@@ -87,33 +87,33 @@
 
 ### 功能清单
 
-- [ ] **P1-1 共享契约**
+- [x] **P1-1 共享契约**
   - `shared/ids.ts`：`SessionId/RunId/CallId/TerminalId/EventId` branded types。
   - `shared/agent-events.ts`：完整 `AgentEvent` 联合，包含 `run.status`、text/reasoning delta、tool proposed/completed、approval requested、session closed。
   - `shared/ipc-contract.ts`：invoke、`agent:event`、`terminal:event` 的版本、payload、result schema。
   - `electron/tools/types.ts`：纯工具契约 `ToolDefinition/ToolCall/ToolResult/Effect`，供插件总线和 P2 执行器复用。
   - 明确所有规范化 `ToolCall` 均有独立 `reason` 字段；副作用工具的 provider schema 强制要求，纯只读工具缺失时规范化为空字符串。
-- [ ] **P1-2 配置与 Secret Store**
+- [x] **P1-2 配置与 Secret Store**
   - `AppConfig`、默认值和 `schemaVersion` 迁移；非敏感配置使用同目录临时文件、file fsync、rename 的原子替换。
   - 内部配置中的 `apiKeyRef` 只引用密文记录；renderer 只接收 `PublicConfig`，以 `credentialConfigured` 表示状态。
   - `config:set` 使用版本化 discriminated union；凭据变更分支接收明文后立即用 safeStorage 异步 API 加密，不记录 payload。
   - 启动后检查异步加密可用性；Linux 同时拒绝 `basic_text` 弱后端；解密处理临时不可用和 `shouldReEncrypt`。
-- [ ] **P1-3 JSONL Trace Logger**
+- [x] **P1-3 JSONL Trace Logger**
   - `TraceEvent` 覆盖架构 §11.2 的全部事件，每行包含 `schemaVersion/seq/eventId/type/ts`。
   - 每 session 一个有界写入队列，正确处理 stream backpressure；`seq` 在入队时分配并严格单调。
   - `logging.enabled=false` 使用 `NullLogger`，不创建文件。
   - reader 忽略崩溃产生的不完整最后一行；关闭 session、窗口崩溃和应用退出时尽力 flush。
   - 按 `retentionDays/maxTotalBytes` 清理最旧的已关闭 trace；清理失败只产生可见诊断，不中断 Agent。
-- [ ] **P1-4 IPC 安全注册器**
+- [x] **P1-4 IPC 安全注册器**
   - 所有 handler 统一执行：主 frame/sender 校验、schema 校验、字符串/数组大小限制、结构化错误转换。
   - 预先定义完整 MVP IPC，包括配置、工作区选择、session create/close、run、approval、terminal 和 skills；未实现 handler 返回明确的 `NOT_AVAILABLE`，不注册任意动态 channel。
   - renderer callback 只收到业务 payload，不收到 `IpcRendererEvent`。
-- [ ] **P1-5 插件事件总线骨架**
+- [x] **P1-5 插件事件总线骨架**
   - 定义全部 7 个 hook 的版本化 context/result。
   - 定义 `registerTool` 注册端口契约；P1 不加载插件，P2 创建 ToolRegistry 后再绑定实际注册实现。
   - 观察型 hook 接收只读快照；`beforeLLMCall` 返回显式 patch；`beforeToolCall` 只能阻断或提高风险。
   - hook 有超时和错误隔离；`beforeToolCall` 失败默认阻断，其他 hook 失败不阻断主流程。
-- [ ] **P1-6 最小 Trace Replay**
+- [x] **P1-6 最小 Trace Replay**
   - 实现纯 reducer：按 `seq` 把 TraceEvent 转换为 UI/Agent 状态，不访问 Provider、不执行工具。
   - 支持实时速度和加速时间轴；未知新事件按 schemaVersion 策略跳过或拒绝。
   - fork 只定义接口和 fixture，实际重发在 P5 完成。

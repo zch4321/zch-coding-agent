@@ -6,8 +6,9 @@ import {
   type Page,
 } from '@playwright/test'
 import type { ChildProcess } from 'node:child_process'
+import { AGENT_API_KEYS } from '../shared/agent-api'
 
-test.describe.serial('P0 Electron security baseline', () => {
+test.describe.serial('Electron security and IPC baseline', () => {
   let electronApp: ElectronApplication
   let electronProcess: ChildProcess
   let page: Page
@@ -38,7 +39,7 @@ test.describe.serial('P0 Electron security baseline', () => {
     }
   })
 
-  test('exposes only the frozen P0 agent API skeleton', async () => {
+  test('exposes only the frozen versioned agent API', async () => {
     const bridge = await page.evaluate(() => {
       const agentApi = Reflect.get(window, 'agentApi') as object
 
@@ -50,9 +51,44 @@ test.describe.serial('P0 Electron security baseline', () => {
     })
 
     expect(bridge).toEqual({
-      agentApiKeys: [],
+      agentApiKeys: [...AGENT_API_KEYS],
       agentApiFrozen: true,
       ipcRendererType: 'undefined',
+    })
+  })
+
+  test('serves config through validated IPC and rejects unavailable features', async () => {
+    const results = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        getConfig(payload: unknown): Promise<unknown>
+        listSkills(payload: unknown): Promise<unknown>
+      }
+
+      return {
+        config: await api.getConfig({ version: 1, section: 'all' }),
+        skills: await api.listSkills({ version: 1 }),
+      }
+    })
+
+    expect(results.config).toMatchObject({
+      version: 1,
+      ok: true,
+      value: {
+        config: {
+          schemaVersion: 1,
+          providers: {
+            deepseek: {
+              credentialConfigured: expect.any(Boolean),
+            },
+          },
+        },
+      },
+    })
+    expect(JSON.stringify(results.config)).not.toContain('apiKeyRef')
+    expect(results.skills).toMatchObject({
+      version: 1,
+      ok: false,
+      error: { code: 'NOT_AVAILABLE' },
     })
   })
 

@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  ipcMain,
   net,
   protocol,
   session,
@@ -13,6 +14,9 @@ import {
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Disposer } from './disposer'
+import { ConfigStore } from './config/store'
+import { ElectronSafeStorageAdapter, SecretStore } from './config/secret-store'
+import { registerIpcHandlers } from './ipc'
 import {
   APP_ENTRY_URL,
   APP_HOST,
@@ -35,6 +39,7 @@ const appDisposer = new Disposer({
 let mainWindow: BrowserWindow | undefined
 let cleanupComplete = false
 let cleanupStarted = false
+let configStore: ConfigStore
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -98,6 +103,40 @@ function installSessionSecurity(): void {
   appDisposer.add(() => defaultSession.webRequest.onHeadersReceived(null))
   appDisposer.add(() => defaultSession.setPermissionCheckHandler(null))
   appDisposer.add(() => defaultSession.setPermissionRequestHandler(null))
+}
+
+async function installIpc(): Promise<void> {
+  const userData = app.getPath('userData')
+  const secretStore = new SecretStore(
+    path.join(userData, 'secrets.json'),
+    new ElectronSafeStorageAdapter(),
+  )
+  configStore = new ConfigStore(path.join(userData, 'config.json'), secretStore)
+  const initialized = await configStore.initialize()
+
+  if (!initialized.secretStorage.available) {
+    console.warn(
+      `Secure credential storage unavailable: ${initialized.secretStorage.reason} (${initialized.secretStorage.backend})`,
+    )
+  }
+
+  const unregister = registerIpcHandlers({
+    ipcMain,
+    getTrustedWebContents: () => mainWindow?.webContents,
+    isAllowedUrl: (url) => isAllowedApplicationUrl(url, devServerUrl),
+    handlers: {
+      'config:get': (payload) => ({
+        section: payload.section,
+        config: configStore.getPublicConfig(),
+      }),
+      'config:set': async (payload) => ({
+        config: await configStore.update(payload),
+      }),
+    },
+    onDiagnostic: (message, error) => console.error(message, error),
+  })
+
+  appDisposer.add(unregister)
 }
 
 function guardNavigation(
@@ -237,6 +276,7 @@ void app
   .then(async () => {
     installAppProtocol()
     installSessionSecurity()
+    await installIpc()
     await createWindow()
   })
   .catch((error) => {

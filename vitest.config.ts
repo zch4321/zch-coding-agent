@@ -4,6 +4,10 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   plugins: [vue()],
   test: {
-    include: ['electron/**/*.test.ts', 'src/**/*.test.ts'],
+    include: [
+      'electron/**/*.test.ts',
+      'shared/**/*.test.ts',
+      'src/**/*.test.ts',
+    ],
   },
 })

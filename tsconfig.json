@@ -25,6 +25,5 @@
     "src/**/*.vue",
     "electron",
     "shared"
-  ],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  ]
 }
