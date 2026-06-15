@@ -1,0 +1,6 @@
+dist
+dist-electron
+node_modules
+playwright-report
+release
+test-results

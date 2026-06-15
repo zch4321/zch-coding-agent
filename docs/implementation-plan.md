@@ -36,28 +36,28 @@
 
 ### 功能清单
 
-- [ ] **P0-1 依赖、构建和发布基线**
+- [x] **P0-1 依赖、构建和发布基线**
   - 将 Electron 从 30 升级到实施时仍受官方支持的稳定版本；本计划初始目标为 Electron 42.x 最新补丁。
   - 升级并验证 Vite、Vue、TypeScript、`vite-plugin-electron`、`electron-builder` 的兼容版本，全部使用精确版本。
   - 移除 renderer 的 Electron/Node polyfill 配置和不再需要的 `vite-plugin-electron-renderer`。
   - 修正 `electron-builder.json5` 的 `appId`、`productName`、Windows x64 target；P4 再加入 `node-pty` rebuild/unpack。
   - 生成并提交 `package-lock.json`。
-- [ ] **P0-2 窄 preload 桥**
+- [x] **P0-2 窄 preload 桥**
   - 删除通用 `window.ipcRenderer`。
   - 暂时暴露冻结的 `window.agentApi` 空骨架；后续只能从版本化 IPC 契约逐项增加方法。
   - 更新全局类型，renderer 不得 import `electron`。
-- [ ] **P0-3 renderer 隔离与内容安全**
+- [x] **P0-3 renderer 隔离与内容安全**
   - 显式设置 `contextIsolation:true`、`sandbox:true`、`nodeIntegration:false`、`webSecurity:true`。
   - 生产环境注册受限的 `app://` 安全协议加载打包资源；开发环境只允许精确的 `VITE_DEV_SERVER_URL` origin。
   - 对生产和开发响应注入 CSP：至少包含 `default-src 'self'`、`script-src 'self'`、`object-src 'none'`、`base-uri 'none'`、`frame-ancestors 'none'`；根据 Naive UI/xterm/Shiki 的实际需求单独收紧 `style-src/img-src/font-src/connect-src`，禁止内联脚本。
   - `will-navigate`/`will-frame-navigate` 对非应用 URL 调用 `event.preventDefault()`；`setWindowOpenHandler` 默认返回 `deny`。
   - 拒绝未声明的 Chromium permission request，不启用 `<webview>`。
   - 移除模板事件 `main-process-message`。
-- [ ] **P0-4 测试、Lint 与 CI**
+- [x] **P0-4 测试、Lint 与 CI**
   - 接入 Vitest、Vue Test Utils、ESLint flat config、Prettier、`vue-tsc --noEmit`。
   - 接入 Electron E2E runner，能启动、检查窗口、关闭并等待进程退出。
   - GitHub Actions 至少包含 Windows 上的 `lint`、`typecheck`、`test`、`test:e2e`、`build`；可额外使用 Linux 跑快速单元测试。
-- [ ] **P0-5 生命周期清理**
+- [x] **P0-5 生命周期清理**
   - 实现 `Disposer`：支持注册、逆序执行、幂等、单项失败隔离和总超时。
   - 在 `before-quit` 执行清理；窗口销毁时注销窗口级 listener。
 

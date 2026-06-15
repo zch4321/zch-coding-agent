@@ -1,25 +1,45 @@
 {
   "name": "my-coding-agent",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "A security-focused desktop coding agent.",
+  "author": "My Coding Agent Contributors",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build && electron-builder",
-    "preview": "vite preview"
+    "build": "npm run typecheck && npm run build:app && electron-builder --win --x64",
+    "build:app": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,vue,js,mjs,cjs,json,json5,css,html,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,vue,js,mjs,cjs,json,json5,css,html,yml,yaml}\"",
+    "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "test": "vitest run",
+    "test:e2e": "npm run build:app && playwright test"
   },
   "dependencies": {
-    "vue": "^3.4.21"
+    "vue": "3.5.38"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.0.4",
-    "typescript": "^5.2.2",
-    "vite": "^5.1.6",
-    "vue-tsc": "^2.0.26",
-    "electron": "^30.0.1",
-    "electron-builder": "^24.13.3",
-    "vite-plugin-electron": "^0.28.6",
-    "vite-plugin-electron-renderer": "^0.14.5"
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.61.0",
+    "@types/node": "24.13.2",
+    "@vitejs/plugin-vue": "6.0.7",
+    "@vue/test-utils": "2.4.11",
+    "electron": "42.4.0",
+    "electron-builder": "26.15.3",
+    "eslint": "10.5.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-vue": "10.9.2",
+    "globals": "17.6.0",
+    "jsdom": "29.1.1",
+    "prettier": "3.8.4",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.61.0",
+    "vite": "8.0.16",
+    "vite-plugin-electron": "1.0.4",
+    "vitest": "4.1.9",
+    "vue-tsc": "3.3.5"
   },
   "main": "dist-electron/main.js"
 }
