@@ -4,7 +4,7 @@ import type { AgentApi } from '../shared/agent-api'
 
 declare global {
   interface Window {
-    readonly agentApi: AgentApi
+    readonly agentApi?: AgentApi
   }
 }
 

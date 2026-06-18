@@ -100,6 +100,29 @@ export const PublicConfigSchema = Type.Object(
       },
       { additionalProperties: false },
     ),
+    privacy: Type.Object(
+      {
+        providerNoticeAccepted: Type.Optional(
+          Type.Object(
+            {
+              version: Type.String({ minLength: 1, maxLength: 64 }),
+              acceptedAt: Type.String({ format: 'date-time' }),
+            },
+            { additionalProperties: false },
+          ),
+        ),
+        traceNoticeAccepted: Type.Optional(
+          Type.Object(
+            {
+              version: Type.String({ minLength: 1, maxLength: 64 }),
+              acceptedAt: Type.String({ format: 'date-time' }),
+            },
+            { additionalProperties: false },
+          ),
+        ),
+      },
+      { additionalProperties: false },
+    ),
     workspace: Type.Object(
       {
         lastOpened: Type.Optional(
@@ -127,6 +150,7 @@ export const ConfigSectionSchema = Type.Union([
   Type.Literal('permission'),
   Type.Literal('limits'),
   Type.Literal('logging'),
+  Type.Literal('privacy'),
   Type.Literal('workspace'),
   Type.Literal('skills'),
 ])
@@ -207,6 +231,19 @@ export const ConfigSetRequestSchema = Type.Union([
       version: Type.Literal(1),
       kind: Type.Literal('logging'),
       value: PublicConfigSchema.properties.logging,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('privacy'),
+      providerNoticeAccepted: Type.Optional(
+        PublicConfigSchema.properties.privacy.properties.providerNoticeAccepted,
+      ),
+      traceNoticeAccepted: Type.Optional(
+        PublicConfigSchema.properties.privacy.properties.traceNoticeAccepted,
+      ),
     },
     { additionalProperties: false },
   ),

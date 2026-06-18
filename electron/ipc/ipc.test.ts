@@ -75,6 +75,9 @@ const validPayloads: {
     terminalId,
     data: 'dir\r',
   },
+  'window:minimize': { version: 1 },
+  'window:toggle-maximize': { version: 1 },
+  'window:close': { version: 1 },
   'skills:list': { version: 1 },
   'skills:installFromUrl': {
     version: 1,

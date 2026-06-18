@@ -28,6 +28,10 @@ export const IpcErrorSchema = Type.Object(
       Type.Literal('INVALID_PAYLOAD'),
       Type.Literal('PAYLOAD_TOO_LARGE'),
       Type.Literal('NOT_AVAILABLE'),
+      Type.Literal('PRECONDITION_FAILED'),
+      Type.Literal('CONFLICT'),
+      Type.Literal('NOT_FOUND'),
+      Type.Literal('CANCELLED'),
       Type.Literal('SECRET_STORAGE_UNAVAILABLE'),
       Type.Literal('INTERNAL_ERROR'),
     ]),
@@ -198,6 +202,18 @@ export const IPC_CONTRACTS = {
       },
       { additionalProperties: false },
     ),
+    result: ipcResultSchema(AcceptedSchema),
+  },
+  'window:minimize': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(AcceptedSchema),
+  },
+  'window:toggle-maximize': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(AcceptedSchema),
+  },
+  'window:close': {
+    payload: EmptyPayloadSchema,
     result: ipcResultSchema(AcceptedSchema),
   },
   'skills:list': {

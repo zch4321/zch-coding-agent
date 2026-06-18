@@ -35,6 +35,15 @@ export interface AgentApi {
   sendTerminalInput(
     payload: IpcPayload<'terminal:input'>,
   ): Promise<IpcResult<'terminal:input'>>
+  minimizeWindow(
+    payload: IpcPayload<'window:minimize'>,
+  ): Promise<IpcResult<'window:minimize'>>
+  toggleMaximizeWindow(
+    payload: IpcPayload<'window:toggle-maximize'>,
+  ): Promise<IpcResult<'window:toggle-maximize'>>
+  closeWindow(
+    payload: IpcPayload<'window:close'>,
+  ): Promise<IpcResult<'window:close'>>
   listSkills(
     payload: IpcPayload<'skills:list'>,
   ): Promise<IpcResult<'skills:list'>>
@@ -64,6 +73,9 @@ export const AGENT_API_KEYS = [
   'interruptRun',
   'decideApproval',
   'sendTerminalInput',
+  'minimizeWindow',
+  'toggleMaximizeWindow',
+  'closeWindow',
   'listSkills',
   'installSkillFromUrl',
   'chooseAndInstallSkill',

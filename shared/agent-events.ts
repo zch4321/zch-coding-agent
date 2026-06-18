@@ -71,6 +71,7 @@ export const PolicySignalSchema = Type.Object(
   },
   { additionalProperties: false },
 )
+export type PolicySignal = Static<typeof PolicySignalSchema>
 
 export const AgentEventSchema = Type.Union([
   Type.Composite([

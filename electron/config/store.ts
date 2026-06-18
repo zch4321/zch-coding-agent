@@ -109,6 +109,16 @@ export class ConfigStore {
       case 'logging':
         next.logging = structuredClone(request.value)
         break
+      case 'privacy':
+        next.privacy = {
+          providerNoticeAccepted: request.providerNoticeAccepted
+            ? structuredClone(request.providerNoticeAccepted)
+            : next.privacy.providerNoticeAccepted,
+          traceNoticeAccepted: request.traceNoticeAccepted
+            ? structuredClone(request.traceNoticeAccepted)
+            : next.privacy.traceNoticeAccepted,
+        }
+        break
       case 'workspace':
         next.workspace =
           request.lastOpened === undefined

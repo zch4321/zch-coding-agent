@@ -1,12 +1,15 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
+  Menu,
   net,
   protocol,
   session,
   type Event,
   type OnHeadersReceivedListenerDetails,
+  type OpenDialogOptions,
   type WebContents,
   type WebContentsWillFrameNavigateEventParams,
   type WebContentsWillNavigateEventParams,
@@ -16,7 +19,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Disposer } from './disposer'
 import { ConfigStore } from './config/store'
 import { ElectronSafeStorageAdapter, SecretStore } from './config/secret-store'
-import { registerIpcHandlers } from './ipc'
+import {
+  PROVIDER_NOTICE_VERSION,
+  TRACE_NOTICE_VERSION,
+} from '../shared/notices'
+import { SessionManager } from './agent/session-manager'
+import { IpcFault, registerIpcHandlers } from './ipc'
+import { PluginEventBus } from './plugins/event-bus'
 import {
   APP_ENTRY_URL,
   APP_HOST,
@@ -120,6 +129,17 @@ async function installIpc(): Promise<void> {
     )
   }
 
+  const pluginBus = new PluginEventBus({
+    onDiagnostic: (diagnostic, error) =>
+      console.error(`Plugin hook ${diagnostic.hook} failed`, error),
+  })
+  const sessionManager = new SessionManager({
+    configStore,
+    traceDirectory: path.join(userData, 'traces'),
+    getWebContents: () => mainWindow?.webContents,
+    pluginBus,
+    onDiagnostic: (message, error) => console.error(message, error),
+  })
   const unregister = registerIpcHandlers({
     ipcMain,
     getTrustedWebContents: () => mainWindow?.webContents,
@@ -129,13 +149,99 @@ async function installIpc(): Promise<void> {
         section: payload.section,
         config: configStore.getPublicConfig(),
       }),
-      'config:set': async (payload) => ({
-        config: await configStore.update(payload),
+      'config:set': async (payload) => {
+        if (
+          payload.kind === 'logging' &&
+          payload.value.enabled &&
+          configStore.getPublicConfig().privacy.traceNoticeAccepted?.version !==
+            TRACE_NOTICE_VERSION
+        ) {
+          throw new IpcFault({
+            code: 'PRECONDITION_FAILED',
+            message:
+              'Trace logging notice must be accepted before enabling full trace logs',
+            details: { requiredVersion: TRACE_NOTICE_VERSION },
+          })
+        }
+
+        return {
+          config: await configStore.update(payload),
+        }
+      },
+      'workspace:choose': async () => {
+        const options: OpenDialogOptions = {
+          properties: ['openDirectory'],
+        }
+        const result = mainWindow
+          ? await dialog.showOpenDialog(mainWindow, options)
+          : await dialog.showOpenDialog(options)
+        const selected = result.canceled ? null : result.filePaths[0]
+
+        if (selected) {
+          await configStore.update({
+            version: 1,
+            kind: 'workspace',
+            lastOpened: selected,
+          })
+        }
+
+        return { path: selected ?? null }
+      },
+      'session:create': async (payload) => ({
+        sessionId: await sessionManager.createSession({
+          workspace: payload.workspace,
+          mode: payload.mode,
+          provider: payload.provider,
+        }),
       }),
+      'session:close': async (payload) => ({
+        accepted: await sessionManager.closeSession(payload.sessionId),
+      }),
+      'run:start': (payload) => ({
+        runId: sessionManager.startRun({
+          sessionId: payload.sessionId,
+          message: payload.message,
+          clientRequestId: payload.clientRequestId,
+        }),
+      }),
+      'run:interrupt': (payload) => ({
+        accepted: sessionManager.interruptRun(payload.sessionId, payload.runId),
+      }),
+      'approval:decide': (payload) => ({
+        accepted: sessionManager.decideApproval({
+          sessionId: payload.sessionId,
+          runId: payload.runId,
+          callId: payload.callId,
+          decision: payload.decision,
+        }),
+      }),
+      'window:minimize': (_payload, event) => {
+        BrowserWindow.fromWebContents(event.sender)?.minimize()
+        return { accepted: true }
+      },
+      'window:toggle-maximize': (_payload, event) => {
+        const window = BrowserWindow.fromWebContents(event.sender)
+
+        if (window?.isMaximized()) {
+          window.unmaximize()
+        } else {
+          window?.maximize()
+        }
+
+        return { accepted: true }
+      },
+      'window:close': (_payload, event) => {
+        BrowserWindow.fromWebContents(event.sender)?.close()
+        return { accepted: true }
+      },
     },
     onDiagnostic: (message, error) => console.error(message, error),
   })
 
+  console.info(
+    `P2 notices: provider=${PROVIDER_NOTICE_VERSION}, trace=${TRACE_NOTICE_VERSION}`,
+  )
+  appDisposer.add(() => sessionManager.dispose())
   appDisposer.add(unregister)
 }
 
@@ -191,7 +297,9 @@ async function createWindow(): Promise<void> {
     minWidth: 720,
     minHeight: 540,
     show: false,
-    backgroundColor: '#090d18',
+    frame: false,
+    autoHideMenuBar: true,
+    backgroundColor: '#f6f8fa',
     webPreferences: {
       preload: path.join(currentDirectory, 'preload.mjs'),
       contextIsolation: true,
@@ -274,6 +382,7 @@ app.on('activate', () => {
 void app
   .whenReady()
   .then(async () => {
+    Menu.setApplicationMenu(null)
     installAppProtocol()
     installSessionSecurity()
     await installIpc()

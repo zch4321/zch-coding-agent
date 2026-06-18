@@ -1,0 +1,867 @@
+import { randomUUID } from 'node:crypto'
+import path from 'node:path'
+import type { WebContents } from 'electron'
+import type { PermissionMode, PublicConfig } from '../../shared/config'
+import { IPC_VERSION } from '../../shared/channels'
+import type {
+  AgentEvent,
+  RunStatus,
+  ToolResultEnvelope,
+} from '../../shared/agent-events'
+import type { CallId, RunId, SessionId } from '../../shared/ids'
+import type { JsonValue } from '../../shared/json'
+import {
+  PROVIDER_NOTICE_VERSION,
+  TRACE_NOTICE_VERSION,
+} from '../../shared/notices'
+import type { ConfigStore } from '../config/store'
+import { IpcFault } from '../ipc'
+import { sendAgentEvent } from '../ipc/event-sink'
+import {
+  JsonlTraceLogger,
+  NullTraceLogger,
+  type TraceLogger,
+} from '../logging/logger'
+import { cleanupTraces } from '../logging/cleanup'
+import type { PluginEventBus } from '../plugins/event-bus'
+import type { ToolCall, ToolResult } from '../tools/types'
+import { ContextIngressFilter } from './context-ingress'
+import { DeepSeekProvider } from './deepseek-provider'
+import { PathGuard } from './path-guard'
+import type {
+  LLMProvider,
+  ProviderAssistantTurn,
+  ProviderEvent,
+  ProviderMessage,
+  ProviderRequestSnapshot,
+} from './provider'
+import { registerReadOnlyTools } from './readonly-tools'
+import { ToolExecutor, ToolRegistry } from './tool-registry'
+
+const SYSTEM_PROMPT =
+  'You are My Coding Agent. Work only inside the selected workspace. In this stage you may only use read-only workspace tools. Never claim to have modified files or run commands.'
+const RUN_CANCEL_GRACE_MS = 2_000
+
+type AgentEventDraft = AgentEvent extends infer Event
+  ? Event extends AgentEvent
+    ? Omit<Event, 'schemaVersion' | 'seq' | 'ts'>
+    : never
+  : never
+
+export interface SessionManagerOptions {
+  configStore: ConfigStore
+  traceDirectory: string
+  getWebContents: () => WebContents | undefined
+  pluginBus?: PluginEventBus
+  providerFactory?: (options: {
+    config: PublicConfig
+    apiKey: string
+  }) => LLMProvider
+  onDiagnostic?: (message: string, error?: unknown) => void
+}
+
+interface PendingIngressApproval {
+  callId: CallId
+  resolve: (decision: 'allow' | 'deny' | 'cancelled') => void
+}
+
+interface ActiveRun {
+  runId: RunId
+  clientRequestId: string
+  controller: AbortController
+  done: Promise<void>
+  status: RunStatus
+  pendingIngress?: PendingIngressApproval
+}
+
+interface SessionState {
+  sessionId: SessionId
+  workspace: string
+  mode: PermissionMode
+  provider: 'deepseek'
+  logger: TraceLogger
+  history: ProviderMessage[]
+  eventSeq: number
+  closed: boolean
+  activeRun?: ActiveRun
+  clientRequests: Map<string, RunId>
+}
+
+function id<Kind extends SessionId | RunId | CallId>(prefix: string): Kind {
+  return `${prefix}:${randomUUID()}` as Kind
+}
+
+function toJsonValue(value: unknown): JsonValue {
+  return JSON.parse(JSON.stringify(value)) as JsonValue
+}
+
+function ipcFault(
+  code:
+    | 'PRECONDITION_FAILED'
+    | 'CONFLICT'
+    | 'NOT_FOUND'
+    | 'CANCELLED'
+    | 'INTERNAL_ERROR',
+  message: string,
+  details?: JsonValue,
+): never {
+  throw new IpcFault({ code, message, details })
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function estimateTokens(value: JsonValue): number {
+  return Math.ceil(JSON.stringify(value).length / 4)
+}
+
+function toolResultForProvider(result: ToolResult): string {
+  return JSON.stringify(result)
+}
+
+function normalizeToolResult(result: ToolResult): ToolResultEnvelope {
+  return result as ToolResultEnvelope
+}
+
+function finalStatusFromError(error: unknown, signal: AbortSignal): RunStatus {
+  if (signal.aborted) {
+    return 'cancelled'
+  }
+
+  if (
+    error &&
+    typeof error === 'object' &&
+    'name' in error &&
+    error.name === 'AbortError'
+  ) {
+    return 'cancelled'
+  }
+
+  return 'failed'
+}
+
+function contextMessages(
+  history: ProviderMessage[],
+  maxContextTokens: number,
+): ProviderMessage[] {
+  const system: ProviderMessage = { role: 'system', content: SYSTEM_PROMPT }
+  const messages = [system, ...history]
+
+  while (
+    messages.length > 2 &&
+    estimateTokens(toJsonValue(messages)) > maxContextTokens
+  ) {
+    messages.splice(1, 1)
+  }
+
+  return messages
+}
+
+export class SessionManager {
+  readonly #configStore: ConfigStore
+  readonly #traceDirectory: string
+  readonly #getWebContents: () => WebContents | undefined
+  readonly #pluginBus: PluginEventBus | undefined
+  readonly #providerFactory: SessionManagerOptions['providerFactory']
+  readonly #onDiagnostic: (message: string, error?: unknown) => void
+  readonly #sessions = new Map<SessionId, SessionState>()
+  readonly #toolRegistry = new ToolRegistry()
+  readonly #toolExecutor: ToolExecutor
+  readonly #ingressFilter = new ContextIngressFilter()
+
+  constructor(options: SessionManagerOptions) {
+    this.#configStore = options.configStore
+    this.#traceDirectory = options.traceDirectory
+    this.#getWebContents = options.getWebContents
+    this.#pluginBus = options.pluginBus
+    this.#providerFactory = options.providerFactory
+    this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
+    registerReadOnlyTools(this.#toolRegistry)
+    this.#toolExecutor = new ToolExecutor(this.#toolRegistry)
+    this.#pluginBus?.setToolRegistrationPort(this.#toolRegistry)
+  }
+
+  async createSession(input: {
+    workspace: string
+    mode: PermissionMode
+    provider: 'deepseek'
+  }): Promise<SessionId> {
+    const publicConfig = this.#configStore.getPublicConfig()
+
+    if (
+      publicConfig.privacy.providerNoticeAccepted?.version !==
+      PROVIDER_NOTICE_VERSION
+    ) {
+      ipcFault(
+        'PRECONDITION_FAILED',
+        'Provider data egress notice must be accepted before creating a session',
+        { requiredVersion: PROVIDER_NOTICE_VERSION },
+      )
+    }
+
+    if (
+      publicConfig.logging.enabled &&
+      publicConfig.privacy.traceNoticeAccepted?.version !== TRACE_NOTICE_VERSION
+    ) {
+      ipcFault(
+        'PRECONDITION_FAILED',
+        'Trace logging notice must be accepted before enabling full trace logs',
+        { requiredVersion: TRACE_NOTICE_VERSION },
+      )
+    }
+
+    if (!publicConfig.providers.deepseek.credentialConfigured) {
+      ipcFault('PRECONDITION_FAILED', 'DeepSeek credential is not configured')
+    }
+
+    const apiKey = await this.#configStore.getDeepSeekApiKey()
+
+    if (!apiKey) {
+      ipcFault('PRECONDITION_FAILED', 'DeepSeek credential is not available')
+    }
+
+    const guard = await PathGuard.create(input.workspace)
+    const sessionId = id<SessionId>('session')
+    const logger = publicConfig.logging.enabled
+      ? await JsonlTraceLogger.create(this.#traceDirectory, sessionId)
+      : new NullTraceLogger()
+    const session: SessionState = {
+      sessionId,
+      workspace: guard.workspacePath,
+      mode: input.mode,
+      provider: input.provider,
+      logger,
+      history: [],
+      eventSeq: 0,
+      closed: false,
+      clientRequests: new Map(),
+    }
+
+    this.#sessions.set(sessionId, session)
+    await session.logger.write({
+      type: 'session.start',
+      sessionId,
+      workspace: session.workspace,
+      model: publicConfig.providers.deepseek.model,
+      mode: input.mode,
+    })
+    await this.#pluginBus
+      ?.emit('onSessionStart', {
+        version: 1,
+        sessionId,
+        workspace: session.workspace,
+        mode: input.mode,
+      })
+      .catch((error: unknown) =>
+        this.#onDiagnostic('Plugin onSessionStart failed', error),
+      )
+
+    return sessionId
+  }
+
+  async closeSession(sessionId: SessionId): Promise<boolean> {
+    const session = this.#sessions.get(sessionId)
+
+    if (!session || session.closed) {
+      return false
+    }
+
+    session.closed = true
+
+    if (session.activeRun) {
+      session.activeRun.controller.abort(new Error('Session closed'))
+      session.activeRun.pendingIngress?.resolve('cancelled')
+      await Promise.race([
+        session.activeRun.done.catch(() => undefined),
+        delay(RUN_CANCEL_GRACE_MS),
+      ])
+    }
+
+    await this.#pluginBus
+      ?.emit('onSessionEnd', {
+        version: 1,
+        sessionId,
+        reason: 'closed',
+      })
+      .catch((error: unknown) =>
+        this.#onDiagnostic('Plugin onSessionEnd failed', error),
+      )
+    await session.logger.write({ type: 'session.end', sessionId })
+    await session.logger.dispose()
+    this.#emit(session, { type: 'session.closed', sessionId })
+    this.#sessions.delete(sessionId)
+    await this.#cleanupTraces()
+    return true
+  }
+
+  startRun(input: {
+    sessionId: SessionId
+    message: string
+    clientRequestId: string
+  }): RunId {
+    const session = this.#requireSession(input.sessionId)
+    const existing = session.clientRequests.get(input.clientRequestId)
+
+    if (existing) {
+      return existing
+    }
+
+    if (session.activeRun) {
+      ipcFault('CONFLICT', 'This session already has an active run')
+    }
+
+    const runId = id<RunId>('run')
+    const controller = new AbortController()
+    const run: ActiveRun = {
+      runId,
+      clientRequestId: input.clientRequestId,
+      controller,
+      status: 'idle',
+      done: Promise.resolve(),
+    }
+
+    run.done = this.#run(session, run, input.message).finally(() => {
+      if (session.activeRun === run) {
+        session.activeRun = undefined
+      }
+    })
+    session.activeRun = run
+    session.clientRequests.set(input.clientRequestId, runId)
+    return runId
+  }
+
+  interruptRun(sessionId: SessionId, runId: RunId): boolean {
+    const session = this.#requireSession(sessionId)
+
+    if (!session.activeRun || session.activeRun.runId !== runId) {
+      return false
+    }
+
+    this.#setRunStatus(session, session.activeRun, 'cancelling')
+    session.activeRun.pendingIngress?.resolve('cancelled')
+    session.activeRun.controller.abort(new Error('Run interrupted'))
+    return true
+  }
+
+  decideApproval(input: {
+    sessionId: SessionId
+    runId: RunId
+    callId: CallId
+    decision: 'allow' | 'deny'
+  }): boolean {
+    const session = this.#requireSession(input.sessionId)
+    const run = session.activeRun
+
+    if (
+      !run ||
+      run.runId !== input.runId ||
+      run.pendingIngress?.callId !== input.callId
+    ) {
+      return false
+    }
+
+    const pending = run.pendingIngress
+    run.pendingIngress = undefined
+    pending.resolve(input.decision)
+    return true
+  }
+
+  async dispose(): Promise<void> {
+    await Promise.all(
+      [...this.#sessions.keys()].map((idValue) => this.closeSession(idValue)),
+    )
+  }
+
+  #requireSession(sessionId: SessionId): SessionState {
+    const session = this.#sessions.get(sessionId)
+
+    if (!session || session.closed) {
+      ipcFault('NOT_FOUND', 'Session not found')
+    }
+
+    return session
+  }
+
+  async #run(
+    session: SessionState,
+    run: ActiveRun,
+    userMessage: string,
+  ): Promise<void> {
+    const signal = run.controller.signal
+
+    try {
+      session.history.push({ role: 'user', content: userMessage })
+      await session.logger.write({
+        type: 'user.message',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        text: userMessage,
+      })
+      await session.logger.write({
+        type: 'run.start',
+        sessionId: session.sessionId,
+        runId: run.runId,
+      })
+
+      for (
+        let step = 0;
+        step < this.#configStore.getPublicConfig().limits.maxStepsPerRun;
+        step += 1
+      ) {
+        if (signal.aborted) {
+          throw signal.reason
+        }
+
+        const completed = await this.#callProvider(session, run)
+
+        session.history.push(completed.turn)
+
+        if (completed.text || completed.reasoning) {
+          await session.logger.write({
+            type: 'agent.message',
+            sessionId: session.sessionId,
+            runId: run.runId,
+            text: completed.text,
+            reasoning: completed.reasoning || undefined,
+          })
+        }
+
+        if (completed.toolCalls.length === 0) {
+          await this.#finishRun(session, run, 'completed')
+          return
+        }
+
+        this.#setRunStatus(session, run, 'evaluating_tools')
+        await this.#executeToolCalls(session, run, completed.toolCalls)
+      }
+
+      throw new Error('Run exceeded maxStepsPerRun')
+    } catch (error) {
+      const status = finalStatusFromError(error, signal)
+      await this.#finishRun(session, run, status, error)
+    }
+  }
+
+  async #callProvider(
+    session: SessionState,
+    run: ActiveRun,
+  ): Promise<{
+    turn: ProviderAssistantTurn
+    toolCalls: ToolCall[]
+    text: string
+    reasoning: string
+  }> {
+    this.#setRunStatus(session, run, 'calling_llm')
+    const config = this.#configStore.getPublicConfig()
+    const apiKey = await this.#configStore.getDeepSeekApiKey()
+
+    if (!apiKey) {
+      ipcFault('PRECONDITION_FAILED', 'DeepSeek credential is not available')
+    }
+
+    let messages = contextMessages(
+      session.history,
+      config.limits.maxContextTokens,
+    )
+    const tools = this.#toolRegistry.providerDefinitions()
+    const hookResult = await this.#pluginBus?.emit('beforeLLMCall', {
+      version: 1,
+      sessionId: session.sessionId,
+      runId: run.runId,
+      messages: toJsonValue(messages) as JsonValue[],
+      params: {
+        provider: 'deepseek',
+        model: config.providers.deepseek.model,
+      },
+    })
+
+    for (const patch of hookResult?.patches ?? []) {
+      if (patch.messages) {
+        messages = patch.messages as unknown as ProviderMessage[]
+      }
+    }
+
+    const provider =
+      this.#providerFactory?.({ config, apiKey }) ??
+      new DeepSeekProvider({
+        baseURL: config.providers.deepseek.baseURL,
+        model: config.providers.deepseek.model,
+        reasoning: config.providers.deepseek.reasoning,
+        apiKey,
+      })
+    const llmCallId = id<CallId>('llm')
+    let text = ''
+    let reasoning = ''
+    let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
+
+    const onRequest = async (snapshot: ProviderRequestSnapshot) => {
+      await session.logger.write({
+        type: 'llm.request',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: llmCallId,
+        normalizedMessages: snapshot.normalizedMessages,
+        providerRequest: snapshot.providerRequest,
+        requestBytes: snapshot.requestBytes,
+        prefixHash: snapshot.prefixHash,
+        prefixFingerprints: snapshot.prefixFingerprints,
+      })
+    }
+
+    for await (const event of provider.streamChat({
+      messages,
+      tools,
+      signal: run.controller.signal,
+      onRequest,
+    })) {
+      await this.#recordProviderEvent(session, run, llmCallId, event)
+
+      if (event.type === 'text.delta') {
+        text += event.delta
+        this.#emit(session, {
+          type: 'assistant.text.delta',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          delta: event.delta,
+        })
+      } else if (event.type === 'reasoning.delta') {
+        reasoning += event.delta
+        this.#emit(session, {
+          type: 'assistant.reasoning.delta',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          delta: event.delta,
+        })
+      } else if (event.type === 'completed') {
+        completed = event
+      }
+    }
+
+    if (!completed) {
+      throw new Error('Provider stream ended without completion')
+    }
+
+    await session.logger.write({
+      type: 'llm.response',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: llmCallId,
+      rawResponse: completed.rawResponse,
+      normalizedTurn: toJsonValue(completed.turn),
+      providerState: completed.providerState,
+      usage: completed.usage,
+      timing: completed.timing,
+    })
+    await this.#pluginBus
+      ?.emit('afterLLMCall', {
+        version: 1,
+        sessionId: session.sessionId,
+        runId: run.runId,
+        response: completed.rawResponse,
+        usage: completed.usage,
+      })
+      .catch((error: unknown) =>
+        this.#onDiagnostic('Plugin afterLLMCall failed', error),
+      )
+
+    return {
+      turn: completed.turn,
+      toolCalls: completed.toolCalls,
+      text,
+      reasoning,
+    }
+  }
+
+  async #recordProviderEvent(
+    session: SessionState,
+    run: ActiveRun,
+    callId: CallId,
+    event: ProviderEvent,
+  ): Promise<void> {
+    if (event.type === 'completed') {
+      return
+    }
+
+    await session.logger.write({
+      type: 'llm.stream',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId,
+      providerEvent: toJsonValue(event),
+      elapsedMs: 0,
+    })
+  }
+
+  async #executeToolCalls(
+    session: SessionState,
+    run: ActiveRun,
+    toolCalls: ToolCall[],
+  ): Promise<void> {
+    this.#setRunStatus(session, run, 'running_tools')
+
+    for (const call of toolCalls) {
+      if (run.controller.signal.aborted) {
+        throw run.controller.signal.reason
+      }
+
+      this.#emit(session, {
+        type: 'tool.proposed',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: call.id,
+        tool: call.toolId,
+        args: call.args,
+        reason: call.reason,
+      })
+
+      let result: ToolResult
+      let approvedBy = 'none'
+      const startedAt = performance.now()
+      const prepared = this.#toolExecutor.prepareReadOnlyCall(
+        session.sessionId,
+        run.runId,
+        call,
+      )
+
+      if (!prepared.ok) {
+        result = prepared.result
+      } else {
+        const hook = await this.#pluginBus?.emit('beforeToolCall', {
+          version: 1,
+          sessionId: session.sessionId,
+          runId: run.runId,
+          call,
+          currentRisk: prepared.definition.defaultRisk,
+        })
+
+        if (hook && (!hook.allow || hook.risk !== 'unchanged')) {
+          result = {
+            status: 'denied',
+            message:
+              hook.reason ??
+              'A security hook blocked or raised the risk of this P2 tool call',
+          }
+        } else {
+          approvedBy = prepared.approvedCall.approvedBy
+          result = await this.#toolExecutor.execute(
+            prepared.approvedCall,
+            {
+              sessionId: session.sessionId,
+              runId: run.runId,
+              workspace: {
+                canonicalPath: session.workspace,
+              },
+            },
+            run.controller.signal,
+          )
+        }
+      }
+
+      await session.logger.write({
+        type: 'tool.call',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: call.id,
+        tool: call.toolId,
+        args: call.args,
+        result: toJsonValue(result),
+        approvedBy,
+        durationMs: performance.now() - startedAt,
+        totalBytes: 'totalBytes' in result ? result.totalBytes : undefined,
+        truncated: 'truncated' in result ? result.truncated : undefined,
+      })
+
+      this.#emit(session, {
+        type: 'tool.completed',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: call.id,
+        result: normalizeToolResult(result),
+      })
+
+      await this.#pluginBus
+        ?.emit('afterToolCall', {
+          version: 1,
+          sessionId: session.sessionId,
+          runId: run.runId,
+          call,
+          result,
+        })
+        .catch((error: unknown) =>
+          this.#onDiagnostic('Plugin afterToolCall failed', error),
+        )
+
+      const providerResult = await this.#filterToolResultForProvider(
+        session,
+        run,
+        call,
+        result,
+      )
+
+      session.history.push({
+        role: 'tool',
+        tool_call_id: call.id,
+        content: toolResultForProvider(providerResult),
+      })
+    }
+  }
+
+  async #filterToolResultForProvider(
+    session: SessionState,
+    run: ActiveRun,
+    call: ToolCall,
+    result: ToolResult,
+  ): Promise<ToolResult> {
+    const config = this.#configStore.getPublicConfig()
+    const decision = this.#ingressFilter.evaluate(
+      config.permission.sensitiveData,
+      { call, result },
+    )
+
+    if (decision.action === 'allow' || decision.action === 'warn') {
+      return result
+    }
+
+    await this.#pluginBus
+      ?.emit('beforeApproval', {
+        version: 1,
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: call.id,
+        policySignals: decision.signals,
+      })
+      .catch((error: unknown) =>
+        this.#onDiagnostic('Plugin beforeApproval failed', error),
+      )
+    await session.logger.write({
+      type: 'approval',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: call.id,
+      policySignals: toJsonValue(decision.signals) as JsonValue[],
+      mode: config.permission.sensitiveData.mode,
+      approver: 'human',
+      decision: 'requested',
+      reason: decision.summary,
+    })
+    this.#setRunStatus(session, run, 'awaiting_approval')
+    this.#emit(session, {
+      type: 'approval.requested',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: call.id,
+      policySignals: decision.signals,
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    })
+
+    const approval = await new Promise<'allow' | 'deny' | 'cancelled'>(
+      (resolve) => {
+        const pending = { callId: call.id, resolve }
+        run.pendingIngress = pending
+        const abort = () => {
+          if (run.pendingIngress === pending) {
+            run.pendingIngress = undefined
+            resolve('cancelled')
+          }
+        }
+        run.controller.signal.addEventListener('abort', abort, { once: true })
+      },
+    )
+    run.pendingIngress = undefined
+
+    await session.logger.write({
+      type: 'approval',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: call.id,
+      policySignals: toJsonValue(decision.signals) as JsonValue[],
+      mode: config.permission.sensitiveData.mode,
+      approver: 'human',
+      decision: approval,
+      reason: approval === 'allow' ? 'Approved by user' : 'Denied by user',
+    })
+
+    if (approval === 'cancelled') {
+      throw run.controller.signal.reason ?? new Error('Run cancelled')
+    }
+
+    this.#setRunStatus(session, run, 'running_tools')
+    return approval === 'allow' ? result : decision.sanitizedResult
+  }
+
+  async #finishRun(
+    session: SessionState,
+    run: ActiveRun,
+    status: RunStatus,
+    error?: unknown,
+  ): Promise<void> {
+    this.#setRunStatus(session, run, status, error)
+    await session.logger.write({
+      type: 'run.end',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      status,
+    })
+  }
+
+  #setRunStatus(
+    session: SessionState,
+    run: ActiveRun,
+    status: RunStatus,
+    error?: unknown,
+  ): void {
+    run.status = status
+    this.#emit(session, {
+      type: 'run.status',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      status,
+      ...(error && status === 'failed'
+        ? {
+            error: {
+              code: 'RUN_FAILED',
+              message:
+                error instanceof Error
+                  ? error.message
+                  : 'Run failed unexpectedly',
+            },
+          }
+        : {}),
+    })
+  }
+
+  #emit(session: SessionState, event: AgentEventDraft): void {
+    const webContents = this.#getWebContents()
+
+    if (!webContents) {
+      return
+    }
+
+    sendAgentEvent(webContents, {
+      version: IPC_VERSION,
+      event: {
+        schemaVersion: 1,
+        seq: (session.eventSeq += 1),
+        ts: new Date().toISOString(),
+        ...event,
+      } as Parameters<typeof sendAgentEvent>[1]['event'],
+    })
+  }
+
+  async #cleanupTraces(): Promise<void> {
+    const config = this.#configStore.getPublicConfig()
+    const activeFiles = new Set(
+      [...this.#sessions.keys()].map((sessionId) =>
+        path.resolve(this.#traceDirectory, `${sessionId}.jsonl`),
+      ),
+    )
+
+    await cleanupTraces(this.#traceDirectory, {
+      retentionDays: config.logging.retentionDays,
+      maxTotalBytes: config.logging.maxTotalBytes,
+      activeFiles,
+      onDiagnostic: this.#onDiagnostic,
+    })
+  }
+}

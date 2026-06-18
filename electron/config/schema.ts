@@ -37,6 +37,7 @@ export const AppConfigSchema = Type.Object(
     ),
     limits: PublicConfigSchema.properties.limits,
     logging: PublicConfigSchema.properties.logging,
+    privacy: PublicConfigSchema.properties.privacy,
     workspace: PublicConfigSchema.properties.workspace,
     skills: PublicConfigSchema.properties.skills,
   },
@@ -80,6 +81,7 @@ export const DEFAULT_APP_CONFIG = {
     retentionDays: 14,
     maxTotalBytes: 500_000_000,
   },
+  privacy: {},
   workspace: {},
   skills: {
     enabled: true,
@@ -106,6 +108,7 @@ export function toPublicConfig(
     permission: structuredClone(config.permission),
     limits: structuredClone(config.limits),
     logging: structuredClone(config.logging),
+    privacy: structuredClone(config.privacy),
     workspace: structuredClone(config.workspace),
     skills: structuredClone(config.skills),
   }
