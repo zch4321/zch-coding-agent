@@ -103,6 +103,7 @@ describe('trace replay', () => {
         args: { path: 'README.md' },
         result: { status: 'ok', content: 'text' },
         approvedBy: 'readonly',
+        policySignals: [],
         durationMs: 3,
       },
     ])

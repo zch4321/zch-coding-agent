@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   NAlert,
   NButton,
@@ -7,25 +7,58 @@ import {
   NCollapseItem,
   NConfigProvider,
   NInput,
+  NInputNumber,
   NModal,
   NSelect,
   NSpace,
   NSwitch,
-  NTag,
 } from 'naive-ui'
 import MarkdownBlock from './components/MarkdownBlock.vue'
+import UiIcon from './components/UiIcon.vue'
 import { useAgentStore, type ToolActivity } from './stores/agent'
 import { IPC_VERSION } from '../shared/channels'
+import type { PermissionMode } from '../shared/config'
 
-type ArtifactTab = 'files' | 'browser' | 'terminal' | 'diff'
+type ArtifactTab = 'files' | 'diff'
+type SettingsTab = 'project' | 'provider' | 'permissions' | 'logging'
+
+interface ExplorerEntry {
+  path: string
+  name: string
+  type: 'file' | 'directory'
+}
+
+interface OpenFile {
+  path: string
+  content: string
+  totalBytes: number
+  truncated: boolean
+}
 
 const agent = useAgentStore()
 const settingsOpen = ref(false)
+const settingsTab = ref<SettingsTab>('project')
+const yoloWarningOpen = ref(false)
+const projectSidebarOpen = ref(true)
+const artifactSidebarOpen = ref(true)
 const activeArtifact = ref<ArtifactTab>('files')
+const searchQuery = ref('')
+const renameConversationId = ref<string>()
+const renameValue = ref('')
+const deleteConversationId = ref<string>()
+const removeProjectOpen = ref(false)
+const switchConversationId = ref<string>()
+const explorerPath = ref('.')
+const explorerEntries = ref<ExplorerEntry[]>([])
+const explorerLoading = ref(false)
+const explorerError = ref('')
+const explorerTruncated = ref(false)
+const openedFiles = ref<OpenFile[]>([])
+const activeFilePath = ref('explorer')
 
 const reasoningOptions = [
-  { label: 'Reasoning auto', value: 'auto' },
-  { label: 'Reasoning off', value: 'off' },
+  { label: 'Auto', value: 'auto' },
+  { label: 'Off', value: 'off' },
 ]
 const modeOptions = [
   { label: 'ReadOnly', value: 'readonly' },
@@ -33,141 +66,123 @@ const modeOptions = [
   { label: 'Confirm', value: 'confirm' },
   { label: 'Yolo', value: 'yolo' },
 ]
-const artifactTabs: Array<{ label: string; value: ArtifactTab }> = [
-  { label: 'Files', value: 'files' },
-  { label: 'Browser', value: 'browser' },
-  { label: 'Terminal', value: 'terminal' },
-  { label: 'Diff', value: 'diff' },
+const sensitiveModeOptions = [
+  { label: 'Off', value: 'off' },
+  { label: 'Warn', value: 'warn' },
+  { label: 'Confirm', value: 'confirm' },
+]
+const settingsTabs: Array<{
+  label: string
+  value: SettingsTab
+}> = [
+  { label: 'Project', value: 'project' },
+  { label: 'Provider', value: 'provider' },
+  { label: 'Permissions', value: 'permissions' },
+  { label: 'Logging', value: 'logging' },
 ]
 
 const projectName = computed(() => {
   if (!agent.workspacePath) {
-    return 'No workspace'
+    return 'Choose workspace'
   }
 
   const normalized = agent.workspacePath.replace(/\\/g, '/')
   return normalized.split('/').filter(Boolean).at(-1) ?? agent.workspacePath
 })
-const workspaceLabel = computed(() => agent.workspacePath || 'Choose workspace')
-const runBadgeClass = computed(() => {
+const workspaceLabel = computed(
+  () => agent.workspacePath || 'No workspace selected',
+)
+const activeTitle = computed(
+  () => agent.activeConversation?.title ?? 'New conversation',
+)
+const statusLabel = computed(() => {
   if (agent.pendingApproval) {
-    return 'approval'
+    return 'Waiting for approval'
   }
 
   if (agent.runStatus === 'failed') {
-    return 'failed'
+    return 'Failed'
+  }
+
+  if (agent.runStatus === 'cancelling') {
+    return 'Cancelling'
   }
 
   if (agent.activeRunId) {
-    return 'calling'
+    return 'Running'
   }
 
-  return 'idle'
+  return ''
 })
-const runLabel = computed(() => {
-  if (!agent.sessionId) {
-    return 'NO SESSION'
+const sortedProjects = computed(() =>
+  agent.projects.map((project) => ({
+    ...project,
+    conversations: agent.conversations
+      .filter((conversation) => conversation.projectPath === project.path)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+  })),
+)
+const searchResults = computed(() => {
+  const query = searchQuery.value.trim().toLocaleLowerCase()
+
+  if (!query) {
+    return []
+  }
+
+  return agent.conversations
+    .filter((conversation) => {
+      if (conversation.title.toLocaleLowerCase().includes(query)) {
+        return true
+      }
+
+      return conversation.messages.some((message) =>
+        message.text.toLocaleLowerCase().includes(query),
+      )
+    })
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+})
+const chronologicalTools = computed(() => [...agent.tools].reverse())
+const activeFile = computed(() =>
+  openedFiles.value.find((file) => file.path === activeFilePath.value),
+)
+const fileLines = computed(() =>
+  (activeFile.value?.content ?? '').split(/\r?\n/),
+)
+const explorerParent = computed(() => {
+  if (explorerPath.value === '.') {
+    return undefined
+  }
+
+  const parts = explorerPath.value.split('/').filter(Boolean)
+  parts.pop()
+  return parts.join('/') || '.'
+})
+const inputDisabled = computed(
+  () =>
+    !agent.workspacePath ||
+    !agent.activeConversationId ||
+    Boolean(agent.activeRunId) ||
+    Boolean(agent.pendingApproval),
+)
+const sendHint = computed(() => {
+  if (!agent.workspacePath) {
+    return 'Choose a workspace to begin'
+  }
+
+  if (!agent.credentialConfigured) {
+    return 'Configure a Provider API key in Settings'
+  }
+
+  if (!agent.providerNoticeAccepted) {
+    return 'Review the Provider data notice above'
   }
 
   if (agent.pendingApproval) {
-    return 'APPROVAL'
+    return 'Resolve the pending approval before sending another message'
   }
 
-  return agent.runStatus.replace(/_/g, ' ').toUpperCase()
+  return 'Ask about this workspace'
 })
-const chronologicalTools = computed(() => [...agent.tools].reverse())
-const activeThreadSubtitle = computed(() =>
-  agent.activeRunId
-    ? '1 active thread · run currently active'
-    : agent.sessionId
-      ? '1 active thread · no run currently active'
-      : 'No active session · configure from settings',
-)
-const lastReadFile = computed(() => {
-  for (const tool of agent.tools) {
-    const content = okContent(tool)
-
-    if (
-      tool.tool === 'read_file' &&
-      content &&
-      typeof content === 'object' &&
-      !Array.isArray(content)
-    ) {
-      const fileContent = content as Record<string, unknown>
-
-      if (
-        typeof fileContent.path !== 'string' ||
-        typeof fileContent.content !== 'string'
-      ) {
-        continue
-      }
-
-      return {
-        path: fileContent.path,
-        content: fileContent.content,
-        totalBytes:
-          typeof fileContent.totalBytes === 'number'
-            ? fileContent.totalBytes
-            : null,
-        truncated:
-          typeof fileContent.truncated === 'boolean'
-            ? fileContent.truncated
-            : false,
-      }
-    }
-  }
-
-  return undefined
-})
-const fileEntries = computed(() => {
-  for (const tool of agent.tools) {
-    const content = okContent(tool)
-
-    if (
-      (tool.tool === 'list_dir' || tool.tool === 'glob') &&
-      content &&
-      typeof content === 'object' &&
-      !Array.isArray(content)
-    ) {
-      const rawEntries =
-        'entries' in content
-          ? content.entries
-          : 'matches' in content
-            ? content.matches
-            : undefined
-
-      if (Array.isArray(rawEntries)) {
-        return rawEntries.slice(0, 12).map((entry) => {
-          if (typeof entry === 'string') {
-            return { path: entry, type: 'file' }
-          }
-
-          if (
-            entry &&
-            typeof entry === 'object' &&
-            'path' in entry &&
-            typeof entry.path === 'string'
-          ) {
-            return {
-              path: entry.path,
-              type:
-                'type' in entry && typeof entry.type === 'string'
-                  ? entry.type
-                  : 'file',
-            }
-          }
-
-          return { path: String(entry), type: 'file' }
-        })
-      }
-    }
-  }
-
-  return []
-})
-const fileLines = computed(() =>
-  (lastReadFile.value?.content ?? '').split(/\r?\n/).slice(0, 80),
-)
 
 function okContent(tool: ToolActivity): unknown {
   const result = tool.result
@@ -185,31 +200,22 @@ function toolResultSummary(tool: ToolActivity): string {
   const result = tool.result
 
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
-    return 'pending'
+    return tool.status === 'proposed' ? 'Proposed' : 'Completed'
   }
 
-  if (!('status' in result) || typeof result.status !== 'string') {
-    return 'completed'
+  if ('status' in result && result.status !== 'ok') {
+    return String(result.status)
   }
 
-  if (result.status !== 'ok') {
-    return result.status
-  }
-
-  const totalBytes =
-    'totalBytes' in result && typeof result.totalBytes === 'number'
-      ? `${Math.round(result.totalBytes / 100) / 10}KB`
-      : 'ok'
-  const truncated =
-    'truncated' in result && result.truncated ? 'truncated' : 'not truncated'
-  return `${totalBytes} · ${truncated}`
+  return 'Completed'
 }
 
 function toolArgsPreview(tool: ToolActivity): string {
   return JSON.stringify(tool.args, null, 2)
 }
 
-function openSettings() {
+function openSettings(tab: SettingsTab = 'project') {
+  settingsTab.value = tab
   settingsOpen.value = true
 }
 
@@ -243,37 +249,293 @@ async function closeWindow() {
   }
 }
 
-function selectArtifact(tab: ArtifactTab) {
-  activeArtifact.value = tab
+function selectMode(value: string | number) {
+  if (
+    value !== 'readonly' &&
+    value !== 'auto' &&
+    value !== 'confirm' &&
+    value !== 'yolo'
+  ) {
+    return
+  }
+
+  if (value === 'yolo' && !agent.yoloNoticeAccepted) {
+    yoloWarningOpen.value = true
+    return
+  }
+
+  agent.setMode(value as PermissionMode)
 }
 
-onMounted(() => {
-  void agent.initialize()
+async function confirmYoloMode() {
+  if (await agent.acceptYoloNotice()) {
+    agent.setMode('yolo')
+    yoloWarningOpen.value = false
+  }
+}
+
+async function createConversation() {
+  if (agent.activeRunId || agent.pendingApproval) {
+    switchConversationId.value = 'new'
+    return
+  }
+
+  await agent.newConversation()
+}
+
+async function openConversation(conversationId: string) {
+  if (!(await agent.selectConversation(conversationId))) {
+    switchConversationId.value = conversationId
+  }
+}
+
+async function confirmConversationSwitch() {
+  const target = switchConversationId.value
+  switchConversationId.value = undefined
+  await agent.interruptRun()
+  await agent.closeRuntimeSession()
+
+  if (target === 'new') {
+    await agent.newConversation()
+  } else if (target) {
+    await agent.selectConversation(target)
+  }
+}
+
+function beginRename(conversationId: string) {
+  const conversation = agent.conversations.find(
+    (item) => item.id === conversationId,
+  )
+
+  if (!conversation) {
+    return
+  }
+
+  renameConversationId.value = conversationId
+  renameValue.value = conversation.title
+}
+
+function confirmRename() {
+  if (renameConversationId.value) {
+    agent.renameConversation(renameConversationId.value, renameValue.value)
+  }
+
+  renameConversationId.value = undefined
+}
+
+async function confirmDeleteConversation() {
+  if (deleteConversationId.value) {
+    await agent.deleteConversation(deleteConversationId.value)
+  }
+
+  deleteConversationId.value = undefined
+}
+
+async function chooseWorkspace() {
+  const selected = await agent.chooseWorkspace()
+
+  if (selected) {
+    await loadDirectory('.')
+  }
+}
+
+async function confirmRemoveProject() {
+  await agent.removeCurrentProject()
+  removeProjectOpen.value = false
+  openedFiles.value = []
+  explorerEntries.value = []
+  activeFilePath.value = 'explorer'
+}
+
+async function loadDirectory(path: string) {
+  const bridge = window.agentApi
+
+  if (!bridge || !agent.workspacePath) {
+    explorerEntries.value = []
+    return
+  }
+
+  explorerLoading.value = true
+  explorerError.value = ''
+  const result = await bridge.listWorkspaceDirectory({
+    version: IPC_VERSION,
+    path,
+  })
+  explorerLoading.value = false
+
+  if (result.ok) {
+    explorerPath.value = result.value.path
+    explorerEntries.value = result.value.entries
+    explorerTruncated.value = result.value.truncated
+  } else {
+    explorerError.value = result.error.message
+  }
+}
+
+async function openExplorerEntry(entry: ExplorerEntry) {
+  if (entry.type === 'directory') {
+    await loadDirectory(entry.path)
+    return
+  }
+
+  const bridge = window.agentApi
+
+  if (!bridge) {
+    return
+  }
+
+  explorerError.value = ''
+  const result = await bridge.readWorkspaceFile({
+    version: IPC_VERSION,
+    path: entry.path,
+  })
+
+  if (!result.ok) {
+    explorerError.value = result.error.message
+    return
+  }
+
+  const existing = openedFiles.value.find(
+    (file) => file.path === result.value.path,
+  )
+
+  if (existing) {
+    Object.assign(existing, result.value)
+  } else {
+    openedFiles.value.push(result.value)
+  }
+
+  activeFilePath.value = result.value.path
+  activeArtifact.value = 'files'
+}
+
+function closeFile(path: string) {
+  const index = openedFiles.value.findIndex((file) => file.path === path)
+  openedFiles.value = openedFiles.value.filter((file) => file.path !== path)
+
+  if (activeFilePath.value === path) {
+    activeFilePath.value =
+      openedFiles.value[Math.max(0, index - 1)]?.path ?? 'explorer'
+  }
+}
+
+function handleComposerKeydown(event: KeyboardEvent) {
+  if (event.isComposing || event.key !== 'Enter' || event.shiftKey) {
+    return
+  }
+
+  event.preventDefault()
+  void agent.sendMessage()
+}
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (!event.ctrlKey) {
+    return
+  }
+
+  if (event.key.toLocaleLowerCase() === 'b' && event.shiftKey) {
+    event.preventDefault()
+    artifactSidebarOpen.value = !artifactSidebarOpen.value
+  } else if (event.key.toLocaleLowerCase() === 'b') {
+    event.preventDefault()
+    projectSidebarOpen.value = !projectSidebarOpen.value
+  }
+}
+
+watch(
+  () => agent.pendingApproval,
+  (approval) => {
+    if (approval?.diff) {
+      activeArtifact.value = 'diff'
+      artifactSidebarOpen.value = true
+    }
+  },
+)
+
+watch(
+  () => agent.workspacePath,
+  (workspace, previous) => {
+    if (workspace && workspace !== previous && agent.initialized) {
+      openedFiles.value = []
+      activeFilePath.value = 'explorer'
+      void loadDirectory('.')
+    }
+  },
+)
+
+onMounted(async () => {
+  window.addEventListener('keydown', handleGlobalKeydown)
+  if (window.innerWidth <= 1080) {
+    artifactSidebarOpen.value = false
+  }
+  await agent.initialize()
+
+  if (agent.workspacePath) {
+    await loadDirectory('.')
+  }
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
   agent.dispose()
 })
 </script>
 
 <template>
   <NConfigProvider>
-    <main class="app-frame" data-testid="app-ready">
+    <main
+      class="app-frame"
+      :class="{
+        'project-sidebar-closed': !projectSidebarOpen,
+        'artifact-sidebar-closed': !artifactSidebarOpen,
+      }"
+      data-testid="app-ready"
+    >
       <header class="app-topbar">
         <div class="window-title">
-          <span class="app-mark">CA</span>
+          <span class="app-mark"><UiIcon name="app" /></span>
           <strong>My Coding Agent</strong>
         </div>
 
-        <button class="project-crumb" type="button" @click="openSettings">
-          <span class="icon">□</span>
+        <button
+          class="project-crumb"
+          type="button"
+          :title="workspaceLabel"
+          @click="openSettings('project')"
+        >
+          <UiIcon name="folder" />
           <span>{{ projectName }}</span>
         </button>
 
         <div class="topbar-actions">
-          <button class="toolbar-button" type="button">Share</button>
-          <button class="icon-button" type="button" @click="openSettings">
-            Settings
+          <button
+            class="topbar-icon-button"
+            type="button"
+            aria-label="Toggle project sidebar"
+            title="Toggle project sidebar (Ctrl+B)"
+            :aria-pressed="projectSidebarOpen"
+            @click="projectSidebarOpen = !projectSidebarOpen"
+          >
+            <UiIcon name="panel-left" />
+          </button>
+          <button
+            class="topbar-icon-button"
+            type="button"
+            aria-label="Toggle artifact sidebar"
+            title="Toggle artifact sidebar (Ctrl+Shift+B)"
+            :aria-pressed="artifactSidebarOpen"
+            @click="artifactSidebarOpen = !artifactSidebarOpen"
+          >
+            <UiIcon name="panel-right" />
+          </button>
+          <button
+            class="topbar-icon-button"
+            type="button"
+            aria-label="Open settings"
+            title="Settings"
+            @click="openSettings()"
+          >
+            <UiIcon name="settings" />
           </button>
           <div class="window-controls" aria-label="Window controls">
             <button
@@ -282,7 +544,7 @@ onUnmounted(() => {
               aria-label="Minimize window"
               @click="minimizeWindow"
             >
-              _
+              <UiIcon name="minimize" />
             </button>
             <button
               class="window-control"
@@ -290,7 +552,7 @@ onUnmounted(() => {
               aria-label="Maximize or restore window"
               @click="toggleMaximizeWindow"
             >
-              □
+              <UiIcon name="maximize" />
             </button>
             <button
               class="window-control close"
@@ -298,86 +560,165 @@ onUnmounted(() => {
               aria-label="Close window"
               @click="closeWindow"
             >
-              ×
+              <UiIcon name="close" />
             </button>
           </div>
         </div>
       </header>
 
       <div class="workbench-shell">
-        <aside class="thread-sidebar">
-          <button class="new-task-button" type="button" @click="openSettings">
-            <span>＋</span>
-            <strong>New task</strong>
+        <aside class="project-sidebar" :aria-hidden="!projectSidebarOpen">
+          <button
+            class="new-conversation-button"
+            type="button"
+            @click="createConversation"
+          >
+            <UiIcon name="plus" />
+            <span>New conversation</span>
           </button>
 
-          <section class="nav-section">
-            <p class="nav-title">TODAY</p>
-            <button class="thread-item active" type="button">
-              <span class="thread-icon">▢</span>
-              <span>Design frontend layout</span>
-            </button>
-            <button class="thread-item" type="button">
-              <span class="thread-icon">▢</span>
-              <span>Review IPC contracts</span>
-            </button>
-            <button class="thread-item" type="button">
-              <span class="thread-icon">▢</span>
-              <span>Path guard tests</span>
-            </button>
-          </section>
+          <label class="conversation-search">
+            <UiIcon name="search" />
+            <input
+              v-model="searchQuery"
+              type="search"
+              placeholder="Search conversations"
+              aria-label="Search conversations"
+            />
+          </label>
 
-          <section class="nav-section">
-            <p class="nav-title">PROJECT</p>
-            <button class="project-item" type="button" @click="openSettings">
-              <span class="thread-icon">□</span>
-              <span>{{ projectName }}</span>
-            </button>
-          </section>
+          <div class="project-list">
+            <template v-if="searchQuery.trim()">
+              <p class="sidebar-section-title">Search results</p>
+              <button
+                v-for="conversation in searchResults"
+                :key="conversation.id"
+                class="conversation-item search-result"
+                type="button"
+                @click="openConversation(conversation.id)"
+              >
+                <span>{{ conversation.title }}</span>
+                <small>{{
+                  agent.projects.find(
+                    (project) => project.path === conversation.projectPath,
+                  )?.name
+                }}</small>
+              </button>
+              <p v-if="searchResults.length === 0" class="sidebar-empty">
+                No matching conversations
+              </p>
+            </template>
 
-          <p class="sidebar-note">
-            Sidebar only switches threads and project context. Mode, model and
-            workspace controls live in composer/settings.
-          </p>
+            <template v-else>
+              <p class="sidebar-section-title">Projects</p>
+              <section
+                v-for="project in sortedProjects"
+                :key="project.path"
+                class="project-group"
+              >
+                <div class="project-heading" :title="project.path">
+                  <UiIcon name="chevron-down" />
+                  <UiIcon name="folder" />
+                  <strong>{{ project.name }}</strong>
+                </div>
+                <div class="conversation-list">
+                  <div
+                    v-for="conversation in project.conversations"
+                    :key="conversation.id"
+                    class="conversation-row"
+                    :class="{
+                      active: conversation.id === agent.activeConversationId,
+                    }"
+                  >
+                    <button
+                      class="conversation-item"
+                      type="button"
+                      @click="openConversation(conversation.id)"
+                    >
+                      {{ conversation.title }}
+                    </button>
+                    <div class="conversation-actions">
+                      <button
+                        type="button"
+                        aria-label="Rename conversation"
+                        title="Rename"
+                        @click="beginRename(conversation.id)"
+                      >
+                        <UiIcon name="edit" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Delete conversation"
+                        title="Delete"
+                        @click="deleteConversationId = conversation.id"
+                      >
+                        <UiIcon name="trash" />
+                      </button>
+                    </div>
+                  </div>
+                  <p
+                    v-if="project.conversations.length === 0"
+                    class="sidebar-empty"
+                  >
+                    No conversations
+                  </p>
+                </div>
+              </section>
+              <div
+                v-if="sortedProjects.length === 0"
+                class="sidebar-empty-state"
+              >
+                <UiIcon name="folder" />
+                <p>No workspace yet</p>
+                <button type="button" @click="chooseWorkspace">
+                  Choose workspace
+                </button>
+              </div>
+            </template>
+          </div>
         </aside>
 
-        <section class="chat-pane">
-          <header class="chat-header">
+        <section class="conversation-pane">
+          <header class="conversation-header">
             <div>
-              <h1>设计前端主页</h1>
-              <p>{{ activeThreadSubtitle }}</p>
+              <h1>{{ activeTitle }}</h1>
+              <p v-if="agent.workspacePath">{{ projectName }}</p>
             </div>
-            <span class="run-badge" :class="runBadgeClass">
-              <span class="badge-dot"></span>
-              {{ runLabel }}
+            <span
+              v-if="statusLabel"
+              class="run-status"
+              :class="agent.pendingApproval ? 'approval' : agent.runStatus"
+            >
+              <span></span>{{ statusLabel }}
             </span>
           </header>
 
-          <div class="chat-scroll" aria-label="对话流">
+          <div class="conversation-scroll" aria-label="Conversation messages">
             <NAlert
               v-if="!agent.bridgeAvailable && agent.initialized"
               type="warning"
-              title="Bridge unavailable"
+              title="Desktop bridge unavailable"
               class="inline-alert"
             >
-              当前在测试或预览环境中，window.agentApi 不可用。
+              Open the Electron application to use workspace and Agent actions.
             </NAlert>
 
             <NAlert
-              v-if="!agent.providerNoticeAccepted"
+              v-if="agent.bridgeAvailable && !agent.providerNoticeAccepted"
               type="info"
-              title="首次外发告知"
+              title="Provider data notice"
               class="inline-alert"
             >
-              消息、代码片段和只读工具结果可能会发送给 DeepSeek
-              Provider。确认后仅记录版本和时间，不记录密钥。
+              Messages, selected code and bounded tool results may be sent to
+              the configured Provider. Only the notice version and acceptance
+              time are stored.
               <div class="notice-action">
                 <NButton
                   size="small"
                   type="primary"
                   @click="agent.acceptProviderNotice"
                 >
-                  我已了解
+                  I understand
                 </NButton>
               </div>
             </NAlert>
@@ -385,8 +726,10 @@ onUnmounted(() => {
             <NAlert
               v-if="agent.error"
               type="error"
-              title="结构化错误"
+              title="Request failed"
               class="inline-alert"
+              closable
+              @close="agent.error = ''"
             >
               {{ agent.error }}
             </NAlert>
@@ -399,13 +742,18 @@ onUnmounted(() => {
             >
               <div class="message-meta">
                 <strong>{{ message.role === 'user' ? 'You' : 'Agent' }}</strong>
-                <span v-if="message.role === 'assistant' && agent.activeRunId">
-                  streaming
+                <span
+                  v-if="
+                    message.role === 'assistant' &&
+                    message.runId === agent.activeRunId
+                  "
+                >
+                  Streaming
                 </span>
               </div>
               <MarkdownBlock :content="message.text || '...'" />
               <NCollapse v-if="message.reasoning" class="reasoning">
-                <NCollapseItem title="Reasoning hidden" name="reasoning">
+                <NCollapseItem title="Reasoning" name="reasoning">
                   <pre>{{ message.reasoning }}</pre>
                 </NCollapseItem>
               </NCollapse>
@@ -417,20 +765,29 @@ onUnmounted(() => {
               class="tool-call-card"
             >
               <div class="tool-call-header">
-                <strong>{{ tool.tool }}</strong>
+                <div>
+                  <span class="tool-kicker">Tool call</span>
+                  <strong>{{ tool.tool }}</strong>
+                </div>
                 <span
                   class="tool-status"
-                  :class="tool.status === 'completed' ? 'ok' : 'pending'"
+                  :class="tool.status === 'completed' ? 'complete' : ''"
                 >
                   {{ toolResultSummary(tool) }}
                 </span>
               </div>
               <p v-if="tool.reason" class="tool-reason">
-                Reason: {{ tool.reason }}
+                {{ tool.reason }}
               </p>
-              <pre>{{ toolArgsPreview(tool) }}</pre>
-              <NCollapse v-if="tool.result">
-                <NCollapseItem title="Result" :name="tool.callId">
+              <NCollapse>
+                <NCollapseItem title="Arguments" :name="`${tool.callId}:args`">
+                  <pre>{{ toolArgsPreview(tool) }}</pre>
+                </NCollapseItem>
+                <NCollapseItem
+                  v-if="okContent(tool)"
+                  title="Result"
+                  :name="`${tool.callId}:result`"
+                >
                   <pre>{{ JSON.stringify(tool.result, null, 2) }}</pre>
                 </NCollapseItem>
               </NCollapse>
@@ -438,29 +795,53 @@ onUnmounted(() => {
 
             <article v-if="agent.pendingApproval" class="approval-card">
               <div class="approval-header">
-                <strong>Approval required</strong>
-                <span>CONTEXT</span>
+                <div>
+                  <span class="tool-kicker">Approval required</span>
+                  <strong>{{ agent.pendingApproval.tool }}</strong>
+                </div>
+                <span>{{ agent.pendingApproval.kind }}</span>
               </div>
-              <p>
-                Tool result matched sensitive context rules before entering the
-                next provider request.
-              </p>
-              <ul>
+              <p>{{ agent.pendingApproval.reason }}</p>
+              <dl class="approval-meta">
+                <div>
+                  <dt>Workspace scope</dt>
+                  <dd>{{ projectName }}</dd>
+                </div>
+                <div>
+                  <dt>Expires</dt>
+                  <dd>{{ agent.pendingApproval.expiresAt }}</dd>
+                </div>
+              </dl>
+              <pre class="approval-args">{{
+                JSON.stringify(agent.pendingApproval.args, null, 2)
+              }}</pre>
+              <ul class="policy-signals">
                 <li
                   v-for="signal in agent.pendingApproval.signals"
                   :key="signal.code + signal.detail"
                 >
-                  {{ signal.detail }}
+                  <UiIcon name="warning" />{{ signal.detail }}
                 </li>
               </ul>
-              <NSpace>
+              <pre v-if="agent.pendingApproval.diff" class="approval-diff">{{
+                agent.pendingApproval.diff
+              }}</pre>
+              <div class="approval-actions">
                 <NButton type="primary" @click="agent.decideApproval('allow')">
                   Approve
+                </NButton>
+                <NButton
+                  v-if="agent.pendingApproval.rememberable"
+                  secondary
+                  type="primary"
+                  @click="agent.decideApproval('allow', true)"
+                >
+                  Approve & remember
                 </NButton>
                 <NButton secondary @click="agent.decideApproval('deny')">
                   Deny
                 </NButton>
-              </NSpace>
+              </div>
             </article>
 
             <div
@@ -469,294 +850,521 @@ onUnmounted(() => {
                 chronologicalTools.length === 0 &&
                 !agent.pendingApproval
               "
-              class="empty-thread"
+              class="conversation-empty"
             >
-              <p class="empty-eyebrow">Agent ready</p>
-              <h2>从底部输入开始，只读检查 workspace。</h2>
-              <p>
-                Provider、workspace、trace 和 API key 都在右上角设置里配置；
-                主界面保持为线程、对话和 Artifact 面板。
-              </p>
+              <span class="empty-icon"><UiIcon name="app" /></span>
+              <template v-if="!agent.workspacePath">
+                <h2>Open a workspace</h2>
+                <p>Choose a project folder to start a local conversation.</p>
+                <NButton type="primary" @click="chooseWorkspace">
+                  Choose workspace
+                </NButton>
+              </template>
+              <template v-else>
+                <h2>What should we work on?</h2>
+                <p>
+                  Ask the Agent to inspect code, explain behavior or prepare a
+                  reviewed change.
+                </p>
+              </template>
             </div>
           </div>
 
-          <footer class="prompt-composer">
+          <footer class="message-input-area">
             <NInput
               v-model:value="agent.input"
               type="textarea"
-              :autosize="{ minRows: 2, maxRows: 5 }"
-              placeholder="Ask the agent to inspect files, summarize code, or open the terminal..."
-              @keydown.ctrl.enter.prevent="agent.sendMessage"
+              :autosize="{ minRows: 2, maxRows: 7 }"
+              :placeholder="sendHint"
+              :disabled="inputDisabled"
+              @keydown="handleComposerKeydown"
             />
-            <div class="composer-bottom">
-              <div class="composer-pills">
+            <div class="message-input-toolbar">
+              <div class="input-selectors">
                 <button
-                  class="composer-pill"
+                  class="model-button"
                   type="button"
-                  @click="openSettings"
+                  @click="openSettings('provider')"
                 >
-                  DeepSeek⌄
+                  {{ agent.providerForm.model }}
+                  <UiIcon name="chevron-down" />
                 </button>
                 <NSelect
-                  v-model:value="agent.mode"
-                  class="mode-pill"
+                  :value="agent.mode"
+                  class="mode-select"
                   size="small"
                   :options="modeOptions"
+                  @update:value="selectMode"
                 />
-                <button
-                  class="composer-pill"
-                  type="button"
-                  @click="selectArtifact('terminal')"
-                >
-                  >_ Terminal
-                </button>
               </div>
               <button
                 v-if="agent.activeRunId"
-                class="send-button interrupt"
+                class="send-button stop"
                 type="button"
-                aria-label="Interrupt"
+                aria-label="Stop run"
+                title="Stop"
                 @click="agent.interruptRun"
               >
-                ×
+                <UiIcon name="stop" />
               </button>
               <button
                 v-else
                 class="send-button"
                 type="button"
-                aria-label="Send"
+                aria-label="Send message"
+                title="Send"
                 :disabled="!agent.canSend"
                 @click="agent.sendMessage"
               >
-                ↑
+                <UiIcon name="send" />
               </button>
             </div>
           </footer>
         </section>
 
-        <aside class="artifact-panel">
+        <aside class="artifact-sidebar" :aria-hidden="!artifactSidebarOpen">
           <header class="artifact-header">
-            <div>
-              <h2>
-                {{
-                  activeArtifact === 'files'
-                    ? 'Files'
-                    : activeArtifact === 'browser'
-                      ? 'Browser'
-                      : activeArtifact === 'terminal'
-                        ? 'Terminal'
-                        : 'Diff'
-                }}
-              </h2>
+            <div class="artifact-project">
+              <strong>{{ projectName }}</strong>
+              <span :title="workspaceLabel">{{ workspaceLabel }}</span>
             </div>
-            <p>{{ workspaceLabel }}</p>
-            <nav class="artifact-tabs" aria-label="Artifact tabs">
+            <nav class="artifact-tabs" aria-label="Artifact views">
               <button
-                v-for="tab in artifactTabs"
-                :key="tab.value"
                 type="button"
-                :class="{ active: activeArtifact === tab.value }"
-                @click="selectArtifact(tab.value)"
+                :class="{ active: activeArtifact === 'files' }"
+                @click="activeArtifact = 'files'"
               >
-                {{ tab.label }}
+                <UiIcon name="explorer" />Files
+              </button>
+              <button
+                type="button"
+                :class="{ active: activeArtifact === 'diff' }"
+                @click="activeArtifact = 'diff'"
+              >
+                <UiIcon name="diff" />Diff
+                <span v-if="agent.pendingApproval?.diff" class="tab-dot"></span>
               </button>
             </nav>
           </header>
 
-          <section class="artifact-body">
-            <div v-if="activeArtifact === 'files'" class="file-artifact">
-              <div class="file-tabs">
-                <button
-                  class="file-tab"
-                  type="button"
-                  :class="{ active: !lastReadFile }"
+          <section v-if="activeArtifact === 'files'" class="artifact-content">
+            <div class="file-tabs" role="tablist" aria-label="Open files">
+              <button
+                type="button"
+                :class="{ active: activeFilePath === 'explorer' }"
+                @click="activeFilePath = 'explorer'"
+              >
+                <UiIcon name="explorer" />Explorer
+              </button>
+              <button
+                v-for="file in openedFiles"
+                :key="file.path"
+                type="button"
+                :class="{ active: activeFilePath === file.path }"
+                :title="file.path"
+                @click="activeFilePath = file.path"
+              >
+                <UiIcon name="file" />
+                <span>{{ file.path.split('/').at(-1) }}</span>
+                <span
+                  class="tab-close"
+                  role="button"
+                  tabindex="0"
+                  aria-label="Close file"
+                  @click.stop="closeFile(file.path)"
+                  @keydown.enter.stop="closeFile(file.path)"
                 >
-                  ⊞ Explorer
-                </button>
+                  <UiIcon name="close" />
+                </span>
+              </button>
+            </div>
+
+            <div v-if="activeFilePath === 'explorer'" class="explorer-view">
+              <div class="explorer-toolbar">
                 <button
-                  v-if="lastReadFile"
-                  class="file-tab active"
                   type="button"
+                  aria-label="Go to parent folder"
+                  :disabled="!explorerParent"
+                  @click="explorerParent && loadDirectory(explorerParent)"
                 >
-                  ▣ {{ lastReadFile.path }}
-                  <span>×</span>
+                  <UiIcon name="arrow-left" />
                 </button>
+                <span :title="explorerPath">{{ explorerPath }}</span>
               </div>
+              <p v-if="explorerLoading" class="artifact-message">
+                Loading files...
+              </p>
+              <p v-else-if="explorerError" class="artifact-message error">
+                {{ explorerError }}
+              </p>
+              <div v-else-if="!agent.workspacePath" class="artifact-empty">
+                <UiIcon name="folder" />
+                <p>Choose a workspace to browse files.</p>
+              </div>
+              <ul v-else class="explorer-list">
+                <li v-for="entry in explorerEntries" :key="entry.path">
+                  <button type="button" @click="openExplorerEntry(entry)">
+                    <UiIcon
+                      :name="entry.type === 'directory' ? 'folder' : 'file'"
+                    />
+                    <span>{{ entry.name }}</span>
+                    <UiIcon
+                      v-if="entry.type === 'directory'"
+                      name="chevron-right"
+                    />
+                  </button>
+                </li>
+              </ul>
+              <p v-if="explorerTruncated" class="artifact-message">
+                Showing the first 1,000 entries.
+              </p>
+            </div>
 
-              <div v-if="lastReadFile" class="file-viewer">
-                <div class="file-viewer-header">
-                  <strong>{{ lastReadFile.path }}</strong>
-                  <span>read-only</span>
+            <div v-else-if="activeFile" class="file-viewer">
+              <div class="file-viewer-header">
+                <div>
+                  <strong>{{ activeFile.path }}</strong>
+                  <span>
+                    Read-only ·
+                    {{ activeFile.totalBytes.toLocaleString() }} bytes
+                  </span>
                 </div>
-                <div class="code-preview">
-                  <div
-                    v-for="(line, index) in fileLines"
-                    :key="index"
-                    class="code-line"
-                  >
-                    <span>{{ String(index + 1).padStart(2, '0') }}</span>
-                    <code>{{ line || ' ' }}</code>
-                  </div>
+                <span v-if="activeFile.truncated" class="truncated-badge">
+                  Truncated
+                </span>
+              </div>
+              <div class="code-preview">
+                <div
+                  v-for="(line, index) in fileLines"
+                  :key="index"
+                  class="code-line"
+                >
+                  <span>{{ index + 1 }}</span>
+                  <code>{{ line || ' ' }}</code>
                 </div>
               </div>
+            </div>
+          </section>
 
-              <div v-else class="explorer-view">
-                <p class="artifact-muted">
-                  Explorer shows workspace paths only when list_dir or glob has
-                  returned data.
-                </p>
-                <ul v-if="fileEntries.length > 0" class="file-list">
-                  <li v-for="entry in fileEntries" :key="entry.path">
-                    <span>{{ entry.type === 'directory' ? '□' : '▣' }}</span>
-                    {{ entry.path }}
-                  </li>
-                </ul>
+          <section v-else class="artifact-content diff-view">
+            <template v-if="agent.pendingApproval?.diff">
+              <div class="diff-summary">
+                <span>Pending change</span>
+                <strong>{{ agent.pendingApproval.tool }}</strong>
+                <p>{{ agent.pendingApproval.reason }}</p>
+                <code v-if="agent.pendingApproval.diffHash">
+                  {{ agent.pendingApproval.diffHash }}
+                </code>
               </div>
-
-              <div class="terminal-note">
-                >_ Terminal output uses this same artifact panel when the
-                Terminal tab is selected.
+              <pre class="diff-content">{{ agent.pendingApproval.diff }}</pre>
+              <div class="diff-actions">
+                <NButton type="primary" @click="agent.decideApproval('allow')">
+                  Approve
+                </NButton>
+                <NButton secondary @click="agent.decideApproval('deny')">
+                  Deny
+                </NButton>
               </div>
-            </div>
-
-            <div
-              v-else-if="activeArtifact === 'browser'"
-              class="empty-artifact"
-            >
-              <h3>Browser Preview</h3>
-              <p>
-                P2 does not open an embedded browser yet. This tab is reserved
-                for P4/P5 preview workflows.
-              </p>
-            </div>
-
-            <div
-              v-else-if="activeArtifact === 'terminal'"
-              class="empty-artifact terminal-artifact"
-            >
-              <h3>>_ Terminal</h3>
-              <p>
-                Persistent terminal arrives in P4. This location matches the
-                design: terminal output appears in the right Artifact Panel, not
-                in the left sidebar.
-              </p>
-            </div>
-
-            <div v-else class="empty-artifact">
-              <h3>Diff Review</h3>
-              <template v-if="agent.pendingApproval">
-                <p>Context approval is waiting.</p>
-                <ul>
-                  <li
-                    v-for="signal in agent.pendingApproval.signals"
-                    :key="signal.code + signal.detail"
-                  >
-                    {{ signal.detail }}
-                  </li>
-                </ul>
-              </template>
-              <p v-else>
-                Write/edit/delete diff review starts in P3. P2 remains workspace
-                read-only.
-              </p>
+            </template>
+            <div v-else class="artifact-empty">
+              <UiIcon name="diff" />
+              <h2>No diff selected</h2>
+              <p>File changes awaiting review will appear here.</p>
             </div>
           </section>
         </aside>
       </div>
 
       <NModal v-model:show="settingsOpen" preset="card" class="settings-modal">
-        <template #header>Settings · session setup</template>
-        <div class="settings-grid">
-          <section class="settings-section">
-            <h3>DeepSeek</h3>
-            <NSpace vertical size="small">
-              <NInput
-                v-model:value="agent.providerForm.baseURL"
-                placeholder="Base URL"
-              />
-              <NInput
-                v-model:value="agent.providerForm.model"
-                placeholder="Model"
-              />
-              <NSelect
-                v-model:value="agent.providerForm.reasoning"
-                :options="reasoningOptions"
-              />
-              <NInput
-                v-model:value="agent.providerForm.apiKey"
-                type="password"
-                show-password-on="click"
-                placeholder="API key, only sent to main process"
-              />
-              <NButton secondary type="primary" @click="agent.saveProvider">
-                Save Provider
-              </NButton>
-              <NTag :type="agent.credentialConfigured ? 'success' : 'warning'">
-                {{
-                  agent.credentialConfigured
-                    ? 'Credential set'
-                    : 'No credential'
-                }}
-              </NTag>
-            </NSpace>
-          </section>
-
-          <section class="settings-section">
-            <h3>Workspace & Mode</h3>
-            <NSpace vertical size="small">
-              <NButton secondary @click="agent.chooseWorkspace">
-                Choose workspace
-              </NButton>
-              <p class="settings-path">{{ workspaceLabel }}</p>
-              <NSelect v-model:value="agent.mode" :options="modeOptions" />
-              <div class="switch-row">
-                <span>Full trace</span>
-                <NSwitch
-                  :value="agent.traceLoggingRequested"
-                  @update:value="agent.setTraceLogging"
-                />
-              </div>
-              <NButton
-                type="primary"
-                :disabled="!agent.canCreateSession"
-                @click="agent.createSession"
-              >
-                Start session
-              </NButton>
-              <NButton
-                secondary
-                :disabled="!agent.sessionId"
-                @click="agent.closeSession"
-              >
-                Close session
-              </NButton>
-            </NSpace>
-          </section>
-
-          <section class="settings-section notice-section">
-            <h3>Notices</h3>
-            <NAlert
-              v-if="!agent.providerNoticeAccepted"
-              type="info"
-              title="Provider data egress"
+        <template #header>Settings</template>
+        <div class="settings-layout">
+          <nav class="settings-nav" aria-label="Settings sections">
+            <button
+              v-for="tab in settingsTabs"
+              :key="tab.value"
+              type="button"
+              :class="{ active: settingsTab === tab.value }"
+              @click="settingsTab = tab.value"
             >
-              Messages, code snippets and bounded read-only tool results may be
-              sent to the configured Provider.
-              <div class="notice-action">
+              {{ tab.label }}
+            </button>
+          </nav>
+
+          <div class="settings-content">
+            <section v-if="settingsTab === 'project'" class="settings-section">
+              <div class="settings-heading">
+                <h2>Project</h2>
+                <p>Manage the workspace used by the current conversation.</p>
+              </div>
+              <label class="settings-field">
+                <span>Current workspace</span>
+                <code>{{ workspaceLabel }}</code>
+              </label>
+              <div class="settings-actions">
+                <NButton type="primary" @click="chooseWorkspace">
+                  Choose workspace
+                </NButton>
                 <NButton
-                  size="small"
-                  type="primary"
-                  @click="agent.acceptProviderNotice"
+                  secondary
+                  type="error"
+                  :disabled="!agent.workspacePath"
+                  @click="removeProjectOpen = true"
                 >
-                  Accept
+                  Remove project
                 </NButton>
               </div>
-            </NAlert>
-            <NAlert v-else type="success" title="Provider notice accepted">
-              Only the notice version and timestamp are stored.
-            </NAlert>
-          </section>
+              <p class="settings-footnote">
+                Removing a project clears its local conversation history. It
+                does not delete files from disk.
+              </p>
+            </section>
+
+            <section
+              v-else-if="settingsTab === 'provider'"
+              class="settings-section"
+            >
+              <div class="settings-heading">
+                <h2>Provider</h2>
+                <p>Configure the main model and the Auto approval model.</p>
+              </div>
+              <label class="settings-field">
+                <span>Base URL</span>
+                <NInput v-model:value="agent.providerForm.baseURL" />
+              </label>
+              <label class="settings-field">
+                <span>Main model</span>
+                <NInput v-model:value="agent.providerForm.model" />
+              </label>
+              <label class="settings-field">
+                <span>Reasoning</span>
+                <NSelect
+                  v-model:value="agent.providerForm.reasoning"
+                  :options="reasoningOptions"
+                />
+              </label>
+              <label class="settings-field">
+                <span>Auto approver model</span>
+                <NInput v-model:value="agent.providerForm.approverModel" />
+              </label>
+              <label class="settings-field">
+                <span>API key</span>
+                <NInput
+                  v-model:value="agent.providerForm.apiKey"
+                  type="password"
+                  show-password-on="click"
+                  placeholder="Enter a new key"
+                />
+                <small>
+                  {{
+                    agent.credentialConfigured
+                      ? 'A credential is stored securely.'
+                      : 'No credential is configured.'
+                  }}
+                </small>
+              </label>
+              <div class="settings-actions">
+                <NButton type="primary" @click="agent.saveProvider">
+                  Save provider
+                </NButton>
+                <NButton
+                  v-if="agent.credentialConfigured"
+                  secondary
+                  @click="agent.clearCredential"
+                >
+                  Clear credential
+                </NButton>
+              </div>
+            </section>
+
+            <section
+              v-else-if="settingsTab === 'permissions'"
+              class="settings-section"
+            >
+              <div class="settings-heading">
+                <h2>Permissions</h2>
+                <p>Set defaults and review rules remembered from approvals.</p>
+              </div>
+              <label class="settings-field">
+                <span>Default mode</span>
+                <NSelect
+                  :value="agent.mode"
+                  :options="modeOptions"
+                  @update:value="selectMode"
+                />
+              </label>
+              <label class="settings-field">
+                <span>Sensitive data</span>
+                <NSelect
+                  v-model:value="agent.permissionForm.sensitiveMode"
+                  :options="sensitiveModeOptions"
+                />
+              </label>
+              <label class="settings-field">
+                <span>Sensitive path globs</span>
+                <NInput
+                  v-model:value="agent.permissionForm.pathGlobs"
+                  type="textarea"
+                  :rows="3"
+                  placeholder="One glob per line"
+                />
+              </label>
+              <label class="settings-field">
+                <span>Content patterns</span>
+                <NInput
+                  v-model:value="agent.permissionForm.contentPatterns"
+                  type="textarea"
+                  :rows="3"
+                  placeholder="One pattern per line"
+                />
+              </label>
+              <NButton type="primary" @click="agent.savePermissions">
+                Save permissions
+              </NButton>
+              <div class="remembered-rules">
+                <h3>Remembered rules</h3>
+                <p v-if="!agent.rememberedRules.length">No remembered rules.</p>
+                <article v-for="rule in agent.rememberedRules" :key="rule.id">
+                  <div>
+                    <strong>{{ rule.toolId }}</strong>
+                    <span>{{ rule.effect }} · {{ rule.workspaceScope }}</span>
+                    <code>{{ rule.argConstraints }}</code>
+                    <small v-if="rule.expiresAt"
+                      >Expires {{ rule.expiresAt }}</small
+                    >
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Delete remembered rule"
+                    @click="agent.removeRememberedRule(rule.id)"
+                  >
+                    <UiIcon name="trash" />
+                  </button>
+                </article>
+              </div>
+            </section>
+
+            <section v-else class="settings-section">
+              <div class="settings-heading">
+                <h2>Logging</h2>
+                <p>Control full trace capture and local retention limits.</p>
+              </div>
+              <div class="settings-switch-row">
+                <div>
+                  <strong>Full trace logging</strong>
+                  <p>May contain prompts, code, tool arguments and outputs.</p>
+                </div>
+                <NSwitch v-model:value="agent.loggingForm.enabled" />
+              </div>
+              <label class="settings-field">
+                <span>Retention days</span>
+                <NInputNumber
+                  v-model:value="agent.loggingForm.retentionDays"
+                  :min="1"
+                  :max="3650"
+                />
+              </label>
+              <label class="settings-field">
+                <span>Maximum total size (MB)</span>
+                <NInputNumber
+                  v-model:value="agent.loggingForm.maxTotalMegabytes"
+                  :min="1"
+                  :max="10000"
+                />
+              </label>
+              <NButton type="primary" @click="agent.saveLogging">
+                Save logging settings
+              </NButton>
+            </section>
+          </div>
         </div>
+      </NModal>
+
+      <NModal
+        v-model:show="yoloWarningOpen"
+        preset="card"
+        class="risk-modal"
+        title="Enable Yolo mode?"
+      >
+        <NAlert type="error" title="Host-level side effects">
+          Yolo skips risk policy, sensitive-data confirmation, model approval
+          and human approval. File changes execute immediately, and later
+          command tools may affect the host. Workspace path invariants still
+          apply.
+        </NAlert>
+        <NSpace justify="end" class="modal-actions">
+          <NButton @click="yoloWarningOpen = false">Cancel</NButton>
+          <NButton type="error" @click="confirmYoloMode"> Enable Yolo </NButton>
+        </NSpace>
+      </NModal>
+
+      <NModal
+        :show="Boolean(renameConversationId)"
+        preset="card"
+        class="small-modal"
+        title="Rename conversation"
+        @update:show="renameConversationId = undefined"
+      >
+        <NInput
+          v-model:value="renameValue"
+          autofocus
+          maxlength="120"
+          @keydown.enter.prevent="confirmRename"
+        />
+        <NSpace justify="end" class="modal-actions">
+          <NButton @click="renameConversationId = undefined">Cancel</NButton>
+          <NButton type="primary" @click="confirmRename">Rename</NButton>
+        </NSpace>
+      </NModal>
+
+      <NModal
+        :show="Boolean(deleteConversationId)"
+        preset="card"
+        class="small-modal"
+        title="Delete conversation?"
+        @update:show="deleteConversationId = undefined"
+      >
+        <p>
+          This removes the local conversation history. Project files are
+          unchanged.
+        </p>
+        <NSpace justify="end" class="modal-actions">
+          <NButton @click="deleteConversationId = undefined">Cancel</NButton>
+          <NButton type="error" @click="confirmDeleteConversation">
+            Delete
+          </NButton>
+        </NSpace>
+      </NModal>
+
+      <NModal
+        v-model:show="removeProjectOpen"
+        preset="card"
+        class="small-modal"
+        title="Remove project?"
+      >
+        <p>
+          This removes the project and its local conversations from the app.
+          Files on disk are not changed.
+        </p>
+        <NSpace justify="end" class="modal-actions">
+          <NButton @click="removeProjectOpen = false">Cancel</NButton>
+          <NButton type="error" @click="confirmRemoveProject">Remove</NButton>
+        </NSpace>
+      </NModal>
+
+      <NModal
+        :show="Boolean(switchConversationId)"
+        preset="card"
+        class="small-modal"
+        title="Stop the current run?"
+        @update:show="switchConversationId = undefined"
+      >
+        <p>The active run must stop before switching conversations.</p>
+        <NSpace justify="end" class="modal-actions">
+          <NButton @click="switchConversationId = undefined">Cancel</NButton>
+          <NButton type="error" @click="confirmConversationSwitch">
+            Stop and continue
+          </NButton>
+        </NSpace>
       </NModal>
     </main>
   </NConfigProvider>

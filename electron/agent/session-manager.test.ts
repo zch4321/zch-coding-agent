@@ -17,6 +17,7 @@ import type {
   ProviderChatRequest,
   ProviderEvent,
 } from './provider'
+import type { AutoApprover } from './auto-approver'
 import { SessionManager } from './session-manager'
 
 class FakeSafeStorage implements SafeStorageAdapter {
@@ -115,6 +116,72 @@ class ScriptedProvider implements LLMProvider {
       timing: { ttftMs: 1, totalMs: 2 },
     }
   }
+}
+
+class ScriptedEditProvider implements LLMProvider {
+  calls = 0
+
+  async *streamChat(): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+
+    if (this.calls === 1) {
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'edit-request' },
+        turn: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-edit',
+              type: 'function',
+              function: {
+                name: 'edit_file',
+                arguments: '{"path":"note.txt","old":"beta","new":"gamma"}',
+              },
+            },
+          ],
+        },
+        toolCalls: [
+          {
+            id: 'call-edit' as CallId,
+            toolId: 'edit_file',
+            args: { path: 'note.txt', old: 'beta', new: 'gamma' },
+            reason: 'Update the requested line',
+          },
+        ],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    yield {
+      type: 'text.delta',
+      delta: 'Updated note.txt',
+      raw: {},
+    }
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'edit-complete' },
+      turn: { role: 'assistant', content: 'Updated note.txt' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
+const safeAutoApprover: AutoApprover = {
+  async evaluate() {
+    return {
+      decision: 'safe',
+      note: 'Single bounded workspace edit',
+      valid: true,
+    }
+  },
 }
 
 async function createConfig(directory: string, secret = 'secret-sentinel') {
@@ -235,5 +302,169 @@ describe('SessionManager P2 loop', () => {
     )
     expect(trace).toContain('tool.call')
     expect(trace).not.toContain('secret-sentinel')
+  })
+
+  it('completes an Auto edit and records P3 approval evidence', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-session-p3-'))
+    const workspace = path.join(directory, 'workspace')
+    const target = path.join(workspace, 'note.txt')
+    await mkdir(workspace)
+    await writeFile(target, 'alpha\nbeta\n')
+
+    const store = await createConfig(directory)
+    const provider = new ScriptedEditProvider()
+    const sent: AgentEventEnvelope[] = []
+    const webContents = {
+      isDestroyed: () => false,
+      send: (_channel: string, envelope: AgentEventEnvelope) => {
+        sent.push(envelope)
+      },
+    } as WebContents
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () => webContents,
+      providerFactory: () => provider,
+      autoApproverFactory: () => safeAutoApprover,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'auto',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: 'Change beta to gamma in note.txt',
+      clientRequestId: 'request-p3-edit',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'run.status' &&
+          envelope.event.status === 'completed',
+      ),
+    )
+
+    expect(await readFile(target, 'utf8')).toBe('alpha\ngamma\n')
+    await manager.closeSession(sessionId)
+    const trace = (
+      await readFile(
+        path.join(directory, 'traces', `${sessionId}.jsonl`),
+        'utf8',
+      )
+    )
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+    const toolCall = trace.find((event) => event.type === 'tool.call')
+
+    expect(toolCall).toMatchObject({
+      tool: 'edit_file',
+      approvedBy: 'model',
+    })
+    expect(toolCall?.policySignals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'filesystem_edit' }),
+      ]),
+    )
+    expect(toolCall?.diffHash).toEqual(expect.any(String))
+  })
+
+  it('accepts one Confirm decision and persists a bounded remembered rule', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-session-confirm-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    await writeFile(path.join(workspace, 'note.txt'), 'alpha\nbeta\n')
+
+    const store = await createConfig(directory)
+    const provider = new ScriptedEditProvider()
+    const sent: AgentEventEnvelope[] = []
+    const webContents = {
+      isDestroyed: () => false,
+      send: (_channel: string, envelope: AgentEventEnvelope) => {
+        sent.push(envelope)
+      },
+    } as WebContents
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () => webContents,
+      providerFactory: () => provider,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'confirm',
+      provider: 'deepseek',
+    })
+    const otherSessionId = await manager.createSession({
+      workspace,
+      mode: 'confirm',
+      provider: 'deepseek',
+    })
+    const runId = manager.startRun({
+      sessionId,
+      message: 'Change beta to gamma in note.txt',
+      clientRequestId: 'request-confirm-edit',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'approval.requested' &&
+          envelope.event.kind === 'tool',
+      ),
+    )
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString()
+
+    expect(
+      manager.decideApproval({
+        sessionId: otherSessionId,
+        runId,
+        callId: 'call-edit' as CallId,
+        decision: 'allow',
+      }),
+    ).toBe(false)
+    expect(
+      manager.decideApproval({
+        sessionId,
+        runId,
+        callId: 'call-edit' as CallId,
+        decision: 'allow',
+        remember: { workspaceScope: 'workspace', expiresAt },
+      }),
+    ).toBe(true)
+    expect(
+      manager.decideApproval({
+        sessionId,
+        runId,
+        callId: 'call-edit' as CallId,
+        decision: 'allow',
+      }),
+    ).toBe(false)
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'run.status' &&
+          envelope.event.runId === runId &&
+          envelope.event.status === 'completed',
+      ),
+    )
+
+    expect(store.getPublicConfig().permission.rememberedRules).toEqual([
+      expect.objectContaining({
+        effect: 'allow',
+        toolId: 'edit_file',
+        workspaceScope: workspace,
+        argConstraints: { path: 'note.txt' },
+        expiresAt,
+        createdFromCallId: 'call-edit',
+      }),
+    ])
+    await manager.closeSession(sessionId)
+    await manager.closeSession(otherSessionId)
   })
 })

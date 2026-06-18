@@ -24,6 +24,7 @@ import {
   TRACE_NOTICE_VERSION,
 } from '../shared/notices'
 import { SessionManager } from './agent/session-manager'
+import { PathGuard, PathGuardError } from './agent/path-guard'
 import { IpcFault, registerIpcHandlers } from './ipc'
 import { PluginEventBus } from './plugins/event-bus'
 import {
@@ -187,6 +188,78 @@ async function installIpc(): Promise<void> {
 
         return { path: selected ?? null }
       },
+      'workspace:list-directory': async (payload) => {
+        const workspace = configStore.getPublicConfig().workspace.lastOpened
+
+        if (!workspace) {
+          throw new IpcFault({
+            code: 'PRECONDITION_FAILED',
+            message: 'Choose a workspace before browsing files',
+          })
+        }
+
+        try {
+          const guard = await PathGuard.create(workspace)
+          const entries = await guard.listDirectory(payload.path ?? '.')
+          const visible = entries
+            .filter(
+              (entry) => entry.type === 'file' || entry.type === 'directory',
+            )
+            .sort((left, right) => {
+              if (left.type !== right.type) {
+                return left.type === 'directory' ? -1 : 1
+              }
+
+              return left.name.localeCompare(right.name)
+            })
+          const limited = visible.slice(0, 1_000)
+
+          return {
+            path: payload.path ?? '.',
+            entries: limited,
+            truncated: visible.length > limited.length,
+          }
+        } catch (error) {
+          if (error instanceof PathGuardError) {
+            throw new IpcFault({
+              code:
+                error.code === 'PATH_NOT_FOUND'
+                  ? 'NOT_FOUND'
+                  : 'PRECONDITION_FAILED',
+              message: error.message,
+            })
+          }
+
+          throw error
+        }
+      },
+      'workspace:read-file': async (payload) => {
+        const workspace = configStore.getPublicConfig().workspace.lastOpened
+
+        if (!workspace) {
+          throw new IpcFault({
+            code: 'PRECONDITION_FAILED',
+            message: 'Choose a workspace before opening files',
+          })
+        }
+
+        try {
+          const guard = await PathGuard.create(workspace)
+          return await guard.readFileBounded(payload.path, 499_999)
+        } catch (error) {
+          if (error instanceof PathGuardError) {
+            throw new IpcFault({
+              code:
+                error.code === 'PATH_NOT_FOUND'
+                  ? 'NOT_FOUND'
+                  : 'PRECONDITION_FAILED',
+              message: error.message,
+            })
+          }
+
+          throw error
+        }
+      },
       'session:create': async (payload) => ({
         sessionId: await sessionManager.createSession({
           workspace: payload.workspace,
@@ -213,6 +286,7 @@ async function installIpc(): Promise<void> {
           runId: payload.runId,
           callId: payload.callId,
           decision: payload.decision,
+          remember: payload.remember,
         }),
       }),
       'window:minimize': (_payload, event) => {
@@ -294,8 +368,8 @@ async function createWindow(): Promise<void> {
   const window = new BrowserWindow({
     width: 1120,
     height: 760,
-    minWidth: 720,
-    minHeight: 540,
+    minWidth: 960,
+    minHeight: 640,
     show: false,
     frame: false,
     autoHideMenuBar: true,

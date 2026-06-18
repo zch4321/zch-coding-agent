@@ -27,6 +27,9 @@ const api: AgentApi = {
   getConfig: (payload) => invoke('config:get', payload),
   setConfig: (payload) => invoke('config:set', payload),
   chooseWorkspace: (payload) => invoke('workspace:choose', payload),
+  listWorkspaceDirectory: (payload) =>
+    invoke('workspace:list-directory', payload),
+  readWorkspaceFile: (payload) => invoke('workspace:read-file', payload),
   createSession: (payload) => invoke('session:create', payload),
   closeSession: (payload) => invoke('session:close', payload),
   startRun: (payload) => invoke('run:start', payload),

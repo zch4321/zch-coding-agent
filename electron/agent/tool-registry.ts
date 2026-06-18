@@ -1,7 +1,5 @@
-import { createHash } from 'node:crypto'
 import type { Static, TSchema } from '@sinclair/typebox'
 import type { ValidateFunction } from 'ajv'
-import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import type {
@@ -11,17 +9,10 @@ import type {
   ToolRegistrationPort,
   ToolResult,
 } from '../tools/types'
-
-export interface ApprovedToolCall {
-  readonly sessionId: SessionId
-  readonly runId: RunId
-  readonly callId: CallId
-  readonly toolId: string
-  readonly args: JsonValue
-  readonly argsHash: string
-  readonly approvedBy: 'readonly-fast-path'
-  readonly approvedAt: string
-}
+import {
+  revalidateApprovedToolCall,
+  type ApprovedToolCall,
+} from './permission-pipeline'
 
 interface RegisteredTool {
   readonly definition: ToolDefinition
@@ -82,39 +73,6 @@ export class ToolRegistry implements ToolRegistrationPort {
   }
 }
 
-export function createArgsHash(args: JsonValue): string {
-  return createHash('sha256').update(JSON.stringify(args)).digest('hex')
-}
-
-export function approveReadOnlyToolCall(
-  sessionId: SessionId,
-  runId: RunId,
-  call: ToolCall,
-  definition: ToolDefinition,
-): ApprovedToolCall | undefined {
-  const readOnly = definition.effects.every(
-    (effect) =>
-      effect === 'filesystem.read' ||
-      effect === 'terminal.read' ||
-      effect === 'instruction.read',
-  )
-
-  if (!readOnly || definition.defaultRisk !== 'low') {
-    return undefined
-  }
-
-  return Object.freeze({
-    sessionId,
-    runId,
-    callId: call.id,
-    toolId: call.toolId,
-    args: structuredClone(call.args),
-    argsHash: createArgsHash(call.args),
-    approvedBy: 'readonly-fast-path',
-    approvedAt: new Date().toISOString(),
-  })
-}
-
 function timeoutResult(toolId: string): ToolResult {
   return {
     status: 'timeout',
@@ -165,12 +123,10 @@ export class ToolExecutor {
     this.#registry = registry
   }
 
-  prepareReadOnlyCall(
-    sessionId: SessionId,
-    runId: RunId,
+  inspectCall(
     call: ToolCall,
   ):
-    | { ok: true; approvedCall: ApprovedToolCall; definition: ToolDefinition }
+    | { ok: true; definition: ToolDefinition }
     | { ok: false; result: ToolResult } {
     const definition = this.#registry.get(call.toolId)
 
@@ -200,24 +156,7 @@ export class ToolExecutor {
       }
     }
 
-    const approvedCall = approveReadOnlyToolCall(
-      sessionId,
-      runId,
-      call,
-      definition,
-    )
-
-    if (!approvedCall) {
-      return {
-        ok: false,
-        result: {
-          status: 'denied',
-          message: 'Only low-risk read-only tools are available in P2',
-        },
-      }
-    }
-
-    return { ok: true, approvedCall, definition }
+    return { ok: true, definition }
   }
 
   async execute(
@@ -246,6 +185,27 @@ export class ToolExecutor {
         status: 'error',
         code: 'INVALID_TOOL_ARGS',
         message: validation.message,
+        retryable: false,
+      }
+    }
+
+    try {
+      await revalidateApprovedToolCall(approvedCall, {
+        sessionId: context.sessionId,
+        runId: context.runId,
+        workspace: context.workspace.canonicalPath,
+      })
+    } catch (error) {
+      return {
+        status: 'error',
+        code:
+          error && typeof error === 'object' && 'code' in error
+            ? String(error.code)
+            : 'APPROVAL_INVALIDATED',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Approval was invalidated before execution',
         retryable: false,
       }
     }

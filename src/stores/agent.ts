@@ -7,6 +7,7 @@ import { IPC_VERSION } from '../../shared/channels'
 import {
   PROVIDER_NOTICE_VERSION,
   TRACE_NOTICE_VERSION,
+  YOLO_NOTICE_VERSION,
 } from '../../shared/notices'
 
 type Role = 'user' | 'assistant'
@@ -32,16 +33,52 @@ export interface ToolActivity {
 export interface PendingApproval {
   runId: RunId
   callId: CallId
+  kind: 'tool' | 'context'
+  tool: string
+  args: unknown
+  reason: string
   signals: Array<{ code: string; severity: string; detail: string }>
+  diff?: string
+  diffHash?: string
+  rememberable: boolean
   expiresAt: string
 }
 
-interface UiConfig {
-  providers: PublicConfig['providers']
-  privacy: PublicConfig['privacy']
-  logging: PublicConfig['logging']
-  workspace: PublicConfig['workspace']
+export interface ProjectRecord {
+  path: string
+  name: string
+  addedAt: string
 }
+
+export interface ConversationRecord {
+  id: string
+  projectPath: string
+  title: string
+  model: string
+  mode: PermissionMode
+  messages: ChatMessage[]
+  createdAt: string
+  updatedAt: string
+}
+
+interface PersistedWorkbench {
+  projects: ProjectRecord[]
+  conversations: ConversationRecord[]
+  activeConversationId?: string
+}
+
+interface UiRememberedRule {
+  id: string
+  effect: 'allow' | 'review'
+  toolId: string
+  workspaceScope: string
+  argConstraints: string
+  expiresAt?: string
+  createdFromCallId: string
+}
+
+const HISTORY_KEY = 'my-coding-agent.workbench.v1'
+let persistTimer: number | undefined
 
 function api(): AgentApi | undefined {
   return window.agentApi
@@ -59,12 +96,48 @@ function nowNotice(version: string) {
   return { version, acceptedAt: new Date().toISOString() }
 }
 
-function toUiConfig(config: PublicConfig): UiConfig {
-  return {
-    providers: config.providers,
-    privacy: config.privacy,
-    logging: config.logging,
-    workspace: config.workspace,
+function projectName(workspacePath: string): string {
+  const normalized = workspacePath.replace(/\\/g, '/')
+  return normalized.split('/').filter(Boolean).at(-1) ?? workspacePath
+}
+
+function cloneMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((message) => ({ ...message }))
+}
+
+function toUiRememberedRules(config: PublicConfig): UiRememberedRule[] {
+  return config.permission.rememberedRules.map((rule) => ({
+    id: rule.id,
+    effect: rule.effect,
+    toolId: rule.toolId,
+    workspaceScope: rule.workspaceScope,
+    argConstraints: JSON.stringify(rule.argConstraints),
+    expiresAt: rule.expiresAt,
+    createdFromCallId: rule.createdFromCallId,
+  }))
+}
+
+function loadWorkbench(): PersistedWorkbench {
+  try {
+    const value = window.localStorage.getItem(HISTORY_KEY)
+
+    if (!value) {
+      return { projects: [], conversations: [] }
+    }
+
+    const parsed = JSON.parse(value) as Partial<PersistedWorkbench>
+    return {
+      projects: Array.isArray(parsed.projects) ? parsed.projects : [],
+      conversations: Array.isArray(parsed.conversations)
+        ? parsed.conversations
+        : [],
+      activeConversationId:
+        typeof parsed.activeConversationId === 'string'
+          ? parsed.activeConversationId
+          : undefined,
+    }
+  } catch {
+    return { projects: [], conversations: [] }
   }
 }
 
@@ -72,8 +145,16 @@ export const useAgentStore = defineStore('agent', {
   state: () => ({
     initialized: false,
     bridgeAvailable: false,
-    config: undefined as UiConfig | undefined,
+    providerNoticeVersion: '',
+    traceNoticeVersion: '',
+    yoloNoticeVersion: '',
+    credentialConfiguredValue: false,
+    builtinPolicies: true,
+    rememberedRules: [] as UiRememberedRule[],
     workspacePath: '',
+    projects: [] as ProjectRecord[],
+    conversations: [] as ConversationRecord[],
+    activeConversationId: undefined as string | undefined,
     sessionId: undefined as SessionId | undefined,
     activeRunId: undefined as RunId | undefined,
     runStatus: 'idle',
@@ -88,31 +169,39 @@ export const useAgentStore = defineStore('agent', {
       model: 'deepseek-chat',
       reasoning: 'auto' as 'auto' | 'off',
       apiKey: '',
+      approverModel: 'deepseek-chat',
     },
-    traceLoggingRequested: false,
+    permissionForm: {
+      sensitiveMode: 'confirm' as 'off' | 'warn' | 'confirm',
+      pathGlobs: '',
+      contentPatterns: '',
+    },
+    loggingForm: {
+      enabled: false,
+      retentionDays: 14,
+      maxTotalMegabytes: 100,
+    },
     unsubscribers: [] as Array<() => void>,
   }),
   getters: {
-    providerNoticeAccepted: (state) =>
-      state.config?.privacy.providerNoticeAccepted?.version ===
-      PROVIDER_NOTICE_VERSION,
-    traceNoticeAccepted: (state) =>
-      state.config?.privacy.traceNoticeAccepted?.version ===
-      TRACE_NOTICE_VERSION,
-    credentialConfigured: (state) =>
-      Boolean(state.config?.providers.deepseek.credentialConfigured),
-    canCreateSession: (state) =>
-      Boolean(
-        state.bridgeAvailable &&
-        state.config?.privacy.providerNoticeAccepted?.version ===
-          PROVIDER_NOTICE_VERSION &&
-        state.config.providers.deepseek.credentialConfigured &&
-        state.workspacePath &&
-        !state.sessionId,
+    activeConversation: (state): ConversationRecord | undefined =>
+      state.conversations.find(
+        (conversation) => conversation.id === state.activeConversationId,
       ),
+    providerNoticeAccepted: (state) =>
+      state.providerNoticeVersion === PROVIDER_NOTICE_VERSION,
+    traceNoticeAccepted: (state) =>
+      state.traceNoticeVersion === TRACE_NOTICE_VERSION,
+    yoloNoticeAccepted: (state) =>
+      state.yoloNoticeVersion === YOLO_NOTICE_VERSION,
+    credentialConfigured: (state) => state.credentialConfiguredValue,
     canSend: (state) =>
       Boolean(
-        state.sessionId &&
+        state.bridgeAvailable &&
+        state.providerNoticeVersion === PROVIDER_NOTICE_VERSION &&
+        state.credentialConfiguredValue &&
+        state.workspacePath &&
+        state.activeConversationId &&
         !state.activeRunId &&
         state.input.trim().length > 0 &&
         !state.pendingApproval,
@@ -124,10 +213,16 @@ export const useAgentStore = defineStore('agent', {
         return
       }
 
+      const history = loadWorkbench()
+      this.projects = history.projects
+      this.conversations = history.conversations
+      this.activeConversationId = history.activeConversationId
+
       const bridge = api()
       this.bridgeAvailable = Boolean(bridge)
 
       if (!bridge) {
+        this.restoreActiveConversation()
         this.initialized = true
         return
       }
@@ -140,28 +235,346 @@ export const useAgentStore = defineStore('agent', {
       if (result.ok) {
         this.applyConfig(result.value.config)
         this.workspacePath = result.value.config.workspace.lastOpened ?? ''
+
+        if (this.workspacePath) {
+          this.registerProject(this.workspacePath)
+          const active = this.conversations.find(
+            (conversation) =>
+              conversation.id === this.activeConversationId &&
+              conversation.projectPath === this.workspacePath,
+          )
+          const latest = this.conversations
+            .filter(
+              (conversation) => conversation.projectPath === this.workspacePath,
+            )
+            .sort((left, right) =>
+              right.updatedAt.localeCompare(left.updatedAt),
+            )[0]
+
+          if (active || latest) {
+            this.activeConversationId = (active ?? latest)?.id
+          } else {
+            this.createConversation(this.workspacePath)
+          }
+        }
       } else {
         this.error = result.error.message
       }
 
+      this.restoreActiveConversation()
       this.unsubscribers.push(
         bridge.onAgentEvent((envelope) =>
           this.handleAgentEvent(envelope.event),
         ),
       )
       this.initialized = true
+      this.persistWorkbench()
     },
     dispose() {
+      if (persistTimer !== undefined) {
+        window.clearTimeout(persistTimer)
+        persistTimer = undefined
+      }
+      this.saveActiveConversation()
+      this.persistWorkbench()
+
       for (const unsubscribe of this.unsubscribers.splice(0)) {
         unsubscribe()
       }
     },
     applyConfig(config: PublicConfig) {
-      this.config = toUiConfig(config)
+      this.providerNoticeVersion =
+        config.privacy.providerNoticeAccepted?.version ?? ''
+      this.traceNoticeVersion =
+        config.privacy.traceNoticeAccepted?.version ?? ''
+      this.yoloNoticeVersion = config.privacy.yoloNoticeAccepted?.version ?? ''
+      this.credentialConfiguredValue =
+        config.providers.deepseek.credentialConfigured
+      this.builtinPolicies = config.permission.builtinPolicies
+      this.rememberedRules = toUiRememberedRules(config)
       this.providerForm.baseURL = config.providers.deepseek.baseURL
       this.providerForm.model = config.providers.deepseek.model
       this.providerForm.reasoning = config.providers.deepseek.reasoning
-      this.traceLoggingRequested = config.logging.enabled
+      this.providerForm.approverModel = config.approval.approverModel
+      this.permissionForm.sensitiveMode = config.permission.sensitiveData.mode
+      this.permissionForm.pathGlobs =
+        config.permission.sensitiveData.pathGlobs.join('\n')
+      this.permissionForm.contentPatterns =
+        config.permission.sensitiveData.contentPatterns.join('\n')
+      this.loggingForm.enabled = config.logging.enabled
+      this.loggingForm.retentionDays = config.logging.retentionDays
+      this.loggingForm.maxTotalMegabytes = Math.max(
+        1,
+        Math.round(config.logging.maxTotalBytes / 1_000_000),
+      )
+    },
+    registerProject(workspacePath: string) {
+      if (!this.projects.some((project) => project.path === workspacePath)) {
+        this.projects.push({
+          path: workspacePath,
+          name: projectName(workspacePath),
+          addedAt: new Date().toISOString(),
+        })
+      }
+    },
+    createConversation(workspacePath?: string) {
+      const targetWorkspace = workspacePath ?? this.workspacePath
+
+      if (!targetWorkspace) {
+        return undefined
+      }
+
+      const now = new Date().toISOString()
+      const conversation: ConversationRecord = {
+        id: requestId(),
+        projectPath: targetWorkspace,
+        title: 'New conversation',
+        model: this.providerForm.model,
+        mode: this.mode,
+        messages: [],
+        createdAt: now,
+        updatedAt: now,
+      }
+      this.registerProject(targetWorkspace)
+      this.conversations.push(conversation)
+      this.activeConversationId = conversation.id
+      this.messages = []
+      this.tools = []
+      this.pendingApproval = undefined
+      this.persistWorkbench()
+      return conversation
+    },
+    async newConversation() {
+      if (!this.workspacePath) {
+        const selected = await this.chooseWorkspace()
+
+        if (!selected) {
+          return false
+        }
+      }
+
+      await this.closeRuntimeSession()
+      this.createConversation()
+      return true
+    },
+    async selectConversation(conversationId: string) {
+      const conversation = this.conversations.find(
+        (item) => item.id === conversationId,
+      )
+
+      if (!conversation || conversationId === this.activeConversationId) {
+        return Boolean(conversation)
+      }
+
+      if (this.activeRunId || this.pendingApproval) {
+        return false
+      }
+
+      this.saveActiveConversation()
+      await this.closeRuntimeSession()
+      await this.activateWorkspace(conversation.projectPath)
+      this.activeConversationId = conversation.id
+      this.restoreActiveConversation()
+      this.persistWorkbench()
+      return true
+    },
+    renameConversation(conversationId: string, title: string) {
+      const conversation = this.conversations.find(
+        (item) => item.id === conversationId,
+      )
+      const normalized = title.trim().slice(0, 120)
+
+      if (!conversation || !normalized) {
+        return
+      }
+
+      conversation.title = normalized
+      conversation.updatedAt = new Date().toISOString()
+      this.persistWorkbench()
+    },
+    async deleteConversation(conversationId: string) {
+      const conversation = this.conversations.find(
+        (item) => item.id === conversationId,
+      )
+
+      if (!conversation || this.activeRunId || this.pendingApproval) {
+        return false
+      }
+
+      if (conversationId === this.activeConversationId) {
+        await this.closeRuntimeSession()
+      }
+
+      this.conversations = this.conversations.filter(
+        (item) => item.id !== conversationId,
+      )
+
+      if (conversationId === this.activeConversationId) {
+        const next = this.conversations
+          .filter((item) => item.projectPath === conversation.projectPath)
+          .sort((left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt),
+          )[0]
+        this.activeConversationId = next?.id
+
+        if (!next && this.workspacePath) {
+          this.createConversation(this.workspacePath)
+        } else {
+          this.restoreActiveConversation()
+        }
+      }
+
+      this.persistWorkbench()
+      return true
+    },
+    async removeCurrentProject() {
+      if (!this.workspacePath || this.activeRunId || this.pendingApproval) {
+        return false
+      }
+
+      const removedPath = this.workspacePath
+      await this.closeRuntimeSession()
+      this.projects = this.projects.filter(
+        (project) => project.path !== removedPath,
+      )
+      this.conversations = this.conversations.filter(
+        (conversation) => conversation.projectPath !== removedPath,
+      )
+      this.workspacePath = ''
+      this.activeConversationId = undefined
+      this.messages = []
+      const bridge = api()
+
+      if (bridge) {
+        const result = await bridge.setConfig({
+          version: IPC_VERSION,
+          kind: 'workspace',
+        })
+
+        if (result.ok) {
+          this.applyConfig(result.value.config)
+        }
+      }
+
+      this.persistWorkbench()
+      return true
+    },
+    restoreActiveConversation() {
+      const conversation = this.conversations.find(
+        (item) => item.id === this.activeConversationId,
+      )
+      this.messages = conversation ? cloneMessages(conversation.messages) : []
+
+      if (conversation) {
+        this.workspacePath = conversation.projectPath
+        this.mode = conversation.mode
+      }
+
+      this.tools = []
+      this.pendingApproval = undefined
+      this.error = ''
+    },
+    saveActiveConversation() {
+      const conversation = this.conversations.find(
+        (item) => item.id === this.activeConversationId,
+      )
+
+      if (!conversation) {
+        return
+      }
+
+      conversation.messages = cloneMessages(this.messages)
+      conversation.mode = this.mode
+      conversation.model = this.providerForm.model
+      conversation.updatedAt = new Date().toISOString()
+    },
+    schedulePersist() {
+      this.saveActiveConversation()
+
+      if (persistTimer !== undefined) {
+        window.clearTimeout(persistTimer)
+      }
+
+      persistTimer = window.setTimeout(() => {
+        this.persistWorkbench()
+        persistTimer = undefined
+      }, 250)
+    },
+    persistWorkbench() {
+      try {
+        window.localStorage.setItem(
+          HISTORY_KEY,
+          JSON.stringify({
+            projects: this.projects,
+            conversations: this.conversations,
+            activeConversationId: this.activeConversationId,
+          } satisfies PersistedWorkbench),
+        )
+      } catch {
+        // History persistence is best effort; runtime behavior remains usable.
+      }
+    },
+    async activateWorkspace(workspacePath: string) {
+      this.workspacePath = workspacePath
+      this.registerProject(workspacePath)
+      const bridge = api()
+
+      if (!bridge) {
+        return
+      }
+
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'workspace',
+        lastOpened: workspacePath,
+      })
+
+      if (result.ok) {
+        this.applyConfig(result.value.config)
+      } else {
+        this.error = result.error.message
+      }
+    },
+    async chooseWorkspace() {
+      const bridge = api()
+
+      if (!bridge) {
+        return undefined
+      }
+
+      const result = await bridge.chooseWorkspace({ version: IPC_VERSION })
+
+      if (!result.ok) {
+        this.error = result.error.message
+        return undefined
+      }
+
+      if (!result.value.path) {
+        return undefined
+      }
+
+      await this.closeRuntimeSession()
+      this.workspacePath = result.value.path
+      this.registerProject(result.value.path)
+      const latest = this.conversations
+        .filter(
+          (conversation) => conversation.projectPath === result.value.path,
+        )
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+
+      if (latest) {
+        this.activeConversationId = latest.id
+        this.restoreActiveConversation()
+      } else {
+        this.createConversation(result.value.path)
+      }
+
+      this.persistWorkbench()
+      return result.value.path
+    },
+    setMode(mode: PermissionMode) {
+      this.mode = mode
+      this.schedulePersist()
     },
     async saveProvider() {
       const bridge = api()
@@ -186,6 +599,19 @@ export const useAgentStore = defineStore('agent', {
 
       this.applyConfig(provider.value.config)
 
+      const approval = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'approval',
+        approverProvider: 'deepseek',
+        approverModel: this.providerForm.approverModel,
+      })
+
+      if (approval.ok) {
+        this.applyConfig(approval.value.config)
+      } else {
+        this.error = approval.error.message
+      }
+
       if (this.providerForm.apiKey.trim()) {
         const credential = await bridge.setConfig({
           version: IPC_VERSION,
@@ -200,6 +626,107 @@ export const useAgentStore = defineStore('agent', {
         } else {
           this.error = credential.error.message
         }
+      }
+
+      this.schedulePersist()
+    },
+    async clearCredential() {
+      const bridge = api()
+
+      if (!bridge) {
+        return
+      }
+
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'credential',
+        action: 'clear',
+      })
+
+      if (result.ok) {
+        this.applyConfig(result.value.config)
+      } else {
+        this.error = result.error.message
+      }
+    },
+    async savePermissions() {
+      const bridge = api()
+
+      if (!bridge) {
+        return
+      }
+
+      const lines = (value: string) =>
+        value
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'permission',
+        builtinPolicies: this.builtinPolicies,
+        rememberedRules: this.rememberedRules.map((rule) => ({
+          ...rule,
+          argConstraints: JSON.parse(rule.argConstraints),
+        })),
+        sensitiveData: {
+          mode: this.permissionForm.sensitiveMode,
+          pathGlobs: lines(this.permissionForm.pathGlobs),
+          contentPatterns: lines(this.permissionForm.contentPatterns),
+        },
+      })
+
+      if (result.ok) {
+        this.applyConfig(result.value.config)
+      } else {
+        this.error = result.error.message
+      }
+    },
+    async removeRememberedRule(ruleId: string) {
+      this.rememberedRules = this.rememberedRules.filter(
+        (rule) => rule.id !== ruleId,
+      )
+      await this.savePermissions()
+    },
+    async saveLogging() {
+      const bridge = api()
+
+      if (!bridge) {
+        return
+      }
+
+      if (this.loggingForm.enabled && !this.traceNoticeAccepted) {
+        const notice = await bridge.setConfig({
+          version: IPC_VERSION,
+          kind: 'privacy',
+          traceNoticeAccepted: nowNotice(TRACE_NOTICE_VERSION),
+        })
+
+        if (!notice.ok) {
+          this.error = notice.error.message
+          return
+        }
+
+        this.applyConfig(notice.value.config)
+      }
+
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'logging',
+        value: {
+          enabled: this.loggingForm.enabled,
+          retentionDays: Math.max(1, this.loggingForm.retentionDays),
+          maxTotalBytes: Math.max(
+            1_024,
+            Math.round(this.loggingForm.maxTotalMegabytes * 1_000_000),
+          ),
+        },
+      })
+
+      if (result.ok) {
+        this.applyConfig(result.value.config)
+      } else {
+        this.error = result.error.message
       }
     },
     async acceptProviderNotice() {
@@ -221,65 +748,32 @@ export const useAgentStore = defineStore('agent', {
         this.error = result.error.message
       }
     },
-    async setTraceLogging(enabled: boolean) {
+    async acceptYoloNotice() {
       const bridge = api()
 
-      if (!bridge || !this.config) {
-        return
-      }
-
-      this.error = ''
-
-      if (enabled && !this.traceNoticeAccepted) {
-        const notice = await bridge.setConfig({
-          version: IPC_VERSION,
-          kind: 'privacy',
-          traceNoticeAccepted: nowNotice(TRACE_NOTICE_VERSION),
-        })
-
-        if (!notice.ok) {
-          this.error = notice.error.message
-          return
-        }
-
-        this.applyConfig(notice.value.config)
+      if (!bridge) {
+        return false
       }
 
       const result = await bridge.setConfig({
         version: IPC_VERSION,
-        kind: 'logging',
-        value: {
-          ...this.config.logging,
-          enabled,
-        },
+        kind: 'privacy',
+        yoloNoticeAccepted: nowNotice(YOLO_NOTICE_VERSION),
       })
 
       if (result.ok) {
         this.applyConfig(result.value.config)
-      } else {
-        this.error = result.error.message
-      }
-    },
-    async chooseWorkspace() {
-      const bridge = api()
-
-      if (!bridge) {
-        return
+        return true
       }
 
-      const result = await bridge.chooseWorkspace({ version: IPC_VERSION })
-
-      if (result.ok && result.value.path) {
-        this.workspacePath = result.value.path
-      } else if (!result.ok) {
-        this.error = result.error.message
-      }
+      this.error = result.error.message
+      return false
     },
     async createSession() {
       const bridge = api()
 
       if (!bridge || !this.workspacePath) {
-        return
+        return false
       }
 
       this.error = ''
@@ -292,32 +786,47 @@ export const useAgentStore = defineStore('agent', {
 
       if (result.ok) {
         this.sessionId = result.value.sessionId
-        this.messages = []
-        this.tools = []
-      } else {
-        this.error = result.error.message
+        return true
       }
+
+      this.error = result.error.message
+      return false
     },
-    async closeSession() {
+    async closeRuntimeSession() {
       const bridge = api()
+      const sessionId = this.sessionId
 
-      if (!bridge || !this.sessionId) {
-        return
+      this.sessionId = undefined
+      this.activeRunId = undefined
+      this.pendingApproval = undefined
+      this.runStatus = 'idle'
+      this.tools = []
+
+      if (bridge && sessionId) {
+        await bridge.closeSession({
+          version: IPC_VERSION,
+          sessionId,
+        })
       }
-
-      await bridge.closeSession({
-        version: IPC_VERSION,
-        sessionId: this.sessionId,
-      })
     },
     async sendMessage() {
       const bridge = api()
+      const text = this.input.trim()
 
-      if (!bridge || !this.sessionId || !this.input.trim()) {
+      if (!bridge || !text || !this.canSend) {
         return
       }
 
-      const text = this.input.trim()
+      if (!this.sessionId && !(await this.createSession())) {
+        return
+      }
+
+      const sessionId = this.sessionId
+
+      if (!sessionId) {
+        return
+      }
+
       this.input = ''
       this.messages.push({
         id: requestId(),
@@ -325,9 +834,18 @@ export const useAgentStore = defineStore('agent', {
         text,
         reasoning: '',
       })
+      const conversation = this.conversations.find(
+        (item) => item.id === this.activeConversationId,
+      )
+
+      if (conversation?.title === 'New conversation') {
+        conversation.title = text.replace(/\s+/g, ' ').slice(0, 56)
+      }
+
+      this.schedulePersist()
       const result = await bridge.startRun({
         version: IPC_VERSION,
-        sessionId: this.sessionId,
+        sessionId,
         message: text,
         clientRequestId: requestId(),
       })
@@ -351,7 +869,7 @@ export const useAgentStore = defineStore('agent', {
         runId: this.activeRunId,
       })
     },
-    async decideApproval(decision: 'allow' | 'deny') {
+    async decideApproval(decision: 'allow' | 'deny', remember = false) {
       const bridge = api()
 
       if (!bridge || !this.sessionId || !this.pendingApproval) {
@@ -365,6 +883,15 @@ export const useAgentStore = defineStore('agent', {
         runId: pending.runId,
         callId: pending.callId,
         decision,
+        remember:
+          decision === 'allow' && remember && pending.rememberable
+            ? {
+                workspaceScope: 'workspace',
+                expiresAt: new Date(
+                  Date.now() + 30 * 24 * 60 * 60_000,
+                ).toISOString(),
+              }
+            : undefined,
       })
 
       if (result.ok) {
@@ -374,6 +901,10 @@ export const useAgentStore = defineStore('agent', {
       }
     },
     handleAgentEvent(event: AgentEvent) {
+      if (this.sessionId && event.sessionId !== this.sessionId) {
+        return
+      }
+
       switch (event.type) {
         case 'run.status':
           this.runStatus = event.status
@@ -387,12 +918,18 @@ export const useAgentStore = defineStore('agent', {
           if (event.error) {
             this.error = event.error.message
           }
+
+          if (!this.activeRunId) {
+            this.schedulePersist()
+          }
           break
         case 'assistant.text.delta':
           this.assistantMessage(event.runId).text += event.delta
+          this.schedulePersist()
           break
         case 'assistant.reasoning.delta':
           this.assistantMessage(event.runId).reasoning += event.delta
+          this.schedulePersist()
           break
         case 'tool.proposed':
           this.tools.unshift({
@@ -417,7 +954,14 @@ export const useAgentStore = defineStore('agent', {
           this.pendingApproval = {
             runId: event.runId,
             callId: event.callId,
+            kind: event.kind,
+            tool: event.tool,
+            args: event.args,
+            reason: event.reason,
             signals: event.policySignals,
+            diff: event.diff,
+            diffHash: event.diffHash,
+            rememberable: event.rememberable,
             expiresAt: event.expiresAt,
           }
           break

@@ -120,6 +120,15 @@ export const PublicConfigSchema = Type.Object(
             { additionalProperties: false },
           ),
         ),
+        yoloNoticeAccepted: Type.Optional(
+          Type.Object(
+            {
+              version: Type.String({ minLength: 1, maxLength: 64 }),
+              acceptedAt: Type.String({ format: 'date-time' }),
+            },
+            { additionalProperties: false },
+          ),
+        ),
       },
       { additionalProperties: false },
     ),
@@ -243,6 +252,9 @@ export const ConfigSetRequestSchema = Type.Union([
       ),
       traceNoticeAccepted: Type.Optional(
         PublicConfigSchema.properties.privacy.properties.traceNoticeAccepted,
+      ),
+      yoloNoticeAccepted: Type.Optional(
+        PublicConfigSchema.properties.privacy.properties.yoloNoticeAccepted,
       ),
     },
     { additionalProperties: false },

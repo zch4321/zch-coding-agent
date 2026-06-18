@@ -36,10 +36,18 @@ import type {
   ProviderRequestSnapshot,
 } from './provider'
 import { registerReadOnlyTools } from './readonly-tools'
+import { registerFileTools } from './file-tools'
+import {
+  PermissionPipeline,
+  type ApprovalRequest,
+  type HumanApprovalDecision,
+  type RememberApprovalInput,
+} from './permission-pipeline'
+import { ProviderAutoApprover, type AutoApprover } from './auto-approver'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
 
 const SYSTEM_PROMPT =
-  'You are My Coding Agent. Work only inside the selected workspace. In this stage you may only use read-only workspace tools. Never claim to have modified files or run commands.'
+  'You are My Coding Agent. Work only inside the selected workspace and use the provided tools. Explain the reason for every tool call. Never claim a file changed unless the tool result confirms it.'
 const RUN_CANCEL_GRACE_MS = 2_000
 
 type AgentEventDraft = AgentEvent extends infer Event
@@ -57,12 +65,17 @@ export interface SessionManagerOptions {
     config: PublicConfig
     apiKey: string
   }) => LLMProvider
+  autoApproverFactory?: (options: {
+    config: PublicConfig
+    apiKey: string
+  }) => AutoApprover
   onDiagnostic?: (message: string, error?: unknown) => void
 }
 
-interface PendingIngressApproval {
+interface PendingApproval {
   callId: CallId
-  resolve: (decision: 'allow' | 'deny' | 'cancelled') => void
+  expiresAt: number
+  resolve: (decision: HumanApprovalDecision) => void
 }
 
 interface ActiveRun {
@@ -71,7 +84,7 @@ interface ActiveRun {
   controller: AbortController
   done: Promise<void>
   status: RunStatus
-  pendingIngress?: PendingIngressApproval
+  pendingApproval?: PendingApproval
 }
 
 interface SessionState {
@@ -164,10 +177,12 @@ export class SessionManager {
   readonly #getWebContents: () => WebContents | undefined
   readonly #pluginBus: PluginEventBus | undefined
   readonly #providerFactory: SessionManagerOptions['providerFactory']
+  readonly #autoApproverFactory: SessionManagerOptions['autoApproverFactory']
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   readonly #sessions = new Map<SessionId, SessionState>()
   readonly #toolRegistry = new ToolRegistry()
   readonly #toolExecutor: ToolExecutor
+  readonly #permissionPipeline = new PermissionPipeline()
   readonly #ingressFilter = new ContextIngressFilter()
 
   constructor(options: SessionManagerOptions) {
@@ -176,8 +191,10 @@ export class SessionManager {
     this.#getWebContents = options.getWebContents
     this.#pluginBus = options.pluginBus
     this.#providerFactory = options.providerFactory
+    this.#autoApproverFactory = options.autoApproverFactory
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
     registerReadOnlyTools(this.#toolRegistry)
+    registerFileTools(this.#toolRegistry)
     this.#toolExecutor = new ToolExecutor(this.#toolRegistry)
     this.#pluginBus?.setToolRegistrationPort(this.#toolRegistry)
   }
@@ -271,7 +288,7 @@ export class SessionManager {
 
     if (session.activeRun) {
       session.activeRun.controller.abort(new Error('Session closed'))
-      session.activeRun.pendingIngress?.resolve('cancelled')
+      session.activeRun.pendingApproval?.resolve({ decision: 'cancelled' })
       await Promise.race([
         session.activeRun.done.catch(() => undefined),
         delay(RUN_CANCEL_GRACE_MS),
@@ -339,7 +356,7 @@ export class SessionManager {
     }
 
     this.#setRunStatus(session, session.activeRun, 'cancelling')
-    session.activeRun.pendingIngress?.resolve('cancelled')
+    session.activeRun.pendingApproval?.resolve({ decision: 'cancelled' })
     session.activeRun.controller.abort(new Error('Run interrupted'))
     return true
   }
@@ -349,6 +366,7 @@ export class SessionManager {
     runId: RunId
     callId: CallId
     decision: 'allow' | 'deny'
+    remember?: RememberApprovalInput
   }): boolean {
     const session = this.#requireSession(input.sessionId)
     const run = session.activeRun
@@ -356,14 +374,18 @@ export class SessionManager {
     if (
       !run ||
       run.runId !== input.runId ||
-      run.pendingIngress?.callId !== input.callId
+      run.pendingApproval?.callId !== input.callId ||
+      run.pendingApproval.expiresAt <= Date.now()
     ) {
       return false
     }
 
-    const pending = run.pendingIngress
-    run.pendingIngress = undefined
-    pending.resolve(input.decision)
+    const pending = run.pendingApproval
+    run.pendingApproval = undefined
+    pending.resolve({
+      decision: input.decision,
+      remember: input.decision === 'allow' ? input.remember : undefined,
+    })
     return true
   }
 
@@ -617,35 +639,88 @@ export class SessionManager {
 
       let result: ToolResult
       let approvedBy = 'none'
+      let policySignals: JsonValue[] = []
+      let diffHash: string | undefined
       const startedAt = performance.now()
-      const prepared = this.#toolExecutor.prepareReadOnlyCall(
-        session.sessionId,
-        run.runId,
-        call,
-      )
+      const inspected = this.#toolExecutor.inspectCall(call)
 
-      if (!prepared.ok) {
-        result = prepared.result
+      if (!inspected.ok) {
+        result = inspected.result
       } else {
-        const hook = await this.#pluginBus?.emit('beforeToolCall', {
-          version: 1,
+        const config = this.#configStore.getPublicConfig()
+        const apiKey = await this.#configStore.getDeepSeekApiKey()
+        const autoApprover =
+          session.mode === 'auto' && apiKey
+            ? (this.#autoApproverFactory?.({ config, apiKey }) ??
+              new ProviderAutoApprover(
+                new DeepSeekProvider({
+                  baseURL: config.providers.deepseek.baseURL,
+                  model: config.approval.approverModel,
+                  reasoning: 'off',
+                  apiKey,
+                }),
+              ))
+            : undefined
+        const authorization = await this.#permissionPipeline.authorize({
           sessionId: session.sessionId,
           runId: run.runId,
+          workspace: session.workspace,
+          mode: session.mode,
           call,
-          currentRisk: prepared.definition.defaultRisk,
+          definition: inspected.definition,
+          config,
+          signal: run.controller.signal,
+          autoApprover,
+          beforeToolCall: (currentRisk) =>
+            this.#pluginBus?.emit('beforeToolCall', {
+              version: 1,
+              sessionId: session.sessionId,
+              runId: run.runId,
+              call,
+              currentRisk,
+            }) ?? Promise.resolve(undefined),
+          requestHumanApproval: (request) =>
+            this.#requestToolApproval(session, run, request),
         })
+        policySignals = toJsonValue(authorization.policySignals) as JsonValue[]
 
-        if (hook && (!hook.allow || hook.risk !== 'unchanged')) {
-          result = {
-            status: 'denied',
-            message:
-              hook.reason ??
-              'A security hook blocked or raised the risk of this P2 tool call',
-          }
+        if (authorization.autoDecision) {
+          await session.logger.write({
+            type: 'approval',
+            sessionId: session.sessionId,
+            runId: run.runId,
+            callId: call.id,
+            policySignals: toJsonValue(
+              authorization.policySignals,
+            ) as JsonValue[],
+            mode: session.mode,
+            approver: 'model',
+            decision: authorization.autoDecision.decision,
+            reason: authorization.autoDecision.note,
+          })
+        }
+
+        if (!authorization.ok) {
+          result = authorization.result
         } else {
-          approvedBy = prepared.approvedCall.approvedBy
+          if (authorization.rememberedRule) {
+            const latest = this.#configStore.getPublicConfig()
+            await this.#configStore.update({
+              version: 1,
+              kind: 'permission',
+              builtinPolicies: latest.permission.builtinPolicies,
+              rememberedRules: [
+                ...latest.permission.rememberedRules,
+                authorization.rememberedRule,
+              ].slice(-256),
+              sensitiveData: latest.permission.sensitiveData,
+            })
+          }
+
+          approvedBy = authorization.approvedCall.approvedBy
+          diffHash = authorization.approvedCall.diffHash
           result = await this.#toolExecutor.execute(
-            prepared.approvedCall,
+            authorization.approvedCall,
             {
               sessionId: session.sessionId,
               runId: run.runId,
@@ -667,6 +742,8 @@ export class SessionManager {
         args: call.args,
         result: toJsonValue(result),
         approvedBy,
+        policySignals,
+        diffHash,
         durationMs: performance.now() - startedAt,
         totalBytes: 'totalBytes' in result ? result.totalBytes : undefined,
         truncated: 'truncated' in result ? result.truncated : undefined,
@@ -707,12 +784,122 @@ export class SessionManager {
     }
   }
 
+  async #requestToolApproval(
+    session: SessionState,
+    run: ActiveRun,
+    request: ApprovalRequest,
+  ): Promise<HumanApprovalDecision> {
+    await this.#pluginBus
+      ?.emit('beforeApproval', {
+        version: 1,
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: request.call.id,
+        policySignals: request.policySignals,
+      })
+      .catch((error: unknown) =>
+        this.#onDiagnostic('Plugin beforeApproval failed', error),
+      )
+    await session.logger.write({
+      type: 'approval',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: request.call.id,
+      policySignals: toJsonValue(request.policySignals) as JsonValue[],
+      mode: session.mode,
+      approver: 'human',
+      decision: 'requested',
+      reason: request.call.reason,
+    })
+    this.#setRunStatus(session, run, 'awaiting_approval')
+    this.#emit(session, {
+      type: 'approval.requested',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: request.call.id,
+      kind: 'tool',
+      tool: request.call.toolId,
+      args: request.call.args,
+      reason: request.call.reason,
+      policySignals: request.policySignals,
+      diff: request.diff,
+      diffHash: request.diffHash,
+      rememberable: request.rememberable,
+      expiresAt: request.expiresAt,
+    })
+
+    const decision = await this.#awaitApproval(
+      run,
+      request.call.id,
+      request.expiresAt,
+    )
+
+    await session.logger.write({
+      type: 'approval',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: request.call.id,
+      policySignals: toJsonValue(request.policySignals) as JsonValue[],
+      mode: session.mode,
+      approver: 'human',
+      decision: decision.decision,
+      reason:
+        decision.decision === 'allow'
+          ? 'Approved by user'
+          : decision.decision === 'deny'
+            ? 'Denied by user'
+            : 'Approval cancelled',
+    })
+    this.#setRunStatus(session, run, 'running_tools')
+    return decision
+  }
+
+  #awaitApproval(
+    run: ActiveRun,
+    callId: CallId,
+    expiresAt: string,
+  ): Promise<HumanApprovalDecision> {
+    return new Promise<HumanApprovalDecision>((resolve) => {
+      const finish = (decision: HumanApprovalDecision) => {
+        if (run.pendingApproval?.callId === callId) {
+          run.pendingApproval = undefined
+        }
+        clearTimeout(timer)
+        resolve(decision)
+      }
+      const pending: PendingApproval = {
+        callId,
+        expiresAt: new Date(expiresAt).getTime(),
+        resolve: finish,
+      }
+      run.pendingApproval = pending
+      const abort = () => {
+        if (run.pendingApproval === pending) {
+          finish({ decision: 'cancelled' })
+        }
+      }
+      run.controller.signal.addEventListener('abort', abort, { once: true })
+      const timer = setTimeout(
+        () => finish({ decision: 'cancelled' }),
+        Math.max(0, pending.expiresAt - Date.now()),
+      )
+    }).finally(() => {
+      if (run.pendingApproval?.callId === callId) {
+        run.pendingApproval = undefined
+      }
+    })
+  }
+
   async #filterToolResultForProvider(
     session: SessionState,
     run: ActiveRun,
     call: ToolCall,
     result: ToolResult,
   ): Promise<ToolResult> {
+    if (session.mode === 'yolo') {
+      return result
+    }
+
     const config = this.#configStore.getPublicConfig()
     const decision = this.#ingressFilter.evaluate(
       config.permission.sensitiveData,
@@ -751,24 +938,20 @@ export class SessionManager {
       sessionId: session.sessionId,
       runId: run.runId,
       callId: call.id,
+      kind: 'context',
+      tool: call.toolId,
+      args: call.args,
+      reason: decision.summary,
       policySignals: decision.signals,
+      rememberable: false,
       expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
     })
 
-    const approval = await new Promise<'allow' | 'deny' | 'cancelled'>(
-      (resolve) => {
-        const pending = { callId: call.id, resolve }
-        run.pendingIngress = pending
-        const abort = () => {
-          if (run.pendingIngress === pending) {
-            run.pendingIngress = undefined
-            resolve('cancelled')
-          }
-        }
-        run.controller.signal.addEventListener('abort', abort, { once: true })
-      },
+    const approval = await this.#awaitApproval(
+      run,
+      call.id,
+      new Date(Date.now() + 10 * 60_000).toISOString(),
     )
-    run.pendingIngress = undefined
 
     await session.logger.write({
       type: 'approval',
@@ -778,16 +961,17 @@ export class SessionManager {
       policySignals: toJsonValue(decision.signals) as JsonValue[],
       mode: config.permission.sensitiveData.mode,
       approver: 'human',
-      decision: approval,
-      reason: approval === 'allow' ? 'Approved by user' : 'Denied by user',
+      decision: approval.decision,
+      reason:
+        approval.decision === 'allow' ? 'Approved by user' : 'Denied by user',
     })
 
-    if (approval === 'cancelled') {
+    if (approval.decision === 'cancelled') {
       throw run.controller.signal.reason ?? new Error('Run cancelled')
     }
 
     this.#setRunStatus(session, run, 'running_tools')
-    return approval === 'allow' ? result : decision.sanitizedResult
+    return approval.decision === 'allow' ? result : decision.sanitizedResult
   }
 
   async #finishRun(

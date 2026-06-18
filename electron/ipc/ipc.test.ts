@@ -44,6 +44,8 @@ const validPayloads: {
     lastOpened: 'F:/workspace',
   },
   'workspace:choose': { version: 1 },
+  'workspace:list-directory': { version: 1, path: '.' },
+  'workspace:read-file': { version: 1, path: 'README.md' },
   'session:create': {
     version: 1,
     workspace: 'F:/workspace',

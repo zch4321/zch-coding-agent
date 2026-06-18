@@ -1,7 +1,7 @@
 # 架构设计文档 · My Coding Agent
 
 > 状态：草案 v0.2 · 最后更新 2026-06-15
-> 配套：[`requirements.md`](./requirements.md)（做什么）。本文档讲「怎么搭」。
+> 配套：[`requirements.md`](./requirements.md)（做什么）、[`frontend-spec.md`](./frontend-spec.md)（前端信息架构与验收）。本文档讲「怎么搭」。
 
 ---
 

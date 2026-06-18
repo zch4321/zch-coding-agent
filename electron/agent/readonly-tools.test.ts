@@ -4,6 +4,8 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { ToolCall } from '../tools/types'
+import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
+import { PermissionPipeline } from './permission-pipeline'
 import { registerReadOnlyTools } from './readonly-tools'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
 
@@ -27,6 +29,7 @@ describe('read-only tools', () => {
       workspace: { canonicalPath: root },
     }
     const signal = new AbortController().signal
+    const pipeline = new PermissionPipeline()
 
     const calls: ToolCall[] = [
       {
@@ -56,15 +59,27 @@ describe('read-only tools', () => {
     ]
 
     for (const call of calls) {
-      const prepared = executor.prepareReadOnlyCall(
-        context.sessionId,
-        context.runId,
-        call,
-      )
+      const inspected = executor.inspectCall(call)
 
-      expect(prepared.ok).toBe(true)
+      expect(inspected.ok).toBe(true)
 
-      if (prepared.ok) {
+      if (inspected.ok) {
+        const prepared = await pipeline.authorize({
+          ...context,
+          workspace: root,
+          mode: 'readonly',
+          call,
+          definition: inspected.definition,
+          config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+          signal,
+          requestHumanApproval: async () => ({ decision: 'deny' }),
+        })
+        expect(prepared.ok).toBe(true)
+
+        if (!prepared.ok) {
+          continue
+        }
+
         const result = await executor.execute(
           prepared.approvedCall,
           context,
@@ -80,32 +95,34 @@ describe('read-only tools', () => {
     const registry = new ToolRegistry()
     registerReadOnlyTools(registry)
     const executor = new ToolExecutor(registry)
-    const prepared = executor.prepareReadOnlyCall(
-      'session-test' as SessionId,
-      'run-test' as RunId,
-      {
-        id: 'call-escape' as CallId,
-        toolId: 'read_file',
-        args: { path: '../outside.txt' },
-        reason: '',
-      },
-    )
+    const call: ToolCall = {
+      id: 'call-escape' as CallId,
+      toolId: 'read_file',
+      args: { path: '../outside.txt' },
+      reason: '',
+    }
+    const inspected = executor.inspectCall(call)
 
-    expect(prepared.ok).toBe(true)
+    expect(inspected.ok).toBe(true)
 
-    if (prepared.ok) {
-      const result = await executor.execute(
-        prepared.approvedCall,
-        {
-          sessionId: 'session-test' as SessionId,
-          runId: 'run-test' as RunId,
-          workspace: { canonicalPath: root },
+    if (inspected.ok) {
+      const prepared = await new PermissionPipeline().authorize({
+        sessionId: 'session-test' as SessionId,
+        runId: 'run-test' as RunId,
+        workspace: root,
+        mode: 'readonly',
+        call,
+        definition: inspected.definition,
+        config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+        signal: new AbortController().signal,
+        requestHumanApproval: async () => ({ decision: 'deny' }),
+      })
+      expect(prepared).toMatchObject({
+        ok: false,
+        result: {
+          status: 'error',
+          code: 'PATH_OUTSIDE_WORKSPACE',
         },
-        new AbortController().signal,
-      )
-      expect(result).toMatchObject({
-        status: 'error',
-        code: 'PATH_OUTSIDE_WORKSPACE',
       })
     }
   })

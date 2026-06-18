@@ -1,5 +1,7 @@
 # 前端设计规划 · My Coding Agent
 
+> **历史草案**：本文档保留早期 Pencil 视觉探索，不再作为实现与验收依据。当前权威规范见 [`frontend-spec.md`](./frontend-spec.md)。其中 Terminal 已改为 P4 对话区底部面板，Browser 已改为 Post-MVP，右侧 Artifact 在 P3 仅包含 Files/Diff。
+
 > 状态：草案 v0.1 · 最后更新 2026-06-17
 > 配套：[`requirements.md`](./requirements.md)、[`architecture.md`](./architecture.md)、[`implementation-plan.md`](./implementation-plan.md)
 

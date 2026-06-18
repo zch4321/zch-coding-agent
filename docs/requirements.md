@@ -1,7 +1,7 @@
 # 需求文档 · My Coding Agent
 
 > 状态：草案 v0.2 · 最后更新 2026-06-15
-> 本文档定义「做什么」。技术怎么做见 [`architecture.md`](./architecture.md)。
+> 本文档定义「做什么」。技术怎么做见 [`architecture.md`](./architecture.md)，前端信息架构与验收标准见 [`frontend-spec.md`](./frontend-spec.md)。
 
 ---
 
@@ -269,15 +269,26 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - 推理过程（reasoning）可折叠展示。
 - 展示 run 状态：运行中、等待审批、取消中、失败、完成；等待审批期间禁止重复提交同一决定。
 
+#### 4.1.1 项目与对话导航
+- UI 中一个项目对应一个 workspace，不重复展示两个概念。
+- 左侧项目侧栏提供新对话、对话搜索，以及项目下的二级对话列表；不引入 Task 概念。
+- 对话保存本地标题、消息历史、所属项目、创建/更新时间和最近使用的模型/权限模式。
+- 搜索只在本地检索对话标题、用户消息和 Agent 文本，不检索工作区文件、工具原始输出、reasoning 或 trace，不访问 Provider。
+- 首次发送消息时自动创建 runtime Session；Session/Run ID 不作为常驻产品信息展示。
+- 正式 UI 不得使用硬编码项目、对话或工具活动作为占位数据。
+
 ### 4.2 终端面板
 - 内嵌终端组件，订阅 PTY 原始流，**人类可观察、可输入**。
 - 支持多终端（`terminal_list` 对应多个 tab/面板）。
 - ANSI 着色渲染。
+- 对话输入区位于对话区内部，只占中间对话工作列宽度，不跨项目侧栏或右侧 Artifact 侧栏。
+- Terminal 位于完整对话区之后、对话输入区下方的可调整底部面板，只占对话工作列宽度，不出现在对话输入区或右侧 Artifact 侧栏。
+- 顶栏提供底部面板开关，并支持 `Ctrl+J` / `Ctrl+\`` 切换。
 
 ### 4.3 Diff 预览
 - `edit_file` / `write_file` 的变更在执行前/后以 diff 形式预览。
 - 审批绑定变更前文件 hash 与拟写入内容 hash；若文件在审批后发生变化，原批准失效并重新计算 diff。
-- 内嵌代码编辑器组件（Monaco 或 CodeMirror，包体积权衡后定）。
+- 使用有界只读 Diff viewer，支持语法高亮、截断提示和审批状态；P3 不引入 Monaco/CodeMirror 等完整编辑器。
 
 ### 4.4 UI 组件库
 - 采用 **Naive UI**（极简风格，按需引入，TS 友好）。
@@ -375,6 +386,7 @@ session.end     { ts }
 - 四档权限模式 + 双模型审批（审批模型可先用 DeepSeek 小模型）
 - 执行不变量 + 可扩展风险黑名单 + 确定性策略
 - Chat UI（Naive UI，流式 + Markdown + 工具可视化）
+- 本地项目/对话导航、对话历史和消息搜索
 - 终端面板（人类可交互）
 - Diff 预览
 - JSONL 完整调试 trace（默认关闭）+ 离线回放引擎 + cache usage/时延统计
@@ -388,7 +400,7 @@ session.end     { ts }
 - **MCP 客户端**（stdio + Streamable HTTP，含 server 生命周期管理）
 - 插件加载器
 - 日志清理 / 回放可视化 GUI（MVP 先提供回放引擎和基础入口）
-- 多会话管理 UI
+- 云端对话同步、跨设备历史和团队共享项目
 
 ---
 

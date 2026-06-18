@@ -117,6 +117,9 @@ export class ConfigStore {
           traceNoticeAccepted: request.traceNoticeAccepted
             ? structuredClone(request.traceNoticeAccepted)
             : next.privacy.traceNoticeAccepted,
+          yoloNoticeAccepted: request.yoloNoticeAccepted
+            ? structuredClone(request.yoloNoticeAccepted)
+            : next.privacy.yoloNoticeAccepted,
         }
         break
       case 'workspace':

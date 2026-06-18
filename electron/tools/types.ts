@@ -1,6 +1,7 @@
 import type { Static, TSchema } from '@sinclair/typebox'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
+import type { ApprovedToolCall } from '../agent/permission-pipeline'
 
 export type Effect =
   | 'filesystem.read'
@@ -42,7 +43,7 @@ export interface ToolExecutionContext {
     canonicalPath: string
   }
   signal: AbortSignal
-  approvedCall: unknown
+  approvedCall: ApprovedToolCall
 }
 
 export type ToolResult =

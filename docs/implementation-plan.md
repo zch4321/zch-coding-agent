@@ -1,7 +1,7 @@
 # 实现计划 · My Coding Agent
 
 > 状态：草案 v0.2 · 最后更新 2026-06-15
-> 配套：[`requirements.md`](./requirements.md)（做什么）、[`architecture.md`](./architecture.md)（怎么搭）。
+> 配套：[`requirements.md`](./requirements.md)（做什么）、[`architecture.md`](./architecture.md)（怎么搭）、[`frontend-spec.md`](./frontend-spec.md)（前端信息架构与验收）。
 > 本文档定义实施顺序、阶段边界和可执行验收标准；需求与架构文档优先于本文档。
 
 ---
@@ -242,6 +242,14 @@
 - [ ] **P3-7 `beforeToolCall` 接线**
   - 在调用有效性检查之后、最终审批决定之前调用。
   - hook 只能阻断或提高风险；不能修复无效调用、降低风险或直接构造 ApprovedToolCall。
+- [ ] **P3-8 前端工作台与本地对话导航**
+  - 按 [`frontend-spec.md`](./frontend-spec.md) 实现 frameless 顶栏、项目侧栏、对话区、对话输入区和只含 Files/Diff 的 Artifact 侧栏。
+  - 一个项目映射一个 workspace；项目下持久化本地对话标题、消息历史、创建/更新时间、模型和权限模式，不引入 Task 概念。
+  - 左侧只提供新对话、搜索和项目下二级对话列表；移除假对话、Share、Browser、Terminal tab 和其他无行为占位。
+  - 对话搜索只索引标题、用户消息和 Agent 文本，不访问 Provider，不索引工作区文件、工具原始输出、reasoning 或 trace。
+  - 首次发送消息自动创建 runtime Session；Settings 不把 Start/Close Session 作为主流程。
+  - Files Explorer 通过独立受限 IPC 懒加载真实 workspace；Explorer、文件内容和 Diff 使用 tab 切换，不同时拥挤展示文件树。
+  - 顶栏可恢复被折叠的项目侧栏和 Artifact 侧栏；960×640 下全部 P3 功能仍可访问。
 
 ### 测试点
 
@@ -254,6 +262,10 @@
 - **T-P3-7**：重复、过期、跨 session 的审批决定均被拒。
 - **T-P3-8**：ApprovalDialog 中的 prompt injection 文本只作为文本展示。
 - **T-P3-9**：`beforeToolCall` 尝试放行无效调用或降低风险时被忽略并记录诊断。
+- **T-P3-10**：正式 UI 的硬编码示例项目、示例对话、无行为按钮和未到阶段的 Browser/Terminal tab 数量为 0。
+- **T-P3-11**：本地搜索可按标题和消息命中并打开对话；搜索期间 Provider、文件检索工具和 trace reader 调用次数均为 0。
+- **T-P3-12**：新对话首次发送自动创建 Session；切换、删除和关闭对话后 active Run、pending approval 和 listener 均正确释放。
+- **T-P3-13**：Explorer 独立加载 workspace，文件内容与 Diff tab 切换时文件树不同时展示；960×640 下侧栏均可通过顶栏恢复。
 
 ### 验收标准
 
@@ -263,6 +275,8 @@
 4. 4 类写入中断后目标文件与操作前逐字节相等，且无残留临时文件。
 5. 至少 10 类凭据样本在 `confirm` 下均暂停进入 LLM 上下文。
 6. Auto 模式端到端 edit 成功，trace 包含 policySignals、approver、diff hash 和 approvedBy。
+7. 项目下对话列表、历史恢复和本地搜索端到端成功，搜索过程中外部请求数为 0。
+8. P3 界面只展示可用能力；Files/Diff、审批和响应式布局逐项通过 [`frontend-spec.md`](./frontend-spec.md) §16。
 
 ---
 
@@ -288,7 +302,8 @@
   - PTY 属于 session；中断 run 不关闭 PTY，会话关闭或应用退出必须关闭。
   - 原始 ANSI 输出进入 UI；有限 ByteRingBuffer 保存 scrollback；给 LLM 的 read 结果 strip ANSI。
 - [ ] **P4-4 终端 UI**
-  - xterm.js 多 tab、输入、resize、原始 ANSI 渲染。
+  - 对话输入区位于对话区内部且只占中间对话工作列宽度；Terminal 位于完整对话区之后、对话输入区下方，只占对话工作列宽度，不出现在 Artifact 侧栏；顶栏和 `Ctrl+J` / `Ctrl+\`` 可切换。
+  - xterm.js 多 tab、输入、resize、折叠/最大化和原始 ANSI 渲染。
   - terminal event 带 seq；丢片后请求有限快照并显示状态。
 - [ ] **P4-5 Native Module 与打包**
   - 配置 `@electron/rebuild`、electron-builder `asarUnpack` 和 Windows x64 native module 打包。
@@ -404,7 +419,7 @@ P0-P5 全部验收标准通过，并满足：
 - MCP 客户端。
 - 插件加载器和插件市场。
 - 完整日志清理 GUI、完整 trace 回放/Cache 分析可视化 GUI。
-- 多会话管理 UI。
+- 云端对话同步、跨设备历史和团队共享项目。
 - Agent Runtime 迁移到 `utilityProcess`。
 - macOS/Linux 正式打包与发布门禁。
 
@@ -417,6 +432,6 @@ P0-P5 全部验收标准通过，并满足：
 | P0 | §1.3、§7、§14、§15.3 | §3.7、§7 |
 | P1 | §2、§7、§10、§11、§12 | §5、§6、§7 |
 | P2 | §3、§4、§7、§9.3 | §2.1、§2.2.2、§2.3、§2.4、§3.6、§4.1 |
-| P3 | §2.1、§9、§13 | §2.2.1、§3、§4.3、§4.6 |
+| P3 | §2.1、§9、§13 | §2.2.1、§3、§4.1.1、§4.3、§4.6 |
 | P4 | §2.1、§8、§14.1 | §2.2.3、§2.2.4、§4.2、§7 |
 | P5 | §5、§8、§11.4 | §2.5、§4.5、§5.3 |

@@ -126,6 +126,58 @@ export const IPC_CONTRACTS = {
       ),
     ),
   },
+  'workspace:list-directory': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          path: Type.String({ minLength: 1, maxLength: 4_096 }),
+          entries: Type.Array(
+            Type.Object(
+              {
+                path: Type.String({ minLength: 1, maxLength: 4_096 }),
+                name: Type.String({ minLength: 1, maxLength: 1_024 }),
+                type: Type.Union([
+                  Type.Literal('file'),
+                  Type.Literal('directory'),
+                ]),
+              },
+              { additionalProperties: false },
+            ),
+            { maxItems: 1_000 },
+          ),
+          truncated: Type.Boolean(),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'workspace:read-file': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        path: Type.String({ minLength: 1, maxLength: 4_096 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          path: Type.String({ minLength: 1, maxLength: 4_096 }),
+          content: Type.String({ maxLength: 500_000 }),
+          totalBytes: Type.Integer({ minimum: 0 }),
+          truncated: Type.Boolean(),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
   'session:create': {
     payload: Type.Object(
       {
@@ -186,7 +238,18 @@ export const IPC_CONTRACTS = {
         runId: RunIdSchema,
         callId: CallIdSchema,
         decision: Type.Union([Type.Literal('allow'), Type.Literal('deny')]),
-        rememberRule: Type.Optional(JsonValueSchema),
+        remember: Type.Optional(
+          Type.Object(
+            {
+              workspaceScope: Type.Union([
+                Type.Literal('workspace'),
+                Type.Literal('global'),
+              ]),
+              expiresAt: Type.Optional(Type.String({ format: 'date-time' })),
+            },
+            { additionalProperties: false },
+          ),
+        ),
       },
       { additionalProperties: false },
     ),
