@@ -31,3 +31,5 @@ test-results
 *.sw?
 .codewhale
 docs/code-review-report
+
+.env
