@@ -109,6 +109,9 @@ export const DEFAULT_APP_CONFIG = {
 export function toPublicConfig(
   config: AppConfig,
   credentialConfigured: boolean,
+  credentialSource: PublicConfig['providers']['deepseek']['credentialSource'] = credentialConfigured
+    ? 'safe-storage'
+    : 'none',
 ): PublicConfig {
   return {
     schemaVersion: 1,
@@ -124,6 +127,7 @@ export function toPublicConfig(
           config.providers.deepseek.modelOverrides,
         ),
         credentialConfigured,
+        credentialSource,
       },
     },
     approval: structuredClone(config.approval),

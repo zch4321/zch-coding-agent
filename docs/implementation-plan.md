@@ -23,6 +23,8 @@
 
 ### 全阶段工程基线
 
+- 真实 Provider 测试只能通过显式 `npm run test:real` 启动，凭据从 `DEEPSEEK_API_KEY` 注入主进程；默认单测和 E2E 不访问真实端点，也不得把该变量传给工具子进程。
+
 - P0 建立 `lint`、`format:check`、`typecheck`、`test`、`test:e2e`、`build` 脚本。
 - 所有资源型模块提供 `dispose()`，统一注册到应用级 `Disposer`。
 - 所有异步边界把错误转换为版本化结构化错误或事件，不允许未捕获异常直接结束主窗口。
@@ -353,30 +355,30 @@
 
 ### 功能清单
 
-- [ ] **P5-1 SkillsManager**
+- [x] **P5-1 SkillsManager**
   - 扫描 `userData/skills/*.md`，拒绝 symlink 和超大文件；使用安全 YAML schema，禁止自定义 tag。
   - 格式错误、缺字段和重复 name 跳过并记诊断，不中断启动。
   - 计算 sha256，与 `index.json` 的 source/enabled/trustedAt 合并；首次发现的手工文件记录为 `source:manual` 且默认 `enabled=false`，只索引已启用 skill。
   - 摘要按名称排序注入 system prompt，受总字符/token 上限约束。
-- [ ] **P5-2 `read_skill`**
+- [x] **P5-2 `read_skill`**
   - 仅按内存索引的精确 name 读取，不做路径拼接。
   - 不触发模型/人工审批，但仍经过 registry schema、索引归属、输出上限和只读 ApprovedToolCall 快速路径。
   - 返回正文时附 source 和 sha256，trace 可定位实际版本。
-- [ ] **P5-3 安装与启用**
+- [x] **P5-3 安装与启用**
   - 支持直接放文件后 refresh、HTTPS URL 下载、主进程文件选择器上传。
   - URL 每次跳转都重新解析并限制 DNS/远端地址、重定向、超时和大小；拒绝 loopback、link-local、RFC1918、ULA、非 HTTPS 和 URL 内嵌凭据。
   - 下载流实际连接地址也必须通过私网检查，避免只做预解析产生 DNS rebinding 窗口。
   - 安装使用原子写，重复 name 不覆盖；默认 `enabled=false`。
   - 实现 list/install/choose/refresh/setEnabled IPC 及管理 UI。
-- [ ] **P5-4 Trace Replay 与 Fork**
+- [x] **P5-4 Trace Replay 与 Fork**
   - offline replay 从 trace reader + reducer 重建 UI 状态，支持 headless 测试和基础调试入口，不实现完整可视化管理 GUI。
   - fork 从任一 `llm.request` 恢复完整 providerRequest，用当前凭据重新发送，写入新 trace 和 `forkedFromEventId`。
   - 历史工具结果只作为已记录请求上下文使用，默认不重新执行任何历史工具；新响应提出的新工具调用仍按正常权限流程处理。
-- [ ] **P5-5 Cache 与时延统计**
+- [x] **P5-5 Cache 与时延统计**
   - 汇总 Provider 原始 usage、cache hit/miss token、TTFT、总延迟、请求字节数和 `prefixFingerprints[]`。
   - cache 是否命中只采用 Provider usage，不根据本地 hash 推断。
   - 提供基础统计入口；完整分析可视化后移。
-- [ ] **P5-6 终端与错误体验收尾**
+- [x] **P5-6 终端与错误体验收尾**
   - 完成多 tab、重连快照、seq 丢片提示和资源关闭状态。
   - Provider、工具、日志、Skill 和 replay 错误均有用户可见且不泄密的结构化展示。
   - 提供受控的“打开日志目录”和“清理已关闭 trace”基础动作；完整日志管理 GUI 继续后移。

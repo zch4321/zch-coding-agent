@@ -9,6 +9,12 @@ import {
   TRACE_NOTICE_VERSION,
   YOLO_NOTICE_VERSION,
 } from '../../shared/notices'
+import type { SkillDiagnostic, SkillSummary } from '../../shared/skills'
+import type {
+  ProviderStats,
+  ReplaySummary,
+  TraceInfo,
+} from '../../shared/trace'
 
 type Role = 'user' | 'assistant'
 
@@ -41,6 +47,7 @@ export interface PendingApproval {
   diff?: string
   diffHash?: string
   rememberable: boolean
+  rememberArgConstraints?: unknown
   expiresAt: string
 }
 
@@ -158,6 +165,7 @@ export const useAgentStore = defineStore('agent', {
     traceNoticeVersion: '',
     yoloNoticeVersion: '',
     credentialConfiguredValue: false,
+    credentialSource: 'none' as 'none' | 'safe-storage' | 'environment',
     builtinPolicies: true,
     rememberedRules: [] as UiRememberedRule[],
     workspacePath: '',
@@ -202,6 +210,17 @@ export const useAgentStore = defineStore('agent', {
       retentionDays: 14,
       maxTotalMegabytes: 100,
     },
+    skills: [] as SkillSummary[],
+    skillDiagnostics: [] as SkillDiagnostic[],
+    skillUrl: '',
+    skillsLoading: false,
+    traces: [] as TraceInfo[],
+    selectedTraceId: undefined as string | undefined,
+    replaySummary: undefined as ReplaySummary | undefined,
+    providerStats: undefined as ProviderStats | undefined,
+    forkEventId: '',
+    traceActionMessage: '',
+    tracesLoading: false,
     unsubscribers: [] as Array<() => void>,
   }),
   getters: {
@@ -236,6 +255,16 @@ export const useAgentStore = defineStore('agent', {
       state.modelProfiles.find(
         (model) => model.id === state.providerForm.model,
       ),
+    traceOptions: (state) =>
+      state.traces.map((trace) => ({
+        label: `${trace.traceId} · ${trace.closed ? 'closed' : 'active'} · ${trace.eventCount} events`,
+        value: trace.traceId,
+      })),
+    forkPointOptions: (state) =>
+      (state.replaySummary?.forkPoints ?? []).map((point) => ({
+        label: `#${point.seq} · ${point.runId} · ${point.eventId}`,
+        value: point.eventId,
+      })),
   },
   actions: {
     async initialize() {
@@ -292,6 +321,7 @@ export const useAgentStore = defineStore('agent', {
       }
 
       await this.loadProviderModels(false)
+      await this.loadSkills(false)
 
       this.restoreActiveConversation()
       this.unsubscribers.push(
@@ -322,6 +352,7 @@ export const useAgentStore = defineStore('agent', {
       this.yoloNoticeVersion = config.privacy.yoloNoticeAccepted?.version ?? ''
       this.credentialConfiguredValue =
         config.providers.deepseek.credentialConfigured
+      this.credentialSource = config.providers.deepseek.credentialSource
       this.builtinPolicies = config.permission.builtinPolicies
       this.rememberedRules = toUiRememberedRules(config)
       this.providerForm.baseURL = config.providers.deepseek.baseURL
@@ -850,6 +881,244 @@ export const useAgentStore = defineStore('agent', {
         this.error = result.error.message
       }
     },
+    applySkillList(value: {
+      skills: SkillSummary[]
+      diagnostics: SkillDiagnostic[]
+    }) {
+      this.skills = value.skills
+      this.skillDiagnostics = value.diagnostics
+    },
+    async loadSkills(refresh = false) {
+      const bridge = api()
+
+      if (!bridge || this.skillsLoading) {
+        return
+      }
+
+      this.skillsLoading = true
+
+      try {
+        const result = refresh
+          ? await bridge.refreshSkills({ version: IPC_VERSION })
+          : await bridge.listSkills({ version: IPC_VERSION })
+
+        if (result.ok) {
+          this.applySkillList(result.value)
+        } else {
+          this.error = result.error.message
+        }
+      } finally {
+        this.skillsLoading = false
+      }
+    },
+    async installSkillFromUrl() {
+      const bridge = api()
+      const url = this.skillUrl.trim()
+
+      if (!bridge || !url) {
+        return
+      }
+
+      this.skillsLoading = true
+
+      try {
+        const result = await bridge.installSkillFromUrl({
+          version: IPC_VERSION,
+          url,
+        })
+
+        if (result.ok) {
+          this.skillUrl = ''
+          this.skillsLoading = false
+          await this.loadSkills(true)
+          return
+        } else {
+          this.error = result.error.message
+        }
+      } finally {
+        this.skillsLoading = false
+      }
+    },
+    async chooseAndInstallSkill() {
+      const bridge = api()
+
+      if (!bridge) {
+        return
+      }
+
+      const result = await bridge.chooseAndInstallSkill({
+        version: IPC_VERSION,
+      })
+
+      if (result.ok && result.value.installed) {
+        await this.loadSkills(true)
+      } else if (!result.ok) {
+        this.error = result.error.message
+      }
+    },
+    async setSkillEnabled(name: string, enabled: boolean) {
+      const bridge = api()
+
+      if (!bridge) {
+        return
+      }
+
+      const result = await bridge.setSkillEnabled({
+        version: IPC_VERSION,
+        name,
+        enabled,
+      })
+
+      if (result.ok && result.value.updated) {
+        await this.loadSkills(false)
+      } else if (!result.ok) {
+        this.error = result.error.message
+      }
+    },
+    async loadTraceData() {
+      const bridge = api()
+
+      if (!bridge || this.tracesLoading) {
+        return
+      }
+
+      this.tracesLoading = true
+      this.traceActionMessage = ''
+
+      try {
+        const [list, stats] = await Promise.all([
+          bridge.listTraces({ version: IPC_VERSION }),
+          bridge.getTraceStats({ version: IPC_VERSION }),
+        ])
+
+        if (list.ok) {
+          this.traces = list.value
+
+          if (
+            this.selectedTraceId &&
+            !this.traces.some((trace) => trace.traceId === this.selectedTraceId)
+          ) {
+            this.selectedTraceId = undefined
+            this.replaySummary = undefined
+          }
+        } else {
+          this.error = list.error.message
+        }
+
+        if (stats.ok) {
+          this.providerStats = stats.value
+        } else {
+          this.error = stats.error.message
+        }
+      } finally {
+        this.tracesLoading = false
+      }
+    },
+    async replaySelectedTrace() {
+      const bridge = api()
+
+      if (!bridge || !this.selectedTraceId) {
+        return
+      }
+
+      const result = await bridge.replayTrace({
+        version: IPC_VERSION,
+        traceId: this.selectedTraceId,
+      })
+
+      if (result.ok) {
+        this.replaySummary = result.value
+        this.traceActionMessage = `Replayed ${result.value.lastSeq} events without executing tools.`
+      } else {
+        this.error = result.error.message
+      }
+    },
+    async forkSelectedTrace() {
+      const bridge = api()
+
+      if (
+        !bridge ||
+        !this.selectedTraceId ||
+        !this.forkEventId.trim() ||
+        !this.replaySummary?.workspace
+      ) {
+        return
+      }
+
+      const prepared = await bridge.forkTrace({
+        version: IPC_VERSION,
+        traceId: this.selectedTraceId,
+        eventId: this.forkEventId.trim() as import('../../shared/ids').EventId,
+      })
+
+      if (!prepared.ok) {
+        this.error = prepared.error.message
+        return
+      }
+
+      this.saveActiveConversation()
+      await this.activateWorkspace(this.replaySummary.workspace)
+      const conversation = this.createConversation(this.replaySummary.workspace)
+
+      if (!conversation) {
+        await bridge.closeSession({
+          version: IPC_VERSION,
+          sessionId: prepared.value.sessionId,
+        })
+        this.error = 'Unable to create a conversation for the trace fork'
+        return
+      }
+
+      conversation.title = `Fork ${this.selectedTraceId}`.slice(0, 120)
+      this.sessionIdsByConversation[conversation.id] = prepared.value.sessionId
+      this.sessionId = prepared.value.sessionId
+      this.runStatus = 'idle'
+      this.activeRunId = undefined
+
+      const started = await bridge.startTraceFork({
+        version: IPC_VERSION,
+        sessionId: prepared.value.sessionId,
+      })
+
+      if (!started.ok) {
+        await this.closeRuntimeSession(conversation.id)
+        this.error = started.error.message
+        return
+      }
+
+      this.activeRunId = started.value.runId
+      this.traceActionMessage = `Fork started in conversation “${conversation.title}”. Historical tools were not replayed.`
+      this.persistWorkbench()
+    },
+    async openLogDirectory() {
+      const bridge = api()
+
+      if (!bridge) {
+        return
+      }
+
+      const result = await bridge.openLogDirectory({ version: IPC_VERSION })
+
+      if (!result.ok) {
+        this.error = result.error.message
+      }
+    },
+    async clearClosedTraces() {
+      const bridge = api()
+
+      if (!bridge) {
+        return
+      }
+
+      const result = await bridge.clearClosedTraces({ version: IPC_VERSION })
+
+      if (result.ok) {
+        this.traceActionMessage = `Deleted ${result.value.deleted} closed trace(s).`
+        await this.loadTraceData()
+      } else {
+        this.error = result.error.message
+      }
+    },
     async acceptProviderNotice() {
       const bridge = api()
 
@@ -1115,6 +1384,7 @@ export const useAgentStore = defineStore('agent', {
             diff: event.diff,
             diffHash: event.diffHash,
             rememberable: event.rememberable,
+            rememberArgConstraints: event.rememberArgConstraints,
             expiresAt: event.expiresAt,
           }
           break

@@ -19,6 +19,11 @@ interface EvaluationInput {
   result: ToolResult
 }
 
+export type IngressPathDecision =
+  | { action: 'allow'; signals: PolicySignal[] }
+  | { action: 'warn'; signals: PolicySignal[] }
+  | { action: 'confirm'; signals: PolicySignal[]; summary: string }
+
 function resultText(value: JsonValue): string {
   if (typeof value === 'string') {
     return value
@@ -93,16 +98,19 @@ function summarize(result: ToolResult): string {
 }
 
 export class ContextIngressFilter {
-  evaluate(
+  evaluatePath(
     config: PublicConfig['permission']['sensitiveData'],
-    input: EvaluationInput,
-  ): IngressDecision {
-    if (config.mode === 'off' || input.result.status !== 'ok') {
+    call: ToolCall,
+  ): IngressPathDecision {
+    if (config.mode === 'off') {
       return { action: 'allow', signals: [] }
     }
 
+    const paths = collectPathCandidates(call, {
+      status: 'denied',
+      message: 'Path preflight',
+    })
     const signals: PolicySignal[] = []
-    const paths = collectPathCandidates(input.call, input.result)
 
     for (const pattern of config.pathGlobs) {
       const matches = paths.filter((candidate) =>
@@ -116,6 +124,34 @@ export class ContextIngressFilter {
           detail: `Matched ${pattern}: ${matches.slice(0, 5).join(', ')}`,
         })
       }
+    }
+
+    if (signals.length === 0) {
+      return { action: 'allow', signals }
+    }
+
+    return config.mode === 'confirm'
+      ? {
+          action: 'confirm',
+          signals,
+          summary: `The tool will read sensitive path(s): ${paths.join(', ')}`,
+        }
+      : { action: 'warn', signals }
+  }
+
+  evaluate(
+    config: PublicConfig['permission']['sensitiveData'],
+    input: EvaluationInput,
+    options: { includePaths?: boolean } = {},
+  ): IngressDecision {
+    if (config.mode === 'off' || input.result.status !== 'ok') {
+      return { action: 'allow', signals: [] }
+    }
+
+    const signals: PolicySignal[] = []
+    if (options.includePaths !== false) {
+      const pathDecision = this.evaluatePath(config, input.call)
+      signals.push(...pathDecision.signals)
     }
 
     const text = resultText(input.result.content)

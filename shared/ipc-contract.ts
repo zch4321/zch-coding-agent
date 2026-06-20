@@ -14,6 +14,14 @@ import {
 } from './ids'
 import { JsonValueSchema } from './json'
 import { TerminalInfoSchema, TerminalSnapshotSchema } from './terminal'
+import { SkillListSchema, SkillSummarySchema } from './skills'
+import {
+  EventIdSchema,
+  ProviderStatsSchema,
+  ReplaySummarySchema,
+  TraceIdSchema,
+  TraceInfoSchema,
+} from './trace'
 import {
   AGENT_EVENT_CHANNEL,
   IPC_VERSION,
@@ -95,17 +103,6 @@ const ModelProfileSchema = Type.Object(
   },
   { additionalProperties: false },
 )
-const SkillSummarySchema = Type.Object(
-  {
-    name: Type.String({ minLength: 1, maxLength: 128 }),
-    description: Type.String({ maxLength: 4_096 }),
-    trigger: Type.String({ maxLength: 4_096 }),
-    enabled: Type.Boolean(),
-    source: Type.String({ maxLength: 2_048 }),
-  },
-  { additionalProperties: false },
-)
-
 export const IPC_CONTRACTS = {
   'config:get': {
     payload: Type.Object(
@@ -392,9 +389,7 @@ export const IPC_CONTRACTS = {
   },
   'skills:list': {
     payload: EmptyPayloadSchema,
-    result: ipcResultSchema(
-      Type.Array(SkillSummarySchema, { maxItems: 10_000 }),
-    ),
+    result: ipcResultSchema(SkillListSchema),
   },
   'skills:installFromUrl': {
     payload: Type.Object(
@@ -428,9 +423,7 @@ export const IPC_CONTRACTS = {
   },
   'skills:refresh': {
     payload: EmptyPayloadSchema,
-    result: ipcResultSchema(
-      Type.Array(SkillSummarySchema, { maxItems: 10_000 }),
-    ),
+    result: ipcResultSchema(SkillListSchema),
   },
   'skills:setEnabled': {
     payload: Type.Object(
@@ -443,6 +436,68 @@ export const IPC_CONTRACTS = {
     ),
     result: ipcResultSchema(
       Type.Object({ updated: Type.Boolean() }, { additionalProperties: false }),
+    ),
+  },
+  'trace:list': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(Type.Array(TraceInfoSchema, { maxItems: 1_000 })),
+  },
+  'trace:replay': {
+    payload: Type.Object(
+      { version: Type.Literal(IPC_VERSION), traceId: TraceIdSchema },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(ReplaySummarySchema),
+  },
+  'trace:stats': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        traceId: Type.Optional(TraceIdSchema),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(ProviderStatsSchema),
+  },
+  'trace:fork': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        traceId: TraceIdSchema,
+        eventId: EventIdSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        { sessionId: SessionIdSchema },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'trace:start-fork': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        sessionId: SessionIdSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object({ runId: RunIdSchema }, { additionalProperties: false }),
+    ),
+  },
+  'logs:open-directory': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(AcceptedSchema),
+  },
+  'logs:clear-closed': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(
+      Type.Object(
+        { deleted: Type.Integer({ minimum: 0 }) },
+        { additionalProperties: false },
+      ),
     ),
   },
 } as const

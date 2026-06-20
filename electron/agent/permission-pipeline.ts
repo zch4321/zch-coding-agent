@@ -54,6 +54,7 @@ export interface ApprovalRequest {
   diffHash?: string
   expiresAt: string
   rememberable: boolean
+  rememberArgConstraints?: JsonValue
 }
 
 export interface RememberApprovalInput {
@@ -199,27 +200,50 @@ function autoSignals(result: AutoApproverResult): PolicySignal[] {
   ]
 }
 
+function rememberArgConstraints(call: ToolCall): JsonValue | undefined {
+  const args = call.args
+
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return undefined
+  }
+
+  if (
+    call.toolId === 'write_file' ||
+    call.toolId === 'apply_patch' ||
+    call.toolId === 'delete_file'
+  ) {
+    return typeof args.path === 'string' ? { path: args.path } : undefined
+  }
+
+  if (call.toolId === 'run_command' && args.mode === 'process') {
+    if (typeof args.executable !== 'string') {
+      return undefined
+    }
+
+    return {
+      mode: 'process',
+      executable: args.executable,
+      ...(Array.isArray(args.args) ? { args: structuredClone(args.args) } : {}),
+      ...(typeof args.cwd === 'string' ? { cwd: args.cwd } : {}),
+    }
+  }
+
+  return undefined
+}
+
 function rememberedRule(input: {
   call: ToolCall
   workspace: string
   remember: RememberApprovalInput
+  argConstraints: JsonValue
 }): RememberedRule {
-  const args = input.call.args
-  const pathConstraint: JsonValue =
-    args &&
-    typeof args === 'object' &&
-    !Array.isArray(args) &&
-    typeof args.path === 'string'
-      ? { path: args.path }
-      : {}
-
   return {
     id: `rule:${randomUUID()}`,
     effect: 'allow',
     toolId: input.call.toolId,
     workspaceScope:
       input.remember.workspaceScope === 'global' ? '*' : input.workspace,
-    argConstraints: pathConstraint,
+    argConstraints: structuredClone(input.argConstraints),
     expiresAt: input.remember.expiresAt,
     createdFromCallId: input.call.id,
   }
@@ -391,13 +415,15 @@ export class PermissionPipeline {
       reviewReason = autoDecision.note
     }
 
+    const rememberConstraints = rememberArgConstraints(input.call)
     const decision = await input.requestHumanApproval({
       call: input.call,
       policySignals: signals,
       diff: plan.diff,
       diffHash: plan.diffHash,
       expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
-      rememberable: true,
+      rememberable: rememberConstraints !== undefined,
+      rememberArgConstraints: rememberConstraints,
     })
 
     if (decision.decision === 'cancelled') {
@@ -420,13 +446,15 @@ export class PermissionPipeline {
       }
     }
 
-    const rule = decision.remember
-      ? rememberedRule({
-          call: input.call,
-          workspace: input.workspace,
-          remember: decision.remember,
-        })
-      : undefined
+    const rule =
+      decision.remember && rememberConstraints
+        ? rememberedRule({
+            call: input.call,
+            workspace: input.workspace,
+            remember: decision.remember,
+            argConstraints: rememberConstraints,
+          })
+        : undefined
 
     return {
       ok: true,

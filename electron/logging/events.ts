@@ -29,6 +29,7 @@ export const TraceEventSchema = Type.Union([
       workspace: Type.String({ maxLength: 4_096 }),
       model: Type.String({ maxLength: 256 }),
       mode: Type.String({ maxLength: 64 }),
+      forkedFromEventId: Type.Optional(EventIdSchema),
     }),
   ]),
   Type.Composite([
@@ -176,6 +177,7 @@ export type TraceEventInput =
       workspace: string
       model: string
       mode: string
+      forkedFromEventId?: EventId
     })
   | (TraceInputBase & { type: 'session.end' })
   | (TraceInputBase & { type: 'run.start'; runId: RunId })

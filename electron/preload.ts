@@ -51,6 +51,13 @@ const api: AgentApi = {
     invoke('skills:chooseAndInstallFile', payload),
   refreshSkills: (payload) => invoke('skills:refresh', payload),
   setSkillEnabled: (payload) => invoke('skills:setEnabled', payload),
+  listTraces: (payload) => invoke('trace:list', payload),
+  replayTrace: (payload) => invoke('trace:replay', payload),
+  getTraceStats: (payload) => invoke('trace:stats', payload),
+  forkTrace: (payload) => invoke('trace:fork', payload),
+  startTraceFork: (payload) => invoke('trace:start-fork', payload),
+  openLogDirectory: (payload) => invoke('logs:open-directory', payload),
+  clearClosedTraces: (payload) => invoke('logs:clear-closed', payload),
   onAgentEvent: (listener) =>
     subscribe<AgentEventEnvelope>(AGENT_EVENT_CHANNEL, listener),
   onTerminalEvent: (listener) =>

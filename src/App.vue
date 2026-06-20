@@ -27,7 +27,7 @@ import { IPC_VERSION } from '../shared/channels'
 import type { PermissionMode } from '../shared/config'
 
 type ArtifactTab = 'files' | 'diff'
-type SettingsTab = 'project' | 'provider' | 'permissions' | 'logging'
+type SettingsTab = 'project' | 'provider' | 'permissions' | 'skills' | 'logging'
 
 const TerminalPanel = defineAsyncComponent(
   () => import('./components/TerminalPanel.vue'),
@@ -95,6 +95,7 @@ const settingsTabs: Array<{
   { label: 'Project', value: 'project' },
   { label: 'Provider', value: 'provider' },
   { label: 'Permissions', value: 'permissions' },
+  { label: 'Skills', value: 'skills' },
   { label: 'Logging', value: 'logging' },
 ]
 
@@ -232,8 +233,36 @@ function toolArgsPreview(tool: ToolActivity): string {
 }
 
 function openSettings(tab: SettingsTab = 'project') {
-  settingsTab.value = tab
+  selectSettingsTab(tab)
   settingsOpen.value = true
+}
+
+function selectSettingsTab(tab: SettingsTab) {
+  settingsTab.value = tab
+
+  if (tab === 'skills') {
+    void agent.loadSkills(false)
+  }
+
+  if (tab === 'logging') {
+    void agent.loadTraceData()
+  }
+}
+
+function providerMetric(value: number | null | undefined, suffix = '') {
+  return value === null || value === undefined
+    ? 'Provider not provided'
+    : `${Math.round(value).toLocaleString()}${suffix}`
+}
+
+function clearClosedTraces() {
+  if (
+    window.confirm(
+      'Delete every closed trace? Active session traces will be preserved.',
+    )
+  ) {
+    void agent.clearClosedTraces()
+  }
 }
 
 async function minimizeWindow() {
@@ -880,6 +909,19 @@ onUnmounted(() => {
               <pre v-if="agent.pendingApproval.diff" class="approval-diff">{{
                 agent.pendingApproval.diff
               }}</pre>
+              <div
+                v-if="agent.pendingApproval.rememberArgConstraints"
+                class="approval-remember-preview"
+              >
+                <strong>Remembered scope</strong>
+                <pre>{{
+                  JSON.stringify(
+                    agent.pendingApproval.rememberArgConstraints,
+                    null,
+                    2,
+                  )
+                }}</pre>
+              </div>
               <div class="approval-actions">
                 <NButton type="primary" @click="agent.decideApproval('allow')">
                   Approve
@@ -1144,7 +1186,7 @@ onUnmounted(() => {
               :key="tab.value"
               type="button"
               :class="{ active: settingsTab === tab.value }"
-              @click="settingsTab = tab.value"
+              @click="selectSettingsTab(tab.value)"
             >
               {{ tab.label }}
             </button>
@@ -1297,7 +1339,9 @@ onUnmounted(() => {
                 <small>
                   {{
                     agent.credentialConfigured
-                      ? 'A credential is stored securely.'
+                      ? agent.credentialSource === 'environment'
+                        ? 'Using DEEPSEEK_API_KEY from the main-process environment.'
+                        : 'A credential is stored securely.'
                       : 'No credential is configured.'
                   }}
                 </small>
@@ -1307,7 +1351,7 @@ onUnmounted(() => {
                   Save provider
                 </NButton>
                 <NButton
-                  v-if="agent.credentialConfigured"
+                  v-if="agent.credentialSource === 'safe-storage'"
                   secondary
                   @click="agent.clearCredential"
                 >
@@ -1383,6 +1427,72 @@ onUnmounted(() => {
               </div>
             </section>
 
+            <section
+              v-else-if="settingsTab === 'skills'"
+              class="settings-section"
+            >
+              <div class="settings-heading">
+                <h2>Skills</h2>
+                <p>
+                  Install bounded instruction files. New skills remain disabled
+                  until you explicitly enable them.
+                </p>
+              </div>
+              <div class="settings-inline">
+                <NInput
+                  v-model:value="agent.skillUrl"
+                  placeholder="https://example.com/skill.md"
+                />
+                <NButton
+                  secondary
+                  :loading="agent.skillsLoading"
+                  @click="agent.installSkillFromUrl"
+                >
+                  Install URL
+                </NButton>
+              </div>
+              <div class="settings-actions">
+                <NButton secondary @click="agent.chooseAndInstallSkill">
+                  Install file
+                </NButton>
+                <NButton
+                  secondary
+                  :loading="agent.skillsLoading"
+                  @click="agent.loadSkills(true)"
+                >
+                  Refresh
+                </NButton>
+              </div>
+              <div class="skill-list">
+                <p v-if="!agent.skills.length">No valid skills found.</p>
+                <article v-for="skill in agent.skills" :key="skill.name">
+                  <div>
+                    <strong>{{ skill.name }}</strong>
+                    <span>{{ skill.description }}</span>
+                    <small>
+                      {{ skill.source }} · {{ skill.sha256.slice(0, 12) }}
+                    </small>
+                  </div>
+                  <NSwitch
+                    :value="skill.enabled"
+                    @update:value="agent.setSkillEnabled(skill.name, $event)"
+                  />
+                </article>
+              </div>
+              <NAlert
+                v-if="agent.skillDiagnostics.length"
+                type="warning"
+                title="Some skill files were skipped"
+              >
+                <div
+                  v-for="item in agent.skillDiagnostics"
+                  :key="`${item.file}:${item.code}`"
+                >
+                  {{ item.file }}: {{ item.message }}
+                </div>
+              </NAlert>
+            </section>
+
             <section v-else class="settings-section">
               <div class="settings-heading">
                 <h2>Logging</h2>
@@ -1414,6 +1524,105 @@ onUnmounted(() => {
               <NButton type="primary" @click="agent.saveLogging">
                 Save logging settings
               </NButton>
+              <div class="settings-actions">
+                <NButton secondary @click="agent.openLogDirectory">
+                  Open log directory
+                </NButton>
+                <NButton
+                  secondary
+                  :loading="agent.tracesLoading"
+                  @click="agent.loadTraceData"
+                >
+                  Refresh traces
+                </NButton>
+                <NButton secondary type="error" @click="clearClosedTraces">
+                  Clear closed traces
+                </NButton>
+              </div>
+
+              <div v-if="agent.providerStats" class="trace-stats">
+                <article>
+                  <span>Requests</span>
+                  <strong>{{ agent.providerStats.requestCount }}</strong>
+                </article>
+                <article>
+                  <span>Total tokens</span>
+                  <strong>{{
+                    providerMetric(agent.providerStats.totalTokens)
+                  }}</strong>
+                </article>
+                <article>
+                  <span>Cache hit tokens</span>
+                  <strong>{{
+                    providerMetric(agent.providerStats.cacheHitTokens)
+                  }}</strong>
+                </article>
+                <article>
+                  <span>Cache miss tokens</span>
+                  <strong>{{
+                    providerMetric(agent.providerStats.cacheMissTokens)
+                  }}</strong>
+                </article>
+                <article>
+                  <span>Average TTFT</span>
+                  <strong>{{
+                    providerMetric(agent.providerStats.averageTtftMs, ' ms')
+                  }}</strong>
+                </article>
+                <article>
+                  <span>Average latency</span>
+                  <strong>{{
+                    providerMetric(agent.providerStats.averageTotalMs, ' ms')
+                  }}</strong>
+                </article>
+              </div>
+
+              <div class="trace-debug">
+                <h3>Offline replay and fork</h3>
+                <NSelect
+                  v-model:value="agent.selectedTraceId"
+                  :options="agent.traceOptions"
+                  clearable
+                  placeholder="Select a trace"
+                />
+                <div class="settings-actions">
+                  <NButton
+                    secondary
+                    :disabled="!agent.selectedTraceId"
+                    @click="agent.replaySelectedTrace"
+                  >
+                    Replay offline
+                  </NButton>
+                </div>
+                <label class="settings-field">
+                  <span>Fork from llm.request event ID</span>
+                  <NSelect
+                    v-model:value="agent.forkEventId"
+                    :options="agent.forkPointOptions"
+                    filterable
+                    tag
+                    placeholder="event-..."
+                  />
+                </label>
+                <NButton
+                  secondary
+                  :disabled="
+                    !agent.selectedTraceId || !agent.forkEventId.trim()
+                  "
+                  @click="agent.forkSelectedTrace"
+                >
+                  Fork with current provider
+                </NButton>
+                <p v-if="agent.replaySummary" class="settings-footnote">
+                  {{ agent.replaySummary.messages.length }} messages ·
+                  {{ agent.replaySummary.toolCount }} tools ·
+                  {{ agent.replaySummary.approvalCount }} approvals ·
+                  {{ agent.replaySummary.closed ? 'closed' : 'active' }}
+                </p>
+                <NAlert v-if="agent.traceActionMessage" type="info">
+                  {{ agent.traceActionMessage }}
+                </NAlert>
+              </div>
             </section>
           </div>
         </div>

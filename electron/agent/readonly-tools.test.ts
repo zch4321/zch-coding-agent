@@ -122,6 +122,26 @@ describe('read-only tools', () => {
     }
   })
 
+  it('terminates catastrophic grep expressions outside the main thread', async () => {
+    const root = await workspace()
+    await writeFile(
+      path.join(root, 'catastrophic.txt'),
+      `${'a'.repeat(80_000)}!`,
+    )
+
+    const result = await executeReadonly(root, {
+      id: 'call-grep-timeout' as CallId,
+      toolId: 'grep',
+      args: { pattern: '(a+)+$', path: '.', maxResults: 10 },
+      reason: 'Exercise regex timeout',
+    })
+
+    expect(result).toMatchObject({
+      status: 'error',
+      code: 'REGEX_TIMEOUT',
+    })
+  })
+
   it('returns a structured error for path escapes', async () => {
     const root = await workspace()
     const registry = new ToolRegistry()

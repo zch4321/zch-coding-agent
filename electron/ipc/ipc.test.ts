@@ -100,6 +100,17 @@ const validPayloads: {
   'skills:chooseAndInstallFile': { version: 1 },
   'skills:refresh': { version: 1 },
   'skills:setEnabled': { version: 1, name: 'test-skill', enabled: true },
+  'trace:list': { version: 1 },
+  'trace:replay': { version: 1, traceId: 'session-test' },
+  'trace:stats': { version: 1 },
+  'trace:fork': {
+    version: 1,
+    traceId: 'session-test',
+    eventId: 'event-1' as import('../../shared/ids').EventId,
+  },
+  'trace:start-fork': { version: 1, sessionId },
+  'logs:open-directory': { version: 1 },
+  'logs:clear-closed': { version: 1 },
 }
 
 describe('IPC security registrar', () => {

@@ -55,6 +55,76 @@ function parseToolArgs(argumentsText: string): JsonValue {
   }
 }
 
+function intentFields(tools: JsonValue[]): Map<string, string> {
+  const fields = new Map<string, string>()
+
+  for (const candidate of tools) {
+    if (
+      !candidate ||
+      typeof candidate !== 'object' ||
+      Array.isArray(candidate)
+    ) {
+      continue
+    }
+
+    const fn = candidate.function
+
+    if (!fn || typeof fn !== 'object' || Array.isArray(fn)) {
+      continue
+    }
+
+    if (
+      typeof fn.name === 'string' &&
+      typeof fn['x-agent-intent-property'] === 'string'
+    ) {
+      fields.set(fn.name, fn['x-agent-intent-property'])
+    }
+  }
+
+  return fields
+}
+
+function wireTools(tools: JsonValue[]): JsonValue[] {
+  return tools.map((candidate) => {
+    const cloned = structuredClone(candidate)
+
+    if (!cloned || typeof cloned !== 'object' || Array.isArray(cloned)) {
+      return cloned
+    }
+
+    const fn = cloned.function
+
+    if (fn && typeof fn === 'object' && !Array.isArray(fn)) {
+      delete fn['x-agent-intent-property']
+    }
+
+    return cloned
+  })
+}
+
+function normalizeToolArgs(
+  toolId: string,
+  argumentsText: string,
+  fields: ReadonlyMap<string, string>,
+): { args: JsonValue; reason: string } {
+  const parsed = parseToolArgs(argumentsText)
+  const intentField = fields.get(toolId)
+
+  if (
+    !intentField ||
+    !parsed ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed)
+  ) {
+    return { args: parsed, reason: '' }
+  }
+
+  const args = structuredClone(parsed)
+  const reason = typeof args[intentField] === 'string' ? args[intentField] : ''
+  delete args[intentField]
+  return { args, reason }
+}
+
 function choiceDelta(chunk: JsonObject): JsonObject | undefined {
   const choices = chunk.choices
 
@@ -104,7 +174,6 @@ export class DeepSeekProvider implements LLMProvider {
   readonly #baseURL: string
   readonly #model: string
   readonly #apiKey: string
-  readonly #reasoning: 'auto' | 'off'
   readonly #fetch: typeof fetch
   readonly #now: () => number
   readonly #createCallId: () => CallId
@@ -113,7 +182,6 @@ export class DeepSeekProvider implements LLMProvider {
     this.#baseURL = options.baseURL
     this.#model = options.model
     this.#apiKey = options.apiKey
-    this.#reasoning = options.reasoning
     this.#fetch = options.fetchImpl ?? fetch
     this.#now = options.now ?? (() => performance.now())
     this.#createCallId =
@@ -123,15 +191,20 @@ export class DeepSeekProvider implements LLMProvider {
   async *streamChat(
     request: ProviderChatRequest,
   ): AsyncIterable<ProviderEvent> {
-    const providerRequest = {
-      model: this.#model,
-      messages: request.messages,
-      tools: request.tools.length > 0 ? request.tools : undefined,
-      stream: true,
-      stream_options: {
-        include_usage: true,
-      },
-    }
+    const override = request.providerRequestOverride
+    const providerTools = wireTools(request.tools)
+    const providerRequest =
+      override && typeof override === 'object' && !Array.isArray(override)
+        ? structuredClone(override)
+        : {
+            model: this.#model,
+            messages: request.messages,
+            tools: providerTools.length > 0 ? providerTools : undefined,
+            stream: true,
+            stream_options: {
+              include_usage: true,
+            },
+          }
     const requestBody = JSON.stringify(providerRequest)
     const requestStart = this.#now()
     let firstTokenAt: number | undefined
@@ -140,6 +213,7 @@ export class DeepSeekProvider implements LLMProvider {
     let text = ''
     let reasoning = ''
     const toolCalls = new Map<number, AccumulatedToolCall>()
+    const toolIntentFields = intentFields(request.tools)
 
     await request.onRequest?.({
       normalizedMessages: toJsonValue(request.messages) as JsonValue[],
@@ -159,10 +233,8 @@ export class DeepSeekProvider implements LLMProvider {
     })
 
     if (!response.ok || !response.body) {
-      const body = await response.text().catch(() => '')
-      throw new Error(
-        `DeepSeek request failed: ${response.status} ${body.slice(0, 512)}`,
-      )
+      await response.body?.cancel().catch(() => undefined)
+      throw new Error(`DeepSeek request failed with status ${response.status}`)
     }
 
     const reader = response.body.getReader()
@@ -204,8 +276,7 @@ export class DeepSeekProvider implements LLMProvider {
           continue
         }
 
-        const reasoningDelta =
-          this.#reasoning === 'off' ? undefined : delta.reasoning_content
+        const reasoningDelta = delta.reasoning_content
 
         if (typeof reasoningDelta === 'string' && reasoningDelta.length > 0) {
           firstTokenAt ??= this.#now()
@@ -291,12 +362,20 @@ export class DeepSeekProvider implements LLMProvider {
           arguments: toolCall.argumentsText,
         },
       }))
-    const normalizedToolCalls: ToolCall[] = nativeToolCalls.map((toolCall) => ({
-      id: toolCall.id as CallId,
-      toolId: toolCall.function.name ?? '',
-      args: parseToolArgs(toolCall.function.arguments ?? ''),
-      reason: '',
-    }))
+    const normalizedToolCalls: ToolCall[] = nativeToolCalls.map((toolCall) => {
+      const toolId = toolCall.function.name ?? ''
+      const normalized = normalizeToolArgs(
+        toolId,
+        toolCall.function.arguments ?? '',
+        toolIntentFields,
+      )
+      return {
+        id: toolCall.id as CallId,
+        toolId,
+        args: normalized.args,
+        reason: normalized.reason,
+      }
+    })
     const turn: ProviderAssistantTurn = {
       role: 'assistant',
       content: text || null,

@@ -1,6 +1,6 @@
 # 前端产品与验收规范 · My Coding Agent
 
-> 状态：草案 v0.1 · 最后更新 2026-06-18  
+> 状态：MVP 实现同步版 v0.2 · 最后更新 2026-06-20
 > 配套：[`requirements.md`](./requirements.md)（产品能力）、[`architecture.md`](./architecture.md)（技术边界）、[`implementation-plan.md`](./implementation-plan.md)（实施阶段）。  
 > 本文档是前端信息架构、交互行为、阶段展示和验收标准的权威依据。历史视觉探索见 [`frontend-design.md`](./frontend-design.md)，发生冲突时以本文档为准。
 
@@ -419,14 +419,24 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - 每条规则显示 tool、workspace scope、arg constraints、expiry 和来源 call。
 - 支持删除规则，不支持编辑为更宽松的任意 JSON。
 
-### 10.4 Logging
+### 10.4 Skills
+
+- 展示 name、description、source、sha256 短摘要和启用状态。
+- 支持 HTTPS URL、主进程文件选择器安装和手工目录 refresh。
+- 新安装和首次扫描的手工 skill 默认禁用；必须由用户显式启用。
+- 格式错误、重复名称、符号链接和超限文件显示诊断，不中断设置页。
+
+### 10.5 Logging
 
 - Trace 开关和独立风险告知。
 - retention days。
 - max total bytes。
 - P5 提供受控的打开日志目录和清理已关闭 trace 入口。
+- 提供 trace 列表、离线 replay 摘要、`llm.request` fork 点和当前 Provider 凭据分叉动作。
+- 展示 Provider 原始 usage 派生的 token/cache 指标与 TTFT/总时延；字段缺失时明确显示 `Provider not provided`。
+- 完整事件时间轴、搜索、导出和批量管理属于 Post-MVP。
 
-### 10.5 Session 生命周期
+### 10.6 Session 生命周期
 
 - Settings 不展示 `Start session` / `Close session` 作为主流程按钮。
 - 首次发送消息时自动创建 runtime Session。

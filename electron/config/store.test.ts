@@ -91,6 +91,36 @@ describe('ConfigStore', () => {
     await expect(configStore.getDeepSeekApiKey()).resolves.toBe(apiKey)
   })
 
+  it('uses a non-persisted environment credential only when no stored key exists', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-env-'))
+    const secretStore = new SecretStore(
+      path.join(directory, 'secrets.json'),
+      new FakeSafeStorage(),
+    )
+    const store = new ConfigStore(
+      path.join(directory, 'config.json'),
+      secretStore,
+      { environmentApiKey: 'environment-secret' },
+    )
+    await store.initialize()
+
+    expect(
+      store.getPublicConfig().providers.deepseek.credentialConfigured,
+    ).toBe(true)
+    await expect(store.getDeepSeekApiKey()).resolves.toBe('environment-secret')
+    expect(
+      await readFile(path.join(directory, 'config.json'), 'utf8'),
+    ).not.toContain('environment-secret')
+
+    await store.update({
+      version: 1,
+      kind: 'credential',
+      action: 'set',
+      apiKey: 'stored-secret',
+    })
+    await expect(store.getDeepSeekApiKey()).resolves.toBe('stored-secret')
+  })
+
   it('migrates missing fields onto defaults and writes atomically', async () => {
     const { directory, configStore } = await createStores()
 

@@ -5,11 +5,18 @@ import type { PermissionMode, PublicConfig } from '../../shared/config'
 import { IPC_VERSION } from '../../shared/channels'
 import type {
   AgentEvent,
+  PolicySignal,
   RunStatus,
   TerminalEvent,
   ToolResultEnvelope,
 } from '../../shared/agent-events'
-import type { CallId, RunId, SessionId, TerminalId } from '../../shared/ids'
+import type {
+  CallId,
+  EventId,
+  RunId,
+  SessionId,
+  TerminalId,
+} from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { TerminalInfo, TerminalSnapshot } from '../../shared/terminal'
 import {
@@ -57,6 +64,8 @@ import {
   selectContextMessages,
 } from './context-budget'
 import { resolveModelProfiles } from './model-catalog'
+import type { SkillsManager } from '../skills/manager'
+import { registerSkillTools } from './skill-tools'
 
 const SYSTEM_PROMPT =
   'You are My Coding Agent. Work only inside the selected workspace and use the provided tools. Explain the reason for every tool call. Never claim a file changed unless the tool result confirms it.'
@@ -79,6 +88,7 @@ export interface SessionManagerOptions {
   traceDirectory: string
   getWebContents: () => WebContents | undefined
   pluginBus?: PluginEventBus
+  skillsManager?: SkillsManager
   providerFactory?: (options: {
     config: PublicConfig
     apiKey: string
@@ -113,6 +123,9 @@ interface SessionState {
   provider: 'deepseek'
   logger: TraceLogger
   history: ProviderMessage[]
+  systemPromptOverride?: string
+  providerRequestOverride?: JsonValue
+  forkedFromEventId?: EventId
   eventSeq: number
   closed: boolean
   activeRun?: ActiveRun
@@ -120,7 +133,7 @@ interface SessionState {
 }
 
 function id<Kind extends SessionId | RunId | CallId>(prefix: string): Kind {
-  return `${prefix}:${randomUUID()}` as Kind
+  return `${prefix}-${randomUUID()}` as Kind
 }
 
 function toJsonValue(value: unknown): JsonValue {
@@ -150,6 +163,23 @@ function toolResultForProvider(result: ToolResult): string {
 
 function normalizeToolResult(result: ToolResult): ToolResultEnvelope {
   return result as ToolResultEnvelope
+}
+
+function toolFailure(error: unknown, signal: AbortSignal): ToolResult {
+  if (signal.aborted) {
+    return { status: 'cancelled', message: 'The run was cancelled' }
+  }
+
+  return {
+    status: 'error',
+    code:
+      error && typeof error === 'object' && 'code' in error
+        ? String(error.code)
+        : 'TOOL_FAILED',
+    message:
+      error instanceof Error ? error.message : 'Tool failed unexpectedly',
+    retryable: false,
+  }
 }
 
 function finalStatusFromError(error: unknown, signal: AbortSignal): RunStatus {
@@ -197,8 +227,12 @@ function contextMessages(
   history: ProviderMessage[],
   config: PublicConfig,
   tools: JsonValue[],
+  skillPrompt = '',
 ): ProviderMessage[] {
-  const system: ProviderMessage = { role: 'system', content: SYSTEM_PROMPT }
+  const system: ProviderMessage = {
+    role: 'system',
+    content: skillPrompt ? `${SYSTEM_PROMPT}\n\n${skillPrompt}` : SYSTEM_PROMPT,
+  }
 
   return selectContextMessages({
     system,
@@ -213,6 +247,7 @@ export class SessionManager {
   readonly #traceDirectory: string
   readonly #getWebContents: () => WebContents | undefined
   readonly #pluginBus: PluginEventBus | undefined
+  readonly #skillsManager: SkillsManager | undefined
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #autoApproverFactory: SessionManagerOptions['autoApproverFactory']
   readonly #onDiagnostic: (message: string, error?: unknown) => void
@@ -228,6 +263,7 @@ export class SessionManager {
     this.#traceDirectory = options.traceDirectory
     this.#getWebContents = options.getWebContents
     this.#pluginBus = options.pluginBus
+    this.#skillsManager = options.skillsManager
     this.#providerFactory = options.providerFactory
     this.#autoApproverFactory = options.autoApproverFactory
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
@@ -249,6 +285,9 @@ export class SessionManager {
       this.#terminalPool,
       () => this.#configStore.getPublicConfig().limits.maxToolOutputBytes,
     )
+    if (this.#skillsManager) {
+      registerSkillTools(this.#toolRegistry, this.#skillsManager)
+    }
     this.#toolExecutor = new ToolExecutor(this.#toolRegistry)
     this.#pluginBus?.setToolRegistrationPort(this.#toolRegistry)
   }
@@ -257,6 +296,10 @@ export class SessionManager {
     workspace: string
     mode: PermissionMode
     provider: 'deepseek'
+    initialHistory?: ProviderMessage[]
+    systemPromptOverride?: string
+    providerRequestOverride?: JsonValue
+    forkedFromEventId?: EventId
   }): Promise<SessionId> {
     const publicConfig = this.#configStore.getPublicConfig()
 
@@ -271,18 +314,32 @@ export class SessionManager {
       )
     }
 
+    if (
+      input.forkedFromEventId &&
+      publicConfig.privacy.traceNoticeAccepted?.version !== TRACE_NOTICE_VERSION
+    ) {
+      ipcFault(
+        'PRECONDITION_FAILED',
+        'Trace logging notice must be accepted before forking a trace',
+      )
+    }
+
     const guard = await PathGuard.create(input.workspace)
     const sessionId = id<SessionId>('session')
-    const logger = publicConfig.logging.enabled
-      ? await JsonlTraceLogger.create(this.#traceDirectory, sessionId)
-      : new NullTraceLogger()
+    const logger =
+      publicConfig.logging.enabled || input.forkedFromEventId
+        ? await JsonlTraceLogger.create(this.#traceDirectory, sessionId)
+        : new NullTraceLogger()
     const session: SessionState = {
       sessionId,
       workspace: guard.workspacePath,
       mode: input.mode,
       provider: input.provider,
       logger,
-      history: [],
+      history: structuredClone(input.initialHistory ?? []),
+      systemPromptOverride: input.systemPromptOverride,
+      providerRequestOverride: structuredClone(input.providerRequestOverride),
+      forkedFromEventId: input.forkedFromEventId,
       eventSeq: 0,
       closed: false,
       clientRequests: new Map(),
@@ -295,6 +352,7 @@ export class SessionManager {
       workspace: session.workspace,
       model: publicConfig.providers.deepseek.model,
       mode: input.mode,
+      forkedFromEventId: input.forkedFromEventId,
     })
     await this.#pluginBus
       ?.emit('onSessionStart', {
@@ -318,14 +376,22 @@ export class SessionManager {
     }
 
     session.closed = true
+    const logger = session.logger
 
     if (session.activeRun) {
       session.activeRun.controller.abort(new Error('Session closed'))
       session.activeRun.pendingApproval?.resolve({ decision: 'cancelled' })
-      await Promise.race([
-        session.activeRun.done.catch(() => undefined),
-        delay(RUN_CANCEL_GRACE_MS),
+      const completed = await Promise.race([
+        session.activeRun.done.then(() => true),
+        delay(RUN_CANCEL_GRACE_MS).then(() => false),
       ])
+
+      if (!completed) {
+        session.logger = new NullTraceLogger()
+        this.#onDiagnostic(
+          `Run ${session.activeRun.runId} did not stop within the cancellation grace period`,
+        )
+      }
     }
 
     this.#terminalPool.closeSession(sessionId)
@@ -339,8 +405,8 @@ export class SessionManager {
       .catch((error: unknown) =>
         this.#onDiagnostic('Plugin onSessionEnd failed', error),
       )
-    await session.logger.write({ type: 'session.end', sessionId })
-    await session.logger.dispose()
+    await logger.write({ type: 'session.end', sessionId })
+    await logger.dispose()
     this.#emit(session, { type: 'session.closed', sessionId })
     this.#sessions.delete(sessionId)
     await this.#cleanupTraces()
@@ -359,6 +425,55 @@ export class SessionManager {
       return existing
     }
 
+    return this.#startSessionRun(session, input.clientRequestId, input.message)
+  }
+
+  async createForkFromTrace(input: {
+    workspace: string
+    mode: PermissionMode
+    messages: ProviderMessage[]
+    providerRequest: JsonValue
+    sourceEventId: EventId
+  }): Promise<{ sessionId: SessionId }> {
+    const system = input.messages.find((message) => message.role === 'system')
+    const history = input.messages.filter(
+      (message) => message.role !== 'system',
+    )
+    const sessionId = await this.createSession({
+      workspace: input.workspace,
+      mode: input.mode,
+      provider: 'deepseek',
+      initialHistory: history,
+      systemPromptOverride:
+        typeof system?.content === 'string' ? system.content : undefined,
+      providerRequestOverride: input.providerRequest,
+      forkedFromEventId: input.sourceEventId,
+    })
+    return { sessionId }
+  }
+
+  startForkRun(sessionId: SessionId): RunId {
+    const session = this.#requireSession(sessionId)
+
+    if (
+      session.forkedFromEventId === undefined ||
+      session.providerRequestOverride === undefined
+    ) {
+      ipcFault('PRECONDITION_FAILED', 'Session is not a prepared trace fork')
+    }
+
+    return this.#startSessionRun(session, `fork-${session.forkedFromEventId}`)
+  }
+
+  activeTraceIds(): Set<string> {
+    return new Set([...this.#sessions.keys()])
+  }
+
+  #startSessionRun(
+    session: SessionState,
+    clientRequestId: string,
+    userMessage?: string,
+  ): RunId {
     const config = this.#configStore.getPublicConfig()
 
     if (
@@ -383,20 +498,24 @@ export class SessionManager {
     const controller = new AbortController()
     const run: ActiveRun = {
       runId,
-      clientRequestId: input.clientRequestId,
+      clientRequestId,
       controller,
       status: 'idle',
       toolTokensUsed: 0,
       done: Promise.resolve(),
     }
 
-    run.done = this.#run(session, run, input.message).finally(() => {
-      if (session.activeRun === run) {
-        session.activeRun = undefined
-      }
-    })
+    run.done = this.#run(session, run, userMessage)
+      .catch((error: unknown) =>
+        this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error),
+      )
+      .finally(() => {
+        if (session.activeRun === run) {
+          session.activeRun = undefined
+        }
+      })
     session.activeRun = run
-    session.clientRequests.set(input.clientRequestId, runId)
+    session.clientRequests.set(clientRequestId, runId)
     return runId
   }
 
@@ -514,18 +633,20 @@ export class SessionManager {
   async #run(
     session: SessionState,
     run: ActiveRun,
-    userMessage: string,
+    userMessage?: string,
   ): Promise<void> {
     const signal = run.controller.signal
 
     try {
-      session.history.push({ role: 'user', content: userMessage })
-      await session.logger.write({
-        type: 'user.message',
-        sessionId: session.sessionId,
-        runId: run.runId,
-        text: userMessage,
-      })
+      if (userMessage !== undefined) {
+        session.history.push({ role: 'user', content: userMessage })
+        await session.logger.write({
+          type: 'user.message',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          text: userMessage,
+        })
+      }
       await session.logger.write({
         type: 'run.start',
         sessionId: session.sessionId,
@@ -589,7 +710,19 @@ export class SessionManager {
     }
 
     const tools = this.#toolRegistry.providerDefinitions()
-    let messages = contextMessages(session.history, config, tools)
+    let messages = session.systemPromptOverride
+      ? selectContextMessages({
+          system: { role: 'system', content: session.systemPromptOverride },
+          history: session.history,
+          maxPromptTokens: modelPromptBudget(config, tools),
+          estimation: config.limits.tokenEstimation,
+        })
+      : contextMessages(
+          session.history,
+          config,
+          tools,
+          this.#skillsManager?.summaryPrompt() ?? '',
+        )
     const hookResult = await this.#pluginBus?.emit('beforeLLMCall', {
       version: 1,
       sessionId: session.sessionId,
@@ -643,9 +776,13 @@ export class SessionManager {
       })
     }
 
+    const providerRequestOverride = session.providerRequestOverride
+    session.providerRequestOverride = undefined
+
     for await (const event of provider.streamChat({
       messages,
       tools,
+      providerRequestOverride,
       signal: run.controller.signal,
       onRequest,
     })) {
@@ -660,13 +797,15 @@ export class SessionManager {
           delta: event.delta,
         })
       } else if (event.type === 'reasoning.delta') {
-        reasoning += event.delta
-        this.#emit(session, {
-          type: 'assistant.reasoning.delta',
-          sessionId: session.sessionId,
-          runId: run.runId,
-          delta: event.delta,
-        })
+        if (config.providers.deepseek.reasoning !== 'off') {
+          reasoning += event.delta
+          this.#emit(session, {
+            type: 'assistant.reasoning.delta',
+            sessionId: session.sessionId,
+            runId: run.runId,
+            delta: event.delta,
+          })
+        }
       } else if (event.type === 'completed') {
         completed = event
       }
@@ -735,10 +874,6 @@ export class SessionManager {
     this.#setRunStatus(session, run, 'running_tools')
 
     for (const call of toolCalls) {
-      if (run.controller.signal.aborted) {
-        throw run.controller.signal.reason
-      }
-
       this.#emit(session, {
         type: 'tool.proposed',
         sessionId: session.sessionId,
@@ -754,95 +889,141 @@ export class SessionManager {
       let policySignals: JsonValue[] = []
       let diffHash: string | undefined
       const startedAt = performance.now()
-      const inspected = this.#toolExecutor.inspectCall(call)
-
-      if (!inspected.ok) {
-        result = inspected.result
-      } else {
-        const config = this.#configStore.getPublicConfig()
-        const apiKey = await this.#configStore.getDeepSeekApiKey()
-        const autoApprover =
-          session.mode === 'auto' && apiKey
-            ? (this.#autoApproverFactory?.({ config, apiKey }) ??
-              new ProviderAutoApprover(
-                new DeepSeekProvider({
-                  baseURL: config.providers.deepseek.baseURL,
-                  model: config.approval.approverModel,
-                  reasoning: 'off',
-                  apiKey,
-                }),
-              ))
-            : undefined
-        const authorization = await this.#permissionPipeline.authorize({
-          sessionId: session.sessionId,
-          runId: run.runId,
-          workspace: session.workspace,
-          mode: session.mode,
-          call,
-          definition: inspected.definition,
-          config,
-          signal: run.controller.signal,
-          autoApprover,
-          beforeToolCall: (currentRisk) =>
-            this.#pluginBus?.emit('beforeToolCall', {
-              version: 1,
-              sessionId: session.sessionId,
-              runId: run.runId,
-              call,
-              currentRisk,
-            }) ?? Promise.resolve(undefined),
-          requestHumanApproval: (request) =>
-            this.#requestToolApproval(session, run, request),
-        })
-        policySignals = toJsonValue(authorization.policySignals) as JsonValue[]
-
-        if (authorization.autoDecision) {
-          await session.logger.write({
-            type: 'approval',
-            sessionId: session.sessionId,
-            runId: run.runId,
-            callId: call.id,
-            policySignals: toJsonValue(
-              authorization.policySignals,
-            ) as JsonValue[],
-            mode: session.mode,
-            approver: 'model',
-            decision: authorization.autoDecision.decision,
-            reason: authorization.autoDecision.note,
-          })
-        }
-
-        if (!authorization.ok) {
-          result = authorization.result
+      try {
+        if (run.controller.signal.aborted) {
+          result = { status: 'cancelled', message: 'The run was cancelled' }
         } else {
-          if (authorization.rememberedRule) {
-            const latest = this.#configStore.getPublicConfig()
-            await this.#configStore.update({
-              version: 1,
-              kind: 'permission',
-              builtinPolicies: latest.permission.builtinPolicies,
-              rememberedRules: [
-                ...latest.permission.rememberedRules,
-                authorization.rememberedRule,
-              ].slice(-256),
-              sensitiveData: latest.permission.sensitiveData,
-            })
-          }
+          const inspected = this.#toolExecutor.inspectCall(call)
 
-          approvedBy = authorization.approvedCall.approvedBy
-          diffHash = authorization.approvedCall.diffHash
-          result = await this.#toolExecutor.execute(
-            authorization.approvedCall,
-            {
+          if (!inspected.ok) {
+            result = inspected.result
+          } else {
+            const config = this.#configStore.getPublicConfig()
+            const apiKey = await this.#configStore.getDeepSeekApiKey()
+            const autoApprover =
+              session.mode === 'auto' && apiKey
+                ? (this.#autoApproverFactory?.({ config, apiKey }) ??
+                  new ProviderAutoApprover(
+                    new DeepSeekProvider({
+                      baseURL: config.providers.deepseek.baseURL,
+                      model: config.approval.approverModel,
+                      reasoning: 'off',
+                      apiKey,
+                    }),
+                  ))
+                : undefined
+            const authorization = await this.#permissionPipeline.authorize({
               sessionId: session.sessionId,
               runId: run.runId,
-              workspace: {
-                canonicalPath: session.workspace,
-              },
-            },
-            run.controller.signal,
-          )
+              workspace: session.workspace,
+              mode: session.mode,
+              call,
+              definition: inspected.definition,
+              config,
+              signal: run.controller.signal,
+              autoApprover,
+              beforeToolCall: (currentRisk) =>
+                this.#pluginBus?.emit('beforeToolCall', {
+                  version: 1,
+                  sessionId: session.sessionId,
+                  runId: run.runId,
+                  call,
+                  currentRisk,
+                }) ?? Promise.resolve(undefined),
+              requestHumanApproval: (request) =>
+                this.#requestToolApproval(session, run, request),
+            })
+            policySignals = toJsonValue(
+              authorization.policySignals,
+            ) as JsonValue[]
+
+            if (authorization.autoDecision) {
+              await session.logger.write({
+                type: 'approval',
+                sessionId: session.sessionId,
+                runId: run.runId,
+                callId: call.id,
+                policySignals: toJsonValue(
+                  authorization.policySignals,
+                ) as JsonValue[],
+                mode: session.mode,
+                approver: 'model',
+                decision: authorization.autoDecision.decision,
+                reason: authorization.autoDecision.note,
+              })
+            }
+
+            if (!authorization.ok) {
+              result = authorization.result
+            } else {
+              if (authorization.rememberedRule) {
+                const latest = this.#configStore.getPublicConfig()
+                await this.#configStore.update({
+                  version: 1,
+                  kind: 'permission',
+                  builtinPolicies: latest.permission.builtinPolicies,
+                  rememberedRules: [
+                    ...latest.permission.rememberedRules,
+                    authorization.rememberedRule,
+                  ].slice(-256),
+                  sensitiveData: latest.permission.sensitiveData,
+                })
+              }
+
+              approvedBy = authorization.approvedCall.approvedBy
+              diffHash = authorization.approvedCall.diffHash
+              const preflight = await this.#preflightToolContext(
+                session,
+                run,
+                call,
+              )
+              policySignals = [
+                ...policySignals,
+                ...(toJsonValue(preflight.signals) as JsonValue[]),
+              ]
+
+              result = preflight.result
+                ? preflight.result
+                : await this.#toolExecutor.execute(
+                    authorization.approvedCall,
+                    {
+                      sessionId: session.sessionId,
+                      runId: run.runId,
+                      workspace: {
+                        canonicalPath: session.workspace,
+                      },
+                    },
+                    run.controller.signal,
+                  )
+            }
+          }
         }
+      } catch (error) {
+        result = toolFailure(error, run.controller.signal)
+      }
+
+      const contextResult = boundToolResultForContext(
+        result,
+        this.#configStore.getPublicConfig().limits,
+        run.toolTokensUsed,
+      )
+      run.toolTokensUsed += contextResult.tokens
+      let providerResult = contextResult.result
+
+      try {
+        const filtered = await this.#filterToolResultForProvider(
+          session,
+          run,
+          call,
+          providerResult,
+        )
+        providerResult = filtered.result
+        policySignals = [
+          ...policySignals,
+          ...(toJsonValue(filtered.signals) as JsonValue[]),
+        ]
+      } catch (error) {
+        providerResult = toolFailure(error, run.controller.signal)
       }
 
       await session.logger.write({
@@ -866,7 +1047,7 @@ export class SessionManager {
         sessionId: session.sessionId,
         runId: run.runId,
         callId: call.id,
-        result: normalizeToolResult(result),
+        result: normalizeToolResult(providerResult),
       })
 
       await this.#pluginBus
@@ -881,24 +1062,15 @@ export class SessionManager {
           this.#onDiagnostic('Plugin afterToolCall failed', error),
         )
 
-      const contextResult = boundToolResultForContext(
-        result,
-        this.#configStore.getPublicConfig().limits,
-        run.toolTokensUsed,
-      )
-      run.toolTokensUsed += contextResult.tokens
-      const providerResult = await this.#filterToolResultForProvider(
-        session,
-        run,
-        call,
-        contextResult.result,
-      )
-
       session.history.push({
         role: 'tool',
         tool_call_id: call.id,
         content: toolResultForProvider(providerResult),
       })
+    }
+
+    if (run.controller.signal.aborted) {
+      throw run.controller.signal.reason ?? new Error('Run cancelled')
     }
   }
 
@@ -943,6 +1115,7 @@ export class SessionManager {
       diff: request.diff,
       diffHash: request.diffHash,
       rememberable: request.rememberable,
+      rememberArgConstraints: request.rememberArgConstraints,
       expiresAt: request.expiresAt,
     })
 
@@ -983,6 +1156,7 @@ export class SessionManager {
           run.pendingApproval = undefined
         }
         clearTimeout(timer)
+        run.controller.signal.removeEventListener('abort', abort)
         resolve(decision)
       }
       const pending: PendingApproval = {
@@ -1008,25 +1182,14 @@ export class SessionManager {
     })
   }
 
-  async #filterToolResultForProvider(
+  async #requestContextApproval(
     session: SessionState,
     run: ActiveRun,
     call: ToolCall,
-    result: ToolResult,
-  ): Promise<ToolResult> {
-    if (session.mode === 'yolo') {
-      return result
-    }
-
-    const config = this.#configStore.getPublicConfig()
-    const decision = this.#ingressFilter.evaluate(
-      config.permission.sensitiveData,
-      { call, result },
-    )
-
-    if (decision.action === 'allow' || decision.action === 'warn') {
-      return result
-    }
+    signals: PolicySignal[],
+    summary: string,
+  ): Promise<HumanApprovalDecision> {
+    const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString()
 
     await this.#pluginBus
       ?.emit('beforeApproval', {
@@ -1034,7 +1197,7 @@ export class SessionManager {
         sessionId: session.sessionId,
         runId: run.runId,
         callId: call.id,
-        policySignals: decision.signals,
+        policySignals: signals,
       })
       .catch((error: unknown) =>
         this.#onDiagnostic('Plugin beforeApproval failed', error),
@@ -1044,11 +1207,11 @@ export class SessionManager {
       sessionId: session.sessionId,
       runId: run.runId,
       callId: call.id,
-      policySignals: toJsonValue(decision.signals) as JsonValue[],
-      mode: config.permission.sensitiveData.mode,
+      policySignals: toJsonValue(signals) as JsonValue[],
+      mode: this.#configStore.getPublicConfig().permission.sensitiveData.mode,
       approver: 'human',
       decision: 'requested',
-      reason: decision.summary,
+      reason: summary,
     })
     this.#setRunStatus(session, run, 'awaiting_approval')
     this.#emit(session, {
@@ -1059,37 +1222,120 @@ export class SessionManager {
       kind: 'context',
       tool: call.toolId,
       args: call.args,
-      reason: decision.summary,
-      policySignals: decision.signals,
+      reason: summary,
+      policySignals: signals,
       rememberable: false,
-      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      expiresAt,
     })
 
-    const approval = await this.#awaitApproval(
-      run,
-      call.id,
-      new Date(Date.now() + 10 * 60_000).toISOString(),
-    )
+    const approval = await this.#awaitApproval(run, call.id, expiresAt)
 
     await session.logger.write({
       type: 'approval',
       sessionId: session.sessionId,
       runId: run.runId,
       callId: call.id,
-      policySignals: toJsonValue(decision.signals) as JsonValue[],
-      mode: config.permission.sensitiveData.mode,
+      policySignals: toJsonValue(signals) as JsonValue[],
+      mode: this.#configStore.getPublicConfig().permission.sensitiveData.mode,
       approver: 'human',
       decision: approval.decision,
       reason:
-        approval.decision === 'allow' ? 'Approved by user' : 'Denied by user',
+        approval.decision === 'allow'
+          ? 'Approved by user'
+          : approval.decision === 'deny'
+            ? 'Denied by user'
+            : 'Approval cancelled',
     })
+    this.#setRunStatus(session, run, 'running_tools')
+    return approval
+  }
 
-    if (approval.decision === 'cancelled') {
-      throw run.controller.signal.reason ?? new Error('Run cancelled')
+  async #preflightToolContext(
+    session: SessionState,
+    run: ActiveRun,
+    call: ToolCall,
+  ): Promise<{ signals: PolicySignal[]; result?: ToolResult }> {
+    if (session.mode === 'yolo') {
+      return { signals: [] }
     }
 
-    this.#setRunStatus(session, run, 'running_tools')
-    return approval.decision === 'allow' ? result : decision.sanitizedResult
+    const decision = this.#ingressFilter.evaluatePath(
+      this.#configStore.getPublicConfig().permission.sensitiveData,
+      call,
+    )
+
+    if (decision.action !== 'confirm') {
+      return { signals: decision.signals }
+    }
+
+    const approval = await this.#requestContextApproval(
+      session,
+      run,
+      call,
+      decision.signals,
+      decision.summary,
+    )
+
+    return {
+      signals: decision.signals,
+      ...(approval.decision === 'allow'
+        ? {}
+        : {
+            result:
+              approval.decision === 'cancelled'
+                ? ({
+                    status: 'cancelled',
+                    message: 'Context ingress approval was cancelled',
+                  } satisfies ToolResult)
+                : ({
+                    status: 'denied',
+                    message:
+                      'Tool execution was withheld by sensitive path confirmation',
+                  } satisfies ToolResult),
+          }),
+    }
+  }
+
+  async #filterToolResultForProvider(
+    session: SessionState,
+    run: ActiveRun,
+    call: ToolCall,
+    result: ToolResult,
+  ): Promise<{ result: ToolResult; signals: PolicySignal[] }> {
+    if (session.mode === 'yolo') {
+      return { result, signals: [] }
+    }
+
+    const config = this.#configStore.getPublicConfig()
+    const decision = this.#ingressFilter.evaluate(
+      config.permission.sensitiveData,
+      { call, result },
+      { includePaths: false },
+    )
+
+    if (decision.action === 'allow' || decision.action === 'warn') {
+      return { result, signals: decision.signals }
+    }
+
+    const approval = await this.#requestContextApproval(
+      session,
+      run,
+      call,
+      decision.signals,
+      decision.summary,
+    )
+    return {
+      result:
+        approval.decision === 'allow'
+          ? result
+          : approval.decision === 'cancelled'
+            ? {
+                status: 'cancelled',
+                message: 'Context ingress approval was cancelled',
+              }
+            : decision.sanitizedResult,
+      signals: decision.signals,
+    }
   }
 
   async #finishRun(
@@ -1134,6 +1380,10 @@ export class SessionManager {
   }
 
   #emit(session: SessionState, event: AgentEventDraft): void {
+    if (session.closed && event.type !== 'session.closed') {
+      return
+    }
+
     const webContents = this.#getWebContents()
 
     if (!webContents) {

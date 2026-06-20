@@ -26,6 +26,7 @@ const agent = useAgentStore()
 const terminals = ref<TerminalInfo[]>([])
 const activeTerminalId = ref<TerminalId>()
 const error = ref('')
+const recoveryNotice = ref('')
 const maximized = ref(false)
 const hosts = new Map<TerminalId, HTMLElement>()
 const views = new Map<TerminalId, TerminalView>()
@@ -312,6 +313,8 @@ function applyTerminalEvent(event: TerminalEvent): void {
   }
 
   if (decision === 'recover') {
+    recoveryNotice.value =
+      'Terminal output gap detected. Restoring the bounded scrollback snapshot.'
     void restoreTerminal(event.terminalId)
     return
   }
@@ -386,12 +389,16 @@ async function restoreTerminal(terminalId: TerminalId): Promise<void> {
     for (const event of queued.sort((left, right) => left.seq - right.seq)) {
       applyTerminalEvent(event)
     }
+    recoveryNotice.value = result.value.truncated
+      ? 'Terminal restored. Older scrollback was truncated by the configured limit.'
+      : ''
   } catch (restoreError) {
     sequence.cancelRecovery(terminalId)
     error.value =
       restoreError instanceof Error
         ? restoreError.message
         : 'Unable to restore terminal output'
+    recoveryNotice.value = ''
   }
 }
 
@@ -506,6 +513,9 @@ onUnmounted(() => {
     </header>
 
     <p v-if="error" class="terminal-error">{{ error }}</p>
+    <p v-if="recoveryNotice" class="terminal-notice">
+      {{ recoveryNotice }}
+    </p>
     <div v-if="terminals.length === 0" class="terminal-empty">
       <span>No terminal is open.</span>
       <button type="button" @click="createTerminal">New terminal</button>

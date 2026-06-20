@@ -7,6 +7,7 @@ import {
   net,
   protocol,
   session,
+  shell,
   type Event,
   type OnHeadersReceivedListenerDetails,
   type OpenDialogOptions,
@@ -32,6 +33,8 @@ import {
 import { PathGuard, PathGuardError } from './agent/path-guard'
 import { IpcFault, registerIpcHandlers } from './ipc'
 import { PluginEventBus } from './plugins/event-bus'
+import { SkillError, SkillsManager } from './skills/manager'
+import { TraceService, TraceServiceError } from './logging/service'
 import {
   APP_ENTRY_URL,
   APP_HOST,
@@ -126,7 +129,13 @@ async function installIpc(): Promise<void> {
     path.join(userData, 'secrets.json'),
     new ElectronSafeStorageAdapter(),
   )
-  configStore = new ConfigStore(path.join(userData, 'config.json'), secretStore)
+  configStore = new ConfigStore(
+    path.join(userData, 'config.json'),
+    secretStore,
+    {
+      environmentApiKey: process.env.DEEPSEEK_API_KEY,
+    },
+  )
   const initialized = await configStore.initialize()
 
   if (!initialized.secretStorage.available) {
@@ -139,11 +148,16 @@ async function installIpc(): Promise<void> {
     onDiagnostic: (diagnostic, error) =>
       console.error(`Plugin hook ${diagnostic.hook} failed`, error),
   })
+  const skillsManager = new SkillsManager(path.join(userData, 'skills'))
+  await skillsManager.initialize()
+  const traceService = new TraceService(path.join(userData, 'traces'))
+  await traceService.initialize()
   const sessionManager = new SessionManager({
     configStore,
     traceDirectory: path.join(userData, 'traces'),
     getWebContents: () => mainWindow?.webContents,
     pluginBus,
+    skillsManager,
     onDiagnostic: (message, error) => console.error(message, error),
   })
   const unregister = registerIpcHandlers({
@@ -398,6 +412,125 @@ async function installIpc(): Promise<void> {
         BrowserWindow.fromWebContents(event.sender)?.close()
         return { accepted: true }
       },
+      'skills:list': () => skillsManager.list(),
+      'skills:installFromUrl': async (payload) => {
+        try {
+          return {
+            installed: true,
+            skill: await skillsManager.installFromUrl(payload.url),
+          }
+        } catch (error) {
+          if (error instanceof SkillError) {
+            throw new IpcFault({
+              code:
+                error.code === 'DUPLICATE_NAME'
+                  ? 'CONFLICT'
+                  : 'PRECONDITION_FAILED',
+              message: error.message,
+              details: { skillCode: error.code },
+            })
+          }
+
+          throw error
+        }
+      },
+      'skills:chooseAndInstallFile': async () => {
+        const options: OpenDialogOptions = {
+          properties: ['openFile'],
+          filters: [{ name: 'Markdown skills', extensions: ['md'] }],
+        }
+        const selected = mainWindow
+          ? await dialog.showOpenDialog(mainWindow, options)
+          : await dialog.showOpenDialog(options)
+
+        if (selected.canceled || !selected.filePaths[0]) {
+          return { installed: false }
+        }
+
+        try {
+          return {
+            installed: true,
+            skill: await skillsManager.installFromFile(selected.filePaths[0]),
+          }
+        } catch (error) {
+          if (error instanceof SkillError) {
+            throw new IpcFault({
+              code:
+                error.code === 'DUPLICATE_NAME'
+                  ? 'CONFLICT'
+                  : 'PRECONDITION_FAILED',
+              message: error.message,
+              details: { skillCode: error.code },
+            })
+          }
+
+          throw error
+        }
+      },
+      'skills:refresh': () => skillsManager.refresh(),
+      'skills:setEnabled': async (payload) => ({
+        updated: await skillsManager.setEnabled(payload.name, payload.enabled),
+      }),
+      'trace:list': () => traceService.list(),
+      'trace:replay': async (payload) => {
+        try {
+          return await traceService.replay(payload.traceId)
+        } catch (error) {
+          if (error instanceof TraceServiceError) {
+            throw new IpcFault({
+              code:
+                error.code === 'TRACE_NOT_FOUND' ||
+                error.code === 'FORK_POINT_NOT_FOUND'
+                  ? 'NOT_FOUND'
+                  : 'PRECONDITION_FAILED',
+              message: error.message,
+            })
+          }
+
+          throw error
+        }
+      },
+      'trace:stats': (payload) => traceService.stats(payload.traceId),
+      'trace:fork': async (payload) => {
+        try {
+          const point = await traceService.forkPoint(
+            payload.traceId,
+            payload.eventId,
+          )
+          return await sessionManager.createForkFromTrace(point)
+        } catch (error) {
+          if (error instanceof TraceServiceError) {
+            throw new IpcFault({
+              code:
+                error.code === 'TRACE_NOT_FOUND' ||
+                error.code === 'FORK_POINT_NOT_FOUND'
+                  ? 'NOT_FOUND'
+                  : 'PRECONDITION_FAILED',
+              message: error.message,
+            })
+          }
+
+          throw error
+        }
+      },
+      'trace:start-fork': (payload) => ({
+        runId: sessionManager.startForkRun(payload.sessionId),
+      }),
+      'logs:open-directory': async () => {
+        await traceService.initialize()
+        const error = await shell.openPath(traceService.directory)
+
+        if (error) {
+          throw new IpcFault({ code: 'NOT_AVAILABLE', message: error })
+        }
+
+        return { accepted: true }
+      },
+      'logs:clear-closed': async () => ({
+        deleted: await traceService.clearClosed(
+          sessionManager.activeTraceIds(),
+        ),
+      }),
     },
     onDiagnostic: (message, error) => console.error(message, error),
   })

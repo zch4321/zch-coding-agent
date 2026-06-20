@@ -6,7 +6,7 @@ import {
   type Page,
 } from '@playwright/test'
 import type { ChildProcess } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { AGENT_API_KEYS } from '../shared/agent-api'
@@ -71,7 +71,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
     })
   })
 
-  test('serves config through validated IPC and rejects unavailable features', async () => {
+  test('serves config and the bounded skills catalog through validated IPC', async () => {
     const results = await page.evaluate(async () => {
       const api = Reflect.get(window, 'agentApi') as {
         getConfig(payload: unknown): Promise<unknown>
@@ -101,8 +101,8 @@ test.describe.serial('Electron security and IPC baseline', () => {
     expect(JSON.stringify(results.config)).not.toContain('apiKeyRef')
     expect(results.skills).toMatchObject({
       version: 1,
-      ok: false,
-      error: { code: 'NOT_AVAILABLE' },
+      ok: true,
+      value: { skills: [], diagnostics: [] },
     })
   })
 
@@ -277,6 +277,49 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await page.keyboard.press('Enter')
     await expect(modelSelect).toContainText('custom-e2e-model')
     await page.keyboard.press('Escape')
+  })
+
+  test('exposes skill management and bounded trace diagnostics in settings', async () => {
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.evaluate(() => {
+      document
+        .querySelector<HTMLButtonElement>('[aria-label="Open settings"]')
+        ?.click()
+    })
+    const navigation = page.getByRole('navigation', {
+      name: 'Settings sections',
+    })
+    await navigation.getByRole('button', { name: 'Skills' }).click()
+    const skills = page.locator('.settings-section')
+    await expect(skills.getByText('No valid skills found.')).toBeVisible()
+    await expect(
+      skills.getByPlaceholder('https://example.com/skill.md'),
+    ).toBeVisible()
+    await expect(
+      skills.getByRole('button', { name: 'Install file' }),
+    ).toBeVisible()
+    await expect(skills.getByRole('button', { name: 'Refresh' })).toBeVisible()
+    await writeFile(
+      path.join(userDataPath, 'skills', 'e2e-skill.md'),
+      '---\nname: e2e-skill\ndescription: E2E skill without optional trigger\n---\nUse E2E instructions.\n',
+    )
+    await skills.getByRole('button', { name: 'Refresh' }).click()
+    await expect(skills.getByText('e2e-skill', { exact: true })).toBeVisible()
+    await expect(
+      skills.getByText('E2E skill without optional trigger'),
+    ).toBeVisible()
+
+    await navigation.getByRole('button', { name: 'Logging' }).click()
+    const logging = page.locator('.settings-section')
+    await expect(
+      logging.getByRole('button', { name: 'Open log directory' }),
+    ).toBeVisible()
+    await expect(
+      logging.getByRole('button', { name: 'Clear closed traces' }),
+    ).toBeVisible()
+    await expect(logging.getByText('Offline replay and fork')).toBeVisible()
+    await expect(logging.getByText('Requests')).toBeVisible()
   })
 
   test('opens, drives, restores, and closes persistent terminal tabs', async () => {

@@ -63,6 +63,7 @@ export interface ProviderRequestSnapshot {
 export interface ProviderChatRequest {
   messages: ProviderMessage[]
   tools: JsonValue[]
+  providerRequestOverride?: JsonValue
   signal: AbortSignal
   onRequest?: (snapshot: ProviderRequestSnapshot) => Promise<void> | void
 }

@@ -68,6 +68,11 @@ export const DeepSeekPublicConfigSchema = Type.Object(
       { maxProperties: 256 },
     ),
     credentialConfigured: Type.Boolean(),
+    credentialSource: Type.Union([
+      Type.Literal('none'),
+      Type.Literal('safe-storage'),
+      Type.Literal('environment'),
+    ]),
   },
   { additionalProperties: false },
 )

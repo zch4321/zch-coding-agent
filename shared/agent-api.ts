@@ -83,6 +83,25 @@ export interface AgentApi {
   setSkillEnabled(
     payload: IpcPayload<'skills:setEnabled'>,
   ): Promise<IpcResult<'skills:setEnabled'>>
+  listTraces(
+    payload: IpcPayload<'trace:list'>,
+  ): Promise<IpcResult<'trace:list'>>
+  replayTrace(
+    payload: IpcPayload<'trace:replay'>,
+  ): Promise<IpcResult<'trace:replay'>>
+  getTraceStats(
+    payload: IpcPayload<'trace:stats'>,
+  ): Promise<IpcResult<'trace:stats'>>
+  forkTrace(payload: IpcPayload<'trace:fork'>): Promise<IpcResult<'trace:fork'>>
+  startTraceFork(
+    payload: IpcPayload<'trace:start-fork'>,
+  ): Promise<IpcResult<'trace:start-fork'>>
+  openLogDirectory(
+    payload: IpcPayload<'logs:open-directory'>,
+  ): Promise<IpcResult<'logs:open-directory'>>
+  clearClosedTraces(
+    payload: IpcPayload<'logs:clear-closed'>,
+  ): Promise<IpcResult<'logs:clear-closed'>>
   onAgentEvent(listener: (event: AgentEventEnvelope) => void): Unsubscribe
   onTerminalEvent(listener: (event: TerminalEventEnvelope) => void): Unsubscribe
 }
@@ -113,6 +132,13 @@ export const AGENT_API_KEYS = [
   'chooseAndInstallSkill',
   'refreshSkills',
   'setSkillEnabled',
+  'listTraces',
+  'replayTrace',
+  'getTraceStats',
+  'forkTrace',
+  'startTraceFork',
+  'openLogDirectory',
+  'clearClosedTraces',
   'onAgentEvent',
   'onTerminalEvent',
 ] as const satisfies readonly (keyof AgentApi)[]

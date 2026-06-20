@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { Type } from '@sinclair/typebox'
 import type { JsonValue } from '../../shared/json'
@@ -8,6 +8,7 @@ import { matchesGlob, normalizePortablePath } from './glob'
 import { PathGuard, PathGuardError } from './path-guard'
 import type { ToolRegistry } from './tool-registry'
 import { estimateTextTokens, truncateTextHeadTail } from './context-budget'
+import { BoundedRegexSearcher } from './regex-search'
 
 const DEFAULT_MAX_ENTRIES = 200
 const DEFAULT_GREP_FILE_BYTES = 256_000
@@ -65,7 +66,6 @@ const GrepArgsSchema = Type.Object(
 
 interface WalkedFile {
   path: string
-  absolutePath: string
 }
 
 function workspaceGuard(canonicalPath: string): PathGuard {
@@ -138,7 +138,7 @@ async function walkFiles(
       }
 
       guard.assertInside(absolutePath)
-      files.push({ path: relativePath, absolutePath })
+      files.push({ path: relativePath })
 
       if (files.length >= maxResults) {
         truncated = true
@@ -385,10 +385,6 @@ export function createReadOnlyToolDefinitions(
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)
-        const pattern = new RegExp(
-          args.pattern,
-          args.caseSensitive ? 'u' : 'iu',
-        )
         const maxResults = args.maxResults ?? DEFAULT_MAX_ENTRIES
         const walked = await walkFiles(
           guard,
@@ -402,36 +398,48 @@ export function createReadOnlyToolDefinitions(
           line: number
           text: string
         }> = []
+        const searcher = new BoundedRegexSearcher()
 
-        for (const file of walked.files) {
-          if (matches.length >= maxResults) {
-            break
-          }
-
-          if (!matchesGlob(include, file.path)) {
-            continue
-          }
-
-          const content = await readFile(file.absolutePath, {
-            encoding: 'utf8',
-            signal: context.signal,
-          }).catch(() => '')
-          const limited = content.slice(0, DEFAULT_GREP_FILE_BYTES)
-          const lines = limited.split(/\r?\n/)
-
-          for (const [index, line] of lines.entries()) {
-            if (pattern.test(line)) {
-              matches.push({
-                path: file.path,
-                line: index + 1,
-                text: line.slice(0, 1_000),
-              })
-            }
-
+        try {
+          for (const file of walked.files) {
             if (matches.length >= maxResults) {
               break
             }
+
+            if (!matchesGlob(include, file.path)) {
+              continue
+            }
+
+            const source = await guard
+              .readFileBounded(
+                file.path,
+                DEFAULT_GREP_FILE_BYTES,
+                context.signal,
+              )
+              .catch(() => undefined)
+
+            if (!source) {
+              continue
+            }
+
+            const fileMatches = await searcher.search({
+              pattern: args.pattern,
+              caseSensitive: Boolean(args.caseSensitive),
+              content: source.content,
+              maxResults: maxResults - matches.length,
+              signal: context.signal,
+            })
+
+            for (const match of fileMatches) {
+              matches.push({
+                path: file.path,
+                line: match.line,
+                text: match.text,
+              })
+            }
           }
+        } finally {
+          await searcher.close()
         }
 
         return {

@@ -9,12 +9,18 @@ import type { SecretStore, SecretStorageStatus } from './secret-store'
 export class ConfigStore {
   readonly #filePath: string
   readonly #secretStore: SecretStore
+  readonly #environmentApiKey: string | undefined
   #config: AppConfig = structuredClone(DEFAULT_APP_CONFIG)
   #mutation = Promise.resolve()
 
-  constructor(filePath: string, secretStore: SecretStore) {
+  constructor(
+    filePath: string,
+    secretStore: SecretStore,
+    options: { environmentApiKey?: string } = {},
+  ) {
     this.#filePath = filePath
     this.#secretStore = secretStore
+    this.#environmentApiKey = options.environmentApiKey?.trim() || undefined
   }
 
   async initialize(): Promise<{
@@ -32,9 +38,17 @@ export class ConfigStore {
   }
 
   getPublicConfig(): PublicConfig {
+    const stored = this.#secretStore.has(
+      this.#config.providers.deepseek.apiKeyRef,
+    )
     return toPublicConfig(
       this.#config,
-      this.#secretStore.has(this.#config.providers.deepseek.apiKeyRef),
+      stored || Boolean(this.#environmentApiKey),
+      stored
+        ? 'safe-storage'
+        : this.#environmentApiKey
+          ? 'environment'
+          : 'none',
     )
   }
 
@@ -44,7 +58,10 @@ export class ConfigStore {
 
   async getDeepSeekApiKey(): Promise<string | undefined> {
     const reference = this.#config.providers.deepseek.apiKeyRef
-    return reference ? this.#secretStore.get(reference) : undefined
+    const stored = reference
+      ? await this.#secretStore.get(reference)
+      : undefined
+    return stored ?? this.#environmentApiKey
   }
 
   update(request: ConfigSetRequest): Promise<PublicConfig> {

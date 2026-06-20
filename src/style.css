@@ -967,6 +967,15 @@ code {
   font-size: 11px;
 }
 
+.terminal-notice {
+  margin: 0;
+  padding: 6px 10px;
+  color: var(--warning);
+  border-bottom: 1px solid var(--border-subtle);
+  background: #fff8c5;
+  font-size: 11px;
+}
+
 .terminal-empty {
   display: grid;
   place-content: center;
@@ -1616,6 +1625,69 @@ code {
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--surface);
+}
+
+.skill-list {
+  display: grid;
+  gap: 8px;
+}
+
+.skill-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.skill-list article > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.skill-list span,
+.skill-list small {
+  color: var(--text-secondary);
+}
+
+.trace-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.trace-stats article {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.trace-stats span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.trace-stats strong {
+  font-size: 12px;
+}
+
+.trace-debug {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.trace-debug h3 {
+  margin: 0;
+  font-size: 14px;
 }
 
 .remembered-rules article > div {

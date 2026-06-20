@@ -138,6 +138,7 @@ export const AgentEventSchema = Type.Union([
       diff: Type.Optional(Type.String({ maxLength: 262_144 })),
       diffHash: Type.Optional(Type.String({ maxLength: 128 })),
       rememberable: Type.Boolean(),
+      rememberArgConstraints: Type.Optional(JsonValueSchema),
       expiresAt: Type.String({ format: 'date-time' }),
     }),
   ]),

@@ -18,6 +18,22 @@ const result: ToolResult = {
 }
 
 describe('P3 context ingress modes', () => {
+  it('detects sensitive paths before tool execution', () => {
+    const decision = new ContextIngressFilter().evaluatePath(
+      {
+        mode: 'confirm',
+        pathGlobs: ['.env*'],
+        contentPatterns: [],
+      },
+      call,
+    )
+
+    expect(decision).toMatchObject({
+      action: 'confirm',
+      signals: [expect.objectContaining({ code: 'sensitive_path' })],
+    })
+  })
+
   it.each([
     ['off', 'allow'],
     ['warn', 'warn'],

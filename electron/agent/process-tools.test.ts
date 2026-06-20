@@ -33,6 +33,20 @@ describe('run_command provider schema', () => {
       },
     })
     expect(definition?.inputSchema).not.toHaveProperty('anyOf')
+
+    const providerDefinition = registry.providerDefinitions()[0]
+    expect(providerDefinition).toMatchObject({
+      function: {
+        'x-agent-intent-property': '_agent_intent',
+        parameters: {
+          required: expect.arrayContaining(['mode', '_agent_intent']),
+          properties: { _agent_intent: expect.any(Object) },
+        },
+      },
+    })
+    expect(definition?.inputSchema).not.toHaveProperty(
+      'properties._agent_intent',
+    )
   })
 
   it.each([

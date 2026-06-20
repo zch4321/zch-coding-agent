@@ -130,5 +130,14 @@ describe('P3 policy engine', () => {
       approvedBy: 'remembered',
     })
     expect(evaluatePolicy({ ...base, mode: 'confirm' }).kind).toBe('review')
+    expect(
+      evaluatePolicy({
+        ...base,
+        mode: 'auto',
+        policySignals: [
+          { code: 'danger', severity: 'danger', detail: 'danger fixture' },
+        ],
+      }).kind,
+    ).toBe('review')
   })
 })

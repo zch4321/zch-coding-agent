@@ -107,6 +107,17 @@ export function evaluatePolicy(input: PolicyInput): PolicyOutcome {
     }
   }
 
+  if (
+    input.builtinPolicies &&
+    (input.effectiveRisk === 'high' ||
+      input.policySignals.some((signal) => signal.severity === 'danger'))
+  ) {
+    return {
+      kind: 'review',
+      reason: 'Deterministic policy requires human review',
+    }
+  }
+
   const rule = matchingRule(input)
 
   if (rule?.effect === 'review') {
@@ -118,17 +129,6 @@ export function evaluatePolicy(input: PolicyInput): PolicyOutcome {
 
   if (rule?.effect === 'allow') {
     return { kind: 'allow', approvedBy: 'remembered' }
-  }
-
-  if (
-    input.builtinPolicies &&
-    (input.effectiveRisk === 'high' ||
-      input.policySignals.some((signal) => signal.severity === 'danger'))
-  ) {
-    return {
-      kind: 'review',
-      reason: 'Deterministic policy requires human review',
-    }
   }
 
   return {

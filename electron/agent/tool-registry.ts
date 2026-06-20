@@ -19,6 +19,46 @@ interface RegisteredTool {
   readonly validate: ValidateFunction
 }
 
+const INTENT_FIELD_BASE = '_agent_intent'
+
+function providerParameters(definition: ToolDefinition): {
+  parameters: JsonValue
+  intentField: string
+} {
+  const schema = structuredClone(definition.inputSchema) as Record<
+    string,
+    unknown
+  >
+  const properties =
+    schema.properties &&
+    typeof schema.properties === 'object' &&
+    !Array.isArray(schema.properties)
+      ? (schema.properties as Record<string, unknown>)
+      : {}
+  let intentField = INTENT_FIELD_BASE
+  let suffix = 2
+
+  while (Object.hasOwn(properties, intentField)) {
+    intentField = `${INTENT_FIELD_BASE}_${suffix}`
+    suffix += 1
+  }
+
+  properties[intentField] = {
+    type: 'string',
+    minLength: 1,
+    maxLength: 2_048,
+    description:
+      'Briefly state why this tool call is needed. This metadata is removed before tool execution.',
+  }
+  schema.properties = properties
+  schema.required = [
+    ...(Array.isArray(schema.required) ? schema.required : []),
+    intentField,
+  ]
+
+  return { parameters: schema as JsonValue, intentField }
+}
+
 export class ToolRegistry implements ToolRegistrationPort {
   readonly #tools = new Map<string, RegisteredTool>()
 
@@ -42,14 +82,18 @@ export class ToolRegistry implements ToolRegistrationPort {
   }
 
   providerDefinitions(): JsonValue[] {
-    return this.list().map((definition) => ({
-      type: 'function',
-      function: {
-        name: definition.id,
-        description: definition.description,
-        parameters: definition.inputSchema as JsonValue,
-      },
-    }))
+    return this.list().map((definition) => {
+      const { parameters, intentField } = providerParameters(definition)
+      return {
+        type: 'function',
+        function: {
+          name: definition.id,
+          description: definition.description,
+          parameters,
+          'x-agent-intent-property': intentField,
+        },
+      }
+    })
   }
 
   validateArgs<Schema extends TSchema>(
@@ -109,18 +153,43 @@ function boundResult(result: ToolResult, maxBytes: number): ToolResult {
     }
   }
 
-  const preview = serialized.slice(0, Math.max(0, maxBytes - 256))
-
-  return {
+  const bytes = Buffer.from(serialized, 'utf8')
+  let lower = 0
+  let upper = bytes.length
+  let bounded: ToolResult = {
     status: 'ok',
     content: {
       truncated: true,
-      preview,
+      preview: '',
       message: 'Tool output exceeded the configured limit',
     },
     truncated: true,
     totalBytes,
   }
+
+  while (lower <= upper) {
+    const retained = Math.floor((lower + upper) / 2)
+    const preview = new TextDecoder().decode(bytes.subarray(0, retained))
+    const candidate: ToolResult = {
+      status: 'ok',
+      content: {
+        truncated: true,
+        preview,
+        message: 'Tool output exceeded the configured limit',
+      },
+      truncated: true,
+      totalBytes,
+    }
+
+    if (Buffer.byteLength(JSON.stringify(candidate), 'utf8') <= maxBytes) {
+      bounded = candidate
+      lower = retained + 1
+    } else {
+      upper = retained - 1
+    }
+  }
+
+  return bounded
 }
 
 export class ToolExecutor {
