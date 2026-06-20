@@ -96,6 +96,7 @@ export const PublicConfigSchema = Type.Object(
     ),
     permission: Type.Object(
       {
+        defaultMode: PermissionModeSchema,
         builtinPolicies: Type.Boolean(),
         rememberedRules: Type.Array(RememberedRuleSchema, { maxItems: 256 }),
         sensitiveData: Type.Object(
@@ -244,6 +245,32 @@ export const ConfigSetRequestSchema = Type.Union([
   Type.Object(
     {
       version: Type.Literal(1),
+      kind: Type.Literal('provider-settings'),
+      baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
+      model: Type.String({ minLength: 1, maxLength: 256 }),
+      contextWindowTokens: Type.Optional(
+        Type.Union([
+          Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+          Type.Null(),
+        ]),
+      ),
+      maxOutputTokens: Type.Optional(
+        Type.Union([
+          Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+          Type.Null(),
+        ]),
+      ),
+      reasoning: Type.Union([Type.Literal('auto'), Type.Literal('off')]),
+      approverProvider: Type.String({ minLength: 1, maxLength: 128 }),
+      approverModel: Type.String({ minLength: 1, maxLength: 256 }),
+      limits: PublicConfigSchema.properties.limits,
+      apiKey: Type.Optional(Type.String({ minLength: 1, maxLength: 16_384 })),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
       kind: Type.Literal('credential'),
       action: Type.Literal('set'),
       apiKey: Type.String({ minLength: 1, maxLength: 16_384 }),
@@ -271,6 +298,7 @@ export const ConfigSetRequestSchema = Type.Union([
     {
       version: Type.Literal(1),
       kind: Type.Literal('permission'),
+      defaultMode: PermissionModeSchema,
       builtinPolicies: Type.Boolean(),
       rememberedRules: Type.Array(RememberedRuleSchema, { maxItems: 256 }),
       sensitiveData: Type.Object(

@@ -34,6 +34,9 @@ export interface AgentApi {
   closeSession(
     payload: IpcPayload<'session:close'>,
   ): Promise<IpcResult<'session:close'>>
+  updateSessionMode(
+    payload: IpcPayload<'session:update-mode'>,
+  ): Promise<IpcResult<'session:update-mode'>>
   startRun(payload: IpcPayload<'run:start'>): Promise<IpcResult<'run:start'>>
   interruptRun(
     payload: IpcPayload<'run:interrupt'>,
@@ -115,6 +118,7 @@ export const AGENT_API_KEYS = [
   'readWorkspaceFile',
   'createSession',
   'closeSession',
+  'updateSessionMode',
   'startRun',
   'interruptRun',
   'decideApproval',

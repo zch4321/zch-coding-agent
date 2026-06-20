@@ -54,6 +54,7 @@ const validPayloads: {
     provider: 'deepseek',
   },
   'session:close': { version: 1, sessionId },
+  'session:update-mode': { version: 1, sessionId, mode: 'auto' },
   'run:start': {
     version: 1,
     sessionId,

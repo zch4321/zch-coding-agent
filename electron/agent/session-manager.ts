@@ -368,6 +368,25 @@ export class SessionManager {
     return sessionId
   }
 
+  async updateSessionMode(
+    sessionId: SessionId,
+    mode: PermissionMode,
+  ): Promise<boolean> {
+    const session = this.#sessions.get(sessionId)
+
+    if (!session || session.closed || session.activeRun) {
+      return false
+    }
+
+    await session.logger.write({
+      type: 'session.mode',
+      sessionId,
+      mode,
+    })
+    session.mode = mode
+    return true
+  }
+
   async closeSession(sessionId: SessionId): Promise<boolean> {
     const session = this.#sessions.get(sessionId)
 
@@ -786,8 +805,6 @@ export class SessionManager {
       signal: run.controller.signal,
       onRequest,
     })) {
-      await this.#recordProviderEvent(session, run, llmCallId, event)
-
       if (event.type === 'text.delta') {
         text += event.delta
         this.#emit(session, {
@@ -844,26 +861,6 @@ export class SessionManager {
       text,
       reasoning,
     }
-  }
-
-  async #recordProviderEvent(
-    session: SessionState,
-    run: ActiveRun,
-    callId: CallId,
-    event: ProviderEvent,
-  ): Promise<void> {
-    if (event.type === 'completed') {
-      return
-    }
-
-    await session.logger.write({
-      type: 'llm.stream',
-      sessionId: session.sessionId,
-      runId: run.runId,
-      callId,
-      providerEvent: toJsonValue(event),
-      elapsedMs: 0,
-    })
   }
 
   async #executeToolCalls(
@@ -961,6 +958,7 @@ export class SessionManager {
                 await this.#configStore.update({
                   version: 1,
                   kind: 'permission',
+                  defaultMode: latest.permission.defaultMode,
                   builtinPolicies: latest.permission.builtinPolicies,
                   rememberedRules: [
                     ...latest.permission.rememberedRules,
@@ -1102,6 +1100,11 @@ export class SessionManager {
       reason: request.call.reason,
     })
     this.#setRunStatus(session, run, 'awaiting_approval')
+    const decisionPromise = this.#awaitApproval(
+      run,
+      request.call.id,
+      request.expiresAt,
+    )
     this.#emit(session, {
       type: 'approval.requested',
       sessionId: session.sessionId,
@@ -1119,11 +1122,7 @@ export class SessionManager {
       expiresAt: request.expiresAt,
     })
 
-    const decision = await this.#awaitApproval(
-      run,
-      request.call.id,
-      request.expiresAt,
-    )
+    const decision = await decisionPromise
 
     await session.logger.write({
       type: 'approval',
@@ -1214,6 +1213,7 @@ export class SessionManager {
       reason: summary,
     })
     this.#setRunStatus(session, run, 'awaiting_approval')
+    const approvalPromise = this.#awaitApproval(run, call.id, expiresAt)
     this.#emit(session, {
       type: 'approval.requested',
       sessionId: session.sessionId,
@@ -1228,7 +1228,7 @@ export class SessionManager {
       expiresAt,
     })
 
-    const approval = await this.#awaitApproval(run, call.id, expiresAt)
+    const approval = await approvalPromise
 
     await session.logger.write({
       type: 'approval',

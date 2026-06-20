@@ -113,4 +113,23 @@ describe('App', () => {
     expect(wrapper.find('.approval-card script').exists()).toBe(false)
     expect(wrapper.find('.approval-card img').exists()).toBe(false)
   })
+
+  it('keeps request failures visible outside the scrollable history', async () => {
+    const pinia = createPinia()
+    const wrapper = mount(App, {
+      global: {
+        plugins: [pinia],
+      },
+    })
+    const store = useAgentStore(pinia)
+    store.error = 'Approval request failed'
+    await nextTick()
+
+    expect(wrapper.get('.conversation-error-overlay').text()).toContain(
+      'Approval request failed',
+    )
+    expect(
+      wrapper.find('.conversation-scroll .conversation-error-overlay').exists(),
+    ).toBe(false)
+  })
 })

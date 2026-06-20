@@ -31,6 +31,7 @@ describe('trace replay', () => {
         model: 'deepseek-chat',
         mode: 'readonly',
       },
+      { type: 'session.mode', sessionId, mode: 'auto' },
       { type: 'run.start', sessionId, runId },
       { type: 'user.message', sessionId, runId, text: 'hello' },
       {
@@ -65,6 +66,7 @@ describe('trace replay', () => {
       { role: 'agent', text: 'hi', reasoning: undefined },
     ])
     expect(first.runs[runId]).toBe('completed')
+    expect(first.mode).toBe('auto')
     expect(first.closed).toBe(true)
     expect(first.agentEvents.map((event) => event.type)).toEqual([
       'run.status',

@@ -42,6 +42,14 @@ export const TraceEventSchema = Type.Union([
   Type.Composite([
     TraceBaseSchema,
     Type.Object({
+      type: Type.Literal('session.mode'),
+      sessionId: SessionIdSchema,
+      mode: Type.String({ maxLength: 64 }),
+    }),
+  ]),
+  Type.Composite([
+    TraceBaseSchema,
+    Type.Object({
       type: Type.Literal('run.start'),
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
@@ -180,6 +188,7 @@ export type TraceEventInput =
       forkedFromEventId?: EventId
     })
   | (TraceInputBase & { type: 'session.end' })
+  | (TraceInputBase & { type: 'session.mode'; mode: string })
   | (TraceInputBase & { type: 'run.start'; runId: RunId })
   | (TraceInputBase & {
       type: 'run.end'

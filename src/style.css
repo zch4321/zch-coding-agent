@@ -500,7 +500,19 @@ textarea:focus-visible {
 }
 
 .conversation-pane.terminal-open {
-  grid-template-rows: auto minmax(0, 1fr) auto minmax(210px, 35%);
+  grid-template-rows:
+    auto minmax(0, 1fr) auto
+    minmax(160px, var(--terminal-height, 35%));
+}
+
+.terminal-resize-handle {
+  position: absolute;
+  z-index: 2;
+  top: -3px;
+  right: 0;
+  left: 0;
+  height: 6px;
+  cursor: ns-resize;
 }
 
 .conversation-pane.terminal-maximized {
@@ -569,10 +581,56 @@ textarea:focus-visible {
   background: #ffebe9;
 }
 
+.conversation-timeline {
+  position: relative;
+  min-height: 0;
+}
+
 .conversation-scroll {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
   min-height: 0;
   overflow: auto;
   padding: 24px clamp(18px, 5vw, 52px);
+}
+
+.conversation-error-overlay {
+  position: absolute;
+  z-index: 8;
+  right: 18px;
+  bottom: 12px;
+  left: 18px;
+  width: min(760px, calc(100% - 36px));
+  margin: 0 auto;
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.18);
+}
+
+.conversation-scroll > .inline-alert {
+  order: -1;
+}
+
+.conversation-scroll > .conversation-empty {
+  order: 0;
+}
+
+.conversation-scroll > .back-to-bottom {
+  order: 2147483647;
+}
+
+.back-to-bottom {
+  position: sticky;
+  bottom: 10px;
+  display: block;
+  margin: 0 auto;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--background);
+  box-shadow: 0 4px 12px rgba(31, 35, 40, 0.12);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .inline-alert,
@@ -1188,6 +1246,45 @@ code {
   background: var(--background);
 }
 
+.file-tab {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.file-tab > button:first-child {
+  min-width: 0;
+}
+
+.file-tab.active {
+  border-bottom: 2px solid var(--accent);
+  background: var(--background);
+}
+
+.file-tab .tab-close {
+  width: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.composer-model-select {
+  width: min(240px, 32vw);
+}
+
+.provider-settings-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: var(--background);
+}
+
 .file-tabs button > span:not(.tab-close) {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1368,6 +1465,38 @@ code {
   min-width: max-content;
   padding: 10px 0 24px;
   background: var(--background);
+}
+
+.file-code-highlight {
+  min-width: max-content;
+  counter-reset: file-line;
+}
+
+.file-code-highlight .shiki {
+  margin: 0;
+  padding: 10px 14px 24px 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--background) !important;
+}
+
+.file-code-highlight .line {
+  display: block;
+  min-height: 21px;
+  line-height: 21px;
+  counter-increment: file-line;
+}
+
+.file-code-highlight .line::before {
+  display: inline-block;
+  width: 42px;
+  margin-right: 12px;
+  padding-right: 9px;
+  border-right: 1px solid var(--border-subtle);
+  color: #8c959f;
+  content: counter(file-line);
+  text-align: right;
+  user-select: none;
 }
 
 .code-line {

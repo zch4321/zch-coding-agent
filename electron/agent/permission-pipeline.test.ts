@@ -8,6 +8,7 @@ import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import type { AutoApprover } from './auto-approver'
 import { registerFileTools } from './file-tools'
 import { PermissionPipeline } from './permission-pipeline'
+import { registerProcessTools } from './process-tools'
 import { ToolRegistry } from './tool-registry'
 
 const sessionId = 'session:pipeline' as SessionId
@@ -22,6 +23,9 @@ async function workspace() {
 function fixture(call: ToolCall) {
   const registry = new ToolRegistry()
   registerFileTools(registry)
+  registerProcessTools(registry, () =>
+    toPublicConfig(DEFAULT_APP_CONFIG, false),
+  )
   const definition = registry.get(call.toolId)
 
   if (!definition) {
@@ -141,4 +145,134 @@ describe('P3 permission pipeline ordering', () => {
       result: { status: 'denied', message: 'blocked by security hook' },
     })
   })
+
+  it('delegates a bounded shell version query to the Auto approver', async () => {
+    const root = await workspace()
+    const call: ToolCall = {
+      id: 'call:npm-version' as CallId,
+      toolId: 'run_command',
+      args: { mode: 'shell', command: 'npm --version' },
+      reason: 'Check npm version',
+    }
+    const { definition, pipeline } = fixture(call)
+    const autoApprover: AutoApprover = {
+      evaluate: vi.fn(async () => ({
+        decision: 'safe' as const,
+        note: 'Read-only version query',
+        valid: true,
+      })),
+    }
+    const requestHumanApproval = vi.fn(async () => ({
+      decision: 'deny' as const,
+    }))
+
+    const result = await pipeline.authorize({
+      sessionId,
+      runId,
+      workspace: root,
+      mode: 'auto',
+      call,
+      definition,
+      config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+      signal: new AbortController().signal,
+      autoApprover,
+      requestHumanApproval,
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      approvedCall: { approvedBy: 'model' },
+    })
+    expect(autoApprover.evaluate).toHaveBeenCalledOnce()
+    expect(requestHumanApproval).not.toHaveBeenCalled()
+  })
+
+  it.each(['npm install', 'rm build.log', 'echo hello | findstr hello'])(
+    'delegates a non-blacklisted shell command to Auto: %s',
+    async (command) => {
+      const root = await workspace()
+      const call: ToolCall = {
+        id: 'call:general-shell' as CallId,
+        toolId: 'run_command',
+        args: { mode: 'shell', command },
+        reason: 'Run a general shell command',
+      }
+      const { definition, pipeline } = fixture(call)
+      const autoApprover: AutoApprover = {
+        evaluate: vi.fn(async () => ({
+          decision: 'safe' as const,
+          note: 'safe',
+          valid: true,
+        })),
+      }
+      const requestHumanApproval = vi.fn(async () => ({
+        decision: 'deny' as const,
+      }))
+
+      const result = await pipeline.authorize({
+        sessionId,
+        runId,
+        workspace: root,
+        mode: 'auto',
+        call,
+        definition,
+        config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+        signal: new AbortController().signal,
+        autoApprover,
+        requestHumanApproval,
+      })
+
+      expect(result).toMatchObject({
+        ok: true,
+        approvedCall: { approvedBy: 'model' },
+      })
+      expect(autoApprover.evaluate).toHaveBeenCalledOnce()
+      expect(requestHumanApproval).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([
+    'rm -rf build',
+    'rm -r -f build',
+    'Remove-Item build -Recurse -Force',
+    'git push origin main',
+  ])(
+    'keeps a blacklisted command on human review in Auto: %s',
+    async (command) => {
+      const root = await workspace()
+      const call: ToolCall = {
+        id: 'call:blacklisted-shell' as CallId,
+        toolId: 'run_command',
+        args: { mode: 'shell', command },
+        reason: 'Run a dangerous shell command',
+      }
+      const { definition, pipeline } = fixture(call)
+      const autoApprover: AutoApprover = {
+        evaluate: vi.fn(async () => ({
+          decision: 'safe' as const,
+          note: 'safe',
+          valid: true,
+        })),
+      }
+      const requestHumanApproval = vi.fn(async () => ({
+        decision: 'deny' as const,
+      }))
+
+      await pipeline.authorize({
+        sessionId,
+        runId,
+        workspace: root,
+        mode: 'auto',
+        call,
+        definition,
+        config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+        signal: new AbortController().signal,
+        autoApprover,
+        requestHumanApproval,
+      })
+
+      expect(autoApprover.evaluate).not.toHaveBeenCalled()
+      expect(requestHumanApproval).toHaveBeenCalledOnce()
+    },
+  )
 })

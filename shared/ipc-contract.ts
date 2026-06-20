@@ -245,6 +245,17 @@ export const IPC_CONTRACTS = {
     ),
     result: ipcResultSchema(AcceptedSchema),
   },
+  'session:update-mode': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        sessionId: SessionIdSchema,
+        mode: PermissionModeSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(AcceptedSchema),
+  },
   'run:start': {
     payload: Type.Object(
       {

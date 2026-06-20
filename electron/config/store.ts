@@ -6,6 +6,42 @@ import { migrateConfig } from './migrations'
 import { DEFAULT_APP_CONFIG, toPublicConfig, type AppConfig } from './schema'
 import type { SecretStore, SecretStorageStatus } from './secret-store'
 
+type ProviderUpdate = Extract<
+  ConfigSetRequest,
+  { kind: 'provider' | 'provider-settings' }
+>
+
+function applyProviderUpdate(next: AppConfig, request: ProviderUpdate): void {
+  next.providers.deepseek.baseURL = request.baseURL
+  next.providers.deepseek.model = request.model
+  next.providers.deepseek.reasoning = request.reasoning
+  next.providers.deepseek.modelOverrides[request.model] = {
+    ...next.providers.deepseek.modelOverrides[request.model],
+  }
+
+  if (request.contextWindowTokens === null) {
+    delete next.providers.deepseek.modelOverrides[request.model]
+      .contextWindowTokens
+  } else if (request.contextWindowTokens !== undefined) {
+    next.providers.deepseek.modelOverrides[request.model].contextWindowTokens =
+      request.contextWindowTokens
+  }
+
+  if (request.maxOutputTokens === null) {
+    delete next.providers.deepseek.modelOverrides[request.model].maxOutputTokens
+  } else if (request.maxOutputTokens !== undefined) {
+    next.providers.deepseek.modelOverrides[request.model].maxOutputTokens =
+      request.maxOutputTokens
+  }
+
+  if (
+    Object.keys(next.providers.deepseek.modelOverrides[request.model])
+      .length === 0
+  ) {
+    delete next.providers.deepseek.modelOverrides[request.model]
+  }
+}
+
 export class ConfigStore {
   readonly #filePath: string
   readonly #secretStore: SecretStore
@@ -97,38 +133,35 @@ export class ConfigStore {
 
     switch (request.kind) {
       case 'provider':
-        next.providers.deepseek.baseURL = request.baseURL
-        next.providers.deepseek.model = request.model
-        next.providers.deepseek.reasoning = request.reasoning
-        next.providers.deepseek.modelOverrides[request.model] = {
-          ...next.providers.deepseek.modelOverrides[request.model],
-        }
-
-        if (request.contextWindowTokens === null) {
-          delete next.providers.deepseek.modelOverrides[request.model]
-            .contextWindowTokens
-        } else if (request.contextWindowTokens !== undefined) {
-          next.providers.deepseek.modelOverrides[
-            request.model
-          ].contextWindowTokens = request.contextWindowTokens
-        }
-
-        if (request.maxOutputTokens === null) {
-          delete next.providers.deepseek.modelOverrides[request.model]
-            .maxOutputTokens
-        } else if (request.maxOutputTokens !== undefined) {
-          next.providers.deepseek.modelOverrides[
-            request.model
-          ].maxOutputTokens = request.maxOutputTokens
-        }
-
-        if (
-          Object.keys(next.providers.deepseek.modelOverrides[request.model])
-            .length === 0
-        ) {
-          delete next.providers.deepseek.modelOverrides[request.model]
-        }
+        applyProviderUpdate(next, request)
         break
+      case 'provider-settings': {
+        applyProviderUpdate(next, request)
+        next.approval = {
+          approverProvider: request.approverProvider,
+          approverModel: request.approverModel,
+        }
+        next.limits = structuredClone(request.limits)
+
+        if (request.apiKey === undefined) {
+          break
+        }
+
+        const previousReference = next.providers.deepseek.apiKeyRef
+        const newReference = await this.#secretStore.set(request.apiKey)
+        next.providers.deepseek.apiKeyRef = newReference
+
+        try {
+          await writeJsonAtomic(this.#filePath, next)
+        } catch (error) {
+          await this.#secretStore.delete(newReference).catch(() => undefined)
+          throw error
+        }
+
+        this.#config = next
+        await this.#secretStore.delete(previousReference)
+        return this.getPublicConfig()
+      }
       case 'credential': {
         const previousReference = next.providers.deepseek.apiKeyRef
 
@@ -162,6 +195,7 @@ export class ConfigStore {
         break
       case 'permission':
         next.permission = {
+          defaultMode: request.defaultMode,
           builtinPolicies: request.builtinPolicies,
           rememberedRules: structuredClone(request.rememberedRules),
           sensitiveData: structuredClone(request.sensitiveData),

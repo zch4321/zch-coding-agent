@@ -162,6 +162,9 @@ export function reduceTraceEvent(
         ts: event.ts,
       })
       break
+    case 'session.mode':
+      state.mode = event.mode
+      break
     case 'run.start':
       state.runs[event.runId] = 'calling_llm'
       state.agentEvents.push({

@@ -319,7 +319,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
       logging.getByRole('button', { name: 'Clear closed traces' }),
     ).toBeVisible()
     await expect(logging.getByText('Offline replay and fork')).toBeVisible()
-    await expect(logging.getByText('Requests')).toBeVisible()
+    await expect(logging.getByText('Requests', { exact: true })).toBeVisible()
   })
 
   test('opens, drives, restores, and closes persistent terminal tabs', async () => {
@@ -341,8 +341,10 @@ test.describe.serial('Electron security and IPC baseline', () => {
     const toggle = page.getByRole('button', { name: 'Toggle terminal' })
     await expect(toggle).toBeEnabled()
     await toggle.click()
-    await expect(page.locator('.terminal-panel')).toBeVisible()
-    await expect(page.getByRole('tab')).toHaveCount(1)
+    const terminalPanel = page.locator('.terminal-panel')
+    const terminalTabs = terminalPanel.getByRole('tab')
+    await expect(terminalPanel).toBeVisible()
+    await expect(terminalTabs).toHaveCount(1)
 
     const activeInput = page.locator(
       '.terminal-surface:visible .xterm-helper-textarea',
@@ -354,19 +356,21 @@ test.describe.serial('Electron security and IPC baseline', () => {
       page.locator('.terminal-surface:visible .xterm-rows'),
     ).toContainText('E2E_PTY_OK')
 
-    await page.getByRole('button', { name: 'New terminal' }).click()
-    await expect(page.getByRole('tab')).toHaveCount(2)
+    await terminalPanel.getByRole('button', { name: 'New terminal' }).click()
+    await expect(terminalTabs).toHaveCount(2)
 
     await page.keyboard.press('Control+J')
-    await expect(page.locator('.terminal-panel')).toBeHidden()
+    await expect(terminalPanel).toBeHidden()
     await page.keyboard.press('Control+J')
-    await expect(page.locator('.terminal-panel')).toBeVisible()
-    await expect(page.getByRole('tab')).toHaveCount(2)
+    await expect(terminalPanel).toBeVisible()
+    await expect(terminalTabs).toHaveCount(2)
 
-    const closeButtons = page.getByRole('button', { name: 'Close terminal' })
+    const closeButtons = terminalPanel.getByRole('button', {
+      name: 'Close terminal',
+    })
     await expect(closeButtons).toHaveCount(2)
     await closeButtons.nth(0).click()
-    await expect(page.getByRole('tab')).toHaveCount(1)
+    await expect(terminalTabs).toHaveCount(1)
   })
 
   test('closes cleanly with exit code zero', async () => {

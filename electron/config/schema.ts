@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox'
 import {
+  PermissionModeSchema,
   PublicConfigSchema,
   RememberedRuleSchema,
   type PublicConfig,
@@ -37,6 +38,7 @@ export const AppConfigSchema = Type.Object(
     approval: PublicConfigSchema.properties.approval,
     permission: Type.Object(
       {
+        defaultMode: PermissionModeSchema,
         builtinPolicies: Type.Boolean(),
         rememberedRules: Type.Array(RememberedRuleSchema, { maxItems: 256 }),
         sensitiveData:
@@ -72,6 +74,7 @@ export const DEFAULT_APP_CONFIG = {
     approverModel: 'deepseek-chat',
   },
   permission: {
+    defaultMode: 'readonly',
     builtinPolicies: true,
     rememberedRules: [],
     sensitiveData: {

@@ -76,7 +76,16 @@ function normalizeLanguage(language: string): string {
 }
 
 function plainCodeHtml(code: string): string {
-  return `<pre class="shiki"><code>${markdown.utils.escapeHtml(code)}</code></pre>`
+  const lines = code
+    .split(/\r?\n/)
+    .map(
+      (line) =>
+        '<span class="line">' +
+        (markdown.utils.escapeHtml(line) || ' ') +
+        '</span>',
+    )
+    .join('')
+  return '<pre class="shiki"><code>' + lines + '</code></pre>'
 }
 
 function getHighlighter(): Promise<MarkdownHighlighter> {
@@ -116,19 +125,26 @@ function getHighlighter(): Promise<MarkdownHighlighter> {
   return highlighterPromise
 }
 
+export async function renderCode(
+  source: string,
+  requestedLanguage: string,
+): Promise<string> {
+  const language = normalizeLanguage(requestedLanguage)
+  return language === 'text'
+    ? plainCodeHtml(source)
+    : (await getHighlighter()).codeToHtml(source, {
+        lang: language,
+        theme: 'github-light',
+      })
+}
+
 export async function renderMarkdown(source: string): Promise<string> {
   const fences: FenceBlock[] = []
   let html = markdown.render(source, { fences })
 
   for (const fence of fences) {
     const language = normalizeLanguage(fence.language)
-    const rendered =
-      language === 'text'
-        ? plainCodeHtml(fence.code)
-        : (await getHighlighter()).codeToHtml(fence.code, {
-            lang: language,
-            theme: 'github-light',
-          })
+    const rendered = await renderCode(fence.code, language)
 
     html = html
       .replace(`<p>${fence.marker}</p>`, rendered)

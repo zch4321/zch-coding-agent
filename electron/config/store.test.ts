@@ -185,6 +185,47 @@ describe('ConfigStore', () => {
       configStore.getPublicConfig().providers.deepseek.modelOverrides,
     ).toEqual({})
   })
+
+  it('commits provider settings and an optional credential together', async () => {
+    const { configStore } = await createStores()
+    const limits = configStore.getPublicConfig().limits
+
+    const result = await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://example.test/v1',
+      model: 'model-b',
+      reasoning: 'off',
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 8_000,
+      approverProvider: 'deepseek',
+      approverModel: 'model-approver',
+      limits: {
+        ...limits,
+        tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 2.5 },
+      },
+      apiKey: 'atomic-secret',
+    })
+
+    expect(result.providers.deepseek).toMatchObject({
+      baseURL: 'https://example.test/v1',
+      model: 'model-b',
+      reasoning: 'off',
+      credentialConfigured: true,
+      modelOverrides: {
+        'model-b': {
+          contextWindowTokens: 128_000,
+          maxOutputTokens: 8_000,
+        },
+      },
+    })
+    expect(result.approval.approverModel).toBe('model-approver')
+    expect(result.limits.tokenEstimation).toEqual({
+      mode: 'custom-bytes',
+      bytesPerToken: 2.5,
+    })
+    await expect(configStore.getDeepSeekApiKey()).resolves.toBe('atomic-secret')
+  })
 })
 
 describe('SecretStore availability', () => {

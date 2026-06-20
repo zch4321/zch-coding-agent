@@ -340,6 +340,12 @@ async function installIpc(): Promise<void> {
       'session:close': async (payload) => ({
         accepted: await sessionManager.closeSession(payload.sessionId),
       }),
+      'session:update-mode': async (payload) => ({
+        accepted: await sessionManager.updateSessionMode(
+          payload.sessionId,
+          payload.mode,
+        ),
+      }),
       'run:start': (payload) => ({
         runId: sessionManager.startRun({
           sessionId: payload.sessionId,

@@ -385,6 +385,8 @@ describe('SessionManager P2 loop', () => {
       'utf8',
     )
     expect(trace).toContain('tool.call')
+    expect(trace).not.toContain('llm.stream')
+    expect(trace).toContain('llm.response')
     expect(trace).not.toContain('secret-sentinel')
   })
 

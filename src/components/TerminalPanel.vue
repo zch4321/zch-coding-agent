@@ -14,6 +14,7 @@ import UiIcon from './UiIcon.vue'
 const emit = defineEmits<{
   close: []
   'maximize-change': [maximized: boolean]
+  'height-change': [height: number]
 }>()
 
 interface TerminalView {
@@ -33,6 +34,8 @@ const views = new Map<TerminalId, TerminalView>()
 let unsubscribe: (() => void) | undefined
 let resizeObserver: ResizeObserver | undefined
 let creatingSession = false
+let resizeStartY = 0
+let resizeStartHeight = 0
 const sequence = new TerminalSequenceTracker()
 
 function terminalLabel(terminal: TerminalInfo, index: number): string {
@@ -408,6 +411,33 @@ function toggleMaximized(): void {
   void nextTick(fitActiveTerminal)
 }
 
+function continuePanelResize(event: PointerEvent): void {
+  const maximum = Math.max(160, window.innerHeight - 180)
+  emit(
+    'height-change',
+    Math.min(
+      maximum,
+      Math.max(160, resizeStartHeight + resizeStartY - event.clientY),
+    ),
+  )
+}
+
+function finishPanelResize(): void {
+  window.removeEventListener('pointermove', continuePanelResize)
+  window.removeEventListener('pointerup', finishPanelResize)
+}
+
+function beginPanelResize(event: PointerEvent): void {
+  if (maximized.value) return
+  const panel = (event.currentTarget as HTMLElement).closest('.terminal-panel')
+  if (!(panel instanceof HTMLElement)) return
+  event.preventDefault()
+  resizeStartY = event.clientY
+  resizeStartHeight = panel.getBoundingClientRect().height
+  window.addEventListener('pointermove', continuePanelResize)
+  window.addEventListener('pointerup', finishPanelResize, { once: true })
+}
+
 watch(
   () => agent.sessionId,
   async () => {
@@ -441,6 +471,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  finishPanelResize()
   unsubscribe?.()
   resizeObserver?.disconnect()
 
@@ -452,6 +483,14 @@ onUnmounted(() => {
 
 <template>
   <section class="terminal-panel" :class="{ maximized }">
+    <div
+      class="terminal-resize-handle"
+      role="separator"
+      aria-label="Resize terminal panel"
+      aria-orientation="horizontal"
+      tabindex="0"
+      @pointerdown="beginPanelResize"
+    ></div>
     <header class="terminal-toolbar">
       <div class="terminal-tabs" role="tablist" aria-label="Terminals">
         <div
