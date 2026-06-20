@@ -23,11 +23,50 @@ export const RememberedRuleSchema = Type.Object(
 )
 export type RememberedRule = Static<typeof RememberedRuleSchema>
 
+export const ProviderModelSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 256 }),
+    ownedBy: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+  },
+  { additionalProperties: false },
+)
+export type ProviderModel = Static<typeof ProviderModelSchema>
+
+export const ModelCapabilityOverrideSchema = Type.Object(
+  {
+    contextWindowTokens: Type.Optional(
+      Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+    ),
+    maxOutputTokens: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+    ),
+  },
+  { additionalProperties: false },
+)
+
+export const TokenEstimationSchema = Type.Object(
+  {
+    mode: Type.Union([
+      Type.Literal('conservative'),
+      Type.Literal('custom-bytes'),
+    ]),
+    bytesPerToken: Type.Number({ minimum: 0.25, maximum: 32 }),
+  },
+  { additionalProperties: false },
+)
+
 export const DeepSeekPublicConfigSchema = Type.Object(
   {
     baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
     reasoning: Type.Union([Type.Literal('auto'), Type.Literal('off')]),
+    modelCatalog: Type.Array(ProviderModelSchema, { maxItems: 1_000 }),
+    modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
+    modelOverrides: Type.Record(
+      Type.String({ minLength: 1, maxLength: 256 }),
+      ModelCapabilityOverrideSchema,
+      { maxProperties: 256 },
+    ),
     credentialConfigured: Type.Boolean(),
   },
   { additionalProperties: false },
@@ -81,6 +120,15 @@ export const PublicConfigSchema = Type.Object(
           maximum: 100_000_000,
         }),
         maxContextTokens: Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+        maxToolResultTokens: Type.Integer({
+          minimum: 256,
+          maximum: 1_000_000,
+        }),
+        maxToolTokensPerRun: Type.Integer({
+          minimum: 256,
+          maximum: 10_000_000,
+        }),
+        tokenEstimation: TokenEstimationSchema,
         commandTimeoutMs: Type.Integer({ minimum: 100, maximum: 86_400_000 }),
         terminalScrollbackBytes: Type.Integer({
           minimum: 1_024,
@@ -172,6 +220,18 @@ export const ConfigSetRequestSchema = Type.Union([
       kind: Type.Literal('provider'),
       baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
       model: Type.String({ minLength: 1, maxLength: 256 }),
+      contextWindowTokens: Type.Optional(
+        Type.Union([
+          Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+          Type.Null(),
+        ]),
+      ),
+      maxOutputTokens: Type.Optional(
+        Type.Union([
+          Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+          Type.Null(),
+        ]),
+      ),
       reasoning: Type.Union([Type.Literal('auto'), Type.Literal('off')]),
     },
     { additionalProperties: false },

@@ -3,6 +3,8 @@
   $schema: 'https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json',
   appId: 'com.mycodingagent.desktop',
   asar: true,
+  asarUnpack: ['node_modules/node-pty/**/*'],
+  npmRebuild: false,
   productName: 'My Coding Agent',
   directories: {
     output: 'release/${version}',

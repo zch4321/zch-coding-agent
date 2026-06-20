@@ -26,6 +26,7 @@ function subscribe<Event>(
 const api: AgentApi = {
   getConfig: (payload) => invoke('config:get', payload),
   setConfig: (payload) => invoke('config:set', payload),
+  listProviderModels: (payload) => invoke('provider:list-models', payload),
   chooseWorkspace: (payload) => invoke('workspace:choose', payload),
   listWorkspaceDirectory: (payload) =>
     invoke('workspace:list-directory', payload),
@@ -36,6 +37,11 @@ const api: AgentApi = {
   interruptRun: (payload) => invoke('run:interrupt', payload),
   decideApproval: (payload) => invoke('approval:decide', payload),
   sendTerminalInput: (payload) => invoke('terminal:input', payload),
+  openTerminal: (payload) => invoke('terminal:open', payload),
+  listTerminals: (payload) => invoke('terminal:list', payload),
+  resizeTerminal: (payload) => invoke('terminal:resize', payload),
+  closeTerminal: (payload) => invoke('terminal:close', payload),
+  getTerminalSnapshot: (payload) => invoke('terminal:snapshot', payload),
   minimizeWindow: (payload) => invoke('window:minimize', payload),
   toggleMaximizeWindow: (payload) => invoke('window:toggle-maximize', payload),
   closeWindow: (payload) => invoke('window:close', payload),

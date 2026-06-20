@@ -9,7 +9,7 @@ import App from './App.vue'
 import { useAgentStore } from './stores/agent'
 
 describe('App', () => {
-  it('renders the P3 workbench without fake or future-stage features', () => {
+  it('renders the P4 workbench without post-MVP placeholders', () => {
     const wrapper = mount(App, {
       global: {
         plugins: [createPinia()],
@@ -23,8 +23,8 @@ describe('App', () => {
     expect(wrapper.text()).toContain('Diff')
     expect(wrapper.text()).not.toContain('Design frontend layout')
     expect(wrapper.text()).not.toContain('Browser Preview')
-    expect(wrapper.text()).not.toContain('Terminal')
     expect(wrapper.text()).not.toContain('Share')
+    expect(wrapper.find('[aria-label="Toggle terminal"]').exists()).toBe(true)
     expect(
       wrapper.find('.conversation-pane .message-input-area').exists(),
     ).toBe(true)
@@ -86,6 +86,7 @@ describe('App', () => {
     })
     const store = useAgentStore(pinia)
     const injection = '<script>window.pwned=true</script><img src=x onerror=1>'
+    store.sessionId = 'session:test' as SessionId
 
     store.handleAgentEvent({
       schemaVersion: 1,

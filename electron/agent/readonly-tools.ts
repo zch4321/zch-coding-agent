@@ -2,18 +2,34 @@ import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Type } from '@sinclair/typebox'
 import type { JsonValue } from '../../shared/json'
+import type { PublicConfig } from '../../shared/config'
 import type { ToolDefinition, ToolResult } from '../tools/types'
 import { matchesGlob, normalizePortablePath } from './glob'
 import { PathGuard, PathGuardError } from './path-guard'
 import type { ToolRegistry } from './tool-registry'
+import { estimateTextTokens, truncateTextHeadTail } from './context-budget'
 
-const DEFAULT_MAX_ENTRIES = 500
-const DEFAULT_GREP_FILE_BYTES = 512_000
+const DEFAULT_MAX_ENTRIES = 200
+const DEFAULT_GREP_FILE_BYTES = 256_000
+const MAX_READ_SOURCE_BYTES = 10_000_000
+const MAX_READ_OUTPUT_BYTES = 64 * 1_024
+const DEFAULT_READ_LINES = 400
+const MAX_READ_LINES = 1_000
+const DEFAULT_LIMITS: Pick<
+  PublicConfig['limits'],
+  'maxToolResultTokens' | 'tokenEstimation'
+> = {
+  maxToolResultTokens: 8_000,
+  tokenEstimation: { mode: 'conservative', bytesPerToken: 3 },
+}
 
 const ReadFileArgsSchema = Type.Object(
   {
     path: Type.String({ minLength: 1, maxLength: 4_096 }),
-    maxBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000_000 })),
+    startLine: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000_000 })),
+    lineCount: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: MAX_READ_LINES }),
+    ),
   },
   { additionalProperties: false },
 )
@@ -135,31 +151,119 @@ async function walkFiles(
   return { files, truncated }
 }
 
-export function createReadOnlyToolDefinitions(): ToolDefinition[] {
+export function createReadOnlyToolDefinitions(
+  getLimits: () => Pick<
+    PublicConfig['limits'],
+    'maxToolResultTokens' | 'tokenEstimation'
+  > = () => DEFAULT_LIMITS,
+): ToolDefinition[] {
   const readFileTool: ToolDefinition<typeof ReadFileArgsSchema> = {
     id: 'read_file',
     description:
-      'Read a UTF-8 text file from the current workspace. Paths must stay inside the workspace.',
+      'Read a bounded line range from a UTF-8 workspace file. Continue with nextStartLine when truncated.',
     inputSchema: ReadFileArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 15_000,
-    maxOutputBytes: 1_000_000,
+    maxOutputBytes: 96 * 1_024,
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)
-        const result = await guard.readFileBounded(
+        const source = await guard.readFileBounded(
           args.path,
-          args.maxBytes ?? 200_000,
+          MAX_READ_SOURCE_BYTES,
           context.signal,
         )
+
+        if (source.truncated) {
+          return {
+            status: 'error',
+            code: 'FILE_TOO_LARGE',
+            message: `read_file supports files up to ${MAX_READ_SOURCE_BYTES} bytes`,
+            retryable: false,
+          }
+        }
+
+        const lines =
+          source.content.length === 0 ? [] : source.content.split(/\r?\n/u)
+
+        if (/\r?\n$/u.test(source.content)) {
+          lines.pop()
+        }
+        const requestedStartLine = args.startLine ?? 1
+        const startIndex = Math.min(requestedStartLine - 1, lines.length)
+        const requestedLines = args.lineCount ?? DEFAULT_READ_LINES
+        const limits = getLimits()
+        const maxTokens = Math.min(8_000, limits.maxToolResultTokens)
+        const selected: string[] = []
+        let selectedBytes = 0
+        let selectedTokens = 0
+        let lineTruncated = false
+
+        for (
+          let index = startIndex;
+          index < lines.length && selected.length < requestedLines;
+          index += 1
+        ) {
+          const separator = selected.length === 0 ? '' : '\n'
+          const candidate = `${separator}${lines[index]}`
+          const candidateBytes = Buffer.byteLength(candidate, 'utf8')
+          const candidateTokens = estimateTextTokens(
+            candidate,
+            limits.tokenEstimation,
+          )
+
+          if (
+            selectedBytes + candidateBytes > MAX_READ_OUTPUT_BYTES ||
+            selectedTokens + candidateTokens > maxTokens
+          ) {
+            if (selected.length === 0) {
+              const byteBounded = Buffer.from(lines[index]).subarray(
+                0,
+                MAX_READ_OUTPUT_BYTES,
+              )
+              selected.push(
+                truncateTextHeadTail(
+                  new TextDecoder().decode(byteBounded),
+                  maxTokens,
+                  limits.tokenEstimation,
+                ),
+              )
+              lineTruncated = true
+            }
+            break
+          }
+
+          selected.push(lines[index])
+          selectedBytes += candidateBytes
+          selectedTokens += candidateTokens
+        }
+
+        const endLine =
+          selected.length === 0
+            ? undefined
+            : requestedStartLine + selected.length - 1
+        const hasMore =
+          lineTruncated || startIndex + selected.length < lines.length
+        const result: JsonValue = {
+          path: source.path,
+          content: selected.join('\n'),
+          startLine: requestedStartLine,
+          endLine: endLine ?? null,
+          totalLines: lines.length,
+          truncated: hasMore,
+          lineTruncated,
+          ...(hasMore && endLine !== undefined
+            ? { nextStartLine: endLine + 1 }
+            : {}),
+        }
 
         return {
           status: 'ok',
           content: result,
-          truncated: result.truncated,
-          totalBytes: result.totalBytes,
+          truncated: hasMore,
+          totalBytes: source.totalBytes,
         }
       } catch (error) {
         return errorResult(error)
@@ -176,7 +280,7 @@ export function createReadOnlyToolDefinitions(): ToolDefinition[] {
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 15_000,
-    maxOutputBytes: 1_000_000,
+    maxOutputBytes: 128 * 1_024,
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)
@@ -239,7 +343,7 @@ export function createReadOnlyToolDefinitions(): ToolDefinition[] {
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 15_000,
-    maxOutputBytes: 1_000_000,
+    maxOutputBytes: 128 * 1_024,
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)
@@ -277,7 +381,7 @@ export function createReadOnlyToolDefinitions(): ToolDefinition[] {
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 1_000_000,
+    maxOutputBytes: 128 * 1_024,
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)
@@ -320,7 +424,7 @@ export function createReadOnlyToolDefinitions(): ToolDefinition[] {
               matches.push({
                 path: file.path,
                 line: index + 1,
-                text: line.slice(0, 2_000),
+                text: line.slice(0, 1_000),
               })
             }
 
@@ -349,8 +453,14 @@ export function createReadOnlyToolDefinitions(): ToolDefinition[] {
   return [readFileTool, listDirTool, globTool, grepTool]
 }
 
-export function registerReadOnlyTools(registry: ToolRegistry): void {
-  for (const definition of createReadOnlyToolDefinitions()) {
+export function registerReadOnlyTools(
+  registry: ToolRegistry,
+  getLimits?: () => Pick<
+    PublicConfig['limits'],
+    'maxToolResultTokens' | 'tokenEstimation'
+  >,
+): void {
+  for (const definition of createReadOnlyToolDefinitions(getLimits)) {
     registry.registerTool(definition)
   }
 }

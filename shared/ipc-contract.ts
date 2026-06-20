@@ -13,6 +13,7 @@ import {
   TerminalIdSchema,
 } from './ids'
 import { JsonValueSchema } from './json'
+import { TerminalInfoSchema, TerminalSnapshotSchema } from './terminal'
 import {
   AGENT_EVENT_CHANNEL,
   IPC_VERSION,
@@ -71,6 +72,29 @@ const AcceptedSchema = Type.Object(
   { accepted: Type.Boolean() },
   { additionalProperties: false },
 )
+const ModelProfileSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 256 }),
+    ownedBy: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    availability: Type.Union([
+      Type.Literal('provider'),
+      Type.Literal('custom'),
+    ]),
+    capabilitySource: Type.Union([
+      Type.Literal('override'),
+      Type.Literal('builtin'),
+      Type.Literal('default'),
+    ]),
+    contextWindowTokens: Type.Integer({
+      minimum: 1_024,
+      maximum: 10_000_000,
+    }),
+    maxOutputTokens: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+    ),
+  },
+  { additionalProperties: false },
+)
 const SkillSummarySchema = Type.Object(
   {
     name: Type.String({ minLength: 1, maxLength: 128 }),
@@ -107,6 +131,25 @@ export const IPC_CONTRACTS = {
       Type.Object(
         {
           config: PublicConfigSchema,
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'provider:list-models': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        refresh: Type.Boolean(),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          models: Type.Array(ModelProfileSchema, { maxItems: 1_000 }),
+          fetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
+          stale: Type.Boolean(),
         },
         { additionalProperties: false },
       ),
@@ -266,6 +309,74 @@ export const IPC_CONTRACTS = {
       { additionalProperties: false },
     ),
     result: ipcResultSchema(AcceptedSchema),
+  },
+  'terminal:open': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        sessionId: SessionIdSchema,
+        cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
+        cols: Type.Optional(Type.Integer({ minimum: 2, maximum: 1_000 })),
+        rows: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000 })),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        { terminal: TerminalInfoSchema },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'terminal:list': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        sessionId: SessionIdSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        { terminals: Type.Array(TerminalInfoSchema, { maxItems: 128 }) },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'terminal:resize': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        sessionId: SessionIdSchema,
+        terminalId: TerminalIdSchema,
+        cols: Type.Integer({ minimum: 2, maximum: 1_000 }),
+        rows: Type.Integer({ minimum: 1, maximum: 1_000 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(AcceptedSchema),
+  },
+  'terminal:close': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        sessionId: SessionIdSchema,
+        terminalId: TerminalIdSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(AcceptedSchema),
+  },
+  'terminal:snapshot': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        sessionId: SessionIdSchema,
+        terminalId: TerminalIdSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(TerminalSnapshotSchema),
   },
   'window:minimize': {
     payload: EmptyPayloadSchema,

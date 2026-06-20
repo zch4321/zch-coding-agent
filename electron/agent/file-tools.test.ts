@@ -19,6 +19,26 @@ import { ToolExecutor, ToolRegistry } from './tool-registry'
 const sessionId = 'session:file-tools' as SessionId
 const runId = 'run:file-tools' as RunId
 
+function betaToGammaPatch(filePath = 'note.txt'): string {
+  return [
+    `--- a/${filePath}`,
+    `+++ b/${filePath}`,
+    '@@ -1,2 +1,2 @@',
+    ' alpha',
+    '-beta',
+    '+gamma',
+  ].join('\n')
+}
+
+const replacementPatch = [
+  '--- a/note.txt',
+  '+++ b/note.txt',
+  '@@ -1,2 +1,1 @@',
+  '-alpha',
+  '-beta',
+  '+replacement',
+].join('\n')
+
 async function workspace() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agent-file-tools-'))
   await writeFile(path.join(root, 'note.txt'), 'alpha\nbeta\n', 'utf8')
@@ -83,7 +103,7 @@ async function execute(root: string, call: ToolCall) {
 }
 
 describe('P3 file tools', () => {
-  it('atomically writes, edits, and deletes workspace files', async () => {
+  it('atomically writes, patches, and deletes workspace files', async () => {
     const root = await workspace()
 
     await expect(
@@ -100,9 +120,9 @@ describe('P3 file tools', () => {
 
     await expect(
       execute(root, {
-        id: 'call:edit' as CallId,
-        toolId: 'edit_file',
-        args: { path: 'note.txt', old: 'beta', new: 'gamma' },
+        id: 'call:patch' as CallId,
+        toolId: 'apply_patch',
+        args: { path: 'note.txt', patch: betaToGammaPatch() },
         reason: 'Update one line',
       }),
     ).resolves.toMatchObject({ status: 'ok' })
@@ -123,20 +143,20 @@ describe('P3 file tools', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('rejects non-unique edit text without changing the file', async () => {
+  it('rejects patch context that does not match without changing the file', async () => {
     const root = await workspace()
     const target = path.join(root, 'note.txt')
     await writeFile(target, 'same\nsame\n', 'utf8')
     const { approval } = await authorize(root, {
-      id: 'call:ambiguous' as CallId,
-      toolId: 'edit_file',
-      args: { path: 'note.txt', old: 'same', new: 'changed' },
-      reason: 'Ambiguous edit',
+      id: 'call:mismatch' as CallId,
+      toolId: 'apply_patch',
+      args: { path: 'note.txt', patch: betaToGammaPatch() },
+      reason: 'Mismatched patch',
     })
 
     expect(approval).toMatchObject({
       ok: false,
-      result: { status: 'error', code: 'RESOURCE_CHANGED' },
+      result: { status: 'error', code: 'INVALID_PATCH' },
     })
     expect(await readFile(target, 'utf8')).toBe('same\nsame\n')
   })
@@ -146,8 +166,8 @@ describe('P3 file tools', () => {
     const target = path.join(root, 'note.txt')
     const call: ToolCall = {
       id: 'call:toctou' as CallId,
-      toolId: 'edit_file',
-      args: { path: 'note.txt', old: 'beta', new: 'gamma' },
+      toolId: 'apply_patch',
+      args: { path: 'note.txt', patch: betaToGammaPatch() },
       reason: 'Update one line',
     }
     const { approval, executor } = await authorize(root, call)
@@ -180,8 +200,8 @@ describe('P3 file tools', () => {
     const target = path.join(root, 'note.txt')
     const call: ToolCall = {
       id: 'call:replacement' as CallId,
-      toolId: 'write_file',
-      args: { path: 'note.txt', content: 'replacement\n' },
+      toolId: 'apply_patch',
+      args: { path: 'note.txt', patch: replacementPatch },
       reason: 'Replace the file',
     }
     const { approval, executor } = await authorize(root, call)
@@ -208,8 +228,8 @@ describe('P3 file tools', () => {
     const target = path.join(root, 'note.txt')
     const call: ToolCall = {
       id: 'call:deleted' as CallId,
-      toolId: 'write_file',
-      args: { path: 'note.txt', content: 'replacement\n' },
+      toolId: 'apply_patch',
+      args: { path: 'note.txt', patch: replacementPatch },
       reason: 'Replace the file',
     }
     const { approval, executor } = await authorize(root, call)
@@ -265,8 +285,11 @@ describe('P3 file tools', () => {
     await writeFile(path.join(directory, 'note.txt'), 'alpha\nbeta\n')
     const call: ToolCall = {
       id: 'call:parent' as CallId,
-      toolId: 'edit_file',
-      args: { path: 'src/note.txt', old: 'beta', new: 'gamma' },
+      toolId: 'apply_patch',
+      args: {
+        path: 'src/note.txt',
+        patch: betaToGammaPatch('src/note.txt'),
+      },
       reason: 'Update nested file',
     }
     const { approval, executor } = await authorize(root, call)
@@ -294,8 +317,8 @@ describe('P3 file tools', () => {
     const target = path.join(root, 'note.txt')
     const call: ToolCall = {
       id: 'call:cancelled' as CallId,
-      toolId: 'write_file',
-      args: { path: 'note.txt', content: 'replacement\n' },
+      toolId: 'apply_patch',
+      args: { path: 'note.txt', patch: replacementPatch },
       reason: 'Replace the file',
     }
     const { approval, executor } = await authorize(root, call)

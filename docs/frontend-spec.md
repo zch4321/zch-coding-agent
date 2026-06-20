@@ -297,7 +297,7 @@ Context Ingress 审批必须显示：
 ### 7.3 模型与模式
 
 - 模型按钮显示实际模型名，不只显示 Provider 名。
-- 点击模型按钮显示已配置模型；管理 Base URL/API Key 进入 Settings。
+- 点击模型按钮使用可搜索、可直接输入的 combobox；Provider 目录外的值标记为“自定义”，不得阻止保存或发送。管理 Base URL/API Key 进入 Settings。
 - 权限模式为 ReadOnly、Auto、Confirm、Yolo。
 - 首次启用 Yolo 必须显示 host-level side effects 风险并记录告知版本。
 - 模型和模式控件使用紧凑下拉，不使用侧栏大卡片。
@@ -401,7 +401,9 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.2 Provider
 
 - Base URL。
-- 主模型。
+- 主模型：鉴权调用 `/models` 刷新可用模型，使用可搜索且可输入的下拉框；失败时保留缓存与手工值。
+- 模型能力：显示目录/内置/自定义来源；上下文长度和最大输出允许用户覆盖，未知模型显示保守默认值提示。
+- Token 估算：默认保守估算，可切换为自定义 `bytesPerToken`；说明该值只影响预算估算，不能关闭字节/行数硬限制。
 - Reasoning 开关。
 - API Key 配置状态、更新和清除。
 - Auto approver Provider/模型。
@@ -610,6 +612,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 - [ ] Project/Provider/Permissions/Logging 分组清晰。
 - [ ] API Key 不回显、不进入 renderer state 和 DOM。
+- [ ] 模型目录刷新、缓存回退、可输入下拉框、未知模型能力提示和手工上下文覆盖可用。
 - [ ] Sensitive Data 和 remembered rules 可配置、查看和删除。
 - [ ] Settings 不把 Start/Close Session 作为主流程。
 - [ ] 新对话、切换项目、删除对话和退出应用正确清理 runtime 资源。

@@ -48,5 +48,14 @@ export default [
       globals: globals.node,
     },
   },
+  {
+    files: ['scripts/**/*.cjs'],
+    languageOptions: {
+      globals: globals.node,
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
   prettier,
 ]

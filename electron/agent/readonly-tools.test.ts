@@ -17,6 +17,38 @@ async function workspace() {
   return root
 }
 
+async function executeReadonly(root: string, call: ToolCall) {
+  const registry = new ToolRegistry()
+  registerReadOnlyTools(registry)
+  const executor = new ToolExecutor(registry)
+  const context = {
+    sessionId: 'session-test' as SessionId,
+    runId: 'run-test' as RunId,
+    workspace: { canonicalPath: root },
+  }
+  const signal = new AbortController().signal
+  const inspected = executor.inspectCall(call)
+
+  if (!inspected.ok) {
+    return inspected.result
+  }
+
+  const prepared = await new PermissionPipeline().authorize({
+    ...context,
+    workspace: root,
+    mode: 'readonly',
+    call,
+    definition: inspected.definition,
+    config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+    signal,
+    requestHumanApproval: async () => ({ decision: 'deny' }),
+  })
+
+  return prepared.ok
+    ? executor.execute(prepared.approvedCall, context, signal)
+    : prepared.result
+}
+
 describe('read-only tools', () => {
   it('executes read_file, list_dir, glob, and grep inside a workspace', async () => {
     const root = await workspace()
@@ -124,6 +156,67 @@ describe('read-only tools', () => {
           code: 'PATH_OUTSIDE_WORKSPACE',
         },
       })
+    }
+  })
+
+  it('paginates files by line and returns a continuation position', async () => {
+    const root = await workspace()
+    await writeFile(
+      path.join(root, 'large.txt'),
+      `${Array.from({ length: 1_200 }, (_, index) => `line-${index + 1}`).join('\n')}\n`,
+    )
+    const first = await executeReadonly(root, {
+      id: 'call-page-1' as CallId,
+      toolId: 'read_file',
+      args: { path: 'large.txt', startLine: 1, lineCount: 1_000 },
+      reason: '',
+    })
+
+    expect(first).toMatchObject({
+      status: 'ok',
+      content: {
+        startLine: 1,
+        endLine: 1_000,
+        nextStartLine: 1_001,
+        truncated: true,
+      },
+    })
+
+    const second = await executeReadonly(root, {
+      id: 'call-page-2' as CallId,
+      toolId: 'read_file',
+      args: { path: 'large.txt', startLine: 1_001, lineCount: 1_000 },
+      reason: '',
+    })
+    expect(second).toMatchObject({
+      status: 'ok',
+      content: {
+        startLine: 1_001,
+        truncated: false,
+      },
+    })
+  })
+
+  it('bounds one extremely long line', async () => {
+    const root = await workspace()
+    await writeFile(path.join(root, 'one-line.txt'), 'x'.repeat(100_000))
+    const result = await executeReadonly(root, {
+      id: 'call-long-line' as CallId,
+      toolId: 'read_file',
+      args: { path: 'one-line.txt' },
+      reason: '',
+    })
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      content: { lineTruncated: true, truncated: true },
+    })
+
+    if (result.status === 'ok') {
+      const content = result.content as { content: string }
+      expect(Buffer.byteLength(content.content, 'utf8')).toBeLessThanOrEqual(
+        64 * 1_024,
+      )
     }
   })
 })

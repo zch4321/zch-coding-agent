@@ -42,7 +42,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 - **可审批**：每个可能产生副作用的工具调用前，必须经过权限管线（§3）。
 - **状态明确**：同一会话同一时间只允许一个活动 run；运行中收到新消息时由 UI 明确选择排队或拒绝，MVP 默认拒绝。
 - **协议完整**：LLM 一次返回多个工具调用时，每个调用都必须回填一个结果；拒绝、取消、超时也以结构化工具结果回填，不能静默丢失。
-- **有界运行**：配置最大循环轮数、单次工具输出大小、累计上下文预算；超限后停止并向用户说明。
+- **有界运行**：配置最大循环轮数、单次和单个 run 的工具输出预算、累计上下文预算；字节、行数/结果数与估算 token 任一上限先到即截断，并向用户和模型返回续读信息。
 - **可回放**：调试日志开启时，循环的请求、响应、流式事件和工具结果必须完整保存，可确定性离线回放原会话；重新请求模型属于单独的“重放请求”，不保证复现随机输出（§5）。
 
 ### 2.2 工具集
@@ -63,12 +63,16 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 #### 2.2.1 文件类
 | 工具 | 作用 | 副作用 | `reason` |
 |---|---|---|---|
-| `read_file` | 读取文件内容（支持行范围） | 无 | 否 |
+| `read_file` | 按行范围分页读取文件内容 | 无 | 否 |
 | `write_file` | 写入/覆盖文件 | 有 | **是** |
-| `edit_file` | 基于 diff 的精确编辑（old→new） | 有 | **是** |
+| `apply_patch` | 对一个已有文件应用多 hunk 文本补丁 | 有 | **是** |
 | `delete_file` | 删除文件（受控路径，替代裸 `rm`） | 有 | **是** |
 
 > 设计意图：把常规删除做成独立工具，便于精确展示路径、数量和审批风险。它不能阻止 `run_command` 间接删除文件，因此命令工具仍必须独立经过权限策略，不能把工具拆分误当成 sandbox。
+
+`read_file` 使用 `startLine + lineCount` 分页，返回实际行范围、总行数、`truncated` 和 `nextStartLine`。默认读取 400 行，单次最多 1000 行，并同时受 64 KiB 与 8K 估算 token 限制；超长单行不能绕过字节/token 上限。
+
+`apply_patch` 第一版一次只修改一个已存在的 UTF-8 文本文件，可包含多个 hunk。补丁路径必须是 workspace 相对路径；禁止 fuzzy apply、二进制、rename、mode change、绝对路径和越界路径。审批绑定原文件 hash、规范化补丁 hash 与结果 hash，执行前重新验证。`write_file` 默认只创建不存在的文件，覆盖已有文件应使用 `apply_patch`。
 
 #### 2.2.2 检索类
 | 工具 | 作用 | `reason` |
@@ -114,6 +118,12 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 必须支持接入多家模型供应商，每家单独写 Provider。能用 OpenAI 兼容协议的（DeepSeek、智谱 GLM、Moonshot、本地 Ollama 等）基于 openai SDK 实现；Anthropic 等自有协议的用其官方 SDK 实现。
 
 **MVP 只实现 DeepSeek Provider**，其他留接口与 TODO。
+
+Provider 可实现模型目录查询。DeepSeek 使用鉴权后的 `GET /models` 获取当前凭据可用的模型 ID；该端点只作为可用性目录，不能假设会返回上下文长度、最大输出或工具能力。设置页合并 Provider 返回、应用内置模型资料和用户自定义模型，并始终允许手工输入。
+
+模型能力采用 `用户覆盖 > 内置资料 > 保守默认值`。未知模型默认按 64K 上下文管理并明确标记“能力未知”；不得抓取 Provider 文档 HTML 推断运行时能力。模型目录请求失败时保留上次成功缓存和当前手工配置。
+
+token 预算通过可替换估算器计算。支持 Provider tokenizer、保守估算和用户自定义 `bytesPerToken`；自定义值按 Provider/模型保存。估算只负责上下文规划，所有工具仍必须执行不可关闭的字节、行数/结果数硬上限。Provider 返回的真实 usage 用于记录与校准，不作为事前边界保证。
 
 #### 2.3.2 Reasoning（推理过程）适配
 不同供应商的「思考过程」格式各异，是适配中最难、最 provider-specific 的部分：
@@ -286,7 +296,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - 顶栏提供底部面板开关，并支持 `Ctrl+J` / `Ctrl+\`` 切换。
 
 ### 4.3 Diff 预览
-- `edit_file` / `write_file` 的变更在执行前/后以 diff 形式预览。
+- `apply_patch` / `write_file` 的变更在执行前/后以 diff 形式预览。
 - 审批绑定变更前文件 hash 与拟写入内容 hash；若文件在审批后发生变化，原批准失效并重新计算 diff。
 - 使用有界只读 Diff viewer，支持语法高亮、截断提示和审批状态；P3 不引入 Monaco/CodeMirror 等完整编辑器。
 

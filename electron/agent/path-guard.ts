@@ -5,6 +5,8 @@ export type PathGuardErrorCode =
   | 'INVALID_PATH'
   | 'PATH_OUTSIDE_WORKSPACE'
   | 'PATH_NOT_FOUND'
+  | 'PATH_ALREADY_EXISTS'
+  | 'FILE_TOO_LARGE'
   | 'RESOURCE_CHANGED'
   | 'NOT_A_DIRECTORY'
   | 'NOT_A_FILE'

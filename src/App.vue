@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  onMounted,
+  onUnmounted,
+  ref,
+  watch,
+} from 'vue'
 import {
   NAlert,
   NButton,
@@ -22,6 +29,10 @@ import type { PermissionMode } from '../shared/config'
 type ArtifactTab = 'files' | 'diff'
 type SettingsTab = 'project' | 'provider' | 'permissions' | 'logging'
 
+const TerminalPanel = defineAsyncComponent(
+  () => import('./components/TerminalPanel.vue'),
+)
+
 interface ExplorerEntry {
   path: string
   name: string
@@ -41,6 +52,8 @@ const settingsTab = ref<SettingsTab>('project')
 const yoloWarningOpen = ref(false)
 const projectSidebarOpen = ref(true)
 const artifactSidebarOpen = ref(true)
+const terminalOpen = ref(false)
+const terminalMaximized = ref(false)
 const activeArtifact = ref<ArtifactTab>('files')
 const searchQuery = ref('')
 const renameConversationId = ref<string>()
@@ -59,6 +72,10 @@ const activeFilePath = ref('explorer')
 const reasoningOptions = [
   { label: 'Auto', value: 'auto' },
   { label: 'Off', value: 'off' },
+]
+const tokenEstimationOptions = [
+  { label: 'Conservative', value: 'conservative' },
+  { label: 'Custom bytes per token', value: 'custom-bytes' },
 ]
 const modeOptions = [
   { label: 'ReadOnly', value: 'readonly' },
@@ -428,12 +445,32 @@ function handleComposerKeydown(event: KeyboardEvent) {
   void agent.sendMessage()
 }
 
+function closeTerminalPanel() {
+  terminalOpen.value = false
+  terminalMaximized.value = false
+}
+
 function handleGlobalKeydown(event: KeyboardEvent) {
   if (!event.ctrlKey) {
     return
   }
 
-  if (event.key.toLocaleLowerCase() === 'b' && event.shiftKey) {
+  if (
+    event.key.toLocaleLowerCase() === 'j' ||
+    event.key === '`' ||
+    event.code === 'Backquote'
+  ) {
+    if (!agent.workspacePath || !agent.bridgeAvailable) {
+      return
+    }
+
+    event.preventDefault()
+    terminalOpen.value = !terminalOpen.value
+
+    if (!terminalOpen.value) {
+      terminalMaximized.value = false
+    }
+  } else if (event.key.toLocaleLowerCase() === 'b' && event.shiftKey) {
     event.preventDefault()
     artifactSidebarOpen.value = !artifactSidebarOpen.value
   } else if (event.key.toLocaleLowerCase() === 'b') {
@@ -464,7 +501,7 @@ watch(
 )
 
 onMounted(async () => {
-  window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('keydown', handleGlobalKeydown, { capture: true })
   if (window.innerWidth <= 1080) {
     artifactSidebarOpen.value = false
   }
@@ -476,7 +513,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('keydown', handleGlobalKeydown, { capture: true })
   agent.dispose()
 })
 </script>
@@ -508,6 +545,17 @@ onUnmounted(() => {
         </button>
 
         <div class="topbar-actions">
+          <button
+            class="topbar-icon-button"
+            type="button"
+            aria-label="Toggle terminal"
+            title="Toggle terminal (Ctrl+J)"
+            :aria-pressed="terminalOpen"
+            :disabled="!agent.workspacePath || !agent.bridgeAvailable"
+            @click="terminalOpen = !terminalOpen"
+          >
+            <UiIcon name="terminal" />
+          </button>
           <button
             class="topbar-icon-button"
             type="button"
@@ -678,7 +726,13 @@ onUnmounted(() => {
           </div>
         </aside>
 
-        <section class="conversation-pane">
+        <section
+          class="conversation-pane"
+          :class="{
+            'terminal-open': terminalOpen,
+            'terminal-maximized': terminalOpen && terminalMaximized,
+          }"
+        >
           <header class="conversation-header">
             <div>
               <h1>{{ activeTitle }}</h1>
@@ -920,6 +974,12 @@ onUnmounted(() => {
               </button>
             </div>
           </footer>
+
+          <TerminalPanel
+            v-if="terminalOpen"
+            @close="closeTerminalPanel"
+            @maximize-change="terminalMaximized = $event"
+          />
         </section>
 
         <aside class="artifact-sidebar" :aria-hidden="!artifactSidebarOpen">
@@ -1133,8 +1193,83 @@ onUnmounted(() => {
               </label>
               <label class="settings-field">
                 <span>Main model</span>
-                <NInput v-model:value="agent.providerForm.model" />
+                <div class="settings-inline">
+                  <NSelect
+                    :value="agent.providerForm.model"
+                    :options="agent.modelOptions"
+                    :loading="agent.modelCatalogLoading"
+                    filterable
+                    tag
+                    @update:value="agent.setProviderModel"
+                  />
+                  <NButton
+                    secondary
+                    :loading="agent.modelCatalogLoading"
+                    :disabled="!agent.credentialConfigured"
+                    @click="agent.loadProviderModels(true)"
+                  >
+                    Refresh
+                  </NButton>
+                </div>
+                <small>
+                  {{
+                    agent.activeModelProfile
+                      ? `${agent.activeModelProfile.availability} model · ${agent.activeModelProfile.capabilitySource} capabilities · ${agent.activeModelProfile.contextWindowTokens.toLocaleString()} effective context tokens`
+                      : 'Custom model with conservative capability defaults.'
+                  }}
+                  <template v-if="agent.modelCatalogFetchedAt">
+                    · Catalog refreshed
+                    {{ new Date(agent.modelCatalogFetchedAt).toLocaleString() }}
+                  </template>
+                </small>
               </label>
+              <div class="settings-inline settings-inline-equal">
+                <label class="settings-field">
+                  <span>Context window override</span>
+                  <NInputNumber
+                    v-model:value="agent.providerForm.contextWindowTokens"
+                    :min="1024"
+                    :max="10000000"
+                    clearable
+                    placeholder="Use model/default value"
+                  />
+                </label>
+                <label class="settings-field">
+                  <span>Maximum output override</span>
+                  <NInputNumber
+                    v-model:value="agent.providerForm.maxOutputTokens"
+                    :min="1"
+                    :max="10000000"
+                    clearable
+                    placeholder="Use model/default value"
+                  />
+                </label>
+              </div>
+              <div class="settings-inline settings-inline-equal">
+                <label class="settings-field">
+                  <span>Token estimation</span>
+                  <NSelect
+                    v-model:value="agent.providerForm.tokenEstimationMode"
+                    :options="tokenEstimationOptions"
+                  />
+                </label>
+                <label class="settings-field">
+                  <span>UTF-8 bytes per token</span>
+                  <NInputNumber
+                    v-model:value="agent.providerForm.bytesPerToken"
+                    :disabled="
+                      agent.providerForm.tokenEstimationMode !== 'custom-bytes'
+                    "
+                    :min="0.25"
+                    :max="32"
+                    :step="0.25"
+                  />
+                </label>
+              </div>
+              <p class="settings-footnote">
+                Token estimation plans context usage. Byte, line and result
+                limits remain enforced independently.
+              </p>
               <label class="settings-field">
                 <span>Reasoning</span>
                 <NSelect
@@ -1144,7 +1279,12 @@ onUnmounted(() => {
               </label>
               <label class="settings-field">
                 <span>Auto approver model</span>
-                <NInput v-model:value="agent.providerForm.approverModel" />
+                <NSelect
+                  v-model:value="agent.providerForm.approverModel"
+                  :options="agent.modelOptions"
+                  filterable
+                  tag
+                />
               </label>
               <label class="settings-field">
                 <span>API key</span>

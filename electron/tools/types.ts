@@ -23,6 +23,7 @@ export interface ToolDefinition<Schema extends TSchema = TSchema> {
   supportsAbort: boolean
   defaultTimeoutMs: number
   maxOutputBytes: number
+  validateArgs?(args: Static<Schema>): string | undefined
   execute(
     args: Static<Schema>,
     context: ToolExecutionContext,

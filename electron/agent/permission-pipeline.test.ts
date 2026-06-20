@@ -72,8 +72,8 @@ describe('P3 permission pipeline ordering', () => {
     const call: ToolCall = {
       id: 'call:risk' as CallId,
       toolId: 'write_file',
-      args: { path: 'note.txt', content: 'after\n' },
-      reason: 'Update note',
+      args: { path: 'created.txt', content: 'after\n' },
+      reason: 'Create note',
     }
     const { definition, pipeline } = fixture(call)
     const autoApprover: AutoApprover = {
@@ -114,8 +114,8 @@ describe('P3 permission pipeline ordering', () => {
     const call: ToolCall = {
       id: 'call:block' as CallId,
       toolId: 'write_file',
-      args: { path: 'note.txt', content: 'after\n' },
-      reason: 'Update note',
+      args: { path: 'created.txt', content: 'after\n' },
+      reason: 'Create note',
     }
     const { definition, pipeline } = fixture(call)
     const result = await pipeline.authorize({

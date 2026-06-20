@@ -6,12 +6,18 @@ import {
   type Page,
 } from '@playwright/test'
 import type { ChildProcess } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { AGENT_API_KEYS } from '../shared/agent-api'
 
 test.describe.serial('Electron security and IPC baseline', () => {
   let electronApp: ElectronApplication
   let electronProcess: ChildProcess
   let page: Page
+  let temporaryRoot: string
+  let workspace: string
+  let userDataPath: string
 
   test.beforeAll(async () => {
     const env = Object.fromEntries(
@@ -20,12 +26,18 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ),
     )
     delete env.VITE_DEV_SERVER_URL
+    temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'agent-e2e-'))
+    workspace = path.join(temporaryRoot, 'workspace')
+    await mkdir(workspace)
 
     electronApp = await electron.launch({
-      args: ['.'],
+      args: ['.', `--user-data-dir=${path.join(temporaryRoot, 'user-data')}`],
       env,
     })
     electronProcess = electronApp.process()
+    userDataPath = await electronApp.evaluate(({ app }) =>
+      app.getPath('userData'),
+    )
     page = await electronApp.firstWindow()
     await expect(page.getByTestId('app-ready')).toBeVisible()
   })
@@ -37,6 +49,8 @@ test.describe.serial('Electron security and IPC baseline', () => {
     ) {
       await electronApp.close()
     }
+
+    await rm(temporaryRoot, { recursive: true, force: true })
   })
 
   test('exposes only the frozen versioned agent API', async () => {
@@ -116,6 +130,50 @@ test.describe.serial('Electron security and IPC baseline', () => {
     })
   })
 
+  test('round-trips credentials through safeStorage without plaintext on disk', async () => {
+    const sentinel = `provider-key-sentinel-${Date.now()}`
+    const results = await page.evaluate(async (apiKey) => {
+      const api = Reflect.get(window, 'agentApi') as {
+        setConfig(payload: unknown): Promise<unknown>
+        getConfig(payload: unknown): Promise<unknown>
+      }
+      const set = await api.setConfig({
+        version: 1,
+        kind: 'credential',
+        action: 'set',
+        apiKey,
+      })
+      const configured = await api.getConfig({ version: 1, section: 'all' })
+      return { set, configured }
+    }, sentinel)
+
+    expect(results.set).toMatchObject({ version: 1, ok: true })
+    expect(results.configured).toMatchObject({
+      version: 1,
+      ok: true,
+      value: {
+        config: {
+          providers: { deepseek: { credentialConfigured: true } },
+        },
+      },
+    })
+    expect(
+      await readFile(path.join(userDataPath, 'secrets.json'), 'utf8'),
+    ).not.toContain(sentinel)
+
+    const cleared = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        setConfig(payload: unknown): Promise<unknown>
+      }
+      return api.setConfig({
+        version: 1,
+        kind: 'credential',
+        action: 'clear',
+      })
+    })
+    expect(cleared).toMatchObject({ version: 1, ok: true })
+  })
+
   test('injects CSP and blocks inline script execution paths', async () => {
     const response = await page.reload()
     const policy = (await response?.allHeaders())?.['content-security-policy']
@@ -179,6 +237,93 @@ test.describe.serial('Electron security and IPC baseline', () => {
       Notification.requestPermission(),
     )
     expect(permission).toBe('denied')
+  })
+
+  test('shows editable model discovery and budget controls', async () => {
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.evaluate(() => {
+      const button = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Open settings"]',
+      )
+      button?.click()
+    })
+    await page
+      .getByRole('navigation', { name: 'Settings sections' })
+      .getByRole('button', { name: 'Provider' })
+      .click()
+    const provider = page.locator('.settings-section')
+
+    await expect(
+      provider.getByText('Main model', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      provider.getByText('Context window override', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      provider.getByText('Maximum output override', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      provider.getByText('Token estimation', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      provider.getByRole('button', { name: 'Refresh' }),
+    ).toBeDisabled()
+    await expect(provider.locator('.n-input-number')).toHaveCount(3)
+
+    const modelSelect = provider.locator('.n-select').first()
+    await modelSelect.click()
+    await page.keyboard.type('custom-e2e-model')
+    await page.keyboard.press('Enter')
+    await expect(modelSelect).toContainText('custom-e2e-model')
+    await page.keyboard.press('Escape')
+  })
+
+  test('opens, drives, restores, and closes persistent terminal tabs', async () => {
+    const configured = await page.evaluate(async (workspacePath) => {
+      const api = Reflect.get(window, 'agentApi') as {
+        setConfig(payload: unknown): Promise<{
+          ok: boolean
+        }>
+      }
+      return api.setConfig({
+        version: 1,
+        kind: 'workspace',
+        lastOpened: workspacePath,
+      })
+    }, workspace)
+    expect(configured.ok).toBe(true)
+
+    await page.reload()
+    const toggle = page.getByRole('button', { name: 'Toggle terminal' })
+    await expect(toggle).toBeEnabled()
+    await toggle.click()
+    await expect(page.locator('.terminal-panel')).toBeVisible()
+    await expect(page.getByRole('tab')).toHaveCount(1)
+
+    const activeInput = page.locator(
+      '.terminal-surface:visible .xterm-helper-textarea',
+    )
+    await activeInput.click()
+    await page.keyboard.type('Write-Output E2E_PTY_OK')
+    await page.keyboard.press('Enter')
+    await expect(
+      page.locator('.terminal-surface:visible .xterm-rows'),
+    ).toContainText('E2E_PTY_OK')
+
+    await page.getByRole('button', { name: 'New terminal' }).click()
+    await expect(page.getByRole('tab')).toHaveCount(2)
+
+    await page.keyboard.press('Control+J')
+    await expect(page.locator('.terminal-panel')).toBeHidden()
+    await page.keyboard.press('Control+J')
+    await expect(page.locator('.terminal-panel')).toBeVisible()
+    await expect(page.getByRole('tab')).toHaveCount(2)
+
+    const closeButtons = page.getByRole('button', { name: 'Close terminal' })
+    await expect(closeButtons).toHaveCount(2)
+    await closeButtons.nth(0).click()
+    await expect(page.getByRole('tab')).toHaveCount(1)
   })
 
   test('closes cleanly with exit code zero', async () => {

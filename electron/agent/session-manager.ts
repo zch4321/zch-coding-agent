@@ -6,17 +6,19 @@ import { IPC_VERSION } from '../../shared/channels'
 import type {
   AgentEvent,
   RunStatus,
+  TerminalEvent,
   ToolResultEnvelope,
 } from '../../shared/agent-events'
-import type { CallId, RunId, SessionId } from '../../shared/ids'
+import type { CallId, RunId, SessionId, TerminalId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
+import type { TerminalInfo, TerminalSnapshot } from '../../shared/terminal'
 import {
   PROVIDER_NOTICE_VERSION,
   TRACE_NOTICE_VERSION,
 } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
 import { IpcFault } from '../ipc'
-import { sendAgentEvent } from '../ipc/event-sink'
+import { sendAgentEvent, sendTerminalEvent } from '../ipc/event-sink'
 import {
   JsonlTraceLogger,
   NullTraceLogger,
@@ -37,6 +39,7 @@ import type {
 } from './provider'
 import { registerReadOnlyTools } from './readonly-tools'
 import { registerFileTools } from './file-tools'
+import { registerProcessTools } from './process-tools'
 import {
   PermissionPipeline,
   type ApprovalRequest,
@@ -45,6 +48,15 @@ import {
 } from './permission-pipeline'
 import { ProviderAutoApprover, type AutoApprover } from './auto-approver'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
+import { TerminalPool, type TerminalEventDraft } from '../terminal/pool'
+import { registerTerminalTools } from './terminal-tools'
+import {
+  boundToolResultForContext,
+  ContextBudgetError,
+  estimateJsonTokens,
+  selectContextMessages,
+} from './context-budget'
+import { resolveModelProfiles } from './model-catalog'
 
 const SYSTEM_PROMPT =
   'You are My Coding Agent. Work only inside the selected workspace and use the provided tools. Explain the reason for every tool call. Never claim a file changed unless the tool result confirms it.'
@@ -52,6 +64,12 @@ const RUN_CANCEL_GRACE_MS = 2_000
 
 type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
+    ? Omit<Event, 'schemaVersion' | 'seq' | 'ts'>
+    : never
+  : never
+
+type TerminalEventDraftEnvelope = TerminalEvent extends infer Event
+  ? Event extends TerminalEvent
     ? Omit<Event, 'schemaVersion' | 'seq' | 'ts'>
     : never
   : never
@@ -84,6 +102,7 @@ interface ActiveRun {
   controller: AbortController
   done: Promise<void>
   status: RunStatus
+  toolTokensUsed: number
   pendingApproval?: PendingApproval
 }
 
@@ -125,10 +144,6 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function estimateTokens(value: JsonValue): number {
-  return Math.ceil(JSON.stringify(value).length / 4)
-}
-
 function toolResultForProvider(result: ToolResult): string {
   return JSON.stringify(result)
 }
@@ -154,21 +169,43 @@ function finalStatusFromError(error: unknown, signal: AbortSignal): RunStatus {
   return 'failed'
 }
 
-function contextMessages(
-  history: ProviderMessage[],
-  maxContextTokens: number,
-): ProviderMessage[] {
-  const system: ProviderMessage = { role: 'system', content: SYSTEM_PROMPT }
-  const messages = [system, ...history]
+function modelPromptBudget(config: PublicConfig, tools: JsonValue[]): number {
+  const model = resolveModelProfiles(config).find(
+    (candidate) => candidate.id === config.providers.deepseek.model,
+  )
+  const contextWindow =
+    model?.contextWindowTokens ?? config.limits.maxContextTokens
+  const outputReserve = model?.maxOutputTokens
+    ? Math.min(model.maxOutputTokens, Math.floor(contextWindow * 0.4))
+    : Math.min(8_192, Math.floor(contextWindow * 0.2))
+  const toolSchemaTokens = estimateJsonTokens(
+    tools,
+    config.limits.tokenEstimation,
+  )
+  const budget = contextWindow - outputReserve - toolSchemaTokens
 
-  while (
-    messages.length > 2 &&
-    estimateTokens(toJsonValue(messages)) > maxContextTokens
-  ) {
-    messages.splice(1, 1)
+  if (budget < 1_024) {
+    throw new ContextBudgetError(
+      'Model output reserve and tool schemas leave no usable prompt budget',
+    )
   }
 
-  return messages
+  return budget
+}
+
+function contextMessages(
+  history: ProviderMessage[],
+  config: PublicConfig,
+  tools: JsonValue[],
+): ProviderMessage[] {
+  const system: ProviderMessage = { role: 'system', content: SYSTEM_PROMPT }
+
+  return selectContextMessages({
+    system,
+    history,
+    maxPromptTokens: modelPromptBudget(config, tools),
+    estimation: config.limits.tokenEstimation,
+  })
 }
 
 export class SessionManager {
@@ -182,6 +219,7 @@ export class SessionManager {
   readonly #sessions = new Map<SessionId, SessionState>()
   readonly #toolRegistry = new ToolRegistry()
   readonly #toolExecutor: ToolExecutor
+  readonly #terminalPool: TerminalPool
   readonly #permissionPipeline = new PermissionPipeline()
   readonly #ingressFilter = new ContextIngressFilter()
 
@@ -193,8 +231,24 @@ export class SessionManager {
     this.#providerFactory = options.providerFactory
     this.#autoApproverFactory = options.autoApproverFactory
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
-    registerReadOnlyTools(this.#toolRegistry)
+    this.#terminalPool = new TerminalPool({
+      getScrollbackBytes: () =>
+        this.#configStore.getPublicConfig().limits.terminalScrollbackBytes,
+      emit: (event) => this.#emitTerminal(event),
+    })
+    registerReadOnlyTools(
+      this.#toolRegistry,
+      () => this.#configStore.getPublicConfig().limits,
+    )
     registerFileTools(this.#toolRegistry)
+    registerProcessTools(this.#toolRegistry, () =>
+      this.#configStore.getPublicConfig(),
+    )
+    registerTerminalTools(
+      this.#toolRegistry,
+      this.#terminalPool,
+      () => this.#configStore.getPublicConfig().limits.maxToolOutputBytes,
+    )
     this.#toolExecutor = new ToolExecutor(this.#toolRegistry)
     this.#pluginBus?.setToolRegistrationPort(this.#toolRegistry)
   }
@@ -207,17 +261,6 @@ export class SessionManager {
     const publicConfig = this.#configStore.getPublicConfig()
 
     if (
-      publicConfig.privacy.providerNoticeAccepted?.version !==
-      PROVIDER_NOTICE_VERSION
-    ) {
-      ipcFault(
-        'PRECONDITION_FAILED',
-        'Provider data egress notice must be accepted before creating a session',
-        { requiredVersion: PROVIDER_NOTICE_VERSION },
-      )
-    }
-
-    if (
       publicConfig.logging.enabled &&
       publicConfig.privacy.traceNoticeAccepted?.version !== TRACE_NOTICE_VERSION
     ) {
@@ -226,16 +269,6 @@ export class SessionManager {
         'Trace logging notice must be accepted before enabling full trace logs',
         { requiredVersion: TRACE_NOTICE_VERSION },
       )
-    }
-
-    if (!publicConfig.providers.deepseek.credentialConfigured) {
-      ipcFault('PRECONDITION_FAILED', 'DeepSeek credential is not configured')
-    }
-
-    const apiKey = await this.#configStore.getDeepSeekApiKey()
-
-    if (!apiKey) {
-      ipcFault('PRECONDITION_FAILED', 'DeepSeek credential is not available')
     }
 
     const guard = await PathGuard.create(input.workspace)
@@ -295,6 +328,8 @@ export class SessionManager {
       ])
     }
 
+    this.#terminalPool.closeSession(sessionId)
+
     await this.#pluginBus
       ?.emit('onSessionEnd', {
         version: 1,
@@ -324,6 +359,22 @@ export class SessionManager {
       return existing
     }
 
+    const config = this.#configStore.getPublicConfig()
+
+    if (
+      config.privacy.providerNoticeAccepted?.version !== PROVIDER_NOTICE_VERSION
+    ) {
+      ipcFault(
+        'PRECONDITION_FAILED',
+        'Provider data egress notice must be accepted before starting a run',
+        { requiredVersion: PROVIDER_NOTICE_VERSION },
+      )
+    }
+
+    if (!config.providers.deepseek.credentialConfigured) {
+      ipcFault('PRECONDITION_FAILED', 'DeepSeek credential is not configured')
+    }
+
     if (session.activeRun) {
       ipcFault('CONFLICT', 'This session already has an active run')
     }
@@ -335,6 +386,7 @@ export class SessionManager {
       clientRequestId: input.clientRequestId,
       controller,
       status: 'idle',
+      toolTokensUsed: 0,
       done: Promise.resolve(),
     }
 
@@ -389,10 +441,64 @@ export class SessionManager {
     return true
   }
 
+  async openTerminal(input: {
+    sessionId: SessionId
+    cwd?: string
+    cols?: number
+    rows?: number
+  }): Promise<TerminalInfo> {
+    const session = this.#requireSession(input.sessionId)
+    return this.#terminalPool.open({
+      sessionId: session.sessionId,
+      workspace: session.workspace,
+      cwd: input.cwd,
+      cols: input.cols,
+      rows: input.rows,
+    })
+  }
+
+  listTerminals(sessionId: SessionId): TerminalInfo[] {
+    this.#requireSession(sessionId)
+    return this.#terminalPool.list(sessionId)
+  }
+
+  sendTerminalInput(
+    sessionId: SessionId,
+    terminalId: TerminalId,
+    data: string,
+  ): boolean {
+    this.#requireSession(sessionId)
+    return this.#terminalPool.write(sessionId, terminalId, data)
+  }
+
+  resizeTerminal(
+    sessionId: SessionId,
+    terminalId: TerminalId,
+    cols: number,
+    rows: number,
+  ): boolean {
+    this.#requireSession(sessionId)
+    return this.#terminalPool.resize(sessionId, terminalId, cols, rows)
+  }
+
+  closeTerminal(sessionId: SessionId, terminalId: TerminalId): boolean {
+    this.#requireSession(sessionId)
+    return this.#terminalPool.close(sessionId, terminalId)
+  }
+
+  terminalSnapshot(
+    sessionId: SessionId,
+    terminalId: TerminalId,
+  ): TerminalSnapshot {
+    this.#requireSession(sessionId)
+    return this.#terminalPool.snapshot(sessionId, terminalId)
+  }
+
   async dispose(): Promise<void> {
     await Promise.all(
       [...this.#sessions.keys()].map((idValue) => this.closeSession(idValue)),
     )
+    this.#terminalPool.dispose()
   }
 
   #requireSession(sessionId: SessionId): SessionState {
@@ -482,11 +588,8 @@ export class SessionManager {
       ipcFault('PRECONDITION_FAILED', 'DeepSeek credential is not available')
     }
 
-    let messages = contextMessages(
-      session.history,
-      config.limits.maxContextTokens,
-    )
     const tools = this.#toolRegistry.providerDefinitions()
+    let messages = contextMessages(session.history, config, tools)
     const hookResult = await this.#pluginBus?.emit('beforeLLMCall', {
       version: 1,
       sessionId: session.sessionId,
@@ -502,6 +605,15 @@ export class SessionManager {
       if (patch.messages) {
         messages = patch.messages as unknown as ProviderMessage[]
       }
+    }
+
+    if (
+      estimateJsonTokens(messages, config.limits.tokenEstimation) >
+      modelPromptBudget(config, tools)
+    ) {
+      throw new ContextBudgetError(
+        'A beforeLLMCall hook exceeded the model context budget',
+      )
     }
 
     const provider =
@@ -769,11 +881,17 @@ export class SessionManager {
           this.#onDiagnostic('Plugin afterToolCall failed', error),
         )
 
+      const contextResult = boundToolResultForContext(
+        result,
+        this.#configStore.getPublicConfig().limits,
+        run.toolTokensUsed,
+      )
+      run.toolTokensUsed += contextResult.tokens
       const providerResult = await this.#filterToolResultForProvider(
         session,
         run,
         call,
-        result,
+        contextResult.result,
       )
 
       session.history.push({
@@ -1030,6 +1148,43 @@ export class SessionManager {
         ts: new Date().toISOString(),
         ...event,
       } as Parameters<typeof sendAgentEvent>[1]['event'],
+    })
+  }
+
+  #emitTerminal(event: TerminalEventDraft): void {
+    const session = this.#sessions.get(event.sessionId)
+    const webContents = this.#getWebContents()
+
+    if (!session || !webContents) {
+      return
+    }
+
+    const draft: TerminalEventDraftEnvelope =
+      event.type === 'terminal.output'
+        ? {
+            type: 'terminal.output',
+            sessionId: event.sessionId,
+            terminalId: event.terminalId,
+            chunk: event.chunk ?? '',
+          }
+        : {
+            type: 'terminal.status',
+            sessionId: event.sessionId,
+            terminalId: event.terminalId,
+            status: event.status ?? 'failed',
+            ...(event.exitCode !== undefined
+              ? { exitCode: event.exitCode }
+              : {}),
+          }
+
+    sendTerminalEvent(webContents, {
+      version: IPC_VERSION,
+      event: {
+        schemaVersion: 1,
+        seq: event.seq,
+        ts: new Date().toISOString(),
+        ...draft,
+      } as TerminalEvent,
     })
   }
 

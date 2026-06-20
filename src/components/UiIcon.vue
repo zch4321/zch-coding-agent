@@ -23,6 +23,9 @@ defineProps<{
     | 'arrow-left'
     | 'check'
     | 'warning'
+    | 'terminal'
+    | 'maximize-panel'
+    | 'restore'
 }>()
 </script>
 
@@ -131,6 +134,23 @@ defineProps<{
       <path d="M12 3 2.5 20h19Z" />
       <path d="M12 9v4" />
       <path d="M12 17h.01" />
+    </g>
+    <g v-else-if="name === 'terminal'">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="m7 9 3 3-3 3" />
+      <path d="M13 15h4" />
+    </g>
+    <g v-else-if="name === 'maximize-panel'">
+      <path d="M8 4H4v4" />
+      <path d="m4 4 6 6" />
+      <path d="M16 20h4v-4" />
+      <path d="m20 20-6-6" />
+    </g>
+    <g v-else-if="name === 'restore'">
+      <path d="M9 4H4v5" />
+      <path d="m4 4 6 6" />
+      <path d="M15 20h5v-5" />
+      <path d="m20 20-6-6" />
     </g>
   </svg>
 </template>

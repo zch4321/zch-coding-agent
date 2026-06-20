@@ -56,6 +56,25 @@ export class ConfigStore {
     return operation
   }
 
+  setDeepSeekModelCatalog(
+    models: AppConfig['providers']['deepseek']['modelCatalog'],
+    fetchedAt: string,
+  ): Promise<PublicConfig> {
+    const operation = this.#mutation.then(async () => {
+      const next = structuredClone(this.#config)
+      next.providers.deepseek.modelCatalog = structuredClone(models)
+      next.providers.deepseek.modelCatalogFetchedAt = fetchedAt
+      await writeJsonAtomic(this.#filePath, next)
+      this.#config = next
+      return this.getPublicConfig()
+    })
+    this.#mutation = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    return operation
+  }
+
   async #apply(request: ConfigSetRequest): Promise<PublicConfig> {
     const next = structuredClone(this.#config)
 
@@ -64,6 +83,34 @@ export class ConfigStore {
         next.providers.deepseek.baseURL = request.baseURL
         next.providers.deepseek.model = request.model
         next.providers.deepseek.reasoning = request.reasoning
+        next.providers.deepseek.modelOverrides[request.model] = {
+          ...next.providers.deepseek.modelOverrides[request.model],
+        }
+
+        if (request.contextWindowTokens === null) {
+          delete next.providers.deepseek.modelOverrides[request.model]
+            .contextWindowTokens
+        } else if (request.contextWindowTokens !== undefined) {
+          next.providers.deepseek.modelOverrides[
+            request.model
+          ].contextWindowTokens = request.contextWindowTokens
+        }
+
+        if (request.maxOutputTokens === null) {
+          delete next.providers.deepseek.modelOverrides[request.model]
+            .maxOutputTokens
+        } else if (request.maxOutputTokens !== undefined) {
+          next.providers.deepseek.modelOverrides[
+            request.model
+          ].maxOutputTokens = request.maxOutputTokens
+        }
+
+        if (
+          Object.keys(next.providers.deepseek.modelOverrides[request.model])
+            .length === 0
+        ) {
+          delete next.providers.deepseek.modelOverrides[request.model]
+        }
         break
       case 'credential': {
         const previousReference = next.providers.deepseek.apiKeyRef

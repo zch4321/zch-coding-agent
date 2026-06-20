@@ -16,23 +16,25 @@ import type { ToolCall, ToolDefinition, ToolResult } from '../tools/types'
 import { PathGuard, PathGuardError } from './path-guard'
 import type { ApprovedToolCall } from './permission-pipeline'
 import type { ToolRegistry } from './tool-registry'
+import { applyTextPatch, TextPatchError } from './text-patch'
 
-const MAX_FILE_BYTES = 10_000_000
+const MAX_MUTATION_FILE_BYTES = 10_000_000
+const MAX_WRITE_BYTES = 256 * 1_024
 const MAX_DIFF_CHARS = 120_000
+const MAX_PATCH_BYTES = 64 * 1_024
 
 const WriteFileArgsSchema = Type.Object(
   {
     path: Type.String({ minLength: 1, maxLength: 4_096 }),
-    content: Type.String({ maxLength: MAX_FILE_BYTES }),
+    content: Type.String({ maxLength: MAX_WRITE_BYTES }),
   },
   { additionalProperties: false },
 )
 
-const EditFileArgsSchema = Type.Object(
+const ApplyPatchArgsSchema = Type.Object(
   {
     path: Type.String({ minLength: 1, maxLength: 4_096 }),
-    old: Type.String({ minLength: 1, maxLength: MAX_FILE_BYTES }),
-    new: Type.String({ maxLength: MAX_FILE_BYTES }),
+    patch: Type.String({ minLength: 1, maxLength: MAX_PATCH_BYTES }),
   },
   { additionalProperties: false },
 )
@@ -44,7 +46,7 @@ const DeleteFileArgsSchema = Type.Object(
   { additionalProperties: false },
 )
 
-export type FileOperation = 'write' | 'edit' | 'delete'
+export type FileOperation = 'write' | 'patch' | 'delete'
 
 export interface FilePrecondition {
   readonly kind: 'file'
@@ -57,6 +59,8 @@ export interface FilePrecondition {
   readonly expectedRealPath?: string
   readonly expectedFileId?: string
   readonly expectedContentHash?: string
+  readonly patchHash?: string
+  readonly expectedResultHash?: string
 }
 
 export interface ToolResourcePlan {
@@ -101,8 +105,8 @@ function operationFor(toolId: string): FileOperation | undefined {
     return 'write'
   }
 
-  if (toolId === 'edit_file') {
-    return 'edit'
+  if (toolId === 'apply_patch') {
+    return 'patch'
   }
 
   return toolId === 'delete_file' ? 'delete' : undefined
@@ -156,6 +160,13 @@ async function captureFilePrecondition(
 
   if (!targetStat.isFile()) {
     throw new PathGuardError('NOT_A_FILE', 'Target is not a regular file')
+  }
+
+  if (targetStat.size > MAX_MUTATION_FILE_BYTES) {
+    throw new PathGuardError(
+      'FILE_TOO_LARGE',
+      `File mutations support files up to ${MAX_MUTATION_FILE_BYTES} bytes`,
+    )
   }
 
   const targetRealPath = path.resolve(await realpath(absolutePath))
@@ -234,24 +245,57 @@ export function createFileDiff(
   return truncateDiff(`${body}\n`)
 }
 
-function countOccurrences(content: string, needle: string): number {
-  let count = 0
-  let index = 0
-
-  while ((index = content.indexOf(needle, index)) !== -1) {
-    count += 1
-    index += Math.max(needle.length, 1)
-  }
-
-  return count
-}
-
 function argsObject(call: ToolCall): Record<string, JsonValue> {
   if (!call.args || typeof call.args !== 'object' || Array.isArray(call.args)) {
     throw new Error('Tool args must be an object')
   }
 
   return call.args
+}
+
+function processPolicySignals(call: ToolCall): PolicySignal[] {
+  if (call.toolId !== 'run_command') {
+    return []
+  }
+
+  const args = argsObject(call)
+  const shellMode = args.mode === 'shell'
+  const command = shellMode
+    ? String(args.command ?? '')
+    : [
+        String(args.executable ?? ''),
+        ...(Array.isArray(args.args) ? args.args : []),
+      ]
+        .map(String)
+        .join(' ')
+  const signals: PolicySignal[] = [
+    {
+      code: shellMode ? 'shell_command' : 'process_spawn',
+      severity: shellMode ? 'danger' : 'warning',
+      detail: shellMode
+        ? 'Shell mode enables shell parsing and expansion'
+        : `Spawn process: ${command.slice(0, 1_024)}`,
+    },
+  ]
+
+  const riskyPatterns: Array<[RegExp, string]> = [
+    [/[|><]|&&|\|\||\$\(|`/u, 'shell_operator'],
+    [/\b(?:rm\s+-rf|del\s+\/s|remove-item\b.*-recurse)\b/iu, 'bulk_delete'],
+    [/\b(?:publish|deploy|release)\b/iu, 'publish_or_deploy'],
+    [/\b(?:credential|token|password|secret)\b/iu, 'credential_operation'],
+  ]
+
+  for (const [pattern, code] of riskyPatterns) {
+    if (pattern.test(command)) {
+      signals.push({
+        code,
+        severity: 'danger',
+        detail: `Command matched the ${code.replaceAll('_', ' ')} risk signal`,
+      })
+    }
+  }
+
+  return signals
 }
 
 function policySignals(
@@ -307,7 +351,10 @@ export async function prepareToolResourcePlan(input: {
       await guard.resolveExisting(candidate)
     }
 
-    return { preconditions: [], policySignals: [] }
+    return {
+      preconditions: [],
+      policySignals: processPolicySignals(input.call),
+    }
   }
 
   const args = argsObject(input.call)
@@ -323,23 +370,24 @@ export async function prepareToolResourcePlan(input: {
   let after: string
 
   if (operation === 'write') {
-    after = String(args.content)
-  } else if (operation === 'edit') {
-    if (!precondition.expectedExists) {
-      throw new PathGuardError('PATH_NOT_FOUND', 'Edit target does not exist')
-    }
-
-    const oldText = String(args.old)
-    const matches = countOccurrences(before, oldText)
-
-    if (matches !== 1) {
+    if (precondition.expectedExists) {
       throw new PathGuardError(
-        'RESOURCE_CHANGED',
-        `edit_file old text must match exactly once; found ${matches}`,
+        'PATH_ALREADY_EXISTS',
+        'write_file only creates new files; use apply_patch for an existing file',
       )
     }
 
-    after = before.replace(oldText, String(args.new))
+    after = String(args.content)
+  } else if (operation === 'patch') {
+    if (!precondition.expectedExists) {
+      throw new PathGuardError('PATH_NOT_FOUND', 'Patch target does not exist')
+    }
+
+    after = applyTextPatch(
+      before,
+      String(args.patch),
+      precondition.path,
+    ).content
   } else {
     if (!precondition.expectedExists) {
       throw new PathGuardError('PATH_NOT_FOUND', 'Delete target does not exist')
@@ -348,10 +396,26 @@ export async function prepareToolResourcePlan(input: {
     after = ''
   }
 
+  if (Buffer.byteLength(after, 'utf8') > MAX_MUTATION_FILE_BYTES) {
+    throw new PathGuardError(
+      'FILE_TOO_LARGE',
+      `The resulting file exceeds ${MAX_MUTATION_FILE_BYTES} bytes`,
+    )
+  }
+
   const diff = createFileDiff(precondition.path, before, after)
 
+  const plannedPrecondition =
+    operation === 'patch'
+      ? Object.freeze({
+          ...precondition,
+          patchHash: hash(String(args.patch)),
+          expectedResultHash: hash(after),
+        })
+      : precondition
+
   return {
-    preconditions: [precondition],
+    preconditions: [plannedPrecondition],
     policySignals: policySignals(operation, precondition.path, before, after),
     diff,
     diffHash: hash(diff),
@@ -445,7 +509,7 @@ function errorResult(error: unknown): ToolResult {
   return {
     status: 'error',
     code:
-      error instanceof PathGuardError
+      error instanceof PathGuardError || error instanceof TextPatchError
         ? error.code
         : error && typeof error === 'object' && 'code' in error
           ? String(error.code)
@@ -459,13 +523,18 @@ export function createFileToolDefinitions(): ToolDefinition[] {
   const writeFile: ToolDefinition<typeof WriteFileArgsSchema> = {
     id: 'write_file',
     description:
-      'Create or replace a UTF-8 file inside the workspace. Requires permission approval.',
+      'Create a new UTF-8 file inside the workspace. Use apply_patch when the file already exists.',
     inputSchema: WriteFileArgsSchema,
     effects: ['filesystem.write'],
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 200_000,
+    validateArgs(args) {
+      return Buffer.byteLength(args.content, 'utf8') > MAX_WRITE_BYTES
+        ? `write_file content must not exceed ${MAX_WRITE_BYTES} UTF-8 bytes`
+        : undefined
+    },
     async execute(args, context) {
       try {
         const precondition = mutationPrecondition(context.approvedCall, 'write')
@@ -490,34 +559,41 @@ export function createFileToolDefinitions(): ToolDefinition[] {
     },
   }
 
-  const editFile: ToolDefinition<typeof EditFileArgsSchema> = {
-    id: 'edit_file',
+  const applyPatch: ToolDefinition<typeof ApplyPatchArgsSchema> = {
+    id: 'apply_patch',
     description:
-      'Replace one exact, unique text occurrence in a UTF-8 workspace file. Requires permission approval.',
-    inputSchema: EditFileArgsSchema,
+      'Apply a strict single-file unified diff with one or more hunks. Context and line numbers must match exactly.',
+    inputSchema: ApplyPatchArgsSchema,
     effects: ['filesystem.write'],
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 200_000,
+    validateArgs(args) {
+      return Buffer.byteLength(args.patch, 'utf8') > MAX_PATCH_BYTES
+        ? `apply_patch patch must not exceed ${MAX_PATCH_BYTES} UTF-8 bytes`
+        : undefined
+    },
     async execute(args, context) {
       try {
-        const precondition = mutationPrecondition(context.approvedCall, 'edit')
+        const precondition = mutationPrecondition(context.approvedCall, 'patch')
         const current = await readFile(precondition.absolutePath, 'utf8')
-        const matches = countOccurrences(current, args.old)
+        const applied = applyTextPatch(current, args.patch, precondition.path)
 
-        if (matches !== 1) {
+        if (
+          precondition.patchHash !== hash(args.patch) ||
+          precondition.expectedResultHash !== hash(applied.content)
+        ) {
           throw new PathGuardError(
             'RESOURCE_CHANGED',
-            `edit_file old text must match exactly once; found ${matches}`,
+            'The approved patch no longer matches its planned result',
           )
         }
 
-        const updated = current.replace(args.old, args.new)
         await atomicReplace(
           context.workspace.canonicalPath,
           precondition,
-          updated,
+          applied.content,
           context.signal,
         )
 
@@ -525,8 +601,11 @@ export function createFileToolDefinitions(): ToolDefinition[] {
           status: 'ok',
           content: {
             path: precondition.path,
-            operation: 'edit',
-            contentHash: hash(updated),
+            operation: 'patch',
+            hunks: applied.hunks,
+            addedLines: applied.addedLines,
+            removedLines: applied.removedLines,
+            contentHash: hash(applied.content),
           },
         }
       } catch (error) {
@@ -570,7 +649,7 @@ export function createFileToolDefinitions(): ToolDefinition[] {
     },
   }
 
-  return [writeFile, editFile, deleteFile]
+  return [writeFile, applyPatch, deleteFile]
 }
 
 export function registerFileTools(registry: ToolRegistry): void {

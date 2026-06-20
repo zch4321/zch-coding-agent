@@ -7,26 +7,32 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && npm run build:app && electron-builder --win --x64",
+    "build": "npm run typecheck && npm run test:native && npm run build:app && electron-builder --win --x64",
     "build:app": "vite build",
+    "rebuild:native:source": "electron-rebuild -f -w node-pty",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,vue,js,mjs,cjs,json,json5,css,html,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,vue,js,mjs,cjs,json,json5,css,html,yml,yaml}\"",
     "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
+    "test:native": "node scripts/native-pty-smoke.cjs",
     "test:e2e": "npm run build:app && playwright test"
   },
   "dependencies": {
     "@sinclair/typebox": "0.34.49",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "ajv": "8.20.0",
     "markdown-it": "14.2.0",
     "naive-ui": "2.44.1",
+    "node-pty": "^1.1.0",
     "pinia": "3.0.4",
     "shiki": "4.2.0",
     "vue": "3.5.38"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.61.0",
     "@types/markdown-it": "14.1.2",

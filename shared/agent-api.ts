@@ -16,6 +16,9 @@ type Unsubscribe = () => void
 export interface AgentApi {
   getConfig(payload: IpcPayload<'config:get'>): Promise<IpcResult<'config:get'>>
   setConfig(payload: IpcPayload<'config:set'>): Promise<IpcResult<'config:set'>>
+  listProviderModels(
+    payload: IpcPayload<'provider:list-models'>,
+  ): Promise<IpcResult<'provider:list-models'>>
   chooseWorkspace(
     payload: IpcPayload<'workspace:choose'>,
   ): Promise<IpcResult<'workspace:choose'>>
@@ -41,6 +44,21 @@ export interface AgentApi {
   sendTerminalInput(
     payload: IpcPayload<'terminal:input'>,
   ): Promise<IpcResult<'terminal:input'>>
+  openTerminal(
+    payload: IpcPayload<'terminal:open'>,
+  ): Promise<IpcResult<'terminal:open'>>
+  listTerminals(
+    payload: IpcPayload<'terminal:list'>,
+  ): Promise<IpcResult<'terminal:list'>>
+  resizeTerminal(
+    payload: IpcPayload<'terminal:resize'>,
+  ): Promise<IpcResult<'terminal:resize'>>
+  closeTerminal(
+    payload: IpcPayload<'terminal:close'>,
+  ): Promise<IpcResult<'terminal:close'>>
+  getTerminalSnapshot(
+    payload: IpcPayload<'terminal:snapshot'>,
+  ): Promise<IpcResult<'terminal:snapshot'>>
   minimizeWindow(
     payload: IpcPayload<'window:minimize'>,
   ): Promise<IpcResult<'window:minimize'>>
@@ -72,6 +90,7 @@ export interface AgentApi {
 export const AGENT_API_KEYS = [
   'getConfig',
   'setConfig',
+  'listProviderModels',
   'chooseWorkspace',
   'listWorkspaceDirectory',
   'readWorkspaceFile',
@@ -81,6 +100,11 @@ export const AGENT_API_KEYS = [
   'interruptRun',
   'decideApproval',
   'sendTerminalInput',
+  'openTerminal',
+  'listTerminals',
+  'resizeTerminal',
+  'closeTerminal',
+  'getTerminalSnapshot',
   'minimizeWindow',
   'toggleMaximizeWindow',
   'closeWindow',

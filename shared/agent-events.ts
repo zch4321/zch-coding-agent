@@ -6,6 +6,7 @@ import {
   TerminalIdSchema,
 } from './ids'
 import { JsonValueSchema } from './json'
+import { TerminalStatusSchema } from './terminal'
 
 const EventBaseSchema = Type.Object({
   schemaVersion: Type.Literal(1),
@@ -176,12 +177,7 @@ export const TerminalEventSchema = Type.Union([
       type: Type.Literal('terminal.status'),
       sessionId: SessionIdSchema,
       terminalId: TerminalIdSchema,
-      status: Type.Union([
-        Type.Literal('opening'),
-        Type.Literal('running'),
-        Type.Literal('closed'),
-        Type.Literal('failed'),
-      ]),
+      status: TerminalStatusSchema,
       exitCode: Type.Optional(Type.Union([Type.Integer(), Type.Null()])),
     }),
   ]),

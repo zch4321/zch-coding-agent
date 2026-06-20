@@ -24,6 +24,11 @@ import {
   TRACE_NOTICE_VERSION,
 } from '../shared/notices'
 import { SessionManager } from './agent/session-manager'
+import {
+  fetchDeepSeekModelCatalog,
+  ModelCatalogError,
+  resolveModelProfiles,
+} from './agent/model-catalog'
 import { PathGuard, PathGuardError } from './agent/path-guard'
 import { IpcFault, registerIpcHandlers } from './ipc'
 import { PluginEventBus } from './plugins/event-bus'
@@ -169,6 +174,57 @@ async function installIpc(): Promise<void> {
           config: await configStore.update(payload),
         }
       },
+      'provider:list-models': async (payload) => {
+        if (payload.refresh) {
+          const apiKey = await configStore.getDeepSeekApiKey()
+
+          if (!apiKey) {
+            throw new IpcFault({
+              code: 'PRECONDITION_FAILED',
+              message: 'Save a DeepSeek credential before refreshing models',
+            })
+          }
+
+          try {
+            const config = configStore.getPublicConfig()
+            const models = await fetchDeepSeekModelCatalog({
+              baseURL: config.providers.deepseek.baseURL,
+              apiKey,
+            })
+            await configStore.setDeepSeekModelCatalog(
+              models,
+              new Date().toISOString(),
+            )
+          } catch (error) {
+            if (error instanceof ModelCatalogError) {
+              throw new IpcFault({
+                code:
+                  error.status === 401 || error.status === 403
+                    ? 'PRECONDITION_FAILED'
+                    : 'NOT_AVAILABLE',
+                message:
+                  error.status === 401 || error.status === 403
+                    ? 'DeepSeek rejected the configured credential'
+                    : error.message,
+              })
+            }
+
+            throw error
+          }
+        }
+
+        const config = configStore.getPublicConfig()
+        const fetchedAt = config.providers.deepseek.modelCatalogFetchedAt
+        const stale =
+          !fetchedAt ||
+          Date.now() - new Date(fetchedAt).getTime() > 24 * 60 * 60_000
+
+        return {
+          models: resolveModelProfiles(config),
+          fetchedAt,
+          stale,
+        }
+      },
       'workspace:choose': async () => {
         const options: OpenDialogOptions = {
           properties: ['openDirectory'],
@@ -289,6 +345,40 @@ async function installIpc(): Promise<void> {
           remember: payload.remember,
         }),
       }),
+      'terminal:open': async (payload) => ({
+        terminal: await sessionManager.openTerminal({
+          sessionId: payload.sessionId,
+          cwd: payload.cwd,
+          cols: payload.cols,
+          rows: payload.rows,
+        }),
+      }),
+      'terminal:list': (payload) => ({
+        terminals: sessionManager.listTerminals(payload.sessionId),
+      }),
+      'terminal:input': (payload) => ({
+        accepted: sessionManager.sendTerminalInput(
+          payload.sessionId,
+          payload.terminalId,
+          payload.data,
+        ),
+      }),
+      'terminal:resize': (payload) => ({
+        accepted: sessionManager.resizeTerminal(
+          payload.sessionId,
+          payload.terminalId,
+          payload.cols,
+          payload.rows,
+        ),
+      }),
+      'terminal:close': (payload) => ({
+        accepted: sessionManager.closeTerminal(
+          payload.sessionId,
+          payload.terminalId,
+        ),
+      }),
+      'terminal:snapshot': (payload) =>
+        sessionManager.terminalSnapshot(payload.sessionId, payload.terminalId),
       'window:minimize': (_payload, event) => {
         BrowserWindow.fromWebContents(event.sender)?.minimize()
         return { accepted: true }

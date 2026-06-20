@@ -15,6 +15,15 @@ export const AppConfigSchema = Type.Object(
           {
             baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
             model: Type.String({ minLength: 1, maxLength: 256 }),
+            modelCatalog:
+              PublicConfigSchema.properties.providers.properties.deepseek
+                .properties.modelCatalog,
+            modelCatalogFetchedAt: Type.Optional(
+              Type.String({ format: 'date-time' }),
+            ),
+            modelOverrides:
+              PublicConfigSchema.properties.providers.properties.deepseek
+                .properties.modelOverrides,
             apiKeyRef: Type.Optional(
               Type.String({ minLength: 1, maxLength: 128 }),
             ),
@@ -53,6 +62,8 @@ export const DEFAULT_APP_CONFIG = {
     deepseek: {
       baseURL: 'https://api.deepseek.com',
       model: 'deepseek-chat',
+      modelCatalog: [],
+      modelOverrides: {},
       reasoning: 'auto',
     },
   },
@@ -71,8 +82,14 @@ export const DEFAULT_APP_CONFIG = {
   },
   limits: {
     maxStepsPerRun: 24,
-    maxToolOutputBytes: 1_000_000,
+    maxToolOutputBytes: 64 * 1_024,
     maxContextTokens: 64_000,
+    maxToolResultTokens: 8_000,
+    maxToolTokensPerRun: 24_000,
+    tokenEstimation: {
+      mode: 'conservative',
+      bytesPerToken: 3,
+    },
     commandTimeoutMs: 120_000,
     terminalScrollbackBytes: 2_000_000,
   },
@@ -101,6 +118,11 @@ export function toPublicConfig(
         baseURL: config.providers.deepseek.baseURL,
         model: config.providers.deepseek.model,
         reasoning: config.providers.deepseek.reasoning,
+        modelCatalog: structuredClone(config.providers.deepseek.modelCatalog),
+        modelCatalogFetchedAt: config.providers.deepseek.modelCatalogFetchedAt,
+        modelOverrides: structuredClone(
+          config.providers.deepseek.modelOverrides,
+        ),
         credentialConfigured,
       },
     },

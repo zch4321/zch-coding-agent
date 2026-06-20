@@ -109,6 +109,51 @@ describe('ConfigStore', () => {
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBeGreaterThan(
       0,
     )
+    expect(configStore.getPublicConfig().limits.tokenEstimation).toEqual({
+      mode: 'conservative',
+      bytesPerToken: 3,
+    })
+  })
+
+  it('persists model catalogs and per-model capability overrides', async () => {
+    const { configStore } = await createStores()
+    await configStore.setDeepSeekModelCatalog(
+      [{ id: 'model-a', ownedBy: 'provider' }],
+      '2026-06-19T00:00:00.000Z',
+    )
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      baseURL: 'https://example.test/v1',
+      model: 'model-a',
+      reasoning: 'off',
+      contextWindowTokens: 200_000,
+      maxOutputTokens: 10_000,
+    })
+
+    expect(configStore.getPublicConfig().providers.deepseek).toMatchObject({
+      modelCatalog: [{ id: 'model-a', ownedBy: 'provider' }],
+      modelCatalogFetchedAt: '2026-06-19T00:00:00.000Z',
+      modelOverrides: {
+        'model-a': {
+          contextWindowTokens: 200_000,
+          maxOutputTokens: 10_000,
+        },
+      },
+    })
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      baseURL: 'https://example.test/v1',
+      model: 'model-a',
+      reasoning: 'off',
+      contextWindowTokens: null,
+      maxOutputTokens: null,
+    })
+    expect(
+      configStore.getPublicConfig().providers.deepseek.modelOverrides,
+    ).toEqual({})
   })
 })
 

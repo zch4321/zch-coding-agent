@@ -77,6 +77,15 @@ interface UiRememberedRule {
   createdFromCallId: string
 }
 
+interface UiModelProfile {
+  id: string
+  ownedBy?: string
+  availability: 'provider' | 'custom'
+  capabilitySource: 'override' | 'builtin' | 'default'
+  contextWindowTokens: number
+  maxOutputTokens?: number
+}
+
 const HISTORY_KEY = 'my-coding-agent.workbench.v1'
 let persistTimer: number | undefined
 
@@ -155,6 +164,7 @@ export const useAgentStore = defineStore('agent', {
     projects: [] as ProjectRecord[],
     conversations: [] as ConversationRecord[],
     activeConversationId: undefined as string | undefined,
+    sessionIdsByConversation: {} as Record<string, SessionId>,
     sessionId: undefined as SessionId | undefined,
     activeRunId: undefined as RunId | undefined,
     runStatus: 'idle',
@@ -164,12 +174,23 @@ export const useAgentStore = defineStore('agent', {
     tools: [] as ToolActivity[],
     pendingApproval: undefined as PendingApproval | undefined,
     error: '',
+    modelProfiles: [] as UiModelProfile[],
+    modelCatalogFetchedAt: undefined as string | undefined,
+    modelCatalogStale: true,
+    modelCatalogLoading: false,
+    modelOverrides:
+      {} as PublicConfig['providers']['deepseek']['modelOverrides'],
+    limitsConfig: undefined as PublicConfig['limits'] | undefined,
     providerForm: {
       baseURL: 'https://api.deepseek.com',
       model: 'deepseek-chat',
       reasoning: 'auto' as 'auto' | 'off',
       apiKey: '',
       approverModel: 'deepseek-chat',
+      contextWindowTokens: null as number | null,
+      maxOutputTokens: null as number | null,
+      tokenEstimationMode: 'conservative' as 'conservative' | 'custom-bytes',
+      bytesPerToken: 3,
     },
     permissionForm: {
       sensitiveMode: 'confirm' as 'off' | 'warn' | 'confirm',
@@ -205,6 +226,15 @@ export const useAgentStore = defineStore('agent', {
         !state.activeRunId &&
         state.input.trim().length > 0 &&
         !state.pendingApproval,
+      ),
+    modelOptions: (state) =>
+      state.modelProfiles.map((model) => ({
+        label: model.id,
+        value: model.id,
+      })),
+    activeModelProfile: (state) =>
+      state.modelProfiles.find(
+        (model) => model.id === state.providerForm.model,
       ),
   },
   actions: {
@@ -261,6 +291,8 @@ export const useAgentStore = defineStore('agent', {
         this.error = result.error.message
       }
 
+      await this.loadProviderModels(false)
+
       this.restoreActiveConversation()
       this.unsubscribers.push(
         bridge.onAgentEvent((envelope) =>
@@ -296,6 +328,14 @@ export const useAgentStore = defineStore('agent', {
       this.providerForm.model = config.providers.deepseek.model
       this.providerForm.reasoning = config.providers.deepseek.reasoning
       this.providerForm.approverModel = config.approval.approverModel
+      this.modelOverrides = structuredClone(
+        config.providers.deepseek.modelOverrides,
+      )
+      this.limitsConfig = structuredClone(config.limits)
+      this.providerForm.tokenEstimationMode = config.limits.tokenEstimation.mode
+      this.providerForm.bytesPerToken =
+        config.limits.tokenEstimation.bytesPerToken
+      this.syncModelOverride(config.providers.deepseek.model)
       this.permissionForm.sensitiveMode = config.permission.sensitiveData.mode
       this.permissionForm.pathGlobs =
         config.permission.sensitiveData.pathGlobs.join('\n')
@@ -338,6 +378,7 @@ export const useAgentStore = defineStore('agent', {
       this.registerProject(targetWorkspace)
       this.conversations.push(conversation)
       this.activeConversationId = conversation.id
+      this.sessionId = undefined
       this.messages = []
       this.tools = []
       this.pendingApproval = undefined
@@ -353,7 +394,7 @@ export const useAgentStore = defineStore('agent', {
         }
       }
 
-      await this.closeRuntimeSession()
+      this.saveActiveConversation()
       this.createConversation()
       return true
     },
@@ -371,7 +412,6 @@ export const useAgentStore = defineStore('agent', {
       }
 
       this.saveActiveConversation()
-      await this.closeRuntimeSession()
       await this.activateWorkspace(conversation.projectPath)
       this.activeConversationId = conversation.id
       this.restoreActiveConversation()
@@ -401,8 +441,8 @@ export const useAgentStore = defineStore('agent', {
         return false
       }
 
-      if (conversationId === this.activeConversationId) {
-        await this.closeRuntimeSession()
+      if (this.sessionIdsByConversation[conversationId]) {
+        await this.closeRuntimeSession(conversationId)
       }
 
       this.conversations = this.conversations.filter(
@@ -433,7 +473,15 @@ export const useAgentStore = defineStore('agent', {
       }
 
       const removedPath = this.workspacePath
-      await this.closeRuntimeSession()
+      const projectConversationIds = this.conversations
+        .filter((conversation) => conversation.projectPath === removedPath)
+        .map((conversation) => conversation.id)
+
+      await Promise.all(
+        projectConversationIds.map((conversationId) =>
+          this.closeRuntimeSession(conversationId),
+        ),
+      )
       this.projects = this.projects.filter(
         (project) => project.path !== removedPath,
       )
@@ -464,6 +512,9 @@ export const useAgentStore = defineStore('agent', {
         (item) => item.id === this.activeConversationId,
       )
       this.messages = conversation ? cloneMessages(conversation.messages) : []
+      this.sessionId = conversation
+        ? this.sessionIdsByConversation[conversation.id]
+        : undefined
 
       if (conversation) {
         this.workspacePath = conversation.projectPath
@@ -553,7 +604,6 @@ export const useAgentStore = defineStore('agent', {
         return undefined
       }
 
-      await this.closeRuntimeSession()
       this.workspacePath = result.value.path
       this.registerProject(result.value.path)
       const latest = this.conversations
@@ -576,6 +626,55 @@ export const useAgentStore = defineStore('agent', {
       this.mode = mode
       this.schedulePersist()
     },
+    syncModelOverride(model: string) {
+      const override = this.modelOverrides[model]
+      this.providerForm.contextWindowTokens =
+        override?.contextWindowTokens ?? null
+      this.providerForm.maxOutputTokens = override?.maxOutputTokens ?? null
+    },
+    setProviderModel(model: string) {
+      this.providerForm.model = model
+      this.syncModelOverride(model)
+
+      if (!this.modelProfiles.some((candidate) => candidate.id === model)) {
+        const fallbackContext = this.limitsConfig?.maxContextTokens ?? 64_000
+        this.modelProfiles.push({
+          id: model,
+          availability: 'custom',
+          capabilitySource: 'default',
+          contextWindowTokens: fallbackContext,
+        })
+      }
+    },
+    async loadProviderModels(refresh: boolean) {
+      const bridge = api()
+
+      if (!bridge || this.modelCatalogLoading) {
+        return
+      }
+
+      this.modelCatalogLoading = true
+
+      try {
+        const result = await bridge.listProviderModels({
+          version: IPC_VERSION,
+          refresh,
+        })
+
+        if (!result.ok) {
+          if (refresh) {
+            this.error = result.error.message
+          }
+          return
+        }
+
+        this.modelProfiles = result.value.models
+        this.modelCatalogFetchedAt = result.value.fetchedAt
+        this.modelCatalogStale = result.value.stale
+      } finally {
+        this.modelCatalogLoading = false
+      }
+    },
     async saveProvider() {
       const bridge = api()
 
@@ -589,6 +688,8 @@ export const useAgentStore = defineStore('agent', {
         kind: 'provider',
         baseURL: this.providerForm.baseURL,
         model: this.providerForm.model,
+        contextWindowTokens: this.providerForm.contextWindowTokens,
+        maxOutputTokens: this.providerForm.maxOutputTokens,
         reasoning: this.providerForm.reasoning,
       })
 
@@ -610,6 +711,26 @@ export const useAgentStore = defineStore('agent', {
         this.applyConfig(approval.value.config)
       } else {
         this.error = approval.error.message
+      }
+
+      if (this.limitsConfig) {
+        const limits = await bridge.setConfig({
+          version: IPC_VERSION,
+          kind: 'limits',
+          value: {
+            ...this.limitsConfig,
+            tokenEstimation: {
+              mode: this.providerForm.tokenEstimationMode,
+              bytesPerToken: this.providerForm.bytesPerToken,
+            },
+          },
+        })
+
+        if (limits.ok) {
+          this.applyConfig(limits.value.config)
+        } else {
+          this.error = limits.error.message
+        }
       }
 
       if (this.providerForm.apiKey.trim()) {
@@ -786,21 +907,34 @@ export const useAgentStore = defineStore('agent', {
 
       if (result.ok) {
         this.sessionId = result.value.sessionId
+        if (this.activeConversationId) {
+          this.sessionIdsByConversation[this.activeConversationId] =
+            result.value.sessionId
+        }
         return true
       }
 
       this.error = result.error.message
       return false
     },
-    async closeRuntimeSession() {
+    async closeRuntimeSession(conversationId?: string) {
       const bridge = api()
-      const sessionId = this.sessionId
+      const targetConversationId = conversationId ?? this.activeConversationId
+      const sessionId = targetConversationId
+        ? this.sessionIdsByConversation[targetConversationId]
+        : undefined
 
-      this.sessionId = undefined
-      this.activeRunId = undefined
-      this.pendingApproval = undefined
-      this.runStatus = 'idle'
-      this.tools = []
+      if (targetConversationId) {
+        delete this.sessionIdsByConversation[targetConversationId]
+      }
+
+      if (targetConversationId === this.activeConversationId) {
+        this.sessionId = undefined
+        this.activeRunId = undefined
+        this.pendingApproval = undefined
+        this.runStatus = 'idle'
+        this.tools = []
+      }
 
       if (bridge && sessionId) {
         await bridge.closeSession({
@@ -901,7 +1035,26 @@ export const useAgentStore = defineStore('agent', {
       }
     },
     handleAgentEvent(event: AgentEvent) {
-      if (this.sessionId && event.sessionId !== this.sessionId) {
+      if (event.type === 'session.closed') {
+        for (const [conversationId, sessionId] of Object.entries(
+          this.sessionIdsByConversation,
+        )) {
+          if (sessionId === event.sessionId) {
+            delete this.sessionIdsByConversation[conversationId]
+          }
+        }
+
+        if (event.sessionId === this.sessionId) {
+          this.sessionId = undefined
+          this.activeRunId = undefined
+          this.pendingApproval = undefined
+          this.runStatus = 'idle'
+        }
+
+        return
+      }
+
+      if (event.sessionId !== this.sessionId) {
         return
       }
 
@@ -964,12 +1117,6 @@ export const useAgentStore = defineStore('agent', {
             rememberable: event.rememberable,
             expiresAt: event.expiresAt,
           }
-          break
-        case 'session.closed':
-          this.sessionId = undefined
-          this.activeRunId = undefined
-          this.pendingApproval = undefined
-          this.runStatus = 'idle'
           break
       }
     },

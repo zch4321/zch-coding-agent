@@ -125,6 +125,17 @@ class ScriptedEditProvider implements LLMProvider {
     this.calls += 1
 
     if (this.calls === 1) {
+      const args = {
+        path: 'note.txt',
+        patch: [
+          '--- a/note.txt',
+          '+++ b/note.txt',
+          '@@ -1,2 +1,2 @@',
+          ' alpha',
+          '-beta',
+          '+gamma',
+        ].join('\n'),
+      }
       yield {
         type: 'completed',
         rawResponse: { id: 'edit-request' },
@@ -136,8 +147,8 @@ class ScriptedEditProvider implements LLMProvider {
               id: 'call-edit',
               type: 'function',
               function: {
-                name: 'edit_file',
-                arguments: '{"path":"note.txt","old":"beta","new":"gamma"}',
+                name: 'apply_patch',
+                arguments: JSON.stringify(args),
               },
             },
           ],
@@ -145,8 +156,8 @@ class ScriptedEditProvider implements LLMProvider {
         toolCalls: [
           {
             id: 'call-edit' as CallId,
-            toolId: 'edit_file',
-            args: { path: 'note.txt', old: 'beta', new: 'gamma' },
+            toolId: 'apply_patch',
+            args,
             reason: 'Update the requested line',
           },
         ],
@@ -360,12 +371,12 @@ describe('SessionManager P2 loop', () => {
     const toolCall = trace.find((event) => event.type === 'tool.call')
 
     expect(toolCall).toMatchObject({
-      tool: 'edit_file',
+      tool: 'apply_patch',
       approvedBy: 'model',
     })
     expect(toolCall?.policySignals).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: 'filesystem_edit' }),
+        expect.objectContaining({ code: 'filesystem_patch' }),
       ]),
     )
     expect(toolCall?.diffHash).toEqual(expect.any(String))
@@ -457,7 +468,7 @@ describe('SessionManager P2 loop', () => {
     expect(store.getPublicConfig().permission.rememberedRules).toEqual([
       expect.objectContaining({
         effect: 'allow',
-        toolId: 'edit_file',
+        toolId: 'apply_patch',
         workspaceScope: workspace,
         argConstraints: { path: 'note.txt' },
         expiresAt,

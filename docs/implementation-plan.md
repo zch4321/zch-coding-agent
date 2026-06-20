@@ -148,7 +148,7 @@
 ### 功能清单
 
 - [ ] **P2-1 首次配置、工作区和会话生命周期**
-  - 提供 DeepSeek base URL/model/reasoning/credential 设置 UI；密钥只通过窄 IPC 进入主进程。
+  - 提供 DeepSeek base URL/model/reasoning/credential 设置 UI；密钥只通过窄 IPC 进入主进程。模型使用鉴权 `/models` 目录与可输入 combobox，目录不承担上下文能力发现。
   - 首次创建会话前明确告知用户：消息、代码和工具结果可能发送给 Provider；记录用户确认版本。
   - 用户启用完整 trace 前展示独立告知：日志可能包含源码、用户输入、推理过程、工具输出和工作区凭据；默认保持关闭。
   - `chooseWorkspace` 由主进程打开目录选择器；`createSession` 绑定 canonical workspace、mode 和 provider。
@@ -170,8 +170,9 @@
   - 处理相对路径、绝对路径、UNC、大小写、`..`、symlink、junction 和最近已存在父目录。
   - 打开前和打开后复核真实路径；所有文件/搜索工具复用同一实现。
 - [ ] **P2-6 上下文预算与协议完整性**
-  - 使用保守 token 估算并预留输出窗口；记录估算器版本。
-  - 截断必须保留 system、最近用户轮次、未完成工具链和 provider state。
+  - 使用可替换 token 估算并预留输出窗口；支持用户按 Provider/模型配置 `bytesPerToken`，记录估算器版本。
+  - 字节、行数/结果数、单结果 token 和单 run 工具 token 均有硬边界；`read_file` 按行分页并返回续读位置。
+  - 截断必须保留 system、最近用户轮次、完整 tool-call/result 组和 provider state。
   - 一次返回多个 tool call 时逐个产生 tool result；拒绝、取消、超时和错误也不得静默丢失。
 - [ ] **P2-7 Context Ingress Filter**
   - 在任何工具结果进入下一次 LLM 请求前统一执行 `off/warn/confirm`。
@@ -221,9 +222,9 @@
   - Yolo 只跳过风险黑名单、记忆规则、敏感数据阻断、模型和人工审批；不能跳过 schema、归属、workspace 和执行前复核。
   - `ApprovedToolCall` 绑定 session/run/call/tool/argsHash/preconditions/approvedBy，使用不可变对象和受限构造。
 - [ ] **P3-2 文件写工具**
-  - 注册 `write_file/edit_file/delete_file`，声明 effects、risk、abort、timeout 和输出上限。
+  - 注册 `write_file/apply_patch/delete_file`，声明 effects、risk、abort、timeout 和输出上限；不再暴露 `edit_file`。
   - 写入使用同目录临时文件、flush、原子 replace；失败时清理临时文件。
-  - `edit_file` 的 old 文本必须唯一匹配；delete 绑定目标真实路径和内容 hash。
+  - `apply_patch` 单文件多 hunk、严格 context 匹配且禁止 fuzzy apply；delete 绑定目标真实路径和内容 hash。
 - [ ] **P3-3 Auto 审批模型**
   - 输入仅包含 tool metadata、完整业务 args、reason、workspacePath 和 policySignals。
   - 输出严格为 `{decision:'safe'|'dangerous', note}`。
@@ -286,28 +287,38 @@
 
 ### 功能清单
 
-- [ ] **P4-1 `run_command`**
+- [x] **P4-1 `run_command`**
   - `mode:'process'` 使用 executable + args[]；`mode:'shell'` 使用 command 字符串并默认提高风险。
   - cwd 必须以 canonical workspace 为初始目录；UI 明确说明这不是主机 sandbox。
   - 使用白名单方式构造子进程 env，Provider key 和应用内部 secret 永不继承。
   - stdout/stderr 流式计数并有界保存；超限继续 drain，返回 `truncated/totalBytes/discardedHash`。
-- [ ] **P4-2 进程树终止与命令信号**
+- [x] **P4-2 进程树终止与命令信号**
   - Windows 实现可验证的进程树管理（优先 Job Object；不可用时使用受控 tree-kill fallback），记录采用的策略。
   - timeout/abort 先请求优雅退出，超过 grace period 强制终止。
   - shell、重定向、管道、命令替换、发布/部署、批量删除和凭据修改只作为风险信号，不宣称完整解析 shell。
-- [ ] **P4-3 PTY 池与终端工具**
+- [x] **P4-3 PTY 池与终端工具**
   - 接入 `node-pty`，实现 open/send/read/list/close/resize。
   - `terminal_open/send/close` 作为副作用工具经过完整权限管线；read/list/resize 经过校验和只读快速放行。
   - renderer 人类输入走 `terminal:input`，不经过 Agent 审批，但必须校验 sender、session 和 terminal ownership。
   - PTY 属于 session；中断 run 不关闭 PTY，会话关闭或应用退出必须关闭。
   - 原始 ANSI 输出进入 UI；有限 ByteRingBuffer 保存 scrollback；给 LLM 的 read 结果 strip ANSI。
-- [ ] **P4-4 终端 UI**
+- [x] **P4-4 终端 UI**
   - 对话输入区位于对话区内部且只占中间对话工作列宽度；Terminal 位于完整对话区之后、对话输入区下方，只占对话工作列宽度，不出现在 Artifact 侧栏；顶栏和 `Ctrl+J` / `Ctrl+\`` 可切换。
   - xterm.js 多 tab、输入、resize、折叠/最大化和原始 ANSI 渲染。
   - terminal event 带 seq；丢片后请求有限快照并显示状态。
-- [ ] **P4-5 Native Module 与打包**
-  - 配置 `@electron/rebuild`、electron-builder `asarUnpack` 和 Windows x64 native module 打包。
+- [x] **P4-5 Native Module 与打包**
+  - 配置 `@electron/rebuild` 源码回退、electron-builder `asarUnpack` 和 Windows x64 native module 打包；默认使用 node-pty 官方 N-API prebuild，避免无条件要求本机安装 C++ Spectre 库。
   - 在打包产物中验证 node-pty、safeStorage、日志目录和进程终止。
+
+- [x] **P4-6 Provider 目录与上下文预算稳定化**
+  - 主进程实现 DeepSeek `GET /models`、有限缓存和结构化错误；renderer 使用可输入模型下拉框。
+  - 合并内置模型能力、Provider 目录和用户覆盖；未知模型使用 64K 保守上下文。
+  - 实现 conservative/custom-bytes token 估算、单结果与单 run 工具预算、协议安全裁剪。
+  - `read_file` 按行分页；命令和终端输出使用更小的模型上下文预算并返回截断元数据。
+- [x] **P4-7 Patch 工具迁移**
+  - 用 `apply_patch` 替换 `edit_file`；第一版一次修改一个已有文件，支持多个 hunk。
+  - parser 拒绝越界、二进制、rename、mode change、fuzzy context 和超限 patch；审批绑定 before/patch/after hash。
+  - `write_file` 默认只创建不存在的文件，历史记忆规则中的 `edit_file` 不再生效。
 
 ### 测试点
 
@@ -320,6 +331,10 @@
 - **T-P4-7**：scrollback 超限只丢最旧字节，`terminal_read` 无 ANSI 且受 lines/bytes 限制。
 - **T-P4-8**：seq 丢片触发一次快照恢复，不重复渲染已有 chunk。
 - **T-P4-9**：Windows 安装/解包产物可启动 PTY、运行并取消命令、完成 safeStorage round-trip。
+- **T-P4-10**：`/models` 成功、401、网络失败和缓存回退均有契约测试；目录外模型仍可保存。
+- **T-P4-11**：中英文、自定义 bytes/token、超长单行和连续命令输出均不会突破单结果/run/context 预算。
+- **T-P4-12**：上下文裁剪后所有 assistant tool call 与 tool result 配对完整。
+- **T-P4-13**：多 hunk patch 成功；context 漂移、越界路径、超限 patch 和执行前文件变化均整体拒绝。
 
 ### 验收标准
 

@@ -69,7 +69,14 @@ export class ToolRegistry implements ToolRegistrationPort {
       }
     }
 
-    return { ok: true, args: args as Static<Schema> }
+    const typedArgs = args as Static<Schema>
+    const validationMessage = definition.validateArgs?.(typedArgs)
+
+    if (validationMessage) {
+      return { ok: false, message: validationMessage }
+    }
+
+    return { ok: true, args: typedArgs }
   }
 }
 
@@ -230,6 +237,19 @@ export class ToolExecutor {
         signal: timeoutController.signal,
         approvedCall,
       })
+
+      if (definition.supportsAbort) {
+        const result = await executed
+
+        if (timeoutController.signal.aborted) {
+          return signal.aborted
+            ? cancelledResult()
+            : timeoutResult(definition.id)
+        }
+
+        return boundResult(result, definition.maxOutputBytes)
+      }
+
       const aborted = new Promise<ToolResult>((resolve) => {
         timeoutController.signal.addEventListener(
           'abort',
@@ -246,6 +266,10 @@ export class ToolExecutor {
     } catch (error) {
       if (signal.aborted) {
         return cancelledResult()
+      }
+
+      if (timeoutController.signal.aborted) {
+        return timeoutResult(definition.id)
       }
 
       return {
