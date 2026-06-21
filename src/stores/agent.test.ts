@@ -10,6 +10,7 @@ import {
 } from '../../electron/config/schema'
 import { validatePayloadLimits } from '../../electron/ipc/validators'
 import { useAgentStore } from './agent'
+import { useAgentTimelineStore } from './agent-timeline'
 
 const sessionId = 'session:test' as SessionId
 const runId = 'run:test' as RunId
@@ -50,6 +51,17 @@ describe('agent store regressions', () => {
   afterEach(() => {
     Reflect.deleteProperty(window, 'agentApi')
     vi.restoreAllMocks()
+  })
+
+  it('forwards facade state to the focused domain stores', () => {
+    const store = useAgentStore()
+    const timeline = useAgentTimelineStore()
+
+    store.input = 'facade draft'
+    expect(timeline.input).toBe('facade draft')
+
+    timeline.input = 'domain draft'
+    expect(store.input).toBe('domain draft')
   })
 
   it('submits an approval once and retains the reviewed diff', async () => {
