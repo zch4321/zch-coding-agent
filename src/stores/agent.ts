@@ -1,7 +1,9 @@
 import { defineStore } from 'pinia'
 import type { AgentEvent } from '../../shared/agent-events'
+import type { FileChangeRecord } from '../../shared/change-history'
 import type { AgentApi } from '../../shared/agent-api'
 import type {
+  AssistantLanguage,
   ConfigSection,
   DeepSeekReasoningEffort,
   PermissionMode,
@@ -14,6 +16,7 @@ import {
   TRACE_NOTICE_VERSION,
   YOLO_NOTICE_VERSION,
 } from '../../shared/notices'
+import { DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 import type {
   ChatMessage,
   ConversationRecord,
@@ -150,6 +153,10 @@ export const useAgentStore = defineStore('agent', {
     timelineCounter: 0,
     pendingApproval: undefined as PendingApproval | undefined,
     latestReviewedApproval: undefined as ReviewedApproval | undefined,
+    changes: [] as FileChangeRecord[],
+    changesLoading: false,
+    revertingChangeId: undefined as string | undefined,
+    workspaceFileRevision: 0,
     lastAgentSeqBySession: {} as Record<string, number>,
     agentEventGap: '',
     error: '',
@@ -174,6 +181,12 @@ export const useAgentStore = defineStore('agent', {
       retentionDays: 14,
       maxTotalMegabytes: 100,
     },
+    assistantForm: {
+      language: 'zh-CN' as AssistantLanguage,
+      systemPrompts: structuredClone(DEFAULT_SYSTEM_PROMPTS),
+    },
+    assistantSaving: false,
+    assistantSaveStatus: '',
     unsubscribers: [] as Array<() => void>,
   }),
   getters: {
@@ -357,6 +370,10 @@ export const useAgentStore = defineStore('agent', {
           Math.round(config.logging.maxTotalBytes / 1_000_000),
         )
       }
+
+      if (includes('assistant')) {
+        this.assistantForm = structuredClone(config.assistant)
+      }
     },
     registerProject(workspacePath: string) {
       if (!this.projects.some((project) => project.path === workspacePath)) {
@@ -394,6 +411,7 @@ export const useAgentStore = defineStore('agent', {
       this.tools = []
       this.timelineCounter = 0
       this.pendingApproval = undefined
+      this.changes = []
       this.persistWorkbench()
       return conversation
     },
@@ -550,6 +568,7 @@ export const useAgentStore = defineStore('agent', {
       }
 
       this.pendingApproval = undefined
+      this.changes = []
       this.error = ''
     },
     saveActiveConversation(touchUpdatedAt = false) {
@@ -630,6 +649,40 @@ export const useAgentStore = defineStore('agent', {
         () => undefined,
       )
       return activate
+    },
+    async saveAssistantSettings(language?: AssistantLanguage) {
+      const bridge = api()
+      const targetLanguage = language ?? this.assistantForm.language
+
+      if (!bridge) {
+        this.assistantForm.language = targetLanguage
+        return true
+      }
+
+      this.assistantSaving = true
+      this.assistantSaveStatus = ''
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'assistant',
+        value: {
+          language: targetLanguage,
+          systemPrompts: {
+            'zh-CN': this.assistantForm.systemPrompts['zh-CN'].trim(),
+            'en-US': this.assistantForm.systemPrompts['en-US'].trim(),
+          },
+        },
+      })
+      this.assistantSaving = false
+
+      if (!result.ok) {
+        this.error = result.error.message
+        this.assistantSaveStatus = result.error.message
+        return false
+      }
+
+      this.applyConfig(result.value.config, ['assistant'])
+      this.assistantSaveStatus = 'saved'
+      return true
     },
     async chooseWorkspace() {
       const bridge = api()
@@ -954,6 +1007,7 @@ export const useAgentStore = defineStore('agent', {
       this.error = ''
       const result = await bridge.createSession({
         version: IPC_VERSION,
+        conversationId: this.activeConversationId!,
         workspace: this.workspacePath,
         mode: this.mode,
         provider: 'deepseek',
@@ -970,6 +1024,73 @@ export const useAgentStore = defineStore('agent', {
 
       this.error = result.error.message
       return false
+    },
+    async loadConversationChanges() {
+      const bridge = api()
+      const conversationId = this.activeConversationId
+      const workspace = this.workspacePath
+
+      if (!bridge || !conversationId || !workspace) {
+        this.changes = []
+        return
+      }
+
+      this.changesLoading = true
+      const result = await bridge.listChanges({
+        version: IPC_VERSION,
+        conversationId,
+        workspace,
+      })
+      this.changesLoading = false
+
+      if (
+        conversationId !== this.activeConversationId ||
+        workspace !== this.workspacePath
+      ) {
+        return
+      }
+
+      if (result.ok) {
+        this.changes = result.value.changes
+      } else {
+        this.error = result.error.message
+      }
+    },
+    async revertChange(changeId: string) {
+      const bridge = api()
+      const conversationId = this.activeConversationId
+      const workspace = this.workspacePath
+
+      if (
+        !bridge ||
+        !conversationId ||
+        !workspace ||
+        this.activeRunId ||
+        this.pendingApproval ||
+        this.revertingChangeId
+      ) {
+        return false
+      }
+
+      this.revertingChangeId = changeId
+      const result = await bridge.revertChange({
+        version: IPC_VERSION,
+        id: changeId,
+        conversationId,
+        workspace,
+      })
+      this.revertingChangeId = undefined
+
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+
+      this.changes = this.changes.map((change) =>
+        change.id === result.value.change.id ? result.value.change : change,
+      )
+      this.workspaceFileRevision += 1
+      return true
     },
     async closeRuntimeSession(conversationId?: string) {
       const bridge = api()
@@ -1207,6 +1328,13 @@ export const useAgentStore = defineStore('agent', {
           if (tool) {
             tool.status = 'completed'
             tool.result = event.result
+            if (
+              tool.tool === 'write_file' ||
+              tool.tool === 'apply_patch' ||
+              tool.tool === 'delete_file'
+            ) {
+              void this.loadConversationChanges()
+            }
           }
           break
         }

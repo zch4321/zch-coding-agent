@@ -49,10 +49,12 @@ import { registerFileTools } from './file-tools'
 import { registerProcessTools } from './process-tools'
 import {
   PermissionPipeline,
+  type ApprovedToolCall,
   type ApprovalRequest,
   type HumanApprovalDecision,
   type RememberApprovalInput,
 } from './permission-pipeline'
+import type { ChangeHistoryStore } from './change-history'
 import { ProviderAutoApprover, type AutoApprover } from './auto-approver'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
 import { TerminalPool, type TerminalEventDraft } from '../terminal/pool'
@@ -67,8 +69,6 @@ import { resolveModelProfiles } from './model-catalog'
 import type { SkillsManager } from '../skills/manager'
 import { registerSkillTools } from './skill-tools'
 
-const SYSTEM_PROMPT =
-  'You are My Coding Agent. Work only inside the selected workspace and use the provided tools. Explain the reason for every tool call. Never claim a file changed unless the tool result confirms it.'
 const RUN_CANCEL_GRACE_MS = 2_000
 
 type AgentEventDraft = AgentEvent extends infer Event
@@ -89,6 +89,7 @@ export interface SessionManagerOptions {
   getWebContents: () => WebContents | undefined
   pluginBus?: PluginEventBus
   skillsManager?: SkillsManager
+  changeHistory?: ChangeHistoryStore
   providerFactory?: (options: {
     config: PublicConfig
     apiKey: string
@@ -118,6 +119,7 @@ interface ActiveRun {
 
 interface SessionState {
   sessionId: SessionId
+  conversationId?: string
   workspace: string
   mode: PermissionMode
   provider: 'deepseek'
@@ -229,9 +231,10 @@ function contextMessages(
   tools: JsonValue[],
   skillPrompt = '',
 ): ProviderMessage[] {
+  const basePrompt = config.assistant.systemPrompts[config.assistant.language]
   const system: ProviderMessage = {
     role: 'system',
-    content: skillPrompt ? `${SYSTEM_PROMPT}\n\n${skillPrompt}` : SYSTEM_PROMPT,
+    content: skillPrompt ? `${basePrompt}\n\n${skillPrompt}` : basePrompt,
   }
 
   return selectContextMessages({
@@ -248,6 +251,7 @@ export class SessionManager {
   readonly #getWebContents: () => WebContents | undefined
   readonly #pluginBus: PluginEventBus | undefined
   readonly #skillsManager: SkillsManager | undefined
+  readonly #changeHistory: ChangeHistoryStore | undefined
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #autoApproverFactory: SessionManagerOptions['autoApproverFactory']
   readonly #onDiagnostic: (message: string, error?: unknown) => void
@@ -264,6 +268,7 @@ export class SessionManager {
     this.#getWebContents = options.getWebContents
     this.#pluginBus = options.pluginBus
     this.#skillsManager = options.skillsManager
+    this.#changeHistory = options.changeHistory
     this.#providerFactory = options.providerFactory
     this.#autoApproverFactory = options.autoApproverFactory
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
@@ -293,6 +298,7 @@ export class SessionManager {
   }
 
   async createSession(input: {
+    conversationId?: string
     workspace: string
     mode: PermissionMode
     provider: 'deepseek'
@@ -332,6 +338,7 @@ export class SessionManager {
         : new NullTraceLogger()
     const session: SessionState = {
       sessionId,
+      conversationId: input.conversationId,
       workspace: guard.workspacePath,
       mode: input.mode,
       provider: input.provider,
@@ -885,6 +892,8 @@ export class SessionManager {
       let approvedBy = 'none'
       let policySignals: JsonValue[] = []
       let diffHash: string | undefined
+      let approvedCall: ApprovedToolCall | undefined
+      let approvedDiff = ''
       const startedAt = performance.now()
       try {
         if (run.controller.signal.aborted) {
@@ -970,6 +979,8 @@ export class SessionManager {
 
               approvedBy = authorization.approvedCall.approvedBy
               diffHash = authorization.approvedCall.diffHash
+              approvedCall = authorization.approvedCall
+              approvedDiff = authorization.diff ?? ''
               const preflight = await this.#preflightToolContext(
                 session,
                 run,
@@ -998,6 +1009,24 @@ export class SessionManager {
         }
       } catch (error) {
         result = toolFailure(error, run.controller.signal)
+      }
+
+      if (
+        result.status === 'ok' &&
+        approvedCall &&
+        session.conversationId &&
+        this.#changeHistory
+      ) {
+        await this.#changeHistory
+          .record({
+            conversationId: session.conversationId,
+            workspace: session.workspace,
+            approvedCall,
+            diff: approvedDiff,
+          })
+          .catch((error: unknown) =>
+            this.#onDiagnostic('Failed to persist file change history', error),
+          )
       }
 
       const contextResult = boundToolResultForContext(

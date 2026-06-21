@@ -239,7 +239,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
     expect(permission).toBe('denied')
   })
 
-  test('shows editable model discovery and budget controls', async () => {
+  test('shows configurable prompts, model discovery, and budget controls', async () => {
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.evaluate(() => {
@@ -248,10 +248,33 @@ test.describe.serial('Electron security and IPC baseline', () => {
       )
       button?.click()
     })
-    await page
-      .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: '模型服务' })
-      .click()
+    const settingsNavigation = page.getByRole('navigation', {
+      name: '设置分类',
+    })
+    await settingsNavigation.getByRole('button', { name: '通用' }).click()
+    const general = page.locator('.settings-section')
+    await expect(general.getByText('中文系统提示词')).toBeVisible()
+    await expect(general.getByText('英文系统提示词')).toBeVisible()
+    await general.locator('textarea').first().fill('E2E 中文系统提示词')
+    await general.getByRole('button', { name: '保存系统提示词' }).click()
+    const savedPrompt = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        getConfig(payload: unknown): Promise<{
+          ok: boolean
+          value?: {
+            config: { assistant: { systemPrompts: Record<string, string> } }
+          }
+        }>
+      }
+      return api.getConfig({ version: 1, section: 'assistant' })
+    })
+    expect(savedPrompt.value?.config.assistant.systemPrompts['zh-CN']).toBe(
+      'E2E 中文系统提示词',
+    )
+    await general.getByRole('button', { name: '恢复默认提示词' }).click()
+    await general.getByRole('button', { name: '保存系统提示词' }).click()
+
+    await settingsNavigation.getByRole('button', { name: '模型服务' }).click()
     const provider = page.locator('.settings-section')
 
     await expect(provider.getByText('主模型', { exact: true })).toBeVisible()
@@ -335,6 +358,13 @@ test.describe.serial('Electron security and IPC baseline', () => {
     expect(configured.ok).toBe(true)
 
     await page.reload()
+    const artifactToggle = page.getByRole('button', {
+      name: '切换文件侧栏（Ctrl+Shift+B）',
+    })
+    if ((await artifactToggle.getAttribute('aria-pressed')) !== 'true') {
+      await artifactToggle.click()
+    }
+    await expect(page.locator('.artifact-sidebar')).toBeVisible()
     const projectHeading = page.locator('.project-heading')
     const conversationList = page.locator('.conversation-list')
     await expect(projectHeading).toHaveAttribute('aria-expanded', 'true')

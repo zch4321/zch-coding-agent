@@ -186,6 +186,29 @@ describe('ConfigStore', () => {
     ).toEqual({})
   })
 
+  it('persists localized configurable system prompts', async () => {
+    const { configStore } = await createStores()
+    const result = await configStore.update({
+      version: 1,
+      kind: 'assistant',
+      value: {
+        language: 'en-US',
+        systemPrompts: {
+          'zh-CN': '中文自定义提示词',
+          'en-US': 'Custom English prompt',
+        },
+      },
+    })
+
+    expect(result.assistant).toEqual({
+      language: 'en-US',
+      systemPrompts: {
+        'zh-CN': '中文自定义提示词',
+        'en-US': 'Custom English prompt',
+      },
+    })
+  })
+
   it('commits provider settings and an optional credential together', async () => {
     const { configStore } = await createStores()
     const limits = configStore.getPublicConfig().limits

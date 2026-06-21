@@ -17,6 +17,7 @@ import ProjectSidebar from './components/projects/ProjectSidebar.vue'
 import SettingsModal from './components/settings/SettingsModal.vue'
 import { useAgentStore } from './stores/agent'
 import type { PermissionMode } from '../shared/config'
+import { setAppLocale, type AppLocale } from './i18n'
 
 type SettingsTab =
   | 'general'
@@ -213,6 +214,11 @@ onMounted(async () => {
     artifactSidebarOpen.value = false
   }
   await agent.initialize()
+  if (agent.assistantForm.language !== locale.value) {
+    await agent.saveAssistantSettings(locale.value as AppLocale)
+  } else {
+    setAppLocale(agent.assistantForm.language)
+  }
 })
 
 onUnmounted(() => {

@@ -32,6 +32,8 @@ const api: AgentApi = {
     invoke('workspace:list-directory', payload),
   readWorkspaceFile: (payload) => invoke('workspace:read-file', payload),
   createSession: (payload) => invoke('session:create', payload),
+  listChanges: (payload) => invoke('changes:list', payload),
+  revertChange: (payload) => invoke('changes:revert', payload),
   closeSession: (payload) => invoke('session:close', payload),
   updateSessionMode: (payload) => invoke('session:update-mode', payload),
   startRun: (payload) => invoke('run:start', payload),

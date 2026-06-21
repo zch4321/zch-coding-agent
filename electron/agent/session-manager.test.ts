@@ -19,6 +19,7 @@ import type {
 } from './provider'
 import type { AutoApprover } from './auto-approver'
 import { SessionManager } from './session-manager'
+import { ChangeHistoryStore } from './change-history'
 
 class FakeSafeStorage implements SafeStorageAdapter {
   readonly platform = 'win32'
@@ -324,6 +325,59 @@ async function waitFor(
 }
 
 describe('SessionManager P2 loop', () => {
+  it('uses the configurable system prompt selected by application language', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-prompt-'))
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    await store.update({
+      version: 1,
+      kind: 'assistant',
+      value: {
+        language: 'en-US',
+        systemPrompts: {
+          'zh-CN': '中文系统提示',
+          'en-US': 'English system prompt selected by the test',
+        },
+      },
+    })
+    const provider = new ForkProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () =>
+        ({
+          isDestroyed: () => false,
+          send: (_channel: string, envelope: AgentEventEnvelope) =>
+            sent.push(envelope),
+        }) as unknown as WebContents,
+      providerFactory: () => provider,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: 'hello',
+      clientRequestId: 'prompt-request',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' && event.status === 'completed',
+      ),
+    )
+    expect(provider.messages[0]).toEqual({
+      role: 'system',
+      content: 'English system prompt selected by the test',
+    })
+    await manager.closeSession(sessionId)
+  })
+
   it('runs a deterministic read-only README summary and keeps credentials out of trace', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-session-'))
     const workspace = path.join(directory, 'workspace')
@@ -398,6 +452,10 @@ describe('SessionManager P2 loop', () => {
     await writeFile(target, 'alpha\nbeta\n')
 
     const store = await createConfig(directory)
+    const changeHistory = new ChangeHistoryStore(
+      path.join(directory, 'change-history.json'),
+    )
+    await changeHistory.initialize()
     const provider = new ScriptedEditProvider()
     const sent: AgentEventEnvelope[] = []
     const webContents = {
@@ -412,8 +470,10 @@ describe('SessionManager P2 loop', () => {
       getWebContents: () => webContents,
       providerFactory: () => provider,
       autoApproverFactory: () => safeAutoApprover,
+      changeHistory,
     })
     const sessionId = await manager.createSession({
+      conversationId: 'conversation-p3',
       workspace,
       mode: 'auto',
       provider: 'deepseek',
@@ -433,6 +493,12 @@ describe('SessionManager P2 loop', () => {
     )
 
     expect(await readFile(target, 'utf8')).toBe('alpha\ngamma\n')
+    expect(changeHistory.list('conversation-p3', workspace)).toMatchObject([
+      {
+        path: 'note.txt',
+        operation: 'patch',
+      },
+    ])
     await manager.closeSession(sessionId)
     const trace = (
       await readFile(

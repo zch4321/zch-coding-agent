@@ -3,6 +3,7 @@ import { computed, h, ref, watch } from 'vue'
 import { NButton, NTree, type TreeOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { IPC_VERSION } from '../../../shared/channels'
+import type { FileChangeRecord } from '../../../shared/change-history'
 import { useAgentStore } from '../../stores/agent'
 import FileCodePreview from './FileCodePreview.vue'
 import UiIcon from '../UiIcon.vue'
@@ -31,6 +32,7 @@ const explorerError = ref('')
 const explorerTruncated = ref(false)
 const openedFiles = ref<OpenFile[]>([])
 const activeFilePath = ref('explorer')
+const selectedChangeId = ref<string>()
 let directoryRequestGeneration = 0
 let fileRequestGeneration = 0
 
@@ -42,6 +44,11 @@ const projectName = computed(() => {
 })
 const activeFile = computed(() =>
   openedFiles.value.find((file) => file.path === activeFilePath.value),
+)
+const selectedChange = computed(
+  () =>
+    agent.changes.find((change) => change.id === selectedChangeId.value) ??
+    agent.changes[0],
 )
 function toTreeOptions(entries: ExplorerEntry[]): TreeOption[] {
   return entries.map((entry) => ({
@@ -168,6 +175,13 @@ function closeFile(path: string) {
   }
 }
 
+async function revertChange(change: FileChangeRecord) {
+  if (!window.confirm(t('artifact.revertConfirm', { path: change.path }))) {
+    return
+  }
+  await agent.revertChange(change.id)
+}
+
 watch(
   () => agent.pendingApproval,
   (approval) => {
@@ -195,6 +209,32 @@ watch(
     }
   },
   { immediate: true },
+)
+
+watch(
+  () => [agent.activeConversationId, agent.workspacePath] as const,
+  () => void agent.loadConversationChanges(),
+  { immediate: true },
+)
+
+watch(
+  () => agent.changes,
+  (changes) => {
+    if (!changes.some((change) => change.id === selectedChangeId.value)) {
+      selectedChangeId.value = changes[0]?.id
+    }
+  },
+  { deep: true },
+)
+
+watch(
+  () => agent.workspaceFileRevision,
+  () => {
+    directoryRequestGeneration += 1
+    explorerTree.value = []
+    void loadRootDirectory(directoryRequestGeneration)
+    if (activeFile.value) void openExplorerFile(activeFile.value.path)
+  },
 )
 </script>
 
@@ -338,46 +378,17 @@ watch(
     </section>
 
     <section v-else class="artifact-content diff-view">
-      <template
-        v-if="agent.pendingApproval?.diff || agent.latestReviewedApproval?.diff"
-      >
+      <template v-if="agent.pendingApproval?.diff">
         <div class="diff-summary">
-          <span>
-            {{
-              agent.pendingApproval?.diff
-                ? t('artifact.pendingChange')
-                : t('artifact.reviewed', {
-                    decision: agent.latestReviewedApproval?.decision,
-                  })
-            }}
-          </span>
-          <strong>
-            {{
-              agent.pendingApproval?.tool ?? agent.latestReviewedApproval?.tool
-            }}
-          </strong>
-          <p>
-            {{
-              agent.pendingApproval?.reason ??
-              agent.latestReviewedApproval?.reason
-            }}
-          </p>
-          <code
-            v-if="
-              agent.pendingApproval?.diffHash ||
-              agent.latestReviewedApproval?.diffHash
-            "
-          >
-            {{
-              agent.pendingApproval?.diffHash ??
-              agent.latestReviewedApproval?.diffHash
-            }}
+          <span>{{ t('artifact.pendingChange') }}</span>
+          <strong>{{ agent.pendingApproval.tool }}</strong>
+          <p>{{ agent.pendingApproval.reason }}</p>
+          <code v-if="agent.pendingApproval.diffHash">
+            {{ agent.pendingApproval.diffHash }}
           </code>
         </div>
-        <pre class="diff-content">{{
-          agent.pendingApproval?.diff ?? agent.latestReviewedApproval?.diff
-        }}</pre>
-        <div v-if="agent.pendingApproval?.diff" class="diff-actions">
+        <pre class="diff-content">{{ agent.pendingApproval.diff }}</pre>
+        <div class="diff-actions">
           <NButton
             type="primary"
             :loading="agent.approvalSubmitting"
@@ -394,6 +405,76 @@ watch(
             {{ t('common.deny') }}
           </NButton>
         </div>
+      </template>
+      <template v-else-if="agent.changes.length && selectedChange">
+        <div class="change-history-header">
+          <div>
+            <strong>{{ t('artifact.changeHistory') }}</strong>
+            <span>{{
+              t('artifact.changeCount', { count: agent.changes.length })
+            }}</span>
+          </div>
+          <span v-if="agent.changesLoading">{{ t('common.loading') }}</span>
+        </div>
+        <div class="change-history-list" role="list">
+          <button
+            v-for="change in agent.changes"
+            :key="change.id"
+            type="button"
+            :class="{ active: change.id === selectedChange.id }"
+            role="listitem"
+            @click="selectedChangeId = change.id"
+          >
+            <span>{{ change.path }}</span>
+            <small>
+              {{ t(`artifact.operation.${change.operation}`) }} ·
+              {{ new Date(change.createdAt).toLocaleString() }}
+            </small>
+            <em v-if="change.revertedAt">{{ t('artifact.reverted') }}</em>
+          </button>
+        </div>
+        <div class="diff-summary">
+          <span>{{ t(`artifact.operation.${selectedChange.operation}`) }}</span>
+          <strong>{{ selectedChange.path }}</strong>
+          <code v-if="selectedChange.diffHash">{{
+            selectedChange.diffHash
+          }}</code>
+        </div>
+        <pre class="diff-content">{{ selectedChange.diff }}</pre>
+        <div class="diff-actions">
+          <NButton
+            type="warning"
+            :loading="agent.revertingChangeId === selectedChange.id"
+            :disabled="
+              Boolean(selectedChange.revertedAt) ||
+              Boolean(agent.revertingChangeId) ||
+              Boolean(agent.activeRunId) ||
+              Boolean(agent.pendingApproval)
+            "
+            @click="revertChange(selectedChange)"
+          >
+            {{
+              selectedChange.revertedAt
+                ? t('artifact.reverted')
+                : t('artifact.revert')
+            }}
+          </NButton>
+          <small>{{ t('artifact.revertSafetyHint') }}</small>
+        </div>
+      </template>
+      <template v-else-if="agent.latestReviewedApproval?.diff">
+        <div class="diff-summary">
+          <span>
+            {{
+              t('artifact.reviewed', {
+                decision: agent.latestReviewedApproval.decision,
+              })
+            }}
+          </span>
+          <strong>{{ agent.latestReviewedApproval.tool }}</strong>
+          <p>{{ agent.latestReviewedApproval.reason }}</p>
+        </div>
+        <pre class="diff-content">{{ agent.latestReviewedApproval.diff }}</pre>
       </template>
       <div v-else class="artifact-empty">
         <UiIcon name="diff" />

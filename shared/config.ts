@@ -1,5 +1,12 @@
 import { Type, type Static } from '@sinclair/typebox'
 import { JsonValueSchema } from './json'
+import type { AssistantLanguage } from './system-prompts'
+
+export const AssistantLanguageSchema = Type.Union([
+  Type.Literal('zh-CN'),
+  Type.Literal('en-US'),
+])
+export type { AssistantLanguage }
 
 export const PermissionModeSchema = Type.Union([
   Type.Literal('readonly'),
@@ -210,6 +217,19 @@ export const PublicConfigSchema = Type.Object(
       },
       { additionalProperties: false },
     ),
+    assistant: Type.Object(
+      {
+        language: AssistantLanguageSchema,
+        systemPrompts: Type.Object(
+          {
+            'zh-CN': Type.String({ minLength: 1, maxLength: 32_768 }),
+            'en-US': Type.String({ minLength: 1, maxLength: 32_768 }),
+          },
+          { additionalProperties: false },
+        ),
+      },
+      { additionalProperties: false },
+    ),
   },
   { additionalProperties: false },
 )
@@ -225,6 +245,7 @@ export const ConfigSectionSchema = Type.Union([
   Type.Literal('privacy'),
   Type.Literal('workspace'),
   Type.Literal('skills'),
+  Type.Literal('assistant'),
 ])
 export type ConfigSection = Static<typeof ConfigSectionSchema>
 
@@ -374,6 +395,14 @@ export const ConfigSetRequestSchema = Type.Union([
       version: Type.Literal(1),
       kind: Type.Literal('skills'),
       value: PublicConfigSchema.properties.skills,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('assistant'),
+      value: PublicConfigSchema.properties.assistant,
     },
     { additionalProperties: false },
   ),

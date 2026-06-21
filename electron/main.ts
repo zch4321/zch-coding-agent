@@ -25,6 +25,7 @@ import {
   TRACE_NOTICE_VERSION,
 } from '../shared/notices'
 import { SessionManager } from './agent/session-manager'
+import { ChangeHistoryError, ChangeHistoryStore } from './agent/change-history'
 import {
   fetchDeepSeekModelCatalog,
   ModelCatalogError,
@@ -152,12 +153,17 @@ async function installIpc(): Promise<void> {
   await skillsManager.initialize()
   const traceService = new TraceService(path.join(userData, 'traces'))
   await traceService.initialize()
+  const changeHistory = new ChangeHistoryStore(
+    path.join(userData, 'change-history.json'),
+  )
+  await changeHistory.initialize()
   const sessionManager = new SessionManager({
     configStore,
     traceDirectory: path.join(userData, 'traces'),
     getWebContents: () => mainWindow?.webContents,
     pluginBus,
     skillsManager,
+    changeHistory,
     onDiagnostic: (message, error) => console.error(message, error),
   })
   const unregister = registerIpcHandlers({
@@ -336,11 +342,45 @@ async function installIpc(): Promise<void> {
       },
       'session:create': async (payload) => ({
         sessionId: await sessionManager.createSession({
+          conversationId: payload.conversationId,
           workspace: payload.workspace,
           mode: payload.mode,
           provider: payload.provider,
         }),
       }),
+      'changes:list': (payload) => ({
+        changes: changeHistory.list(payload.conversationId, payload.workspace),
+      }),
+      'changes:revert': async (payload) => {
+        try {
+          return {
+            change: await changeHistory.revert({
+              id: payload.id,
+              conversationId: payload.conversationId,
+              workspace: payload.workspace,
+            }),
+          }
+        } catch (error) {
+          if (error instanceof ChangeHistoryError) {
+            throw new IpcFault({
+              code:
+                error.code === 'NOT_FOUND'
+                  ? 'NOT_FOUND'
+                  : error.code === 'RESOURCE_CHANGED'
+                    ? 'CONFLICT'
+                    : 'PRECONDITION_FAILED',
+              message: error.message,
+            })
+          }
+          if (error instanceof PathGuardError) {
+            throw new IpcFault({
+              code: 'PRECONDITION_FAILED',
+              message: error.message,
+            })
+          }
+          throw error
+        }
+      },
       'session:close': async (payload) => ({
         accepted: await sessionManager.closeSession(payload.sessionId),
       }),

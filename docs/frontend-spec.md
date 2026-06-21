@@ -351,7 +351,9 @@ Files 内部使用二级 tab：
 - 显示目标路径、操作类型、diff hash、截断状态和统一 diff。
 - Diff 活动时不同时展示 Explorer。
 - 审批按钮可同时出现在对话卡和 Diff footer，但共享同一 store 状态。
-- 审批完成后保留最近一次 Diff 和结果状态，直到切换对话或被新 Diff 替换。
+- 审批完成后从主进程加载当前 conversation 的持久化文件变更历史；切换对话或项目时必须按 conversationId + workspace 重新查询，不能复用上一对话的列表。
+- 变更列表显示路径、操作、时间、diff hash 和回退状态；选择记录后显示对应统一 diff。
+- “回退此变更”必须先显示明确确认，运行期间禁用。主进程返回 `CONFLICT` 时在当前视口显示错误，不能假装回退成功。
 - 大 Diff 必须有明确截断提示，不能让 UI 假装展示了完整变化。
 
 ---
@@ -390,6 +392,12 @@ Terminal 不属于 P3 UI，P4 完成 PTY 后才显示。
 ## 10. Settings
 
 Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的独立路由。
+
+### 10.0 General
+
+- 界面语言支持简体中文和英文，切换后立即更新 UI，并同步主进程 `assistant.language`。
+- 展示可编辑的中英文 system prompt，支持保存和恢复内置默认值；两个版本均不能为空。
+- 保存后的提示词从已有对话的下一轮模型调用开始生效；不得把 API Key 等凭据写入提示词。
 
 ### 10.1 Project
 

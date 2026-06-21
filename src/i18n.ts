@@ -113,7 +113,19 @@ const messages = {
       pendingChange: '待审批变更',
       reviewed: '审批结果：{decision}',
       noDiff: '未选择变更',
-      noDiffHint: '等待审批的文件变更会显示在这里。',
+      noDiffHint: '当前对话尚未产生文件变更。',
+      changeHistory: '本次对话的文件变更',
+      changeCount: '共 {count} 项',
+      operation: {
+        write: '新建文件',
+        patch: '修改文件',
+        delete: '删除文件',
+      },
+      revert: '回退此变更',
+      reverted: '已回退',
+      revertConfirm:
+        '确定回退对 {path} 的这次变更吗？仅当文件仍保持该次修改后的内容时才会执行。',
+      revertSafetyHint: '检测到文件有后续修改时，回退会被拒绝。',
     },
     settings: {
       general: '通用',
@@ -128,6 +140,12 @@ const messages = {
       chinese: '简体中文',
       english: 'English',
       appearanceTitle: '通用设置',
+      systemPromptZh: '中文系统提示词',
+      systemPromptEn: '英文系统提示词',
+      systemPromptHint:
+        'Agent 在每次模型调用时使用当前界面语言对应的提示词。修改后对已有对话的下一轮调用生效，但不会改变路径和权限等硬安全边界。',
+      saveSystemPrompts: '保存系统提示词',
+      restoreSystemPrompts: '恢复默认提示词',
       projectTitle: '项目',
       projectHint: '选择供文件、命令和助手操作使用的工作区。',
       currentWorkspace: '当前工作区',
@@ -366,7 +384,20 @@ const messages = {
       pendingChange: 'Pending change',
       reviewed: 'Review {decision}',
       noDiff: 'No diff selected',
-      noDiffHint: 'File changes awaiting review will appear here.',
+      noDiffHint: 'This conversation has not changed any files yet.',
+      changeHistory: 'File changes in this conversation',
+      changeCount: '{count} changes',
+      operation: {
+        write: 'Created file',
+        patch: 'Modified file',
+        delete: 'Deleted file',
+      },
+      revert: 'Revert this change',
+      reverted: 'Reverted',
+      revertConfirm:
+        'Revert this change to {path}? It will proceed only if the file still matches the agent change.',
+      revertSafetyHint:
+        'Revert is refused when newer file changes are detected.',
     },
     settings: {
       general: 'General',
@@ -381,6 +412,12 @@ const messages = {
       chinese: '简体中文',
       english: 'English',
       appearanceTitle: 'General',
+      systemPromptZh: 'Chinese system prompt',
+      systemPromptEn: 'English system prompt',
+      systemPromptHint:
+        'Each model call uses the prompt matching the interface language. Changes apply to the next turn of existing conversations without changing hard path or permission boundaries.',
+      saveSystemPrompts: 'Save system prompts',
+      restoreSystemPrompts: 'Restore defaults',
       projectTitle: 'Project',
       projectHint:
         'Select the workspace used by file, command, and Agent operations.',

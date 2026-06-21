@@ -49,11 +49,23 @@ const validPayloads: {
   'workspace:read-file': { version: 1, path: 'README.md' },
   'session:create': {
     version: 1,
+    conversationId: 'conversation-1',
     workspace: 'F:/workspace',
     mode: 'readonly',
     provider: 'deepseek',
   },
   'session:close': { version: 1, sessionId },
+  'changes:list': {
+    version: 1,
+    conversationId: 'conversation-1',
+    workspace: 'F:/workspace',
+  },
+  'changes:revert': {
+    version: 1,
+    id: 'change-1',
+    conversationId: 'conversation-1',
+    workspace: 'F:/workspace',
+  },
   'session:update-mode': { version: 1, sessionId, mode: 'auto' },
   'run:start': {
     version: 1,

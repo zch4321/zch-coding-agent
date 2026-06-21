@@ -677,6 +677,7 @@ textarea:focus-visible {
   width: min(100%, 760px);
   min-width: 0;
   max-width: 100%;
+  flex: 0 0 auto;
   margin: 0 auto 18px;
 }
 
@@ -1566,8 +1567,9 @@ code {
 }
 
 .diff-view {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
   overflow: hidden;
 }
 
@@ -1607,6 +1609,7 @@ code {
 }
 
 .diff-content {
+  flex: 1;
   min-height: 0;
   margin: 0;
   overflow: auto;
@@ -1623,6 +1626,85 @@ code {
   padding: 10px 14px;
   border-top: 1px solid var(--border);
   background: var(--surface);
+}
+
+.diff-actions small {
+  align-self: center;
+  margin-right: auto;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.change-history-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface);
+}
+
+.change-history-header strong,
+.change-history-header span {
+  display: block;
+}
+
+.change-history-header span {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.change-history-list {
+  display: flex;
+  min-height: 44px;
+  max-height: 132px;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  overflow: auto;
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.change-history-list button {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  text-align: left;
+}
+
+.change-history-list button:hover,
+.change-history-list button.active {
+  color: var(--text);
+  background: #eaeef2;
+}
+
+.change-history-list button span {
+  overflow: hidden;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-history-list button small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.change-history-list button em {
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  color: var(--success);
+  font-size: 9px;
+  font-style: normal;
 }
 
 .settings-modal {

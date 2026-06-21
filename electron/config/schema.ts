@@ -6,6 +6,7 @@ import {
   RememberedRuleSchema,
   type PublicConfig,
 } from '../../shared/config'
+import { DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 
 export const AppConfigSchema = Type.Object(
   {
@@ -52,6 +53,7 @@ export const AppConfigSchema = Type.Object(
     privacy: PublicConfigSchema.properties.privacy,
     workspace: PublicConfigSchema.properties.workspace,
     skills: PublicConfigSchema.properties.skills,
+    assistant: PublicConfigSchema.properties.assistant,
   },
   { additionalProperties: false },
 )
@@ -108,6 +110,10 @@ export const DEFAULT_APP_CONFIG = {
     enabled: true,
     maxSummaryChars: 2_000,
   },
+  assistant: {
+    language: 'zh-CN',
+    systemPrompts: structuredClone(DEFAULT_SYSTEM_PROMPTS),
+  },
 } satisfies AppConfig
 
 export function toPublicConfig(
@@ -141,5 +147,6 @@ export function toPublicConfig(
     privacy: structuredClone(config.privacy),
     workspace: structuredClone(config.workspace),
     skills: structuredClone(config.skills),
+    assistant: structuredClone(config.assistant),
   }
 }

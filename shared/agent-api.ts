@@ -31,6 +31,12 @@ export interface AgentApi {
   createSession(
     payload: IpcPayload<'session:create'>,
   ): Promise<IpcResult<'session:create'>>
+  listChanges(
+    payload: IpcPayload<'changes:list'>,
+  ): Promise<IpcResult<'changes:list'>>
+  revertChange(
+    payload: IpcPayload<'changes:revert'>,
+  ): Promise<IpcResult<'changes:revert'>>
   closeSession(
     payload: IpcPayload<'session:close'>,
   ): Promise<IpcResult<'session:close'>>
@@ -117,6 +123,8 @@ export const AGENT_API_KEYS = [
   'listWorkspaceDirectory',
   'readWorkspaceFile',
   'createSession',
+  'listChanges',
+  'revertChange',
   'closeSession',
   'updateSessionMode',
   'startRun',

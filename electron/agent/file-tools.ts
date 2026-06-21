@@ -59,8 +59,10 @@ export interface FilePrecondition {
   readonly expectedRealPath?: string
   readonly expectedFileId?: string
   readonly expectedContentHash?: string
+  readonly expectedContent?: string
   readonly patchHash?: string
   readonly expectedResultHash?: string
+  readonly expectedResultContent?: string
 }
 
 export interface ToolResourcePlan {
@@ -184,6 +186,7 @@ async function captureFilePrecondition(
     expectedRealPath: targetRealPath,
     expectedFileId: resourceId(targetStat),
     expectedContentHash: hash(content),
+    expectedContent: content.toString('utf8'),
   })
 }
 
@@ -436,14 +439,12 @@ export async function prepareToolResourcePlan(input: {
 
   const diff = createFileDiff(precondition.path, before, after)
 
-  const plannedPrecondition =
-    operation === 'patch'
-      ? Object.freeze({
-          ...precondition,
-          patchHash: hash(String(args.patch)),
-          expectedResultHash: hash(after),
-        })
-      : precondition
+  const plannedPrecondition = Object.freeze({
+    ...precondition,
+    ...(operation === 'patch' ? { patchHash: hash(String(args.patch)) } : {}),
+    expectedResultHash: hash(after),
+    expectedResultContent: after,
+  })
 
   return {
     preconditions: [plannedPrecondition],

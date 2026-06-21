@@ -1,5 +1,6 @@
 import { Type, type Static, type TSchema } from '@sinclair/typebox'
 import { AgentEventSchema, TerminalEventSchema } from './agent-events'
+import { FileChangeRecordSchema } from './change-history'
 import {
   ConfigSectionSchema,
   ConfigSetRequestSchema,
@@ -224,6 +225,7 @@ export const IPC_CONTRACTS = {
     payload: Type.Object(
       {
         version: Type.Literal(IPC_VERSION),
+        conversationId: Type.String({ minLength: 1, maxLength: 256 }),
         workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
         mode: PermissionModeSchema,
         provider: Type.Literal('deepseek'),
@@ -246,6 +248,39 @@ export const IPC_CONTRACTS = {
       { additionalProperties: false },
     ),
     result: ipcResultSchema(AcceptedSchema),
+  },
+  'changes:list': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        conversationId: Type.String({ minLength: 1, maxLength: 256 }),
+        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        { changes: Type.Array(FileChangeRecordSchema, { maxItems: 200 }) },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'changes:revert': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        id: Type.String({ minLength: 1, maxLength: 128 }),
+        conversationId: Type.String({ minLength: 1, maxLength: 256 }),
+        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        { change: FileChangeRecordSchema },
+        { additionalProperties: false },
+      ),
+    ),
   },
   'session:update-mode': {
     payload: Type.Object(
