@@ -6,7 +6,14 @@ import {
   onUnmounted,
   ref,
 } from 'vue'
-import { enUS, NConfigProvider, zhCN } from 'naive-ui'
+import {
+  enUS,
+  NConfigProvider,
+  NLayout,
+  NLayoutContent,
+  NLayoutSider,
+  zhCN,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import ConversationTimeline from './components/chat/ConversationTimeline.vue'
 import MessageComposer from './components/chat/MessageComposer.vue'
@@ -27,6 +34,12 @@ type SettingsTab =
   | 'skills'
   | 'logging'
 
+type Sidebar = 'project' | 'artifact'
+
+const PROJECT_SIDEBAR_WIDTH = 240
+const ARTIFACT_SIDEBAR_WIDTH = 440
+const MIN_CONVERSATION_WIDTH = 440
+
 const TerminalPanel = defineAsyncComponent(
   () => import('./components/TerminalPanel.vue'),
 )
@@ -38,6 +51,11 @@ const settingsTab = ref<SettingsTab>('general')
 const yoloWarningOpen = ref(false)
 const projectSidebarOpen = ref(true)
 const artifactSidebarOpen = ref(false)
+const workbenchElement = ref<HTMLElement>()
+const workbenchWidth = ref(
+  typeof window === 'undefined' ? 0 : window.innerWidth,
+)
+const lastOpenedSidebar = ref<Sidebar>('project')
 const terminalOpen = ref(false)
 const terminalMaximized = ref(false)
 const terminalHeight = ref(280)
@@ -64,6 +82,23 @@ const activeTitle = computed(() =>
     : agent.activeConversation.title,
 )
 const naiveLocale = computed(() => (locale.value === 'zh-CN' ? zhCN : enUS))
+const canOpenProjectSidebar = computed(
+  () => workbenchWidth.value >= PROJECT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH,
+)
+const canOpenArtifactSidebar = computed(
+  () => workbenchWidth.value >= ARTIFACT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH,
+)
+const canOpenBothSidebars = computed(
+  () =>
+    workbenchWidth.value >=
+    PROJECT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH + ARTIFACT_SIDEBAR_WIDTH,
+)
+const projectSidebarDisabled = computed(
+  () => !projectSidebarOpen.value && !canOpenProjectSidebar.value,
+)
+const artifactSidebarDisabled = computed(
+  () => !artifactSidebarOpen.value && !canOpenArtifactSidebar.value,
+)
 const statusLabel = computed(() => {
   if (agent.pendingApproval) {
     return t('app.waitingApproval')
@@ -179,6 +214,68 @@ function closeTerminalPanel() {
   terminalMaximized.value = false
 }
 
+function reconcileSidebars() {
+  if (!canOpenProjectSidebar.value) {
+    projectSidebarOpen.value = false
+  }
+
+  if (!canOpenArtifactSidebar.value) {
+    artifactSidebarOpen.value = false
+  }
+
+  if (
+    projectSidebarOpen.value &&
+    artifactSidebarOpen.value &&
+    !canOpenBothSidebars.value
+  ) {
+    if (lastOpenedSidebar.value === 'project') {
+      artifactSidebarOpen.value = false
+    } else {
+      projectSidebarOpen.value = false
+    }
+  }
+}
+
+function measureWorkbench() {
+  const measuredWidth = workbenchElement.value?.clientWidth ?? 0
+  workbenchWidth.value = measuredWidth || window.innerWidth
+  reconcileSidebars()
+}
+
+function toggleProjectSidebar() {
+  if (projectSidebarOpen.value) {
+    projectSidebarOpen.value = false
+    return
+  }
+
+  if (!canOpenProjectSidebar.value) return
+  lastOpenedSidebar.value = 'project'
+
+  if (artifactSidebarOpen.value && !canOpenBothSidebars.value) {
+    artifactSidebarOpen.value = false
+  }
+
+  projectSidebarOpen.value = true
+}
+
+function toggleArtifactSidebar() {
+  if (artifactSidebarOpen.value) {
+    artifactSidebarOpen.value = false
+    return
+  }
+
+  if (!canOpenArtifactSidebar.value) return
+  lastOpenedSidebar.value = 'artifact'
+
+  if (projectSidebarOpen.value && !canOpenBothSidebars.value) {
+    projectSidebarOpen.value = false
+  }
+
+  artifactSidebarOpen.value = true
+}
+
+let workbenchResizeObserver: ResizeObserver | undefined
+
 function handleGlobalKeydown(event: KeyboardEvent) {
   if (!event.ctrlKey) {
     return
@@ -201,18 +298,23 @@ function handleGlobalKeydown(event: KeyboardEvent) {
     }
   } else if (event.key.toLocaleLowerCase() === 'b' && event.shiftKey) {
     event.preventDefault()
-    artifactSidebarOpen.value = !artifactSidebarOpen.value
+    toggleArtifactSidebar()
   } else if (event.key.toLocaleLowerCase() === 'b') {
     event.preventDefault()
-    projectSidebarOpen.value = !projectSidebarOpen.value
+    toggleProjectSidebar()
   }
 }
 
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown, { capture: true })
-  if (window.innerWidth <= 1080) {
-    artifactSidebarOpen.value = false
+  window.addEventListener('resize', measureWorkbench)
+  measureWorkbench()
+
+  if (workbenchElement.value && typeof ResizeObserver !== 'undefined') {
+    workbenchResizeObserver = new ResizeObserver(measureWorkbench)
+    workbenchResizeObserver.observe(workbenchElement.value)
   }
+
   await agent.initialize()
   if (agent.assistantForm.language !== locale.value) {
     await agent.saveAssistantSettings(locale.value as AppLocale)
@@ -223,81 +325,122 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown, { capture: true })
+  window.removeEventListener('resize', measureWorkbench)
+  workbenchResizeObserver?.disconnect()
+  workbenchResizeObserver = undefined
   agent.dispose()
 })
 </script>
 
 <template>
   <NConfigProvider :locale="naiveLocale">
-    <main
-      class="app-frame"
-      :class="{
-        'project-sidebar-closed': !projectSidebarOpen,
-        'artifact-sidebar-closed': !artifactSidebarOpen,
-      }"
-      data-testid="app-ready"
-    >
+    <main class="app-frame" data-testid="app-ready">
       <AppTopbar
         :project-name="projectName"
         :workspace-label="workspaceLabel"
         :terminal-open="terminalOpen"
         :project-sidebar-open="projectSidebarOpen"
         :artifact-sidebar-open="artifactSidebarOpen"
+        :project-sidebar-disabled="projectSidebarDisabled"
+        :artifact-sidebar-disabled="artifactSidebarDisabled"
         @project="openSettings('project')"
         @terminal="terminalOpen = !terminalOpen"
-        @project-sidebar="projectSidebarOpen = !projectSidebarOpen"
-        @artifact-sidebar="artifactSidebarOpen = !artifactSidebarOpen"
+        @project-sidebar="toggleProjectSidebar"
+        @artifact-sidebar="toggleArtifactSidebar"
         @settings="openSettings()"
       />
 
-      <div class="workbench-shell">
-        <ProjectSidebar
-          :aria-hidden="!projectSidebarOpen"
-          @add="agent.chooseWorkspace"
-          @create="createConversation"
-          @open="openConversation"
-          @rename="beginRename"
-          @delete="deleteConversationId = $event"
-        />
-
-        <section
-          class="conversation-pane"
-          :style="{ '--terminal-height': terminalHeight + 'px' }"
-          :class="{
-            'terminal-open': terminalOpen,
-            'terminal-maximized': terminalOpen && terminalMaximized,
-          }"
+      <div ref="workbenchElement" class="workbench-shell">
+        <NLayout
+          class="workbench-layout"
+          content-style="height: 100%; overflow: hidden"
+          has-sider
         >
-          <header class="conversation-header">
-            <div>
-              <h1>{{ activeTitle }}</h1>
-              <p v-if="agent.workspacePath">{{ projectName }}</p>
-            </div>
-            <span
-              v-if="statusLabel"
-              class="run-status"
-              :class="agent.pendingApproval ? 'approval' : agent.runStatus"
+          <NLayoutSider
+            :width="PROJECT_SIDEBAR_WIDTH"
+            :collapsed-width="0"
+            :collapsed="!projectSidebarOpen"
+            :show-collapsed-content="false"
+            content-style="overflow: hidden"
+            collapse-mode="width"
+            :show-trigger="false"
+            bordered
+          >
+            <ProjectSidebar
+              :aria-hidden="!projectSidebarOpen"
+              @add="agent.chooseWorkspace"
+              @create="createConversation"
+              @open="openConversation"
+              @rename="beginRename"
+              @delete="deleteConversationId = $event"
+            />
+          </NLayoutSider>
+
+          <NLayout
+            class="workbench-main-layout"
+            content-style="height: 100%; overflow: hidden"
+            has-sider
+            sider-placement="right"
+          >
+            <NLayoutContent
+              class="conversation-layout"
+              content-class="conversation-layout-content"
+              content-style="overflow: hidden"
             >
-              <span></span>{{ statusLabel }}
-            </span>
-          </header>
+              <section
+                class="conversation-pane"
+                :style="{ '--terminal-height': terminalHeight + 'px' }"
+                :class="{
+                  'terminal-open': terminalOpen,
+                  'terminal-maximized': terminalOpen && terminalMaximized,
+                }"
+              >
+                <header class="conversation-header">
+                  <div>
+                    <h1>{{ activeTitle }}</h1>
+                    <p v-if="agent.workspacePath">{{ projectName }}</p>
+                  </div>
+                  <span
+                    v-if="statusLabel"
+                    class="run-status"
+                    :class="
+                      agent.pendingApproval ? 'approval' : agent.runStatus
+                    "
+                  >
+                    <span></span>{{ statusLabel }}
+                  </span>
+                </header>
 
-          <ConversationTimeline :project-name="projectName" />
+                <ConversationTimeline :project-name="projectName" />
 
-          <MessageComposer
-            @mode="selectMode"
-            @provider="openSettings('provider')"
-          />
+                <MessageComposer
+                  @mode="selectMode"
+                  @provider="openSettings('provider')"
+                />
 
-          <TerminalPanel
-            v-if="terminalOpen"
-            @close="closeTerminalPanel"
-            @height-change="terminalHeight = $event"
-            @maximize-change="terminalMaximized = $event"
-          />
-        </section>
+                <TerminalPanel
+                  v-if="terminalOpen"
+                  @close="closeTerminalPanel"
+                  @height-change="terminalHeight = $event"
+                  @maximize-change="terminalMaximized = $event"
+                />
+              </section>
+            </NLayoutContent>
 
-        <ArtifactPanel :aria-hidden="!artifactSidebarOpen" />
+            <NLayoutSider
+              :width="ARTIFACT_SIDEBAR_WIDTH"
+              :collapsed-width="0"
+              :collapsed="!artifactSidebarOpen"
+              :show-collapsed-content="false"
+              content-style="overflow: hidden"
+              collapse-mode="width"
+              :show-trigger="false"
+              bordered
+            >
+              <ArtifactPanel :aria-hidden="!artifactSidebarOpen" />
+            </NLayoutSider>
+          </NLayout>
+        </NLayout>
       </div>
 
       <SettingsModal

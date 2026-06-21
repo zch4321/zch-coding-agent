@@ -14,9 +14,17 @@ import ProjectSidebar from './components/projects/ProjectSidebar.vue'
 import { i18n, setAppLocale } from './i18n'
 import { useAgentStore } from './stores/agent'
 
+function setWindowWidth(width: number) {
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    value: width,
+  })
+}
+
 describe('App', () => {
   beforeEach(() => {
     setAppLocale('zh-CN')
+    setWindowWidth(1024)
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       value: vi.fn((query: string) => ({
@@ -32,6 +40,7 @@ describe('App', () => {
     })
   })
   afterEach(() => {
+    setWindowWidth(1024)
     Reflect.deleteProperty(window, 'agentApi')
     Reflect.deleteProperty(window, 'matchMedia')
   })
@@ -55,6 +64,55 @@ describe('App', () => {
     expect(
       wrapper.find('.conversation-pane .message-input-area').exists(),
     ).toBe(true)
+  })
+
+  it('keeps at most one docked sidebar open when both do not fit', async () => {
+    setWindowWidth(1000)
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), i18n],
+      },
+    })
+    const projectToggle = wrapper.get('[aria-label="切换项目侧栏（Ctrl+B）"]')
+    const artifactToggle = wrapper.get(
+      '[aria-label="切换文件侧栏（Ctrl+Shift+B）"]',
+    )
+
+    expect(projectToggle.attributes('aria-pressed')).toBe('true')
+    expect(artifactToggle.attributes('aria-pressed')).toBe('false')
+
+    await artifactToggle.trigger('click')
+
+    expect(projectToggle.attributes('aria-pressed')).toBe('false')
+    expect(artifactToggle.attributes('aria-pressed')).toBe('true')
+
+    await projectToggle.trigger('click')
+
+    expect(projectToggle.attributes('aria-pressed')).toBe('true')
+    expect(artifactToggle.attributes('aria-pressed')).toBe('false')
+  })
+
+  it('disables docked sidebars that cannot preserve the conversation width', async () => {
+    setWindowWidth(600)
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), i18n],
+      },
+    })
+    await nextTick()
+    const projectToggle = wrapper.get('[aria-label="切换项目侧栏（Ctrl+B）"]')
+    const artifactToggle = wrapper.get(
+      '[aria-label="切换文件侧栏（Ctrl+Shift+B）"]',
+    )
+
+    expect(projectToggle.attributes('disabled')).toBeDefined()
+    expect(artifactToggle.attributes('disabled')).toBeDefined()
+    expect(projectToggle.element.parentElement?.title).toBe(
+      '窗口宽度不足，放大窗口后可打开侧栏',
+    )
+    expect(artifactToggle.element.parentElement?.title).toBe(
+      '窗口宽度不足，放大窗口后可打开侧栏',
+    )
   })
 
   it('searches persisted conversation text locally and switches artifact tabs', async () => {

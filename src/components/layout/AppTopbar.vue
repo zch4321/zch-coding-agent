@@ -10,6 +10,8 @@ defineProps<{
   terminalOpen: boolean
   projectSidebarOpen: boolean
   artifactSidebarOpen: boolean
+  projectSidebarDisabled: boolean
+  artifactSidebarDisabled: boolean
 }>()
 const emit = defineEmits<{
   project: []
@@ -56,26 +58,44 @@ async function windowAction(
       >
         <UiIcon name="terminal" />
       </button>
-      <button
-        class="topbar-icon-button"
-        type="button"
-        :aria-label="t('topbar.projectSidebar')"
-        :title="t('topbar.projectSidebar')"
-        :aria-pressed="projectSidebarOpen"
-        @click="emit('project-sidebar')"
+      <span
+        class="topbar-button-slot"
+        :title="
+          projectSidebarDisabled
+            ? t('topbar.sidebarUnavailable')
+            : t('topbar.projectSidebar')
+        "
       >
-        <UiIcon name="panel-left" />
-      </button>
-      <button
-        class="topbar-icon-button"
-        type="button"
-        :aria-label="t('topbar.artifactSidebar')"
-        :title="t('topbar.artifactSidebar')"
-        :aria-pressed="artifactSidebarOpen"
-        @click="emit('artifact-sidebar')"
+        <button
+          class="topbar-icon-button"
+          type="button"
+          :aria-label="t('topbar.projectSidebar')"
+          :aria-pressed="projectSidebarOpen"
+          :disabled="projectSidebarDisabled"
+          @click="emit('project-sidebar')"
+        >
+          <UiIcon name="panel-left" />
+        </button>
+      </span>
+      <span
+        class="topbar-button-slot"
+        :title="
+          artifactSidebarDisabled
+            ? t('topbar.sidebarUnavailable')
+            : t('topbar.artifactSidebar')
+        "
       >
-        <UiIcon name="panel-right" />
-      </button>
+        <button
+          class="topbar-icon-button"
+          type="button"
+          :aria-label="t('topbar.artifactSidebar')"
+          :aria-pressed="artifactSidebarOpen"
+          :disabled="artifactSidebarDisabled"
+          @click="emit('artifact-sidebar')"
+        >
+          <UiIcon name="panel-right" />
+        </button>
+      </span>
       <button
         class="topbar-icon-button"
         type="button"

@@ -365,6 +365,13 @@ test.describe.serial('Electron security and IPC baseline', () => {
       await artifactToggle.click()
     }
     await expect(page.locator('.artifact-sidebar')).toBeVisible()
+    const projectToggle = page.getByRole('button', {
+      name: '切换项目侧栏（Ctrl+B）',
+    })
+    if ((await projectToggle.getAttribute('aria-pressed')) !== 'true') {
+      await projectToggle.click()
+    }
+    await expect(page.locator('.project-sidebar')).toBeVisible()
     const projectHeading = page.locator('.project-heading')
     const conversationList = page.locator('.conversation-list')
     await expect(projectHeading).toHaveAttribute('aria-expanded', 'true')
@@ -373,6 +380,11 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await expect(conversationList).toBeHidden()
     await projectHeading.click()
     await expect(conversationList).toBeVisible()
+
+    if ((await artifactToggle.getAttribute('aria-pressed')) !== 'true') {
+      await artifactToggle.click()
+    }
+    await expect(page.locator('.artifact-sidebar')).toBeVisible()
 
     const folderNode = page.getByText('cached-folder', { exact: true })
     await folderNode.click()
