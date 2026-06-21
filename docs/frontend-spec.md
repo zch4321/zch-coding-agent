@@ -340,7 +340,7 @@ Files 内部使用二级 tab：
 - 点击 Explorer tab 返回文件树。
 - 文件 tab 支持关闭；关闭当前文件后回到最近 tab 或 Explorer。
 - Artifact header 始终显示当前项目目录名；完整路径可复制并有 tooltip。
-- Explorer 通过独立、受限 IPC 懒加载，不依赖 Agent 最近是否调用 `list_dir`。
+- Explorer 使用树形视图，通过独立、受限 IPC 懒加载，不依赖 Agent 最近是否调用 `list_dir`。目录首次展开时加载并缓存子节点，后续收缩与展开不重复请求；切换项目时清空树缓存并加载新根节点。
 - 点击文件通过主进程 PathGuard 读取有界内容。
 - viewer 只读，支持行号、语法高亮、截断提示和加载错误。
 - symlink、junction、路径大小写和越界检查沿用主进程安全不变量。
@@ -448,17 +448,17 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 前端必须覆盖以下显式状态：
 
-| 状态 | 对话区 | 输入区 | Artifact |
-|---|---|---|---|
-| 未选择项目 | 引导选择目录 | Send disabled | 空状态 |
-| Provider 未配置 | 配置提示 | Send disabled | 可浏览本地文件 |
-| Idle | 不显示内部 badge | 可输入 | 保留当前 tab |
-| Calling LLM | 流式占位/文本 | Stop | 保留当前 tab |
-| Running tool | 工具卡状态更新 | Stop | 文件工具可打开相关 Artifact |
-| Waiting approval | 审批卡 | 禁止发送，可 Stop | 自动显示 Diff 或相关文件 |
-| Cancelling | 短状态 | Stop disabled | 保留内容 |
-| Failed | 结构化错误、可重试 | 恢复输入 | 保留审查上下文 |
-| Conversation closed | 历史只读 | 新消息时重新绑定 Session | 恢复持久化 Artifact 元数据 |
+| 状态                | 对话区             | 输入区                   | Artifact                    |
+| ------------------- | ------------------ | ------------------------ | --------------------------- |
+| 未选择项目          | 引导选择目录       | Send disabled            | 空状态                      |
+| Provider 未配置     | 配置提示           | Send disabled            | 可浏览本地文件              |
+| Idle                | 不显示内部 badge   | 可输入                   | 保留当前 tab                |
+| Calling LLM         | 流式占位/文本      | Stop                     | 保留当前 tab                |
+| Running tool        | 工具卡状态更新     | Stop                     | 文件工具可打开相关 Artifact |
+| Waiting approval    | 审批卡             | 禁止发送，可 Stop        | 自动显示 Diff 或相关文件    |
+| Cancelling          | 短状态             | Stop disabled            | 保留内容                    |
+| Failed              | 结构化错误、可重试 | 恢复输入                 | 保留审查上下文              |
+| Conversation closed | 历史只读           | 新消息时重新绑定 Session | 恢复持久化 Artifact 元数据  |
 
 要求：
 
@@ -478,19 +478,19 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 ### 12.2 亮色 Tokens
 
-| Token | 值 | 用途 |
-|---|---|---|
-| `background` | `#FFFFFF` | 对话、viewer 主背景 |
-| `surface` | `#F6F8FA` | 顶栏、侧栏、次级面板 |
-| `canvas` | `#F3F3F3` | 应用底色 |
-| `border` | `#D0D7DE` | 分割线和控件边框 |
-| `text-primary` | `#24292F` | 主文本 |
-| `text-secondary` | `#57606A` | 次级文本 |
-| `text-muted` | `#6E7781` | 提示和 metadata |
-| `accent` | `#0969DA` | 主操作和活动状态 |
-| `success` | `#1A7F37` | 成功 |
-| `warning` | `#9A6700` | 警告 |
-| `danger` | `#CF222E` | 拒绝、失败、Yolo 风险 |
+| Token            | 值        | 用途                  |
+| ---------------- | --------- | --------------------- |
+| `background`     | `#FFFFFF` | 对话、viewer 主背景   |
+| `surface`        | `#F6F8FA` | 顶栏、侧栏、次级面板  |
+| `canvas`         | `#F3F3F3` | 应用底色              |
+| `border`         | `#D0D7DE` | 分割线和控件边框      |
+| `text-primary`   | `#24292F` | 主文本                |
+| `text-secondary` | `#57606A` | 次级文本              |
+| `text-muted`     | `#6E7781` | 提示和 metadata       |
+| `accent`         | `#0969DA` | 主操作和活动状态      |
+| `success`        | `#1A7F37` | 成功                  |
+| `warning`        | `#9A6700` | 警告                  |
+| `danger`         | `#CF222E` | 拒绝、失败、Yolo 风险 |
 
 ### 12.3 字体与图标
 
@@ -552,17 +552,17 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 ## 15. 阶段可见性
 
-| 能力 | P2 | P3 | P4 | P5 | Post-MVP |
-|---|---:|---:|---:|---:|---:|
-| 项目选择与项目侧栏 | 必须 | 必须 | 必须 | 必须 | 必须 |
-| 对话列表与搜索 | 基础 | 完整本地版 | 保持 | 保持 | 可扩展同步 |
-| Chat/Markdown/流式 | 必须 | 必须 | 必须 | 必须 | 必须 |
-| Files Explorer/Viewer | 基础 | 必须 | 必须 | 必须 | 必须 |
-| 文件审批与 Diff | - | 必须 | 必须 | 必须 | 必须 |
-| Terminal 底部面板 | - | 不显示 | 必须 | 必须 | 必须 |
-| Skills 管理 | - | - | - | 必须 | 必须 |
-| Trace/Replay 基础入口 | - | Trace 设置 | Trace 设置 | 必须 | 完整 GUI 可后移 |
-| Browser | - | - | - | - | 单独设计 |
+| 能力                  |   P2 |         P3 |         P4 |   P5 |        Post-MVP |
+| --------------------- | ---: | ---------: | ---------: | ---: | --------------: |
+| 项目选择与项目侧栏    | 必须 |       必须 |       必须 | 必须 |            必须 |
+| 对话列表与搜索        | 基础 | 完整本地版 |       保持 | 保持 |      可扩展同步 |
+| Chat/Markdown/流式    | 必须 |       必须 |       必须 | 必须 |            必须 |
+| Files Explorer/Viewer | 基础 |       必须 |       必须 | 必须 |            必须 |
+| 文件审批与 Diff       |    - |       必须 |       必须 | 必须 |            必须 |
+| Terminal 底部面板     |    - |     不显示 |       必须 | 必须 |            必须 |
+| Skills 管理           |    - |          - |          - | 必须 |            必须 |
+| Trace/Replay 基础入口 |    - | Trace 设置 | Trace 设置 | 必须 | 完整 GUI 可后移 |
+| Browser               |    - |          - |          - |    - |        单独设计 |
 
 阶段未到时使用“完全不显示”，而不是可点击占位 tab。
 

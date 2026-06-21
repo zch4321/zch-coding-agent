@@ -24,6 +24,9 @@ class FakePty implements PtyLike {
 
   kill(): void {
     this.killed = true
+    for (const listener of this.#exit) {
+      listener({ exitCode: 0 })
+    }
   }
 
   onData(listener: (data: string) => void) {
@@ -63,6 +66,16 @@ async function harness(scrollbackBytes = 1_024) {
 }
 
 describe('TerminalPool', () => {
+  it('waits for active PTYs to exit during disposal', async () => {
+    const { root, ptys, pool } = await harness()
+    await pool.open({ sessionId: sessionA, workspace: root })
+
+    await pool.dispose()
+
+    expect(ptys[0]?.killed).toBe(true)
+    expect(pool.list(sessionA)).toEqual([])
+  })
+
   it('streams ANSI output but returns bounded ANSI-free model text', async () => {
     const { root, events, ptys, pool } = await harness()
     const terminal = await pool.open({ sessionId: sessionA, workspace: root })

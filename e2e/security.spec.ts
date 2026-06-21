@@ -244,31 +244,28 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.evaluate(() => {
       const button = document.querySelector<HTMLButtonElement>(
-        '[aria-label="Open settings"]',
+        '[aria-label="打开设置"]',
       )
       button?.click()
     })
     await page
-      .getByRole('navigation', { name: 'Settings sections' })
-      .getByRole('button', { name: 'Provider' })
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '模型服务' })
       .click()
     const provider = page.locator('.settings-section')
 
+    await expect(provider.getByText('主模型', { exact: true })).toBeVisible()
     await expect(
-      provider.getByText('Main model', { exact: true }),
+      provider.getByText('上下文窗口覆盖值', { exact: true }),
     ).toBeVisible()
     await expect(
-      provider.getByText('Context window override', { exact: true }),
+      provider.getByText('最大输出覆盖值', { exact: true }),
     ).toBeVisible()
     await expect(
-      provider.getByText('Maximum output override', { exact: true }),
+      provider.getByText('Token 估算方式', { exact: true }),
     ).toBeVisible()
-    await expect(
-      provider.getByText('Token estimation', { exact: true }),
-    ).toBeVisible()
-    await expect(
-      provider.getByRole('button', { name: 'Refresh' }),
-    ).toBeDisabled()
+    await expect(provider.getByRole('button', { name: '刷新' })).toBeDisabled()
+    await expect(provider.getByText('思考深度', { exact: true })).toBeVisible()
     await expect(provider.locator('.n-input-number')).toHaveCount(3)
 
     const modelSelect = provider.locator('.n-select').first()
@@ -284,42 +281,232 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.evaluate(() => {
       document
-        .querySelector<HTMLButtonElement>('[aria-label="Open settings"]')
+        .querySelector<HTMLButtonElement>('[aria-label="打开设置"]')
         ?.click()
     })
     const navigation = page.getByRole('navigation', {
-      name: 'Settings sections',
+      name: '设置分类',
     })
-    await navigation.getByRole('button', { name: 'Skills' }).click()
+    await navigation.getByRole('button', { name: '技能' }).click()
     const skills = page.locator('.settings-section')
-    await expect(skills.getByText('No valid skills found.')).toBeVisible()
+    await expect(skills.getByText('未找到有效技能。')).toBeVisible()
     await expect(
       skills.getByPlaceholder('https://example.com/skill.md'),
     ).toBeVisible()
-    await expect(
-      skills.getByRole('button', { name: 'Install file' }),
-    ).toBeVisible()
-    await expect(skills.getByRole('button', { name: 'Refresh' })).toBeVisible()
+    await expect(skills.getByRole('button', { name: '安装文件' })).toBeVisible()
+    await expect(skills.getByRole('button', { name: '刷新' })).toBeVisible()
     await writeFile(
       path.join(userDataPath, 'skills', 'e2e-skill.md'),
       '---\nname: e2e-skill\ndescription: E2E skill without optional trigger\n---\nUse E2E instructions.\n',
     )
-    await skills.getByRole('button', { name: 'Refresh' }).click()
+    await skills.getByRole('button', { name: '刷新' }).click()
     await expect(skills.getByText('e2e-skill', { exact: true })).toBeVisible()
     await expect(
       skills.getByText('E2E skill without optional trigger'),
     ).toBeVisible()
 
-    await navigation.getByRole('button', { name: 'Logging' }).click()
+    await navigation.getByRole('button', { name: '日志' }).click()
     const logging = page.locator('.settings-section')
     await expect(
-      logging.getByRole('button', { name: 'Open log directory' }),
+      logging.getByRole('button', { name: '打开日志目录' }),
     ).toBeVisible()
     await expect(
-      logging.getByRole('button', { name: 'Clear closed traces' }),
+      logging.getByRole('button', { name: '清理已关闭 Trace' }),
     ).toBeVisible()
-    await expect(logging.getByText('Offline replay and fork')).toBeVisible()
-    await expect(logging.getByText('Requests', { exact: true })).toBeVisible()
+    await expect(logging.getByText('离线回放与分叉')).toBeVisible()
+    await expect(logging.getByText('请求数', { exact: true })).toBeVisible()
+  })
+
+  test('collapses projects and renders file tabs as one active tab unit', async () => {
+    await writeFile(path.join(workspace, 'blog.pen'), 'sample design\n')
+    const cachedDirectory = path.join(workspace, 'cached-folder')
+    await mkdir(cachedDirectory)
+    await writeFile(path.join(cachedDirectory, 'cached.txt'), 'cached child\n')
+    const configured = await page.evaluate(async (workspacePath) => {
+      const api = Reflect.get(window, 'agentApi') as {
+        setConfig(payload: unknown): Promise<{ ok: boolean }>
+      }
+      return api.setConfig({
+        version: 1,
+        kind: 'workspace',
+        lastOpened: workspacePath,
+      })
+    }, workspace)
+    expect(configured.ok).toBe(true)
+
+    await page.reload()
+    const projectHeading = page.locator('.project-heading')
+    const conversationList = page.locator('.conversation-list')
+    await expect(projectHeading).toHaveAttribute('aria-expanded', 'true')
+    await projectHeading.click()
+    await expect(projectHeading).toHaveAttribute('aria-expanded', 'false')
+    await expect(conversationList).toBeHidden()
+    await projectHeading.click()
+    await expect(conversationList).toBeVisible()
+
+    const folderNode = page.getByText('cached-folder', { exact: true })
+    await folderNode.click()
+    await expect(page.locator('.explorer-tree')).toContainText('cached.txt')
+    await rm(path.join(cachedDirectory, 'cached.txt'))
+    await folderNode.click()
+    await folderNode.click()
+    await expect(page.locator('.explorer-tree')).toContainText('cached.txt')
+
+    await page.getByText('blog.pen', { exact: true }).click()
+    const activeFileTab = page.locator('.file-tab.active')
+    await expect(activeFileTab).toContainText('blog.pen')
+    await expect(page.locator('.file-viewer-header')).toContainText('blog.pen')
+    const tabLayout = await activeFileTab.evaluate((tab) => {
+      const label = tab.querySelector('.file-tab-label')
+      const close = tab.querySelector('.tab-close')
+      return {
+        childCount: tab.children.length,
+        display: getComputedStyle(tab).display,
+        activeUnderline: getComputedStyle(tab).boxShadow,
+        labelHeight: label?.getBoundingClientRect().height,
+        closeHeight: close?.getBoundingClientRect().height,
+      }
+    })
+    expect(tabLayout).toMatchObject({
+      childCount: 2,
+      display: 'flex',
+      labelHeight: tabLayout.closeHeight,
+    })
+    expect(tabLayout.activeUnderline).not.toBe('none')
+  })
+
+  test('keeps the file tree bound to the selected project conversation', async () => {
+    const firstWorkspace = path.join(temporaryRoot, 'project-a')
+    const secondWorkspace = path.join(temporaryRoot, 'project-b')
+    await mkdir(firstWorkspace)
+    await mkdir(secondWorkspace)
+    await writeFile(path.join(firstWorkspace, 'only-a.txt'), 'project a\n')
+    await writeFile(path.join(secondWorkspace, 'only-b.txt'), 'project b\n')
+    const configured = await page.evaluate(async (workspacePath) => {
+      const api = Reflect.get(window, 'agentApi') as {
+        setConfig(payload: unknown): Promise<{ ok: boolean }>
+      }
+      return api.setConfig({
+        version: 1,
+        kind: 'workspace',
+        lastOpened: workspacePath,
+      })
+    }, firstWorkspace)
+    expect(configured.ok).toBe(true)
+    await page.evaluate(
+      ({ first, second }) => {
+        const timestamp = '2026-06-21T00:00:00.000Z'
+        localStorage.setItem(
+          'my-coding-agent.workbench.v1',
+          JSON.stringify({
+            projects: [
+              { path: first, name: 'project-a', addedAt: timestamp },
+              { path: second, name: 'project-b', addedAt: timestamp },
+            ],
+            conversations: [
+              {
+                id: 'conversation:a',
+                projectPath: first,
+                title: 'Project A conversation',
+                model: 'deepseek-v4-pro',
+                mode: 'auto',
+                messages: [],
+                tools: [],
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              },
+              {
+                id: 'conversation:b',
+                projectPath: second,
+                title: 'Project B conversation',
+                model: 'deepseek-v4-pro',
+                mode: 'auto',
+                messages: [],
+                tools: [],
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              },
+            ],
+            activeConversationId: 'conversation:a',
+          }),
+        )
+      },
+      { first: firstWorkspace, second: secondWorkspace },
+    )
+
+    await page.reload()
+    await page
+      .getByRole('button', { name: 'Project B conversation', exact: true })
+      .click()
+    await expect(page.locator('.artifact-project')).toContainText(
+      secondWorkspace,
+    )
+    await expect(page.locator('.explorer-tree')).toContainText('only-b.txt')
+    await expect(page.locator('.explorer-tree')).not.toContainText('only-a.txt')
+
+    await page
+      .getByRole('button', { name: 'Project A conversation', exact: true })
+      .click()
+    await expect(page.locator('.artifact-project')).toContainText(
+      firstWorkspace,
+    )
+    await expect(page.locator('.explorer-tree')).toContainText('only-a.txt')
+    await expect(page.locator('.explorer-tree')).not.toContainText('only-b.txt')
+  })
+
+  test('contains very long tool result lines inside the tool card', async () => {
+    await page.evaluate(() => {
+      const key = 'my-coding-agent.workbench.v1'
+      const workbench = JSON.parse(localStorage.getItem(key) ?? '{}') as {
+        conversations?: Array<Record<string, unknown>>
+        activeConversationId?: string
+      }
+      const active = workbench.conversations?.find(
+        (conversation) => conversation.id === workbench.activeConversationId,
+      )
+      if (!active) throw new Error('Expected an active conversation')
+      active.tools = [
+        {
+          callId: 'call:long-result',
+          runId: 'run:long-result',
+          tool: 'run_command',
+          args: { command: 'print-long-line' },
+          reason: 'Test long output containment',
+          status: 'completed',
+          result: { status: 'ok', content: 'x'.repeat(20_000) },
+          order: 1,
+        },
+      ]
+      localStorage.setItem(key, JSON.stringify(workbench))
+    })
+
+    await page.reload()
+    const card = page.locator('.tool-call-card')
+    await expect(card).toBeVisible()
+    await card.getByText('结果', { exact: true }).click()
+    const metrics = await card.evaluate((element) => {
+      const pane = document.querySelector('.conversation-pane')
+      const scroll = document.querySelector('.conversation-scroll')
+      const pre = element.querySelector('pre')
+      if (!pane || !scroll || !pre) throw new Error('Expected tool layout')
+      const paneRect = pane.getBoundingClientRect()
+      const cardRect = element.getBoundingClientRect()
+      return {
+        cardLeft: cardRect.left,
+        cardRight: cardRect.right,
+        paneLeft: paneRect.left,
+        paneRight: paneRect.right,
+        outerClientWidth: scroll.clientWidth,
+        outerScrollWidth: scroll.scrollWidth,
+        resultClientWidth: pre.clientWidth,
+        resultScrollWidth: pre.scrollWidth,
+      }
+    })
+
+    expect(metrics.cardLeft).toBeGreaterThanOrEqual(metrics.paneLeft)
+    expect(metrics.cardRight).toBeLessThanOrEqual(metrics.paneRight)
+    expect(metrics.outerScrollWidth).toBe(metrics.outerClientWidth)
+    expect(metrics.resultScrollWidth).toBeGreaterThan(metrics.resultClientWidth)
   })
 
   test('opens, drives, restores, and closes persistent terminal tabs', async () => {
@@ -338,7 +525,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
     expect(configured.ok).toBe(true)
 
     await page.reload()
-    const toggle = page.getByRole('button', { name: 'Toggle terminal' })
+    const toggle = page.getByRole('button', { name: /切换终端/ })
     await expect(toggle).toBeEnabled()
     await toggle.click()
     const terminalPanel = page.locator('.terminal-panel')
@@ -356,7 +543,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
       page.locator('.terminal-surface:visible .xterm-rows'),
     ).toContainText('E2E_PTY_OK')
 
-    await terminalPanel.getByRole('button', { name: 'New terminal' }).click()
+    await terminalPanel.getByRole('button', { name: '新建终端' }).click()
     await expect(terminalTabs).toHaveCount(2)
 
     await page.keyboard.press('Control+J')
@@ -366,7 +553,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await expect(terminalTabs).toHaveCount(2)
 
     const closeButtons = terminalPanel.getByRole('button', {
-      name: 'Close terminal',
+      name: '关闭终端',
     })
     await expect(closeButtons).toHaveCount(2)
     await closeButtons.nth(0).click()

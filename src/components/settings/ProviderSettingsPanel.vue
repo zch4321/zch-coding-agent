@@ -1,30 +1,34 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NButton, NInput, NInputNumber, NSelect } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 
 const agent = useAgentStore()
-const reasoningOptions = [
-  { label: 'Automatic', value: 'auto' },
-  { label: 'Off', value: 'off' },
-]
-const tokenEstimationOptions = [
-  { label: 'Conservative default', value: 'conservative' },
-  { label: 'Custom UTF-8 bytes/token', value: 'custom-bytes' },
-]
+const { t } = useI18n()
+const reasoningOptions = computed(() => [
+  { label: t('settings.reasoningOff'), value: 'off' },
+  { label: t('settings.reasoningHigh'), value: 'high' },
+  { label: t('settings.reasoningMax'), value: 'max' },
+])
+const tokenEstimationOptions = computed(() => [
+  { label: t('settings.tokenConservative'), value: 'conservative' },
+  { label: t('settings.tokenCustom'), value: 'custom-bytes' },
+])
 </script>
 
 <template>
   <section class="settings-section">
     <div class="settings-heading">
-      <h2>Provider</h2>
-      <p>Configure the main model and the Auto approval model.</p>
+      <h2>{{ t('settings.providerTitle') }}</h2>
+      <p>{{ t('settings.providerHint') }}</p>
     </div>
     <label class="settings-field">
-      <span>Base URL</span>
+      <span>{{ t('settings.baseUrl') }}</span>
       <NInput v-model:value="agent.providerForm.baseURL" />
     </label>
     <label class="settings-field">
-      <span>Main model</span>
+      <span>{{ t('settings.mainModel') }}</span>
       <div class="settings-inline">
         <NSelect
           :value="agent.providerForm.model"
@@ -40,54 +44,54 @@ const tokenEstimationOptions = [
           :disabled="!agent.credentialConfigured"
           @click="agent.loadProviderModels(true)"
         >
-          Refresh
+          {{ t('common.refresh') }}
         </NButton>
       </div>
       <small>
         {{
           agent.activeModelProfile
-            ? agent.activeModelProfile.availability +
-              ' model · ' +
-              agent.activeModelProfile.capabilitySource +
-              ' capabilities · ' +
-              agent.activeModelProfile.contextWindowTokens.toLocaleString() +
-              ' effective context tokens'
-            : 'Custom model with conservative capability defaults.'
+            ? t('settings.modelProfile', {
+                availability: agent.activeModelProfile.availability,
+                source: agent.activeModelProfile.capabilitySource,
+                tokens:
+                  agent.activeModelProfile.contextWindowTokens.toLocaleString(),
+              })
+            : t('settings.customModel')
         }}
       </small>
     </label>
     <div class="settings-inline settings-inline-equal">
       <label class="settings-field">
-        <span>Context window override</span>
+        <span>{{ t('settings.contextOverride') }}</span>
         <NInputNumber
           v-model:value="agent.providerForm.contextWindowTokens"
           :min="1024"
           :max="10000000"
           clearable
-          placeholder="Use model/default value"
+          :placeholder="t('settings.useDefault')"
         />
       </label>
       <label class="settings-field">
-        <span>Maximum output override</span>
+        <span>{{ t('settings.outputOverride') }}</span>
         <NInputNumber
           v-model:value="agent.providerForm.maxOutputTokens"
           :min="1"
           :max="10000000"
           clearable
-          placeholder="Use model/default value"
+          :placeholder="t('settings.useDefault')"
         />
       </label>
     </div>
     <div class="settings-inline settings-inline-equal">
       <label class="settings-field">
-        <span>Token estimation</span>
+        <span>{{ t('settings.tokenEstimation') }}</span>
         <NSelect
           v-model:value="agent.providerForm.tokenEstimationMode"
           :options="tokenEstimationOptions"
         />
       </label>
       <label class="settings-field">
-        <span>UTF-8 bytes per token</span>
+        <span>{{ t('settings.bytesPerToken') }}</span>
         <NInputNumber
           v-model:value="agent.providerForm.bytesPerToken"
           :disabled="agent.providerForm.tokenEstimationMode !== 'custom-bytes'"
@@ -98,18 +102,20 @@ const tokenEstimationOptions = [
       </label>
     </div>
     <p class="settings-footnote">
-      Token estimation plans context usage. Byte, line and result limits remain
-      enforced independently.
+      {{ t('settings.tokenHint') }}
     </p>
     <label class="settings-field">
-      <span>Reasoning</span>
+      <span>{{ t('settings.reasoning') }}</span>
       <NSelect
         v-model:value="agent.providerForm.reasoning"
         :options="reasoningOptions"
       />
+      <small>
+        {{ t('settings.reasoningHint') }}
+      </small>
     </label>
     <label class="settings-field">
-      <span>Auto approver model</span>
+      <span>{{ t('settings.approverModel') }}</span>
       <NSelect
         v-model:value="agent.providerForm.approverModel"
         :options="agent.modelOptions"
@@ -118,20 +124,20 @@ const tokenEstimationOptions = [
       />
     </label>
     <label class="settings-field">
-      <span>API key</span>
+      <span>{{ t('settings.apiKey') }}</span>
       <NInput
         v-model:value="agent.providerForm.apiKey"
         type="password"
         show-password-on="click"
-        placeholder="Enter a new key"
+        :placeholder="t('settings.apiKeyPlaceholder')"
       />
       <small>
         {{
           agent.credentialConfigured
             ? agent.credentialSource === 'environment'
-              ? 'Using DEEPSEEK_API_KEY from the main-process environment.'
-              : 'A credential is stored securely.'
-            : 'No credential is configured.'
+              ? t('settings.credentialEnv')
+              : t('settings.credentialStored')
+            : t('settings.credentialNone')
         }}
       </small>
     </label>
@@ -142,17 +148,23 @@ const tokenEstimationOptions = [
         :disabled="!agent.providerDirty"
         @click="agent.saveProvider"
       >
-        Save provider
+        {{ t('settings.saveProvider') }}
       </NButton>
       <NButton
         v-if="agent.credentialSource === 'safe-storage'"
         secondary
         @click="agent.clearCredential"
       >
-        Clear credential
+        {{ t('settings.clearCredential') }}
       </NButton>
       <small class="settings-save-status" aria-live="polite">
-        {{ agent.providerDirty ? 'Unsaved changes' : agent.providerSaveStatus }}
+        {{
+          agent.providerDirty
+            ? t('settings.unsaved')
+            : agent.providerSaveStatus
+              ? t('settings.saved')
+              : ''
+        }}
       </small>
     </div>
   </section>

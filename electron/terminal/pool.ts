@@ -54,6 +54,8 @@ interface TerminalResource {
   scrollback: ByteRingBuffer
   dataDisposable: { dispose(): void }
   exitDisposable: { dispose(): void }
+  exitPromise: Promise<void>
+  resolveExit: () => void
   explicitClose: boolean
 }
 
@@ -79,6 +81,7 @@ export class TerminalPool {
   readonly #options: TerminalPoolOptions
   readonly #resources = new Map<TerminalId, TerminalResource>()
   readonly #closedOwners = new Map<TerminalId, SessionId>()
+  readonly #pendingExits = new Set<Promise<void>>()
 
   constructor(options: TerminalPoolOptions) {
     this.#options = options
@@ -128,6 +131,10 @@ export class TerminalPool {
       rows,
       seq: 0,
     }
+    let resolveExit!: () => void
+    const exitPromise = new Promise<void>((resolve) => {
+      resolveExit = resolve
+    })
     const resource: TerminalResource = {
       info,
       sessionId: input.sessionId,
@@ -135,6 +142,8 @@ export class TerminalPool {
       scrollback: new ByteRingBuffer(this.#options.getScrollbackBytes()),
       dataDisposable: { dispose: () => undefined },
       exitDisposable: { dispose: () => undefined },
+      exitPromise,
+      resolveExit,
       explicitClose: false,
     }
     this.#resources.set(id, resource)
@@ -151,6 +160,8 @@ export class TerminalPool {
       })
     })
     resource.exitDisposable = pty.onExit(({ exitCode }) => {
+      resource.resolveExit()
+      resource.exitDisposable.dispose()
       if (!resource.explicitClose) {
         this.#emitStatus(resource, 'closed', exitCode)
       }
@@ -261,22 +272,34 @@ export class TerminalPool {
       throw new Error('Terminal not found for this session')
     }
 
-    this.#disposeResource(resource)
+    void this.#disposeResource(resource)
     return true
   }
 
   closeSession(sessionId: SessionId): void {
     for (const resource of [...this.#resources.values()]) {
       if (resource.sessionId === sessionId) {
-        this.#disposeResource(resource)
+        void this.#disposeResource(resource)
       }
     }
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     for (const resource of [...this.#resources.values()]) {
-      this.#disposeResource(resource)
+      void this.#disposeResource(resource)
     }
+
+    const pending = [...this.#pendingExits]
+    if (pending.length === 0) return
+
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      Promise.allSettled(pending),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, 1_000)
+      }),
+    ])
+    if (timeout) clearTimeout(timeout)
   }
 
   #requireOwned(sessionId: SessionId, id: TerminalId): TerminalResource {
@@ -306,14 +329,13 @@ export class TerminalPool {
     })
   }
 
-  #disposeResource(resource: TerminalResource): void {
+  #disposeResource(resource: TerminalResource): Promise<void> {
     if (!this.#resources.has(resource.info.terminalId)) {
-      return
+      return resource.exitPromise
     }
 
     resource.explicitClose = true
     resource.dataDisposable.dispose()
-    resource.exitDisposable.dispose()
 
     try {
       resource.pty.kill()
@@ -329,5 +351,12 @@ export class TerminalPool {
     if (this.#closedOwners.size > 256) {
       this.#closedOwners.delete(this.#closedOwners.keys().next().value!)
     }
+
+    const pending = resource.exitPromise.finally(() => {
+      resource.exitDisposable.dispose()
+      this.#pendingExits.delete(pending)
+    })
+    this.#pendingExits.add(pending)
+    return pending
   }
 }

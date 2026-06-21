@@ -335,16 +335,48 @@ textarea:focus-visible {
   text-transform: uppercase;
 }
 
+.sidebar-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.add-project-button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  margin-right: 4px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.add-project-button:hover {
+  color: var(--text);
+  background: var(--background);
+}
+
 .project-group {
   margin-bottom: 14px;
 }
 
 .project-heading {
+  width: 100%;
   min-height: 30px;
   gap: 6px;
   padding: 0 6px;
   color: var(--text-secondary);
   font-size: 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+}
+
+.project-heading:hover {
+  background: var(--background);
 }
 
 .project-heading .ui-icon:first-child {
@@ -583,15 +615,19 @@ textarea:focus-visible {
 
 .conversation-timeline {
   position: relative;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .conversation-scroll {
   display: flex;
+  min-width: 0;
   height: 100%;
   flex-direction: column;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 24px clamp(18px, 5vw, 52px);
 }
 
@@ -639,6 +675,8 @@ textarea:focus-visible {
 .approval-card,
 .conversation-empty {
   width: min(100%, 760px);
+  min-width: 0;
+  max-width: 100%;
   margin: 0 auto 18px;
 }
 
@@ -715,10 +753,32 @@ code {
 
 .tool-call-card,
 .approval-card {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
+}
+
+.tool-call-card .n-collapse,
+.tool-call-card .n-collapse-item,
+.tool-call-card .n-collapse-item__content-wrapper,
+.tool-call-card .n-collapse-item__content-inner,
+.reasoning .n-collapse-item__content-wrapper,
+.reasoning .n-collapse-item__content-inner {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tool-call-card pre,
+.reasoning pre {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: auto;
 }
 
 .tool-call-header,
@@ -1218,21 +1278,21 @@ code {
 .file-tabs {
   min-width: 0;
   height: 38px;
-  gap: 2px;
+  gap: 0;
   overflow-x: auto;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   scrollbar-width: thin;
 }
 
-.file-tabs button {
+.file-tabs > button,
+.file-tab-label {
   min-width: 0;
   max-width: 180px;
   height: 100%;
   gap: 6px;
   padding: 0 9px;
   border: 0;
-  border-right: 1px solid var(--border-subtle);
   border-bottom: 2px solid transparent;
   color: var(--text-secondary);
   background: transparent;
@@ -1240,7 +1300,12 @@ code {
   white-space: nowrap;
 }
 
-.file-tabs button.active {
+.file-tabs > button {
+  flex: 0 0 auto;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.file-tabs > button.active {
   border-bottom-color: var(--accent);
   color: var(--text);
   background: var(--background);
@@ -1248,24 +1313,33 @@ code {
 
 .file-tab {
   display: flex;
-  min-width: 0;
+  min-width: 92px;
+  max-width: 220px;
+  height: 100%;
+  flex: 0 0 auto;
   align-items: stretch;
+  border-right: 1px solid var(--border-subtle);
 }
 
-.file-tab > button:first-child {
+.file-tab-label {
   min-width: 0;
+  flex: 1;
+  border: 0;
 }
 
 .file-tab.active {
-  border-bottom: 2px solid var(--accent);
   background: var(--background);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .file-tab .tab-close {
   width: 26px;
+  height: 100%;
+  flex: 0 0 auto;
   padding: 0;
   border: 0;
   border-radius: 0;
+  border-bottom: 0;
   background: transparent;
 }
 
@@ -1285,7 +1359,8 @@ code {
   background: var(--background);
 }
 
-.file-tabs button > span:not(.tab-close) {
+.file-tab-label > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1311,70 +1386,38 @@ code {
 .file-viewer {
   height: calc(100% - 38px);
   min-height: 0;
+}
+
+.file-viewer {
   overflow: auto;
 }
 
-.explorer-toolbar {
-  position: sticky;
-  z-index: 1;
-  top: 0;
-  min-height: 38px;
-  gap: 6px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--background);
-}
-
-.explorer-toolbar button:disabled {
-  cursor: default;
-  opacity: 0.35;
-}
-
-.explorer-toolbar span {
+.explorer-tree-state {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
   overflow: hidden;
-  color: var(--text-muted);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.explorer-list {
-  margin: 0;
-  padding: 6px 8px 16px;
-  list-style: none;
+.explorer-tree {
+  min-height: 0;
+  flex: 1;
+  padding: 8px 7px 14px;
 }
 
-.explorer-list button {
-  width: 100%;
-  min-height: 30px;
-  gap: 7px;
-  padding: 0 7px;
-  border: 0;
-  border-radius: 6px;
-  color: var(--text-secondary);
-  background: transparent;
+.explorer-tree .n-tree-node-content__text {
+  overflow: hidden;
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 11px;
-  text-align: left;
-}
-
-.explorer-list button:hover {
-  color: var(--text);
-  background: var(--surface);
-}
-
-.explorer-list button span {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.explorer-list button .ui-icon:last-child {
-  width: 13px;
-  height: 13px;
+.explorer-tree .n-tree-node-content__prefix .ui-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
 }
 
 .artifact-message {

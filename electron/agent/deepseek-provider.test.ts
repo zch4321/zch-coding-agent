@@ -68,7 +68,7 @@ describe('DeepSeekProvider', () => {
       baseURL: 'https://api.example/v1',
       model: 'fixture',
       apiKey: 'secret',
-      reasoning: 'auto',
+      reasoning: 'high',
       createCallId: () => 'call-generated' as CallId,
       fetchImpl: async (_input, init) => {
         wireBody = String(init?.body)
@@ -167,6 +167,42 @@ describe('DeepSeekProvider', () => {
     })
     expect(wireBody).not.toContain('x-agent-intent-property')
     expect(wireBody).toContain('_agent_intent')
+    expect(JSON.parse(wireBody)).toMatchObject({
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
+    })
+  })
+
+  it('sends the documented maximum effort and disables thinking explicitly', async () => {
+    const bodies: unknown[] = []
+    for (const reasoning of ['max', 'off'] as const) {
+      const provider = new DeepSeekProvider({
+        baseURL: 'https://api.example/v1',
+        model: 'deepseek-v4-pro',
+        apiKey: 'secret',
+        reasoning,
+        fetchImpl: async (_input, init) => {
+          bodies.push(JSON.parse(String(init?.body)))
+          return sseResponse([])
+        },
+      })
+      for await (const event of provider.streamChat({
+        messages: [{ role: 'user', content: 'hello' }],
+        tools: [],
+        signal: new AbortController().signal,
+      })) {
+        void event
+      }
+    }
+
+    expect(bodies).toEqual([
+      expect.objectContaining({
+        thinking: { type: 'enabled' },
+        reasoning_effort: 'max',
+      }),
+      expect.objectContaining({ thinking: { type: 'disabled' } }),
+    ])
+    expect(bodies[1]).not.toHaveProperty('reasoning_effort')
   })
 
   it('preserves hidden reasoning continuation when display is off', async () => {

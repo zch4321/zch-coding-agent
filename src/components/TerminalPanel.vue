@@ -2,6 +2,7 @@
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
+import { useI18n } from 'vue-i18n'
 import '@xterm/xterm/css/xterm.css'
 import { IPC_VERSION } from '../../shared/channels'
 import type { TerminalEvent } from '../../shared/agent-events'
@@ -24,6 +25,7 @@ interface TerminalView {
 }
 
 const agent = useAgentStore()
+const { t } = useI18n()
 const terminals = ref<TerminalInfo[]>([])
 const activeTerminalId = ref<TerminalId>()
 const error = ref('')
@@ -40,7 +42,7 @@ const sequence = new TerminalSequenceTracker()
 
 function terminalLabel(terminal: TerminalInfo, index: number): string {
   const shell = terminal.shell.replace(/\\/gu, '/').split('/').at(-1)
-  return shell || `Terminal ${index + 1}`
+  return shell || t('terminal.name', { index: index + 1 })
 }
 
 function setHost(terminalId: TerminalId, element: Element | null): void {
@@ -159,7 +161,7 @@ async function loadTerminals(createWhenEmpty = false): Promise<void> {
   const bridge = window.agentApi
 
   if (!bridge) {
-    error.value = 'Desktop bridge unavailable'
+    error.value = t('terminal.bridgeUnavailable')
     return
   }
 
@@ -219,7 +221,7 @@ async function createTerminal(): Promise<void> {
   error.value = ''
 
   if (!bridge) {
-    error.value = 'Desktop bridge unavailable'
+    error.value = t('terminal.bridgeUnavailable')
     return
   }
 
@@ -234,7 +236,7 @@ async function createTerminal(): Promise<void> {
     }
 
     if (!created) {
-      error.value = agent.error || 'Unable to create a local session'
+      error.value = agent.error || t('terminal.createFailed')
       return
     }
   }
@@ -316,8 +318,7 @@ function applyTerminalEvent(event: TerminalEvent): void {
   }
 
   if (decision === 'recover') {
-    recoveryNotice.value =
-      'Terminal output gap detected. Restoring the bounded scrollback snapshot.'
+    recoveryNotice.value = t('terminal.outputGap')
     void restoreTerminal(event.terminalId)
     return
   }
@@ -393,14 +394,14 @@ async function restoreTerminal(terminalId: TerminalId): Promise<void> {
       applyTerminalEvent(event)
     }
     recoveryNotice.value = result.value.truncated
-      ? 'Terminal restored. Older scrollback was truncated by the configured limit.'
+      ? t('terminal.restoredTruncated')
       : ''
   } catch (restoreError) {
     sequence.cancelRecovery(terminalId)
     error.value =
       restoreError instanceof Error
         ? restoreError.message
-        : 'Unable to restore terminal output'
+        : t('terminal.restoreFailed')
     recoveryNotice.value = ''
   }
 }
@@ -486,13 +487,17 @@ onUnmounted(() => {
     <div
       class="terminal-resize-handle"
       role="separator"
-      aria-label="Resize terminal panel"
+      :aria-label="t('terminal.resize')"
       aria-orientation="horizontal"
       tabindex="0"
       @pointerdown="beginPanelResize"
     ></div>
     <header class="terminal-toolbar">
-      <div class="terminal-tabs" role="tablist" aria-label="Terminals">
+      <div
+        class="terminal-tabs"
+        role="tablist"
+        :aria-label="t('terminal.terminals')"
+      >
         <div
           v-for="(terminal, index) in terminals"
           :key="terminal.terminalId"
@@ -514,8 +519,8 @@ onUnmounted(() => {
           <button
             type="button"
             class="terminal-tab-close"
-            aria-label="Close terminal"
-            title="Close terminal"
+            :aria-label="t('terminal.close')"
+            :title="t('terminal.close')"
             @click="closeTerminal(terminal.terminalId)"
           >
             <UiIcon name="close" />
@@ -526,24 +531,26 @@ onUnmounted(() => {
       <div class="terminal-actions">
         <button
           type="button"
-          aria-label="New terminal"
-          title="New terminal"
+          :aria-label="t('terminal.new')"
+          :title="t('terminal.new')"
           @click="createTerminal"
         >
           <UiIcon name="plus" />
         </button>
         <button
           type="button"
-          :aria-label="maximized ? 'Restore terminal' : 'Maximize terminal'"
-          :title="maximized ? 'Restore terminal' : 'Maximize terminal'"
+          :aria-label="
+            maximized ? t('terminal.restore') : t('terminal.maximize')
+          "
+          :title="maximized ? t('terminal.restore') : t('terminal.maximize')"
           @click="toggleMaximized"
         >
           <UiIcon :name="maximized ? 'restore' : 'maximize-panel'" />
         </button>
         <button
           type="button"
-          aria-label="Hide terminal"
-          title="Hide terminal (Ctrl+J)"
+          :aria-label="t('terminal.hide')"
+          :title="t('terminal.hide')"
           @click="emit('close')"
         >
           <UiIcon name="chevron-down" />
@@ -556,8 +563,10 @@ onUnmounted(() => {
       {{ recoveryNotice }}
     </p>
     <div v-if="terminals.length === 0" class="terminal-empty">
-      <span>No terminal is open.</span>
-      <button type="button" @click="createTerminal">New terminal</button>
+      <span>{{ t('terminal.empty') }}</span>
+      <button type="button" @click="createTerminal">
+        {{ t('terminal.new') }}
+      </button>
     </div>
     <div v-else class="terminal-views">
       <div

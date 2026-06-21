@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { NButton } from 'naive-ui'
+import { computed, h, ref, watch } from 'vue'
+import { NButton, NTree, type TreeOption } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { IPC_VERSION } from '../../../shared/channels'
 import { useAgentStore } from '../../stores/agent'
 import FileCodePreview from './FileCodePreview.vue'
@@ -22,66 +23,117 @@ interface OpenFile {
 }
 
 const agent = useAgentStore()
+const { t } = useI18n()
 const activeArtifact = ref<ArtifactTab>('files')
-const explorerPath = ref('.')
-const explorerEntries = ref<ExplorerEntry[]>([])
+const explorerTree = ref<TreeOption[]>([])
 const explorerLoading = ref(false)
 const explorerError = ref('')
 const explorerTruncated = ref(false)
 const openedFiles = ref<OpenFile[]>([])
 const activeFilePath = ref('explorer')
+let directoryRequestGeneration = 0
+let fileRequestGeneration = 0
 
 const projectName = computed(() => {
   const normalized = agent.workspacePath.replace(/\\/g, '/')
-  return normalized.split('/').filter(Boolean).at(-1) || 'Choose workspace'
+  return (
+    normalized.split('/').filter(Boolean).at(-1) || t('app.chooseWorkspace')
+  )
 })
 const activeFile = computed(() =>
   openedFiles.value.find((file) => file.path === activeFilePath.value),
 )
-const explorerParent = computed(() => {
-  if (explorerPath.value === '.') return undefined
-  const parts = explorerPath.value.split('/').filter(Boolean)
-  parts.pop()
-  return parts.join('/') || '.'
-})
+function toTreeOptions(entries: ExplorerEntry[]): TreeOption[] {
+  return entries.map((entry) => ({
+    key: entry.path,
+    label: entry.name,
+    path: entry.path,
+    entryType: entry.type,
+    isLeaf: entry.type === 'file',
+  }))
+}
 
-async function loadDirectory(path: string) {
+async function fetchDirectory(
+  path: string,
+  generation: number,
+): Promise<TreeOption[] | undefined> {
   const bridge = window.agentApi
-  if (!bridge || !agent.workspacePath) {
-    explorerEntries.value = []
-    return
+  const workspace = agent.workspacePath
+  if (!bridge || !workspace) {
+    return undefined
   }
 
-  explorerLoading.value = true
   explorerError.value = ''
   const result = await bridge.listWorkspaceDirectory({
     version: IPC_VERSION,
     path,
   })
-  explorerLoading.value = false
 
-  if (result.ok) {
-    explorerPath.value = result.value.path
-    explorerEntries.value = result.value.entries
-    explorerTruncated.value = result.value.truncated
-  } else {
-    explorerError.value = result.error.message
-  }
-}
-
-async function openExplorerEntry(entry: ExplorerEntry) {
-  if (entry.type === 'directory') {
-    await loadDirectory(entry.path)
+  if (
+    generation !== directoryRequestGeneration ||
+    workspace !== agent.workspacePath ||
+    (result.ok && result.value.workspace !== workspace)
+  ) {
     return
   }
 
+  if (result.ok) {
+    if (result.value.truncated) explorerTruncated.value = true
+    return toTreeOptions(result.value.entries)
+  } else {
+    explorerError.value = result.error.message
+    return undefined
+  }
+}
+
+async function loadRootDirectory(generation: number) {
+  explorerLoading.value = true
+  const children = await fetchDirectory('.', generation)
+  if (generation !== directoryRequestGeneration) return
+  explorerLoading.value = false
+  if (children) explorerTree.value = children
+}
+
+async function loadTreeNode(option: TreeOption) {
+  if (option.entryType !== 'directory' || typeof option.path !== 'string') {
+    return true
+  }
+
+  const generation = directoryRequestGeneration
+  const children = await fetchDirectory(option.path, generation)
+  if (!children || generation !== directoryRequestGeneration) return false
+  option.children = children
+  return true
+}
+
+function treeClickBehavior({ option }: { option: TreeOption }) {
+  return option.entryType === 'directory' ? 'toggleExpand' : 'toggleSelect'
+}
+
+function renderTreePrefix({ option }: { option: TreeOption }) {
+  return h(UiIcon, {
+    name: option.entryType === 'directory' ? 'folder' : 'file',
+  })
+}
+
+async function openExplorerFile(path: string) {
   const bridge = window.agentApi
-  if (!bridge) return
+  const workspace = agent.workspacePath
+  const generation = ++fileRequestGeneration
+  if (!bridge || !workspace) return
   explorerError.value = ''
   const result = await bridge.readWorkspaceFile({
     version: IPC_VERSION,
-    path: entry.path,
+    path,
   })
+
+  if (
+    generation !== fileRequestGeneration ||
+    workspace !== agent.workspacePath ||
+    (result.ok && result.value.workspace !== workspace)
+  ) {
+    return
+  }
 
   if (!result.ok) {
     explorerError.value = result.error.message
@@ -95,6 +147,16 @@ async function openExplorerEntry(entry: ExplorerEntry) {
   else openedFiles.value.push(result.value)
   activeFilePath.value = result.value.path
   activeArtifact.value = 'files'
+}
+
+function handleTreeSelection(
+  _keys: Array<string | number>,
+  options: Array<TreeOption | null>,
+) {
+  const option = options.at(-1)
+  if (option?.entryType === 'file' && typeof option.path === 'string') {
+    void openExplorerFile(option.path)
+  }
 }
 
 function closeFile(path: string) {
@@ -116,12 +178,19 @@ watch(
 watch(
   () => agent.workspacePath,
   (workspace, previous) => {
+    directoryRequestGeneration += 1
+    fileRequestGeneration += 1
+    explorerLoading.value = false
+    explorerError.value = ''
+    explorerTree.value = []
+    explorerTruncated.value = false
+
     if (workspace && workspace !== previous) {
       openedFiles.value = []
       activeFilePath.value = 'explorer'
-      void loadDirectory('.')
+      void loadRootDirectory(directoryRequestGeneration)
     } else if (!workspace) {
-      explorerEntries.value = []
+      explorerTree.value = []
       openedFiles.value = []
     }
   },
@@ -134,11 +203,15 @@ watch(
     <header class="artifact-header">
       <div class="artifact-project">
         <strong>{{ projectName }}</strong>
-        <span :title="agent.workspacePath || 'No workspace selected'">
-          {{ agent.workspacePath || 'No workspace selected' }}
+        <span :title="agent.workspacePath || t('app.noWorkspace')">
+          {{ agent.workspacePath || t('app.noWorkspace') }}
         </span>
       </div>
-      <nav class="artifact-tabs" aria-label="Artifact views" role="tablist">
+      <nav
+        class="artifact-tabs"
+        :aria-label="t('artifact.openFiles')"
+        role="tablist"
+      >
         <button
           type="button"
           role="tab"
@@ -146,7 +219,7 @@ watch(
           :class="{ active: activeArtifact === 'files' }"
           @click="activeArtifact = 'files'"
         >
-          <UiIcon name="explorer" />Files
+          <UiIcon name="explorer" />{{ t('artifact.files') }}
         </button>
         <button
           type="button"
@@ -155,14 +228,18 @@ watch(
           :class="{ active: activeArtifact === 'diff' }"
           @click="activeArtifact = 'diff'"
         >
-          <UiIcon name="diff" />Diff
+          <UiIcon name="diff" />{{ t('artifact.diff') }}
           <span v-if="agent.pendingApproval?.diff" class="tab-dot"></span>
         </button>
       </nav>
     </header>
 
     <section v-if="activeArtifact === 'files'" class="artifact-content">
-      <div class="file-tabs" role="tablist" aria-label="Open files">
+      <div
+        class="file-tabs"
+        role="tablist"
+        :aria-label="t('artifact.openFiles')"
+      >
         <button
           type="button"
           role="tab"
@@ -170,7 +247,7 @@ watch(
           :class="{ active: activeFilePath === 'explorer' }"
           @click="activeFilePath = 'explorer'"
         >
-          <UiIcon name="explorer" />Explorer
+          <UiIcon name="explorer" />{{ t('artifact.explorer') }}
         </button>
         <div
           v-for="file in openedFiles"
@@ -179,6 +256,7 @@ watch(
           :class="{ active: activeFilePath === file.path }"
         >
           <button
+            class="file-tab-label"
             type="button"
             role="tab"
             :aria-selected="activeFilePath === file.path"
@@ -191,7 +269,7 @@ watch(
           <button
             class="tab-close"
             type="button"
-            aria-label="Close file"
+            :aria-label="t('artifact.closeFile')"
             @click="closeFile(file.path)"
           >
             <UiIcon name="close" />
@@ -200,37 +278,39 @@ watch(
       </div>
 
       <div v-if="activeFilePath === 'explorer'" class="explorer-view">
-        <div class="explorer-toolbar">
-          <button
-            type="button"
-            aria-label="Go to parent folder"
-            :disabled="!explorerParent"
-            @click="explorerParent && loadDirectory(explorerParent)"
-          >
-            <UiIcon name="arrow-left" />
-          </button>
-          <span :title="explorerPath">{{ explorerPath }}</span>
-        </div>
-        <p v-if="explorerLoading" class="artifact-message">Loading files...</p>
-        <p v-else-if="explorerError" class="artifact-message error">
-          {{ explorerError }}
-        </p>
-        <div v-else-if="!agent.workspacePath" class="artifact-empty">
+        <div v-if="!agent.workspacePath" class="artifact-empty">
           <UiIcon name="folder" />
-          <p>Choose a workspace to browse files.</p>
+          <p>{{ t('artifact.chooseHint') }}</p>
         </div>
-        <ul v-else class="explorer-list">
-          <li v-for="entry in explorerEntries" :key="entry.path">
-            <button type="button" @click="openExplorerEntry(entry)">
-              <UiIcon :name="entry.type === 'directory' ? 'folder' : 'file'" />
-              <span>{{ entry.name }}</span>
-              <UiIcon v-if="entry.type === 'directory'" name="chevron-right" />
-            </button>
-          </li>
-        </ul>
-        <p v-if="explorerTruncated" class="artifact-message">
-          Showing the first 1,000 entries.
-        </p>
+        <div v-else class="explorer-tree-state">
+          <p v-if="explorerLoading" class="artifact-message">
+            {{ t('artifact.loading') }}
+          </p>
+          <p v-if="explorerError" class="artifact-message error">
+            {{ explorerError }}
+          </p>
+          <NTree
+            v-if="explorerTree.length"
+            class="explorer-tree"
+            :data="explorerTree"
+            :on-load="loadTreeNode"
+            :render-prefix="renderTreePrefix"
+            :override-default-node-click-behavior="treeClickBehavior"
+            block-line
+            show-line
+            virtual-scroll
+            @update:selected-keys="handleTreeSelection"
+          />
+          <p
+            v-else-if="!explorerLoading && !explorerError"
+            class="artifact-message"
+          >
+            {{ t('artifact.emptyDirectory') }}
+          </p>
+          <p v-if="explorerTruncated" class="artifact-message">
+            {{ t('artifact.truncatedList') }}
+          </p>
+        </div>
       </div>
 
       <div v-else-if="activeFile" class="file-viewer">
@@ -238,11 +318,16 @@ watch(
           <div>
             <strong>{{ activeFile.path }}</strong>
             <span>
-              Read-only · {{ activeFile.totalBytes.toLocaleString() }} bytes
+              {{ t('artifact.readonly') }} ·
+              {{
+                t('artifact.bytes', {
+                  count: activeFile.totalBytes.toLocaleString(),
+                })
+              }}
             </span>
           </div>
           <span v-if="activeFile.truncated" class="truncated-badge">
-            Truncated
+            {{ t('artifact.truncated') }}
           </span>
         </div>
         <FileCodePreview
@@ -260,8 +345,10 @@ watch(
           <span>
             {{
               agent.pendingApproval?.diff
-                ? 'Pending change'
-                : 'Review ' + agent.latestReviewedApproval?.decision
+                ? t('artifact.pendingChange')
+                : t('artifact.reviewed', {
+                    decision: agent.latestReviewedApproval?.decision,
+                  })
             }}
           </span>
           <strong>
@@ -297,21 +384,21 @@ watch(
             :disabled="agent.approvalSubmitting"
             @click="agent.decideApproval('allow')"
           >
-            Approve
+            {{ t('common.approve') }}
           </NButton>
           <NButton
             secondary
             :disabled="agent.approvalSubmitting"
             @click="agent.decideApproval('deny')"
           >
-            Deny
+            {{ t('common.deny') }}
           </NButton>
         </div>
       </template>
       <div v-else class="artifact-empty">
         <UiIcon name="diff" />
-        <h2>No diff selected</h2>
-        <p>File changes awaiting review will appear here.</p>
+        <h2>{{ t('artifact.noDiff') }}</h2>
+        <p>{{ t('artifact.noDiffHint') }}</p>
       </div>
     </section>
   </aside>

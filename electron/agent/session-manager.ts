@@ -636,7 +636,7 @@ export class SessionManager {
     await Promise.all(
       [...this.#sessions.keys()].map((idValue) => this.closeSession(idValue)),
     )
-    this.#terminalPool.dispose()
+    await this.#terminalPool.dispose()
   }
 
   #requireSession(sessionId: SessionId): SessionState {

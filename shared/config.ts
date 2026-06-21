@@ -9,6 +9,15 @@ export const PermissionModeSchema = Type.Union([
 ])
 export type PermissionMode = Static<typeof PermissionModeSchema>
 
+export const DeepSeekReasoningEffortSchema = Type.Union([
+  Type.Literal('off'),
+  Type.Literal('high'),
+  Type.Literal('max'),
+])
+export type DeepSeekReasoningEffort = Static<
+  typeof DeepSeekReasoningEffortSchema
+>
+
 export const RememberedRuleSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
@@ -59,7 +68,7 @@ export const DeepSeekPublicConfigSchema = Type.Object(
   {
     baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
-    reasoning: Type.Union([Type.Literal('auto'), Type.Literal('off')]),
+    reasoning: DeepSeekReasoningEffortSchema,
     modelCatalog: Type.Array(ProviderModelSchema, { maxItems: 1_000 }),
     modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
     modelOverrides: Type.Record(
@@ -238,7 +247,7 @@ export const ConfigSetRequestSchema = Type.Union([
           Type.Null(),
         ]),
       ),
-      reasoning: Type.Union([Type.Literal('auto'), Type.Literal('off')]),
+      reasoning: DeepSeekReasoningEffortSchema,
     },
     { additionalProperties: false },
   ),
@@ -260,7 +269,7 @@ export const ConfigSetRequestSchema = Type.Union([
           Type.Null(),
         ]),
       ),
-      reasoning: Type.Union([Type.Literal('auto'), Type.Literal('off')]),
+      reasoning: DeepSeekReasoningEffortSchema,
       approverProvider: Type.String({ minLength: 1, maxLength: 128 }),
       approverModel: Type.String({ minLength: 1, maxLength: 256 }),
       limits: PublicConfigSchema.properties.limits,

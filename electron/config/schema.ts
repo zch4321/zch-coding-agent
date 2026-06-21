@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox'
 import {
+  DeepSeekReasoningEffortSchema,
   PermissionModeSchema,
   PublicConfigSchema,
   RememberedRuleSchema,
@@ -28,7 +29,7 @@ export const AppConfigSchema = Type.Object(
             apiKeyRef: Type.Optional(
               Type.String({ minLength: 1, maxLength: 128 }),
             ),
-            reasoning: Type.Union([Type.Literal('auto'), Type.Literal('off')]),
+            reasoning: DeepSeekReasoningEffortSchema,
           },
           { additionalProperties: false },
         ),
@@ -66,7 +67,7 @@ export const DEFAULT_APP_CONFIG = {
       model: 'deepseek-chat',
       modelCatalog: [],
       modelOverrides: {},
-      reasoning: 'auto',
+      reasoning: 'high',
     },
   },
   approval: {

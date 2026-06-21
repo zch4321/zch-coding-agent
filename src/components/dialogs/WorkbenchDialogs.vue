@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { NAlert, NButton, NInput, NModal, NSpace } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 defineProps<{
   yoloOpen: boolean
@@ -19,6 +20,7 @@ const emit = defineEmits<{
   'confirm-delete': []
   'confirm-switch': []
 }>()
+const { t } = useI18n()
 </script>
 
 <template>
@@ -26,18 +28,18 @@ const emit = defineEmits<{
     :show="yoloOpen"
     preset="card"
     class="risk-modal"
-    title="Enable Yolo mode?"
+    :title="t('dialogs.yoloTitle')"
     @update:show="emit('update:yoloOpen', $event)"
   >
-    <NAlert type="error" title="Host-level side effects">
-      Yolo skips risk policy, sensitive-data confirmation, model approval and
-      human approval. File changes execute immediately, and command tools may
-      affect the host. Workspace path invariants still apply.
+    <NAlert type="error" :title="t('dialogs.yoloRisk')">
+      {{ t('dialogs.yoloText') }}
     </NAlert>
     <NSpace justify="end" class="modal-actions">
-      <NButton @click="emit('update:yoloOpen', false)">Cancel</NButton>
+      <NButton @click="emit('update:yoloOpen', false)">{{
+        t('common.cancel')
+      }}</NButton>
       <NButton type="error" @click="emit('confirm-yolo')">
-        Enable Yolo
+        {{ t('dialogs.enableYolo') }}
       </NButton>
     </NSpace>
   </NModal>
@@ -46,7 +48,7 @@ const emit = defineEmits<{
     :show="renameOpen"
     preset="card"
     class="small-modal"
-    title="Rename conversation"
+    :title="t('dialogs.renameTitle')"
     @update:show="emit('update:renameOpen', $event)"
   >
     <NInput
@@ -55,8 +57,12 @@ const emit = defineEmits<{
       @update:value="emit('update:renameValue', $event)"
     />
     <NSpace justify="end" class="modal-actions">
-      <NButton @click="emit('update:renameOpen', false)">Cancel</NButton>
-      <NButton type="primary" @click="emit('confirm-rename')">Rename</NButton>
+      <NButton @click="emit('update:renameOpen', false)">{{
+        t('common.cancel')
+      }}</NButton>
+      <NButton type="primary" @click="emit('confirm-rename')">{{
+        t('dialogs.rename')
+      }}</NButton>
     </NSpace>
   </NModal>
 
@@ -64,16 +70,19 @@ const emit = defineEmits<{
     :show="deleteOpen"
     preset="card"
     class="small-modal"
-    title="Delete conversation?"
+    :title="t('dialogs.deleteTitle')"
     @update:show="emit('update:deleteOpen', $event)"
   >
     <p>
-      This removes local conversation history and closes its runtime resources.
-      Workspace files are not deleted.
+      {{ t('dialogs.deleteText') }}
     </p>
     <NSpace justify="end" class="modal-actions">
-      <NButton @click="emit('update:deleteOpen', false)">Cancel</NButton>
-      <NButton type="error" @click="emit('confirm-delete')">Delete</NButton>
+      <NButton @click="emit('update:deleteOpen', false)">{{
+        t('common.cancel')
+      }}</NButton>
+      <NButton type="error" @click="emit('confirm-delete')">{{
+        t('common.delete')
+      }}</NButton>
     </NSpace>
   </NModal>
 
@@ -81,17 +90,18 @@ const emit = defineEmits<{
     :show="switchOpen"
     preset="card"
     class="small-modal"
-    title="Interrupt the active run?"
+    :title="t('dialogs.switchTitle')"
     @update:show="emit('update:switchOpen', $event)"
   >
     <p>
-      Switching conversations interrupts the active run and closes its runtime
-      session. Persistent terminal processes in that session will also close.
+      {{ t('dialogs.switchText') }}
     </p>
     <NSpace justify="end" class="modal-actions">
-      <NButton @click="emit('update:switchOpen', false)">Cancel</NButton>
+      <NButton @click="emit('update:switchOpen', false)">{{
+        t('common.cancel')
+      }}</NButton>
       <NButton type="error" @click="emit('confirm-switch')">
-        Interrupt and switch
+        {{ t('dialogs.interruptSwitch') }}
       </NButton>
     </NSpace>
   </NModal>

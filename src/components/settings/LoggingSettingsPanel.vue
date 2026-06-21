@@ -1,25 +1,23 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { NAlert, NButton, NInputNumber, NSelect, NSwitch } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import { useTraceStore } from '../../stores/traces'
 
 const agent = useAgentStore()
 const traces = useTraceStore()
+const { t } = useI18n()
 onMounted(() => void traces.load())
 
 function providerMetric(value: number | null | undefined, suffix = '') {
   return value === null || value === undefined
-    ? 'Provider not provided'
+    ? t('logging.unavailable')
     : Math.round(value).toLocaleString() + suffix
 }
 
 function clearClosedTraces() {
-  if (
-    window.confirm(
-      'Delete every closed trace? Active session traces will be preserved.',
-    )
-  ) {
+  if (window.confirm(t('logging.clearConfirm'))) {
     void traces.clearClosed()
   }
 }
@@ -28,21 +26,18 @@ function clearClosedTraces() {
 <template>
   <section class="settings-section">
     <div class="settings-heading">
-      <h2>Logging</h2>
-      <p>
-        Capture final requests, responses, tools, approvals, usage and timing.
-        Streaming chunks are not written.
-      </p>
+      <h2>{{ t('logging.title') }}</h2>
+      <p>{{ t('logging.hint') }}</p>
     </div>
     <div class="settings-switch-row">
       <div>
-        <strong>Full trace logging</strong>
-        <p>May contain prompts, code, tool arguments and outputs.</p>
+        <strong>{{ t('logging.full') }}</strong>
+        <p>{{ t('logging.fullHint') }}</p>
       </div>
       <NSwitch v-model:value="agent.loggingForm.enabled" />
     </div>
     <label class="settings-field">
-      <span>Retention days</span>
+      <span>{{ t('logging.retention') }}</span>
       <NInputNumber
         v-model:value="agent.loggingForm.retentionDays"
         :min="1"
@@ -50,7 +45,7 @@ function clearClosedTraces() {
       />
     </label>
     <label class="settings-field">
-      <span>Maximum total size (MB)</span>
+      <span>{{ t('logging.maxSize') }}</span>
       <NInputNumber
         v-model:value="agent.loggingForm.maxTotalMegabytes"
         :min="1"
@@ -58,49 +53,49 @@ function clearClosedTraces() {
       />
     </label>
     <NButton type="primary" @click="agent.saveLogging">
-      Save logging settings
+      {{ t('logging.save') }}
     </NButton>
     <div class="settings-actions">
       <NButton secondary @click="traces.openDirectory">
-        Open log directory
+        {{ t('logging.openDirectory') }}
       </NButton>
       <NButton secondary :loading="traces.loading" @click="traces.load">
-        Refresh traces
+        {{ t('logging.refresh') }}
       </NButton>
       <NButton secondary type="error" @click="clearClosedTraces">
-        Clear closed traces
+        {{ t('logging.clear') }}
       </NButton>
     </div>
 
     <div v-if="traces.providerStats" class="trace-stats">
       <article>
-        <span>Requests</span>
+        <span>{{ t('logging.requests') }}</span>
         <strong>{{ traces.providerStats.requestCount }}</strong>
       </article>
       <article>
-        <span>Total tokens</span>
+        <span>{{ t('logging.totalTokens') }}</span>
         <strong>{{ providerMetric(traces.providerStats.totalTokens) }}</strong>
       </article>
       <article>
-        <span>Cache hit tokens</span>
+        <span>{{ t('logging.cacheHit') }}</span>
         <strong>{{
           providerMetric(traces.providerStats.cacheHitTokens)
         }}</strong>
       </article>
       <article>
-        <span>Cache miss tokens</span>
+        <span>{{ t('logging.cacheMiss') }}</span>
         <strong>{{
           providerMetric(traces.providerStats.cacheMissTokens)
         }}</strong>
       </article>
       <article>
-        <span>Average TTFT</span>
+        <span>{{ t('logging.averageTtft') }}</span>
         <strong>{{
           providerMetric(traces.providerStats.averageTtftMs, ' ms')
         }}</strong>
       </article>
       <article>
-        <span>Average latency</span>
+        <span>{{ t('logging.averageLatency') }}</span>
         <strong>{{
           providerMetric(traces.providerStats.averageTotalMs, ' ms')
         }}</strong>
@@ -108,12 +103,12 @@ function clearClosedTraces() {
     </div>
 
     <div class="trace-debug">
-      <h3>Offline replay and fork</h3>
+      <h3>{{ t('logging.replayFork') }}</h3>
       <NSelect
         v-model:value="traces.selectedId"
         :options="traces.options"
         clearable
-        placeholder="Select a trace"
+        :placeholder="t('logging.selectTrace')"
       />
       <div class="settings-actions">
         <NButton
@@ -121,11 +116,11 @@ function clearClosedTraces() {
           :disabled="!traces.selectedId"
           @click="traces.replaySelected"
         >
-          Replay offline
+          {{ t('logging.replay') }}
         </NButton>
       </div>
       <label class="settings-field">
-        <span>Fork from llm.request event ID</span>
+        <span>{{ t('logging.forkEvent') }}</span>
         <NSelect
           v-model:value="traces.forkEventId"
           :options="traces.forkPointOptions"
@@ -139,13 +134,13 @@ function clearClosedTraces() {
         :disabled="!traces.selectedId || !traces.forkEventId.trim()"
         @click="traces.forkSelected"
       >
-        Fork with current provider
+        {{ t('logging.fork') }}
       </NButton>
       <p v-if="traces.replay" class="settings-footnote">
-        {{ traces.replay.messages.length }} messages ·
-        {{ traces.replay.toolCount }} tools ·
-        {{ traces.replay.approvalCount }} approvals ·
-        {{ traces.replay.closed ? 'closed' : 'active' }}
+        {{ t('logging.messages', { count: traces.replay.messages.length }) }} ·
+        {{ t('logging.tools', { count: traces.replay.toolCount }) }} ·
+        {{ t('logging.approvals', { count: traces.replay.approvalCount }) }} ·
+        {{ traces.replay.closed ? t('logging.closed') : t('logging.active') }}
       </p>
       <NAlert v-if="traces.actionMessage" type="info">
         {{ traces.actionMessage }}

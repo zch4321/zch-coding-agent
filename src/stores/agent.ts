@@ -3,6 +3,7 @@ import type { AgentEvent } from '../../shared/agent-events'
 import type { AgentApi } from '../../shared/agent-api'
 import type {
   ConfigSection,
+  DeepSeekReasoningEffort,
   PermissionMode,
   PublicConfig,
 } from '../../shared/config'
@@ -35,11 +36,12 @@ export type {
 
 const HISTORY_KEY = 'my-coding-agent.workbench.v1'
 let persistTimer: number | undefined
+let workspaceActivationQueue = Promise.resolve()
 
 const DEFAULT_PROVIDER_FORM = {
   baseURL: 'https://api.deepseek.com',
   model: 'deepseek-chat',
-  reasoning: 'auto' as 'auto' | 'off',
+  reasoning: 'high' as DeepSeekReasoningEffort,
   apiKey: '',
   approverModel: 'deepseek-chat',
   contextWindowTokens: null as number | null,
@@ -422,7 +424,9 @@ export const useAgentStore = defineStore('agent', {
       }
 
       this.saveActiveConversation()
-      await this.activateWorkspace(conversation.projectPath)
+      if (!(await this.activateWorkspace(conversation.projectPath))) {
+        return false
+      }
       this.activeConversationId = conversation.id
       this.restoreActiveConversation()
       this.persistWorkbench()
@@ -548,7 +552,7 @@ export const useAgentStore = defineStore('agent', {
       this.pendingApproval = undefined
       this.error = ''
     },
-    saveActiveConversation() {
+    saveActiveConversation(touchUpdatedAt = false) {
       const conversation = this.conversations.find(
         (item) => item.id === this.activeConversationId,
       )
@@ -564,10 +568,12 @@ export const useAgentStore = defineStore('agent', {
         : undefined
       conversation.mode = this.mode
       conversation.model = this.providerForm.model
-      conversation.updatedAt = new Date().toISOString()
+      if (touchUpdatedAt) {
+        conversation.updatedAt = new Date().toISOString()
+      }
     },
-    schedulePersist() {
-      this.saveActiveConversation()
+    schedulePersist(touchUpdatedAt = true) {
+      this.saveActiveConversation(touchUpdatedAt)
 
       if (persistTimer !== undefined) {
         window.clearTimeout(persistTimer)
@@ -592,26 +598,38 @@ export const useAgentStore = defineStore('agent', {
         // History persistence is best effort; runtime behavior remains usable.
       }
     },
-    async activateWorkspace(workspacePath: string) {
-      this.workspacePath = workspacePath
+    async activateWorkspace(workspacePath: string): Promise<boolean> {
       this.registerProject(workspacePath)
       const bridge = api()
 
       if (!bridge) {
-        return
+        this.workspacePath = workspacePath
+        return true
       }
 
-      const result = await bridge.setConfig({
-        version: IPC_VERSION,
-        kind: 'workspace',
-        lastOpened: workspacePath,
-      })
+      const activate = workspaceActivationQueue.then(async () => {
+        const result = await bridge.setConfig({
+          version: IPC_VERSION,
+          kind: 'workspace',
+          lastOpened: workspacePath,
+        })
 
-      if (result.ok) {
+        if (!result.ok) {
+          this.error = result.error.message
+          return false
+        }
+
+        // Publish the renderer state only after the main process has switched.
+        // File browsing IPC resolves its root from this main-process setting.
+        this.workspacePath = workspacePath
         this.applyConfig(result.value.config, ['workspace'])
-      } else {
-        this.error = result.error.message
-      }
+        return true
+      })
+      workspaceActivationQueue = activate.then(
+        () => undefined,
+        () => undefined,
+      )
+      return activate
     },
     async chooseWorkspace() {
       const bridge = api()
@@ -676,7 +694,7 @@ export const useAgentStore = defineStore('agent', {
       }
 
       this.mode = mode
-      this.schedulePersist()
+      this.schedulePersist(false)
       return true
     },
     syncModelOverride(model: string) {
@@ -781,7 +799,7 @@ export const useAgentStore = defineStore('agent', {
         ])
         this.providerForm.apiKey = ''
         this.providerSaveStatus = 'Saved'
-        this.schedulePersist()
+        this.schedulePersist(false)
       } finally {
         this.providerSaving = false
       }

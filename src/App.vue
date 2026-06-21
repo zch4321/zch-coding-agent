@@ -6,7 +6,8 @@ import {
   onUnmounted,
   ref,
 } from 'vue'
-import { NConfigProvider } from 'naive-ui'
+import { enUS, NConfigProvider, zhCN } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import ConversationTimeline from './components/chat/ConversationTimeline.vue'
 import MessageComposer from './components/chat/MessageComposer.vue'
 import WorkbenchDialogs from './components/dialogs/WorkbenchDialogs.vue'
@@ -17,18 +18,25 @@ import SettingsModal from './components/settings/SettingsModal.vue'
 import { useAgentStore } from './stores/agent'
 import type { PermissionMode } from '../shared/config'
 
-type SettingsTab = 'project' | 'provider' | 'permissions' | 'skills' | 'logging'
+type SettingsTab =
+  | 'general'
+  | 'project'
+  | 'provider'
+  | 'permissions'
+  | 'skills'
+  | 'logging'
 
 const TerminalPanel = defineAsyncComponent(
   () => import('./components/TerminalPanel.vue'),
 )
 
 const agent = useAgentStore()
+const { locale, t } = useI18n()
 const settingsOpen = ref(false)
-const settingsTab = ref<SettingsTab>('project')
+const settingsTab = ref<SettingsTab>('general')
 const yoloWarningOpen = ref(false)
 const projectSidebarOpen = ref(true)
-const artifactSidebarOpen = ref(true)
+const artifactSidebarOpen = ref(false)
 const terminalOpen = ref(false)
 const terminalMaximized = ref(false)
 const terminalHeight = ref(280)
@@ -39,38 +47,42 @@ const switchConversationId = ref<string>()
 
 const projectName = computed(() => {
   if (!agent.workspacePath) {
-    return 'Choose workspace'
+    return t('app.chooseWorkspace')
   }
 
   const normalized = agent.workspacePath.replace(/\\/g, '/')
   return normalized.split('/').filter(Boolean).at(-1) ?? agent.workspacePath
 })
 const workspaceLabel = computed(
-  () => agent.workspacePath || 'No workspace selected',
+  () => agent.workspacePath || t('app.noWorkspace'),
 )
-const activeTitle = computed(
-  () => agent.activeConversation?.title ?? 'New conversation',
+const activeTitle = computed(() =>
+  !agent.activeConversation ||
+  agent.activeConversation.title === 'New conversation'
+    ? t('app.newConversation')
+    : agent.activeConversation.title,
 )
+const naiveLocale = computed(() => (locale.value === 'zh-CN' ? zhCN : enUS))
 const statusLabel = computed(() => {
   if (agent.pendingApproval) {
-    return 'Waiting for approval'
+    return t('app.waitingApproval')
   }
 
   if (agent.runStatus === 'failed') {
-    return 'Failed'
+    return t('app.failed')
   }
 
   if (agent.runStatus === 'cancelling') {
-    return 'Cancelling'
+    return t('app.cancelling')
   }
 
   if (agent.activeRunId) {
-    return 'Running'
+    return t('app.running')
   }
 
   return ''
 })
-function openSettings(tab: SettingsTab = 'project') {
+function openSettings(tab: SettingsTab = 'general') {
   settingsTab.value = tab
   settingsOpen.value = true
 }
@@ -111,7 +123,10 @@ async function createConversation() {
 }
 
 async function openConversation(conversationId: string) {
-  if (!(await agent.selectConversation(conversationId))) {
+  if (
+    !(await agent.selectConversation(conversationId)) &&
+    (agent.activeRunId || agent.pendingApproval)
+  ) {
     switchConversationId.value = conversationId
   }
 }
@@ -207,7 +222,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <NConfigProvider>
+  <NConfigProvider :locale="naiveLocale">
     <main
       class="app-frame"
       :class="{
@@ -232,6 +247,7 @@ onUnmounted(() => {
       <div class="workbench-shell">
         <ProjectSidebar
           :aria-hidden="!projectSidebarOpen"
+          @add="agent.chooseWorkspace"
           @create="createConversation"
           @open="openConversation"
           @rename="beginRename"

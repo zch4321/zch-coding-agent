@@ -1,20 +1,19 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { NAlert, NButton, NInput, NSwitch } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { useSkillsStore } from '../../stores/skills'
 
 const skills = useSkillsStore()
+const { t } = useI18n()
 onMounted(() => void skills.load(false))
 </script>
 
 <template>
   <section class="settings-section">
     <div class="settings-heading">
-      <h2>Skills</h2>
-      <p>
-        Install bounded instruction files. New skills remain disabled until you
-        explicitly enable them.
-      </p>
+      <h2>{{ t('skills.title') }}</h2>
+      <p>{{ t('skills.hint') }}</p>
     </div>
     <div class="settings-inline">
       <NInput
@@ -26,19 +25,19 @@ onMounted(() => void skills.load(false))
         :loading="skills.loading"
         @click="skills.installFromUrl"
       >
-        Install URL
+        {{ t('skills.installUrl') }}
       </NButton>
     </div>
     <div class="settings-actions">
       <NButton secondary @click="skills.chooseAndInstall">
-        Install file
+        {{ t('skills.installFile') }}
       </NButton>
       <NButton secondary :loading="skills.loading" @click="skills.load(true)">
-        Refresh
+        {{ t('skills.refresh') }}
       </NButton>
     </div>
     <div class="skill-list">
-      <p v-if="!skills.items.length">No valid skills found.</p>
+      <p v-if="!skills.items.length">{{ t('skills.none') }}</p>
       <article v-for="skill in skills.items" :key="skill.name">
         <div>
           <strong>{{ skill.name }}</strong>
@@ -54,7 +53,7 @@ onMounted(() => void skills.load(false))
     <NAlert
       v-if="skills.diagnostics.length"
       type="warning"
-      title="Some skill files were skipped"
+      :title="t('skills.skipped')"
     >
       <div
         v-for="item in skills.diagnostics"

@@ -177,6 +177,7 @@ export const IPC_CONTRACTS = {
     result: ipcResultSchema(
       Type.Object(
         {
+          workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
           path: Type.String({ minLength: 1, maxLength: 4_096 }),
           entries: Type.Array(
             Type.Object(
@@ -209,6 +210,7 @@ export const IPC_CONTRACTS = {
     result: ipcResultSchema(
       Type.Object(
         {
+          workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
           path: Type.String({ minLength: 1, maxLength: 4_096 }),
           content: Type.String({ maxLength: 500_000 }),
           totalBytes: Type.Integer({ minimum: 0 }),

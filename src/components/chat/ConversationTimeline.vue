@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { NAlert, NButton, NCollapse, NCollapseItem } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import type { ToolActivity } from '../../stores/agent'
 import { useAgentStore } from '../../stores/agent'
 import MarkdownBlock from '../MarkdownBlock.vue'
@@ -9,6 +10,7 @@ import UiIcon from '../UiIcon.vue'
 defineProps<{ projectName: string }>()
 
 const agent = useAgentStore()
+const { t } = useI18n()
 const scrollElement = ref<HTMLElement>()
 const followingOutput = ref(true)
 const chronologicalTools = computed(() => [...agent.tools].reverse())
@@ -29,14 +31,14 @@ function toolResultSummary(tool: ToolActivity): string {
   const result = tool.result
 
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
-    return tool.status === 'proposed' ? 'Proposed' : 'Completed'
+    return tool.status === 'proposed' ? t('chat.proposed') : t('chat.completed')
   }
 
   if ('status' in result && result.status !== 'ok') {
     return String(result.status)
   }
 
-  return 'Completed'
+  return t('chat.completed')
 }
 
 function handleScroll() {
@@ -64,6 +66,14 @@ watch(
   ],
   () => void scrollToBottom(),
 )
+
+watch(
+  () => agent.activeConversationId,
+  () => {
+    followingOutput.value = true
+    void scrollToBottom(true)
+  },
+)
 </script>
 
 <template>
@@ -71,40 +81,38 @@ watch(
     <div
       ref="scrollElement"
       class="conversation-scroll"
-      aria-label="Conversation messages"
+      :aria-label="t('chat.messages')"
       @scroll.passive="handleScroll"
     >
       <NAlert
         v-if="!agent.bridgeAvailable && agent.initialized"
         type="warning"
-        title="Desktop bridge unavailable"
+        :title="t('chat.bridgeUnavailable')"
         class="inline-alert"
       >
-        Open the Electron application to use workspace and Agent actions.
+        {{ t('chat.bridgeHint') }}
       </NAlert>
       <NAlert
         v-if="agent.bridgeAvailable && !agent.providerNoticeAccepted"
         type="info"
-        title="Provider data notice"
+        :title="t('chat.providerNotice')"
         class="inline-alert"
       >
-        Messages, selected code and bounded tool results may be sent to the
-        configured Provider. Only the notice version and acceptance time are
-        stored.
+        {{ t('chat.providerNoticeText') }}
         <div class="notice-action">
           <NButton
             size="small"
             type="primary"
             @click="agent.acceptProviderNotice"
           >
-            I understand
+            {{ t('chat.understand') }}
           </NButton>
         </div>
       </NAlert>
       <NAlert
         v-if="agent.agentEventGap"
         type="warning"
-        title="Conversation event gap"
+        :title="t('chat.eventGap')"
         class="inline-alert"
         closable
         @close="agent.agentEventGap = ''"
@@ -120,19 +128,21 @@ watch(
         :style="{ order: message.order ?? 0 }"
       >
         <div class="message-meta">
-          <strong>{{ message.role === 'user' ? 'You' : 'Agent' }}</strong>
+          <strong>{{
+            message.role === 'user' ? t('chat.you') : t('chat.agent')
+          }}</strong>
           <span
             v-if="
               message.role === 'assistant' &&
               message.runId === agent.activeRunId
             "
           >
-            Streaming
+            {{ t('chat.streaming') }}
           </span>
         </div>
         <MarkdownBlock :content="message.text || '...'" />
         <NCollapse v-if="message.reasoning" class="reasoning">
-          <NCollapseItem title="Reasoning" name="reasoning">
+          <NCollapseItem :title="t('chat.reasoning')" name="reasoning">
             <pre>{{ message.reasoning }}</pre>
           </NCollapseItem>
         </NCollapse>
@@ -146,7 +156,7 @@ watch(
       >
         <div class="tool-call-header">
           <div>
-            <span class="tool-kicker">Tool call</span>
+            <span class="tool-kicker">{{ t('chat.toolCall') }}</span>
             <strong>{{ tool.tool }}</strong>
           </div>
           <span
@@ -158,12 +168,15 @@ watch(
         </div>
         <p v-if="tool.reason" class="tool-reason">{{ tool.reason }}</p>
         <NCollapse>
-          <NCollapseItem title="Arguments" :name="tool.callId + ':args'">
+          <NCollapseItem
+            :title="t('chat.arguments')"
+            :name="tool.callId + ':args'"
+          >
             <pre>{{ JSON.stringify(tool.args, null, 2) }}</pre>
           </NCollapseItem>
           <NCollapseItem
             v-if="okContent(tool)"
-            title="Result"
+            :title="t('chat.result')"
             :name="tool.callId + ':result'"
           >
             <pre>{{ JSON.stringify(tool.result, null, 2) }}</pre>
@@ -178,7 +191,7 @@ watch(
       >
         <div class="approval-header">
           <div>
-            <span class="tool-kicker">Approval required</span>
+            <span class="tool-kicker">{{ t('chat.approvalRequired') }}</span>
             <strong>{{ agent.pendingApproval.tool }}</strong>
           </div>
           <span>{{ agent.pendingApproval.kind }}</span>
@@ -186,11 +199,11 @@ watch(
         <p>{{ agent.pendingApproval.reason }}</p>
         <dl class="approval-meta">
           <div>
-            <dt>Workspace scope</dt>
+            <dt>{{ t('chat.workspaceScope') }}</dt>
             <dd>{{ projectName }}</dd>
           </div>
           <div>
-            <dt>Expires</dt>
+            <dt>{{ t('chat.expires') }}</dt>
             <dd>{{ agent.pendingApproval.expiresAt }}</dd>
           </div>
         </dl>
@@ -212,7 +225,7 @@ watch(
           v-if="agent.pendingApproval.rememberArgConstraints"
           class="approval-remember-preview"
         >
-          <strong>Remembered scope</strong>
+          <strong>{{ t('chat.rememberedScope') }}</strong>
           <pre>{{
             JSON.stringify(
               agent.pendingApproval.rememberArgConstraints,
@@ -230,8 +243,8 @@ watch(
           >
             {{
               agent.pendingApproval.kind === 'context'
-                ? 'Allow context'
-                : 'Approve'
+                ? t('chat.allowContext')
+                : t('common.approve')
             }}
           </NButton>
           <NButton
@@ -241,7 +254,7 @@ watch(
             :disabled="agent.approvalSubmitting"
             @click="agent.decideApproval('allow', true)"
           >
-            Approve & remember
+            {{ t('chat.approveRemember') }}
           </NButton>
           <NButton
             secondary
@@ -250,8 +263,8 @@ watch(
           >
             {{
               agent.pendingApproval.kind === 'context'
-                ? 'Withhold context'
-                : 'Deny'
+                ? t('chat.withholdContext')
+                : t('common.deny')
             }}
           </NButton>
         </div>
@@ -267,18 +280,15 @@ watch(
       >
         <span class="empty-icon"><UiIcon name="app" /></span>
         <template v-if="!agent.workspacePath">
-          <h2>Open a workspace</h2>
-          <p>Choose a project folder to start a local conversation.</p>
+          <h2>{{ t('chat.openWorkspace') }}</h2>
+          <p>{{ t('chat.openWorkspaceHint') }}</p>
           <NButton type="primary" @click="agent.chooseWorkspace">
-            Choose workspace
+            {{ t('app.chooseWorkspace') }}
           </NButton>
         </template>
         <template v-else>
-          <h2>What should we work on?</h2>
-          <p>
-            Ask the Agent to inspect code, explain behavior or prepare a
-            reviewed change.
-          </p>
+          <h2>{{ t('chat.workQuestion') }}</h2>
+          <p>{{ t('chat.workHint') }}</p>
         </template>
       </div>
 
@@ -288,13 +298,13 @@ watch(
         type="button"
         @click="scrollToBottom(true)"
       >
-        Back to bottom
+        {{ t('chat.backBottom') }}
       </button>
     </div>
     <NAlert
       v-if="agent.error"
       type="error"
-      title="Request failed"
+      :title="t('chat.requestFailed')"
       class="conversation-error-overlay"
       closable
       @close="agent.error = ''"

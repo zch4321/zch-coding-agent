@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { CallId } from '../../shared/ids'
 import type { JsonObject, JsonValue } from '../../shared/json'
 import type { ToolCall } from '../tools/types'
+import type { DeepSeekReasoningEffort } from '../../shared/config'
 import type {
   LLMProvider,
   ProviderAssistantTurn,
@@ -13,7 +14,7 @@ export interface DeepSeekProviderOptions {
   baseURL: string
   model: string
   apiKey: string
-  reasoning: 'auto' | 'off'
+  reasoning: DeepSeekReasoningEffort
   fetchImpl?: typeof fetch
   now?: () => number
   createCallId?: () => CallId
@@ -174,6 +175,7 @@ export class DeepSeekProvider implements LLMProvider {
   readonly #baseURL: string
   readonly #model: string
   readonly #apiKey: string
+  readonly #reasoning: DeepSeekReasoningEffort
   readonly #fetch: typeof fetch
   readonly #now: () => number
   readonly #createCallId: () => CallId
@@ -182,6 +184,7 @@ export class DeepSeekProvider implements LLMProvider {
     this.#baseURL = options.baseURL
     this.#model = options.model
     this.#apiKey = options.apiKey
+    this.#reasoning = options.reasoning
     this.#fetch = options.fetchImpl ?? fetch
     this.#now = options.now ?? (() => performance.now())
     this.#createCallId =
@@ -204,6 +207,12 @@ export class DeepSeekProvider implements LLMProvider {
             stream_options: {
               include_usage: true,
             },
+            thinking: {
+              type: this.#reasoning === 'off' ? 'disabled' : 'enabled',
+            },
+            ...(this.#reasoning === 'off'
+              ? {}
+              : { reasoning_effort: this.#reasoning }),
           }
     const requestBody = JSON.stringify(providerRequest)
     const requestStart = this.#now()

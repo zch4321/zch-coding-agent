@@ -285,6 +285,7 @@ async function installIpc(): Promise<void> {
           const limited = visible.slice(0, 1_000)
 
           return {
+            workspace,
             path: payload.path ?? '.',
             entries: limited,
             truncated: visible.length > limited.length,
@@ -315,7 +316,10 @@ async function installIpc(): Promise<void> {
 
         try {
           const guard = await PathGuard.create(workspace)
-          return await guard.readFileBounded(payload.path, 499_999)
+          return {
+            workspace,
+            ...(await guard.readFileBounded(payload.path, 499_999)),
+          }
         } catch (error) {
           if (error instanceof PathGuardError) {
             throw new IpcFault({

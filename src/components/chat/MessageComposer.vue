@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NInput, NSelect } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import type { PermissionMode } from '../../../shared/config'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
@@ -10,12 +11,13 @@ const emit = defineEmits<{
   provider: []
 }>()
 const agent = useAgentStore()
-const modeOptions = [
-  { label: 'ReadOnly', value: 'readonly' },
-  { label: 'Auto', value: 'auto' },
-  { label: 'Confirm', value: 'confirm' },
-  { label: 'Yolo', value: 'yolo' },
-]
+const { t } = useI18n()
+const modeOptions = computed(() => [
+  { label: t('chat.readonly'), value: 'readonly' },
+  { label: t('chat.auto'), value: 'auto' },
+  { label: t('chat.confirm'), value: 'confirm' },
+  { label: t('chat.yolo'), value: 'yolo' },
+])
 const inputDisabled = computed(
   () =>
     !agent.workspacePath ||
@@ -24,13 +26,11 @@ const inputDisabled = computed(
     Boolean(agent.pendingApproval),
 )
 const sendHint = computed(() => {
-  if (!agent.workspacePath) return 'Choose a workspace to begin'
-  if (!agent.credentialConfigured)
-    return 'Configure a Provider API key in Settings'
-  if (!agent.providerNoticeAccepted) return 'Review the Provider data notice'
-  if (agent.pendingApproval)
-    return 'Resolve the pending approval before sending another message'
-  return 'Ask about this workspace'
+  if (!agent.workspacePath) return t('chat.chooseHint')
+  if (!agent.credentialConfigured) return t('chat.apiKeyHint')
+  if (!agent.providerNoticeAccepted) return t('chat.noticeHint')
+  if (agent.pendingApproval) return t('chat.approvalHint')
+  return t('chat.inputHint')
 })
 
 function handleKeydown(event: KeyboardEvent) {
@@ -64,8 +64,8 @@ function handleKeydown(event: KeyboardEvent) {
         <button
           class="provider-settings-button"
           type="button"
-          aria-label="Open Provider settings"
-          title="Provider settings"
+          :aria-label="t('chat.providerSettings')"
+          :title="t('chat.providerSettings')"
           @click="emit('provider')"
         >
           <UiIcon name="settings" />
@@ -83,8 +83,8 @@ function handleKeydown(event: KeyboardEvent) {
         v-if="agent.activeRunId"
         class="send-button stop"
         type="button"
-        aria-label="Stop run"
-        title="Stop"
+        :aria-label="t('chat.stop')"
+        :title="t('chat.stop')"
         :disabled="agent.runStatus === 'cancelling'"
         @click="agent.interruptRun"
       >
@@ -94,8 +94,8 @@ function handleKeydown(event: KeyboardEvent) {
         v-else
         class="send-button"
         type="button"
-        aria-label="Send message"
-        title="Send"
+        :aria-label="t('chat.send')"
+        :title="t('chat.send')"
         :disabled="!agent.canSend"
         @click="agent.sendMessage"
       >

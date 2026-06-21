@@ -54,6 +54,12 @@ export function migrateConfig(candidate: unknown): AppConfig {
   const migrated = mergeRecord(DEFAULT_APP_CONFIG, candidate)
   migrated.schemaVersion = 1
 
+  // `auto` was the pre-V4 setting. DeepSeek documents `high` as the normal
+  // default, so preserve the previous behavior while moving to explicit effort.
+  if ((migrated.providers.deepseek.reasoning as string) === 'auto') {
+    migrated.providers.deepseek.reasoning = 'high'
+  }
+
   if (!validateAppConfig(migrated)) {
     throw new Error(formatSchemaErrors(validateAppConfig.errors))
   }

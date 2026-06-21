@@ -1,17 +1,14 @@
 <script setup lang="ts">
 import { NButton } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 
 const emit = defineEmits<{ removed: [] }>()
 const agent = useAgentStore()
+const { t } = useI18n()
 
 async function removeProject() {
-  if (
-    agent.workspacePath &&
-    window.confirm(
-      'Remove this project and its local conversation history from the app?',
-    )
-  ) {
+  if (agent.workspacePath && window.confirm(t('settings.removeConfirm'))) {
     await agent.removeCurrentProject()
     emit('removed')
   }
@@ -21,16 +18,16 @@ async function removeProject() {
 <template>
   <section class="settings-section">
     <div class="settings-heading">
-      <h2>Project</h2>
-      <p>Select the workspace used by file, command, and Agent operations.</p>
+      <h2>{{ t('settings.projectTitle') }}</h2>
+      <p>{{ t('settings.projectHint') }}</p>
     </div>
     <div class="settings-field">
-      <span>Current workspace</span>
-      <code>{{ agent.workspacePath || 'No workspace selected' }}</code>
+      <span>{{ t('settings.currentWorkspace') }}</span>
+      <code>{{ agent.workspacePath || t('app.noWorkspace') }}</code>
     </div>
     <div class="settings-actions">
       <NButton type="primary" @click="agent.chooseWorkspace">
-        Choose workspace
+        {{ t('app.chooseWorkspace') }}
       </NButton>
       <NButton
         secondary
@@ -38,12 +35,11 @@ async function removeProject() {
         :disabled="!agent.workspacePath"
         @click="removeProject"
       >
-        Remove project
+        {{ t('settings.removeProject') }}
       </NButton>
     </div>
     <p class="settings-footnote">
-      Removing a project clears app history and runtime resources. It does not
-      delete files from disk.
+      {{ t('settings.removeHint') }}
     </p>
   </section>
 </template>

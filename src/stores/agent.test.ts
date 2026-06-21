@@ -198,6 +198,68 @@ describe('agent store regressions', () => {
     expect(store.mode).toBe('auto')
   })
 
+  it('does not change conversation recency when merely switching', async () => {
+    const store = useAgentStore()
+    store.workspacePath = 'F:/workspace/example'
+    const first = store.createConversation()
+    const second = store.createConversation()
+
+    expect(first).toBeDefined()
+    expect(second).toBeDefined()
+    if (!first || !second) return
+
+    first.updatedAt = '2026-06-20T00:00:00.000Z'
+    second.updatedAt = '2026-06-20T00:01:00.000Z'
+
+    await store.selectConversation(first.id)
+
+    expect(second.updatedAt).toBe('2026-06-20T00:01:00.000Z')
+    expect(store.activeConversationId).toBe(first.id)
+  })
+
+  it('publishes a new renderer workspace only after main-process config switches', async () => {
+    const firstWorkspace = 'F:/workspace/first'
+    const secondWorkspace = 'F:/workspace/second'
+    const config = toPublicConfig(DEFAULT_APP_CONFIG, false)
+    config.workspace.lastOpened = secondWorkspace
+    let resolveSetConfig!: (
+      value: Awaited<ReturnType<AgentApi['setConfig']>>,
+    ) => void
+    const setConfig = vi.fn(
+      () =>
+        new Promise<Awaited<ReturnType<AgentApi['setConfig']>>>((resolve) => {
+          resolveSetConfig = resolve
+        }),
+    )
+    installApi({ setConfig })
+    const store = useAgentStore()
+    store.workspacePath = firstWorkspace
+    const first = store.createConversation(firstWorkspace)
+    const second = store.createConversation(secondWorkspace)
+    if (!first || !second) throw new Error('Expected conversations')
+    store.activeConversationId = first.id
+    store.restoreActiveConversation()
+
+    const switching = store.selectConversation(second.id)
+    await Promise.resolve()
+
+    expect(setConfig).toHaveBeenCalledWith({
+      version: 1,
+      kind: 'workspace',
+      lastOpened: secondWorkspace,
+    })
+    expect(store.workspacePath).toBe(firstWorkspace)
+
+    resolveSetConfig({
+      version: 1,
+      ok: true,
+      value: { config },
+    })
+    await expect(switching).resolves.toBe(true)
+    expect(store.workspacePath).toBe(secondWorkspace)
+    expect(store.activeConversationId).toBe(second.id)
+  })
+
   it('ignores duplicate Agent events and reports sequence gaps', () => {
     const store = useAgentStore()
     store.sessionId = sessionId

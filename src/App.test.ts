@@ -1,30 +1,57 @@
 // @vitest-environment jsdom
 
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
+import { NTree } from 'naive-ui'
+import type { AgentApi } from '../shared/agent-api'
 import type { CallId, RunId, SessionId } from '../shared/ids'
 import App from './App.vue'
+import ArtifactPanel from './components/artifacts/ArtifactPanel.vue'
+import ConversationTimeline from './components/chat/ConversationTimeline.vue'
+import ProjectSidebar from './components/projects/ProjectSidebar.vue'
+import { i18n, setAppLocale } from './i18n'
 import { useAgentStore } from './stores/agent'
 
 describe('App', () => {
+  beforeEach(() => {
+    setAppLocale('zh-CN')
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(() => false),
+      })),
+    })
+  })
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'agentApi')
+    Reflect.deleteProperty(window, 'matchMedia')
+  })
+
   it('renders the P4 workbench without post-MVP placeholders', () => {
     const wrapper = mount(App, {
       global: {
-        plugins: [createPinia()],
+        plugins: [createPinia(), i18n],
       },
     })
 
     expect(wrapper.get('[data-testid="app-ready"]')).toBeDefined()
-    expect(wrapper.text()).toContain('My Coding Agent')
-    expect(wrapper.text()).toContain('New conversation')
-    expect(wrapper.text()).toContain('Files')
-    expect(wrapper.text()).toContain('Diff')
+    expect(wrapper.text()).toContain('我的编程助手')
+    expect(wrapper.text()).toContain('新建对话')
+    expect(wrapper.text()).toContain('文件')
+    expect(wrapper.text()).toContain('变更')
     expect(wrapper.text()).not.toContain('Design frontend layout')
     expect(wrapper.text()).not.toContain('Browser Preview')
     expect(wrapper.text()).not.toContain('Share')
-    expect(wrapper.find('[aria-label="Toggle terminal"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label^="切换终端"]').exists()).toBe(true)
     expect(
       wrapper.find('.conversation-pane .message-input-area').exists(),
     ).toBe(true)
@@ -34,7 +61,7 @@ describe('App', () => {
     const pinia = createPinia()
     const wrapper = mount(App, {
       global: {
-        plugins: [pinia],
+        plugins: [pinia, i18n],
       },
     })
     const store = useAgentStore(pinia)
@@ -74,14 +101,14 @@ describe('App', () => {
     expect(artifactTabs).toHaveLength(2)
     await artifactTabs[1]?.trigger('click')
     expect(wrapper.find('.diff-view').exists()).toBe(true)
-    expect(wrapper.text()).toContain('No diff selected')
+    expect(wrapper.text()).toContain('未选择变更')
   })
 
   it('renders approval injection content as inert text', async () => {
     const pinia = createPinia()
     const wrapper = mount(App, {
       global: {
-        plugins: [pinia],
+        plugins: [pinia, i18n],
       },
     })
     const store = useAgentStore(pinia)
@@ -118,7 +145,7 @@ describe('App', () => {
     const pinia = createPinia()
     const wrapper = mount(App, {
       global: {
-        plugins: [pinia],
+        plugins: [pinia, i18n],
       },
     })
     const store = useAgentStore(pinia)
@@ -131,5 +158,132 @@ describe('App', () => {
     expect(
       wrapper.find('.conversation-scroll .conversation-error-overlay').exists(),
     ).toBe(false)
+  })
+
+  it('resets the back-to-bottom state when the conversation changes', async () => {
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    store.activeConversationId = 'conversation:one'
+    const wrapper = mount(ConversationTimeline, {
+      props: { projectName: 'example' },
+      global: {
+        plugins: [pinia, i18n],
+      },
+    })
+
+    const scroll = wrapper.get('.conversation-scroll')
+    Object.defineProperties(scroll.element, {
+      scrollHeight: { configurable: true, value: 1_000 },
+      clientHeight: { configurable: true, value: 100 },
+      scrollTop: { configurable: true, value: 0, writable: true },
+    })
+    await scroll.trigger('scroll')
+    expect(wrapper.find('.back-to-bottom').exists()).toBe(true)
+
+    store.activeConversationId = 'conversation:two'
+    await nextTick()
+    await nextTick()
+
+    expect(wrapper.find('.back-to-bottom').exists()).toBe(false)
+  })
+
+  it('collapses and expands a project conversation group', async () => {
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    store.projects = [
+      {
+        path: 'F:/workspace/example',
+        name: 'example',
+        addedAt: '2026-06-21T00:00:00.000Z',
+      },
+    ]
+    store.conversations = [
+      {
+        id: 'conversation:one',
+        projectPath: 'F:/workspace/example',
+        title: 'Review UI',
+        model: 'deepseek-v4-pro',
+        mode: 'auto',
+        messages: [],
+        tools: [],
+        createdAt: '2026-06-21T00:00:00.000Z',
+        updatedAt: '2026-06-21T00:00:00.000Z',
+      },
+    ]
+    const wrapper = mount(ProjectSidebar, {
+      global: { plugins: [pinia, i18n] },
+    })
+    const heading = wrapper.get('.project-heading')
+
+    expect(heading.attributes('aria-expanded')).toBe('true')
+    await heading.trigger('click')
+    expect(heading.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get('.conversation-list').attributes('style')).toContain(
+      'display: none',
+    )
+
+    await heading.trigger('click')
+    expect(heading.attributes('aria-expanded')).toBe('true')
+  })
+
+  it('ignores a stale directory response after switching projects', async () => {
+    type DirectoryResult = Awaited<
+      ReturnType<AgentApi['listWorkspaceDirectory']>
+    >
+    let resolveFirst!: (result: DirectoryResult) => void
+    let resolveSecond!: (result: DirectoryResult) => void
+    let call = 0
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        listWorkspaceDirectory: () => {
+          call += 1
+          return new Promise<DirectoryResult>((resolve) => {
+            if (call === 1) resolveFirst = resolve
+            else resolveSecond = resolve
+          })
+        },
+      } as Partial<AgentApi> as AgentApi,
+    })
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    store.workspacePath = 'F:/workspace/first'
+    const wrapper = mount(ArtifactPanel, {
+      global: { plugins: [pinia, i18n] },
+    })
+    await nextTick()
+
+    store.workspacePath = 'F:/workspace/second'
+    await nextTick()
+    resolveSecond({
+      version: 1,
+      ok: true,
+      value: {
+        workspace: 'F:/workspace/second',
+        path: '.',
+        entries: [{ path: 'second.txt', name: 'second.txt', type: 'file' }],
+        truncated: false,
+      },
+    })
+    await flushPromises()
+    expect(wrapper.getComponent(NTree).props('data')).toMatchObject([
+      { path: 'second.txt', label: 'second.txt', entryType: 'file' },
+    ])
+
+    resolveFirst({
+      version: 1,
+      ok: true,
+      value: {
+        workspace: 'F:/workspace/first',
+        path: '.',
+        entries: [{ path: 'first.txt', name: 'first.txt', type: 'file' }],
+        truncated: false,
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.getComponent(NTree).props('data')).toMatchObject([
+      { path: 'second.txt', label: 'second.txt', entryType: 'file' },
+    ])
   })
 })

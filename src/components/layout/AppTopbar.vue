@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { IPC_VERSION } from '../../../shared/channels'
 import { useAgentStore } from '../../stores/agent'
+import { useI18n } from 'vue-i18n'
 import UiIcon from '../UiIcon.vue'
 
 defineProps<{
@@ -18,6 +19,7 @@ const emit = defineEmits<{
   settings: []
 }>()
 const agent = useAgentStore()
+const { t } = useI18n()
 
 async function windowAction(
   action: 'minimizeWindow' | 'toggleMaximizeWindow' | 'closeWindow',
@@ -31,7 +33,7 @@ async function windowAction(
   <header class="app-topbar">
     <div class="window-title">
       <span class="app-mark"><UiIcon name="app" /></span>
-      <strong>My Coding Agent</strong>
+      <strong>{{ t('app.name') }}</strong>
     </div>
     <button
       class="project-crumb"
@@ -46,8 +48,8 @@ async function windowAction(
       <button
         class="topbar-icon-button"
         type="button"
-        aria-label="Toggle terminal"
-        title="Toggle terminal (Ctrl+J)"
+        :aria-label="t('topbar.terminal')"
+        :title="t('topbar.terminal')"
         :aria-pressed="terminalOpen"
         :disabled="!agent.workspacePath || !agent.bridgeAvailable"
         @click="emit('terminal')"
@@ -57,8 +59,8 @@ async function windowAction(
       <button
         class="topbar-icon-button"
         type="button"
-        aria-label="Toggle project sidebar"
-        title="Toggle project sidebar (Ctrl+B)"
+        :aria-label="t('topbar.projectSidebar')"
+        :title="t('topbar.projectSidebar')"
         :aria-pressed="projectSidebarOpen"
         @click="emit('project-sidebar')"
       >
@@ -67,8 +69,8 @@ async function windowAction(
       <button
         class="topbar-icon-button"
         type="button"
-        aria-label="Toggle artifact sidebar"
-        title="Toggle artifact sidebar (Ctrl+Shift+B)"
+        :aria-label="t('topbar.artifactSidebar')"
+        :title="t('topbar.artifactSidebar')"
         :aria-pressed="artifactSidebarOpen"
         @click="emit('artifact-sidebar')"
       >
@@ -77,17 +79,17 @@ async function windowAction(
       <button
         class="topbar-icon-button"
         type="button"
-        aria-label="Open settings"
-        title="Settings"
+        :aria-label="t('topbar.settings')"
+        :title="t('topbar.settings')"
         @click="emit('settings')"
       >
         <UiIcon name="settings" />
       </button>
-      <div class="window-controls" aria-label="Window controls">
+      <div class="window-controls" :aria-label="t('topbar.windowControls')">
         <button
           class="window-control"
           type="button"
-          aria-label="Minimize window"
+          :aria-label="t('topbar.minimize')"
           @click="windowAction('minimizeWindow')"
         >
           <UiIcon name="minimize" />
@@ -95,7 +97,7 @@ async function windowAction(
         <button
           class="window-control"
           type="button"
-          aria-label="Maximize or restore window"
+          :aria-label="t('topbar.maximize')"
           @click="windowAction('toggleMaximizeWindow')"
         >
           <UiIcon name="maximize" />
@@ -103,7 +105,7 @@ async function windowAction(
         <button
           class="window-control close"
           type="button"
-          aria-label="Close window"
+          :aria-label="t('topbar.close')"
           @click="windowAction('closeWindow')"
         >
           <UiIcon name="close" />
