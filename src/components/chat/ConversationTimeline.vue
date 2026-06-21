@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NAlert, NButton, NCollapse, NCollapseItem } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { ToolActivity } from '../../stores/agent'
@@ -9,11 +9,19 @@ import UiIcon from '../UiIcon.vue'
 
 defineProps<{ projectName: string }>()
 
+type CollapseHeaderClickInfo = {
+  name: string | number
+  expanded: boolean
+}
+
 const agent = useAgentStore()
 const { t } = useI18n()
 const scrollElement = ref<HTMLElement>()
+const bottomSentinel = ref<HTMLElement>()
 const followingOutput = ref(true)
 const chronologicalTools = computed(() => [...agent.tools].reverse())
+const expandedToolDetails = ref<string[]>([])
+let resizeObserver: ResizeObserver | undefined
 
 function okContent(tool: ToolActivity): unknown {
   const result = tool.result
@@ -41,18 +49,104 @@ function toolResultSummary(tool: ToolActivity): string {
   return t('chat.completed')
 }
 
+function toolDetailsTitle(tool: ToolActivity): string {
+  return okContent(tool) ? t('chat.result') : t('chat.arguments')
+}
+
+function toolDetailsName(tool: ToolActivity): string {
+  return `${tool.callId}:details`
+}
+
+function isToolDetailsExpanded(tool: ToolActivity): boolean {
+  return expandedToolDetails.value.includes(toolDetailsName(tool))
+}
+
+function setToolDetailsExpanded(tool: ToolActivity, expanded: boolean) {
+  const name = toolDetailsName(tool)
+  const next = new Set(expandedToolDetails.value)
+
+  if (expanded) {
+    next.add(name)
+  } else {
+    next.delete(name)
+  }
+
+  expandedToolDetails.value = [...next]
+  onContentResized()
+}
+
+function updateToolDetailsFromHeader(
+  tool: ToolActivity,
+  info: CollapseHeaderClickInfo,
+) {
+  if (String(info.name) !== toolDetailsName(tool)) return
+  setToolDetailsExpanded(tool, info.expanded)
+}
+
+const toolRenderSignature = computed(() =>
+  agent.tools
+    .map((tool) => {
+      const result =
+        tool.result &&
+        typeof tool.result === 'object' &&
+        !Array.isArray(tool.result)
+          ? tool.result
+          : undefined
+      const resultStatus =
+        result && 'status' in result ? String(result.status) : 'pending'
+      const resultSize = result ? JSON.stringify(result).length : 0
+      return `${tool.callId}:${tool.status}:${resultStatus}:${resultSize}`
+    })
+    .join('|'),
+)
+
+function isNearBottom(element: HTMLElement): boolean {
+  return element.scrollHeight - element.scrollTop - element.clientHeight < 48
+}
+
 function handleScroll() {
   const element = scrollElement.value
   if (!element) return
-  followingOutput.value =
-    element.scrollHeight - element.scrollTop - element.clientHeight < 48
+  followingOutput.value = isNearBottom(element)
+}
+
+function onContentResized() {
+  const element = scrollElement.value
+  if (!element || !followingOutput.value) return
+  void scrollToBottom()
+}
+
+function animationFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => resolve())
+    } else {
+      window.setTimeout(resolve, 0)
+    }
+  })
 }
 
 async function scrollToBottom(force = false) {
   if (!followingOutput.value && !force) return
   await nextTick()
+  await animationFrame()
   const element = scrollElement.value
-  if (element) element.scrollTop = element.scrollHeight
+
+  if (
+    bottomSentinel.value &&
+    typeof bottomSentinel.value.scrollIntoView === 'function'
+  ) {
+    bottomSentinel.value.scrollIntoView({ block: 'end' })
+  } else if (element) {
+    element.scrollTop = element.scrollHeight
+  }
+
+  await nextTick()
+
+  if (element) {
+    element.scrollTop = element.scrollHeight
+  }
+
   followingOutput.value = true
 }
 
@@ -62,6 +156,7 @@ watch(
     agent.messages.at(-1)?.text.length ?? 0,
     agent.messages.at(-1)?.reasoning.length ?? 0,
     agent.tools.length,
+    toolRenderSignature.value,
     agent.pendingApproval?.callId,
   ],
   () => void scrollToBottom(),
@@ -71,9 +166,24 @@ watch(
   () => agent.activeConversationId,
   () => {
     followingOutput.value = true
+    expandedToolDetails.value = []
     void scrollToBottom(true)
   },
 )
+
+onMounted(() => {
+  const element = scrollElement.value
+
+  if (element && typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(onContentResized)
+    resizeObserver.observe(element)
+  }
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = undefined
+})
 </script>
 
 <template>
@@ -166,20 +276,33 @@ watch(
             {{ toolResultSummary(tool) }}
           </span>
         </div>
-        <p v-if="tool.reason" class="tool-reason">{{ tool.reason }}</p>
-        <NCollapse>
+        <p v-if="tool.reason" class="tool-reason" :title="tool.reason">
+          {{ tool.reason }}
+        </p>
+        <NCollapse
+          :expanded-names="
+            isToolDetailsExpanded(tool) ? [toolDetailsName(tool)] : []
+          "
+          @item-header-click="(info) => updateToolDetailsFromHeader(tool, info)"
+        >
           <NCollapseItem
-            :title="t('chat.arguments')"
-            :name="tool.callId + ':args'"
+            :title="toolDetailsTitle(tool)"
+            :name="toolDetailsName(tool)"
           >
-            <pre>{{ JSON.stringify(tool.args, null, 2) }}</pre>
-          </NCollapseItem>
-          <NCollapseItem
-            v-if="okContent(tool)"
-            :title="t('chat.result')"
-            :name="tool.callId + ':result'"
-          >
-            <pre>{{ JSON.stringify(tool.result, null, 2) }}</pre>
+            <template v-if="isToolDetailsExpanded(tool)">
+              <div class="tool-detail-block">
+                <strong>{{ t('chat.arguments') }}</strong>
+                <pre class="tool-args-json">{{
+                  JSON.stringify(tool.args, null, 2)
+                }}</pre>
+              </div>
+              <div v-if="okContent(tool)" class="tool-detail-block">
+                <strong>{{ t('chat.result') }}</strong>
+                <pre class="tool-result-json">{{
+                  JSON.stringify(tool.result, null, 2)
+                }}</pre>
+              </div>
+            </template>
           </NCollapseItem>
         </NCollapse>
       </article>
@@ -300,6 +423,11 @@ watch(
       >
         {{ t('chat.backBottom') }}
       </button>
+      <span
+        ref="bottomSentinel"
+        class="conversation-bottom-sentinel"
+        aria-hidden="true"
+      ></span>
     </div>
     <NAlert
       v-if="agent.error"

@@ -187,6 +187,42 @@ describe('App', () => {
     expect(wrapper.find('.back-to-bottom').exists()).toBe(false)
   })
 
+  it('renders tool arguments and results only after expansion', async () => {
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    store.tools = [
+      {
+        callId: 'call:long' as CallId,
+        runId: 'run:test' as RunId,
+        tool: 'read_file',
+        args: { path: 'long-line.txt' },
+        reason: 'Inspect a file with long output',
+        status: 'completed',
+        result: {
+          status: 'ok',
+          content: { text: 'x'.repeat(5_000) },
+        },
+        order: 1,
+      },
+    ]
+    const wrapper = mount(ConversationTimeline, {
+      props: { projectName: 'example' },
+      global: {
+        plugins: [pinia, i18n],
+      },
+    })
+
+    expect(wrapper.find('.tool-args-json').exists()).toBe(false)
+    expect(wrapper.find('.tool-result-json').exists()).toBe(false)
+
+    await wrapper.get('.n-collapse-item__header-main').trigger('click')
+    await nextTick()
+    await flushPromises()
+
+    expect(wrapper.get('.tool-args-json').text()).toContain('long-line.txt')
+    expect(wrapper.get('.tool-result-json').text()).toContain('xxxxx')
+  })
+
   it('collapses and expands a project conversation group', async () => {
     const pinia = createPinia()
     const store = useAgentStore(pinia)

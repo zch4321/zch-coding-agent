@@ -484,6 +484,76 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await expect(page.locator('.explorer-tree')).not.toContainText('only-b.txt')
   })
 
+  test('docks the artifact sidebar without covering the conversation scrollbar on narrow desktop widths', async () => {
+    await page.setViewportSize({ width: 1000, height: 720 })
+    await page.evaluate(() => {
+      const key = 'my-coding-agent.workbench.v1'
+      const workbench = JSON.parse(localStorage.getItem(key) ?? '{}') as {
+        conversations?: Array<Record<string, unknown>>
+        activeConversationId?: string
+      }
+      const active = workbench.conversations?.find(
+        (conversation) => conversation.id === workbench.activeConversationId,
+      )
+      if (!active) throw new Error('Expected an active conversation')
+      active.title =
+        '详细分析项目，添加一个 code-review 报告，但是不要修改任何文件或覆盖现有内容'
+      localStorage.setItem(key, JSON.stringify(workbench))
+    })
+    await page.reload()
+    const artifactToggle = page.getByRole('button', {
+      name: '切换文件侧栏（Ctrl+Shift+B）',
+    })
+    if ((await artifactToggle.getAttribute('aria-pressed')) !== 'true') {
+      await artifactToggle.click()
+    }
+    await expect(page.locator('.artifact-sidebar')).toBeVisible()
+
+    const metrics = await page.evaluate(() => {
+      const pane = document.querySelector('.conversation-pane')
+      const scroll = document.querySelector('.conversation-scroll')
+      const artifact = document.querySelector('.artifact-sidebar')
+      const title = document.querySelector('.conversation-header h1')
+      const composer = document.querySelector('.message-input-area')
+      const composerToolbar = document.querySelector('.message-input-toolbar')
+      if (
+        !pane ||
+        !scroll ||
+        !artifact ||
+        !title ||
+        !composer ||
+        !composerToolbar
+      ) {
+        throw new Error('Expected workbench layout elements')
+      }
+      const paneRect = pane.getBoundingClientRect()
+      const scrollRect = scroll.getBoundingClientRect()
+      const artifactRect = artifact.getBoundingClientRect()
+      const titleRect = title.getBoundingClientRect()
+      const composerRect = composer.getBoundingClientRect()
+      const toolbarRect = composerToolbar.getBoundingClientRect()
+      return {
+        paneRight: paneRect.right,
+        scrollRight: scrollRect.right,
+        titleRight: titleRect.right,
+        composerRight: composerRect.right,
+        toolbarRight: toolbarRect.right,
+        artifactLeft: artifactRect.left,
+        artifactPosition: getComputedStyle(artifact).position,
+        bodyScrollWidth: document.body.scrollWidth,
+        viewportWidth: window.innerWidth,
+      }
+    })
+
+    expect(metrics.artifactPosition).not.toBe('absolute')
+    expect(metrics.paneRight).toBeLessThanOrEqual(metrics.artifactLeft)
+    expect(metrics.scrollRight).toBeLessThanOrEqual(metrics.artifactLeft)
+    expect(metrics.titleRight).toBeLessThanOrEqual(metrics.artifactLeft)
+    expect(metrics.composerRight).toBeLessThanOrEqual(metrics.artifactLeft)
+    expect(metrics.toolbarRight).toBeLessThanOrEqual(metrics.artifactLeft)
+    expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.viewportWidth)
+  })
+
   test('contains very long tool result lines inside the tool card', async () => {
     await page.evaluate(() => {
       const key = 'my-coding-agent.workbench.v1'
@@ -513,11 +583,14 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await page.reload()
     const card = page.locator('.tool-call-card')
     await expect(card).toBeVisible()
-    await card.getByText('结果', { exact: true }).click()
+    await card
+      .locator('.n-collapse-item__header-main')
+      .evaluate((element: HTMLElement) => element.click())
+    await expect(card.locator('.tool-result-json')).toBeVisible()
     const metrics = await card.evaluate((element) => {
       const pane = document.querySelector('.conversation-pane')
       const scroll = document.querySelector('.conversation-scroll')
-      const pre = element.querySelector('pre')
+      const pre = element.querySelector('.tool-result-json')
       if (!pane || !scroll || !pre) throw new Error('Expected tool layout')
       const paneRect = pane.getBoundingClientRect()
       const cardRect = element.getBoundingClientRect()
@@ -536,7 +609,9 @@ test.describe.serial('Electron security and IPC baseline', () => {
     expect(metrics.cardLeft).toBeGreaterThanOrEqual(metrics.paneLeft)
     expect(metrics.cardRight).toBeLessThanOrEqual(metrics.paneRight)
     expect(metrics.outerScrollWidth).toBe(metrics.outerClientWidth)
-    expect(metrics.resultScrollWidth).toBeGreaterThan(metrics.resultClientWidth)
+    expect(metrics.resultScrollWidth).toBeLessThanOrEqual(
+      metrics.resultClientWidth,
+    )
   })
 
   test('opens, drives, restores, and closes persistent terminal tabs', async () => {

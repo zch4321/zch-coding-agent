@@ -5,7 +5,6 @@ import type { AgentApi } from '../../shared/agent-api'
 import type {
   AssistantLanguage,
   ConfigSection,
-  DeepSeekReasoningEffort,
   PermissionMode,
   PublicConfig,
 } from '../../shared/config'
@@ -28,6 +27,15 @@ import type {
   UiModelProfile,
   UiRememberedRule,
 } from './agent-types'
+import { nowNotice, toUiRememberedRules } from './config-mapping'
+import { DEFAULT_PROVIDER_FORM, providerFormSignature } from './provider-form'
+import {
+  cloneMessages,
+  HISTORY_KEY,
+  loadWorkbench,
+  projectName,
+  requestId,
+} from './workbench-persistence'
 export type {
   ChatMessage,
   ConversationRecord,
@@ -37,94 +45,11 @@ export type {
   ToolActivity,
 } from './agent-types'
 
-const HISTORY_KEY = 'my-coding-agent.workbench.v1'
 let persistTimer: number | undefined
 let workspaceActivationQueue = Promise.resolve()
 
-const DEFAULT_PROVIDER_FORM = {
-  baseURL: 'https://api.deepseek.com',
-  model: 'deepseek-chat',
-  reasoning: 'high' as DeepSeekReasoningEffort,
-  apiKey: '',
-  approverModel: 'deepseek-chat',
-  contextWindowTokens: null as number | null,
-  maxOutputTokens: null as number | null,
-  tokenEstimationMode: 'conservative' as 'conservative' | 'custom-bytes',
-  bytesPerToken: 3,
-}
-
-function providerFormSignature(form: typeof DEFAULT_PROVIDER_FORM): string {
-  return JSON.stringify({
-    baseURL: form.baseURL,
-    model: form.model,
-    reasoning: form.reasoning,
-    approverModel: form.approverModel,
-    contextWindowTokens: form.contextWindowTokens,
-    maxOutputTokens: form.maxOutputTokens,
-    tokenEstimationMode: form.tokenEstimationMode,
-    bytesPerToken: form.bytesPerToken,
-  })
-}
-
 function api(): AgentApi | undefined {
   return window.agentApi
-}
-
-function requestId(): string {
-  return `ui:${
-    'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}:${Math.random().toString(16).slice(2)}`
-  }`
-}
-
-function nowNotice(version: string) {
-  return { version, acceptedAt: new Date().toISOString() }
-}
-
-function projectName(workspacePath: string): string {
-  const normalized = workspacePath.replace(/\\/g, '/')
-  return normalized.split('/').filter(Boolean).at(-1) ?? workspacePath
-}
-
-function cloneMessages(messages: ChatMessage[]): ChatMessage[] {
-  return messages.map((message) => ({ ...message }))
-}
-
-function toUiRememberedRules(config: PublicConfig): UiRememberedRule[] {
-  return config.permission.rememberedRules.map((rule) => ({
-    id: rule.id,
-    effect: rule.effect,
-    toolId: rule.toolId,
-    workspaceScope: rule.workspaceScope,
-    argConstraints: JSON.stringify(rule.argConstraints),
-    expiresAt: rule.expiresAt,
-    createdFromCallId: rule.createdFromCallId,
-  }))
-}
-
-function loadWorkbench(): PersistedWorkbench {
-  try {
-    const value = window.localStorage.getItem(HISTORY_KEY)
-
-    if (!value) {
-      return { projects: [], conversations: [] }
-    }
-
-    const parsed = JSON.parse(value) as Partial<PersistedWorkbench>
-    return {
-      projects: Array.isArray(parsed.projects) ? parsed.projects : [],
-      conversations: Array.isArray(parsed.conversations)
-        ? parsed.conversations
-        : [],
-      activeConversationId:
-        typeof parsed.activeConversationId === 'string'
-          ? parsed.activeConversationId
-          : undefined,
-    }
-  } catch {
-    return { projects: [], conversations: [] }
-  }
 }
 
 export const useAgentStore = defineStore('agent', {

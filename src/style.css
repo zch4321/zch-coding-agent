@@ -527,6 +527,7 @@ textarea:focus-visible {
   min-width: 0;
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
   background: var(--background);
   grid-column: 2;
 }
@@ -560,15 +561,21 @@ textarea:focus-visible {
 }
 
 .conversation-header {
+  min-width: 0;
   min-height: 66px;
   justify-content: space-between;
   gap: 16px;
   padding: 14px 24px 12px;
+  overflow: hidden;
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.conversation-header > div {
+  min-width: 0;
+}
+
 .conversation-header h1 {
-  max-width: 620px;
+  max-width: min(620px, 100%);
   margin: 0;
   overflow: hidden;
   font-size: 18px;
@@ -579,9 +586,12 @@ textarea:focus-visible {
 }
 
 .conversation-header p {
+  overflow: hidden;
   margin: 3px 0 0;
   color: var(--text-muted);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-status {
@@ -652,6 +662,17 @@ textarea:focus-visible {
 
 .conversation-scroll > .back-to-bottom {
   order: 2147483647;
+}
+
+.conversation-scroll > .conversation-bottom-sentinel {
+  order: 2147483646;
+}
+
+.conversation-bottom-sentinel {
+  display: block;
+  width: 1px;
+  height: 1px;
+  flex: 0 0 auto;
 }
 
 .back-to-bottom {
@@ -757,10 +778,17 @@ code {
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
+}
+
+.tool-call-card {
+  padding: 10px 13px;
+}
+
+.approval-card {
+  padding: 14px 16px;
 }
 
 .tool-call-card .n-collapse,
@@ -791,6 +819,7 @@ code {
 .tool-call-header > div,
 .approval-header > div {
   display: grid;
+  min-width: 0;
   gap: 2px;
 }
 
@@ -804,8 +833,50 @@ code {
 
 .tool-call-header strong,
 .approval-header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 13px;
+}
+
+.tool-call-card .n-collapse {
+  margin-top: 6px;
+  border-top: 0;
+}
+
+.tool-call-card .n-collapse-item {
+  margin: 0;
+}
+
+.tool-call-card .n-collapse-item__header {
+  padding: 4px 0 0;
+  font-size: 12px;
+}
+
+.tool-call-card .n-collapse-item__content-inner {
+  padding-top: 6px;
+}
+
+.tool-detail-block {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.tool-detail-block + .tool-detail-block {
+  margin-top: 10px;
+}
+
+.tool-detail-block > strong {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.tool-args-json,
+.tool-result-json {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .tool-status,
@@ -822,10 +893,21 @@ code {
 
 .tool-reason,
 .approval-card > p {
-  margin: 11px 0;
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.tool-reason {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 5px 0 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.approval-card > p {
+  margin: 11px 0;
 }
 
 .approval-card {
@@ -937,6 +1019,8 @@ code {
 
 .message-input-area {
   width: min(760px, calc(100% - 36px));
+  min-width: 0;
+  max-width: calc(100% - 36px);
   margin: 0 auto 16px;
   padding: 10px;
   border: 1px solid var(--border);
@@ -1121,6 +1205,7 @@ code {
 }
 
 .message-input-toolbar {
+  min-width: 0;
   min-height: 34px;
   justify-content: space-between;
   gap: 10px;
@@ -1129,6 +1214,7 @@ code {
 
 .input-selectors {
   min-width: 0;
+  flex: 1 1 auto;
   gap: 7px;
 }
 
@@ -1346,6 +1432,8 @@ code {
 
 .composer-model-select {
   width: min(240px, 32vw);
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .provider-settings-button {
@@ -1987,20 +2075,7 @@ code {
 
 @media (max-width: 1080px) {
   .app-frame {
-    --artifact-width: 0px;
-  }
-
-  .workbench-shell {
-    grid-template-columns: var(--project-width) minmax(0, 1fr);
-  }
-
-  .artifact-sidebar {
-    position: absolute;
-    z-index: 5;
-    inset: 0 0 0 auto;
-    width: 410px;
-    grid-column: auto;
-    box-shadow: -10px 0 26px rgba(31, 35, 40, 0.12);
+    --artifact-width: minmax(320px, 36vw);
   }
 }
 
@@ -2032,6 +2107,15 @@ code {
     width: 240px;
     grid-column: auto;
     box-shadow: 10px 0 26px rgba(31, 35, 40, 0.12);
+  }
+
+  .artifact-sidebar {
+    position: absolute;
+    z-index: 5;
+    inset: 0 0 0 auto;
+    width: min(410px, calc(100vw - 48px));
+    grid-column: auto;
+    box-shadow: -10px 0 26px rgba(31, 35, 40, 0.12);
   }
 
   .settings-layout {
