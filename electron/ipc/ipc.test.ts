@@ -44,9 +44,26 @@ const validPayloads: {
     lastOpened: 'F:/workspace',
   },
   'provider:list-models': { version: 1, refresh: false },
+  'workbench:get': { version: 1 },
+  'workbench:save': {
+    version: 1,
+    workbench: { projects: [], conversations: [] },
+  },
+  'workbench:migrate-v1': {
+    version: 1,
+    workbench: { projects: [], conversations: [] },
+  },
   'workspace:choose': { version: 1 },
-  'workspace:list-directory': { version: 1, path: '.' },
-  'workspace:read-file': { version: 1, path: 'README.md' },
+  'workspace:list-directory': {
+    version: 1,
+    workspace: 'F:/workspace',
+    path: '.',
+  },
+  'workspace:read-file': {
+    version: 1,
+    workspace: 'F:/workspace',
+    path: 'README.md',
+  },
   'session:create': {
     version: 1,
     conversationId: 'conversation-1',

@@ -154,7 +154,9 @@ export class SessionApprovalCoordinator {
     signals: PolicySignal[],
     summary: string,
   ): Promise<HumanApprovalDecision> {
-    const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString()
+    const expiresAt = new Date(
+      Date.now() + this.#configStore.getPublicConfig().limits.approvalTimeoutMs,
+    ).toISOString()
 
     await this.#pluginBus
       ?.emit('beforeApproval', {

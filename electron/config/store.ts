@@ -232,6 +232,12 @@ export class ConfigStore {
       case 'assistant':
         next.assistant = structuredClone(request.value)
         break
+      case 'prompts':
+        next.prompts = structuredClone(request.value)
+        break
+      case 'network':
+        next.network = structuredClone(request.value)
+        break
     }
 
     await writeJsonAtomic(this.#filePath, next)

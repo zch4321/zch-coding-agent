@@ -14,6 +14,64 @@ import {
 } from './workbench-persistence'
 
 let workspaceActivationQueue = Promise.resolve()
+const MIGRATED_HISTORY_KEY = 'my-coding-agent.workbench.v2.migrated'
+type WorkbenchIpcResult =
+  | { ok: true; value: PersistedWorkbench }
+  | { ok: false; error: { message: string } }
+type WorkbenchBridge = {
+  getWorkbench(payload: {
+    version: typeof IPC_VERSION
+  }): Promise<WorkbenchIpcResult>
+  migrateWorkbenchV1(payload: {
+    version: typeof IPC_VERSION
+    workbench: PersistedWorkbench
+  }): Promise<WorkbenchIpcResult>
+  saveWorkbench(payload: {
+    version: typeof IPC_VERSION
+    workbench: PersistedWorkbench
+  }): Promise<WorkbenchIpcResult>
+}
+
+function hasConversationContent(conversation: ConversationRecord): boolean {
+  return Boolean(
+    conversation.messages.length > 0 ||
+    (conversation.tools?.length ?? 0) > 0 ||
+    (conversation.orchestratorEntries?.length ?? 0) > 0,
+  )
+}
+
+function persistableConversation(
+  conversation: ConversationRecord,
+): Omit<ConversationRecord, 'transient'> | undefined {
+  if (conversation.transient && !hasConversationContent(conversation)) {
+    return undefined
+  }
+
+  const persistable = { ...conversation }
+  delete persistable.transient
+  return persistable
+}
+
+function snapshotForPersistence(state: {
+  projects: ProjectRecord[]
+  conversations: ConversationRecord[]
+  activeConversationId?: string
+}): PersistedWorkbench {
+  const conversations = state.conversations
+    .map(persistableConversation)
+    .filter((conversation) => conversation !== undefined)
+  const activeConversationId = conversations.some(
+    (conversation) => conversation.id === state.activeConversationId,
+  )
+    ? state.activeConversationId
+    : undefined
+
+  return {
+    projects: state.projects,
+    conversations,
+    ...(activeConversationId ? { activeConversationId } : {}),
+  }
+}
 
 export const useAgentWorkbenchStore = defineStore('agent-workbench', {
   state: () => ({
@@ -24,17 +82,56 @@ export const useAgentWorkbenchStore = defineStore('agent-workbench', {
     activeConversationId: undefined as string | undefined,
   }),
   getters: {
-    activeConversation: (state): ConversationRecord | undefined =>
-      state.conversations.find(
-        (conversation) => conversation.id === state.activeConversationId,
-      ),
+    activeConversation(): ConversationRecord | undefined {
+      const conversations = this.conversations as ConversationRecord[]
+      const activeConversationId = this.activeConversationId as
+        | string
+        | undefined
+      return conversations.find(
+        (conversation) => conversation.id === activeConversationId,
+      )
+    },
   },
   actions: {
-    loadPersistedWorkbench() {
+    async loadPersistedWorkbench() {
       const history = loadWorkbench()
-      this.projects = history.projects
-      this.conversations = history.conversations
-      this.activeConversationId = history.activeConversationId
+      const bridge = window.agentApi as unknown as WorkbenchBridge | undefined
+
+      if (!bridge?.getWorkbench || !bridge.migrateWorkbenchV1) {
+        this.projects = history.projects
+        this.conversations = history.conversations
+        this.activeConversationId = history.activeConversationId
+        return
+      }
+
+      const shouldMigrate =
+        !window.localStorage.getItem(MIGRATED_HISTORY_KEY) &&
+        (history.projects.length > 0 || history.conversations.length > 0)
+      const result = shouldMigrate
+        ? await bridge.migrateWorkbenchV1({
+            version: IPC_VERSION,
+            workbench: history,
+          })
+        : await bridge.getWorkbench({
+            version: IPC_VERSION,
+          })
+
+      if (!result.ok) {
+        this.error = result.error.message
+        this.projects = history.projects
+        this.conversations = history.conversations
+        this.activeConversationId = history.activeConversationId
+        return
+      }
+
+      if (shouldMigrate) {
+        window.localStorage.setItem(MIGRATED_HISTORY_KEY, 'true')
+        window.localStorage.removeItem(HISTORY_KEY)
+      }
+
+      this.projects = result.value.projects
+      this.conversations = result.value.conversations
+      this.activeConversationId = result.value.activeConversationId
     },
     registerProject(workspacePath: string) {
       if (!this.projects.some((project) => project.path === workspacePath)) {
@@ -61,6 +158,7 @@ export const useAgentWorkbenchStore = defineStore('agent-workbench', {
         tools: [],
         createdAt: now,
         updatedAt: now,
+        transient: true,
       }
       this.registerProject(workspacePath)
       this.conversations.push(conversation)
@@ -91,14 +189,25 @@ export const useAgentWorkbenchStore = defineStore('agent-workbench', {
       )
     },
     persistWorkbench() {
+      const snapshot = snapshotForPersistence(this)
+      const bridge = window.agentApi as unknown as WorkbenchBridge | undefined
+
+      if (typeof bridge?.saveWorkbench === 'function') {
+        void bridge
+          .saveWorkbench({
+            version: IPC_VERSION,
+            workbench: snapshot,
+          })
+          .then((result) => {
+            if (!result.ok) this.error = result.error.message
+          })
+        return
+      }
+
       try {
         window.localStorage.setItem(
           HISTORY_KEY,
-          JSON.stringify({
-            projects: this.projects,
-            conversations: this.conversations,
-            activeConversationId: this.activeConversationId,
-          } satisfies PersistedWorkbench),
+          JSON.stringify(snapshot satisfies PersistedWorkbench),
         )
       } catch {
         // Persistence is best effort; runtime behavior remains usable.

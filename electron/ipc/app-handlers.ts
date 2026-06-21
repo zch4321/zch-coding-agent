@@ -11,6 +11,8 @@ import type { SessionManager } from '../agent/session-manager'
 import type { ConfigStore } from '../config/store'
 import { SkillError, type SkillsManager } from '../skills/manager'
 import { TraceServiceError, type TraceService } from '../logging/service'
+import type { WorkbenchStore } from '../workbench/store'
+import type { HttpTransport } from '../net/http-transport'
 import { IpcFault, type IpcBusinessHandlers } from './index'
 
 export interface AppIpcHandlerDependencies {
@@ -19,6 +21,11 @@ export interface AppIpcHandlerDependencies {
   skillsManager: SkillsManager
   traceService: TraceService
   changeHistory: ChangeHistoryStore
+  workbenchStore: WorkbenchStore
+  getHttpTransport?: () => HttpTransport
+  refreshHttpTransport?: (
+    proxy: ReturnType<ConfigStore['getPublicConfig']>['network']['httpProxy'],
+  ) => void
   getMainWindow: () => BrowserWindow | undefined
 }
 
@@ -31,6 +38,9 @@ export function createAppIpcHandlers(
     skillsManager,
     traceService,
     changeHistory,
+    workbenchStore,
+    getHttpTransport,
+    refreshHttpTransport,
     getMainWindow,
   } = dependencies
 
@@ -54,9 +64,13 @@ export function createAppIpcHandlers(
         })
       }
 
-      return {
-        config: await configStore.update(payload),
+      const config = await configStore.update(payload)
+
+      if (payload.kind === 'network') {
+        refreshHttpTransport?.(config.network.httpProxy)
       }
+
+      return { config }
     },
     'provider:list-models': async (payload) => {
       if (payload.refresh) {
@@ -74,6 +88,10 @@ export function createAppIpcHandlers(
           const models = await fetchDeepSeekModelCatalog({
             baseURL: config.providers.deepseek.baseURL,
             apiKey,
+            timeoutMs: config.limits.modelCatalogTimeoutMs,
+            fetchImpl: getHttpTransport
+              ? (input, init) => getHttpTransport().fetch(input, init)
+              : undefined,
           })
           await configStore.setDeepSeekModelCatalog(
             models,
@@ -109,6 +127,11 @@ export function createAppIpcHandlers(
         stale,
       }
     },
+    'workbench:get': () => workbenchStore.getSnapshot(),
+    'workbench:save': (payload) =>
+      workbenchStore.saveSnapshot(payload.workbench),
+    'workbench:migrate-v1': (payload) =>
+      workbenchStore.mergeSnapshot(payload.workbench),
     'workspace:choose': async () => {
       const options: OpenDialogOptions = {
         properties: ['openDirectory'],
@@ -130,7 +153,8 @@ export function createAppIpcHandlers(
       return { path: selected ?? null }
     },
     'workspace:list-directory': async (payload) => {
-      const workspace = configStore.getPublicConfig().workspace.lastOpened
+      const workspace =
+        payload.workspace ?? configStore.getPublicConfig().workspace.lastOpened
 
       if (!workspace) {
         throw new IpcFault({
@@ -176,7 +200,8 @@ export function createAppIpcHandlers(
       }
     },
     'workspace:read-file': async (payload) => {
-      const workspace = configStore.getPublicConfig().workspace.lastOpened
+      const workspace =
+        payload.workspace ?? configStore.getPublicConfig().workspace.lastOpened
 
       if (!workspace) {
         throw new IpcFault({
@@ -187,9 +212,13 @@ export function createAppIpcHandlers(
 
       try {
         const guard = await PathGuard.create(workspace)
+        const maxBytes = Math.min(
+          configStore.getPublicConfig().limits.readFileOutputBytes,
+          499_999,
+        )
         return {
           workspace,
-          ...(await guard.readFileBounded(payload.path, 499_999)),
+          ...(await guard.readFileBounded(payload.path, maxBytes)),
         }
       } catch (error) {
         if (error instanceof PathGuardError) {

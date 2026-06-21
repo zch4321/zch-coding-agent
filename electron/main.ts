@@ -28,6 +28,9 @@ import { createAppIpcHandlers } from './ipc/app-handlers'
 import { PluginEventBus } from './plugins/event-bus'
 import { SkillsManager } from './skills/manager'
 import { TraceService } from './logging/service'
+import { WorkbenchStore } from './workbench/store'
+import { createHttpTransport } from './net/http-transport'
+import { PromptRegistry } from './prompts/registry'
 import {
   APP_ENTRY_URL,
   APP_HOST,
@@ -129,6 +132,12 @@ async function installIpc(): Promise<void> {
     },
   )
   const initialized = await configStore.initialize()
+  let httpTransport = createHttpTransport(initialized.config.network.httpProxy)
+  const refreshHttpTransport = (
+    proxy: typeof initialized.config.network.httpProxy,
+  ) => {
+    httpTransport = createHttpTransport(proxy)
+  }
 
   if (!initialized.secretStorage.available) {
     console.warn(
@@ -148,6 +157,13 @@ async function installIpc(): Promise<void> {
     path.join(userData, 'change-history.json'),
   )
   await changeHistory.initialize()
+  const workbenchStore = new WorkbenchStore(
+    path.join(userData, 'workbench.json'),
+  )
+  await workbenchStore.initialize()
+  const promptRegistry = await PromptRegistry.load(
+    path.join(appRoot, 'resources', 'prompts'),
+  )
   const sessionManager = new SessionManager({
     configStore,
     traceDirectory: path.join(userData, 'traces'),
@@ -155,6 +171,9 @@ async function installIpc(): Promise<void> {
     pluginBus,
     skillsManager,
     changeHistory,
+    promptRegistry,
+    fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =>
+      httpTransport.fetch(input, init),
     onDiagnostic: (message, error) => console.error(message, error),
   })
   const unregister = registerIpcHandlers({
@@ -167,6 +186,9 @@ async function installIpc(): Promise<void> {
       skillsManager,
       traceService,
       changeHistory,
+      workbenchStore,
+      getHttpTransport: () => httpTransport,
+      refreshHttpTransport,
       getMainWindow: () => mainWindow,
     }),
     onDiagnostic: (message, error) => console.error(message, error),

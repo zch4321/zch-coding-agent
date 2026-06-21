@@ -19,6 +19,15 @@ export interface AgentApi {
   listProviderModels(
     payload: IpcPayload<'provider:list-models'>,
   ): Promise<IpcResult<'provider:list-models'>>
+  getWorkbench(
+    payload: IpcPayload<'workbench:get'>,
+  ): Promise<IpcResult<'workbench:get'>>
+  saveWorkbench(
+    payload: IpcPayload<'workbench:save'>,
+  ): Promise<IpcResult<'workbench:save'>>
+  migrateWorkbenchV1(
+    payload: IpcPayload<'workbench:migrate-v1'>,
+  ): Promise<IpcResult<'workbench:migrate-v1'>>
   chooseWorkspace(
     payload: IpcPayload<'workspace:choose'>,
   ): Promise<IpcResult<'workspace:choose'>>
@@ -119,6 +128,9 @@ export const AGENT_API_KEYS = [
   'getConfig',
   'setConfig',
   'listProviderModels',
+  'getWorkbench',
+  'saveWorkbench',
+  'migrateWorkbenchV1',
   'chooseWorkspace',
   'listWorkspaceDirectory',
   'readWorkspaceFile',

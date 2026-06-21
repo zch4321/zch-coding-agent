@@ -44,7 +44,8 @@ export function migrateConfig(candidate: unknown): AppConfig {
   if (
     schemaVersion !== undefined &&
     schemaVersion !== 0 &&
-    schemaVersion !== 1
+    schemaVersion !== 1 &&
+    schemaVersion !== 2
   ) {
     throw new Error(
       `Unsupported config schema version: ${String(schemaVersion)}`,
@@ -52,7 +53,7 @@ export function migrateConfig(candidate: unknown): AppConfig {
   }
 
   const migrated = mergeRecord(DEFAULT_APP_CONFIG, candidate)
-  migrated.schemaVersion = 1
+  migrated.schemaVersion = 2
 
   // `auto` was the pre-V4 setting. DeepSeek documents `high` as the normal
   // default, so preserve the previous behavior while moving to explicit effort.

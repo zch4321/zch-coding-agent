@@ -23,6 +23,7 @@ import {
   TraceIdSchema,
   TraceInfoSchema,
 } from './trace'
+import { PersistedWorkbenchSchema } from './workbench'
 import {
   AGENT_EVENT_CHANNEL,
   IPC_VERSION,
@@ -153,6 +154,30 @@ export const IPC_CONTRACTS = {
       ),
     ),
   },
+  'workbench:get': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(PersistedWorkbenchSchema),
+  },
+  'workbench:save': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        workbench: PersistedWorkbenchSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(PersistedWorkbenchSchema),
+  },
+  'workbench:migrate-v1': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        workbench: PersistedWorkbenchSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(PersistedWorkbenchSchema),
+  },
   'workspace:choose': {
     payload: EmptyPayloadSchema,
     result: ipcResultSchema(
@@ -171,6 +196,7 @@ export const IPC_CONTRACTS = {
     payload: Type.Object(
       {
         version: Type.Literal(IPC_VERSION),
+        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
         path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
       },
       { additionalProperties: false },
@@ -204,6 +230,7 @@ export const IPC_CONTRACTS = {
     payload: Type.Object(
       {
         version: Type.Literal(IPC_VERSION),
+        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
         path: Type.String({ minLength: 1, maxLength: 4_096 }),
       },
       { additionalProperties: false },

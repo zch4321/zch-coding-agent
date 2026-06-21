@@ -18,10 +18,15 @@ const DEFAULT_READ_LINES = 400
 const MAX_READ_LINES = 1_000
 const DEFAULT_LIMITS: Pick<
   PublicConfig['limits'],
-  'maxToolResultTokens' | 'tokenEstimation'
+  | 'maxToolResultTokens'
+  | 'tokenEstimation'
+  | 'readFileSourceBytes'
+  | 'readFileOutputBytes'
 > = {
   maxToolResultTokens: 8_000,
   tokenEstimation: { mode: 'conservative', bytesPerToken: 3 },
+  readFileSourceBytes: MAX_READ_SOURCE_BYTES,
+  readFileOutputBytes: MAX_READ_OUTPUT_BYTES,
 }
 
 const ReadFileArgsSchema = Type.Object(
@@ -154,7 +159,10 @@ async function walkFiles(
 export function createReadOnlyToolDefinitions(
   getLimits: () => Pick<
     PublicConfig['limits'],
-    'maxToolResultTokens' | 'tokenEstimation'
+    | 'maxToolResultTokens'
+    | 'tokenEstimation'
+    | 'readFileSourceBytes'
+    | 'readFileOutputBytes'
   > = () => DEFAULT_LIMITS,
 ): ToolDefinition[] {
   const readFileTool: ToolDefinition<typeof ReadFileArgsSchema> = {
@@ -170,9 +178,18 @@ export function createReadOnlyToolDefinitions(
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)
+        const limits = getLimits()
+        const maxSourceBytes = Math.min(
+          limits.readFileSourceBytes,
+          MAX_READ_SOURCE_BYTES,
+        )
+        const maxOutputBytes = Math.min(
+          limits.readFileOutputBytes,
+          MAX_READ_OUTPUT_BYTES,
+        )
         const source = await guard.readFileBounded(
           args.path,
-          MAX_READ_SOURCE_BYTES,
+          maxSourceBytes,
           context.signal,
         )
 
@@ -180,7 +197,7 @@ export function createReadOnlyToolDefinitions(
           return {
             status: 'error',
             code: 'FILE_TOO_LARGE',
-            message: `read_file supports files up to ${MAX_READ_SOURCE_BYTES} bytes`,
+            message: `read_file supports files up to ${maxSourceBytes} bytes`,
             retryable: false,
           }
         }
@@ -194,7 +211,6 @@ export function createReadOnlyToolDefinitions(
         const requestedStartLine = args.startLine ?? 1
         const startIndex = Math.min(requestedStartLine - 1, lines.length)
         const requestedLines = args.lineCount ?? DEFAULT_READ_LINES
-        const limits = getLimits()
         const maxTokens = Math.min(8_000, limits.maxToolResultTokens)
         const selected: string[] = []
         let selectedBytes = 0
@@ -215,13 +231,13 @@ export function createReadOnlyToolDefinitions(
           )
 
           if (
-            selectedBytes + candidateBytes > MAX_READ_OUTPUT_BYTES ||
+            selectedBytes + candidateBytes > maxOutputBytes ||
             selectedTokens + candidateTokens > maxTokens
           ) {
             if (selected.length === 0) {
               const byteBounded = Buffer.from(lines[index]).subarray(
                 0,
-                MAX_READ_OUTPUT_BYTES,
+                maxOutputBytes,
               )
               selected.push(
                 truncateTextHeadTail(
@@ -465,7 +481,10 @@ export function registerReadOnlyTools(
   registry: ToolRegistry,
   getLimits?: () => Pick<
     PublicConfig['limits'],
-    'maxToolResultTokens' | 'tokenEstimation'
+    | 'maxToolResultTokens'
+    | 'tokenEstimation'
+    | 'readFileSourceBytes'
+    | 'readFileOutputBytes'
   >,
 ): void {
   for (const definition of createReadOnlyToolDefinitions(getLimits)) {

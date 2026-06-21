@@ -57,7 +57,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const workbench = useAgentWorkbenchStore()
       if (shell.initialized) return
 
-      workbench.loadPersistedWorkbench()
+      await workbench.loadPersistedWorkbench()
       const bridge = window.agentApi
       shell.bridgeAvailable = Boolean(bridge)
 
@@ -414,28 +414,31 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const sessionId = this.sessionId
       if (!sessionId) return
 
-      timeline.input = ''
-      timeline.messages.push({
-        id: requestId(),
-        role: 'user',
-        text,
-        reasoning: '',
-        order: timeline.nextTimelineOrder(),
-      })
-      const conversation = workbench.activeConversation
-      if (conversation?.title === 'New conversation') {
-        conversation.title = text.replace(/\s+/g, ' ').slice(0, 56)
-      }
-
-      this.schedulePersist()
       const result = await bridge.startRun({
         version: IPC_VERSION,
         sessionId,
         message: text,
         clientRequestId: requestId(),
       })
-      if (result.ok) this.activeRunId = result.value.runId
-      else this.error = result.error.message
+      if (result.ok) {
+        timeline.input = ''
+        timeline.messages.push({
+          id: requestId(),
+          role: 'user',
+          text,
+          reasoning: '',
+          order: timeline.nextTimelineOrder(),
+        })
+        const conversation = workbench.activeConversation
+        if (conversation?.title === 'New conversation') {
+          conversation.title = text.replace(/\s+/g, ' ').slice(0, 56)
+        }
+        if (conversation?.transient) {
+          delete conversation.transient
+        }
+        this.activeRunId = result.value.runId
+        this.schedulePersist()
+      } else this.error = result.error.message
     },
     async interruptRun() {
       const bridge = window.agentApi

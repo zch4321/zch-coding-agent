@@ -73,6 +73,7 @@ async function fetchDirectory(
   explorerError.value = ''
   const result = await bridge.listWorkspaceDirectory({
     version: IPC_VERSION,
+    workspace,
     path,
   })
 
@@ -131,6 +132,7 @@ async function openExplorerFile(path: string) {
   explorerError.value = ''
   const result = await bridge.readWorkspaceFile({
     version: IPC_VERSION,
+    workspace,
     path,
   })
 

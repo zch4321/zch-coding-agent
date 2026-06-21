@@ -18,6 +18,7 @@ export type PermissionMode = Static<typeof PermissionModeSchema>
 
 export const DeepSeekReasoningEffortSchema = Type.Union([
   Type.Literal('off'),
+  Type.Literal('low'),
   Type.Literal('high'),
   Type.Literal('max'),
 ])
@@ -71,6 +72,30 @@ export const TokenEstimationSchema = Type.Object(
   { additionalProperties: false },
 )
 
+export const HttpProxyConfigSchema = Type.Union([
+  Type.Object({ mode: Type.Literal('off') }, { additionalProperties: false }),
+  Type.Object(
+    { mode: Type.Literal('system') },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      mode: Type.Literal('manual'),
+      url: Type.String({ minLength: 1, maxLength: 2048 }),
+    },
+    { additionalProperties: false },
+  ),
+])
+export type HttpProxyConfig = Static<typeof HttpProxyConfigSchema>
+
+export const PromptResourceRefSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 256 }),
+    version: Type.String({ minLength: 1, maxLength: 64 }),
+  },
+  { additionalProperties: false },
+)
+
 export const DeepSeekPublicConfigSchema = Type.Object(
   {
     baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
@@ -95,7 +120,7 @@ export const DeepSeekPublicConfigSchema = Type.Object(
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(1),
+    schemaVersion: Type.Literal(2),
     activeProvider: Type.Literal('deepseek'),
     providers: Type.Object(
       {
@@ -152,6 +177,42 @@ export const PublicConfigSchema = Type.Object(
         }),
         tokenEstimation: TokenEstimationSchema,
         commandTimeoutMs: Type.Integer({ minimum: 100, maximum: 86_400_000 }),
+        readFileSourceBytes: Type.Integer({
+          minimum: 1_024,
+          maximum: 100_000_000,
+        }),
+        readFileOutputBytes: Type.Integer({
+          minimum: 1_024,
+          maximum: 10_000_000,
+        }),
+        editableFileBytes: Type.Integer({
+          minimum: 1_024,
+          maximum: 100_000_000,
+        }),
+        writeFileBytes: Type.Integer({
+          minimum: 1_024,
+          maximum: 10_000_000,
+        }),
+        patchBytes: Type.Integer({
+          minimum: 1_024,
+          maximum: 10_000_000,
+        }),
+        diffChars: Type.Integer({
+          minimum: 1_024,
+          maximum: 10_000_000,
+        }),
+        approvalTimeoutMs: Type.Integer({
+          minimum: 1_000,
+          maximum: 86_400_000,
+        }),
+        autoApprovalTimeoutMs: Type.Integer({
+          minimum: 1_000,
+          maximum: 300_000,
+        }),
+        modelCatalogTimeoutMs: Type.Integer({
+          minimum: 1_000,
+          maximum: 300_000,
+        }),
         terminalScrollbackBytes: Type.Integer({
           minimum: 1_024,
           maximum: 100_000_000,
@@ -230,6 +291,30 @@ export const PublicConfigSchema = Type.Object(
       },
       { additionalProperties: false },
     ),
+    prompts: Type.Object(
+      {
+        system: Type.Object(
+          {
+            'zh-CN': PromptResourceRefSchema,
+            'en-US': PromptResourceRefSchema,
+          },
+          { additionalProperties: false },
+        ),
+        approval: Type.Object(
+          {
+            classifyRisk: PromptResourceRefSchema,
+          },
+          { additionalProperties: false },
+        ),
+      },
+      { additionalProperties: false },
+    ),
+    network: Type.Object(
+      {
+        httpProxy: HttpProxyConfigSchema,
+      },
+      { additionalProperties: false },
+    ),
   },
   { additionalProperties: false },
 )
@@ -246,6 +331,8 @@ export const ConfigSectionSchema = Type.Union([
   Type.Literal('workspace'),
   Type.Literal('skills'),
   Type.Literal('assistant'),
+  Type.Literal('prompts'),
+  Type.Literal('network'),
 ])
 export type ConfigSection = Static<typeof ConfigSectionSchema>
 
@@ -403,6 +490,22 @@ export const ConfigSetRequestSchema = Type.Union([
       version: Type.Literal(1),
       kind: Type.Literal('assistant'),
       value: PublicConfigSchema.properties.assistant,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('prompts'),
+      value: PublicConfigSchema.properties.prompts,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('network'),
+      value: PublicConfigSchema.properties.network,
     },
     { additionalProperties: false },
   ),

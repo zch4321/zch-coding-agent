@@ -8,6 +8,7 @@ const agent = useAgentStore()
 const { t } = useI18n()
 const reasoningOptions = computed(() => [
   { label: t('settings.reasoningOff'), value: 'off' },
+  { label: t('settings.reasoningLow'), value: 'low' },
   { label: t('settings.reasoningHigh'), value: 'high' },
   { label: t('settings.reasoningMax'), value: 'max' },
 ])

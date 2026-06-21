@@ -1,9 +1,11 @@
 import { readFile } from 'node:fs/promises'
 import { Type } from '@sinclair/typebox'
+import type { PublicConfig } from '../../shared/config'
 import type { ToolCall, ToolDefinition, ToolResult } from '../tools/types'
 import { atomicDelete, atomicReplace } from './file-tool-atomic'
 import { createFileDiff } from './file-tool-diff'
 import {
+  MAX_DIFF_CHARS,
   MAX_MUTATION_FILE_BYTES,
   MAX_PATCH_BYTES,
   MAX_WRITE_BYTES,
@@ -55,13 +57,45 @@ const DeleteFileArgsSchema = Type.Object(
   { additionalProperties: false },
 )
 
+type FileToolLimits = Pick<
+  PublicConfig['limits'],
+  'editableFileBytes' | 'writeFileBytes' | 'patchBytes' | 'diffChars'
+>
+
+const DEFAULT_FILE_TOOL_LIMITS: FileToolLimits = {
+  editableFileBytes: MAX_MUTATION_FILE_BYTES,
+  writeFileBytes: MAX_WRITE_BYTES,
+  patchBytes: MAX_PATCH_BYTES,
+  diffChars: MAX_DIFF_CHARS,
+}
+
+function fileLimits(limits?: Partial<FileToolLimits>): FileToolLimits {
+  return {
+    editableFileBytes: Math.min(
+      limits?.editableFileBytes ?? MAX_MUTATION_FILE_BYTES,
+      MAX_MUTATION_FILE_BYTES,
+    ),
+    writeFileBytes: Math.min(
+      limits?.writeFileBytes ?? MAX_WRITE_BYTES,
+      MAX_WRITE_BYTES,
+    ),
+    patchBytes: Math.min(
+      limits?.patchBytes ?? MAX_PATCH_BYTES,
+      MAX_PATCH_BYTES,
+    ),
+    diffChars: Math.min(limits?.diffChars ?? MAX_DIFF_CHARS, MAX_DIFF_CHARS),
+  }
+}
+
 export async function prepareToolResourcePlan(input: {
   workspace: string
   call: ToolCall
   definition: ToolDefinition
+  limits?: Partial<FileToolLimits>
 }): Promise<ToolResourcePlan> {
   const guard = PathGuard.fromCanonical(input.workspace)
   const operation = operationFor(input.call.toolId)
+  const limits = fileLimits(input.limits)
 
   if (!operation) {
     if (input.definition.effects.includes('filesystem.read')) {
@@ -82,6 +116,7 @@ export async function prepareToolResourcePlan(input: {
     guard,
     targetPath,
     operation,
+    limits.editableFileBytes,
   )
   const before = precondition.expectedExists
     ? await readFile(precondition.expectedRealPath!, 'utf8')
@@ -115,14 +150,21 @@ export async function prepareToolResourcePlan(input: {
     after = ''
   }
 
-  if (Buffer.byteLength(after, 'utf8') > MAX_MUTATION_FILE_BYTES) {
+  if (Buffer.byteLength(after, 'utf8') > limits.editableFileBytes) {
     throw new PathGuardError(
       'FILE_TOO_LARGE',
-      `The resulting file exceeds ${MAX_MUTATION_FILE_BYTES} bytes`,
+      `The resulting file exceeds ${limits.editableFileBytes} bytes`,
     )
   }
 
   const diff = createFileDiff(precondition.path, before, after)
+
+  if (diff.length > limits.diffChars) {
+    throw new PathGuardError(
+      'FILE_TOO_LARGE',
+      `The preview diff exceeds ${limits.diffChars} characters`,
+    )
+  }
 
   const plannedPrecondition = Object.freeze({
     ...precondition,
@@ -173,7 +215,9 @@ function errorResult(error: unknown): ToolResult {
   }
 }
 
-export function createFileToolDefinitions(): ToolDefinition[] {
+export function createFileToolDefinitions(
+  getLimits: () => Partial<FileToolLimits> = () => DEFAULT_FILE_TOOL_LIMITS,
+): ToolDefinition[] {
   const writeFile: ToolDefinition<typeof WriteFileArgsSchema> = {
     id: 'write_file',
     description:
@@ -185,8 +229,9 @@ export function createFileToolDefinitions(): ToolDefinition[] {
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 200_000,
     validateArgs(args) {
-      return Buffer.byteLength(args.content, 'utf8') > MAX_WRITE_BYTES
-        ? `write_file content must not exceed ${MAX_WRITE_BYTES} UTF-8 bytes`
+      const limit = fileLimits(getLimits()).writeFileBytes
+      return Buffer.byteLength(args.content, 'utf8') > limit
+        ? `write_file content must not exceed ${limit} UTF-8 bytes`
         : undefined
     },
     async execute(args, context) {
@@ -224,8 +269,9 @@ export function createFileToolDefinitions(): ToolDefinition[] {
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 200_000,
     validateArgs(args) {
-      return Buffer.byteLength(args.patch, 'utf8') > MAX_PATCH_BYTES
-        ? `apply_patch patch must not exceed ${MAX_PATCH_BYTES} UTF-8 bytes`
+      const limit = fileLimits(getLimits()).patchBytes
+      return Buffer.byteLength(args.patch, 'utf8') > limit
+        ? `apply_patch patch must not exceed ${limit} UTF-8 bytes`
         : undefined
     },
     async execute(args, context) {
@@ -306,8 +352,11 @@ export function createFileToolDefinitions(): ToolDefinition[] {
   return [writeFile, applyPatch, deleteFile]
 }
 
-export function registerFileTools(registry: ToolRegistry): void {
-  for (const definition of createFileToolDefinitions()) {
+export function registerFileTools(
+  registry: ToolRegistry,
+  getLimits?: () => Partial<FileToolLimits>,
+): void {
+  for (const definition of createFileToolDefinitions(getLimits)) {
     registry.registerTool(definition)
   }
 }

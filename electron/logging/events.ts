@@ -20,6 +20,16 @@ const TraceBaseSchema = Type.Object({
   ts: Type.String({ format: 'date-time' }),
 })
 
+const PromptResourceSummarySchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 256 }),
+    version: Type.String({ minLength: 1, maxLength: 64 }),
+    path: Type.String({ minLength: 1, maxLength: 4_096 }),
+    sha256: Type.String({ minLength: 64, maxLength: 64 }),
+  },
+  { additionalProperties: false },
+)
+
 export const TraceEventSchema = Type.Union([
   Type.Composite([
     TraceBaseSchema,
@@ -77,6 +87,9 @@ export const TraceEventSchema = Type.Union([
       prefixHash: Type.String({ maxLength: 256 }),
       prefixFingerprints: Type.Optional(
         Type.Array(Type.String({ maxLength: 256 })),
+      ),
+      promptResources: Type.Optional(
+        Type.Array(PromptResourceSummarySchema, { maxItems: 32 }),
       ),
     }),
   ]),
@@ -204,6 +217,7 @@ export type TraceEventInput =
       requestBytes: number
       prefixHash: string
       prefixFingerprints?: string[]
+      promptResources?: Static<typeof PromptResourceSummarySchema>[]
     })
   | (TraceInputBase & {
       type: 'llm.stream'

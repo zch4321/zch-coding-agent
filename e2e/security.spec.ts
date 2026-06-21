@@ -89,7 +89,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           providers: {
             deepseek: {
               credentialConfigured: expect.any(Boolean),
@@ -435,12 +435,15 @@ test.describe.serial('Electron security and IPC baseline', () => {
       })
     }, firstWorkspace)
     expect(configured.ok).toBe(true)
-    await page.evaluate(
+    const savedWorkbench = await page.evaluate(
       ({ first, second }) => {
+        const api = Reflect.get(window, 'agentApi') as {
+          saveWorkbench(payload: unknown): Promise<{ ok: boolean }>
+        }
         const timestamp = '2026-06-21T00:00:00.000Z'
-        localStorage.setItem(
-          'my-coding-agent.workbench.v1',
-          JSON.stringify({
+        return api.saveWorkbench({
+          version: 1,
+          workbench: {
             projects: [
               { path: first, name: 'project-a', addedAt: timestamp },
               { path: second, name: 'project-b', addedAt: timestamp },
@@ -452,7 +455,15 @@ test.describe.serial('Electron security and IPC baseline', () => {
                 title: 'Project A conversation',
                 model: 'deepseek-v4-pro',
                 mode: 'auto',
-                messages: [],
+                messages: [
+                  {
+                    id: 'message:a',
+                    role: 'user',
+                    text: 'seed project a',
+                    reasoning: '',
+                    order: 1,
+                  },
+                ],
                 tools: [],
                 createdAt: timestamp,
                 updatedAt: timestamp,
@@ -463,18 +474,27 @@ test.describe.serial('Electron security and IPC baseline', () => {
                 title: 'Project B conversation',
                 model: 'deepseek-v4-pro',
                 mode: 'auto',
-                messages: [],
+                messages: [
+                  {
+                    id: 'message:b',
+                    role: 'user',
+                    text: 'seed project b',
+                    reasoning: '',
+                    order: 1,
+                  },
+                ],
                 tools: [],
                 createdAt: timestamp,
                 updatedAt: timestamp,
               },
             ],
             activeConversationId: 'conversation:a',
-          }),
-        )
+          },
+        })
       },
       { first: firstWorkspace, second: secondWorkspace },
     )
+    expect(savedWorkbench.ok).toBe(true)
 
     await page.reload()
     await page
@@ -498,20 +518,31 @@ test.describe.serial('Electron security and IPC baseline', () => {
 
   test('docks the artifact sidebar without covering the conversation scrollbar on narrow desktop widths', async () => {
     await page.setViewportSize({ width: 1000, height: 720 })
-    await page.evaluate(() => {
-      const key = 'my-coding-agent.workbench.v1'
-      const workbench = JSON.parse(localStorage.getItem(key) ?? '{}') as {
-        conversations?: Array<Record<string, unknown>>
-        activeConversationId?: string
+    const updatedWorkbench = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        getWorkbench(payload: unknown): Promise<{
+          ok: boolean
+          value?: {
+            conversations: Array<Record<string, unknown>>
+            activeConversationId?: string
+          }
+        }>
+        saveWorkbench(payload: unknown): Promise<{ ok: boolean }>
       }
+      const loaded = await api.getWorkbench({ version: 1 })
+      if (!loaded.ok || !loaded.value) {
+        throw new Error('Expected workbench load to succeed')
+      }
+      const workbench = loaded.value
       const active = workbench.conversations?.find(
         (conversation) => conversation.id === workbench.activeConversationId,
       )
       if (!active) throw new Error('Expected an active conversation')
       active.title =
         '详细分析项目，添加一个 code-review 报告，但是不要修改任何文件或覆盖现有内容'
-      localStorage.setItem(key, JSON.stringify(workbench))
+      return api.saveWorkbench({ version: 1, workbench })
     })
+    expect(updatedWorkbench.ok).toBe(true)
     await page.reload()
     const artifactToggle = page.getByRole('button', {
       name: '切换文件侧栏（Ctrl+Shift+B）',
@@ -567,12 +598,20 @@ test.describe.serial('Electron security and IPC baseline', () => {
   })
 
   test('contains very long tool result lines inside the tool card', async () => {
-    await page.evaluate(() => {
-      const key = 'my-coding-agent.workbench.v1'
-      const workbench = JSON.parse(localStorage.getItem(key) ?? '{}') as {
-        conversations?: Array<Record<string, unknown>>
-        activeConversationId?: string
+    const savedWorkbench = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        getWorkbench(payload: unknown): Promise<{
+          ok: boolean
+          value?: {
+            conversations: Array<Record<string, unknown>>
+            activeConversationId?: string
+          }
+        }>
+        saveWorkbench(payload: unknown): Promise<{ ok: boolean }>
       }
+      const loaded = await api.getWorkbench({ version: 1 })
+      const workbench = loaded.value
+      if (!workbench) throw new Error('Expected workbench')
       const active = workbench.conversations?.find(
         (conversation) => conversation.id === workbench.activeConversationId,
       )
@@ -589,8 +628,9 @@ test.describe.serial('Electron security and IPC baseline', () => {
           order: 1,
         },
       ]
-      localStorage.setItem(key, JSON.stringify(workbench))
+      return api.saveWorkbench({ version: 1, workbench })
     })
+    expect(savedWorkbench.ok).toBe(true)
 
     await page.reload()
     const card = page.locator('.tool-call-card')

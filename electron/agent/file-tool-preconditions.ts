@@ -39,6 +39,7 @@ export async function captureFilePrecondition(
   guard: PathGuard,
   inputPath: string,
   operation: FileOperation,
+  maxMutationFileBytes = MAX_MUTATION_FILE_BYTES,
 ): Promise<FilePrecondition> {
   const absolutePath = guard.resolveCandidate(inputPath)
   const parentPath = path.dirname(absolutePath)
@@ -85,10 +86,10 @@ export async function captureFilePrecondition(
     throw new PathGuardError('NOT_A_FILE', 'Target is not a regular file')
   }
 
-  if (targetStat.size > MAX_MUTATION_FILE_BYTES) {
+  if (targetStat.size > maxMutationFileBytes) {
     throw new PathGuardError(
       'FILE_TOO_LARGE',
-      `File mutations support files up to ${MAX_MUTATION_FILE_BYTES} bytes`,
+      `File mutations support files up to ${maxMutationFileBytes} bytes`,
     )
   }
 

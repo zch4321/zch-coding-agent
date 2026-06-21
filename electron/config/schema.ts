@@ -6,11 +6,15 @@ import {
   RememberedRuleSchema,
   type PublicConfig,
 } from '../../shared/config'
+import {
+  DEFAULT_APPROVAL_PROMPT_REFS,
+  DEFAULT_SYSTEM_PROMPT_REFS,
+} from '../../shared/prompt-resources'
 import { DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(1),
+    schemaVersion: Type.Literal(2),
     activeProvider: Type.Literal('deepseek'),
     providers: Type.Object(
       {
@@ -54,6 +58,8 @@ export const AppConfigSchema = Type.Object(
     workspace: PublicConfigSchema.properties.workspace,
     skills: PublicConfigSchema.properties.skills,
     assistant: PublicConfigSchema.properties.assistant,
+    prompts: PublicConfigSchema.properties.prompts,
+    network: PublicConfigSchema.properties.network,
   },
   { additionalProperties: false },
 )
@@ -61,7 +67,7 @@ export const AppConfigSchema = Type.Object(
 export type AppConfig = Static<typeof AppConfigSchema>
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   activeProvider: 'deepseek',
   providers: {
     deepseek: {
@@ -97,6 +103,15 @@ export const DEFAULT_APP_CONFIG = {
       bytesPerToken: 3,
     },
     commandTimeoutMs: 120_000,
+    readFileSourceBytes: 10_000_000,
+    readFileOutputBytes: 64 * 1_024,
+    editableFileBytes: 10_000_000,
+    writeFileBytes: 256 * 1_024,
+    patchBytes: 64 * 1_024,
+    diffChars: 120_000,
+    approvalTimeoutMs: 10 * 60_000,
+    autoApprovalTimeoutMs: 15_000,
+    modelCatalogTimeoutMs: 15_000,
     terminalScrollbackBytes: 2_000_000,
   },
   logging: {
@@ -114,6 +129,13 @@ export const DEFAULT_APP_CONFIG = {
     language: 'zh-CN',
     systemPrompts: structuredClone(DEFAULT_SYSTEM_PROMPTS),
   },
+  prompts: {
+    system: structuredClone(DEFAULT_SYSTEM_PROMPT_REFS),
+    approval: structuredClone(DEFAULT_APPROVAL_PROMPT_REFS),
+  },
+  network: {
+    httpProxy: { mode: 'off' },
+  },
 } satisfies AppConfig
 
 export function toPublicConfig(
@@ -124,7 +146,7 @@ export function toPublicConfig(
     : 'none',
 ): PublicConfig {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     activeProvider: config.activeProvider,
     providers: {
       deepseek: {
@@ -148,5 +170,7 @@ export function toPublicConfig(
     workspace: structuredClone(config.workspace),
     skills: structuredClone(config.skills),
     assistant: structuredClone(config.assistant),
+    prompts: structuredClone(config.prompts),
+    network: structuredClone(config.network),
   }
 }

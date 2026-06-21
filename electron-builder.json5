@@ -9,7 +9,7 @@
   directories: {
     output: 'release/${version}',
   },
-  files: ['dist', 'dist-electron'],
+  files: ['dist', 'dist-electron', 'resources/prompts'],
   win: {
     target: [
       {

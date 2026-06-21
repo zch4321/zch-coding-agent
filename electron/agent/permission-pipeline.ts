@@ -298,6 +298,7 @@ export class PermissionPipeline {
         workspace: input.workspace,
         call: input.call,
         definition: input.definition,
+        limits: input.config.limits,
       })
     } catch (error) {
       return {
@@ -421,7 +422,9 @@ export class PermissionPipeline {
       policySignals: signals,
       diff: plan.diff,
       diffHash: plan.diffHash,
-      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      expiresAt: new Date(
+        Date.now() + input.config.limits.approvalTimeoutMs,
+      ).toISOString(),
       rememberable: rememberConstraints !== undefined,
       rememberArgConstraints: rememberConstraints,
     })

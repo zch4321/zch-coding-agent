@@ -15,6 +15,7 @@ import type { AutoApprover } from './auto-approver'
 import type { LLMProvider, ProviderMessage } from './provider'
 import type { HumanApprovalDecision } from './permission-pipeline'
 import type { SkillsManager } from '../skills/manager'
+import type { PromptRegistry } from '../prompts/registry'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -35,6 +36,8 @@ export interface SessionManagerOptions {
   pluginBus?: PluginEventBus
   skillsManager?: SkillsManager
   changeHistory?: ChangeHistoryStore
+  promptRegistry?: PromptRegistry
+  fetchImpl?: typeof fetch
   providerFactory?: (options: {
     config: PublicConfig
     apiKey: string

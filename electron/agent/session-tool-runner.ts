@@ -13,6 +13,7 @@ import type { ToolCall, ToolResult } from '../tools/types'
 import { ProviderAutoApprover } from './auto-approver'
 import type { ToolExecutor } from './tool-registry'
 import { toJsonValue } from './session-common'
+import type { PromptRegistry } from '../prompts/registry'
 import {
   normalizeToolResult,
   toolFailure,
@@ -31,6 +32,8 @@ export class SessionToolRunner {
   readonly #configStore: ConfigStore
   readonly #pluginBus: PluginEventBus | undefined
   readonly #changeHistory: ChangeHistoryStore | undefined
+  readonly #promptRegistry: PromptRegistry | undefined
+  readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #autoApproverFactory: SessionManagerOptions['autoApproverFactory']
   readonly #permissionPipeline: PermissionPipeline
   readonly #toolExecutor: ToolExecutor
@@ -49,6 +52,8 @@ export class SessionToolRunner {
     configStore: ConfigStore
     pluginBus?: PluginEventBus
     changeHistory?: ChangeHistoryStore
+    promptRegistry?: PromptRegistry
+    fetchImpl?: typeof fetch
     autoApproverFactory: SessionManagerOptions['autoApproverFactory']
     permissionPipeline: PermissionPipeline
     toolExecutor: ToolExecutor
@@ -66,6 +71,8 @@ export class SessionToolRunner {
     this.#configStore = options.configStore
     this.#pluginBus = options.pluginBus
     this.#changeHistory = options.changeHistory
+    this.#promptRegistry = options.promptRegistry
+    this.#fetchImpl = options.fetchImpl
     this.#autoApproverFactory = options.autoApproverFactory
     this.#permissionPipeline = options.permissionPipeline
     this.#toolExecutor = options.toolExecutor
@@ -121,7 +128,10 @@ export class SessionToolRunner {
                       model: config.approval.approverModel,
                       reasoning: 'off',
                       apiKey,
+                      fetchImpl: this.#fetchImpl,
                     }),
+                    config.limits.autoApprovalTimeoutMs,
+                    this.#promptRegistry?.approvalPrompt().content,
                   ))
                 : undefined
             const authorization = await this.#permissionPipeline.authorize({

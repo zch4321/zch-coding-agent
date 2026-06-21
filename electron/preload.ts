@@ -27,6 +27,9 @@ const api: AgentApi = {
   getConfig: (payload) => invoke('config:get', payload),
   setConfig: (payload) => invoke('config:set', payload),
   listProviderModels: (payload) => invoke('provider:list-models', payload),
+  getWorkbench: (payload) => invoke('workbench:get', payload),
+  saveWorkbench: (payload) => invoke('workbench:save', payload),
+  migrateWorkbenchV1: (payload) => invoke('workbench:migrate-v1', payload),
   chooseWorkspace: (payload) => invoke('workspace:choose', payload),
   listWorkspaceDirectory: (payload) =>
     invoke('workspace:list-directory', payload),

@@ -17,7 +17,12 @@ import type {
 import type { SkillsManager } from '../skills/manager'
 import type { ToolRegistry } from './tool-registry'
 import { id, ipcFault, toJsonValue } from './session-common'
-import { contextMessages, modelPromptBudget } from './session-run-utils'
+import {
+  contextMessages,
+  modelPromptBudget,
+  resolveSystemPrompt,
+} from './session-run-utils'
+import type { PromptRegistry } from '../prompts/registry'
 import type {
   ActiveRun,
   AgentEventDraft,
@@ -38,6 +43,8 @@ export class SessionProviderTurnRunner {
   readonly #toolRegistry: ToolRegistry
   readonly #skillsManager: SkillsManager | undefined
   readonly #pluginBus: PluginEventBus | undefined
+  readonly #promptRegistry: PromptRegistry | undefined
+  readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
@@ -47,6 +54,8 @@ export class SessionProviderTurnRunner {
     toolRegistry: ToolRegistry
     skillsManager?: SkillsManager
     pluginBus?: PluginEventBus
+    promptRegistry?: PromptRegistry
+    fetchImpl?: typeof fetch
     providerFactory: SessionManagerOptions['providerFactory']
     onDiagnostic: (message: string, error?: unknown) => void
     emit: (session: SessionState, event: AgentEventDraft) => void
@@ -55,6 +64,8 @@ export class SessionProviderTurnRunner {
     this.#toolRegistry = options.toolRegistry
     this.#skillsManager = options.skillsManager
     this.#pluginBus = options.pluginBus
+    this.#promptRegistry = options.promptRegistry
+    this.#fetchImpl = options.fetchImpl
     this.#providerFactory = options.providerFactory
     this.#onDiagnostic = options.onDiagnostic
     this.#emit = options.emit
@@ -74,6 +85,10 @@ export class SessionProviderTurnRunner {
     }
 
     const tools = this.#toolRegistry.providerDefinitions()
+    const skillPrompt = this.#skillsManager?.summaryPrompt() ?? ''
+    const promptResources = session.systemPromptOverride
+      ? []
+      : resolveSystemPrompt(config, skillPrompt, this.#promptRegistry).resources
     let messages = session.systemPromptOverride
       ? selectContextMessages({
           system: { role: 'system', content: session.systemPromptOverride },
@@ -85,7 +100,8 @@ export class SessionProviderTurnRunner {
           session.history,
           config,
           tools,
-          this.#skillsManager?.summaryPrompt() ?? '',
+          skillPrompt,
+          this.#promptRegistry,
         )
     const hookResult = await this.#pluginBus?.emit('beforeLLMCall', {
       version: 1,
@@ -120,6 +136,7 @@ export class SessionProviderTurnRunner {
         model: config.providers.deepseek.model,
         reasoning: config.providers.deepseek.reasoning,
         apiKey,
+        fetchImpl: this.#fetchImpl,
       })
     const llmCallId = id<CallId>('llm')
     let text = ''
@@ -137,6 +154,7 @@ export class SessionProviderTurnRunner {
         requestBytes: snapshot.requestBytes,
         prefixHash: snapshot.prefixHash,
         prefixFingerprints: snapshot.prefixFingerprints,
+        promptResources,
       })
     }
 

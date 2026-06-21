@@ -57,6 +57,7 @@ export class SessionManager {
   readonly #skillsManager: SkillsManager | undefined
   readonly #changeHistory: ChangeHistoryStore | undefined
   readonly #providerFactory: SessionManagerOptions['providerFactory']
+  readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #autoApproverFactory: SessionManagerOptions['autoApproverFactory']
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   readonly #sessions = new Map<SessionId, SessionState>()
@@ -78,6 +79,7 @@ export class SessionManager {
     this.#skillsManager = options.skillsManager
     this.#changeHistory = options.changeHistory
     this.#providerFactory = options.providerFactory
+    this.#fetchImpl = options.fetchImpl
     this.#autoApproverFactory = options.autoApproverFactory
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
     this.#events = new SessionEventEmitter({
@@ -101,6 +103,8 @@ export class SessionManager {
       toolRegistry: this.#toolRegistry,
       skillsManager: this.#skillsManager,
       pluginBus: this.#pluginBus,
+      promptRegistry: options.promptRegistry,
+      fetchImpl: this.#fetchImpl,
       providerFactory: this.#providerFactory,
       onDiagnostic: this.#onDiagnostic,
       emit: (session, event) => this.#emit(session, event),
@@ -115,7 +119,10 @@ export class SessionManager {
       this.#toolRegistry,
       () => this.#configStore.getPublicConfig().limits,
     )
-    registerFileTools(this.#toolRegistry)
+    registerFileTools(
+      this.#toolRegistry,
+      () => this.#configStore.getPublicConfig().limits,
+    )
     registerProcessTools(this.#toolRegistry, () =>
       this.#configStore.getPublicConfig(),
     )
@@ -132,6 +139,8 @@ export class SessionManager {
       configStore: this.#configStore,
       pluginBus: this.#pluginBus,
       changeHistory: this.#changeHistory,
+      promptRegistry: options.promptRegistry,
+      fetchImpl: this.#fetchImpl,
       autoApproverFactory: this.#autoApproverFactory,
       permissionPipeline: this.#permissionPipeline,
       toolExecutor: this.#toolExecutor,

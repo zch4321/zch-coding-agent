@@ -163,6 +163,7 @@ const messages = {
       bytesPerToken: '每 Token 的 UTF-8 字节数',
       reasoning: '思考深度',
       reasoningOff: '关闭',
+      reasoningLow: '低',
       reasoningHigh: '高',
       reasoningMax: '最大',
       reasoningHint:
@@ -439,6 +440,7 @@ const messages = {
       bytesPerToken: 'UTF-8 bytes per token',
       reasoning: 'Reasoning effort',
       reasoningOff: 'Off',
+      reasoningLow: 'Low',
       reasoningHigh: 'High',
       reasoningMax: 'Maximum',
       reasoningHint:
