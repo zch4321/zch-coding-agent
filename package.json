@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && npm run test:native && npm run build:app && electron-builder --win --x64",
+    "build": "npm run typecheck && npm run test:native && npm run build:app && electron-builder --win --x64 --publish never",
     "build:app": "vite build",
     "rebuild:native:source": "electron-rebuild -f -w node-pty",
     "preview": "vite preview",
