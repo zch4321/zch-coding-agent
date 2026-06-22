@@ -262,24 +262,38 @@ test.describe.serial('Electron security and IPC baseline', () => {
     const general = page.locator('.settings-section')
     await expect(general.getByText('中文系统提示词')).toBeVisible()
     await expect(general.getByText('英文系统提示词')).toBeVisible()
-    await general.locator('textarea').first().fill('E2E 中文系统提示词')
+    const zhPrompt = general
+      .locator('.settings-field', { hasText: '中文系统提示词' })
+      .locator('textarea')
+    const saveStatus = general.locator('.settings-save-status')
+    await zhPrompt.fill('E2E 中文系统提示词')
+    await expect(zhPrompt).toHaveValue('E2E 中文系统提示词')
     await general.getByRole('button', { name: '保存系统提示词' }).click()
-    const savedPrompt = await page.evaluate(async () => {
-      const api = Reflect.get(window, 'agentApi') as {
-        getConfig(payload: unknown): Promise<{
-          ok: boolean
-          value?: {
-            config: { assistant: { systemPrompts: Record<string, string> } }
+    await expect(saveStatus).toHaveText('已保存')
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          const api = Reflect.get(window, 'agentApi') as {
+            getConfig(payload: unknown): Promise<{
+              ok: boolean
+              value?: {
+                config: {
+                  assistant: { systemPrompts: Record<string, string> }
+                }
+              }
+            }>
           }
-        }>
-      }
-      return api.getConfig({ version: 1, section: 'assistant' })
-    })
-    expect(savedPrompt.value?.config.assistant.systemPrompts['zh-CN']).toBe(
-      'E2E 中文系统提示词',
-    )
+          const savedPrompt = await api.getConfig({
+            version: 1,
+            section: 'assistant',
+          })
+          return savedPrompt.value?.config.assistant.systemPrompts['zh-CN']
+        }),
+      )
+      .toBe('E2E 中文系统提示词')
     await general.getByRole('button', { name: '恢复默认提示词' }).click()
     await general.getByRole('button', { name: '保存系统提示词' }).click()
+    await expect(saveStatus).toHaveText('已保存')
 
     await settingsNavigation.getByRole('button', { name: '模型服务' }).click()
     const provider = page.locator('.settings-section')
