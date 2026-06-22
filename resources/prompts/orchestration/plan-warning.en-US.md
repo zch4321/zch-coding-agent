@@ -1,0 +1,1 @@
+The Plan auto-continuation budget is exhausted, but unfinished plan items remain. Stop auto-continuing and explicitly tell the user which items remain, their current status, and that user confirmation is required before continuing.
