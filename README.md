@@ -9,7 +9,7 @@
 Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 它是一个本地 Coding Agent：模型可以通过受控工具查看代码、修改文件、运行命令、操作持久终端，并把每一步结果回传到下一轮推理。
 
-项目的设计目标是在“能真正完成工程任务”和“不能随意破坏本机环境”之间做一个清晰的产品边界。渲染进程只负责 UI，主进程负责 Agent runtime、工具执行、凭据管理和 IPC 校验；所有跨进程 payload 都有共享 schema，并在 IPC 边界做运行时验证。
+![Workbench](docs/images/readme/workbench.png)
 
 ## 核心能力
 
