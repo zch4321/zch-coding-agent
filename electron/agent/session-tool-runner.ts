@@ -1,9 +1,12 @@
 import type { RunStatus } from '../../shared/agent-events'
+import {
+  getProviderConfig,
+  type ProviderPublicConfig,
+} from '../../shared/config'
 import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { ChangeHistoryStore } from './change-history'
 import { boundToolResultForContext } from './context-budget'
-import { DeepSeekProvider } from './deepseek-provider'
 import {
   PermissionPipeline,
   type ApprovedToolCall,
@@ -21,12 +24,14 @@ import {
 } from './session-run-utils'
 import type { SessionApprovalCoordinator } from './session-approval'
 import type { SessionContextGate } from './session-context-gate'
+import { createConfiguredProvider } from './session-provider-turn'
 import type {
   ActiveRun,
   AgentEventDraft,
   SessionManagerOptions,
   SessionState,
 } from './session-types'
+import { normalizeLlmUsage } from './usage'
 
 export class SessionToolRunner {
   readonly #configStore: ConfigStore
@@ -107,6 +112,7 @@ export class SessionToolRunner {
       let diffHash: string | undefined
       let approvedCall: ApprovedToolCall | undefined
       let approvedDiff = ''
+      let approvalUsageProvider: ProviderPublicConfig | undefined
       const startedAt = performance.now()
       try {
         if (run.controller.signal.aborted) {
@@ -118,18 +124,32 @@ export class SessionToolRunner {
             result = inspected.result
           } else {
             const config = this.#configStore.getPublicConfig()
-            const apiKey = await this.#configStore.getDeepSeekApiKey()
+            const configuredApproverProvider = getProviderConfig(
+              config,
+              config.approval.approverProviderId,
+            )
+            approvalUsageProvider = configuredApproverProvider
+              ? {
+                  ...configuredApproverProvider,
+                  model: config.approval.approverModel,
+                  reasoning: 'off',
+                }
+              : undefined
+            const apiKey = configuredApproverProvider
+              ? await this.#configStore.getProviderApiKey(
+                  configuredApproverProvider.id,
+                )
+              : undefined
             const autoApprover =
-              session.mode === 'auto' && apiKey
+              session.mode === 'auto' && apiKey && approvalUsageProvider
                 ? (this.#autoApproverFactory?.({ config, apiKey }) ??
                   new ProviderAutoApprover(
-                    new DeepSeekProvider({
-                      baseURL: config.providers.deepseek.baseURL,
-                      model: config.approval.approverModel,
-                      reasoning: 'off',
+                    createConfiguredProvider(
+                      config,
+                      approvalUsageProvider,
                       apiKey,
-                      fetchImpl: this.#fetchImpl,
-                    }),
+                      this.#fetchImpl,
+                    ),
                     config.limits.autoApprovalTimeoutMs,
                     this.#promptRegistry?.approvalPrompt().content,
                   ))
@@ -173,6 +193,32 @@ export class SessionToolRunner {
                 decision: authorization.autoDecision.decision,
                 reason: authorization.autoDecision.note,
               })
+              const approvalUsage =
+                approvalUsageProvider && authorization.autoDecision.usage
+                  ? normalizeLlmUsage({
+                      scope: 'approval',
+                      config,
+                      provider: approvalUsageProvider,
+                      raw: authorization.autoDecision.usage,
+                    })
+                  : undefined
+
+              if (approvalUsage) {
+                await session.logger.write({
+                  type: 'llm.usage',
+                  sessionId: session.sessionId,
+                  runId: run.runId,
+                  callId: call.id,
+                  usage: approvalUsage,
+                })
+                this.#emit(session, {
+                  type: 'llm.usage',
+                  sessionId: session.sessionId,
+                  runId: run.runId,
+                  callId: call.id,
+                  usage: approvalUsage,
+                })
+              }
             }
 
             if (!authorization.ok) {

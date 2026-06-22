@@ -1,4 +1,4 @@
-import type { PublicConfig } from '../../shared/config'
+import { getActiveProviderConfig, type PublicConfig } from '../../shared/config'
 import type { RunStatus, ToolResultEnvelope } from '../../shared/agent-events'
 import type { JsonValue } from '../../shared/json'
 import type { ToolResult } from '../tools/types'
@@ -64,8 +64,9 @@ export function modelPromptBudget(
   config: PublicConfig,
   tools: JsonValue[],
 ): number {
-  const model = resolveModelProfiles(config).find(
-    (candidate) => candidate.id === config.providers.deepseek.model,
+  const provider = getActiveProviderConfig(config)
+  const model = resolveModelProfiles(config, provider.id).find(
+    (candidate) => candidate.id === provider.model,
   )
   const contextWindow =
     model?.contextWindowTokens ?? config.limits.maxContextTokens

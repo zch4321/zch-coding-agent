@@ -7,6 +7,7 @@ import {
 } from './ids'
 import { JsonValueSchema } from './json'
 import { TerminalStatusSchema } from './terminal'
+import { LlmUsageRecordSchema } from './usage'
 
 const EventBaseSchema = Type.Object({
   schemaVersion: Type.Literal(1),
@@ -150,6 +151,16 @@ export const AgentEventSchema = Type.Union([
       runId: RunIdSchema,
       callId: CallIdSchema,
       result: ToolResultEnvelopeSchema,
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
+      type: Type.Literal('llm.usage'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      callId: CallIdSchema,
+      usage: LlmUsageRecordSchema,
     }),
   ]),
   Type.Composite([

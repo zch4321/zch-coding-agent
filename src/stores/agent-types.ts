@@ -1,5 +1,21 @@
 import type { CallId, RunId } from '../../shared/ids'
 
+export interface UiLlmUsageRecord {
+  scope: 'main' | 'approval' | 'title' | 'compression'
+  providerId: string
+  providerLabel: string
+  model: string
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  reasoningTokens?: number
+  cacheHitTokens?: number
+  cacheMissTokens?: number
+  contextWindowTokens: number
+  contextWindowSource: 'override' | 'builtin' | 'default' | 'provider'
+  raw: unknown
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'orchestrator'
@@ -17,6 +33,13 @@ export interface ToolActivity {
   reason: string
   status: 'proposed' | 'completed'
   result?: unknown
+  order?: number
+}
+
+export interface UsageActivity {
+  runId: RunId
+  callId: CallId
+  usage: UiLlmUsageRecord
   order?: number
 }
 
@@ -55,6 +78,7 @@ export interface ConversationRecord {
   mode: import('../../shared/config').PermissionMode
   messages: ChatMessage[]
   tools?: ToolActivity[]
+  usage?: UsageActivity[]
   orchestratorEntries?: OrchestratorEntry[]
   latestReviewedApproval?: ReviewedApproval
   createdAt: string

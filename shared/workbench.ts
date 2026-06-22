@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox'
 import { PermissionModeSchema } from './config'
 import { CallIdSchema, RunIdSchema } from './ids'
 import { JsonValueSchema } from './json'
+import { LlmUsageRecordSchema } from './usage'
 
 export const ChatMessageSchema = Type.Object(
   {
@@ -34,6 +35,17 @@ export const ToolActivitySchema = Type.Object(
   { additionalProperties: false },
 )
 export type ToolActivity = Static<typeof ToolActivitySchema>
+
+export const UsageActivitySchema = Type.Object(
+  {
+    runId: RunIdSchema,
+    callId: CallIdSchema,
+    usage: LlmUsageRecordSchema,
+    order: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
+  },
+  { additionalProperties: false },
+)
+export type UsageActivity = Static<typeof UsageActivitySchema>
 
 export const ReviewedApprovalSchema = Type.Object(
   {
@@ -86,6 +98,7 @@ export const ConversationRecordSchema = Type.Object(
     mode: PermissionModeSchema,
     messages: Type.Array(ChatMessageSchema, { maxItems: 10_000 }),
     tools: Type.Optional(Type.Array(ToolActivitySchema, { maxItems: 10_000 })),
+    usage: Type.Optional(Type.Array(UsageActivitySchema, { maxItems: 10_000 })),
     orchestratorEntries: Type.Optional(
       Type.Array(OrchestratorEntrySchema, { maxItems: 10_000 }),
     ),

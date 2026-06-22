@@ -118,6 +118,23 @@ const statusLabel = computed(() => {
 
   return ''
 })
+function usageTokens(value: typeof agent.latestUsage): number {
+  if (!value) return 0
+  return (
+    value.totalTokens ??
+    (value.promptTokens ?? 0) + (value.completionTokens ?? 0)
+  )
+}
+const usageSummary = computed(() => {
+  if (!agent.latestUsage) return ''
+
+  return t('app.usageSummary', {
+    latest: usageTokens(agent.latestUsage).toLocaleString(),
+    total: agent.conversationTotalTokens.toLocaleString(),
+    context: agent.latestUsage.contextWindowTokens.toLocaleString(),
+    source: agent.latestUsage.contextWindowSource,
+  })
+})
 function openSettings(tab: SettingsTab = 'general') {
   settingsTab.value = tab
   settingsOpen.value = true
@@ -399,6 +416,9 @@ onUnmounted(() => {
                   <div>
                     <h1>{{ activeTitle }}</h1>
                     <p v-if="agent.workspacePath">{{ projectName }}</p>
+                    <p v-if="usageSummary" class="usage-summary">
+                      {{ usageSummary }}
+                    </p>
                   </div>
                   <span
                     v-if="statusLabel"

@@ -1,3 +1,4 @@
+import { getActiveProviderConfig, type PublicConfig } from '../../shared/config'
 import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { PluginEventBus } from '../plugins/event-bus'
@@ -7,7 +8,7 @@ import {
   estimateJsonTokens,
   selectContextMessages,
 } from './context-budget'
-import { DeepSeekProvider } from './deepseek-provider'
+import { OpenAICompatibleProvider } from './deepseek-provider'
 import type {
   ProviderAssistantTurn,
   ProviderEvent,
@@ -30,6 +31,7 @@ import type {
   SessionState,
 } from './session-types'
 import type { CallId } from '../../shared/ids'
+import { normalizeLlmUsage } from './usage'
 
 export interface ProviderTurnResult {
   turn: ProviderAssistantTurn
@@ -78,10 +80,14 @@ export class SessionProviderTurnRunner {
   ): Promise<ProviderTurnResult> {
     setRunCalling()
     const config = this.#configStore.getPublicConfig()
-    const apiKey = await this.#configStore.getDeepSeekApiKey()
+    const providerConfig = getActiveProviderConfig(config)
+    const apiKey = await this.#configStore.getProviderApiKey(providerConfig.id)
 
     if (!apiKey) {
-      ipcFault('PRECONDITION_FAILED', 'DeepSeek credential is not available')
+      ipcFault(
+        'PRECONDITION_FAILED',
+        `${providerConfig.label} credential is not available`,
+      )
     }
 
     const tools = this.#toolRegistry.providerDefinitions()
@@ -109,8 +115,8 @@ export class SessionProviderTurnRunner {
       runId: run.runId,
       messages: toJsonValue(messages) as JsonValue[],
       params: {
-        provider: 'deepseek',
-        model: config.providers.deepseek.model,
+        provider: providerConfig.id,
+        model: providerConfig.model,
       },
     })
 
@@ -131,13 +137,7 @@ export class SessionProviderTurnRunner {
 
     const provider =
       this.#providerFactory?.({ config, apiKey }) ??
-      new DeepSeekProvider({
-        baseURL: config.providers.deepseek.baseURL,
-        model: config.providers.deepseek.model,
-        reasoning: config.providers.deepseek.reasoning,
-        apiKey,
-        fetchImpl: this.#fetchImpl,
-      })
+      createConfiguredProvider(config, providerConfig, apiKey, this.#fetchImpl)
     const llmCallId = id<CallId>('llm')
     let text = ''
     let reasoning = ''
@@ -177,7 +177,7 @@ export class SessionProviderTurnRunner {
           delta: event.delta,
         })
       } else if (event.type === 'reasoning.delta') {
-        if (config.providers.deepseek.reasoning !== 'off') {
+        if (providerConfig.reasoning !== 'off') {
           reasoning += event.delta
           this.#emit(session, {
             type: 'assistant.reasoning.delta',
@@ -206,6 +206,29 @@ export class SessionProviderTurnRunner {
       usage: completed.usage,
       timing: completed.timing,
     })
+    const usage = normalizeLlmUsage({
+      scope: 'main',
+      config,
+      provider: providerConfig,
+      raw: completed.usage,
+    })
+
+    if (usage) {
+      await session.logger.write({
+        type: 'llm.usage',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: llmCallId,
+        usage,
+      })
+      this.#emit(session, {
+        type: 'llm.usage',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: llmCallId,
+        usage,
+      })
+    }
     await this.#pluginBus
       ?.emit('afterLLMCall', {
         version: 1,
@@ -225,4 +248,21 @@ export class SessionProviderTurnRunner {
       reasoning,
     }
   }
+}
+
+export function createConfiguredProvider(
+  _config: PublicConfig,
+  provider: ReturnType<typeof getActiveProviderConfig>,
+  apiKey: string,
+  fetchImpl?: typeof fetch,
+): OpenAICompatibleProvider {
+  return new OpenAICompatibleProvider({
+    providerId: provider.id,
+    profile: provider.profile,
+    baseURL: provider.baseURL,
+    model: provider.model,
+    reasoning: provider.reasoning,
+    apiKey,
+    fetchImpl,
+  })
 }

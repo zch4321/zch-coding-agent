@@ -5,12 +5,35 @@ import { DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 
 describe('config migrations', () => {
   it('maps the legacy automatic reasoning setting to DeepSeek high effort', () => {
-    const legacy = structuredClone(DEFAULT_APP_CONFIG) as unknown as {
-      providers: { deepseek: { reasoning: string } }
+    const legacy = {
+      schemaVersion: 2,
+      activeProvider: 'deepseek',
+      providers: {
+        deepseek: {
+          baseURL: 'https://api.deepseek.com',
+          model: 'deepseek-chat',
+          modelCatalog: [],
+          modelOverrides: {},
+          reasoning: 'auto',
+        },
+      },
+      approval: {
+        approverProvider: 'deepseek',
+        approverModel: 'deepseek-chat',
+      },
     }
-    legacy.providers.deepseek.reasoning = 'auto'
 
-    expect(migrateConfig(legacy).providers.deepseek.reasoning).toBe('high')
+    const migrated = migrateConfig(legacy)
+
+    expect(migrated.providers[0].reasoning).toBe('high')
+    expect(migrated.approval.approverProviderId).toBe('deepseek')
+  })
+
+  it('maps the mistakenly exposed low reasoning setting to DeepSeek high effort', () => {
+    const legacy = structuredClone(DEFAULT_APP_CONFIG)
+    legacy.providers[0].reasoning = 'low' as never
+
+    expect(migrateConfig(legacy).providers[0].reasoning).toBe('high')
   })
 
   it('adds localized system prompts to existing version-one configs', () => {
@@ -25,7 +48,7 @@ describe('config migrations', () => {
     })
   })
 
-  it('upgrades version-one configs to schema v2 defaults', () => {
+  it('upgrades version-one configs to schema v3 defaults', () => {
     const legacy = structuredClone(DEFAULT_APP_CONFIG) as Partial<
       typeof DEFAULT_APP_CONFIG
     >
@@ -35,7 +58,7 @@ describe('config migrations', () => {
 
     const migrated = migrateConfig(legacy)
 
-    expect(migrated.schemaVersion).toBe(2)
+    expect(migrated.schemaVersion).toBe(3)
     expect(migrated.network.httpProxy).toEqual({ mode: 'off' })
     expect(migrated.prompts.approval.classifyRisk.id).toBe(
       'approval.classify-risk',

@@ -16,6 +16,8 @@ const messages = {
       failed: '失败',
       cancelling: '正在取消',
       waitingApproval: '等待审批',
+      usageSummary:
+        '上次 {latest} tokens · 对话累计 {total} · 上下文 {context}（{source}）',
     },
     common: {
       cancel: '取消',
@@ -155,6 +157,12 @@ const messages = {
       removeHint: '移除项目会清理应用历史和运行资源，但不会删除磁盘文件。',
       providerTitle: '模型服务',
       providerHint: '配置主模型和自动审批模型。',
+      providerLabel: 'Provider 名称',
+      providerProfile: 'Provider Profile',
+      providerProfileDeepSeek: 'DeepSeek',
+      providerProfileGeneric: '通用 OpenAI 兼容',
+      providerProfileHint:
+        'DeepSeek profile 会发送 thinking/reasoning_effort；通用 OpenAI 兼容 profile 不发送 DeepSeek 专有参数。',
       baseUrl: '基础 URL',
       mainModel: '主模型',
       contextOverride: '上下文窗口覆盖值',
@@ -163,11 +171,10 @@ const messages = {
       bytesPerToken: '每 Token 的 UTF-8 字节数',
       reasoning: '思考深度',
       reasoningOff: '关闭',
-      reasoningLow: '低',
       reasoningHigh: '高',
       reasoningMax: '最大',
-      reasoningHint:
-        'DeepSeek V4 Pro 实际支持 high 与 max；low/medium 会被服务端映射为 high。',
+      reasoningHint: 'DeepSeek V4 Pro 支持 high 与 max；关闭会禁用 thinking。',
+      approverProvider: '自动审批 Provider',
       approverModel: '自动审批模型',
       apiKey: 'API Key',
       apiKeyPlaceholder: '输入新的 Key',
@@ -285,6 +292,8 @@ const messages = {
       failed: 'Failed',
       cancelling: 'Cancelling',
       waitingApproval: 'Waiting for approval',
+      usageSummary:
+        'Last {latest} tokens · conversation {total} · context {context} ({source})',
     },
     common: {
       cancel: 'Cancel',
@@ -432,6 +441,12 @@ const messages = {
         'Removing a project clears app history and runtime resources. It does not delete files from disk.',
       providerTitle: 'Provider',
       providerHint: 'Configure the main model and the Auto approval model.',
+      providerLabel: 'Provider label',
+      providerProfile: 'Provider profile',
+      providerProfileDeepSeek: 'DeepSeek',
+      providerProfileGeneric: 'Generic OpenAI-compatible',
+      providerProfileHint:
+        'The DeepSeek profile sends thinking/reasoning_effort. The generic OpenAI-compatible profile does not send DeepSeek-specific parameters.',
       baseUrl: 'Base URL',
       mainModel: 'Main model',
       contextOverride: 'Context window override',
@@ -440,11 +455,11 @@ const messages = {
       bytesPerToken: 'UTF-8 bytes per token',
       reasoning: 'Reasoning effort',
       reasoningOff: 'Off',
-      reasoningLow: 'Low',
       reasoningHigh: 'High',
       reasoningMax: 'Maximum',
       reasoningHint:
-        'DeepSeek V4 Pro supports high and max; low/medium are mapped to high by the service.',
+        'DeepSeek V4 Pro supports high and max. Off disables thinking.',
+      approverProvider: 'Auto approver provider',
       approverModel: 'Auto approver model',
       apiKey: 'API key',
       apiKeyPlaceholder: 'Enter a new key',

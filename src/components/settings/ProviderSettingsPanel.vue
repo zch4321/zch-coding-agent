@@ -6,9 +6,12 @@ import { useAgentStore } from '../../stores/agent'
 
 const agent = useAgentStore()
 const { t } = useI18n()
+const profileOptions = computed(() => [
+  { label: t('settings.providerProfileDeepSeek'), value: 'deepseek' },
+  { label: t('settings.providerProfileGeneric'), value: 'generic' },
+])
 const reasoningOptions = computed(() => [
   { label: t('settings.reasoningOff'), value: 'off' },
-  { label: t('settings.reasoningLow'), value: 'low' },
   { label: t('settings.reasoningHigh'), value: 'high' },
   { label: t('settings.reasoningMax'), value: 'max' },
 ])
@@ -24,6 +27,22 @@ const tokenEstimationOptions = computed(() => [
       <h2>{{ t('settings.providerTitle') }}</h2>
       <p>{{ t('settings.providerHint') }}</p>
     </div>
+    <div class="settings-inline settings-inline-equal">
+      <label class="settings-field">
+        <span>{{ t('settings.providerLabel') }}</span>
+        <NInput v-model:value="agent.providerForm.label" />
+      </label>
+      <label class="settings-field">
+        <span>{{ t('settings.providerProfile') }}</span>
+        <NSelect
+          v-model:value="agent.providerForm.profile"
+          :options="profileOptions"
+        />
+      </label>
+    </div>
+    <p class="settings-footnote">
+      {{ t('settings.providerProfileHint') }}
+    </p>
     <label class="settings-field">
       <span>{{ t('settings.baseUrl') }}</span>
       <NInput v-model:value="agent.providerForm.baseURL" />
@@ -114,6 +133,14 @@ const tokenEstimationOptions = computed(() => [
       <small>
         {{ t('settings.reasoningHint') }}
       </small>
+    </label>
+    <label class="settings-field">
+      <span>{{ t('settings.approverProvider') }}</span>
+      <NSelect
+        v-model:value="agent.providerForm.approverProviderId"
+        :options="agent.providerOptions"
+        filterable
+      />
     </label>
     <label class="settings-field">
       <span>{{ t('settings.approverModel') }}</span>

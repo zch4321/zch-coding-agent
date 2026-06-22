@@ -82,7 +82,7 @@ describe('ConfigStore', () => {
     )
     const rendererText = JSON.stringify(publicConfig)
 
-    expect(publicConfig.providers.deepseek.credentialConfigured).toBe(true)
+    expect(publicConfig.providers[0].credentialConfigured).toBe(true)
     expect(configText).not.toContain(apiKey)
     expect(secretText).not.toContain(apiKey)
     expect(rendererText).not.toContain(apiKey)
@@ -104,9 +104,7 @@ describe('ConfigStore', () => {
     )
     await store.initialize()
 
-    expect(
-      store.getPublicConfig().providers.deepseek.credentialConfigured,
-    ).toBe(true)
+    expect(store.getPublicConfig().providers[0].credentialConfigured).toBe(true)
     await expect(store.getDeepSeekApiKey()).resolves.toBe('environment-secret')
     expect(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
@@ -135,7 +133,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(2)
+    expect(parsed.schemaVersion).toBe(3)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBeGreaterThan(
       0,
     )
@@ -161,7 +159,7 @@ describe('ConfigStore', () => {
       maxOutputTokens: 10_000,
     })
 
-    expect(configStore.getPublicConfig().providers.deepseek).toMatchObject({
+    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
       modelCatalog: [{ id: 'model-a', ownedBy: 'provider' }],
       modelCatalogFetchedAt: '2026-06-19T00:00:00.000Z',
       modelOverrides: {
@@ -181,9 +179,9 @@ describe('ConfigStore', () => {
       contextWindowTokens: null,
       maxOutputTokens: null,
     })
-    expect(
-      configStore.getPublicConfig().providers.deepseek.modelOverrides,
-    ).toEqual({})
+    expect(configStore.getPublicConfig().providers[0].modelOverrides).toEqual(
+      {},
+    )
   })
 
   it('persists localized configurable system prompts', async () => {
@@ -221,7 +219,7 @@ describe('ConfigStore', () => {
       reasoning: 'off',
       contextWindowTokens: 128_000,
       maxOutputTokens: 8_000,
-      approverProvider: 'deepseek',
+      approverProviderId: 'deepseek',
       approverModel: 'model-approver',
       limits: {
         ...limits,
@@ -230,7 +228,7 @@ describe('ConfigStore', () => {
       apiKey: 'atomic-secret',
     })
 
-    expect(result.providers.deepseek).toMatchObject({
+    expect(result.providers[0]).toMatchObject({
       baseURL: 'https://example.test/v1',
       model: 'model-b',
       reasoning: 'off',
@@ -242,6 +240,7 @@ describe('ConfigStore', () => {
         },
       },
     })
+    expect(result.approval.approverProviderId).toBe('deepseek')
     expect(result.approval.approverModel).toBe('model-approver')
     expect(result.limits.tokenEstimation).toEqual({
       mode: 'custom-bytes',

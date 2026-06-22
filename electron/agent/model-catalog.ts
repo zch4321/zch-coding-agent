@@ -1,4 +1,9 @@
-import type { PublicConfig, ProviderModel } from '../../shared/config'
+import {
+  getActiveProviderConfig,
+  getProviderConfig,
+  type PublicConfig,
+  type ProviderModel,
+} from '../../shared/config'
 
 const MAX_CATALOG_BYTES = 1_000_000
 const MAX_MODELS = 1_000
@@ -46,7 +51,7 @@ export function modelCatalogEndpoint(baseURL: string): string {
   return new URL('models', normalized).toString()
 }
 
-export async function fetchDeepSeekModelCatalog(options: {
+export async function fetchOpenAICompatibleModelCatalog(options: {
   baseURL: string
   apiKey: string
   signal?: AbortSignal
@@ -135,8 +140,14 @@ export async function fetchDeepSeekModelCatalog(options: {
   }
 }
 
-export function resolveModelProfiles(config: PublicConfig): ModelProfile[] {
-  const provider = config.providers.deepseek
+export const fetchDeepSeekModelCatalog = fetchOpenAICompatibleModelCatalog
+
+export function resolveModelProfiles(
+  config: PublicConfig,
+  providerId = config.activeProviderId,
+): ModelProfile[] {
+  const provider =
+    getProviderConfig(config, providerId) ?? getActiveProviderConfig(config)
   const models = new Map(
     provider.modelCatalog.map((model) => [model.id, model]),
   )

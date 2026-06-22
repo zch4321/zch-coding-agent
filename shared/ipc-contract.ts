@@ -255,7 +255,7 @@ export const IPC_CONTRACTS = {
         conversationId: Type.String({ minLength: 1, maxLength: 256 }),
         workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
         mode: PermissionModeSchema,
-        provider: Type.Literal('deepseek'),
+        provider: Type.String({ minLength: 1, maxLength: 128 }),
       },
       { additionalProperties: false },
     ),

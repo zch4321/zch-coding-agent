@@ -24,11 +24,11 @@ type WorkbenchBridge = {
   }): Promise<WorkbenchIpcResult>
   migrateWorkbenchV1(payload: {
     version: typeof IPC_VERSION
-    workbench: PersistedWorkbench
+    workbench: unknown
   }): Promise<WorkbenchIpcResult>
   saveWorkbench(payload: {
     version: typeof IPC_VERSION
-    workbench: PersistedWorkbench
+    workbench: unknown
   }): Promise<WorkbenchIpcResult>
 }
 

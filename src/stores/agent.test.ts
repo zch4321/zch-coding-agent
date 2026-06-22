@@ -117,8 +117,8 @@ describe('agent store regressions', () => {
   it('saves one immutable provider draft in a single atomic request', async () => {
     const oldConfig = toPublicConfig(DEFAULT_APP_CONFIG, true)
     const finalConfig = structuredClone(oldConfig)
-    finalConfig.providers.deepseek.baseURL = 'https://example.test'
-    finalConfig.providers.deepseek.model = 'new-model'
+    finalConfig.providers[0].baseURL = 'https://example.test'
+    finalConfig.providers[0].model = 'new-model'
     finalConfig.approval.approverModel = 'new-approver'
     finalConfig.limits.tokenEstimation = {
       mode: 'custom-bytes',

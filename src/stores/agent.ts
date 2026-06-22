@@ -48,6 +48,7 @@ const settingsProperties = new Set<PropertyKey>([
   'yoloNoticeVersion',
   'credentialConfiguredValue',
   'credentialSource',
+  'providers',
   'builtinPolicies',
   'rememberedRules',
   'defaultMode',
@@ -71,6 +72,7 @@ const settingsProperties = new Set<PropertyKey>([
   'yoloNoticeAccepted',
   'credentialConfigured',
   'modelOptions',
+  'providerOptions',
   'activeModelProfile',
   'providerDirty',
 ])
@@ -85,8 +87,11 @@ const timelineProperties = new Set<PropertyKey>([
   'input',
   'messages',
   'tools',
+  'usage',
   'timelineCounter',
   'latestReviewedApproval',
+  'latestUsage',
+  'conversationTotalTokens',
 ])
 const runtimeProperties = new Set<PropertyKey>([
   'sessionIdsByConversation',

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
-import { DeepSeekProvider } from './deepseek-provider'
+import { DeepSeekProvider, OpenAICompatibleProvider } from './deepseek-provider'
 import type { ProviderEvent } from './provider'
 
 function sseResponse(payloads: JsonValue[]): Response {
@@ -205,6 +205,38 @@ describe('DeepSeekProvider', () => {
     expect(bodies[1]).not.toHaveProperty('reasoning_effort')
   })
 
+  it('does not send DeepSeek-specific thinking parameters for generic OpenAI-compatible providers', async () => {
+    let body = ''
+    const provider = new OpenAICompatibleProvider({
+      providerId: 'local-openai',
+      profile: 'generic',
+      baseURL: 'https://api.example/v1',
+      model: 'generic-model',
+      apiKey: 'secret',
+      reasoning: 'max',
+      fetchImpl: async (_input, init) => {
+        body = String(init?.body)
+        return sseResponse([])
+      },
+    })
+
+    for await (const event of provider.streamChat({
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      signal: new AbortController().signal,
+    })) {
+      void event
+    }
+
+    const parsed = JSON.parse(body)
+    expect(parsed).toMatchObject({
+      model: 'generic-model',
+      stream: true,
+    })
+    expect(parsed).not.toHaveProperty('thinking')
+    expect(parsed).not.toHaveProperty('reasoning_effort')
+  })
+
   it('preserves hidden reasoning continuation when display is off', async () => {
     const provider = new DeepSeekProvider({
       baseURL: 'https://api.example/v1',
@@ -270,7 +302,7 @@ describe('DeepSeekProvider', () => {
     }
 
     await expect(consume()).rejects.toThrow(
-      'DeepSeek request failed with status 400',
+      'deepseek request failed with status 400',
     )
     await expect(consume()).rejects.not.toThrow('secret request echo')
   })

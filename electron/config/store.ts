@@ -3,7 +3,15 @@ import path from 'node:path'
 import type { ConfigSetRequest, PublicConfig } from '../../shared/config'
 import { writeJsonAtomic } from './atomic-file'
 import { migrateConfig } from './migrations'
-import { DEFAULT_APP_CONFIG, toPublicConfig, type AppConfig } from './schema'
+import {
+  DEFAULT_APP_CONFIG,
+  DEFAULT_PROVIDER_ID,
+  getActiveAppProvider,
+  getAppProvider,
+  toPublicConfig,
+  type AppConfig,
+  type AppProviderConfig,
+} from './schema'
 import type { SecretStore, SecretStorageStatus } from './secret-store'
 
 type ProviderUpdate = Extract<
@@ -12,34 +20,52 @@ type ProviderUpdate = Extract<
 >
 
 function applyProviderUpdate(next: AppConfig, request: ProviderUpdate): void {
-  next.providers.deepseek.baseURL = request.baseURL
-  next.providers.deepseek.model = request.model
-  next.providers.deepseek.reasoning = request.reasoning
-  next.providers.deepseek.modelOverrides[request.model] = {
-    ...next.providers.deepseek.modelOverrides[request.model],
+  const providerId = request.providerId ?? next.activeProviderId
+  let provider = getAppProvider(next, providerId)
+
+  if (!provider) {
+    provider = {
+      id: providerId,
+      label: request.label ?? providerId,
+      protocol: 'openai-compatible',
+      profile: request.profile ?? 'generic',
+      baseURL: request.baseURL,
+      model: request.model,
+      reasoning: request.reasoning,
+      modelCatalog: [],
+      modelOverrides: {},
+    }
+    next.providers.push(provider)
+  }
+
+  provider.label = request.label ?? provider.label
+  provider.profile = request.profile ?? provider.profile
+  provider.baseURL = request.baseURL
+  provider.model = request.model
+  provider.reasoning = request.reasoning
+  provider.modelOverrides[request.model] = {
+    ...provider.modelOverrides[request.model],
   }
 
   if (request.contextWindowTokens === null) {
-    delete next.providers.deepseek.modelOverrides[request.model]
-      .contextWindowTokens
+    delete provider.modelOverrides[request.model].contextWindowTokens
   } else if (request.contextWindowTokens !== undefined) {
-    next.providers.deepseek.modelOverrides[request.model].contextWindowTokens =
+    provider.modelOverrides[request.model].contextWindowTokens =
       request.contextWindowTokens
   }
 
   if (request.maxOutputTokens === null) {
-    delete next.providers.deepseek.modelOverrides[request.model].maxOutputTokens
+    delete provider.modelOverrides[request.model].maxOutputTokens
   } else if (request.maxOutputTokens !== undefined) {
-    next.providers.deepseek.modelOverrides[request.model].maxOutputTokens =
+    provider.modelOverrides[request.model].maxOutputTokens =
       request.maxOutputTokens
   }
 
-  if (
-    Object.keys(next.providers.deepseek.modelOverrides[request.model])
-      .length === 0
-  ) {
-    delete next.providers.deepseek.modelOverrides[request.model]
+  if (Object.keys(provider.modelOverrides[request.model]).length === 0) {
+    delete provider.modelOverrides[request.model]
   }
+
+  next.activeProviderId = provider.id
 }
 
 export class ConfigStore {
@@ -74,18 +100,21 @@ export class ConfigStore {
   }
 
   getPublicConfig(): PublicConfig {
-    const stored = this.#secretStore.has(
-      this.#config.providers.deepseek.apiKeyRef,
-    )
-    return toPublicConfig(
-      this.#config,
-      stored || Boolean(this.#environmentApiKey),
-      stored
-        ? 'safe-storage'
-        : this.#environmentApiKey
-          ? 'environment'
-          : 'none',
-    )
+    return toPublicConfig(this.#config, (provider) => {
+      const stored = this.#secretStore.has(provider.apiKeyRef)
+      const environment =
+        provider.id === DEFAULT_PROVIDER_ID
+          ? Boolean(this.#environmentApiKey)
+          : false
+      return {
+        credentialConfigured: stored || environment,
+        credentialSource: stored
+          ? 'safe-storage'
+          : environment
+            ? 'environment'
+            : 'none',
+      }
+    })
   }
 
   getInternalConfig(): AppConfig {
@@ -93,11 +122,22 @@ export class ConfigStore {
   }
 
   async getDeepSeekApiKey(): Promise<string | undefined> {
-    const reference = this.#config.providers.deepseek.apiKeyRef
+    return this.getProviderApiKey(DEFAULT_PROVIDER_ID)
+  }
+
+  async getProviderApiKey(providerId: string): Promise<string | undefined> {
+    const provider = getAppProvider(this.#config, providerId)
+    const reference = provider?.apiKeyRef
     const stored = reference
       ? await this.#secretStore.get(reference)
       : undefined
-    return stored ?? this.#environmentApiKey
+    const environment =
+      provider?.id === DEFAULT_PROVIDER_ID ? this.#environmentApiKey : undefined
+    return stored ?? environment
+  }
+
+  getActiveProvider(): AppProviderConfig {
+    return structuredClone(getActiveAppProvider(this.#config))
   }
 
   update(request: ConfigSetRequest): Promise<PublicConfig> {
@@ -109,14 +149,21 @@ export class ConfigStore {
     return operation
   }
 
-  setDeepSeekModelCatalog(
-    models: AppConfig['providers']['deepseek']['modelCatalog'],
+  setProviderModelCatalog(
+    providerId: string,
+    models: AppProviderConfig['modelCatalog'],
     fetchedAt: string,
   ): Promise<PublicConfig> {
     const operation = this.#mutation.then(async () => {
       const next = structuredClone(this.#config)
-      next.providers.deepseek.modelCatalog = structuredClone(models)
-      next.providers.deepseek.modelCatalogFetchedAt = fetchedAt
+      const provider = getAppProvider(next, providerId)
+
+      if (!provider) {
+        throw new Error(`Provider not found: ${providerId}`)
+      }
+
+      provider.modelCatalog = structuredClone(models)
+      provider.modelCatalogFetchedAt = fetchedAt
       await writeJsonAtomic(this.#filePath, next)
       this.#config = next
       return this.getPublicConfig()
@@ -126,6 +173,13 @@ export class ConfigStore {
       () => undefined,
     )
     return operation
+  }
+
+  setDeepSeekModelCatalog(
+    models: AppProviderConfig['modelCatalog'],
+    fetchedAt: string,
+  ): Promise<PublicConfig> {
+    return this.setProviderModelCatalog(DEFAULT_PROVIDER_ID, models, fetchedAt)
   }
 
   async #apply(request: ConfigSetRequest): Promise<PublicConfig> {
@@ -138,7 +192,7 @@ export class ConfigStore {
       case 'provider-settings': {
         applyProviderUpdate(next, request)
         next.approval = {
-          approverProvider: request.approverProvider,
+          approverProviderId: request.approverProviderId,
           approverModel: request.approverModel,
         }
         next.limits = structuredClone(request.limits)
@@ -147,9 +201,12 @@ export class ConfigStore {
           break
         }
 
-        const previousReference = next.providers.deepseek.apiKeyRef
+        const provider =
+          getAppProvider(next, request.providerId ?? next.activeProviderId) ??
+          getActiveAppProvider(next)
+        const previousReference = provider.apiKeyRef
         const newReference = await this.#secretStore.set(request.apiKey)
-        next.providers.deepseek.apiKeyRef = newReference
+        provider.apiKeyRef = newReference
 
         try {
           await writeJsonAtomic(this.#filePath, next)
@@ -163,10 +220,13 @@ export class ConfigStore {
         return this.getPublicConfig()
       }
       case 'credential': {
-        const previousReference = next.providers.deepseek.apiKeyRef
+        const provider =
+          getAppProvider(next, request.providerId ?? next.activeProviderId) ??
+          getActiveAppProvider(next)
+        const previousReference = provider.apiKeyRef
 
         if (request.action === 'clear') {
-          delete next.providers.deepseek.apiKeyRef
+          delete provider.apiKeyRef
           await writeJsonAtomic(this.#filePath, next)
           this.#config = next
           await this.#secretStore.delete(previousReference)
@@ -174,7 +234,7 @@ export class ConfigStore {
         }
 
         const newReference = await this.#secretStore.set(request.apiKey)
-        next.providers.deepseek.apiKeyRef = newReference
+        provider.apiKeyRef = newReference
 
         try {
           await writeJsonAtomic(this.#filePath, next)
@@ -189,7 +249,7 @@ export class ConfigStore {
       }
       case 'approval':
         next.approval = {
-          approverProvider: request.approverProvider,
+          approverProviderId: request.approverProviderId,
           approverModel: request.approverModel,
         }
         break

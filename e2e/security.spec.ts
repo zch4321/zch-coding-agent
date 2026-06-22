@@ -89,12 +89,14 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 2,
-          providers: {
-            deepseek: {
+          schemaVersion: 3,
+          activeProviderId: 'deepseek',
+          providers: [
+            {
+              id: 'deepseek',
               credentialConfigured: expect.any(Boolean),
             },
-          },
+          ],
         },
       },
     })
@@ -153,7 +155,12 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          providers: { deepseek: { credentialConfigured: true } },
+          providers: [
+            {
+              id: 'deepseek',
+              credentialConfigured: true,
+            },
+          ],
         },
       },
     })
@@ -287,11 +294,16 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await expect(
       provider.getByText('Token 估算方式', { exact: true }),
     ).toBeVisible()
+    await expect(
+      provider.getByText('Provider Profile', { exact: true }),
+    ).toBeVisible()
     await expect(provider.getByRole('button', { name: '刷新' })).toBeDisabled()
     await expect(provider.getByText('思考深度', { exact: true })).toBeVisible()
     await expect(provider.locator('.n-input-number')).toHaveCount(3)
 
-    const modelSelect = provider.locator('.n-select').first()
+    const modelSelect = provider
+      .locator('.settings-field', { hasText: '主模型' })
+      .locator('.n-select')
     await modelSelect.click()
     await page.keyboard.type('custom-e2e-model')
     await page.keyboard.press('Enter')

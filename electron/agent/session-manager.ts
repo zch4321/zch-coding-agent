@@ -1,5 +1,9 @@
 import path from 'node:path'
-import type { PermissionMode } from '../../shared/config'
+import {
+  getActiveProviderConfig,
+  getProviderConfig,
+  type PermissionMode,
+} from '../../shared/config'
 import type { RunStatus } from '../../shared/agent-events'
 import type {
   CallId,
@@ -158,7 +162,7 @@ export class SessionManager {
     conversationId?: string
     workspace: string
     mode: PermissionMode
-    provider: 'deepseek'
+    provider: string
     initialHistory?: ProviderMessage[]
     systemPromptOverride?: string
     providerRequestOverride?: JsonValue
@@ -214,7 +218,9 @@ export class SessionManager {
       type: 'session.start',
       sessionId,
       workspace: session.workspace,
-      model: publicConfig.providers.deepseek.model,
+      model:
+        getProviderConfig(publicConfig, input.provider)?.model ??
+        getActiveProviderConfig(publicConfig).model,
       mode: input.mode,
       forkedFromEventId: input.forkedFromEventId,
     })
@@ -325,7 +331,7 @@ export class SessionManager {
     const sessionId = await this.createSession({
       workspace: input.workspace,
       mode: input.mode,
-      provider: 'deepseek',
+      provider: this.#configStore.getPublicConfig().activeProviderId,
       initialHistory: history,
       systemPromptOverride:
         typeof system?.content === 'string' ? system.content : undefined,
@@ -369,8 +375,13 @@ export class SessionManager {
       )
     }
 
-    if (!config.providers.deepseek.credentialConfigured) {
-      ipcFault('PRECONDITION_FAILED', 'DeepSeek credential is not configured')
+    const provider = getProviderConfig(config, session.provider)
+
+    if (!provider?.credentialConfigured) {
+      ipcFault(
+        'PRECONDITION_FAILED',
+        `${provider?.label ?? session.provider} credential is not configured`,
+      )
     }
 
     if (session.activeRun) {

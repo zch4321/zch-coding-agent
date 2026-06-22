@@ -16,15 +16,14 @@ export const PermissionModeSchema = Type.Union([
 ])
 export type PermissionMode = Static<typeof PermissionModeSchema>
 
-export const DeepSeekReasoningEffortSchema = Type.Union([
+export const ReasoningEffortSchema = Type.Union([
   Type.Literal('off'),
-  Type.Literal('low'),
   Type.Literal('high'),
   Type.Literal('max'),
 ])
-export type DeepSeekReasoningEffort = Static<
-  typeof DeepSeekReasoningEffortSchema
->
+export type ReasoningEffort = Static<typeof ReasoningEffortSchema>
+export const DeepSeekReasoningEffortSchema = ReasoningEffortSchema
+export type DeepSeekReasoningEffort = ReasoningEffort
 
 export const RememberedRuleSchema = Type.Object(
   {
@@ -96,11 +95,24 @@ export const PromptResourceRefSchema = Type.Object(
   { additionalProperties: false },
 )
 
-export const DeepSeekPublicConfigSchema = Type.Object(
+export const ProviderProtocolSchema = Type.Literal('openai-compatible')
+export type ProviderProtocol = Static<typeof ProviderProtocolSchema>
+
+export const ProviderProfileSchema = Type.Union([
+  Type.Literal('deepseek'),
+  Type.Literal('generic'),
+])
+export type ProviderProfile = Static<typeof ProviderProfileSchema>
+
+export const ProviderPublicConfigSchema = Type.Object(
   {
+    id: Type.String({ minLength: 1, maxLength: 128 }),
+    label: Type.String({ minLength: 1, maxLength: 128 }),
+    protocol: ProviderProtocolSchema,
+    profile: ProviderProfileSchema,
     baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
-    reasoning: DeepSeekReasoningEffortSchema,
+    reasoning: ReasoningEffortSchema,
     modelCatalog: Type.Array(ProviderModelSchema, { maxItems: 1_000 }),
     modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
     modelOverrides: Type.Record(
@@ -117,20 +129,19 @@ export const DeepSeekPublicConfigSchema = Type.Object(
   },
   { additionalProperties: false },
 )
+export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(2),
-    activeProvider: Type.Literal('deepseek'),
-    providers: Type.Object(
-      {
-        deepseek: DeepSeekPublicConfigSchema,
-      },
-      { additionalProperties: false },
-    ),
+    schemaVersion: Type.Literal(3),
+    activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
+    providers: Type.Array(ProviderPublicConfigSchema, {
+      minItems: 1,
+      maxItems: 32,
+    }),
     approval: Type.Object(
       {
-        approverProvider: Type.String({ minLength: 1, maxLength: 128 }),
+        approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
         approverModel: Type.String({ minLength: 1, maxLength: 256 }),
       },
       { additionalProperties: false },
@@ -320,6 +331,21 @@ export const PublicConfigSchema = Type.Object(
 )
 export type PublicConfig = Static<typeof PublicConfigSchema>
 
+export function getProviderConfig(
+  config: PublicConfig,
+  providerId: string,
+): ProviderPublicConfig | undefined {
+  return config.providers.find((provider) => provider.id === providerId)
+}
+
+export function getActiveProviderConfig(
+  config: PublicConfig,
+): ProviderPublicConfig {
+  return (
+    getProviderConfig(config, config.activeProviderId) ?? config.providers[0]
+  )
+}
+
 export const ConfigSectionSchema = Type.Union([
   Type.Literal('all'),
   Type.Literal('providers'),
@@ -341,6 +367,9 @@ export const ConfigSetRequestSchema = Type.Union([
     {
       version: Type.Literal(1),
       kind: Type.Literal('provider'),
+      providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+      label: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+      profile: Type.Optional(ProviderProfileSchema),
       baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
       model: Type.String({ minLength: 1, maxLength: 256 }),
       contextWindowTokens: Type.Optional(
@@ -355,7 +384,7 @@ export const ConfigSetRequestSchema = Type.Union([
           Type.Null(),
         ]),
       ),
-      reasoning: DeepSeekReasoningEffortSchema,
+      reasoning: ReasoningEffortSchema,
     },
     { additionalProperties: false },
   ),
@@ -363,6 +392,9 @@ export const ConfigSetRequestSchema = Type.Union([
     {
       version: Type.Literal(1),
       kind: Type.Literal('provider-settings'),
+      providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+      label: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+      profile: Type.Optional(ProviderProfileSchema),
       baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
       model: Type.String({ minLength: 1, maxLength: 256 }),
       contextWindowTokens: Type.Optional(
@@ -377,8 +409,8 @@ export const ConfigSetRequestSchema = Type.Union([
           Type.Null(),
         ]),
       ),
-      reasoning: DeepSeekReasoningEffortSchema,
-      approverProvider: Type.String({ minLength: 1, maxLength: 128 }),
+      reasoning: ReasoningEffortSchema,
+      approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
       approverModel: Type.String({ minLength: 1, maxLength: 256 }),
       limits: PublicConfigSchema.properties.limits,
       apiKey: Type.Optional(Type.String({ minLength: 1, maxLength: 16_384 })),
@@ -389,6 +421,7 @@ export const ConfigSetRequestSchema = Type.Union([
     {
       version: Type.Literal(1),
       kind: Type.Literal('credential'),
+      providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
       action: Type.Literal('set'),
       apiKey: Type.String({ minLength: 1, maxLength: 16_384 }),
     },
@@ -398,6 +431,7 @@ export const ConfigSetRequestSchema = Type.Union([
     {
       version: Type.Literal(1),
       kind: Type.Literal('credential'),
+      providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
       action: Type.Literal('clear'),
     },
     { additionalProperties: false },
@@ -406,7 +440,7 @@ export const ConfigSetRequestSchema = Type.Union([
     {
       version: Type.Literal(1),
       kind: Type.Literal('approval'),
-      approverProvider: Type.String({ minLength: 1, maxLength: 128 }),
+      approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
       approverModel: Type.String({ minLength: 1, maxLength: 256 }),
     },
     { additionalProperties: false },

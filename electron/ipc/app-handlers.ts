@@ -2,7 +2,7 @@ import { BrowserWindow, dialog, shell, type OpenDialogOptions } from 'electron'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import { ChangeHistoryError, ChangeHistoryStore } from '../agent/change-history'
 import {
-  fetchDeepSeekModelCatalog,
+  fetchOpenAICompatibleModelCatalog,
   ModelCatalogError,
   resolveModelProfiles,
 } from '../agent/model-catalog'
@@ -73,27 +73,39 @@ export function createAppIpcHandlers(
       return { config }
     },
     'provider:list-models': async (payload) => {
+      const config = configStore.getPublicConfig()
+      const provider = config.providers.find(
+        (candidate) => candidate.id === config.activeProviderId,
+      )
+
+      if (!provider) {
+        throw new IpcFault({
+          code: 'PRECONDITION_FAILED',
+          message: 'Active provider is not configured',
+        })
+      }
+
       if (payload.refresh) {
-        const apiKey = await configStore.getDeepSeekApiKey()
+        const apiKey = await configStore.getProviderApiKey(provider.id)
 
         if (!apiKey) {
           throw new IpcFault({
             code: 'PRECONDITION_FAILED',
-            message: 'Save a DeepSeek credential before refreshing models',
+            message: `Save a ${provider.label} credential before refreshing models`,
           })
         }
 
         try {
-          const config = configStore.getPublicConfig()
-          const models = await fetchDeepSeekModelCatalog({
-            baseURL: config.providers.deepseek.baseURL,
+          const models = await fetchOpenAICompatibleModelCatalog({
+            baseURL: provider.baseURL,
             apiKey,
             timeoutMs: config.limits.modelCatalogTimeoutMs,
             fetchImpl: getHttpTransport
               ? (input, init) => getHttpTransport().fetch(input, init)
               : undefined,
           })
-          await configStore.setDeepSeekModelCatalog(
+          await configStore.setProviderModelCatalog(
+            provider.id,
             models,
             new Date().toISOString(),
           )
@@ -106,7 +118,7 @@ export function createAppIpcHandlers(
                   : 'NOT_AVAILABLE',
               message:
                 error.status === 401 || error.status === 403
-                  ? 'DeepSeek rejected the configured credential'
+                  ? `${provider.label} rejected the configured credential`
                   : error.message,
             })
           }
@@ -115,14 +127,18 @@ export function createAppIpcHandlers(
         }
       }
 
-      const config = configStore.getPublicConfig()
-      const fetchedAt = config.providers.deepseek.modelCatalogFetchedAt
+      const latestConfig = configStore.getPublicConfig()
+      const latestProvider =
+        latestConfig.providers.find(
+          (candidate) => candidate.id === latestConfig.activeProviderId,
+        ) ?? latestConfig.providers[0]
+      const fetchedAt = latestProvider.modelCatalogFetchedAt
       const stale =
         !fetchedAt ||
         Date.now() - new Date(fetchedAt).getTime() > 24 * 60 * 60_000
 
       return {
-        models: resolveModelProfiles(config),
+        models: resolveModelProfiles(latestConfig, latestProvider.id),
         fetchedAt,
         stale,
       }

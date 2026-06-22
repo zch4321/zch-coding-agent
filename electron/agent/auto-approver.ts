@@ -26,6 +26,7 @@ export interface AutoApproverInput {
 export interface AutoApproverResult extends AutoApproverOutput {
   valid: boolean
   failure?: 'timeout' | 'network' | 'invalid_output'
+  usage?: JsonValue
 }
 
 export interface AutoApprover {
@@ -51,6 +52,15 @@ function fallback(
     valid: false,
     failure,
   }
+}
+
+function hasUsageData(value: JsonValue): boolean {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0,
+  )
 }
 
 export function strictAutoApproverOutput(text: string): AutoApproverResult {
@@ -117,6 +127,7 @@ export class ProviderAutoApprover implements AutoApprover {
       },
     ]
     let text = ''
+    let usage: JsonValue | undefined
 
     try {
       for await (const event of this.#provider.streamChat({
@@ -128,10 +139,16 @@ export class ProviderAutoApprover implements AutoApprover {
           text += event.delta
         } else if (event.type === 'completed') {
           text = event.turn.content ?? text
+          if (hasUsageData(event.usage)) {
+            usage = event.usage
+          }
         }
       }
 
-      return strictAutoApproverOutput(text)
+      return {
+        ...strictAutoApproverOutput(text),
+        ...(usage === undefined ? {} : { usage }),
+      }
     } catch (error) {
       if (signal.aborted) {
         throw signal.reason ?? error

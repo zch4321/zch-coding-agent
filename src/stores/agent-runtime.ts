@@ -361,12 +361,13 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       if (!bridge || !workbench.workspacePath) return false
 
       this.error = ''
+      const settings = useAgentSettingsStore()
       const result = await bridge.createSession({
         version: IPC_VERSION,
         conversationId: workbench.activeConversationId!,
         workspace: workbench.workspacePath,
         mode: this.mode,
-        provider: 'deepseek',
+        provider: settings.providerForm.providerId,
       })
       if (result.ok) {
         this.sessionId = result.value.sessionId
@@ -595,6 +596,15 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           }
           break
         }
+        case 'llm.usage':
+          timeline.usage.push({
+            runId: event.runId,
+            callId: event.callId,
+            usage: event.usage,
+            order: timeline.nextTimelineOrder(),
+          })
+          this.schedulePersist()
+          break
         case 'approval.requested':
           if (event.diff) timeline.latestReviewedApproval = undefined
           this.pendingApproval = {

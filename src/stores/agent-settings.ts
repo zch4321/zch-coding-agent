@@ -4,8 +4,10 @@ import type {
   AssistantLanguage,
   ConfigSection,
   PermissionMode,
+  ProviderPublicConfig,
   PublicConfig,
 } from '../../shared/config'
+import { getActiveProviderConfig } from '../../shared/config'
 import {
   PROVIDER_NOTICE_VERSION,
   TRACE_NOTICE_VERSION,
@@ -24,6 +26,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     yoloNoticeVersion: '',
     credentialConfiguredValue: false,
     credentialSource: 'none' as 'none' | 'safe-storage' | 'environment',
+    providers: [] as Array<{ id: string; label: string }>,
     builtinPolicies: true,
     rememberedRules: [] as UiRememberedRule[],
     defaultMode: 'readonly' as PermissionMode,
@@ -31,8 +34,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     modelCatalogFetchedAt: undefined as string | undefined,
     modelCatalogStale: true,
     modelCatalogLoading: false,
-    modelOverrides:
-      {} as PublicConfig['providers']['deepseek']['modelOverrides'],
+    modelOverrides: {} as ProviderPublicConfig['modelOverrides'],
     limitsConfig: undefined as PublicConfig['limits'] | undefined,
     providerForm: structuredClone(DEFAULT_PROVIDER_FORM),
     providerSavedSignature: providerFormSignature(DEFAULT_PROVIDER_FORM),
@@ -68,6 +70,11 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         label: model.id,
         value: model.id,
       })),
+    providerOptions: (state) =>
+      state.providers.map((provider) => ({
+        label: provider.label,
+        value: provider.id,
+      })),
     activeModelProfile: (state) =>
       state.modelProfiles.find(
         (model) => model.id === state.providerForm.model,
@@ -94,19 +101,26 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       }
 
       if (includes('providers')) {
-        this.credentialConfiguredValue =
-          config.providers.deepseek.credentialConfigured
-        this.credentialSource = config.providers.deepseek.credentialSource
-        this.providerForm.baseURL = config.providers.deepseek.baseURL
-        this.providerForm.model = config.providers.deepseek.model
-        this.providerForm.reasoning = config.providers.deepseek.reasoning
-        this.modelOverrides = structuredClone(
-          config.providers.deepseek.modelOverrides,
-        )
-        this.syncModelOverride(config.providers.deepseek.model)
+        const provider = getActiveProviderConfig(config)
+        this.providers = config.providers.map((item) => ({
+          id: item.id,
+          label: item.label,
+        }))
+        this.credentialConfiguredValue = provider.credentialConfigured
+        this.credentialSource = provider.credentialSource
+        this.providerForm.providerId = provider.id
+        this.providerForm.label = provider.label
+        this.providerForm.profile = provider.profile
+        this.providerForm.baseURL = provider.baseURL
+        this.providerForm.model = provider.model
+        this.providerForm.reasoning = provider.reasoning
+        this.modelOverrides = structuredClone(provider.modelOverrides)
+        this.syncModelOverride(provider.model)
       }
 
       if (includes('approval')) {
+        this.providerForm.approverProviderId =
+          config.approval.approverProviderId
         this.providerForm.approverModel = config.approval.approverModel
       }
 
@@ -246,7 +260,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           contextWindowTokens: draft.contextWindowTokens,
           maxOutputTokens: draft.maxOutputTokens,
           reasoning: draft.reasoning,
-          approverProvider: 'deepseek',
+          providerId: draft.providerId,
+          label: draft.label,
+          profile: draft.profile,
+          approverProviderId: draft.approverProviderId,
           approverModel: draft.approverModel,
           limits: {
             ...limits,

@@ -1,9 +1,12 @@
 import { Type, type Static } from '@sinclair/typebox'
 import {
-  DeepSeekReasoningEffortSchema,
   PermissionModeSchema,
+  ProviderProfileSchema,
+  ProviderProtocolSchema,
   PublicConfigSchema,
+  ReasoningEffortSchema,
   RememberedRuleSchema,
+  type ProviderPublicConfig,
   type PublicConfig,
 } from '../../shared/config'
 import {
@@ -12,35 +15,38 @@ import {
 } from '../../shared/prompt-resources'
 import { DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 
+export const AppProviderConfigSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 128 }),
+    label: Type.String({ minLength: 1, maxLength: 128 }),
+    protocol: ProviderProtocolSchema,
+    profile: ProviderProfileSchema,
+    baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
+    model: Type.String({ minLength: 1, maxLength: 256 }),
+    reasoning: ReasoningEffortSchema,
+    modelCatalog: Type.Array(
+      PublicConfigSchema.properties.providers.items.properties.modelCatalog
+        .items,
+      { maxItems: 1_000 },
+    ),
+    modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
+    modelOverrides:
+      PublicConfigSchema.properties.providers.items.properties.modelOverrides,
+    apiKeyRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+  },
+  { additionalProperties: false },
+)
+
+export type AppProviderConfig = Static<typeof AppProviderConfigSchema>
+
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(2),
-    activeProvider: Type.Literal('deepseek'),
-    providers: Type.Object(
-      {
-        deepseek: Type.Object(
-          {
-            baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
-            model: Type.String({ minLength: 1, maxLength: 256 }),
-            modelCatalog:
-              PublicConfigSchema.properties.providers.properties.deepseek
-                .properties.modelCatalog,
-            modelCatalogFetchedAt: Type.Optional(
-              Type.String({ format: 'date-time' }),
-            ),
-            modelOverrides:
-              PublicConfigSchema.properties.providers.properties.deepseek
-                .properties.modelOverrides,
-            apiKeyRef: Type.Optional(
-              Type.String({ minLength: 1, maxLength: 128 }),
-            ),
-            reasoning: DeepSeekReasoningEffortSchema,
-          },
-          { additionalProperties: false },
-        ),
-      },
-      { additionalProperties: false },
-    ),
+    schemaVersion: Type.Literal(3),
+    activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
+    providers: Type.Array(AppProviderConfigSchema, {
+      minItems: 1,
+      maxItems: 32,
+    }),
     approval: PublicConfigSchema.properties.approval,
     permission: Type.Object(
       {
@@ -66,20 +72,26 @@ export const AppConfigSchema = Type.Object(
 
 export type AppConfig = Static<typeof AppConfigSchema>
 
+export const DEFAULT_PROVIDER_ID = 'deepseek'
+
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 2,
-  activeProvider: 'deepseek',
-  providers: {
-    deepseek: {
+  schemaVersion: 3,
+  activeProviderId: DEFAULT_PROVIDER_ID,
+  providers: [
+    {
+      id: DEFAULT_PROVIDER_ID,
+      label: 'DeepSeek',
+      protocol: 'openai-compatible',
+      profile: 'deepseek',
       baseURL: 'https://api.deepseek.com',
       model: 'deepseek-chat',
       modelCatalog: [],
       modelOverrides: {},
       reasoning: 'high',
     },
-  },
+  ],
   approval: {
-    approverProvider: 'deepseek',
+    approverProviderId: DEFAULT_PROVIDER_ID,
     approverModel: 'deepseek-chat',
   },
   permission: {
@@ -138,30 +150,68 @@ export const DEFAULT_APP_CONFIG = {
   },
 } satisfies AppConfig
 
+export function getAppProvider(
+  config: AppConfig,
+  providerId: string,
+): AppProviderConfig | undefined {
+  return config.providers.find((provider) => provider.id === providerId)
+}
+
+export function getActiveAppProvider(config: AppConfig): AppProviderConfig {
+  return (
+    getAppProvider(config, config.activeProviderId) ??
+    config.providers[0] ??
+    DEFAULT_APP_CONFIG.providers[0]
+  )
+}
+
 export function toPublicConfig(
   config: AppConfig,
   credentialConfigured: boolean,
-  credentialSource: PublicConfig['providers']['deepseek']['credentialSource'] = credentialConfigured
-    ? 'safe-storage'
-    : 'none',
+  credentialSource?: ProviderPublicConfig['credentialSource'],
+): PublicConfig
+export function toPublicConfig(
+  config: AppConfig,
+  credentialForProvider: (
+    provider: AppProviderConfig,
+  ) => Pick<ProviderPublicConfig, 'credentialConfigured' | 'credentialSource'>,
+): PublicConfig
+export function toPublicConfig(
+  config: AppConfig,
+  credential:
+    | boolean
+    | ((
+        provider: AppProviderConfig,
+      ) => Pick<
+        ProviderPublicConfig,
+        'credentialConfigured' | 'credentialSource'
+      >),
+  credentialSource: ProviderPublicConfig['credentialSource'] = 'safe-storage',
 ): PublicConfig {
+  const credentialForProvider =
+    typeof credential === 'function'
+      ? credential
+      : () => ({
+          credentialConfigured: credential,
+          credentialSource: credential ? credentialSource : 'none',
+        })
+
   return {
-    schemaVersion: 2,
-    activeProvider: config.activeProvider,
-    providers: {
-      deepseek: {
-        baseURL: config.providers.deepseek.baseURL,
-        model: config.providers.deepseek.model,
-        reasoning: config.providers.deepseek.reasoning,
-        modelCatalog: structuredClone(config.providers.deepseek.modelCatalog),
-        modelCatalogFetchedAt: config.providers.deepseek.modelCatalogFetchedAt,
-        modelOverrides: structuredClone(
-          config.providers.deepseek.modelOverrides,
-        ),
-        credentialConfigured,
-        credentialSource,
-      },
-    },
+    schemaVersion: 3,
+    activeProviderId: config.activeProviderId,
+    providers: config.providers.map((provider) => ({
+      id: provider.id,
+      label: provider.label,
+      protocol: provider.protocol,
+      profile: provider.profile,
+      baseURL: provider.baseURL,
+      model: provider.model,
+      reasoning: provider.reasoning,
+      modelCatalog: structuredClone(provider.modelCatalog),
+      modelCatalogFetchedAt: provider.modelCatalogFetchedAt,
+      modelOverrides: structuredClone(provider.modelOverrides),
+      ...credentialForProvider(provider),
+    })),
     approval: structuredClone(config.approval),
     permission: structuredClone(config.permission),
     limits: structuredClone(config.limits),

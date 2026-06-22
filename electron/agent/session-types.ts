@@ -70,7 +70,7 @@ export interface SessionState {
   conversationId?: string
   workspace: string
   mode: PermissionMode
-  provider: 'deepseek'
+  provider: string
   logger: TraceLogger
   history: ProviderMessage[]
   systemPromptOverride?: string

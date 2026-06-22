@@ -75,12 +75,13 @@ describe('DeepSeek model catalog', () => {
 
   it('uses override, builtin and conservative capability sources in order', () => {
     const internal: AppConfig = structuredClone(DEFAULT_APP_CONFIG)
-    internal.providers.deepseek.model = 'custom-model'
-    internal.providers.deepseek.modelCatalog = [
+    const provider = internal.providers[0]
+    provider.model = 'custom-model'
+    provider.modelCatalog = [
       { id: 'deepseek-v4-pro', ownedBy: 'deepseek' },
       { id: 'custom-model' },
     ]
-    internal.providers.deepseek.modelOverrides['custom-model'] = {
+    provider.modelOverrides['custom-model'] = {
       contextWindowTokens: 123_456,
       maxOutputTokens: 7_000,
     }

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { CallId } from '../../shared/ids'
 import type { JsonObject, JsonValue } from '../../shared/json'
 import type { ToolCall } from '../tools/types'
-import type { DeepSeekReasoningEffort } from '../../shared/config'
+import type { ProviderProfile, ReasoningEffort } from '../../shared/config'
 import type {
   LLMProvider,
   ProviderAssistantTurn,
@@ -10,15 +10,22 @@ import type {
   ProviderEvent,
 } from './provider'
 
-export interface DeepSeekProviderOptions {
+export interface OpenAICompatibleProviderOptions {
+  providerId: string
+  profile: ProviderProfile
   baseURL: string
   model: string
   apiKey: string
-  reasoning: DeepSeekReasoningEffort
+  reasoning?: ReasoningEffort
   fetchImpl?: typeof fetch
   now?: () => number
   createCallId?: () => CallId
 }
+
+export type DeepSeekProviderOptions = Omit<
+  OpenAICompatibleProviderOptions,
+  'providerId' | 'profile'
+>
 
 interface AccumulatedToolCall {
   index: number
@@ -171,20 +178,24 @@ function ssePayloads(buffer: string): { payloads: string[]; rest: string } {
   return { payloads, rest }
 }
 
-export class DeepSeekProvider implements LLMProvider {
+export class OpenAICompatibleProvider implements LLMProvider {
+  readonly #providerId: string
+  readonly #profile: ProviderProfile
   readonly #baseURL: string
   readonly #model: string
   readonly #apiKey: string
-  readonly #reasoning: DeepSeekReasoningEffort
+  readonly #reasoning: ReasoningEffort
   readonly #fetch: typeof fetch
   readonly #now: () => number
   readonly #createCallId: () => CallId
 
-  constructor(options: DeepSeekProviderOptions) {
+  constructor(options: OpenAICompatibleProviderOptions) {
+    this.#providerId = options.providerId
+    this.#profile = options.profile
     this.#baseURL = options.baseURL
     this.#model = options.model
     this.#apiKey = options.apiKey
-    this.#reasoning = options.reasoning
+    this.#reasoning = options.reasoning ?? 'off'
     this.#fetch = options.fetchImpl ?? fetch
     this.#now = options.now ?? (() => performance.now())
     this.#createCallId =
@@ -196,6 +207,17 @@ export class DeepSeekProvider implements LLMProvider {
   ): AsyncIterable<ProviderEvent> {
     const override = request.providerRequestOverride
     const providerTools = wireTools(request.tools)
+    const thinking =
+      this.#profile === 'deepseek'
+        ? {
+            thinking: {
+              type: this.#reasoning === 'off' ? 'disabled' : 'enabled',
+            },
+            ...(this.#reasoning === 'off'
+              ? {}
+              : { reasoning_effort: this.#reasoning }),
+          }
+        : {}
     const providerRequest =
       override && typeof override === 'object' && !Array.isArray(override)
         ? structuredClone(override)
@@ -207,12 +229,7 @@ export class DeepSeekProvider implements LLMProvider {
             stream_options: {
               include_usage: true,
             },
-            thinking: {
-              type: this.#reasoning === 'off' ? 'disabled' : 'enabled',
-            },
-            ...(this.#reasoning === 'off'
-              ? {}
-              : { reasoning_effort: this.#reasoning }),
+            ...thinking,
           }
     const requestBody = JSON.stringify(providerRequest)
     const requestStart = this.#now()
@@ -243,7 +260,9 @@ export class DeepSeekProvider implements LLMProvider {
 
     if (!response.ok || !response.body) {
       await response.body?.cancel().catch(() => undefined)
-      throw new Error(`DeepSeek request failed with status ${response.status}`)
+      throw new Error(
+        `${this.#providerId} request failed with status ${response.status}`,
+      )
     }
 
     const reader = response.body.getReader()
@@ -402,7 +421,8 @@ export class DeepSeekProvider implements LLMProvider {
       toolCalls: normalizedToolCalls,
       usage: latestUsage,
       providerState: toJsonValue({
-        provider: 'deepseek',
+        provider: this.#providerId,
+        profile: this.#profile,
         assistant: turn,
       }),
       timing: {
@@ -411,5 +431,15 @@ export class DeepSeekProvider implements LLMProvider {
         responseBytes: byteLength(rawResponse),
       },
     }
+  }
+}
+
+export class DeepSeekProvider extends OpenAICompatibleProvider {
+  constructor(options: DeepSeekProviderOptions) {
+    super({
+      ...options,
+      providerId: 'deepseek',
+      profile: 'deepseek',
+    })
   }
 }

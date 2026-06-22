@@ -12,6 +12,7 @@ import {
   type TerminalId,
 } from '../../shared/ids'
 import { JsonValueSchema, type JsonValue } from '../../shared/json'
+import { LlmUsageRecordSchema, type LlmUsageRecord } from '../../shared/usage'
 
 const TraceBaseSchema = Type.Object({
   schemaVersion: Type.Literal(1),
@@ -116,6 +117,16 @@ export const TraceEventSchema = Type.Union([
       providerState: Type.Optional(JsonValueSchema),
       usage: JsonValueSchema,
       timing: JsonValueSchema,
+    }),
+  ]),
+  Type.Composite([
+    TraceBaseSchema,
+    Type.Object({
+      type: Type.Literal('llm.usage'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      callId: CallIdSchema,
+      usage: LlmUsageRecordSchema,
     }),
   ]),
   Type.Composite([
@@ -235,6 +246,12 @@ export type TraceEventInput =
       providerState?: JsonValue
       usage: JsonValue
       timing: JsonValue
+    })
+  | (TraceInputBase & {
+      type: 'llm.usage'
+      runId: RunId
+      callId: CallId
+      usage: LlmUsageRecord
     })
   | (TraceInputBase & {
       type: 'approval'
