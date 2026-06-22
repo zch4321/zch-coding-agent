@@ -1,4 +1,4 @@
-# 需求文档 · My Coding Agent
+# 需求文档 · Zch Coding Agent
 
 > 状态：MVP 实现同步版 v0.3 · 最后更新 2026-06-20
 > 本文档定义「做什么」。技术怎么做见 [`architecture.md`](./architecture.md)，前端信息架构与验收标准见 [`frontend-spec.md`](./frontend-spec.md)。

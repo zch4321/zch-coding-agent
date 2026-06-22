@@ -53,7 +53,7 @@ describe('App', () => {
     })
 
     expect(wrapper.get('[data-testid="app-ready"]')).toBeDefined()
-    expect(wrapper.text()).toContain('我的编程助手')
+    expect(wrapper.text()).toContain('Zch Coding Agent')
     expect(wrapper.text()).toContain('新建对话')
     expect(wrapper.text()).toContain('文件')
     expect(wrapper.text()).toContain('变更')

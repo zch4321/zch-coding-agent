@@ -2,12 +2,12 @@ import { createI18n } from 'vue-i18n'
 
 export type AppLocale = 'zh-CN' | 'en-US'
 
-const LOCALE_KEY = 'my-coding-agent.locale'
+const LOCALE_KEY = 'zch-coding-agent.locale'
 
 const messages = {
   'zh-CN': {
     app: {
-      name: '我的编程助手',
+      name: 'Zch Coding Agent',
       chooseWorkspace: '选择工作区',
       noWorkspace: '未选择工作区',
       newConversation: '新建对话',
@@ -309,7 +309,7 @@ const messages = {
   },
   'en-US': {
     app: {
-      name: 'My Coding Agent',
+      name: 'Zch Coding Agent',
       chooseWorkspace: 'Choose workspace',
       noWorkspace: 'No workspace selected',
       newConversation: 'New conversation',

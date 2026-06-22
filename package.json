@@ -1,9 +1,9 @@
 {
-  "name": "my-coding-agent",
+  "name": "zch-coding-agent",
   "private": true,
   "version": "0.1.0",
   "description": "A security-focused desktop coding agent.",
-  "author": "My Coding Agent Contributors",
+  "author": "Zch Coding Agent Contributors",
   "type": "module",
   "scripts": {
     "dev": "vite",

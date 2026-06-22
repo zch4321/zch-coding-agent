@@ -1,13 +1,13 @@
-# My Coding Agent
+# Zch Coding Agent
 
-安装：普通用户可以直接在 GitHub Releases 下载 `My Coding Agent-Windows-*-Setup.exe` 安装包并运行安装；当前发布目标是 Windows x64。开发者需要 Node.js 24，克隆仓库后执行 `npm ci` 安装依赖，开发模式运行 `npm run dev`；如需本地生成安装包，再执行 `npm run build`，产物会输出到 `release/<version>/`。
+安装：普通用户可以直接在 GitHub Releases 下载 `Zch Coding Agent-Windows-*-Setup.exe` 安装包并运行安装；当前发布目标是 Windows x64。开发者需要 Node.js 24，克隆仓库后执行 `npm ci` 安装依赖，开发模式运行 `npm run dev`；如需本地生成安装包，再执行 `npm run build`，产物会输出到 `release/<version>/`。
 
 使用：启动应用后先选择一个工作区目录，在设置里配置模型服务和 API Key，然后在对话框中提出任务。Agent 会在当前工作区内读取文件、搜索代码、应用补丁、执行命令或打开共享终端；涉及文件写入、命令执行、终端输入等副作用时，会根据当前权限模式进入人工审批、自动审批或全自动执行。普通测试使用 `npm test`，端到端测试使用 `npm run test:e2e`，可选真实 Provider 测试使用 `npm run test:real`。
 
 ## 项目简介
 
-My Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
-它是一个简单的Coding Agent：模型可以通过受控工具查看代码、修改文件、运行命令、操作持久终端，并把每一步结果回传到下一轮推理。
+Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
+它是一个本地 Coding Agent：模型可以通过受控工具查看代码、修改文件、运行命令、操作持久终端，并把每一步结果回传到下一轮推理。
 
 项目的设计目标是在“能真正完成工程任务”和“不能随意破坏本机环境”之间做一个清晰的产品边界。渲染进程只负责 UI，主进程负责 Agent runtime、工具执行、凭据管理和 IPC 校验；所有跨进程 payload 都有共享 schema，并在 IPC 边界做运行时验证。
 
@@ -77,7 +77,6 @@ npm run test:real
 
 Zch Coding Agent 的安全模型是“本地桌面应用 + 明确审批 + 工作区路径边界”，不是容器级 sandbox。
 文件工具会限制在 workspace 内，并对真实路径和资源状态做复核；但 `run_command` 和持久终端本质上仍是主机进程执行能力，因此在 Auto / Yolo 模式下需要用户明确接受风险。
-
 
 ## 当前状态
 

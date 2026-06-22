@@ -1,4 +1,4 @@
-# 前端产品与验收规范 · My Coding Agent
+# 前端产品与验收规范 · Zch Coding Agent
 
 > 状态：MVP 实现同步版 v0.2 · 最后更新 2026-06-20
 > 配套：[`requirements.md`](./requirements.md)（产品能力）、[`architecture.md`](./architecture.md)（技术边界）、[`implementation-plan.md`](./implementation-plan.md)（实施阶段）。  
@@ -101,7 +101,7 @@
 左侧：
 
 - 应用图标。
-- `My Coding Agent`。
+- `Zch Coding Agent`。
 
 中间：
 

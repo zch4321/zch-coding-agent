@@ -14,7 +14,7 @@ import {
 } from './workbench-persistence'
 
 let workspaceActivationQueue = Promise.resolve()
-const MIGRATED_HISTORY_KEY = 'my-coding-agent.workbench.v2.migrated'
+const MIGRATED_HISTORY_KEY = 'zch-coding-agent.workbench.v2.migrated'
 type WorkbenchIpcResult =
   | { ok: true; value: PersistedWorkbench }
   | { ok: false; error: { message: string } }

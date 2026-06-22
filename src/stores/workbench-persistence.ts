@@ -1,6 +1,6 @@
 import type { ChatMessage, PersistedWorkbench } from './agent-types'
 
-export const HISTORY_KEY = 'my-coding-agent.workbench.v1'
+export const HISTORY_KEY = 'zch-coding-agent.workbench.v1'
 
 export function requestId(): string {
   return `ui:${
