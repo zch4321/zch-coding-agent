@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -937,7 +937,7 @@ describe('SessionManager P2 loop', () => {
       expect.objectContaining({
         effect: 'allow',
         toolId: 'apply_patch',
-        workspaceScope: workspace,
+        workspaceScope: path.resolve(await realpath(workspace)),
         argConstraints: { path: 'note.txt' },
         expiresAt,
         createdFromCallId: 'call-edit',

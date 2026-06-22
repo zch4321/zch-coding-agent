@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -47,7 +47,7 @@ describe('runCommand', () => {
       signal: new AbortController().signal,
     })
 
-    expect(path.resolve(result.stdout)).toBe(path.resolve(root))
+    expect(path.resolve(result.stdout)).toBe(path.resolve(await realpath(root)))
     expect(result.exitCode).toBe(0)
     expect(result.truncated).toBe(false)
   })

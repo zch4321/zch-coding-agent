@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -24,6 +24,17 @@ describe('PathGuard', () => {
     expect(result.path).toBe('README.md')
     expect(result.content).toContain('# Test')
     expect(result.truncated).toBe(false)
+  })
+
+  it('normalizes canonical roots before resolving real child paths', async () => {
+    const root = await workspace()
+    const guard = PathGuard.fromCanonical(root)
+    const created = await PathGuard.create(root)
+    const result = await guard.resolveExisting('README.md')
+
+    expect(guard.workspacePath).toBe(path.resolve(await realpath(root)))
+    expect(guard.workspacePath).toBe(created.workspacePath)
+    expect(result.relativePath).toBe('README.md')
   })
 
   it('rejects relative and absolute escapes', async () => {

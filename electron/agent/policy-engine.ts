@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs'
+import path from 'node:path'
 import type { PolicySignal } from '../../shared/agent-events'
 import type { PermissionMode, RememberedRule } from '../../shared/config'
 import type { JsonValue } from '../../shared/json'
@@ -37,8 +39,17 @@ function sameWorkspace(rule: RememberedRule, workspace: string): boolean {
     return true
   }
 
-  const normalize = (value: string) =>
-    process.platform === 'win32' ? value.toLowerCase() : value
+  const normalize = (value: string) => {
+    let resolved = path.resolve(value)
+
+    try {
+      resolved = path.resolve(realpathSync.native(resolved))
+    } catch {
+      // Remembered rules may outlive their workspace directory.
+    }
+
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+  }
   return normalize(rule.workspaceScope) === normalize(workspace)
 }
 

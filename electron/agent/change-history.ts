@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { realpathSync } from 'node:fs'
 import {
   lstat,
   mkdir,
@@ -44,7 +45,14 @@ function hash(value: string): string {
 }
 
 function normalizePath(value: string): string {
-  const resolved = path.resolve(value)
+  let resolved = path.resolve(value)
+
+  try {
+    resolved = path.resolve(realpathSync.native(resolved))
+  } catch {
+    // Historical records may point at a workspace that no longer exists.
+  }
+
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved
 }
 

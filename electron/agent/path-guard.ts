@@ -1,4 +1,5 @@
 import { open, readdir, realpath, stat } from 'node:fs/promises'
+import { realpathSync } from 'node:fs'
 import path from 'node:path'
 
 export type PathGuardErrorCode =
@@ -91,17 +92,30 @@ async function nearestExistingParent(target: string): Promise<string> {
 
 export class PathGuard {
   readonly workspacePath: string
+  readonly #workspaceAliases: readonly string[]
 
-  private constructor(workspacePath: string) {
+  private constructor(workspacePath: string, aliases: readonly string[] = []) {
     this.workspacePath = workspacePath
+    this.#workspaceAliases = [...new Set([workspacePath, ...aliases])]
   }
 
   static fromCanonical(workspacePath: string): PathGuard {
-    return new PathGuard(path.resolve(workspacePath))
+    assertReasonableInput(workspacePath)
+    const resolvedWorkspacePath = path.resolve(workspacePath)
+
+    try {
+      const realWorkspacePath = path.resolve(
+        realpathSync.native(resolvedWorkspacePath),
+      )
+      return new PathGuard(realWorkspacePath, [resolvedWorkspacePath])
+    } catch {
+      return new PathGuard(resolvedWorkspacePath)
+    }
   }
 
   static async create(workspacePath: string): Promise<PathGuard> {
     assertReasonableInput(workspacePath)
+    const resolvedWorkspacePath = path.resolve(workspacePath)
     const workspaceRealPath = await realpath(workspacePath)
     const workspaceStat = await stat(workspaceRealPath)
 
@@ -112,7 +126,15 @@ export class PathGuard {
       )
     }
 
-    return new PathGuard(path.resolve(workspaceRealPath))
+    return new PathGuard(path.resolve(workspaceRealPath), [
+      resolvedWorkspacePath,
+    ])
+  }
+
+  #isInsideWorkspace(candidate: string): boolean {
+    return this.#workspaceAliases.some((workspacePath) =>
+      isSubpath(workspacePath, candidate),
+    )
   }
 
   resolveCandidate(inputPath: string): string {
@@ -121,7 +143,7 @@ export class PathGuard {
       ? path.resolve(inputPath)
       : path.resolve(this.workspacePath, inputPath)
 
-    if (!isSubpath(this.workspacePath, absolutePath)) {
+    if (!this.#isInsideWorkspace(absolutePath)) {
       throw new PathGuardError(
         'PATH_OUTSIDE_WORKSPACE',
         'Path escapes the workspace',
@@ -136,7 +158,7 @@ export class PathGuard {
     const parent = await nearestExistingParent(absolutePath)
     const parentRealPath = await realpath(parent)
 
-    if (!isSubpath(this.workspacePath, parentRealPath)) {
+    if (!this.#isInsideWorkspace(parentRealPath)) {
       throw new PathGuardError(
         'PATH_OUTSIDE_WORKSPACE',
         'Existing parent escapes the workspace',
@@ -160,7 +182,7 @@ export class PathGuard {
       throw error
     }
 
-    if (!isSubpath(this.workspacePath, realPathValue)) {
+    if (!this.#isInsideWorkspace(realPathValue)) {
       throw new PathGuardError(
         'PATH_OUTSIDE_WORKSPACE',
         'Real path escapes the workspace',
@@ -178,7 +200,7 @@ export class PathGuard {
   }
 
   assertInside(realPathValue: string): void {
-    if (!isSubpath(this.workspacePath, realPathValue)) {
+    if (!this.#isInsideWorkspace(realPathValue)) {
       throw new PathGuardError(
         'PATH_OUTSIDE_WORKSPACE',
         'Real path escapes the workspace',
