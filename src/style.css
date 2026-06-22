@@ -25,6 +25,8 @@
   --warning: #9a6700;
   --danger: #cf222e;
   --focus: 0 0 0 2px rgba(9, 105, 218, 0.24);
+  --surface-hover: #eaeef2;
+  --terminal-height: 35%;
 }
 
 * {
