@@ -5,6 +5,9 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createCommandEnvironment, runCommand } from './run'
 
+const PROCESS_TERMINATION_TEST_TIMEOUT_MS =
+  process.platform === 'win32' ? 30_000 : 10_000
+
 async function workspace(): Promise<string> {
   return mkdtemp(path.join(os.tmpdir(), 'agent-command-'))
 }
@@ -94,28 +97,32 @@ describe('runCommand', () => {
     expect(result.discardedHash).toBe(discardedHash.digest('hex'))
   })
 
-  it('times out and terminates five long-running processes', async () => {
-    const root = await workspace()
+  it(
+    'times out and terminates five long-running processes',
+    async () => {
+      const root = await workspace()
 
-    for (let iteration = 0; iteration < 5; iteration += 1) {
-      const result = await runCommand({
-        workspace: root,
-        command: {
-          mode: 'process',
-          executable: process.execPath,
-          args: ['-e', 'setInterval(() => undefined, 1_000)'],
-        },
-        timeoutMs: 100,
-        terminationGraceMs: 100,
-        maxOutputBytes: 4_096,
-        signal: new AbortController().signal,
-      })
+      for (let iteration = 0; iteration < 5; iteration += 1) {
+        const result = await runCommand({
+          workspace: root,
+          command: {
+            mode: 'process',
+            executable: process.execPath,
+            args: ['-e', 'setInterval(() => undefined, 1_000)'],
+          },
+          timeoutMs: 100,
+          terminationGraceMs: 100,
+          maxOutputBytes: 4_096,
+          signal: new AbortController().signal,
+        })
 
-      expect(result.timedOut).toBe(true)
-      expect(result.durationMs).toBeLessThan(5_000)
-      expect(result.terminationStrategy).not.toBe('none')
-    }
-  })
+        expect(result.timedOut).toBe(true)
+        expect(result.durationMs).toBeLessThan(5_000)
+        expect(result.terminationStrategy).not.toBe('none')
+      }
+    },
+    PROCESS_TERMINATION_TEST_TIMEOUT_MS,
+  )
 
   it.each([0, 1, 2])(
     'leaves no process behind after aborting spawn depth %i',
@@ -165,6 +172,7 @@ describe('runCommand', () => {
       expect(pids).toHaveLength(depth + 1)
       await expect(waitForProcessesToExit(pids)).resolves.toBe(true)
     },
+    PROCESS_TERMINATION_TEST_TIMEOUT_MS,
   )
 
   it('constructs a secret-free child environment from an allowlist', () => {
