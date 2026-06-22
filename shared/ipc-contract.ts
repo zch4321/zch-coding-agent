@@ -17,6 +17,11 @@ import { JsonValueSchema } from './json'
 import { TerminalInfoSchema, TerminalSnapshotSchema } from './terminal'
 import { SkillListSchema, SkillSummarySchema } from './skills'
 import {
+  ContextAttachmentChipSchema,
+  ContextAttachmentKindSchema,
+  RunContextSchema,
+} from './context'
+import {
   EventIdSchema,
   ProviderStatsSchema,
   ReplaySummarySchema,
@@ -248,6 +253,26 @@ export const IPC_CONTRACTS = {
       ),
     ),
   },
+  'workspace:choose-context': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+        kind: ContextAttachmentKindSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          attachments: Type.Array(ContextAttachmentChipSchema, {
+            maxItems: 32,
+          }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
   'session:create': {
     payload: Type.Object(
       {
@@ -327,6 +352,7 @@ export const IPC_CONTRACTS = {
         sessionId: SessionIdSchema,
         message: Type.String({ minLength: 1, maxLength: 1_000_000 }),
         clientRequestId: Type.String({ minLength: 1, maxLength: 128 }),
+        context: Type.Optional(RunContextSchema),
       },
       { additionalProperties: false },
     ),

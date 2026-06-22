@@ -241,6 +241,18 @@ export function reduceTraceEvent(
         text: event.text,
         reasoning: event.reasoning,
       })
+      if (event.runId) {
+        state.agentEvents.push({
+          schemaVersion: 1,
+          type: 'assistant.message.completed',
+          sessionId: event.sessionId,
+          runId: event.runId,
+          text: event.text,
+          ...(event.reasoning ? { reasoning: event.reasoning } : {}),
+          seq: event.seq,
+          ts: event.ts,
+        })
+      }
       break
     case 'llm.request':
     case 'llm.response':

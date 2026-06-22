@@ -13,6 +13,7 @@ import type {
   TerminalId,
 } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
+import type { RunContext } from '../../shared/context'
 import type { TerminalInfo, TerminalSnapshot } from '../../shared/terminal'
 import {
   PROVIDER_NOTICE_VERSION,
@@ -50,8 +51,13 @@ import { SessionApprovalCoordinator } from './session-approval'
 import { SessionContextGate } from './session-context-gate'
 import { SessionProviderTurnRunner } from './session-provider-turn'
 import { SessionToolRunner } from './session-tool-runner'
+import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
+import { prepareRunContext } from './context-attachments'
+import { resolveSlashCommand } from './slash-commands'
+import { registerOrchestrationTools } from './orchestration-tools'
 
 const RUN_CANCEL_GRACE_MS = 2_000
+const MAX_GOAL_CONTINUATIONS = 8
 
 export class SessionManager {
   readonly #configStore: ConfigStore
@@ -60,6 +66,7 @@ export class SessionManager {
   readonly #pluginBus: PluginEventBus | undefined
   readonly #skillsManager: SkillsManager | undefined
   readonly #changeHistory: ChangeHistoryStore | undefined
+  readonly #promptRegistry: PromptRegistry | undefined
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #autoApproverFactory: SessionManagerOptions['autoApproverFactory']
@@ -82,6 +89,7 @@ export class SessionManager {
     this.#pluginBus = options.pluginBus
     this.#skillsManager = options.skillsManager
     this.#changeHistory = options.changeHistory
+    this.#promptRegistry = options.promptRegistry
     this.#providerFactory = options.providerFactory
     this.#fetchImpl = options.fetchImpl
     this.#autoApproverFactory = options.autoApproverFactory
@@ -138,6 +146,10 @@ export class SessionManager {
     if (this.#skillsManager) {
       registerSkillTools(this.#toolRegistry, this.#skillsManager)
     }
+    registerOrchestrationTools(this.#toolRegistry, {
+      getSession: (sessionId) => this.#sessions.get(sessionId),
+      emit: (session, event) => this.#emit(session, event),
+    })
     this.#toolExecutor = new ToolExecutor(this.#toolRegistry)
     this.#toolRunner = new SessionToolRunner({
       configStore: this.#configStore,
@@ -306,6 +318,7 @@ export class SessionManager {
     sessionId: SessionId
     message: string
     clientRequestId: string
+    context?: RunContext
   }): RunId {
     const session = this.#requireSession(input.sessionId)
     const existing = session.clientRequests.get(input.clientRequestId)
@@ -314,7 +327,12 @@ export class SessionManager {
       return existing
     }
 
-    return this.#startSessionRun(session, input.clientRequestId, input.message)
+    return this.#startSessionRun(
+      session,
+      input.clientRequestId,
+      input.message,
+      input.context,
+    )
   }
 
   async createForkFromTrace(input: {
@@ -362,6 +380,7 @@ export class SessionManager {
     session: SessionState,
     clientRequestId: string,
     userMessage?: string,
+    context?: RunContext,
   ): RunId {
     const config = this.#configStore.getPublicConfig()
 
@@ -399,7 +418,7 @@ export class SessionManager {
       done: Promise.resolve(),
     }
 
-    run.done = this.#run(session, run, userMessage)
+    run.done = this.#run(session, run, userMessage, context)
       .catch((error: unknown) =>
         this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error),
       )
@@ -499,17 +518,33 @@ export class SessionManager {
     session: SessionState,
     run: ActiveRun,
     userMessage?: string,
+    context?: RunContext,
   ): Promise<void> {
     const signal = run.controller.signal
 
     try {
       if (userMessage !== undefined) {
-        session.history.push({ role: 'user', content: userMessage })
+        const prepared = await this.#prepareUserTurn(
+          session,
+          run,
+          userMessage,
+          context,
+        )
+        if (prepared.contextMessage) {
+          session.history.push({
+            role: 'user',
+            content: prepared.contextMessage,
+          })
+        }
+        session.history.push({
+          role: 'user',
+          content: prepared.providerMessage,
+        })
         await session.logger.write({
           type: 'user.message',
           sessionId: session.sessionId,
           runId: run.runId,
-          text: userMessage,
+          text: prepared.visibleMessage,
         })
       }
       await session.logger.write({
@@ -536,6 +571,13 @@ export class SessionManager {
         session.history.push(completed.turn)
 
         if (completed.text || completed.reasoning) {
+          this.#emit(session, {
+            type: 'assistant.message.completed',
+            sessionId: session.sessionId,
+            runId: run.runId,
+            text: completed.text,
+            ...(completed.reasoning ? { reasoning: completed.reasoning } : {}),
+          })
           await session.logger.write({
             type: 'agent.message',
             sessionId: session.sessionId,
@@ -546,6 +588,11 @@ export class SessionManager {
         }
 
         if (completed.toolCalls.length === 0) {
+          const continuation = await this.#nextOrchestrationStep(session, run)
+          if (continuation === 'continue') {
+            continue
+          }
+
           await this.#finishRun(session, run, 'completed')
           return
         }
@@ -562,6 +609,223 @@ export class SessionManager {
     } catch (error) {
       const status = finalStatusFromError(error, signal)
       await this.#finishRun(session, run, status, error)
+    }
+  }
+
+  async #prepareUserTurn(
+    session: SessionState,
+    run: ActiveRun,
+    userMessage: string,
+    context?: RunContext,
+  ): Promise<{
+    visibleMessage: string
+    providerMessage: string
+    contextMessage?: string
+  }> {
+    const config = this.#configStore.getPublicConfig()
+    const command = resolveSlashCommand({
+      message: userMessage,
+      config,
+      skillsManager: this.#skillsManager,
+      promptRegistry: this.#promptRegistry,
+    })
+
+    if (command.goal) {
+      session.goal = command.goal
+      this.#emit(session, {
+        type: 'goal.updated',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        goal: structuredClone(command.goal),
+      })
+    }
+
+    if (command.plan) {
+      session.plan = command.plan
+      this.#emit(session, {
+        type: 'plan.updated',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        plan: structuredClone(command.plan),
+      })
+    }
+
+    if (command.orchestratorMessage) {
+      await this.#emitOrchestratorMessage(session, run, {
+        ...command.orchestratorMessage,
+        injectIntoHistory: false,
+      })
+    }
+
+    const preparedContext = await prepareRunContext({
+      workspace: session.workspace,
+      attachments: context?.attachments ?? [],
+      config,
+      signal: run.controller.signal,
+    })
+
+    return {
+      visibleMessage: command.visibleMessage,
+      providerMessage: command.providerMessage,
+      contextMessage: preparedContext.providerContent || undefined,
+    }
+  }
+
+  async #nextOrchestrationStep(
+    session: SessionState,
+    run: ActiveRun,
+  ): Promise<'continue' | 'finish'> {
+    const goal = session.goal
+
+    if (goal?.status === 'active') {
+      if (goal.continuationCount >= MAX_GOAL_CONTINUATIONS) {
+        goal.status = 'paused'
+        goal.updatedAt = new Date().toISOString()
+        this.#emit(session, {
+          type: 'goal.updated',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          goal: structuredClone(goal),
+        })
+        await this.#emitOrchestratorMessage(session, run, {
+          kind: 'goal-paused',
+          text: 'Goal auto-continuation limit reached. The Goal was paused instead of being marked complete.',
+          injectIntoHistory: false,
+        })
+        return 'finish'
+      }
+
+      goal.continuationCount += 1
+      goal.updatedAt = new Date().toISOString()
+      this.#emit(session, {
+        type: 'goal.updated',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        goal: structuredClone(goal),
+      })
+      const prompt = this.#orchestrationPrompt('goalContinue')
+      await this.#emitOrchestratorMessage(session, run, {
+        kind: 'goal-continuation',
+        text: [
+          prompt.text,
+          '',
+          `Goal objective: ${goal.objective}`,
+          `Goal state: ${JSON.stringify(goal)}`,
+          session.plan
+            ? `Current plan state: ${JSON.stringify(session.plan)}`
+            : 'Current plan state: none',
+        ].join('\n'),
+        resource: prompt.resource,
+        injectIntoHistory: true,
+      })
+      return 'continue'
+    }
+
+    const plan = session.plan
+    const openItems = (plan?.items ?? []).filter(
+      (item) => item.status !== 'completed' && item.status !== 'cancelled',
+    )
+
+    if (!plan || openItems.length === 0) {
+      return 'finish'
+    }
+
+    if (plan.continuationCount < 1) {
+      plan.continuationCount += 1
+      plan.updatedAt = new Date().toISOString()
+      this.#emit(session, {
+        type: 'plan.updated',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        plan: structuredClone(plan),
+      })
+      const prompt = this.#orchestrationPrompt('planContinue')
+      await this.#emitOrchestratorMessage(session, run, {
+        kind: 'plan-continuation',
+        text: [
+          prompt.text,
+          '',
+          `Plan objective: ${plan.objective}`,
+          `Open plan items: ${JSON.stringify(openItems)}`,
+        ].join('\n'),
+        resource: prompt.resource,
+        injectIntoHistory: true,
+      })
+      return 'continue'
+    }
+
+    const prompt = this.#orchestrationPrompt('planWarning')
+    plan.warning = prompt.text
+    plan.updatedAt = new Date().toISOString()
+    this.#emit(session, {
+      type: 'plan.updated',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      plan: structuredClone(plan),
+    })
+    await this.#emitOrchestratorMessage(session, run, {
+      kind: 'plan-warning',
+      text: prompt.text,
+      resource: prompt.resource,
+      injectIntoHistory: false,
+    })
+    return 'finish'
+  }
+
+  #orchestrationPrompt(kind: 'goalContinue' | 'planContinue' | 'planWarning'): {
+    text: string
+    resource?: PromptResourceSummary
+  } {
+    const config = this.#configStore.getPublicConfig()
+    const resolved = this.#promptRegistry?.orchestrationPrompt(
+      kind,
+      config.assistant.language,
+    )
+
+    if (resolved) {
+      return { text: resolved.content, resource: resolved.resource }
+    }
+
+    return {
+      text: `Continue orchestration step: ${kind}`,
+    }
+  }
+
+  async #emitOrchestratorMessage(
+    session: SessionState,
+    run: ActiveRun,
+    input: {
+      kind: string
+      text: string
+      resource?: PromptResourceSummary
+      injectIntoHistory: boolean
+    },
+  ): Promise<void> {
+    this.#emit(session, {
+      type: 'orchestrator.message',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      kind: input.kind,
+      text: input.text,
+      promptId: input.resource?.id,
+      promptHash: input.resource?.sha256,
+    })
+
+    await session.logger.write({
+      type: 'orchestrator.message',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      kind: input.kind,
+      text: input.text,
+      promptId: input.resource?.id,
+      promptHash: input.resource?.sha256,
+    })
+
+    if (input.injectIntoHistory) {
+      session.history.push({
+        role: 'user',
+        content: input.text,
+      })
     }
   }
 

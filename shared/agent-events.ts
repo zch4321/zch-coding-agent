@@ -8,6 +8,7 @@ import {
 import { JsonValueSchema } from './json'
 import { TerminalStatusSchema } from './terminal'
 import { LlmUsageRecordSchema } from './usage'
+import { GoalStateSchema, PlanStateSchema } from './orchestration'
 
 const EventBaseSchema = Type.Object({
   schemaVersion: Type.Literal(1),
@@ -115,6 +116,16 @@ export const AgentEventSchema = Type.Union([
   Type.Composite([
     EventBaseSchema,
     Type.Object({
+      type: Type.Literal('assistant.message.completed'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      text: Type.String({ maxLength: 1_000_000 }),
+      reasoning: Type.Optional(Type.String({ maxLength: 1_000_000 })),
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
       type: Type.Literal('tool.proposed'),
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
@@ -161,6 +172,36 @@ export const AgentEventSchema = Type.Union([
       runId: RunIdSchema,
       callId: CallIdSchema,
       usage: LlmUsageRecordSchema,
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
+      type: Type.Literal('orchestrator.message'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      kind: Type.String({ minLength: 1, maxLength: 128 }),
+      text: Type.String({ maxLength: 1_000_000 }),
+      promptId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+      promptHash: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
+      type: Type.Literal('goal.updated'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      goal: Type.Optional(GoalStateSchema),
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
+      type: Type.Literal('plan.updated'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      plan: Type.Optional(PlanStateSchema),
     }),
   ]),
   Type.Composite([

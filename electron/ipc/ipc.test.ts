@@ -64,6 +64,11 @@ const validPayloads: {
     workspace: 'F:/workspace',
     path: 'README.md',
   },
+  'workspace:choose-context': {
+    version: 1,
+    workspace: 'F:/workspace',
+    kind: 'file',
+  },
   'session:create': {
     version: 1,
     conversationId: 'conversation-1',

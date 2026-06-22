@@ -229,6 +229,37 @@ onBeforeUnmount(() => {
       >
         {{ agent.agentEventGap }}
       </NAlert>
+      <section
+        v-if="agent.goal || agent.plan"
+        class="orchestration-panel"
+        :style="{ order: 0 }"
+      >
+        <article v-if="agent.goal" class="orchestration-card">
+          <div class="orchestration-card-header">
+            <span>{{ t('chat.goal') }}</span>
+            <strong>{{ agent.goal.status }}</strong>
+          </div>
+          <p>{{ agent.goal.objective }}</p>
+          <small v-if="agent.goal.summary">{{ agent.goal.summary }}</small>
+          <small v-else-if="agent.goal.blockReason">
+            {{ agent.goal.blockReason }}
+          </small>
+        </article>
+        <article v-if="agent.plan" class="orchestration-card">
+          <div class="orchestration-card-header">
+            <span>{{ t('chat.plan') }}</span>
+            <strong>{{ agent.plan.items.length }}</strong>
+          </div>
+          <p>{{ agent.plan.objective }}</p>
+          <ol v-if="agent.plan.items.length" class="plan-item-list">
+            <li v-for="item in agent.plan.items" :key="item.id">
+              <span>{{ item.title }}</span>
+              <em>{{ item.status }}</em>
+            </li>
+          </ol>
+          <small v-if="agent.plan.warning">{{ agent.plan.warning }}</small>
+        </article>
+      </section>
 
       <article
         v-for="message in agent.messages"
@@ -239,7 +270,11 @@ onBeforeUnmount(() => {
       >
         <div class="message-meta">
           <strong>{{
-            message.role === 'user' ? t('chat.you') : t('chat.agent')
+            message.role === 'user'
+              ? t('chat.you')
+              : message.role === 'orchestrator'
+                ? t('chat.orchestrator')
+                : t('chat.agent')
           }}</strong>
           <span
             v-if="
@@ -248,6 +283,20 @@ onBeforeUnmount(() => {
             "
           >
             {{ t('chat.streaming') }}
+          </span>
+        </div>
+        <div v-if="message.attachments?.length" class="message-attachments">
+          <span
+            v-for="attachment in message.attachments"
+            :key="attachment.kind + ':' + attachment.path"
+            class="context-chip"
+            :title="attachment.path"
+          >
+            <UiIcon
+              :name="attachment.kind === 'directory' ? 'folder' : 'file'"
+            />
+            <span>{{ attachment.path }}</span>
+            <small>{{ attachment.source }}</small>
           </span>
         </div>
         <MarkdownBlock :content="message.text || '...'" />

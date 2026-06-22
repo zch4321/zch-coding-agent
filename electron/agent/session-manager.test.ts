@@ -20,6 +20,7 @@ import type {
 import type { AutoApprover } from './auto-approver'
 import { SessionManager } from './session-manager'
 import { ChangeHistoryStore } from './change-history'
+import { PromptRegistry } from '../prompts/registry'
 
 class FakeSafeStorage implements SafeStorageAdapter {
   readonly platform = 'win32'
@@ -203,6 +204,150 @@ class ForkProvider implements LLMProvider {
       type: 'completed',
       rawResponse: { id: 'fork-complete' },
       turn: { role: 'assistant', content: 'Fork complete' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
+class CompactProvider implements LLMProvider {
+  messages: ProviderChatRequest['messages'] = []
+
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
+    this.messages = structuredClone(request.messages)
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'compact' },
+      turn: { role: 'assistant', content: 'Compact summary' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
+class GoalContinuationProvider implements LLMProvider {
+  calls = 0
+  requests: ProviderChatRequest['messages'][] = []
+
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    this.requests.push(structuredClone(request.messages))
+
+    if (this.calls === 1) {
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'goal-first' },
+        turn: { role: 'assistant', content: 'Working on the goal' },
+        toolCalls: [],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    if (this.calls === 2) {
+      const args = {
+        summary: 'Goal finished',
+        evidence: 'Continuation requested explicit completion',
+        remainingRisks: 'none',
+      }
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'goal-complete' },
+        turn: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-goal-complete',
+              type: 'function',
+              function: {
+                name: 'goal_complete',
+                arguments: JSON.stringify(args),
+              },
+            },
+          ],
+        },
+        toolCalls: [
+          {
+            id: 'call-goal-complete' as CallId,
+            toolId: 'goal_complete',
+            args,
+            reason: 'The goal is complete',
+          },
+        ],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'goal-final' },
+      turn: { role: 'assistant', content: 'Goal complete' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
+class PlanWarningProvider implements LLMProvider {
+  calls = 0
+
+  async *streamChat(): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+
+    if (this.calls === 1) {
+      const args = { items: ['Inspect state', 'Report result'] }
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'plan-set' },
+        turn: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-plan-set',
+              type: 'function',
+              function: {
+                name: 'plan_set',
+                arguments: JSON.stringify(args),
+              },
+            },
+          ],
+        },
+        toolCalls: [
+          {
+            id: 'call-plan-set' as CallId,
+            toolId: 'plan_set',
+            args,
+            reason: 'Create the requested plan',
+          },
+        ],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    yield {
+      type: 'completed',
+      rawResponse: { id: `plan-open-${this.calls}` },
+      turn: { role: 'assistant', content: 'Plan still open' },
       toolCalls: [],
       usage: {},
       providerState: {},
@@ -432,6 +577,13 @@ describe('SessionManager P2 loop', () => {
           envelope.event.delta === 'README summary',
       ),
     ).toBe(true)
+    expect(
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'assistant.message.completed' &&
+          envelope.event.text === 'README summary',
+      ),
+    ).toBe(true)
 
     await manager.closeSession(sessionId as SessionId)
     const trace = await readFile(
@@ -442,6 +594,181 @@ describe('SessionManager P2 loop', () => {
     expect(trace).not.toContain('llm.stream')
     expect(trace).toContain('llm.response')
     expect(trace).not.toContain('secret-sentinel')
+  })
+
+  it('renders /compact as a visible orchestrator prompt without deleting history', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-compact-'))
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const provider = new CompactProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () =>
+        ({
+          isDestroyed: () => false,
+          send: (_channel: string, envelope: AgentEventEnvelope) =>
+            sent.push(envelope),
+        }) as unknown as WebContents,
+      providerFactory: () => provider,
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: '/compact focus on risks',
+      clientRequestId: 'request-compact',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'run.status' &&
+          envelope.event.status === 'completed',
+      ),
+    )
+
+    expect(
+      sent.find((envelope) => envelope.event.type === 'orchestrator.message')
+        ?.event,
+    ).toMatchObject({
+      type: 'orchestrator.message',
+      kind: 'compact',
+      promptId: 'orchestration.compact.zh-CN',
+    })
+    expect(
+      provider.messages.some(
+        (message) =>
+          message.role === 'user' &&
+          typeof message.content === 'string' &&
+          message.content.includes('focus on risks'),
+      ),
+    ).toBe(true)
+    await manager.closeSession(sessionId)
+  })
+
+  it('continues an active Goal until the model explicitly completes it', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-goal-'))
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const provider = new GoalContinuationProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () =>
+        ({
+          isDestroyed: () => false,
+          send: (_channel: string, envelope: AgentEventEnvelope) =>
+            sent.push(envelope),
+        }) as unknown as WebContents,
+      providerFactory: () => provider,
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: '/goal Produce a verified result',
+      clientRequestId: 'request-goal',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'run.status' &&
+          envelope.event.status === 'completed',
+      ),
+    )
+
+    expect(provider.calls).toBe(3)
+    expect(
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'orchestrator.message' &&
+          envelope.event.kind === 'goal-continuation',
+      ),
+    ).toBe(true)
+    expect(
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'goal.updated' &&
+          envelope.event.goal?.status === 'completed',
+      ),
+    ).toBe(true)
+    await manager.closeSession(sessionId)
+  })
+
+  it('auto-continues a standalone Plan once and then warns', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-plan-'))
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const provider = new PlanWarningProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () =>
+        ({
+          isDestroyed: () => false,
+          send: (_channel: string, envelope: AgentEventEnvelope) =>
+            sent.push(envelope),
+        }) as unknown as WebContents,
+      providerFactory: () => provider,
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: '/plan Check something',
+      clientRequestId: 'request-plan',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'run.status' &&
+          envelope.event.status === 'completed',
+      ),
+    )
+
+    expect(provider.calls).toBe(3)
+    expect(
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'orchestrator.message' &&
+          envelope.event.kind === 'plan-continuation',
+      ),
+    ).toBe(true)
+    expect(
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'orchestrator.message' &&
+          envelope.event.kind === 'plan-warning',
+      ),
+    ).toBe(true)
+    await manager.closeSession(sessionId)
   })
 
   it('completes an Auto edit and records P3 approval evidence', async () => {

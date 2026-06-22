@@ -7,6 +7,7 @@ import {
   protocol,
   session,
   type Event,
+  type Input,
   type OnHeadersReceivedListenerDetails,
   type WebContents,
   type WebContentsWillFrameNavigateEventParams,
@@ -242,6 +243,30 @@ function guardNavigation(
   })
 }
 
+function installDevToolsShortcut(
+  webContents: WebContents,
+  windowDisposer: Disposer,
+): void {
+  const toggleDevTools = (event: Event, input: Input): void => {
+    if (input.type !== 'keyDown' || input.key !== 'F12') {
+      return
+    }
+
+    event.preventDefault()
+
+    if (webContents.isDevToolsOpened()) {
+      webContents.closeDevTools()
+    } else {
+      webContents.openDevTools({ mode: 'detach' })
+    }
+  }
+
+  webContents.on('before-input-event', toggleDevTools)
+  windowDisposer.add(() => {
+    webContents.removeListener('before-input-event', toggleDevTools)
+  })
+}
+
 async function createWindow(): Promise<void> {
   const windowDisposer = new Disposer({
     timeoutMs: 1_000,
@@ -271,6 +296,7 @@ async function createWindow(): Promise<void> {
 
   mainWindow = window
   guardNavigation(window.webContents, windowDisposer)
+  installDevToolsShortcut(window.webContents, windowDisposer)
 
   const showWindow = () => window.show()
   const cleanupWindow = () => {

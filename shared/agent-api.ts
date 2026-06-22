@@ -37,6 +37,9 @@ export interface AgentApi {
   readWorkspaceFile(
     payload: IpcPayload<'workspace:read-file'>,
   ): Promise<IpcResult<'workspace:read-file'>>
+  chooseWorkspaceContext(
+    payload: IpcPayload<'workspace:choose-context'>,
+  ): Promise<IpcResult<'workspace:choose-context'>>
   createSession(
     payload: IpcPayload<'session:create'>,
   ): Promise<IpcResult<'session:create'>>
@@ -134,6 +137,7 @@ export const AGENT_API_KEYS = [
   'chooseWorkspace',
   'listWorkspaceDirectory',
   'readWorkspaceFile',
+  'chooseWorkspaceContext',
   'createSession',
   'listChanges',
   'revertChange',

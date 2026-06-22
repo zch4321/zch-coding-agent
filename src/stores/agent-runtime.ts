@@ -7,6 +7,11 @@ import type {
   PermissionMode,
   PublicConfig,
 } from '../../shared/config'
+import type {
+  ContextAttachmentChip,
+  ContextAttachmentKind,
+  ContextAttachmentRef,
+} from '../../shared/context'
 import type { RunId, SessionId } from '../../shared/ids'
 import type { PendingApproval } from './agent-types'
 import { useAgentChangesStore } from './agent-changes'
@@ -17,6 +22,45 @@ import { useAgentWorkbenchStore } from './agent-workbench'
 import { requestId } from './workbench-persistence'
 
 let persistTimer: number | undefined
+
+function parseMentionAttachments(message: string): ContextAttachmentChip[] {
+  const attachments: ContextAttachmentChip[] = []
+  const seen = new Set<string>()
+  const pattern = /(^|\s)@([^\s@]+)/gu
+  let match: RegExpExecArray | null
+
+  while ((match = pattern.exec(message))) {
+    const raw = match[2]?.trim()
+    if (!raw || raw.startsWith('http://') || raw.startsWith('https://')) {
+      continue
+    }
+
+    const normalizedPath = raw.replace(/^["']|["']$/gu, '').replace(/\\/gu, '/')
+    const kind: ContextAttachmentKind = normalizedPath.endsWith('/')
+      ? 'directory'
+      : 'file'
+    const path =
+      kind === 'directory'
+        ? normalizedPath.replace(/\/+$/gu, '')
+        : normalizedPath
+    const key = `${kind}:${path}`
+    if (!path || seen.has(key)) continue
+    seen.add(key)
+    attachments.push({ kind, path, source: 'mention' })
+  }
+
+  return attachments
+}
+
+function attachmentRefs(
+  attachments: ContextAttachmentChip[],
+): ContextAttachmentRef[] {
+  return attachments.map((attachment) => ({
+    kind: attachment.kind,
+    path: attachment.path,
+    source: attachment.source,
+  }))
+}
 
 export const useAgentRuntimeStore = defineStore('agent-runtime', {
   state: () => ({
@@ -45,7 +89,8 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         workbench.workspacePath &&
         workbench.activeConversationId &&
         !state.activeRunId &&
-        timeline.input.trim().length > 0 &&
+        (timeline.input.trim().length > 0 ||
+          timeline.contextAttachments.length > 0) &&
         !state.pendingApproval,
       )
     },
@@ -152,14 +197,26 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       workbench.persistWorkbench()
       return conversation
     },
-    async newConversation() {
+    async newConversation(workspacePath?: string) {
       const workbench = useAgentWorkbenchStore()
-      if (!workbench.workspacePath) {
+      if (!workspacePath && !workbench.workspacePath) {
         const selected = await this.chooseWorkspace()
         if (!selected) return false
+        workspacePath = selected
       }
+
       this.saveActiveConversation()
-      this.createConversation()
+      const targetWorkspace = workspacePath ?? workbench.workspacePath
+      if (!targetWorkspace) return false
+
+      if (
+        targetWorkspace !== workbench.workspacePath &&
+        !(await workbench.activateWorkspace(targetWorkspace))
+      ) {
+        return false
+      }
+
+      this.createConversation(targetWorkspace)
       return true
     },
     async selectConversation(conversationId: string) {
@@ -405,29 +462,63 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         await bridge.closeSession({ version: IPC_VERSION, sessionId })
       }
     },
+    async chooseContextAttachment(kind: ContextAttachmentKind) {
+      const timeline = useAgentTimelineStore()
+      const workbench = useAgentWorkbenchStore()
+      const bridge = window.agentApi
+      if (!bridge || !workbench.workspacePath) return false
+
+      const result = await bridge.chooseWorkspaceContext({
+        version: IPC_VERSION,
+        workspace: workbench.workspacePath,
+        kind,
+      })
+
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+
+      timeline.addContextAttachments(result.value.attachments)
+      return result.value.attachments.length > 0
+    },
     async sendMessage() {
       const timeline = useAgentTimelineStore()
       const workbench = useAgentWorkbenchStore()
       const bridge = window.agentApi
-      const text = timeline.input.trim()
+      const text =
+        timeline.input.trim() ||
+        'Please inspect the attached workspace context.'
       if (!bridge || !text || !this.canSend) return
       if (!this.sessionId && !(await this.createSession())) return
       const sessionId = this.sessionId
       if (!sessionId) return
+      const mentionAttachments = parseMentionAttachments(text)
+      const contextAttachments = [
+        ...timeline.contextAttachments,
+        ...mentionAttachments,
+      ]
 
       const result = await bridge.startRun({
         version: IPC_VERSION,
         sessionId,
         message: text,
         clientRequestId: requestId(),
+        ...(contextAttachments.length
+          ? { context: { attachments: attachmentRefs(contextAttachments) } }
+          : {}),
       })
       if (result.ok) {
         timeline.input = ''
+        timeline.clearContextAttachments()
         timeline.messages.push({
           id: requestId(),
           role: 'user',
           text,
           reasoning: '',
+          attachments: contextAttachments.map((attachment) => ({
+            ...attachment,
+          })),
           order: timeline.nextTimelineOrder(),
         })
         const conversation = workbench.activeConversation
@@ -568,6 +659,15 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           timeline.assistantMessage(event.runId).reasoning += event.delta
           this.schedulePersist()
           break
+        case 'assistant.message.completed': {
+          const message = timeline.assistantMessage(event.runId)
+          message.text = event.text
+          if (event.reasoning !== undefined) {
+            message.reasoning = event.reasoning
+          }
+          this.schedulePersist()
+          break
+        }
         case 'tool.proposed':
           timeline.tools.unshift({
             callId: event.callId,
@@ -603,6 +703,25 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
             usage: event.usage,
             order: timeline.nextTimelineOrder(),
           })
+          this.schedulePersist()
+          break
+        case 'orchestrator.message':
+          timeline.messages.push({
+            id: requestId(),
+            role: 'orchestrator',
+            runId: event.runId,
+            text: event.text,
+            reasoning: '',
+            order: timeline.nextTimelineOrder(),
+          })
+          this.schedulePersist()
+          break
+        case 'goal.updated':
+          timeline.goal = event.goal ? structuredClone(event.goal) : undefined
+          this.schedulePersist()
+          break
+        case 'plan.updated':
+          timeline.plan = event.plan ? structuredClone(event.plan) : undefined
           this.schedulePersist()
           break
         case 'approval.requested':

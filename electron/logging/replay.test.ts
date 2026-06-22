@@ -71,6 +71,7 @@ describe('trace replay', () => {
     expect(first.agentEvents.map((event) => event.type)).toEqual([
       'run.status',
       'assistant.text.delta',
+      'assistant.message.completed',
       'run.status',
       'session.closed',
     ])

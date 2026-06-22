@@ -63,6 +63,7 @@ const renameConversationId = ref<string>()
 const renameValue = ref('')
 const deleteConversationId = ref<string>()
 const switchConversationId = ref<string>()
+const switchNewConversationWorkspace = ref<string>()
 
 const projectName = computed(() => {
   if (!agent.workspacePath) {
@@ -166,13 +167,14 @@ async function confirmYoloMode() {
   }
 }
 
-async function createConversation() {
+async function createConversation(workspacePath?: string) {
   if (agent.activeRunId || agent.pendingApproval) {
     switchConversationId.value = 'new'
+    switchNewConversationWorkspace.value = workspacePath
     return
   }
 
-  await agent.newConversation()
+  await agent.newConversation(workspacePath)
 }
 
 async function openConversation(conversationId: string) {
@@ -181,20 +183,28 @@ async function openConversation(conversationId: string) {
     (agent.activeRunId || agent.pendingApproval)
   ) {
     switchConversationId.value = conversationId
+    switchNewConversationWorkspace.value = undefined
   }
 }
 
 async function confirmConversationSwitch() {
   const target = switchConversationId.value
+  const targetWorkspace = switchNewConversationWorkspace.value
   switchConversationId.value = undefined
+  switchNewConversationWorkspace.value = undefined
   await agent.interruptRun()
   await agent.closeRuntimeSession()
 
   if (target === 'new') {
-    await agent.newConversation()
+    await agent.newConversation(targetWorkspace)
   } else if (target) {
     await agent.selectConversation(target)
   }
+}
+
+function closeSwitchDialog() {
+  switchConversationId.value = undefined
+  switchNewConversationWorkspace.value = undefined
 }
 
 function beginRename(conversationId: string) {
@@ -479,7 +489,7 @@ onUnmounted(() => {
         @update:rename-open="!$event && (renameConversationId = undefined)"
         @update:rename-value="renameValue = $event"
         @update:delete-open="!$event && (deleteConversationId = undefined)"
-        @update:switch-open="!$event && (switchConversationId = undefined)"
+        @update:switch-open="!$event && closeSwitchDialog()"
         @confirm-yolo="confirmYoloMode"
         @confirm-rename="confirmRename"
         @confirm-delete="confirmDeleteConversation"

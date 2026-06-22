@@ -52,6 +52,10 @@ function persistableConversation(
   return persistable
 }
 
+function cloneForIpc<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
 function snapshotForPersistence(state: {
   projects: ProjectRecord[]
   conversations: ConversationRecord[]
@@ -66,11 +70,11 @@ function snapshotForPersistence(state: {
     ? state.activeConversationId
     : undefined
 
-  return {
+  return cloneForIpc({
     projects: state.projects,
     conversations,
     ...(activeConversationId ? { activeConversationId } : {}),
-  }
+  })
 }
 
 export const useAgentWorkbenchStore = defineStore('agent-workbench', {

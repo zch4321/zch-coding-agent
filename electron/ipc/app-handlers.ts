@@ -1,4 +1,5 @@
 import { BrowserWindow, dialog, shell, type OpenDialogOptions } from 'electron'
+import { stat } from 'node:fs/promises'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import { ChangeHistoryError, ChangeHistoryStore } from '../agent/change-history'
 import {
@@ -250,6 +251,67 @@ export function createAppIpcHandlers(
         throw error
       }
     },
+    'workspace:choose-context': async (payload) => {
+      const options: OpenDialogOptions = {
+        defaultPath: payload.workspace,
+        properties:
+          payload.kind === 'directory'
+            ? ['openDirectory', 'multiSelections']
+            : ['openFile', 'multiSelections'],
+      }
+      const mainWindow = getMainWindow()
+      const selected = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options)
+
+      if (selected.canceled) {
+        return { attachments: [] }
+      }
+
+      try {
+        const guard = await PathGuard.create(payload.workspace)
+        const attachments = await Promise.all(
+          selected.filePaths.slice(0, 32).map(async (filePath) => {
+            const guarded = await guard.resolveExisting(filePath)
+            const fileStat = await stat(guarded.realPath)
+
+            if (payload.kind === 'file' && !fileStat.isFile()) {
+              throw new PathGuardError('NOT_A_FILE', 'Path is not a file')
+            }
+
+            if (payload.kind === 'directory' && !fileStat.isDirectory()) {
+              throw new PathGuardError(
+                'NOT_A_DIRECTORY',
+                'Path is not a directory',
+              )
+            }
+
+            return {
+              kind: payload.kind,
+              path: guarded.relativePath,
+              source: 'picker' as const,
+              ...(payload.kind === 'file'
+                ? { totalBytes: fileStat.size, truncated: false }
+                : {}),
+            }
+          }),
+        )
+
+        return { attachments }
+      } catch (error) {
+        if (error instanceof PathGuardError) {
+          throw new IpcFault({
+            code:
+              error.code === 'PATH_NOT_FOUND'
+                ? 'NOT_FOUND'
+                : 'PRECONDITION_FAILED',
+            message: error.message,
+          })
+        }
+
+        throw error
+      }
+    },
     'session:create': async (payload) => ({
       sessionId: await sessionManager.createSession({
         conversationId: payload.conversationId,
@@ -305,6 +367,7 @@ export function createAppIpcHandlers(
         sessionId: payload.sessionId,
         message: payload.message,
         clientRequestId: payload.clientRequestId,
+        context: payload.context,
       }),
     }),
     'run:interrupt': (payload) => ({

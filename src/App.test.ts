@@ -320,6 +320,25 @@ describe('App', () => {
     expect(heading.attributes('aria-expanded')).toBe('true')
   })
 
+  it('creates a conversation from an empty project heading', async () => {
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    store.projects = [
+      {
+        path: 'F:/workspace/empty',
+        name: 'empty',
+        addedAt: '2026-06-21T00:00:00.000Z',
+      },
+    ]
+    const wrapper = mount(ProjectSidebar, {
+      global: { plugins: [pinia, i18n] },
+    })
+
+    await wrapper.get('.project-new-conversation-button').trigger('click')
+
+    expect(wrapper.emitted('create')?.[0]).toEqual(['F:/workspace/empty'])
+  })
+
   it('ignores a stale directory response after switching projects', async () => {
     type DirectoryResult = Awaited<
       ReturnType<AgentApi['listWorkspaceDirectory']>

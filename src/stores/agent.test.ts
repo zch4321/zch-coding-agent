@@ -9,6 +9,7 @@ import {
   toPublicConfig,
 } from '../../electron/config/schema'
 import { validatePayloadLimits } from '../../electron/ipc/validators'
+import { PROVIDER_NOTICE_VERSION } from '../../shared/notices'
 import { useAgentStore } from './agent'
 import { useAgentTimelineStore } from './agent-timeline'
 
@@ -62,6 +63,26 @@ describe('agent store regressions', () => {
 
     timeline.input = 'domain draft'
     expect(store.input).toBe('domain draft')
+  })
+
+  it('persists cloneable workbench snapshots through the Electron bridge', () => {
+    const saveWorkbench = vi.fn(
+      async (payload: Parameters<AgentApi['saveWorkbench']>[0]) => {
+        expect(() => structuredClone(payload.workbench)).not.toThrow()
+        return {
+          version: 1 as const,
+          ok: true as const,
+          value: payload.workbench,
+        }
+      },
+    )
+    installApi({ saveWorkbench })
+    const store = useAgentStore()
+    store.workspacePath = 'F:/workspace/example'
+
+    store.createConversation()
+
+    expect(saveWorkbench).toHaveBeenCalled()
   })
 
   it('submits an approval once and retains the reviewed diff', async () => {
@@ -210,6 +231,54 @@ describe('agent store regressions', () => {
     expect(store.mode).toBe('auto')
   })
 
+  it('sends typed @path and selected chips as structured context attachments', async () => {
+    const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
+    config.privacy.providerNoticeAccepted = {
+      version: PROVIDER_NOTICE_VERSION,
+      acceptedAt: '2026-06-22T00:00:00.000Z',
+    }
+    const createSession = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { sessionId },
+    }))
+    const startRun = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { runId },
+    }))
+    installApi({ createSession, startRun })
+    const store = useAgentStore()
+    store.bridgeAvailable = true
+    store.applyConfig(config)
+    store.workspacePath = 'F:/workspace/example'
+    store.createConversation()
+    store.input = 'Review @README.md and @src/'
+    store.contextAttachments = [
+      { kind: 'directory', path: 'docs', source: 'picker' },
+    ]
+
+    await store.sendMessage()
+
+    expect(startRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: {
+          attachments: [
+            { kind: 'directory', path: 'docs', source: 'picker' },
+            { kind: 'file', path: 'README.md', source: 'mention' },
+            { kind: 'directory', path: 'src', source: 'mention' },
+          ],
+        },
+      }),
+    )
+    expect(store.contextAttachments).toEqual([])
+    expect(store.messages[0]?.attachments).toMatchObject([
+      { kind: 'directory', path: 'docs' },
+      { kind: 'file', path: 'README.md' },
+      { kind: 'directory', path: 'src' },
+    ])
+  })
+
   it('does not change conversation recency when merely switching', async () => {
     const store = useAgentStore()
     store.workspacePath = 'F:/workspace/example'
@@ -270,6 +339,33 @@ describe('agent store regressions', () => {
     await expect(switching).resolves.toBe(true)
     expect(store.workspacePath).toBe(secondWorkspace)
     expect(store.activeConversationId).toBe(second.id)
+  })
+
+  it('creates a new conversation for a specific project workspace', async () => {
+    const firstWorkspace = 'F:/workspace/first'
+    const secondWorkspace = 'F:/workspace/second'
+    const config = toPublicConfig(DEFAULT_APP_CONFIG, false)
+    config.workspace.lastOpened = secondWorkspace
+    const setConfig = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { config },
+    }))
+    installApi({ setConfig })
+    const store = useAgentStore()
+    store.workspacePath = firstWorkspace
+    store.registerProject(firstWorkspace)
+    store.registerProject(secondWorkspace)
+
+    await expect(store.newConversation(secondWorkspace)).resolves.toBe(true)
+
+    expect(setConfig).toHaveBeenCalledWith({
+      version: 1,
+      kind: 'workspace',
+      lastOpened: secondWorkspace,
+    })
+    expect(store.workspacePath).toBe(secondWorkspace)
+    expect(store.activeConversation?.projectPath).toBe(secondWorkspace)
   })
 
   it('ignores duplicate Agent events and reports sequence gaps', () => {
@@ -336,5 +432,55 @@ describe('agent store regressions', () => {
       store.tools[0]?.order,
       store.messages[1]?.order,
     ]).toEqual([1, 2, 3])
+  })
+
+  it('renders completed assistant messages even if stream deltas were missed', () => {
+    const store = useAgentStore()
+    store.sessionId = sessionId
+
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 1,
+      ts: '2026-06-20T00:00:00.000Z',
+      type: 'assistant.message.completed',
+      sessionId,
+      runId,
+      text: 'Final answer',
+      reasoning: 'Final reasoning',
+    })
+
+    expect(store.messages[0]).toMatchObject({
+      role: 'assistant',
+      runId,
+      text: 'Final answer',
+      reasoning: 'Final reasoning',
+    })
+  })
+
+  it('uses completed assistant messages as an idempotent final snapshot', () => {
+    const store = useAgentStore()
+    store.sessionId = sessionId
+
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 1,
+      ts: '2026-06-20T00:00:00.000Z',
+      type: 'assistant.text.delta',
+      sessionId,
+      runId,
+      delta: 'Part',
+    })
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 2,
+      ts: '2026-06-20T00:00:01.000Z',
+      type: 'assistant.message.completed',
+      sessionId,
+      runId,
+      text: 'Part plus final text',
+    })
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]?.text).toBe('Part plus final text')
   })
 })

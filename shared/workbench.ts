@@ -3,6 +3,8 @@ import { PermissionModeSchema } from './config'
 import { CallIdSchema, RunIdSchema } from './ids'
 import { JsonValueSchema } from './json'
 import { LlmUsageRecordSchema } from './usage'
+import { ContextAttachmentChipSchema } from './context'
+import { GoalStateSchema, PlanStateSchema } from './orchestration'
 
 export const ChatMessageSchema = Type.Object(
   {
@@ -16,6 +18,9 @@ export const ChatMessageSchema = Type.Object(
     text: Type.String({ maxLength: 1_000_000 }),
     reasoning: Type.String({ maxLength: 1_000_000 }),
     order: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
+    attachments: Type.Optional(
+      Type.Array(ContextAttachmentChipSchema, { maxItems: 64 }),
+    ),
   },
   { additionalProperties: false },
 )
@@ -99,6 +104,8 @@ export const ConversationRecordSchema = Type.Object(
     messages: Type.Array(ChatMessageSchema, { maxItems: 10_000 }),
     tools: Type.Optional(Type.Array(ToolActivitySchema, { maxItems: 10_000 })),
     usage: Type.Optional(Type.Array(UsageActivitySchema, { maxItems: 10_000 })),
+    goal: Type.Optional(GoalStateSchema),
+    plan: Type.Optional(PlanStateSchema),
     orchestratorEntries: Type.Optional(
       Type.Array(OrchestratorEntrySchema, { maxItems: 10_000 }),
     ),

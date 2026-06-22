@@ -4,9 +4,9 @@ import { useAgentStore } from '../../stores/agent'
 import { useI18n } from 'vue-i18n'
 import UiIcon from '../UiIcon.vue'
 
-defineEmits<{
+const emit = defineEmits<{
   add: []
-  create: []
+  create: [workspacePath?: string]
   open: [conversationId: string]
   rename: [conversationId: string]
   delete: [conversationId: string]
@@ -20,6 +20,13 @@ const collapsedProjects = reactive(new Set<string>())
 function toggleProject(path: string) {
   if (collapsedProjects.has(path)) collapsedProjects.delete(path)
   else collapsedProjects.add(path)
+}
+
+function createProjectConversation(workspacePath: string) {
+  if (collapsedProjects.has(workspacePath)) {
+    collapsedProjects.delete(workspacePath)
+  }
+  emit('create', workspacePath)
 }
 
 function displayConversationTitle(title: string) {
@@ -76,7 +83,7 @@ const searchGroups = computed(() => {
     <button
       class="new-conversation-button"
       type="button"
-      @click="$emit('create')"
+      @click="emit('create')"
     >
       <UiIcon name="plus" />
       <span>{{ t('app.newConversation') }}</span>
@@ -109,7 +116,7 @@ const searchGroups = computed(() => {
             :key="conversation.id"
             class="conversation-item search-result"
             type="button"
-            @click="$emit('open', conversation.id)"
+            @click="emit('open', conversation.id)"
           >
             <span>{{ displayConversationTitle(conversation.title) }}</span>
             <small>{{ conversation.match }}</small>
@@ -131,7 +138,7 @@ const searchGroups = computed(() => {
             class="add-project-button"
             :aria-label="t('sidebar.addWorkspace')"
             :title="t('sidebar.addWorkspace')"
-            @click="$emit('add')"
+            @click="emit('add')"
           >
             <UiIcon name="plus" />
           </button>
@@ -141,23 +148,34 @@ const searchGroups = computed(() => {
           :key="project.path"
           class="project-group"
         >
-          <button
-            type="button"
-            class="project-heading"
-            :title="project.path"
-            :aria-expanded="!collapsedProjects.has(project.path)"
-            @click="toggleProject(project.path)"
-          >
-            <UiIcon
-              :name="
-                collapsedProjects.has(project.path)
-                  ? 'chevron-right'
-                  : 'chevron-down'
-              "
-            />
-            <UiIcon name="folder" />
-            <strong>{{ project.name }}</strong>
-          </button>
+          <div class="project-heading-row">
+            <button
+              type="button"
+              class="project-heading"
+              :title="project.path"
+              :aria-expanded="!collapsedProjects.has(project.path)"
+              @click="toggleProject(project.path)"
+            >
+              <UiIcon
+                :name="
+                  collapsedProjects.has(project.path)
+                    ? 'chevron-right'
+                    : 'chevron-down'
+                "
+              />
+              <UiIcon name="folder" />
+              <strong>{{ project.name }}</strong>
+            </button>
+            <button
+              type="button"
+              class="project-new-conversation-button"
+              :aria-label="t('sidebar.newConversationInProject')"
+              :title="t('sidebar.newConversationInProject')"
+              @click="createProjectConversation(project.path)"
+            >
+              <UiIcon name="plus" />
+            </button>
+          </div>
           <div
             v-show="!collapsedProjects.has(project.path)"
             class="conversation-list"
@@ -173,7 +191,7 @@ const searchGroups = computed(() => {
               <button
                 class="conversation-item"
                 type="button"
-                @click="$emit('open', conversation.id)"
+                @click="emit('open', conversation.id)"
               >
                 {{ displayConversationTitle(conversation.title) }}
               </button>
@@ -182,7 +200,7 @@ const searchGroups = computed(() => {
                   type="button"
                   :aria-label="t('sidebar.rename')"
                   :title="t('sidebar.renameTitle')"
-                  @click="$emit('rename', conversation.id)"
+                  @click="emit('rename', conversation.id)"
                 >
                   <UiIcon name="edit" />
                 </button>
@@ -190,7 +208,7 @@ const searchGroups = computed(() => {
                   type="button"
                   :aria-label="t('sidebar.delete')"
                   :title="t('sidebar.deleteTitle')"
-                  @click="$emit('delete', conversation.id)"
+                  @click="emit('delete', conversation.id)"
                 >
                   <UiIcon name="trash" />
                 </button>

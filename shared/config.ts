@@ -317,6 +317,39 @@ export const PublicConfigSchema = Type.Object(
           },
           { additionalProperties: false },
         ),
+        orchestration: Type.Object(
+          {
+            goalContinue: Type.Object(
+              {
+                'zh-CN': PromptResourceRefSchema,
+                'en-US': PromptResourceRefSchema,
+              },
+              { additionalProperties: false },
+            ),
+            planContinue: Type.Object(
+              {
+                'zh-CN': PromptResourceRefSchema,
+                'en-US': PromptResourceRefSchema,
+              },
+              { additionalProperties: false },
+            ),
+            planWarning: Type.Object(
+              {
+                'zh-CN': PromptResourceRefSchema,
+                'en-US': PromptResourceRefSchema,
+              },
+              { additionalProperties: false },
+            ),
+            compact: Type.Object(
+              {
+                'zh-CN': PromptResourceRefSchema,
+                'en-US': PromptResourceRefSchema,
+              },
+              { additionalProperties: false },
+            ),
+          },
+          { additionalProperties: false },
+        ),
       },
       { additionalProperties: false },
     ),

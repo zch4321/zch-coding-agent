@@ -16,7 +16,10 @@ export function projectName(workspacePath: string): string {
 }
 
 export function cloneMessages(messages: ChatMessage[]): ChatMessage[] {
-  return messages.map((message) => ({ ...message }))
+  return messages.map((message) => ({
+    ...message,
+    attachments: message.attachments?.map((attachment) => ({ ...attachment })),
+  }))
 }
 
 export function loadWorkbench(): PersistedWorkbench {

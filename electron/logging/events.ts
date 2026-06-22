@@ -195,6 +195,18 @@ export const TraceEventSchema = Type.Union([
       reasoning: Type.Optional(Type.String({ maxLength: 1_000_000 })),
     }),
   ]),
+  Type.Composite([
+    TraceBaseSchema,
+    Type.Object({
+      type: Type.Literal('orchestrator.message'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      kind: Type.String({ maxLength: 128 }),
+      text: Type.String({ maxLength: 1_000_000 }),
+      promptId: Type.Optional(Type.String({ maxLength: 256 })),
+      promptHash: Type.Optional(Type.String({ maxLength: 128 })),
+    }),
+  ]),
 ])
 
 export type TraceEvent = Static<typeof TraceEventSchema>
@@ -294,6 +306,14 @@ export type TraceEventInput =
       runId?: RunId
       text: string
       reasoning?: string
+    })
+  | (TraceInputBase & {
+      type: 'orchestrator.message'
+      runId: RunId
+      kind: string
+      text: string
+      promptId?: string
+      promptHash?: string
     })
 
 export interface TraceEventFactory {

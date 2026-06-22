@@ -11,6 +11,7 @@ import {
 } from '../../shared/config'
 import {
   DEFAULT_APPROVAL_PROMPT_REFS,
+  DEFAULT_ORCHESTRATION_PROMPT_REFS,
   DEFAULT_SYSTEM_PROMPT_REFS,
 } from '../../shared/prompt-resources'
 import { DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
@@ -144,6 +145,7 @@ export const DEFAULT_APP_CONFIG = {
   prompts: {
     system: structuredClone(DEFAULT_SYSTEM_PROMPT_REFS),
     approval: structuredClone(DEFAULT_APPROVAL_PROMPT_REFS),
+    orchestration: structuredClone(DEFAULT_ORCHESTRATION_PROMPT_REFS),
   },
   network: {
     httpProxy: { mode: 'off' },

@@ -1,4 +1,6 @@
 import type { CallId, RunId } from '../../shared/ids'
+import type { ContextAttachmentChip } from '../../shared/context'
+import type { GoalState, PlanState } from '../../shared/orchestration'
 
 export interface UiLlmUsageRecord {
   scope: 'main' | 'approval' | 'title' | 'compression'
@@ -23,6 +25,7 @@ export interface ChatMessage {
   text: string
   reasoning: string
   order?: number
+  attachments?: ContextAttachmentChip[]
 }
 
 export interface ToolActivity {
@@ -79,12 +82,16 @@ export interface ConversationRecord {
   messages: ChatMessage[]
   tools?: ToolActivity[]
   usage?: UsageActivity[]
+  goal?: GoalState
+  plan?: PlanState
   orchestratorEntries?: OrchestratorEntry[]
   latestReviewedApproval?: ReviewedApproval
   createdAt: string
   updatedAt: string
   transient?: boolean
 }
+
+export type { ContextAttachmentChip, GoalState, PlanState }
 
 export interface PersistedWorkbench {
   projects: ProjectRecord[]

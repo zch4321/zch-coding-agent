@@ -6,6 +6,9 @@ import type {
   ReviewedApproval,
   ToolActivity,
   UsageActivity,
+  ContextAttachmentChip,
+  GoalState,
+  PlanState,
 } from './agent-types'
 import { cloneMessages, requestId } from './workbench-persistence'
 
@@ -15,6 +18,9 @@ export const useAgentTimelineStore = defineStore('agent-timeline', {
     messages: [] as ChatMessage[],
     tools: [] as ToolActivity[],
     usage: [] as UsageActivity[],
+    contextAttachments: [] as ContextAttachmentChip[],
+    goal: undefined as GoalState | undefined,
+    plan: undefined as PlanState | undefined,
     timelineCounter: 0,
     latestReviewedApproval: undefined as ReviewedApproval | undefined,
   }),
@@ -36,6 +42,9 @@ export const useAgentTimelineStore = defineStore('agent-timeline', {
       this.messages = []
       this.tools = []
       this.usage = []
+      this.contextAttachments = []
+      this.goal = undefined
+      this.plan = undefined
       this.timelineCounter = 0
       this.latestReviewedApproval = undefined
     },
@@ -43,6 +52,13 @@ export const useAgentTimelineStore = defineStore('agent-timeline', {
       this.messages = conversation ? cloneMessages(conversation.messages) : []
       this.tools = (conversation?.tools ?? []).map((tool) => ({ ...tool }))
       this.usage = (conversation?.usage ?? []).map((item) => ({ ...item }))
+      this.contextAttachments = []
+      this.goal = conversation?.goal
+        ? structuredClone(conversation.goal)
+        : undefined
+      this.plan = conversation?.plan
+        ? structuredClone(conversation.plan)
+        : undefined
       this.latestReviewedApproval = conversation?.latestReviewedApproval
         ? { ...conversation.latestReviewedApproval }
         : undefined
@@ -65,6 +81,8 @@ export const useAgentTimelineStore = defineStore('agent-timeline', {
       conversation.messages = cloneMessages(this.messages)
       conversation.tools = this.tools.map((tool) => ({ ...tool }))
       conversation.usage = this.usage.map((item) => ({ ...item }))
+      conversation.goal = this.goal ? structuredClone(this.goal) : undefined
+      conversation.plan = this.plan ? structuredClone(this.plan) : undefined
       conversation.latestReviewedApproval = this.latestReviewedApproval
         ? { ...this.latestReviewedApproval }
         : undefined
@@ -95,6 +113,26 @@ export const useAgentTimelineStore = defineStore('agent-timeline', {
     nextTimelineOrder(): number {
       this.timelineCounter += 1
       return this.timelineCounter
+    },
+    addContextAttachments(attachments: ContextAttachmentChip[]) {
+      const seen = new Set(
+        this.contextAttachments.map((item) => `${item.kind}:${item.path}`),
+      )
+
+      for (const attachment of attachments) {
+        const key = `${attachment.kind}:${attachment.path}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        this.contextAttachments.push({ ...attachment })
+      }
+    },
+    removeContextAttachment(path: string, kind: ContextAttachmentChip['kind']) {
+      this.contextAttachments = this.contextAttachments.filter(
+        (item) => item.path !== path || item.kind !== kind,
+      )
+    },
+    clearContextAttachments() {
+      this.contextAttachments = []
     },
   },
 })

@@ -4,6 +4,7 @@ import path from 'node:path'
 import type { AssistantLanguage } from '../../shared/system-prompts'
 import {
   DEFAULT_APPROVAL_PROMPT_REFS,
+  DEFAULT_ORCHESTRATION_PROMPT_REFS,
   DEFAULT_SYSTEM_PROMPT_REFS,
 } from '../../shared/prompt-resources'
 
@@ -49,6 +50,19 @@ export class PromptRegistry {
         DEFAULT_APPROVAL_PROMPT_REFS.classifyRisk.version,
         path.join(rootDirectory, 'approval', 'classify-risk.md'),
       ),
+      ...Object.values(DEFAULT_ORCHESTRATION_PROMPT_REFS).flatMap((localized) =>
+        (['zh-CN', 'en-US'] as const).map((locale) =>
+          loadResource(
+            localized[locale].id,
+            localized[locale].version,
+            path.join(
+              rootDirectory,
+              'orchestration',
+              `${localized[locale].id.replace('orchestration.', '')}.md`,
+            ),
+          ),
+        ),
+      ),
     ])
     return new PromptRegistry(resources)
   }
@@ -86,6 +100,20 @@ export class PromptRegistry {
 
   approvalPrompt(): ResolvedPrompt {
     const resource = this.get(DEFAULT_APPROVAL_PROMPT_REFS.classifyRisk.id)
+    return {
+      content: resource.content,
+      resource: withoutContent(resource),
+      customized: false,
+    }
+  }
+
+  orchestrationPrompt(
+    kind: keyof typeof DEFAULT_ORCHESTRATION_PROMPT_REFS,
+    locale: AssistantLanguage,
+  ): ResolvedPrompt {
+    const resource = this.get(
+      DEFAULT_ORCHESTRATION_PROMPT_REFS[kind][locale].id,
+    )
     return {
       content: resource.content,
       resource: withoutContent(resource),

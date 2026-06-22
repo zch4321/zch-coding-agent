@@ -16,6 +16,7 @@ import type { LLMProvider, ProviderMessage } from './provider'
 import type { HumanApprovalDecision } from './permission-pipeline'
 import type { SkillsManager } from '../skills/manager'
 import type { PromptRegistry } from '../prompts/registry'
+import type { GoalState, PlanState } from '../../shared/orchestration'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -76,6 +77,8 @@ export interface SessionState {
   systemPromptOverride?: string
   providerRequestOverride?: JsonValue
   forkedFromEventId?: EventId
+  goal?: GoalState
+  plan?: PlanState
   eventSeq: number
   closed: boolean
   activeRun?: ActiveRun
