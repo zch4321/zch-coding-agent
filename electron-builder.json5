@@ -3,7 +3,10 @@
   $schema: 'https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json',
   appId: 'com.zchcodingagent.desktop',
   asar: true,
-  asarUnpack: ['node_modules/node-pty/**/*'],
+  asarUnpack: [
+    'node_modules/node-pty/**/*',
+    'node_modules/@vscode/ripgrep*/**/*',
+  ],
   npmRebuild: false,
   productName: 'Zch Coding Agent',
   directories: {

@@ -16,7 +16,7 @@ export default defineConfig({
         vite: {
           build: {
             rolldownOptions: {
-              external: ['node-pty'],
+              external: ['node-pty', '@vscode/ripgrep'],
             },
           },
         },

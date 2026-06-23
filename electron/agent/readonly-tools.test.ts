@@ -8,6 +8,12 @@ import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { PermissionPipeline } from './permission-pipeline'
 import { registerReadOnlyTools } from './readonly-tools'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
+import {
+  JavaScriptSearcher,
+  resolveWorkspaceSearcher,
+  __resetCachedSearcher,
+  type Searcher,
+} from './searcher'
 
 async function workspace() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agent-tools-'))
@@ -17,9 +23,17 @@ async function workspace() {
   return root
 }
 
-async function executeReadonly(root: string, call: ToolCall) {
+async function executeReadonly(
+  root: string,
+  call: ToolCall,
+  searcher?: Searcher,
+) {
   const registry = new ToolRegistry()
-  registerReadOnlyTools(registry)
+  registerReadOnlyTools(
+    registry,
+    undefined,
+    searcher ? () => Promise.resolve(searcher) : undefined,
+  )
   const executor = new ToolExecutor(registry)
   const context = {
     sessionId: 'session-test' as SessionId,
@@ -122,24 +136,106 @@ describe('read-only tools', () => {
     }
   })
 
-  it('terminates catastrophic grep expressions outside the main thread', async () => {
+  it('terminates catastrophic grep expressions in the JavaScript fallback', async () => {
     const root = await workspace()
     await writeFile(
       path.join(root, 'catastrophic.txt'),
       `${'a'.repeat(80_000)}!`,
     )
 
-    const result = await executeReadonly(root, {
-      id: 'call-grep-timeout' as CallId,
-      toolId: 'grep',
-      args: { pattern: '(a+)+$', path: '.', maxResults: 10 },
-      reason: 'Exercise regex timeout',
-    })
+    const result = await executeReadonly(
+      root,
+      {
+        id: 'call-grep-timeout' as CallId,
+        toolId: 'grep',
+        args: { pattern: '(a+)+$', path: '.', maxResults: 10 },
+        reason: 'Exercise regex timeout',
+      },
+      new JavaScriptSearcher(),
+    )
 
     expect(result).toMatchObject({
       status: 'error',
       code: 'REGEX_TIMEOUT',
     })
+  })
+
+  it('returns relative paths and line numbers from the ripgrep backend', async () => {
+    __resetCachedSearcher()
+    const searcher = await resolveWorkspaceSearcher()
+    const root = await workspace()
+    await writeFile(
+      path.join(root, 'src', 'util.ts'),
+      'export const marker = 1\n',
+    )
+
+    const result = await executeReadonly(
+      root,
+      {
+        id: 'call-grep-rg' as CallId,
+        toolId: 'grep',
+        args: { pattern: 'marker', include: '**/*.ts', maxResults: 10 },
+        reason: '',
+      },
+      searcher,
+    )
+
+    expect(result).toMatchObject({ status: 'ok' })
+
+    if (result.status === 'ok') {
+      const content = result.content as {
+        matches: Array<{ path: string; line: number; text: string }>
+      }
+      const paths = content.matches.map((match) => match.path)
+      expect(paths).toContain('src/app.ts')
+      expect(paths).toContain('src/util.ts')
+      const appMatch = content.matches.find(
+        (match) => match.path === 'src/app.ts',
+      )
+      expect(appMatch?.line).toBe(1)
+      expect(appMatch?.text).toContain('marker')
+    }
+  })
+
+  it('prefixes read_file content with line numbers by default', async () => {
+    const root = await workspace()
+    await writeFile(path.join(root, 'lines.txt'), 'alpha\nbeta\ngamma\n')
+
+    const result = await executeReadonly(root, {
+      id: 'call-read-numbers' as CallId,
+      toolId: 'read_file',
+      args: { path: 'lines.txt' },
+      reason: '',
+    })
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      content: { startLine: 1, endLine: 3, truncated: false },
+    })
+
+    if (result.status === 'ok') {
+      const content = result.content as { content: string }
+      expect(content.content).toBe('1\talpha\n2\tbeta\n3\tgamma')
+    }
+  })
+
+  it('omits line numbers when lineNumbers is false', async () => {
+    const root = await workspace()
+    await writeFile(path.join(root, 'lines.txt'), 'alpha\nbeta\n')
+
+    const result = await executeReadonly(root, {
+      id: 'call-read-no-numbers' as CallId,
+      toolId: 'read_file',
+      args: { path: 'lines.txt', lineNumbers: false },
+      reason: '',
+    })
+
+    expect(result).toMatchObject({ status: 'ok' })
+
+    if (result.status === 'ok') {
+      const content = result.content as { content: string }
+      expect(content.content).toBe('alpha\nbeta')
+    }
   })
 
   it('returns a structured error for path escapes', async () => {
