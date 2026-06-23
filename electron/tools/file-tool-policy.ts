@@ -1,6 +1,6 @@
 import type { PolicySignal } from '../../shared/agent-events'
 import type { JsonValue } from '../../shared/json'
-import type { ToolCall } from '../tools/types'
+import type { ToolCall } from './types'
 import type { FileOperation } from './file-tool-types'
 
 export function argsObject(call: ToolCall): Record<string, JsonValue> {

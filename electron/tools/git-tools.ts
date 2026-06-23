@@ -5,7 +5,7 @@ import type {
   ToolDefinition,
   ToolRegistrationPort,
   ToolResult,
-} from '../tools/types'
+} from './types'
 import {
   runCommand,
   type CommandSpec,

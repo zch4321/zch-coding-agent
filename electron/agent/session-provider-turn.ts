@@ -7,7 +7,7 @@ import {
   ContextBudgetError,
   estimateJsonTokens,
   selectContextMessages,
-} from './context-budget'
+} from '../tools/context-budget'
 import { OpenAICompatibleProvider } from '../providers/deepseek-provider'
 import type {
   ProviderAssistantTurn,
@@ -16,7 +16,7 @@ import type {
   ProviderRequestSnapshot,
 } from '../providers/provider'
 import type { SkillsManager } from '../skills/manager'
-import type { ToolRegistry } from './tool-registry'
+import type { ToolRegistry } from '../tools/tool-registry'
 import { id, ipcFault, toJsonValue } from './session-common'
 import {
   contextMessages,

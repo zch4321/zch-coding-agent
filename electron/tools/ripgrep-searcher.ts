@@ -6,7 +6,7 @@ import type {
   SearchMatch,
   SearchOutcome,
   Searcher,
-} from '../tools/searcher-types'
+} from './searcher-types'
 
 const SKIPPED_GLOBS = ['!node_modules', '!.git', '!dist']
 

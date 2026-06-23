@@ -2,7 +2,7 @@ import { Type } from '@sinclair/typebox'
 import { describe, expect, it } from 'vitest'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
-import { PermissionPipeline } from './permission-pipeline'
+import { PermissionPipeline } from '../agent/permission-pipeline'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
 
 describe('ToolRegistry hard output boundary', () => {

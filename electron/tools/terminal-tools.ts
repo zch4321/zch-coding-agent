@@ -1,7 +1,7 @@
 import { Type } from '@sinclair/typebox'
 import { TerminalIdSchema } from '../../shared/ids'
 import type { TerminalPool } from '../terminal/pool'
-import type { ToolDefinition, ToolRegistrationPort } from '../tools/types'
+import type { ToolDefinition, ToolRegistrationPort } from './types'
 
 const OpenSchema = Type.Object(
   {

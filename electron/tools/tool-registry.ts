@@ -8,9 +8,9 @@ import type {
   ToolExecutionContext,
   ToolRegistrationPort,
   ToolResult,
-} from '../tools/types'
-import type { ApprovedToolCall } from '../tools/approved-tool-call'
-import { revalidateApprovedToolCall } from './permission-pipeline'
+} from './types'
+import type { ApprovedToolCall } from './approved-tool-call'
+import { revalidateApprovedToolCall } from '../agent/permission-pipeline'
 
 interface RegisteredTool {
   readonly definition: ToolDefinition

@@ -1,7 +1,7 @@
 import { Type } from '@sinclair/typebox'
 import type { JsonValue } from '../../shared/json'
 import type { PublicConfig } from '../../shared/config'
-import type { ToolDefinition, ToolResult } from '../tools/types'
+import type { ToolDefinition, ToolResult } from './types'
 import { matchesGlob } from './glob'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
 import type { ToolRegistry } from './tool-registry'

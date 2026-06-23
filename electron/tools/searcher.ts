@@ -6,7 +6,7 @@ import {
   type SearchMatch,
   type SearchOutcome,
   type Searcher,
-} from '../tools/searcher-types'
+} from './searcher-types'
 import { walkFiles } from './workspace-walk'
 
 const DEFAULT_GREP_FILE_BYTES = 256_000

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { Type } from '@sinclair/typebox'
 import type { PublicConfig } from '../../shared/config'
-import type { ToolCall, ToolDefinition, ToolResult } from '../tools/types'
+import type { ToolCall, ToolDefinition, ToolResult } from './types'
 import { atomicDelete, atomicReplace } from './file-tool-atomic'
 import { createFileDiff } from './file-tool-diff'
 import {
@@ -31,7 +31,7 @@ export type {
   ToolResourcePlan,
 } from './file-tool-types'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
-import type { ApprovedToolCall } from '../tools/approved-tool-call'
+import type { ApprovedToolCall } from './approved-tool-call'
 import type { ToolRegistry } from './tool-registry'
 import { applyTextPatch, TextPatchError } from './text-patch'
 

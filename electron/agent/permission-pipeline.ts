@@ -23,7 +23,7 @@ import {
   prepareToolResourcePlan,
   revalidateResourcePreconditions,
   type ToolResourcePlan,
-} from './file-tools'
+} from '../tools/file-tools'
 import { PathGuardError } from '../safety/path-guard'
 import { evaluatePolicy } from './policy-engine'
 

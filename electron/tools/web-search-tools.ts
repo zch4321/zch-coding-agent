@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox'
 import type { PublicConfig } from '../../shared/config'
 import type { JsonValue } from '../../shared/json'
-import type { ToolRegistrationPort, ToolResult } from '../tools/types'
+import type { ToolRegistrationPort, ToolResult } from './types'
 import type { ConfigStore } from '../config/store'
 import {
   BraveSearchProvider,

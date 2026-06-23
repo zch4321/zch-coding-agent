@@ -6,7 +6,7 @@ import {
   ContextBudgetError,
   estimateJsonTokens,
   selectContextMessages,
-} from './context-budget'
+} from '../tools/context-budget'
 import { resolveModelProfiles } from '../providers/model-catalog'
 import type { ProviderMessage } from '../providers/provider'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'

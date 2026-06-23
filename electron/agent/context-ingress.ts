@@ -2,7 +2,7 @@ import type { PublicConfig } from '../../shared/config'
 import type { PolicySignal } from '../../shared/agent-events'
 import type { JsonValue } from '../../shared/json'
 import type { ToolCall, ToolResult } from '../tools/types'
-import { matchesGlob } from './glob'
+import { matchesGlob } from '../tools/glob'
 
 export type IngressDecision =
   | { action: 'allow'; signals: PolicySignal[] }

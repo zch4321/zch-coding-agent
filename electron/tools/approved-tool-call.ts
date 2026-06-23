@@ -1,6 +1,6 @@
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
-import type { FilePrecondition } from '../agent/file-tool-types'
+import type { FilePrecondition } from './file-tool-types'
 
 /**
  * Branded type for a tool call that has passed the permission pipeline. The

@@ -1,6 +1,6 @@
 import { Type } from '@sinclair/typebox'
 import type { SkillsManager } from '../skills/manager'
-import type { ToolDefinition } from '../tools/types'
+import type { ToolDefinition } from './types'
 import type { ToolRegistry } from './tool-registry'
 
 const ReadSkillArgsSchema = Type.Object(

@@ -6,10 +6,10 @@ import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { ToolCall } from '../tools/types'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import type { AutoApprover } from './auto-approver'
-import { registerFileTools } from './file-tools'
+import { registerFileTools } from '../tools/file-tools'
 import { PermissionPipeline } from './permission-pipeline'
-import { registerProcessTools } from './process-tools'
-import { ToolRegistry } from './tool-registry'
+import { registerProcessTools } from '../tools/process-tools'
+import { ToolRegistry } from '../tools/tool-registry'
 
 const sessionId = 'session:pipeline' as SessionId
 const runId = 'run:pipeline' as RunId
