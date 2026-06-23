@@ -83,4 +83,19 @@ describe('config migrations', () => {
       count: 5,
     })
   })
+
+  it('normalizes a removed web search provider and clears its credential ref', () => {
+    const legacy = structuredClone(DEFAULT_APP_CONFIG) as unknown as {
+      schemaVersion: number
+      webSearch: { provider: string; apiKeyRef?: string; count: number }
+    }
+    legacy.schemaVersion = 4
+    legacy.webSearch.provider = 'serper'
+    legacy.webSearch.apiKeyRef = 'secret:serper-key'
+
+    const migrated = migrateConfig(legacy)
+
+    expect(migrated.webSearch.provider).toBe('brave')
+    expect(migrated.webSearch.apiKeyRef).toBeUndefined()
+  })
 })

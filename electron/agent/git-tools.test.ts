@@ -221,6 +221,59 @@ describe('git read-only tools', () => {
     }
   })
 
+  it('does not trigger a configured textconv filter from git_diff', async () => {
+    const root = await repo()
+    await writeFile(path.join(root, 'blob.bin'), 'binary\n')
+    await git(root, ['add', 'blob.bin'])
+    await git(root, ['commit', '--quiet', '-m', 'add binary'])
+    const marker = path.join(root, 'textconv-marker.txt')
+    await git(root, [
+      'config',
+      'diff.evil.command',
+      // shell on Windows: write the marker via a simple command line.
+      process.platform === 'win32'
+        ? `cmd /c echo triggered > "${marker}"`
+        : `sh -c 'echo triggered > "${marker}"'`,
+    ])
+    await writeFile(path.join(root, '.gitattributes'), '*.bin diff=evil\n')
+    await git(root, ['add', '.gitattributes'])
+    await git(root, ['commit', '--quiet', '-m', 'gitattributes'])
+
+    const result = await execute(root, {
+      toolId: 'git_diff',
+      args: { paths: ['blob.bin'] },
+    })
+
+    expect(result).toMatchObject({ status: 'ok' })
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  it('does not trigger a configured textconv filter from git_show', async () => {
+    const root = await repo()
+    await writeFile(path.join(root, 'blob.bin'), 'binary\n')
+    await git(root, ['add', 'blob.bin'])
+    await git(root, ['commit', '--quiet', '-m', 'add binary'])
+    const marker = path.join(root, 'textconv-marker.txt')
+    await git(root, [
+      'config',
+      'diff.evil.command',
+      process.platform === 'win32'
+        ? `cmd /c echo triggered > "${marker}"`
+        : `sh -c 'echo triggered > "${marker}"'`,
+    ])
+    await writeFile(path.join(root, '.gitattributes'), '*.bin diff=evil\n')
+    await git(root, ['add', '.gitattributes'])
+    await git(root, ['commit', '--quiet', '-m', 'gitattributes'])
+
+    const result = await execute(root, {
+      toolId: 'git_show',
+      args: { ref: 'HEAD' },
+    })
+
+    expect(result).toMatchObject({ status: 'ok' })
+    expect(existsSync(marker)).toBe(false)
+  })
+
   it('rejects disallowed flags before invoking git', async () => {
     const root = await repo()
     const result = await execute(root, {

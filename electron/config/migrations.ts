@@ -62,6 +62,15 @@ export function migrateConfig(candidate: unknown): AppConfig {
     reasoning: normalizeReasoning(provider.reasoning),
   }))
 
+  // The web search provider union was narrowed to 'brave'. Any config that
+  // still references a removed provider (serper/tavily) is normalized back to
+  // brave, and its apiKeyRef is dropped so a non-Brave credential is never
+  // reused against the Brave endpoint.
+  if (migrated.webSearch.provider !== 'brave') {
+    migrated.webSearch.provider = 'brave'
+    delete migrated.webSearch.apiKeyRef
+  }
+
   if (
     !migrated.providers.some(
       (provider) => provider.id === migrated.activeProviderId,

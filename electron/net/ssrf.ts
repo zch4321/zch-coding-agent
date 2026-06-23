@@ -17,6 +17,16 @@ export interface SsrfFetchOptions {
   allowedMimePrefixes?: readonly string[]
   /** Extra request headers merged over the defaults. */
   headers?: Record<string, string>
+  /**
+   * Test seam: override host resolution. Production callers must not set this;
+   * the default resolves via dns.lookup and rejects private addresses.
+   */
+  resolveHost?: (hostname: string) => Promise<ResolvedAddress[]>
+  /**
+   * Test seam: override the public-address predicate. Production callers must
+   * not set this; the default rejects loopback / link-local / RFC1918 / ULA.
+   */
+  isAddressPublic?: (address: string) => boolean
 }
 
 export interface SsrfFetchResponse {
@@ -38,7 +48,7 @@ export class SsrfFetchError extends Error {
   }
 }
 
-interface ResolvedAddress {
+export interface ResolvedAddress {
   address: string
   family: number
 }
@@ -66,20 +76,54 @@ function validateUrl(input: string, allowedSchemes: readonly string[]): URL {
   return url
 }
 
+const SENSITIVE_HEADER_PREFIXES = [
+  'authorization',
+  'cookie',
+  'x-subscription-token',
+  'x-api-key',
+  'proxy-authorization',
+]
+
+export function sameOrigin(a: URL, b: URL): boolean {
+  return (
+    a.protocol === b.protocol && a.hostname === b.hostname && a.port === b.port
+  )
+}
+
+export function stripSensitiveHeaders(
+  headers: Record<string, string>,
+): Record<string, string> {
+  const next: Record<string, string> = {}
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (!SENSITIVE_HEADER_PREFIXES.includes(name.toLowerCase())) {
+      next[name] = value
+    }
+  }
+
+  return next
+}
+
 async function resolvePublicAddresses(
   hostname: string,
+  resolveHost?: (hostname: string) => Promise<ResolvedAddress[]>,
+  isAddressPublic: (address: string) => boolean = isPublicNetworkAddress,
 ): Promise<ResolvedAddress[]> {
   let records: { address: string; family: number }[]
 
-  try {
-    records = (await dnsLookup(hostname, { all: true, verbatim: true })).map(
-      (record) => ({
-        address: record.address,
-        family: record.family === 6 ? 6 : 4,
-      }),
-    )
-  } catch {
-    throw new SsrfFetchError('DNS_FAILED', `Failed to resolve ${hostname}`)
+  if (resolveHost) {
+    records = await resolveHost(hostname)
+  } else {
+    try {
+      records = (await dnsLookup(hostname, { all: true, verbatim: true })).map(
+        (record) => ({
+          address: record.address,
+          family: record.family === 6 ? 6 : 4,
+        }),
+      )
+    } catch {
+      throw new SsrfFetchError('DNS_FAILED', `Failed to resolve ${hostname}`)
+    }
   }
 
   if (records.length === 0) {
@@ -87,7 +131,7 @@ async function resolvePublicAddresses(
   }
 
   for (const record of records) {
-    if (!isPublicNetworkAddress(record.address)) {
+    if (!isAddressPublic(record.address)) {
       throw new SsrfFetchError(
         'PRIVATE_ADDRESS',
         `Hostname ${hostname} resolves to a private address`,
@@ -103,6 +147,7 @@ function performRequest(
   pinned: ResolvedAddress,
   options: SsrfFetchOptions,
   accept: string,
+  headers?: Record<string, string>,
 ): Promise<{
   status: number
   location: string | undefined
@@ -112,16 +157,21 @@ function performRequest(
 }> {
   return new Promise((resolve, reject) => {
     const transport = url.protocol === 'https:' ? httpsRequest : httpRequest
+    // Pin the connection to the resolved IP by rewriting the request URL's
+    // hostname while preserving the original Host header. This avoids the
+    // Node http `lookup` option (whose callback contract differs across
+    // Node versions) and guarantees the socket dials the verified address,
+    // resisting DNS rebinding mid-request.
+    const pinnedUrl = new URL(url.href)
+    pinnedUrl.hostname = pinned.address
+    pinnedUrl.port = url.port || (url.protocol === 'https:' ? '443' : '80')
+    const hostHeader = url.port ? `${url.hostname}:${url.port}` : url.hostname
     const request = transport(
-      url,
+      pinnedUrl,
       {
         method: 'GET',
         signal: options.signal,
-        headers: { accept, ...options.headers },
-        // Pin the connection to the resolved IP so a later DNS rebinding
-        // cannot redirect traffic to a private address mid-request.
-        lookup: (_hostname, _options, callback) =>
-          callback(null, pinned.address, pinned.family),
+        headers: { accept, host: hostHeader, ...headers },
       },
       (response) => {
         const chunks: Buffer[] = []
@@ -144,9 +194,20 @@ function performRequest(
         }
 
         response.on('data', (chunk: Buffer) => {
+          if (truncated) {
+            return
+          }
+
           total += chunk.length
 
           if (total > options.maxBytes) {
+            // Keep the part of this chunk that still fits under the cap so the
+            // bounded body is exactly maxBytes, not the previously-read bytes.
+            const overshoot = total - options.maxBytes
+            const usable = chunk.subarray(0, chunk.length - overshoot)
+            if (usable.length > 0) {
+              chunks.push(usable)
+            }
             truncated = true
             // Destroy the socket so the server stops streaming, then resolve
             // with the bounded body already read instead of surfacing an
@@ -222,12 +283,23 @@ export async function fetchWithSsrfGuard(
   let current = validateUrl(input, allowedSchemes)
   let finalUrl = current.href
   let redirects = 0
+  let requestHeaders = options.headers
 
   while (true) {
-    const addresses = await resolvePublicAddresses(current.hostname)
+    const addresses = await resolvePublicAddresses(
+      current.hostname,
+      options.resolveHost,
+      options.isAddressPublic,
+    )
     const pinned = addresses[0]!
 
-    const result = await performRequest(current, pinned, options, accept)
+    const result = await performRequest(
+      current,
+      pinned,
+      options,
+      accept,
+      requestHeaders,
+    )
 
     if (result.status >= 300 && result.status < 400 && result.location) {
       redirects += 1
@@ -239,10 +311,19 @@ export async function fetchWithSsrfGuard(
         )
       }
 
-      current = validateUrl(
+      const next = validateUrl(
         new URL(result.location, current.href).href,
         allowedSchemes,
       )
+
+      // Strip sensitive headers when a redirect crosses origin so an
+      // attacker-controlled redirect target never receives credentials
+      // intended for the original host.
+      if (requestHeaders && !sameOrigin(current, next)) {
+        requestHeaders = stripSensitiveHeaders(requestHeaders)
+      }
+
+      current = next
       finalUrl = current.href
       continue
     }
