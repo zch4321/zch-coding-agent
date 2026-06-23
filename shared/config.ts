@@ -228,6 +228,12 @@ export const PublicConfigSchema = Type.Object(
           minimum: 1_024,
           maximum: 100_000_000,
         }),
+        fetchResponseBytes: Type.Integer({
+          minimum: 1_024,
+          maximum: 10_000_000,
+        }),
+        fetchTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 60_000 }),
+        fetchMaxRedirects: Type.Integer({ minimum: 0, maximum: 10 }),
       },
       { additionalProperties: false },
     ),

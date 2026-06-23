@@ -27,6 +27,7 @@ import { PathGuard } from './path-guard'
 import type { ProviderMessage } from './provider'
 import { registerReadOnlyTools } from './readonly-tools'
 import { registerFileTools } from './file-tools'
+import { registerFetchTools } from './fetch-tools'
 import { registerGitReadOnlyTools, registerGitWriteTools } from './git-tools'
 import { registerProcessTools } from './process-tools'
 import {
@@ -143,6 +144,9 @@ export class SessionManager {
       this.#configStore.getPublicConfig(),
     )
     registerGitWriteTools(this.#toolRegistry, () =>
+      this.#configStore.getPublicConfig(),
+    )
+    registerFetchTools(this.#toolRegistry, () =>
       this.#configStore.getPublicConfig(),
     )
     registerTerminalTools(

@@ -126,6 +126,9 @@ export const DEFAULT_APP_CONFIG = {
     autoApprovalTimeoutMs: 15_000,
     modelCatalogTimeoutMs: 15_000,
     terminalScrollbackBytes: 2_000_000,
+    fetchResponseBytes: 256 * 1_024,
+    fetchTimeoutMs: 20_000,
+    fetchMaxRedirects: 5,
   },
   logging: {
     enabled: false,
