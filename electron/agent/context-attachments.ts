@@ -4,7 +4,7 @@ import type {
   ContextAttachmentRef,
 } from '../../shared/context'
 import type { PublicConfig } from '../../shared/config'
-import { PathGuard } from './path-guard'
+import { PathGuard } from '../safety/path-guard'
 import {
   formatAgentsInstructions,
   loadAgentsInstructions,

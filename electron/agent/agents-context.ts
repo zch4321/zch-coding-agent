@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import type { ContextAttachmentRef } from '../../shared/context'
-import { PathGuard, PathGuardError } from './path-guard'
+import { PathGuard, PathGuardError } from '../safety/path-guard'
 
 const AGENTS_FILE = 'AGENTS.md'
 const MAX_AGENTS_FILES = 16

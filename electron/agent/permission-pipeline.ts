@@ -24,7 +24,7 @@ import {
   revalidateResourcePreconditions,
   type ToolResourcePlan,
 } from './file-tools'
-import { PathGuardError } from './path-guard'
+import { PathGuardError } from '../safety/path-guard'
 import { evaluatePolicy } from './policy-engine'
 
 export interface ApprovalRequest {

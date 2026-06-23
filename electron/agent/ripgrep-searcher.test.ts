@@ -2,7 +2,7 @@ import { mkdtemp, writeFile, mkdir } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { PathGuard } from './path-guard'
+import { PathGuard } from '../safety/path-guard'
 import { RipgrepSearcher } from './ripgrep-searcher'
 import { __resetCachedSearcher } from './searcher'
 

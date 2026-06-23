@@ -13,7 +13,7 @@ import path from 'node:path'
 import type { FileChangeRecord } from '../../shared/change-history'
 import type { ApprovedToolCall } from '../tools/approved-tool-call'
 import { writeJsonAtomic } from '../config/atomic-file'
-import { PathGuard } from './path-guard'
+import { PathGuard } from '../safety/path-guard'
 
 const MAX_RECORDS = 200
 const MAX_HISTORY_BYTES = 50_000_000

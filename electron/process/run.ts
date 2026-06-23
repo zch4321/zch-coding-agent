@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
-import { PathGuard, PathGuardError } from '../agent/path-guard'
+import { PathGuard, PathGuardError } from '../safety/path-guard'
 import {
   BoundedProcessOutput,
   type BoundedOutputSnapshot,

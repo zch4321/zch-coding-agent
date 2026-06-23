@@ -1,4 +1,4 @@
-import type { PathGuard } from '../agent/path-guard'
+import type { PathGuard } from '../safety/path-guard'
 
 export interface SearchMatch {
   path: string

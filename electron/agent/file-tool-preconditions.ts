@@ -3,7 +3,7 @@ import { lstat, readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { MAX_MUTATION_FILE_BYTES } from './file-tool-limits'
 import type { FileOperation, FilePrecondition } from './file-tool-types'
-import { PathGuard, PathGuardError } from './path-guard'
+import { PathGuard, PathGuardError } from '../safety/path-guard'
 
 function portableRelative(workspace: string, absolutePath: string): string {
   return path.relative(workspace, absolutePath).split(path.sep).join('/') || '.'

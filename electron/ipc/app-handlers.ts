@@ -7,7 +7,7 @@ import {
   ModelCatalogError,
   resolveModelProfiles,
 } from '../agent/model-catalog'
-import { PathGuard, PathGuardError } from '../agent/path-guard'
+import { PathGuard, PathGuardError } from '../safety/path-guard'
 import type { SessionManager } from '../agent/session-manager'
 import type { ConfigStore } from '../config/store'
 import { SkillError, type SkillsManager } from '../skills/manager'

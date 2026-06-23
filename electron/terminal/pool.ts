@@ -8,7 +8,7 @@ import type {
   TerminalSnapshot,
   TerminalStatus,
 } from '../../shared/terminal'
-import { PathGuard, PathGuardError } from '../agent/path-guard'
+import { PathGuard, PathGuardError } from '../safety/path-guard'
 import { createCommandEnvironment } from '../process/run'
 import { ByteRingBuffer } from './byte-ring-buffer'
 
