@@ -14,6 +14,7 @@ const ENV_ALLOWLIST = [
   'APPDATA',
   'COLORTERM',
   'COMSPEC',
+  'HOME',
   'HOMEDRIVE',
   'HOMEPATH',
   'LANG',

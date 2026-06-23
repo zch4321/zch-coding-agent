@@ -30,7 +30,8 @@ export function hasSideEffects(definition: ToolDefinition): boolean {
     (effect) =>
       effect !== 'filesystem.read' &&
       effect !== 'terminal.read' &&
-      effect !== 'instruction.read',
+      effect !== 'instruction.read' &&
+      effect !== 'vcs.read',
   )
 }
 

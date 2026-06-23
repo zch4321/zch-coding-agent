@@ -12,6 +12,8 @@ export type Effect =
   | 'terminal.write'
   | 'network.request'
   | 'instruction.read'
+  | 'vcs.read'
+  | 'vcs.write'
   | 'external.unknown'
 
 export interface ToolDefinition<Schema extends TSchema = TSchema> {

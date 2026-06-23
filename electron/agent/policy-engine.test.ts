@@ -92,6 +92,41 @@ describe('P3 policy engine', () => {
     },
   )
 
+  it.each(modes)(
+    'auto-approves a low-risk vcs.read tool in %s mode',
+    (mode) => {
+      const tool: ToolDefinition<typeof EmptyArgsSchema> = {
+        id: 'git_status',
+        description: 'read-only git',
+        inputSchema: EmptyArgsSchema,
+        effects: ['vcs.read'],
+        defaultRisk: 'low',
+        supportsAbort: true,
+        defaultTimeoutMs: 1_000,
+        maxOutputBytes: 1_000,
+        async execute() {
+          return { status: 'ok', content: null }
+        },
+      }
+      const outcome = evaluatePolicy({
+        mode,
+        definition: tool,
+        effectiveRisk: 'low',
+        policySignals: [],
+        rememberedRules: [],
+        builtinPolicies: true,
+        workspace: 'F:/workspace',
+        args: {},
+        callId: 'call:vcs' as CallId,
+      })
+
+      expect(outcome.kind).toBe('allow')
+      if (outcome.kind === 'allow') {
+        expect(outcome.approvedBy).toBe('readonly')
+      }
+    },
+  )
+
   it('sends danger signals to human review in Auto but Yolo skips them', () => {
     expect(
       evaluate({ mode: 'auto', effect: 'write', risk: 'low', danger: true })
