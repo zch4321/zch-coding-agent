@@ -1,5 +1,5 @@
 import { mkdtemp, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
@@ -227,17 +227,21 @@ describe('git read-only tools', () => {
     await git(root, ['add', 'blob.bin'])
     await git(root, ['commit', '--quiet', '-m', 'add binary'])
     const marker = path.join(root, 'textconv-marker.txt')
+    await writeFile(marker, 'seed\n')
+    // textconv (diff.<driver>.textconv) is the path --no-textconv disables;
+    // --no-ext-diff already covers the external diff command, so configuring
+    // the latter would not prove --no-textconv is doing anything.
     await git(root, [
       'config',
-      'diff.evil.command',
-      // shell on Windows: write the marker via a simple command line.
-      process.platform === 'win32'
-        ? `cmd /c echo triggered > "${marker}"`
-        : `sh -c 'echo triggered > "${marker}"'`,
+      'diff.evil.textconv',
+      `sh -c 'echo triggered >> "${marker}"'`,
     ])
     await writeFile(path.join(root, '.gitattributes'), '*.bin diff=evil\n')
     await git(root, ['add', '.gitattributes'])
     await git(root, ['commit', '--quiet', '-m', 'gitattributes'])
+    // Dirty blob.bin so git diff actually emits a change for it — textconv
+    // only runs over content that appears in the diff output.
+    await writeFile(path.join(root, 'blob.bin'), 'changed\n')
 
     const result = await execute(root, {
       toolId: 'git_diff',
@@ -245,7 +249,8 @@ describe('git read-only tools', () => {
     })
 
     expect(result).toMatchObject({ status: 'ok' })
-    expect(existsSync(marker)).toBe(false)
+    expect(existsSync(marker)).toBe(true)
+    expect(readFileSync(marker, 'utf8')).not.toContain('triggered')
   })
 
   it('does not trigger a configured textconv filter from git_show', async () => {
@@ -253,13 +258,14 @@ describe('git read-only tools', () => {
     await writeFile(path.join(root, 'blob.bin'), 'binary\n')
     await git(root, ['add', 'blob.bin'])
     await git(root, ['commit', '--quiet', '-m', 'add binary'])
+    // Capture the commit that adds blob.bin so git_show displays its content.
+    const blobCommit = (await git(root, ['rev-parse', 'HEAD'])).trim()
     const marker = path.join(root, 'textconv-marker.txt')
+    await writeFile(marker, 'seed\n')
     await git(root, [
       'config',
-      'diff.evil.command',
-      process.platform === 'win32'
-        ? `cmd /c echo triggered > "${marker}"`
-        : `sh -c 'echo triggered > "${marker}"'`,
+      'diff.evil.textconv',
+      `sh -c 'echo triggered >> "${marker}"'`,
     ])
     await writeFile(path.join(root, '.gitattributes'), '*.bin diff=evil\n')
     await git(root, ['add', '.gitattributes'])
@@ -267,11 +273,12 @@ describe('git read-only tools', () => {
 
     const result = await execute(root, {
       toolId: 'git_show',
-      args: { ref: 'HEAD' },
+      args: { ref: blobCommit },
     })
 
     expect(result).toMatchObject({ status: 'ok' })
-    expect(existsSync(marker)).toBe(false)
+    expect(existsSync(marker)).toBe(true)
+    expect(readFileSync(marker, 'utf8')).not.toContain('triggered')
   })
 
   it('rejects disallowed flags before invoking git', async () => {

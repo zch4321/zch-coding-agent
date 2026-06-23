@@ -52,13 +52,14 @@ const providerOptions = computed(() => [
       </span>
       <span v-else>{{ t('settings.webSearchCredentialNone') }}</span>
     </p>
-    <div class="settings-inline">
+    <div class="settings-actions">
       <NButton
         type="primary"
         :loading="settings.webSearchSaving"
+        :disabled="!settings.webSearchDirty"
         @click="settings.saveWebSearchSettings()"
       >
-        {{ t('settings.saved') }}
+        {{ t('settings.saveWebSearch') }}
       </NButton>
       <NButton
         v-if="settings.webSearchCredentialConfigured"
@@ -67,6 +68,15 @@ const providerOptions = computed(() => [
       >
         {{ t('settings.webSearchClearCredential') }}
       </NButton>
+      <small class="settings-save-status" aria-live="polite">
+        {{
+          settings.webSearchDirty
+            ? t('settings.unsaved')
+            : settings.webSearchSaveStatus
+              ? t('settings.saved')
+              : ''
+        }}
+      </small>
     </div>
   </section>
 </template>

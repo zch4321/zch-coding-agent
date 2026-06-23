@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { AddressInfo } from 'node:net'
 import {
+  buildPinnedRequest,
   fetchWithSsrfGuard,
   SsrfFetchError,
   sameOrigin,
@@ -137,6 +138,58 @@ describe('redirect header policy', () => {
   })
 })
 
+describe('buildPinnedRequest', () => {
+  it('pins an IPv4 address into the request URL', () => {
+    const { pinnedUrl, hostHeader } = buildPinnedRequest(
+      new URL('https://example.com:8443/path'),
+      { address: '203.0.113.5', family: 4 },
+    )
+
+    expect(pinnedUrl.hostname).toBe('203.0.113.5')
+    expect(pinnedUrl.port).toBe('8443')
+    expect(hostHeader).toBe('example.com:8443')
+  })
+
+  it('pins an IPv6 address using a bracketed host so the literal survives', () => {
+    const url = new URL('https://example.com/path')
+    const { pinnedUrl, hostHeader, servername } = buildPinnedRequest(url, {
+      address: '2606:4700:4700::1111',
+      family: 6,
+    })
+
+    // A bare assignment `url.hostname = '2606:...'` is a no-op in Node, so the
+    // bracketed host form is what makes the pin effective. Node drops the
+    // default :443 port from the host string, which is fine — the literal is
+    // preserved and resolves to the verified address.
+    expect(pinnedUrl.hostname).toBe('[2606:4700:4700::1111]')
+    expect(pinnedUrl.host).toMatch(/\[2606:4700:4700::1111\]/u)
+    expect(pinnedUrl.href).toBe('https://[2606:4700:4700::1111]/path')
+    expect(hostHeader).toBe('example.com')
+    expect(servername).toBe('example.com')
+  })
+
+  it('uses the explicit port for IPv6 with a custom port', () => {
+    const { pinnedUrl } = buildPinnedRequest(
+      new URL('https://example.com:9000/'),
+      {
+        address: '::1',
+        family: 6,
+      },
+    )
+
+    expect(pinnedUrl.host).toBe('[::1]:9000')
+  })
+
+  it('does not set servername for plain HTTP', () => {
+    const { servername } = buildPinnedRequest(new URL('http://example.com/'), {
+      address: '203.0.113.5',
+      family: 4,
+    })
+
+    expect(servername).toBeUndefined()
+  })
+})
+
 describe('SSRF fetch against a local server', () => {
   let server: Server
   let port: number
@@ -185,18 +238,28 @@ describe('SSRF fetch against a local server', () => {
     }
   }
 
+  const loopbackHooks = {
+    resolveHost: loopbackResolver,
+    isAddressPublic: allowLoopback,
+  }
+
   function fetchLocal(url: string, overrides: Record<string, unknown> = {}) {
-    return fetchWithSsrfGuard(url, {
-      maxBytes: 4_096,
-      timeoutMs: 5_000,
-      maxRedirects: 3,
-      allowedSchemes: ['http:'],
-      signal: new AbortController().signal,
-      resolveHost: loopbackResolver,
-      isAddressPublic: allowLoopback,
-      allowedMimePrefixes: ['text/', 'application/json'],
-      ...overrides,
-    })
+    const { hooks = loopbackHooks, ...options } = overrides as {
+      hooks?: typeof loopbackHooks
+    } & Record<string, unknown>
+    return fetchWithSsrfGuard(
+      url,
+      {
+        maxBytes: 4_096,
+        timeoutMs: 5_000,
+        maxRedirects: 3,
+        allowedSchemes: ['http:'],
+        signal: new AbortController().signal,
+        allowedMimePrefixes: ['text/', 'application/json'],
+        ...options,
+      },
+      hooks,
+    )
   }
 
   it('returns a successful response body', async () => {

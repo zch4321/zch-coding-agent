@@ -17,15 +17,17 @@ export interface SsrfFetchOptions {
   allowedMimePrefixes?: readonly string[]
   /** Extra request headers merged over the defaults. */
   headers?: Record<string, string>
-  /**
-   * Test seam: override host resolution. Production callers must not set this;
-   * the default resolves via dns.lookup and rejects private addresses.
-   */
+}
+
+/**
+ * Internal hooks for deterministic tests. These are NOT part of the public
+ * options surface — production callers have no way to set them through
+ * `fetchWithSsrfGuard`'s typed signature. They exist so the SSRF guard can be
+ * exercised against a local HTTP server (whose loopback address would
+ * otherwise be rejected) without weakening the real DNS/private-address path.
+ */
+export interface SsrfTestHooks {
   resolveHost?: (hostname: string) => Promise<ResolvedAddress[]>
-  /**
-   * Test seam: override the public-address predicate. Production callers must
-   * not set this; the default rejects loopback / link-local / RFC1918 / ULA.
-   */
   isAddressPublic?: (address: string) => boolean
 }
 
@@ -142,6 +144,46 @@ async function resolvePublicAddresses(
   return records
 }
 
+/**
+ * Build the connection target for IP pinning. For IPv6 the address must be
+ * written as a bracketed host (`[addr]:port`); assigning a bare IPv6 literal
+ * to `url.hostname` is a silent no-op in Node, which would leave the request
+ * resolving the original domain and defeat DNS-rebinding protection. The Host
+ * header preserves the original hostname so virtual-host routing still works.
+ *
+ * Pure and exported so pinning correctness can be unit-tested for IPv4/IPv6
+ * without standing up a real server.
+ */
+export function buildPinnedRequest(
+  url: URL,
+  pinned: ResolvedAddress,
+): {
+  pinnedUrl: URL
+  hostHeader: string
+  servername?: string
+} {
+  const pinnedUrl = new URL(url.href)
+  const defaultPort = url.protocol === 'https:' ? '443' : '80'
+  const port = url.port || defaultPort
+
+  if (pinned.family === 6) {
+    pinnedUrl.host = `[${pinned.address}]:${port}`
+  } else {
+    pinnedUrl.hostname = pinned.address
+    pinnedUrl.port = port
+  }
+
+  const hostHeader = url.port ? `${url.hostname}:${url.port}` : url.hostname
+
+  // For HTTPS the socket dials the IP, but TLS SNI / certificate validation
+  // must still use the original hostname.
+  return {
+    pinnedUrl,
+    hostHeader,
+    servername: url.protocol === 'https:' ? url.hostname : undefined,
+  }
+}
+
 function performRequest(
   url: URL,
   pinned: ResolvedAddress,
@@ -158,20 +200,20 @@ function performRequest(
   return new Promise((resolve, reject) => {
     const transport = url.protocol === 'https:' ? httpsRequest : httpRequest
     // Pin the connection to the resolved IP by rewriting the request URL's
-    // hostname while preserving the original Host header. This avoids the
-    // Node http `lookup` option (whose callback contract differs across
-    // Node versions) and guarantees the socket dials the verified address,
-    // resisting DNS rebinding mid-request.
-    const pinnedUrl = new URL(url.href)
-    pinnedUrl.hostname = pinned.address
-    pinnedUrl.port = url.port || (url.protocol === 'https:' ? '443' : '80')
-    const hostHeader = url.port ? `${url.hostname}:${url.port}` : url.hostname
+    // hostname while preserving the original Host header. buildPinnedRequest
+    // handles the IPv6 bracketed-host case that a bare hostname assignment
+    // would silently drop.
+    const { pinnedUrl, hostHeader, servername } = buildPinnedRequest(
+      url,
+      pinned,
+    )
     const request = transport(
       pinnedUrl,
       {
         method: 'GET',
         signal: options.signal,
         headers: { accept, host: hostHeader, ...headers },
+        ...(servername ? { servername } : {}),
       },
       (response) => {
         const chunks: Buffer[] = []
@@ -272,6 +314,7 @@ function performRequest(
 export async function fetchWithSsrfGuard(
   input: string,
   options: SsrfFetchOptions,
+  hooks?: SsrfTestHooks,
 ): Promise<SsrfFetchResponse> {
   const allowedSchemes = options.allowedSchemes ?? ['https:']
   const accept = 'text/plain,text/html;q=0.9,application/json;q=0.9,*/*;q=0.1'
@@ -288,8 +331,8 @@ export async function fetchWithSsrfGuard(
   while (true) {
     const addresses = await resolvePublicAddresses(
       current.hostname,
-      options.resolveHost,
-      options.isAddressPublic,
+      hooks?.resolveHost,
+      hooks?.isAddressPublic,
     )
     const pinned = addresses[0]!
 

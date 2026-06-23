@@ -64,6 +64,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     webSearchCredentialConfigured: false,
     webSearchSaving: false,
     webSearchSaveStatus: '',
+    webSearchSavedSignature: 'brave|5',
   }),
   getters: {
     providerNoticeAccepted: (state) =>
@@ -92,6 +93,12 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         state.providerForm.apiKey.trim() ||
         providerFormSignature(state.providerForm) !==
           state.providerSavedSignature,
+      ),
+    webSearchDirty: (state) =>
+      Boolean(
+        state.webSearchForm.apiKey.trim() ||
+        `${state.webSearchForm.provider}|${state.webSearchForm.count}` !==
+          state.webSearchSavedSignature,
       ),
   },
   actions: {
@@ -174,6 +181,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         this.webSearchForm.apiKey = ''
         this.webSearchCredentialConfigured =
           config.webSearch.credentialConfigured
+        this.webSearchSavedSignature = `${config.webSearch.provider}|${config.webSearch.count}`
       }
     },
     async saveAssistantSettings(language?: AssistantLanguage) {
