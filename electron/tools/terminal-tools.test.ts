@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CallId } from '../../shared/ids'
 import type { TerminalPool } from '../terminal/pool'
-import { evaluatePolicy } from '../agent/policy-engine'
+import { evaluatePolicy } from '../permission/policy-engine'
 import { registerTerminalTools } from './terminal-tools'
 import { ToolRegistry } from './tool-registry'
 

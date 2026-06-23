@@ -7,11 +7,11 @@ import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { ChangeHistoryStore } from './change-history'
 import { boundToolResultForContext } from '../tools/context-budget'
-import { PermissionPipeline } from './permission-pipeline'
+import { PermissionPipeline } from '../permission/permission-pipeline'
 import type { ApprovedToolCall } from '../tools/approved-tool-call'
 import type { PluginEventBus } from '../plugins/event-bus'
 import type { ToolCall, ToolResult } from '../tools/types'
-import { ProviderAutoApprover } from './auto-approver'
+import { ProviderAutoApprover } from '../permission/auto-approver'
 import type { ToolExecutor } from '../tools/tool-registry'
 import { toJsonValue } from './session-common'
 import type { PromptRegistry } from '../prompts/registry'
@@ -20,7 +20,7 @@ import {
   toolFailure,
   toolResultForProvider,
 } from './session-run-utils'
-import type { SessionApprovalCoordinator } from './session-approval'
+import type { SessionApprovalCoordinator } from '../permission/session-approval'
 import type { SessionContextGate } from './session-context-gate'
 import { createConfiguredProvider } from './session-provider-turn'
 import type {

@@ -13,7 +13,7 @@ import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { ToolCall } from './types'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { registerFileTools } from './file-tools'
-import { PermissionPipeline } from '../agent/permission-pipeline'
+import { PermissionPipeline } from '../permission/permission-pipeline'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
 
 const sessionId = 'session:file-tools' as SessionId

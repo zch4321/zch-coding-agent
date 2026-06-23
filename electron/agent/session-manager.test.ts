@@ -17,7 +17,7 @@ import type {
   ProviderChatRequest,
   ProviderEvent,
 } from '../providers/provider'
-import type { AutoApprover } from './auto-approver'
+import type { AutoApprover } from '../permission/auto-approver'
 import { SessionManager } from './session-manager'
 import { ChangeHistoryStore } from './change-history'
 import { PromptRegistry } from '../prompts/registry'

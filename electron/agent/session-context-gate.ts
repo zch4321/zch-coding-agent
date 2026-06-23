@@ -2,7 +2,7 @@ import type { PolicySignal } from '../../shared/agent-events'
 import type { ConfigStore } from '../config/store'
 import type { ToolCall, ToolResult } from '../tools/types'
 import { ContextIngressFilter } from './context-ingress'
-import type { SessionApprovalCoordinator } from './session-approval'
+import type { SessionApprovalCoordinator } from '../permission/session-approval'
 import type { ActiveRun, SessionState } from './session-types'
 
 export class SessionContextGate {

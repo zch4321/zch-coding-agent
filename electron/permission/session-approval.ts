@@ -9,13 +9,13 @@ import {
   type HumanApprovalDecision,
   type RememberApprovalInput,
 } from './permission-pipeline'
-import { toJsonValue } from './session-common'
+import { toJsonValue } from '../agent/session-common'
 import type {
   ActiveRun,
   AgentEventDraft,
   PendingApproval,
   SessionState,
-} from './session-types'
+} from '../agent/session-types'
 
 interface SessionApprovalCoordinatorOptions {
   configStore: ConfigStore

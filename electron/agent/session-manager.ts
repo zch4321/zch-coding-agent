@@ -34,7 +34,7 @@ import { registerWebSearchTools } from '../tools/web-search-tools'
 import {
   PermissionPipeline,
   type RememberApprovalInput,
-} from './permission-pipeline'
+} from '../permission/permission-pipeline'
 import type { ChangeHistoryStore } from './change-history'
 import { ToolExecutor, ToolRegistry } from '../tools/tool-registry'
 import { registerTerminalTools } from '../tools/terminal-tools'
@@ -50,7 +50,7 @@ import type {
 } from './session-types'
 import { SessionEventEmitter } from './session-events'
 import { SessionTerminalController } from './session-terminals'
-import { SessionApprovalCoordinator } from './session-approval'
+import { SessionApprovalCoordinator } from '../permission/session-approval'
 import { SessionContextGate } from './session-context-gate'
 import { SessionProviderTurnRunner } from './session-provider-turn'
 import { SessionToolRunner } from './session-tool-runner'

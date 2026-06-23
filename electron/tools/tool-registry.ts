@@ -10,7 +10,7 @@ import type {
   ToolResult,
 } from './types'
 import type { ApprovedToolCall } from './approved-tool-call'
-import { revalidateApprovedToolCall } from '../agent/permission-pipeline'
+import { revalidateApprovedToolCall } from '../permission/permission-pipeline'
 
 interface RegisteredTool {
   readonly definition: ToolDefinition

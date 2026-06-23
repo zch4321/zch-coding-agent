@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { ToolCall } from './types'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
-import { PermissionPipeline } from '../agent/permission-pipeline'
+import { PermissionPipeline } from '../permission/permission-pipeline'
 import { registerReadOnlyTools } from './readonly-tools'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
 import {
