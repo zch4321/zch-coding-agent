@@ -11,7 +11,7 @@ import {
 } from 'node:fs/promises'
 import path from 'node:path'
 import type { FileChangeRecord } from '../../shared/change-history'
-import type { ApprovedToolCall } from './permission-pipeline'
+import type { ApprovedToolCall } from '../tools/approved-tool-call'
 import { writeJsonAtomic } from '../config/atomic-file'
 import { PathGuard } from './path-guard'
 

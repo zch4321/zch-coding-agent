@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
-import type { ApprovedToolCall } from './permission-pipeline'
+import type { ApprovedToolCall } from '../tools/approved-tool-call'
 import { ChangeHistoryStore } from './change-history'
 
 async function harness() {

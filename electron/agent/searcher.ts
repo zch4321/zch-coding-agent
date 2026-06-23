@@ -1,41 +1,17 @@
 import { matchesGlob } from './glob'
-import type { PathGuard } from './path-guard'
 import { BoundedRegexSearcher } from './regex-search'
 import { RipgrepSearcher } from './ripgrep-searcher'
+import {
+  type SearchInput,
+  type SearchMatch,
+  type SearchOutcome,
+  type Searcher,
+} from '../tools/searcher-types'
 import { walkFiles } from './workspace-walk'
 
 const DEFAULT_GREP_FILE_BYTES = 256_000
 
-export interface SearchMatch {
-  path: string
-  line: number
-  text: string
-}
-
-export interface SearchOutcome {
-  matches: SearchMatch[]
-  truncated: boolean
-}
-
-export interface SearchInput {
-  pattern: string
-  caseSensitive: boolean
-  guard: PathGuard
-  rootInput: string
-  include: string
-  maxResults: number
-  signal: AbortSignal
-}
-
-/**
- * Workspace-scoped text search. Implementations own the file walk, glob
- * filtering and matching, but must keep results inside the workspace and
- * surface only files that the caller could read with filesystem.read tools.
- */
-export interface Searcher {
-  readonly backend: 'ripgrep' | 'javascript'
-  search(input: SearchInput): Promise<SearchOutcome>
-}
+export type { SearchInput, SearchMatch, SearchOutcome, Searcher }
 
 /**
  * In-process fallback that mirrors the original grep behaviour: walk the

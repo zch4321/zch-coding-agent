@@ -1,7 +1,7 @@
 import type { Static, TSchema } from '@sinclair/typebox'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
-import type { ApprovedToolCall } from '../agent/permission-pipeline'
+import type { ApprovedToolCall } from './approved-tool-call'
 
 export type Effect =
   | 'filesystem.read'

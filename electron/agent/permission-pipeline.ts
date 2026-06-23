@@ -5,9 +5,14 @@ import type {
   PublicConfig,
   RememberedRule,
 } from '../../shared/config'
-import type { CallId, RunId, SessionId } from '../../shared/ids'
+import type { RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { BeforeToolCallEmitResult } from '../plugins/types'
+import {
+  approvedCallBrand,
+  type ApprovedBy,
+  type ApprovedToolCall,
+} from '../tools/approved-tool-call'
 import type { ToolCall, ToolDefinition, ToolResult } from '../tools/types'
 import {
   autoApproverInput,
@@ -17,35 +22,10 @@ import {
 import {
   prepareToolResourcePlan,
   revalidateResourcePreconditions,
-  type FilePrecondition,
   type ToolResourcePlan,
 } from './file-tools'
 import { PathGuardError } from './path-guard'
 import { evaluatePolicy } from './policy-engine'
-
-const approvedCallBrand: unique symbol = Symbol('ApprovedToolCall')
-
-export type ApprovedBy =
-  | 'readonly'
-  | 'policy'
-  | 'model'
-  | 'human'
-  | 'remembered'
-  | 'yolo'
-
-export interface ApprovedToolCall {
-  readonly [approvedCallBrand]: true
-  readonly sessionId: SessionId
-  readonly runId: RunId
-  readonly callId: CallId
-  readonly toolId: string
-  readonly args: JsonValue
-  readonly argsHash: string
-  readonly resourcePreconditions: readonly FilePrecondition[]
-  readonly diffHash?: string
-  readonly approvedBy: ApprovedBy
-  readonly approvedAt: string
-}
 
 export interface ApprovalRequest {
   call: ToolCall

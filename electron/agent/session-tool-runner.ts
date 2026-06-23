@@ -7,10 +7,8 @@ import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { ChangeHistoryStore } from './change-history'
 import { boundToolResultForContext } from './context-budget'
-import {
-  PermissionPipeline,
-  type ApprovedToolCall,
-} from './permission-pipeline'
+import { PermissionPipeline } from './permission-pipeline'
+import type { ApprovedToolCall } from '../tools/approved-tool-call'
 import type { PluginEventBus } from '../plugins/event-bus'
 import type { ToolCall, ToolResult } from '../tools/types'
 import { ProviderAutoApprover } from './auto-approver'

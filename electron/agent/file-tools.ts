@@ -31,7 +31,7 @@ export type {
   ToolResourcePlan,
 } from './file-tool-types'
 import { PathGuard, PathGuardError } from './path-guard'
-import type { ApprovedToolCall } from './permission-pipeline'
+import type { ApprovedToolCall } from '../tools/approved-tool-call'
 import type { ToolRegistry } from './tool-registry'
 import { applyTextPatch, TextPatchError } from './text-patch'
 
