@@ -291,10 +291,10 @@ describe('ConfigStore', () => {
     const config = await configStore.update({
       version: 1,
       kind: 'web-search',
-      provider: 'serper',
+      provider: 'brave',
       count: 10,
     })
-    expect(config.webSearch.provider).toBe('serper')
+    expect(config.webSearch.provider).toBe('brave')
     expect(config.webSearch.count).toBe(10)
   })
 })

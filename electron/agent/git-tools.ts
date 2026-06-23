@@ -46,6 +46,29 @@ function assertFlagsAllowed(
   return undefined
 }
 
+/**
+ * Validate a positional Git reference (revision range or object ref). Anything
+ * starting with "-" is rejected so a caller cannot inject Git options such as
+ * `--output=<path>` through a field registered as read-only.
+ */
+function assertRef(
+  value: string,
+  field: string,
+  toolId: string,
+): string | undefined {
+  if (value.startsWith('-')) {
+    return `${toolId} ${field} must not be a git option: ${value.slice(0, 64)}`
+  }
+
+  // Revision ranges may contain "..", "...", "^", "~", but not shell/path
+  // separators that could smuggle a worktree pathspec past the guard.
+  if (/[|;&\r\n]/u.test(value)) {
+    return `${toolId} ${field} contains forbidden characters`
+  }
+
+  return undefined
+}
+
 function gitResultContent(result: RunCommandResult): JsonValue {
   return {
     stdout: result.stdout,
@@ -281,7 +304,21 @@ export function registerGitReadOnlyTools(
       }
 
       const limit = args.limit ? ['-n', String(args.limit)] : []
-      const revision = args.revision ? [args.revision] : []
+      let revision: string[] = []
+
+      if (args.revision) {
+        const refError = assertRef(args.revision, 'revision', 'git_log')
+        if (refError) {
+          return {
+            status: 'error',
+            code: 'INVALID_ARGS',
+            message: refError,
+            retryable: false,
+          }
+        }
+        revision = ['--end-of-options', args.revision]
+      }
+
       const { timeoutMs, maxOutputBytes } = timeoutAndOutput(getConfig)
 
       return runGit({
@@ -317,11 +354,21 @@ export function registerGitReadOnlyTools(
         }
       }
 
+      const refError = assertRef(args.ref, 'ref', 'git_show')
+      if (refError) {
+        return {
+          status: 'error',
+          code: 'INVALID_ARGS',
+          message: refError,
+          retryable: false,
+        }
+      }
+
       const { timeoutMs, maxOutputBytes } = timeoutAndOutput(getConfig)
       return runGit({
         workspace: context.workspace.canonicalPath,
         subcommand: 'show',
-        args: [...flags, args.ref],
+        args: [...flags, '--end-of-options', args.ref],
         fixedArgs: ['--no-ext-diff'],
         signal: context.signal,
         timeoutMs,
@@ -384,8 +431,31 @@ export function registerGitWriteTools(
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 64 * 1_024,
     async execute(args: GitAddArgs, context): Promise<ToolResult> {
+      if (args.all && args.paths && args.paths.length > 0) {
+        return {
+          status: 'error',
+          code: 'INVALID_ARGS',
+          message: 'git_add all=true cannot be combined with paths',
+          retryable: false,
+        }
+      }
+
+      const paths = args.paths ?? []
+      for (const candidate of paths) {
+        if (candidate.startsWith('-')) {
+          return {
+            status: 'error',
+            code: 'INVALID_ARGS',
+            message: `git_add path must not be a git option: ${candidate.slice(0, 64)}`,
+            retryable: false,
+          }
+        }
+      }
+
       const { timeoutMs, maxOutputBytes } = timeoutAndOutput(getConfig)
-      const addArgs = args.all ? ['-A'] : (args.paths ?? [])
+      // `--` separates options from pathspecs so a path value like `-A` is
+      // treated as a literal path, never re-parsed as `git add -A`.
+      const addArgs = args.all ? ['-A'] : ['--', ...paths]
       return runGit({
         workspace: context.workspace.canonicalPath,
         subcommand: 'add',

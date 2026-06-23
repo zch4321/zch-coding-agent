@@ -52,6 +52,17 @@ export function registerFetchTools(
     async execute(args: FetchArgs, context): Promise<ToolResult> {
       try {
         const limits = getConfig().limits
+        const headers: Record<string, string> = {}
+
+        if (args.accept) {
+          // Sanitize the caller-supplied Accept header so it cannot smuggle
+          // control characters or additional headers.
+          const cleanAccept = args.accept.replace(/[\r\n]/gu, '').trim()
+          if (cleanAccept) {
+            headers.accept = cleanAccept
+          }
+        }
+
         const response = await fetchWithSsrfGuard(args.url, {
           maxBytes: Math.min(
             args.maxBytes ?? limits.fetchResponseBytes,
@@ -63,7 +74,19 @@ export function registerFetchTools(
           ),
           maxRedirects: limits.fetchMaxRedirects,
           allowedSchemes: ['https:'],
+          // Restrict responses to fetchable text/structured types so the
+          // tool does not pull binaries into the agent context.
+          allowedMimePrefixes: [
+            'text/',
+            'application/json',
+            'application/xml',
+            'application/javascript',
+            'application/xhtml',
+            'application/rss',
+            'application/atom',
+          ],
           signal: context.signal,
+          headers,
         })
 
         const content: JsonValue = {

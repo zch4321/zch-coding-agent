@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { normalizePortablePath } from './glob'
+import { RegexSearchError } from './regex-search'
 import type {
   SearchInput,
   SearchMatch,
@@ -196,8 +197,32 @@ export class RipgrepSearcher implements Searcher {
       })
 
       child.stderr.setEncoding('utf8')
+      let stderrText = ''
+      child.stderr.on('data', (chunk: string) => {
+        stderrText += chunk
+      })
       child.on('error', reject)
-      child.on('exit', resolve)
+      child.on('exit', (code) => {
+        if (capped) {
+          resolve()
+          return
+        }
+
+        // rg exit codes: 0 = matches found, 1 = no matches, 2+ = error
+        // (bad regex, IO failure, etc.). Treat 2+ as a structured failure so
+        // invalid regex surfaces instead of being swallowed as empty results.
+        if (code !== null && code > 1) {
+          const detail = stderrText.trim() || `ripgrep exited with code ${code}`
+          reject(
+            /regex|invalid pattern/iu.test(detail)
+              ? new RegexSearchError('INVALID_REGEX', detail)
+              : new RegexSearchError('REGEX_FAILED', detail),
+          )
+          return
+        }
+
+        resolve()
+      })
 
       const onAbort = () => {
         child.kill()

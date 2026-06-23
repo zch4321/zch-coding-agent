@@ -9,8 +9,6 @@ const { t } = useI18n()
 
 const providerOptions = computed(() => [
   { label: t('settings.webSearchProviderBrave'), value: 'brave' },
-  { label: t('settings.webSearchProviderSerper'), value: 'serper' },
-  { label: t('settings.webSearchProviderTavily'), value: 'tavily' },
 ])
 </script>
 

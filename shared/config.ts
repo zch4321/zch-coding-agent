@@ -367,11 +367,7 @@ export const PublicConfigSchema = Type.Object(
     ),
     webSearch: Type.Object(
       {
-        provider: Type.Union([
-          Type.Literal('brave'),
-          Type.Literal('serper'),
-          Type.Literal('tavily'),
-        ]),
+        provider: Type.Union([Type.Literal('brave')]),
         credentialConfigured: Type.Boolean(),
         credentialSource: Type.Union([
           Type.Literal('safe-storage'),
@@ -604,11 +600,7 @@ export const ConfigSetRequestSchema = Type.Union([
     {
       version: Type.Literal(1),
       kind: Type.Literal('web-search'),
-      provider: Type.Union([
-        Type.Literal('brave'),
-        Type.Literal('serper'),
-        Type.Literal('tavily'),
-      ]),
+      provider: Type.Union([Type.Literal('brave')]),
       count: Type.Integer({ minimum: 1, maximum: 20 }),
     },
     { additionalProperties: false },

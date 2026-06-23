@@ -127,30 +127,50 @@ function performRequest(
         const chunks: Buffer[] = []
         let total = 0
         let truncated = false
+        let settled = false
 
-        response.on('data', (chunk: Buffer) => {
-          total += chunk.length
-
-          if (total > options.maxBytes) {
-            truncated = true
-            request.destroy()
+        const finishWithBody = () => {
+          if (settled) {
             return
           }
-
-          chunks.push(chunk)
-        })
-
-        response.on('end', () =>
+          settled = true
           resolve({
             status: response.statusCode ?? 0,
             location: response.headers.location,
             contentType: response.headers['content-type'] ?? '',
             body: Buffer.concat(chunks),
             truncated,
-          }),
-        )
+          })
+        }
 
-        response.on('error', reject)
+        response.on('data', (chunk: Buffer) => {
+          total += chunk.length
+
+          if (total > options.maxBytes) {
+            truncated = true
+            // Destroy the socket so the server stops streaming, then resolve
+            // with the bounded body already read instead of surfacing an
+            // ECONNRESET error.
+            request.destroy()
+            finishWithBody()
+            return
+          }
+
+          chunks.push(chunk)
+        })
+
+        response.on('end', finishWithBody)
+
+        response.on('error', (error) => {
+          if (truncated || settled) {
+            return
+          }
+          reject(
+            error instanceof SsrfFetchError
+              ? error
+              : new SsrfFetchError('REQUEST_FAILED', error.message),
+          )
+        })
       },
     )
 

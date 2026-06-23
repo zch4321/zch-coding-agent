@@ -42,11 +42,7 @@ export type AppProviderConfig = Static<typeof AppProviderConfigSchema>
 
 export const AppWebSearchConfigSchema = Type.Object(
   {
-    provider: Type.Union([
-      Type.Literal('brave'),
-      Type.Literal('serper'),
-      Type.Literal('tavily'),
-    ]),
+    provider: Type.Union([Type.Literal('brave')]),
     apiKeyRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     count: Type.Integer({ minimum: 1, maximum: 20 }),
   },

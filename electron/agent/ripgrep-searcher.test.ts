@@ -135,4 +135,15 @@ describe('RipgrepSearcher', () => {
 
     await expect(promise).rejects.toBeDefined()
   })
+
+  it('rejects an invalid regex instead of returning empty results', async () => {
+    const root = await makeWorkspace()
+    const promise = search(new RipgrepSearcher(), root, {
+      pattern: '[',
+    })
+
+    await expect(promise).rejects.toMatchObject({
+      code: expect.stringMatching(/INVALID_REGEX|REGEX_FAILED/u),
+    })
+  })
 })

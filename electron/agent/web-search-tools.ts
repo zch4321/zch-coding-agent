@@ -103,7 +103,11 @@ function createProvider(
     return new BraveSearchProvider(apiKey)
   }
 
-  // serper / tavily providers are reserved for future implementation; brave
-  // is the default and only fully implemented provider.
-  return new BraveSearchProvider(apiKey)
+  // The provider union is currently limited to 'brave' by the schema. If a
+  // future provider is added before being implemented, fail loudly instead of
+  // silently routing a non-Brave API key to Brave's endpoint.
+  throw new WebSearchError(
+    'UNSUPPORTED_PROVIDER',
+    `Web search provider ${providerId} is not implemented`,
+  )
 }

@@ -1,4 +1,5 @@
 import { mkdtemp, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
@@ -232,6 +233,36 @@ describe('git read-only tools', () => {
       code: 'INVALID_ARGS',
     })
   })
+
+  it('rejects git_log revision option injection and writes no file', async () => {
+    const root = await repo()
+    const target = path.join(root, 'injected.txt')
+    const result = await execute(root, {
+      toolId: 'git_log',
+      args: { revision: `--output=${target}`, limit: 1 },
+    })
+
+    expect(result).toMatchObject({
+      status: 'error',
+      code: 'INVALID_ARGS',
+    })
+    expect(existsSync(target)).toBe(false)
+  })
+
+  it('rejects git_show ref option injection and writes no file', async () => {
+    const root = await repo()
+    const target = path.join(root, 'injected.txt')
+    const result = await execute(root, {
+      toolId: 'git_show',
+      args: { ref: `--output=${target}` },
+    })
+
+    expect(result).toMatchObject({
+      status: 'error',
+      code: 'INVALID_ARGS',
+    })
+    expect(existsSync(target)).toBe(false)
+  })
 })
 
 function writeHarness(root: string) {
@@ -323,6 +354,42 @@ describe('git write tools', () => {
       const content = log.content as { stdout: string }
       expect(content.stdout).toMatch(/add src/u)
     }
+  })
+
+  it('rejects a git_add path that looks like a git option', async () => {
+    const root = await repo()
+    const result = await executeWrite(root, {
+      toolId: 'git_add',
+      args: { paths: ['-A'] },
+    })
+
+    expect(result).toMatchObject({
+      status: 'error',
+      code: 'INVALID_ARGS',
+    })
+
+    // Nothing should be staged as a side effect.
+    const status = await execute(root, {
+      toolId: 'git_status',
+      args: { flags: ['--short'] },
+    })
+    if (status.status === 'ok') {
+      const content = status.content as { stdout: string }
+      expect(content.stdout).not.toMatch(/^A\s+-A/u)
+    }
+  })
+
+  it('rejects git_add combining all=true with paths', async () => {
+    const root = await repo()
+    const result = await executeWrite(root, {
+      toolId: 'git_add',
+      args: { all: true, paths: ['src.txt'] },
+    })
+
+    expect(result).toMatchObject({
+      status: 'error',
+      code: 'INVALID_ARGS',
+    })
   })
 
   it('runs git_commit with --no-verify so hooks are skipped', async () => {
