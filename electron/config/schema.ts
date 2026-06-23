@@ -40,9 +40,24 @@ export const AppProviderConfigSchema = Type.Object(
 
 export type AppProviderConfig = Static<typeof AppProviderConfigSchema>
 
+export const AppWebSearchConfigSchema = Type.Object(
+  {
+    provider: Type.Union([
+      Type.Literal('brave'),
+      Type.Literal('serper'),
+      Type.Literal('tavily'),
+    ]),
+    apiKeyRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    count: Type.Integer({ minimum: 1, maximum: 20 }),
+  },
+  { additionalProperties: false },
+)
+
+export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
+
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(3),
+    schemaVersion: Type.Literal(4),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
@@ -67,6 +82,7 @@ export const AppConfigSchema = Type.Object(
     assistant: PublicConfigSchema.properties.assistant,
     prompts: PublicConfigSchema.properties.prompts,
     network: PublicConfigSchema.properties.network,
+    webSearch: AppWebSearchConfigSchema,
   },
   { additionalProperties: false },
 )
@@ -76,7 +92,7 @@ export type AppConfig = Static<typeof AppConfigSchema>
 export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   activeProviderId: DEFAULT_PROVIDER_ID,
   providers: [
     {
@@ -153,6 +169,10 @@ export const DEFAULT_APP_CONFIG = {
   network: {
     httpProxy: { mode: 'off' },
   },
+  webSearch: {
+    provider: 'brave',
+    count: 5,
+  },
 } satisfies AppConfig
 
 export function getAppProvider(
@@ -174,12 +194,21 @@ export function toPublicConfig(
   config: AppConfig,
   credentialConfigured: boolean,
   credentialSource?: ProviderPublicConfig['credentialSource'],
+  webSearchCredential?: Pick<
+    PublicConfig['webSearch'],
+    'credentialConfigured' | 'credentialSource'
+  >,
 ): PublicConfig
 export function toPublicConfig(
   config: AppConfig,
   credentialForProvider: (
     provider: AppProviderConfig,
   ) => Pick<ProviderPublicConfig, 'credentialConfigured' | 'credentialSource'>,
+  credentialSource?: ProviderPublicConfig['credentialSource'],
+  webSearchCredential?: Pick<
+    PublicConfig['webSearch'],
+    'credentialConfigured' | 'credentialSource'
+  >,
 ): PublicConfig
 export function toPublicConfig(
   config: AppConfig,
@@ -192,6 +221,10 @@ export function toPublicConfig(
         'credentialConfigured' | 'credentialSource'
       >),
   credentialSource: ProviderPublicConfig['credentialSource'] = 'safe-storage',
+  webSearchCredential: Pick<
+    PublicConfig['webSearch'],
+    'credentialConfigured' | 'credentialSource'
+  > = { credentialConfigured: false, credentialSource: 'none' },
 ): PublicConfig {
   const credentialForProvider =
     typeof credential === 'function'
@@ -202,7 +235,7 @@ export function toPublicConfig(
         })
 
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     activeProviderId: config.activeProviderId,
     providers: config.providers.map((provider) => ({
       id: provider.id,
@@ -227,5 +260,10 @@ export function toPublicConfig(
     assistant: structuredClone(config.assistant),
     prompts: structuredClone(config.prompts),
     network: structuredClone(config.network),
+    webSearch: {
+      provider: config.webSearch.provider,
+      count: config.webSearch.count,
+      ...webSearchCredential,
+    },
   }
 }

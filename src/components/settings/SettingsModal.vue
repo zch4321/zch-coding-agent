@@ -10,6 +10,7 @@ import PermissionsSettingsPanel from './PermissionsSettingsPanel.vue'
 import ProjectSettingsPanel from './ProjectSettingsPanel.vue'
 import ProviderSettingsPanel from './ProviderSettingsPanel.vue'
 import SkillsSettingsPanel from './SkillsSettingsPanel.vue'
+import WebSearchSettingsPanel from './WebSearchSettingsPanel.vue'
 
 type SettingsTab =
   | 'general'
@@ -18,6 +19,7 @@ type SettingsTab =
   | 'permissions'
   | 'skills'
   | 'logging'
+  | 'websearch'
 
 const props = defineProps<{
   show: boolean
@@ -42,6 +44,7 @@ const tabs = computed<
   { value: 'permissions', label: t('settings.permissions'), icon: 'warning' },
   { value: 'skills', label: t('settings.skills'), icon: 'app' },
   { value: 'logging', label: t('settings.logging'), icon: 'file' },
+  { value: 'websearch', label: t('settings.webSearchTitle'), icon: 'app' },
 ])
 
 function selectTab(tab: SettingsTab) {
@@ -89,6 +92,8 @@ watch(
           @mode="emit('mode', $event)"
         />
         <SkillsSettingsPanel v-else-if="activeTab === 'skills'" />
+        <LoggingSettingsPanel v-else-if="activeTab === 'logging'" />
+        <WebSearchSettingsPanel v-else-if="activeTab === 'websearch'" />
         <LoggingSettingsPanel v-else />
       </div>
     </div>

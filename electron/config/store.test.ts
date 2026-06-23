@@ -133,7 +133,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(3)
+    expect(parsed.schemaVersion).toBe(4)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBeGreaterThan(
       0,
     )
@@ -247,6 +247,55 @@ describe('ConfigStore', () => {
       bytesPerToken: 2.5,
     })
     await expect(configStore.getDeepSeekApiKey()).resolves.toBe('atomic-secret')
+  })
+
+  it('stores, masks and clears a web search API key', async () => {
+    const { directory, configStore } = await createStores()
+
+    expect(configStore.getPublicConfig().webSearch.credentialConfigured).toBe(
+      false,
+    )
+
+    const config = await configStore.update({
+      version: 1,
+      kind: 'web-search-credential',
+      action: 'set',
+      apiKey: 'brave-key-secret',
+    })
+    expect(config.webSearch.credentialConfigured).toBe(true)
+    expect(JSON.stringify(config)).not.toContain('brave-key-secret')
+
+    const persisted = JSON.parse(
+      await readFile(path.join(directory, 'config.json'), 'utf8'),
+    ) as { webSearch: { apiKeyRef?: string } }
+    expect(persisted.webSearch.apiKeyRef).toBeDefined()
+
+    await expect(configStore.getWebSearchApiKey()).resolves.toBe(
+      'brave-key-secret',
+    )
+
+    await configStore.update({
+      version: 1,
+      kind: 'web-search-credential',
+      action: 'clear',
+    })
+    expect(configStore.getPublicConfig().webSearch.credentialConfigured).toBe(
+      false,
+    )
+    await expect(configStore.getWebSearchApiKey()).resolves.toBeUndefined()
+  })
+
+  it('updates web search provider and count', async () => {
+    const { configStore } = await createStores()
+
+    const config = await configStore.update({
+      version: 1,
+      kind: 'web-search',
+      provider: 'serper',
+      count: 10,
+    })
+    expect(config.webSearch.provider).toBe('serper')
+    expect(config.webSearch.count).toBe(10)
   })
 })
 

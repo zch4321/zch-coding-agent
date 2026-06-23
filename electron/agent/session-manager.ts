@@ -30,6 +30,7 @@ import { registerFileTools } from './file-tools'
 import { registerFetchTools } from './fetch-tools'
 import { registerGitReadOnlyTools, registerGitWriteTools } from './git-tools'
 import { registerProcessTools } from './process-tools'
+import { registerWebSearchTools } from './web-search-tools'
 import {
   PermissionPipeline,
   type RememberApprovalInput,
@@ -149,6 +150,7 @@ export class SessionManager {
     registerFetchTools(this.#toolRegistry, () =>
       this.#configStore.getPublicConfig(),
     )
+    registerWebSearchTools(this.#toolRegistry, this.#configStore)
     registerTerminalTools(
       this.#toolRegistry,
       this.#terminals.pool,

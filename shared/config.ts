@@ -133,7 +133,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(3),
+    schemaVersion: Type.Literal(4),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
@@ -365,6 +365,23 @@ export const PublicConfigSchema = Type.Object(
       },
       { additionalProperties: false },
     ),
+    webSearch: Type.Object(
+      {
+        provider: Type.Union([
+          Type.Literal('brave'),
+          Type.Literal('serper'),
+          Type.Literal('tavily'),
+        ]),
+        credentialConfigured: Type.Boolean(),
+        credentialSource: Type.Union([
+          Type.Literal('safe-storage'),
+          Type.Literal('environment'),
+          Type.Literal('none'),
+        ]),
+        count: Type.Integer({ minimum: 1, maximum: 20 }),
+      },
+      { additionalProperties: false },
+    ),
   },
   { additionalProperties: false },
 )
@@ -398,6 +415,7 @@ export const ConfigSectionSchema = Type.Union([
   Type.Literal('assistant'),
   Type.Literal('prompts'),
   Type.Literal('network'),
+  Type.Literal('webSearch'),
 ])
 export type ConfigSection = Static<typeof ConfigSectionSchema>
 
@@ -579,6 +597,28 @@ export const ConfigSetRequestSchema = Type.Union([
       version: Type.Literal(1),
       kind: Type.Literal('network'),
       value: PublicConfigSchema.properties.network,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('web-search'),
+      provider: Type.Union([
+        Type.Literal('brave'),
+        Type.Literal('serper'),
+        Type.Literal('tavily'),
+      ]),
+      count: Type.Integer({ minimum: 1, maximum: 20 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('web-search-credential'),
+      action: Type.Union([Type.Literal('set'), Type.Literal('clear')]),
+      apiKey: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
     },
     { additionalProperties: false },
   ),

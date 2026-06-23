@@ -100,21 +100,26 @@ export class ConfigStore {
   }
 
   getPublicConfig(): PublicConfig {
-    return toPublicConfig(this.#config, (provider) => {
-      const stored = this.#secretStore.has(provider.apiKeyRef)
-      const environment =
-        provider.id === DEFAULT_PROVIDER_ID
-          ? Boolean(this.#environmentApiKey)
-          : false
-      return {
-        credentialConfigured: stored || environment,
-        credentialSource: stored
-          ? 'safe-storage'
-          : environment
-            ? 'environment'
-            : 'none',
-      }
-    })
+    return toPublicConfig(
+      this.#config,
+      (provider) => {
+        const stored = this.#secretStore.has(provider.apiKeyRef)
+        const environment =
+          provider.id === DEFAULT_PROVIDER_ID
+            ? Boolean(this.#environmentApiKey)
+            : false
+        return {
+          credentialConfigured: stored || environment,
+          credentialSource: stored
+            ? 'safe-storage'
+            : environment
+              ? 'environment'
+              : 'none',
+        }
+      },
+      undefined,
+      this.#webSearchCredential(),
+    )
   }
 
   getInternalConfig(): AppConfig {
@@ -134,6 +139,24 @@ export class ConfigStore {
     const environment =
       provider?.id === DEFAULT_PROVIDER_ID ? this.#environmentApiKey : undefined
     return stored ?? environment
+  }
+
+  async getWebSearchApiKey(): Promise<string | undefined> {
+    const reference = this.#config.webSearch.apiKeyRef
+    return reference ? this.#secretStore.get(reference) : undefined
+  }
+
+  #webSearchCredential(): Pick<
+    PublicConfig['webSearch'],
+    'credentialConfigured' | 'credentialSource'
+  > {
+    const configured = this.#config.webSearch.apiKeyRef
+      ? this.#secretStore.has(this.#config.webSearch.apiKeyRef)
+      : false
+    return {
+      credentialConfigured: configured,
+      credentialSource: configured ? 'safe-storage' : 'none',
+    }
   }
 
   getActiveProvider(): AppProviderConfig {
@@ -298,6 +321,43 @@ export class ConfigStore {
       case 'network':
         next.network = structuredClone(request.value)
         break
+      case 'web-search': {
+        next.webSearch = {
+          provider: request.provider,
+          count: request.count,
+          apiKeyRef: next.webSearch.apiKeyRef,
+        }
+        break
+      }
+      case 'web-search-credential': {
+        const previousReference = next.webSearch.apiKeyRef
+
+        if (request.action === 'clear') {
+          delete next.webSearch.apiKeyRef
+          await writeJsonAtomic(this.#filePath, next)
+          this.#config = next
+          await this.#secretStore.delete(previousReference)
+          return this.getPublicConfig()
+        }
+
+        if (!request.apiKey) {
+          throw new Error('web-search-credential set requires an apiKey')
+        }
+
+        const newReference = await this.#secretStore.set(request.apiKey)
+        next.webSearch.apiKeyRef = newReference
+
+        try {
+          await writeJsonAtomic(this.#filePath, next)
+        } catch (error) {
+          await this.#secretStore.delete(newReference).catch(() => undefined)
+          throw error
+        }
+
+        this.#config = next
+        await this.#secretStore.delete(previousReference)
+        return this.getPublicConfig()
+      }
     }
 
     await writeJsonAtomic(this.#filePath, next)

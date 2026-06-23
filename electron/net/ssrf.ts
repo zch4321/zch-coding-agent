@@ -15,6 +15,8 @@ export interface SsrfFetchOptions {
   signal: AbortSignal
   /** Optional allow-list of lowercased MIME prefixes; empty means any. */
   allowedMimePrefixes?: readonly string[]
+  /** Extra request headers merged over the defaults. */
+  headers?: Record<string, string>
 }
 
 export interface SsrfFetchResponse {
@@ -115,7 +117,7 @@ function performRequest(
       {
         method: 'GET',
         signal: options.signal,
-        headers: { accept },
+        headers: { accept, ...options.headers },
         // Pin the connection to the resolved IP so a later DNS rebinding
         // cannot redirect traffic to a private address mid-request.
         lookup: (_hostname, _options, callback) =>

@@ -56,6 +56,14 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     },
     assistantSaving: false,
     assistantSaveStatus: '',
+    webSearchForm: {
+      provider: 'brave' as PublicConfig['webSearch']['provider'],
+      count: 5,
+      apiKey: '',
+    },
+    webSearchCredentialConfigured: false,
+    webSearchSaving: false,
+    webSearchSaveStatus: '',
   }),
   getters: {
     providerNoticeAccepted: (state) =>
@@ -158,6 +166,14 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
 
       if (includes('assistant')) {
         this.assistantForm = structuredClone(config.assistant)
+      }
+
+      if (includes('all') || includes('webSearch')) {
+        this.webSearchForm.provider = config.webSearch.provider
+        this.webSearchForm.count = config.webSearch.count
+        this.webSearchForm.apiKey = ''
+        this.webSearchCredentialConfigured =
+          config.webSearch.credentialConfigured
       }
     },
     async saveAssistantSettings(language?: AssistantLanguage) {
@@ -299,6 +315,54 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         action: 'clear',
       })
       if (result.ok) this.applyConfig(result.value.config, ['providers'])
+      else this.error = result.error.message
+    },
+    async saveWebSearchSettings() {
+      const bridge = window.agentApi
+      if (!bridge) return
+      this.webSearchSaving = true
+      try {
+        const apiKey = this.webSearchForm.apiKey.trim()
+        if (apiKey) {
+          const keyResult = await bridge.setConfig({
+            version: IPC_VERSION,
+            kind: 'web-search-credential',
+            action: 'set',
+            apiKey,
+          })
+          if (!keyResult.ok) {
+            this.error = keyResult.error.message
+            return false
+          }
+          this.applyConfig(keyResult.value.config, ['webSearch'])
+        }
+
+        const result = await bridge.setConfig({
+          version: IPC_VERSION,
+          kind: 'web-search',
+          provider: this.webSearchForm.provider,
+          count: this.webSearchForm.count,
+        })
+        if (result.ok) {
+          this.applyConfig(result.value.config, ['webSearch'])
+          this.webSearchSaveStatus = 'saved'
+          return true
+        }
+        this.error = result.error.message
+        return false
+      } finally {
+        this.webSearchSaving = false
+      }
+    },
+    async clearWebSearchCredential() {
+      const bridge = window.agentApi
+      if (!bridge) return
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'web-search-credential',
+        action: 'clear',
+      })
+      if (result.ok) this.applyConfig(result.value.config, ['webSearch'])
       else this.error = result.error.message
     },
     async savePermissions(mode: PermissionMode) {

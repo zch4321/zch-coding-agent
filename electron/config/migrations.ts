@@ -46,7 +46,8 @@ export function migrateConfig(candidate: unknown): AppConfig {
     schemaVersion !== 0 &&
     schemaVersion !== 1 &&
     schemaVersion !== 2 &&
-    schemaVersion !== 3
+    schemaVersion !== 3 &&
+    schemaVersion !== 4
   ) {
     throw new Error(
       `Unsupported config schema version: ${String(schemaVersion)}`,
@@ -55,7 +56,7 @@ export function migrateConfig(candidate: unknown): AppConfig {
 
   const normalized = normalizeConfigShape(candidate)
   const migrated = mergeRecord(DEFAULT_APP_CONFIG as AppConfig, normalized)
-  migrated.schemaVersion = 3
+  migrated.schemaVersion = 4
   migrated.providers = migrated.providers.map((provider) => ({
     ...provider,
     reasoning: normalizeReasoning(provider.reasoning),

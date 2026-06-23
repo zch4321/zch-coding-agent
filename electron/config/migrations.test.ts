@@ -58,7 +58,7 @@ describe('config migrations', () => {
 
     const migrated = migrateConfig(legacy)
 
-    expect(migrated.schemaVersion).toBe(3)
+    expect(migrated.schemaVersion).toBe(4)
     expect(migrated.network.httpProxy).toEqual({ mode: 'off' })
     expect(migrated.prompts.approval.classifyRisk.id).toBe(
       'approval.classify-risk',
@@ -67,6 +67,20 @@ describe('config migrations', () => {
       approvalTimeoutMs: 600_000,
       autoApprovalTimeoutMs: 15_000,
       modelCatalogTimeoutMs: 15_000,
+    })
+  })
+
+  it('migrates a v3 config up to v4 with web search defaults', () => {
+    const v3 = structuredClone(DEFAULT_APP_CONFIG)
+    v3.schemaVersion = 3 as never
+    delete (v3 as { webSearch?: unknown }).webSearch
+
+    const migrated = migrateConfig(v3)
+
+    expect(migrated.schemaVersion).toBe(4)
+    expect(migrated.webSearch).toEqual({
+      provider: 'brave',
+      count: 5,
     })
   })
 })
