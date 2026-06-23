@@ -11,7 +11,7 @@ if (!process.env.DEEPSEEK_API_KEY?.trim()) {
 const vitest = path.join(process.cwd(), 'node_modules', 'vitest', 'vitest.mjs')
 const result = spawnSync(
   process.execPath,
-  [vitest, 'run', 'electron/agent/real-api.test.ts', '--reporter=verbose'],
+  [vitest, 'run', 'electron/session/real-api.test.ts', '--reporter=verbose'],
   {
     stdio: 'inherit',
     env: { ...process.env, RUN_REAL_API_TESTS: '1' },
