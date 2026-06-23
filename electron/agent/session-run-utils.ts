@@ -7,8 +7,8 @@ import {
   estimateJsonTokens,
   selectContextMessages,
 } from './context-budget'
-import { resolveModelProfiles } from './model-catalog'
-import type { ProviderMessage } from './provider'
+import { resolveModelProfiles } from '../providers/model-catalog'
+import type { ProviderMessage } from '../providers/provider'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 
 export function delay(ms: number): Promise<void> {

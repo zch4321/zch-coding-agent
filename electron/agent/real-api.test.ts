@@ -12,7 +12,7 @@ import {
 } from '../../shared/notices'
 import { ConfigStore } from '../config/store'
 import { SecretStore, type SafeStorageAdapter } from '../config/secret-store'
-import { fetchDeepSeekModelCatalog } from './model-catalog'
+import { fetchDeepSeekModelCatalog } from '../providers/model-catalog'
 import { SkillsManager } from '../skills/manager'
 import { TraceService } from '../logging/service'
 import { SessionManager } from './session-manager'

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
-import type { ProviderMessage } from './provider'
+import type { ProviderMessage } from '../providers/provider'
 import {
   boundToolResultForContext,
   estimateTextTokens,

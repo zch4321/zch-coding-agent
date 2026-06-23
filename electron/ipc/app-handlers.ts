@@ -6,7 +6,7 @@ import {
   fetchOpenAICompatibleModelCatalog,
   ModelCatalogError,
   resolveModelProfiles,
-} from '../agent/model-catalog'
+} from '../providers/model-catalog'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
 import type { SessionManager } from '../agent/session-manager'
 import type { ConfigStore } from '../config/store'

@@ -29,7 +29,7 @@ import type {
   SessionManagerOptions,
   SessionState,
 } from './session-types'
-import { normalizeLlmUsage } from './usage'
+import { normalizeLlmUsage } from '../providers/usage'
 
 export class SessionToolRunner {
   readonly #configStore: ConfigStore

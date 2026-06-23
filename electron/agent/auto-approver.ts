@@ -3,7 +3,7 @@ import type { PolicySignal } from '../../shared/agent-events'
 import type { JsonValue } from '../../shared/json'
 import { compileSchema } from '../schema-validator'
 import type { ToolCall, ToolDefinition } from '../tools/types'
-import type { LLMProvider, ProviderMessage } from './provider'
+import type { LLMProvider, ProviderMessage } from '../providers/provider'
 
 const AutoApproverOutputSchema = Type.Object(
   {

@@ -8,13 +8,13 @@ import {
   estimateJsonTokens,
   selectContextMessages,
 } from './context-budget'
-import { OpenAICompatibleProvider } from './deepseek-provider'
+import { OpenAICompatibleProvider } from '../providers/deepseek-provider'
 import type {
   ProviderAssistantTurn,
   ProviderEvent,
   ProviderMessage,
   ProviderRequestSnapshot,
-} from './provider'
+} from '../providers/provider'
 import type { SkillsManager } from '../skills/manager'
 import type { ToolRegistry } from './tool-registry'
 import { id, ipcFault, toJsonValue } from './session-common'
@@ -31,7 +31,7 @@ import type {
   SessionState,
 } from './session-types'
 import type { CallId } from '../../shared/ids'
-import { normalizeLlmUsage } from './usage'
+import { normalizeLlmUsage } from '../providers/usage'
 
 export interface ProviderTurnResult {
   turn: ProviderAssistantTurn

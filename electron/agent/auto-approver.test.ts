@@ -4,7 +4,7 @@ import type {
   LLMProvider,
   ProviderChatRequest,
   ProviderEvent,
-} from './provider'
+} from '../providers/provider'
 import {
   ProviderAutoApprover,
   strictAutoApproverOutput,

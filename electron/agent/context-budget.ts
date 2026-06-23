@@ -1,6 +1,6 @@
 import type { PublicConfig } from '../../shared/config'
 import type { ToolResult } from '../tools/types'
-import type { ProviderMessage } from './provider'
+import type { ProviderMessage } from '../providers/provider'
 
 const TRUNCATION_MARKER = '\n... output truncated ...\n'
 

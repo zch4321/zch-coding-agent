@@ -9,7 +9,7 @@ import type {
   TraceInfo,
 } from '../../shared/trace'
 import type { PermissionMode } from '../../shared/config'
-import type { ProviderMessage } from '../agent/provider'
+import type { ProviderMessage } from '../providers/provider'
 import type { TraceEvent } from './events'
 import { readTraceFile } from './reader'
 import { replayTrace } from './replay'

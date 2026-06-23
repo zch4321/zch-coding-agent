@@ -16,7 +16,7 @@ import type {
   LLMProvider,
   ProviderChatRequest,
   ProviderEvent,
-} from './provider'
+} from '../providers/provider'
 import type { AutoApprover } from './auto-approver'
 import { SessionManager } from './session-manager'
 import { ChangeHistoryStore } from './change-history'
