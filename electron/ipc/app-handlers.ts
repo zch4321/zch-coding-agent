@@ -1,14 +1,14 @@
 import { BrowserWindow, dialog, shell, type OpenDialogOptions } from 'electron'
 import { stat } from 'node:fs/promises'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
-import { ChangeHistoryError, ChangeHistoryStore } from '../agent/change-history'
+import { ChangeHistoryError, ChangeHistoryStore } from '../session/change-history'
 import {
   fetchOpenAICompatibleModelCatalog,
   ModelCatalogError,
   resolveModelProfiles,
 } from '../providers/model-catalog'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
-import type { SessionManager } from '../agent/session-manager'
+import type { SessionManager } from '../session/session-manager'
 import type { ConfigStore } from '../config/store'
 import { SkillError, type SkillsManager } from '../skills/manager'
 import { TraceServiceError, type TraceService } from '../logging/service'

@@ -22,8 +22,8 @@ import {
   PROVIDER_NOTICE_VERSION,
   TRACE_NOTICE_VERSION,
 } from '../shared/notices'
-import { SessionManager } from './agent/session-manager'
-import { ChangeHistoryStore } from './agent/change-history'
+import { SessionManager } from './session/session-manager'
+import { ChangeHistoryStore } from './session/change-history'
 import { registerIpcHandlers } from './ipc'
 import { createAppIpcHandlers } from './ipc/app-handlers'
 import { PluginEventBus } from './plugins/event-bus'
