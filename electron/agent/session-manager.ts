@@ -27,7 +27,7 @@ import { PathGuard } from './path-guard'
 import type { ProviderMessage } from './provider'
 import { registerReadOnlyTools } from './readonly-tools'
 import { registerFileTools } from './file-tools'
-import { registerGitReadOnlyTools } from './git-tools'
+import { registerGitReadOnlyTools, registerGitWriteTools } from './git-tools'
 import { registerProcessTools } from './process-tools'
 import {
   PermissionPipeline,
@@ -140,6 +140,9 @@ export class SessionManager {
       this.#configStore.getPublicConfig(),
     )
     registerGitReadOnlyTools(this.#toolRegistry, () =>
+      this.#configStore.getPublicConfig(),
+    )
+    registerGitWriteTools(this.#toolRegistry, () =>
       this.#configStore.getPublicConfig(),
     )
     registerTerminalTools(

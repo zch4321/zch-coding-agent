@@ -13,6 +13,7 @@ import {
 import {
   argsObject,
   filePolicySignals,
+  gitPolicySignals,
   operationFor,
   processPolicySignals,
 } from './file-tool-policy'
@@ -106,7 +107,10 @@ export async function prepareToolResourcePlan(input: {
 
     return {
       preconditions: [],
-      policySignals: processPolicySignals(input.call),
+      policySignals: [
+        ...processPolicySignals(input.call),
+        ...gitPolicySignals(input.call),
+      ],
     }
   }
 

@@ -136,3 +136,53 @@ export function filePolicySignals(
 
   return signals
 }
+
+/**
+ * Deterministic policy signals for the dedicated git write tools. processPolicySignals
+ * only inspects run_command strings, so git_add / git_commit / git_restore would
+ * otherwise bypass the danger -> review gate even for amend / restore --hard.
+ */
+export function gitPolicySignals(call: ToolCall): PolicySignal[] {
+  if (
+    call.toolId !== 'git_add' &&
+    call.toolId !== 'git_commit' &&
+    call.toolId !== 'git_restore'
+  ) {
+    return []
+  }
+
+  const args = argsObject(call)
+  const signals: PolicySignal[] = [
+    {
+      code: `vcs_${call.toolId.replace('git_', '')}`,
+      severity: 'warning',
+      detail: `${call.toolId} mutates git state`,
+    },
+  ]
+
+  if (call.toolId === 'git_commit' && args.amend === true) {
+    signals.push({
+      code: 'git_amend',
+      severity: 'danger',
+      detail: 'git commit --amend rewrites history',
+    })
+  }
+
+  if (call.toolId === 'git_restore' && args.staged !== true) {
+    signals.push({
+      code: 'git_restore_worktree',
+      severity: 'danger',
+      detail: 'git restore discards uncommitted working tree changes',
+    })
+  }
+
+  if (call.toolId === 'git_add' && args.all === true) {
+    signals.push({
+      code: 'git_add_all',
+      severity: 'warning',
+      detail: 'git add -A stages every change in the workspace',
+    })
+  }
+
+  return signals
+}

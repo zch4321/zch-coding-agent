@@ -228,6 +228,26 @@ function rememberArgConstraints(call: ToolCall): JsonValue | undefined {
     }
   }
 
+  if (call.toolId === 'git_add') {
+    return {
+      ...(args.all === true ? { all: true } : {}),
+      ...(Array.isArray(args.paths)
+        ? { paths: structuredClone(args.paths) }
+        : {}),
+    }
+  }
+
+  if (call.toolId === 'git_restore') {
+    return {
+      ...(args.staged === true ? { staged: true } : {}),
+      ...(Array.isArray(args.paths)
+        ? { paths: structuredClone(args.paths) }
+        : {}),
+    }
+  }
+
+  // git_commit is intentionally not rememberable: auto-committing on a rule
+  // would create history without a per-call decision.
   return undefined
 }
 

@@ -335,3 +335,119 @@ export function registerGitReadOnlyTools(
   registry.registerTool(gitLog)
   registry.registerTool(gitShow)
 }
+
+const GitAddSchema = Type.Object(
+  {
+    paths: PATHS_FIELD,
+    all: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+)
+type GitAddArgs = Static<typeof GitAddSchema>
+
+const GitCommitSchema = Type.Object(
+  {
+    message: Type.String({ minLength: 1, maxLength: 4_096 }),
+    amend: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+)
+type GitCommitArgs = Static<typeof GitCommitSchema>
+
+const GitRestoreSchema = Type.Object(
+  {
+    paths: PATHS_FIELD,
+    staged: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+)
+type GitRestoreArgs = Static<typeof GitRestoreSchema>
+
+/**
+ * Deterministic policy signals for the dedicated git write tools live in
+ * file-tool-policy.ts (gitPolicySignals) so they share the argsObject helper
+ * and are merged into the tool resource plan alongside processPolicySignals.
+ */
+
+export function registerGitWriteTools(
+  registry: ToolRegistrationPort,
+  getConfig: () => PublicConfig,
+): void {
+  const gitAdd: ToolDefinition<typeof GitAddSchema> = {
+    id: 'git_add',
+    description:
+      'Stage file paths in the working tree. Use all=true to stage every change (higher risk).',
+    inputSchema: GitAddSchema,
+    effects: ['process.spawn', 'vcs.write'],
+    defaultRisk: 'review',
+    supportsAbort: true,
+    defaultTimeoutMs: 20_000,
+    maxOutputBytes: 64 * 1_024,
+    async execute(args: GitAddArgs, context): Promise<ToolResult> {
+      const { timeoutMs, maxOutputBytes } = timeoutAndOutput(getConfig)
+      const addArgs = args.all ? ['-A'] : (args.paths ?? [])
+      return runGit({
+        workspace: context.workspace.canonicalPath,
+        subcommand: 'add',
+        args: addArgs,
+        signal: context.signal,
+        timeoutMs,
+        maxOutputBytes,
+      })
+    },
+  }
+
+  const gitCommit: ToolDefinition<typeof GitCommitSchema> = {
+    id: 'git_commit',
+    description:
+      'Create a commit from the staged changes. Hooks are disabled (--no-verify) so commit-time side effects never run silently. amend=true rewrites the previous commit (high risk).',
+    inputSchema: GitCommitSchema,
+    effects: ['process.spawn', 'vcs.write'],
+    defaultRisk: 'review',
+    supportsAbort: true,
+    defaultTimeoutMs: 30_000,
+    maxOutputBytes: 64 * 1_024,
+    async execute(args: GitCommitArgs, context): Promise<ToolResult> {
+      const { timeoutMs, maxOutputBytes } = timeoutAndOutput(getConfig)
+      const amend = args.amend ? ['--amend'] : []
+      // --no-verify prevents commit hooks from running unapproved side effects.
+      return runGit({
+        workspace: context.workspace.canonicalPath,
+        subcommand: 'commit',
+        args: ['--no-verify', '-m', args.message, ...amend],
+        signal: context.signal,
+        timeoutMs,
+        maxOutputBytes,
+      })
+    },
+  }
+
+  const gitRestore: ToolDefinition<typeof GitRestoreSchema> = {
+    id: 'git_restore',
+    description:
+      'Restore working tree files, discarding uncommitted changes (default, high risk). staged=true restores the index instead (unstage).',
+    inputSchema: GitRestoreSchema,
+    effects: ['process.spawn', 'vcs.write'],
+    defaultRisk: 'review',
+    supportsAbort: true,
+    defaultTimeoutMs: 20_000,
+    maxOutputBytes: 64 * 1_024,
+    async execute(args: GitRestoreArgs, context): Promise<ToolResult> {
+      const { timeoutMs, maxOutputBytes } = timeoutAndOutput(getConfig)
+      const staged = args.staged ? ['--staged'] : []
+      const paths = args.paths ?? []
+      return runGit({
+        workspace: context.workspace.canonicalPath,
+        subcommand: 'restore',
+        args: [...staged, '--', ...paths],
+        signal: context.signal,
+        timeoutMs,
+        maxOutputBytes,
+      })
+    },
+  }
+
+  registry.registerTool(gitAdd)
+  registry.registerTool(gitCommit)
+  registry.registerTool(gitRestore)
+}
