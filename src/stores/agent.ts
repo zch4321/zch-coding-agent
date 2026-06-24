@@ -140,7 +140,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     renameConversation: runtime.renameConversation,
     deleteConversation: runtime.deleteConversation,
     forkConversation: runtime.forkConversation,
-    revertConversationToMessage: runtime.revertConversationToMessage,
+    revertConversationAfterMessage: runtime.revertConversationAfterMessage,
     exportConversationMarkdown: workbench.exportConversationMarkdown,
     exportConversationViaDialog: workbench.exportConversationViaDialog,
     importConversationViaDialog: workbench.importConversationViaDialog,

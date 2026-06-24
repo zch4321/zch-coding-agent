@@ -513,7 +513,7 @@ describe('agent store regressions', () => {
     expect(store.activeConversation?.title).toBe('Fix the flaky terminal test')
   })
 
-  it('forks a conversation into a new branch with parent metadata', async () => {
+  it('forks a conversation into a new branch, truncating tools after the fork point', async () => {
     const saveWorkbench = vi.fn(
       async (payload: Parameters<AgentApi['saveWorkbench']>[0]) => ({
         version: 1 as const,
@@ -530,10 +530,31 @@ describe('agent store regressions', () => {
     original.messages = [
       { id: 'm1', role: 'user', text: 'one', reasoning: '', order: 0 },
       { id: 'm2', role: 'assistant', text: 'two', reasoning: '', order: 1 },
-      { id: 'm3', role: 'user', text: 'three', reasoning: '', order: 2 },
+      { id: 'm3', role: 'user', text: 'three', reasoning: '', order: 4 },
+      { id: 'm4', role: 'assistant', text: 'four', reasoning: '', order: 5 },
+    ]
+    original.tools = [
+      {
+        callId,
+        runId,
+        tool: 'read_file',
+        args: {},
+        reason: '',
+        status: 'completed',
+        order: 2,
+      },
+      {
+        callId: 'call-after' as CallId,
+        runId,
+        tool: 'write_file',
+        args: {},
+        reason: '',
+        status: 'completed',
+        order: 6,
+      },
     ]
 
-    const result = await store.forkConversation(original.id)
+    const result = await store.forkConversation(original.id, 'm2')
 
     expect(result).toBe(true)
     const forked = store.activeConversation
@@ -542,15 +563,17 @@ describe('agent store regressions', () => {
     expect(forked?.parentId).toBe(original.id)
     expect(forked?.parentTitle).toBe('Original conversation')
     expect(forked?.forkedAt).toBeDefined()
-    // The fork copies the full history when no fork point is given.
-    expect(forked?.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3'])
+    // The fork keeps messages up to and including the fork point.
+    expect(forked?.messages.map((m) => m.id)).toEqual(['m1', 'm2'])
+    // Tools recorded after the fork point are dropped; only the earlier one is kept.
+    expect(forked?.tools?.map((tool) => tool.callId)).toEqual([callId])
     // The original conversation is untouched.
     expect(
       store.conversations.find((c) => c.id === original.id)?.messages,
-    ).toHaveLength(3)
+    ).toHaveLength(4)
   })
 
-  it('reverts to a message by creating a truncated branch', async () => {
+  it('reverts in place by discarding messages after the kept reply', async () => {
     const saveWorkbench = vi.fn(
       async (payload: Parameters<AgentApi['saveWorkbench']>[0]) => ({
         version: 1 as const,
@@ -566,20 +589,40 @@ describe('agent store regressions', () => {
     original.messages = [
       { id: 'm1', role: 'user', text: 'one', reasoning: '', order: 0 },
       { id: 'm2', role: 'assistant', text: 'two', reasoning: '', order: 1 },
-      { id: 'm3', role: 'user', text: 'three', reasoning: '', order: 2 },
+      { id: 'm3', role: 'user', text: 'three', reasoning: '', order: 4 },
+      { id: 'm4', role: 'assistant', text: 'four', reasoning: '', order: 5 },
+    ]
+    original.tools = [
+      {
+        callId,
+        runId,
+        tool: 'read_file',
+        args: {},
+        reason: '',
+        status: 'completed',
+        order: 2,
+      },
+      {
+        callId: 'call-after' as CallId,
+        runId,
+        tool: 'write_file',
+        args: {},
+        reason: '',
+        status: 'completed',
+        order: 6,
+      },
     ]
 
-    const result = await store.revertConversationToMessage('m2')
+    const result = await store.revertConversationAfterMessage('m2')
 
     expect(result).toBe(true)
-    const forked = store.activeConversation
-    expect(forked).toBeDefined()
-    expect(forked?.forkPointMessageId).toBe('m2')
-    // The revert branch keeps history up to and including the fork point.
-    expect(forked?.messages.map((m) => m.id)).toEqual(['m1', 'm2'])
-    // The original conversation retains its full history.
-    expect(
-      store.conversations.find((c) => c.id === original.id)?.messages,
-    ).toHaveLength(3)
+    // No new conversation is created; the same conversation is mutated in place.
+    expect(store.conversations).toHaveLength(1)
+    const reverted = store.activeConversation
+    expect(reverted?.id).toBe(original.id)
+    // The kept reply (m2) and everything before it remain; m3/m4 are gone.
+    expect(reverted?.messages.map((m) => m.id)).toEqual(['m1', 'm2'])
+    // Tools recorded after the kept reply are also removed.
+    expect(reverted?.tools?.map((tool) => tool.callId)).toEqual([callId])
   })
 })

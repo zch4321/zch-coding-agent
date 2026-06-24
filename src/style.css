@@ -825,7 +825,8 @@ textarea:focus-visible {
   color: var(--accent);
 }
 
-.revert-to-here {
+.revert-to-here,
+.message-action {
   margin-left: auto;
   padding: 2px 8px;
   border: 1px solid var(--border);
@@ -836,7 +837,8 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
-.revert-to-here:hover:not(:disabled) {
+.revert-to-here:hover:not(:disabled),
+.message-action:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -844,6 +846,16 @@ textarea:focus-visible {
 .revert-to-here:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.message-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.message-actions .message-action {
+  margin-left: 0;
 }
 
 .revert-preview {

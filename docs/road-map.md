@@ -250,7 +250,7 @@ Fetch/Search 约束：
 - 导入历史不伪造工具执行或 Provider continuation。
 - Agent 自动起名：保留本地截断 fallback，可选后台标题模型。
 - Conversation branch：复制历史到新 conversation，保留 parent/fork metadata。
-- 回退对话：默认创建新分支，不直接破坏原历史。
+- 回退对话：原地撤销到任意一轮，删除该回复及其后的所有消息，不新建对话。
 - 回退文件：基于 change history 逆序恢复，必须通过 hash precondition。
 - Diff/changes 视图支持按 run、文件、状态过滤。
 

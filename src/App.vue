@@ -220,12 +220,17 @@ async function confirmRevert() {
   revertMessageId.value = undefined
   revertMessagePreview.value = ''
   if (!messageId) return
-  await agent.revertConversationToMessage(messageId)
+  await agent.revertConversationAfterMessage(messageId)
 }
 
 async function forkConversation(conversationId: string) {
   if (agent.activeRunId || agent.pendingApproval) return
   await agent.forkConversation(conversationId)
+}
+
+async function forkFromMessage(messageId: string) {
+  if (agent.activeRunId || agent.pendingApproval) return
+  await agent.forkConversation(undefined, messageId)
 }
 
 async function exportConversation(conversationId: string) {
@@ -485,6 +490,7 @@ onUnmounted(() => {
                 <ConversationTimeline
                   :project-name="projectName"
                   @revert="requestRevert"
+                  @fork="forkFromMessage"
                 />
 
                 <MessageComposer

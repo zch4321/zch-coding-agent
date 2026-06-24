@@ -69,6 +69,97 @@ function cloneForIpc<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
+/**
+ * Result of truncating a conversation at a message (inclusive): everything at
+ * or before the kept message's timeline order is retained, everything strictly
+ * after is dropped. Tools, usage and orchestrator entries are filtered by the
+ * same order threshold so a truncated conversation never shows tool calls that
+ * happened after the cut. Goal/plan/latestReviewedApproval are kept only when
+ * their state was established at or before the cut.
+ */
+interface ConversationSlice {
+  messages: ConversationRecord['messages']
+  tools: NonNullable<ConversationRecord['tools']>
+  usage: NonNullable<ConversationRecord['usage']>
+  goal: ConversationRecord['goal']
+  plan: ConversationRecord['plan']
+  orchestratorEntries: NonNullable<ConversationRecord['orchestratorEntries']>
+  latestReviewedApproval: ConversationRecord['latestReviewedApproval']
+}
+
+function splitConversationAt(
+  conversation: ConversationRecord,
+  keepMessageId?: string,
+): ConversationSlice {
+  const messages = cloneMessages(conversation.messages)
+
+  // No fork point: keep everything, but still normalize the optional arrays.
+  if (!keepMessageId) {
+    return {
+      messages,
+      tools: conversation.tools?.map((tool) => ({ ...tool })) ?? [],
+      usage: conversation.usage?.map((item) => ({ ...item })) ?? [],
+      goal: conversation.goal ? structuredClone(conversation.goal) : undefined,
+      plan: conversation.plan ? structuredClone(conversation.plan) : undefined,
+      orchestratorEntries:
+        conversation.orchestratorEntries?.map((entry) => ({ ...entry })) ?? [],
+      latestReviewedApproval: conversation.latestReviewedApproval
+        ? { ...conversation.latestReviewedApproval }
+        : undefined,
+    }
+  }
+
+  const cutIndex = messages.findIndex((message) => message.id === keepMessageId)
+  if (cutIndex < 0) {
+    return {
+      messages,
+      tools: conversation.tools?.map((tool) => ({ ...tool })) ?? [],
+      usage: conversation.usage?.map((item) => ({ ...item })) ?? [],
+      goal: conversation.goal ? structuredClone(conversation.goal) : undefined,
+      plan: conversation.plan ? structuredClone(conversation.plan) : undefined,
+      orchestratorEntries:
+        conversation.orchestratorEntries?.map((entry) => ({ ...entry })) ?? [],
+      latestReviewedApproval: conversation.latestReviewedApproval
+        ? { ...conversation.latestReviewedApproval }
+        : undefined,
+    }
+  }
+
+  const keptMessages = messages.slice(0, cutIndex + 1)
+  // The exclusive upper bound is the order of the first message AFTER the cut.
+  // Everything strictly before that bound — including tools recorded during
+  // the kept assistant reply, which naturally carry a higher order than the
+  // reply itself — is retained. When the kept message is the last one, there
+  // is no following message, so everything is kept.
+  const firstDropped = messages[cutIndex + 1]
+  const exclusiveBound = firstDropped?.order
+
+  const withinBound = (order: number | undefined): boolean =>
+    exclusiveBound === undefined ? true : (order ?? 0) < exclusiveBound
+
+  const tools = (conversation.tools ?? []).filter((tool) =>
+    withinBound(tool.order),
+  )
+  const usage = (conversation.usage ?? []).filter((item) =>
+    withinBound(item.order),
+  )
+  const orchestratorEntries = (conversation.orchestratorEntries ?? []).filter(
+    (entry) => withinBound(entry.order),
+  )
+
+  return {
+    messages: keptMessages,
+    tools: tools.map((tool) => ({ ...tool })),
+    usage: usage.map((item) => ({ ...item })),
+    goal: conversation.goal ? structuredClone(conversation.goal) : undefined,
+    plan: conversation.plan ? structuredClone(conversation.plan) : undefined,
+    orchestratorEntries: orchestratorEntries.map((entry) => ({ ...entry })),
+    latestReviewedApproval: conversation.latestReviewedApproval
+      ? { ...conversation.latestReviewedApproval }
+      : undefined,
+  }
+}
+
 function snapshotForPersistence(state: {
   projects: ProjectRecord[]
   conversations: ConversationRecord[]
@@ -199,9 +290,9 @@ export const useAgentWorkbenchStore = defineStore('agent-workbench', {
     /**
      * Copy a conversation (optionally truncated at forkPointMessageId) into a
      * new conversation that records fork metadata. The original conversation
-     * is never mutated, per road-map R6 ("回退对话：默认创建新分支，不直接破坏
-     * 原历史"). Tool/usage/goal/plan state is copied so the branch can continue
-     * a run; orchestrator entries are copied too.
+     * is never mutated. When truncating, messages, tools, usage and
+     * orchestrator entries are all filtered by timeline order so the branch
+     * never shows tool calls that happened after the fork point.
      */
     forkConversation(
       sourceId: string,
@@ -211,16 +302,7 @@ export const useAgentWorkbenchStore = defineStore('agent-workbench', {
       const source = this.conversations.find((item) => item.id === sourceId)
       if (!source) return undefined
 
-      const messages = cloneMessages(source.messages)
-      let truncated = messages
-      if (forkPointMessageId) {
-        const cutIndex = messages.findIndex(
-          (message) => message.id === forkPointMessageId,
-        )
-        if (cutIndex >= 0) {
-          truncated = messages.slice(0, cutIndex + 1)
-        }
-      }
+      const cut = splitConversationAt(source, forkPointMessageId)
 
       const now = new Date().toISOString()
       const forked: ConversationRecord = {
@@ -229,17 +311,13 @@ export const useAgentWorkbenchStore = defineStore('agent-workbench', {
         title: normalizeTitle(title ?? `${FORK_TITLE_PREFIX}: ${source.title}`),
         model: source.model,
         mode: source.mode,
-        messages: truncated,
-        tools: source.tools?.map((tool) => ({ ...tool })),
-        usage: source.usage?.map((item) => ({ ...item })),
-        goal: source.goal ? structuredClone(source.goal) : undefined,
-        plan: source.plan ? structuredClone(source.plan) : undefined,
-        orchestratorEntries: source.orchestratorEntries?.map((entry) => ({
-          ...entry,
-        })),
-        latestReviewedApproval: source.latestReviewedApproval
-          ? { ...source.latestReviewedApproval }
-          : undefined,
+        messages: cut.messages,
+        tools: cut.tools,
+        usage: cut.usage,
+        goal: cut.goal,
+        plan: cut.plan,
+        orchestratorEntries: cut.orchestratorEntries,
+        latestReviewedApproval: cut.latestReviewedApproval,
         parentId: source.id,
         parentTitle: source.title,
         forkPointMessageId: forkPointMessageId,
@@ -253,21 +331,32 @@ export const useAgentWorkbenchStore = defineStore('agent-workbench', {
       return forked
     },
     /**
-     * Revert (回退对话) the active conversation to the state at a message by
-     * creating a new branch truncated at that message. Mirrors forkConversation
-     * but always truncates and defaults the title to indicate a revert.
+     * 回退对话 (in-place): truncate the active conversation so that the
+     * message with keepMessageId is the LAST message kept — everything after
+     * it (later messages, tools, usage, orchestrator entries, goal/plan
+     * updates) is removed. The conversation itself is mutated; no branch is
+     * created. This is destructive, so callers gate it behind a confirmation.
      */
-    revertConversationToMessage(
-      sourceId: string,
-      forkPointMessageId: string,
+    revertConversationAfterMessage(
+      conversationId: string,
+      keepMessageId: string,
     ): ConversationRecord | undefined {
-      const source = this.conversations.find((item) => item.id === sourceId)
-      if (!source) return undefined
-      return this.forkConversation(
-        sourceId,
-        forkPointMessageId,
-        `Revert: ${source.title}`,
+      const conversation = this.conversations.find(
+        (item) => item.id === conversationId,
       )
+      if (!conversation) return undefined
+
+      const cut = splitConversationAt(conversation, keepMessageId)
+      conversation.messages = cut.messages
+      conversation.tools = cut.tools
+      conversation.usage = cut.usage
+      conversation.goal = cut.goal
+      conversation.plan = cut.plan
+      conversation.orchestratorEntries = cut.orchestratorEntries
+      conversation.latestReviewedApproval = cut.latestReviewedApproval
+      conversation.updatedAt = new Date().toISOString()
+      this.persistWorkbench()
+      return conversation
     },
     /**
      * Build a markdown export string for a conversation.

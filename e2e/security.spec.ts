@@ -692,12 +692,12 @@ test.describe.serial('Electron security and IPC baseline', () => {
     )
   })
 
-  test('persists conversation fork and revert metadata through the workbench', async () => {
+  test('persists conversation fork metadata and reverts in place through the workbench', async () => {
     const timestamp = '2026-06-22T00:00:00.000Z'
-    // Seed a source conversation plus a fork and a revert branch directly via
-    // the validated workbench IPC. This exercises the R6.1 schema migration:
-    // the new fork-pointer fields must round-trip through saveSnapshot and the
-    // TypeBox validators without being rejected.
+    // Seed a source conversation plus a fork branch directly via the validated
+    // workbench IPC. This exercises the R6.1 schema migration: the new
+    // fork-pointer fields must round-trip through saveSnapshot and the TypeBox
+    // validators without being rejected.
     const seeded = await page.evaluate(
       async ({ workspacePath, stamp }) => {
         const api = Reflect.get(window, 'agentApi') as {
@@ -764,42 +764,6 @@ test.describe.serial('Electron security and IPC baseline', () => {
                     reasoning: '',
                     order: 1,
                   },
-                  {
-                    id: 'm3',
-                    role: 'user',
-                    text: 'three',
-                    reasoning: '',
-                    order: 2,
-                  },
-                ],
-                tools: [],
-                parentId: 'conversation:source',
-                parentTitle: 'Source conversation',
-                forkedAt: stamp,
-                createdAt: stamp,
-                updatedAt: stamp,
-              },
-              {
-                id: 'conversation:revert',
-                projectPath: workspacePath,
-                title: 'Revert: Source conversation',
-                model: 'deepseek-chat',
-                mode: 'auto',
-                messages: [
-                  {
-                    id: 'm1',
-                    role: 'user',
-                    text: 'one',
-                    reasoning: '',
-                    order: 0,
-                  },
-                  {
-                    id: 'm2',
-                    role: 'assistant',
-                    text: 'two',
-                    reasoning: '',
-                    order: 1,
-                  },
                 ],
                 tools: [],
                 parentId: 'conversation:source',
@@ -840,44 +804,32 @@ test.describe.serial('Electron security and IPC baseline', () => {
         return Array.isArray(messages) ? messages.length : undefined
       }
       return {
+        conversationCount: loaded.value?.conversations?.length,
         sourceCount: messageCount('conversation:source'),
         fork: {
           parentId: byId('conversation:fork')?.parentId,
           parentTitle: byId('conversation:fork')?.parentTitle,
           forkedAt: byId('conversation:fork')?.forkedAt,
+          forkPointMessageId: byId('conversation:fork')?.forkPointMessageId,
           messageCount: messageCount('conversation:fork'),
-        },
-        revert: {
-          forkPointMessageId: byId('conversation:revert')?.forkPointMessageId,
-          parentId: byId('conversation:revert')?.parentId,
-          messageCount: messageCount('conversation:revert'),
         },
       }
     })
 
+    expect(roundTripped.conversationCount).toBe(2)
     expect(roundTripped.sourceCount).toBe(3)
     expect(roundTripped.fork).toMatchObject({
       parentId: 'conversation:source',
       parentTitle: 'Source conversation',
       forkedAt: timestamp,
-      messageCount: 3,
-    })
-    expect(roundTripped.revert).toMatchObject({
       forkPointMessageId: 'm2',
-      parentId: 'conversation:source',
       messageCount: 2,
     })
 
-    // The markdown export IPC channel is wired and produces a transcript.
+    // The markdown export IPC channel is wired and returns the workbench.
     const exported = await page.evaluate(async () => {
       const api = Reflect.get(window, 'agentApi') as {
-        getWorkbench(payload: unknown): Promise<{
-          ok: boolean
-          value?: {
-            conversations: Array<Record<string, unknown>>
-            activeConversationId?: string
-          }
-        }>
+        getWorkbench(payload: unknown): Promise<{ ok: boolean }>
       }
       const loaded = await api.getWorkbench({ version: 1 })
       return loaded.ok
