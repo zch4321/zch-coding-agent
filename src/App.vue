@@ -223,11 +223,6 @@ async function confirmRevert() {
   await agent.revertConversationAfterMessage(messageId)
 }
 
-async function forkConversation(conversationId: string) {
-  if (agent.activeRunId || agent.pendingApproval) return
-  await agent.forkConversation(conversationId)
-}
-
 async function forkFromMessage(messageId: string) {
   if (agent.activeRunId || agent.pendingApproval) return
   await agent.forkConversation(undefined, messageId)
@@ -443,7 +438,6 @@ onUnmounted(() => {
               @open="openConversation"
               @rename="beginRename"
               @delete="deleteConversationId = $event"
-              @fork="forkConversation"
               @export="exportConversation"
               @import="importConversation"
             />

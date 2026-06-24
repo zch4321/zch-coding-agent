@@ -827,20 +827,20 @@ textarea:focus-visible {
 
 .revert-to-here,
 .message-action {
-  margin-left: auto;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 0;
   border-radius: 6px;
   color: var(--text-muted);
   background: transparent;
-  font-size: 10px;
-  white-space: nowrap;
 }
 
 .revert-to-here:hover:not(:disabled),
 .message-action:hover {
-  border-color: var(--accent);
   color: var(--accent);
+  background: var(--background);
 }
 
 .revert-to-here:disabled {
@@ -850,12 +850,8 @@ textarea:focus-visible {
 
 .message-actions {
   display: flex;
-  gap: 6px;
+  gap: 2px;
   margin-top: 8px;
-}
-
-.message-actions .message-action {
-  margin-left: 0;
 }
 
 .revert-preview {

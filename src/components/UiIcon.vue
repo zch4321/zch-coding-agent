@@ -29,6 +29,7 @@ defineProps<{
     | 'git-branch'
     | 'download'
     | 'upload'
+    | 'undo'
 }>()
 </script>
 
@@ -171,6 +172,10 @@ defineProps<{
       <path d="M12 15V4" />
       <path d="m7 9 5-5 5 5" />
       <path d="M5 20h14" />
+    </g>
+    <g v-else-if="name === 'undo'">
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5h-4" />
     </g>
   </svg>
 </template>

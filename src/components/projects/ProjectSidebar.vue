@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import { NTooltip } from 'naive-ui'
 import { useAgentStore } from '../../stores/agent'
 import { useI18n } from 'vue-i18n'
 import UiIcon from '../UiIcon.vue'
@@ -10,7 +11,6 @@ const emit = defineEmits<{
   open: [conversationId: string]
   rename: [conversationId: string]
   delete: [conversationId: string]
-  fork: [conversationId: string]
   export: [conversationId: string]
   import: []
 }>()
@@ -101,16 +101,20 @@ const searchGroups = computed(() => {
         <UiIcon name="plus" />
         <span>{{ t('app.newConversation') }}</span>
       </button>
-      <button
-        type="button"
-        class="import-conversation-button"
-        :aria-label="t('sidebar.import')"
-        :title="t('sidebar.import')"
-        :disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
-        @click="emit('import')"
-      >
-        <UiIcon name="upload" />
-      </button>
+      <NTooltip>
+        <template #trigger>
+          <button
+            type="button"
+            class="import-conversation-button"
+            :aria-label="t('sidebar.import')"
+            :disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
+            @click="emit('import')"
+          >
+            <UiIcon name="upload" />
+          </button>
+        </template>
+        {{ t('sidebar.import') }}
+      </NTooltip>
     </div>
 
     <label class="conversation-search">
@@ -230,41 +234,42 @@ const searchGroups = computed(() => {
                 </span>
               </button>
               <div class="conversation-actions">
-                <button
-                  type="button"
-                  :aria-label="t('sidebar.fork')"
-                  :title="t('sidebar.forkTitle')"
-                  :disabled="
-                    Boolean(agent.activeRunId || agent.pendingApproval)
-                  "
-                  @click="emit('fork', conversation.id)"
-                >
-                  <UiIcon name="git-branch" />
-                </button>
-                <button
-                  type="button"
-                  :aria-label="t('sidebar.export')"
-                  :title="t('sidebar.exportTitle')"
-                  @click="emit('export', conversation.id)"
-                >
-                  <UiIcon name="download" />
-                </button>
-                <button
-                  type="button"
-                  :aria-label="t('sidebar.rename')"
-                  :title="t('sidebar.renameTitle')"
-                  @click="emit('rename', conversation.id)"
-                >
-                  <UiIcon name="edit" />
-                </button>
-                <button
-                  type="button"
-                  :aria-label="t('sidebar.delete')"
-                  :title="t('sidebar.deleteTitle')"
-                  @click="emit('delete', conversation.id)"
-                >
-                  <UiIcon name="trash" />
-                </button>
+                <NTooltip>
+                  <template #trigger>
+                    <button
+                      type="button"
+                      :aria-label="t('sidebar.export')"
+                      @click="emit('export', conversation.id)"
+                    >
+                      <UiIcon name="download" />
+                    </button>
+                  </template>
+                  {{ t('sidebar.exportTitle') }}
+                </NTooltip>
+                <NTooltip>
+                  <template #trigger>
+                    <button
+                      type="button"
+                      :aria-label="t('sidebar.rename')"
+                      @click="emit('rename', conversation.id)"
+                    >
+                      <UiIcon name="edit" />
+                    </button>
+                  </template>
+                  {{ t('sidebar.renameTitle') }}
+                </NTooltip>
+                <NTooltip>
+                  <template #trigger>
+                    <button
+                      type="button"
+                      :aria-label="t('sidebar.delete')"
+                      @click="emit('delete', conversation.id)"
+                    >
+                      <UiIcon name="trash" />
+                    </button>
+                  </template>
+                  {{ t('sidebar.deleteTitle') }}
+                </NTooltip>
               </div>
             </div>
             <p v-if="project.conversations.length === 0" class="sidebar-empty">

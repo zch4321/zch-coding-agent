@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NAlert, NButton, NCollapse, NCollapseItem } from 'naive-ui'
+import { NAlert, NButton, NCollapse, NCollapseItem, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { ToolActivity } from '../../stores/agent'
 import { useAgentStore } from '../../stores/agent'
@@ -327,22 +327,32 @@ onBeforeUnmount(() => {
           "
           class="message-actions"
         >
-          <button
-            type="button"
-            class="message-action"
-            :title="t('chat.revertToHereTitle')"
-            @click="requestRevert(message.id, message.text)"
-          >
-            {{ t('chat.revertToHere') }}
-          </button>
-          <button
-            type="button"
-            class="message-action"
-            :title="t('chat.forkFromHereTitle')"
-            @click="requestFork(message.id)"
-          >
-            {{ t('chat.forkFromHere') }}
-          </button>
+          <NTooltip>
+            <template #trigger>
+              <button
+                type="button"
+                class="message-action"
+                :aria-label="t('chat.revertToHere')"
+                @click="requestRevert(message.id, message.text)"
+              >
+                <UiIcon name="undo" />
+              </button>
+            </template>
+            {{ t('chat.revertToHereTitle') }}
+          </NTooltip>
+          <NTooltip>
+            <template #trigger>
+              <button
+                type="button"
+                class="message-action"
+                :aria-label="t('chat.forkFromHere')"
+                @click="requestFork(message.id)"
+              >
+                <UiIcon name="git-branch" />
+              </button>
+            </template>
+            {{ t('chat.forkFromHereTitle') }}
+          </NTooltip>
         </div>
       </article>
 
