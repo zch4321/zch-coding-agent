@@ -299,18 +299,21 @@ onBeforeUnmount(() => {
           </span>
         </div>
         <div v-if="message.attachments?.length" class="message-attachments">
-          <span
+          <NTooltip
             v-for="attachment in message.attachments"
             :key="attachment.kind + ':' + attachment.path"
-            class="context-chip"
-            :title="attachment.path"
           >
-            <UiIcon
-              :name="attachment.kind === 'directory' ? 'folder' : 'file'"
-            />
-            <span>{{ attachment.path }}</span>
-            <small>{{ attachment.source }}</small>
-          </span>
+            <template #trigger>
+              <span class="context-chip">
+                <UiIcon
+                  :name="attachment.kind === 'directory' ? 'folder' : 'file'"
+                />
+                <span>{{ attachment.path }}</span>
+                <small>{{ attachment.source }}</small>
+              </span>
+            </template>
+            {{ attachment.path }}
+          </NTooltip>
         </div>
         <MarkdownBlock :content="message.text || '...'" />
         <NCollapse v-if="message.reasoning" class="reasoning">
@@ -374,9 +377,12 @@ onBeforeUnmount(() => {
             {{ toolResultSummary(tool) }}
           </span>
         </div>
-        <p v-if="tool.reason" class="tool-reason" :title="tool.reason">
+        <NTooltip v-if="tool.reason">
+          <template #trigger>
+            <p class="tool-reason">{{ tool.reason }}</p>
+          </template>
           {{ tool.reason }}
-        </p>
+        </NTooltip>
         <NCollapse
           :expanded-names="
             isToolDetailsExpanded(tool) ? [toolDetailsName(tool)] : []

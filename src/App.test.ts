@@ -107,12 +107,6 @@ describe('App', () => {
 
     expect(projectToggle.attributes('disabled')).toBeDefined()
     expect(artifactToggle.attributes('disabled')).toBeDefined()
-    expect(projectToggle.element.parentElement?.title).toBe(
-      '窗口宽度不足，放大窗口后可打开侧栏',
-    )
-    expect(artifactToggle.element.parentElement?.title).toBe(
-      '窗口宽度不足，放大窗口后可打开侧栏',
-    )
   })
 
   it('searches persisted conversation text locally and switches artifact tabs', async () => {

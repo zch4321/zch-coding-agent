@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { NTooltip } from 'naive-ui'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { useI18n } from 'vue-i18n'
@@ -516,45 +517,61 @@ onUnmounted(() => {
               terminal.status
             }}</small>
           </button>
-          <button
-            type="button"
-            class="terminal-tab-close"
-            :aria-label="t('terminal.close')"
-            :title="t('terminal.close')"
-            @click="closeTerminal(terminal.terminalId)"
-          >
-            <UiIcon name="close" />
-          </button>
+          <NTooltip>
+            <template #trigger>
+              <button
+                type="button"
+                class="terminal-tab-close"
+                :aria-label="t('terminal.close')"
+                @click="closeTerminal(terminal.terminalId)"
+              >
+                <UiIcon name="close" />
+              </button>
+            </template>
+            {{ t('terminal.close') }}
+          </NTooltip>
         </div>
       </div>
 
       <div class="terminal-actions">
-        <button
-          type="button"
-          :aria-label="t('terminal.new')"
-          :title="t('terminal.new')"
-          @click="createTerminal"
-        >
-          <UiIcon name="plus" />
-        </button>
-        <button
-          type="button"
-          :aria-label="
-            maximized ? t('terminal.restore') : t('terminal.maximize')
-          "
-          :title="maximized ? t('terminal.restore') : t('terminal.maximize')"
-          @click="toggleMaximized"
-        >
-          <UiIcon :name="maximized ? 'restore' : 'maximize-panel'" />
-        </button>
-        <button
-          type="button"
-          :aria-label="t('terminal.hide')"
-          :title="t('terminal.hide')"
-          @click="emit('close')"
-        >
-          <UiIcon name="chevron-down" />
-        </button>
+        <NTooltip>
+          <template #trigger>
+            <button
+              type="button"
+              :aria-label="t('terminal.new')"
+              @click="createTerminal"
+            >
+              <UiIcon name="plus" />
+            </button>
+          </template>
+          {{ t('terminal.new') }}
+        </NTooltip>
+        <NTooltip>
+          <template #trigger>
+            <button
+              type="button"
+              :aria-label="
+                maximized ? t('terminal.restore') : t('terminal.maximize')
+              "
+              @click="toggleMaximized"
+            >
+              <UiIcon :name="maximized ? 'restore' : 'maximize-panel'" />
+            </button>
+          </template>
+          {{ maximized ? t('terminal.restore') : t('terminal.maximize') }}
+        </NTooltip>
+        <NTooltip>
+          <template #trigger>
+            <button
+              type="button"
+              :aria-label="t('terminal.hide')"
+              @click="emit('close')"
+            >
+              <UiIcon name="chevron-down" />
+            </button>
+          </template>
+          {{ t('terminal.hide') }}
+        </NTooltip>
       </div>
     </header>
 

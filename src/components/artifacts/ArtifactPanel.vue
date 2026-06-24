@@ -3,6 +3,7 @@ import { computed, h, ref, watch } from 'vue'
 import {
   NButton,
   NSelect,
+  NTooltip,
   NTree,
   type SelectOption,
   type TreeOption,
@@ -303,9 +304,12 @@ watch(
     <header class="artifact-header">
       <div class="artifact-project">
         <strong>{{ projectName }}</strong>
-        <span :title="agent.workspacePath || t('app.noWorkspace')">
+        <NTooltip>
+          <template #trigger>
+            <span>{{ agent.workspacePath || t('app.noWorkspace') }}</span>
+          </template>
           {{ agent.workspacePath || t('app.noWorkspace') }}
-        </span>
+        </NTooltip>
       </div>
       <nav
         class="artifact-tabs"
@@ -355,17 +359,21 @@ watch(
           class="file-tab"
           :class="{ active: activeFilePath === file.path }"
         >
-          <button
-            class="file-tab-label"
-            type="button"
-            role="tab"
-            :aria-selected="activeFilePath === file.path"
-            :title="file.path"
-            @click="activeFilePath = file.path"
-          >
-            <UiIcon name="file" />
-            <span>{{ file.path.split('/').at(-1) }}</span>
-          </button>
+          <NTooltip>
+            <template #trigger>
+              <button
+                class="file-tab-label"
+                type="button"
+                role="tab"
+                :aria-selected="activeFilePath === file.path"
+                @click="activeFilePath = file.path"
+              >
+                <UiIcon name="file" />
+                <span>{{ file.path.split('/').at(-1) }}</span>
+              </button>
+            </template>
+            {{ file.path }}
+          </NTooltip>
           <button
             class="tab-close"
             type="button"

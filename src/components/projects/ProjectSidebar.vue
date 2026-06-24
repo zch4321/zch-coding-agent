@@ -135,10 +135,15 @@ const searchGroups = computed(() => {
           :key="project.path"
           class="project-group search-group"
         >
-          <div class="project-heading" :title="project.path">
-            <UiIcon name="folder" />
-            <strong>{{ project.name }}</strong>
-          </div>
+          <NTooltip>
+            <template #trigger>
+              <div class="project-heading">
+                <UiIcon name="folder" />
+                <strong>{{ project.name }}</strong>
+              </div>
+            </template>
+            {{ project.path }}
+          </NTooltip>
           <button
             v-for="conversation in project.conversations"
             :key="conversation.id"
@@ -161,15 +166,19 @@ const searchGroups = computed(() => {
       <template v-else>
         <div class="sidebar-section-heading">
           <p class="sidebar-section-title">{{ t('sidebar.projects') }}</p>
-          <button
-            type="button"
-            class="add-project-button"
-            :aria-label="t('sidebar.addWorkspace')"
-            :title="t('sidebar.addWorkspace')"
-            @click="emit('add')"
-          >
-            <UiIcon name="plus" />
-          </button>
+          <NTooltip>
+            <template #trigger>
+              <button
+                type="button"
+                class="add-project-button"
+                :aria-label="t('sidebar.addWorkspace')"
+                @click="emit('add')"
+              >
+                <UiIcon name="plus" />
+              </button>
+            </template>
+            {{ t('sidebar.addWorkspace') }}
+          </NTooltip>
         </div>
         <section
           v-for="project in sortedProjects"
@@ -177,32 +186,40 @@ const searchGroups = computed(() => {
           class="project-group"
         >
           <div class="project-heading-row">
-            <button
-              type="button"
-              class="project-heading"
-              :title="project.path"
-              :aria-expanded="!collapsedProjects.has(project.path)"
-              @click="toggleProject(project.path)"
-            >
-              <UiIcon
-                :name="
-                  collapsedProjects.has(project.path)
-                    ? 'chevron-right'
-                    : 'chevron-down'
-                "
-              />
-              <UiIcon name="folder" />
-              <strong>{{ project.name }}</strong>
-            </button>
-            <button
-              type="button"
-              class="project-new-conversation-button"
-              :aria-label="t('sidebar.newConversationInProject')"
-              :title="t('sidebar.newConversationInProject')"
-              @click="createProjectConversation(project.path)"
-            >
-              <UiIcon name="plus" />
-            </button>
+            <NTooltip>
+              <template #trigger>
+                <button
+                  type="button"
+                  class="project-heading"
+                  :aria-expanded="!collapsedProjects.has(project.path)"
+                  @click="toggleProject(project.path)"
+                >
+                  <UiIcon
+                    :name="
+                      collapsedProjects.has(project.path)
+                        ? 'chevron-right'
+                        : 'chevron-down'
+                    "
+                  />
+                  <UiIcon name="folder" />
+                  <strong>{{ project.name }}</strong>
+                </button>
+              </template>
+              {{ project.path }}
+            </NTooltip>
+            <NTooltip>
+              <template #trigger>
+                <button
+                  type="button"
+                  class="project-new-conversation-button"
+                  :aria-label="t('sidebar.newConversationInProject')"
+                  @click="createProjectConversation(project.path)"
+                >
+                  <UiIcon name="plus" />
+                </button>
+              </template>
+              {{ t('sidebar.newConversationInProject') }}
+            </NTooltip>
           </div>
           <div
             v-show="!collapsedProjects.has(project.path)"
