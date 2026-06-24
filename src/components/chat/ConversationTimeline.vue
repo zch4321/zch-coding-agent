@@ -16,12 +16,21 @@ type CollapseHeaderClickInfo = {
 
 const agent = useAgentStore()
 const { t } = useI18n()
+const emit = defineEmits<{
+  revert: [messageId: string, preview: string]
+}>()
 const scrollElement = ref<HTMLElement>()
 const bottomSentinel = ref<HTMLElement>()
 const followingOutput = ref(true)
 const chronologicalTools = computed(() => [...agent.tools].reverse())
 const expandedToolDetails = ref<string[]>([])
 let resizeObserver: ResizeObserver | undefined
+
+function requestRevert(messageId: string, text: string) {
+  if (agent.activeRunId || agent.pendingApproval) return
+  const preview = text.replace(/\s+/g, ' ').slice(0, 80)
+  emit('revert', messageId, preview)
+}
 
 function okContent(tool: ToolActivity): unknown {
   const result = tool.result
@@ -284,6 +293,16 @@ onBeforeUnmount(() => {
           >
             {{ t('chat.streaming') }}
           </span>
+          <button
+            v-if="message.role === 'user' && message.text"
+            type="button"
+            class="revert-to-here"
+            :title="t('chat.revertToHereTitle')"
+            :disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
+            @click="requestRevert(message.id, message.text)"
+          >
+            {{ t('chat.revertToHere') }}
+          </button>
         </div>
         <div v-if="message.attachments?.length" class="message-attachments">
           <span

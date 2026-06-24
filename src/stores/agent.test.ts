@@ -483,4 +483,103 @@ describe('agent store regressions', () => {
     expect(store.messages).toHaveLength(1)
     expect(store.messages[0]?.text).toBe('Part plus final text')
   })
+
+  it('auto-titles the conversation from the first user message', async () => {
+    const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
+    config.privacy.providerNoticeAccepted = {
+      version: PROVIDER_NOTICE_VERSION,
+      acceptedAt: '2026-06-22T00:00:00.000Z',
+    }
+    const createSession = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { sessionId },
+    }))
+    const startRun = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { runId },
+    }))
+    installApi({ createSession, startRun })
+    const store = useAgentStore()
+    store.bridgeAvailable = true
+    store.applyConfig(config)
+    store.workspacePath = 'F:/workspace/example'
+    store.createConversation()
+    store.input = 'Fix the flaky terminal test'
+
+    await store.sendMessage()
+
+    expect(store.activeConversation?.title).toBe('Fix the flaky terminal test')
+  })
+
+  it('forks a conversation into a new branch with parent metadata', async () => {
+    const saveWorkbench = vi.fn(
+      async (payload: Parameters<AgentApi['saveWorkbench']>[0]) => ({
+        version: 1 as const,
+        ok: true as const,
+        value: payload.workbench,
+      }),
+    )
+    installApi({ saveWorkbench })
+    const store = useAgentStore()
+    store.workspacePath = 'F:/workspace/example'
+    const original = store.createConversation()
+    if (!original) throw new Error('Expected conversation')
+    original.title = 'Original conversation'
+    original.messages = [
+      { id: 'm1', role: 'user', text: 'one', reasoning: '', order: 0 },
+      { id: 'm2', role: 'assistant', text: 'two', reasoning: '', order: 1 },
+      { id: 'm3', role: 'user', text: 'three', reasoning: '', order: 2 },
+    ]
+
+    const result = await store.forkConversation(original.id)
+
+    expect(result).toBe(true)
+    const forked = store.activeConversation
+    expect(forked).toBeDefined()
+    expect(forked?.id).not.toBe(original.id)
+    expect(forked?.parentId).toBe(original.id)
+    expect(forked?.parentTitle).toBe('Original conversation')
+    expect(forked?.forkedAt).toBeDefined()
+    // The fork copies the full history when no fork point is given.
+    expect(forked?.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3'])
+    // The original conversation is untouched.
+    expect(
+      store.conversations.find((c) => c.id === original.id)?.messages,
+    ).toHaveLength(3)
+  })
+
+  it('reverts to a message by creating a truncated branch', async () => {
+    const saveWorkbench = vi.fn(
+      async (payload: Parameters<AgentApi['saveWorkbench']>[0]) => ({
+        version: 1 as const,
+        ok: true as const,
+        value: payload.workbench,
+      }),
+    )
+    installApi({ saveWorkbench })
+    const store = useAgentStore()
+    store.workspacePath = 'F:/workspace/example'
+    const original = store.createConversation()
+    if (!original) throw new Error('Expected conversation')
+    original.messages = [
+      { id: 'm1', role: 'user', text: 'one', reasoning: '', order: 0 },
+      { id: 'm2', role: 'assistant', text: 'two', reasoning: '', order: 1 },
+      { id: 'm3', role: 'user', text: 'three', reasoning: '', order: 2 },
+    ]
+
+    const result = await store.revertConversationToMessage('m2')
+
+    expect(result).toBe(true)
+    const forked = store.activeConversation
+    expect(forked).toBeDefined()
+    expect(forked?.forkPointMessageId).toBe('m2')
+    // The revert branch keeps history up to and including the fork point.
+    expect(forked?.messages.map((m) => m.id)).toEqual(['m1', 'm2'])
+    // The original conversation retains its full history.
+    expect(
+      store.conversations.find((c) => c.id === original.id)?.messages,
+    ).toHaveLength(3)
+  })
 })

@@ -10,6 +10,9 @@ const emit = defineEmits<{
   open: [conversationId: string]
   rename: [conversationId: string]
   delete: [conversationId: string]
+  fork: [conversationId: string]
+  export: [conversationId: string]
+  import: []
 }>()
 
 const agent = useAgentStore()
@@ -31,6 +34,15 @@ function createProjectConversation(workspacePath: string) {
 
 function displayConversationTitle(title: string) {
   return title === 'New conversation' ? t('app.newConversation') : title
+}
+function conversationBadges(conversation: {
+  parentId?: string
+  importedFrom?: string
+}): string[] {
+  const badges: string[] = []
+  if (conversation.parentId) badges.push(t('chat.forkedBadge'))
+  if (conversation.importedFrom) badges.push(t('chat.importedBadge'))
+  return badges
 }
 const compareConversations = (
   left: (typeof agent.conversations)[number],
@@ -80,14 +92,26 @@ const searchGroups = computed(() => {
 
 <template>
   <aside class="project-sidebar">
-    <button
-      class="new-conversation-button"
-      type="button"
-      @click="emit('create')"
-    >
-      <UiIcon name="plus" />
-      <span>{{ t('app.newConversation') }}</span>
-    </button>
+    <div class="new-conversation-row">
+      <button
+        class="new-conversation-button"
+        type="button"
+        @click="emit('create')"
+      >
+        <UiIcon name="plus" />
+        <span>{{ t('app.newConversation') }}</span>
+      </button>
+      <button
+        type="button"
+        class="import-conversation-button"
+        :aria-label="t('sidebar.import')"
+        :title="t('sidebar.import')"
+        :disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
+        @click="emit('import')"
+      >
+        <UiIcon name="upload" />
+      </button>
+    </div>
 
     <label class="conversation-search">
       <UiIcon name="search" />
@@ -194,8 +218,37 @@ const searchGroups = computed(() => {
                 @click="emit('open', conversation.id)"
               >
                 {{ displayConversationTitle(conversation.title) }}
+                <span
+                  v-if="conversationBadges(conversation).length"
+                  class="conversation-badges"
+                >
+                  <em
+                    v-for="badge in conversationBadges(conversation)"
+                    :key="badge"
+                    >{{ badge }}</em
+                  >
+                </span>
               </button>
               <div class="conversation-actions">
+                <button
+                  type="button"
+                  :aria-label="t('sidebar.fork')"
+                  :title="t('sidebar.forkTitle')"
+                  :disabled="
+                    Boolean(agent.activeRunId || agent.pendingApproval)
+                  "
+                  @click="emit('fork', conversation.id)"
+                >
+                  <UiIcon name="git-branch" />
+                </button>
+                <button
+                  type="button"
+                  :aria-label="t('sidebar.export')"
+                  :title="t('sidebar.exportTitle')"
+                  @click="emit('export', conversation.id)"
+                >
+                  <UiIcon name="download" />
+                </button>
                 <button
                   type="button"
                   :aria-label="t('sidebar.rename')"

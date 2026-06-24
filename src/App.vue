@@ -64,6 +64,8 @@ const renameValue = ref('')
 const deleteConversationId = ref<string>()
 const switchConversationId = ref<string>()
 const switchNewConversationWorkspace = ref<string>()
+const revertMessageId = ref<string>()
+const revertMessagePreview = ref('')
 
 const projectName = computed(() => {
   if (!agent.workspacePath) {
@@ -205,6 +207,42 @@ async function confirmConversationSwitch() {
 function closeSwitchDialog() {
   switchConversationId.value = undefined
   switchNewConversationWorkspace.value = undefined
+}
+
+function requestRevert(messageId: string, preview: string) {
+  if (agent.activeRunId || agent.pendingApproval) return
+  revertMessageId.value = messageId
+  revertMessagePreview.value = preview
+}
+
+async function confirmRevert() {
+  const messageId = revertMessageId.value
+  revertMessageId.value = undefined
+  revertMessagePreview.value = ''
+  if (!messageId) return
+  await agent.revertConversationToMessage(messageId)
+}
+
+async function forkConversation(conversationId: string) {
+  if (agent.activeRunId || agent.pendingApproval) return
+  await agent.forkConversation(conversationId)
+}
+
+async function exportConversation(conversationId: string) {
+  const result = await agent.exportConversationViaDialog(conversationId)
+  if (!result.canceled && result.error) {
+    agent.error = t('dialogs.exportFailed') + ': ' + result.error
+  }
+}
+
+async function importConversation() {
+  if (agent.activeRunId || agent.pendingApproval) return
+  const result = await agent.importConversationViaDialog()
+  if (result.error) {
+    agent.error = t('dialogs.importFailed') + ': ' + result.error
+  } else if (!result.canceled && result.conversationId) {
+    agent.error = ''
+  }
 }
 
 function beginRename(conversationId: string) {
@@ -400,6 +438,9 @@ onUnmounted(() => {
               @open="openConversation"
               @rename="beginRename"
               @delete="deleteConversationId = $event"
+              @fork="forkConversation"
+              @export="exportConversation"
+              @import="importConversation"
             />
           </NLayoutSider>
 
@@ -441,7 +482,10 @@ onUnmounted(() => {
                   </span>
                 </header>
 
-                <ConversationTimeline :project-name="projectName" />
+                <ConversationTimeline
+                  :project-name="projectName"
+                  @revert="requestRevert"
+                />
 
                 <MessageComposer
                   @mode="selectMode"
@@ -485,15 +529,19 @@ onUnmounted(() => {
         :rename-value="renameValue"
         :delete-open="Boolean(deleteConversationId)"
         :switch-open="Boolean(switchConversationId)"
+        :revert-open="Boolean(revertMessageId)"
+        :revert-message-preview="revertMessagePreview"
         @update:yolo-open="yoloWarningOpen = $event"
         @update:rename-open="!$event && (renameConversationId = undefined)"
         @update:rename-value="renameValue = $event"
         @update:delete-open="!$event && (deleteConversationId = undefined)"
         @update:switch-open="!$event && closeSwitchDialog()"
+        @update:revert-open="!$event && (revertMessageId = undefined)"
         @confirm-yolo="confirmYoloMode"
         @confirm-rename="confirmRename"
         @confirm-delete="confirmDeleteConversation"
         @confirm-switch="confirmConversationSwitch"
+        @confirm-revert="confirmRevert"
       />
     </main>
   </NConfigProvider>

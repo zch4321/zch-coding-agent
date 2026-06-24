@@ -30,6 +30,10 @@ const api: AgentApi = {
   getWorkbench: (payload) => invoke('workbench:get', payload),
   saveWorkbench: (payload) => invoke('workbench:save', payload),
   migrateWorkbenchV1: (payload) => invoke('workbench:migrate-v1', payload),
+  exportConversationMarkdown: (payload) =>
+    invoke('workbench:export-conversation', payload),
+  importConversationMarkdown: (payload) =>
+    invoke('workbench:import-conversation', payload),
   chooseWorkspace: (payload) => invoke('workspace:choose', payload),
   listWorkspaceDirectory: (payload) =>
     invoke('workspace:list-directory', payload),

@@ -183,6 +183,37 @@ export const IPC_CONTRACTS = {
     ),
     result: ipcResultSchema(PersistedWorkbenchSchema),
   },
+  'workbench:export-conversation': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        markdown: Type.String({ minLength: 1, maxLength: 5_000_000 }),
+        suggestedName: Type.String({ minLength: 1, maxLength: 256 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          canceled: Type.Boolean(),
+          path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'workbench:import-conversation': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          canceled: Type.Boolean(),
+          markdown: Type.Optional(Type.String({ maxLength: 5_000_000 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
   'workspace:choose': {
     payload: EmptyPayloadSchema,
     result: ipcResultSchema(

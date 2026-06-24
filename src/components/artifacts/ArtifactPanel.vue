@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
-import { NButton, NTree, type TreeOption } from 'naive-ui'
+import {
+  NButton,
+  NSelect,
+  NTree,
+  type SelectOption,
+  type TreeOption,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { IPC_VERSION } from '../../../shared/channels'
 import type { FileChangeRecord } from '../../../shared/change-history'
@@ -9,6 +15,7 @@ import FileCodePreview from './FileCodePreview.vue'
 import UiIcon from '../UiIcon.vue'
 
 type ArtifactTab = 'files' | 'diff'
+type ChangeStatusFilter = 'all' | 'active' | 'reverted'
 
 interface ExplorerEntry {
   path: string
@@ -33,6 +40,9 @@ const explorerTruncated = ref(false)
 const openedFiles = ref<OpenFile[]>([])
 const activeFilePath = ref('explorer')
 const selectedChangeId = ref<string>()
+const filterRunId = ref<string | undefined>(undefined)
+const filterPath = ref<string | undefined>(undefined)
+const filterStatus = ref<ChangeStatusFilter>('all')
 let directoryRequestGeneration = 0
 let fileRequestGeneration = 0
 
@@ -48,7 +58,50 @@ const activeFile = computed(() =>
 const selectedChange = computed(
   () =>
     agent.changes.find((change) => change.id === selectedChangeId.value) ??
-    agent.changes[0],
+    filteredChanges.value[0],
+)
+const runOptions = computed<SelectOption[]>(() => {
+  const runs = new Map<string, number>()
+  for (const change of agent.changes) {
+    runs.set(change.runId, (runs.get(change.runId) ?? 0) + 1)
+  }
+  return [
+    { label: t('artifact.filterAll'), value: undefined },
+    ...[...runs.entries()].map(([runId, count]) => ({
+      label: `${runId} (${count})`,
+      value: runId,
+    })),
+  ]
+})
+const pathOptions = computed<SelectOption[]>(() => {
+  const paths = new Map<string, number>()
+  for (const change of agent.changes) {
+    paths.set(change.path, (paths.get(change.path) ?? 0) + 1)
+  }
+  return [
+    { label: t('artifact.filterAll'), value: undefined },
+    ...[...paths.entries()].map(([path, count]) => ({
+      label: `${path} (${count})`,
+      value: path,
+    })),
+  ]
+})
+const statusOptions = computed<SelectOption[]>(
+  () =>
+    [
+      { label: t('artifact.filterAll'), value: 'all' },
+      { label: t('artifact.filterActive'), value: 'active' },
+      { label: t('artifact.filterReverted'), value: 'reverted' },
+    ] as SelectOption[],
+)
+const filteredChanges = computed(() =>
+  agent.changes.filter((change) => {
+    if (filterRunId.value && change.runId !== filterRunId.value) return false
+    if (filterPath.value && change.path !== filterPath.value) return false
+    if (filterStatus.value === 'active' && change.revertedAt) return false
+    if (filterStatus.value === 'reverted' && !change.revertedAt) return false
+    return true
+  }),
 )
 function toTreeOptions(entries: ExplorerEntry[]): TreeOption[] {
   return entries.map((entry) => ({
@@ -215,7 +268,12 @@ watch(
 
 watch(
   () => [agent.activeConversationId, agent.workspacePath] as const,
-  () => void agent.loadConversationChanges(),
+  () => {
+    filterRunId.value = undefined
+    filterPath.value = undefined
+    filterStatus.value = 'all'
+    void agent.loadConversationChanges()
+  },
   { immediate: true },
 )
 
@@ -418,9 +476,38 @@ watch(
           </div>
           <span v-if="agent.changesLoading">{{ t('common.loading') }}</span>
         </div>
-        <div class="change-history-list" role="list">
+        <div class="change-filters">
+          <NSelect
+            v-model:value="filterRunId"
+            :options="runOptions"
+            :placeholder="t('artifact.filterByRun')"
+            size="small"
+            filterable
+            class="change-filter-select"
+          />
+          <NSelect
+            v-model:value="filterPath"
+            :options="pathOptions"
+            :placeholder="t('artifact.filterByFile')"
+            size="small"
+            filterable
+            class="change-filter-select"
+          />
+          <NSelect
+            v-model:value="filterStatus"
+            :options="statusOptions"
+            :placeholder="t('artifact.filterByStatus')"
+            size="small"
+            class="change-filter-select"
+          />
+        </div>
+        <div
+          v-if="filteredChanges.length"
+          class="change-history-list"
+          role="list"
+        >
           <button
-            v-for="change in agent.changes"
+            v-for="change in filteredChanges"
             :key="change.id"
             type="button"
             :class="{ active: change.id === selectedChange.id }"
@@ -435,6 +522,9 @@ watch(
             <em v-if="change.revertedAt">{{ t('artifact.reverted') }}</em>
           </button>
         </div>
+        <p v-else class="artifact-message">
+          {{ t('artifact.noFilteredChanges') }}
+        </p>
         <div class="diff-summary">
           <span>{{ t(`artifact.operation.${selectedChange.operation}`) }}</span>
           <strong>{{ selectedChange.path }}</strong>

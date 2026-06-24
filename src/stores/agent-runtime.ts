@@ -241,6 +241,66 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     renameConversation(conversationId: string, title: string) {
       useAgentWorkbenchStore().renameConversation(conversationId, title)
     },
+    /**
+     * Fork the active conversation (or a specific one) into a new branch. The
+     * new branch becomes active. Runs are blocked while forking; the forked
+     * conversation starts without a live session, so the next sendMessage
+     * creates a fresh session bound to the branch.
+     */
+    async forkConversation(
+      sourceId?: string,
+      forkPointMessageId?: string,
+    ): Promise<boolean> {
+      const workbench = useAgentWorkbenchStore()
+      const timeline = useAgentTimelineStore()
+      const changes = useAgentChangesStore()
+      const source =
+        workbench.conversations.find(
+          (item) => item.id === (sourceId ?? workbench.activeConversationId),
+        ) ?? workbench.activeConversation
+      if (!source || this.activeRunId || this.pendingApproval) return false
+
+      const forked = workbench.forkConversation(source.id, forkPointMessageId)
+      if (!forked) return false
+
+      this.sessionId = undefined
+      timeline.reset()
+      changes.reset()
+      this.pendingApproval = undefined
+      this.restoreActiveConversation()
+      return true
+    },
+    /**
+     * 回退对话: create a revert branch truncated at forkPointMessageId. The
+     * original conversation history is preserved; only the new branch is
+     * active and shorter.
+     */
+    async revertConversationToMessage(
+      forkPointMessageId: string,
+      sourceId?: string,
+    ): Promise<boolean> {
+      const workbench = useAgentWorkbenchStore()
+      const source =
+        workbench.conversations.find(
+          (item) => item.id === (sourceId ?? workbench.activeConversationId),
+        ) ?? workbench.activeConversation
+      if (!source || this.activeRunId || this.pendingApproval) return false
+
+      const forked = workbench.revertConversationToMessage(
+        source.id,
+        forkPointMessageId,
+      )
+      if (!forked) return false
+
+      const timeline = useAgentTimelineStore()
+      const changes = useAgentChangesStore()
+      this.sessionId = undefined
+      timeline.reset()
+      changes.reset()
+      this.pendingApproval = undefined
+      this.restoreActiveConversation()
+      return true
+    },
     async deleteConversation(conversationId: string) {
       const workbench = useAgentWorkbenchStore()
       const conversation = workbench.conversations.find(
@@ -522,8 +582,8 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           order: timeline.nextTimelineOrder(),
         })
         const conversation = workbench.activeConversation
-        if (conversation?.title === 'New conversation') {
-          conversation.title = text.replace(/\s+/g, ' ').slice(0, 56)
+        if (conversation) {
+          workbench.applyAutoTitle(conversation, text)
         }
         if (conversation?.transient) {
           delete conversation.transient

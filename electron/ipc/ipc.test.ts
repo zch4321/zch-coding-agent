@@ -53,6 +53,12 @@ const validPayloads: {
     version: 1,
     workbench: { projects: [], conversations: [] },
   },
+  'workbench:export-conversation': {
+    version: 1,
+    markdown: '# Exported conversation',
+    suggestedName: 'conversation.md',
+  },
+  'workbench:import-conversation': { version: 1 },
   'workspace:choose': { version: 1 },
   'workspace:list-directory': {
     version: 1,

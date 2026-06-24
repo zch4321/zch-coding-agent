@@ -86,6 +86,11 @@ export interface ConversationRecord {
   plan?: PlanState
   orchestratorEntries?: OrchestratorEntry[]
   latestReviewedApproval?: ReviewedApproval
+  parentId?: string
+  parentTitle?: string
+  forkPointMessageId?: string
+  forkedAt?: string
+  importedFrom?: string
   createdAt: string
   updatedAt: string
   transient?: boolean

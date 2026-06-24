@@ -8,6 +8,8 @@ defineProps<{
   renameValue: string
   deleteOpen: boolean
   switchOpen: boolean
+  revertOpen: boolean
+  revertMessagePreview: string
 }>()
 const emit = defineEmits<{
   'update:yoloOpen': [value: boolean]
@@ -15,10 +17,12 @@ const emit = defineEmits<{
   'update:renameValue': [value: string]
   'update:deleteOpen': [value: boolean]
   'update:switchOpen': [value: boolean]
+  'update:revertOpen': [value: boolean]
   'confirm-yolo': []
   'confirm-rename': []
   'confirm-delete': []
   'confirm-switch': []
+  'confirm-revert': []
 }>()
 const { t } = useI18n()
 </script>
@@ -102,6 +106,29 @@ const { t } = useI18n()
       }}</NButton>
       <NButton type="error" @click="emit('confirm-switch')">
         {{ t('dialogs.interruptSwitch') }}
+      </NButton>
+    </NSpace>
+  </NModal>
+
+  <NModal
+    :show="revertOpen"
+    preset="card"
+    class="small-modal"
+    :title="t('dialogs.revertTitle')"
+    @update:show="emit('update:revertOpen', $event)"
+  >
+    <p>
+      {{ t('dialogs.revertText') }}
+    </p>
+    <p v-if="revertMessagePreview" class="revert-preview">
+      {{ revertMessagePreview }}
+    </p>
+    <NSpace justify="end" class="modal-actions">
+      <NButton @click="emit('update:revertOpen', false)">{{
+        t('common.cancel')
+      }}</NButton>
+      <NButton type="primary" @click="emit('confirm-revert')">
+        {{ t('dialogs.confirmRevert') }}
       </NButton>
     </NSpace>
   </NModal>

@@ -1,5 +1,11 @@
-import { BrowserWindow, dialog, shell, type OpenDialogOptions } from 'electron'
-import { stat } from 'node:fs/promises'
+import {
+  BrowserWindow,
+  dialog,
+  shell,
+  type OpenDialogOptions,
+  type SaveDialogOptions,
+} from 'electron'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import {
   ChangeHistoryError,
@@ -152,6 +158,72 @@ export function createAppIpcHandlers(
       workbenchStore.saveSnapshot(payload.workbench),
     'workbench:migrate-v1': (payload) =>
       workbenchStore.mergeSnapshot(payload.workbench),
+    'workbench:export-conversation': async (payload) => {
+      const options: SaveDialogOptions = {
+        defaultPath: payload.suggestedName,
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      }
+      const mainWindow = getMainWindow()
+      const result = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, options)
+        : await dialog.showSaveDialog(options)
+
+      if (result.canceled || !result.filePath) {
+        return { canceled: true }
+      }
+
+      try {
+        await writeFile(result.filePath, payload.markdown, 'utf8')
+        return { canceled: false, path: result.filePath }
+      } catch (error) {
+        if (error instanceof PathGuardError) {
+          throw new IpcFault({
+            code: 'PRECONDITION_FAILED',
+            message: error.message,
+          })
+        }
+        throw error
+      }
+    },
+    'workbench:import-conversation': async () => {
+      const options: OpenDialogOptions = {
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+        properties: ['openFile'],
+      }
+      const mainWindow = getMainWindow()
+      const result = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options)
+
+      if (result.canceled || !result.filePaths[0]) {
+        return { canceled: true }
+      }
+
+      try {
+        const raw = await readFile(result.filePaths[0], 'utf8')
+        if (Buffer.byteLength(raw, 'utf8') > 5_000_000) {
+          throw new IpcFault({
+            code: 'PAYLOAD_TOO_LARGE',
+            message: 'Imported markdown exceeds the 5 MB size limit',
+          })
+        }
+        return { canceled: false, markdown: raw }
+      } catch (error) {
+        if (error instanceof IpcFault) throw error
+        if (
+          error &&
+          typeof error === 'object' &&
+          'code' in error &&
+          (error.code === 'ENOENT' || error.code === 'EACCES')
+        ) {
+          throw new IpcFault({
+            code: 'NOT_FOUND',
+            message: 'The selected file could not be read',
+          })
+        }
+        throw error
+      }
+    },
     'workspace:choose': async () => {
       const options: OpenDialogOptions = {
         properties: ['openDirectory'],

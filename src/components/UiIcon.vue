@@ -26,6 +26,9 @@ defineProps<{
     | 'terminal'
     | 'maximize-panel'
     | 'restore'
+    | 'git-branch'
+    | 'download'
+    | 'upload'
 }>()
 </script>
 
@@ -151,6 +154,23 @@ defineProps<{
       <path d="m4 4 6 6" />
       <path d="M15 20h5v-5" />
       <path d="m20 20-6-6" />
+    </g>
+    <g v-else-if="name === 'git-branch'">
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <circle cx="18" cy="8" r="2.5" />
+      <path d="M6 8.5v7" />
+      <path d="M18 10.5c0 4-4 3.5-6 5" />
+    </g>
+    <g v-else-if="name === 'download'">
+      <path d="M12 4v11" />
+      <path d="m7 11 5 5 5-5" />
+      <path d="M5 20h14" />
+    </g>
+    <g v-else-if="name === 'upload'">
+      <path d="M12 15V4" />
+      <path d="m7 9 5-5 5 5" />
+      <path d="M5 20h14" />
     </g>
   </svg>
 </template>

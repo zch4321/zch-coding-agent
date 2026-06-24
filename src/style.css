@@ -291,6 +291,34 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
+.new-conversation-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.import-conversation-button {
+  display: grid;
+  width: 38px;
+  min-height: 38px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  background: var(--background);
+}
+
+.import-conversation-button:hover:not(:disabled) {
+  border-color: #8c959f;
+  color: var(--accent);
+}
+
+.import-conversation-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .new-conversation-button .ui-icon {
   color: var(--accent);
 }
@@ -492,6 +520,28 @@ textarea:focus-visible {
 .remembered-rules button:hover {
   color: var(--text);
   background: var(--background);
+}
+
+.conversation-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.conversation-badges {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+}
+
+.conversation-badges em {
+  padding: 0 5px;
+  border-radius: 4px;
+  color: var(--accent);
+  background: rgba(0, 122, 255, 0.12);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .search-result {
@@ -773,6 +823,41 @@ textarea:focus-visible {
 .chat-message.assistant .message-meta span,
 .chat-message.orchestrator .message-meta strong {
   color: var(--accent);
+}
+
+.revert-to-here {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.revert-to-here:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.revert-to-here:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.revert-preview {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .message-attachments,
@@ -1982,6 +2067,18 @@ code {
   overflow: auto;
   padding: 6px;
   border-bottom: 1px solid var(--border);
+}
+
+.change-filters {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.change-filter-select {
+  flex: 1;
+  min-width: 0;
 }
 
 .change-history-list button {
