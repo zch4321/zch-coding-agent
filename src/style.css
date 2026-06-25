@@ -1965,6 +1965,160 @@ code {
   font-size: 12px;
 }
 
+.plan-view {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.plan-panel-header,
+.plan-panel-footer {
+  min-width: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.plan-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plan-panel-header > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.plan-panel-header span,
+.plan-panel-header small,
+.plan-panel-footer {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.plan-panel-header strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.plan-panel-header small {
+  flex: 0 0 auto;
+}
+
+.plan-warning {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(154, 103, 0, 0.18);
+  color: var(--warning);
+  background: #fff8c5;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.plan-warning .ui-icon {
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+}
+
+.artifact-plan-list {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.artifact-plan-list li {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.plan-item-main {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+}
+
+.plan-item-main strong {
+  display: block;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.plan-item-main small,
+.artifact-plan-list p,
+.plan-panel-footer span {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.artifact-plan-list p {
+  margin: 0 0 0 21px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.artifact-plan-list .plan-evidence {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.plan-status-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.artifact-plan-list .status-in-progress .plan-status-dot {
+  background: var(--accent);
+}
+
+.artifact-plan-list .status-completed .plan-status-dot {
+  background: var(--success);
+}
+
+.artifact-plan-list .status-blocked .plan-status-dot {
+  background: var(--warning);
+}
+
+.artifact-plan-list .status-cancelled .plan-status-dot {
+  background: var(--danger);
+}
+
+.plan-panel-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+}
+
 .file-viewer-header {
   position: sticky;
   z-index: 1;

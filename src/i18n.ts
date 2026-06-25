@@ -55,7 +55,7 @@ const messages = {
     topbar: {
       terminal: '切换终端（Ctrl+J）',
       projectSidebar: '切换项目侧栏（Ctrl+B）',
-      artifactSidebar: '切换文件侧栏（Ctrl+Shift+B）',
+      artifactSidebar: '切换右侧栏（Ctrl+Shift+B）',
       sidebarUnavailable: '窗口宽度不足，放大窗口后可打开侧栏',
       settings: '打开设置',
       minimize: '最小化窗口',
@@ -151,6 +151,7 @@ const messages = {
     artifact: {
       files: '文件',
       diff: '变更',
+      plan: '计划',
       explorer: '资源管理器',
       openFiles: '已打开文件',
       closeFile: '关闭文件',
@@ -185,6 +186,18 @@ const messages = {
       filterActive: '未回退',
       filterReverted: '已回退',
       noFilteredChanges: '没有符合过滤条件的变更。',
+      planProgress: '{completed}/{total} 已完成',
+      planNoItems: '计划还没有任务项。',
+      planContinuations: '自动续跑 {count} 次',
+      noPlan: '暂无计划',
+      noPlanHint: 'Agent 创建计划后会显示在这里。',
+      planStatus: {
+        pending: '待处理',
+        in_progress: '进行中',
+        completed: '已完成',
+        blocked: '阻塞',
+        cancelled: '已取消',
+      },
     },
     settings: {
       general: '通用',
@@ -406,7 +419,7 @@ const messages = {
     topbar: {
       terminal: 'Toggle terminal (Ctrl+J)',
       projectSidebar: 'Toggle project sidebar (Ctrl+B)',
-      artifactSidebar: 'Toggle artifact sidebar (Ctrl+Shift+B)',
+      artifactSidebar: 'Toggle right sidebar (Ctrl+Shift+B)',
       sidebarUnavailable: 'Window is too narrow to open this sidebar',
       settings: 'Open settings',
       minimize: 'Minimize window',
@@ -506,6 +519,7 @@ const messages = {
     artifact: {
       files: 'Files',
       diff: 'Diff',
+      plan: 'Plan',
       explorer: 'Explorer',
       openFiles: 'Open files',
       closeFile: 'Close file',
@@ -541,6 +555,18 @@ const messages = {
       filterActive: 'Active',
       filterReverted: 'Reverted',
       noFilteredChanges: 'No changes match the current filters.',
+      planProgress: '{completed}/{total} complete',
+      planNoItems: 'The plan has no items yet.',
+      planContinuations: '{count} automatic continuations',
+      noPlan: 'No plan',
+      noPlanHint: 'Plans created by the Agent will appear here.',
+      planStatus: {
+        pending: 'Pending',
+        in_progress: 'In progress',
+        completed: 'Completed',
+        blocked: 'Blocked',
+        cancelled: 'Cancelled',
+      },
     },
     settings: {
       general: 'General',

@@ -295,7 +295,7 @@ onBeforeUnmount(() => {
         {{ agent.agentEventGap }}
       </NAlert>
       <section
-        v-if="agent.goal || agent.plan"
+        v-if="agent.goal"
         class="orchestration-panel"
         :style="{ order: 0 }"
       >
@@ -309,20 +309,6 @@ onBeforeUnmount(() => {
           <small v-else-if="agent.goal.blockReason">
             {{ agent.goal.blockReason }}
           </small>
-        </article>
-        <article v-if="agent.plan" class="orchestration-card">
-          <div class="orchestration-card-header">
-            <span>{{ t('chat.plan') }}</span>
-            <strong>{{ agent.plan.items.length }}</strong>
-          </div>
-          <p>{{ agent.plan.objective }}</p>
-          <ol v-if="agent.plan.items.length" class="plan-item-list">
-            <li v-for="item in agent.plan.items" :key="item.id">
-              <span>{{ item.title }}</span>
-              <em>{{ item.status }}</em>
-            </li>
-          </ol>
-          <small v-if="agent.plan.warning">{{ agent.plan.warning }}</small>
         </article>
       </section>
 

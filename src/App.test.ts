@@ -56,6 +56,7 @@ describe('App', () => {
     expect(wrapper.text()).toContain('Zch Coding Agent')
     expect(wrapper.text()).toContain('新建对话')
     expect(wrapper.text()).toContain('文件')
+    expect(wrapper.text()).toContain('计划')
     expect(wrapper.text()).toContain('变更')
     expect(wrapper.text()).not.toContain('Design frontend layout')
     expect(wrapper.text()).not.toContain('Browser Preview')
@@ -75,7 +76,7 @@ describe('App', () => {
     })
     const projectToggle = wrapper.get('[aria-label="切换项目侧栏（Ctrl+B）"]')
     const artifactToggle = wrapper.get(
-      '[aria-label="切换文件侧栏（Ctrl+Shift+B）"]',
+      '[aria-label="切换右侧栏（Ctrl+Shift+B）"]',
     )
 
     expect(projectToggle.attributes('aria-pressed')).toBe('true')
@@ -102,7 +103,7 @@ describe('App', () => {
     await nextTick()
     const projectToggle = wrapper.get('[aria-label="切换项目侧栏（Ctrl+B）"]')
     const artifactToggle = wrapper.get(
-      '[aria-label="切换文件侧栏（Ctrl+Shift+B）"]',
+      '[aria-label="切换右侧栏（Ctrl+Shift+B）"]',
     )
 
     expect(projectToggle.attributes('disabled')).toBeDefined()
@@ -150,10 +151,61 @@ describe('App', () => {
     expect(wrapper.text()).toContain('example')
 
     const artifactTabs = wrapper.findAll('.artifact-tabs button')
-    expect(artifactTabs).toHaveLength(2)
-    await artifactTabs[1]?.trigger('click')
+    expect(artifactTabs).toHaveLength(3)
+    await artifactTabs[2]?.trigger('click')
     expect(wrapper.find('.diff-view').exists()).toBe(true)
     expect(wrapper.text()).toContain('未选择变更')
+  })
+
+  it('renders plans in the right sidebar and opens it when a plan is created', async () => {
+    setWindowWidth(1200)
+    const pinia = createPinia()
+    const wrapper = mount(App, {
+      global: {
+        plugins: [pinia, i18n],
+      },
+    })
+    const store = useAgentStore(pinia)
+    const artifactToggle = wrapper.get(
+      '[aria-label="切换右侧栏（Ctrl+Shift+B）"]',
+    )
+
+    expect(artifactToggle.attributes('aria-pressed')).toBe('false')
+    store.plan = {
+      id: 'plan:test',
+      objective: 'Tighten the tool call UI',
+      items: [
+        {
+          id: 'plan:item:one',
+          title: 'Move plan into the right sidebar',
+          status: 'completed',
+          updatedAt: '2026-06-25T00:00:00.000Z',
+          result: 'Plan panel added.',
+          evidence: 'Artifact tab rendered.',
+        },
+        {
+          id: 'plan:item:two',
+          title: 'Open the tab automatically',
+          status: 'in_progress',
+          updatedAt: '2026-06-25T00:01:00.000Z',
+        },
+      ],
+      createdAt: '2026-06-25T00:00:00.000Z',
+      updatedAt: '2026-06-25T00:01:00.000Z',
+      continuationCount: 1,
+      warning: 'Waiting for verification.',
+    }
+    await nextTick()
+    await nextTick()
+
+    expect(artifactToggle.attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('.plan-view').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Tighten the tool call UI')
+    expect(wrapper.text()).toContain('Move plan into the right sidebar')
+    expect(wrapper.text()).toContain('Waiting for verification.')
+    expect(wrapper.find('.conversation-scroll .plan-item-list').exists()).toBe(
+      false,
+    )
   })
 
   it('renders approval injection content as inert text', async () => {

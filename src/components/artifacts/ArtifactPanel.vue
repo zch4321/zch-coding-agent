@@ -11,11 +11,12 @@ import {
 import { useI18n } from 'vue-i18n'
 import { IPC_VERSION } from '../../../shared/channels'
 import type { FileChangeRecord } from '../../../shared/change-history'
+import type { PlanItem } from '../../../shared/orchestration'
 import { useAgentStore } from '../../stores/agent'
 import FileCodePreview from './FileCodePreview.vue'
 import UiIcon from '../UiIcon.vue'
 
-type ArtifactTab = 'files' | 'diff'
+type ArtifactTab = 'files' | 'diff' | 'plan'
 type ChangeStatusFilter = 'all' | 'active' | 'reverted'
 
 interface ExplorerEntry {
@@ -33,7 +34,16 @@ interface OpenFile {
 
 const agent = useAgentStore()
 const { t } = useI18n()
-const activeArtifact = ref<ArtifactTab>('files')
+const props = withDefaults(defineProps<{ activeTab?: ArtifactTab }>(), {
+  activeTab: 'files',
+})
+const emit = defineEmits<{
+  'update:activeTab': [tab: ArtifactTab]
+}>()
+const activeArtifact = computed({
+  get: () => props.activeTab,
+  set: (tab: ArtifactTab) => emit('update:activeTab', tab),
+})
 const explorerTree = ref<TreeOption[]>([])
 const explorerLoading = ref(false)
 const explorerError = ref('')
@@ -61,6 +71,11 @@ const selectedChange = computed(
     agent.changes.find((change) => change.id === selectedChangeId.value) ??
     filteredChanges.value[0],
 )
+const planProgress = computed(() => {
+  const items = agent.plan?.items ?? []
+  const completed = items.filter((item) => item.status === 'completed').length
+  return { completed, total: items.length }
+})
 const runOptions = computed<SelectOption[]>(() => {
   const runs = new Map<string, number>()
   for (const change of agent.changes) {
@@ -104,6 +119,14 @@ const filteredChanges = computed(() =>
     return true
   }),
 )
+function planStatusClass(item: PlanItem): string {
+  return `status-${item.status.replace(/_/g, '-')}`
+}
+
+function formatTimestamp(value: string): string {
+  return new Date(value).toLocaleString()
+}
+
 function toTreeOptions(entries: ExplorerEntry[]): TreeOption[] {
   return entries.map((entry) => ({
     key: entry.path,
@@ -246,6 +269,13 @@ watch(
 )
 
 watch(
+  () => agent.plan?.id,
+  (planId, previousPlanId) => {
+    if (planId && planId !== previousPlanId) activeArtifact.value = 'plan'
+  },
+)
+
+watch(
   () => agent.workspacePath,
   (workspace, previous) => {
     directoryRequestGeneration += 1
@@ -324,6 +354,16 @@ watch(
           @click="activeArtifact = 'files'"
         >
           <UiIcon name="explorer" />{{ t('artifact.files') }}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeArtifact === 'plan'"
+          :class="{ active: activeArtifact === 'plan' }"
+          @click="activeArtifact = 'plan'"
+        >
+          <UiIcon name="check" />{{ t('artifact.plan') }}
+          <span v-if="agent.plan" class="tab-dot"></span>
         </button>
         <button
           type="button"
@@ -445,7 +485,10 @@ watch(
       </div>
     </section>
 
-    <section v-else class="artifact-content diff-view">
+    <section
+      v-else-if="activeArtifact === 'diff'"
+      class="artifact-content diff-view"
+    >
       <template v-if="agent.pendingApproval?.diff">
         <div class="diff-summary">
           <span>{{ t('artifact.pendingChange') }}</span>
@@ -580,6 +623,66 @@ watch(
         <UiIcon name="diff" />
         <h2>{{ t('artifact.noDiff') }}</h2>
         <p>{{ t('artifact.noDiffHint') }}</p>
+      </div>
+    </section>
+
+    <section v-else class="artifact-content plan-view">
+      <template v-if="agent.plan">
+        <header class="plan-panel-header">
+          <div>
+            <span>{{ t('artifact.plan') }}</span>
+            <strong>{{ agent.plan.objective }}</strong>
+          </div>
+          <small>
+            {{
+              t('artifact.planProgress', {
+                completed: planProgress.completed,
+                total: planProgress.total,
+              })
+            }}
+          </small>
+        </header>
+        <p v-if="agent.plan.warning" class="plan-warning">
+          <UiIcon name="warning" />{{ agent.plan.warning }}
+        </p>
+        <ol v-if="agent.plan.items.length" class="artifact-plan-list">
+          <li
+            v-for="item in agent.plan.items"
+            :key="item.id"
+            :class="planStatusClass(item)"
+          >
+            <div class="plan-item-main">
+              <span class="plan-status-dot" aria-hidden="true"></span>
+              <div>
+                <strong>{{ item.title }}</strong>
+                <small>
+                  {{ t(`artifact.planStatus.${item.status}`) }} ·
+                  {{ formatTimestamp(item.updatedAt) }}
+                </small>
+              </div>
+            </div>
+            <p v-if="item.result">{{ item.result }}</p>
+            <p v-if="item.evidence" class="plan-evidence">
+              {{ item.evidence }}
+            </p>
+          </li>
+        </ol>
+        <p v-else class="artifact-message">{{ t('artifact.planNoItems') }}</p>
+        <footer class="plan-panel-footer">
+          <span>
+            {{
+              t('artifact.planContinuations', {
+                count: agent.plan.continuationCount,
+              })
+            }}
+          </span>
+          <span>{{ formatTimestamp(agent.plan.updatedAt) }}</span>
+        </footer>
+      </template>
+      <div v-else class="artifact-empty">
+        <UiIcon name="check" />
+        <h2>{{ t('artifact.noPlan') }}</h2>
+        <p>{{ t('artifact.noPlanHint') }}</p>
       </div>
     </section>
   </aside>

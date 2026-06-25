@@ -5,6 +5,7 @@ import {
   onMounted,
   onUnmounted,
   ref,
+  watch,
 } from 'vue'
 import {
   enUS,
@@ -35,6 +36,7 @@ type SettingsTab =
   | 'logging'
 
 type Sidebar = 'project' | 'artifact'
+type ArtifactTab = 'files' | 'diff' | 'plan'
 
 const PROJECT_SIDEBAR_WIDTH = 240
 const ARTIFACT_SIDEBAR_WIDTH = 440
@@ -51,6 +53,7 @@ const settingsTab = ref<SettingsTab>('general')
 const yoloWarningOpen = ref(false)
 const projectSidebarOpen = ref(true)
 const artifactSidebarOpen = ref(false)
+const artifactTab = ref<ArtifactTab>('files')
 const workbenchElement = ref<HTMLElement>()
 const workbenchWidth = ref(
   typeof window === 'undefined' ? 0 : window.innerWidth,
@@ -329,6 +332,10 @@ function toggleArtifactSidebar() {
     return
   }
 
+  openArtifactSidebar()
+}
+
+function openArtifactSidebar() {
   if (!canOpenArtifactSidebar.value) return
   lastOpenedSidebar.value = 'artifact'
 
@@ -338,6 +345,15 @@ function toggleArtifactSidebar() {
 
   artifactSidebarOpen.value = true
 }
+
+watch(
+  () => agent.plan?.id,
+  (planId, previousPlanId) => {
+    if (!planId || planId === previousPlanId) return
+    artifactTab.value = 'plan'
+    openArtifactSidebar()
+  },
+)
 
 let workbenchResizeObserver: ResizeObserver | undefined
 
@@ -511,7 +527,10 @@ onUnmounted(() => {
               :show-trigger="false"
               bordered
             >
-              <ArtifactPanel :aria-hidden="!artifactSidebarOpen" />
+              <ArtifactPanel
+                v-model:active-tab="artifactTab"
+                :aria-hidden="!artifactSidebarOpen"
+              />
             </NLayoutSider>
           </NLayout>
         </NLayout>
