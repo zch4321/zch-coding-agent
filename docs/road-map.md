@@ -2,11 +2,12 @@
 
 本文件承接 `feature-backlog.md`，只记录下一阶段和仍未实现的产品方向。已完成的 R0-R6 不再保留在路线图正文中；历史背景以 git history、PR 说明和 release notes 为准。
 
-每个阶段都应保持可独立评审、可测试、可回滚。当前优先级从大功能扩张转向影响可用性的基础能力：Prompt Harness、项目模块建模、语义代码工具、LSP 后端，以及 Serena/MCP 适配。
+每个阶段都应保持可独立评审、可测试、可回滚。当前优先级从大功能扩张转向影响可用性的基础能力：Prompt Harness、ReAct 编排、项目模块建模、语义代码工具、LSP 后端，以及 Serena/MCP 适配。
 
 ## 0. 当前结论
 
 - Prompt 不能继续作为一整块系统提示词拼接。需要改成可审计的 layer model，并把工具 schema、运行时策略、仓库规则、环境信息和会话上下文分开处理。
+- ReAct run 进行中允许用户发送补充信息，但不能打断当前工具调用链。补充信息应排队到下一个安全 checkpoint，并以明确 tag 注入给模型。
 - 安全策略、权限边界、路径约束、审批要求和凭据保护属于只读 `runtime_policy`，不能被用户可编辑 Prompt 覆盖。
 - 用户可编辑 Prompt 应降级为个人偏好、语气和工作方式补充，优先级低于系统基础指令、运行时策略和仓库指令。
 - 项目上下文需要显式建模。多语言仓库不应靠模型每轮临时猜测，而应维护一个可追踪的 `ProjectModel / ModuleGraph`。
@@ -77,7 +78,63 @@ interface PromptLayer {
 - 单测覆盖 layer 顺序、hash、trusted 标记、未替换模板变量、AGENTS 优先级和环境信息裁剪。
 - Trace 中可以看出每个 Prompt 片段的来源，不需要读最终大 prompt 才能排查问题。
 
-## 2. ProjectModel / ModuleGraph
+## 2. ReAct Live Interjections
+
+目标：允许用户在长轮次 ReAct 循环中补充信息，而不取消当前 run、不破坏 provider 的 tool call / tool result 协议顺序。
+
+核心语义：
+
+```text
+user: 原始任务
+assistant: tool_calls
+tool: tool_result A
+tool: tool_result B
+orchestrator/user: <live_user_interjection>用户中途补充的信息</live_user_interjection>
+assistant: 继续推理、下一批 tool calls 或最终回答
+```
+
+建议模型：
+
+```ts
+interface RunInterjection {
+  id: string
+  conversationId: string
+  runId: string
+  content: string
+  createdAt: string
+  status: 'queued' | 'injected' | 'superseded'
+  injectedAfterToolBatchId?: string
+}
+```
+
+实现要求：
+
+- 用户在 run 进行中发送的新消息不启动新 run，也不立即取消当前 run。
+- 当前 provider request 正在飞行中时，interjection 只能进入队列，不能修改已发送请求。
+- 当前 tool batch 未完成时，interjection 不能插入到 assistant tool call 和对应 tool result 中间。
+- 每个 tool batch 结束后，run loop 检查 pending interjections，并在下一次模型 continuation 前注入。
+- 注入内容必须使用固定 tag，例如 `<live_user_interjection>`，并明确说明它是真实用户补充信息，不是 tool output。
+- 多条 interjection 可以合并成一个 provider message，但持久化、UI 和 trace 必须保留每条原始消息。
+- 如果 assistant 已经进入最终回答且不会再发起下一次 continuation，pending interjection 应作为下一轮普通用户消息，除非用户显式选择 interrupt/restart。
+- “停止执行”仍然是独立控制，不依赖 interjection；interjection 不应立即终止正在运行的 shell/tool。
+
+Prompt 规则：
+
+```text
+Messages tagged as <live_user_interjection> are real user messages received
+while the current run was already in progress. They are not tool output.
+Treat them as the latest user instruction for the next reasoning step, while
+respecting system, developer, runtime, repository, and tool-safety instructions.
+```
+
+验收：
+
+- 长工具调用期间发送补充信息不会破坏当前 tool result 回填。
+- 下一次模型 continuation 能看到插入的 interjection，并能据此调整后续步骤。
+- UI 时间线能区分普通用户消息、运行中插话、orchestrator continuation 和 tool result。
+- Trace 记录 interjection 的创建时间、注入位置、tag 内容和状态变化。
+
+## 3. ProjectModel / ModuleGraph
 
 目标：让多语言、多子项目仓库有明确的 module 边界，为 Prompt Harness、LSP 路由和语义工具提供基础。
 
@@ -132,7 +189,7 @@ interface ProjectModel {
 - 模块配置不会因为模型误判而静默污染用户仓库。
 - 当文件路径命中多个或零个 module 时，工具返回明确的歧义或缺失信息。
 
-## 3. Code Intelligence Facade
+## 4. Code Intelligence Facade
 
 目标：先定义模型可见的稳定语义代码工具，再在后面替换或叠加 LSP、Serena、JetBrains、VS Code、ast-grep 等后端。
 
@@ -161,7 +218,7 @@ code_diagnostics
 - 大文件场景下不会默认把全文塞进上下文。
 - 所有外部后端输出都按不可信内容处理，并做大小、数量和时间限制。
 
-## 4. LSP Backend
+## 5. LSP Backend
 
 目标：为 Code Intelligence Facade 提供第一类 IDE 能力，按 module 和文件类型自动路由到对应 language server。
 
@@ -186,7 +243,7 @@ code_diagnostics
 - 多 module 项目中，前端文件不会误用后端 language server，后端文件不会误用前端 language server。
 - LSP 不可用时，Agent 仍能退回现有 grep/read-file 工作流。
 
-## 5. Serena / MCP Adapter
+## 6. Serena / MCP Adapter
 
 目标：接入 Serena 的 symbol-level retrieval/edit/refactor 能力，但对模型保持稳定的 Code Intelligence Facade。
 
@@ -216,7 +273,7 @@ code_diagnostics
 - Serena 不可用时，Code Intelligence Facade 仍然可用或能给出明确降级信息。
 - 写入类能力进入权限管线，不绕过现有文件保护、审批和 trace。
 
-## 6. Deferred / Later
+## 7. Deferred / Later
 
 原 R7 暂缓到后续阶段：
 
@@ -235,7 +292,7 @@ code_diagnostics
 - 云端同步和团队共享项目。
 - 完整插件市场。
 
-## 7. 阶段门禁
+## 8. 阶段门禁
 
 每个实现阶段至少通过：
 
