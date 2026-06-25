@@ -1,262 +1,224 @@
 # Road Map · Zch Coding Agent
 
-本文件承接 `feature-backlog.md`，用于记录已确认的产品方向、实现顺序和关键约束。它不是一次性实现清单；每个阶段都应保持可独立评审、可测试、可回滚。
+本文件承接 `feature-backlog.md`，只记录下一阶段和仍未实现的产品方向。已完成的 R0-R6 不再保留在路线图正文中；历史背景以 git history、PR 说明和 release notes 为准。
 
-## 0. 已确认决策
+每个阶段都应保持可独立评审、可测试、可回滚。当前优先级从大功能扩张转向影响可用性的基础能力：Prompt Harness、项目模块建模、语义代码工具、LSP 后端，以及 Serena/MCP 适配。
 
-- Prompt 不应散落在代码中。系统、审批、续跑、命令模板等默认 Prompt 需要放入独立资源文件，由 `PromptRegistry` 加载、校验、版本化和记录 hash。
-- 自动审批 Prompt 不允许用户编辑。它可以被查看版本/hash，但不能通过设置页面覆盖。
-- 用户系统 Prompt 继续允许配置；默认值来自资源文件，用户配置仅作为 override。
-- Goal 允许多次自动续跑，直到 Agent 显式调用结束 Goal 的工具，或者进入暂停、阻塞、取消、资源上限状态。
-- Goal 续跑 Prompt 必须作为可见的编排消息出现在对话中，不能隐藏在系统层。
-- Plan 只允许一次自动续跑。续跑后仍有未完成计划项时，不再自动运行，必须显式警告用户并等待用户确认。
-- 浏览器能力优先做隔离的内置浏览器；用户 Chrome 登录态与扩展集成延后。
-- 流式输出未结束前提前执行工具暂缓实现，除非 Provider 明确提供 finalized tool-call 事件。
+## 0. 当前结论
 
-## 1. 基础原则
+- Prompt 不能继续作为一整块系统提示词拼接。需要改成可审计的 layer model，并把工具 schema、运行时策略、仓库规则、环境信息和会话上下文分开处理。
+- 安全策略、权限边界、路径约束、审批要求和凭据保护属于只读 `runtime_policy`，不能被用户可编辑 Prompt 覆盖。
+- 用户可编辑 Prompt 应降级为个人偏好、语气和工作方式补充，优先级低于系统基础指令、运行时策略和仓库指令。
+- 项目上下文需要显式建模。多语言仓库不应靠模型每轮临时猜测，而应维护一个可追踪的 `ProjectModel / ModuleGraph`。
+- 如果项目没有已配置模块，模型可以通过工具推断和设置 module 根目录；推断结果必须带来源、hash/时间和可覆盖机制。
+- 如果项目已有模块，Prompt Harness 应把简洁 module 摘要注入上下文，供模型选择工具和判断代码边界。
+- 当语义代码工具可用时，应鼓励模型优先使用 `code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_diagnostics` 等工具，再读取局部文件内容。
+- Serena、JetBrains、VS Code、LSP、ast-grep 等后端不应直接暴露成一堆原始工具给模型；模型应看到稳定的 Code Intelligence Facade。
+- R7 的浏览器、多模态和高级统计暂缓，等 Prompt Harness 与代码理解能力稳定后再推进。
 
-### 1.1 模块边界优先
+## 1. Prompt Harness
 
-当前最主要的工程风险不是缺功能，而是职责集中。新功能进入前，必须先拆分主进程、Agent runtime、前端 store 和文件工具。
+目标：把一次模型请求拆成稳定、可审计、可缓存的 Prompt 层，而不是在 `session-run-utils` 中拼接 `basePrompt + skillPrompt`。
 
-目标不是机械追求 500 行以下，而是让每个文件只承担一个清晰职责，并能独立测试。
-
-### 1.2 配置是软限制，代码保留硬上限
-
-读文件、写文件、补丁、diff、工具输出、审批超时、终端超时、上下文预算等都应配置化；但配置值必须被不可绕过的硬上限夹住，防止资源耗尽、过大 IPC 和无界等待。
-
-### 1.3 对话状态归主进程管理
-
-当前 renderer `localStorage` 不足以支撑分支、导入导出、统计、回滚和大量历史。后续应引入主进程 WorkbenchStore，renderer 只持有 UI draft 和当前投影。
-
-### 1.4 可见编排
-
-任何由系统代替用户追加给模型的续跑、压缩、计划检查、Goal 检查 Prompt，都必须在对话中可见，并标记为 `orchestrator` 来源。Provider 不支持该角色时，内部可映射为 user message，但持久化和 UI 不能伪装成用户输入。
-
-## 2. 关键设计
-
-### 2.1 PromptRegistry
-
-建议资源结构：
+建议新增模块：
 
 ```text
-resources/prompts/
-├─ system/
-│  ├─ zh-CN.md
-│  └─ en-US.md
-├─ approval/
-│  └─ classify-risk.md
-├─ orchestration/
-│  ├─ goal-continue.zh-CN.md
-│  ├─ goal-continue.en-US.md
-│  ├─ plan-continue.zh-CN.md
-│  └─ plan-continue.en-US.md
-└─ commands/
-   └─ ...
+electron/session/prompt-harness/
+├─ prompt-builder.ts
+├─ prompt-layer.ts
+├─ runtime-policy.ts
+├─ environment-context.ts
+├─ project-context.ts
+├─ prompt-trace.ts
+└─ provider-message-mapper.ts
+```
+
+核心类型：
+
+```ts
+type PromptLayerKind =
+  | 'base_instructions'
+  | 'runtime_policy'
+  | 'repo_instructions'
+  | 'skills_metadata'
+  | 'environment_context'
+  | 'project_context'
+  | 'run_context'
+  | 'orchestration'
+  | 'history'
+
+interface PromptLayer {
+  id: string
+  kind: PromptLayerKind
+  role: 'system' | 'developer' | 'user'
+  content: string
+  source: string
+  sha256: string
+  estimatedTokens: number
+  trusted: boolean
+}
 ```
 
 实现要求：
 
-- Prompt ID、locale、version/hash 必须可追踪。
-- 模板变量必须有 schema，渲染后不得留下未替换变量。
-- 安全 Prompt 只读打包，用户不能覆盖。
-- Trace 记录 Prompt ID 与 hash，不重复记录不可编辑 Prompt 全文。
+- `PromptRegistry` 继续负责加载资源文件、校验版本和记录 hash。
+- `PromptBuilder` 负责构造 `PromptLayer[]`，再由 provider mapper 转成具体 provider messages。
+- 基础指令和运行时策略尽量保持稳定顺序，减少 prompt cache miss。
+- 工具 schema 不混入 Prompt 正文，仍由 provider tools 字段传递。
+- `runtime_policy` 包含权限、审批、路径、凭据、工具输出不可信、外部内容不可信等硬规则。
+- `environment_context` 每轮动态生成，包含 cwd、shell、当前日期、时区、工作区、git repo、branch、HEAD、dirty summary、主要 manifest 和 top-level structure。
+- `project_context` 注入已确认或已推断的 modules、语言、manifest、LSP 后端和 module 来源。
+- `repo_instructions` 注入 `AGENTS.override.md`、`AGENTS.md` 等仓库规则，支持嵌套优先级、大小限制、hash 和 untrusted 标记。
+- Trace 记录 layer id、kind、source、hash、token 估算和 trusted 状态，避免只记录最终拼接后的 messages。
 
-### 2.2 Goal
+验收：
 
-Goal 是 conversation 级持久目标，只允许一个 active goal。
+- 原有会话请求行为保持兼容，Provider 收到的内容语义不倒退。
+- 单测覆盖 layer 顺序、hash、trusted 标记、未替换模板变量、AGENTS 优先级和环境信息裁剪。
+- Trace 中可以看出每个 Prompt 片段的来源，不需要读最终大 prompt 才能排查问题。
 
-建议状态：
+## 2. ProjectModel / ModuleGraph
+
+目标：让多语言、多子项目仓库有明确的 module 边界，为 Prompt Harness、LSP 路由和语义工具提供基础。
+
+模块示例：
 
 ```text
-active -> paused -> active
-active -> blocked -> active
-active -> completed
-active -> cancelled
+workspace/
+├─ frontend/  # Vue / TypeScript / package.json
+├─ backend/   # Java / Gradle / Spring
+└─ scripts/   # Python / pyproject.toml
 ```
 
-模型工具：
+建议模型：
 
-- `goal_get`
-- `goal_complete({ summary, evidence, remainingRisks })`
-- `goal_block({ reason, requiredInput })`
+```ts
+interface ProjectModule {
+  id: string
+  root: string
+  name: string
+  languages: string[]
+  manifests: string[]
+  sourceRoots: string[]
+  testRoots: string[]
+  excludedRoots: string[]
+  lspBackends: string[]
+  source: 'auto-detected' | 'model-suggested' | 'user-confirmed' | 'manual'
+  confidence: number
+  updatedAt: string
+}
 
-用户入口：
-
-- `/goal <objective>` 创建或替换目标并立即开始执行。
-- UI 提供暂停、恢复、编辑、取消、查看状态。
-- Goal 文本应包含可验证完成标准；长目标应允许引用文件。
-
-续跑策略：
-
-- 每轮结束后，如果 Goal 仍为 active 且未调用 `goal_complete` 或 `goal_block`，插入可见 `goal-continuation` 消息并继续。
-- Goal 续跑受最大轮数、最大 token、最大持续时间和连续失败次数限制。
-- 达到上限时进入 paused，不得标记完成。
-- Goal active 时，如果存在未完成 plan 项，不允许直接完成 Goal，除非明确取消这些计划项并说明原因。
-
-### 2.3 Plan
-
-Plan 是任务分解和进度可视化，不等同于 Goal。
-
-计划项状态：
-
-```text
-pending | in_progress | completed | blocked | cancelled
+interface ProjectModel {
+  workspaceRoot: string
+  modules: ProjectModule[]
+  defaultModuleId?: string
+  version: number
+}
 ```
 
 实现要求：
 
-- 完成计划项必须提供 result/evidence，不能只打勾。
-- Plan 显示在右侧 Tasks 面板。
-- 独立 Plan 在 run 结束后仍未清空时，最多自动续跑一次。
-- 自动续跑 Prompt 必须出现在对话中。
-- 续跑后仍未清空时，显示警告并等待用户确认。
-- 如果 Plan 属于 active Goal，则 Goal 续跑策略接管，不应用 Plan 的一次续跑限制。
-
-### 2.4 浏览器能力
-
-分两层实现。
-
-第一阶段：内置隔离浏览器。
-
-- 使用 Electron `WebContentsView`，不启用 `<webview>`。
-- 单独 session partition，默认非持久化。
-- `sandbox: true`、`nodeIntegration: false`，无 preload bridge。
-- 使用 `webContents.debugger` 对指定 browser view 走 CDP，不开放全局 remote debugging port。
-- 支持本地开发服务、公开网页、截图、Accessibility/DOM snapshot、点击、输入、控制台与网络错误。
-- 不支持用户 Chrome cookie、扩展、已登录状态。
-
-第二阶段：Chrome/Edge 扩展。
-
-- 通过浏览器扩展 + Native Messaging Host 获取用户浏览器上下文。
-- 每个 host 单独审批，支持会话允许、永久允许、拒绝。
-- 不提供 cookie、password、localStorage 的直接读取工具。
-- 不通过 Playwright 或远程调试端口直接接管用户默认 profile。
-
-浏览器工具输出一律视为不可信上下文。跨站导航、表单提交、下载、会产生外部副作用的点击必须经过权限管线。
-
-## 3. 阶段路线图
-
-### R0 · 稳定性与问题收口
-
-目标：先修复当前影响使用的 UI 和状态问题。
-
-- 修复工具调用 block 导致自动滚动不到底。
-- 工具卡折叠态改成单行摘要，参数和结果延迟到展开后渲染。
-- 验证删除工作区功能 UI 与行为。
-- 验证 `write_file` 只创建新文件的行为已经满足需求。
-- 梳理当前已完成项，避免重复开发。
+- 先做确定性扫描：`package.json`、`pnpm-workspace.yaml`、`tsconfig.json`、`pyproject.toml`、`requirements.txt`、`go.mod`、`Cargo.toml`、`pom.xml`、`build.gradle`、`.sln`、`*.csproj`、`CMakeLists.txt`。
+- 提供 `project_get_modules`、`project_detect_modules`、`project_set_modules` 工具。
+- `project_set_modules` 默认写入应用 workspace metadata，不写入仓库；后续可以支持用户显式导出到仓库配置。
+- 模型可以在没有 module 配置时调用工具推断模块根目录，但推断结果必须可审计、可替换、可重新检测。
+- 一个 workspace 可以有多个 module；同一个文件请求按路径归属路由到对应 module。
+- 对 `node_modules`、`dist`、`build`、`target`、`.venv`、`.git` 等目录默认排除，避免污染索引和 Prompt。
+- Prompt Harness 在存在模块时注入精简摘要；没有模块时提示模型先建立模块边界，再进行大范围代码探索。
 
 验收：
 
-- 添加自动滚动和工具卡回归测试。
-- 手工验证长工具结果、折叠/展开、对话切换、新建对话。
+- 单仓库单模块、前后端双模块、monorepo workspace、脚本目录混合项目都有测试样例。
+- 模块配置不会因为模型误判而静默污染用户仓库。
+- 当文件路径命中多个或零个 module 时，工具返回明确的歧义或缺失信息。
 
-### R1 · 模块拆分
+## 3. Code Intelligence Facade
 
-目标：降低后续功能进入成本。
+目标：先定义模型可见的稳定语义代码工具，再在后面替换或叠加 LSP、Serena、JetBrains、VS Code、ast-grep 等后端。
 
-- `electron/main.ts` 拆成 app bootstrap、window、安全策略、service assembly、IPC handlers。
-- `electron/agent/session-manager.ts` 拆成 session facade、run loop、provider turn、tool runner、approval coordinator、context builder。
-- `src/stores/agent.ts` 拆成 workbench、conversation、runtime、approval、provider-config、artifacts stores。
-- `electron/agent/file-tools.ts` 拆成 schemas、mutation planner、precondition、atomic writer、diff。
+第一批只读工具：
 
-约束：
+```text
+code_symbol_overview
+code_find_definition
+code_find_references
+code_workspace_symbols
+code_diagnostics
+```
 
-- 机械迁移和行为变更分开提交。
-- 每次拆分后必须通过 lint、typecheck、unit tests。
+实现要求：
 
-### R2 · 主进程工作台与配置 v2
-
-目标：为分支、统计、导入导出和大历史做数据基础。
-
-- 新增主进程 WorkbenchStore，管理 projects、conversations、messages、tools、orchestrator entries。
-- 空对话改成 transient draft，第一次 run accepted 后才持久化。
-- 配置 schema 升级，新增文件限制、审批超时、Prompt 资源版本、HTTP proxy。
-- 引入 PromptRegistry。
-- Provider 请求通过统一 HttpTransport，支持 off/system/manual proxy。
-
-验收：
-
-- 迁移旧 localStorage 历史。
-- 对话切换、项目切换、文件树路径必须完全由当前 conversation/workspace 决定。
-- 配置迁移有回归测试。
-
-### R3 · Provider 与用量统计
-
-目标：支持 OpenAI-compatible 多 Provider，并建立真实 usage ledger。
-
-- 配置模型从固定 DeepSeek 改为 ProviderConfig 列表。
-- 先实现通用 OpenAI-compatible Provider。
-- DeepSeek 变成一个 Provider profile。
-- 审批模型单独配置 provider/model。
-- 标准化 `llm.usage` 事件，主模型、审批模型、标题模型、压缩模型都记录。
-- UI 显示上次请求真实 prompt/context tokens、本轮与总 token、模型上下文上限来源。
-- 增加文件变更行数标签，点击进入 Diff。
-- 设置界面改成独立 settings view，不再使用大型 modal 承载全部配置。
-
-说明：
-
-- “当前输入即将消耗的 token”只能估算；真实值只能在 Provider 返回 usage 后显示。
-- 模型最大上下文只有 Provider 明确返回时才算真实，否则标记为内置资料或用户覆盖。
-
-### R4 · 上下文输入与命令系统
-
-目标：实现 `@` 文件引用、`/` 命令、AGENTS 注入、压缩、Goal 和 Plan。
-
-- `@path` 解析为结构化附件，由主进程重新校验和读取。
-- Composer 增加 “+” 按钮添加文件、目录、图片等上下文。
-- AGENTS.md 按层级发现、大小限制、hash 缓存，并以低于 system/user 的层级注入。
-- Slash command registry：`/prompt`、`/skill`、`/compact`、`/goal`、`/plan`。
-- `/skill` 显式加载 Skill 正文，跳过模型自行探索 Skill 的步骤。
-- `/compact` 生成可追溯摘要，不静默删除历史。
-- Goal/Plan 按本路线图 §2.2、§2.3 实现。
+- 工具输入使用 workspace 相对路径和可选 `moduleId`，不要暴露后端实现细节。
+- 工具输出保持小而结构化，包含文件、range、symbol kind、简短上下文和后端来源。
+- 如果语义后端不可用，允许回退到 `rg`、文件索引或 ast-grep，但结果要标明 `precision`。
+- Prompt 中明确鼓励模型先用语义工具定位范围，再读取相关文件片段。
+- `read_file` 仍保留，用于小文件、配置文件、最终确认和语义工具无法覆盖的场景。
+- 写入类重构工具暂缓，先保证 read-only code intelligence 稳定。
 
 验收：
 
-- 附件内容不直接渲染给用户，只显示 chip 和元数据。
-- 续跑 Prompt 在对话中可见。
-- Goal 可多轮自动续跑并显式完成。
-- Plan 只自动续跑一次，失败后显式警告。
+- 模型可以在不知道具体后端的情况下完成 definition、references、diagnostics 查询。
+- 大文件场景下不会默认把全文塞进上下文。
+- 所有外部后端输出都按不可信内容处理，并做大小、数量和时间限制。
 
-### R5 · 开发工具增强
+## 4. LSP Backend
 
-目标：补齐代码代理常用工具。
+目标：为 Code Intelligence Facade 提供第一类 IDE 能力，按 module 和文件类型自动路由到对应 language server。
 
-- 打包 ripgrep，内置 grep 作为 fallback。
-- `read_file` 输出带行号内容。
-- Git 只读工具：`git_status`、`git_diff`、`git_log`、`git_show`。
-- Git 写工具：`git_add`、`git_commit`、`git_restore`。
-- Fetch/Search 工具初版。
+优先顺序：
 
-Git 约束：
+1. TypeScript / JavaScript / Vue：匹配当前 Electron + Vue 项目本身。
+2. Python：常见脚本和自动化项目。
+3. Go / Rust / Java：按用户项目需求逐步扩展。
 
-- 所有 git 命令禁用 pager。
-- diff/show 禁用外部 diff。
-- commit hooks 默认不静默运行；需要清晰风险策略。
-- 写入 index、restore、commit 都进入权限管线。
+实现要求：
 
-Fetch/Search 约束：
+- 新增 `LanguageServerManager`，按 workspace + module 复用 language server 进程。
+- 新增路由层，根据文件路径、module、语言和 manifest 选择后端。
+- 支持初始化、打开文件、关闭文件、definition、references、workspace symbols、diagnostics。
+- diagnostics 做缓存，避免每次请求都重新启动或重新扫描。
+- language server 未安装、启动失败或不支持某能力时，返回可解释错误并允许 fallback。
+- LSP 进程生命周期、超时、输出大小和日志必须受主进程控制。
 
-- URL scheme、redirect、私网地址、响应大小、超时、MIME 都要校验。
-- 搜索 API Key 存 safeStorage。
-- 网络内容一律不可信。
+验收：
 
-### R6 · 会话图谱与回滚
+- 在当前 TS/Vue 项目内，能通过 facade 查询符号、定义、引用和诊断。
+- 多 module 项目中，前端文件不会误用后端 language server，后端文件不会误用前端 language server。
+- LSP 不可用时，Agent 仍能退回现有 grep/read-file 工作流。
 
-目标：让用户可靠查看、导出、分支和回退历史。
+## 5. Serena / MCP Adapter
 
-- Markdown 导入/导出，使用带版本 front matter 的格式。
-- 导入历史不伪造工具执行或 Provider continuation。
-- Agent 自动起名：保留本地截断 fallback，可选后台标题模型。
-- Conversation branch：复制历史到新 conversation，保留 parent/fork metadata。
-- 回退对话：原地撤销到任意一轮，删除该回复及其后的所有消息，不新建对话。
-- 回退文件：基于 change history 逆序恢复，必须通过 hash precondition。
-- Diff/changes 视图支持按 run、文件、状态过滤。
+目标：接入 Serena 的 symbol-level retrieval/edit/refactor 能力，但对模型保持稳定的 Code Intelligence Facade。
 
-### R7 · 浏览器、多模态与高级统计
+第一阶段：只读 Serena MVP。
 
-目标：扩展到视觉验证、网页交互和长期用量分析。
+- 新增 `electron/mcp/`：
+  - `mcp-client-manager.ts`
+  - `stdio-transport.ts`
+  - `mcp-tool-adapter.ts`
+  - `mcp-config.ts`
+- 配置 schema 支持 server name、command、args、env allowlist、cwd、enabled tools、disabled tools、startup timeout、tool timeout 和默认审批策略。
+- 每个 workspace 启动独立 Serena 进程，避免单活项目状态串线。
+- Serena retrieval 能力映射到 `code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_diagnostics`。
+- 禁用或默认审批 shell、file edit、rename、replace、insert、memory write 等写入或副作用工具。
+- MCP 工具列表不在会话中途静默改变；新增、删除或变更工具应下轮生效或要求重连。
+
+第二阶段：写入和重构。
+
+- rename、replace、insert、safe delete 映射到现有文件写入和权限管线。
+- shell 执行映射到现有进程权限模型，默认高风险。
+- Serena memory 写入单独审批，并在 UI 中可见。
+- 所有 MCP 输出标记为 untrusted，并受大小、时间和 schema 校验限制。
+
+验收：
+
+- 不直接把原始 `mcp__serena__*` 工具暴露给模型作为默认能力。
+- Serena 不可用时，Code Intelligence Facade 仍然可用或能给出明确降级信息。
+- 写入类能力进入权限管线，不绕过现有文件保护、审批和 trace。
+
+## 6. Deferred / Later
+
+原 R7 暂缓到后续阶段：
 
 - 内置隔离浏览器工具。
 - 浏览器 Comments/Annotations。
@@ -265,7 +227,7 @@ Fetch/Search 约束：
 - token 热力图、模型用量折线图、缓存命中率趋势。
 - 高级 trace/usage 查询。
 
-## 4. 暂缓项
+其他暂缓项：
 
 - Provider stream 未结束前提前执行工具。
 - 直接控制用户 Chrome 默认 profile。
@@ -273,13 +235,13 @@ Fetch/Search 约束：
 - 云端同步和团队共享项目。
 - 完整插件市场。
 
-## 5. 阶段门禁
+## 7. 阶段门禁
 
-每一阶段至少通过：
+每个实现阶段至少通过：
 
 - `npm run lint`
 - `npm run format:check`
 - `npm run typecheck`
 - `npm test`
 
-涉及 Electron UI、文件树、审批、终端、设置、浏览器的阶段还必须补充 E2E。真实 Provider 测试继续保持 opt-in，不能进入默认单测链路。
+涉及 Electron UI、文件树、审批、终端、设置、浏览器或 MCP 进程生命周期的阶段，还必须补充对应 E2E 或集成测试。真实 Provider 和外部 Serena/LSP 测试继续保持 opt-in，不能进入默认单测链路。
