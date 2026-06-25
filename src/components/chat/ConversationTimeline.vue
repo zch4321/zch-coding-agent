@@ -24,6 +24,14 @@ const scrollElement = ref<HTMLElement>()
 const bottomSentinel = ref<HTMLElement>()
 const followingOutput = ref(true)
 const chronologicalTools = computed(() => [...agent.tools].reverse())
+const visibleMessages = computed(() =>
+  agent.messages.filter(
+    (message) =>
+      message.role !== 'assistant' ||
+      message.text.trim().length > 0 ||
+      message.reasoning.trim().length > 0,
+  ),
+)
 const expandedToolDetails = ref<string[]>([])
 let resizeObserver: ResizeObserver | undefined
 
@@ -208,9 +216,9 @@ async function scrollToBottom(force = false) {
 
 watch(
   () => [
-    agent.messages.length,
-    agent.messages.at(-1)?.text.length ?? 0,
-    agent.messages.at(-1)?.reasoning.length ?? 0,
+    visibleMessages.value.length,
+    visibleMessages.value.at(-1)?.text.length ?? 0,
+    visibleMessages.value.at(-1)?.reasoning.length ?? 0,
     agent.tools.length,
     toolRenderSignature.value,
     agent.usage.length,
@@ -319,7 +327,7 @@ onBeforeUnmount(() => {
       </section>
 
       <article
-        v-for="message in agent.messages"
+        v-for="message in visibleMessages"
         :key="message.id"
         class="chat-message"
         :class="message.role"
@@ -359,7 +367,7 @@ onBeforeUnmount(() => {
             {{ attachment.path }}
           </NTooltip>
         </div>
-        <MarkdownBlock :content="message.text || '...'" />
+        <MarkdownBlock v-if="message.text.trim()" :content="message.text" />
         <NCollapse v-if="message.reasoning" class="reasoning">
           <NCollapseItem :title="t('chat.reasoning')" name="reasoning">
             <pre>{{ message.reasoning }}</pre>
@@ -409,7 +417,14 @@ onBeforeUnmount(() => {
         class="tool-call-card"
         :style="{ order: tool.order ?? 0 }"
       >
-        <div class="tool-call-row">
+        <button
+          type="button"
+          class="tool-call-row"
+          :title="tool.reason || tool.tool"
+          :aria-controls="toolDetailsName(tool)"
+          :aria-expanded="isToolDetailsExpanded(tool)"
+          @click="toggleToolDetails(tool)"
+        >
           <div class="tool-call-summary" :title="tool.reason || tool.tool">
             <span class="tool-call-muted">{{ t('chat.toolCall') }}</span>
             <strong>{{ tool.tool }}</strong>
@@ -420,31 +435,14 @@ onBeforeUnmount(() => {
               {{ toolResultSummary(tool) }}
             </span>
           </div>
-          <NTooltip>
-            <template #trigger>
-              <button
-                type="button"
-                class="tool-details-toggle"
-                :aria-label="t('chat.toggleToolDetails')"
-                :aria-expanded="isToolDetailsExpanded(tool)"
-                @click="toggleToolDetails(tool)"
-              >
-                <UiIcon
-                  :name="
-                    isToolDetailsExpanded(tool)
-                      ? 'chevron-down'
-                      : 'chevron-right'
-                  "
-                />
-              </button>
-            </template>
-            {{
-              isToolDetailsExpanded(tool)
-                ? t('chat.hideToolDetails')
-                : t('chat.showToolDetails')
-            }}
-          </NTooltip>
-        </div>
+          <span class="tool-details-toggle" aria-hidden="true">
+            <UiIcon
+              :name="
+                isToolDetailsExpanded(tool) ? 'chevron-down' : 'chevron-right'
+              "
+            />
+          </span>
+        </button>
         <div
           v-if="isToolDetailsExpanded(tool)"
           :id="toolDetailsName(tool)"
@@ -637,7 +635,7 @@ onBeforeUnmount(() => {
 
       <div
         v-if="
-          agent.messages.length === 0 &&
+          visibleMessages.length === 0 &&
           chronologicalTools.length === 0 &&
           !agent.pendingApproval
         "

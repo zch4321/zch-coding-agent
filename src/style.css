@@ -1092,12 +1092,17 @@ code {
 
 .tool-call-row {
   display: flex;
+  width: 100%;
   min-width: 0;
   min-height: 26px;
   align-items: center;
   gap: 8px;
+  padding: 0;
+  border: 0;
   color: var(--text-muted);
+  background: transparent;
   font-size: 12px;
+  text-align: left;
 }
 
 .tool-call-summary {
@@ -1140,7 +1145,7 @@ code {
   background: transparent;
 }
 
-.tool-details-toggle:hover {
+.tool-call-row:hover .tool-details-toggle {
   color: var(--accent);
   background: var(--surface);
 }

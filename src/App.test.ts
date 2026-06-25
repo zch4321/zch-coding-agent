@@ -272,7 +272,7 @@ describe('App', () => {
     expect(wrapper.find('.tool-args-json').exists()).toBe(false)
     expect(wrapper.find('.tool-result-json').exists()).toBe(false)
 
-    await wrapper.get('.tool-details-toggle').trigger('click')
+    await wrapper.get('.tool-call-row').trigger('click')
     await nextTick()
     await flushPromises()
 
@@ -336,7 +336,7 @@ describe('App', () => {
     expect(wrapper.get('.tool-call-summary').text()).not.toContain('note.txt')
     expect(wrapper.find('.tool-approval-json').exists()).toBe(false)
 
-    await wrapper.get('.tool-details-toggle').trigger('click')
+    await wrapper.get('.tool-call-row').trigger('click')
     await nextTick()
     await flushPromises()
 
@@ -348,6 +348,42 @@ describe('App', () => {
       'approval-model',
     )
     expect(wrapper.get('.tool-approval-json').text()).toContain('bounded write')
+  })
+
+  it('does not render empty assistant placeholders before tool calls', async () => {
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    store.messages = [
+      {
+        id: 'message:empty-assistant',
+        role: 'assistant',
+        runId: 'run:test' as RunId,
+        text: '',
+        reasoning: '',
+        order: 1,
+      },
+    ]
+    store.tools = [
+      {
+        callId: 'call:read' as CallId,
+        runId: 'run:test' as RunId,
+        tool: 'read_file',
+        args: { path: 'README.md' },
+        reason: 'Read the file',
+        status: 'proposed',
+        order: 2,
+      },
+    ]
+    const wrapper = mount(ConversationTimeline, {
+      props: { projectName: 'example' },
+      global: {
+        plugins: [pinia, i18n],
+      },
+    })
+
+    expect(wrapper.find('.chat-message.assistant').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('...')
+    expect(wrapper.get('.tool-call-row').text()).toContain('read_file')
   })
 
   it('collapses and expands a project conversation group', async () => {
