@@ -4,6 +4,7 @@ import path from 'node:path'
 import type { AssistantLanguage } from '../../shared/system-prompts'
 import {
   DEFAULT_APPROVAL_PROMPT_REFS,
+  DEFAULT_HARNESS_PROMPT_REFS,
   DEFAULT_ORCHESTRATION_PROMPT_REFS,
   DEFAULT_SYSTEM_PROMPT_REFS,
 } from '../../shared/prompt-resources'
@@ -44,6 +45,19 @@ export class PromptRegistry {
         DEFAULT_SYSTEM_PROMPT_REFS['en-US'].id,
         DEFAULT_SYSTEM_PROMPT_REFS['en-US'].version,
         path.join(rootDirectory, 'system', 'en-US.md'),
+      ),
+      ...Object.values(DEFAULT_HARNESS_PROMPT_REFS).flatMap((localized) =>
+        (['zh-CN', 'en-US'] as const).map((locale) =>
+          loadResource(
+            localized[locale].id,
+            localized[locale].version,
+            path.join(
+              rootDirectory,
+              'harness',
+              `${localized[locale].id.replace('harness.', '')}.md`,
+            ),
+          ),
+        ),
       ),
       loadResource(
         DEFAULT_APPROVAL_PROMPT_REFS.classifyRisk.id,
@@ -95,6 +109,18 @@ export class PromptRegistry {
       content: customized ? normalizedOverride! : resource.content,
       resource: withoutContent(resource),
       customized,
+    }
+  }
+
+  harnessPrompt(
+    kind: keyof typeof DEFAULT_HARNESS_PROMPT_REFS,
+    locale: AssistantLanguage,
+  ): ResolvedPrompt {
+    const resource = this.get(DEFAULT_HARNESS_PROMPT_REFS[kind][locale].id)
+    return {
+      content: resource.content,
+      resource: withoutContent(resource),
+      customized: false,
     }
   }
 

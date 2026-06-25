@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { NButton, NInput, NSelect } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { setAppLocale, type AppLocale } from '../../i18n'
-import { DEFAULT_SYSTEM_PROMPTS } from '../../../shared/system-prompts'
+import { DEFAULT_ASSISTANT_PREFERENCES } from '../../../shared/system-prompts'
 import { useAgentStore } from '../../stores/agent'
 
 const { locale, t } = useI18n()
@@ -21,8 +21,10 @@ async function changeLanguage(value: AppLocale) {
   }
 }
 
-function restoreDefaultPrompts() {
-  agent.assistantForm.systemPrompts = structuredClone(DEFAULT_SYSTEM_PROMPTS)
+function restoreDefaultPreferences() {
+  agent.assistantForm.preferences = structuredClone(
+    DEFAULT_ASSISTANT_PREFERENCES,
+  )
   agent.assistantSaveStatus = ''
 }
 </script>
@@ -42,45 +44,43 @@ function restoreDefaultPrompts() {
       />
     </label>
     <label class="settings-field">
-      <span>{{ t('settings.systemPromptZh') }}</span>
+      <span>{{ t('settings.assistantPreferencesZh') }}</span>
       <NInput
-        v-model:value="agent.assistantForm.systemPrompts['zh-CN']"
+        v-model:value="agent.assistantForm.preferences['zh-CN']"
         type="textarea"
         :autosize="{ minRows: 6, maxRows: 12 }"
-        :placeholder="DEFAULT_SYSTEM_PROMPTS['zh-CN']"
+        :placeholder="t('settings.assistantPreferencesPlaceholder')"
         @update:value="agent.assistantSaveStatus = ''"
       />
     </label>
     <label class="settings-field">
-      <span>{{ t('settings.systemPromptEn') }}</span>
+      <span>{{ t('settings.assistantPreferencesEn') }}</span>
       <NInput
-        v-model:value="agent.assistantForm.systemPrompts['en-US']"
+        v-model:value="agent.assistantForm.preferences['en-US']"
         type="textarea"
         :autosize="{ minRows: 6, maxRows: 12 }"
-        :placeholder="DEFAULT_SYSTEM_PROMPTS['en-US']"
+        :placeholder="t('settings.assistantPreferencesPlaceholder')"
         @update:value="agent.assistantSaveStatus = ''"
       />
     </label>
-    <p class="settings-footnote">{{ t('settings.systemPromptHint') }}</p>
+    <p class="settings-footnote">
+      {{ t('settings.assistantPreferencesHint') }}
+    </p>
     <div class="settings-actions">
       <NButton
         type="primary"
         :loading="agent.assistantSaving"
-        :disabled="
-          agent.assistantSaving ||
-          !agent.assistantForm.systemPrompts['zh-CN'].trim() ||
-          !agent.assistantForm.systemPrompts['en-US'].trim()
-        "
+        :disabled="agent.assistantSaving"
         @click="agent.saveAssistantSettings(locale as AppLocale)"
       >
-        {{ t('settings.saveSystemPrompts') }}
+        {{ t('settings.saveAssistantPreferences') }}
       </NButton>
       <NButton
         secondary
         :disabled="agent.assistantSaving"
-        @click="restoreDefaultPrompts"
+        @click="restoreDefaultPreferences"
       >
-        {{ t('settings.restoreSystemPrompts') }}
+        {{ t('settings.restoreAssistantPreferences') }}
       </NButton>
       <small class="settings-save-status" aria-live="polite">
         {{ agent.assistantSaveStatus === 'saved' ? t('settings.saved') : '' }}

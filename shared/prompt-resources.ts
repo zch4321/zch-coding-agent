@@ -15,6 +15,32 @@ export const DEFAULT_SYSTEM_PROMPT_REFS: Record<
   'en-US': { id: 'system.en-US', version: PROMPT_RESOURCE_VERSION },
 }
 
+export const DEFAULT_HARNESS_PROMPT_REFS: Record<
+  'baseInstructions' | 'runtimeContext',
+  Record<AssistantLanguage, PromptResourceRef>
+> = {
+  baseInstructions: {
+    'zh-CN': {
+      id: 'harness.base-instructions.zh-CN',
+      version: PROMPT_RESOURCE_VERSION,
+    },
+    'en-US': {
+      id: 'harness.base-instructions.en-US',
+      version: PROMPT_RESOURCE_VERSION,
+    },
+  },
+  runtimeContext: {
+    'zh-CN': {
+      id: 'harness.runtime-context.zh-CN',
+      version: PROMPT_RESOURCE_VERSION,
+    },
+    'en-US': {
+      id: 'harness.runtime-context.en-US',
+      version: PROMPT_RESOURCE_VERSION,
+    },
+  },
+}
+
 export const DEFAULT_APPROVAL_PROMPT_REFS = {
   classifyRisk: {
     id: 'approval.classify-risk',

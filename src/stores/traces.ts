@@ -2,19 +2,33 @@ import { defineStore } from 'pinia'
 import { IPC_VERSION } from '../../shared/channels'
 import type { EventId } from '../../shared/ids'
 import type {
+  PromptBuildSummary,
   ProviderStats,
   ReplaySummary,
   TraceInfo,
 } from '../../shared/trace'
 import { useAgentStore } from './agent'
 
+interface PromptRequestView {
+  eventId: EventId
+  runId: string
+  seq: number
+  messages: unknown[]
+  promptBuild?: PromptBuildSummary
+}
+
+type ReplayView = Omit<ReplaySummary, 'requests'> & {
+  requests: PromptRequestView[]
+}
+
 export const useTraceStore = defineStore('traces', {
   state: () => ({
     items: [] as TraceInfo[],
     selectedId: undefined as string | undefined,
-    replay: undefined as ReplaySummary | undefined,
+    replay: undefined as ReplayView | undefined,
     providerStats: undefined as ProviderStats | undefined,
     forkEventId: '',
+    promptRequestEventId: '',
     actionMessage: '',
     loading: false,
     error: '',
@@ -36,6 +50,16 @@ export const useTraceStore = defineStore('traces', {
         label: '#' + point.seq + ' · ' + point.runId + ' · ' + point.eventId,
         value: point.eventId,
       })),
+    promptRequestOptions: (state) =>
+      (state.replay?.requests ?? []).map((request) => ({
+        label:
+          '#' + request.seq + ' · ' + request.runId + ' · ' + request.eventId,
+        value: request.eventId,
+      })),
+    selectedPromptRequest: (state): PromptRequestView | undefined =>
+      (state.replay?.requests ?? []).find(
+        (request) => request.eventId === state.promptRequestEventId,
+      ),
   },
   actions: {
     async load() {
@@ -73,7 +97,8 @@ export const useTraceStore = defineStore('traces', {
         traceId: this.selectedId,
       })
       if (result.ok) {
-        this.replay = result.value
+        this.replay = result.value as ReplayView
+        this.promptRequestEventId = result.value.requests.at(-1)?.eventId ?? ''
         this.actionMessage =
           'Replayed ' +
           result.value.lastSeq +

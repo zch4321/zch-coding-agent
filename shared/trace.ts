@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox'
 import { EventIdSchema, RunIdSchema, SessionIdSchema } from './ids'
+import { JsonValueSchema } from './json'
 
 export const TraceIdSchema = Type.String({
   minLength: 1,
@@ -21,6 +22,68 @@ export const TraceInfoSchema = Type.Object(
   { additionalProperties: false },
 )
 export type TraceInfo = Static<typeof TraceInfoSchema>
+
+export const PromptLayerKindSchema = Type.Union([
+  Type.Literal('base_instructions'),
+  Type.Literal('runtime_policy_and_context'),
+  Type.Literal('assistant_preferences'),
+  Type.Literal('agents'),
+  Type.Literal('selected_context'),
+  Type.Literal('user_interjection'),
+  Type.Literal('orchestration_request'),
+])
+export type PromptLayerKind = Static<typeof PromptLayerKindSchema>
+
+export const PromptLayerSummarySchema = Type.Object(
+  {
+    seq: Type.Integer({ minimum: 1 }),
+    messageIndex: Type.Integer({ minimum: 0 }),
+    kind: PromptLayerKindSchema,
+    role: Type.Union([
+      Type.Literal('system'),
+      Type.Literal('user'),
+      Type.Literal('assistant'),
+      Type.Literal('tool'),
+    ]),
+    source: Type.String({ minLength: 1, maxLength: 512 }),
+    trusted: Type.Boolean(),
+    editable: Type.Boolean(),
+    sha256: Type.String({ minLength: 64, maxLength: 64 }),
+    estimatedTokens: Type.Integer({ minimum: 0 }),
+    included: Type.Boolean(),
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+)
+export type PromptLayerSummary = Static<typeof PromptLayerSummarySchema>
+
+export const PromptBuildSummarySchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    layers: Type.Array(PromptLayerSummarySchema, { maxItems: 10_000 }),
+    messageCount: Type.Integer({ minimum: 0 }),
+    historyMessageCount: Type.Integer({ minimum: 0 }),
+    ledgerMessageCount: Type.Integer({ minimum: 0 }),
+    omittedHistoryMessages: Type.Integer({ minimum: 0 }),
+    promptBudgetTokens: Type.Integer({ minimum: 0 }),
+    estimatedTokens: Type.Integer({ minimum: 0 }),
+    toolsHash: Type.String({ minLength: 64, maxLength: 64 }),
+  },
+  { additionalProperties: false },
+)
+export type PromptBuildSummary = Static<typeof PromptBuildSummarySchema>
+
+export const TraceRequestSummarySchema = Type.Object(
+  {
+    eventId: EventIdSchema,
+    runId: RunIdSchema,
+    seq: Type.Integer({ minimum: 1 }),
+    messages: Type.Array(JsonValueSchema, { maxItems: 10_000 }),
+    promptBuild: Type.Optional(PromptBuildSummarySchema),
+  },
+  { additionalProperties: false },
+)
+export type TraceRequestSummary = Static<typeof TraceRequestSummarySchema>
 
 export const ReplaySummarySchema = Type.Object(
   {
@@ -53,6 +116,7 @@ export const ReplaySummarySchema = Type.Object(
       ),
       { maxItems: 10_000 },
     ),
+    requests: Type.Array(TraceRequestSummarySchema, { maxItems: 10_000 }),
     messages: Type.Array(
       Type.Object(
         {

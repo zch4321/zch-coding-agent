@@ -133,7 +133,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(4)
+    expect(parsed.schemaVersion).toBe(5)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBeGreaterThan(
       0,
     )
@@ -184,25 +184,25 @@ describe('ConfigStore', () => {
     )
   })
 
-  it('persists localized configurable system prompts', async () => {
+  it('persists localized assistant preferences', async () => {
     const { configStore } = await createStores()
     const result = await configStore.update({
       version: 1,
       kind: 'assistant',
       value: {
         language: 'en-US',
-        systemPrompts: {
-          'zh-CN': '中文自定义提示词',
-          'en-US': 'Custom English prompt',
+        preferences: {
+          'zh-CN': '中文助手偏好',
+          'en-US': 'Custom English preference',
         },
       },
     })
 
     expect(result.assistant).toEqual({
       language: 'en-US',
-      systemPrompts: {
-        'zh-CN': '中文自定义提示词',
-        'en-US': 'Custom English prompt',
+      preferences: {
+        'zh-CN': '中文助手偏好',
+        'en-US': 'Custom English preference',
       },
     })
   })

@@ -3,11 +3,7 @@ import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { PluginEventBus } from '../plugins/event-bus'
 import type { ToolCall } from '../tools/types'
-import {
-  ContextBudgetError,
-  estimateJsonTokens,
-  selectContextMessages,
-} from '../tools/context-budget'
+import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import { OpenAICompatibleProvider } from '../providers/deepseek-provider'
 import type {
   ProviderAssistantTurn,
@@ -15,15 +11,10 @@ import type {
   ProviderMessage,
   ProviderRequestSnapshot,
 } from '../providers/provider'
-import type { SkillsManager } from '../skills/manager'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { id, ipcFault, toJsonValue } from './session-common'
-import {
-  contextMessages,
-  modelPromptBudget,
-  resolveSystemPrompt,
-} from './session-run-utils'
-import type { PromptRegistry } from '../prompts/registry'
+import { modelPromptBudget } from './session-run-utils'
+import { promptResources, selectPromptMessages } from './prompt-harness'
 import type {
   ActiveRun,
   AgentEventDraft,
@@ -32,6 +23,11 @@ import type {
 } from './session-types'
 import type { CallId } from '../../shared/ids'
 import { normalizeLlmUsage } from '../providers/usage'
+import type { PromptRegistry } from '../prompts/registry'
+import {
+  appendAgentsContextIfChanged,
+  appendRuntimeContextIfChanged,
+} from './prompt-harness'
 
 export interface ProviderTurnResult {
   turn: ProviderAssistantTurn
@@ -43,7 +39,6 @@ export interface ProviderTurnResult {
 export class SessionProviderTurnRunner {
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
-  readonly #skillsManager: SkillsManager | undefined
   readonly #pluginBus: PluginEventBus | undefined
   readonly #promptRegistry: PromptRegistry | undefined
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
@@ -54,7 +49,6 @@ export class SessionProviderTurnRunner {
   constructor(options: {
     configStore: ConfigStore
     toolRegistry: ToolRegistry
-    skillsManager?: SkillsManager
     pluginBus?: PluginEventBus
     promptRegistry?: PromptRegistry
     fetchImpl?: typeof fetch
@@ -64,7 +58,6 @@ export class SessionProviderTurnRunner {
   }) {
     this.#configStore = options.configStore
     this.#toolRegistry = options.toolRegistry
-    this.#skillsManager = options.skillsManager
     this.#pluginBus = options.pluginBus
     this.#promptRegistry = options.promptRegistry
     this.#fetchImpl = options.fetchImpl
@@ -91,24 +84,32 @@ export class SessionProviderTurnRunner {
     }
 
     const tools = this.#toolRegistry.providerDefinitions()
-    const skillPrompt = this.#skillsManager?.summaryPrompt() ?? ''
-    const promptResources = session.systemPromptOverride
-      ? []
-      : resolveSystemPrompt(config, skillPrompt, this.#promptRegistry).resources
-    let messages = session.systemPromptOverride
-      ? selectContextMessages({
-          system: { role: 'system', content: session.systemPromptOverride },
-          history: session.history,
-          maxPromptTokens: modelPromptBudget(config, tools),
-          estimation: config.limits.tokenEstimation,
-        })
-      : contextMessages(
-          session.history,
-          config,
-          tools,
-          skillPrompt,
-          this.#promptRegistry,
-        )
+    await appendRuntimeContextIfChanged(session, {
+      workspace: session.workspace,
+      mode: session.mode,
+      config,
+      providerId: session.provider,
+      promptRegistry: this.#promptRegistry,
+      reason: 'provider_call',
+      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+      signal: run.controller.signal,
+    })
+    await appendAgentsContextIfChanged(session, {
+      workspace: session.workspace,
+      mode: session.mode,
+      config,
+      providerId: session.provider,
+      promptRegistry: this.#promptRegistry,
+      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+      signal: run.controller.signal,
+    })
+    let selection = selectPromptMessages({
+      state: session,
+      tools,
+      maxPromptTokens: modelPromptBudget(config, tools),
+      estimation: config.limits.tokenEstimation,
+    })
+    let messages = selection.messages
     const hookResult = await this.#pluginBus?.emit('beforeLLMCall', {
       version: 1,
       sessionId: session.sessionId,
@@ -123,6 +124,17 @@ export class SessionProviderTurnRunner {
     for (const patch of hookResult?.patches ?? []) {
       if (patch.messages) {
         messages = patch.messages as unknown as ProviderMessage[]
+        selection = {
+          messages,
+          promptBuild: {
+            ...selection.promptBuild,
+            messageCount: messages.length,
+            estimatedTokens: estimateJsonTokens(
+              messages,
+              config.limits.tokenEstimation,
+            ),
+          },
+        }
       }
     }
 
@@ -154,7 +166,8 @@ export class SessionProviderTurnRunner {
         requestBytes: snapshot.requestBytes,
         prefixHash: snapshot.prefixHash,
         prefixFingerprints: snapshot.prefixFingerprints,
-        promptResources,
+        promptResources: promptResources(session),
+        promptBuild: selection.promptBuild,
       })
     }
 

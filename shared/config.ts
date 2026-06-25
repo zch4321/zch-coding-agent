@@ -133,7 +133,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(4),
+    schemaVersion: Type.Literal(5),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
@@ -298,10 +298,10 @@ export const PublicConfigSchema = Type.Object(
     assistant: Type.Object(
       {
         language: AssistantLanguageSchema,
-        systemPrompts: Type.Object(
+        preferences: Type.Object(
           {
-            'zh-CN': Type.String({ minLength: 1, maxLength: 32_768 }),
-            'en-US': Type.String({ minLength: 1, maxLength: 32_768 }),
+            'zh-CN': Type.String({ maxLength: 32_768 }),
+            'en-US': Type.String({ maxLength: 32_768 }),
           },
           { additionalProperties: false },
         ),

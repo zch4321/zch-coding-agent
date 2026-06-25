@@ -506,7 +506,7 @@ async function waitFor(
 }
 
 describe('SessionManager P2 loop', () => {
-  it('uses the configurable system prompt selected by application language', async () => {
+  it('uses configurable assistant preferences without replacing harness system messages', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-prompt-'))
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
@@ -516,9 +516,9 @@ describe('SessionManager P2 loop', () => {
       kind: 'assistant',
       value: {
         language: 'en-US',
-        systemPrompts: {
-          'zh-CN': '中文系统提示',
-          'en-US': 'English system prompt selected by the test',
+        preferences: {
+          'zh-CN': '中文偏好',
+          'en-US': 'English assistant preference selected by the test',
         },
       },
     })
@@ -552,10 +552,20 @@ describe('SessionManager P2 loop', () => {
           event.type === 'run.status' && event.status === 'completed',
       ),
     )
-    expect(provider.messages[0]).toEqual({
-      role: 'system',
-      content: 'English system prompt selected by the test',
-    })
+    expect(provider.messages[0]?.role).toBe('system')
+    expect(provider.messages[1]?.role).toBe('system')
+    expect(
+      provider.messages.some((message) => message.content === 'hello'),
+    ).toBe(true)
+    expect(
+      provider.messages.some(
+        (message) =>
+          message.role === 'user' &&
+          message.content?.includes(
+            'English assistant preference selected by the test',
+          ),
+      ),
+    ).toBe(true)
     await manager.closeSession(sessionId)
   })
 

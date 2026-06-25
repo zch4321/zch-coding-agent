@@ -2,14 +2,8 @@ import { getActiveProviderConfig, type PublicConfig } from '../../shared/config'
 import type { RunStatus, ToolResultEnvelope } from '../../shared/agent-events'
 import type { JsonValue } from '../../shared/json'
 import type { ToolResult } from '../tools/types'
-import {
-  ContextBudgetError,
-  estimateJsonTokens,
-  selectContextMessages,
-} from '../tools/context-budget'
+import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import { resolveModelProfiles } from '../providers/model-catalog'
-import type { ProviderMessage } from '../providers/provider'
-import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -86,45 +80,4 @@ export function modelPromptBudget(
   }
 
   return budget
-}
-
-export function contextMessages(
-  history: ProviderMessage[],
-  config: PublicConfig,
-  tools: JsonValue[],
-  skillPrompt = '',
-  promptRegistry?: PromptRegistry,
-): ProviderMessage[] {
-  const resolved = resolveSystemPrompt(config, skillPrompt, promptRegistry)
-  return selectContextMessages({
-    system: resolved.message,
-    history,
-    maxPromptTokens: modelPromptBudget(config, tools),
-    estimation: config.limits.tokenEstimation,
-  })
-}
-
-export function resolveSystemPrompt(
-  config: PublicConfig,
-  skillPrompt = '',
-  promptRegistry?: PromptRegistry,
-): {
-  message: ProviderMessage
-  resources: PromptResourceSummary[]
-} {
-  const configured = config.assistant.systemPrompts[config.assistant.language]
-  const resolved = promptRegistry?.systemPrompt(
-    config.assistant.language,
-    configured,
-  )
-  const basePrompt = resolved?.content ?? configured
-  const system: ProviderMessage = {
-    role: 'system',
-    content: skillPrompt ? `${basePrompt}\n\n${skillPrompt}` : basePrompt,
-  }
-
-  return {
-    message: system,
-    resources: resolved ? [resolved.resource] : [],
-  }
 }

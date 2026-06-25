@@ -13,6 +13,10 @@ import {
 } from '../../shared/ids'
 import { JsonValueSchema, type JsonValue } from '../../shared/json'
 import { LlmUsageRecordSchema, type LlmUsageRecord } from '../../shared/usage'
+import {
+  PromptBuildSummarySchema,
+  type PromptBuildSummary,
+} from '../../shared/trace'
 
 const TraceBaseSchema = Type.Object({
   schemaVersion: Type.Literal(1),
@@ -92,6 +96,7 @@ export const TraceEventSchema = Type.Union([
       promptResources: Type.Optional(
         Type.Array(PromptResourceSummarySchema, { maxItems: 32 }),
       ),
+      promptBuild: Type.Optional(PromptBuildSummarySchema),
     }),
   ]),
   Type.Composite([
@@ -241,6 +246,7 @@ export type TraceEventInput =
       prefixHash: string
       prefixFingerprints?: string[]
       promptResources?: Static<typeof PromptResourceSummarySchema>[]
+      promptBuild?: PromptBuildSummary
     })
   | (TraceInputBase & {
       type: 'llm.stream'

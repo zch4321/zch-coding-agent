@@ -89,7 +89,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 4,
+          schemaVersion: 5,
           activeProviderId: 'deepseek',
           providers: [
             {
@@ -273,7 +273,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
     expect(permission).toBe('denied')
   })
 
-  test('shows configurable prompts, model discovery, and budget controls', async () => {
+  test('shows assistant preferences, model discovery, and budget controls', async () => {
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.locator('.sidebar-settings-button').click()
@@ -282,15 +282,15 @@ test.describe.serial('Electron security and IPC baseline', () => {
     })
     await settingsNavigation.getByRole('button', { name: '通用' }).click()
     const general = page.locator('.settings-section')
-    await expect(general.getByText('中文系统提示词')).toBeVisible()
-    await expect(general.getByText('英文系统提示词')).toBeVisible()
+    await expect(general.getByText('中文助手偏好')).toBeVisible()
+    await expect(general.getByText('英文助手偏好')).toBeVisible()
     const zhPrompt = general
-      .locator('.settings-field', { hasText: '中文系统提示词' })
+      .locator('.settings-field', { hasText: '中文助手偏好' })
       .locator('textarea')
     const saveStatus = general.locator('.settings-save-status')
-    await zhPrompt.fill('E2E 中文系统提示词')
-    await expect(zhPrompt).toHaveValue('E2E 中文系统提示词')
-    await general.getByRole('button', { name: '保存系统提示词' }).click()
+    await zhPrompt.fill('E2E 中文助手偏好')
+    await expect(zhPrompt).toHaveValue('E2E 中文助手偏好')
+    await general.getByRole('button', { name: '保存助手偏好' }).click()
     await expect(saveStatus).toHaveText('已保存')
     await expect
       .poll(async () =>
@@ -300,7 +300,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
               ok: boolean
               value?: {
                 config: {
-                  assistant: { systemPrompts: Record<string, string> }
+                  assistant: { preferences: Record<string, string> }
                 }
               }
             }>
@@ -309,12 +309,12 @@ test.describe.serial('Electron security and IPC baseline', () => {
             version: 1,
             section: 'assistant',
           })
-          return savedPrompt.value?.config.assistant.systemPrompts['zh-CN']
+          return savedPrompt.value?.config.assistant.preferences['zh-CN']
         }),
       )
-      .toBe('E2E 中文系统提示词')
-    await general.getByRole('button', { name: '恢复默认提示词' }).click()
-    await general.getByRole('button', { name: '保存系统提示词' }).click()
+      .toBe('E2E 中文助手偏好')
+    await general.getByRole('button', { name: '清空助手偏好' }).click()
+    await general.getByRole('button', { name: '保存助手偏好' }).click()
     await expect(saveStatus).toHaveText('已保存')
 
     await settingsNavigation.getByRole('button', { name: '模型服务' }).click()
@@ -463,6 +463,143 @@ test.describe.serial('Electron security and IPC baseline', () => {
       skills.getByText('E2E skill without optional trigger'),
     ).toBeVisible()
 
+    const traceDirectory = path.join(userDataPath, 'traces')
+    await mkdir(traceDirectory, { recursive: true })
+    const traceId = 'prompt-inspector-e2e'
+    const traceLines = [
+      {
+        schemaVersion: 1,
+        seq: 1,
+        eventId: 'event-prompt-e2e-1',
+        ts: '2026-06-25T00:00:00.000Z',
+        type: 'session.start',
+        sessionId: 'session-prompt-e2e',
+        workspace,
+        model: 'deepseek-chat',
+        mode: 'readonly',
+      },
+      {
+        schemaVersion: 1,
+        seq: 2,
+        eventId: 'event-prompt-e2e-2',
+        ts: '2026-06-25T00:00:01.000Z',
+        type: 'run.start',
+        sessionId: 'session-prompt-e2e',
+        runId: 'run-prompt-e2e',
+      },
+      {
+        schemaVersion: 1,
+        seq: 3,
+        eventId: 'event-prompt-e2e-3',
+        ts: '2026-06-25T00:00:02.000Z',
+        type: 'llm.request',
+        sessionId: 'session-prompt-e2e',
+        runId: 'run-prompt-e2e',
+        callId: 'llm-prompt-e2e',
+        normalizedMessages: [
+          { role: 'system', content: 'base harness' },
+          { role: 'system', content: 'runtime harness' },
+          {
+            role: 'user',
+            content:
+              '<assistant_preferences status="configured">E2E preference</assistant_preferences>',
+          },
+          { role: 'user', content: '<agents>Use E2E AGENTS.</agents>' },
+          { role: 'user', content: 'raw user request' },
+        ],
+        providerRequest: { messages: [] },
+        requestBytes: 128,
+        prefixHash: 'a'.repeat(64),
+        promptBuild: {
+          schemaVersion: 1,
+          messageCount: 5,
+          historyMessageCount: 5,
+          ledgerMessageCount: 4,
+          omittedHistoryMessages: 0,
+          promptBudgetTokens: 64000,
+          estimatedTokens: 128,
+          toolsHash: 'b'.repeat(64),
+          layers: [
+            {
+              seq: 1,
+              messageIndex: 0,
+              kind: 'base_instructions',
+              role: 'system',
+              source: 'resources/prompts/harness/base-instructions.zh-CN.md',
+              trusted: true,
+              editable: false,
+              sha256: 'c'.repeat(64),
+              estimatedTokens: 10,
+              included: true,
+              truncated: false,
+            },
+            {
+              seq: 2,
+              messageIndex: 1,
+              kind: 'runtime_policy_and_context',
+              role: 'system',
+              source: 'resources/prompts/harness/runtime-context.zh-CN.md',
+              trusted: true,
+              editable: false,
+              sha256: 'd'.repeat(64),
+              estimatedTokens: 10,
+              included: true,
+              truncated: false,
+            },
+            {
+              seq: 3,
+              messageIndex: 2,
+              kind: 'assistant_preferences',
+              role: 'user',
+              source: 'config.assistant.preferences',
+              trusted: false,
+              editable: true,
+              sha256: 'e'.repeat(64),
+              estimatedTokens: 10,
+              included: true,
+              truncated: false,
+            },
+            {
+              seq: 4,
+              messageIndex: 3,
+              kind: 'agents',
+              role: 'user',
+              source: 'workspace:AGENTS.md',
+              trusted: false,
+              editable: false,
+              sha256: 'f'.repeat(64),
+              estimatedTokens: 10,
+              included: true,
+              truncated: false,
+            },
+          ],
+        },
+      },
+      {
+        schemaVersion: 1,
+        seq: 4,
+        eventId: 'event-prompt-e2e-4',
+        ts: '2026-06-25T00:00:03.000Z',
+        type: 'run.end',
+        sessionId: 'session-prompt-e2e',
+        runId: 'run-prompt-e2e',
+        status: 'completed',
+      },
+      {
+        schemaVersion: 1,
+        seq: 5,
+        eventId: 'event-prompt-e2e-5',
+        ts: '2026-06-25T00:00:04.000Z',
+        type: 'session.end',
+        sessionId: 'session-prompt-e2e',
+      },
+    ]
+    await writeFile(
+      path.join(traceDirectory, `${traceId}.jsonl`),
+      traceLines.map((line) => JSON.stringify(line)).join('\n'),
+      'utf8',
+    )
+
     await navigation.getByRole('button', { name: '日志' }).click()
     const logging = page.locator('.settings-section')
     await expect(
@@ -473,6 +610,17 @@ test.describe.serial('Electron security and IPC baseline', () => {
     ).toBeVisible()
     await expect(logging.getByText('离线回放与分叉')).toBeVisible()
     await expect(logging.getByText('请求数', { exact: true })).toBeVisible()
+    await logging.getByRole('button', { name: '刷新 Trace' }).click()
+    await logging.locator('.trace-debug').locator('.n-select').first().click()
+    await page.getByText(traceId).click()
+    await logging.getByRole('button', { name: '离线回放' }).click()
+    await expect(logging.getByText('Prompt Inspector')).toBeVisible()
+    await expect(logging.getByText('base_instructions')).toBeVisible()
+    await expect(logging.getByText('runtime_policy_and_context')).toBeVisible()
+    await expect(logging.getByText('assistant_preferences')).toBeVisible()
+    await expect(logging.getByText('agents', { exact: true })).toBeVisible()
+    await logging.getByText('#2 · user').click()
+    await expect(logging.getByText('E2E preference')).toBeVisible()
   })
 
   test('collapses projects and renders file tabs as one active tab unit', async () => {

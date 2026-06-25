@@ -1,6 +1,15 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { NAlert, NButton, NInputNumber, NSelect, NSwitch } from 'naive-ui'
+import { computed, onMounted } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NCollapse,
+  NCollapseItem,
+  NInputNumber,
+  NSelect,
+  NSwitch,
+  NTag,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import { useTraceStore } from '../../stores/traces'
@@ -9,6 +18,11 @@ const agent = useAgentStore()
 const traces = useTraceStore()
 const { t } = useI18n()
 onMounted(() => void traces.load())
+const promptRequest = computed(() => traces.selectedPromptRequest)
+const promptLayers = computed(
+  () => promptRequest.value?.promptBuild?.layers ?? [],
+)
+const promptMessages = computed(() => promptRequest.value?.messages ?? [])
 
 function providerMetric(value: number | null | undefined, suffix = '') {
   return value === null || value === undefined
@@ -20,6 +34,18 @@ function clearClosedTraces() {
   if (window.confirm(t('logging.clearConfirm'))) {
     void traces.clearClosed()
   }
+}
+
+function jsonText(value: unknown) {
+  return JSON.stringify(value, null, 2)
+}
+
+function promptMessageTitle(message: unknown, index: number) {
+  const role =
+    message && typeof message === 'object' && !Array.isArray(message)
+      ? Reflect.get(message, 'role')
+      : undefined
+  return `#${index} · ${typeof role === 'string' ? role : 'message'}`
 }
 </script>
 
@@ -146,6 +172,66 @@ function clearClosedTraces() {
         {{ traces.actionMessage }}
       </NAlert>
       <NAlert v-if="traces.error" type="error">{{ traces.error }}</NAlert>
+    </div>
+
+    <div v-if="traces.replay" class="prompt-inspector">
+      <h3>{{ t('logging.promptInspector') }}</h3>
+      <label class="settings-field">
+        <span>{{ t('logging.promptRequest') }}</span>
+        <NSelect
+          v-model:value="traces.promptRequestEventId"
+          :options="traces.promptRequestOptions"
+          filterable
+          :placeholder="t('logging.promptRequestPlaceholder')"
+        />
+      </label>
+      <div v-if="promptRequest?.promptBuild" class="prompt-build-summary">
+        <article>
+          <span>{{ t('logging.promptMessages') }}</span>
+          <strong>{{ promptRequest.promptBuild.messageCount }}</strong>
+        </article>
+        <article>
+          <span>{{ t('logging.promptLayers') }}</span>
+          <strong>{{ promptRequest.promptBuild.ledgerMessageCount }}</strong>
+        </article>
+        <article>
+          <span>{{ t('logging.promptEstimatedTokens') }}</span>
+          <strong>{{
+            promptRequest.promptBuild.estimatedTokens.toLocaleString()
+          }}</strong>
+        </article>
+        <article>
+          <span>{{ t('logging.promptOmitted') }}</span>
+          <strong>{{
+            promptRequest.promptBuild.omittedHistoryMessages
+          }}</strong>
+        </article>
+      </div>
+      <div v-if="promptLayers.length" class="prompt-layer-list">
+        <article
+          v-for="layer in promptLayers"
+          :key="layer.seq"
+          class="prompt-layer-row"
+        >
+          <NTag size="small" :type="layer.trusted ? 'success' : 'warning'">
+            {{ layer.kind }}
+          </NTag>
+          <span>{{ layer.role }}</span>
+          <span>{{ layer.source }}</span>
+          <span>#{{ layer.messageIndex }}</span>
+          <span>{{ layer.estimatedTokens.toLocaleString() }} tokens</span>
+          <span>{{ layer.sha256.slice(0, 12) }}</span>
+        </article>
+      </div>
+      <NCollapse v-if="promptMessages.length" accordion>
+        <NCollapseItem
+          v-for="(message, index) in promptMessages"
+          :key="index"
+          :title="promptMessageTitle(message, index)"
+        >
+          <pre class="prompt-message-json">{{ jsonText(message) }}</pre>
+        </NCollapseItem>
+      </NCollapse>
     </div>
   </section>
 </template>

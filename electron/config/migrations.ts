@@ -1,5 +1,6 @@
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import { AppConfigSchema, DEFAULT_APP_CONFIG, type AppConfig } from './schema'
+import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 
 const validateAppConfig = compileSchema(AppConfigSchema)
 
@@ -47,7 +48,8 @@ export function migrateConfig(candidate: unknown): AppConfig {
     schemaVersion !== 1 &&
     schemaVersion !== 2 &&
     schemaVersion !== 3 &&
-    schemaVersion !== 4
+    schemaVersion !== 4 &&
+    schemaVersion !== 5
   ) {
     throw new Error(
       `Unsupported config schema version: ${String(schemaVersion)}`,
@@ -56,7 +58,7 @@ export function migrateConfig(candidate: unknown): AppConfig {
 
   const normalized = normalizeConfigShape(candidate)
   const migrated = mergeRecord(DEFAULT_APP_CONFIG as AppConfig, normalized)
-  migrated.schemaVersion = 4
+  migrated.schemaVersion = 5
   migrated.providers = migrated.providers.map((provider) => ({
     ...provider,
     reasoning: normalizeReasoning(provider.reasoning),
@@ -193,5 +195,50 @@ function normalizeConfigShape(candidate: object): Record<string, unknown> {
     delete approval.approverProvider
   }
 
+  normalizeAssistant(raw)
+
   return raw
+}
+
+function legacyPromptPreference(
+  candidate: unknown,
+  locale: keyof typeof LEGACY_DEFAULT_SYSTEM_PROMPTS,
+): string {
+  if (typeof candidate !== 'string') {
+    return ''
+  }
+
+  const trimmed = candidate.trim()
+  return trimmed && trimmed !== LEGACY_DEFAULT_SYSTEM_PROMPTS[locale]
+    ? trimmed
+    : ''
+}
+
+function normalizeAssistant(raw: Record<string, unknown>): void {
+  const assistant =
+    raw.assistant &&
+    typeof raw.assistant === 'object' &&
+    !Array.isArray(raw.assistant)
+      ? (raw.assistant as Record<string, unknown>)
+      : {}
+  const legacy =
+    assistant.systemPrompts &&
+    typeof assistant.systemPrompts === 'object' &&
+    !Array.isArray(assistant.systemPrompts)
+      ? (assistant.systemPrompts as Record<string, unknown>)
+      : undefined
+
+  if (
+    !assistant.preferences ||
+    typeof assistant.preferences !== 'object' ||
+    Array.isArray(assistant.preferences)
+  ) {
+    assistant.preferences = {
+      'zh-CN': legacyPromptPreference(legacy?.['zh-CN'], 'zh-CN'),
+      'en-US': legacyPromptPreference(legacy?.['en-US'], 'en-US'),
+    }
+  }
+
+  delete assistant.systemPrompts
+  raw.assistant = assistant
 }

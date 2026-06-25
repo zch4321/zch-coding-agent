@@ -14,7 +14,7 @@ import {
   DEFAULT_ORCHESTRATION_PROMPT_REFS,
   DEFAULT_SYSTEM_PROMPT_REFS,
 } from '../../shared/prompt-resources'
-import { DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
+import { DEFAULT_ASSISTANT_PREFERENCES } from '../../shared/system-prompts'
 
 export const AppProviderConfigSchema = Type.Object(
   {
@@ -53,7 +53,7 @@ export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
 
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(4),
+    schemaVersion: Type.Literal(5),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
@@ -88,7 +88,7 @@ export type AppConfig = Static<typeof AppConfigSchema>
 export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   activeProviderId: DEFAULT_PROVIDER_ID,
   providers: [
     {
@@ -155,7 +155,7 @@ export const DEFAULT_APP_CONFIG = {
   },
   assistant: {
     language: 'zh-CN',
-    systemPrompts: structuredClone(DEFAULT_SYSTEM_PROMPTS),
+    preferences: structuredClone(DEFAULT_ASSISTANT_PREFERENCES),
   },
   prompts: {
     system: structuredClone(DEFAULT_SYSTEM_PROMPT_REFS),
@@ -231,7 +231,7 @@ export function toPublicConfig(
         })
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     activeProviderId: config.activeProviderId,
     providers: config.providers.map((provider) => ({
       id: provider.id,

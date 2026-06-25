@@ -17,6 +17,7 @@ import type { HumanApprovalDecision } from '../permission/permission-pipeline'
 import type { SkillsManager } from '../skills/manager'
 import type { PromptRegistry } from '../prompts/registry'
 import type { GoalState, PlanState } from '../../shared/orchestration'
+import type { PromptLedgerEntry } from './prompt-harness'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -74,7 +75,10 @@ export interface SessionState {
   provider: string
   logger: TraceLogger
   history: ProviderMessage[]
-  systemPromptOverride?: string
+  promptLedger: PromptLedgerEntry[]
+  nextPromptSeq: number
+  lastRuntimeContextHash?: string
+  lastAgentsContextHash?: string
   providerRequestOverride?: JsonValue
   forkedFromEventId?: EventId
   goal?: GoalState

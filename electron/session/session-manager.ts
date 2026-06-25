@@ -62,6 +62,14 @@ import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 import { prepareRunContext } from './context-attachments'
 import { resolveSlashCommand } from './slash-commands'
 import { registerOrchestrationTools } from './orchestration-tools'
+import {
+  appendAgentsContextIfChanged,
+  appendInitialPromptHarness,
+  appendPromptLayer,
+  appendRuntimeContextIfChanged,
+  orchestrationRequestContent,
+  selectedContextContent,
+} from './prompt-harness'
 
 const RUN_CANCEL_GRACE_MS = 2_000
 const MAX_GOAL_CONTINUATIONS = 8
@@ -120,7 +128,6 @@ export class SessionManager {
     this.#providerTurns = new SessionProviderTurnRunner({
       configStore: this.#configStore,
       toolRegistry: this.#toolRegistry,
-      skillsManager: this.#skillsManager,
       pluginBus: this.#pluginBus,
       promptRegistry: options.promptRegistry,
       fetchImpl: this.#fetchImpl,
@@ -193,9 +200,9 @@ export class SessionManager {
     mode: PermissionMode
     provider: string
     initialHistory?: ProviderMessage[]
-    systemPromptOverride?: string
     providerRequestOverride?: JsonValue
     forkedFromEventId?: EventId
+    skipInitialHarness?: boolean
   }): Promise<SessionId> {
     const publicConfig = this.#configStore.getPublicConfig()
 
@@ -234,7 +241,8 @@ export class SessionManager {
       provider: input.provider,
       logger,
       history: structuredClone(input.initialHistory ?? []),
-      systemPromptOverride: input.systemPromptOverride,
+      promptLedger: [],
+      nextPromptSeq: 1,
       providerRequestOverride: structuredClone(input.providerRequestOverride),
       forkedFromEventId: input.forkedFromEventId,
       eventSeq: 0,
@@ -243,6 +251,17 @@ export class SessionManager {
     }
 
     this.#sessions.set(sessionId, session)
+    if (!input.skipInitialHarness) {
+      await appendInitialPromptHarness(session, {
+        workspace: session.workspace,
+        mode: session.mode,
+        config: publicConfig,
+        providerId: input.provider,
+        promptRegistry: this.#promptRegistry,
+        skillSummary: this.#skillsManager?.summaryPrompt(),
+        toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+      })
+    }
     await session.logger.write({
       type: 'session.start',
       sessionId,
@@ -283,6 +302,15 @@ export class SessionManager {
       mode,
     })
     session.mode = mode
+    await appendRuntimeContextIfChanged(session, {
+      workspace: session.workspace,
+      mode: session.mode,
+      config: this.#configStore.getPublicConfig(),
+      providerId: session.provider,
+      promptRegistry: this.#promptRegistry,
+      reason: 'permission_mode_changed',
+      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+    })
     return true
   }
 
@@ -389,19 +417,14 @@ export class SessionManager {
     providerRequest: JsonValue
     sourceEventId: EventId
   }): Promise<{ sessionId: SessionId }> {
-    const system = input.messages.find((message) => message.role === 'system')
-    const history = input.messages.filter(
-      (message) => message.role !== 'system',
-    )
     const sessionId = await this.createSession({
       workspace: input.workspace,
       mode: input.mode,
       provider: this.#configStore.getPublicConfig().activeProviderId,
-      initialHistory: history,
-      systemPromptOverride:
-        typeof system?.content === 'string' ? system.content : undefined,
+      initialHistory: input.messages,
       providerRequestOverride: input.providerRequest,
       forkedFromEventId: input.sourceEventId,
+      skipInitialHarness: true,
     })
     return { sessionId }
   }
@@ -577,10 +600,15 @@ export class SessionManager {
           userMessage,
           context,
         )
-        if (prepared.contextMessage) {
-          session.history.push({
+        for (const appMessage of prepared.appMessages) {
+          appendPromptLayer(session, {
+            kind: appMessage.kind,
             role: 'user',
-            content: prepared.contextMessage,
+            content: appMessage.content,
+            source: appMessage.source,
+            trusted: false,
+            editable: false,
+            config: this.#configStore.getPublicConfig(),
           })
         }
         session.history.push({
@@ -667,9 +695,33 @@ export class SessionManager {
   ): Promise<{
     visibleMessage: string
     providerMessage: string
-    contextMessage?: string
+    appMessages: Array<{
+      kind: 'selected_context' | 'orchestration_request' | 'user_interjection'
+      content: string
+      source: string
+    }>
   }> {
     const config = this.#configStore.getPublicConfig()
+    await appendRuntimeContextIfChanged(session, {
+      workspace: session.workspace,
+      mode: session.mode,
+      config,
+      providerId: session.provider,
+      promptRegistry: this.#promptRegistry,
+      reason: 'run_started',
+      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+      signal: run.controller.signal,
+    })
+    await appendAgentsContextIfChanged(session, {
+      workspace: session.workspace,
+      mode: session.mode,
+      config,
+      providerId: session.provider,
+      promptRegistry: this.#promptRegistry,
+      skillSummary: this.#skillsManager?.summaryPrompt(),
+      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+      signal: run.controller.signal,
+    })
     const command = resolveSlashCommand({
       message: userMessage,
       config,
@@ -711,10 +763,31 @@ export class SessionManager {
       signal: run.controller.signal,
     })
 
+    const appMessages: Array<{
+      kind: 'selected_context' | 'orchestration_request' | 'user_interjection'
+      content: string
+      source: string
+    }> = []
+
+    for (const message of command.providerContextMessages ?? []) {
+      appMessages.push(message)
+    }
+
+    if (preparedContext.providerContent) {
+      appMessages.push({
+        kind: 'selected_context',
+        content: selectedContextContent(
+          preparedContext.providerContent,
+          'run_context',
+        ),
+        source: 'run_context.attachments',
+      })
+    }
+
     return {
       visibleMessage: command.visibleMessage,
       providerMessage: command.providerMessage,
-      contextMessage: preparedContext.providerContent || undefined,
+      appMessages,
     }
   }
 
@@ -873,9 +946,14 @@ export class SessionManager {
     })
 
     if (input.injectIntoHistory) {
-      session.history.push({
+      appendPromptLayer(session, {
+        kind: 'orchestration_request',
         role: 'user',
-        content: input.text,
+        content: orchestrationRequestContent(input.kind, input.text),
+        source: `orchestration.${input.kind}`,
+        trusted: false,
+        editable: false,
+        config: this.#configStore.getPublicConfig(),
       })
     }
   }

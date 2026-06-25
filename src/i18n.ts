@@ -228,6 +228,14 @@ const messages = {
         'Agent 在每次模型调用时使用当前界面语言对应的提示词。修改后对已有对话的下一轮调用生效，但不会改变路径和权限等硬安全边界。',
       saveSystemPrompts: '保存系统提示词',
       restoreSystemPrompts: '恢复默认提示词',
+      assistantPreferencesZh: '中文助手偏好',
+      assistantPreferencesEn: '英文助手偏好',
+      assistantPreferencesPlaceholder:
+        '可留空。写入语气、输出风格或默认工作偏好。',
+      assistantPreferencesHint:
+        '助手偏好会作为低优先级上下文注入，只对新对话生效，不能覆盖 Harness、运行时策略、权限或路径边界。',
+      saveAssistantPreferences: '保存助手偏好',
+      restoreAssistantPreferences: '清空助手偏好',
       projectTitle: '项目',
       projectHint: '选择供文件、命令和助手操作使用的工作区。',
       currentWorkspace: '当前工作区',
@@ -368,6 +376,13 @@ const messages = {
       approvals: '{count} 次审批',
       closed: '已关闭',
       active: '活动中',
+      promptInspector: 'Prompt Inspector',
+      promptRequest: 'LLM Request',
+      promptRequestPlaceholder: '选择一次 LLM request',
+      promptMessages: '最终消息',
+      promptLayers: 'Harness 层',
+      promptEstimatedTokens: '估算 Token',
+      promptOmitted: '裁剪消息',
     },
     skills: {
       title: '技能',
@@ -623,6 +638,14 @@ const messages = {
         'Each model call uses the prompt matching the interface language. Changes apply to the next turn of existing conversations without changing hard path or permission boundaries.',
       saveSystemPrompts: 'Save system prompts',
       restoreSystemPrompts: 'Restore defaults',
+      assistantPreferencesZh: 'Chinese assistant preferences',
+      assistantPreferencesEn: 'English assistant preferences',
+      assistantPreferencesPlaceholder:
+        'Optional. Add tone, output style, or default working preferences.',
+      assistantPreferencesHint:
+        'Assistant preferences are injected as low-priority context for new conversations only. They cannot override the Harness, runtime policy, permissions, or path boundaries.',
+      saveAssistantPreferences: 'Save assistant preferences',
+      restoreAssistantPreferences: 'Clear preferences',
       projectTitle: 'Project',
       projectHint:
         'Select the workspace used by file, command, and Agent operations.',
@@ -773,6 +796,13 @@ const messages = {
       approvals: '{count} approvals',
       closed: 'closed',
       active: 'active',
+      promptInspector: 'Prompt Inspector',
+      promptRequest: 'LLM request',
+      promptRequestPlaceholder: 'Select an LLM request',
+      promptMessages: 'Final messages',
+      promptLayers: 'Harness layers',
+      promptEstimatedTokens: 'Estimated tokens',
+      promptOmitted: 'Omitted messages',
     },
     skills: {
       title: 'Skills',

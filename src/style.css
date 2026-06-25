@@ -2821,6 +2821,84 @@ code {
   font-size: 14px;
 }
 
+.prompt-inspector {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.prompt-inspector h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.prompt-build-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.prompt-build-summary article {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.prompt-build-summary span,
+.prompt-layer-row {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.prompt-build-summary strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.prompt-layer-list {
+  display: grid;
+  gap: 6px;
+}
+
+.prompt-layer-row {
+  display: grid;
+  grid-template-columns:
+    minmax(160px, 1.2fr) 48px minmax(0, 1.8fr)
+    48px 96px 92px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.prompt-layer-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-message-json {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .remembered-rules article > div {
   display: grid;
   gap: 2px;

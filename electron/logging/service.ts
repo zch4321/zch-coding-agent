@@ -163,6 +163,27 @@ function providerMessages(value: JsonValue[]): ProviderMessage[] {
   })
 }
 
+function truncateJsonStrings(value: JsonValue, maxLength = 200_000): JsonValue {
+  if (typeof value === 'string') {
+    return value.length > maxLength ? value.slice(0, maxLength) : value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => truncateJsonStrings(item, maxLength))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        truncateJsonStrings(item, maxLength),
+      ]),
+    )
+  }
+
+  return value
+}
+
 export class TraceService {
   constructor(readonly directory: string) {}
 
@@ -238,6 +259,25 @@ export class TraceService {
                   eventId: event.eventId,
                   runId: event.runId,
                   seq: event.seq,
+                },
+              ]
+            : [],
+        )
+        .slice(-10_000),
+      requests: events
+        .flatMap((event) =>
+          event.type === 'llm.request'
+            ? [
+                {
+                  eventId: event.eventId,
+                  runId: event.runId,
+                  seq: event.seq,
+                  messages: event.normalizedMessages
+                    .slice(0, 10_000)
+                    .map((message) => truncateJsonStrings(message)),
+                  ...(event.promptBuild
+                    ? { promptBuild: structuredClone(event.promptBuild) }
+                    : {}),
                 },
               ]
             : [],

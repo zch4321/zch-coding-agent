@@ -13,7 +13,7 @@ import {
   TRACE_NOTICE_VERSION,
   YOLO_NOTICE_VERSION,
 } from '../../shared/notices'
-import { DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
+import { DEFAULT_ASSISTANT_PREFERENCES } from '../../shared/system-prompts'
 import { nowNotice, toUiRememberedRules } from './config-mapping'
 import type { UiModelProfile, UiRememberedRule } from './agent-types'
 import { DEFAULT_PROVIDER_FORM, providerFormSignature } from './provider-form'
@@ -113,7 +113,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     },
     assistantForm: {
       language: 'zh-CN' as AssistantLanguage,
-      systemPrompts: structuredClone(DEFAULT_SYSTEM_PROMPTS),
+      preferences: structuredClone(DEFAULT_ASSISTANT_PREFERENCES),
     },
     assistantSaving: false,
     assistantSaveStatus: '',
@@ -339,9 +339,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         kind: 'assistant',
         value: {
           language: targetLanguage,
-          systemPrompts: {
-            'zh-CN': this.assistantForm.systemPrompts['zh-CN'].trim(),
-            'en-US': this.assistantForm.systemPrompts['en-US'].trim(),
+          preferences: {
+            'zh-CN': this.assistantForm.preferences['zh-CN'].trim(),
+            'en-US': this.assistantForm.preferences['en-US'].trim(),
           },
         },
       })

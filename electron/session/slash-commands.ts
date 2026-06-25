@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import type { PublicConfig } from '../../shared/config'
+import type { PromptLayerKind } from '../../shared/trace'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { SkillsManager } from '../skills/manager'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
+import {
+  orchestrationRequestContent,
+  selectedContextContent,
+} from './prompt-harness'
 
 export interface SlashCommandResolution {
   visibleMessage: string
@@ -12,6 +17,11 @@ export interface SlashCommandResolution {
     text: string
     resource?: PromptResourceSummary
   }
+  providerContextMessages?: Array<{
+    kind: Extract<PromptLayerKind, 'selected_context' | 'orchestration_request'>
+    content: string
+    source: string
+  }>
   goal?: GoalState
   plan?: PlanState
 }
@@ -108,15 +118,25 @@ export function resolveSlashCommand(input: {
 
     return {
       visibleMessage: input.message,
-      providerMessage: [
-        `The user explicitly requested skill "${skill.name}". Follow its full instructions without first calling read_skill.`,
-        `<skill name="${skill.name}" source="${skill.source}" sha256="${skill.sha256}">`,
-        skill.body,
-        '</skill>',
-        instruction
-          ? `User request: ${instruction}`
-          : 'User request: execute the requested skill.',
-      ].join('\n\n'),
+      providerMessage: input.message,
+      providerContextMessages: [
+        {
+          kind: 'selected_context',
+          source: `skill:${skill.name}`,
+          content: selectedContextContent(
+            [
+              `The user explicitly requested skill "${skill.name}". Follow its full instructions without first calling read_skill.`,
+              `<skill name="${skill.name}" source="${skill.source}" sha256="${skill.sha256}">`,
+              skill.body,
+              '</skill>',
+              instruction
+                ? `User request: ${instruction}`
+                : 'User request: execute the requested skill.',
+            ].join('\n\n'),
+            `skill:${skill.name}`,
+          ),
+        },
+      ],
     }
   }
 
@@ -132,7 +152,14 @@ export function resolveSlashCommand(input: {
 
     return {
       visibleMessage: input.message,
-      providerMessage: text,
+      providerMessage: input.message,
+      providerContextMessages: [
+        {
+          kind: 'orchestration_request',
+          source: 'slash:/compact',
+          content: orchestrationRequestContent('compact', text),
+        },
+      ],
       orchestratorMessage: {
         kind: 'compact',
         text,
@@ -148,7 +175,14 @@ export function resolveSlashCommand(input: {
 
     return {
       visibleMessage: input.message,
-      providerMessage: parsed.rest,
+      providerMessage: input.message,
+      providerContextMessages: [
+        {
+          kind: 'orchestration_request',
+          source: 'slash:/prompt',
+          content: orchestrationRequestContent('prompt', parsed.rest),
+        },
+      ],
       orchestratorMessage: {
         kind: 'prompt',
         text: parsed.rest,
@@ -162,12 +196,20 @@ export function resolveSlashCommand(input: {
     }
 
     const goal = newGoal(parsed.rest)
+    const instruction = [
+      `Start and pursue this Goal: ${goal.objective}`,
+      'Use goal_get when you need the current state. You must eventually call goal_complete with evidence, or goal_block with required input if blocked.',
+    ].join('\n\n')
     return {
       visibleMessage: input.message,
-      providerMessage: [
-        `Start and pursue this Goal: ${goal.objective}`,
-        'Use goal_get when you need the current state. You must eventually call goal_complete with evidence, or goal_block with required input if blocked.',
-      ].join('\n\n'),
+      providerMessage: input.message,
+      providerContextMessages: [
+        {
+          kind: 'orchestration_request',
+          source: 'slash:/goal',
+          content: orchestrationRequestContent('goal-started', instruction),
+        },
+      ],
       goal,
       orchestratorMessage: {
         kind: 'goal-started',
@@ -182,12 +224,20 @@ export function resolveSlashCommand(input: {
     }
 
     const plan = newPlan(parsed.rest)
+    const instruction = [
+      `Create a Plan for user review: ${plan.objective}`,
+      'First call plan_set with concrete items. plan_set leaves the Plan awaiting_review, so stop after creating it and wait for user approval. If the user later approves, call plan_status with status="active" before executing open items. If the user rejects it, call plan_status with status="rejected". Completed items require result and evidence.',
+    ].join('\n\n')
     return {
       visibleMessage: input.message,
-      providerMessage: [
-        `Create a Plan for user review: ${plan.objective}`,
-        'First call plan_set with concrete items. plan_set leaves the Plan awaiting_review, so stop after creating it and wait for user approval. If the user later approves, call plan_status with status="active" before executing open items. If the user rejects it, call plan_status with status="rejected". Completed items require result and evidence.',
-      ].join('\n\n'),
+      providerMessage: input.message,
+      providerContextMessages: [
+        {
+          kind: 'orchestration_request',
+          source: 'slash:/plan',
+          content: orchestrationRequestContent('plan-started', instruction),
+        },
+      ],
       plan,
       orchestratorMessage: {
         kind: 'plan-started',
