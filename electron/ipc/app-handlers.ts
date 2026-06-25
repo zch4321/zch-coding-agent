@@ -1,10 +1,7 @@
 import { BrowserWindow, dialog, shell, type OpenDialogOptions } from 'electron'
 import { stat } from 'node:fs/promises'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
-import {
-  ChangeHistoryError,
-  ChangeHistoryStore,
-} from '../session/change-history'
+import { ChangeHistoryError, ChangeHistoryStore } from '../session/change-history'
 import {
   fetchOpenAICompatibleModelCatalog,
   ModelCatalogError,
