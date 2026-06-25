@@ -438,6 +438,11 @@ export function createAppIpcHandlers(
         payload.mode,
       ),
     }),
+    'plan:update-status': (payload) =>
+      sessionManager.updatePlanStatus({
+        sessionId: payload.sessionId,
+        status: payload.status,
+      }),
     'run:start': (payload) => ({
       runId: sessionManager.startRun({
         sessionId: payload.sessionId,

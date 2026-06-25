@@ -583,6 +583,59 @@ describe('agent store regressions', () => {
     expect(store.activeConversation?.title).toBe('Fix the flaky terminal test')
   })
 
+  it('approves an awaiting plan and starts a run', async () => {
+    const plan = {
+      id: 'plan:test',
+      objective: 'Review this plan',
+      status: 'awaiting_review' as const,
+      items: [
+        {
+          id: 'item:1',
+          title: 'Inspect state',
+          status: 'pending' as const,
+          updatedAt: stamp,
+        },
+      ],
+      createdAt: stamp,
+      updatedAt: stamp,
+      continuationCount: 0,
+    }
+    const updatePlanStatus = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { accepted: true, plan: { ...plan, status: 'active' as const } },
+    }))
+    const startRun = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { runId },
+    }))
+    installApi({ updatePlanStatus, startRun })
+    const store = useAgentStore()
+    store.workspacePath = 'F:/workspace/example'
+    store.createConversation()
+    store.sessionId = sessionId
+    store.plan = plan
+
+    await store.approvePlan()
+
+    expect(updatePlanStatus).toHaveBeenCalledWith({
+      version: 1,
+      sessionId,
+      status: 'active',
+    })
+    expect(startRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        version: 1,
+        sessionId,
+        message: '用户已批准当前计划。继续执行已激活的计划。',
+      }),
+    )
+    expect(store.plan?.status).toBe('active')
+    expect(store.activeRunId).toBe(runId)
+    expect(store.messages.at(-1)?.text).toContain('用户已批准当前计划')
+  })
+
   it('forks a conversation into a new branch, truncating tools after the fork point', async () => {
     const saveWorkbench = vi.fn(
       async (payload: Parameters<AgentApi['saveWorkbench']>[0]) => ({

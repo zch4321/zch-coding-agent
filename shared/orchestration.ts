@@ -36,6 +36,14 @@ export const PlanItemStatusSchema = Type.Union([
 ])
 export type PlanItemStatus = Static<typeof PlanItemStatusSchema>
 
+export const PlanStatusSchema = Type.Union([
+  Type.Literal('awaiting_review'),
+  Type.Literal('active'),
+  Type.Literal('rejected'),
+  Type.Literal('completed'),
+])
+export type PlanStatus = Static<typeof PlanStatusSchema>
+
 export const PlanItemSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
@@ -53,6 +61,7 @@ export const PlanStateSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
     objective: Type.String({ minLength: 1, maxLength: 16_384 }),
+    status: Type.Optional(PlanStatusSchema),
     items: Type.Array(PlanItemSchema, { maxItems: 256 }),
     createdAt: Type.String({ format: 'date-time' }),
     updatedAt: Type.String({ format: 'date-time' }),

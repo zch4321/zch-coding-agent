@@ -37,6 +37,7 @@ function newPlan(objective: string): PlanState {
   return {
     id: `plan:${randomUUID()}`,
     objective,
+    status: 'awaiting_review',
     items: [],
     createdAt,
     updatedAt: createdAt,
@@ -184,13 +185,13 @@ export function resolveSlashCommand(input: {
     return {
       visibleMessage: input.message,
       providerMessage: [
-        `Create and execute a Plan for: ${plan.objective}`,
-        'First call plan_set with concrete items. Then update each item with plan_update. Completed items require result and evidence.',
+        `Create a Plan for user review: ${plan.objective}`,
+        'First call plan_set with concrete items. plan_set leaves the Plan awaiting_review, so stop after creating it and wait for user approval. If the user later approves, call plan_status with status="active" before executing open items. If the user rejects it, call plan_status with status="rejected". Completed items require result and evidence.',
       ].join('\n\n'),
       plan,
       orchestratorMessage: {
         kind: 'plan-started',
-        text: `Plan started: ${plan.objective}`,
+        text: `Plan awaiting review: ${plan.objective}`,
       },
     }
   }

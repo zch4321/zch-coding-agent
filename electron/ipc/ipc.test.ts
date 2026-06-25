@@ -95,6 +95,11 @@ const validPayloads: {
     workspace: 'F:/workspace',
   },
   'session:update-mode': { version: 1, sessionId, mode: 'auto' },
+  'plan:update-status': {
+    version: 1,
+    sessionId,
+    status: 'active',
+  },
   'run:start': {
     version: 1,
     sessionId,

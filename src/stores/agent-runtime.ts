@@ -13,6 +13,7 @@ import type {
   ContextAttachmentRef,
 } from '../../shared/context'
 import type { RunId, SessionId } from '../../shared/ids'
+import type { PlanStatus } from '../../shared/orchestration'
 import type { PendingApproval } from './agent-types'
 import { useAgentChangesStore } from './agent-changes'
 import { useAgentSettingsStore } from './agent-settings'
@@ -470,6 +471,82 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       this.mode = mode
       this.schedulePersist(false)
       return true
+    },
+    async updatePlanStatus(status: PlanStatus) {
+      const timeline = useAgentTimelineStore()
+      const bridge = window.agentApi
+      if (
+        !bridge ||
+        !this.sessionId ||
+        this.activeRunId ||
+        this.pendingApproval
+      )
+        return false
+
+      const result = await bridge.updatePlanStatus({
+        version: IPC_VERSION,
+        sessionId: this.sessionId,
+        status,
+      })
+
+      if (result.ok && result.value.accepted) {
+        timeline.plan = result.value.plan
+          ? structuredClone(result.value.plan)
+          : undefined
+        this.schedulePersist(false)
+        return true
+      }
+
+      this.error = result.ok
+        ? 'The current plan state could not be changed.'
+        : result.error.message
+      return false
+    },
+    async approvePlan() {
+      const timeline = useAgentTimelineStore()
+      const settings = useAgentSettingsStore()
+      const bridge = window.agentApi
+      if (
+        !bridge ||
+        !this.sessionId ||
+        !timeline.plan ||
+        this.activeRunId ||
+        this.pendingApproval
+      ) {
+        return false
+      }
+
+      if (!(await this.updatePlanStatus('active'))) return false
+
+      const text =
+        settings.assistantForm.language === 'zh-CN'
+          ? '用户已批准当前计划。继续执行已激活的计划。'
+          : 'The user approved the current plan. Continue executing the active plan.'
+      const result = await bridge.startRun({
+        version: IPC_VERSION,
+        sessionId: this.sessionId,
+        message: text,
+        clientRequestId: requestId(),
+      })
+
+      if (result.ok) {
+        timeline.messages.push({
+          id: requestId(),
+          role: 'user',
+          text,
+          reasoning: '',
+          order: timeline.nextTimelineOrder(),
+        })
+        this.activeRunId = result.value.runId
+        this.schedulePersist()
+        return true
+      }
+
+      this.error = result.error.message
+      return false
+    },
+    async rejectPlan() {
+      return this.updatePlanStatus('rejected')
     },
     async createSession() {
       const workbench = useAgentWorkbenchStore()

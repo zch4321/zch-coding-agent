@@ -208,6 +208,82 @@ describe('App', () => {
     )
   })
 
+  it('approves an awaiting plan from the plan tab', async () => {
+    const updatePlanStatus = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: {
+        accepted: true,
+        plan: {
+          id: 'plan:test',
+          objective: 'Review the plan',
+          status: 'active' as const,
+          items: [
+            {
+              id: 'item:1',
+              title: 'Inspect state',
+              status: 'pending' as const,
+              updatedAt: '2026-06-25T00:00:00.000Z',
+            },
+          ],
+          createdAt: '2026-06-25T00:00:00.000Z',
+          updatedAt: '2026-06-25T00:01:00.000Z',
+          continuationCount: 0,
+        },
+      },
+    }))
+    const startRun = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { runId: 'run:test' as RunId },
+    }))
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        updatePlanStatus,
+        startRun,
+      } as Partial<AgentApi> as AgentApi,
+    })
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    store.sessionId = 'session:test' as SessionId
+    store.plan = {
+      id: 'plan:test',
+      objective: 'Review the plan',
+      status: 'awaiting_review',
+      items: [
+        {
+          id: 'item:1',
+          title: 'Inspect state',
+          status: 'pending',
+          updatedAt: '2026-06-25T00:00:00.000Z',
+        },
+      ],
+      createdAt: '2026-06-25T00:00:00.000Z',
+      updatedAt: '2026-06-25T00:00:00.000Z',
+      continuationCount: 0,
+    }
+    const wrapper = mount(ArtifactPanel, {
+      global: { plugins: [pinia, i18n] },
+      props: { activeTab: 'plan' },
+    })
+    const approveButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('批准并开始'))
+
+    expect(wrapper.text()).toContain('待审查')
+    expect(approveButton).toBeTruthy()
+    await approveButton?.trigger('click')
+    await flushPromises()
+
+    expect(updatePlanStatus).toHaveBeenCalledWith({
+      version: 1,
+      sessionId: 'session:test',
+      status: 'active',
+    })
+    expect(startRun).toHaveBeenCalled()
+  })
+
   it('renders approval injection content as inert text', async () => {
     const pinia = createPinia()
     const wrapper = mount(App, {

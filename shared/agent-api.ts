@@ -61,6 +61,9 @@ export interface AgentApi {
   updateSessionMode(
     payload: IpcPayload<'session:update-mode'>,
   ): Promise<IpcResult<'session:update-mode'>>
+  updatePlanStatus(
+    payload: IpcPayload<'plan:update-status'>,
+  ): Promise<IpcResult<'plan:update-status'>>
   startRun(payload: IpcPayload<'run:start'>): Promise<IpcResult<'run:start'>>
   interruptRun(
     payload: IpcPayload<'run:interrupt'>,
@@ -151,6 +154,7 @@ export const AGENT_API_KEYS = [
   'revertChange',
   'closeSession',
   'updateSessionMode',
+  'updatePlanStatus',
   'startRun',
   'interruptRun',
   'decideApproval',

@@ -15,6 +15,7 @@ import type {
 import type { JsonValue } from '../../shared/json'
 import type { RunContext } from '../../shared/context'
 import type { TerminalInfo, TerminalSnapshot } from '../../shared/terminal'
+import type { PlanState, PlanStatus } from '../../shared/orchestration'
 import {
   PROVIDER_NOTICE_VERSION,
   TRACE_NOTICE_VERSION,
@@ -283,6 +284,36 @@ export class SessionManager {
     })
     session.mode = mode
     return true
+  }
+
+  updatePlanStatus(input: { sessionId: SessionId; status: PlanStatus }): {
+    accepted: boolean
+    plan?: PlanState
+  } {
+    const session = this.#sessions.get(input.sessionId)
+
+    if (!session || session.closed || session.activeRun || !session.plan) {
+      return { accepted: false }
+    }
+
+    const openItems = session.plan.items.filter(
+      (item) => item.status !== 'completed' && item.status !== 'cancelled',
+    )
+
+    if (input.status === 'completed' && openItems.length > 0) {
+      return { accepted: false }
+    }
+
+    const previousStatus = session.plan.status ?? 'active'
+    session.plan.status = input.status
+    session.plan.updatedAt = new Date().toISOString()
+
+    if (input.status === 'active' && previousStatus !== 'active') {
+      session.plan.continuationCount = 0
+      delete session.plan.warning
+    }
+
+    return { accepted: true, plan: structuredClone(session.plan) }
   }
 
   async closeSession(sessionId: SessionId): Promise<boolean> {
@@ -742,7 +773,11 @@ export class SessionManager {
       (item) => item.status !== 'completed' && item.status !== 'cancelled',
     )
 
-    if (!plan || openItems.length === 0) {
+    if (
+      !plan ||
+      (plan.status ?? 'active') !== 'active' ||
+      openItems.length === 0
+    ) {
       return 'finish'
     }
 

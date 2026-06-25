@@ -76,6 +76,14 @@ const planProgress = computed(() => {
   const completed = items.filter((item) => item.status === 'completed').length
   return { completed, total: items.length }
 })
+const planWorkflowStatus = computed(() => agent.plan?.status ?? 'active')
+const canReviewPlan = computed(
+  () =>
+    planWorkflowStatus.value === 'awaiting_review' &&
+    Boolean(agent.sessionId) &&
+    !agent.activeRunId &&
+    !agent.pendingApproval,
+)
 const runOptions = computed<SelectOption[]>(() => {
   const runs = new Map<string, number>()
   for (const change of agent.changes) {
@@ -121,6 +129,10 @@ const filteredChanges = computed(() =>
 )
 function planStatusClass(item: PlanItem): string {
   return `status-${item.status.replace(/_/g, '-')}`
+}
+
+function planWorkflowStatusClass(): string {
+  return `state-${planWorkflowStatus.value.replace(/_/g, '-')}`
 }
 
 function formatTimestamp(value: string): string {
@@ -630,7 +642,12 @@ watch(
       <template v-if="agent.plan">
         <header class="plan-panel-header">
           <div>
-            <span>{{ t('artifact.plan') }}</span>
+            <div class="plan-title-row">
+              <span>{{ t('artifact.plan') }}</span>
+              <span class="plan-state-badge" :class="planWorkflowStatusClass()">
+                {{ t(`artifact.planState.${planWorkflowStatus}`) }}
+              </span>
+            </div>
             <strong>{{ agent.plan.objective }}</strong>
           </div>
           <small>
@@ -642,6 +659,28 @@ watch(
             }}
           </small>
         </header>
+        <div
+          v-if="planWorkflowStatus === 'awaiting_review'"
+          class="plan-review-actions"
+        >
+          <NButton
+            type="primary"
+            size="small"
+            :disabled="!canReviewPlan"
+            @click="agent.approvePlan"
+          >
+            {{ t('artifact.approvePlan') }}
+          </NButton>
+          <NButton
+            secondary
+            size="small"
+            :disabled="!canReviewPlan"
+            @click="agent.rejectPlan"
+          >
+            {{ t('artifact.rejectPlan') }}
+          </NButton>
+          <small>{{ t('artifact.planReviewHint') }}</small>
+        </div>
         <p v-if="agent.plan.warning" class="plan-warning">
           <UiIcon name="warning" />{{ agent.plan.warning }}
         </p>

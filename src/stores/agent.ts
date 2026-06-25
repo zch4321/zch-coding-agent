@@ -169,6 +169,9 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     acceptProviderNotice: settings.acceptProviderNotice,
     acceptYoloNotice: settings.acceptYoloNotice,
     createSession: runtime.createSession,
+    updatePlanStatus: runtime.updatePlanStatus,
+    approvePlan: runtime.approvePlan,
+    rejectPlan: runtime.rejectPlan,
     loadConversationChanges: changes.loadConversationChanges,
     revertChange: (changeId: string) =>
       changes.revertChange(

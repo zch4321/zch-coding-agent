@@ -3,6 +3,7 @@ import { Type, type Static } from '@sinclair/typebox'
 import type { ToolRegistrationPort, ToolResult } from '../tools/types'
 import type { RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
+import { PlanStatusSchema } from '../../shared/orchestration'
 import type { AgentEventDraft, SessionState } from './session-types'
 
 const EmptySchema = Type.Object({}, { additionalProperties: false })
@@ -44,6 +45,12 @@ const PlanUpdateSchema = Type.Object(
     ]),
     result: Type.Optional(Type.String({ maxLength: 65_536 })),
     evidence: Type.Optional(Type.String({ maxLength: 65_536 })),
+  },
+  { additionalProperties: false },
+)
+const PlanStatusUpdateSchema = Type.Object(
+  {
+    status: PlanStatusSchema,
   },
   { additionalProperties: false },
 )
@@ -229,7 +236,7 @@ export function registerOrchestrationTools(
   registry.registerTool({
     id: 'plan_set',
     description:
-      'Create or replace the current Plan with concrete items before executing a planned task.',
+      'Create or replace the current Plan with concrete items and put it in awaiting_review by default. After calling plan_set, stop for user review instead of executing the items. If the user explicitly approves the current plan later, call plan_status with status="active" and then continue execution. If the user rejects the plan, call plan_status with status="rejected".',
     inputSchema: PlanSetSchema,
     effects: ['instruction.read'],
     defaultRisk: 'low',
@@ -244,6 +251,7 @@ export function registerOrchestrationTools(
       session.plan = {
         id: session.plan?.id ?? `plan:${randomUUID()}`,
         objective,
+        status: 'awaiting_review',
         continuationCount: session.plan?.continuationCount ?? 0,
         createdAt: session.plan?.createdAt ?? updatedAt,
         updatedAt,
@@ -254,6 +262,42 @@ export function registerOrchestrationTools(
           updatedAt,
         })),
       }
+      emitPlan(session, options.emit, context.runId)
+      return ok({ plan: session.plan })
+    },
+  })
+
+  registry.registerTool({
+    id: 'plan_status',
+    description:
+      'Change the top-level Plan status. Use status="awaiting_review" after creating or revising a plan that needs user approval, then stop and wait. Use status="active" only after explicit user approval, including natural-language approval like "approve", "go ahead", or "start"; after setting active, continue executing open plan items. Use status="rejected" when the user rejects or asks not to proceed; do not execute rejected plan items. Use status="completed" only after the plan is finished; complete or cancel every open item first.',
+    inputSchema: PlanStatusUpdateSchema,
+    effects: ['instruction.read'],
+    defaultRisk: 'low',
+    supportsAbort: true,
+    defaultTimeoutMs: 1_000,
+    maxOutputBytes: 32 * 1_024,
+    async execute(args: Static<typeof PlanStatusUpdateSchema>, context) {
+      const session = requireSession(options.getSession, context.sessionId)
+      if ('status' in session) return session
+      if (!session.plan) return error('No Plan exists')
+
+      const openItems = openPlanItems(session)
+      if (args.status === 'completed' && openItems.length > 0) {
+        return error(
+          'Complete or cancel every open plan item before setting the Plan status to completed.',
+        )
+      }
+
+      const previousStatus = session.plan.status ?? 'active'
+      session.plan.status = args.status
+      session.plan.updatedAt = now()
+
+      if (args.status === 'active' && previousStatus !== 'active') {
+        session.plan.continuationCount = 0
+        delete session.plan.warning
+      }
+
       emitPlan(session, options.emit, context.runId)
       return ok({ plan: session.plan })
     },

@@ -307,6 +307,8 @@ class GoalContinuationProvider implements LLMProvider {
 class PlanWarningProvider implements LLMProvider {
   calls = 0
 
+  constructor(private readonly activatePlan = false) {}
+
   async *streamChat(): AsyncIterable<ProviderEvent> {
     this.calls += 1
 
@@ -335,6 +337,40 @@ class PlanWarningProvider implements LLMProvider {
             toolId: 'plan_set',
             args,
             reason: 'Create the requested plan',
+          },
+        ],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    if (this.calls === 2 && this.activatePlan) {
+      const args = { status: 'active' }
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'plan-activate' },
+        turn: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-plan-status',
+              type: 'function',
+              function: {
+                name: 'plan_status',
+                arguments: JSON.stringify(args),
+              },
+            },
+          ],
+        },
+        toolCalls: [
+          {
+            id: 'call-plan-status' as CallId,
+            toolId: 'plan_status',
+            args,
+            reason: 'The user approved the plan',
           },
         ],
         usage: {},
@@ -713,7 +749,7 @@ describe('SessionManager P2 loop', () => {
     await manager.closeSession(sessionId)
   })
 
-  it('auto-continues a standalone Plan once and then warns', async () => {
+  it('does not auto-continue a Plan awaiting review', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-plan-'))
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
@@ -753,7 +789,72 @@ describe('SessionManager P2 loop', () => {
       ),
     )
 
-    expect(provider.calls).toBe(3)
+    expect(provider.calls).toBe(2)
+    expect(
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'plan.updated' &&
+          envelope.event.plan?.status === 'awaiting_review',
+      ),
+    ).toBe(true)
+    expect(
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'orchestrator.message' &&
+          envelope.event.kind === 'plan-continuation',
+      ),
+    ).toBe(false)
+    expect(
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'orchestrator.message' &&
+          envelope.event.kind === 'plan-warning',
+      ),
+    ).toBe(false)
+    await manager.closeSession(sessionId)
+  })
+
+  it('auto-continues an active standalone Plan once and then warns', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-plan-'))
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const provider = new PlanWarningProvider(true)
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () =>
+        ({
+          isDestroyed: () => false,
+          send: (_channel: string, envelope: AgentEventEnvelope) =>
+            sent.push(envelope),
+        }) as unknown as WebContents,
+      providerFactory: () => provider,
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: '/plan Check something',
+      clientRequestId: 'request-plan',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'run.status' &&
+          envelope.event.status === 'completed',
+      ),
+    )
+
+    expect(provider.calls).toBe(4)
     expect(
       sent.some(
         (envelope) =>

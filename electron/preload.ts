@@ -45,6 +45,7 @@ const api: AgentApi = {
   revertChange: (payload) => invoke('changes:revert', payload),
   closeSession: (payload) => invoke('session:close', payload),
   updateSessionMode: (payload) => invoke('session:update-mode', payload),
+  updatePlanStatus: (payload) => invoke('plan:update-status', payload),
   startRun: (payload) => invoke('run:start', payload),
   interruptRun: (payload) => invoke('run:interrupt', payload),
   decideApproval: (payload) => invoke('approval:decide', payload),

@@ -14,6 +14,7 @@ import {
   TerminalIdSchema,
 } from './ids'
 import { JsonValueSchema } from './json'
+import { PlanStateSchema, PlanStatusSchema } from './orchestration'
 import { TerminalInfoSchema, TerminalSnapshotSchema } from './terminal'
 import { SkillListSchema, SkillSummarySchema } from './skills'
 import {
@@ -382,6 +383,25 @@ export const IPC_CONTRACTS = {
       { additionalProperties: false },
     ),
     result: ipcResultSchema(AcceptedSchema),
+  },
+  'plan:update-status': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        sessionId: SessionIdSchema,
+        status: PlanStatusSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          accepted: Type.Boolean(),
+          plan: Type.Optional(PlanStateSchema),
+        },
+        { additionalProperties: false },
+      ),
+    ),
   },
   'run:start': {
     payload: Type.Object(
