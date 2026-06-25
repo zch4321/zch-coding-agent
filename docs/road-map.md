@@ -2,11 +2,12 @@
 
 本文件承接 `feature-backlog.md`，只记录下一阶段和仍未实现的产品方向。已完成的 R0-R6 不再保留在路线图正文中；历史背景以 git history、PR 说明和 release notes 为准。
 
-每个阶段都应保持可独立评审、可测试、可回滚。当前优先级从大功能扩张转向影响可用性的基础能力：Prompt Harness、ReAct 编排、项目模块建模、语义代码工具、LSP 后端，以及 Serena/MCP 适配。
+每个阶段都应保持可独立评审、可测试、可回滚。当前优先级从大功能扩张转向影响可用性的基础能力：工具调用紧凑 UI、Prompt Harness、ReAct 编排、项目模块建模、语义代码工具、LSP 后端，以及 Serena/MCP 适配。
 
 ## 0. 当前结论
 
 - Prompt 不能继续作为一整块系统提示词拼接。需要改成可审计的 layer model，并把工具 schema、运行时策略、仓库规则、环境信息和会话上下文分开处理。
+- 工具调用卡片当前占用过多对话空间，应优先改成一行灰色摘要；参数、结果和自动审批输出放入右侧展开面板或行内展开详情。
 - ReAct run 进行中允许用户发送补充信息，但不能打断当前工具调用链。补充信息应排队到下一个安全 checkpoint，并以明确 tag 注入给模型。
 - 安全策略、权限边界、路径约束、审批要求和凭据保护属于只读 `runtime_policy`，不能被用户可编辑 Prompt 覆盖。
 - 用户可编辑 Prompt 应降级为个人偏好、语气和工作方式补充，优先级低于系统基础指令、运行时策略和仓库指令。
@@ -15,9 +16,39 @@
 - 如果项目已有模块，Prompt Harness 应把简洁 module 摘要注入上下文，供模型选择工具和判断代码边界。
 - 当语义代码工具可用时，应鼓励模型优先使用 `code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_diagnostics` 等工具，再读取局部文件内容。
 - Serena、JetBrains、VS Code、LSP、ast-grep 等后端不应直接暴露成一堆原始工具给模型；模型应看到稳定的 Code Intelligence Facade。
-- R7 的浏览器、多模态和高级统计暂缓，等 Prompt Harness 与代码理解能力稳定后再推进。
+- R7 的浏览器、多模态和高级统计暂缓，等基础可用性、Prompt Harness 与代码理解能力稳定后再推进。
 
-## 1. Prompt Harness
+## 1. Tool Call Compact UI
+
+目标：先解决当前对话中工具调用卡片过于占地的问题，让长轮次 ReAct 输出更容易浏览。
+
+范围：纯前端优先，不改变工具执行、审批和 provider 协议。
+
+折叠态：
+
+- 每个工具调用默认渲染为一行灰色摘要文本。
+- 摘要包含工具名、状态、耗时、关键参数摘要和结果摘要。
+- 文本必须保持单行，超出部分省略，不能撑高消息流。
+- 右侧提供展开按钮，用于查看完整参数、结果、错误和审批信息。
+- 多个工具调用连续出现时，视觉上保持轻量列表，而不是重复大卡片。
+
+展开态：
+
+- 参数和结果延迟到展开后渲染，避免大 JSON 阻塞消息流。
+- 参数、结果、错误、stdout/stderr、diff 摘要分区展示。
+- 自动审批的输出也纳入详情区，包括风险等级、允许/拒绝结果、理由、命中的策略和审批来源。
+- 如果当前前端状态里缺少自动审批明细，先在 UI 中预留区域和类型入口；需要主进程补持久化字段时，作为后续小任务处理。
+- 展开/折叠状态应按消息或 tool call id 稳定保存，切换对话时不产生明显跳动。
+
+验收：
+
+- 默认对话流中，工具调用只占一行灰色摘要。
+- 点击右侧按钮可以展开查看完整参数和结果，再次点击收起。
+- 自动审批输出能在同一处查看；没有审批信息时不显示空白大块。
+- 长工具结果、连续工具调用、错误工具调用和自动审批工具调用都有前端回归测试。
+- 移动宽度或窄窗口下，摘要文本、状态和展开按钮不重叠。
+
+## 2. Prompt Harness
 
 目标：把一次模型请求拆成稳定、可审计、可缓存的 Prompt 层，而不是在 `session-run-utils` 中拼接 `basePrompt + skillPrompt`。
 
@@ -78,7 +109,7 @@ interface PromptLayer {
 - 单测覆盖 layer 顺序、hash、trusted 标记、未替换模板变量、AGENTS 优先级和环境信息裁剪。
 - Trace 中可以看出每个 Prompt 片段的来源，不需要读最终大 prompt 才能排查问题。
 
-## 2. ReAct Live Interjections
+## 3. ReAct Live Interjections
 
 目标：允许用户在长轮次 ReAct 循环中补充信息，而不取消当前 run、不破坏 provider 的 tool call / tool result 协议顺序。
 
@@ -134,7 +165,7 @@ respecting system, developer, runtime, repository, and tool-safety instructions.
 - UI 时间线能区分普通用户消息、运行中插话、orchestrator continuation 和 tool result。
 - Trace 记录 interjection 的创建时间、注入位置、tag 内容和状态变化。
 
-## 3. ProjectModel / ModuleGraph
+## 4. ProjectModel / ModuleGraph
 
 目标：让多语言、多子项目仓库有明确的 module 边界，为 Prompt Harness、LSP 路由和语义工具提供基础。
 
@@ -189,7 +220,7 @@ interface ProjectModel {
 - 模块配置不会因为模型误判而静默污染用户仓库。
 - 当文件路径命中多个或零个 module 时，工具返回明确的歧义或缺失信息。
 
-## 4. Code Intelligence Facade
+## 5. Code Intelligence Facade
 
 目标：先定义模型可见的稳定语义代码工具，再在后面替换或叠加 LSP、Serena、JetBrains、VS Code、ast-grep 等后端。
 
@@ -218,7 +249,7 @@ code_diagnostics
 - 大文件场景下不会默认把全文塞进上下文。
 - 所有外部后端输出都按不可信内容处理，并做大小、数量和时间限制。
 
-## 5. LSP Backend
+## 6. LSP Backend
 
 目标：为 Code Intelligence Facade 提供第一类 IDE 能力，按 module 和文件类型自动路由到对应 language server。
 
@@ -243,7 +274,7 @@ code_diagnostics
 - 多 module 项目中，前端文件不会误用后端 language server，后端文件不会误用前端 language server。
 - LSP 不可用时，Agent 仍能退回现有 grep/read-file 工作流。
 
-## 6. Serena / MCP Adapter
+## 7. Serena / MCP Adapter
 
 目标：接入 Serena 的 symbol-level retrieval/edit/refactor 能力，但对模型保持稳定的 Code Intelligence Facade。
 
@@ -273,7 +304,7 @@ code_diagnostics
 - Serena 不可用时，Code Intelligence Facade 仍然可用或能给出明确降级信息。
 - 写入类能力进入权限管线，不绕过现有文件保护、审批和 trace。
 
-## 7. Deferred / Later
+## 8. Deferred / Later
 
 原 R7 暂缓到后续阶段：
 
@@ -292,7 +323,7 @@ code_diagnostics
 - 云端同步和团队共享项目。
 - 完整插件市场。
 
-## 8. 阶段门禁
+## 9. 阶段门禁
 
 每个实现阶段至少通过：
 
