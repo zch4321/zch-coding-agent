@@ -28,6 +28,12 @@ export interface AgentApi {
   migrateWorkbenchV1(
     payload: IpcPayload<'workbench:migrate-v1'>,
   ): Promise<IpcResult<'workbench:migrate-v1'>>
+  exportConversationMarkdown(
+    payload: IpcPayload<'workbench:export-conversation'>,
+  ): Promise<IpcResult<'workbench:export-conversation'>>
+  importConversationMarkdown(
+    payload: IpcPayload<'workbench:import-conversation'>,
+  ): Promise<IpcResult<'workbench:import-conversation'>>
   chooseWorkspace(
     payload: IpcPayload<'workspace:choose'>,
   ): Promise<IpcResult<'workspace:choose'>>
@@ -134,6 +140,8 @@ export const AGENT_API_KEYS = [
   'getWorkbench',
   'saveWorkbench',
   'migrateWorkbenchV1',
+  'exportConversationMarkdown',
+  'importConversationMarkdown',
   'chooseWorkspace',
   'listWorkspaceDirectory',
   'readWorkspaceFile',

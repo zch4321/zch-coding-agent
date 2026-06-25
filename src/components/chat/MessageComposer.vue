@@ -5,6 +5,7 @@ import {
   NDropdown,
   NInput,
   NSelect,
+  NTooltip,
   type DropdownOption,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -419,24 +420,29 @@ watch(inputDisabled, (disabled) => {
       @select="selectSuggestion"
     />
     <div v-if="agent.contextAttachments.length" class="composer-context-chips">
-      <span
+      <NTooltip
         v-for="attachment in agent.contextAttachments"
         :key="attachment.kind + ':' + attachment.path"
-        class="context-chip"
-        :title="attachment.path"
       >
-        <UiIcon :name="attachment.kind === 'directory' ? 'folder' : 'file'" />
-        <span>{{ attachment.path }}</span>
-        <button
-          type="button"
-          :aria-label="t('chat.removeContext')"
-          @click="
-            agent.removeContextAttachment(attachment.path, attachment.kind)
-          "
-        >
-          <UiIcon name="close" />
-        </button>
-      </span>
+        <template #trigger>
+          <span class="context-chip">
+            <UiIcon
+              :name="attachment.kind === 'directory' ? 'folder' : 'file'"
+            />
+            <span>{{ attachment.path }}</span>
+            <button
+              type="button"
+              :aria-label="t('chat.removeContext')"
+              @click="
+                agent.removeContextAttachment(attachment.path, attachment.kind)
+              "
+            >
+              <UiIcon name="close" />
+            </button>
+          </span>
+        </template>
+        {{ attachment.path }}
+      </NTooltip>
     </div>
     <div ref="composerInputHost">
       <NInput
@@ -472,15 +478,19 @@ watch(inputDisabled, (disabled) => {
           tag
           @update:value="agent.setProviderModel"
         />
-        <button
-          class="provider-settings-button"
-          type="button"
-          :aria-label="t('chat.providerSettings')"
-          :title="t('chat.providerSettings')"
-          @click="emit('provider')"
-        >
-          <UiIcon name="settings" />
-        </button>
+        <NTooltip>
+          <template #trigger>
+            <button
+              class="provider-settings-button"
+              type="button"
+              :aria-label="t('chat.providerSettings')"
+              @click="emit('provider')"
+            >
+              <UiIcon name="settings" />
+            </button>
+          </template>
+          {{ t('chat.providerSettings') }}
+        </NTooltip>
         <NSelect
           :value="agent.mode"
           class="mode-select"
@@ -490,28 +500,34 @@ watch(inputDisabled, (disabled) => {
           @update:value="emit('mode', $event as PermissionMode)"
         />
       </div>
-      <button
-        v-if="agent.activeRunId"
-        class="send-button stop"
-        type="button"
-        :aria-label="t('chat.stop')"
-        :title="t('chat.stop')"
-        :disabled="agent.runStatus === 'cancelling'"
-        @click="agent.interruptRun"
-      >
-        <UiIcon name="stop" />
-      </button>
-      <button
-        v-else
-        class="send-button"
-        type="button"
-        :aria-label="t('chat.send')"
-        :title="t('chat.send')"
-        :disabled="!agent.canSend"
-        @click="agent.sendMessage"
-      >
-        <UiIcon name="send" />
-      </button>
+      <NTooltip v-if="agent.activeRunId">
+        <template #trigger>
+          <button
+            class="send-button stop"
+            type="button"
+            :aria-label="t('chat.stop')"
+            :disabled="agent.runStatus === 'cancelling'"
+            @click="agent.interruptRun"
+          >
+            <UiIcon name="stop" />
+          </button>
+        </template>
+        {{ t('chat.stop') }}
+      </NTooltip>
+      <NTooltip v-else>
+        <template #trigger>
+          <button
+            class="send-button"
+            type="button"
+            :aria-label="t('chat.send')"
+            :disabled="!agent.canSend"
+            @click="agent.sendMessage"
+          >
+            <UiIcon name="send" />
+          </button>
+        </template>
+        {{ t('chat.send') }}
+      </NTooltip>
     </div>
   </footer>
 </template>

@@ -12,6 +12,10 @@ import type {
 } from './agent-types'
 import { cloneMessages, requestId } from './workbench-persistence'
 
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
 export const useAgentTimelineStore = defineStore('agent-timeline', {
   state: () => ({
     input: '',
@@ -53,12 +57,8 @@ export const useAgentTimelineStore = defineStore('agent-timeline', {
       this.tools = (conversation?.tools ?? []).map((tool) => ({ ...tool }))
       this.usage = (conversation?.usage ?? []).map((item) => ({ ...item }))
       this.contextAttachments = []
-      this.goal = conversation?.goal
-        ? structuredClone(conversation.goal)
-        : undefined
-      this.plan = conversation?.plan
-        ? structuredClone(conversation.plan)
-        : undefined
+      this.goal = conversation?.goal ? cloneJson(conversation.goal) : undefined
+      this.plan = conversation?.plan ? cloneJson(conversation.plan) : undefined
       this.latestReviewedApproval = conversation?.latestReviewedApproval
         ? { ...conversation.latestReviewedApproval }
         : undefined
@@ -81,8 +81,8 @@ export const useAgentTimelineStore = defineStore('agent-timeline', {
       conversation.messages = cloneMessages(this.messages)
       conversation.tools = this.tools.map((tool) => ({ ...tool }))
       conversation.usage = this.usage.map((item) => ({ ...item }))
-      conversation.goal = this.goal ? structuredClone(this.goal) : undefined
-      conversation.plan = this.plan ? structuredClone(this.plan) : undefined
+      conversation.goal = this.goal ? cloneJson(this.goal) : undefined
+      conversation.plan = this.plan ? cloneJson(this.plan) : undefined
       conversation.latestReviewedApproval = this.latestReviewedApproval
         ? { ...this.latestReviewedApproval }
         : undefined

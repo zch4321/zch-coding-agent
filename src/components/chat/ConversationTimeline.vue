@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NAlert, NButton, NCollapse, NCollapseItem } from 'naive-ui'
+import { NAlert, NButton, NCollapse, NCollapseItem, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { ToolActivity } from '../../stores/agent'
 import { useAgentStore } from '../../stores/agent'
@@ -16,12 +16,25 @@ type CollapseHeaderClickInfo = {
 
 const agent = useAgentStore()
 const { t } = useI18n()
+const emit = defineEmits<{
+  revert: [messageId: string, preview: string]
+  fork: [messageId: string]
+}>()
 const scrollElement = ref<HTMLElement>()
 const bottomSentinel = ref<HTMLElement>()
 const followingOutput = ref(true)
 const chronologicalTools = computed(() => [...agent.tools].reverse())
 const expandedToolDetails = ref<string[]>([])
 let resizeObserver: ResizeObserver | undefined
+
+function requestRevert(messageId: string, text: string) {
+  const preview = text.replace(/\s+/g, ' ').slice(0, 80)
+  emit('revert', messageId, preview)
+}
+
+function requestFork(messageId: string) {
+  emit('fork', messageId)
+}
 
 function okContent(tool: ToolActivity): unknown {
   const result = tool.result
@@ -286,18 +299,21 @@ onBeforeUnmount(() => {
           </span>
         </div>
         <div v-if="message.attachments?.length" class="message-attachments">
-          <span
+          <NTooltip
             v-for="attachment in message.attachments"
             :key="attachment.kind + ':' + attachment.path"
-            class="context-chip"
-            :title="attachment.path"
           >
-            <UiIcon
-              :name="attachment.kind === 'directory' ? 'folder' : 'file'"
-            />
-            <span>{{ attachment.path }}</span>
-            <small>{{ attachment.source }}</small>
-          </span>
+            <template #trigger>
+              <span class="context-chip">
+                <UiIcon
+                  :name="attachment.kind === 'directory' ? 'folder' : 'file'"
+                />
+                <span>{{ attachment.path }}</span>
+                <small>{{ attachment.source }}</small>
+              </span>
+            </template>
+            {{ attachment.path }}
+          </NTooltip>
         </div>
         <MarkdownBlock :content="message.text || '...'" />
         <NCollapse v-if="message.reasoning" class="reasoning">
@@ -305,6 +321,42 @@ onBeforeUnmount(() => {
             <pre>{{ message.reasoning }}</pre>
           </NCollapseItem>
         </NCollapse>
+        <div
+          v-if="
+            message.role === 'assistant' &&
+            message.text &&
+            !agent.activeRunId &&
+            !agent.pendingApproval
+          "
+          class="message-actions"
+        >
+          <NTooltip>
+            <template #trigger>
+              <button
+                type="button"
+                class="message-action"
+                :aria-label="t('chat.revertToHere')"
+                @click="requestRevert(message.id, message.text)"
+              >
+                <UiIcon name="undo" />
+              </button>
+            </template>
+            {{ t('chat.revertToHereTitle') }}
+          </NTooltip>
+          <NTooltip>
+            <template #trigger>
+              <button
+                type="button"
+                class="message-action"
+                :aria-label="t('chat.forkFromHere')"
+                @click="requestFork(message.id)"
+              >
+                <UiIcon name="git-branch" />
+              </button>
+            </template>
+            {{ t('chat.forkFromHereTitle') }}
+          </NTooltip>
+        </div>
       </article>
 
       <article
@@ -325,9 +377,12 @@ onBeforeUnmount(() => {
             {{ toolResultSummary(tool) }}
           </span>
         </div>
-        <p v-if="tool.reason" class="tool-reason" :title="tool.reason">
+        <NTooltip v-if="tool.reason">
+          <template #trigger>
+            <p class="tool-reason">{{ tool.reason }}</p>
+          </template>
           {{ tool.reason }}
-        </p>
+        </NTooltip>
         <NCollapse
           :expanded-names="
             isToolDetailsExpanded(tool) ? [toolDetailsName(tool)] : []

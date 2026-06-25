@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import { NTooltip } from 'naive-ui'
 import { useAgentStore } from '../../stores/agent'
 import { useI18n } from 'vue-i18n'
 import UiIcon from '../UiIcon.vue'
@@ -10,6 +11,8 @@ const emit = defineEmits<{
   open: [conversationId: string]
   rename: [conversationId: string]
   delete: [conversationId: string]
+  export: [conversationId: string]
+  import: []
 }>()
 
 const agent = useAgentStore()
@@ -31,6 +34,15 @@ function createProjectConversation(workspacePath: string) {
 
 function displayConversationTitle(title: string) {
   return title === 'New conversation' ? t('app.newConversation') : title
+}
+function conversationBadges(conversation: {
+  parentId?: string
+  importedFrom?: string
+}): string[] {
+  const badges: string[] = []
+  if (conversation.parentId) badges.push(t('chat.forkedBadge'))
+  if (conversation.importedFrom) badges.push(t('chat.importedBadge'))
+  return badges
 }
 const compareConversations = (
   left: (typeof agent.conversations)[number],
@@ -80,14 +92,30 @@ const searchGroups = computed(() => {
 
 <template>
   <aside class="project-sidebar">
-    <button
-      class="new-conversation-button"
-      type="button"
-      @click="emit('create')"
-    >
-      <UiIcon name="plus" />
-      <span>{{ t('app.newConversation') }}</span>
-    </button>
+    <div class="new-conversation-row">
+      <button
+        class="new-conversation-button"
+        type="button"
+        @click="emit('create')"
+      >
+        <UiIcon name="plus" />
+        <span>{{ t('app.newConversation') }}</span>
+      </button>
+      <NTooltip>
+        <template #trigger>
+          <button
+            type="button"
+            class="import-conversation-button"
+            :aria-label="t('sidebar.import')"
+            :disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
+            @click="emit('import')"
+          >
+            <UiIcon name="upload" />
+          </button>
+        </template>
+        {{ t('sidebar.import') }}
+      </NTooltip>
+    </div>
 
     <label class="conversation-search">
       <UiIcon name="search" />
@@ -107,10 +135,15 @@ const searchGroups = computed(() => {
           :key="project.path"
           class="project-group search-group"
         >
-          <div class="project-heading" :title="project.path">
-            <UiIcon name="folder" />
-            <strong>{{ project.name }}</strong>
-          </div>
+          <NTooltip>
+            <template #trigger>
+              <div class="project-heading">
+                <UiIcon name="folder" />
+                <strong>{{ project.name }}</strong>
+              </div>
+            </template>
+            {{ project.path }}
+          </NTooltip>
           <button
             v-for="conversation in project.conversations"
             :key="conversation.id"
@@ -133,15 +166,19 @@ const searchGroups = computed(() => {
       <template v-else>
         <div class="sidebar-section-heading">
           <p class="sidebar-section-title">{{ t('sidebar.projects') }}</p>
-          <button
-            type="button"
-            class="add-project-button"
-            :aria-label="t('sidebar.addWorkspace')"
-            :title="t('sidebar.addWorkspace')"
-            @click="emit('add')"
-          >
-            <UiIcon name="plus" />
-          </button>
+          <NTooltip>
+            <template #trigger>
+              <button
+                type="button"
+                class="add-project-button"
+                :aria-label="t('sidebar.addWorkspace')"
+                @click="emit('add')"
+              >
+                <UiIcon name="plus" />
+              </button>
+            </template>
+            {{ t('sidebar.addWorkspace') }}
+          </NTooltip>
         </div>
         <section
           v-for="project in sortedProjects"
@@ -149,32 +186,40 @@ const searchGroups = computed(() => {
           class="project-group"
         >
           <div class="project-heading-row">
-            <button
-              type="button"
-              class="project-heading"
-              :title="project.path"
-              :aria-expanded="!collapsedProjects.has(project.path)"
-              @click="toggleProject(project.path)"
-            >
-              <UiIcon
-                :name="
-                  collapsedProjects.has(project.path)
-                    ? 'chevron-right'
-                    : 'chevron-down'
-                "
-              />
-              <UiIcon name="folder" />
-              <strong>{{ project.name }}</strong>
-            </button>
-            <button
-              type="button"
-              class="project-new-conversation-button"
-              :aria-label="t('sidebar.newConversationInProject')"
-              :title="t('sidebar.newConversationInProject')"
-              @click="createProjectConversation(project.path)"
-            >
-              <UiIcon name="plus" />
-            </button>
+            <NTooltip>
+              <template #trigger>
+                <button
+                  type="button"
+                  class="project-heading"
+                  :aria-expanded="!collapsedProjects.has(project.path)"
+                  @click="toggleProject(project.path)"
+                >
+                  <UiIcon
+                    :name="
+                      collapsedProjects.has(project.path)
+                        ? 'chevron-right'
+                        : 'chevron-down'
+                    "
+                  />
+                  <UiIcon name="folder" />
+                  <strong>{{ project.name }}</strong>
+                </button>
+              </template>
+              {{ project.path }}
+            </NTooltip>
+            <NTooltip>
+              <template #trigger>
+                <button
+                  type="button"
+                  class="project-new-conversation-button"
+                  :aria-label="t('sidebar.newConversationInProject')"
+                  @click="createProjectConversation(project.path)"
+                >
+                  <UiIcon name="plus" />
+                </button>
+              </template>
+              {{ t('sidebar.newConversationInProject') }}
+            </NTooltip>
           </div>
           <div
             v-show="!collapsedProjects.has(project.path)"
@@ -194,24 +239,54 @@ const searchGroups = computed(() => {
                 @click="emit('open', conversation.id)"
               >
                 {{ displayConversationTitle(conversation.title) }}
+                <span
+                  v-if="conversationBadges(conversation).length"
+                  class="conversation-badges"
+                >
+                  <em
+                    v-for="badge in conversationBadges(conversation)"
+                    :key="badge"
+                    >{{ badge }}</em
+                  >
+                </span>
               </button>
               <div class="conversation-actions">
-                <button
-                  type="button"
-                  :aria-label="t('sidebar.rename')"
-                  :title="t('sidebar.renameTitle')"
-                  @click="emit('rename', conversation.id)"
-                >
-                  <UiIcon name="edit" />
-                </button>
-                <button
-                  type="button"
-                  :aria-label="t('sidebar.delete')"
-                  :title="t('sidebar.deleteTitle')"
-                  @click="emit('delete', conversation.id)"
-                >
-                  <UiIcon name="trash" />
-                </button>
+                <NTooltip>
+                  <template #trigger>
+                    <button
+                      type="button"
+                      :aria-label="t('sidebar.export')"
+                      @click="emit('export', conversation.id)"
+                    >
+                      <UiIcon name="download" />
+                    </button>
+                  </template>
+                  {{ t('sidebar.exportTitle') }}
+                </NTooltip>
+                <NTooltip>
+                  <template #trigger>
+                    <button
+                      type="button"
+                      :aria-label="t('sidebar.rename')"
+                      @click="emit('rename', conversation.id)"
+                    >
+                      <UiIcon name="edit" />
+                    </button>
+                  </template>
+                  {{ t('sidebar.renameTitle') }}
+                </NTooltip>
+                <NTooltip>
+                  <template #trigger>
+                    <button
+                      type="button"
+                      :aria-label="t('sidebar.delete')"
+                      @click="emit('delete', conversation.id)"
+                    >
+                      <UiIcon name="trash" />
+                    </button>
+                  </template>
+                  {{ t('sidebar.deleteTitle') }}
+                </NTooltip>
               </div>
             </div>
             <p v-if="project.conversations.length === 0" class="sidebar-empty">

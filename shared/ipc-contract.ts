@@ -37,6 +37,8 @@ import {
 
 export { AGENT_EVENT_CHANNEL, IPC_VERSION, TERMINAL_EVENT_CHANNEL }
 
+export const CONVERSATION_MARKDOWN_MAX_BYTES = 5_000_000
+
 export const IpcErrorSchema = Type.Object(
   {
     code: Type.Union([
@@ -182,6 +184,42 @@ export const IPC_CONTRACTS = {
       { additionalProperties: false },
     ),
     result: ipcResultSchema(PersistedWorkbenchSchema),
+  },
+  'workbench:export-conversation': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        markdown: Type.String({
+          minLength: 1,
+          maxLength: CONVERSATION_MARKDOWN_MAX_BYTES,
+        }),
+        suggestedName: Type.String({ minLength: 1, maxLength: 256 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          canceled: Type.Boolean(),
+          path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'workbench:import-conversation': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          canceled: Type.Boolean(),
+          markdown: Type.Optional(
+            Type.String({ maxLength: CONVERSATION_MARKDOWN_MAX_BYTES }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
   },
   'workspace:choose': {
     payload: EmptyPayloadSchema,

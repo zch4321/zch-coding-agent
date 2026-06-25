@@ -241,6 +241,65 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     renameConversation(conversationId: string, title: string) {
       useAgentWorkbenchStore().renameConversation(conversationId, title)
     },
+    /**
+     * Fork the active conversation (or a specific one) into a new branch. The
+     * new branch becomes active, truncated at forkPointMessageId (inclusive).
+     * Runs are blocked while forking; the forked conversation starts without a
+     * live session, so the next sendMessage creates a fresh session.
+     */
+    async forkConversation(
+      sourceId?: string,
+      forkPointMessageId?: string,
+    ): Promise<boolean> {
+      const workbench = useAgentWorkbenchStore()
+      const timeline = useAgentTimelineStore()
+      const changes = useAgentChangesStore()
+      const source =
+        workbench.conversations.find(
+          (item) => item.id === (sourceId ?? workbench.activeConversationId),
+        ) ?? workbench.activeConversation
+      if (!source || this.activeRunId || this.pendingApproval) return false
+
+      const forked = workbench.forkConversation(source.id, forkPointMessageId)
+      if (!forked) return false
+
+      this.sessionId = undefined
+      timeline.reset()
+      changes.reset()
+      this.pendingApproval = undefined
+      this.restoreActiveConversation()
+      return true
+    },
+    /**
+     * 回退对话 (in-place): remove every message after the agent reply with
+     * keepMessageId (and the tools/usage/orchestrator updates recorded after
+     * it), keeping the conversation itself. The old runtime session is closed
+     * because its history no longer matches; the next send creates a fresh one.
+     */
+    async revertConversationAfterMessage(
+      keepMessageId: string,
+    ): Promise<boolean> {
+      const workbench = useAgentWorkbenchStore()
+      const timeline = useAgentTimelineStore()
+      const changes = useAgentChangesStore()
+      const conversation = workbench.activeConversation
+      if (!conversation || this.activeRunId || this.pendingApproval)
+        return false
+
+      const updated = workbench.revertConversationAfterMessage(
+        conversation.id,
+        keepMessageId,
+      )
+      if (!updated) return false
+
+      // The history changed, so the live session is stale and must be closed.
+      await this.closeRuntimeSession(conversation.id)
+      timeline.reset()
+      changes.reset()
+      this.pendingApproval = undefined
+      this.restoreActiveConversation()
+      return true
+    },
     async deleteConversation(conversationId: string) {
       const workbench = useAgentWorkbenchStore()
       const conversation = workbench.conversations.find(
@@ -522,8 +581,8 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           order: timeline.nextTimelineOrder(),
         })
         const conversation = workbench.activeConversation
-        if (conversation?.title === 'New conversation') {
-          conversation.title = text.replace(/\s+/g, ' ').slice(0, 56)
+        if (conversation) {
+          workbench.applyAutoTitle(conversation, text)
         }
         if (conversation?.transient) {
           delete conversation.transient
