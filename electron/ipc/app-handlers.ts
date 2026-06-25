@@ -8,7 +8,10 @@ import {
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { CONVERSATION_MARKDOWN_MAX_BYTES } from '../../shared/ipc-contract'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
-import { ChangeHistoryError, ChangeHistoryStore } from '../session/change-history'
+import {
+  ChangeHistoryError,
+  ChangeHistoryStore,
+} from '../session/change-history'
 import {
   fetchOpenAICompatibleModelCatalog,
   ModelCatalogError,

@@ -28,7 +28,10 @@ import type { ProviderMessage } from '../providers/provider'
 import { registerReadOnlyTools } from '../tools/readonly-tools'
 import { registerFileTools } from '../tools/file-tools'
 import { registerFetchTools } from '../tools/fetch-tools'
-import { registerGitReadOnlyTools, registerGitWriteTools } from '../tools/git-tools'
+import {
+  registerGitReadOnlyTools,
+  registerGitWriteTools,
+} from '../tools/git-tools'
 import { registerProcessTools } from '../tools/process-tools'
 import { registerWebSearchTools } from '../tools/web-search-tools'
 import {
