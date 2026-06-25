@@ -6,6 +6,7 @@ import {
   type SaveDialogOptions,
 } from 'electron'
 import { readFile, stat, writeFile } from 'node:fs/promises'
+import { CONVERSATION_MARKDOWN_MAX_BYTES } from '../../shared/ipc-contract'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import {
   ChangeHistoryError,
@@ -201,7 +202,7 @@ export function createAppIpcHandlers(
 
       try {
         const raw = await readFile(result.filePaths[0], 'utf8')
-        if (Buffer.byteLength(raw, 'utf8') > 5_000_000) {
+        if (Buffer.byteLength(raw, 'utf8') > CONVERSATION_MARKDOWN_MAX_BYTES) {
           throw new IpcFault({
             code: 'PAYLOAD_TOO_LARGE',
             message: 'Imported markdown exceeds the 5 MB size limit',

@@ -9,13 +9,16 @@ import {
   toPublicConfig,
 } from '../../electron/config/schema'
 import { validatePayloadLimits } from '../../electron/ipc/validators'
+import { conversationToMarkdown } from '../../shared/conversation-markdown'
 import { PROVIDER_NOTICE_VERSION } from '../../shared/notices'
+import type { ConversationRecord as SharedConversationRecord } from '../../shared/workbench'
 import { useAgentStore } from './agent'
 import { useAgentTimelineStore } from './agent-timeline'
 
 const sessionId = 'session:test' as SessionId
 const runId = 'run:test' as RunId
 const callId = 'call:test' as CallId
+const stamp = '2026-06-20T00:00:00.000Z'
 
 function installApi(api: Partial<AgentApi>) {
   Object.defineProperty(window, 'agentApi', {
@@ -44,6 +47,31 @@ function requestApproval(store: ReturnType<typeof useAgentStore>) {
     rememberable: true,
     expiresAt: '2026-06-20T01:00:00.000Z',
   })
+}
+
+function markdownConversation(
+  overrides: Partial<SharedConversationRecord> = {},
+): SharedConversationRecord {
+  return {
+    id: 'conversation:imported-source',
+    projectPath: 'F:/untrusted/source',
+    title: 'Imported source',
+    model: 'deepseek-chat',
+    mode: 'auto',
+    messages: [
+      {
+        id: 'message:source',
+        role: 'user',
+        text: 'imported body',
+        reasoning: '',
+        order: 0,
+      },
+    ],
+    tools: [],
+    createdAt: stamp,
+    updatedAt: stamp,
+    ...overrides,
+  }
 }
 
 describe('agent store regressions', () => {
@@ -573,6 +601,108 @@ describe('agent store regressions', () => {
     ).toHaveLength(4)
   })
 
+  it('forks at the latest message without dropping timeline state', async () => {
+    const saveWorkbench = vi.fn(
+      async (payload: Parameters<AgentApi['saveWorkbench']>[0]) => ({
+        version: 1 as const,
+        ok: true as const,
+        value: payload.workbench,
+      }),
+    )
+    installApi({ saveWorkbench })
+    const store = useAgentStore()
+    store.workspacePath = 'F:/workspace/example'
+    const original = store.createConversation()
+    if (!original) throw new Error('Expected conversation')
+    original.messages = [
+      { id: 'm1', role: 'user', text: 'one', reasoning: '', order: 0 },
+      { id: 'm2', role: 'assistant', text: 'two', reasoning: '', order: 1 },
+    ]
+    original.tools = [
+      {
+        callId,
+        runId,
+        tool: 'read_file',
+        args: {},
+        reason: '',
+        status: 'completed',
+        order: 2,
+      },
+    ]
+    original.usage = [
+      {
+        runId,
+        callId,
+        order: 3,
+        usage: {
+          scope: 'main',
+          providerId: 'deepseek',
+          providerLabel: 'DeepSeek',
+          model: 'deepseek-chat',
+          contextWindowTokens: 64_000,
+          contextWindowSource: 'default',
+          raw: null,
+        },
+      },
+    ]
+    original.goal = {
+      id: 'goal:one',
+      objective: 'Finish the review',
+      status: 'active',
+      createdAt: stamp,
+      updatedAt: stamp,
+      continuationCount: 0,
+    }
+    original.plan = {
+      id: 'plan:one',
+      objective: 'Finish the review',
+      items: [
+        {
+          id: 'item:one',
+          title: 'Run checks',
+          status: 'completed',
+          updatedAt: stamp,
+          result: 'done',
+          evidence: 'unit test',
+        },
+      ],
+      createdAt: stamp,
+      updatedAt: stamp,
+      continuationCount: 0,
+    }
+    original.orchestratorEntries = [
+      {
+        id: 'orchestrator:one',
+        kind: 'goal-continuation',
+        text: 'continue',
+        createdAt: stamp,
+        order: 4,
+      },
+    ]
+    original.latestReviewedApproval = {
+      runId,
+      callId,
+      tool: 'write_file',
+      reason: 'Review diff',
+      diff: '--- a/file\n+++ b/file',
+      decision: 'allowed',
+    }
+
+    const result = await store.forkConversation(original.id, 'm2')
+
+    expect(result).toBe(true)
+    const forked = store.activeConversation
+    expect(forked?.messages.map((message) => message.id)).toEqual(['m1', 'm2'])
+    expect(forked?.tools).toHaveLength(1)
+    expect(forked?.usage).toHaveLength(1)
+    expect(forked?.orchestratorEntries).toHaveLength(1)
+    expect(forked?.goal).toEqual(original.goal)
+    expect(forked?.plan).toEqual(original.plan)
+    expect(forked?.latestReviewedApproval).toEqual(
+      original.latestReviewedApproval,
+    )
+  })
+
   it('reverts in place by discarding messages after the kept reply', async () => {
     const saveWorkbench = vi.fn(
       async (payload: Parameters<AgentApi['saveWorkbench']>[0]) => ({
@@ -624,5 +754,86 @@ describe('agent store regressions', () => {
     expect(reverted?.messages.map((m) => m.id)).toEqual(['m1', 'm2'])
     // Tools recorded after the kept reply are also removed.
     expect(reverted?.tools?.map((tool) => tool.callId)).toEqual([callId])
+  })
+
+  it('imports markdown into the current workspace instead of trusting projectPath', async () => {
+    const trustedWorkspace = 'F:/workspace/trusted'
+    const markdown = conversationToMarkdown(
+      markdownConversation({
+        projectPath: 'C:/Users/alice/sensitive',
+        title: 'External path import',
+      }),
+    )
+    const importConversationMarkdown = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { canceled: false, markdown },
+    }))
+    const saveWorkbench = vi.fn(
+      async (payload: Parameters<AgentApi['saveWorkbench']>[0]) => ({
+        version: 1 as const,
+        ok: true as const,
+        value: payload.workbench,
+      }),
+    )
+    installApi({ importConversationMarkdown, saveWorkbench })
+    const store = useAgentStore()
+    store.workspacePath = trustedWorkspace
+
+    const result = await store.importConversationViaDialog()
+
+    expect(result).toMatchObject({ canceled: false })
+    expect(store.activeConversation?.projectPath).toBe(trustedWorkspace)
+    expect(store.projects.map((project) => project.path)).toEqual([
+      trustedWorkspace,
+    ])
+    expect(
+      store.projects.some(
+        (project) => project.path === 'C:/Users/alice/sensitive',
+      ),
+    ).toBe(false)
+    expect(saveWorkbench).toHaveBeenCalledTimes(1)
+    expect(
+      saveWorkbench.mock.calls[0]?.[0].workbench.conversations[0]?.projectPath,
+    ).toBe(trustedWorkspace)
+  })
+
+  it('rejects schema-invalid imported markdown before mutating state', async () => {
+    const markdown = conversationToMarkdown(
+      markdownConversation({
+        messages: [
+          {
+            id: 'message:too-large',
+            role: 'user',
+            text: 'x'.repeat(1_000_001),
+            reasoning: '',
+            order: 0,
+          },
+        ],
+      }),
+    )
+    const importConversationMarkdown = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { canceled: false, markdown },
+    }))
+    const saveWorkbench = vi.fn(
+      async (payload: Parameters<AgentApi['saveWorkbench']>[0]) => ({
+        version: 1 as const,
+        ok: true as const,
+        value: payload.workbench,
+      }),
+    )
+    installApi({ importConversationMarkdown, saveWorkbench })
+    const store = useAgentStore()
+    store.workspacePath = 'F:/workspace/trusted'
+
+    const result = await store.importConversationViaDialog()
+
+    expect(result.canceled).toBe(false)
+    expect(result.error).toContain('/messages/0/text')
+    expect(store.conversations).toHaveLength(0)
+    expect(store.projects).toHaveLength(0)
+    expect(saveWorkbench).not.toHaveBeenCalled()
   })
 })

@@ -826,7 +826,8 @@ test.describe.serial('Electron security and IPC baseline', () => {
       messageCount: 2,
     })
 
-    // The markdown export IPC channel is wired and returns the workbench.
+    // Handler-level markdown import/export behavior is covered by unit tests;
+    // this e2e case only verifies the persisted workbench remains readable.
     const exported = await page.evaluate(async () => {
       const api = Reflect.get(window, 'agentApi') as {
         getWorkbench(payload: unknown): Promise<{ ok: boolean }>

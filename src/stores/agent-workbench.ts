@@ -13,11 +13,16 @@ import {
   deriveAutoTitle,
   normalizeTitle,
 } from '../../shared/conversation-titles'
+import { ConversationRecordSchema } from '../../shared/workbench'
 import type {
   ConversationRecord,
   PersistedWorkbench,
   ProjectRecord,
 } from './agent-types'
+import {
+  compileWorkbenchSchema,
+  formatWorkbenchSchemaErrors,
+} from './workbench-schema'
 import {
   HISTORY_KEY,
   cloneMessages,
@@ -44,6 +49,10 @@ type WorkbenchBridge = {
     workbench: unknown
   }): Promise<WorkbenchIpcResult>
 }
+
+const validateConversationRecord = compileWorkbenchSchema(
+  ConversationRecordSchema,
+)
 
 function hasConversationContent(conversation: ConversationRecord): boolean {
   return Boolean(
@@ -87,6 +96,24 @@ interface ConversationSlice {
   latestReviewedApproval: ConversationRecord['latestReviewedApproval']
 }
 
+function fullConversationSlice(
+  conversation: ConversationRecord,
+  messages = cloneMessages(conversation.messages),
+): ConversationSlice {
+  return {
+    messages,
+    tools: conversation.tools?.map((tool) => ({ ...tool })) ?? [],
+    usage: conversation.usage?.map((item) => ({ ...item })) ?? [],
+    goal: conversation.goal ? cloneForIpc(conversation.goal) : undefined,
+    plan: conversation.plan ? cloneForIpc(conversation.plan) : undefined,
+    orchestratorEntries:
+      conversation.orchestratorEntries?.map((entry) => ({ ...entry })) ?? [],
+    latestReviewedApproval: conversation.latestReviewedApproval
+      ? { ...conversation.latestReviewedApproval }
+      : undefined,
+  }
+}
+
 function splitConversationAt(
   conversation: ConversationRecord,
   keepMessageId?: string,
@@ -95,34 +122,12 @@ function splitConversationAt(
 
   // No fork point: keep everything, but still normalize the optional arrays.
   if (!keepMessageId) {
-    return {
-      messages,
-      tools: conversation.tools?.map((tool) => ({ ...tool })) ?? [],
-      usage: conversation.usage?.map((item) => ({ ...item })) ?? [],
-      goal: conversation.goal ? structuredClone(conversation.goal) : undefined,
-      plan: conversation.plan ? structuredClone(conversation.plan) : undefined,
-      orchestratorEntries:
-        conversation.orchestratorEntries?.map((entry) => ({ ...entry })) ?? [],
-      latestReviewedApproval: conversation.latestReviewedApproval
-        ? { ...conversation.latestReviewedApproval }
-        : undefined,
-    }
+    return fullConversationSlice(conversation, messages)
   }
 
   const cutIndex = messages.findIndex((message) => message.id === keepMessageId)
   if (cutIndex < 0) {
-    return {
-      messages,
-      tools: conversation.tools?.map((tool) => ({ ...tool })) ?? [],
-      usage: conversation.usage?.map((item) => ({ ...item })) ?? [],
-      goal: conversation.goal ? structuredClone(conversation.goal) : undefined,
-      plan: conversation.plan ? structuredClone(conversation.plan) : undefined,
-      orchestratorEntries:
-        conversation.orchestratorEntries?.map((entry) => ({ ...entry })) ?? [],
-      latestReviewedApproval: conversation.latestReviewedApproval
-        ? { ...conversation.latestReviewedApproval }
-        : undefined,
-    }
+    return fullConversationSlice(conversation, messages)
   }
 
   const keptMessages = messages.slice(0, cutIndex + 1)
@@ -132,10 +137,25 @@ function splitConversationAt(
   // reply itself — is retained. When the kept message is the last one, there
   // is no following message, so everything is kept.
   const firstDropped = messages[cutIndex + 1]
+  if (!firstDropped) {
+    return fullConversationSlice(conversation, keptMessages)
+  }
+
   const exclusiveBound = firstDropped?.order
+  if (exclusiveBound === undefined) {
+    return {
+      messages: keptMessages,
+      tools: [],
+      usage: [],
+      goal: undefined,
+      plan: undefined,
+      orchestratorEntries: [],
+      latestReviewedApproval: undefined,
+    }
+  }
 
   const withinBound = (order: number | undefined): boolean =>
-    exclusiveBound === undefined ? true : (order ?? 0) < exclusiveBound
+    order !== undefined && order < exclusiveBound
 
   const tools = (conversation.tools ?? []).filter((tool) =>
     withinBound(tool.order),
@@ -151,12 +171,10 @@ function splitConversationAt(
     messages: keptMessages,
     tools: tools.map((tool) => ({ ...tool })),
     usage: usage.map((item) => ({ ...item })),
-    goal: conversation.goal ? structuredClone(conversation.goal) : undefined,
-    plan: conversation.plan ? structuredClone(conversation.plan) : undefined,
+    goal: undefined,
+    plan: undefined,
     orchestratorEntries: orchestratorEntries.map((entry) => ({ ...entry })),
-    latestReviewedApproval: conversation.latestReviewedApproval
-      ? { ...conversation.latestReviewedApproval }
-      : undefined,
+    latestReviewedApproval: undefined,
   }
 }
 
@@ -432,13 +450,23 @@ export const useAgentWorkbenchStore = defineStore('agent-workbench', {
         throw error
       }
 
+      const targetProjectPath = this.workspacePath
+      if (!targetProjectPath) {
+        return {
+          canceled: false,
+          error: 'Choose a workspace before importing a conversation.',
+        }
+      }
+
       // Always assign a fresh id/title to avoid colliding with or overwriting
-      // an existing conversation. The shared record is structurally compatible
-      // with the renderer record.
+      // an existing conversation. The imported projectPath is not trusted:
+      // markdown files can come from anywhere, so imports are mapped to the
+      // currently active workspace instead of registering arbitrary paths.
       const now = new Date().toISOString()
-      const imported = {
+      const imported: ConversationRecord = {
         ...(parsed as unknown as ConversationRecord),
         id: requestId(),
+        projectPath: targetProjectPath,
         title: normalizeTitle(`Imported: ${parsed.title}`).slice(
           0,
           CONVERSATION_TITLE_MAX,
@@ -446,6 +474,12 @@ export const useAgentWorkbenchStore = defineStore('agent-workbench', {
         importedFrom: 'markdown',
         createdAt: now,
         updatedAt: now,
+      }
+      if (!validateConversationRecord(imported)) {
+        return {
+          canceled: false,
+          error: formatWorkbenchSchemaErrors(validateConversationRecord.errors),
+        }
       }
       this.registerProject(imported.projectPath)
       this.conversations.push(imported)
