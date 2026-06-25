@@ -188,7 +188,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
 
       const conversation = workbench.createConversationRecord(
         targetWorkspace,
-        settings.providerForm.model,
+        settings.activeProviderModel,
         this.mode,
       )
       this.sessionId = undefined
@@ -401,7 +401,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
 
       timeline.writeToConversation(conversation)
       conversation.mode = this.mode
-      conversation.model = settings.providerForm.model
+      conversation.model = settings.activeProviderModel
       if (touchUpdatedAt) conversation.updatedAt = new Date().toISOString()
     },
     schedulePersist(touchUpdatedAt = true) {
@@ -560,7 +560,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         conversationId: workbench.activeConversationId!,
         workspace: workbench.workspacePath,
         mode: this.mode,
-        provider: settings.providerForm.providerId,
+        provider: settings.activeProviderId,
       })
       if (result.ok) {
         this.sessionId = result.value.sessionId

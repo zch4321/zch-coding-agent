@@ -249,6 +249,87 @@ describe('ConfigStore', () => {
     await expect(configStore.getDeepSeekApiKey()).resolves.toBe('atomic-secret')
   })
 
+  it('selects, copies and deletes providers without copying secrets', async () => {
+    const { configStore } = await createStores()
+    const limits = configStore.getPublicConfig().limits
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      providerId: 'generic',
+      label: 'Generic',
+      profile: 'generic',
+      baseURL: 'https://generic.example/v1',
+      model: 'generic-chat',
+      reasoning: 'off',
+      approverProviderId: 'deepseek',
+      approverModel: 'deepseek-chat',
+      limits,
+      apiKey: 'generic-secret',
+    })
+    await configStore.setProviderModelCatalog(
+      'generic',
+      [{ id: 'generic-chat' }, { id: 'generic-reasoner' }],
+      '2026-06-25T00:00:00.000Z',
+    )
+
+    const selected = await configStore.update({
+      version: 1,
+      kind: 'provider-select',
+      providerId: 'generic',
+    })
+    expect(selected.activeProviderId).toBe('generic')
+
+    const copied = await configStore.update({
+      version: 1,
+      kind: 'provider-copy',
+      sourceProviderId: 'generic',
+      providerId: 'generic-copy',
+      label: 'Generic Copy',
+    })
+    const copiedProvider = copied.providers.find(
+      (provider) => provider.id === 'generic-copy',
+    )
+    expect(copiedProvider).toMatchObject({
+      label: 'Generic Copy',
+      baseURL: 'https://generic.example/v1',
+      model: 'generic-chat',
+      credentialConfigured: false,
+      modelCatalog: [{ id: 'generic-chat' }, { id: 'generic-reasoner' }],
+    })
+    await expect(
+      configStore.getProviderApiKey('generic-copy'),
+    ).resolves.toBeUndefined()
+
+    const deleted = await configStore.update({
+      version: 1,
+      kind: 'provider-delete',
+      providerId: 'generic',
+      fallbackProviderId: 'generic-copy',
+    })
+    expect(deleted.providers.map((provider) => provider.id)).toEqual([
+      'deepseek',
+      'generic-copy',
+    ])
+    expect(deleted.activeProviderId).toBe('generic-copy')
+    expect(deleted.approval.approverProviderId).toBe('deepseek')
+    await expect(
+      configStore.getProviderApiKey('generic'),
+    ).resolves.toBeUndefined()
+  })
+
+  it('refuses to delete the last provider', async () => {
+    const { configStore } = await createStores()
+
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'provider-delete',
+        providerId: 'deepseek',
+      }),
+    ).rejects.toThrow('Cannot delete the last provider')
+  })
+
   it('stores, masks and clears a web search API key', async () => {
     const { directory, configStore } = await createStores()
 

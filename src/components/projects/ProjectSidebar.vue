@@ -13,6 +13,7 @@ const emit = defineEmits<{
   delete: [conversationId: string]
   export: [conversationId: string]
   import: []
+  settings: []
 }>()
 
 const agent = useAgentStore()
@@ -302,6 +303,17 @@ const searchGroups = computed(() => {
           </button>
         </div>
       </template>
+    </div>
+
+    <div class="project-sidebar-footer">
+      <button
+        class="sidebar-settings-button"
+        type="button"
+        @click="emit('settings')"
+      >
+        <UiIcon name="settings" />
+        <span>{{ t('app.settings') }}</span>
+      </button>
     </div>
   </aside>
 </template>

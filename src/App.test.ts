@@ -11,14 +11,50 @@ import App from './App.vue'
 import ArtifactPanel from './components/artifacts/ArtifactPanel.vue'
 import ConversationTimeline from './components/chat/ConversationTimeline.vue'
 import ProjectSidebar from './components/projects/ProjectSidebar.vue'
+import ProviderSettingsPanel from './components/settings/ProviderSettingsPanel.vue'
+import { DEFAULT_APP_CONFIG, toPublicConfig } from '../electron/config/schema'
 import { i18n, setAppLocale } from './i18n'
 import { useAgentStore } from './stores/agent'
+
+function multiProviderConfig() {
+  const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
+  config.providers[0].modelCatalog = [
+    { id: 'deepseek-chat' },
+    { id: 'deepseek-reasoner' },
+  ]
+  config.providers.push({
+    ...structuredClone(config.providers[0]),
+    id: 'generic',
+    label: 'Generic Provider',
+    profile: 'generic',
+    baseURL: 'https://generic.example/v1',
+    model: 'generic-chat',
+    reasoning: 'off',
+    modelCatalog: [{ id: 'generic-chat' }, { id: 'generic-coder' }],
+    modelOverrides: {
+      'generic-large': { contextWindowTokens: 128_000 },
+    },
+    credentialConfigured: false,
+    credentialSource: 'none',
+  })
+  return config
+}
 
 function setWindowWidth(width: number) {
   Object.defineProperty(window, 'innerWidth', {
     configurable: true,
     value: width,
   })
+}
+
+function clickBodyButton(label: string) {
+  const button = [...document.body.querySelectorAll('button')].find((item) =>
+    item.textContent?.includes(label),
+  )
+  if (!button) {
+    throw new Error(`Button not found: ${label}`)
+  }
+  button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 }
 
 describe('App', () => {
@@ -65,6 +101,27 @@ describe('App', () => {
     expect(
       wrapper.find('.conversation-pane .message-input-area').exists(),
     ).toBe(true)
+  })
+
+  it('opens settings as a page from the project sidebar and returns to chat', async () => {
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), i18n],
+      },
+    })
+
+    await wrapper.get('.sidebar-settings-button').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('.settings-page').exists()).toBe(true)
+    expect(wrapper.find('.settings-modal').exists()).toBe(false)
+    expect(wrapper.find('.artifact-sidebar').exists()).toBe(false)
+    expect(wrapper.text()).toContain('返回主界面')
+
+    await wrapper.get('.settings-back-button').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('.conversation-pane').exists()).toBe(true)
   })
 
   it('keeps at most one docked sidebar open when both do not fit', async () => {
@@ -282,6 +339,95 @@ describe('App', () => {
       status: 'active',
     })
     expect(startRun).toHaveBeenCalled()
+  })
+
+  it('renders provider cards and gates dirty provider switches', async () => {
+    const config = multiProviderConfig()
+    const setConfig = vi.fn(
+      async (payload: Parameters<AgentApi['setConfig']>[0]) => {
+        if (payload.kind === 'provider-settings') {
+          const provider = config.providers.find(
+            (candidate) => candidate.id === payload.providerId,
+          )
+          if (provider) {
+            provider.label = payload.label ?? provider.label
+            provider.baseURL = payload.baseURL
+            provider.model = payload.model
+            provider.reasoning = payload.reasoning
+          }
+        }
+        return {
+          version: 1 as const,
+          ok: true as const,
+          value: { config },
+        }
+      },
+    )
+    const listProviderModels = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: {
+        models: [
+          {
+            id: 'generic-chat',
+            availability: 'provider' as const,
+            capabilitySource: 'default' as const,
+            contextWindowTokens: 64_000,
+          },
+        ],
+        stale: false,
+      },
+    }))
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        setConfig,
+        listProviderModels,
+      } as Partial<AgentApi> as AgentApi,
+    })
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    store.applyConfig(config)
+    const wrapper = mount(ProviderSettingsPanel, {
+      attachTo: document.body,
+      global: { plugins: [pinia, i18n] },
+    })
+
+    expect(wrapper.findAll('.provider-card')).toHaveLength(2)
+    expect(wrapper.text()).toContain('DeepSeek')
+    expect(wrapper.text()).toContain('Generic Provider')
+    expect(wrapper.text()).toContain('generic-large')
+
+    store.providerForm.label = 'Unsaved DeepSeek'
+    await wrapper.findAll('.provider-card')[1]?.trigger('click')
+    await nextTick()
+    expect(document.body.textContent).toContain('Provider 有未保存修改')
+
+    clickBodyButton('取消')
+    await nextTick()
+    expect(store.selectedProviderId).toBe('deepseek')
+
+    await wrapper.findAll('.provider-card')[1]?.trigger('click')
+    await nextTick()
+    clickBodyButton('放弃修改')
+    await flushPromises()
+    expect(store.selectedProviderId).toBe('generic')
+
+    store.providerForm.baseURL = 'https://changed.example/v1'
+    await wrapper.findAll('.provider-card')[0]?.trigger('click')
+    await nextTick()
+    clickBodyButton('保存并继续')
+    await flushPromises()
+
+    expect(setConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'provider-settings',
+        providerId: 'generic',
+        baseURL: 'https://changed.example/v1',
+      }),
+    )
+    expect(store.selectedProviderId).toBe('deepseek')
+    wrapper.unmount()
   })
 
   it('renders approval injection content as inert text', async () => {

@@ -19,7 +19,11 @@ type ProviderUpdate = Extract<
   { kind: 'provider' | 'provider-settings' }
 >
 
-function applyProviderUpdate(next: AppConfig, request: ProviderUpdate): void {
+function applyProviderUpdate(
+  next: AppConfig,
+  request: ProviderUpdate,
+  options: { activate: boolean },
+): void {
   const providerId = request.providerId ?? next.activeProviderId
   let provider = getAppProvider(next, providerId)
 
@@ -65,7 +69,22 @@ function applyProviderUpdate(next: AppConfig, request: ProviderUpdate): void {
     delete provider.modelOverrides[request.model]
   }
 
-  next.activeProviderId = provider.id
+  if (options.activate) {
+    next.activeProviderId = provider.id
+  }
+}
+
+function providerFallback(
+  next: AppConfig,
+  preferredProviderId?: string,
+): AppProviderConfig | undefined {
+  return (
+    (preferredProviderId
+      ? getAppProvider(next, preferredProviderId)
+      : undefined) ??
+    getAppProvider(next, next.activeProviderId) ??
+    next.providers[0]
+  )
 }
 
 export class ConfigStore {
@@ -210,10 +229,10 @@ export class ConfigStore {
 
     switch (request.kind) {
       case 'provider':
-        applyProviderUpdate(next, request)
+        applyProviderUpdate(next, request, { activate: true })
         break
       case 'provider-settings': {
-        applyProviderUpdate(next, request)
+        applyProviderUpdate(next, request, { activate: false })
         next.approval = {
           approverProviderId: request.approverProviderId,
           approverModel: request.approverModel,
@@ -238,6 +257,73 @@ export class ConfigStore {
           throw error
         }
 
+        this.#config = next
+        await this.#secretStore.delete(previousReference)
+        return this.getPublicConfig()
+      }
+      case 'provider-select': {
+        const provider = getAppProvider(next, request.providerId)
+
+        if (!provider) {
+          throw new Error(`Provider not found: ${request.providerId}`)
+        }
+
+        next.activeProviderId = provider.id
+        break
+      }
+      case 'provider-copy': {
+        const source = getAppProvider(next, request.sourceProviderId)
+
+        if (!source) {
+          throw new Error(`Provider not found: ${request.sourceProviderId}`)
+        }
+
+        if (getAppProvider(next, request.providerId)) {
+          throw new Error(`Provider already exists: ${request.providerId}`)
+        }
+
+        const copy = structuredClone(source)
+        delete copy.apiKeyRef
+        next.providers.push({
+          ...copy,
+          id: request.providerId,
+          label: request.label,
+        })
+        break
+      }
+      case 'provider-delete': {
+        if (next.providers.length <= 1) {
+          throw new Error('Cannot delete the last provider')
+        }
+
+        const provider = getAppProvider(next, request.providerId)
+
+        if (!provider) {
+          throw new Error(`Provider not found: ${request.providerId}`)
+        }
+
+        const previousReference = provider.apiKeyRef
+        next.providers = next.providers.filter(
+          (candidate) => candidate.id !== request.providerId,
+        )
+        const fallback = providerFallback(next, request.fallbackProviderId)
+
+        if (!fallback) {
+          throw new Error('No provider is available after deletion')
+        }
+
+        if (next.activeProviderId === request.providerId) {
+          next.activeProviderId = fallback.id
+        }
+
+        if (next.approval.approverProviderId === request.providerId) {
+          next.approval = {
+            approverProviderId: fallback.id,
+            approverModel: fallback.model,
+          }
+        }
+
+        await writeJsonAtomic(this.#filePath, next)
         this.#config = next
         await this.#secretStore.delete(previousReference)
         return this.getPublicConfig()

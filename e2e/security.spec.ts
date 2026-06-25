@@ -276,12 +276,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
   test('shows configurable prompts, model discovery, and budget controls', async () => {
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
-    await page.evaluate(() => {
-      const button = document.querySelector<HTMLButtonElement>(
-        '[aria-label="打开设置"]',
-      )
-      button?.click()
-    })
+    await page.locator('.sidebar-settings-button').click()
     const settingsNavigation = page.getByRole('navigation', {
       name: '设置分类',
     })
@@ -325,6 +320,8 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await settingsNavigation.getByRole('button', { name: '模型服务' }).click()
     const provider = page.locator('.settings-section')
 
+    await expect(provider.locator('.provider-card')).toHaveCount(1)
+    await expect(provider.locator('.provider-card')).toContainText('DeepSeek')
     await expect(provider.getByText('主模型', { exact: true })).toBeVisible()
     await expect(
       provider.getByText('上下文窗口覆盖值', { exact: true }),
@@ -352,14 +349,99 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await page.keyboard.press('Escape')
   })
 
+  test('manages provider cards through the settings page', async () => {
+    const seeded = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        getConfig(payload: unknown): Promise<{
+          ok: boolean
+          value?: { config: { limits: unknown } }
+        }>
+        setConfig(payload: unknown): Promise<{ ok: boolean }>
+      }
+      const current = await api.getConfig({ version: 1, section: 'all' })
+      if (!current.ok || !current.value) return false
+      const result = await api.setConfig({
+        version: 1,
+        kind: 'provider-settings',
+        providerId: 'e2e-alt',
+        label: 'E2E Alt',
+        profile: 'generic',
+        baseURL: 'https://provider.example/v1',
+        model: 'e2e-alt-chat',
+        reasoning: 'off',
+        approverProviderId: 'deepseek',
+        approverModel: 'deepseek-chat',
+        limits: current.value.config.limits,
+      })
+      return result.ok
+    })
+    expect(seeded).toBe(true)
+
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.locator('.sidebar-settings-button').click()
+    const navigation = page.getByRole('navigation', {
+      name: '设置分类',
+    })
+    await navigation.getByRole('button', { name: '模型服务' }).click()
+    const provider = page.locator('.settings-section')
+
+    await expect(provider.locator('.provider-card')).toHaveCount(2)
+    const altCard = provider.locator('.provider-card', { hasText: 'E2E Alt' })
+    await expect(altCard).toContainText('e2e-alt-chat')
+
+    await provider.getByRole('button', { name: '新增 Provider' }).click()
+    await expect(
+      provider.locator('.provider-card', { hasText: 'New Provider' }),
+    ).toBeVisible()
+
+    await altCard.click()
+    await provider
+      .locator('.settings-field', { hasText: 'Provider 名称' })
+      .locator('input')
+      .fill('E2E Alt Edited')
+    await provider.getByRole('button', { name: '保存模型服务' }).click()
+    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+    await expect(
+      provider.locator('.provider-card', { hasText: 'E2E Alt Edited' }),
+    ).toBeVisible()
+
+    await provider.getByRole('button', { name: '设为默认' }).click()
+    await expect(
+      provider.locator('.provider-card.active', { hasText: 'E2E Alt Edited' }),
+    ).toContainText('默认')
+
+    const editedCard = provider.locator('.provider-card', {
+      hasText: 'E2E Alt Edited',
+    })
+    await editedCard.getByRole('button', { name: '操作' }).click()
+    await page.getByText('复制 Provider', { exact: true }).click()
+    const copyCard = provider.locator('.provider-card', {
+      hasText: 'E2E Alt Edited Copy',
+    })
+    await expect(copyCard).toBeVisible()
+
+    await copyCard.getByRole('button', { name: '操作' }).click()
+    await page.getByText('删除 Provider', { exact: true }).last().click()
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: '删除 Provider' })
+      .click()
+    await expect(copyCard).toHaveCount(0)
+
+    const configText = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        getConfig(payload: unknown): Promise<unknown>
+      }
+      return JSON.stringify(await api.getConfig({ version: 1, section: 'all' }))
+    })
+    expect(configText).not.toContain('apiKeyRef')
+  })
+
   test('exposes skill management and bounded trace diagnostics in settings', async () => {
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
-    await page.evaluate(() => {
-      document
-        .querySelector<HTMLButtonElement>('[aria-label="打开设置"]')
-        ?.click()
-    })
+    await page.locator('.sidebar-settings-button').click()
     const navigation = page.getByRole('navigation', {
       name: '设置分类',
     })
@@ -412,7 +494,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
 
     await page.reload()
     const artifactToggle = page.getByRole('button', {
-      name: '切换文件侧栏（Ctrl+Shift+B）',
+      name: '切换右侧栏（Ctrl+Shift+B）',
     })
     if ((await artifactToggle.getAttribute('aria-pressed')) !== 'true') {
       await artifactToggle.click()
@@ -624,7 +706,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
     expect(updatedWorkbench.ok).toBe(true)
     await page.reload()
     const artifactToggle = page.getByRole('button', {
-      name: '切换文件侧栏（Ctrl+Shift+B）',
+      name: '切换右侧栏（Ctrl+Shift+B）',
     })
     if ((await artifactToggle.getAttribute('aria-pressed')) !== 'true') {
       await artifactToggle.click()
@@ -716,9 +798,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await page.reload()
     const card = page.locator('.tool-call-card')
     await expect(card).toBeVisible()
-    await card
-      .locator('.n-collapse-item__header-main')
-      .evaluate((element: HTMLElement) => element.click())
+    await card.locator('.tool-call-row').click()
     await expect(card.locator('.tool-result-json')).toBeVisible()
     const metrics = await card.evaluate((element) => {
       const pane = document.querySelector('.conversation-pane')

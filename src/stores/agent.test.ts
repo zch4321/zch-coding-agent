@@ -74,6 +74,31 @@ function markdownConversation(
   }
 }
 
+function multiProviderConfig() {
+  const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
+  config.providers[0].modelCatalog = [
+    { id: 'deepseek-chat' },
+    { id: 'deepseek-reasoner' },
+  ]
+  config.providers.push({
+    ...structuredClone(config.providers[0]),
+    id: 'generic',
+    label: 'Generic Provider',
+    profile: 'generic',
+    baseURL: 'https://generic.example/v1',
+    model: 'generic-chat',
+    reasoning: 'off',
+    modelCatalog: [{ id: 'generic-chat' }, { id: 'generic-coder' }],
+    modelOverrides: {
+      'generic-large': { contextWindowTokens: 128_000 },
+    },
+    credentialConfigured: false,
+    credentialSource: 'none',
+  })
+  config.approval.approverProviderId = 'deepseek'
+  return config
+}
+
 describe('agent store regressions', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
@@ -236,6 +261,123 @@ describe('agent store regressions', () => {
     expect(store.providerForm.model).toBe('draft-model')
     expect(store.providerDirty).toBe(true)
     expect(store.loggingForm.retentionDays).toBe(30)
+  })
+
+  it('keeps provider editing selection separate from the active provider', async () => {
+    installApi({
+      listProviderModels: vi.fn(async () => ({
+        version: 1 as const,
+        ok: true as const,
+        value: {
+          models: [
+            {
+              id: 'generic-chat',
+              availability: 'provider' as const,
+              capabilitySource: 'default' as const,
+              contextWindowTokens: 64_000,
+            },
+          ],
+          stale: false,
+        },
+      })),
+    })
+    const store = useAgentStore()
+    store.applyConfig(multiProviderConfig())
+
+    expect(store.providerCardSummaries).toMatchObject([
+      {
+        id: 'deepseek',
+        isActive: true,
+        isSelected: true,
+        models: ['deepseek-chat', 'deepseek-reasoner'],
+      },
+      {
+        id: 'generic',
+        isActive: false,
+        isSelected: false,
+        models: ['generic-chat', 'generic-coder', 'generic-large'],
+      },
+    ])
+
+    await store.selectProviderForEditing('generic')
+
+    expect(store.activeProviderId).toBe('deepseek')
+    expect(store.activeProviderModel).toBe('deepseek-chat')
+    expect(store.credentialConfigured).toBe(true)
+    expect(store.selectedCredentialConfigured).toBe(false)
+    expect(store.providerForm).toMatchObject({
+      providerId: 'generic',
+      label: 'Generic Provider',
+      model: 'generic-chat',
+      profile: 'generic',
+    })
+  })
+
+  it('sends provider CRUD configuration requests through IPC', async () => {
+    const config = multiProviderConfig()
+    const setConfig = vi.fn(
+      async (payload: Parameters<AgentApi['setConfig']>[0]) => {
+        const next = structuredClone(config)
+        if (payload.kind === 'provider-select') {
+          next.activeProviderId = payload.providerId
+        } else if (payload.kind === 'provider-copy') {
+          const source = next.providers.find(
+            (provider) => provider.id === payload.sourceProviderId,
+          )
+          if (source) {
+            next.providers.push({
+              ...structuredClone(source),
+              id: payload.providerId,
+              label: payload.label,
+              credentialConfigured: false,
+              credentialSource: 'none',
+            })
+          }
+        } else if (payload.kind === 'provider-delete') {
+          next.providers = next.providers.filter(
+            (provider) => provider.id !== payload.providerId,
+          )
+          next.activeProviderId =
+            payload.fallbackProviderId ?? next.providers[0].id
+        }
+        return {
+          version: 1 as const,
+          ok: true as const,
+          value: { config: next },
+        }
+      },
+    )
+    installApi({ setConfig })
+    const store = useAgentStore()
+    store.applyConfig(config)
+
+    await store.setActiveProvider('generic')
+    await store.copyProvider('generic')
+    await store.deleteProvider('generic')
+
+    expect(setConfig).toHaveBeenNthCalledWith(1, {
+      version: 1,
+      kind: 'provider-select',
+      providerId: 'generic',
+    })
+    expect(setConfig).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        version: 1,
+        kind: 'provider-copy',
+        sourceProviderId: 'generic',
+        providerId: 'generic-provider-copy',
+        label: 'Generic Provider Copy',
+      }),
+    )
+    expect(setConfig).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        version: 1,
+        kind: 'provider-delete',
+        providerId: 'generic',
+      }),
+    )
   })
 
   it('updates the active runtime session when permission mode changes', async () => {

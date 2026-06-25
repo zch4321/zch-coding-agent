@@ -148,6 +148,9 @@ export const IPC_CONTRACTS = {
       {
         version: Type.Literal(IPC_VERSION),
         refresh: Type.Boolean(),
+        providerId: Type.Optional(
+          Type.String({ minLength: 1, maxLength: 128 }),
+        ),
       },
       { additionalProperties: false },
     ),

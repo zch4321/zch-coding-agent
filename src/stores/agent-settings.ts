@@ -7,7 +7,7 @@ import type {
   ProviderPublicConfig,
   PublicConfig,
 } from '../../shared/config'
-import { getActiveProviderConfig } from '../../shared/config'
+import { getProviderConfig } from '../../shared/config'
 import {
   PROVIDER_NOTICE_VERSION,
   TRACE_NOTICE_VERSION,
@@ -18,15 +18,76 @@ import { nowNotice, toUiRememberedRules } from './config-mapping'
 import type { UiModelProfile, UiRememberedRule } from './agent-types'
 import { DEFAULT_PROVIDER_FORM, providerFormSignature } from './provider-form'
 
+function providerModelProfiles(
+  provider: ProviderPublicConfig | undefined,
+  fallbackContextWindowTokens: number,
+): UiModelProfile[] {
+  if (!provider) return []
+
+  const ids = new Set<string>([
+    provider.model,
+    ...provider.modelCatalog.map((model) => model.id),
+    ...Object.keys(provider.modelOverrides),
+  ])
+
+  return [...ids].map((id) => {
+    const catalogModel = provider.modelCatalog.find((model) => model.id === id)
+    const override = provider.modelOverrides[id]
+    return {
+      id,
+      ownedBy: catalogModel?.ownedBy,
+      availability: catalogModel ? 'provider' : 'custom',
+      capabilitySource: override ? 'override' : 'default',
+      contextWindowTokens:
+        override?.contextWindowTokens ?? fallbackContextWindowTokens,
+      ...(override?.maxOutputTokens
+        ? { maxOutputTokens: override.maxOutputTokens }
+        : {}),
+    }
+  })
+}
+
+function providerPreviewModels(provider: ProviderPublicConfig): string[] {
+  const ids = new Set<string>([
+    provider.model,
+    ...provider.modelCatalog.map((model) => model.id),
+    ...Object.keys(provider.modelOverrides),
+  ])
+  return [...ids].slice(0, 3)
+}
+
+function providerIdFromLabel(label: string, existingIds: Set<string>): string {
+  const base =
+    label
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'provider'
+  let candidate = base
+  let index = 2
+
+  while (existingIds.has(candidate)) {
+    candidate = `${base}-${index}`
+    index += 1
+  }
+
+  return candidate
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
 export const useAgentSettingsStore = defineStore('agent-settings', {
   state: () => ({
     error: '',
     providerNoticeVersion: '',
     traceNoticeVersion: '',
     yoloNoticeVersion: '',
-    credentialConfiguredValue: false,
-    credentialSource: 'none' as 'none' | 'safe-storage' | 'environment',
-    providers: [] as Array<{ id: string; label: string }>,
+    activeProviderId: 'deepseek',
+    selectedProviderId: 'deepseek',
+    providers: [] as ProviderPublicConfig[],
     builtinPolicies: true,
     rememberedRules: [] as UiRememberedRule[],
     defaultMode: 'readonly' as PermissionMode,
@@ -73,7 +134,36 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       state.traceNoticeVersion === TRACE_NOTICE_VERSION,
     yoloNoticeAccepted: (state) =>
       state.yoloNoticeVersion === YOLO_NOTICE_VERSION,
-    credentialConfigured: (state) => state.credentialConfiguredValue,
+    activeProvider: (state) =>
+      state.providers.find(
+        (provider) => provider.id === state.activeProviderId,
+      ),
+    selectedProvider: (state) =>
+      state.providers.find(
+        (provider) => provider.id === state.selectedProviderId,
+      ),
+    credentialConfigured: (state) =>
+      Boolean(
+        state.providers.find(
+          (provider) => provider.id === state.activeProviderId,
+        )?.credentialConfigured,
+      ),
+    credentialSource: (state) =>
+      state.providers.find((provider) => provider.id === state.activeProviderId)
+        ?.credentialSource ?? 'none',
+    selectedCredentialConfigured: (state) =>
+      Boolean(
+        state.providers.find(
+          (provider) => provider.id === state.selectedProviderId,
+        )?.credentialConfigured,
+      ),
+    selectedCredentialSource: (state) =>
+      state.providers.find(
+        (provider) => provider.id === state.selectedProviderId,
+      )?.credentialSource ?? 'none',
+    activeProviderModel: (state) =>
+      state.providers.find((provider) => provider.id === state.activeProviderId)
+        ?.model ?? state.providerForm.model,
     modelOptions: (state) =>
       state.modelProfiles.map((model) => ({
         label: model.id,
@@ -83,6 +173,17 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       state.providers.map((provider) => ({
         label: provider.label,
         value: provider.id,
+      })),
+    providerCardSummaries: (state) =>
+      state.providers.map((provider) => ({
+        id: provider.id,
+        label: provider.label,
+        profile: provider.profile,
+        models: providerPreviewModels(provider),
+        isActive: provider.id === state.activeProviderId,
+        isSelected: provider.id === state.selectedProviderId,
+        credentialConfigured: provider.credentialConfigured,
+        credentialSource: provider.credentialSource,
       })),
     activeModelProfile: (state) =>
       state.modelProfiles.find(
@@ -102,6 +203,49 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       ),
   },
   actions: {
+    hydrateSelectedProviderForm(config?: PublicConfig) {
+      const providers = config?.providers ?? this.providers
+      const activeProviderId = config?.activeProviderId ?? this.activeProviderId
+      const provider =
+        providers.find((item) => item.id === this.selectedProviderId) ??
+        providers.find((item) => item.id === activeProviderId) ??
+        providers[0]
+
+      if (!provider) return
+
+      this.selectedProviderId = provider.id
+      this.providerForm.providerId = provider.id
+      this.providerForm.label = provider.label
+      this.providerForm.profile = provider.profile
+      this.providerForm.baseURL = provider.baseURL
+      this.providerForm.model = provider.model
+      this.providerForm.reasoning = provider.reasoning
+      this.providerForm.apiKey = ''
+      this.modelOverrides = cloneJson(provider.modelOverrides)
+      this.modelProfiles = providerModelProfiles(
+        provider,
+        (config?.limits ?? this.limitsConfig)?.maxContextTokens ?? 64_000,
+      )
+      this.modelCatalogFetchedAt = provider.modelCatalogFetchedAt
+      this.modelCatalogStale =
+        !provider.modelCatalogFetchedAt ||
+        Date.now() - new Date(provider.modelCatalogFetchedAt).getTime() >
+          24 * 60 * 60_000
+
+      const approval = config?.approval
+      if (approval) {
+        this.providerForm.approverProviderId = approval.approverProviderId
+        this.providerForm.approverModel = approval.approverModel
+      }
+
+      const limits = config?.limits ?? this.limitsConfig
+      if (limits) {
+        this.providerForm.tokenEstimationMode = limits.tokenEstimation.mode
+        this.providerForm.bytesPerToken = limits.tokenEstimation.bytesPerToken
+      }
+
+      this.syncModelOverride(provider.model)
+    },
     applyConfig(config: PublicConfig, sections: ConfigSection[] = ['all']) {
       const includes = (section: ConfigSection) =>
         sections.includes('all') || sections.includes(section)
@@ -116,21 +260,15 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       }
 
       if (includes('providers')) {
-        const provider = getActiveProviderConfig(config)
-        this.providers = config.providers.map((item) => ({
-          id: item.id,
-          label: item.label,
-        }))
-        this.credentialConfiguredValue = provider.credentialConfigured
-        this.credentialSource = provider.credentialSource
-        this.providerForm.providerId = provider.id
-        this.providerForm.label = provider.label
-        this.providerForm.profile = provider.profile
-        this.providerForm.baseURL = provider.baseURL
-        this.providerForm.model = provider.model
-        this.providerForm.reasoning = provider.reasoning
-        this.modelOverrides = structuredClone(provider.modelOverrides)
-        this.syncModelOverride(provider.model)
+        this.activeProviderId = config.activeProviderId
+        this.providers = structuredClone(config.providers)
+
+        if (
+          !this.selectedProviderId ||
+          !getProviderConfig(config, this.selectedProviderId)
+        ) {
+          this.selectedProviderId = config.activeProviderId
+        }
       }
 
       if (includes('approval')) {
@@ -148,6 +286,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       }
 
       if (includes('providers') || includes('approval') || includes('limits')) {
+        this.hydrateSelectedProviderForm(config)
         this.providerSavedSignature = providerFormSignature(this.providerForm)
       }
 
@@ -224,6 +363,21 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         override?.contextWindowTokens ?? null
       this.providerForm.maxOutputTokens = override?.maxOutputTokens ?? null
     },
+    async selectProviderForEditing(providerId: string, refreshModels = true) {
+      if (!this.providers.some((provider) => provider.id === providerId)) {
+        return false
+      }
+
+      this.selectedProviderId = providerId
+      this.hydrateSelectedProviderForm()
+      this.providerSavedSignature = providerFormSignature(this.providerForm)
+      if (refreshModels) await this.loadProviderModels(false)
+      return true
+    },
+    resetSelectedProviderDraft() {
+      this.hydrateSelectedProviderForm()
+      this.providerSavedSignature = providerFormSignature(this.providerForm)
+    },
     setProviderModel(model: string) {
       this.providerForm.model = model
       this.syncModelOverride(model)
@@ -243,22 +397,146 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
 
       if (!bridge || this.modelCatalogLoading) return
       this.modelCatalogLoading = true
+      const providerId = this.selectedProviderId
 
       try {
         const result = await bridge.listProviderModels({
           version: IPC_VERSION,
           refresh,
+          providerId,
         })
         if (!result.ok) {
           if (refresh) this.error = result.error.message
           return
         }
+
+        if (refresh) {
+          const configResult = await bridge.getConfig({
+            version: IPC_VERSION,
+            section: 'providers',
+          })
+          if (configResult.ok) {
+            this.applyConfig(configResult.value.config, ['providers'])
+          }
+        }
+
+        if (providerId !== this.selectedProviderId) return
         this.modelProfiles = result.value.models
         this.modelCatalogFetchedAt = result.value.fetchedAt
         this.modelCatalogStale = result.value.stale
       } finally {
         this.modelCatalogLoading = false
       }
+    },
+    async setActiveProvider(providerId: string) {
+      const bridge = window.agentApi
+      if (!bridge) return false
+
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'provider-select',
+        providerId,
+      })
+
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+
+      this.applyConfig(result.value.config, ['providers'])
+      return true
+    },
+    async createProvider() {
+      const bridge = window.agentApi
+      if (!bridge) return false
+
+      const limits = this.limitsConfig
+      if (!limits) {
+        this.error = 'Provider settings are not initialized.'
+        return false
+      }
+
+      const existingIds = new Set(this.providers.map((provider) => provider.id))
+      const labelBase = 'New Provider'
+      const nextIndex = this.providers.length + 1
+      const label = `${labelBase} ${nextIndex}`
+      const providerId = providerIdFromLabel(label, existingIds)
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'provider-settings',
+        providerId,
+        label,
+        profile: 'generic',
+        baseURL: 'https://api.example.com/v1',
+        model: 'model-name',
+        reasoning: 'off',
+        approverProviderId: this.providerForm.approverProviderId,
+        approverModel: this.providerForm.approverModel,
+        limits: cloneJson(limits),
+      })
+
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+
+      this.selectedProviderId = providerId
+      this.applyConfig(result.value.config, ['providers', 'approval', 'limits'])
+      return true
+    },
+    async copyProvider(sourceProviderId?: string) {
+      const bridge = window.agentApi
+      const sourceId = sourceProviderId ?? this.selectedProviderId
+      const source = this.providers.find((provider) => provider.id === sourceId)
+      if (!bridge || !source) return false
+
+      const providerId = providerIdFromLabel(
+        `${source.label} copy`,
+        new Set(this.providers.map((provider) => provider.id)),
+      )
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'provider-copy',
+        sourceProviderId: source.id,
+        providerId,
+        label: `${source.label} Copy`,
+      })
+
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+
+      this.selectedProviderId = providerId
+      this.applyConfig(result.value.config, ['providers'])
+      return true
+    },
+    async deleteProvider(providerId: string) {
+      const bridge = window.agentApi
+      if (!bridge || this.providers.length <= 1) return false
+
+      const fallbackProvider = this.providers.find(
+        (provider) => provider.id !== providerId,
+      )
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'provider-delete',
+        providerId,
+        ...(fallbackProvider
+          ? { fallbackProviderId: fallbackProvider.id }
+          : {}),
+      })
+
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+
+      if (this.selectedProviderId === providerId) {
+        this.selectedProviderId = result.value.config.activeProviderId
+      }
+      this.applyConfig(result.value.config, ['providers', 'approval'])
+      return true
     },
     async saveProvider() {
       const bridge = window.agentApi
@@ -320,6 +598,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       const result = await bridge.setConfig({
         version: IPC_VERSION,
         kind: 'credential',
+        providerId: this.selectedProviderId,
         action: 'clear',
       })
       if (result.ok) this.applyConfig(result.value.config, ['providers'])

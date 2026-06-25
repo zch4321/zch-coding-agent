@@ -473,6 +473,35 @@ export const ConfigSetRequestSchema = Type.Union([
   Type.Object(
     {
       version: Type.Literal(1),
+      kind: Type.Literal('provider-select'),
+      providerId: Type.String({ minLength: 1, maxLength: 128 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('provider-copy'),
+      sourceProviderId: Type.String({ minLength: 1, maxLength: 128 }),
+      providerId: Type.String({ minLength: 1, maxLength: 128 }),
+      label: Type.String({ minLength: 1, maxLength: 128 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('provider-delete'),
+      providerId: Type.String({ minLength: 1, maxLength: 128 }),
+      fallbackProviderId: Type.Optional(
+        Type.String({ minLength: 1, maxLength: 128 }),
+      ),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
       kind: Type.Literal('credential'),
       providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
       action: Type.Literal('set'),

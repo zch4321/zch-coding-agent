@@ -19,7 +19,6 @@ const emit = defineEmits<{
   terminal: []
   'project-sidebar': []
   'artifact-sidebar': []
-  settings: []
 }>()
 const agent = useAgentStore()
 const { t } = useI18n()
@@ -105,19 +104,6 @@ async function windowAction(
             ? t('topbar.sidebarUnavailable')
             : t('topbar.artifactSidebar')
         }}
-      </NTooltip>
-      <NTooltip>
-        <template #trigger>
-          <button
-            class="topbar-icon-button"
-            type="button"
-            :aria-label="t('topbar.settings')"
-            @click="emit('settings')"
-          >
-            <UiIcon name="settings" />
-          </button>
-        </template>
-        {{ t('topbar.settings') }}
       </NTooltip>
       <div class="window-controls" :aria-label="t('topbar.windowControls')">
         <button

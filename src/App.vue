@@ -22,21 +22,16 @@ import WorkbenchDialogs from './components/dialogs/WorkbenchDialogs.vue'
 import ArtifactPanel from './components/artifacts/ArtifactPanel.vue'
 import AppTopbar from './components/layout/AppTopbar.vue'
 import ProjectSidebar from './components/projects/ProjectSidebar.vue'
-import SettingsModal from './components/settings/SettingsModal.vue'
+import SettingsNavigation from './components/settings/SettingsNavigation.vue'
+import SettingsPage from './components/settings/SettingsPage.vue'
 import { useAgentStore } from './stores/agent'
 import type { PermissionMode } from '../shared/config'
 import { setAppLocale, type AppLocale } from './i18n'
-
-type SettingsTab =
-  | 'general'
-  | 'project'
-  | 'provider'
-  | 'permissions'
-  | 'skills'
-  | 'logging'
+import type { SettingsTab } from './components/settings/settings-tabs'
 
 type Sidebar = 'project' | 'artifact'
 type ArtifactTab = 'files' | 'diff' | 'plan'
+type AppView = 'chat' | 'settings'
 
 const PROJECT_SIDEBAR_WIDTH = 240
 const ARTIFACT_SIDEBAR_WIDTH = 440
@@ -48,7 +43,7 @@ const TerminalPanel = defineAsyncComponent(
 
 const agent = useAgentStore()
 const { locale, t } = useI18n()
-const settingsOpen = ref(false)
+const activeView = ref<AppView>('chat')
 const settingsTab = ref<SettingsTab>('general')
 const yoloWarningOpen = ref(false)
 const projectSidebarOpen = ref(true)
@@ -103,7 +98,9 @@ const projectSidebarDisabled = computed(
   () => !projectSidebarOpen.value && !canOpenProjectSidebar.value,
 )
 const artifactSidebarDisabled = computed(
-  () => !artifactSidebarOpen.value && !canOpenArtifactSidebar.value,
+  () =>
+    activeView.value === 'settings' ||
+    (!artifactSidebarOpen.value && !canOpenArtifactSidebar.value),
 )
 const statusLabel = computed(() => {
   if (agent.pendingApproval) {
@@ -143,7 +140,14 @@ const usageSummary = computed(() => {
 })
 function openSettings(tab: SettingsTab = 'general') {
   settingsTab.value = tab
-  settingsOpen.value = true
+  activeView.value = 'settings'
+  projectSidebarOpen.value = true
+  artifactSidebarOpen.value = false
+}
+
+function closeSettings() {
+  activeView.value = 'chat'
+  void agent.selectProviderForEditing(agent.activeProviderId)
 }
 
 async function selectMode(value: string | number) {
@@ -336,6 +340,7 @@ function toggleArtifactSidebar() {
 }
 
 function openArtifactSidebar() {
+  if (activeView.value === 'settings') return
   if (!canOpenArtifactSidebar.value) return
   lastOpenedSidebar.value = 'artifact'
 
@@ -428,7 +433,6 @@ onUnmounted(() => {
         @terminal="terminalOpen = !terminalOpen"
         @project-sidebar="toggleProjectSidebar"
         @artifact-sidebar="toggleArtifactSidebar"
-        @settings="openSettings()"
       />
 
       <div ref="workbenchElement" class="workbench-shell">
@@ -447,7 +451,15 @@ onUnmounted(() => {
             :show-trigger="false"
             bordered
           >
+            <SettingsNavigation
+              v-if="activeView === 'settings'"
+              :active-tab="settingsTab"
+              :aria-hidden="!projectSidebarOpen"
+              @update:active-tab="settingsTab = $event"
+              @close="closeSettings"
+            />
             <ProjectSidebar
+              v-else
               :aria-hidden="!projectSidebarOpen"
               @add="agent.chooseWorkspace"
               @create="createConversation"
@@ -456,6 +468,7 @@ onUnmounted(() => {
               @delete="deleteConversationId = $event"
               @export="exportConversation"
               @import="importConversation"
+              @settings="openSettings()"
             />
           </NLayoutSider>
 
@@ -470,7 +483,14 @@ onUnmounted(() => {
               content-class="conversation-layout-content"
               content-style="overflow: hidden"
             >
+              <SettingsPage
+                v-if="activeView === 'settings'"
+                :active-tab="settingsTab"
+                @close="closeSettings"
+                @mode="selectMode"
+              />
               <section
+                v-else
                 class="conversation-pane"
                 :style="{ '--terminal-height': terminalHeight + 'px' }"
                 :class="{
@@ -518,6 +538,7 @@ onUnmounted(() => {
             </NLayoutContent>
 
             <NLayoutSider
+              v-if="activeView === 'chat'"
               :width="ARTIFACT_SIDEBAR_WIDTH"
               :collapsed-width="0"
               :collapsed="!artifactSidebarOpen"
@@ -535,12 +556,6 @@ onUnmounted(() => {
           </NLayout>
         </NLayout>
       </div>
-
-      <SettingsModal
-        v-model:show="settingsOpen"
-        :initial-tab="settingsTab"
-        @mode="selectMode"
-      />
 
       <WorkbenchDialogs
         :yolo-open="yoloWarningOpen"
