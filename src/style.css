@@ -1031,7 +1031,6 @@ code {
   margin-top: 10px;
 }
 
-.tool-call-card,
 .approval-card {
   min-width: 0;
   max-width: 100%;
@@ -1042,17 +1041,15 @@ code {
 }
 
 .tool-call-card {
-  padding: 10px 13px;
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: 6px;
 }
 
 .approval-card {
   padding: 14px 16px;
 }
 
-.tool-call-card .n-collapse,
-.tool-call-card .n-collapse-item,
-.tool-call-card .n-collapse-item__content-wrapper,
-.tool-call-card .n-collapse-item__content-inner,
 .reasoning .n-collapse-item__content-wrapper,
 .reasoning .n-collapse-item__content-inner {
   width: 100%;
@@ -1060,7 +1057,6 @@ code {
   max-width: 100%;
 }
 
-.tool-call-card pre,
 .reasoning pre {
   width: 100%;
   min-width: 0;
@@ -1068,13 +1064,11 @@ code {
   overflow-y: auto;
 }
 
-.tool-call-header,
 .approval-header {
   justify-content: space-between;
   gap: 14px;
 }
 
-.tool-call-header > div,
 .approval-header > div {
   display: grid;
   min-width: 0;
@@ -1089,7 +1083,6 @@ code {
   text-transform: uppercase;
 }
 
-.tool-call-header strong,
 .approval-header strong {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -1097,22 +1090,87 @@ code {
   font-size: 13px;
 }
 
-.tool-call-card .n-collapse {
-  margin-top: 6px;
-  border-top: 0;
-}
-
-.tool-call-card .n-collapse-item {
-  margin: 0;
-}
-
-.tool-call-card .n-collapse-item__header {
-  padding: 4px 0 0;
+.tool-call-row {
+  display: flex;
+  min-width: 0;
+  min-height: 26px;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
   font-size: 12px;
 }
 
-.tool-call-card .n-collapse-item__content-inner {
-  padding-top: 6px;
+.tool-call-summary {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.tool-call-summary strong {
+  min-width: 0;
+  overflow: hidden;
+  flex: 0 1 auto;
+  color: var(--text-secondary);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.tool-call-muted,
+.tool-summary-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool-call-muted {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.tool-summary-text {
+  flex: 1 1 auto;
+}
+
+.tool-details-toggle {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.tool-details-toggle:hover {
+  color: var(--accent);
+  background: var(--surface);
+}
+
+.tool-details-toggle .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.tool-call-details {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  margin: 5px 0 0 21px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
 }
 
 .tool-detail-block {
@@ -1131,7 +1189,9 @@ code {
 }
 
 .tool-args-json,
-.tool-result-json {
+.tool-result-json,
+.tool-approval-json {
+  max-height: 320px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -1149,19 +1209,10 @@ code {
   color: var(--success);
 }
 
-.tool-reason,
 .approval-card > p {
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.5;
-}
-
-.tool-reason {
-  display: -webkit-box;
-  overflow: hidden;
-  margin: 5px 0 0;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
 }
 
 .approval-card > p {
@@ -1180,6 +1231,13 @@ code {
   margin: 12px 0;
 }
 
+.tool-approval-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
 .approval-meta div {
   min-width: 0;
   padding: 8px 10px;
@@ -1188,8 +1246,24 @@ code {
   background: rgba(255, 255, 255, 0.5);
 }
 
+.tool-approval-meta div {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--background);
+}
+
 .approval-meta dt {
   color: var(--warning);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.tool-approval-meta dt,
+.tool-approval-usage span {
+  color: var(--text-muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -1202,6 +1276,28 @@ code {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tool-approval-meta dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-approval-note,
+.tool-approval-usage p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tool-approval-usage {
+  display: grid;
+  gap: 5px;
 }
 
 .approval-args,
@@ -1227,6 +1323,10 @@ code {
 
 .policy-signals li {
   gap: 7px;
+}
+
+.policy-signals.compact {
+  margin: 0;
 }
 
 .approval-actions {

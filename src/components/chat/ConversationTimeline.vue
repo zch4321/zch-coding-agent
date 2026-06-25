@@ -2,17 +2,17 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NAlert, NButton, NCollapse, NCollapseItem, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { ToolActivity } from '../../stores/agent'
+import type {
+  PendingApproval,
+  ReviewedApproval,
+  ToolActivity,
+} from '../../stores/agent'
+import type { UsageActivity } from '../../stores/agent-types'
 import { useAgentStore } from '../../stores/agent'
 import MarkdownBlock from '../MarkdownBlock.vue'
 import UiIcon from '../UiIcon.vue'
 
 defineProps<{ projectName: string }>()
-
-type CollapseHeaderClickInfo = {
-  name: string | number
-  expanded: boolean
-}
 
 const agent = useAgentStore()
 const { t } = useI18n()
@@ -36,18 +36,6 @@ function requestFork(messageId: string) {
   emit('fork', messageId)
 }
 
-function okContent(tool: ToolActivity): unknown {
-  const result = tool.result
-
-  if (!result || typeof result !== 'object' || Array.isArray(result)) {
-    return undefined
-  }
-
-  return 'status' in result && result.status === 'ok' && 'content' in result
-    ? result.content
-    : undefined
-}
-
 function toolResultSummary(tool: ToolActivity): string {
   const result = tool.result
 
@@ -60,10 +48,6 @@ function toolResultSummary(tool: ToolActivity): string {
   }
 
   return t('chat.completed')
-}
-
-function toolDetailsTitle(tool: ToolActivity): string {
-  return okContent(tool) ? t('chat.result') : t('chat.arguments')
 }
 
 function toolDetailsName(tool: ToolActivity): string {
@@ -88,12 +72,114 @@ function setToolDetailsExpanded(tool: ToolActivity, expanded: boolean) {
   onContentResized()
 }
 
-function updateToolDetailsFromHeader(
+function toggleToolDetails(tool: ToolActivity) {
+  setToolDetailsExpanded(tool, !isToolDetailsExpanded(tool))
+}
+
+function stringifyJson(value: unknown, space = 2): string {
+  try {
+    return JSON.stringify(value, null, space) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function compactText(value: unknown, maxLength = 120): string {
+  const text =
+    typeof value === 'string'
+      ? value
+      : stringifyJson(value, 0).replace(/\s+/g, ' ')
+
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text
+}
+
+function compactObjectSummary(value: unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return compactText(value)
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).slice(0, 3)
+  if (entries.length === 0) return '{}'
+
+  return entries
+    .map(([key, entryValue]) => `${key}=${compactText(entryValue, 36)}`)
+    .join(', ')
+}
+
+function toolArgumentSummary(tool: ToolActivity): string {
+  return compactObjectSummary(tool.args)
+}
+
+function toolInlineResultSummary(tool: ToolActivity): string {
+  const result = tool.result
+
+  if (result === undefined) return tool.reason || t('chat.proposed')
+
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return compactText(result)
+  }
+
+  const resultObject = result as Record<string, unknown>
+  const status = resultObject.status ? String(resultObject.status) : ''
+  const content =
+    'content' in resultObject
+      ? resultObject.content
+      : 'message' in resultObject
+        ? resultObject.message
+        : result
+
+  return [status, compactText(content, 96)].filter(Boolean).join(': ')
+}
+
+function hasToolResult(tool: ToolActivity): boolean {
+  return tool.result !== undefined
+}
+
+function pendingApprovalForTool(
   tool: ToolActivity,
-  info: CollapseHeaderClickInfo,
-) {
-  if (String(info.name) !== toolDetailsName(tool)) return
-  setToolDetailsExpanded(tool, info.expanded)
+): PendingApproval | undefined {
+  return agent.pendingApproval?.callId === tool.callId
+    ? agent.pendingApproval
+    : undefined
+}
+
+function reviewedApprovalForTool(
+  tool: ToolActivity,
+): ReviewedApproval | undefined {
+  return agent.latestReviewedApproval?.callId === tool.callId
+    ? agent.latestReviewedApproval
+    : undefined
+}
+
+function approvalUsageForTool(tool: ToolActivity): UsageActivity | undefined {
+  return agent.usage.find(
+    (item) => item.callId === tool.callId && item.usage.scope === 'approval',
+  )
+}
+
+function hasApprovalDetails(tool: ToolActivity): boolean {
+  return Boolean(
+    pendingApprovalForTool(tool) ||
+    reviewedApprovalForTool(tool) ||
+    approvalUsageForTool(tool),
+  )
+}
+
+function approvalUsageSummary(usage: UsageActivity): string {
+  const values = [
+    usage.usage.providerLabel,
+    usage.usage.model,
+    usage.usage.totalTokens !== undefined
+      ? `${usage.usage.totalTokens} tokens`
+      : undefined,
+  ].filter(Boolean)
+
+  return values.join(' · ')
+}
+
+function approvalUsageSummaryForTool(tool: ToolActivity): string {
+  const usage = approvalUsageForTool(tool)
+  return usage ? approvalUsageSummary(usage) : ''
 }
 
 const toolRenderSignature = computed(() =>
@@ -170,6 +256,7 @@ watch(
     agent.messages.at(-1)?.reasoning.length ?? 0,
     agent.tools.length,
     toolRenderSignature.value,
+    agent.usage.length,
     agent.pendingApproval?.callId,
   ],
   () => void scrollToBottom(),
@@ -365,50 +452,132 @@ onBeforeUnmount(() => {
         class="tool-call-card"
         :style="{ order: tool.order ?? 0 }"
       >
-        <div class="tool-call-header">
-          <div>
-            <span class="tool-kicker">{{ t('chat.toolCall') }}</span>
+        <div class="tool-call-row">
+          <div
+            class="tool-call-summary"
+            :title="tool.reason || toolInlineResultSummary(tool)"
+          >
+            <span class="tool-call-muted">{{ t('chat.toolCall') }}</span>
             <strong>{{ tool.tool }}</strong>
+            <span
+              class="tool-status"
+              :class="tool.status === 'completed' ? 'complete' : ''"
+            >
+              {{ toolResultSummary(tool) }}
+            </span>
+            <span class="tool-summary-text">
+              {{ t('chat.arguments') }}:
+              {{ toolArgumentSummary(tool) }}
+            </span>
+            <span class="tool-summary-text">
+              {{ t('chat.result') }}:
+              {{ toolInlineResultSummary(tool) }}
+            </span>
           </div>
-          <span
-            class="tool-status"
-            :class="tool.status === 'completed' ? 'complete' : ''"
-          >
-            {{ toolResultSummary(tool) }}
-          </span>
-        </div>
-        <NTooltip v-if="tool.reason">
-          <template #trigger>
-            <p class="tool-reason">{{ tool.reason }}</p>
-          </template>
-          {{ tool.reason }}
-        </NTooltip>
-        <NCollapse
-          :expanded-names="
-            isToolDetailsExpanded(tool) ? [toolDetailsName(tool)] : []
-          "
-          @item-header-click="(info) => updateToolDetailsFromHeader(tool, info)"
-        >
-          <NCollapseItem
-            :title="toolDetailsTitle(tool)"
-            :name="toolDetailsName(tool)"
-          >
-            <template v-if="isToolDetailsExpanded(tool)">
-              <div class="tool-detail-block">
-                <strong>{{ t('chat.arguments') }}</strong>
-                <pre class="tool-args-json">{{
-                  JSON.stringify(tool.args, null, 2)
-                }}</pre>
-              </div>
-              <div v-if="okContent(tool)" class="tool-detail-block">
-                <strong>{{ t('chat.result') }}</strong>
-                <pre class="tool-result-json">{{
-                  JSON.stringify(tool.result, null, 2)
-                }}</pre>
-              </div>
+          <NTooltip>
+            <template #trigger>
+              <button
+                type="button"
+                class="tool-details-toggle"
+                :aria-label="t('chat.toggleToolDetails')"
+                :aria-expanded="isToolDetailsExpanded(tool)"
+                @click="toggleToolDetails(tool)"
+              >
+                <UiIcon
+                  :name="
+                    isToolDetailsExpanded(tool)
+                      ? 'chevron-down'
+                      : 'chevron-right'
+                  "
+                />
+              </button>
             </template>
-          </NCollapseItem>
-        </NCollapse>
+            {{
+              isToolDetailsExpanded(tool)
+                ? t('chat.hideToolDetails')
+                : t('chat.showToolDetails')
+            }}
+          </NTooltip>
+        </div>
+        <div
+          v-if="isToolDetailsExpanded(tool)"
+          :id="toolDetailsName(tool)"
+          class="tool-call-details"
+        >
+          <div class="tool-detail-block">
+            <strong>{{ t('chat.arguments') }}</strong>
+            <pre class="tool-args-json">{{ stringifyJson(tool.args) }}</pre>
+          </div>
+          <div v-if="hasToolResult(tool)" class="tool-detail-block">
+            <strong>{{ t('chat.result') }}</strong>
+            <pre class="tool-result-json">{{ stringifyJson(tool.result) }}</pre>
+          </div>
+          <div v-if="hasApprovalDetails(tool)" class="tool-detail-block">
+            <strong>{{ t('chat.approvalDetails') }}</strong>
+            <dl v-if="pendingApprovalForTool(tool)" class="tool-approval-meta">
+              <div>
+                <dt>{{ t('chat.approvalRequired') }}</dt>
+                <dd>{{ pendingApprovalForTool(tool)?.kind }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('chat.expires') }}</dt>
+                <dd>{{ pendingApprovalForTool(tool)?.expiresAt }}</dd>
+              </div>
+            </dl>
+            <p
+              v-if="pendingApprovalForTool(tool)?.reason"
+              class="tool-approval-note"
+            >
+              {{ pendingApprovalForTool(tool)?.reason }}
+            </p>
+            <ul
+              v-if="pendingApprovalForTool(tool)?.signals.length"
+              class="policy-signals compact"
+            >
+              <li
+                v-for="signal in pendingApprovalForTool(tool)?.signals"
+                :key="signal.code + signal.detail"
+              >
+                <UiIcon name="warning" />{{ signal.detail }}
+              </li>
+            </ul>
+            <pre
+              v-if="pendingApprovalForTool(tool)?.diff"
+              class="tool-approval-json"
+              >{{ pendingApprovalForTool(tool)?.diff }}</pre
+            >
+            <dl v-if="reviewedApprovalForTool(tool)" class="tool-approval-meta">
+              <div>
+                <dt>{{ t('chat.approvalDecision') }}</dt>
+                <dd>{{ reviewedApprovalForTool(tool)?.decision }}</dd>
+              </div>
+              <div v-if="reviewedApprovalForTool(tool)?.diffHash">
+                <dt>{{ t('chat.diffHash') }}</dt>
+                <dd>{{ reviewedApprovalForTool(tool)?.diffHash }}</dd>
+              </div>
+            </dl>
+            <p
+              v-if="reviewedApprovalForTool(tool)?.reason"
+              class="tool-approval-note"
+            >
+              {{ reviewedApprovalForTool(tool)?.reason }}
+            </p>
+            <pre
+              v-if="reviewedApprovalForTool(tool)?.diff"
+              class="tool-approval-json"
+              >{{ reviewedApprovalForTool(tool)?.diff }}</pre
+            >
+            <div v-if="approvalUsageForTool(tool)" class="tool-approval-usage">
+              <span>{{ t('chat.approvalUsage') }}</span>
+              <p>{{ approvalUsageSummaryForTool(tool) }}</p>
+              <pre
+                v-if="approvalUsageForTool(tool)?.usage.raw"
+                class="tool-approval-json"
+                >{{ stringifyJson(approvalUsageForTool(tool)?.usage.raw) }}</pre
+              >
+            </div>
+          </div>
+        </div>
       </article>
 
       <article

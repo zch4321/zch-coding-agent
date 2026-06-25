@@ -267,12 +267,71 @@ describe('App', () => {
     expect(wrapper.find('.tool-args-json').exists()).toBe(false)
     expect(wrapper.find('.tool-result-json').exists()).toBe(false)
 
-    await wrapper.get('.n-collapse-item__header-main').trigger('click')
+    await wrapper.get('.tool-details-toggle').trigger('click')
     await nextTick()
     await flushPromises()
 
     expect(wrapper.get('.tool-args-json').text()).toContain('long-line.txt')
     expect(wrapper.get('.tool-result-json').text()).toContain('xxxxx')
+  })
+
+  it('renders compact tool rows with approval usage in expanded details', async () => {
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    const toolRunId = 'run:approval-usage' as RunId
+    const toolCallId = 'call:approval-usage' as CallId
+    store.tools = [
+      {
+        callId: toolCallId,
+        runId: toolRunId,
+        tool: 'write_file',
+        args: { path: 'note.txt', content: 'updated' },
+        reason: 'Write the requested file',
+        status: 'completed',
+        result: {
+          status: 'ok',
+          content: { path: 'note.txt' },
+        },
+        order: 1,
+      },
+    ]
+    store.usage = [
+      {
+        runId: toolRunId,
+        callId: toolCallId,
+        order: 2,
+        usage: {
+          scope: 'approval',
+          providerId: 'deepseek',
+          providerLabel: 'DeepSeek',
+          model: 'approval-model',
+          promptTokens: 10,
+          completionTokens: 4,
+          totalTokens: 14,
+          contextWindowTokens: 64_000,
+          contextWindowSource: 'default',
+          raw: { decision: 'safe', note: 'bounded write' },
+        },
+      },
+    ]
+    const wrapper = mount(ConversationTimeline, {
+      props: { projectName: 'example' },
+      global: {
+        plugins: [pinia, i18n],
+      },
+    })
+
+    expect(wrapper.get('.tool-call-summary').text()).toContain('write_file')
+    expect(wrapper.find('.tool-approval-json').exists()).toBe(false)
+
+    await wrapper.get('.tool-details-toggle').trigger('click')
+    await nextTick()
+    await flushPromises()
+
+    expect(wrapper.get('.tool-approval-usage').text()).toContain(
+      'approval-model',
+    )
+    expect(wrapper.get('.tool-approval-json').text()).toContain('bounded write')
   })
 
   it('collapses and expands a project conversation group', async () => {
