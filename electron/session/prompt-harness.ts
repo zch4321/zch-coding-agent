@@ -18,7 +18,9 @@ import {
   loadAgentsInstructions,
 } from './agents-context'
 
-const MAX_TOP_LEVEL_ENTRIES = 80
+const MAX_TREE_DEPTH = 3
+const MAX_TREE_ENTRIES = 300
+const MAX_TREE_ENTRIES_PER_DIRECTORY = 60
 const MAX_MODULES = 24
 const GIT_TIMEOUT_MS = 1_500
 const GIT_MAX_OUTPUT_BYTES = 8 * 1_024
@@ -217,7 +219,7 @@ async function gitSummary(
     return 'git: not a repository'
   }
 
-  const [head, branch, status] = await Promise.all([
+  const [head, branch, status, recentCommits] = await Promise.all([
     runGit(workspace, ['rev-parse', '--short', 'HEAD'], signal),
     runGit(workspace, ['branch', '--show-current'], signal),
     runGit(
@@ -225,6 +227,7 @@ async function gitSummary(
       ['status', '--short', '--branch', '--untracked-files=normal'],
       signal,
     ),
+    runGit(workspace, ['log', '-5', '--oneline', '--decorate=short'], signal),
   ])
 
   return [
@@ -233,23 +236,80 @@ async function gitSummary(
     `head: ${head || 'unknown'}`,
     'status:',
     status || 'clean or unavailable',
+    'recent_commits:',
+    recentCommits || 'no commits or unavailable',
   ].join('\n')
 }
 
-async function topLevelSummary(workspace: string): Promise<string> {
-  const entries = await readdir(workspace, { withFileTypes: true })
-  const visible = entries
-    .filter((entry) => !entry.name.startsWith('.git'))
-    .sort((left, right) => {
-      if (left.isDirectory() !== right.isDirectory()) {
-        return left.isDirectory() ? -1 : 1
-      }
-      return left.name.localeCompare(right.name)
+function shouldSkipTreeEntry(name: string): boolean {
+  return (
+    name === '.git' ||
+    name === 'node_modules' ||
+    name === 'dist' ||
+    name === 'dist-electron' ||
+    name === 'build' ||
+    name === 'coverage' ||
+    name === '.cache' ||
+    name === '.vite' ||
+    name === '.turbo'
+  )
+}
+
+async function projectTreeSummary(workspace: string): Promise<string> {
+  const lines: string[] = []
+  let count = 0
+
+  async function visit(directory: string, depth: number): Promise<void> {
+    if (depth > MAX_TREE_DEPTH || count >= MAX_TREE_ENTRIES) {
+      return
+    }
+
+    const entries = await readdir(path.join(workspace, directory), {
+      withFileTypes: true,
     })
-  const limited = visible.slice(0, MAX_TOP_LEVEL_ENTRIES)
-  return limited
-    .map((entry) => `${entry.isDirectory() ? 'dir ' : 'file'} ${entry.name}`)
-    .join('\n')
+    const visible = entries
+      .filter((entry) => !shouldSkipTreeEntry(entry.name))
+      .filter((entry) => entry.isDirectory() || entry.isFile())
+      .sort((left, right) => {
+        if (left.isDirectory() !== right.isDirectory()) {
+          return left.isDirectory() ? -1 : 1
+        }
+        return left.name.localeCompare(right.name)
+      })
+    const limited = visible.slice(0, MAX_TREE_ENTRIES_PER_DIRECTORY)
+    const indent = '  '.repeat(depth - 1)
+
+    for (const entry of limited) {
+      if (count >= MAX_TREE_ENTRIES) {
+        break
+      }
+
+      const relative = directory ? `${directory}/${entry.name}` : entry.name
+      lines.push(
+        `${indent}${entry.isDirectory() ? 'dir ' : 'file'} ${relative}`,
+      )
+      count += 1
+
+      if (entry.isDirectory()) {
+        await visit(relative, depth + 1)
+      }
+    }
+
+    if (visible.length > limited.length && count < MAX_TREE_ENTRIES) {
+      lines.push(
+        `${indent}... ${visible.length - limited.length} entries omitted`,
+      )
+      count += 1
+    }
+  }
+
+  await visit('', 1)
+
+  if (count >= MAX_TREE_ENTRIES) {
+    lines.push(`... project tree truncated at ${MAX_TREE_ENTRIES} entries`)
+  }
+
+  return lines.join('\n') || 'empty workspace'
 }
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -316,20 +376,23 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
   const provider = input.config.providers.find(
     (candidate) => candidate.id === input.providerId,
   )
-  const [git, topLevel, modules] = await Promise.all([
+  const [git, projectTree, modules] = await Promise.all([
     gitSummary(input.workspace, input.signal).catch(() => 'git: unavailable'),
-    topLevelSummary(input.workspace).catch(() => 'unavailable'),
+    projectTreeSummary(input.workspace).catch(() => 'unavailable'),
     detectModules(input.workspace).catch(() => 'No module summary available.'),
   ])
+  const currentTime = new Date().toISOString()
   const body = [
     tagged(
       'environment_context',
       { current_date: new Date().toISOString().slice(0, 10) },
       [
+        `current_time: ${currentTime}`,
         `workspace: ${input.workspace}`,
         `cwd: ${input.workspace}`,
         `shell: ${process.platform === 'win32' ? 'powershell' : process.env.SHELL || 'sh'}`,
         `os: ${os.platform()} ${os.release()}`,
+        `assistant_language: ${locale}`,
         `permission_mode: ${input.mode}`,
         `provider: ${provider?.label ?? input.providerId} (${input.providerId})`,
         `model: ${provider?.model ?? 'unknown'}`,
@@ -340,8 +403,8 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
         '',
         git,
         '',
-        'top_level_project_structure:',
-        topLevel,
+        `project_tree_depth_${MAX_TREE_DEPTH}:`,
+        projectTree,
       ].join('\n'),
     ),
     tagged(
@@ -351,10 +414,11 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
     ),
   ].join('\n\n')
   const content = `${prompt.content}\n\n${body}`
+  const stableContent = content.replace(currentTime, '<current_time_snapshot>')
 
   return {
     content,
-    hash: sha256(content),
+    hash: sha256(stableContent),
     ...(prompt.resource ? { resource: prompt.resource } : {}),
   }
 }
