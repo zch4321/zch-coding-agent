@@ -76,6 +76,24 @@ export const PolicySignalSchema = Type.Object(
 )
 export type PolicySignal = Static<typeof PolicySignalSchema>
 
+export const ToolApprovalSummarySchema = Type.Object(
+  {
+    approver: Type.Literal('model'),
+    decision: Type.Union([Type.Literal('safe'), Type.Literal('dangerous')]),
+    reason: Type.String({ maxLength: 4_096 }),
+    valid: Type.Boolean(),
+    failure: Type.Optional(
+      Type.Union([
+        Type.Literal('timeout'),
+        Type.Literal('network'),
+        Type.Literal('invalid_output'),
+      ]),
+    ),
+  },
+  { additionalProperties: false },
+)
+export type ToolApprovalSummary = Static<typeof ToolApprovalSummarySchema>
+
 export const AgentEventSchema = Type.Union([
   Type.Composite([
     EventBaseSchema,
@@ -162,6 +180,7 @@ export const AgentEventSchema = Type.Union([
       runId: RunIdSchema,
       callId: CallIdSchema,
       result: ToolResultEnvelopeSchema,
+      approval: Type.Optional(ToolApprovalSummarySchema),
     }),
   ]),
   Type.Composite([

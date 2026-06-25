@@ -47,6 +47,24 @@ describe('shared runtime contracts', () => {
     }
 
     expect(validateAgentEvent(agentEvent)).toBe(true)
+    expect(
+      validateAgentEvent({
+        schemaVersion: 1,
+        type: 'tool.completed',
+        sessionId,
+        runId,
+        callId,
+        result: { status: 'ok', content: { text: 'done' } },
+        approval: {
+          approver: 'model',
+          decision: 'safe',
+          reason: 'Read-only bounded action',
+          valid: true,
+        },
+        seq: 2,
+        ts: '2026-06-15T00:00:01.000Z',
+      } satisfies AgentEvent),
+    ).toBe(true)
     expect(validateTerminalEvent(terminalEvent)).toBe(true)
     expect(validateAgentEvent({ ...agentEvent, reason: undefined })).toBe(false)
   })

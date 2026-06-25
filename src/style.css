@@ -1113,19 +1113,11 @@ code {
 
 .tool-call-summary strong {
   min-width: 0;
-  overflow: hidden;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   color: var(--text-secondary);
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 12px;
-  text-overflow: ellipsis;
-}
-
-.tool-call-muted,
-.tool-summary-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tool-call-muted {
@@ -1134,10 +1126,6 @@ code {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-}
-
-.tool-summary-text {
-  flex: 1 1 auto;
 }
 
 .tool-details-toggle {

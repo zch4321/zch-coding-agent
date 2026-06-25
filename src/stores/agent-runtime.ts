@@ -745,6 +745,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           if (tool) {
             tool.status = 'completed'
             tool.result = event.result
+            tool.approval = event.approval
             if (
               tool.tool === 'write_file' ||
               tool.tool === 'apply_patch' ||

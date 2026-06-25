@@ -1,4 +1,4 @@
-import type { RunStatus } from '../../shared/agent-events'
+import type { RunStatus, ToolApprovalSummary } from '../../shared/agent-events'
 import {
   getProviderConfig,
   type ProviderPublicConfig,
@@ -111,6 +111,7 @@ export class SessionToolRunner {
       let approvedCall: ApprovedToolCall | undefined
       let approvedDiff = ''
       let approvalUsageProvider: ProviderPublicConfig | undefined
+      let approvalSummary: ToolApprovalSummary | undefined
       const startedAt = performance.now()
       try {
         if (run.controller.signal.aborted) {
@@ -178,6 +179,15 @@ export class SessionToolRunner {
             ) as JsonValue[]
 
             if (authorization.autoDecision) {
+              approvalSummary = {
+                approver: 'model',
+                decision: authorization.autoDecision.decision,
+                reason: authorization.autoDecision.note,
+                valid: authorization.autoDecision.valid,
+                ...(authorization.autoDecision.failure
+                  ? { failure: authorization.autoDecision.failure }
+                  : {}),
+              }
               await session.logger.write({
                 type: 'approval',
                 sessionId: session.sessionId,
@@ -335,6 +345,7 @@ export class SessionToolRunner {
         runId: run.runId,
         callId: call.id,
         result: normalizeToolResult(providerResult),
+        ...(approvalSummary ? { approval: approvalSummary } : {}),
       })
 
       await this.#pluginBus

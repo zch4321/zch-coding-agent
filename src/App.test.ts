@@ -264,6 +264,11 @@ describe('App', () => {
       },
     })
 
+    expect(wrapper.get('.tool-call-summary').text()).toContain('read_file')
+    expect(wrapper.get('.tool-call-summary').text()).not.toContain(
+      'long-line.txt',
+    )
+    expect(wrapper.get('.tool-call-summary').text()).not.toContain('xxxxx')
     expect(wrapper.find('.tool-args-json').exists()).toBe(false)
     expect(wrapper.find('.tool-result-json').exists()).toBe(false)
 
@@ -291,6 +296,12 @@ describe('App', () => {
         result: {
           status: 'ok',
           content: { path: 'note.txt' },
+        },
+        approval: {
+          approver: 'model',
+          decision: 'safe',
+          reason: 'Single bounded workspace edit',
+          valid: true,
         },
         order: 1,
       },
@@ -322,12 +333,17 @@ describe('App', () => {
     })
 
     expect(wrapper.get('.tool-call-summary').text()).toContain('write_file')
+    expect(wrapper.get('.tool-call-summary').text()).not.toContain('note.txt')
     expect(wrapper.find('.tool-approval-json').exists()).toBe(false)
 
     await wrapper.get('.tool-details-toggle').trigger('click')
     await nextTick()
     await flushPromises()
 
+    expect(wrapper.get('.tool-approval-meta').text()).toContain('safe')
+    expect(wrapper.get('.tool-approval-note').text()).toContain(
+      'Single bounded workspace edit',
+    )
     expect(wrapper.get('.tool-approval-usage').text()).toContain(
       'approval-model',
     )

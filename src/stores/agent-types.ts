@@ -1,6 +1,7 @@
 import type { CallId, RunId } from '../../shared/ids'
 import type { ContextAttachmentChip } from '../../shared/context'
 import type { GoalState, PlanState } from '../../shared/orchestration'
+import type { ToolApprovalSummary } from '../../shared/agent-events'
 
 export interface UiLlmUsageRecord {
   scope: 'main' | 'approval' | 'title' | 'compression'
@@ -36,6 +37,7 @@ export interface ToolActivity {
   reason: string
   status: 'proposed' | 'completed'
   result?: unknown
+  approval?: ToolApprovalSummary
   order?: number
 }
 

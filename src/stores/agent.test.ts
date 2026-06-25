@@ -462,6 +462,48 @@ describe('agent store regressions', () => {
     ]).toEqual([1, 2, 3])
   })
 
+  it('attaches auto approval summaries to completed tools', () => {
+    const store = useAgentStore()
+    store.sessionId = sessionId
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 1,
+      ts: '2026-06-20T00:00:00.000Z',
+      type: 'tool.proposed',
+      sessionId,
+      runId,
+      callId,
+      tool: 'write_file',
+      args: { path: 'note.txt', content: 'updated' },
+      reason: 'Write the requested file',
+    })
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 2,
+      ts: '2026-06-20T00:00:01.000Z',
+      type: 'tool.completed',
+      sessionId,
+      runId,
+      callId,
+      result: { status: 'ok', content: { path: 'note.txt' } },
+      approval: {
+        approver: 'model',
+        decision: 'safe',
+        reason: 'Single bounded workspace edit',
+        valid: true,
+      },
+    })
+
+    expect(store.tools[0]).toMatchObject({
+      status: 'completed',
+      approval: {
+        approver: 'model',
+        decision: 'safe',
+        reason: 'Single bounded workspace edit',
+      },
+    })
+  })
+
   it('renders completed assistant messages even if stream deltas were missed', () => {
     const store = useAgentStore()
     store.sessionId = sessionId

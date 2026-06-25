@@ -5,6 +5,7 @@ import { JsonValueSchema } from './json'
 import { LlmUsageRecordSchema } from './usage'
 import { ContextAttachmentChipSchema } from './context'
 import { GoalStateSchema, PlanStateSchema } from './orchestration'
+import { ToolApprovalSummarySchema } from './agent-events'
 
 export const ChatMessageSchema = Type.Object(
   {
@@ -35,6 +36,7 @@ export const ToolActivitySchema = Type.Object(
     reason: Type.String({ maxLength: 16_384 }),
     status: Type.Union([Type.Literal('proposed'), Type.Literal('completed')]),
     result: Type.Optional(JsonValueSchema),
+    approval: Type.Optional(ToolApprovalSummarySchema),
     order: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
   },
   { additionalProperties: false },

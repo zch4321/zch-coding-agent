@@ -84,53 +84,6 @@ function stringifyJson(value: unknown, space = 2): string {
   }
 }
 
-function compactText(value: unknown, maxLength = 120): string {
-  const text =
-    typeof value === 'string'
-      ? value
-      : stringifyJson(value, 0).replace(/\s+/g, ' ')
-
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text
-}
-
-function compactObjectSummary(value: unknown): string {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return compactText(value)
-  }
-
-  const entries = Object.entries(value as Record<string, unknown>).slice(0, 3)
-  if (entries.length === 0) return '{}'
-
-  return entries
-    .map(([key, entryValue]) => `${key}=${compactText(entryValue, 36)}`)
-    .join(', ')
-}
-
-function toolArgumentSummary(tool: ToolActivity): string {
-  return compactObjectSummary(tool.args)
-}
-
-function toolInlineResultSummary(tool: ToolActivity): string {
-  const result = tool.result
-
-  if (result === undefined) return tool.reason || t('chat.proposed')
-
-  if (!result || typeof result !== 'object' || Array.isArray(result)) {
-    return compactText(result)
-  }
-
-  const resultObject = result as Record<string, unknown>
-  const status = resultObject.status ? String(resultObject.status) : ''
-  const content =
-    'content' in resultObject
-      ? resultObject.content
-      : 'message' in resultObject
-        ? resultObject.message
-        : result
-
-  return [status, compactText(content, 96)].filter(Boolean).join(': ')
-}
-
 function hasToolResult(tool: ToolActivity): boolean {
   return tool.result !== undefined
 }
@@ -159,6 +112,7 @@ function approvalUsageForTool(tool: ToolActivity): UsageActivity | undefined {
 
 function hasApprovalDetails(tool: ToolActivity): boolean {
   return Boolean(
+    tool.approval ||
     pendingApprovalForTool(tool) ||
     reviewedApprovalForTool(tool) ||
     approvalUsageForTool(tool),
@@ -194,7 +148,10 @@ const toolRenderSignature = computed(() =>
       const resultStatus =
         result && 'status' in result ? String(result.status) : 'pending'
       const resultSize = result ? JSON.stringify(result).length : 0
-      return `${tool.callId}:${tool.status}:${resultStatus}:${resultSize}`
+      const approval = tool.approval
+        ? `${tool.approval.decision}:${tool.approval.reason}`
+        : ''
+      return `${tool.callId}:${tool.status}:${resultStatus}:${resultSize}:${approval}`
     })
     .join('|'),
 )
@@ -453,10 +410,7 @@ onBeforeUnmount(() => {
         :style="{ order: tool.order ?? 0 }"
       >
         <div class="tool-call-row">
-          <div
-            class="tool-call-summary"
-            :title="tool.reason || toolInlineResultSummary(tool)"
-          >
+          <div class="tool-call-summary" :title="tool.reason || tool.tool">
             <span class="tool-call-muted">{{ t('chat.toolCall') }}</span>
             <strong>{{ tool.tool }}</strong>
             <span
@@ -464,14 +418,6 @@ onBeforeUnmount(() => {
               :class="tool.status === 'completed' ? 'complete' : ''"
             >
               {{ toolResultSummary(tool) }}
-            </span>
-            <span class="tool-summary-text">
-              {{ t('chat.arguments') }}:
-              {{ toolArgumentSummary(tool) }}
-            </span>
-            <span class="tool-summary-text">
-              {{ t('chat.result') }}:
-              {{ toolInlineResultSummary(tool) }}
             </span>
           </div>
           <NTooltip>
@@ -514,6 +460,29 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="hasApprovalDetails(tool)" class="tool-detail-block">
             <strong>{{ t('chat.approvalDetails') }}</strong>
+            <dl v-if="tool.approval" class="tool-approval-meta">
+              <div>
+                <dt>{{ t('chat.approver') }}</dt>
+                <dd>{{ tool.approval.approver }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('chat.approvalDecision') }}</dt>
+                <dd>{{ tool.approval.decision }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('chat.approvalValid') }}</dt>
+                <dd>
+                  {{ tool.approval.valid ? t('common.yes') : t('common.no') }}
+                </dd>
+              </div>
+              <div v-if="tool.approval.failure">
+                <dt>{{ t('chat.approvalFailure') }}</dt>
+                <dd>{{ tool.approval.failure }}</dd>
+              </div>
+            </dl>
+            <p v-if="tool.approval?.reason" class="tool-approval-note">
+              {{ tool.approval.reason }}
+            </p>
             <dl v-if="pendingApprovalForTool(tool)" class="tool-approval-meta">
               <div>
                 <dt>{{ t('chat.approvalRequired') }}</dt>

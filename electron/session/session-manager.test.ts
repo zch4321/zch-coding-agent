@@ -820,6 +820,20 @@ describe('SessionManager P2 loop', () => {
     )
 
     expect(await readFile(target, 'utf8')).toBe('alpha\ngamma\n')
+    expect(
+      sent.find(
+        (envelope) =>
+          envelope.event.type === 'tool.completed' &&
+          envelope.event.callId === 'call-edit',
+      )?.event,
+    ).toMatchObject({
+      approval: {
+        approver: 'model',
+        decision: 'safe',
+        reason: 'Single bounded workspace edit',
+        valid: true,
+      },
+    })
     expect(changeHistory.list('conversation-p3', workspace)).toMatchObject([
       {
         path: 'note.txt',
