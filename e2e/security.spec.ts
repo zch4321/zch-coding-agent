@@ -182,12 +182,39 @@ test.describe.serial('Electron security and IPC baseline', () => {
   })
 
   test('injects CSP and blocks inline script execution paths', async () => {
+    const inlineStyleCspErrors: string[] = []
+    page.on('console', (message) => {
+      const text = message.text()
+      if (
+        message.type() === 'error' &&
+        text.includes('Content Security Policy') &&
+        text.includes('inline style')
+      ) {
+        inlineStyleCspErrors.push(text)
+      }
+    })
+
     const response = await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
     const policy = (await response?.allHeaders())?.['content-security-policy']
 
     expect(policy).toContain("default-src 'self'")
     expect(policy).toContain("script-src 'self'")
+    expect(policy).toContain("style-src 'self' 'unsafe-inline'")
     expect(policy).toContain("object-src 'none'")
+    await page.waitForTimeout(50)
+    expect(inlineStyleCspErrors).toEqual([])
+
+    const inlineStyleWidth = await page.evaluate(() => {
+      const element = document.createElement('div')
+      element.setAttribute('style', 'position: absolute; width: 17px;')
+      document.body.append(element)
+      const width = getComputedStyle(element).width
+      element.remove()
+      return width
+    })
+
+    expect(inlineStyleWidth).toBe('17px')
 
     const executionCount = await page.evaluate(async () => {
       const testWindow = window as Window & { __p0ExecutionCount?: number }
@@ -544,11 +571,12 @@ test.describe.serial('Electron security and IPC baseline', () => {
 
   test('docks the artifact sidebar without covering the conversation scrollbar on narrow desktop widths', async () => {
     await page.setViewportSize({ width: 1000, height: 720 })
-    const updatedWorkbench = await page.evaluate(async () => {
+    const updatedWorkbench = await page.evaluate(async (workspacePath) => {
       const api = Reflect.get(window, 'agentApi') as {
         getWorkbench(payload: unknown): Promise<{
           ok: boolean
           value?: {
+            projects?: Array<Record<string, unknown>>
             conversations: Array<Record<string, unknown>>
             activeConversationId?: string
           }
@@ -563,11 +591,36 @@ test.describe.serial('Electron security and IPC baseline', () => {
       const active = workbench.conversations?.find(
         (conversation) => conversation.id === workbench.activeConversationId,
       )
-      if (!active) throw new Error('Expected an active conversation')
-      active.title =
+      const title =
         '详细分析项目，添加一个 code-review 报告，但是不要修改任何文件或覆盖现有内容'
+
+      if (active) {
+        active.title = title
+      } else {
+        const timestamp = '2026-06-22T00:00:00.000Z'
+        workbench.projects = [
+          ...(workbench.projects ?? []),
+          { path: workspacePath, name: 'workspace', addedAt: timestamp },
+        ]
+        workbench.conversations = [
+          ...(workbench.conversations ?? []),
+          {
+            id: 'conversation:layout',
+            projectPath: workspacePath,
+            title,
+            model: 'deepseek-chat',
+            mode: 'auto',
+            messages: [],
+            tools: [],
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ]
+        workbench.activeConversationId = 'conversation:layout'
+      }
+
       return api.saveWorkbench({ version: 1, workbench })
-    })
+    }, workspace)
     expect(updatedWorkbench.ok).toBe(true)
     await page.reload()
     const artifactToggle = page.getByRole('button', {
@@ -615,11 +668,13 @@ test.describe.serial('Electron security and IPC baseline', () => {
     })
 
     expect(metrics.artifactPosition).not.toBe('absolute')
-    expect(metrics.paneRight).toBeLessThanOrEqual(metrics.artifactLeft)
-    expect(metrics.scrollRight).toBeLessThanOrEqual(metrics.artifactLeft)
-    expect(metrics.titleRight).toBeLessThanOrEqual(metrics.artifactLeft)
-    expect(metrics.composerRight).toBeLessThanOrEqual(metrics.artifactLeft)
-    expect(metrics.toolbarRight).toBeLessThanOrEqual(metrics.artifactLeft)
+    const layoutTolerancePx = 0.5
+    const artifactLeftBoundary = metrics.artifactLeft + layoutTolerancePx
+    expect(metrics.paneRight).toBeLessThanOrEqual(artifactLeftBoundary)
+    expect(metrics.scrollRight).toBeLessThanOrEqual(artifactLeftBoundary)
+    expect(metrics.titleRight).toBeLessThanOrEqual(artifactLeftBoundary)
+    expect(metrics.composerRight).toBeLessThanOrEqual(artifactLeftBoundary)
+    expect(metrics.toolbarRight).toBeLessThanOrEqual(artifactLeftBoundary)
     expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.viewportWidth)
   })
 

@@ -398,7 +398,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <NConfigProvider :locale="naiveLocale">
+  <NConfigProvider :locale="naiveLocale" inline-theme-disabled>
     <main class="app-frame" data-testid="app-ready">
       <AppTopbar
         :project-name="projectName"

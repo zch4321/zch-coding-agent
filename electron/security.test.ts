@@ -75,12 +75,13 @@ describe('content security policy', () => {
     expect(policy).toContain("script-src 'self'")
     expect(policy).not.toContain("'unsafe-eval'")
     expect(policy).not.toContain("script-src 'self' 'unsafe-inline'")
+    expect(policy).toContain("style-src 'self' 'unsafe-inline'")
     expect(policy).toContain("object-src 'none'")
     expect(policy).toContain("base-uri 'none'")
     expect(policy).toContain("frame-ancestors 'none'")
   })
 
-  it('only expands style and connection sources for the development origin', () => {
+  it('only expands connection sources for the development origin', () => {
     const policy = createContentSecurityPolicy(
       new URL('http://127.0.0.1:5173/'),
     )

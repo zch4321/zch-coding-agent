@@ -87,7 +87,10 @@ export function createContentSecurityPolicy(devServerUrl?: URL): string {
   return [
     "default-src 'self'",
     "script-src 'self'",
-    `style-src 'self'${devServerUrl ? " 'unsafe-inline'" : ''}`,
+    // Naive UI and a few renderer layout bindings rely on runtime style tags
+    // and element style attributes. Keep inline script/eval blocked, but allow
+    // inline styles so packaged builds don't render unstyled native controls.
+    "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self'",
     `connect-src ${[...connectSources].join(' ')}`,
