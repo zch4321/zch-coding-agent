@@ -14,7 +14,7 @@ import type {
 } from '../../shared/context'
 import type { RunId, SessionId } from '../../shared/ids'
 import type { PlanStatus } from '../../shared/orchestration'
-import type { PendingApproval } from './agent-types'
+import type { ChatMessage, PendingApproval } from './agent-types'
 import { useAgentChangesStore } from './agent-changes'
 import { useAgentSettingsStore } from './agent-settings'
 import { useAgentShellStore } from './agent-shell'
@@ -23,6 +23,27 @@ import { useAgentWorkbenchStore } from './agent-workbench'
 import { requestId } from './workbench-persistence'
 
 let persistTimer: number | undefined
+
+interface PendingCarryoverInterjection {
+  interjectionId: string
+  content: string
+}
+
+interface SendMessageOptions {
+  text?: string
+  includeContext?: boolean
+  clearInput?: boolean
+}
+
+function normalizeSendMessageOptions(
+  value: SendMessageOptions | Event,
+): SendMessageOptions {
+  if (!value || typeof value !== 'object') return {}
+  if ('text' in value || 'includeContext' in value || 'clearInput' in value) {
+    return value as SendMessageOptions
+  }
+  return {}
+}
 
 function parseMentionAttachments(message: string): ContextAttachmentChip[] {
   const attachments: ContextAttachmentChip[] = []
@@ -63,6 +84,27 @@ function attachmentRefs(
   }))
 }
 
+function enqueueCarryover(
+  queue: PendingCarryoverInterjection[],
+  item: PendingCarryoverInterjection,
+): void {
+  if (!queue.some((entry) => entry.interjectionId === item.interjectionId)) {
+    queue.push(item)
+  }
+}
+
+function carryoverFromMessages(
+  messages: ChatMessage[],
+): PendingCarryoverInterjection[] {
+  return messages.flatMap((message) =>
+    message.role === 'interjection' &&
+    message.interjectionStatus === 'carryover' &&
+    message.interjectionId
+      ? [{ interjectionId: message.interjectionId, content: message.text }]
+      : [],
+  )
+}
+
 export const useAgentRuntimeStore = defineStore('agent-runtime', {
   state: () => ({
     error: '',
@@ -74,6 +116,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     pendingApproval: undefined as PendingApproval | undefined,
     lastAgentSeqBySession: {} as Record<string, number>,
     agentEventGap: '',
+    pendingCarryover: [] as PendingCarryoverInterjection[],
   }),
   getters: {
     approvalSubmitting: (state) =>
@@ -93,6 +136,25 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         (timeline.input.trim().length > 0 ||
           timeline.contextAttachments.length > 0) &&
         !state.pendingApproval,
+      )
+    },
+    canInterject: (state) => {
+      const shell = useAgentShellStore()
+      const timeline = useAgentTimelineStore()
+      // Interjections are allowed while a run is in progress, including while
+      // it is paused on an approval. They queue and inject at the next
+      // tool-batch boundary; they never cancel the run or the approval.
+      const blockingApproval =
+        state.pendingApproval?.status === 'submitting' ||
+        (state.pendingApproval?.status === 'requested' &&
+          state.runStatus !== 'awaiting_approval')
+      return Boolean(
+        shell.bridgeAvailable &&
+        state.sessionId &&
+        state.activeRunId &&
+        state.runStatus !== 'cancelling' &&
+        !blockingApproval &&
+        timeline.input.trim().length > 0,
       )
     },
   },
@@ -194,6 +256,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       this.sessionId = undefined
       timeline.reset()
       this.pendingApproval = undefined
+      this.pendingCarryover = []
       changes.reset()
       workbench.persistWorkbench()
       return conversation
@@ -385,12 +448,16 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         this.mode = conversation.mode
       }
       this.pendingApproval = undefined
+      this.pendingCarryover = carryoverFromMessages(timeline.messages)
       changes.reset()
       useAgentShellStore().error = ''
       useAgentSettingsStore().error = ''
       workbench.error = ''
       changes.error = ''
       this.error = ''
+      if (!this.activeRunId && this.pendingCarryover.length > 0) {
+        void this.flushCarryoverInterjections()
+      }
     },
     saveActiveConversation(touchUpdatedAt = false) {
       const settings = useAgentSettingsStore()
@@ -589,6 +656,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         this.sessionId = undefined
         this.activeRunId = undefined
         this.pendingApproval = undefined
+        this.pendingCarryover = []
         this.runStatus = 'idle'
         timeline.tools = []
       }
@@ -618,20 +686,41 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       timeline.addContextAttachments(result.value.attachments)
       return result.value.attachments.length > 0
     },
-    async sendMessage() {
+    async sendMessage(options: SendMessageOptions | Event = {}) {
+      const sendOptions = normalizeSendMessageOptions(options)
       const timeline = useAgentTimelineStore()
       const workbench = useAgentWorkbenchStore()
+      const shell = useAgentShellStore()
+      const settings = useAgentSettingsStore()
       const bridge = window.agentApi
+      const explicitText = sendOptions.text?.trim()
+      const draftText = timeline.input.trim()
       const text =
-        timeline.input.trim() ||
+        explicitText ||
+        draftText ||
         'Please inspect the attached workspace context.'
-      if (!bridge || !text || !this.canSend) return
-      if (!this.sessionId && !(await this.createSession())) return
+      const hasUserInput =
+        Boolean(explicitText || draftText) ||
+        timeline.contextAttachments.length > 0
+      const canStartRun = Boolean(
+        shell.bridgeAvailable &&
+        settings.providerNoticeAccepted &&
+        settings.credentialConfigured &&
+        workbench.workspacePath &&
+        workbench.activeConversationId &&
+        !this.activeRunId &&
+        !this.pendingApproval,
+      )
+      if (!bridge || !text || !hasUserInput || !canStartRun) return false
+      if (!this.sessionId && !(await this.createSession())) return false
       const sessionId = this.sessionId
-      if (!sessionId) return
-      const mentionAttachments = parseMentionAttachments(text)
+      if (!sessionId) return false
+      const includeContext = sendOptions.includeContext !== false
+      const mentionAttachments = includeContext
+        ? parseMentionAttachments(text)
+        : []
       const contextAttachments = [
-        ...timeline.contextAttachments,
+        ...(includeContext ? timeline.contextAttachments : []),
         ...mentionAttachments,
       ]
 
@@ -645,8 +734,10 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           : {}),
       })
       if (result.ok) {
-        timeline.input = ''
-        timeline.clearContextAttachments()
+        if (sendOptions.clearInput !== false) {
+          timeline.input = ''
+          timeline.clearContextAttachments()
+        }
         timeline.messages.push({
           id: requestId(),
           role: 'user',
@@ -666,7 +757,82 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         }
         this.activeRunId = result.value.runId
         this.schedulePersist()
-      } else this.error = result.error.message
+        return true
+      }
+      this.error = result.error.message
+      return false
+    },
+    async sendInterjection() {
+      const timeline = useAgentTimelineStore()
+      const bridge = window.agentApi
+      const text = timeline.input.trim()
+      if (!bridge || !text || !this.canInterject) return
+      const sessionId = this.sessionId
+      const runId = this.activeRunId
+      if (!sessionId || !runId) return
+
+      const interjectionId = requestId()
+      const result = await bridge.interjectRun({
+        version: IPC_VERSION,
+        sessionId,
+        runId,
+        message: text,
+        clientRequestId: interjectionId,
+      })
+
+      if (result.ok && result.value.accepted) {
+        // The interjection.updated event may have arrived before the IPC
+        // result resolved (the main process emits it synchronously). Avoid a
+        // duplicate by only pushing when no message for this id exists yet.
+        const alreadyPresent = timeline.messages.some(
+          (item) => item.interjectionId === interjectionId,
+        )
+        if (!alreadyPresent) {
+          timeline.messages.push({
+            id: requestId(),
+            role: 'interjection',
+            runId,
+            text,
+            reasoning: '',
+            interjectionId,
+            interjectionStatus: 'queued',
+            order: timeline.nextTimelineOrder(),
+          })
+        }
+        timeline.input = ''
+        // Interjections are text-only. Clear any context chips so they do not
+        // leak into the next ordinary user turn.
+        timeline.clearContextAttachments()
+        this.schedulePersist()
+      } else if (!result.ok) {
+        this.error = result.error.message
+      }
+    },
+    async flushCarryoverInterjections() {
+      // Drain interjections that were carried over from a finished run's final
+      // answer. Each becomes the next ordinary user turn. Only one is sent per
+      // flush because sendMessage starts a new run; the rest drain when that
+      // run terminates.
+      if (this.activeRunId || this.pendingCarryover.length === 0) return
+      const timeline = useAgentTimelineStore()
+      const pending = this.pendingCarryover[0]
+      if (!pending) return
+      const sent = await this.sendMessage({
+        text: pending.content,
+        includeContext: false,
+        clearInput: false,
+      })
+      if (!sent) return
+      this.pendingCarryover.shift()
+      const index = timeline.messages.findIndex(
+        (item) =>
+          item.role === 'interjection' &&
+          item.interjectionId === pending.interjectionId,
+      )
+      if (index >= 0) {
+        timeline.messages.splice(index, 1)
+        this.schedulePersist()
+      }
     },
     async interruptRun() {
       const bridge = window.agentApi
@@ -769,6 +935,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           this.sessionId = undefined
           this.activeRunId = undefined
           this.pendingApproval = undefined
+          this.pendingCarryover = []
           this.runStatus = 'idle'
         }
         return
@@ -785,7 +952,10 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
               ? undefined
               : event.runId
           if (event.error) this.error = event.error.message
-          if (!this.activeRunId) this.schedulePersist()
+          if (!this.activeRunId) {
+            this.schedulePersist()
+            void this.flushCarryoverInterjections()
+          }
           break
         case 'assistant.text.delta':
           timeline.assistantMessage(event.runId).text += event.delta
@@ -853,6 +1023,63 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           })
           this.schedulePersist()
           break
+        case 'interjection.updated': {
+          const existing = timeline.messages.find(
+            (item) =>
+              item.role === 'interjection' &&
+              item.interjectionId === event.interjectionId,
+          )
+          if (existing) {
+            existing.interjectionStatus = event.status
+            existing.text = event.content
+          } else {
+            timeline.messages.push({
+              id: requestId(),
+              role: 'interjection',
+              runId: event.runId,
+              text: event.content,
+              reasoning: '',
+              interjectionId: event.interjectionId,
+              interjectionStatus: event.status,
+              order: timeline.nextTimelineOrder(),
+            })
+          }
+          this.schedulePersist()
+          break
+        }
+        case 'interjection.carryover': {
+          // The run reached a final answer; this interjection becomes the next
+          // ordinary user turn. Keep the placeholder visible until that send
+          // succeeds, so a reload or IPC failure does not erase the user's
+          // original message.
+          const existing = timeline.messages.find(
+            (item) =>
+              item.role === 'interjection' &&
+              item.interjectionId === event.interjectionId,
+          )
+          if (existing) {
+            existing.interjectionStatus = 'carryover'
+            existing.text = event.content
+          } else {
+            timeline.messages.push({
+              id: requestId(),
+              role: 'interjection',
+              runId: event.runId,
+              text: event.content,
+              reasoning: '',
+              interjectionId: event.interjectionId,
+              interjectionStatus: 'carryover',
+              order: timeline.nextTimelineOrder(),
+            })
+          }
+          enqueueCarryover(this.pendingCarryover, {
+            interjectionId: event.interjectionId,
+            content: event.content,
+          })
+          this.schedulePersist()
+          if (!this.activeRunId) void this.flushCarryoverInterjections()
+          break
+        }
         case 'goal.updated':
           timeline.goal = event.goal ? structuredClone(event.goal) : undefined
           this.schedulePersist()

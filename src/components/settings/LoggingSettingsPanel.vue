@@ -23,6 +23,9 @@ const promptLayers = computed(
   () => promptRequest.value?.promptBuild?.layers ?? [],
 )
 const promptMessages = computed(() => promptRequest.value?.messages ?? [])
+const replayInterjections = computed(() =>
+  (traces.replay?.interjections ?? []).slice(-20),
+)
 
 function providerMetric(value: number | null | undefined, suffix = '') {
   return value === null || value === undefined
@@ -46,6 +49,14 @@ function promptMessageTitle(message: unknown, index: number) {
       ? Reflect.get(message, 'role')
       : undefined
   return `#${index} · ${typeof role === 'string' ? role : 'message'}`
+}
+
+function interjectionTitle(interjection: {
+  interjectionId: string
+  status: string
+  history: unknown[]
+}) {
+  return `${interjection.status} · ${interjection.interjectionId} · ${interjection.history.length}`
 }
 </script>
 
@@ -166,8 +177,36 @@ function promptMessageTitle(message: unknown, index: number) {
         {{ t('logging.messages', { count: traces.replay.messages.length }) }} ·
         {{ t('logging.tools', { count: traces.replay.toolCount }) }} ·
         {{ t('logging.approvals', { count: traces.replay.approvalCount }) }} ·
+        {{
+          t('logging.interjections', {
+            count: traces.replay.interjections.length,
+          })
+        }}
+        ·
         {{ traces.replay.closed ? t('logging.closed') : t('logging.active') }}
       </p>
+      <NCollapse v-if="replayInterjections.length" class="trace-interjections">
+        <NCollapseItem
+          v-for="interjection in replayInterjections"
+          :key="interjection.interjectionId"
+          :title="interjectionTitle(interjection)"
+        >
+          <div class="trace-interjection-history">
+            <article
+              v-for="entry in interjection.history"
+              :key="entry.seq + ':' + entry.status"
+            >
+              <NTag size="small">{{ entry.status }}</NTag>
+              <span>#{{ entry.seq }}</span>
+              <span>{{ entry.createdAt }}</span>
+              <span v-if="entry.injectedAfterToolBatchId">
+                {{ entry.injectedAfterToolBatchId }}
+              </span>
+              <pre>{{ entry.content }}</pre>
+            </article>
+          </div>
+        </NCollapseItem>
+      </NCollapse>
       <NAlert v-if="traces.actionMessage" type="info">
         {{ traces.actionMessage }}
       </NAlert>

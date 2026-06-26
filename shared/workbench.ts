@@ -14,6 +14,7 @@ export const ChatMessageSchema = Type.Object(
       Type.Literal('user'),
       Type.Literal('assistant'),
       Type.Literal('orchestrator'),
+      Type.Literal('interjection'),
     ]),
     runId: Type.Optional(RunIdSchema),
     text: Type.String({ maxLength: 1_000_000 }),
@@ -21,6 +22,17 @@ export const ChatMessageSchema = Type.Object(
     order: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
     attachments: Type.Optional(
       Type.Array(ContextAttachmentChipSchema, { maxItems: 64 }),
+    ),
+    interjectionId: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 128 }),
+    ),
+    interjectionStatus: Type.Optional(
+      Type.Union([
+        Type.Literal('queued'),
+        Type.Literal('injected'),
+        Type.Literal('superseded'),
+        Type.Literal('carryover'),
+      ]),
     ),
   },
   { additionalProperties: false },

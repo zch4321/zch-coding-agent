@@ -128,6 +128,36 @@ export const ReplaySummarySchema = Type.Object(
       ),
       { maxItems: 10_000 },
     ),
+    interjections: Type.Array(
+      Type.Object(
+        {
+          interjectionId: Type.String({ minLength: 1, maxLength: 128 }),
+          status: Type.String({ maxLength: 64 }),
+          content: Type.String({ maxLength: 200_000 }),
+          createdAt: Type.String({ format: 'date-time' }),
+          injectedAfterToolBatchId: Type.Optional(
+            Type.String({ maxLength: 128 }),
+          ),
+          history: Type.Array(
+            Type.Object(
+              {
+                seq: Type.Integer({ minimum: 1 }),
+                status: Type.String({ maxLength: 64 }),
+                content: Type.String({ maxLength: 200_000 }),
+                createdAt: Type.String({ format: 'date-time' }),
+                injectedAfterToolBatchId: Type.Optional(
+                  Type.String({ maxLength: 128 }),
+                ),
+              },
+              { additionalProperties: false },
+            ),
+            { maxItems: 10_000 },
+          ),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 10_000 },
+    ),
     toolCount: Type.Integer({ minimum: 0 }),
     approvalCount: Type.Integer({ minimum: 0 }),
     terminalCount: Type.Integer({ minimum: 0 }),

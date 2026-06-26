@@ -21,12 +21,14 @@ export interface UiLlmUsageRecord {
 
 export interface ChatMessage {
   id: string
-  role: 'user' | 'assistant' | 'orchestrator'
+  role: 'user' | 'assistant' | 'orchestrator' | 'interjection'
   runId?: RunId
   text: string
   reasoning: string
   order?: number
   attachments?: ContextAttachmentChip[]
+  interjectionId?: string
+  interjectionStatus?: 'queued' | 'injected' | 'superseded' | 'carryover'
 }
 
 export interface ToolActivity {

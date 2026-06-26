@@ -114,6 +114,7 @@ const runtimeProperties = new Set<PropertyKey>([
   'agentEventGap',
   'approvalSubmitting',
   'canSend',
+  'canInterject',
 ])
 const changesProperties = new Set<PropertyKey>([
   'changes',
@@ -194,6 +195,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
       ),
     closeRuntimeSession: runtime.closeRuntimeSession,
     sendMessage: runtime.sendMessage,
+    sendInterjection: runtime.sendInterjection,
     chooseContextAttachment: runtime.chooseContextAttachment,
     addContextAttachments: timeline.addContextAttachments,
     removeContextAttachment: timeline.removeContextAttachment,

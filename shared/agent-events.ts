@@ -208,6 +208,36 @@ export const AgentEventSchema = Type.Union([
   Type.Composite([
     EventBaseSchema,
     Type.Object({
+      type: Type.Literal('interjection.updated'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      interjectionId: Type.String({ minLength: 1, maxLength: 128 }),
+      status: Type.Union([
+        Type.Literal('queued'),
+        Type.Literal('injected'),
+        Type.Literal('superseded'),
+      ]),
+      content: Type.String({ maxLength: 1_000_000 }),
+      injectedAfterToolBatchId: Type.Optional(
+        Type.String({ minLength: 1, maxLength: 128 }),
+      ),
+      createdAt: Type.String({ format: 'date-time' }),
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
+      type: Type.Literal('interjection.carryover'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      interjectionId: Type.String({ minLength: 1, maxLength: 128 }),
+      content: Type.String({ maxLength: 1_000_000 }),
+      createdAt: Type.String({ format: 'date-time' }),
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
       type: Type.Literal('goal.updated'),
       sessionId: SessionIdSchema,
       runId: RunIdSchema,

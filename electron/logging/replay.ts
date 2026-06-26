@@ -12,6 +12,21 @@ export interface ReplayMessage {
   reasoning?: string
 }
 
+export interface ReplayInterjection {
+  interjectionId: string
+  status: string
+  content: string
+  createdAt: string
+  injectedAfterToolBatchId?: string
+  history: Array<{
+    seq: number
+    status: string
+    content: string
+    createdAt: string
+    injectedAfterToolBatchId?: string
+  }>
+}
+
 export interface ReplayState {
   schemaVersion: 1
   lastSeq: number
@@ -23,6 +38,7 @@ export interface ReplayState {
   closed: boolean
   runs: Partial<Record<RunId, RunStatus>>
   messages: ReplayMessage[]
+  interjections: ReplayInterjection[]
   tools: Partial<
     Record<
       CallId,
@@ -51,6 +67,7 @@ export const INITIAL_REPLAY_STATE: ReplayState = {
   closed: false,
   runs: {},
   messages: [],
+  interjections: [],
   tools: {},
   approvals: [],
   terminals: {},
@@ -254,6 +271,46 @@ export function reduceTraceEvent(
         })
       }
       break
+    case 'interjection.message': {
+      // Preserve the latest status for each interjection id while keeping the
+      // full lifecycle (queued -> injected/superseded/carryover) auditable.
+      const existing = state.interjections.find(
+        (item) => item.interjectionId === event.interjectionId,
+      )
+      const historyEntry = {
+        seq: event.seq,
+        status: event.status,
+        content: event.content,
+        createdAt: event.createdAt,
+        ...(event.injectedAfterToolBatchId
+          ? { injectedAfterToolBatchId: event.injectedAfterToolBatchId }
+          : {}),
+      }
+      const next: ReplayInterjection = {
+        interjectionId: event.interjectionId,
+        status: event.status,
+        content: event.content,
+        createdAt: event.createdAt,
+        ...(event.injectedAfterToolBatchId
+          ? { injectedAfterToolBatchId: event.injectedAfterToolBatchId }
+          : {}),
+        history: [historyEntry],
+      }
+      if (existing) {
+        existing.status = event.status
+        existing.content = event.content
+        existing.createdAt = event.createdAt
+        if (event.injectedAfterToolBatchId) {
+          existing.injectedAfterToolBatchId = event.injectedAfterToolBatchId
+        } else {
+          delete existing.injectedAfterToolBatchId
+        }
+        existing.history.push(historyEntry)
+      } else {
+        state.interjections.push(next)
+      }
+      break
+    }
     case 'llm.request':
     case 'llm.response':
       break

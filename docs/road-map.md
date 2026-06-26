@@ -304,7 +304,58 @@ code_diagnostics
 - Serena 不可用时，Code Intelligence Facade 仍然可用或能给出明确降级信息。
 - 写入类能力进入权限管线，不绕过现有文件保护、审批和 trace。
 
-## 8. Deferred / Later
+## 8. Multi-Provider Routing
+
+目标：让一个工作区和一段对话可以稳定使用多个模型服务，而不是只有全局 `activeProviderId`。多 Provider 应支持按会话、按用途、按模型能力和按失败策略选择，同时保持凭据隔离、trace 可审计和 UI 可解释。
+
+当前基础：
+
+- 配置层已经有 `providers[]`、`activeProviderId`、`approval.approverProviderId` 和每个 Provider 独立 credential。
+- UI 已能保存 OpenAI-compatible Provider、profile、baseURL、model、reasoning、上下文窗口覆盖值和输出上限。
+- 当前主模型运行时仍应改成基于 session provider，而不是每次读取全局 active provider。
+- 自动审批模型已经有独立 provider/model 配置，可以作为用途路由的第一个参考实现。
+
+建议模型：
+
+```ts
+interface ProviderRoleBinding {
+  role: 'main' | 'approval' | 'planner' | 'summarizer' | 'code_review'
+  providerId: string
+  model: string
+  reasoning?: 'off' | 'high' | 'max'
+}
+
+interface ConversationProviderConfig {
+  defaultProviderId: string
+  defaultModel: string
+  roleBindings: ProviderRoleBinding[]
+  fallbackProviderIds: string[]
+  pinned: boolean
+}
+```
+
+实现要求：
+
+- 会话创建时记录 provider/model 快照；运行中不应因为用户修改全局默认 Provider 而静默切换模型。
+- `SessionProviderTurnRunner` 按 `session.provider` 和 session model/provider snapshot 选择主模型，不能继续直接使用全局 active provider。
+- `ConversationRecord` 保存 providerId、model、profile 和必要的模型能力摘要，便于历史对话恢复和 trace 排查。
+- Provider 配置 UI 支持新增、复制、删除、测试连接、刷新模型列表、设置默认 Provider。
+- Message composer 可以选择当前对话的主 Provider/model；切换应只影响下一轮 run，并在时间线或 trace 中可见。
+- 自动审批、规划、摘要、代码审查等用途可以逐步支持 role binding；第一阶段只做 `main` 与 `approval`，不做模型自动决策。
+- 每次 LLM request、usage、trace、错误和重试都必须记录 providerId、providerLabel、model、role 和 profile。
+- Provider fallback 必须显式配置；失败后是否切换模型要进入 orchestrator/trace，不能静默换服务商。
+- 不同 Provider 的 tools/schema、reasoning、streaming、tool call 格式差异由 provider adapter 处理，session loop 不直接写 provider 特例。
+- 凭据继续只在主进程和 safeStorage/env 中使用，renderer 只能看到 credentialConfigured 和 credentialSource。
+
+验收：
+
+- 一个对话创建后，即使全局默认 Provider 改变，该对话下一轮仍使用原本绑定的 Provider，除非用户显式切换。
+- 同一工作区内两个对话可以分别使用不同 Provider/model，并且 usage、trace 和 UI 都能准确显示。
+- 自动审批可以使用不同于主模型的 Provider，失败时不会暴露密钥，也不会绕过人工审批。
+- Provider 不可用、凭据缺失、模型列表过期和 fallback 触发都有可解释错误和测试覆盖。
+- OpenAI-compatible 的 DeepSeek profile 与 generic profile 都能通过同一 provider adapter 流程运行。
+
+## 9. Deferred / Later
 
 原 R7 暂缓到后续阶段：
 
@@ -323,7 +374,7 @@ code_diagnostics
 - 云端同步和团队共享项目。
 - 完整插件市场。
 
-## 9. 阶段门禁
+## 10. 阶段门禁
 
 每个实现阶段至少通过：
 

@@ -432,6 +432,19 @@ export const IPC_CONTRACTS = {
     ),
     result: ipcResultSchema(AcceptedSchema),
   },
+  'run:interject': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        sessionId: SessionIdSchema,
+        runId: RunIdSchema,
+        message: Type.String({ minLength: 1, maxLength: 1_000_000 }),
+        clientRequestId: Type.String({ minLength: 1, maxLength: 128 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(AcceptedSchema),
+  },
   'approval:decide': {
     payload: Type.Object(
       {

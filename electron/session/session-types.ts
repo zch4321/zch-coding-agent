@@ -57,6 +57,19 @@ export interface PendingApproval {
   resolve: (decision: HumanApprovalDecision) => void
 }
 
+export type InterjectionStatus = 'queued' | 'injected' | 'superseded'
+
+export interface RunInterjection {
+  id: string
+  clientRequestId: string
+  conversationId?: string
+  runId: RunId
+  content: string
+  createdAt: string
+  status: InterjectionStatus
+  injectedAfterToolBatchId?: string
+}
+
 export interface ActiveRun {
   runId: RunId
   clientRequestId: string
@@ -65,6 +78,12 @@ export interface ActiveRun {
   status: RunStatus
   toolTokensUsed: number
   pendingApproval?: PendingApproval
+  pendingInterjections: RunInterjection[]
+  // Tracks every clientRequestId this run has accepted (queued, injected,
+  // superseded or carried over) so duplicate IPC retries are no-ops across
+  // the full interjection lifecycle, not just while queued.
+  processedInterjectionIds: Set<string>
+  lastToolBatchId?: string
 }
 
 export interface SessionState {

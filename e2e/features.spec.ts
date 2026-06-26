@@ -26,6 +26,8 @@ interface FakeProvider {
   origin: string
   requests: CapturedProviderRequest[]
   queue(chunks: JsonObject[]): void
+  armSecondResponseGate(): void
+  releaseSecondResponse(): void
   close(): Promise<void>
 }
 
@@ -55,6 +57,10 @@ async function parseJsonBody(request: IncomingMessage): Promise<JsonObject> {
 async function startFakeProvider(): Promise<FakeProvider> {
   const queuedResponses: JsonObject[][] = []
   const requests: CapturedProviderRequest[] = []
+  // Optional gate that holds the second provider request open until the test
+  // releases it, so a mid-run interjection can be queued first.
+  let secondResponseGate: (() => void) | undefined
+  let secondResponsePromise: Promise<void> | undefined
   const server = createServer(async (request, response) => {
     try {
       if (request.method !== 'POST' || request.url !== '/chat/completions') {
@@ -74,6 +80,11 @@ async function startFakeProvider(): Promise<FakeProvider> {
         response.writeHead(500, { 'content-type': 'application/json' })
         response.end(JSON.stringify({ error: 'unexpected provider call' }))
         return
+      }
+
+      // Hold the second request open until the test queues an interjection.
+      if (requests.length === 2 && secondResponsePromise) {
+        await secondResponsePromise
       }
 
       response.writeHead(200, {
@@ -114,6 +125,16 @@ async function startFakeProvider(): Promise<FakeProvider> {
     requests,
     queue(chunks) {
       queuedResponses.push(chunks)
+    },
+    armSecondResponseGate() {
+      secondResponsePromise = new Promise<void>((resolve) => {
+        secondResponseGate = resolve
+      })
+    },
+    releaseSecondResponse() {
+      if (secondResponseGate) {
+        secondResponseGate()
+      }
     },
     close() {
       return new Promise<void>((resolve, reject) => {
@@ -462,5 +483,119 @@ test.describe('Electron functional workflows', () => {
     expect(providerMessageText(secondRequest.body)).toContain(
       '"path":"e2e-output.txt"',
     )
+  })
+
+  test('injects a live user interjection after a tool batch mid-run', async () => {
+    // First provider turn: a write_file tool call that requires approval in
+    // confirm mode. Second provider turn: a final answer that acknowledges the
+    // queued interjection. The approval pause gives the test a deterministic
+    // window to queue the interjection before the second provider turn.
+    fakeProvider.queue([
+      toolCallDelta({
+        id: 'call:e2e-interject-write',
+        name: 'write_file',
+        args: {
+          path: 'interject-output.txt',
+          content: 'interjection run\n',
+          _agent_intent: 'Create an output file',
+        },
+      }),
+    ])
+    fakeProvider.queue([textDelta('Done after the live interjection.')])
+
+    await configureApp({
+      page,
+      providerBaseURL: fakeProvider.origin,
+      workspace,
+      defaultMode: 'confirm',
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+
+    const composer = page.locator('.message-input-area textarea')
+    await expect(composer).toBeEnabled()
+    await composer.fill('Create interject-output.txt')
+    await page.getByRole('button', { name: '发送消息' }).click()
+
+    // The write_file tool call requires approval, so the run pauses. This is
+    // the deterministic window to queue a live interjection.
+    await expect.poll(() => fakeProvider.requests.length).toBe(1)
+    const approval = page.locator('.approval-card')
+    await expect(approval).toBeVisible()
+    await expect(approval).toContainText('write_file')
+
+    await expect(composer).toBeEnabled()
+    await composer.fill('Remember to mention the interjection')
+    await page.getByRole('button', { name: '发送插话' }).click()
+
+    // The interjection appears as a distinct timeline message while the run is
+    // still paused on the approval.
+    await expect(
+      page.locator('.chat-message.interjection').first(),
+    ).toContainText('Remember to mention the interjection')
+
+    // Approve the write so the tool batch completes; the queued interjection
+    // is then injected before the second provider continuation.
+    await approval.getByRole('button', { name: '批准', exact: true }).click()
+
+    // The run continues (a second provider request fires) and finishes.
+    await expect
+      .poll(() => fakeProvider.requests.length, { timeout: 15_000 })
+      .toBe(2)
+    await expect(page.locator('.chat-message.assistant')).toContainText(
+      'Done after the live interjection.',
+    )
+
+    const secondRequest = fakeProvider.requests[1]
+    const secondRequestBody = JSON.stringify(secondRequest.body)
+    expect(secondRequestBody).toContain('<live_user_interjection>')
+    expect(secondRequestBody).toContain('Remember to mention the interjection')
+
+    // The interjection user message must come after the tool result, never
+    // interleaved between the assistant tool_call and its tool_result.
+    const messages =
+      (secondRequest.body.messages as Array<{
+        role?: string
+        content?: string
+      }>) ?? []
+    const toolResultIndex = messages.findIndex(
+      (message) => message.role === 'tool',
+    )
+    const interjectionIndex = messages.findIndex(
+      (message) =>
+        message.role === 'user' &&
+        typeof message.content === 'string' &&
+        message.content.includes('<live_user_interjection>'),
+    )
+    expect(toolResultIndex).toBeGreaterThanOrEqual(0)
+    expect(interjectionIndex).toBeGreaterThan(toolResultIndex)
+
+    // The persisted workbench stores the interjection message.
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          type Message = { role: string; text: string }
+          type Conversation = { messages: Message[] }
+          type WorkbenchResult =
+            | { ok: true; value: { conversations: Conversation[] } }
+            | { ok: false }
+          const api = Reflect.get(window, 'agentApi') as {
+            getWorkbench(payload: unknown): Promise<WorkbenchResult>
+          }
+          const workbench = await api.getWorkbench({ version: 1 })
+          if (!workbench.ok) return ''
+          const conversation = workbench.value.conversations.find((candidate) =>
+            candidate.messages.some((message) =>
+              message.text.includes('Create interject-output.txt'),
+            ),
+          )
+          return (
+            conversation?.messages.find(
+              (message) => message.role === 'interjection',
+            )?.text ?? ''
+          )
+        }),
+      )
+      .toBe('Remember to mention the interjection')
   })
 })

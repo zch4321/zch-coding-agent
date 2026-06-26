@@ -48,6 +48,7 @@ const api: AgentApi = {
   updatePlanStatus: (payload) => invoke('plan:update-status', payload),
   startRun: (payload) => invoke('run:start', payload),
   interruptRun: (payload) => invoke('run:interrupt', payload),
+  interjectRun: (payload) => invoke('run:interject', payload),
   decideApproval: (payload) => invoke('approval:decide', payload),
   sendTerminalInput: (payload) => invoke('terminal:input', payload),
   openTerminal: (payload) => invoke('terminal:open', payload),

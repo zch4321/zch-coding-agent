@@ -68,6 +68,9 @@ export interface AgentApi {
   interruptRun(
     payload: IpcPayload<'run:interrupt'>,
   ): Promise<IpcResult<'run:interrupt'>>
+  interjectRun(
+    payload: IpcPayload<'run:interject'>,
+  ): Promise<IpcResult<'run:interject'>>
   decideApproval(
     payload: IpcPayload<'approval:decide'>,
   ): Promise<IpcResult<'approval:decide'>>
@@ -157,6 +160,7 @@ export const AGENT_API_KEYS = [
   'updatePlanStatus',
   'startRun',
   'interruptRun',
+  'interjectRun',
   'decideApproval',
   'sendTerminalInput',
   'openTerminal',

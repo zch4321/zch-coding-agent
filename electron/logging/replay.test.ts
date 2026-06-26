@@ -128,6 +128,7 @@ describe('trace replay', () => {
         closed: false,
         runs: {},
         messages: [],
+        interjections: [],
         tools: {},
         approvals: [],
         terminals: {},
@@ -153,5 +154,143 @@ describe('trace replay', () => {
     expect(() => reduceTraceEvent(state, duplicate)).toThrow(
       'strictly increasing',
     )
+  })
+
+  it('replays interjection lifecycle across queued, injected, carryover and superseded', () => {
+    const events = trace([
+      {
+        type: 'session.start',
+        sessionId,
+        workspace: 'F:/workspace',
+        model: 'deepseek-chat',
+        mode: 'auto',
+      },
+      { type: 'run.start', sessionId, runId },
+      { type: 'user.message', sessionId, runId, text: 'hello' },
+      {
+        type: 'interjection.message',
+        sessionId,
+        runId,
+        interjectionId: 'interjection-1',
+        status: 'queued',
+        content: 'queued detail',
+        createdAt: '2026-06-26T00:00:00.000Z',
+      },
+      {
+        type: 'interjection.message',
+        sessionId,
+        runId,
+        interjectionId: 'interjection-1',
+        status: 'injected',
+        content: 'queued detail',
+        createdAt: '2026-06-26T00:00:00.000Z',
+        injectedAfterToolBatchId: 'tool-batch-1',
+      },
+      {
+        type: 'interjection.message',
+        sessionId,
+        runId,
+        interjectionId: 'interjection-2',
+        status: 'queued',
+        content: 'will be superseded',
+        createdAt: '2026-06-26T00:00:01.000Z',
+      },
+      {
+        type: 'interjection.message',
+        sessionId,
+        runId,
+        interjectionId: 'interjection-2',
+        status: 'superseded',
+        content: 'will be superseded',
+        createdAt: '2026-06-26T00:00:01.000Z',
+      },
+      {
+        type: 'interjection.message',
+        sessionId,
+        runId,
+        interjectionId: 'interjection-3',
+        status: 'queued',
+        content: 'next turn detail',
+        createdAt: '2026-06-26T00:00:02.000Z',
+      },
+      {
+        type: 'interjection.message',
+        sessionId,
+        runId,
+        interjectionId: 'interjection-3',
+        status: 'carryover',
+        content: 'next turn detail',
+        createdAt: '2026-06-26T00:00:02.000Z',
+      },
+      { type: 'run.end', sessionId, runId, status: 'cancelled' },
+      { type: 'session.end', sessionId },
+    ])
+
+    const state = replayTrace(events)
+
+    expect(state.interjections).toEqual([
+      {
+        interjectionId: 'interjection-1',
+        status: 'injected',
+        content: 'queued detail',
+        createdAt: '2026-06-26T00:00:00.000Z',
+        injectedAfterToolBatchId: 'tool-batch-1',
+        history: [
+          {
+            seq: 4,
+            status: 'queued',
+            content: 'queued detail',
+            createdAt: '2026-06-26T00:00:00.000Z',
+          },
+          {
+            seq: 5,
+            status: 'injected',
+            content: 'queued detail',
+            createdAt: '2026-06-26T00:00:00.000Z',
+            injectedAfterToolBatchId: 'tool-batch-1',
+          },
+        ],
+      },
+      {
+        interjectionId: 'interjection-2',
+        status: 'superseded',
+        content: 'will be superseded',
+        createdAt: '2026-06-26T00:00:01.000Z',
+        history: [
+          {
+            seq: 6,
+            status: 'queued',
+            content: 'will be superseded',
+            createdAt: '2026-06-26T00:00:01.000Z',
+          },
+          {
+            seq: 7,
+            status: 'superseded',
+            content: 'will be superseded',
+            createdAt: '2026-06-26T00:00:01.000Z',
+          },
+        ],
+      },
+      {
+        interjectionId: 'interjection-3',
+        status: 'carryover',
+        content: 'next turn detail',
+        createdAt: '2026-06-26T00:00:02.000Z',
+        history: [
+          {
+            seq: 8,
+            status: 'queued',
+            content: 'next turn detail',
+            createdAt: '2026-06-26T00:00:02.000Z',
+          },
+          {
+            seq: 9,
+            status: 'carryover',
+            content: 'next turn detail',
+            createdAt: '2026-06-26T00:00:02.000Z',
+          },
+        ],
+      },
+    ])
   })
 })

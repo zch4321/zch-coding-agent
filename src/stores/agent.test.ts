@@ -13,6 +13,7 @@ import { conversationToMarkdown } from '../../shared/conversation-markdown'
 import { PROVIDER_NOTICE_VERSION } from '../../shared/notices'
 import type { ConversationRecord as SharedConversationRecord } from '../../shared/workbench'
 import { useAgentStore } from './agent'
+import { useAgentRuntimeStore } from './agent-runtime'
 import { useAgentTimelineStore } from './agent-timeline'
 
 const sessionId = 'session:test' as SessionId
@@ -447,6 +448,108 @@ describe('agent store regressions', () => {
       { kind: 'file', path: 'README.md' },
       { kind: 'directory', path: 'src' },
     ])
+  })
+
+  it('keeps a carried-over interjection until the next user turn starts successfully', async () => {
+    const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
+    config.privacy.providerNoticeAccepted = {
+      version: PROVIDER_NOTICE_VERSION,
+      acceptedAt: '2026-06-22T00:00:00.000Z',
+    }
+    const startRun = vi
+      .fn()
+      .mockResolvedValueOnce({
+        version: 1 as const,
+        ok: false as const,
+        error: {
+          code: 'CONFLICT',
+          message: 'This session already has an active run',
+        },
+      })
+      .mockResolvedValueOnce({
+        version: 1 as const,
+        ok: true as const,
+        value: { runId: 'run:carryover' as RunId },
+      })
+    installApi({ startRun })
+    const store = useAgentStore()
+    const runtime = useAgentRuntimeStore()
+    store.bridgeAvailable = true
+    store.applyConfig(config)
+    store.workspacePath = 'F:/workspace/example'
+    store.createConversation()
+    store.sessionId = sessionId
+    store.activeRunId = runId
+    store.input = 'draft already typed'
+    store.contextAttachments = [
+      { kind: 'file', path: 'draft.md', source: 'picker' },
+    ]
+    store.messages.push({
+      id: 'message:interjection-carryover',
+      role: 'interjection',
+      runId,
+      text: 'Use the alternate approach',
+      reasoning: '',
+      interjectionId: 'interjection:carryover',
+      interjectionStatus: 'queued',
+      order: 1,
+    })
+
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 1,
+      ts: stamp,
+      type: 'interjection.carryover',
+      sessionId,
+      runId,
+      interjectionId: 'interjection:carryover',
+      content: 'Use the alternate approach',
+      createdAt: stamp,
+    })
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 2,
+      ts: stamp,
+      type: 'run.status',
+      sessionId,
+      runId,
+      status: 'completed',
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(startRun).toHaveBeenCalledTimes(1)
+    expect(store.input).toBe('draft already typed')
+    expect(store.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'interjection',
+          interjectionId: 'interjection:carryover',
+          interjectionStatus: 'carryover',
+          text: 'Use the alternate approach',
+        }),
+      ]),
+    )
+
+    await runtime.flushCarryoverInterjections()
+
+    expect(startRun).toHaveBeenCalledTimes(2)
+    expect(startRun).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ context: expect.anything() }),
+    )
+    expect(store.input).toBe('draft already typed')
+    expect(store.contextAttachments).toEqual([
+      { kind: 'file', path: 'draft.md', source: 'picker' },
+    ])
+    expect(
+      store.messages.some(
+        (message) => message.interjectionId === 'interjection:carryover',
+      ),
+    ).toBe(false)
+    expect(store.messages.at(-1)).toMatchObject({
+      role: 'user',
+      text: 'Use the alternate approach',
+    })
   })
 
   it('does not change conversation recency when merely switching', async () => {

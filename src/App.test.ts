@@ -660,6 +660,68 @@ describe('App', () => {
     expect(wrapper.get('.tool-call-row').text()).toContain('read_file')
   })
 
+  it('shows the superseded badge for an interjection not applied to the run', async () => {
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    store.messages = [
+      {
+        id: 'message:interjection-superseded',
+        role: 'interjection',
+        runId: 'run:test' as RunId,
+        text: 'Remember to mention the interjection',
+        reasoning: '',
+        interjectionId: 'interjection:1',
+        interjectionStatus: 'superseded',
+        order: 1,
+      },
+    ]
+    const wrapper = mount(ConversationTimeline, {
+      props: { projectName: 'example' },
+      global: {
+        plugins: [pinia, i18n],
+      },
+    })
+    await flushPromises()
+
+    const interjection = wrapper.get('.chat-message.interjection')
+    expect(interjection.text()).toContain(
+      'Remember to mention the interjection',
+    )
+    expect(interjection.find('.interjection-status.superseded').exists()).toBe(
+      true,
+    )
+  })
+
+  it('shows the carryover badge for an interjection pending a new user turn', async () => {
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    store.messages = [
+      {
+        id: 'message:interjection-carryover',
+        role: 'interjection',
+        runId: 'run:test' as RunId,
+        text: 'Use the alternate approach',
+        reasoning: '',
+        interjectionId: 'interjection:carryover',
+        interjectionStatus: 'carryover',
+        order: 1,
+      },
+    ]
+    const wrapper = mount(ConversationTimeline, {
+      props: { projectName: 'example' },
+      global: {
+        plugins: [pinia, i18n],
+      },
+    })
+    await flushPromises()
+
+    const interjection = wrapper.get('.chat-message.interjection')
+    expect(interjection.text()).toContain('Use the alternate approach')
+    expect(interjection.find('.interjection-status.carryover').exists()).toBe(
+      true,
+    )
+  })
+
   it('collapses and expands a project conversation group', async () => {
     const pinia = createPinia()
     const store = useAgentStore(pinia)

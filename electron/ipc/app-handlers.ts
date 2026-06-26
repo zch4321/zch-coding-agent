@@ -457,6 +457,14 @@ export function createAppIpcHandlers(
     'run:interrupt': (payload) => ({
       accepted: sessionManager.interruptRun(payload.sessionId, payload.runId),
     }),
+    'run:interject': (payload) => ({
+      accepted: sessionManager.interjectRun({
+        sessionId: payload.sessionId,
+        runId: payload.runId,
+        message: payload.message,
+        clientRequestId: payload.clientRequestId,
+      }),
+    }),
     'approval:decide': (payload) => ({
       accepted: sessionManager.decideApproval({
         sessionId: payload.sessionId,

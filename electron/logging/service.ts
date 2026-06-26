@@ -290,6 +290,14 @@ export class TraceService {
           ? { reasoning: message.reasoning.slice(0, 200_000) }
           : {}),
       })),
+      interjections: state.interjections.slice(-10_000).map((interjection) => ({
+        ...interjection,
+        content: interjection.content.slice(0, 200_000),
+        history: interjection.history.slice(-10_000).map((entry) => ({
+          ...entry,
+          content: entry.content.slice(0, 200_000),
+        })),
+      })),
       toolCount: Object.keys(state.tools).length,
       approvalCount: state.approvals.length,
       terminalCount: Object.keys(state.terminals).length,

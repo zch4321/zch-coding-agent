@@ -57,6 +57,11 @@ const contextOptions = computed<DropdownOption[]>(() => [
   { label: t('chat.addFileContext'), key: 'file' },
   { label: t('chat.addDirectoryContext'), key: 'directory' },
 ])
+// Context attachment and mode controls are disabled while a run is active or
+// an approval is pending: live interjections are text-only, so the context
+// dropdown/chips and @file suggestions must not imply otherwise. The textarea
+// itself stays enabled (see textareaDisabled) so the user can type an
+// interjection.
 const inputDisabled = computed(
   () =>
     !agent.workspacePath ||
@@ -64,11 +69,14 @@ const inputDisabled = computed(
     Boolean(agent.activeRunId) ||
     Boolean(agent.pendingApproval),
 )
+const textareaDisabled = computed(
+  () => !agent.workspacePath || !agent.activeConversationId,
+)
 const sendHint = computed(() => {
   if (!agent.workspacePath) return t('chat.chooseHint')
   if (!agent.credentialConfigured) return t('chat.apiKeyHint')
   if (!agent.providerNoticeAccepted) return t('chat.noticeHint')
-  if (agent.pendingApproval) return t('chat.approvalHint')
+  if (agent.activeRunId) return t('chat.interjectionHint')
   return t('chat.inputHint')
 })
 const suggestionPanelVisible = computed(() => Boolean(suggestionTrigger.value))
@@ -370,7 +378,7 @@ function handleKeydown(event: KeyboardEvent) {
 
   if (event.isComposing || event.key !== 'Enter' || event.shiftKey) return
   event.preventDefault()
-  void agent.sendMessage()
+  void (agent.activeRunId ? agent.sendInterjection() : agent.sendMessage())
 }
 
 function handleKeyup(event: KeyboardEvent) {
@@ -450,7 +458,7 @@ watch(inputDisabled, (disabled) => {
         type="textarea"
         :autosize="{ minRows: 2, maxRows: 7 }"
         :placeholder="sendHint"
-        :disabled="inputDisabled"
+        :disabled="textareaDisabled"
         @keydown="handleKeydown"
         @click="scheduleSuggestionRefresh"
         @keyup="handleKeyup"
@@ -502,17 +510,28 @@ watch(inputDisabled, (disabled) => {
       </div>
       <NTooltip v-if="agent.activeRunId">
         <template #trigger>
-          <button
-            class="send-button stop"
-            type="button"
-            :aria-label="t('chat.stop')"
-            :disabled="agent.runStatus === 'cancelling'"
-            @click="agent.interruptRun"
-          >
-            <UiIcon name="stop" />
-          </button>
+          <div class="run-actions">
+            <button
+              class="send-button interject"
+              type="button"
+              :aria-label="t('chat.interjectionSend')"
+              :disabled="!agent.canInterject"
+              @click="agent.sendInterjection"
+            >
+              <UiIcon name="send" />
+            </button>
+            <button
+              class="send-button stop"
+              type="button"
+              :aria-label="t('chat.stop')"
+              :disabled="agent.runStatus === 'cancelling'"
+              @click="agent.interruptRun"
+            >
+              <UiIcon name="stop" />
+            </button>
+          </div>
         </template>
-        {{ t('chat.stop') }}
+        {{ t('chat.interjectionSend') }} / {{ t('chat.stop') }}
       </NTooltip>
       <NTooltip v-else>
         <template #trigger>

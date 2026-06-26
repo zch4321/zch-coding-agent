@@ -111,6 +111,13 @@ const validPayloads: {
     sessionId,
     runId,
   },
+  'run:interject': {
+    version: 1,
+    sessionId,
+    runId,
+    message: 'supplementary info',
+    clientRequestId: 'request-interject',
+  },
   'approval:decide': {
     version: 1,
     sessionId,

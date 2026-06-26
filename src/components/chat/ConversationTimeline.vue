@@ -325,7 +325,9 @@ onBeforeUnmount(() => {
               ? t('chat.you')
               : message.role === 'orchestrator'
                 ? t('chat.orchestrator')
-                : t('chat.agent')
+                : message.role === 'interjection'
+                  ? t('chat.interjection')
+                  : t('chat.agent')
           }}</strong>
           <span
             v-if="
@@ -334,6 +336,42 @@ onBeforeUnmount(() => {
             "
           >
             {{ t('chat.streaming') }}
+          </span>
+          <span
+            v-else-if="
+              message.role === 'interjection' &&
+              message.interjectionStatus === 'queued'
+            "
+            class="interjection-status"
+          >
+            {{ t('chat.interjectionQueued') }}
+          </span>
+          <span
+            v-else-if="
+              message.role === 'interjection' &&
+              message.interjectionStatus === 'injected'
+            "
+            class="interjection-status"
+          >
+            {{ t('chat.interjectionInjected') }}
+          </span>
+          <span
+            v-else-if="
+              message.role === 'interjection' &&
+              message.interjectionStatus === 'superseded'
+            "
+            class="interjection-status superseded"
+          >
+            {{ t('chat.interjectionSuperseded') }}
+          </span>
+          <span
+            v-else-if="
+              message.role === 'interjection' &&
+              message.interjectionStatus === 'carryover'
+            "
+            class="interjection-status carryover"
+          >
+            {{ t('chat.interjectionCarryover') }}
           </span>
         </div>
         <div v-if="message.attachments?.length" class="message-attachments">

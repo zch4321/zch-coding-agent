@@ -82,4 +82,54 @@ describe('shared runtime contracts', () => {
     expect(validate(payload)).toBe(true)
     expect(validate({ ...payload, message: '' })).toBe(false)
   })
+
+  it('validates the run:interject payload contract', () => {
+    const channel: IpcChannel = 'run:interject'
+    const payload: IpcPayload<typeof channel> = {
+      version: 1,
+      sessionId,
+      runId,
+      message: 'Supplementary detail',
+      clientRequestId: 'request-interject',
+    }
+    const validate = compileSchema(IPC_CONTRACTS[channel].payload)
+
+    expect(validate(payload)).toBe(true)
+    expect(validate({ ...payload, message: '' })).toBe(false)
+    expect(validate({ version: 1, sessionId, runId, message: 'x' })).toBe(false)
+  })
+
+  it('validates representative interjection.updated events', () => {
+    const validateAgentEvent = compileSchema(AgentEventSchema)
+    const base = {
+      schemaVersion: 1 as const,
+      sessionId,
+      runId,
+      interjectionId: 'interjection-1',
+      content: 'queued message',
+      createdAt: '2026-06-26T00:00:00.000Z',
+      seq: 1,
+      ts: '2026-06-26T00:00:00.000Z',
+    }
+    const queued: AgentEvent = {
+      ...base,
+      type: 'interjection.updated',
+      status: 'queued',
+    }
+    const injected: AgentEvent = {
+      ...base,
+      type: 'interjection.updated',
+      status: 'injected',
+      injectedAfterToolBatchId: 'tool-batch-1',
+    }
+    const carryover: AgentEvent = {
+      ...base,
+      type: 'interjection.carryover',
+    }
+
+    expect(validateAgentEvent(queued)).toBe(true)
+    expect(validateAgentEvent(injected)).toBe(true)
+    expect(validateAgentEvent(carryover)).toBe(true)
+    expect(validateAgentEvent({ ...queued, status: 'unknown' })).toBe(false)
+  })
 })

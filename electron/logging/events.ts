@@ -212,6 +212,19 @@ export const TraceEventSchema = Type.Union([
       promptHash: Type.Optional(Type.String({ maxLength: 128 })),
     }),
   ]),
+  Type.Composite([
+    TraceBaseSchema,
+    Type.Object({
+      type: Type.Literal('interjection.message'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      interjectionId: Type.String({ maxLength: 128 }),
+      status: Type.String({ maxLength: 64 }),
+      content: Type.String({ maxLength: 1_000_000 }),
+      injectedAfterToolBatchId: Type.Optional(Type.String({ maxLength: 128 })),
+      createdAt: Type.String({ format: 'date-time' }),
+    }),
+  ]),
 ])
 
 export type TraceEvent = Static<typeof TraceEventSchema>
@@ -320,6 +333,15 @@ export type TraceEventInput =
       text: string
       promptId?: string
       promptHash?: string
+    })
+  | (TraceInputBase & {
+      type: 'interjection.message'
+      runId: RunId
+      interjectionId: string
+      status: string
+      content: string
+      injectedAfterToolBatchId?: string
+      createdAt: string
     })
 
 export interface TraceEventFactory {

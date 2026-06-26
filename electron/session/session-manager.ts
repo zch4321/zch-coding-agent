@@ -49,6 +49,7 @@ import { id, ipcFault } from './session-common'
 import type {
   ActiveRun,
   AgentEventDraft,
+  RunInterjection,
   SessionManagerOptions,
   SessionState,
 } from './session-types'
@@ -73,6 +74,23 @@ import {
 
 const RUN_CANCEL_GRACE_MS = 2_000
 const MAX_GOAL_CONTINUATIONS = 8
+
+const INTERJECTION_RULE_NOTE =
+  'Messages tagged as <live_user_interjection> are real user messages received while the current run was already in progress. They are not tool output. Treat them as the latest user instruction for the next reasoning step, while respecting system, developer, runtime, repository, and tool-safety instructions.'
+
+function liveUserInterjectionContent(content: string): string {
+  return [
+    '<live_user_interjection>',
+    content,
+    '</live_user_interjection>',
+    '',
+    INTERJECTION_RULE_NOTE,
+  ].join('\n')
+}
+
+function isTerminalRunStatus(status: RunStatus): boolean {
+  return status === 'completed' || status === 'cancelled' || status === 'failed'
+}
 
 export class SessionManager {
   readonly #configStore: ConfigStore
@@ -355,6 +373,7 @@ export class SessionManager {
     const logger = session.logger
 
     if (session.activeRun) {
+      this.#supersedePendingInterjections(session, session.activeRun)
       session.activeRun.controller.abort(new Error('Session closed'))
       session.activeRun.pendingApproval?.resolve({ decision: 'cancelled' })
       const completed = await Promise.race([
@@ -473,6 +492,10 @@ export class SessionManager {
       )
     }
 
+    if (session.activeRun && isTerminalRunStatus(session.activeRun.status)) {
+      session.activeRun = undefined
+    }
+
     if (session.activeRun) {
       ipcFault('CONFLICT', 'This session already has an active run')
     }
@@ -486,6 +509,8 @@ export class SessionManager {
       status: 'idle',
       toolTokensUsed: 0,
       done: Promise.resolve(),
+      pendingInterjections: [],
+      processedInterjectionIds: new Set(),
     }
 
     run.done = this.#run(session, run, userMessage, context)
@@ -510,8 +535,49 @@ export class SessionManager {
     }
 
     this.#setRunStatus(session, session.activeRun, 'cancelling')
+    this.#supersedePendingInterjections(session, session.activeRun)
     session.activeRun.pendingApproval?.resolve({ decision: 'cancelled' })
     session.activeRun.controller.abort(new Error('Run interrupted'))
+    return true
+  }
+
+  interjectRun(input: {
+    sessionId: SessionId
+    runId: RunId
+    message: string
+    clientRequestId: string
+  }): boolean {
+    const session = this.#requireSession(input.sessionId)
+    const run = session.activeRun
+
+    if (!run || run.runId !== input.runId) {
+      ipcFault('CONFLICT', 'The session does not have an active run')
+    }
+
+    if (run.status === 'cancelling') {
+      ipcFault('CONFLICT', 'The active run is already cancelling')
+    }
+
+    // Idempotent: a repeated clientRequestId is a no-op across the full
+    // interjection lifecycle (queued, injected, superseded, carried over), so
+    // retried IPC cannot re-queue an already-handled interjection.
+    if (run.processedInterjectionIds.has(input.clientRequestId)) {
+      return true
+    }
+
+    const interjection: RunInterjection = {
+      id: input.clientRequestId,
+      clientRequestId: input.clientRequestId,
+      conversationId: session.conversationId,
+      runId: run.runId,
+      content: input.message,
+      createdAt: new Date().toISOString(),
+      status: 'queued',
+    }
+    run.pendingInterjections.push(interjection)
+    run.processedInterjectionIds.add(input.clientRequestId)
+    this.#emitInterjectionEvent(session, interjection)
+    void this.#logInterjection(session, interjection)
     return true
   }
 
@@ -637,6 +703,12 @@ export class SessionManager {
           throw signal.reason
         }
 
+        // Inject queued interjections at the tool-batch boundary, before the
+        // next model continuation. This runs after the previous tool batch has
+        // completed (and never splits an assistant tool_call from its
+        // tool_result, because executeToolCalls has already finished).
+        await this.#drainInterjections(session, run)
+
         const completed = await this.#providerTurns.callProvider(
           session,
           run,
@@ -668,11 +740,21 @@ export class SessionManager {
             continue
           }
 
+          if (run.pendingInterjections.length > 0) {
+            // The assistant reached a final answer with no further
+            // continuation. Per the roadmap, pending interjections become the
+            // next ordinary user turn rather than forcing extra continuations
+            // of this run (which would overwrite the final answer in the
+            // renderer). Carry them over so the renderer starts a fresh run.
+            await this.#carryOverInterjections(session, run)
+          }
+
           await this.#finishRun(session, run, 'completed')
           return
         }
 
         this.#setRunStatus(session, run, 'evaluating_tools')
+        run.lastToolBatchId = id('tool-batch')
         await this.#toolRunner.executeToolCalls(
           session,
           run,
@@ -913,6 +995,122 @@ export class SessionManager {
     return {
       text: `Continue orchestration step: ${kind}`,
     }
+  }
+
+  async #drainInterjections(
+    session: SessionState,
+    run: ActiveRun,
+  ): Promise<void> {
+    const pending = run.pendingInterjections
+    if (pending.length === 0) return
+
+    const batchId = run.lastToolBatchId
+    const config = this.#configStore.getPublicConfig()
+    const toInject = pending.splice(0, pending.length)
+
+    // Multiple queued interjections are flushed in arrival order. Each one is
+    // injected as its own pinned prompt layer and persisted/traced separately,
+    // even though they all flow into the same model continuation.
+    for (const interjection of toInject) {
+      appendPromptLayer(session, {
+        kind: 'user_interjection',
+        role: 'user',
+        content: liveUserInterjectionContent(interjection.content),
+        source: 'run.interjection',
+        trusted: false,
+        editable: false,
+        config,
+      })
+      interjection.status = 'injected'
+      if (batchId) {
+        interjection.injectedAfterToolBatchId = batchId
+      }
+      this.#emitInterjectionEvent(session, interjection)
+      await this.#logInterjection(session, interjection)
+    }
+  }
+
+  #supersedePendingInterjections(session: SessionState, run: ActiveRun): void {
+    for (const interjection of run.pendingInterjections) {
+      if (interjection.status === 'queued') {
+        interjection.status = 'superseded'
+        this.#emitInterjectionEvent(session, interjection)
+        void this.#logInterjection(session, interjection)
+      }
+    }
+    run.pendingInterjections = []
+  }
+
+  async #carryOverInterjections(
+    session: SessionState,
+    run: ActiveRun,
+  ): Promise<void> {
+    // Final-answer branch: pending interjections become the next ordinary
+    // user turn. Emit a carryover signal (and trace) for each, then drop them
+    // from this run so the renderer can start a fresh run with the content.
+    const toCarry = run.pendingInterjections.splice(
+      0,
+      run.pendingInterjections.length,
+    )
+    for (const interjection of toCarry) {
+      this.#emit(session, {
+        type: 'interjection.carryover',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        interjectionId: interjection.id,
+        content: interjection.content,
+        createdAt: interjection.createdAt,
+      })
+      await session.logger.write({
+        type: 'interjection.message',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        interjectionId: interjection.id,
+        status: 'carryover',
+        content: interjection.content,
+        createdAt: interjection.createdAt,
+      })
+    }
+  }
+
+  #emitInterjectionEvent(
+    session: SessionState,
+    interjection: RunInterjection,
+  ): void {
+    this.#emit(session, {
+      type: 'interjection.updated',
+      sessionId: session.sessionId,
+      runId: interjection.runId,
+      interjectionId: interjection.id,
+      status: interjection.status,
+      content: interjection.content,
+      createdAt: interjection.createdAt,
+      ...(interjection.injectedAfterToolBatchId
+        ? {
+            injectedAfterToolBatchId: interjection.injectedAfterToolBatchId,
+          }
+        : {}),
+    })
+  }
+
+  async #logInterjection(
+    session: SessionState,
+    interjection: RunInterjection,
+  ): Promise<void> {
+    await session.logger.write({
+      type: 'interjection.message',
+      sessionId: session.sessionId,
+      runId: interjection.runId,
+      interjectionId: interjection.id,
+      status: interjection.status,
+      content: interjection.content,
+      createdAt: interjection.createdAt,
+      ...(interjection.injectedAfterToolBatchId
+        ? {
+            injectedAfterToolBatchId: interjection.injectedAfterToolBatchId,
+          }
+        : {}),
+    })
   }
 
   async #emitOrchestratorMessage(
