@@ -2,7 +2,7 @@
 
 本文件承接 `feature-backlog.md`，只记录下一阶段和仍未实现的产品方向。已完成的 R0-R6 不再保留在路线图正文中；历史背景以 git history、PR 说明和 release notes 为准。
 
-每个阶段都应保持可独立评审、可测试、可回滚。当前优先级从大功能扩张转向影响可用性的基础能力：工具调用紧凑 UI、Prompt Harness、ReAct 编排、项目模块建模、语义代码工具、LSP 后端，以及 Serena/MCP 适配。
+每个阶段都应保持可独立评审、可测试、可回滚。当前优先级从大功能扩张转向影响可用性的基础能力：工具调用紧凑 UI、Prompt Harness、ReAct 编排、项目模块建模、语义代码工具、LSP 后端、Serena/MCP 适配，以及真实长程 Agent Benchmark。
 
 ## 0. 当前结论
 
@@ -16,6 +16,7 @@
 - 如果项目已有模块，Prompt Harness 应把简洁 module 摘要注入上下文，供模型选择工具和判断代码边界。
 - 当语义代码工具可用时，应鼓励模型优先使用 `code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_diagnostics` 等工具，再读取局部文件内容。
 - Serena、JetBrains、VS Code、LSP、ast-grep 等后端不应直接暴露成一堆原始工具给模型；模型应看到稳定的 Code Intelligence Facade。
+- 真实 LLM 端到端能力不应继续伪装成普通测试。需要独立 Benchmark Harness，用真实仓库任务、官方 evaluator、Playwright 前端操作和 trace 指标评估 coding agent harness 是否有效。
 - R7 的浏览器、多模态和高级统计暂缓，等基础可用性、Prompt Harness 与代码理解能力稳定后再推进。
 
 ## 1. Tool Call Compact UI
@@ -355,7 +356,66 @@ interface ConversationProviderConfig {
 - Provider 不可用、凭据缺失、模型列表过期和 fallback 触发都有可解释错误和测试覆盖。
 - OpenAI-compatible 的 DeepSeek profile 与 generic profile 都能通过同一 provider adapter 流程运行。
 
-## 9. Deferred / Later
+## 9. Agent Benchmark Harness
+
+目标：建立独立于 `npm test` / `npm run test:e2e` 的真实 coding-agent benchmark，用来评估“当前 harness + 前端 UI + 工具系统 + 真实 LLM”能否完成复杂长程工程任务。它不是常规测试门禁，也不是 provider 连通性 demo；它应能暴露 Prompt Harness、工具选择、审批、上下文管理、测试迭代、trace 和安全边界的真实问题。
+
+建议目录：
+
+```text
+benchmarks/
+├─ README.md
+├─ playwright.benchmark.config.ts
+├─ run-benchmark.cjs
+├─ lib/
+│  ├─ app.ts
+│  ├─ case-runner.ts
+│  ├─ dataset.ts
+│  ├─ approvals.ts
+│  ├─ scoring.ts
+│  ├─ artifacts.ts
+│  └─ redaction.ts
+├─ cases/
+│  ├─ swe-bench-pro/
+│  ├─ swe-evo/
+│  ├─ swe-marathon/
+│  └─ harness-stress/
+└─ results/
+```
+
+数据集策略：
+
+- 第一优先级接入 SWE-bench Pro：使用其任务数据作为 agent 输入，用官方 Docker evaluator 作为最终裁判。Agent 只看到 `problem_statement`、仓库 `base_commit`、公开约束和工作区；不得看到 gold patch、`test_patch`、`fail_to_pass` 或 `pass_to_pass`。
+- 评测时从 SWE-bench Pro instance 取出 Docker image 中的 `/app` 到临时 workspace，reset 到 `base_commit`，交给本应用打开；agent 完成后导出 `git diff --binary base_commit`，再提交给官方 evaluator 判定 resolved。
+- 后续接入 SWE-EVO / SWE-Chain 类软件演进任务，用于验证跨版本升级、长程上下文和反复测试修复。
+- SWE-Marathon 作为高成本 full/nightly 旗舰 benchmark，只用于少量多小时任务，不进入日常开发循环。
+- 自建 `harness-stress` 只覆盖外部 benchmark 不关心的产品语义：confirm 审批、运行中插话、workspace path guard、trace/key 泄漏、终端长输出、中断与恢复。
+
+执行模型：
+
+- 新增 `npm run benchmark:smoke`、`npm run benchmark`、`npm run benchmark:full`，全部 opt-in，不进入默认 `npm test`、`npm run test:e2e` 或 release build 门禁。
+- Benchmark runner 负责准备临时 workspace、启动 Electron、通过 Playwright 在真实前端发送任务、点击审批、发送插话、等待 run 完成，并收集最终 patch、trace、截图、workbench、日志和用量。
+- Setup 可以通过受控 IPC 写入 workspace、provider、privacy notice 和 logging 配置，避免 native file picker 与密钥输入影响稳定性；被评估的核心行为必须走前端 UI：发消息、审批、插话、计划批准和结果查看。
+- API Key 只通过主进程环境变量注入，例如 `DEEPSEEK_API_KEY`；renderer 只能看到 `credentialConfigured` / `credentialSource`。Benchmark 不在 UI 中输入真实 key，结束后必须扫描 trace、workbench、日志、终端输出和 artifacts，确认没有密钥明文。
+- 每个 case 都在独立临时目录运行，初始 workspace 必须 git-clean。最终 patch 必须能在干净 evaluator 环境中从 `base_commit` 独立应用。
+
+评分口径：
+
+- `resolved` 使用对应数据集官方 evaluator；对 SWE-bench Pro，核心是官方脚本在干净 Docker 中应用 patch、运行 instance 的 `run_script.sh`，解析测试输出，并要求 `fail_to_pass ∪ pass_to_pass` 全部通过。
+- 自建 case 必须有隐藏 evaluator，并提供 oracle patch 自检：baseline 必须失败，应用 oracle patch 后必须通过，no-op 不能通过。
+- 单个 case 先过硬门禁：run 未崩溃/超时、patch 可应用、隐藏或官方 evaluator 通过、无 workspace 外写入、无密钥泄漏、权限模式未被绕过。硬门禁失败则该 case 记 0 分。
+- 通过硬门禁后计算加权分：功能正确性、harness 覆盖度、安全与边界、迭代效率、UI/trace 完整性。Harness 覆盖度由 trace 和 UI 证明，包括是否发生真实工具调用、provider continuation、测试失败后再修复、审批卡决策、interjection 注入、plan 状态流转和 usage 记录。
+- 输出 `summary.json`、`summary.md` 和每个 case 的 artifacts：`workspace.patch`、evaluator log、agent trace、Playwright trace、截图、token/cost/duration/tool-call metrics。
+
+验收：
+
+- 可以从 SWE-bench Pro 中选择单个 instance，自动准备临时 workspace，经由本应用前端完成任务，再用官方 evaluator 得到 resolved/unresolved。
+- `benchmark:smoke` 能跑一个小规模真实任务并产出完整 artifacts；失败时能看出是 agent 解题失败、harness 失败、evaluator 失败还是环境失败。
+- `benchmark` 至少覆盖 10 个中等复杂任务，包含多文件修改、测试失败迭代、命令执行、读写工具和审批。
+- `benchmark:full` 至少包含 1 个长程任务，要求模型制定计划、跨多轮运行测试、根据失败反复修改，并记录完整 trace。
+- Benchmark 结果不阻塞普通开发测试，但可作为 Prompt Harness、语义工具、Provider routing 和权限策略改动的回归对比指标。
+
+## 10. Deferred / Later
 
 原 R7 暂缓到后续阶段：
 
@@ -374,7 +434,7 @@ interface ConversationProviderConfig {
 - 云端同步和团队共享项目。
 - 完整插件市场。
 
-## 10. 阶段门禁
+## 11. 阶段门禁
 
 每个实现阶段至少通过：
 
