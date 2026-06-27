@@ -1,7 +1,7 @@
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { lookup as dnsLookup } from 'node:dns/promises'
-import { isPublicNetworkAddress } from '../skills/manager'
+import { isPublicNetworkAddress } from './network-address'
 
 export interface SsrfFetchOptions {
   /** Hard cap on the response body in bytes. */

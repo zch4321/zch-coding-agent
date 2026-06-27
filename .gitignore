@@ -31,5 +31,6 @@ test-results
 *.sw?
 .codewhale
 docs/code-review-report
+docs/decoupling-refactor-plan.tmp.md
 
 .env
