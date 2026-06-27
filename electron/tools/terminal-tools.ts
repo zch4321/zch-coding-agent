@@ -112,7 +112,8 @@ export function registerTerminalTools(
 ): void {
   registry.registerTool({
     id: 'terminal_open',
-    description: 'Open a persistent terminal owned by the current session.',
+    description:
+      'Open a persistent terminal owned by the current session. Use for long-running tests, watch tasks, dev servers, REPLs, and commands that need repeated observation.',
     inputSchema: OpenSchema,
     effects: ['terminal.write'],
     defaultRisk: 'review',
@@ -131,7 +132,8 @@ export function registerTerminalTools(
 
   registry.registerTool({
     id: 'terminal_send',
-    description: 'Send input to a persistent terminal owned by this session.',
+    description:
+      'Send input to a persistent terminal owned by this session. Include a newline to start a command. For long-running commands, follow with delay and terminal_read instead of run_command.',
     inputSchema: SendSchema,
     effects: ['terminal.write'],
     defaultRisk: 'review',
@@ -155,7 +157,7 @@ export function registerTerminalTools(
   registry.registerTool({
     id: 'terminal_read',
     description:
-      'Read bounded, ANSI-free output from a persistent terminal owned by this session.',
+      'Read bounded, ANSI-free output from a persistent terminal owned by this session. Use cursor for incremental polling after delay while a long-running test, server, watcher, or REPL continues.',
     inputSchema: ReadSchema,
     effects: ['terminal.read'],
     defaultRisk: 'low',

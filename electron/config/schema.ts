@@ -136,7 +136,7 @@ export const DEFAULT_APP_CONFIG = {
     patchBytes: 64 * 1_024,
     diffChars: 120_000,
     approvalTimeoutMs: 10 * 60_000,
-    autoApprovalTimeoutMs: 15_000,
+    autoApprovalTimeoutMs: 60_000,
     modelCatalogTimeoutMs: 15_000,
     terminalScrollbackBytes: 2_000_000,
     fetchResponseBytes: 256 * 1_024,

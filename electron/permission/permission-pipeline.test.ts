@@ -40,7 +40,7 @@ describe('P3 permission pipeline ordering', () => {
     const root = await workspace()
     const call: ToolCall = {
       id: 'call:escape' as CallId,
-      toolId: 'write_file',
+      toolId: 'create_file',
       args: { path: '../outside.txt', content: 'bad' },
       reason: 'Escape workspace',
     }
@@ -75,7 +75,7 @@ describe('P3 permission pipeline ordering', () => {
     const root = await workspace()
     const call: ToolCall = {
       id: 'call:risk' as CallId,
-      toolId: 'write_file',
+      toolId: 'create_file',
       args: { path: 'created.txt', content: 'after\n' },
       reason: 'Create note',
     }
@@ -129,7 +129,7 @@ describe('P3 permission pipeline ordering', () => {
     const calls: ToolCall[] = [
       {
         id: 'call:write-policy' as CallId,
-        toolId: 'write_file',
+        toolId: 'create_file',
         args: { path: 'created.txt', content: 'after\n' },
         reason: 'Create note',
       },
@@ -180,7 +180,7 @@ describe('P3 permission pipeline ordering', () => {
     await mkdir(path.join(root, '.git'))
     const call: ToolCall = {
       id: 'call:git-config' as CallId,
-      toolId: 'write_file',
+      toolId: 'create_file',
       args: {
         path: '.git/config',
         content: '[core]\nrepositoryformatversion = 0\n',
@@ -226,7 +226,7 @@ describe('P3 permission pipeline ordering', () => {
     const root = await workspace()
     const call: ToolCall = {
       id: 'call:block' as CallId,
-      toolId: 'write_file',
+      toolId: 'create_file',
       args: { path: 'created.txt', content: 'after\n' },
       reason: 'Create note',
     }

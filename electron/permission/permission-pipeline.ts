@@ -188,7 +188,7 @@ function rememberArgConstraints(call: ToolCall): JsonValue | undefined {
   }
 
   if (
-    call.toolId === 'write_file' ||
+    call.toolId === 'create_file' ||
     call.toolId === 'apply_patch' ||
     call.toolId === 'delete_file'
   ) {

@@ -574,7 +574,7 @@ describe('App', () => {
       runId: 'run:test' as RunId,
       callId: 'call:test' as CallId,
       kind: 'tool',
-      tool: 'write_file',
+      tool: 'create_file',
       args: { path: 'note.txt', content: injection },
       reason: injection,
       policySignals: [
@@ -687,7 +687,7 @@ describe('App', () => {
       {
         callId: toolCallId,
         runId: toolRunId,
-        tool: 'write_file',
+        tool: 'create_file',
         args: { path: 'note.txt', content: 'updated' },
         reason: 'Write the requested file',
         status: 'completed',
@@ -730,7 +730,7 @@ describe('App', () => {
       },
     })
 
-    expect(wrapper.get('.tool-call-summary').text()).toContain('write_file')
+    expect(wrapper.get('.tool-call-summary').text()).toContain('create_file')
     expect(wrapper.get('.tool-call-summary').text()).not.toContain('note.txt')
     expect(wrapper.find('.tool-approval-json').exists()).toBe(false)
 

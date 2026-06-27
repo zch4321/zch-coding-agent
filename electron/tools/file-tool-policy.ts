@@ -12,7 +12,7 @@ export function argsObject(call: ToolCall): Record<string, JsonValue> {
 }
 
 export function operationFor(toolId: string): FileOperation | undefined {
-  if (toolId === 'write_file') {
+  if (toolId === 'create_file') {
     return 'write'
   }
 

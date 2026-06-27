@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { CallId } from '../../shared/ids'
+import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
+import { PermissionPipeline } from '../permission/permission-pipeline'
 import { registerProcessTools } from './process-tools'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
 
@@ -86,5 +87,58 @@ describe('run_command provider schema', () => {
         reason: 'test validation',
       }).ok,
     ).toBe(true)
+  })
+})
+
+describe('delay tool', () => {
+  it('is registered as a low-risk wait primitive for terminal polling', async () => {
+    const { registry, executor } = harness()
+    const definition = registry.get('delay')
+    const sessionId = 'session:delay' as SessionId
+    const runId = 'run:delay' as RunId
+    const signal = new AbortController().signal
+    const call = {
+      id: 'call:delay' as CallId,
+      toolId: 'delay',
+      args: json({ durationMs: 1 }),
+      reason: 'Wait before reading terminal output',
+    }
+
+    expect(definition).toMatchObject({
+      defaultRisk: 'low',
+      effects: [],
+    })
+    expect(executor.inspectCall(call).ok).toBe(true)
+
+    const approved = await new PermissionPipeline().authorize({
+      sessionId,
+      runId,
+      workspace: process.cwd(),
+      mode: 'readonly',
+      call,
+      definition: definition!,
+      config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+      signal,
+      requestHumanApproval: async () => ({ decision: 'deny' }),
+    })
+
+    expect(approved).toMatchObject({
+      ok: true,
+      approvedCall: { approvedBy: 'readonly' },
+    })
+    if (!approved.ok) {
+      return
+    }
+
+    await expect(
+      executor.execute(
+        approved.approvedCall,
+        { sessionId, runId, workspace: { canonicalPath: process.cwd() } },
+        signal,
+      ),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      content: { waitedMs: expect.any(Number) },
+    })
   })
 })

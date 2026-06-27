@@ -39,7 +39,7 @@ function requestApproval(store: ReturnType<typeof useAgentStore>) {
     runId,
     callId,
     kind: 'tool',
-    tool: 'write_file',
+    tool: 'create_file',
     args: { path: 'note.txt', content: 'updated' },
     reason: 'Write the requested file',
     policySignals: [],
@@ -747,7 +747,7 @@ describe('agent store regressions', () => {
       sessionId,
       runId,
       callId,
-      tool: 'write_file',
+      tool: 'create_file',
       args: { path: 'note.txt', content: 'updated' },
       reason: 'Write the requested file',
     })
@@ -943,7 +943,7 @@ describe('agent store regressions', () => {
       {
         callId: 'call-after' as CallId,
         runId,
-        tool: 'write_file',
+        tool: 'create_file',
         args: {},
         reason: '',
         status: 'completed',
@@ -1051,7 +1051,7 @@ describe('agent store regressions', () => {
     original.latestReviewedApproval = {
       runId,
       callId,
-      tool: 'write_file',
+      tool: 'create_file',
       reason: 'Review diff',
       diff: '--- a/file\n+++ b/file',
       decision: 'allowed',
@@ -1104,7 +1104,7 @@ describe('agent store regressions', () => {
       {
         callId: 'call-after' as CallId,
         runId,
-        tool: 'write_file',
+        tool: 'create_file',
         args: {},
         reason: '',
         status: 'completed',

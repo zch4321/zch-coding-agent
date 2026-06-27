@@ -109,7 +109,7 @@ describe('P3 file tools', () => {
     await expect(
       execute(root, {
         id: 'call:write' as CallId,
-        toolId: 'write_file',
+        toolId: 'create_file',
         args: { path: 'created.txt', content: 'created\n' },
         reason: 'Create a fixture',
       }),
@@ -141,6 +141,25 @@ describe('P3 file tools', () => {
     await expect(
       readFile(path.join(root, 'created.txt')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('creates missing parent directories for new files', async () => {
+    const root = await workspace()
+
+    await expect(
+      execute(root, {
+        id: 'call:nested-create' as CallId,
+        toolId: 'create_file',
+        args: {
+          path: 'src/generated/client.ts',
+          content: 'export const generated = true\n',
+        },
+        reason: 'Create a generated source file',
+      }),
+    ).resolves.toMatchObject({ status: 'ok' })
+    expect(
+      await readFile(path.join(root, 'src', 'generated', 'client.ts'), 'utf8'),
+    ).toBe('export const generated = true\n')
   })
 
   it('rejects patch context that does not match without changing the file', async () => {
@@ -255,7 +274,7 @@ describe('P3 file tools', () => {
     const target = path.join(root, 'new-note.txt')
     const call: ToolCall = {
       id: 'call:created' as CallId,
-      toolId: 'write_file',
+      toolId: 'create_file',
       args: { path: 'new-note.txt', content: 'agent content\n' },
       reason: 'Create a file',
     }
@@ -296,6 +315,38 @@ describe('P3 file tools', () => {
     await rename(directory, path.join(root, 'src-old'))
     await mkdir(directory)
     await writeFile(path.join(directory, 'note.txt'), 'alpha\nbeta\n')
+
+    if (approval.ok) {
+      await expect(
+        executor.execute(
+          approval.approvedCall,
+          {
+            sessionId,
+            runId,
+            workspace: { canonicalPath: root },
+          },
+          new AbortController().signal,
+        ),
+      ).resolves.toMatchObject({ status: 'error', code: 'RESOURCE_CHANGED' })
+    }
+  })
+
+  it('invalidates create approval when the nearest existing parent is replaced', async () => {
+    const root = await workspace()
+    const directory = path.join(root, 'src')
+    await mkdir(directory)
+    const call: ToolCall = {
+      id: 'call:create-parent' as CallId,
+      toolId: 'create_file',
+      args: {
+        path: 'src/generated/client.ts',
+        content: 'export const generated = true\n',
+      },
+      reason: 'Create a generated source file',
+    }
+    const { approval, executor } = await authorize(root, call)
+    await rename(directory, path.join(root, 'src-old'))
+    await mkdir(directory)
 
     if (approval.ok) {
       await expect(

@@ -802,7 +802,7 @@ const messages = {
       readFileSourceBytes: 'Readable source file byte limit',
       readFileOutputBytes: 'Read file output byte limit',
       editableFileBytes: 'Editable file byte limit',
-      writeFileBytes: 'Write file byte limit',
+      writeFileBytes: 'Create file byte limit',
       patchBytes: 'Patch byte limit',
       diffChars: 'Diff preview character limit',
       approvalTimeoutMs: 'Human approval timeout (ms)',

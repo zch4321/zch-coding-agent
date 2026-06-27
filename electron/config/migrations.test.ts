@@ -129,9 +129,28 @@ describe('config migrations', () => {
     )
     expect(migrated.limits).toMatchObject({
       approvalTimeoutMs: 600_000,
-      autoApprovalTimeoutMs: 15_000,
+      autoApprovalTimeoutMs: 60_000,
       autoCompactTriggerPercent: 80,
       modelCatalogTimeoutMs: 15_000,
+    })
+  })
+
+  it('renames remembered write_file rules to create_file', () => {
+    const legacy = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+    legacy.permission.rememberedRules = [
+      {
+        id: 'rule:create-file',
+        effect: 'allow',
+        toolId: 'write_file',
+        workspaceScope: 'F:/workspace',
+        argConstraints: { path: 'new.txt' },
+        createdFromCallId: 'call:legacy',
+      },
+    ]
+
+    expect(migrateConfig(legacy).permission.rememberedRules[0]).toMatchObject({
+      toolId: 'create_file',
+      argConstraints: { path: 'new.txt' },
     })
   })
 

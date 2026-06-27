@@ -35,13 +35,13 @@ import type { ApprovedToolCall } from './approved-tool-call'
 import type { ToolRegistry } from './tool-registry'
 import { applyTextPatch, TextPatchError } from './text-patch'
 
-const WriteFileArgsSchema = Type.Object(
+const CreateFileArgsSchema = Type.Object(
   {
     path: Type.String({
       minLength: 1,
       maxLength: 4_096,
       description:
-        'Workspace-relative path for the new file. The file must not already exist.',
+        'Workspace-relative path for the new file. Missing parent directories are created automatically. The file must not already exist.',
     }),
     content: Type.String({
       maxLength: MAX_WRITE_BYTES,
@@ -155,7 +155,7 @@ export async function prepareToolResourcePlan(input: {
     if (precondition.expectedExists) {
       throw new PathGuardError(
         'PATH_ALREADY_EXISTS',
-        'write_file only creates new files; use apply_patch for an existing file',
+        'create_file only creates new files; use apply_patch for an existing file',
       )
     }
 
@@ -246,11 +246,11 @@ function errorResult(error: unknown): ToolResult {
 export function createFileToolDefinitions(
   getLimits: () => Partial<FileToolLimits> = () => DEFAULT_FILE_TOOL_LIMITS,
 ): ToolDefinition[] {
-  const writeFile: ToolDefinition<typeof WriteFileArgsSchema> = {
-    id: 'write_file',
+  const createFile: ToolDefinition<typeof CreateFileArgsSchema> = {
+    id: 'create_file',
     description:
-      'Create a new UTF-8 file inside the workspace. Use apply_patch when the file already exists.',
-    inputSchema: WriteFileArgsSchema,
+      'Create a new UTF-8 file inside the workspace, creating missing parent directories automatically. Use apply_patch when the file already exists.',
+    inputSchema: CreateFileArgsSchema,
     effects: ['filesystem.write'],
     defaultRisk: 'review',
     supportsAbort: true,
@@ -259,7 +259,7 @@ export function createFileToolDefinitions(
     validateArgs(args) {
       const limit = fileLimits(getLimits()).writeFileBytes
       return Buffer.byteLength(args.content, 'utf8') > limit
-        ? `write_file content must not exceed ${limit} UTF-8 bytes`
+        ? `create_file content must not exceed ${limit} UTF-8 bytes`
         : undefined
     },
     async execute(args, context) {
@@ -377,7 +377,7 @@ export function createFileToolDefinitions(
     },
   }
 
-  return [writeFile, applyPatch, deleteFile]
+  return [createFile, applyPatch, deleteFile]
 }
 
 export function registerFileTools(

@@ -109,7 +109,7 @@ async function waitForConfirmedWrite(input: {
           : undefined
       const exactExpectedWrite =
         event.kind === 'tool' &&
-        event.tool === 'write_file' &&
+        event.tool === 'create_file' &&
         args?.path === input.expectedPath &&
         args?.content === input.expectedContent
       input.manager.decideApproval({
@@ -312,7 +312,7 @@ describe.skipIf(!live)('real DeepSeek endpoint', () => {
     })
     const writeRunId = manager.startRun({
       sessionId: writeSessionId,
-      message: `Use write_file to create live-created.txt with the exact content ${sentinel}.`,
+      message: `Use create_file to create live-created.txt with the exact content ${sentinel}.`,
       clientRequestId: 'real-write-run',
     })
     await waitForConfirmedWrite({

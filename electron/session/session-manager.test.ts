@@ -567,7 +567,7 @@ class MultiToolCancellationProvider implements LLMProvider {
         id: `call-write-${index + 1}`,
         type: 'function',
         function: {
-          name: 'write_file',
+          name: 'create_file',
           arguments: JSON.stringify({ path: fileName, content: fileName }),
         },
       }))
@@ -577,7 +577,7 @@ class MultiToolCancellationProvider implements LLMProvider {
         turn: { role: 'assistant', content: null, tool_calls: toolCalls },
         toolCalls: toolCalls.map((toolCall) => ({
           id: toolCall.id as CallId,
-          toolId: 'write_file',
+          toolId: 'create_file',
           args: JSON.parse(toolCall.function.arguments) as JsonValue,
           reason: 'Create cancellation fixture',
         })),

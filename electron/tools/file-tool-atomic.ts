@@ -1,8 +1,37 @@
 import { randomUUID } from 'node:crypto'
-import { open, rename, unlink } from 'node:fs/promises'
+import { mkdir, open, realpath, rename, stat, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import type { FilePrecondition } from './file-tool-types'
 import { assertFilePrecondition } from './file-tool-preconditions'
+import { PathGuard, PathGuardError } from '../safety/path-guard'
+
+async function ensureParentDirectory(
+  workspace: string,
+  precondition: FilePrecondition,
+  signal: AbortSignal,
+): Promise<string> {
+  if (precondition.expectedParentExists !== false) {
+    return precondition.parentRealPath
+  }
+
+  signal.throwIfAborted()
+  await mkdir(precondition.parentRealPath, { recursive: true })
+  const parentRealPath = path.resolve(
+    await realpath(precondition.parentRealPath),
+  )
+  const parentStat = await stat(parentRealPath)
+  PathGuard.fromCanonical(workspace).assertInside(parentRealPath)
+
+  if (!parentStat.isDirectory()) {
+    throw new PathGuardError(
+      'NOT_A_DIRECTORY',
+      'Target parent is not a directory',
+    )
+  }
+
+  signal.throwIfAborted()
+  return parentRealPath
+}
 
 export async function atomicReplace(
   workspace: string,
@@ -10,8 +39,13 @@ export async function atomicReplace(
   content: string,
   signal: AbortSignal,
 ): Promise<void> {
+  const parentRealPath = await ensureParentDirectory(
+    workspace,
+    precondition,
+    signal,
+  )
   const temporaryPath = path.join(
-    precondition.parentRealPath,
+    parentRealPath,
     `.${path.basename(precondition.absolutePath)}.${randomUUID()}.tmp`,
   )
   const file = await open(temporaryPath, 'wx', 0o600)

@@ -89,7 +89,7 @@ function isAutoAllowedWorkspaceFileMutation(input: PolicyInput): boolean {
   return (
     input.mode === 'auto' &&
     input.builtinPolicies &&
-    (input.definition.id === 'write_file' ||
+    (input.definition.id === 'create_file' ||
       input.definition.id === 'apply_patch')
   )
 }

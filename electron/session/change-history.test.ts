@@ -28,7 +28,7 @@ function approvedCall(input: {
     callId: 'call-1' as CallId,
     toolId:
       input.operation === 'write'
-        ? 'write_file'
+        ? 'create_file'
         : input.operation === 'patch'
           ? 'apply_patch'
           : 'delete_file',

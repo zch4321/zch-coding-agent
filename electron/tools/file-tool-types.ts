@@ -9,6 +9,9 @@ export interface FilePrecondition {
   readonly absolutePath: string
   readonly parentRealPath: string
   readonly expectedParentId: string
+  readonly expectedParentExists?: boolean
+  readonly expectedExistingParentRealPath?: string
+  readonly expectedExistingParentId?: string
   readonly expectedExists: boolean
   readonly expectedRealPath?: string
   readonly expectedFileId?: string

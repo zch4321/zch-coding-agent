@@ -4,6 +4,8 @@ import type { JsonValue } from '../../shared/json'
 import type { ToolRegistrationPort, ToolResult } from './types'
 import { runCommand } from '../process/run'
 
+const MAX_DELAY_MS = 60_000
+
 const RunCommandSchema = Type.Object(
   {
     mode: Type.Union([Type.Literal('process'), Type.Literal('shell')], {
@@ -50,10 +52,23 @@ const RunCommandSchema = Type.Object(
   {
     additionalProperties: false,
     description:
-      'Run a process without shell parsing, or explicitly run a higher-risk shell command.',
+      'Run a bounded short-lived process without shell parsing, or explicitly run a higher-risk shell command. Use terminal tools for long-running tests, watch tasks, dev servers, REPLs, and commands that need periodic observation.',
   },
 )
 type RunCommandArgs = Static<typeof RunCommandSchema>
+
+const DelaySchema = Type.Object(
+  {
+    durationMs: Type.Integer({
+      minimum: 1,
+      maximum: MAX_DELAY_MS,
+      description:
+        'Milliseconds to wait before the next step. Use after terminal_send before terminal_read when observing long-running tests, dev servers, watch tasks, or REPL output.',
+    }),
+  },
+  { additionalProperties: false },
+)
+type DelayArgs = Static<typeof DelaySchema>
 
 function validateRunCommandArgs(args: RunCommandArgs): string | undefined {
   if (args.mode === 'process') {
@@ -79,6 +94,28 @@ function validateRunCommandArgs(args: RunCommandArgs): string | undefined {
   return undefined
 }
 
+function wait(durationMs: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }
+    const timer = setTimeout(finish, durationMs)
+    const abort = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+      reject(signal.reason ?? new Error('delay aborted'))
+    }
+
+    if (signal.aborted) {
+      abort()
+      return
+    }
+
+    signal.addEventListener('abort', abort, { once: true })
+  })
+}
+
 export function registerProcessTools(
   registry: ToolRegistrationPort,
   getConfig: () => PublicConfig,
@@ -86,7 +123,7 @@ export function registerProcessTools(
   registry.registerTool({
     id: 'run_command',
     description:
-      'Run a bounded child process from the workspace. Prefer process mode with an executable and argument array. Shell mode is higher risk.',
+      'Run a bounded short-lived child process from the workspace. Prefer process mode with an executable and argument array. Shell mode is higher risk. For long-running tests, watch tasks, dev servers, REPLs, or commands that need periodic observation, open a terminal, send the command, use delay, then read terminal output.',
     inputSchema: RunCommandSchema,
     effects: ['process.spawn'],
     defaultRisk: 'review',
@@ -136,6 +173,28 @@ export function registerProcessTools(
         content: JSON.parse(JSON.stringify(result)) as JsonValue,
         truncated: result.truncated,
         totalBytes: result.totalBytes,
+      }
+    },
+  })
+
+  registry.registerTool({
+    id: 'delay',
+    description:
+      'Wait for a short bounded interval before continuing. Use with terminal_read polling after terminal_send for long-running tests, watch tasks, dev servers, or REPLs.',
+    inputSchema: DelaySchema,
+    effects: [],
+    defaultRisk: 'low',
+    supportsAbort: true,
+    defaultTimeoutMs: MAX_DELAY_MS + 5_000,
+    maxOutputBytes: 4_096,
+    async execute(args: DelayArgs, context): Promise<ToolResult> {
+      const startedAt = performance.now()
+      await wait(args.durationMs, context.signal)
+      return {
+        status: 'ok',
+        content: {
+          waitedMs: Math.round(performance.now() - startedAt),
+        },
       }
     },
   })

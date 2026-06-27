@@ -3,6 +3,7 @@ import type { ToolResult } from './types'
 import type { ProviderMessage } from '../providers/provider'
 
 const TRUNCATION_MARKER = '\n... output truncated ...\n'
+const EXHAUSTED_TOOL_RESULT_PREVIEW_TOKENS = 512
 
 export class ContextBudgetError extends Error {
   constructor(message: string) {
@@ -61,26 +62,6 @@ export function boundToolResultForContext(
   const remaining = Math.max(0, limits.maxToolTokensPerRun - usedTokens)
   const allowed = Math.min(limits.maxToolResultTokens, remaining)
 
-  if (allowed <= 0) {
-    const bounded: ToolResult = {
-      status: 'ok',
-      content: {
-        truncated: true,
-        message:
-          'Tool result omitted because the run tool-context budget is exhausted',
-      },
-      truncated: true,
-      totalBytes:
-        result.status === 'ok'
-          ? (result.totalBytes ?? Buffer.byteLength(JSON.stringify(result)))
-          : Buffer.byteLength(JSON.stringify(result)),
-    }
-    return {
-      result: bounded,
-      tokens: estimateJsonTokens(bounded, limits.tokenEstimation),
-    }
-  }
-
   const tokens = estimateJsonTokens(result, limits.tokenEstimation)
 
   if (tokens <= allowed) {
@@ -88,16 +69,26 @@ export function boundToolResultForContext(
   }
 
   const serialized = JSON.stringify(result)
+  const previewBudget =
+    allowed <= 0
+      ? Math.min(
+          limits.maxToolResultTokens,
+          EXHAUSTED_TOOL_RESULT_PREVIEW_TOKENS,
+        )
+      : allowed
   const bounded: ToolResult = {
     status: 'ok',
     content: {
       truncated: true,
       preview: truncateTextHeadTail(
         serialized,
-        Math.max(1, allowed - 64),
+        Math.max(1, previewBudget - 64),
         limits.tokenEstimation,
       ),
-      message: 'Tool result exceeded the model-context budget',
+      message:
+        allowed <= 0
+          ? 'Tool result exceeded the run tool-context budget; returning a bounded preview'
+          : 'Tool result exceeded the model-context budget',
     },
     truncated: true,
     totalBytes:

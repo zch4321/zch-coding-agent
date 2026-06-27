@@ -94,7 +94,7 @@ export class ProviderAutoApprover implements AutoApprover {
 
   constructor(
     provider: LLMProvider,
-    timeoutMs = 15_000,
+    timeoutMs = 60_000,
     systemPrompt?: string,
   ) {
     this.#provider = provider

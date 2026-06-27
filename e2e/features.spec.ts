@@ -386,7 +386,7 @@ test.describe('Electron functional workflows', () => {
       stream: true,
     })
     expect(providerToolNames(request.body)).toEqual(
-      expect.arrayContaining(['read_file', 'write_file']),
+      expect.arrayContaining(['read_file', 'create_file']),
     )
     const requestMessages = providerMessageText(request.body)
     expect(requestMessages).toContain('<context_file path="notes.md"')
@@ -423,11 +423,11 @@ test.describe('Electron functional workflows', () => {
       .toBe('E2E provider saw the workspace context.')
   })
 
-  test('approves a write_file tool call and continues the provider turn', async () => {
+  test('approves a create_file tool call and continues the provider turn', async () => {
     fakeProvider.queue([
       toolCallDelta({
         id: 'call:e2e-write',
-        name: 'write_file',
+        name: 'create_file',
         args: {
           path: 'e2e-output.txt',
           content: 'approved by e2e\n',
@@ -455,7 +455,7 @@ test.describe('Electron functional workflows', () => {
     await expect.poll(() => fakeProvider.requests.length).toBe(1)
     const approval = page.locator('.approval-card')
     await expect(approval).toBeVisible()
-    await expect(approval).toContainText('write_file')
+    await expect(approval).toContainText('create_file')
     await expect(approval).toContainText('e2e-output.txt')
     await approval.getByRole('button', { name: '批准', exact: true }).click()
 
@@ -468,7 +468,7 @@ test.describe('Electron functional workflows', () => {
       .toBe('approved by e2e\n')
     await expect.poll(() => fakeProvider.requests.length).toBe(2)
     await expect(
-      page.locator('.tool-call-card', { hasText: 'write_file' }),
+      page.locator('.tool-call-card', { hasText: 'create_file' }),
     ).toContainText('已完成')
     await expect(page.locator('.chat-message.assistant')).toContainText(
       'Created e2e-output.txt',
@@ -476,7 +476,7 @@ test.describe('Electron functional workflows', () => {
 
     const firstRequest = fakeProvider.requests[0]
     const secondRequest = fakeProvider.requests[1]
-    expect(providerToolNames(firstRequest.body)).toContain('write_file')
+    expect(providerToolNames(firstRequest.body)).toContain('create_file')
     const secondRequestBody = JSON.stringify(secondRequest.body)
     expect(secondRequestBody).toContain('"role":"tool"')
     expect(secondRequestBody).toContain('"tool_call_id":"call:e2e-write"')
@@ -486,14 +486,14 @@ test.describe('Electron functional workflows', () => {
   })
 
   test('injects a live user interjection after a tool batch mid-run', async () => {
-    // First provider turn: a write_file tool call that requires approval in
+    // First provider turn: a create_file tool call that requires approval in
     // confirm mode. Second provider turn: a final answer that acknowledges the
     // queued interjection. The approval pause gives the test a deterministic
     // window to queue the interjection before the second provider turn.
     fakeProvider.queue([
       toolCallDelta({
         id: 'call:e2e-interject-write',
-        name: 'write_file',
+        name: 'create_file',
         args: {
           path: 'interject-output.txt',
           content: 'interjection run\n',
@@ -517,12 +517,12 @@ test.describe('Electron functional workflows', () => {
     await composer.fill('Create interject-output.txt')
     await page.getByRole('button', { name: '发送消息' }).click()
 
-    // The write_file tool call requires approval, so the run pauses. This is
+    // The create_file tool call requires approval, so the run pauses. This is
     // the deterministic window to queue a live interjection.
     await expect.poll(() => fakeProvider.requests.length).toBe(1)
     const approval = page.locator('.approval-card')
     await expect(approval).toBeVisible()
-    await expect(approval).toContainText('write_file')
+    await expect(approval).toContainText('create_file')
 
     await expect(composer).toBeEnabled()
     await composer.fill('Remember to mention the interjection')

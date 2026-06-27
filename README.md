@@ -16,8 +16,8 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - 工作区级 Agent 会话：每个会话绑定一个本地目录，文件工具会检测规范化路径、真实路径和 symlink 逃逸。
 - 多轮工具调用：支持模型原生 tool use，能连续读取、搜索、修改、执行命令，直到模型产出最终回复。
 - 权限模式：支持 ReadOnly、Auto、Confirm、Yolo 四档模式，副作用工具会经过确定性策略、自动审批或人工确认。
-- 文件工具：`read_file`、`list_dir`、`glob`、`grep`、`write_file`、`apply_patch`、`delete_file`，带分页、字节上限、diff 预览和执行前 precondition 复核。
-- 命令与终端：`run_command` 用于一次性进程执行，持久 PTY 终端用于长跑服务、REPL 和人机共享观察。
+- 文件工具：`read_file`、`list_dir`、`glob`、`grep`、`create_file`、`apply_patch`、`delete_file`，带分页、字节上限、diff 预览和执行前 precondition 复核。
+- 命令与终端：`run_command` 用于短命令和一次性进程执行，长跑测试、服务、watch 和 REPL 使用持久 PTY，并通过 `delay` + `terminal_read` 轮询输出。
 - 安全凭据：Provider API Key 存在 Electron `safeStorage`，不会暴露给 renderer、trace 文件或子进程环境。
 - 可观测性：可选择开启 JSONL trace，记录请求、响应、工具、审批和 usage，并支持离线回放、fork 和统计。
 - 可配置提示词：内置中英文 system prompt，设置页可编辑，界面语言会选择对应提示词。

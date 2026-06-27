@@ -35,6 +35,115 @@ function isMissing(error: unknown): boolean {
   )
 }
 
+function isNotDirectoryPath(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    error.code === 'ENOTDIR',
+  )
+}
+
+async function nearestExistingParent(target: string): Promise<string> {
+  let current = target
+
+  while (true) {
+    try {
+      await stat(current)
+      return current
+    } catch (error) {
+      if (isNotDirectoryPath(error)) {
+        throw new PathGuardError(
+          'NOT_A_DIRECTORY',
+          'Target parent is not a directory',
+        )
+      }
+
+      if (!isMissing(error)) {
+        throw error
+      }
+    }
+
+    const parent = path.dirname(current)
+
+    if (parent === current) {
+      throw new PathGuardError('PATH_NOT_FOUND', 'No existing parent found')
+    }
+
+    current = parent
+  }
+}
+
+async function captureParentPrecondition(
+  guard: PathGuard,
+  parentPath: string,
+  allowMissing: boolean,
+): Promise<{
+  parentRealPath: string
+  expectedParentId: string
+  expectedParentExists: boolean
+  expectedExistingParentRealPath: string
+  expectedExistingParentId: string
+}> {
+  try {
+    const parentRealPath = path.resolve(await realpath(parentPath))
+    const parentStat = await stat(parentRealPath)
+
+    guard.assertInside(parentRealPath)
+
+    if (!parentStat.isDirectory()) {
+      throw new PathGuardError(
+        'NOT_A_DIRECTORY',
+        'Target parent is not a directory',
+      )
+    }
+
+    const parentId = directoryId(parentStat)
+    return {
+      parentRealPath,
+      expectedParentId: parentId,
+      expectedParentExists: true,
+      expectedExistingParentRealPath: parentRealPath,
+      expectedExistingParentId: parentId,
+    }
+  } catch (error) {
+    if (!allowMissing || (!isMissing(error) && !isNotDirectoryPath(error))) {
+      throw error
+    }
+  }
+
+  const existingParentPath = await nearestExistingParent(parentPath)
+  const existingParentRealPath = path.resolve(
+    await realpath(existingParentPath),
+  )
+  const existingParentStat = await stat(existingParentRealPath)
+
+  guard.assertInside(existingParentRealPath)
+
+  if (!existingParentStat.isDirectory()) {
+    throw new PathGuardError(
+      'NOT_A_DIRECTORY',
+      'Target parent is not a directory',
+    )
+  }
+
+  const missingParentRelative = path.relative(existingParentPath, parentPath)
+  const parentRealPath = path.resolve(
+    existingParentRealPath,
+    missingParentRelative,
+  )
+  guard.assertInside(parentRealPath)
+  const existingParentId = directoryId(existingParentStat)
+
+  return {
+    parentRealPath,
+    expectedParentId: existingParentId,
+    expectedParentExists: false,
+    expectedExistingParentRealPath: existingParentRealPath,
+    expectedExistingParentId: existingParentId,
+  }
+}
+
 export async function captureFilePrecondition(
   guard: PathGuard,
   inputPath: string,
@@ -43,22 +152,20 @@ export async function captureFilePrecondition(
 ): Promise<FilePrecondition> {
   const absolutePath = guard.resolveCandidate(inputPath)
   const parentPath = path.dirname(absolutePath)
-  const parentRealPath = path.resolve(await realpath(parentPath))
-  const parentStat = await stat(parentRealPath)
-
-  guard.assertInside(parentRealPath)
-
-  if (!parentStat.isDirectory()) {
-    throw new PathGuardError(
-      'NOT_A_DIRECTORY',
-      'Target parent is not a directory',
-    )
-  }
+  const parent = await captureParentPrecondition(
+    guard,
+    parentPath,
+    operation === 'write',
+  )
+  const canonicalAbsolutePath = path.resolve(
+    parent.parentRealPath,
+    path.basename(absolutePath),
+  )
 
   let targetStat: Awaited<ReturnType<typeof lstat>>
 
   try {
-    targetStat = await lstat(absolutePath)
+    targetStat = await lstat(canonicalAbsolutePath)
   } catch (error) {
     if (!isMissing(error)) {
       throw error
@@ -67,10 +174,13 @@ export async function captureFilePrecondition(
     return Object.freeze({
       kind: 'file',
       operation,
-      path: portableRelative(guard.workspacePath, absolutePath),
-      absolutePath,
-      parentRealPath,
-      expectedParentId: directoryId(parentStat),
+      path: portableRelative(guard.workspacePath, canonicalAbsolutePath),
+      absolutePath: canonicalAbsolutePath,
+      parentRealPath: parent.parentRealPath,
+      expectedParentId: parent.expectedParentId,
+      expectedParentExists: parent.expectedParentExists,
+      expectedExistingParentRealPath: parent.expectedExistingParentRealPath,
+      expectedExistingParentId: parent.expectedExistingParentId,
       expectedExists: false,
     })
   }
@@ -93,7 +203,7 @@ export async function captureFilePrecondition(
     )
   }
 
-  const targetRealPath = path.resolve(await realpath(absolutePath))
+  const targetRealPath = path.resolve(await realpath(canonicalAbsolutePath))
   guard.assertInside(targetRealPath)
   const content = await readFile(targetRealPath)
 
@@ -101,9 +211,12 @@ export async function captureFilePrecondition(
     kind: 'file',
     operation,
     path: portableRelative(guard.workspacePath, targetRealPath),
-    absolutePath,
-    parentRealPath,
-    expectedParentId: directoryId(parentStat),
+    absolutePath: canonicalAbsolutePath,
+    parentRealPath: parent.parentRealPath,
+    expectedParentId: parent.expectedParentId,
+    expectedParentExists: parent.expectedParentExists,
+    expectedExistingParentRealPath: parent.expectedExistingParentRealPath,
+    expectedExistingParentId: parent.expectedExistingParentId,
     expectedExists: true,
     expectedRealPath: targetRealPath,
     expectedFileId: resourceId(targetStat),
@@ -112,23 +225,59 @@ export async function captureFilePrecondition(
   })
 }
 
+async function assertExistingParentPrecondition(
+  guard: PathGuard,
+  expected: FilePrecondition,
+): Promise<void> {
+  if (
+    expected.expectedExistingParentRealPath === undefined ||
+    expected.expectedExistingParentId === undefined
+  ) {
+    return
+  }
+
+  const currentRealPath = path.resolve(
+    await realpath(expected.expectedExistingParentRealPath),
+  )
+  const currentStat = await stat(currentRealPath)
+
+  guard.assertInside(currentRealPath)
+
+  if (
+    normalizeForCompare(currentRealPath) !==
+      normalizeForCompare(expected.expectedExistingParentRealPath) ||
+    !currentStat.isDirectory() ||
+    directoryId(currentStat) !== expected.expectedExistingParentId
+  ) {
+    throw new PathGuardError(
+      'RESOURCE_CHANGED',
+      'The target parent changed after approval; review the updated diff',
+    )
+  }
+}
+
 export async function assertFilePrecondition(
   workspace: string,
   expected: FilePrecondition,
 ): Promise<void> {
   const guard = PathGuard.fromCanonical(workspace)
+  await assertExistingParentPrecondition(guard, expected)
   const current = await captureFilePrecondition(
     guard,
     expected.absolutePath,
     expected.operation,
   )
+  const parentChanged =
+    expected.expectedParentExists === false
+      ? false
+      : normalizeForCompare(current.parentRealPath) !==
+          normalizeForCompare(expected.parentRealPath) ||
+        current.expectedParentId !== expected.expectedParentId
   const changed =
     current.path !== expected.path ||
     normalizeForCompare(current.absolutePath) !==
       normalizeForCompare(expected.absolutePath) ||
-    normalizeForCompare(current.parentRealPath) !==
-      normalizeForCompare(expected.parentRealPath) ||
-    current.expectedParentId !== expected.expectedParentId ||
+    parentChanged ||
     current.expectedExists !== expected.expectedExists ||
     normalizeForCompare(current.expectedRealPath ?? '') !==
       normalizeForCompare(expected.expectedRealPath ?? '') ||

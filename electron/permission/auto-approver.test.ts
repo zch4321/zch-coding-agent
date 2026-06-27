@@ -13,7 +13,7 @@ import {
 
 const input: AutoApproverInput = {
   tool: {
-    id: 'write_file',
+    id: 'create_file',
     effects: ['filesystem.write'],
     defaultRisk: 'review',
   },

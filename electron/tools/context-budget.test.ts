@@ -47,9 +47,15 @@ describe('context budget', () => {
       status: 'ok',
       truncated: true,
       content: expect.objectContaining({
-        message: expect.stringContaining('budget is exhausted'),
+        message: expect.stringContaining('bounded preview'),
       }),
     })
+    expect(
+      JSON.stringify(
+        boundToolResultForContext(large, limits, limits.maxToolTokensPerRun)
+          .result,
+      ),
+    ).toContain('-TAIL')
   })
 
   it('drops complete old turns without orphaning tool results', () => {

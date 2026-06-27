@@ -181,7 +181,7 @@ describe('conversation markdown round-trip', () => {
         {
           callId,
           runId,
-          tool: 'write_file',
+          tool: 'create_file',
           args: { path: 'a.txt' },
           reason: '',
           status: 'completed',

@@ -101,6 +101,11 @@ export function migrateConfig(candidate: unknown): AppConfig {
     migrated.approval.approverProviderId = migrated.activeProviderId
   }
 
+  migrated.permission.rememberedRules = migrated.permission.rememberedRules.map(
+    (rule) =>
+      rule.toolId === 'write_file' ? { ...rule, toolId: 'create_file' } : rule,
+  )
+
   if (!validateAppConfig(migrated)) {
     throw new Error(formatSchemaErrors(validateAppConfig.errors))
   }
