@@ -1,7 +1,7 @@
 {
   "name": "zch-coding-agent",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A security-focused desktop coding agent.",
   "author": "Zch Coding Agent Contributors",
   "type": "module",
