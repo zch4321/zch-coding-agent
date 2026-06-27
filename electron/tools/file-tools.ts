@@ -37,23 +37,47 @@ import { applyTextPatch, TextPatchError } from './text-patch'
 
 const WriteFileArgsSchema = Type.Object(
   {
-    path: Type.String({ minLength: 1, maxLength: 4_096 }),
-    content: Type.String({ maxLength: MAX_WRITE_BYTES }),
+    path: Type.String({
+      minLength: 1,
+      maxLength: 4_096,
+      description:
+        'Workspace-relative path for the new file. The file must not already exist.',
+    }),
+    content: Type.String({
+      maxLength: MAX_WRITE_BYTES,
+      description:
+        'Complete UTF-8 content for the new file. Use apply_patch for existing files.',
+    }),
   },
   { additionalProperties: false },
 )
 
 const ApplyPatchArgsSchema = Type.Object(
   {
-    path: Type.String({ minLength: 1, maxLength: 4_096 }),
-    patch: Type.String({ minLength: 1, maxLength: MAX_PATCH_BYTES }),
+    path: Type.String({
+      minLength: 1,
+      maxLength: 4_096,
+      description:
+        'Workspace-relative path of one existing UTF-8 text file to modify.',
+    }),
+    patch: Type.String({
+      minLength: 1,
+      maxLength: MAX_PATCH_BYTES,
+      description:
+        'Single-file unified diff. Context/deleted lines must match exactly; header line counts are advisory.',
+    }),
   },
   { additionalProperties: false },
 )
 
 const DeleteFileArgsSchema = Type.Object(
   {
-    path: Type.String({ minLength: 1, maxLength: 4_096 }),
+    path: Type.String({
+      minLength: 1,
+      maxLength: 4_096,
+      description:
+        'Workspace-relative path of one existing regular file to delete.',
+    }),
   },
   { additionalProperties: false },
 )
@@ -265,7 +289,7 @@ export function createFileToolDefinitions(
   const applyPatch: ToolDefinition<typeof ApplyPatchArgsSchema> = {
     id: 'apply_patch',
     description:
-      'Apply a strict single-file unified diff with one or more hunks. Context and line numbers must match exactly.',
+      'Apply a single-file unified diff with one or more hunks. Context/deleted lines must match exactly; hunk line counts and new-file line numbers are advisory. If the old line number is stale, the patch is applied only when the exact context has one unique match.',
     inputSchema: ApplyPatchArgsSchema,
     effects: ['filesystem.write'],
     defaultRisk: 'review',

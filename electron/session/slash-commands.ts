@@ -86,7 +86,7 @@ function orchestrationPrompt(
   }
 
   return {
-    text: 'Create a traceable compact summary. Preserve goals, decisions, tool results, changes, unfinished work, and risks. Do not delete history.',
+    text: 'Create a traceable compact summary that will replace the older conversation history. Preserve goals, decisions, tool results, changes, unfinished work, and risks. Output only the summary.',
   }
 }
 

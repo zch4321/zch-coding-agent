@@ -267,7 +267,9 @@ async function runAgent(session: Session, run: Run, userInput: string) {
 - **审批等待可取消**：每个 pending approval 绑定 `sessionId + runId + callId`，中断、窗口销毁或会话结束时自动失效；重复决定必须幂等拒绝。
 - **工具结果有界**：stdout/stderr、文件内容和 PTY scrollback 超限时截断，并附 `truncated/totalBytes`；完整大结果可落临时 artifact，但不会自动进入模型上下文。
 - **上下文预算**：优先保留 system、最近用户轮次、未完成工具链路和 provider 必需 continuation state；压缩不能破坏 provider 的工具调用协议。
+- **Compact 重写语义**：手动 `/compact` 先用旧 provider messages 生成摘要，然后清空 provider history，重新注入完整 harness，并把摘要作为 `<compact_history>` 包裹的第一条 user context；运行中自动 compact 只能在 tool-call/tool-result 完整边界执行，并保留当前用户轮次及其之后的消息。
 - **失败不等于丢消息**：Provider/工具异常转为 run 事件和用户可见错误；只有协议明确允许时才把错误作为 tool result 继续给模型。
+- **计划审阅状态显式化**：`plan_set` 默认创建 `awaiting_review` Plan；用户批准或拒绝后，模型使用 `plan_status` 把 Plan 切到 `active` 或 `rejected`。该工具是面向模型的状态同步入口，目的是记录 plan review 结果并驱动后续自动续跑，不代表跳过权限管线。
 
 ---
 
@@ -309,7 +311,11 @@ interface LLMProvider {
 ```ts
 interface ProviderContinuationState {
   providerId: string
-  protocol: 'deepseek-chat' | 'anthropic-messages' | 'openai-responses' | string
+  protocol:
+    | 'deepseek-chat-completions'
+    | 'anthropic-messages'
+    | 'openai-responses'
+    | string
   version: 1
   payload: JsonValue // 完整、有序、JSON 可持久化的不透明 provider-native 状态
   requiredUntil?: 'tool-chain-end' | 'conversation-end'
@@ -619,6 +625,7 @@ TerminalResource {
 [D] 确定性风险策略 / 审批模型
    ├─ 黑名单 / 高风险 → HUMAN_REVIEW
    ├─ Confirm 且有副作用 → HUMAN_REVIEW
+   ├─ Auto workspace write/apply_patch policy-safe → ALLOW
    ├─ Auto safe → ALLOW
    └─ Auto dangerous / timeout / invalid → HUMAN_REVIEW
    │
@@ -818,7 +825,7 @@ interface AppConfig {
   }
   approval: {
     approverProvider: string // Auto 模式审批模型 provider
-    approverModel: string // 如 deepseek-chat(小)
+    approverModel: string // 如 deepseek-v4-flash
   }
   permission: {
     builtinPolicies: boolean
@@ -830,9 +837,10 @@ interface AppConfig {
     }
   }
   limits: {
-    maxStepsPerRun: number
+    maxStepsPerRun: number // 默认 200
     maxToolOutputBytes: number // 不可关闭的内存/IPC 硬边界
     maxContextTokens: number // 未知模型的保守默认值
+    autoCompactTriggerPercent: number // 默认 80；按当前模型 prompt budget 计算
     maxToolResultTokens: number
     maxToolTokensPerRun: number
     tokenEstimation: {

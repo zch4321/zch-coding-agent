@@ -1001,6 +1001,12 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
               void changes.loadConversationChanges()
             }
           }
+          if (
+            this.pendingApproval?.runId === event.runId &&
+            this.pendingApproval.callId === event.callId
+          ) {
+            this.pendingApproval = undefined
+          }
           break
         }
         case 'llm.usage':

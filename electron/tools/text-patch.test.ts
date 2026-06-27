@@ -26,6 +26,40 @@ describe('strict text patch', () => {
     })
   })
 
+  it('treats hunk line counts as advisory', () => {
+    const patch = [
+      '@@ -1,2 +1,1 @@',
+      ' alpha',
+      '-beta',
+      '+gamma',
+      '+delta',
+    ].join('\n')
+
+    expect(applyTextPatch('alpha\nbeta\n', patch, 'note.txt').content).toBe(
+      'alpha\ngamma\ndelta\n',
+    )
+  })
+
+  it('uses unique exact context when the hunk line number is stale', () => {
+    const patch = ['@@ -1,2 +1,2 @@', ' alpha', '-beta', '+gamma'].join('\n')
+
+    expect(
+      applyTextPatch('first\nalpha\nbeta\nlast\n', patch, 'note.txt').content,
+    ).toBe('first\nalpha\ngamma\nlast\n')
+  })
+
+  it('rejects stale hunk line numbers when exact context is ambiguous', () => {
+    const patch = ['@@ -1,2 +1,2 @@', ' alpha', '-beta', '+gamma'].join('\n')
+
+    expect(() =>
+      applyTextPatch(
+        'first\nalpha\nbeta\nmiddle\nalpha\nbeta\nlast\n',
+        patch,
+        'note.txt',
+      ),
+    ).toThrow('multiple locations')
+  })
+
   it('preserves CRLF line endings', () => {
     const patch = ['@@ -1,2 +1,2 @@', ' alpha', '-beta', '+gamma'].join('\n')
 
@@ -55,6 +89,14 @@ describe('strict text patch', () => {
         ['@@ -1,2 +1,2 @@', ' alpha', '-beta', '+gamma'].join('\n'),
         'note.txt',
       ),
-    ).toThrow('does not match')
+    ).toThrow('Expected context')
+
+    expect(() =>
+      applyTextPatch(
+        'changed\nbeta\n',
+        ['@@ -1,2 +1,2 @@', ' alpha', '-beta', '+gamma'].join('\n'),
+        'note.txt',
+      ),
+    ).toThrow('Actual content near requested line')
   })
 })

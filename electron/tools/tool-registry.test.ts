@@ -3,9 +3,39 @@ import { describe, expect, it } from 'vitest'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { PermissionPipeline } from '../permission/permission-pipeline'
+import { registerOrchestrationTools } from '../session/orchestration-tools'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
 
 describe('ToolRegistry hard output boundary', () => {
+  it('requires result and evidence for completed plan_update calls', () => {
+    const registry = new ToolRegistry()
+    registerOrchestrationTools(registry, {
+      getSession: () => undefined,
+      emit: () => undefined,
+    })
+    const definition = registry.get('plan_update')
+
+    expect(definition).toBeTruthy()
+    expect(
+      registry.validateArgs(definition!, {
+        id: 'item:1',
+        status: 'completed',
+      }),
+    ).toMatchObject({
+      ok: false,
+    })
+    expect(
+      registry.validateArgs(definition!, {
+        id: 'item:1',
+        status: 'completed',
+        result: 'Done',
+        evidence: 'Verified',
+      }),
+    ).toMatchObject({
+      ok: true,
+    })
+  })
+
   it('bounds the final UTF-8 JSON result rather than JavaScript characters', async () => {
     const registry = new ToolRegistry()
     registry.registerTool({

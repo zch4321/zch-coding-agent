@@ -3,54 +3,150 @@ import { Type, type Static } from '@sinclair/typebox'
 import type { ToolRegistrationPort, ToolResult } from '../tools/types'
 import type { RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
-import { PlanStatusSchema } from '../../shared/orchestration'
 import type { AgentEventDraft, SessionState } from './session-types'
 
 const EmptySchema = Type.Object({}, { additionalProperties: false })
 const GoalCompleteSchema = Type.Object(
   {
-    summary: Type.String({ minLength: 1, maxLength: 65_536 }),
-    evidence: Type.String({ minLength: 1, maxLength: 65_536 }),
-    remainingRisks: Type.Optional(Type.String({ maxLength: 65_536 })),
-    cancelOpenPlan: Type.Optional(Type.Boolean()),
+    summary: Type.String({
+      minLength: 1,
+      maxLength: 65_536,
+      description: 'Concise summary of the completed goal and final outcome.',
+    }),
+    evidence: Type.String({
+      minLength: 1,
+      maxLength: 65_536,
+      description:
+        'Concrete evidence that the goal is complete, such as files changed, tests run, or observed results.',
+    }),
+    remainingRisks: Type.Optional(
+      Type.String({
+        maxLength: 65_536,
+        description: 'Known residual risks, limitations, or unverified areas.',
+      }),
+    ),
+    cancelOpenPlan: Type.Optional(
+      Type.Boolean({
+        description:
+          'Set true only when open plan items remain and should be cancelled because the goal is already complete.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
 const GoalBlockSchema = Type.Object(
   {
-    reason: Type.String({ minLength: 1, maxLength: 65_536 }),
-    requiredInput: Type.String({ minLength: 1, maxLength: 65_536 }),
+    reason: Type.String({
+      minLength: 1,
+      maxLength: 65_536,
+      description: 'Why progress is blocked.',
+    }),
+    requiredInput: Type.String({
+      minLength: 1,
+      maxLength: 65_536,
+      description:
+        'Specific user input or external state change required to continue.',
+    }),
   },
   { additionalProperties: false },
 )
 const PlanSetSchema = Type.Object(
   {
-    objective: Type.Optional(Type.String({ minLength: 1, maxLength: 16_384 })),
-    items: Type.Array(Type.String({ minLength: 1, maxLength: 4_096 }), {
-      minItems: 1,
-      maxItems: 256,
-    }),
+    objective: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 16_384,
+        description:
+          'Optional top-level objective for the plan. Omit to keep the previous objective or use a generic title.',
+      }),
+    ),
+    items: Type.Array(
+      Type.String({
+        minLength: 1,
+        maxLength: 4_096,
+        description:
+          'One concrete, checkable plan item. Use imperative task text, not status labels.',
+      }),
+      {
+        minItems: 1,
+        maxItems: 256,
+        description:
+          'Ordered list of concrete plan items. Calling plan_set puts the plan into awaiting_review.',
+      },
+    ),
   },
   { additionalProperties: false },
 )
-const PlanUpdateSchema = Type.Object(
-  {
-    id: Type.String({ minLength: 1, maxLength: 128 }),
-    status: Type.Union([
-      Type.Literal('pending'),
-      Type.Literal('in_progress'),
-      Type.Literal('completed'),
-      Type.Literal('blocked'),
-      Type.Literal('cancelled'),
-    ]),
-    result: Type.Optional(Type.String({ maxLength: 65_536 })),
-    evidence: Type.Optional(Type.String({ maxLength: 65_536 })),
+const PlanItemIdSchema = Type.String({
+  minLength: 1,
+  maxLength: 128,
+  description:
+    'Plan item id exactly as returned by plan_get or a previous plan_set call, for example item:1.',
+})
+const PlanItemResultSchema = Type.String({
+  minLength: 1,
+  maxLength: 65_536,
+  description:
+    'Outcome of the item. Required when status is completed; optional otherwise.',
+})
+const PlanItemEvidenceSchema = Type.String({
+  minLength: 1,
+  maxLength: 65_536,
+  description:
+    'Concrete evidence for the item result. Required when status is completed; optional otherwise.',
+})
+const PlanUpdateSchema = Type.Unsafe<{
+  id: string
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked' | 'cancelled'
+  result?: string
+  evidence?: string
+}>({
+  type: 'object',
+  properties: {
+    id: PlanItemIdSchema,
+    status: {
+      type: 'string',
+      enum: ['pending', 'in_progress', 'completed', 'blocked', 'cancelled'],
+      description:
+        'New item status. Use completed only with result and evidence.',
+    },
+    result: PlanItemResultSchema,
+    evidence: PlanItemEvidenceSchema,
   },
-  { additionalProperties: false },
-)
+  required: ['id', 'status'],
+  additionalProperties: false,
+  allOf: [
+    {
+      if: {
+        properties: {
+          status: { const: 'completed' },
+        },
+        required: ['status'],
+      },
+      then: {
+        properties: {
+          result: PlanItemResultSchema,
+          evidence: PlanItemEvidenceSchema,
+        },
+        required: ['result', 'evidence'],
+      },
+    },
+  ],
+})
 const PlanStatusUpdateSchema = Type.Object(
   {
-    status: PlanStatusSchema,
+    status: Type.Union(
+      [
+        Type.Literal('awaiting_review'),
+        Type.Literal('active'),
+        Type.Literal('rejected'),
+        Type.Literal('completed'),
+      ],
+      {
+        description:
+          'Top-level plan status. Use active only after explicit user approval; completed requires all items completed or cancelled.',
+      },
+    ),
   },
   { additionalProperties: false },
 )

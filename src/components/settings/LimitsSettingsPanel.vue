@@ -40,6 +40,15 @@ const tokenEstimationOptions = computed(() => [
             />
           </label>
           <label class="settings-field">
+            <span>{{ t('limits.autoCompactTriggerPercent') }}</span>
+            <NInputNumber
+              v-model:value="agent.limitsConfig.autoCompactTriggerPercent"
+              :min="50"
+              :max="95"
+              suffix="%"
+            />
+          </label>
+          <label class="settings-field">
             <span>{{ t('limits.maxToolResultTokens') }}</span>
             <NInputNumber
               v-model:value="agent.limitsConfig.maxToolResultTokens"

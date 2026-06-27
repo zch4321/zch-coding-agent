@@ -30,9 +30,21 @@ const RunCommandSchema = Type.Object(
         description: "Required when mode is 'shell'.",
       }),
     ),
-    cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
+    cwd: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 4_096,
+        description:
+          'Workspace-relative working directory. Omit to run from the workspace root.',
+      }),
+    ),
     timeoutMs: Type.Optional(
-      Type.Integer({ minimum: 100, maximum: 86_400_000 }),
+      Type.Integer({
+        minimum: 100,
+        maximum: 86_400_000,
+        description:
+          'Requested command timeout in milliseconds, capped by configured commandTimeoutMs.',
+      }),
     ),
   },
   {

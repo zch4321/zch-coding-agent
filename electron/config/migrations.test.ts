@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_APP_CONFIG } from './schema'
+import { DEFAULT_APP_CONFIG, type AppConfig } from './schema'
 import { migrateConfig } from './migrations'
 import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 
@@ -26,7 +26,42 @@ describe('config migrations', () => {
     const migrated = migrateConfig(legacy)
 
     expect(migrated.providers[0].reasoning).toBe('high')
+    expect(migrated.providers[0].model).toBe('deepseek-v4-flash')
     expect(migrated.approval.approverProviderId).toBe('deepseek')
+    expect(migrated.approval.approverModel).toBe('deepseek-v4-flash')
+  })
+
+  it('normalizes legacy DeepSeek reasoner model names to V4 flash', () => {
+    const legacy = structuredClone(DEFAULT_APP_CONFIG)
+    legacy.providers[0].model = 'deepseek-reasoner'
+    legacy.approval.approverModel = 'deepseek-reasoner'
+
+    const migrated = migrateConfig(legacy)
+
+    expect(migrated.providers[0].model).toBe('deepseek-v4-flash')
+    expect(migrated.approval.approverModel).toBe('deepseek-v4-flash')
+  })
+
+  it('does not normalize legacy-looking model names on generic providers', () => {
+    const legacy = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+    legacy.providers.push({
+      ...structuredClone(DEFAULT_APP_CONFIG.providers[0]),
+      id: 'generic',
+      label: 'Generic',
+      profile: 'generic',
+      model: 'deepseek-chat',
+    })
+    legacy.activeProviderId = 'generic'
+    legacy.approval.approverProviderId = 'generic'
+    legacy.approval.approverModel = 'deepseek-reasoner'
+
+    const migrated = migrateConfig(legacy)
+    const generic = migrated.providers.find(
+      (provider) => provider.id === 'generic',
+    )
+
+    expect(generic?.model).toBe('deepseek-chat')
+    expect(migrated.approval.approverModel).toBe('deepseek-reasoner')
   })
 
   it('maps the mistakenly exposed low reasoning setting to DeepSeek high effort', () => {
@@ -95,6 +130,7 @@ describe('config migrations', () => {
     expect(migrated.limits).toMatchObject({
       approvalTimeoutMs: 600_000,
       autoApprovalTimeoutMs: 15_000,
+      autoCompactTriggerPercent: 80,
       modelCatalogTimeoutMs: 15_000,
     })
   })

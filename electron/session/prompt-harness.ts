@@ -69,6 +69,10 @@ interface HarnessPromptInput {
   providerId: string
   promptRegistry?: PromptRegistry
   skillSummary?: string
+  compactHistory?: {
+    summary: string
+    source: string
+  }
   toolNames?: readonly string[]
   signal?: AbortSignal
 }
@@ -461,6 +465,20 @@ export async function appendInitialPromptHarness(
     ...(base.resource ? { resource: base.resource } : {}),
   })
 
+  const compactHistory = input.compactHistory
+  const compactSummary = compactHistory?.summary.trim()
+  if (compactHistory && compactSummary) {
+    appendPromptLayer(state, {
+      kind: 'compact_history',
+      role: 'user',
+      content: compactHistoryContent(compactSummary),
+      source: compactHistory.source,
+      trusted: false,
+      editable: false,
+      config: input.config,
+    })
+  }
+
   await appendRuntimeContextIfChanged(state, {
     ...input,
     reason: 'session_created',
@@ -524,7 +542,7 @@ export async function appendRuntimeContextIfChanged(
   state.lastRuntimeContextHash = runtime.hash
   appendPromptLayer(state, {
     kind: 'runtime_policy_and_context',
-    role: 'system',
+    role: 'user',
     content: runtime.content,
     source: runtime.resource?.path ?? 'fallback:harness.runtime-context',
     trusted: true,
@@ -698,4 +716,8 @@ export function orchestrationRequestContent(
   content: string,
 ): string {
   return tagged('orchestration_request', { kind }, content)
+}
+
+export function compactHistoryContent(content: string): string {
+  return tagged('compact_history', { source: 'history_compaction' }, content)
 }

@@ -97,7 +97,7 @@ export const DEFAULT_APP_CONFIG = {
       protocol: 'openai-compatible',
       profile: 'deepseek',
       baseURL: 'https://api.deepseek.com',
-      model: 'deepseek-chat',
+      model: 'deepseek-v4-pro',
       modelCatalog: [],
       modelOverrides: {},
       reasoning: 'high',
@@ -105,7 +105,7 @@ export const DEFAULT_APP_CONFIG = {
   ],
   approval: {
     approverProviderId: DEFAULT_PROVIDER_ID,
-    approverModel: 'deepseek-chat',
+    approverModel: 'deepseek-v4-flash',
   },
   permission: {
     defaultMode: 'readonly',
@@ -121,6 +121,7 @@ export const DEFAULT_APP_CONFIG = {
     maxStepsPerRun: 200,
     maxToolOutputBytes: 64 * 1_024,
     maxContextTokens: 64_000,
+    autoCompactTriggerPercent: 80,
     maxToolResultTokens: 8_000,
     maxToolTokensPerRun: 24_000,
     tokenEstimation: {

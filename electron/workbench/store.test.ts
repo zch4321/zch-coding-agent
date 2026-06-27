@@ -10,7 +10,7 @@ function conversation(id: string, projectPath: string): ConversationRecord {
     id,
     projectPath,
     title: 'Review workbench',
-    model: 'deepseek-chat',
+    model: 'deepseek-v4-pro',
     mode: 'auto',
     messages: [
       {

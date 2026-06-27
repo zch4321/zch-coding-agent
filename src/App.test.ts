@@ -4,12 +4,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
-import { NTree } from 'naive-ui'
+import { NSelect, NTree } from 'naive-ui'
 import type { AgentApi } from '../shared/agent-api'
 import type { CallId, RunId, SessionId } from '../shared/ids'
 import App from './App.vue'
 import ArtifactPanel from './components/artifacts/ArtifactPanel.vue'
 import ConversationTimeline from './components/chat/ConversationTimeline.vue'
+import MessageComposer from './components/chat/MessageComposer.vue'
 import ProjectSidebar from './components/projects/ProjectSidebar.vue'
 import ProviderSettingsPanel from './components/settings/ProviderSettingsPanel.vue'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../electron/config/schema'
@@ -19,8 +20,8 @@ import { useAgentStore } from './stores/agent'
 function multiProviderConfig() {
   const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
   config.providers[0].modelCatalog = [
-    { id: 'deepseek-chat' },
-    { id: 'deepseek-reasoner' },
+    { id: 'deepseek-v4-flash' },
+    { id: 'deepseek-v4-pro' },
   ]
   config.providers.push({
     ...structuredClone(config.providers[0]),
@@ -250,7 +251,7 @@ describe('App', () => {
         id: 'conversation:one',
         projectPath: 'F:/workspace/example',
         title: 'Review permissions',
-        model: 'deepseek-chat',
+        model: 'deepseek-v4-pro',
         mode: 'confirm',
         messages: [
           {
@@ -490,6 +491,66 @@ describe('App', () => {
       }),
     )
     expect(store.selectedProviderId).toBe('deepseek')
+    wrapper.unmount()
+  })
+
+  it('lets the composer switch the active provider', async () => {
+    const config = multiProviderConfig()
+    const nextConfig = structuredClone(config)
+    nextConfig.activeProviderId = 'generic'
+    const setConfig = vi.fn(async () => ({
+      ok: true as const,
+      version: 1 as const,
+      value: { config: nextConfig },
+    }))
+    const listProviderModels = vi.fn(async () => ({
+      ok: true as const,
+      version: 1 as const,
+      value: {
+        models: [
+          {
+            id: 'generic-chat',
+            availability: 'provider' as const,
+            capabilitySource: 'default' as const,
+            contextWindowTokens: 64_000,
+          },
+        ],
+        stale: false,
+      },
+    }))
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        setConfig,
+        listProviderModels,
+      } as Partial<AgentApi> as AgentApi,
+    })
+    const pinia = createPinia()
+    const store = useAgentStore(pinia)
+    store.applyConfig(config)
+    const wrapper = mount(MessageComposer, {
+      attachTo: document.body,
+      global: { plugins: [pinia, i18n] },
+    })
+
+    const providerSelect = wrapper
+      .findAllComponents(NSelect)
+      .find((component) =>
+        component.classes().includes('composer-provider-select'),
+      )
+    expect(providerSelect).toBeTruthy()
+    providerSelect?.vm.$emit('update:value', 'generic')
+    await flushPromises()
+
+    expect(setConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'provider-select',
+        providerId: 'generic',
+      }),
+    )
+    expect(store.activeProviderId).toBe('generic')
+    expect(store.selectedProviderId).toBe('generic')
+    expect(store.providerForm.model).toBe('generic-chat')
     wrapper.unmount()
   })
 

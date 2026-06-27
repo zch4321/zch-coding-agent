@@ -6,12 +6,36 @@ import { fetchWithSsrfGuard, SsrfFetchError } from '../net/ssrf'
 
 const FetchSchema = Type.Object(
   {
-    url: Type.String({ minLength: 1, maxLength: 4_096 }),
+    url: Type.String({
+      minLength: 1,
+      maxLength: 4_096,
+      description:
+        'Absolute HTTPS URL to fetch. Private networks and unsafe redirects are blocked.',
+    }),
     maxBytes: Type.Optional(
-      Type.Integer({ minimum: 1_024, maximum: 1_000_000 }),
+      Type.Integer({
+        minimum: 1_024,
+        maximum: 1_000_000,
+        description:
+          'Maximum response body bytes to return, bounded again by configuration.',
+      }),
     ),
-    timeoutMs: Type.Optional(Type.Integer({ minimum: 1_000, maximum: 60_000 })),
-    accept: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    timeoutMs: Type.Optional(
+      Type.Integer({
+        minimum: 1_000,
+        maximum: 60_000,
+        description:
+          'Request timeout in milliseconds, bounded again by configuration.',
+      }),
+    ),
+    accept: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 256,
+        description:
+          'Optional Accept header value. Control characters are stripped.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )

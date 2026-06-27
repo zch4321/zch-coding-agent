@@ -28,41 +28,123 @@ const DEFAULT_LIMITS: Pick<
 
 const ReadFileArgsSchema = Type.Object(
   {
-    path: Type.String({ minLength: 1, maxLength: 4_096 }),
-    startLine: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000_000 })),
-    lineCount: Type.Optional(
-      Type.Integer({ minimum: 1, maximum: MAX_READ_LINES }),
+    path: Type.String({
+      minLength: 1,
+      maxLength: 4_096,
+      description: 'Workspace-relative path of the UTF-8 file to read.',
+    }),
+    startLine: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 10_000_000,
+        description: '1-based first line to read. Omit to start at line 1.',
+      }),
     ),
-    lineNumbers: Type.Optional(Type.Boolean()),
+    lineCount: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: MAX_READ_LINES,
+        description: `Maximum number of lines to return, up to ${MAX_READ_LINES}.`,
+      }),
+    ),
+    lineNumbers: Type.Optional(
+      Type.Boolean({
+        description:
+          'Whether to prefix returned lines with line numbers. Defaults to true.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
 
 const ListDirArgsSchema = Type.Object(
   {
-    path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
-    recursive: Type.Optional(Type.Boolean()),
-    maxEntries: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000 })),
+    path: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 4_096,
+        description:
+          'Workspace-relative directory path. Omit to list the workspace root.',
+      }),
+    ),
+    recursive: Type.Optional(
+      Type.Boolean({
+        description:
+          'Set true to recursively list files. Omit or false for one directory level.',
+      }),
+    ),
+    maxEntries: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 10_000,
+        description: 'Maximum number of entries to return.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
 
 const GlobArgsSchema = Type.Object(
   {
-    pattern: Type.String({ minLength: 1, maxLength: 1_024 }),
-    path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
-    maxResults: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000 })),
+    pattern: Type.String({
+      minLength: 1,
+      maxLength: 1_024,
+      description: 'Glob pattern relative to path, for example **/*.ts.',
+    }),
+    path: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 4_096,
+        description:
+          'Workspace-relative directory to search. Omit to search the workspace root.',
+      }),
+    ),
+    maxResults: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 10_000,
+        description: 'Maximum number of matching file paths to return.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
 
 const GrepArgsSchema = Type.Object(
   {
-    pattern: Type.String({ minLength: 1, maxLength: 2_048 }),
-    path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
-    include: Type.Optional(Type.String({ minLength: 1, maxLength: 1_024 })),
-    caseSensitive: Type.Optional(Type.Boolean()),
-    maxResults: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000 })),
+    pattern: Type.String({
+      minLength: 1,
+      maxLength: 2_048,
+      description: 'Regular expression pattern to search for.',
+    }),
+    path: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 4_096,
+        description:
+          'Workspace-relative file or directory to search. Omit for workspace root.',
+      }),
+    ),
+    include: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 1_024,
+        description:
+          'Glob filter for searched files, for example **/*.ts. Defaults to **/*.',
+      }),
+    ),
+    caseSensitive: Type.Optional(
+      Type.Boolean({
+        description: 'Set true for case-sensitive matching.',
+      }),
+    ),
+    maxResults: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 10_000,
+        description: 'Maximum number of matches to return.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )

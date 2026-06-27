@@ -57,7 +57,7 @@ function markdownConversation(
     id: 'conversation:imported-source',
     projectPath: 'F:/untrusted/source',
     title: 'Imported source',
-    model: 'deepseek-chat',
+    model: 'deepseek-v4-pro',
     mode: 'auto',
     messages: [
       {
@@ -78,8 +78,8 @@ function markdownConversation(
 function multiProviderConfig() {
   const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
   config.providers[0].modelCatalog = [
-    { id: 'deepseek-chat' },
-    { id: 'deepseek-reasoner' },
+    { id: 'deepseek-v4-flash' },
+    { id: 'deepseek-v4-pro' },
   ]
   config.providers.push({
     ...structuredClone(config.providers[0]),
@@ -189,6 +189,35 @@ describe('agent store regressions', () => {
     })
   })
 
+  it('clears a pending approval when the matching tool completes', () => {
+    installApi({})
+    const store = useAgentStore()
+    requestApproval(store)
+
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 2,
+      ts: '2026-06-20T00:00:01.000Z',
+      type: 'tool.completed',
+      sessionId,
+      runId,
+      callId,
+      result: {
+        status: 'cancelled',
+        message: 'Approval was cancelled',
+      },
+      approval: {
+        approver: 'model',
+        decision: 'dangerous',
+        reason: 'Approval model timed out',
+        valid: false,
+        failure: 'timeout',
+      },
+    })
+
+    expect(store.pendingApproval).toBeUndefined()
+  })
+
   it('saves one immutable provider draft in a single atomic request', async () => {
     const oldConfig = toPublicConfig(DEFAULT_APP_CONFIG, true)
     const finalConfig = structuredClone(oldConfig)
@@ -290,7 +319,7 @@ describe('agent store regressions', () => {
         id: 'deepseek',
         isActive: true,
         isSelected: true,
-        models: ['deepseek-chat', 'deepseek-reasoner'],
+        models: ['deepseek-v4-pro', 'deepseek-v4-flash'],
       },
       {
         id: 'generic',
@@ -303,7 +332,7 @@ describe('agent store regressions', () => {
     await store.selectProviderForEditing('generic')
 
     expect(store.activeProviderId).toBe('deepseek')
-    expect(store.activeProviderModel).toBe('deepseek-chat')
+    expect(store.activeProviderModel).toBe('deepseek-v4-pro')
     expect(store.credentialConfigured).toBe(true)
     expect(store.selectedCredentialConfigured).toBe(false)
     expect(store.providerForm).toMatchObject({
@@ -978,7 +1007,7 @@ describe('agent store regressions', () => {
           scope: 'main',
           providerId: 'deepseek',
           providerLabel: 'DeepSeek',
-          model: 'deepseek-chat',
+          model: 'deepseek-v4-pro',
           contextWindowTokens: 64_000,
           contextWindowSource: 'default',
           raw: null,

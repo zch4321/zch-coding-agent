@@ -277,16 +277,112 @@ class ForkProvider implements LLMProvider {
 }
 
 class CompactProvider implements LLMProvider {
-  messages: ProviderChatRequest['messages'] = []
+  calls = 0
+  requests: Array<{
+    messages: ProviderChatRequest['messages']
+    tools: ProviderChatRequest['tools']
+  }> = []
 
   async *streamChat(
     request: ProviderChatRequest,
   ): AsyncIterable<ProviderEvent> {
-    this.messages = structuredClone(request.messages)
+    this.calls += 1
+    this.requests.push({
+      messages: structuredClone(request.messages),
+      tools: structuredClone(request.tools),
+    })
+    await request.onRequest?.({
+      normalizedMessages: request.messages as unknown as JsonValue[],
+      providerRequest: {
+        model: 'fixture',
+        messages: request.messages as unknown as JsonValue[],
+        tools: request.tools,
+      },
+      requestBytes: 10,
+      prefixHash: `compact-${this.calls}`,
+    })
+
+    if (this.calls === 1) {
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'old-run' },
+        turn: { role: 'assistant', content: 'Old answer' },
+        toolCalls: [],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    if (this.calls === 2) {
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'compact' },
+        turn: { role: 'assistant', content: 'Compact summary retained' },
+        toolCalls: [],
+        usage: { total_tokens: 7 },
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
     yield {
       type: 'completed',
-      rawResponse: { id: 'compact' },
-      turn: { role: 'assistant', content: 'Compact summary' },
+      rawResponse: { id: 'after-compact' },
+      turn: { role: 'assistant', content: 'After compact' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
+class AutoCompactProvider implements LLMProvider {
+  calls = 0
+  requests: Array<{
+    messages: ProviderChatRequest['messages']
+    tools: ProviderChatRequest['tools']
+  }> = []
+
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    this.requests.push({
+      messages: structuredClone(request.messages),
+      tools: structuredClone(request.tools),
+    })
+    await request.onRequest?.({
+      normalizedMessages: request.messages as unknown as JsonValue[],
+      providerRequest: {
+        model: 'fixture',
+        messages: request.messages as unknown as JsonValue[],
+        tools: request.tools,
+      },
+      requestBytes: 10,
+      prefixHash: `auto-compact-${this.calls}`,
+    })
+
+    if (this.calls === 2) {
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'auto-compact' },
+        turn: { role: 'assistant', content: 'Auto compact summary retained' },
+        toolCalls: [],
+        usage: { total_tokens: 9 },
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    yield {
+      type: 'completed',
+      rawResponse: { id: `normal-${this.calls}` },
+      turn: { role: 'assistant', content: `Normal response ${this.calls}` },
       toolCalls: [],
       usage: {},
       providerState: {},
@@ -580,7 +676,7 @@ async function waitFor(
 }
 
 describe('SessionManager P2 loop', () => {
-  it('uses configurable assistant preferences without replacing harness system messages', async () => {
+  it('uses configurable assistant preferences without replacing the base harness system message', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-prompt-'))
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
@@ -627,7 +723,8 @@ describe('SessionManager P2 loop', () => {
       ),
     )
     expect(provider.messages[0]?.role).toBe('system')
-    expect(provider.messages[1]?.role).toBe('system')
+    expect(provider.messages[1]?.role).toBe('user')
+    expect(provider.messages[1]?.content).toContain('<environment_context')
     expect(
       provider.messages.some((message) => message.content === 'hello'),
     ).toBe(true)
@@ -716,7 +813,7 @@ describe('SessionManager P2 loop', () => {
     expect(trace).not.toContain('secret-sentinel')
   })
 
-  it('renders /compact as a visible orchestrator prompt without deleting history', async () => {
+  it('rewrites provider history for /compact and reinjects summary as user context', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-compact-'))
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
@@ -744,17 +841,35 @@ describe('SessionManager P2 loop', () => {
     })
     manager.startRun({
       sessionId,
+      message: 'RAW_SHOULD_DROP first task',
+      clientRequestId: 'request-before-compact',
+    })
+
+    await waitFor(
+      () =>
+        sent.filter(
+          (envelope) =>
+            envelope.event.type === 'run.status' &&
+            envelope.event.status === 'completed',
+        ).length >= 1,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    manager.startRun({
+      sessionId,
       message: '/compact focus on risks',
       clientRequestId: 'request-compact',
     })
 
-    await waitFor(() =>
-      sent.some(
-        (envelope) =>
-          envelope.event.type === 'run.status' &&
-          envelope.event.status === 'completed',
-      ),
+    await waitFor(
+      () =>
+        sent.filter(
+          (envelope) =>
+            envelope.event.type === 'run.status' &&
+            envelope.event.status === 'completed',
+        ).length >= 2,
     )
+    await new Promise((resolve) => setTimeout(resolve, 20))
 
     expect(
       sent.find((envelope) => envelope.event.type === 'orchestrator.message')
@@ -764,14 +879,145 @@ describe('SessionManager P2 loop', () => {
       kind: 'compact',
       promptId: 'orchestration.compact.zh-CN',
     })
+    expect(provider.requests[1]?.tools).toEqual([])
     expect(
-      provider.messages.some(
+      provider.requests[1]?.messages.some(
         (message) =>
           message.role === 'user' &&
           typeof message.content === 'string' &&
           message.content.includes('focus on risks'),
       ),
     ).toBe(true)
+
+    manager.startRun({
+      sessionId,
+      message: 'continue after compact',
+      clientRequestId: 'request-after-compact',
+    })
+
+    await waitFor(
+      () =>
+        sent.filter(
+          (envelope) =>
+            envelope.event.type === 'run.status' &&
+            envelope.event.status === 'completed',
+        ).length >= 3,
+    )
+
+    const afterCompactMessages = provider.requests[2]?.messages ?? []
+    const rendered = JSON.stringify(afterCompactMessages)
+
+    expect(rendered).not.toContain('RAW_SHOULD_DROP')
+    expect(afterCompactMessages[0]?.role).toBe('system')
+    expect(afterCompactMessages[1]?.role).toBe('user')
+    expect(afterCompactMessages[1]?.content).toContain('<compact_history')
+    expect(afterCompactMessages[1]?.content).toContain(
+      'Compact summary retained',
+    )
+    expect(
+      afterCompactMessages.some(
+        (message) => message.content === 'continue after compact',
+      ),
+    ).toBe(true)
+    await manager.closeSession(sessionId)
+  })
+
+  it('auto compacts older history when the prompt reaches the configured threshold', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-auto-compact-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const current = store.getPublicConfig()
+    await store.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://api.deepseek.com',
+      model: 'auto-compact-test-model',
+      reasoning: 'off',
+      contextWindowTokens: 160_000,
+      maxOutputTokens: 8_000,
+      approverProviderId: 'deepseek',
+      approverModel: 'deepseek-v4-flash',
+      limits: {
+        ...current.limits,
+        autoCompactTriggerPercent: 50,
+        tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
+      },
+    })
+    const provider = new AutoCompactProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () =>
+        ({
+          isDestroyed: () => false,
+          send: (_channel: string, envelope: AgentEventEnvelope) =>
+            sent.push(envelope),
+        }) as unknown as WebContents,
+      providerFactory: () => provider,
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: `AUTO_OLD_CONTEXT ${'x'.repeat(90_000)}`,
+      clientRequestId: 'request-auto-compact-old',
+    })
+
+    await waitFor(
+      () =>
+        sent.filter(
+          (envelope) =>
+            envelope.event.type === 'run.status' &&
+            envelope.event.status === 'completed',
+        ).length >= 1,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    manager.startRun({
+      sessionId,
+      message: 'AUTO_CURRENT_TURN must remain',
+      clientRequestId: 'request-auto-compact-current',
+    })
+
+    await waitFor(
+      () =>
+        sent.filter(
+          (envelope) =>
+            envelope.event.type === 'run.status' &&
+            envelope.event.status === 'completed',
+        ).length >= 2,
+    )
+
+    expect(provider.requests[1]?.tools).toEqual([])
+    expect(
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'orchestrator.message' &&
+          envelope.event.kind === 'compact-auto',
+      ),
+    ).toBe(true)
+
+    const afterAutoCompactMessages = provider.requests[2]?.messages ?? []
+    const rendered = JSON.stringify(afterAutoCompactMessages)
+
+    expect(rendered).not.toContain('AUTO_OLD_CONTEXT')
+    expect(rendered).toContain('AUTO_CURRENT_TURN must remain')
+    expect(afterAutoCompactMessages[0]?.role).toBe('system')
+    expect(afterAutoCompactMessages[1]?.role).toBe('user')
+    expect(afterAutoCompactMessages[1]?.content).toContain('<compact_history')
+    expect(afterAutoCompactMessages[1]?.content).toContain(
+      'Auto compact summary retained',
+    )
     await manager.closeSession(sessionId)
   })
 
@@ -1136,6 +1382,92 @@ describe('SessionManager P2 loop', () => {
         reasoning_effort: 'high',
       }),
     ])
+    await manager.closeSession(sessionId)
+  })
+
+  it('executes a command after Auto approval times out and the user approves', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-session-auto-approval-timeout-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+
+    const store = await createConfig(directory)
+    const provider = new ScriptedCommandProvider()
+    const sent: AgentEventEnvelope[] = []
+    const webContents = {
+      isDestroyed: () => false,
+      send: (_channel: string, envelope: AgentEventEnvelope) => {
+        sent.push(envelope)
+      },
+    } as WebContents
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () => webContents,
+      providerFactory: () => provider,
+      autoApproverFactory: () => ({
+        async evaluate() {
+          return {
+            decision: 'dangerous',
+            note: 'Approval model timed out',
+            valid: false,
+            failure: 'timeout',
+          }
+        },
+      }),
+    })
+    const sessionId = await manager.createSession({
+      conversationId: 'conversation-auto-approval-timeout',
+      workspace,
+      mode: 'auto',
+      provider: 'deepseek',
+    })
+    const runId = manager.startRun({
+      sessionId,
+      message: 'Check the local Node version',
+      clientRequestId: 'request-auto-approval-timeout',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'approval.requested' &&
+          envelope.event.callId === 'call-command',
+      ),
+    )
+
+    expect(
+      manager.decideApproval({
+        sessionId,
+        runId,
+        callId: 'call-command' as CallId,
+        decision: 'allow',
+      }),
+    ).toBe(true)
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'run.status' &&
+          envelope.event.status === 'completed',
+      ),
+    )
+
+    const completedTool = sent.find(
+      (envelope) =>
+        envelope.event.type === 'tool.completed' &&
+        envelope.event.callId === 'call-command',
+    )?.event
+
+    expect(completedTool).toMatchObject({
+      result: { status: 'ok' },
+      approval: {
+        approver: 'model',
+        decision: 'dangerous',
+        failure: 'timeout',
+      },
+    })
     await manager.closeSession(sessionId)
   })
 

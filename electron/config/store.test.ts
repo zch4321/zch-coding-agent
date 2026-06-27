@@ -135,6 +135,9 @@ describe('ConfigStore', () => {
     ) as Record<string, unknown>
     expect(parsed.schemaVersion).toBe(5)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(200)
+    expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
+      80,
+    )
     expect(configStore.getPublicConfig().limits.tokenEstimation).toEqual({
       mode: 'conservative',
       bytesPerToken: 3,
@@ -261,7 +264,7 @@ describe('ConfigStore', () => {
       model: 'generic-chat',
       reasoning: 'off',
       approverProviderId: 'deepseek',
-      approverModel: 'deepseek-chat',
+      approverModel: 'deepseek-v4-flash',
       limits,
       apiKey: 'generic-secret',
     })

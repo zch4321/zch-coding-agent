@@ -22,10 +22,31 @@ const GIT_BASE_ARGS = [
 ]
 
 const FLAGS_FIELD = Type.Optional(
-  Type.Array(Type.String({ maxLength: 256 }), { maxItems: 16 }),
+  Type.Array(
+    Type.String({
+      maxLength: 256,
+      description:
+        'One allowed git flag for this tool. Unsupported flags are rejected.',
+    }),
+    {
+      maxItems: 16,
+      description:
+        'Optional list of allowlisted flags. Do not include positional refs or paths here.',
+    },
+  ),
 )
 const PATHS_FIELD = Type.Optional(
-  Type.Array(Type.String({ maxLength: 4_096 }), { maxItems: 64 }),
+  Type.Array(
+    Type.String({
+      maxLength: 4_096,
+      description:
+        'Workspace-relative git pathspec. Must be a path, not a git option.',
+    }),
+    {
+      maxItems: 64,
+      description: 'Optional workspace-relative pathspecs.',
+    },
+  ),
 )
 
 function assertFlagsAllowed(
@@ -153,8 +174,21 @@ type GitDiffArgs = Static<typeof GitDiffSchema>
 const GitLogSchema = Type.Object(
   {
     flags: FLAGS_FIELD,
-    revision: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
+    revision: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 256,
+        description:
+          'Optional git revision or revision range, for example HEAD~5..HEAD. Must not start with "-".',
+      }),
+    ),
+    limit: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 500,
+        description: 'Maximum number of commits to show.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
@@ -163,7 +197,12 @@ type GitLogArgs = Static<typeof GitLogSchema>
 const GitShowSchema = Type.Object(
   {
     flags: FLAGS_FIELD,
-    ref: Type.String({ minLength: 1, maxLength: 256 }),
+    ref: Type.String({
+      minLength: 1,
+      maxLength: 256,
+      description:
+        'Required git commit, tag, branch, or object ref. Must not start with "-".',
+    }),
   },
   { additionalProperties: false },
 )
@@ -382,7 +421,12 @@ export function registerGitReadOnlyTools(
 const GitAddSchema = Type.Object(
   {
     paths: PATHS_FIELD,
-    all: Type.Optional(Type.Boolean()),
+    all: Type.Optional(
+      Type.Boolean({
+        description:
+          'Set true to stage every working tree change. Do not combine with paths.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
@@ -390,8 +434,17 @@ type GitAddArgs = Static<typeof GitAddSchema>
 
 const GitCommitSchema = Type.Object(
   {
-    message: Type.String({ minLength: 1, maxLength: 4_096 }),
-    amend: Type.Optional(Type.Boolean()),
+    message: Type.String({
+      minLength: 1,
+      maxLength: 4_096,
+      description: 'Commit message passed as a single -m value.',
+    }),
+    amend: Type.Optional(
+      Type.Boolean({
+        description:
+          'Set true to amend the previous commit. This rewrites history and requires review.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
@@ -400,7 +453,12 @@ type GitCommitArgs = Static<typeof GitCommitSchema>
 const GitRestoreSchema = Type.Object(
   {
     paths: PATHS_FIELD,
-    staged: Type.Optional(Type.Boolean()),
+    staged: Type.Optional(
+      Type.Boolean({
+        description:
+          'Set true to restore the index (unstage). Omit or false to discard working tree changes.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )

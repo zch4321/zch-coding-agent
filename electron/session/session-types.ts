@@ -84,6 +84,7 @@ export interface ActiveRun {
   // the full interjection lifecycle, not just while queued.
   processedInterjectionIds: Set<string>
   lastToolBatchId?: string
+  currentTurnStartIndex?: number
 }
 
 export interface SessionState {

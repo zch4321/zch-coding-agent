@@ -9,6 +9,8 @@ const ReadSkillArgsSchema = Type.Object(
       minLength: 1,
       maxLength: 64,
       pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$',
+      description:
+        'Exact enabled skill name from the skill summary, without plugin prefix decoration.',
     }),
   },
   { additionalProperties: false },

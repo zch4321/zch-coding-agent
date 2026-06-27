@@ -61,8 +61,20 @@ export function migrateConfig(candidate: unknown): AppConfig {
   migrated.schemaVersion = 5
   migrated.providers = migrated.providers.map((provider) => ({
     ...provider,
+    model:
+      provider.profile === 'deepseek'
+        ? normalizeDeepSeekModel(provider.model)
+        : provider.model,
     reasoning: normalizeReasoning(provider.reasoning),
   }))
+  const approverProvider = migrated.providers.find(
+    (provider) => provider.id === migrated.approval.approverProviderId,
+  )
+  if (approverProvider?.profile === 'deepseek') {
+    migrated.approval.approverModel = normalizeDeepSeekModel(
+      migrated.approval.approverModel,
+    )
+  }
 
   // The web search provider union was narrowed to 'brave'. Any config that
   // still references a removed provider (serper/tavily) is normalized back to
@@ -94,6 +106,14 @@ export function migrateConfig(candidate: unknown): AppConfig {
   }
 
   return migrated
+}
+
+function normalizeDeepSeekModel(value: string): string {
+  if (value === 'deepseek-chat' || value === 'deepseek-reasoner') {
+    return 'deepseek-v4-flash'
+  }
+
+  return value
 }
 
 function normalizeReasoning(value: unknown): 'off' | 'high' | 'max' {

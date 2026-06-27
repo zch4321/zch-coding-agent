@@ -400,6 +400,23 @@ function handleContextSelect(key: string | number) {
   }
 }
 
+async function handleProviderSelect(value: string | number) {
+  const providerId = String(value)
+  if (
+    providerId === agent.activeProviderId ||
+    agent.activeRunId ||
+    agent.pendingApproval
+  ) {
+    return
+  }
+
+  if (await agent.setActiveProvider(providerId)) {
+    await agent.selectProviderForEditing(providerId)
+    await agent.closeRuntimeSession()
+    agent.schedulePersist(false)
+  }
+}
+
 watch(
   () => agent.input,
   () => {
@@ -477,6 +494,15 @@ watch(inputDisabled, (disabled) => {
             <UiIcon name="plus" />
           </NButton>
         </NDropdown>
+        <NSelect
+          :value="agent.activeProviderId"
+          class="composer-provider-select"
+          size="small"
+          :options="agent.providerOptions"
+          :disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
+          filterable
+          @update:value="handleProviderSelect"
+        />
         <NSelect
           :value="agent.providerForm.model"
           class="composer-model-select"

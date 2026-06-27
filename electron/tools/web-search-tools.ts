@@ -11,8 +11,19 @@ import {
 
 const WebSearchSchema = Type.Object(
   {
-    query: Type.String({ minLength: 1, maxLength: 1_024 }),
-    count: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+    query: Type.String({
+      minLength: 1,
+      maxLength: 1_024,
+      description: 'Search query for current or external web information.',
+    }),
+    count: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 20,
+        description:
+          'Maximum number of search results to return. Omit to use settings.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )

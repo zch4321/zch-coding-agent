@@ -1944,8 +1944,14 @@ code {
   background: transparent;
 }
 
+.composer-provider-select {
+  width: min(180px, 24vw);
+  min-width: 120px;
+  flex: 0 1 180px;
+}
+
 .composer-model-select {
-  width: min(240px, 32vw);
+  width: min(220px, 28vw);
   min-width: 0;
   flex: 1 1 auto;
 }

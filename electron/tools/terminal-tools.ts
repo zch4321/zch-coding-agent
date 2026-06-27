@@ -1,42 +1,106 @@
 import { Type } from '@sinclair/typebox'
-import { TerminalIdSchema } from '../../shared/ids'
+import type { TerminalId } from '../../shared/ids'
 import type { TerminalPool } from '../terminal/pool'
 import type { ToolDefinition, ToolRegistrationPort } from './types'
 
+const TerminalIdField = Type.Unsafe<TerminalId>(
+  Type.String({
+    minLength: 1,
+    maxLength: 128,
+    pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$',
+    title: 'TerminalId',
+    description:
+      'Terminal id returned by terminal_open or terminal_list for this session.',
+  }),
+)
+
 const OpenSchema = Type.Object(
   {
-    cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
-    shell: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
-    cols: Type.Optional(Type.Integer({ minimum: 2, maximum: 1_000 })),
-    rows: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000 })),
+    cwd: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 4_096,
+        description:
+          'Workspace-relative directory for the terminal. Omit for workspace root.',
+      }),
+    ),
+    shell: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 4_096,
+        description:
+          'Optional shell executable. Omit to use the configured/default shell.',
+      }),
+    ),
+    cols: Type.Optional(
+      Type.Integer({
+        minimum: 2,
+        maximum: 1_000,
+        description: 'Initial terminal width in columns.',
+      }),
+    ),
+    rows: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 1_000,
+        description: 'Initial terminal height in rows.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
 const SendSchema = Type.Object(
   {
-    terminalId: TerminalIdSchema,
-    data: Type.String({ minLength: 1, maxLength: 262_144 }),
+    terminalId: TerminalIdField,
+    data: Type.String({
+      minLength: 1,
+      maxLength: 262_144,
+      description:
+        'Input bytes to send to the terminal. Include a trailing newline to press Enter.',
+    }),
   },
   { additionalProperties: false },
 )
 const ReadSchema = Type.Object(
   {
-    terminalId: TerminalIdSchema,
-    cursor: Type.Optional(Type.Integer({ minimum: 0 })),
-    lines: Type.Optional(Type.Integer({ minimum: 1, maximum: 5_000 })),
+    terminalId: TerminalIdField,
+    cursor: Type.Optional(
+      Type.Integer({
+        minimum: 0,
+        description:
+          'Optional scrollback cursor from a previous terminal_read result.',
+      }),
+    ),
+    lines: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 5_000,
+        description: 'Maximum number of terminal lines to return.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
 const ListSchema = Type.Object({}, { additionalProperties: false })
 const CloseSchema = Type.Object(
-  { terminalId: TerminalIdSchema },
+  {
+    terminalId: TerminalIdField,
+  },
   { additionalProperties: false },
 )
 const ResizeSchema = Type.Object(
   {
-    terminalId: TerminalIdSchema,
-    cols: Type.Integer({ minimum: 2, maximum: 1_000 }),
-    rows: Type.Integer({ minimum: 1, maximum: 1_000 }),
+    terminalId: TerminalIdField,
+    cols: Type.Integer({
+      minimum: 2,
+      maximum: 1_000,
+      description: 'New terminal width in columns.',
+    }),
+    rows: Type.Integer({
+      minimum: 1,
+      maximum: 1_000,
+      description: 'New terminal height in rows.',
+    }),
   },
   { additionalProperties: false },
 )

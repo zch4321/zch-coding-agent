@@ -9,7 +9,7 @@
 - Prompt 不能继续作为一整块系统提示词拼接。需要改成可审计的 layer model，并把工具 schema、运行时策略、仓库规则、环境信息和会话上下文分开处理。
 - 工具调用卡片当前占用过多对话空间，应优先改成一行灰色摘要；参数、结果和自动审批输出放入右侧展开面板或行内展开详情。
 - ReAct run 进行中允许用户发送补充信息，但不能打断当前工具调用链。补充信息应排队到下一个安全 checkpoint，并以明确 tag 注入给模型。
-- 安全策略、权限边界、路径约束、审批要求和凭据保护属于只读 `runtime_policy`，不能被用户可编辑 Prompt 覆盖。
+- 安全策略、权限边界、路径约束、审批要求和凭据保护属于只读 `runtime_policy`，以非系统上下文注入但不能被用户可编辑 Prompt 覆盖。
 - 用户可编辑 Prompt 应降级为个人偏好、语气和工作方式补充，优先级低于系统基础指令、运行时策略和仓库指令。
 - 项目上下文需要显式建模。多语言仓库不应靠模型每轮临时猜测，而应维护一个可追踪的 `ProjectModel / ModuleGraph`。
 - 如果项目没有已配置模块，模型可以通过工具推断和设置 module 根目录；推断结果必须带来源、hash/时间和可覆盖机制。
@@ -96,7 +96,7 @@ interface PromptLayer {
 
 - `PromptRegistry` 继续负责加载资源文件、校验版本和记录 hash。
 - `PromptBuilder` 负责构造 `PromptLayer[]`，再由 provider mapper 转成具体 provider messages。
-- 基础指令和运行时策略尽量保持稳定顺序，减少 prompt cache miss。
+- 基础指令保持稳定 system 前缀；运行时策略和环境上下文作为非系统动态层注入，尽量保持稳定顺序以减少 prompt cache miss。
 - 工具 schema 不混入 Prompt 正文，仍由 provider tools 字段传递。
 - `runtime_policy` 包含权限、审批、路径、凭据、工具输出不可信、外部内容不可信等硬规则。
 - `environment_context` 每轮动态生成，包含 cwd、shell、当前日期、时区、工作区、git repo、branch、HEAD、dirty summary、主要 manifest 和 top-level structure。

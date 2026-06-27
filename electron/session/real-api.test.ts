@@ -21,7 +21,7 @@ const live = process.env.RUN_REAL_API_TESTS === '1'
 const apiKey = process.env.DEEPSEEK_API_KEY?.trim() ?? ''
 const baseURL =
   process.env.DEEPSEEK_BASE_URL?.trim() || 'https://api.deepseek.com'
-const model = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-chat'
+const model = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-v4-flash'
 const sentinel = `LIVE_ENDPOINT_SENTINEL_${Date.now()}`
 const managers: SessionManager[] = []
 

@@ -52,6 +52,9 @@ describe('prompt harness', () => {
       'assistant_preferences',
       'agents',
     ])
+    expect(state.promptLedger[0]?.role).toBe('system')
+    expect(state.promptLedger[1]?.role).toBe('user')
+    expect(state.history[1]?.role).toBe('user')
     expect(state.history.at(-1)).toEqual({
       role: 'user',
       content: 'hello raw user',
@@ -135,6 +138,7 @@ describe('prompt harness', () => {
     })
     expect(state.history).toHaveLength(before + 1)
     expect(state.promptLedger.at(-1)?.kind).toBe('runtime_policy_and_context')
+    expect(state.promptLedger.at(-1)?.role).toBe('user')
   })
 
   it('records prompt build metadata without mutating existing messages', async () => {

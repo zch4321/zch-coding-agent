@@ -178,6 +178,7 @@ export const PublicConfigSchema = Type.Object(
           maximum: 100_000_000,
         }),
         maxContextTokens: Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+        autoCompactTriggerPercent: Type.Integer({ minimum: 50, maximum: 95 }),
         maxToolResultTokens: Type.Integer({
           minimum: 256,
           maximum: 1_000_000,

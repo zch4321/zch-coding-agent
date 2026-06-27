@@ -1,5 +1,6 @@
 const MAX_PATCH_HUNKS = 100
 const MAX_CHANGED_LINES = 10_000
+const PATCH_ERROR_CONTEXT_LINES = 8
 
 export class TextPatchError extends Error {
   readonly code = 'INVALID_PATCH'
@@ -12,9 +13,6 @@ export class TextPatchError extends Error {
 
 interface ParsedHunk {
   oldStart: number
-  oldCount: number
-  newStart: number
-  newCount: number
   oldLines: string[]
   newLines: string[]
   addedLines: number
@@ -107,9 +105,6 @@ function parsePatch(patch: string, expectedPath: string): ParsedHunk[] {
 
     const hunk: ParsedHunk = {
       oldStart: Number(match[1]),
-      oldCount: match[2] === undefined ? 1 : Number(match[2]),
-      newStart: Number(match[3]),
-      newCount: match[4] === undefined ? 1 : Number(match[4]),
       oldLines: [],
       newLines: [],
       addedLines: 0,
@@ -139,13 +134,6 @@ function parsePatch(patch: string, expectedPath: string): ParsedHunk[] {
       index += 1
     }
 
-    if (
-      hunk.oldLines.length !== hunk.oldCount ||
-      hunk.newLines.length !== hunk.newCount
-    ) {
-      throw new TextPatchError('Patch hunk line counts do not match its header')
-    }
-
     changedLines += hunk.addedLines + hunk.removedLines
     hunks.push(hunk)
 
@@ -159,6 +147,64 @@ function parsePatch(patch: string, expectedPath: string): ParsedHunk[] {
   }
 
   return hunks
+}
+
+function matchingSequenceAt(
+  sourceLines: string[],
+  start: number,
+  expected: string[],
+): boolean {
+  return (
+    start >= 0 &&
+    sourceLines.length - start >= expected.length &&
+    expected.every((line, index) => sourceLines[start + index] === line)
+  )
+}
+
+function findUniqueSequence(
+  sourceLines: string[],
+  expected: string[],
+):
+  | { kind: 'none' }
+  | { kind: 'unique'; position: number }
+  | { kind: 'multiple' } {
+  if (expected.length === 0) {
+    return { kind: 'none' }
+  }
+
+  let found: number | undefined
+
+  for (
+    let index = 0;
+    index <= sourceLines.length - expected.length;
+    index += 1
+  ) {
+    if (!matchingSequenceAt(sourceLines, index, expected)) {
+      continue
+    }
+
+    if (found !== undefined) {
+      return { kind: 'multiple' }
+    }
+
+    found = index
+  }
+
+  return found === undefined
+    ? { kind: 'none' }
+    : { kind: 'unique', position: found }
+}
+
+function formatPatchPreview(lines: string[], startLine: number): string {
+  const preview = lines.slice(0, PATCH_ERROR_CONTEXT_LINES)
+  const suffix =
+    lines.length > preview.length
+      ? [`... ${lines.length - preview.length} more line(s)`]
+      : []
+
+  return [...preview, ...suffix]
+    .map((line, index) => `${startLine + index}\t${line}`)
+    .join('\n')
 }
 
 export function applyTextPatch(
@@ -181,21 +227,43 @@ export function applyTextPatch(
   let removedLines = 0
 
   for (const hunk of hunks) {
-    const position = hunk.oldStart - 1 + offset
-    const expectedNewPosition = hunk.newStart - 1
+    let position = hunk.oldStart - 1 + offset
 
-    if (position < 0 || position !== expectedNewPosition) {
+    if (position < 0) {
       throw new TextPatchError('Patch hunk line numbers are inconsistent')
     }
 
-    const actual = sourceLines.slice(position, position + hunk.oldLines.length)
+    if (!matchingSequenceAt(sourceLines, position, hunk.oldLines)) {
+      const match = findUniqueSequence(sourceLines, hunk.oldLines)
 
-    if (
-      actual.length !== hunk.oldLines.length ||
-      actual.some((line, lineIndex) => line !== hunk.oldLines[lineIndex])
-    ) {
+      if (match.kind === 'unique') {
+        position = match.position
+      } else if (match.kind === 'multiple') {
+        throw new TextPatchError(
+          [
+            'Patch context matches multiple locations; provide more unchanged context lines.',
+            'Expected context:',
+            formatPatchPreview(hunk.oldLines, hunk.oldStart),
+          ].join('\n'),
+        )
+      }
+    }
+
+    if (!matchingSequenceAt(sourceLines, position, hunk.oldLines)) {
+      const actualStart = Math.max(0, position)
+      const actual = sourceLines.slice(
+        actualStart,
+        actualStart + Math.max(hunk.oldLines.length, 1),
+      )
       throw new TextPatchError(
-        `Patch context does not match at source line ${hunk.oldStart}`,
+        [
+          `Patch context does not match at source line ${hunk.oldStart}.`,
+          'Expected context:',
+          formatPatchPreview(hunk.oldLines, hunk.oldStart),
+          'Actual content near requested line:',
+          formatPatchPreview(actual, actualStart + 1),
+          'If the target text moved, include more unchanged context lines around the edit.',
+        ].join('\n'),
       )
     }
 
