@@ -19,7 +19,8 @@
     "test:real": "node scripts/run-real-api-tests.cjs",
     "test:native": "node scripts/native-pty-smoke.cjs",
     "test:ripgrep": "node scripts/ripgrep-smoke.cjs",
-    "test:e2e": "npm run build:app && playwright test"
+    "test:e2e": "npm run build:app && playwright test",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@sinclair/typebox": "0.34.49",
