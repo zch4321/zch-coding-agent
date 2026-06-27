@@ -134,6 +134,14 @@ export function filePolicySignals(
     })
   }
 
+  if (/(^|\/)\.git(?:\/|$)/iu.test(targetPath)) {
+    signals.push({
+      code: 'vcs_metadata_path',
+      severity: 'danger',
+      detail: `The target path mutates Git metadata: ${targetPath}`,
+    })
+  }
+
   return signals
 }
 

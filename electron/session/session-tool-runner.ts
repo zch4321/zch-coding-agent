@@ -131,7 +131,10 @@ export class SessionToolRunner {
               ? {
                   ...configuredApproverProvider,
                   model: config.approval.approverModel,
-                  reasoning: 'off',
+                  reasoning:
+                    configuredApproverProvider.reasoning === 'off'
+                      ? 'high'
+                      : configuredApproverProvider.reasoning,
                 }
               : undefined
             const apiKey = configuredApproverProvider

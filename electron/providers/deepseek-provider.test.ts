@@ -205,6 +205,35 @@ describe('DeepSeekProvider', () => {
     expect(bodies[1]).not.toHaveProperty('reasoning_effort')
   })
 
+  it('sends JSON object response format when requested', async () => {
+    let body = ''
+    const provider = new DeepSeekProvider({
+      baseURL: 'https://api.example/v1',
+      model: 'deepseek-v4-flash',
+      apiKey: 'secret',
+      reasoning: 'high',
+      fetchImpl: async (_input, init) => {
+        body = String(init?.body)
+        return sseResponse([])
+      },
+    })
+
+    for await (const event of provider.streamChat({
+      messages: [{ role: 'user', content: 'return json' }],
+      tools: [],
+      responseFormat: { type: 'json_object' },
+      signal: new AbortController().signal,
+    })) {
+      void event
+    }
+
+    expect(JSON.parse(body)).toMatchObject({
+      response_format: { type: 'json_object' },
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
+    })
+  })
+
   it('does not send DeepSeek-specific thinking parameters for generic OpenAI-compatible providers', async () => {
     let body = ''
     const provider = new OpenAICompatibleProvider({

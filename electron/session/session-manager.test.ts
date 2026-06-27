@@ -187,6 +187,70 @@ class ScriptedEditProvider implements LLMProvider {
   }
 }
 
+class ScriptedCommandProvider implements LLMProvider {
+  calls = 0
+
+  async *streamChat(): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+
+    if (this.calls === 1) {
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'command-request' },
+        turn: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-command',
+              type: 'function',
+              function: {
+                name: 'run_command',
+                arguments: JSON.stringify({
+                  mode: 'process',
+                  executable: process.execPath,
+                  args: ['--version'],
+                }),
+              },
+            },
+          ],
+        },
+        toolCalls: [
+          {
+            id: 'call-command' as CallId,
+            toolId: 'run_command',
+            args: {
+              mode: 'process',
+              executable: process.execPath,
+              args: ['--version'],
+            },
+            reason: 'Check Node version',
+          },
+        ],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    yield {
+      type: 'text.delta',
+      delta: 'Checked Node version',
+      raw: {},
+    }
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'command-complete' },
+      turn: { role: 'assistant', content: 'Checked Node version' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
 class ForkProvider implements LLMProvider {
   calls = 0
   messages: ProviderChatRequest['messages'] = []
@@ -448,6 +512,16 @@ const safeAutoApprover: AutoApprover = {
       valid: true,
     }
   },
+}
+
+function sseResponse(payloads: JsonValue[]): Response {
+  const body = payloads
+    .map((payload) => `data: ${JSON.stringify(payload)}\n\n`)
+    .join('')
+  return new Response(body, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+  })
 }
 
 async function createConfig(directory: string, secret = 'secret-sentinel') {
@@ -882,7 +956,7 @@ describe('SessionManager P2 loop', () => {
     await manager.closeSession(sessionId)
   })
 
-  it('completes an Auto edit and records P3 approval evidence', async () => {
+  it('completes an Auto edit through policy approval and records change evidence', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-session-p3-'))
     const workspace = path.join(directory, 'workspace')
     const target = path.join(workspace, 'note.txt')
@@ -937,14 +1011,7 @@ describe('SessionManager P2 loop', () => {
           envelope.event.type === 'tool.completed' &&
           envelope.event.callId === 'call-edit',
       )?.event,
-    ).toMatchObject({
-      approval: {
-        approver: 'model',
-        decision: 'safe',
-        reason: 'Single bounded workspace edit',
-        valid: true,
-      },
-    })
+    ).not.toHaveProperty('approval')
     expect(changeHistory.list('conversation-p3', workspace)).toMatchObject([
       {
         path: 'note.txt',
@@ -965,7 +1032,7 @@ describe('SessionManager P2 loop', () => {
 
     expect(toolCall).toMatchObject({
       tool: 'apply_patch',
-      approvedBy: 'model',
+      approvedBy: 'policy',
     })
     expect(toolCall?.policySignals).toEqual(
       expect.arrayContaining([
@@ -973,6 +1040,103 @@ describe('SessionManager P2 loop', () => {
       ]),
     )
     expect(toolCall?.diffHash).toEqual(expect.any(String))
+  })
+
+  it('uses JSON mode and thinking for default Auto approval requests', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-session-auto-approval-json-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+
+    const store = await createConfig(directory)
+    const current = store.getPublicConfig()
+    await store.update({
+      version: 1,
+      kind: 'provider-settings',
+      providerId: 'deepseek',
+      label: 'DeepSeek',
+      profile: 'deepseek',
+      baseURL: 'https://api.example/v1',
+      model: 'main-model',
+      reasoning: 'off',
+      approverProviderId: 'deepseek',
+      approverModel: 'approval-model',
+      limits: current.limits,
+    })
+    const provider = new ScriptedCommandProvider()
+    const approvalBodies: JsonValue[] = []
+    const sent: AgentEventEnvelope[] = []
+    const webContents = {
+      isDestroyed: () => false,
+      send: (_channel: string, envelope: AgentEventEnvelope) => {
+        sent.push(envelope)
+      },
+    } as WebContents
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () => webContents,
+      providerFactory: () => provider,
+      fetchImpl: async (_input, init) => {
+        approvalBodies.push(JSON.parse(String(init?.body)) as JsonValue)
+        return sseResponse([
+          {
+            choices: [
+              {
+                delta: {
+                  reasoning_content: 'Check bounded command.',
+                },
+              },
+            ],
+          },
+          {
+            choices: [
+              {
+                delta: {
+                  content:
+                    '{"decision":"safe","note":"bounded process command"}',
+                },
+              },
+            ],
+            usage: {
+              prompt_tokens: 12,
+              completion_tokens: 6,
+              total_tokens: 18,
+            },
+          },
+        ])
+      },
+    })
+    const sessionId = await manager.createSession({
+      conversationId: 'conversation-auto-approval-json',
+      workspace,
+      mode: 'auto',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: 'Check the local Node version',
+      clientRequestId: 'request-auto-approval-json',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'run.status' &&
+          envelope.event.status === 'completed',
+      ),
+    )
+
+    expect(approvalBodies).toEqual([
+      expect.objectContaining({
+        model: 'approval-model',
+        response_format: { type: 'json_object' },
+        thinking: { type: 'enabled' },
+        reasoning_effort: 'high',
+      }),
+    ])
+    await manager.closeSession(sessionId)
   })
 
   it('accepts one Confirm decision and persists a bounded remembered rule', async () => {

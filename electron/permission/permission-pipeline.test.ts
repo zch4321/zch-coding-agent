@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -109,6 +109,115 @@ describe('P3 permission pipeline ordering', () => {
     })
 
     expect(result.ok).toBe(false)
+    expect(autoApprover.evaluate).not.toHaveBeenCalled()
+    expect(requestHumanApproval).toHaveBeenCalledOnce()
+  })
+
+  it('auto-allows bounded workspace write and patch file calls without the approval model', async () => {
+    const root = await workspace()
+    const autoApprover: AutoApprover = {
+      evaluate: vi.fn(async () => ({
+        decision: 'dangerous' as const,
+        note: 'should not be called',
+        valid: true,
+      })),
+    }
+    const requestHumanApproval = vi.fn(async () => ({
+      decision: 'deny' as const,
+    }))
+
+    const calls: ToolCall[] = [
+      {
+        id: 'call:write-policy' as CallId,
+        toolId: 'write_file',
+        args: { path: 'created.txt', content: 'after\n' },
+        reason: 'Create note',
+      },
+      {
+        id: 'call:patch-policy' as CallId,
+        toolId: 'apply_patch',
+        args: {
+          path: 'note.txt',
+          patch: [
+            '--- a/note.txt',
+            '+++ b/note.txt',
+            '@@ -1 +1 @@',
+            '-before',
+            '+after',
+          ].join('\n'),
+        },
+        reason: 'Patch note',
+      },
+    ]
+
+    for (const call of calls) {
+      const { definition, pipeline } = fixture(call)
+      const result = await pipeline.authorize({
+        sessionId,
+        runId,
+        workspace: root,
+        mode: 'auto',
+        call,
+        definition,
+        config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+        signal: new AbortController().signal,
+        autoApprover,
+        requestHumanApproval,
+      })
+
+      expect(result).toMatchObject({
+        ok: true,
+        approvedCall: { approvedBy: 'policy' },
+      })
+    }
+
+    expect(autoApprover.evaluate).not.toHaveBeenCalled()
+    expect(requestHumanApproval).not.toHaveBeenCalled()
+  })
+
+  it('keeps VCS metadata file mutations on human review in Auto', async () => {
+    const root = await workspace()
+    await mkdir(path.join(root, '.git'))
+    const call: ToolCall = {
+      id: 'call:git-config' as CallId,
+      toolId: 'write_file',
+      args: {
+        path: '.git/config',
+        content: '[core]\nrepositoryformatversion = 0\n',
+      },
+      reason: 'Mutate git metadata',
+    }
+    const { definition, pipeline } = fixture(call)
+    const autoApprover: AutoApprover = {
+      evaluate: vi.fn(async () => ({
+        decision: 'safe' as const,
+        note: 'should not be called',
+        valid: true,
+      })),
+    }
+    const requestHumanApproval = vi.fn(async () => ({
+      decision: 'deny' as const,
+    }))
+
+    const result = await pipeline.authorize({
+      sessionId,
+      runId,
+      workspace: root,
+      mode: 'auto',
+      call,
+      definition,
+      config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+      signal: new AbortController().signal,
+      autoApprover,
+      requestHumanApproval,
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.policySignals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'vcs_metadata_path' }),
+      ]),
+    )
     expect(autoApprover.evaluate).not.toHaveBeenCalled()
     expect(requestHumanApproval).toHaveBeenCalledOnce()
   })

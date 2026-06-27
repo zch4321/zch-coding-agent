@@ -58,6 +58,8 @@ const settingsProperties = new Set<PropertyKey>([
   'modelCatalogLoading',
   'modelOverrides',
   'limitsConfig',
+  'limitsSaving',
+  'limitsSaveStatus',
   'providerForm',
   'providerSavedSignature',
   'providerSaving',
@@ -177,6 +179,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
       return saved
     },
     clearCredential: settings.clearCredential,
+    saveLimits: settings.saveLimits,
     savePermissions: () => settings.savePermissions(runtime.mode),
     removeRememberedRule: (ruleId: string) =>
       settings.removeRememberedRule(ruleId, runtime.mode),

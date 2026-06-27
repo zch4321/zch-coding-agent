@@ -2,6 +2,7 @@ import { Type } from '@sinclair/typebox'
 import { describe, expect, it } from 'vitest'
 import type { PermissionMode, RememberedRule } from '../../shared/config'
 import type { CallId } from '../../shared/ids'
+import type { JsonValue } from '../../shared/json'
 import type { ToolDefinition } from '../tools/types'
 import { evaluatePolicy } from './policy-engine'
 
@@ -80,6 +81,75 @@ function evaluate(input: {
   })
 }
 
+function runCommandPolicy(args: JsonValue, danger = false) {
+  const tool: ToolDefinition<typeof EmptyArgsSchema> = {
+    id: 'run_command',
+    description: 'process fixture',
+    inputSchema: EmptyArgsSchema,
+    effects: ['process.spawn'],
+    defaultRisk: 'review',
+    supportsAbort: true,
+    defaultTimeoutMs: 1_000,
+    maxOutputBytes: 1_000,
+    async execute() {
+      return { status: 'ok', content: null }
+    },
+  }
+
+  return evaluatePolicy({
+    mode: 'auto',
+    definition: tool,
+    effectiveRisk: 'review',
+    policySignals: danger
+      ? [{ code: 'danger', severity: 'danger', detail: 'danger fixture' }]
+      : [],
+    rememberedRules: [],
+    builtinPolicies: true,
+    workspace: 'F:/workspace',
+    args,
+    callId: 'call:go-command' as CallId,
+  })
+}
+
+function fileMutationPolicy(input: {
+  toolId: 'write_file' | 'apply_patch' | 'delete_file'
+  mode?: PermissionMode
+  danger?: boolean
+  builtinPolicies?: boolean
+  rules?: RememberedRule[]
+}) {
+  const risk = input.toolId === 'delete_file' ? 'high' : 'review'
+  const tool: ToolDefinition<typeof EmptyArgsSchema> = {
+    id: input.toolId,
+    description: 'file mutation fixture',
+    inputSchema: EmptyArgsSchema,
+    effects: [
+      input.toolId === 'delete_file' ? 'filesystem.delete' : 'filesystem.write',
+    ],
+    defaultRisk: risk,
+    supportsAbort: true,
+    defaultTimeoutMs: 1_000,
+    maxOutputBytes: 1_000,
+    async execute() {
+      return { status: 'ok', content: null }
+    },
+  }
+
+  return evaluatePolicy({
+    mode: input.mode ?? 'auto',
+    definition: tool,
+    effectiveRisk: risk,
+    policySignals: input.danger
+      ? [{ code: 'danger', severity: 'danger', detail: 'danger fixture' }]
+      : [],
+    rememberedRules: input.rules ?? [],
+    builtinPolicies: input.builtinPolicies ?? true,
+    workspace: 'F:/workspace',
+    args: {},
+    callId: 'call:file-mutation' as CallId,
+  })
+}
+
 describe('P3 policy engine', () => {
   it('contains at least 30 deterministic matrix rows', () => {
     expect(matrix.length).toBeGreaterThanOrEqual(30)
@@ -136,6 +206,79 @@ describe('P3 policy engine', () => {
       evaluate({ mode: 'yolo', effect: 'write', risk: 'high', danger: true })
         .kind,
     ).toBe('allow')
+  })
+
+  it('delegates Go module maintenance commands to the Auto approval model', () => {
+    expect(
+      runCommandPolicy({
+        mode: 'process',
+        executable: 'go',
+        args: ['mod', 'tidy'],
+      }).kind,
+    ).toBe('model')
+    expect(
+      runCommandPolicy({
+        mode: 'process',
+        executable: 'go',
+        args: ['get', 'example.com/module@latest'],
+      }).kind,
+    ).toBe('model')
+    expect(
+      runCommandPolicy({
+        mode: 'shell',
+        command: 'go mod tidy',
+      }).kind,
+    ).toBe('model')
+    expect(
+      runCommandPolicy(
+        {
+          mode: 'process',
+          executable: 'go',
+          args: ['mod', 'tidy'],
+        },
+        true,
+      ).kind,
+    ).toBe('review')
+  })
+
+  it('auto-allows bounded workspace write and patch file mutations by policy', () => {
+    expect(fileMutationPolicy({ toolId: 'write_file' })).toMatchObject({
+      kind: 'allow',
+      approvedBy: 'policy',
+    })
+    expect(fileMutationPolicy({ toolId: 'apply_patch' })).toMatchObject({
+      kind: 'allow',
+      approvedBy: 'policy',
+    })
+    expect(
+      fileMutationPolicy({ toolId: 'write_file', mode: 'confirm' }).kind,
+    ).toBe('review')
+    expect(
+      fileMutationPolicy({ toolId: 'apply_patch', danger: true }).kind,
+    ).toBe('review')
+    expect(fileMutationPolicy({ toolId: 'delete_file' }).kind).toBe('review')
+    expect(
+      fileMutationPolicy({
+        toolId: 'write_file',
+        builtinPolicies: false,
+      }).kind,
+    ).toBe('model')
+    expect(
+      fileMutationPolicy({
+        toolId: 'write_file',
+        rules: [
+          {
+            id: 'rule:file-review',
+            effect: 'review',
+            toolId: 'write_file',
+            workspaceScope: 'F:/workspace',
+            argConstraints: {},
+            expiresAt: '2099-01-01T00:00:00.000Z',
+            createdFromCallId: 'call:source',
+          },
+        ],
+      }).kind,
+    ).toBe('review')
   })
 
   it('applies active remembered allow rules only in Auto mode', () => {

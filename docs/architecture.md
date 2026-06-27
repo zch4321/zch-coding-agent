@@ -616,7 +616,7 @@ TerminalResource {
    ├─ Yolo → ALLOW
    ├─ ReadOnly 且有副作用 → DENY
    └─ Auto / Confirm → [D]
-[D] 确定性低风险规则 / 审批模型
+[D] 确定性风险策略 / 审批模型
    ├─ 黑名单 / 高风险 → HUMAN_REVIEW
    ├─ Confirm 且有副作用 → HUMAN_REVIEW
    ├─ Auto safe → ALLOW
@@ -670,6 +670,10 @@ type PermissionDecision =
 - 可选敏感数据策略：在工具输出进入 LLM 上下文前，按 `off | warn | confirm` 检查路径 glob 和内容模式；默认 `off`，Yolo 跳过阻断。
 
 文件工具的 workspace 边界属于其调用契约；任意命令执行不具备同等路径隔离，必须在 UI 和模式说明中明确。
+
+`write_file` 与 `apply_patch` 在资源计划确认 workspace 边界、diff 上限、precondition 和 policy signals 后，Auto 模式可由确定性策略直接放行，以避免为普通单文件修改消耗审批模型 token。该放行不适用于 `delete_file`、VCS 元数据路径、敏感路径、danger signal、Confirm 模式或用户记住的 review 规则。
+
+确定性策略不得为有副作用的常规命令维护静态放行白名单。`go mod tidy`、`npm install`、`pip install -r requirements.txt` 这类命令仍有副作用；在 Auto 模式下应进入审批模型，由模型结合具体参数、cwd、路径、脚本/网络行为和 policy signals 判定 safe 或 dangerous。
 
 #### 9.3.1 敏感数据检查实现
 

@@ -118,7 +118,7 @@ export const DEFAULT_APP_CONFIG = {
     },
   },
   limits: {
-    maxStepsPerRun: 24,
+    maxStepsPerRun: 200,
     maxToolOutputBytes: 64 * 1_024,
     maxContextTokens: 64_000,
     maxToolResultTokens: 8_000,

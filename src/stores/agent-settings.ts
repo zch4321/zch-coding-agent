@@ -97,6 +97,8 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     modelCatalogLoading: false,
     modelOverrides: {} as ProviderPublicConfig['modelOverrides'],
     limitsConfig: undefined as PublicConfig['limits'] | undefined,
+    limitsSaving: false,
+    limitsSaveStatus: '',
     providerForm: structuredClone(DEFAULT_PROVIDER_FORM),
     providerSavedSignature: providerFormSignature(DEFAULT_PROVIDER_FORM),
     providerSaving: false,
@@ -651,6 +653,33 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       })
       if (result.ok) this.applyConfig(result.value.config, ['webSearch'])
       else this.error = result.error.message
+    },
+    async saveLimits() {
+      const bridge = window.agentApi
+      const limits = this.limitsConfig
+      if (!bridge || !limits || this.limitsSaving) return false
+
+      this.limitsSaving = true
+      this.limitsSaveStatus = ''
+      try {
+        const result = await bridge.setConfig({
+          version: IPC_VERSION,
+          kind: 'limits',
+          value: cloneJson(limits),
+        })
+
+        if (!result.ok) {
+          this.error = result.error.message
+          this.limitsSaveStatus = result.error.message
+          return false
+        }
+
+        this.applyConfig(result.value.config, ['limits'])
+        this.limitsSaveStatus = 'Saved'
+        return true
+      } finally {
+        this.limitsSaving = false
+      }
     },
     async savePermissions(mode: PermissionMode) {
       const bridge = window.agentApi

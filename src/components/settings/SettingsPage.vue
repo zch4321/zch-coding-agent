@@ -2,6 +2,7 @@
 import type { PermissionMode } from '../../../shared/config'
 import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue'
 import LoggingSettingsPanel from './LoggingSettingsPanel.vue'
+import LimitsSettingsPanel from './LimitsSettingsPanel.vue'
 import PermissionsSettingsPanel from './PermissionsSettingsPanel.vue'
 import ProjectSettingsPanel from './ProjectSettingsPanel.vue'
 import ProviderSettingsPanel from './ProviderSettingsPanel.vue'
@@ -27,6 +28,7 @@ const emit = defineEmits<{
         @removed="emit('close')"
       />
       <ProviderSettingsPanel v-else-if="activeTab === 'provider'" />
+      <LimitsSettingsPanel v-else-if="activeTab === 'limits'" />
       <PermissionsSettingsPanel
         v-else-if="activeTab === 'permissions'"
         @mode="emit('mode', $event)"

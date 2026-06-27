@@ -704,6 +704,47 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.usage-summary {
+  display: grid;
+  width: min(560px, 100%);
+  min-width: 0;
+  gap: 4px;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.usage-progress-row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.usage-progress-row span,
+.usage-summary p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-progress {
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eaeef2;
+}
+
+.usage-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
 .run-status {
   gap: 7px;
   padding: 5px 9px;
@@ -2652,6 +2693,26 @@ code {
 .settings-inline-equal > * {
   min-width: 0;
   flex: 1;
+}
+
+.limits-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.limits-group {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.limits-group h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
 }
 
 .settings-actions {

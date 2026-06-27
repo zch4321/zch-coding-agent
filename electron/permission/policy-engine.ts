@@ -85,6 +85,15 @@ function matchingRule(input: PolicyInput): RememberedRule | undefined {
   )
 }
 
+function isAutoAllowedWorkspaceFileMutation(input: PolicyInput): boolean {
+  return (
+    input.mode === 'auto' &&
+    input.builtinPolicies &&
+    (input.definition.id === 'write_file' ||
+      input.definition.id === 'apply_patch')
+  )
+}
+
 export function evaluatePolicy(input: PolicyInput): PolicyOutcome {
   const sideEffects = hasSideEffects(input.definition)
 
@@ -137,6 +146,10 @@ export function evaluatePolicy(input: PolicyInput): PolicyOutcome {
       kind: 'review',
       reason: `Remembered rule ${rule.id} requires review`,
     }
+  }
+
+  if (isAutoAllowedWorkspaceFileMutation(input)) {
+    return { kind: 'allow', approvedBy: 'policy' }
   }
 
   if (rule?.effect === 'allow') {

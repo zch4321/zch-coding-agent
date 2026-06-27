@@ -134,9 +134,7 @@ describe('ConfigStore', () => {
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
     expect(parsed.schemaVersion).toBe(5)
-    expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBeGreaterThan(
-      0,
-    )
+    expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(200)
     expect(configStore.getPublicConfig().limits.tokenEstimation).toEqual({
       mode: 'conservative',
       bytesPerToken: 3,

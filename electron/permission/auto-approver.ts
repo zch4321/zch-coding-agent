@@ -133,6 +133,7 @@ export class ProviderAutoApprover implements AutoApprover {
       for await (const event of this.#provider.streamChat({
         messages,
         tools: [],
+        responseFormat: { type: 'json_object' },
         signal: controller.signal,
       })) {
         if (event.type === 'text.delta') {

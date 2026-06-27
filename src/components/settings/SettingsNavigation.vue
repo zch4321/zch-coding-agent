@@ -22,6 +22,7 @@ const tabs = computed<
   { value: 'general', label: t('settings.general'), icon: 'settings' },
   { value: 'project', label: t('settings.project'), icon: 'folder' },
   { value: 'provider', label: t('settings.provider'), icon: 'settings' },
+  { value: 'limits', label: t('settings.limits'), icon: 'settings' },
   { value: 'permissions', label: t('settings.permissions'), icon: 'warning' },
   { value: 'skills', label: t('settings.skills'), icon: 'app' },
   { value: 'logging', label: t('settings.logging'), icon: 'file' },

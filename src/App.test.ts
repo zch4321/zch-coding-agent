@@ -103,6 +103,69 @@ describe('App', () => {
     ).toBe(true)
   })
 
+  it('keeps context usage pinned to the latest main model usage', async () => {
+    const pinia = createPinia()
+    const wrapper = mount(App, {
+      global: {
+        plugins: [pinia, i18n],
+      },
+    })
+    const store = useAgentStore(pinia)
+
+    store.usage = [
+      {
+        runId: 'run:main-usage' as RunId,
+        callId: 'llm:main-usage' as CallId,
+        order: 1,
+        usage: {
+          scope: 'main',
+          providerId: 'deepseek',
+          providerLabel: 'DeepSeek',
+          model: 'deepseek-v4-pro',
+          promptTokens: 20_000,
+          completionTokens: 1_000,
+          totalTokens: 21_000,
+          cacheHitTokens: 12_000,
+          cacheMissTokens: 8_000,
+          contextWindowTokens: 64_000,
+          contextWindowSource: 'default',
+          raw: {},
+        },
+      },
+      {
+        runId: 'run:main-usage' as RunId,
+        callId: 'call:approval-usage' as CallId,
+        order: 2,
+        usage: {
+          scope: 'approval',
+          providerId: 'deepseek',
+          providerLabel: 'DeepSeek',
+          model: 'approval-model',
+          promptTokens: 2_000,
+          completionTokens: 100,
+          totalTokens: 2_100,
+          cacheHitTokens: 0,
+          cacheMissTokens: 2_000,
+          contextWindowTokens: 1_000_000,
+          contextWindowSource: 'builtin',
+          raw: {},
+        },
+      },
+    ]
+    await nextTick()
+
+    const summary = wrapper.get('.usage-summary')
+    expect(summary.text()).toContain('20,000/64,000')
+    expect(summary.text()).toContain('31%')
+    expect(summary.text()).toContain('累计 23,100 Token')
+    expect(summary.text()).toContain('缓存命中输入 12,000')
+    expect(summary.text()).toContain('未命中输入 10,000')
+    expect(summary.text()).not.toContain('2,000/1,000,000')
+    expect(wrapper.get('.usage-progress span').attributes('style')).toContain(
+      'width: 31%',
+    )
+  })
+
   it('opens settings as a page from the project sidebar and returns to chat', async () => {
     const wrapper = mount(App, {
       global: {

@@ -60,9 +60,14 @@ export interface ProviderRequestSnapshot {
   prefixFingerprints?: string[]
 }
 
+export interface ProviderResponseFormat {
+  type: 'json_object'
+}
+
 export interface ProviderChatRequest {
   messages: ProviderMessage[]
   tools: JsonValue[]
+  responseFormat?: ProviderResponseFormat
   providerRequestOverride?: JsonValue
   signal: AbortSignal
   onRequest?: (snapshot: ProviderRequestSnapshot) => Promise<void> | void

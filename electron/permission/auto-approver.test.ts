@@ -70,6 +70,25 @@ class TextProvider implements LLMProvider {
   }
 }
 
+class CapturingProvider implements LLMProvider {
+  request: ProviderChatRequest | undefined
+
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
+    this.request = request
+    yield {
+      type: 'completed',
+      rawResponse: {},
+      turn: { role: 'assistant', content: '{"decision":"safe","note":"json"}' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
 describe('P3 auto approver', () => {
   it.each([
     ['not json', 'not json'],
@@ -96,6 +115,20 @@ describe('P3 auto approver', () => {
       note: 'bounded edit',
       valid: true,
     })
+  })
+
+  it('requests JSON object output from the provider', async () => {
+    const provider = new CapturingProvider()
+    const approver = new ProviderAutoApprover(provider)
+
+    await expect(
+      approver.evaluate(input, new AbortController().signal),
+    ).resolves.toMatchObject({
+      decision: 'safe',
+      valid: true,
+    })
+    expect(provider.request?.tools).toEqual([])
+    expect(provider.request?.responseFormat).toEqual({ type: 'json_object' })
   })
 
   it('converts network errors to dangerous human-review fallback', async () => {

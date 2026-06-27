@@ -229,6 +229,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
             stream_options: {
               include_usage: true,
             },
+            ...(request.responseFormat
+              ? { response_format: request.responseFormat }
+              : {}),
             ...thinking,
           }
     const requestBody = JSON.stringify(providerRequest)
