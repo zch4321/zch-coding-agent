@@ -908,6 +908,15 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         this.error = result.error.message
       }
     },
+    /**
+     * Applies a sequenced main-process agent event to the renderer stores.
+     *
+     * Keep the ingress rules centralized here: duplicate/gap detection,
+     * session-close cleanup, and current-session filtering all happen before
+     * domain state is updated. The switch below intentionally stays close to
+     * the event contract so ordering-sensitive timeline updates are easy to
+     * audit against `shared/agent-events`.
+     */
     handleAgentEvent(event: AgentEvent) {
       const timeline = useAgentTimelineStore()
       const changes = useAgentChangesStore()
