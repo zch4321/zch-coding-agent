@@ -18,6 +18,7 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - 权限模式：支持 ReadOnly、Auto、Confirm、Yolo 四档模式，副作用工具会经过确定性策略、自动审批或人工确认。
 - 文件工具：`read_file`、`list_dir`、`glob`、`grep`、`create_file`、`apply_patch`、`delete_file`，带分页、字节上限、diff 预览和执行前 precondition 复核。
 - 命令与终端：`run_command` 用于短命令和一次性进程执行，长跑测试、服务、watch 和 REPL 使用持久 PTY，并通过 `delay` + `terminal_read` 轮询输出。
+- 项目与代码智能：`.zch/project-model.json` 保存项目模块和 Serena 配置；`code_*` 工具可通过 Serena 定位符号、定义、引用和诊断，定义查询会尽量返回函数/类代码上下文。
 - 安全凭据：Provider API Key 存在 Electron `safeStorage`，不会暴露给 renderer、trace 文件或子进程环境。
 - 可观测性：可选择开启 JSONL trace，记录请求、响应、工具、审批和 usage，并支持离线回放、fork 和统计。
 - 可配置提示词：内置中英文 system prompt，设置页可编辑，界面语言会选择对应提示词。
@@ -80,4 +81,4 @@ Zch Coding Agent 的安全模型是“本地桌面应用 + 明确审批 + 工作
 
 ## 当前状态
 
-`v0.1.0` 以 Windows x64 为主要发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理和 trace 基础能力。后续方向可以扩展多 Provider、MCP / 插件加载器、代码索引和更强的 OS 级隔离。
+`v0.1.0` 以 Windows x64 为主要发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能和 trace 基础能力。后续方向可以扩展多 Provider、通用 MCP / 插件加载器、IDE 级编辑能力和更强的 OS 级隔离。

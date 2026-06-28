@@ -32,7 +32,9 @@ const POTENTIAL_CAPABILITIES: CodeIntelligenceCapability[] = [
   'diagnostics',
 ]
 const MAX_TEXT = 12_000
+const MAX_DEFINITION_TEXT = 32_000
 const MAX_ITEMS = 200
+const MAX_SYMBOL_CONTEXT = 16_384
 
 interface SerenaLaunchPlan {
   command: string
@@ -138,42 +140,67 @@ function flattenSymbols(value: unknown): unknown[] {
   return nested.length > 0 ? [value, ...nested] : [value]
 }
 
-function asNumber(value: unknown): number | undefined {
+function asInteger(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value)
-    ? Math.max(1, Math.floor(value))
+    ? Math.floor(value)
     : undefined
+}
+
+function asOneBased(value: unknown): number | undefined {
+  const number = asInteger(value)
+  return number === undefined ? undefined : Math.max(1, number + 1)
+}
+
+function objectValue(value: unknown, key: string): unknown {
+  return value && typeof value === 'object'
+    ? Reflect.get(value, key)
+    : undefined
+}
+
+function objectFrom(value: unknown, key: string): object | undefined {
+  const candidate = objectValue(value, key)
+  return candidate && typeof candidate === 'object' ? candidate : undefined
 }
 
 function rangeFrom(value: unknown): CodeRange | undefined {
   if (!value || typeof value !== 'object') return undefined
-  const range = Reflect.get(value, 'range')
+  const bodyLocation =
+    objectFrom(value, 'body_location') ?? objectFrom(value, 'bodyLocation')
+  const location = objectFrom(value, 'location')
+  const range = objectFrom(value, 'range') ?? objectFrom(location, 'range')
+  const selectionRange =
+    objectFrom(value, 'selectionRange') ?? objectFrom(value, 'selection_range')
   const start =
-    range && typeof range === 'object' ? Reflect.get(range, 'start') : undefined
-  const end =
-    range && typeof range === 'object' ? Reflect.get(range, 'end') : undefined
+    objectFrom(range, 'start') ?? objectFrom(selectionRange, 'start')
+  const end = objectFrom(range, 'end')
   const startLine =
-    asNumber(Reflect.get(value, 'start_line')) ??
-    asNumber(Reflect.get(value, 'line')) ??
-    (start && typeof start === 'object'
-      ? asNumber(Reflect.get(start, 'line'))
-      : undefined)
+    asOneBased(objectValue(value, 'start_line')) ??
+    asOneBased(objectValue(value, 'startLine')) ??
+    asOneBased(objectValue(value, 'line')) ??
+    asOneBased(objectValue(value, 'reference_line')) ??
+    asOneBased(objectValue(value, 'referenceLine')) ??
+    asOneBased(objectValue(bodyLocation, 'start_line')) ??
+    asOneBased(objectValue(bodyLocation, 'startLine')) ??
+    asOneBased(objectValue(location, 'line')) ??
+    asOneBased(objectValue(start, 'line'))
   const startColumn =
-    asNumber(Reflect.get(value, 'start_column')) ??
-    (start && typeof start === 'object'
-      ? asNumber(Reflect.get(start, 'character'))
-      : undefined) ??
+    asOneBased(objectValue(value, 'start_column')) ??
+    asOneBased(objectValue(value, 'startColumn')) ??
+    asOneBased(objectValue(value, 'column')) ??
+    asOneBased(objectValue(location, 'column')) ??
+    asOneBased(objectValue(start, 'character')) ??
     1
   const endLine =
-    asNumber(Reflect.get(value, 'end_line')) ??
-    (end && typeof end === 'object'
-      ? asNumber(Reflect.get(end, 'line'))
-      : undefined) ??
+    asOneBased(objectValue(value, 'end_line')) ??
+    asOneBased(objectValue(value, 'endLine')) ??
+    asOneBased(objectValue(bodyLocation, 'end_line')) ??
+    asOneBased(objectValue(bodyLocation, 'endLine')) ??
+    asOneBased(objectValue(end, 'line')) ??
     startLine
   const endColumn =
-    asNumber(Reflect.get(value, 'end_column')) ??
-    (end && typeof end === 'object'
-      ? asNumber(Reflect.get(end, 'character'))
-      : undefined) ??
+    asOneBased(objectValue(value, 'end_column')) ??
+    asOneBased(objectValue(value, 'endColumn')) ??
+    asOneBased(objectValue(end, 'character')) ??
     startColumn
 
   return startLine && endLine
@@ -267,7 +294,7 @@ function symbolItemFrom(value: unknown): CodeSymbolItem | undefined {
       ? { containerName: container.slice(0, 512) }
       : {}),
     ...(typeof context === 'string'
-      ? { context: context.slice(0, 4_096) }
+      ? { context: context.slice(0, MAX_SYMBOL_CONTEXT) }
       : {}),
   }
 }
@@ -324,10 +351,11 @@ function resultFromText(input: {
   capability: CodeIntelligenceCapability
   text: string
   fallbackName: string
+  maxText?: number
 }): CodeIntelligenceResult {
-  const truncated = input.text.length > MAX_TEXT
-  const preview = input.text.slice(0, MAX_TEXT)
-  const parsed = tryParseJson(preview)
+  const maxText = input.maxText ?? MAX_TEXT
+  const truncated = input.text.length > maxText
+  const parsed = tryParseJson(input.text)
   const items = flattenSymbols(parsed)
     .flatMap((value) => {
       const item = symbolItemFrom(value)
@@ -335,11 +363,12 @@ function resultFromText(input: {
     })
     .slice(0, MAX_ITEMS)
 
+  const preview = input.text.slice(0, maxText)
   if (items.length === 0 && preview.trim()) {
     items.push({
       name: input.fallbackName,
       kind: 'unknown',
-      context: preview.trim().slice(0, 4_096),
+      context: preview.trim().slice(0, MAX_SYMBOL_CONTEXT),
     })
   }
 
@@ -625,6 +654,9 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
       capability: input.capability,
       text,
       fallbackName: mapped.name,
+      ...(input.capability === 'definition'
+        ? { maxText: MAX_DEFINITION_TEXT }
+        : {}),
     })
   }
 
@@ -730,9 +762,9 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
         return tool('find_symbol', tools, {
           name_path_pattern: symbol,
           relative_path: relativePath,
-          include_body: false,
+          include_body: true,
           substring_matching: true,
-          max_answer_chars: MAX_TEXT,
+          max_answer_chars: MAX_DEFINITION_TEXT,
         })
       case 'references':
         if (!symbol) return undefined

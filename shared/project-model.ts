@@ -247,7 +247,7 @@ export const CodeSymbolItemSchema = Type.Object(
     path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
     range: Type.Optional(CodeRangeSchema),
     containerName: Type.Optional(Type.String({ maxLength: 512 })),
-    context: Type.Optional(Type.String({ maxLength: 4_096 })),
+    context: Type.Optional(Type.String({ maxLength: 16_384 })),
   },
   { additionalProperties: false },
 )

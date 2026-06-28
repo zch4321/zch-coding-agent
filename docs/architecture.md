@@ -161,6 +161,8 @@ type ToolResult =
 
 `ToolRegistry.providerDefinitions()` 在发给模型时为工具 schema 包装保留的 intent 字段，Provider 解析 tool call 后将其提升为 `ToolCall.reason` 并从 `args` 删除。MCP 转发只发送清理后的业务 `args`。若外部 schema 与保留字段冲突，注册时生成不冲突的字段名并记录映射。
 
+ProjectModel 与 Code Intelligence Facade 是受控内置工具，不直接暴露后端原始协议。`project_*` 工具只读写当前 workspace 的 `.zch/project-model.json` 元数据；`code_*` 工具通过 `CodeBackendManager` 路由到已配置后端。当前 Serena adapter 是专用只读 code-intelligence 后端：使用 MCP stdio client 调用 Serena 的符号、引用和诊断能力，但不会把原始 `mcp__serena__*` 工具注册给模型。`code_find_definition` 请求 Serena 返回定义体，并把函数/类代码和文档上下文放入结构化结果的 `items[].context`。如果 `<module_context>` 显示后端未配置或调用返回 `BACKEND_UNAVAILABLE` / `UNSUPPORTED_CAPABILITY`，Agent 应退回普通搜索和有界 `read_file`。
+
 `run_command` 的 schema 显式区分：
 
 ```ts

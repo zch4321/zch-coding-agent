@@ -15,7 +15,7 @@
 - 如果项目没有已配置模块，模型和用户都可以通过工具设置 module 根目录；自动检测只能作为可替换组件提供建议，检测结果必须带来源、hash/时间和可覆盖机制。
 - Module 配置保存为当前 workspace 的 `.zch/project-model.json` 项目元数据；应用可自动创建 `.zch/`，但不自动修改 `.gitignore`，只在 Project tab 提示用户是否忽略。
 - 如果项目已有模块，Prompt Harness 应把简洁 module 摘要注入上下文，供模型选择工具和判断代码边界。
-- 当语义代码工具可用时，Harness 应从提示词和工具描述层面鼓励模型优先使用 `code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_diagnostics` 等 IDE 级工具，再读取局部文件内容。
+- 当语义代码后端已配置或可用时，Harness 应从提示词和 `<module_context>` 层面鼓励模型优先使用 `code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_diagnostics` 等 IDE 级工具；后端不可用时应退回普通搜索和局部读取。
 - Serena、JetBrains、VS Code、LSP、ast-grep 等后端不应直接暴露成一堆原始工具给模型；模型应看到稳定的 Code Intelligence Facade。每种语言使用哪个后端由用户配置，不在同一语言上自动并行混用多个后端。
 - R4-R7 的第一条 vertical slice 已落地：`.zch` ProjectModel、Project tab、Project 工具、Code Intelligence Facade、Serena MCP 只读 adapter 和 Serena v1 稳定化。当前仍是 v1：没有完整 LSP 后端、没有多后端矩阵、没有写入类 IDE 重构能力。
 - Serena v1 已验证可通过 stdio MCP 启动并映射只读能力，Project tab 已提供结构化启动配置和启动命令预览，dashboard 默认保留但不自动打开。当前仍依赖用户本机安装或 command 绝对路径；托管安装、完整 module 编辑器、多后端配置和写入类 IDE 重构能力是下一步。
@@ -275,8 +275,9 @@ code_diagnostics
 
 - 已新增模型可见的只读 facade 工具：`code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_workspace_symbols`、`code_diagnostics`。
 - 输出已统一包含 `backendId`、`capability`、`precision`、`source`、`truncated`、`items`，错误路径返回结构化 `code` 和 `message`。
-- 工具和 base prompt 已提醒模型优先使用 ProjectModel 与 `code_*` 工具定位范围，再读局部文件。
+- 工具和 base prompt 已提醒模型先确认 ProjectModel；只有 `<module_context>` 显示 code intelligence backend 已配置时，才优先使用 `code_*` 工具定位范围。
 - `code_symbol_overview` 已收紧为文件级工具；目录输入会返回结构化 `PATH_NOT_FILE`，目录场景应改用 `code_workspace_symbols`、`rg` 或后续独立 `code_directory_overview`。
+- `code_find_definition` 通过 Serena `find_symbol(include_body=true)` 获取定义；后端支持时，`items[].context` 会包含函数/类定义体和文档上下文，模型可先用该内容判断再决定是否读取文件片段。
 - `code_diagnostics` 已映射 Serena `get_diagnostics_for_file`，先支持文件级 diagnostics；如果 Serena 不暴露该 raw tool，则返回 `UNSUPPORTED_CAPABILITY`。
 
 下一步：
@@ -287,7 +288,7 @@ code_diagnostics
 
 验收：
 
-- 模型可以在不知道具体后端的情况下完成 definition、references、diagnostics 查询。
+- 模型可以在不知道具体后端的情况下完成 definition、references、diagnostics 查询；definition 结果应尽量包含可直接使用的定义体上下文。
 - 大文件场景下不会默认把全文塞进上下文。
 - 所有外部后端输出都按不可信内容处理，并做大小、数量和时间限制。
 - 在支持 IDE 后端的项目中，Benchmark 和 trace 能看到 agent 优先使用 Code Intelligence Facade，而不是直接退回大范围全文读取。
@@ -355,7 +356,7 @@ interface CodeBackendBinding {
 第一阶段：Serena MCP 只读 backend v1。
 
 - 当前已通过官方 MCP TypeScript SDK 接入 Serena stdio server，没有直接暴露 raw `mcp__serena__*` 工具给模型。
-- 当前映射 Serena raw tools：`get_symbols_overview`、`find_symbol`、`find_referencing_symbols`、`get_diagnostics_for_file`。
+- 当前映射 Serena raw tools：`get_symbols_overview`、`find_symbol`、`find_referencing_symbols`、`get_diagnostics_for_file`；definition 查询使用 `find_symbol(include_body=true)` 返回定义体上下文。
 - 当前禁止 memory、shell、edit、rename、insert、replace 等 raw MCP 工具进入模型 tool schema。
 - 当前 Serena 使用结构化项目配置生成 argv：`command`、`context`、`projectMode`、`languageBackend`、`enableWebDashboard`、`openWebDashboard`、`logLevel`、`startupTimeoutMs`、`toolTimeoutMs` 和 `extraArgs` 保存在 `.zch/project-model.json`。旧 raw `args` 会在读取时迁移到结构化字段。
 - Dashboard 默认保留但不自动打开：默认生成 `--open-web-dashboard false`，`enableWebDashboard` 不强制关闭。

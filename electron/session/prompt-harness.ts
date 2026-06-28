@@ -373,6 +373,35 @@ async function detectModules(workspace: string): Promise<string> {
     : 'No module markers detected yet.'
 }
 
+function codeIntelligenceGuidance(project: {
+  serena: { enabled: boolean }
+  backendBindings: Array<{
+    enabled: boolean
+    capabilities: readonly string[]
+  }>
+}): string[] {
+  const enabledBindings = project.backendBindings.filter(
+    (binding) => binding.enabled && binding.capabilities.length > 0,
+  )
+  const capabilities = [
+    ...new Set(enabledBindings.flatMap((binding) => binding.capabilities)),
+  ].sort()
+
+  if (!project.serena.enabled || enabledBindings.length === 0) {
+    return [
+      'code_intelligence: unavailable',
+      'guidance: code_* tools are registered by the app, but no enabled project backend is configured; use search/read_file unless the user asks to configure the backend.',
+    ]
+  }
+
+  return [
+    'code_intelligence: configured',
+    `capabilities: ${capabilities.join(',') || 'unknown'}`,
+    'guidance: prefer code_workspace_symbols/code_symbol_overview to locate code, then code_find_definition for definitions; code_find_definition may return function/class bodies and documentation context in items[].context.',
+    'backend_start: code_* queries may start the configured backend on first use; if a query returns BACKEND_UNAVAILABLE or UNSUPPORTED_CAPABILITY, fall back to search/read_file.',
+  ]
+}
+
 async function projectContextSummary(input: RuntimeContextInput): Promise<{
   status: string
   content: string
@@ -421,6 +450,9 @@ async function projectContextSummary(input: RuntimeContextInput): Promise<{
         `default_module: ${project.defaultModuleId ?? 'none'}`,
         `serena: id=${project.serena.id} enabled=${project.serena.enabled} command=${project.serena.command}`,
         `gitignore_recommended_for_zch: ${snapshot.gitIgnoreRecommended}`,
+        '',
+        'semantic_tools:',
+        ...codeIntelligenceGuidance(project),
         '',
         'modules:',
         ...moduleLines,

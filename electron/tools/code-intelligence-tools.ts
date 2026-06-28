@@ -118,7 +118,7 @@ export function registerCodeIntelligenceTools(
   registry.registerTool({
     id: 'code_find_definition',
     description:
-      'Find a symbol definition through the configured IDE/code-intelligence backend.',
+      'Find a symbol definition through the configured IDE/code-intelligence backend. When supported, the result includes the definition range plus the function/class body and nearby documentation in items[].context, so prefer this before reading the file.',
     inputSchema: SymbolAtPathSchema,
     effects: ['code.read'],
     defaultRisk: 'low',

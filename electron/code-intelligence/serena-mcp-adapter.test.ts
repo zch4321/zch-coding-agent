@@ -85,8 +85,8 @@ function handle(message) {
               source: 'fake-lsp',
               code: 'TS2322',
               range: {
-                start: { line: 3, character: 5 },
-                end: { line: 3, character: 18 },
+                start: { line: 2, character: 4 },
+                end: { line: 2, character: 17 },
               },
             }]),
           }],
@@ -101,10 +101,13 @@ function handle(message) {
       name: name === 'get_symbols_overview' ? 'App' : symbolName,
       kind: 'class',
       relative_path: args.relative_path || 'src/app.ts',
-      range: {
-        start: { line: 1, character: 1 },
-        end: { line: 12, character: 1 },
+      body_location: {
+        start_line: 0,
+        end_line: 11,
       },
+      body: args.include_body
+        ? '/** App coordinates the feature. */\\nexport class App {\\n  run() {\\n    return true\\n  }\\n}'
+        : undefined,
     }
     send({
       id: message.id,
@@ -194,6 +197,12 @@ describe('SerenaMcpAdapter', () => {
         name: 'App',
         kind: 'class',
         path: 'src/app.ts',
+        range: {
+          startLine: 1,
+          startColumn: 1,
+          endLine: 12,
+          endColumn: 1,
+        },
       })
       expect(adapter.status(project(directory)).state).toBe('ready')
       expect(adapter.status(project(directory)).capabilities).toContain(
@@ -223,6 +232,43 @@ describe('SerenaMcpAdapter', () => {
         message: 'Type mismatch',
         source: 'fake-lsp',
         code: 'TS2322',
+        range: {
+          startLine: 3,
+          startColumn: 5,
+          endLine: 3,
+          endColumn: 18,
+        },
+      })
+    } finally {
+      await adapter.dispose()
+    }
+  })
+
+  it('returns a 1-based range for symbol definitions', async () => {
+    const directory = await workspace()
+    const script = await fakeServer(directory)
+    const adapter = adapterFor(script)
+
+    try {
+      const result = await adapter.query(project(directory), {
+        capability: 'definition',
+        workspace: directory,
+        path: 'src/app.ts',
+        symbolName: 'App',
+      })
+
+      expect(result.precision).toBe('semantic')
+      expect(result.items[0]).toMatchObject({
+        name: 'App',
+        path: 'src/app.ts',
+        range: {
+          startLine: 1,
+          startColumn: 1,
+          endLine: 12,
+          endColumn: 1,
+        },
+        context:
+          '/** App coordinates the feature. */\nexport class App {\n  run() {\n    return true\n  }\n}',
       })
     } finally {
       await adapter.dispose()

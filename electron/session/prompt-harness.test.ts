@@ -185,7 +185,43 @@ describe('prompt harness', () => {
       'project_model: .zch/project-model.json',
     )
     expect(state.history[1]?.content).toContain('module frontend')
+    expect(state.history[1]?.content).toContain('semantic_tools:')
+    expect(state.history[1]?.content).toContain(
+      'code_intelligence: unavailable',
+    )
     expect(state.history[1]?.content).toContain('code_backends:')
+  })
+
+  it('encourages code intelligence only when a backend is configured', async () => {
+    const workspace = path.join(
+      os.tmpdir(),
+      `prompt-harness-intelligence-${Date.now()}`,
+    )
+    await mkdir(workspace, { recursive: true })
+    const projectMetadata = new ProjectMetadataStore()
+    const snapshot = await projectMetadata.get(workspace)
+    await projectMetadata.save(workspace, {
+      ...snapshot.project,
+      serena: { ...snapshot.project.serena, enabled: true },
+      backendBindings: snapshot.project.backendBindings.map((binding) => ({
+        ...binding,
+        enabled: true,
+      })),
+    })
+    const state = ledger()
+
+    await appendInitialPromptHarness(state, {
+      workspace,
+      mode: 'readonly',
+      config: publicConfig(),
+      providerId: 'deepseek',
+      projectMetadata,
+    })
+
+    expect(state.history[1]?.content).toContain('code_intelligence: configured')
+    expect(state.history[1]?.content).toContain(
+      'code_find_definition may return function/class bodies',
+    )
   })
 
   it('records prompt build metadata without mutating existing messages', async () => {
