@@ -6,12 +6,36 @@ import {
   type IpcPayload,
 } from '../../shared/ipc-contract'
 import type { CallId, RunId, SessionId, TerminalId } from '../../shared/ids'
+import type { ProjectModel } from '../../shared/project-model'
 import { handleIpcInvocation, registerIpcHandlers } from './index'
 
 const sessionId = 'session-1' as SessionId
 const runId = 'run-1' as RunId
 const callId = 'call-1' as CallId
 const terminalId = 'terminal-1' as TerminalId
+const projectModel = {
+  schemaVersion: 1,
+  workspaceRoot: 'F:/workspace',
+  modules: [],
+  storage: 'project-local',
+  backendBindings: [],
+  serena: {
+    id: 'serena',
+    enabled: false,
+    command: 'serena',
+    args: [
+      'start-mcp-server',
+      '--context',
+      'ide-assistant',
+      '--project',
+      '${workspace}',
+    ],
+    startupTimeoutMs: 15_000,
+    toolTimeoutMs: 30_000,
+    languages: ['typescript', 'javascript'],
+  },
+  updatedAt: '2026-06-28T00:00:00.000Z',
+} satisfies ProjectModel
 
 function createEvent(options: {
   trusted?: boolean
@@ -74,6 +98,19 @@ const validPayloads: {
     version: 1,
     workspace: 'F:/workspace',
     kind: 'file',
+  },
+  'project:get': { version: 1, workspace: 'F:/workspace' },
+  'project:save': {
+    version: 1,
+    workspace: 'F:/workspace',
+    project: projectModel,
+  },
+  'project:detect-modules': { version: 1, workspace: 'F:/workspace' },
+  'project:backend-status': { version: 1, workspace: 'F:/workspace' },
+  'project:restart-backend': {
+    version: 1,
+    workspace: 'F:/workspace',
+    backendId: 'serena',
   },
   'session:create': {
     version: 1,

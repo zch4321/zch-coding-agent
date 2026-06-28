@@ -40,6 +40,13 @@ const api: AgentApi = {
   readWorkspaceFile: (payload) => invoke('workspace:read-file', payload),
   chooseWorkspaceContext: (payload) =>
     invoke('workspace:choose-context', payload),
+  getProject: (payload) => invoke('project:get', payload),
+  saveProject: (payload) => invoke('project:save', payload),
+  detectProjectModules: (payload) => invoke('project:detect-modules', payload),
+  getProjectBackendStatus: (payload) =>
+    invoke('project:backend-status', payload),
+  restartProjectBackend: (payload) =>
+    invoke('project:restart-backend', payload),
   createSession: (payload) => invoke('session:create', payload),
   listChanges: (payload) => invoke('changes:list', payload),
   revertChange: (payload) => invoke('changes:revert', payload),

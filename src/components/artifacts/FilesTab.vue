@@ -1,0 +1,298 @@
+<script setup lang="ts">
+import { computed, h, ref, watch } from 'vue'
+import { NTooltip, NTree, type TreeOption } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
+import { IPC_VERSION } from '../../../shared/channels'
+import { useAgentStore } from '../../stores/agent'
+import UiIcon from '../UiIcon.vue'
+import FileCodePreview from './FileCodePreview.vue'
+
+interface ExplorerEntry {
+  path: string
+  name: string
+  type: 'file' | 'directory'
+}
+
+interface OpenFile {
+  path: string
+  content: string
+  totalBytes: number
+  truncated: boolean
+}
+
+const agent = useAgentStore()
+const { t } = useI18n()
+
+const explorerTree = ref<TreeOption[]>([])
+const explorerLoading = ref(false)
+const explorerError = ref('')
+const explorerTruncated = ref(false)
+const openedFiles = ref<OpenFile[]>([])
+const activeFilePath = ref('explorer')
+let directoryRequestGeneration = 0
+let fileRequestGeneration = 0
+
+const activeFile = computed(() =>
+  openedFiles.value.find((file) => file.path === activeFilePath.value),
+)
+
+function toTreeOptions(entries: ExplorerEntry[]): TreeOption[] {
+  return entries.map((entry) => ({
+    key: entry.path,
+    label: entry.name,
+    path: entry.path,
+    entryType: entry.type,
+    isLeaf: entry.type === 'file',
+  }))
+}
+
+async function fetchDirectory(
+  path: string,
+  generation: number,
+): Promise<TreeOption[] | undefined> {
+  const bridge = window.agentApi
+  const workspace = agent.workspacePath
+  if (!bridge || !workspace) {
+    return undefined
+  }
+
+  explorerError.value = ''
+  const result = await bridge.listWorkspaceDirectory({
+    version: IPC_VERSION,
+    workspace,
+    path,
+  })
+
+  if (
+    generation !== directoryRequestGeneration ||
+    workspace !== agent.workspacePath ||
+    (result.ok && result.value.workspace !== workspace)
+  ) {
+    return
+  }
+
+  if (result.ok) {
+    if (result.value.truncated) explorerTruncated.value = true
+    return toTreeOptions(result.value.entries)
+  } else {
+    explorerError.value = result.error.message
+    return undefined
+  }
+}
+
+async function loadRootDirectory(generation: number) {
+  explorerLoading.value = true
+  const children = await fetchDirectory('.', generation)
+  if (generation !== directoryRequestGeneration) return
+  explorerLoading.value = false
+  if (children) explorerTree.value = children
+}
+
+async function loadTreeNode(option: TreeOption) {
+  if (option.entryType !== 'directory' || typeof option.path !== 'string') {
+    return true
+  }
+
+  const generation = directoryRequestGeneration
+  const children = await fetchDirectory(option.path, generation)
+  if (!children || generation !== directoryRequestGeneration) return false
+  option.children = children
+  return true
+}
+
+function treeClickBehavior({ option }: { option: TreeOption }) {
+  return option.entryType === 'directory' ? 'toggleExpand' : 'toggleSelect'
+}
+
+function renderTreePrefix({ option }: { option: TreeOption }) {
+  return h(UiIcon, {
+    name: option.entryType === 'directory' ? 'folder' : 'file',
+  })
+}
+
+async function openExplorerFile(path: string) {
+  const bridge = window.agentApi
+  const workspace = agent.workspacePath
+  const generation = ++fileRequestGeneration
+  if (!bridge || !workspace) return
+  explorerError.value = ''
+  const result = await bridge.readWorkspaceFile({
+    version: IPC_VERSION,
+    workspace,
+    path,
+  })
+
+  if (
+    generation !== fileRequestGeneration ||
+    workspace !== agent.workspacePath ||
+    (result.ok && result.value.workspace !== workspace)
+  ) {
+    return
+  }
+
+  if (!result.ok) {
+    explorerError.value = result.error.message
+    return
+  }
+
+  const existing = openedFiles.value.find(
+    (file) => file.path === result.value.path,
+  )
+  if (existing) Object.assign(existing, result.value)
+  else openedFiles.value.push(result.value)
+  activeFilePath.value = result.value.path
+}
+
+function handleTreeSelection(
+  _keys: Array<string | number>,
+  options: Array<TreeOption | null>,
+) {
+  const option = options.at(-1)
+  if (option?.entryType === 'file' && typeof option.path === 'string') {
+    void openExplorerFile(option.path)
+  }
+}
+
+function closeFile(path: string) {
+  const index = openedFiles.value.findIndex((file) => file.path === path)
+  openedFiles.value = openedFiles.value.filter((file) => file.path !== path)
+  if (activeFilePath.value === path) {
+    activeFilePath.value =
+      openedFiles.value[Math.max(0, index - 1)]?.path ?? 'explorer'
+  }
+}
+
+watch(
+  () => agent.workspacePath,
+  (workspace, previous) => {
+    directoryRequestGeneration += 1
+    fileRequestGeneration += 1
+    explorerLoading.value = false
+    explorerError.value = ''
+    explorerTree.value = []
+    explorerTruncated.value = false
+
+    if (workspace && workspace !== previous) {
+      openedFiles.value = []
+      activeFilePath.value = 'explorer'
+      void loadRootDirectory(directoryRequestGeneration)
+    } else if (!workspace) {
+      explorerTree.value = []
+      openedFiles.value = []
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  () => agent.workspaceFileRevision,
+  () => {
+    directoryRequestGeneration += 1
+    explorerTree.value = []
+    void loadRootDirectory(directoryRequestGeneration)
+    if (activeFile.value) void openExplorerFile(activeFile.value.path)
+  },
+)
+</script>
+
+<template>
+  <section class="artifact-content">
+    <div class="file-tabs" role="tablist" :aria-label="t('artifact.openFiles')">
+      <button
+        type="button"
+        role="tab"
+        :aria-selected="activeFilePath === 'explorer'"
+        :class="{ active: activeFilePath === 'explorer' }"
+        @click="activeFilePath = 'explorer'"
+      >
+        <UiIcon name="explorer" />{{ t('artifact.explorer') }}
+      </button>
+      <div
+        v-for="file in openedFiles"
+        :key="file.path"
+        class="file-tab"
+        :class="{ active: activeFilePath === file.path }"
+      >
+        <NTooltip>
+          <template #trigger>
+            <button
+              class="file-tab-label"
+              type="button"
+              role="tab"
+              :aria-selected="activeFilePath === file.path"
+              @click="activeFilePath = file.path"
+            >
+              <UiIcon name="file" />
+              <span>{{ file.path.split('/').at(-1) }}</span>
+            </button>
+          </template>
+          {{ file.path }}
+        </NTooltip>
+        <button
+          class="tab-close"
+          type="button"
+          :aria-label="t('artifact.closeFile')"
+          @click="closeFile(file.path)"
+        >
+          <UiIcon name="close" />
+        </button>
+      </div>
+    </div>
+
+    <div v-if="activeFilePath === 'explorer'" class="explorer-view">
+      <div v-if="!agent.workspacePath" class="artifact-empty">
+        <UiIcon name="folder" />
+        <p>{{ t('artifact.chooseHint') }}</p>
+      </div>
+      <div v-else class="explorer-tree-state">
+        <p v-if="explorerLoading" class="artifact-message">
+          {{ t('artifact.loading') }}
+        </p>
+        <p v-if="explorerError" class="artifact-message error">
+          {{ explorerError }}
+        </p>
+        <NTree
+          v-if="explorerTree.length"
+          class="explorer-tree"
+          :data="explorerTree"
+          :on-load="loadTreeNode"
+          :render-prefix="renderTreePrefix"
+          :override-default-node-click-behavior="treeClickBehavior"
+          block-line
+          show-line
+          virtual-scroll
+          @update:selected-keys="handleTreeSelection"
+        />
+        <p
+          v-else-if="!explorerLoading && !explorerError"
+          class="artifact-message"
+        >
+          {{ t('artifact.emptyDirectory') }}
+        </p>
+        <p v-if="explorerTruncated" class="artifact-message">
+          {{ t('artifact.truncatedList') }}
+        </p>
+      </div>
+    </div>
+
+    <div v-else-if="activeFile" class="file-viewer">
+      <div class="file-viewer-header">
+        <div>
+          <strong>{{ activeFile.path }}</strong>
+          <span>
+            {{ t('artifact.readonly') }} ·
+            {{
+              t('artifact.bytes', {
+                count: activeFile.totalBytes.toLocaleString(),
+              })
+            }}
+          </span>
+        </div>
+        <span v-if="activeFile.truncated" class="truncated-badge">
+          {{ t('artifact.truncated') }}
+        </span>
+      </div>
+      <FileCodePreview :path="activeFile.path" :content="activeFile.content" />
+    </div>
+  </section>
+</template>

@@ -46,6 +46,21 @@ export interface AgentApi {
   chooseWorkspaceContext(
     payload: IpcPayload<'workspace:choose-context'>,
   ): Promise<IpcResult<'workspace:choose-context'>>
+  getProject(
+    payload: IpcPayload<'project:get'>,
+  ): Promise<IpcResult<'project:get'>>
+  saveProject(
+    payload: IpcPayload<'project:save'>,
+  ): Promise<IpcResult<'project:save'>>
+  detectProjectModules(
+    payload: IpcPayload<'project:detect-modules'>,
+  ): Promise<IpcResult<'project:detect-modules'>>
+  getProjectBackendStatus(
+    payload: IpcPayload<'project:backend-status'>,
+  ): Promise<IpcResult<'project:backend-status'>>
+  restartProjectBackend(
+    payload: IpcPayload<'project:restart-backend'>,
+  ): Promise<IpcResult<'project:restart-backend'>>
   createSession(
     payload: IpcPayload<'session:create'>,
   ): Promise<IpcResult<'session:create'>>
@@ -152,6 +167,11 @@ export const AGENT_API_KEYS = [
   'listWorkspaceDirectory',
   'readWorkspaceFile',
   'chooseWorkspaceContext',
+  'getProject',
+  'saveProject',
+  'detectProjectModules',
+  'getProjectBackendStatus',
+  'restartProjectBackend',
   'createSession',
   'listChanges',
   'revertChange',

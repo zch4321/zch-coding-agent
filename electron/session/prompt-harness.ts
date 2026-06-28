@@ -12,6 +12,7 @@ import type {
 import type { JsonValue } from '../../shared/json'
 import type { ProviderMessage } from '../providers/provider'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
+import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import {
   formatAgentsInstructions,
@@ -57,6 +58,7 @@ interface RuntimeContextInput {
   config: PublicConfig
   providerId: string
   promptRegistry?: PromptRegistry
+  projectMetadata?: ProjectMetadataStore
   reason: string
   toolNames?: readonly string[]
   signal?: AbortSignal
@@ -68,6 +70,7 @@ interface HarnessPromptInput {
   config: PublicConfig
   providerId: string
   promptRegistry?: PromptRegistry
+  projectMetadata?: ProjectMetadataStore
   skillSummary?: string
   compactHistory?: {
     summary: string
@@ -370,6 +373,75 @@ async function detectModules(workspace: string): Promise<string> {
     : 'No module markers detected yet.'
 }
 
+async function projectContextSummary(input: RuntimeContextInput): Promise<{
+  status: string
+  content: string
+}> {
+  if (!input.projectMetadata) {
+    return {
+      status: 'detected',
+      content: await detectModules(input.workspace).catch(
+        () => 'No module summary available.',
+      ),
+    }
+  }
+
+  try {
+    const snapshot = await input.projectMetadata.get(input.workspace)
+    const project = snapshot.project
+    const moduleLines =
+      project.modules.length > 0
+        ? project.modules.map((module) =>
+            [
+              `module ${module.id}`,
+              `root=${module.root}`,
+              `languages=${module.languages.join(',') || 'unknown'}`,
+              `source=${module.source}`,
+              `confidence=${module.confidence}`,
+              `manifests=${module.manifests.join(',') || 'none'}`,
+            ].join(' '),
+          )
+        : [
+            'No modules configured yet. Use project_detect_modules and project_set_modules before broad code exploration.',
+          ]
+    const backendLines = project.backendBindings.map((binding) =>
+      [
+        `backend ${binding.id}`,
+        `language=${binding.language}`,
+        `kind=${binding.backendKind}`,
+        `enabled=${binding.enabled}`,
+        `capabilities=${binding.capabilities.join(',')}`,
+      ].join(' '),
+    )
+
+    return {
+      status: project.modules.length > 0 ? 'configured' : 'empty',
+      content: [
+        `project_model: ${snapshot.path}`,
+        `default_module: ${project.defaultModuleId ?? 'none'}`,
+        `serena: id=${project.serena.id} enabled=${project.serena.enabled} command=${project.serena.command}`,
+        `gitignore_recommended_for_zch: ${snapshot.gitIgnoreRecommended}`,
+        '',
+        'modules:',
+        ...moduleLines,
+        '',
+        'code_backends:',
+        ...(backendLines.length > 0
+          ? backendLines
+          : ['No backend bindings configured.']),
+      ].join('\n'),
+    }
+  } catch (error) {
+    return {
+      status: 'unavailable',
+      content:
+        error instanceof Error
+          ? `ProjectModel unavailable: ${error.message}`
+          : 'ProjectModel unavailable.',
+    }
+  }
+}
+
 async function runtimeContext(input: RuntimeContextInput): Promise<{
   content: string
   hash: string
@@ -383,7 +455,7 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
   const [git, projectTree, modules] = await Promise.all([
     gitSummary(input.workspace, input.signal).catch(() => 'git: unavailable'),
     projectTreeSummary(input.workspace).catch(() => 'unavailable'),
-    detectModules(input.workspace).catch(() => 'No module summary available.'),
+    projectContextSummary(input),
   ])
   const currentTime = new Date().toISOString()
   const body = [
@@ -413,8 +485,8 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
     ),
     tagged(
       'module_context',
-      { status: 'detected', semantic_tools: 'not_configured' },
-      modules,
+      { status: modules.status, semantic_tools: 'code_intelligence_facade' },
+      modules.content,
     ),
   ].join('\n\n')
   const content = `${prompt.content}\n\n${body}`

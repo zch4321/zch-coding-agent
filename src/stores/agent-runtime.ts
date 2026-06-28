@@ -14,20 +14,20 @@ import type {
 } from '../../shared/context'
 import type { RunId, SessionId } from '../../shared/ids'
 import type { PlanStatus } from '../../shared/orchestration'
-import type { ChatMessage, PendingApproval } from './agent-types'
+import type { PendingApproval } from './agent-types'
 import { useAgentChangesStore } from './agent-changes'
 import { useAgentSettingsStore } from './agent-settings'
 import { useAgentShellStore } from './agent-shell'
 import { useAgentTimelineStore } from './agent-timeline'
 import { useAgentWorkbenchStore } from './agent-workbench'
+import {
+  carryoverFromMessages,
+  handleRuntimeAgentEvent,
+  type PendingCarryoverInterjection,
+} from './runtime-events'
 import { requestId } from './workbench-persistence'
 
 let persistTimer: number | undefined
-
-interface PendingCarryoverInterjection {
-  interjectionId: string
-  content: string
-}
 
 interface SendMessageOptions {
   text?: string
@@ -82,27 +82,6 @@ function attachmentRefs(
     path: attachment.path,
     source: attachment.source,
   }))
-}
-
-function enqueueCarryover(
-  queue: PendingCarryoverInterjection[],
-  item: PendingCarryoverInterjection,
-): void {
-  if (!queue.some((entry) => entry.interjectionId === item.interjectionId)) {
-    queue.push(item)
-  }
-}
-
-function carryoverFromMessages(
-  messages: ChatMessage[],
-): PendingCarryoverInterjection[] {
-  return messages.flatMap((message) =>
-    message.role === 'interjection' &&
-    message.interjectionStatus === 'carryover' &&
-    message.interjectionId
-      ? [{ interjectionId: message.interjectionId, content: message.text }]
-      : [],
-  )
 }
 
 export const useAgentRuntimeStore = defineStore('agent-runtime', {
@@ -951,178 +930,14 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       }
 
       if (event.sessionId !== this.sessionId) return
-      switch (event.type) {
-        case 'run.status':
-          this.runStatus = event.status
-          this.activeRunId =
-            event.status === 'completed' ||
-            event.status === 'cancelled' ||
-            event.status === 'failed'
-              ? undefined
-              : event.runId
-          if (event.error) this.error = event.error.message
-          if (!this.activeRunId) {
-            this.schedulePersist()
-            void this.flushCarryoverInterjections()
-          }
-          break
-        case 'assistant.text.delta':
-          timeline.assistantMessage(event.runId).text += event.delta
-          this.schedulePersist()
-          break
-        case 'assistant.reasoning.delta':
-          timeline.assistantMessage(event.runId).reasoning += event.delta
-          this.schedulePersist()
-          break
-        case 'assistant.message.completed': {
-          const message = timeline.assistantMessage(event.runId)
-          message.text = event.text
-          if (event.reasoning !== undefined) {
-            message.reasoning = event.reasoning
-          }
-          this.schedulePersist()
-          break
-        }
-        case 'tool.proposed':
-          timeline.tools.unshift({
-            callId: event.callId,
-            runId: event.runId,
-            tool: event.tool,
-            args: event.args,
-            reason: event.reason,
-            status: 'proposed',
-            order: timeline.nextTimelineOrder(),
-          })
-          break
-        case 'tool.completed': {
-          const tool = timeline.tools.find(
-            (item) => item.callId === event.callId,
-          )
-          if (tool) {
-            tool.status = 'completed'
-            tool.result = event.result
-            tool.approval = event.approval
-            if (
-              tool.tool === 'create_file' ||
-              tool.tool === 'apply_patch' ||
-              tool.tool === 'delete_file'
-            ) {
-              void changes.loadConversationChanges()
-            }
-          }
-          if (
-            this.pendingApproval?.runId === event.runId &&
-            this.pendingApproval.callId === event.callId
-          ) {
-            this.pendingApproval = undefined
-          }
-          break
-        }
-        case 'llm.usage':
-          timeline.usage.push({
-            runId: event.runId,
-            callId: event.callId,
-            usage: event.usage,
-            order: timeline.nextTimelineOrder(),
-          })
-          this.schedulePersist()
-          break
-        case 'orchestrator.message':
-          timeline.messages.push({
-            id: requestId(),
-            role: 'orchestrator',
-            runId: event.runId,
-            text: event.text,
-            reasoning: '',
-            order: timeline.nextTimelineOrder(),
-          })
-          this.schedulePersist()
-          break
-        case 'interjection.updated': {
-          const existing = timeline.messages.find(
-            (item) =>
-              item.role === 'interjection' &&
-              item.interjectionId === event.interjectionId,
-          )
-          if (existing) {
-            existing.interjectionStatus = event.status
-            existing.text = event.content
-          } else {
-            timeline.messages.push({
-              id: requestId(),
-              role: 'interjection',
-              runId: event.runId,
-              text: event.content,
-              reasoning: '',
-              interjectionId: event.interjectionId,
-              interjectionStatus: event.status,
-              order: timeline.nextTimelineOrder(),
-            })
-          }
-          this.schedulePersist()
-          break
-        }
-        case 'interjection.carryover': {
-          // The run reached a final answer; this interjection becomes the next
-          // ordinary user turn. Keep the placeholder visible until that send
-          // succeeds, so a reload or IPC failure does not erase the user's
-          // original message.
-          const existing = timeline.messages.find(
-            (item) =>
-              item.role === 'interjection' &&
-              item.interjectionId === event.interjectionId,
-          )
-          if (existing) {
-            existing.interjectionStatus = 'carryover'
-            existing.text = event.content
-          } else {
-            timeline.messages.push({
-              id: requestId(),
-              role: 'interjection',
-              runId: event.runId,
-              text: event.content,
-              reasoning: '',
-              interjectionId: event.interjectionId,
-              interjectionStatus: 'carryover',
-              order: timeline.nextTimelineOrder(),
-            })
-          }
-          enqueueCarryover(this.pendingCarryover, {
-            interjectionId: event.interjectionId,
-            content: event.content,
-          })
-          this.schedulePersist()
-          if (!this.activeRunId) void this.flushCarryoverInterjections()
-          break
-        }
-        case 'goal.updated':
-          timeline.goal = event.goal ? structuredClone(event.goal) : undefined
-          this.schedulePersist()
-          break
-        case 'plan.updated':
-          timeline.plan = event.plan ? structuredClone(event.plan) : undefined
-          this.schedulePersist()
-          break
-        case 'approval.requested':
-          if (event.diff) timeline.latestReviewedApproval = undefined
-          this.pendingApproval = {
-            runId: event.runId,
-            callId: event.callId,
-            kind: event.kind,
-            tool: event.tool,
-            args: event.args,
-            reason: event.reason,
-            signals: event.policySignals,
-            diff: event.diff,
-            diffHash: event.diffHash,
-            rememberable: event.rememberable,
-            rememberArgConstraints: event.rememberArgConstraints,
-            expiresAt: event.expiresAt,
-            status: 'requested',
-            order: timeline.nextTimelineOrder(),
-          }
-          break
-      }
+      handleRuntimeAgentEvent(event, {
+        runtime: this,
+        timeline,
+        changes,
+        schedulePersist: (touchUpdatedAt) =>
+          this.schedulePersist(touchUpdatedAt),
+        flushCarryoverInterjections: () => this.flushCarryoverInterjections(),
+      })
     },
   },
 })

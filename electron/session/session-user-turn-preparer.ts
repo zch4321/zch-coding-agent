@@ -1,6 +1,7 @@
 import type { RunContext } from '../../shared/context'
 import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
+import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import type { SkillsManager } from '../skills/manager'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { prepareRunContext } from './context-attachments'
@@ -28,6 +29,7 @@ export class SessionUserTurnPreparer {
   readonly #toolRegistry: ToolRegistry
   readonly #skillsManager: SkillsManager | undefined
   readonly #promptRegistry: PromptRegistry | undefined
+  readonly #projectMetadata: ProjectMetadataStore | undefined
   readonly #orchestratorMessages: SessionOrchestratorMessages
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
 
@@ -36,6 +38,7 @@ export class SessionUserTurnPreparer {
     toolRegistry: ToolRegistry
     skillsManager?: SkillsManager
     promptRegistry?: PromptRegistry
+    projectMetadata?: ProjectMetadataStore
     orchestratorMessages: SessionOrchestratorMessages
     emit: (session: SessionState, event: AgentEventDraft) => void
   }) {
@@ -43,6 +46,7 @@ export class SessionUserTurnPreparer {
     this.#toolRegistry = options.toolRegistry
     this.#skillsManager = options.skillsManager
     this.#promptRegistry = options.promptRegistry
+    this.#projectMetadata = options.projectMetadata
     this.#orchestratorMessages = options.orchestratorMessages
     this.#emit = options.emit
   }
@@ -60,6 +64,7 @@ export class SessionUserTurnPreparer {
       config,
       providerId: session.provider,
       promptRegistry: this.#promptRegistry,
+      projectMetadata: this.#projectMetadata,
       reason: 'run_started',
       toolNames: this.#toolRegistry.list().map((tool) => tool.id),
       signal: run.controller.signal,
@@ -70,6 +75,7 @@ export class SessionUserTurnPreparer {
       config,
       providerId: session.provider,
       promptRegistry: this.#promptRegistry,
+      projectMetadata: this.#projectMetadata,
       skillSummary: this.#skillsManager?.summaryPrompt(),
       toolNames: this.#toolRegistry.list().map((tool) => tool.id),
       signal: run.controller.signal,

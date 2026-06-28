@@ -24,6 +24,11 @@ import { SkillError, type SkillsManager } from '../skills/manager'
 import { TraceServiceError, type TraceService } from '../logging/service'
 import type { WorkbenchStore } from '../workbench/store'
 import type { HttpTransport } from '../net/http-transport'
+import {
+  ProjectMetadataError,
+  type ProjectMetadataStore,
+} from '../project/project-metadata-store'
+import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import { IpcFault, type IpcBusinessHandlers } from './index'
 
 export interface AppIpcHandlerDependencies {
@@ -33,11 +38,25 @@ export interface AppIpcHandlerDependencies {
   traceService: TraceService
   changeHistory: ChangeHistoryStore
   workbenchStore: WorkbenchStore
+  projectMetadata: ProjectMetadataStore
+  codeBackends: CodeBackendManager
   getHttpTransport?: () => HttpTransport
   refreshHttpTransport?: (
     proxy: ReturnType<ConfigStore['getPublicConfig']>['network']['httpProxy'],
   ) => void
   getMainWindow: () => BrowserWindow | undefined
+}
+
+function projectMetadataFault(error: unknown): IpcFault | undefined {
+  if (!(error instanceof ProjectMetadataError)) return undefined
+
+  return new IpcFault({
+    code:
+      error.code === 'WORKSPACE_NOT_FOUND'
+        ? 'NOT_FOUND'
+        : 'PRECONDITION_FAILED',
+    message: error.message,
+  })
 }
 
 export function createAppIpcHandlers(
@@ -50,6 +69,8 @@ export function createAppIpcHandlers(
     traceService,
     changeHistory,
     workbenchStore,
+    projectMetadata,
+    codeBackends,
     getHttpTransport,
     refreshHttpTransport,
     getMainWindow,
@@ -388,6 +409,55 @@ export function createAppIpcHandlers(
           })
         }
 
+        throw error
+      }
+    },
+    'project:get': async (payload) => {
+      try {
+        return await projectMetadata.get(payload.workspace)
+      } catch (error) {
+        const fault = projectMetadataFault(error)
+        if (fault) throw fault
+        throw error
+      }
+    },
+    'project:save': async (payload) => {
+      try {
+        return await projectMetadata.save(payload.workspace, payload.project)
+      } catch (error) {
+        const fault = projectMetadataFault(error)
+        if (fault) throw fault
+        throw error
+      }
+    },
+    'project:detect-modules': async (payload) => {
+      try {
+        return {
+          modules: await projectMetadata.detectModules(payload.workspace),
+        }
+      } catch (error) {
+        const fault = projectMetadataFault(error)
+        if (fault) throw fault
+        throw error
+      }
+    },
+    'project:backend-status': async (payload) => {
+      try {
+        return {
+          statuses: await codeBackends.statuses(payload.workspace),
+        }
+      } catch (error) {
+        const fault = projectMetadataFault(error)
+        if (fault) throw fault
+        throw error
+      }
+    },
+    'project:restart-backend': async (payload) => {
+      try {
+        return await codeBackends.restart(payload.workspace, payload.backendId)
+      } catch (error) {
+        const fault = projectMetadataFault(error)
+        if (fault) throw fault
         throw error
       }
     },

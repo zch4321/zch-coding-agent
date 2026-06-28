@@ -24,6 +24,7 @@ import type {
 import type { CallId } from '../../shared/ids'
 import { normalizeLlmUsage } from '../providers/usage'
 import type { PromptRegistry } from '../prompts/registry'
+import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import {
   appendAgentsContextIfChanged,
   appendRuntimeContextIfChanged,
@@ -41,6 +42,7 @@ export class SessionProviderTurnRunner {
   readonly #toolRegistry: ToolRegistry
   readonly #pluginBus: PluginEventBus | undefined
   readonly #promptRegistry: PromptRegistry | undefined
+  readonly #projectMetadata: ProjectMetadataStore | undefined
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #onDiagnostic: (message: string, error?: unknown) => void
@@ -51,6 +53,7 @@ export class SessionProviderTurnRunner {
     toolRegistry: ToolRegistry
     pluginBus?: PluginEventBus
     promptRegistry?: PromptRegistry
+    projectMetadata?: ProjectMetadataStore
     fetchImpl?: typeof fetch
     providerFactory: SessionManagerOptions['providerFactory']
     onDiagnostic: (message: string, error?: unknown) => void
@@ -60,6 +63,7 @@ export class SessionProviderTurnRunner {
     this.#toolRegistry = options.toolRegistry
     this.#pluginBus = options.pluginBus
     this.#promptRegistry = options.promptRegistry
+    this.#projectMetadata = options.projectMetadata
     this.#fetchImpl = options.fetchImpl
     this.#providerFactory = options.providerFactory
     this.#onDiagnostic = options.onDiagnostic
@@ -90,6 +94,7 @@ export class SessionProviderTurnRunner {
       config,
       providerId: session.provider,
       promptRegistry: this.#promptRegistry,
+      projectMetadata: this.#projectMetadata,
       reason: 'provider_call',
       toolNames: this.#toolRegistry.list().map((tool) => tool.id),
       signal: run.controller.signal,
@@ -100,6 +105,7 @@ export class SessionProviderTurnRunner {
       config,
       providerId: session.provider,
       promptRegistry: this.#promptRegistry,
+      projectMetadata: this.#projectMetadata,
       toolNames: this.#toolRegistry.list().map((tool) => tool.id),
       signal: run.controller.signal,
     })

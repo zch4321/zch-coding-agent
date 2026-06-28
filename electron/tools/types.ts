@@ -14,6 +14,8 @@ export type Effect =
   | 'instruction.read'
   | 'vcs.read'
   | 'vcs.write'
+  | 'workspace.metadata.write'
+  | 'code.read'
   | 'external.unknown'
 
 export interface ToolDefinition<Schema extends TSchema = TSchema> {

@@ -272,7 +272,7 @@ describe('App', () => {
     expect(wrapper.text()).toContain('example')
 
     const artifactTabs = wrapper.findAll('.artifact-tabs button')
-    expect(artifactTabs).toHaveLength(3)
+    expect(artifactTabs).toHaveLength(4)
     await artifactTabs[2]?.trigger('click')
     expect(wrapper.find('.diff-view').exists()).toBe(true)
     expect(wrapper.text()).toContain('未选择变更')

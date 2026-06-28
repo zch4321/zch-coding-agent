@@ -15,6 +15,12 @@ import {
 } from './ids'
 import { JsonValueSchema } from './json'
 import { PlanStateSchema, PlanStatusSchema } from './orchestration'
+import {
+  CodeBackendStatusSchema,
+  DetectedProjectModulesSchema,
+  ProjectMetadataSnapshotSchema,
+  ProjectModelSchema,
+} from './project-model'
 import { TerminalInfoSchema, TerminalSnapshotSchema } from './terminal'
 import { SkillListSchema, SkillSummarySchema } from './skills'
 import {
@@ -314,6 +320,65 @@ export const IPC_CONTRACTS = {
         { additionalProperties: false },
       ),
     ),
+  },
+  'project:get': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(ProjectMetadataSnapshotSchema),
+  },
+  'project:save': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+        project: ProjectModelSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(ProjectMetadataSnapshotSchema),
+  },
+  'project:detect-modules': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(DetectedProjectModulesSchema),
+  },
+  'project:backend-status': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          statuses: Type.Array(CodeBackendStatusSchema, { maxItems: 32 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'project:restart-backend': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+        backendId: Type.String({ minLength: 1, maxLength: 128 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(CodeBackendStatusSchema),
   },
   'session:create': {
     payload: Type.Object(

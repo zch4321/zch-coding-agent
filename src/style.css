@@ -2039,6 +2039,16 @@ code {
   color: var(--danger);
 }
 
+.artifact-error {
+  margin: 12px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border-radius: 6px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  font-size: 12px;
+}
+
 .artifact-empty {
   display: grid;
   height: 100%;
@@ -2074,6 +2084,140 @@ code {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.project-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.project-section {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.project-section-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.project-section-header h3,
+.project-section-header p,
+.detected-modules h4 {
+  margin: 0;
+}
+
+.project-section-header h3,
+.detected-modules h4 {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.project-section-header p {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.project-warning {
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--warning) 13%, transparent);
+  font-size: 12px;
+}
+
+.module-list,
+.backend-status-list,
+.detected-modules {
+  display: grid;
+  gap: 8px;
+}
+
+.module-row,
+.backend-status {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 8px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.module-row strong,
+.backend-status strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.module-row span,
+.module-row small,
+.backend-status small {
+  min-width: 0;
+  color: var(--text-muted);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.project-field {
+  display: grid;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.project-field input,
+.project-field textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--background);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11px;
+}
+
+.backend-status > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.backend-state {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--background);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.backend-state.ready {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.backend-state.error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 .plan-panel-header,

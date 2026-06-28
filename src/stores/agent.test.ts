@@ -828,6 +828,111 @@ describe('agent store regressions', () => {
     expect(store.messages[0]?.text).toBe('Part plus final text')
   })
 
+  it('routes orchestration and usage events through the runtime dispatcher', () => {
+    const store = useAgentStore()
+    store.sessionId = sessionId
+
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 1,
+      ts: stamp,
+      type: 'assistant.reasoning.delta',
+      sessionId,
+      runId,
+      delta: 'Thinking step',
+    })
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 2,
+      ts: stamp,
+      type: 'llm.usage',
+      sessionId,
+      runId,
+      callId,
+      usage: {
+        scope: 'main',
+        providerId: 'deepseek',
+        providerLabel: 'DeepSeek',
+        model: 'deepseek-v4-flash',
+        promptTokens: 100,
+        completionTokens: 25,
+        totalTokens: 125,
+        contextWindowTokens: 128_000,
+        contextWindowSource: 'builtin',
+        raw: {},
+      },
+    })
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 3,
+      ts: stamp,
+      type: 'orchestrator.message',
+      sessionId,
+      runId,
+      kind: 'plan-warning',
+      text: 'Review the current plan before continuing.',
+    })
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 4,
+      ts: stamp,
+      type: 'goal.updated',
+      sessionId,
+      runId,
+      goal: {
+        id: 'goal:test',
+        objective: 'Complete the refactor',
+        status: 'active',
+        createdAt: stamp,
+        updatedAt: stamp,
+        continuationCount: 1,
+      },
+    })
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 5,
+      ts: stamp,
+      type: 'plan.updated',
+      sessionId,
+      runId,
+      plan: {
+        id: 'plan:test',
+        objective: 'Split runtime handlers',
+        status: 'active',
+        items: [
+          {
+            id: 'item:test',
+            title: 'Move event handling',
+            status: 'completed',
+            updatedAt: stamp,
+          },
+        ],
+        createdAt: stamp,
+        updatedAt: stamp,
+        continuationCount: 0,
+      },
+    })
+
+    expect(store.messages[0]).toMatchObject({
+      role: 'assistant',
+      reasoning: 'Thinking step',
+      order: 1,
+    })
+    expect(store.usage[0]).toMatchObject({
+      runId,
+      callId,
+      usage: expect.objectContaining({ totalTokens: 125 }),
+      order: 2,
+    })
+    expect(store.messages[1]).toMatchObject({
+      role: 'orchestrator',
+      text: 'Review the current plan before continuing.',
+      order: 3,
+    })
+    expect(store.goal).toMatchObject({ id: 'goal:test', status: 'active' })
+    expect(store.plan).toMatchObject({ id: 'plan:test', status: 'active' })
+  })
+
   it('auto-titles the conversation from the first user message', async () => {
     const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
     config.privacy.providerNoticeAccepted = {

@@ -32,6 +32,8 @@ import { TraceService } from './logging/service'
 import { WorkbenchStore } from './workbench/store'
 import { createHttpTransport } from './net/http-transport'
 import { PromptRegistry } from './prompts/registry'
+import { ProjectMetadataStore } from './project/project-metadata-store'
+import { CodeBackendManager } from './code-intelligence/backend-manager'
 import {
   APP_ENTRY_URL,
   APP_HOST,
@@ -162,6 +164,8 @@ async function installIpc(): Promise<void> {
     path.join(userData, 'workbench.json'),
   )
   await workbenchStore.initialize()
+  const projectMetadata = new ProjectMetadataStore()
+  const codeBackends = new CodeBackendManager({ projectMetadata })
   const promptRegistry = await PromptRegistry.load(
     path.join(appRoot, 'resources', 'prompts'),
   )
@@ -172,6 +176,8 @@ async function installIpc(): Promise<void> {
     pluginBus,
     skillsManager,
     changeHistory,
+    projectMetadata,
+    codeBackends,
     promptRegistry,
     fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =>
       httpTransport.fetch(input, init),
@@ -188,6 +194,8 @@ async function installIpc(): Promise<void> {
       traceService,
       changeHistory,
       workbenchStore,
+      projectMetadata,
+      codeBackends,
       getHttpTransport: () => httpTransport,
       refreshHttpTransport,
       getMainWindow: () => mainWindow,
@@ -199,6 +207,7 @@ async function installIpc(): Promise<void> {
     `P2 notices: provider=${PROVIDER_NOTICE_VERSION}, trace=${TRACE_NOTICE_VERSION}`,
   )
   appDisposer.add(() => sessionManager.dispose())
+  appDisposer.add(() => codeBackends.dispose())
   appDisposer.add(unregister)
 }
 

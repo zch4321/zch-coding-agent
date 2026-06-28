@@ -1,12 +1,14 @@
 import type { ConfigStore } from '../config/store'
 import type { SkillsManager } from '../skills/manager'
 import { registerFetchTools } from '../tools/fetch-tools'
+import { registerCodeIntelligenceTools } from '../tools/code-intelligence-tools'
 import { registerFileTools } from '../tools/file-tools'
 import {
   registerGitReadOnlyTools,
   registerGitWriteTools,
 } from '../tools/git-tools'
 import { registerProcessTools } from '../tools/process-tools'
+import { registerProjectTools } from '../tools/project-tools'
 import { registerReadOnlyTools } from '../tools/readonly-tools'
 import { registerSkillTools } from '../tools/skill-tools'
 import { registerTerminalTools } from '../tools/terminal-tools'
@@ -16,6 +18,8 @@ import { registerOrchestrationTools } from './orchestration-tools'
 import type { SessionTerminalController } from './session-terminals'
 import type { AgentEventDraft, SessionState } from './session-types'
 import type { SessionId } from '../../shared/ids'
+import type { ProjectMetadataStore } from '../project/project-metadata-store'
+import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 
 export interface SessionTooling {
   toolRegistry: ToolRegistry
@@ -26,6 +30,8 @@ export function createSessionTooling(options: {
   configStore: ConfigStore
   terminals: SessionTerminalController
   skillsManager?: SkillsManager
+  projectMetadata?: ProjectMetadataStore
+  codeBackends?: CodeBackendManager
   getSession: (sessionId: SessionId) => SessionState | undefined
   emit: (session: SessionState, event: AgentEventDraft) => void
 }): SessionTooling {
@@ -57,6 +63,12 @@ export function createSessionTooling(options: {
   )
   if (options.skillsManager) {
     registerSkillTools(toolRegistry, options.skillsManager)
+  }
+  if (options.projectMetadata) {
+    registerProjectTools(toolRegistry, options.projectMetadata)
+  }
+  if (options.codeBackends) {
+    registerCodeIntelligenceTools(toolRegistry, options.codeBackends)
   }
   registerOrchestrationTools(toolRegistry, {
     getSession: options.getSession,

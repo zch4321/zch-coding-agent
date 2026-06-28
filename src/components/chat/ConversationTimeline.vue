@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NAlert, NButton, NCollapse, NCollapseItem, NTooltip } from 'naive-ui'
+import { NAlert, NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type {
-  PendingApproval,
-  ReviewedApproval,
-  ToolActivity,
-} from '../../stores/agent'
-import type { UsageActivity } from '../../stores/agent-types'
+import type { ToolActivity } from '../../stores/agent'
 import { useAgentStore } from '../../stores/agent'
-import MarkdownBlock from '../MarkdownBlock.vue'
 import UiIcon from '../UiIcon.vue'
+import ApprovalCard from './ApprovalCard.vue'
+import ChatMessageItem from './ChatMessageItem.vue'
+import GoalPanel from './GoalPanel.vue'
+import ToolCallCard from './ToolCallCard.vue'
 
 defineProps<{ projectName: string }>()
 
@@ -44,20 +42,6 @@ function requestFork(messageId: string) {
   emit('fork', messageId)
 }
 
-function toolResultSummary(tool: ToolActivity): string {
-  const result = tool.result
-
-  if (!result || typeof result !== 'object' || Array.isArray(result)) {
-    return tool.status === 'proposed' ? t('chat.proposed') : t('chat.completed')
-  }
-
-  if ('status' in result && result.status !== 'ok') {
-    return String(result.status)
-  }
-
-  return t('chat.completed')
-}
-
 function toolDetailsName(tool: ToolActivity): string {
   return `${tool.callId}:details`
 }
@@ -82,66 +66,6 @@ function setToolDetailsExpanded(tool: ToolActivity, expanded: boolean) {
 
 function toggleToolDetails(tool: ToolActivity) {
   setToolDetailsExpanded(tool, !isToolDetailsExpanded(tool))
-}
-
-function stringifyJson(value: unknown, space = 2): string {
-  try {
-    return JSON.stringify(value, null, space) ?? String(value)
-  } catch {
-    return String(value)
-  }
-}
-
-function hasToolResult(tool: ToolActivity): boolean {
-  return tool.result !== undefined
-}
-
-function pendingApprovalForTool(
-  tool: ToolActivity,
-): PendingApproval | undefined {
-  return agent.pendingApproval?.callId === tool.callId
-    ? agent.pendingApproval
-    : undefined
-}
-
-function reviewedApprovalForTool(
-  tool: ToolActivity,
-): ReviewedApproval | undefined {
-  return agent.latestReviewedApproval?.callId === tool.callId
-    ? agent.latestReviewedApproval
-    : undefined
-}
-
-function approvalUsageForTool(tool: ToolActivity): UsageActivity | undefined {
-  return agent.usage.find(
-    (item) => item.callId === tool.callId && item.usage.scope === 'approval',
-  )
-}
-
-function hasApprovalDetails(tool: ToolActivity): boolean {
-  return Boolean(
-    tool.approval ||
-    pendingApprovalForTool(tool) ||
-    reviewedApprovalForTool(tool) ||
-    approvalUsageForTool(tool),
-  )
-}
-
-function approvalUsageSummary(usage: UsageActivity): string {
-  const values = [
-    usage.usage.providerLabel,
-    usage.usage.model,
-    usage.usage.totalTokens !== undefined
-      ? `${usage.usage.totalTokens} tokens`
-      : undefined,
-  ].filter(Boolean)
-
-  return values.join(' · ')
-}
-
-function approvalUsageSummaryForTool(tool: ToolActivity): string {
-  const usage = approvalUsageForTool(tool)
-  return usage ? approvalUsageSummary(usage) : ''
 }
 
 const toolRenderSignature = computed(() =>
@@ -294,368 +218,30 @@ onBeforeUnmount(() => {
       >
         {{ agent.agentEventGap }}
       </NAlert>
-      <section
-        v-if="agent.goal"
-        class="orchestration-panel"
-        :style="{ order: 0 }"
-      >
-        <article v-if="agent.goal" class="orchestration-card">
-          <div class="orchestration-card-header">
-            <span>{{ t('chat.goal') }}</span>
-            <strong>{{ agent.goal.status }}</strong>
-          </div>
-          <p>{{ agent.goal.objective }}</p>
-          <small v-if="agent.goal.summary">{{ agent.goal.summary }}</small>
-          <small v-else-if="agent.goal.blockReason">
-            {{ agent.goal.blockReason }}
-          </small>
-        </article>
-      </section>
 
-      <article
+      <GoalPanel v-if="agent.goal" :style="{ order: 0 }" />
+
+      <ChatMessageItem
         v-for="message in visibleMessages"
         :key="message.id"
-        class="chat-message"
-        :class="message.role"
+        :message="message"
+        :active-run-id="agent.activeRunId"
+        :actions-disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
         :style="{ order: message.order ?? 0 }"
-      >
-        <div class="message-meta">
-          <strong>{{
-            message.role === 'user'
-              ? t('chat.you')
-              : message.role === 'orchestrator'
-                ? t('chat.orchestrator')
-                : message.role === 'interjection'
-                  ? t('chat.interjection')
-                  : t('chat.agent')
-          }}</strong>
-          <span
-            v-if="
-              message.role === 'assistant' &&
-              message.runId === agent.activeRunId
-            "
-          >
-            {{ t('chat.streaming') }}
-          </span>
-          <span
-            v-else-if="
-              message.role === 'interjection' &&
-              message.interjectionStatus === 'queued'
-            "
-            class="interjection-status"
-          >
-            {{ t('chat.interjectionQueued') }}
-          </span>
-          <span
-            v-else-if="
-              message.role === 'interjection' &&
-              message.interjectionStatus === 'injected'
-            "
-            class="interjection-status"
-          >
-            {{ t('chat.interjectionInjected') }}
-          </span>
-          <span
-            v-else-if="
-              message.role === 'interjection' &&
-              message.interjectionStatus === 'superseded'
-            "
-            class="interjection-status superseded"
-          >
-            {{ t('chat.interjectionSuperseded') }}
-          </span>
-          <span
-            v-else-if="
-              message.role === 'interjection' &&
-              message.interjectionStatus === 'carryover'
-            "
-            class="interjection-status carryover"
-          >
-            {{ t('chat.interjectionCarryover') }}
-          </span>
-        </div>
-        <div v-if="message.attachments?.length" class="message-attachments">
-          <NTooltip
-            v-for="attachment in message.attachments"
-            :key="attachment.kind + ':' + attachment.path"
-          >
-            <template #trigger>
-              <span class="context-chip">
-                <UiIcon
-                  :name="attachment.kind === 'directory' ? 'folder' : 'file'"
-                />
-                <span>{{ attachment.path }}</span>
-                <small>{{ attachment.source }}</small>
-              </span>
-            </template>
-            {{ attachment.path }}
-          </NTooltip>
-        </div>
-        <MarkdownBlock v-if="message.text.trim()" :content="message.text" />
-        <NCollapse v-if="message.reasoning" class="reasoning">
-          <NCollapseItem :title="t('chat.reasoning')" name="reasoning">
-            <pre>{{ message.reasoning }}</pre>
-          </NCollapseItem>
-        </NCollapse>
-        <div
-          v-if="
-            message.role === 'assistant' &&
-            message.text &&
-            !agent.activeRunId &&
-            !agent.pendingApproval
-          "
-          class="message-actions"
-        >
-          <NTooltip>
-            <template #trigger>
-              <button
-                type="button"
-                class="message-action"
-                :aria-label="t('chat.revertToHere')"
-                @click="requestRevert(message.id, message.text)"
-              >
-                <UiIcon name="undo" />
-              </button>
-            </template>
-            {{ t('chat.revertToHereTitle') }}
-          </NTooltip>
-          <NTooltip>
-            <template #trigger>
-              <button
-                type="button"
-                class="message-action"
-                :aria-label="t('chat.forkFromHere')"
-                @click="requestFork(message.id)"
-              >
-                <UiIcon name="git-branch" />
-              </button>
-            </template>
-            {{ t('chat.forkFromHereTitle') }}
-          </NTooltip>
-        </div>
-      </article>
+        @revert="requestRevert"
+        @fork="requestFork"
+      />
 
-      <article
+      <ToolCallCard
         v-for="tool in chronologicalTools"
         :key="tool.callId"
-        class="tool-call-card"
+        :tool="tool"
+        :expanded="isToolDetailsExpanded(tool)"
         :style="{ order: tool.order ?? 0 }"
-      >
-        <button
-          type="button"
-          class="tool-call-row"
-          :title="tool.reason || tool.tool"
-          :aria-controls="toolDetailsName(tool)"
-          :aria-expanded="isToolDetailsExpanded(tool)"
-          @click="toggleToolDetails(tool)"
-        >
-          <div class="tool-call-summary" :title="tool.reason || tool.tool">
-            <span class="tool-call-muted">{{ t('chat.toolCall') }}</span>
-            <strong>{{ tool.tool }}</strong>
-            <span
-              class="tool-status"
-              :class="tool.status === 'completed' ? 'complete' : ''"
-            >
-              {{ toolResultSummary(tool) }}
-            </span>
-          </div>
-          <span class="tool-details-toggle" aria-hidden="true">
-            <UiIcon
-              :name="
-                isToolDetailsExpanded(tool) ? 'chevron-down' : 'chevron-right'
-              "
-            />
-          </span>
-        </button>
-        <div
-          v-if="isToolDetailsExpanded(tool)"
-          :id="toolDetailsName(tool)"
-          class="tool-call-details"
-        >
-          <div class="tool-detail-block">
-            <strong>{{ t('chat.arguments') }}</strong>
-            <pre class="tool-args-json">{{ stringifyJson(tool.args) }}</pre>
-          </div>
-          <div v-if="hasToolResult(tool)" class="tool-detail-block">
-            <strong>{{ t('chat.result') }}</strong>
-            <pre class="tool-result-json">{{ stringifyJson(tool.result) }}</pre>
-          </div>
-          <div v-if="hasApprovalDetails(tool)" class="tool-detail-block">
-            <strong>{{ t('chat.approvalDetails') }}</strong>
-            <dl v-if="tool.approval" class="tool-approval-meta">
-              <div>
-                <dt>{{ t('chat.approver') }}</dt>
-                <dd>{{ tool.approval.approver }}</dd>
-              </div>
-              <div>
-                <dt>{{ t('chat.approvalDecision') }}</dt>
-                <dd>{{ tool.approval.decision }}</dd>
-              </div>
-              <div>
-                <dt>{{ t('chat.approvalValid') }}</dt>
-                <dd>
-                  {{ tool.approval.valid ? t('common.yes') : t('common.no') }}
-                </dd>
-              </div>
-              <div v-if="tool.approval.failure">
-                <dt>{{ t('chat.approvalFailure') }}</dt>
-                <dd>{{ tool.approval.failure }}</dd>
-              </div>
-            </dl>
-            <p v-if="tool.approval?.reason" class="tool-approval-note">
-              {{ tool.approval.reason }}
-            </p>
-            <dl v-if="pendingApprovalForTool(tool)" class="tool-approval-meta">
-              <div>
-                <dt>{{ t('chat.approvalRequired') }}</dt>
-                <dd>{{ pendingApprovalForTool(tool)?.kind }}</dd>
-              </div>
-              <div>
-                <dt>{{ t('chat.expires') }}</dt>
-                <dd>{{ pendingApprovalForTool(tool)?.expiresAt }}</dd>
-              </div>
-            </dl>
-            <p
-              v-if="pendingApprovalForTool(tool)?.reason"
-              class="tool-approval-note"
-            >
-              {{ pendingApprovalForTool(tool)?.reason }}
-            </p>
-            <ul
-              v-if="pendingApprovalForTool(tool)?.signals.length"
-              class="policy-signals compact"
-            >
-              <li
-                v-for="signal in pendingApprovalForTool(tool)?.signals"
-                :key="signal.code + signal.detail"
-              >
-                <UiIcon name="warning" />{{ signal.detail }}
-              </li>
-            </ul>
-            <pre
-              v-if="pendingApprovalForTool(tool)?.diff"
-              class="tool-approval-json"
-              >{{ pendingApprovalForTool(tool)?.diff }}</pre
-            >
-            <dl v-if="reviewedApprovalForTool(tool)" class="tool-approval-meta">
-              <div>
-                <dt>{{ t('chat.approvalDecision') }}</dt>
-                <dd>{{ reviewedApprovalForTool(tool)?.decision }}</dd>
-              </div>
-              <div v-if="reviewedApprovalForTool(tool)?.diffHash">
-                <dt>{{ t('chat.diffHash') }}</dt>
-                <dd>{{ reviewedApprovalForTool(tool)?.diffHash }}</dd>
-              </div>
-            </dl>
-            <p
-              v-if="reviewedApprovalForTool(tool)?.reason"
-              class="tool-approval-note"
-            >
-              {{ reviewedApprovalForTool(tool)?.reason }}
-            </p>
-            <pre
-              v-if="reviewedApprovalForTool(tool)?.diff"
-              class="tool-approval-json"
-              >{{ reviewedApprovalForTool(tool)?.diff }}</pre
-            >
-            <div v-if="approvalUsageForTool(tool)" class="tool-approval-usage">
-              <span>{{ t('chat.approvalUsage') }}</span>
-              <p>{{ approvalUsageSummaryForTool(tool) }}</p>
-              <pre
-                v-if="approvalUsageForTool(tool)?.usage.raw"
-                class="tool-approval-json"
-                >{{ stringifyJson(approvalUsageForTool(tool)?.usage.raw) }}</pre
-              >
-            </div>
-          </div>
-        </div>
-      </article>
+        @toggle="toggleToolDetails(tool)"
+      />
 
-      <article
-        v-if="agent.pendingApproval"
-        class="approval-card"
-        :style="{ order: agent.pendingApproval.order }"
-      >
-        <div class="approval-header">
-          <div>
-            <span class="tool-kicker">{{ t('chat.approvalRequired') }}</span>
-            <strong>{{ agent.pendingApproval.tool }}</strong>
-          </div>
-          <span>{{ agent.pendingApproval.kind }}</span>
-        </div>
-        <p>{{ agent.pendingApproval.reason }}</p>
-        <dl class="approval-meta">
-          <div>
-            <dt>{{ t('chat.workspaceScope') }}</dt>
-            <dd>{{ projectName }}</dd>
-          </div>
-          <div>
-            <dt>{{ t('chat.expires') }}</dt>
-            <dd>{{ agent.pendingApproval.expiresAt }}</dd>
-          </div>
-        </dl>
-        <pre class="approval-args">{{
-          JSON.stringify(agent.pendingApproval.args, null, 2)
-        }}</pre>
-        <ul class="policy-signals">
-          <li
-            v-for="signal in agent.pendingApproval.signals"
-            :key="signal.code + signal.detail"
-          >
-            <UiIcon name="warning" />{{ signal.detail }}
-          </li>
-        </ul>
-        <pre v-if="agent.pendingApproval.diff" class="approval-diff">{{
-          agent.pendingApproval.diff
-        }}</pre>
-        <div
-          v-if="agent.pendingApproval.rememberArgConstraints"
-          class="approval-remember-preview"
-        >
-          <strong>{{ t('chat.rememberedScope') }}</strong>
-          <pre>{{
-            JSON.stringify(
-              agent.pendingApproval.rememberArgConstraints,
-              null,
-              2,
-            )
-          }}</pre>
-        </div>
-        <div class="approval-actions">
-          <NButton
-            type="primary"
-            :loading="agent.approvalSubmitting"
-            :disabled="agent.approvalSubmitting"
-            @click="agent.decideApproval('allow')"
-          >
-            {{
-              agent.pendingApproval.kind === 'context'
-                ? t('chat.allowContext')
-                : t('common.approve')
-            }}
-          </NButton>
-          <NButton
-            v-if="agent.pendingApproval.rememberable"
-            secondary
-            type="primary"
-            :disabled="agent.approvalSubmitting"
-            @click="agent.decideApproval('allow', true)"
-          >
-            {{ t('chat.approveRemember') }}
-          </NButton>
-          <NButton
-            secondary
-            :disabled="agent.approvalSubmitting"
-            @click="agent.decideApproval('deny')"
-          >
-            {{
-              agent.pendingApproval.kind === 'context'
-                ? t('chat.withholdContext')
-                : t('common.deny')
-            }}
-          </NButton>
-        </div>
-      </article>
+      <ApprovalCard v-if="agent.pendingApproval" :project-name="projectName" />
 
       <div
         v-if="

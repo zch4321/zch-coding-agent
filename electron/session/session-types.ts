@@ -18,6 +18,8 @@ import type { SkillsManager } from '../skills/manager'
 import type { PromptRegistry } from '../prompts/registry'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { PromptLedgerEntry } from './prompt-harness'
+import type { ProjectMetadataStore } from '../project/project-metadata-store'
+import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -38,6 +40,8 @@ export interface SessionManagerOptions {
   pluginBus?: PluginEventBus
   skillsManager?: SkillsManager
   changeHistory?: ChangeHistoryStore
+  projectMetadata?: ProjectMetadataStore
+  codeBackends?: CodeBackendManager
   promptRegistry?: PromptRegistry
   fetchImpl?: typeof fetch
   providerFactory?: (options: {

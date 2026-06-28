@@ -5,6 +5,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
+import { ProjectMetadataStore } from '../project/project-metadata-store'
 import {
   appendInitialPromptHarness,
   appendPromptLayer,
@@ -139,6 +140,52 @@ describe('prompt harness', () => {
     expect(state.history).toHaveLength(before + 1)
     expect(state.promptLedger.at(-1)?.kind).toBe('runtime_policy_and_context')
     expect(state.promptLedger.at(-1)?.role).toBe('user')
+  })
+
+  it('uses ProjectModel metadata in module context when available', async () => {
+    const workspace = path.join(
+      os.tmpdir(),
+      `prompt-harness-project-${Date.now()}`,
+    )
+    await mkdir(workspace, { recursive: true })
+    const projectMetadata = new ProjectMetadataStore()
+    const snapshot = await projectMetadata.get(workspace)
+    await projectMetadata.save(workspace, {
+      ...snapshot.project,
+      modules: [
+        {
+          id: 'frontend',
+          root: '.',
+          name: 'frontend',
+          languages: ['typescript'],
+          manifests: ['package.json'],
+          sourceRoots: ['src'],
+          testRoots: [],
+          excludedRoots: ['node_modules'],
+          backendHints: ['serena'],
+          source: 'agent-set',
+          confidence: 0.9,
+          fingerprint: 'fingerprint',
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      defaultModuleId: 'frontend',
+    })
+    const state = ledger()
+
+    await appendInitialPromptHarness(state, {
+      workspace,
+      mode: 'readonly',
+      config: publicConfig(),
+      providerId: 'deepseek',
+      projectMetadata,
+    })
+
+    expect(state.history[1]?.content).toContain(
+      'project_model: .zch/project-model.json',
+    )
+    expect(state.history[1]?.content).toContain('module frontend')
+    expect(state.history[1]?.content).toContain('code_backends:')
   })
 
   it('records prompt build metadata without mutating existing messages', async () => {

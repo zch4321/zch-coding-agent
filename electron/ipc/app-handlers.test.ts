@@ -47,6 +47,8 @@ function createHandlers() {
     traceService: {} as never,
     changeHistory: {} as never,
     workbenchStore: {} as never,
+    projectMetadata: {} as never,
+    codeBackends: {} as never,
     getMainWindow: () => undefined,
   })
 }

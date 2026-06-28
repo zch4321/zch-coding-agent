@@ -42,6 +42,8 @@ import { SessionContextGate } from './session-context-gate'
 import { SessionProviderTurnRunner } from './session-provider-turn'
 import { SessionToolRunner } from './session-tool-runner'
 import type { PromptRegistry } from '../prompts/registry'
+import type { ProjectMetadataStore } from '../project/project-metadata-store'
+import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import { SessionOrchestratorMessages } from './session-orchestrator-messages'
 import { createSessionTooling } from './session-tooling'
 import { SessionCompactCoordinator } from './session-compact-coordinator'
@@ -71,6 +73,8 @@ export class SessionManager {
   readonly #pluginBus: PluginEventBus | undefined
   readonly #skillsManager: SkillsManager | undefined
   readonly #changeHistory: ChangeHistoryStore | undefined
+  readonly #projectMetadata: ProjectMetadataStore | undefined
+  readonly #codeBackends: CodeBackendManager | undefined
   readonly #promptRegistry: PromptRegistry | undefined
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
@@ -105,6 +109,8 @@ export class SessionManager {
     this.#pluginBus = options.pluginBus
     this.#skillsManager = options.skillsManager
     this.#changeHistory = options.changeHistory
+    this.#projectMetadata = options.projectMetadata
+    this.#codeBackends = options.codeBackends
     this.#promptRegistry = options.promptRegistry
     this.#providerFactory = options.providerFactory
     this.#fetchImpl = options.fetchImpl
@@ -141,6 +147,8 @@ export class SessionManager {
       configStore: this.#configStore,
       terminals: this.#terminals,
       skillsManager: this.#skillsManager,
+      projectMetadata: this.#projectMetadata,
+      codeBackends: this.#codeBackends,
       getSession: (sessionId) => this.#sessions.get(sessionId),
       emit: (session, event) => this.#emit(session, event),
     })
@@ -151,6 +159,7 @@ export class SessionManager {
       toolRegistry: this.#toolRegistry,
       skillsManager: this.#skillsManager,
       promptRegistry: this.#promptRegistry,
+      projectMetadata: this.#projectMetadata,
       providerFactory: this.#providerFactory,
       fetchImpl: this.#fetchImpl,
       orchestratorMessages: this.#orchestratorMessages,
@@ -171,6 +180,7 @@ export class SessionManager {
       toolRegistry: this.#toolRegistry,
       skillsManager: this.#skillsManager,
       promptRegistry: this.#promptRegistry,
+      projectMetadata: this.#projectMetadata,
       orchestratorMessages: this.#orchestratorMessages,
       emit: (session, event) => this.#emit(session, event),
     })
@@ -179,6 +189,7 @@ export class SessionManager {
       toolRegistry: this.#toolRegistry,
       pluginBus: this.#pluginBus,
       promptRegistry: options.promptRegistry,
+      projectMetadata: this.#projectMetadata,
       fetchImpl: this.#fetchImpl,
       providerFactory: this.#providerFactory,
       onDiagnostic: this.#onDiagnostic,
@@ -285,6 +296,7 @@ export class SessionManager {
         config: publicConfig,
         providerId: input.provider,
         promptRegistry: this.#promptRegistry,
+        projectMetadata: this.#projectMetadata,
         skillSummary: this.#skillsManager?.summaryPrompt(),
         toolNames: this.#toolRegistry.list().map((tool) => tool.id),
       })
@@ -341,6 +353,7 @@ export class SessionManager {
       config: this.#configStore.getPublicConfig(),
       providerId: session.provider,
       promptRegistry: this.#promptRegistry,
+      projectMetadata: this.#projectMetadata,
       reason: 'permission_mode_changed',
       toolNames: this.#toolRegistry.list().map((tool) => tool.id),
     })
