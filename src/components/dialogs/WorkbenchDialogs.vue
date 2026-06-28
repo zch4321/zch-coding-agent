@@ -52,6 +52,7 @@ const { t } = useI18n()
     :show="renameOpen"
     preset="card"
     class="small-modal"
+    content-class="small-modal-content"
     :title="t('dialogs.renameTitle')"
     @update:show="emit('update:renameOpen', $event)"
   >
@@ -74,6 +75,7 @@ const { t } = useI18n()
     :show="deleteOpen"
     preset="card"
     class="small-modal"
+    content-class="small-modal-content"
     :title="t('dialogs.deleteTitle')"
     @update:show="emit('update:deleteOpen', $event)"
   >
@@ -94,6 +96,7 @@ const { t } = useI18n()
     :show="switchOpen"
     preset="card"
     class="small-modal"
+    content-class="small-modal-content"
     :title="t('dialogs.switchTitle')"
     @update:show="emit('update:switchOpen', $event)"
   >
@@ -114,6 +117,7 @@ const { t } = useI18n()
     :show="revertOpen"
     preset="card"
     class="small-modal"
+    content-class="small-modal-content"
     :title="t('dialogs.revertTitle')"
     @update:show="emit('update:revertOpen', $event)"
   >

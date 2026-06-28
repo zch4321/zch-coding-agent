@@ -3250,7 +3250,7 @@ code {
   width: min(460px, calc(100vw - 40px));
 }
 
-.small-modal p {
+.small-modal-content p {
   margin: 0;
   color: var(--text-secondary);
   line-height: 1.5;

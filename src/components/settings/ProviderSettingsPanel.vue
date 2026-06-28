@@ -421,6 +421,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
       :show="Boolean(dirtyAction)"
       preset="card"
       class="small-modal"
+      content-class="small-modal-content"
       @update:show="!$event && (dirtyAction = undefined)"
     >
       <template #header>{{ t('settings.unsavedProviderTitle') }}</template>

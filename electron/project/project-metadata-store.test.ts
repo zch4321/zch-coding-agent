@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -35,7 +35,9 @@ describe('ProjectMetadataStore', () => {
 
     expect(snapshot.path).toBe('.zch/project-model.json')
     expect(snapshot.gitIgnoreRecommended).toBe(true)
-    expect(snapshot.project.workspaceRoot).toBe(path.resolve(directory))
+    expect(snapshot.project.workspaceRoot).toBe(
+      path.resolve(await realpath(directory)),
+    )
     expect(snapshot.project.serena.command).toBe('serena')
     expect(snapshot.project.backendBindings.length).toBeGreaterThan(0)
     expect(snapshot.project.backendBindings[0]?.capabilities).toContain(
