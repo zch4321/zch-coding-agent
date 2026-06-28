@@ -52,7 +52,13 @@ function projectModel(
         backendId: 'serena',
         backendKind: 'serena-mcp',
         enabled: false,
-        capabilities: ['symbol_overview', 'definition', 'references'],
+        capabilities: [
+          'symbol_overview',
+          'definition',
+          'references',
+          'workspace_symbols',
+          'diagnostics',
+        ],
         configuredBy: 'user',
         updatedAt: timestamp,
       },
@@ -61,13 +67,10 @@ function projectModel(
       id: 'serena',
       enabled: false,
       command: 'serena',
-      args: [
-        'start-mcp-server',
-        '--context',
-        'ide-assistant',
-        '--project',
-        '${workspace}',
-      ],
+      context: 'ide-assistant',
+      projectMode: 'workspacePath',
+      openWebDashboard: false,
+      extraArgs: [],
       startupTimeoutMs: 15_000,
       toolTimeoutMs: 30_000,
       languages: ['typescript'],
@@ -92,7 +95,13 @@ function readyStatus(): CodeBackendStatus {
     backendId: 'serena',
     backendKind: 'serena-mcp',
     state: 'ready',
-    capabilities: ['symbol_overview', 'definition', 'references'],
+    capabilities: [
+      'symbol_overview',
+      'definition',
+      'references',
+      'workspace_symbols',
+      'diagnostics',
+    ],
     message: 'Serena backend is ready.',
     updatedAt: timestamp,
   }
@@ -235,5 +244,57 @@ describe('ProjectTab', () => {
         }),
       }),
     )
+  })
+
+  it('edits structured Serena config and previews launch args', async () => {
+    const api = projectApi()
+    const wrapper = await mountProjectTab()
+
+    expect(
+      wrapper.find('[data-testid="serena-launch-preview"]').text(),
+    ).toContain('--open-web-dashboard false')
+
+    await wrapper.find('[data-testid="serena-context"]').setValue('codex')
+    await wrapper.find('[data-testid="serena-project-mode"]').setValue('none')
+    await wrapper
+      .find('[data-testid="serena-language-backend"]')
+      .setValue('LSP')
+    await wrapper.find('[data-testid="serena-tool-timeout"]').setValue('60000')
+    await wrapper.find('[data-testid="serena-open-dashboard"]').setValue(true)
+    await wrapper
+      .find('[data-testid="serena-extra-args"]')
+      .setValue('--experimental\n${workspace}/extra')
+    await flushPromises()
+
+    expect(
+      wrapper.find('[data-testid="serena-launch-preview"]').text(),
+    ).toContain('--context codex')
+    expect(
+      wrapper.find('[data-testid="serena-launch-preview"]').text(),
+    ).toContain('--language-backend LSP')
+    expect(
+      wrapper.find('[data-testid="serena-launch-preview"]').text(),
+    ).toContain('--open-web-dashboard true')
+
+    bodyButton('Save project config').click()
+    await flushPromises()
+
+    const payload = vi.mocked(api.saveProject).mock.calls.at(-1)?.[0]
+    expect(payload).toEqual(
+      expect.objectContaining({
+        workspace,
+        project: expect.objectContaining({
+          serena: expect.objectContaining({
+            context: 'codex',
+            projectMode: 'none',
+            languageBackend: 'LSP',
+            openWebDashboard: true,
+            toolTimeoutMs: 60_000,
+            extraArgs: ['--experimental', '${workspace}/extra'],
+          }),
+        }),
+      }),
+    )
+    expect(payload?.project.serena).not.toHaveProperty('args')
   })
 })

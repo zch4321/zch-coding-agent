@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises'
 import type {
   CodeBackendStatus,
   CodeIntelligenceCapability,
@@ -35,6 +36,10 @@ function isInsideModule(module: ProjectModule, relativePath: string): boolean {
     relativePath === module.root ||
     relativePath.startsWith(`${module.root}/`)
   )
+}
+
+function requiresFilePath(capability: CodeIntelligenceCapability): boolean {
+  return capability === 'symbol_overview' || capability === 'diagnostics'
 }
 
 function pickModule(
@@ -103,9 +108,12 @@ export class CodeBackendManager {
     const project = snapshot.project
     const guard = await PathGuard.create(input.workspace)
     let relativePath = input.path
+    let absolutePath: string | undefined
 
     if (relativePath) {
-      relativePath = (await guard.resolveExisting(relativePath)).relativePath
+      const resolved = await guard.resolveExisting(relativePath)
+      relativePath = resolved.relativePath
+      absolutePath = resolved.absolutePath
     }
 
     const module = pickModule(project, input.moduleId, relativePath)
@@ -128,6 +136,27 @@ export class CodeBackendManager {
         code: 'PATH_OUTSIDE_MODULE',
         message: `Path ${relativePath} is outside module ${module.id}.`,
       })
+    }
+
+    if (requiresFilePath(input.capability)) {
+      if (!relativePath || !absolutePath) {
+        return unsupported({
+          backendId: project.serena.id,
+          capability: input.capability,
+          code: 'PATH_NOT_FILE',
+          message: `${input.capability} requires a workspace-relative file path.`,
+        })
+      }
+
+      const pathStat = await stat(absolutePath)
+      if (!pathStat.isFile()) {
+        return unsupported({
+          backendId: project.serena.id,
+          capability: input.capability,
+          code: 'PATH_NOT_FILE',
+          message: `${relativePath} is not a file. Use code_workspace_symbols or narrow the query to a source file first.`,
+        })
+      }
     }
 
     const binding = project.backendBindings.find(

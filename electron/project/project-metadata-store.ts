@@ -7,6 +7,10 @@ import {
   type ProjectMetadataSnapshot,
   type ProjectModel,
   type ProjectModelFile,
+  type SerenaBackendConfig,
+  type SerenaLanguageBackend,
+  type SerenaLogLevel,
+  type SerenaProjectMode,
 } from '../../shared/project-model'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
@@ -21,7 +25,36 @@ const READONLY_CAPABILITIES = [
   'definition',
   'references',
   'workspace_symbols',
+  'diagnostics',
 ] as const
+const DEFAULT_SERENA_CONTEXT = 'ide-assistant'
+const DEFAULT_SERENA_PROJECT_MODE: SerenaProjectMode = 'workspacePath'
+const DEFAULT_SERENA_LANGUAGES = [
+  'typescript',
+  'javascript',
+  'python',
+  'go',
+  'rust',
+  'java',
+]
+const LEGACY_DEFAULT_SERENA_ARGS = [
+  'start-mcp-server',
+  '--context',
+  DEFAULT_SERENA_CONTEXT,
+  '--project',
+  '${workspace}',
+]
+const SERENA_LANGUAGE_BACKENDS = new Set<SerenaLanguageBackend>([
+  'LSP',
+  'JetBrains',
+])
+const SERENA_LOG_LEVELS = new Set<SerenaLogLevel>([
+  'DEBUG',
+  'INFO',
+  'WARNING',
+  'ERROR',
+  'CRITICAL',
+])
 
 const validateProjectModel = compileSchema(ProjectModelSchema)
 const validateProjectModelFile = compileSchema(ProjectModelFileSchema)
@@ -43,16 +76,6 @@ function toPortable(relativePath: string): string {
   return relativePath.split(path.sep).join('/') || '.'
 }
 
-function defaultSerenaArgs(): string[] {
-  return [
-    'start-mcp-server',
-    '--context',
-    'ide-assistant',
-    '--project',
-    '${workspace}',
-  ]
-}
-
 function defaultModel(workspaceRoot: string): ProjectModel {
   const now = new Date().toISOString()
   const project: ProjectModel = {
@@ -65,10 +88,13 @@ function defaultModel(workspaceRoot: string): ProjectModel {
       id: DEFAULT_SERENA_ID,
       enabled: false,
       command: 'serena',
-      args: defaultSerenaArgs(),
+      context: DEFAULT_SERENA_CONTEXT,
+      projectMode: DEFAULT_SERENA_PROJECT_MODE,
+      openWebDashboard: false,
+      extraArgs: [],
       startupTimeoutMs: 15_000,
       toolTimeoutMs: 30_000,
-      languages: ['typescript', 'javascript', 'python', 'go', 'rust', 'java'],
+      languages: DEFAULT_SERENA_LANGUAGES,
     },
     updatedAt: now,
   }
@@ -98,6 +124,189 @@ function defaultBindings(project: ProjectModel): CodeBackendBinding[] {
   }))
 }
 
+function parseBoolean(value: string | undefined): boolean | undefined {
+  if (!value) return undefined
+  const normalized = value.toLowerCase()
+  if (normalized === 'true') return true
+  if (normalized === 'false') return false
+  return undefined
+}
+
+function sameArgs(left: readonly string[], right: readonly string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((arg, index) => arg === right[index])
+  )
+}
+
+function migrateLegacyArgs(
+  args: readonly string[] | undefined,
+  workspaceRoot: string,
+): Partial<SerenaBackendConfig> {
+  if (
+    !args ||
+    args.length === 0 ||
+    sameArgs(args, LEGACY_DEFAULT_SERENA_ARGS)
+  ) {
+    return {}
+  }
+
+  const migrated: Partial<SerenaBackendConfig> = {}
+  const extraArgs: string[] = []
+  let index = args[0] === 'start-mcp-server' ? 1 : 0
+
+  while (index < args.length) {
+    const arg = args[index]
+    const next = args[index + 1]
+
+    switch (arg) {
+      case '--context':
+        if (next) {
+          migrated.context = next
+          index += 2
+        } else {
+          extraArgs.push(arg)
+          index += 1
+        }
+        break
+      case '--project':
+      case '--project-file':
+        if (next === '${workspace}' || next === workspaceRoot) {
+          migrated.projectMode = 'workspacePath'
+        } else if (next) {
+          migrated.projectMode = 'none'
+          extraArgs.push(arg, next)
+        } else {
+          extraArgs.push(arg)
+        }
+        index += next ? 2 : 1
+        break
+      case '--project-from-cwd':
+        migrated.projectMode = 'projectFromCwd'
+        index += 1
+        break
+      case '--language-backend':
+        if (
+          next &&
+          SERENA_LANGUAGE_BACKENDS.has(next as SerenaLanguageBackend)
+        ) {
+          migrated.languageBackend = next as SerenaLanguageBackend
+        } else {
+          extraArgs.push(...(next ? [arg, next] : [arg]))
+        }
+        index += next ? 2 : 1
+        break
+      case '--enable-web-dashboard': {
+        const parsed = parseBoolean(next)
+        if (parsed === undefined)
+          extraArgs.push(...(next ? [arg, next] : [arg]))
+        else migrated.enableWebDashboard = parsed
+        index += next ? 2 : 1
+        break
+      }
+      case '--open-web-dashboard': {
+        const parsed = parseBoolean(next)
+        if (parsed === undefined)
+          extraArgs.push(...(next ? [arg, next] : [arg]))
+        else migrated.openWebDashboard = parsed
+        index += next ? 2 : 1
+        break
+      }
+      case '--log-level':
+        if (next && SERENA_LOG_LEVELS.has(next as SerenaLogLevel)) {
+          migrated.logLevel = next as SerenaLogLevel
+        } else {
+          extraArgs.push(...(next ? [arg, next] : [arg]))
+        }
+        index += next ? 2 : 1
+        break
+      case '--tool-timeout': {
+        const seconds = next ? Number(next) : Number.NaN
+        if (Number.isFinite(seconds) && seconds > 0) {
+          migrated.toolTimeoutMs = Math.round(seconds * 1_000)
+        } else {
+          extraArgs.push(...(next ? [arg, next] : [arg]))
+        }
+        index += next ? 2 : 1
+        break
+      }
+      default:
+        extraArgs.push(arg)
+        index += 1
+        break
+    }
+  }
+
+  if (extraArgs.length > 0) migrated.extraArgs = extraArgs
+  return migrated
+}
+
+function normalizeSerena(
+  input: SerenaBackendConfig,
+  workspaceRoot: string,
+): SerenaBackendConfig {
+  const migrated = migrateLegacyArgs(input.args, workspaceRoot)
+  const normalized: SerenaBackendConfig = {
+    id: input.id || DEFAULT_SERENA_ID,
+    enabled: input.enabled,
+    command: input.command || 'serena',
+    context: input.context || migrated.context || DEFAULT_SERENA_CONTEXT,
+    projectMode:
+      input.projectMode || migrated.projectMode || DEFAULT_SERENA_PROJECT_MODE,
+    openWebDashboard:
+      input.openWebDashboard ?? migrated.openWebDashboard ?? false,
+    extraArgs: input.extraArgs ?? migrated.extraArgs ?? [],
+    startupTimeoutMs: input.startupTimeoutMs || 15_000,
+    toolTimeoutMs: migrated.toolTimeoutMs || input.toolTimeoutMs || 30_000,
+    languages:
+      input.languages.length > 0
+        ? [...new Set(input.languages)].sort()
+        : DEFAULT_SERENA_LANGUAGES,
+  }
+  const enableWebDashboard =
+    input.enableWebDashboard ?? migrated.enableWebDashboard
+
+  if (input.cwd) normalized.cwd = input.cwd
+  if (input.languageBackend || migrated.languageBackend) {
+    normalized.languageBackend =
+      input.languageBackend ?? migrated.languageBackend
+  }
+  if (enableWebDashboard !== undefined) {
+    normalized.enableWebDashboard = enableWebDashboard
+  }
+  if (input.logLevel || migrated.logLevel) {
+    normalized.logLevel = input.logLevel ?? migrated.logLevel
+  }
+
+  return normalized
+}
+
+function normalizeBindings(
+  project: ProjectModel,
+  updatedAt: string,
+): CodeBackendBinding[] {
+  if (project.backendBindings.length === 0) {
+    return defaultBindings(project)
+  }
+
+  return project.backendBindings.map((binding) => {
+    if (
+      binding.backendKind !== 'serena-mcp' ||
+      binding.backendId !== project.serena.id
+    ) {
+      return binding
+    }
+
+    return {
+      ...binding,
+      capabilities: [
+        ...new Set([...binding.capabilities, ...READONLY_CAPABILITIES]),
+      ],
+      updatedAt: binding.updatedAt || updatedAt,
+    }
+  })
+}
+
 function normalizeProject(project: ProjectModel, workspaceRoot: string) {
   const now = new Date().toISOString()
   const next: ProjectModel = {
@@ -106,30 +315,14 @@ function normalizeProject(project: ProjectModel, workspaceRoot: string) {
     workspaceRoot,
     storage: 'project-local',
     updatedAt: project.updatedAt || now,
-    serena: {
-      ...project.serena,
-      id: project.serena.id || DEFAULT_SERENA_ID,
-      command: project.serena.command || 'serena',
-      args:
-        project.serena.args.length > 0
-          ? project.serena.args
-          : defaultSerenaArgs(),
-      startupTimeoutMs: project.serena.startupTimeoutMs || 15_000,
-      toolTimeoutMs: project.serena.toolTimeoutMs || 30_000,
-      languages:
-        project.serena.languages.length > 0
-          ? [...new Set(project.serena.languages)].sort()
-          : ['typescript', 'javascript'],
-    },
+    serena: normalizeSerena(project.serena, workspaceRoot),
   }
 
   if (!next.defaultModuleId && next.modules[0]) {
     next.defaultModuleId = next.modules[0].id
   }
 
-  if (next.backendBindings.length === 0) {
-    next.backendBindings = defaultBindings(next)
-  }
+  next.backendBindings = normalizeBindings(next, now)
 
   return next
 }

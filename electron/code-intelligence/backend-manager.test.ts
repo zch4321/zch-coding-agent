@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -58,13 +58,14 @@ function enabledProject(project: ProjectModel): ProjectModel {
 describe('CodeBackendManager', () => {
   it('returns unsupported when no backend binding is enabled', async () => {
     const directory = await workspace()
+    await writeFile(path.join(directory, 'app.ts'), 'export class App {}\n')
     const projectMetadata = new ProjectMetadataStore()
     const manager = new CodeBackendManager({ projectMetadata })
 
     const result = await manager.query({
       capability: 'symbol_overview',
       workspace: directory,
-      path: '.',
+      path: 'app.ts',
     })
 
     expect(result.precision).toBe('unsupported')
@@ -74,6 +75,7 @@ describe('CodeBackendManager', () => {
 
   it('routes enabled semantic queries to Serena', async () => {
     const directory = await workspace()
+    await writeFile(path.join(directory, 'app.ts'), 'export class App {}\n')
     const projectMetadata = new ProjectMetadataStore()
     const snapshot = await projectMetadata.get(directory)
     await projectMetadata.save(directory, enabledProject(snapshot.project))
@@ -100,7 +102,7 @@ describe('CodeBackendManager', () => {
     const result = await manager.query({
       capability: 'symbol_overview',
       workspace: directory,
-      path: '.',
+      path: 'app.ts',
     })
 
     expect(result).toBe(expected)
@@ -110,12 +112,13 @@ describe('CodeBackendManager', () => {
       }),
       expect.objectContaining({
         capability: 'symbol_overview',
+        path: 'app.ts',
         moduleId: 'root',
       }),
     )
   })
 
-  it('returns unsupported capability when the configured backend lacks diagnostics', async () => {
+  it('rejects file-only semantic queries for directories', async () => {
     const directory = await workspace()
     const projectMetadata = new ProjectMetadataStore()
     const snapshot = await projectMetadata.get(directory)
@@ -123,9 +126,37 @@ describe('CodeBackendManager', () => {
     const manager = new CodeBackendManager({ projectMetadata })
 
     const result = await manager.query({
-      capability: 'diagnostics',
+      capability: 'symbol_overview',
       workspace: directory,
       path: '.',
+    })
+
+    expect(result.precision).toBe('unsupported')
+    expect(result.code).toBe('PATH_NOT_FILE')
+  })
+
+  it('returns unsupported capability when the configured backend lacks diagnostics', async () => {
+    const directory = await workspace()
+    await writeFile(path.join(directory, 'app.ts'), 'export class App {}\n')
+    const snapshot = await new ProjectMetadataStore().get(directory)
+    const project = enabledProject(snapshot.project)
+    project.backendBindings = project.backendBindings.map((binding) => ({
+      ...binding,
+      capabilities: ['symbol_overview'],
+    }))
+    const projectMetadata = {
+      get: vi.fn(async () => ({
+        project,
+        path: '.zch/project-model.json',
+        gitIgnoreRecommended: false,
+      })),
+    } as unknown as ProjectMetadataStore
+    const manager = new CodeBackendManager({ projectMetadata })
+
+    const result = await manager.query({
+      capability: 'diagnostics',
+      workspace: directory,
+      path: 'app.ts',
     })
 
     expect(result.precision).toBe('unsupported')

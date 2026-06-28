@@ -1,6 +1,6 @@
 # 前端产品与验收规范 · Zch Coding Agent
 
-> 状态：MVP 实现同步版 v0.2 · 最后更新 2026-06-20
+> 状态：MVP 实现同步版 v0.3 · 最后更新 2026-06-28
 > 配套：[`requirements.md`](./requirements.md)（产品能力）、[`architecture.md`](./architecture.md)（技术边界）、[`implementation-plan.md`](./implementation-plan.md)（实施阶段）。  
 > 本文档是前端信息架构、交互行为、阶段展示和验收标准的权威依据。历史视觉探索见 [`frontend-design.md`](./frontend-design.md)，发生冲突时以本文档为准。
 
@@ -49,8 +49,8 @@
 
 ### 2.4 Artifact
 
-- Artifact 是 Agent 工作中产生或查看的文件内容、Diff 等可审查对象。
-- P3 的 Artifact 类型只有 Files 和 Diff。
+- Artifact 是当前项目中由 Agent 产生、查看或依赖的上下文对象，包括文件内容、Diff、计划和项目级代码智能配置。
+- Artifact 侧栏承载当前 workspace 的项目状态视图；全局应用设置仍放在 Settings 页面。
 - Terminal 不是 Artifact；Browser 在 Post-MVP 重新设计。
 
 ---
@@ -64,7 +64,8 @@
 │ 应用名称      当前项目         布局控制  设置  最小化/最大化/关闭 │
 ├──────────────┬──────────────────────────┬────────────────────────┤
 │ 项目侧栏      │ 对话工作列                │ Artifact 侧栏          │
-│              │ ┌────── 对话区 ─────────┐ │ Files / Diff           │
+│              │ ┌────── 对话区 ─────────┐ │ Files / Diff / Plan /  │
+│              │                         │ │ Project                │
 │ + 新对话      │ │ 对话标题 + 活动状态   │ │                        │
 │ 搜索对话      │ │ 消息 / 工具 / 审批    │ │ Explorer / File / Diff │
 │              │ │                       │ │                        │
@@ -314,10 +315,12 @@ Context Ingress 审批必须显示：
 
 ### 8.1 阶段可见性
 
-P3 仅显示：
+当前 Artifact 侧栏可显示：
 
 - Files
 - Diff
+- Plan
+- Project
 
 不显示：
 
@@ -355,6 +358,19 @@ Files 内部使用二级 tab：
 - 变更列表显示路径、操作、时间、diff hash 和回退状态；选择记录后显示对应统一 diff。
 - “回退此变更”必须先显示明确确认，运行期间禁用。主进程返回 `CONFLICT` 时在当前视口显示错误，不能假装回退成功。
 - 大 Diff 必须有明确截断提示，不能让 UI 假装展示了完整变化。
+
+### 8.4 Project
+
+Project tab 展示当前 workspace 专属的项目状态和代码智能配置，不承载全局应用设置。
+
+- Modules：查看当前 module、重新检测 module、预览检测结果并保存为项目元数据；当前 UI 尚未提供完整手动 module 编辑器。
+- Serena backend：展示和编辑当前项目的 Serena MCP 结构化启动配置，包括 command、context、project 参数模式、language backend、启动超时、工具超时、dashboard 行为、日志级别和高级附加参数。
+- Launch preview：展示根据结构化配置生成的启动命令，便于排查 PATH、参数和 dashboard 行为。
+- Backend status：展示后端状态、动态 capabilities、启动失败摘要、stderr 尾部和重启入口。
+- Metadata：展示 module 状态保存位置；当前版本使用 `.zch/project-model.json` 作为 project-local metadata。
+- `.zch/` 由应用按需自动创建；不存 API key、大 trace 或原始工具输出，不自动修改 `.gitignore`，未被忽略时在此 tab 提示用户。
+- Agent 对 module 的自动更新应在此 tab 可审计，并能区分 `detected`、`agent-set`、`user-set` 和 `imported` 来源。
+- 全局凭据、默认 Provider 和应用级偏好仍在 Settings 页面；Project tab 只选择当前项目如何使用这些能力。
 
 ---
 

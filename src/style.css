@@ -43,6 +43,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -53,6 +54,7 @@ button {
 
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 textarea:focus-visible {
   outline: none;
   box-shadow: var(--focus);
@@ -2182,6 +2184,7 @@ code {
 }
 
 .project-field input,
+.project-field select,
 .project-field textarea {
   width: 100%;
   min-width: 0;
@@ -2192,6 +2195,51 @@ code {
   background: var(--background);
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 11px;
+}
+
+.project-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.project-checkbox {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.project-checkbox input {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.launch-preview {
+  display: grid;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.launch-preview code {
+  display: block;
+  min-width: 0;
+  padding: 7px 8px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .backend-status > div {

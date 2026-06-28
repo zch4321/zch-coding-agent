@@ -2,7 +2,7 @@
 
 本文件承接 `feature-backlog.md`，只记录下一阶段和仍未实现的产品方向。已完成的 R0-R6 不再保留在路线图正文中；历史背景以 git history、PR 说明和 release notes 为准。
 
-每个阶段都应保持可独立评审、可测试、可回滚。当前优先级从大功能扩张转向影响可用性的基础能力：工具调用紧凑 UI、Prompt Harness、ReAct 编排、项目模块建模、语义代码工具、LSP 后端、Serena/MCP 适配，以及真实长程 Agent Benchmark。
+每个阶段都应保持可独立评审、可测试、可回滚。当前优先级从大功能扩张转向影响可用性的基础能力：工具调用紧凑 UI、Prompt Harness、ReAct 编排、项目模块建模、语义代码工具、IDE 后端适配、Serena/MCP 适配，以及真实长程 Agent Benchmark。
 
 ## 0. 当前结论
 
@@ -12,10 +12,13 @@
 - 安全策略、权限边界、路径约束、审批要求和凭据保护属于只读 `runtime_policy`，以非系统上下文注入但不能被用户可编辑 Prompt 覆盖。
 - 用户可编辑 Prompt 应降级为个人偏好、语气和工作方式补充，优先级低于系统基础指令、运行时策略和仓库指令。
 - 项目上下文需要显式建模。多语言仓库不应靠模型每轮临时猜测，而应维护一个可追踪的 `ProjectModel / ModuleGraph`。
-- 如果项目没有已配置模块，模型可以通过工具推断和设置 module 根目录；推断结果必须带来源、hash/时间和可覆盖机制。
+- 如果项目没有已配置模块，模型和用户都可以通过工具设置 module 根目录；自动检测只能作为可替换组件提供建议，检测结果必须带来源、hash/时间和可覆盖机制。
+- Module 配置保存为当前 workspace 的 `.zch/project-model.json` 项目元数据；应用可自动创建 `.zch/`，但不自动修改 `.gitignore`，只在 Project tab 提示用户是否忽略。
 - 如果项目已有模块，Prompt Harness 应把简洁 module 摘要注入上下文，供模型选择工具和判断代码边界。
-- 当语义代码工具可用时，应鼓励模型优先使用 `code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_diagnostics` 等工具，再读取局部文件内容。
-- Serena、JetBrains、VS Code、LSP、ast-grep 等后端不应直接暴露成一堆原始工具给模型；模型应看到稳定的 Code Intelligence Facade。
+- 当语义代码工具可用时，Harness 应从提示词和工具描述层面鼓励模型优先使用 `code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_diagnostics` 等 IDE 级工具，再读取局部文件内容。
+- Serena、JetBrains、VS Code、LSP、ast-grep 等后端不应直接暴露成一堆原始工具给模型；模型应看到稳定的 Code Intelligence Facade。每种语言使用哪个后端由用户配置，不在同一语言上自动并行混用多个后端。
+- R4-R7 的第一条 vertical slice 已落地：`.zch` ProjectModel、Project tab、Project 工具、Code Intelligence Facade、Serena MCP 只读 adapter 和 Serena v1 稳定化。当前仍是 v1：没有完整 LSP 后端、没有多后端矩阵、没有写入类 IDE 重构能力。
+- Serena v1 已验证可通过 stdio MCP 启动并映射只读能力，Project tab 已提供结构化启动配置和启动命令预览，dashboard 默认保留但不自动打开。当前仍依赖用户本机安装或 command 绝对路径；托管安装、完整 module 编辑器、多后端配置和写入类 IDE 重构能力是下一步。
 - 真实 LLM 端到端能力不应继续伪装成普通测试。需要独立 Benchmark Harness，用真实仓库任务、官方 evaluator、Playwright 前端操作和 trace 指标评估 coding agent harness 是否有效。
 - R7 的浏览器、多模态和高级统计暂缓，等基础可用性、Prompt Harness 与代码理解能力稳定后再推进。
 
@@ -100,7 +103,7 @@ interface PromptLayer {
 - 工具 schema 不混入 Prompt 正文，仍由 provider tools 字段传递。
 - `runtime_policy` 包含权限、审批、路径、凭据、工具输出不可信、外部内容不可信等硬规则。
 - `environment_context` 每轮动态生成，包含 cwd、shell、当前日期、时区、工作区、git repo、branch、HEAD、dirty summary、主要 manifest 和 top-level structure。
-- `project_context` 注入已确认或已推断的 modules、语言、manifest、LSP 后端和 module 来源。
+- `project_context` 注入当前 workspace 的 modules、语言、manifest、每种语言配置的 code intelligence backend 和 module 来源；模型设置或检测得到的 module 也必须带来源和更新时间。
 - `repo_instructions` 注入 `AGENTS.override.md`、`AGENTS.md` 等仓库规则，支持嵌套优先级、大小限制、hash 和 untrusted 标记。
 - Trace 记录 layer id、kind、source、hash、token 估算和 trusted 状态，避免只记录最终拼接后的 messages。
 
@@ -168,7 +171,7 @@ respecting system, developer, runtime, repository, and tool-safety instructions.
 
 ## 4. ProjectModel / ModuleGraph
 
-目标：让多语言、多子项目仓库有明确的 module 边界，为 Prompt Harness、LSP 路由和语义工具提供基础。
+目标：让多语言、多子项目仓库有明确的 module 边界，为 Prompt Harness、IDE 工具路由和语义代码工具提供基础。核心只定义数据模型、存储、工具接口和路由约定；自动检测、语言理解和 IDE 后端实现都应作为可替换组件接入。
 
 模块示例：
 
@@ -191,39 +194,62 @@ interface ProjectModule {
   sourceRoots: string[]
   testRoots: string[]
   excludedRoots: string[]
-  lspBackends: string[]
-  source: 'auto-detected' | 'model-suggested' | 'user-confirmed' | 'manual'
+  backendHints: string[]
+  source: 'detected' | 'agent-set' | 'user-set' | 'imported'
   confidence: number
+  fingerprint: string
   updatedAt: string
 }
 
 interface ProjectModel {
+  schemaVersion: 1
   workspaceRoot: string
   modules: ProjectModule[]
   defaultModuleId?: string
-  version: number
+  storage: 'project-local'
+  backendBindings: CodeBackendBinding[]
+  serena: SerenaBackendConfig
+  updatedAt: string
 }
 ```
 
+当前实现：
+
+- 已新增 `shared/project-model.ts`，定义 `ProjectModel`、`ProjectModule`、`CodeBackendBinding`、`CodeBackendStatus` 和 code intelligence 结果结构。
+- 已新增 `ProjectMetadataStore`，默认读写 `<workspace>/.zch/project-model.json`；该文件不存 API key、大 trace 或原始工具输出。
+- 已新增轻量 `ProjectModuleDetector`，按 manifest 检测单模块、多模块和常见语言线索；检测结果来源为 `detected`。
+- 已新增 agent 工具：`project_get_modules`、`project_detect_modules`、`project_set_modules`、`project_update_module`。
+- 已新增 Artifact Panel 的 Project tab，展示 modules、检测结果、结构化 Serena 配置、启动命令预览、backend status 和 `.zch/` gitignore 建议。
+- Prompt Harness 已优先使用 ProjectModel 摘要注入 module/backend context；没有 metadata store 时才退回旧的临时 manifest 检测。
+
 实现要求：
 
-- 先做确定性扫描：`package.json`、`pnpm-workspace.yaml`、`tsconfig.json`、`pyproject.toml`、`requirements.txt`、`go.mod`、`Cargo.toml`、`pom.xml`、`build.gradle`、`.sln`、`*.csproj`、`CMakeLists.txt`。
-- 提供 `project_get_modules`、`project_detect_modules`、`project_set_modules` 工具。
-- `project_set_modules` 默认写入应用 workspace metadata，不写入仓库；后续可以支持用户显式导出到仓库配置。
-- 模型可以在没有 module 配置时调用工具推断模块根目录，但推断结果必须可审计、可替换、可重新检测。
+- `project_set_modules` 和 `project_update_module` 只写入 `.zch/project-model.json` 项目元数据，不修改源码文件或 git 历史；该受控 metadata 写入在所有权限模式下允许自动执行。
+- `.zch/project-model.json` 不存 API key、大 trace 或原始工具输出；应用不自动写 `.gitignore`，Project tab 只显示建议。
+- 模型可以在没有 module 配置时自行调用工具设置 module 根目录，也可以在发现配置不合适时自行修正；Prompt 和 UI 必须能展示当前 module 来源，避免用户误以为这是仓库事实。
+- 自动检测通过 `ProjectModuleDetector` 接口接入，核心不内置不断膨胀的语言生态规则。当前内置检测器只做轻量 manifest 扫描；后续检测器可以由插件、MCP server 或受维护的开源工具提供。
+- 内置检测器只做低风险的 manifest/workspace 线索聚合；复杂语言规则优先委托给持续维护的工具或插件，而不是在核心里长期维护。
 - 一个 workspace 可以有多个 module；同一个文件请求按路径归属路由到对应 module。
 - 对 `node_modules`、`dist`、`build`、`target`、`.venv`、`.git` 等目录默认排除，避免污染索引和 Prompt。
 - Prompt Harness 在存在模块时注入精简摘要；没有模块时提示模型先建立模块边界，再进行大范围代码探索。
 
+下一步：
+
+- Project tab 增加完整手动编辑能力：module root、languages、sourceRoots、testRoots、excludedRoots、default module 和来源说明。当前 UI 只能查看、重新检测并保存检测结果；agent 已可通过 `project_set_modules` / `project_update_module` 设置 module。
+- 为 module metadata 更新补 trace/change history 摘要，便于审计和回滚。
+- 明确 `.zch/` 文件的 Git 噪音处理：继续只提示，不自动改 `.gitignore`；可增加复制建议或一键打开 `.gitignore`。
+- 评估是否把内置 detector 替换为或接入受维护的 project detector，而不是继续在核心里扩展语言规则。
+
 验收：
 
 - 单仓库单模块、前后端双模块、monorepo workspace、脚本目录混合项目都有测试样例。
-- 模块配置不会因为模型误判而静默污染用户仓库。
+- 模块配置不会因为模型误判而静默污染源码或 git 历史；`.zch/` 只保存本应用项目元数据，并在未被 `.gitignore` 忽略时提示用户。
 - 当文件路径命中多个或零个 module 时，工具返回明确的歧义或缺失信息。
+- Prompt Harness 能把当前 module 摘要和来源注入上下文，模型能据此选择后续 IDE 级工具。
 
 ## 5. Code Intelligence Facade
 
-目标：先定义模型可见的稳定语义代码工具，再在后面替换或叠加 LSP、Serena、JetBrains、VS Code、ast-grep 等后端。
+目标：先定义模型可见的稳定 IDE 级语义代码工具，让 Harness 从工具描述和提示词层面鼓励 agent 优先使用它们；后端可以替换为 LSP、Serena、JetBrains、VS Code、ast-grep、索引器或 MCP server，但不直接暴露后端原始工具给模型。
 
 第一批只读工具：
 
@@ -239,70 +265,123 @@ code_diagnostics
 
 - 工具输入使用 workspace 相对路径和可选 `moduleId`，不要暴露后端实现细节。
 - 工具输出保持小而结构化，包含文件、range、symbol kind、简短上下文和后端来源。
-- 如果语义后端不可用，允许回退到 `rg`、文件索引或 ast-grep，但结果要标明 `precision`。
-- Prompt 中明确鼓励模型先用语义工具定位范围，再读取相关文件片段。
+- 每种语言在同一 workspace/module 中只使用一个用户配置的首选后端；不要对同一语言自动并行查询多个后端。第一版不静默 fallback；后端不可用或能力缺失时返回结构化 `code`、`precision` 和 `message`。
+- Prompt 和工具描述中明确鼓励模型先用语义工具定位范围，再读取相关文件片段。
 - `read_file` 仍保留，用于小文件、配置文件、最终确认和语义工具无法覆盖的场景。
 - 写入类重构工具暂缓，先保证 read-only code intelligence 稳定。
+- 后续 IDE 级编辑能力单独设计，不在第一批实现。候选能力包括 `code_rename_symbol`、`code_replace_symbol_body`、`code_update_definition`、`code_apply_refactor_preview` 和项目问题反馈；所有写入都必须进入现有文件变更、diff、审批和 trace 管线。
+
+当前实现：
+
+- 已新增模型可见的只读 facade 工具：`code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_workspace_symbols`、`code_diagnostics`。
+- 输出已统一包含 `backendId`、`capability`、`precision`、`source`、`truncated`、`items`，错误路径返回结构化 `code` 和 `message`。
+- 工具和 base prompt 已提醒模型优先使用 ProjectModel 与 `code_*` 工具定位范围，再读局部文件。
+- `code_symbol_overview` 已收紧为文件级工具；目录输入会返回结构化 `PATH_NOT_FILE`，目录场景应改用 `code_workspace_symbols`、`rg` 或后续独立 `code_directory_overview`。
+- `code_diagnostics` 已映射 Serena `get_diagnostics_for_file`，先支持文件级 diagnostics；如果 Serena 不暴露该 raw tool，则返回 `UNSUPPORTED_CAPABILITY`。
+
+下一步：
+
+- 设计目录级 overview/diagnostics 的有界能力，避免把大目录一次性塞给后端或上下文。
+- 扩展 diagnostics 结果缓存、过期标记和 UI 展示，避免每次查询都重新触发昂贵后端扫描。
+- 在 benchmark trace 中记录 facade 命中率、读文件 token、首次定位正确文件耗时和 fallback/unsupported 原因。
 
 验收：
 
 - 模型可以在不知道具体后端的情况下完成 definition、references、diagnostics 查询。
 - 大文件场景下不会默认把全文塞进上下文。
 - 所有外部后端输出都按不可信内容处理，并做大小、数量和时间限制。
+- 在支持 IDE 后端的项目中，Benchmark 和 trace 能看到 agent 优先使用 Code Intelligence Facade，而不是直接退回大范围全文读取。
 
-## 6. LSP Backend
+## 6. Code Intelligence Backend Routing
 
-目标：为 Code Intelligence Facade 提供第一类 IDE 能力，按 module 和文件类型自动路由到对应 language server。
+目标：为 Code Intelligence Facade 提供后端配置、能力发现和路由层。核心只管理“哪个 module/语言 使用哪个后端”的选择，不自研语言服务后端，也不把同一语言自动分发给多个后端。
 
-优先顺序：
+建议模型：
 
-1. TypeScript / JavaScript / Vue：匹配当前 Electron + Vue 项目本身。
-2. Python：常见脚本和自动化项目。
-3. Go / Rust / Java：按用户项目需求逐步扩展。
+```ts
+interface CodeBackendBinding {
+  id: string
+  moduleId?: string
+  language: string
+  backendId: string
+  enabled: boolean
+  capabilities: Array<
+    | 'symbol_overview'
+    | 'definition'
+    | 'references'
+    | 'workspace_symbols'
+    | 'diagnostics'
+    | 'rename'
+    | 'edit'
+  >
+  configuredBy: 'user' | 'imported'
+  updatedAt: string
+}
+```
 
 实现要求：
 
-- 新增 `LanguageServerManager`，按 workspace + module 复用 language server 进程。
-- 新增路由层，根据文件路径、module、语言和 manifest 选择后端。
-- 支持初始化、打开文件、关闭文件、definition、references、workspace symbols、diagnostics。
-- diagnostics 做缓存，避免每次请求都重新启动或重新扫描。
-- language server 未安装、启动失败或不支持某能力时，返回可解释错误并允许 fallback。
-- LSP 进程生命周期、超时、输出大小和日志必须受主进程控制。
+- 新增 Code Intelligence 后端管理/路由层，根据 workspace、module、语言、文件路径和用户配置选择一个后端。
+- 用户可在 Artifact Panel 的项目配置 tab 中为每种语言选择后端，例如内置 LSP 插件、JetBrains/WebStorm MCP、Serena MCP、VS Code adapter 或通用 fallback。
+- 路由层必须返回明确错误：未配置、后端不可用、能力不支持、路径无法归属 module、后端超时。
+- 后端能力通过统一接口暴露，不把 LSP、MCP 或 IDE 的原始协议细节泄露给模型。
+- 诊断结果允许缓存，但必须带生成时间、后端、moduleId、语言和是否可能过期。
+- 后端进程或外部连接的生命周期、超时、输出大小、日志和信任边界必须受主进程控制或由对应插件声明并接受统一约束。
+
+当前实现：
+
+- 已新增 `CodeBackendManager`，按 ProjectModel、module、language 和 enabled binding 路由到 Serena adapter。
+- 当前只支持一个 Serena backend；数据模型预留了按语言和 module 绑定，但 UI 只提供全局 Serena 开关、结构化启动配置、启动命令预览和 backend status。
+- 当前没有自研 `LanguageServerManager`，也没有 TypeScript/Go/Python LSP 进程管理；语言理解能力来自 Serena 自己的 backend。
+- 后端不可用、module 不匹配、path 不属于 module、文件级工具传入目录、能力不支持都会返回结构化 unsupported 结果。
+- Serena ready 后会根据实际 `tools/list` 计算 capabilities；启动失败状态会保留到下一次 restart，并在 status message 中包含受控启动摘要和 stderr 尾部。
+
+下一步：
+
+- Project tab 增加按 module/language 的 backend 选择和能力展示，而不是只有全局 Serena 开关。
+- 增加 backend startup/restart/stop 的持久 trace event，包含 command、cwd、argv 摘要、pid、stderr 尾部和错误 code；当前这些信息只体现在 backend status message 中。
+- 后续再评估是否接入 JetBrains/WebStorm MCP、VS Code adapter 或插件化 LSP；核心不直接维护多语言 LSP 生态。
 
 验收：
 
-- 在当前 TS/Vue 项目内，能通过 facade 查询符号、定义、引用和诊断。
-- 多 module 项目中，前端文件不会误用后端 language server，后端文件不会误用前端 language server。
-- LSP 不可用时，Agent 仍能退回现有 grep/read-file 工作流。
+- 在当前 TS/Vue 项目内，能通过 facade 查询符号、定义、引用和诊断，具体后端由用户配置决定。
+- 多 module 项目中，前端文件不会误用后端语言的 code backend，后端文件不会误用前端语言的 code backend。
+- 配置缺失或后端不可用时，Agent 仍能退回现有 grep/read-file 工作流，并在 trace 中记录降级原因。
 
-## 7. Serena / MCP Adapter
+## 7. IDE / MCP Backend Adapters
 
-目标：接入 Serena 的 symbol-level retrieval/edit/refactor 能力，但对模型保持稳定的 Code Intelligence Facade。
+目标：接入 Serena、JetBrains/WebStorm、VS Code、LSP 插件等 IDE 级后端，但对模型保持稳定的 Code Intelligence Facade。MCP 或 IDE 后端是能力来源，不是模型直接调用的一组默认工具。
 
-第一阶段：只读 Serena MVP。
+第一阶段：Serena MCP 只读 backend v1。
 
-- 新增 `electron/mcp/`：
-  - `mcp-client-manager.ts`
-  - `stdio-transport.ts`
-  - `mcp-tool-adapter.ts`
-  - `mcp-config.ts`
-- 配置 schema 支持 server name、command、args、env allowlist、cwd、enabled tools、disabled tools、startup timeout、tool timeout 和默认审批策略。
-- 每个 workspace 启动独立 Serena 进程，避免单活项目状态串线。
-- Serena retrieval 能力映射到 `code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_diagnostics`。
-- 禁用或默认审批 shell、file edit、rename、replace、insert、memory write 等写入或副作用工具。
+- 当前已通过官方 MCP TypeScript SDK 接入 Serena stdio server，没有直接暴露 raw `mcp__serena__*` 工具给模型。
+- 当前映射 Serena raw tools：`get_symbols_overview`、`find_symbol`、`find_referencing_symbols`、`get_diagnostics_for_file`。
+- 当前禁止 memory、shell、edit、rename、insert、replace 等 raw MCP 工具进入模型 tool schema。
+- 当前 Serena 使用结构化项目配置生成 argv：`command`、`context`、`projectMode`、`languageBackend`、`enableWebDashboard`、`openWebDashboard`、`logLevel`、`startupTimeoutMs`、`toolTimeoutMs` 和 `extraArgs` 保存在 `.zch/project-model.json`。旧 raw `args` 会在读取时迁移到结构化字段。
+- Dashboard 默认保留但不自动打开：默认生成 `--open-web-dashboard false`，`enableWebDashboard` 不强制关闭。
+- 后端 ready capabilities 根据 Serena `tools/list` 动态生成；启动失败 status 会保留错误摘要、argv preview 和 stderr tail。
+- 当前依赖用户本机安装 Serena，且应用进程能通过 PATH 或绝对路径找到 command；尚未实现托管安装。
+
+下一步：
+
+- 实现 Serena 托管安装 resolver：优先 managed Serena，其次 custom command；提供安装、修复、版本、license notice 和 sha256 校验。
+- 增加 backend 持久日志/trace，解决 PATH、spawn、startup timeout、tool list 缺失等问题的可诊断性；当前只有 Project tab status 展示受控摘要。
+- 明确是否在 adapter 内部消费 Serena `initial_instructions` / `onboarding`；默认不要把 Serena 自身 agent prompt 混入本应用 Prompt Harness。
 - MCP 工具列表不在会话中途静默改变；新增、删除或变更工具应下轮生效或要求重连。
 
 第二阶段：写入和重构。
 
-- rename、replace、insert、safe delete 映射到现有文件写入和权限管线。
+- rename、replace、insert、safe delete、实现替换、定义更新等 IDE 级编辑能力映射到现有文件写入、diff、审批、trace 和回滚管线。
+- 写入类后端调用应优先返回 preview/diff，只有用户或权限管线允许后才落盘。
+- 修改后提供项目问题反馈：自动刷新相关 diagnostics、展示新增/消失的问题，并把问题摘要写入 run timeline。
 - shell 执行映射到现有进程权限模型，默认高风险。
 - Serena memory 写入单独审批，并在 UI 中可见。
 - 所有 MCP 输出标记为 untrusted，并受大小、时间和 schema 校验限制。
 
 验收：
 
-- 不直接把原始 `mcp__serena__*` 工具暴露给模型作为默认能力。
-- Serena 不可用时，Code Intelligence Facade 仍然可用或能给出明确降级信息。
+- 不直接把原始 `mcp__serena__*`、`mcp__jetbrains__*`、`mcp__vscode__*` 等工具暴露给模型作为默认能力。
+- IDE/MCP 后端不可用时，Code Intelligence Facade 仍然可用或能给出明确降级信息。
 - 写入类能力进入权限管线，不绕过现有文件保护、审批和 trace。
 
 ## 8. Multi-Provider Routing

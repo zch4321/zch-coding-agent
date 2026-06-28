@@ -77,12 +77,48 @@ export const CodeBackendBindingSchema = Type.Object(
 )
 export type CodeBackendBinding = Static<typeof CodeBackendBindingSchema>
 
+export const SerenaProjectModeSchema = Type.Union([
+  Type.Literal('workspacePath'),
+  Type.Literal('projectFromCwd'),
+  Type.Literal('none'),
+])
+export type SerenaProjectMode = Static<typeof SerenaProjectModeSchema>
+
+export const SerenaLanguageBackendSchema = Type.Union([
+  Type.Literal('LSP'),
+  Type.Literal('JetBrains'),
+])
+export type SerenaLanguageBackend = Static<typeof SerenaLanguageBackendSchema>
+
+export const SerenaLogLevelSchema = Type.Union([
+  Type.Literal('DEBUG'),
+  Type.Literal('INFO'),
+  Type.Literal('WARNING'),
+  Type.Literal('ERROR'),
+  Type.Literal('CRITICAL'),
+])
+export type SerenaLogLevel = Static<typeof SerenaLogLevelSchema>
+
 export const SerenaBackendConfigSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
     enabled: Type.Boolean(),
     command: Type.String({ minLength: 1, maxLength: 512 }),
-    args: Type.Array(Type.String({ maxLength: 2_048 }), { maxItems: 64 }),
+    context: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    projectMode: Type.Optional(SerenaProjectModeSchema),
+    languageBackend: Type.Optional(SerenaLanguageBackendSchema),
+    enableWebDashboard: Type.Optional(Type.Boolean()),
+    openWebDashboard: Type.Optional(Type.Boolean()),
+    logLevel: Type.Optional(SerenaLogLevelSchema),
+    extraArgs: Type.Optional(
+      Type.Array(Type.String({ maxLength: 2_048 }), { maxItems: 64 }),
+    ),
+    args: Type.Optional(
+      Type.Array(Type.String({ maxLength: 2_048 }), {
+        maxItems: 64,
+        description: 'Legacy raw Serena args, migrated to structured fields.',
+      }),
+    ),
     cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
     startupTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 300_000 }),
     toolTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 300_000 }),
@@ -243,6 +279,7 @@ export const CodeIntelligenceResultCodeSchema = Type.Union([
   Type.Literal('BACKEND_UNAVAILABLE'),
   Type.Literal('MODULE_NOT_FOUND'),
   Type.Literal('PATH_OUTSIDE_MODULE'),
+  Type.Literal('PATH_NOT_FILE'),
 ])
 export type CodeIntelligenceResultCode = Static<
   typeof CodeIntelligenceResultCodeSchema

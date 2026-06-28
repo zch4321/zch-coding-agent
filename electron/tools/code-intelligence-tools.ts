@@ -2,16 +2,14 @@ import { Type, type Static } from '@sinclair/typebox'
 import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
 
-const BaseCodeQuerySchema = Type.Object(
+const DiagnosticsSchema = Type.Object(
   {
-    path: Type.Optional(
-      Type.String({
-        minLength: 1,
-        maxLength: 4_096,
-        description:
-          'Workspace-relative file or directory path. Omit only for workspace-wide symbol search.',
-      }),
-    ),
+    path: Type.String({
+      minLength: 1,
+      maxLength: 4_096,
+      description:
+        'Workspace-relative file path to inspect for IDE diagnostics.',
+    }),
     moduleId: Type.Optional(
       Type.String({
         minLength: 1,
@@ -30,7 +28,7 @@ const SymbolOverviewSchema = Type.Object(
       minLength: 1,
       maxLength: 4_096,
       description:
-        'Workspace-relative file or directory path to summarize semantically.',
+        'Workspace-relative source file path to summarize semantically. Directories are not supported by the Serena backend.',
     }),
     moduleId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   },
@@ -71,7 +69,7 @@ const WorkspaceSymbolsSchema = Type.Object(
 )
 type WorkspaceSymbolsArgs = Static<typeof WorkspaceSymbolsSchema>
 
-type DiagnosticsArgs = Static<typeof BaseCodeQuerySchema>
+type DiagnosticsArgs = Static<typeof DiagnosticsSchema>
 
 function toolError(error: unknown): ToolResult {
   return {
@@ -93,7 +91,7 @@ export function registerCodeIntelligenceTools(
   registry.registerTool({
     id: 'code_symbol_overview',
     description:
-      'Use IDE-level code intelligence to summarize symbols in a file or directory before reading large source files.',
+      'Use IDE-level code intelligence to summarize symbols in one source file before reading large files. For directories, search with code_workspace_symbols or locate candidate files first.',
     inputSchema: SymbolOverviewSchema,
     effects: ['code.read'],
     defaultRisk: 'low',
@@ -203,8 +201,8 @@ export function registerCodeIntelligenceTools(
   registry.registerTool({
     id: 'code_diagnostics',
     description:
-      'Return project diagnostics from the configured IDE/code-intelligence backend when supported.',
-    inputSchema: BaseCodeQuerySchema,
+      'Return IDE diagnostics for one source file from the configured code-intelligence backend when supported.',
+    inputSchema: DiagnosticsSchema,
     effects: ['code.read'],
     defaultRisk: 'low',
     supportsAbort: true,
@@ -225,5 +223,5 @@ export function registerCodeIntelligenceTools(
         return toolError(error)
       }
     },
-  } satisfies ToolDefinition<typeof BaseCodeQuerySchema>)
+  } satisfies ToolDefinition<typeof DiagnosticsSchema>)
 }

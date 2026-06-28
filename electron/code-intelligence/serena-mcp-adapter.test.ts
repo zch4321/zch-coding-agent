@@ -25,10 +25,16 @@ afterEach(async () => {
 function fakeServerSource(): string {
   return `
 const mode = process.argv[2] || 'default'
-const allTools = ['get_symbols_overview', 'find_symbol', 'find_referencing_symbols', 'replace_symbol_body']
-const tools = mode === 'missing-overview'
-  ? allTools.filter((name) => name !== 'get_symbols_overview')
-  : allTools
+if (mode === 'crash') {
+  console.error('fake startup failure')
+  process.exit(1)
+}
+const allTools = ['get_symbols_overview', 'find_symbol', 'find_referencing_symbols', 'get_diagnostics_for_file', 'replace_symbol_body']
+const tools = allTools.filter((name) => {
+  if (mode === 'missing-overview' && name === 'get_symbols_overview') return false
+  if (mode === 'missing-diagnostics' && name === 'get_diagnostics_for_file') return false
+  return true
+})
 let buffer = ''
 
 function send(message) {
@@ -66,6 +72,28 @@ function handle(message) {
   if (message.method === 'tools/call') {
     const name = message.params?.name
     const args = message.params?.arguments ?? {}
+    if (name === 'get_diagnostics_for_file') {
+      send({
+        id: message.id,
+        result: {
+          content: [{
+            type: 'text',
+            text: JSON.stringify([{
+              relative_path: args.relative_path || 'src/app.ts',
+              severity: 1,
+              message: 'Type mismatch',
+              source: 'fake-lsp',
+              code: 'TS2322',
+              range: {
+                start: { line: 3, character: 5 },
+                end: { line: 3, character: 18 },
+              },
+            }]),
+          }],
+        },
+      })
+      return
+    }
     const symbolName = name === 'find_symbol'
       ? String(args.name_path_pattern || 'App')
       : String(args.name_path || 'App')
@@ -112,11 +140,7 @@ async function fakeServer(workspacePath: string): Promise<string> {
   return script
 }
 
-function project(
-  workspacePath: string,
-  script: string,
-  mode = 'default',
-): ProjectModel {
+function project(workspacePath: string, mode = 'default'): ProjectModel {
   return {
     schemaVersion: 1,
     workspaceRoot: workspacePath,
@@ -126,8 +150,11 @@ function project(
     serena: {
       id: 'serena',
       enabled: true,
-      command: process.execPath,
-      args: [script, mode],
+      command: 'serena',
+      context: 'ide-assistant',
+      projectMode: 'workspacePath',
+      openWebDashboard: false,
+      extraArgs: [mode],
       cwd: workspacePath,
       startupTimeoutMs: 5_000,
       toolTimeoutMs: 5_000,
@@ -137,14 +164,25 @@ function project(
   }
 }
 
+function adapterFor(script: string): SerenaMcpAdapter {
+  return new SerenaMcpAdapter({
+    launch: (model) => ({
+      command: process.execPath,
+      args: [script, model.serena.extraArgs?.[0] ?? 'default'],
+      cwd: model.workspaceRoot,
+      preview: `${process.execPath} ${script}`,
+    }),
+  })
+}
+
 describe('SerenaMcpAdapter', () => {
   it('maps read-only code intelligence calls through a stdio MCP server', async () => {
     const directory = await workspace()
     const script = await fakeServer(directory)
-    const adapter = new SerenaMcpAdapter()
+    const adapter = adapterFor(script)
 
     try {
-      const result = await adapter.query(project(directory, script), {
+      const result = await adapter.query(project(directory), {
         capability: 'symbol_overview',
         workspace: directory,
         path: 'src/app.ts',
@@ -157,7 +195,35 @@ describe('SerenaMcpAdapter', () => {
         kind: 'class',
         path: 'src/app.ts',
       })
-      expect(adapter.status(project(directory, script)).state).toBe('ready')
+      expect(adapter.status(project(directory)).state).toBe('ready')
+      expect(adapter.status(project(directory)).capabilities).toContain(
+        'diagnostics',
+      )
+    } finally {
+      await adapter.dispose()
+    }
+  })
+
+  it('maps Serena file diagnostics into code diagnostics', async () => {
+    const directory = await workspace()
+    const script = await fakeServer(directory)
+    const adapter = adapterFor(script)
+
+    try {
+      const result = await adapter.query(project(directory), {
+        capability: 'diagnostics',
+        workspace: directory,
+        path: 'src/app.ts',
+      })
+
+      expect(result.precision).toBe('semantic')
+      expect(result.items[0]).toMatchObject({
+        path: 'src/app.ts',
+        severity: 'error',
+        message: 'Type mismatch',
+        source: 'fake-lsp',
+        code: 'TS2322',
+      })
     } finally {
       await adapter.dispose()
     }
@@ -166,11 +232,11 @@ describe('SerenaMcpAdapter', () => {
   it('returns unsupported when Serena omits the mapped read-only tool', async () => {
     const directory = await workspace()
     const script = await fakeServer(directory)
-    const adapter = new SerenaMcpAdapter()
+    const adapter = adapterFor(script)
 
     try {
       const result = await adapter.query(
-        project(directory, script, 'missing-overview'),
+        project(directory, 'missing-overview'),
         {
           capability: 'symbol_overview',
           workspace: directory,
@@ -180,6 +246,53 @@ describe('SerenaMcpAdapter', () => {
 
       expect(result.precision).toBe('unsupported')
       expect(result.code).toBe('UNSUPPORTED_CAPABILITY')
+    } finally {
+      await adapter.dispose()
+    }
+  })
+
+  it('returns unsupported when Serena omits diagnostics', async () => {
+    const directory = await workspace()
+    const script = await fakeServer(directory)
+    const adapter = adapterFor(script)
+
+    try {
+      const result = await adapter.query(
+        project(directory, 'missing-diagnostics'),
+        {
+          capability: 'diagnostics',
+          workspace: directory,
+          path: 'src/app.ts',
+        },
+      )
+
+      expect(result.precision).toBe('unsupported')
+      expect(result.code).toBe('UNSUPPORTED_CAPABILITY')
+      expect(
+        adapter.status(project(directory, 'missing-diagnostics')).capabilities,
+      ).not.toContain('diagnostics')
+    } finally {
+      await adapter.dispose()
+    }
+  })
+
+  it('preserves startup failure diagnostics in backend status', async () => {
+    const directory = await workspace()
+    const script = await fakeServer(directory)
+    const adapter = adapterFor(script)
+    const model = project(directory, 'crash')
+
+    try {
+      const status = await adapter.restart(model)
+
+      expect(status.state).toBe('error')
+      expect(status.message).toContain('Serena backend failed to start.')
+      expect(status.message).toContain('fake startup failure')
+      expect(status.message).toContain('argv:')
+      expect(adapter.status(model)).toMatchObject({
+        state: 'error',
+        message: status.message,
+      })
     } finally {
       await adapter.dispose()
     }
