@@ -125,13 +125,15 @@ export function resolveSlashCommand(input: {
           source: `skill:${skill.name}`,
           content: selectedContextContent(
             [
+              `<skill_request name="${skill.name}">`,
               `The user explicitly requested skill "${skill.name}". Follow its full instructions without first calling read_skill.`,
-              `<skill name="${skill.name}" source="${skill.source}" sha256="${skill.sha256}">`,
-              skill.body,
-              '</skill>',
               instruction
                 ? `User request: ${instruction}`
                 : 'User request: execute the requested skill.',
+              '</skill_request>',
+              `<skill name="${skill.name}" source="${skill.source}" sha256="${skill.sha256}">`,
+              skill.body,
+              '</skill>',
             ].join('\n\n'),
             `skill:${skill.name}`,
           ),

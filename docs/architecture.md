@@ -270,6 +270,10 @@ async function runAgent(session: Session, run: Run, userInput: string) {
 - **工具结果有界**：stdout/stderr、文件内容和 PTY scrollback 超限时截断，并附 `truncated/totalBytes`；完整大结果可落临时 artifact，但不会自动进入模型上下文。
 - **上下文预算**：优先保留 system、最近用户轮次、未完成工具链路和 provider 必需 continuation state；压缩不能破坏 provider 的工具调用协议。
 - **Compact 重写语义**：手动 `/compact` 先用旧 provider messages 生成摘要，然后清空 provider history，重新注入完整 harness，并把摘要作为 `<compact_history>` 包裹的第一条 user context；运行中自动 compact 只能在 tool-call/tool-result 完整边界执行，并保留当前用户轮次及其之后的消息。
+- **Append-only 消息原则**：除显式 compact 外，已经写入 `session.history` 的 message 不做原地修改。运行时上下文、AGENTS 变化、用户插话、选中上下文和工具结果都通过追加新 message/layer 表达；Provider 请求选择器可以因预算省略旧 message，但不能改写持久历史。工具结果必须在入栈前完成截断、敏感数据过滤和 provider 格式化，入栈后只作为历史事实保留。
+- **Harness tag 语义**：模型可见的 XML-like tag 是 harness 协议的一部分，稳定说明写入 base instructions。Tag 只表达来源、生命周期和预期用途，不提升信任级别；`<environment_context>`、`<module_context>` 等动态快照可多次出现，模型应以最新快照为准，trace 仍保留旧快照用于审计。由 harness 追加的非对话上下文应尽量全文 tag 包裹，不在 tag 外增加重复说明句。
+- **缓存友好顺序**：稳定 base instructions、工具 schema 顺序和 prompt resource hash 应尽量不变；高频变化信息只追加为动态层，并在 hash 时排除不影响决策的瞬时时间戳。是否在 provider request 中只保留最新 runtime snapshot 需要由 cache/benchmark 数据决定，不能靠直觉改动。
+- **模板注入边界**：`runtime-context.*.md` 使用资源化模板和白名单变量替换，例如 `${identifier}`；模板不执行 JS 或任意表达式，未知变量、未渲染变量和未 escape 的 attribute 值必须在加载、渲染或测试阶段失败。动态变量先由 TypeScript collector 做路径、大小、token、敏感数据和信任边界处理，再进入模板；后续其他 prompt 模板也必须沿用同一边界。
 - **失败不等于丢消息**：Provider/工具异常转为 run 事件和用户可见错误；只有协议明确允许时才把错误作为 tool result 继续给模型。
 - **计划审阅状态显式化**：`plan_set` 默认创建 `awaiting_review` Plan；用户批准或拒绝后，模型使用 `plan_status` 把 Plan 切到 `active` 或 `rejected`。该工具是面向模型的状态同步入口，目的是记录 plan review 结果并驱动后续自动续跑，不代表跳过权限管线。
 

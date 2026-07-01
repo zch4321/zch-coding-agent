@@ -35,7 +35,9 @@ describe('PromptRegistry', () => {
     expect(base.resource.id).toBe(
       DEFAULT_HARNESS_PROMPT_REFS.baseInstructions['zh-CN'].id,
     )
-    expect(base.content).toContain('<agents>')
+    expect(base.content).toContain('指令优先级与信任边界')
+    expect(base.content).toContain('Harness 标签')
+    expect(base.content).toContain('ProjectModel')
     expect(runtime.resource.id).toBe(
       DEFAULT_HARNESS_PROMPT_REFS.runtimeContext['en-US'].id,
     )

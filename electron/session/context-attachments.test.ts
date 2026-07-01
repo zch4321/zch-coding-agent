@@ -26,12 +26,19 @@ describe('R4 run context attachments', () => {
     expect(context.chips).toMatchObject([
       { kind: 'file', path: 'docs/note.md', source: 'mention' },
     ])
+    expect(context.providerContent.trimStart()).toMatch(/^<agents /u)
     expect(context.providerContent).toContain('root guidance')
     expect(context.providerContent).toContain('docs guidance')
     expect(context.providerContent).toContain(
       '<context_file path="docs/note.md"',
     )
     expect(context.providerContent).toContain('# Note')
+    expect(context.providerContent).not.toContain(
+      'Repository AGENTS.md instructions follow',
+    )
+    expect(context.providerContent).not.toContain(
+      'The following bounded workspace context was selected',
+    )
   })
 
   it('summarizes directory attachments without reading every file body', async () => {
@@ -51,6 +58,7 @@ describe('R4 run context attachments', () => {
     expect(context.chips).toMatchObject([
       { kind: 'directory', path: 'src', source: 'picker' },
     ])
+    expect(context.providerContent.trimStart()).toMatch(/^<context_directory /u)
     expect(context.providerContent).toContain('<context_directory path="src"')
     expect(context.providerContent).toContain('file src/index.ts')
     expect(context.providerContent).not.toContain('secret body')

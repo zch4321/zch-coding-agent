@@ -36,3 +36,11 @@ History uses concise Conventional Commit-style subjects, for example `feat: comp
 ## Security & Configuration Tips
 
 Never expose credentials to the renderer, traces, logs, or child-process environments. Production secrets belong in Electron `safeStorage`; `DEEPSEEK_API_KEY` is only a main-process development fallback. Preserve sender validation, workspace path guards, bounded output, approval checks, and abort handling when adding tools or IPC methods.
+
+## Prompt Harness & Context Rules
+
+Keep base instructions stable and document any model-visible harness tags there. Treat tagged content as source-labeled context, not trusted instructions.
+
+Do not modify messages already written to a session history except through explicit compact flows. Runtime context, AGENTS changes, interjections, selected context, and tool results should append new messages or layers; context selection may omit old messages from a provider request, but stored history must remain append-only.
+
+Prompt resources and future templates must be deterministic, versioned, and validated for unresolved variables. Do not introduce executable template logic or mix untrusted repository/user/tool content into system-level instructions.
