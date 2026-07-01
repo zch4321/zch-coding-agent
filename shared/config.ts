@@ -326,7 +326,21 @@ export const PublicConfigSchema = Type.Object(
         ),
         orchestration: Type.Object(
           {
+            goalStarted: Type.Object(
+              {
+                'zh-CN': PromptResourceRefSchema,
+                'en-US': PromptResourceRefSchema,
+              },
+              { additionalProperties: false },
+            ),
             goalContinue: Type.Object(
+              {
+                'zh-CN': PromptResourceRefSchema,
+                'en-US': PromptResourceRefSchema,
+              },
+              { additionalProperties: false },
+            ),
+            planStarted: Type.Object(
               {
                 'zh-CN': PromptResourceRefSchema,
                 'en-US': PromptResourceRefSchema,

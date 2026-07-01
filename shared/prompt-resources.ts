@@ -1,6 +1,6 @@
 import type { AssistantLanguage } from './system-prompts'
 
-export const PROMPT_RESOURCE_VERSION = '2026-07-01.2'
+export const PROMPT_RESOURCE_VERSION = '2026-07-01.3'
 
 export interface PromptResourceRef {
   id: string
@@ -49,9 +49,24 @@ export const DEFAULT_APPROVAL_PROMPT_REFS = {
 }
 
 export const DEFAULT_ORCHESTRATION_PROMPT_REFS: Record<
-  'goalContinue' | 'planContinue' | 'planWarning' | 'compact',
+  | 'goalStarted'
+  | 'goalContinue'
+  | 'planStarted'
+  | 'planContinue'
+  | 'planWarning'
+  | 'compact',
   Record<AssistantLanguage, PromptResourceRef>
 > = {
+  goalStarted: {
+    'zh-CN': {
+      id: 'orchestration.goal-started.zh-CN',
+      version: PROMPT_RESOURCE_VERSION,
+    },
+    'en-US': {
+      id: 'orchestration.goal-started.en-US',
+      version: PROMPT_RESOURCE_VERSION,
+    },
+  },
   goalContinue: {
     'zh-CN': {
       id: 'orchestration.goal-continue.zh-CN',
@@ -59,6 +74,16 @@ export const DEFAULT_ORCHESTRATION_PROMPT_REFS: Record<
     },
     'en-US': {
       id: 'orchestration.goal-continue.en-US',
+      version: PROMPT_RESOURCE_VERSION,
+    },
+  },
+  planStarted: {
+    'zh-CN': {
+      id: 'orchestration.plan-started.zh-CN',
+      version: PROMPT_RESOURCE_VERSION,
+    },
+    'en-US': {
+      id: 'orchestration.plan-started.en-US',
       version: PROMPT_RESOURCE_VERSION,
     },
   },

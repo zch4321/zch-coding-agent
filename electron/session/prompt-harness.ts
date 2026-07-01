@@ -165,7 +165,7 @@ function tagged(
   )
 }
 
-function renderPromptTemplate(
+export function renderPromptTemplate(
   template: string,
   variables: Record<string, string>,
 ): string {

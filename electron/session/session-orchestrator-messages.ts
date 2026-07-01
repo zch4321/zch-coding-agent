@@ -7,7 +7,9 @@ import {
 import type { ActiveRun, AgentEventDraft, SessionState } from './session-types'
 
 export type OrchestrationPromptKind =
+  | 'goalStarted'
   | 'goalContinue'
+  | 'planStarted'
   | 'planContinue'
   | 'planWarning'
   | 'compact'

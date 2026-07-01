@@ -6,6 +6,7 @@ import type { SkillsManager } from '../skills/manager'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 import {
   orchestrationRequestContent,
+  renderPromptTemplate,
   selectedContextContent,
 } from './prompt-harness'
 
@@ -74,7 +75,7 @@ function splitCommand(
 function orchestrationPrompt(
   registry: PromptRegistry | undefined,
   config: PublicConfig,
-  kind: 'compact',
+  kind: 'compact' | 'goalStarted' | 'planStarted',
 ): { text: string; resource?: PromptResourceSummary } {
   const resolved = registry?.orchestrationPrompt(
     kind,
@@ -86,7 +87,10 @@ function orchestrationPrompt(
   }
 
   return {
-    text: 'Create a traceable compact summary that will replace the older conversation history. Preserve goals, decisions, tool results, changes, unfinished work, and risks. Output only the summary.',
+    text:
+      kind === 'compact'
+        ? 'Create a traceable compact summary that will replace the older conversation history. Preserve goals, decisions, tool results, changes, unfinished work, and risks. Output only the summary.'
+        : '',
   }
 }
 
@@ -198,10 +202,14 @@ export function resolveSlashCommand(input: {
     }
 
     const goal = newGoal(parsed.rest)
-    const instruction = [
-      `Start and pursue this Goal: ${goal.objective}`,
-      'Use goal_get when you need the current state. You must eventually call goal_complete with evidence, or goal_block with required input if blocked.',
-    ].join('\n\n')
+    const prompt = orchestrationPrompt(
+      input.promptRegistry,
+      input.config,
+      'goalStarted',
+    )
+    const instruction = renderPromptTemplate(prompt.text, {
+      objective: goal.objective,
+    })
     return {
       visibleMessage: input.message,
       providerMessage: input.message,
@@ -216,6 +224,7 @@ export function resolveSlashCommand(input: {
       orchestratorMessage: {
         kind: 'goal-started',
         text: `Goal started: ${goal.objective}`,
+        resource: prompt.resource,
       },
     }
   }
@@ -226,10 +235,14 @@ export function resolveSlashCommand(input: {
     }
 
     const plan = newPlan(parsed.rest)
-    const instruction = [
-      `Create a Plan for user review: ${plan.objective}`,
-      'First call plan_set with concrete items. plan_set leaves the Plan awaiting_review, so stop after creating it and wait for user approval. If the user later approves, call plan_status with status="active" before executing open items. If the user rejects it, call plan_status with status="rejected". Completed items require result and evidence.',
-    ].join('\n\n')
+    const prompt = orchestrationPrompt(
+      input.promptRegistry,
+      input.config,
+      'planStarted',
+    )
+    const instruction = renderPromptTemplate(prompt.text, {
+      objective: plan.objective,
+    })
     return {
       visibleMessage: input.message,
       providerMessage: input.message,
@@ -244,6 +257,7 @@ export function resolveSlashCommand(input: {
       orchestratorMessage: {
         kind: 'plan-started',
         text: `Plan awaiting review: ${plan.objective}`,
+        resource: prompt.resource,
       },
     }
   }

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_APPROVAL_PROMPT_REFS,
   DEFAULT_HARNESS_PROMPT_REFS,
+  DEFAULT_ORCHESTRATION_PROMPT_REFS,
 } from '../../shared/prompt-resources'
 import { PromptRegistry } from './registry'
 
@@ -58,5 +59,23 @@ describe('PromptRegistry', () => {
       DEFAULT_APPROVAL_PROMPT_REFS.classifyRisk.id,
     )
     expect(approval.content).toContain('Return only strict JSON')
+  })
+
+  it('loads orchestration slash command prompt resources', async () => {
+    const registry = await PromptRegistry.load(
+      path.resolve('resources', 'prompts'),
+    )
+    const goal = registry.orchestrationPrompt('goalStarted', 'zh-CN')
+    const plan = registry.orchestrationPrompt('planStarted', 'en-US')
+
+    expect(goal.resource.id).toBe(
+      DEFAULT_ORCHESTRATION_PROMPT_REFS.goalStarted['zh-CN'].id,
+    )
+    expect(goal.content).toContain('${objective}')
+    expect(plan.resource.id).toBe(
+      DEFAULT_ORCHESTRATION_PROMPT_REFS.planStarted['en-US'].id,
+    )
+    expect(plan.content).toContain('plan_set')
+    expect(plan.content).toContain('${objective}')
   })
 })
