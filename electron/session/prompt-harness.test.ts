@@ -8,6 +8,7 @@ import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { ProjectMetadataStore } from '../project/project-metadata-store'
 import { PromptRegistry } from '../prompts/registry'
 import {
+  appendAgentsContextIfChanged,
   appendInitialPromptHarness,
   appendPromptLayer,
   appendRuntimeContextIfChanged,
@@ -76,6 +77,61 @@ describe('prompt harness', () => {
     expect(state.history[1]?.content).toContain('project_tree_depth_3:')
     expect(state.history[1]?.content).toContain('src/feature/view.ts')
     expect(state.history[3]?.content).toContain('<agents')
+  })
+
+  it('skips AGENTS layer when no AGENTS.md exists', async () => {
+    const workspace = path.join(
+      os.tmpdir(),
+      `prompt-harness-no-agents-${Date.now()}`,
+    )
+    await mkdir(workspace, { recursive: true })
+    const state = ledger()
+    const config = publicConfig()
+
+    await appendInitialPromptHarness(state, {
+      workspace,
+      mode: 'readonly',
+      config,
+      providerId: 'deepseek',
+      promptRegistry,
+    })
+
+    expect(state.promptLedger.map((entry) => entry.kind)).not.toContain(
+      'agents',
+    )
+    expect(
+      state.history.some((message) =>
+        message.content?.includes(
+          'No AGENTS.md instructions were found for this workspace.',
+        ),
+      ),
+    ).toBe(false)
+
+    const before = state.history.length
+    await expect(
+      appendAgentsContextIfChanged(state, {
+        workspace,
+        mode: 'readonly',
+        config,
+        providerId: 'deepseek',
+        promptRegistry,
+      }),
+    ).resolves.toBe(false)
+    expect(state.history).toHaveLength(before)
+
+    await writeFile(path.join(workspace, 'AGENTS.md'), 'later guidance\n')
+    await expect(
+      appendAgentsContextIfChanged(state, {
+        workspace,
+        mode: 'readonly',
+        config,
+        providerId: 'deepseek',
+        promptRegistry,
+      }),
+    ).resolves.toBe(true)
+    expect(state.promptLedger.at(-1)?.kind).toBe('agents')
+    expect(state.history.at(-1)?.content).toContain('<agents')
+    expect(state.history.at(-1)?.content).toContain('later guidance')
   })
 
   it('includes recent git commit summaries when the workspace is a repository', async () => {

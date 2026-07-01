@@ -25,6 +25,7 @@ const MAX_TREE_ENTRIES_PER_DIRECTORY = 60
 const MAX_MODULES = 24
 const GIT_TIMEOUT_MS = 1_500
 const GIT_MAX_OUTPUT_BYTES = 8 * 1_024
+const EMPTY_AGENTS_CONTEXT_HASH = sha256('')
 
 export interface PromptLedgerEntry {
   seq: number
@@ -544,22 +545,18 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
 async function agentsContext(input: HarnessPromptInput): Promise<{
   content: string
   hash: string
-}> {
+} | null> {
   const agents = await loadAgentsInstructions({
     workspace: input.workspace,
     attachments: [],
     signal: input.signal,
   })
   const formatted = formatAgentsInstructions(agents)
-  const content =
-    formatted ||
-    tagged(
-      'agents',
-      { status: 'not_found' },
-      'No AGENTS.md instructions were found for this workspace.',
-    )
+  if (!formatted) {
+    return null
+  }
 
-  return { content, hash: sha256(content) }
+  return { content: formatted, hash: sha256(formatted) }
 }
 
 export async function appendInitialPromptHarness(
@@ -614,16 +611,18 @@ export async function appendInitialPromptHarness(
   })
 
   const agents = await agentsContext(input)
-  state.lastAgentsContextHash = agents.hash
-  appendPromptLayer(state, {
-    kind: 'agents',
-    role: 'user',
-    content: agents.content,
-    source: 'workspace:AGENTS.md',
-    trusted: false,
-    editable: false,
-    config: input.config,
-  })
+  state.lastAgentsContextHash = agents?.hash ?? EMPTY_AGENTS_CONTEXT_HASH
+  if (agents) {
+    appendPromptLayer(state, {
+      kind: 'agents',
+      role: 'user',
+      content: agents.content,
+      source: 'workspace:AGENTS.md',
+      trusted: false,
+      editable: false,
+      config: input.config,
+    })
+  }
 
   const skillSummary = input.skillSummary?.trim()
   if (skillSummary) {
@@ -672,12 +671,17 @@ export async function appendAgentsContextIfChanged(
   input: HarnessPromptInput,
 ): Promise<boolean> {
   const agents = await agentsContext(input)
+  const hash = agents?.hash ?? EMPTY_AGENTS_CONTEXT_HASH
 
-  if (state.lastAgentsContextHash === agents.hash) {
+  if (state.lastAgentsContextHash === hash) {
     return false
   }
 
-  state.lastAgentsContextHash = agents.hash
+  state.lastAgentsContextHash = hash
+  if (!agents) {
+    return false
+  }
+
   appendPromptLayer(state, {
     kind: 'agents',
     role: 'user',
