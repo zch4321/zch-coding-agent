@@ -38,10 +38,13 @@ describe('PromptRegistry', () => {
     expect(base.content).toContain('指令优先级与上下文边界')
     expect(base.content).toContain('Harness 标签')
     expect(base.content).toContain('ProjectModel')
+    expect(base.content).not.toContain('<runtime_policy>')
     expect(runtime.resource.id).toBe(
       DEFAULT_HARNESS_PROMPT_REFS.runtimeContext['en-US'].id,
     )
-    expect(runtime.content).toContain('runtime policy')
+    expect(runtime.content.trimStart()).toMatch(/^<environment_context/u)
+    expect(runtime.content).toContain('<module_context')
+    expect(runtime.content).not.toContain('<runtime_policy>')
   })
 
   it('keeps the approval classifier prompt as a non-customized resource', async () => {

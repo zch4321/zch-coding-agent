@@ -6,11 +6,11 @@
 
 ## 0. 当前结论
 
-- Prompt 不能继续作为一整块系统提示词拼接。需要改成可审计的 layer model，并把工具 schema、运行时策略、仓库规则、环境信息和会话上下文分开处理。
+- Prompt 不能继续作为一整块系统提示词拼接。需要改成可审计的 layer model，并把工具 schema、运行时约束、仓库规则、环境信息和会话上下文分开处理。
 - 工具调用卡片当前占用过多对话空间，应优先改成一行灰色摘要；参数、结果和自动审批输出放入右侧展开面板或行内展开详情。
 - ReAct run 进行中允许用户发送补充信息，但不能打断当前工具调用链。补充信息应排队到下一个安全 checkpoint，并以明确 tag 注入给模型。
-- 安全策略、权限边界、路径约束、审批要求和凭据保护属于只读 `runtime_policy`，以非系统上下文注入但不能被用户可编辑 Prompt 覆盖。
-- 用户可编辑 Prompt 应降级为个人偏好、语气和工作方式补充，优先级低于系统基础指令、运行时策略和仓库指令。
+- 安全策略、权限边界、路径约束、审批要求和凭据保护属于运行时约束，应写入稳定 base instruction，不能被用户可编辑 Prompt 覆盖。
+- 用户可编辑 Prompt 应降级为个人偏好、语气和工作方式补充，优先级低于系统基础指令、运行时约束和仓库指令。
 - 项目上下文需要显式建模。多语言仓库不应靠模型每轮临时猜测，而应维护一个可追踪的 `ProjectModel / ModuleGraph`。
 - 如果项目没有已配置模块，模型和用户都可以通过工具设置 module 根目录；自动检测只能作为可替换组件提供建议，检测结果必须带来源、hash/时间和可覆盖机制。
 - Module 配置保存为当前 workspace 的 `.zch/project-model.json` 项目元数据；应用可自动创建 `.zch/`，但不自动修改 `.gitignore`，只在 Project tab 提示用户是否忽略。
@@ -62,7 +62,7 @@
 electron/session/prompt-harness/
 ├─ prompt-builder.ts
 ├─ prompt-layer.ts
-├─ runtime-policy.ts
+├─ runtime-context.ts
 ├─ environment-context.ts
 ├─ project-context.ts
 ├─ prompt-trace.ts
@@ -74,7 +74,7 @@ electron/session/prompt-harness/
 ```ts
 type PromptLayerKind =
   | 'base_instructions'
-  | 'runtime_policy'
+  | 'runtime_context'
   | 'repo_instructions'
   | 'skills_metadata'
   | 'environment_context'
@@ -99,9 +99,9 @@ interface PromptLayer {
 
 - `PromptRegistry` 继续负责加载资源文件、校验版本和记录 hash。
 - `PromptBuilder` 负责构造 `PromptLayer[]`，再由 provider mapper 转成具体 provider messages。
-- 基础指令保持稳定 system 前缀；运行时策略和环境上下文作为非系统动态层注入，尽量保持稳定顺序以减少 prompt cache miss。
+- 基础指令保持稳定 system 前缀，并包含运行时约束和 tag 语义；环境和模块上下文作为非系统动态层注入，尽量保持稳定顺序以减少 prompt cache miss。
 - 工具 schema 不混入 Prompt 正文，仍由 provider tools 字段传递。
-- `runtime_policy` 包含权限、审批、路径、凭据、工具输出不可信、外部内容不可信等硬规则。
+- `runtime_context` 只包含会随运行状态变化的快照；静态优先级和权限规则留在 base instructions。
 - `environment_context` 每轮动态生成，包含 cwd、shell、当前日期、时区、工作区、git repo、branch、HEAD、dirty summary、主要 manifest 和 top-level structure。
 - `project_context` 注入当前 workspace 的 modules、语言、manifest、每种语言配置的 code intelligence backend 和 module 来源；模型设置或检测得到的 module 也必须带来源和更新时间。
 - `repo_instructions` 注入 `AGENTS.override.md`、`AGENTS.md` 等仓库规则，支持嵌套优先级、大小限制、hash 和 untrusted 标记。

@@ -70,7 +70,9 @@ describe('prompt harness', () => {
       role: 'user',
       content: 'hello raw user',
     })
-    expect(state.history[1]?.content?.trimStart()).toMatch(/^<runtime_policy>/u)
+    expect(state.history[1]?.content?.trimStart()).toMatch(
+      /^<environment_context/u,
+    )
     expect(state.history[1]?.content).not.toContain('${')
     expect(state.history[1]?.content).toContain('current_time:')
     expect(state.history[1]?.content).toContain('assistant_language: zh-CN')

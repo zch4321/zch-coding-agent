@@ -1,6 +1,6 @@
 import type { AssistantLanguage } from './system-prompts'
 
-export const PROMPT_RESOURCE_VERSION = '2026-07-01'
+export const PROMPT_RESOURCE_VERSION = '2026-07-01.1'
 
 export interface PromptResourceRef {
   id: string
