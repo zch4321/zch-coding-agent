@@ -3,9 +3,10 @@ import { execFile } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { ProjectMetadataStore } from '../project/project-metadata-store'
+import { PromptRegistry } from '../prompts/registry'
 import {
   appendInitialPromptHarness,
   appendPromptLayer,
@@ -15,6 +16,7 @@ import {
 } from './prompt-harness'
 
 const execFileAsync = promisify(execFile)
+let promptRegistry: PromptRegistry
 
 function publicConfig() {
   return toPublicConfig(structuredClone(DEFAULT_APP_CONFIG), false)
@@ -29,6 +31,12 @@ function ledger(): PromptLedgerState {
 }
 
 describe('prompt harness', () => {
+  beforeAll(async () => {
+    promptRegistry = await PromptRegistry.load(
+      path.resolve('resources', 'prompts'),
+    )
+  })
+
   it('appends initial harness messages before raw user messages', async () => {
     const workspace = path.join(os.tmpdir(), `prompt-harness-${Date.now()}`)
     await mkdir(workspace, { recursive: true })
@@ -43,6 +51,7 @@ describe('prompt harness', () => {
       mode: 'readonly',
       config,
       providerId: 'deepseek',
+      promptRegistry,
       toolNames: ['read_file'],
     })
     state.history.push({ role: 'user', content: 'hello raw user' })
@@ -95,6 +104,7 @@ describe('prompt harness', () => {
       mode: 'readonly',
       config,
       providerId: 'deepseek',
+      promptRegistry,
     })
 
     expect(state.history[1]?.content).toContain('recent_commits:')
@@ -117,6 +127,7 @@ describe('prompt harness', () => {
       mode: 'readonly',
       config,
       providerId: 'deepseek',
+      promptRegistry,
       toolNames: ['read_file'],
     })
     const before = state.history.length
@@ -126,6 +137,7 @@ describe('prompt harness', () => {
       mode: 'readonly',
       config,
       providerId: 'deepseek',
+      promptRegistry,
       reason: 'same-state',
       toolNames: ['read_file'],
     })
@@ -136,6 +148,7 @@ describe('prompt harness', () => {
       mode: 'confirm',
       config,
       providerId: 'deepseek',
+      promptRegistry,
       reason: 'mode-changed',
       toolNames: ['read_file'],
     })
@@ -180,6 +193,7 @@ describe('prompt harness', () => {
       mode: 'readonly',
       config: publicConfig(),
       providerId: 'deepseek',
+      promptRegistry,
       projectMetadata,
     })
 
@@ -217,6 +231,7 @@ describe('prompt harness', () => {
       mode: 'readonly',
       config: publicConfig(),
       providerId: 'deepseek',
+      promptRegistry,
       projectMetadata,
     })
 
@@ -240,6 +255,7 @@ describe('prompt harness', () => {
       mode: 'readonly',
       config,
       providerId: 'deepseek',
+      promptRegistry,
     })
     const original = structuredClone(state.history)
     appendPromptLayer(state, {

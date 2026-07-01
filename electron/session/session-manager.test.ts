@@ -697,6 +697,9 @@ describe('SessionManager P2 loop', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
       getWebContents: () =>
         ({
           isDestroyed: () => false,
