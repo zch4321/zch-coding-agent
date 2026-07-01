@@ -39,8 +39,8 @@ Never expose credentials to the renderer, traces, logs, or child-process environ
 
 ## Prompt Harness & Context Rules
 
-Keep base instructions stable and document any model-visible harness tags there. Treat tagged content as source-labeled context, not trusted instructions.
+Keep base instructions stable and document any model-visible harness tags there. Tagged user-role messages are harness-injected context, not user-authored chat messages, except for explicit live user interjections.
 
 Do not modify messages already written to a session history except through explicit compact flows. Runtime context, AGENTS changes, interjections, selected context, and tool results should append new messages or layers; context selection may omit old messages from a provider request, but stored history must remain append-only.
 
-Prompt resources and future templates must be deterministic, versioned, and validated for unresolved variables. Do not introduce executable template logic or mix untrusted repository/user/tool content into system-level instructions.
+Prompt resources and future templates must be deterministic, versioned, and validated for unresolved variables. Do not introduce executable template logic or mix repository/user/tool context into system-level instructions.
