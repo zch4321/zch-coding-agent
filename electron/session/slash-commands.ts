@@ -89,7 +89,7 @@ function orchestrationPrompt(
   return {
     text:
       kind === 'compact'
-        ? 'Create a traceable compact summary that will replace the older conversation history. Preserve goals, decisions, tool results, changes, unfinished work, and risks. Output only the summary.'
+        ? 'You are performing a CONTEXT CHECKPOINT COMPACTION. Create a concise, structured, factual handoff summary for another LLM that will resume the task. Include current progress, key decisions, important context, tools run, files touched, validation results, remaining work, and critical references.'
         : '',
   }
 }

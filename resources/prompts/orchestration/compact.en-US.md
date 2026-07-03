@@ -1,8 +1,10 @@
-Create a traceable compact summary that will replace the older conversation history.
+You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
 
-Requirements:
-- Preserve the user goal, key decisions, tools run, file changes, unfinished work, and risks.
-- This summary will be reinjected as a `<compact_history>` user message and replace the old provider messages; do not assume the old history remains visible.
-- Output only the summary body. Do not call tools or claim that files changed.
-- Mark uncertain information instead of presenting inference as fact.
-- Output structured Markdown that can be used to continue the conversation.
+Include:
+- Current progress and key decisions made
+- Important context, constraints, or user preferences
+- Tools run, files touched, and validation results when relevant
+- What remains to be done (clear next steps)
+- Any critical data, examples, or references needed to continue
+
+Be concise, structured, factual, and focused on helping the next LLM seamlessly continue the work. Mark uncertainty instead of presenting inference as fact.
