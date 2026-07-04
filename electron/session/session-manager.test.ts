@@ -21,6 +21,25 @@ import type { AutoApprover } from '../permission/auto-approver'
 import { SessionManager } from './session-manager'
 import { ChangeHistoryStore } from './change-history'
 import { PromptRegistry } from '../prompts/registry'
+import {
+  DEFAULT_HARNESS_PROMPT_REFS,
+  DEFAULT_ORCHESTRATION_PROMPT_REFS,
+  PROMPT_RESOURCE_VERSION,
+} from '../../shared/prompt-resources'
+
+interface TraceObject {
+  type?: string
+  normalizedMessages?: Array<{ role?: string; content?: unknown }>
+  promptResources?: Array<{
+    id?: string
+    version?: string
+    path?: string
+    sha256?: string
+  }>
+  promptBuild?: {
+    layers?: Array<{ kind?: string; included?: boolean }>
+  }
+}
 
 class FakeSafeStorage implements SafeStorageAdapter {
   readonly platform = 'win32'
@@ -116,6 +135,37 @@ class ScriptedProvider implements LLMProvider {
       usage: { total_tokens: 12 },
       providerState: { turn: 2 },
       timing: { ttftMs: 1, totalMs: 2 },
+    }
+  }
+}
+
+class PromptAuditProvider implements LLMProvider {
+  calls = 0
+  requests: ProviderChatRequest['messages'][] = []
+
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    this.requests.push(structuredClone(request.messages))
+    await request.onRequest?.({
+      normalizedMessages: request.messages as unknown as JsonValue[],
+      providerRequest: {
+        model: 'fixture',
+        messages: request.messages as unknown as JsonValue[],
+        tools: request.tools,
+      },
+      requestBytes: 10,
+      prefixHash: `prompt-audit-${this.calls}`,
+    })
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'prompt-audit' },
+      turn: { role: 'assistant', content: 'Prompt audit complete' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
     }
   }
 }
@@ -466,11 +516,15 @@ class GoalContinuationProvider implements LLMProvider {
 
 class PlanWarningProvider implements LLMProvider {
   calls = 0
+  requests: ProviderChatRequest['messages'][] = []
 
   constructor(private readonly activatePlan = false) {}
 
-  async *streamChat(): AsyncIterable<ProviderEvent> {
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
     this.calls += 1
+    this.requests.push(structuredClone(request.messages))
 
     if (this.calls === 1) {
       const args = { items: ['Inspect state', 'Report result'] }
@@ -658,6 +712,13 @@ async function createConfig(directory: string, secret = 'secret-sentinel') {
   return store
 }
 
+function parseTrace(raw: string): TraceObject[] {
+  return raw
+    .split(/\r?\n/u)
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line) as TraceObject)
+}
+
 async function waitFor(
   predicate: () => boolean,
   timeoutMs = 2_000,
@@ -814,6 +875,94 @@ describe('SessionManager P2 loop', () => {
     expect(trace).not.toContain('llm.stream')
     expect(trace).toContain('llm.response')
     expect(trace).not.toContain('secret-sentinel')
+  })
+
+  it('writes prompt build layers and prompt resources to real trace requests', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-prompt-trace-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    await writeFile(
+      path.join(workspace, 'AGENTS.md'),
+      'Trace AGENTS guidance\n',
+    )
+    const store = await createConfig(directory)
+    const provider = new PromptAuditProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () =>
+        ({
+          isDestroyed: () => false,
+          send: (_channel: string, envelope: AgentEventEnvelope) =>
+            sent.push(envelope),
+        }) as unknown as WebContents,
+      providerFactory: () => provider,
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: 'Audit prompt metadata',
+      clientRequestId: 'request-prompt-audit',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'run.status' &&
+          envelope.event.status === 'completed',
+      ),
+    )
+    await manager.closeSession(sessionId)
+
+    const trace = parseTrace(
+      await readFile(
+        path.join(directory, 'traces', `${sessionId}.jsonl`),
+        'utf8',
+      ),
+    )
+    const llmRequest = trace.find((event) => event.type === 'llm.request')
+    const layerKinds =
+      llmRequest?.promptBuild?.layers?.map((layer) => layer.kind) ?? []
+    const resources = llmRequest?.promptResources ?? []
+    const resourceIds = resources.map((resource) => resource.id)
+
+    expect(layerKinds).toEqual(
+      expect.arrayContaining([
+        'base_instructions',
+        'runtime_policy_and_context',
+        'assistant_preferences',
+        'agents',
+      ]),
+    )
+    expect(resourceIds).toEqual(
+      expect.arrayContaining([
+        DEFAULT_HARNESS_PROMPT_REFS.baseInstructions['zh-CN'].id,
+        DEFAULT_HARNESS_PROMPT_REFS.runtimeContext['zh-CN'].id,
+      ]),
+    )
+    expect(
+      resources.every(
+        (resource) =>
+          resource.version === PROMPT_RESOURCE_VERSION &&
+          typeof resource.path === 'string' &&
+          resource.path.length > 0 &&
+          /^[a-f0-9]{64}$/u.test(resource.sha256 ?? ''),
+      ),
+    ).toBe(true)
+    expect(String(llmRequest?.normalizedMessages?.[1]?.content ?? '')).toMatch(
+      /^<environment_context/u,
+    )
+    expect(provider.requests[0]?.[1]?.role).toBe('user')
   })
 
   it('rewrites provider history for /compact and reinjects summary as user context', async () => {
@@ -1065,6 +1214,27 @@ describe('SessionManager P2 loop', () => {
     )
 
     expect(provider.calls).toBe(3)
+    const firstRequest =
+      provider.requests[0]
+        ?.map((message) =>
+          typeof message.content === 'string' ? message.content : '',
+        )
+        .join('\n') ?? ''
+    expect(firstRequest).toContain(
+      '<orchestration_request kind="goal-started">',
+    )
+    expect(firstRequest).toContain('Produce a verified result')
+    expect(firstRequest).toContain('goal_complete')
+    expect(
+      sent.find(
+        (envelope) =>
+          envelope.event.type === 'orchestrator.message' &&
+          envelope.event.kind === 'goal-started',
+      )?.event,
+    ).toMatchObject({
+      promptId: DEFAULT_ORCHESTRATION_PROMPT_REFS.goalStarted['zh-CN'].id,
+      promptHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    })
     expect(
       sent.some(
         (envelope) =>
@@ -1123,6 +1293,27 @@ describe('SessionManager P2 loop', () => {
     )
 
     expect(provider.calls).toBe(2)
+    const firstRequest =
+      provider.requests[0]
+        ?.map((message) =>
+          typeof message.content === 'string' ? message.content : '',
+        )
+        .join('\n') ?? ''
+    expect(firstRequest).toContain(
+      '<orchestration_request kind="plan-started">',
+    )
+    expect(firstRequest).toContain('Check something')
+    expect(firstRequest).toContain('plan_set')
+    expect(
+      sent.find(
+        (envelope) =>
+          envelope.event.type === 'orchestrator.message' &&
+          envelope.event.kind === 'plan-started',
+      )?.event,
+    ).toMatchObject({
+      promptId: DEFAULT_ORCHESTRATION_PROMPT_REFS.planStarted['zh-CN'].id,
+      promptHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    })
     expect(
       sent.some(
         (envelope) =>

@@ -180,7 +180,7 @@ export function renderPromptTemplate(
     },
   )
 
-  if (/\$\{[A-Za-z][A-Za-z0-9_]*\}/u.test(rendered)) {
+  if (rendered.includes('${')) {
     throw new Error('Prompt template contains unresolved variables')
   }
 

@@ -9,5 +9,20 @@ export default defineConfig({
       'shared/**/*.test.ts',
       'src/**/*.test.ts',
     ],
+    coverage: {
+      provider: 'v8',
+      include: ['electron/**/*.ts', 'shared/**/*.ts', 'src/**/*.ts'],
+      exclude: [
+        '**/*.test.ts',
+        'coverage/**',
+        'dist/**',
+        'dist-electron/**',
+        'e2e/**',
+        'resources/**',
+        'scripts/**',
+        'electron/electron-env.d.ts',
+        'src/vite-env.d.ts',
+      ],
+    },
   },
 })

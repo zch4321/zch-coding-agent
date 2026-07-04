@@ -12,7 +12,10 @@ import {
   appendInitialPromptHarness,
   appendPromptLayer,
   appendRuntimeContextIfChanged,
+  orchestrationRequestContent,
+  renderPromptTemplate,
   selectPromptMessages,
+  selectedContextContent,
   type PromptLedgerState,
 } from './prompt-harness'
 
@@ -35,6 +38,41 @@ describe('prompt harness', () => {
   beforeAll(async () => {
     promptRegistry = await PromptRegistry.load(
       path.resolve('resources', 'prompts'),
+    )
+  })
+
+  it('renders prompt templates and fails on unresolved placeholders', () => {
+    expect(
+      renderPromptTemplate('Hello ${name}; repeat ${name}.', {
+        name: 'agent',
+      }),
+    ).toBe('Hello agent; repeat agent.')
+    expect(() => renderPromptTemplate('${missing}', {})).toThrow(
+      'Prompt template references unknown variable: missing',
+    )
+
+    for (const template of [
+      '${name }',
+      '${ name}',
+      '${name-name}',
+      '${',
+      'prefix ${name } suffix',
+    ]) {
+      expect(() => renderPromptTemplate(template, { name: 'agent' })).toThrow(
+        'Prompt template contains unresolved variables',
+      )
+    }
+  })
+
+  it('escapes harness tag attributes while preserving body text', () => {
+    expect(selectedContextContent('body <kept>', 'run"&<>')).toContain(
+      '<selected_context source="run&quot;&amp;&lt;&gt;">',
+    )
+    expect(selectedContextContent('body <kept>', 'run"&<>')).toContain(
+      'body <kept>',
+    )
+    expect(orchestrationRequestContent('plan"&<>', 'review')).toContain(
+      '<orchestration_request kind="plan&quot;&amp;&lt;&gt;">',
     )
   })
 
@@ -134,6 +172,86 @@ describe('prompt harness', () => {
     expect(state.promptLedger.at(-1)?.kind).toBe('agents')
     expect(state.history.at(-1)?.content).toContain('<agents')
     expect(state.history.at(-1)?.content).toContain('later guidance')
+  })
+
+  it('appends updated AGENTS guidance without rewriting earlier layers', async () => {
+    const workspace = path.join(
+      os.tmpdir(),
+      `prompt-harness-agents-update-${Date.now()}`,
+    )
+    await mkdir(workspace, { recursive: true })
+    await writeFile(path.join(workspace, 'AGENTS.md'), 'initial guidance\n')
+    const state = ledger()
+    const config = publicConfig()
+
+    await appendInitialPromptHarness(state, {
+      workspace,
+      mode: 'readonly',
+      config,
+      providerId: 'deepseek',
+      promptRegistry,
+    })
+    const originalHistory = structuredClone(state.history)
+
+    await writeFile(path.join(workspace, 'AGENTS.md'), 'updated guidance\n')
+    await expect(
+      appendAgentsContextIfChanged(state, {
+        workspace,
+        mode: 'readonly',
+        config,
+        providerId: 'deepseek',
+        promptRegistry,
+      }),
+    ).resolves.toBe(true)
+
+    expect(state.history.slice(0, originalHistory.length)).toEqual(
+      originalHistory,
+    )
+    expect(
+      state.promptLedger.filter((entry) => entry.kind === 'agents'),
+    ).toHaveLength(2)
+    expect(state.history.at(-1)?.content).toContain('updated guidance')
+    expect(state.history.at(-1)?.content).not.toContain('initial guidance')
+
+    const beforeSameContent = state.history.length
+    await expect(
+      appendAgentsContextIfChanged(state, {
+        workspace,
+        mode: 'readonly',
+        config,
+        providerId: 'deepseek',
+        promptRegistry,
+      }),
+    ).resolves.toBe(false)
+    expect(state.history).toHaveLength(beforeSameContent)
+  })
+
+  it('marks oversized AGENTS guidance as truncated and keeps content bounded', async () => {
+    const workspace = path.join(
+      os.tmpdir(),
+      `prompt-harness-agents-truncated-${Date.now()}`,
+    )
+    await mkdir(workspace, { recursive: true })
+    await writeFile(path.join(workspace, 'AGENTS.md'), 'A'.repeat(70 * 1_024))
+    const state = ledger()
+
+    await appendInitialPromptHarness(state, {
+      workspace,
+      mode: 'readonly',
+      config: publicConfig(),
+      providerId: 'deepseek',
+      promptRegistry,
+    })
+
+    const agents = state.history.find((message) =>
+      message.content?.startsWith('<agents '),
+    )
+    if (!agents?.content) {
+      throw new Error('Expected AGENTS guidance layer to be appended')
+    }
+    expect(agents.content).toContain('truncated="true"')
+    expect(agents.content).toContain('bytes="71680"')
+    expect(agents.content.length).toBeLessThan(70 * 1_024)
   })
 
   it('includes recent git commit summaries when the workspace is a repository', async () => {
@@ -343,5 +461,70 @@ describe('prompt harness', () => {
       role: 'user',
       content: 'raw user text',
     })
+  })
+
+  it('retains pinned layers and the latest user turn under a tight prompt budget', () => {
+    const config = publicConfig()
+    config.limits.tokenEstimation = {
+      mode: 'custom-bytes',
+      bytesPerToken: 1,
+    }
+    const state = ledger()
+
+    appendPromptLayer(state, {
+      kind: 'base_instructions',
+      role: 'system',
+      content: 'base',
+      source: 'test:base',
+      trusted: true,
+      editable: false,
+      config,
+    })
+    appendPromptLayer(state, {
+      kind: 'runtime_policy_and_context',
+      role: 'user',
+      content: 'runtime',
+      source: 'test:runtime',
+      trusted: true,
+      editable: false,
+      config,
+    })
+    state.history.push({
+      role: 'user',
+      content: `old user ${'x'.repeat(5_000)}`,
+    })
+    state.history.push({
+      role: 'assistant',
+      content: `old assistant ${'y'.repeat(5_000)}`,
+    })
+    appendPromptLayer(state, {
+      kind: 'agents',
+      role: 'user',
+      content: 'current agents guidance',
+      source: 'workspace:AGENTS.md',
+      trusted: false,
+      editable: false,
+      config,
+    })
+    state.history.push({ role: 'user', content: 'latest user task' })
+
+    const selected = selectPromptMessages({
+      state,
+      tools: [],
+      maxPromptTokens: 1_000,
+      estimation: config.limits.tokenEstimation,
+    })
+    const rendered = JSON.stringify(selected.messages)
+
+    expect(rendered).toContain('base')
+    expect(rendered).toContain('runtime')
+    expect(rendered).toContain('current agents guidance')
+    expect(rendered).toContain('latest user task')
+    expect(rendered).not.toContain('old user')
+    expect(rendered).not.toContain('old assistant')
+    expect(selected.promptBuild.omittedHistoryMessages).toBe(2)
+    expect(selected.promptBuild.layers.every((layer) => layer.included)).toBe(
+      true,
+    )
   })
 })

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_APP_CONFIG, type AppConfig } from './schema'
 import { migrateConfig } from './migrations'
 import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
+import { DEFAULT_ORCHESTRATION_PROMPT_REFS } from '../../shared/prompt-resources'
 
 describe('config migrations', () => {
   it('maps the legacy automatic reasoning setting to DeepSeek high effort', () => {
@@ -127,6 +128,12 @@ describe('config migrations', () => {
     expect(migrated.prompts.approval.classifyRisk.id).toBe(
       'approval.classify-risk',
     )
+    expect(migrated.prompts.orchestration.goalStarted['zh-CN']).toEqual(
+      DEFAULT_ORCHESTRATION_PROMPT_REFS.goalStarted['zh-CN'],
+    )
+    expect(migrated.prompts.orchestration.planStarted['zh-CN']).toEqual(
+      DEFAULT_ORCHESTRATION_PROMPT_REFS.planStarted['zh-CN'],
+    )
     expect(migrated.limits).toMatchObject({
       approvalTimeoutMs: 600_000,
       autoApprovalTimeoutMs: 60_000,
@@ -181,5 +188,36 @@ describe('config migrations', () => {
 
     expect(migrated.webSearch.provider).toBe('brave')
     expect(migrated.webSearch.apiKeyRef).toBeUndefined()
+  })
+
+  it('fills missing orchestration prompt refs in partial prompt configs', () => {
+    const legacy = structuredClone(DEFAULT_APP_CONFIG) as unknown as {
+      schemaVersion: number
+      prompts: {
+        orchestration: {
+          compact: typeof DEFAULT_APP_CONFIG.prompts.orchestration.compact
+        }
+      }
+    }
+    legacy.schemaVersion = 4
+    legacy.prompts = {
+      orchestration: {
+        compact: structuredClone(
+          DEFAULT_APP_CONFIG.prompts.orchestration.compact,
+        ),
+      },
+    }
+
+    const migrated = migrateConfig(legacy)
+
+    expect(migrated.prompts.orchestration.compact).toEqual(
+      DEFAULT_APP_CONFIG.prompts.orchestration.compact,
+    )
+    expect(migrated.prompts.orchestration.goalStarted).toEqual(
+      DEFAULT_ORCHESTRATION_PROMPT_REFS.goalStarted,
+    )
+    expect(migrated.prompts.orchestration.planStarted).toEqual(
+      DEFAULT_ORCHESTRATION_PROMPT_REFS.planStarted,
+    )
   })
 })

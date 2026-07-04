@@ -5,8 +5,24 @@ import {
   DEFAULT_APPROVAL_PROMPT_REFS,
   DEFAULT_HARNESS_PROMPT_REFS,
   DEFAULT_ORCHESTRATION_PROMPT_REFS,
+  DEFAULT_SYSTEM_PROMPT_REFS,
+  PROMPT_RESOURCE_VERSION,
+  type PromptResourceRef,
 } from '../../shared/prompt-resources'
 import { PromptRegistry } from './registry'
+
+function defaultPromptRefs(): PromptResourceRef[] {
+  return [
+    ...Object.values(DEFAULT_SYSTEM_PROMPT_REFS),
+    ...Object.values(DEFAULT_HARNESS_PROMPT_REFS).flatMap((localized) =>
+      Object.values(localized),
+    ),
+    DEFAULT_APPROVAL_PROMPT_REFS.classifyRisk,
+    ...Object.values(DEFAULT_ORCHESTRATION_PROMPT_REFS).flatMap((localized) =>
+      Object.values(localized),
+    ),
+  ]
+}
 
 describe('PromptRegistry', () => {
   it('loads versioned prompt resources and resolves localized system prompts', async () => {
@@ -77,5 +93,32 @@ describe('PromptRegistry', () => {
     )
     expect(plan.content).toContain('plan_set')
     expect(plan.content).toContain('${objective}')
+  })
+
+  it('resolves every default prompt ref to a non-empty versioned resource', async () => {
+    const registry = await PromptRegistry.load(
+      path.resolve('resources', 'prompts'),
+    )
+    const listed = new Map(
+      registry.list().map((resource) => [resource.id, resource]),
+    )
+
+    for (const ref of defaultPromptRefs()) {
+      const resource = registry.get(ref.id)
+
+      expect(listed.get(ref.id)).toMatchObject({
+        id: ref.id,
+        version: PROMPT_RESOURCE_VERSION,
+        path: resource.path,
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      })
+      expect(resource.version).toBe(ref.version)
+      expect(resource.version).toBe(PROMPT_RESOURCE_VERSION)
+      expect(resource.path).toBeTruthy()
+      expect(resource.content.trim()).not.toBe('')
+      await expect(readFile(resource.path, 'utf8')).resolves.toContain(
+        resource.content,
+      )
+    }
   })
 })
