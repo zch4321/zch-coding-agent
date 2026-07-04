@@ -1137,6 +1137,32 @@ test.describe.serial('Electron security and IPC baseline', () => {
     expect(configured.ok).toBe(true)
 
     await page.reload()
+    const terminalReady = page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const api = Reflect.get(window, 'agentApi') as {
+            onTerminalEvent(
+              listener: (envelope: {
+                event: {
+                  type: string
+                  status?: string
+                }
+              }) => void,
+            ): () => void
+          }
+          const unsubscribe = api.onTerminalEvent((envelope) => {
+            const { event } = envelope
+
+            if (
+              event.type === 'terminal.status' &&
+              event.status === 'running'
+            ) {
+              unsubscribe()
+              resolve()
+            }
+          })
+        }),
+    )
     const toggle = page.getByRole('button', { name: /切换终端/ })
     await expect(toggle).toBeEnabled()
     await toggle.click()
@@ -1145,15 +1171,22 @@ test.describe.serial('Electron security and IPC baseline', () => {
     await expect(terminalPanel).toBeVisible()
     await expect(terminalTabs).toHaveCount(1)
 
+    await terminalReady
     const activeInput = page.locator(
       '.terminal-surface:visible .xterm-helper-textarea',
     )
-    await activeInput.click()
-    await page.keyboard.type('Write-Output E2E_PTY_OK')
+    await expect(activeInput).toBeAttached()
+    await activeInput.focus()
+    await expect
+      .poll(() =>
+        activeInput.evaluate((element) => document.activeElement === element),
+      )
+      .toBe(true)
+    await page.keyboard.type('Write-Output E2E_PTY_OK', { delay: 2 })
     await page.keyboard.press('Enter')
     await expect(
       page.locator('.terminal-surface:visible .xterm-rows'),
-    ).toContainText('E2E_PTY_OK')
+    ).toContainText('E2E_PTY_OK', { timeout: 15_000 })
 
     await terminalPanel.getByRole('button', { name: '新建终端' }).click()
     await expect(terminalTabs).toHaveCount(2)
