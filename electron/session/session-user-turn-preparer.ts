@@ -97,16 +97,6 @@ export class SessionUserTurnPreparer {
       })
     }
 
-    if (command.plan) {
-      session.plan = command.plan
-      this.#emit(session, {
-        type: 'plan.updated',
-        sessionId: session.sessionId,
-        runId: run.runId,
-        plan: structuredClone(command.plan),
-      })
-    }
-
     if (command.orchestratorMessage) {
       await this.#orchestratorMessages.emit(session, run, {
         ...command.orchestratorMessage,

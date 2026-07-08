@@ -109,7 +109,7 @@ IPC 调用链：
 
 ## 4. 配置、凭据与模型
 
-配置由 `electron/config/store.ts` 管理，schema 在 `electron/config/schema.ts` 和 `shared/config.ts` 中定义。当前 schema version 为 5。
+配置由 `electron/config/store.ts` 管理，schema 在 `electron/config/schema.ts` 和 `shared/config.ts` 中定义。当前 schema version 为 6。
 
 持久化位置：
 
@@ -167,7 +167,7 @@ Prompt harness 当前由 `electron/session/prompt-harness.ts`、`electron/prompt
 
 资源加载：
 
-- `PromptRegistry.load(resources/prompts)` 加载 system、harness、approval、orchestration prompt。
+- `PromptRegistry.load(resources/prompts)` 加载 harness、approval、orchestration prompt。
 - 每个资源记录 `id/version/path/sha256`。
 - 默认资源引用定义在 `shared/prompt-resources.ts`。
 
@@ -192,15 +192,15 @@ Prompt harness 当前由 `electron/session/prompt-harness.ts`、`electron/prompt
 
 `electron/session/slash-commands.ts` 解析当前支持的命令：
 
-| 命令                | 行为                                                                                |
-| ------------------- | ----------------------------------------------------------------------------------- |
-| `/skill <name> ...` | 读取已启用 skill 的完整正文，注入 `<skill_request>` 和 `<skill>` selected context。 |
-| `/compact ...`      | 触发手动 history compaction，使用 orchestration compact prompt。                    |
-| `/prompt ...`       | 注入 app-authored orchestration request。                                           |
-| `/goal ...`         | 创建 active goal，注入 localized `goal-started` orchestration prompt。              |
-| `/plan ...`         | 创建 awaiting_review plan，注入 localized `plan-started` orchestration prompt。     |
+| 命令                | 行为                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `/skill <name> ...` | 读取已启用 skill 的完整正文，注入 `<skill_request>` 和 `<skill>` selected context。        |
+| `/compact ...`      | 触发手动 history compaction，使用 orchestration compact prompt。                           |
+| `/prompt ...`       | 注入 app-authored orchestration request。                                                  |
+| `/goal ...`         | 创建 active goal，注入 localized `goal-started` orchestration prompt。                     |
+| `/plan ...`         | 注入 localized `plan-started` orchestration prompt；实际 Plan 由模型调用 `plan_set` 创建。 |
 
-Goal/Plan 状态存放在 `SessionState` 中，并通过 `goal.updated` / `plan.updated` 事件同步到 renderer。模型可通过 `orchestration-tools.ts` 暴露的 goal/plan 工具读取和更新状态。Plan 默认进入 `awaiting_review`，用户从 UI 审批后由 renderer 调用 `plan:update-status`。
+Goal/Plan 状态存放在 `SessionState` 中，并通过 `goal.updated` / `plan.updated` 事件同步到 renderer。模型可通过 `orchestration-tools.ts` 暴露的 goal/plan 工具读取和更新状态。`plan_set` 创建或替换 Plan，并默认进入 `awaiting_review`；Plan review 是编排状态，不是权限模式，副作用工具仍由 permission pipeline 审批和执行。用户明确批准后，模型通过 `plan_status({ status: "active" })` 记录状态并继续；所有 item 完成或取消后，运行时会把 active 顶层 Plan 收口为 `completed`。
 
 ---
 

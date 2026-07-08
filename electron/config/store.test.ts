@@ -133,7 +133,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(5)
+    expect(parsed.schemaVersion).toBe(6)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(200)
     expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
       80,

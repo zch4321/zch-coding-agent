@@ -606,6 +606,199 @@ class PlanWarningProvider implements LLMProvider {
   }
 }
 
+class SameBatchPlanMutationProvider implements LLMProvider {
+  calls = 0
+
+  async *streamChat(): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+
+    if (this.calls === 1) {
+      const planArgs = { items: ['Create planned file'] }
+      const writeArgs = { path: 'planned.txt', content: 'planned\n' }
+      const toolCalls = [
+        {
+          id: 'call-plan-set',
+          type: 'function',
+          function: {
+            name: 'plan_set',
+            arguments: JSON.stringify(planArgs),
+          },
+        },
+        {
+          id: 'call-create-file',
+          type: 'function',
+          function: {
+            name: 'create_file',
+            arguments: JSON.stringify(writeArgs),
+          },
+        },
+      ]
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'plan-and-write' },
+        turn: { role: 'assistant', content: null, tool_calls: toolCalls },
+        toolCalls: [
+          {
+            id: 'call-plan-set' as CallId,
+            toolId: 'plan_set',
+            args: planArgs,
+            reason: 'Create a reviewable plan',
+          },
+          {
+            id: 'call-create-file' as CallId,
+            toolId: 'create_file',
+            args: writeArgs,
+            reason: 'Create the requested file',
+          },
+        ],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'plan-and-write-final' },
+      turn: { role: 'assistant', content: 'Done' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
+class PlanCompletionProvider implements LLMProvider {
+  calls = 0
+  requests: ProviderChatRequest['messages'][] = []
+
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    this.requests.push(structuredClone(request.messages))
+
+    if (this.calls === 1) {
+      const args = { items: ['Inspect state'] }
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'plan-set' },
+        turn: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-plan-set',
+              type: 'function',
+              function: {
+                name: 'plan_set',
+                arguments: JSON.stringify(args),
+              },
+            },
+          ],
+        },
+        toolCalls: [
+          {
+            id: 'call-plan-set' as CallId,
+            toolId: 'plan_set',
+            args,
+            reason: 'Create the requested plan',
+          },
+        ],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    if (this.calls === 2) {
+      const args = { status: 'active' }
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'plan-active' },
+        turn: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-plan-status',
+              type: 'function',
+              function: {
+                name: 'plan_status',
+                arguments: JSON.stringify(args),
+              },
+            },
+          ],
+        },
+        toolCalls: [
+          {
+            id: 'call-plan-status' as CallId,
+            toolId: 'plan_status',
+            args,
+            reason: 'The plan is approved',
+          },
+        ],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    if (this.calls === 3) {
+      const args = {
+        id: 'item:1',
+        status: 'completed',
+        result: 'Inspection completed',
+        evidence: 'Observed the requested state',
+      }
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'plan-item-complete' },
+        turn: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-plan-update',
+              type: 'function',
+              function: {
+                name: 'plan_update',
+                arguments: JSON.stringify(args),
+              },
+            },
+          ],
+        },
+        toolCalls: [
+          {
+            id: 'call-plan-update' as CallId,
+            toolId: 'plan_update',
+            args,
+            reason: 'Mark the item complete',
+          },
+        ],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'plan-complete-final' },
+      turn: { role: 'assistant', content: 'Plan items done' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
 class MultiToolCancellationProvider implements LLMProvider {
   calls = 0
   requests: ProviderChatRequest['messages'][] = []
@@ -1328,6 +1521,125 @@ describe('SessionManager P2 loop', () => {
           envelope.event.kind === 'plan-continuation',
       ),
     ).toBe(false)
+    expect(
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'orchestrator.message' &&
+          envelope.event.kind === 'plan-warning',
+      ),
+    ).toBe(false)
+    await manager.closeSession(sessionId)
+  })
+
+  it('keeps same-batch side-effect tools on the normal approval path after plan_set', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-plan-side-effect-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const provider = new SameBatchPlanMutationProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () =>
+        ({
+          isDestroyed: () => false,
+          send: (_channel: string, envelope: AgentEventEnvelope) =>
+            sent.push(envelope),
+        }) as unknown as WebContents,
+      providerFactory: () => provider,
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'confirm',
+      provider: 'deepseek',
+    })
+    const runId = manager.startRun({
+      sessionId,
+      message: 'Plan, then create the file',
+      clientRequestId: 'request-plan-side-effect',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'plan.updated' &&
+          envelope.event.plan?.status === 'awaiting_review',
+      ),
+    )
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'approval.requested' &&
+          envelope.event.callId === 'call-create-file',
+      ),
+    )
+
+    expect(provider.calls).toBe(1)
+    expect(
+      await readFile(path.join(workspace, 'planned.txt'), 'utf8').catch(
+        () => 'missing',
+      ),
+    ).toBe('missing')
+    expect(manager.interruptRun(sessionId, runId)).toBe(true)
+    await manager.closeSession(sessionId)
+  })
+
+  it('marks an active Plan completed when every item is closed', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-plan-complete-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const provider = new PlanCompletionProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      getWebContents: () =>
+        ({
+          isDestroyed: () => false,
+          send: (_channel: string, envelope: AgentEventEnvelope) =>
+            sent.push(envelope),
+        }) as unknown as WebContents,
+      providerFactory: () => provider,
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: '/plan Check something',
+      clientRequestId: 'request-plan-complete',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'run.status' &&
+          envelope.event.status === 'completed',
+      ),
+    )
+
+    expect(provider.calls).toBe(4)
+    expect(
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'plan.updated' &&
+          envelope.event.plan?.status === 'completed',
+      ),
+    ).toBe(true)
     expect(
       sent.some(
         (envelope) =>

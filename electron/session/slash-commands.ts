@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { PublicConfig } from '../../shared/config'
 import type { PromptLayerKind } from '../../shared/trace'
-import type { GoalState, PlanState } from '../../shared/orchestration'
+import type { GoalState } from '../../shared/orchestration'
 import type { SkillsManager } from '../skills/manager'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 import {
@@ -24,7 +24,6 @@ export interface SlashCommandResolution {
     source: string
   }>
   goal?: GoalState
-  plan?: PlanState
 }
 
 function now(): string {
@@ -37,19 +36,6 @@ function newGoal(objective: string): GoalState {
     id: `goal:${randomUUID()}`,
     objective,
     status: 'active',
-    createdAt,
-    updatedAt: createdAt,
-    continuationCount: 0,
-  }
-}
-
-function newPlan(objective: string): PlanState {
-  const createdAt = now()
-  return {
-    id: `plan:${randomUUID()}`,
-    objective,
-    status: 'awaiting_review',
-    items: [],
     createdAt,
     updatedAt: createdAt,
     continuationCount: 0,
@@ -234,14 +220,13 @@ export function resolveSlashCommand(input: {
       throw new Error('/plan requires an objective.')
     }
 
-    const plan = newPlan(parsed.rest)
     const prompt = orchestrationPrompt(
       input.promptRegistry,
       input.config,
       'planStarted',
     )
     const instruction = renderPromptTemplate(prompt.text, {
-      objective: plan.objective,
+      objective: parsed.rest,
     })
     return {
       visibleMessage: input.message,
@@ -253,10 +238,9 @@ export function resolveSlashCommand(input: {
           content: orchestrationRequestContent('plan-started', instruction),
         },
       ],
-      plan,
       orchestratorMessage: {
         kind: 'plan-started',
-        text: `Plan awaiting review: ${plan.objective}`,
+        text: `Plan requested: ${parsed.rest}`,
         resource: prompt.resource,
       },
     }

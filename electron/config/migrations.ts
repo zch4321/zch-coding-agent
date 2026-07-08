@@ -49,7 +49,8 @@ export function migrateConfig(candidate: unknown): AppConfig {
     schemaVersion !== 2 &&
     schemaVersion !== 3 &&
     schemaVersion !== 4 &&
-    schemaVersion !== 5
+    schemaVersion !== 5 &&
+    schemaVersion !== 6
   ) {
     throw new Error(
       `Unsupported config schema version: ${String(schemaVersion)}`,
@@ -58,7 +59,7 @@ export function migrateConfig(candidate: unknown): AppConfig {
 
   const normalized = normalizeConfigShape(candidate)
   const migrated = mergeRecord(DEFAULT_APP_CONFIG as AppConfig, normalized)
-  migrated.schemaVersion = 5
+  migrated.schemaVersion = 6
   migrated.providers = migrated.providers.map((provider) => ({
     ...provider,
     model:
@@ -221,6 +222,7 @@ function normalizeConfigShape(candidate: object): Record<string, unknown> {
   }
 
   normalizeAssistant(raw)
+  normalizePrompts(raw)
 
   return raw
 }
@@ -266,4 +268,20 @@ function normalizeAssistant(raw: Record<string, unknown>): void {
 
   delete assistant.systemPrompts
   raw.assistant = assistant
+}
+
+function normalizePrompts(raw: Record<string, unknown>): void {
+  const prompts =
+    raw.prompts &&
+    typeof raw.prompts === 'object' &&
+    !Array.isArray(raw.prompts)
+      ? (raw.prompts as Record<string, unknown>)
+      : undefined
+
+  if (!prompts) {
+    return
+  }
+
+  delete prompts.system
+  raw.prompts = prompts
 }

@@ -7,14 +7,6 @@ export interface PromptResourceRef {
   version: string
 }
 
-export const DEFAULT_SYSTEM_PROMPT_REFS: Record<
-  AssistantLanguage,
-  PromptResourceRef
-> = {
-  'zh-CN': { id: 'system.zh-CN', version: PROMPT_RESOURCE_VERSION },
-  'en-US': { id: 'system.en-US', version: PROMPT_RESOURCE_VERSION },
-}
-
 export const DEFAULT_HARNESS_PROMPT_REFS: Record<
   'baseInstructions' | 'runtimeContext',
   Record<AssistantLanguage, PromptResourceRef>

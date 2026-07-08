@@ -6,7 +6,6 @@ import {
   DEFAULT_APPROVAL_PROMPT_REFS,
   DEFAULT_HARNESS_PROMPT_REFS,
   DEFAULT_ORCHESTRATION_PROMPT_REFS,
-  DEFAULT_SYSTEM_PROMPT_REFS,
 } from '../../shared/prompt-resources'
 
 export interface PromptResource {
@@ -36,16 +35,6 @@ export class PromptRegistry {
 
   static async load(rootDirectory: string): Promise<PromptRegistry> {
     const resources = await Promise.all([
-      loadResource(
-        DEFAULT_SYSTEM_PROMPT_REFS['zh-CN'].id,
-        DEFAULT_SYSTEM_PROMPT_REFS['zh-CN'].version,
-        path.join(rootDirectory, 'system', 'zh-CN.md'),
-      ),
-      loadResource(
-        DEFAULT_SYSTEM_PROMPT_REFS['en-US'].id,
-        DEFAULT_SYSTEM_PROMPT_REFS['en-US'].version,
-        path.join(rootDirectory, 'system', 'en-US.md'),
-      ),
       ...Object.values(DEFAULT_HARNESS_PROMPT_REFS).flatMap((localized) =>
         (['zh-CN', 'en-US'] as const).map((locale) =>
           loadResource(
@@ -97,19 +86,6 @@ export class PromptRegistry {
       throw new Error(`Prompt resource is not registered: ${id}`)
     }
     return resource
-  }
-
-  systemPrompt(locale: AssistantLanguage, override?: string): ResolvedPrompt {
-    const resource = this.get(DEFAULT_SYSTEM_PROMPT_REFS[locale].id)
-    const normalizedOverride = override?.trim()
-    const customized = Boolean(
-      normalizedOverride && normalizedOverride !== resource.content,
-    )
-    return {
-      content: customized ? normalizedOverride! : resource.content,
-      resource: withoutContent(resource),
-      customized,
-    }
   }
 
   harnessPrompt(

@@ -3,6 +3,12 @@ import type { ActiveRun, AgentEventDraft, SessionState } from './session-types'
 
 const MAX_GOAL_CONTINUATIONS = 8
 
+function openPlanItems(session: SessionState) {
+  return (session.plan?.items ?? []).filter(
+    (item) => item.status !== 'completed' && item.status !== 'cancelled',
+  )
+}
+
 export class SessionOrchestrationPlanner {
   readonly #orchestratorMessages: SessionOrchestratorMessages
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
@@ -19,6 +25,8 @@ export class SessionOrchestrationPlanner {
     session: SessionState,
     run: ActiveRun,
   ): Promise<'continue' | 'finish'> {
+    this.#completeActivePlanIfDone(session, run)
+
     const goal = session.goal
 
     if (goal?.status === 'active') {
@@ -66,9 +74,7 @@ export class SessionOrchestrationPlanner {
     }
 
     const plan = session.plan
-    const openItems = (plan?.items ?? []).filter(
-      (item) => item.status !== 'completed' && item.status !== 'cancelled',
-    )
+    const openItems = openPlanItems(session)
 
     if (
       !plan ||
@@ -118,5 +124,25 @@ export class SessionOrchestrationPlanner {
       injectIntoHistory: false,
     })
     return 'finish'
+  }
+
+  #completeActivePlanIfDone(session: SessionState, run: ActiveRun): void {
+    const plan = session.plan
+    if (!plan || (plan.status ?? 'active') !== 'active') {
+      return
+    }
+
+    if (plan.items.length === 0 || openPlanItems(session).length > 0) {
+      return
+    }
+
+    plan.status = 'completed'
+    plan.updatedAt = new Date().toISOString()
+    this.#emit(session, {
+      type: 'plan.updated',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      plan: structuredClone(plan),
+    })
   }
 }

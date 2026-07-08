@@ -5,7 +5,6 @@ import {
   DEFAULT_APPROVAL_PROMPT_REFS,
   DEFAULT_HARNESS_PROMPT_REFS,
   DEFAULT_ORCHESTRATION_PROMPT_REFS,
-  DEFAULT_SYSTEM_PROMPT_REFS,
   PROMPT_RESOURCE_VERSION,
   type PromptResourceRef,
 } from '../../shared/prompt-resources'
@@ -13,7 +12,6 @@ import { PromptRegistry } from './registry'
 
 function defaultPromptRefs(): PromptResourceRef[] {
   return [
-    ...Object.values(DEFAULT_SYSTEM_PROMPT_REFS),
     ...Object.values(DEFAULT_HARNESS_PROMPT_REFS).flatMap((localized) =>
       Object.values(localized),
     ),
@@ -25,21 +23,19 @@ function defaultPromptRefs(): PromptResourceRef[] {
 }
 
 describe('PromptRegistry', () => {
-  it('loads versioned prompt resources and resolves localized system prompts', async () => {
+  it('loads versioned prompt resources without legacy system prompts', async () => {
     const registry = await PromptRegistry.load(
       path.resolve('resources', 'prompts'),
     )
 
-    const legacyZh = await readFile(
-      path.resolve('resources', 'prompts', 'system', 'zh-CN.md'),
-      'utf8',
-    )
-    expect(registry.systemPrompt('zh-CN').content).toBe(legacyZh.trim())
     expect(
       registry
         .list()
         .every((resource) => /^[a-f0-9]{64}$/u.test(resource.sha256)),
     ).toBe(true)
+    expect(registry.list().map((resource) => resource.id)).not.toContain(
+      'system.zh-CN',
+    )
   })
 
   it('loads append-only harness prompt resources', async () => {

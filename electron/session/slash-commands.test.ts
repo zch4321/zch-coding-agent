@@ -25,6 +25,10 @@ describe('resolveSlashCommand', () => {
     expect(content).toContain('为用户审阅创建 Plan：Check something')
     expect(content).toContain('plan_set')
     expect(content).not.toContain('${objective}')
+    expect('plan' in result).toBe(false)
+    expect(result.orchestratorMessage?.text).toBe(
+      'Plan requested: Check something',
+    )
     expect(result.orchestratorMessage?.resource?.id).toBe(
       DEFAULT_ORCHESTRATION_PROMPT_REFS.planStarted['zh-CN'].id,
     )

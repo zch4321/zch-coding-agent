@@ -123,7 +123,7 @@ describe('config migrations', () => {
 
     const migrated = migrateConfig(legacy)
 
-    expect(migrated.schemaVersion).toBe(5)
+    expect(migrated.schemaVersion).toBe(6)
     expect(migrated.network.httpProxy).toEqual({ mode: 'off' })
     expect(migrated.prompts.approval.classifyRisk.id).toBe(
       'approval.classify-risk',
@@ -161,14 +161,14 @@ describe('config migrations', () => {
     })
   })
 
-  it('migrates a v3 config up to v5 with web search defaults', () => {
+  it('migrates a v3 config up to v6 with web search defaults', () => {
     const v3 = structuredClone(DEFAULT_APP_CONFIG)
     v3.schemaVersion = 3 as never
     delete (v3 as { webSearch?: unknown }).webSearch
 
     const migrated = migrateConfig(v3)
 
-    expect(migrated.schemaVersion).toBe(5)
+    expect(migrated.schemaVersion).toBe(6)
     expect(migrated.webSearch).toEqual({
       provider: 'brave',
       count: 5,
@@ -219,5 +219,27 @@ describe('config migrations', () => {
     expect(migrated.prompts.orchestration.planStarted).toEqual(
       DEFAULT_ORCHESTRATION_PROMPT_REFS.planStarted,
     )
+  })
+
+  it('drops legacy system prompt refs from prompt configs', () => {
+    const legacy = structuredClone(DEFAULT_APP_CONFIG) as unknown as {
+      schemaVersion: number
+      prompts: typeof DEFAULT_APP_CONFIG.prompts & {
+        system?: {
+          'zh-CN': { id: string; version: string }
+          'en-US': { id: string; version: string }
+        }
+      }
+    }
+    legacy.schemaVersion = 5
+    legacy.prompts.system = {
+      'zh-CN': { id: 'system.zh-CN', version: 'legacy' },
+      'en-US': { id: 'system.en-US', version: 'legacy' },
+    }
+
+    const migrated = migrateConfig(legacy)
+
+    expect(migrated.schemaVersion).toBe(6)
+    expect(migrated.prompts).not.toHaveProperty('system')
   })
 })

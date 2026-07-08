@@ -133,7 +133,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(5),
+    schemaVersion: Type.Literal(6),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
@@ -311,13 +311,6 @@ export const PublicConfigSchema = Type.Object(
     ),
     prompts: Type.Object(
       {
-        system: Type.Object(
-          {
-            'zh-CN': PromptResourceRefSchema,
-            'en-US': PromptResourceRefSchema,
-          },
-          { additionalProperties: false },
-        ),
         approval: Type.Object(
           {
             classifyRisk: PromptResourceRefSchema,
