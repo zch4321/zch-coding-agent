@@ -3,12 +3,16 @@ import path from 'node:path'
 import type { ContextAttachmentRef } from '../../shared/context'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
 
-const AGENTS_FILE = 'AGENTS.md'
+const AGENTS_FILES = ['AGENTS.md', 'AGENTS.override.md'] as const
 const MAX_AGENTS_FILES = 16
 const MAX_AGENTS_BYTES = 64 * 1_024
+type AgentsInstructionKind = (typeof AGENTS_FILES)[number]
 
 export interface AgentsInstruction {
   path: string
+  kind: AgentsInstructionKind
+  depth: number
+  priority: number
   content: string
   totalBytes: number
   truncated: boolean
@@ -38,7 +42,16 @@ function directoryChain(portablePath: string): string[] {
   return dirs
 }
 
-function agentsCandidates(attachments: ContextAttachmentRef[]): string[] {
+interface AgentsCandidate {
+  path: string
+  kind: AgentsInstructionKind
+  depth: number
+  priority: number
+}
+
+function agentsCandidates(
+  attachments: ContextAttachmentRef[],
+): AgentsCandidate[] {
   const dirs = new Set<string>(['.'])
 
   for (const attachment of attachments) {
@@ -56,8 +69,20 @@ function agentsCandidates(attachments: ContextAttachmentRef[]): string[] {
   }
 
   return [...dirs]
+    .flatMap((dir) =>
+      AGENTS_FILES.map((fileName) => ({
+        path: dir === '.' ? fileName : `${dir}/${fileName}`,
+        kind: fileName,
+        depth: dir === '.' ? 0 : dir.split('/').filter(Boolean).length,
+      })),
+    )
+    .map((candidate, index) => ({
+      path: candidate.path,
+      kind: candidate.kind,
+      depth: candidate.depth,
+      priority: index,
+    }))
     .slice(0, MAX_AGENTS_FILES)
-    .map((dir) => (dir === '.' ? AGENTS_FILE : `${dir}/${AGENTS_FILE}`))
 }
 
 export async function loadAgentsInstructions(input: {
@@ -76,12 +101,15 @@ export async function loadAgentsInstructions(input: {
 
     try {
       const file = await guard.readFileBounded(
-        candidate,
+        candidate.path,
         MAX_AGENTS_BYTES,
         input.signal,
       )
       results.push({
         path: file.path,
+        kind: candidate.kind,
+        depth: candidate.depth,
+        priority: candidate.priority,
         content: file.content,
         totalBytes: file.totalBytes,
         truncated: file.truncated,
@@ -111,7 +139,7 @@ export function formatAgentsInstructions(
 
   const sections = instructions.map((instruction) =>
     [
-      `<agents path="${instruction.path}" sha256="${instruction.sha256}" bytes="${instruction.totalBytes}" truncated="${instruction.truncated}">`,
+      `<agents path="${instruction.path}" kind="${instruction.kind}" depth="${instruction.depth}" priority="${instruction.priority}" sha256="${instruction.sha256}" bytes="${instruction.totalBytes}" truncated="${instruction.truncated}">`,
       instruction.content,
       '</agents>',
     ].join('\n'),

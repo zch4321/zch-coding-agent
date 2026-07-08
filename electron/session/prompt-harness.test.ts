@@ -97,7 +97,7 @@ describe('prompt harness', () => {
 
     expect(state.promptLedger.map((entry) => entry.kind)).toEqual([
       'base_instructions',
-      'runtime_policy_and_context',
+      'runtime_context',
       'assistant_preferences',
       'agents',
     ])
@@ -113,10 +113,63 @@ describe('prompt harness', () => {
     )
     expect(state.history[1]?.content).not.toContain('${')
     expect(state.history[1]?.content).toContain('current_time:')
+    expect(state.history[1]?.content).toContain('timezone:')
     expect(state.history[1]?.content).toContain('assistant_language: zh-CN')
     expect(state.history[1]?.content).toContain('project_tree_depth_3:')
     expect(state.history[1]?.content).toContain('src/feature/view.ts')
     expect(state.history[3]?.content).toContain('<agents')
+  })
+
+  it('loads AGENTS override guidance with explicit priority metadata', async () => {
+    const workspace = path.join(
+      os.tmpdir(),
+      `prompt-harness-agents-override-${Date.now()}`,
+    )
+    await mkdir(path.join(workspace, 'src', 'feature'), { recursive: true })
+    await writeFile(path.join(workspace, 'AGENTS.md'), 'root guidance\n')
+    await writeFile(
+      path.join(workspace, 'AGENTS.override.md'),
+      'root override\n',
+    )
+    await writeFile(path.join(workspace, 'src', 'AGENTS.md'), 'src guidance\n')
+    await writeFile(
+      path.join(workspace, 'src', 'feature', 'AGENTS.override.md'),
+      'feature override\n',
+    )
+    await writeFile(path.join(workspace, 'src', 'feature', 'view.ts'), 'ok\n')
+
+    const prepared = await import('./context-attachments').then((module) =>
+      module.prepareRunContext({
+        workspace,
+        attachments: [
+          {
+            kind: 'file',
+            path: 'src/feature/view.ts',
+            source: 'mention',
+          },
+        ],
+        config: publicConfig(),
+      }),
+    )
+
+    expect(prepared.providerContent).toContain(
+      '<agents path="AGENTS.md" kind="AGENTS.md" depth="0" priority="0"',
+    )
+    expect(prepared.providerContent).toContain(
+      '<agents path="AGENTS.override.md" kind="AGENTS.override.md" depth="0" priority="1"',
+    )
+    expect(prepared.providerContent).toContain(
+      '<agents path="src/AGENTS.md" kind="AGENTS.md" depth="1"',
+    )
+    expect(prepared.providerContent).toContain(
+      '<agents path="src/feature/AGENTS.override.md" kind="AGENTS.override.md" depth="2"',
+    )
+    expect(prepared.providerContent.indexOf('root guidance')).toBeLessThan(
+      prepared.providerContent.indexOf('root override'),
+    )
+    expect(prepared.providerContent.indexOf('src guidance')).toBeLessThan(
+      prepared.providerContent.indexOf('feature override'),
+    )
   })
 
   it('skips AGENTS layer when no AGENTS.md exists', async () => {
@@ -329,7 +382,7 @@ describe('prompt harness', () => {
       toolNames: ['read_file'],
     })
     expect(state.history).toHaveLength(before + 1)
-    expect(state.promptLedger.at(-1)?.kind).toBe('runtime_policy_and_context')
+    expect(state.promptLedger.at(-1)?.kind).toBe('runtime_context')
     expect(state.promptLedger.at(-1)?.role).toBe('user')
   })
 
@@ -481,7 +534,7 @@ describe('prompt harness', () => {
       config,
     })
     appendPromptLayer(state, {
-      kind: 'runtime_policy_and_context',
+      kind: 'runtime_context',
       role: 'user',
       content: 'runtime',
       source: 'test:runtime',
@@ -501,7 +554,7 @@ describe('prompt harness', () => {
       kind: 'agents',
       role: 'user',
       content: 'current agents guidance',
-      source: 'workspace:AGENTS.md',
+      source: 'workspace:AGENTS',
       trusted: false,
       editable: false,
       config,

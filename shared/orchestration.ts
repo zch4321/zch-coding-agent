@@ -52,6 +52,7 @@ export const PlanItemSchema = Type.Object(
     updatedAt: Type.String({ format: 'date-time' }),
     result: Type.Optional(Type.String({ maxLength: 65_536 })),
     evidence: Type.Optional(Type.String({ maxLength: 65_536 })),
+    cancelReason: Type.Optional(Type.String({ maxLength: 65_536 })),
   },
   { additionalProperties: false },
 )

@@ -313,6 +313,7 @@ export function reduceTraceEvent(
     }
     case 'llm.request':
     case 'llm.response':
+    case 'plan.status':
       break
   }
 

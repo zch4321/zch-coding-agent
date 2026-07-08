@@ -34,6 +34,23 @@ describe('ToolRegistry hard output boundary', () => {
     ).toMatchObject({
       ok: true,
     })
+    expect(
+      registry.validateArgs(definition!, {
+        id: 'item:1',
+        status: 'cancelled',
+      }),
+    ).toMatchObject({
+      ok: false,
+    })
+    expect(
+      registry.validateArgs(definition!, {
+        id: 'item:1',
+        status: 'cancelled',
+        cancelReason: 'No longer needed',
+      }),
+    ).toMatchObject({
+      ok: true,
+    })
   })
 
   it('bounds the final UTF-8 JSON result rather than JavaScript characters', async () => {

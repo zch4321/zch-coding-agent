@@ -154,7 +154,7 @@ Run 流程概要：
 - 每个 session 同时最多一个 active run。
 - `startRun` 创建 `AbortController` 和 `ActiveRun`，重复 `clientRequestId` 幂等返回已有 run。
 - 普通用户消息先经 `SessionUserTurnPreparer`，再把 app-authored context layers 和用户原文追加到 `session.history`。
-- `/compact` 是特殊命令，由 compact coordinator 直接处理，不进入普通 provider/tool loop。
+- `/compact` 是特殊命令，由 compact coordinator 直接处理，不进入普通 provider/tool loop；重写后的 `<compact_history>` 会追加 compact 时刻的 Goal/Plan 状态快照，避免摘要模型漏写编排状态。
 - 每步 provider 调用前会 drain queued interjections、检查自动 compact、重新注入最新 runtime/AGENTS context。
 - provider 返回 assistant turn 后写入 history；若有 tool calls，则进入工具执行；若没有 tool calls，则检查 goal/plan continuation 或结束 run。
 - 中断通过 `AbortSignal` 协作传递给 provider、工具、审批等待和长进程。
@@ -174,8 +174,8 @@ Prompt harness 当前由 `electron/session/prompt-harness.ts`、`electron/prompt
 会话层：
 
 - 初始 session 会追加 base instructions、runtime context、assistant preferences、AGENTS 和 skills summary。
-- runtime context 来自 `resources/prompts/harness/runtime-context.*.md` 模板，变量由 TypeScript collector 提供。
-- `AGENTS.md` 通过 `agents-context.ts` 从 workspace 和 selected attachments 的目录链读取，格式化为 `<agents ...>` tagged context。
+- runtime context 来自 `resources/prompts/harness/runtime-context.*.md` 模板，变量由 TypeScript collector 提供；动态快照包含当前日期、时间、timezone、workspace、permission mode、provider/model、git summary、project tree 和 module context。
+- `AGENTS.md` / `AGENTS.override.md` 通过 `agents-context.ts` 从 workspace 和 selected attachments 的目录链读取，格式化为 `<agents ...>` tagged context；tag 会记录 path、kind、depth、priority、hash、bytes 和 truncated，越深目录和 override 文件具有更高优先级。
 - run attachments 由 `context-attachments.ts` 生成 `<context_file>` 和 `<context_directory>`，再包进 `<selected_context>`。
 - slash command、skills、compact、goal/plan 等 app-authored context 以 user-role provider message 追加，但其来源、trusted/editable、hash 和 token 估算记录在 prompt ledger。
 
@@ -200,7 +200,7 @@ Prompt harness 当前由 `electron/session/prompt-harness.ts`、`electron/prompt
 | `/goal ...`         | 创建 active goal，注入 localized `goal-started` orchestration prompt。                     |
 | `/plan ...`         | 注入 localized `plan-started` orchestration prompt；实际 Plan 由模型调用 `plan_set` 创建。 |
 
-Goal/Plan 状态存放在 `SessionState` 中，并通过 `goal.updated` / `plan.updated` 事件同步到 renderer。模型可通过 `orchestration-tools.ts` 暴露的 goal/plan 工具读取和更新状态。`plan_set` 创建或替换 Plan，并默认进入 `awaiting_review`；Plan review 是编排状态，不是权限模式，副作用工具仍由 permission pipeline 审批和执行。用户明确批准后，模型通过 `plan_status({ status: "active" })` 记录状态并继续；所有 item 完成或取消后，运行时会把 active 顶层 Plan 收口为 `completed`。
+Goal/Plan 状态存放在 `SessionState` 中，并通过 `goal.updated` / `plan.updated` 事件同步到 renderer。模型可通过 `orchestration-tools.ts` 暴露的 goal/plan 工具读取和更新状态。`plan_set` 创建或替换 Plan，并默认进入 `awaiting_review`；Plan review 是编排状态，不是权限模式，副作用工具仍由 permission pipeline 审批和执行。用户明确批准后，UI 先把 Plan 标记为 `active` 并写入 `plan.status` trace event，再启动下一轮；自然语言批准可由模型通过 `plan_status({ status: "active" })` 记录状态并继续。所有 item 完成或取消后，运行时会把 active 顶层 Plan 收口为 `completed`；completed item 必须有 result/evidence，cancelled item 必须有 cancelReason。
 
 ---
 
@@ -369,6 +369,7 @@ Trace 默认关闭。开启 logging 前必须接受 trace notice。
 - LLM：`llm.request`、`llm.response`、`llm.usage`。
 - tool/approval：`approval`、`tool.call`。
 - UI-visible content：`user.message`、`agent.message`、`orchestrator.message`、`interjection.message`。
+- orchestration audit：`plan.status` 记录 UI plan review 导致的顶层 Plan 状态变化。
 - terminal：`terminal.event`。
 
 Trace request 记录：

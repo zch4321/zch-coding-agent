@@ -1,6 +1,7 @@
 import { getActiveProviderConfig } from '../../shared/config'
 import type { RunStatus } from '../../shared/agent-events'
 import type { CallId } from '../../shared/ids'
+import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
@@ -26,6 +27,16 @@ import {
   selectPromptMessages,
 } from './prompt-harness'
 import { resolveSlashCommand } from './slash-commands'
+
+function compactOrchestrationState(input: {
+  goal?: GoalState
+  plan?: PlanState
+}): string {
+  const lines = ['Orchestration state at compaction:']
+  lines.push(`Goal: ${input.goal ? JSON.stringify(input.goal) : 'none'}`)
+  lines.push(`Plan: ${input.plan ? JSON.stringify(input.plan) : 'none'}`)
+  return lines.join('\n')
+}
 
 export class SessionCompactCoordinator {
   readonly #configStore: ConfigStore
@@ -224,6 +235,7 @@ export class SessionCompactCoordinator {
   ): ProviderMessage[] {
     const excludedKinds = new Set([
       'base_instructions',
+      'runtime_context',
       'runtime_policy_and_context',
       'assistant_preferences',
       'agents',
@@ -398,7 +410,7 @@ export class SessionCompactCoordinator {
       projectMetadata: this.#projectMetadata,
       skillSummary: this.#skillsManager?.summaryPrompt(),
       compactHistory: {
-        summary,
+        summary: [summary, '', compactOrchestrationState(session)].join('\n'),
         source: options.source,
       },
       toolNames: this.#toolRegistry.list().map((tool) => tool.id),

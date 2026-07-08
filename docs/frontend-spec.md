@@ -412,8 +412,8 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.0 General
 
 - 界面语言支持简体中文和英文，切换后立即更新 UI，并同步主进程 `assistant.language`。
-- 展示可编辑的中英文 system prompt，支持保存和恢复内置默认值；两个版本均不能为空。
-- 保存后的提示词从已有对话的下一轮模型调用开始生效；不得把 API Key 等凭据写入提示词。
+- 展示可编辑的中英文 assistant preferences，支持保存和恢复默认值；base harness instructions 不在设置页中编辑。
+- 保存后的偏好从已有对话的下一轮模型调用开始生效；不得把 API Key 等凭据写入偏好。
 
 ### 10.1 Project
 

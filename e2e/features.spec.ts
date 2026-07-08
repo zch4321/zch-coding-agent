@@ -200,6 +200,27 @@ function toolCallDelta(input: {
   }
 }
 
+function toolCallsDelta(
+  calls: Array<{ id: string; name: string; args: JsonObject }>,
+): JsonObject {
+  return {
+    choices: [
+      {
+        delta: {
+          tool_calls: calls.map((call, index) => ({
+            index,
+            id: call.id,
+            function: {
+              name: call.name,
+              arguments: JSON.stringify(call.args),
+            },
+          })),
+        },
+      },
+    ],
+  }
+}
+
 function providerToolNames(body: JsonObject): string[] {
   const tools = body.tools
   if (!Array.isArray(tools)) return []
@@ -792,17 +813,44 @@ test.describe('Electron functional workflows', () => {
         id: 'call:e2e-plan-set',
         name: 'plan_set',
         args: {
+          objective: 'Validate the prompt harness e2e flow',
           items: ['Inspect prompt harness state', 'Report verification'],
         },
       }),
     ])
     fakeProvider.queue([textDelta('Plan is ready for review.')])
+    fakeProvider.queue([
+      toolCallsDelta([
+        {
+          id: 'call:e2e-plan-item-1',
+          name: 'plan_update',
+          args: {
+            id: 'item:1',
+            status: 'completed',
+            result: 'Inspected prompt harness state',
+            evidence: 'E2E provider completed item 1',
+          },
+        },
+        {
+          id: 'call:e2e-plan-item-2',
+          name: 'plan_update',
+          args: {
+            id: 'item:2',
+            status: 'completed',
+            result: 'Reported verification',
+            evidence: 'E2E provider completed item 2',
+          },
+        },
+      ]),
+    ])
+    fakeProvider.queue([textDelta('Approved plan continued.')])
 
     await configureApp({
       page,
       providerBaseURL: fakeProvider.origin,
       workspace,
       defaultMode: 'readonly',
+      traceLogging: true,
     })
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
@@ -827,6 +875,123 @@ test.describe('Electron functional workflows', () => {
     await expect(planView).toContainText('待审查')
     await expect(
       planView.getByRole('button', { name: '批准并开始' }),
+    ).toBeVisible()
+    await planView.getByRole('button', { name: '批准并开始' }).click()
+
+    await expect.poll(() => fakeProvider.requests.length).toBe(4)
+    expect(providerMessageText(fakeProvider.requests[2].body)).toContain(
+      '用户已批准当前计划。继续执行已激活的计划。',
+    )
+    await expect(
+      page.locator('.chat-message.assistant', {
+        hasText: 'Approved plan continued.',
+      }),
+    ).toBeVisible()
+    await expect(planView).toContainText('已结束')
+
+    const trace = await latestTrace({ userDataPath })
+    expect(trace.raw).toContain('"type":"plan.status"')
+    expect(trace.raw).toContain('"previousStatus":"awaiting_review"')
+    expect(trace.raw).toContain('"status":"active"')
+  })
+
+  test('rejects a reviewed /plan without starting another provider run', async () => {
+    fakeProvider.queue([
+      toolCallDelta({
+        id: 'call:e2e-plan-reject-set',
+        name: 'plan_set',
+        args: {
+          objective: 'Reject this e2e plan',
+          items: ['Inspect rejected plan'],
+        },
+      }),
+    ])
+    fakeProvider.queue([textDelta('Rejected plan is ready for review.')])
+
+    await configureApp({
+      page,
+      providerBaseURL: fakeProvider.origin,
+      workspace,
+      defaultMode: 'readonly',
+      traceLogging: true,
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+
+    const composer = page.locator('.message-input-area textarea')
+    await composer.fill('/plan Reject this e2e plan')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect.poll(() => fakeProvider.requests.length).toBe(2)
+
+    const planView = page.locator('.plan-view')
+    await expect(planView).toContainText('待审查')
+    await planView.getByRole('button', { name: '不批准' }).click()
+    await expect(planView).toContainText('已拒绝')
+    await page.waitForTimeout(250)
+    expect(fakeProvider.requests.length).toBe(2)
+
+    const trace = await latestTrace({ userDataPath })
+    expect(trace.raw).toContain('"type":"plan.status"')
+    expect(trace.raw).toContain('"status":"rejected"')
+  })
+
+  test('keeps normal tool approval available after same-batch plan_set', async () => {
+    fakeProvider.queue([
+      toolCallsDelta([
+        {
+          id: 'call:e2e-same-batch-plan',
+          name: 'plan_set',
+          args: {
+            items: ['Create a file after review'],
+          },
+        },
+        {
+          id: 'call:e2e-same-batch-write',
+          name: 'create_file',
+          args: {
+            path: 'same-batch-plan.txt',
+            content: 'same batch approval\n',
+            _agent_intent: 'Create the same-batch approval fixture',
+          },
+        },
+      ]),
+    ])
+    fakeProvider.queue([textDelta('Same-batch write completed.')])
+
+    await configureApp({
+      page,
+      providerBaseURL: fakeProvider.origin,
+      workspace,
+      defaultMode: 'confirm',
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+
+    const composer = page.locator('.message-input-area textarea')
+    await composer.fill('Create a plan and same-batch file')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect.poll(() => fakeProvider.requests.length).toBe(1)
+
+    const planView = page.locator('.plan-view')
+    await expect(planView).toContainText('待审查')
+    const approval = page.locator('.approval-card')
+    await expect(approval).toBeVisible()
+    await expect(approval).toContainText('create_file')
+    await expect(approval).toContainText('same-batch-plan.txt')
+    await approval.getByRole('button', { name: '批准', exact: true }).click()
+
+    await expect
+      .poll(async () =>
+        readFile(path.join(workspace, 'same-batch-plan.txt'), 'utf8').catch(
+          () => '',
+        ),
+      )
+      .toBe('same batch approval\n')
+    await expect.poll(() => fakeProvider.requests.length).toBe(2)
+    await expect(
+      page.locator('.chat-message.assistant', {
+        hasText: 'Same-batch write completed.',
+      }),
     ).toBeVisible()
   })
 
@@ -885,7 +1050,7 @@ test.describe('Electron functional workflows', () => {
     await logging.getByRole('button', { name: '离线回放' }).click()
     await expect(logging.getByText('Prompt Inspector')).toBeVisible()
     await expect(logging.getByText('base_instructions')).toBeVisible()
-    await expect(logging.getByText('runtime_policy_and_context')).toBeVisible()
+    await expect(logging.getByText('runtime_context')).toBeVisible()
     await expect(logging.getByText('agents', { exact: true })).toBeVisible()
   })
 
@@ -1065,6 +1230,9 @@ test.describe('Electron functional workflows', () => {
     expect(afterCompactText).not.toContain('RAW_E2E_OLD_CONTEXT')
     expect(afterCompactText).toContain('<compact_history')
     expect(afterCompactText).toContain('E2E compact summary retained.')
+    expect(afterCompactText).toContain('Orchestration state at compaction:')
+    expect(afterCompactText).toContain('Goal: none')
+    expect(afterCompactText).toContain('Plan: none')
 
     const trace = await latestTrace({ userDataPath })
     const compactEvent = trace.events.find(

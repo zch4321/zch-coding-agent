@@ -44,8 +44,8 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 - **协议完整**：LLM 一次返回多个工具调用时，每个调用都必须回填一个结果；拒绝、取消、超时也以结构化工具结果回填，不能静默丢失。
 - **有界运行**：配置最大循环轮数、单次和单个 run 的工具输出预算、累计上下文预算；`maxStepsPerRun` 默认值为 200，可在 Limits 设置中调整；上下文达到当前模型 prompt budget 的 `autoCompactTriggerPercent`（默认 80%）时，在安全边界自动压缩旧历史；字节、行数/结果数与估算 token 任一上限先到即截断，并向用户和模型返回续读信息。
 - **可回放**：调试日志开启时，循环的请求、响应、流式事件和工具结果必须完整保存，可确定性离线回放原会话；重新请求模型属于单独的“重放请求”，不保证复现随机输出（§5）。
-- **提示词可配置**：基础 system prompt 由主进程配置持有，内置 `zh-CN` / `en-US` 两套默认值并允许用户编辑；界面语言变化后，已有会话从下一轮 Provider 调用开始使用对应语言版本。Skill 摘要追加在基础提示词之后。
-- **计划审阅门**：模型可用 `plan_set` 创建或替换 Plan，默认进入 `awaiting_review` 并停止执行；用户明确批准或拒绝后，下一轮模型通过 `plan_status({status:"active" | "rejected"})` 记录审阅结果。向模型暴露 `plan_status` 是设计意图，用于把自然语言批准/拒绝转成可审计状态，不绕过权限管线或工具审批。
+- **Prompt Harness**：稳定 base instructions、runtime context、AGENTS、selected context、orchestration request 和 compact history 作为可审计 prompt layers 进入模型请求；用户可编辑内容是 assistant preferences，不替换 base harness instructions。
+- **计划审阅门**：模型可用 `plan_set` 创建或替换 Plan，默认进入 `awaiting_review` 并停止执行；UI 批准/拒绝会直接记录顶层 Plan 状态并写入 trace，自然语言批准/拒绝也可由模型通过 `plan_status({status:"active" | "rejected"})` 转成可审计状态。Plan review 不是权限模式，不绕过也不替代工具审批。
 
 ### 2.2 工具集
 
@@ -151,7 +151,7 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 #### 2.5.1 是什么
 Skills 是高度浓缩的「专家指令」——一段描述某领域最佳实践的 markdown（SKILL.md）。采用**渐进式上下文**加载：
 
-- **摘要阶段**：启动时扫描 skills 目录，把每个 skill 的 frontmatter（name + description + trigger）提取出来，**全部摘要拼成一段注入 system prompt**（便宜，常驻上下文）。
+- **摘要阶段**：启动时扫描 skills 目录，把每个 skill 的 frontmatter（name + description + trigger）提取出来，作为 harness selected context/skills summary 注入（便宜，常驻上下文）。
 - **正文阶段**：Agent 判断某个 skill 相关时，调用 `read_skill(name)` 工具加载完整正文，按其指令执行（按需，省 token）。
 
 #### 2.5.2 SKILL.md 规范

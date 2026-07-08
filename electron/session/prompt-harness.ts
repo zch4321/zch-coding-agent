@@ -89,6 +89,16 @@ function hashJson(value: unknown): string {
   return sha256(JSON.stringify(value))
 }
 
+function currentTimeZone(): string {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown'
+  const offsetMinutes = -new Date().getTimezoneOffset()
+  const sign = offsetMinutes >= 0 ? '+' : '-'
+  const absolute = Math.abs(offsetMinutes)
+  const hours = String(Math.floor(absolute / 60)).padStart(2, '0')
+  const minutes = String(absolute % 60).padStart(2, '0')
+  return `${timeZone} (UTC${sign}${hours}:${minutes})`
+}
+
 function escapeAttribute(value: string): string {
   return value
     .replace(/&/gu, '&amp;')
@@ -511,6 +521,7 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
   const content = renderPromptTemplate(prompt.content, {
     currentDate: new Date().toISOString().slice(0, 10),
     currentTime,
+    timezone: currentTimeZone(),
     workspace: input.workspace,
     cwd: input.workspace,
     shell:
@@ -617,7 +628,7 @@ export async function appendInitialPromptHarness(
       kind: 'agents',
       role: 'user',
       content: agents.content,
-      source: 'workspace:AGENTS.md',
+      source: 'workspace:AGENTS',
       trusted: false,
       editable: false,
       config: input.config,
@@ -654,7 +665,7 @@ export async function appendRuntimeContextIfChanged(
 
   state.lastRuntimeContextHash = runtime.hash
   appendPromptLayer(state, {
-    kind: 'runtime_policy_and_context',
+    kind: 'runtime_context',
     role: 'user',
     content: runtime.content,
     source: runtime.resource?.path ?? 'fallback:harness.runtime-context',
@@ -686,7 +697,7 @@ export async function appendAgentsContextIfChanged(
     kind: 'agents',
     role: 'user',
     content: agents.content,
-    source: 'workspace:AGENTS.md',
+    source: 'workspace:AGENTS',
     trusted: false,
     editable: false,
     config: input.config,

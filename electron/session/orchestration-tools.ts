@@ -95,11 +95,18 @@ const PlanItemEvidenceSchema = Type.String({
   description:
     'Concrete evidence for the item result. Required when status is completed; optional otherwise.',
 })
+const PlanItemCancelReasonSchema = Type.String({
+  minLength: 1,
+  maxLength: 65_536,
+  description:
+    'Reason the item was cancelled. Required when status is cancelled; optional otherwise.',
+})
 const PlanUpdateSchema = Type.Unsafe<{
   id: string
   status: 'pending' | 'in_progress' | 'completed' | 'blocked' | 'cancelled'
   result?: string
   evidence?: string
+  cancelReason?: string
 }>({
   type: 'object',
   properties: {
@@ -112,6 +119,7 @@ const PlanUpdateSchema = Type.Unsafe<{
     },
     result: PlanItemResultSchema,
     evidence: PlanItemEvidenceSchema,
+    cancelReason: PlanItemCancelReasonSchema,
   },
   required: ['id', 'status'],
   additionalProperties: false,
@@ -129,6 +137,20 @@ const PlanUpdateSchema = Type.Unsafe<{
           evidence: PlanItemEvidenceSchema,
         },
         required: ['result', 'evidence'],
+      },
+    },
+    {
+      if: {
+        properties: {
+          status: { const: 'cancelled' },
+        },
+        required: ['status'],
+      },
+      then: {
+        properties: {
+          cancelReason: PlanItemCancelReasonSchema,
+        },
+        required: ['cancelReason'],
       },
     },
   ],
@@ -264,6 +286,9 @@ export function registerOrchestrationTools(
                 status: 'cancelled',
                 result:
                   item.result ?? 'Cancelled because the Goal was completed.',
+                cancelReason:
+                  item.cancelReason ??
+                  'Cancelled because the Goal was completed.',
                 updatedAt,
               },
         )
@@ -402,7 +427,7 @@ export function registerOrchestrationTools(
   registry.registerTool({
     id: 'plan_update',
     description:
-      'Update one Plan item. Completed items must include result and evidence.',
+      'Update one Plan item. Completed items must include result and evidence. Cancelled items must include cancelReason.',
     inputSchema: PlanUpdateSchema,
     effects: ['instruction.read'],
     defaultRisk: 'low',
@@ -419,6 +444,9 @@ export function registerOrchestrationTools(
       ) {
         return error('Completed plan items require result and evidence')
       }
+      if (args.status === 'cancelled' && !args.cancelReason?.trim()) {
+        return error('Cancelled plan items require cancelReason')
+      }
 
       const item = session.plan.items.find(
         (candidate) => candidate.id === args.id,
@@ -428,6 +456,7 @@ export function registerOrchestrationTools(
       item.status = args.status
       item.result = args.result
       item.evidence = args.evidence
+      item.cancelReason = args.cancelReason
       item.updatedAt = now()
       session.plan.updatedAt = item.updatedAt
       emitPlan(session, options.emit, context.runId)

@@ -1,5 +1,6 @@
 <environment_context current_date="${currentDate}">
 current_time: ${currentTime}
+timezone: ${timezone}
 workspace: ${workspace}
 cwd: ${cwd}
 shell: ${shell}

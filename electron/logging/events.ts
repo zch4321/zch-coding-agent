@@ -215,6 +215,17 @@ export const TraceEventSchema = Type.Union([
   Type.Composite([
     TraceBaseSchema,
     Type.Object({
+      type: Type.Literal('plan.status'),
+      sessionId: SessionIdSchema,
+      previousStatus: Type.String({ maxLength: 64 }),
+      status: Type.String({ maxLength: 64 }),
+      source: Type.String({ maxLength: 128 }),
+      plan: JsonValueSchema,
+    }),
+  ]),
+  Type.Composite([
+    TraceBaseSchema,
+    Type.Object({
       type: Type.Literal('interjection.message'),
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
@@ -333,6 +344,13 @@ export type TraceEventInput =
       text: string
       promptId?: string
       promptHash?: string
+    })
+  | (TraceInputBase & {
+      type: 'plan.status'
+      previousStatus: string
+      status: string
+      source: string
+      plan: JsonValue
     })
   | (TraceInputBase & {
       type: 'interjection.message'

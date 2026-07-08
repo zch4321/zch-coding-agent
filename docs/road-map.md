@@ -2,64 +2,24 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、compact/goal/plan 编排、live interjection v1、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、工具紧凑 UI v1 已经落地。下一阶段重点是把这些能力从“可用”推进到“可并行、可扩展、可观测、可评估”。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、工具紧凑 UI v1 已经落地。下一阶段重点是把这些能力从“可用”推进到“可并行、可扩展、可观测、可评估”。
 
 ## 0. 未完成概览
 
 | 优先级 | 领域                           | 目标                                                     | 主要风险                                    |
 | ------ | ------------------------------ | -------------------------------------------------------- | ------------------------------------------- |
-| P0     | Harness / Plan / Goal 硬化     | 补齐 Plan 审阅 UX、compact 续接质量和上下文扩展规则      | 审阅链路覆盖不足、compact 后状态丢失        |
-| P0.5   | Concurrent ReAct Sessions      | 多个对话可同时运行，切换对话不打断后台 run               | renderer 单例状态、事件串线、并发写文件冲突 |
+| P0     | Concurrent ReAct Sessions      | 多个对话可同时运行，切换对话不打断后台 run               | renderer 单例状态、事件串线、并发写文件冲突 |
 | P1     | Generic MCP v1                 | 接入通用 MCP server，并复用现有工具和权限管线            | 外部工具 schema/输出不受控、工具数量膨胀    |
 | P1     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断                |
 | P1     | Provider Routing               | 会话级 provider/model 快照与用途路由                     | 全局 active provider 静默影响已有会话       |
 | P2     | Benchmark Harness              | 用真实任务评估 harness、工具、上下文和权限策略           | 成本高、环境复杂、指标不可比较              |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张            |
 
-## 1. M0 · Harness And Orchestration Hardening
-
-目标：把已落地的 Prompt Harness、Plan、Goal、Compact 从 prompt 约束提升为更明确的运行时契约，减少模型绕过和历史包袱。
-
-### 1.1 Plan 审阅 UX 与 E2E
-
-- 用户批准后必须先把 Plan 标记为 `active`，再执行计划项；自然语言批准、拒绝和重新规划都要在 trace 中可审计。
-- UI 审阅入口需要清晰区分 Plan review、tool approval 和普通 run 状态，避免把 Plan 误当成权限模式。
-- Plan item 完成、取消、阻塞时，UI 和 trace 都应保留 result/evidence/cancel reason。
-
-验收：
-
-- E2E 覆盖用户批准后继续执行、拒绝后不执行。
-- E2E 覆盖 Plan review 不阻塞普通 tool approval。
-- Plan 完成、拒绝、重规划状态可从 trace 解释。
-
-### 1.2 Goal / Plan / Compact Prompt 收口
-
-- Goal continuation、Plan continuation 和 Compact prompt 保持资源文件化、模板化和版本化。
-- Compact summary 明确保留：用户目标、最新要求、已做决策、工具结果、文件变更、Plan/Goal 状态、未完成工作、风险和不确定性。
-- Goal complete/block 必须有可验证 evidence；如果仍有 open plan item，必须完成、取消或显式说明为什么 `cancelOpenPlan=true`。
-
-验收：
-
-- `plan-warning` 不作为 provider message 注入，只作为 UI 状态展示。
-- compact 后 `<compact_history>` 包含 Plan/Goal 状态并能继续运行。
-- Goal/Plan prompt 的默认资源全部有 registry 测试和 unresolved template variable 测试。
-
-### 1.3 Prompt Harness 扩展
-
-- Runtime context 只保留动态快照；静态规则继续放 base instructions。
-- 补齐 runtime context 的 timezone 等必要动态变量。
-- AGENTS 读取后续支持 `AGENTS.override.md` 和更明确的嵌套优先级；继续保持缺失不注入、变更只 append 新 layer。
-
-验收：
-
-- Trace 仍能记录 base/runtime/AGENTS/selected/orchestration prompt resource metadata。
-- AGENTS 变更不改写已存在历史，只追加新 layer。
-
-## 2. M1 · Concurrent ReAct Sessions
+## 1. M1 · Concurrent ReAct Sessions
 
 目标：允许多个 conversation 各自持有后台 ReAct loop。用户切换对话、查看别的任务或启动另一个任务时，不应打断已经运行的后端循环。
 
-### 2.1 并发语义
+### 1.1 并发语义
 
 - 一个 conversation 同一时间最多一个 active run。
 - 一个 app 可以同时存在多个 conversation active run。
@@ -73,7 +33,7 @@
 - B 可以启动自己的 run；A/B 的 assistant delta、tool、usage、plan/goal 不串线。
 - 切回 A 后能看到完整 timeline，顺序正确。
 
-### 2.2 Renderer State Routing
+### 1.2 Renderer State Routing
 
 - renderer runtime 从单例状态改为 per-conversation/per-session 状态：
 
@@ -100,7 +60,7 @@ interface ConversationRuntimeState {
 - 后台 `approval.requested` 不覆盖当前对话的 pending approval。
 - Store 单测覆盖 A/B 两个 session 交错事件。
 
-### 2.3 Background Approval UX
+### 1.3 Background Approval UX
 
 - Project sidebar / conversation list 显示 running、awaiting approval、failed、completed 等状态 badge。
 - 当前对话外的 approval 不弹出当前详情面板，但用户能从 badge 切到对应对话处理。
@@ -113,7 +73,7 @@ interface ConversationRuntimeState {
 - 点击 A 的 approval badge 切回 A 后能 approve/deny 正确 call。
 - 拒绝后台 approval 不影响其他 run。
 
-### 2.4 Workspace Mutation Lease
+### 1.4 Workspace Mutation Lease
 
 目标：允许并行读和 LLM 推理，但避免同一 workspace 内多个 run 同时写文件造成 diff/precondition 互相破坏。
 
@@ -129,7 +89,7 @@ interface ConversationRuntimeState {
 - 不同 workspace 的 mutating run 可以并行。
 - lease 状态进入 trace 和 UI，用户知道为什么等待。
 
-### 2.5 并发资源限制
+### 1.5 并发资源限制
 
 - 增加配置：`maxConcurrentRuns`、`maxConcurrentProviderCalls`、`maxConcurrentMutatingRunsPerWorkspace`。
 - 超出限制的新 run 应排队或拒绝，并给出明确 UI 提示。
@@ -141,11 +101,11 @@ interface ConversationRuntimeState {
 - 取消一个后台 run 不会取消其他 run。
 - 关闭 app/session 时能清理所有 active runs 和 terminals。
 
-## 3. M2 · Generic MCP v1
+## 2. M2 · Generic MCP v1
 
 目标：实现通用 MCP client，让外部 MCP server 成为受控工具来源，同时继续复用 `ToolRegistry`、权限管线、trace 和 UI。
 
-### 3.1 McpManager
+### 2.1 McpManager
 
 - 新增 `electron/mcp/mcp-manager.ts`，管理 server 配置、生命周期、连接、状态、stderr tail 和关闭。
 - v1 先支持 stdio transport：spawn server，完成 initialize、initialized、tools/list。
@@ -159,7 +119,7 @@ interface ConversationRuntimeState {
 - 启动失败、stderr、timeout、工具缺失有结构化状态。
 - Serena adapter 可以复用 McpManager 连接能力，但行为保持 facade-only。
 
-### 3.2 McpToolBridge
+### 2.2 McpToolBridge
 
 - 把 MCP tool 转成内部 `ToolDefinition`。
 - 内部 canonical id 使用 `mcp:<serverId>:<toolName>`。
@@ -173,7 +133,7 @@ interface ConversationRuntimeState {
 - alias 能反查到 server/tool。
 - MCP 返回超大结果时被截断并标记。
 
-### 3.3 权限与风险
+### 2.3 权限与风险
 
 - MCP tool 默认外部来源，不按只读自动放行。
 - server 自报 `readOnlyHint/destructiveHint/idempotentHint/openWorldHint` 只作为风险信号，不直接决定权限。
@@ -187,7 +147,7 @@ interface ConversationRuntimeState {
 - 被 denylist 命中的 tool 不会暴露或不可执行。
 - MCP tool 的审批卡显示 serverId、toolName、args、risk signals。
 
-### 3.4 配置与 UI
+### 2.4 配置与 UI
 
 建议配置：
 
@@ -221,11 +181,11 @@ interface McpServerConfig {
 - 工具列表可见且不会泄漏 secret。
 - 配置 migration 和 public config 不暴露密文。
 
-## 4. M3 · Project And Code Intelligence UX
+## 3. M3 · Project And Code Intelligence UX
 
 目标：把已落地的 ProjectModel、Code Intelligence Facade 和 Serena v1 从“可用 vertical slice”推进到可配置、可诊断、可维护。
 
-### 4.1 ProjectModel 编辑器
+### 3.1 ProjectModel 编辑器
 
 - Project tab 支持完整手动编辑：module root、languages、sourceRoots、testRoots、excludedRoots、default module、来源说明。
 - module metadata 更新写入 trace/change history 摘要，便于审计和回滚。
@@ -238,7 +198,7 @@ interface McpServerConfig {
 - agent 工具和 UI 编辑不会互相覆盖未保存更改。
 - 多 module 路径归属错误返回明确提示。
 
-### 4.2 Backend Routing UI
+### 3.2 Backend Routing UI
 
 - Project tab 增加按 module/language 的 backend 选择和 capability 展示。
 - 不再只有全局 Serena 开关。
@@ -251,7 +211,7 @@ interface McpServerConfig {
 - 后端不可用时 facade 返回明确降级原因。
 - trace 能定位 PATH、spawn、startup timeout、tool list 缺失等问题。
 
-### 4.3 Code Intelligence Facade 增强
+### 3.3 Code Intelligence Facade 增强
 
 - 设计目录级 overview/diagnostics 的有界能力。
 - diagnostics 支持缓存、过期标记和 UI 展示。
@@ -265,7 +225,7 @@ interface McpServerConfig {
 - diagnostics UI 能显示来源、时间和 stale 状态。
 - IDE 写入能力不能绕过文件工具保护。
 
-### 4.4 Serena Managed
+### 3.4 Serena Managed
 
 - 实现 Serena 托管安装 resolver：优先 managed Serena，其次 custom command。
 - 提供安装、修复、版本、license notice、sha256 校验。
@@ -278,11 +238,11 @@ interface McpServerConfig {
 - managed/custom 两种模式状态清晰。
 - Serena prompt/onboarding 不进入系统 prompt 或 base instructions。
 
-## 5. M4 · Provider Routing And Observability
+## 4. M4 · Provider Routing And Observability
 
 目标：让 provider/model 从全局设置变成可审计的会话级和用途级选择，同时增强 trace/replay 对 prompt、工具和并发运行的解释能力。
 
-### 5.1 Session Provider Snapshot
+### 4.1 Session Provider Snapshot
 
 - 会话创建时记录 provider/model/profile/capability snapshot。
 - `SessionProviderTurnRunner` 按 session snapshot 选择主模型，不能继续直接使用全局 active provider。
@@ -295,7 +255,7 @@ interface McpServerConfig {
 - 两个对话可以使用不同 provider/model 并同时运行。
 - trace 和 usage 显示准确 providerId/model/profile。
 
-### 5.2 Role Binding
+### 4.2 Role Binding
 
 - 第一阶段支持 `main` 与 `approval` 两种 role。
 - 后续支持 `planner`、`summarizer`、`code_review`。
@@ -308,7 +268,7 @@ interface McpServerConfig {
 - approval provider 失败时不绕过人工审批。
 - fallback 触发可在 UI 和 trace 中解释。
 
-### 5.3 Trace / Replay 增强
+### 4.3 Trace / Replay 增强
 
 - trace 记录并发 run 的 conversationId、sessionId、runId、provider role、workspace mutation lease、prompt resource、prompt build。
 - 支持从任一 `llm.request` fork/replay 当前 provider request。
@@ -321,7 +281,7 @@ interface McpServerConfig {
 - replay 不执行工具副作用。
 - 敏感信息扫描覆盖 trace、workbench、terminal output 和 artifacts。
 
-## 6. M5 · Agent Benchmark Harness
+## 5. M5 · Agent Benchmark Harness
 
 目标：建立独立于 `npm test` / `npm run test:e2e` 的真实 coding-agent benchmark，用来评估 harness、并发、工具选择、审批、上下文管理、测试迭代、trace 和安全边界。
 
@@ -348,7 +308,7 @@ benchmarks/
 └─ results/
 ```
 
-### 6.1 数据集
+### 5.1 数据集
 
 - 第一优先级接入 SWE-bench Pro：agent 只看到 `problem_statement`、仓库 `base_commit`、公开约束和 workspace。
 - 不允许 agent 看到 gold patch、`test_patch`、`fail_to_pass` 或 `pass_to_pass`。
@@ -356,14 +316,14 @@ benchmarks/
 - SWE-Marathon 只用于少量高成本 full/nightly 任务。
 - 自建 `harness-stress` 覆盖外部 benchmark 不关心的产品语义：审批、并发 run、运行中插话、workspace mutation lease、trace/key 泄漏、终端长输出、中断与恢复。
 
-### 6.2 执行
+### 5.2 执行
 
 - 新增 `npm run benchmark:smoke`、`npm run benchmark`、`npm run benchmark:full`，全部 opt-in。
 - runner 准备临时 workspace、启动 Electron、通过 Playwright 真实前端发送任务、审批、插话、等待 run 完成。
 - 收集 patch、trace、截图、workbench、日志、usage、tool metrics。
 - API key 只通过主进程环境变量或 safe storage 注入，benchmark 后扫描泄漏。
 
-### 6.3 评分
+### 5.3 评分
 
 - 官方数据集用官方 evaluator。
 - 自建 case 必须有隐藏 evaluator 和 oracle patch 自检。
@@ -377,7 +337,7 @@ benchmarks/
 - `benchmark:full` 至少包含 1 个长程任务。
 - 结果可用于比较 Prompt Harness、Code Intelligence、Provider Routing、Concurrent Sessions 和 MCP 改动。
 
-## 7. Later
+## 6. Later
 
 - 外部 JS 插件加载器：签名、来源、隔离、权限声明、工具注册。
 - 内置隔离浏览器工具。
@@ -392,7 +352,7 @@ benchmarks/
 - 云端同步和团队共享项目。
 - 完整插件市场。
 
-## 8. 阶段门禁
+## 7. 阶段门禁
 
 每个实现阶段至少通过：
 

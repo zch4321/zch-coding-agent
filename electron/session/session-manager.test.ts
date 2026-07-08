@@ -1132,7 +1132,7 @@ describe('SessionManager P2 loop', () => {
     expect(layerKinds).toEqual(
       expect.arrayContaining([
         'base_instructions',
-        'runtime_policy_and_context',
+        'runtime_context',
         'assistant_preferences',
         'agents',
       ]),
@@ -1259,6 +1259,11 @@ describe('SessionManager P2 loop', () => {
     expect(afterCompactMessages[1]?.content).toContain(
       'Compact summary retained',
     )
+    expect(afterCompactMessages[1]?.content).toContain(
+      'Orchestration state at compaction:',
+    )
+    expect(afterCompactMessages[1]?.content).toContain('Goal: none')
+    expect(afterCompactMessages[1]?.content).toContain('Plan: none')
     expect(
       afterCompactMessages.some(
         (message) => message.content === 'continue after compact',
@@ -1528,6 +1533,28 @@ describe('SessionManager P2 loop', () => {
           envelope.event.kind === 'plan-warning',
       ),
     ).toBe(false)
+    await expect(
+      manager.updatePlanStatus({ sessionId, status: 'rejected' }),
+    ).resolves.toMatchObject({
+      accepted: true,
+      plan: { status: 'rejected' },
+    })
+    const trace = parseTrace(
+      await readFile(
+        path.join(directory, 'traces', `${sessionId}.jsonl`),
+        'utf8',
+      ),
+    )
+    expect(trace).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'plan.status',
+          previousStatus: 'awaiting_review',
+          status: 'rejected',
+          source: 'ui:plan-review',
+        }),
+      ]),
+    )
     await manager.closeSession(sessionId)
   })
 

@@ -103,6 +103,9 @@ function formatTimestamp(value: string): string {
           <p v-if="item.evidence" class="plan-evidence">
             {{ item.evidence }}
           </p>
+          <p v-if="item.cancelReason" class="plan-cancel-reason">
+            {{ t('artifact.planCancelReason') }}: {{ item.cancelReason }}
+          </p>
         </li>
       </ol>
       <p v-else class="artifact-message">{{ t('artifact.planNoItems') }}</p>

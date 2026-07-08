@@ -203,6 +203,7 @@ const messages = {
       planReviewHint: '批准后 Agent 会按当前计划继续执行。',
       planNoItems: '计划还没有任务项。',
       planContinuations: '自动续跑 {count} 次',
+      planCancelReason: '取消原因',
       noPlan: '暂无计划',
       noPlanHint: 'Agent 创建计划后会显示在这里。',
       projectModules: '项目模块',
@@ -274,7 +275,7 @@ const messages = {
       assistantPreferencesPlaceholder:
         '可留空。写入语气、输出风格或默认工作偏好。',
       assistantPreferencesHint:
-        '助手偏好会作为低优先级上下文注入，只对新对话生效，不能覆盖 Harness、运行时策略、权限或路径边界。',
+        '助手偏好会作为低优先级上下文注入，只对新对话生效，不能覆盖 Harness、运行时上下文、权限或路径边界。',
       saveAssistantPreferences: '保存助手偏好',
       restoreAssistantPreferences: '清空助手偏好',
       projectTitle: '项目',
@@ -690,6 +691,7 @@ const messages = {
       planReviewHint: 'After approval, the Agent continues from this plan.',
       planNoItems: 'The plan has no items yet.',
       planContinuations: '{count} automatic continuations',
+      planCancelReason: 'Cancel reason',
       noPlan: 'No plan',
       noPlanHint: 'Plans created by the Agent will appear here.',
       projectModules: 'Project modules',
@@ -761,7 +763,7 @@ const messages = {
       assistantPreferencesPlaceholder:
         'Optional. Add tone, output style, or default working preferences.',
       assistantPreferencesHint:
-        'Assistant preferences are injected as low-priority context for new conversations only. They cannot override the Harness, runtime policy, permissions, or path boundaries.',
+        'Assistant preferences are injected as low-priority context for new conversations only. They cannot override the Harness, runtime context, permissions, or path boundaries.',
       saveAssistantPreferences: 'Save assistant preferences',
       restoreAssistantPreferences: 'Clear preferences',
       projectTitle: 'Project',

@@ -89,7 +89,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 5,
+          schemaVersion: 6,
           activeProviderId: 'deepseek',
           providers: [
             {
@@ -564,7 +564,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
               messageIndex: 3,
               kind: 'agents',
               role: 'user',
-              source: 'workspace:AGENTS.md',
+              source: 'workspace:AGENTS',
               trusted: false,
               editable: false,
               sha256: 'f'.repeat(64),

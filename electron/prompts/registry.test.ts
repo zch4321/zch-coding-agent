@@ -56,6 +56,7 @@ describe('PromptRegistry', () => {
       DEFAULT_HARNESS_PROMPT_REFS.runtimeContext['en-US'].id,
     )
     expect(runtime.content.trimStart()).toMatch(/^<environment_context/u)
+    expect(runtime.content).toContain('timezone: ${timezone}')
     expect(runtime.content).toContain('<module_context')
     expect(runtime.content).not.toContain('<runtime_policy>')
   })
@@ -89,6 +90,9 @@ describe('PromptRegistry', () => {
     )
     expect(plan.content).toContain('plan_set')
     expect(plan.content).toContain('${objective}')
+    expect(registry.orchestrationPrompt('compact', 'en-US').content).toContain(
+      'Current Plan state',
+    )
   })
 
   it('resolves every default prompt ref to a non-empty versioned resource', async () => {

@@ -25,6 +25,9 @@ export type TraceInfo = Static<typeof TraceInfoSchema>
 
 export const PromptLayerKindSchema = Type.Union([
   Type.Literal('base_instructions'),
+  Type.Literal('runtime_context'),
+  // Legacy trace compatibility for prompt builds produced before runtime policy
+  // was folded into base instructions.
   Type.Literal('runtime_policy_and_context'),
   Type.Literal('assistant_preferences'),
   Type.Literal('agents'),

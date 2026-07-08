@@ -29,7 +29,7 @@ import {
 import type { ChangeHistoryStore } from './change-history'
 import type { ToolExecutor, ToolRegistry } from '../tools/tool-registry'
 import type { SkillsManager } from '../skills/manager'
-import { id, ipcFault } from './session-common'
+import { id, ipcFault, toJsonValue } from './session-common'
 import type {
   AgentEventDraft,
   SessionManagerOptions,
@@ -366,10 +366,13 @@ export class SessionManager {
    * This is intentionally narrow UI control logic; model-created plan contents
    * and continuation behavior live in the orchestration tools/planner.
    */
-  updatePlanStatus(input: { sessionId: SessionId; status: PlanStatus }): {
+  async updatePlanStatus(input: {
+    sessionId: SessionId
+    status: PlanStatus
+  }): Promise<{
     accepted: boolean
     plan?: PlanState
-  } {
+  }> {
     const session = this.#sessions.get(input.sessionId)
 
     if (!session || session.closed || session.activeRun || !session.plan) {
@@ -392,6 +395,15 @@ export class SessionManager {
       session.plan.continuationCount = 0
       delete session.plan.warning
     }
+
+    await session.logger.write({
+      type: 'plan.status',
+      sessionId: input.sessionId,
+      previousStatus,
+      status: input.status,
+      source: 'ui:plan-review',
+      plan: toJsonValue(session.plan),
+    })
 
     return { accepted: true, plan: structuredClone(session.plan) }
   }
