@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { AgentEvent } from '../../shared/agent-events'
+import type { AgentEvent, RunStatus } from '../../shared/agent-events'
 import { IPC_VERSION } from '../../shared/channels'
 import type {
   AssistantLanguage,
@@ -14,7 +14,14 @@ import type {
 } from '../../shared/context'
 import type { RunId, SessionId } from '../../shared/ids'
 import type { PlanStatus } from '../../shared/orchestration'
-import type { PendingApproval } from './agent-types'
+import type {
+  ChatMessage,
+  ConversationRecord,
+  GoalState,
+  PendingApproval,
+  PlanState,
+  ReviewedApproval,
+} from './agent-types'
 import { useAgentChangesStore } from './agent-changes'
 import { useAgentSettingsStore } from './agent-settings'
 import { useAgentShellStore } from './agent-shell'
@@ -24,8 +31,9 @@ import {
   carryoverFromMessages,
   handleRuntimeAgentEvent,
   type PendingCarryoverInterjection,
+  type RuntimeEventTimeline,
 } from './runtime-events'
-import { requestId } from './workbench-persistence'
+import { cloneMessages, requestId } from './workbench-persistence'
 
 let persistTimer: number | undefined
 
@@ -84,9 +92,126 @@ function attachmentRefs(
   }))
 }
 
+interface ConversationRuntimeState {
+  conversationId: string
+  sessionId: SessionId | undefined
+  activeRunId: RunId | undefined
+  runStatus: RunStatus | 'idle'
+  pendingApproval: PendingApproval | undefined
+  pendingCarryover: PendingCarryoverInterjection[]
+  error: string
+}
+
+interface TimelineAdapter extends RuntimeEventTimeline {
+  timelineCounter: number
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function createConversationRuntime(
+  conversationId: string,
+): ConversationRuntimeState {
+  return {
+    conversationId,
+    sessionId: undefined,
+    activeRunId: undefined,
+    runStatus: 'idle',
+    pendingApproval: undefined,
+    pendingCarryover: [],
+    error: '',
+  }
+}
+
+function runtimeBusy(runtime: ConversationRuntimeState | undefined): boolean {
+  return Boolean(runtime?.activeRunId || runtime?.pendingApproval)
+}
+
+function conversationTimelineCounter(conversation: ConversationRecord): number {
+  return Math.max(
+    conversation.messages.reduce(
+      (maximum, message) => Math.max(maximum, message.order ?? 0),
+      0,
+    ),
+    (conversation.tools ?? []).reduce(
+      (maximum, tool) => Math.max(maximum, tool.order ?? 0),
+      0,
+    ),
+    (conversation.usage ?? []).reduce(
+      (maximum, item) => Math.max(maximum, item.order ?? 0),
+      0,
+    ),
+  )
+}
+
+function timelineAdapterFromConversation(
+  conversation: ConversationRecord,
+): TimelineAdapter {
+  const adapter: TimelineAdapter = {
+    messages: cloneMessages(conversation.messages),
+    tools: (conversation.tools ?? []).map((tool) => ({ ...tool })),
+    usage: (conversation.usage ?? []).map((item) => ({ ...item })),
+    goal: conversation.goal
+      ? cloneJson<GoalState>(conversation.goal)
+      : undefined,
+    plan: conversation.plan
+      ? cloneJson<PlanState>(conversation.plan)
+      : undefined,
+    latestReviewedApproval: conversation.latestReviewedApproval
+      ? ({ ...conversation.latestReviewedApproval } satisfies ReviewedApproval)
+      : undefined,
+    timelineCounter: conversationTimelineCounter(conversation),
+    assistantMessage(runId: RunId): ChatMessage {
+      const latestToolOrder = adapter.tools.reduce(
+        (maximum, tool) =>
+          tool.runId === runId ? Math.max(maximum, tool.order ?? 0) : maximum,
+        0,
+      )
+      let message = adapter.messages
+        .filter((item) => item.role === 'assistant' && item.runId === runId)
+        .sort((left, right) => (right.order ?? 0) - (left.order ?? 0))[0]
+
+      if (!message || (message.order ?? 0) < latestToolOrder) {
+        message = {
+          id: requestId(),
+          role: 'assistant',
+          runId,
+          text: '',
+          reasoning: '',
+          order: adapter.nextTimelineOrder(),
+        }
+        adapter.messages.push(message)
+      }
+      return message
+    },
+    nextTimelineOrder(): number {
+      adapter.timelineCounter += 1
+      return adapter.timelineCounter
+    },
+  }
+  return adapter
+}
+
+function writeTimelineAdapterToConversation(
+  conversation: ConversationRecord,
+  adapter: RuntimeEventTimeline,
+): void {
+  conversation.messages = cloneMessages(adapter.messages)
+  conversation.tools = adapter.tools.map((tool) => ({ ...tool }))
+  conversation.usage = adapter.usage.map((item) => ({ ...item }))
+  conversation.goal = adapter.goal ? cloneJson(adapter.goal) : undefined
+  conversation.plan = adapter.plan ? cloneJson(adapter.plan) : undefined
+  conversation.latestReviewedApproval = adapter.latestReviewedApproval
+    ? { ...adapter.latestReviewedApproval }
+    : undefined
+}
+
 export const useAgentRuntimeStore = defineStore('agent-runtime', {
   state: () => ({
     error: '',
+    conversationRuntimes: {} as Record<string, ConversationRuntimeState>,
+    conversationIdBySessionId: {} as Record<string, string>,
     sessionIdsByConversation: {} as Record<string, SessionId>,
     sessionId: undefined as SessionId | undefined,
     activeRunId: undefined as RunId | undefined,
@@ -138,6 +263,72 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
   },
   actions: {
+    ensureConversationRuntime(
+      conversationId: string,
+    ): ConversationRuntimeState {
+      const existing = this.conversationRuntimes[conversationId]
+      if (existing) return existing
+
+      const runtime = createConversationRuntime(conversationId)
+      const sessionId = this.sessionIdsByConversation[conversationId]
+      if (sessionId) {
+        runtime.sessionId = sessionId
+        this.conversationIdBySessionId[sessionId] = conversationId
+      }
+      this.conversationRuntimes[conversationId] = runtime
+      return runtime
+    },
+    currentConversationRuntime(): ConversationRuntimeState | undefined {
+      const workbench = useAgentWorkbenchStore()
+      return workbench.activeConversationId
+        ? this.ensureConversationRuntime(workbench.activeConversationId)
+        : undefined
+    },
+    mirrorConversationRuntime(conversationId?: string) {
+      const runtime = conversationId
+        ? this.ensureConversationRuntime(conversationId)
+        : undefined
+      this.sessionId = runtime?.sessionId
+      this.activeRunId = runtime?.activeRunId
+      this.runStatus = runtime?.runStatus ?? 'idle'
+      this.pendingApproval = runtime?.pendingApproval
+      this.pendingCarryover = runtime?.pendingCarryover ?? []
+      this.error = runtime?.error ?? this.error
+    },
+    currentConversationIsBusy(): boolean {
+      const workbench = useAgentWorkbenchStore()
+      const conversationId = workbench.activeConversationId
+      if (!conversationId) return false
+      return this.conversationIsBusy(conversationId)
+    },
+    conversationIsBusy(conversationId: string): boolean {
+      const workbench = useAgentWorkbenchStore()
+      const runtime = this.conversationRuntimes[conversationId]
+      return (
+        runtimeBusy(runtime) ||
+        (conversationId === workbench.activeConversationId &&
+          Boolean(this.activeRunId || this.pendingApproval))
+      )
+    },
+    conversationIdForSession(sessionId: SessionId): string | undefined {
+      const indexed = this.conversationIdBySessionId[sessionId]
+      if (indexed) return indexed
+
+      for (const [conversationId, candidate] of Object.entries(
+        this.sessionIdsByConversation,
+      )) {
+        if (candidate === sessionId) {
+          this.conversationIdBySessionId[sessionId] = conversationId
+          return conversationId
+        }
+      }
+
+      const workbench = useAgentWorkbenchStore()
+      if (sessionId === this.sessionId && workbench.activeConversationId) {
+        return workbench.activeConversationId
+      }
+      return undefined
+    },
     async initialize() {
       const shell = useAgentShellStore()
       const settings = useAgentSettingsStore()
@@ -232,10 +423,15 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         settings.activeProviderModel,
         this.mode,
       )
-      this.sessionId = undefined
+      const runtime = this.ensureConversationRuntime(conversation.id)
+      runtime.sessionId = undefined
+      runtime.activeRunId = undefined
+      runtime.runStatus = 'idle'
+      runtime.pendingApproval = undefined
+      runtime.pendingCarryover = []
+      runtime.error = ''
+      this.mirrorConversationRuntime(conversation.id)
       timeline.reset()
-      this.pendingApproval = undefined
-      this.pendingCarryover = []
       changes.reset()
       workbench.persistWorkbench()
       return conversation
@@ -270,8 +466,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       if (!conversation || conversationId === workbench.activeConversationId) {
         return Boolean(conversation)
       }
-      if (this.activeRunId || this.pendingApproval) return false
-
       this.saveActiveConversation()
       if (!(await workbench.activateWorkspace(conversation.projectPath))) {
         return false
@@ -301,15 +495,15 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         workbench.conversations.find(
           (item) => item.id === (sourceId ?? workbench.activeConversationId),
         ) ?? workbench.activeConversation
-      if (!source || this.activeRunId || this.pendingApproval) return false
+      if (!source || this.conversationIsBusy(source.id)) return false
 
       const forked = workbench.forkConversation(source.id, forkPointMessageId)
       if (!forked) return false
 
-      this.sessionId = undefined
+      this.ensureConversationRuntime(forked.id)
+      this.mirrorConversationRuntime(forked.id)
       timeline.reset()
       changes.reset()
-      this.pendingApproval = undefined
       this.restoreActiveConversation()
       return true
     },
@@ -326,7 +520,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const timeline = useAgentTimelineStore()
       const changes = useAgentChangesStore()
       const conversation = workbench.activeConversation
-      if (!conversation || this.activeRunId || this.pendingApproval)
+      if (!conversation || this.conversationIsBusy(conversation.id))
         return false
 
       const updated = workbench.revertConversationAfterMessage(
@@ -339,7 +533,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       await this.closeRuntimeSession(conversation.id)
       timeline.reset()
       changes.reset()
-      this.pendingApproval = undefined
       this.restoreActiveConversation()
       return true
     },
@@ -348,7 +541,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const conversation = workbench.conversations.find(
         (item) => item.id === conversationId,
       )
-      if (!conversation || this.activeRunId || this.pendingApproval) {
+      if (!conversation || this.conversationIsBusy(conversationId)) {
         return false
       }
 
@@ -380,8 +573,12 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const changes = useAgentChangesStore()
       if (
         !workbench.workspacePath ||
-        this.activeRunId ||
-        this.pendingApproval
+        workbench.conversations
+          .filter(
+            (conversation) =>
+              conversation.projectPath === workbench.workspacePath,
+          )
+          .some((conversation) => this.conversationIsBusy(conversation.id))
       ) {
         return false
       }
@@ -418,16 +615,21 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const changes = useAgentChangesStore()
       const conversation = workbench.activeConversation
       timeline.hydrate(conversation)
-      this.sessionId = conversation
-        ? this.sessionIdsByConversation[conversation.id]
-        : undefined
 
       if (conversation) {
         workbench.workspacePath = conversation.projectPath
         this.mode = conversation.mode
+        const runtime = this.ensureConversationRuntime(conversation.id)
+        runtime.sessionId =
+          runtime.sessionId ?? this.sessionIdsByConversation[conversation.id]
+        if (runtime.sessionId) {
+          this.conversationIdBySessionId[runtime.sessionId] = conversation.id
+        }
+        if (!runtime.activeRunId && !runtime.pendingApproval) {
+          runtime.pendingCarryover = carryoverFromMessages(timeline.messages)
+        }
       }
-      this.pendingApproval = undefined
-      this.pendingCarryover = carryoverFromMessages(timeline.messages)
+      this.mirrorConversationRuntime(conversation?.id)
       changes.reset()
       useAgentShellStore().error = ''
       useAgentSettingsStore().error = ''
@@ -499,7 +701,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     async setMode(mode: PermissionMode) {
       if (mode === this.mode) return true
-      if (this.activeRunId || this.pendingApproval) return false
+      if (this.currentConversationIsBusy()) return false
       const bridge = window.agentApi
       if (bridge && this.sessionId) {
         const result = await bridge.updateSessionMode({
@@ -515,18 +717,15 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         }
       }
       this.mode = mode
+      const runtime = this.currentConversationRuntime()
+      if (runtime) this.mirrorConversationRuntime(runtime.conversationId)
       this.schedulePersist(false)
       return true
     },
     async updatePlanStatus(status: PlanStatus) {
       const timeline = useAgentTimelineStore()
       const bridge = window.agentApi
-      if (
-        !bridge ||
-        !this.sessionId ||
-        this.activeRunId ||
-        this.pendingApproval
-      )
+      if (!bridge || !this.sessionId || this.currentConversationIsBusy())
         return false
 
       const result = await bridge.updatePlanStatus({
@@ -556,8 +755,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         !bridge ||
         !this.sessionId ||
         !timeline.plan ||
-        this.activeRunId ||
-        this.pendingApproval
+        this.currentConversationIsBusy()
       ) {
         return false
       }
@@ -583,7 +781,14 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           reasoning: '',
           order: timeline.nextTimelineOrder(),
         })
-        this.activeRunId = result.value.runId
+        const runtime = this.currentConversationRuntime()
+        if (runtime) {
+          runtime.activeRunId = result.value.runId
+          runtime.runStatus = 'calling_llm'
+          this.mirrorConversationRuntime(runtime.conversationId)
+        } else {
+          this.activeRunId = result.value.runId
+        }
         this.schedulePersist()
         return true
       }
@@ -609,10 +814,18 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         provider: settings.activeProviderId,
       })
       if (result.ok) {
-        this.sessionId = result.value.sessionId
         if (workbench.activeConversationId) {
+          const runtime = this.ensureConversationRuntime(
+            workbench.activeConversationId,
+          )
+          runtime.sessionId = result.value.sessionId
           this.sessionIdsByConversation[workbench.activeConversationId] =
             result.value.sessionId
+          this.conversationIdBySessionId[result.value.sessionId] =
+            workbench.activeConversationId
+          this.mirrorConversationRuntime(workbench.activeConversationId)
+        } else {
+          this.sessionId = result.value.sessionId
         }
         return true
       }
@@ -630,13 +843,21 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
 
       if (targetConversationId) {
         delete this.sessionIdsByConversation[targetConversationId]
+        const runtime = this.conversationRuntimes[targetConversationId]
+        if (runtime?.sessionId) {
+          delete this.conversationIdBySessionId[runtime.sessionId]
+        }
+        if (runtime) {
+          runtime.sessionId = undefined
+          runtime.activeRunId = undefined
+          runtime.pendingApproval = undefined
+          runtime.pendingCarryover = []
+          runtime.runStatus = 'idle'
+          runtime.error = ''
+        }
       }
       if (targetConversationId === workbench.activeConversationId) {
-        this.sessionId = undefined
-        this.activeRunId = undefined
-        this.pendingApproval = undefined
-        this.pendingCarryover = []
-        this.runStatus = 'idle'
+        this.mirrorConversationRuntime(targetConversationId)
         timeline.tools = []
       }
 
@@ -687,8 +908,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         settings.credentialConfigured &&
         workbench.workspacePath &&
         workbench.activeConversationId &&
-        !this.activeRunId &&
-        !this.pendingApproval,
+        !this.currentConversationIsBusy(),
       )
       if (!bridge || !text || !hasUserInput || !canStartRun) return false
       if (!this.sessionId && !(await this.createSession())) return false
@@ -734,7 +954,14 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         if (conversation?.transient) {
           delete conversation.transient
         }
-        this.activeRunId = result.value.runId
+        const runtime = this.currentConversationRuntime()
+        if (runtime) {
+          runtime.activeRunId = result.value.runId
+          runtime.runStatus = 'calling_llm'
+          this.mirrorConversationRuntime(runtime.conversationId)
+        } else {
+          this.activeRunId = result.value.runId
+        }
         this.schedulePersist()
         return true
       }
@@ -825,16 +1052,18 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     async decideApproval(decision: 'allow' | 'deny', remember = false) {
       const timeline = useAgentTimelineStore()
       const bridge = window.agentApi
+      const runtime = this.currentConversationRuntime()
+      const pendingApproval = runtime?.pendingApproval ?? this.pendingApproval
       if (
         !bridge ||
         !this.sessionId ||
-        !this.pendingApproval ||
-        this.pendingApproval.status === 'submitting'
+        !pendingApproval ||
+        pendingApproval.status === 'submitting'
       ) {
         return
       }
 
-      const pending = this.pendingApproval
+      const pending = pendingApproval
       pending.status = 'submitting'
       const rememberInput =
         decision === 'allow' && remember && pending.rememberable
@@ -866,7 +1095,12 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
             decision: decision === 'allow' ? 'allowed' : 'denied',
           }
         }
-        this.pendingApproval = undefined
+        if (runtime) {
+          runtime.pendingApproval = undefined
+          this.mirrorConversationRuntime(runtime.conversationId)
+        } else {
+          this.pendingApproval = undefined
+        }
       } else if (result.ok) {
         if (pending.diff) {
           timeline.latestReviewedApproval = {
@@ -879,7 +1113,12 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
             decision: 'stale',
           }
         }
-        this.pendingApproval = undefined
+        if (runtime) {
+          runtime.pendingApproval = undefined
+          this.mirrorConversationRuntime(runtime.conversationId)
+        } else {
+          this.pendingApproval = undefined
+        }
         this.error =
           'This approval is no longer active. Review the latest run state.'
       } else {
@@ -899,6 +1138,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     handleAgentEvent(event: AgentEvent) {
       const timeline = useAgentTimelineStore()
       const changes = useAgentChangesStore()
+      const workbench = useAgentWorkbenchStore()
       const previousSeq = this.lastAgentSeqBySession[event.sessionId] ?? 0
       if (event.seq <= previousSeq) return
       if (previousSeq > 0 && event.seq > previousSeq + 1) {
@@ -911,15 +1151,29 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       }
       this.lastAgentSeqBySession[event.sessionId] = event.seq
 
+      const conversationId = this.conversationIdForSession(event.sessionId)
       if (event.type === 'session.closed') {
-        for (const [conversationId, sessionId] of Object.entries(
-          this.sessionIdsByConversation,
-        )) {
-          if (sessionId === event.sessionId) {
-            delete this.sessionIdsByConversation[conversationId]
+        const closedConversationId =
+          conversationId ??
+          Object.entries(this.sessionIdsByConversation).find(
+            ([, sessionId]) => sessionId === event.sessionId,
+          )?.[0]
+        if (closedConversationId) {
+          delete this.sessionIdsByConversation[closedConversationId]
+          const runtime = this.conversationRuntimes[closedConversationId]
+          if (runtime) {
+            runtime.sessionId = undefined
+            runtime.activeRunId = undefined
+            runtime.pendingApproval = undefined
+            runtime.pendingCarryover = []
+            runtime.runStatus = 'idle'
+            runtime.error = ''
           }
         }
-        if (event.sessionId === this.sessionId) {
+        delete this.conversationIdBySessionId[event.sessionId]
+        if (closedConversationId === workbench.activeConversationId) {
+          this.mirrorConversationRuntime(closedConversationId)
+        } else if (event.sessionId === this.sessionId) {
           this.sessionId = undefined
           this.activeRunId = undefined
           this.pendingApproval = undefined
@@ -929,15 +1183,75 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         return
       }
 
-      if (event.sessionId !== this.sessionId) return
+      if (!conversationId) {
+        if (event.sessionId !== this.sessionId) return
+        handleRuntimeAgentEvent(event, {
+          runtime: this,
+          timeline,
+          loadConversationChanges: () => changes.loadConversationChanges(),
+          schedulePersist: (touchUpdatedAt) =>
+            this.schedulePersist(touchUpdatedAt),
+          flushCarryoverInterjections: () => this.flushCarryoverInterjections(),
+        })
+        return
+      }
+
+      const runtime = this.ensureConversationRuntime(conversationId)
+      if (
+        conversationId === workbench.activeConversationId &&
+        event.sessionId === this.sessionId
+      ) {
+        runtime.activeRunId = runtime.activeRunId ?? this.activeRunId
+        runtime.pendingApproval =
+          runtime.pendingApproval ?? this.pendingApproval
+        runtime.pendingCarryover =
+          runtime.pendingCarryover.length > 0
+            ? runtime.pendingCarryover
+            : this.pendingCarryover
+        if (runtime.runStatus === 'idle' && this.runStatus !== 'idle') {
+          runtime.runStatus = this.runStatus as RunStatus | 'idle'
+        }
+      }
+      runtime.sessionId = event.sessionId
+      this.sessionIdsByConversation[conversationId] = event.sessionId
+      this.conversationIdBySessionId[event.sessionId] = conversationId
+
+      if (conversationId !== workbench.activeConversationId) {
+        const conversation = workbench.conversations.find(
+          (item) => item.id === conversationId,
+        )
+        if (!conversation) return
+
+        const backgroundTimeline = timelineAdapterFromConversation(conversation)
+        const persistBackgroundConversation = (touchUpdatedAt = true) => {
+          writeTimelineAdapterToConversation(conversation, backgroundTimeline)
+          if (touchUpdatedAt) conversation.updatedAt = new Date().toISOString()
+          workbench.persistWorkbench()
+        }
+
+        handleRuntimeAgentEvent(event, {
+          runtime,
+          timeline: backgroundTimeline,
+          loadConversationChanges: () => undefined,
+          schedulePersist: persistBackgroundConversation,
+          flushCarryoverInterjections: () => undefined,
+        })
+        persistBackgroundConversation()
+        return
+      }
+
       handleRuntimeAgentEvent(event, {
-        runtime: this,
+        runtime,
         timeline,
-        changes,
+        loadConversationChanges: () => changes.loadConversationChanges(),
         schedulePersist: (touchUpdatedAt) =>
           this.schedulePersist(touchUpdatedAt),
-        flushCarryoverInterjections: () => this.flushCarryoverInterjections(),
+        flushCarryoverInterjections: () => {
+          this.mirrorConversationRuntime(conversationId)
+          return this.flushCarryoverInterjections()
+        },
       })
+      this.mirrorConversationRuntime(conversationId)
     },
   },
 })

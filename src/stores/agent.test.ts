@@ -600,6 +600,69 @@ describe('agent store regressions', () => {
     expect(store.activeConversationId).toBe(first.id)
   })
 
+  it('allows switching away from a conversation with an active background run', async () => {
+    const store = useAgentStore()
+    const runtime = useAgentRuntimeStore()
+    store.workspacePath = 'F:/workspace/example'
+    const first = store.createConversation()
+    const second = store.createConversation()
+    expect(first).toBeDefined()
+    expect(second).toBeDefined()
+    if (!first || !second) return
+
+    store.activeConversationId = first.id
+    store.restoreActiveConversation()
+    const firstRuntime = runtime.ensureConversationRuntime(first.id)
+    firstRuntime.sessionId = sessionId
+    firstRuntime.activeRunId = runId
+    firstRuntime.runStatus = 'calling_llm'
+    runtime.sessionIdsByConversation[first.id] = sessionId
+    runtime.conversationIdBySessionId[sessionId] = first.id
+    runtime.mirrorConversationRuntime(first.id)
+
+    await expect(store.selectConversation(second.id)).resolves.toBe(true)
+
+    expect(store.activeConversationId).toBe(second.id)
+    expect(store.activeRunId).toBeUndefined()
+    expect(runtime.conversationRuntimes[first.id]?.activeRunId).toBe(runId)
+  })
+
+  it('routes background session events to their conversation record', () => {
+    const store = useAgentStore()
+    const runtime = useAgentRuntimeStore()
+    store.workspacePath = 'F:/workspace/example'
+    const background = store.createConversation()
+    const foreground = store.createConversation()
+    expect(background).toBeDefined()
+    expect(foreground).toBeDefined()
+    if (!background || !foreground) return
+
+    const backgroundSessionId = 'session:background' as SessionId
+    const backgroundRunId = 'run:background' as RunId
+    const backgroundRuntime = runtime.ensureConversationRuntime(background.id)
+    backgroundRuntime.sessionId = backgroundSessionId
+    runtime.sessionIdsByConversation[background.id] = backgroundSessionId
+    runtime.conversationIdBySessionId[backgroundSessionId] = background.id
+
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 1,
+      ts: stamp,
+      type: 'assistant.text.delta',
+      sessionId: backgroundSessionId,
+      runId: backgroundRunId,
+      delta: 'background text',
+    })
+
+    expect(store.activeConversationId).toBe(foreground.id)
+    expect(store.messages).toEqual([])
+    expect(background.messages[0]).toMatchObject({
+      role: 'assistant',
+      runId: backgroundRunId,
+      text: 'background text',
+    })
+  })
+
   it('publishes a new renderer workspace only after main-process config switches', async () => {
     const firstWorkspace = 'F:/workspace/first'
     const secondWorkspace = 'F:/workspace/second'

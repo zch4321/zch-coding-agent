@@ -1,8 +1,14 @@
 import type { AgentEvent, RunStatus } from '../../../shared/agent-events'
 import type { RunId } from '../../../shared/ids'
-import type { useAgentChangesStore } from '../agent-changes'
-import type { PendingApproval } from '../agent-types'
-import type { useAgentTimelineStore } from '../agent-timeline'
+import type {
+  ChatMessage,
+  GoalState,
+  PendingApproval,
+  PlanState,
+  ReviewedApproval,
+  ToolActivity,
+  UsageActivity,
+} from '../agent-types'
 
 export interface PendingCarryoverInterjection {
   interjectionId: string
@@ -19,10 +25,21 @@ export interface RuntimeEventState {
   error: string
 }
 
+export interface RuntimeEventTimeline {
+  messages: ChatMessage[]
+  tools: ToolActivity[]
+  usage: UsageActivity[]
+  goal: GoalState | undefined
+  plan: PlanState | undefined
+  latestReviewedApproval: ReviewedApproval | undefined
+  assistantMessage(runId: RunId): ChatMessage
+  nextTimelineOrder(): number
+}
+
 export interface RuntimeEventContext {
   runtime: RuntimeEventState
-  timeline: ReturnType<typeof useAgentTimelineStore>
-  changes: ReturnType<typeof useAgentChangesStore>
+  timeline: RuntimeEventTimeline
+  loadConversationChanges(): void | Promise<void>
   schedulePersist(touchUpdatedAt?: boolean): void
   flushCarryoverInterjections(): void | Promise<void>
 }

@@ -7,7 +7,10 @@ import { handleToolEvent } from './tool-events'
 import type { RuntimeDomainEvent, RuntimeEventContext } from './types'
 
 export { carryoverFromMessages, enqueueCarryover } from './interjection-events'
-export type { PendingCarryoverInterjection } from './types'
+export type {
+  PendingCarryoverInterjection,
+  RuntimeEventTimeline,
+} from './types'
 
 export function handleRuntimeAgentEvent(
   event: RuntimeDomainEvent,

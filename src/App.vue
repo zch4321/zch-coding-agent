@@ -142,12 +142,6 @@ async function confirmYoloMode() {
 }
 
 async function createConversation(workspacePath?: string) {
-  if (agent.activeRunId || agent.pendingApproval) {
-    switchConversationId.value = 'new'
-    switchNewConversationWorkspace.value = workspacePath
-    return
-  }
-
   await agent.newConversation(workspacePath)
 }
 

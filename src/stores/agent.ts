@@ -106,6 +106,8 @@ const timelineProperties = new Set<PropertyKey>([
   'conversationTotalTokens',
 ])
 const runtimeProperties = new Set<PropertyKey>([
+  'conversationRuntimes',
+  'conversationIdBySessionId',
   'sessionIdsByConversation',
   'sessionId',
   'activeRunId',
