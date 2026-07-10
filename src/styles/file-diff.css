@@ -1,0 +1,256 @@
+.file-viewer-header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--background);
+}
+
+.file-viewer-header > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.file-viewer-header strong,
+.file-viewer-header span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-viewer-header strong {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11px;
+}
+
+.file-viewer-header span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.truncated-badge {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: var(--warning) !important;
+  background: #fff8c5;
+  font-weight: 700;
+}
+
+.code-preview {
+  min-width: max-content;
+  padding: 10px 0 24px;
+  background: var(--background);
+}
+
+.file-code-highlight {
+  min-width: max-content;
+  counter-reset: file-line;
+}
+
+.file-code-highlight .shiki {
+  margin: 0;
+  padding: 10px 14px 24px 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--background) !important;
+}
+
+.file-code-highlight .line {
+  display: block;
+  min-height: 21px;
+  line-height: 21px;
+  counter-increment: file-line;
+}
+
+.file-code-highlight .line::before {
+  display: inline-block;
+  width: 42px;
+  margin-right: 12px;
+  padding-right: 9px;
+  border-right: 1px solid var(--border-subtle);
+  color: #8c959f;
+  content: counter(file-line);
+  text-align: right;
+  user-select: none;
+}
+
+.code-line {
+  display: grid;
+  min-height: 21px;
+  grid-template-columns: 42px 1fr;
+  gap: 12px;
+  padding: 0 14px 0 0;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11px;
+  line-height: 21px;
+}
+
+.code-line > span {
+  padding-right: 9px;
+  border-right: 1px solid var(--border-subtle);
+  color: #8c959f;
+  text-align: right;
+  user-select: none;
+}
+
+.code-line code {
+  white-space: pre;
+}
+
+.diff-view {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.diff-summary {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.diff-summary span,
+.diff-summary strong {
+  display: block;
+}
+
+.diff-summary span {
+  color: var(--warning);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.diff-summary strong {
+  margin-top: 3px;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+}
+
+.diff-summary p {
+  margin: 8px 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.diff-summary code {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.diff-content {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  background: var(--background);
+  white-space: pre;
+}
+
+.diff-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.diff-actions small {
+  align-self: center;
+  margin-right: auto;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.change-history-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface);
+}
+
+.change-history-header strong,
+.change-history-header span {
+  display: block;
+}
+
+.change-history-header span {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.change-history-list {
+  display: flex;
+  min-height: 44px;
+  max-height: 132px;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  overflow: auto;
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.change-filters {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.change-filter-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.change-history-list button {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  text-align: left;
+}
+
+.change-history-list button:hover,
+.change-history-list button.active {
+  color: var(--text);
+  background: #eaeef2;
+}
+
+.change-history-list button span {
+  overflow: hidden;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-history-list button small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.change-history-list button em {
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  color: var(--success);
+  font-size: 9px;
+  font-style: normal;
+}

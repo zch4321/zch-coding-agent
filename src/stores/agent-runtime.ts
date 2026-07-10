@@ -238,6 +238,16 @@ function timelineAdapterFromConversation(
   return adapter
 }
 
+/**
+ * This store is intentionally a large renderer-side coordination boundary.
+ * Its actions jointly own cross-store conversation transitions, IPC calls,
+ * runtime session state, and persistence. Splitting those actions into files
+ * would require a broad dependency context or introduce Pinia cycles.
+ *
+ * Keep narrow pure helpers and event handlers outside this store (for example
+ * `runtime-events/`). Revisit a larger split only with a redesigned ownership
+ * model, not merely to reduce this file's line count.
+ */
 export const useAgentRuntimeStore = defineStore('agent-runtime', {
   state: () => ({
     globalError: '',

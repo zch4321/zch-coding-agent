@@ -1,0 +1,77 @@
+.message-input-area .n-input {
+  --n-border: 0 !important;
+  --n-border-hover: 0 !important;
+  --n-border-focus: 0 !important;
+  --n-box-shadow-focus: none !important;
+  --n-color-disabled: transparent !important;
+}
+
+.message-input-toolbar {
+  min-width: 0;
+  min-height: 34px;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 7px;
+}
+
+.input-selectors {
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 7px;
+}
+
+.model-button {
+  min-width: 0;
+  max-width: 190px;
+  height: 32px;
+  gap: 6px;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-button .ui-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.mode-select {
+  width: 112px;
+}
+
+.mode-select .n-base-selection {
+  border-radius: 8px !important;
+}
+
+.send-button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  color: #ffffff;
+  background: var(--accent);
+}
+
+.send-button:hover:not(:disabled) {
+  background: #0550ae;
+}
+
+.send-button:disabled {
+  cursor: not-allowed;
+  color: #8c959f;
+  background: #eaeef2;
+}
+
+.send-button.stop {
+  background: var(--danger);
+}
