@@ -14,6 +14,7 @@ Define cross-process payloads once in `shared/` and validate them at IPC boundar
 ## Working Practices
 
 - Never commit code changes directly to `master`. Use the current non-`master` task branch when it is appropriate; create a branch only when working from `master` or no suitable task branch exists. New branches must use a conventional prefix such as `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, or `chore/`; never use the `codex/` prefix.
+- After making changes on a non-`master` branch, commit the scoped changes and push the branch to its configured remote.
 - Keep each code file below 500 lines where practical, including test files, stylesheets, Vue components, and pages. Exceed this only when the functionality is genuinely cohesive or splitting it would add more complexity than it removes.
 - Use TypeScript and Vue SFCs. Prettier enforces two spaces, single quotes, no semicolons, and trailing commas; ESLint handles semantic rules. Use `kebab-case.ts` modules, `PascalCase.vue` components, `camelCase` values, and `PascalCase` types.
 - Keep commits cohesive and use imperative Conventional Commit-style subjects.

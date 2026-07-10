@@ -1,0 +1,93 @@
+.message-input-area {
+  width: min(760px, calc(100% - 36px));
+  min-width: 0;
+  max-width: calc(100% - 36px);
+  margin: 0 auto 16px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--background);
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.07);
+}
+
+.composer-context-chips {
+  margin-bottom: 7px;
+}
+
+.composer-suggestions {
+  display: grid;
+  max-height: 260px;
+  min-width: 0;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 22px rgba(31, 35, 40, 0.1);
+}
+
+.composer-suggestions header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 1px 5px 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.composer-suggestions-empty {
+  margin: 0;
+  padding: 8px 9px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.composer-suggestion-menu {
+  min-width: 0;
+}
+
+.composer-suggestion-menu .n-menu-item {
+  margin: 0;
+}
+
+.composer-suggestion-menu .n-menu-item-content {
+  padding-right: 7px !important;
+  border-radius: 8px !important;
+}
+
+.composer-suggestion-label {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.composer-suggestion-label strong,
+.composer-suggestion-label small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-suggestion-label strong {
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+.composer-suggestion-label small {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.15;
+}
+
+.message-input-area:focus-within {
+  border-color: #8c959f;
+  box-shadow:
+    var(--focus),
+    0 8px 24px rgba(31, 35, 40, 0.07);
+}
