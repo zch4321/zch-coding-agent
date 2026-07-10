@@ -22,6 +22,18 @@ const tokenEstimationOptions = computed(() => [
     <template v-if="agent.limitsConfig">
       <div class="limits-grid">
         <section class="limits-group">
+          <h3>{{ t('limits.concurrency') }}</h3>
+          <label class="settings-field">
+            <span>{{ t('limits.maxConcurrentRuns') }}</span>
+            <NInputNumber
+              v-model:value="agent.limitsConfig.maxConcurrentRuns"
+              :min="1"
+              :max="32"
+            />
+          </label>
+          <p>{{ t('limits.concurrencyHint') }}</p>
+        </section>
+        <section class="limits-group">
           <h3>{{ t('limits.runLoop') }}</h3>
           <label class="settings-field">
             <span>{{ t('limits.maxStepsPerRun') }}</span>

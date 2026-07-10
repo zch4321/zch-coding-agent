@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { NButton } from 'naive-ui'
+import { computed } from 'vue'
+import { NButton, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 
 const emit = defineEmits<{ removed: [] }>()
 const agent = useAgentStore()
 const { t } = useI18n()
+const projectBusy = computed(() =>
+  agent.conversations
+    .filter((conversation) => conversation.projectPath === agent.workspacePath)
+    .some((conversation) => agent.conversationIsBusy(conversation.id)),
+)
 
 async function removeProject() {
   if (agent.workspacePath && window.confirm(t('settings.removeConfirm'))) {
@@ -29,14 +35,19 @@ async function removeProject() {
       <NButton type="primary" @click="agent.chooseWorkspace">
         {{ t('app.chooseWorkspace') }}
       </NButton>
-      <NButton
-        secondary
-        type="error"
-        :disabled="!agent.workspacePath"
-        @click="removeProject"
-      >
-        {{ t('settings.removeProject') }}
-      </NButton>
+      <NTooltip :disabled="!projectBusy">
+        <template #trigger>
+          <NButton
+            secondary
+            type="error"
+            :disabled="!agent.workspacePath || projectBusy"
+            @click="removeProject"
+          >
+            {{ t('settings.removeProject') }}
+          </NButton>
+        </template>
+        {{ t('settings.removeProjectBusy') }}
+      </NTooltip>
     </div>
     <p class="settings-footnote">
       {{ t('settings.removeHint') }}

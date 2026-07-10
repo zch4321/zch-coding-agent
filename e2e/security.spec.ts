@@ -89,7 +89,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 6,
+          schemaVersion: 7,
           activeProviderId: 'deepseek',
           providers: [
             {
@@ -1213,8 +1213,8 @@ test.describe.serial('Electron security and IPC baseline', () => {
       electronProcess.once('exit', (code, signal) => resolve({ code, signal }))
     })
 
-    await electronApp.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.close()
+    await electronApp.evaluate(({ app }) => {
+      app.quit()
     })
 
     await expect(exit).resolves.toEqual({ code: 0, signal: null })

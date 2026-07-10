@@ -53,10 +53,13 @@ export const useAgentTimelineStore = defineStore('agent-timeline', {
       this.latestReviewedApproval = undefined
     },
     hydrate(conversation?: ConversationRecord) {
+      this.input = conversation?.draft ?? ''
       this.messages = conversation ? cloneMessages(conversation.messages) : []
       this.tools = (conversation?.tools ?? []).map((tool) => ({ ...tool }))
       this.usage = (conversation?.usage ?? []).map((item) => ({ ...item }))
-      this.contextAttachments = []
+      this.contextAttachments = (conversation?.contextAttachments ?? []).map(
+        (attachment) => ({ ...attachment }),
+      )
       this.goal = conversation?.goal ? cloneJson(conversation.goal) : undefined
       this.plan = conversation?.plan ? cloneJson(conversation.plan) : undefined
       this.latestReviewedApproval = conversation?.latestReviewedApproval
@@ -78,6 +81,10 @@ export const useAgentTimelineStore = defineStore('agent-timeline', {
       )
     },
     writeToConversation(conversation: ConversationRecord) {
+      conversation.draft = this.input || undefined
+      conversation.contextAttachments = this.contextAttachments.length
+        ? this.contextAttachments.map((attachment) => ({ ...attachment }))
+        : undefined
       conversation.messages = cloneMessages(this.messages)
       conversation.tools = this.tools.map((tool) => ({ ...tool }))
       conversation.usage = this.usage.map((item) => ({ ...item }))

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NButton, NInput, NSelect } from 'naive-ui'
+import { NButton, NInput, NSelect, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { PermissionMode } from '../../../shared/config'
 import { useAgentStore } from '../../stores/agent'
@@ -30,12 +30,24 @@ const sensitiveModeOptions = computed(() => [
     </div>
     <label class="settings-field">
       <span>{{ t('permissions.defaultMode') }}</span>
-      <NSelect
-        :value="agent.mode"
-        :options="modeOptions"
-        :disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
-        @update:value="emit('mode', $event as PermissionMode)"
-      />
+      <NTooltip :disabled="!agent.modeLockedByWriter">
+        <template #trigger>
+          <NSelect
+            :value="agent.modeLockedByWriter ? 'readonly' : agent.mode"
+            :options="modeOptions"
+            :disabled="
+              Boolean(
+                agent.startPending ||
+                agent.activeRunId ||
+                agent.pendingApproval ||
+                agent.modeLockedByWriter,
+              )
+            "
+            @update:value="emit('mode', $event as PermissionMode)"
+          />
+        </template>
+        {{ agent.modeLockTooltip }}
+      </NTooltip>
     </label>
     <label class="settings-field">
       <span>{{ t('permissions.sensitiveData') }}</span>

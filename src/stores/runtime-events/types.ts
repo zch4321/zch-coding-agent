@@ -15,7 +15,10 @@ export interface PendingCarryoverInterjection {
   content: string
 }
 
-export type RuntimeDomainEvent = Exclude<AgentEvent, { type: 'session.closed' }>
+export type RuntimeDomainEvent = Exclude<
+  AgentEvent,
+  { type: 'session.closed' } | { type: 'workspace.writer.changed' }
+>
 
 export interface RuntimeEventState {
   activeRunId: RunId | undefined

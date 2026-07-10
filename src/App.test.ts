@@ -367,7 +367,8 @@ describe('App', () => {
     })
     const pinia = createPinia()
     const store = useAgentStore(pinia)
-    store.sessionId = 'session:test' as SessionId
+    const conversation = store.createConversation('F:/workspace/example')
+    store.registerSession(conversation!.id, 'session:test' as SessionId)
     store.plan = {
       id: 'plan:test',
       objective: 'Review the plan',
@@ -563,7 +564,8 @@ describe('App', () => {
     })
     const store = useAgentStore(pinia)
     const injection = '<script>window.pwned=true</script><img src=x onerror=1>'
-    store.sessionId = 'session:test' as SessionId
+    const conversation = store.createConversation('F:/workspace/example')
+    store.registerSession(conversation!.id, 'session:test' as SessionId)
 
     store.handleAgentEvent({
       schemaVersion: 1,

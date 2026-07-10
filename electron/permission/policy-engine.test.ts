@@ -162,6 +162,45 @@ describe('P3 policy engine', () => {
     },
   )
 
+  it.each([
+    'filesystem.write',
+    'filesystem.delete',
+    'vcs.write',
+    'workspace.metadata.write',
+    'process.spawn',
+    'terminal.write',
+    'network.request',
+    'external.unknown',
+  ] as const)('denies %s side effects in ReadOnly mode', (effect) => {
+    const tool: ToolDefinition<typeof EmptyArgsSchema> = {
+      id: `readonly-${effect}`,
+      description: 'readonly side-effect fixture',
+      inputSchema: EmptyArgsSchema,
+      effects: [effect],
+      defaultRisk: 'low',
+      supportsAbort: true,
+      defaultTimeoutMs: 1_000,
+      maxOutputBytes: 1_000,
+      async execute() {
+        return { status: 'ok', content: null }
+      },
+    }
+
+    expect(
+      evaluatePolicy({
+        mode: 'readonly',
+        definition: tool,
+        effectiveRisk: 'low',
+        policySignals: [],
+        rememberedRules: [],
+        builtinPolicies: true,
+        workspace: 'F:/workspace',
+        args: {},
+        callId: 'call:readonly-effects' as CallId,
+      }),
+    ).toMatchObject({ kind: 'deny', code: 'READONLY_MODE' })
+  })
+
   it.each(modes)(
     'auto-approves a low-risk vcs.read tool in %s mode',
     (mode) => {

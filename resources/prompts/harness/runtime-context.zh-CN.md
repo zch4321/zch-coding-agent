@@ -23,3 +23,7 @@ ${projectTree}
 <module_context status="${moduleStatus}" semantic_tools="code_intelligence_facade">
 ${moduleContent}
 </module_context>
+
+<workspace_concurrency status="${workspaceConcurrencyStatus}">
+${workspaceConcurrencyContent}
+</workspace_concurrency>

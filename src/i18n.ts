@@ -49,6 +49,7 @@ const messages = {
       renameTitle: '重命名',
       delete: '删除对话',
       deleteTitle: '删除',
+      busyActionBlocked: '运行中或等待审批时不可删除',
       fork: '创建分支副本',
       forkTitle: '分支',
       export: '导出为 Markdown',
@@ -143,6 +144,15 @@ const messages = {
       forkFromHereTitle: '从此回复创建分支',
       forkedBadge: '分支',
       importedBadge: '导入',
+      status: {
+        awaitingApproval: '待审批',
+        writer: '写入中',
+        readonlyLocked: '只读锁定',
+        cancelling: '取消中',
+        running: '运行中',
+        failed: '失败',
+        completed: '已完成',
+      },
       providerSettings: '模型服务设置',
       stop: '停止运行',
       send: '发送消息',
@@ -282,6 +292,7 @@ const messages = {
       projectHint: '选择供文件、命令和助手操作使用的工作区。',
       currentWorkspace: '当前工作区',
       removeProject: '移除项目',
+      removeProjectBusy: '项目中仍有运行中、启动中或等待审批的对话',
       removeConfirm: '从应用中移除此项目及其本地对话历史？',
       removeHint: '移除项目会清理应用历史和运行资源，但不会删除磁盘文件。',
       providerTitle: '模型服务',
@@ -353,6 +364,10 @@ const messages = {
     limits: {
       title: '运行限制',
       hint: '调整 Agent 循环、上下文、工具输出、审批和网络请求的硬限制。',
+      concurrency: '并发任务',
+      maxConcurrentRuns: '最大并发任务数',
+      concurrencyHint:
+        '同一工作区始终只允许一个写入任务；只读任务可并行，writer 上限不可调整。',
       runLoop: '循环与上下文',
       commands: '命令与终端',
       files: '文件工具',
@@ -394,9 +409,6 @@ const messages = {
       rename: '重命名',
       deleteTitle: '删除对话？',
       deleteText: '这会删除本地对话历史并关闭运行资源，但不会删除工作区文件。',
-      switchTitle: '中断当前运行？',
-      switchText: '切换对话会中断当前运行并关闭其会话，持久终端进程也会关闭。',
-      interruptSwitch: '中断并切换',
       revertTitle: '回退对话？',
       revertText:
         '将原地删除此回复及其后的所有消息（包括工具调用），回到该回复处重新输入。此操作不可撤销，且不会新建对话。',
@@ -531,6 +543,7 @@ const messages = {
       renameTitle: 'Rename',
       delete: 'Delete conversation',
       deleteTitle: 'Delete',
+      busyActionBlocked: 'Unavailable while running or awaiting approval',
       fork: 'Create a branched copy',
       forkTitle: 'Fork',
       export: 'Export as Markdown',
@@ -629,6 +642,15 @@ const messages = {
       forkFromHereTitle: 'Create a branch from this reply',
       forkedBadge: 'Fork',
       importedBadge: 'Imported',
+      status: {
+        awaitingApproval: 'Awaiting approval',
+        writer: 'Writer',
+        readonlyLocked: 'Read-only locked',
+        cancelling: 'Cancelling',
+        running: 'Running',
+        failed: 'Failed',
+        completed: 'Completed',
+      },
       providerSettings: 'Provider settings',
       stop: 'Stop run',
       send: 'Send message',
@@ -771,6 +793,8 @@ const messages = {
         'Select the workspace used by file, command, and Agent operations.',
       currentWorkspace: 'Current workspace',
       removeProject: 'Remove project',
+      removeProjectBusy:
+        'A conversation in this project is running, starting, or awaiting approval',
       removeConfirm:
         'Remove this project and its local conversation history from the app?',
       removeHint:
@@ -848,6 +872,10 @@ const messages = {
     limits: {
       title: 'Limits',
       hint: 'Tune hard limits for the Agent loop, context, tool output, approvals and network requests.',
+      concurrency: 'Concurrent tasks',
+      maxConcurrentRuns: 'Maximum concurrent tasks',
+      concurrencyHint:
+        'Each workspace always permits one writer; read-only tasks may run in parallel and the writer limit is fixed.',
       runLoop: 'Loop and context',
       commands: 'Commands and terminal',
       files: 'File tools',
@@ -890,10 +918,6 @@ const messages = {
       deleteTitle: 'Delete conversation?',
       deleteText:
         'This removes local conversation history and closes its runtime resources. Workspace files are not deleted.',
-      switchTitle: 'Interrupt the active run?',
-      switchText:
-        'Switching conversations interrupts the active run and closes its runtime session. Persistent terminal processes in that session will also close.',
-      interruptSwitch: 'Interrupt and switch',
       revertTitle: 'Revert conversation?',
       revertText:
         'This discards the reply and all messages after it (including tool calls) in place, returning to that reply to type again. This cannot be undone and does not create a new conversation.',

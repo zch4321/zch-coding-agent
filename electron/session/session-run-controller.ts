@@ -14,6 +14,7 @@ import { delay, finalStatusFromError } from './session-run-utils'
 import type { SessionToolRunner } from './session-tool-runner'
 import type { SessionUserTurnPreparer } from './session-user-turn-preparer'
 import type { ActiveRun, AgentEventDraft, SessionState } from './session-types'
+import type { RunAccessLease } from './workspace-access-coordinator'
 
 function isTerminalRunStatus(status: RunStatus): boolean {
   return status === 'completed' || status === 'cancelled' || status === 'failed'
@@ -33,6 +34,10 @@ export class SessionRunController {
   readonly #userTurns: SessionUserTurnPreparer
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
+  readonly #acquireRunAccess: (
+    session: SessionState,
+    runId: RunId,
+  ) => RunAccessLease
 
   constructor(options: {
     configStore: ConfigStore
@@ -44,6 +49,7 @@ export class SessionRunController {
     userTurns: SessionUserTurnPreparer
     onDiagnostic: (message: string, error?: unknown) => void
     emit: (session: SessionState, event: AgentEventDraft) => void
+    acquireRunAccess: (session: SessionState, runId: RunId) => RunAccessLease
   }) {
     this.#configStore = options.configStore
     this.#providerTurns = options.providerTurns
@@ -54,6 +60,7 @@ export class SessionRunController {
     this.#userTurns = options.userTurns
     this.#onDiagnostic = options.onDiagnostic
     this.#emit = options.emit
+    this.#acquireRunAccess = options.acquireRunAccess
   }
 
   start(
@@ -80,6 +87,7 @@ export class SessionRunController {
     }
 
     const runId = id<RunId>('run')
+    const access = this.#acquireRunAccess(session, runId)
     const controller = new AbortController()
     const run: ActiveRun = {
       runId,
@@ -88,6 +96,10 @@ export class SessionRunController {
       status: 'idle',
       toolTokensUsed: 0,
       done: Promise.resolve(),
+      releaseRunSlot: access.releaseRunSlot,
+      releaseWriter: access.releaseWriter,
+      pendingSideEffects: new Set(),
+      writerReleasePending: false,
       pendingInterjections: [],
       processedInterjectionIds: new Set(),
     }
@@ -97,6 +109,7 @@ export class SessionRunController {
         this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error),
       )
       .finally(() => {
+        this.releaseAccess(run)
         if (session.activeRun === run) {
           session.activeRun = undefined
         }
@@ -141,6 +154,9 @@ export class SessionRunController {
     status: RunStatus,
     error?: unknown,
   ): void {
+    if (isTerminalRunStatus(status)) {
+      this.releaseAccess(run)
+    }
     run.status = status
     this.#emit(session, {
       type: 'run.status',
@@ -158,6 +174,27 @@ export class SessionRunController {
             },
           }
         : {}),
+    })
+  }
+
+  releaseAccess(run: ActiveRun): void {
+    run.releaseRunSlot()
+    this.#releaseWriterWhenSettled(run)
+  }
+
+  #releaseWriterWhenSettled(run: ActiveRun): void {
+    if (run.writerReleasePending) return
+
+    const pending = [...run.pendingSideEffects]
+    if (pending.length === 0) {
+      run.releaseWriter()
+      return
+    }
+
+    run.writerReleasePending = true
+    void Promise.allSettled(pending).then(() => {
+      run.writerReleasePending = false
+      this.#releaseWriterWhenSettled(run)
     })
   }
 

@@ -108,14 +108,17 @@ const timelineProperties = new Set<PropertyKey>([
 const runtimeProperties = new Set<PropertyKey>([
   'conversationRuntimes',
   'conversationIdBySessionId',
-  'sessionIdsByConversation',
+  'workspaceWriters',
   'sessionId',
   'activeRunId',
+  'startPending',
   'runStatus',
   'mode',
   'pendingApproval',
-  'lastAgentSeqBySession',
   'agentEventGap',
+  'modeLockedByWriter',
+  'modeLockTooltip',
+  'modeSyncError',
   'approvalSubmitting',
   'canSend',
   'canInterject',
@@ -196,7 +199,11 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     revertChange: (changeId: string) =>
       changes.revertChange(
         changeId,
-        Boolean(runtime.activeRunId || runtime.pendingApproval),
+        Boolean(
+          runtime.startPending ||
+          runtime.activeRunId ||
+          runtime.pendingApproval,
+        ),
       ),
     closeRuntimeSession: runtime.closeRuntimeSession,
     sendMessage: runtime.sendMessage,
@@ -207,6 +214,12 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     interruptRun: runtime.interruptRun,
     decideApproval: runtime.decideApproval,
     handleAgentEvent: runtime.handleAgentEvent,
+    registerSession: runtime.registerSession,
+    registerRun: runtime.registerRun,
+    setStartPending: runtime.setStartPending,
+    clearDiagnostics: runtime.clearDiagnostics,
+    conversationIsBusy: runtime.conversationIsBusy,
+    conversationStatus: runtime.conversationStatus,
     assistantMessage: timeline.assistantMessage,
     nextTimelineOrder: timeline.nextTimelineOrder,
   }
@@ -239,7 +252,8 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
       if (property === 'error') {
         shell.error = String(value)
         if (!value) {
-          runtime.error = ''
+          runtime.globalError = ''
+          runtime.setConversationError(workbench.activeConversationId, '')
           settings.error = ''
           workbench.error = ''
           changes.error = ''

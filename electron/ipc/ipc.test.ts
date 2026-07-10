@@ -194,6 +194,7 @@ const validPayloads: {
     version: 1,
     traceId: 'session-test',
     eventId: 'event-1' as import('../../shared/ids').EventId,
+    conversationId: 'conversation:test',
   },
   'trace:start-fork': { version: 1, sessionId },
   'logs:open-directory': { version: 1 },

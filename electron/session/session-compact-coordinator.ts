@@ -25,6 +25,7 @@ import {
   orchestrationRequestContent,
   promptResources,
   selectPromptMessages,
+  type WorkspaceConcurrencyContext,
 } from './prompt-harness'
 import { resolveSlashCommand } from './slash-commands'
 
@@ -54,6 +55,9 @@ export class SessionCompactCoordinator {
     status: RunStatus,
     error?: unknown,
   ) => void
+  readonly #getWorkspaceConcurrency: (
+    session: SessionState,
+  ) => WorkspaceConcurrencyContext
 
   constructor(options: {
     configStore: ConfigStore
@@ -71,6 +75,9 @@ export class SessionCompactCoordinator {
       status: RunStatus,
       error?: unknown,
     ) => void
+    getWorkspaceConcurrency?: (
+      session: SessionState,
+    ) => WorkspaceConcurrencyContext
   }) {
     this.#configStore = options.configStore
     this.#toolRegistry = options.toolRegistry
@@ -82,6 +89,8 @@ export class SessionCompactCoordinator {
     this.#orchestratorMessages = options.orchestratorMessages
     this.#emit = options.emit
     this.#setRunStatus = options.setRunStatus
+    this.#getWorkspaceConcurrency =
+      options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
   }
 
   async maybeAutoCompactBeforeProviderCall(
@@ -408,6 +417,7 @@ export class SessionCompactCoordinator {
       providerId: session.provider,
       promptRegistry: this.#promptRegistry,
       projectMetadata: this.#projectMetadata,
+      workspaceConcurrency: this.#getWorkspaceConcurrency(session),
       skillSummary: this.#skillsManager?.summaryPrompt(),
       compactHistory: {
         summary: [summary, '', compactOrchestrationState(session)].join('\n'),

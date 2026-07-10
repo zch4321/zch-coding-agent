@@ -28,8 +28,19 @@ function installApi(api: Partial<AgentApi>) {
   })
 }
 
+function registerActiveSession(
+  store: ReturnType<typeof useAgentStore>,
+  value: SessionId = sessionId,
+) {
+  if (!store.activeConversationId) {
+    store.workspacePath = 'F:/workspace/example'
+    store.createConversation()
+  }
+  store.registerSession(store.activeConversationId!, value)
+}
+
 function requestApproval(store: ReturnType<typeof useAgentStore>) {
-  store.sessionId = sessionId
+  registerActiveSession(store)
   store.handleAgentEvent({
     schemaVersion: 1,
     seq: 1,
@@ -163,8 +174,14 @@ describe('agent store regressions', () => {
     const store = useAgentStore()
     requestApproval(store)
 
-    const first = store.decideApproval('allow')
-    const duplicate = store.decideApproval('allow')
+    const first = store.decideApproval({
+      conversationId: store.activeConversationId!,
+      decision: 'allow',
+    })
+    const duplicate = store.decideApproval({
+      conversationId: store.activeConversationId!,
+      decision: 'allow',
+    })
 
     expect(store.approvalSubmitting).toBe(true)
     expect(decideApproval).toHaveBeenCalledTimes(1)
@@ -418,7 +435,7 @@ describe('agent store regressions', () => {
     }))
     installApi({ updateSessionMode })
     const store = useAgentStore()
-    store.sessionId = sessionId
+    registerActiveSession(store)
     store.mode = 'confirm'
 
     await expect(store.setMode('auto')).resolves.toBe(true)
@@ -507,8 +524,8 @@ describe('agent store regressions', () => {
     store.applyConfig(config)
     store.workspacePath = 'F:/workspace/example'
     store.createConversation()
-    store.sessionId = sessionId
-    store.activeRunId = runId
+    registerActiveSession(store)
+    store.registerRun(store.activeConversationId!, runId)
     store.input = 'draft already typed'
     store.contextAttachments = [
       { kind: 'file', path: 'draft.md', source: 'picker' },
@@ -544,10 +561,7 @@ describe('agent store regressions', () => {
       runId,
       status: 'completed',
     })
-    await Promise.resolve()
-    await Promise.resolve()
-
-    expect(startRun).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
     expect(store.input).toBe('draft already typed')
     expect(store.messages).toEqual(
       expect.arrayContaining([
@@ -616,9 +630,7 @@ describe('agent store regressions', () => {
     firstRuntime.sessionId = sessionId
     firstRuntime.activeRunId = runId
     firstRuntime.runStatus = 'calling_llm'
-    runtime.sessionIdsByConversation[first.id] = sessionId
-    runtime.conversationIdBySessionId[sessionId] = first.id
-    runtime.mirrorConversationRuntime(first.id)
+    runtime.registerSession(first.id, sessionId)
 
     await expect(store.selectConversation(second.id)).resolves.toBe(true)
 
@@ -641,8 +653,7 @@ describe('agent store regressions', () => {
     const backgroundRunId = 'run:background' as RunId
     const backgroundRuntime = runtime.ensureConversationRuntime(background.id)
     backgroundRuntime.sessionId = backgroundSessionId
-    runtime.sessionIdsByConversation[background.id] = backgroundSessionId
-    runtime.conversationIdBySessionId[backgroundSessionId] = background.id
+    runtime.registerSession(background.id, backgroundSessionId)
 
     store.handleAgentEvent({
       schemaVersion: 1,
@@ -735,7 +746,7 @@ describe('agent store regressions', () => {
 
   it('ignores duplicate Agent events and reports sequence gaps', () => {
     const store = useAgentStore()
-    store.sessionId = sessionId
+    registerActiveSession(store)
     const first = {
       schemaVersion: 1 as const,
       seq: 1,
@@ -754,9 +765,81 @@ describe('agent store regressions', () => {
     expect(store.agentEventGap).toContain('expected 2, received 3')
   })
 
+  it('accepts a fresh event sequence after replacing a conversation session', () => {
+    const store = useAgentStore()
+    store.workspacePath = 'F:/workspace/example'
+    const conversation = store.createConversation()
+    expect(conversation).toBeDefined()
+    if (!conversation) return
+
+    const firstSession = 'session:first-sequence' as SessionId
+    const replacementSession = 'session:replacement-sequence' as SessionId
+    store.registerSession(conversation.id, firstSession)
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 1,
+      ts: stamp,
+      type: 'assistant.text.delta',
+      sessionId: firstSession,
+      runId,
+      delta: 'first session output',
+    })
+
+    store.registerSession(conversation.id, replacementSession)
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 1,
+      ts: stamp,
+      type: 'assistant.text.delta',
+      sessionId: replacementSession,
+      runId: 'run:replacement-sequence' as RunId,
+      delta: 'replacement session output',
+    })
+
+    expect(store.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: 'replacement session output' }),
+      ]),
+    )
+  })
+
+  it('keeps composer drafts and context attachments isolated across conversation switches', async () => {
+    const store = useAgentStore()
+    store.workspacePath = 'F:/workspace/example'
+    const first = store.createConversation()
+    const second = store.createConversation()
+    expect(first).toBeDefined()
+    expect(second).toBeDefined()
+    if (!first || !second) return
+
+    store.activeConversationId = first.id
+    store.restoreActiveConversation()
+    store.input = 'Keep this draft in the first conversation'
+    store.addContextAttachments([
+      { kind: 'file', path: 'src/main.ts', source: 'picker' },
+    ])
+
+    await expect(store.selectConversation(second.id)).resolves.toBe(true)
+    store.input = 'Keep this draft in the second conversation'
+    store.addContextAttachments([
+      { kind: 'file', path: 'src/other.ts', source: 'picker' },
+    ])
+    await expect(store.selectConversation(first.id)).resolves.toBe(true)
+
+    expect({
+      input: store.input,
+      contextAttachments: store.contextAttachments,
+    }).toEqual({
+      input: 'Keep this draft in the first conversation',
+      contextAttachments: [
+        { kind: 'file', path: 'src/main.ts', source: 'picker' },
+      ],
+    })
+  })
+
   it('starts a new assistant segment after a tool call', () => {
     const store = useAgentStore()
-    store.sessionId = sessionId
+    registerActiveSession(store)
     store.handleAgentEvent({
       schemaVersion: 1,
       seq: 1,
@@ -801,7 +884,7 @@ describe('agent store regressions', () => {
 
   it('attaches auto approval summaries to completed tools', () => {
     const store = useAgentStore()
-    store.sessionId = sessionId
+    registerActiveSession(store)
     store.handleAgentEvent({
       schemaVersion: 1,
       seq: 1,
@@ -843,7 +926,7 @@ describe('agent store regressions', () => {
 
   it('renders completed assistant messages even if stream deltas were missed', () => {
     const store = useAgentStore()
-    store.sessionId = sessionId
+    registerActiveSession(store)
 
     store.handleAgentEvent({
       schemaVersion: 1,
@@ -866,7 +949,7 @@ describe('agent store regressions', () => {
 
   it('uses completed assistant messages as an idempotent final snapshot', () => {
     const store = useAgentStore()
-    store.sessionId = sessionId
+    registerActiveSession(store)
 
     store.handleAgentEvent({
       schemaVersion: 1,
@@ -893,7 +976,7 @@ describe('agent store regressions', () => {
 
   it('routes orchestration and usage events through the runtime dispatcher', () => {
     const store = useAgentStore()
-    store.sessionId = sessionId
+    registerActiveSession(store)
 
     store.handleAgentEvent({
       schemaVersion: 1,
@@ -1056,7 +1139,7 @@ describe('agent store regressions', () => {
     const store = useAgentStore()
     store.workspacePath = 'F:/workspace/example'
     store.createConversation()
-    store.sessionId = sessionId
+    registerActiveSession(store)
     store.plan = plan
 
     await store.approvePlan()
@@ -1372,5 +1455,240 @@ describe('agent store regressions', () => {
     expect(store.conversations).toHaveLength(0)
     expect(store.projects).toHaveLength(0)
     expect(saveWorkbench).not.toHaveBeenCalled()
+  })
+
+  it('lazily locks only the selected conversation while a workspace writer is active', async () => {
+    const workspace = 'F:/workspace/shared'
+    const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
+    config.workspace.lastOpened = workspace
+    const setConfig = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { config },
+    }))
+    const updateSessionMode = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { accepted: true },
+    }))
+    installApi({ setConfig, updateSessionMode })
+    const store = useAgentStore()
+    const runtime = useAgentRuntimeStore()
+    store.workspacePath = workspace
+    const writer = store.createConversation(workspace)!
+    const selected = store.createConversation(workspace)!
+    const inactive = store.createConversation(workspace)!
+    writer.mode = 'auto'
+    selected.mode = 'confirm'
+    inactive.mode = 'yolo'
+    const writerSession = 'session:writer' as SessionId
+    const selectedSession = 'session:selected' as SessionId
+    runtime.registerSession(writer.id, writerSession)
+    runtime.registerSession(selected.id, selectedSession)
+    store.activeConversationId = writer.id
+    store.restoreActiveConversation()
+
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 1,
+      ts: stamp,
+      type: 'workspace.writer.changed',
+      workspace,
+      status: 'acquired',
+      writerConversationId: writer.id,
+      writerSessionId: writerSession,
+      writerRunId: runId,
+    })
+
+    expect(selected.mode).toBe('confirm')
+    expect(inactive.mode).toBe('yolo')
+    await expect(store.selectConversation(selected.id)).resolves.toBe(true)
+    expect(selected.mode).toBe('readonly')
+    expect(inactive.mode).toBe('yolo')
+    expect(store.mode).toBe('readonly')
+    expect(store.modeLockedByWriter).toBe(true)
+    expect(updateSessionMode).toHaveBeenCalledWith({
+      version: 1,
+      sessionId: selectedSession,
+      mode: 'readonly',
+    })
+
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 2,
+      ts: stamp,
+      type: 'workspace.writer.changed',
+      workspace,
+      status: 'released',
+      writerConversationId: writer.id,
+      writerSessionId: writerSession,
+      writerRunId: runId,
+    })
+    expect(store.modeLockedByWriter).toBe(false)
+    expect(selected.mode).toBe('readonly')
+  })
+
+  it('keeps create-session and start-run results on their origin conversation', async () => {
+    const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
+    config.privacy.providerNoticeAccepted = {
+      version: PROVIDER_NOTICE_VERSION,
+      acceptedAt: stamp,
+    }
+    config.workspace.lastOpened = 'F:/workspace/example'
+    let resolveSession!: (
+      value: Awaited<ReturnType<AgentApi['createSession']>>,
+    ) => void
+    const createSession = vi.fn(
+      () =>
+        new Promise<Awaited<ReturnType<AgentApi['createSession']>>>(
+          (resolve) => {
+            resolveSession = resolve
+          },
+        ),
+    )
+    const startRun = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { runId },
+    }))
+    const setConfig = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { config },
+    }))
+    installApi({ createSession, startRun, setConfig })
+    const store = useAgentStore()
+    const runtime = useAgentRuntimeStore()
+    store.bridgeAvailable = true
+    store.applyConfig(config)
+    store.workspacePath = 'F:/workspace/example'
+    const origin = store.createConversation()!
+    const foreground = store.createConversation()!
+    store.activeConversationId = origin.id
+    store.restoreActiveConversation()
+    store.input = 'Message for A'
+
+    const sending = store.sendMessage()
+    await vi.waitFor(() => expect(createSession).toHaveBeenCalledTimes(1))
+    expect(runtime.conversationRuntimes[origin.id]?.startPending).toBe(true)
+
+    await store.selectConversation(foreground.id)
+    store.input = 'Draft for B'
+    resolveSession({
+      version: 1,
+      ok: true,
+      value: { sessionId },
+    })
+    await expect(sending).resolves.toBe(true)
+
+    expect(store.activeConversationId).toBe(foreground.id)
+    expect(store.input).toBe('Draft for B')
+    expect(store.messages).toEqual([])
+    expect(origin.messages.at(-1)?.text).toBe('Message for A')
+    expect(runtime.conversationRuntimes[origin.id]).toMatchObject({
+      sessionId,
+      activeRunId: runId,
+      startPending: false,
+    })
+    expect(
+      runtime.conversationRuntimes[foreground.id]?.sessionId,
+    ).toBeUndefined()
+  })
+
+  it('routes a background approval decision by explicit conversation id', async () => {
+    const decideApproval = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: { accepted: true },
+    }))
+    installApi({ decideApproval })
+    const store = useAgentStore()
+    const runtime = useAgentRuntimeStore()
+    store.workspacePath = 'F:/workspace/example'
+    const background = store.createConversation()!
+    const foreground = store.createConversation()!
+    const backgroundSession = 'session:background-approval' as SessionId
+    runtime.registerSession(background.id, backgroundSession)
+
+    store.handleAgentEvent({
+      schemaVersion: 1,
+      seq: 1,
+      ts: stamp,
+      type: 'approval.requested',
+      sessionId: backgroundSession,
+      runId,
+      callId,
+      kind: 'tool',
+      tool: 'create_file',
+      args: { path: 'note.txt', content: 'ok' },
+      reason: 'Background write',
+      policySignals: [],
+      diff: 'diff',
+      rememberable: false,
+      expiresAt: stamp,
+    })
+
+    expect(store.activeConversationId).toBe(foreground.id)
+    expect(store.pendingApproval).toBeUndefined()
+    expect(store.conversationStatus(background.id)).toBe('awaitingApproval')
+    await store.decideApproval({
+      conversationId: background.id,
+      decision: 'deny',
+    })
+
+    expect(decideApproval).toHaveBeenCalledWith({
+      version: 1,
+      sessionId: backgroundSession,
+      runId,
+      callId,
+      decision: 'deny',
+    })
+    expect(
+      runtime.conversationRuntimes[background.id]?.pendingApproval,
+    ).toBeUndefined()
+  })
+
+  it('debounces background streaming persistence across conversations', async () => {
+    vi.useFakeTimers()
+    try {
+      const saveWorkbench = vi.fn(
+        async (payload: Parameters<AgentApi['saveWorkbench']>[0]) => ({
+          version: 1 as const,
+          ok: true as const,
+          value: payload.workbench,
+        }),
+      )
+      installApi({ saveWorkbench })
+      const store = useAgentStore()
+      const runtime = useAgentRuntimeStore()
+      store.workspacePath = 'F:/workspace/example'
+      const background = store.createConversation()!
+      store.createConversation()
+      const backgroundSession = 'session:background-save' as SessionId
+      runtime.registerSession(background.id, backgroundSession)
+      saveWorkbench.mockClear()
+
+      for (const [seq, delta] of [
+        [1, 'one'],
+        [2, 'two'],
+      ] as const) {
+        store.handleAgentEvent({
+          schemaVersion: 1,
+          seq,
+          ts: stamp,
+          type: 'assistant.text.delta',
+          sessionId: backgroundSession,
+          runId,
+          delta,
+        })
+      }
+
+      expect(background.messages[0]?.text).toBe('onetwo')
+      expect(saveWorkbench).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(250)
+      expect(saveWorkbench).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

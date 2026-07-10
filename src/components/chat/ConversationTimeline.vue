@@ -214,7 +214,7 @@ onBeforeUnmount(() => {
         :title="t('chat.eventGap')"
         class="inline-alert"
         closable
-        @close="agent.agentEventGap = ''"
+        @close="agent.clearDiagnostics()"
       >
         {{ agent.agentEventGap }}
       </NAlert>
@@ -226,7 +226,11 @@ onBeforeUnmount(() => {
         :key="message.id"
         :message="message"
         :active-run-id="agent.activeRunId"
-        :actions-disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
+        :actions-disabled="
+          Boolean(
+            agent.startPending || agent.activeRunId || agent.pendingApproval,
+          )
+        "
         :style="{ order: message.order ?? 0 }"
         @revert="requestRevert"
         @fork="requestFork"

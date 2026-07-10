@@ -284,9 +284,10 @@ describe.skipIf(!live)('real DeepSeek endpoint', () => {
       (await traceService.stats(readTraceId)).requestCount,
     ).toBeGreaterThan(0)
     const lastForkPoint = replay.forkPoints.at(-1)!
-    const preparedFork = await manager.createForkFromTrace(
-      await traceService.forkPoint(readTraceId, lastForkPoint.eventId),
-    )
+    const preparedFork = await manager.createForkFromTrace({
+      ...(await traceService.forkPoint(readTraceId, lastForkPoint.eventId)),
+      conversationId: 'conversation:real-api-fork',
+    })
     const forkRunId = manager.startForkRun(preparedFork.sessionId)
     await waitFor(() =>
       events.some(

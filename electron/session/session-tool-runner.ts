@@ -8,6 +8,7 @@ import type { ConfigStore } from '../config/store'
 import type { ChangeHistoryStore } from './change-history'
 import { boundToolResultForContext } from '../tools/context-budget'
 import { PermissionPipeline } from '../permission/permission-pipeline'
+import { hasSideEffects } from '../permission/policy-engine'
 import type { ApprovedToolCall } from '../tools/approved-tool-call'
 import type { PluginEventBus } from '../plugins/event-bus'
 import type { ToolCall, ToolResult } from '../tools/types'
@@ -276,6 +277,14 @@ export class SessionToolRunner {
                       },
                     },
                     run.controller.signal,
+                    hasSideEffects(inspected.definition)
+                      ? (settlement) => {
+                          run.pendingSideEffects.add(settlement)
+                          void settlement.then(() =>
+                            run.pendingSideEffects.delete(settlement),
+                          )
+                        }
+                      : undefined,
                   )
             }
           }

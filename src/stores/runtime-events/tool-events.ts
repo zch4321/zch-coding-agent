@@ -15,7 +15,8 @@ export function handleToolEvent(
   event: ToolEvent,
   context: RuntimeEventContext,
 ): void {
-  const { runtime, timeline, loadConversationChanges } = context
+  const { runtime, timeline, loadConversationChanges, schedulePersist } =
+    context
 
   if (event.type === 'tool.proposed') {
     timeline.tools.unshift({
@@ -27,6 +28,7 @@ export function handleToolEvent(
       status: 'proposed',
       order: timeline.nextTimelineOrder(),
     })
+    schedulePersist()
     return
   }
 
@@ -46,4 +48,5 @@ export function handleToolEvent(
   ) {
     runtime.pendingApproval = undefined
   }
+  schedulePersist()
 }

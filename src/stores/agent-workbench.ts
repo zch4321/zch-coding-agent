@@ -58,7 +58,9 @@ function hasConversationContent(conversation: ConversationRecord): boolean {
   return Boolean(
     conversation.messages.length > 0 ||
     (conversation.tools?.length ?? 0) > 0 ||
-    (conversation.orchestratorEntries?.length ?? 0) > 0,
+    (conversation.orchestratorEntries?.length ?? 0) > 0 ||
+    (conversation.draft?.length ?? 0) > 0 ||
+    (conversation.contextAttachments?.length ?? 0) > 0,
   )
 }
 

@@ -37,10 +37,13 @@ function displayConversationTitle(title: string) {
   return title === 'New conversation' ? t('app.newConversation') : title
 }
 function conversationBadges(conversation: {
+  id: string
   parentId?: string
   importedFrom?: string
 }): string[] {
   const badges: string[] = []
+  const status = agent.conversationStatus(conversation.id)
+  if (status) badges.push(t(`chat.status.${status}`))
   if (conversation.parentId) badges.push(t('chat.forkedBadge'))
   if (conversation.importedFrom) badges.push(t('chat.importedBadge'))
   return badges
@@ -108,7 +111,13 @@ const searchGroups = computed(() => {
             type="button"
             class="import-conversation-button"
             :aria-label="t('sidebar.import')"
-            :disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
+            :disabled="
+              Boolean(
+                agent.startPending ||
+                agent.activeRunId ||
+                agent.pendingApproval,
+              )
+            "
             @click="emit('import')"
           >
             <UiIcon name="upload" />
@@ -153,6 +162,16 @@ const searchGroups = computed(() => {
             @click="emit('open', conversation.id)"
           >
             <span>{{ displayConversationTitle(conversation.title) }}</span>
+            <span
+              v-if="conversationBadges(conversation).length"
+              class="conversation-badges"
+            >
+              <em
+                v-for="badge in conversationBadges(conversation)"
+                :key="badge"
+                >{{ badge }}</em
+              >
+            </span>
             <small>{{ conversation.match }}</small>
             <time :datetime="conversation.updatedAt">
               {{ new Date(conversation.updatedAt).toLocaleString() }}
@@ -281,12 +300,17 @@ const searchGroups = computed(() => {
                     <button
                       type="button"
                       :aria-label="t('sidebar.delete')"
+                      :disabled="agent.conversationIsBusy(conversation.id)"
                       @click="emit('delete', conversation.id)"
                     >
                       <UiIcon name="trash" />
                     </button>
                   </template>
-                  {{ t('sidebar.deleteTitle') }}
+                  {{
+                    agent.conversationIsBusy(conversation.id)
+                      ? t('sidebar.busyActionBlocked')
+                      : t('sidebar.deleteTitle')
+                  }}
                 </NTooltip>
               </div>
             </div>

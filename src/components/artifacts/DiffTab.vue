@@ -111,14 +111,24 @@ watch(
           type="primary"
           :loading="agent.approvalSubmitting"
           :disabled="agent.approvalSubmitting"
-          @click="agent.decideApproval('allow')"
+          @click="
+            agent.decideApproval({
+              conversationId: agent.activeConversationId!,
+              decision: 'allow',
+            })
+          "
         >
           {{ t('common.approve') }}
         </NButton>
         <NButton
           secondary
           :disabled="agent.approvalSubmitting"
-          @click="agent.decideApproval('deny')"
+          @click="
+            agent.decideApproval({
+              conversationId: agent.activeConversationId!,
+              decision: 'deny',
+            })
+          "
         >
           {{ t('common.deny') }}
         </NButton>
