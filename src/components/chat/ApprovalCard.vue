@@ -64,7 +64,12 @@ const { t } = useI18n()
         type="primary"
         :loading="agent.approvalSubmitting"
         :disabled="agent.approvalSubmitting"
-        @click="agent.decideApproval('allow')"
+        @click="
+          agent.decideApproval({
+            conversationId: agent.activeConversationId!,
+            decision: 'allow',
+          })
+        "
       >
         {{
           agent.pendingApproval.kind === 'context'
@@ -77,14 +82,25 @@ const { t } = useI18n()
         secondary
         type="primary"
         :disabled="agent.approvalSubmitting"
-        @click="agent.decideApproval('allow', true)"
+        @click="
+          agent.decideApproval({
+            conversationId: agent.activeConversationId!,
+            decision: 'allow',
+            remember: true,
+          })
+        "
       >
         {{ t('chat.approveRemember') }}
       </NButton>
       <NButton
         secondary
         :disabled="agent.approvalSubmitting"
-        @click="agent.decideApproval('deny')"
+        @click="
+          agent.decideApproval({
+            conversationId: agent.activeConversationId!,
+            decision: 'deny',
+          })
+        "
       >
         {{
           agent.pendingApproval.kind === 'context'

@@ -2,104 +2,17 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、工具紧凑 UI v1 已经落地。下一阶段重点是把这些能力从“可用”推进到“可并行、可扩展、可观测、可评估”。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、工具紧凑 UI v1 已经落地。下一阶段重点是继续推进扩展、路由、可观测与评估能力。
 
 ## 0. 未完成概览
 
-| 优先级 | 领域                           | 目标                                                     | 主要风险                                    |
-| ------ | ------------------------------ | -------------------------------------------------------- | ------------------------------------------- |
-| P0     | Concurrent ReAct Sessions      | 多个对话可同时运行，切换对话不打断后台 run               | renderer 单例状态、事件串线、并发写文件冲突 |
-| P1     | Generic MCP v1                 | 接入通用 MCP server，并复用现有工具和权限管线            | 外部工具 schema/输出不受控、工具数量膨胀    |
-| P1     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断                |
-| P1     | Provider Routing               | 会话级 provider/model 快照与用途路由                     | 全局 active provider 静默影响已有会话       |
-| P2     | Benchmark Harness              | 用真实任务评估 harness、工具、上下文和权限策略           | 成本高、环境复杂、指标不可比较              |
-| P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张            |
-
-## 1. M1 · Concurrent ReAct Sessions
-
-目标：允许多个 conversation 各自持有后台 ReAct loop。用户切换对话、查看别的任务或启动另一个任务时，不应打断已经运行的后端循环。
-
-### 1.1 并发语义
-
-- 一个 conversation 同一时间最多一个 active run。
-- 一个 app 可以同时存在多个 conversation active run。
-- 切换 conversation 不取消后台 run，不关闭对应 session，不丢 provider/tool continuation。
-- 删除、fork、revert、关闭 workspace 等破坏历史一致性的操作，对 running conversation 必须显式阻止或先要求用户取消 run。
-- 后台 run 结束后，conversation timeline、badge、updatedAt 和持久化状态要更新。
-
-验收：
-
-- A 对话运行中切到 B，A 后端继续收到 provider continuation 和 tool result。
-- B 可以启动自己的 run；A/B 的 assistant delta、tool、usage、plan/goal 不串线。
-- 切回 A 后能看到完整 timeline，顺序正确。
-
-### 1.2 Renderer State Routing
-
-- renderer runtime 从单例状态改为 per-conversation/per-session 状态：
-
-```ts
-interface ConversationRuntimeState {
-  conversationId: string
-  sessionId?: SessionId
-  activeRunId?: RunId
-  runStatus: RunStatus | 'idle'
-  pendingApproval?: PendingApproval
-  pendingCarryover: PendingCarryoverInterjection[]
-  lastAgentSeq?: number
-}
-```
-
-- 维护 `conversationIdBySessionId`，所有 `AgentEvent` 先按 `event.sessionId` 路由。
-- 当前 conversation 的事件更新 visible timeline store。
-- 后台 conversation 的事件直接更新对应 `ConversationRecord`，不能写进当前 timeline。
-- 事件 gap、unknown session、stale event 都要可诊断。
-
-验收：
-
-- 后台 session 的 `assistant.text.delta` 不会出现在当前打开的对话中。
-- 后台 `approval.requested` 不覆盖当前对话的 pending approval。
-- Store 单测覆盖 A/B 两个 session 交错事件。
-
-### 1.3 Background Approval UX
-
-- Project sidebar / conversation list 显示 running、awaiting approval、failed、completed 等状态 badge。
-- 当前对话外的 approval 不弹出当前详情面板，但用户能从 badge 切到对应对话处理。
-- `decideApproval` 必须基于目标 conversation runtime 的 `sessionId/runId/callId`，不能默认使用当前 active conversation。
-- 多个 pending approval 可以同时存在，UI 必须能区分。
-
-验收：
-
-- A/B 同时运行，A 等审批时 B 仍可浏览和运行。
-- 点击 A 的 approval badge 切回 A 后能 approve/deny 正确 call。
-- 拒绝后台 approval 不影响其他 run。
-
-### 1.4 Workspace Mutation Lease
-
-目标：允许并行读和 LLM 推理，但避免同一 workspace 内多个 run 同时写文件造成 diff/precondition 互相破坏。
-
-- 每个 workspace 建立 mutation lease。
-- 只读工具、code intelligence、grep/read/list、LLM call 可并行。
-- 文件写入、删除、git 写入、终端写入、process spawn、外部高风险 MCP tool 等副作用调用需要 lease。
-- v1 策略：同一 workspace 同时只允许一个 mutating run；其他 run 触发副作用时进入 waiting/review/blocked，而不是并发执行。
-- lease 在 run completed/cancelled/failed、tool batch 结束后按策略释放；异常路径必须释放。
-
-验收：
-
-- 两个对话同时尝试修改同一 workspace 时，第二个不会落盘并发写。
-- 不同 workspace 的 mutating run 可以并行。
-- lease 状态进入 trace 和 UI，用户知道为什么等待。
-
-### 1.5 并发资源限制
-
-- 增加配置：`maxConcurrentRuns`、`maxConcurrentProviderCalls`、`maxConcurrentMutatingRunsPerWorkspace`。
-- 超出限制的新 run 应排队或拒绝，并给出明确 UI 提示。
-- Provider rate limit、tool timeout 和 cancellation 不应互相污染。
-
-验收：
-
-- 达到并发上限时不会继续创建无限后台 run。
-- 取消一个后台 run 不会取消其他 run。
-- 关闭 app/session 时能清理所有 active runs 和 terminals。
+| 优先级 | 领域                           | 目标                                                     | 主要风险                                 |
+| ------ | ------------------------------ | -------------------------------------------------------- | ---------------------------------------- |
+| P1     | Generic MCP v1                 | 接入通用 MCP server，并复用现有工具和权限管线            | 外部工具 schema/输出不受控、工具数量膨胀 |
+| P1     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断             |
+| P1     | Provider Routing               | 会话级 provider/model 快照与用途路由                     | 全局 active provider 静默影响已有会话    |
+| P2     | Benchmark Harness              | 用真实任务评估 harness、工具、上下文和权限策略           | 成本高、环境复杂、指标不可比较           |
+| P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张         |
 
 ## 2. M2 · Generic MCP v1
 
@@ -270,7 +183,7 @@ interface McpServerConfig {
 
 ### 4.3 Trace / Replay 增强
 
-- trace 记录并发 run 的 conversationId、sessionId、runId、provider role、workspace mutation lease、prompt resource、prompt build。
+- trace 记录并发 run 的 conversationId、sessionId、runId、provider role、workspace writer ownership、prompt resource、prompt build。
 - 支持从任一 `llm.request` fork/replay 当前 provider request。
 - 增加 prompt cache 指标、usage 趋势、tool timing、compact 前后 token 变化。
 - 后端、MCP、Serena、provider retry、approval model 的关键事件进入统一 trace。
@@ -314,7 +227,7 @@ benchmarks/
 - 不允许 agent 看到 gold patch、`test_patch`、`fail_to_pass` 或 `pass_to_pass`。
 - 后续接入 SWE-EVO / SWE-Chain 类软件演进任务。
 - SWE-Marathon 只用于少量高成本 full/nightly 任务。
-- 自建 `harness-stress` 覆盖外部 benchmark 不关心的产品语义：审批、并发 run、运行中插话、workspace mutation lease、trace/key 泄漏、终端长输出、中断与恢复。
+- 自建 `harness-stress` 覆盖外部 benchmark 不关心的产品语义：审批、并发 run、运行中插话、workspace writer 冲突、trace/key 泄漏、终端长输出、中断与恢复。
 
 ### 5.2 执行
 

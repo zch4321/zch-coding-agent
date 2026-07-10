@@ -450,7 +450,24 @@ export const IPC_CONTRACTS = {
       },
       { additionalProperties: false },
     ),
-    result: ipcResultSchema(AcceptedSchema),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          accepted: Type.Boolean(),
+          reason: Type.Optional(
+            Type.Union([
+              Type.Literal('active_run'),
+              Type.Literal('workspace_writer_active'),
+            ]),
+          ),
+          writerConversationId: Type.Optional(
+            Type.String({ minLength: 1, maxLength: 256 }),
+          ),
+          writerRunId: Type.Optional(RunIdSchema),
+        },
+        { additionalProperties: false },
+      ),
+    ),
   },
   'plan:update-status': {
     payload: Type.Object(
@@ -705,6 +722,7 @@ export const IPC_CONTRACTS = {
         version: Type.Literal(IPC_VERSION),
         traceId: TraceIdSchema,
         eventId: EventIdSchema,
+        conversationId: Type.String({ minLength: 1, maxLength: 256 }),
       },
       { additionalProperties: false },
     ),

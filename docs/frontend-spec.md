@@ -45,7 +45,9 @@
 
 - Session、Run 是运行时概念，不作为左侧导航层级。
 - 同一对话同一时间最多一个 active Run。
-- Run 活动时再次发送消息默认拒绝；排队不在 MVP 范围。
+- 全应用默认最多 4 个 active Run，达到 `maxConcurrentRuns` 后新 Run 直接拒绝；不另设 provider call 上限。
+- 同一 canonical workspace 最多一个非只读 writer Run；ReadOnly Run 可与 writer 和其他 ReadOnly Run 并行，不同 workspace 的 writer 可并行。
+- Run 活动时同一对话再次发送消息默认拒绝；排队不在当前范围。
 
 ### 2.4 Artifact
 
@@ -158,7 +160,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 
 - 有当前项目时，在该项目下创建新对话并聚焦输入框。
 - 没有项目时，先打开目录选择器，成功后创建项目和新对话。
-- 当前 Run 活动时触发新对话，必须先确认是否中断；未经确认不丢失当前状态。
+- 当前 Run 活动时可以新建或切换对话，不中断后台 Run，也不显示“中断并切换”确认框。
 - 创建对话本身不需要立即访问 Provider；首次发送消息时再创建 runtime Session。
 
 ### 5.3 对话标题
@@ -184,6 +186,13 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 - 空列表显示简短空状态，不用假数据撑满界面。
 - 对话列表排序默认按 `updatedAt` 倒序。
 
+### 5.6 并发状态与破坏性操作
+
+- 对话项和搜索结果显示一个最高优先级运行状态：`Awaiting approval` → `Writer` → `Read-only locked` → `Cancelling` → `Running` → `Failed` → `Completed`。
+- 后台 approval 只在其所属 conversation 显示 badge；点击后 ApprovalCard 使用显式 conversationId 提交，不得复用先前 active conversation 的 session/run/call。
+- running、start pending 或 awaiting approval 的 conversation 禁用 delete、fork 和 revert，并通过 tooltip 说明原因；项目内任一 conversation busy 时禁止 remove project。
+- conversation 切换不清空目标之外的 draft、context attachments、error 或 pending approval。
+
 ---
 
 ## 6. 对话区
@@ -194,7 +203,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 
 - 显示当前对话标题。
 - 空闲时不显示 `NO SESSION`、`IDLE` 等内部状态 badge。
-- 仅在以下情况显示短状态：`Running`、`Waiting for approval`、`Cancelling`、`Failed`。
+- 仅在以下情况显示短状态：`Running`、`Writer`、`Read-only locked`、`Waiting for approval`、`Cancelling`、`Failed`。
 - 状态不得挤压对话标题；窄宽度下优先保留标题和 Stop 操作。
 
 ### 6.2 消息流
@@ -292,7 +301,7 @@ Context Ingress 审批必须显示：
 - `Shift+Enter` 换行。
 - IME composition 期间按 Enter 不发送。
 - 空消息不可发送。
-- active Run 或 pending approval 时不可再次发送；显示明确原因。
+- active Run、start pending、pending approval 或 readonly mode 同步失败时不可再次发送；显示明确原因。
 - Stop 触发 run interrupt，不关闭 P4 PTY。
 
 ### 7.3 模型与模式
@@ -302,6 +311,9 @@ Context Ingress 审批必须显示：
 - 权限模式为 ReadOnly、Auto、Confirm、Yolo。
 - 首次启用 Yolo 必须显示 host-level side effects 风险并记录告知版本。
 - 模型和模式控件使用紧凑下拉，不使用侧栏大卡片。
+- 同 workspace 其他 writer 活跃时，用户切到该 conversation 才把它持久化并同步为 ReadOnly；其 mode selector 显示 ReadOnly、disabled，并用 tooltip 指明 writer conversation。
+- 不批量修改未打开的其他 conversation。writer 结束后 selector 解除 disabled，但 conversation 保持 ReadOnly；用户手动选择 Auto/Confirm/Yolo 时由主进程重新校验。
+- 如果后台 writer 在当前 conversation 打开后取得所有权，当前 conversation 立即执行同样的 ReadOnly 同步。同步失败仍允许浏览，但禁用发送并显示可重试错误。
 
 ### 7.4 布局验收
 
@@ -464,7 +476,8 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 - Settings 不展示 `Start session` / `Close session` 作为主流程按钮。
 - 首次发送消息时自动创建 runtime Session。
-- 新对话、切换项目、删除对话和退出应用负责触发生命周期处理。
+- 切换 conversation 不关闭后台 Session 或 Run；删除 conversation、移除项目和退出应用才关闭对应 runtime 资源。退出时统一取消 active runs、释放 workspace writer 并关闭 PTY。
+- 未发送 draft 与 context attachments 按 conversation 保存和恢复；A → B → A 切换不得把 B 的输入带回 A，也不得清空 A 的未发送内容。
 
 ---
 
@@ -480,6 +493,8 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 | Calling LLM         | 流式占位/文本      | Stop                     | 保留当前 tab                |
 | Running tool        | 工具卡状态更新     | Stop                     | 文件工具可打开相关 Artifact |
 | Waiting approval    | 审批卡             | 禁止发送，可 Stop        | 自动显示 Diff 或相关文件    |
+| Workspace writer    | Writer badge       | 当前 Run 的普通控制      | 保留内容                    |
+| Read-only locked    | Read-only locked   | 允许启动只读分析         | 保留内容并提示状态可能过期  |
 | Cancelling          | 短状态             | Stop disabled            | 保留内容                    |
 | Failed              | 结构化错误、可重试 | 恢复输入                 | 保留审查上下文              |
 | Conversation closed | 历史只读           | 新消息时重新绑定 Session | 恢复持久化 Artifact 元数据  |
@@ -611,6 +626,9 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] 对话标题可生成、重命名和删除。
 - [ ] 搜索只在本地检索标题和消息，并能打开结果。
 - [ ] 首次发送消息自动创建 runtime Session。
+- [ ] A 运行时切到 B 不打断 A，A/B timeline、approval、error 和 draft 不串线。
+- [ ] Sidebar 与搜索结果按规定优先级显示 writer/running/readonly locked/approval/failed/completed 状态。
+- [ ] running/start pending/approval conversation 的 delete、fork、revert 和 remove project 被禁用并说明原因。
 
 ### 16.3 对话与输入
 
@@ -618,6 +636,8 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] active Run 和 pending approval 时禁止重复发送。
 - [ ] Enter、Shift+Enter 和 IME 行为符合规范。
 - [ ] 模型和权限模式只使用紧凑控件，不放入侧栏大卡片。
+- [ ] 同 workspace writer 活跃时，切到其他 conversation 后 mode 显示并同步为 ReadOnly 且 selector disabled；writer 结束后解锁但不自动恢复模式。
+- [ ] Limits 只提供最大并发任务数；UI 明确 writer=1 是不可配置安全规则。
 - [ ] 对话输入区没有 Terminal 入口。
 - [ ] Send/Stop 按钮与底部、右侧距离一致。
 

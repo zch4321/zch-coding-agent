@@ -79,6 +79,10 @@ export interface ActiveRun {
   clientRequestId: string
   controller: AbortController
   done: Promise<void>
+  releaseRunSlot: () => void
+  releaseWriter: () => void
+  pendingSideEffects: Set<Promise<void>>
+  writerReleasePending: boolean
   status: RunStatus
   toolTokensUsed: number
   pendingApproval?: PendingApproval

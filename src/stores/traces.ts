@@ -117,44 +117,45 @@ export const useTraceStore = defineStore('traces', {
         return
       }
 
-      const prepared = await bridge.forkTrace({
-        version: IPC_VERSION,
-        traceId: this.selectedId,
-        eventId: this.forkEventId.trim() as EventId,
-      })
-      if (!prepared.ok) {
-        this.error = prepared.error.message
-        return
-      }
-
       agent.saveActiveConversation()
       await agent.activateWorkspace(this.replay.workspace)
       const conversation = agent.createConversation(this.replay.workspace)
       if (!conversation) {
-        await bridge.closeSession({
-          version: IPC_VERSION,
-          sessionId: prepared.value.sessionId,
-        })
         this.error = 'Unable to create a conversation for the trace fork'
         return
       }
 
       conversation.title = ('Fork ' + this.selectedId).slice(0, 120)
-      agent.sessionIdsByConversation[conversation.id] = prepared.value.sessionId
-      agent.sessionId = prepared.value.sessionId
-      agent.runStatus = 'idle'
-      agent.activeRunId = undefined
-      const started = await bridge.startTraceFork({
-        version: IPC_VERSION,
-        sessionId: prepared.value.sessionId,
-      })
-      if (!started.ok) {
-        await agent.closeRuntimeSession(conversation.id)
-        this.error = started.error.message
-        return
-      }
+      agent.setStartPending(conversation.id, true)
+      try {
+        const prepared = await bridge.forkTrace({
+          version: IPC_VERSION,
+          traceId: this.selectedId,
+          eventId: this.forkEventId.trim() as EventId,
+          conversationId: conversation.id,
+        })
+        if (!prepared.ok) {
+          agent.setStartPending(conversation.id, false)
+          await agent.deleteConversation(conversation.id)
+          this.error = prepared.error.message
+          return
+        }
 
-      agent.activeRunId = started.value.runId
+        agent.registerSession(conversation.id, prepared.value.sessionId)
+        const started = await bridge.startTraceFork({
+          version: IPC_VERSION,
+          sessionId: prepared.value.sessionId,
+        })
+        if (!started.ok) {
+          await agent.closeRuntimeSession(conversation.id)
+          this.error = started.error.message
+          return
+        }
+
+        agent.registerRun(conversation.id, started.value.runId)
+      } finally {
+        agent.setStartPending(conversation.id, false)
+      }
       this.actionMessage =
         'Fork started in conversation “' +
         conversation.title +

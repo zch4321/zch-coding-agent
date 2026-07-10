@@ -53,6 +53,15 @@ export interface PromptSelection {
   promptBuild: PromptBuildSummary
 }
 
+export type WorkspaceConcurrencyContext =
+  | { status: 'available' }
+  | { status: 'writer'; writerConversationId: string; writerRunId: string }
+  | {
+      status: 'readonly_locked'
+      writerConversationId: string
+      writerRunId: string
+    }
+
 interface RuntimeContextInput {
   workspace: string
   mode: string
@@ -61,6 +70,7 @@ interface RuntimeContextInput {
   promptRegistry?: PromptRegistry
   projectMetadata?: ProjectMetadataStore
   reason: string
+  workspaceConcurrency?: WorkspaceConcurrencyContext
   toolNames?: readonly string[]
   signal?: AbortSignal
 }
@@ -73,6 +83,7 @@ interface HarnessPromptInput {
   promptRegistry?: PromptRegistry
   projectMetadata?: ProjectMetadataStore
   skillSummary?: string
+  workspaceConcurrency?: WorkspaceConcurrencyContext
   compactHistory?: {
     summary: string
     source: string
@@ -518,6 +529,11 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
     projectContextSummary(input),
   ])
   const currentTime = new Date().toISOString()
+  const concurrency = input.workspaceConcurrency ?? { status: 'available' }
+  const workspaceConcurrencyContent =
+    locale === 'zh-CN'
+      ? workspaceConcurrencyContentZh(concurrency)
+      : workspaceConcurrencyContentEn(concurrency)
   const content = renderPromptTemplate(prompt.content, {
     currentDate: new Date().toISOString().slice(0, 10),
     currentTime,
@@ -543,6 +559,8 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
     projectTree,
     moduleStatus: escapeAttribute(modules.status),
     moduleContent: modules.content,
+    workspaceConcurrencyStatus: concurrency.status,
+    workspaceConcurrencyContent,
   })
   const stableContent = content.replace(currentTime, '<current_time_snapshot>')
 
@@ -551,6 +569,54 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
     hash: sha256(stableContent),
     ...(prompt.resource ? { resource: prompt.resource } : {}),
   }
+}
+
+function workspaceConcurrencyContentEn(
+  context: WorkspaceConcurrencyContext,
+): string {
+  if (context.status === 'available') {
+    return 'No agent run currently owns the workspace writer.'
+  }
+
+  if (context.status === 'writer') {
+    return [
+      'This session owns the workspace writer for its complete run.',
+      `writer_conversation_id: ${escapeAttribute(context.writerConversationId)}`,
+      `writer_run_id: ${escapeAttribute(context.writerRunId)}`,
+    ].join('\n')
+  }
+
+  return [
+    'Another agent run is modifying this workspace. This session is forcibly restricted to readonly access.',
+    'Do not write or delete files, modify Git or project metadata, write to terminals, spawn side-effecting processes, access the network for side effects, or call any other mutating tool.',
+    'After the writer finishes, reread relevant files before drawing conclusions because prior workspace state may be stale.',
+    `writer_conversation_id: ${escapeAttribute(context.writerConversationId)}`,
+    `writer_run_id: ${escapeAttribute(context.writerRunId)}`,
+  ].join('\n')
+}
+
+function workspaceConcurrencyContentZh(
+  context: WorkspaceConcurrencyContext,
+): string {
+  if (context.status === 'available') {
+    return '当前没有 agent run 持有 workspace writer。'
+  }
+
+  if (context.status === 'writer') {
+    return [
+      '当前 session 在完整 run 生命周期内持有 workspace writer。',
+      `writer_conversation_id: ${escapeAttribute(context.writerConversationId)}`,
+      `writer_run_id: ${escapeAttribute(context.writerRunId)}`,
+    ].join('\n')
+  }
+
+  return [
+    '另一个 agent run 正在修改同一 workspace；当前 session 被强制限制为只读。',
+    '不得写入或删除文件、修改 Git 或项目元数据、写入终端、启动有副作用的进程、执行有副作用的网络访问，或调用任何其他 mutating tool。',
+    'writer 结束后必须重新读取相关文件再下结论，避免依据过期的 workspace 状态。',
+    `writer_conversation_id: ${escapeAttribute(context.writerConversationId)}`,
+    `writer_run_id: ${escapeAttribute(context.writerRunId)}`,
+  ].join('\n')
 }
 
 async function agentsContext(input: HarnessPromptInput): Promise<{

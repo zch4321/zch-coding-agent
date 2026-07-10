@@ -109,7 +109,7 @@ IPC 调用链：
 
 ## 4. 配置、凭据与模型
 
-配置由 `electron/config/store.ts` 管理，schema 在 `electron/config/schema.ts` 和 `shared/config.ts` 中定义。当前 schema version 为 6。
+配置由 `electron/config/store.ts` 管理，schema 在 `electron/config/schema.ts` 和 `shared/config.ts` 中定义。当前 schema version 为 7；v7 新增 `limits.maxConcurrentRuns`（`1..32`，默认 `4`），旧配置迁移时自动补默认值。并发配置不包含独立 provider call 上限，也不允许调整同 workspace writer 数。
 
 持久化位置：
 
@@ -148,6 +148,7 @@ IPC 调用链：
 | `SessionOrchestratorMessages`    | orchestration prompt 解析、事件和 history 注入。                         |
 | `SessionEventEmitter`            | AgentEvent 发射和 session 归属检查。                                     |
 | `SessionTerminalController`      | session-scoped terminal facade。                                         |
+| `WorkspaceAccessCoordinator`     | 全局 active run 配额与 canonical workspace 唯一 writer 所有权。          |
 
 Run 流程概要：
 
@@ -158,6 +159,16 @@ Run 流程概要：
 - 每步 provider 调用前会 drain queued interjections、检查自动 compact、重新注入最新 runtime/AGENTS context。
 - provider 返回 assistant turn 后写入 history；若有 tool calls，则进入工具执行；若没有 tool calls，则检查 goal/plan continuation 或结束 run。
 - 中断通过 `AbortSignal` 协作传递给 provider、工具、审批等待和长进程。
+
+并发与 workspace 访问采用“一写多读”模型：
+
+- 全应用最多同时存在 `maxConcurrentRuns` 个 active run，默认 4；第 5 个 run 直接以 `CONFLICT / max_concurrent_runs` 拒绝，不排队。每个 run 同时最多一个 provider call，因此该配置也构成理论 provider call 上限。
+- `readonly` run 只占全局 run slot，不获取 writer；`auto`、`confirm`、`yolo` run 必须原子获取 canonical workspace 的唯一 writer。不同 workspace 可以各有一个 writer，同一 workspace 的第二个非只读 run 以 `CONFLICT / workspace_writer_active` 拒绝。
+- writer 从 run 启动覆盖 provider 调用、工具执行、等待人工审批、interjection continuation 和 cancelling；不会在单个 tool batch 后释放。若取消或超时时存在 `supportsAbort: false` 的副作用工具，terminal 状态可以先完成，但 writer 必须继续持有到该工具底层 Promise settle，不能仅因包装层返回 cancelled/timeout 就开放第二个 writer。
+- terminal run status 对 renderer 可见前先幂等释放全局 run slot；没有残留副作用时同时释放 writer，否则延迟到残留副作用 settle。`finally`、session close 超时与 manager dispose 使用同一幂等路径兜底。carryover 可立即使用全局容量，但同 workspace 的非只读 carryover 会等待 writer 真正释放后重试。
+- idle session 改为 `readonly` 始终允许；改为非只读模式时主进程重新检查 writer。active run 期间任何 mode 修改都拒绝。
+- `workspace.writer.changed` 向 renderer 发布 acquired/released owner；trace 记录 `workspace.writer` 的 acquired/released/rejected、结构化 `run.rejected`，且 `session.start` 包含 conversationId。
+- ReadOnly 对所有副作用生效，包括 filesystem/VCS/project metadata 写入、process spawn、terminal write、network side effect 和 unknown external effect；只读文件、代码、VCS、terminal 与 instruction 读取仍可用。
 
 ---
 
@@ -174,7 +185,8 @@ Prompt harness 当前由 `electron/session/prompt-harness.ts`、`electron/prompt
 会话层：
 
 - 初始 session 会追加 base instructions、runtime context、assistant preferences、AGENTS 和 skills summary。
-- runtime context 来自 `resources/prompts/harness/runtime-context.*.md` 模板，变量由 TypeScript collector 提供；动态快照包含当前日期、时间、timezone、workspace、permission mode、provider/model、git summary、project tree 和 module context。
+- runtime context 来自 `resources/prompts/harness/runtime-context.*.md` 模板，变量由 TypeScript collector 提供；动态快照包含当前日期、时间、timezone、workspace、permission mode、provider/model、git summary、project tree、module context 和 workspace writer 状态。
+- `<workspace_concurrency>` 固定为 `available`、`writer` 或 `readonly_locked`。其他 writer 存在时，trusted harness 会写入 writer conversation/run ID，明确禁止当前 readonly session 调用副作用工具，并要求 writer 结束后重读相关文件。该状态参与 runtime-context hash，因此获取和释放 writer 都只在下一次 provider call 追加新快照，不改写已存历史。
 - `AGENTS.md` / `AGENTS.override.md` 通过 `agents-context.ts` 从 workspace 和 selected attachments 的目录链读取，格式化为 `<agents ...>` tagged context；tag 会记录 path、kind、depth、priority、hash、bytes 和 truncated，越深目录和 override 文件具有更高优先级。
 - run attachments 由 `context-attachments.ts` 生成 `<context_file>` 和 `<context_directory>`，再包进 `<selected_context>`。
 - slash command、skills、compact、goal/plan 等 app-authored context 以 user-role provider message 追加，但其来源、trusted/editable、hash 和 token 估算记录在 prompt ledger。
@@ -365,7 +377,7 @@ Trace 默认关闭。开启 logging 前必须接受 trace notice。
 
 主要事件：
 
-- session/run lifecycle：`session.start`、`session.end`、`session.mode`、`run.start`、`run.end`。
+- session/run lifecycle：`session.start`、`session.end`、`session.mode`、`run.start`、`run.end`、`run.rejected`、`workspace.writer`。
 - LLM：`llm.request`、`llm.response`、`llm.usage`。
 - tool/approval：`approval`、`tool.call`。
 - UI-visible content：`user.message`、`agent.message`、`orchestrator.message`、`interjection.message`。
@@ -380,7 +392,7 @@ Trace request 记录：
 - prompt resources。
 - prompt build layer summary。
 
-`TraceService` 提供 list、replay、stats、fork 和 cleanup。Fork 从某个 `llm.request` 恢复 provider request override，创建新 session，默认不重放历史副作用。
+`TraceService` 提供 list、replay、stats、fork 和 cleanup。Fork 从某个 `llm.request` 恢复 provider request override，目标 conversationId 必须随 fork 请求进入新 session，默认不重放历史副作用。
 
 隐私边界：
 
@@ -402,6 +414,15 @@ Renderer 是 Vue 3 + Pinia 应用，主要职责是展示和收集用户操作�
 - `agent-timeline`：messages、tools、usage、context attachments、goal/plan。
 - `agent-changes`：agent 文件变更和 revert。
 - `agent.ts`：兼容旧组件的 facade，新代码应直接使用领域 store。
+
+并发路由规则：
+
+- `conversationRuntimes` 是 sessionId、activeRunId、runStatus、startPending、pending approval/carryover、error、event seq、diagnostics 和 timeline counter 的唯一运行时来源；active facade 值由当前 conversation 派生。
+- 每个 `ConversationRecord` 还持久化自己的 composer draft 与 context attachments；切换 conversation 时先写回来源 record，再从目标 record 恢复，未发送内容不会在后台 run 或 workspace 切换时串线或丢失。
+- create session、start run、approval、interrupt、plan 和 trace fork 在 `await` 前捕获 conversationId，IPC 返回后只更新发起方；后台事件通过 `conversationIdBySessionId` 路由。
+- 当前 timeline 使用 `agent-timeline`；后台 timeline adapter 直接绑定目标 `ConversationRecord`，内存立即更新。所有 conversation 共用 250ms workbench debounce，dispose 前 flush；事件诊断最多保留 100 条。
+- `workspaceWriters` 索引只保存主进程事件快照。writer 获取时不批量改 inactive conversation；用户切换到同 workspace 的其他 conversation 时才持久化为 readonly 并同步其 idle session。writer 结束后 selector 解锁但保持 readonly，必须由用户手动选择其他模式。
+- 后台 approval、carryover、错误和 completed/failed 状态保留在目标 runtime；sidebar/search badge 优先级为 awaiting approval、writer、readonly locked、cancelling、running、failed、completed。
 
 UI 主要区域：
 

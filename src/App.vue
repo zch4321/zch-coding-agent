@@ -61,8 +61,6 @@ const terminalHeight = ref(280)
 const renameConversationId = ref<string>()
 const renameValue = ref('')
 const deleteConversationId = ref<string>()
-const switchConversationId = ref<string>()
-const switchNewConversationWorkspace = ref<string>()
 const revertMessageId = ref<string>()
 const revertMessagePreview = ref('')
 
@@ -142,47 +140,15 @@ async function confirmYoloMode() {
 }
 
 async function createConversation(workspacePath?: string) {
-  if (agent.activeRunId || agent.pendingApproval) {
-    switchConversationId.value = 'new'
-    switchNewConversationWorkspace.value = workspacePath
-    return
-  }
-
   await agent.newConversation(workspacePath)
 }
 
 async function openConversation(conversationId: string) {
-  if (
-    !(await agent.selectConversation(conversationId)) &&
-    (agent.activeRunId || agent.pendingApproval)
-  ) {
-    switchConversationId.value = conversationId
-    switchNewConversationWorkspace.value = undefined
-  }
-}
-
-async function confirmConversationSwitch() {
-  const target = switchConversationId.value
-  const targetWorkspace = switchNewConversationWorkspace.value
-  switchConversationId.value = undefined
-  switchNewConversationWorkspace.value = undefined
-  await agent.interruptRun()
-  await agent.closeRuntimeSession()
-
-  if (target === 'new') {
-    await agent.newConversation(targetWorkspace)
-  } else if (target) {
-    await agent.selectConversation(target)
-  }
-}
-
-function closeSwitchDialog() {
-  switchConversationId.value = undefined
-  switchNewConversationWorkspace.value = undefined
+  await agent.selectConversation(conversationId)
 }
 
 function requestRevert(messageId: string, preview: string) {
-  if (agent.activeRunId || agent.pendingApproval) return
+  if (agent.startPending || agent.activeRunId || agent.pendingApproval) return
   revertMessageId.value = messageId
   revertMessagePreview.value = preview
 }
@@ -196,7 +162,7 @@ async function confirmRevert() {
 }
 
 async function forkFromMessage(messageId: string) {
-  if (agent.activeRunId || agent.pendingApproval) return
+  if (agent.startPending || agent.activeRunId || agent.pendingApproval) return
   await agent.forkConversation(undefined, messageId)
 }
 
@@ -208,7 +174,7 @@ async function exportConversation(conversationId: string) {
 }
 
 async function importConversation() {
-  if (agent.activeRunId || agent.pendingApproval) return
+  if (agent.startPending || agent.activeRunId || agent.pendingApproval) return
   const result = await agent.importConversationViaDialog()
   if (result.error) {
     agent.error = t('dialogs.importFailed') + ': ' + result.error
@@ -513,19 +479,16 @@ onUnmounted(() => {
         :rename-open="Boolean(renameConversationId)"
         :rename-value="renameValue"
         :delete-open="Boolean(deleteConversationId)"
-        :switch-open="Boolean(switchConversationId)"
         :revert-open="Boolean(revertMessageId)"
         :revert-message-preview="revertMessagePreview"
         @update:yolo-open="yoloWarningOpen = $event"
         @update:rename-open="!$event && (renameConversationId = undefined)"
         @update:rename-value="renameValue = $event"
         @update:delete-open="!$event && (deleteConversationId = undefined)"
-        @update:switch-open="!$event && closeSwitchDialog()"
         @update:revert-open="!$event && (revertMessageId = undefined)"
         @confirm-yolo="confirmYoloMode"
         @confirm-rename="confirmRename"
         @confirm-delete="confirmDeleteConversation"
-        @confirm-switch="confirmConversationSwitch"
         @confirm-revert="confirmRevert"
       />
     </main>

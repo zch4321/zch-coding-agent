@@ -52,7 +52,7 @@ export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
 
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(6),
+    schemaVersion: Type.Literal(7),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
@@ -87,7 +87,7 @@ export type AppConfig = Static<typeof AppConfigSchema>
 export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 6,
+  schemaVersion: 7,
   activeProviderId: DEFAULT_PROVIDER_ID,
   providers: [
     {
@@ -117,6 +117,7 @@ export const DEFAULT_APP_CONFIG = {
     },
   },
   limits: {
+    maxConcurrentRuns: 4,
     maxStepsPerRun: 200,
     maxToolOutputBytes: 64 * 1_024,
     maxContextTokens: 64_000,
@@ -230,7 +231,7 @@ export function toPublicConfig(
         })
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     activeProviderId: config.activeProviderId,
     providers: config.providers.map((provider) => ({
       id: provider.id,

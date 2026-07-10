@@ -32,7 +32,6 @@ export function hasSideEffects(definition: ToolDefinition): boolean {
       effect !== 'terminal.read' &&
       effect !== 'instruction.read' &&
       effect !== 'vcs.read' &&
-      effect !== 'workspace.metadata.write' &&
       effect !== 'code.read',
   )
 }

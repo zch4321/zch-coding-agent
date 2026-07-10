@@ -28,6 +28,7 @@ import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import {
   appendAgentsContextIfChanged,
   appendRuntimeContextIfChanged,
+  type WorkspaceConcurrencyContext,
 } from './prompt-harness'
 
 export interface ProviderTurnResult {
@@ -47,6 +48,9 @@ export class SessionProviderTurnRunner {
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
+  readonly #getWorkspaceConcurrency: (
+    session: SessionState,
+  ) => WorkspaceConcurrencyContext
 
   constructor(options: {
     configStore: ConfigStore
@@ -58,6 +62,9 @@ export class SessionProviderTurnRunner {
     providerFactory: SessionManagerOptions['providerFactory']
     onDiagnostic: (message: string, error?: unknown) => void
     emit: (session: SessionState, event: AgentEventDraft) => void
+    getWorkspaceConcurrency?: (
+      session: SessionState,
+    ) => WorkspaceConcurrencyContext
   }) {
     this.#configStore = options.configStore
     this.#toolRegistry = options.toolRegistry
@@ -68,6 +75,8 @@ export class SessionProviderTurnRunner {
     this.#providerFactory = options.providerFactory
     this.#onDiagnostic = options.onDiagnostic
     this.#emit = options.emit
+    this.#getWorkspaceConcurrency =
+      options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
   }
 
   async callProvider(
@@ -96,6 +105,7 @@ export class SessionProviderTurnRunner {
       promptRegistry: this.#promptRegistry,
       projectMetadata: this.#projectMetadata,
       reason: 'provider_call',
+      workspaceConcurrency: this.#getWorkspaceConcurrency(session),
       toolNames: this.#toolRegistry.list().map((tool) => tool.id),
       signal: run.controller.signal,
     })

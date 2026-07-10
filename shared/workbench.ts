@@ -116,6 +116,10 @@ export const ConversationRecordSchema = Type.Object(
     title: Type.String({ minLength: 1, maxLength: 256 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
     mode: PermissionModeSchema,
+    draft: Type.Optional(Type.String({ maxLength: 1_000_000 })),
+    contextAttachments: Type.Optional(
+      Type.Array(ContextAttachmentChipSchema, { maxItems: 64 }),
+    ),
     messages: Type.Array(ChatMessageSchema, { maxItems: 10_000 }),
     tools: Type.Optional(Type.Array(ToolActivitySchema, { maxItems: 10_000 })),
     usage: Type.Optional(Type.Array(UsageActivitySchema, { maxItems: 10_000 })),

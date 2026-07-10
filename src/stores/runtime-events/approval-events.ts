@@ -6,7 +6,7 @@ export function handleApprovalEvent(
   event: ApprovalEvent,
   context: RuntimeEventContext,
 ): void {
-  const { runtime, timeline } = context
+  const { runtime, timeline, schedulePersist } = context
 
   if (event.diff) timeline.latestReviewedApproval = undefined
   runtime.pendingApproval = {
@@ -25,4 +25,5 @@ export function handleApprovalEvent(
     status: 'requested',
     order: timeline.nextTimelineOrder(),
   }
+  schedulePersist()
 }

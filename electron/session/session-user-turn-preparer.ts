@@ -9,6 +9,7 @@ import {
   appendAgentsContextIfChanged,
   appendRuntimeContextIfChanged,
   selectedContextContent,
+  type WorkspaceConcurrencyContext,
 } from './prompt-harness'
 import type { SessionOrchestratorMessages } from './session-orchestrator-messages'
 import { resolveSlashCommand } from './slash-commands'
@@ -32,6 +33,9 @@ export class SessionUserTurnPreparer {
   readonly #projectMetadata: ProjectMetadataStore | undefined
   readonly #orchestratorMessages: SessionOrchestratorMessages
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
+  readonly #getWorkspaceConcurrency: (
+    session: SessionState,
+  ) => WorkspaceConcurrencyContext
 
   constructor(options: {
     configStore: ConfigStore
@@ -41,6 +45,9 @@ export class SessionUserTurnPreparer {
     projectMetadata?: ProjectMetadataStore
     orchestratorMessages: SessionOrchestratorMessages
     emit: (session: SessionState, event: AgentEventDraft) => void
+    getWorkspaceConcurrency?: (
+      session: SessionState,
+    ) => WorkspaceConcurrencyContext
   }) {
     this.#configStore = options.configStore
     this.#toolRegistry = options.toolRegistry
@@ -49,6 +56,8 @@ export class SessionUserTurnPreparer {
     this.#projectMetadata = options.projectMetadata
     this.#orchestratorMessages = options.orchestratorMessages
     this.#emit = options.emit
+    this.#getWorkspaceConcurrency =
+      options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
   }
 
   async prepare(
@@ -66,6 +75,7 @@ export class SessionUserTurnPreparer {
       promptRegistry: this.#promptRegistry,
       projectMetadata: this.#projectMetadata,
       reason: 'run_started',
+      workspaceConcurrency: this.#getWorkspaceConcurrency(session),
       toolNames: this.#toolRegistry.list().map((tool) => tool.id),
       signal: run.controller.signal,
     })

@@ -386,6 +386,97 @@ describe('prompt harness', () => {
     expect(state.promptLedger.at(-1)?.role).toBe('user')
   })
 
+  it('appends workspace writer snapshots without rewriting prompt history', async () => {
+    const workspace = path.join(
+      os.tmpdir(),
+      `prompt-harness-writer-${Date.now()}`,
+    )
+    await mkdir(workspace, { recursive: true })
+    const state = ledger()
+    const config = publicConfig()
+
+    await appendInitialPromptHarness(state, {
+      workspace,
+      mode: 'readonly',
+      config,
+      providerId: 'deepseek',
+      promptRegistry,
+      workspaceConcurrency: { status: 'available' },
+    })
+    const original = structuredClone(state.history)
+
+    await expect(
+      appendRuntimeContextIfChanged(state, {
+        workspace,
+        mode: 'readonly',
+        config,
+        providerId: 'deepseek',
+        promptRegistry,
+        reason: 'writer-acquired',
+        workspaceConcurrency: {
+          status: 'readonly_locked',
+          writerConversationId: 'conversation:writer',
+          writerRunId: 'run:writer',
+        },
+      }),
+    ).resolves.toBe(true)
+
+    expect(state.history.slice(0, original.length)).toEqual(original)
+    expect(state.history.at(-1)?.content).toContain(
+      '<workspace_concurrency status="readonly_locked">',
+    )
+    expect(state.history.at(-1)?.content).toContain('conversation:writer')
+    expect(state.history.at(-1)?.content).toContain('run:writer')
+    expect(state.history.at(-1)?.content).toContain('重新读取相关文件')
+
+    await expect(
+      appendRuntimeContextIfChanged(state, {
+        workspace,
+        mode: 'readonly',
+        config,
+        providerId: 'deepseek',
+        promptRegistry,
+        reason: 'writer-released',
+        workspaceConcurrency: { status: 'available' },
+      }),
+    ).resolves.toBe(true)
+    expect(state.history.at(-1)?.content).toContain(
+      '<workspace_concurrency status="available">',
+    )
+  })
+
+  it('renders the English readonly lock warning with fixed safety guidance', async () => {
+    const workspace = path.join(
+      os.tmpdir(),
+      `prompt-harness-writer-en-${Date.now()}`,
+    )
+    await mkdir(workspace, { recursive: true })
+    const config = publicConfig()
+    config.assistant.language = 'en-US'
+    const state = ledger()
+
+    await appendInitialPromptHarness(state, {
+      workspace,
+      mode: 'readonly',
+      config,
+      providerId: 'deepseek',
+      promptRegistry,
+      workspaceConcurrency: {
+        status: 'readonly_locked',
+        writerConversationId: 'conversation:writer-en',
+        writerRunId: 'run:writer-en',
+      },
+    })
+
+    const runtime = state.history.find((message) =>
+      message.content?.includes('<workspace_concurrency'),
+    )
+    expect(runtime?.content).toContain('forcibly restricted to readonly')
+    expect(runtime?.content).toContain('Do not write or delete files')
+    expect(runtime?.content).toContain('reread relevant files')
+    expect(runtime?.content).not.toContain('${')
+  })
+
   it('uses ProjectModel metadata in module context when available', async () => {
     const workspace = path.join(
       os.tmpdir(),

@@ -54,7 +54,14 @@ import { SessionRunController } from './session-run-controller'
 import {
   appendInitialPromptHarness,
   appendRuntimeContextIfChanged,
+  type WorkspaceConcurrencyContext,
 } from './prompt-harness'
+import {
+  WorkspaceAccessCoordinator,
+  type RunAccessLease,
+  type RunAccessRejection,
+  type WorkspaceWriterOwner,
+} from './workspace-access-coordinator'
 
 const RUN_CANCEL_GRACE_MS = 2_000
 
@@ -81,6 +88,7 @@ export class SessionManager {
   readonly #autoApproverFactory: SessionManagerOptions['autoApproverFactory']
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   readonly #sessions = new Map<SessionId, SessionState>()
+  readonly #writerEventSessions = new Map<RunId, SessionState>()
   readonly #toolRegistry: ToolRegistry
   readonly #toolExecutor: ToolExecutor
   readonly #events: SessionEventEmitter
@@ -93,6 +101,7 @@ export class SessionManager {
   readonly #orchestration: SessionOrchestrationPlanner
   readonly #userTurns: SessionUserTurnPreparer
   readonly #runs: SessionRunController
+  readonly #workspaceAccess: WorkspaceAccessCoordinator
   readonly #permissionPipeline = new PermissionPipeline()
 
   /**
@@ -119,6 +128,10 @@ export class SessionManager {
     this.#events = new SessionEventEmitter({
       getWebContents: this.#getWebContents,
       getSession: (sessionId) => this.#sessions.get(sessionId),
+    })
+    this.#workspaceAccess = new WorkspaceAccessCoordinator({
+      onWriterChanged: (status, owner) =>
+        this.#handleWorkspaceWriterChanged(status, owner),
     })
     this.#approvals = new SessionApprovalCoordinator({
       configStore: this.#configStore,
@@ -166,6 +179,8 @@ export class SessionManager {
       emit: (session, event) => this.#emit(session, event),
       setRunStatus: (session, run, status, error) =>
         this.#runs.setRunStatus(session, run, status, error),
+      getWorkspaceConcurrency: (session) =>
+        this.#workspaceConcurrencyContext(session),
     })
     this.#interjections = new SessionInterjectionCoordinator({
       configStore: this.#configStore,
@@ -183,6 +198,8 @@ export class SessionManager {
       projectMetadata: this.#projectMetadata,
       orchestratorMessages: this.#orchestratorMessages,
       emit: (session, event) => this.#emit(session, event),
+      getWorkspaceConcurrency: (session) =>
+        this.#workspaceConcurrencyContext(session),
     })
     const providerTurns = new SessionProviderTurnRunner({
       configStore: this.#configStore,
@@ -194,6 +211,8 @@ export class SessionManager {
       providerFactory: this.#providerFactory,
       onDiagnostic: this.#onDiagnostic,
       emit: (session, event) => this.#emit(session, event),
+      getWorkspaceConcurrency: (session) =>
+        this.#workspaceConcurrencyContext(session),
     })
     const toolRunner = new SessionToolRunner({
       configStore: this.#configStore,
@@ -221,6 +240,8 @@ export class SessionManager {
       userTurns: this.#userTurns,
       onDiagnostic: this.#onDiagnostic,
       emit: (session, event) => this.#emit(session, event),
+      acquireRunAccess: (session, runId) =>
+        this.#acquireRunAccess(session, runId),
     })
     this.#pluginBus?.setToolRegistrationPort(this.#toolRegistry)
   }
@@ -299,11 +320,13 @@ export class SessionManager {
         projectMetadata: this.#projectMetadata,
         skillSummary: this.#skillsManager?.summaryPrompt(),
         toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+        workspaceConcurrency: this.#workspaceConcurrencyContext(session),
       })
     }
     await session.logger.write({
       type: 'session.start',
       sessionId,
+      conversationId: input.conversationId,
       workspace: session.workspace,
       model:
         getProviderConfig(publicConfig, input.provider)?.model ??
@@ -334,11 +357,30 @@ export class SessionManager {
   async updateSessionMode(
     sessionId: SessionId,
     mode: PermissionMode,
-  ): Promise<boolean> {
+  ): Promise<{
+    accepted: boolean
+    reason?: 'active_run' | 'workspace_writer_active'
+    writerConversationId?: string
+    writerRunId?: RunId
+  }> {
     const session = this.#sessions.get(sessionId)
 
-    if (!session || session.closed || session.activeRun) {
-      return false
+    if (!session || session.closed) {
+      return { accepted: false }
+    }
+
+    if (session.activeRun) {
+      return { accepted: false, reason: 'active_run' }
+    }
+
+    const writer = this.#workspaceAccess.writerFor(session.workspace)
+    if (mode !== 'readonly' && writer) {
+      return {
+        accepted: false,
+        reason: 'workspace_writer_active',
+        writerConversationId: writer.conversationId,
+        writerRunId: writer.runId,
+      }
     }
 
     await session.logger.write({
@@ -355,9 +397,10 @@ export class SessionManager {
       promptRegistry: this.#promptRegistry,
       projectMetadata: this.#projectMetadata,
       reason: 'permission_mode_changed',
+      workspaceConcurrency: this.#workspaceConcurrencyContext(session),
       toolNames: this.#toolRegistry.list().map((tool) => tool.id),
     })
-    return true
+    return { accepted: true }
   }
 
   /**
@@ -429,6 +472,7 @@ export class SessionManager {
       )
 
       if (!completed) {
+        this.#runs.releaseAccess(session.activeRun)
         session.logger = new NullTraceLogger()
         this.#onDiagnostic(
           `Run ${session.activeRun.runId} did not stop within the cancellation grace period`,
@@ -483,6 +527,7 @@ export class SessionManager {
    * compare provider behavior without re-emitting historical side effects.
    */
   async createForkFromTrace(input: {
+    conversationId: string
     workspace: string
     mode: PermissionMode
     messages: ProviderMessage[]
@@ -490,6 +535,7 @@ export class SessionManager {
     sourceEventId: EventId
   }): Promise<{ sessionId: SessionId }> {
     const sessionId = await this.createSession({
+      conversationId: input.conversationId,
       workspace: input.workspace,
       mode: input.mode,
       provider: this.#configStore.getPublicConfig().activeProviderId,
@@ -645,7 +691,147 @@ export class SessionManager {
     await Promise.all(
       [...this.#sessions.keys()].map((idValue) => this.closeSession(idValue)),
     )
+    this.#workspaceAccess.releaseAll()
     await this.#terminals.dispose()
+  }
+
+  #acquireRunAccess(session: SessionState, runId: RunId): RunAccessLease {
+    const result = this.#workspaceAccess.acquire({
+      limit: this.#configStore.getPublicConfig().limits.maxConcurrentRuns,
+      workspace: session.workspace,
+      mode: session.mode,
+      conversationId: session.conversationId ?? session.sessionId,
+      sessionId: session.sessionId,
+      runId,
+    })
+
+    if (result.acquired) {
+      if (session.mode !== 'readonly') {
+        this.#writerEventSessions.set(runId, session)
+      }
+      return result.lease
+    }
+
+    this.#traceRunAccessRejection(session, runId, result.rejection)
+    if (result.rejection.reason === 'max_concurrent_runs') {
+      ipcFault('CONFLICT', 'The maximum number of concurrent runs is active', {
+        reason: result.rejection.reason,
+        limit: result.rejection.limit,
+        active: result.rejection.active,
+      })
+    }
+
+    ipcFault('CONFLICT', 'Another run is modifying this workspace', {
+      reason: result.rejection.reason,
+      writerConversationId: result.rejection.writer.conversationId,
+      writerRunId: result.rejection.writer.runId,
+    })
+  }
+
+  #traceRunAccessRejection(
+    session: SessionState,
+    runId: RunId,
+    rejection: RunAccessRejection,
+  ): void {
+    const common = {
+      type: 'run.rejected' as const,
+      sessionId: session.sessionId,
+      runId,
+    }
+    const event =
+      rejection.reason === 'max_concurrent_runs'
+        ? {
+            ...common,
+            reason: rejection.reason,
+            limit: rejection.limit,
+            active: rejection.active,
+          }
+        : {
+            ...common,
+            reason: rejection.reason,
+            writerConversationId: rejection.writer.conversationId,
+            writerRunId: rejection.writer.runId,
+          }
+    void session.logger
+      .write(event)
+      .catch((error: unknown) =>
+        this.#onDiagnostic('Failed to trace rejected run', error),
+      )
+
+    if (rejection.reason === 'workspace_writer_active') {
+      void session.logger
+        .write({
+          type: 'workspace.writer',
+          sessionId: session.sessionId,
+          runId,
+          workspace: session.workspace,
+          conversationId: session.conversationId ?? session.sessionId,
+          status: 'rejected',
+          writerConversationId: rejection.writer.conversationId,
+          writerRunId: rejection.writer.runId,
+        })
+        .catch((error: unknown) =>
+          this.#onDiagnostic(
+            'Failed to trace rejected workspace writer',
+            error,
+          ),
+        )
+    }
+  }
+
+  #handleWorkspaceWriterChanged(
+    status: 'acquired' | 'released',
+    owner: WorkspaceWriterOwner,
+  ): void {
+    const session =
+      this.#sessions.get(owner.sessionId) ??
+      this.#writerEventSessions.get(owner.runId)
+    if (!session) return
+
+    void session.logger
+      .write({
+        type: 'workspace.writer',
+        sessionId: owner.sessionId,
+        runId: owner.runId,
+        workspace: owner.workspace,
+        conversationId: owner.conversationId,
+        status,
+      })
+      .catch((error: unknown) =>
+        this.#onDiagnostic('Failed to trace workspace writer change', error),
+      )
+    this.#emit(session, {
+      type: 'workspace.writer.changed',
+      workspace: owner.workspace,
+      status,
+      writerConversationId: owner.conversationId,
+      writerSessionId: owner.sessionId,
+      writerRunId: owner.runId,
+    })
+    if (status === 'released') {
+      this.#writerEventSessions.delete(owner.runId)
+    }
+  }
+
+  #workspaceConcurrencyContext(
+    session: SessionState,
+  ): WorkspaceConcurrencyContext {
+    const writer = this.#workspaceAccess.writerFor(session.workspace)
+    if (!writer) return { status: 'available' }
+
+    if (writer.sessionId === session.sessionId) {
+      return {
+        status: 'writer',
+        writerConversationId: writer.conversationId,
+        writerRunId: writer.runId,
+      }
+    }
+
+    return {
+      status: 'readonly_locked',
+      writerConversationId: writer.conversationId,
+      writerRunId: writer.runId,
+    }
   }
 
   /**

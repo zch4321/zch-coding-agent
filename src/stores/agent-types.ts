@@ -83,6 +83,8 @@ export interface ConversationRecord {
   title: string
   model: string
   mode: import('../../shared/config').PermissionMode
+  draft?: string
+  contextAttachments?: ContextAttachmentChip[]
   messages: ChatMessage[]
   tools?: ToolActivity[]
   usage?: UsageActivity[]

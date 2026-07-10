@@ -66,6 +66,7 @@ const inputDisabled = computed(
   () =>
     !agent.workspacePath ||
     !agent.activeConversationId ||
+    agent.startPending ||
     Boolean(agent.activeRunId) ||
     Boolean(agent.pendingApproval),
 )
@@ -499,7 +500,11 @@ watch(inputDisabled, (disabled) => {
           class="composer-provider-select"
           size="small"
           :options="agent.providerOptions"
-          :disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
+          :disabled="
+            Boolean(
+              agent.startPending || agent.activeRunId || agent.pendingApproval,
+            )
+          "
           filterable
           @update:value="handleProviderSelect"
         />
@@ -525,14 +530,26 @@ watch(inputDisabled, (disabled) => {
           </template>
           {{ t('chat.providerSettings') }}
         </NTooltip>
-        <NSelect
-          :value="agent.mode"
-          class="mode-select"
-          size="small"
-          :options="modeOptions"
-          :disabled="Boolean(agent.activeRunId || agent.pendingApproval)"
-          @update:value="emit('mode', $event as PermissionMode)"
-        />
+        <NTooltip :disabled="!agent.modeLockedByWriter">
+          <template #trigger>
+            <NSelect
+              :value="agent.modeLockedByWriter ? 'readonly' : agent.mode"
+              class="mode-select"
+              size="small"
+              :options="modeOptions"
+              :disabled="
+                Boolean(
+                  agent.startPending ||
+                  agent.activeRunId ||
+                  agent.pendingApproval ||
+                  agent.modeLockedByWriter,
+                )
+              "
+              @update:value="emit('mode', $event as PermissionMode)"
+            />
+          </template>
+          {{ agent.modeLockTooltip }}
+        </NTooltip>
       </div>
       <NTooltip v-if="agent.activeRunId">
         <template #trigger>
@@ -551,7 +568,7 @@ watch(inputDisabled, (disabled) => {
               type="button"
               :aria-label="t('chat.stop')"
               :disabled="agent.runStatus === 'cancelling'"
-              @click="agent.interruptRun"
+              @click="() => agent.interruptRun()"
             >
               <UiIcon name="stop" />
             </button>

@@ -237,6 +237,7 @@ export class ToolExecutor {
     approvedCall: ApprovedToolCall,
     context: Omit<ToolExecutionContext, 'approvedCall' | 'signal'>,
     signal: AbortSignal,
+    onNonAbortableSettlement?: (settlement: Promise<void>) => void,
   ): Promise<ToolResult> {
     const definition = this.#registry.get(approvedCall.toolId)
 
@@ -316,6 +317,12 @@ export class ToolExecutor {
 
         return boundResult(result, definition.maxOutputBytes)
       }
+
+      const settlement = executed.then(
+        () => undefined,
+        () => undefined,
+      )
+      onNonAbortableSettlement?.(settlement)
 
       const aborted = new Promise<ToolResult>((resolve) => {
         timeoutController.signal.addEventListener(

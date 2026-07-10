@@ -23,7 +23,11 @@ export class SessionEventEmitter {
   }
 
   emitAgent(session: SessionState, event: AgentEventDraft): void {
-    if (session.closed && event.type !== 'session.closed') {
+    if (
+      session.closed &&
+      event.type !== 'session.closed' &&
+      event.type !== 'workspace.writer.changed'
+    ) {
       return
     }
 

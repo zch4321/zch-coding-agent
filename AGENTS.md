@@ -1,46 +1,36 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Structure and Boundaries
 
 This is an Electron + Vue 3 desktop coding agent. Preserve process boundaries:
 
-- `electron/` contains the privileged main process, preload bridge, agent runtime, tools, IPC, configuration, logging, and terminals.
-- `src/` contains the sandboxed Vue renderer, Pinia state, and UI components.
-- `shared/` contains process-neutral contracts and schemas; do not import Electron, Node.js, or Vue here.
-- `e2e/` holds Playwright tests; `scripts/` holds native and live-provider runners.
-- `docs/` is the architecture source of truth. `designs/` and `public/` contain visual references and static assets.
+- `electron/`: privileged main process, preload bridge, runtime, tools, IPC, configuration, logging, and terminals.
+- `src/`: sandboxed Vue renderer, Pinia state, and UI.
+- `shared/`: process-neutral contracts and schemas; never import Electron, Node.js, or Vue here.
+- `e2e/`: Playwright tests. `scripts/`: native and live-provider runners. `docs/`: architecture source of truth.
 
-## Build, Test, and Development Commands
+Define cross-process payloads once in `shared/` and validate them at IPC boundaries. Keep credentials out of the renderer, traces, logs, and child-process environments. Preserve sender validation, workspace path guards, bounded output, approval checks, and abort handling.
 
-- `npm ci`: install locked dependencies.
-- `npm run dev`: start Vite and Electron for local development.
-- `npm run build`: run checks, native smoke tests, and produce a Windows x64 package.
-- `npm test`: run deterministic Vitest tests.
-- `npm run test:e2e`: build and run Playwright serially.
-- `npm run test:native`: verify `node-pty` integration.
-- `npm run test:real`: run opt-in DeepSeek tests; requires `DEEPSEEK_API_KEY`.
-- `npm run lint`, `npm run format:check`, `npm run typecheck`: required static quality gates.
+## Working Practices
 
-## Coding Style & Naming Conventions
+- Never commit code changes directly to `master`. Use the current non-`master` task branch when it is appropriate; create a branch only when working from `master` or no suitable task branch exists. New branches must use a conventional prefix such as `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, or `chore/`; never use the `codex/` prefix.
+- Keep each code file below 500 lines where practical, including test files, stylesheets, Vue components, and pages. Exceed this only when the functionality is genuinely cohesive or splitting it would add more complexity than it removes.
+- Use TypeScript and Vue SFCs. Prettier enforces two spaces, single quotes, no semicolons, and trailing commas; ESLint handles semantic rules. Use `kebab-case.ts` modules, `PascalCase.vue` components, `camelCase` values, and `PascalCase` types.
+- Keep commits cohesive and use imperative Conventional Commit-style subjects.
 
-Use TypeScript and Vue Single-File Components. Prettier enforces two-space indentation, single quotes, no semicolons, and trailing commas; ESLint handles semantic rules. Use `kebab-case.ts` for modules, `PascalCase.vue` for components, `camelCase` for values, and `PascalCase` for types. Define cross-process payloads once in `shared/` and validate them at IPC boundaries.
+## Verification
 
-## Testing Guidelines
+- `npm test`: deterministic Vitest tests.
+- `npm run lint`, `npm run format:check`, `npm run typecheck`: static quality gates.
+- `npm run test:native` and `npm run test:ripgrep`: native integration smoke tests.
+- `npm run test:e2e`: build the app, then run serial Playwright Electron tests.
+- `npm run build`: typecheck, run native and ripgrep smoke tests, build the app, and package Windows x64.
+- `npm run test:real`: opt-in DeepSeek tests; requires `DEEPSEEK_API_KEY` and must remain outside the deterministic suite.
 
-Vitest tests are colocated as `*.test.ts`; Playwright specs use `e2e/*.spec.ts`. Add regression coverage for changed policies, parsers, IPC handlers, and tools. Security-sensitive branches must be exercised. Keep `npm test` offline and deterministic; never fold live API tests into it.
+Add regression coverage for changed policy, parser, IPC, and tool behavior. Exercise security-sensitive branches.
 
-## Commit & Pull Request Guidelines
+## Prompt Harness and Context
 
-History uses concise Conventional Commit-style subjects, for example `feat: complete P4 terminal and context safeguards`. Use an imperative subject and coherent commits. Pull requests should explain behavior and security impact, link issues, list commands run, and include screenshots for renderer changes. Call out migrations, native changes, or required environment variables.
+Keep base instructions stable and document model-visible harness tags there. Tagged user-role messages are harness-injected context, not user-authored chat messages, except explicit live user interjections.
 
-## Security & Configuration Tips
-
-Never expose credentials to the renderer, traces, logs, or child-process environments. Production secrets belong in Electron `safeStorage`; `DEEPSEEK_API_KEY` is only a main-process development fallback. Preserve sender validation, workspace path guards, bounded output, approval checks, and abort handling when adding tools or IPC methods.
-
-## Prompt Harness & Context Rules
-
-Keep base instructions stable and document any model-visible harness tags there. Tagged user-role messages are harness-injected context, not user-authored chat messages, except for explicit live user interjections.
-
-Do not modify messages already written to a session history except through explicit compact flows. Runtime context, AGENTS changes, interjections, selected context, and tool results should append new messages or layers; context selection may omit old messages from a provider request, but stored history must remain append-only.
-
-Prompt resources and future templates must be deterministic, versioned, and validated for unresolved variables. Do not introduce executable template logic or mix repository/user/tool context into system-level instructions.
+Do not modify session history except through explicit compaction. Runtime context, AGENTS changes, interjections, selected context, and tool results append new messages or layers; provider context selection may omit old messages, but stored history remains append-only. Prompt resources and templates must be deterministic, versioned, and validated for unresolved variables; never add executable template logic or put repository, user, or tool context into system-level instructions.

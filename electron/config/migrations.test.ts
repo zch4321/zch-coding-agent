@@ -123,7 +123,8 @@ describe('config migrations', () => {
 
     const migrated = migrateConfig(legacy)
 
-    expect(migrated.schemaVersion).toBe(6)
+    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.limits.maxConcurrentRuns).toBe(4)
     expect(migrated.network.httpProxy).toEqual({ mode: 'off' })
     expect(migrated.prompts.approval.classifyRisk.id).toBe(
       'approval.classify-risk',
@@ -161,14 +162,15 @@ describe('config migrations', () => {
     })
   })
 
-  it('migrates a v3 config up to v6 with web search defaults', () => {
+  it('migrates a v3 config up to v7 with concurrency defaults', () => {
     const v3 = structuredClone(DEFAULT_APP_CONFIG)
     v3.schemaVersion = 3 as never
     delete (v3 as { webSearch?: unknown }).webSearch
 
     const migrated = migrateConfig(v3)
 
-    expect(migrated.schemaVersion).toBe(6)
+    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.limits.maxConcurrentRuns).toBe(4)
     expect(migrated.webSearch).toEqual({
       provider: 'brave',
       count: 5,
@@ -239,7 +241,7 @@ describe('config migrations', () => {
 
     const migrated = migrateConfig(legacy)
 
-    expect(migrated.schemaVersion).toBe(6)
+    expect(migrated.schemaVersion).toBe(7)
     expect(migrated.prompts).not.toHaveProperty('system')
   })
 })

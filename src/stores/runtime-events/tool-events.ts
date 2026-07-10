@@ -15,7 +15,8 @@ export function handleToolEvent(
   event: ToolEvent,
   context: RuntimeEventContext,
 ): void {
-  const { runtime, timeline, changes } = context
+  const { runtime, timeline, loadConversationChanges, schedulePersist } =
+    context
 
   if (event.type === 'tool.proposed') {
     timeline.tools.unshift({
@@ -27,6 +28,7 @@ export function handleToolEvent(
       status: 'proposed',
       order: timeline.nextTimelineOrder(),
     })
+    schedulePersist()
     return
   }
 
@@ -36,7 +38,7 @@ export function handleToolEvent(
     tool.result = event.result
     tool.approval = event.approval
     if (workspaceMutatingTools.has(tool.tool)) {
-      void changes.loadConversationChanges()
+      void loadConversationChanges()
     }
   }
 
@@ -46,4 +48,5 @@ export function handleToolEvent(
   ) {
     runtime.pendingApproval = undefined
   }
+  schedulePersist()
 }

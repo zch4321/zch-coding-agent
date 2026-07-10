@@ -505,12 +505,8 @@ export function createAppIpcHandlers(
     'session:close': async (payload) => ({
       accepted: await sessionManager.closeSession(payload.sessionId),
     }),
-    'session:update-mode': async (payload) => ({
-      accepted: await sessionManager.updateSessionMode(
-        payload.sessionId,
-        payload.mode,
-      ),
-    }),
+    'session:update-mode': async (payload) =>
+      sessionManager.updateSessionMode(payload.sessionId, payload.mode),
     'plan:update-status': (payload) =>
       sessionManager.updatePlanStatus({
         sessionId: payload.sessionId,
@@ -683,7 +679,10 @@ export function createAppIpcHandlers(
           payload.traceId,
           payload.eventId,
         )
-        return await sessionManager.createForkFromTrace(point)
+        return await sessionManager.createForkFromTrace({
+          ...point,
+          conversationId: payload.conversationId,
+        })
       } catch (error) {
         if (error instanceof TraceServiceError) {
           throw new IpcFault({
