@@ -14,6 +14,7 @@ import type {
 import { SessionManager } from './session-manager'
 import {
   createConfig,
+  createIpcTestEventSink,
   ForkProvider,
   waitFor,
 } from './session-manager-test-support'
@@ -87,7 +88,9 @@ describe('SessionManager cancellation and forks', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () => webContents,
+      eventSink: createIpcTestEventSink((envelope) =>
+        webContents.send('', envelope),
+      ),
       providerFactory: () => provider,
     })
     const sessionId = await manager.createSession({
@@ -145,7 +148,7 @@ describe('SessionManager cancellation and forks', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () => undefined,
+      eventSink: createIpcTestEventSink(() => undefined),
       providerFactory: () => provider,
     })
     const sourceEventId = 'event-source-request' as EventId

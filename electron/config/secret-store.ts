@@ -1,7 +1,6 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { safeStorage } from 'electron'
 import { writeJsonAtomic } from './atomic-file'
 
 interface SecretRecord {
@@ -22,30 +21,6 @@ export interface SafeStorageAdapter {
   decryptStringAsync(
     value: Buffer,
   ): Promise<{ result: string; shouldReEncrypt: boolean }>
-}
-
-export class ElectronSafeStorageAdapter implements SafeStorageAdapter {
-  readonly platform = process.platform
-
-  isAsyncEncryptionAvailable(): Promise<boolean> {
-    return safeStorage.isAsyncEncryptionAvailable()
-  }
-
-  getSelectedStorageBackend(): string {
-    return this.platform === 'linux'
-      ? safeStorage.getSelectedStorageBackend()
-      : 'system'
-  }
-
-  encryptStringAsync(value: string): Promise<Buffer> {
-    return safeStorage.encryptStringAsync(value)
-  }
-
-  decryptStringAsync(
-    value: Buffer,
-  ): Promise<{ result: string; shouldReEncrypt: boolean }> {
-    return safeStorage.decryptStringAsync(value)
-  }
 }
 
 export type SecretStorageStatus =

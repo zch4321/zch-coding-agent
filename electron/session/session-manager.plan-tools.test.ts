@@ -2,13 +2,16 @@ import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { WebContents } from 'electron'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { CallId } from '../../shared/ids'
 import type { LLMProvider, ProviderEvent } from '../providers/provider'
 import { PromptRegistry } from '../prompts/registry'
 import { SessionManager } from './session-manager'
-import { createConfig, waitFor } from './session-manager-test-support'
+import {
+  createConfig,
+  createIpcTestEventSink,
+  waitFor,
+} from './session-manager-test-support'
 
 describe('SessionManager plan tool batches', () => {
   class SameBatchPlanMutationProvider implements LLMProvider {
@@ -87,12 +90,7 @@ describe('SessionManager plan tool batches', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
       promptRegistry: await PromptRegistry.load(
         path.resolve('resources', 'prompts'),

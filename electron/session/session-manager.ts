@@ -77,7 +77,6 @@ const RUN_CANCEL_GRACE_MS = 2_000
 export class SessionManager {
   readonly #configStore: ConfigStore
   readonly #traceDirectory: string
-  readonly #getWebContents: SessionManagerOptions['getWebContents']
   readonly #pluginBus: PluginEventBus | undefined
   readonly #skillsManager: SkillsManager | undefined
   readonly #changeHistory: ChangeHistoryStore | undefined
@@ -117,7 +116,6 @@ export class SessionManager {
   constructor(options: SessionManagerOptions) {
     this.#configStore = options.configStore
     this.#traceDirectory = options.traceDirectory
-    this.#getWebContents = options.getWebContents
     this.#pluginBus = options.pluginBus
     this.#skillsManager = options.skillsManager
     this.#changeHistory = options.changeHistory
@@ -130,7 +128,7 @@ export class SessionManager {
     this.#autoApproverFactory = options.autoApproverFactory
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
     this.#events = new SessionEventEmitter({
-      getWebContents: this.#getWebContents,
+      eventSink: options.eventSink,
       getSession: (sessionId) => this.#sessions.get(sessionId),
     })
     this.#workspaceAccess = new WorkspaceAccessCoordinator({

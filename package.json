@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,vue,js,mjs,cjs,json,json5,css,html,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,vue,js,mjs,cjs,json,json5,css,html,yml,yaml}\"",
-    "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.runtime.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:real": "node scripts/run-real-api-tests.cjs",

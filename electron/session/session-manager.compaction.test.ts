@@ -2,7 +2,6 @@ import { mkdir, mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { WebContents } from 'electron'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import { PromptRegistry } from '../prompts/registry'
 import { SessionManager } from './session-manager'
@@ -10,7 +9,11 @@ import {
   AutoCompactProvider,
   CompactProvider,
 } from './session-manager-compaction-fixtures'
-import { createConfig, waitFor } from './session-manager-test-support'
+import {
+  createConfig,
+  createIpcTestEventSink,
+  waitFor,
+} from './session-manager-test-support'
 
 describe('SessionManager compaction', () => {
   it('rewrites provider history for /compact and reinjects summary as user context', async () => {
@@ -23,12 +26,7 @@ describe('SessionManager compaction', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
       promptRegistry: await PromptRegistry.load(
         path.resolve('resources', 'prompts'),
@@ -156,12 +154,7 @@ describe('SessionManager compaction', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
       promptRegistry: await PromptRegistry.load(
         path.resolve('resources', 'prompts'),
