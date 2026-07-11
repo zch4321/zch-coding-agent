@@ -16,6 +16,21 @@ type Unsubscribe = () => void
 export interface AgentApi {
   getConfig(payload: IpcPayload<'config:get'>): Promise<IpcResult<'config:get'>>
   setConfig(payload: IpcPayload<'config:set'>): Promise<IpcResult<'config:set'>>
+  listMcpServers(
+    payload: IpcPayload<'mcp:list'>,
+  ): Promise<IpcResult<'mcp:list'>>
+  reloadMcpConfig(
+    payload: IpcPayload<'mcp:reload'>,
+  ): Promise<IpcResult<'mcp:reload'>>
+  trustAndEnableMcpServer(
+    payload: IpcPayload<'mcp:trust-enable'>,
+  ): Promise<IpcResult<'mcp:trust-enable'>>
+  disableMcpServer(
+    payload: IpcPayload<'mcp:disable'>,
+  ): Promise<IpcResult<'mcp:disable'>>
+  restartMcpServer(
+    payload: IpcPayload<'mcp:restart'>,
+  ): Promise<IpcResult<'mcp:restart'>>
   listProviderModels(
     payload: IpcPayload<'provider:list-models'>,
   ): Promise<IpcResult<'provider:list-models'>>
@@ -157,6 +172,11 @@ export interface AgentApi {
 export const AGENT_API_KEYS = [
   'getConfig',
   'setConfig',
+  'listMcpServers',
+  'reloadMcpConfig',
+  'trustAndEnableMcpServer',
+  'disableMcpServer',
+  'restartMcpServer',
   'listProviderModels',
   'getWorkbench',
   'saveWorkbench',

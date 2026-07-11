@@ -5,6 +5,19 @@ import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 import { DEFAULT_ORCHESTRATION_PROMPT_REFS } from '../../shared/prompt-resources'
 
 describe('config migrations', () => {
+  it('adds an empty MCP server list when migrating schema v7', () => {
+    const legacy = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
+      string,
+      unknown
+    >
+    legacy.schemaVersion = 7
+    delete legacy.mcpServers
+
+    const migrated = migrateConfig(legacy)
+
+    expect(migrated.schemaVersion).toBe(8)
+    expect(migrated.mcpServers).toEqual([])
+  })
   it('maps the legacy automatic reasoning setting to DeepSeek high effort', () => {
     const legacy = {
       schemaVersion: 2,
@@ -123,7 +136,7 @@ describe('config migrations', () => {
 
     const migrated = migrateConfig(legacy)
 
-    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.schemaVersion).toBe(8)
     expect(migrated.limits.maxConcurrentRuns).toBe(4)
     expect(migrated.network.httpProxy).toEqual({ mode: 'off' })
     expect(migrated.prompts.approval.classifyRisk.id).toBe(
@@ -169,7 +182,7 @@ describe('config migrations', () => {
 
     const migrated = migrateConfig(v3)
 
-    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.schemaVersion).toBe(8)
     expect(migrated.limits.maxConcurrentRuns).toBe(4)
     expect(migrated.webSearch).toEqual({
       provider: 'brave',
@@ -241,7 +254,7 @@ describe('config migrations', () => {
 
     const migrated = migrateConfig(legacy)
 
-    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.schemaVersion).toBe(8)
     expect(migrated.prompts).not.toHaveProperty('system')
   })
 })

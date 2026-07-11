@@ -26,6 +26,11 @@ function subscribe<Event>(
 const api: AgentApi = {
   getConfig: (payload) => invoke('config:get', payload),
   setConfig: (payload) => invoke('config:set', payload),
+  listMcpServers: (payload) => invoke('mcp:list', payload),
+  reloadMcpConfig: (payload) => invoke('mcp:reload', payload),
+  trustAndEnableMcpServer: (payload) => invoke('mcp:trust-enable', payload),
+  disableMcpServer: (payload) => invoke('mcp:disable', payload),
+  restartMcpServer: (payload) => invoke('mcp:restart', payload),
   listProviderModels: (payload) => invoke('provider:list-models', payload),
   getWorkbench: (payload) => invoke('workbench:get', payload),
   saveWorkbench: (payload) => invoke('workbench:save', payload),

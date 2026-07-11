@@ -34,6 +34,7 @@ import { createHttpTransport } from './net/http-transport'
 import { PromptRegistry } from './prompts/registry'
 import { ProjectMetadataStore } from './project/project-metadata-store'
 import { CodeBackendManager } from './code-intelligence/backend-manager'
+import { McpManager } from './mcp/mcp-manager'
 import {
   APP_ENTRY_URL,
   APP_HOST,
@@ -166,6 +167,12 @@ async function installIpc(): Promise<void> {
   await workbenchStore.initialize()
   const projectMetadata = new ProjectMetadataStore()
   const codeBackends = new CodeBackendManager({ projectMetadata })
+  const mcpManager = new McpManager({
+    configStore,
+    defaultCwd: userData,
+    onDiagnostic: (message, error) => console.error(message, error),
+  })
+  await mcpManager.initialize()
   const promptRegistry = await PromptRegistry.load(
     path.join(appRoot, 'resources', 'prompts'),
   )
@@ -178,6 +185,7 @@ async function installIpc(): Promise<void> {
     changeHistory,
     projectMetadata,
     codeBackends,
+    mcpManager,
     promptRegistry,
     fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =>
       httpTransport.fetch(input, init),
@@ -196,6 +204,7 @@ async function installIpc(): Promise<void> {
       workbenchStore,
       projectMetadata,
       codeBackends,
+      mcpManager,
       getHttpTransport: () => httpTransport,
       refreshHttpTransport,
       getMainWindow: () => mainWindow,
@@ -206,6 +215,7 @@ async function installIpc(): Promise<void> {
   console.info(
     `P2 notices: provider=${PROVIDER_NOTICE_VERSION}, trace=${TRACE_NOTICE_VERSION}`,
   )
+  appDisposer.add(() => mcpManager.dispose())
   appDisposer.add(() => sessionManager.dispose())
   appDisposer.add(() => codeBackends.dispose())
   appDisposer.add(unregister)

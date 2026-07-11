@@ -25,6 +25,7 @@ const tabs = computed<
   { value: 'limits', label: t('settings.limits'), icon: 'settings' },
   { value: 'permissions', label: t('settings.permissions'), icon: 'warning' },
   { value: 'skills', label: t('settings.skills'), icon: 'app' },
+  { value: 'mcp', label: t('settings.mcp'), icon: 'app' },
   { value: 'logging', label: t('settings.logging'), icon: 'file' },
   { value: 'websearch', label: t('settings.webSearchTitle'), icon: 'app' },
 ])

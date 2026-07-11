@@ -20,10 +20,13 @@ import type { AgentEventDraft, SessionState } from './session-types'
 import type { SessionId } from '../../shared/ids'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import type { CodeBackendManager } from '../code-intelligence/backend-manager'
+import type { McpManager } from '../mcp/mcp-manager'
+import { registerMcpTools, type McpToolGateway } from '../tools/mcp-tools'
 
 export interface SessionTooling {
   toolRegistry: ToolRegistry
   toolExecutor: ToolExecutor
+  mcpGateway?: McpToolGateway
 }
 
 export function createSessionTooling(options: {
@@ -32,6 +35,7 @@ export function createSessionTooling(options: {
   skillsManager?: SkillsManager
   projectMetadata?: ProjectMetadataStore
   codeBackends?: CodeBackendManager
+  mcpManager?: McpManager
   getSession: (sessionId: SessionId) => SessionState | undefined
   emit: (session: SessionState, event: AgentEventDraft) => void
 }): SessionTooling {
@@ -75,8 +79,17 @@ export function createSessionTooling(options: {
     emit: options.emit,
   })
 
+  const mcpGateway = options.mcpManager
+    ? registerMcpTools(toolRegistry, {
+        manager: options.mcpManager,
+        configStore: options.configStore,
+        getSession: options.getSession,
+      })
+    : undefined
+
   return {
     toolRegistry,
     toolExecutor: new ToolExecutor(toolRegistry),
+    mcpGateway,
   }
 }

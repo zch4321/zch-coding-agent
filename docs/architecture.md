@@ -334,6 +334,15 @@ Code intelligence facade：
 - 支持符号概览、定义、引用、workspace symbols 和 diagnostics。
 - 当 backend 未配置、capability 不支持、路径不在 module 内或需要 file path 但传了目录时，返回结构化 unsupported result，而不是抛给模型。
 
+Generic MCP gateway：
+
+- `McpManager` 管理手写 stdio server 配置、启动信任、global/workspace 生命周期、目录 revision、退避重启、draining 和关闭；`McpStdioConnection` 同时供通用 MCP 与 Serena adapter 复用。
+- Provider 工具定义固定为 `list_mcp_servers`、`read_mcp_server`、`call_mcp_tool`。前两者只读取本地缓存目录；`read_mcp_server` 使用绑定 server/revision/offset 的不透明 cursor，并受页大小与总输出大小双重边界约束。
+- Session 保存每个 server 已披露的 revision 和工具名。通用 wrapper 在产生 proposed event 前解析为 `mcp:<serverId>:<toolName>` 的临时 `ToolDefinition`，所以权限、审批、plugin hook、trace 和 writer 协调看到的是实际 server、tool、arguments 与 annotations。
+- 动态 MCP tool 固定分类为 `external.unknown`、风险 `review`、不可记忆审批、不可自动重试。ReadOnly 拒绝，Auto 进入审批模型，Confirm 进入人工审批，Yolo 跳过 MCP 审批。
+- `tools/list` 最多 100 页、1,000 个工具和 4 MiB 原始目录；单个规范化工具最多 32 KiB。重复 cursor、重复名称、无效 schema 与过大定义形成诊断且不可调用。
+- `structuredContent` 与文本内容优先保留；图片、音频和 blob 的原始 base64 不进入模型上下文。输出继续受公共字节/token 和敏感内容边界约束。
+
 ---
 
 ## 13. Skills 与网络

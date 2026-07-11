@@ -45,7 +45,8 @@ import type { PromptRegistry } from '../prompts/registry'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import { SessionOrchestratorMessages } from './session-orchestrator-messages'
-import { createSessionTooling } from './session-tooling'
+import { createSessionTooling, type SessionTooling } from './session-tooling'
+import type { McpManager } from '../mcp/mcp-manager'
 import { SessionCompactCoordinator } from './session-compact-coordinator'
 import { SessionInterjectionCoordinator } from './session-interjection-coordinator'
 import { SessionOrchestrationPlanner } from './session-orchestration-planner'
@@ -82,6 +83,7 @@ export class SessionManager {
   readonly #changeHistory: ChangeHistoryStore | undefined
   readonly #projectMetadata: ProjectMetadataStore | undefined
   readonly #codeBackends: CodeBackendManager | undefined
+  readonly #mcpManager: McpManager | undefined
   readonly #promptRegistry: PromptRegistry | undefined
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
@@ -91,6 +93,7 @@ export class SessionManager {
   readonly #writerEventSessions = new Map<RunId, SessionState>()
   readonly #toolRegistry: ToolRegistry
   readonly #toolExecutor: ToolExecutor
+  readonly #mcpGateway: SessionTooling['mcpGateway']
   readonly #events: SessionEventEmitter
   readonly #terminals: SessionTerminalController
   readonly #approvals: SessionApprovalCoordinator
@@ -120,6 +123,7 @@ export class SessionManager {
     this.#changeHistory = options.changeHistory
     this.#projectMetadata = options.projectMetadata
     this.#codeBackends = options.codeBackends
+    this.#mcpManager = options.mcpManager
     this.#promptRegistry = options.promptRegistry
     this.#providerFactory = options.providerFactory
     this.#fetchImpl = options.fetchImpl
@@ -162,11 +166,13 @@ export class SessionManager {
       skillsManager: this.#skillsManager,
       projectMetadata: this.#projectMetadata,
       codeBackends: this.#codeBackends,
+      mcpManager: options.mcpManager,
       getSession: (sessionId) => this.#sessions.get(sessionId),
       emit: (session, event) => this.#emit(session, event),
     })
     this.#toolRegistry = tooling.toolRegistry
     this.#toolExecutor = tooling.toolExecutor
+    this.#mcpGateway = tooling.mcpGateway
     this.#compact = new SessionCompactCoordinator({
       configStore: this.#configStore,
       toolRegistry: this.#toolRegistry,
@@ -225,6 +231,7 @@ export class SessionManager {
       toolExecutor: this.#toolExecutor,
       approvals: this.#approvals,
       contextGate: this.#contextGate,
+      mcpGateway: this.#mcpGateway,
       onDiagnostic: this.#onDiagnostic,
       emit: (session, event) => this.#emit(session, event),
       setRunStatus: (session, run, status, error) =>
@@ -287,6 +294,7 @@ export class SessionManager {
     }
 
     const guard = await PathGuard.create(input.workspace)
+    await this.#mcpManager?.activateWorkspace(guard.workspacePath)
     const sessionId = id<SessionId>('session')
     const logger =
       publicConfig.logging.enabled || input.forkedFromEventId
@@ -307,6 +315,7 @@ export class SessionManager {
       eventSeq: 0,
       closed: false,
       clientRequests: new Map(),
+      mcpDisclosures: new Map(),
     }
 
     this.#sessions.set(sessionId, session)

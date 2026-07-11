@@ -23,6 +23,7 @@ import {
 } from './project-model'
 import { TerminalInfoSchema, TerminalSnapshotSchema } from './terminal'
 import { SkillListSchema, SkillSummarySchema } from './skills'
+import { McpServerIdSchema, McpSettingsSnapshotSchema } from './mcp'
 import {
   ContextAttachmentChipSchema,
   ContextAttachmentKindSchema,
@@ -148,6 +149,45 @@ export const IPC_CONTRACTS = {
         { additionalProperties: false },
       ),
     ),
+  },
+  'mcp:list': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(McpSettingsSnapshotSchema),
+  },
+  'mcp:reload': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(McpSettingsSnapshotSchema),
+  },
+  'mcp:trust-enable': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        serverId: McpServerIdSchema,
+        fingerprint: Type.String({ minLength: 64, maxLength: 64 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(McpSettingsSnapshotSchema),
+  },
+  'mcp:disable': {
+    payload: Type.Object(
+      { version: Type.Literal(IPC_VERSION), serverId: McpServerIdSchema },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(McpSettingsSnapshotSchema),
+  },
+  'mcp:restart': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        serverId: McpServerIdSchema,
+        workspace: Type.Optional(
+          Type.String({ minLength: 1, maxLength: 4_096 }),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(McpSettingsSnapshotSchema),
   },
   'provider:list-models': {
     payload: Type.Object(

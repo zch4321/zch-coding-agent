@@ -20,6 +20,7 @@ import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { PromptLedgerEntry } from './prompt-harness'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import type { CodeBackendManager } from '../code-intelligence/backend-manager'
+import type { McpManager } from '../mcp/mcp-manager'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -42,6 +43,7 @@ export interface SessionManagerOptions {
   changeHistory?: ChangeHistoryStore
   projectMetadata?: ProjectMetadataStore
   codeBackends?: CodeBackendManager
+  mcpManager?: McpManager
   promptRegistry?: PromptRegistry
   fetchImpl?: typeof fetch
   providerFactory?: (options: {
@@ -115,4 +117,5 @@ export interface SessionState {
   closed: boolean
   activeRun?: ActiveRun
   clientRequests: Map<string, RunId>
+  mcpDisclosures: Map<string, { revision: string; toolNames: Set<string> }>
 }

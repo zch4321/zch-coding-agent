@@ -23,6 +23,32 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - 可观测性：可选择开启 JSONL trace，记录请求、响应、工具、审批和 usage，并支持离线回放、fork 和统计。
 - 可配置提示词：内置中英文 system prompt，设置页可编辑，界面语言会选择对应提示词。
 - Skills：支持安装、扫描和启用本地 Skill 指令文件，通过按需读取减少常驻上下文开销。
+- Generic MCP：支持手写 stdio server 配置、逐 server 启停与启动信任；模型通过三个固定 gateway 工具分页发现和调用外部工具，调用继续经过现有权限与 trace 管线。
+
+### MCP 配置示例
+
+在 Electron `userData/config.json` 的 `mcpServers` 数组中手写配置，然后从设置页的“MCP 连接”重新加载并信任启用。敏感值请通过 `envFromHost` 引用主机环境变量，不要写入 `env`。
+
+```json
+{
+  "mcpServers": [
+    {
+      "id": "example",
+      "label": "Example tools",
+      "description": "Workspace-local example MCP server",
+      "enabled": false,
+      "scope": "workspace",
+      "transport": "stdio",
+      "command": "node",
+      "args": ["${workspace}/scripts/example-mcp.mjs"],
+      "env": { "LOG_LEVEL": "warn" },
+      "envFromHost": { "API_TOKEN": "EXAMPLE_API_TOKEN" },
+      "startupTimeoutMs": 10000,
+      "toolTimeoutMs": 30000
+    }
+  ]
+}
+```
 
 ## 技术栈
 
@@ -81,4 +107,4 @@ Zch Coding Agent 的安全模型是“本地桌面应用 + 明确审批 + 工作
 
 ## 当前状态
 
-`v0.1.0` 以 Windows x64 为主要发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能和 trace 基础能力。后续方向可以扩展多 Provider、通用 MCP / 插件加载器、IDE 级编辑能力和更强的 OS 级隔离。
+当前版本以 Windows x64 为主要发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway 和 trace 基础能力。后续方向可以扩展多 Provider、插件加载器、IDE 级编辑能力和更强的 OS 级隔离。

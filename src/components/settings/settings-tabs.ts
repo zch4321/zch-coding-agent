@@ -5,5 +5,6 @@ export type SettingsTab =
   | 'limits'
   | 'permissions'
   | 'skills'
+  | 'mcp'
   | 'logging'
   | 'websearch'

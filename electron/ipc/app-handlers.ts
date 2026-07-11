@@ -29,6 +29,7 @@ import {
   type ProjectMetadataStore,
 } from '../project/project-metadata-store'
 import type { CodeBackendManager } from '../code-intelligence/backend-manager'
+import type { McpManager } from '../mcp/mcp-manager'
 import { IpcFault, type IpcBusinessHandlers } from './index'
 
 export interface AppIpcHandlerDependencies {
@@ -40,6 +41,7 @@ export interface AppIpcHandlerDependencies {
   workbenchStore: WorkbenchStore
   projectMetadata: ProjectMetadataStore
   codeBackends: CodeBackendManager
+  mcpManager?: McpManager
   getHttpTransport?: () => HttpTransport
   refreshHttpTransport?: (
     proxy: ReturnType<ConfigStore['getPublicConfig']>['network']['httpProxy'],
@@ -59,6 +61,10 @@ function projectMetadataFault(error: unknown): IpcFault | undefined {
   })
 }
 
+function notAvailable(message: string): IpcFault {
+  return new IpcFault({ code: 'NOT_AVAILABLE', message })
+}
+
 export function createAppIpcHandlers(
   dependencies: AppIpcHandlerDependencies,
 ): IpcBusinessHandlers {
@@ -71,6 +77,7 @@ export function createAppIpcHandlers(
     workbenchStore,
     projectMetadata,
     codeBackends,
+    mcpManager,
     getHttpTransport,
     refreshHttpTransport,
     getMainWindow,
@@ -103,6 +110,30 @@ export function createAppIpcHandlers(
       }
 
       return { config }
+    },
+    'mcp:list': () => ({ servers: mcpManager?.listStatuses() ?? [] }),
+    'mcp:reload': async () => {
+      if (!mcpManager) throw notAvailable('MCP manager is unavailable')
+      return { servers: await mcpManager.reload() }
+    },
+    'mcp:trust-enable': async (payload) => {
+      if (!mcpManager) throw notAvailable('MCP manager is unavailable')
+      return {
+        servers: await mcpManager.trustAndEnable(
+          payload.serverId,
+          payload.fingerprint,
+        ),
+      }
+    },
+    'mcp:disable': async (payload) => {
+      if (!mcpManager) throw notAvailable('MCP manager is unavailable')
+      return { servers: await mcpManager.disable(payload.serverId) }
+    },
+    'mcp:restart': async (payload) => {
+      if (!mcpManager) throw notAvailable('MCP manager is unavailable')
+      return {
+        servers: await mcpManager.restart(payload.serverId, payload.workspace),
+      }
     },
     'provider:list-models': async (payload) => {
       const config = configStore.getPublicConfig()

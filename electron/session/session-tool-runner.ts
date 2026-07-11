@@ -11,7 +11,7 @@ import { PermissionPipeline } from '../permission/permission-pipeline'
 import { hasSideEffects } from '../permission/policy-engine'
 import type { ApprovedToolCall } from '../tools/approved-tool-call'
 import type { PluginEventBus } from '../plugins/event-bus'
-import type { ToolCall, ToolResult } from '../tools/types'
+import type { ToolCall, ToolDefinition, ToolResult } from '../tools/types'
 import { ProviderAutoApprover } from '../permission/auto-approver'
 import type { ToolExecutor } from '../tools/tool-registry'
 import { toJsonValue } from './session-common'
@@ -31,6 +31,7 @@ import type {
   SessionState,
 } from './session-types'
 import { normalizeLlmUsage } from '../providers/usage'
+import type { McpToolGateway } from '../tools/mcp-tools'
 
 export class SessionToolRunner {
   readonly #configStore: ConfigStore
@@ -43,6 +44,7 @@ export class SessionToolRunner {
   readonly #toolExecutor: ToolExecutor
   readonly #approvals: SessionApprovalCoordinator
   readonly #contextGate: SessionContextGate
+  readonly #mcpGateway: McpToolGateway | undefined
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
   readonly #setRunStatus: (
@@ -63,6 +65,7 @@ export class SessionToolRunner {
     toolExecutor: ToolExecutor
     approvals: SessionApprovalCoordinator
     contextGate: SessionContextGate
+    mcpGateway?: McpToolGateway
     onDiagnostic: (message: string, error?: unknown) => void
     emit: (session: SessionState, event: AgentEventDraft) => void
     setRunStatus: (
@@ -82,6 +85,7 @@ export class SessionToolRunner {
     this.#toolExecutor = options.toolExecutor
     this.#approvals = options.approvals
     this.#contextGate = options.contextGate
+    this.#mcpGateway = options.mcpGateway
     this.#onDiagnostic = options.onDiagnostic
     this.#emit = options.emit
     this.#setRunStatus = options.setRunStatus
@@ -94,7 +98,19 @@ export class SessionToolRunner {
   ): Promise<void> {
     this.#setRunStatus(session, run, 'running_tools')
 
-    for (const call of toolCalls) {
+    for (const providerCall of toolCalls) {
+      let call = providerCall
+      let definitionOverride: ToolDefinition | undefined
+      let resolutionFailure: ToolResult | undefined
+      const resolution = this.#mcpGateway?.resolveCall(session, providerCall)
+      if (resolution?.matched) {
+        if (resolution.ok) {
+          call = resolution.call
+          definitionOverride = resolution.definition
+        } else {
+          resolutionFailure = resolution.result
+        }
+      }
       this.#emit(session, {
         type: 'tool.proposed',
         sessionId: session.sessionId,
@@ -117,8 +133,13 @@ export class SessionToolRunner {
       try {
         if (run.controller.signal.aborted) {
           result = { status: 'cancelled', message: 'The run was cancelled' }
+        } else if (resolutionFailure) {
+          result = resolutionFailure
         } else {
-          const inspected = this.#toolExecutor.inspectCall(call)
+          const inspected = this.#toolExecutor.inspectCall(
+            call,
+            definitionOverride,
+          )
 
           if (!inspected.ok) {
             result = inspected.result
@@ -285,6 +306,7 @@ export class SessionToolRunner {
                           )
                         }
                       : undefined,
+                    definitionOverride,
                   )
             }
           }

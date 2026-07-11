@@ -259,6 +259,7 @@ const zhCN = {
     limits: '运行限制',
     permissions: '权限',
     skills: '技能',
+    mcp: 'MCP 连接',
     logging: '日志',
     sections: '设置分类',
     backToChat: '返回主界面',
@@ -474,6 +475,18 @@ const zhCN = {
     refresh: '刷新',
     none: '未找到有效技能。',
     skipped: '部分技能文件已跳过',
+  },
+  mcp: {
+    title: 'MCP 连接',
+    hint: '连接配置由用户手写。可在此重新加载、信任、启停和诊断 stdio MCP server。',
+    reload: '重新加载配置',
+    none: '配置中没有 MCP server。',
+    tools: '{count} 个工具',
+    restart: '重启连接',
+    trustTitle: '信任并启用 MCP server？',
+    trustHint:
+      'stdio MCP server 会以本应用权限执行下面的命令。请确认命令、参数、工作目录和环境变量名称。',
+    trustEnable: '信任并启用',
   },
   terminal: {
     name: '终端 {index}',

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -133,7 +133,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(7)
+    expect(parsed.schemaVersion).toBe(8)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(200)
     expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
       80,
@@ -142,6 +142,44 @@ describe('ConfigStore', () => {
       mode: 'conservative',
       bytesPerToken: 3,
     })
+  })
+
+  it('reloads handwritten MCP config atomically and exposes no host value', async () => {
+    const { directory, configStore } = await createStores()
+    const configPath = path.join(directory, 'config.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >
+    config.mcpServers = [
+      {
+        id: 'fixture',
+        label: 'Fixture',
+        description: 'Test MCP server',
+        enabled: false,
+        scope: 'global',
+        transport: 'stdio',
+        command: 'node',
+        args: ['server.mjs'],
+        envFromHost: { TOKEN: 'MCP_TEST_TOKEN' },
+        startupTimeoutMs: 5_000,
+        toolTimeoutMs: 5_000,
+      },
+    ]
+    await writeFile(configPath, JSON.stringify(config), 'utf8')
+    await configStore.reloadFromDisk()
+
+    expect(configStore.getMcpServers()).toHaveLength(1)
+    expect(JSON.stringify(configStore.getPublicConfig())).not.toContain(
+      'host-secret-value',
+    )
+
+    config.schemaVersion = 99
+    await writeFile(configPath, JSON.stringify(config), 'utf8')
+    await expect(configStore.reloadFromDisk()).rejects.toThrow(
+      'Unsupported config schema version',
+    )
+    expect(configStore.getMcpServers()).toHaveLength(1)
   })
 
   it('persists model catalogs and per-model capability overrides', async () => {

@@ -195,7 +195,7 @@ export const TraceEventSchema = Type.Union([
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
       callId: CallIdSchema,
-      tool: Type.String({ maxLength: 128 }),
+      tool: Type.String({ maxLength: 512 }),
       args: JsonValueSchema,
       result: JsonValueSchema,
       approvedBy: Type.String({ maxLength: 64 }),

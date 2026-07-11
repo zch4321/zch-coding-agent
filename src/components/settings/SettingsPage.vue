@@ -7,6 +7,7 @@ import PermissionsSettingsPanel from './PermissionsSettingsPanel.vue'
 import ProjectSettingsPanel from './ProjectSettingsPanel.vue'
 import ProviderSettingsPanel from './ProviderSettingsPanel.vue'
 import SkillsSettingsPanel from './SkillsSettingsPanel.vue'
+import McpSettingsPanel from './McpSettingsPanel.vue'
 import WebSearchSettingsPanel from './WebSearchSettingsPanel.vue'
 import type { SettingsTab } from './settings-tabs'
 
@@ -34,6 +35,7 @@ const emit = defineEmits<{
         @mode="emit('mode', $event)"
       />
       <SkillsSettingsPanel v-else-if="activeTab === 'skills'" />
+      <McpSettingsPanel v-else-if="activeTab === 'mcp'" />
       <LoggingSettingsPanel v-else-if="activeTab === 'logging'" />
       <WebSearchSettingsPanel v-else-if="activeTab === 'websearch'" />
       <LoggingSettingsPanel v-else />

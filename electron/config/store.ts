@@ -13,6 +13,7 @@ import {
   type AppProviderConfig,
 } from './schema'
 import type { SecretStore, SecretStorageStatus } from './secret-store'
+import type { McpLaunchTrust, McpServerConfig } from '../../shared/mcp'
 
 type ProviderUpdate = Extract<
   ConfigSetRequest,
@@ -110,7 +111,9 @@ export class ConfigStore {
   }> {
     await mkdir(path.dirname(this.#filePath), { recursive: true })
     const secretStorage = await this.#secretStore.initialize()
-    this.#config = await this.#read()
+    const config = await this.#read()
+    assertUniqueMcpServers(config)
+    this.#config = config
 
     return {
       config: this.getPublicConfig(),
@@ -180,6 +183,52 @@ export class ConfigStore {
 
   getActiveProvider(): AppProviderConfig {
     return structuredClone(getActiveAppProvider(this.#config))
+  }
+
+  getMcpServers(): McpServerConfig[] {
+    return structuredClone(this.#config.mcpServers)
+  }
+
+  reloadFromDisk(): Promise<PublicConfig> {
+    const operation = this.#mutation.then(async () => {
+      const next = await this.#read()
+      assertUniqueMcpServers(next)
+      this.#config = next
+      return this.getPublicConfig()
+    })
+    this.#mutation = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    return operation
+  }
+
+  setMcpServerEnabled(
+    serverId: string,
+    enabled: boolean,
+    launchTrust?: McpLaunchTrust,
+  ): Promise<PublicConfig> {
+    const operation = this.#mutation.then(async () => {
+      const next = structuredClone(this.#config)
+      const server = next.mcpServers.find(
+        (candidate) => candidate.id === serverId,
+      )
+
+      if (!server) {
+        throw new Error(`MCP server not found: ${serverId}`)
+      }
+
+      server.enabled = enabled
+      if (launchTrust) server.launchTrust = structuredClone(launchTrust)
+      await writeJsonAtomic(this.#filePath, next)
+      this.#config = next
+      return this.getPublicConfig()
+    })
+    this.#mutation = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    return operation
   }
 
   update(request: ConfigSetRequest): Promise<PublicConfig> {
@@ -469,5 +518,15 @@ export class ConfigStore {
 
       throw error
     }
+  }
+}
+
+function assertUniqueMcpServers(config: AppConfig): void {
+  const ids = new Set<string>()
+  for (const server of config.mcpServers) {
+    if (ids.has(server.id)) {
+      throw new Error(`Duplicate MCP server id: ${server.id}`)
+    }
+    ids.add(server.id)
   }
 }

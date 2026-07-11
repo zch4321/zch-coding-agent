@@ -64,6 +64,15 @@ const validPayloads: {
     kind: 'workspace',
     lastOpened: 'F:/workspace',
   },
+  'mcp:list': { version: 1 },
+  'mcp:reload': { version: 1 },
+  'mcp:trust-enable': {
+    version: 1,
+    serverId: 'github',
+    fingerprint: 'a'.repeat(64),
+  },
+  'mcp:disable': { version: 1, serverId: 'github' },
+  'mcp:restart': { version: 1, serverId: 'github' },
   'provider:list-models': { version: 1, refresh: false },
   'workbench:get': { version: 1 },
   'workbench:save': {

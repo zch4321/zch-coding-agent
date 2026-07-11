@@ -155,6 +155,19 @@
   color: var(--text-secondary);
 }
 
+.mcp-log-tail,
+.mcp-launch-preview {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+}
+
 .trace-stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

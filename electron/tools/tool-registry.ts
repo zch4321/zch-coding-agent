@@ -199,10 +199,11 @@ export class ToolExecutor {
 
   inspectCall(
     call: ToolCall,
+    definitionOverride?: ToolDefinition,
   ):
     | { ok: true; definition: ToolDefinition }
     | { ok: false; result: ToolResult } {
-    const definition = this.#registry.get(call.toolId)
+    const definition = definitionOverride ?? this.#registry.get(call.toolId)
 
     if (!definition) {
       return {
@@ -216,7 +217,9 @@ export class ToolExecutor {
       }
     }
 
-    const validation = this.#registry.validateArgs(definition, call.args)
+    const validation = definitionOverride
+      ? validateUnregisteredDefinition(definition, call.args)
+      : this.#registry.validateArgs(definition, call.args)
 
     if (!validation.ok) {
       return {
@@ -238,8 +241,10 @@ export class ToolExecutor {
     context: Omit<ToolExecutionContext, 'approvedCall' | 'signal'>,
     signal: AbortSignal,
     onNonAbortableSettlement?: (settlement: Promise<void>) => void,
+    definitionOverride?: ToolDefinition,
   ): Promise<ToolResult> {
-    const definition = this.#registry.get(approvedCall.toolId)
+    const definition =
+      definitionOverride ?? this.#registry.get(approvedCall.toolId)
 
     if (!definition) {
       return {
@@ -250,10 +255,9 @@ export class ToolExecutor {
       }
     }
 
-    const validation = this.#registry.validateArgs(
-      definition,
-      approvedCall.args,
-    )
+    const validation = definitionOverride
+      ? validateUnregisteredDefinition(definition, approvedCall.args)
+      : this.#registry.validateArgs(definition, approvedCall.args)
 
     if (!validation.ok) {
       return {
@@ -361,4 +365,17 @@ export class ToolExecutor {
       signal.removeEventListener('abort', relayAbort)
     }
   }
+}
+
+function validateUnregisteredDefinition<Schema extends TSchema>(
+  definition: ToolDefinition<Schema>,
+  args: JsonValue,
+): { ok: true; args: Static<Schema> } | { ok: false; message: string } {
+  const validate = compileSchema(definition.inputSchema)
+  if (!validate(args)) {
+    return { ok: false, message: formatSchemaErrors(validate.errors) }
+  }
+  const typedArgs = args as Static<Schema>
+  const message = definition.validateArgs?.(typedArgs)
+  return message ? { ok: false, message } : { ok: true, args: typedArgs }
 }

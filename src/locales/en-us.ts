@@ -262,6 +262,7 @@ const enUS = {
     limits: 'Limits',
     permissions: 'Permissions',
     skills: 'Skills',
+    mcp: 'MCP connections',
     logging: 'Logging',
     sections: 'Settings sections',
     backToChat: 'Back to main view',
@@ -486,6 +487,18 @@ const enUS = {
     refresh: 'Refresh',
     none: 'No valid skills found.',
     skipped: 'Some skill files were skipped',
+  },
+  mcp: {
+    title: 'MCP connections',
+    hint: 'Connection profiles are handwritten. Reload, trust, toggle and diagnose stdio MCP servers here.',
+    reload: 'Reload config',
+    none: 'No MCP servers are configured.',
+    tools: '{count} tools',
+    restart: 'Restart connection',
+    trustTitle: 'Trust and enable MCP server?',
+    trustHint:
+      'A stdio MCP server runs this command with the application privileges. Review the command, arguments, working directory and environment names.',
+    trustEnable: 'Trust and enable',
   },
   terminal: {
     name: 'Terminal {index}',

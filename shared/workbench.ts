@@ -43,7 +43,7 @@ export const ToolActivitySchema = Type.Object(
   {
     callId: CallIdSchema,
     runId: RunIdSchema,
-    tool: Type.String({ minLength: 1, maxLength: 128 }),
+    tool: Type.String({ minLength: 1, maxLength: 512 }),
     args: JsonValueSchema,
     reason: Type.String({ maxLength: 16_384 }),
     status: Type.Union([Type.Literal('proposed'), Type.Literal('completed')]),
@@ -70,7 +70,7 @@ export const ReviewedApprovalSchema = Type.Object(
   {
     runId: RunIdSchema,
     callId: CallIdSchema,
-    tool: Type.String({ minLength: 1, maxLength: 128 }),
+    tool: Type.String({ minLength: 1, maxLength: 512 }),
     reason: Type.String({ maxLength: 16_384 }),
     diff: Type.String({ maxLength: 250_000 }),
     diffHash: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),

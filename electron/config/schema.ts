@@ -14,6 +14,7 @@ import {
   DEFAULT_ORCHESTRATION_PROMPT_REFS,
 } from '../../shared/prompt-resources'
 import { DEFAULT_ASSISTANT_PREFERENCES } from '../../shared/system-prompts'
+import { McpServerConfigSchema } from '../../shared/mcp'
 
 export const AppProviderConfigSchema = Type.Object(
   {
@@ -52,7 +53,7 @@ export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
 
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(7),
+    schemaVersion: Type.Literal(8),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
@@ -78,6 +79,7 @@ export const AppConfigSchema = Type.Object(
     prompts: PublicConfigSchema.properties.prompts,
     network: PublicConfigSchema.properties.network,
     webSearch: AppWebSearchConfigSchema,
+    mcpServers: Type.Array(McpServerConfigSchema, { maxItems: 32 }),
   },
   { additionalProperties: false },
 )
@@ -87,7 +89,7 @@ export type AppConfig = Static<typeof AppConfigSchema>
 export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 7,
+  schemaVersion: 8,
   activeProviderId: DEFAULT_PROVIDER_ID,
   providers: [
     {
@@ -169,6 +171,7 @@ export const DEFAULT_APP_CONFIG = {
     provider: 'brave',
     count: 5,
   },
+  mcpServers: [],
 } satisfies AppConfig
 
 export function getAppProvider(
@@ -231,7 +234,7 @@ export function toPublicConfig(
         })
 
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     activeProviderId: config.activeProviderId,
     providers: config.providers.map((provider) => ({
       id: provider.id,
@@ -261,5 +264,6 @@ export function toPublicConfig(
       count: config.webSearch.count,
       ...webSearchCredential,
     },
+    mcpServers: structuredClone(config.mcpServers),
   }
 }

@@ -211,6 +211,14 @@ test.describe.serial('Electron settings workflows', () => {
       skills.getByText('E2E skill without optional trigger'),
     ).toBeVisible()
 
+    await navigation.getByRole('button', { name: 'MCP 连接' }).click()
+    const mcp = page.locator('.settings-section')
+    await expect(mcp.getByRole('heading', { name: 'MCP 连接' })).toBeVisible()
+    await expect(mcp.getByText('配置中没有 MCP server。')).toBeVisible()
+    await expect(
+      mcp.getByRole('button', { name: '重新加载配置' }),
+    ).toBeVisible()
+
     const traceDirectory = path.join(userDataPath, 'traces')
     await mkdir(traceDirectory, { recursive: true })
     const traceId = 'prompt-inspector-e2e'

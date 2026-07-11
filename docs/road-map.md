@@ -2,97 +2,16 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、工具紧凑 UI v1 已经落地。下一阶段重点是继续推进扩展、路由、可观测与评估能力。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、工具紧凑 UI v1 已经落地。下一阶段重点是继续推进扩展、路由、可观测与评估能力。
 
 ## 0. 未完成概览
 
-| 优先级 | 领域                           | 目标                                                     | 主要风险                                 |
-| ------ | ------------------------------ | -------------------------------------------------------- | ---------------------------------------- |
-| P1     | Generic MCP v1                 | 接入通用 MCP server，并复用现有工具和权限管线            | 外部工具 schema/输出不受控、工具数量膨胀 |
-| P1     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断             |
-| P1     | Provider Routing               | 会话级 provider/model 快照与用途路由                     | 全局 active provider 静默影响已有会话    |
-| P2     | Benchmark Harness              | 用真实任务评估 harness、工具、上下文和权限策略           | 成本高、环境复杂、指标不可比较           |
-| P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张         |
-
-## 2. M2 · Generic MCP v1
-
-目标：实现通用 MCP client，让外部 MCP server 成为受控工具来源，同时继续复用 `ToolRegistry`、权限管线、trace 和 UI。
-
-### 2.1 McpManager
-
-- 新增 `electron/mcp/mcp-manager.ts`，管理 server 配置、生命周期、连接、状态、stderr tail 和关闭。
-- v1 先支持 stdio transport：spawn server，完成 initialize、initialized、tools/list。
-- 预留 streamable-http transport，但不作为 v1 必做。
-- 支持 startup timeout、tool timeout、崩溃检测、手动 restart、应用退出清理。
-- server tool list 不在会话中途静默改变；`tools/list_changed` 后要求下轮生效或显式 reconnect。
-
-验收：
-
-- fake stdio MCP server 可启动、list tools、call tool、关闭。
-- 启动失败、stderr、timeout、工具缺失有结构化状态。
-- Serena adapter 可以复用 McpManager 连接能力，但行为保持 facade-only。
-
-### 2.2 McpToolBridge
-
-- 把 MCP tool 转成内部 `ToolDefinition`。
-- 内部 canonical id 使用 `mcp:<serverId>:<toolName>`。
-- provider-visible tool name 使用稳定、可逆、安全 alias，不能假设 provider 支持冒号或过长名称。
-- 校验 MCP input schema 子集；不支持的 schema 要拒绝或降级为 catalog 模式。
-- 输出统一做大小、数量、类型和 token 限制。
-
-验收：
-
-- MCP tool 可以出现在 provider tools 字段并被调用。
-- alias 能反查到 server/tool。
-- MCP 返回超大结果时被截断并标记。
-
-### 2.3 权限与风险
-
-- MCP tool 默认外部来源，不按只读自动放行。
-- server 自报 `readOnlyHint/destructiveHint/idempotentHint/openWorldHint` 只作为风险信号，不直接决定权限。
-- 用户可以配置 allowlist、denylist、risk override。
-- 未配置的外部 tool 默认 `review` 或 `high`，并进入现有 permission pipeline。
-- MCP server 不能绕过 workspace path guard、审批、secret redaction、trace 规则。
-
-验收：
-
-- 未显式 allow 的 MCP tool 在 Auto/Confirm 下需要审批。
-- 被 denylist 命中的 tool 不会暴露或不可执行。
-- MCP tool 的审批卡显示 serverId、toolName、args、risk signals。
-
-### 2.4 配置与 UI
-
-建议配置：
-
-```ts
-interface McpServerConfig {
-  id: string
-  enabled: boolean
-  transport: 'stdio' | 'streamable-http'
-  command?: string
-  args?: string[]
-  cwd?: string
-  url?: string
-  envSecretRefs?: Record<string, string>
-  authRef?: string
-  startupTimeoutMs: number
-  toolTimeoutMs: number
-  expose: 'disabled' | 'direct-tools' | 'catalog'
-  allowTools?: string[]
-  denyTools?: string[]
-  riskOverrides?: Record<string, 'readonly' | 'review' | 'high'>
-}
-```
-
-- Settings 中展示 MCP servers、状态、tools、stderr tail、restart。
-- 支持 direct-tools 和 catalog 两种暴露模式。
-- 大量工具默认走 catalog，避免 provider tools schema 爆炸。
-
-验收：
-
-- 用户可新增、启用、禁用、重启 stdio MCP server。
-- 工具列表可见且不会泄漏 secret。
-- 配置 migration 和 public config 不暴露密文。
+| 优先级 | 领域                           | 目标                                                     | 主要风险                              |
+| ------ | ------------------------------ | -------------------------------------------------------- | ------------------------------------- |
+| P1     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断          |
+| P1     | Provider Routing               | 会话级 provider/model 快照与用途路由                     | 全局 active provider 静默影响已有会话 |
+| P2     | Benchmark Harness              | 用真实任务评估 harness、工具、上下文和权限策略           | 成本高、环境复杂、指标不可比较        |
+| P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张      |
 
 ## 3. M3 · Project And Code Intelligence UX
 

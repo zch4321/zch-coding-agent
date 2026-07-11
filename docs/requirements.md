@@ -221,14 +221,15 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - **stdio**：spawn 本地 MCP server 子进程（首要）。
 - **Streamable HTTP**：连接远程 MCP server（预留，MVP 之后）；旧 HTTP+SSE 仅作为兼容模式。
 
-#### 2.6.3 能力范围（MVP 之后）
+#### 2.6.3 Generic MCP v1 能力范围
 
-> MVP **不实现通用 MCP 工具桥**，只预留接口与配置。Serena 作为专用 code-intelligence 后端接入时，不直接暴露原始 MCP 工具给模型。下面是完整通用 MCP 形态设计：
-
-- **配置**：用户在配置中声明 MCP server 列表（命令 + 参数）。启用 server 时完成 MCP 协议握手（initialize → initialized → tools/list），把 server 暴露的工具注册进统一 `ToolRegistry`。
-- **工具命名**：MCP 工具有稳定内部 canonical id；发给不同模型前映射为符合其函数命名限制的安全别名，再可逆映射回 server/tool。
-- **权限**：**MCP 工具同样过权限管线**（硬约束、确定性策略、权限模式、审批）。权限管线按工具来源识别，对未知工具默认按「有副作用」处理（走审批）。
-- **生命周期**：管理 MCP server 子进程的按需启动、健康检查、退避重启和退出清理；本地 server 命令本身需要用户显式信任。
+- **配置**：用户在 `userData/config.json` 手写 stdio server 配置。全局 server 在应用启动时连接，工作区 server 在对应工作区激活时连接；启动命令变更会使 fingerprint 信任失效。
+- **稳定 gateway**：Provider 始终只看到 `list_mcp_servers`、`read_mcp_server`、`call_mcp_tool` 三个固定工具。目录读取按 server 分页，MCP 的 `tools/list` 本身也完整跟随 server cursor，配置和目录变化不改变顶层工具定义。
+- **披露约束**：会话必须先读取包含目标工具的当前 revision 页面才能调用。cursor 绑定 server、revision 和 offset，目录变化后旧 cursor 与旧披露状态失效。
+- **工具命名**：通用调用在权限判断和 `tool.proposed` 前展开为 `mcp:<serverId>:<toolName>`，并以 MCP 原始 input schema 校验业务参数。
+- **权限**：目录工具在 ReadOnly 下可读；MCP 执行在 ReadOnly 下拒绝、Auto 下模型审批并可升级人工审批、Confirm 下人工审批、Yolo 下直接执行。MCP 审批不可记忆、调用不可自动重放。
+- **生命周期**：主进程管理 handshake、目录边界、超时、取消、draining、有限指数退避重启、stderr tail 和应用退出清理。Serena 复用 stdio connection，但只暴露稳定 `code_*` facade。
+- **秘密环境变量**：`env` 仅存非敏感值；`envFromHost` 只保存子进程变量名到主机变量名的映射。主机值只在主进程启动子进程时解析，不进入 renderer、public config、trace 或日志。
 
 ---
 

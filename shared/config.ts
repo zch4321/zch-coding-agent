@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox'
 import { JsonValueSchema } from './json'
 import type { AssistantLanguage } from './system-prompts'
+import { McpServerConfigSchema } from './mcp'
 
 export const AssistantLanguageSchema = Type.Union([
   Type.Literal('zh-CN'),
@@ -29,7 +30,7 @@ export const RememberedRuleSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
     effect: Type.Union([Type.Literal('allow'), Type.Literal('review')]),
-    toolId: Type.String({ minLength: 1, maxLength: 128 }),
+    toolId: Type.String({ minLength: 1, maxLength: 512 }),
     workspaceScope: Type.String({ minLength: 1, maxLength: 4096 }),
     argConstraints: JsonValueSchema,
     expiresAt: Type.Optional(Type.String({ format: 'date-time' })),
@@ -133,7 +134,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(7),
+    schemaVersion: Type.Literal(8),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
@@ -387,6 +388,7 @@ export const PublicConfigSchema = Type.Object(
       },
       { additionalProperties: false },
     ),
+    mcpServers: Type.Array(McpServerConfigSchema, { maxItems: 32 }),
   },
   { additionalProperties: false },
 )
@@ -421,6 +423,7 @@ export const ConfigSectionSchema = Type.Union([
   Type.Literal('prompts'),
   Type.Literal('network'),
   Type.Literal('webSearch'),
+  Type.Literal('mcp'),
 ])
 export type ConfigSection = Static<typeof ConfigSectionSchema>
 

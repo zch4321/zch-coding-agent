@@ -1,6 +1,3 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import type { Stream } from 'node:stream'
 import type {
   CodeBackendStatus,
   CodeDiagnosticItem,
@@ -16,6 +13,7 @@ import {
   buildSerenaLaunchArgs,
   buildSerenaLaunchPreview,
 } from '../../shared/serena-launch'
+import { McpStdioConnection } from '../mcp/mcp-stdio-connection'
 import type { CodeIntelligenceBackend, CodeIntelligenceQuery } from './types'
 
 const ALLOWED_SERENA_TOOLS = new Set([
@@ -48,8 +46,7 @@ export interface SerenaMcpAdapterOptions {
 }
 
 interface SerenaSession {
-  client: Client
-  transport: StdioClientTransport
+  connection: McpStdioConnection
   tools: Set<string>
   status: CodeBackendStatus
 }
@@ -584,7 +581,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     const session = this.#sessions.get(key)
     this.#sessions.delete(key)
     this.#starts.delete(key)
-    await session?.transport.close().catch(() => undefined)
+    await session?.connection.close().catch(() => undefined)
     this.#statuses.set(key, {
       backendId: project.serena.id,
       backendKind: 'serena-mcp',
@@ -604,7 +601,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     this.#statuses.clear()
     await Promise.all(
       sessions.map((session) =>
-        session.transport.close().catch(() => undefined),
+        session.connection.close().catch(() => undefined),
       ),
     )
   }
@@ -634,10 +631,10 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
       )
     }
 
-    const result = await session.client.callTool(
-      { name: mapped.name, arguments: mapped.arguments },
-      undefined,
-      { timeout: project.serena.toolTimeoutMs },
+    const result = await session.connection.callTool(
+      mapped.name,
+      mapped.arguments,
+      { timeoutMs: project.serena.toolTimeoutMs },
     )
     const text = textFromContent(result.content)
     if (input.capability === 'diagnostics') {
@@ -682,41 +679,28 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
 
   async #connect(project: ProjectModel): Promise<SerenaSession> {
     const launch = this.#launch(project)
-    const transport = new StdioClientTransport({
-      command: launch.command,
-      args: launch.args,
-      cwd: launch.cwd,
-      stderr: 'pipe',
-    })
-    const stderr = transport.stderr
-    const stderrChunks: string[] = []
-    attachStderr(stderr, stderrChunks)
-
-    const client = new Client({
-      name: 'zch-coding-agent',
-      version: '0.1.2',
+    const connection = new McpStdioConnection({
+      launch: {
+        command: launch.command,
+        args: launch.args,
+        cwd: launch.cwd,
+        startupTimeoutMs: project.serena.startupTimeoutMs,
+        redactions: [],
+      },
     })
 
     let tools: Set<string>
 
     try {
-      await client.connect(transport, {
-        timeout: project.serena.startupTimeoutMs,
-      })
-      tools = new Set(
-        (
-          await client.listTools(undefined, {
-            timeout: project.serena.startupTimeoutMs,
-          })
-        ).tools.map((tool) => tool.name),
-      )
+      const catalog = await connection.connect()
+      tools = new Set(catalog.tools.map((tool) => tool.name))
     } catch (error) {
-      await transport.close().catch(() => undefined)
+      await connection.close().catch(() => undefined)
       throw new Error(
         launchMessage({
           launch,
           headline: 'Serena backend failed to start.',
-          stderrChunks,
+          stderrChunks: [connection.stderrTail],
           error: error instanceof Error ? error.message : String(error),
         }),
         { cause: error },
@@ -729,15 +713,15 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
       backendKind: 'serena-mcp',
       state: 'ready',
       capabilities,
-      pid: transport.pid ?? undefined,
+      pid: connection.pid,
       message: launchMessage({
         launch,
         headline: 'Serena backend is ready.',
-        stderrChunks,
+        stderrChunks: [connection.stderrTail],
       }),
       updatedAt: now(),
     }
-    const session = { client, transport, tools, status }
+    const session = { connection, tools, status }
     const key = this.#key(project)
     this.#sessions.set(key, session)
     this.#statuses.set(key, status)
@@ -801,13 +785,4 @@ function tool(
   return ALLOWED_SERENA_TOOLS.has(name) && tools.has(name)
     ? { name, arguments: args }
     : undefined
-}
-
-function attachStderr(stderr: Stream | null, chunks: string[]): void {
-  stderr?.on('data', (chunk: Buffer | string) => {
-    chunks.push(String(chunk).slice(0, 2_000))
-    while (chunks.join('\n').length > 4_000) {
-      chunks.shift()
-    }
-  })
 }
