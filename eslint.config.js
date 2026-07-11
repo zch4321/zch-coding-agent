@@ -9,6 +9,7 @@ export default [
     ignores: [
       'dist/**',
       'dist-electron/**',
+      'dist-headless/**',
       'node_modules/**',
       'playwright-report/**',
       'release/**',
@@ -72,6 +73,7 @@ export default [
       'electron/runtime/agent-runtime.ts',
       'electron/runtime/create-agent-runtime.ts',
       'electron/runtime/runtime-event*.ts',
+      'electron/headless/**/*.ts',
       'electron/session/**/*.ts',
       'electron/tools/**/*.ts',
       'electron/providers/**/*.ts',

@@ -34,6 +34,14 @@ export type TerminalEventDraftEnvelope = TerminalEvent extends infer Event
     : never
   : never
 
+export interface HarnessRunMessage {
+  kind: string
+  text: string
+  source: string
+  promptId?: string
+  promptHash?: string
+}
+
 export interface SessionManagerOptions {
   configStore: ConfigStore
   traceDirectory: string

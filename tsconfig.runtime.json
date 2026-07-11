@@ -11,6 +11,7 @@
   },
   "include": [
     "electron/js-yaml.d.ts",
+    "electron/headless/**/*.ts",
     "electron/runtime/agent-runtime.ts",
     "electron/runtime/create-agent-runtime.ts",
     "electron/runtime/runtime-event-bus.ts",

@@ -91,18 +91,31 @@ function providerFallback(
 export class ConfigStore {
   readonly #filePath: string
   readonly #secretStore: SecretStore
-  readonly #environmentApiKey: string | undefined
+  readonly #environmentApiKeys: Readonly<Record<string, string>>
   #config: AppConfig = structuredClone(DEFAULT_APP_CONFIG)
   #mutation = Promise.resolve()
 
   constructor(
     filePath: string,
     secretStore: SecretStore,
-    options: { environmentApiKey?: string } = {},
+    options: {
+      environmentApiKey?: string
+      environmentApiKeys?: Record<string, string | undefined>
+    } = {},
   ) {
     this.#filePath = filePath
     this.#secretStore = secretStore
-    this.#environmentApiKey = options.environmentApiKey?.trim() || undefined
+    this.#environmentApiKeys = Object.fromEntries(
+      Object.entries({
+        ...(options.environmentApiKey
+          ? { [DEFAULT_PROVIDER_ID]: options.environmentApiKey }
+          : {}),
+        ...options.environmentApiKeys,
+      }).flatMap(([providerId, value]) => {
+        const normalized = value?.trim()
+        return normalized ? [[providerId, normalized]] : []
+      }),
+    )
   }
 
   async initialize(): Promise<{
@@ -126,10 +139,7 @@ export class ConfigStore {
       this.#config,
       (provider) => {
         const stored = this.#secretStore.has(provider.apiKeyRef)
-        const environment =
-          provider.id === DEFAULT_PROVIDER_ID
-            ? Boolean(this.#environmentApiKey)
-            : false
+        const environment = Boolean(this.#environmentApiKeys[provider.id])
         return {
           credentialConfigured: stored || environment,
           credentialSource: stored
@@ -158,8 +168,9 @@ export class ConfigStore {
     const stored = reference
       ? await this.#secretStore.get(reference)
       : undefined
-    const environment =
-      provider?.id === DEFAULT_PROVIDER_ID ? this.#environmentApiKey : undefined
+    const environment = provider
+      ? this.#environmentApiKeys[provider.id]
+      : undefined
     return stored ?? environment
   }
 

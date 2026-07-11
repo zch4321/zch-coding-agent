@@ -7,8 +7,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && npm run test:native && npm run test:ripgrep && npm run build:app && electron-builder --win --x64 --publish never",
+    "build": "npm run typecheck && npm run test:native && npm run test:ripgrep && npm run build:app && npm run build:headless && electron-builder --win --x64 --publish never",
     "build:app": "vite build",
+    "build:headless": "vite build --config vite.headless.config.ts",
+    "agent:headless": "node dist-headless/zch-agent-headless.mjs",
     "rebuild:native:source": "electron-rebuild -f -w node-pty",
     "preview": "vite preview",
     "lint": "eslint .",

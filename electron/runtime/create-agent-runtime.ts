@@ -105,6 +105,7 @@ export async function createAgentRuntime(
         projects,
         codeBackends,
         mcp,
+        prompts: promptRegistry,
       },
       dispose: async () => {
         const report = await disposer.dispose()

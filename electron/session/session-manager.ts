@@ -32,6 +32,7 @@ import type { SkillsManager } from '../skills/manager'
 import { id, ipcFault, toJsonValue } from './session-common'
 import type {
   AgentEventDraft,
+  HarnessRunMessage,
   SessionManagerOptions,
   SessionState,
 } from './session-types'
@@ -419,6 +420,7 @@ export class SessionManager {
   async updatePlanStatus(input: {
     sessionId: SessionId
     status: PlanStatus
+    source?: 'ui:plan-review' | 'headless:auto-plan-approval'
   }): Promise<{
     accepted: boolean
     plan?: PlanState
@@ -451,7 +453,7 @@ export class SessionManager {
       sessionId: input.sessionId,
       previousStatus,
       status: input.status,
-      source: 'ui:plan-review',
+      source: input.source ?? 'ui:plan-review',
       plan: toJsonValue(session.plan),
     })
 
@@ -527,6 +529,21 @@ export class SessionManager {
     )
   }
 
+  startHarnessRun(input: {
+    sessionId: SessionId
+    clientRequestId: string
+    message: HarnessRunMessage
+  }): RunId {
+    const session = this.#requireSession(input.sessionId)
+    return this.#runs.start(
+      session,
+      input.clientRequestId,
+      undefined,
+      undefined,
+      input.message,
+    )
+  }
+
   /**
    * Creates a prepared fork session from a recorded provider request.
    *
@@ -586,6 +603,12 @@ export class SessionManager {
   interruptRun(sessionId: SessionId, runId: RunId): boolean {
     const session = this.#requireSession(sessionId)
     return this.#runs.interrupt(session, runId)
+  }
+
+  async waitForRunSettled(sessionId: SessionId, runId: RunId): Promise<void> {
+    const session = this.#requireSession(sessionId)
+    const run = session.activeRun
+    if (run?.runId === runId) await run.done
   }
 
   /**

@@ -5,6 +5,7 @@ import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import type { TraceService } from '../logging/service'
 import type { McpManager } from '../mcp/mcp-manager'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
+import type { PromptRegistry } from '../prompts/registry'
 import type { SessionManager } from '../session/session-manager'
 import type { ChangeHistoryStore } from '../session/change-history'
 import type { SkillsManager } from '../skills/manager'
@@ -19,6 +20,7 @@ export interface AgentRuntimeServices {
   projects: ProjectMetadataStore
   codeBackends: CodeBackendManager
   mcp: McpManager
+  prompts: PromptRegistry
 }
 
 export interface AgentRunHandle {
@@ -67,7 +69,12 @@ export class AgentRuntime {
       throw input.signal.reason
     }
     const runId = this.services.sessions.startRun(input)
-    const completion = this.events.waitForRun(input.sessionId, runId)
+    const completion = this.events
+      .waitForRun(input.sessionId, runId)
+      .then(async (result) => {
+        await this.services.sessions.waitForRunSettled(input.sessionId, runId)
+        return result
+      })
     const interrupt = () =>
       this.services.sessions.interruptRun(input.sessionId, runId)
     const abort = () => interrupt()

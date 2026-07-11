@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_APPROVAL_PROMPT_REFS,
+  DEFAULT_HEADLESS_PROMPT_REFS,
   DEFAULT_HARNESS_PROMPT_REFS,
   DEFAULT_ORCHESTRATION_PROMPT_REFS,
   PROMPT_RESOURCE_VERSION,
@@ -72,6 +73,22 @@ describe('PromptRegistry', () => {
       DEFAULT_APPROVAL_PROMPT_REFS.classifyRisk.id,
     )
     expect(approval.content).toContain('Return only strict JSON')
+  })
+
+  it('loads the versioned autonomous headless continuation prompt', async () => {
+    const registry = await PromptRegistry.load(
+      path.resolve('resources', 'prompts'),
+    )
+    const prompt = registry.headlessPrompt('autonomousPlanApproval', 'en-US')
+
+    expect(prompt.resource.id).toBe(
+      DEFAULT_HEADLESS_PROMPT_REFS.autonomousPlanApproval['en-US'].id,
+    )
+    expect(prompt.resource.version).toBe(
+      DEFAULT_HEADLESS_PROMPT_REFS.autonomousPlanApproval['en-US'].version,
+    )
+    expect(prompt.content).toContain('<autonomous_plan_approval>')
+    expect(prompt.content).toContain('not a user-authored message')
   })
 
   it('loads orchestration slash command prompt resources', async () => {
