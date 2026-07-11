@@ -121,6 +121,12 @@ stdout 是带 `schemaVersion/seq/ts` 的 JSONL，stderr 只接收 host 诊断；
 
 Plan 进入 `awaiting_review` 后，driver 先等待共享 run controller 完全 settle，再用 `headless:auto-plan-approval` 更新状态并追加版本化 `<autonomous_plan_approval>` harness layer。该消息记录为 `orchestrator.message` 和 `harness.auto_action`，不是 `user.message`。自动批准达到配置上限或 Goal blocked 时返回 `needs_human_input`。SIGINT、SIGTERM 和 wall timeout 都复用 Runtime interrupt/disposer。
 
+### 3.2 Runtime identity 与 host parity
+
+每次 Headless run 会在 artifacts 中原子写入 `identity.json`。identity 包含构建时注入的 source commit、runtime image digest、case/config digest、全部 prompt resource hash、精确 Provider tool definitions 的 `toolsHash`、provider/model/profile/reasoning、核心预算，以及 platform/arch/Node/Skills/MCP/tool capability snapshot。比较器默认比较完整 identity；任一字段不同都会返回 `RUNTIME_IDENTITY_MISMATCH` 和具体字段路径，不允许把不可比 run group 混合统计。
+
+`runtime-parity.test.ts` 使用同一 fake-provider trajectory 分别通过真实 Electron IPC handler/event adapter 和 Headless API 运行。fixture 覆盖 read、patch、process、Plan 人工/自动恢复、compact 和 generic MCP canonical call，比较 Provider messages、稳定 prompt layer hashes、prompt resources、`toolsHash`、工具参数/结果和最终 Git patch。规范化只处理显式 host 差异：随机 ID、时间、绝对路径、PID/耗时、自动 Plan 消息位置，以及由时间生成的 runtime-context hash；不使用宽泛 snapshot，也不忽略工具、模型消息或 patch 的结构差异。
+
 ---
 
 ## 4. 配置、凭据与模型
@@ -515,7 +521,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 
 ## 19. 当前限制
 
-- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI 已实现，但 Linux OCI worker、隔离 grader 和 Electron/Headless parity suite 尚未实现。
+- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI 与 host parity 已实现，但 Linux OCI worker 和隔离 grader 尚未实现。
 - Provider 层当前是 OpenAI-compatible/DeepSeek 为主，没有多厂商完整矩阵。
 - Code intelligence backend 当前实际实现为 Serena MCP 只读 adapter，rename/edit capability 只在 schema 中预留。
 - 插件系统只有事件总线和 hook 点，没有本地 JS 插件加载器。

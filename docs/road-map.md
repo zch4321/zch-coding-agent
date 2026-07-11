@@ -2,7 +2,7 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、工具紧凑 UI v1 已经落地。下一阶段继续推进 M5 host parity、Linux Docker worker 和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、工具紧凑 UI v1 已经落地。下一阶段继续推进 M5 Linux Docker worker 和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
 
 ## 0. 未完成概览
 
@@ -18,20 +18,6 @@
 目标：先建立独立于 renderer、IPC、`npm test` 和 `npm run test:e2e` 的真实 coding-agent benchmark。Electron 与 Headless 必须调用同一份 Agent Runtime；Linux Docker 只替换宿主交互和部署方式，不得复制 Prompt Harness、工具注册、Provider loop、权限、compact、Skills、MCP 或 trace 实现。
 
 M5 保留原编号以维持已有文档和历史引用，但从本阶段起提前为首要里程碑。它首先评估 harness 工程本身，不把 Electron UI 性能混入 coding correctness；UI/IPC 继续由 E2E 覆盖，并通过 parity 测试证明两个宿主没有语义漂移。
-
-### 5.3 Electron / Headless Parity
-
-- 建立共享 fake provider trajectory，分别通过 Electron IPC host 与 Headless API 运行。
-- 规范化随机 ID、时间戳、平台绝对路径和 UI-only 事件后，比较 Provider messages、prompt layer hashes、`toolsHash`、工具参数与结果、compact、Goal/Plan continuation、MCP 披露状态和最终 patch。
-- parity fixture 覆盖只读、写入、命令、一次 compact、一次 Plan 自动/人工恢复和一个通用 MCP call；不要求两个宿主拥有相同 UI 事件。
-- 每次构建在 artifact 中写入 source commit、runtime image digest、prompt resource hashes、tools hash、config hash、provider/model/profile 和 capability snapshot。
-- CI 禁止 Electron 和 Headless 从不同入口自行装配 runtime；parity 差异必须显式更新 fixture 原因，不能使用宽泛 snapshot 覆盖。
-
-验收：
-
-- 同一 harness revision 下，除声明的 host interaction 外，两个入口产生相同 Provider 请求和工具语义。
-- 修改 Prompt、tools、compact、Skills 或 MCP 后，桌面和 Headless parity 同时变化；不存在仅更新 benchmark 副本的路径。
-- benchmark 报告能拒绝比较 source commit、case digest、模型配置或核心预算不一致的 run group。
 
 ### 5.4 Linux Docker Worker
 
@@ -165,7 +151,6 @@ benchmarks/
 
 | 步骤  | 具体实现                                                     | 完成标志                        |
 | ----- | ------------------------------------------------------------ | ------------------------------- |
-| M5.6  | 建 Electron/Headless parity fixture 与 identity 记录         | CI 可检测 prompt/tool/loop 漂移 |
 | M5.7  | 构建受限 Linux OCI image、coordinator 和清理器               | 容器 smoke 无残留资源           |
 | M5.8  | 实现 manifest loader、native adapter 和 3 个 core smoke case | baseline/oracle/mutant 自检通过 |
 | M5.9  | 实现隔离 grader、L0-L5、硬门禁和 artifact/redaction          | 评分回归与泄漏测试通过          |
@@ -175,7 +160,7 @@ benchmarks/
 | M5.13 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查                 | Linux worker 跑通冻结 revision  |
 | M5.14 | 增加 SWE-bench compatibility 与高成本 full adapter           | 不影响主套件且保持 opt-in       |
 
-单一 Runtime 和固定 Yolo Headless host 已可用 fake provider 验证；M5.6 完成 Electron/Headless parity，M5.7–M5.11 构成第一个可用的 Docker benchmark vertical slice；不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
+单一 Runtime、固定 Yolo Headless host、runtime identity 和 Electron/Headless parity 已经落地；M5.7–M5.11 构成第一个可用的 Docker benchmark vertical slice，不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
 
 总体验收：
 

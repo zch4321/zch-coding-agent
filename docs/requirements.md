@@ -419,6 +419,8 @@ session.end     { ts }
 - result 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计、trace 和 patch 路径。Agent `completed` 不代表 benchmark correctness。
 - Plan 自动批准必须在前一 run 完全 settle 后，通过有版本的 harness 消息追加到历史和 trace；不得伪装成用户消息。Goal blocked 或自动批准达到上限返回 `needs_human_input`。
 - timeout、SIGINT 和 SIGTERM 必须进入共享 interrupt/disposer；补丁采集不得修改 workspace 的真实 Git index。
+- 每个 Headless artifact 必须包含 runtime identity；source commit、case/config digest、provider/model、核心预算、prompt/tool hash 或 capability 不同的结果不得直接比较。
+- Electron/Headless parity 必须通过共享 trajectory 比较 Provider messages、稳定 prompt layer、工具定义与调用、compact/Plan/MCP 行为和 patch；只允许逐字段声明的 host 差异，禁止宽泛 snapshot 忽略。
 
 ---
 
