@@ -55,6 +55,7 @@ shared/
 electron/
   main.ts                   # app bootstrap、安全策略、依赖装配
   preload.ts                # 冻结 window.agentApi
+  headless/                 # 固定 Yolo API/CLI、JSONL、result/patch 和自动 Plan driver
   ipc/                      # IPC 注册、sender/payload/result 校验
   runtime/                  # Node-only AgentRuntime 组装、事件总线和 Electron host adapter
   session/                  # SessionManager、run loop、prompt harness、compact/interjection/orchestration
@@ -95,7 +96,7 @@ src/
 - 初始化 `ConfigStore`、Electron `safeStorage` adapter、HTTP transport 和 `WorkbenchStore`，再通过唯一的 `createAgentRuntime()` 创建 Agent 服务。
 - 通过 `registerIpcHandlers` 绑定所有 `shared/ipc-contract.ts` 中声明的 channel。
 
-`createAgentRuntime()` 是 Agent 依赖的唯一生产组装入口，创建 `SkillsManager`、`TraceService`、`ChangeHistoryStore`、`ProjectMetadataStore`、`CodeBackendManager`、`McpManager`、`PromptRegistry` 和 `SessionManager`。这些服务不由 Electron host 或未来 Headless host 重复组装。配置存储、网络 transport、Workbench、窗口和 IPC 仍是 host 职责。
+`createAgentRuntime()` 是 Agent 依赖的唯一生产组装入口，创建 `SkillsManager`、`TraceService`、`ChangeHistoryStore`、`ProjectMetadataStore`、`CodeBackendManager`、`McpManager`、`PromptRegistry` 和 `SessionManager`。这些服务不由 Electron 或 Headless host 重复组装。配置存储、网络 transport、Workbench、窗口和 IPC 仍是 host 职责。
 
 IPC 调用链：
 
@@ -111,6 +112,14 @@ IPC 调用链：
 - `TERMINAL_EVENT_CHANNEL`：PTY 输出、状态和快照相关事件。
 
 `SessionEventEmitter` 只产生与 Electron 无关的 `AgentEvent` / `TerminalEvent`，交给 `RuntimeEventBus` 校验和发布。EventBus 即使没有 renderer subscriber 也会有界保存 terminal run completion，供程序化 `AgentRuntime.run()` 等待；Electron adapter 只负责包装 IPC envelope 并转发给当前 `WebContents`。单个 host listener 失败会记录诊断，不能中断 Agent loop。
+
+### 3.1 Headless host
+
+`electron/headless/` 提供内部 `zch-agent-headless run` 和可直接调用的 `runHeadlessAgent()`。它把受信任的 headless config 转换为普通 v8 `AppConfig`，通过 provider-scoped 环境凭据创建同一个 `createAgentRuntime()`，并强制 session 使用 Yolo；task 无法修改权限模式或运行配置。Headless 不注册额外工具，也不复制 Provider/tool/compact/Skills/MCP loop。
+
+stdout 是带 `schemaVersion/seq/ts` 的 JSONL，stderr 只接收 host 诊断；`result.json` 使用原子写入。host listener 汇总 usage、工具执行、最终回复和结构化 Goal/Plan 状态，补丁通过临时 Git index 生成，不修改真实 index。结果状态区分 `completed`、`failed`、`cancelled`、`timed_out` 和 `needs_human_input`，不把 Agent 正常结束误写成 hidden grader 通过。
+
+Plan 进入 `awaiting_review` 后，driver 先等待共享 run controller 完全 settle，再用 `headless:auto-plan-approval` 更新状态并追加版本化 `<autonomous_plan_approval>` harness layer。该消息记录为 `orchestrator.message` 和 `harness.auto_action`，不是 `user.message`。自动批准达到配置上限或 Goal blocked 时返回 `needs_human_input`。SIGINT、SIGTERM 和 wall timeout 都复用 Runtime interrupt/disposer。
 
 ---
 
@@ -506,7 +515,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 
 ## 19. 当前限制
 
-- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI 和 Docker worker 尚未实现。
+- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI 已实现，但 Linux OCI worker、隔离 grader 和 Electron/Headless parity suite 尚未实现。
 - Provider 层当前是 OpenAI-compatible/DeepSeek 为主，没有多厂商完整矩阵。
 - Code intelligence backend 当前实际实现为 Serena MCP 只读 adapter，rename/edit capability 只在 schema 中预留。
 - 插件系统只有事件总线和 hook 点，没有本地 JS 插件加载器。

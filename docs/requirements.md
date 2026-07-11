@@ -411,6 +411,15 @@ session.end     { ts }
 - 保存 Provider 返回的完整 usage，包括可用时的 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`、输入/输出 token；同时记录 TTFT、总延迟、请求字节数和稳定前缀 hash，供 KV cache 分析。
 - DeepSeek 流式调用必须请求最终 usage chunk；cache 命中以 Provider 返回字段为准，不能仅根据本地消息前缀推断。
 
+### 5.4 Headless 运行输出
+
+- 内部 Headless host 必须复用桌面端唯一 Agent Runtime 组装入口，固定 Yolo 且不增加、删除或替换模型可见工具。
+- stdout 只允许版本化 JSONL；host 诊断写 stderr；最终 `result.json` 原子写入 workspace 外的 artifacts 目录。
+- Provider 凭据只能由受信任配置声明的环境变量名称解析，凭据值不得进入配置回包、JSONL、trace、patch 或子进程环境。
+- result 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计、trace 和 patch 路径。Agent `completed` 不代表 benchmark correctness。
+- Plan 自动批准必须在前一 run 完全 settle 后，通过有版本的 harness 消息追加到历史和 trace；不得伪装成用户消息。Goal blocked 或自动批准达到上限返回 `needs_human_input`。
+- timeout、SIGINT 和 SIGTERM 必须进入共享 interrupt/disposer；补丁采集不得修改 workspace 的真实 Git index。
+
 ---
 
 ## 6. 插件系统（生命周期钩子）

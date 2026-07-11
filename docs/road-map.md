@@ -2,7 +2,7 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、工具紧凑 UI v1 已经落地。下一阶段继续推进 M5 Headless CLI 和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、工具紧凑 UI v1 已经落地。下一阶段继续推进 M5 host parity、Linux Docker worker 和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
 
 ## 0. 未完成概览
 
@@ -18,34 +18,6 @@
 目标：先建立独立于 renderer、IPC、`npm test` 和 `npm run test:e2e` 的真实 coding-agent benchmark。Electron 与 Headless 必须调用同一份 Agent Runtime；Linux Docker 只替换宿主交互和部署方式，不得复制 Prompt Harness、工具注册、Provider loop、权限、compact、Skills、MCP 或 trace 实现。
 
 M5 保留原编号以维持已有文档和历史引用，但从本阶段起提前为首要里程碑。它首先评估 harness 工程本身，不把 Electron UI 性能混入 coding correctness；UI/IPC 继续由 E2E 覆盖，并通过 parity 测试证明两个宿主没有语义漂移。
-
-### 5.2 Headless API 与固定 Yolo CLI
-
-- 新增内部二进制 `zch-agent-headless`，v1 只支持 `run` 子命令和固定 `mode: yolo`；不提供 Confirm/Auto，也不出现人工工具审批等待态。
-- CLI 接受受信任的 harness config、独立 task 文件、workspace、artifact 目录和预算。task 内容不能覆盖 Provider、工具、MCP、Skills、网络或输出限制。
-- stdout 只输出有版本的 JSONL 事件；诊断写 stderr；最终结果写原子 JSON。退出码区分正常结束、Agent/Provider 失败、超时、配置错误和外部中断，但退出码不代表 hidden grader 通过。
-- CLI 输出并保存 session/run id、最终回复、patch 路径、trace 路径、usage、工具统计、终态与未完成原因。SIGINT/SIGTERM 必须进入现有 abort/disposer 管线。
-- Yolo 只跳过工具和 MCP 权限审批。另设 `AutonomousInteractionDriver` 处理人类交互语义：Plan 进入 `awaiting_review` 时，在当前 run settle 后自动批准一次并追加带标签的 harness 消息；Goal blocked 或需求澄清不得捏造用户答案，标记为 `needs_human_input`。
-- 自动消息使用版本化 prompt resource，例如 `<autonomous_plan_approval>`，按 append-only 规则进入历史和 trace，并记录 `harness.auto_action`，不能伪装成用户原创消息。
-- Headless 不新增 benchmark 专用工具，不删减桌面 Agent 可见工具。若平台不支持某工具，case 必须在准备阶段失败为 unsupported，而不是运行中静默换实现。
-
-建议命令：
-
-```text
-zch-agent-headless run
-  --workspace /workspace
-  --task-file /run/task.md
-  --config /run/harness.json
-  --artifacts /artifacts
-  --timeout-ms 1800000
-```
-
-验收：
-
-- CLI 能在纯 Node Linux 环境完成 smoke task，并持续输出可校验 JSONL。
-- CLI 参数、task、stdout、stderr、trace 和 patch 都不包含真实 Provider key。
-- 自动 Plan 审批最多触发配置上限次数，且 token、工具和 wall time 继续累计到同一 trial。
-- 正常结束但功能未通过时 CLI 仍返回 Agent 完成状态，由 grader 另行给出 correctness。
 
 ### 5.3 Electron / Headless Parity
 
@@ -193,7 +165,6 @@ benchmarks/
 
 | 步骤  | 具体实现                                                     | 完成标志                        |
 | ----- | ------------------------------------------------------------ | ------------------------------- |
-| M5.5  | 实现固定 Yolo CLI、JSONL、原子 result 和自动 Plan driver     | Linux 本机 headless smoke 通过  |
 | M5.6  | 建 Electron/Headless parity fixture 与 identity 记录         | CI 可检测 prompt/tool/loop 漂移 |
 | M5.7  | 构建受限 Linux OCI image、coordinator 和清理器               | 容器 smoke 无残留资源           |
 | M5.8  | 实现 manifest loader、native adapter 和 3 个 core smoke case | baseline/oracle/mutant 自检通过 |
@@ -204,7 +175,7 @@ benchmarks/
 | M5.13 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查                 | Linux worker 跑通冻结 revision  |
 | M5.14 | 增加 SWE-bench compatibility 与高成本 full adapter           | 不影响主套件且保持 opt-in       |
 
-单一 Runtime 已可用 fake provider 验证“同一 harness”；M5.5–M5.6 完成 Headless host 与 parity，M5.7–M5.11 构成第一个可用的 Docker benchmark vertical slice；不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
+单一 Runtime 和固定 Yolo Headless host 已可用 fake provider 验证；M5.6 完成 Electron/Headless parity，M5.7–M5.11 构成第一个可用的 Docker benchmark vertical slice；不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
 
 总体验收：
 
