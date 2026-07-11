@@ -2,7 +2,7 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、工具紧凑 UI v1 已经落地。下一阶段先推进 M5，建立可复现的 Headless Agent Runtime 与真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、工具紧凑 UI v1 已经落地。下一阶段继续推进 M5 Headless CLI 和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
 
 ## 0. 未完成概览
 
@@ -18,22 +18,6 @@
 目标：先建立独立于 renderer、IPC、`npm test` 和 `npm run test:e2e` 的真实 coding-agent benchmark。Electron 与 Headless 必须调用同一份 Agent Runtime；Linux Docker 只替换宿主交互和部署方式，不得复制 Prompt Harness、工具注册、Provider loop、权限、compact、Skills、MCP 或 trace 实现。
 
 M5 保留原编号以维持已有文档和历史引用，但从本阶段起提前为首要里程碑。它首先评估 harness 工程本身，不把 Electron UI 性能混入 coding correctness；UI/IPC 继续由 E2E 覆盖，并通过 parity 测试证明两个宿主没有语义漂移。
-
-### 5.1 单一 Agent Runtime 边界
-
-- 定义 Node 侧 `AgentRuntime`、`RuntimeEventSink`、`CredentialProvider` 和 disposer 契约。`shared/` 只保存可跨进程 schema，Node 实现继续留在特权侧，不能把文件、进程或密钥能力移入 renderer。
-- 将 `SessionEventEmitter` 对 `WebContents` 的直接依赖替换为 `RuntimeEventSink`。无订阅者时也必须递增序号并保留可等待的 run 终态，禁止因为没有窗口而静默丢事件。
-- 将通用 SecretStore 与 Electron `safeStorage` adapter 分开；Headless 只接受环境注入或 benchmark credential broker，不提供明文持久化密钥。
-- 新增唯一的 `createAgentRuntime()` 组装入口，统一创建 PromptRegistry、SessionManager、ToolRegistry、SkillsManager、McpManager、CodeBackendManager、trace、change history 和 Provider transport。
-- Electron `main.ts` 改为通过 `createAgentRuntime()` 启动现有产品；不得在 Electron host 或 Headless host 单独注册工具、拼 prompt、实现 compact 或构造 Provider request。
-- 运行时暴露稳定的 `run()` / `interrupt()` / `dispose()` 和事件订阅接口。调用者不应读取 SessionManager 私有状态来判断完成。
-
-验收：
-
-- Electron 现有单测和 E2E 行为不变。
-- 核心 runtime 的依赖图不包含 Electron value import、Vue 或 IPC handler。
-- fake provider 可在没有 `BrowserWindow`、`WebContents` 和 preload 的 Node 进程里完成一次读、写、测试和最终回复。
-- runtime dispose 后没有残留 PTY、MCP、Serena、Provider request 或 writer lease。
 
 ### 5.2 Headless API 与固定 Yolo CLI
 
@@ -207,25 +191,20 @@ benchmarks/
 
 ### 5.10 按提交粒度的实施顺序
 
-| 步骤  | 具体实现                                                     | 完成标志                                |
-| ----- | ------------------------------------------------------------ | --------------------------------------- |
-| M5.0  | 写 ADR、Runtime/Headless/Case/Result schema 和目录边界       | schema 单测与架构评审通过               |
-| M5.1  | 抽 `RuntimeEventSink`，让 SessionManager 无窗口运行          | 无 WebContents 单测完成完整 run         |
-| M5.2  | 拆 Electron safeStorage adapter 和 Headless credential port  | Node CLI 依赖图无 Electron value import |
-| M5.3  | 新增 `createAgentRuntime()`，Electron main 切换到统一工厂    | 桌面单测/E2E 全绿且工具 hash 不变       |
-| M5.4  | 实现 `AgentRuntime.run()`、等待终态、abort 和 dispose        | 程序化 fake-provider smoke 通过         |
-| M5.5  | 实现固定 Yolo CLI、JSONL、原子 result 和自动 Plan driver     | Linux 本机 headless smoke 通过          |
-| M5.6  | 建 Electron/Headless parity fixture 与 identity 记录         | CI 可检测 prompt/tool/loop 漂移         |
-| M5.7  | 构建受限 Linux OCI image、coordinator 和清理器               | 容器 smoke 无残留资源                   |
-| M5.8  | 实现 manifest loader、native adapter 和 3 个 core smoke case | baseline/oracle/mutant 自检通过         |
-| M5.9  | 实现隔离 grader、L0-L5、硬门禁和 artifact/redaction          | 评分回归与泄漏测试通过                  |
-| M5.10 | 补 tool attempt、usage/cost/paired comparison                | 指标 golden tests 通过                  |
-| M5.11 | 实现 strict、repair-once、resume 和多 trial                  | append-only、隔离与恢复测试通过         |
-| M5.12 | 扩展到 12/24 个 core case                                    | `benchmark` 可产出稳定 A/B 报告         |
-| M5.13 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查                 | Linux worker 跑通冻结 revision          |
-| M5.14 | 增加 SWE-bench compatibility 与高成本 full adapter           | 不影响主套件且保持 opt-in               |
+| 步骤  | 具体实现                                                     | 完成标志                        |
+| ----- | ------------------------------------------------------------ | ------------------------------- |
+| M5.5  | 实现固定 Yolo CLI、JSONL、原子 result 和自动 Plan driver     | Linux 本机 headless smoke 通过  |
+| M5.6  | 建 Electron/Headless parity fixture 与 identity 记录         | CI 可检测 prompt/tool/loop 漂移 |
+| M5.7  | 构建受限 Linux OCI image、coordinator 和清理器               | 容器 smoke 无残留资源           |
+| M5.8  | 实现 manifest loader、native adapter 和 3 个 core smoke case | baseline/oracle/mutant 自检通过 |
+| M5.9  | 实现隔离 grader、L0-L5、硬门禁和 artifact/redaction          | 评分回归与泄漏测试通过          |
+| M5.10 | 补 tool attempt、usage/cost/paired comparison                | 指标 golden tests 通过          |
+| M5.11 | 实现 strict、repair-once、resume 和多 trial                  | append-only、隔离与恢复测试通过 |
+| M5.12 | 扩展到 12/24 个 core case                                    | `benchmark` 可产出稳定 A/B 报告 |
+| M5.13 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查                 | Linux worker 跑通冻结 revision  |
+| M5.14 | 增加 SWE-bench compatibility 与高成本 full adapter           | 不影响主套件且保持 opt-in       |
 
-M5.0–M5.6 完成后即可开始用 fake provider 验证“同一 harness”；M5.7–M5.11 构成第一个可用的 Docker benchmark vertical slice；不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
+单一 Runtime 已可用 fake provider 验证“同一 harness”；M5.5–M5.6 完成 Headless host 与 parity，M5.7–M5.11 构成第一个可用的 Docker benchmark vertical slice；不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
 
 总体验收：
 

@@ -1,6 +1,6 @@
 # 架构设计文档 · Zch Coding Agent
 
-> 状态：当前实现同步版 · 最后更新 2026-07-04
+> 状态：当前实现同步版 · 最后更新 2026-07-11
 >
 > 配套文档：[`requirements.md`](./requirements.md) 说明产品能力，`frontend-spec.md`](./frontend-spec.md) 说明前端信息架构。本文只记录当前代码实际架构和关键边界，不再保留早期设计稿内容或未实现方案。
 
@@ -19,10 +19,12 @@ Preload
 
 Main process
   ├─ IPC handlers / sender validation / payload validation
-  ├─ SessionManager and session collaborators
-  ├─ LLM providers
-  ├─ Tool registry, permission pipeline, terminal pool
-  ├─ prompt resources and prompt harness
+  ├─ Electron Runtime Event adapter
+  ├─ AgentRuntime composition root
+  │   ├─ SessionManager and session collaborators
+  │   ├─ LLM providers
+  │   ├─ Tool registry, permission pipeline, terminal pool
+  │   └─ prompt resources and prompt harness
   ├─ config, secrets, logging, workbench, skills
   └─ project metadata and code-intelligence backends
 ```
@@ -54,6 +56,7 @@ electron/
   main.ts                   # app bootstrap、安全策略、依赖装配
   preload.ts                # 冻结 window.agentApi
   ipc/                      # IPC 注册、sender/payload/result 校验
+  runtime/                  # Node-only AgentRuntime 组装、事件总线和 Electron host adapter
   session/                  # SessionManager、run loop、prompt harness、compact/interjection/orchestration
   tools/                    # 内置工具定义和 ToolRegistry/ToolExecutor
   permission/               # policy engine、approval pipeline、auto approver
@@ -89,8 +92,10 @@ src/
 
 - 注册自定义 app scheme，开发环境使用 Vite dev server，生产环境从 `dist/` 读取资源。
 - 安装 CSP、导航拦截、权限拒绝、webview/window-open 禁用等安全策略。
-- 初始化 `ConfigStore`、`SecretStore`、`SkillsManager`、`TraceService`、`WorkbenchStore`、`ProjectMetadataStore`、`CodeBackendManager`、`PromptRegistry` 和 `SessionManager`。
+- 初始化 `ConfigStore`、Electron `safeStorage` adapter、HTTP transport 和 `WorkbenchStore`，再通过唯一的 `createAgentRuntime()` 创建 Agent 服务。
 - 通过 `registerIpcHandlers` 绑定所有 `shared/ipc-contract.ts` 中声明的 channel。
+
+`createAgentRuntime()` 是 Agent 依赖的唯一生产组装入口，创建 `SkillsManager`、`TraceService`、`ChangeHistoryStore`、`ProjectMetadataStore`、`CodeBackendManager`、`McpManager`、`PromptRegistry` 和 `SessionManager`。这些服务不由 Electron host 或未来 Headless host 重复组装。配置存储、网络 transport、Workbench、窗口和 IPC 仍是 host 职责。
 
 IPC 调用链：
 
@@ -105,16 +110,18 @@ IPC 调用链：
 - `AGENT_EVENT_CHANNEL`：run、assistant、tool、approval、goal/plan、interjection、usage 等事件。
 - `TERMINAL_EVENT_CHANNEL`：PTY 输出、状态和快照相关事件。
 
+`SessionEventEmitter` 只产生与 Electron 无关的 `AgentEvent` / `TerminalEvent`，交给 `RuntimeEventBus` 校验和发布。EventBus 即使没有 renderer subscriber 也会有界保存 terminal run completion，供程序化 `AgentRuntime.run()` 等待；Electron adapter 只负责包装 IPC envelope 并转发给当前 `WebContents`。单个 host listener 失败会记录诊断，不能中断 Agent loop。
+
 ---
 
 ## 4. 配置、凭据与模型
 
-配置由 `electron/config/store.ts` 管理，schema 在 `electron/config/schema.ts` 和 `shared/config.ts` 中定义。当前 schema version 为 7；v7 新增 `limits.maxConcurrentRuns`（`1..32`，默认 `4`），旧配置迁移时自动补默认值。并发配置不包含独立 provider call 上限，也不允许调整同 workspace writer 数。
+配置由 `electron/config/store.ts` 管理，schema 在 `electron/config/schema.ts` 和 `shared/config.ts` 中定义。当前 schema version 为 8；v8 增加通用 MCP server 配置，旧配置迁移时自动补默认值。并发配置不包含独立 provider call 上限，也不允许调整同 workspace writer 数。
 
 持久化位置：
 
 - 非敏感配置：`userData/config.json`。
-- 凭据：`userData/secrets.json`，通过 Electron `safeStorage` 加密。
+- 凭据：`userData/secrets.json`，通用 `SecretStore` 通过 host 提供的 adapter 加密；桌面 host 使用 Electron `safeStorage` adapter。
 - workbench：`userData/workbench.json`。
 - trace：`userData/traces/*.jsonl`。
 - change history：`userData/change-history.json`。
@@ -134,7 +141,7 @@ IPC 调用链：
 
 ## 5. Session 与 Run
 
-`SessionManager` 是主进程 session 门面，负责 session map、生命周期、IPC-facing 方法、trace logger 所有权、terminal facade 和依赖装配。长流程被拆到 session-scoped collaborators：
+`AgentRuntime` 是 Node-only 生命周期和控制门面，拥有共享事件总线、Agent 服务以及幂等 dispose。它提供程序化 create session、run completion、interrupt 和 close；Electron IPC 使用同一 runtime services。`SessionManager` 负责 session map、run 生命周期、trace logger 所有权和 terminal facade，长流程被拆到 session-scoped collaborators：
 
 | 模块                             | 职责                                                                     |
 | -------------------------------- | ------------------------------------------------------------------------ |
@@ -483,7 +490,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 
 当前测试分布：
 
-- `electron/**/*.test.ts`：主进程业务、工具、权限、provider、session、prompt、logging、project/code intelligence。
+- `electron/**/*.test.ts`：主进程业务、Node-only AgentRuntime、工具、权限、provider、session、prompt、logging、project/code intelligence。
 - `shared/**/*.test.ts`：contract、markdown import/export、titles。
 - `src/**/*.test.ts`：Pinia stores、Vue components、terminal sequence。
 - `e2e/*.spec.ts`：Electron 安全基线、设置/工作台/UI、fake provider 功能流、审批、interjection、terminal。
@@ -499,7 +506,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 
 ## 19. 当前限制
 
-- Runtime 仍在 Electron 主进程内，不是 utility process；未捕获主进程错误仍可能影响窗口。
+- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI 和 Docker worker 尚未实现。
 - Provider 层当前是 OpenAI-compatible/DeepSeek 为主，没有多厂商完整矩阵。
 - Code intelligence backend 当前实际实现为 Serena MCP 只读 adapter，rename/edit capability 只在 schema 中预留。
 - 插件系统只有事件总线和 hook 点，没有本地 JS 插件加载器。
