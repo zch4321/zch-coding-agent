@@ -1,3 +1,9 @@
+.git
+.github
+.vscode
+.electron-cache
+.npm-cache*
+coverage
 dist
 dist-electron
 dist-headless
@@ -6,3 +12,6 @@ node_modules
 playwright-report
 release
 test-results
+*.tsbuildinfo
+benchmarks/results
+*.log

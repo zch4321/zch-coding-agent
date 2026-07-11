@@ -6,12 +6,18 @@ export default defineConfig({
   test: {
     include: [
       'electron/**/*.test.ts',
+      'benchmarks/**/*.test.ts',
       'shared/**/*.test.ts',
       'src/**/*.test.ts',
     ],
     coverage: {
       provider: 'v8',
-      include: ['electron/**/*.ts', 'shared/**/*.ts', 'src/**/*.ts'],
+      include: [
+        'benchmarks/**/*.ts',
+        'electron/**/*.ts',
+        'shared/**/*.ts',
+        'src/**/*.ts',
+      ],
       exclude: [
         '**/*.test.ts',
         'coverage/**',

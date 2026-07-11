@@ -10,6 +10,8 @@
     "build": "npm run typecheck && npm run test:native && npm run test:ripgrep && npm run build:app && npm run build:headless && electron-builder --win --x64 --publish never",
     "build:app": "vite build",
     "build:headless": "vite build --config vite.headless.config.ts",
+    "build:worker-services": "vite build --config vite.worker.config.ts",
+    "build:worker-image": "node scripts/build-worker-image.cjs",
     "agent:headless": "node dist-headless/zch-agent-headless.mjs",
     "rebuild:native:source": "electron-rebuild -f -w node-pty",
     "preview": "vite preview",
@@ -23,6 +25,7 @@
     "test:native": "node scripts/native-pty-smoke.cjs",
     "test:ripgrep": "node scripts/ripgrep-smoke.cjs",
     "test:e2e": "npm run build:app && playwright test",
+    "test:docker-worker": "node scripts/run-docker-worker-tests.cjs",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {

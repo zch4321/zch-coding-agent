@@ -107,19 +107,11 @@ export async function runHeadlessAgent(
   })
   const controller = new AbortController()
   let timedOut = false
+  let timeout: ReturnType<typeof setTimeout> | undefined
   const relayAbort = () =>
     controller.abort(
       options.signal?.reason ?? new Error('Headless run cancelled'),
     )
-  options.signal?.addEventListener('abort', relayAbort, { once: true })
-  const timeout = setTimeout(
-    () => {
-      timedOut = true
-      controller.abort(new Error('Headless run timed out'))
-    },
-    Math.max(1, options.timeoutMs),
-  )
-  timeout.unref()
 
   const provider = options.config.provider
   writer.write({
@@ -150,6 +142,16 @@ export async function runHeadlessAgent(
         clientRequestId: 'headless-task-1',
         signal: controller.signal,
       })
+      options.signal?.addEventListener('abort', relayAbort, { once: true })
+      if (options.signal?.aborted) relayAbort()
+      timeout = setTimeout(
+        () => {
+          timedOut = true
+          controller.abort(new Error('Headless run timed out'))
+        },
+        Math.max(1, options.timeoutMs),
+      )
+      timeout.unref()
       runIds.push(firstRun.runId)
       completion = await firstRun.completion
 
@@ -209,7 +211,7 @@ export async function runHeadlessAgent(
         incompleteReason = 'plan_approval_limit'
       }
     } finally {
-      clearTimeout(timeout)
+      if (timeout) clearTimeout(timeout)
       options.signal?.removeEventListener('abort', relayAbort)
     }
 
@@ -269,7 +271,7 @@ export async function runHeadlessAgent(
     writer.write({ type: 'runtime.completed', status, resultPath })
     return result
   } finally {
-    clearTimeout(timeout)
+    if (timeout) clearTimeout(timeout)
     options.signal?.removeEventListener('abort', relayAbort)
     if (sessionId) await runtime.closeSession(sessionId).catch(() => false)
     await runtime.dispose()
