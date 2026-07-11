@@ -127,6 +127,14 @@ Plan 进入 `awaiting_review` 后，driver 先等待共享 run controller 完全
 
 `runtime-parity.test.ts` 使用同一 fake-provider trajectory 分别通过真实 Electron IPC handler/event adapter 和 Headless API 运行。fixture 覆盖 read、patch、process、Plan 人工/自动恢复、compact 和 generic MCP canonical call，比较 Provider messages、稳定 prompt layer hashes、prompt resources、`toolsHash`、工具参数/结果和最终 Git patch。规范化只处理显式 host 差异：随机 ID、时间、绝对路径、PID/耗时、自动 Plan 消息位置，以及由时间生成的 runtime-context hash；不使用宽泛 snapshot，也不忽略工具、模型消息或 patch 的结构差异。
 
+### 3.3 Linux Docker worker
+
+`benchmarks/docker/headless.Dockerfile` 从固定 digest 的 Node 24 bookworm-slim 构建 Linux x64/glibc OCI image，在 build stage 重新编译 Linux `node-pty`，再把 `dist-headless/zch-agent-headless.mjs`、版本化 prompt resources 和运行时依赖复制到非 root runtime stage。镜像标签记录 source commit/tree、platform、libc 和 Node major；Headless identity 另记录实际 image ID/digest。Docker worker 没有第二份 Agent loop 或工具注册。
+
+`benchmarks/worker/coordinator.ts` 在创建资源前检查 Linux/amd64 daemon、seccomp、CPU/内存/PID capability 和镜像标签。Agent container 固定使用只读 rootfs、UID/GID 10001、`cap-drop=ALL`、`no-new-privileges`、默认 seccomp、CPU/内存/PID/tmpfs/wall/disk budgets；只挂载一个临时 workspace、独立 artifacts、只读 config/task 和单次 credential file。Docker socket、宿主 home、git credential、hidden grader 和任意额外挂载均不进入该接口。
+
+默认 credential 模式创建每次 run 独立的 internal network。Agent 只连接该网络并只持有随机 proxy token；Provider proxy 是唯一双网络容器，真实 key 只通过 coordinator 私有临时文件挂载给 proxy，且有请求体和请求次数上限。显式 direct 模式只用于受控开发 fallback。所有终态都执行 stop、有限等待、kill fallback、bounded logs/artifact 收集、container/network 删除和 secret directory 删除，并把清理结果写入 `worker-result.json`。
+
 ---
 
 ## 4. 配置、凭据与模型
@@ -502,6 +510,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 - `npm run test:native`：node-pty native smoke。
 - `npm run test:ripgrep`：bundled ripgrep smoke。
 - `npm run test:real`：显式 live provider 测试，需要 `DEEPSEEK_API_KEY`。
+- `npm run test:docker-worker`：显式构建 Linux worker image，运行 fake-provider proxy smoke 和强制超时清理；不进入默认测试链路。
 
 当前测试分布：
 
@@ -521,7 +530,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 
 ## 19. 当前限制
 
-- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI 与 host parity 已实现，但 Linux OCI worker 和隔离 grader 尚未实现。
+- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI、host parity 与 Linux OCI worker 已实现，但 case manifest、隔离 grader 和正式 benchmark runner 尚未实现。
 - Provider 层当前是 OpenAI-compatible/DeepSeek 为主，没有多厂商完整矩阵。
 - Code intelligence backend 当前实际实现为 Serena MCP 只读 adapter，rename/edit capability 只在 schema 中预留。
 - 插件系统只有事件总线和 hook 点，没有本地 JS 插件加载器。

@@ -2,7 +2,7 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、工具紧凑 UI v1 已经落地。下一阶段继续推进 M5 Linux Docker worker 和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、工具紧凑 UI v1 已经落地。下一阶段继续推进 M5 case manifest、隔离 grader 和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
 
 ## 0. 未完成概览
 
@@ -19,26 +19,11 @@
 
 M5 保留原编号以维持已有文档和历史引用，但从本阶段起提前为首要里程碑。它首先评估 harness 工程本身，不把 Electron UI 性能混入 coding correctness；UI/IPC 继续由 E2E 覆盖，并通过 parity 测试证明两个宿主没有语义漂移。
 
-### 5.4 Linux Docker Worker
-
-- 构建与桌面端来自同一 source commit 的 `zch-agent-headless:<commit>` OCI image。v1 明确支持 Linux x64、Node LTS 和 glibc 基础镜像；musl、其他架构或 native addon ABI 不匹配返回 unsupported。
-- 自建 case 优先 `FROM zch-agent-headless:<commit>` 安装任务依赖；外部 benchmark 后续支持从固定 case image digest 注入同一 headless bundle。
-- Agent container 包含 runtime、workspace、编译器和公开测试，不包含 gold patch、test patch、hidden grader、`fail_to_pass` 或 `pass_to_pass` 元数据。
-- Evaluator 使用另一容器，从 pristine base 应用 agent patch 后运行 hidden tests；grader 无 Provider credential，默认 `network=none`。
-- Agent container 使用非 root 用户、`--cap-drop=ALL`、默认 seccomp、PID/CPU/内存/磁盘/wall-time 限制、临时 volume；禁止 Docker socket、宿主 home、宿主 git credential 和任意宿主目录挂载。
-- Provider key 保留在 coordinator。推荐通过限额、单 trial、可撤销 token 的本地 Provider proxy 访问真实 API；Agent container 网络只允许该 proxy。直接环境密钥仅作为受控开发 fallback，仍必须通过现有子进程环境 allowlist。
-- coordinator 在超时、取消和异常退出时按顺序终止 Agent、等待有限清理、强制 kill、收集诊断并销毁 container/volume，不能留下后台进程。
-
-验收：
-
-- Agent 只能修改临时 workspace；容器内越界破坏不能影响宿主或 grader。
-- Agent 无法读取 hidden tests、gold patch、真实 Provider key 或 Docker daemon。
-- 同一 image digest 和 case revision 连续准备三次，baseline 与 oracle evaluator 结果一致。
-- container 被强制终止后没有残留进程、网络、volume writer 或泄漏的 credential token。
-
 ### 5.5 Case Manifest 与数据集策略
 
 - 定义版本化 `BenchmarkCase` schema，至少包含 case id、suite、task、repository source/revision/archive hash、platform、case image digest、setup、公开检查、grader、验收行为组、feedback policy、修改范围和资源预算。
+- 自建 case 优先 `FROM zch-agent-headless:<commit>` 安装任务依赖；外部 benchmark 后续支持从固定 case image digest 注入同一 Headless bundle。
+- Agent 可见 case image 只包含 runtime、workspace、编译器和公开测试，不包含 gold patch、test patch、hidden grader、`fail_to_pass` 或 `pass_to_pass` 元数据。Evaluator 使用另一容器，从 pristine base 应用 Agent patch 后运行 hidden tests；grader 无 Provider credential且默认 `network=none`。
 - dataset adapter 只把外部格式归一化为 `BenchmarkCase`；gold/test patch 和 evaluator 私有字段停留在 coordinator/grader，绝不进入 renderer、Headless config、Agent trace 或 workspace。
 - workspace 从固定 archive 创建，并移除可恢复未来提交的 git history、tag、remote、reflog 和缓存。保留任务需要的当前源码信息，但不能通过仓库历史直接找到答案。
 - 第一主套件为人工编写的 `core-24`：6 个 bug fix、6 个 feature、3 个 refactor/compatibility、3 个正确 abstain/no-change、6 个 harness-stress。
@@ -52,6 +37,7 @@ M5 保留原编号以维持已有文档和历史引用，但从本阶段起提�
 - Agent 可见 bundle 的自动扫描确认不存在 evaluator 私有字段和未来 git 历史。
 - `core-24` 每项都有 acceptance group、baseline/oracle/mutant 证据和审核记录。
 - 外部 adapter 更新不会静默改变已冻结 suite；新 revision 产生新的 suite identity。
+- 同一 image digest 和 case revision 连续准备三次时，baseline 与 oracle evaluator 结果必须一致。
 
 ### 5.6 Runner、严格首轮与一次修复
 
@@ -151,16 +137,16 @@ benchmarks/
 
 | 步骤  | 具体实现                                                     | 完成标志                        |
 | ----- | ------------------------------------------------------------ | ------------------------------- |
-| M5.7  | 构建受限 Linux OCI image、coordinator 和清理器               | 容器 smoke 无残留资源           |
-| M5.8  | 实现 manifest loader、native adapter 和 3 个 core smoke case | baseline/oracle/mutant 自检通过 |
-| M5.9  | 实现隔离 grader、L0-L5、硬门禁和 artifact/redaction          | 评分回归与泄漏测试通过          |
-| M5.10 | 补 tool attempt、usage/cost/paired comparison                | 指标 golden tests 通过          |
-| M5.11 | 实现 strict、repair-once、resume 和多 trial                  | append-only、隔离与恢复测试通过 |
-| M5.12 | 扩展到 12/24 个 core case                                    | `benchmark` 可产出稳定 A/B 报告 |
-| M5.13 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查                 | Linux worker 跑通冻结 revision  |
-| M5.14 | 增加 SWE-bench compatibility 与高成本 full adapter           | 不影响主套件且保持 opt-in       |
+| M5.5  | 实现 manifest loader、native adapter 和 3 个 core smoke case | baseline/oracle/mutant 自检通过 |
+| M5.6  | 实现 runner、strict、repair-once、resume 和多 trial          | append-only、隔离与恢复测试通过 |
+| M5.7  | 实现隔离 grader、L0-L5、硬门禁和 artifact/redaction          | 评分回归与泄漏测试通过          |
+| M5.8  | 补 tool attempt、usage/cost/paired comparison                | 指标 golden tests 通过          |
+| M5.9  | 接入 smoke/日常/full 命令和分层 artifacts                    | 完整 vertical slice 通过        |
+| M5.10 | 扩展到 12/24 个 core case                                    | `benchmark` 可产出稳定 A/B 报告 |
+| M5.11 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查                 | Linux worker 跑通冻结 revision  |
+| M5.12 | 增加 SWE-bench compatibility 与高成本 full adapter           | 不影响主套件且保持 opt-in       |
 
-单一 Runtime、固定 Yolo Headless host、runtime identity 和 Electron/Headless parity 已经落地；M5.7–M5.11 构成第一个可用的 Docker benchmark vertical slice，不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
+单一 Runtime、固定 Yolo Headless host、runtime identity、Electron/Headless parity 和受限 Linux Docker worker 已经落地；M5.5–M5.9 构成第一个可用的 Docker benchmark vertical slice，不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
 
 总体验收：
 

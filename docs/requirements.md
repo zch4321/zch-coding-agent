@@ -422,6 +422,15 @@ session.end     { ts }
 - 每个 Headless artifact 必须包含 runtime identity；source commit、case/config digest、provider/model、核心预算、prompt/tool hash 或 capability 不同的结果不得直接比较。
 - Electron/Headless parity 必须通过共享 trajectory 比较 Provider messages、稳定 prompt layer、工具定义与调用、compact/Plan/MCP 行为和 patch；只允许逐字段声明的 host 差异，禁止宽泛 snapshot 忽略。
 
+### 5.5 Linux Docker worker
+
+- Worker image 必须从与桌面/Headless 相同的 source commit 构建并复用唯一 Headless bundle；v1 只支持 Linux x64、Node 24 LTS 和 glibc，其他 daemon、架构、libc 或 native ABI 返回 `unsupported`。
+- Agent container 必须使用非 root、只读 rootfs、drop 全 capabilities、no-new-privileges、默认 seccomp，以及 PID、CPU、内存、tmpfs、磁盘和 wall-time 预算。允许的 bind mount 仅为单次 workspace、artifacts、只读输入和 credential file。
+- 默认 Provider proxy 模式下，Agent 只能加入该 run 的 internal network且只能读取单次 proxy token；真实 Provider key 只存在 coordinator 内存和 proxy 专用临时 secret file，不得进入 Agent config/env、trace、JSONL、artifacts 或 Docker inspect env。
+- 直接 credential 模式仅作为显式受控开发 fallback。两种模式都必须使用 Headless config 中声明的 provider-scoped credential 名称，task 不得选择 credential、网络或权限模式。
+- coordinator 必须在 timeout、cancel、异常和正常完成后执行有限 stop、kill fallback、bounded log/artifact 收集、container/network 删除和 secret 删除；清理结果写入版本化 `worker-result.json`，coordinator/environment 故障不得计为模型任务失败。
+- Docker smoke 必须验证一次真实工具写入轨迹和一次挂起 Provider 强制终止，确认 secret 不泄漏、sandbox 参数生效且没有残留 Agent/proxy container 或 run network。该测试显式 opt-in，不进入无 Docker 的默认 `npm test`。
+
 ---
 
 ## 6. 插件系统（生命周期钩子）

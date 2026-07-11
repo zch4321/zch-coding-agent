@@ -4,7 +4,7 @@
 
 使用：启动应用后先选择一个工作区目录，在设置里配置模型服务和 API Key，然后在对话框中提出任务。Agent 会在当前工作区内读取文件、搜索代码、应用补丁、执行命令或打开共享终端；涉及文件写入、命令执行、终端输入等副作用时，会根据当前权限模式进入人工审批、自动审批或全自动执行。普通测试使用 `npm test`，端到端测试使用 `npm run test:e2e`，可选真实 Provider 测试使用 `npm run test:real`。
 
-内部 benchmark host 可通过 `npm run build:headless` 构建，然后用 `npm run agent:headless -- run --workspace <dir> --task-file <file> --config <file> --artifacts <dir> --timeout-ms <ms>` 启动。该入口固定为无人审批的 Yolo，stdout 只输出 JSONL，运行结果和 patch 写入 workspace 外的 artifacts 目录；它用于后续 Docker benchmark，不替代桌面安全边界。
+内部 benchmark host 可通过 `npm run build:headless` 构建，然后用 `npm run agent:headless -- run --workspace <dir> --task-file <file> --config <file> --artifacts <dir> --timeout-ms <ms>` 启动。该入口固定为无人审批的 Yolo，stdout 只输出 JSONL，运行结果和 patch 写入 workspace 外的 artifacts 目录。Linux worker 继续复用这一个 bundle；`npm run build:worker-image` 构建同 commit 的 OCI image，`npm run test:docker-worker` 显式运行 Docker smoke 与强制终止清理测试。
 
 ## 项目简介
 
@@ -27,6 +27,7 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - Skills：支持安装、扫描和启用本地 Skill 指令文件，通过按需读取减少常驻上下文开销。
 - Generic MCP：支持手写 stdio server 配置、逐 server 启停与启动信任；模型通过三个固定 gateway 工具分页发现和调用外部工具，调用继续经过现有权限与 trace 管线。
 - Headless host：复用桌面端同一 Node Agent Runtime，提供固定 Yolo 的程序化 API/CLI、JSONL 事件、原子 result/identity、usage/tool 指标、Git patch 和自动 Plan continuation；parity fixture 持续校验 Electron/Headless 的 Provider、prompt、tool、compact、Plan、MCP 和 patch 语义。
+- Linux Docker worker：以固定的 Node 24/glibc Linux x64 镜像运行同一 Headless bundle；coordinator 做 capability/image identity 预检、资源限制、受控挂载、Provider proxy、产物回收和 stop/kill/remove 清理。Agent 默认只接触单 trial proxy token，不接触真实 Provider key、Docker socket或宿主 home。
 
 ### MCP 配置示例
 
@@ -94,6 +95,8 @@ npm run lint
 npm run format:check
 npm run typecheck
 npm run build:headless
+npm run build:worker-image
+npm run test:docker-worker
 npm run build
 ```
 
@@ -122,9 +125,10 @@ npm run test:real
 
 ## 安全边界
 
-Zch Coding Agent 的安全模型是“本地桌面应用 + 明确审批 + 工作区路径边界”，不是容器级 sandbox。
-文件工具会限制在 workspace 内，并对真实路径和资源状态做复核；但 `run_command` 和持久终端本质上仍是主机进程执行能力，因此在 Auto / Yolo 模式下需要用户明确接受风险。
+桌面产品的安全模型是“本地应用 + 明确审批 + 工作区路径边界”，不是容器级 sandbox。文件工具会限制在 workspace 内，并对真实路径和资源状态做复核；但桌面端 `run_command` 和持久终端本质上仍是主机进程执行能力，因此在 Auto / Yolo 模式下需要用户明确接受风险。
+
+内部 benchmark worker 是另一条部署边界：它固定 Yolo，但在受限 Linux container 中运行，只挂载单次 workspace/artifacts 并应用资源和网络限制。该隔离不反向改变桌面端权限语义，也尚未包含后续 M5 的 hidden grader。
 
 ## 当前状态
 
-当前版本以 Windows x64 为主要发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host 和 trace 基础能力。后续方向包括 Electron/Headless parity、Linux Docker benchmark、隔离 grader、多 Provider、插件加载器和 IDE 级编辑能力。
+当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity、Linux Docker worker 和 trace 基础能力。后续方向包括 benchmark case manifest、隔离 grader、多 Provider、插件加载器和 IDE 级编辑能力。
