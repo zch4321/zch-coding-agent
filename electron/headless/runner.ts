@@ -3,9 +3,13 @@ import path from 'node:path'
 import type { Writable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import type { AutoApprover } from '../permission/auto-approver'
+import { RuntimeIdentitySchema } from '../../shared/runtime-identity'
+import type { RuntimeIdentity } from '../../shared/runtime-identity'
 import type { LLMProvider } from '../providers/provider'
 import { createAgentRuntime } from '../runtime/create-agent-runtime'
+import { createRuntimeIdentity, sha256Json } from '../runtime/runtime-identity'
 import type { RunCompletion } from '../runtime/runtime-events'
+import type { RuntimeEventListener } from '../runtime/runtime-events'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import { writeJsonAtomic } from '../config/atomic-file'
 import { prepareHeadlessConfig } from './config'
@@ -19,6 +23,7 @@ import { HeadlessEventWriter, HeadlessRunMetrics } from './event-stream'
 import { collectWorkspacePatch } from './patch'
 
 const validateResult = compileSchema(HeadlessResultSchema)
+const validateRuntimeIdentity = compileSchema(RuntimeIdentitySchema)
 
 export class HeadlessRunInputError extends Error {
   readonly code = 'HEADLESS_RUN_INPUT_INVALID'
@@ -49,6 +54,10 @@ export interface RunHeadlessAgentOptions {
     apiKey: string
   }) => AutoApprover
   onDiagnostic?: (message: string, error?: unknown) => void
+  sourceCommit?: string
+  sourceTree?: RuntimeIdentity['sourceTree']
+  runtimeImageDigest?: string
+  eventListeners?: RuntimeEventListener[]
 }
 
 export async function runHeadlessAgent(
@@ -93,7 +102,7 @@ export async function runHeadlessAgent(
     fetchImpl: options.fetchImpl,
     providerFactory: options.providerFactory,
     autoApproverFactory: options.autoApproverFactory,
-    eventListeners: [metrics],
+    eventListeners: [metrics, ...(options.eventListeners ?? [])],
     onDiagnostic: options.onDiagnostic,
   })
   const controller = new AbortController()
@@ -208,6 +217,16 @@ export async function runHeadlessAgent(
     const patch = await collectWorkspacePatch({ workspace, artifactsDirectory })
     const completedAt = new Date().toISOString()
     const resultPath = path.join(artifactsDirectory, 'result.json')
+    const identityPath = path.join(artifactsDirectory, 'identity.json')
+    const identity = createRuntimeIdentity({
+      runtime,
+      config: prepared.configStore.getPublicConfig(),
+      configHash: prepared.configHash,
+      caseDigest: options.config.caseDigest ?? sha256Json(options.task),
+      sourceCommit: options.sourceCommit,
+      sourceTree: options.sourceTree,
+      runtimeImageDigest: options.runtimeImageDigest,
+    })
     const result: HeadlessResult = {
       schemaVersion: 1,
       status,
@@ -226,6 +245,7 @@ export async function runHeadlessAgent(
       tools: { ...metrics.tools },
       artifacts: {
         resultPath,
+        identityPath,
         tracePath: path.join(
           prepared.userDataDirectory,
           'traces',
@@ -240,6 +260,10 @@ export async function runHeadlessAgent(
     if (!validateResult(result)) {
       throw new Error(formatSchemaErrors(validateResult.errors))
     }
+    if (!validateRuntimeIdentity(identity)) {
+      throw new Error(formatSchemaErrors(validateRuntimeIdentity.errors))
+    }
+    await writeJsonAtomic(identityPath, identity)
     await writeJsonAtomic(resultPath, result)
     await runtime.closeSession(sessionId)
     writer.write({ type: 'runtime.completed', status, resultPath })

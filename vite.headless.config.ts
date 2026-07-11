@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
+import { sourceCommitDefine } from './build/source-identity'
 
 export default defineConfig({
+  define: sourceCommitDefine(),
   build: {
     target: 'node22',
     outDir: 'dist-headless',

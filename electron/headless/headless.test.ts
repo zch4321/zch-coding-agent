@@ -342,6 +342,18 @@ describe('Headless host', () => {
     await expect(
       readFile(result.artifacts.resultPath, 'utf8'),
     ).resolves.toContain('"status": "completed"')
+    const identity = JSON.parse(
+      await readFile(result.artifacts.identityPath, 'utf8'),
+    ) as {
+      configHash: string
+      toolsHash: string
+      promptResources: unknown[]
+      capabilities: { toolNames: string[] }
+    }
+    expect(identity.configHash).toBe(result.configHash)
+    expect(identity.toolsHash).toMatch(/^[a-f0-9]{64}$/u)
+    expect(identity.promptResources.length).toBeGreaterThan(0)
+    expect(identity.capabilities.toolNames).toContain('call_mcp_tool')
     await expect(
       readFile(result.artifacts.tracePath, 'utf8'),
     ).resolves.toContain('"type":"tool.call"')

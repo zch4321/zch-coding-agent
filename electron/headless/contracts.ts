@@ -55,6 +55,13 @@ export const HeadlessConfigSchema = Type.Object(
     maxAutoPlanApprovals: Type.Optional(
       Type.Integer({ minimum: 0, maximum: 8 }),
     ),
+    caseDigest: Type.Optional(
+      Type.String({
+        minLength: 64,
+        maxLength: 64,
+        pattern: '^[a-f0-9]{64}$',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
@@ -110,6 +117,7 @@ export const HeadlessResultSchema = Type.Object(
     artifacts: Type.Object(
       {
         resultPath: Type.String({ minLength: 1, maxLength: 4_096 }),
+        identityPath: Type.String({ minLength: 1, maxLength: 4_096 }),
         tracePath: Type.String({ minLength: 1, maxLength: 4_096 }),
         patchPath: Type.Optional(
           Type.String({ minLength: 1, maxLength: 4_096 }),

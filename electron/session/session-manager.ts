@@ -605,6 +605,17 @@ export class SessionManager {
     return this.#runs.interrupt(session, runId)
   }
 
+  providerToolDefinitions(): JsonValue[] {
+    return structuredClone(this.#toolRegistry.providerDefinitions())
+  }
+
+  toolNames(): string[] {
+    return this.#toolRegistry
+      .list()
+      .map((tool) => tool.id)
+      .sort()
+  }
+
   async waitForRunSettled(sessionId: SessionId, runId: RunId): Promise<void> {
     const session = this.#requireSession(sessionId)
     const run = session.activeRun
