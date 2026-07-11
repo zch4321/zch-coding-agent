@@ -6,7 +6,9 @@ export const useMcpStore = defineStore('mcp', {
   state: () => ({
     items: [] as McpServerStatus[],
     loading: false,
+    refreshing: false,
     error: '',
+    requestSequence: 0,
   }),
   actions: {
     apply(servers: McpServerStatus[]) {
@@ -16,25 +18,33 @@ export const useMcpStore = defineStore('mcp', {
       operation: (
         bridge: NonNullable<typeof window.agentApi>,
       ) => ReturnType<NonNullable<typeof window.agentApi>['listMcpServers']>,
+      options: { background?: boolean; skipIfBusy?: boolean } = {},
     ) {
       const bridge = window.agentApi
-      if (!bridge || this.loading) return
-      this.loading = true
+      if (!bridge || (options.skipIfBusy && (this.loading || this.refreshing)))
+        return
+      const requestSequence = ++this.requestSequence
+      if (options.background) this.refreshing = true
+      else this.loading = true
       this.error = ''
       try {
         const result = await operation(bridge)
+        if (requestSequence !== this.requestSequence) return
         if (result.ok) this.apply(result.value.servers)
         else this.error = result.error.message
       } catch (error) {
+        if (requestSequence !== this.requestSequence) return
         this.error =
           error instanceof Error ? error.message : 'MCP request failed'
       } finally {
-        this.loading = false
+        if (options.background) this.refreshing = false
+        else if (requestSequence === this.requestSequence) this.loading = false
       }
     },
     load() {
-      return this.run((bridge) =>
-        bridge.listMcpServers({ version: IPC_VERSION }),
+      return this.run(
+        (bridge) => bridge.listMcpServers({ version: IPC_VERSION }),
+        { background: true, skipIfBusy: true },
       )
     },
     reload() {

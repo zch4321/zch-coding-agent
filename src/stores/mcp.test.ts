@@ -42,6 +42,37 @@ describe('MCP settings store', () => {
     await store.trustAndEnable(server)
     expect(store.items[0]).toMatchObject({ enabled: true, trusted: true })
   })
+
+  it('lets user actions supersede an in-flight background refresh', async () => {
+    let finishRefresh: ((value: ReturnType<typeof success>) => void) | undefined
+    const listMcpServers = vi.fn(
+      () =>
+        new Promise<ReturnType<typeof success>>((resolve) => {
+          finishRefresh = resolve
+        }),
+    )
+    const restarted = {
+      ...server,
+      enabled: true,
+      trusted: true,
+      state: 'ready' as const,
+      pid: 4321,
+    }
+    const restartMcpServer = vi.fn(async () => success([restarted]))
+    installApi({ listMcpServers, restartMcpServer })
+    const store = useMcpStore()
+
+    const refresh = store.load()
+    await Promise.resolve()
+    await store.restart(server)
+    finishRefresh?.(success([server]))
+    await refresh
+
+    expect(restartMcpServer).toHaveBeenCalledOnce()
+    expect(store.items).toEqual([restarted])
+    expect(store.loading).toBe(false)
+    expect(store.refreshing).toBe(false)
+  })
 })
 
 function success(servers: McpServerStatus[]) {

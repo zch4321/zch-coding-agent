@@ -30,6 +30,10 @@ async function trustAndEnable() {
   await mcp.trustAndEnable(server)
   if (!mcp.error) trustTarget.value = undefined
 }
+
+function restartServer(server: McpServerStatus) {
+  void mcp.restart(server)
+}
 </script>
 
 <template>
@@ -42,7 +46,7 @@ async function trustAndEnable() {
       <NButton secondary :loading="mcp.loading" @click="mcp.reload">
         {{ t('mcp.reload') }}
       </NButton>
-      <NButton secondary :loading="mcp.loading" @click="mcp.load">
+      <NButton secondary :loading="mcp.refreshing" @click="mcp.load">
         {{ t('common.refresh') }}
       </NButton>
     </div>
@@ -75,7 +79,7 @@ async function trustAndEnable() {
             size="small"
             secondary
             :loading="mcp.loading"
-            @click="mcp.restart(server)"
+            @click="restartServer(server)"
           >
             {{ t('mcp.restart') }}
           </NButton>
