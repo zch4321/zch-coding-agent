@@ -187,6 +187,19 @@ describe('McpManager', () => {
     expect(manager.listStatuses()[0]).toMatchObject({ state: 'ready' })
   })
 
+  it('restarts a ready connection on demand', async () => {
+    process.env.ZCH_MCP_TEST_SECRET = 'test-secret-value'
+    const manager = await createManager(
+      trustedConfig({ env: { FAKE_STARTUP_MARKER: '1' } }),
+    )
+    const before = manager.listStatuses()[0]?.stderrTail
+
+    await manager.restart('fixture')
+
+    expect(manager.listStatuses()[0]).toMatchObject({ state: 'ready' })
+    expect(manager.listStatuses()[0]?.stderrTail).not.toBe(before)
+  })
+
   it('keeps invalid schemas in diagnostics but makes them unavailable', async () => {
     process.env.ZCH_MCP_TEST_SECRET = 'test-secret-value'
     const manager = await createManager(

@@ -2,12 +2,16 @@ import readline from 'node:readline'
 import process from 'node:process'
 import { existsSync, writeFileSync } from 'node:fs'
 import { setTimeout } from 'node:timers'
+import { randomUUID } from 'node:crypto'
 
 const mode = process.env.FAKE_MCP_MODE ?? 'normal'
 const secret = process.env.FAKE_SECRET
 const crashMarker = process.env.FAKE_CRASH_MARKER
 let catalogChanged = false
 if (secret) process.stderr.write(`fixture secret=${secret}\n`)
+if (process.env.FAKE_STARTUP_MARKER) {
+  process.stderr.write(`fixture-start=${randomUUID()}\n`)
+}
 
 const alpha = {
   name: 'alpha',
