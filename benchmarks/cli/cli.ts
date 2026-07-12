@@ -1,9 +1,25 @@
 import { execFile } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { Writable } from 'node:stream'
 import { promisify } from 'node:util'
+import { writeJsonAtomic } from '../../electron/config/atomic-file'
 import { loadNativeBenchmarkSuite } from '../adapters/native'
+import {
+  loadLatestMonthlySwebenchCatalog,
+  loadLatestSweRebenchCatalog,
+  loadMonthlySwebenchCatalog,
+  loadSweRebenchCatalog,
+  type ExternalDatasetCatalog,
+} from '../adapters/external-datasets'
+import { ExternalDockerRuntime } from '../adapters/external-docker-runtime'
+import {
+  loadExternalBenchmarkSuites,
+  type ExternalAdapterRuntime,
+} from '../adapters/external'
+import type { LoadedAdapterSuite } from '../adapters/contracts'
+import type { BenchmarkCohort } from '../cohort/contracts'
+import { buildRollingMixedCohort, verifyCohort } from '../cohort/selection'
 import { BenchmarkCaseValidationError } from '../cases/loader'
 import { validateBenchmarkPriceSnapshot } from '../metrics/aggregate'
 import type { BenchmarkPriceSnapshot } from '../metrics/contracts'
@@ -42,6 +58,8 @@ export interface BenchmarkCliArguments {
   priceSnapshotFile?: string
   credentialMode: 'proxy' | 'direct'
   allowExternalNetwork: boolean
+  cohortFile?: string
+  seed?: string
 }
 
 export class BenchmarkCliError extends Error {
@@ -62,6 +80,16 @@ export interface BenchmarkCliOptions {
   inspectImage?: typeof inspectWorkerImage
   groupRunner?: typeof runBenchmarkGroup
   signal?: AbortSignal
+  loadExternalCatalogs?: (
+    cohort?: BenchmarkCohort,
+  ) => Promise<ExternalDatasetCatalog[]>
+  createExternalRuntime?: (input: {
+    cacheDirectory: string
+    runtimeImage: string
+    sourceCommit: string
+  }) => ExternalAdapterRuntime & {
+    resolveImage: ExternalDockerRuntime['resolveImage']
+  }
 }
 
 export function parseBenchmarkArguments(argv: string[]): BenchmarkCliArguments {
@@ -83,6 +111,8 @@ export function parseBenchmarkArguments(argv: string[]): BenchmarkCliArguments {
     '--price-snapshot',
     '--credential-mode',
     '--allow-external-network',
+    '--cohort',
+    '--seed',
   ])
   for (let index = 1; index < argv.length; index += 2) {
     const flag = argv[index]
@@ -127,6 +157,17 @@ export function parseBenchmarkArguments(argv: string[]): BenchmarkCliArguments {
     single.get('--allow-external-network') ?? 'true',
     '--allow-external-network',
   )
+  const cohortFile = single.get('--cohort')
+  const seed = single.get('--seed')?.trim()
+  if (cohortFile && seed) {
+    throw new BenchmarkCliError('--cohort and --seed cannot be used together')
+  }
+  if ((cohortFile || seed) && preset !== 'external') {
+    throw new BenchmarkCliError('--cohort and --seed require --preset external')
+  }
+  if (seed && (seed.length > 256 || /[\r\n\0]/u.test(seed))) {
+    throw new BenchmarkCliError('--seed is invalid')
+  }
   const trialsValue = single.get('--trials')
   const trials = trialsValue
     ? positiveInteger(trialsValue, '--trials', 5)
@@ -162,6 +203,8 @@ export function parseBenchmarkArguments(argv: string[]): BenchmarkCliArguments {
       : undefined,
     credentialMode,
     allowExternalNetwork,
+    cohortFile: cohortFile ? path.resolve(cohortFile) : undefined,
+    seed: seed || undefined,
   }
 }
 
@@ -175,16 +218,8 @@ export async function runBenchmarkCli(
     const args = parseBenchmarkArguments(argv)
     const environment = options.environment ?? process.env
     const sourceCommit = options.sourceCommit ?? (await currentSourceCommit())
-    const [config, suites, priceSnapshot] = await Promise.all([
+    const [config, priceSnapshot] = await Promise.all([
       loadHeadlessConfig(args.configFile),
-      Promise.all(
-        args.suiteFiles.map((suiteFile) =>
-          loadNativeBenchmarkSuite({
-            benchmarkRoot: args.benchmarkRoot,
-            suiteFile,
-          }),
-        ),
-      ),
       args.priceSnapshotFile
         ? loadPriceSnapshot(args.priceSnapshotFile)
         : Promise.resolve(undefined),
@@ -204,11 +239,6 @@ export async function runBenchmarkCli(
         'Price snapshot provider/model does not match the Headless config',
       )
     }
-    const selectedCases = selectCases({
-      suites,
-      selectors: args.caseSelectors,
-      caseLimit: BENCHMARK_PRESETS[args.preset].caseLimit,
-    })
     const image =
       args.image ??
       environment.ZCH_WORKER_IMAGE ??
@@ -225,6 +255,32 @@ export async function runBenchmarkCli(
         'results',
         `${timestamp(now)}-${args.preset}`,
       )
+    const external =
+      args.preset === 'external'
+        ? await prepareExternalRun({
+            args,
+            options,
+            image,
+            sourceCommit,
+            outputDirectory,
+            now,
+          })
+        : undefined
+    const suites: LoadedAdapterSuite[] = external
+      ? external.suites
+      : await Promise.all(
+          args.suiteFiles.map((suiteFile) =>
+            loadNativeBenchmarkSuite({
+              benchmarkRoot: args.benchmarkRoot,
+              suiteFile,
+            }),
+          ),
+        )
+    const selectedCases = selectCases({
+      suites,
+      selectors: args.caseSelectors,
+      caseLimit: BENCHMARK_PRESETS[args.preset].caseLimit,
+    })
     const credential = credentialForRun(
       args.credentialMode,
       credentialValue,
@@ -243,6 +299,7 @@ export async function runBenchmarkCli(
       protocol: args.protocol,
       feedbackVisibility: args.feedbackVisibility,
       priceSnapshot,
+      cohortHash: external?.cohort.cohortHash,
       signal: options.signal,
     }
     const result = await (options.groupRunner ?? runBenchmarkGroup)(groupInput)
@@ -272,7 +329,7 @@ export async function runBenchmarkCli(
 }
 
 function selectCases(input: {
-  suites: Awaited<ReturnType<typeof loadNativeBenchmarkSuite>>[]
+  suites: LoadedAdapterSuite[]
   selectors: string[]
   caseLimit: number | null
 }): SelectedBenchmarkCase[] {
@@ -393,5 +450,138 @@ function parseBoolean(value: string, flag: string): boolean {
 }
 
 function isPreset(value: string | undefined): value is BenchmarkRunPreset {
-  return value === 'smoke' || value === 'daily' || value === 'full'
+  return (
+    value === 'smoke' ||
+    value === 'daily' ||
+    value === 'full' ||
+    value === 'external'
+  )
+}
+
+async function prepareExternalRun(input: {
+  args: BenchmarkCliArguments
+  options: BenchmarkCliOptions
+  image: string
+  sourceCommit: string
+  outputDirectory: string
+  now: Date
+}): Promise<{ cohort: BenchmarkCohort; suites: LoadedAdapterSuite[] }> {
+  const runtime =
+    input.options.createExternalRuntime?.({
+      cacheDirectory: path.join(input.args.benchmarkRoot, '.cache', 'external'),
+      runtimeImage: input.image,
+      sourceCommit: input.sourceCommit,
+    }) ??
+    new ExternalDockerRuntime({
+      cacheDirectory: path.join(input.args.benchmarkRoot, '.cache', 'external'),
+      runtimeImage: input.image,
+      sourceCommit: input.sourceCommit,
+    })
+  const cohort = input.args.cohortFile
+    ? await loadCohortFile(input.args.cohortFile)
+    : undefined
+  const catalogs = await (
+    input.options.loadExternalCatalogs ?? defaultExternalCatalogLoader
+  )(cohort)
+  let resolvedCohort = cohort
+  if (resolvedCohort) {
+    for (const cohortCase of resolvedCohort.cases) {
+      const candidate = catalogs
+        .find((catalog) => catalog.release.source === cohortCase.source)
+        ?.candidates.find((entry) => entry.caseId === cohortCase.caseId)
+      if (!candidate) {
+        throw new BenchmarkCliError(
+          `Pinned cohort case is unavailable: ${cohortCase.caseId}`,
+        )
+      }
+      const image = await runtime.resolveImage(candidate)
+      if (
+        !image.eligible ||
+        image.officialDigest !== cohortCase.officialImage.digest ||
+        image.agentImageDigest !== cohortCase.agentImageDigest
+      ) {
+        throw new BenchmarkCliError(
+          `Pinned cohort image mismatch: ${cohortCase.caseId}`,
+        )
+      }
+    }
+  } else {
+    resolvedCohort = await buildRollingMixedCohort({
+      releases: catalogs.map((catalog) => catalog.release),
+      candidates: catalogs.flatMap((catalog) => catalog.candidates),
+      seed: input.args.seed,
+      now: () => input.now,
+      initialExclusions: catalogs.flatMap((catalog) =>
+        catalog.exclusions.map((entry) => ({
+          source: catalog.release.source,
+          caseId: entry.caseId,
+          reason: entry.reason,
+        })),
+      ),
+      resolveImage: (candidate) => runtime.resolveImage(candidate),
+    })
+  }
+  await mkdir(input.outputDirectory, { recursive: true })
+  await writeJsonAtomic(
+    path.join(input.outputDirectory, 'cohort.json'),
+    resolvedCohort,
+  )
+  return {
+    cohort: resolvedCohort,
+    suites: loadExternalBenchmarkSuites({
+      cohort: resolvedCohort,
+      catalogs,
+      runtime,
+    }),
+  }
+}
+
+async function defaultExternalCatalogLoader(
+  cohort?: BenchmarkCohort,
+): Promise<ExternalDatasetCatalog[]> {
+  if (!cohort) {
+    return Promise.all([
+      loadLatestMonthlySwebenchCatalog(),
+      loadLatestSweRebenchCatalog(),
+    ])
+  }
+  const monthly = cohort.sources.find(
+    (source) => source.source === 'monthly-swebench',
+  )
+  const rebench = cohort.sources.find(
+    (source) => source.source === 'swe-rebench',
+  )
+  if (!monthly || !rebench) {
+    throw new BenchmarkCliError(
+      'Pinned cohort is missing an external dataset release',
+    )
+  }
+  return Promise.all([
+    loadMonthlySwebenchCatalog(monthly),
+    loadSweRebenchCatalog(rebench),
+  ])
+}
+
+async function loadCohortFile(filePath: string): Promise<BenchmarkCohort> {
+  const raw = await readFile(filePath)
+  if (raw.byteLength > 4 * 1024 * 1024) {
+    throw new BenchmarkCliError('Benchmark cohort exceeds 4 MiB')
+  }
+  let cohort: BenchmarkCohort
+  try {
+    cohort = JSON.parse(raw.toString('utf8')) as BenchmarkCohort
+    if (
+      cohort?.schemaVersion !== 1 ||
+      cohort.kind !== 'rolling-mixed-16' ||
+      !Array.isArray(cohort.sources) ||
+      !Array.isArray(cohort.cases) ||
+      !Array.isArray(cohort.exclusions)
+    ) {
+      throw new Error('shape')
+    }
+    verifyCohort(cohort)
+  } catch {
+    throw new BenchmarkCliError('Benchmark cohort is invalid')
+  }
+  return cohort
 }

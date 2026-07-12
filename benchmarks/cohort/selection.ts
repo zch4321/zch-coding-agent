@@ -21,6 +21,7 @@ export interface BuildRollingMixedCohortInput {
   candidates: ExternalBenchmarkCandidate[]
   seed?: string
   now?: () => Date
+  initialExclusions?: BenchmarkCohortExclusion[]
   resolveImage: (
     candidate: ExternalBenchmarkCandidate,
   ) => Promise<ResolvedExternalImage>
@@ -30,7 +31,9 @@ export async function buildRollingMixedCohort(
   input: BuildRollingMixedCohortInput,
 ): Promise<BenchmarkCohort> {
   const seed = input.seed?.trim() || randomBytes(16).toString('hex')
-  const exclusions: BenchmarkCohortExclusion[] = []
+  const exclusions: BenchmarkCohortExclusion[] = [
+    ...(input.initialExclusions ?? []),
+  ]
   const selected: BenchmarkCohortCase[] = []
   const repositories = new Set<string>()
 

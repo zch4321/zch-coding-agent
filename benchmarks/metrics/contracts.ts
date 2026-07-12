@@ -171,6 +171,7 @@ export interface BenchmarkComparisonReport {
   baseline: BenchmarkRunGroupSummary
   candidate: BenchmarkRunGroupSummary
   paired: BenchmarkPairedDelta[]
+  pairedOutcomes: { wins: number; losses: number; ties: number }
   resolveDelta: number
   resolveDelta95Ci: { low: number; high: number }
   ordering: 'baseline' | 'candidate' | 'tie'

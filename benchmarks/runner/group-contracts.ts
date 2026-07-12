@@ -16,7 +16,7 @@ import type {
 import type { IsolatedGraderRunner } from '../grader/coordinator'
 import type { DockerWorkerCredential } from '../worker/contracts'
 
-export type BenchmarkRunPreset = 'smoke' | 'daily' | 'full'
+export type BenchmarkRunPreset = 'smoke' | 'daily' | 'full' | 'external'
 
 export const BENCHMARK_PRESETS: Record<
   BenchmarkRunPreset,
@@ -25,6 +25,7 @@ export const BENCHMARK_PRESETS: Record<
   smoke: { caseLimit: 3, trials: 1 },
   daily: { caseLimit: 8, trials: 3 },
   full: { caseLimit: null, trials: 5 },
+  external: { caseLimit: null, trials: 3 },
 }
 
 export interface SelectedBenchmarkCase {
@@ -61,6 +62,7 @@ export interface BenchmarkRunGroupIdentity {
   feedbackVisibility: BenchmarkFeedbackVisibility | null
   trialsPerCase: number
   priceSnapshotSha256: string | null
+  cohortHash?: string
 }
 
 export interface BenchmarkRunGroupSummaryReport {
@@ -77,6 +79,19 @@ export interface BenchmarkRunGroupSummaryReport {
   missingMetricTrials: number
   levels: Record<BenchmarkEvaluationResult['level'], number>
   failureCategories: Record<string, number>
+  sources?: Partial<
+    Record<
+      'monthly-swebench' | 'swe-rebench',
+      {
+        cases: number
+        trials: number
+        resolved: number
+        resolveRate: number
+        levels: Record<BenchmarkEvaluationResult['level'], number>
+      }
+    >
+  >
+  sourceMacroResolveRate?: number
   efficiency?: BenchmarkRunGroupSummary
   startedAt: string
   completedAt: string
@@ -140,6 +155,7 @@ export interface RunBenchmarkGroupInput {
   protocol: BenchmarkRunnerProtocol
   feedbackVisibility?: BenchmarkFeedbackVisibility
   priceSnapshot?: BenchmarkPriceSnapshot
+  cohortHash?: string
   signal?: AbortSignal
   trialRunner?: BenchmarkCaseTrialRunner
   workerRunner?: DockerWorkerRunner

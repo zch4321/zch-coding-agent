@@ -212,6 +212,7 @@ function createRunGroupIdentity(
     feedbackVisibility: input.feedbackVisibility ?? null,
     trialsPerCase: input.trialsPerCase,
     priceSnapshotSha256,
+    ...(input.cohortHash ? { cohortHash: input.cohortHash } : {}),
   }
 }
 
@@ -378,6 +379,34 @@ function summarizeRunGroup(input: {
         metrics: trial.metrics!,
       }))
     : []
+  const sourceGroups = Object.fromEntries(
+    (['monthly-swebench', 'swe-rebench'] as const)
+      .map((source) => {
+        const trials = input.trials.filter((trial) =>
+          trial.suiteId.startsWith(`${source}-`),
+        )
+        if (trials.length === 0) return undefined
+        const sourceLevels = { L0: 0, L1: 0, L2: 0, L3: 0, L4: 0, L5: 0 }
+        for (const trial of trials) sourceLevels[trial.evaluation.level] += 1
+        const resolved = trials.filter(
+          (trial) => trial.evaluation.resolved,
+        ).length
+        return [
+          source,
+          {
+            cases: new Set(trials.map((trial) => trial.caseId)).size,
+            trials: trials.length,
+            resolved,
+            resolveRate: resolved / trials.length,
+            levels: sourceLevels,
+          },
+        ] as const
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+  )
+  const sourceRates = Object.values(sourceGroups).map(
+    (source) => source.resolveRate,
+  )
   return {
     schemaVersion: 1,
     identitySha256: input.identitySha256,
@@ -395,6 +424,14 @@ function summarizeRunGroup(input: {
     missingMetricTrials,
     levels,
     failureCategories,
+    ...(sourceRates.length > 0
+      ? {
+          sources: sourceGroups,
+          sourceMacroResolveRate:
+            sourceRates.reduce((total, value) => total + value, 0) /
+            sourceRates.length,
+        }
+      : {}),
     ...(metricsComplete
       ? { efficiency: summarizeBenchmarkRunGroup(comparable) }
       : {}),

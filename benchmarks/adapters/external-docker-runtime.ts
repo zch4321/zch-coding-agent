@@ -88,6 +88,12 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     input: Parameters<ExternalAdapterRuntime['prepare']>[0],
   ): Promise<ExternalPreparedWorkspace> {
     const info = await this.#ensureImages(input.candidate)
+    if (
+      info.taskImageDigest !== input.cohortCase.officialImage.digest ||
+      info.agentImageDigest !== input.cohortCase.agentImageDigest
+    ) {
+      throw new Error('External task image drifted from the pinned cohort')
+    }
     if (info.agentImage !== input.agentImageReference) {
       await runDockerCommand([
         'image',

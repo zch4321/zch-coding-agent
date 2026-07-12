@@ -14,6 +14,7 @@ release
 test-results
 *.tsbuildinfo
 benchmarks/results
+benchmarks/.cache
 benchmarks/archives
 benchmarks/manifests
 benchmarks/private

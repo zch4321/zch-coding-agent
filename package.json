@@ -17,6 +17,7 @@
     "benchmark:smoke": "npm run build:benchmark && node dist-benchmark/zch-benchmark.mjs run --preset smoke",
     "benchmark": "npm run build:benchmark && node dist-benchmark/zch-benchmark.mjs run --preset daily",
     "benchmark:full": "npm run build:benchmark && node dist-benchmark/zch-benchmark.mjs run --preset full",
+    "benchmark:external": "npm run build:benchmark && node dist-benchmark/zch-benchmark.mjs run --preset external",
     "rebuild:native:source": "electron-rebuild -f -w node-pty",
     "preview": "vite preview",
     "lint": "eslint .",
@@ -30,6 +31,7 @@
     "test:ripgrep": "node scripts/ripgrep-smoke.cjs",
     "test:e2e": "npm run build:app && playwright test",
     "test:docker-worker": "node scripts/run-docker-worker-tests.cjs",
+    "test:benchmark-external-real": "node scripts/run-real-external-benchmark-tests.cjs",
     "test:benchmark-cases": "vitest run benchmarks/cases/cases.test.ts",
     "postinstall": "electron-builder install-app-deps"
   },
@@ -40,6 +42,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "ajv": "8.20.0",
+    "hyparquet": "^1.26.0",
     "js-yaml": "4.2.0",
     "markdown-it": "14.2.0",
     "naive-ui": "2.44.1",

@@ -4,6 +4,7 @@ import type {
   MonthlyPrivatePayload,
   SweRebenchPrivatePayload,
 } from '../cohort/contracts'
+import { asyncBufferFromUrl, parquetReadObjects } from 'hyparquet'
 
 export const MONTHLY_SWEBENCH_ADAPTER_REVISION = 'monthly-swebench-v1'
 export const SWE_REBENCH_ADAPTER_REVISION = 'swe-rebench-v1'
@@ -37,13 +38,24 @@ export async function loadLatestMonthlySwebenchCatalog(
     .sort((left, right) => right.release.localeCompare(left.release))[0]
   if (!latest) throw new Error('No Monthly-SWEBench release is available')
 
-  const previewUrl = `https://huggingface.co/datasets/${latest.dataset}/resolve/${latest.commit}/preview.csv`
+  return loadMonthlySwebenchCatalog(latest, options)
+}
+
+export async function loadMonthlySwebenchCatalog(
+  release: ExternalDatasetRelease,
+  options: ExternalDatasetClientOptions = {},
+): Promise<ExternalDatasetCatalog> {
+  if (release.source !== 'monthly-swebench') {
+    throw new Error('Expected a Monthly-SWEBench release')
+  }
+  const request = options.fetch ?? fetch
+  const previewUrl = `https://huggingface.co/datasets/${release.dataset}/resolve/${release.commit}/preview.csv`
   const preview = await fetchText(request, previewUrl)
   const rows = parseCsv(preview)
   const candidates: ExternalBenchmarkCandidate[] = []
   const exclusions: ExternalDatasetCatalog['exclusions'] = []
   for (const row of rows) {
-    const candidate = monthlyCandidate(latest, row)
+    const candidate = monthlyCandidate(release, row)
     if (candidate) candidates.push(candidate)
     else
       exclusions.push({
@@ -51,7 +63,7 @@ export async function loadLatestMonthlySwebenchCatalog(
         reason: 'invalid_fields',
       })
   }
-  return { release: latest, candidates, exclusions }
+  return { release, candidates, exclusions }
 }
 
 export async function loadLatestSweRebenchCatalog(
@@ -94,6 +106,30 @@ export async function loadLatestSweRebenchCatalog(
       })
   }
   return { release: datasetRelease, candidates, exclusions }
+}
+
+export async function loadSweRebenchCatalog(
+  release: ExternalDatasetRelease,
+): Promise<ExternalDatasetCatalog> {
+  if (release.source !== 'swe-rebench') {
+    throw new Error('Expected a SWE-rebench release')
+  }
+  const url = `https://huggingface.co/datasets/${release.dataset}/resolve/${release.commit}/data/${release.release}-00000-of-00001.parquet`
+  const file = await asyncBufferFromUrl({ url })
+  const rows = await parquetReadObjects({ file })
+  const candidates: ExternalBenchmarkCandidate[] = []
+  const exclusions: ExternalDatasetCatalog['exclusions'] = []
+  for (const raw of rows) {
+    const candidate = rebenchCandidate(release, raw)
+    if (candidate) candidates.push(candidate)
+    else {
+      exclusions.push({
+        caseId: recordString(raw, 'instance_id') || 'unknown',
+        reason: 'invalid_fields',
+      })
+    }
+  }
+  return { release, candidates, exclusions }
 }
 
 function parseMonthlyRepository(

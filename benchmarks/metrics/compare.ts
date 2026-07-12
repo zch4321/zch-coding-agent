@@ -84,6 +84,11 @@ export function compareBenchmarkRunGroups(input: {
     baseline: summarizeBenchmarkRunGroup(baseline),
     candidate: summarizeBenchmarkRunGroup(candidate),
     paired,
+    pairedOutcomes: {
+      wins: paired.filter((entry) => entry.resolveDelta > 0).length,
+      losses: paired.filter((entry) => entry.resolveDelta < 0).length,
+      ties: paired.filter((entry) => entry.resolveDelta === 0).length,
+    },
     resolveDelta,
     resolveDelta95Ci: confidenceInterval(deltas, resolveDelta),
     ordering: lexicographicOrdering(baseline, candidate),

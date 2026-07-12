@@ -29,6 +29,7 @@ describe('benchmark run group comparison', () => {
     const report = compareBenchmarkRunGroups({ baseline, candidate })
     expect(report.resolveDelta).toBe(0.5)
     expect(report.paired.map((pair) => pair.resolveDelta)).toEqual([0, 1])
+    expect(report.pairedOutcomes).toEqual({ wins: 1, losses: 0, ties: 1 })
     expect(report.ordering).toBe('candidate')
   })
 
