@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { writeJsonAtomic } from '../../electron/config/atomic-file'
 import { sha256Bytes } from '../cases/hash'
+import { verifyCohort } from '../cohort/selection'
 import { summarizeBenchmarkRunGroup } from '../metrics/compare'
 import { runBenchmarkTrials } from './runner'
 import type {
@@ -37,6 +38,7 @@ export async function runBenchmarkGroup(
     identitySha256,
     config: input.config,
     priceSnapshot: input.priceSnapshot,
+    cohort: input.cohort,
   })
   const cases: BenchmarkRunGroupResult['cases'] = []
   const trialRunner = input.trialRunner ?? runBenchmarkTrials
@@ -222,6 +224,7 @@ async function prepareRunGroupDirectory(input: {
   identitySha256: string
   config: RunBenchmarkGroupInput['config']
   priceSnapshot?: RunBenchmarkGroupInput['priceSnapshot']
+  cohort?: RunBenchmarkGroupInput['cohort']
 }): Promise<string> {
   await mkdir(input.outputDirectory, { recursive: true })
   const entries = await readdir(input.outputDirectory)
@@ -273,6 +276,32 @@ async function prepareRunGroupDirectory(input: {
         throw new Error('Benchmark price snapshot checksum mismatch')
       }
     }
+    if (input.identity.cohortHash) {
+      let existingCohort: unknown
+      try {
+        existingCohort = JSON.parse(
+          await readFile(
+            path.join(input.outputDirectory, 'cohort.json'),
+            'utf8',
+          ),
+        )
+      } catch {
+        throw new Error('Benchmark cohort is missing or invalid')
+      }
+      try {
+        verifyCohort(
+          existingCohort as NonNullable<RunBenchmarkGroupInput['cohort']>,
+        )
+      } catch {
+        throw new Error('Benchmark cohort checksum mismatch')
+      }
+      if (
+        (existingCohort as NonNullable<RunBenchmarkGroupInput['cohort']>)
+          .cohortHash !== input.identity.cohortHash
+      ) {
+        throw new Error('Benchmark cohort checksum mismatch')
+      }
+    }
     try {
       const state = JSON.parse(
         await readFile(
@@ -301,6 +330,14 @@ async function prepareRunGroupDirectory(input: {
             writeJsonAtomic(
               path.join(input.outputDirectory, 'price-snapshot.json'),
               input.priceSnapshot,
+            ),
+          ]
+        : []),
+      ...(input.cohort
+        ? [
+            writeJsonAtomic(
+              path.join(input.outputDirectory, 'cohort.json'),
+              input.cohort,
             ),
           ]
         : []),
@@ -503,6 +540,10 @@ function validateInput(input: RunBenchmarkGroupInput): void {
   if (input.protocol === 'strict' && input.feedbackVisibility) {
     throw new Error('Strict benchmark runs cannot set feedback visibility')
   }
+  if (input.cohort && input.cohort.cohortHash !== input.cohortHash) {
+    throw new Error('Benchmark cohort input does not match its identity hash')
+  }
+  if (input.cohort) verifyCohort(input.cohort)
 }
 
 async function writeState(

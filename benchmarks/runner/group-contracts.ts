@@ -15,6 +15,7 @@ import type {
 } from './contracts'
 import type { IsolatedGraderRunner } from '../grader/coordinator'
 import type { DockerWorkerCredential } from '../worker/contracts'
+import type { BenchmarkCohort } from '../cohort/contracts'
 
 export type BenchmarkRunPreset = 'smoke' | 'daily' | 'full' | 'external'
 
@@ -156,6 +157,7 @@ export interface RunBenchmarkGroupInput {
   feedbackVisibility?: BenchmarkFeedbackVisibility
   priceSnapshot?: BenchmarkPriceSnapshot
   cohortHash?: string
+  cohort?: BenchmarkCohort
   signal?: AbortSignal
   trialRunner?: BenchmarkCaseTrialRunner
   workerRunner?: DockerWorkerRunner

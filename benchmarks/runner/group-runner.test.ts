@@ -7,6 +7,8 @@ import {
   type NativeBenchmarkSuite,
 } from '../adapters/native'
 import type { BenchmarkTrialMetrics } from '../metrics/contracts'
+import type { BenchmarkCohort } from '../cohort/contracts'
+import { sha256Canonical } from '../cohort/hash'
 import type {
   BenchmarkTrialsResult,
   RunBenchmarkTrialsInput,
@@ -121,6 +123,31 @@ describe('benchmark run-group coordinator', () => {
       metricsComplete: false,
     })
     expect(result.summary.efficiency).toBeUndefined()
+  })
+
+  it('initializes and validates cohort artifacts with the run-group identity', async () => {
+    const outputDirectory = await temporaryDirectory()
+    const cohort = fixtureCohort()
+    const input = {
+      ...groupInput(outputDirectory, fakeTrialRunner(), 1),
+      preset: 'external' as const,
+      cohort,
+      cohortHash: cohort.cohortHash,
+    }
+
+    await runBenchmarkGroup(input)
+    await expect(
+      readFile(path.join(outputDirectory, 'cohort.json'), 'utf8'),
+    ).resolves.toContain(cohort.cohortHash)
+    await runBenchmarkGroup(input)
+
+    await writeFile(
+      path.join(outputDirectory, 'cohort.json'),
+      JSON.stringify({ ...cohort, seed: 'tampered' }),
+    )
+    await expect(runBenchmarkGroup(input)).rejects.toThrow(
+      'cohort checksum mismatch',
+    )
   })
 })
 
@@ -278,6 +305,47 @@ function fakeTrialRunner(
       ],
     }
   }
+}
+
+function fixtureCohort(): BenchmarkCohort {
+  const sources = (['monthly-swebench', 'swe-rebench'] as const).map(
+    (source) => ({
+      source,
+      dataset: `fixture/${source}`,
+      release: '2026-05',
+      commit: 'a'.repeat(40),
+      adapterRevision: `${source}-v1`,
+    }),
+  )
+  const cases = sources.flatMap((source) =>
+    Array.from({ length: 8 }, (_, index) => ({
+      ...source,
+      caseId: `${source.source}-case-${index}`,
+      repository: `${source.source}/repo-${index}`,
+      classification: 'bug-fix' as const,
+      language: 'python',
+      patchScale: 'small' as const,
+      caseHash: String(index).padStart(
+        64,
+        source.source === 'monthly-swebench' ? 'a' : 'b',
+      ),
+      officialImage: {
+        reference: `fixture/${source.source}:${index}`,
+        digest: `sha256:${'c'.repeat(64)}`,
+      },
+      agentImageDigest: `sha256:${'d'.repeat(64)}`,
+    })),
+  )
+  const draft = {
+    schemaVersion: 1 as const,
+    kind: 'rolling-mixed-16' as const,
+    createdAt: '2026-07-12T00:00:00.000Z',
+    seed: 'fixture',
+    sources,
+    cases,
+    exclusions: [],
+  }
+  return { ...draft, cohortHash: sha256Canonical(draft) }
 }
 
 function trialMetrics(tokens: number, cost: number): BenchmarkTrialMetrics {

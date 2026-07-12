@@ -311,14 +311,11 @@ describe('benchmark CLI', () => {
     expect(received?.selectedCases).toHaveLength(16)
     expect(received?.trialsPerCase).toBe(3)
     expect(received?.cohortHash).toMatch(/^[a-f0-9]{64}$/u)
-    const cohort = JSON.parse(
-      await readFile(path.join(outputDirectory, 'cohort.json'), 'utf8'),
-    ) as { seed: string; cases: unknown[]; cohortHash: string }
-    expect(cohort).toMatchObject({
+    expect(received?.cohort).toMatchObject({
       seed: 'cli-fixture',
       cohortHash: received?.cohortHash,
     })
-    expect(cohort.cases).toHaveLength(16)
+    expect(received?.cohort?.cases).toHaveLength(16)
   })
 })
 

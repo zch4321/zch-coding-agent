@@ -1,9 +1,8 @@
 import { execFile } from 'node:child_process'
-import { mkdir, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { Writable } from 'node:stream'
 import { promisify } from 'node:util'
-import { writeJsonAtomic } from '../../electron/config/atomic-file'
 import { loadNativeBenchmarkSuite } from '../adapters/native'
 import {
   loadLatestMonthlySwebenchCatalog,
@@ -300,6 +299,7 @@ export async function runBenchmarkCli(
       feedbackVisibility: args.feedbackVisibility,
       priceSnapshot,
       cohortHash: external?.cohort.cohortHash,
+      cohort: external?.cohort,
       signal: options.signal,
     }
     const result = await (options.groupRunner ?? runBenchmarkGroup)(groupInput)
@@ -521,11 +521,6 @@ async function prepareExternalRun(input: {
       resolveImage: (candidate) => runtime.resolveImage(candidate),
     })
   }
-  await mkdir(input.outputDirectory, { recursive: true })
-  await writeJsonAtomic(
-    path.join(input.outputDirectory, 'cohort.json'),
-    resolvedCohort,
-  )
   return {
     cohort: resolvedCohort,
     suites: loadExternalBenchmarkSuites({
