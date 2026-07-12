@@ -1,6 +1,6 @@
 # Benchmark Worker
 
-当前目录实现 Linux Docker execution boundary、BenchmarkCase v1、strict/repair-once runner、独立 grader container、硬门禁、L0–L5 scoring，以及 trace/tool/usage/cost与 paired comparison。容器中的 Agent 仍是 `electron/headless/` 构建出的同一个固定 Yolo bundle；下一阶段 M5.9补齐正式 benchmark命令和分层报告。
+当前目录实现 Linux Docker execution boundary、BenchmarkCase v1、strict/repair-once runner、独立 grader container、硬门禁、L0–L5 scoring、trace/tool/usage/cost与 paired comparison，以及正式 benchmark命令和分层报告。容器中的 Agent 仍是 `electron/headless/` 构建出的同一个固定 Yolo bundle。
 
 ## 构建与验证
 
@@ -21,6 +21,42 @@ npm run test:benchmark-cases
 - Provider 永久挂起，验证 wall timeout、stop/kill fallback、sandbox inspect 和 Agent/proxy/network 零残留。
 
 已存在且可信的镜像可用 `ZCH_SKIP_WORKER_IMAGE_BUILD=1` 跳过重建。
+
+## 正式命令
+
+先创建一个不提交版本库的 Headless config，例如 `benchmark-config.local`：
+
+```json
+{
+  "schemaVersion": 1,
+  "provider": {
+    "id": "deepseek",
+    "profile": "deepseek",
+    "baseURL": "https://api.deepseek.com",
+    "model": "deepseek-chat",
+    "reasoning": "off",
+    "credentialEnv": "DEEPSEEK_API_KEY"
+  }
+}
+```
+
+构建与运行：
+
+```powershell
+$env:DEEPSEEK_API_KEY = '...'
+npm run build-worker-image
+npm run benchmark:smoke -- --config benchmark-config.local
+npm run benchmark -- --config benchmark-config.local
+npm run benchmark:full -- --config benchmark-config.local
+```
+
+- `benchmark:smoke`：默认最多3个 case，每项1 trial。
+- `benchmark`：daily preset，默认最多12个 case，每项3 trials；当前 bootstrap suite只有3项，M5.10会扩展到12/24项。
+- `benchmark:full`：全部显式 suite，每项5 trials。
+
+三个命令都只构建轻量 CLI bundle，不自动构建 Docker image。默认 image为当前 commit对应的 `zch-agent-headless:<12位commit>`，可用 `--image`或 `ZCH_WORKER_IMAGE`指定。常用覆盖参数包括重复的 `--suite` / `--case`、`--trials 1..5`、`--protocol repair-once --feedback public|diagnostic`、`--price-snapshot`、`--output`以及显式开发fallback `--credential-mode direct`。默认 proxy模式只把真实key交给受限 Provider proxy。
+
+默认输出位于 `benchmarks/results/<timestamp>-<preset>`。指定同一个 `--output`可恢复identity一致的中断运行；identity变化时拒绝覆盖。
 
 ## 凭据边界
 
@@ -49,6 +85,8 @@ coordinator 只接受固定 workspace、artifacts、config/task 和 credential m
 每个 trial 写入独立 `.incomplete-*` staging，删除 workspace、扫描 Provider credential 泄漏并计算整棵 artifact checksum后才原子改名为 final。Resume 只复用 identity和 checksum都匹配的 complete final；遗留 staging、活跃容器和 continuation state永不复用。pass@k 会为每个 index重新准备 workspace并调用独立 worker。
 
 Runner 从 runtime trace生成 `metrics.json`。Token按 main/approval/title/compression scope汇总，Provider未报告字段保持 `null`；工具按 stage/outcome/tool/effect计数，并附带 patch与 trajectory指标。传入 `priceSnapshot` 时，完整 snapshot写入 `price-snapshot.json`并以 hash固定在 trial identity；比较器逐字段校验 paired identity后才计算 resolve delta、95%区间和 safety/correctness/efficiency词典序结果。
+
+Run-group artifacts按 `cases/<suite>/<case>/trials/trial-N/attempts/<phase>`分层。根目录的 `summary.json`用于本地总览，`shareable-report.json`只包含公开evaluation和聚合metrics；`redaction.json`列出config、raw worker trace/JSONL/stderr、case result及grader restricted证据等不可直接分享的路径和字段。缺失trace metrics时run-group状态为`incomplete`，不会输出伪造的效率总计。
 
 ## Grader 与评分
 

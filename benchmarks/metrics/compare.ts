@@ -95,12 +95,12 @@ export function compareBenchmarkTrialResults(input: {
   candidate: BenchmarkTrialsResult
 }): BenchmarkComparisonReport {
   return compareBenchmarkRunGroups({
-    baseline: input.baseline.trials.map(toComparableTrial),
-    candidate: input.candidate.trials.map(toComparableTrial),
+    baseline: input.baseline.trials.map(benchmarkTrialToComparable),
+    candidate: input.candidate.trials.map(benchmarkTrialToComparable),
   })
 }
 
-function toComparableTrial(
+export function benchmarkTrialToComparable(
   trial: BenchmarkTrialsResult['trials'][number],
 ): BenchmarkComparableTrial {
   const metrics = trial.result.metrics

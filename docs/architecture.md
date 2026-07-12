@@ -169,6 +169,14 @@ Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 
 
 `benchmarks/metrics/compare.ts` 使用全部 trial 成本计算 `costPerResolvedUsd`，同时保留 unresolved 的 token/成本消耗。A/B 先逐 trial 校验 case、runtime/case/grader image、Provider/model/profile/reasoning、预算、protocol、trial index 和 price snapshot，再输出 paired delta、总体 resolve delta与 95%区间。排序固定按 hard-gate safety、correctness、efficiency 的词典序，效率不参与 correctness 得分。
 
+### 3.8 Benchmark CLI、运行档位与 artifacts
+
+`benchmarks/cli/main.ts` 构建为独立 Node 24 bundle，不依赖 Electron renderer 或 IPC。三个 opt-in npm命令分别固定 smoke、daily和 full preset；默认选择上限为 3/12/全部 case，trial数为 1/3/5，正式 CLI最多接受 8 个 suite、64 个 case和每项 5 trials。CLI从 Headless config声明的环境变量读取 Provider key，默认把真实 key只交给受限 Provider proxy；key不进入 run-group identity、config snapshot、stdout或报告。
+
+`benchmarks/runner/group-runner.ts` 串行复用 `runBenchmarkTrials()`，只增加 run-group编排，不复制 Agent、worker或 grader实现。Artifact层级固定为 run-group → suite/case → trial → attempt；group保存不可变 identity、Headless config和可选 price snapshot，case保存 manifest/Agent descriptor/task，trial继续保存 worker trace/JSONL/stderr、metrics和泄漏扫描，attempt保存 patch/evaluation/grader证据。同一输出目录只有 identity完全一致时才能恢复，具体 trial仍由已有 complete marker和整树 hash验证。
+
+本地 `case-result.restricted.json`、raw worker/grader artifacts和 config snapshot不进入分享报告。`shareable-report.json`仅组合公开 evaluation、聚合 metrics和 comparison identity；`redaction.json`同时列出 restricted globs和被删除字段。Run-group `summary.json`区分 unresolved与 artifact/metrics incomplete，避免把 trace缺失伪装成有效零成本结果。
+
 ---
 
 ## 4. 配置、凭据与模型

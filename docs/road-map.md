@@ -2,7 +2,7 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、BenchmarkCase v1/native adapter/3 项 core smoke、strict/repair-once runner、隔离 grader、硬门禁和 L0–L5 评分，以及 trace/tool/usage/cost/paired comparison 已经落地。下一阶段继续推进正式 benchmark 命令面，再用真实任务信号指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、BenchmarkCase v1/native adapter/3 项 core smoke、strict/repair-once runner、隔离 grader、硬门禁和 L0–L5 评分、trace/tool/usage/cost/paired comparison，以及正式 benchmark 命令、档位和分层 artifacts 已经落地。下一阶段扩展 core case，再用真实任务信号指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
 
 ## 0. 未完成概览
 
@@ -19,50 +19,6 @@
 
 M5 保留原编号以维持已有文档和历史引用，但从本阶段起提前为首要里程碑。它首先评估 harness 工程本身，不把 Electron UI 性能混入 coding correctness；UI/IPC 继续由 E2E 覆盖，并通过 parity 测试证明两个宿主没有语义漂移。
 
-### 5.9 命令、Artifacts 与运行档位
-
-- 新增 `npm run benchmark:smoke`、`npm run benchmark`、`npm run benchmark:full`，全部 opt-in，不进入默认 `npm test`、build 或 E2E。
-- `benchmark:smoke` 默认 3 个自建 case、每项 1 trial，用于验证完整链路。
-- `benchmark` 默认 12 个 `core-24` case、每项 3 trials，用于日常 harness A/B。
-- `benchmark:full` 默认完整 `core-24`、每项最多 5 trials，并按显式参数加入 `fresh-12` 或高成本外部 suite。
-- artifacts 以 run-group/case/trial/attempt 分层，保存 manifest snapshot、identity、config、task、patch、grader report、trace、JSONL、stderr tail、usage、tool metrics、泄漏扫描和汇总报告。
-- 原始敏感 artifacts 只保存在本地受限目录；可分享报告先经过 redaction，并标明删除或聚合了哪些字段。
-
-建议目录：
-
-```text
-benchmarks/
-├─ README.md
-├─ manifests/
-│  ├─ core-24/
-│  └─ fresh-12/
-├─ adapters/
-│  ├─ native.ts
-│  ├─ swe-rebench.ts
-│  ├─ swe-bench.ts
-│  └─ swe-lancer.ts
-├─ runner/
-│  ├─ coordinator.ts
-│  ├─ prepare-case.ts
-│  ├─ run-headless.ts
-│  ├─ grade.ts
-│  ├─ feedback.ts
-│  ├─ scoring.ts
-│  ├─ artifacts.ts
-│  └─ redaction.ts
-├─ docker/
-│  ├─ headless.Dockerfile
-│  └─ fixtures/
-└─ results/
-```
-
-验收：
-
-- `benchmark:smoke` 能从空缓存完成 prepare → Agent → patch → hidden grader → report → cleanup。
-- artifacts 足以离线复核等级、成本、工具轨迹和失败类别，但不泄漏真实密钥。
-- 汇总报告能同时展示 strict、repair-once 和独立多 trial，标签不会混淆。
-- 默认测试链路在没有 Docker、外部 dataset 或真实 Provider key 时仍保持确定性通过。
-
 后续数据集扩展：
 
 - 把已冻结的 3 项 bootstrap case 扩展为人工编写的 `core-24`：6 个 bug fix、6 个 feature、3 个 refactor/compatibility、3 个正确 abstain/no-change、6 个 harness-stress。普通 case 要求失败 baseline，abstain case 要求通过 baseline 与 no-change oracle；新增每项还需至少两个 mutant、三次无 flaky 和独立 prompt/test 对齐复核。
@@ -74,12 +30,11 @@ benchmarks/
 
 | 步骤  | 具体实现                                           | 完成标志                        |
 | ----- | -------------------------------------------------- | ------------------------------- |
-| M5.9  | 接入 smoke/日常/full 命令和分层 artifacts          | 完整 vertical slice 通过        |
 | M5.10 | 扩展到 12/24 个 core case                          | `benchmark` 可产出稳定 A/B 报告 |
 | M5.11 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查       | Linux worker 跑通冻结 revision  |
 | M5.12 | 增加 SWE-bench compatibility 与高成本 full adapter | 不影响主套件且保持 opt-in       |
 
-单一 Runtime、固定 Yolo Headless host、runtime identity、Electron/Headless parity、受限 Linux Docker worker、3 项冻结 native smoke case、strict/repair-once runner、隔离 grader、L0–L5评分和可比较指标已经落地；M5.9 完成后补齐正式命令面，不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
+单一 Runtime、固定 Yolo Headless host、runtime identity、Electron/Headless parity、受限 Linux Docker worker、3 项冻结 native smoke case、strict/repair-once runner、隔离 grader、L0–L5评分、可比较指标和正式命令面已经落地；扩展到全部 24 个 case 前，现有 smoke suite 已可用于完整链路和低样本 A/B 检查。
 
 总体验收：
 

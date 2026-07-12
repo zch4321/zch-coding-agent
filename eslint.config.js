@@ -11,6 +11,7 @@ export default [
       'dist-electron/**',
       'dist-headless/**',
       'dist-worker/**',
+      'dist-benchmark/**',
       'node_modules/**',
       'playwright-report/**',
       'release/**',

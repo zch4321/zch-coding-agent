@@ -1,0 +1,147 @@
+import type { HeadlessConfig } from '../../electron/headless/contracts'
+import type { NativeBenchmarkSuite } from '../adapters/native'
+import type { LoadedBenchmarkCase } from '../cases/contracts'
+import type {
+  BenchmarkPriceSnapshot,
+  BenchmarkRunGroupSummary,
+  BenchmarkTrialMetrics,
+} from '../metrics/contracts'
+import type {
+  BenchmarkEvaluationResult,
+  BenchmarkFeedbackVisibility,
+  BenchmarkRunnerProtocol,
+  BenchmarkTrialsResult,
+  DockerWorkerRunner,
+} from './contracts'
+import type { IsolatedGraderRunner } from '../grader/coordinator'
+import type { DockerWorkerCredential } from '../worker/contracts'
+
+export type BenchmarkRunPreset = 'smoke' | 'daily' | 'full'
+
+export const BENCHMARK_PRESETS: Record<
+  BenchmarkRunPreset,
+  { caseLimit: number | null; trials: number }
+> = {
+  smoke: { caseLimit: 3, trials: 1 },
+  daily: { caseLimit: 12, trials: 3 },
+  full: { caseLimit: null, trials: 5 },
+}
+
+export interface SelectedBenchmarkCase {
+  suite: NativeBenchmarkSuite
+  loadedCase: LoadedBenchmarkCase
+}
+
+export interface BenchmarkRunGroupIdentity {
+  schemaVersion: 1
+  preset: BenchmarkRunPreset
+  suites: Array<{
+    id: string
+    revision: string
+    adapterId: string
+    adapterRevision: string
+    identitySha256: string
+  }>
+  cases: Array<{
+    suiteId: string
+    caseId: string
+    identitySha256: string
+  }>
+  image: string
+  runtimeImageDigest: string
+  sourceCommit: string
+  configSha256: string
+  provider: {
+    id: string
+    model: string
+    profile: string
+    reasoning: string
+  }
+  protocol: BenchmarkRunnerProtocol
+  feedbackVisibility: BenchmarkFeedbackVisibility | null
+  trialsPerCase: number
+  priceSnapshotSha256: string | null
+}
+
+export interface BenchmarkRunGroupSummaryReport {
+  schemaVersion: 1
+  identitySha256: string
+  preset: BenchmarkRunPreset
+  status: 'completed' | 'incomplete'
+  cases: number
+  trials: number
+  resolved: number
+  resolvedInitial: number
+  recovered: number
+  metricsComplete: boolean
+  missingMetricTrials: number
+  levels: Record<BenchmarkEvaluationResult['level'], number>
+  failureCategories: Record<string, number>
+  efficiency?: BenchmarkRunGroupSummary
+  startedAt: string
+  completedAt: string
+  durationMs: number
+}
+
+export interface BenchmarkShareableTrial {
+  suiteId: string
+  caseId: string
+  trialIndex: number
+  protocol: BenchmarkRunnerProtocol
+  reused: boolean
+  resolvedInitial: boolean
+  resolvedAfterFeedback: boolean
+  recovered: boolean
+  evaluation: BenchmarkEvaluationResult
+  metrics?: BenchmarkTrialMetrics
+  comparisonIdentity: BenchmarkTrialsResult['trials'][number]['identity']['comparisonIdentity']
+}
+
+export interface BenchmarkShareableReport {
+  schemaVersion: 1
+  identitySha256: string
+  preset: BenchmarkRunPreset
+  summary: BenchmarkRunGroupSummaryReport
+  trials: BenchmarkShareableTrial[]
+  redaction: {
+    policy: 'benchmark-shareable-v1'
+    restrictedArtifacts: string[]
+    removedFields: string[]
+  }
+}
+
+export interface BenchmarkRunGroupResult {
+  directory: string
+  identity: BenchmarkRunGroupIdentity
+  identitySha256: string
+  summary: BenchmarkRunGroupSummaryReport
+  report: BenchmarkShareableReport
+  cases: Array<{
+    suiteId: string
+    caseId: string
+    directory: string
+    trials: BenchmarkTrialsResult
+  }>
+}
+
+export type BenchmarkCaseTrialRunner =
+  typeof import('./runner').runBenchmarkTrials
+
+export interface RunBenchmarkGroupInput {
+  preset: BenchmarkRunPreset
+  selectedCases: SelectedBenchmarkCase[]
+  image: string
+  runtimeImageDigest: string
+  sourceCommit: string
+  config: HeadlessConfig
+  credential: DockerWorkerCredential
+  outputDirectory: string
+  trialsPerCase: number
+  protocol: BenchmarkRunnerProtocol
+  feedbackVisibility?: BenchmarkFeedbackVisibility
+  priceSnapshot?: BenchmarkPriceSnapshot
+  signal?: AbortSignal
+  trialRunner?: BenchmarkCaseTrialRunner
+  workerRunner?: DockerWorkerRunner
+  graderRunner?: IsolatedGraderRunner
+}

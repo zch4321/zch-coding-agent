@@ -1,0 +1,397 @@
+import { execFile } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import type { Writable } from 'node:stream'
+import { promisify } from 'node:util'
+import { loadNativeBenchmarkSuite } from '../adapters/native'
+import { BenchmarkCaseValidationError } from '../cases/loader'
+import { validateBenchmarkPriceSnapshot } from '../metrics/aggregate'
+import type { BenchmarkPriceSnapshot } from '../metrics/contracts'
+import { inspectWorkerImage } from '../worker/capabilities'
+import type { DockerWorkerCredential } from '../worker/contracts'
+import {
+  HeadlessConfigError,
+  loadHeadlessConfig,
+} from '../../electron/headless/config'
+import {
+  BENCHMARK_PRESETS,
+  type BenchmarkRunGroupResult,
+  type BenchmarkRunPreset,
+  type RunBenchmarkGroupInput,
+  type SelectedBenchmarkCase,
+} from '../runner/group-contracts'
+import { runBenchmarkGroup } from '../runner/group-runner'
+
+const execFileAsync = promisify(execFile)
+const DEFAULT_SUITE = 'manifests/core-24/suite.json'
+const MAX_PRICE_SNAPSHOT_BYTES = 1024 * 1024
+const MAX_CLI_SUITES = 8
+const MAX_CLI_CASES = 64
+
+export interface BenchmarkCliArguments {
+  preset: BenchmarkRunPreset
+  configFile: string
+  benchmarkRoot: string
+  suiteFiles: string[]
+  caseSelectors: string[]
+  outputDirectory?: string
+  image?: string
+  trials?: number
+  protocol: 'strict' | 'repair-once'
+  feedbackVisibility?: 'public' | 'diagnostic'
+  priceSnapshotFile?: string
+  credentialMode: 'proxy' | 'direct'
+  allowExternalNetwork: boolean
+}
+
+export class BenchmarkCliError extends Error {
+  readonly code = 'BENCHMARK_CLI_INVALID'
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'BenchmarkCliError'
+  }
+}
+
+export interface BenchmarkCliOptions {
+  environment?: NodeJS.ProcessEnv
+  output?: Writable
+  errorOutput?: Writable
+  now?: () => Date
+  sourceCommit?: string
+  inspectImage?: typeof inspectWorkerImage
+  groupRunner?: typeof runBenchmarkGroup
+  signal?: AbortSignal
+}
+
+export function parseBenchmarkArguments(argv: string[]): BenchmarkCliArguments {
+  if (argv[0] !== 'run') throw new BenchmarkCliError('Expected the run command')
+  const single = new Map<string, string>()
+  const repeated = new Map<string, string[]>()
+  const repeatable = new Set(['--suite', '--case'])
+  const allowed = new Set([
+    '--preset',
+    '--config',
+    '--benchmark-root',
+    '--suite',
+    '--case',
+    '--output',
+    '--image',
+    '--trials',
+    '--protocol',
+    '--feedback',
+    '--price-snapshot',
+    '--credential-mode',
+    '--allow-external-network',
+  ])
+  for (let index = 1; index < argv.length; index += 2) {
+    const flag = argv[index]
+    const value = argv[index + 1]
+    if (!flag || !allowed.has(flag)) {
+      throw new BenchmarkCliError(`Unknown argument: ${flag ?? ''}`)
+    }
+    if (!value || value.startsWith('--')) {
+      throw new BenchmarkCliError(`Missing value for ${flag}`)
+    }
+    if (repeatable.has(flag)) {
+      repeated.set(flag, [...(repeated.get(flag) ?? []), value])
+    } else {
+      if (single.has(flag))
+        throw new BenchmarkCliError(`Duplicate argument: ${flag}`)
+      single.set(flag, value)
+    }
+  }
+
+  const preset = single.get('--preset')
+  if (!isPreset(preset))
+    throw new BenchmarkCliError('Invalid or missing --preset')
+  const configFile = single.get('--config')
+  if (!configFile)
+    throw new BenchmarkCliError('Missing required argument: --config')
+  const protocol = single.get('--protocol') ?? 'strict'
+  if (protocol !== 'strict' && protocol !== 'repair-once') {
+    throw new BenchmarkCliError('--protocol must be strict or repair-once')
+  }
+  const feedback = single.get('--feedback')
+  if (feedback && feedback !== 'public' && feedback !== 'diagnostic') {
+    throw new BenchmarkCliError('--feedback must be public or diagnostic')
+  }
+  if (protocol === 'strict' && feedback) {
+    throw new BenchmarkCliError('--feedback requires repair-once protocol')
+  }
+  const credentialMode = single.get('--credential-mode') ?? 'proxy'
+  if (credentialMode !== 'proxy' && credentialMode !== 'direct') {
+    throw new BenchmarkCliError('--credential-mode must be proxy or direct')
+  }
+  const allowExternalNetwork = parseBoolean(
+    single.get('--allow-external-network') ?? 'true',
+    '--allow-external-network',
+  )
+  const trialsValue = single.get('--trials')
+  const trials = trialsValue
+    ? positiveInteger(trialsValue, '--trials', 5)
+    : undefined
+  const benchmarkRoot = path.resolve(
+    single.get('--benchmark-root') ?? 'benchmarks',
+  )
+  const suiteFiles = repeated.get('--suite') ?? [DEFAULT_SUITE]
+  if (suiteFiles.length > MAX_CLI_SUITES) {
+    throw new BenchmarkCliError(
+      `At most ${MAX_CLI_SUITES} suites may be selected`,
+    )
+  }
+
+  return {
+    preset,
+    configFile: path.resolve(configFile),
+    benchmarkRoot,
+    suiteFiles,
+    caseSelectors: repeated.get('--case') ?? [],
+    outputDirectory: single.get('--output')
+      ? path.resolve(single.get('--output')!)
+      : undefined,
+    image: single.get('--image'),
+    trials,
+    protocol,
+    feedbackVisibility:
+      protocol === 'repair-once'
+        ? ((feedback ?? 'public') as 'public' | 'diagnostic')
+        : undefined,
+    priceSnapshotFile: single.get('--price-snapshot')
+      ? path.resolve(single.get('--price-snapshot')!)
+      : undefined,
+    credentialMode,
+    allowExternalNetwork,
+  }
+}
+
+export async function runBenchmarkCli(
+  argv: string[],
+  options: BenchmarkCliOptions = {},
+): Promise<{ exitCode: number; result?: BenchmarkRunGroupResult }> {
+  const output = options.output ?? process.stdout
+  const errorOutput = options.errorOutput ?? process.stderr
+  try {
+    const args = parseBenchmarkArguments(argv)
+    const environment = options.environment ?? process.env
+    const sourceCommit = options.sourceCommit ?? (await currentSourceCommit())
+    const [config, suites, priceSnapshot] = await Promise.all([
+      loadHeadlessConfig(args.configFile),
+      Promise.all(
+        args.suiteFiles.map((suiteFile) =>
+          loadNativeBenchmarkSuite({
+            benchmarkRoot: args.benchmarkRoot,
+            suiteFile,
+          }),
+        ),
+      ),
+      args.priceSnapshotFile
+        ? loadPriceSnapshot(args.priceSnapshotFile)
+        : Promise.resolve(undefined),
+    ])
+    const credentialValue = environment[config.provider.credentialEnv]?.trim()
+    if (!credentialValue) {
+      throw new BenchmarkCliError(
+        `Provider credential environment variable is missing: ${config.provider.credentialEnv}`,
+      )
+    }
+    if (
+      priceSnapshot &&
+      (priceSnapshot.providerId !== config.provider.id ||
+        priceSnapshot.model !== config.provider.model)
+    ) {
+      throw new BenchmarkCliError(
+        'Price snapshot provider/model does not match the Headless config',
+      )
+    }
+    const selectedCases = selectCases({
+      suites,
+      selectors: args.caseSelectors,
+      caseLimit: BENCHMARK_PRESETS[args.preset].caseLimit,
+    })
+    const image =
+      args.image ??
+      environment.ZCH_WORKER_IMAGE ??
+      `zch-agent-headless:${sourceCommit.slice(0, 12)}`
+    const imageIdentity = await (options.inspectImage ?? inspectWorkerImage)(
+      image,
+      sourceCommit,
+    )
+    const now = options.now?.() ?? new Date()
+    const outputDirectory =
+      args.outputDirectory ??
+      path.resolve(
+        args.benchmarkRoot,
+        'results',
+        `${timestamp(now)}-${args.preset}`,
+      )
+    const credential = credentialForRun(
+      args.credentialMode,
+      credentialValue,
+      args.allowExternalNetwork,
+    )
+    const groupInput: RunBenchmarkGroupInput = {
+      preset: args.preset,
+      selectedCases,
+      image,
+      runtimeImageDigest: imageIdentity.digest,
+      sourceCommit,
+      config,
+      credential,
+      outputDirectory,
+      trialsPerCase: args.trials ?? BENCHMARK_PRESETS[args.preset].trials,
+      protocol: args.protocol,
+      feedbackVisibility: args.feedbackVisibility,
+      priceSnapshot,
+      signal: options.signal,
+    }
+    const result = await (options.groupRunner ?? runBenchmarkGroup)(groupInput)
+    output.write(
+      `${JSON.stringify({
+        schemaVersion: 1,
+        status: result.summary.status,
+        preset: result.summary.preset,
+        cases: result.summary.cases,
+        trials: result.summary.trials,
+        resolved: result.summary.resolved,
+        directory: result.directory,
+        report: path.join(result.directory, 'shareable-report.json'),
+      })}\n`,
+    )
+    return { exitCode: result.summary.status === 'completed' ? 0 : 2, result }
+  } catch (error) {
+    errorOutput.write(
+      `[benchmark] ${error instanceof Error ? error.message : 'Unexpected failure'}\n`,
+    )
+    const invalidInput =
+      error instanceof BenchmarkCliError ||
+      error instanceof HeadlessConfigError ||
+      error instanceof BenchmarkCaseValidationError
+    return { exitCode: options.signal?.aborted ? 130 : invalidInput ? 4 : 2 }
+  }
+}
+
+function selectCases(input: {
+  suites: Awaited<ReturnType<typeof loadNativeBenchmarkSuite>>[]
+  selectors: string[]
+  caseLimit: number | null
+}): SelectedBenchmarkCase[] {
+  const available = input.suites.flatMap((suite) =>
+    suite.cases.map((loadedCase) => ({ suite, loadedCase })),
+  )
+  const keys = available.map(
+    ({ suite, loadedCase }) => `${suite.suite.id}:${loadedCase.manifest.id}`,
+  )
+  if (new Set(keys).size !== keys.length) {
+    throw new BenchmarkCliError(
+      'Selected suites contain duplicate case identities',
+    )
+  }
+  let selected = available
+  if (input.selectors.length > 0) {
+    selected = input.selectors.map((selector) => {
+      const matches = available.filter(({ suite, loadedCase }) =>
+        selector.includes(':')
+          ? `${suite.suite.id}:${loadedCase.manifest.id}` === selector
+          : loadedCase.manifest.id === selector,
+      )
+      if (matches.length !== 1) {
+        throw new BenchmarkCliError(
+          matches.length === 0
+            ? `Unknown benchmark case: ${selector}`
+            : `Ambiguous benchmark case: ${selector}`,
+        )
+      }
+      return matches[0]!
+    })
+  }
+  const limit = input.caseLimit
+  selected =
+    input.selectors.length > 0 || limit === null
+      ? selected
+      : selected.slice(0, limit)
+  if (selected.length === 0)
+    throw new BenchmarkCliError('No benchmark cases selected')
+  const selectedKeys = selected.map(
+    ({ suite, loadedCase }) => `${suite.suite.id}:${loadedCase.manifest.id}`,
+  )
+  if (new Set(selectedKeys).size !== selectedKeys.length) {
+    throw new BenchmarkCliError('Benchmark case selection contains duplicates')
+  }
+  if (selected.length > MAX_CLI_CASES) {
+    throw new BenchmarkCliError(
+      `Benchmark selection exceeds the ${MAX_CLI_CASES}-case CLI limit`,
+    )
+  }
+  return selected
+}
+
+async function loadPriceSnapshot(
+  filePath: string,
+): Promise<BenchmarkPriceSnapshot> {
+  const raw = await readFile(filePath)
+  if (raw.byteLength > MAX_PRICE_SNAPSHOT_BYTES) {
+    throw new BenchmarkCliError('Price snapshot exceeds 1 MiB')
+  }
+  let value: BenchmarkPriceSnapshot
+  try {
+    value = JSON.parse(raw.toString('utf8')) as BenchmarkPriceSnapshot
+  } catch {
+    throw new BenchmarkCliError('Price snapshot is not valid JSON')
+  }
+  try {
+    validateBenchmarkPriceSnapshot(value)
+  } catch (error) {
+    throw new BenchmarkCliError(
+      error instanceof Error ? error.message : 'Price snapshot is invalid',
+    )
+  }
+  return value
+}
+
+function credentialForRun(
+  mode: 'proxy' | 'direct',
+  credential: string,
+  allowExternalNetwork: boolean,
+): DockerWorkerCredential {
+  return mode === 'proxy'
+    ? { mode, upstreamCredential: credential, allowExternalNetwork }
+    : { mode, credential }
+}
+
+async function currentSourceCommit(): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+      windowsHide: true,
+    })
+    const commit = stdout.trim()
+    if (!/^[a-f0-9]{40}$/u.test(commit)) throw new Error('invalid commit')
+    return commit
+  } catch {
+    throw new BenchmarkCliError('Unable to resolve the current source commit')
+  }
+}
+
+function timestamp(value: Date): string {
+  return value.toISOString().replaceAll(':', '').replaceAll('.', '-')
+}
+
+function positiveInteger(value: string, flag: string, maximum: number): number {
+  if (!/^\d+$/u.test(value))
+    throw new BenchmarkCliError(`${flag} must be an integer`)
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
+    throw new BenchmarkCliError(`${flag} must be between 1 and ${maximum}`)
+  }
+  return parsed
+}
+
+function parseBoolean(value: string, flag: string): boolean {
+  if (value === 'true') return true
+  if (value === 'false') return false
+  throw new BenchmarkCliError(`${flag} must be true or false`)
+}
+
+function isPreset(value: string | undefined): value is BenchmarkRunPreset {
+  return value === 'smoke' || value === 'daily' || value === 'full'
+}

@@ -467,6 +467,14 @@ session.end     { ts }
 - `costPerResolvedUsd`、tokens/tool calls per resolved必须以全部 trial 总消耗除以 resolved 数，不能丢弃失败 trial。另行报告 unresolved token/cost和 resolved duration中位数。
 - A/B 必须逐 trial匹配 suite/case identity、runtime/case/grader image、Provider/model/profile/reasoning、资源预算、protocol/feedback、trial index与 price snapshot。任一不一致必须拒绝并列出字段路径；可比较结果输出 paired delta、总体 resolve delta与置信区间，并按 safety、correctness、efficiency词典序排序。
 
+### 5.10 Benchmark CLI, profiles, and artifacts
+
+- 必须提供独立 opt-in的 `benchmark:smoke`、`benchmark`、`benchmark:full`；默认 `npm test`、`npm run build`和 Electron E2E不得隐式构建镜像、连接 Provider或运行 benchmark。三个 preset默认分别为最多3×1、12×3、全部×5，CLI必须对 suite/case/trial数量设置硬上限。
+- CLI必须复用 Headless config和同一 Docker worker/runner/grader，不得实现第二份 Agent loop。Provider key只从 config声明的主机环境变量读取，默认经 proxy credential模式传递；命令输出、identity、config snapshot、summary和shareable report不得包含 key值。
+- Run-group identity必须固定 preset、suite/adapter、case identity、runtime image digest、source commit、Headless config、Provider/model/profile/reasoning、protocol/feedback、trial数和price snapshot。非空输出目录只有 identity完全一致时才能恢复；trial复用仍须满足各自complete marker和artifact hash。
+- Artifact必须按 run-group/suite/case/trial/attempt分层，足以离线复核manifest、task、runtime identity、patch、grader、trace、JSONL、stderr、usage/tool metrics、泄漏扫描和最终等级。缺失trace metrics的执行必须标为incomplete，不能生成虚假效率汇总。
+- `shareable-report.json`只能包含公开evaluation、聚合metrics、comparison identity和无路径summary。Raw trace/JSONL/stderr、config snapshot、case-result、grader input/private check/command/output必须列入restricted artifact清单；redaction文件必须声明删除字段。
+
 ---
 
 ## 6. 插件系统（生命周期钩子）
