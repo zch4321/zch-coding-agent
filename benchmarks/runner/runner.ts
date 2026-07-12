@@ -47,7 +47,6 @@ import type {
   RunBenchmarkTrialsInput,
 } from './contracts'
 import { createBenchmarkFeedback } from './feedback'
-import { collectBenchmarkPatch } from './native-evaluator'
 import {
   benchmarkConversationMarkdown,
   benchmarkSessionTranscriptMarkdown,

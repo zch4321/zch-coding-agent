@@ -82,6 +82,31 @@ describe('Docker worker coordinator', () => {
     expect(cancelled.status).toBe('cancelled')
     expect(cancelled.error?.code).toBe('DOCKER_CANCELLED')
   })
+
+  it('rejects unsafe named-volume workspace inputs before contacting Docker', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'worker-volume-'))
+    temporaryDirectories.push(root)
+    const workspace = path.join(root, 'workspace')
+    const artifacts = path.join(root, 'artifacts')
+    await Promise.all([mkdir(workspace), mkdir(artifacts)])
+
+    const result = await runDockerWorker({
+      image: 'not-needed',
+      workspaceDirectory: workspace,
+      workspace: {
+        kind: 'volume',
+        name: '../unsafe',
+        containerPath: '/testbed',
+      },
+      artifactsDirectory: artifacts,
+      config: config(),
+      task: 'valid task',
+      credential: { mode: 'direct', credential: 'ephemeral' },
+    })
+
+    expect(result.status).toBe('invalid')
+    expect(result.error?.message).toContain('volume name')
+  })
 })
 
 function config(): HeadlessConfig {

@@ -33,10 +33,22 @@ import type {
   ExternalAdapterRuntime,
   ExternalPreparedWorkspace,
 } from './external'
+import {
+  assertMonthlyResources,
+  assertRebenchResources,
+  ExternalResourceLimitError,
+  inferMonthlyLanguage,
+} from './external-resource-limits'
+import {
+  dockerImageExists as imageExists,
+  dockerImageId as imageId,
+  dockerImageWorkspace as imageWorkspace,
+} from './external-docker-image'
 
 const execFileAsync = promisify(execFile)
 const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 const MAX_VERIFIER_OUTPUT_BYTES = 4 * 1024 * 1024
+const EXTERNAL_COMPATIBILITY_REVISION = 'external-compatibility-v4'
 
 interface ExternalImageInfo {
   taskImage: string
@@ -79,8 +91,14 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
             agentImageDigest: info.agentImageDigest,
           }
         : { eligible: false, reason: 'compatibility_failed' }
-    } catch {
-      return { eligible: false, reason: 'image_unavailable' }
+    } catch (error) {
+      return {
+        eligible: false,
+        reason:
+          error instanceof ExternalResourceLimitError
+            ? 'resource_limit'
+            : 'image_unavailable',
+      }
     }
   }
 
@@ -288,33 +306,53 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
       candidate.privatePayload.kind === 'monthly-swebench'
         ? await this.#buildMonthlyTaskImage(candidate)
         : await this.#pullRebenchImage(candidate)
-    const agentImage = `zch-external-build/${candidate.source}:${candidateHash(candidate).slice(0, 20)}`
-    await runDockerCommand(
-      [
-        'build',
-        '--platform',
-        'linux/amd64',
-        '--file',
-        path.resolve(
-          this.#options.overlayDockerfile ??
-            'benchmarks/docker/external-overlay.Dockerfile',
-        ),
-        '--build-arg',
-        `ZCH_RUNTIME_IMAGE=${this.#options.runtimeImage}`,
-        '--build-arg',
-        `TASK_IMAGE=${task.image}`,
-        '--build-arg',
-        `TASK_WORKSPACE=${task.workspace}`,
-        '--build-arg',
-        `ZCH_SOURCE_COMMIT=${this.#options.sourceCommit}`,
-        '--build-arg',
-        `ZCH_SOURCE_TREE_STATE=${this.#options.sourceTreeState ?? 'unknown'}`,
-        '--tag',
-        agentImage,
-        '.',
-      ],
-      { timeoutMs: 20 * 60_000, maxOutputBytes: 8 * 1024 * 1024 },
-    )
+    const agentImage = `zch-external-build/${candidate.source}:${candidateHash(candidate).slice(0, 12)}-${this.#options.sourceCommit.slice(0, 12)}`
+    if (!(await imageExists(agentImage))) {
+      await runDockerCommand(
+        [
+          'build',
+          '--platform',
+          'linux/amd64',
+          '--file',
+          path.resolve(
+            this.#options.overlayDockerfile ??
+              'benchmarks/docker/external-overlay.Dockerfile',
+          ),
+          '--build-arg',
+          `ZCH_RUNTIME_IMAGE=${this.#options.runtimeImage}`,
+          '--build-arg',
+          `TASK_IMAGE=${task.image}`,
+          '--build-arg',
+          `TASK_WORKSPACE=${task.workspace}`,
+          '--build-arg',
+          `ZCH_SOURCE_COMMIT=${this.#options.sourceCommit}`,
+          '--build-arg',
+          `ZCH_SOURCE_TREE_STATE=${this.#options.sourceTreeState ?? 'unknown'}`,
+          '--tag',
+          agentImage,
+          '.',
+        ],
+        { timeoutMs: 20 * 60_000, maxOutputBytes: 8 * 1024 * 1024 },
+      )
+    }
+    const nodeCheck = await runDockerCommand([
+      'run',
+      '--rm',
+      '--network',
+      'none',
+      '--read-only',
+      '--user',
+      '10001:10001',
+      '--entrypoint',
+      '/usr/local/bin/node',
+      agentImage,
+      '--version',
+    ])
+    if (!/^v24\./u.test(nodeCheck.stdout.trim())) {
+      throw new Error(
+        'Derived external image cannot execute the ZCH Node runtime',
+      )
+    }
     const info: ExternalImageInfo = {
       taskImage: task.image,
       taskImageDigest: await imageId(task.image),
@@ -387,37 +425,50 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
       path.join(taskDirectory, 'task.toml'),
       'utf8',
     )
+    assertMonthlyResources(taskToml)
     candidate.language = inferMonthlyLanguage(taskToml)
     const image = `zch-task/monthly:${candidateHash(candidate).slice(0, 20)}`
-    await runDockerCommand(
-      [
-        'build',
-        '--platform',
-        'linux/amd64',
-        '--file',
-        path.join(taskDirectory, 'environment', 'Dockerfile'),
-        '--tag',
-        image,
-        path.join(taskDirectory, 'environment'),
-      ],
-      { timeoutMs: 30 * 60_000, maxOutputBytes: 8 * 1024 * 1024 },
-    )
+    if (!(await imageExists(image))) {
+      await runDockerCommand(
+        [
+          'build',
+          '--platform',
+          'linux/amd64',
+          '--file',
+          path.join(taskDirectory, 'environment', 'Dockerfile'),
+          '--tag',
+          image,
+          path.join(taskDirectory, 'environment'),
+        ],
+        { timeoutMs: 30 * 60_000, maxOutputBytes: 8 * 1024 * 1024 },
+      )
+    }
     return { image, workspace: await imageWorkspace(image), taskDirectory }
   }
 
   async #pullRebenchImage(
     candidate: ExternalBenchmarkCandidate,
   ): Promise<{ image: string; workspace: string }> {
-    await runDockerCommand(
-      ['pull', '--platform', 'linux/amd64', candidate.officialImageReference],
-      {
-        timeoutMs: 30 * 60_000,
-        maxOutputBytes: 8 * 1024 * 1024,
-      },
-    )
+    assertRebenchResources(candidate)
+    const image = `zch-task/rebench:${candidateHash(candidate).slice(0, 20)}`
+    if (!(await imageExists(image))) {
+      await runDockerCommand(
+        ['pull', '--platform', 'linux/amd64', candidate.officialImageReference],
+        {
+          timeoutMs: 30 * 60_000,
+          maxOutputBytes: 8 * 1024 * 1024,
+        },
+      )
+      await runDockerCommand([
+        'image',
+        'tag',
+        candidate.officialImageReference,
+        image,
+      ])
+    }
     return {
-      image: candidate.officialImageReference,
-      workspace: await imageWorkspace(candidate.officialImageReference),
+      image,
+      workspace: await imageWorkspace(image),
     }
   }
 
@@ -428,7 +479,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     const directory = path.join(this.#options.cacheDirectory, 'compatibility')
     const file = path.join(
       directory,
-      `${candidateHash(candidate)}-${info.taskImageDigest.slice(7)}.json`,
+      `${candidateHash(candidate)}-${info.taskImageDigest.slice(7)}-${EXTERNAL_COMPATIBILITY_REVISION}.json`,
     )
     if (await exists(file)) {
       const cached = JSON.parse(await readFile(file, 'utf8')) as {
@@ -440,24 +491,31 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     await mkdir(directory, { recursive: true })
     const baseline = await this.#compatibilityAttempt(candidate, info, false)
     const oracle = await this.#compatibilityAttempt(candidate, info, true)
+    const baselineResolved = verifierResolved(baseline)
+    const oracleResolved = verifierResolved(oracle)
     const record = {
       schemaVersion: 1,
       adapterRevision: candidate.adapterRevision,
+      compatibilityRevision: EXTERNAL_COMPATIBILITY_REVISION,
       caseHash: candidateHash(candidate),
       officialImageDigest: info.taskImageDigest,
-      baselineResolved: baseline,
-      oracleResolved: oracle,
+      baselineResolved,
+      oracleResolved,
+      diagnostics: {
+        baseline: compatibilityDiagnostic(baseline),
+        oracle: compatibilityDiagnostic(oracle),
+      },
       checkedAt: new Date().toISOString(),
     }
     await writeJsonAtomic(file, record)
-    return !baseline && oracle
+    return !baselineResolved && oracleResolved
   }
 
   async #compatibilityAttempt(
     candidate: ExternalBenchmarkCandidate,
     info: ExternalImageInfo,
     oracle: boolean,
-  ): Promise<boolean> {
+  ): Promise<VerifierResult> {
     const privateDirectory = await mkdtemp(
       path.join(os.tmpdir(), 'zch-external-compat-'),
     )
@@ -477,18 +535,13 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
             candidate.privatePayload.solutionPatch,
           )
       }
-      const verifier = await this.#executeVerifier({
+      return await this.#executeVerifier({
         candidate,
         info,
         volume,
         privateDirectory,
         oracle,
       })
-      return (
-        verifier.regressionPassed &&
-        verifier.targetResults.length > 0 &&
-        verifier.targetResults.every(Boolean)
-      )
     } finally {
       await this.#removeVolume(volume)
       await rm(privateDirectory, { recursive: true, force: true })
@@ -515,7 +568,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
         volume: input.volume,
         privateDirectory: input.privateDirectory,
         script:
-          'git apply --check /private/agent.patch && git apply /private/agent.patch && git diff --check HEAD && test "$(git diff --name-only HEAD | wc -l)" -le 1000',
+          'git apply --check /zch-private/agent.patch && git apply /zch-private/agent.patch && git diff --check HEAD && test "$(git diff --name-only HEAD | wc -l)" -le 1000',
       }),
       { allowFailure: true, timeoutMs: 60_000 },
     )
@@ -535,28 +588,28 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     oracle?: boolean
   }): Promise<VerifierResult> {
     const mounts: string[] = []
-    let script = ''
+    let script: string
     if (input.candidate.privatePayload.kind === 'monthly-swebench') {
       if (!input.info.taskDirectory)
         throw new Error('Monthly task files are unavailable')
       mounts.push(
         bindMount(
           path.join(input.info.taskDirectory, 'tests'),
-          '/private/tests',
+          '/upstream-tests',
           true,
         ),
       )
       mounts.push(
         bindMount(
           path.join(input.info.taskDirectory, 'solution'),
-          '/private/solution',
+          '/upstream-solution',
           true,
         ),
       )
       script = [
-        input.patchFile ? `git apply /private/${input.patchFile}` : '',
-        input.oracle ? 'bash /private/solution/solve.sh' : '',
-        'REWARD_FILE=/tmp/reward.txt bash /private/tests/test.sh',
+        input.patchFile ? `git apply /zch-private/${input.patchFile}` : '',
+        input.oracle ? 'bash /upstream-solution/solve.sh' : '',
+        'REWARD_FILE=/tmp/reward.txt bash /upstream-tests/test.sh',
       ]
         .filter(Boolean)
         .join(' && ')
@@ -579,9 +632,9 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
       }
       const testCommand = rebenchTestCommand(payload)
       script = [
-        input.patchFile ? `git apply /private/${input.patchFile}` : '',
-        input.oracle ? 'git apply /private/oracle.patch' : '',
-        'git apply /private/test.patch',
+        input.patchFile ? `git apply /zch-private/${input.patchFile}` : '',
+        input.oracle ? 'git apply /zch-private/oracle.patch' : '',
+        'git apply /zch-private/test.patch',
         testCommand,
       ]
         .filter(Boolean)
@@ -653,6 +706,24 @@ interface VerifierResult {
   command: DockerCommandResult
   regressionPassed: boolean
   targetResults: boolean[]
+}
+
+function verifierResolved(result: VerifierResult): boolean {
+  return (
+    result.regressionPassed &&
+    result.targetResults.length > 0 &&
+    result.targetResults.every(Boolean)
+  )
+}
+
+function compatibilityDiagnostic(result: VerifierResult) {
+  return {
+    exitCode: result.command.exitCode,
+    regressionPassed: result.regressionPassed,
+    targetResults: result.targetResults,
+    stdoutTail: boundedTail(result.command.stdout, 16 * 1024),
+    stderrTail: boundedTail(result.command.stderr, 16 * 1024),
+  }
 }
 
 export function parseExternalVerifier(
@@ -754,13 +825,17 @@ function restrictedRunArgs(input: {
     '--cpus',
     '2',
     '--tmpfs',
-    '/tmp:rw,noexec,nosuid,nodev,size=268435456,mode=1777',
+    '/tmp:rw,exec,nosuid,nodev,size=268435456,mode=1777',
+    '--tmpfs',
+    '/home/zch:rw,nosuid,nodev,size=1073741824,mode=0700,uid=10001,gid=10001',
+    '--tmpfs',
+    '/logs:rw,nosuid,nodev,size=67108864,mode=0777',
     '--entrypoint',
     '/bin/sh',
     '--mount',
     volumeMount(input.volume, input.workspace),
     '--mount',
-    bindMount(input.privateDirectory, '/private', true),
+    bindMount(input.privateDirectory, '/zch-private', true),
     ...(input.extraMounts ?? []).flatMap((mount) => ['--mount', mount]),
     '--workdir',
     input.workspace,
@@ -851,34 +926,6 @@ function completeSandbox(value = true) {
   }
 }
 
-async function imageId(image: string): Promise<string> {
-  const result = await runDockerCommand([
-    'image',
-    'inspect',
-    '--format',
-    '{{.Id}}',
-    image,
-  ])
-  const value = result.stdout.trim()
-  if (!/^sha256:[a-f0-9]{64}$/u.test(value))
-    throw new Error('Docker image digest is invalid')
-  return value
-}
-
-async function imageWorkspace(image: string): Promise<string> {
-  const result = await runDockerCommand([
-    'image',
-    'inspect',
-    '--format',
-    '{{.Config.WorkingDir}}',
-    image,
-  ])
-  const value = result.stdout.trim().replace(/\/+$/u, '')
-  if (!value.startsWith('/') || value === '/')
-    throw new Error('External task image has no safe native workspace')
-  return value
-}
-
 async function fetchBounded(
   request: typeof fetch,
   url: string,
@@ -908,26 +955,6 @@ function bindMount(
   return `type=bind,src=${path.resolve(source)},dst=${destination}${readOnly ? ',readonly' : ''}`
 }
 
-function inferMonthlyLanguage(taskToml: string): string {
-  const value = taskToml.toLowerCase()
-  for (const language of [
-    'python',
-    'go',
-    'rust',
-    'java',
-    'typescript',
-    'javascript',
-    'c++',
-    'c',
-  ]) {
-    if (
-      new RegExp(`['\"]${language.replace('+', '\\+')}['\"]`, 'u').test(value)
-    )
-      return language
-  }
-  return 'unknown'
-}
-
 function bounded(value: string): string {
   const buffer = Buffer.from(value, 'utf8')
   return buffer.byteLength <= MAX_VERIFIER_OUTPUT_BYTES
@@ -935,6 +962,13 @@ function bounded(value: string): string {
     : buffer
         .subarray(buffer.byteLength - MAX_VERIFIER_OUTPUT_BYTES)
         .toString('utf8')
+}
+
+function boundedTail(value: string, maxBytes: number): string {
+  const buffer = Buffer.from(value, 'utf8')
+  return buffer.byteLength <= maxBytes
+    ? value
+    : buffer.subarray(buffer.byteLength - maxBytes).toString('utf8')
 }
 
 function safeMessage(error: unknown): string {

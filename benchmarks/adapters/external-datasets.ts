@@ -9,7 +9,6 @@ import { asyncBufferFromUrl, parquetReadObjects } from 'hyparquet'
 export const MONTHLY_SWEBENCH_ADAPTER_REVISION = 'monthly-swebench-v1'
 export const SWE_REBENCH_ADAPTER_REVISION = 'swe-rebench-v1'
 
-const MONTHLY_DATASET_PREFIX = 'UnipatAI/Monthly-SWEBench-'
 const REBENCH_DATASET = 'nebius/SWE-rebench-leaderboard'
 const MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 const REBENCH_PAGE_SIZE = 100
@@ -207,8 +206,8 @@ function rebenchCandidate(
   const repository = stringValue(raw.repo)
   const baseCommit = stringValue(raw.base_commit)
   const problemStatement = stringValue(raw.problem_statement)
-  const solutionPatch = stringValue(raw.patch)
-  const testPatch = stringValue(raw.test_patch)
+  const solutionPatch = exactString(raw.patch)
+  const testPatch = exactString(raw.test_patch)
   const officialImageReference = stringValue(raw.docker_image)
   const failToPass = stringArray(raw.FAIL_TO_PASS)
   const passToPass = stringArray(raw.PASS_TO_PASS)
@@ -217,8 +216,8 @@ function rebenchCandidate(
     !repository ||
     !baseCommit ||
     !problemStatement ||
-    !solutionPatch ||
-    !testPatch ||
+    !solutionPatch.trim() ||
+    !testPatch.trim() ||
     !officialImageReference ||
     failToPass.length === 0
   ) {
@@ -234,6 +233,9 @@ function rebenchCandidate(
       installConfig: raw.install_config,
       interface: raw.interface,
       verifierTimeoutSeconds: raw.harbor_verifier_timeout_sec,
+      cpus: raw.harbor_cpus,
+      memory: raw.harbor_memory,
+      storage: raw.harbor_storage,
     },
   }
   return {
@@ -352,6 +354,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function exactString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
 }
 
 function stringArray(value: unknown): string[] {

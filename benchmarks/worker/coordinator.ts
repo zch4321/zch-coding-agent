@@ -220,6 +220,7 @@ export async function runDockerWorker(
           ZCH_RUNTIME_IMAGE_DIGEST: image.digest,
         },
         interactive: Boolean(input.benchmarkControl),
+        tmpNoExec: workspace.kind === 'bind',
         command: [
           'run',
           '--workspace',
@@ -395,6 +396,7 @@ function restrictedCreateArgs(input: {
   environment: Record<string, string>
   command: string[]
   interactive?: boolean
+  tmpNoExec?: boolean
 }): string[] {
   const args = [
     'create',
@@ -417,7 +419,9 @@ function restrictedCreateArgs(input: {
     '--network',
     input.network,
     '--tmpfs',
-    `/tmp:rw,noexec,nosuid,nodev,size=${input.limits.tmpfsBytes},mode=1777`,
+    `/tmp:rw,${input.tmpNoExec === false ? 'exec,' : 'noexec,'}nosuid,nodev,size=${input.limits.tmpfsBytes},mode=1777`,
+    '--tmpfs',
+    `/home/zch:rw,nosuid,nodev,size=${input.limits.tmpfsBytes},mode=0700,uid=10001,gid=10001`,
   ]
   if (input.interactive) args.push('--interactive')
   if (input.networkAlias) args.push('--network-alias', input.networkAlias)

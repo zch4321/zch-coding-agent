@@ -9,6 +9,7 @@ import type {
 import { sha256Canonical } from '../cohort/hash'
 import { candidateHash } from '../cohort/selection'
 import type { IsolatedGraderRunResult } from '../grader/contracts'
+import { scoreIsolatedGrader } from '../grader/scoring'
 import { parseExternalVerifier } from './external-docker-runtime'
 import {
   loadExternalBenchmarkSuites,
@@ -70,6 +71,12 @@ describe('external benchmark adapters', () => {
       officialImageDigest: digest('a'),
       agentImageDigest: digest('b'),
     })
+    expect(
+      scoreIsolatedGrader({
+        loadedCase: rebench.cases[0]!,
+        grader: partialGraderResult(rebench.cases[0]!.manifest.id),
+      }).level,
+    ).toBe('L4')
 
     const prepared = await rebench.caseAdapter.prepareWorkspace({
       loadedCase: rebench.cases[0]!,
@@ -233,6 +240,48 @@ function graderResult(): IsolatedGraderRunResult {
       stdoutPath: 'fixture/stdout',
       stderrPath: 'fixture/stderr',
       coordinatorResultPath: 'fixture/result',
+    },
+  }
+}
+
+function partialGraderResult(caseId: string): IsolatedGraderRunResult {
+  const result = graderResult()
+  const command = (
+    stage: 'setup' | 'public' | 'private',
+    id: string,
+    passed: boolean,
+    acceptanceGroupId?: string,
+  ) => ({
+    stage,
+    id,
+    ...(acceptanceGroupId ? { acceptanceGroupId } : {}),
+    passed,
+    exitCode: passed ? 0 : 1,
+    timedOut: false,
+    durationMs: 1,
+    stdoutSha256: sha256Bytes('stdout'),
+    stderrSha256: sha256Bytes('stderr'),
+    failureCategory: passed ? ('none' as const) : ('exit_nonzero' as const),
+  })
+  return {
+    ...result,
+    status: 'completed',
+    patch: { ...result.patch, present: true },
+    output: {
+      schemaVersion: 1,
+      graderRevision: 'isolated-grader-v1',
+      status: 'completed',
+      inputSha256: result.inputSha256,
+      caseId,
+      startedAt: result.startedAt,
+      completedAt: result.completedAt,
+      durationMs: 1,
+      commands: [
+        command('setup', 'verifier-start', true),
+        command('public', 'regression', true, 'regression'),
+        command('private', 'target-1', true, 'target-1'),
+        command('private', 'target-2', false, 'target-2'),
+      ],
     },
   }
 }
