@@ -72,6 +72,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
   readonly #options: ExternalDockerRuntimeOptions
   readonly #images = new Map<string, ExternalImageInfo>()
   readonly #volumes = new Set<string>()
+  readonly #createdImageReferences: string[] = []
 
   constructor(options: ExternalDockerRuntimeOptions) {
     this.#options = options
@@ -113,12 +114,14 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
       throw new Error('External task image drifted from the pinned cohort')
     }
     if (info.agentImage !== input.agentImageReference) {
+      const aliasExisted = await imageExists(input.agentImageReference)
       await runDockerCommand([
         'image',
         'tag',
         info.agentImage,
         input.agentImageReference,
       ])
+      if (!aliasExisted) this.#trackCreatedImage(input.agentImageReference)
       info.agentImage = input.agentImageReference
     }
     await mkdir(input.destination, { recursive: true })
@@ -291,6 +294,25 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     )
   }
 
+  async cleanupImages(): Promise<{ removed: number; failed: number }> {
+    await Promise.all(
+      [...this.#volumes].map((volume) => this.#removeVolume(volume)),
+    )
+    let removed = 0
+    let failed = 0
+    for (const reference of [...this.#createdImageReferences].reverse()) {
+      const result = await runDockerCommand(['image', 'rm', reference], {
+        allowFailure: true,
+        maxOutputBytes: 1024 * 1024,
+      }).catch(() => undefined)
+      if (result?.exitCode === 0) removed += 1
+      else failed += 1
+    }
+    this.#createdImageReferences.length = 0
+    this.#images.clear()
+    return { removed, failed }
+  }
+
   async #ensureImages(
     candidate: ExternalBenchmarkCandidate,
   ): Promise<ExternalImageInfo> {
@@ -334,6 +356,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
         ],
         { timeoutMs: 20 * 60_000, maxOutputBytes: 8 * 1024 * 1024 },
       )
+      this.#trackCreatedImage(agentImage)
     }
     const nodeCheck = await runDockerCommand([
       'run',
@@ -442,6 +465,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
         ],
         { timeoutMs: 30 * 60_000, maxOutputBytes: 8 * 1024 * 1024 },
       )
+      this.#trackCreatedImage(image)
     }
     return { image, workspace: await imageWorkspace(image), taskDirectory }
   }
@@ -452,6 +476,9 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     assertRebenchResources(candidate)
     const image = `zch-task/rebench:${candidateHash(candidate).slice(0, 20)}`
     if (!(await imageExists(image))) {
+      const officialImageExisted = await imageExists(
+        candidate.officialImageReference,
+      )
       await runDockerCommand(
         ['pull', '--platform', 'linux/amd64', candidate.officialImageReference],
         {
@@ -459,12 +486,16 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
           maxOutputBytes: 8 * 1024 * 1024,
         },
       )
+      if (!officialImageExisted) {
+        this.#trackCreatedImage(candidate.officialImageReference)
+      }
       await runDockerCommand([
         'image',
         'tag',
         candidate.officialImageReference,
         image,
       ])
+      this.#trackCreatedImage(image)
     }
     return {
       image,
@@ -699,6 +730,12 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
   #volumeName(caseId: string): string {
     const suffix = sha256Bytes(`${caseId}:${randomUUID()}`).slice(0, 20)
     return `zch-benchmark-${suffix}`
+  }
+
+  #trackCreatedImage(reference: string): void {
+    if (!this.#createdImageReferences.includes(reference)) {
+      this.#createdImageReferences.push(reference)
+    }
   }
 }
 

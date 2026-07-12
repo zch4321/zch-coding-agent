@@ -63,6 +63,7 @@ export interface BenchmarkCliArguments {
   allowExternalNetwork: boolean
   cohortFile?: string
   seed?: string
+  externalImageRetention: 'run' | 'keep'
 }
 
 export class BenchmarkCliError extends Error {
@@ -116,6 +117,7 @@ export function parseBenchmarkArguments(argv: string[]): BenchmarkCliArguments {
     '--allow-external-network',
     '--cohort',
     '--seed',
+    '--external-image-retention',
   ])
   for (let index = 1; index < argv.length; index += 2) {
     const flag = argv[index]
@@ -162,11 +164,23 @@ export function parseBenchmarkArguments(argv: string[]): BenchmarkCliArguments {
   )
   const cohortFile = single.get('--cohort')
   const seed = single.get('--seed')?.trim()
+  const externalImageRetention =
+    single.get('--external-image-retention') ?? 'run'
+  if (externalImageRetention !== 'run' && externalImageRetention !== 'keep') {
+    throw new BenchmarkCliError(
+      '--external-image-retention must be run or keep',
+    )
+  }
   if (cohortFile && seed) {
     throw new BenchmarkCliError('--cohort and --seed cannot be used together')
   }
   if ((cohortFile || seed) && preset !== 'external') {
     throw new BenchmarkCliError('--cohort and --seed require --preset external')
+  }
+  if (single.has('--external-image-retention') && preset !== 'external') {
+    throw new BenchmarkCliError(
+      '--external-image-retention requires --preset external',
+    )
   }
   if (seed && (seed.length > 256 || /[\r\n\0]/u.test(seed))) {
     throw new BenchmarkCliError('--seed is invalid')
@@ -208,6 +222,7 @@ export function parseBenchmarkArguments(argv: string[]): BenchmarkCliArguments {
     allowExternalNetwork,
     cohortFile: cohortFile ? path.resolve(cohortFile) : undefined,
     seed: seed || undefined,
+    externalImageRetention,
   }
 }
 
@@ -217,8 +232,16 @@ export async function runBenchmarkCli(
 ): Promise<{ exitCode: number; result?: BenchmarkRunGroupResult }> {
   const output = options.output ?? process.stdout
   const errorOutput = options.errorOutput ?? process.stderr
+  let externalRuntime:
+    | (ExternalAdapterRuntime & {
+        resolveImage: ExternalDockerRuntime['resolveImage']
+      })
+    | undefined
+  let cleanupExternalImages = false
   try {
     const args = parseBenchmarkArguments(argv)
+    cleanupExternalImages =
+      args.preset === 'external' && args.externalImageRetention === 'run'
     const environment = options.environment ?? process.env
     const sourceCommit = options.sourceCommit ?? (await currentSourceCommit())
     const [config, priceSnapshot] = await Promise.all([
@@ -258,15 +281,26 @@ export async function runBenchmarkCli(
         'results',
         `${timestamp(now)}-${args.preset}`,
       )
+    if (args.preset === 'external') {
+      externalRuntime =
+        options.createExternalRuntime?.({
+          cacheDirectory: path.join(args.benchmarkRoot, '.cache', 'external'),
+          runtimeImage: image,
+          sourceCommit,
+        }) ??
+        new ExternalDockerRuntime({
+          cacheDirectory: path.join(args.benchmarkRoot, '.cache', 'external'),
+          runtimeImage: image,
+          sourceCommit,
+        })
+    }
     const external =
       args.preset === 'external'
         ? await prepareExternalRun({
             args,
             options,
-            image,
-            sourceCommit,
-            outputDirectory,
             now,
+            runtime: externalRuntime!,
             onCandidate: (candidate) =>
               writeProgress(
                 errorOutput,
@@ -340,6 +374,19 @@ export async function runBenchmarkCli(
       error instanceof HeadlessConfigError ||
       error instanceof BenchmarkCaseValidationError
     return { exitCode: options.signal?.aborted ? 130 : invalidInput ? 4 : 2 }
+  } finally {
+    if (cleanupExternalImages && externalRuntime?.cleanupImages) {
+      writeProgress(errorOutput, 'cleaning up images created by this run')
+      try {
+        const cleanup = await externalRuntime.cleanupImages()
+        writeProgress(
+          errorOutput,
+          `image cleanup completed: ${cleanup.removed} removed, ${cleanup.failed} failed`,
+        )
+      } catch {
+        writeProgress(errorOutput, 'image cleanup failed')
+      }
+    }
   }
 }
 
@@ -476,23 +523,13 @@ function isPreset(value: string | undefined): value is BenchmarkRunPreset {
 async function prepareExternalRun(input: {
   args: BenchmarkCliArguments
   options: BenchmarkCliOptions
-  image: string
-  sourceCommit: string
-  outputDirectory: string
   now: Date
   onCandidate?: (candidate: ExternalBenchmarkCandidate) => void
+  runtime: ExternalAdapterRuntime & {
+    resolveImage: ExternalDockerRuntime['resolveImage']
+  }
 }): Promise<{ cohort: BenchmarkCohort; suites: LoadedAdapterSuite[] }> {
-  const runtime =
-    input.options.createExternalRuntime?.({
-      cacheDirectory: path.join(input.args.benchmarkRoot, '.cache', 'external'),
-      runtimeImage: input.image,
-      sourceCommit: input.sourceCommit,
-    }) ??
-    new ExternalDockerRuntime({
-      cacheDirectory: path.join(input.args.benchmarkRoot, '.cache', 'external'),
-      runtimeImage: input.image,
-      sourceCommit: input.sourceCommit,
-    })
+  const runtime = input.runtime
   const cohort = input.args.cohortFile
     ? await loadCohortFile(input.args.cohortFile)
     : undefined

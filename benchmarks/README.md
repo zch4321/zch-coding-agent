@@ -62,6 +62,8 @@ npm run benchmark:external -- --config benchmark-config.local --seed trial-1
 - `benchmark:full`：完整 `core-harness-8`，每项5 trials。
 - `benchmark:external`：最新 Monthly-SWEBench 8项与最新 SWE-rebench leaderboard 8项，每项3 trials。首次运行可传 `--seed`；A/B 的另一侧使用 `--cohort <上一轮 cohort.json>`，不得同时传 seed。
 
+`benchmark:external` 默认在成功、失败或取消后删除本次进程新建或新拉取的 external 任务与派生镜像标签；运行前已经存在的镜像和 `zch-agent-headless` Runtime 不会删除。需要连续复用镜像时显式传入 `--external-image-retention keep`。该清理不会执行全局 BuildKit prune，以免影响其他项目的构建缓存。
+
 四个命令都只构建轻量 CLI bundle，不自动构建 Docker image。默认 image为当前 commit对应的 `zch-agent-headless:<12位commit>`，可用 `--image`或 `ZCH_WORKER_IMAGE`指定。常用覆盖参数包括重复的 `--suite` / `--case`、`--trials 1..5`、`--protocol repair-once --feedback public|diagnostic`、`--price-snapshot`、`--output`以及显式开发fallback `--credential-mode direct`。默认 proxy模式只把真实key交给受限 Provider proxy。
 
 运行进度写入 stderr，包括 external 候选项目与镜像准备、当前 case/project、trial 序号、L0–L5 结果、是否解决、耗时和缓存复用状态。stdout 仍只输出最终单行 JSON，便于脚本稳定解析和管道处理。

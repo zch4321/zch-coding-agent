@@ -111,6 +111,17 @@ describe('benchmark CLI', () => {
         'fixed',
       ]),
     ).toThrow('--cohort and --seed')
+    expect(() =>
+      parseBenchmarkArguments([
+        'run',
+        '--preset',
+        'full',
+        '--config',
+        'config.json',
+        '--external-image-retention',
+        'keep',
+      ]),
+    ).toThrow('--external-image-retention requires --preset external')
   })
 
   it('parses the external preset with a reproducible seed or pinned cohort', () => {
@@ -138,6 +149,19 @@ describe('benchmark CLI', () => {
       seed: 'repeatable-seed',
     })
     expect(pinned.cohortFile).toBe(path.resolve('cohort.json'))
+    expect(seeded.externalImageRetention).toBe('run')
+
+    expect(
+      parseBenchmarkArguments([
+        'run',
+        '--preset',
+        'external',
+        '--config',
+        'config.json',
+        '--external-image-retention',
+        'keep',
+      ]).externalImageRetention,
+    ).toBe('keep')
   })
 
   it('loads the real suite, keeps the key out of output, and applies smoke defaults', async () => {
@@ -281,6 +305,8 @@ describe('benchmark CLI', () => {
     )
     const candidates = externalCandidates()
     let received: RunBenchmarkGroupInput | undefined
+    let cleanupCalls = 0
+    let stderr = ''
     const result = await runBenchmarkCli(
       [
         'run',
@@ -341,13 +367,17 @@ describe('benchmark CLI', () => {
             throw new Error('not run by the CLI fixture')
           },
           dispose: async () => undefined,
+          cleanupImages: async () => {
+            cleanupCalls += 1
+            return { removed: 3, failed: 0 }
+          },
         }),
         groupRunner: async (input) => {
           received = input
           return fakeResult(outputDirectory)
         },
         output: stringWriter(() => undefined),
-        errorOutput: stringWriter(() => undefined),
+        errorOutput: stringWriter((value) => (stderr += value)),
       },
     )
 
@@ -360,6 +390,10 @@ describe('benchmark CLI', () => {
       cohortHash: received?.cohortHash,
     })
     expect(received?.cohort?.cases).toHaveLength(16)
+    expect(cleanupCalls).toBe(1)
+    expect(stderr).toContain(
+      '[benchmark] image cleanup completed: 3 removed, 0 failed',
+    )
   })
 })
 

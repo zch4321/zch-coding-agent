@@ -48,6 +48,7 @@ export interface ExternalAdapterRuntime {
     agentImageReference: string
   }): Promise<IsolatedGraderRunResult>
   dispose(workspaces: ExternalPreparedWorkspace[]): Promise<void>
+  cleanupImages?(): Promise<{ removed: number; failed: number }>
 }
 
 interface ExternalCasePrivate {
