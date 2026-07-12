@@ -24,7 +24,13 @@ npm run test:benchmark-cases
 
 ## 正式命令
 
-先创建一个不提交版本库的 Headless config，例如 `benchmark-config.local`：
+先从仓库中的可提交模板创建本地 Headless config。`benchmark-config.local` 已被 `.gitignore` 显式排除：
+
+```powershell
+Copy-Item benchmark-config.example.json benchmark-config.local
+```
+
+模板默认内容如下，可按需修改 Provider、模型和环境变量名称：
 
 ```json
 {

@@ -23,6 +23,7 @@ benchmarks/results
 .electron-cache
 *.tsbuildinfo
 *.local
+/benchmark-config.local
 
 # Editor directories and files
 .vscode/*

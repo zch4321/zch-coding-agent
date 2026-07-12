@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Writable } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
+import { loadHeadlessConfig } from '../../electron/headless/config'
 import type {
   BenchmarkRunGroupResult,
   RunBenchmarkGroupInput,
@@ -24,6 +25,19 @@ afterEach(async () => {
 })
 
 describe('benchmark CLI', () => {
+  it('ships a valid local config template without a credential value', async () => {
+    const config = await loadHeadlessConfig(
+      path.resolve('benchmark-config.example.json'),
+    )
+
+    expect(config.provider).toMatchObject({
+      id: 'deepseek',
+      model: 'deepseek-chat',
+      credentialEnv: 'DEEPSEEK_API_KEY',
+    })
+    expect(JSON.stringify(config)).not.toMatch(/api[_-]?key\s*:/iu)
+  })
+
   it('parses fixed presets, repeatable suites/cases, and safe defaults', () => {
     const args = parseBenchmarkArguments([
       'run',
