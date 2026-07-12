@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "caseId": "slugify-normalization",
+  "suiteId": "core-24",
+  "suiteRevision": "smoke-v1",
+  "checks": [
+    {
+      "id": "edge-separators",
+      "acceptanceGroupId": "edge-separators",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { slugify } from './src/slugify.mjs'; assert.equal(slugify(' --Already   Clean-- '), 'already-clean')"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    },
+    {
+      "id": "unicode-folding",
+      "acceptanceGroupId": "unicode-folding",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { slugify } from './src/slugify.mjs'; assert.equal(slugify('Café déjà'), 'cafe-deja')"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    }
+  ],
+  "oracle": {
+    "kind": "patch",
+    "patch": "diff --git a/src/slugify.mjs b/src/slugify.mjs\n--- a/src/slugify.mjs\n+++ b/src/slugify.mjs\n@@ -1,3 +1,8 @@\n export function slugify(value) {\n-  return value.trim().toLowerCase().replace(/\\s+/, '-')\n+  return value\n+    .trim()\n+    .toLowerCase()\n+    .normalize('NFKD')\n+    .replace(/[\\u0300-\\u036f]/g, '')\n+    .replace(/[^a-z0-9]+/g, '-')\n+    .replace(/^-+|-+$/g, '')\n }\n"
+  },
+  "mutants": [
+    {
+      "id": "keeps-edge-separators",
+      "description": "Normalizes punctuation but forgets to remove separators at the string edges.",
+      "patch": "diff --git a/src/slugify.mjs b/src/slugify.mjs\n--- a/src/slugify.mjs\n+++ b/src/slugify.mjs\n@@ -1,3 +1,3 @@\n export function slugify(value) {\n-  return value.trim().toLowerCase().replace(/\\s+/, '-')\n+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')\n }\n",
+      "expectedFailedGroups": ["edge-separators", "unicode-folding"]
+    },
+    {
+      "id": "drops-diacritics-letters",
+      "description": "Handles separators and edges but drops accented letters instead of folding them.",
+      "patch": "diff --git a/src/slugify.mjs b/src/slugify.mjs\n--- a/src/slugify.mjs\n+++ b/src/slugify.mjs\n@@ -1,3 +1,6 @@\n export function slugify(value) {\n-  return value.trim().toLowerCase().replace(/\\s+/, '-')\n+  return value\n+    .trim()\n+    .toLowerCase()\n+    .replace(/[^a-z0-9]+/g, '-')\n+    .replace(/^-+|-+$/g, '')\n }\n",
+      "expectedFailedGroups": ["unicode-folding"]
+    }
+  ]
+}

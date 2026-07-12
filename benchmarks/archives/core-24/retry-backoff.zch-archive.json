@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "treeSha256": "4c3b565a2c74d629a277aec177a63f64bbf2bb53188258cce04a22b794b858b0",
+  "files": [
+    {
+      "path": "package.json",
+      "encoding": "utf8",
+      "executable": false,
+      "content": "{\n  \"name\": \"retry-backoff\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": { \"test\": \"node test/public.test.mjs\" }\n}\n"
+    },
+    {
+      "path": "src/retry-delay.mjs",
+      "encoding": "utf8",
+      "executable": false,
+      "content": "export function retryDelay(attempt, baseMs, capMs) {\n  return Math.min(capMs, baseMs * attempt)\n}\n"
+    },
+    {
+      "path": "test/public.test.mjs",
+      "encoding": "utf8",
+      "executable": false,
+      "content": "import assert from 'node:assert/strict'\nimport { retryDelay } from '../src/retry-delay.mjs'\n\nassert.equal(retryDelay(3, 100, 1000), 400)\n"
+    }
+  ]
+}

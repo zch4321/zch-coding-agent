@@ -17,6 +17,7 @@ release
 playwright-report
 test-results
 coverage
+benchmarks/results
 .npm-cache*
 .electron-cache
 *.tsbuildinfo

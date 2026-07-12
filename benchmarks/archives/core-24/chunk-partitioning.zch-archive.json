@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "treeSha256": "f82922304301734eeb3e478392609270dd586584686af5c87f77253db3d755cb",
+  "files": [
+    {
+      "path": "package.json",
+      "encoding": "utf8",
+      "executable": false,
+      "content": "{\n  \"name\": \"chunk-partitioning\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": { \"test\": \"node test/public.test.mjs\" }\n}\n"
+    },
+    {
+      "path": "src/chunk.mjs",
+      "encoding": "utf8",
+      "executable": false,
+      "content": "export function chunk(items, size) {\n  return [items]\n}\n"
+    },
+    {
+      "path": "test/public.test.mjs",
+      "encoding": "utf8",
+      "executable": false,
+      "content": "import assert from 'node:assert/strict'\nimport { chunk } from '../src/chunk.mjs'\n\nassert.deepEqual(chunk([1, 2, 3, 4], 2), [[1, 2], [3, 4]])\n"
+    }
+  ]
+}

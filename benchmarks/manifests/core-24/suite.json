@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "core-24",
+  "revision": "smoke-v1",
+  "title": "Core 24 bootstrap smoke cases",
+  "targetCaseCount": 24,
+  "cases": [
+    {
+      "id": "chunk-partitioning",
+      "manifest": "manifests/core-24/chunk-partitioning.json",
+      "manifestSha256": "b990589f5d98e47b1d7de9384b84a7c02ef3545c4e0774c00e6f63b7045ac8db"
+    },
+    {
+      "id": "retry-backoff",
+      "manifest": "manifests/core-24/retry-backoff.json",
+      "manifestSha256": "a645fcc8e364853cea40df528fdfabe0978c156f088ad8a37a22858cc98f723e"
+    },
+    {
+      "id": "slugify-normalization",
+      "manifest": "manifests/core-24/slugify-normalization.json",
+      "manifestSha256": "6ef8c0d5cab325e907b0fd899a760872e8716ac5906a654e8008fe6b88ca24f1"
+    }
+  ]
+}

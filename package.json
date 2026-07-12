@@ -26,6 +26,7 @@
     "test:ripgrep": "node scripts/ripgrep-smoke.cjs",
     "test:e2e": "npm run build:app && playwright test",
     "test:docker-worker": "node scripts/run-docker-worker-tests.cjs",
+    "test:benchmark-cases": "vitest run benchmarks/cases/cases.test.ts",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
