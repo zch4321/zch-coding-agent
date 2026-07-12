@@ -11,6 +11,7 @@ export default defineConfig({
       input: {
         'provider-proxy': path.resolve('benchmarks/worker/provider-proxy.ts'),
         'fake-provider': path.resolve('benchmarks/worker/fake-provider.ts'),
+        grader: path.resolve('benchmarks/grader/service.ts'),
       },
       output: {
         entryFileNames: '[name].mjs',

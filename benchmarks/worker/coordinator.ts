@@ -222,6 +222,17 @@ export async function runDockerWorker(
     )
     agentCreated = true
     cleanup.agentRemoved = false
+    result.sandbox = {
+      readOnlyRoot: true,
+      nonRoot: true,
+      capabilitiesDropped: true,
+      noNewPrivileges: true,
+      boundedResources: true,
+      controlledMounts: true,
+      dockerSocketAbsent: true,
+      networkPolicyApplied: true,
+      fixedYolo: true,
+    }
     let phaseHandled = false
     const attached = input.benchmarkControl
       ? startAttachedDockerContainer({

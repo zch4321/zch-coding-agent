@@ -1,6 +1,6 @@
 import type {
+  BenchmarkEvaluationResult,
   BenchmarkFeedbackVisibility,
-  NativeEvaluationResult,
 } from './contracts'
 
 const MAX_FEEDBACK_BYTES = 8 * 1024
@@ -15,7 +15,7 @@ const FORBIDDEN_FEEDBACK_TERMS = [
 ]
 
 export function createBenchmarkFeedback(input: {
-  evaluation: NativeEvaluationResult
+  evaluation: BenchmarkEvaluationResult
   visibility: BenchmarkFeedbackVisibility
 }): string {
   const publicPassed = input.evaluation.publicChecks.filter(
@@ -68,18 +68,21 @@ function sanitizeLabel(value: string): string {
     .slice(0, 256)
 }
 
-function publicFailureCategory(evaluation: NativeEvaluationResult): string {
+function publicFailureCategory(evaluation: BenchmarkEvaluationResult): string {
   switch (evaluation.failureCategory) {
     case 'patch_invalid':
       return 'invalid patch'
     case 'setup_failed':
       return 'setup or build failure'
-    case 'public_check_failed':
+    case 'regression_failed':
       return 'public check failure'
     case 'acceptance_failed':
       return 'acceptance failure'
-    case 'grader_failed':
+    case 'infrastructure_failed':
       return 'evaluation failure'
+    case 'scope_violation':
+    case 'patch_hygiene_failed':
+      return 'invalid patch'
     default:
       return 'unresolved task'
   }

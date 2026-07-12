@@ -438,7 +438,7 @@ session.end     { ts }
 - Agent descriptor 只能包含 task、公开检查、修改范围和预算。Private spec 路径、hidden commands、oracle/gold patch、mutants、外部数据集 `fail_to_pass` / `pass_to_pass` 不得进入 descriptor、workspace、Headless config、trace 或 Docker build context。
 - Workspace 必须从固定 archive 向空目录重建；archive path 需要 containment、重复项和 tree hash 校验。准备后的 Git 只保留当前 baseline commit，不得含 remote、tag、reflog、hooks、不可达未来对象或缓存历史。
 - 非 abstain 自建 case 的 baseline 必须失败；abstain/no-change case 的 baseline 与 `no-change` oracle 必须通过。两类 case 的 oracle 都要通过全部公开与私有行为组，且至少两个合理 mutant 必须通过公开检查但被声明的隐藏行为组拒绝。完整准备和评判重复三次，证据签名不一致视为 flaky/invalid。
-- M5.5 native adapter 只运行仓库内受信任的 synthetic fixture；外部 dataset 只能归一化为公开 BenchmarkCase，不能借 adapter 把 evaluator 私有字段带入 Agent 面。正式外部代码执行必须等待隔离 grader/runner。
+- Native test adapter 只运行仓库内受信任的 synthetic fixture，不能产生正式 benchmark 结果；外部 dataset 只能归一化为公开 BenchmarkCase，不能借 adapter 把 evaluator 私有字段带入 Agent 面。外部代码执行还必须提供固定 repository image和专用官方 evaluator adapter。
 
 ### 5.7 Benchmark runner protocol
 
@@ -448,6 +448,15 @@ session.end     { ts }
 - Trial 结果必须分别记录 `resolvedInitial`、`resolvedAfterFeedback`、`recovered`、首轮指标、修复阶段增量指标和累计指标。修复成功不得回填首次通过；`pass@k` 必须是 k 个独立 pristine trial，不得复用 session、container、workspace、credential token 或 Provider continuation。
 - Resume 只允许复用 identity 一致、带 complete marker 且整棵 artifact checksum 一致的 immutable trial。`.incomplete-*` staging 不计入样本也不复用；已有 final artifact 缺失、被篡改或 identity 不同必须拒绝覆盖。
 - Runner 完成前必须删除 Agent workspace、扫描 artifacts 是否含真实 Provider credential，并保存零命中报告。凭据命中时必须删除该 staging；patch、trace、JSONL、stderr 和 worker cleanup evidence均保留在独立 trial artifact 中。
+
+### 5.8 Isolated grader and scoring
+
+- 正式 grader 必须运行在与 Agent 分离的 container，使用 `network=none`、非 root、只读 rootfs、drop all capabilities、no-new-privileges、PID/CPU/内存/tmpfs/wall limits。只允许挂载干净 evaluator workspace、只读 private input 和独立 output；Docker socket、Agent artifacts、Provider credential 和宿主 home不得出现。
+- 宿主从冻结 archive重建 workspace并应用 patch；private spec只序列化到一次性只读 grader input，不进入 Agent image/workspace/config/trace。Grader output必须校验 schema、case/input/image identity及完整命令计划，input执行前后 hash必须一致。
+- 结果状态固定区分 `unsupported`、`invalid`、`attempted` 和 `graded`。Docker/capability/image/grader/coordinator故障归为 unsupported/invalid；Agent patch不能应用、越过 modification scope或违反 diff hygiene归为 attempted，不得混入 deterministic graded样本。
+- 硬门禁至少覆盖 patch apply/scope/hygiene、Agent execution boundary、Headless result、runtime image identity、worker/grader cleanup、credential scan、grader sandbox/input immutability/completion。任一 infrastructure gate失败时，即使功能检查通过也不得 resolved。
+- 完成等级固定为 L0 无有效改动、L1 合法 patch、L2 setup/build/static通过、L3公开回归通过、L4至少一个行为组通过、L5全部 critical行为组与回归门禁通过。Partial correctness按 acceptance group做 macro-average，单组增加测试数量不得改变组权重。
+- 可分享 `evaluation.json` 只能包含公开检查、行为组聚合、失败类别、硬门禁和 grader identity。Private check id/command、命令 stdout/stderr和 grader input只能存在于本地 restricted artifact或完全省略；命令输出默认只保存 hash。
 
 ---
 

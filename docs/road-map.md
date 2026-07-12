@@ -2,7 +2,7 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、BenchmarkCase v1/native adapter/3 项 core smoke，以及 strict/repair-once benchmark runner 已经落地。下一阶段继续推进隔离 grader、分级评分和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、BenchmarkCase v1/native adapter/3 项 core smoke、strict/repair-once runner，以及隔离 grader、硬门禁和 L0–L5 评分已经落地。下一阶段继续推进 trace/usage/cost 比较和正式 benchmark 命令面，再用真实任务信号指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
 
 ## 0. 未完成概览
 
@@ -18,22 +18,6 @@
 目标：先建立独立于 renderer、IPC、`npm test` 和 `npm run test:e2e` 的真实 coding-agent benchmark。Electron 与 Headless 必须调用同一份 Agent Runtime；Linux Docker 只替换宿主交互和部署方式，不得复制 Prompt Harness、工具注册、Provider loop、权限、compact、Skills、MCP 或 trace 实现。
 
 M5 保留原编号以维持已有文档和历史引用，但从本阶段起提前为首要里程碑。它首先评估 harness 工程本身，不把 Electron UI 性能混入 coding correctness；UI/IPC 继续由 E2E 覆盖，并通过 parity 测试证明两个宿主没有语义漂移。
-
-### 5.7 分级评分与硬门禁
-
-- 先区分 `invalid`、`unsupported`、`attempted` 和 `graded`。环境、镜像、grader 或 coordinator 故障记为 invalid/unsupported，不混入模型失败率。
-- 硬门禁包括：run 未越权、patch 可应用、无 workspace 外写入、无密钥泄漏、权限未绕过、grader 未被修改、资源预算未被规避。违反后即使功能测试通过也不能 resolved。
-- 完成级别固定为：L0 无有效改动；L1 patch 合法可应用；L2 build/type/static 通过；L3 原有回归通过；L4 部分 acceptance groups 通过；L5 所有关键功能组与回归门禁通过。
-- partial correctness 按 manifest 中行为组做 macro-average，不直接按测试函数或断言数量平均。关键组必须全部通过才可 L5；grader 输出每组证据和失败类别。
-- 外部官方数据集保留其官方 binary evaluator 为主结果；本地多级评分只作为诊断，不宣称替代官方 leaderboard 协议。
-- LLM reviewer 只允许用于失败分类、可维护性注释或人工审核辅助，不能覆盖 deterministic grader，也不能单独决定 resolved。
-
-验收：
-
-- no-op、build-only、破坏回归、只完成部分行为和完整修复分别落入预期等级。
-- 改变单个测试数量不会改变行为组权重。
-- grader 自身错误能从 Agent 失败中分离，并保留可重放证据。
-- 每个 resolved 结果都能追溯到 case revision、patch hash、grader digest 和逐组结果。
 
 ### 5.8 Trace、工具、Token、成本与比较
 
@@ -105,16 +89,15 @@ benchmarks/
 
 ### 5.10 按提交粒度的实施顺序
 
-| 步骤  | 具体实现                                            | 完成标志                        |
-| ----- | --------------------------------------------------- | ------------------------------- |
-| M5.7  | 实现隔离 grader、L0-L5、硬门禁和 artifact/redaction | 评分回归与泄漏测试通过          |
-| M5.8  | 补 tool attempt、usage/cost/paired comparison       | 指标 golden tests 通过          |
-| M5.9  | 接入 smoke/日常/full 命令和分层 artifacts           | 完整 vertical slice 通过        |
-| M5.10 | 扩展到 12/24 个 core case                           | `benchmark` 可产出稳定 A/B 报告 |
-| M5.11 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查        | Linux worker 跑通冻结 revision  |
-| M5.12 | 增加 SWE-bench compatibility 与高成本 full adapter  | 不影响主套件且保持 opt-in       |
+| 步骤  | 具体实现                                           | 完成标志                        |
+| ----- | -------------------------------------------------- | ------------------------------- |
+| M5.8  | 补 tool attempt、usage/cost/paired comparison      | 指标 golden tests 通过          |
+| M5.9  | 接入 smoke/日常/full 命令和分层 artifacts          | 完整 vertical slice 通过        |
+| M5.10 | 扩展到 12/24 个 core case                          | `benchmark` 可产出稳定 A/B 报告 |
+| M5.11 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查       | Linux worker 跑通冻结 revision  |
+| M5.12 | 增加 SWE-bench compatibility 与高成本 full adapter | 不影响主套件且保持 opt-in       |
 
-单一 Runtime、固定 Yolo Headless host、runtime identity、Electron/Headless parity、受限 Linux Docker worker、3 项冻结 native smoke case 和 strict/repair-once runner 已经落地；M5.7–M5.9 完成后构成第一个带隔离分级评分和正式命令面的 Docker benchmark vertical slice，不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
+单一 Runtime、固定 Yolo Headless host、runtime identity、Electron/Headless parity、受限 Linux Docker worker、3 项冻结 native smoke case、strict/repair-once runner、隔离 grader 和 L0–L5 评分已经落地；M5.8–M5.9 完成后补齐可比较指标与正式命令面，不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
 
 总体验收：
 

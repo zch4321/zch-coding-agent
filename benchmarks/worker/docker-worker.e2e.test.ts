@@ -12,6 +12,13 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { HeadlessConfig } from '../../electron/headless/contracts'
+import { loadNativeBenchmarkSuite } from '../adapters/native'
+import type { LoadedBenchmarkCase } from '../cases/contracts'
+import { loadPrivateCaseSpec } from '../cases/loader'
+import { runIsolatedGrader } from '../grader/coordinator'
+import { scoreIsolatedGrader } from '../grader/scoring'
+import { runBenchmarkTrials } from '../runner/runner'
+import { inspectWorkerImage } from './capabilities'
 import { runDockerWorker } from './coordinator'
 import { runDockerCommand } from './docker-client'
 
@@ -66,6 +73,9 @@ describe.skipIf(!enabled)('Linux Docker worker', () => {
     expect(result.image?.sourceCommit).toBe(sourceCommit)
     expect(result.image?.platform).toBe('linux-x64')
     expect(result.image?.libc).toBe('glibc')
+    expect(result.sandbox && Object.values(result.sandbox).every(Boolean)).toBe(
+      true,
+    )
     expect(result.cleanup).toEqual({
       agentRemoved: true,
       proxyRemoved: true,
@@ -133,6 +143,137 @@ describe.skipIf(!enabled)('Linux Docker worker', () => {
     await expectNoWorkerResources()
   }, 90_000)
 
+  it('runs hidden checks in a separate restricted grader container', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'grader-e2e-'))
+    temporaryDirectories.push(root)
+    const suite = await loadNativeBenchmarkSuite({
+      benchmarkRoot: path.resolve('benchmarks'),
+      suiteFile: 'manifests/core-24/suite.json',
+    })
+    const loadedCase = suite.cases.find(
+      (candidate) => candidate.manifest.id === 'slugify-normalization',
+    )!
+    const privateSpec = await loadPrivateCaseSpec(loadedCase)
+    if (privateSpec.oracle.kind !== 'patch') throw new Error('patch expected')
+    const slowCase: LoadedBenchmarkCase = {
+      ...loadedCase,
+      manifest: {
+        ...loadedCase.manifest,
+        setup: [
+          {
+            executable: 'node',
+            args: ['-e', 'setTimeout(() => {}, 2000)'],
+            timeoutMs: 5_000,
+            maxOutputBytes: 65_536,
+          },
+        ],
+      },
+    }
+    const identity = await inspectWorkerImage(image, sourceCommit)
+    const running = runIsolatedGrader({
+      loadedCase: slowCase,
+      patch: privateSpec.oracle.patch,
+      image,
+      expectedImageDigest: identity.digest,
+      expectedSourceCommit: sourceCommit,
+      artifactsDirectory: path.join(root, 'artifacts'),
+    })
+    const graderName = await waitForContainer('zch-grader-')
+    const inspection = await inspectContainer(graderName)
+    expect(inspection.HostConfig.ReadonlyRootfs).toBe(true)
+    expect(inspection.HostConfig.CapDrop).toContain('ALL')
+    expect(inspection.HostConfig.SecurityOpt).toContain('no-new-privileges')
+    expect(inspection.HostConfig.NetworkMode).toBe('none')
+    expect(inspection.Config.User).toBe('10001:10001')
+    expect(
+      inspection.Mounts.map((mount) => ({
+        destination: mount.Destination,
+        readWrite: mount.RW,
+      })).sort((left, right) =>
+        left.destination.localeCompare(right.destination),
+      ),
+    ).toEqual([
+      { destination: '/grader/input', readWrite: false },
+      { destination: '/grader/output', readWrite: true },
+      { destination: '/workspace', readWrite: true },
+    ])
+    expect(JSON.stringify(inspection.Mounts)).not.toMatch(/docker\.sock/iu)
+
+    const grader = await running
+    const evaluation = scoreIsolatedGrader({ loadedCase: slowCase, grader })
+    expect(grader.status).toBe('completed')
+    expect(grader.cleanup).toEqual({
+      containerRemoved: true,
+      privateDirectoryRemoved: true,
+    })
+    expect(evaluation.level).toBe('L5')
+    expect(evaluation.resolved).toBe(true)
+    const rawReport = await readFile(grader.artifacts.rawReportPath!, 'utf8')
+    expect(rawReport).not.toContain('assert.equal')
+    expect(rawReport).not.toContain('Café déjà')
+    await expectNoWorkerResources()
+  }, 90_000)
+
+  it('grades a complete strict runner trial without exposing private input to Agent', async () => {
+    const fixture = await createFixture('slug')
+    const suite = await loadNativeBenchmarkSuite({
+      benchmarkRoot: path.resolve('benchmarks'),
+      suiteFile: 'manifests/core-24/suite.json',
+    })
+    const loadedCase = suite.cases.find(
+      (candidate) => candidate.manifest.id === 'slugify-normalization',
+    )!
+    const outputDirectory = path.join(
+      path.dirname(fixture.workspace),
+      'runner-output',
+    )
+    const run = await runBenchmarkTrials({
+      loadedCase,
+      suiteIdentitySha256: suite.suiteIdentitySha256,
+      image,
+      expectedSourceCommit: sourceCommit,
+      config: config(fixture.providerBaseURL),
+      credential: {
+        mode: 'proxy',
+        upstreamCredential: fixture.upstreamSecret,
+        allowExternalNetwork: true,
+      },
+      outputDirectory,
+      protocol: 'strict',
+    })
+
+    const trial = run.trials[0]!
+    expect(trial.result.workerStatus).toBe('completed')
+    expect(trial.result.initial.evaluation.status).toBe('graded')
+    expect(trial.result.initial.evaluation.level).toBe('L5')
+    expect(trial.result.resolvedInitial).toBe(true)
+    const headless = JSON.parse(
+      await readFile(
+        path.join(trial.directory, 'worker', 'result.json'),
+        'utf8',
+      ),
+    ) as { sessionId: string }
+    const trace = await readFile(
+      path.join(
+        trial.directory,
+        'worker',
+        'runtime',
+        'traces',
+        `${headless.sessionId}.jsonl`,
+      ),
+      'utf8',
+    )
+    expect(trace).not.toContain('Café déjà')
+    expect(trace).not.toContain('edge-separators')
+    expect(
+      await readFile(
+        path.join(trial.directory, 'attempts', 'initial', 'redaction.json'),
+        'utf8',
+      ),
+    ).toContain('privateCheckIds')
+    await expectNoWorkerResources()
+  }, 120_000)
+
   it('enforces the sandbox and removes resources after a forced timeout', async () => {
     const fixture = await createFixture('hang')
     const running = runDockerWorker({
@@ -186,7 +327,7 @@ describe.skipIf(!enabled)('Linux Docker worker', () => {
   }, 30_000)
 })
 
-async function createFixture(mode: 'patch' | 'hang'): Promise<{
+async function createFixture(mode: 'patch' | 'hang' | 'slug'): Promise<{
   workspace: string
   artifacts: string
   providerBaseURL: string
@@ -271,12 +412,16 @@ function config(baseURL: string): HeadlessConfig {
 }
 
 async function waitForAgentContainer(): Promise<string> {
+  return await waitForContainer('zch-agent-')
+}
+
+async function waitForContainer(prefix: string): Promise<string> {
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
     const result = await runDockerCommand([
       'ps',
       '--filter',
-      'name=^/zch-agent-',
+      `name=^/${prefix}`,
       '--format',
       '{{.Names}}',
     ])
@@ -284,7 +429,7 @@ async function waitForAgentContainer(): Promise<string> {
     if (name) return name
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
-  throw new Error('Timed out waiting for the Agent container')
+  throw new Error(`Timed out waiting for container: ${prefix}`)
 }
 
 async function inspectContainer(name: string): Promise<{
@@ -296,8 +441,8 @@ async function inspectContainer(name: string): Promise<{
     SecurityOpt: string[]
     NetworkMode: string
   }
-  Mounts: Array<{ Destination: string }>
-  Config: { Env: string[] }
+  Mounts: Array<{ Destination: string; RW: boolean }>
+  Config: { Env: string[]; User: string }
 }> {
   const result = await runDockerCommand(['inspect', name])
   return JSON.parse(result.stdout)[0]
@@ -334,7 +479,7 @@ async function expectNoWorkerResources(): Promise<void> {
     'ps',
     '--all',
     '--filter',
-    'name=^/zch-(agent|proxy)-',
+    'name=^/zch-(agent|proxy|grader)-',
     '--format',
     '{{.Names}}',
   ])
@@ -355,7 +500,7 @@ async function cleanupWorkerResources(): Promise<void> {
     'ps',
     '--all',
     '--filter',
-    'name=^/zch-(agent|proxy)-',
+    'name=^/zch-(agent|proxy|grader)-',
     '--format',
     '{{.Names}}',
   ])

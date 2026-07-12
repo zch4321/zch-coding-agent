@@ -23,6 +23,9 @@ case "$command_name" in
   fake-provider)
     exec node /opt/zch/fake-provider.mjs "$@"
     ;;
+  grader)
+    exec node /opt/zch/grader.mjs "$@"
+    ;;
   *)
     echo "Unknown worker command: $command_name" >&2
     exit 64

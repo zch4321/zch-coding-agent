@@ -13,6 +13,7 @@ import {
 import type { LoadedBenchmarkCase, PrivateCaseSpec } from '../cases/contracts'
 import { loadPrivateCaseSpec } from '../cases/loader'
 import { runGit } from '../cases/process'
+import { runTrustedNativeTestGrader } from '../grader/native-test-adapter'
 import type {
   DockerWorkerResult,
   DockerWorkerRunInput,
@@ -45,7 +46,7 @@ afterEach(async () => {
   )
 })
 
-describe('benchmark runner', () => {
+describe('benchmark runner', { timeout: 15_000 }, () => {
   it('keeps strict evaluation hidden and preserves resolved_initial', async () => {
     const outputDirectory = await temporaryDirectory()
     let calls = 0
@@ -125,6 +126,35 @@ describe('benchmark runner', () => {
     expect(result.recovered).toBe(true)
     expect(result.afterFeedback?.incrementalMetrics?.usage.totalTokens).toBe(6)
     expect(result.afterFeedback?.cumulativeMetrics?.usage.totalTokens).toBe(16)
+  }, 15_000)
+
+  it('does not turn grader infrastructure failure into model feedback', async () => {
+    const outputDirectory = await temporaryDirectory()
+    let decisionAction = ''
+    const worker: DockerWorkerRunner = async (input) => {
+      const decision = await input.benchmarkControl!.onPhaseReady({
+        status: 'completed',
+        sessionId: 'grader-failure' as HeadlessResult['sessionId'],
+        runIds: ['grader-failure-run' as HeadlessResult['runIds'][number]],
+        usage: usage(1),
+        tools: { proposed: 0, completed: 0, failed: 0 },
+      })
+      decisionAction = decision.action
+      return workerResult(input, 'grader-failure-worker')
+    }
+    const request = baseInput(outputDirectory, worker)
+    const run = await runBenchmarkTrials({
+      ...request,
+      protocol: 'repair-once',
+      graderRunner: async () => {
+        throw new Error('simulated grader crash')
+      },
+    })
+
+    expect(decisionAction).toBe('finish')
+    expect(run.trials[0]!.result.repairAttempted).toBe(false)
+    expect(run.trials[0]!.result.initial.evaluation.status).toBe('invalid')
+    expect(run.trials[0]!.result.initial.evaluation.resolved).toBe(false)
   })
 
   it('starts pass@k trials pristine and safely reuses only complete artifacts', async () => {
@@ -233,6 +263,50 @@ describe('benchmark runner', () => {
     ).rejects.toThrow('credential leaked')
     expect(await readdir(outputDirectory)).toEqual([])
   })
+
+  it('does not resolve an L5 patch when worker cleanup evidence fails', async () => {
+    const outputDirectory = await temporaryDirectory()
+    const worker: DockerWorkerRunner = async (input) => {
+      if (privateSpec.oracle.kind !== 'patch') throw new Error('patch expected')
+      await applyPatch(input.workspaceDirectory, privateSpec.oracle.patch)
+      const result = workerResult(input, 'cleanup-failure-worker')
+      result.cleanup.networkRemoved = false
+      return result
+    }
+    const run = await runBenchmarkTrials(baseInput(outputDirectory, worker))
+    const evaluation = run.trials[0]!.result.initial.evaluation
+
+    expect(evaluation.level).toBe('L5')
+    expect(evaluation.status).toBe('invalid')
+    expect(evaluation.resolved).toBe(false)
+    expect(
+      evaluation.hardGates.find((gate) => gate.id === 'worker_cleanup')?.passed,
+    ).toBe(false)
+  })
+
+  it('preserves worker unsupported status without launching a grader', async () => {
+    const outputDirectory = await temporaryDirectory()
+    let graderCalls = 0
+    const worker: DockerWorkerRunner = async (input) => {
+      const result = workerResult(input, 'unsupported-worker')
+      result.status = 'unsupported'
+      return result
+    }
+    const request = baseInput(outputDirectory, worker)
+    const run = await runBenchmarkTrials({
+      ...request,
+      graderRunner: async (input) => {
+        graderCalls += 1
+        return await runTrustedNativeTestGrader(input)
+      },
+    })
+
+    expect(graderCalls).toBe(0)
+    expect(run.trials[0]!.result.initial.evaluation.status).toBe('unsupported')
+    expect(run.trials[0]!.result.initial.evaluation.failureCategory).toBe(
+      'unsupported',
+    )
+  })
 })
 
 describe('benchmark feedback', () => {
@@ -240,11 +314,14 @@ describe('benchmark feedback', () => {
     const feedback = createBenchmarkFeedback({
       visibility: 'diagnostic',
       evaluation: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         status: 'graded',
         resolved: false,
+        level: 'L4',
+        groupMacroScore: 0,
         patchSha256: 'a'.repeat(64),
         failureCategory: 'acceptance_failed',
+        hardGates: [],
         publicChecks: [],
         groups: [
           {
@@ -254,8 +331,22 @@ describe('benchmark feedback', () => {
             passed: false,
             publicPassed: true,
             privatePassed: false,
+            weight: 1,
+            evidence: {
+              public: { passed: 0, total: 0, failureCategories: [] },
+              private: {
+                passed: 0,
+                total: 1,
+                failureCategories: ['exit_nonzero'],
+              },
+            },
           },
         ],
+        grader: {
+          revision: 'isolated-grader-v1',
+          imageDigest: 'sha256:test',
+          inputSha256: 'b'.repeat(64),
+        },
       },
     })
     expect(feedback).toContain('Published behavior group')
@@ -273,6 +364,7 @@ function baseInput(outputDirectory: string, workerRunner: DockerWorkerRunner) {
     credential: { mode: 'direct' as const, credential: 'ephemeral-secret' },
     outputDirectory,
     workerRunner,
+    graderRunner: runTrustedNativeTestGrader,
   }
 }
 

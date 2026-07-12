@@ -147,11 +147,19 @@ Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 
 
 ### 3.5 Benchmark runner 与 repair control
 
-`benchmarks/runner/runner.ts` 编排 trial，但不实现第二份 Agent loop。默认 `strict` 在 Headless container 完成后收集 Git patch，再由宿主可信 native evaluator 从冻结 archive 创建新 workspace、应用 patch并运行公开/私有检查。容器只挂载 Agent workspace 和自身 artifacts，private spec 与 evaluator workspace始终留在宿主侧；评判结果只保存检查结论，不保存私有命令 stdout/stderr。
+`benchmarks/runner/runner.ts` 编排 trial，但不实现第二份 Agent loop。默认 `strict` 在 Headless container 完成后收集 Git patch，再调用独立 grader coordinator；repair-once的首评和终评也走同一 grader协议。Agent container只挂载自己的 workspace和 artifacts，private spec与 evaluator workspace始终留在 grader边界。
 
 `repair-once` 通过固定的 `benchmark.phase_ready` JSONL 事件和 `docker start --attach --interactive` stdin 决策通道协调。runner 首评失败后只返回一次经过清洗的 public/diagnostic feedback；Headless 用同一个 `SessionManager` 追加 `<benchmark_feedback>` harness message并启动一个 repair run，因此该消息在 trace 中是 orchestrator message，不伪装成 user message。无论首评还是终评，grader 都使用新准备的 workspace。
 
-每个 pass@k trial 都创建独立 workspace、container、proxy token 和 artifact staging。runner 在 resume 前解析当前 OCI image digest并把它纳入 trial identity；final trial 通过目录级 checksum和 identity hash封存。Resume 只读 complete final，不恢复 workspace、container 或 Provider continuation，遗留 `.incomplete-*` 仅作未完成证据。完成前删除 workspace并扫描所有 artifacts中的真实 Provider credential，命中时删除 staging。M5.7 再把当前可信 native evaluator扩展为正式隔离 grader、硬门禁和 L0–L5 评分。
+每个 pass@k trial 都创建独立 workspace、container、proxy token 和 artifact staging。runner 在 resume 前解析当前 OCI image digest并把它和 grader revision/digest纳入 trial identity；final trial 通过目录级 checksum和 identity hash封存。Resume 只读 complete final，不恢复 workspace、container 或 Provider continuation，遗留 `.incomplete-*` 仅作未完成证据。完成前删除 workspace并扫描所有 artifacts中的真实 Provider credential，命中时删除 staging。
+
+### 3.6 Isolated grader 与分级评分
+
+`benchmarks/grader/coordinator.ts` 从冻结 archive创建一次性 workspace并执行 patch apply、modification scope和 `git diff --check` preflight；通过后才启动独立 grader container。Container固定使用 `network=none`、UID/GID 10001、只读 rootfs、`cap-drop=ALL`、no-new-privileges和资源限制，只挂载 evaluator workspace、只读 private input及 output。Private input执行前后校验 hash，output校验 TypeBox schema、case/input/image identity和逐项命令计划，所有 container与临时目录在终态清理。
+
+`benchmarks/grader/service.ts` 在 container内顺序执行 setup、public和private命令。原始 stdout/stderr不写入 report，只保存 bounded执行状态、失败类别和内容 hash。Restricted report保留私有 check ID用于本地复核；shareable `evaluation.json` 只暴露公开检查与 acceptance-group聚合，并由 `redaction.json` 声明省略字段。
+
+`benchmarks/grader/scoring.ts` 区分 unsupported、invalid、attempted和 graded，先应用 patch、sandbox、identity、cleanup、credential等硬门禁，再计算 L0–L5。L4/L5按 manifest行为组而非测试数量计算，`groupMacroScore`对组做宏平均；全部 critical组与公开回归通过才可 L5，且任何硬门禁失败都不能 resolved。仓库内 native evaluator仅保留为 deterministic单元测试 adapter，不再产生正式 runner结果。
 
 ---
 
@@ -549,7 +557,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 
 ## 19. 当前限制
 
-- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI、host parity、Linux OCI worker、BenchmarkCase v1 与 strict/repair-once runner 已实现，但 grader 仍是宿主可信进程中的 synthetic native adapter，尚未完成独立 container隔离、硬门禁和 L0–L5 评分。
+- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。当前隔离 grader只支持仓库冻结的 Node 24 synthetic case；外部 repository image兼容、官方 binary evaluator和跨语言依赖环境仍属于 M5.10–M5.12。
 - Provider 层当前是 OpenAI-compatible/DeepSeek 为主，没有多厂商完整矩阵。
 - Code intelligence backend 当前实际实现为 Serena MCP 只读 adapter，rename/edit capability 只在 schema 中预留。
 - 插件系统只有事件总线和 hook 点，没有本地 JS 插件加载器。

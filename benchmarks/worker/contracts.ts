@@ -95,6 +95,18 @@ export interface DockerWorkerCleanup {
   secretsRemoved: boolean
 }
 
+export interface DockerWorkerSandboxEvidence {
+  readOnlyRoot: boolean
+  nonRoot: boolean
+  capabilitiesDropped: boolean
+  noNewPrivileges: boolean
+  boundedResources: boolean
+  controlledMounts: boolean
+  dockerSocketAbsent: boolean
+  networkPolicyApplied: boolean
+  fixedYolo: boolean
+}
+
 export interface DockerWorkerResult {
   schemaVersion: typeof DOCKER_WORKER_SCHEMA_VERSION
   runId: string
@@ -104,6 +116,7 @@ export interface DockerWorkerResult {
   durationMs: number
   capability?: DockerWorkerCapability
   image?: DockerWorkerImageIdentity
+  sandbox?: DockerWorkerSandboxEvidence
   containerName?: string
   proxyContainerName?: string
   networkName?: string

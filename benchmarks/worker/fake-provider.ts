@@ -35,12 +35,7 @@ export async function runFakeProvider(
       'content-type': 'text/event-stream; charset=utf-8',
     })
     const payload =
-      mode === 'patch' && requestCount === 1
-        ? toolCall('docker-smoke-tool', 'apply_patch', {
-            path: 'note.txt',
-            patch: '@@ -1 +1 @@\n-before\n+after',
-          })
-        : textDelta('Docker worker completed.')
+      firstToolCall(mode, requestCount) ?? textDelta('Docker worker completed.')
     response.write(`data: ${JSON.stringify(payload)}\n\n`)
     response.write('data: [DONE]\n\n')
     response.end()
@@ -57,6 +52,24 @@ export async function runFakeProvider(
   }
   process.once('SIGINT', close)
   process.once('SIGTERM', close)
+}
+
+function firstToolCall(mode: string, requestCount: number) {
+  if (requestCount !== 1) return undefined
+  if (mode === 'patch') {
+    return toolCall('docker-smoke-tool', 'apply_patch', {
+      path: 'note.txt',
+      patch: '@@ -1 +1 @@\n-before\n+after',
+    })
+  }
+  if (mode === 'slug') {
+    return toolCall('docker-benchmark-tool', 'apply_patch', {
+      path: 'src/slugify.mjs',
+      patch:
+        "@@ -1,3 +1,8 @@\n export function slugify(value) {\n-  return value.trim().toLowerCase().replace(/\\s+/, '-')\n+  return value\n+    .trim()\n+    .toLowerCase()\n+    .normalize('NFKD')\n+    .replace(/[\\u0300-\\u036f]/g, '')\n+    .replace(/[^a-z0-9]+/g, '-')\n+    .replace(/^-+|-+$/g, '')\n }",
+    })
+  }
+  return undefined
 }
 
 function toolCall(id: string, name: string, args: Record<string, string>) {

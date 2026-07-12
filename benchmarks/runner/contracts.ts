@@ -3,6 +3,7 @@ import type {
   HeadlessResult,
 } from '../../electron/headless/contracts'
 import type { LoadedBenchmarkCase } from '../cases/contracts'
+import type { IsolatedGraderRunner } from '../grader/coordinator'
 import type {
   DockerWorkerCredential,
   DockerWorkerResult,
@@ -28,6 +29,66 @@ export interface BenchmarkGroupOutcome {
   passed: boolean
   publicPassed: boolean
   privatePassed: boolean
+}
+
+export interface BenchmarkHardGate {
+  id:
+    | 'patch_applies'
+    | 'modification_scope'
+    | 'patch_hygiene'
+    | 'agent_execution_boundary'
+    | 'agent_result_valid'
+    | 'runtime_identity'
+    | 'worker_cleanup'
+    | 'credential_clean'
+    | 'grader_sandbox'
+    | 'grader_input_immutable'
+    | 'grader_completed'
+    | 'grader_cleanup'
+  passed: boolean
+  owner: 'agent' | 'infrastructure'
+}
+
+export interface BenchmarkEvaluationResult {
+  schemaVersion: 2
+  status: 'unsupported' | 'invalid' | 'attempted' | 'graded'
+  resolved: boolean
+  level: 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5'
+  groupMacroScore: number
+  patchSha256: string
+  failureCategory:
+    | 'none'
+    | 'unsupported'
+    | 'no_change'
+    | 'patch_invalid'
+    | 'scope_violation'
+    | 'patch_hygiene_failed'
+    | 'setup_failed'
+    | 'regression_failed'
+    | 'acceptance_failed'
+    | 'hard_gate_failed'
+    | 'infrastructure_failed'
+  hardGates: BenchmarkHardGate[]
+  publicChecks: BenchmarkCheckOutcome[]
+  groups: Array<
+    BenchmarkGroupOutcome & {
+      weight: number
+      evidence: {
+        public: {
+          passed: number
+          total: number
+          failureCategories: string[]
+        }
+        private: {
+          passed: number
+          total: number
+          failureCategories: string[]
+        }
+      }
+    }
+  >
+  grader: { revision: string; imageDigest: string; inputSha256: string }
+  error?: { code: string; message: string }
 }
 
 export interface NativeEvaluationResult {
@@ -61,6 +122,8 @@ export interface BenchmarkTrialIdentity {
   caseIdentity: LoadedBenchmarkCase['identity']
   runtimeImage: string
   runtimeImageDigest: string
+  graderRevision: string
+  graderImageDigest: string
   expectedSourceCommit?: string
   headlessConfigSha256: string
   protocol: BenchmarkRunnerProtocol
@@ -77,11 +140,11 @@ export interface BenchmarkTrialResult {
   workerStatus: DockerWorkerResult['status']
   sessionId?: string
   initial: {
-    evaluation: NativeEvaluationResult
+    evaluation: BenchmarkEvaluationResult
     metrics?: BenchmarkMetricSnapshot
   }
   afterFeedback?: {
-    evaluation: NativeEvaluationResult
+    evaluation: BenchmarkEvaluationResult
     incrementalMetrics?: BenchmarkMetricSnapshot
     cumulativeMetrics?: BenchmarkMetricSnapshot
   }
@@ -120,4 +183,5 @@ export interface RunBenchmarkTrialsInput {
   feedbackVisibility?: BenchmarkFeedbackVisibility
   signal?: AbortSignal
   workerRunner?: DockerWorkerRunner
+  graderRunner?: IsolatedGraderRunner
 }

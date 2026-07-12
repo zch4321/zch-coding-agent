@@ -29,6 +29,7 @@ WORKDIR /opt/zch
 COPY --from=build /src/dist-headless/zch-agent-headless.mjs ./
 COPY --from=build /src/dist-worker/provider-proxy.mjs ./
 COPY --from=build /src/dist-worker/fake-provider.mjs ./
+COPY --from=build /src/dist-worker/grader.mjs ./
 COPY --from=build /src/resources/prompts ./resources/prompts
 COPY --from=build /src/node_modules ./node_modules
 COPY --chmod=0555 benchmarks/docker/entrypoint.sh /usr/local/bin/zch-worker

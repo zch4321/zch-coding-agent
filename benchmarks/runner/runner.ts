@@ -17,20 +17,31 @@ import {
 import { compileSchema } from '../../electron/schema-validator'
 import { sha256Bytes } from '../cases/hash'
 import { prepareBenchmarkWorkspace } from '../cases/prepare'
+import {
+  ISOLATED_GRADER_REVISION,
+  type IsolatedGraderRunResult,
+} from '../grader/contracts'
+import {
+  runIsolatedGrader,
+  type IsolatedGraderRunner,
+} from '../grader/coordinator'
+import { scoreIsolatedGrader } from '../grader/scoring'
 import { inspectWorkerImage } from '../worker/capabilities'
 import { runDockerWorker } from '../worker/coordinator'
 import type { DockerWorkerRunInput } from '../worker/contracts'
 import type {
   BenchmarkFeedbackVisibility,
+  BenchmarkEvaluationResult,
+  BenchmarkHardGate,
   BenchmarkMetricSnapshot,
   BenchmarkTrialIdentity,
   BenchmarkTrialResult,
   BenchmarkTrialsResult,
-  NativeEvaluationResult,
+  DockerWorkerRunner,
   RunBenchmarkTrialsInput,
 } from './contracts'
 import { createBenchmarkFeedback } from './feedback'
-import { collectBenchmarkPatch, evaluateNativePatch } from './native-evaluator'
+import { collectBenchmarkPatch } from './native-evaluator'
 
 const MAX_TRIALS = 100
 const MAX_RESULT_BYTES = 2 * 1024 * 1024
@@ -39,7 +50,9 @@ const validateHeadlessResult = compileSchema(HeadlessResultSchema)
 
 interface AttemptCapture {
   patch: string
-  evaluation: NativeEvaluationResult
+  grader: IsolatedGraderRunResult
+  evaluation: BenchmarkEvaluationResult
+  directory: string
 }
 
 interface CompleteMarker {
@@ -157,8 +170,17 @@ async function runTrial(input: {
           loadedCase: input.input.loadedCase,
           workspace,
           directory: path.join(attemptsDirectory, 'initial'),
+          image: input.input.image,
+          imageDigest: input.runtimeImageDigest,
+          expectedSourceCommit: input.input.expectedSourceCommit,
+          signal: input.input.signal,
+          graderRunner: input.input.graderRunner ?? runIsolatedGrader,
         })
-        if (initial.evaluation.resolved) {
+        if (
+          initial.evaluation.resolved ||
+          initial.evaluation.status === 'invalid' ||
+          initial.evaluation.status === 'unsupported'
+        ) {
           return { schemaVersion: 1, action: 'finish' }
         }
         repairAttempted = true
@@ -186,6 +208,17 @@ async function runTrial(input: {
       loadedCase: input.input.loadedCase,
       workspace,
       directory: path.join(attemptsDirectory, 'initial'),
+      image: input.input.image,
+      imageDigest: input.runtimeImageDigest,
+      expectedSourceCommit: input.input.expectedSourceCommit,
+      signal: input.input.signal,
+      graderRunner: input.input.graderRunner ?? runIsolatedGrader,
+      skipGraderStatus:
+        worker.status === 'unsupported'
+          ? 'unsupported'
+          : worker.status === 'invalid'
+            ? 'invalid'
+            : undefined,
     })
   }
   const headless = await readHeadlessResult(workerArtifacts)
@@ -198,7 +231,23 @@ async function runTrial(input: {
       loadedCase: input.input.loadedCase,
       workspace,
       directory: path.join(attemptsDirectory, 'after-feedback'),
+      image: input.input.image,
+      imageDigest: input.runtimeImageDigest,
+      expectedSourceCommit: input.input.expectedSourceCommit,
+      signal: input.input.signal,
+      graderRunner: input.input.graderRunner ?? runIsolatedGrader,
     })
+  }
+
+  const trialGates = createTrialGates({
+    worker,
+    headless,
+    expectedImageDigest: input.runtimeImageDigest,
+    trustedTestWorker: Boolean(input.input.workerRunner),
+  })
+  await finalizeAttempt(initial, input.input.loadedCase, trialGates)
+  if (afterFeedback) {
+    await finalizeAttempt(afterFeedback, input.input.loadedCase, trialGates)
   }
 
   const result: BenchmarkTrialResult = {
@@ -262,39 +311,204 @@ async function captureAttempt(input: {
   loadedCase: RunBenchmarkTrialsInput['loadedCase']
   workspace: string
   directory: string
+  image: string
+  imageDigest: string
+  expectedSourceCommit?: string
+  signal?: AbortSignal
+  graderRunner: IsolatedGraderRunner
+  skipGraderStatus?: 'unsupported' | 'invalid'
 }): Promise<AttemptCapture> {
   await mkdir(input.directory, { recursive: true })
   let patch = ''
-  let evaluation: NativeEvaluationResult
+  let grader: IsolatedGraderRunResult | undefined
   try {
     patch = await collectBenchmarkPatch({
       workspace: input.workspace,
       maxPatchBytes: input.loadedCase.manifest.modificationScope.maxPatchBytes,
     })
-    evaluation = await evaluateNativePatch({
-      loadedCase: input.loadedCase,
-      patch,
-    })
   } catch {
-    evaluation = {
-      schemaVersion: 1,
-      status: 'invalid',
-      resolved: false,
-      patchSha256: sha256Bytes(patch),
-      failureCategory: 'patch_invalid',
-      publicChecks: [],
-      groups: [],
-      error: {
-        code: 'BENCHMARK_PATCH_INVALID',
-        message: 'The evaluator could not grade this patch',
-      },
+    grader = failedGraderRun({
+      patch,
+      imageDigest: input.imageDigest,
+      artifactsDirectory: path.join(input.directory, 'grader'),
+      status: 'attempted',
+      code: 'BENCHMARK_PATCH_CAPTURE_FAILED',
+      message: 'The submitted patch could not be captured for grading',
+    })
+  }
+  if (!grader && input.skipGraderStatus) {
+    grader = failedGraderRun({
+      patch,
+      imageDigest: input.imageDigest,
+      artifactsDirectory: path.join(input.directory, 'grader'),
+      status: input.skipGraderStatus,
+      code:
+        input.skipGraderStatus === 'unsupported'
+          ? 'BENCHMARK_WORKER_UNSUPPORTED'
+          : 'BENCHMARK_WORKER_INVALID',
+      message: 'The Agent worker could not produce a gradeable attempt',
+    })
+  }
+  if (!grader) {
+    try {
+      grader = await input.graderRunner({
+        loadedCase: input.loadedCase,
+        patch,
+        image: input.image,
+        expectedImageDigest: input.imageDigest,
+        expectedSourceCommit: input.expectedSourceCommit,
+        artifactsDirectory: path.join(input.directory, 'grader'),
+        signal: input.signal,
+      })
+    } catch {
+      grader = failedGraderRun({
+        patch,
+        imageDigest: input.imageDigest,
+        artifactsDirectory: path.join(input.directory, 'grader'),
+        status: 'invalid',
+        code: 'BENCHMARK_GRADER_COORDINATOR_FAILED',
+        message: 'The isolated grader coordinator failed unexpectedly',
+      })
     }
   }
+  const evaluation = scoreIsolatedGrader({
+    loadedCase: input.loadedCase,
+    grader,
+  })
   await Promise.all([
     writeFile(path.join(input.directory, 'patch.diff'), patch, 'utf8'),
     writeJsonAtomic(path.join(input.directory, 'evaluation.json'), evaluation),
+    writeJsonAtomic(path.join(input.directory, 'redaction.json'), {
+      schemaVersion: 1,
+      shareableReport: 'evaluation.json',
+      restrictedArtifacts: [
+        'grader/coordinator-result.restricted.json',
+        ...(grader.artifacts.rawReportPath
+          ? ['grader/raw-report.restricted.json']
+          : []),
+      ],
+      removedFields: [
+        'graderInput',
+        'privateCheckIds',
+        'privateCommands',
+        'commandStdout',
+        'commandStderr',
+      ],
+    }),
   ])
-  return { patch, evaluation }
+  return { patch, grader, evaluation, directory: input.directory }
+}
+
+async function finalizeAttempt(
+  attempt: AttemptCapture,
+  loadedCase: RunBenchmarkTrialsInput['loadedCase'],
+  additionalGates: BenchmarkHardGate[],
+): Promise<void> {
+  attempt.evaluation = scoreIsolatedGrader({
+    loadedCase,
+    grader: attempt.grader,
+    additionalGates,
+  })
+  await writeJsonAtomic(
+    path.join(attempt.directory, 'evaluation.json'),
+    attempt.evaluation,
+  )
+}
+
+function createTrialGates(input: {
+  worker: Awaited<ReturnType<DockerWorkerRunner>>
+  headless?: HeadlessResult
+  expectedImageDigest: string
+  trustedTestWorker: boolean
+}): BenchmarkHardGate[] {
+  const executionBoundary =
+    input.trustedTestWorker ||
+    Boolean(
+      input.worker.capability &&
+      input.worker.image &&
+      input.worker.sandbox &&
+      Object.values(input.worker.sandbox).every(Boolean),
+    )
+  const runtimeIdentity =
+    input.trustedTestWorker ||
+    input.worker.image?.digest === input.expectedImageDigest
+  const cleanup = Object.values(input.worker.cleanup).every(Boolean)
+  return [
+    {
+      id: 'agent_execution_boundary',
+      passed: executionBoundary,
+      owner: 'infrastructure',
+    },
+    {
+      id: 'agent_result_valid',
+      passed: input.trustedTestWorker || Boolean(input.headless),
+      owner: 'infrastructure',
+    },
+    {
+      id: 'runtime_identity',
+      passed: runtimeIdentity,
+      owner: 'infrastructure',
+    },
+    {
+      id: 'worker_cleanup',
+      passed: cleanup,
+      owner: 'infrastructure',
+    },
+    { id: 'credential_clean', passed: true, owner: 'infrastructure' },
+  ]
+}
+
+function failedGraderRun(input: {
+  patch: string
+  imageDigest: string
+  artifactsDirectory: string
+  status: 'attempted' | 'invalid' | 'unsupported'
+  code: string
+  message: string
+}): IsolatedGraderRunResult {
+  const now = new Date().toISOString()
+  return {
+    schemaVersion: 1,
+    status: input.status,
+    graderRevision: ISOLATED_GRADER_REVISION,
+    graderImageDigest: input.imageDigest,
+    inputSha256: sha256Bytes(''),
+    startedAt: now,
+    completedAt: now,
+    durationMs: 0,
+    patch: {
+      sha256: sha256Bytes(input.patch),
+      present: Boolean(input.patch),
+      applies: false,
+      scopeCompliant: false,
+      hygienePassed: false,
+    },
+    sandbox: {
+      networkDisabled: false,
+      readOnlyRoot: false,
+      nonRoot: false,
+      capabilitiesDropped: false,
+      noNewPrivileges: false,
+      boundedResources: false,
+      privateInputReadOnly: false,
+      dockerSocketAbsent: false,
+    },
+    inputImmutable: false,
+    cleanup: { containerRemoved: true, privateDirectoryRemoved: true },
+    artifacts: {
+      directory: input.artifactsDirectory,
+      stdoutPath: path.join(input.artifactsDirectory, 'stdout.log'),
+      stderrPath: path.join(input.artifactsDirectory, 'stderr.log'),
+      coordinatorResultPath: path.join(
+        input.artifactsDirectory,
+        'coordinator-result.restricted.json',
+      ),
+    },
+    error: {
+      code: input.code,
+      message: input.message,
+    },
+  }
 }
 
 async function readCompletedTrial(
@@ -500,6 +714,8 @@ function createTrialIdentity(input: {
     caseIdentity: structuredClone(input.input.loadedCase.identity),
     runtimeImage: input.input.image,
     runtimeImageDigest: input.runtimeImageDigest,
+    graderRevision: ISOLATED_GRADER_REVISION,
+    graderImageDigest: input.runtimeImageDigest,
     expectedSourceCommit: input.input.expectedSourceCommit,
     headlessConfigSha256: sha256Canonical(input.effectiveConfig),
     protocol: input.protocol,
