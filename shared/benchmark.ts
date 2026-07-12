@@ -36,7 +36,7 @@ export const BenchmarkAgentCaseSchema = Type.Object(
         },
         { additionalProperties: false },
       ),
-      { minItems: 1, maxItems: 32 },
+      { minItems: 0, maxItems: 32 },
     ),
     modificationScope: Type.Object(
       {

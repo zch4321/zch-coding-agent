@@ -42,8 +42,22 @@ export type DockerWorkerCredential =
   | DockerWorkerProxyCredential
   | DockerWorkerDirectCredential
 
+export type DockerWorkerWorkspace =
+  | {
+      kind: 'bind'
+      directory: string
+      containerPath?: string
+    }
+  | {
+      kind: 'volume'
+      name: string
+      containerPath: string
+    }
+
 export interface DockerWorkerRunInput {
   image: string
+  proxyImage?: string
+  workspace?: DockerWorkerWorkspace
   workspaceDirectory: string
   artifactsDirectory: string
   config: HeadlessConfig

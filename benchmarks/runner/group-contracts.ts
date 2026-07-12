@@ -1,5 +1,5 @@
 import type { HeadlessConfig } from '../../electron/headless/contracts'
-import type { NativeBenchmarkSuite } from '../adapters/native'
+import type { LoadedAdapterSuite } from '../adapters/contracts'
 import type { LoadedBenchmarkCase } from '../cases/contracts'
 import type {
   BenchmarkPriceSnapshot,
@@ -28,7 +28,7 @@ export const BENCHMARK_PRESETS: Record<
 }
 
 export interface SelectedBenchmarkCase {
-  suite: NativeBenchmarkSuite
+  suite: LoadedAdapterSuite
   loadedCase: LoadedBenchmarkCase
 }
 

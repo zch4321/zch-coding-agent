@@ -91,26 +91,30 @@ export async function runBenchmarkTrials(
   const runtimeImageDigest = await resolveRuntimeImageDigest(input)
   await mkdir(input.outputDirectory, { recursive: true })
   const results: BenchmarkTrialsResult['trials'] = []
-  for (let trialIndex = 1; trialIndex <= trials; trialIndex += 1) {
-    if (input.signal?.aborted) throw new Error('Benchmark run was cancelled')
-    const identity = createTrialIdentity({
-      input,
-      protocol,
-      feedbackVisibility,
-      effectiveConfig,
-      runtimeImageDigest,
-      trialIndex,
-    })
-    results.push(
-      await runTrial({
+  try {
+    for (let trialIndex = 1; trialIndex <= trials; trialIndex += 1) {
+      if (input.signal?.aborted) throw new Error('Benchmark run was cancelled')
+      const identity = createTrialIdentity({
         input,
         protocol,
         feedbackVisibility,
         effectiveConfig,
         runtimeImageDigest,
-        identity,
-      }),
-    )
+        trialIndex,
+      })
+      results.push(
+        await runTrial({
+          input,
+          protocol,
+          feedbackVisibility,
+          effectiveConfig,
+          runtimeImageDigest,
+          identity,
+        }),
+      )
+    }
+  } finally {
+    await input.adapter.disposeCaseResources?.(input.loadedCase)
   }
   return { schemaVersion: 1, protocol, trials: results }
 }
@@ -165,6 +169,11 @@ async function runTrial(input: {
   const workerRunner = input.input.workerRunner ?? runDockerWorker
   const workerInput: DockerWorkerRunInput = {
     image: input.input.image,
+    proxyImage: input.input.proxyImage,
+    workspace: preparedWorkspace.mount ?? {
+      kind: 'bind',
+      directory: preparedWorkspace.directory,
+    },
     workspaceDirectory: preparedWorkspace.directory,
     artifactsDirectory: workerArtifacts,
     config: input.effectiveConfig,

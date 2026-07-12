@@ -15,10 +15,19 @@ export const NATIVE_ADAPTER_REVISION = 'native-v1'
 export const nativeBenchmarkAdapter: BenchmarkCaseAdapter = {
   id: 'native',
   revision: NATIVE_ADAPTER_REVISION,
+  executionImage(input) {
+    return {
+      image: input.defaultImage,
+      runtimeImageDigest: input.defaultImageDigest,
+    }
+  },
   toAgentCaseDescriptor,
   async prepareWorkspace(input) {
     await prepareBenchmarkWorkspace(input)
-    return { directory: input.destination }
+    return {
+      directory: input.destination,
+      mount: { kind: 'bind', directory: input.destination },
+    }
   },
   capturePatch(input) {
     return collectBenchmarkPatch({

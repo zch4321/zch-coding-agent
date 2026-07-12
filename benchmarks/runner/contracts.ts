@@ -188,6 +188,7 @@ export interface RunBenchmarkTrialsInput {
   adapter: BenchmarkCaseAdapter
   suiteIdentitySha256: string
   image: string
+  proxyImage?: string
   runtimeImageDigest?: string
   expectedSourceCommit?: string
   config: HeadlessConfig

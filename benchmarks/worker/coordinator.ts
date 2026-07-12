@@ -24,6 +24,7 @@ import {
   type DockerWorkerResult,
   type DockerWorkerRunInput,
   type DockerWorkerStatus,
+  type DockerWorkerWorkspace,
 } from './contracts'
 import {
   DockerCommandError,
@@ -109,12 +110,18 @@ export async function runDockerWorker(
   try {
     limits = normalizeLimits(input.limits)
     validateInput(input)
+    const workspace = resolveWorkspace(input)
     const directories = await ensureSafeRunDirectories({
-      workspace: input.workspaceDirectory,
+      workspace:
+        workspace.kind === 'bind'
+          ? workspace.directory
+          : input.workspaceDirectory!,
       artifacts: input.artifactsDirectory,
     })
     await assertDiskBudget(
-      [directories.workspace, directories.artifacts],
+      workspace.kind === 'bind'
+        ? [directories.workspace, directories.artifacts]
+        : [directories.artifacts],
       limits.diskBytes,
     )
     const [capability, image] = await Promise.all([
@@ -168,7 +175,7 @@ export async function runDockerWorker(
       await runDockerCommand(
         restrictedCreateArgs({
           name: proxyName,
-          image: input.image,
+          image: input.proxyImage ?? input.image,
           network: networkName,
           networkAlias: PROVIDER_PROXY_ALIAS,
           limits: proxyLimits(limits),
@@ -203,7 +210,7 @@ export async function runDockerWorker(
         network,
         limits,
         mounts: [
-          readWriteDirectoryMount(directories.workspace, CONTAINER_WORKSPACE),
+          workspaceMount(workspace, directories.workspace),
           readWriteDirectoryMount(directories.artifacts, CONTAINER_ARTIFACTS),
           readOnlyDirectoryMount(inputDirectory, CONTAINER_INPUT),
           readOnlyFileMount(credentialPath, CONTAINER_CREDENTIAL),
@@ -216,7 +223,7 @@ export async function runDockerWorker(
         command: [
           'run',
           '--workspace',
-          CONTAINER_WORKSPACE,
+          workspace.containerPath,
           '--task-file',
           `${CONTAINER_INPUT}/task.txt`,
           '--config',
@@ -301,7 +308,10 @@ export async function runDockerWorker(
         disposeSignal: monitorController.signal,
         wallTimeMs: limits.wallTimeMs,
         diskBytes: limits.diskBytes,
-        directories: [directories.workspace, directories.artifacts],
+        directories:
+          workspace.kind === 'bind'
+            ? [directories.workspace, directories.artifacts]
+            : [directories.artifacts],
       }),
     ])
     monitorController.abort()
@@ -326,7 +336,9 @@ export async function runDockerWorker(
     )
     if (!stop) {
       await assertDiskBudget(
-        [directories.workspace, directories.artifacts],
+        workspace.kind === 'bind'
+          ? [directories.workspace, directories.artifacts]
+          : [directories.artifacts],
         limits.diskBytes,
       )
       await applyHeadlessResult(result, directories.artifacts)
@@ -480,6 +492,10 @@ function validateInput(input: DockerWorkerRunInput): void {
   if (!input.image.trim() || /[\r\n\0]/u.test(input.image)) {
     throw new Error('Docker worker image reference is invalid')
   }
+  resolveWorkspace(input)
+  if (input.proxyImage && /[\r\n\0]/u.test(input.proxyImage)) {
+    throw new Error('Docker worker proxy image reference is invalid')
+  }
   if (!input.task.trim() || Buffer.byteLength(input.task) > 1024 * 1024) {
     throw new Error('Docker worker task must be non-empty and at most 1 MiB')
   }
@@ -491,6 +507,48 @@ function validateInput(input: DockerWorkerRunInput): void {
       ? input.credential.upstreamCredential
       : input.credential.credential
   if (!credential.trim()) throw new Error('Provider credential is empty')
+}
+
+function resolveWorkspace(
+  input: DockerWorkerRunInput,
+):
+  | Required<Extract<DockerWorkerWorkspace, { kind: 'bind' }>>
+  | Extract<DockerWorkerWorkspace, { kind: 'volume' }> {
+  const workspace: DockerWorkerWorkspace =
+    input.workspace ??
+    ({ kind: 'bind', directory: input.workspaceDirectory } as const)
+  if (workspace.kind === 'bind') {
+    if (!workspace.directory.trim()) {
+      throw new Error('Docker worker bind workspace is invalid')
+    }
+    return {
+      ...workspace,
+      containerPath: validateContainerWorkspacePath(
+        workspace.containerPath ?? CONTAINER_WORKSPACE,
+      ),
+    }
+  }
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/u.test(workspace.name)) {
+    throw new Error('Docker worker volume name is invalid')
+  }
+  return {
+    ...workspace,
+    containerPath: validateContainerWorkspacePath(workspace.containerPath),
+  }
+}
+
+function validateContainerWorkspacePath(value: string): string {
+  if (
+    !value.startsWith('/') ||
+    value === '/' ||
+    value === CONTAINER_ARTIFACTS ||
+    value.startsWith('/run/') ||
+    value.includes(',') ||
+    /[\r\n\0]/u.test(value)
+  ) {
+    throw new Error('Docker worker container workspace path is invalid')
+  }
+  return value.replace(/\/+$/u, '')
 }
 
 async function waitForStop(input: {
@@ -659,6 +717,17 @@ function readOnlyDirectoryMount(source: string, destination: string): string {
 
 function readWriteDirectoryMount(source: string, destination: string): string {
   return `type=bind,src=${source},dst=${destination}`
+}
+
+function workspaceMount(
+  workspace:
+    | Required<Extract<DockerWorkerWorkspace, { kind: 'bind' }>>
+    | Extract<DockerWorkerWorkspace, { kind: 'volume' }>,
+  bindDirectory: string,
+): string {
+  return workspace.kind === 'bind'
+    ? readWriteDirectoryMount(bindDirectory, workspace.containerPath)
+    : `type=volume,src=${workspace.name},dst=${workspace.containerPath}`
 }
 
 function classifyErrorStatus(error: unknown): DockerWorkerStatus {

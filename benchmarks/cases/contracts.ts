@@ -284,6 +284,16 @@ export interface LoadedBenchmarkCase {
     archiveSha256: string
     treeSha256: string
     privateSpecSha256: string
+    external?: {
+      adapterRevision: string
+      dataset: string
+      release: string
+      commit: string
+      caseHash: string
+      officialImageDigest: string
+      agentImageDigest: string
+      cohortHash: string
+    }
   }
   [BENCHMARK_CASE_INTERNAL]: {
     archivePath: string
