@@ -12,6 +12,7 @@ const emit = defineEmits<{
   rename: [conversationId: string]
   delete: [conversationId: string]
   export: [conversationId: string]
+  inspect: [conversationId: string]
   import: []
   settings: []
 }>()
@@ -271,6 +272,18 @@ const searchGroups = computed(() => {
                 </span>
               </button>
               <div class="conversation-actions">
+                <NTooltip>
+                  <template #trigger>
+                    <button
+                      type="button"
+                      :aria-label="t('sidebar.inspectTranscript')"
+                      @click="emit('inspect', conversation.id)"
+                    >
+                      <UiIcon name="search" />
+                    </button>
+                  </template>
+                  {{ t('sidebar.inspectTranscript') }}
+                </NTooltip>
                 <NTooltip>
                   <template #trigger>
                     <button

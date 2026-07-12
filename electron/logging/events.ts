@@ -196,6 +196,18 @@ export const TraceEventSchema = Type.Union([
   Type.Composite([
     TraceBaseSchema,
     Type.Object({
+      type: Type.Literal('tool.proposed'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      callId: CallIdSchema,
+      tool: Type.String({ minLength: 1, maxLength: 512 }),
+      args: JsonValueSchema,
+      reason: Type.String({ maxLength: 65_536 }),
+    }),
+  ]),
+  Type.Composite([
+    TraceBaseSchema,
+    Type.Object({
       type: Type.Literal('tool.attempt'),
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
@@ -233,6 +245,7 @@ export const TraceEventSchema = Type.Union([
       callId: CallIdSchema,
       tool: Type.String({ maxLength: 512 }),
       args: JsonValueSchema,
+      reason: Type.Optional(Type.String({ maxLength: 65_536 })),
       result: JsonValueSchema,
       approvedBy: Type.String({ maxLength: 64 }),
       policySignals: Type.Array(JsonValueSchema, { maxItems: 256 }),
@@ -402,6 +415,14 @@ export type TraceEventInput =
       reason: string
     })
   | (TraceInputBase & {
+      type: 'tool.proposed'
+      runId: RunId
+      callId: CallId
+      tool: string
+      args: JsonValue
+      reason: string
+    })
+  | (TraceInputBase & {
       type: 'tool.attempt'
       runId: RunId
       callId: CallId
@@ -427,6 +448,7 @@ export type TraceEventInput =
       callId: CallId
       tool: string
       args: JsonValue
+      reason?: string
       result: JsonValue
       approvedBy: string
       policySignals: JsonValue[]

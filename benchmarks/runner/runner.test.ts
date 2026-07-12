@@ -28,7 +28,7 @@ import type {
 } from '../worker/contracts'
 import type { DockerWorkerRunner } from './contracts'
 import { createBenchmarkFeedback } from './feedback'
-import { runBenchmarkTrials } from './runner'
+import { runBenchmarkTrials, scanArtifactsForCredential } from './runner'
 
 const temporaryDirectories: string[] = []
 let suite: NativeBenchmarkSuite
@@ -334,6 +334,26 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
             seq: 6,
             eventId: 'event-6',
             ts: '2026-01-01T00:00:00.011Z',
+            type: 'tool.call',
+            sessionId: 'metrics-session',
+            runId: 'metrics-run',
+            callId: 'metrics-tool-call',
+            tool: 'run_command',
+            args: {
+              mode: 'process',
+              executable: 'node',
+              args: ['test/public.test.mjs'],
+            },
+            result: { status: 'ok', content: '' },
+            approvedBy: 'yolo',
+            policySignals: [],
+            durationMs: 1,
+          },
+          {
+            schemaVersion: 1,
+            seq: 7,
+            eventId: 'event-7',
+            ts: '2026-01-01T00:00:00.012Z',
             type: 'agent.message',
             sessionId: 'metrics-session',
             runId: 'metrics-run',
@@ -341,9 +361,9 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
           },
           {
             schemaVersion: 1,
-            seq: 7,
-            eventId: 'event-7',
-            ts: '2026-01-01T00:00:00.012Z',
+            seq: 8,
+            eventId: 'event-8',
+            ts: '2026-01-01T00:00:00.013Z',
             type: 'session.end',
             sessionId: 'metrics-session',
           },
@@ -388,6 +408,41 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
     expect(trial.result.artifacts?.conversationMarkdown).toBe(
       'conversation.restricted.md',
     )
+    const transcript = await readFile(
+      path.join(trial.directory, 'session-transcript.restricted.md'),
+      'utf8',
+    )
+    expect(transcript).toContain('zch-session-transcript')
+    expect(transcript).toContain('run_command')
+    expect(transcript).toContain('benchmark_case')
+    expect(trial.result.artifacts?.sessionTranscript).toBe(
+      'session-transcript.restricted.md',
+    )
+  })
+
+  it('exempts only the restricted session transcript from credential scanning', async () => {
+    const directory = await temporaryDirectory()
+    await writeFile(
+      path.join(directory, 'session-transcript.restricted.md'),
+      'local-secret',
+      'utf8',
+    )
+    await writeFile(path.join(directory, 'safe.json'), '{}', 'utf8')
+    await expect(
+      scanArtifactsForCredential({
+        directory,
+        credential: 'local-secret',
+        excludedFiles: new Set(['session-transcript.restricted.md']),
+      }),
+    ).resolves.toMatchObject({ filesScanned: 1, sensitiveMatches: 0 })
+    await writeFile(path.join(directory, 'unsafe.log'), 'local-secret', 'utf8')
+    await expect(
+      scanArtifactsForCredential({
+        directory,
+        credential: 'local-secret',
+        excludedFiles: new Set(['session-transcript.restricted.md']),
+      }),
+    ).rejects.toThrow('unsafe.log')
   })
 
   it('does not count a killed partial trial and starts its replacement pristine', async () => {

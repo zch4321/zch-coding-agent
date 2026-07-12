@@ -152,6 +152,15 @@ export interface AgentApi {
   replayTrace(
     payload: IpcPayload<'trace:replay'>,
   ): Promise<IpcResult<'trace:replay'>>
+  getSessionTranscriptPage(
+    payload: IpcPayload<'trace:transcript-page'>,
+  ): Promise<IpcResult<'trace:transcript-page'>>
+  getSessionTranscriptRequestMessages(
+    payload: IpcPayload<'trace:request-messages'>,
+  ): Promise<IpcResult<'trace:request-messages'>>
+  exportSessionTranscript(
+    payload: IpcPayload<'trace:export-transcript'>,
+  ): Promise<IpcResult<'trace:export-transcript'>>
   getTraceStats(
     payload: IpcPayload<'trace:stats'>,
   ): Promise<IpcResult<'trace:stats'>>
@@ -218,6 +227,9 @@ export const AGENT_API_KEYS = [
   'setSkillEnabled',
   'listTraces',
   'replayTrace',
+  'getSessionTranscriptPage',
+  'getSessionTranscriptRequestMessages',
+  'exportSessionTranscript',
   'getTraceStats',
   'forkTrace',
   'startTraceFork',

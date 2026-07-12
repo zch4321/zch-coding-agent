@@ -130,7 +130,7 @@ export class SessionToolRunner {
           resolutionFailure = resolution.result
         }
       }
-      this.#emit(session, {
+      const proposed = {
         type: 'tool.proposed',
         sessionId: session.sessionId,
         runId: run.runId,
@@ -138,7 +138,9 @@ export class SessionToolRunner {
         tool: call.toolId,
         args: call.args,
         reason: call.reason,
-      })
+      } as const
+      await session.logger.write(proposed)
+      this.#emit(session, proposed)
 
       let result: ToolResult
       let approvedBy = 'none'
@@ -411,6 +413,7 @@ export class SessionToolRunner {
         callId: call.id,
         tool: call.toolId,
         args: call.args,
+        reason: call.reason,
         result: toJsonValue(result),
         approvedBy,
         policySignals,

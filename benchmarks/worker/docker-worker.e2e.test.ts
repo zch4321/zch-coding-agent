@@ -291,6 +291,15 @@ describe.skipIf(!enabled)('Linux Docker worker', () => {
     expect(conversation).toContain('## user')
     expect(conversation).toContain('## assistant')
     expect(conversation).not.toContain('Café déjà')
+    const sessionTranscript = await readFile(
+      path.join(trial.directory, 'session-transcript.restricted.md'),
+      'utf8',
+    )
+    expect(sessionTranscript).toContain('zch-session-transcript')
+    expect(sessionTranscript).toContain('benchmark_case')
+    expect(sessionTranscript).toContain('apply_patch')
+    expect(sessionTranscript).toContain('run_command')
+    expect(sessionTranscript).not.toMatch(/data:(?:image|audio|video)\//iu)
     expect(
       await readFile(
         path.join(trial.directory, 'attempts', 'initial', 'redaction.json'),

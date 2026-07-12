@@ -181,7 +181,7 @@ Runner把经过schema校验的公开Agent case descriptor写入独立只读文�
 
 本地 `case-result.restricted.json`、raw worker/grader artifacts和 config snapshot不进入分享报告。`shareable-report.json`仅组合公开 evaluation、聚合 metrics和 comparison identity；`redaction.json`同时列出 restricted globs和被删除字段。Run-group `summary.json`区分 unresolved与 artifact/metrics incomplete，避免把 trace缺失伪装成有效零成本结果。
 
-每个有完整trace的trial还通过共享 `conversationToMarkdown()` 生成 `conversation.restricted.md`，保持与Electron导出相同的versioned front matter和user/assistant/orchestrator正文格式。Markdown用于人工阅读，不包含tool/usage，也不取代raw trace；它在credential scan和artifact hash之前写入，并始终列为restricted artifact。
+每个有完整trace的trial通过共享 `conversationToMarkdown()` 生成可导入消息语义的 `conversation.restricted.md`，并通过桌面端同一transcript normalizer生成 `session-transcript.restricted.md`。后者包含工具、审批、内部编排、明文reasoning和Provider消息快照，不取代raw trace；它进入artifact hash和restricted清单、从shareable report隐藏，并作为唯一精确路径例外不进入credential scan。
 
 ---
 
@@ -479,7 +479,9 @@ Trace request 记录：
 - prompt resources。
 - prompt build layer summary。
 
-`TraceService` 提供 list、replay、stats、fork 和 cleanup。Fork 从某个 `llm.request` 恢复 provider request override，目标 conversationId 必须随 fork 请求进入新 session，默认不重放历史副作用。
+`TraceService` 提供 list、replay、stats、fork、cleanup与session transcript。Transcript normalizer按seq生成稳定快照，把同一callId的proposed/approval/attempt/call合并为工具项，final message替代重复stream delta，中断delta标记partial；Provider消息快照单独分页。Timeline cursor绑定trace revision，活动trace追加后旧cursor变stale，renderer只能读取2 MiB有界页面。Fork仍从某个 `llm.request` 恢复provider request override，不重放历史副作用。
+
+`zch-session-transcript` 是不可导入的restricted审计格式，与可导入且不含工具的 `zch-conversation` 分离。Electron主进程每次导出前显示风险警告并原子保存，既不扫描也不脱敏；多模态载荷和opaque reasoning不写入。查看器可从conversation或Trace Debug进入，按run分组并过滤用户、Assistant、reasoning、internal、tool/approval、Provider、runtime和terminal事件。
 
 隐私边界：
 

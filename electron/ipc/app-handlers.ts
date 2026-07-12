@@ -22,6 +22,7 @@ import type { SessionManager } from '../session/session-manager'
 import type { ConfigStore } from '../config/store'
 import { SkillError, type SkillsManager } from '../skills/manager'
 import { TraceServiceError, type TraceService } from '../logging/service'
+import { writeTextAtomic } from '../config/atomic-file'
 import type { WorkbenchStore } from '../workbench/store'
 import type { HttpTransport } from '../net/http-transport'
 import {
@@ -58,6 +59,20 @@ function projectMetadataFault(error: unknown): IpcFault | undefined {
         ? 'NOT_FOUND'
         : 'PRECONDITION_FAILED',
     message: error.message,
+  })
+}
+
+function traceFault(error: unknown): IpcFault | undefined {
+  if (!(error instanceof TraceServiceError)) return undefined
+  return new IpcFault({
+    code:
+      error.code === 'TRACE_NOT_FOUND' ||
+      error.code === 'FORK_POINT_NOT_FOUND' ||
+      error.code === 'TRACE_REQUEST_NOT_FOUND'
+        ? 'NOT_FOUND'
+        : 'PRECONDITION_FAILED',
+    message: error.message,
+    details: { traceCode: error.code },
   })
 }
 
@@ -689,17 +704,68 @@ export function createAppIpcHandlers(
       try {
         return await traceService.replay(payload.traceId)
       } catch (error) {
-        if (error instanceof TraceServiceError) {
-          throw new IpcFault({
-            code:
-              error.code === 'TRACE_NOT_FOUND' ||
-              error.code === 'FORK_POINT_NOT_FOUND'
-                ? 'NOT_FOUND'
-                : 'PRECONDITION_FAILED',
-            message: error.message,
-          })
-        }
+        const fault = traceFault(error)
+        if (fault) throw fault
+        throw error
+      }
+    },
+    'trace:transcript-page': async (payload) => {
+      try {
+        return await traceService.transcriptPage(payload)
+      } catch (error) {
+        const fault = traceFault(error)
+        if (fault) throw fault
+        throw error
+      }
+    },
+    'trace:request-messages': async (payload) => {
+      try {
+        return await traceService.transcriptRequestMessages(payload)
+      } catch (error) {
+        const fault = traceFault(error)
+        if (fault) throw fault
+        throw error
+      }
+    },
+    'trace:export-transcript': async (payload) => {
+      const mainWindow = getMainWindow()
+      const warningOptions = {
+        type: 'warning' as const,
+        buttons: ['Cancel', 'Continue export'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        title: 'Export restricted session transcript',
+        message: 'This export is not scanned or redacted',
+        detail:
+          'The file may contain source code, file paths, commands, tool arguments and results, internal orchestration, and plaintext reasoning. Save it only to a trusted location and take care when sharing it.',
+      }
+      const warning = mainWindow
+        ? await dialog.showMessageBox(mainWindow, warningOptions)
+        : await dialog.showMessageBox(warningOptions)
+      if (warning.response !== 1) return { canceled: true }
 
+      try {
+        const document = await traceService.transcriptDocument(payload.traceId)
+        const suggested = `${
+          document.metadata.conversationId ?? payload.traceId
+        }-session-transcript.md`.replace(/[\\/:*?"<>|]/gu, '_')
+        const options: SaveDialogOptions = {
+          defaultPath: suggested,
+          filters: [{ name: 'Markdown', extensions: ['md'] }],
+        }
+        const result = mainWindow
+          ? await dialog.showSaveDialog(mainWindow, options)
+          : await dialog.showSaveDialog(options)
+        if (result.canceled || !result.filePath) return { canceled: true }
+        await writeTextAtomic(
+          result.filePath,
+          await traceService.transcriptMarkdown(payload.traceId),
+        )
+        return { canceled: false, path: result.filePath }
+      } catch (error) {
+        const fault = traceFault(error)
+        if (fault) throw fault
         throw error
       }
     },
@@ -715,17 +781,8 @@ export function createAppIpcHandlers(
           conversationId: payload.conversationId,
         })
       } catch (error) {
-        if (error instanceof TraceServiceError) {
-          throw new IpcFault({
-            code:
-              error.code === 'TRACE_NOT_FOUND' ||
-              error.code === 'FORK_POINT_NOT_FOUND'
-                ? 'NOT_FOUND'
-                : 'PRECONDITION_FAILED',
-            message: error.message,
-          })
-        }
-
+        const fault = traceFault(error)
+        if (fault) throw fault
         throw error
       }
     },

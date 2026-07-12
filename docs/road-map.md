@@ -2,7 +2,7 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、BenchmarkCase v1/native adapter/3 项 core smoke、strict/repair-once runner、隔离 grader、硬门禁和 L0–L5 评分、trace/tool/usage/cost/paired comparison，以及正式 benchmark 命令、档位和分层 artifacts 已经落地。下一阶段扩展 core case，再用真实任务信号指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、BenchmarkCase v1/native adapter/3 项 core smoke、strict/repair-once runner、隔离 grader、硬门禁和 L0–L5 评分、trace/tool/usage/cost/paired comparison、完整session transcript查看/导出，以及正式 benchmark 命令、档位和分层 artifacts 已经落地。下一阶段扩展 core case，再用真实任务信号指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
 
 ## 0. 未完成概览
 
@@ -142,7 +142,7 @@ M5 保留原编号以维持已有文档和历史引用，但从本阶段起提�
 
 - 能从 trace 判断一次失败是 provider、tool、审批、上下文、MCP 还是 UI 路由问题。
 - replay 不执行工具副作用。
-- 敏感信息扫描覆盖 trace、workbench、terminal output 和 artifacts。
+- 敏感信息扫描覆盖需要自动分享或判定安全门禁的artifacts；用户明确导出的本地restricted session transcript只做逐次风险警告，不扫描或脱敏。
 
 ## 6. Later
 

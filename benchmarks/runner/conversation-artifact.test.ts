@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../electron/logging/events'
 import { markdownToConversation } from '../../shared/conversation-markdown'
-import { benchmarkConversationMarkdown } from './conversation-artifact'
+import {
+  benchmarkConversationMarkdown,
+  benchmarkSessionTranscriptMarkdown,
+} from './conversation-artifact'
 
 describe('benchmark conversation artifact', () => {
   it('reuses the Electron markdown format for user, harness, and assistant messages', () => {
@@ -54,6 +57,12 @@ describe('benchmark conversation artifact', () => {
     expect(parsed.messages[0]?.text).toContain('allowedPaths')
     expect(parsed.messages[2]?.reasoning).toBe('Checked the public behavior.')
     expect(markdown).not.toContain('run_command')
+
+    const transcript = benchmarkSessionTranscriptMarkdown({ trace })
+    expect(transcript).toContain('format: "zch-session-transcript"')
+    expect(transcript).toContain('run_command')
+    expect(transcript).toContain('Checked the public behavior.')
+    expect(transcript).toContain('not been scanned or redacted')
   })
 })
 

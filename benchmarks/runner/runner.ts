@@ -50,7 +50,10 @@ import type {
 import { createBenchmarkFeedback } from './feedback'
 import { collectBenchmarkPatch } from './native-evaluator'
 import { toAgentCaseDescriptor } from '../adapters/native'
-import { benchmarkConversationMarkdown } from './conversation-artifact'
+import {
+  benchmarkConversationMarkdown,
+  benchmarkSessionTranscriptMarkdown,
+} from './conversation-artifact'
 import {
   aggregateBenchmarkMetrics,
   validateBenchmarkPriceSnapshot,
@@ -290,6 +293,9 @@ async function runTrial(input: {
           caseId: input.input.loadedCase.manifest.id,
         })
       : undefined
+  const sessionTranscriptMarkdown = trace
+    ? benchmarkSessionTranscriptMarkdown({ trace })
+    : undefined
 
   const result: BenchmarkTrialResult = {
     schemaVersion: 1,
@@ -300,10 +306,17 @@ async function runTrial(input: {
     workerStatus: worker.status,
     sessionId: headless?.sessionId,
     metrics,
-    ...(conversationMarkdown
+    ...(conversationMarkdown || sessionTranscriptMarkdown
       ? {
           artifacts: {
-            conversationMarkdown: 'conversation.restricted.md',
+            ...(conversationMarkdown
+              ? { conversationMarkdown: 'conversation.restricted.md' }
+              : {}),
+            ...(sessionTranscriptMarkdown
+              ? {
+                  sessionTranscript: 'session-transcript.restricted.md',
+                }
+              : {}),
           },
         }
       : {}),
@@ -338,6 +351,13 @@ async function runTrial(input: {
       'utf8',
     )
   }
+  if (sessionTranscriptMarkdown) {
+    await writeFile(
+      path.join(stagingDirectory, 'session-transcript.restricted.md'),
+      sessionTranscriptMarkdown,
+      'utf8',
+    )
+  }
   if (input.input.priceSnapshot) {
     await writeJsonAtomic(
       path.join(stagingDirectory, 'price-snapshot.json'),
@@ -352,6 +372,7 @@ async function runTrial(input: {
         input.input.credential.mode === 'proxy'
           ? input.input.credential.upstreamCredential
           : input.input.credential.credential,
+      excludedFiles: new Set(['session-transcript.restricted.md']),
     })
   } catch (error) {
     await rm(stagingDirectory, { recursive: true, force: true })
@@ -652,9 +673,10 @@ async function listFiles(directory: string): Promise<string[]> {
   return files.sort()
 }
 
-async function scanArtifactsForCredential(input: {
+export async function scanArtifactsForCredential(input: {
   directory: string
   credential: string
+  excludedFiles?: ReadonlySet<string>
 }): Promise<{
   schemaVersion: 1
   filesScanned: number
@@ -663,7 +685,9 @@ async function scanArtifactsForCredential(input: {
 }> {
   const needle = Buffer.from(input.credential, 'utf8')
   if (needle.byteLength === 0) throw new Error('Benchmark credential is empty')
-  const files = await listFiles(input.directory)
+  const files = (await listFiles(input.directory)).filter(
+    (relative) => !input.excludedFiles?.has(relative),
+  )
   let bytesScanned = 0
   for (const relative of files) {
     const content = await readFile(path.join(input.directory, relative))

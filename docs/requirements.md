@@ -384,6 +384,8 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - “完整”以 Agent 实际可见数据为边界：工具因输出上限而未进入 Agent 的丢弃字节记录 `totalBytes/truncated/discardedHash`，不要求无限落盘；进入模型上下文的内容必须逐字保存。
 - 不记录请求传输层凭据，例如 API Key、Authorization header 和 safeStorage 密文；这些信息不属于模型上下文，也不是回放所需数据。
 - 开启时必须明确提示日志可能包含源代码、用户输入、模型推理、工具输出以及工作区中被读取的凭据，并支持保留天数/总大小上限。
+- 完整 trace 必须可规范化为只读 `zch-session-transcript`：按 run 展示用户/Assistant/明文 reasoning、内部编排、工具与审批、Provider上下文、Plan、interjection、usage、terminal和生命周期。该格式不可导入或重放；每次 Electron 导出前必须警告，导出内容不做敏感信息扫描或脱敏，用户负责本地保存和后续分享。
+- Transcript 不输出 provider wire request/raw response/provider state、流式重复分片、工具schema、加密/opaque reasoning或多模态原始载荷；中断且没有final message的明文delta标为partial，多模态只保留类型/MIME/已知大小占位。
 - 不引入 SQLite（避免 native 依赖）；日志清理 GUI 留待后续版本。
 
 ### 5.2 必须记录的事件（每条一行 JSON）
@@ -447,7 +449,7 @@ session.end     { ts }
 - `public` feedback 只能包含公开检查摘要；`diagnostic` 还可包含公开 manifest 已声明的验收组名称和通用失败类别。两者均禁止隐藏源码、私有命令输出、精确隐藏期望、oracle/gold patch 和外部数据集 evaluator 字段。
 - Trial 结果必须分别记录 `resolvedInitial`、`resolvedAfterFeedback`、`recovered`、首轮指标、修复阶段增量指标和累计指标。修复成功不得回填首次通过；`pass@k` 必须是 k 个独立 pristine trial，不得复用 session、container、workspace、credential token 或 Provider continuation。
 - Resume 只允许复用 identity 一致、带 complete marker 且整棵 artifact checksum 一致的 immutable trial。`.incomplete-*` staging 不计入样本也不复用；已有 final artifact 缺失、被篡改或 identity 不同必须拒绝覆盖。
-- Runner 完成前必须删除 Agent workspace、扫描 artifacts 是否含真实 Provider credential，并保存零命中报告。凭据命中时必须删除该 staging；patch、trace、JSONL、stderr 和 worker cleanup evidence均保留在独立 trial artifact 中。
+- Runner 完成前必须删除 Agent workspace、扫描 artifacts 是否含真实 Provider credential，并保存零命中报告。凭据命中时必须删除该 staging；唯一例外是明确标为restricted且不进入shareable report的 `session-transcript.restricted.md`，它按本地用户负责原则不扫描或脱敏，其他patch、trace、JSONL、stderr和证据仍必须扫描。
 
 ### 5.8 Isolated grader and scoring
 
@@ -477,6 +479,7 @@ session.end     { ts }
 - Artifact必须按 run-group/suite/case/trial/attempt分层，足以离线复核manifest、task、runtime identity、patch、grader、trace、JSONL、stderr、usage/tool metrics、泄漏扫描和最终等级。缺失trace metrics的执行必须标为incomplete，不能生成虚假效率汇总。
 - `shareable-report.json`只能包含公开evaluation、聚合metrics、comparison identity和无路径summary。Raw trace/JSONL/stderr、config snapshot、case-result、grader input/private check/command/output必须列入restricted artifact清单；redaction文件必须声明删除字段。
 - 有完整trace的trial必须复用共享conversation Markdown serializer生成 `conversation.restricted.md`，包含user/assistant/orchestrator正文和reasoning，且在leak scan与artifact hash之前写入。该文件只用于人工阅读，不得伪造tool消息，也不得进入shareable report。
+- 有完整trace的trial还必须用桌面端同一normalizer生成 `session-transcript.restricted.md`，包含工具、审批、内部编排、明文reasoning和折叠Provider上下文；它进入artifact hash和restricted清单，但从credential scan的输入中按精确artifact路径排除。
 
 ---
 

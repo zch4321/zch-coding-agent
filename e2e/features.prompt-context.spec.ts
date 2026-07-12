@@ -86,6 +86,22 @@ test.describe('Electron prompt and selected-context workflows', () => {
     await expect(logging.getByText('base_instructions')).toBeVisible()
     await expect(logging.getByText('runtime_context')).toBeVisible()
     await expect(logging.getByText('agents', { exact: true })).toBeVisible()
+
+    await logging.getByRole('button', { name: '查看完整时间线' }).click()
+    const transcript = page.locator('.transcript-modal')
+    await expect(transcript).toBeVisible()
+    await expect(transcript).toContainText('Provider request')
+    await expect(transcript).toContainText('Capture prompt metadata')
+    const providerRequest = transcript
+      .locator('.transcript-entry[data-kind="provider_request"]')
+      .first()
+    await providerRequest.locator('summary').click()
+    await providerRequest
+      .getByRole('button', { name: '加载 Provider 上下文快照' })
+      .click()
+    await expect(providerRequest).toContainText(
+      'Trace inspector AGENTS guidance.',
+    )
   })
 
   test('refreshes AGENTS.md guidance on later provider requests', async () => {

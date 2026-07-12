@@ -94,7 +94,7 @@ coordinator 只接受固定 workspace、artifacts、config/task 和 credential m
 
 Runner 从 runtime trace生成 `metrics.json`。Token按 main/approval/title/compression scope汇总，Provider未报告字段保持 `null`；工具按 stage/outcome/tool/effect计数，并附带 patch与 trajectory指标。传入 `priceSnapshot` 时，完整 snapshot写入 `price-snapshot.json`并以 hash固定在 trial identity；比较器逐字段校验 paired identity后才计算 resolve delta、95%区间和 safety/correctness/efficiency词典序结果。
 
-Run-group artifacts按 `cases/<suite>/<case>/trials/trial-N/attempts/<phase>`分层。每个完整trial复用Electron对话导出格式生成 `conversation.restricted.md`，方便直接阅读task、Harness context、assistant回复和reasoning；tool/usage仍以trace和metrics为准。根目录的 `summary.json`用于本地总览，`shareable-report.json`只包含公开evaluation和聚合metrics；`redaction.json`列出对话Markdown、config、raw worker trace/JSONL/stderr、case result及grader restricted证据等不可直接分享的路径和字段。缺失trace metrics时run-group状态为`incomplete`，不会输出伪造的效率总计。
+Run-group artifacts按 `cases/<suite>/<case>/trials/trial-N/attempts/<phase>`分层。每个完整trial同时生成可导入消息语义的 `conversation.restricted.md` 和只读完整轨迹 `session-transcript.restricted.md`；后者包含工具、审批、内部编排、明文reasoning与Provider消息快照，不做敏感信息扫描或脱敏，用户必须自行负责本地保存和分享。两者均不进入shareable report，session transcript仍进入artifact hash但按精确路径从credential scan排除；其他worker/grader/artifact继续扫描。缺失trace metrics时run-group状态为`incomplete`，不会输出伪造的效率总计。
 
 ## Grader 与评分
 

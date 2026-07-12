@@ -22,7 +22,7 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - 命令与终端：`run_command` 用于短命令和一次性进程执行，长跑测试、服务、watch 和 REPL 使用持久 PTY，并通过 `delay` + `terminal_read` 轮询输出。
 - 项目与代码智能：`.zch/project-model.json` 保存项目模块和 Serena 配置；`code_*` 工具可通过 Serena 定位符号、定义、引用和诊断，定义查询会尽量返回函数/类代码上下文。
 - 安全凭据：Provider API Key 存在 Electron `safeStorage`，不会暴露给 renderer、trace 文件或子进程环境。
-- 可观测性：可选择开启 JSONL trace，记录请求、响应、工具、审批和 usage，并支持离线回放、fork 和统计。
+- 可观测性：可选择开启 JSONL trace，记录请求、响应、工具、审批和 usage，并支持离线回放、fork、统计及完整会话时间线；只读 `zch-session-transcript` Markdown 会包含内部编排、明文 reasoning、工具与 Provider 上下文，导出前每次提示其未经敏感信息扫描或脱敏。
 - 可配置提示词：内置中英文 system prompt，设置页可编辑，界面语言会选择对应提示词。
 - Skills：支持安装、扫描和启用本地 Skill 指令文件，通过按需读取减少常驻上下文开销。
 - Generic MCP：支持手写 stdio server 配置、逐 server 启停与启动信任；模型通过三个固定 gateway 工具分页发现和调用外部工具，调用继续经过现有权限与 trace 管线。
