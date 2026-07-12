@@ -435,12 +435,15 @@ session.end     { ts }
 
 ### 5.6 Benchmark case contract
 
-- BenchmarkCase v1 必须记录 case/suite/revision、任务、repository provenance、固定 archive/tree hash、Linux platform、case image OCI digest、setup、公开检查、grader protocol、acceptance groups、feedback policy、修改范围、资源预算和 prompt/test review record；未知字段和越界预算一律拒绝。
+- Native BenchmarkCase v1 必须记录 case/suite/revision、任务、repository provenance、固定 archive/tree hash、Linux platform、case image OCI digest、setup、公开检查、grader protocol、acceptance groups、feedback policy、修改范围和资源预算；未知字段和越界预算一律拒绝。Core中的review record只记录确定性self-check，不要求prompt/test alignment或人工批准。
 - Suite index 必须固定每个 manifest hash；manifest 必须继续固定 archive、tree 和 private spec hash。Dataset adapter id/revision 纳入 suite identity，adapter 或任一 transitive 输入变化都必须得到新 identity，不能静默覆盖冻结 suite。
 - Agent descriptor 只能包含 task、公开检查、修改范围和预算。Private spec 路径、hidden commands、oracle/gold patch、mutants、外部数据集 `fail_to_pass` / `pass_to_pass` 不得进入 descriptor、workspace、Headless config、trace 或 Docker build context。
 - Workspace 必须从固定 archive 向空目录重建；archive path 需要 containment、重复项和 tree hash 校验。准备后的 Git 只保留当前 baseline commit，不得含 remote、tag、reflog、hooks、不可达未来对象或缓存历史。
 - 非 abstain 自建 case 的 baseline 必须失败；abstain/no-change case 的 baseline 与 `no-change` oracle 必须通过。两类 case 的 oracle 都要通过全部公开与私有行为组，且至少两个合理 mutant 必须通过公开检查但被声明的隐藏行为组拒绝。完整准备和评判重复三次，证据签名不一致视为 flaky/invalid。
-- Native test adapter 只运行仓库内受信任的 synthetic fixture，不能产生正式 benchmark 结果；外部 dataset 只能归一化为公开 BenchmarkCase，不能借 adapter 把 evaluator 私有字段带入 Agent 面。外部代码执行还必须提供固定 repository image和专用官方 evaluator adapter。
+- 通用adapter边界必须内置native、monthly-swebench与swe-rebench；runner不能依赖native archive的准备、patch捕获或grader细节。外部dataset只能归一化公开Agent descriptor，不能借adapter把solution、gold/test patch、测试ID或verifier字段带入Agent面。
+- `core-harness-8`固定8项并保留baseline/oracle、每项至少两个mutant和三次稳定性自检。外部数据质量直接信任上游，不增加语义审核Agent、prompt/test alignment或人工批准。
+- 外部workspace必须使用Docker named volume挂载到任务原生路径；Agent image只能从官方任务环境叠加当前ZCH Headless runtime，Provider proxy继续使用通用worker image。Grader每次使用fresh volume、上游verifier、`network=none`、非root、只读rootfs和资源限制。
+- 每个新外部case/image digest首次使用时缓存一次baseline未解决和oracle已解决的机器兼容检查；失败必须归类为infrastructure incompatible并按cohort固定顺序递补，不得评价数据集语义质量。
 
 ### 5.7 Benchmark runner protocol
 
@@ -468,16 +471,19 @@ session.end     { ts }
 - 测试识别必须覆盖结构化process/shell参数、常见package/language runner和直接执行test/spec文件；terminal_send成功只表示输入被接受，不能作为最终验证通过时间。
 - 成本只能由显式 run-group `priceSnapshot` 的逐 usage-field rate计算；snapshot source/revision/hash必须进入 artifact 与 trial identity。任何被定价 usage 字段 unknown 时 scope和总成本也必须 unknown。
 - `costPerResolvedUsd`、tokens/tool calls per resolved必须以全部 trial 总消耗除以 resolved 数，不能丢弃失败 trial。另行报告 unresolved token/cost和 resolved duration中位数。
-- A/B 必须逐 trial匹配 suite/case identity、runtime/case/grader image、Provider/model/profile/reasoning、资源预算、protocol/feedback、trial index与 price snapshot。任一不一致必须拒绝并列出字段路径；可比较结果输出 paired delta、总体 resolve delta与置信区间，并按 safety、correctness、efficiency词典序排序。
+- A/B 必须逐 trial匹配 cohort、suite/case identity、runtime/case/grader image、Provider/model/profile/reasoning、资源预算、protocol/feedback、trial index与 price snapshot。任一不一致必须拒绝并列出字段路径；可比较结果输出paired delta、win/loss/tie、总体resolve delta与置信区间，并按safety、correctness、efficiency词典序排序。
 
 ### 5.10 Benchmark CLI, profiles, and artifacts
 
-- 必须提供独立 opt-in的 `benchmark:smoke`、`benchmark`、`benchmark:full`；默认 `npm test`、`npm run build`和 Electron E2E不得隐式构建镜像、连接 Provider或运行 benchmark。三个 preset默认分别为最多3×1、12×3、全部×5，CLI必须对 suite/case/trial数量设置硬上限。
+- 必须提供独立opt-in的`benchmark:smoke`、`benchmark`、`benchmark:full`和`benchmark:external`；默认`npm test`、`npm run build`和Electron E2E不得隐式构建镜像、连接Provider或运行benchmark。Core三个preset分别为3×1、8×3、8×5；external固定Monthly 8 + SWE-rebench 8且每项3 trials。CLI必须对suite/case/trial数量设置硬上限。
+- External run开始时必须解析最新Monthly release与SWE-rebench leaderboard split，并按seed无放回抽取；Monthly固定4 bugfix + 4 non-bug，SWE-rebench按仓库和patch规模分层，整个cohort同仓库最多一项。缺字段、image不可用、资源越界或兼容失败按固定随机顺序递补并记录原因。
+- `cohort.json`必须固定两个dataset release/commit、adapter revision、seed、16个case hash、官方任务image digest和派生Agent image digest。`--seed`用于生成，`--cohort`用于A/B复用，两者互斥；run内目录变化不得改变已固定cohort。
 - CLI必须复用 Headless config和同一 Docker worker/runner/grader，不得实现第二份 Agent loop。Provider key只从 config声明的主机环境变量读取，默认经 proxy credential模式传递；命令输出、identity、config snapshot、summary和shareable report不得包含 key值。
-- 经过schema校验的公开BenchmarkCase descriptor必须以独立 `<benchmark_case>` Harness层进入首次模型请求，并在trace中记录为orchestrator context；不得拼接到用户task或伪装成 `user.message`。Agent必须能看到public checks、allowed/denied paths和资源预算，但不能看到private evaluator字段。
+- 经过schema校验的公开case descriptor必须以独立`<benchmark_case>` Harness层进入首次模型请求，并在trace中记录为orchestrator context；不得拼接到用户task或伪装成`user.message`。Native case可显示public checks、allowed/denied paths和资源预算；外部case只显示problem statement、公开范围和预算，不显示测试列表。两者都不能包含private evaluator字段。
 - Run-group identity必须固定 preset、suite/adapter、case identity、runtime image digest、source commit、Headless config、Provider/model/profile/reasoning、protocol/feedback、trial数和price snapshot。非空输出目录只有 identity完全一致时才能恢复；trial复用仍须满足各自complete marker和artifact hash。
 - Artifact必须按 run-group/suite/case/trial/attempt分层，足以离线复核manifest、task、runtime identity、patch、grader、trace、JSONL、stderr、usage/tool metrics、泄漏扫描和最终等级。缺失trace metrics的执行必须标为incomplete，不能生成虚假效率汇总。
 - `shareable-report.json`只能包含公开evaluation、聚合metrics、comparison identity和无路径summary。Raw trace/JSONL/stderr、config snapshot、case-result、grader input/private check/command/output必须列入restricted artifact清单；redaction文件必须声明删除字段。
+- External summary必须分别显示Monthly、SWE-rebench、50/50 source macro与总体结果；不同来源的trial不能相互替补或隐藏单项结果。
 - 有完整trace的trial必须复用共享conversation Markdown serializer生成 `conversation.restricted.md`，包含user/assistant/orchestrator正文和reasoning，且在leak scan与artifact hash之前写入。该文件只用于人工阅读，不得伪造tool消息，也不得进入shareable report。
 - 有完整trace的trial还必须用桌面端同一normalizer生成 `session-transcript.restricted.md`，包含工具、审批、内部编排、明文reasoning和折叠Provider上下文；它进入artifact hash和restricted清单，但从credential scan的输入中按精确artifact路径排除。
 

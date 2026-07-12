@@ -54,13 +54,19 @@ npm run build-worker-image
 npm run benchmark:smoke -- --config benchmark-config.local
 npm run benchmark -- --config benchmark-config.local
 npm run benchmark:full -- --config benchmark-config.local
+npm run benchmark:external -- --config benchmark-config.local --seed trial-1
 ```
 
 - `benchmark:smoke`：默认最多3个 case，每项1 trial。
-- `benchmark`：daily preset，默认最多12个 case，每项3 trials；当前 bootstrap suite只有3项，M5.10会扩展到12/24项。
-- `benchmark:full`：全部显式 suite，每项5 trials。
+- `benchmark`：完整 `core-harness-8`，每项3 trials。
+- `benchmark:full`：完整 `core-harness-8`，每项5 trials。
+- `benchmark:external`：最新 Monthly-SWEBench 8项与最新 SWE-rebench leaderboard 8项，每项3 trials。首次运行可传 `--seed`；A/B 的另一侧使用 `--cohort <上一轮 cohort.json>`，不得同时传 seed。
 
-三个命令都只构建轻量 CLI bundle，不自动构建 Docker image。默认 image为当前 commit对应的 `zch-agent-headless:<12位commit>`，可用 `--image`或 `ZCH_WORKER_IMAGE`指定。常用覆盖参数包括重复的 `--suite` / `--case`、`--trials 1..5`、`--protocol repair-once --feedback public|diagnostic`、`--price-snapshot`、`--output`以及显式开发fallback `--credential-mode direct`。默认 proxy模式只把真实key交给受限 Provider proxy。
+四个命令都只构建轻量 CLI bundle，不自动构建 Docker image。默认 image为当前 commit对应的 `zch-agent-headless:<12位commit>`，可用 `--image`或 `ZCH_WORKER_IMAGE`指定。常用覆盖参数包括重复的 `--suite` / `--case`、`--trials 1..5`、`--protocol repair-once --feedback public|diagnostic`、`--price-snapshot`、`--output`以及显式开发fallback `--credential-mode direct`。默认 proxy模式只把真实key交给受限 Provider proxy。
+
+外部运行开始时解析最新 release，并把两个 dataset commit、adapter revision、随机 seed、case hash、官方任务 image digest、ZCH派生 image digest和最终16项写入 `cohort.json`。Monthly固定4项bugfix和4项non-bugfix；SWE-rebench按patch规模轮转；全 cohort 同仓库最多一项。无效字段、镜像不可用、资源越界和兼容性失败按固定随机顺序递补并记录排除原因，不执行prompt/test alignment、审核Agent或人工批准。每个新case/image只缓存一次baseline未解决与oracle已解决的机器兼容性检查。
+
+真实数据源兼容验证使用 `npm run test:benchmark-external-real`，它会构建worker image并至少验证两个来源各一项的环境、overlay和baseline/oracle verifier接线；不进入默认 `npm test`，也不以skip测试占位。
 
 默认输出位于 `benchmarks/results/<timestamp>-<preset>`。指定同一个 `--output`可恢复identity一致的中断运行；identity变化时拒绝覆盖。
 
@@ -82,7 +88,9 @@ coordinator 只接受固定 workspace、artifacts、config/task 和 credential m
 
 源码使用可审阅的 `zch-case-archive-v1` JSON archive。准备器校验 raw archive 与规范化 tree hash后才写文件，再创建只有一个 baseline commit 的新 Git 仓库，并删除 reflog、hooks、remote、tag 和不可达历史。Agent 可见树还会扫描私有字段和 grader/oracle/mutant 路径。
 
-`private/core-harness-8/` 只供可信 coordinator/evaluator 和数据质量自检读取，并已从 Docker build context 排除。当前 3 个 bootstrap case 各自包含一个 oracle 和两个可通过公开检查但会被隐藏行为组拒绝的 mutant；`test:benchmark-cases` 对 baseline/oracle/mutant 从 pristine archive 重复准备三次，签名不一致即判定 flaky。
+`private/core-harness-8/` 只供可信 coordinator/evaluator 和数据质量自检读取，并已从 Docker build context 排除。固定8项覆盖slug、chunk、retry、falsey配置优先级、monorepo最深路由、API兼容重构、有界长日志诊断和正确no-change；每项包含oracle和两个可通过公开检查但会被隐藏行为组拒绝的mutant。`test:benchmark-cases` 对baseline/oracle/mutant从pristine archive重复准备三次，签名不一致即判定flaky。这里的review字段只记录确定性自检，不是语义alignment或人工批准门禁。
+
+外部 adapter 不把上游任务伪装成 native archive。Monthly Harbor环境和 SWE-rebench官方image先构建/拉取为 Linux/amd64任务image，再只叠加当前ZCH Headless runtime；Provider proxy仍使用通用worker image。Agent workspace位于任务原生路径的Docker named volume，保留symlink和执行位；gold/solution、test patch、测试ID及verifier配置只存在于grader私有缓存和挂载，Agent descriptor对外部case仅含problem statement、范围与预算。
 
 ## Runner protocol
 

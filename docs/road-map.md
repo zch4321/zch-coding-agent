@@ -2,7 +2,7 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、BenchmarkCase v1/native adapter/3 项 core smoke、strict/repair-once runner、隔离 grader、硬门禁和 L0–L5 评分、trace/tool/usage/cost/paired comparison、完整session transcript查看/导出，以及正式 benchmark 命令、档位和分层 artifacts 已经落地。下一阶段扩展 core case，再用真实任务信号指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、固定 Core Harness 8、Monthly-SWEBench/SWE-rebench滚动mixed-16、不可变cohort、strict/repair-once runner、隔离 grader、硬门禁和L0–L5评分、trace/tool/usage/cost/paired comparison、完整session transcript查看/导出，以及正式benchmark命令、档位和分层artifacts已经落地。下一阶段用真实任务信号指导Project / Code Intelligence和Provider Routing的后续改动。
 
 ## 0. 未完成概览
 
@@ -19,22 +19,9 @@
 
 M5 保留原编号以维持已有文档和历史引用，但从本阶段起提前为首要里程碑。它首先评估 harness 工程本身，不把 Electron UI 性能混入 coding correctness；UI/IPC 继续由 E2E 覆盖，并通过 parity 测试证明两个宿主没有语义漂移。
 
-后续数据集扩展：
+M5.10已经完成：`core-harness-8`固定8项确定性回归；`benchmark:external`从最新Monthly-SWEBench与SWE-rebench各抽8项，使用seed和`cohort.json`固定dataset commit、case与image digest。外部数据直接信任上游，不建设prompt/test alignment、本地审核Agent或人工批准系统。任务环境通过named volume和官方verifier执行，ZCH只叠加同一Headless runtime。
 
-- 把已冻结的 3 项 bootstrap case 扩展为人工编写的 `core-24`：6 个 bug fix、6 个 feature、3 个 refactor/compatibility、3 个正确 abstain/no-change、6 个 harness-stress。普通 case 要求失败 baseline，abstain case 要求通过 baseline 与 no-change oracle；新增每项还需至少两个 mutant、三次无 flaky 和独立 prompt/test 对齐复核。
-- 自建 case 优先 `FROM zch-agent-headless:<commit>` 安装任务依赖；Agent 可见 image 不含 private spec。Evaluator 使用另一容器，从 pristine base 应用 patch 后运行 hidden tests，且无 Provider credential、默认 `network=none`。
-- 第一外部套件为 `fresh-12`：从最新 SWE-rebench 时间窗选取 12 项，人工审核并冻结 revision。SWE-bench Pro/Verified 只作为 compatibility adapter；SWE-bench-Live、SWE-Lancer 和长期演进任务留给 `benchmark:full`。
-- 外部 adapter 只归一化公开 BenchmarkCase；gold/test patch、`fail_to_pass`、`pass_to_pass` 和 evaluator 私有字段始终停留在 grader 面。许可证、镜像来源、digest 和运行限制必须记录。
-
-### 5.10 按提交粒度的实施顺序
-
-| 步骤  | 具体实现                                           | 完成标志                        |
-| ----- | -------------------------------------------------- | ------------------------------- |
-| M5.10 | 扩展到 12/24 个 core case                          | `benchmark` 可产出稳定 A/B 报告 |
-| M5.11 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查       | Linux worker 跑通冻结 revision  |
-| M5.12 | 增加 SWE-bench compatibility 与高成本 full adapter | 不影响主套件且保持 opt-in       |
-
-单一 Runtime、固定 Yolo Headless host、runtime identity、Electron/Headless parity、受限 Linux Docker worker、3 项冻结 native smoke case、strict/repair-once runner、隔离 grader、L0–L5评分、可比较指标和正式命令面已经落地；扩展到全部 24 个 case 前，现有 smoke suite 已可用于完整链路和低样本 A/B 检查。
+后续Benchmark工作只在真实使用信号证明必要时扩展数据源、置信区间或长期趋势展示，不再以扩大自建case数量或建设本地数据审核系统作为独立里程碑。SWE-bench Pro/Verified、SWE-bench-Live、SWE-Lancer等保持可选候选，不进入默认命令。
 
 总体验收：
 

@@ -137,13 +137,17 @@ Plan 进入 `awaiting_review` 后，driver 先等待共享 run controller 完全
 
 ### 3.4 BenchmarkCase 与 workspace preparation
 
-`benchmarks/cases/contracts.ts` 定义 BenchmarkCase、suite index、源码 archive 和 private evaluator spec 的 v1 TypeBox schema。公开 manifest 固定 repository provenance、raw archive/tree SHA-256、case image OCI digest、setup/public checks、acceptance groups、feedback policy、修改范围、资源预算和 prompt/test review record；grader 公开部分只有 adapter/protocol 和 private spec 内容摘要。Suite index 固定每个 manifest hash，native adapter revision 再与 suite hash组合成最终 suite identity。
+`benchmarks/cases/contracts.ts` 定义 native BenchmarkCase、suite index、源码 archive 和 private evaluator spec 的 v1 TypeBox schema。公开 manifest 固定 repository provenance、raw archive/tree SHA-256、case image OCI digest、setup/public checks、acceptance groups、feedback policy、修改范围和资源预算；grader 公开部分只有 adapter/protocol 和 private spec 内容摘要。Suite index固定每个manifest hash，统一adapter revision再与suite hash组合成最终suite identity。Core manifest保留的review record只说明确定性self-check，不构成prompt/test语义审核或人工批准流程。
 
 Oracle patch、mutant patch 与隐藏命令只位于 `benchmarks/private/`，该目录不进入 Docker build context。`toAgentCaseDescriptor()` 不返回 grader digest、内部绝对路径或任何 private spec 字段。Loader 在 workspace 或 Agent run 创建之前完成 schema、raw checksum、tree checksum、路径 containment、重复 ID、group reference、budget 和 OCI pin 校验；文件在首次 load 后变化还会被二次 checksum 拒绝。
 
 源码 archive 使用确定性的 `zch-case-archive-v1` JSON 文件，按 path、mode、byte length 和原始内容计算 tree hash。准备器只向空目录写普通文件，创建一个新的 baseline-only Git repository，然后删除 reflog、hooks、remote/tag refs，并检查不存在不可达历史。Agent 可见文件表必须与 archive 完全一致，且会扫描 hidden/grader/oracle/mutant 路径和 evaluator-only 字段。
 
-Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 mutant，检查修改范围与 `git diff --check`。普通 case 要求 baseline 失败；abstain case 支持通过 baseline 和显式 `no-change` oracle。Mutant 必须先通过全部公开检查，再被声明的隐藏 acceptance group 拒绝；每个 case 完整重复三次并比较 baseline commit 与证据签名。当前 bootstrap suite 提供 slug normalization、chunk partitioning 和 retry backoff 三项，目标 `core-24` 数量仍由后续里程碑扩展。
+Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 mutant，检查修改范围与 `git diff --check`。普通case要求baseline失败；abstain case支持通过baseline和显式`no-change` oracle。Mutant必须先通过全部公开检查，再被声明的隐藏acceptance group拒绝；每个case完整重复三次并比较baseline commit与证据签名。`core-harness-8`固定为8项：slug normalization、chunk partitioning、retry backoff、config precedence、workspace routing、API compatibility refactor、diagnostic tail和no-change contract。
+
+`benchmarks/adapters/external-datasets.ts` 负责解析最新或固定commit的Monthly-SWEBench与SWE-rebench leaderboard。最新只在run开始时解析；`benchmarks/cohort/selection.ts`用seed执行无放回抽样，固定Monthly 4 bugfix + 4 non-bug、SWE-rebench按patch规模分层8项，并跨来源限制同仓库最多一项。`cohort.json`记录dataset release/commit、adapter revision、case hash、官方任务image digest、派生Agent image digest和排除原因；case identity再包含cohort hash，所以A/B使用不同cohort会在现有逐字段identity比较中被拒绝。上游数据质量被直接信任，不运行prompt/test alignment、审核Agent或人工批准。
+
+`benchmarks/adapters/external-docker-runtime.ts` 为外部任务实现机器兼容和执行边界。Monthly Harbor `environment/Dockerfile`构建任务image，SWE-rebench拉取行内声明的官方image；随后使用multi-stage overlay只复制当前ZCH Node Headless bundle，不复制Agent loop。任务原生workspace通过Docker named volume挂载，因而不经过Windows bind语义并保留symlink、执行位和依赖环境。Agent只看到problem statement、公开范围与预算；solution、gold/test patch、测试ID和verifier配置保留在`.dockerignore`排除的私有cache与grader挂载。每个case/image digest首次运行baseline未解决、oracle已解决的可缓存兼容检查；失败只标为infrastructure incompatible并递补，不评价数据集语义质量。
 
 ### 3.5 Benchmark runner 与 repair control
 
@@ -171,15 +175,15 @@ Runner把经过schema校验的公开Agent case descriptor写入独立只读文�
 
 测试命令识别先从结构化tool参数恢复命令文本，覆盖package runner、常见语言测试器以及 `node test/...`等直接执行测试文件的形式；只有已settle成功的 `run_command` 才可作为最终验证时间，terminal input被接受不能冒充测试通过。
 
-`benchmarks/metrics/compare.ts` 使用全部 trial 成本计算 `costPerResolvedUsd`，同时保留 unresolved 的 token/成本消耗。A/B 先逐 trial 校验 case、runtime/case/grader image、Provider/model/profile/reasoning、预算、protocol、trial index 和 price snapshot，再输出 paired delta、总体 resolve delta与 95%区间。排序固定按 hard-gate safety、correctness、efficiency 的词典序，效率不参与 correctness 得分。
+`benchmarks/metrics/compare.ts` 使用全部 trial 成本计算 `costPerResolvedUsd`，同时保留 unresolved 的 token/成本消耗。A/B先逐trial校验case/cohort、runtime/case/grader image、Provider/model/profile/reasoning、预算、protocol、trial index和price snapshot，再输出paired delta、win/loss/tie、总体resolve delta与95%区间。排序固定按hard-gate safety、correctness、efficiency的词典序，效率不参与correctness得分。
 
 ### 3.8 Benchmark CLI、运行档位与 artifacts
 
-`benchmarks/cli/main.ts` 构建为独立 Node 24 bundle，不依赖 Electron renderer 或 IPC。三个 opt-in npm命令分别固定 smoke、daily和 full preset；默认选择上限为 3/12/全部 case，trial数为 1/3/5，正式 CLI最多接受 8 个 suite、64 个 case和每项 5 trials。CLI从 Headless config声明的环境变量读取 Provider key，默认把真实 key只交给受限 Provider proxy；key不进入 run-group identity、config snapshot、stdout或报告。
+`benchmarks/cli/main.ts` 构建为独立 Node 24 bundle，不依赖 Electron renderer 或 IPC。四个opt-in npm命令分别固定smoke、daily、full和external preset：Core默认3×1、8×3、8×5，external为Monthly 8 + SWE-rebench 8且每项3 trials。CLI最多接受8个suite、64个case和每项5 trials，从Headless config声明的环境变量读取Provider key，并默认只把真实key交给受限Provider proxy。External支持`--seed`创建cohort或`--cohort`复用，不允许同时指定。
 
 `benchmarks/runner/group-runner.ts` 串行复用 `runBenchmarkTrials()`，只增加 run-group编排，不复制 Agent、worker或 grader实现。Artifact层级固定为 run-group → suite/case → trial → attempt；group保存不可变 identity、Headless config和可选 price snapshot，case保存 manifest/Agent descriptor/task，trial继续保存 worker trace/JSONL/stderr、metrics和泄漏扫描，attempt保存 patch/evaluation/grader证据。同一输出目录只有 identity完全一致时才能恢复，具体 trial仍由已有 complete marker和整树 hash验证。
 
-本地 `case-result.restricted.json`、raw worker/grader artifacts和 config snapshot不进入分享报告。`shareable-report.json`仅组合公开 evaluation、聚合 metrics和 comparison identity；`redaction.json`同时列出 restricted globs和被删除字段。Run-group `summary.json`区分 unresolved与 artifact/metrics incomplete，避免把 trace缺失伪装成有效零成本结果。
+本地 `case-result.restricted.json`、raw worker/grader artifacts和 config snapshot不进入分享报告。`shareable-report.json`仅组合公开evaluation、聚合metrics和comparison identity；外部报告另外分列Monthly、SWE-rebench、两来源50/50 macro与总体结果。`redaction.json`同时列出restricted globs和被删除字段。Run-group `summary.json`区分unresolved与artifact/metrics incomplete，避免把trace缺失伪装成有效零成本结果。
 
 每个有完整trace的trial通过共享 `conversationToMarkdown()` 生成可导入消息语义的 `conversation.restricted.md`，并通过桌面端同一transcript normalizer生成 `session-transcript.restricted.md`。后者包含工具、审批、内部编排、明文reasoning和Provider消息快照，不取代raw trace；它进入artifact hash和restricted清单、从shareable report隐藏，并作为唯一精确路径例外不进入credential scan。
 
@@ -581,7 +585,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 
 ## 19. 当前限制
 
-- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。当前隔离 grader只支持仓库冻结的 Node 24 synthetic case；外部 repository image兼容、官方 binary evaluator和跨语言依赖环境仍属于 M5.10–M5.12。
+- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。外部benchmark已支持Harbor/SWE-rebench声明的Linux任务环境，但上游image体积、registry可用性和跨平台Docker实现仍会产生infrastructure incompatible样本；这类失败不计为模型任务失败。
 - Provider 层当前是 OpenAI-compatible/DeepSeek 为主，没有多厂商完整矩阵。
 - Code intelligence backend 当前实际实现为 Serena MCP 只读 adapter，rename/edit capability 只在 schema 中预留。
 - 插件系统只有事件总线和 hook 点，没有本地 JS 插件加载器。

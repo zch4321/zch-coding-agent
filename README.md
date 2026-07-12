@@ -30,6 +30,7 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - Linux Docker worker：以固定的 Node 24/glibc Linux x64 镜像运行同一 Headless bundle；coordinator 做 capability/image identity 预检、资源限制、受控挂载、Provider proxy、产物回收和 stop/kill/remove 清理。Agent 默认只接触单 trial proxy token，不接触真实 Provider key、Docker socket或宿主 home。
 - Benchmark case contract：版本化 manifest 描述任务、固定源码 archive、case image digest、公开检查、验收组、修改范围和资源预算；native adapter identity 与 suite/case/archive/private-spec checksum 共同冻结数据集。Oracle、mutant 和隐藏检查只存在于 evaluator private spec，不进入 Agent descriptor 或 workspace。
 - Benchmark runner：默认 strict 隐藏首评；可选 repair-once 在同一 Headless session追加一次清洗后的 harness feedback，并分别保留首次与修复后结果。pass@k 从 pristine workspace独立运行，resume 只复用 identity和目录 checksum一致的完整 trial。
+- Benchmark suites：`core-harness-8`提供8项固定确定性回归；`benchmark:external`从最新Monthly-SWEBench与SWE-rebench各抽8项，并用可复用`cohort.json`固定dataset commit、seed、case和任务/派生image digest。外部数据直接信任上游，不增加语义审核或人工批准。
 - Isolated grader：在独立 `network=none`、非 root、只读 rootfs容器中运行 private checks；硬门禁覆盖 patch范围、Agent/grader sandbox、identity、cleanup和credential，结果区分 unsupported/invalid/attempted/graded并输出 L0–L5及行为组宏平均。
 
 ### MCP 配置示例
@@ -135,4 +136,4 @@ npm run test:real
 
 ## 当前状态
 
-当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity、Linux Docker worker、BenchmarkCase v1、strict/repair-once runner、隔离 grader、L0–L5评分、unknown-aware usage/cost/tool指标与 paired comparison，以及 smoke/daily/full benchmark命令和分层artifacts。后续方向包括扩展 core-24、接入冻结外部suite、多 Provider、插件加载器和 IDE 级编辑能力。
+当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity、Linux Docker worker、Core Harness 8、Monthly/SWE-rebench滚动mixed-16、strict/repair-once runner、隔离 grader、L0–L5评分、unknown-aware usage/cost/tool指标与 paired comparison，以及 smoke/daily/full/external benchmark命令和分层artifacts。后续方向包括更多Provider、插件加载器、IDE级编辑能力与可选的统计扩展。
