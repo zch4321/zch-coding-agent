@@ -1,4 +1,12 @@
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -53,6 +61,10 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
     const worker: DockerWorkerRunner = async (input) => {
       calls += 1
       expect(input.benchmarkControl).toBeUndefined()
+      expect(input.benchmarkCase?.modificationScope).toMatchObject({
+        allowedPaths: ['src/**'],
+        deniedPaths: ['test/**', 'package.json'],
+      })
       await applyPatch(input.workspaceDirectory, privateSpec.mutants[0]!.patch)
       return workerResult(input, 'strict-worker')
     }
@@ -239,6 +251,38 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
             seq: 1,
             eventId: 'event-1',
             ts: '2026-01-01T00:00:00.000Z',
+            type: 'session.start',
+            sessionId: 'metrics-session',
+            workspace: '/workspace',
+            model: 'fake-model',
+            mode: 'yolo',
+          },
+          {
+            schemaVersion: 1,
+            seq: 2,
+            eventId: 'event-2',
+            ts: '2026-01-01T00:00:00.001Z',
+            type: 'orchestrator.message',
+            sessionId: 'metrics-session',
+            runId: 'metrics-run',
+            kind: 'benchmark_case',
+            text: '{"allowedPaths":["src/**"]}',
+          },
+          {
+            schemaVersion: 1,
+            seq: 3,
+            eventId: 'event-3',
+            ts: '2026-01-01T00:00:00.002Z',
+            type: 'user.message',
+            sessionId: 'metrics-session',
+            runId: 'metrics-run',
+            text: 'Fix the benchmark case',
+          },
+          {
+            schemaVersion: 1,
+            seq: 4,
+            eventId: 'event-4',
+            ts: '2026-01-01T00:00:00.003Z',
             type: 'llm.request',
             sessionId: 'metrics-session',
             runId: 'metrics-run',
@@ -262,8 +306,8 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
           },
           {
             schemaVersion: 1,
-            seq: 2,
-            eventId: 'event-2',
+            seq: 5,
+            eventId: 'event-5',
             ts: '2026-01-01T00:00:00.010Z',
             type: 'llm.usage',
             sessionId: 'metrics-session',
@@ -284,6 +328,24 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
               contextWindowSource: 'builtin',
               raw: {},
             },
+          },
+          {
+            schemaVersion: 1,
+            seq: 6,
+            eventId: 'event-6',
+            ts: '2026-01-01T00:00:00.011Z',
+            type: 'agent.message',
+            sessionId: 'metrics-session',
+            runId: 'metrics-run',
+            text: 'Implemented the fix.',
+          },
+          {
+            schemaVersion: 1,
+            seq: 7,
+            eventId: 'event-7',
+            ts: '2026-01-01T00:00:00.012Z',
+            type: 'session.end',
+            sessionId: 'metrics-session',
           },
         ]
           .map((event) => JSON.stringify(event))
@@ -316,6 +378,16 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
     await expect(
       stat(path.join(trial.directory, 'metrics.json')),
     ).resolves.toBeDefined()
+    const conversation = await readFile(
+      path.join(trial.directory, 'conversation.restricted.md'),
+      'utf8',
+    )
+    expect(conversation).toContain('## orchestrator')
+    expect(conversation).toContain('Fix the benchmark case')
+    expect(conversation).toContain('Implemented the fix.')
+    expect(trial.result.artifacts?.conversationMarkdown).toBe(
+      'conversation.restricted.md',
+    )
   })
 
   it('does not count a killed partial trial and starts its replacement pristine', async () => {

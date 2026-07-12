@@ -84,6 +84,7 @@ describe('benchmark run-group coordinator', () => {
     expect(report).not.toContain(outputDirectory)
     expect(report).toContain('benchmark-shareable-v1')
     expect(report).toContain('case-result.restricted.json')
+    expect(report).toContain('conversation.restricted.md')
   })
 
   it('resumes the same identity and rejects a different config', async () => {

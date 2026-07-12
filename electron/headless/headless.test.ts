@@ -7,6 +7,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
+import type { BenchmarkAgentCase } from '../../shared/benchmark'
 import type {
   LLMProvider,
   ProviderChatRequest,
@@ -209,6 +210,44 @@ function config(overrides: Partial<HeadlessConfig> = {}): HeadlessConfig {
   }
 }
 
+function benchmarkCase(): BenchmarkAgentCase {
+  return {
+    schemaVersion: 1,
+    caseId: 'case-one',
+    suiteId: 'core-24',
+    suiteRevision: 'smoke-v1',
+    task: 'Fix src/example.mjs',
+    publicChecks: [
+      {
+        id: 'public-check',
+        title: 'Public behavior',
+        acceptanceGroupId: 'behavior',
+        command: {
+          executable: 'node',
+          args: ['test/public.test.mjs'],
+          timeoutMs: 5_000,
+          maxOutputBytes: 65_536,
+        },
+      },
+    ],
+    modificationScope: {
+      allowedPaths: ['src/**'],
+      deniedPaths: ['test/**'],
+      maxChangedFiles: 2,
+      maxPatchBytes: 65_536,
+    },
+    resources: {
+      wallTimeMs: 60_000,
+      cpus: 1,
+      memoryBytes: 536_870_912,
+      pids: 64,
+      diskBytes: 268_435_456,
+      maxAgentSteps: 32,
+      maxContextTokens: 65_536,
+    },
+  }
+}
+
 async function fixture(git = false): Promise<{
   directory: string
   workspace: string
@@ -264,23 +303,27 @@ describe('Headless host', () => {
       '1000',
     ])
     expect(parsed.timeoutMs).toBe(1_000)
-    expect(
-      parseHeadlessArguments([
-        'run',
-        '--workspace',
-        '.',
-        '--task-file',
-        'task.md',
-        '--config',
-        'headless.json',
-        '--artifacts',
-        '../artifacts',
-        '--timeout-ms',
-        '1000',
-        '--benchmark-protocol',
-        'repair-once',
-      ]).benchmarkProtocol,
-    ).toBe('repair-once')
+    const benchmarkParsed = parseHeadlessArguments([
+      'run',
+      '--workspace',
+      '.',
+      '--task-file',
+      'task.md',
+      '--config',
+      'headless.json',
+      '--artifacts',
+      '../artifacts',
+      '--timeout-ms',
+      '1000',
+      '--benchmark-protocol',
+      'repair-once',
+      '--benchmark-case-file',
+      'benchmark-case.json',
+    ])
+    expect(benchmarkParsed.benchmarkProtocol).toBe('repair-once')
+    expect(benchmarkParsed.benchmarkCaseFile).toBe(
+      path.resolve('benchmark-case.json'),
+    )
     expect(() =>
       parseHeadlessArguments([
         'run',
@@ -296,9 +339,11 @@ describe('Headless host', () => {
     const { directory, workspace, artifacts } = await fixture()
     const taskFile = path.join(directory, 'task.md')
     const configFile = path.join(directory, 'headless.json')
+    const benchmarkCaseFile = path.join(directory, 'benchmark-case.json')
     await Promise.all([
       writeFile(taskFile, 'Create headless-created.txt\n'),
       writeFile(configFile, `${JSON.stringify(config())}\n`),
+      writeFile(benchmarkCaseFile, `${JSON.stringify(benchmarkCase())}\n`),
     ])
     const output = new StringSink()
     const diagnostics = new StringSink()
@@ -316,6 +361,8 @@ describe('Headless host', () => {
         artifacts,
         '--timeout-ms',
         '5000',
+        '--benchmark-case-file',
+        benchmarkCaseFile,
       ],
       {
         output,
@@ -408,6 +455,45 @@ describe('Headless host', () => {
     ).not.toContain(secret)
     expect(provider.receivedApiKey).toBe(secret)
   }, 20_000)
+
+  it('injects a public benchmark descriptor separately from the user task', async () => {
+    const { workspace, artifacts } = await fixture()
+    const output = new StringSink()
+    const provider = new RepairProvider()
+    const result = await runHeadlessAgent({
+      config: config(),
+      workspace,
+      task: 'Fix the implementation',
+      benchmarkCase: benchmarkCase(),
+      artifactsDirectory: artifacts,
+      timeoutMs: 5_000,
+      output,
+      environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },
+      providerFactory: () => provider,
+    })
+
+    expect(result.status).toBe('completed')
+    const messages = provider.requests[0] ?? []
+    const descriptorIndex = messages.findIndex(
+      (message) =>
+        message.role === 'user' &&
+        message.content?.includes('<benchmark_case') &&
+        message.content.includes('"deniedPaths"') &&
+        message.content.includes('test/**'),
+    )
+    const taskIndex = messages.findIndex(
+      (message) =>
+        message.role === 'user' && message.content === 'Fix the implementation',
+    )
+    expect(descriptorIndex).toBeGreaterThanOrEqual(0)
+    expect(taskIndex).toBeGreaterThan(descriptorIndex)
+    const trace = await readFile(result.artifacts.tracePath, 'utf8')
+    expect(trace).toContain('"kind":"benchmark_case"')
+    expect(trace).toContain('"type":"user.message"')
+    expect(trace).not.toContain(
+      '"type":"user.message","text":"{\\n  \\"schemaVersion\\"',
+    )
+  })
 
   it('auto-approves a reviewed plan using trusted harness context', async () => {
     const { workspace, artifacts } = await fixture()

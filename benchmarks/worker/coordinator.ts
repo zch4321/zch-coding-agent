@@ -10,6 +10,7 @@ import {
   type HeadlessResult,
 } from '../../electron/headless/contracts'
 import { compileSchema } from '../../electron/schema-validator'
+import { BenchmarkAgentCaseSchema } from '../../shared/benchmark'
 import {
   inspectDockerCapability,
   inspectWorkerImage,
@@ -45,6 +46,7 @@ const PROVIDER_PROXY_ALIAS = 'zch-provider-proxy'
 const validateHeadlessResult = compileSchema(HeadlessResultSchema)
 const validateHeadlessStreamEvent = compileSchema(HeadlessStreamEventSchema)
 const validateBenchmarkDecision = compileSchema(HeadlessBenchmarkDecisionSchema)
+const validateBenchmarkCase = compileSchema(BenchmarkAgentCaseSchema)
 
 interface StopReason {
   status: DockerWorkerStatus
@@ -133,6 +135,7 @@ export async function runDockerWorker(
     const credentialPath = path.join(privateDirectory, 'provider-credential')
     const configPath = path.join(inputDirectory, 'config.json')
     const taskPath = path.join(inputDirectory, 'task.txt')
+    const benchmarkCasePath = path.join(inputDirectory, 'benchmark-case.json')
     const workerToken = randomBytes(32).toString('base64url')
 
     if (input.credential.mode === 'proxy') {
@@ -144,6 +147,14 @@ export async function runDockerWorker(
     await Promise.all([
       writePrivateFile(configPath, `${JSON.stringify(config)}\n`),
       writePrivateFile(taskPath, input.task),
+      ...(input.benchmarkCase
+        ? [
+            writePrivateFile(
+              benchmarkCasePath,
+              `${JSON.stringify(input.benchmarkCase)}\n`,
+            ),
+          ]
+        : []),
     ])
 
     if (input.credential.mode === 'proxy') {
@@ -214,6 +225,12 @@ export async function runDockerWorker(
           CONTAINER_ARTIFACTS,
           '--timeout-ms',
           String(Math.min(limits.wallTimeMs, 86_400_000)),
+          ...(input.benchmarkCase
+            ? [
+                '--benchmark-case-file',
+                `${CONTAINER_INPUT}/benchmark-case.json`,
+              ]
+            : []),
           ...(input.benchmarkControl
             ? ['--benchmark-protocol', input.benchmarkControl.protocol]
             : []),
@@ -465,6 +482,9 @@ function validateInput(input: DockerWorkerRunInput): void {
   }
   if (!input.task.trim() || Buffer.byteLength(input.task) > 1024 * 1024) {
     throw new Error('Docker worker task must be non-empty and at most 1 MiB')
+  }
+  if (input.benchmarkCase && !validateBenchmarkCase(input.benchmarkCase)) {
+    throw new Error('Docker worker benchmark case is invalid')
   }
   const credential =
     input.credential.mode === 'proxy'

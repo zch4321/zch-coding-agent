@@ -42,6 +42,12 @@ export interface HarnessRunMessage {
   promptHash?: string
 }
 
+export interface RunHarnessContext {
+  kind: 'benchmark_case'
+  text: string
+  source: string
+}
+
 export interface SessionManagerOptions {
   configStore: ConfigStore
   traceDirectory: string

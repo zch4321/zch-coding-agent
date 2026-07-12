@@ -33,6 +33,7 @@ export const PromptLayerKindSchema = Type.Union([
   Type.Literal('agents'),
   Type.Literal('compact_history'),
   Type.Literal('selected_context'),
+  Type.Literal('benchmark_case'),
   Type.Literal('user_interjection'),
   Type.Literal('orchestration_request'),
 ])

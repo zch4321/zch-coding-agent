@@ -149,6 +149,8 @@ Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 
 
 `benchmarks/runner/runner.ts` 编排 trial，但不实现第二份 Agent loop。默认 `strict` 在 Headless container 完成后收集 Git patch，再调用独立 grader coordinator；repair-once的首评和终评也走同一 grader协议。Agent container只挂载自己的 workspace和 artifacts，private spec与 evaluator workspace始终留在 grader边界。
 
+Runner把经过schema校验的公开Agent case descriptor写入独立只读文件，由Headless以 `<benchmark_case>` user-role Harness层注入首次run；真实task仍单独记录为 `user.message`。Descriptor只含公开检查、allowed/denied modification scope和资源预算，不含private spec、oracle或mutant。Base Harness明确该tag是应用生成的任务约束，不是另一条用户消息。
+
 `repair-once` 通过固定的 `benchmark.phase_ready` JSONL 事件和 `docker start --attach --interactive` stdin 决策通道协调。runner 首评失败后只返回一次经过清洗的 public/diagnostic feedback；Headless 用同一个 `SessionManager` 追加 `<benchmark_feedback>` harness message并启动一个 repair run，因此该消息在 trace 中是 orchestrator message，不伪装成 user message。无论首评还是终评，grader 都使用新准备的 workspace。
 
 每个 pass@k trial 都创建独立 workspace、container、proxy token 和 artifact staging。runner 在 resume 前解析当前 OCI image digest并把它和 grader revision/digest纳入 trial identity；final trial 通过目录级 checksum和 identity hash封存。Resume 只读 complete final，不恢复 workspace、container 或 Provider continuation，遗留 `.incomplete-*` 仅作未完成证据。完成前删除 workspace并扫描所有 artifacts中的真实 Provider credential，命中时删除 staging。
@@ -167,6 +169,8 @@ Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 
 
 `benchmarks/metrics/aggregate.ts` 从 trace、Agent JSONL、patch 和 Headless duration 生成 trial metrics：按 scope 汇总 token，按 tool/effect 汇总工具终态，计算重复 canonical 参数签名、首次编辑/测试、最终验证后空转、patch 规模及 trajectory 计数。只有显式固定的 `priceSnapshot` 才计算成本；snapshot 原文、来源 revision 和 hash 一同进入 artifacts/identity，任何被定价字段缺失都会使相应成本保持 unknown。
 
+测试命令识别先从结构化tool参数恢复命令文本，覆盖package runner、常见语言测试器以及 `node test/...`等直接执行测试文件的形式；只有已settle成功的 `run_command` 才可作为最终验证时间，terminal input被接受不能冒充测试通过。
+
 `benchmarks/metrics/compare.ts` 使用全部 trial 成本计算 `costPerResolvedUsd`，同时保留 unresolved 的 token/成本消耗。A/B 先逐 trial 校验 case、runtime/case/grader image、Provider/model/profile/reasoning、预算、protocol、trial index 和 price snapshot，再输出 paired delta、总体 resolve delta与 95%区间。排序固定按 hard-gate safety、correctness、efficiency 的词典序，效率不参与 correctness 得分。
 
 ### 3.8 Benchmark CLI、运行档位与 artifacts
@@ -176,6 +180,8 @@ Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 
 `benchmarks/runner/group-runner.ts` 串行复用 `runBenchmarkTrials()`，只增加 run-group编排，不复制 Agent、worker或 grader实现。Artifact层级固定为 run-group → suite/case → trial → attempt；group保存不可变 identity、Headless config和可选 price snapshot，case保存 manifest/Agent descriptor/task，trial继续保存 worker trace/JSONL/stderr、metrics和泄漏扫描，attempt保存 patch/evaluation/grader证据。同一输出目录只有 identity完全一致时才能恢复，具体 trial仍由已有 complete marker和整树 hash验证。
 
 本地 `case-result.restricted.json`、raw worker/grader artifacts和 config snapshot不进入分享报告。`shareable-report.json`仅组合公开 evaluation、聚合 metrics和 comparison identity；`redaction.json`同时列出 restricted globs和被删除字段。Run-group `summary.json`区分 unresolved与 artifact/metrics incomplete，避免把 trace缺失伪装成有效零成本结果。
+
+每个有完整trace的trial还通过共享 `conversationToMarkdown()` 生成 `conversation.restricted.md`，保持与Electron导出相同的versioned front matter和user/assistant/orchestrator正文格式。Markdown用于人工阅读，不包含tool/usage，也不取代raw trace；它在credential scan和artifact hash之前写入，并始终列为restricted artifact。
 
 ---
 

@@ -4,6 +4,7 @@ import type {
   HeadlessRunStatus,
   HeadlessStreamEvent,
 } from '../../electron/headless/contracts'
+import type { BenchmarkAgentCase } from '../../shared/benchmark'
 
 export const DOCKER_WORKER_SCHEMA_VERSION = 1 as const
 
@@ -47,6 +48,7 @@ export interface DockerWorkerRunInput {
   artifactsDirectory: string
   config: HeadlessConfig
   task: string
+  benchmarkCase?: BenchmarkAgentCase
   credential: DockerWorkerCredential
   expectedSourceCommit?: string
   caseDigest?: string

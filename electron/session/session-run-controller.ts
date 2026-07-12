@@ -6,6 +6,7 @@ import { PROVIDER_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
 import {
   appendPromptLayer,
+  benchmarkCaseContent,
   benchmarkFeedbackContent,
   orchestrationRequestContent,
 } from './prompt-harness'
@@ -21,6 +22,7 @@ import type {
   ActiveRun,
   AgentEventDraft,
   HarnessRunMessage,
+  RunHarnessContext,
   SessionState,
 } from './session-types'
 import type { RunAccessLease } from './workspace-access-coordinator'
@@ -78,6 +80,7 @@ export class SessionRunController {
     userMessage?: string,
     context?: RunContext,
     harnessMessage?: HarnessRunMessage,
+    harnessContexts?: RunHarnessContext[],
   ): RunId {
     const existing = session.clientRequests.get(clientRequestId)
 
@@ -114,7 +117,14 @@ export class SessionRunController {
       processedInterjectionIds: new Set(),
     }
 
-    run.done = this.#run(session, run, userMessage, context, harnessMessage)
+    run.done = this.#run(
+      session,
+      run,
+      userMessage,
+      context,
+      harnessMessage,
+      harnessContexts,
+    )
       .catch((error: unknown) =>
         this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error),
       )
@@ -235,6 +245,7 @@ export class SessionRunController {
     userMessage?: string,
     context?: RunContext,
     harnessMessage?: HarnessRunMessage,
+    harnessContexts?: RunHarnessContext[],
   ): Promise<void> {
     const signal = run.controller.signal
 
@@ -297,6 +308,31 @@ export class SessionRunController {
             trusted: false,
             editable: false,
             config: this.#configStore.getPublicConfig(),
+          })
+        }
+        for (const harnessContext of harnessContexts ?? []) {
+          appendPromptLayer(session, {
+            kind: harnessContext.kind,
+            role: 'user',
+            content: benchmarkCaseContent(harnessContext.text),
+            source: harnessContext.source,
+            trusted: true,
+            editable: false,
+            config: this.#configStore.getPublicConfig(),
+          })
+          this.#emit(session, {
+            type: 'orchestrator.message',
+            sessionId: session.sessionId,
+            runId: run.runId,
+            kind: harnessContext.kind,
+            text: harnessContext.text,
+          })
+          await session.logger.write({
+            type: 'orchestrator.message',
+            sessionId: session.sessionId,
+            runId: run.runId,
+            kind: harnessContext.kind,
+            text: harnessContext.text,
           })
         }
         session.history.push({

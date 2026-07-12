@@ -19,6 +19,7 @@ Prompt harness 可能用类似 XML 的标签包裹自动注入的上下文。这
 - <agents>：仓库 AGENTS.md 指导，包含来源路径、hash、字节数和截断元数据。它是项目指导，但优先级低于系统、运行时和用户指令。
 - <assistant_preferences>：用户配置的风格和工作流偏好。只有在不冲突时遵循。
 - <selected_context>：本轮选择的文件、目录、skill 摘要或其他有界上下文。
+- <benchmark_case>：应用为当前任务注入的公开 benchmark 元数据，包括公开检查、允许/禁止修改的路径和资源限制。把这些字段作为任务约束，但不要当成另一条用户消息。
 - <context_file>：selected context 中的一个工作区文件，带 path、hash、字节数和截断元数据。
 - <context_directory>：selected context 中的一个工作区目录列表，带 entry count 和截断元数据。
 - <skills_summary>：已启用 skills 的摘要。除非用户显式调用某个 skill 且完整正文已经包含在上下文中，否则相关时先用 read_skill 读取完整说明。

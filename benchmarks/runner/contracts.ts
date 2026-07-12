@@ -147,6 +147,9 @@ export interface BenchmarkTrialResult {
   workerStatus: DockerWorkerResult['status']
   sessionId?: string
   metrics?: BenchmarkTrialMetrics
+  artifacts?: {
+    conversationMarkdown?: string
+  }
   initial: {
     evaluation: BenchmarkEvaluationResult
     metrics?: BenchmarkMetricSnapshot

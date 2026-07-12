@@ -33,6 +33,7 @@ import { id, ipcFault, toJsonValue } from './session-common'
 import type {
   AgentEventDraft,
   HarnessRunMessage,
+  RunHarnessContext,
   SessionManagerOptions,
   SessionState,
 } from './session-types'
@@ -519,6 +520,7 @@ export class SessionManager {
     message: string
     clientRequestId: string
     context?: RunContext
+    harnessContexts?: RunHarnessContext[]
   }): RunId {
     const session = this.#requireSession(input.sessionId)
     return this.#runs.start(
@@ -526,6 +528,8 @@ export class SessionManager {
       input.clientRequestId,
       input.message,
       input.context,
+      undefined,
+      input.harnessContexts,
     )
   }
 

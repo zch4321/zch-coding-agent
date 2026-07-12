@@ -10,6 +10,7 @@ import { createAgentRuntime } from '../runtime/create-agent-runtime'
 import { createRuntimeIdentity, sha256Json } from '../runtime/runtime-identity'
 import type { RunCompletion } from '../runtime/runtime-events'
 import type { RuntimeEventListener } from '../runtime/runtime-events'
+import type { BenchmarkAgentCase } from '../../shared/benchmark'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import { writeJsonAtomic } from '../config/atomic-file'
 import { prepareHeadlessConfig } from './config'
@@ -60,6 +61,7 @@ export interface RunHeadlessAgentOptions {
   runtimeImageDigest?: string
   eventListeners?: RuntimeEventListener[]
   benchmarkController?: HeadlessBenchmarkController
+  benchmarkCase?: BenchmarkAgentCase
 }
 
 export async function runHeadlessAgent(
@@ -156,6 +158,17 @@ export async function runHeadlessAgent(
         sessionId,
         message: options.task,
         clientRequestId: 'headless-task-1',
+        ...(options.benchmarkCase
+          ? {
+              harnessContexts: [
+                {
+                  kind: 'benchmark_case' as const,
+                  text: JSON.stringify(options.benchmarkCase, null, 2),
+                  source: `benchmark:${options.benchmarkCase.suiteId}/${options.benchmarkCase.caseId}`,
+                },
+              ],
+            }
+          : {}),
         signal: controller.signal,
       })
       options.signal?.addEventListener('abort', relayAbort, { once: true })

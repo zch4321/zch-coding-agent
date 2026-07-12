@@ -49,6 +49,8 @@ import type {
 } from './contracts'
 import { createBenchmarkFeedback } from './feedback'
 import { collectBenchmarkPatch } from './native-evaluator'
+import { toAgentCaseDescriptor } from '../adapters/native'
+import { benchmarkConversationMarkdown } from './conversation-artifact'
 import {
   aggregateBenchmarkMetrics,
   validateBenchmarkPriceSnapshot,
@@ -166,6 +168,7 @@ async function runTrial(input: {
     artifactsDirectory: workerArtifacts,
     config: input.effectiveConfig,
     task: input.input.loadedCase.manifest.task,
+    benchmarkCase: toAgentCaseDescriptor(input.input.loadedCase),
     credential: input.input.credential,
     expectedSourceCommit: input.input.expectedSourceCommit,
     caseDigest: sha256Canonical(input.input.loadedCase.identity),
@@ -280,6 +283,13 @@ async function runTrial(input: {
           priceSnapshot: input.input.priceSnapshot,
         })
       : undefined
+  const conversationMarkdown =
+    headless && trace
+      ? benchmarkConversationMarkdown({
+          trace,
+          caseId: input.input.loadedCase.manifest.id,
+        })
+      : undefined
 
   const result: BenchmarkTrialResult = {
     schemaVersion: 1,
@@ -290,6 +300,13 @@ async function runTrial(input: {
     workerStatus: worker.status,
     sessionId: headless?.sessionId,
     metrics,
+    ...(conversationMarkdown
+      ? {
+          artifacts: {
+            conversationMarkdown: 'conversation.restricted.md',
+          },
+        }
+      : {}),
     initial: { evaluation: initial.evaluation, metrics: initialMetrics },
     afterFeedback: afterFeedback
       ? {
@@ -313,6 +330,13 @@ async function runTrial(input: {
   await rm(workspace, { recursive: true, force: true })
   if (metrics) {
     await writeJsonAtomic(path.join(stagingDirectory, 'metrics.json'), metrics)
+  }
+  if (conversationMarkdown) {
+    await writeFile(
+      path.join(stagingDirectory, 'conversation.restricted.md'),
+      conversationMarkdown,
+      'utf8',
+    )
   }
   if (input.input.priceSnapshot) {
     await writeJsonAtomic(

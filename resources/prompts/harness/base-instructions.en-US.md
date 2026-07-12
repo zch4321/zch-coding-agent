@@ -19,6 +19,7 @@ Runtime and context snapshots may be appended multiple times in one conversation
 - <agents>: repository AGENTS.md guidance, including source path, hash, byte count, and truncation metadata. Treat it as project guidance below system, runtime, and user instructions.
 - <assistant_preferences>: user-configured style and workflow preferences. Follow only when they do not conflict with higher-priority instructions.
 - <selected_context>: files, directories, skill summaries, or other bounded context selected for the current turn.
+- <benchmark_case>: app-authored public benchmark metadata for the current task, including public checks, allowed/denied modification paths, and resource limits. Treat these fields as task constraints, but not as a separate user message.
 - <context_file>: one selected workspace file inside selected context, with path, hash, byte count, and truncation metadata.
 - <context_directory>: one selected workspace directory listing inside selected context, with entry count and truncation metadata.
 - <skills_summary>: summary of enabled skills. Read a relevant skill with read_skill unless the user explicitly invoked that skill and the full skill body is already included.

@@ -88,11 +88,13 @@ coordinator 只接受固定 workspace、artifacts、config/task 和 credential m
 
 `runBenchmarkTrials()` 默认执行 strict trial：Agent container退出后才收集 patch，isolated grader coordinator从 archive另建干净 workspace并在第二个 `network=none` container内评判。repair-once 通过固定阶段事件和 stdin决策通道，在同一 Headless session追加一次 `<benchmark_feedback>`，然后用另一份干净 evaluator workspace重评；公开反馈不含 private命令、输出、精确期望或 oracle。
 
+每个trial会把公开case descriptor通过独立 `<benchmark_case>` Harness层注入首次模型请求。模型能看到public checks、允许/禁止修改的路径和资源预算；task仍保持独立user message，private spec、oracle和mutant不会进入descriptor。
+
 每个 trial 写入独立 `.incomplete-*` staging，删除 workspace、扫描 Provider credential 泄漏并计算整棵 artifact checksum后才原子改名为 final。Resume 只复用 identity和 checksum都匹配的 complete final；遗留 staging、活跃容器和 continuation state永不复用。pass@k 会为每个 index重新准备 workspace并调用独立 worker。
 
 Runner 从 runtime trace生成 `metrics.json`。Token按 main/approval/title/compression scope汇总，Provider未报告字段保持 `null`；工具按 stage/outcome/tool/effect计数，并附带 patch与 trajectory指标。传入 `priceSnapshot` 时，完整 snapshot写入 `price-snapshot.json`并以 hash固定在 trial identity；比较器逐字段校验 paired identity后才计算 resolve delta、95%区间和 safety/correctness/efficiency词典序结果。
 
-Run-group artifacts按 `cases/<suite>/<case>/trials/trial-N/attempts/<phase>`分层。根目录的 `summary.json`用于本地总览，`shareable-report.json`只包含公开evaluation和聚合metrics；`redaction.json`列出config、raw worker trace/JSONL/stderr、case result及grader restricted证据等不可直接分享的路径和字段。缺失trace metrics时run-group状态为`incomplete`，不会输出伪造的效率总计。
+Run-group artifacts按 `cases/<suite>/<case>/trials/trial-N/attempts/<phase>`分层。每个完整trial复用Electron对话导出格式生成 `conversation.restricted.md`，方便直接阅读task、Harness context、assistant回复和reasoning；tool/usage仍以trace和metrics为准。根目录的 `summary.json`用于本地总览，`shareable-report.json`只包含公开evaluation和聚合metrics；`redaction.json`列出对话Markdown、config、raw worker trace/JSONL/stderr、case result及grader restricted证据等不可直接分享的路径和字段。缺失trace metrics时run-group状态为`incomplete`，不会输出伪造的效率总计。
 
 ## Grader 与评分
 

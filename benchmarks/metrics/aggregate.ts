@@ -212,7 +212,9 @@ function summarizeTools(
     }
     if (call && isTestCall(attempt.tool, call.args)) {
       if (firstTestMs === null) firstTestMs = offset
-      if (attempt.outcome === 'succeeded') finalVerificationMs = offset
+      if (attempt.outcome === 'succeeded' && attempt.tool === 'run_command') {
+        finalVerificationMs = offset
+      }
     }
   }
 
@@ -421,9 +423,27 @@ function isTestCall(tool: string, args: unknown): boolean {
   if (!['run_command', 'terminal_open', 'terminal_send'].includes(tool)) {
     return false
   }
-  return /(?:^|\s|["'])(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|\b(?:vitest|jest|pytest|go\s+test|cargo\s+test|mvn\s+test|gradle\s+test)\b/iu.test(
-    JSON.stringify(args),
+  const command = toolCommandText(args)
+  return (
+    /(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|\b(?:vitest|jest|pytest|go\s+test|cargo\s+test|mvn\s+test|gradle\s+test|dotnet\s+test|swift\s+test|mix\s+test|phpunit|ctest)\b/iu.test(
+      command,
+    ) ||
+    /\b(?:node|bun|deno|python(?:3)?)\b[^\r\n]*(?:^|[\s\\/])(?:test|tests|__tests__|e2e)(?:[\\/]|\b)|\b(?:node|bun|deno|python(?:3)?)\b[^\r\n]*(?:\.test|\.spec)\.[A-Za-z0-9]+\b/iu.test(
+      command,
+    )
   )
+}
+
+function toolCommandText(args: unknown): string {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return ''
+  const record = args as Record<string, unknown>
+  if (typeof record.command === 'string') return record.command
+  if (typeof record.data === 'string') return record.data
+  if (typeof record.executable !== 'string') return ''
+  const commandArgs = Array.isArray(record.args)
+    ? record.args.filter((value): value is string => typeof value === 'string')
+    : []
+  return [record.executable, ...commandArgs].join(' ')
 }
 
 function isTestPath(file: string): boolean {

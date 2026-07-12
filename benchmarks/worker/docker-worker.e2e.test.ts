@@ -263,8 +263,34 @@ describe.skipIf(!enabled)('Linux Docker worker', () => {
       ),
       'utf8',
     )
+    const traceEvents = trace
+      .trim()
+      .split(/\r?\n/u)
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            type?: string
+            kind?: string
+            text?: string
+          },
+      )
+    const benchmarkContext = traceEvents.find(
+      (event) =>
+        event.type === 'orchestrator.message' &&
+        event.kind === 'benchmark_case',
+    )
+    expect(benchmarkContext?.text).toContain('"allowedPaths"')
+    expect(benchmarkContext?.text).toContain('src/**')
     expect(trace).not.toContain('Café déjà')
     expect(trace).not.toContain('edge-separators')
+    const conversation = await readFile(
+      path.join(trial.directory, 'conversation.restricted.md'),
+      'utf8',
+    )
+    expect(conversation).toContain('## orchestrator')
+    expect(conversation).toContain('## user')
+    expect(conversation).toContain('## assistant')
+    expect(conversation).not.toContain('Café déjà')
     expect(
       await readFile(
         path.join(trial.directory, 'attempts', 'initial', 'redaction.json'),

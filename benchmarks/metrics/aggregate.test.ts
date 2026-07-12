@@ -33,7 +33,11 @@ describe('benchmark metric aggregation', () => {
         400,
         'success',
         'run_command',
-        { mode: 'shell', command: 'npm test' },
+        {
+          mode: 'process',
+          executable: 'node',
+          args: ['test/public.test.mjs'],
+        },
         'ok',
       ),
       attempt(10, 500, 'duplicate', 'run_command', 'execution', 'failed', {
@@ -44,7 +48,11 @@ describe('benchmark metric aggregation', () => {
         500,
         'duplicate',
         'run_command',
-        { command: 'npm test', mode: 'shell' },
+        {
+          args: ['test/public.test.mjs'],
+          executable: 'node',
+          mode: 'process',
+        },
         'error',
       ),
     ]

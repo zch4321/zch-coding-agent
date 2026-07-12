@@ -11,6 +11,7 @@ import type { ChangeHistoryStore } from '../session/change-history'
 import type { SkillsManager } from '../skills/manager'
 import type { RuntimeEventBus } from './runtime-event-bus'
 import type { RunCompletion } from './runtime-events'
+import type { RunHarnessContext } from '../session/session-types'
 
 export interface AgentRuntimeServices {
   sessions: SessionManager
@@ -62,6 +63,7 @@ export class AgentRuntime {
     message: string
     clientRequestId: string
     context?: RunContext
+    harnessContexts?: RunHarnessContext[]
     signal?: AbortSignal
   }): AgentRunHandle {
     this.#assertAvailable()

@@ -463,6 +463,7 @@ session.end     { ts }
 - 每个工具调用必须产生一个 terminal `tool.attempt`，区分 validation、permission 与 execution stage，并记录 outcome、effects、duration、输入/输出字节、截断及错误码。Schema 无效、权限拒绝、执行失败与成功不得合并为“已完成”。
 - Trial usage 必须按 main、approval、title、compression scope 汇总 prompt/completion/reasoning/cache hit/cache miss/total token。Provider 未返回的 request 或字段必须保存为 `null`/unknown，不得以零、字符数或 tokenizer 估算替代精确 usage。
 - 工具、patch 与 trajectory 指标必须覆盖 proposed/executed/succeeded/failed/denied、tool/effect 分类、重复参数签名、首次有效编辑/测试、最终验证后空转、文件与增删行、测试/二进制改动、workspace 外写入、LLM request、continuation、compact、Plan/Goal、MCP和 terminal。
+- 测试识别必须覆盖结构化process/shell参数、常见package/language runner和直接执行test/spec文件；terminal_send成功只表示输入被接受，不能作为最终验证通过时间。
 - 成本只能由显式 run-group `priceSnapshot` 的逐 usage-field rate计算；snapshot source/revision/hash必须进入 artifact 与 trial identity。任何被定价 usage 字段 unknown 时 scope和总成本也必须 unknown。
 - `costPerResolvedUsd`、tokens/tool calls per resolved必须以全部 trial 总消耗除以 resolved 数，不能丢弃失败 trial。另行报告 unresolved token/cost和 resolved duration中位数。
 - A/B 必须逐 trial匹配 suite/case identity、runtime/case/grader image、Provider/model/profile/reasoning、资源预算、protocol/feedback、trial index与 price snapshot。任一不一致必须拒绝并列出字段路径；可比较结果输出 paired delta、总体 resolve delta与置信区间，并按 safety、correctness、efficiency词典序排序。
@@ -471,9 +472,11 @@ session.end     { ts }
 
 - 必须提供独立 opt-in的 `benchmark:smoke`、`benchmark`、`benchmark:full`；默认 `npm test`、`npm run build`和 Electron E2E不得隐式构建镜像、连接 Provider或运行 benchmark。三个 preset默认分别为最多3×1、12×3、全部×5，CLI必须对 suite/case/trial数量设置硬上限。
 - CLI必须复用 Headless config和同一 Docker worker/runner/grader，不得实现第二份 Agent loop。Provider key只从 config声明的主机环境变量读取，默认经 proxy credential模式传递；命令输出、identity、config snapshot、summary和shareable report不得包含 key值。
+- 经过schema校验的公开BenchmarkCase descriptor必须以独立 `<benchmark_case>` Harness层进入首次模型请求，并在trace中记录为orchestrator context；不得拼接到用户task或伪装成 `user.message`。Agent必须能看到public checks、allowed/denied paths和资源预算，但不能看到private evaluator字段。
 - Run-group identity必须固定 preset、suite/adapter、case identity、runtime image digest、source commit、Headless config、Provider/model/profile/reasoning、protocol/feedback、trial数和price snapshot。非空输出目录只有 identity完全一致时才能恢复；trial复用仍须满足各自complete marker和artifact hash。
 - Artifact必须按 run-group/suite/case/trial/attempt分层，足以离线复核manifest、task、runtime identity、patch、grader、trace、JSONL、stderr、usage/tool metrics、泄漏扫描和最终等级。缺失trace metrics的执行必须标为incomplete，不能生成虚假效率汇总。
 - `shareable-report.json`只能包含公开evaluation、聚合metrics、comparison identity和无路径summary。Raw trace/JSONL/stderr、config snapshot、case-result、grader input/private check/command/output必须列入restricted artifact清单；redaction文件必须声明删除字段。
+- 有完整trace的trial必须复用共享conversation Markdown serializer生成 `conversation.restricted.md`，包含user/assistant/orchestrator正文和reasoning，且在leak scan与artifact hash之前写入。该文件只用于人工阅读，不得伪造tool消息，也不得进入shareable report。
 
 ---
 

@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import {
   HeadlessCliError,
   parseHeadlessArguments,
+  readHeadlessBenchmarkCase,
   readHeadlessTask,
 } from './cli'
 import { HeadlessConfigError, loadHeadlessConfig } from './config'
@@ -50,14 +51,18 @@ export async function runHeadlessMain(
 
   try {
     const args = parseHeadlessArguments(argv)
-    const [config, task] = await Promise.all([
+    const [config, task, benchmarkCase] = await Promise.all([
       loadHeadlessConfig(args.configFile),
       readHeadlessTask(args.taskFile),
+      args.benchmarkCaseFile
+        ? readHeadlessBenchmarkCase(args.benchmarkCaseFile)
+        : Promise.resolve(undefined),
     ])
     const result = await runHeadlessAgent({
       config,
       workspace: args.workspace,
       task,
+      benchmarkCase,
       artifactsDirectory: args.artifactsDirectory,
       timeoutMs: args.timeoutMs,
       output,

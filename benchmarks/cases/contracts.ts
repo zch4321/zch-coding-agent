@@ -1,4 +1,11 @@
 import { Type, type Static } from '@sinclair/typebox'
+import {
+  BenchmarkCommandSchema,
+  type BenchmarkAgentCase,
+  type BenchmarkCommand,
+} from '../../shared/benchmark'
+
+export { BenchmarkCommandSchema, type BenchmarkCommand }
 
 const IdSchema = Type.String({
   minLength: 1,
@@ -16,18 +23,6 @@ const OciDigestSchema = Type.String({
   pattern: '^sha256:[a-f0-9]{64}$',
 })
 const RelativePathSchema = Type.String({ minLength: 1, maxLength: 1_024 })
-
-export const BenchmarkCommandSchema = Type.Object(
-  {
-    executable: Type.String({ minLength: 1, maxLength: 256 }),
-    args: Type.Array(Type.String({ maxLength: 8_192 }), { maxItems: 128 }),
-    cwd: Type.Optional(RelativePathSchema),
-    timeoutMs: Type.Integer({ minimum: 100, maximum: 300_000 }),
-    maxOutputBytes: Type.Integer({ minimum: 1_024, maximum: 4_194_304 }),
-  },
-  { additionalProperties: false },
-)
-export type BenchmarkCommand = Static<typeof BenchmarkCommandSchema>
 
 export const BenchmarkCaseSchema = Type.Object(
   {
@@ -302,13 +297,4 @@ export interface LoadedBenchmarkSuite {
   cases: LoadedBenchmarkCase[]
 }
 
-export interface AgentCaseDescriptor {
-  schemaVersion: 1
-  caseId: string
-  suiteId: string
-  suiteRevision: string
-  task: string
-  publicChecks: BenchmarkCase['publicChecks']
-  modificationScope: BenchmarkCase['modificationScope']
-  resources: BenchmarkCase['resources']
-}
+export type AgentCaseDescriptor = BenchmarkAgentCase
