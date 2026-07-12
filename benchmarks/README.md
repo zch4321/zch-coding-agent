@@ -68,6 +68,8 @@ npm run benchmark:external -- --config benchmark-config.local --seed trial-1
 
 运行进度写入 stderr，包括 external 候选项目与镜像准备、当前 case/project、trial 序号、L0–L5 结果、是否解决、耗时和缓存复用状态。stdout 仍只输出最终单行 JSON，便于脚本稳定解析和管道处理。
 
+External 镜像构建、拉取、workspace volume 初始化和 baseline/oracle 兼容性检查会输出阶段变化；单个候选准备超过15秒时持续输出心跳。任务仓库的所有权只在临时 named volume 中调整，不会通过递归 `chown` 复制到派生镜像层。
+
 外部运行开始时解析最新 release，并把两个 dataset commit、adapter revision、随机 seed、case hash、官方任务 image digest、ZCH派生 image digest和最终16项写入 `cohort.json`。Monthly固定4项bugfix和4项non-bugfix；SWE-rebench按patch规模轮转；全 cohort 同仓库最多一项。无效字段、镜像不可用、资源越界和兼容性失败按固定随机顺序递补并记录排除原因，不执行prompt/test alignment、审核Agent或人工批准。每个新case/image只缓存一次baseline未解决与oracle已解决的机器兼容性检查。
 
 真实数据源兼容验证使用 `npm run test:benchmark-external-real`，它会构建worker image并至少验证两个来源各一项的环境、overlay和baseline/oracle verifier接线；不进入默认 `npm test`，也不以skip测试占位。

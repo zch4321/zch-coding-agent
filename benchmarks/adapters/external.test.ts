@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { sha256Bytes } from '../cases/hash'
 import type {
@@ -10,7 +12,10 @@ import { sha256Canonical } from '../cohort/hash'
 import { candidateHash } from '../cohort/selection'
 import type { IsolatedGraderRunResult } from '../grader/contracts'
 import { scoreIsolatedGrader } from '../grader/scoring'
-import { parseExternalVerifier } from './external-docker-runtime'
+import {
+  externalVolumeInitializerArgs,
+  parseExternalVerifier,
+} from './external-docker-runtime'
 import {
   loadExternalBenchmarkSuites,
   type ExternalAdapterRuntime,
@@ -19,6 +24,26 @@ import {
 const digest = (character: string) => `sha256:${character.repeat(64)}`
 
 describe('external benchmark adapters', () => {
+  it('keeps recursive workspace ownership changes out of image layers', async () => {
+    const dockerfile = await readFile(
+      path.resolve('benchmarks/docker/external-overlay.Dockerfile'),
+      'utf8',
+    )
+
+    expect(dockerfile).not.toMatch(/chown\s+-R/iu)
+    expect(dockerfile).toContain('chown 10001:10001 /home/zch')
+
+    const args = externalVolumeInitializerArgs({
+      container: 'volume-init',
+      image: 'task-image',
+      volume: 'workspace-volume',
+      workspace: '/app/project with spaces',
+    })
+    expect(args).toContain('chown -R 10001:10001 -- "$1"')
+    expect(args.at(-1)).toBe('/app/project with spaces')
+    expect(args.join(' ')).not.toContain('chown -R 10001:10001 -- /app/project')
+  })
+
   it('loads a pinned 8+8 cohort while keeping gold and verifier data outside the Agent descriptor', async () => {
     const candidates = fixtureCandidates()
     const cohort = fixtureCohort(candidates)

@@ -91,6 +91,7 @@ export interface BenchmarkCliOptions {
     cacheDirectory: string
     runtimeImage: string
     sourceCommit: string
+    onProgress?: (message: string) => void
   }) => ExternalAdapterRuntime & {
     resolveImage: ExternalDockerRuntime['resolveImage']
   }
@@ -287,11 +288,15 @@ export async function runBenchmarkCli(
           cacheDirectory: path.join(args.benchmarkRoot, '.cache', 'external'),
           runtimeImage: image,
           sourceCommit,
+          onProgress: (message) =>
+            writeProgress(errorOutput, terminalText(message)),
         }) ??
         new ExternalDockerRuntime({
           cacheDirectory: path.join(args.benchmarkRoot, '.cache', 'external'),
           runtimeImage: image,
           sourceCommit,
+          onProgress: (message) =>
+            writeProgress(errorOutput, terminalText(message)),
         })
     }
     const external =
@@ -304,7 +309,12 @@ export async function runBenchmarkCli(
             onCandidate: (candidate) =>
               writeProgress(
                 errorOutput,
-                `preparing ${candidate.source} project ${candidate.repository} (${candidate.caseId})`,
+                `preparing ${terminalText(candidate.source)} project ${terminalText(candidate.repository)} (${terminalText(candidate.caseId)})`,
+              ),
+            onCandidateHeartbeat: (candidate, elapsedMs) =>
+              writeProgress(
+                errorOutput,
+                `still preparing ${terminalText(candidate.repository)} (${terminalText(candidate.caseId)}), ${formatDuration(elapsedMs)} elapsed`,
               ),
           })
         : undefined
@@ -525,11 +535,31 @@ async function prepareExternalRun(input: {
   options: BenchmarkCliOptions
   now: Date
   onCandidate?: (candidate: ExternalBenchmarkCandidate) => void
+  onCandidateHeartbeat?: (
+    candidate: ExternalBenchmarkCandidate,
+    elapsedMs: number,
+  ) => void
   runtime: ExternalAdapterRuntime & {
     resolveImage: ExternalDockerRuntime['resolveImage']
   }
 }): Promise<{ cohort: BenchmarkCohort; suites: LoadedAdapterSuite[] }> {
   const runtime = input.runtime
+  const resolveImage = async (candidate: ExternalBenchmarkCandidate) => {
+    input.onCandidate?.(candidate)
+    const startedMs = performance.now()
+    const heartbeat = setInterval(() => {
+      input.onCandidateHeartbeat?.(
+        candidate,
+        Math.max(0, performance.now() - startedMs),
+      )
+    }, 15_000)
+    heartbeat.unref()
+    try {
+      return await runtime.resolveImage(candidate)
+    } finally {
+      clearInterval(heartbeat)
+    }
+  }
   const cohort = input.args.cohortFile
     ? await loadCohortFile(input.args.cohortFile)
     : undefined
@@ -547,8 +577,7 @@ async function prepareExternalRun(input: {
           `Pinned cohort case is unavailable: ${cohortCase.caseId}`,
         )
       }
-      input.onCandidate?.(candidate)
-      const image = await runtime.resolveImage(candidate)
+      const image = await resolveImage(candidate)
       if (
         !image.eligible ||
         image.officialDigest !== cohortCase.officialImage.digest ||
@@ -573,8 +602,7 @@ async function prepareExternalRun(input: {
         })),
       ),
       resolveImage: (candidate) => {
-        input.onCandidate?.(candidate)
-        return runtime.resolveImage(candidate)
+        return resolveImage(candidate)
       },
     })
   }

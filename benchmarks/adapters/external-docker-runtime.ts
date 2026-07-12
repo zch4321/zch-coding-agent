@@ -48,7 +48,7 @@ import {
 const execFileAsync = promisify(execFile)
 const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 const MAX_VERIFIER_OUTPUT_BYTES = 4 * 1024 * 1024
-const EXTERNAL_COMPATIBILITY_REVISION = 'external-compatibility-v4'
+const EXTERNAL_COMPATIBILITY_REVISION = 'external-compatibility-v5'
 
 interface ExternalImageInfo {
   taskImage: string
@@ -66,6 +66,7 @@ export interface ExternalDockerRuntimeOptions {
   sourceTreeState?: string
   overlayDockerfile?: string
   fetch?: typeof fetch
+  onProgress?: (message: string) => void
 }
 
 export class ExternalDockerRuntime implements ExternalAdapterRuntime {
@@ -328,18 +329,22 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
       candidate.privatePayload.kind === 'monthly-swebench'
         ? await this.#buildMonthlyTaskImage(candidate)
         : await this.#pullRebenchImage(candidate)
+    const overlayDockerfile = path.resolve(
+      this.#options.overlayDockerfile ??
+        'benchmarks/docker/external-overlay.Dockerfile',
+    )
     const agentImage = `zch-external-build/${candidate.source}:${candidateHash(candidate).slice(0, 12)}-${this.#options.sourceCommit.slice(0, 12)}`
     if (!(await imageExists(agentImage))) {
+      this.#progress(
+        `building external overlay for ${candidate.source}/${candidate.caseId}`,
+      )
       await runDockerCommand(
         [
           'build',
           '--platform',
           'linux/amd64',
           '--file',
-          path.resolve(
-            this.#options.overlayDockerfile ??
-              'benchmarks/docker/external-overlay.Dockerfile',
-          ),
+          overlayDockerfile,
           '--build-arg',
           `ZCH_RUNTIME_IMAGE=${this.#options.runtimeImage}`,
           '--build-arg',
@@ -352,11 +357,14 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
           `ZCH_SOURCE_TREE_STATE=${this.#options.sourceTreeState ?? 'unknown'}`,
           '--tag',
           agentImage,
-          '.',
+          path.dirname(overlayDockerfile),
         ],
         { timeoutMs: 20 * 60_000, maxOutputBytes: 8 * 1024 * 1024 },
       )
       this.#trackCreatedImage(agentImage)
+      this.#progress(
+        `external overlay ready for ${candidate.source}/${candidate.caseId}`,
+      )
     }
     const nodeCheck = await runDockerCommand([
       'run',
@@ -403,6 +411,9 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     const taskDirectory = path.join(releaseDirectory, 'tasks', candidate.caseId)
     await mkdir(path.dirname(taskDirectory), { recursive: true })
     if (!(await exists(archivePath))) {
+      this.#progress(
+        `downloading Monthly-SWEBench archive for ${candidate.caseId}`,
+      )
       const base = `https://huggingface.co/datasets/${candidate.dataset}/resolve/${candidate.commit}`
       const sums = await fetchBounded(
         this.#options.fetch ?? fetch,
@@ -425,6 +436,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
         throw new Error('Monthly archive checksum mismatch')
       await mkdir(releaseDirectory, { recursive: true })
       await writeFile(archivePath, archive)
+      this.#progress('Monthly-SWEBench archive cached')
     }
     if (!(await exists(taskDirectory))) {
       await execFileAsync(
@@ -452,6 +464,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     candidate.language = inferMonthlyLanguage(taskToml)
     const image = `zch-task/monthly:${candidateHash(candidate).slice(0, 20)}`
     if (!(await imageExists(image))) {
+      this.#progress(`building task image for ${candidate.caseId}`)
       await runDockerCommand(
         [
           'build',
@@ -466,6 +479,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
         { timeoutMs: 30 * 60_000, maxOutputBytes: 8 * 1024 * 1024 },
       )
       this.#trackCreatedImage(image)
+      this.#progress(`task image ready for ${candidate.caseId}`)
     }
     return { image, workspace: await imageWorkspace(image), taskDirectory }
   }
@@ -479,6 +493,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
       const officialImageExisted = await imageExists(
         candidate.officialImageReference,
       )
+      this.#progress(`pulling task image for ${candidate.caseId}`)
       await runDockerCommand(
         ['pull', '--platform', 'linux/amd64', candidate.officialImageReference],
         {
@@ -496,6 +511,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
         image,
       ])
       this.#trackCreatedImage(image)
+      this.#progress(`task image ready for ${candidate.caseId}`)
     }
     return {
       image,
@@ -510,7 +526,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     const directory = path.join(this.#options.cacheDirectory, 'compatibility')
     const file = path.join(
       directory,
-      `${candidateHash(candidate)}-${info.taskImageDigest.slice(7)}-${EXTERNAL_COMPATIBILITY_REVISION}.json`,
+      `${candidateHash(candidate)}-${info.taskImageDigest.slice(7)}-${info.agentImageDigest.slice(7)}-${EXTERNAL_COMPATIBILITY_REVISION}.json`,
     )
     if (await exists(file)) {
       const cached = JSON.parse(await readFile(file, 'utf8')) as {
@@ -530,6 +546,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
       compatibilityRevision: EXTERNAL_COMPATIBILITY_REVISION,
       caseHash: candidateHash(candidate),
       officialImageDigest: info.taskImageDigest,
+      agentImageDigest: info.agentImageDigest,
       baselineResolved,
       oracleResolved,
       diagnostics: {
@@ -554,6 +571,9 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
       `${candidate.caseId}-${oracle ? 'oracle' : 'baseline'}`,
     )
     try {
+      this.#progress(
+        `running ${oracle ? 'oracle' : 'baseline'} compatibility for ${candidate.caseId}`,
+      )
       await this.#initializeVolume(volume, info.agentImage, info.workspace)
       if (candidate.privatePayload.kind === 'swe-rebench') {
         await writeFile(
@@ -566,13 +586,17 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
             candidate.privatePayload.solutionPatch,
           )
       }
-      return await this.#executeVerifier({
+      const result = await this.#executeVerifier({
         candidate,
         info,
         volume,
         privateDirectory,
         oracle,
       })
+      this.#progress(
+        `${oracle ? 'oracle' : 'baseline'} compatibility completed for ${candidate.caseId}`,
+      )
+      return result
     } finally {
       await this.#removeVolume(volume)
       await rm(privateDirectory, { recursive: true, force: true })
@@ -694,24 +718,22 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     image: string,
     workspace: string,
   ): Promise<void> {
+    this.#progress(`initializing writable workspace volume at ${workspace}`)
     await runDockerCommand(['volume', 'create', volume])
     this.#volumes.add(volume)
     const container = `zch-volume-init-${randomUUID().replaceAll('-', '').slice(0, 12)}`
     try {
-      await runDockerCommand([
-        'create',
-        '--name',
-        container,
-        '--entrypoint',
-        '/bin/sh',
-        '--mount',
-        volumeMount(volume, workspace),
-        image,
-        '-c',
-        'true',
-      ])
+      await runDockerCommand(
+        externalVolumeInitializerArgs({
+          container,
+          image,
+          volume,
+          workspace,
+        }),
+      )
       await runDockerCommand(['start', container])
       await runDockerCommand(['wait', container], { allowFailure: true })
+      this.#progress(`workspace volume ready at ${workspace}`)
     } finally {
       await runDockerCommand(['rm', '--force', container], {
         allowFailure: true,
@@ -737,12 +759,42 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
       this.#createdImageReferences.push(reference)
     }
   }
+
+  #progress(message: string): void {
+    try {
+      this.#options.onProgress?.(message)
+    } catch {
+      // Progress reporting must never change benchmark behavior.
+    }
+  }
 }
 
 interface VerifierResult {
   command: DockerCommandResult
   regressionPassed: boolean
   targetResults: boolean[]
+}
+
+export function externalVolumeInitializerArgs(input: {
+  container: string
+  image: string
+  volume: string
+  workspace: string
+}): string[] {
+  return [
+    'create',
+    '--name',
+    input.container,
+    '--entrypoint',
+    '/bin/sh',
+    '--mount',
+    volumeMount(input.volume, input.workspace),
+    input.image,
+    '-c',
+    'chown -R 10001:10001 -- "$1"',
+    'zch-volume-init',
+    input.workspace,
+  ]
 }
 
 function verifierResolved(result: VerifierResult): boolean {

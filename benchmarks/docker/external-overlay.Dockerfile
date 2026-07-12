@@ -12,7 +12,7 @@ ARG ZCH_SOURCE_TREE_STATE=unknown
 RUN test -n "${TASK_WORKSPACE}" \
   && test -d "${TASK_WORKSPACE}" \
   && mkdir -p /home/zch \
-  && chown -R 10001:10001 "${TASK_WORKSPACE}" /home/zch
+  && chown 10001:10001 /home/zch
 COPY --from=zch-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=zch-runtime /usr/bin/tini /usr/bin/tini
 COPY --from=zch-runtime /usr/local/bin/zch-worker /usr/local/bin/zch-worker

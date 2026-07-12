@@ -347,31 +347,34 @@ describe('benchmark CLI', () => {
             exclusions: [],
           },
         ],
-        createExternalRuntime: () => ({
-          resolveImage: async (candidate) => ({
-            eligible: true,
-            officialReference: candidate.officialImageReference,
-            officialDigest: `sha256:${'c'.repeat(64)}`,
-            agentImageDigest: `sha256:${'d'.repeat(64)}`,
-          }),
-          prepare: async ({ destination }) => ({
-            directory: destination,
-            mount: {
-              kind: 'volume',
-              name: 'fixture-volume',
-              containerPath: '/testbed',
+        createExternalRuntime: (runtimeOptions) => {
+          runtimeOptions.onProgress?.('building fixture image')
+          return {
+            resolveImage: async (candidate) => ({
+              eligible: true,
+              officialReference: candidate.officialImageReference,
+              officialDigest: `sha256:${'c'.repeat(64)}`,
+              agentImageDigest: `sha256:${'d'.repeat(64)}`,
+            }),
+            prepare: async ({ destination }) => ({
+              directory: destination,
+              mount: {
+                kind: 'volume',
+                name: 'fixture-volume',
+                containerPath: '/testbed',
+              },
+            }),
+            capturePatch: async () => '',
+            grade: async () => {
+              throw new Error('not run by the CLI fixture')
             },
-          }),
-          capturePatch: async () => '',
-          grade: async () => {
-            throw new Error('not run by the CLI fixture')
-          },
-          dispose: async () => undefined,
-          cleanupImages: async () => {
-            cleanupCalls += 1
-            return { removed: 3, failed: 0 }
-          },
-        }),
+            dispose: async () => undefined,
+            cleanupImages: async () => {
+              cleanupCalls += 1
+              return { removed: 3, failed: 0 }
+            },
+          }
+        },
         groupRunner: async (input) => {
           received = input
           return fakeResult(outputDirectory)
@@ -394,6 +397,7 @@ describe('benchmark CLI', () => {
     expect(stderr).toContain(
       '[benchmark] image cleanup completed: 3 removed, 0 failed',
     )
+    expect(stderr).toContain('[benchmark] building fixture image')
   })
 })
 
