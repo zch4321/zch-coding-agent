@@ -33,6 +33,23 @@ import type {
 import { normalizeLlmUsage } from '../providers/usage'
 import type { McpToolGateway } from '../tools/mcp-tools'
 
+type ToolAttemptStage = 'validation' | 'permission' | 'execution'
+
+function attemptOutcome(
+  stage: ToolAttemptStage,
+  result: ToolResult,
+): 'rejected' | 'succeeded' | 'failed' | 'denied' | 'cancelled' | 'timeout' {
+  if (result.status === 'denied') return 'denied'
+  if (result.status === 'cancelled') return 'cancelled'
+  if (result.status === 'timeout') return 'timeout'
+  if (stage !== 'execution') return 'rejected'
+  return result.status === 'ok' ? 'succeeded' : 'failed'
+}
+
+function serializedBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(toJsonValue(value)), 'utf8')
+}
+
 export class SessionToolRunner {
   readonly #configStore: ConfigStore
   readonly #pluginBus: PluginEventBus | undefined
@@ -102,6 +119,8 @@ export class SessionToolRunner {
       let call = providerCall
       let definitionOverride: ToolDefinition | undefined
       let resolutionFailure: ToolResult | undefined
+      let attemptStage: ToolAttemptStage = 'validation'
+      let attemptEffects: string[] = []
       const resolution = this.#mcpGateway?.resolveCall(session, providerCall)
       if (resolution?.matched) {
         if (resolution.ok) {
@@ -142,8 +161,11 @@ export class SessionToolRunner {
           )
 
           if (!inspected.ok) {
+            attemptEffects = [...(inspected.definition?.effects ?? [])]
             result = inspected.result
           } else {
+            attemptStage = 'permission'
+            attemptEffects = [...inspected.definition.effects]
             const config = this.#configStore.getPublicConfig()
             const configuredApproverProvider = getProviderConfig(
               config,
@@ -286,28 +308,31 @@ export class SessionToolRunner {
                 ...(toJsonValue(preflight.signals) as JsonValue[]),
               ]
 
-              result = preflight.result
-                ? preflight.result
-                : await this.#toolExecutor.execute(
-                    authorization.approvedCall,
-                    {
-                      sessionId: session.sessionId,
-                      runId: run.runId,
-                      workspace: {
-                        canonicalPath: session.workspace,
-                      },
+              if (preflight.result) {
+                result = preflight.result
+              } else {
+                attemptStage = 'execution'
+                result = await this.#toolExecutor.execute(
+                  authorization.approvedCall,
+                  {
+                    sessionId: session.sessionId,
+                    runId: run.runId,
+                    workspace: {
+                      canonicalPath: session.workspace,
                     },
-                    run.controller.signal,
-                    hasSideEffects(inspected.definition)
-                      ? (settlement) => {
-                          run.pendingSideEffects.add(settlement)
-                          void settlement.then(() =>
-                            run.pendingSideEffects.delete(settlement),
-                          )
-                        }
-                      : undefined,
-                    definitionOverride,
-                  )
+                  },
+                  run.controller.signal,
+                  hasSideEffects(inspected.definition)
+                    ? (settlement) => {
+                        run.pendingSideEffects.add(settlement)
+                        void settlement.then(() =>
+                          run.pendingSideEffects.delete(settlement),
+                        )
+                      }
+                    : undefined,
+                  definitionOverride,
+                )
+              }
             }
           }
         }
@@ -357,6 +382,28 @@ export class SessionToolRunner {
         providerResult = toolFailure(error, run.controller.signal)
       }
 
+      const durationMs = performance.now() - startedAt
+      const attempt = {
+        type: 'tool.attempt' as const,
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: call.id,
+        tool: call.toolId,
+        stage: attemptStage,
+        outcome: attemptOutcome(attemptStage, result),
+        effects: attemptEffects,
+        durationMs,
+        inputBytes: serializedBytes(call.args),
+        outputBytes:
+          'totalBytes' in result && result.totalBytes !== undefined
+            ? result.totalBytes
+            : serializedBytes(result),
+        truncated: 'truncated' in result && result.truncated === true,
+        ...(result.status === 'error' ? { errorCode: result.code } : {}),
+      }
+      await session.logger.write(attempt)
+      this.#emit(session, attempt)
+
       await session.logger.write({
         type: 'tool.call',
         sessionId: session.sessionId,
@@ -368,7 +415,7 @@ export class SessionToolRunner {
         approvedBy,
         policySignals,
         diffHash,
-        durationMs: performance.now() - startedAt,
+        durationMs,
         totalBytes: 'totalBytes' in result ? result.totalBytes : undefined,
         truncated: 'truncated' in result ? result.truncated : undefined,
       })

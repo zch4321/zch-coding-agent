@@ -135,4 +135,4 @@ npm run test:real
 
 ## 当前状态
 
-当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity、Linux Docker worker、BenchmarkCase v1、strict/repair-once runner、隔离 grader、L0–L5评分与 trace 基础能力。后续方向包括 benchmark效率指标、多 Provider、插件加载器和 IDE 级编辑能力。
+当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity、Linux Docker worker、BenchmarkCase v1、strict/repair-once runner、隔离 grader、L0–L5评分，以及 unknown-aware usage/cost/tool指标与 paired comparison。后续方向包括正式 benchmark命令与档位、多 Provider、插件加载器和 IDE 级编辑能力。

@@ -96,7 +96,14 @@ describe('SessionManager approvals', () => {
       .split('\n')
       .map((line) => JSON.parse(line) as Record<string, unknown>)
     const toolCall = trace.find((event) => event.type === 'tool.call')
+    const toolAttempt = trace.find((event) => event.type === 'tool.attempt')
 
+    expect(toolAttempt).toMatchObject({
+      tool: 'apply_patch',
+      stage: 'execution',
+      outcome: 'succeeded',
+      effects: ['filesystem.write'],
+    })
     expect(toolCall).toMatchObject({
       tool: 'apply_patch',
       approvedBy: 'policy',

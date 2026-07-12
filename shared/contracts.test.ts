@@ -50,6 +50,25 @@ describe('shared runtime contracts', () => {
     expect(
       validateAgentEvent({
         schemaVersion: 1,
+        type: 'tool.attempt',
+        sessionId,
+        runId,
+        callId,
+        tool: 'read_file',
+        stage: 'execution',
+        outcome: 'succeeded',
+        effects: ['filesystem.read'],
+        durationMs: 1,
+        inputBytes: 10,
+        outputBytes: 20,
+        truncated: false,
+        seq: 2,
+        ts: '2026-06-15T00:00:00.500Z',
+      } satisfies AgentEvent),
+    ).toBe(true)
+    expect(
+      validateAgentEvent({
+        schemaVersion: 1,
         type: 'tool.completed',
         sessionId,
         runId,
@@ -61,7 +80,7 @@ describe('shared runtime contracts', () => {
           reason: 'Read-only bounded action',
           valid: true,
         },
-        seq: 2,
+        seq: 3,
         ts: '2026-06-15T00:00:01.000Z',
       } satisfies AgentEvent),
     ).toBe(true)

@@ -3,6 +3,11 @@ import type {
   HeadlessResult,
 } from '../../electron/headless/contracts'
 import type { LoadedBenchmarkCase } from '../cases/contracts'
+import type {
+  BenchmarkComparisonIdentity,
+  BenchmarkPriceSnapshot,
+  BenchmarkTrialMetrics,
+} from '../metrics/contracts'
 import type { IsolatedGraderRunner } from '../grader/coordinator'
 import type {
   DockerWorkerCredential,
@@ -129,6 +134,8 @@ export interface BenchmarkTrialIdentity {
   protocol: BenchmarkRunnerProtocol
   feedbackVisibility?: BenchmarkFeedbackVisibility
   trialIndex: number
+  priceSnapshotSha256?: string
+  comparisonIdentity: BenchmarkComparisonIdentity
 }
 
 export interface BenchmarkTrialResult {
@@ -139,6 +146,7 @@ export interface BenchmarkTrialResult {
   workerRunId: string
   workerStatus: DockerWorkerResult['status']
   sessionId?: string
+  metrics?: BenchmarkTrialMetrics
   initial: {
     evaluation: BenchmarkEvaluationResult
     metrics?: BenchmarkMetricSnapshot
@@ -160,6 +168,7 @@ export interface BenchmarkTrialsResult {
   protocol: BenchmarkRunnerProtocol
   trials: Array<{
     directory: string
+    identity: BenchmarkTrialIdentity
     result: BenchmarkTrialResult
     reused: boolean
   }>
@@ -184,4 +193,5 @@ export interface RunBenchmarkTrialsInput {
   signal?: AbortSignal
   workerRunner?: DockerWorkerRunner
   graderRunner?: IsolatedGraderRunner
+  priceSnapshot?: BenchmarkPriceSnapshot
 }

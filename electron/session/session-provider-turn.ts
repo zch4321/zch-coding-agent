@@ -177,6 +177,7 @@ export class SessionProviderTurnRunner {
         sessionId: session.sessionId,
         runId: run.runId,
         callId: llmCallId,
+        scope: 'main',
         normalizedMessages: snapshot.normalizedMessages,
         providerRequest: snapshot.providerRequest,
         requestBytes: snapshot.requestBytes,

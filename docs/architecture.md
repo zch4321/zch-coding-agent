@@ -161,6 +161,14 @@ Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 
 
 `benchmarks/grader/scoring.ts` 区分 unsupported、invalid、attempted和 graded，先应用 patch、sandbox、identity、cleanup、credential等硬门禁，再计算 L0–L5。L4/L5按 manifest行为组而非测试数量计算，`groupMacroScore`对组做宏平均；全部 critical组与公开回归通过才可 L5，且任何硬门禁失败都不能 resolved。仓库内 native evaluator仅保留为 deterministic单元测试 adapter，不再产生正式 runner结果。
 
+### 3.7 Benchmark 指标、成本与配对比较
+
+`SessionToolRunner` 在每次工具终态写入 `tool.attempt`，记录 canonical tool、validation/permission/execution stage、outcome、effects、duration、输入输出字节、截断和错误码；`tool.call` 继续保留实际参数与结果。`llm.request` 额外标记 main/compression scope，approval 调用可由 approval trace 与 usage 对齐，因此缺失 Provider usage 的 request 会明确形成 unknown，而不是按文本长度估算或累加成零。
+
+`benchmarks/metrics/aggregate.ts` 从 trace、Agent JSONL、patch 和 Headless duration 生成 trial metrics：按 scope 汇总 token，按 tool/effect 汇总工具终态，计算重复 canonical 参数签名、首次编辑/测试、最终验证后空转、patch 规模及 trajectory 计数。只有显式固定的 `priceSnapshot` 才计算成本；snapshot 原文、来源 revision 和 hash 一同进入 artifacts/identity，任何被定价字段缺失都会使相应成本保持 unknown。
+
+`benchmarks/metrics/compare.ts` 使用全部 trial 成本计算 `costPerResolvedUsd`，同时保留 unresolved 的 token/成本消耗。A/B 先逐 trial 校验 case、runtime/case/grader image、Provider/model/profile/reasoning、预算、protocol、trial index 和 price snapshot，再输出 paired delta、总体 resolve delta与 95%区间。排序固定按 hard-gate safety、correctness、efficiency 的词典序，效率不参与 correctness 得分。
+
 ---
 
 ## 4. 配置、凭据与模型

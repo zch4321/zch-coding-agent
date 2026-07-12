@@ -9,11 +9,18 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import path from 'node:path'
+import type { AgentEvent } from '../../shared/agent-events'
 import { writeJsonAtomic } from '../../electron/config/atomic-file'
 import {
   HeadlessResultSchema,
+  HeadlessStreamEventSchema,
   type HeadlessResult,
+  type HeadlessStreamEvent,
 } from '../../electron/headless/contracts'
+import {
+  TraceEventSchema,
+  type TraceEvent,
+} from '../../electron/logging/events'
 import { compileSchema } from '../../electron/schema-validator'
 import { sha256Bytes } from '../cases/hash'
 import { prepareBenchmarkWorkspace } from '../cases/prepare'
@@ -42,11 +49,17 @@ import type {
 } from './contracts'
 import { createBenchmarkFeedback } from './feedback'
 import { collectBenchmarkPatch } from './native-evaluator'
+import {
+  aggregateBenchmarkMetrics,
+  validateBenchmarkPriceSnapshot,
+} from '../metrics/aggregate'
 
 const MAX_TRIALS = 100
 const MAX_RESULT_BYTES = 2 * 1024 * 1024
 const MAX_LEAK_SCAN_BYTES = 64 * 1024 * 1024
 const validateHeadlessResult = compileSchema(HeadlessResultSchema)
+const validateTraceEvent = compileSchema(TraceEventSchema)
+const validateHeadlessStreamEvent = compileSchema(HeadlessStreamEventSchema)
 
 interface AttemptCapture {
   patch: string
@@ -112,7 +125,12 @@ async function runTrial(input: {
   const identitySha256 = sha256Canonical(input.identity)
   const resumed = await readCompletedTrial(finalDirectory, identitySha256)
   if (resumed)
-    return { directory: finalDirectory, result: resumed, reused: true }
+    return {
+      directory: finalDirectory,
+      identity: input.identity,
+      result: resumed,
+      reused: true,
+    }
   if (await exists(finalDirectory)) {
     throw new Error(`Benchmark trial directory is incomplete: ${trialName}`)
   }
@@ -250,6 +268,19 @@ async function runTrial(input: {
     await finalizeAttempt(afterFeedback, input.input.loadedCase, trialGates)
   }
 
+  const trace = await readBenchmarkTrace(workerArtifacts)
+  const agentEvents = await readBenchmarkAgentEvents(workerArtifacts)
+  const metrics =
+    headless && trace
+      ? aggregateBenchmarkMetrics({
+          trace,
+          agentEvents,
+          patch: (afterFeedback ?? initial).patch,
+          durationMs: headless.durationMs,
+          priceSnapshot: input.input.priceSnapshot,
+        })
+      : undefined
+
   const result: BenchmarkTrialResult = {
     schemaVersion: 1,
     identitySha256,
@@ -258,6 +289,7 @@ async function runTrial(input: {
     workerRunId: worker.runId,
     workerStatus: worker.status,
     sessionId: headless?.sessionId,
+    metrics,
     initial: { evaluation: initial.evaluation, metrics: initialMetrics },
     afterFeedback: afterFeedback
       ? {
@@ -279,6 +311,15 @@ async function runTrial(input: {
     completedAt: new Date().toISOString(),
   }
   await rm(workspace, { recursive: true, force: true })
+  if (metrics) {
+    await writeJsonAtomic(path.join(stagingDirectory, 'metrics.json'), metrics)
+  }
+  if (input.input.priceSnapshot) {
+    await writeJsonAtomic(
+      path.join(stagingDirectory, 'price-snapshot.json'),
+      input.input.priceSnapshot,
+    )
+  }
   let leakScan: Awaited<ReturnType<typeof scanArtifactsForCredential>>
   try {
     leakScan = await scanArtifactsForCredential({
@@ -304,7 +345,12 @@ async function runTrial(input: {
     artifactsSha256,
   } satisfies CompleteMarker)
   await rename(stagingDirectory, finalDirectory)
-  return { directory: finalDirectory, result, reused: false }
+  return {
+    directory: finalDirectory,
+    identity: input.identity,
+    result,
+    reused: false,
+  }
 }
 
 async function captureAttempt(input: {
@@ -626,6 +672,56 @@ async function readHeadlessResult(
   }
 }
 
+async function readBenchmarkTrace(
+  artifactsDirectory: string,
+): Promise<TraceEvent[] | undefined> {
+  try {
+    const files = (await listFiles(artifactsDirectory)).filter(
+      (file) =>
+        file.endsWith('.jsonl') &&
+        (file.includes('/traces/') || file === 'trace.jsonl'),
+    )
+    if (files.length !== 1) return undefined
+    const values = await readJsonLinesBounded(
+      path.join(artifactsDirectory, files[0]!),
+    )
+    if (!values.every((value) => validateTraceEvent(value))) return undefined
+    return values as TraceEvent[]
+  } catch {
+    return undefined
+  }
+}
+
+async function readBenchmarkAgentEvents(
+  artifactsDirectory: string,
+): Promise<AgentEvent[] | undefined> {
+  try {
+    const values = await readJsonLinesBounded(
+      path.join(artifactsDirectory, 'stdout.jsonl'),
+    )
+    if (!values.every((value) => validateHeadlessStreamEvent(value))) {
+      return undefined
+    }
+    return (values as HeadlessStreamEvent[]).flatMap((event) =>
+      event.type === 'agent.event' ? [event.event] : [],
+    )
+  } catch {
+    return undefined
+  }
+}
+
+async function readJsonLinesBounded(filePath: string): Promise<unknown[]> {
+  const raw = await readFile(filePath)
+  if (raw.byteLength > MAX_LEAK_SCAN_BYTES) {
+    throw new Error('Benchmark JSONL artifact exceeds its byte limit')
+  }
+  return raw
+    .toString('utf8')
+    .split(/\r?\n/u)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as unknown)
+}
+
 function subtractMetrics(
   cumulative: BenchmarkMetricSnapshot,
   initial: BenchmarkMetricSnapshot,
@@ -705,6 +801,22 @@ function createTrialIdentity(input: {
   trialIndex: number
 }): BenchmarkTrialIdentity {
   const manifest = input.input.loadedCase.manifest
+  const provider = input.effectiveConfig.provider
+  if (input.input.priceSnapshot) {
+    validateBenchmarkPriceSnapshot(input.input.priceSnapshot)
+  }
+  if (
+    input.input.priceSnapshot &&
+    (input.input.priceSnapshot.providerId !== provider.id ||
+      input.input.priceSnapshot.model !== provider.model)
+  ) {
+    throw new Error(
+      'Benchmark price snapshot provider/model does not match the trial config',
+    )
+  }
+  const priceSnapshotSha256 = input.input.priceSnapshot
+    ? sha256Canonical(input.input.priceSnapshot)
+    : undefined
   return {
     schemaVersion: 1,
     suiteId: manifest.suite.id,
@@ -721,6 +833,31 @@ function createTrialIdentity(input: {
     protocol: input.protocol,
     feedbackVisibility: input.feedbackVisibility,
     trialIndex: input.trialIndex,
+    priceSnapshotSha256,
+    comparisonIdentity: {
+      suiteIdentitySha256: input.input.suiteIdentitySha256,
+      caseIdentitySha256: sha256Canonical(input.input.loadedCase.identity),
+      runtimeImageDigest: input.runtimeImageDigest,
+      caseImageDigest: manifest.caseImage.digest,
+      graderImageDigest: input.runtimeImageDigest,
+      providerId: provider.id,
+      model: provider.model,
+      profile: provider.profile ?? 'generic',
+      reasoning: provider.reasoning ?? 'high',
+      budget: {
+        wallTimeMs: manifest.resources.wallTimeMs,
+        cpus: manifest.resources.cpus,
+        memoryBytes: manifest.resources.memoryBytes,
+        pids: manifest.resources.pids,
+        diskBytes: manifest.resources.diskBytes,
+        maxAgentSteps: input.effectiveConfig.limits!.maxStepsPerRun!,
+        maxContextTokens: input.effectiveConfig.limits!.maxContextTokens!,
+      },
+      protocol: input.protocol,
+      feedbackVisibility: input.feedbackVisibility ?? null,
+      trialIndex: input.trialIndex,
+      priceSnapshotSha256: priceSnapshotSha256 ?? null,
+    },
   }
 }
 

@@ -458,6 +458,15 @@ session.end     { ts }
 - 完成等级固定为 L0 无有效改动、L1 合法 patch、L2 setup/build/static通过、L3公开回归通过、L4至少一个行为组通过、L5全部 critical行为组与回归门禁通过。Partial correctness按 acceptance group做 macro-average，单组增加测试数量不得改变组权重。
 - 可分享 `evaluation.json` 只能包含公开检查、行为组聚合、失败类别、硬门禁和 grader identity。Private check id/command、命令 stdout/stderr和 grader input只能存在于本地 restricted artifact或完全省略；命令输出默认只保存 hash。
 
+### 5.9 Benchmark metrics and comparison
+
+- 每个工具调用必须产生一个 terminal `tool.attempt`，区分 validation、permission 与 execution stage，并记录 outcome、effects、duration、输入/输出字节、截断及错误码。Schema 无效、权限拒绝、执行失败与成功不得合并为“已完成”。
+- Trial usage 必须按 main、approval、title、compression scope 汇总 prompt/completion/reasoning/cache hit/cache miss/total token。Provider 未返回的 request 或字段必须保存为 `null`/unknown，不得以零、字符数或 tokenizer 估算替代精确 usage。
+- 工具、patch 与 trajectory 指标必须覆盖 proposed/executed/succeeded/failed/denied、tool/effect 分类、重复参数签名、首次有效编辑/测试、最终验证后空转、文件与增删行、测试/二进制改动、workspace 外写入、LLM request、continuation、compact、Plan/Goal、MCP和 terminal。
+- 成本只能由显式 run-group `priceSnapshot` 的逐 usage-field rate计算；snapshot source/revision/hash必须进入 artifact 与 trial identity。任何被定价 usage 字段 unknown 时 scope和总成本也必须 unknown。
+- `costPerResolvedUsd`、tokens/tool calls per resolved必须以全部 trial 总消耗除以 resolved 数，不能丢弃失败 trial。另行报告 unresolved token/cost和 resolved duration中位数。
+- A/B 必须逐 trial匹配 suite/case identity、runtime/case/grader image、Provider/model/profile/reasoning、资源预算、protocol/feedback、trial index与 price snapshot。任一不一致必须拒绝并列出字段路径；可比较结果输出 paired delta、总体 resolve delta与置信区间，并按 safety、correctness、efficiency词典序排序。
+
 ---
 
 ## 6. 插件系统（生命周期钩子）

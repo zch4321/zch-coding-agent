@@ -202,7 +202,7 @@ export class ToolExecutor {
     definitionOverride?: ToolDefinition,
   ):
     | { ok: true; definition: ToolDefinition }
-    | { ok: false; result: ToolResult } {
+    | { ok: false; result: ToolResult; definition?: ToolDefinition } {
     const definition = definitionOverride ?? this.#registry.get(call.toolId)
 
     if (!definition) {
@@ -224,6 +224,7 @@ export class ToolExecutor {
     if (!validation.ok) {
       return {
         ok: false,
+        definition,
         result: {
           status: 'error',
           code: 'INVALID_TOOL_ARGS',

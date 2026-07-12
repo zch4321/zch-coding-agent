@@ -213,6 +213,111 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
     ).rejects.toThrow('identity mismatch')
   })
 
+  it('persists trace-derived metrics with a fixed price snapshot', async () => {
+    const outputDirectory = await temporaryDirectory()
+    const worker: DockerWorkerRunner = async (input) => {
+      if (privateSpec.oracle.kind !== 'patch') throw new Error('patch expected')
+      await applyPatch(input.workspaceDirectory, privateSpec.oracle.patch)
+      await writeHeadlessResult(input, {
+        sessionId: 'metrics-session' as HeadlessResult['sessionId'],
+        runIds: ['metrics-run' as HeadlessResult['runIds'][number]],
+        usage: usage(12),
+        tools: { proposed: 0, completed: 0, failed: 0 },
+        benchmark: undefined,
+      })
+      const traceDirectory = path.join(
+        input.artifactsDirectory,
+        'runtime',
+        'traces',
+      )
+      await mkdir(traceDirectory, { recursive: true })
+      await writeFile(
+        path.join(traceDirectory, 'metrics-session.jsonl'),
+        `${[
+          {
+            schemaVersion: 1,
+            seq: 1,
+            eventId: 'event-1',
+            ts: '2026-01-01T00:00:00.000Z',
+            type: 'llm.request',
+            sessionId: 'metrics-session',
+            runId: 'metrics-run',
+            callId: 'metrics-call',
+            scope: 'main',
+            normalizedMessages: [],
+            providerRequest: {},
+            requestBytes: 10,
+            prefixHash: 'prefix',
+            promptBuild: {
+              schemaVersion: 1,
+              layers: [],
+              messageCount: 0,
+              historyMessageCount: 0,
+              ledgerMessageCount: 0,
+              omittedHistoryMessages: 0,
+              promptBudgetTokens: 1_000,
+              estimatedTokens: 1,
+              toolsHash: 'f'.repeat(64),
+            },
+          },
+          {
+            schemaVersion: 1,
+            seq: 2,
+            eventId: 'event-2',
+            ts: '2026-01-01T00:00:00.010Z',
+            type: 'llm.usage',
+            sessionId: 'metrics-session',
+            runId: 'metrics-run',
+            callId: 'metrics-call',
+            usage: {
+              scope: 'main',
+              providerId: 'benchmark-test',
+              providerLabel: 'Benchmark test',
+              model: 'fake-model',
+              promptTokens: 10,
+              completionTokens: 2,
+              totalTokens: 12,
+              reasoningTokens: 0,
+              cacheHitTokens: 0,
+              cacheMissTokens: 10,
+              contextWindowTokens: 10_000,
+              contextWindowSource: 'builtin',
+              raw: {},
+            },
+          },
+        ]
+          .map((event) => JSON.stringify(event))
+          .join('\n')}\n`,
+      )
+      return workerResult(input, 'metrics-worker')
+    }
+    const run = await runBenchmarkTrials({
+      ...baseInput(outputDirectory, worker),
+      priceSnapshot: {
+        schemaVersion: 1,
+        id: 'test-price-v1',
+        source: 'runner test',
+        revision: '1',
+        currency: 'USD',
+        providerId: 'benchmark-test',
+        model: 'fake-model',
+        ratesPerMillionTokens: {
+          promptTokens: 1,
+          completionTokens: 2,
+        },
+      },
+    })
+    const trial = run.trials[0]!
+
+    expect(trial.identity.comparisonIdentity.providerId).toBe('benchmark-test')
+    expect(trial.identity.priceSnapshotSha256).toMatch(/^[a-f0-9]{64}$/u)
+    expect(trial.result.metrics?.usage.total.totalTokens).toBe(12)
+    expect(trial.result.metrics?.cost.totalUsd).toBeCloseTo(0.000014)
+    await expect(
+      stat(path.join(trial.directory, 'metrics.json')),
+    ).resolves.toBeDefined()
+  })
+
   it('does not count a killed partial trial and starts its replacement pristine', async () => {
     const outputDirectory = await temporaryDirectory()
     const interrupted: DockerWorkerRunner = async (input) => {
