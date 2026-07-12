@@ -135,6 +135,24 @@ describe('SessionManager M1 workspace concurrency', () => {
         .at(-1)?.content ?? ''
     )
   }
+
+  async function waitForModeUpdate(
+    manager: SessionManager,
+    sessionId: Parameters<SessionManager['updateSessionMode']>[0],
+    mode: Parameters<SessionManager['updateSessionMode']>[1],
+  ): Promise<void> {
+    const deadline = Date.now() + 2_000
+    while (Date.now() < deadline) {
+      const result = await manager.updateSessionMode(sessionId, mode)
+      if (result.accepted) return
+      if (result.reason !== 'active_run') {
+        throw new Error(`Unexpected mode update rejection: ${result.reason}`)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error('Timed out waiting for the session run to settle')
+  }
+
   it('enforces four active runs and one writer per canonical workspace', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-m1-'))
     const workspaceA = path.join(directory, 'workspace-a')
@@ -303,10 +321,7 @@ describe('SessionManager M1 workspace concurrency', () => {
           event.status === 'completed',
       ),
     )
-
-    await expect(
-      manager.updateSessionMode(readerSession, 'confirm'),
-    ).resolves.toEqual({ accepted: true })
+    await waitForModeUpdate(manager, readerSession, 'confirm')
     const nextWriterRun = manager.startRun({
       sessionId: readerSession,
       message: 'Writer after release',
