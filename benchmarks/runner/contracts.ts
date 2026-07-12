@@ -3,6 +3,7 @@ import type {
   HeadlessResult,
 } from '../../electron/headless/contracts'
 import type { LoadedBenchmarkCase } from '../cases/contracts'
+import type { BenchmarkCaseAdapter } from '../adapters/contracts'
 import type {
   BenchmarkComparisonIdentity,
   BenchmarkPriceSnapshot,
@@ -184,6 +185,7 @@ export type DockerWorkerRunner = (
 
 export interface RunBenchmarkTrialsInput {
   loadedCase: LoadedBenchmarkCase
+  adapter: BenchmarkCaseAdapter
   suiteIdentitySha256: string
   image: string
   runtimeImageDigest?: string

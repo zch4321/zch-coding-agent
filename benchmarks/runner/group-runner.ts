@@ -1,7 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { writeJsonAtomic } from '../../electron/config/atomic-file'
-import { toAgentCaseDescriptor } from '../adapters/native'
 import { sha256Bytes } from '../cases/hash'
 import { summarizeBenchmarkRunGroup } from '../metrics/compare'
 import { runBenchmarkTrials } from './runner'
@@ -61,12 +60,13 @@ export async function runBenchmarkGroup(
         ),
         writeJsonAtomic(
           path.join(caseDirectory, 'agent-case.json'),
-          toAgentCaseDescriptor(selected.loadedCase),
+          selected.suite.caseAdapter.toAgentCaseDescriptor(selected.loadedCase),
         ),
         writeFile(path.join(caseDirectory, 'task.txt'), manifest.task, 'utf8'),
       ])
       const trials = await trialRunner({
         loadedCase: selected.loadedCase,
+        adapter: selected.suite.caseAdapter,
         suiteIdentitySha256: selected.suite.suiteIdentitySha256,
         image: input.image,
         runtimeImageDigest: input.runtimeImageDigest,

@@ -590,6 +590,7 @@ describe('benchmark feedback', () => {
 function baseInput(outputDirectory: string, workerRunner: DockerWorkerRunner) {
   return {
     loadedCase,
+    adapter: suite.caseAdapter,
     suiteIdentitySha256: suite.suiteIdentitySha256,
     image: 'zch-agent-headless:test',
     config: config(),

@@ -5,14 +5,38 @@ import type {
 } from '../cases/contracts'
 import { loadBenchmarkSuite } from '../cases/loader'
 import { sha256Bytes } from '../cases/hash'
+import { prepareBenchmarkWorkspace } from '../cases/prepare'
+import { collectBenchmarkPatch } from '../runner/native-evaluator'
+import { runIsolatedGrader } from '../grader/coordinator'
+import type { BenchmarkCaseAdapter } from './contracts'
 
 export const NATIVE_ADAPTER_REVISION = 'native-v1'
+
+export const nativeBenchmarkAdapter: BenchmarkCaseAdapter = {
+  id: 'native',
+  revision: NATIVE_ADAPTER_REVISION,
+  toAgentCaseDescriptor,
+  async prepareWorkspace(input) {
+    await prepareBenchmarkWorkspace(input)
+    return { directory: input.destination }
+  },
+  capturePatch(input) {
+    return collectBenchmarkPatch({
+      workspace: input.workspace.directory,
+      maxPatchBytes: input.loadedCase.manifest.modificationScope.maxPatchBytes,
+    })
+  },
+  runGrader(input, override) {
+    return (override ?? runIsolatedGrader)(input)
+  },
+}
 
 export type NativeBenchmarkSuite = LoadedBenchmarkSuite & {
   adapter: {
     id: 'native'
     revision: typeof NATIVE_ADAPTER_REVISION
   }
+  caseAdapter: typeof nativeBenchmarkAdapter
   suiteIdentitySha256: string
 }
 
@@ -25,6 +49,7 @@ export async function loadNativeBenchmarkSuite(input: {
   return {
     ...loaded,
     adapter,
+    caseAdapter: nativeBenchmarkAdapter,
     suiteIdentitySha256: sha256Bytes(
       JSON.stringify({
         schemaVersion: 1,

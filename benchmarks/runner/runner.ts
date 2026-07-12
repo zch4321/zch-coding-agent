@@ -23,7 +23,6 @@ import {
 } from '../../electron/logging/events'
 import { compileSchema } from '../../electron/schema-validator'
 import { sha256Bytes } from '../cases/hash'
-import { prepareBenchmarkWorkspace } from '../cases/prepare'
 import {
   ISOLATED_GRADER_REVISION,
   type IsolatedGraderRunResult,
@@ -49,7 +48,6 @@ import type {
 } from './contracts'
 import { createBenchmarkFeedback } from './feedback'
 import { collectBenchmarkPatch } from './native-evaluator'
-import { toAgentCaseDescriptor } from '../adapters/native'
 import {
   benchmarkConversationMarkdown,
   benchmarkSessionTranscriptMarkdown,
@@ -151,7 +149,7 @@ async function runTrial(input: {
     mkdir(workerArtifacts, { recursive: true }),
     mkdir(attemptsDirectory, { recursive: true }),
   ])
-  await prepareBenchmarkWorkspace({
+  const preparedWorkspace = await input.input.adapter.prepareWorkspace({
     loadedCase: input.input.loadedCase,
     destination: workspace,
   })
@@ -167,11 +165,13 @@ async function runTrial(input: {
   const workerRunner = input.input.workerRunner ?? runDockerWorker
   const workerInput: DockerWorkerRunInput = {
     image: input.input.image,
-    workspaceDirectory: workspace,
+    workspaceDirectory: preparedWorkspace.directory,
     artifactsDirectory: workerArtifacts,
     config: input.effectiveConfig,
     task: input.input.loadedCase.manifest.task,
-    benchmarkCase: toAgentCaseDescriptor(input.input.loadedCase),
+    benchmarkCase: input.input.adapter.toAgentCaseDescriptor(
+      input.input.loadedCase,
+    ),
     credential: input.input.credential,
     expectedSourceCommit: input.input.expectedSourceCommit,
     caseDigest: sha256Canonical(input.input.loadedCase.identity),
@@ -192,7 +192,8 @@ async function runTrial(input: {
         }
         initial = await captureAttempt({
           loadedCase: input.input.loadedCase,
-          workspace,
+          workspace: preparedWorkspace,
+          adapter: input.input.adapter,
           directory: path.join(attemptsDirectory, 'initial'),
           image: input.input.image,
           imageDigest: input.runtimeImageDigest,
@@ -230,7 +231,8 @@ async function runTrial(input: {
   if (!initial) {
     initial = await captureAttempt({
       loadedCase: input.input.loadedCase,
-      workspace,
+      workspace: preparedWorkspace,
+      adapter: input.input.adapter,
       directory: path.join(attemptsDirectory, 'initial'),
       image: input.input.image,
       imageDigest: input.runtimeImageDigest,
@@ -253,7 +255,8 @@ async function runTrial(input: {
   if (repairAttempted) {
     afterFeedback = await captureAttempt({
       loadedCase: input.input.loadedCase,
-      workspace,
+      workspace: preparedWorkspace,
+      adapter: input.input.adapter,
       directory: path.join(attemptsDirectory, 'after-feedback'),
       image: input.input.image,
       imageDigest: input.runtimeImageDigest,
@@ -400,7 +403,8 @@ async function runTrial(input: {
 
 async function captureAttempt(input: {
   loadedCase: RunBenchmarkTrialsInput['loadedCase']
-  workspace: string
+  workspace: import('../adapters/contracts').BenchmarkPreparedWorkspace
+  adapter: import('../adapters/contracts').BenchmarkCaseAdapter
   directory: string
   image: string
   imageDigest: string
@@ -413,9 +417,9 @@ async function captureAttempt(input: {
   let patch = ''
   let grader: IsolatedGraderRunResult | undefined
   try {
-    patch = await collectBenchmarkPatch({
+    patch = await input.adapter.capturePatch({
+      loadedCase: input.loadedCase,
       workspace: input.workspace,
-      maxPatchBytes: input.loadedCase.manifest.modificationScope.maxPatchBytes,
     })
   } catch {
     grader = failedGraderRun({
@@ -442,15 +446,18 @@ async function captureAttempt(input: {
   }
   if (!grader) {
     try {
-      grader = await input.graderRunner({
-        loadedCase: input.loadedCase,
-        patch,
-        image: input.image,
-        expectedImageDigest: input.imageDigest,
-        expectedSourceCommit: input.expectedSourceCommit,
-        artifactsDirectory: path.join(input.directory, 'grader'),
-        signal: input.signal,
-      })
+      grader = await input.adapter.runGrader(
+        {
+          loadedCase: input.loadedCase,
+          patch,
+          image: input.image,
+          expectedImageDigest: input.imageDigest,
+          expectedSourceCommit: input.expectedSourceCommit,
+          artifactsDirectory: path.join(input.directory, 'grader'),
+          signal: input.signal,
+        },
+        input.graderRunner,
+      )
     } catch {
       grader = failedGraderRun({
         patch,

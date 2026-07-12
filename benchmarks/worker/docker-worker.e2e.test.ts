@@ -229,6 +229,7 @@ describe.skipIf(!enabled)('Linux Docker worker', () => {
     )
     const run = await runBenchmarkTrials({
       loadedCase,
+      adapter: suite.caseAdapter,
       suiteIdentitySha256: suite.suiteIdentitySha256,
       image,
       expectedSourceCommit: sourceCommit,
