@@ -4,7 +4,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { writeJsonAtomic } from '../../electron/config/atomic-file'
 import {
+  HeadlessBenchmarkDecisionSchema,
   HeadlessResultSchema,
+  HeadlessStreamEventSchema,
   type HeadlessResult,
 } from '../../electron/headless/contracts'
 import { compileSchema } from '../../electron/schema-validator'
@@ -22,7 +24,11 @@ import {
   type DockerWorkerRunInput,
   type DockerWorkerStatus,
 } from './contracts'
-import { DockerCommandError, runDockerCommand } from './docker-client'
+import {
+  DockerCommandError,
+  runDockerCommand,
+  startAttachedDockerContainer,
+} from './docker-client'
 import {
   directoryBytes,
   ensureSafeRunDirectories,
@@ -37,6 +43,8 @@ const CONTAINER_CREDENTIAL = '/run/secrets/provider-credential'
 const CONTAINER_UPSTREAM_CREDENTIAL = '/run/secrets/upstream-credential'
 const PROVIDER_PROXY_ALIAS = 'zch-provider-proxy'
 const validateHeadlessResult = compileSchema(HeadlessResultSchema)
+const validateHeadlessStreamEvent = compileSchema(HeadlessStreamEventSchema)
+const validateBenchmarkDecision = compileSchema(HeadlessBenchmarkDecisionSchema)
 
 interface StopReason {
   status: DockerWorkerStatus
@@ -193,6 +201,7 @@ export async function runDockerWorker(
           ZCH_PROVIDER_CREDENTIAL_FILE: CONTAINER_CREDENTIAL,
           ZCH_RUNTIME_IMAGE_DIGEST: image.digest,
         },
+        interactive: Boolean(input.benchmarkControl),
         command: [
           'run',
           '--workspace',
@@ -205,12 +214,52 @@ export async function runDockerWorker(
           CONTAINER_ARTIFACTS,
           '--timeout-ms',
           String(Math.min(limits.wallTimeMs, 86_400_000)),
+          ...(input.benchmarkControl
+            ? ['--benchmark-protocol', input.benchmarkControl.protocol]
+            : []),
         ],
       }),
     )
     agentCreated = true
     cleanup.agentRemoved = false
-    await runDockerCommand(['start', agentName])
+    let phaseHandled = false
+    const attached = input.benchmarkControl
+      ? startAttachedDockerContainer({
+          container: agentName,
+          timeoutMs: limits.wallTimeMs + limits.stopGraceMs + 30_000,
+          maxOutputBytes: limits.maxLogBytes * 2,
+          onStdoutLine: async (line) => {
+            let event: unknown
+            try {
+              event = JSON.parse(line)
+            } catch {
+              return undefined
+            }
+            if (!isBenchmarkPhaseReady(event)) return undefined
+            if (phaseHandled) {
+              throw new Error('Docker worker emitted multiple benchmark phases')
+            }
+            phaseHandled = true
+            const decision = await input.benchmarkControl!.onPhaseReady({
+              status: event.status,
+              sessionId: event.sessionId,
+              runIds: [...event.runIds],
+              usage: { ...event.usage },
+              tools: { ...event.tools },
+            })
+            if (!validateBenchmarkDecision(decision)) {
+              throw new Error(
+                'Benchmark controller returned an invalid decision',
+              )
+            }
+            return JSON.stringify(decision)
+          },
+        }).then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+      : undefined
+    if (!input.benchmarkControl) await runDockerCommand(['start', agentName])
 
     const waitPromise = runDockerCommand(['wait', agentName], {
       timeoutMs: limits.wallTimeMs + limits.stopGraceMs + 30_000,
@@ -234,6 +283,8 @@ export async function runDockerWorker(
       result.error = { code: stop.code, message: stop.message }
     }
     const waited = await waitPromise
+    const attachError = await attached
+    if (attachError) throw attachError
     const exitCode = Number.parseInt(waited.stdout.trim(), 10)
     if (!Number.isInteger(exitCode)) {
       throw new Error('Docker wait returned an invalid exit code')
@@ -303,6 +354,7 @@ function restrictedCreateArgs(input: {
   mounts: string[]
   environment: Record<string, string>
   command: string[]
+  interactive?: boolean
 }): string[] {
   const args = [
     'create',
@@ -327,6 +379,7 @@ function restrictedCreateArgs(input: {
     '--tmpfs',
     `/tmp:rw,noexec,nosuid,nodev,size=${input.limits.tmpfsBytes},mode=1777`,
   ]
+  if (input.interactive) args.push('--interactive')
   if (input.networkAlias) args.push('--network-alias', input.networkAlias)
   for (const mount of input.mounts) args.push('--mount', mount)
   for (const [name, value] of Object.entries(input.environment)) {
@@ -334,6 +387,22 @@ function restrictedCreateArgs(input: {
   }
   args.push(input.image, ...input.command)
   return args
+}
+
+function isBenchmarkPhaseReady(value: unknown): value is {
+  type: 'benchmark.phase_ready'
+  status: import('../../electron/headless/contracts').HeadlessRunStatus
+  sessionId: string
+  runIds: string[]
+  usage: import('../../electron/headless/event-stream').HeadlessUsageTotals
+  tools: { proposed: number; completed: number; failed: number }
+} {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    candidate.type === 'benchmark.phase_ready' &&
+    validateHeadlessStreamEvent(value)
+  )
 }
 
 function normalizeLimits(

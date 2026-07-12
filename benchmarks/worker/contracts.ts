@@ -1,4 +1,9 @@
 import type { HeadlessConfig } from '../../electron/headless/contracts'
+import type {
+  HeadlessBenchmarkDecision,
+  HeadlessRunStatus,
+  HeadlessStreamEvent,
+} from '../../electron/headless/contracts'
 
 export const DOCKER_WORKER_SCHEMA_VERSION = 1 as const
 
@@ -47,6 +52,22 @@ export interface DockerWorkerRunInput {
   caseDigest?: string
   limits?: Partial<DockerWorkerLimits>
   signal?: AbortSignal
+  benchmarkControl?: {
+    protocol: 'repair-once'
+    onPhaseReady: (phase: {
+      status: HeadlessRunStatus
+      sessionId: string
+      runIds: string[]
+      usage: Extract<
+        HeadlessStreamEvent,
+        { type: 'benchmark.phase_ready' }
+      >['usage']
+      tools: Extract<
+        HeadlessStreamEvent,
+        { type: 'benchmark.phase_ready' }
+      >['tools']
+    }) => Promise<HeadlessBenchmarkDecision>
+  }
 }
 
 export interface DockerWorkerCapability {

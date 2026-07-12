@@ -145,6 +145,14 @@ Oracle patch、mutant patch 与隐藏命令只位于 `benchmarks/private/`，该
 
 Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 mutant，检查修改范围与 `git diff --check`。普通 case 要求 baseline 失败；abstain case 支持通过 baseline 和显式 `no-change` oracle。Mutant 必须先通过全部公开检查，再被声明的隐藏 acceptance group 拒绝；每个 case 完整重复三次并比较 baseline commit 与证据签名。当前 bootstrap suite 提供 slug normalization、chunk partitioning 和 retry backoff 三项，目标 `core-24` 数量仍由后续里程碑扩展。
 
+### 3.5 Benchmark runner 与 repair control
+
+`benchmarks/runner/runner.ts` 编排 trial，但不实现第二份 Agent loop。默认 `strict` 在 Headless container 完成后收集 Git patch，再由宿主可信 native evaluator 从冻结 archive 创建新 workspace、应用 patch并运行公开/私有检查。容器只挂载 Agent workspace 和自身 artifacts，private spec 与 evaluator workspace始终留在宿主侧；评判结果只保存检查结论，不保存私有命令 stdout/stderr。
+
+`repair-once` 通过固定的 `benchmark.phase_ready` JSONL 事件和 `docker start --attach --interactive` stdin 决策通道协调。runner 首评失败后只返回一次经过清洗的 public/diagnostic feedback；Headless 用同一个 `SessionManager` 追加 `<benchmark_feedback>` harness message并启动一个 repair run，因此该消息在 trace 中是 orchestrator message，不伪装成 user message。无论首评还是终评，grader 都使用新准备的 workspace。
+
+每个 pass@k trial 都创建独立 workspace、container、proxy token 和 artifact staging。runner 在 resume 前解析当前 OCI image digest并把它纳入 trial identity；final trial 通过目录级 checksum和 identity hash封存。Resume 只读 complete final，不恢复 workspace、container 或 Provider continuation，遗留 `.incomplete-*` 仅作未完成证据。完成前删除 workspace并扫描所有 artifacts中的真实 Provider credential，命中时删除 staging。M5.7 再把当前可信 native evaluator扩展为正式隔离 grader、硬门禁和 L0–L5 评分。
+
 ---
 
 ## 4. 配置、凭据与模型
@@ -541,7 +549,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 
 ## 19. 当前限制
 
-- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI、host parity、Linux OCI worker 与 BenchmarkCase v1 已实现，但隔离 grader 和正式 benchmark runner 尚未实现。
+- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI、host parity、Linux OCI worker、BenchmarkCase v1 与 strict/repair-once runner 已实现，但 grader 仍是宿主可信进程中的 synthetic native adapter，尚未完成独立 container隔离、硬门禁和 L0–L5 评分。
 - Provider 层当前是 OpenAI-compatible/DeepSeek 为主，没有多厂商完整矩阵。
 - Code intelligence backend 当前实际实现为 Serena MCP 只读 adapter，rename/edit capability 只在 schema 中预留。
 - 插件系统只有事件总线和 hook 点，没有本地 JS 插件加载器。

@@ -9,6 +9,7 @@ export interface HeadlessRunArguments {
   configFile: string
   artifactsDirectory: string
   timeoutMs: number
+  benchmarkProtocol?: 'repair-once'
 }
 
 export class HeadlessCliError extends Error {
@@ -32,6 +33,7 @@ export function parseHeadlessArguments(argv: string[]): HeadlessRunArguments {
     '--config',
     '--artifacts',
     '--timeout-ms',
+    '--benchmark-protocol',
   ])
   for (let index = 1; index < argv.length; index += 2) {
     const flag = argv[index]
@@ -65,6 +67,11 @@ export function parseHeadlessArguments(argv: string[]): HeadlessRunArguments {
   ) {
     throw new HeadlessCliError('--timeout-ms must be between 1 and 86400000')
   }
+  const benchmarkProtocolValue = values.get('--benchmark-protocol')
+  if (benchmarkProtocolValue && benchmarkProtocolValue !== 'repair-once') {
+    throw new HeadlessCliError('Unsupported benchmark protocol')
+  }
+  const benchmarkProtocol = benchmarkProtocolValue ? 'repair-once' : undefined
 
   return {
     workspace: required('--workspace'),
@@ -72,6 +79,7 @@ export function parseHeadlessArguments(argv: string[]): HeadlessRunArguments {
     configFile: required('--config'),
     artifactsDirectory: required('--artifacts'),
     timeoutMs,
+    ...(benchmarkProtocol ? { benchmarkProtocol } : {}),
   }
 }
 

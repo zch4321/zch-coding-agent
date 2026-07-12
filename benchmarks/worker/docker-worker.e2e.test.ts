@@ -77,6 +77,62 @@ describe.skipIf(!enabled)('Linux Docker worker', () => {
     await expectNoWorkerResources()
   }, 90_000)
 
+  it('keeps repair-once in one attached container and session', async () => {
+    const fixture = await createFixture('patch')
+    let phases = 0
+    let initialSession = ''
+    const result = await runDockerWorker({
+      image,
+      workspaceDirectory: fixture.workspace,
+      artifactsDirectory: fixture.artifacts,
+      config: config(fixture.providerBaseURL),
+      task: 'Change note.txt from before to after, then finish.',
+      credential: {
+        mode: 'proxy',
+        upstreamCredential: fixture.upstreamSecret,
+        allowExternalNetwork: true,
+      },
+      expectedSourceCommit: sourceCommit,
+      limits: { wallTimeMs: 60_000, stopGraceMs: 1_000 },
+      benchmarkControl: {
+        protocol: 'repair-once',
+        onPhaseReady: async (phase) => {
+          phases += 1
+          initialSession = phase.sessionId
+          return {
+            schemaVersion: 1,
+            action: 'repair',
+            feedback: {
+              visibility: 'public',
+              text: 'Re-check the requested file and finish the task.',
+            },
+          }
+        },
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    expect(phases).toBe(1)
+    const headless = JSON.parse(
+      await readFile(path.join(fixture.artifacts, 'result.json'), 'utf8'),
+    ) as {
+      sessionId: string
+      benchmark: {
+        repairAttempted: boolean
+        initialRunIds: string[]
+        repairRunIds: string[]
+      }
+    }
+    expect(headless.sessionId).toBe(initialSession)
+    expect(headless.benchmark.repairAttempted).toBe(true)
+    expect(headless.benchmark.initialRunIds).toHaveLength(1)
+    expect(headless.benchmark.repairRunIds).toHaveLength(1)
+    expect(
+      await readFile(path.join(fixture.workspace, 'note.txt'), 'utf8'),
+    ).toBe('after\n')
+    await expectNoWorkerResources()
+  }, 90_000)
+
   it('enforces the sandbox and removes resources after a forced timeout', async () => {
     const fixture = await createFixture('hang')
     const running = runDockerWorker({

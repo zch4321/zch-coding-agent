@@ -29,6 +29,28 @@ const HeadlessProviderConfigSchema = Type.Object(
   { additionalProperties: false },
 )
 
+const HeadlessUsageSchema = Type.Object(
+  {
+    records: Type.Integer({ minimum: 0 }),
+    promptTokens: Type.Integer({ minimum: 0 }),
+    completionTokens: Type.Integer({ minimum: 0 }),
+    reasoningTokens: Type.Integer({ minimum: 0 }),
+    totalTokens: Type.Integer({ minimum: 0 }),
+    cacheHitTokens: Type.Integer({ minimum: 0 }),
+    cacheMissTokens: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+)
+
+const HeadlessToolTotalsSchema = Type.Object(
+  {
+    proposed: Type.Integer({ minimum: 0 }),
+    completed: Type.Integer({ minimum: 0 }),
+    failed: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+)
+
 export const HeadlessConfigSchema = Type.Object(
   {
     schemaVersion: Type.Literal(1),
@@ -94,25 +116,18 @@ export const HeadlessResultSchema = Type.Object(
     ),
     configHash: Type.String({ minLength: 64, maxLength: 64 }),
     autoPlanApprovals: Type.Integer({ minimum: 0, maximum: 8 }),
-    usage: Type.Object(
-      {
-        records: Type.Integer({ minimum: 0 }),
-        promptTokens: Type.Integer({ minimum: 0 }),
-        completionTokens: Type.Integer({ minimum: 0 }),
-        reasoningTokens: Type.Integer({ minimum: 0 }),
-        totalTokens: Type.Integer({ minimum: 0 }),
-        cacheHitTokens: Type.Integer({ minimum: 0 }),
-        cacheMissTokens: Type.Integer({ minimum: 0 }),
-      },
-      { additionalProperties: false },
-    ),
-    tools: Type.Object(
-      {
-        proposed: Type.Integer({ minimum: 0 }),
-        completed: Type.Integer({ minimum: 0 }),
-        failed: Type.Integer({ minimum: 0 }),
-      },
-      { additionalProperties: false },
+    usage: HeadlessUsageSchema,
+    tools: HeadlessToolTotalsSchema,
+    benchmark: Type.Optional(
+      Type.Object(
+        {
+          protocol: Type.Literal('repair-once'),
+          repairAttempted: Type.Boolean(),
+          initialRunIds: Type.Array(RunIdSchema, { minItems: 1, maxItems: 16 }),
+          repairRunIds: Type.Array(RunIdSchema, { maxItems: 16 }),
+        },
+        { additionalProperties: false },
+      ),
     ),
     artifacts: Type.Object(
       {
@@ -164,6 +179,19 @@ export const HeadlessStreamEventSchema = Type.Union([
   ]),
   Type.Composite([
     HeadlessEventBaseSchema,
+    Type.Object({
+      type: Type.Literal('benchmark.phase_ready'),
+      protocol: Type.Literal('repair-once'),
+      phase: Type.Literal('initial'),
+      status: HeadlessRunStatusSchema,
+      sessionId: SessionIdSchema,
+      runIds: Type.Array(RunIdSchema, { minItems: 1, maxItems: 16 }),
+      usage: HeadlessUsageSchema,
+      tools: HeadlessToolTotalsSchema,
+    }),
+  ]),
+  Type.Composite([
+    HeadlessEventBaseSchema,
     Type.Object({ type: Type.Literal('agent.event'), event: AgentEventSchema }),
   ]),
   Type.Composite([
@@ -200,3 +228,40 @@ export type HeadlessStreamEventDraft = HeadlessStreamEvent extends infer Event
     ? Omit<Event, 'schemaVersion' | 'seq' | 'ts'>
     : never
   : never
+
+export const HeadlessBenchmarkDecisionSchema = Type.Union([
+  Type.Object(
+    {
+      schemaVersion: Type.Literal(1),
+      action: Type.Literal('finish'),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      schemaVersion: Type.Literal(1),
+      action: Type.Literal('repair'),
+      feedback: Type.Object(
+        {
+          visibility: Type.Union([
+            Type.Literal('public'),
+            Type.Literal('diagnostic'),
+          ]),
+          text: Type.String({ minLength: 1, maxLength: 16_384 }),
+        },
+        { additionalProperties: false },
+      ),
+    },
+    { additionalProperties: false },
+  ),
+])
+export type HeadlessBenchmarkDecision = Static<
+  typeof HeadlessBenchmarkDecisionSchema
+>
+
+export interface HeadlessBenchmarkController {
+  protocol: 'repair-once'
+  waitForDecision(input: {
+    signal: AbortSignal
+  }): Promise<HeadlessBenchmarkDecision>
+}

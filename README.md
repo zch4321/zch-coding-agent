@@ -29,6 +29,7 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - Headless host：复用桌面端同一 Node Agent Runtime，提供固定 Yolo 的程序化 API/CLI、JSONL 事件、原子 result/identity、usage/tool 指标、Git patch 和自动 Plan continuation；parity fixture 持续校验 Electron/Headless 的 Provider、prompt、tool、compact、Plan、MCP 和 patch 语义。
 - Linux Docker worker：以固定的 Node 24/glibc Linux x64 镜像运行同一 Headless bundle；coordinator 做 capability/image identity 预检、资源限制、受控挂载、Provider proxy、产物回收和 stop/kill/remove 清理。Agent 默认只接触单 trial proxy token，不接触真实 Provider key、Docker socket或宿主 home。
 - Benchmark case contract：版本化 manifest 描述任务、固定源码 archive、case image digest、公开检查、验收组、修改范围和资源预算；native adapter identity 与 suite/case/archive/private-spec checksum 共同冻结数据集。Oracle、mutant 和隐藏检查只存在于 evaluator private spec，不进入 Agent descriptor 或 workspace。
+- Benchmark runner：默认 strict 隐藏首评；可选 repair-once 在同一 Headless session追加一次清洗后的 harness feedback，并分别保留首次与修复后结果。pass@k 从 pristine workspace独立运行，resume 只复用 identity和目录 checksum一致的完整 trial。
 
 ### MCP 配置示例
 
@@ -129,8 +130,8 @@ npm run test:real
 
 桌面产品的安全模型是“本地应用 + 明确审批 + 工作区路径边界”，不是容器级 sandbox。文件工具会限制在 workspace 内，并对真实路径和资源状态做复核；但桌面端 `run_command` 和持久终端本质上仍是主机进程执行能力，因此在 Auto / Yolo 模式下需要用户明确接受风险。
 
-内部 benchmark worker 是另一条部署边界：它固定 Yolo，但在受限 Linux container 中运行，只挂载单次 workspace/artifacts 并应用资源和网络限制。该隔离不反向改变桌面端权限语义，也尚未包含后续 M5 的 hidden grader。
+内部 benchmark worker 是另一条部署边界：它固定 Yolo，但在受限 Linux container 中运行，只挂载单次 workspace/artifacts 并应用资源和网络限制。Hidden evaluator留在可信宿主侧并从冻结 archive重建干净 workspace，不挂载进 Agent container；正式 grader container隔离和分级评分仍属于 M5.7。
 
 ## 当前状态
 
-当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity、Linux Docker worker、BenchmarkCase v1 与 trace 基础能力。后续方向包括 benchmark runner、隔离 grader、多 Provider、插件加载器和 IDE 级编辑能力。
+当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity、Linux Docker worker、BenchmarkCase v1、strict/repair-once runner 与 trace 基础能力。后续方向包括隔离 grader、多 Provider、插件加载器和 IDE 级编辑能力。

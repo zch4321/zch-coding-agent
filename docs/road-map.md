@@ -2,7 +2,7 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、BenchmarkCase v1/native adapter/3 项 core smoke、工具紧凑 UI v1 已经落地。下一阶段继续推进 M5 runner、隔离 grader 和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、BenchmarkCase v1/native adapter/3 项 core smoke，以及 strict/repair-once benchmark runner 已经落地。下一阶段继续推进隔离 grader、分级评分和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
 
 ## 0. 未完成概览
 
@@ -18,23 +18,6 @@
 目标：先建立独立于 renderer、IPC、`npm test` 和 `npm run test:e2e` 的真实 coding-agent benchmark。Electron 与 Headless 必须调用同一份 Agent Runtime；Linux Docker 只替换宿主交互和部署方式，不得复制 Prompt Harness、工具注册、Provider loop、权限、compact、Skills、MCP 或 trace 实现。
 
 M5 保留原编号以维持已有文档和历史引用，但从本阶段起提前为首要里程碑。它首先评估 harness 工程本身，不把 Electron UI 性能混入 coding correctness；UI/IPC 继续由 E2E 覆盖，并通过 parity 测试证明两个宿主没有语义漂移。
-
-### 5.6 Runner、严格首轮与一次修复
-
-- runner 负责准备临时 workspace、启动 Headless container、发送 task、等待 run、收集 patch/trace/JSONL/stderr、调用 grader、扫描泄漏和清理资源。
-- `strict` 是默认协议：Agent 结束后直接隐藏评判，不把 grader 反馈给 Agent；它产生主指标 `resolved_initial`。
-- `repair-once` 是独立协议：首次失败后，在同一 workspace 和 session 追加一次 `<benchmark_feedback>`，允许一个有预算的修复阶段，再用干净 grader 重评。
-- feedback 分为 `public` 和 `diagnostic`。`public` 只包含构建、lint 和公开测试摘要；`diagnostic` 可包含失败的验收组名和清理后的错误类别。两者都不能包含隐藏测试源码、精确隐藏期望值、oracle 路径或 gold diff。
-- repair 不是 `pass@2`。报告分别保存 initial、after-feedback、recovery rate 以及第二阶段增量和累计成本；不得用修复成功回填首次通过率。
-- `pass@k` 仅用于从 pristine workspace 开始的 k 个独立 trial；每个 trial 使用独立 session、container、credential token 和 artifact 目录。
-- runner 支持安全 resume：只复用完整且 identity 匹配的 immutable artifact；不复用活跃 container、半写 trace、Provider continuation state 或 workspace。
-
-验收：
-
-- strict 模式下 Agent 永远看不到 evaluator 输出。
-- repair-once 恰好最多追加一次反馈，历史保持 append-only，第二次 grader 使用最终 patch 和干净环境。
-- 中途 kill runner 后重新执行，不会把半成品计为失败样本或覆盖已有完整 trial。
-- 同一任务多 trial 之间没有 workspace、session、MCP disclosure、terminal 或 provider state 串扰。
 
 ### 5.7 分级评分与硬门禁
 
@@ -124,7 +107,6 @@ benchmarks/
 
 | 步骤  | 具体实现                                            | 完成标志                        |
 | ----- | --------------------------------------------------- | ------------------------------- |
-| M5.6  | 实现 runner、strict、repair-once、resume 和多 trial | append-only、隔离与恢复测试通过 |
 | M5.7  | 实现隔离 grader、L0-L5、硬门禁和 artifact/redaction | 评分回归与泄漏测试通过          |
 | M5.8  | 补 tool attempt、usage/cost/paired comparison       | 指标 golden tests 通过          |
 | M5.9  | 接入 smoke/日常/full 命令和分层 artifacts           | 完整 vertical slice 通过        |
@@ -132,7 +114,7 @@ benchmarks/
 | M5.11 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查        | Linux worker 跑通冻结 revision  |
 | M5.12 | 增加 SWE-bench compatibility 与高成本 full adapter  | 不影响主套件且保持 opt-in       |
 
-单一 Runtime、固定 Yolo Headless host、runtime identity、Electron/Headless parity、受限 Linux Docker worker 和 3 项冻结 native smoke case 已经落地；M5.6–M5.9 完成后构成第一个可用的 Docker benchmark vertical slice，不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
+单一 Runtime、固定 Yolo Headless host、runtime identity、Electron/Headless parity、受限 Linux Docker worker、3 项冻结 native smoke case 和 strict/repair-once runner 已经落地；M5.7–M5.9 完成后构成第一个带隔离分级评分和正式命令面的 Docker benchmark vertical slice，不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
 
 总体验收：
 

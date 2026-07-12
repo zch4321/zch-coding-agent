@@ -440,6 +440,15 @@ session.end     { ts }
 - 非 abstain 自建 case 的 baseline 必须失败；abstain/no-change case 的 baseline 与 `no-change` oracle 必须通过。两类 case 的 oracle 都要通过全部公开与私有行为组，且至少两个合理 mutant 必须通过公开检查但被声明的隐藏行为组拒绝。完整准备和评判重复三次，证据签名不一致视为 flaky/invalid。
 - M5.5 native adapter 只运行仓库内受信任的 synthetic fixture；外部 dataset 只能归一化为公开 BenchmarkCase，不能借 adapter 把 evaluator 私有字段带入 Agent 面。正式外部代码执行必须等待隔离 grader/runner。
 
+### 5.7 Benchmark runner protocol
+
+- Runner 默认使用 `strict`：每个 trial 从冻结 archive 创建 pristine workspace，只启动一个独立 Headless container；Agent 退出后才在宿主可信边界创建新的 evaluator workspace并应用 patch，任何 evaluator 输出都不得回流 Agent。
+- `repair-once` 只对 manifest 明确允许的 case 开启。首轮完成后 Headless 发出一次阶段事件，runner 评判当前 patch，并通过 attach stdin 最多返回一次清洗后的 `<benchmark_feedback>`；修复必须复用同一 workspace、session 和 append-only history，最终 patch必须在另一份干净 evaluator workspace重评。
+- `public` feedback 只能包含公开检查摘要；`diagnostic` 还可包含公开 manifest 已声明的验收组名称和通用失败类别。两者均禁止隐藏源码、私有命令输出、精确隐藏期望、oracle/gold patch 和外部数据集 evaluator 字段。
+- Trial 结果必须分别记录 `resolvedInitial`、`resolvedAfterFeedback`、`recovered`、首轮指标、修复阶段增量指标和累计指标。修复成功不得回填首次通过；`pass@k` 必须是 k 个独立 pristine trial，不得复用 session、container、workspace、credential token 或 Provider continuation。
+- Resume 只允许复用 identity 一致、带 complete marker 且整棵 artifact checksum 一致的 immutable trial。`.incomplete-*` staging 不计入样本也不复用；已有 final artifact 缺失、被篡改或 identity 不同必须拒绝覆盖。
+- Runner 完成前必须删除 Agent workspace、扫描 artifacts 是否含真实 Provider credential，并保存零命中报告。凭据命中时必须删除该 staging；patch、trace、JSONL、stderr 和 worker cleanup evidence均保留在独立 trial artifact 中。
+
 ---
 
 ## 6. 插件系统（生命周期钩子）

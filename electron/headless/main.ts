@@ -8,6 +8,7 @@ import {
   readHeadlessTask,
 } from './cli'
 import { HeadlessConfigError, loadHeadlessConfig } from './config'
+import { StdinBenchmarkController } from './benchmark-control'
 import type { HeadlessRunStatus } from './contracts'
 import {
   HeadlessRunInputError,
@@ -64,6 +65,9 @@ export async function runHeadlessMain(
       environment: options.environment,
       providerFactory: options.providerFactory,
       promptDirectory: options.promptDirectory,
+      ...(args.benchmarkProtocol
+        ? { benchmarkController: new StdinBenchmarkController(process.stdin) }
+        : {}),
       onDiagnostic: (message, error) => {
         errorOutput.write(
           `[headless] ${message}${error instanceof Error ? `: ${error.message}` : ''}\n`,

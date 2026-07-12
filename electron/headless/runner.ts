@@ -16,6 +16,7 @@ import { prepareHeadlessConfig } from './config'
 import {
   HeadlessResultSchema,
   type HeadlessConfig,
+  type HeadlessBenchmarkController,
   type HeadlessResult,
   type HeadlessRunStatus,
 } from './contracts'
@@ -58,6 +59,7 @@ export interface RunHeadlessAgentOptions {
   sourceTree?: RuntimeIdentity['sourceTree']
   runtimeImageDigest?: string
   eventListeners?: RuntimeEventListener[]
+  benchmarkController?: HeadlessBenchmarkController
 }
 
 export async function runHeadlessAgent(
@@ -125,9 +127,23 @@ export async function runHeadlessAgent(
 
   let sessionId: Awaited<ReturnType<typeof runtime.createSession>> | undefined
   const runIds: HeadlessResult['runIds'] = []
+  let initialRunIds: HeadlessResult['runIds'] | undefined
+  const repairRunIds: HeadlessResult['runIds'] = []
+  let repairAttempted = false
   let completion: RunCompletion | undefined
   let autoPlanApprovals = 0
   let incompleteReason: HeadlessResult['incompleteReason']
+  const armTimeout = (): void => {
+    if (timeout) clearTimeout(timeout)
+    timeout = setTimeout(
+      () => {
+        timedOut = true
+        controller.abort(new Error('Headless run timed out'))
+      },
+      Math.max(1, options.timeoutMs),
+    )
+    timeout.unref()
+  }
 
   try {
     try {
@@ -144,14 +160,7 @@ export async function runHeadlessAgent(
       })
       options.signal?.addEventListener('abort', relayAbort, { once: true })
       if (options.signal?.aborted) relayAbort()
-      timeout = setTimeout(
-        () => {
-          timedOut = true
-          controller.abort(new Error('Headless run timed out'))
-        },
-        Math.max(1, options.timeoutMs),
-      )
-      timeout.unref()
+      armTimeout()
       runIds.push(firstRun.runId)
       completion = await firstRun.completion
 
@@ -210,6 +219,56 @@ export async function runHeadlessAgent(
       } else if (metrics.plan?.status === 'awaiting_review') {
         incompleteReason = 'plan_approval_limit'
       }
+      initialRunIds = [...runIds]
+      if (
+        options.benchmarkController &&
+        !timedOut &&
+        !incompleteReason &&
+        !controller.signal.aborted
+      ) {
+        if (timeout) clearTimeout(timeout)
+        const initialStatus = classifyStatus({
+          completion,
+          timedOut,
+          incompleteReason,
+        })
+        writer.write({
+          type: 'benchmark.phase_ready',
+          protocol: 'repair-once',
+          phase: 'initial',
+          status: initialStatus,
+          sessionId,
+          runIds: [...initialRunIds],
+          usage: { ...metrics.usage },
+          tools: { ...metrics.tools },
+        })
+        const decision = await options.benchmarkController.waitForDecision({
+          signal: controller.signal,
+        })
+        if (decision.action === 'repair') {
+          repairAttempted = true
+          const runId = runtime.services.sessions.startHarnessRun({
+            sessionId,
+            clientRequestId: 'headless-benchmark-repair-1',
+            message: {
+              kind: 'benchmark_feedback',
+              text: `Visibility: ${decision.feedback.visibility}\n${decision.feedback.text}`,
+              source: 'headless:benchmark-repair',
+            },
+          })
+          runIds.push(runId)
+          repairRunIds.push(runId)
+          armTimeout()
+          const interrupt = () => runtime.interrupt(sessionId!, runId)
+          controller.signal.addEventListener('abort', interrupt, { once: true })
+          try {
+            completion = await runtime.events.waitForRun(sessionId, runId)
+            await runtime.services.sessions.waitForRunSettled(sessionId, runId)
+          } finally {
+            controller.signal.removeEventListener('abort', interrupt)
+          }
+        }
+      }
     } finally {
       if (timeout) clearTimeout(timeout)
       options.signal?.removeEventListener('abort', relayAbort)
@@ -245,6 +304,16 @@ export async function runHeadlessAgent(
       autoPlanApprovals,
       usage: { ...metrics.usage },
       tools: { ...metrics.tools },
+      ...(options.benchmarkController
+        ? {
+            benchmark: {
+              protocol: 'repair-once' as const,
+              repairAttempted,
+              initialRunIds: initialRunIds ?? [...runIds],
+              repairRunIds,
+            },
+          }
+        : {}),
       artifacts: {
         resultPath,
         identityPath,

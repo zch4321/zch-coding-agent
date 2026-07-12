@@ -13,7 +13,7 @@ import type {
   ProviderEvent,
 } from '../providers/provider'
 import { parseHeadlessArguments } from './cli'
-import type { HeadlessConfig } from './contracts'
+import type { HeadlessBenchmarkController, HeadlessConfig } from './contracts'
 import { HEADLESS_EXIT_CODES, runHeadlessMain } from './main'
 import { runHeadlessAgent } from './runner'
 
@@ -129,6 +129,22 @@ class HangingProvider implements LLMProvider {
       request.signal.addEventListener('abort', abort, { once: true })
     })
     yield messageCompletion('unreachable', 'unreachable')
+  }
+}
+
+class RepairProvider implements LLMProvider {
+  calls = 0
+  requests: ProviderChatRequest['messages'][] = []
+
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    this.requests.push(structuredClone(request.messages))
+    yield messageCompletion(
+      `repair-${this.calls}`,
+      this.calls === 1 ? 'Initial attempt complete.' : 'Repair complete.',
+    )
   }
 }
 
@@ -248,6 +264,23 @@ describe('Headless host', () => {
       '1000',
     ])
     expect(parsed.timeoutMs).toBe(1_000)
+    expect(
+      parseHeadlessArguments([
+        'run',
+        '--workspace',
+        '.',
+        '--task-file',
+        'task.md',
+        '--config',
+        'headless.json',
+        '--artifacts',
+        '../artifacts',
+        '--timeout-ms',
+        '1000',
+        '--benchmark-protocol',
+        'repair-once',
+      ]).benchmarkProtocol,
+    ).toBe('repair-once')
     expect(() =>
       parseHeadlessArguments([
         'run',
@@ -452,5 +485,59 @@ describe('Headless host', () => {
     await expect(
       readFile(result.artifacts.resultPath, 'utf8'),
     ).resolves.toContain('"status": "timed_out"')
+  }, 20_000)
+
+  it('appends one benchmark repair as trusted harness context in the same session', async () => {
+    const { workspace, artifacts } = await fixture()
+    const output = new StringSink()
+    const provider = new RepairProvider()
+    const benchmarkController: HeadlessBenchmarkController = {
+      protocol: 'repair-once',
+      async waitForDecision() {
+        return {
+          schemaVersion: 1,
+          action: 'repair',
+          feedback: {
+            visibility: 'diagnostic',
+            text: 'The edge-case acceptance group is still failing.',
+          },
+        }
+      },
+    }
+    const result = await runHeadlessAgent({
+      config: config(),
+      workspace,
+      task: 'Attempt the benchmark task',
+      artifactsDirectory: artifacts,
+      timeoutMs: 5_000,
+      output,
+      environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },
+      providerFactory: () => provider,
+      benchmarkController,
+    })
+
+    expect(result.status).toBe('completed')
+    expect(result.runIds).toHaveLength(2)
+    expect(result.benchmark).toMatchObject({
+      protocol: 'repair-once',
+      repairAttempted: true,
+      initialRunIds: [result.runIds[0]],
+      repairRunIds: [result.runIds[1]],
+    })
+    expect(output.value).toContain('"type":"benchmark.phase_ready"')
+    expect(provider.requests[1]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'user',
+          content: expect.stringContaining('<benchmark_feedback'),
+        }),
+      ]),
+    )
+    const trace = await readFile(result.artifacts.tracePath, 'utf8')
+    expect(trace).toContain('"kind":"benchmark_feedback"')
+    expect(trace).toContain('"type":"orchestrator.message"')
+    expect(trace).not.toContain(
+      '"type":"user.message","text":"Visibility: diagnostic',
+    )
   }, 20_000)
 })

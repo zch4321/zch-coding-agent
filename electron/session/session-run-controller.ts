@@ -6,6 +6,7 @@ import { PROVIDER_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
 import {
   appendPromptLayer,
+  benchmarkFeedbackContent,
   orchestrationRequestContent,
 } from './prompt-harness'
 import { id, ipcFault } from './session-common'
@@ -239,10 +240,13 @@ export class SessionRunController {
 
     try {
       if (harnessMessage) {
-        const content = orchestrationRequestContent(
-          harnessMessage.kind,
-          harnessMessage.text,
-        )
+        const content =
+          harnessMessage.kind === 'benchmark_feedback'
+            ? benchmarkFeedbackContent(harnessMessage.text)
+            : orchestrationRequestContent(
+                harnessMessage.kind,
+                harnessMessage.text,
+              )
         appendPromptLayer(session, {
           kind: 'orchestration_request',
           role: 'user',
