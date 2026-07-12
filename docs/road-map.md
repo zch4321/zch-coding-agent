@@ -2,7 +2,7 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、工具紧凑 UI v1 已经落地。下一阶段继续推进 M5 case manifest、隔离 grader 和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、BenchmarkCase v1/native adapter/3 项 core smoke、工具紧凑 UI v1 已经落地。下一阶段继续推进 M5 runner、隔离 grader 和真实任务评估基线，再用它指导 Project / Code Intelligence 和 Provider Routing 的后续改动。
 
 ## 0. 未完成概览
 
@@ -18,26 +18,6 @@
 目标：先建立独立于 renderer、IPC、`npm test` 和 `npm run test:e2e` 的真实 coding-agent benchmark。Electron 与 Headless 必须调用同一份 Agent Runtime；Linux Docker 只替换宿主交互和部署方式，不得复制 Prompt Harness、工具注册、Provider loop、权限、compact、Skills、MCP 或 trace 实现。
 
 M5 保留原编号以维持已有文档和历史引用，但从本阶段起提前为首要里程碑。它首先评估 harness 工程本身，不把 Electron UI 性能混入 coding correctness；UI/IPC 继续由 E2E 覆盖，并通过 parity 测试证明两个宿主没有语义漂移。
-
-### 5.5 Case Manifest 与数据集策略
-
-- 定义版本化 `BenchmarkCase` schema，至少包含 case id、suite、task、repository source/revision/archive hash、platform、case image digest、setup、公开检查、grader、验收行为组、feedback policy、修改范围和资源预算。
-- 自建 case 优先 `FROM zch-agent-headless:<commit>` 安装任务依赖；外部 benchmark 后续支持从固定 case image digest 注入同一 Headless bundle。
-- Agent 可见 case image 只包含 runtime、workspace、编译器和公开测试，不包含 gold patch、test patch、hidden grader、`fail_to_pass` 或 `pass_to_pass` 元数据。Evaluator 使用另一容器，从 pristine base 应用 Agent patch 后运行 hidden tests；grader 无 Provider credential且默认 `network=none`。
-- dataset adapter 只把外部格式归一化为 `BenchmarkCase`；gold/test patch 和 evaluator 私有字段停留在 coordinator/grader，绝不进入 renderer、Headless config、Agent trace 或 workspace。
-- workspace 从固定 archive 创建，并移除可恢复未来提交的 git history、tag、remote、reflog 和缓存。保留任务需要的当前源码信息，但不能通过仓库历史直接找到答案。
-- 第一主套件为人工编写的 `core-24`：6 个 bug fix、6 个 feature、3 个 refactor/compatibility、3 个正确 abstain/no-change、6 个 harness-stress。
-- 第一外部套件为 `fresh-12`：从最新 SWE-rebench 时间窗选取 12 项，再人工审核 prompt/test 对齐并冻结 revision。SWE-bench Pro/Verified 只作为兼容 adapter，不作为 M5 主分数。
-- SWE-bench-Live、SWE-Lancer、长期软件演进任务留给 `benchmark:full`；外部许可证、镜像来源、digest 和运行限制必须记录。
-- 每个自建或人工筛选 case 必须通过：baseline 触发预期失败、oracle 全部通过、至少两个合理但错误的 mutant 被拒绝、无关回归保持通过、三次重复无 flaky、独立 prompt/test 对齐复核。
-
-验收：
-
-- manifest 在执行前经过 schema、checksum、路径和预算校验；失败时不创建 Agent run。
-- Agent 可见 bundle 的自动扫描确认不存在 evaluator 私有字段和未来 git 历史。
-- `core-24` 每项都有 acceptance group、baseline/oracle/mutant 证据和审核记录。
-- 外部 adapter 更新不会静默改变已冻结 suite；新 revision 产生新的 suite identity。
-- 同一 image digest 和 case revision 连续准备三次时，baseline 与 oracle evaluator 结果必须一致。
 
 ### 5.6 Runner、严格首轮与一次修复
 
@@ -133,20 +113,26 @@ benchmarks/
 - 汇总报告能同时展示 strict、repair-once 和独立多 trial，标签不会混淆。
 - 默认测试链路在没有 Docker、外部 dataset 或真实 Provider key 时仍保持确定性通过。
 
+后续数据集扩展：
+
+- 把已冻结的 3 项 bootstrap case 扩展为人工编写的 `core-24`：6 个 bug fix、6 个 feature、3 个 refactor/compatibility、3 个正确 abstain/no-change、6 个 harness-stress。普通 case 要求失败 baseline，abstain case 要求通过 baseline 与 no-change oracle；新增每项还需至少两个 mutant、三次无 flaky 和独立 prompt/test 对齐复核。
+- 自建 case 优先 `FROM zch-agent-headless:<commit>` 安装任务依赖；Agent 可见 image 不含 private spec。Evaluator 使用另一容器，从 pristine base 应用 patch 后运行 hidden tests，且无 Provider credential、默认 `network=none`。
+- 第一外部套件为 `fresh-12`：从最新 SWE-rebench 时间窗选取 12 项，人工审核并冻结 revision。SWE-bench Pro/Verified 只作为 compatibility adapter；SWE-bench-Live、SWE-Lancer 和长期演进任务留给 `benchmark:full`。
+- 外部 adapter 只归一化公开 BenchmarkCase；gold/test patch、`fail_to_pass`、`pass_to_pass` 和 evaluator 私有字段始终停留在 grader 面。许可证、镜像来源、digest 和运行限制必须记录。
+
 ### 5.10 按提交粒度的实施顺序
 
-| 步骤  | 具体实现                                                     | 完成标志                        |
-| ----- | ------------------------------------------------------------ | ------------------------------- |
-| M5.5  | 实现 manifest loader、native adapter 和 3 个 core smoke case | baseline/oracle/mutant 自检通过 |
-| M5.6  | 实现 runner、strict、repair-once、resume 和多 trial          | append-only、隔离与恢复测试通过 |
-| M5.7  | 实现隔离 grader、L0-L5、硬门禁和 artifact/redaction          | 评分回归与泄漏测试通过          |
-| M5.8  | 补 tool attempt、usage/cost/paired comparison                | 指标 golden tests 通过          |
-| M5.9  | 接入 smoke/日常/full 命令和分层 artifacts                    | 完整 vertical slice 通过        |
-| M5.10 | 扩展到 12/24 个 core case                                    | `benchmark` 可产出稳定 A/B 报告 |
-| M5.11 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查                 | Linux worker 跑通冻结 revision  |
-| M5.12 | 增加 SWE-bench compatibility 与高成本 full adapter           | 不影响主套件且保持 opt-in       |
+| 步骤  | 具体实现                                            | 完成标志                        |
+| ----- | --------------------------------------------------- | ------------------------------- |
+| M5.6  | 实现 runner、strict、repair-once、resume 和多 trial | append-only、隔离与恢复测试通过 |
+| M5.7  | 实现隔离 grader、L0-L5、硬门禁和 artifact/redaction | 评分回归与泄漏测试通过          |
+| M5.8  | 补 tool attempt、usage/cost/paired comparison       | 指标 golden tests 通过          |
+| M5.9  | 接入 smoke/日常/full 命令和分层 artifacts           | 完整 vertical slice 通过        |
+| M5.10 | 扩展到 12/24 个 core case                           | `benchmark` 可产出稳定 A/B 报告 |
+| M5.11 | 接 SWE-rebench `fresh-12` 和外部镜像兼容检查        | Linux worker 跑通冻结 revision  |
+| M5.12 | 增加 SWE-bench compatibility 与高成本 full adapter  | 不影响主套件且保持 opt-in       |
 
-单一 Runtime、固定 Yolo Headless host、runtime identity、Electron/Headless parity 和受限 Linux Docker worker 已经落地；M5.5–M5.9 构成第一个可用的 Docker benchmark vertical slice，不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
+单一 Runtime、固定 Yolo Headless host、runtime identity、Electron/Headless parity、受限 Linux Docker worker 和 3 项冻结 native smoke case 已经落地；M5.6–M5.9 完成后构成第一个可用的 Docker benchmark vertical slice，不必等待全部 24 个 case 才开始为 M3/M4 提供 A/B 信号。
 
 总体验收：
 

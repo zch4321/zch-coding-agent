@@ -28,6 +28,7 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - Generic MCP：支持手写 stdio server 配置、逐 server 启停与启动信任；模型通过三个固定 gateway 工具分页发现和调用外部工具，调用继续经过现有权限与 trace 管线。
 - Headless host：复用桌面端同一 Node Agent Runtime，提供固定 Yolo 的程序化 API/CLI、JSONL 事件、原子 result/identity、usage/tool 指标、Git patch 和自动 Plan continuation；parity fixture 持续校验 Electron/Headless 的 Provider、prompt、tool、compact、Plan、MCP 和 patch 语义。
 - Linux Docker worker：以固定的 Node 24/glibc Linux x64 镜像运行同一 Headless bundle；coordinator 做 capability/image identity 预检、资源限制、受控挂载、Provider proxy、产物回收和 stop/kill/remove 清理。Agent 默认只接触单 trial proxy token，不接触真实 Provider key、Docker socket或宿主 home。
+- Benchmark case contract：版本化 manifest 描述任务、固定源码 archive、case image digest、公开检查、验收组、修改范围和资源预算；native adapter identity 与 suite/case/archive/private-spec checksum 共同冻结数据集。Oracle、mutant 和隐藏检查只存在于 evaluator private spec，不进入 Agent descriptor 或 workspace。
 
 ### MCP 配置示例
 
@@ -97,6 +98,7 @@ npm run typecheck
 npm run build:headless
 npm run build:worker-image
 npm run test:docker-worker
+npm run test:benchmark-cases
 npm run build
 ```
 
@@ -131,4 +133,4 @@ npm run test:real
 
 ## 当前状态
 
-当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity、Linux Docker worker 和 trace 基础能力。后续方向包括 benchmark case manifest、隔离 grader、多 Provider、插件加载器和 IDE 级编辑能力。
+当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity、Linux Docker worker、BenchmarkCase v1 与 trace 基础能力。后续方向包括 benchmark runner、隔离 grader、多 Provider、插件加载器和 IDE 级编辑能力。

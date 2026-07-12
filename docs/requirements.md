@@ -431,6 +431,15 @@ session.end     { ts }
 - coordinator 必须在 timeout、cancel、异常和正常完成后执行有限 stop、kill fallback、bounded log/artifact 收集、container/network 删除和 secret 删除；清理结果写入版本化 `worker-result.json`，coordinator/environment 故障不得计为模型任务失败。
 - Docker smoke 必须验证一次真实工具写入轨迹和一次挂起 Provider 强制终止，确认 secret 不泄漏、sandbox 参数生效且没有残留 Agent/proxy container 或 run network。该测试显式 opt-in，不进入无 Docker 的默认 `npm test`。
 
+### 5.6 Benchmark case contract
+
+- BenchmarkCase v1 必须记录 case/suite/revision、任务、repository provenance、固定 archive/tree hash、Linux platform、case image OCI digest、setup、公开检查、grader protocol、acceptance groups、feedback policy、修改范围、资源预算和 prompt/test review record；未知字段和越界预算一律拒绝。
+- Suite index 必须固定每个 manifest hash；manifest 必须继续固定 archive、tree 和 private spec hash。Dataset adapter id/revision 纳入 suite identity，adapter 或任一 transitive 输入变化都必须得到新 identity，不能静默覆盖冻结 suite。
+- Agent descriptor 只能包含 task、公开检查、修改范围和预算。Private spec 路径、hidden commands、oracle/gold patch、mutants、外部数据集 `fail_to_pass` / `pass_to_pass` 不得进入 descriptor、workspace、Headless config、trace 或 Docker build context。
+- Workspace 必须从固定 archive 向空目录重建；archive path 需要 containment、重复项和 tree hash 校验。准备后的 Git 只保留当前 baseline commit，不得含 remote、tag、reflog、hooks、不可达未来对象或缓存历史。
+- 非 abstain 自建 case 的 baseline 必须失败；abstain/no-change case 的 baseline 与 `no-change` oracle 必须通过。两类 case 的 oracle 都要通过全部公开与私有行为组，且至少两个合理 mutant 必须通过公开检查但被声明的隐藏行为组拒绝。完整准备和评判重复三次，证据签名不一致视为 flaky/invalid。
+- M5.5 native adapter 只运行仓库内受信任的 synthetic fixture；外部 dataset 只能归一化为公开 BenchmarkCase，不能借 adapter 把 evaluator 私有字段带入 Agent 面。正式外部代码执行必须等待隔离 grader/runner。
+
 ---
 
 ## 6. 插件系统（生命周期钩子）

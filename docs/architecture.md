@@ -135,6 +135,16 @@ Plan 进入 `awaiting_review` 后，driver 先等待共享 run controller 完全
 
 默认 credential 模式创建每次 run 独立的 internal network。Agent 只连接该网络并只持有随机 proxy token；Provider proxy 是唯一双网络容器，真实 key 只通过 coordinator 私有临时文件挂载给 proxy，且有请求体和请求次数上限。显式 direct 模式只用于受控开发 fallback。所有终态都执行 stop、有限等待、kill fallback、bounded logs/artifact 收集、container/network 删除和 secret directory 删除，并把清理结果写入 `worker-result.json`。
 
+### 3.4 BenchmarkCase 与 workspace preparation
+
+`benchmarks/cases/contracts.ts` 定义 BenchmarkCase、suite index、源码 archive 和 private evaluator spec 的 v1 TypeBox schema。公开 manifest 固定 repository provenance、raw archive/tree SHA-256、case image OCI digest、setup/public checks、acceptance groups、feedback policy、修改范围、资源预算和 prompt/test review record；grader 公开部分只有 adapter/protocol 和 private spec 内容摘要。Suite index 固定每个 manifest hash，native adapter revision 再与 suite hash组合成最终 suite identity。
+
+Oracle patch、mutant patch 与隐藏命令只位于 `benchmarks/private/`，该目录不进入 Docker build context。`toAgentCaseDescriptor()` 不返回 grader digest、内部绝对路径或任何 private spec 字段。Loader 在 workspace 或 Agent run 创建之前完成 schema、raw checksum、tree checksum、路径 containment、重复 ID、group reference、budget 和 OCI pin 校验；文件在首次 load 后变化还会被二次 checksum 拒绝。
+
+源码 archive 使用确定性的 `zch-case-archive-v1` JSON 文件，按 path、mode、byte length 和原始内容计算 tree hash。准备器只向空目录写普通文件，创建一个新的 baseline-only Git repository，然后删除 reflog、hooks、remote/tag refs，并检查不存在不可达历史。Agent 可见文件表必须与 archive 完全一致，且会扫描 hidden/grader/oracle/mutant 路径和 evaluator-only 字段。
+
+Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 mutant，检查修改范围与 `git diff --check`。普通 case 要求 baseline 失败；abstain case 支持通过 baseline 和显式 `no-change` oracle。Mutant 必须先通过全部公开检查，再被声明的隐藏 acceptance group 拒绝；每个 case 完整重复三次并比较 baseline commit 与证据签名。当前 bootstrap suite 提供 slug normalization、chunk partitioning 和 retry backoff 三项，目标 `core-24` 数量仍由后续里程碑扩展。
+
 ---
 
 ## 4. 配置、凭据与模型
@@ -511,6 +521,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 - `npm run test:ripgrep`：bundled ripgrep smoke。
 - `npm run test:real`：显式 live provider 测试，需要 `DEEPSEEK_API_KEY`。
 - `npm run test:docker-worker`：显式构建 Linux worker image，运行 fake-provider proxy smoke 和强制超时清理；不进入默认测试链路。
+- `npm run test:benchmark-cases`：校验冻结 manifest/archive/private-spec，并对 3 个 bootstrap case 重复运行 baseline/oracle/mutant 自检。
 
 当前测试分布：
 
@@ -530,7 +541,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 
 ## 19. 当前限制
 
-- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI、host parity 与 Linux OCI worker 已实现，但 case manifest、隔离 grader 和正式 benchmark runner 尚未实现。
+- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。Headless CLI、host parity、Linux OCI worker 与 BenchmarkCase v1 已实现，但隔离 grader 和正式 benchmark runner 尚未实现。
 - Provider 层当前是 OpenAI-compatible/DeepSeek 为主，没有多厂商完整矩阵。
 - Code intelligence backend 当前实际实现为 Serena MCP 只读 adapter，rename/edit capability 只在 schema 中预留。
 - 插件系统只有事件总线和 hook 点，没有本地 JS 插件加载器。

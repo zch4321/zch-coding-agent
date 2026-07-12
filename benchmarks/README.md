@@ -1,12 +1,13 @@
 # Benchmark Worker
 
-当前目录实现 M5.4 的 Linux Docker execution boundary，不负责 case manifest 或 grader。容器中的 Agent 仍是 `electron/headless/` 构建出的同一个固定 Yolo bundle；`benchmarks/worker/` 只负责部署、网络、资源和清理生命周期。
+当前目录实现 M5.4 的 Linux Docker execution boundary 和 M5.5 的 BenchmarkCase v1 数据边界；正式 runner、repair protocol 和 grader scoring 仍属于后续里程碑。容器中的 Agent 仍是 `electron/headless/` 构建出的同一个固定 Yolo bundle。
 
 ## 构建与验证
 
 ```powershell
 npm run build:worker-image
 npm run test:docker-worker
+npm run test:benchmark-cases
 ```
 
 镜像默认命名为 `zch-agent-headless:<HEAD 前 12 位>`，也可通过 `ZCH_WORKER_IMAGE` 指定。构建脚本把完整 HEAD 和 clean/dirty tree 状态注入 bundle 与 OCI labels。正式可比较 run 应使用 clean commit 和不可变 image digest。
@@ -27,3 +28,13 @@ npm run test:docker-worker
 ## 受限资源
 
 coordinator 只接受固定 workspace、artifacts、config/task 和 credential mount，不暴露通用 mount 参数。Agent 使用非 root、read-only rootfs、drop all capabilities、no-new-privileges、默认 seccomp、PID/CPU/内存/tmpfs/wall/disk limits。无论正常完成、失败、取消还是超时，最终都会收集有界 stdout/stderr，删除 container/network/secret directory，并把清理状态写入 `worker-result.json`。
+
+## Case contract 与私有评判数据
+
+`manifests/core-24/suite.json` 是当前冻结 suite index，每个 entry 固定 manifest SHA-256；manifest 再固定源码 archive、源码 tree、private evaluator spec 和 case image digest。`adapters/native.ts` 另外把 adapter revision 纳入 suite identity，因此 adapter 语义变化必须产生新的 identity。
+
+公开 manifest 包含 task、repository provenance、setup、public checks、acceptance groups、feedback policy、modification scope、budgets 和 review record，但不包含 private spec 路径、隐藏命令、oracle patch 或 mutant patch。`toAgentCaseDescriptor()` 进一步只导出 Agent 真正需要的公开字段。
+
+源码使用可审阅的 `zch-case-archive-v1` JSON archive。准备器校验 raw archive 与规范化 tree hash后才写文件，再创建只有一个 baseline commit 的新 Git 仓库，并删除 reflog、hooks、remote、tag 和不可达历史。Agent 可见树还会扫描私有字段和 grader/oracle/mutant 路径。
+
+`private/core-24/` 只供可信 coordinator/evaluator 和数据质量自检读取，并已从 Docker build context 排除。当前 3 个 bootstrap case 各自包含一个 oracle 和两个可通过公开检查但会被隐藏行为组拒绝的 mutant；`test:benchmark-cases` 对 baseline/oracle/mutant 从 pristine archive 重复准备三次，签名不一致即判定 flaky。
