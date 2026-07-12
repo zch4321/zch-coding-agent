@@ -58,6 +58,7 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
   it('keeps strict evaluation hidden and preserves resolved_initial', async () => {
     const outputDirectory = await temporaryDirectory()
     let calls = 0
+    const progress: string[] = []
     const worker: DockerWorkerRunner = async (input) => {
       calls += 1
       expect(input.benchmarkControl).toBeUndefined()
@@ -72,12 +73,14 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
     const run = await runBenchmarkTrials({
       ...baseInput(outputDirectory, worker),
       protocol: 'strict',
+      onProgress: (event) => progress.push(event.phase),
     })
 
     expect(calls).toBe(1)
     expect(run.trials[0]!.result.resolvedInitial).toBe(false)
     expect(run.trials[0]!.result.repairAttempted).toBe(false)
     expect(run.trials[0]!.result.afterFeedback).toBeUndefined()
+    expect(progress).toEqual(['trial-start', 'trial-complete'])
   })
 
   it('repairs once in one worker and reports incremental and cumulative cost', async () => {

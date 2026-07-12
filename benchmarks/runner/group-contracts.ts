@@ -140,6 +140,52 @@ export interface BenchmarkRunGroupResult {
   }>
 }
 
+export type BenchmarkRunProgressEvent =
+  | {
+      phase: 'case-start'
+      caseIndex: number
+      caseCount: number
+      suiteId: string
+      caseId: string
+      repository: string
+      trialCount: number
+    }
+  | {
+      phase: 'trial-start'
+      caseIndex: number
+      caseCount: number
+      suiteId: string
+      caseId: string
+      repository: string
+      trialIndex: number
+      trialCount: number
+    }
+  | {
+      phase: 'trial-complete'
+      caseIndex: number
+      caseCount: number
+      suiteId: string
+      caseId: string
+      repository: string
+      trialIndex: number
+      trialCount: number
+      reused: boolean
+      resolved: boolean
+      level: BenchmarkEvaluationResult['level']
+      durationMs: number
+    }
+  | {
+      phase: 'case-complete'
+      caseIndex: number
+      caseCount: number
+      suiteId: string
+      caseId: string
+      repository: string
+      trialCount: number
+      resolved: number
+      durationMs: number
+    }
+
 export type BenchmarkCaseTrialRunner =
   typeof import('./runner').runBenchmarkTrials
 
@@ -162,4 +208,5 @@ export interface RunBenchmarkGroupInput {
   trialRunner?: BenchmarkCaseTrialRunner
   workerRunner?: DockerWorkerRunner
   graderRunner?: IsolatedGraderRunner
+  onProgress?: (event: BenchmarkRunProgressEvent) => void
 }

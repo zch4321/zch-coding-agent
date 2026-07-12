@@ -17,7 +17,10 @@ import {
   type ExternalAdapterRuntime,
 } from '../adapters/external'
 import type { LoadedAdapterSuite } from '../adapters/contracts'
-import type { BenchmarkCohort } from '../cohort/contracts'
+import type {
+  BenchmarkCohort,
+  ExternalBenchmarkCandidate,
+} from '../cohort/contracts'
 import { buildRollingMixedCohort, verifyCohort } from '../cohort/selection'
 import { BenchmarkCaseValidationError } from '../cases/loader'
 import { validateBenchmarkPriceSnapshot } from '../metrics/aggregate'
@@ -31,6 +34,7 @@ import {
 import {
   BENCHMARK_PRESETS,
   type BenchmarkRunGroupResult,
+  type BenchmarkRunProgressEvent,
   type BenchmarkRunPreset,
   type RunBenchmarkGroupInput,
   type SelectedBenchmarkCase,
@@ -263,6 +267,11 @@ export async function runBenchmarkCli(
             sourceCommit,
             outputDirectory,
             now,
+            onCandidate: (candidate) =>
+              writeProgress(
+                errorOutput,
+                `preparing ${candidate.source} project ${candidate.repository} (${candidate.caseId})`,
+              ),
           })
         : undefined
     const suites: LoadedAdapterSuite[] = external
@@ -301,7 +310,13 @@ export async function runBenchmarkCli(
       cohortHash: external?.cohort.cohortHash,
       cohort: external?.cohort,
       signal: options.signal,
+      onProgress: (event) =>
+        writeProgress(errorOutput, formatProgressEvent(event)),
     }
+    writeProgress(
+      errorOutput,
+      `starting ${args.preset}: ${selectedCases.length} cases x ${groupInput.trialsPerCase} trials (${selectedCases.length * groupInput.trialsPerCase} total)`,
+    )
     const result = await (options.groupRunner ?? runBenchmarkGroup)(groupInput)
     output.write(
       `${JSON.stringify({
@@ -465,6 +480,7 @@ async function prepareExternalRun(input: {
   sourceCommit: string
   outputDirectory: string
   now: Date
+  onCandidate?: (candidate: ExternalBenchmarkCandidate) => void
 }): Promise<{ cohort: BenchmarkCohort; suites: LoadedAdapterSuite[] }> {
   const runtime =
     input.options.createExternalRuntime?.({
@@ -494,6 +510,7 @@ async function prepareExternalRun(input: {
           `Pinned cohort case is unavailable: ${cohortCase.caseId}`,
         )
       }
+      input.onCandidate?.(candidate)
       const image = await runtime.resolveImage(candidate)
       if (
         !image.eligible ||
@@ -518,7 +535,10 @@ async function prepareExternalRun(input: {
           reason: entry.reason,
         })),
       ),
-      resolveImage: (candidate) => runtime.resolveImage(candidate),
+      resolveImage: (candidate) => {
+        input.onCandidate?.(candidate)
+        return runtime.resolveImage(candidate)
+      },
     })
   }
   return {
@@ -529,6 +549,44 @@ async function prepareExternalRun(input: {
       runtime,
     }),
   }
+}
+
+function formatProgressEvent(event: BenchmarkRunProgressEvent): string {
+  const caseLabel = `${terminalText(event.suiteId)}/${terminalText(event.caseId)}`
+  if (event.phase === 'case-start') {
+    return `[case ${event.caseIndex}/${event.caseCount}] ${caseLabel} project=${terminalText(event.repository)}`
+  }
+  if (event.phase === 'trial-start') {
+    return `[case ${event.caseIndex}/${event.caseCount}] [trial ${event.trialIndex}/${event.trialCount}] ${caseLabel} started`
+  }
+  if (event.phase === 'trial-complete') {
+    const outcome = event.resolved ? 'resolved' : 'unresolved'
+    const reuse = event.reused ? ' (cached)' : ''
+    return `[case ${event.caseIndex}/${event.caseCount}] [trial ${event.trialIndex}/${event.trialCount}] ${caseLabel} ${event.level} ${outcome} in ${formatDuration(event.durationMs)}${reuse}`
+  }
+  return `[case ${event.caseIndex}/${event.caseCount}] ${caseLabel} completed: ${event.resolved}/${event.trialCount} resolved in ${formatDuration(event.durationMs)}`
+}
+
+function writeProgress(output: Writable, message: string): void {
+  output.write(`[benchmark] ${message}\n`)
+}
+
+function terminalText(value: string): string {
+  const withoutControls = Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0)!
+    return codePoint <= 31 || (codePoint >= 127 && codePoint <= 159)
+      ? ' '
+      : character
+  }).join('')
+  return withoutControls.replace(/\s+/gu, ' ').trim().slice(0, 240)
+}
+
+function formatDuration(durationMs: number): string {
+  if (durationMs < 1_000) return `${Math.round(durationMs)}ms`
+  if (durationMs < 60_000) return `${(durationMs / 1_000).toFixed(1)}s`
+  const minutes = Math.floor(durationMs / 60_000)
+  const seconds = Math.round((durationMs % 60_000) / 1_000)
+  return `${minutes}m ${seconds}s`
 }
 
 async function defaultExternalCatalogLoader(

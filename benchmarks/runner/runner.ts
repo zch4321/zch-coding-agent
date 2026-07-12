@@ -93,6 +93,11 @@ export async function runBenchmarkTrials(
   try {
     for (let trialIndex = 1; trialIndex <= trials; trialIndex += 1) {
       if (input.signal?.aborted) throw new Error('Benchmark run was cancelled')
+      emitProgress(input, {
+        phase: 'trial-start',
+        trialIndex,
+        trialCount: trials,
+      })
       const identity = createTrialIdentity({
         input,
         protocol,
@@ -101,21 +106,46 @@ export async function runBenchmarkTrials(
         runtimeImageDigest,
         trialIndex,
       })
-      results.push(
-        await runTrial({
-          input,
-          protocol,
-          feedbackVisibility,
-          effectiveConfig,
-          runtimeImageDigest,
-          identity,
-        }),
-      )
+      const startedMs = performance.now()
+      const trial = await runTrial({
+        input,
+        protocol,
+        feedbackVisibility,
+        effectiveConfig,
+        runtimeImageDigest,
+        identity,
+      })
+      results.push(trial)
+      const evaluation =
+        trial.result.afterFeedback?.evaluation ??
+        trial.result.initial.evaluation
+      emitProgress(input, {
+        phase: 'trial-complete',
+        trialIndex,
+        trialCount: trials,
+        reused: trial.reused,
+        resolved: trial.result.resolvedAfterFeedback,
+        level: evaluation.level,
+        durationMs: trial.reused
+          ? 0
+          : Math.max(0, performance.now() - startedMs),
+      })
     }
   } finally {
     await input.adapter.disposeCaseResources?.(input.loadedCase)
   }
   return { schemaVersion: 1, protocol, trials: results }
+}
+
+function emitProgress(
+  input: RunBenchmarkTrialsInput,
+  event: Parameters<NonNullable<RunBenchmarkTrialsInput['onProgress']>>[0],
+): void {
+  try {
+    input.onProgress?.(event)
+  } catch {
+    // Progress reporting must never change the benchmark outcome.
+  }
 }
 
 async function runTrial(input: {

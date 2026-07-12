@@ -185,6 +185,41 @@ describe('benchmark CLI', () => {
         }),
         groupRunner: async (input) => {
           received = input
+          const common = {
+            caseIndex: 1,
+            caseCount: 3,
+            suiteId: 'core-harness-8',
+            caseId: 'slugify-normalization',
+            repository: 'fixture\u001b[31m/repository',
+          }
+          input.onProgress?.({
+            phase: 'case-start',
+            ...common,
+            trialCount: 1,
+          })
+          input.onProgress?.({
+            phase: 'trial-start',
+            ...common,
+            trialIndex: 1,
+            trialCount: 1,
+          })
+          input.onProgress?.({
+            phase: 'trial-complete',
+            ...common,
+            trialIndex: 1,
+            trialCount: 1,
+            reused: false,
+            resolved: true,
+            level: 'L5',
+            durationMs: 1_250,
+          })
+          input.onProgress?.({
+            phase: 'case-complete',
+            ...common,
+            trialCount: 1,
+            resolved: 1,
+            durationMs: 61_000,
+          })
           return fakeResult(outputDirectory)
         },
         output: stringWriter((value) => (stdout += value)),
@@ -193,7 +228,16 @@ describe('benchmark CLI', () => {
     )
 
     expect(result.exitCode).toBe(0)
-    expect(stderr).toBe('')
+    expect(stderr).toBe(
+      [
+        '[benchmark] starting smoke: 3 cases x 1 trials (3 total)',
+        '[benchmark] [case 1/3] core-harness-8/slugify-normalization project=fixture [31m/repository',
+        '[benchmark] [case 1/3] [trial 1/1] core-harness-8/slugify-normalization started',
+        '[benchmark] [case 1/3] [trial 1/1] core-harness-8/slugify-normalization L5 resolved in 1.3s',
+        '[benchmark] [case 1/3] core-harness-8/slugify-normalization completed: 1/1 resolved in 1m 1s',
+        '',
+      ].join('\n'),
+    )
     expect(received?.selectedCases).toHaveLength(3)
     expect(received?.trialsPerCase).toBe(1)
     expect(received?.credential).toEqual({

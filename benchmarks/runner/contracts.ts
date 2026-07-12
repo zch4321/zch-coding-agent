@@ -179,6 +179,22 @@ export interface BenchmarkTrialsResult {
   }>
 }
 
+export type BenchmarkTrialProgressEvent =
+  | {
+      phase: 'trial-start'
+      trialIndex: number
+      trialCount: number
+    }
+  | {
+      phase: 'trial-complete'
+      trialIndex: number
+      trialCount: number
+      reused: boolean
+      resolved: boolean
+      level: BenchmarkEvaluationResult['level']
+      durationMs: number
+    }
+
 export type DockerWorkerRunner = (
   input: DockerWorkerRunInput,
 ) => Promise<DockerWorkerResult>
@@ -201,4 +217,5 @@ export interface RunBenchmarkTrialsInput {
   workerRunner?: DockerWorkerRunner
   graderRunner?: IsolatedGraderRunner
   priceSnapshot?: BenchmarkPriceSnapshot
+  onProgress?: (event: BenchmarkTrialProgressEvent) => void
 }

@@ -44,9 +44,22 @@ export async function runBenchmarkGroup(
   const trialRunner = input.trialRunner ?? runBenchmarkTrials
 
   try {
-    for (const selected of input.selectedCases) {
+    for (const [caseOffset, selected] of input.selectedCases.entries()) {
       if (input.signal?.aborted) throw new Error('Benchmark run was cancelled')
       const manifest = selected.loadedCase.manifest
+      const caseIndex = caseOffset + 1
+      const caseCount = input.selectedCases.length
+      const repository = manifest.repository.source.locator
+      const caseStartedMs = performance.now()
+      emitProgress(input, {
+        phase: 'case-start',
+        caseIndex,
+        caseCount,
+        suiteId: manifest.suite.id,
+        caseId: manifest.id,
+        repository,
+        trialCount: input.trialsPerCase,
+      })
       const caseDirectory = path.join(
         outputDirectory,
         'cases',
@@ -87,6 +100,15 @@ export async function runBenchmarkGroup(
         workerRunner: input.workerRunner,
         graderRunner: input.graderRunner,
         priceSnapshot: input.priceSnapshot,
+        onProgress: (event) =>
+          emitProgress(input, {
+            ...event,
+            caseIndex,
+            caseCount,
+            suiteId: manifest.suite.id,
+            caseId: manifest.id,
+            repository,
+          }),
       })
       const record = {
         suiteId: manifest.suite.id,
@@ -99,6 +121,19 @@ export async function runBenchmarkGroup(
         path.join(caseDirectory, 'case-result.restricted.json'),
         record,
       )
+      emitProgress(input, {
+        phase: 'case-complete',
+        caseIndex,
+        caseCount,
+        suiteId: manifest.suite.id,
+        caseId: manifest.id,
+        repository,
+        trialCount: trials.trials.length,
+        resolved: trials.trials.filter(
+          (trial) => trial.result.resolvedAfterFeedback,
+        ).length,
+        durationMs: Math.max(0, performance.now() - caseStartedMs),
+      })
     }
 
     const completedAt = new Date().toISOString()
@@ -163,6 +198,17 @@ export async function runBenchmarkGroup(
       completedAt: new Date().toISOString(),
     }).catch(() => undefined)
     throw error
+  }
+}
+
+function emitProgress(
+  input: RunBenchmarkGroupInput,
+  event: Parameters<NonNullable<RunBenchmarkGroupInput['onProgress']>>[0],
+): void {
+  try {
+    input.onProgress?.(event)
+  } catch {
+    // Progress reporting must never change the benchmark outcome.
   }
 }
 

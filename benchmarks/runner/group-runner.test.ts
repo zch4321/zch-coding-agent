@@ -125,6 +125,22 @@ describe('benchmark run-group coordinator', () => {
     expect(result.summary.efficiency).toBeUndefined()
   })
 
+  it('reports case and trial progress without changing execution', async () => {
+    const outputDirectory = await temporaryDirectory()
+    const events: string[] = []
+    await runBenchmarkGroup({
+      ...groupInput(outputDirectory, fakeTrialRunner(), 1),
+      onProgress: (event) => events.push(event.phase),
+    })
+
+    expect(events).toEqual([
+      'case-start',
+      'trial-start',
+      'trial-complete',
+      'case-complete',
+    ])
+  })
+
   it('initializes and validates cohort artifacts with the run-group identity', async () => {
     const outputDirectory = await temporaryDirectory()
     const cohort = fixtureCohort()
@@ -193,6 +209,11 @@ function fakeTrialRunner(
   return async (
     input: RunBenchmarkTrialsInput,
   ): Promise<BenchmarkTrialsResult> => {
+    input.onProgress?.({
+      phase: 'trial-start',
+      trialIndex: 1,
+      trialCount: input.trials ?? 1,
+    })
     const trialDirectory = path.join(input.outputDirectory, 'trial-0001')
     const attemptDirectory = path.join(trialDirectory, 'attempts', 'initial')
     await mkdir(path.join(trialDirectory, 'worker'), { recursive: true })
@@ -261,7 +282,7 @@ function fakeTrialRunner(
     const metrics = includeMetrics
       ? trialMetrics(resolved ? 100 : 900, resolved ? 1 : 9)
       : undefined
-    return {
+    const result: BenchmarkTrialsResult = {
       schemaVersion: 1,
       protocol: input.protocol ?? 'strict',
       trials: [
@@ -304,6 +325,16 @@ function fakeTrialRunner(
         },
       ],
     }
+    input.onProgress?.({
+      phase: 'trial-complete',
+      trialIndex: 1,
+      trialCount: input.trials ?? 1,
+      reused: result.trials[0]!.reused,
+      resolved,
+      level: evaluation.level,
+      durationMs: 1250,
+    })
+    return result
   }
 }
 
