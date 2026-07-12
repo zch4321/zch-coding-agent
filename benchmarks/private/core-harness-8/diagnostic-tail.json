@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "caseId": "diagnostic-tail",
+  "suiteId": "core-harness-8",
+  "suiteRevision": "v1",
+  "checks": [
+    {
+      "id": "last-error",
+      "acceptanceGroupId": "last-error",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { extractDiagnostic } from './src/diagnostic.mjs'; assert.equal(extractDiagnostic('ERROR: stale\\nINFO: retrying\\nERROR: final cause'), 'final cause')"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    },
+    {
+      "id": "trailing-noise",
+      "acceptanceGroupId": "trailing-noise",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { extractDiagnostic } from './src/diagnostic.mjs'; assert.equal(extractDiagnostic('INFO: begin\\nERROR: disk full  \\nINFO: cleanup\\n'), 'disk full'); assert.equal(extractDiagnostic('INFO: healthy'), null)"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    }
+  ],
+  "oracle": {
+    "kind": "patch",
+    "patch": "diff --git a/src/diagnostic.mjs b/src/diagnostic.mjs\n--- a/src/diagnostic.mjs\n+++ b/src/diagnostic.mjs\n@@ -1,3 +1,6 @@\n export function extractDiagnostic(log) {\n-  return log.split('\\n').find((line) => line.startsWith('ERROR:')) ?? null\n+  const matches = [...log.matchAll(/^ERROR:\\s*(.+)$/gm)]\n+  const message = matches.at(-1)?.[1]\n+  return message === undefined ? null : message.trim()\n }\n"
+  },
+  "mutants": [
+    {
+      "id": "first-error",
+      "description": "Strips the prefix but returns the first error rather than the final diagnostic.",
+      "patch": "diff --git a/src/diagnostic.mjs b/src/diagnostic.mjs\n--- a/src/diagnostic.mjs\n+++ b/src/diagnostic.mjs\n@@ -1,3 +1,4 @@\n export function extractDiagnostic(log) {\n-  return log.split('\\n').find((line) => line.startsWith('ERROR:')) ?? null\n+  const line = log.split('\\n').find((entry) => entry.startsWith('ERROR:'))\n+  return line?.slice('ERROR:'.length).trim() ?? null\n }\n",
+      "expectedFailedGroups": ["last-error"]
+    },
+    {
+      "id": "last-line-only",
+      "description": "Works when the error is the final line but ignores earlier errors followed by cleanup output.",
+      "patch": "diff --git a/src/diagnostic.mjs b/src/diagnostic.mjs\n--- a/src/diagnostic.mjs\n+++ b/src/diagnostic.mjs\n@@ -1,3 +1,4 @@\n export function extractDiagnostic(log) {\n-  return log.split('\\n').find((line) => line.startsWith('ERROR:')) ?? null\n+  const line = log.split('\\n').at(-1)\n+  return line?.startsWith('ERROR:') ? line.slice('ERROR:'.length).trim() : null\n }\n",
+      "expectedFailedGroups": ["trailing-noise"]
+    }
+  ]
+}

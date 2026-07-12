@@ -1,19 +1,22 @@
 {
   "schemaVersion": 1,
-  "id": "chunk-partitioning",
-  "suite": { "id": "core-24", "revision": "smoke-v1" },
-  "kind": "feature",
-  "task": "Implement chunk(items, size) in src/chunk.mjs so it returns consecutive arrays of at most size elements, preserves a final partial chunk, and throws RangeError when size is not a positive integer. Keep the existing module API.",
+  "id": "config-precedence",
+  "suite": {
+    "id": "core-harness-8",
+    "revision": "v1"
+  },
+  "kind": "bug-fix",
+  "task": "Fix mergeConfig in src/merge-config.mjs so explicit false, zero, and empty-string overrides take precedence while nested configuration objects are merged recursively. Preserve the exported API and do not mutate either input.",
   "repository": {
     "source": {
       "kind": "synthetic",
-      "locator": "zch/core-24/chunk-partitioning",
+      "locator": "zch/core-harness-8/config-precedence",
       "revision": "baseline-v1",
       "license": "MIT-0"
     },
-    "archive": "archives/core-24/chunk-partitioning.zch-archive.json",
-    "archiveSha256": "768f16620517ddda6605b14d28d7604ff0432cf58461c9139a70d4c468eabb5e",
-    "treeSha256": "f82922304301734eeb3e478392609270dd586584686af5c87f77253db3d755cb"
+    "archive": "archives/core-harness-8/config-precedence.zch-archive.json",
+    "archiveSha256": "a95a7e4bac701c44ed70ef1f57485be5f819ad9f97589a907ccdee42bd620f44",
+    "treeSha256": "e5d5c08194788636e0e9caf245b202a231e43b0cf904a67c14d66066bc691659"
   },
   "platform": {
     "os": "linux",
@@ -28,9 +31,9 @@
   "setup": [],
   "publicChecks": [
     {
-      "id": "public-even-chunks",
-      "title": "Partitions an evenly divisible array",
-      "acceptanceGroupId": "core-behavior",
+      "id": "public-false-override",
+      "title": "Preserves an explicit false override",
+      "acceptanceGroupId": "false-override",
       "command": {
         "executable": "node",
         "args": ["test/public.test.mjs"],
@@ -42,29 +45,32 @@
   "grader": {
     "adapter": "native-command-v1",
     "protocolVersion": 1,
-    "privateSpecSha256": "376b1b0e7edd318aef4e5e5bffb5aa8e3492947c4e69ebc4cc8866c6b8c9cbe2"
+    "privateSpecSha256": "4c51b6597a4ece36f237736f012b3ef6260edec25be5a13c66bf382756504788"
   },
   "acceptanceGroups": [
     {
-      "id": "core-behavior",
-      "title": "Consecutive chunk partitioning",
+      "id": "false-override",
+      "title": "Explicit false precedence",
       "critical": true,
       "weight": 1
     },
     {
-      "id": "partial-chunk",
-      "title": "Final partial chunk",
+      "id": "falsey-values",
+      "title": "All explicit falsey values",
       "critical": true,
       "weight": 1
     },
     {
-      "id": "invalid-size",
-      "title": "Invalid size rejection",
+      "id": "nested-config",
+      "title": "Recursive nested configuration",
       "critical": true,
       "weight": 1
     }
   ],
-  "feedbackPolicy": { "allowed": "public", "repairOnceAllowed": true },
+  "feedbackPolicy": {
+    "allowed": "public",
+    "repairOnceAllowed": true
+  },
   "modificationScope": {
     "allowedPaths": ["src/**"],
     "deniedPaths": ["test/**", "package.json"],
@@ -86,9 +92,9 @@
     "repetitions": 3,
     "review": {
       "status": "reviewed",
-      "reviewer": "maintainer-review:core-smoke-v1",
+      "reviewer": "deterministic-self-check:core-harness-v1",
       "reviewedAt": "2026-07-12T00:00:00.000Z",
-      "method": "Manual prompt-to-public-and-private-behavior alignment review; public coverage leaves meaningful edge cases for private evaluation."
+      "method": "Deterministic baseline, oracle, mutant, and three-repetition stability self-check; no semantic alignment gate."
     }
   }
 }

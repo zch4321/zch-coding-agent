@@ -148,7 +148,7 @@ describe.skipIf(!enabled)('Linux Docker worker', () => {
     temporaryDirectories.push(root)
     const suite = await loadNativeBenchmarkSuite({
       benchmarkRoot: path.resolve('benchmarks'),
-      suiteFile: 'manifests/core-24/suite.json',
+      suiteFile: 'manifests/core-harness-8/suite.json',
     })
     const loadedCase = suite.cases.find(
       (candidate) => candidate.manifest.id === 'slugify-normalization',
@@ -218,7 +218,7 @@ describe.skipIf(!enabled)('Linux Docker worker', () => {
     const fixture = await createFixture('slug')
     const suite = await loadNativeBenchmarkSuite({
       benchmarkRoot: path.resolve('benchmarks'),
-      suiteFile: 'manifests/core-24/suite.json',
+      suiteFile: 'manifests/core-harness-8/suite.json',
     })
     const loadedCase = suite.cases.find(
       (candidate) => candidate.manifest.id === 'slugify-normalization',

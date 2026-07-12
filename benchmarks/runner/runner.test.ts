@@ -38,7 +38,7 @@ let privateSpec: PrivateCaseSpec
 beforeAll(async () => {
   suite = await loadNativeBenchmarkSuite({
     benchmarkRoot: path.resolve('benchmarks'),
-    suiteFile: 'manifests/core-24/suite.json',
+    suiteFile: 'manifests/core-harness-8/suite.json',
   })
   loadedCase = suite.cases.find(
     (candidate) => candidate.manifest.id === 'slugify-normalization',

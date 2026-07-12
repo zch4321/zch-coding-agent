@@ -23,7 +23,7 @@ let suite: NativeBenchmarkSuite
 beforeAll(async () => {
   suite = await loadNativeBenchmarkSuite({
     benchmarkRoot: path.resolve('benchmarks'),
-    suiteFile: 'manifests/core-24/suite.json',
+    suiteFile: 'manifests/core-harness-8/suite.json',
   })
 })
 
@@ -60,7 +60,7 @@ describe('benchmark run-group coordinator', () => {
         path.join(
           outputDirectory,
           'cases',
-          'core-24',
+          'core-harness-8',
           suite.cases[0]!.manifest.id,
           'trials',
           'trial-0001',

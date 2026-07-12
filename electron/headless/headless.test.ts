@@ -214,7 +214,7 @@ function benchmarkCase(): BenchmarkAgentCase {
   return {
     schemaVersion: 1,
     caseId: 'case-one',
-    suiteId: 'core-24',
+    suiteId: 'core-harness-8',
     suiteRevision: 'smoke-v1',
     task: 'Fix src/example.mjs',
     publicChecks: [

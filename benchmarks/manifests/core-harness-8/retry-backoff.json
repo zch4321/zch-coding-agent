@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "retry-backoff",
+  "suite": {
+    "id": "core-harness-8",
+    "revision": "v1"
+  },
+  "kind": "harness-stress",
+  "task": "Fix retryDelay(attempt, baseMs, capMs) in src/retry-delay.mjs. Attempt numbering starts at 1, delays grow exponentially from baseMs, values never exceed capMs, and non-positive or non-integer attempts throw RangeError. Keep the existing module API.",
+  "repository": {
+    "source": {
+      "kind": "synthetic",
+      "locator": "zch/core-harness-8/retry-backoff",
+      "revision": "baseline-v1",
+      "license": "MIT-0"
+    },
+    "archive": "archives/core-harness-8/retry-backoff.zch-archive.json",
+    "archiveSha256": "3f16b953c4ff138b1930cec6b928739493fa240e47bf9dd36a46b1e99ff26744",
+    "treeSha256": "4c3b565a2c74d629a277aec177a63f64bbf2bb53188258cce04a22b794b858b0"
+  },
+  "platform": {
+    "os": "linux",
+    "architecture": "x64",
+    "libc": "glibc",
+    "nodeMajor": 24
+  },
+  "caseImage": {
+    "reference": "node:24-bookworm-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5",
+    "digest": "sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5"
+  },
+  "setup": [],
+  "publicChecks": [
+    {
+      "id": "public-exponential",
+      "title": "Uses one-based exponential growth",
+      "acceptanceGroupId": "core-behavior",
+      "command": {
+        "executable": "node",
+        "args": ["test/public.test.mjs"],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    }
+  ],
+  "grader": {
+    "adapter": "native-command-v1",
+    "protocolVersion": 1,
+    "privateSpecSha256": "08ca113d1a33abc046321f5719792e1758e42f6ff1849d1653afa8b7af3b2f47"
+  },
+  "acceptanceGroups": [
+    {
+      "id": "core-behavior",
+      "title": "One-based exponential delay",
+      "critical": true,
+      "weight": 1
+    },
+    {
+      "id": "cap-delay",
+      "title": "Configured delay cap",
+      "critical": true,
+      "weight": 1
+    },
+    {
+      "id": "invalid-attempt",
+      "title": "Invalid attempt rejection",
+      "critical": true,
+      "weight": 1
+    }
+  ],
+  "feedbackPolicy": {
+    "allowed": "public",
+    "repairOnceAllowed": true
+  },
+  "modificationScope": {
+    "allowedPaths": ["src/**"],
+    "deniedPaths": ["test/**", "package.json"],
+    "maxChangedFiles": 2,
+    "maxPatchBytes": 65536
+  },
+  "resources": {
+    "wallTimeMs": 60000,
+    "cpus": 1,
+    "memoryBytes": 536870912,
+    "pids": 64,
+    "diskBytes": 268435456,
+    "maxAgentSteps": 32,
+    "maxContextTokens": 65536
+  },
+  "quality": {
+    "baselineExpected": "fail",
+    "minimumRejectedMutants": 2,
+    "repetitions": 3,
+    "review": {
+      "status": "reviewed",
+      "reviewer": "maintainer-review:core-v1",
+      "reviewedAt": "2026-07-12T00:00:00.000Z",
+      "method": "Manual prompt-to-public-and-private-behavior alignment review; validation and cap behavior remain independently testable."
+    }
+  }
+}

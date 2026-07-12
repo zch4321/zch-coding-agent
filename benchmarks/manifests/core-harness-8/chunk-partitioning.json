@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "chunk-partitioning",
+  "suite": {
+    "id": "core-harness-8",
+    "revision": "v1"
+  },
+  "kind": "feature",
+  "task": "Implement chunk(items, size) in src/chunk.mjs so it returns consecutive arrays of at most size elements, preserves a final partial chunk, and throws RangeError when size is not a positive integer. Keep the existing module API.",
+  "repository": {
+    "source": {
+      "kind": "synthetic",
+      "locator": "zch/core-harness-8/chunk-partitioning",
+      "revision": "baseline-v1",
+      "license": "MIT-0"
+    },
+    "archive": "archives/core-harness-8/chunk-partitioning.zch-archive.json",
+    "archiveSha256": "768f16620517ddda6605b14d28d7604ff0432cf58461c9139a70d4c468eabb5e",
+    "treeSha256": "f82922304301734eeb3e478392609270dd586584686af5c87f77253db3d755cb"
+  },
+  "platform": {
+    "os": "linux",
+    "architecture": "x64",
+    "libc": "glibc",
+    "nodeMajor": 24
+  },
+  "caseImage": {
+    "reference": "node:24-bookworm-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5",
+    "digest": "sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5"
+  },
+  "setup": [],
+  "publicChecks": [
+    {
+      "id": "public-even-chunks",
+      "title": "Partitions an evenly divisible array",
+      "acceptanceGroupId": "core-behavior",
+      "command": {
+        "executable": "node",
+        "args": ["test/public.test.mjs"],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    }
+  ],
+  "grader": {
+    "adapter": "native-command-v1",
+    "protocolVersion": 1,
+    "privateSpecSha256": "5c8aa36d3eced2d73fe69e6047816e5c5c6e7532831b34389bb8844f24e929de"
+  },
+  "acceptanceGroups": [
+    {
+      "id": "core-behavior",
+      "title": "Consecutive chunk partitioning",
+      "critical": true,
+      "weight": 1
+    },
+    {
+      "id": "partial-chunk",
+      "title": "Final partial chunk",
+      "critical": true,
+      "weight": 1
+    },
+    {
+      "id": "invalid-size",
+      "title": "Invalid size rejection",
+      "critical": true,
+      "weight": 1
+    }
+  ],
+  "feedbackPolicy": {
+    "allowed": "public",
+    "repairOnceAllowed": true
+  },
+  "modificationScope": {
+    "allowedPaths": ["src/**"],
+    "deniedPaths": ["test/**", "package.json"],
+    "maxChangedFiles": 2,
+    "maxPatchBytes": 65536
+  },
+  "resources": {
+    "wallTimeMs": 60000,
+    "cpus": 1,
+    "memoryBytes": 536870912,
+    "pids": 64,
+    "diskBytes": 268435456,
+    "maxAgentSteps": 32,
+    "maxContextTokens": 65536
+  },
+  "quality": {
+    "baselineExpected": "fail",
+    "minimumRejectedMutants": 2,
+    "repetitions": 3,
+    "review": {
+      "status": "reviewed",
+      "reviewer": "maintainer-review:core-v1",
+      "reviewedAt": "2026-07-12T00:00:00.000Z",
+      "method": "Deterministic baseline, oracle, mutant, and three-repetition stability self-check; no semantic alignment gate."
+    }
+  }
+}

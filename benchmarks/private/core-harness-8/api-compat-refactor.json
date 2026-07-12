@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "caseId": "api-compat-refactor",
+  "suiteId": "core-harness-8",
+  "suiteRevision": "v1",
+  "checks": [
+    {
+      "id": "string-compatibility",
+      "acceptanceGroupId": "string-compatibility",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { parseEndpoint } from './src/endpoint.mjs'; assert.deepEqual(parseEndpoint('api.test:3000'), { host: 'api.test', port: 3000 }); assert.deepEqual(parseEndpoint('http://api.test:8080/v1'), { host: 'api.test', port: 8080 })"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    },
+    {
+      "id": "protocol-defaults",
+      "acceptanceGroupId": "protocol-defaults",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { parseEndpoint } from './src/endpoint.mjs'; assert.deepEqual(parseEndpoint(new URL('https://secure.test/path')), { host: 'secure.test', port: 443 }); assert.deepEqual(parseEndpoint('http://plain.test'), { host: 'plain.test', port: 80 })"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    }
+  ],
+  "oracle": {
+    "kind": "patch",
+    "patch": "diff --git a/src/endpoint.mjs b/src/endpoint.mjs\n--- a/src/endpoint.mjs\n+++ b/src/endpoint.mjs\n@@ -1,4 +1,7 @@\n export function parseEndpoint(value) {\n-  const url = new URL(value.includes('://') ? value : `http://${value}`)\n-  return { host: url.hostname, port: Number(url.port || 80) }\n+  const url = value instanceof URL\n+    ? value\n+    : new URL(value.includes('://') ? value : `http://${value}`)\n+  const defaultPort = url.protocol === 'https:' ? 443 : 80\n+  return { host: url.hostname, port: Number(url.port || defaultPort) }\n }\n"
+  },
+  "mutants": [
+    {
+      "id": "url-only",
+      "description": "Accepts URL objects but drops the existing string API.",
+      "patch": "diff --git a/src/endpoint.mjs b/src/endpoint.mjs\n--- a/src/endpoint.mjs\n+++ b/src/endpoint.mjs\n@@ -1,4 +1,4 @@\n export function parseEndpoint(value) {\n-  const url = new URL(value.includes('://') ? value : `http://${value}`)\n+  const url = value\n   return { host: url.hostname, port: Number(url.port || 80) }\n }\n",
+      "expectedFailedGroups": ["string-compatibility", "protocol-defaults"]
+    },
+    {
+      "id": "fixed-default-port",
+      "description": "Supports both input shapes but assumes port 80 for every protocol.",
+      "patch": "diff --git a/src/endpoint.mjs b/src/endpoint.mjs\n--- a/src/endpoint.mjs\n+++ b/src/endpoint.mjs\n@@ -1,4 +1,6 @@\n export function parseEndpoint(value) {\n-  const url = new URL(value.includes('://') ? value : `http://${value}`)\n+  const url = value instanceof URL\n+    ? value\n+    : new URL(value.includes('://') ? value : `http://${value}`)\n   return { host: url.hostname, port: Number(url.port || 80) }\n }\n",
+      "expectedFailedGroups": ["protocol-defaults"]
+    }
+  ]
+}

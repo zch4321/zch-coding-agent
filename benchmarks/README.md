@@ -76,13 +76,13 @@ coordinator 只接受固定 workspace、artifacts、config/task 和 credential m
 
 ## Case contract 与私有评判数据
 
-`manifests/core-24/suite.json` 是当前冻结 suite index，每个 entry 固定 manifest SHA-256；manifest 再固定源码 archive、源码 tree、private evaluator spec 和 case image digest。`adapters/native.ts` 另外把 adapter revision 纳入 suite identity，因此 adapter 语义变化必须产生新的 identity。
+`manifests/core-harness-8/suite.json` 是当前冻结 suite index，每个 entry 固定 manifest SHA-256；manifest 再固定源码 archive、源码 tree、private evaluator spec 和 case image digest。`adapters/native.ts` 另外把 adapter revision 纳入 suite identity，因此 adapter 语义变化必须产生新的 identity。
 
 公开 manifest 包含 task、repository provenance、setup、public checks、acceptance groups、feedback policy、modification scope、budgets 和 review record，但不包含 private spec 路径、隐藏命令、oracle patch 或 mutant patch。`toAgentCaseDescriptor()` 进一步只导出 Agent 真正需要的公开字段。
 
 源码使用可审阅的 `zch-case-archive-v1` JSON archive。准备器校验 raw archive 与规范化 tree hash后才写文件，再创建只有一个 baseline commit 的新 Git 仓库，并删除 reflog、hooks、remote、tag 和不可达历史。Agent 可见树还会扫描私有字段和 grader/oracle/mutant 路径。
 
-`private/core-24/` 只供可信 coordinator/evaluator 和数据质量自检读取，并已从 Docker build context 排除。当前 3 个 bootstrap case 各自包含一个 oracle 和两个可通过公开检查但会被隐藏行为组拒绝的 mutant；`test:benchmark-cases` 对 baseline/oracle/mutant 从 pristine archive 重复准备三次，签名不一致即判定 flaky。
+`private/core-harness-8/` 只供可信 coordinator/evaluator 和数据质量自检读取，并已从 Docker build context 排除。当前 3 个 bootstrap case 各自包含一个 oracle 和两个可通过公开检查但会被隐藏行为组拒绝的 mutant；`test:benchmark-cases` 对 baseline/oracle/mutant 从 pristine archive 重复准备三次，签名不一致即判定 flaky。
 
 ## Runner protocol
 

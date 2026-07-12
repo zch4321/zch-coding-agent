@@ -12,7 +12,7 @@ import { prepareBenchmarkWorkspace, scanAgentVisibleWorkspace } from './prepare'
 import { selfCheckBenchmarkCase } from './self-check'
 
 const benchmarkRoot = path.resolve('benchmarks')
-const suiteFile = 'manifests/core-24/suite.json'
+const suiteFile = 'manifests/core-harness-8/suite.json'
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
@@ -28,14 +28,19 @@ describe('Benchmark case manifests', () => {
     const loaded = await loadNativeBenchmarkSuite({ benchmarkRoot, suiteFile })
 
     expect(loaded.suite).toMatchObject({
-      id: 'core-24',
-      revision: 'smoke-v1',
-      targetCaseCount: 24,
+      id: 'core-harness-8',
+      revision: 'v1',
+      targetCaseCount: 8,
     })
     expect(loaded.cases.map((entry) => entry.manifest.id)).toEqual([
       'chunk-partitioning',
       'retry-backoff',
       'slugify-normalization',
+      'config-precedence',
+      'workspace-routing',
+      'api-compat-refactor',
+      'diagnostic-tail',
+      'no-change-contract',
     ])
     expect(loaded.suiteSha256).toMatch(/^[a-f0-9]{64}$/u)
     expect(loaded.adapter).toEqual({ id: 'native', revision: 'native-v1' })
@@ -54,7 +59,7 @@ describe('Benchmark case manifests', () => {
         path.resolve('benchmarks'),
       )
       expect(JSON.stringify(loadedCase)).not.toMatch(
-        /private\/core-24|private\\core-24/iu,
+        /private\/core-harness-8|private\\core-harness-8/iu,
       )
     }
   })
@@ -133,19 +138,24 @@ describe('Benchmark case manifests', () => {
     ).rejects.toThrow('private path')
   })
 
-  it('proves baseline, oracle, and two mutants for every smoke case across three repetitions', async () => {
+  it('proves baseline, oracle, and two mutants for all eight core cases across three repetitions', async () => {
     const loaded = await loadNativeBenchmarkSuite({ benchmarkRoot, suiteFile })
     const evidence = []
     for (const loadedCase of loaded.cases) {
       evidence.push(await selfCheckBenchmarkCase(loadedCase))
     }
 
-    expect(evidence).toHaveLength(3)
+    expect(evidence).toHaveLength(8)
     for (const entry of evidence) {
       expect(entry.repetitions).toBe(3)
       expect(entry.baselineCommit).toMatch(/^[a-f0-9]{40,64}$/u)
-      expect(entry.baselineExpected).toBe('fail')
-      expect(entry.baselineFailedChecks.length).toBeGreaterThan(0)
+      if (entry.caseId === 'no-change-contract') {
+        expect(entry.baselineExpected).toBe('pass')
+        expect(entry.baselineFailedChecks).toEqual([])
+      } else {
+        expect(entry.baselineExpected).toBe('fail')
+        expect(entry.baselineFailedChecks.length).toBeGreaterThan(0)
+      }
       expect(entry.oraclePassed).toBe(true)
       expect(entry.mutants).toHaveLength(2)
       expect(

@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "diagnostic-tail",
+  "suite": {
+    "id": "core-harness-8",
+    "revision": "v1"
+  },
+  "kind": "harness-stress",
+  "task": "Fix extractDiagnostic in src/diagnostic.mjs so it returns the trimmed message from the final ERROR: line in a potentially long log, or null when no error exists. Keep the public API and tolerate trailing output.",
+  "repository": {
+    "source": {
+      "kind": "synthetic",
+      "locator": "zch/core-harness-8/diagnostic-tail",
+      "revision": "baseline-v1",
+      "license": "MIT-0"
+    },
+    "archive": "archives/core-harness-8/diagnostic-tail.zch-archive.json",
+    "archiveSha256": "48860a77deca5cc8d1a0e8297db874ad0cfd3fd21b84ae7dcdfe5ad50b301729",
+    "treeSha256": "8b2e045f199f7cb35631a58c5e4e93c741038ecde809664dfa57965dc945d08a"
+  },
+  "platform": {
+    "os": "linux",
+    "architecture": "x64",
+    "libc": "glibc",
+    "nodeMajor": 24
+  },
+  "caseImage": {
+    "reference": "node:24-bookworm-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5",
+    "digest": "sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5"
+  },
+  "setup": [],
+  "publicChecks": [
+    {
+      "id": "public-long-tail",
+      "title": "Finds a diagnostic after a long log tail",
+      "acceptanceGroupId": "long-tail",
+      "command": {
+        "executable": "node",
+        "args": ["test/public.test.mjs"],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    }
+  ],
+  "grader": {
+    "adapter": "native-command-v1",
+    "protocolVersion": 1,
+    "privateSpecSha256": "4bc015e72331d1648045cd0dabfb5558c8e307d126fcfc93b5b44c0311b186d2"
+  },
+  "acceptanceGroups": [
+    {
+      "id": "long-tail",
+      "title": "Bounded long-log diagnostic",
+      "critical": true,
+      "weight": 1
+    },
+    {
+      "id": "last-error",
+      "title": "Final error wins",
+      "critical": true,
+      "weight": 1
+    },
+    {
+      "id": "trailing-noise",
+      "title": "Trailing output and no-error behavior",
+      "critical": true,
+      "weight": 1
+    }
+  ],
+  "feedbackPolicy": {
+    "allowed": "diagnostic",
+    "repairOnceAllowed": true
+  },
+  "modificationScope": {
+    "allowedPaths": ["src/**"],
+    "deniedPaths": ["test/**", "package.json"],
+    "maxChangedFiles": 2,
+    "maxPatchBytes": 65536
+  },
+  "resources": {
+    "wallTimeMs": 60000,
+    "cpus": 1,
+    "memoryBytes": 536870912,
+    "pids": 64,
+    "diskBytes": 268435456,
+    "maxAgentSteps": 32,
+    "maxContextTokens": 65536
+  },
+  "quality": {
+    "baselineExpected": "fail",
+    "minimumRejectedMutants": 2,
+    "repetitions": 3,
+    "review": {
+      "status": "reviewed",
+      "reviewer": "deterministic-self-check:core-harness-v1",
+      "reviewedAt": "2026-07-12T00:00:00.000Z",
+      "method": "Deterministic baseline, oracle, mutant, and three-repetition stability self-check; no semantic alignment gate."
+    }
+  }
+}

@@ -23,7 +23,7 @@ export const BENCHMARK_PRESETS: Record<
   { caseLimit: number | null; trials: number }
 > = {
   smoke: { caseLimit: 3, trials: 1 },
-  daily: { caseLimit: 12, trials: 3 },
+  daily: { caseLimit: 8, trials: 3 },
   full: { caseLimit: null, trials: 5 },
 }
 

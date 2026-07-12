@@ -23,7 +23,7 @@ import {
 import { runBenchmarkGroup } from '../runner/group-runner'
 
 const execFileAsync = promisify(execFile)
-const DEFAULT_SUITE = 'manifests/core-24/suite.json'
+const DEFAULT_SUITE = 'manifests/core-harness-8/suite.json'
 const MAX_PRICE_SNAPSHOT_BYTES = 1024 * 1024
 const MAX_CLI_SUITES = 8
 const MAX_CLI_CASES = 64

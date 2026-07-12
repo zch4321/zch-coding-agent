@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "caseId": "chunk-partitioning",
-  "suiteId": "core-24",
-  "suiteRevision": "smoke-v1",
+  "suiteId": "core-harness-8",
+  "suiteRevision": "v1",
   "checks": [
     {
       "id": "partial-chunk",

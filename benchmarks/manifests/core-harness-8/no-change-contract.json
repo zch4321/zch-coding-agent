@@ -1,19 +1,22 @@
 {
   "schemaVersion": 1,
-  "id": "retry-backoff",
-  "suite": { "id": "core-24", "revision": "smoke-v1" },
-  "kind": "harness-stress",
-  "task": "Fix retryDelay(attempt, baseMs, capMs) in src/retry-delay.mjs. Attempt numbering starts at 1, delays grow exponentially from baseMs, values never exceed capMs, and non-positive or non-integer attempts throw RangeError. Keep the existing module API.",
+  "id": "no-change-contract",
+  "suite": {
+    "id": "core-harness-8",
+    "revision": "v1"
+  },
+  "kind": "abstain",
+  "task": "Inspect isSafeRelativePath in src/safe-path.mjs and its contract. If it already rejects absolute paths and traversal across slash styles while accepting safe relative paths, leave the implementation unchanged.",
   "repository": {
     "source": {
       "kind": "synthetic",
-      "locator": "zch/core-24/retry-backoff",
+      "locator": "zch/core-harness-8/no-change-contract",
       "revision": "baseline-v1",
       "license": "MIT-0"
     },
-    "archive": "archives/core-24/retry-backoff.zch-archive.json",
-    "archiveSha256": "3f16b953c4ff138b1930cec6b928739493fa240e47bf9dd36a46b1e99ff26744",
-    "treeSha256": "4c3b565a2c74d629a277aec177a63f64bbf2bb53188258cce04a22b794b858b0"
+    "archive": "archives/core-harness-8/no-change-contract.zch-archive.json",
+    "archiveSha256": "8dccf630631d5cc12acb60a3774e0f131ca5d7be38cce7b6805b64673d58a346",
+    "treeSha256": "065a9513f96c265f4c1eddcacc4db6aa760c52d3272240549039f54cc794ffec"
   },
   "platform": {
     "os": "linux",
@@ -28,9 +31,9 @@
   "setup": [],
   "publicChecks": [
     {
-      "id": "public-exponential",
-      "title": "Uses one-based exponential growth",
-      "acceptanceGroupId": "core-behavior",
+      "id": "public-safe-relative",
+      "title": "Accepts an ordinary safe relative path",
+      "acceptanceGroupId": "safe-relative",
       "command": {
         "executable": "node",
         "args": ["test/public.test.mjs"],
@@ -42,29 +45,32 @@
   "grader": {
     "adapter": "native-command-v1",
     "protocolVersion": 1,
-    "privateSpecSha256": "91c46e9512d43a996e7c331ce32d3d78514a8bec0b4fcb09b0f55ce734d4452a"
+    "privateSpecSha256": "3375fdc62e9f1ebd586217b522bafa360e4bda2a61ce5ba2afa7ccce6c41a328"
   },
   "acceptanceGroups": [
     {
-      "id": "core-behavior",
-      "title": "One-based exponential delay",
+      "id": "safe-relative",
+      "title": "Safe relative paths",
       "critical": true,
       "weight": 1
     },
     {
-      "id": "cap-delay",
-      "title": "Configured delay cap",
+      "id": "traversal",
+      "title": "Traversal rejection",
       "critical": true,
       "weight": 1
     },
     {
-      "id": "invalid-attempt",
-      "title": "Invalid attempt rejection",
+      "id": "absolute-paths",
+      "title": "Absolute path rejection",
       "critical": true,
       "weight": 1
     }
   ],
-  "feedbackPolicy": { "allowed": "public", "repairOnceAllowed": true },
+  "feedbackPolicy": {
+    "allowed": "none",
+    "repairOnceAllowed": true
+  },
   "modificationScope": {
     "allowedPaths": ["src/**"],
     "deniedPaths": ["test/**", "package.json"],
@@ -81,14 +87,14 @@
     "maxContextTokens": 65536
   },
   "quality": {
-    "baselineExpected": "fail",
+    "baselineExpected": "pass",
     "minimumRejectedMutants": 2,
     "repetitions": 3,
     "review": {
       "status": "reviewed",
-      "reviewer": "maintainer-review:core-smoke-v1",
+      "reviewer": "deterministic-self-check:core-harness-v1",
       "reviewedAt": "2026-07-12T00:00:00.000Z",
-      "method": "Manual prompt-to-public-and-private-behavior alignment review; validation and cap behavior remain independently testable."
+      "method": "Deterministic baseline, no-change oracle, mutant, and three-repetition stability self-check; no semantic alignment gate."
     }
   }
 }
