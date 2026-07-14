@@ -2,16 +2,34 @@
 
 本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节进入 `architecture.md`、release notes 或 git history；不要在路线图正文里继续维护“当前实现”长段落。
 
-当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、工具紧凑 UI v1 已经落地。下一阶段重点是继续推进扩展、路由、可观测与评估能力。
+当前基线：基础桌面 Agent、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、固定 Core Harness 8、Monthly-SWEBench/SWE-rebench滚动mixed-16、不可变cohort、strict/repair-once runner、隔离 grader、硬门禁和L0–L5评分、trace/tool/usage/cost/paired comparison、完整session transcript查看/导出，以及正式benchmark命令、档位和分层artifacts已经落地。下一阶段用真实任务信号指导Project / Code Intelligence和Provider Routing的后续改动。
 
 ## 0. 未完成概览
 
 | 优先级 | 领域                           | 目标                                                     | 主要风险                              |
 | ------ | ------------------------------ | -------------------------------------------------------- | ------------------------------------- |
-| P1     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断          |
-| P1     | Provider Routing               | 会话级 provider/model 快照与用途路由                     | 全局 active provider 静默影响已有会话 |
-| P2     | Benchmark Harness              | 用真实任务评估 harness、工具、上下文和权限策略           | 成本高、环境复杂、指标不可比较        |
+| P1     | Benchmark Harness              | 用同一 Agent Runtime 在 Linux Docker 评估真实任务        | 双实现漂移、环境复杂、grader 信号失真 |
+| P2     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断          |
+| P2     | Provider Routing               | 会话级 provider/model 快照与用途路由                     | 全局 active provider 静默影响已有会话 |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张      |
+
+## 5. M5 · Headless Agent Runtime And Benchmark Harness
+
+目标：先建立独立于 renderer、IPC、`npm test` 和 `npm run test:e2e` 的真实 coding-agent benchmark。Electron 与 Headless 必须调用同一份 Agent Runtime；Linux Docker 只替换宿主交互和部署方式，不得复制 Prompt Harness、工具注册、Provider loop、权限、compact、Skills、MCP 或 trace 实现。
+
+M5 保留原编号以维持已有文档和历史引用，但从本阶段起提前为首要里程碑。它首先评估 harness 工程本身，不把 Electron UI 性能混入 coding correctness；UI/IPC 继续由 E2E 覆盖，并通过 parity 测试证明两个宿主没有语义漂移。
+
+M5.10已经完成：`core-harness-8`固定8项确定性回归；`benchmark:external`从最新Monthly-SWEBench与SWE-rebench各抽8项，使用seed和`cohort.json`固定dataset commit、case与image digest。外部数据直接信任上游，不建设prompt/test alignment、本地审核Agent或人工批准系统。任务环境通过named volume和官方verifier执行，ZCH只叠加同一Headless runtime。
+
+后续Benchmark工作只在真实使用信号证明必要时扩展数据源、置信区间或长期趋势展示，不再以扩大自建case数量或建设本地数据审核系统作为独立里程碑。SWE-bench Pro/Verified、SWE-bench-Live、SWE-Lancer等保持可选候选，不进入默认命令。
+
+总体验收：
+
+- Headless 和 Electron 共用唯一 Agent Runtime，没有 Prompt、tool 或 loop 副本。
+- Linux Docker 中可用真实 Provider 在固定 Yolo、无人审批模式完成任务，并由隔离 grader 评分。
+- `benchmark:smoke`、`benchmark` 和 `benchmark:full` 具备明确成本与运行边界。
+- 结果可比较 Prompt Harness、Code Intelligence、Provider Routing、Concurrent Sessions、Skills 和 MCP 改动。
+- 任何结果都可追溯、可重放、可解释，并通过 workspace、权限、credential 和 artifact 安全检查。
 
 ## 3. M3 · Project And Code Intelligence UX
 
@@ -111,63 +129,7 @@
 
 - 能从 trace 判断一次失败是 provider、tool、审批、上下文、MCP 还是 UI 路由问题。
 - replay 不执行工具副作用。
-- 敏感信息扫描覆盖 trace、workbench、terminal output 和 artifacts。
-
-## 5. M5 · Agent Benchmark Harness
-
-目标：建立独立于 `npm test` / `npm run test:e2e` 的真实 coding-agent benchmark，用来评估 harness、并发、工具选择、审批、上下文管理、测试迭代、trace 和安全边界。
-
-建议目录：
-
-```text
-benchmarks/
-├─ README.md
-├─ playwright.benchmark.config.ts
-├─ run-benchmark.cjs
-├─ lib/
-│  ├─ app.ts
-│  ├─ case-runner.ts
-│  ├─ dataset.ts
-│  ├─ approvals.ts
-│  ├─ scoring.ts
-│  ├─ artifacts.ts
-│  └─ redaction.ts
-├─ cases/
-│  ├─ swe-bench-pro/
-│  ├─ swe-evo/
-│  ├─ swe-marathon/
-│  └─ harness-stress/
-└─ results/
-```
-
-### 5.1 数据集
-
-- 第一优先级接入 SWE-bench Pro：agent 只看到 `problem_statement`、仓库 `base_commit`、公开约束和 workspace。
-- 不允许 agent 看到 gold patch、`test_patch`、`fail_to_pass` 或 `pass_to_pass`。
-- 后续接入 SWE-EVO / SWE-Chain 类软件演进任务。
-- SWE-Marathon 只用于少量高成本 full/nightly 任务。
-- 自建 `harness-stress` 覆盖外部 benchmark 不关心的产品语义：审批、并发 run、运行中插话、workspace writer 冲突、trace/key 泄漏、终端长输出、中断与恢复。
-
-### 5.2 执行
-
-- 新增 `npm run benchmark:smoke`、`npm run benchmark`、`npm run benchmark:full`，全部 opt-in。
-- runner 准备临时 workspace、启动 Electron、通过 Playwright 真实前端发送任务、审批、插话、等待 run 完成。
-- 收集 patch、trace、截图、workbench、日志、usage、tool metrics。
-- API key 只通过主进程环境变量或 safe storage 注入，benchmark 后扫描泄漏。
-
-### 5.3 评分
-
-- 官方数据集用官方 evaluator。
-- 自建 case 必须有隐藏 evaluator 和 oracle patch 自检。
-- 硬门禁：run 未崩溃/超时、patch 可应用、evaluator 通过、无 workspace 外写入、无密钥泄漏、权限未绕过。
-- 通过硬门禁后计算功能正确性、harness 覆盖度、安全边界、迭代效率、UI/trace 完整性。
-
-验收：
-
-- `benchmark:smoke` 能跑一个小规模真实任务并产出完整 artifacts。
-- `benchmark` 至少覆盖 10 个中等复杂任务。
-- `benchmark:full` 至少包含 1 个长程任务。
-- 结果可用于比较 Prompt Harness、Code Intelligence、Provider Routing、Concurrent Sessions 和 MCP 改动。
+- 敏感信息扫描覆盖需要自动分享或判定安全门禁的artifacts；用户明确导出的本地restricted session transcript只做逐次风险警告，不扫描或脱敏。
 
 ## 6. Later
 

@@ -1,4 +1,3 @@
-import type { WebContents } from 'electron'
 import type { PermissionMode, PublicConfig } from '../../shared/config'
 import type {
   AgentEvent,
@@ -21,6 +20,7 @@ import type { PromptLedgerEntry } from './prompt-harness'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import type { McpManager } from '../mcp/mcp-manager'
+import type { RuntimeEventSink } from '../runtime/runtime-events'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -34,10 +34,24 @@ export type TerminalEventDraftEnvelope = TerminalEvent extends infer Event
     : never
   : never
 
+export interface HarnessRunMessage {
+  kind: string
+  text: string
+  source: string
+  promptId?: string
+  promptHash?: string
+}
+
+export interface RunHarnessContext {
+  kind: 'benchmark_case'
+  text: string
+  source: string
+}
+
 export interface SessionManagerOptions {
   configStore: ConfigStore
   traceDirectory: string
-  getWebContents: () => WebContents | undefined
+  eventSink: RuntimeEventSink
   pluginBus?: PluginEventBus
   skillsManager?: SkillsManager
   changeHistory?: ChangeHistoryStore

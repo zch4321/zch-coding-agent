@@ -14,7 +14,11 @@ import {
   ScriptedEditProvider,
   sseResponse,
 } from './session-manager-approval-fixtures'
-import { createConfig, waitFor } from './session-manager-test-support'
+import {
+  createConfig,
+  createIpcTestEventSink,
+  waitFor,
+} from './session-manager-test-support'
 
 describe('SessionManager approvals', () => {
   it('completes an Auto edit through policy approval and records change evidence', async () => {
@@ -40,7 +44,9 @@ describe('SessionManager approvals', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () => webContents,
+      eventSink: createIpcTestEventSink((envelope) =>
+        webContents.send('', envelope),
+      ),
       providerFactory: () => provider,
       autoApproverFactory: () => safeAutoApprover,
       changeHistory,
@@ -90,7 +96,14 @@ describe('SessionManager approvals', () => {
       .split('\n')
       .map((line) => JSON.parse(line) as Record<string, unknown>)
     const toolCall = trace.find((event) => event.type === 'tool.call')
+    const toolAttempt = trace.find((event) => event.type === 'tool.attempt')
 
+    expect(toolAttempt).toMatchObject({
+      tool: 'apply_patch',
+      stage: 'execution',
+      outcome: 'succeeded',
+      effects: ['filesystem.write'],
+    })
     expect(toolCall).toMatchObject({
       tool: 'apply_patch',
       approvedBy: 'policy',
@@ -137,7 +150,9 @@ describe('SessionManager approvals', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () => webContents,
+      eventSink: createIpcTestEventSink((envelope) =>
+        webContents.send('', envelope),
+      ),
       providerFactory: () => provider,
       fetchImpl: async (_input, init) => {
         approvalBodies.push(JSON.parse(String(init?.body)) as JsonValue)
@@ -219,7 +234,9 @@ describe('SessionManager approvals', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () => webContents,
+      eventSink: createIpcTestEventSink((envelope) =>
+        webContents.send('', envelope),
+      ),
       providerFactory: () => provider,
       autoApproverFactory: () => ({
         async evaluate() {
@@ -306,7 +323,9 @@ describe('SessionManager approvals', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () => webContents,
+      eventSink: createIpcTestEventSink((envelope) =>
+        webContents.send('', envelope),
+      ),
       providerFactory: () => provider,
     })
     const sessionId = await manager.createSession({

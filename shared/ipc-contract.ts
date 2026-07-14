@@ -38,6 +38,10 @@ import {
 } from './trace'
 import { PersistedWorkbenchSchema } from './workbench'
 import {
+  SessionTranscriptPageSchema,
+  SessionTranscriptRequestMessagesPageSchema,
+} from './session-transcript'
+import {
   AGENT_EVENT_CHANNEL,
   IPC_VERSION,
   TERMINAL_EVENT_CHANNEL,
@@ -745,6 +749,46 @@ export const IPC_CONTRACTS = {
       { additionalProperties: false },
     ),
     result: ipcResultSchema(ReplaySummarySchema),
+  },
+  'trace:transcript-page': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        traceId: TraceIdSchema,
+        cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 2_048 })),
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(SessionTranscriptPageSchema),
+  },
+  'trace:request-messages': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        traceId: TraceIdSchema,
+        requestEventId: EventIdSchema,
+        cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 2_048 })),
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(SessionTranscriptRequestMessagesPageSchema),
+  },
+  'trace:export-transcript': {
+    payload: Type.Object(
+      { version: Type.Literal(IPC_VERSION), traceId: TraceIdSchema },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          canceled: Type.Boolean(),
+          path: Type.Optional(Type.String({ maxLength: 4_096 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
   },
   'trace:stats': {
     payload: Type.Object(

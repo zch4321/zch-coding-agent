@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { WebContents } from 'electron'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import { DEFAULT_ORCHESTRATION_PROMPT_REFS } from '../../shared/prompt-resources'
 import { PromptRegistry } from '../prompts/registry'
@@ -14,6 +13,7 @@ import {
 } from './session-manager-orchestration-fixtures'
 import {
   createConfig,
+  createIpcTestEventSink,
   parseTrace,
   waitFor,
 } from './session-manager-test-support'
@@ -29,12 +29,7 @@ describe('SessionManager goal and plan orchestration', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
       promptRegistry: await PromptRegistry.load(
         path.resolve('resources', 'prompts'),
@@ -108,12 +103,7 @@ describe('SessionManager goal and plan orchestration', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
       promptRegistry: await PromptRegistry.load(
         path.resolve('resources', 'prompts'),
@@ -218,12 +208,7 @@ describe('SessionManager goal and plan orchestration', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
       promptRegistry: await PromptRegistry.load(
         path.resolve('resources', 'prompts'),
@@ -276,12 +261,7 @@ describe('SessionManager goal and plan orchestration', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
       promptRegistry: await PromptRegistry.load(
         path.resolve('resources', 'prompts'),

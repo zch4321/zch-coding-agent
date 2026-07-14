@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "caseId": "workspace-routing",
+  "suiteId": "core-harness-8",
+  "suiteRevision": "v1",
+  "checks": [
+    {
+      "id": "deepest-package",
+      "acceptanceGroupId": "deepest-package",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { routeWorkspace } from './src/route-workspace.mjs'; assert.equal(routeWorkspace('apps/web/packages/editor/src/index.js', ['apps/web', 'apps/web/packages/editor']), 'apps/web/packages/editor'); assert.equal(routeWorkspace('apps\\\\web\\\\packages\\\\editor\\\\src\\\\index.js', ['apps/web', 'apps/web/packages/editor']), 'apps/web/packages/editor')"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    },
+    {
+      "id": "path-boundary",
+      "acceptanceGroupId": "path-boundary",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { routeWorkspace } from './src/route-workspace.mjs'; assert.equal(routeWorkspace('apps/website/src/index.js', ['apps/web']), null); assert.equal(routeWorkspace('apps/web/src/index.js', ['apps/web/']), 'apps/web/')"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    }
+  ],
+  "oracle": {
+    "kind": "patch",
+    "patch": "diff --git a/src/route-workspace.mjs b/src/route-workspace.mjs\n--- a/src/route-workspace.mjs\n+++ b/src/route-workspace.mjs\n@@ -1,3 +1,11 @@\n export function routeWorkspace(filePath, workspaceRoots) {\n-  return workspaceRoots.find((root) => filePath.startsWith(root)) ?? null\n+  const file = normalize(filePath)\n+  return workspaceRoots\n+    .map((root) => ({ root, normalized: normalize(root) }))\n+    .filter(({ normalized }) => file === normalized || file.startsWith(`${normalized}/`))\n+    .sort((left, right) => right.normalized.length - left.normalized.length)[0]?.root ?? null\n }\n+\n+function normalize(value) {\n+  return value.replaceAll('\\\\', '/').replace(/\\/+$/, '')\n+}\n"
+  },
+  "mutants": [
+    {
+      "id": "longest-prefix",
+      "description": "Selects the longest string prefix without checking a path boundary.",
+      "patch": "diff --git a/src/route-workspace.mjs b/src/route-workspace.mjs\n--- a/src/route-workspace.mjs\n+++ b/src/route-workspace.mjs\n@@ -1,3 +1,5 @@\n export function routeWorkspace(filePath, workspaceRoots) {\n-  return workspaceRoots.find((root) => filePath.startsWith(root)) ?? null\n+  const file = filePath.replaceAll('\\\\', '/')\n+  return workspaceRoots.filter((root) => file.startsWith(root.replace(/\\/+$/, '')))\n+    .sort((left, right) => right.length - left.length)[0] ?? null\n }\n",
+      "expectedFailedGroups": ["path-boundary"]
+    },
+    {
+      "id": "first-boundary-match",
+      "description": "Checks boundaries but keeps the first rather than deepest workspace.",
+      "patch": "diff --git a/src/route-workspace.mjs b/src/route-workspace.mjs\n--- a/src/route-workspace.mjs\n+++ b/src/route-workspace.mjs\n@@ -1,3 +1,7 @@\n export function routeWorkspace(filePath, workspaceRoots) {\n-  return workspaceRoots.find((root) => filePath.startsWith(root)) ?? null\n+  const file = filePath.replaceAll('\\\\', '/')\n+  return workspaceRoots.find((root) => {\n+    const normalized = root.replace(/\\/+$/, '')\n+    return file === normalized || file.startsWith(`${normalized}/`)\n+  }) ?? null\n }\n",
+      "expectedFailedGroups": ["deepest-package"]
+    }
+  ]
+}

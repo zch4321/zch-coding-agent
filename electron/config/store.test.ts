@@ -63,6 +63,40 @@ async function createStores(adapter = new FakeSafeStorage()) {
 }
 
 describe('ConfigStore', () => {
+  it('supports provider-scoped environment credentials for headless hosts', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
+    const secretStore = new SecretStore(
+      path.join(directory, 'secrets.json'),
+      new FakeSafeStorage(),
+    )
+    const store = new ConfigStore(
+      path.join(directory, 'config.json'),
+      secretStore,
+      { environmentApiKeys: { generic: ' generic-secret ' } },
+    )
+    await store.initialize()
+    await store.update({
+      version: 1,
+      kind: 'provider',
+      providerId: 'generic',
+      label: 'Generic',
+      profile: 'generic',
+      baseURL: 'https://provider.invalid',
+      model: 'generic-model',
+      reasoning: 'high',
+    })
+
+    expect(
+      store
+        .getPublicConfig()
+        .providers.find((provider) => provider.id === 'generic')
+        ?.credentialSource,
+    ).toBe('environment')
+    await expect(store.getProviderApiKey('generic')).resolves.toBe(
+      'generic-secret',
+    )
+  })
+
   it('persists credentials separately and only exposes configured state', async () => {
     const { directory, configStore } = await createStores()
     const apiKey = 'test-secret-key'

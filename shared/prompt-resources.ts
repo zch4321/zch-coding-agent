@@ -1,6 +1,7 @@
 import type { AssistantLanguage } from './system-prompts'
 
 export const PROMPT_RESOURCE_VERSION = '2026-07-10.1'
+export const HEADLESS_PROMPT_RESOURCE_VERSION = '2026-07-11.1'
 
 export interface PromptResourceRef {
   id: string
@@ -37,6 +38,22 @@ export const DEFAULT_APPROVAL_PROMPT_REFS = {
   classifyRisk: {
     id: 'approval.classify-risk',
     version: PROMPT_RESOURCE_VERSION,
+  },
+}
+
+export const DEFAULT_HEADLESS_PROMPT_REFS: Record<
+  'autonomousPlanApproval',
+  Record<AssistantLanguage, PromptResourceRef>
+> = {
+  autonomousPlanApproval: {
+    'zh-CN': {
+      id: 'headless.autonomous-plan-approval.zh-CN',
+      version: HEADLESS_PROMPT_RESOURCE_VERSION,
+    },
+    'en-US': {
+      id: 'headless.autonomous-plan-approval.en-US',
+      version: HEADLESS_PROMPT_RESOURCE_VERSION,
+    },
   },
 }
 

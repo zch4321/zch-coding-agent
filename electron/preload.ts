@@ -79,6 +79,12 @@ const api: AgentApi = {
   setSkillEnabled: (payload) => invoke('skills:setEnabled', payload),
   listTraces: (payload) => invoke('trace:list', payload),
   replayTrace: (payload) => invoke('trace:replay', payload),
+  getSessionTranscriptPage: (payload) =>
+    invoke('trace:transcript-page', payload),
+  getSessionTranscriptRequestMessages: (payload) =>
+    invoke('trace:request-messages', payload),
+  exportSessionTranscript: (payload) =>
+    invoke('trace:export-transcript', payload),
   getTraceStats: (payload) => invoke('trace:stats', payload),
   forkTrace: (payload) => invoke('trace:fork', payload),
   startTraceFork: (payload) => invoke('trace:start-fork', payload),

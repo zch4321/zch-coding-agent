@@ -4,6 +4,8 @@
 
 使用：启动应用后先选择一个工作区目录，在设置里配置模型服务和 API Key，然后在对话框中提出任务。Agent 会在当前工作区内读取文件、搜索代码、应用补丁、执行命令或打开共享终端；涉及文件写入、命令执行、终端输入等副作用时，会根据当前权限模式进入人工审批、自动审批或全自动执行。普通测试使用 `npm test`，端到端测试使用 `npm run test:e2e`，可选真实 Provider 测试使用 `npm run test:real`。
 
+内部 benchmark host 可通过 `npm run build:headless` 构建，然后用 `npm run agent:headless -- run --workspace <dir> --task-file <file> --config <file> --artifacts <dir> --timeout-ms <ms>` 启动。该入口固定为无人审批的 Yolo，stdout 只输出 JSONL，运行结果和 patch 写入 workspace 外的 artifacts 目录。Linux worker 继续复用这一个 bundle；`npm run build:worker-image` 构建同 commit 的 OCI image，`npm run test:docker-worker` 显式运行 Docker smoke 与强制终止清理测试。
+
 ## 项目简介
 
 Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
@@ -20,10 +22,16 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - 命令与终端：`run_command` 用于短命令和一次性进程执行，长跑测试、服务、watch 和 REPL 使用持久 PTY，并通过 `delay` + `terminal_read` 轮询输出。
 - 项目与代码智能：`.zch/project-model.json` 保存项目模块和 Serena 配置；`code_*` 工具可通过 Serena 定位符号、定义、引用和诊断，定义查询会尽量返回函数/类代码上下文。
 - 安全凭据：Provider API Key 存在 Electron `safeStorage`，不会暴露给 renderer、trace 文件或子进程环境。
-- 可观测性：可选择开启 JSONL trace，记录请求、响应、工具、审批和 usage，并支持离线回放、fork 和统计。
+- 可观测性：可选择开启 JSONL trace，记录请求、响应、工具、审批和 usage，并支持离线回放、fork、统计及完整会话时间线；只读 `zch-session-transcript` Markdown 会包含内部编排、明文 reasoning、工具与 Provider 上下文，导出前每次提示其未经敏感信息扫描或脱敏。
 - 可配置提示词：内置中英文 system prompt，设置页可编辑，界面语言会选择对应提示词。
 - Skills：支持安装、扫描和启用本地 Skill 指令文件，通过按需读取减少常驻上下文开销。
 - Generic MCP：支持手写 stdio server 配置、逐 server 启停与启动信任；模型通过三个固定 gateway 工具分页发现和调用外部工具，调用继续经过现有权限与 trace 管线。
+- Headless host：复用桌面端同一 Node Agent Runtime，提供固定 Yolo 的程序化 API/CLI、JSONL 事件、原子 result/identity、usage/tool 指标、Git patch 和自动 Plan continuation；parity fixture 持续校验 Electron/Headless 的 Provider、prompt、tool、compact、Plan、MCP 和 patch 语义。
+- Linux Docker worker：以固定的 Node 24/glibc Linux x64 镜像运行同一 Headless bundle；coordinator 做 capability/image identity 预检、资源限制、受控挂载、Provider proxy、产物回收和 stop/kill/remove 清理。Agent 默认只接触单 trial proxy token，不接触真实 Provider key、Docker socket或宿主 home。
+- Benchmark case contract：版本化 manifest 描述任务、固定源码 archive、case image digest、公开检查、验收组、修改范围和资源预算；native adapter identity 与 suite/case/archive/private-spec checksum 共同冻结数据集。Oracle、mutant 和隐藏检查只存在于 evaluator private spec，不进入 Agent descriptor 或 workspace。
+- Benchmark runner：默认 strict 隐藏首评；可选 repair-once 在同一 Headless session追加一次清洗后的 harness feedback，并分别保留首次与修复后结果。pass@k 从 pristine workspace独立运行，resume 只复用 identity和目录 checksum一致的完整 trial。
+- Benchmark suites：`core-harness-8`提供8项固定确定性回归；`benchmark:external`从最新Monthly-SWEBench与SWE-rebench各抽8项，并用可复用`cohort.json`固定dataset commit、seed、case和任务/派生image digest。外部数据直接信任上游，不增加语义审核或人工批准。
+- Isolated grader：在独立 `network=none`、非 root、只读 rootfs容器中运行 private checks；硬门禁覆盖 patch范围、Agent/grader sandbox、identity、cleanup和credential，结果区分 unsupported/invalid/attempted/graded并输出 L0–L5及行为组宏平均。
 
 ### MCP 配置示例
 
@@ -90,7 +98,27 @@ npm run test:e2e
 npm run lint
 npm run format:check
 npm run typecheck
+npm run build:headless
+npm run build:worker-image
+npm run test:docker-worker
+npm run test:benchmark-cases
 npm run build
+```
+
+Headless config 只保存 credential 环境变量名称，不接受明文 key。例如：
+
+```json
+{
+  "schemaVersion": 1,
+  "provider": {
+    "id": "openai-compatible",
+    "baseURL": "https://provider.example/v1",
+    "model": "coding-model",
+    "reasoning": "high",
+    "credentialEnv": "BENCHMARK_PROVIDER_API_KEY"
+  },
+  "maxAutoPlanApprovals": 1
+}
 ```
 
 真实 Provider 测试默认不会进入 `npm test`，需要显式设置环境变量后运行：
@@ -102,9 +130,10 @@ npm run test:real
 
 ## 安全边界
 
-Zch Coding Agent 的安全模型是“本地桌面应用 + 明确审批 + 工作区路径边界”，不是容器级 sandbox。
-文件工具会限制在 workspace 内，并对真实路径和资源状态做复核；但 `run_command` 和持久终端本质上仍是主机进程执行能力，因此在 Auto / Yolo 模式下需要用户明确接受风险。
+桌面产品的安全模型是“本地应用 + 明确审批 + 工作区路径边界”，不是容器级 sandbox。文件工具会限制在 workspace 内，并对真实路径和资源状态做复核；但桌面端 `run_command` 和持久终端本质上仍是主机进程执行能力，因此在 Auto / Yolo 模式下需要用户明确接受风险。
+
+内部 benchmark worker 是另一条部署边界：它固定 Yolo，但在受限 Linux container 中运行，只挂载单次 workspace/artifacts并应用资源和网络限制。Hidden evaluator从冻结 archive重建干净 workspace，再进入第二个无网络 grader container；private input、Provider credential和两个容器的 artifacts互不挂载。
 
 ## 当前状态
 
-当前版本以 Windows x64 为主要发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway 和 trace 基础能力。后续方向可以扩展多 Provider、插件加载器、IDE 级编辑能力和更强的 OS 级隔离。
+当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity、Linux Docker worker、Core Harness 8、Monthly/SWE-rebench滚动mixed-16、strict/repair-once runner、隔离 grader、L0–L5评分、unknown-aware usage/cost/tool指标与 paired comparison，以及 smoke/daily/full/external benchmark命令和分层artifacts。后续方向包括更多Provider、插件加载器、IDE级编辑能力与可选的统计扩展。

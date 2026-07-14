@@ -12,7 +12,11 @@ import {
   type TerminalId,
 } from '../../shared/ids'
 import { JsonValueSchema, type JsonValue } from '../../shared/json'
-import { LlmUsageRecordSchema, type LlmUsageRecord } from '../../shared/usage'
+import {
+  LlmUsageRecordSchema,
+  LlmUsageScopeSchema,
+  type LlmUsageRecord,
+} from '../../shared/usage'
 import {
   PromptBuildSummarySchema,
   type PromptBuildSummary,
@@ -126,6 +130,7 @@ export const TraceEventSchema = Type.Union([
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
       callId: CallIdSchema,
+      scope: Type.Optional(LlmUsageScopeSchema),
       normalizedMessages: Type.Array(JsonValueSchema),
       providerRequest: JsonValueSchema,
       requestBytes: Type.Integer({ minimum: 0 }),
@@ -191,12 +196,56 @@ export const TraceEventSchema = Type.Union([
   Type.Composite([
     TraceBaseSchema,
     Type.Object({
+      type: Type.Literal('tool.proposed'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      callId: CallIdSchema,
+      tool: Type.String({ minLength: 1, maxLength: 512 }),
+      args: JsonValueSchema,
+      reason: Type.String({ maxLength: 65_536 }),
+    }),
+  ]),
+  Type.Composite([
+    TraceBaseSchema,
+    Type.Object({
+      type: Type.Literal('tool.attempt'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      callId: CallIdSchema,
+      tool: Type.String({ minLength: 1, maxLength: 512 }),
+      stage: Type.Union([
+        Type.Literal('validation'),
+        Type.Literal('permission'),
+        Type.Literal('execution'),
+      ]),
+      outcome: Type.Union([
+        Type.Literal('rejected'),
+        Type.Literal('succeeded'),
+        Type.Literal('failed'),
+        Type.Literal('denied'),
+        Type.Literal('cancelled'),
+        Type.Literal('timeout'),
+      ]),
+      effects: Type.Array(Type.String({ minLength: 1, maxLength: 128 }), {
+        maxItems: 32,
+      }),
+      durationMs: Type.Number({ minimum: 0 }),
+      inputBytes: Type.Integer({ minimum: 0 }),
+      outputBytes: Type.Integer({ minimum: 0 }),
+      truncated: Type.Boolean(),
+      errorCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    }),
+  ]),
+  Type.Composite([
+    TraceBaseSchema,
+    Type.Object({
       type: Type.Literal('tool.call'),
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
       callId: CallIdSchema,
       tool: Type.String({ maxLength: 512 }),
       args: JsonValueSchema,
+      reason: Type.Optional(Type.String({ maxLength: 65_536 })),
       result: JsonValueSchema,
       approvedBy: Type.String({ maxLength: 64 }),
       policySignals: Type.Array(JsonValueSchema, { maxItems: 256 }),
@@ -323,6 +372,7 @@ export type TraceEventInput =
       type: 'llm.request'
       runId: RunId
       callId: CallId
+      scope?: LlmUsageRecord['scope']
       normalizedMessages: JsonValue[]
       providerRequest: JsonValue
       requestBytes: number
@@ -365,11 +415,40 @@ export type TraceEventInput =
       reason: string
     })
   | (TraceInputBase & {
+      type: 'tool.proposed'
+      runId: RunId
+      callId: CallId
+      tool: string
+      args: JsonValue
+      reason: string
+    })
+  | (TraceInputBase & {
+      type: 'tool.attempt'
+      runId: RunId
+      callId: CallId
+      tool: string
+      stage: 'validation' | 'permission' | 'execution'
+      outcome:
+        | 'rejected'
+        | 'succeeded'
+        | 'failed'
+        | 'denied'
+        | 'cancelled'
+        | 'timeout'
+      effects: string[]
+      durationMs: number
+      inputBytes: number
+      outputBytes: number
+      truncated: boolean
+      errorCode?: string
+    })
+  | (TraceInputBase & {
       type: 'tool.call'
       runId: RunId
       callId: CallId
       tool: string
       args: JsonValue
+      reason?: string
       result: JsonValue
       approvedBy: string
       policySignals: JsonValue[]

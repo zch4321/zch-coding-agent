@@ -1,4 +1,5 @@
 import { lstat, mkdir, readdir, unlink } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import type { EventId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
@@ -8,14 +9,32 @@ import type {
   TraceId,
   TraceInfo,
 } from '../../shared/trace'
+import type {
+  SessionTranscriptPage,
+  SessionTranscriptRequestMessagesPage,
+} from '../../shared/session-transcript'
 import type { PermissionMode } from '../../shared/config'
 import type { ProviderMessage } from '../providers/provider'
 import type { TraceEvent } from './events'
 import { readTraceFile } from './reader'
 import { replayTrace } from './replay'
+import {
+  normalizeSessionTranscript,
+  sessionTranscriptToMarkdown,
+  type SessionTranscriptDocument,
+} from './session-transcript'
 
 const TRACE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
 const MAX_TRACE_BYTES = 32 * 1_024 * 1_024
+const MAX_TRANSCRIPT_PAGE_BYTES = 2 * 1_024 * 1_024
+
+interface TranscriptCursor {
+  kind: 'timeline' | 'request'
+  traceId: TraceId
+  revision: string
+  offset: number
+  requestEventId?: EventId
+}
 
 export class TraceServiceError extends Error {
   constructor(
@@ -23,7 +42,10 @@ export class TraceServiceError extends Error {
       | 'INVALID_TRACE'
       | 'TRACE_NOT_FOUND'
       | 'TRACE_TOO_LARGE'
-      | 'FORK_POINT_NOT_FOUND',
+      | 'FORK_POINT_NOT_FOUND'
+      | 'TRACE_CURSOR_INVALID'
+      | 'TRACE_CURSOR_STALE'
+      | 'TRACE_REQUEST_NOT_FOUND',
     message: string,
   ) {
     super(message)
@@ -184,6 +206,81 @@ function truncateJsonStrings(value: JsonValue, maxLength = 200_000): JsonValue {
   return value
 }
 
+function encodeTranscriptCursor(cursor: TranscriptCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url')
+}
+
+function decodeTranscriptCursor(value: string): TranscriptCursor {
+  try {
+    const candidate = JSON.parse(
+      Buffer.from(value, 'base64url').toString('utf8'),
+    ) as Partial<TranscriptCursor>
+    if (
+      (candidate.kind !== 'timeline' && candidate.kind !== 'request') ||
+      typeof candidate.traceId !== 'string' ||
+      !TRACE_ID.test(candidate.traceId) ||
+      typeof candidate.revision !== 'string' ||
+      !candidate.revision ||
+      !Number.isInteger(candidate.offset) ||
+      (candidate.offset ?? -1) < 0 ||
+      (candidate.requestEventId !== undefined &&
+        typeof candidate.requestEventId !== 'string')
+    ) {
+      throw new Error('invalid cursor')
+    }
+    return candidate as TranscriptCursor
+  } catch {
+    throw new TraceServiceError(
+      'TRACE_CURSOR_INVALID',
+      'Transcript cursor is invalid',
+    )
+  }
+}
+
+function transcriptRevision(input: {
+  traceId: TraceId
+  size: number
+  mtimeMs: number
+  lastSeq: number
+}): string {
+  return createHash('sha256')
+    .update(
+      `${input.traceId}\0${input.size}\0${input.mtimeMs}\0${input.lastSeq}`,
+    )
+    .digest('hex')
+}
+
+function boundedPage<T>(
+  values: readonly T[],
+  offset: number,
+  limit: number,
+): { items: T[]; nextOffset?: number } {
+  const items: T[] = []
+  let bytes = 2
+  for (
+    let index = offset;
+    index < values.length && items.length < limit;
+    index += 1
+  ) {
+    const candidate = values[index]
+    if (candidate === undefined) break
+    const candidateBytes = Buffer.byteLength(JSON.stringify(candidate), 'utf8')
+    if (
+      items.length > 0 &&
+      bytes + candidateBytes > MAX_TRANSCRIPT_PAGE_BYTES
+    ) {
+      break
+    }
+    items.push(candidate)
+    bytes += candidateBytes
+  }
+  const next = offset + items.length
+  return {
+    items,
+    ...(next < values.length ? { nextOffset: next } : {}),
+  }
+}
+
 export class TraceService {
   constructor(readonly directory: string) {}
 
@@ -216,6 +313,9 @@ export class TraceService {
         traces.push({
           traceId: traceId as TraceId,
           ...(start ? { sessionId: start.sessionId, startedAt: start.ts } : {}),
+          ...(start?.conversationId
+            ? { conversationId: start.conversationId }
+            : {}),
           ...(end ? { endedAt: end.ts } : {}),
           closed: Boolean(end),
           size,
@@ -302,6 +402,141 @@ export class TraceService {
       approvalCount: state.approvals.length,
       terminalCount: Object.keys(state.terminals).length,
     }
+  }
+
+  async transcriptDocument(
+    traceId: TraceId,
+  ): Promise<SessionTranscriptDocument> {
+    const snapshot = await this.#read(traceId)
+    const lastSeq = snapshot.events.at(-1)?.seq ?? 0
+    const revision = transcriptRevision({
+      traceId,
+      size: snapshot.size,
+      mtimeMs: snapshot.mtimeMs,
+      lastSeq,
+    })
+    return normalizeSessionTranscript(snapshot.events, {
+      traceId,
+      revision,
+      active: !snapshot.events.some((event) => event.type === 'session.end'),
+    })
+  }
+
+  async transcriptPage(input: {
+    traceId: TraceId
+    cursor?: string
+    limit?: number
+  }): Promise<SessionTranscriptPage> {
+    const document = await this.transcriptDocument(input.traceId)
+    const cursor = input.cursor
+      ? decodeTranscriptCursor(input.cursor)
+      : undefined
+    if (
+      cursor &&
+      (cursor.kind !== 'timeline' || cursor.traceId !== input.traceId)
+    ) {
+      throw new TraceServiceError(
+        'TRACE_CURSOR_INVALID',
+        'Transcript cursor does not belong to this timeline',
+      )
+    }
+    if (cursor && cursor.revision !== document.metadata.revision) {
+      throw new TraceServiceError(
+        'TRACE_CURSOR_STALE',
+        'Trace changed after the transcript snapshot was opened',
+      )
+    }
+    const limit = Math.min(100, Math.max(1, input.limit ?? 50))
+    const offset = cursor?.offset ?? 0
+    if (offset > document.entries.length) {
+      throw new TraceServiceError(
+        'TRACE_CURSOR_INVALID',
+        'Transcript cursor offset is invalid',
+      )
+    }
+    const page = boundedPage(document.entries, offset, limit)
+    return {
+      metadata: document.metadata,
+      total: document.entries.length,
+      entries: page.items,
+      ...(page.nextOffset !== undefined
+        ? {
+            nextCursor: encodeTranscriptCursor({
+              kind: 'timeline',
+              traceId: input.traceId,
+              revision: document.metadata.revision,
+              offset: page.nextOffset,
+            }),
+          }
+        : {}),
+    }
+  }
+
+  async transcriptRequestMessages(input: {
+    traceId: TraceId
+    requestEventId: EventId
+    cursor?: string
+    limit?: number
+  }): Promise<SessionTranscriptRequestMessagesPage> {
+    const document = await this.transcriptDocument(input.traceId)
+    const messages = document.requestMessages.get(input.requestEventId)
+    if (!messages) {
+      throw new TraceServiceError(
+        'TRACE_REQUEST_NOT_FOUND',
+        'Provider request was not found in this trace',
+      )
+    }
+    const cursor = input.cursor
+      ? decodeTranscriptCursor(input.cursor)
+      : undefined
+    if (
+      cursor &&
+      (cursor.kind !== 'request' ||
+        cursor.traceId !== input.traceId ||
+        cursor.requestEventId !== input.requestEventId)
+    ) {
+      throw new TraceServiceError(
+        'TRACE_CURSOR_INVALID',
+        'Transcript cursor does not belong to this provider request',
+      )
+    }
+    if (cursor && cursor.revision !== document.metadata.revision) {
+      throw new TraceServiceError(
+        'TRACE_CURSOR_STALE',
+        'Trace changed after the provider request snapshot was opened',
+      )
+    }
+    const limit = Math.min(25, Math.max(1, input.limit ?? 10))
+    const offset = cursor?.offset ?? 0
+    if (offset > messages.length) {
+      throw new TraceServiceError(
+        'TRACE_CURSOR_INVALID',
+        'Provider request cursor offset is invalid',
+      )
+    }
+    const page = boundedPage(messages, offset, limit)
+    return {
+      traceId: input.traceId,
+      revision: document.metadata.revision,
+      requestEventId: input.requestEventId,
+      total: messages.length,
+      messages: page.items,
+      ...(page.nextOffset !== undefined
+        ? {
+            nextCursor: encodeTranscriptCursor({
+              kind: 'request',
+              traceId: input.traceId,
+              revision: document.metadata.revision,
+              requestEventId: input.requestEventId,
+              offset: page.nextOffset,
+            }),
+          }
+        : {}),
+    }
+  }
+
+  async transcriptMarkdown(traceId: TraceId): Promise<string> {
+    return sessionTranscriptToMarkdown(await this.transcriptDocument(traceId))
   }
 
   async stats(traceId?: TraceId): Promise<ProviderStats> {
@@ -401,7 +636,7 @@ export class TraceService {
 
   async #read(
     traceId: TraceId,
-  ): Promise<{ events: TraceEvent[]; size: number }> {
+  ): Promise<{ events: TraceEvent[]; size: number; mtimeMs: number }> {
     const filePath = this.#path(traceId)
 
     try {
@@ -421,7 +656,11 @@ export class TraceService {
         )
       }
 
-      return { events: await readTraceFile(filePath), size: fileStat.size }
+      return {
+        events: await readTraceFile(filePath),
+        size: fileStat.size,
+        mtimeMs: fileStat.mtimeMs,
+      }
     } catch (error) {
       if (error instanceof TraceServiceError) {
         throw error

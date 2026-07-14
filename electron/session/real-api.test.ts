@@ -16,6 +16,7 @@ import { fetchDeepSeekModelCatalog } from '../providers/model-catalog'
 import { SkillsManager } from '../skills/manager'
 import { TraceService } from '../logging/service'
 import { SessionManager } from './session-manager'
+import { createIpcTestEventSink } from './session-manager-test-support'
 
 const live = process.env.RUN_REAL_API_TESTS === '1'
 const apiKey = process.env.DEEPSEEK_API_KEY?.trim() ?? ''
@@ -213,7 +214,9 @@ async function liveHarness() {
   const manager = new SessionManager({
     configStore: store,
     traceDirectory: path.join(directory, 'traces'),
-    getWebContents: () => webContents,
+    eventSink: createIpcTestEventSink((envelope) =>
+      webContents.send('', envelope),
+    ),
     skillsManager: skills,
   })
   managers.push(manager)

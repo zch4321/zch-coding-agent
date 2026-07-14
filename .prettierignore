@@ -1,5 +1,7 @@
 dist
 dist-electron
+dist-headless
+dist-worker
 node_modules
 playwright-report
 release

@@ -30,6 +30,8 @@ export function handleRuntimeAgentEvent(
     case 'tool.completed':
       handleToolEvent(event, context)
       return
+    case 'tool.attempt':
+      return
     case 'orchestrator.message':
     case 'goal.updated':
     case 'plan.updated':

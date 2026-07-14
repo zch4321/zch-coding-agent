@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "treeSha256": "c9eb79988aba3af73aba2f5e1e947e2f99d076b726bbddc33ec1a9fd78b0ad3f",
+  "files": [
+    {
+      "path": "package.json",
+      "encoding": "utf8",
+      "executable": false,
+      "content": "{\n  \"name\": \"workspace-routing\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": { \"test\": \"node test/public.test.mjs\" }\n}\n"
+    },
+    {
+      "path": "src/route-workspace.mjs",
+      "encoding": "utf8",
+      "executable": false,
+      "content": "export function routeWorkspace(filePath, workspaceRoots) {\n  return workspaceRoots.find((root) => filePath.startsWith(root)) ?? null\n}\n"
+    },
+    {
+      "path": "test/public.test.mjs",
+      "encoding": "utf8",
+      "executable": false,
+      "content": "import assert from 'node:assert/strict'\nimport { routeWorkspace } from '../src/route-workspace.mjs'\n\nassert.equal(routeWorkspace('apps/web/src/main.js', ['packages/api', 'apps/web']), 'apps/web')\n"
+    }
+  ]
+}

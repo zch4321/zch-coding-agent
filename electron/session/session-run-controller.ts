@@ -4,7 +4,12 @@ import type { RunStatus } from '../../shared/agent-events'
 import type { RunId } from '../../shared/ids'
 import { PROVIDER_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
-import { appendPromptLayer } from './prompt-harness'
+import {
+  appendPromptLayer,
+  benchmarkCaseContent,
+  benchmarkFeedbackContent,
+  orchestrationRequestContent,
+} from './prompt-harness'
 import { id, ipcFault } from './session-common'
 import type { SessionCompactCoordinator } from './session-compact-coordinator'
 import type { SessionInterjectionCoordinator } from './session-interjection-coordinator'
@@ -13,7 +18,13 @@ import type { SessionProviderTurnRunner } from './session-provider-turn'
 import { delay, finalStatusFromError } from './session-run-utils'
 import type { SessionToolRunner } from './session-tool-runner'
 import type { SessionUserTurnPreparer } from './session-user-turn-preparer'
-import type { ActiveRun, AgentEventDraft, SessionState } from './session-types'
+import type {
+  ActiveRun,
+  AgentEventDraft,
+  HarnessRunMessage,
+  RunHarnessContext,
+  SessionState,
+} from './session-types'
 import type { RunAccessLease } from './workspace-access-coordinator'
 
 function isTerminalRunStatus(status: RunStatus): boolean {
@@ -68,6 +79,8 @@ export class SessionRunController {
     clientRequestId: string,
     userMessage?: string,
     context?: RunContext,
+    harnessMessage?: HarnessRunMessage,
+    harnessContexts?: RunHarnessContext[],
   ): RunId {
     const existing = session.clientRequests.get(clientRequestId)
 
@@ -104,7 +117,14 @@ export class SessionRunController {
       processedInterjectionIds: new Set(),
     }
 
-    run.done = this.#run(session, run, userMessage, context)
+    run.done = this.#run(
+      session,
+      run,
+      userMessage,
+      context,
+      harnessMessage,
+      harnessContexts,
+    )
       .catch((error: unknown) =>
         this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error),
       )
@@ -224,11 +244,48 @@ export class SessionRunController {
     run: ActiveRun,
     userMessage?: string,
     context?: RunContext,
+    harnessMessage?: HarnessRunMessage,
+    harnessContexts?: RunHarnessContext[],
   ): Promise<void> {
     const signal = run.controller.signal
 
     try {
-      if (userMessage !== undefined) {
+      if (harnessMessage) {
+        const content =
+          harnessMessage.kind === 'benchmark_feedback'
+            ? benchmarkFeedbackContent(harnessMessage.text)
+            : orchestrationRequestContent(
+                harnessMessage.kind,
+                harnessMessage.text,
+              )
+        appendPromptLayer(session, {
+          kind: 'orchestration_request',
+          role: 'user',
+          content,
+          source: harnessMessage.source,
+          trusted: true,
+          editable: false,
+          config: this.#configStore.getPublicConfig(),
+        })
+        this.#emit(session, {
+          type: 'orchestrator.message',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          kind: harnessMessage.kind,
+          text: harnessMessage.text,
+          promptId: harnessMessage.promptId,
+          promptHash: harnessMessage.promptHash,
+        })
+        await session.logger.write({
+          type: 'orchestrator.message',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          kind: harnessMessage.kind,
+          text: harnessMessage.text,
+          promptId: harnessMessage.promptId,
+          promptHash: harnessMessage.promptHash,
+        })
+      } else if (userMessage !== undefined) {
         if (isCompactSlashCommand(userMessage)) {
           await this.#compact.runCompactCommand(session, run, userMessage)
           await this.#finishRun(session, run, 'completed')
@@ -251,6 +308,31 @@ export class SessionRunController {
             trusted: false,
             editable: false,
             config: this.#configStore.getPublicConfig(),
+          })
+        }
+        for (const harnessContext of harnessContexts ?? []) {
+          appendPromptLayer(session, {
+            kind: harnessContext.kind,
+            role: 'user',
+            content: benchmarkCaseContent(harnessContext.text),
+            source: harnessContext.source,
+            trusted: true,
+            editable: false,
+            config: this.#configStore.getPublicConfig(),
+          })
+          this.#emit(session, {
+            type: 'orchestrator.message',
+            sessionId: session.sessionId,
+            runId: run.runId,
+            kind: harnessContext.kind,
+            text: harnessContext.text,
+          })
+          await session.logger.write({
+            type: 'orchestrator.message',
+            sessionId: session.sessionId,
+            runId: run.runId,
+            kind: harnessContext.kind,
+            text: harnessContext.text,
           })
         }
         session.history.push({

@@ -17,24 +17,18 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Disposer } from './disposer'
 import { ConfigStore } from './config/store'
-import { ElectronSafeStorageAdapter, SecretStore } from './config/secret-store'
+import { SecretStore } from './config/secret-store'
+import { ElectronSafeStorageAdapter } from './config/electron-safe-storage-adapter'
 import {
   PROVIDER_NOTICE_VERSION,
   TRACE_NOTICE_VERSION,
 } from '../shared/notices'
-import { SessionManager } from './session/session-manager'
-import { ChangeHistoryStore } from './session/change-history'
 import { registerIpcHandlers } from './ipc'
 import { createAppIpcHandlers } from './ipc/app-handlers'
-import { PluginEventBus } from './plugins/event-bus'
-import { SkillsManager } from './skills/manager'
-import { TraceService } from './logging/service'
 import { WorkbenchStore } from './workbench/store'
 import { createHttpTransport } from './net/http-transport'
-import { PromptRegistry } from './prompts/registry'
-import { ProjectMetadataStore } from './project/project-metadata-store'
-import { CodeBackendManager } from './code-intelligence/backend-manager'
-import { McpManager } from './mcp/mcp-manager'
+import { createElectronRuntimeEventListener } from './runtime/electron-runtime-event-sink'
+import { createAgentRuntime } from './runtime/create-agent-runtime'
 import {
   APP_ENTRY_URL,
   APP_HOST,
@@ -149,48 +143,31 @@ async function installIpc(): Promise<void> {
     )
   }
 
-  const pluginBus = new PluginEventBus({
-    onDiagnostic: (diagnostic, error) =>
-      console.error(`Plugin hook ${diagnostic.hook} failed`, error),
-  })
-  const skillsManager = new SkillsManager(path.join(userData, 'skills'))
-  await skillsManager.initialize()
-  const traceService = new TraceService(path.join(userData, 'traces'))
-  await traceService.initialize()
-  const changeHistory = new ChangeHistoryStore(
-    path.join(userData, 'change-history.json'),
-  )
-  await changeHistory.initialize()
   const workbenchStore = new WorkbenchStore(
     path.join(userData, 'workbench.json'),
   )
   await workbenchStore.initialize()
-  const projectMetadata = new ProjectMetadataStore()
-  const codeBackends = new CodeBackendManager({ projectMetadata })
-  const mcpManager = new McpManager({
+  const runtime = await createAgentRuntime({
     configStore,
-    defaultCwd: userData,
-    onDiagnostic: (message, error) => console.error(message, error),
-  })
-  await mcpManager.initialize()
-  const promptRegistry = await PromptRegistry.load(
-    path.join(appRoot, 'resources', 'prompts'),
-  )
-  const sessionManager = new SessionManager({
-    configStore,
-    traceDirectory: path.join(userData, 'traces'),
-    getWebContents: () => mainWindow?.webContents,
-    pluginBus,
-    skillsManager,
-    changeHistory,
-    projectMetadata,
-    codeBackends,
-    mcpManager,
-    promptRegistry,
+    userDataDirectory: userData,
+    promptDirectory: path.join(appRoot, 'resources', 'prompts'),
+    eventListeners: [
+      createElectronRuntimeEventListener(() => mainWindow?.webContents),
+    ],
     fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =>
       httpTransport.fetch(input, init),
     onDiagnostic: (message, error) => console.error(message, error),
   })
+  appDisposer.add(() => runtime.dispose())
+  const {
+    sessions: sessionManager,
+    skills: skillsManager,
+    traces: traceService,
+    changes: changeHistory,
+    projects: projectMetadata,
+    codeBackends,
+    mcp: mcpManager,
+  } = runtime.services
   const unregister = registerIpcHandlers({
     ipcMain,
     getTrustedWebContents: () => mainWindow?.webContents,
@@ -215,9 +192,6 @@ async function installIpc(): Promise<void> {
   console.info(
     `P2 notices: provider=${PROVIDER_NOTICE_VERSION}, trace=${TRACE_NOTICE_VERSION}`,
   )
-  appDisposer.add(() => mcpManager.dispose())
-  appDisposer.add(() => sessionManager.dispose())
-  appDisposer.add(() => codeBackends.dispose())
   appDisposer.add(unregister)
 }
 

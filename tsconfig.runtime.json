@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "skipLibCheck": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "electron/js-yaml.d.ts",
+    "electron/headless/**/*.ts",
+    "benchmarks/**/*.ts",
+    "electron/runtime/agent-runtime.ts",
+    "electron/runtime/create-agent-runtime.ts",
+    "electron/runtime/runtime-event-bus.ts",
+    "electron/runtime/runtime-events.ts"
+  ]
+}

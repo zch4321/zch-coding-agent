@@ -1,24 +1,22 @@
 import type { TerminalEvent } from '../../shared/agent-events'
-import { IPC_VERSION } from '../../shared/channels'
 import type { SessionId } from '../../shared/ids'
-import { sendAgentEvent, sendTerminalEvent } from '../ipc/event-sink'
 import type { TerminalEventDraft } from '../terminal/pool'
+import type { RuntimeEventSink } from '../runtime/runtime-events'
 import type {
   AgentEventDraft,
-  SessionManagerOptions,
   SessionState,
   TerminalEventDraftEnvelope,
 } from './session-types'
 
 export class SessionEventEmitter {
-  readonly #getWebContents: SessionManagerOptions['getWebContents']
+  readonly #eventSink: RuntimeEventSink
   readonly #getSession: (sessionId: SessionId) => SessionState | undefined
 
   constructor(options: {
-    getWebContents: SessionManagerOptions['getWebContents']
+    eventSink: RuntimeEventSink
     getSession: (sessionId: SessionId) => SessionState | undefined
   }) {
-    this.#getWebContents = options.getWebContents
+    this.#eventSink = options.eventSink
     this.#getSession = options.getSession
   }
 
@@ -31,28 +29,17 @@ export class SessionEventEmitter {
       return
     }
 
-    const webContents = this.#getWebContents()
-
-    if (!webContents) {
-      return
-    }
-
-    sendAgentEvent(webContents, {
-      version: IPC_VERSION,
-      event: {
-        schemaVersion: 1,
-        seq: (session.eventSeq += 1),
-        ts: new Date().toISOString(),
-        ...event,
-      } as Parameters<typeof sendAgentEvent>[1]['event'],
-    })
+    this.#eventSink.publishAgent({
+      schemaVersion: 1,
+      seq: (session.eventSeq += 1),
+      ts: new Date().toISOString(),
+      ...event,
+    } as Parameters<RuntimeEventSink['publishAgent']>[0])
   }
 
   emitTerminal(event: TerminalEventDraft): void {
     const session = this.#getSession(event.sessionId)
-    const webContents = this.#getWebContents()
-
-    if (!session || !webContents) {
+    if (!session) {
       return
     }
 
@@ -74,14 +61,11 @@ export class SessionEventEmitter {
               : {}),
           }
 
-    sendTerminalEvent(webContents, {
-      version: IPC_VERSION,
-      event: {
-        schemaVersion: 1,
-        seq: event.seq,
-        ts: new Date().toISOString(),
-        ...draft,
-      } as TerminalEvent,
-    })
+    this.#eventSink.publishTerminal({
+      schemaVersion: 1,
+      seq: event.seq,
+      ts: new Date().toISOString(),
+      ...draft,
+    } as TerminalEvent)
   }
 }

@@ -32,6 +32,8 @@ import type { SkillsManager } from '../skills/manager'
 import { id, ipcFault, toJsonValue } from './session-common'
 import type {
   AgentEventDraft,
+  HarnessRunMessage,
+  RunHarnessContext,
   SessionManagerOptions,
   SessionState,
 } from './session-types'
@@ -77,7 +79,6 @@ const RUN_CANCEL_GRACE_MS = 2_000
 export class SessionManager {
   readonly #configStore: ConfigStore
   readonly #traceDirectory: string
-  readonly #getWebContents: SessionManagerOptions['getWebContents']
   readonly #pluginBus: PluginEventBus | undefined
   readonly #skillsManager: SkillsManager | undefined
   readonly #changeHistory: ChangeHistoryStore | undefined
@@ -117,7 +118,6 @@ export class SessionManager {
   constructor(options: SessionManagerOptions) {
     this.#configStore = options.configStore
     this.#traceDirectory = options.traceDirectory
-    this.#getWebContents = options.getWebContents
     this.#pluginBus = options.pluginBus
     this.#skillsManager = options.skillsManager
     this.#changeHistory = options.changeHistory
@@ -130,7 +130,7 @@ export class SessionManager {
     this.#autoApproverFactory = options.autoApproverFactory
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
     this.#events = new SessionEventEmitter({
-      getWebContents: this.#getWebContents,
+      eventSink: options.eventSink,
       getSession: (sessionId) => this.#sessions.get(sessionId),
     })
     this.#workspaceAccess = new WorkspaceAccessCoordinator({
@@ -421,6 +421,7 @@ export class SessionManager {
   async updatePlanStatus(input: {
     sessionId: SessionId
     status: PlanStatus
+    source?: 'ui:plan-review' | 'headless:auto-plan-approval'
   }): Promise<{
     accepted: boolean
     plan?: PlanState
@@ -453,7 +454,7 @@ export class SessionManager {
       sessionId: input.sessionId,
       previousStatus,
       status: input.status,
-      source: 'ui:plan-review',
+      source: input.source ?? 'ui:plan-review',
       plan: toJsonValue(session.plan),
     })
 
@@ -519,6 +520,7 @@ export class SessionManager {
     message: string
     clientRequestId: string
     context?: RunContext
+    harnessContexts?: RunHarnessContext[]
   }): RunId {
     const session = this.#requireSession(input.sessionId)
     return this.#runs.start(
@@ -526,6 +528,23 @@ export class SessionManager {
       input.clientRequestId,
       input.message,
       input.context,
+      undefined,
+      input.harnessContexts,
+    )
+  }
+
+  startHarnessRun(input: {
+    sessionId: SessionId
+    clientRequestId: string
+    message: HarnessRunMessage
+  }): RunId {
+    const session = this.#requireSession(input.sessionId)
+    return this.#runs.start(
+      session,
+      input.clientRequestId,
+      undefined,
+      undefined,
+      input.message,
     )
   }
 
@@ -588,6 +607,23 @@ export class SessionManager {
   interruptRun(sessionId: SessionId, runId: RunId): boolean {
     const session = this.#requireSession(sessionId)
     return this.#runs.interrupt(session, runId)
+  }
+
+  providerToolDefinitions(): JsonValue[] {
+    return structuredClone(this.#toolRegistry.providerDefinitions())
+  }
+
+  toolNames(): string[] {
+    return this.#toolRegistry
+      .list()
+      .map((tool) => tool.id)
+      .sort()
+  }
+
+  async waitForRunSettled(sessionId: SessionId, runId: RunId): Promise<void> {
+    const session = this.#requireSession(sessionId)
+    const run = session.activeRun
+    if (run?.runId === runId) await run.done
   }
 
   /**

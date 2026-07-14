@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import type { WebContents } from 'electron'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { CallId } from '../../shared/ids'
 import type {
@@ -13,7 +12,11 @@ import type {
 import { PromptRegistry } from '../prompts/registry'
 import { ProjectMetadataStore } from '../project/project-metadata-store'
 import { SessionManager } from './session-manager'
-import { createConfig, waitFor } from './session-manager-test-support'
+import {
+  createConfig,
+  createIpcTestEventSink,
+  waitFor,
+} from './session-manager-test-support'
 
 describe('SessionManager M1 workspace concurrency', () => {
   class ConcurrentGateProvider implements LLMProvider {
@@ -165,12 +168,7 @@ describe('SessionManager M1 workspace concurrency', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
       promptRegistry: await PromptRegistry.load(
         path.resolve('resources', 'prompts'),
@@ -391,12 +389,7 @@ describe('SessionManager M1 workspace concurrency', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
       projectMetadata,
     })

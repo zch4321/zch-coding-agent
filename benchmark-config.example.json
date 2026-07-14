@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "provider": {
+    "id": "deepseek",
+    "profile": "deepseek",
+    "baseURL": "https://api.deepseek.com",
+    "model": "deepseek-chat",
+    "reasoning": "off",
+    "credentialEnv": "DEEPSEEK_API_KEY"
+  }
+}

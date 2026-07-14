@@ -9,11 +9,33 @@ export default [
     ignores: [
       'dist/**',
       'dist-electron/**',
+      'dist-headless/**',
+      'dist-worker/**',
+      'dist-benchmark/**',
       'node_modules/**',
       'playwright-report/**',
       'release/**',
       'test-results/**',
     ],
+  },
+  {
+    files: ['electron/**/*.ts'],
+    ignores: [
+      '**/*.test.ts',
+      '**/*test-support.ts',
+      '**/*-fixtures.ts',
+      'electron/runtime/create-agent-runtime.ts',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "NewExpression[callee.name='SessionManager']",
+          message:
+            'Production code must create SessionManager through createAgentRuntime().',
+        },
+      ],
+    },
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -39,6 +61,7 @@ export default [
   {
     files: [
       'electron/**/*.ts',
+      'benchmarks/**/*.ts',
       'shared/**/*.ts',
       'e2e/**/*.ts',
       '*.config.ts',
@@ -46,6 +69,40 @@ export default [
     ],
     languageOptions: {
       globals: globals.node,
+    },
+  },
+  {
+    files: [
+      'electron/runtime/agent-runtime.ts',
+      'electron/runtime/create-agent-runtime.ts',
+      'electron/runtime/runtime-event*.ts',
+      'electron/headless/**/*.ts',
+      'electron/session/**/*.ts',
+      'electron/tools/**/*.ts',
+      'electron/providers/**/*.ts',
+      'electron/mcp/**/*.ts',
+      'electron/skills/**/*.ts',
+      'electron/logging/**/*.ts',
+      'electron/process/**/*.ts',
+      'electron/safety/**/*.ts',
+      'electron/project/**/*.ts',
+      'electron/code-intelligence/**/*.ts',
+      'electron/config/secret-store.ts',
+    ],
+    ignores: ['**/*.test.ts', '**/*test-support.ts', '**/*-fixtures.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'electron',
+              message:
+                'Agent Runtime code must depend on host adapters instead of Electron values.',
+            },
+          ],
+        },
+      ],
     },
   },
   {

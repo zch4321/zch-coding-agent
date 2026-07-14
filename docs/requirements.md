@@ -384,6 +384,8 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - “完整”以 Agent 实际可见数据为边界：工具因输出上限而未进入 Agent 的丢弃字节记录 `totalBytes/truncated/discardedHash`，不要求无限落盘；进入模型上下文的内容必须逐字保存。
 - 不记录请求传输层凭据，例如 API Key、Authorization header 和 safeStorage 密文；这些信息不属于模型上下文，也不是回放所需数据。
 - 开启时必须明确提示日志可能包含源代码、用户输入、模型推理、工具输出以及工作区中被读取的凭据，并支持保留天数/总大小上限。
+- 完整 trace 必须可规范化为只读 `zch-session-transcript`：按 run 展示用户/Assistant/明文 reasoning、内部编排、工具与审批、Provider上下文、Plan、interjection、usage、terminal和生命周期。该格式不可导入或重放；每次 Electron 导出前必须警告，导出内容不做敏感信息扫描或脱敏，用户负责本地保存和后续分享。
+- Transcript 不输出 provider wire request/raw response/provider state、流式重复分片、工具schema、加密/opaque reasoning或多模态原始载荷；中断且没有final message的明文delta标为partial，多模态只保留类型/MIME/已知大小占位。
 - 不引入 SQLite（避免 native 依赖）；日志清理 GUI 留待后续版本。
 
 ### 5.2 必须记录的事件（每条一行 JSON）
@@ -410,6 +412,80 @@ session.end     { ts }
 - **工具重放**默认只注入已记录结果；真实重新执行副作用工具必须是独立显式操作。
 - 保存 Provider 返回的完整 usage，包括可用时的 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`、输入/输出 token；同时记录 TTFT、总延迟、请求字节数和稳定前缀 hash，供 KV cache 分析。
 - DeepSeek 流式调用必须请求最终 usage chunk；cache 命中以 Provider 返回字段为准，不能仅根据本地消息前缀推断。
+
+### 5.4 Headless 运行输出
+
+- 内部 Headless host 必须复用桌面端唯一 Agent Runtime 组装入口，固定 Yolo 且不增加、删除或替换模型可见工具。
+- stdout 只允许版本化 JSONL；host 诊断写 stderr；最终 `result.json` 原子写入 workspace 外的 artifacts 目录。
+- Provider 凭据只能由受信任配置声明的环境变量名称解析，凭据值不得进入配置回包、JSONL、trace、patch 或子进程环境。
+- result 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计、trace 和 patch 路径。Agent `completed` 不代表 benchmark correctness。
+- Plan 自动批准必须在前一 run 完全 settle 后，通过有版本的 harness 消息追加到历史和 trace；不得伪装成用户消息。Goal blocked 或自动批准达到上限返回 `needs_human_input`。
+- timeout、SIGINT 和 SIGTERM 必须进入共享 interrupt/disposer；补丁采集不得修改 workspace 的真实 Git index。
+- 每个 Headless artifact 必须包含 runtime identity；source commit、case/config digest、provider/model、核心预算、prompt/tool hash 或 capability 不同的结果不得直接比较。
+- Electron/Headless parity 必须通过共享 trajectory 比较 Provider messages、稳定 prompt layer、工具定义与调用、compact/Plan/MCP 行为和 patch；只允许逐字段声明的 host 差异，禁止宽泛 snapshot 忽略。
+
+### 5.5 Linux Docker worker
+
+- Worker image 必须从与桌面/Headless 相同的 source commit 构建并复用唯一 Headless bundle；v1 只支持 Linux x64、Node 24 LTS 和 glibc，其他 daemon、架构、libc 或 native ABI 返回 `unsupported`。
+- Agent container 必须使用非 root、只读 rootfs、drop 全 capabilities、no-new-privileges、默认 seccomp，以及 PID、CPU、内存、tmpfs、磁盘和 wall-time 预算。允许的 bind mount 仅为单次 workspace、artifacts、只读输入和 credential file。
+- 默认 Provider proxy 模式下，Agent 只能加入该 run 的 internal network且只能读取单次 proxy token；真实 Provider key 只存在 coordinator 内存和 proxy 专用临时 secret file，不得进入 Agent config/env、trace、JSONL、artifacts 或 Docker inspect env。
+- 直接 credential 模式仅作为显式受控开发 fallback。两种模式都必须使用 Headless config 中声明的 provider-scoped credential 名称，task 不得选择 credential、网络或权限模式。
+- coordinator 必须在 timeout、cancel、异常和正常完成后执行有限 stop、kill fallback、bounded log/artifact 收集、container/network 删除和 secret 删除；清理结果写入版本化 `worker-result.json`，coordinator/environment 故障不得计为模型任务失败。
+- Docker smoke 必须验证一次真实工具写入轨迹和一次挂起 Provider 强制终止，确认 secret 不泄漏、sandbox 参数生效且没有残留 Agent/proxy container 或 run network。该测试显式 opt-in，不进入无 Docker 的默认 `npm test`。
+
+### 5.6 Benchmark case contract
+
+- Native BenchmarkCase v1 必须记录 case/suite/revision、任务、repository provenance、固定 archive/tree hash、Linux platform、case image OCI digest、setup、公开检查、grader protocol、acceptance groups、feedback policy、修改范围和资源预算；未知字段和越界预算一律拒绝。Core中的review record只记录确定性self-check，不要求prompt/test alignment或人工批准。
+- Suite index 必须固定每个 manifest hash；manifest 必须继续固定 archive、tree 和 private spec hash。Dataset adapter id/revision 纳入 suite identity，adapter 或任一 transitive 输入变化都必须得到新 identity，不能静默覆盖冻结 suite。
+- Agent descriptor 只能包含 task、公开检查、修改范围和预算。Private spec 路径、hidden commands、oracle/gold patch、mutants、外部数据集 `fail_to_pass` / `pass_to_pass` 不得进入 descriptor、workspace、Headless config、trace 或 Docker build context。
+- Workspace 必须从固定 archive 向空目录重建；archive path 需要 containment、重复项和 tree hash 校验。准备后的 Git 只保留当前 baseline commit，不得含 remote、tag、reflog、hooks、不可达未来对象或缓存历史。
+- 非 abstain 自建 case 的 baseline 必须失败；abstain/no-change case 的 baseline 与 `no-change` oracle 必须通过。两类 case 的 oracle 都要通过全部公开与私有行为组，且至少两个合理 mutant 必须通过公开检查但被声明的隐藏行为组拒绝。完整准备和评判重复三次，证据签名不一致视为 flaky/invalid。
+- 通用adapter边界必须内置native、monthly-swebench与swe-rebench；runner不能依赖native archive的准备、patch捕获或grader细节。外部dataset只能归一化公开Agent descriptor，不能借adapter把solution、gold/test patch、测试ID或verifier字段带入Agent面。
+- `core-harness-8`固定8项并保留baseline/oracle、每项至少两个mutant和三次稳定性自检。外部数据质量直接信任上游，不增加语义审核Agent、prompt/test alignment或人工批准。
+- 外部workspace必须使用Docker named volume挂载到任务原生路径；Agent image只能从官方任务环境叠加当前ZCH Headless runtime，Provider proxy继续使用通用worker image。Grader每次使用fresh volume、上游verifier、`network=none`、非root、只读rootfs和资源限制。
+- 每个新外部case/image digest首次使用时缓存一次baseline未解决和oracle已解决的机器兼容检查；失败必须归类为infrastructure incompatible并按cohort固定顺序递补，不得评价数据集语义质量。
+
+### 5.7 Benchmark runner protocol
+
+- Runner 默认使用 `strict`：每个 trial 从冻结 archive 创建 pristine workspace，只启动一个独立 Headless container；Agent 退出后才在宿主可信边界创建新的 evaluator workspace并应用 patch，任何 evaluator 输出都不得回流 Agent。
+- `repair-once` 只对 manifest 明确允许的 case 开启。首轮完成后 Headless 发出一次阶段事件，runner 评判当前 patch，并通过 attach stdin 最多返回一次清洗后的 `<benchmark_feedback>`；修复必须复用同一 workspace、session 和 append-only history，最终 patch必须在另一份干净 evaluator workspace重评。
+- `public` feedback 只能包含公开检查摘要；`diagnostic` 还可包含公开 manifest 已声明的验收组名称和通用失败类别。两者均禁止隐藏源码、私有命令输出、精确隐藏期望、oracle/gold patch 和外部数据集 evaluator 字段。
+- Trial 结果必须分别记录 `resolvedInitial`、`resolvedAfterFeedback`、`recovered`、首轮指标、修复阶段增量指标和累计指标。修复成功不得回填首次通过；`pass@k` 必须是 k 个独立 pristine trial，不得复用 session、container、workspace、credential token 或 Provider continuation。
+- Resume 只允许复用 identity 一致、带 complete marker 且整棵 artifact checksum 一致的 immutable trial。`.incomplete-*` staging 不计入样本也不复用；已有 final artifact 缺失、被篡改或 identity 不同必须拒绝覆盖。
+- Runner 完成前必须删除 Agent workspace、扫描 artifacts 是否含真实 Provider credential，并保存零命中报告。凭据命中时必须删除该 staging；唯一例外是明确标为restricted且不进入shareable report的 `session-transcript.restricted.md`，它按本地用户负责原则不扫描或脱敏，其他patch、trace、JSONL、stderr和证据仍必须扫描。
+
+### 5.8 Isolated grader and scoring
+
+- 正式 grader 必须运行在与 Agent 分离的 container，使用 `network=none`、非 root、只读 rootfs、drop all capabilities、no-new-privileges、PID/CPU/内存/tmpfs/wall limits。只允许挂载干净 evaluator workspace、只读 private input 和独立 output；Docker socket、Agent artifacts、Provider credential 和宿主 home不得出现。
+- 宿主从冻结 archive重建 workspace并应用 patch；private spec只序列化到一次性只读 grader input，不进入 Agent image/workspace/config/trace。Grader output必须校验 schema、case/input/image identity及完整命令计划，input执行前后 hash必须一致。
+- 结果状态固定区分 `unsupported`、`invalid`、`attempted` 和 `graded`。Docker/capability/image/grader/coordinator故障归为 unsupported/invalid；Agent patch不能应用、越过 modification scope或违反 diff hygiene归为 attempted，不得混入 deterministic graded样本。
+- 硬门禁至少覆盖 patch apply/scope/hygiene、Agent execution boundary、Headless result、runtime image identity、worker/grader cleanup、credential scan、grader sandbox/input immutability/completion。任一 infrastructure gate失败时，即使功能检查通过也不得 resolved。
+- 完成等级固定为 L0 无有效改动、L1 合法 patch、L2 setup/build/static通过、L3公开回归通过、L4至少一个行为组通过、L5全部 critical行为组与回归门禁通过。Partial correctness按 acceptance group做 macro-average，单组增加测试数量不得改变组权重。
+- 可分享 `evaluation.json` 只能包含公开检查、行为组聚合、失败类别、硬门禁和 grader identity。Private check id/command、命令 stdout/stderr和 grader input只能存在于本地 restricted artifact或完全省略；命令输出默认只保存 hash。
+
+### 5.9 Benchmark metrics and comparison
+
+- 每个工具调用必须产生一个 terminal `tool.attempt`，区分 validation、permission 与 execution stage，并记录 outcome、effects、duration、输入/输出字节、截断及错误码。Schema 无效、权限拒绝、执行失败与成功不得合并为“已完成”。
+- Trial usage 必须按 main、approval、title、compression scope 汇总 prompt/completion/reasoning/cache hit/cache miss/total token。Provider 未返回的 request 或字段必须保存为 `null`/unknown，不得以零、字符数或 tokenizer 估算替代精确 usage。
+- 工具、patch 与 trajectory 指标必须覆盖 proposed/executed/succeeded/failed/denied、tool/effect 分类、重复参数签名、首次有效编辑/测试、最终验证后空转、文件与增删行、测试/二进制改动、workspace 外写入、LLM request、continuation、compact、Plan/Goal、MCP和 terminal。
+- 测试识别必须覆盖结构化process/shell参数、常见package/language runner和直接执行test/spec文件；terminal_send成功只表示输入被接受，不能作为最终验证通过时间。
+- 成本只能由显式 run-group `priceSnapshot` 的逐 usage-field rate计算；snapshot source/revision/hash必须进入 artifact 与 trial identity。任何被定价 usage 字段 unknown 时 scope和总成本也必须 unknown。
+- `costPerResolvedUsd`、tokens/tool calls per resolved必须以全部 trial 总消耗除以 resolved 数，不能丢弃失败 trial。另行报告 unresolved token/cost和 resolved duration中位数。
+- A/B 必须逐 trial匹配 cohort、suite/case identity、runtime/case/grader image、Provider/model/profile/reasoning、资源预算、protocol/feedback、trial index与 price snapshot。任一不一致必须拒绝并列出字段路径；可比较结果输出paired delta、win/loss/tie、总体resolve delta与置信区间，并按safety、correctness、efficiency词典序排序。
+
+### 5.10 Benchmark CLI, profiles, and artifacts
+
+- 必须提供独立opt-in的`benchmark:smoke`、`benchmark`、`benchmark:full`和`benchmark:external`；默认`npm test`、`npm run build`和Electron E2E不得隐式构建镜像、连接Provider或运行benchmark。Core三个preset分别为3×1、8×3、8×5；external固定Monthly 8 + SWE-rebench 8且每项3 trials。CLI必须对suite/case/trial数量设置硬上限。
+- External run开始时必须解析最新Monthly release与SWE-rebench leaderboard split，并按seed无放回抽取；Monthly固定4 bugfix + 4 non-bug，SWE-rebench按仓库和patch规模分层，整个cohort同仓库最多一项。缺字段、image不可用、资源越界或兼容失败按固定随机顺序递补并记录原因。
+- `cohort.json`必须固定两个dataset release/commit、adapter revision、seed、16个case hash、官方任务image digest和派生Agent image digest。`--seed`用于生成，`--cohort`用于A/B复用，两者互斥；run内目录变化不得改变已固定cohort。
+- CLI必须复用 Headless config和同一 Docker worker/runner/grader，不得实现第二份 Agent loop。Provider key只从 config声明的主机环境变量读取，默认经 proxy credential模式传递；命令输出、identity、config snapshot、summary和shareable report不得包含 key值。
+- 经过schema校验的公开case descriptor必须以独立`<benchmark_case>` Harness层进入首次模型请求，并在trace中记录为orchestrator context；不得拼接到用户task或伪装成`user.message`。Native case可显示public checks、allowed/denied paths和资源预算；外部case只显示problem statement、公开范围和预算，不显示测试列表。两者都不能包含private evaluator字段。
+- Run-group identity必须固定 preset、suite/adapter、case identity、runtime image digest、source commit、Headless config、Provider/model/profile/reasoning、protocol/feedback、trial数和price snapshot。非空输出目录只有 identity完全一致时才能恢复；trial复用仍须满足各自complete marker和artifact hash。
+- Artifact必须按 run-group/suite/case/trial/attempt分层，足以离线复核manifest、task、runtime identity、patch、grader、trace、JSONL、stderr、usage/tool metrics、泄漏扫描和最终等级。缺失trace metrics的执行必须标为incomplete，不能生成虚假效率汇总。
+- `shareable-report.json`只能包含公开evaluation、聚合metrics、comparison identity和无路径summary。Raw trace/JSONL/stderr、config snapshot、case-result、grader input/private check/command/output必须列入restricted artifact清单；redaction文件必须声明删除字段。
+- External summary必须分别显示Monthly、SWE-rebench、50/50 source macro与总体结果；不同来源的trial不能相互替补或隐藏单项结果。
+- 有完整trace的trial必须复用共享conversation Markdown serializer生成 `conversation.restricted.md`，包含user/assistant/orchestrator正文和reasoning，且在leak scan与artifact hash之前写入。该文件只用于人工阅读，不得伪造tool消息，也不得进入shareable report。
+- 有完整trace的trial还必须用桌面端同一normalizer生成 `session-transcript.restricted.md`，包含工具、审批、内部编排、明文reasoning和折叠Provider上下文；它进入artifact hash和restricted清单，但从credential scan的输入中按精确artifact路径排除。
 
 ---
 

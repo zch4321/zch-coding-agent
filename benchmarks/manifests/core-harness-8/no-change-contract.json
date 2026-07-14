@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "no-change-contract",
+  "suite": {
+    "id": "core-harness-8",
+    "revision": "v1"
+  },
+  "kind": "abstain",
+  "task": "Inspect isSafeRelativePath in src/safe-path.mjs and its contract. If it already rejects absolute paths and traversal across slash styles while accepting safe relative paths, leave the implementation unchanged.",
+  "repository": {
+    "source": {
+      "kind": "synthetic",
+      "locator": "zch/core-harness-8/no-change-contract",
+      "revision": "baseline-v1",
+      "license": "MIT-0"
+    },
+    "archive": "archives/core-harness-8/no-change-contract.zch-archive.json",
+    "archiveSha256": "8dccf630631d5cc12acb60a3774e0f131ca5d7be38cce7b6805b64673d58a346",
+    "treeSha256": "065a9513f96c265f4c1eddcacc4db6aa760c52d3272240549039f54cc794ffec"
+  },
+  "platform": {
+    "os": "linux",
+    "architecture": "x64",
+    "libc": "glibc",
+    "nodeMajor": 24
+  },
+  "caseImage": {
+    "reference": "node:24-bookworm-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5",
+    "digest": "sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5"
+  },
+  "setup": [],
+  "publicChecks": [
+    {
+      "id": "public-safe-relative",
+      "title": "Accepts an ordinary safe relative path",
+      "acceptanceGroupId": "safe-relative",
+      "command": {
+        "executable": "node",
+        "args": ["test/public.test.mjs"],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    }
+  ],
+  "grader": {
+    "adapter": "native-command-v1",
+    "protocolVersion": 1,
+    "privateSpecSha256": "3375fdc62e9f1ebd586217b522bafa360e4bda2a61ce5ba2afa7ccce6c41a328"
+  },
+  "acceptanceGroups": [
+    {
+      "id": "safe-relative",
+      "title": "Safe relative paths",
+      "critical": true,
+      "weight": 1
+    },
+    {
+      "id": "traversal",
+      "title": "Traversal rejection",
+      "critical": true,
+      "weight": 1
+    },
+    {
+      "id": "absolute-paths",
+      "title": "Absolute path rejection",
+      "critical": true,
+      "weight": 1
+    }
+  ],
+  "feedbackPolicy": {
+    "allowed": "none",
+    "repairOnceAllowed": true
+  },
+  "modificationScope": {
+    "allowedPaths": ["src/**"],
+    "deniedPaths": ["test/**", "package.json"],
+    "maxChangedFiles": 2,
+    "maxPatchBytes": 65536
+  },
+  "resources": {
+    "wallTimeMs": 60000,
+    "cpus": 1,
+    "memoryBytes": 536870912,
+    "pids": 64,
+    "diskBytes": 268435456,
+    "maxAgentSteps": 32,
+    "maxContextTokens": 65536
+  },
+  "quality": {
+    "baselineExpected": "pass",
+    "minimumRejectedMutants": 2,
+    "repetitions": 3,
+    "review": {
+      "status": "reviewed",
+      "reviewer": "deterministic-self-check:core-harness-v1",
+      "reviewedAt": "2026-07-12T00:00:00.000Z",
+      "method": "Deterministic baseline, no-change oracle, mutant, and three-repetition stability self-check; no semantic alignment gate."
+    }
+  }
+}

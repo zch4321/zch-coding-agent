@@ -1,5 +1,10 @@
 import path from 'node:path'
 import type { JsonValue } from '../../shared/json'
+import { IPC_VERSION } from '../../shared/channels'
+import type {
+  AgentEventEnvelope,
+  TerminalEventEnvelope,
+} from '../../shared/ipc-contract'
 import {
   PROVIDER_NOTICE_VERSION,
   TRACE_NOTICE_VERSION,
@@ -11,6 +16,7 @@ import type {
   ProviderChatRequest,
   ProviderEvent,
 } from '../providers/provider'
+import type { RuntimeEventSink } from '../runtime/runtime-events'
 
 export interface TraceObject {
   type?: string
@@ -23,6 +29,17 @@ export interface TraceObject {
   }>
   promptBuild?: {
     layers?: Array<{ kind?: string; included?: boolean }>
+  }
+}
+
+export function createIpcTestEventSink(
+  onAgentEvent: (envelope: AgentEventEnvelope) => void,
+  onTerminalEvent: (envelope: TerminalEventEnvelope) => void = () => undefined,
+): RuntimeEventSink {
+  return {
+    publishAgent: (event) => onAgentEvent({ version: IPC_VERSION, event }),
+    publishTerminal: (event) =>
+      onTerminalEvent({ version: IPC_VERSION, event }),
   }
 }
 

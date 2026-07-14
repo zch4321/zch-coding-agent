@@ -144,6 +144,37 @@ export const AgentEventSchema = Type.Union([
   Type.Composite([
     EventBaseSchema,
     Type.Object({
+      type: Type.Literal('tool.attempt'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      callId: CallIdSchema,
+      tool: Type.String({ minLength: 1, maxLength: 512 }),
+      stage: Type.Union([
+        Type.Literal('validation'),
+        Type.Literal('permission'),
+        Type.Literal('execution'),
+      ]),
+      outcome: Type.Union([
+        Type.Literal('rejected'),
+        Type.Literal('succeeded'),
+        Type.Literal('failed'),
+        Type.Literal('denied'),
+        Type.Literal('cancelled'),
+        Type.Literal('timeout'),
+      ]),
+      effects: Type.Array(Type.String({ minLength: 1, maxLength: 128 }), {
+        maxItems: 32,
+      }),
+      durationMs: Type.Number({ minimum: 0 }),
+      inputBytes: Type.Integer({ minimum: 0 }),
+      outputBytes: Type.Integer({ minimum: 0 }),
+      truncated: Type.Boolean(),
+      errorCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
       type: Type.Literal('tool.proposed'),
       sessionId: SessionIdSchema,
       runId: RunIdSchema,

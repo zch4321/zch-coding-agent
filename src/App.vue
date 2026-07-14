@@ -20,12 +20,14 @@ import ConversationHeader from './components/chat/ConversationHeader.vue'
 import ConversationTimeline from './components/chat/ConversationTimeline.vue'
 import MessageComposer from './components/chat/MessageComposer.vue'
 import WorkbenchDialogs from './components/dialogs/WorkbenchDialogs.vue'
+import SessionTranscriptViewer from './components/transcript/SessionTranscriptViewer.vue'
 import ArtifactPanel from './components/artifacts/ArtifactPanel.vue'
 import AppTopbar from './components/layout/AppTopbar.vue'
 import ProjectSidebar from './components/projects/ProjectSidebar.vue'
 import SettingsNavigation from './components/settings/SettingsNavigation.vue'
 import SettingsPage from './components/settings/SettingsPage.vue'
 import { useAgentStore } from './stores/agent'
+import { useTraceStore } from './stores/traces'
 import type { PermissionMode } from '../shared/config'
 import { setAppLocale, type AppLocale } from './i18n'
 import type { SettingsTab } from './components/settings/settings-tabs'
@@ -43,6 +45,7 @@ const TerminalPanel = defineAsyncComponent(
 )
 
 const agent = useAgentStore()
+const traces = useTraceStore()
 const { locale, t } = useI18n()
 const activeView = ref<AppView>('chat')
 const settingsTab = ref<SettingsTab>('general')
@@ -171,6 +174,10 @@ async function exportConversation(conversationId: string) {
   if (!result.canceled && result.error) {
     agent.error = t('dialogs.exportFailed') + ': ' + result.error
   }
+}
+
+function inspectConversation(conversationId: string) {
+  void traces.openConversationTranscript(conversationId)
 }
 
 async function importConversation() {
@@ -398,6 +405,7 @@ onUnmounted(() => {
               @rename="beginRename"
               @delete="deleteConversationId = $event"
               @export="exportConversation"
+              @inspect="inspectConversation"
               @import="importConversation"
               @settings="openSettings()"
             />
@@ -491,6 +499,7 @@ onUnmounted(() => {
         @confirm-delete="confirmDeleteConversation"
         @confirm-revert="confirmRevert"
       />
+      <SessionTranscriptViewer />
     </main>
   </NConfigProvider>
 </template>

@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "caseId": "chunk-partitioning",
+  "suiteId": "core-harness-8",
+  "suiteRevision": "v1",
+  "checks": [
+    {
+      "id": "partial-chunk",
+      "acceptanceGroupId": "partial-chunk",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { chunk } from './src/chunk.mjs'; assert.deepEqual(chunk([1, 2, 3], 2), [[1, 2], [3]])"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    },
+    {
+      "id": "invalid-size",
+      "acceptanceGroupId": "invalid-size",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { chunk } from './src/chunk.mjs'; assert.throws(() => chunk([1], 0), RangeError); assert.throws(() => chunk([1], 1.5), RangeError)"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    }
+  ],
+  "oracle": {
+    "kind": "patch",
+    "patch": "diff --git a/src/chunk.mjs b/src/chunk.mjs\n--- a/src/chunk.mjs\n+++ b/src/chunk.mjs\n@@ -1,3 +1,10 @@\n export function chunk(items, size) {\n-  return [items]\n+  if (!Number.isInteger(size) || size <= 0) {\n+    throw new RangeError('size must be a positive integer')\n+  }\n+  const result = []\n+  for (let index = 0; index < items.length; index += size) {\n+    result.push(items.slice(index, index + size))\n+  }\n+  return result\n }\n"
+  },
+  "mutants": [
+    {
+      "id": "returns-empty-for-invalid",
+      "description": "Partitions correctly but silently returns an empty array for invalid sizes.",
+      "patch": "diff --git a/src/chunk.mjs b/src/chunk.mjs\n--- a/src/chunk.mjs\n+++ b/src/chunk.mjs\n@@ -1,3 +1,9 @@\n export function chunk(items, size) {\n-  return [items]\n+  if (!Number.isInteger(size) || size <= 0) return []\n+  const result = []\n+  for (let index = 0; index < items.length; index += size) {\n+    result.push(items.slice(index, index + size))\n+  }\n+  return result\n }\n",
+      "expectedFailedGroups": ["invalid-size"]
+    },
+    {
+      "id": "drops-partial-tail",
+      "description": "Partitions complete chunks but discards the final partial chunk.",
+      "patch": "diff --git a/src/chunk.mjs b/src/chunk.mjs\n--- a/src/chunk.mjs\n+++ b/src/chunk.mjs\n@@ -1,3 +1,10 @@\n export function chunk(items, size) {\n-  return [items]\n+  if (!Number.isInteger(size) || size <= 0) {\n+    throw new RangeError('size must be a positive integer')\n+  }\n+  const result = []\n+  for (let index = 0; index + size <= items.length; index += size) {\n+    result.push(items.slice(index, index + size))\n+  }\n+  return result\n }\n",
+      "expectedFailedGroups": ["partial-chunk"]
+    }
+  ]
+}

@@ -6,22 +6,32 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 // exercised without a real Electron/Node filesystem. vi.hoisted makes the mock
 // functions available inside the hoisted vi.mock factories.
 
-const { showSaveDialog, showOpenDialog, readFile, writeFile, stat } =
-  vi.hoisted(() => ({
-    showSaveDialog: vi.fn(),
-    showOpenDialog: vi.fn(),
-    readFile: vi.fn(),
-    writeFile: vi.fn(),
-    stat: vi.fn(),
-  }))
+const {
+  showSaveDialog,
+  showOpenDialog,
+  showMessageBox,
+  readFile,
+  writeFile,
+  writeTextAtomic,
+  stat,
+} = vi.hoisted(() => ({
+  showSaveDialog: vi.fn(),
+  showOpenDialog: vi.fn(),
+  showMessageBox: vi.fn(),
+  readFile: vi.fn(),
+  writeFile: vi.fn(),
+  writeTextAtomic: vi.fn(),
+  stat: vi.fn(),
+}))
 
 vi.mock('electron', () => ({
   BrowserWindow: {},
-  dialog: { showSaveDialog, showOpenDialog },
+  dialog: { showSaveDialog, showOpenDialog, showMessageBox },
   shell: {},
 }))
 
 vi.mock('node:fs/promises', () => ({ readFile, writeFile, stat }))
+vi.mock('../config/atomic-file', () => ({ writeTextAtomic }))
 
 // PathGuard is exercised by other handlers; stub it so importing the module
 // does not pull in real fs behaviour for the import/export tests.
@@ -39,12 +49,12 @@ vi.mock('../safety/path-guard', () => ({
 import { createAppIpcHandlers } from './app-handlers'
 import { CONVERSATION_MARKDOWN_MAX_BYTES } from '../../shared/ipc-contract'
 
-function createHandlers() {
+function createHandlers(traceService: Record<string, unknown> = {}) {
   return createAppIpcHandlers({
     configStore: {} as never,
     sessionManager: {} as never,
     skillsManager: {} as never,
-    traceService: {} as never,
+    traceService: traceService as never,
     changeHistory: {} as never,
     workbenchStore: {} as never,
     projectMetadata: {} as never,
@@ -62,8 +72,10 @@ describe('workbench import/export handlers', () => {
   beforeEach(() => {
     showSaveDialog.mockReset()
     showOpenDialog.mockReset()
+    showMessageBox.mockReset()
     readFile.mockReset()
     writeFile.mockReset()
+    writeTextAtomic.mockReset()
   })
 
   it('returns a cancel when the export save dialog is dismissed', async () => {
@@ -119,6 +131,55 @@ describe('workbench import/export handlers', () => {
 
     expect(result).toEqual({ canceled: true })
     expect(readFile).not.toHaveBeenCalled()
+  })
+
+  it('warns on every transcript export and stops before save when cancelled', async () => {
+    showMessageBox.mockResolvedValue({ response: 0 })
+    const handlers = createHandlers()
+    await expect(
+      handlers['trace:export-transcript']!(
+        { version: 1, traceId: 'session-test' },
+        stubEvent,
+      ),
+    ).resolves.toEqual({ canceled: true })
+    await handlers['trace:export-transcript']!(
+      { version: 1, traceId: 'session-test' },
+      stubEvent,
+    )
+    expect(showMessageBox).toHaveBeenCalledTimes(2)
+    expect(showSaveDialog).not.toHaveBeenCalled()
+  })
+
+  it('generates and atomically saves a transcript only after warning approval', async () => {
+    showMessageBox.mockResolvedValue({ response: 1 })
+    showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: 'F:/out/session-transcript.md',
+    })
+    writeTextAtomic.mockResolvedValue(undefined)
+    const transcriptDocument = vi.fn().mockResolvedValue({
+      metadata: { conversationId: 'conversation-1' },
+    })
+    const transcriptMarkdown = vi.fn().mockResolvedValue('# transcript')
+    const handlers = createHandlers({
+      transcriptDocument,
+      transcriptMarkdown,
+    })
+    await expect(
+      handlers['trace:export-transcript']!(
+        { version: 1, traceId: 'session-test' },
+        stubEvent,
+      ),
+    ).resolves.toEqual({
+      canceled: false,
+      path: 'F:/out/session-transcript.md',
+    })
+    expect(transcriptDocument).toHaveBeenCalledWith('session-test')
+    expect(transcriptMarkdown).toHaveBeenCalledWith('session-test')
+    expect(writeTextAtomic).toHaveBeenCalledWith(
+      'F:/out/session-transcript.md',
+      '# transcript',
+    )
   })
 
   it('returns the file content on a successful, in-limit import', async () => {

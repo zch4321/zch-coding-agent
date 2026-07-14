@@ -32,3 +32,33 @@ export async function writeJsonAtomic(
     throw error
   }
 }
+
+export async function writeTextAtomic(
+  filePath: string,
+  data: string,
+): Promise<void> {
+  const directory = path.dirname(filePath)
+  const temporaryPath = path.join(
+    directory,
+    `.${path.basename(filePath)}.${randomUUID()}.tmp`,
+  )
+  const file = await open(temporaryPath, 'wx', 0o600)
+
+  try {
+    await file.writeFile(data, 'utf8')
+    await file.sync()
+  } catch (error) {
+    await file.close().catch(() => undefined)
+    await unlink(temporaryPath).catch(() => undefined)
+    throw error
+  }
+
+  await file.close()
+
+  try {
+    await rename(temporaryPath, filePath)
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => undefined)
+    throw error
+  }
+}

@@ -2,14 +2,17 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { WebContents } from 'electron'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import { SessionManager } from './session-manager'
 import {
   FinalAnswerInterjectionProvider,
   InterjectionProvider,
 } from './session-manager-interjection-fixtures'
-import { createConfig, waitFor } from './session-manager-test-support'
+import {
+  createConfig,
+  createIpcTestEventSink,
+  waitFor,
+} from './session-manager-test-support'
 
 describe('SessionManager live interjections', () => {
   it('injects a queued interjection after a tool batch without canceling the run', async () => {
@@ -23,12 +26,7 @@ describe('SessionManager live interjections', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
     })
     const sessionId = await manager.createSession({
@@ -122,12 +120,7 @@ describe('SessionManager live interjections', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
     })
     const sessionId = await manager.createSession({
@@ -211,12 +204,7 @@ describe('SessionManager live interjections', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
     })
     const sessionId = await manager.createSession({
@@ -317,12 +305,7 @@ describe('SessionManager live interjections', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
     })
     const sessionId = await manager.createSession({

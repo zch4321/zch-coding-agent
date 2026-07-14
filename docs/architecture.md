@@ -1,6 +1,6 @@
 # 架构设计文档 · Zch Coding Agent
 
-> 状态：当前实现同步版 · 最后更新 2026-07-04
+> 状态：当前实现同步版 · 最后更新 2026-07-11
 >
 > 配套文档：[`requirements.md`](./requirements.md) 说明产品能力，`frontend-spec.md`](./frontend-spec.md) 说明前端信息架构。本文只记录当前代码实际架构和关键边界，不再保留早期设计稿内容或未实现方案。
 
@@ -19,10 +19,12 @@ Preload
 
 Main process
   ├─ IPC handlers / sender validation / payload validation
-  ├─ SessionManager and session collaborators
-  ├─ LLM providers
-  ├─ Tool registry, permission pipeline, terminal pool
-  ├─ prompt resources and prompt harness
+  ├─ Electron Runtime Event adapter
+  ├─ AgentRuntime composition root
+  │   ├─ SessionManager and session collaborators
+  │   ├─ LLM providers
+  │   ├─ Tool registry, permission pipeline, terminal pool
+  │   └─ prompt resources and prompt harness
   ├─ config, secrets, logging, workbench, skills
   └─ project metadata and code-intelligence backends
 ```
@@ -53,7 +55,9 @@ shared/
 electron/
   main.ts                   # app bootstrap、安全策略、依赖装配
   preload.ts                # 冻结 window.agentApi
+  headless/                 # 固定 Yolo API/CLI、JSONL、result/patch 和自动 Plan driver
   ipc/                      # IPC 注册、sender/payload/result 校验
+  runtime/                  # Node-only AgentRuntime 组装、事件总线和 Electron host adapter
   session/                  # SessionManager、run loop、prompt harness、compact/interjection/orchestration
   tools/                    # 内置工具定义和 ToolRegistry/ToolExecutor
   permission/               # policy engine、approval pipeline、auto approver
@@ -89,8 +93,10 @@ src/
 
 - 注册自定义 app scheme，开发环境使用 Vite dev server，生产环境从 `dist/` 读取资源。
 - 安装 CSP、导航拦截、权限拒绝、webview/window-open 禁用等安全策略。
-- 初始化 `ConfigStore`、`SecretStore`、`SkillsManager`、`TraceService`、`WorkbenchStore`、`ProjectMetadataStore`、`CodeBackendManager`、`PromptRegistry` 和 `SessionManager`。
+- 初始化 `ConfigStore`、Electron `safeStorage` adapter、HTTP transport 和 `WorkbenchStore`，再通过唯一的 `createAgentRuntime()` 创建 Agent 服务。
 - 通过 `registerIpcHandlers` 绑定所有 `shared/ipc-contract.ts` 中声明的 channel。
+
+`createAgentRuntime()` 是 Agent 依赖的唯一生产组装入口，创建 `SkillsManager`、`TraceService`、`ChangeHistoryStore`、`ProjectMetadataStore`、`CodeBackendManager`、`McpManager`、`PromptRegistry` 和 `SessionManager`。这些服务不由 Electron 或 Headless host 重复组装。配置存储、网络 transport、Workbench、窗口和 IPC 仍是 host 职责。
 
 IPC 调用链：
 
@@ -105,16 +111,92 @@ IPC 调用链：
 - `AGENT_EVENT_CHANNEL`：run、assistant、tool、approval、goal/plan、interjection、usage 等事件。
 - `TERMINAL_EVENT_CHANNEL`：PTY 输出、状态和快照相关事件。
 
+`SessionEventEmitter` 只产生与 Electron 无关的 `AgentEvent` / `TerminalEvent`，交给 `RuntimeEventBus` 校验和发布。EventBus 即使没有 renderer subscriber 也会有界保存 terminal run completion，供程序化 `AgentRuntime.run()` 等待；Electron adapter 只负责包装 IPC envelope 并转发给当前 `WebContents`。单个 host listener 失败会记录诊断，不能中断 Agent loop。
+
+### 3.1 Headless host
+
+`electron/headless/` 提供内部 `zch-agent-headless run` 和可直接调用的 `runHeadlessAgent()`。它把受信任的 headless config 转换为普通 v8 `AppConfig`，通过 provider-scoped 环境凭据创建同一个 `createAgentRuntime()`，并强制 session 使用 Yolo；task 无法修改权限模式或运行配置。Headless 不注册额外工具，也不复制 Provider/tool/compact/Skills/MCP loop。
+
+stdout 是带 `schemaVersion/seq/ts` 的 JSONL，stderr 只接收 host 诊断；`result.json` 使用原子写入。host listener 汇总 usage、工具执行、最终回复和结构化 Goal/Plan 状态，补丁通过临时 Git index 生成，不修改真实 index。结果状态区分 `completed`、`failed`、`cancelled`、`timed_out` 和 `needs_human_input`，不把 Agent 正常结束误写成 hidden grader 通过。
+
+Plan 进入 `awaiting_review` 后，driver 先等待共享 run controller 完全 settle，再用 `headless:auto-plan-approval` 更新状态并追加版本化 `<autonomous_plan_approval>` harness layer。该消息记录为 `orchestrator.message` 和 `harness.auto_action`，不是 `user.message`。自动批准达到配置上限或 Goal blocked 时返回 `needs_human_input`。SIGINT、SIGTERM 和 wall timeout 都复用 Runtime interrupt/disposer。
+
+### 3.2 Runtime identity 与 host parity
+
+每次 Headless run 会在 artifacts 中原子写入 `identity.json`。identity 包含构建时注入的 source commit、runtime image digest、case/config digest、全部 prompt resource hash、精确 Provider tool definitions 的 `toolsHash`、provider/model/profile/reasoning、核心预算，以及 platform/arch/Node/Skills/MCP/tool capability snapshot。比较器默认比较完整 identity；任一字段不同都会返回 `RUNTIME_IDENTITY_MISMATCH` 和具体字段路径，不允许把不可比 run group 混合统计。
+
+`runtime-parity.test.ts` 使用同一 fake-provider trajectory 分别通过真实 Electron IPC handler/event adapter 和 Headless API 运行。fixture 覆盖 read、patch、process、Plan 人工/自动恢复、compact 和 generic MCP canonical call，比较 Provider messages、稳定 prompt layer hashes、prompt resources、`toolsHash`、工具参数/结果和最终 Git patch。规范化只处理显式 host 差异：随机 ID、时间、绝对路径、PID/耗时、自动 Plan 消息位置，以及由时间生成的 runtime-context hash；不使用宽泛 snapshot，也不忽略工具、模型消息或 patch 的结构差异。
+
+### 3.3 Linux Docker worker
+
+`benchmarks/docker/headless.Dockerfile` 从固定 digest 的 Node 24 bookworm-slim 构建 Linux x64/glibc OCI image，在 build stage 重新编译 Linux `node-pty`，再把 `dist-headless/zch-agent-headless.mjs`、版本化 prompt resources 和运行时依赖复制到非 root runtime stage。镜像标签记录 source commit/tree、platform、libc 和 Node major；Headless identity 另记录实际 image ID/digest。Docker worker 没有第二份 Agent loop 或工具注册。
+
+`benchmarks/worker/coordinator.ts` 在创建资源前检查 Linux/amd64 daemon、seccomp、CPU/内存/PID capability 和镜像标签。Agent container 固定使用只读 rootfs、UID/GID 10001、`cap-drop=ALL`、`no-new-privileges`、默认 seccomp、CPU/内存/PID/tmpfs/wall/disk budgets；只挂载一个临时 workspace、独立 artifacts、只读 config/task 和单次 credential file。Docker socket、宿主 home、git credential、hidden grader 和任意额外挂载均不进入该接口。
+
+默认 credential 模式创建每次 run 独立的 internal network。Agent 只连接该网络并只持有随机 proxy token；Provider proxy 是唯一双网络容器，真实 key 只通过 coordinator 私有临时文件挂载给 proxy，且有请求体和请求次数上限。显式 direct 模式只用于受控开发 fallback。所有终态都执行 stop、有限等待、kill fallback、bounded logs/artifact 收集、container/network 删除和 secret directory 删除，并把清理结果写入 `worker-result.json`。
+
+### 3.4 BenchmarkCase 与 workspace preparation
+
+`benchmarks/cases/contracts.ts` 定义 native BenchmarkCase、suite index、源码 archive 和 private evaluator spec 的 v1 TypeBox schema。公开 manifest 固定 repository provenance、raw archive/tree SHA-256、case image OCI digest、setup/public checks、acceptance groups、feedback policy、修改范围和资源预算；grader 公开部分只有 adapter/protocol 和 private spec 内容摘要。Suite index固定每个manifest hash，统一adapter revision再与suite hash组合成最终suite identity。Core manifest保留的review record只说明确定性self-check，不构成prompt/test语义审核或人工批准流程。
+
+Oracle patch、mutant patch 与隐藏命令只位于 `benchmarks/private/`，该目录不进入 Docker build context。`toAgentCaseDescriptor()` 不返回 grader digest、内部绝对路径或任何 private spec 字段。Loader 在 workspace 或 Agent run 创建之前完成 schema、raw checksum、tree checksum、路径 containment、重复 ID、group reference、budget 和 OCI pin 校验；文件在首次 load 后变化还会被二次 checksum 拒绝。
+
+源码 archive 使用确定性的 `zch-case-archive-v1` JSON 文件，按 path、mode、byte length 和原始内容计算 tree hash。准备器只向空目录写普通文件，创建一个新的 baseline-only Git repository，然后删除 reflog、hooks、remote/tag refs，并检查不存在不可达历史。Agent 可见文件表必须与 archive 完全一致，且会扫描 hidden/grader/oracle/mutant 路径和 evaluator-only 字段。
+
+Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 mutant，检查修改范围与 `git diff --check`。普通case要求baseline失败；abstain case支持通过baseline和显式`no-change` oracle。Mutant必须先通过全部公开检查，再被声明的隐藏acceptance group拒绝；每个case完整重复三次并比较baseline commit与证据签名。`core-harness-8`固定为8项：slug normalization、chunk partitioning、retry backoff、config precedence、workspace routing、API compatibility refactor、diagnostic tail和no-change contract。
+
+`benchmarks/adapters/external-datasets.ts` 负责解析最新或固定commit的Monthly-SWEBench与SWE-rebench leaderboard。最新只在run开始时解析；`benchmarks/cohort/selection.ts`用seed执行无放回抽样，固定Monthly 4 bugfix + 4 non-bug、SWE-rebench按patch规模分层8项，并跨来源限制同仓库最多一项。`cohort.json`记录dataset release/commit、adapter revision、case hash、官方任务image digest、派生Agent image digest和排除原因；case identity再包含cohort hash，所以A/B使用不同cohort会在现有逐字段identity比较中被拒绝。上游数据质量被直接信任，不运行prompt/test alignment、审核Agent或人工批准。
+
+`benchmarks/adapters/external-docker-runtime.ts` 为外部任务实现机器兼容和执行边界。Monthly Harbor `environment/Dockerfile`构建任务image，SWE-rebench拉取行内声明的官方image；随后使用multi-stage overlay只复制当前ZCH Node Headless bundle，不复制Agent loop。任务原生workspace通过Docker named volume挂载，因而不经过Windows bind语义并保留symlink、执行位和依赖环境。Agent只看到problem statement、公开范围与预算；solution、gold/test patch、测试ID和verifier配置保留在`.dockerignore`排除的私有cache与grader挂载。每个case/image digest首次运行baseline未解决、oracle已解决的可缓存兼容检查；失败只标为infrastructure incompatible并递补，不评价数据集语义质量。
+
+### 3.5 Benchmark runner 与 repair control
+
+`benchmarks/runner/runner.ts` 编排 trial，但不实现第二份 Agent loop。默认 `strict` 在 Headless container 完成后收集 Git patch，再调用独立 grader coordinator；repair-once的首评和终评也走同一 grader协议。Agent container只挂载自己的 workspace和 artifacts，private spec与 evaluator workspace始终留在 grader边界。
+
+Runner把经过schema校验的公开Agent case descriptor写入独立只读文件，由Headless以 `<benchmark_case>` user-role Harness层注入首次run；真实task仍单独记录为 `user.message`。Descriptor只含公开检查、allowed/denied modification scope和资源预算，不含private spec、oracle或mutant。Base Harness明确该tag是应用生成的任务约束，不是另一条用户消息。
+
+`repair-once` 通过固定的 `benchmark.phase_ready` JSONL 事件和 `docker start --attach --interactive` stdin 决策通道协调。runner 首评失败后只返回一次经过清洗的 public/diagnostic feedback；Headless 用同一个 `SessionManager` 追加 `<benchmark_feedback>` harness message并启动一个 repair run，因此该消息在 trace 中是 orchestrator message，不伪装成 user message。无论首评还是终评，grader 都使用新准备的 workspace。
+
+每个 pass@k trial 都创建独立 workspace、container、proxy token 和 artifact staging。runner 在 resume 前解析当前 OCI image digest并把它和 grader revision/digest纳入 trial identity；final trial 通过目录级 checksum和 identity hash封存。Resume 只读 complete final，不恢复 workspace、container 或 Provider continuation，遗留 `.incomplete-*` 仅作未完成证据。完成前删除 workspace并扫描所有 artifacts中的真实 Provider credential，命中时删除 staging。
+
+### 3.6 Isolated grader 与分级评分
+
+`benchmarks/grader/coordinator.ts` 从冻结 archive创建一次性 workspace并执行 patch apply、modification scope和 `git diff --check` preflight；通过后才启动独立 grader container。Container固定使用 `network=none`、UID/GID 10001、只读 rootfs、`cap-drop=ALL`、no-new-privileges和资源限制，只挂载 evaluator workspace、只读 private input及 output。Private input执行前后校验 hash，output校验 TypeBox schema、case/input/image identity和逐项命令计划，所有 container与临时目录在终态清理。
+
+`benchmarks/grader/service.ts` 在 container内顺序执行 setup、public和private命令。原始 stdout/stderr不写入 report，只保存 bounded执行状态、失败类别和内容 hash。Restricted report保留私有 check ID用于本地复核；shareable `evaluation.json` 只暴露公开检查与 acceptance-group聚合，并由 `redaction.json` 声明省略字段。
+
+`benchmarks/grader/scoring.ts` 区分 unsupported、invalid、attempted和 graded，先应用 patch、sandbox、identity、cleanup、credential等硬门禁，再计算 L0–L5。L4/L5按 manifest行为组而非测试数量计算，`groupMacroScore`对组做宏平均；全部 critical组与公开回归通过才可 L5，且任何硬门禁失败都不能 resolved。仓库内 native evaluator仅保留为 deterministic单元测试 adapter，不再产生正式 runner结果。
+
+### 3.7 Benchmark 指标、成本与配对比较
+
+`SessionToolRunner` 在每次工具终态写入 `tool.attempt`，记录 canonical tool、validation/permission/execution stage、outcome、effects、duration、输入输出字节、截断和错误码；`tool.call` 继续保留实际参数与结果。`llm.request` 额外标记 main/compression scope，approval 调用可由 approval trace 与 usage 对齐，因此缺失 Provider usage 的 request 会明确形成 unknown，而不是按文本长度估算或累加成零。
+
+`benchmarks/metrics/aggregate.ts` 从 trace、Agent JSONL、patch 和 Headless duration 生成 trial metrics：按 scope 汇总 token，按 tool/effect 汇总工具终态，计算重复 canonical 参数签名、首次编辑/测试、最终验证后空转、patch 规模及 trajectory 计数。只有显式固定的 `priceSnapshot` 才计算成本；snapshot 原文、来源 revision 和 hash 一同进入 artifacts/identity，任何被定价字段缺失都会使相应成本保持 unknown。
+
+测试命令识别先从结构化tool参数恢复命令文本，覆盖package runner、常见语言测试器以及 `node test/...`等直接执行测试文件的形式；只有已settle成功的 `run_command` 才可作为最终验证时间，terminal input被接受不能冒充测试通过。
+
+`benchmarks/metrics/compare.ts` 使用全部 trial 成本计算 `costPerResolvedUsd`，同时保留 unresolved 的 token/成本消耗。A/B先逐trial校验case/cohort、runtime/case/grader image、Provider/model/profile/reasoning、预算、protocol、trial index和price snapshot，再输出paired delta、win/loss/tie、总体resolve delta与95%区间。排序固定按hard-gate safety、correctness、efficiency的词典序，效率不参与correctness得分。
+
+### 3.8 Benchmark CLI、运行档位与 artifacts
+
+`benchmarks/cli/main.ts` 构建为独立 Node 24 bundle，不依赖 Electron renderer 或 IPC。四个opt-in npm命令分别固定smoke、daily、full和external preset：Core默认3×1、8×3、8×5，external为Monthly 8 + SWE-rebench 8且每项3 trials。CLI最多接受8个suite、64个case和每项5 trials，从Headless config声明的环境变量读取Provider key，并默认只把真实key交给受限Provider proxy。External支持`--seed`创建cohort或`--cohort`复用，不允许同时指定。
+
+`benchmarks/runner/group-runner.ts` 串行复用 `runBenchmarkTrials()`，只增加 run-group编排，不复制 Agent、worker或 grader实现。Artifact层级固定为 run-group → suite/case → trial → attempt；group保存不可变 identity、Headless config和可选 price snapshot，case保存 manifest/Agent descriptor/task，trial继续保存 worker trace/JSONL/stderr、metrics和泄漏扫描，attempt保存 patch/evaluation/grader证据。同一输出目录只有 identity完全一致时才能恢复，具体 trial仍由已有 complete marker和整树 hash验证。
+
+本地 `case-result.restricted.json`、raw worker/grader artifacts和 config snapshot不进入分享报告。`shareable-report.json`仅组合公开evaluation、聚合metrics和comparison identity；外部报告另外分列Monthly、SWE-rebench、两来源50/50 macro与总体结果。`redaction.json`同时列出restricted globs和被删除字段。Run-group `summary.json`区分unresolved与artifact/metrics incomplete，避免把trace缺失伪装成有效零成本结果。
+
+每个有完整trace的trial通过共享 `conversationToMarkdown()` 生成可导入消息语义的 `conversation.restricted.md`，并通过桌面端同一transcript normalizer生成 `session-transcript.restricted.md`。后者包含工具、审批、内部编排、明文reasoning和Provider消息快照，不取代raw trace；它进入artifact hash和restricted清单、从shareable report隐藏，并作为唯一精确路径例外不进入credential scan。
+
 ---
 
 ## 4. 配置、凭据与模型
 
-配置由 `electron/config/store.ts` 管理，schema 在 `electron/config/schema.ts` 和 `shared/config.ts` 中定义。当前 schema version 为 7；v7 新增 `limits.maxConcurrentRuns`（`1..32`，默认 `4`），旧配置迁移时自动补默认值。并发配置不包含独立 provider call 上限，也不允许调整同 workspace writer 数。
+配置由 `electron/config/store.ts` 管理，schema 在 `electron/config/schema.ts` 和 `shared/config.ts` 中定义。当前 schema version 为 8；v8 增加通用 MCP server 配置，旧配置迁移时自动补默认值。并发配置不包含独立 provider call 上限，也不允许调整同 workspace writer 数。
 
 持久化位置：
 
 - 非敏感配置：`userData/config.json`。
-- 凭据：`userData/secrets.json`，通过 Electron `safeStorage` 加密。
+- 凭据：`userData/secrets.json`，通用 `SecretStore` 通过 host 提供的 adapter 加密；桌面 host 使用 Electron `safeStorage` adapter。
 - workbench：`userData/workbench.json`。
 - trace：`userData/traces/*.jsonl`。
 - change history：`userData/change-history.json`。
@@ -134,7 +216,7 @@ IPC 调用链：
 
 ## 5. Session 与 Run
 
-`SessionManager` 是主进程 session 门面，负责 session map、生命周期、IPC-facing 方法、trace logger 所有权、terminal facade 和依赖装配。长流程被拆到 session-scoped collaborators：
+`AgentRuntime` 是 Node-only 生命周期和控制门面，拥有共享事件总线、Agent 服务以及幂等 dispose。它提供程序化 create session、run completion、interrupt 和 close；Electron IPC 使用同一 runtime services。`SessionManager` 负责 session map、run 生命周期、trace logger 所有权和 terminal facade，长流程被拆到 session-scoped collaborators：
 
 | 模块                             | 职责                                                                     |
 | -------------------------------- | ------------------------------------------------------------------------ |
@@ -401,7 +483,9 @@ Trace request 记录：
 - prompt resources。
 - prompt build layer summary。
 
-`TraceService` 提供 list、replay、stats、fork 和 cleanup。Fork 从某个 `llm.request` 恢复 provider request override，目标 conversationId 必须随 fork 请求进入新 session，默认不重放历史副作用。
+`TraceService` 提供 list、replay、stats、fork、cleanup与session transcript。Transcript normalizer按seq生成稳定快照，把同一callId的proposed/approval/attempt/call合并为工具项，final message替代重复stream delta，中断delta标记partial；Provider消息快照单独分页。Timeline cursor绑定trace revision，活动trace追加后旧cursor变stale，renderer只能读取2 MiB有界页面。Fork仍从某个 `llm.request` 恢复provider request override，不重放历史副作用。
+
+`zch-session-transcript` 是不可导入的restricted审计格式，与可导入且不含工具的 `zch-conversation` 分离。Electron主进程每次导出前显示风险警告并原子保存，既不扫描也不脱敏；多模态载荷和opaque reasoning不写入。查看器可从conversation或Trace Debug进入，按run分组并过滤用户、Assistant、reasoning、internal、tool/approval、Provider、runtime和terminal事件。
 
 隐私边界：
 
@@ -480,10 +564,12 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 - `npm run test:native`：node-pty native smoke。
 - `npm run test:ripgrep`：bundled ripgrep smoke。
 - `npm run test:real`：显式 live provider 测试，需要 `DEEPSEEK_API_KEY`。
+- `npm run test:docker-worker`：显式构建 Linux worker image，运行 fake-provider proxy smoke 和强制超时清理；不进入默认测试链路。
+- `npm run test:benchmark-cases`：校验冻结 manifest/archive/private-spec，并对 3 个 bootstrap case 重复运行 baseline/oracle/mutant 自检。
 
 当前测试分布：
 
-- `electron/**/*.test.ts`：主进程业务、工具、权限、provider、session、prompt、logging、project/code intelligence。
+- `electron/**/*.test.ts`：主进程业务、Node-only AgentRuntime、工具、权限、provider、session、prompt、logging、project/code intelligence。
 - `shared/**/*.test.ts`：contract、markdown import/export、titles。
 - `src/**/*.test.ts`：Pinia stores、Vue components、terminal sequence。
 - `e2e/*.spec.ts`：Electron 安全基线、设置/工作台/UI、fake provider 功能流、审批、interjection、terminal。
@@ -499,7 +585,7 @@ Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有
 
 ## 19. 当前限制
 
-- Runtime 仍在 Electron 主进程内，不是 utility process；未捕获主进程错误仍可能影响窗口。
+- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。外部benchmark已支持Harbor/SWE-rebench声明的Linux任务环境，但上游image体积、registry可用性和跨平台Docker实现仍会产生infrastructure incompatible样本；这类失败不计为模型任务失败。
 - Provider 层当前是 OpenAI-compatible/DeepSeek 为主，没有多厂商完整矩阵。
 - Code intelligence backend 当前实际实现为 Serena MCP 只读 adapter，rename/edit capability 只在 schema 中预留。
 - 插件系统只有事件总线和 hook 点，没有本地 JS 插件加载器。

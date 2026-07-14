@@ -304,6 +304,7 @@ export class SessionCompactCoordinator {
           sessionId: session.sessionId,
           runId: run.runId,
           callId,
+          scope: 'compression',
           normalizedMessages: snapshot.normalizedMessages,
           providerRequest: snapshot.providerRequest,
           requestBytes: snapshot.requestBytes,

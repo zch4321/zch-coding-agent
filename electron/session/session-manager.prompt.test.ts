@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { WebContents } from 'electron'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { SessionId } from '../../shared/ids'
 import {
@@ -17,6 +16,7 @@ import {
 } from './session-manager-prompt-fixtures'
 import {
   createConfig,
+  createIpcTestEventSink,
   ForkProvider,
   parseTrace,
   waitFor,
@@ -47,12 +47,7 @@ describe('SessionManager prompt and trace', () => {
       promptRegistry: await PromptRegistry.load(
         path.resolve('resources', 'prompts'),
       ),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
     })
     const sessionId = await manager.createSession({
@@ -104,11 +99,13 @@ describe('SessionManager prompt and trace', () => {
       send: (_channel: string, envelope: AgentEventEnvelope) => {
         sent.push(envelope)
       },
-    } as WebContents
+    }
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () => webContents,
+      eventSink: createIpcTestEventSink((envelope) =>
+        webContents.send('', envelope),
+      ),
       providerFactory: () => provider,
     })
     const sessionId = await manager.createSession({
@@ -179,12 +176,7 @@ describe('SessionManager prompt and trace', () => {
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
-      getWebContents: () =>
-        ({
-          isDestroyed: () => false,
-          send: (_channel: string, envelope: AgentEventEnvelope) =>
-            sent.push(envelope),
-        }) as unknown as WebContents,
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
       promptRegistry: await PromptRegistry.load(
         path.resolve('resources', 'prompts'),

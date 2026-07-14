@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "workspace-routing",
+  "suite": {
+    "id": "core-harness-8",
+    "revision": "v1"
+  },
+  "kind": "bug-fix",
+  "task": "Fix routeWorkspace in src/route-workspace.mjs for a small monorepo: normalize path separators, match only complete path boundaries, and select the deepest matching package root. Preserve the original root string in the return value.",
+  "repository": {
+    "source": {
+      "kind": "synthetic",
+      "locator": "zch/core-harness-8/workspace-routing",
+      "revision": "baseline-v1",
+      "license": "MIT-0"
+    },
+    "archive": "archives/core-harness-8/workspace-routing.zch-archive.json",
+    "archiveSha256": "91ff2f8e1a768b82c82b7c0af0f30d3c2920d1342907f78b0e080fb1e9be02f8",
+    "treeSha256": "c9eb79988aba3af73aba2f5e1e947e2f99d076b726bbddc33ec1a9fd78b0ad3f"
+  },
+  "platform": {
+    "os": "linux",
+    "architecture": "x64",
+    "libc": "glibc",
+    "nodeMajor": 24
+  },
+  "caseImage": {
+    "reference": "node:24-bookworm-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5",
+    "digest": "sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5"
+  },
+  "setup": [],
+  "publicChecks": [
+    {
+      "id": "public-package-route",
+      "title": "Routes a file to a package root",
+      "acceptanceGroupId": "package-route",
+      "command": {
+        "executable": "node",
+        "args": ["test/public.test.mjs"],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    }
+  ],
+  "grader": {
+    "adapter": "native-command-v1",
+    "protocolVersion": 1,
+    "privateSpecSha256": "5d618c6f5ec3927b8cd8eae16f1784cb2668280df4a4c2bc7450e4167bfa46c9"
+  },
+  "acceptanceGroups": [
+    {
+      "id": "package-route",
+      "title": "Ordinary package routing",
+      "critical": true,
+      "weight": 1
+    },
+    {
+      "id": "deepest-package",
+      "title": "Deepest package and separator normalization",
+      "critical": true,
+      "weight": 1
+    },
+    {
+      "id": "path-boundary",
+      "title": "Complete path boundary matching",
+      "critical": true,
+      "weight": 1
+    }
+  ],
+  "feedbackPolicy": {
+    "allowed": "public",
+    "repairOnceAllowed": true
+  },
+  "modificationScope": {
+    "allowedPaths": ["src/**"],
+    "deniedPaths": ["test/**", "package.json"],
+    "maxChangedFiles": 2,
+    "maxPatchBytes": 65536
+  },
+  "resources": {
+    "wallTimeMs": 60000,
+    "cpus": 1,
+    "memoryBytes": 536870912,
+    "pids": 64,
+    "diskBytes": 268435456,
+    "maxAgentSteps": 32,
+    "maxContextTokens": 65536
+  },
+  "quality": {
+    "baselineExpected": "fail",
+    "minimumRejectedMutants": 2,
+    "repetitions": 3,
+    "review": {
+      "status": "reviewed",
+      "reviewer": "deterministic-self-check:core-harness-v1",
+      "reviewedAt": "2026-07-12T00:00:00.000Z",
+      "method": "Deterministic baseline, oracle, mutant, and three-repetition stability self-check; no semantic alignment gate."
+    }
+  }
+}

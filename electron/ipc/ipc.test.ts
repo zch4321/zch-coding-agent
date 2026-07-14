@@ -198,6 +198,13 @@ const validPayloads: {
   'skills:setEnabled': { version: 1, name: 'test-skill', enabled: true },
   'trace:list': { version: 1 },
   'trace:replay': { version: 1, traceId: 'session-test' },
+  'trace:transcript-page': { version: 1, traceId: 'session-test' },
+  'trace:request-messages': {
+    version: 1,
+    traceId: 'session-test',
+    requestEventId: 'event-1' as import('../../shared/ids').EventId,
+  },
+  'trace:export-transcript': { version: 1, traceId: 'session-test' },
   'trace:stats': { version: 1 },
   'trace:fork': {
     version: 1,

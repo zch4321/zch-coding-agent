@@ -13,6 +13,9 @@ export const TraceInfoSchema = Type.Object(
   {
     traceId: TraceIdSchema,
     sessionId: Type.Optional(SessionIdSchema),
+    conversationId: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 256 }),
+    ),
     startedAt: Type.Optional(Type.String({ format: 'date-time' })),
     endedAt: Type.Optional(Type.String({ format: 'date-time' })),
     closed: Type.Boolean(),
@@ -33,6 +36,7 @@ export const PromptLayerKindSchema = Type.Union([
   Type.Literal('agents'),
   Type.Literal('compact_history'),
   Type.Literal('selected_context'),
+  Type.Literal('benchmark_case'),
   Type.Literal('user_interjection'),
   Type.Literal('orchestration_request'),
 ])

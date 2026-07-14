@@ -155,6 +155,13 @@ function interjectionTitle(interjection: {
         >
           {{ t('logging.replay') }}
         </NButton>
+        <NButton
+          secondary
+          :disabled="!traces.selectedId"
+          @click="traces.selectedId && traces.openTranscript(traces.selectedId)"
+        >
+          {{ t('transcript.inspect') }}
+        </NButton>
       </div>
       <label class="settings-field">
         <span>{{ t('logging.forkEvent') }}</span>

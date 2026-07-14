@@ -913,6 +913,14 @@ export function orchestrationRequestContent(
   return tagged('orchestration_request', { kind }, content)
 }
 
+export function benchmarkFeedbackContent(content: string): string {
+  return tagged('benchmark_feedback', { source: 'grader' }, content)
+}
+
+export function benchmarkCaseContent(content: string): string {
+  return tagged('benchmark_case', { source: 'public_manifest' }, content)
+}
+
 export function compactHistoryContent(content: string): string {
   return tagged('compact_history', { source: 'history_compaction' }, content)
 }

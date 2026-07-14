@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "caseId": "config-precedence",
+  "suiteId": "core-harness-8",
+  "suiteRevision": "v1",
+  "checks": [
+    {
+      "id": "falsey-values",
+      "acceptanceGroupId": "falsey-values",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { mergeConfig } from './src/merge-config.mjs'; assert.deepEqual(mergeConfig({ retries: 3, prefix: 'x' }, { retries: 0, prefix: '' }), { retries: 0, prefix: '' })"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    },
+    {
+      "id": "nested-config",
+      "acceptanceGroupId": "nested-config",
+      "command": {
+        "executable": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import assert from 'node:assert/strict'; import { mergeConfig } from './src/merge-config.mjs'; assert.deepEqual(mergeConfig({ http: { timeout: 30, retries: 3 }, mode: 'safe' }, { http: { retries: 0 } }), { http: { timeout: 30, retries: 0 }, mode: 'safe' })"
+        ],
+        "timeoutMs": 5000,
+        "maxOutputBytes": 65536
+      }
+    }
+  ],
+  "oracle": {
+    "kind": "patch",
+    "patch": "diff --git a/src/merge-config.mjs b/src/merge-config.mjs\n--- a/src/merge-config.mjs\n+++ b/src/merge-config.mjs\n@@ -1,5 +1,15 @@\n export function mergeConfig(defaults, overrides) {\n-  return Object.fromEntries(\n-    Object.entries(defaults).map(([key, value]) => [key, overrides[key] || value]),\n-  )\n+  const result = {}\n+  for (const key of new Set([...Object.keys(defaults), ...Object.keys(overrides)])) {\n+    const fallback = defaults[key]\n+    const supplied = Object.hasOwn(overrides, key) ? overrides[key] : fallback\n+    if (isRecord(fallback) && isRecord(supplied)) {\n+      result[key] = mergeConfig(fallback, supplied)\n+    } else {\n+      result[key] = supplied\n+    }\n+  }\n+  return result\n }\n+\n+function isRecord(value) {\n+  return value !== null && typeof value === 'object' && !Array.isArray(value)\n+}\n"
+  },
+  "mutants": [
+    {
+      "id": "top-level-only",
+      "description": "Preserves falsey values but replaces nested objects wholesale.",
+      "patch": "diff --git a/src/merge-config.mjs b/src/merge-config.mjs\n--- a/src/merge-config.mjs\n+++ b/src/merge-config.mjs\n@@ -1,5 +1,7 @@\n export function mergeConfig(defaults, overrides) {\n   return Object.fromEntries(\n-    Object.entries(defaults).map(([key, value]) => [key, overrides[key] || value]),\n+    Object.entries(defaults).map(([key, value]) => [\n+      key, Object.hasOwn(overrides, key) ? overrides[key] : value,\n+    ]),\n   )\n }\n",
+      "expectedFailedGroups": ["nested-config"]
+    },
+    {
+      "id": "boolean-special-case",
+      "description": "Handles false but still discards numeric and string falsey overrides.",
+      "patch": "diff --git a/src/merge-config.mjs b/src/merge-config.mjs\n--- a/src/merge-config.mjs\n+++ b/src/merge-config.mjs\n@@ -1,5 +1,5 @@\n export function mergeConfig(defaults, overrides) {\n   return Object.fromEntries(\n-    Object.entries(defaults).map(([key, value]) => [key, overrides[key] || value]),\n+    Object.entries(defaults).map(([key, value]) => [key, overrides[key] === false ? false : overrides[key] || value]),\n   )\n }\n",
+      "expectedFailedGroups": ["falsey-values", "nested-config"]
+    }
+  ]
+}
