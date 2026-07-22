@@ -1,9 +1,9 @@
 # 前端产品与验收规范 · Zch Coding Agent
 
-> 状态：Backend Architecture v2 配套规范 · 最后更新 2026-07-22
+> 状态：Backend Architecture v2.1 配套规范 · 最后更新 2026-07-22
 > 配套：[`requirements.md`](./requirements.md)（产品能力）、[`architecture.md`](./architecture.md)（技术边界）、[`road-map.md`](./road-map.md)（实施方向）。
 > 本文档是前端信息架构、交互行为、阶段展示和验收标准的权威依据；发生冲突时以本文档为准。
-> v2 状态所有权和恢复行为是迁移目标；当前实现差异见架构文档 §19。
+> v2.1 状态所有权和恢复行为是迁移目标；当前实现差异见架构文档 §20。
 
 ---
 
@@ -36,7 +36,8 @@
 ### 2.2 对话（Conversation）
 
 - “对话”是持久化 `Session` 在 UI 中的产品名称，不是另一种领域实体。
-- 对话标题、项目、消息、模型、权限模式、draft 和时间等数据都来自 backend-owned Session state。
+- 对话标题、项目、完整消息、模型、权限模式、Goal/Plan 和时间来自 backend-owned Session state。
+- Draft 和 draft attachments 只属于 renderer 输入组件，不要求跨 Session 切换、renderer reload 或应用重启恢复。
 - 创建对话即通过后端创建并持久化 Session；不存在 renderer-only Conversation、临时 Conversation 或 `conversationId -> sessionId` 绑定。
 - Renderer 可以分页缓存 Session 数据并派生 timeline，但不能保存或回写另一套 ConversationRecord。
 - 不引入 Task 概念。
@@ -191,7 +192,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 - 对话项和搜索结果显示一个最高优先级运行状态：`Awaiting approval` → `Writer` → `Read-only locked` → `Cancelling` → `Running` → `Failed` → `Completed`。
 - 后台 approval 只在其所属对话显示 badge；点击后 ApprovalCard 使用显式 `sessionId/runId/callId` 提交，不得复用先前 active Session 的标识。
 - running、start pending 或 awaiting approval 的 conversation 禁用 delete、fork 和 revert，并通过 tooltip 说明原因；项目内任一 conversation busy 时禁止 remove project。
-- 对话切换不清空其他 Session 的 backend-owned draft、context attachments、error 或 pending approval 副本。
+- 对话切换不得让 timeline、error、pending approval 或 runtime event 串到错误 Session。产品不验收未发送 draft/context attachments 的跨 Session 恢复。
 
 ---
 
@@ -411,7 +412,7 @@ Terminal 不属于 P3 UI，P4 完成 PTY 后才显示。
 
 ### 9.3 生命周期
 
-- Terminal 归属于持久化 Session 对应的 backend SessionRuntime。
+- Terminal 归属于持久化 Session 对应的 backend `LiveSessionContext`。
 - 切换对话时切换到该对话所属 terminal 集合。
 - Interrupt Run 不关闭 PTY。
 - 归档/删除 Session、移除项目或退出应用时关闭所属 PTY。
@@ -476,10 +477,10 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.6 Session 生命周期
 
 - Settings 不展示 `Start session` / `Close session` 作为主流程按钮。
-- 新建对话时由后端创建持久化 Session；首次发送只创建 Run。
-- 切换对话不关闭后台 SessionRuntime 或 Run；归档/删除 Session、移除项目和退出应用才清理对应 runtime 资源。退出时统一取消 active runs、释放 workspace writer 并关闭 PTY。
-- 未发送 draft 与 context attachments 由后端按 Session 保存和恢复；A → B → A 切换不得把 B 的输入带回 A，也不得清空 A 的未发送内容。
-- 应用重启后从后端 Session snapshot 恢复消息、draft、Goal/Plan、模型和模式；非终态 Run 显示为 `interrupted`，不得只恢复 UI 消息却丢失模型上下文。
+- 新建对话时由后端创建持久化 Session；首次发送启动 backend memory 中的 Active Run。
+- 切换对话不关闭后台 `LiveSessionContext` 或 `ActiveRunExecution`；归档/删除 Session、移除项目和退出应用才清理对应 runtime 资源。退出时统一取消 active runs、释放 workspace writer 并关闭 PTY。
+- 未发送 draft 与 context attachments 不进入 backend，不保证 A → B → A、renderer reload 或应用重启后恢复。
+- 应用重启后从 backend Session snapshot 恢复完整 messages、Goal/Plan、模型和模式；partial assistant output、pending approval 和 Active Run 可以丢失，不显示伪造的 interrupted message。
 
 ---
 
@@ -504,7 +505,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 要求：
 
 - 错误消息对用户可见但不泄露 API Key、Authorization header 或主进程堆栈。
-- `stateRevision` 重复时不重复应用；检测 state change 缺口后请求 Session snapshot。`run:stream` 的 sequence 缺口只影响瞬时展示，并从后端 `run_outputs` checkpoint 恢复。
+- Session `revision` 重复时不重复应用；检测 committed change 缺口后请求 Session snapshot。`run:stream` sequence 缺口只影响瞬时展示；backend 没有可恢复 buffer 时允许丢失 partial output。
 - 切换对话、卸载组件和关闭窗口时注销 renderer listener。
 
 ---
@@ -627,8 +628,8 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] 新对话在当前项目下创建；无项目时先选择目录。
 - [ ] 对话标题可生成、重命名和删除。
 - [ ] 搜索只在本地检索标题和消息，并能打开结果。
-- [ ] 新建对话立即创建 backend-owned Session；首次发送只创建 Run。
-- [ ] A 运行时切到 B 不打断 A，A/B timeline、approval、error 和 draft 不串线。
+- [ ] 新建对话立即创建 backend-owned Session；首次发送启动内存 Active Run。
+- [ ] A 运行时切到 B 不打断 A，A/B timeline、approval 和 error 不串线；draft 跨切换恢复不属于验收要求。
 - [ ] Sidebar 与搜索结果按规定优先级显示 writer/running/readonly locked/approval/failed/completed 状态。
 - [ ] running/start pending/approval conversation 的 delete、fork、revert 和 remove project 被禁用并说明原因。
 

@@ -1,8 +1,8 @@
 # 需求文档 · Zch Coding Agent
 
-> 状态：Backend Architecture v2 配套需求 · 最后更新 2026-07-22
+> 状态：Backend Architecture v2.1 配套需求 · 最后更新 2026-07-22
 > 本文档定义「做什么」。技术怎么做见 [`architecture.md`](./architecture.md)，前端信息架构与验收标准见 [`frontend-spec.md`](./frontend-spec.md)。
-> v2 条目是迁移目标，不表示当前 legacy 实现已经满足；迁移状态见架构文档 §19。
+> v2.1 条目是迁移目标，不表示当前 legacy 实现已经满足；迁移状态见架构文档 §20。
 
 ---
 
@@ -159,13 +159,18 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 
 - 一个工作区（workspace）= 一个本地目录。
 - Session 是持久化对话实体，绑定一个工作区、当前模型选择与权限模式；UI 中的“对话”是 Session 的展示名称，不存在独立 Conversation 领域记录或 `conversationId -> sessionId` 映射。
-- 所有持久化 Session/Run/消息/工具/审批/Goal/Plan/draft 状态以后端和 SQLite 为准。Renderer 只保存带 entity/state revision 的后端副本及纯 UI 状态，不得单独创建或提交领域状态。
-- 每次用户提交形成一个持久化 Run；Run 在开始时冻结实际 `ModelRouteSnapshot` 和权限模式。Session 的模型/模式修改只影响后续 Run，不改变已经开始的 Run。
+- SQLite 只持久化 Session 元数据和完整 Message history。Goal/Plan 属于 Session 元数据；完整 assistant/tool/harness 内容统一表示为 Message。Renderer 只保存这些 backend records 的副本，不得单独创建已提交消息。
+- Draft 和 draft attachments 是 renderer UI 状态，不进入 backend 或 SQLite，也不要求在切换 Session、renderer reload 或应用重启后保留。
+- 每次用户提交形成 backend memory 中的 Active Run；它在开始时冻结实际 `ModelRouteSnapshot` 和权限模式，但不单独落盘。完成的 assistant message 记录实际 route；Session 的模型/模式修改只影响后续 Run。
+- Active Run、stream delta、pending approval、未完成 tool batch、writer lease 和 PTY/process 都是 backend runtime state，不进入 SQLite。
 - 同一 canonical workspace 同时最多一个非只读 writer run；`auto`、`confirm`、`yolo` 从 run 启动覆盖 provider、工具、等待审批、interjection continuation 和 cancelling。若不可中止的副作用工具在 cancelled/timeout 结果之后仍在执行，writer 必须继续持有到其底层 Promise settle。writer 数固定为 1，不提供配置。
 - `readonly` run 不获取 writer，可与 writer 和其他 readonly run 并行；不同 workspace 可各自拥有 writer。同 workspace 的第二个非只读 run 不排队，返回带 owner Session/Run 的结构化冲突。
 - completed、failed、cancelled、异常、session close 和 app dispose 都必须走幂等释放路径。全局 run slot 在 terminal run status 对 renderer 可见前释放；writer 在没有残留副作用时同步释放，有不可中止副作用时延迟到其真正 settle，禁止为满足 UI 终态而提前开放第二个 writer。
 - 文件工具必须约束在工作区边界内（规范化路径、真实路径与符号链接逃逸检测）。
-- Session canonical history 必须持久化，应用重启后可以继续同一 Session，并从最新 checkpoint 加后续历史重建模型上下文。非终态 Run 在重启恢复时标记为 `interrupted`；不承诺恢复其进程、PTY、网络请求或其他运行时对象，但必须保留已提交状态和有界 partial output。
+- Session canonical history 必须以完整 Message 持久化。应用重启后按 `inHistory = true` 和 `seq` 重建 OpenAI-compatible messages；compact 通过完整 summary message 和显式 `inHistory` 变更替代旧前缀。
+- Assistant stream delta 只保存在 backend memory；Provider turn 完成后才插入 Message。包含 tool calls 的 assistant turn 必须等每个 call 都有 terminal result 后，与对应 tool messages 在同一 transaction 写入，数据库不得保存协议半截。
+- 应用崩溃可以丢失尚未完成的 assistant text/reasoning、tool batch 和 Active Run，不保存 partial message，也不生成持久化 interrupted Run。最后一条已提交 user message 可以暂时没有 assistant reply。
+- 如果副作用工具已经修改 workspace、但应用在完整 tool batch transaction 前崩溃，文件变化可以保留而 tool messages 丢失；系统以下一次读取到的实际 workspace 为准。V2.1 不承诺文件系统与消息数据库之间的 crash-atomic journal。
 - JSONL trace 是可选审计记录，不是事务恢复日志，也不能作为 Session 状态的唯一来源。
 
 ### 2.5 Skills（渐进式专家指令）
@@ -336,9 +341,9 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 
 - UI 中一个项目对应一个 workspace，不重复展示两个概念。
 - 左侧项目侧栏提供新对话、对话搜索，以及项目下的二级对话列表；不引入 Task 概念。
-- “对话”直接对应 backend-owned Session；标题、消息历史、所属项目、创建/更新时间、draft 和模型/权限模式均由后端持久化并推送给 renderer。
+- “对话”直接对应 backend-owned Session；标题、完整消息历史、所属项目、创建/更新时间和模型/权限模式由后端持久化并推送给 renderer。Draft 仅属于 renderer 输入组件。
 - 搜索通过本地后端查询 Session 标题、用户消息和 Agent 文本，不检索工作区文件、工具原始输出、reasoning 或 trace，也不访问 Provider。
-- 新建对话时立即创建持久化 Session；首次发送消息只创建 Run。Session/Run ID 不作为常驻产品信息展示。
+- 新建对话时立即创建持久化 Session；首次发送消息启动内存 Active Run。Session/Run ID 不作为常驻产品信息展示。
 - 正式 UI 不得使用硬编码项目、对话或工具活动作为占位数据。
 
 ### 4.2 终端面板

@@ -10,7 +10,7 @@
 | ------ | ------------------------------ | -------------------------------------------------------- | ------------------------------------- |
 | P1     | Benchmark Harness              | 用同一 Agent Runtime 在 Linux Docker 评估真实任务        | 双实现漂移、环境复杂、grader 信号失真 |
 | P2     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断          |
-| P2     | Provider Routing               | Session selection、Run route snapshot 与用途路由         | 全局 active provider 静默影响已有会话 |
+| P2     | Provider Routing               | Session selection、Active Run route 与用途路由           | 全局 active provider 静默影响已有会话 |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张      |
 
 ## 5. M5 · Headless Agent Runtime And Benchmark Harness
@@ -92,12 +92,12 @@ M5.10已经完成：`core-harness-8`固定8项确定性回归；`benchmark:exter
 
 目标：让 provider/model 从全局设置变成可审计的会话级和用途级选择，同时增强 trace/replay 对 prompt、工具和并发运行的解释能力。
 
-### 4.1 Session Selection 与 Run Route Snapshot
+### 4.1 Session Selection 与 Active Run Route Snapshot
 
 - Session 持久化当前 provider/model/reasoning selection；renderer 下拉框必须通过 backend command 更新它，不能只修改本地 form。
-- 每个 Run 启动时从 Session selection 解析并持久化不可变 `ModelRouteSnapshot`；`SessionProviderTurnRunner` 按 Run route 选择主模型，不能直接使用全局 active provider。
+- 每个 Active Run 启动时从 Session selection 解析不可变 `ModelRouteSnapshot`；它保存在 backend memory，完成的 assistant message 记录实际 route。Provider turn 不能直接使用全局 active provider。
 - 修改全局默认 provider 只影响新 Session，或用户显式恢复默认后的后续 Run。
-- 不再使用独立 `ConversationRecord` 保存模型状态；Session 和 Run route 使用 `shared/` canonical schema。
+- 不再使用独立 `ConversationRecord` 或持久化 Run 保存模型状态；Session selection、active route 和 Message metadata 使用 `shared/` canonical schema。
 
 验收：
 
