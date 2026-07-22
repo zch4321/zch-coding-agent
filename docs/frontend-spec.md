@@ -214,7 +214,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 
 - 用户消息。
 - Agent 流式 Markdown。
-- reasoning 折叠区，默认折叠。
+- `normalizedReasoningText` reasoning 折叠区，默认折叠；没有可读投影时不显示空 reasoning 容器。
 - 工具调用卡。
 - 审批卡。
 - 结构化错误和重试提示。
@@ -223,6 +223,8 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 
 - 只有 `kind = 'user_input'` 的 Message 显示为用户气泡；`role = 'user'` 的 orchestrator、runtime context、harness 或 compact summary 不能伪装成用户亲自输入。
 - `kind = 'assistant_turn'` / `'tool_result'` 的完整 records 用于重建稳定消息和工具卡；Active Run 的 delta/runtime events 只负责未完成状态，不能由 renderer 自行提交为 Message。
+- Renderer 只能展示 `normalizedReasoningText`，必须把 `providerContinuation` 当作 opaque canonical data，不解析、不修改，也不展示其中的原始 CoT、signature、encrypted/redacted block、response id 或 output item。
+- Renderer 根据按 `kind` 校验的 typed metadata 展示 attachment provenance、usage、tool/approval/compact 摘要；不能把未知 metadata 字段转成 Provider request 内容。
 - 自动跟随流式输出；用户主动向上滚动后停止强制跟随，并显示“回到底部”。
 - 长代码和长路径不撑破布局。
 - Markdown 禁止 raw HTML；外链协议白名单化并通过受控主进程动作打开。
@@ -639,6 +641,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 16.3 对话与输入
 
 - [ ] 流式文本、折叠 reasoning、工具卡和结构化错误正常。
+- [ ] Reasoning 折叠区只展示 `normalizedReasoningText`；缺失时不显示，opaque `providerContinuation` 永不进入 UI。
 - [ ] `kind = 'user_input'` 才渲染为用户气泡；user-role orchestrator/runtime context/harness 不伪装成用户输入。
 - [ ] active Run 和 pending approval 时禁止重复发送。
 - [ ] Enter、Shift+Enter 和 IME 行为符合规范。

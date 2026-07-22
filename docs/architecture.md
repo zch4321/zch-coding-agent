@@ -258,6 +258,53 @@ interface SessionRecord {
 ### 5.2 MessageRecord
 
 ```ts
+interface ProviderContinuationEnvelope {
+  schemaVersion: 1
+  adapterId: string
+  format: string
+  data: JsonValue
+}
+
+interface MessageMetadataV1 {
+  schemaVersion: 1
+  attachments?: Array<{
+    ref: string
+    name: string
+    mimeType?: string
+    snapshotHash?: string
+  }>
+  prompt?: {
+    resourceId: string
+    version: string
+    hash: string
+  }
+  usage?: {
+    inputTokens?: number
+    outputTokens?: number
+    reasoningTokens?: number
+    cachedInputTokens?: number
+  }
+  tool?: {
+    name: string
+    reason?: string
+    status: 'completed' | 'denied' | 'failed' | 'cancelled' | 'timed_out'
+    truncated: boolean
+    durationMs?: number
+  }
+  approval?: {
+    decision: 'approved' | 'denied'
+    source: 'user' | 'rule' | 'model'
+  }
+  compact?: {
+    replacesThroughSeq: number
+    sourceHash: string
+  }
+  reasoningProjection?: {
+    truncated: boolean
+    omittedOpaqueBlocks: boolean
+  }
+}
+
 interface MessageRecord {
   schemaVersion: 1
   id: MessageId
@@ -279,12 +326,12 @@ interface MessageRecord {
 
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | null
-  reasoningContent?: string
+  normalizedReasoningText?: string
   toolCalls?: JsonValue[]
   toolCallId?: string
-  providerState?: JsonValue
+  providerContinuation?: ProviderContinuationEnvelope
   modelRoute?: ModelRouteSnapshot
-  metadata?: JsonValue
+  metadata?: MessageMetadataV1
 
   inHistory: boolean
   createdAt: string
@@ -294,11 +341,16 @@ interface MessageRecord {
 字段职责：
 
 - `kind`：应用内部语义，renderer、搜索、导出和 compact policy 用它区分用户输入、编排注入和其他消息；它永远不发送给 Provider。
-- `role/content/reasoningContent/toolCalls/toolCallId`：provider-neutral、可无损重建模型请求的消息语义。不能根据 `kind` 或内容标签临时猜测这些字段。
-- `providerState`：可选的 provider-native continuation，不要求 renderer 解释。
+- `role/content/toolCalls/toolCallId`：provider-neutral、可无损重建公共消息序列的协议字段。不能根据 `kind` 或内容标签临时猜测。
+- `normalizedReasoningText`：可选、非加密、应用标准化后的可读 reasoning 文本或摘要，只用于 UI、导出和通用审计；它不是原始 CoT，也不能用于反向重建 Provider continuation。
+- `providerContinuation`：可选的 provider-native continuation envelope。Core 只验证外壳并原样搬运 `data`；只有 `adapterId + format` 对应的 Provider Adapter 可以解释它。
 - `modelRoute`：已完成 assistant turn 实际使用的 route，便于 UI 和审计。
-- `metadata`：attachments、prompt id/hash、usage、approval summary、tool reason 等非 provider 核心字段。
+- `metadata`：应用拥有并理解的 typed annotations，例如 attachment provenance、prompt id/hash、标准化 usage、approval/tool/compact 摘要和 reasoning projection 状态。
 - `inHistory`：是否属于下一次 provider request 的 canonical active history。
+
+`metadata`“与 Provider 协议无关”指的是：它可以来源于 Provider，例如标准化 usage，但删除 metadata 只能损失 UI、统计或审计信息，不能让下一次 Provider request 失去协议完整性。任何必须原样回传、只由 Adapter 理解、或影响 continuation 正确性的字段都必须进入 `providerContinuation`，不能藏在 metadata 中。完整原始 Provider request/response、headers 和 stream events 属于可选 trace，也不进入 metadata。
+
+实际 shared schema 应按 `MessageRecord.kind` 对 metadata 使用 discriminated union；上面的 `MessageMetadataV1` 汇总允许出现的字段，不能作为接受任意键的开放字典。
 
 `kind` 与 `role` 正交。相同的 provider role 不代表相同的产品语义：
 
@@ -321,12 +373,25 @@ MessageRecord[]
   -> MessageHistoryCompiler
 CompiledProviderHistory
   ├─ ProviderMessage[]
-  └─ opaque continuation references
+  └─ ProviderContinuationEnvelope references
   -> ProviderAdapter
 OpenAI / DeepSeek / Anthropic request DTO
 ```
 
-SQLite 不保存某个 Provider SDK 的原始请求 DTO。`MessageRecord` 保存公共、完整的消息字段，以及恢复 continuation 所需的可选 opaque `providerState`；它不保存完整 wire request。`MessageHistoryCompiler` 校验 active history 的协议完整性，移除 `kind`、数据库 ID 和 UI metadata，并把 provider state 作为独立 opaque continuation reference 交给 Adapter；最后由 Provider Adapter 转成具体 wire DTO。对 OpenAI-compatible Provider，这通常只是字段选择和命名转换，但仍必须保留该边界。
+`CompiledProviderHistory` 是瞬时内存结构，并保留 continuation 与来源 assistant message 的关联：
+
+```ts
+interface CompiledProviderHistory {
+  entries: Array<{
+    sourceMessageId: MessageId
+    message: ProviderMessage
+    sourceModelRoute?: ModelRouteSnapshot
+    continuation?: ProviderContinuationEnvelope
+  }>
+}
+```
+
+SQLite 不保存某个 Provider SDK 的原始请求 DTO。`MessageRecord` 保存公共、完整的消息字段、可读 reasoning 投影，以及恢复 continuation 所需的可选 opaque envelope；它不保存完整 wire request。`MessageHistoryCompiler` 校验 active history 的协议完整性，不把 `kind`、数据库 ID、`normalizedReasoningText` 或 UI metadata 放入 `ProviderMessage`；`sourceMessageId` 只在内存中关联对应 `providerContinuation`，最终也不会进入 wire request。最后由 Provider Adapter 转成具体 DTO。对 OpenAI-compatible Provider，这通常只是字段选择和命名转换，但仍必须保留该边界。
 
 ### 5.3 SessionSnapshot
 
@@ -430,12 +495,20 @@ CREATE TABLE messages (
   kind                 TEXT NOT NULL,
   role                 TEXT NOT NULL,
   content              TEXT,
-  reasoning_content    TEXT,
+  normalized_reasoning_text    TEXT,
   tool_calls_json      TEXT,
   tool_call_id         TEXT,
-  provider_state_json  TEXT,
+  provider_continuation_json   TEXT
+    CHECK (
+      provider_continuation_json IS NULL
+      OR json_valid(provider_continuation_json)
+    ),
   model_route_json     TEXT,
-  metadata_json        TEXT,
+  metadata_json        TEXT
+    CHECK (
+      metadata_json IS NULL
+      OR json_valid(metadata_json)
+    ),
   in_history           INTEGER NOT NULL CHECK (in_history IN (0, 1)),
   created_at           TEXT NOT NULL,
   UNIQUE (session_id, seq),
@@ -449,7 +522,11 @@ CREATE INDEX messages_turn_idx
   ON messages(session_id, turn_id, seq);
 ```
 
-所有 JSON 列在 application boundary 按 shared schema 校验，并使用 `CHECK(json_valid(...))` 或等价 codec 约束。Nullable JSON 需要允许 SQL `NULL`。
+`provider_continuation_json` 保存完整 `ProviderContinuationEnvelope` JSON；`data` 保留 Adapter 提供的原始 JSON 结构和数组顺序。若供应商状态需要逐字节保持，Adapter 必须把原始字节编码成 envelope `data` 中带明确 format 的 base64/string，通用 codec 不得解析后重组。Repository 只验证 envelope 外层，Adapter 再按 `adapterId/format` 验证 `data`。
+
+`normalized_reasoning_text` 只保存可读明文投影，不保存签名、密文、redacted block、response cursor 或 provider item id。`metadata_json` 保存按 Message `kind` 校验的 `MessageMetadataV1` JSON；未知键默认拒绝，不能用它绕过 `provider_continuation_json` 的 Adapter ownership。
+
+所有 JSON 列在 application boundary 按 shared schema 校验，并使用 `CHECK(json_valid(...))` 或等价 codec 约束。Nullable JSON 需要允许 SQL `NULL`。`provider_continuation_json` 通常只在 `kind = 'assistant_turn'` 时非空；它不得包含凭据、Authorization header、完整 wire request、usage 或 timing。
 
 `UNIQUE(session_id, client_request_id)` 只对 `kind = 'user_input'` message 的非空 request id 生效，用于阻止一次发送被重复插入；其他 message 的该字段为 `NULL`。
 
@@ -483,10 +560,10 @@ SELECT schema_version,
        kind,
        role,
        content,
-       reasoning_content,
+       normalized_reasoning_text,
        tool_calls_json,
        tool_call_id,
-       provider_state_json,
+       provider_continuation_json,
        model_route_json,
        metadata_json,
        in_history,
@@ -509,7 +586,7 @@ Session history 不再依赖 main-process `ProviderMessage[]`。Backend 可以�
 
 #### Assistant final message
 
-Text/reasoning delta 只进入 `ActiveRunExecution` memory buffer，并通过 `run:stream` 推送。Provider 发出 completed turn 后，backend 插入一条完整 `kind = 'assistant_turn'` message。
+Text/reasoning delta 只进入 `ActiveRunExecution` memory buffer，并通过 `run:stream` 推送。Provider 发出 completed turn 后，backend 才插入完整 `kind = 'assistant_turn'` message：公开、非加密的可读投影进入 `normalizedReasoningText`；协议连续性所需的原始结构进入 `providerContinuation`。两者都不按 delta 增量写数据库。
 
 #### Tool call batch
 
@@ -554,9 +631,76 @@ Compact summary 的 `metadata` 至少记录：
 
 ### 7.4 Provider continuation
 
-Provider-native continuation 跟随完成的 assistant message 保存在 `providerState`。如果当前 provider/model 与该 state 不兼容，adapter 忽略 continuation 并使用 active messages 重放。
+`ProviderContinuationEnvelope` 统一的是可路由、可版本化的外壳，不统一不同供应商的 CoT 数据结构：
 
-Opaque provider state 不要求 renderer 解释或展示。
+```ts
+interface ProviderContinuationEnvelope {
+  schemaVersion: 1
+  adapterId: string
+  format: string
+  data: JsonValue
+}
+```
+
+它表示“这个已完成 assistant turn 若由兼容 Provider 继续，Adapter 需要原样恢复的 provider-native 状态”。它不是 Session 全局 cursor，也不是标准化 reasoning。常见 payload：
+
+```json
+{
+  "schemaVersion": 1,
+  "adapterId": "deepseek.chat",
+  "format": "assistant-turn.v1",
+  "data": {
+    "reasoning_content": "exact provider text"
+  }
+}
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "adapterId": "anthropic.messages",
+  "format": "thinking-blocks.v1",
+  "data": {
+    "contentBlocks": [
+      {
+        "type": "thinking",
+        "thinking": "...",
+        "signature": "..."
+      },
+      {
+        "type": "redacted_thinking",
+        "data": "..."
+      }
+    ]
+  }
+}
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "adapterId": "openai.responses",
+  "format": "response-state.v1",
+  "data": {
+    "responseId": "resp_xxx",
+    "outputItems": [
+      {
+        "type": "reasoning",
+        "id": "rs_xxx",
+        "encrypted_content": "..."
+      }
+    ]
+  }
+}
+```
+
+`MessageHistoryCompiler` 不解析 `data`。Provider Adapter 使用 Message 的 `modelRoute` 加 envelope 的 `adapterId/format` 判断兼容性：
+
+- 兼容：按该 Adapter 的协议使用原始 continuation。
+- 不兼容、用户切换 Provider 或 format 未知：忽略 continuation，使用 canonical active messages 重放。
+- continuation 损坏：不得从 `normalizedReasoningText` 伪造签名、密文、item id 或原始 block 顺序；只能明确降级重放或返回错误。
+
+Renderer 可以持有同一个 canonical record，但必须把 `providerContinuation` 当作 opaque data，不解释、不展示、不修改。完整原始 Provider response 只进入显式开启的 trace；Message 中只保留协议继续所需的最小状态。
 
 ---
 
@@ -874,9 +1018,10 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 2. 如果存在 `workbench.json`，先做只读备份。
 3. Transaction 导入 projects、Session metadata 和能可靠转换的完整 messages。
 4. 旧 tool activity 只有在能够构成完整 assistant tool-call + tool result 协议时才转换为 provider history；否则只导入可见文本或 metadata，不伪造模型历史。
-5. 不承诺迁移未发送 draft。
-6. 写入 import marker 和来源 hash。
-7. Commit 成功后启用新 repository。
+5. 旧的可见明文 reasoning 只能导入 `normalizedReasoningText`；Importer 不得把它包装成虚假的 `providerContinuation`。
+6. 不承诺迁移未发送 draft。
+7. 写入 import marker 和来源 hash。
+8. Commit 成功后启用新 repository。
 
 旧 Workbench 没有完整 harness/provider history，因此导入 Session 标记：
 
@@ -904,10 +1049,14 @@ historyFidelity = legacy_display_only
 - Session/Message codec round-trip。
 - `kind` 与 provider `role` 独立 round-trip，同为 `role = 'user'` 的 user/orchestrator/runtime context 重启后仍可区分。
 - MessageHistoryCompiler 只投影 provider 字段；相同 active MessageRecords、route 和 adapter config 生成确定性的 Provider DTO。
+- `normalizedReasoningText` 只包含允许展示的非加密文本；缺失投影时 UI 不显示 reasoning，且不能从它重建 continuation。
+- `ProviderContinuationEnvelope` 外层 schema 校验、`data` 原样 round-trip、数组顺序不变；签名、密文和 opaque item 不被 Core 改写。
+- Adapter、route 或 format 不兼容时忽略 continuation 并重放 canonical messages；损坏状态不得由 normalized reasoning 伪造。
+- 删除或改变 metadata 不改变相同 route/adapter 下编译出的 Provider request；协议关键字段藏入 metadata 的 fixture 必须被拒绝。
 - SQLite migration、foreign key、transaction rollback 和 seq uniqueness。
 - Application service 的 Session/Message 多表事务回滚时，Repository 不得留下独立 commit。
 - User send 重试不重复插入 message。
-- Assistant text/reasoning 只有 completed 后才落盘。
+- Assistant text、`normalizedReasoningText` 和 `providerContinuation` 只有 completed 后才落盘。
 - 每个持久化 assistant tool-call message 后都有完整 tool result messages。
 - Tool batch transaction 失败时不留下协议半截。
 - Compact 只在完整 turn boundary 修改 `inHistory`，active history 可直接按 seq 重建。
