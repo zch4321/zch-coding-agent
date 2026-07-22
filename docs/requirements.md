@@ -1,7 +1,8 @@
 # 需求文档 · Zch Coding Agent
 
-> 状态：MVP 实现同步版 v0.3 · 最后更新 2026-06-20
+> 状态：Backend Architecture v2.1 配套需求 · 最后更新 2026-07-22
 > 本文档定义「做什么」。技术怎么做见 [`architecture.md`](./architecture.md)，前端信息架构与验收标准见 [`frontend-spec.md`](./frontend-spec.md)。
+> v2.1 条目是迁移目标，不表示当前 legacy 实现已经满足；迁移状态见架构文档 §20。
 
 ---
 
@@ -45,7 +46,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 - **可中断**：用户随时可中止当前 Agent 任务。
 - **可审批**：每个可能产生副作用的工具调用前，必须经过权限管线（§3）。
-- **状态明确**：同一会话同一时间只允许一个活动 run；运行中收到新消息时默认拒绝，但切换到其他 conversation 不取消后台 run。
+- **状态明确**：同一 Session 同一时间只允许一个活动 Run；运行中收到新消息时默认拒绝，但切换到其他对话不取消后台 Run。
 - **协议完整**：LLM 一次返回多个工具调用时，每个调用都必须回填一个结果；拒绝、取消、超时也以结构化工具结果回填，不能静默丢失。
 - **有界运行**：配置最大循环轮数、单次和单个 run 的工具输出预算、累计上下文预算；全应用 `maxConcurrentRuns` 范围为 `1..32`、默认 4，达到上限的新 run 直接拒绝。每个 run 同时最多一个 provider call，不设置独立 provider 并发上限。`maxStepsPerRun` 默认值为 200，可在 Limits 设置中调整；上下文达到当前模型 prompt budget 的 `autoCompactTriggerPercent`（默认 80%）时，在安全边界自动压缩旧历史；字节、行数/结果数与估算 token 任一上限先到即截断，并向用户和模型返回续读信息。
 - **可回放**：调试日志开启时，循环的请求、响应、流式事件和工具结果必须完整保存，可确定性离线回放原会话；重新请求模型属于单独的“重放请求”，不保证复现随机输出（§5）。
@@ -131,7 +132,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 #### 2.3.1 多 Provider 支持
 
-必须支持接入多家模型供应商，每家单独写 Provider。能用 OpenAI 兼容协议的（DeepSeek、智谱 GLM、Moonshot、本地 Ollama 等）基于 openai SDK 实现；Anthropic 等自有协议的用其官方 SDK 实现。
+必须支持接入多家模型供应商。一个 Provider module 可以组合目录查询、鉴权/HTTP/SDK transport 与一个或多个 Provider Protocol Adapter；不能把某个 SDK 的消息类型当成 Core 的公共消息接口。复用 OpenAI Chat Completions 协议的 DeepSeek、智谱 GLM、Moonshot、本地 Ollama 等可以共享 Chat Completions Adapter，OpenAI Responses 与 Anthropic Messages 使用各自的 Adapter。
 
 **MVP 只实现 DeepSeek Provider**，其他留接口与 TODO。
 
@@ -152,17 +153,50 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 | **Anthropic** | 有序 `thinking` / `redacted_thinking` block + `signature` | 明文摘要 + 不透明签名/密文 | 工具链路中必须保留完整 block、顺序与不透明字段，不得筛掉 redacted block |
 | **OpenAI**    | Responses API reasoning output items                      | 摘要 + 不透明状态          | 用 `previous_response_id` 或完整回传相关 output items；适配器决定策略   |
 
-需求：抽象统一的**供应商延续状态（Provider Continuation State）**。它必须能保留一次 assistant turn 中有序的 provider-native items，而不只是单个 reasoning 字符串。Agent Loop 只保存和搬运该状态，不解析、不重建内部字段。详见架构文档。
+需求：抽象统一的 **Provider Continuation Envelope**，但不统一 envelope 内部的 CoT 或 provider-native 数据结构。每个完成的 assistant turn 可以同时保存：
+
+- `normalizedReasoningText`：只包含非加密、应用标准化后的可读 reasoning 文本或摘要，用于 UI、导出和通用审计；允许为空，不能用于重建签名、密文、item id 或原始 block 顺序。
+- `providerContinuation`：包含 `schemaVersion/adapterId/format/data` 的版本化 envelope。`data` 原样保留该 Adapter 继续请求所需的有序 provider-native items、签名、密文、cursor 或 response id；Agent Core 和 Renderer 只搬运，不解释、不修改。
+
+完整原始 Provider request/response 和 stream events 只属于显式开启的 trace。Message 只保存 canonical message parts、可读 reasoning 投影，以及继续协议所需的最小 opaque state。
+
+#### 2.3.3 Canonical History 与 Provider Protocol Adapter
+
+持久化历史使用应用自己的 `MessageRecord`：`kind` 表达内部语义，`parts` 是有序、封闭的 canonical payload。V1 part 只包含 `text`、`tool_call` 和 `tool_result`；不保存 Provider DTO 派生出来的 `role/content/toolCalls/toolCallId`，也不把任一 SDK 类型暴露给 Persistence、Renderer 或 Agent Core。
+
+`MessageHistoryCompiler` 只按 `seq/inHistory/compact boundary` 选择历史、校验 `kind/parts` 约束和 tool call/result 配对，并生成 `CompiledCanonicalHistory`。随后由 `ModelRouteSnapshot.adapterId` 指定的 Provider Protocol Adapter 消费**完整有序历史**，执行可能是一对多、多对一的协议编译：
+
+- Chat Completions 可把 assistant `tool_call` parts 编译为 `assistant.tool_calls[]`，把每个 result 编译为独立的 `role = 'tool'` message。
+- Responses API 可把同一链路编译为 `function_call` / `function_call_output` items。
+- Anthropic Messages 可把相邻 tool results 合并到一个 `user` message，并将 `tool_result` blocks 放在其他 content blocks 前面。
+
+因此 wire `role` 只属于特定协议，不是数据库字段；一条 `MessageRecord` 也不保证对应一条 Provider message/item。Adapter 还负责把 Provider stream 解码为 normalized events，并在完成时返回 canonical assistant parts、可读 reasoning 投影和 continuation envelope；Application Service 为其补齐 Session/Message 字段后一次性持久化完整 turn。
+
+同一供应商的不同协议必须使用不同 `adapterId`，例如 `openai.chat-completions` 与 `openai.responses`。协议差异依据：[OpenAI Responses migration](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)、[Anthropic tool results](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)。
 
 ### 2.4 会话与工作区
 
 - 一个工作区（workspace）= 一个本地目录。
-- 会话（session）绑定一个工作区与一个权限模式。
+- Project 是 backend-owned 的持久化 workspace 注册记录，使用稳定 `projectId` 和规范化绝对路径。移动目录后通过重新关联更新 Project path，不改写 Session identity。移除 Project 会删除应用中它的 Sessions/Messages/FileChanges，绝不删除 workspace 目录或项目文件。
+- Session 是持久化对话实体，绑定一个 `projectId`、当前模型选择与权限模式；UI 中的“对话”是 Session 的展示名称，不存在独立 Conversation 领域记录或 `conversationId -> sessionId` 映射。
+- SQLite 持久化 schema migrations、Projects、Session 元数据、完整 Message history 和有界 FileChanges。Goal/Plan 属于 Session 元数据；完整 assistant/tool/harness 内容统一表示为 Message。Renderer 只保存 backend public records 的副本，不得单独创建已提交消息。
+- Database migrations 必须按版本前向执行，在单个 transaction 内提交 schema/data change 和 migration record；已应用文件 checksum 改变或数据库版本高于当前应用时明确拒绝打开，不静默猜测兼容。
+- 每个 `MessageRecord` 保存内部 `kind` 与有序 `parts`。`kind` 用于区分真实用户输入、编排消息、runtime context、harness、assistant、tool result 和 compact summary；它不是 Provider wire role。V1 shared schema 必须按 `kind` 校验 part 组合：用户输入是非空 text；assistant turn 只含 text/tool-call 且记录实际 route；tool result record 只含一个 terminal tool-result，并引用历史中未完成的 call。
+- Message metadata 是按 `kind` 校验的 application-owned typed annotations，可包含 attachment provenance、prompt id/version/hash、标准化 usage、tool/approval/compact 摘要和 reasoning projection 状态。Metadata 可以来源于 Provider，但删除它不能破坏下一次 Provider 请求；协议关键或只能由 Adapter 理解的数据必须放入 `providerContinuation`。
+- SQLite 不保存 OpenAI、DeepSeek、Anthropic 或其他 Provider SDK 的请求 DTO。发起请求时，backend 从 `inHistory = true` 的完整 `MessageRecord` 生成 `CompiledCanonicalHistory`，再由当前 Provider Protocol Adapter 整段编译 wire DTO；Persistence layer 不依赖 Provider。
+- Draft 和 draft attachments 是 renderer UI 状态，不进入 backend 或 SQLite，也不要求在切换 Session、renderer reload 或应用重启后保留。
+- 每次用户提交形成 backend memory 中的 Active Run；它在开始时冻结包含 `adapterId/providerId/model/reasoning profile/config revision` 的实际 `ModelRouteSnapshot` 和权限模式，但不单独落盘。完成的 assistant message 记录实际 route；Session 的模型/模式修改只影响后续 Run。
+- Active Run、stream delta、pending approval、未完成 tool batch、writer lease 和 PTY/process 都是 backend runtime state，不进入 SQLite。
 - 同一 canonical workspace 同时最多一个非只读 writer run；`auto`、`confirm`、`yolo` 从 run 启动覆盖 provider、工具、等待审批、interjection continuation 和 cancelling。若不可中止的副作用工具在 cancelled/timeout 结果之后仍在执行，writer 必须继续持有到其底层 Promise settle。writer 数固定为 1，不提供配置。
-- `readonly` run 不获取 writer，可与 writer 和其他 readonly run 并行；不同 workspace 可各自拥有 writer。同 workspace 的第二个非只读 run 不排队，返回带 owner conversation/run 的结构化冲突。
+- `readonly` run 不获取 writer，可与 writer 和其他 readonly run 并行；不同 workspace 可各自拥有 writer。同 workspace 的第二个非只读 run 不排队，返回带 owner Session/Run 的结构化冲突。
 - completed、failed、cancelled、异常、session close 和 app dispose 都必须走幂等释放路径。全局 run slot 在 terminal run status 对 renderer 可见前释放；writer 在没有残留副作用时同步释放，有不可中止副作用时延迟到其真正 settle，禁止为满足 UI 终态而提前开放第二个 writer。
 - 文件工具必须约束在工作区边界内（规范化路径、真实路径与符号链接逃逸检测）。
-- MVP 会话状态保存在内存；应用崩溃或重启后不承诺恢复未完成 run。JSONL trace 是审计记录，不是事务恢复日志。
+- Session canonical history 必须以完整 Message 持久化。应用重启后按 `inHistory = true` 和 `seq` 重建 `CompiledCanonicalHistory`，再由当前 route 的 Protocol Adapter 生成请求；compact 通过完整 summary message 和显式 `inHistory` 变更替代旧前缀。
+- Assistant stream delta 只保存在 backend memory；Provider turn 完成后才插入 Message。包含 tool calls 的 assistant turn 必须等每个 call 都有 terminal result 后，与对应 tool messages 在同一 transaction 写入，数据库不得保存协议半截。
+- 应用崩溃可以丢失尚未完成的 assistant text/reasoning、tool batch 和 Active Run，不保存 partial message，也不生成持久化 interrupted Run。最后一条已提交 user message 可以暂时没有 assistant reply。
+- 如果副作用工具已经修改 workspace、但应用在完整 tool batch transaction 前崩溃，文件变化可以保留而 tool messages 丢失；系统以下一次读取到的实际 workspace 为准。V2.1 不承诺文件系统与消息数据库之间的 crash-atomic journal。
+- 如果文件副作用已成功但 `file_changes` 持久化失败，terminal tool result 必须如实报告 `mutationSucceeded = true`、`CHANGE_HISTORY_PERSIST_FAILED` 和 `revertAvailable = false`；不得把已发生的文件操作报成未发生或自动重试。
+- JSONL trace 是可选审计记录，不是事务恢复日志，也不能作为 Session 状态的唯一来源。
 
 ### 2.5 Skills（渐进式专家指令）
 
@@ -332,9 +366,10 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 
 - UI 中一个项目对应一个 workspace，不重复展示两个概念。
 - 左侧项目侧栏提供新对话、对话搜索，以及项目下的二级对话列表；不引入 Task 概念。
-- 对话保存本地标题、消息历史、所属项目、创建/更新时间和最近使用的模型/权限模式。
-- 搜索只在本地检索对话标题、用户消息和 Agent 文本，不检索工作区文件、工具原始输出、reasoning 或 trace，不访问 Provider。
-- 首次发送消息时自动创建 runtime Session；Session/Run ID 不作为常驻产品信息展示。
+- “对话”直接对应 backend-owned Session；标题、完整消息历史、所属项目、创建/更新时间和模型/权限模式由后端持久化并推送给 renderer。Draft 仅属于 renderer 输入组件。
+- Durable command 在数据库 commit 后同时返回提交结果并发布同内容事件；renderer 对回包和事件按 cursor/revision 幂等合并。后端自主提交依赖事件通知，不定时轮询；bootstrap、分页/搜索、按需加载和缺口重同步才使用 query。
+- 搜索通过本地后端查询 Session 标题，以及 `kind = 'user_input'/'assistant_turn'` records 中 `type = 'text'` 的 parts；不把 orchestrator/harness/runtime context 当成用户消息，也不检索 tool call 参数、tool result/JSON parts、工作区文件、reasoning、continuation 或 trace，更不访问 Provider。
+- 新建对话时立即创建持久化 Session；首次发送消息启动内存 Active Run。Session/Run ID 不作为常驻产品信息展示。
 - 正式 UI 不得使用硬编码项目、对话或工具活动作为占位数据。
 
 ### 4.2 终端面板
@@ -351,9 +386,10 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - `apply_patch` / `create_file` 的变更在执行前/后以 diff 形式预览。
 - 审批绑定变更前文件 hash 与拟写入内容 hash；若文件在审批后发生变化，原批准失效并重新计算 diff。
 - 使用有界只读 Diff viewer，支持语法高亮、截断提示和审批状态；P3 不引入 Monaco/CodeMirror 等完整编辑器。
-- 每次成功的 `create_file` / `apply_patch` / `delete_file` 按 conversation 保存变更记录、before/after hash 和有界恢复快照；Diff 面板可查看上次及更早的对话变更。
+- 每次成功的 `create_file` / `apply_patch` / `delete_file` 按 Session 保存变更记录、before/after hash 和有界恢复快照；Diff 面板可查看上次及更早的 Session 变更。
 - 用户可显式回退单项变更。回退前必须再次确认，并校验当前文件仍等于该记录的 after 状态；检测到用户或后续工具修改时拒绝覆盖。回退不依赖 Git，也不影响其他文件。
-- 变更历史仅保存在主进程 `userData`，不向 renderer 暴露恢复快照；记录数量和总字节数必须有硬上限。
+- 变更历史保存在主进程 `userData/agent.db` 的 `file_changes` 表。它不是 Message、Run journal、trace 或模型历史；恢复用 `beforeContent` 只对 backend 可见，renderer 只获得不含快照的 `FileChangeSummary`。
+- `file_changes` 的记录数量和 `beforeContent + diff` UTF-8 总字节数必须有硬上限。单条恢复 payload 已超过总上限时，文件工具必须在副作用前拒绝；Retention 只会让过旧单项丧失 Diff/revert 能力，不能删除 Message 或改动 workspace。
 
 ### 4.4 UI 组件库
 
@@ -378,24 +414,24 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 
 ### 5.1 形态
 
-- 每个会话一个 **JSONL 文件**，存于 Electron `userData/logs/`。
+- 每个 Session 一个 **JSONL 文件**，存于 Electron `userData/traces/`。
 - 日志是**调试功能**，配置项 `logging.enabled` 默认 `false`；只有用户显式开启后才创建 trace。
 - 开启后采用完整记录模式，不做上下文脱敏或摘要化：完整保存规范化消息、实际 Provider 请求体、原始流事件、聚合响应、reasoning/continuation state、工具参数与结果、审批事件和配置快照。
 - “完整”以 Agent 实际可见数据为边界：工具因输出上限而未进入 Agent 的丢弃字节记录 `totalBytes/truncated/discardedHash`，不要求无限落盘；进入模型上下文的内容必须逐字保存。
 - 不记录请求传输层凭据，例如 API Key、Authorization header 和 safeStorage 密文；这些信息不属于模型上下文，也不是回放所需数据。
 - 开启时必须明确提示日志可能包含源代码、用户输入、模型推理、工具输出以及工作区中被读取的凭据，并支持保留天数/总大小上限。
 - 完整 trace 必须可规范化为只读 `zch-session-transcript`：按 run 展示用户/Assistant/明文 reasoning、内部编排、工具与审批、Provider上下文、Plan、interjection、usage、terminal和生命周期。该格式不可导入或重放；每次 Electron 导出前必须警告，导出内容不做敏感信息扫描或脱敏，用户负责本地保存和后续分享。
-- Transcript 不输出 provider wire request/raw response/provider state、流式重复分片、工具schema、加密/opaque reasoning或多模态原始载荷；中断且没有final message的明文delta标为partial，多模态只保留类型/MIME/已知大小占位。
-- 不引入 SQLite（避免 native 依赖）；日志清理 GUI 留待后续版本。
+- Transcript 不输出 provider wire request/raw response/provider continuation、流式重复分片、工具schema、加密/opaque reasoning或多模态原始载荷；中断且没有final message的明文delta标为partial，多模态只保留类型/MIME/已知大小占位。
+- 产品 Session 状态使用 SQLite 持久化；Trace 继续按每个 Session 一个 JSONL 文件保存，不能因数据库存在而降低 trace 保真度。日志清理 GUI 留待后续版本。
 
 ### 5.2 必须记录的事件（每条一行 JSON）
 
 ```
-session.start   { schemaVersion, seq, eventId, conversationId, sessionId, workspace, model, mode, ts }
+session.start   { schemaVersion, seq, eventId, sessionId, workspace, model, mode, ts }
 run.start/end   { runId, status, ts }
-run.rejected    { runId, reason, limit?, active?, writerConversationId?, writerRunId?, ts }
-workspace.writer { conversationId, sessionId, runId, workspace, acquired|released|rejected, owner?, ts }
-llm.call        { callId, runId, model, params, messages, providerRequest, rawEvents, response, providerState?, usage, timing, ts }
+run.rejected    { runId, reason, limit?, active?, writerSessionId?, writerRunId?, ts }
+workspace.writer { sessionId, runId, workspace, acquired|released|rejected, owner?, ts }
+llm.call        { callId, runId, model, params, messages, providerRequest, rawEvents, response, providerContinuation?, usage, timing, ts }
 approval        { callId, policySignals, mode, approver, decision, reason, ts }
 tool.call       { callId, runId, tool, args, result, approvedBy, duration, ts }
 terminal.event  { terminalId, direction, data/status, seq, ts }
@@ -501,15 +537,15 @@ session.end     { ts }
 
 ### 6.3 钩子点（初步）
 
-| 钩子             | 时机                               | 可阻断？   |
-| ---------------- | ---------------------------------- | ---------- |
-| `onSessionStart` | 会话开始                           | 否         |
-| `onSessionEnd`   | 会话结束                           | 否         |
-| `beforeLLMCall`  | LLM 调用前（可改 messages/params） | 否（改参） |
-| `afterLLMCall`   | LLM 返回后                         | 否         |
-| `beforeToolCall` | 工具执行前（可阻断执行）           | **是**     |
-| `afterToolCall`  | 工具执行后                         | 否         |
-| `beforeApproval` | 审批判定前                         | 否         |
+| 钩子             | 时机                                                  | 可阻断？   |
+| ---------------- | ----------------------------------------------------- | ---------- |
+| `onSessionStart` | 会话开始                                              | 否         |
+| `onSessionEnd`   | 会话结束                                              | 否         |
+| `beforeLLMCall`  | LLM 调用前（可改已编译请求副本/params，不改持久历史） | 否（改参） |
+| `afterLLMCall`   | LLM 返回后                                            | 否         |
+| `beforeToolCall` | 工具执行前（可阻断执行）                              | **是**     |
+| `afterToolCall`  | 工具执行后                                            | 否         |
+| `beforeApproval` | 审批判定前                                            | 否         |
 
 > 阻断型钩子返回 `{ allow: false, reason }` 可拦截工具执行。
 
@@ -521,12 +557,12 @@ session.end     { ts }
 | ------------ | ----------------------------------------------------------------------------------------------------------------------- |
 | **可中断**   | 任意 LLM 流与当前工具执行可被用户中止，不残留无主子进程；会话所属 PTY 按既定生命周期保留或关闭                          |
 | **安全**     | 文件路径硬边界 + 分层权限策略 + IPC 隔离 + safeStorage，见 §3                                                           |
-| **可扩展**   | 新增工具 = 注册一个 schema + handler；新增 Provider = 实现接口 + Reasoning adapter                                      |
+| **可扩展**   | 新增工具 = 注册一个 schema + handler；新增 Provider 协议 = transport + Protocol Adapter + reasoning/continuation codec  |
 | **桌面分发** | electron-builder 打包 Windows（首要），macOS/Linux 后续                                                                 |
 | **配置化**   | 模型、Provider、权限模式、调试日志开关、Skills 开关和用户策略均可配置                                                   |
 | **资源有界** | 工具输出、日志大小、循环轮数、并发 run、PTY scrollback 都有上限；默认最多 4 个 active run，同 workspace writer 永远为 1 |
 | **失败隔离** | Provider、工具、日志失败转成结构化事件，不得因未捕获异常直接打崩主窗口                                                  |
-| **契约演进** | IPC、日志、配置和 provider state 均带版本，可做向后兼容迁移                                                             |
+| **契约演进** | IPC、日志、配置和 Provider Continuation Envelope 均带版本，可做向后兼容迁移                                             |
 
 ---
 
@@ -561,7 +597,7 @@ session.end     { ts }
 ## 附录 A · 术语表
 
 - **PTY**：伪终端（pseudo-terminal），长生命周期的双向终端会话。
-- **Provider Continuation State**：Provider 为继续多轮工具链路保存的有序不透明状态；Agent Loop 只搬运。
+- **Provider Continuation Envelope**：附着在完成 assistant message 上的版本化外壳；`adapterId/format` 标识解释者，`data` 保存继续多轮工具链路所需的有序不透明 Provider 状态。统一的是外壳，不是 CoT 数据结构。
 - **执行不变量**：工具 schema、资源归属和 workspace 契约等调用有效性条件，不属于可审批的风险策略。
 - **风险黑名单**：Auto/Confirm 下提升审批等级的危险动作规则；Yolo 明确跳过。
 - **Auto Approval**：由独立小模型对动作做 safe/dangerous 二分类自动放行的能力。
