@@ -1,0 +1,298 @@
+import { createHash } from 'node:crypto'
+import path from 'node:path'
+import { DatabaseSync, type StatementSync } from 'node:sqlite'
+import { DATABASE_MIGRATIONS, type DatabaseMigration } from './migrations'
+import { PersistenceError } from './persistence-error'
+
+const SCHEMA_MIGRATIONS_SQL = `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version          INTEGER PRIMARY KEY CHECK (version > 0),
+  name             TEXT NOT NULL UNIQUE,
+  checksum_sha256  TEXT NOT NULL CHECK (length(checksum_sha256) = 64),
+  app_version      TEXT NOT NULL,
+  applied_at       TEXT NOT NULL
+) STRICT;
+`
+
+interface AppliedMigrationRow {
+  version: number
+  name: string
+  checksum_sha256: string
+}
+
+export interface DatabaseServiceOptions {
+  databasePath: string
+  appVersion: string
+  migrations?: readonly DatabaseMigration[]
+  now?: () => string
+}
+
+export class PersistenceReader {
+  constructor(protected readonly database: DatabaseSync) {}
+
+  prepare(sql: string): StatementSync {
+    return this.database.prepare(sql)
+  }
+}
+
+export class PersistenceTransaction extends PersistenceReader {
+  #active = true
+
+  override prepare(sql: string): StatementSync {
+    this.#assertActive()
+    return super.prepare(sql)
+  }
+
+  exec(sql: string): void {
+    this.#assertActive()
+    this.database.exec(sql)
+  }
+
+  deactivate(): void {
+    this.#active = false
+  }
+
+  #assertActive(): void {
+    if (!this.#active) {
+      throw new PersistenceError(
+        'DATABASE_CLOSED',
+        'Persistence transaction is no longer active',
+      )
+    }
+  }
+}
+
+export class DatabaseService {
+  readonly databasePath: string
+  readonly #database: DatabaseSync
+  readonly #reader: PersistenceReader
+  #writeTail: Promise<void> = Promise.resolve()
+  #acceptingWork = true
+  #closePromise?: Promise<void>
+
+  private constructor(options: DatabaseServiceOptions) {
+    this.databasePath = options.databasePath
+    this.#database = new DatabaseSync(options.databasePath, {
+      allowExtension: false,
+      defensive: true,
+      enableDoubleQuotedStringLiterals: false,
+      enableForeignKeyConstraints: true,
+      timeout: 5_000,
+    })
+    this.#reader = new PersistenceReader(this.#database)
+
+    try {
+      this.#configure()
+      this.#migrate(
+        options.migrations ?? DATABASE_MIGRATIONS,
+        options.appVersion,
+        options.now ?? (() => new Date().toISOString()),
+      )
+    } catch (error) {
+      this.#database.close()
+      throw error
+    }
+  }
+
+  static open(options: DatabaseServiceOptions): DatabaseService {
+    return new DatabaseService(options)
+  }
+
+  read<Result>(work: (reader: PersistenceReader) => Result): Result {
+    this.#assertOpen()
+    return work(this.#reader)
+  }
+
+  withTransaction<Result>(
+    work: (transaction: PersistenceTransaction) => Result,
+  ): Promise<Result> {
+    return this.#enqueueWrite(() => {
+      this.#database.exec('BEGIN IMMEDIATE')
+      const transaction = new PersistenceTransaction(this.#database)
+
+      try {
+        const result = work(transaction)
+        if (isPromiseLike(result)) {
+          void Promise.resolve(result).catch(() => undefined)
+          throw new PersistenceError(
+            'ASYNC_TRANSACTION_NOT_ALLOWED',
+            'Persistence transactions must not await external work',
+          )
+        }
+        this.#database.exec('COMMIT')
+        return result
+      } catch (error) {
+        if (this.#database.isTransaction) this.#database.exec('ROLLBACK')
+        throw error
+      } finally {
+        transaction.deactivate()
+      }
+    })
+  }
+
+  close(): Promise<void> {
+    if (this.#closePromise) return this.#closePromise
+    this.#acceptingWork = false
+    this.#closePromise = this.#writeTail.then(() => {
+      if (this.#database.isOpen) this.#database.close()
+    })
+    return this.#closePromise
+  }
+
+  #configure(): void {
+    this.#database.exec('PRAGMA foreign_keys = ON')
+    this.#database.exec('PRAGMA journal_mode = WAL')
+    this.#database.exec('PRAGMA busy_timeout = 5000')
+  }
+
+  #migrate(
+    migrations: readonly DatabaseMigration[],
+    appVersion: string,
+    now: () => string,
+  ): void {
+    validateMigrations(migrations)
+    this.#database.exec(SCHEMA_MIGRATIONS_SQL)
+
+    const applied = this.#database
+      .prepare(
+        `SELECT version, name, checksum_sha256
+         FROM schema_migrations
+         ORDER BY version ASC`,
+      )
+      .all() as unknown as AppliedMigrationRow[]
+    const supportedByVersion = new Map(
+      migrations.map((migration) => [migration.version, migration]),
+    )
+    const latestSupported = migrations.at(-1)?.version ?? 0
+
+    for (const [index, row] of applied.entries()) {
+      if (row.version > latestSupported) {
+        throw new PersistenceError(
+          'DATABASE_VERSION_TOO_NEW',
+          `Database schema version ${row.version} is newer than supported version ${latestSupported}`,
+        )
+      }
+      if (row.version !== index + 1) {
+        throw new PersistenceError(
+          'MIGRATION_INVALID',
+          `Applied migrations are not contiguous at version ${index + 1}`,
+        )
+      }
+      const migration = supportedByVersion.get(row.version)
+      if (!migration || migration.name !== row.name) {
+        throw new PersistenceError(
+          'MIGRATION_INVALID',
+          `Applied migration ${row.version}:${row.name} is not supported`,
+        )
+      }
+      const checksum = migrationChecksum(migration.sql)
+      if (row.checksum_sha256 !== checksum) {
+        throw new PersistenceError(
+          'MIGRATION_CHECKSUM_MISMATCH',
+          `Migration ${migration.name} checksum does not match the applied database`,
+        )
+      }
+    }
+
+    const appliedVersions = new Set(applied.map((row) => row.version))
+    for (const migration of migrations) {
+      if (appliedVersions.has(migration.version)) continue
+      this.#applyMigration(migration, appVersion, now())
+    }
+  }
+
+  #applyMigration(
+    migration: DatabaseMigration,
+    appVersion: string,
+    appliedAt: string,
+  ): void {
+    this.#database.exec('BEGIN IMMEDIATE')
+    try {
+      this.#database.exec(migration.sql)
+      this.#database
+        .prepare(
+          `INSERT INTO schema_migrations (
+             version, name, checksum_sha256, app_version, applied_at
+           ) VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run(
+          migration.version,
+          migration.name,
+          migrationChecksum(migration.sql),
+          appVersion,
+          appliedAt,
+        )
+      this.#database.exec('COMMIT')
+    } catch (error) {
+      if (this.#database.isTransaction) this.#database.exec('ROLLBACK')
+      throw new PersistenceError(
+        'MIGRATION_FAILED',
+        `Migration ${migration.name} failed`,
+        { cause: error },
+      )
+    }
+  }
+
+  #enqueueWrite<Result>(work: () => Result): Promise<Result> {
+    if (!this.#acceptingWork) {
+      return Promise.reject(
+        new PersistenceError('DATABASE_CLOSED', 'Database is closed'),
+      )
+    }
+
+    const result = this.#writeTail.then(work)
+    this.#writeTail = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+
+  #assertOpen(): void {
+    if (!this.#acceptingWork || !this.#database.isOpen) {
+      throw new PersistenceError('DATABASE_CLOSED', 'Database is closed')
+    }
+  }
+}
+
+export function desktopDatabasePath(userDataPath: string): string {
+  return path.join(userDataPath, 'agent.db')
+}
+
+export function headlessTrialDatabasePath(trialDirectory: string): string {
+  return path.join(trialDirectory, 'agent.db')
+}
+
+export function migrationChecksum(sql: string): string {
+  return createHash('sha256').update(sql, 'utf8').digest('hex')
+}
+
+function validateMigrations(migrations: readonly DatabaseMigration[]): void {
+  const names = new Set<string>()
+  for (const [index, migration] of migrations.entries()) {
+    const expectedVersion = index + 1
+    const expectedNamePrefix = `${String(expectedVersion).padStart(4, '0')}_`
+    if (
+      migration.version !== expectedVersion ||
+      !/^\d{4}_[a-z0-9_]+$/u.test(migration.name) ||
+      !migration.name.startsWith(expectedNamePrefix) ||
+      migration.sql.trim().length === 0 ||
+      names.has(migration.name)
+    ) {
+      throw new PersistenceError(
+        'MIGRATION_INVALID',
+        `Migration ${migration.name || '<unnamed>'} is not a valid version ${expectedVersion}`,
+      )
+    }
+    names.add(migration.name)
+  }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value !== null &&
+    (typeof value === 'object' || typeof value === 'function') &&
+    'then' in value &&
+    typeof value.then === 'function'
+  )
+}

@@ -1,6 +1,6 @@
 # Backend State Architecture v2.1 · 详细重构计划
 
-> 状态：实施中 · P0–P1 已完成 · 2026-07-22
+> 状态：实施中 · P0–P2 已完成 · 2026-07-22
 >
 > 目标架构：[`architecture.md`](./architecture.md)
 >
@@ -289,29 +289,31 @@ V1 使用单 connection、串行 write queue 和短 transaction。数据库不�
 
 ### 6.3 任务
 
-- [ ] 新增 `electron/persistence/database-service.ts`，统一负责 open、PRAGMA、migration、write queue、transaction 和 close。
-- [ ] Desktop database 固定为 `userData/agent.db`；Headless 每个 trial 使用隔离临时 database path。
-- [ ] 实现 `schema_migrations` bootstrap、递增 migration 文件、SHA-256 checksum、forward-only 和 higher-version refusal。
-- [ ] 新增 `0001_initial.sql`，创建 `projects/sessions/messages/file_changes` 和目标 indexes/checks。
-- [ ] 新增 Project/Session/Message/FileChange repositories；repository 接受 transaction handle，不自行 commit。
-- [ ] 新增 row codecs，在读写边界使用 P1 shared schema 校验 JSON、时间、boolean 和 enum。
-- [ ] 所有业务 transaction 由 application service 发起；DatabaseService 不发布 renderer event。
-- [ ] 对本地搜索先实现有界 text-part scan；不在 V1 增加 FTS 真相源。
-- [ ] 为 test harness 提供临时文件数据库工厂；不要依赖共享全局内存 database。
+- [x] 新增 `electron/persistence/database-service.ts`，统一负责 open、PRAGMA、migration、write queue、transaction 和 close。
+- [x] Desktop database 固定为 `userData/agent.db`；Headless 每个 trial 使用隔离临时 database path。
+- [x] 实现 `schema_migrations` bootstrap、递增 migration 文件、SHA-256 checksum、forward-only 和 higher-version refusal。
+- [x] 新增 `0001_initial.sql`，创建 `projects/sessions/messages/file_changes` 和目标 indexes/checks。
+- [x] 新增 Project/Session/Message/FileChange repositories；repository 接受 transaction handle，不自行 commit。
+- [x] 新增 row codecs，在读写边界使用 P1 shared schema 校验 JSON、时间、boolean 和 enum。
+- [x] 所有业务 transaction 由 application service 发起；DatabaseService 不发布 renderer event。
+- [x] 对本地搜索先实现有界 text-part scan；不在 V1 增加 FTS 真相源。
+- [x] 为 test harness 提供临时文件数据库工厂；不要依赖共享全局内存 database。
 
 ### 6.4 测试
 
-- [ ] migration 顺序、checksum mismatch、单步 rollback、重复启动和高版本拒绝。
-- [ ] `foreign_keys = ON`、WAL、busy timeout 和 close/dispose。
-- [ ] codec deep-equality、损坏 JSON/enum 拒绝和 nullable JSON。
-- [ ] Project path uniqueness、Session cascade、Message seq/clientRequest uniqueness。
-- [ ] 跨 Repository transaction rollback 不留下半条 Session/Message。
-- [ ] 200 条/50 MB FileChange retention 与单条超限预检查。
-- [ ] Electron development、Headless Node 24、Windows x64 packaged app 都能 open/migrate/query/close。
+- [x] migration 顺序、checksum mismatch、单步 rollback、重复启动和高版本拒绝。
+- [x] `foreign_keys = ON`、WAL、busy timeout 和 close/dispose。
+- [x] codec deep-equality、损坏 JSON/enum 拒绝和 nullable JSON。
+- [x] Project path uniqueness、Session cascade、Message seq/clientRequest uniqueness。
+- [x] 跨 Repository transaction rollback 不留下半条 Session/Message。
+- [x] 200 条/50 MB FileChange retention 与单条超限预检查。
+- [x] Electron development、Headless Node 24、Windows x64 packaged app 都能 open/migrate/query/close。
 
 ### 6.5 验收与回滚
 
 P2 结束时 repositories 只能由 unit/integration tests 使用。回滚只删除新代码和临时测试数据库，不需要用户数据恢复。
+
+P2 已按该隔离边界完成：production Desktop/Headless composition 尚未导入 Persistence，真实 `userData`、`workbench.json` 和 `change-history.json` 均未读写。`npm run test:sqlite` 覆盖 host Node 与 development Electron runtime，`npm run test:sqlite:packaged` 覆盖 Windows x64 unpacked package；探针执行文件数据库 migration transaction、query、close、reopen 和清理。Headless bundle 明确以 Node 24 为 build target；本地验证时 development Electron 与 packaged Electron 均内嵌 Node 24.16.0。
 
 ---
 

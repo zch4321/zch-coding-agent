@@ -1469,7 +1469,9 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 
 ## 20. 当前迁移状态
 
-P0 regression gates 和 P1 shared canonical contracts 已实现。P1 target contracts 尚未接入 SQLite、现有 preload/IPC handler 或 renderer；这部分分别从 P2、P6、P7 开始。
+P0 regression gates、P1 shared canonical contracts 和 P2 SQLite/Persistence foundation 已实现。P2 已提供 checksummed forward migrations、单连接串行 transaction、Project/Session/Message/FileChange repositories、shared-schema row codecs、有界查询、文件型临时测试数据库，以及 development Electron/Windows x64 package 的 `node:sqlite` 探针。
+
+P2 persistence 仍只由 unit/integration tests 和 runtime probe 使用，尚未导入 production Desktop/Headless composition，也不读取或修改真实 `userData`、`workbench.json` 或 `change-history.json`。P1 `domain-state-api` 仍未接入现有 preload/IPC handler 或 renderer；这些接线分别从 P4、P6、P7 开始，并在 P8 协调切流。
 
 当前 legacy 实现仍然：
 

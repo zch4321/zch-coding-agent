@@ -4,7 +4,7 @@ import { sourceCommitDefine } from './build/source-identity'
 export default defineConfig({
   define: sourceCommitDefine(),
   build: {
-    target: 'node22',
+    target: 'node24',
     outDir: 'dist-headless',
     emptyOutDir: true,
     ssr: 'electron/headless/main.ts',

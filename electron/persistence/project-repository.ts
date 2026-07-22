@@ -1,0 +1,71 @@
+import type { ProjectId } from '../../shared/ids'
+import type { ProjectRecord } from '../../shared/project'
+import { MAX_PROJECT_RECORDS } from '../../shared/durable'
+import { decodeProjectRow, encodeProjectRow } from './project-codec'
+import type {
+  PersistenceReader,
+  PersistenceTransaction,
+} from './database-service'
+
+const PROJECT_COLUMNS = `
+  schema_version, id, path, name, revision, created_at, updated_at
+`
+
+export class ProjectRepository {
+  insert(transaction: PersistenceTransaction, record: ProjectRecord): void {
+    const row = encodeProjectRow(record)
+    transaction
+      .prepare(
+        `INSERT INTO projects (
+           schema_version, id, path, name, revision, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.schema_version,
+        row.id,
+        row.path,
+        row.name,
+        row.revision,
+        row.created_at,
+        row.updated_at,
+      )
+  }
+
+  update(transaction: PersistenceTransaction, record: ProjectRecord): boolean {
+    const row = encodeProjectRow(record)
+    const result = transaction
+      .prepare(
+        `UPDATE projects
+         SET path = ?, name = ?, revision = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(row.path, row.name, row.revision, row.updated_at, row.id)
+    return Number(result.changes) > 0
+  }
+
+  delete(transaction: PersistenceTransaction, id: ProjectId): boolean {
+    const result = transaction
+      .prepare('DELETE FROM projects WHERE id = ?')
+      .run(id)
+    return Number(result.changes) > 0
+  }
+
+  get(reader: PersistenceReader, id: ProjectId): ProjectRecord | undefined {
+    const row = reader
+      .prepare(`SELECT ${PROJECT_COLUMNS} FROM projects WHERE id = ?`)
+      .get(id)
+    return row ? decodeProjectRow(row) : undefined
+  }
+
+  list(reader: PersistenceReader): ProjectRecord[] {
+    return reader
+      .prepare(
+        `SELECT ${PROJECT_COLUMNS}
+         FROM projects
+         ORDER BY created_at ASC, id ASC
+         LIMIT ?`,
+      )
+      .all(MAX_PROJECT_RECORDS)
+      .map(decodeProjectRow)
+  }
+}
