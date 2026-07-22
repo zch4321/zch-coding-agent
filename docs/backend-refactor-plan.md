@@ -263,7 +263,7 @@ P0 只调整测试和 fixture，不触及用户数据；任何门禁调整都可
 - [ ] 定义 `ProviderContinuationEnvelope`、`MessageMetadataV1` 和 `ModelRouteSnapshot`；禁止 credentials、raw request 和任意 metadata key。
 - [ ] 新增 `shared/file-change.ts`：公开 `FileChangeSummary`，不包含 `beforeContent`。
 - [ ] 扩展 `shared/ids.ts`：稳定 Project/Session/Message/FileChange IDs；`runId` 保持 runtime-only。
-- [ ] 新增 durable command/query/event schema；payload/result 全部带 IPC version 和有界字段。
+- [ ] 新增 durable command/query/event schema；定义 `BackendEventCursor`、`DurableCommitEnvelope` 和各 topic 的 bounded change payload，payload/result 全部带 IPC version 和有界字段。
 - [ ] 明确 Message page 方向与 cursor：V1 使用 `beforeSeq?: number`、`limit <= 200`，返回降序查询结果时在 IPC response 中恢复为升序 records。
 - [ ] 为 legacy importer 定义 backend-private input codec；不得把 legacy `ConversationRecord` 继续当目标 public schema。
 
@@ -564,28 +564,36 @@ Terminal、Settings、Trace、Skills、MCP、ProjectModel 和 workspace read API
 
 ### 10.3 Command 规则
 
-- [ ] `app:get-bootstrap` 返回 Projects、最近 Sessions、当前选择和必要 public settings，不返回全部 Message 内容。
+- [ ] `app:get-bootstrap` 返回 Projects、最近 Sessions、当前选择、必要 public settings 和同一 snapshot 边界的 `BackendEventCursor`，不返回全部 Message 内容。
 - [ ] `session:get` 返回 SessionSnapshot、第一页 messages 和可选 ActiveRunPublicSnapshot。
 - [ ] `message:list` 使用稳定 seq cursor，后台严格限制 page size。
 - [ ] `session:update` 支持 title/model selection/mode 等受约束 patch，并携带 `expectedRevision`；冲突返回当前 record。
 - [ ] `session:create` 接收 `projectId` 和可选 selection/mode，不再接收 `conversationId + workspace`。
 - [ ] `file-change:list/revert` 只接收 `sessionId`/changeId；backend 自己解析 Project workspace。
 - [ ] IPC handler 只调用 application service，不直接访问 repositories/runtime maps。
+- [ ] 每个 durable command 在 commit 后只构造一次 envelope；invoke result 和 push event 复用同一对象语义，到达顺序不作保证，失败 transaction 不发布事件。
+- [ ] Commit、cursor 分配和 envelope 发布属于同一个串行 application-state job；bootstrap snapshot/cursor 读取进入同一队列，不暴露 commit 与 cursor 之间的中间状态。
+- [ ] `run:start` result 同时返回 user/context Message commit envelope 与 runtime snapshot/runId；后续 assistant/tool commit 由 backend event 主动推送。
 - [ ] Export/import conversation 从 backend query 构造，不接收 renderer 自己拼出的整份 Markdown/ConversationRecord 作为事实。
 
 ### 10.4 Push channels
 
 - Durable state 新增独立 versioned event envelope：`project.changed`、`session.changed`、`file-change.changed`。
+- Envelope 带 main-process 实例 ID 和实例内全局单调 sequence；它只用于传输去重、排序和缺口检测，不落盘、不充当领域 revision。
+- `project.changed` 和 `file-change.changed` 推送 bounded full-list snapshot；`session.changed` 推送完整 SessionRecord 与 bounded Message upserts，过大的 compact change 使用 cache invalidation。
 - 现有 Agent event channel 继续承载 runtime status/delta/tool/approval/orchestration，避免把 durable record 和 partial stream 混为一种事件。
 - Terminal event channel 保持独立。
-- Renderer 发现 Session revision gap 时停止应用后续 durable delta，调用 `session:get` 替换副本。
+- Renderer 在 hydrate 前先订阅并 buffer durable events；bootstrap snapshot 携带 cursor，安装 snapshot 后只重放更新且连续的 buffered events。
+- Renderer 让 invoke result 和 push event 经过同一个 reconciler；重复 cursor 幂等忽略，cursor gap/instance change 重新 bootstrap，Session revision gap 调用 `session:get` 替换副本。
+- Durable state 不做定时轮询；query 只用于 bootstrap、分页/搜索/按需加载和缺口重同步。
 - Durable event 只在 database commit 后发布；不增加 durable outbox。
 
 ### 10.5 测试与验收
 
 - [ ] 每个 payload/result/event schema 的 valid/invalid/size/sender cases。
 - [ ] handler 返回 shared canonical records，不返回 database rows。
-- [ ] revision conflict、event gap resync 和 renderer reload snapshot。
+- [ ] command response/event 两种到达顺序与重复 envelope 都只应用一次。
+- [ ] revision conflict、event cursor gap、backend instance change、bootstrap buffer overflow、renderer reload snapshot 和重同步。
 - [ ] `AGENT_API_KEYS`、preload、IPC contracts 和 handlers 一一对应。
 - [ ] Headless application service 不依赖 IPC。
 
@@ -611,8 +619,9 @@ ui-store
 
 ### 11.3 任务
 
-- [ ] Bootstrap 只从 `app:get-bootstrap` 初始化 Projects/Sessions，不读 Workbench 作为正常路径。
-- [ ] Sidebar、新建、重命名、archive、Project add/remove 全部发送 backend command，并只应用返回 record/event。
+- [ ] Preload 先注册 durable listener 并在 hydrate 前有界 buffer；Bootstrap 只从 `app:get-bootstrap` 初始化 Projects/Sessions，按 cursor 重放 buffer，不读 Workbench 作为正常路径。
+- [ ] 实现唯一 durable-event reconciler，command result 与 push event 共用：cursor 去重/排序、Session revision 校验、缺口 resync 和 cache invalidation。
+- [ ] Sidebar、新建、重命名、archive、Project add/remove 全部发送 backend command；仅设置 pending UI，收到 commit envelope 后才修改 durable replica。
 - [ ] Session timeline 从 `MessageRecord[]` 投影；不复制另一套 ChatMessage/ToolActivity durable schema。
 - [ ] `kind = 'user_input'` 才渲染用户气泡；text/tool-call/tool-result parts 按序投影。
 - [ ] Runtime stream store 维护未完成 assistant/tool/approval overlay；收到 committed Message 后按 run/call 关联清除 overlay。
@@ -623,6 +632,7 @@ ui-store
 - [ ] Goal/Plan UI 使用 SessionRecord；runtime event 只能展示 pending，commit event/response 才更新 durable replica。
 - [ ] Search 调 backend，只搜索 title 和 user/assistant text parts。
 - [ ] Message paging、scroll anchor、background Session event 和 revision gap resync。
+- [ ] 不增加 durable polling timer；query 仅用于 bootstrap、Session open、分页/搜索、FileChange 按需加载和 gap recovery。
 - [ ] Conversation Markdown export 从 backend records 生成；legacy import 走 P5 importer。
 
 ### 11.4 测试迁移
@@ -630,6 +640,7 @@ ui-store
 - [ ] 重写 `agent.history/conversations/requests/runtime-events/concurrency` store tests，删除 Workbench snapshot expectation。
 - [ ] E2E fixture 使用 backend commands 或受限 test seed helper，不调用 `workbench:save`。
 - [ ] reload E2E 验证 SQLite Session/Message，而不是 renderer partial snapshot。
+- [ ] bootstrap 期间发生 commit 不丢事件；event 先于 response、response 先于 event 和重复 delivery 得到相同副本。
 - [ ] background Run、approval、writer lock 和 interjection 不串 Session。
 - [ ] partial assistant 在 renderer reload/main survive 情况下可从 ActiveRun snapshot恢复；main crash 后允许丢失。
 
@@ -659,7 +670,10 @@ Config/Secrets initialize
   -> Agent runtime composition
   -> register target IPC
   -> create renderer window
-  -> renderer app:get-bootstrap
+  -> preload subscribe + bounded durable event buffer
+  -> renderer app:get-bootstrap(snapshot + cursor)
+  -> hydrate + replay newer buffered events
+  -> live event apply
 ```
 
 如果 database/migration/importer 失败，应用显示明确的 blocking recovery 状态并保留备份；不得静默回退到 renderer Workbench truth，也不得以空数据库覆盖旧文件。
@@ -681,9 +695,10 @@ Config/Secrets initialize
 4. Crash：user 已提交但 assistant 未完成，重启后不出现 partial/interrupted message。
 5. Renderer reload：main 存活时 Run 继续，UI 重新取得 ActiveRun snapshot。
 6. 模型切换：Session A/B 使用不同 route，全局 default 修改不影响已有 Session。
-7. Concurrent sessions：一写多读、writer delayed release、后台事件不串线。
-8. FileChanges：重启 list/revert、冲突拒绝、retention 正确。
-9. Headless parity：Provider requests、tools、prompt hashes 和 patch 与 Electron 一致。
+7. Bootstrap race：snapshot 读取期间提交 Session/Message，renderer 最终副本既不遗漏也不重复。
+8. Concurrent sessions：一写多读、writer delayed release、后台事件不串线。
+9. FileChanges：重启 list/revert、冲突拒绝、retention 正确。
+10. Headless parity：Provider requests、tools、prompt hashes 和 patch 与 Electron 一致。
 
 ### 12.5 回滚策略
 

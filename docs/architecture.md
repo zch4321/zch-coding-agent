@@ -56,8 +56,8 @@ SQLite
 1. Renderer 发送 typed command。
 2. Backend 校验 command。
 3. Backend 在 SQLite transaction 中更新 Project/Session、插入完整 Message，或记录完整 FileChange。
-4. Commit 成功后返回并推送新的 record/revision。
-5. Renderer 用 backend record 更新本地副本。
+4. Commit 成功后生成一次 `DurableCommitEnvelope`；command 回包和 durable push event 携带同一个 envelope，到达顺序不作保证。
+5. Renderer 让回包和事件经过同一个 reconciler，按 event cursor 和 record revision 幂等更新本地副本。
 
 数据库提交失败时，renderer 只能显示 pending/error，不能把请求值当成已提交事实。
 
@@ -996,21 +996,125 @@ approval:decide
 - `file-change:changed`：受影响 `sessionId` 和 commit 后的完整 FileChangeSummary list snapshot，已包含 retention 结果。
 - `run:stream`：active run status、text/reasoning delta、tool/approval、terminal 等瞬时事件。
 
-### 8.2 无 durable change log
+### 8.2 Commit 回包与 Commit Event
+
+Renderer 发起的 command 不能只等待 push event，也不能只依赖 invoke 回包。两条路径解决不同问题：
+
+- invoke 回包让发起操作的组件明确知道 command 成功、冲突或失败，并立即结束 pending 状态。
+- durable push event 覆盖 backend 自主发生的提交，例如 assistant turn 完成、tool batch 完成、compact、Goal/Plan tool 更新，以及后台 Session 的变更。
+
+所有 durable mutation 在 transaction commit 后只构造一次提交结果：
+
+```ts
+interface BackendEventCursor {
+  backendInstanceId: string
+  sequence: number
+}
+
+interface DurableCommitEnvelope<TChange> {
+  schemaVersion: 1
+  cursor: BackendEventCursor
+  topic: 'project.changed' | 'session.changed' | 'file-change.changed'
+  change: TChange
+}
+
+interface DurableCommandResult<TChange> {
+  schemaVersion: 1
+  commit: DurableCommitEnvelope<TChange>
+}
+```
+
+`backendInstanceId` 在 main process 每次启动时重新生成，`sequence` 是该实例内所有 durable commit 共用的严格单调序号。它们只是 IPC 传输顺序游标，不写 SQLite，也不是领域 revision、change log 或可恢复的事件历史。
+
+对应 change payload 为：
+
+```ts
+interface ProjectCommittedChange {
+  projects: ProjectRecord[]
+}
+
+interface SessionCommittedChange {
+  session: SessionRecord
+  messageChange:
+    | { mode: 'upsert'; records: MessageRecord[] }
+    | { mode: 'invalidate'; throughSeq: number }
+}
+
+interface FileChangeCommittedChange {
+  sessionId: SessionId
+  fileChanges: FileChangeSummary[]
+}
+```
+
+Project 和 FileChange 集合有明确上限，因此提交完整 list snapshot。Session event 总是携带完整 `SessionRecord`；常规提交携带本次完整新增或更新的 Message records。Compact 等操作如果影响的旧 Message 太多、会超过 IPC 上限，则使用 `mode = 'invalidate'`，renderer 丢弃该 Session 的已缓存 message pages，并通过 `session:get/message:list` 重取；不能发送无界事件。
+
+Application service 的固定顺序是：
+
+1. 在串行 write queue 中校验 `expectedRevision` 等前置条件。
+2. 执行 transaction 并 commit。
+3. 为已提交结果分配 event cursor，构造 immutable envelope。
+4. 将同一个 envelope 交给 event publisher 和 IPC handler。
+5. Event 与 invoke response 谁先到 renderer 都是合法行为。
+
+Commit、cursor 分配和 envelope 发布必须在同一个串行 application-state job 释放前完成；bootstrap snapshot 读取也进入这条队列，不能在“数据库已 commit、cursor 尚未分配”的中间状态取快照。Commit 失败时不分配 envelope、不发送 durable event。`run:start` 等同时产生 runtime 结果的 command 在 `DurableCommandResult` 之外返回 `ActiveRunPublicSnapshot/runId`；其中 durable 部分仍必须是相同的 commit envelope。
+
+### 8.3 Renderer Reconciliation
+
+Renderer 不为 durable state 做 optimistic write。点击创建、重命名、切换模型或发送消息后，只设置 UI-only `pending`；收到 command error 时清除 pending 并保留 backend record，收到 commit 回包或事件时才更新副本。
+
+Command 回包和 push event 进入同一个 durable-event reconciler：
+
+1. `backendInstanceId` 不同：当前副本属于旧 backend，重新 bootstrap。
+2. `sequence <= lastAppliedSequence`：同一提交已由另一条路径处理，幂等忽略。
+3. `sequence = lastAppliedSequence + 1`：按 topic 应用 change，并推进 cursor。
+4. `sequence > lastAppliedSequence + 1`：存在提交缺口，不猜测缺失内容；重新 bootstrap，清空已加载 Session message/FileChange pages，再按当前页面需要查询。
+
+Invoke promise 的成功/失败仍负责结束该组件的 pending 状态；如果同一 envelope 已由 event 先应用，回包在 reconciler 中被忽略只表示“不重复写副本”，不表示 command 失败。
+
+应用 `session.changed` 时还要检查 Session 自身的持久化 revision：
+
+- 本地不存在该 Session：安装 record；按 `messageChange` 安装 records 或标记 message cache invalid。
+- incoming revision 小于或等于本地 revision：不重复应用 records。
+- incoming revision 等于本地 revision + 1：应用完整 SessionRecord 和 message change。
+- incoming revision 大于本地 revision + 1：该 Session 存在领域变更缺口，调用 `session:get` 替换 Session，并重建其 message cache。
+
+每个 Session transaction 只把 `sessions.revision` 递增一次，即使它插入了一组连续 Messages。Message 仍用 `(sessionId, seq)` 幂等 upsert。查询得到的 snapshot 可以直接替换副本；事件 delta 不能跨 revision 缺口强行合并。
+
+### 8.4 Bootstrap 无窗口丢事件
+
+Renderer 启动不能采用“先 query、后 subscribe”，否则两步之间的 commit 会永久漏掉。固定握手为：
+
+1. Preload bridge 先订阅 durable events，并在 renderer 完成 hydrate 前暂存有界 buffer。
+2. Renderer 调用 `app:get-bootstrap`。
+3. Backend 在与 write queue 一致的边界读取 snapshot，并一并返回当时的 `BackendEventCursor`。
+4. Renderer 安装 snapshot。
+5. 只重放同一 `backendInstanceId` 且 `sequence` 大于 snapshot cursor 的 buffered events。
+6. 确认序号连续后切换为 live apply；实例变化、buffer 溢出或序号缺口都重新 bootstrap。
+
+这套 buffer 只跨越一次 bootstrap 窗口，不是 durable queue。窗口 reload 后重新执行同一握手。
+
+### 8.5 Query 时机与禁止轮询
+
+Renderer 不定时轮询 Project、Session、Message、Goal/Plan 或 FileChange。Query 只用于：
+
+- 应用 bootstrap 和 renderer reload。
+- 切换 Session、消息分页、搜索和按需加载 FileChanges。
+- revision/event cursor 缺口后的重同步。
+- 用户显式刷新某项允许过期的 workspace read model。
+
+Backend 自主产生的 durable state 一律通过 commit event 通知；invoke response 只确认当前 command，不能代替对其他 Session 和后台执行的订阅。
+
+`run:stream` 不进入 durable reconciler。它按 `sessionId/runId` 更新 runtime overlay，允许包含独立的瞬时 sequence；缺口只触发一次 `session:get` 获取可用的 `ActiveRunPublicSnapshot`，不能轮询补 token。收到对应 Session 的完整 assistant/tool Message commit 后，renderer 清除已经被持久化事实取代的 overlay。Backend 不再持有 buffer 时，部分流式文本允许丢失。
+
+### 8.6 无 durable change log
 
 Durable-state changed events 由 commit 后的 backend event publisher 发送，不写 `session_change_log` 或通用 durable outbox。
-
-Renderer 发现 Session revision gap 时：
-
-1. 停止应用后续增量。
-2. 调用 `session:get`。
-3. 用最新 Session 和所需 message page 替换副本。
 
 Project 和 FileChange 变更直接推送有界完整 list snapshot；renderer 用新 list 替换副本。Renderer reload 或 main-process restart 后再通过 bootstrap/`file-change:list` 获得当前值。
 
 Desktop 单窗口场景中，主进程崩溃会同时终止 renderer；重启后本来就会 bootstrap，因此不需要 durable outbox/change log。
 
-### 8.3 无通用 processed command table
+### 8.7 Command 幂等
 
 幂等使用业务键：
 
@@ -1030,7 +1134,7 @@ Desktop 单窗口场景中，主进程崩溃会同时终止 renderer；重启后
 1. Renderer 发送 `session:create(projectId, model?, mode?)`。
 2. Backend 从 backend-owned defaults 补齐。
 3. Transaction 插入 Session。
-4. Commit 后返回并推送 SessionRecord。
+4. Commit 后通过回包和 `session.changed` 推送同一个 envelope，其中包含 SessionRecord。
 5. Renderer 导航到新 Session。
 
 创建 Session 不访问 Provider。空 Session 是真实 backend record。
@@ -1059,8 +1163,8 @@ Active Run 开始时解析 immutable `ModelRouteSnapshot` 并保存在 memory；
 1. Backend 校验 Session、Provider、并发和 writer 条件。
 2. 预留 run slot/writer lease。
 3. Transaction 插入完整 user/context messages。
-4. Commit 后推送 messages。
-5. 创建 `ActiveRunExecution` 并开始 provider/tool loop。
+4. Commit 后生成 `session.changed` envelope；`run:start` 回包返回该 envelope 和 runtime snapshot，push channel 发送同一 envelope。
+5. 创建 `ActiveRunExecution` 并开始 provider/tool loop；其后 backend 自主完成的 assistant/tool commit 只需通过 push event 通知 renderer。
 6. Stream delta 只存 memory 并推送 renderer。
 7. 每个完整 assistant turn 或完整 tool batch 按 §7.2 写入 SQLite。
 8. 完成、取消或失败后释放 runtime resources。
@@ -1333,6 +1437,8 @@ historyFidelity = legacy_display_only
 - SQLite migration 顺序、checksum 不可变、单步 rollback、高版本拒绝、foreign key cascade 和 seq uniqueness。
 - 移除 Project 会 cascade 删除其 Sessions/Messages/FileChanges，但不删除 workspace 目录或任何项目文件。
 - Application service 的 Session/Message 多表事务回滚时，Repository 不得留下独立 commit。
+- Durable mutation 的 invoke result 与 push event 携带同一个 envelope；event-first、response-first 和重复 delivery 都只更新一次 renderer replica。
+- Bootstrap 在订阅后读取 snapshot/cursor；握手期间发生 commit 不丢失，cursor gap、backend instance change 或 buffer overflow 会重同步而不是轮询。
 - User send 重试不重复插入 message。
 - Assistant text、`normalizedReasoningText` 和 `providerContinuation` 只有 completed 后才落盘。
 - 每个持久化 assistant tool-call message 后都有完整 tool result messages。

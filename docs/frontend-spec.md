@@ -19,7 +19,8 @@
 4. **内部状态最小暴露**：`sessionId/runId/callId` 不作为常驻产品信息展示；只有运行、等待审批、取消和错误等用户需处理的状态可见。
 5. **阶段能力诚实**：Terminal 到 P4 才出现；Browser 属于 Post-MVP；当前阶段不展示对应 tab 或占位页。
 6. **安全边界不下沉**：renderer 只展示和发起版本化 IPC；workspace、schema、资源归属和权限判断仍由主进程执行。
-7. **Codex 信息结构 + VS Code 工作区习惯**：整体结构参考 Codex；窗口布局控制、文件审查和底部终端参考 VS Code。
+7. **后端提交驱动**：durable state 只在收到 command commit 回包或 backend commit event 后更新；两者进入同一个 revision reconciler，不做定时轮询。
+8. **Codex 信息结构 + VS Code 工作区习惯**：整体结构参考 Codex；窗口布局控制、文件审查和底部终端参考 VS Code。
 
 ---
 
@@ -513,7 +514,13 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 要求：
 
 - 错误消息对用户可见但不泄露 API Key、Authorization header 或主进程堆栈。
-- Session `revision` 重复时不重复应用；检测 committed change 缺口后请求 Session snapshot。`run:stream` sequence 缺口只影响瞬时展示；backend 没有可恢复 buffer 时允许丢失 partial output。
+- 创建、重命名、归档、切换模型/模式和发送消息期间只设置 pending/error UI，不先改 durable replica；commit 失败时继续显示后端原值。
+- Command 回包和 durable push event 使用同一个 reconciler；相同 event cursor 只应用一次，不依赖两者的到达顺序。
+- Event 已先应用时，重复的成功回包仍结束当前控件的 pending，只是不重复改写副本。
+- Preload 在 bootstrap query 前开始 buffer durable events；安装带 cursor 的 bootstrap snapshot 后重放更新事件，再进入 live apply，不能采用“先 query、后 subscribe”。
+- Event cursor 缺口或 backend instance 变化时重新 bootstrap；Session `revision` 重复时不重复应用，revision 缺口请求 Session snapshot 并重建 message cache。
+- Project、Session、Message、Goal/Plan 和 FileChange 不定时轮询；query 只用于 bootstrap、切换/分页/搜索/按需加载和缺口恢复。
+- `run:stream` sequence 缺口只影响瞬时展示，可单次读取 ActiveRun snapshot，但不能轮询补 token；backend 没有可恢复 buffer 时允许丢失 partial output。
 - 切换对话、卸载组件和关闭窗口时注销 renderer listener。
 
 ---

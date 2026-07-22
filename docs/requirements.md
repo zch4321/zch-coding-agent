@@ -367,6 +367,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - UI 中一个项目对应一个 workspace，不重复展示两个概念。
 - 左侧项目侧栏提供新对话、对话搜索，以及项目下的二级对话列表；不引入 Task 概念。
 - “对话”直接对应 backend-owned Session；标题、完整消息历史、所属项目、创建/更新时间和模型/权限模式由后端持久化并推送给 renderer。Draft 仅属于 renderer 输入组件。
+- Durable command 在数据库 commit 后同时返回提交结果并发布同内容事件；renderer 对回包和事件按 cursor/revision 幂等合并。后端自主提交依赖事件通知，不定时轮询；bootstrap、分页/搜索、按需加载和缺口重同步才使用 query。
 - 搜索通过本地后端查询 Session 标题，以及 `kind = 'user_input'/'assistant_turn'` records 中 `type = 'text'` 的 parts；不把 orchestrator/harness/runtime context 当成用户消息，也不检索 tool call 参数、tool result/JSON parts、工作区文件、reasoning、continuation 或 trace，更不访问 Provider。
 - 新建对话时立即创建持久化 Session；首次发送消息启动内存 Active Run。Session/Run ID 不作为常驻产品信息展示。
 - 正式 UI 不得使用硬编码项目、对话或工具活动作为占位数据。
