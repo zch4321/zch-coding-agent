@@ -22,7 +22,7 @@
 4. 在 backend application service 中实现完整 Session/Message/FileChange transaction 和 runtime 边界。
 5. 新 IPC 和 renderer replica stores 准备完成后，进行一次协调切流。
 6. 切流成功后立即删除 `workbench:save`、renderer durable Conversation 和 JSON change-history 写路径。
-7. 最后用 restart、migration、Headless parity、Electron E2E 和 Windows package smoke 收口。
+7. 最后用 restart、SQLite migration、Headless parity、Electron E2E 和 Windows package smoke 收口。
 
 P1–P7 可以在同一重构分支上分批提交，但新持久化路径在 P8 前不写真实用户数据库。P8 是唯一 durable-state 真相源切流点：切流前 legacy JSON 是真相源；切流后 SQLite 是真相源。不存在同时以两边为准的稳定版本。P3 等阶段可以先替换进程内实现，但不能提前让 SQLite 和 Workbench 同时承接用户状态。
 
@@ -34,26 +34,15 @@ P1–P7 可以在同一重构分支上分批提交，但新持久化路径在 P8
 - Provider transport / protocol adapter 分层与 immutable `ModelRouteSnapshot`。
 - `LiveSessionContext`、`ActiveRunExecution` 和完整 message 写入规则。
 - Durable-state IPC、runtime stream IPC 和 renderer replica stores。
-- `workbench.json`、legacy localStorage 和 `change-history.json` 的一次性导入。
 - Desktop、Headless、trace/replay、parity、E2E 和打包兼容。
 
-### 1.2 明确不做
+### 1.2 本轮评审重点
 
-- 不持久化 draft、partial stream、pending approval、Active Run、PTY 或进程句柄。
-- 不增加 `runs`、`run_outputs`、通用 outbox 或 processed-command 表。
-- 不把 config、secrets、trace、Skills 或 ProjectModel 搬进 SQLite。
-- 不在本次重构中发布新的 Provider、云同步、多模态、插件加载器或多 Agent 产品能力。
-- 不建设通用 ORM、动态 query DSL 或第二套 Headless Agent loop。
-- 不承诺 filesystem mutation 与 SQLite Message transaction 的 crash-atomicity。
-
-### 1.3 本轮评审重点
-
-实现前最值得单独确认的是四个决定：
+实现前最值得单独确认的是三个决定：
 
 1. P8 采用单次 durable-state 协调切流，P1–P7 不写真实用户 SQLite，不引入可长期启用的双写 feature flag。
 2. SQLite 首选 Node.js 24 内置 `node:sqlite`，但以 Electron Windows packaged-app probe 作为硬门禁。
-3. 无法证明真实 route 的 legacy assistant message 只展示、`inHistory = false`，不伪造 Provider route；这需要同步放宽一个目标 schema 约束。
-4. 当前超时的 benchmark case proof 从默认 `npm test` 稳定门禁中隔离，继续由显式 benchmark-case 命令执行。
+3. 当前超时的 benchmark case proof 从默认 `npm test` 稳定门禁中隔离，继续由显式 benchmark-case 命令执行。
 
 ---
 
@@ -203,7 +192,7 @@ P0 Baseline
     -> P2 SQLite Foundation
     -> P3 Canonical History + Protocol Adapter
       -> P4 Durable Session/Application Runtime
-        -> P5 FileChanges + Legacy Importer
+        -> P5 FileChanges
           -> P6 Durable IPC
             -> P7 Renderer Replicas
               -> P8 Coordinated Cutover
@@ -216,7 +205,7 @@ P2 和 P3 的代码可并行开发，但 P4 同时依赖二者。P6、P7 可以�
 ### 3.3 提交粒度
 
 - 每个提交只引入一个 schema、repository、adapter 或可验证 vertical slice。
-- 禁止在同一提交中同时改 schema、迁移旧数据、重写 renderer 和删除旧实现。
+- 禁止在同一提交中同时改 schema、重写 renderer 和删除旧实现。
 - 临时 compatibility code 必须在提交说明和本计划中有明确删除阶段。
 - 新代码文件尽量低于 1,000 行；SessionManager 和 renderer store 的拆分以职责边界为准。
 
@@ -258,26 +247,15 @@ P0 只调整测试和 fixture，不触及用户数据；任何门禁调整都可
 ### 5.2 任务
 
 - [ ] 新增 `shared/project.ts`：`ProjectRecord`、`ProjectId` 和 revision 约束。
-- [ ] 新增 `shared/session.ts`：`SessionRecord`、`SessionSnapshot`、分页摘要、lifecycle、history fidelity、Goal/Plan 和 model selection。
+- [ ] 新增 `shared/session.ts`：`SessionRecord`、`SessionSnapshot`、分页摘要、lifecycle、Goal/Plan 和 model selection。
 - [ ] 新增 `shared/message.ts`：按 `kind` 判别的 `MessageRecord` 闭集 union，以及 `TextPart/ToolCallPart/ToolResultPart`。
 - [ ] 定义 `ProviderContinuationEnvelope`、`MessageMetadataV1` 和 `ModelRouteSnapshot`；禁止 credentials、raw request 和任意 metadata key。
 - [ ] 新增 `shared/file-change.ts`：公开 `FileChangeSummary`，不包含 `beforeContent`。
 - [ ] 扩展 `shared/ids.ts`：稳定 Project/Session/Message/FileChange IDs；`runId` 保持 runtime-only。
 - [ ] 新增 durable command/query/event schema；定义 `BackendEventCursor`、`DurableCommitEnvelope` 和各 topic 的 bounded change payload，payload/result 全部带 IPC version 和有界字段。
 - [ ] 明确 Message page 方向与 cursor：V1 使用 `beforeSeq?: number`、`limit <= 200`，返回降序查询结果时在 IPC response 中恢复为升序 records。
-- [ ] 为 legacy importer 定义 backend-private input codec；不得把 legacy `ConversationRecord` 继续当目标 public schema。
 
-### 5.3 必须先确认的 legacy 例外
-
-旧 Workbench 无法证明历史 assistant message 的真实 Provider route。推荐规则是：
-
-- 导入的 legacy assistant display record 可以缺少 `modelRoute`，但必须同时满足 Session `historyFidelity = 'legacy_display_only'`、Message `inHistory = false`，并带受约束的 legacy-import metadata。
-- 不根据当前全局 Provider 伪造“实际 route”。
-- 第一次新发送从新的 canonical segment 开始，UI 明确提示旧内容只用于展示、不在模型上下文中。
-
-这需要在开始 P1 前同步修订 `architecture.md` 中“所有 assistant_turn 必须有 modelRoute”的绝对约束。如果评审决定允许可靠文本历史进入 active context，则必须另外定义可证明的 route inference 和协议断裂检查，不能在 importer 中临时猜测。
-
-### 5.4 测试
+### 5.3 测试
 
 - [ ] 所有 shared records schema round-trip。
 - [ ] 每个 `kind` 的合法/非法 part 组合。
@@ -285,7 +263,7 @@ P0 只调整测试和 fixture，不触及用户数据；任何门禁调整都可
 - [ ] `JsonValue` 深度、数组长度、文本大小和 unknown-key 拒绝。
 - [ ] Renderer/backend 使用同一导出类型，不存在复制定义。
 
-### 5.5 验收与删除
+### 5.4 验收与删除
 
 P1 不删除 `shared/workbench.ts`，因为 legacy runtime 仍在使用；但任何新 target code 禁止继续导入它。删除发生在 P9。
 
@@ -374,7 +352,7 @@ P2 结束时 repositories 只能由 unit/integration tests 使用。回滚只删
 - `electron/runtime/runtime-parity.ts`
 - `e2e/support/fake-provider.ts`
 
-目标 grep gate：除 Chat wire DTO/Adapter 内部和明确的 legacy importer fixture 外，Core、Persistence、Renderer 中不得出现 `ProviderMessage`、`reasoning_content`、`tool_call_id` 或 `tool_calls` wire fields。
+目标 grep gate：除 Chat wire DTO/Adapter 内部外，Core、Persistence、Renderer 中不得出现 `ProviderMessage`、`reasoning_content`、`tool_call_id` 或 `tool_calls` wire fields。
 
 ### 7.4 测试
 
@@ -482,9 +460,9 @@ P4 target composition 必须能在临时数据库中完成“发送 A → tool c
 
 ---
 
-## 9. P5 · FileChanges 与 Legacy Importer
+## 9. P5 · FileChanges
 
-### 9.1 FileChange 任务
+### 9.1 任务
 
 - [ ] 用 `FileChangeService/Repository` 替换 JSON store 的目标实现，公开只返回 `FileChangeSummary`。
 - [ ] 单条 payload 超限必须在 filesystem mutation 前拒绝。
@@ -494,37 +472,11 @@ P4 target composition 必须能在临时数据库中完成“发送 A → tool c
 - [ ] retention 与 insert 在同一 transaction；只删除最旧 FileChanges，不修改 Messages/workspace。
 - [ ] revert 获取 workspace writer lease，成功后 revisioned update record。
 
-### 9.2 Importer 任务
-
-- [ ] 启动时只读发现 `workbench.json`、legacy unversioned Workbench 和 `change-history.json`。
-- [ ] 导入前复制带时间/哈希的只读备份；备份成功前不写目标数据库。
-- [ ] 使用 canonical workspace 建 Project，并使用确定性 ID 建 Session/Message/FileChange。
-- [ ] 普通 legacy visible messages 只按评审后的 fidelity policy 导入；不得伪造 harness、continuation 或 route。
-- [ ] 只有完整、可验证的 assistant tool-call + terminal result chain 才进入 active history；其他 tool activity 只做 display record 或导入报告。
-- [ ] legacy reasoning 只进入 `normalizedReasoningText`，不伪造 continuation。
-- [ ] ChangeHistory 只有归属、path containment、existence/hash 和 snapshot 合法时才获得 revert 能力。
-- [ ] importer 在一个 transaction 中完成；冲突时 decode 并比较，same 则跳过，different 则停止。
-- [ ] 输出本地 migration report：导入数量、降级数量、跳过原因和备份路径，不包含 secrets。
-- [ ] commit 成功后原 JSON 更名为 `.imported-*`；失败时保留原文件和空/未激活数据库。
-
-### 9.3 Legacy localStorage
-
-当前 renderer 仍可能持有 `zch-coding-agent.workbench.v1`。推荐保留一个只用于升级的 one-shot import command：
-
-1. Backend bootstrap 在无 Workbench 文件且数据库为空时返回 `legacyRendererImportAllowed = true`。
-2. Renderer 读取旧 localStorage，发送一次受 schema/size 限制的 migration payload。
-3. Backend 使用同一个 importer transaction，成功后 renderer 删除 localStorage key。
-4. 该 command 不支持覆盖非空数据库，也不作为常规 Workbench save。
-
-P9 删除 renderer 的 ongoing localStorage fallback；是否保留 one-shot importer 一个兼容版本，在发布评审时决定。
-
-### 9.4 测试与验收
+### 9.2 测试与验收
 
 - [ ] create/patch/delete 重启后 list/revert。
 - [ ] RESOURCE_CHANGED、重复 revert、超限和 persistence failure。
-- [ ] importer 首次成功、崩溃重试、重复运行、ID conflict 和损坏 JSON。
-- [ ] legacy incomplete tool chain 不进入 active history。
-- [ ] import 不删除 workspace 文件，不导入 draft，不输出 `beforeContent` 到 IPC。
+- [ ] `beforeContent` 不进入 IPC、renderer store、DOM 或默认 trace。
 
 ---
 
@@ -574,7 +526,7 @@ Terminal、Settings、Trace、Skills、MCP、ProjectModel 和 workspace read API
 - [ ] 每个 durable command 在 commit 后只构造一次 envelope；invoke result 和 push event 复用同一对象语义，到达顺序不作保证，失败 transaction 不发布事件。
 - [ ] Commit、cursor 分配和 envelope 发布属于同一个串行 application-state job；bootstrap snapshot/cursor 读取进入同一队列，不暴露 commit 与 cursor 之间的中间状态。
 - [ ] `run:start` result 同时返回 user/context Message commit envelope 与 runtime snapshot/runId；后续 assistant/tool commit 由 backend event 主动推送。
-- [ ] Export/import conversation 从 backend query 构造，不接收 renderer 自己拼出的整份 Markdown/ConversationRecord 作为事实。
+- [ ] Conversation export 从 backend query 构造，不接收 renderer 自己拼出的整份 Markdown/ConversationRecord 作为事实。
 
 ### 10.4 Push channels
 
@@ -633,7 +585,7 @@ ui-store
 - [ ] Search 调 backend，只搜索 title 和 user/assistant text parts。
 - [ ] Message paging、scroll anchor、background Session event 和 revision gap resync。
 - [ ] 不增加 durable polling timer；query 仅用于 bootstrap、Session open、分页/搜索、FileChange 按需加载和 gap recovery。
-- [ ] Conversation Markdown export 从 backend records 生成；legacy import 走 P5 importer。
+- [ ] Conversation Markdown export 从 backend records 生成。
 
 ### 11.4 测试迁移
 
@@ -656,7 +608,6 @@ Renderer source 中不再有“写完整 Workbench”的新调用；在 P8 切�
 
 - P0–P7 全部 exit criteria 通过。
 - 目标 database/application/IPC/renderer 已在临时 userData 上跑完核心 restart E2E。
-- Legacy importer 对真实匿名化样本和损坏样本完成 dry run。
 - Windows x64 packaged app 可 open/migrate/query `node:sqlite`。
 - 不存在阻塞级 schema/open decision。
 
@@ -665,7 +616,6 @@ Renderer source 中不再有“写完整 Workbench”的新调用；在 P8 切�
 ```text
 Config/Secrets initialize
   -> DatabaseService open + migrations
-  -> Legacy importer transaction if required
   -> repositories + application services
   -> Agent runtime composition
   -> register target IPC
@@ -676,34 +626,31 @@ Config/Secrets initialize
   -> live event apply
 ```
 
-如果 database/migration/importer 失败，应用显示明确的 blocking recovery 状态并保留备份；不得静默回退到 renderer Workbench truth，也不得以空数据库覆盖旧文件。
+如果 database open/migration 失败，应用显示明确的 blocking recovery 状态；不得静默回退到 renderer Workbench truth。
 
 ### 12.3 切流动作
 
 - [ ] `electron/main.ts` 默认组装 target DatabaseService/Application/Runtime。
 - [ ] Renderer 默认加载 replica stores。
 - [ ] 停止注册/调用 `workbench:save` 和 JSON ChangeHistory 写路径。
-- [ ] 保留 legacy files 只读备份，不再作为启动状态源。
 - [ ] Headless 为每个 run/trial创建独立数据库，并调用同一 target composition。
 - [ ] Trace replay/fork 通过 target SessionService 和 Protocol Adapter，不注入第二套 history。
 
 ### 12.4 切流验收场景
 
 1. 新用户：添加 Project、创建空 Session、发送、重启、继续。
-2. 旧用户：导入多个 Project/Conversation、展示 fidelity 状态、创建新 canonical segment。
-3. Tool chain：assistant calls、多个 terminal results、final answer，重启后请求完整。
-4. Crash：user 已提交但 assistant 未完成，重启后不出现 partial/interrupted message。
-5. Renderer reload：main 存活时 Run 继续，UI 重新取得 ActiveRun snapshot。
-6. 模型切换：Session A/B 使用不同 route，全局 default 修改不影响已有 Session。
-7. Bootstrap race：snapshot 读取期间提交 Session/Message，renderer 最终副本既不遗漏也不重复。
-8. Concurrent sessions：一写多读、writer delayed release、后台事件不串线。
-9. FileChanges：重启 list/revert、冲突拒绝、retention 正确。
-10. Headless parity：Provider requests、tools、prompt hashes 和 patch 与 Electron 一致。
+2. Tool chain：assistant calls、多个 terminal results、final answer，重启后请求完整。
+3. Crash：user 已提交但 assistant 未完成，重启后不出现 partial/interrupted message。
+4. Renderer reload：main 存活时 Run 继续，UI 重新取得 ActiveRun snapshot。
+5. 模型切换：Session A/B 使用不同 route，全局 default 修改不影响已有 Session。
+6. Bootstrap race：snapshot 读取期间提交 Session/Message，renderer 最终副本既不遗漏也不重复。
+7. Concurrent sessions：一写多读、writer delayed release、后台事件不串线。
+8. FileChanges：重启 list/revert、冲突拒绝、retention 正确。
+9. Headless parity：Provider requests、tools、prompt hashes 和 patch 与 Electron 一致。
 
 ### 12.5 回滚策略
 
 - 数据库只做 forward migration，不自动 down migration。
-- P8 发布前保存 untouched legacy backups；旧二进制回滚需要显式选择/恢复对应 backup，不能由新版本自动反写旧格式。
 - 如果切流版本尚未发布，只回退 composition commit并删除测试 userData。
 - 如果已发布且用户产生了新 SQLite-only Session，不能简单降级旧版本；必须修复 forward 或提供独立只读导出工具。
 
@@ -724,7 +671,7 @@ P8 稳定后立即删除，不保留“以后可能用”的双实现。
 
 ### 13.2 Shared/Renderer 删除
 
-- [ ] `shared/workbench.ts` 目标外引用；legacy input codec 移入 importer 私有目录。
+- [ ] `shared/workbench.ts` 及其目标外引用。
 - [ ] `src/stores/agent-workbench.ts`、`workbench-persistence.ts`、重复 `agent-types` durable records。
 - [ ] `HISTORY_KEY` ongoing localStorage persistence。
 - [ ] renderer timeline 到 ConversationRecord 的 `writeToConversation()`。
@@ -736,7 +683,7 @@ P8 稳定后立即删除，不保留“以后可能用”的双实现。
 使用 grep/architecture tests 保证：
 
 - 产品代码不再包含 `saveWorkbench`。
-- `workbench.json`/`change-history.json` 只在 importer/backup diagnostics 中出现。
+- 产品代码不再读取或写入 `workbench.json`/`change-history.json`。
 - `ProviderMessage` 只可能是某个 wire Adapter 内部私有类型，不从 `electron/providers` 公共出口导出。
 - Renderer 不引用 SQLite、Node、Electron IPC renderer 原语或 backend-private FileChange payload。
 
@@ -774,7 +721,7 @@ npm run build
 
 - `npm run test:benchmark-cases`。
 - Electron/Headless parity suite。
-- Windows x64 安装包首次启动、升级导入、重启续聊和卸载后 userData 保留检查。
+- Windows x64 安装包首次启动、SQLite migration、重启续聊和卸载后 userData 保留检查。
 - `npm run test:real` 只在具备显式凭据时运行，不进入确定性默认门禁。
 
 ### 14.3 性能预算
@@ -783,7 +730,7 @@ npm run build
 - Message page 最大 200，搜索结果和摘要有硬上限。
 - Stream path 零 SQLite writes。
 - 单个 transaction 不包含 Provider 网络、工具执行或 filesystem IO。
-- Migration 和 importer 对大 Workbench 输出阶段进度/诊断，不能冻结后静默等待。
+- SQLite migration 输出阶段进度/诊断，不能冻结后静默等待。
 
 ### 14.4 文档收口
 
@@ -796,18 +743,17 @@ npm run build
 
 ## 15. 风险登记
 
-| 风险                              | 触发点 | 缓解                                                          | 阻塞门禁                         |
-| --------------------------------- | ------ | ------------------------------------------------------------- | -------------------------------- |
-| Legacy import 丢数据              | P5/P8  | 只读备份、单 transaction、deterministic IDs、migration report | 损坏/重复/中断 fixtures 全通过   |
-| Provider wire 行为漂移            | P3     | P0 golden、adapter contract、real-provider opt-in             | DeepSeek golden 与 parity 通过   |
-| Harness 顺序或 compact 语义改变   | P3/P4  | canonical source metadata、prompt build comparison            | Prompt/compact suites 通过       |
-| 模型仍读取全局 active config      | P3/P4  | immutable route grep gate 和 concurrent Session test          | 两 Session 不同 route E2E        |
-| Partial stream 再次落盘           | P7     | runtime overlay store，禁止 durable save import               | crash/reload E2E                 |
-| SQLite 阻塞 main process          | P2/P10 | 短 transaction、分页、无 delta writes、性能测量               | bootstrap/query budget           |
-| Electron/Headless runtime 分叉    | P4/P8  | 唯一 composition + parity capture                             | parity suite                     |
-| E2E 依赖旧 Workbench 后门         | P7/P9  | backend seed helper/commands                                  | grep 无 `workbench:save` fixture |
-| File mutation 成功但 history 失败 | P5     | terminal warning + revert unavailable                         | fault-injection test             |
-| 发布后无法旧版降级                | P8     | untouched legacy backup、forward fix/export policy            | upgrade drill 与 recovery 文档   |
+| 风险                              | 触发点 | 缓解                                                 | 阻塞门禁                         |
+| --------------------------------- | ------ | ---------------------------------------------------- | -------------------------------- |
+| Provider wire 行为漂移            | P3     | P0 golden、adapter contract、real-provider opt-in    | DeepSeek golden 与 parity 通过   |
+| Harness 顺序或 compact 语义改变   | P3/P4  | canonical source metadata、prompt build comparison   | Prompt/compact suites 通过       |
+| 模型仍读取全局 active config      | P3/P4  | immutable route grep gate 和 concurrent Session test | 两 Session 不同 route E2E        |
+| Partial stream 再次落盘           | P7     | runtime overlay store，禁止 durable save             | crash/reload E2E                 |
+| SQLite 阻塞 main process          | P2/P10 | 短 transaction、分页、无 delta writes、性能测量      | bootstrap/query budget           |
+| Electron/Headless runtime 分叉    | P4/P8  | 唯一 composition + parity capture                    | parity suite                     |
+| E2E 依赖旧 Workbench 后门         | P7/P9  | backend seed helper/commands                         | grep 无 `workbench:save` fixture |
+| File mutation 成功但 history 失败 | P5     | terminal warning + revert unavailable                | fault-injection test             |
+| 发布后无法旧版降级                | P8     | forward fix/export policy                            | upgrade drill 与 recovery 文档   |
 
 ---
 

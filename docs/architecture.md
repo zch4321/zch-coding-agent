@@ -274,7 +274,6 @@ interface SessionRecord {
     sessionId: SessionId
     forkedFromSeq: number
   }
-  historyFidelity: 'complete' | 'legacy_display_only'
   revision: number
   lastSeq: number
   createdAt: string
@@ -596,15 +595,6 @@ PRAGMA busy_timeout = 5000;
 | `messages`          | 完整、排序、可编译 Provider request 的 canonical history |
 | `file_changes`      | 文件变更与有界 revert 数据；不属于消息历史               |
 
-不存在以下表：
-
-- `session_drafts` / `session_draft_attachments`。
-- `runs` / `run_outputs`。
-- `timeline_entries` / tool/approval subtype tables。
-- `context_checkpoints`。
-- `session_change_log`。
-- `processed_commands`。
-
 ### 6.3 `schema_migrations`
 
 ```sql
@@ -663,7 +653,6 @@ CREATE TABLE sessions (
   plan_json          TEXT,
   parent_session_id  TEXT REFERENCES sessions(id) ON DELETE SET NULL,
   forked_from_seq    INTEGER,
-  history_fidelity   TEXT NOT NULL,
   revision           INTEGER NOT NULL,
   last_seq           INTEGER NOT NULL,
   created_at         TEXT NOT NULL,
@@ -1387,34 +1376,20 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 
 ## 18. 迁移方案
 
-### 18.1 Workbench 导入
+### 18.1 新数据库启用
 
-首次打开 v2 database：
+切流版本首次启用 v2 persistence 时，创建 `agent.db` 并执行 SQLite schema migrations。旧 `workbench.json`、renderer localStorage 和 `change-history.json` 不参与新数据库初始化或状态恢复；新架构从 SQLite 中已有的 records 开始，没有 records 时显示空 Project/Session 状态。
 
-1. 创建 `agent.db` 并执行 migrations。
-2. 如果存在 `workbench.json` 或 `change-history.json`，先对原文件做只读备份。
-3. 一个 transaction 内先导入 Projects，为 canonical workspace 生成稳定 `projectId`，再导入 Session metadata 和能可靠转换的完整 Messages。
-4. Legacy `role/content/toolCalls/toolCallId` 只作为 importer input：可见文本转成 text parts，已验证工具参数转成 tool-call parts。旧 tool activity 只有在能够构成完整 assistant tool-call + terminal tool-result 链路时才导入 active canonical history；否则只导入 display-only text/metadata，不伪造模型历史。
-5. 旧的可见明文 reasoning 只能导入 `normalizedReasoningText`；Importer 不得把它包装成虚假的 `providerContinuation`。
-6. `change-history.json` 中的记录只有在 Session/workspace 能唯一对应、路径受 workspace 约束且 snapshot/hash 合法时才导入 `file_changes`；无法验证的记录留在备份中，不提供可能覆盖错误文件的 revert。
-7. 不承诺迁移未发送 draft。
-8. 导入 ID 使用可重现映射。崩溃重试遇到相同 primary/unique key 时，必须 decode 并比较已有记录；内容相同则跳过，内容不同则停止导入，不得覆盖。全部 commit 成功后，将原 JSON 更名为已导入备份并启用新 repository；不为此新增通用 `processed_commands` 或 product metadata table。
-
-旧 Workbench 没有完整 harness/provider history，因此导入 Session 标记：
-
-```text
-historyFidelity = legacy_display_only
-```
+切流不读取、改写、重命名或删除这些旧文件。`schema_migrations` 只负责 `agent.db` 自身的 schema version，不承担旧 Conversation/Message/FileChange 数据转换。
 
 ### 18.2 切换顺序
 
 1. 引入 shared Session/Message/MessagePart schemas 和 SQLite repositories。
-2. 引入 Project 和 FileChange repositories，将 `workbench.json` project registry 与 `change-history.json` 纳入 SQLite。
+2. 引入 Project 和 FileChange repositories。
 3. 引入只输出 `CompiledCanonicalHistory` 的 Message history compiler、Provider Protocol Adapter contract 和完整 tool batch transaction。
 4. Runtime 改为从 messages 查询 active history。
 5. Renderer 改为 Project/Session/Message/FileChangeSummary replica。
-6. 启用一次性 importer。
-7. 删除 `workbench:save`、frontend conversation persistence、legacy change-history JSON 和 memory-only canonical history。
+6. 删除 `workbench:save`、frontend conversation persistence、legacy change-history JSON 和 memory-only canonical history。
 
 迁移不长期双写。
 
@@ -1451,7 +1426,6 @@ historyFidelity = legacy_display_only
 - FileChange create/patch/delete 都能在重启后列出和回退；当前文件不匹配 after existence/hash 时必须返回 `RESOURCE_CHANGED`。
 - FileChange 持久化失败时不宣称 `revertAvailable`；单条 payload 超限在文件副作用前拒绝；retention 只删除最旧变更记录，不改写 Messages 或 workspace。
 - `FileChangeSummary` IPC 不包含 `beforeContent`，renderer store、DOM、trace 默认记录中不得出现恢复 snapshot。
-- Legacy importer 中断后重试不生成重复 Project/Session/Message/FileChange，损坏或无法归属的变更记录不可导入为可回退项。
 
 核心重启回归：
 
