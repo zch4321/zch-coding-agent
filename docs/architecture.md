@@ -104,7 +104,7 @@ decode(encode(record)) deep-equals record
 ```text
 shared/
   durable.ts              # schema version、revision/seq 与容量上限
-  durable-api.ts          # target commands / queries / results / events
+  domain-state-api.ts     # 业务状态 commands / queries / results / events
   project.ts              # ProjectRecord
   session.ts              # SessionRecord / SessionSnapshot
   message.ts              # canonical MessageRecord

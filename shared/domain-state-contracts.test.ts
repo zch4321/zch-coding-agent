@@ -3,15 +3,15 @@ import Ajv from 'ajv'
 import type { TSchema } from '@sinclair/typebox'
 import {
   AppBootstrapResultSchema,
-  DURABLE_API_CONTRACTS,
-  DurableStateEventSchema,
+  DOMAIN_STATE_API_CONTRACTS,
+  DomainStateEventSchema,
   FileChangeCommittedChangeSchema,
   MessageListPayloadSchema,
   ProjectCommittedChangeSchema,
   SessionCommittedChangeSchema,
-  type DurableApiPayload,
-  type DurableStateEvent,
-} from './durable-api'
+  type DomainStateApiPayload,
+  type DomainStateEvent,
+} from './domain-state-api'
 import { MAX_MESSAGE_PAGE_RECORDS } from './durable'
 import { FileChangeSummarySchema, type FileChangeSummary } from './file-change'
 import type {
@@ -240,7 +240,7 @@ const fileChange: FileChangeSummary = {
   updatedAt: timestamp,
 }
 
-describe('durable canonical records', () => {
+describe('domain-state canonical records', () => {
   it('round-trips Project, Session, every Message kind, route and FileChange', () => {
     roundTrip(ProjectRecordSchema, project)
     roundTrip(SessionRecordSchema, session)
@@ -451,7 +451,7 @@ describe('message paging and Session snapshots', () => {
   })
 })
 
-describe('bounded durable API contracts', () => {
+describe('bounded domain-state API contracts', () => {
   const cursor = {
     schemaVersion: 1 as const,
     backendInstanceId: 'backend:one',
@@ -459,7 +459,7 @@ describe('bounded durable API contracts', () => {
   }
 
   it('keeps payload and result versions explicit', () => {
-    const payload: DurableApiPayload<'message:list'> = {
+    const payload: DomainStateApiPayload<'message:list'> = {
       version: 1,
       sessionId,
       beforeSeq: 9,
@@ -471,8 +471,8 @@ describe('bounded durable API contracts', () => {
     expect(
       validatePayload({ ...payload, limit: MAX_MESSAGE_PAGE_RECORDS + 1 }),
     ).toBe(false)
-    expect(Object.keys(DURABLE_API_CONTRACTS)).toHaveLength(13)
-    for (const contract of Object.values(DURABLE_API_CONTRACTS)) {
+    expect(Object.keys(DOMAIN_STATE_API_CONTRACTS)).toHaveLength(13)
+    for (const contract of Object.values(DOMAIN_STATE_API_CONTRACTS)) {
       expect(
         (contract.payload as { properties?: Record<string, unknown> })
           .properties?.version,
@@ -501,7 +501,7 @@ describe('bounded durable API contracts', () => {
       fileChanges: [fileChange],
     })
 
-    const event: DurableStateEvent = {
+    const event: DomainStateEvent = {
       version: 1,
       commit: {
         schemaVersion: 1,
@@ -510,7 +510,7 @@ describe('bounded durable API contracts', () => {
         change: { session, messageChange: { mode: 'none' } },
       },
     }
-    roundTrip(DurableStateEventSchema, event)
+    roundTrip(DomainStateEventSchema, event)
   })
 
   it('bounds bootstrap collections and rejects unknown result fields', () => {

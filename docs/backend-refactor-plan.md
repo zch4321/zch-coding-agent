@@ -251,7 +251,7 @@ P0 只调整测试和 fixture，不触及用户数据；任何门禁调整都可
 - [x] 定义 `ProviderContinuationEnvelope`、`MessageMetadataV1` 和 `ModelRouteSnapshot`；禁止 credentials、raw request 和任意 metadata key。
 - [x] 新增 `shared/file-change.ts`：公开 `FileChangeSummary`，不包含 `beforeContent`。
 - [x] 扩展 `shared/ids.ts`：稳定 Project/Session/Message/FileChange IDs；`runId` 保持 runtime-only。
-- [x] 新增 durable command/query/event schema；定义 `BackendEventCursor`、`DurableCommitEnvelope` 和各 topic 的 bounded change payload，payload/result 全部带 IPC version 和有界字段。
+- [x] 新增 domain-state command/query/event schema；定义 `BackendEventCursor`、`DurableCommitEnvelope` 和各 topic 的 bounded change payload，payload/result 全部带 IPC version 和有界字段。
 - [x] 明确 Message page 方向与 cursor：V1 使用 `beforeSeq?: number`、`limit <= 200`，返回降序查询结果时在 IPC response 中恢复为升序 records。
 
 ### 5.3 测试
@@ -266,7 +266,7 @@ P0 只调整测试和 fixture，不触及用户数据；任何门禁调整都可
 
 P1 不删除 `shared/workbench.ts`，因为 legacy runtime 仍在使用；但任何新 target code 禁止继续导入它。删除发生在 P9。
 
-P1 的 durable API 位于 `shared/durable-api.ts`，尚未注册到现有 `IPC_CONTRACTS`、preload 或 handler；正式接线仍在 P6。Record-local TypeBox schema 与 bounded JSON/route/page semantic validators 共同构成 P2 codec 边界；跨 Message 的 call/result 完整性由 P3 `MessageHistoryCompiler` 校验。
+P1 的业务状态 API 位于 `shared/domain-state-api.ts`，用于区分 backend-owned domain state、瞬时 runtime state 和 renderer UI state；其中 `DurableCommitEnvelope` 仍专指已经提交的持久事实。该 API 尚未注册到现有 `IPC_CONTRACTS`、preload 或 handler，正式接线仍在 P6。Record-local TypeBox schema 与 bounded JSON/route/page semantic validators 共同构成 P2 codec 边界；跨 Message 的 call/result 完整性由 P3 `MessageHistoryCompiler` 校验。
 
 ---
 

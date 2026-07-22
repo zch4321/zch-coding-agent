@@ -167,14 +167,14 @@ export type FileChangeCommandResult = Static<
   typeof FileChangeCommandResultSchema
 >
 
-export const DurableStateEventSchema = Type.Object(
+export const DomainStateEventSchema = Type.Object(
   {
     ...versionProperty,
     commit: DurableCommitEnvelopeSchema,
   },
   { additionalProperties: false },
 )
-export type DurableStateEvent = Static<typeof DurableStateEventSchema>
+export type DomainStateEvent = Static<typeof DomainStateEventSchema>
 
 export const AppBootstrapPayloadSchema = Type.Object(versionProperty, {
   additionalProperties: false,
@@ -362,7 +362,7 @@ export const FileChangeRevertPayloadSchema = Type.Object(
   { additionalProperties: false },
 )
 
-export const DURABLE_API_CONTRACTS = {
+export const DOMAIN_STATE_API_CONTRACTS = {
   'app:get-bootstrap': {
     payload: AppBootstrapPayloadSchema,
     result: AppBootstrapResultSchema,
@@ -417,10 +417,8 @@ export const DURABLE_API_CONTRACTS = {
   },
 } as const
 
-export type DurableApiChannel = keyof typeof DURABLE_API_CONTRACTS
-export type DurableApiPayload<Channel extends DurableApiChannel> = Static<
-  (typeof DURABLE_API_CONTRACTS)[Channel]['payload']
->
-export type DurableApiResult<Channel extends DurableApiChannel> = Static<
-  (typeof DURABLE_API_CONTRACTS)[Channel]['result']
->
+export type DomainStateApiChannel = keyof typeof DOMAIN_STATE_API_CONTRACTS
+export type DomainStateApiPayload<Channel extends DomainStateApiChannel> =
+  Static<(typeof DOMAIN_STATE_API_CONTRACTS)[Channel]['payload']>
+export type DomainStateApiResult<Channel extends DomainStateApiChannel> =
+  Static<(typeof DOMAIN_STATE_API_CONTRACTS)[Channel]['result']>
