@@ -10,6 +10,7 @@ const SHARED_FORBIDDEN_IMPORT =
   /^(?:node:|electron$|electron\/|vue$|vue\/|pinia$|pinia\/|\.\.\/(?:electron|src)\/)/u
 const TARGET_ROOTS = ['electron/application', 'electron/persistence']
 const PROVIDER_IMPORT = /(?:^|\/)providers?(?:\/|$)|provider(?:\.ts)?$/u
+const LEGACY_WORKBENCH_IMPORT = /(?:^|\/)shared\/workbench(?:\.ts)?$/u
 const CHAT_WIRE_IDENTIFIER =
   /\b(?:ProviderMessage|ProviderAssistantTurn|reasoning_content|tool_call_id|tool_calls)\b/u
 
@@ -81,6 +82,12 @@ describe('architecture import boundaries', () => {
           ...specifiers
             .filter((specifier) => PROVIDER_IMPORT.test(specifier))
             .map((specifier) => `${relative(filePath)} -> ${specifier}`),
+          ...specifiers
+            .filter((specifier) => LEGACY_WORKBENCH_IMPORT.test(specifier))
+            .map(
+              (specifier) =>
+                `${relative(filePath)} -> legacy target import ${specifier}`,
+            ),
           ...(CHAT_WIRE_IDENTIFIER.test(source)
             ? [`${relative(filePath)} -> Chat Completions wire identifier`]
             : []),

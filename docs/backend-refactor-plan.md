@@ -1,6 +1,6 @@
 # Backend State Architecture v2.1 · 详细重构计划
 
-> 状态：待评审实施计划 · 2026-07-22
+> 状态：实施中 · P0–P1 已完成 · 2026-07-22
 >
 > 目标架构：[`architecture.md`](./architecture.md)
 >
@@ -245,26 +245,28 @@ P0 只调整测试和 fixture，不触及用户数据；任何门禁调整都可
 
 ### 5.2 任务
 
-- [ ] 新增 `shared/project.ts`：`ProjectRecord`、`ProjectId` 和 revision 约束。
-- [ ] 新增 `shared/session.ts`：`SessionRecord`、`SessionSnapshot`、分页摘要、lifecycle、Goal/Plan 和 model selection。
-- [ ] 新增 `shared/message.ts`：按 `kind` 判别的 `MessageRecord` 闭集 union，以及 `TextPart/ToolCallPart/ToolResultPart`。
-- [ ] 定义 `ProviderContinuationEnvelope`、`MessageMetadataV1` 和 `ModelRouteSnapshot`；禁止 credentials、raw request 和任意 metadata key。
-- [ ] 新增 `shared/file-change.ts`：公开 `FileChangeSummary`，不包含 `beforeContent`。
-- [ ] 扩展 `shared/ids.ts`：稳定 Project/Session/Message/FileChange IDs；`runId` 保持 runtime-only。
-- [ ] 新增 durable command/query/event schema；定义 `BackendEventCursor`、`DurableCommitEnvelope` 和各 topic 的 bounded change payload，payload/result 全部带 IPC version 和有界字段。
-- [ ] 明确 Message page 方向与 cursor：V1 使用 `beforeSeq?: number`、`limit <= 200`，返回降序查询结果时在 IPC response 中恢复为升序 records。
+- [x] 新增 `shared/project.ts`：`ProjectRecord` 和 revision 约束；所有稳定 ID 统一由 `shared/ids.ts` 导出。
+- [x] 新增 `shared/session.ts`：`SessionRecord`、`SessionSnapshot`、分页摘要、lifecycle、Goal/Plan 和 model selection。
+- [x] 新增 `shared/message.ts`：按 `kind` 判别的 `MessageRecord` 闭集 union，以及 `TextPart/ToolCallPart/ToolResultPart`。
+- [x] 定义 `ProviderContinuationEnvelope`、`MessageMetadataV1` 和 `ModelRouteSnapshot`；禁止 credentials、raw request 和任意 metadata key。
+- [x] 新增 `shared/file-change.ts`：公开 `FileChangeSummary`，不包含 `beforeContent`。
+- [x] 扩展 `shared/ids.ts`：稳定 Project/Session/Message/FileChange IDs；`runId` 保持 runtime-only。
+- [x] 新增 durable command/query/event schema；定义 `BackendEventCursor`、`DurableCommitEnvelope` 和各 topic 的 bounded change payload，payload/result 全部带 IPC version 和有界字段。
+- [x] 明确 Message page 方向与 cursor：V1 使用 `beforeSeq?: number`、`limit <= 200`，返回降序查询结果时在 IPC response 中恢复为升序 records。
 
 ### 5.3 测试
 
-- [ ] 所有 shared records schema round-trip。
-- [ ] 每个 `kind` 的合法/非法 part 组合。
-- [ ] `tool_result.callId`、assistant route、reasoning/continuation 位置约束。
-- [ ] `JsonValue` 深度、数组长度、文本大小和 unknown-key 拒绝。
-- [ ] Renderer/backend 使用同一导出类型，不存在复制定义。
+- [x] 所有 shared records schema round-trip。
+- [x] 每个 `kind` 的合法/非法 part 组合。
+- [x] `tool_result.callId` 结构、assistant 本地 call ID 唯一性、route、reasoning/continuation 位置约束；跨 record call/result 配对留在 P3 compiler。
+- [x] `JsonValue` 深度、数组长度、文本大小、总字节和 unknown-key 拒绝。
+- [x] Renderer/backend 目标代码只允许复用 shared 导出，不新增复制定义或导入 legacy Workbench。
 
 ### 5.4 验收与删除
 
 P1 不删除 `shared/workbench.ts`，因为 legacy runtime 仍在使用；但任何新 target code 禁止继续导入它。删除发生在 P9。
+
+P1 的 durable API 位于 `shared/durable-api.ts`，尚未注册到现有 `IPC_CONTRACTS`、preload 或 handler；正式接线仍在 P6。Record-local TypeBox schema 与 bounded JSON/route/page semantic validators 共同构成 P2 codec 边界；跨 Message 的 call/result 完整性由 P3 `MessageHistoryCompiler` 校验。
 
 ---
 

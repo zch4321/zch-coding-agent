@@ -103,12 +103,14 @@ decode(encode(record)) deep-equals record
 
 ```text
 shared/
+  durable.ts              # schema version、revision/seq 与容量上限
+  durable-api.ts          # target commands / queries / results / events
   project.ts              # ProjectRecord
   session.ts              # SessionRecord / SessionSnapshot
   message.ts              # canonical MessageRecord
+  model-route.ts          # ModelSelection / ModelRouteSnapshot
   file-change.ts          # FileChangeSummary IPC schema
   runtime-events.ts       # ephemeral Run/stream events
-  commands.ts             # commands / queries / results
   ipc-contract.ts
   config.ts
   ids.ts
@@ -235,6 +237,10 @@ Run 完成或应用退出后，`ActiveRunExecution` 销毁。完成的结果已�
 
 ## 5. Canonical 数据结构
 
+V1 record `schemaVersion` 固定为 1。Project、Session 和 FileChange `revision` 从 1 开始；空 Session 的 `lastSeq = 0`，首条 Message 的 `seq = 1`。所有计数使用不超过 JavaScript safe integer 的非负或正整数。Message page 最大 200 条并按 `seq` 升序返回；Session summary page 最大 200 条，按 `(updatedAt, id)` 降序并使用同一复合 cursor；Project list 最大 512 条，FileChange list 最大 200 条，单次 Session commit 最多携带 512 条 Message records。
+
+TypeBox schema 负责单 record 的闭集字段、枚举、长度和 `kind + parts` 组合；`assertBoundedJsonValue`、route/page semantic validators 负责 JSON 深度/总字节、secret-safe endpoint、本地 call ID 唯一性和升序 page 等不能可靠表达为可组合 JSON Schema 的约束。跨 records 的 tool call/result 配对不属于 P1 schema，由 `MessageHistoryCompiler` 在 P3 校验。
+
 ### 5.1 ProjectRecord
 
 ```ts
@@ -300,6 +306,8 @@ interface ModelRouteSnapshot {
 ```
 
 Snapshot 保存解析完成后的非凭据 route，而不是指向可变全局 Provider 配置的引用。`purpose` 表示 `main/approval/title/compression` 等模型用途，不是 wire role；API key、Authorization header 和 transport client 不进入 shared record。一次 Run 启动后，即使用户修改 Provider 配置，该 Run 仍使用已冻结的 adapter、endpoint、model 和 reasoning；新配置只影响后续 Run。
+
+`endpoint` 必须是 HTTP(S) 绝对 URL，并拒绝 URL userinfo、fragment 和凭据型 query key。它是可进入 SQLite、renderer 和 trace 的非 secret route 信息，不能用来携带 API key、token、signature 或 Authorization 数据。
 
 ### 5.3 MessageRecord
 
@@ -547,8 +555,25 @@ Renderer 只能通过 IPC 获得 `FileChangeSummary`。这不违反“Session �
 
 ```ts
 interface SessionSnapshot {
+  schemaVersion: 1
   session: SessionRecord
-  messages: MessageRecord[]
+  messagePage: MessagePage
+}
+
+type MessagePage =
+  | {
+      schemaVersion: 1
+      sessionId: SessionId
+      records: MessageRecord[]
+      hasMore: true
+      nextBeforeSeq: number
+    }
+  | {
+      schemaVersion: 1
+      sessionId: SessionId
+      records: MessageRecord[]
+      hasMore: false
+    }
 }
 
 interface SessionOpenResult {
@@ -559,7 +584,7 @@ interface SessionOpenResult {
 
 `SessionSnapshot` 只包含数据库可无损恢复的 canonical data。`SessionOpenResult.runtime` 是独立的 backend-memory snapshot，仅用于 renderer reload 后恢复当前活动展示；它不是 Session data。
 
-历史可以按 `seq` 分页。Renderer 持有的是 canonical records 的部分副本，不是另一套结构。
+历史使用 exclusive `beforeSeq` 按 `seq` 降序查询，再在 response 中恢复为升序 records。`hasMore = true` 时 `nextBeforeSeq` 等于当前页第一条 record 的 seq。Renderer 持有的是 canonical records 的部分副本，不是另一套结构。
 
 ---
 
@@ -996,6 +1021,7 @@ Renderer 发起的 command 不能只等待 push event，也不能只依赖 invok
 
 ```ts
 interface BackendEventCursor {
+  schemaVersion: 1
   backendInstanceId: string
   sequence: number
 }
@@ -1008,7 +1034,7 @@ interface DurableCommitEnvelope<TChange> {
 }
 
 interface DurableCommandResult<TChange> {
-  schemaVersion: 1
+  version: 1
   commit: DurableCommitEnvelope<TChange>
 }
 ```
@@ -1025,6 +1051,7 @@ interface ProjectCommittedChange {
 interface SessionCommittedChange {
   session: SessionRecord
   messageChange:
+    | { mode: 'none' }
     | { mode: 'upsert'; records: MessageRecord[] }
     | { mode: 'invalidate'; throughSeq: number }
 }
@@ -1035,7 +1062,7 @@ interface FileChangeCommittedChange {
 }
 ```
 
-Project 和 FileChange 集合有明确上限，因此提交完整 list snapshot。Session event 总是携带完整 `SessionRecord`；常规提交携带本次完整新增或更新的 Message records。Compact 等操作如果影响的旧 Message 太多、会超过 IPC 上限，则使用 `mode = 'invalidate'`，renderer 丢弃该 Session 的已缓存 message pages，并通过 `session:get/message:list` 重取；不能发送无界事件。
+Project 和 FileChange 集合有明确上限，因此提交完整 list snapshot。Session event 总是携带完整 `SessionRecord`；纯标题、模型或权限等 metadata 更新使用 `mode = 'none'`，常规消息提交使用非空 `upsert` records。Compact 等操作如果影响的旧 Message 太多、会超过 IPC 上限，则使用 `mode = 'invalidate'`，renderer 丢弃该 Session 的已缓存 message pages，并通过 `session:get/message:list` 重取；不能发送无界事件。
 
 Application service 的固定顺序是：
 
@@ -1441,6 +1468,8 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 ---
 
 ## 20. 当前迁移状态
+
+P0 regression gates 和 P1 shared canonical contracts 已实现。P1 target contracts 尚未接入 SQLite、现有 preload/IPC handler 或 renderer；这部分分别从 P2、P6、P7 开始。
 
 当前 legacy 实现仍然：
 

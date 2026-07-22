@@ -1,0 +1,536 @@
+import { describe, expect, it } from 'vitest'
+import Ajv from 'ajv'
+import type { TSchema } from '@sinclair/typebox'
+import {
+  AppBootstrapResultSchema,
+  DURABLE_API_CONTRACTS,
+  DurableStateEventSchema,
+  FileChangeCommittedChangeSchema,
+  MessageListPayloadSchema,
+  ProjectCommittedChangeSchema,
+  SessionCommittedChangeSchema,
+  type DurableApiPayload,
+  type DurableStateEvent,
+} from './durable-api'
+import { MAX_MESSAGE_PAGE_RECORDS } from './durable'
+import { FileChangeSummarySchema, type FileChangeSummary } from './file-change'
+import type {
+  CallId,
+  FileChangeId,
+  MessageId,
+  ProjectId,
+  SessionId,
+} from './ids'
+import { assertBoundedJsonValue, type JsonValueLimits } from './json'
+import {
+  assertMessagePageSemantics,
+  assertMessageRecordSemantics,
+  MessagePageSchema,
+  MessageRecordSchema,
+  type MessagePage,
+  type MessageRecord,
+} from './message'
+import {
+  assertModelRouteSnapshotSafe,
+  ModelRouteSnapshotSchema,
+  type ModelRouteSnapshot,
+} from './model-route'
+import { ProjectRecordSchema, type ProjectRecord } from './project'
+import {
+  assertSessionPageSemantics,
+  assertSessionSnapshotSemantics,
+  SessionPageSchema,
+  SessionRecordSchema,
+  SessionSnapshotSchema,
+  type SessionRecord,
+} from './session'
+
+const projectId = 'project:one' as ProjectId
+const sessionId = 'session:one' as SessionId
+const callId = 'call:one' as CallId
+const hash = 'a'.repeat(64)
+const timestamp = '2026-07-22T12:00:00.000Z'
+
+function compileSchema(schema: TSchema) {
+  const ajv = new Ajv({ allErrors: true, strict: true })
+  ajv.addFormat('date-time', true)
+  return ajv.compile(schema)
+}
+
+function roundTrip<Schema extends TSchema>(schema: Schema, value: unknown) {
+  const validate = compileSchema(schema)
+  const copy = JSON.parse(JSON.stringify(value)) as unknown
+  expect(validate(copy), JSON.stringify(validate.errors)).toBe(true)
+  expect(copy).toEqual(value)
+}
+
+const route: ModelRouteSnapshot = {
+  schemaVersion: 1,
+  purpose: 'main',
+  adapterId: 'deepseek.chat-completions',
+  providerId: 'deepseek',
+  model: 'deepseek-chat',
+  reasoning: 'off',
+  endpoint: 'https://api.deepseek.com/chat/completions',
+  providerConfigRevision: 1,
+}
+
+const project: ProjectRecord = {
+  schemaVersion: 1,
+  id: projectId,
+  path: 'F:\\workspace\\one',
+  name: 'one',
+  revision: 1,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+}
+
+const session: SessionRecord = {
+  schemaVersion: 1,
+  id: sessionId,
+  projectId,
+  title: 'Canonical contracts',
+  lifecycle: 'active',
+  permissionMode: 'confirm',
+  modelSelection: {
+    providerId: 'deepseek',
+    model: 'deepseek-chat',
+    reasoning: 'off',
+  },
+  goal: null,
+  plan: null,
+  revision: 1,
+  lastSeq: 9,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+}
+
+function identity(id: string, seq: number) {
+  return {
+    schemaVersion: 1 as const,
+    id: id as MessageId,
+    sessionId,
+    seq,
+    inHistory: true,
+    createdAt: timestamp,
+  }
+}
+
+const messages: MessageRecord[] = [
+  {
+    ...identity('message:1', 1),
+    kind: 'user_input',
+    clientRequestId: 'request:1',
+    parts: [{ type: 'text', text: 'Inspect the repository' }],
+    metadata: {
+      schemaVersion: 1,
+      attachments: [
+        { ref: 'README.md', name: 'README.md', snapshotHash: hash },
+      ],
+    },
+  },
+  {
+    ...identity('message:2', 2),
+    kind: 'assistant_turn',
+    parts: [
+      { type: 'text', text: 'I will inspect it.' },
+      {
+        type: 'tool_call',
+        callId,
+        name: 'read_file',
+        arguments: { path: 'README.md' },
+      },
+    ],
+    normalizedReasoningText: 'Need repository context.',
+    providerContinuation: {
+      schemaVersion: 1,
+      adapterId: 'deepseek.chat-completions',
+      format: 'reasoning-content-v1',
+      data: { ordered: ['first', 'second'] },
+    },
+    modelRoute: route,
+    metadata: {
+      schemaVersion: 1,
+      usage: { inputTokens: 10, outputTokens: 5 },
+      reasoningProjection: {
+        truncated: false,
+        omittedOpaqueBlocks: true,
+      },
+    },
+  },
+  {
+    ...identity('message:3', 3),
+    kind: 'tool_result',
+    parts: [
+      {
+        type: 'tool_result',
+        callId,
+        content: [
+          { type: 'text', text: 'README' },
+          { type: 'json', value: { bytes: 6 } },
+        ],
+        isError: false,
+      },
+    ],
+    metadata: {
+      schemaVersion: 1,
+      tool: {
+        name: 'read_file',
+        status: 'completed',
+        truncated: false,
+      },
+    },
+  },
+  {
+    ...identity('message:4', 4),
+    kind: 'harness',
+    parts: [{ type: 'text', text: 'Base instructions' }],
+    metadata: {
+      schemaVersion: 1,
+      prompt: { resourceId: 'base', version: '1', hash },
+    },
+  },
+  {
+    ...identity('message:5', 5),
+    kind: 'runtime_context',
+    parts: [{ type: 'text', text: 'Runtime context' }],
+  },
+  {
+    ...identity('message:6', 6),
+    kind: 'agents_context',
+    parts: [{ type: 'text', text: 'AGENTS context' }],
+  },
+  {
+    ...identity('message:7', 7),
+    kind: 'orchestrator',
+    parts: [{ type: 'text', text: 'Continue the active plan' }],
+  },
+  {
+    ...identity('message:8', 8),
+    kind: 'interjection',
+    parts: [{ type: 'text', text: 'Also check the tests' }],
+  },
+  {
+    ...identity('message:9', 9),
+    kind: 'compact_summary',
+    parts: [{ type: 'text', text: 'Summary of earlier messages' }],
+    metadata: {
+      schemaVersion: 1,
+      compact: { replacesThroughSeq: 8, sourceHash: hash },
+    },
+  },
+]
+
+const fileChange: FileChangeSummary = {
+  schemaVersion: 1,
+  id: 'file-change:one' as FileChangeId,
+  sessionId,
+  callId,
+  path: 'README.md',
+  operation: 'patch',
+  diff: '@@ -1 +1 @@',
+  diffHash: hash,
+  diffTruncated: false,
+  beforeExists: true,
+  beforeHash: hash,
+  afterExists: true,
+  afterHash: hash,
+  revision: 1,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+}
+
+describe('durable canonical records', () => {
+  it('round-trips Project, Session, every Message kind, route and FileChange', () => {
+    roundTrip(ProjectRecordSchema, project)
+    roundTrip(SessionRecordSchema, session)
+    roundTrip(ModelRouteSnapshotSchema, route)
+    roundTrip(FileChangeSummarySchema, fileChange)
+    for (const message of messages) roundTrip(MessageRecordSchema, message)
+  })
+
+  it('enforces lifecycle, revision and secret-safe public fields', () => {
+    const validateSession = compileSchema(SessionRecordSchema)
+    const validateProject = compileSchema(ProjectRecordSchema)
+    const validateFileChange = compileSchema(FileChangeSummarySchema)
+
+    expect(validateSession({ ...session, lifecycle: 'archived' })).toBe(false)
+    expect(
+      validateSession({
+        ...session,
+        lifecycle: 'archived',
+        archivedAt: timestamp,
+      }),
+    ).toBe(true)
+    expect(validateProject({ ...project, revision: 0 })).toBe(false)
+    expect(
+      validateFileChange({ ...fileChange, beforeContent: 'private snapshot' }),
+    ).toBe(false)
+  })
+})
+
+describe('canonical Message constraints', () => {
+  const validate = compileSchema(MessageRecordSchema)
+
+  it('rejects illegal kind/part and metadata combinations', () => {
+    const user = messages[0]!
+    const assistant = messages[1]!
+    const toolResult = messages[2]!
+    const compact = messages[8]!
+
+    expect(
+      validate({
+        ...user,
+        parts: [
+          {
+            type: 'tool_call',
+            callId,
+            name: 'read_file',
+            arguments: {},
+          },
+        ],
+      }),
+    ).toBe(false)
+    expect(validate({ ...assistant, parts: toolResult.parts })).toBe(false)
+    expect(
+      validate({
+        ...toolResult,
+        parts: [...toolResult.parts, ...toolResult.parts],
+      }),
+    ).toBe(false)
+    expect(validate({ ...user, providerContinuation: {} })).toBe(false)
+    expect(validate({ ...assistant, modelRoute: undefined })).toBe(false)
+    expect(
+      validate({
+        ...assistant,
+        metadata: { schemaVersion: 1, providerState: 'not allowed' },
+      }),
+    ).toBe(false)
+    const compactWithoutMetadata: Record<string, unknown> = { ...compact }
+    delete compactWithoutMetadata.metadata
+    expect(validate(compactWithoutMetadata)).toBe(false)
+  })
+
+  it('checks local call uniqueness, bounded JSON and route safety', () => {
+    const assistant = messages[1]
+    if (!assistant || assistant.kind !== 'assistant_turn') {
+      throw new Error('assistant fixture is missing')
+    }
+    const toolCall = assistant.parts.find((part) => part.type === 'tool_call')
+    if (!toolCall) throw new Error('tool-call fixture is missing')
+
+    expect(() =>
+      assertMessageRecordSemantics({
+        ...assistant,
+        parts: [...assistant.parts, { ...toolCall }],
+      }),
+    ).toThrow(/Duplicate assistant tool call/u)
+    expect(() =>
+      assertMessageRecordSemantics({
+        ...assistant,
+        modelRoute: {
+          ...route,
+          endpoint: 'https://user:secret@example.test/v1',
+        },
+      }),
+    ).toThrow(/credentials/u)
+    expect(() =>
+      assertModelRouteSnapshotSafe({
+        ...route,
+        endpoint: 'https://example.test/v1?api_key=secret',
+      }),
+    ).toThrow(/credential query/u)
+  })
+
+  it('preserves opaque continuation JSON ordering through a round-trip', () => {
+    const assistant = messages[1]
+    if (!assistant || assistant.kind !== 'assistant_turn') {
+      throw new Error('assistant fixture is missing')
+    }
+    const serialized = JSON.stringify(assistant.providerContinuation)
+    expect(JSON.stringify(JSON.parse(serialized))).toBe(serialized)
+  })
+})
+
+describe('bounded canonical JSON', () => {
+  const limits: JsonValueLimits = {
+    maxDepth: 2,
+    maxArrayLength: 2,
+    maxObjectKeys: 2,
+    maxStringLength: 4,
+    maxBytes: 32,
+  }
+
+  it('accepts values within limits and rejects every structural bound', () => {
+    expect(() => assertBoundedJsonValue({ ok: [1, 2] }, limits)).not.toThrow()
+    expect(() =>
+      assertBoundedJsonValue({ a: { b: { c: 1 } } }, limits),
+    ).toThrow(/depth/u)
+    expect(() => assertBoundedJsonValue([1, 2, 3], limits)).toThrow(/array/u)
+    expect(() => assertBoundedJsonValue({ a: 1, b: 2, c: 3 }, limits)).toThrow(
+      /key count/u,
+    )
+    expect(() => assertBoundedJsonValue('12345', limits)).toThrow(/string/u)
+    expect(() =>
+      assertBoundedJsonValue(
+        { abcd: 'abcd', efgh: 'efgh' },
+        { ...limits, maxBytes: 20 },
+      ),
+    ).toThrow(/size/u)
+  })
+
+  it('rejects non-JSON values and cycles', () => {
+    const cycle: { self?: unknown } = {}
+    cycle.self = cycle
+    expect(() => assertBoundedJsonValue(Number.NaN, limits)).toThrow(/finite/u)
+    expect(() => assertBoundedJsonValue(new Date(), limits)).toThrow(/plain/u)
+    expect(() => assertBoundedJsonValue(cycle, limits)).toThrow(/cycles/u)
+  })
+})
+
+describe('message paging and Session snapshots', () => {
+  const page: MessagePage = {
+    schemaVersion: 1,
+    sessionId,
+    records: messages.slice(0, 3),
+    hasMore: true,
+    nextBeforeSeq: 1,
+  }
+
+  it('uses ascending records and an exclusive beforeSeq cursor', () => {
+    roundTrip(MessagePageSchema, page)
+    expect(() => assertMessagePageSemantics(page)).not.toThrow()
+    expect(() =>
+      assertMessagePageSemantics({
+        ...page,
+        records: [...page.records].reverse(),
+        nextBeforeSeq: 3,
+      }),
+    ).toThrow(/ascending/u)
+    expect(() =>
+      assertMessagePageSemantics({ ...page, nextBeforeSeq: 2 }),
+    ).toThrow(/nextBeforeSeq/u)
+  })
+
+  it('keeps Session and page ownership aligned', () => {
+    const snapshot = { schemaVersion: 1 as const, session, messagePage: page }
+    roundTrip(SessionSnapshotSchema, snapshot)
+    expect(() => assertSessionSnapshotSemantics(snapshot)).not.toThrow()
+    expect(() =>
+      assertSessionSnapshotSemantics({
+        ...snapshot,
+        messagePage: {
+          ...page,
+          sessionId: 'session:other' as SessionId,
+        },
+      }),
+    ).toThrow(/another Session/u)
+  })
+
+  it('pages Session summaries by a stable updatedAt/id cursor', () => {
+    const newer: SessionRecord = {
+      ...session,
+      id: 'session:two' as SessionId,
+      updatedAt: '2026-07-22T13:00:00.000Z',
+    }
+    const page = {
+      schemaVersion: 1 as const,
+      records: [newer, session],
+      hasMore: true as const,
+      nextBefore: { updatedAt: session.updatedAt, sessionId: session.id },
+    }
+    roundTrip(SessionPageSchema, page)
+    expect(() => assertSessionPageSemantics(page)).not.toThrow()
+    expect(() =>
+      assertSessionPageSemantics({
+        ...page,
+        records: [...page.records].reverse(),
+        nextBefore: { updatedAt: newer.updatedAt, sessionId: newer.id },
+      }),
+    ).toThrow(/descending/u)
+  })
+})
+
+describe('bounded durable API contracts', () => {
+  const cursor = {
+    schemaVersion: 1 as const,
+    backendInstanceId: 'backend:one',
+    sequence: 1,
+  }
+
+  it('keeps payload and result versions explicit', () => {
+    const payload: DurableApiPayload<'message:list'> = {
+      version: 1,
+      sessionId,
+      beforeSeq: 9,
+      limit: MAX_MESSAGE_PAGE_RECORDS,
+    }
+    const validatePayload = compileSchema(MessageListPayloadSchema)
+    expect(validatePayload(payload)).toBe(true)
+    expect(validatePayload({ ...payload, version: 2 })).toBe(false)
+    expect(
+      validatePayload({ ...payload, limit: MAX_MESSAGE_PAGE_RECORDS + 1 }),
+    ).toBe(false)
+    expect(Object.keys(DURABLE_API_CONTRACTS)).toHaveLength(13)
+    for (const contract of Object.values(DURABLE_API_CONTRACTS)) {
+      expect(
+        (contract.payload as { properties?: Record<string, unknown> })
+          .properties?.version,
+      ).toBeDefined()
+      expect(
+        (contract.result as { properties?: Record<string, unknown> }).properties
+          ?.version,
+      ).toBeDefined()
+      expect(() => compileSchema(contract.payload)).not.toThrow()
+      expect(() => compileSchema(contract.result)).not.toThrow()
+    }
+  })
+
+  it('round-trips bounded topic changes and supports metadata-only Session commits', () => {
+    roundTrip(ProjectCommittedChangeSchema, { projects: [project] })
+    roundTrip(SessionCommittedChangeSchema, {
+      session,
+      messageChange: { mode: 'none' },
+    })
+    roundTrip(SessionCommittedChangeSchema, {
+      session,
+      messageChange: { mode: 'upsert', records: messages.slice(0, 3) },
+    })
+    roundTrip(FileChangeCommittedChangeSchema, {
+      sessionId,
+      fileChanges: [fileChange],
+    })
+
+    const event: DurableStateEvent = {
+      version: 1,
+      commit: {
+        schemaVersion: 1,
+        cursor,
+        topic: 'session.changed',
+        change: { session, messageChange: { mode: 'none' } },
+      },
+    }
+    roundTrip(DurableStateEventSchema, event)
+  })
+
+  it('bounds bootstrap collections and rejects unknown result fields', () => {
+    const validate = compileSchema(AppBootstrapResultSchema)
+    expect(
+      validate({
+        version: 1,
+        cursor,
+        projects: [project],
+        sessions: [session],
+      }),
+    ).toBe(true)
+    expect(
+      validate({
+        version: 1,
+        cursor,
+        projects: [project],
+        sessions: [session],
+        workbench: {},
+      }),
+    ).toBe(false)
+  })
+})
