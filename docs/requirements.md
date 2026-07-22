@@ -1,7 +1,8 @@
 # 需求文档 · Zch Coding Agent
 
-> 状态：MVP 实现同步版 v0.3 · 最后更新 2026-06-20
+> 状态：Backend Architecture v2 配套需求 · 最后更新 2026-07-22
 > 本文档定义「做什么」。技术怎么做见 [`architecture.md`](./architecture.md)，前端信息架构与验收标准见 [`frontend-spec.md`](./frontend-spec.md)。
+> v2 条目是迁移目标，不表示当前 legacy 实现已经满足；迁移状态见架构文档 §19。
 
 ---
 
@@ -45,7 +46,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 - **可中断**：用户随时可中止当前 Agent 任务。
 - **可审批**：每个可能产生副作用的工具调用前，必须经过权限管线（§3）。
-- **状态明确**：同一会话同一时间只允许一个活动 run；运行中收到新消息时默认拒绝，但切换到其他 conversation 不取消后台 run。
+- **状态明确**：同一 Session 同一时间只允许一个活动 Run；运行中收到新消息时默认拒绝，但切换到其他对话不取消后台 Run。
 - **协议完整**：LLM 一次返回多个工具调用时，每个调用都必须回填一个结果；拒绝、取消、超时也以结构化工具结果回填，不能静默丢失。
 - **有界运行**：配置最大循环轮数、单次和单个 run 的工具输出预算、累计上下文预算；全应用 `maxConcurrentRuns` 范围为 `1..32`、默认 4，达到上限的新 run 直接拒绝。每个 run 同时最多一个 provider call，不设置独立 provider 并发上限。`maxStepsPerRun` 默认值为 200，可在 Limits 设置中调整；上下文达到当前模型 prompt budget 的 `autoCompactTriggerPercent`（默认 80%）时，在安全边界自动压缩旧历史；字节、行数/结果数与估算 token 任一上限先到即截断，并向用户和模型返回续读信息。
 - **可回放**：调试日志开启时，循环的请求、响应、流式事件和工具结果必须完整保存，可确定性离线回放原会话；重新请求模型属于单独的“重放请求”，不保证复现随机输出（§5）。
@@ -157,12 +158,15 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 ### 2.4 会话与工作区
 
 - 一个工作区（workspace）= 一个本地目录。
-- 会话（session）绑定一个工作区与一个权限模式。
+- Session 是持久化对话实体，绑定一个工作区、当前模型选择与权限模式；UI 中的“对话”是 Session 的展示名称，不存在独立 Conversation 领域记录或 `conversationId -> sessionId` 映射。
+- 所有持久化 Session/Run/消息/工具/审批/Goal/Plan/draft 状态以后端和 SQLite 为准。Renderer 只保存带 entity/state revision 的后端副本及纯 UI 状态，不得单独创建或提交领域状态。
+- 每次用户提交形成一个持久化 Run；Run 在开始时冻结实际 `ModelRouteSnapshot` 和权限模式。Session 的模型/模式修改只影响后续 Run，不改变已经开始的 Run。
 - 同一 canonical workspace 同时最多一个非只读 writer run；`auto`、`confirm`、`yolo` 从 run 启动覆盖 provider、工具、等待审批、interjection continuation 和 cancelling。若不可中止的副作用工具在 cancelled/timeout 结果之后仍在执行，writer 必须继续持有到其底层 Promise settle。writer 数固定为 1，不提供配置。
-- `readonly` run 不获取 writer，可与 writer 和其他 readonly run 并行；不同 workspace 可各自拥有 writer。同 workspace 的第二个非只读 run 不排队，返回带 owner conversation/run 的结构化冲突。
+- `readonly` run 不获取 writer，可与 writer 和其他 readonly run 并行；不同 workspace 可各自拥有 writer。同 workspace 的第二个非只读 run 不排队，返回带 owner Session/Run 的结构化冲突。
 - completed、failed、cancelled、异常、session close 和 app dispose 都必须走幂等释放路径。全局 run slot 在 terminal run status 对 renderer 可见前释放；writer 在没有残留副作用时同步释放，有不可中止副作用时延迟到其真正 settle，禁止为满足 UI 终态而提前开放第二个 writer。
 - 文件工具必须约束在工作区边界内（规范化路径、真实路径与符号链接逃逸检测）。
-- MVP 会话状态保存在内存；应用崩溃或重启后不承诺恢复未完成 run。JSONL trace 是审计记录，不是事务恢复日志。
+- Session canonical history 必须持久化，应用重启后可以继续同一 Session，并从最新 checkpoint 加后续历史重建模型上下文。非终态 Run 在重启恢复时标记为 `interrupted`；不承诺恢复其进程、PTY、网络请求或其他运行时对象，但必须保留已提交状态和有界 partial output。
+- JSONL trace 是可选审计记录，不是事务恢复日志，也不能作为 Session 状态的唯一来源。
 
 ### 2.5 Skills（渐进式专家指令）
 
@@ -332,9 +336,9 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 
 - UI 中一个项目对应一个 workspace，不重复展示两个概念。
 - 左侧项目侧栏提供新对话、对话搜索，以及项目下的二级对话列表；不引入 Task 概念。
-- 对话保存本地标题、消息历史、所属项目、创建/更新时间和最近使用的模型/权限模式。
-- 搜索只在本地检索对话标题、用户消息和 Agent 文本，不检索工作区文件、工具原始输出、reasoning 或 trace，不访问 Provider。
-- 首次发送消息时自动创建 runtime Session；Session/Run ID 不作为常驻产品信息展示。
+- “对话”直接对应 backend-owned Session；标题、消息历史、所属项目、创建/更新时间、draft 和模型/权限模式均由后端持久化并推送给 renderer。
+- 搜索通过本地后端查询 Session 标题、用户消息和 Agent 文本，不检索工作区文件、工具原始输出、reasoning 或 trace，也不访问 Provider。
+- 新建对话时立即创建持久化 Session；首次发送消息只创建 Run。Session/Run ID 不作为常驻产品信息展示。
 - 正式 UI 不得使用硬编码项目、对话或工具活动作为占位数据。
 
 ### 4.2 终端面板
@@ -351,7 +355,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - `apply_patch` / `create_file` 的变更在执行前/后以 diff 形式预览。
 - 审批绑定变更前文件 hash 与拟写入内容 hash；若文件在审批后发生变化，原批准失效并重新计算 diff。
 - 使用有界只读 Diff viewer，支持语法高亮、截断提示和审批状态；P3 不引入 Monaco/CodeMirror 等完整编辑器。
-- 每次成功的 `create_file` / `apply_patch` / `delete_file` 按 conversation 保存变更记录、before/after hash 和有界恢复快照；Diff 面板可查看上次及更早的对话变更。
+- 每次成功的 `create_file` / `apply_patch` / `delete_file` 按 Session 保存变更记录、before/after hash 和有界恢复快照；Diff 面板可查看上次及更早的 Session 变更。
 - 用户可显式回退单项变更。回退前必须再次确认，并校验当前文件仍等于该记录的 after 状态；检测到用户或后续工具修改时拒绝覆盖。回退不依赖 Git，也不影响其他文件。
 - 变更历史仅保存在主进程 `userData`，不向 renderer 暴露恢复快照；记录数量和总字节数必须有硬上限。
 
@@ -378,7 +382,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 
 ### 5.1 形态
 
-- 每个会话一个 **JSONL 文件**，存于 Electron `userData/logs/`。
+- 每个 Session 一个 **JSONL 文件**，存于 Electron `userData/traces/`。
 - 日志是**调试功能**，配置项 `logging.enabled` 默认 `false`；只有用户显式开启后才创建 trace。
 - 开启后采用完整记录模式，不做上下文脱敏或摘要化：完整保存规范化消息、实际 Provider 请求体、原始流事件、聚合响应、reasoning/continuation state、工具参数与结果、审批事件和配置快照。
 - “完整”以 Agent 实际可见数据为边界：工具因输出上限而未进入 Agent 的丢弃字节记录 `totalBytes/truncated/discardedHash`，不要求无限落盘；进入模型上下文的内容必须逐字保存。
@@ -386,15 +390,15 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - 开启时必须明确提示日志可能包含源代码、用户输入、模型推理、工具输出以及工作区中被读取的凭据，并支持保留天数/总大小上限。
 - 完整 trace 必须可规范化为只读 `zch-session-transcript`：按 run 展示用户/Assistant/明文 reasoning、内部编排、工具与审批、Provider上下文、Plan、interjection、usage、terminal和生命周期。该格式不可导入或重放；每次 Electron 导出前必须警告，导出内容不做敏感信息扫描或脱敏，用户负责本地保存和后续分享。
 - Transcript 不输出 provider wire request/raw response/provider state、流式重复分片、工具schema、加密/opaque reasoning或多模态原始载荷；中断且没有final message的明文delta标为partial，多模态只保留类型/MIME/已知大小占位。
-- 不引入 SQLite（避免 native 依赖）；日志清理 GUI 留待后续版本。
+- 产品 Session 状态使用 SQLite 持久化；Trace 继续按每个 Session 一个 JSONL 文件保存，不能因数据库存在而降低 trace 保真度。日志清理 GUI 留待后续版本。
 
 ### 5.2 必须记录的事件（每条一行 JSON）
 
 ```
-session.start   { schemaVersion, seq, eventId, conversationId, sessionId, workspace, model, mode, ts }
+session.start   { schemaVersion, seq, eventId, sessionId, workspace, model, mode, ts }
 run.start/end   { runId, status, ts }
-run.rejected    { runId, reason, limit?, active?, writerConversationId?, writerRunId?, ts }
-workspace.writer { conversationId, sessionId, runId, workspace, acquired|released|rejected, owner?, ts }
+run.rejected    { runId, reason, limit?, active?, writerSessionId?, writerRunId?, ts }
+workspace.writer { sessionId, runId, workspace, acquired|released|rejected, owner?, ts }
 llm.call        { callId, runId, model, params, messages, providerRequest, rawEvents, response, providerState?, usage, timing, ts }
 approval        { callId, policySignals, mode, approver, decision, reason, ts }
 tool.call       { callId, runId, tool, args, result, approvedBy, duration, ts }

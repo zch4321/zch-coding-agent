@@ -1,593 +1,933 @@
 # 架构设计文档 · Zch Coding Agent
 
-> 状态：当前实现同步版 · 最后更新 2026-07-11
+> 状态：Backend Architecture v2 目标规范 · 2026-07-22
 >
-> 配套文档：[`requirements.md`](./requirements.md) 说明产品能力，`frontend-spec.md`](./frontend-spec.md) 说明前端信息架构。本文只记录当前代码实际架构和关键边界，不再保留早期设计稿内容或未实现方案。
+> 配套文档：[`requirements.md`](./requirements.md) 定义产品能力，[`frontend-spec.md`](./frontend-spec.md) 定义前端信息架构与交互验收。
+>
+> 本文是后续重构的规范性目标，不表示所有内容已经实现。迁移期间，新增代码必须遵守本文边界；旧 `workbench.json`、renderer-owned conversation 和 memory-only session history 仅作为待移除的兼容实现，不得继续扩展。
 
 ---
 
-## 1. 总览
+## 1. 架构目标
 
-Zch Coding Agent 是 Electron + Vue 3 桌面 coding agent。实现采用主进程编排、渲染进程展示、preload 白名单桥接的结构：
+Zch Coding Agent 是 Electron + Vue 3 桌面 coding agent。后端负责领域状态、持久化、Agent 编排和所有宿主能力；renderer 负责展示、收集输入并保存后端状态的副本。
+
+目标结构：
 
 ```text
-Renderer (Vue + Pinia, sandboxed)
-  └─ window.agentApi / AgentEvent / TerminalEvent
-
-Preload
-  └─ contextBridge 暴露冻结的 AgentApi，不暴露 ipcRenderer
-
-Main process
-  ├─ IPC handlers / sender validation / payload validation
-  ├─ Electron Runtime Event adapter
-  ├─ AgentRuntime composition root
-  │   ├─ SessionManager and session collaborators
-  │   ├─ LLM providers
-  │   ├─ Tool registry, permission pipeline, terminal pool
-  │   └─ prompt resources and prompt harness
-  ├─ config, secrets, logging, workbench, skills
-  └─ project metadata and code-intelligence backends
+Renderer (Vue + Pinia)
+  ├─ UI-only state
+  └─ revisioned backend replicas
+          │ commands / queries
+          ▼
+Preload typed bridge
+          │ validated IPC
+          ▼
+Backend application services
+  ├─ SessionService / RunService
+  ├─ RuntimeCoordinator
+  ├─ Provider / Prompt / Tool / Permission services
+  ├─ Project / Terminal / Skills / MCP services
+  └─ SQLite repositories
+          │ commit
+          ▼
+SQLite canonical durable state
+          │ SessionChange / snapshot
+          ▼
+Renderer replicas
 ```
 
-核心边界：
+这次重构解决以下根本问题：
 
-- `shared/` 只放跨进程类型、schema 和纯数据契约，不导入 Electron、Node.js 或 Vue。
-- `electron/` 拥有主进程权限，负责 secrets、文件系统、进程、PTY、网络、LLM、工具执行和 IPC。
-- `src/` 是 sandboxed renderer，只通过 `window.agentApi` 调用主进程，不直接访问 Node/Electron。
-- `resources/prompts/` 是模型可见 prompt 资源，由 `PromptRegistry` 加载并带版本/hash 进入 trace。
+- renderer 不再拥有一套独立于后端的 conversation 真相。
+- `ConversationRecord` 与 main-process `SessionState` 不再表示同一个对话的两套不同数据。
+- 应用重启后，模型上下文能够从持久化数据恢复，而不是只恢复 UI 消息。
+- 模型、权限模式、Goal、Plan、工具、审批和 draft 的变更都经过后端。
+- renderer 不再保存整个 workbench 快照，也不再通过 `workbench:save` 覆盖全部对话。
+- provider request 由 provider-neutral canonical history 编译，不以进程内 `ProviderMessage[]` 为唯一来源。
 
 ---
 
-## 2. 目录结构
+## 2. 固定原则
 
-当前主要目录：
+### 2.1 后端是领域状态的唯一真相源
+
+所有非纯 UI 状态由后端拥有。状态变更流程固定为：
+
+1. renderer 发送版本化 command。
+2. 后端校验 command 和目标 entity revision。
+3. 后端在事务中更新 canonical state。
+4. SQLite commit 成功。
+5. 后端返回并发布带 entity/state revision 的 snapshot 或 change。
+6. renderer 用后端结果替换或更新本地副本。
+
+不得先向 renderer 宣布持久状态成功，再异步尝试落盘。数据库提交失败时，前端只能保留 pending/error UI，不得把请求值当成已提交事实。
+
+### 2.2 状态分为三类
+
+| 类别                    | 所有者           | 是否落盘             | 示例                                                                                               |
+| ----------------------- | ---------------- | -------------------- | -------------------------------------------------------------------------------------------------- |
+| Durable domain state    | backend + SQLite | 是                   | Session、消息、Run、model selection、route snapshot、Goal、Plan、审批、usage、draft                |
+| Ephemeral runtime state | backend          | 否或仅保存恢复检查点 | `AbortController`、Promise、provider client、writer lock、PTY process、MCP connection、流式 buffer |
+| UI-only state           | renderer         | 否                   | 滚动位置、面板展开、hover、当前选区、IME composition、未确认的 optimistic value                    |
+
+“前端不能独立修改状态”的准确含义是：**不得存在只有 renderer 知道的已提交领域状态**。输入控件在 IPC 往返前可以有临时值，但必须明确标记 pending，并最终以后端返回为准。
+
+### 2.3 Canonical schema 只能定义一次
+
+持久化领域记录在 `shared/` 使用 TypeBox 定义 schema，并由 schema 导出 TypeScript 类型。renderer、backend application service、IPC 和数据库 codec 共用同一份定义。
+
+禁止在 `src/` 和 `electron/` 再手写语义相近但字段不同的 `ConversationRecord`、`ChatMessage` 或持久化 `SessionState`。
+
+SQLite 是 canonical record 的关系型存储表示。数据库列名和表拆分可以不同于嵌套 JSON，但必须满足：
+
+```text
+decode(encode(record)) deep-equals record
+```
+
+不能为了“物理结构完全相同”把完整 Session 序列化成一个不断增长的 JSON blob；那会重新引入整份重写、弱查询和并发覆盖问题。
+
+### 2.4 Commit 后发布
+
+所有 durable change 都带 Session `stateRevision`。它是 Session aggregate 的同步序号，与单个 record 的 `entityRevision` 分开。后端只发布已提交数据；renderer 按 `stateRevision` 应用：
+
+- `incomingStateRevision <= localStateRevision`：忽略重复或过期 change。
+- `incomingStateRevision == localStateRevision + 1`：正常应用。
+- `incomingStateRevision > localStateRevision + 1`：停止增量应用并请求 snapshot。
+
+`stateRevision` 只用于同步排序；title、model selection、draft、Plan 等并发写冲突使用各自的 `entityRevision`。无关的 tool/usage 更新不能让 draft command 产生伪冲突。
+
+流式 token 是 backend-owned ephemeral output，可以在数据库 checkpoint 之间高频推送；它不能伪装成已经提交的最终消息。
+
+### 2.5 历史保真与 append-only
+
+用户消息、assistant 最终消息、harness layer、工具调用结果和 compaction checkpoint 一旦成为正式历史，不允许原地改写。明确的 compaction 只增加 checkpoint，不删除原始历史。
+
+provider context selection 可以省略旧记录，但不能修改 canonical history。需要修正时追加新 record 或使用显式 tombstone/supersede 语义。
+
+---
+
+## 3. 进程与代码边界
+
+### 3.1 `shared/`
+
+只包含跨进程的纯数据定义和纯函数：
 
 ```text
 shared/
-  agent-api.ts              # preload 暴露给 renderer 的 API 形状
-  ipc-contract.ts           # IPC 请求/响应 runtime schema
-  agent-events.ts           # AgentEvent 和 UI timeline 事件
-  config.ts                 # PublicConfig、配置请求 schema
-  project-model.ts          # ProjectModel / Code Intelligence contracts
-  trace.ts                  # promptBuild / trace 辅助 schema
-  workbench.ts              # 项目、会话、消息、工具活动持久化模型
-
-electron/
-  main.ts                   # app bootstrap、安全策略、依赖装配
-  preload.ts                # 冻结 window.agentApi
-  headless/                 # 固定 Yolo API/CLI、JSONL、result/patch 和自动 Plan driver
-  ipc/                      # IPC 注册、sender/payload/result 校验
-  runtime/                  # Node-only AgentRuntime 组装、事件总线和 Electron host adapter
-  session/                  # SessionManager、run loop、prompt harness、compact/interjection/orchestration
-  tools/                    # 内置工具定义和 ToolRegistry/ToolExecutor
-  permission/               # policy engine、approval pipeline、auto approver
-  providers/                # OpenAI-compatible provider adapter
-  prompts/                  # PromptRegistry
-  logging/                  # JSONL trace、replay、stats、cleanup
-  config/                   # config store、secret store、migration、atomic write
-  project/                  # .zch/project-model.json 存储和模块检测
-  code-intelligence/        # CodeBackendManager、Serena MCP adapter
-  terminal/                 # node-pty pool 和 bounded scrollback
-  skills/                   # skill 扫描、安装、启用和 SSRF 边界
-  net/                      # HTTP transport、proxy、SSRF guard
-  workbench/                # main-process workbench persistence
-
-src/
-  App.vue
-  components/               # chat、settings、artifacts、terminal 等 UI
-  stores/
-    agent.ts                # 兼容门面，转发到领域 store
-    agent-runtime.ts        # session/run/AgentEvent runtime
-    agent-workbench.ts      # projects/conversations persistence
-    agent-timeline.ts       # messages/tools/context/plan/goal timeline
-    agent-settings.ts       # providers、permissions、logging、skills settings
-    agent-changes.ts        # change history/revert
-    agent-shell.ts          # bridge/bootstrap state
+  session.ts              # SessionRecord、SessionSnapshot、SessionChange
+  run.ts                  # RunRecord、RunStatus、RunOutput
+  timeline.ts             # Message、ToolCall、Approval、Usage 等 canonical entity
+  commands.ts             # commands / queries / results
+  ipc-contract.ts         # IPC runtime schemas
+  agent-events.ts         # runtime stream events
+  config.ts
+  ids.ts
 ```
 
----
+`shared/` 不得导入 Electron、Node.js、Vue、Pinia、数据库 driver 或 provider implementation。
 
-## 3. 应用启动与 IPC
+### 3.2 `electron/`
 
-`electron/main.ts` 负责：
+主进程后端拥有：
 
-- 注册自定义 app scheme，开发环境使用 Vite dev server，生产环境从 `dist/` 读取资源。
-- 安装 CSP、导航拦截、权限拒绝、webview/window-open 禁用等安全策略。
-- 初始化 `ConfigStore`、Electron `safeStorage` adapter、HTTP transport 和 `WorkbenchStore`，再通过唯一的 `createAgentRuntime()` 创建 Agent 服务。
-- 通过 `registerIpcHandlers` 绑定所有 `shared/ipc-contract.ts` 中声明的 channel。
+- SQLite connection、migrations、repositories 和 transaction boundary。
+- application services 和 command handlers。
+- Session/Run runtime coordinator。
+- Provider、Prompt Harness、Tool、Permission、Terminal、MCP、Skills 和 Project services。
+- secrets、文件系统、进程、网络和 trace。
+- state change publisher。
 
-`createAgentRuntime()` 是 Agent 依赖的唯一生产组装入口，创建 `SkillsManager`、`TraceService`、`ChangeHistoryStore`、`ProjectMetadataStore`、`CodeBackendManager`、`McpManager`、`PromptRegistry` 和 `SessionManager`。这些服务不由 Electron 或 Headless host 重复组装。配置存储、网络 transport、Workbench、窗口和 IPC 仍是 host 职责。
+目标目录：
 
-IPC 调用链：
+```text
+electron/
+  application/            # commands、queries、transaction orchestration
+  persistence/
+    database.ts           # SQLite lifecycle / pragmas / write queue
+    migrations/
+    repositories/
+    codecs/
+  runtime/                # AgentRuntime、SessionRuntime、RunRuntime
+  session/                # provider-neutral session/run domain logic
+  ipc/                    # host adapter，不承载领域逻辑
+  providers/
+  prompts/
+  tools/
+  permission/
+  terminal/
+  project/
+  skills/
+  mcp/
+  logging/
+```
 
-1. renderer 调用 `window.agentApi.*`。
-2. preload 把调用转成固定 channel 的 `ipcRenderer.invoke`。
-3. `electron/ipc/index.ts` 校验 sender、payload size、payload schema。
-4. `electron/ipc/app-handlers.ts` 执行业务 handler。
-5. 返回值再次按 result schema 校验后返回 renderer。
+IPC handler 只负责 host 边界校验、调用 application service 和编码结果，不能直接修改 repository 或 runtime map。
 
-主进程向 renderer 推送两类事件：
+### 3.3 `src/`
 
-- `AGENT_EVENT_CHANNEL`：run、assistant、tool、approval、goal/plan、interjection、usage 等事件。
-- `TERMINAL_EVENT_CHANNEL`：PTY 输出、状态和快照相关事件。
+Renderer 只包含：
 
-`SessionEventEmitter` 只产生与 Electron 无关的 `AgentEvent` / `TerminalEvent`，交给 `RuntimeEventBus` 校验和发布。EventBus 即使没有 renderer subscriber 也会有界保存 terminal run completion，供程序化 `AgentRuntime.run()` 等待；Electron adapter 只负责包装 IPC envelope 并转发给当前 `WebContents`。单个 host listener 失败会记录诊断，不能中断 Agent loop。
+- backend entity replicas。
+- command pending/error 状态。
+- selectors 和展示 projection。
+- 纯 UI 状态。
 
-### 3.1 Headless host
+它不能读写 SQLite、workspace、secrets 或 provider，也不能持久化完整 Session。
 
-`electron/headless/` 提供内部 `zch-agent-headless run` 和可直接调用的 `runHeadlessAgent()`。它把受信任的 headless config 转换为普通 v8 `AppConfig`，通过 provider-scoped 环境凭据创建同一个 `createAgentRuntime()`，并强制 session 使用 Yolo；task 无法修改权限模式或运行配置。Headless 不注册额外工具，也不复制 Provider/tool/compact/Skills/MCP loop。
+### 3.4 Host-neutral runtime
 
-stdout 是带 `schemaVersion/seq/ts` 的 JSONL，stderr 只接收 host 诊断；`result.json` 使用原子写入。host listener 汇总 usage、工具执行、最终回复和结构化 Goal/Plan 状态，补丁通过临时 Git index 生成，不修改真实 index。结果状态区分 `completed`、`failed`、`cancelled`、`timed_out` 和 `needs_human_input`，不把 Agent 正常结束误写成 hidden grader 通过。
+Electron 和 Headless 必须复用同一个 application/runtime composition。Repository 通过 port 注入：
 
-Plan 进入 `awaiting_review` 后，driver 先等待共享 run controller 完全 settle，再用 `headless:auto-plan-approval` 更新状态并追加版本化 `<autonomous_plan_approval>` harness layer。该消息记录为 `orchestrator.message` 和 `harness.auto_action`，不是 `user.message`。自动批准达到配置上限或 Goal blocked 时返回 `needs_human_input`。SIGINT、SIGTERM 和 wall timeout 都复用 Runtime interrupt/disposer。
+- Desktop 使用 `userData/agent.db`。
+- Headless/benchmark 使用每次任务独立的临时 SQLite 数据库。
+- 测试可以使用临时 SQLite 文件；不得用行为不同的手写内存仓库替代数据库关键语义。
 
-### 3.2 Runtime identity 与 host parity
-
-每次 Headless run 会在 artifacts 中原子写入 `identity.json`。identity 包含构建时注入的 source commit、runtime image digest、case/config digest、全部 prompt resource hash、精确 Provider tool definitions 的 `toolsHash`、provider/model/profile/reasoning、核心预算，以及 platform/arch/Node/Skills/MCP/tool capability snapshot。比较器默认比较完整 identity；任一字段不同都会返回 `RUNTIME_IDENTITY_MISMATCH` 和具体字段路径，不允许把不可比 run group 混合统计。
-
-`runtime-parity.test.ts` 使用同一 fake-provider trajectory 分别通过真实 Electron IPC handler/event adapter 和 Headless API 运行。fixture 覆盖 read、patch、process、Plan 人工/自动恢复、compact 和 generic MCP canonical call，比较 Provider messages、稳定 prompt layer hashes、prompt resources、`toolsHash`、工具参数/结果和最终 Git patch。规范化只处理显式 host 差异：随机 ID、时间、绝对路径、PID/耗时、自动 Plan 消息位置，以及由时间生成的 runtime-context hash；不使用宽泛 snapshot，也不忽略工具、模型消息或 patch 的结构差异。
-
-### 3.3 Linux Docker worker
-
-`benchmarks/docker/headless.Dockerfile` 从固定 digest 的 Node 24 bookworm-slim 构建 Linux x64/glibc OCI image，在 build stage 重新编译 Linux `node-pty`，再把 `dist-headless/zch-agent-headless.mjs`、版本化 prompt resources 和运行时依赖复制到非 root runtime stage。镜像标签记录 source commit/tree、platform、libc 和 Node major；Headless identity 另记录实际 image ID/digest。Docker worker 没有第二份 Agent loop 或工具注册。
-
-`benchmarks/worker/coordinator.ts` 在创建资源前检查 Linux/amd64 daemon、seccomp、CPU/内存/PID capability 和镜像标签。Agent container 固定使用只读 rootfs、UID/GID 10001、`cap-drop=ALL`、`no-new-privileges`、默认 seccomp、CPU/内存/PID/tmpfs/wall/disk budgets；只挂载一个临时 workspace、独立 artifacts、只读 config/task 和单次 credential file。Docker socket、宿主 home、git credential、hidden grader 和任意额外挂载均不进入该接口。
-
-默认 credential 模式创建每次 run 独立的 internal network。Agent 只连接该网络并只持有随机 proxy token；Provider proxy 是唯一双网络容器，真实 key 只通过 coordinator 私有临时文件挂载给 proxy，且有请求体和请求次数上限。显式 direct 模式只用于受控开发 fallback。所有终态都执行 stop、有限等待、kill fallback、bounded logs/artifact 收集、container/network 删除和 secret directory 删除，并把清理结果写入 `worker-result.json`。
-
-### 3.4 BenchmarkCase 与 workspace preparation
-
-`benchmarks/cases/contracts.ts` 定义 native BenchmarkCase、suite index、源码 archive 和 private evaluator spec 的 v1 TypeBox schema。公开 manifest 固定 repository provenance、raw archive/tree SHA-256、case image OCI digest、setup/public checks、acceptance groups、feedback policy、修改范围和资源预算；grader 公开部分只有 adapter/protocol 和 private spec 内容摘要。Suite index固定每个manifest hash，统一adapter revision再与suite hash组合成最终suite identity。Core manifest保留的review record只说明确定性self-check，不构成prompt/test语义审核或人工批准流程。
-
-Oracle patch、mutant patch 与隐藏命令只位于 `benchmarks/private/`，该目录不进入 Docker build context。`toAgentCaseDescriptor()` 不返回 grader digest、内部绝对路径或任何 private spec 字段。Loader 在 workspace 或 Agent run 创建之前完成 schema、raw checksum、tree checksum、路径 containment、重复 ID、group reference、budget 和 OCI pin 校验；文件在首次 load 后变化还会被二次 checksum 拒绝。
-
-源码 archive 使用确定性的 `zch-case-archive-v1` JSON 文件，按 path、mode、byte length 和原始内容计算 tree hash。准备器只向空目录写普通文件，创建一个新的 baseline-only Git repository，然后删除 reflog、hooks、remote/tag refs，并检查不存在不可达历史。Agent 可见文件表必须与 archive 完全一致，且会扫描 hidden/grader/oracle/mutant 路径和 evaluator-only 字段。
-
-Native self-check 从 pristine archive 分别运行 baseline、oracle 和每个 mutant，检查修改范围与 `git diff --check`。普通case要求baseline失败；abstain case支持通过baseline和显式`no-change` oracle。Mutant必须先通过全部公开检查，再被声明的隐藏acceptance group拒绝；每个case完整重复三次并比较baseline commit与证据签名。`core-harness-8`固定为8项：slug normalization、chunk partitioning、retry backoff、config precedence、workspace routing、API compatibility refactor、diagnostic tail和no-change contract。
-
-`benchmarks/adapters/external-datasets.ts` 负责解析最新或固定commit的Monthly-SWEBench与SWE-rebench leaderboard。最新只在run开始时解析；`benchmarks/cohort/selection.ts`用seed执行无放回抽样，固定Monthly 4 bugfix + 4 non-bug、SWE-rebench按patch规模分层8项，并跨来源限制同仓库最多一项。`cohort.json`记录dataset release/commit、adapter revision、case hash、官方任务image digest、派生Agent image digest和排除原因；case identity再包含cohort hash，所以A/B使用不同cohort会在现有逐字段identity比较中被拒绝。上游数据质量被直接信任，不运行prompt/test alignment、审核Agent或人工批准。
-
-`benchmarks/adapters/external-docker-runtime.ts` 为外部任务实现机器兼容和执行边界。Monthly Harbor `environment/Dockerfile`构建任务image，SWE-rebench拉取行内声明的官方image；随后使用multi-stage overlay只复制当前ZCH Node Headless bundle，不复制Agent loop。任务原生workspace通过Docker named volume挂载，因而不经过Windows bind语义并保留symlink、执行位和依赖环境。Agent只看到problem statement、公开范围与预算；solution、gold/test patch、测试ID和verifier配置保留在`.dockerignore`排除的私有cache与grader挂载。每个case/image digest首次运行baseline未解决、oracle已解决的可缓存兼容检查；失败只标为infrastructure incompatible并递补，不评价数据集语义质量。
-
-### 3.5 Benchmark runner 与 repair control
-
-`benchmarks/runner/runner.ts` 编排 trial，但不实现第二份 Agent loop。默认 `strict` 在 Headless container 完成后收集 Git patch，再调用独立 grader coordinator；repair-once的首评和终评也走同一 grader协议。Agent container只挂载自己的 workspace和 artifacts，private spec与 evaluator workspace始终留在 grader边界。
-
-Runner把经过schema校验的公开Agent case descriptor写入独立只读文件，由Headless以 `<benchmark_case>` user-role Harness层注入首次run；真实task仍单独记录为 `user.message`。Descriptor只含公开检查、allowed/denied modification scope和资源预算，不含private spec、oracle或mutant。Base Harness明确该tag是应用生成的任务约束，不是另一条用户消息。
-
-`repair-once` 通过固定的 `benchmark.phase_ready` JSONL 事件和 `docker start --attach --interactive` stdin 决策通道协调。runner 首评失败后只返回一次经过清洗的 public/diagnostic feedback；Headless 用同一个 `SessionManager` 追加 `<benchmark_feedback>` harness message并启动一个 repair run，因此该消息在 trace 中是 orchestrator message，不伪装成 user message。无论首评还是终评，grader 都使用新准备的 workspace。
-
-每个 pass@k trial 都创建独立 workspace、container、proxy token 和 artifact staging。runner 在 resume 前解析当前 OCI image digest并把它和 grader revision/digest纳入 trial identity；final trial 通过目录级 checksum和 identity hash封存。Resume 只读 complete final，不恢复 workspace、container 或 Provider continuation，遗留 `.incomplete-*` 仅作未完成证据。完成前删除 workspace并扫描所有 artifacts中的真实 Provider credential，命中时删除 staging。
-
-### 3.6 Isolated grader 与分级评分
-
-`benchmarks/grader/coordinator.ts` 从冻结 archive创建一次性 workspace并执行 patch apply、modification scope和 `git diff --check` preflight；通过后才启动独立 grader container。Container固定使用 `network=none`、UID/GID 10001、只读 rootfs、`cap-drop=ALL`、no-new-privileges和资源限制，只挂载 evaluator workspace、只读 private input及 output。Private input执行前后校验 hash，output校验 TypeBox schema、case/input/image identity和逐项命令计划，所有 container与临时目录在终态清理。
-
-`benchmarks/grader/service.ts` 在 container内顺序执行 setup、public和private命令。原始 stdout/stderr不写入 report，只保存 bounded执行状态、失败类别和内容 hash。Restricted report保留私有 check ID用于本地复核；shareable `evaluation.json` 只暴露公开检查与 acceptance-group聚合，并由 `redaction.json` 声明省略字段。
-
-`benchmarks/grader/scoring.ts` 区分 unsupported、invalid、attempted和 graded，先应用 patch、sandbox、identity、cleanup、credential等硬门禁，再计算 L0–L5。L4/L5按 manifest行为组而非测试数量计算，`groupMacroScore`对组做宏平均；全部 critical组与公开回归通过才可 L5，且任何硬门禁失败都不能 resolved。仓库内 native evaluator仅保留为 deterministic单元测试 adapter，不再产生正式 runner结果。
-
-### 3.7 Benchmark 指标、成本与配对比较
-
-`SessionToolRunner` 在每次工具终态写入 `tool.attempt`，记录 canonical tool、validation/permission/execution stage、outcome、effects、duration、输入输出字节、截断和错误码；`tool.call` 继续保留实际参数与结果。`llm.request` 额外标记 main/compression scope，approval 调用可由 approval trace 与 usage 对齐，因此缺失 Provider usage 的 request 会明确形成 unknown，而不是按文本长度估算或累加成零。
-
-`benchmarks/metrics/aggregate.ts` 从 trace、Agent JSONL、patch 和 Headless duration 生成 trial metrics：按 scope 汇总 token，按 tool/effect 汇总工具终态，计算重复 canonical 参数签名、首次编辑/测试、最终验证后空转、patch 规模及 trajectory 计数。只有显式固定的 `priceSnapshot` 才计算成本；snapshot 原文、来源 revision 和 hash 一同进入 artifacts/identity，任何被定价字段缺失都会使相应成本保持 unknown。
-
-测试命令识别先从结构化tool参数恢复命令文本，覆盖package runner、常见语言测试器以及 `node test/...`等直接执行测试文件的形式；只有已settle成功的 `run_command` 才可作为最终验证时间，terminal input被接受不能冒充测试通过。
-
-`benchmarks/metrics/compare.ts` 使用全部 trial 成本计算 `costPerResolvedUsd`，同时保留 unresolved 的 token/成本消耗。A/B先逐trial校验case/cohort、runtime/case/grader image、Provider/model/profile/reasoning、预算、protocol、trial index和price snapshot，再输出paired delta、win/loss/tie、总体resolve delta与95%区间。排序固定按hard-gate safety、correctness、efficiency的词典序，效率不参与correctness得分。
-
-### 3.8 Benchmark CLI、运行档位与 artifacts
-
-`benchmarks/cli/main.ts` 构建为独立 Node 24 bundle，不依赖 Electron renderer 或 IPC。四个opt-in npm命令分别固定smoke、daily、full和external preset：Core默认3×1、8×3、8×5，external为Monthly 8 + SWE-rebench 8且每项3 trials。CLI最多接受8个suite、64个case和每项5 trials，从Headless config声明的环境变量读取Provider key，并默认只把真实key交给受限Provider proxy。External支持`--seed`创建cohort或`--cohort`复用，不允许同时指定。
-
-`benchmarks/runner/group-runner.ts` 串行复用 `runBenchmarkTrials()`，只增加 run-group编排，不复制 Agent、worker或 grader实现。Artifact层级固定为 run-group → suite/case → trial → attempt；group保存不可变 identity、Headless config和可选 price snapshot，case保存 manifest/Agent descriptor/task，trial继续保存 worker trace/JSONL/stderr、metrics和泄漏扫描，attempt保存 patch/evaluation/grader证据。同一输出目录只有 identity完全一致时才能恢复，具体 trial仍由已有 complete marker和整树 hash验证。
-
-本地 `case-result.restricted.json`、raw worker/grader artifacts和 config snapshot不进入分享报告。`shareable-report.json`仅组合公开evaluation、聚合metrics和comparison identity；外部报告另外分列Monthly、SWE-rebench、两来源50/50 macro与总体结果。`redaction.json`同时列出restricted globs和被删除字段。Run-group `summary.json`区分unresolved与artifact/metrics incomplete，避免把trace缺失伪装成有效零成本结果。
-
-每个有完整trace的trial通过共享 `conversationToMarkdown()` 生成可导入消息语义的 `conversation.restricted.md`，并通过桌面端同一transcript normalizer生成 `session-transcript.restricted.md`。后者包含工具、审批、内部编排、明文reasoning和Provider消息快照，不取代raw trace；它进入artifact hash和restricted清单、从shareable report隐藏，并作为唯一精确路径例外不进入credential scan。
+Headless 不复制 Prompt、Provider、Tool、Permission、compact 或 Session loop。
 
 ---
 
-## 4. 配置、凭据与模型
+## 4. 领域术语与生命周期
 
-配置由 `electron/config/store.ts` 管理，schema 在 `electron/config/schema.ts` 和 `shared/config.ts` 中定义。当前 schema version 为 8；v8 增加通用 MCP server 配置，旧配置迁移时自动补默认值。并发配置不包含独立 provider call 上限，也不允许调整同 workspace writer 数。
+### 4.1 Project
 
-持久化位置：
+Project 是用户选择的 canonical workspace。数据库使用稳定 `projectId`，路径只是可变属性，不作为跨表主键。
 
-- 非敏感配置：`userData/config.json`。
-- 凭据：`userData/secrets.json`，通用 `SecretStore` 通过 host 提供的 adapter 加密；桌面 host 使用 Electron `safeStorage` adapter。
-- workbench：`userData/workbench.json`。
-- trace：`userData/traces/*.jsonl`。
-- change history：`userData/change-history.json`。
-- skills：`userData/skills/`。
-- project metadata：每个 workspace 下的 `.zch/project-model.json`。
+### 4.2 Session
 
-配置要点：
+Session 是一个持久化对话，也是左侧栏中用户看到的“对话”。系统不再维护额外 `Conversation` 领域实体，也不再维护 `conversationId -> sessionId` 映射。
 
-- provider 是数组结构，支持 `deepseek` 和 generic OpenAI-compatible profile。
-- `DEEPSEEK_API_KEY` 只作为开发 fallback，renderer 永远只能看到 credential configured/source 状态。
-- web search 当前支持 Brave provider 配置。
-- HTTP proxy 通过 `createHttpTransport` 装配，配置变化后刷新 transport。
-- 模型目录刷新由主进程带凭据请求 provider，renderer 不接触 API key。
-- assistant preferences 是用户可编辑偏好，不替换 base harness prompt。
+Session 创建后立即由后端保存。空 Session 可以由显式清理策略删除或归档，但不能先只存在 renderer，再在第一条消息时偷偷创建另一种 runtime Session。
 
----
+### 4.3 Run
 
-## 5. Session 与 Run
+Run 是一次用户提交触发的 Agent 执行。一个 Session 可以包含多个 Run；同一 Session 同时最多一个 active Run。
 
-`AgentRuntime` 是 Node-only 生命周期和控制门面，拥有共享事件总线、Agent 服务以及幂等 dispose。它提供程序化 create session、run completion、interrupt 和 close；Electron IPC 使用同一 runtime services。`SessionManager` 负责 session map、run 生命周期、trace logger 所有权和 terminal facade，长流程被拆到 session-scoped collaborators：
+Run 是持久记录，包含：
 
-| 模块                             | 职责                                                                     |
-| -------------------------------- | ------------------------------------------------------------------------ |
-| `SessionRunController`           | 单 run 状态机、用户轮入栈、provider/tool 循环、取消和结束。              |
-| `SessionUserTurnPreparer`        | runtime/AGENTS 更新、slash command 解析、run context attachment 准备。   |
-| `SessionProviderTurnRunner`      | prompt selection、plugin beforeLLMCall、provider 调用、LLM trace/usage。 |
-| `SessionToolRunner`              | 工具 inspect、权限管线、审批、执行、tool result 入栈和 trace。           |
-| `SessionCompactCoordinator`      | 手动 `/compact` 和自动 compact，重写 provider history。                  |
-| `SessionInterjectionCoordinator` | 运行中用户插话排队、注入、carryover、supersede。                         |
-| `SessionOrchestrationPlanner`    | goal/plan continuation 和 warning。                                      |
-| `SessionOrchestratorMessages`    | orchestration prompt 解析、事件和 history 注入。                         |
-| `SessionEventEmitter`            | AgentEvent 发射和 session 归属检查。                                     |
-| `SessionTerminalController`      | session-scoped terminal facade。                                         |
-| `WorkspaceAccessCoordinator`     | 全局 active run 配额与 canonical workspace 唯一 writer 所有权。          |
+- 输入消息引用。
+- 状态和错误。
+- 开始时的 permission mode snapshot。
+- 不可变 `ModelRouteSnapshot`。
+- 起止时间和 usage 关联。
+- 可选 `parentRunId` 和 `kind`，为 orchestration/swarm child execution 保留稳定归属。
 
-Run 流程概要：
+### 4.4 SessionRuntime 与 RunRuntime
 
-- 每个 session 同时最多一个 active run。
-- `startRun` 创建 `AbortController` 和 `ActiveRun`，重复 `clientRequestId` 幂等返回已有 run。
-- 普通用户消息先经 `SessionUserTurnPreparer`，再把 app-authored context layers 和用户原文追加到 `session.history`。
-- `/compact` 是特殊命令，由 compact coordinator 直接处理，不进入普通 provider/tool loop；重写后的 `<compact_history>` 会追加 compact 时刻的 Goal/Plan 状态快照，避免摘要模型漏写编排状态。
-- 每步 provider 调用前会 drain queued interjections、检查自动 compact、重新注入最新 runtime/AGENTS context。
-- provider 返回 assistant turn 后写入 history；若有 tool calls，则进入工具执行；若没有 tool calls，则检查 goal/plan continuation 或结束 run。
-- 中断通过 `AbortSignal` 协作传递给 provider、工具、审批等待和长进程。
+后端内存对象必须使用不同名称：
 
-并发与 workspace 访问采用“一写多读”模型：
+```ts
+interface SessionRuntime {
+  sessionId: SessionId
+  activeRun?: RunRuntime
+  terminalFacade: SessionTerminalFacade
+  cachedStateRevision: number
+  mcpDisclosures: Map<string, McpDisclosure>
+}
 
-- 全应用最多同时存在 `maxConcurrentRuns` 个 active run，默认 4；第 5 个 run 直接以 `CONFLICT / max_concurrent_runs` 拒绝，不排队。每个 run 同时最多一个 provider call，因此该配置也构成理论 provider call 上限。
-- `readonly` run 只占全局 run slot，不获取 writer；`auto`、`confirm`、`yolo` run 必须原子获取 canonical workspace 的唯一 writer。不同 workspace 可以各有一个 writer，同一 workspace 的第二个非只读 run 以 `CONFLICT / workspace_writer_active` 拒绝。
-- writer 从 run 启动覆盖 provider 调用、工具执行、等待人工审批、interjection continuation 和 cancelling；不会在单个 tool batch 后释放。若取消或超时时存在 `supportsAbort: false` 的副作用工具，terminal 状态可以先完成，但 writer 必须继续持有到该工具底层 Promise settle，不能仅因包装层返回 cancelled/timeout 就开放第二个 writer。
-- terminal run status 对 renderer 可见前先幂等释放全局 run slot；没有残留副作用时同时释放 writer，否则延迟到残留副作用 settle。`finally`、session close 超时与 manager dispose 使用同一幂等路径兜底。carryover 可立即使用全局容量，但同 workspace 的非只读 carryover 会等待 writer 真正释放后重试。
-- idle session 改为 `readonly` 始终允许；改为非只读模式时主进程重新检查 writer。active run 期间任何 mode 修改都拒绝。
-- `workspace.writer.changed` 向 renderer 发布 acquired/released owner；trace 记录 `workspace.writer` 的 acquired/released/rejected、结构化 `run.rejected`，且 `session.start` 包含 conversationId。
-- ReadOnly 对所有副作用生效，包括 filesystem/VCS/project metadata 写入、process spawn、terminal write、network side effect 和 unknown external effect；只读文件、代码、VCS、terminal 与 instruction 读取仍可用。
+interface RunRuntime {
+  runId: RunId
+  controller: AbortController
+  done: Promise<void>
+  pendingSideEffects: Set<Promise<void>>
+  pendingApproval?: PendingApprovalWaiter
+  writerLease?: WorkspaceWriterLease
+}
+```
+
+这些对象永远不经过 IPC，也不直接序列化。重启后它们由 durable records 重建或安全终止。
 
 ---
 
-## 6. Prompt Harness
+## 5. Canonical Session 数据模型
 
-Prompt harness 当前由 `electron/session/prompt-harness.ts`、`electron/prompts/registry.ts` 和 `resources/prompts/` 组成。
+### 5.1 SessionRecord
 
-资源加载：
+```ts
+interface SessionRecord {
+  schemaVersion: 1
+  id: SessionId
+  projectId: ProjectId
+  title: string
+  lifecycle: 'active' | 'archived'
+  permissionMode: PermissionMode
+  modelSelection: {
+    providerId: string
+    model: string
+    reasoning: ReasoningEffort
+  }
+  parent?: {
+    sessionId: SessionId
+    forkedFromSequence: number
+  }
+  historyFidelity: 'complete' | 'legacy_display_only'
+  entityRevision: number
+  createdAt: string
+  updatedAt: string
+  archivedAt?: string
+}
+```
 
-- `PromptRegistry.load(resources/prompts)` 加载 harness、approval、orchestration prompt。
-- 每个资源记录 `id/version/path/sha256`。
-- 默认资源引用定义在 `shared/prompt-resources.ts`。
+`modelSelection` 是下一次 Run 默认使用的用户选择，不是已经运行过请求的审计事实。
 
-会话层：
+### 5.2 SessionDraft 与 RunRecord
 
-- 初始 session 会追加 base instructions、runtime context、assistant preferences、AGENTS 和 skills summary。
-- runtime context 来自 `resources/prompts/harness/runtime-context.*.md` 模板，变量由 TypeScript collector 提供；动态快照包含当前日期、时间、timezone、workspace、permission mode、provider/model、git summary、project tree、module context 和 workspace writer 状态。
-- `<workspace_concurrency>` 固定为 `available`、`writer` 或 `readonly_locked`。其他 writer 存在时，trusted harness 会写入 writer conversation/run ID，明确禁止当前 readonly session 调用副作用工具，并要求 writer 结束后重读相关文件。该状态参与 runtime-context hash，因此获取和释放 writer 都只在下一次 provider call 追加新快照，不改写已存历史。
-- `AGENTS.md` / `AGENTS.override.md` 通过 `agents-context.ts` 从 workspace 和 selected attachments 的目录链读取，格式化为 `<agents ...>` tagged context；tag 会记录 path、kind、depth、priority、hash、bytes 和 truncated，越深目录和 override 文件具有更高优先级。
-- run attachments 由 `context-attachments.ts` 生成 `<context_file>` 和 `<context_directory>`，再包进 `<selected_context>`。
-- slash command、skills、compact、goal/plan 等 app-authored context 以 user-role provider message 追加，但其来源、trusted/editable、hash 和 token 估算记录在 prompt ledger。
+```ts
+interface SessionDraft {
+  sessionId: SessionId
+  text: string
+  attachments: ContextAttachmentRef[]
+  entityRevision: number
+  updatedAt: string
+}
 
-选择与 trace：
+interface RunRecord {
+  schemaVersion: 1
+  id: RunId
+  sessionId: SessionId
+  clientRequestId: string
+  triggerMessageId: MessageId
+  kind: 'primary' | 'orchestration' | 'swarm_child'
+  parentRunId?: RunId
+  status:
+    | 'queued'
+    | 'calling_llm'
+    | 'evaluating_tools'
+    | 'awaiting_approval'
+    | 'running_tools'
+    | 'cancelling'
+    | 'completed'
+    | 'cancelled'
+    | 'failed'
+    | 'interrupted'
+  permissionMode: PermissionMode
+  modelRoute: ModelRouteSnapshot
+  error?: {
+    code: string
+    message: string
+  }
+  entityRevision: number
+  createdAt: string
+  startedAt?: string
+  finishedAt?: string
+}
+```
 
-- `selectPromptMessages` 保留 ledger-pinned layers，并按完整用户轮次裁剪普通历史。
-- 每次 provider request 记录 `promptBuild`，包含 layer kind/source/hash/included 等摘要。
-- `promptResources(session)` 把被使用的 prompt resource id/version/path/hash 写入 `llm.request` trace。
-- 除 compact 重写外，`session.history` 按 append-only 处理。
+`modelRoute` 在数据库中通过 immutable route row 关联，但 repository 返回的 canonical `RunRecord` 包含完整 snapshot。`interrupted` 表示上一进程未正常完成，不能与用户主动 `cancelled` 混为一谈。
 
----
+### 5.3 SessionSnapshot
 
-## 7. Slash Commands、Goals 和 Plans
+```ts
+interface SessionSnapshot {
+  stateRevision: number
+  session: SessionRecord
+  draft: SessionDraft | null
+  runs: RunRecord[]
+  timeline: SessionTimelineEntity[]
+  goal: GoalState | null
+  plan: PlanState | null
+  contextCheckpoints: ContextCheckpoint[]
+  runOutputs: RunOutput[]
+}
+```
 
-`electron/session/slash-commands.ts` 解析当前支持的命令：
+其中 timeline 是 shared discriminated union：
 
-| 命令                | 行为                                                                                       |
-| ------------------- | ------------------------------------------------------------------------------------------ |
-| `/skill <name> ...` | 读取已启用 skill 的完整正文，注入 `<skill_request>` 和 `<skill>` selected context。        |
-| `/compact ...`      | 触发手动 history compaction，使用 orchestration compact prompt。                           |
-| `/prompt ...`       | 注入 app-authored orchestration request。                                                  |
-| `/goal ...`         | 创建 active goal，注入 localized `goal-started` orchestration prompt。                     |
-| `/plan ...`         | 注入 localized `plan-started` orchestration prompt；实际 Plan 由模型调用 `plan_set` 创建。 |
+```ts
+type SessionTimelineEntity =
+  | SessionMessage
+  | ToolCallRecord
+  | ToolResultRecord
+  | ApprovalRequestRecord
+  | ApprovalDecisionRecord
+  | UsageRecord
+```
 
-Goal/Plan 状态存放在 `SessionState` 中，并通过 `goal.updated` / `plan.updated` 事件同步到 renderer。模型可通过 `orchestration-tools.ts` 暴露的 goal/plan 工具读取和更新状态。`plan_set` 创建或替换 Plan，并默认进入 `awaiting_review`；Plan review 是编排状态，不是权限模式，副作用工具仍由 permission pipeline 审批和执行。用户明确批准后，UI 先把 Plan 标记为 `active` 并写入 `plan.status` trace event，再启动下一轮；自然语言批准可由模型通过 `plan_status({ status: "active" })` 记录状态并继续。所有 item 完成或取消后，运行时会把 active 顶层 Plan 收口为 `completed`；completed item 必须有 result/evidence，cancelled item 必须有 cancelReason。
+每个成员都包含相同的 `id/sessionId/runId?/sequence/createdAt` base fields。Snapshot 是逻辑结构，不要求每次 IPC 都发送全部历史。Query 可以返回 Session header、最新 timeline page 和 cursor；renderer 持有的是 canonical state 的部分副本，而不是另一套 state。
 
----
+### 5.4 SessionMessage
 
-## 8. LLM Provider
+正式消息同时服务于 UI timeline 和 provider context compiler：
 
-Provider 抽象在 `electron/providers/provider.ts`：
+```ts
+interface SessionMessage {
+  schemaVersion: 1
+  id: MessageId
+  sessionId: SessionId
+  runId?: RunId
+  sequence: number
+  kind:
+    | 'user'
+    | 'assistant'
+    | 'harness'
+    | 'runtime_context'
+    | 'agents_context'
+    | 'orchestrator'
+    | 'interjection'
+    | 'compaction'
+  modelRole?: 'system' | 'user' | 'assistant'
+  audience: 'user' | 'model' | 'both'
+  source: string
+  content: string | null
+  reasoning?: string
+  status: 'complete' | 'incomplete' | 'queued' | 'superseded'
+  prompt?: {
+    id: string
+    version: string
+    hash: string
+  }
+  createdAt: string
+}
+```
 
-- 输入是 normalized `ProviderMessage[]`、tool schemas、responseFormat、providerRequestOverride 和 AbortSignal。
-- 输出是 `ProviderEvent` async iterable：文本 delta、reasoning delta、tool delta、usage、completed。
-- completed event 携带 normalized assistant turn、解析后的 `ToolCall[]`、provider raw response、usage、timing 和 providerState。
+Renderer 根据 `kind`、`audience`、`source` 和 `status` 决定是否以及如何渲染。Backend 根据 `modelRole`、`audience` 和 checkpoint 生成模型上下文。Renderer 不读取 provider wire JSON 来猜测 UI 语义。
 
-当前实现的实际 provider 是 `OpenAICompatibleProvider`：
+### 5.5 ProviderMessage 不是状态
 
-- 支持 DeepSeek profile 和 generic OpenAI-compatible profile。
-- DeepSeek reasoning 参数、stream usage、tool call delta 聚合和 provider request snapshot 在 adapter 内处理。
-- Auto approval 复用同一 provider 抽象，并可请求 JSON object response format。
+`ProviderMessage[]` 是 `ProviderContextCompiler` 为一次 provider request 生成的临时 adapter 输入。它来自：
 
-Provider request snapshot 会记录 normalized messages、provider wire request、request bytes、prefix hash 和 prefix fingerprints。传输层 Authorization 不写入 trace。
+- canonical messages。
+- tool calls/results。
+- 最新适用的 context checkpoint。
+- 当前 Run 的 Prompt Harness layers。
+- route-compatible provider continuation state。
 
----
-
-## 9. 工具系统
-
-工具由 `createSessionTooling` 注册到 `ToolRegistry`，再由 `ToolExecutor` 执行。当前内置工具类别：
-
-- read-only workspace tools：`read_file`、`list_dir`、`glob`、`grep`。
-- file mutation tools：`create_file`、`apply_patch`、`delete_file`。
-- process tools：`run_command`、`delay`。
-- terminal tools：`terminal_open`、`terminal_send`、`terminal_read`、`terminal_list`、`terminal_resize`、`terminal_close`。
-- git tools：`git_status`、`git_diff`、`git_log`、`git_show`、`git_add`、`git_commit`、`git_restore`。
-- network tools：`fetch`、`web_search`。
-- skills：`read_skill`。
-- project metadata：`project_get_modules`、`project_detect_modules`、`project_set_modules` 等。
-- code intelligence：`code_symbol_overview`、`code_find_definition`、`code_find_references`、`code_workspace_symbols`、`code_diagnostics`。
-- orchestration：goal/plan 状态工具。
-
-Tool contract：
-
-- 每个 tool 定义 id、description、TypeBox input schema、effects、defaultRisk、timeout、输出上限和 `execute`。
-- 发给 provider 的 schema 会自动加入 `_agent_intent` 字段；解析 tool call 后提升为 `ToolCall.reason` 并从业务 args 删除。
-- `ToolExecutor.inspectCall` 先做 tool id 和 schema/自定义参数校验。
-- `ToolExecutor.execute` 要求传入 `ApprovedToolCall`，执行前 revalidate session/run/tool/args hash/resource preconditions。
-- 所有 tool result 都经过字节上限裁剪，再进入 provider history 和 trace。
-
----
-
-## 10. 权限与审批
-
-权限管线由 `PermissionPipeline`、`policy-engine.ts`、`session-approval.ts` 和 `auto-approver.ts` 组成。
-
-决策输入包括：
-
-- 当前 permission mode：`readonly`、`auto`、`confirm`、`yolo`。
-- tool effects、defaultRisk 和 policy signals。
-- remembered rules。
-- plugin `beforeToolCall` hook 风险提升。
-- file tools 的 resource plan、diff 和 preconditions。
-- Auto 模式下的 approval provider 判断。
-
-模式语义：
-
-- `readonly`：只允许只读/低风险工具。
-- `confirm`：有副作用或 review-risk 工具进入人工审批。
-- `auto`：策略可 fast-path 低风险操作，其他场景可调用审批模型；危险或模型失败会进入人工审批。
-- `yolo`：跳过普通审批策略，但仍保留 schema、workspace、sender、resource precondition 等执行不变量。
-
-人工审批由主进程发出 `approval.requested` 事件，renderer 决策后调用 `approval:decide`。审批绑定 `sessionId/runId/callId`，过期、中断、重复决策和错误归属都被拒绝。
-
----
-
-## 11. 文件、进程、终端与 Git
-
-文件边界：
-
-- `PathGuard` 负责 workspace 根、真实路径、路径逃逸、symlink/junction、大小和 bounded read/write。
-- `create_file` 只创建不存在文件，可创建缺失父目录。
-- `apply_patch` 对已有 UTF-8 文件应用严格 text patch，不做 fuzzy apply。
-- `delete_file` 独立高风险工具。
-- `ChangeHistoryStore` 记录 agent 文件变更，支持 UI revert。
-
-进程边界：
-
-- `run_command` 支持 `process` 和 `shell` 两种模式。
-- 子进程环境使用 allowlist 构造，不继承 provider API key 等应用秘密。
-- 输出由 bounded output 保留 head/tail、totalBytes、truncated 和 discarded hash。
-- 超时/取消会终止进程树。
-
-终端：
-
-- `TerminalPool` 基于 `node-pty`，PTY 生命周期归属 session，不随单个 run 自动销毁。
-- 输出以 terminal event 推送到 renderer；model-facing `terminal_read` 返回 ANSI-free bounded text。
-- renderer 端用 xterm.js 展示，`terminal-sequence.ts` 处理事件序列缺口恢复。
-
-Git：
-
-- read tools 默认低风险。
-- write tools 通过权限管线；`git_commit` 使用 `--no-verify`，`git_restore` 视为 discard 类高风险。
-- 参数做 option injection 防护，pathspec 和 ref 均按白名单处理。
-
----
-
-## 12. ProjectModel 与 Code Intelligence
-
-Project metadata 存在 workspace 的 `.zch/project-model.json`，由 `ProjectMetadataStore` 管理。默认模型包含：
-
-- modules。
-- defaultModuleId。
-- Serena backend config。
-- code backend bindings。
-- `.zch` 是否建议加入 gitignore 的提示。
-
-`ProjectModuleDetector` 根据 manifests 检测多模块结构。renderer 的 Project tab 可查看/保存模块、Serena 配置和 backend 状态。
-
-Code intelligence facade：
-
-- 模型只看到稳定 `code_*` 工具，不直接看到原始 Serena MCP tools。
-- `CodeBackendManager` 根据 ProjectModel、module、language、path 和 capability 路由查询。
-- 当前实际 backend 是 `SerenaMcpAdapter`，通过 MCP stdio 启动 Serena 并只允许一组只读工具。
-- 支持符号概览、定义、引用、workspace symbols 和 diagnostics。
-- 当 backend 未配置、capability 不支持、路径不在 module 内或需要 file path 但传了目录时，返回结构化 unsupported result，而不是抛给模型。
-
-Generic MCP gateway：
-
-- `McpManager` 管理手写 stdio server 配置、启动信任、global/workspace 生命周期、目录 revision、退避重启、draining 和关闭；`McpStdioConnection` 同时供通用 MCP 与 Serena adapter 复用。
-- Provider 工具定义固定为 `list_mcp_servers`、`read_mcp_server`、`call_mcp_tool`。前两者只读取本地缓存目录；`read_mcp_server` 使用绑定 server/revision/offset 的不透明 cursor，并受页大小与总输出大小双重边界约束。
-- Session 保存每个 server 已披露的 revision 和工具名。通用 wrapper 在产生 proposed event 前解析为 `mcp:<serverId>:<toolName>` 的临时 `ToolDefinition`，所以权限、审批、plugin hook、trace 和 writer 协调看到的是实际 server、tool、arguments 与 annotations。
-- 动态 MCP tool 固定分类为 `external.unknown`、风险 `review`、不可记忆审批、不可自动重试。ReadOnly 拒绝，Auto 进入审批模型，Confirm 进入人工审批，Yolo 跳过 MCP 审批。
-- `tools/list` 最多 100 页、1,000 个工具和 4 MiB 原始目录；单个规范化工具最多 32 KiB。重复 cursor、重复名称、无效 schema 与过大定义形成诊断且不可调用。
-- `structuredContent` 与文本内容优先保留；图片、音频和 blob 的原始 base64 不进入模型上下文。输出继续受公共字节/token 和敏感内容边界约束。
+它不能成为唯一 history，也不能在 SessionRuntime 中形成不可恢复的第二真相源。
 
 ---
 
-## 13. Skills 与网络
+## 6. SQLite 持久化
 
-`SkillsManager` 负责：
+### 6.1 文件和连接
 
-- 扫描 `userData/skills`。
-- 解析 bounded YAML front matter。
-- 跳过 malformed、重复、超大、symlinked skill。
-- 管理 enablement。
-- 安装本地文件和 HTTPS URL skill。
+Desktop database 位于：
 
-网络安全：
+```text
+userData/agent.db
+```
 
-- skill URL 安装和 fetch/web_search 走 SSRF guard。
-- 私网、loopback、link-local、带 credentials 的 URL 被拒绝。
-- redirect 重新校验目标，跨源 redirect 会剥离敏感 header。
-- HTTP proxy 由配置驱动，通过 main-process transport 注入。
+同一主进程使用一个数据库连接和串行 write queue。初始化至少执行：
 
----
+```sql
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+PRAGMA busy_timeout = 5000;
+```
 
-## 14. 插件事件总线
+是否使用 `synchronous = NORMAL` 或 `FULL` 在 driver 选型和性能测试后确定。禁止业务模块各自创建连接或绕过 transaction service。
 
-`PluginEventBus` 是主进程内的 hook/event 机制，不是插件 sandbox。当前用于：
+### 6.2 表设计
 
-- `onSessionStart` / `onSessionEnd` observation。
-- `beforeLLMCall` 可返回 message patch。
-- `afterLLMCall` observation。
-- `beforeToolCall` 可提升风险或阻断。
-- `afterToolCall` observation。
+#### 基础与项目
 
-Hook context/result 都是版本化对象。Hook 超时和错误隔离由 event bus 处理；安全相关 hook 失败按保守策略处理。当前代码提供事件总线和 tool registration port，但没有实现外部 JS 插件加载器。
+| 表                   | 关键字段                                                  | 约束与用途                                    |
+| -------------------- | --------------------------------------------------------- | --------------------------------------------- |
+| `schema_migrations`  | `version`, `name`, `applied_at`                           | 顺序迁移；每个版本只执行一次                  |
+| `projects`           | `id`, `path`, `name`, `revision`, timestamps              | `path UNIQUE`；Session 通过 `project_id` 关联 |
+| `processed_commands` | `command_id`, `command_type`, `result_json`, `created_at` | 对可重试 command 做幂等去重                   |
 
----
+#### Session 与 draft
 
-## 15. 日志、Trace 与回放
+| 表                          | 关键字段                                                                                                                                                                                                                              | 约束与用途                                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `sessions`                  | `id`, `project_id`, `title`, `lifecycle`, `permission_mode`, `selected_provider_id`, `selected_model`, `selected_reasoning`, parent/fork fields, `history_fidelity`, `entity_revision`, `state_revision`, `last_sequence`, timestamps | Session aggregate root；每个领域事务递增 `state_revision`，仅 metadata 修改递增 `entity_revision` |
+| `session_drafts`            | `session_id`, `text`, `entity_revision`, `updated_at`                                                                                                                                                                                 | 每个 Session 最多一个 draft                                                                       |
+| `session_draft_attachments` | `session_id`, `position`, `kind`, `path`, `source`                                                                                                                                                                                    | `PRIMARY KEY(session_id, position)`                                                               |
 
-Trace 默认关闭。开启 logging 前必须接受 trace notice。
+#### Run 与路由
 
-`JsonlTraceLogger` 写入 `userData/traces/{sessionId}.jsonl`，每行是一个 schemaVersion 1 的 trace event，并带单调 `seq` 和 `eventId`。`NullTraceLogger` 在关闭时不创建文件。
+| 表                             | 关键字段                                                                                                                                                                              | 约束与用途                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `model_route_snapshots`        | `id`, provider id/label/protocol/profile/base URL、model、reasoning、context window、max output、capability source、`created_at`                                                      | immutable；不保存凭据                                                 |
+| `runs`                         | `id`, `session_id`, `client_request_id`, `trigger_message_id`, `kind`, `parent_run_id`, `route_snapshot_id`, `permission_mode`, `status`, error fields, `entity_revision`, timestamps | `UNIQUE(session_id, client_request_id)`；route/mode 在 Run 开始时冻结 |
+| `run_outputs`                  | `run_id`, `text`, `reasoning`, `entity_revision`, `updated_at`                                                                                                                        | 流式输出的 backend-owned checkpoint；完成后转成正式 assistant message |
+| `provider_continuation_states` | `id`, `session_id`, `run_id`, `route_snapshot_id`, `through_sequence`, `state_json`, `created_at`                                                                                     | opaque、route-bound；切换不兼容 route 时忽略而不是重写                |
 
-主要事件：
+#### Timeline 与编排
 
-- session/run lifecycle：`session.start`、`session.end`、`session.mode`、`run.start`、`run.end`、`run.rejected`、`workspace.writer`。
-- LLM：`llm.request`、`llm.response`、`llm.usage`。
-- tool/approval：`approval`、`tool.call`。
-- UI-visible content：`user.message`、`agent.message`、`orchestrator.message`、`interjection.message`。
-- orchestration audit：`plan.status` 记录 UI plan review 导致的顶层 Plan 状态变化。
-- terminal：`terminal.event`。
+| 表                    | 关键字段                                                                                                | 约束与用途                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `timeline_entries`    | `id`, `session_id`, `run_id`, `sequence`, `entity_type`, `created_at`                                   | 所有 timeline entity 的共同基表；`UNIQUE(session_id, sequence)`，保证跨类型全局顺序  |
+| `messages`            | `entry_id`, `kind`, `model_role`, `audience`, `source`, `content`, `reasoning`, `status`, prompt fields | 正式 provider-neutral history；`entry_id` 一对一引用 `timeline_entries`              |
+| `message_attachments` | `message_entry_id`, `position`, path/kind/source/size/truncated                                         | 已提交用户消息的 selected context 引用                                               |
+| `tool_calls`          | `entry_id`, `call_id`, `assistant_message_entry_id`, `tool`, `args_json`, `reason`                      | immutable tool proposal；顺序和 Session/Run 归属来自基表                             |
+| `tool_results`        | `entry_id`, `call_id`, `result_json`, `approval_summary_json`, outcome fields                           | immutable tool terminal result；`call_id UNIQUE`，拒绝/取消/超时也必须有结果         |
+| `approval_requests`   | `entry_id`, `approval_id`, `call_id`, kind/tool/request fields、policy/diff/expiry                      | immutable approval request                                                           |
+| `approval_decisions`  | `entry_id`, `approval_id`, decision/status/reason fields                                                | immutable terminal decision；`approval_id UNIQUE`，包含 allowed/denied/stale/expired |
+| `usage_records`       | `entry_id`, `call_id`, scope/provider/model/token/context fields、`raw_json`                            | Provider usage                                                                       |
+| `goals`               | `id`, `session_id`, GoalState fields、`entity_revision`                                                 | 当前 Goal；历史变化仍写 trace/change                                                 |
+| `plans`               | `id`, `session_id`, PlanState fields、`entity_revision`                                                 | 当前 Plan                                                                            |
+| `plan_items`          | `id`, `plan_id`, `position`, title/status/result/evidence/cancel fields                                 | Plan item 顺序和状态                                                                 |
+| `context_checkpoints` | `id`, `session_id`, `through_sequence`, `summary`, `provider_state_json`, `source_hash`, `created_at`   | compact checkpoint；不删除原始 messages                                              |
 
-Trace request 记录：
+#### 同步与恢复
 
-- normalized messages。
-- provider request body。
-- request bytes、prefix hash、prefix fingerprints。
-- prompt resources。
-- prompt build layer summary。
+| 表                   | 关键字段                                                                     | 约束与用途                                                                        |
+| -------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `session_change_log` | `session_id`, `state_revision`, `change_json`, `created_at`                  | 与领域变更同事务写入；支持短期增量补漏；复合主键为 `(session_id, state_revision)` |
+| `file_changes`       | change id、`session_id`, `run_id`, path、before/after metadata、`created_at` | 取代独立全局 JSON change-history；具体容量策略另行确定                            |
 
-`TraceService` 提供 list、replay、stats、fork、cleanup与session transcript。Transcript normalizer按seq生成稳定快照，把同一callId的proposed/approval/attempt/call合并为工具项，final message替代重复stream delta，中断delta标记partial；Provider消息快照单独分页。Timeline cursor绑定trace revision，活动trace追加后旧cursor变stale，renderer只能读取2 MiB有界页面。Fork仍从某个 `llm.request` 恢复provider request override，不重放历史副作用。
+`session_change_log` 是同步日志，不是第二真相源。可以按 retention 清理；请求的 `stateRevision` 已被清理时返回 snapshot-required。
 
-`zch-session-transcript` 是不可导入的restricted审计格式，与可导入且不含工具的 `zch-conversation` 分离。Electron主进程每次导出前显示风险警告并原子保存，既不扫描也不脱敏；多模态载荷和opaque reasoning不写入。查看器可从conversation或Trace Debug进入，按run分组并过滤用户、Assistant、reasoning、internal、tool/approval、Provider、runtime和terminal事件。
+### 6.3 通用数据库约束
 
-隐私边界：
-
-- Authorization/API key/safeStorage 密文不写 trace。
-- 工作区文件、tool output、模型消息本身如果包含秘密，启用完整 trace 后会被原样保存；UI 以 notice 和清理入口提示用户。
-
----
-
-## 16. Renderer 架构
-
-Renderer 是 Vue 3 + Pinia 应用，主要职责是展示和收集用户操作。
-
-状态分层：
-
-- `agent-shell`：bridge/bootstrap 状态。
-- `agent-settings`：provider、permission、logging、assistant、skills settings。
-- `agent-workbench`：projects、conversations、markdown import/export、persistence。
-- `agent-runtime`：session/run 生命周期、IPC 调用、AgentEvent 分发。
-- `agent-timeline`：messages、tools、usage、context attachments、goal/plan。
-- `agent-changes`：agent 文件变更和 revert。
-- `agent.ts`：兼容旧组件的 facade，新代码应直接使用领域 store。
-
-并发路由规则：
-
-- `conversationRuntimes` 是 sessionId、activeRunId、runStatus、startPending、pending approval/carryover、error、event seq、diagnostics 和 timeline counter 的唯一运行时来源；active facade 值由当前 conversation 派生。
-- 每个 `ConversationRecord` 还持久化自己的 composer draft 与 context attachments；切换 conversation 时先写回来源 record，再从目标 record 恢复，未发送内容不会在后台 run 或 workspace 切换时串线或丢失。
-- create session、start run、approval、interrupt、plan 和 trace fork 在 `await` 前捕获 conversationId，IPC 返回后只更新发起方；后台事件通过 `conversationIdBySessionId` 路由。
-- 当前 timeline 使用 `agent-timeline`；后台 timeline adapter 直接绑定目标 `ConversationRecord`，内存立即更新。所有 conversation 共用 250ms workbench debounce，dispose 前 flush；事件诊断最多保留 100 条。
-- `workspaceWriters` 索引只保存主进程事件快照。writer 获取时不批量改 inactive conversation；用户切换到同 workspace 的其他 conversation 时才持久化为 readonly 并同步其 idle session。writer 结束后 selector 解锁但保持 readonly，必须由用户手动选择其他模式。
-- 后台 approval、carryover、错误和 completed/failed 状态保留在目标 runtime；sidebar/search badge 优先级为 awaiting approval、writer、readonly locked、cancelling、running、failed、completed。
-
-UI 主要区域：
-
-- Chat timeline：用户、assistant、tool rows、approval、interjection、orchestration、goal/plan。
-- Composer：普通消息、slash commands、`@path` context attachments、run 中 interjection。
-- Settings：provider、model catalog、permissions、logging、assistant preferences、skills。
-- Artifact sidebar：workspace explorer、Project tab、changes/trace 等工具面板。
-- Terminal panel：persistent PTY tabs。
-
-Renderer 不执行工具、不读 secrets、不直接访问文件系统。所有文件树、文件内容、terminal、trace、project metadata 都通过 `agentApi` 调用主进程。
+- ID 使用稳定字符串 ID；由 backend 创建，renderer 不生成正式实体 ID。
+- 时间统一保存 UTC RFC 3339 字符串。
+- JSON 列写入前按 shared schema 校验，并使用 `CHECK(json_valid(...))`。
+- Session-owned 子表使用 foreign key；删除/归档策略必须显式，不依赖散落的手工清理。
+- Timeline entity 先从事务内的 `sessions.last_sequence` 分配 sequence，再插入 `timeline_entries` 和对应 subtype row。
+- 消息、tool call/result、approval request/decision、usage、route snapshot 和 checkpoint 一旦提交即 immutable。
+- Mutable entity 使用独立 `entityRevision`；任何 Session-owned durable transaction 同时递增 Session `stateRevision`。
 
 ---
 
-## 17. 安全边界
+## 7. Command、Query 与状态同步
 
-已实现的主要安全边界：
+### 7.1 API 形态
 
-- Renderer sandbox + contextIsolation。
-- 冻结 `window.agentApi`，不暴露 `ipcRenderer`。
-- IPC sender、frame、origin 和 payload/result schema 校验。
-- CSP、navigation/window/webview/permission 禁用。
-- `PathGuard` 限制 workspace 文件访问。
-- secret store 不向 renderer 返回密文或 apiKeyRef。
-- 子进程环境 allowlist，避免泄露 provider credentials。
-- tool permission pipeline 和 per-call approval。
-- output bounding 和 context budget。
-- SSRF guard 和 redirect revalidation。
-- trace notice gate 和 trace cleanup。
+IPC 保留显式、typed channel，不使用无 schema 的通用 RPC。目标能力至少包括：
 
-非目标：
+```text
+app:get-bootstrap
+project:list / project:add / project:update / project:remove
+session:list / session:get / session:create / session:update / session:archive
+session:update-draft
+session:get-changes
+run:start / run:interrupt / run:interject
+approval:decide
+goal:update / plan:update
+```
 
-- `run_command`、PTY、git hooks 和项目脚本不是 sandbox。用户批准后它们仍可访问主机环境。
-- 完整 trace 不是脱敏日志。它用于调试和回放，默认关闭。
-- 插件事件总线不是执行任意第三方 JS 的隔离环境。
+主进程推送分成两类：
+
+- `state:changed`：已提交的 canonical entity change。
+- `run:stream`：文本/reasoning delta、runtime status、terminal output 等瞬时事件。
+
+不能继续让同一 `AgentEvent` 同时承担数据库事实、流式传输、UI model 构造和 trace 四种职责。
+
+### 7.2 Command envelope
+
+会产生持久变更的 command 包含：
+
+```ts
+interface CommandEnvelope<T> {
+  schemaVersion: 1
+  commandId: string
+  sessionId?: SessionId
+  expectedEntityRevision?: number
+  payload: T
+}
+```
+
+- `commandId` 支持 IPC retry 幂等。
+- `expectedEntityRevision` 用于 title/model/mode 所在的 SessionRecord，以及 draft、Plan 等各自会发生并发覆盖的 entity；它不使用 Session `stateRevision`。
+- `run:start` 额外使用稳定 `clientRequestId`，并受数据库 unique constraint 保护。
+- 冲突返回当前 entity revision 和最新 entity，不做 silent last-write-wins。
+
+### 7.3 SessionChange
+
+```ts
+interface SessionChange {
+  schemaVersion: 1
+  sessionId: SessionId
+  stateRevision: number
+  upserts: SessionEntity[]
+  deletes: EntityRef[]
+  committedAt: string
+}
+```
+
+Backend response 和 push 使用同一 change schema。发起请求的窗口可以先从 response 应用；随后收到重复 push 时依靠 `stateRevision` 幂等忽略。
+
+### 7.4 Snapshot 和分页
+
+应用启动只返回：
+
+- public settings。
+- project list。
+- Session summaries。
+- 当前选中 Session 的必要首屏数据。
+
+完整历史按 `sequence` 分页。以下情况请求新的 snapshot：
+
+- renderer 首次打开 Session。
+- 应用/窗口重载。
+- `stateRevision` gap。
+- change cursor 过期。
+- schema version 变化。
+
+禁止恢复 `workbench:save` 式全应用快照覆盖。
 
 ---
 
-## 18. 测试与质量门禁
+## 8. 核心流程
 
-常用命令：
+### 8.1 创建 Session
 
-- `npm test`：Vitest deterministic tests。
-- `npm run typecheck`：Vue/Node TypeScript type checks。
-- `npm run lint`、`npm run format:check`：静态质量。
-- `npm run test:e2e`：先 `npm run build:app`，再 Playwright Electron e2e。
-- `npm run test:native`：node-pty native smoke。
-- `npm run test:ripgrep`：bundled ripgrep smoke。
-- `npm run test:real`：显式 live provider 测试，需要 `DEEPSEEK_API_KEY`。
-- `npm run test:docker-worker`：显式构建 Linux worker image，运行 fake-provider proxy smoke 和强制超时清理；不进入默认测试链路。
-- `npm run test:benchmark-cases`：校验冻结 manifest/archive/private-spec，并对 3 个 bootstrap case 重复运行 baseline/oracle/mutant 自检。
+1. Renderer 发送 `session:create`，包含 `projectId` 和可选初始 model/mode。
+2. Backend 从当前 backend-owned defaults 补齐字段。
+3. 单事务插入 Session，并写 `stateRevision = 1` 的 change。
+4. Commit 后返回并发布 `SessionRecord`。
+5. Renderer 将它加入 replica store 并导航到该 Session。
 
-当前测试分布：
+空 Session 是真实后端记录，不存在 renderer-only `transient` conversation。
 
-- `electron/**/*.test.ts`：主进程业务、Node-only AgentRuntime、工具、权限、provider、session、prompt、logging、project/code intelligence。
-- `shared/**/*.test.ts`：contract、markdown import/export、titles。
-- `src/**/*.test.ts`：Pinia stores、Vue components、terminal sequence。
-- `e2e/*.spec.ts`：Electron 安全基线、设置/工作台/UI、fake provider 功能流、审批、interjection、terminal。
+### 8.2 更新 draft
 
-设计约束：
+输入控件可以立即显示本地字符。Renderer 对 draft 采用 debounce command：
 
-- `npm test` 必须离线、确定性，不依赖真实付费 provider。
-- Live provider 测试只走 `npm run test:real`。
-- 安全敏感分支需要单测覆盖：IPC、path guard、permission、secrets、SSRF、tool resource preconditions。
-- Renderer 回归优先用组件/store 测试；跨 renderer-main-provider 的关键路径用 Playwright。
+1. 本地值标记为 pending。
+2. 发送 `session:update-draft(expectedEntityRevision)`。
+3. 后端更新 `session_drafts` 并发布 change。
+4. Renderer 用确认值、entity revision 和 state revision 收口 pending。
+
+应用关闭时可以主动 flush，但正确性不能依赖 renderer 的 dispose 回调一定执行。
+
+### 8.3 更新模型和权限模式
+
+模型下拉框发送带 SessionRecord `expectedEntityRevision` 的 `session:update`，更新 `SessionRecord.modelSelection`。它不直接改 provider settings，也不修改已经开始的 Run。
+
+权限模式同样由后端更新。active Run 使用启动时冻结的 permission mode；Session 上的新值只影响后续 Run，避免运行中语义突变。
+
+### 8.4 发送用户消息
+
+`run:start` 在第一个事务中完成：
+
+1. 校验 Session、model/mode entity revision、并发和 writer 条件，并预留所需 run slot/writer lease。
+2. 追加 canonical user message 和 attachments。
+3. 清空已提交 draft。
+4. 从 Session model selection 解析 immutable `ModelRouteSnapshot`。
+5. 创建 Run，冻结 route 和 permission mode。
+6. 递增 Session `stateRevision` 和 sequence。
+7. Commit 后发布 user message、Run 和 Session change。
+8. 将预留 lease 交给 `RunRuntime` 并启动执行；事务失败时必须释放预留资源。
+
+因此不会出现 UI 已经显示用户消息、但后端没有对应 Run/history 的状态。
+
+### 8.5 Provider、工具和流式输出
+
+1. `ProviderContextCompiler` 从 SQLite records/checkpoint 构建 provider-neutral上下文。
+2. Provider adapter 编译成目标 provider request。
+3. Text/reasoning delta 写入 backend run buffer，并通过 `run:stream` 推送。
+4. Backend 周期性更新 `run_outputs`，用于 renderer 重连和进程崩溃后的 incomplete display。
+5. Tool proposal、approval request、decision 和 result 分别获得 timeline sequence，并在各自事务提交后发布 state change；不能通过更新 proposal row 丢失真实顺序。
+6. Provider 完成后，在同一事务写 assistant message、usage、continuation state 和 terminal Run status。
+7. Commit 后清理/终结 run output，并发布最终 change。
+
+最终 assistant message 不能由 renderer 聚合 delta 后自行创建。
+
+### 8.6 重启恢复
+
+应用启动时执行 recovery transaction：
+
+- 将非终态 Run 标为 `interrupted`。
+- 关闭不存在底层进程的 terminal/runtime records。
+- 释放所有内存 writer/run lease；它们不能跨进程存活。
+- 保留 `run_outputs` 作为 incomplete output。
+- Session history、Goal、Plan、model selection、draft 和审批结果从 SQLite 恢复。
+
+下一次 Run 从最新适用 checkpoint 加后续 canonical records 重建 context。恢复不能依赖上一进程的 `SessionRuntime`。
 
 ---
 
-## 19. 当前限制
+## 9. Model Route 与 Provider Context
 
-- 桌面产品仍把 Node-only AgentRuntime 实例化在 Electron 主进程，而不是 utility process；未捕获的主进程宿主错误仍可能影响窗口。外部benchmark已支持Harbor/SWE-rebench声明的Linux任务环境，但上游image体积、registry可用性和跨平台Docker实现仍会产生infrastructure incompatible样本；这类失败不计为模型任务失败。
-- Provider 层当前是 OpenAI-compatible/DeepSeek 为主，没有多厂商完整矩阵。
-- Code intelligence backend 当前实际实现为 Serena MCP 只读 adapter，rename/edit capability 只在 schema 中预留。
-- 插件系统只有事件总线和 hook 点，没有本地 JS 插件加载器。
-- 完整 trace 默认关闭，开启后可能保存源码和工具输出中的敏感内容。
-- 命令/终端/git 写操作依赖权限和审批，不提供 OS/container 级隔离。
+### 9.1 两层模型状态
+
+模型状态明确分为：
+
+- `Session.modelSelection`：下一次 Run 的用户选择。
+- `Run.modelRouteSnapshot`：这次执行实际使用的不可变事实。
+
+`ModelRouteSnapshot` 包含 provider id/label、protocol、profile、base URL、model、reasoning、context window、max output 和 capability source，但不包含 API key。
+
+全局 provider 默认值只用于新 Session 或用户明确“恢复默认”。改变全局默认不能让现有 Session 静默换模型。
+
+### 9.2 Provider continuation
+
+Provider continuation state 是 opaque JSON，并绑定：
+
+- Session。
+- Run/provider call。
+- ModelRouteSnapshot。
+- `throughSequence`。
+
+Provider adapter 可以复用兼容 continuation。切换 provider/model/protocol 后若不兼容，compiler 必须回退到 canonical history replay，不能丢弃历史或错误复用旧 token。
+
+### 9.3 Prompt Harness
+
+Base instructions、runtime context、assistant preferences、AGENTS、selected context、skills、slash/orchestration request 均形成 canonical harness/message record，并记录 source、prompt id/version/hash 和 audience。
+
+Prompt selection 可以裁剪普通历史，但 pinned layers、compact checkpoint 和当前用户轮必须保持协议完整。每次 provider request 继续把 prompt build、resource hash 和最终 normalized messages 写入 trace。
+
+---
+
+## 10. Run 编排、并发与工具
+
+现有 Agent loop、Prompt Harness、ToolRegistry、PermissionPipeline、TerminalPool、MCP、Skills、ProjectModel 和 Code Intelligence 能力继续保留，但它们通过 application/runtime service 修改 canonical state。
+
+### 10.1 并发不变量
+
+- 每个 Session 同时最多一个 active Run。
+- 全应用 `maxConcurrentRuns` 限制不变。
+- 同一 canonical workspace 同时最多一个非 readonly writer Run。
+- `readonly` Run 不获取 writer lease。
+- writer lease 覆盖 provider、工具、审批等待、interjection continuation 和 cancelling。
+- 有不可中止副作用仍在执行时，Run 可以进入用户可见终态，但 writer 必须延迟释放到副作用真正 settle。
+
+Writer lease 属于 backend runtime，不持久化为可恢复锁。Run record 和 trace 记录获得、拒绝、释放事实；重启时所有旧 lease 失效。
+
+### 10.2 工具与审批
+
+- Tool call 先规范化和校验，再追加 immutable `ToolCallRecord`。
+- 需要人工审批时追加 `ApprovalRequestRecord`；renderer 只提交 decision command，后端再追加 `ApprovalDecisionRecord`。Pending 状态由 request 尚无 terminal decision 推导。
+- Tool result 必须先落盘，再进入下一次 provider context。
+- 拒绝、取消、超时同样形成结构化 result。
+- Tool output 继续执行字节/token/条目上限。
+- Workspace path、resource precondition 和 tool ownership 是执行不变量，不因本地桌面威胁模型放宽。
+
+### 10.3 Goal、Plan 和 interjection
+
+Goal/Plan 从 SessionRuntime 移入 SQLite tables。模型工具和 renderer command 都调用相同 application service，不得一方只改内存。
+
+Interjection 的 queued/injected/superseded/carryover 状态由后端保存。它进入 provider context 后形成 canonical message；renderer 只根据状态渲染。
+
+### 10.4 Compact
+
+Compact 生成 `context_checkpoints` 和对应 canonical compaction message。它记录 `throughSequence`、source hash、Goal/Plan snapshot 和必要 provider state，但不重写或删除旧 messages。
+
+---
+
+## 11. 配置、Secrets 与其他存储
+
+“Backend authoritative”不等于所有内容必须进入同一个数据库。
+
+目标存储边界：
+
+| 数据                                                               | 存储                                         | 所有者                  |
+| ------------------------------------------------------------------ | -------------------------------------------- | ----------------------- |
+| Projects、Sessions、Runs、timeline、Goal/Plan、draft、file changes | `userData/agent.db`                          | backend                 |
+| 非敏感应用/provider 配置                                           | backend config repository；可后续迁入 SQLite | backend                 |
+| API keys                                                           | Electron safeStorage-backed secret store     | backend                 |
+| Trace                                                              | `userData/traces/*.jsonl`                    | backend                 |
+| Skills                                                             | `userData/skills/`                           | backend manager         |
+| ProjectModel                                                       | workspace `.zch/project-model.json`          | backend project service |
+| Prompt resources                                                   | versioned application resources              | backend registry        |
+
+Renderer 只能读取经过筛选的 public config snapshot。API key、Authorization 和 safeStorage 密文不进入 renderer、Session records 或 trace。
+
+配置的 mutation 同样走 command → backend store → committed snapshot → renderer，不允许 settings form 只改 Pinia。
+
+---
+
+## 12. Renderer 架构
+
+### 12.1 Replica stores
+
+目标 store 分层：
+
+```text
+app-shell-store          bridge/bootstrap/window UI
+project-replica-store    backend ProjectRecord copies
+session-replica-store    SessionRecord and paged canonical entities
+run-stream-store         backend stream buffers and connection state
+settings-replica-store   public backend settings copies
+ui-store                 selection/layout/scroll/panel state
+```
+
+Pinia action 可以发送 command，但不得在成功前直接把领域值当成 canonical state。收到 response/change 后统一通过 reducer/upsert 路径更新 replica。
+
+### 12.2 Renderer 可以派生但不能发明
+
+Renderer 可以：
+
+- 直接按 sequence 渲染 canonical timeline，并按 call/approval ID 把相关实体投影成工具卡和审批卡。
+- 根据 canonical kind 决定隐藏、折叠或使用哪个组件。
+- 计算 badge、搜索索引和展示用 summary。
+- 缓存分页结果。
+
+Renderer 不可以：
+
+- 自行创建正式 message、Run、ToolCall 或 Approval。
+- 聚合 delta 后自行认定 assistant message completed。
+- 将 model dropdown 值只写入 form/store。
+- 保存整个 Session/workbench 文件。
+- 在切换 Session 时把一份 frontend record 写回另一份 record。
+
+### 12.3 UI-only 状态
+
+以下状态可以只在 renderer：
+
+- 当前导航和选中的 Session。
+- 面板尺寸、展开状态和滚动位置。
+- hover、selection、modal open/close。
+- IME composition。
+- 尚未确认的输入值和 command pending/error。
+
+如果产品要求某项 UI preference 跨重启恢复，它会升级为 backend-owned preference，而不是直接增加 renderer localStorage 真相源。
+
+---
+
+## 13. IPC 与 Electron 边界
+
+Preload 继续只暴露冻结的 typed API，不暴露 `ipcRenderer`。每个 command/query/result/change 都按 `shared/` schema 校验。
+
+本项目不以防御已完全控制本机的恶意软件为目标，因此不引入数据库加密、多用户 ACL、本地记录签名或防止同一 OS 用户读取对话的机制。
+
+仍保留：
+
+- renderer sandbox 和 contextIsolation。
+- sender/frame/origin 与 payload/result schema 校验。
+- CSP、导航和 window/webview 限制。
+- secrets 不进入 renderer。
+- workspace path 和 resource ownership 校验。
+- 子进程环境 allowlist。
+- tool approval、abort 和 bounded output。
+
+这些边界主要防止模型误操作、prompt injection、renderer bug 和依赖漏洞，同时维护业务不变量，不是为了对抗 root 级本机攻击者。
+
+---
+
+## 14. Trace、回放与导出
+
+SQLite 是产品状态的真相源；JSONL trace 是可选审计和调试记录，不能承担 Session 恢复。
+
+Trace 继续记录：
+
+- Session/Run lifecycle 和 route snapshot。
+- prompt build、normalized messages 和 provider request/response。
+- text/reasoning stream、usage 和 continuation metadata。
+- tool、approval、interjection、Goal/Plan、writer 和 terminal 事件。
+
+Trace sequence 与 Session entity sequence 是不同命名空间。Trace 可以比产品状态更详细，也可以在 logging 关闭时不存在。
+
+Conversation Markdown import/export 以 canonical messages 为输入。Restricted session transcript 可以组合 SQLite state 与 trace；缺少 trace 时必须明确省略 provider wire/runtime 细节，不能把产品 state 冒充完整 trace。
+
+---
+
+## 15. Project、Terminal、Skills、MCP 与插件
+
+这些服务仍在 backend：
+
+- Project explorer 和 code intelligence 通过 query 返回 canonical public records。
+- Terminal 的 PTY process、scrollback 和 ownership 属于 backend runtime；renderer 只显示 terminal stream。应用重启不恢复真实 PTY process。
+- Skills manager 扫描、安装和启用 skill；renderer 只提交 command 和显示状态。
+- MCP manager 拥有连接、目录 revision、tool normalization 和调用。
+- Plugin event bus 是 backend hook/event 机制，不是 renderer 插件运行时。
+
+这些服务如需修改 Session timeline、Goal/Plan 或 tool state，必须调用 application service，不能直接向 renderer 发一个无法恢复的临时事实。
+
+---
+
+## 16. Headless、Benchmark 与 Runtime Parity
+
+Headless 和 Benchmark 继续复用唯一 Agent runtime。v2 要求把 persistence 也纳入 parity：
+
+- 每次 benchmark trial 使用独立临时 SQLite database。
+- desktop fake-provider 和 headless fake-provider trajectory 比较 canonical records、provider messages、tool results、prompt hashes 和最终 patch。
+- Runtime identity 继续包含 source commit、prompt/tool hash、provider/model/profile/reasoning 和预算。
+- Benchmark artifacts 可以导出数据库中的 canonical transcript，但不得依赖 renderer store。
+- Trial resume 不恢复未完成 container/runtime；数据库和 artifacts 只在完整终态后封存。
+
+Docker worker、isolated grader、credential proxy、case identity、pass@k 独立 workspace 和 cleanup hard gate 的现有边界不因状态架构重构而改变。
+
+---
+
+## 17. 迁移方案
+
+### 17.1 一次性导入
+
+首次打开 v2 database 时：
+
+1. 创建并迁移 `agent.db`。
+2. 如果存在 `workbench.json` 且没有 import marker，先复制只读备份。
+3. 在单一事务中导入 projects 和 conversations。
+4. 每个旧 Conversation 创建同 ID 或稳定映射的 Session。
+5. 导入可见 messages、tool activities、usage、Goal、Plan、draft、attachments 和 fork metadata。
+6. 写入 import marker 和来源 hash。
+7. Commit 成功后才启用新 repository；失败时保留旧文件且不写半成品。
+
+旧 `workbench.json` 没有完整保存 backend provider history、harness layers 和 continuation state，因此不能完美恢复。迁移 Session 必须标记：
+
+```text
+historyFidelity = legacy_display_only
+```
+
+迁移器不得伪造不存在的 provider history。旧 Session 后续执行可以采用明确的 visible-history replay/summary 策略，并在 UI 或内部诊断中说明上下文保真度有限。
+
+### 17.2 切换原则
+
+迁移不采用长期双写。正确顺序是：
+
+1. 引入 shared canonical schemas、SQLite 和 repository tests。
+2. 引入 backend Session/Run application services。
+3. Runtime 改为从 repository 构建 history 并事务性写结果。
+4. Renderer 改为 query/command/change replica。
+5. 一次性启用 importer 并切换真相源。
+6. 删除 `workbench:save`、frontend persistence 和 memory-only canonical history。
+
+任何阶段都只能有一个明确真相源。兼容 adapter 可以读旧格式并写新格式，不能让两个方向互相覆盖。
+
+### 17.3 明确移除项
+
+- `userData/workbench.json` 作为活动存储。
+- `PersistedWorkbench.conversations`。
+- frontend-owned `ConversationRecord`。
+- `conversationIdBySessionId`。
+- renderer 250ms 全 workbench save。
+- `SessionState.history` 作为唯一 provider context。
+- 只修改 provider form、不提交 Session selection 的模型下拉框行为。
+
+---
+
+## 18. 测试与架构不变量
+
+### 18.1 必须新增的测试层
+
+- Shared schema contract tests。
+- SQLite migration、foreign key、transaction rollback 和 codec round-trip tests。
+- Repository tests 使用真实临时 SQLite 文件。
+- Application command idempotency、entity revision conflict 和 commit-before-publish tests。
+- Runtime crash/restart recovery tests。
+- Renderer replica reducer、state revision gap 和 pending reconciliation tests。
+- Electron full relaunch E2E，不以 `page.reload()` 代替进程重启。
+- Desktop/Headless persistence parity tests。
+
+### 18.2 核心恢复回归
+
+必须覆盖以下端到端不变量：
+
+1. 用户发送消息 A。
+2. Provider 产生 tool call、tool result 和最终回复。
+3. 完整退出 Electron 主进程。
+4. 使用相同 `userData` 重启。
+5. 在同一 Session 发送消息 B。
+6. 断言新 provider request 包含正确的 A、assistant/tool 历史、B、checkpoint 和 route 语义。
+
+还必须覆盖：
+
+- model selection 修改只影响后续 Run。
+- 已开始 Run 的 route/mode 不随 Session 修改漂移。
+- interrupted Run 恢复为明确终态并保留 partial output。
+- renderer 不能只靠本地 mutation 产生持久消息。
+- duplicate command/clientRequestId 不产生重复消息或 Run。
+- state revision gap 必须 snapshot resync。
+- tool result 未 commit 时不得进入下一次 provider request。
+
+### 18.3 质量门禁
+
+现有 `npm test`、typecheck、lint、format、native、ripgrep、E2E、real-provider 和 benchmark opt-in 门禁继续保留。数据库 driver 引入后，打包和 native ABI smoke 必须覆盖开发环境与目标 Electron runtime。
+
+---
+
+## 19. 当前迁移状态
+
+本文描述目标架构。当前代码仍存在以下已知 legacy 状态：
+
+- renderer Pinia 保存 conversation 和 timeline，并整体写入 `workbench.json`。
+- main-process Session history 主要位于内存。
+- restart 后 UI history 与 provider history 可能不一致。
+- Session 和 Conversation 使用不同 ID/生命周期。
+- composer model selection 与实际 Session route 不是同一 canonical mutation。
+
+这些不是 v2 允许的长期折中。任何涉及 Session、模型选择、历史恢复或 renderer persistence 的新功能，都应优先落到 v2 migration，不得继续扩大 legacy 数据流。

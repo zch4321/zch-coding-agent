@@ -1,8 +1,9 @@
 # 前端产品与验收规范 · Zch Coding Agent
 
-> 状态：MVP 实现同步版 v0.3 · 最后更新 2026-06-28
-> 配套：[`requirements.md`](./requirements.md)（产品能力）、[`architecture.md`](./architecture.md)（技术边界）、[`implementation-plan.md`](./implementation-plan.md)（实施阶段）。  
-> 本文档是前端信息架构、交互行为、阶段展示和验收标准的权威依据。历史视觉探索见 [`frontend-design.md`](./frontend-design.md)，发生冲突时以本文档为准。
+> 状态：Backend Architecture v2 配套规范 · 最后更新 2026-07-22
+> 配套：[`requirements.md`](./requirements.md)（产品能力）、[`architecture.md`](./architecture.md)（技术边界）、[`road-map.md`](./road-map.md)（实施方向）。
+> 本文档是前端信息架构、交互行为、阶段展示和验收标准的权威依据；发生冲突时以本文档为准。
+> v2 状态所有权和恢复行为是迁移目标；当前实现差异见架构文档 §19。
 
 ---
 
@@ -34,20 +35,19 @@
 
 ### 2.2 对话（Conversation）
 
-- 对话是项目下可持续打开、搜索和恢复的用户界面实体。
-- 对话保存标题、所属项目、消息历史、创建时间、更新时间、模型和权限模式等 UI 元数据。
-- 对话不是新的执行权限边界；实际 Agent 运行仍使用 `Session` 和 `Run`。
-- 一个打开的对话在需要执行 Agent 时绑定一个 runtime Session；一次用户提交形成一个 Run。
-- runtime Session 关闭后，对话记录仍可保留；重新打开时由运行时恢复所需上下文或创建新的 Session。
+- “对话”是持久化 `Session` 在 UI 中的产品名称，不是另一种领域实体。
+- 对话标题、项目、消息、模型、权限模式、draft 和时间等数据都来自 backend-owned Session state。
+- 创建对话即通过后端创建并持久化 Session；不存在 renderer-only Conversation、临时 Conversation 或 `conversationId -> sessionId` 绑定。
+- Renderer 可以分页缓存 Session 数据并派生 timeline，但不能保存或回写另一套 ConversationRecord。
 - 不引入 Task 概念。
 
 ### 2.3 Session 与 Run
 
-- Session、Run 是运行时概念，不作为左侧导航层级。
-- 同一对话同一时间最多一个 active Run。
+- Session 是持久化对话，但 UI 仍显示“对话”而不显示内部 ID；Run 不作为左侧导航层级。
+- 同一 Session 同一时间最多一个 active Run。
 - 全应用默认最多 4 个 active Run，达到 `maxConcurrentRuns` 后新 Run 直接拒绝；不另设 provider call 上限。
 - 同一 canonical workspace 最多一个非只读 writer Run；ReadOnly Run 可与 writer 和其他 ReadOnly Run 并行，不同 workspace 的 writer 可并行。
-- Run 活动时同一对话再次发送消息默认拒绝；排队不在当前范围。
+- Run 活动时同一 Session 再次发送普通消息默认拒绝；排队不在当前范围。
 
 ### 2.4 Artifact
 
@@ -161,7 +161,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 - 有当前项目时，在该项目下创建新对话并聚焦输入框。
 - 没有项目时，先打开目录选择器，成功后创建项目和新对话。
 - 当前 Run 活动时可以新建或切换对话，不中断后台 Run，也不显示“中断并切换”确认框。
-- 创建对话本身不需要立即访问 Provider；首次发送消息时再创建 runtime Session。
+- 创建对话立即通过后端创建持久化 Session，但不访问 Provider；首次发送消息时只创建新的 Run。
 
 ### 5.3 对话标题
 
@@ -189,9 +189,9 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 ### 5.6 并发状态与破坏性操作
 
 - 对话项和搜索结果显示一个最高优先级运行状态：`Awaiting approval` → `Writer` → `Read-only locked` → `Cancelling` → `Running` → `Failed` → `Completed`。
-- 后台 approval 只在其所属 conversation 显示 badge；点击后 ApprovalCard 使用显式 conversationId 提交，不得复用先前 active conversation 的 session/run/call。
+- 后台 approval 只在其所属对话显示 badge；点击后 ApprovalCard 使用显式 `sessionId/runId/callId` 提交，不得复用先前 active Session 的标识。
 - running、start pending 或 awaiting approval 的 conversation 禁用 delete、fork 和 revert，并通过 tooltip 说明原因；项目内任一 conversation busy 时禁止 remove project。
-- conversation 切换不清空目标之外的 draft、context attachments、error 或 pending approval。
+- 对话切换不清空其他 Session 的 backend-owned draft、context attachments、error 或 pending approval 副本。
 
 ---
 
@@ -311,9 +311,10 @@ Context Ingress 审批必须显示：
 - 权限模式为 ReadOnly、Auto、Confirm、Yolo。
 - 首次启用 Yolo 必须显示 host-level side effects 风险并记录告知版本。
 - 模型和模式控件使用紧凑下拉，不使用侧栏大卡片。
-- 同 workspace 其他 writer 活跃时，用户切到该 conversation 才把它持久化并同步为 ReadOnly；其 mode selector 显示 ReadOnly、disabled，并用 tooltip 指明 writer conversation。
-- 不批量修改未打开的其他 conversation。writer 结束后 selector 解除 disabled，但 conversation 保持 ReadOnly；用户手动选择 Auto/Confirm/Yolo 时由主进程重新校验。
-- 如果后台 writer 在当前 conversation 打开后取得所有权，当前 conversation 立即执行同样的 ReadOnly 同步。同步失败仍允许浏览，但禁用发送并显示可重试错误。
+- 模型和模式修改必须发送 Session command；控件只在收到后端确认的 entity/state revision 后进入 committed 状态，失败时回到后端值并显示错误。
+- 同 workspace 其他 writer 活跃时，后端发布 `Read-only locked` 运行约束；当前 Session 保存的权限模式不因用户切换对话而被 renderer 偷改为 ReadOnly。
+- `Read-only locked` 期间仍可按 Session 当前模式展示选择值，但非只读 Run 的发送入口禁用并指明 writer Session；用户可以明确将 Session 模式改为 ReadOnly 后启动只读分析。
+- writer 结束后解除运行约束，不自动改变 Session 已保存的模式。
 
 ### 7.4 布局验收
 
@@ -366,7 +367,7 @@ Files 内部使用二级 tab：
 - 显示目标路径、操作类型、diff hash、截断状态和统一 diff。
 - Diff 活动时不同时展示 Explorer。
 - 审批按钮可同时出现在对话卡和 Diff footer，但共享同一 store 状态。
-- 审批完成后从主进程加载当前 conversation 的持久化文件变更历史；切换对话或项目时必须按 conversationId + workspace 重新查询，不能复用上一对话的列表。
+- 审批完成后从后端加载当前 Session 的持久化文件变更历史；切换对话或项目时必须按 `sessionId` 重新查询，不能复用上一对话的列表。
 - 变更列表显示路径、操作、时间、diff hash 和回退状态；选择记录后显示对应统一 diff。
 - “回退此变更”必须先显示明确确认，运行期间禁用。主进程返回 `CONFLICT` 时在当前视口显示错误，不能假装回退成功。
 - 大 Diff 必须有明确截断提示，不能让 UI 假装展示了完整变化。
@@ -410,10 +411,10 @@ Terminal 不属于 P3 UI，P4 完成 PTY 后才显示。
 
 ### 9.3 生命周期
 
-- Terminal 归属于当前对话绑定的 runtime Session。
+- Terminal 归属于持久化 Session 对应的 backend SessionRuntime。
 - 切换对话时切换到该对话所属 terminal 集合。
 - Interrupt Run 不关闭 PTY。
-- 关闭对话 runtime Session、删除对话或退出应用时关闭所属 PTY。
+- 归档/删除 Session、移除项目或退出应用时关闭所属 PTY。
 
 ---
 
@@ -475,9 +476,10 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.6 Session 生命周期
 
 - Settings 不展示 `Start session` / `Close session` 作为主流程按钮。
-- 首次发送消息时自动创建 runtime Session。
-- 切换 conversation 不关闭后台 Session 或 Run；删除 conversation、移除项目和退出应用才关闭对应 runtime 资源。退出时统一取消 active runs、释放 workspace writer 并关闭 PTY。
-- 未发送 draft 与 context attachments 按 conversation 保存和恢复；A → B → A 切换不得把 B 的输入带回 A，也不得清空 A 的未发送内容。
+- 新建对话时由后端创建持久化 Session；首次发送只创建 Run。
+- 切换对话不关闭后台 SessionRuntime 或 Run；归档/删除 Session、移除项目和退出应用才清理对应 runtime 资源。退出时统一取消 active runs、释放 workspace writer 并关闭 PTY。
+- 未发送 draft 与 context attachments 由后端按 Session 保存和恢复；A → B → A 切换不得把 B 的输入带回 A，也不得清空 A 的未发送内容。
+- 应用重启后从后端 Session snapshot 恢复消息、draft、Goal/Plan、模型和模式；非终态 Run 显示为 `interrupted`，不得只恢复 UI 消息却丢失模型上下文。
 
 ---
 
@@ -485,24 +487,24 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 前端必须覆盖以下显式状态：
 
-| 状态                | 对话区             | 输入区                   | Artifact                    |
-| ------------------- | ------------------ | ------------------------ | --------------------------- |
-| 未选择项目          | 引导选择目录       | Send disabled            | 空状态                      |
-| Provider 未配置     | 配置提示           | Send disabled            | 可浏览本地文件              |
-| Idle                | 不显示内部 badge   | 可输入                   | 保留当前 tab                |
-| Calling LLM         | 流式占位/文本      | Stop                     | 保留当前 tab                |
-| Running tool        | 工具卡状态更新     | Stop                     | 文件工具可打开相关 Artifact |
-| Waiting approval    | 审批卡             | 禁止发送，可 Stop        | 自动显示 Diff 或相关文件    |
-| Workspace writer    | Writer badge       | 当前 Run 的普通控制      | 保留内容                    |
-| Read-only locked    | Read-only locked   | 允许启动只读分析         | 保留内容并提示状态可能过期  |
-| Cancelling          | 短状态             | Stop disabled            | 保留内容                    |
-| Failed              | 结构化错误、可重试 | 恢复输入                 | 保留审查上下文              |
-| Conversation closed | 历史只读           | 新消息时重新绑定 Session | 恢复持久化 Artifact 元数据  |
+| 状态             | 对话区             | 输入区              | Artifact                    |
+| ---------------- | ------------------ | ------------------- | --------------------------- |
+| 未选择项目       | 引导选择目录       | Send disabled       | 空状态                      |
+| Provider 未配置  | 配置提示           | Send disabled       | 可浏览本地文件              |
+| Idle             | 不显示内部 badge   | 可输入              | 保留当前 tab                |
+| Calling LLM      | 流式占位/文本      | Stop                | 保留当前 tab                |
+| Running tool     | 工具卡状态更新     | Stop                | 文件工具可打开相关 Artifact |
+| Waiting approval | 审批卡             | 禁止发送，可 Stop   | 自动显示 Diff 或相关文件    |
+| Workspace writer | Writer badge       | 当前 Run 的普通控制 | 保留内容                    |
+| Read-only locked | Read-only locked   | 允许启动只读分析    | 保留内容并提示状态可能过期  |
+| Cancelling       | 短状态             | Stop disabled       | 保留内容                    |
+| Failed           | 结构化错误、可重试 | 恢复输入            | 保留审查上下文              |
+| Session archived | 历史只读           | Unarchive 后可发送  | 恢复持久化 Artifact 元数据  |
 
 要求：
 
 - 错误消息对用户可见但不泄露 API Key、Authorization header 或主进程堆栈。
-- event seq 重复时不重复渲染；检测丢片后显示状态并请求允许的有限快照。
+- `stateRevision` 重复时不重复应用；检测 state change 缺口后请求 Session snapshot。`run:stream` 的 sequence 缺口只影响瞬时展示，并从后端 `run_outputs` checkpoint 恢复。
 - 切换对话、卸载组件和关闭窗口时注销 renderer listener。
 
 ---
@@ -625,7 +627,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] 新对话在当前项目下创建；无项目时先选择目录。
 - [ ] 对话标题可生成、重命名和删除。
 - [ ] 搜索只在本地检索标题和消息，并能打开结果。
-- [ ] 首次发送消息自动创建 runtime Session。
+- [ ] 新建对话立即创建 backend-owned Session；首次发送只创建 Run。
 - [ ] A 运行时切到 B 不打断 A，A/B timeline、approval、error 和 draft 不串线。
 - [ ] Sidebar 与搜索结果按规定优先级显示 writer/running/readonly locked/approval/failed/completed 状态。
 - [ ] running/start pending/approval conversation 的 delete、fork、revert 和 remove project 被禁用并说明原因。
@@ -636,7 +638,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] active Run 和 pending approval 时禁止重复发送。
 - [ ] Enter、Shift+Enter 和 IME 行为符合规范。
 - [ ] 模型和权限模式只使用紧凑控件，不放入侧栏大卡片。
-- [ ] 同 workspace writer 活跃时，切到其他 conversation 后 mode 显示并同步为 ReadOnly 且 selector disabled；writer 结束后解锁但不自动恢复模式。
+- [ ] 同 workspace writer 活跃时，其他 Session 显示 Read-only locked；renderer 不修改其持久化 mode，writer 结束后解除约束。
 - [ ] Limits 只提供最大并发任务数；UI 明确 writer=1 是不可配置安全规则。
 - [ ] 对话输入区没有 Terminal 入口。
 - [ ] Send/Stop 按钮与底部、右侧距离一致。
