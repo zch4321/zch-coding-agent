@@ -38,7 +38,7 @@
 
 - “对话”是持久化 `Session` 在 UI 中的产品名称，不是另一种领域实体。
 - 对话标题、项目、完整消息、模型、权限模式、Goal/Plan 和时间来自 backend-owned Session state。
-- Renderer 使用 shared `MessageRecord` 原样保存 backend 副本，并根据内部 `kind` 决定展示；不能根据 provider `role` 重新发明另一套消息类型。
+- Renderer 使用 shared `MessageRecord` 原样保存 backend 副本，根据内部 `kind` 和有序 `parts` 决定展示；不能补造 Provider wire role、请求 DTO 或另一套消息类型。
 - Draft 和 draft attachments 只属于 renderer 输入组件，不要求跨 Session 切换、renderer reload 或应用重启恢复。
 - 创建对话即通过后端创建并持久化 Session；不存在 renderer-only Conversation、临时 Conversation 或 `conversationId -> sessionId` 绑定。
 - Renderer 可以分页缓存 Session 数据并派生 timeline，但不能保存或回写另一套 ConversationRecord。
@@ -176,9 +176,9 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 
 ### 5.4 对话搜索
 
-- 搜索范围：对话标题、用户消息和 Agent 文本消息。
+- 搜索范围：对话标题，以及 `user_input/assistant_turn` records 中 `type = 'text'` 的 parts。
 - 默认跨已添加项目搜索，结果按项目分组。
-- 不搜索工作区文件内容、工具原始输出、reasoning、trace 或 API Key。
+- 不搜索工作区文件内容、tool-call 参数、tool-result/JSON payload、reasoning、continuation、trace 或 API Key。
 - 结果显示项目名、对话标题、匹配摘要和更新时间。
 - 点击结果打开对应项目和对话。
 - 搜索必须在本地完成，不把搜索内容发送给 Provider。
@@ -222,7 +222,8 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 
 消息流要求：
 
-- 只有 `kind = 'user_input'` 的 Message 显示为用户气泡；`role = 'user'` 的 orchestrator、runtime context、harness 或 compact summary 不能伪装成用户亲自输入。
+- 只有 `kind = 'user_input'` 的 Message 显示为用户气泡；orchestrator、runtime context、harness 或 compact summary 不能伪装成用户亲自输入。
+- Renderer 按 part 的原始顺序渲染：`text` 进入 Markdown，assistant `tool_call` 与对应 `tool_result` 组成稳定工具卡；受支持的 JSON result 只进入有界、可展开的结构化视图。它不能把 parts 重新编译成 Provider DTO。
 - `kind = 'assistant_turn'` / `'tool_result'` 的完整 records 用于重建稳定消息和工具卡；Active Run 的 delta/runtime events 只负责未完成状态，不能由 renderer 自行提交为 Message。
 - Renderer 只能展示 `normalizedReasoningText`，必须把 `providerContinuation` 当作 opaque canonical data，不解析、不修改，也不展示其中的原始 CoT、signature、encrypted/redacted block、response id 或 output item。
 - Renderer 根据按 `kind` 校验的 typed metadata 展示 attachment provenance、usage、tool/approval/compact 摘要；不能把未知 metadata 字段转成 Provider request 内容。
@@ -645,7 +646,8 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 - [ ] 流式文本、折叠 reasoning、工具卡和结构化错误正常。
 - [ ] Reasoning 折叠区只展示 `normalizedReasoningText`；缺失时不显示，opaque `providerContinuation` 永不进入 UI。
-- [ ] `kind = 'user_input'` 才渲染为用户气泡；user-role orchestrator/runtime context/harness 不伪装成用户输入。
+- [ ] `kind = 'user_input'` 才渲染为用户气泡；orchestrator/runtime context/harness 不伪装成用户输入。
+- [ ] `text/tool_call/tool_result` parts 按原始顺序渲染，工具卡可由完整 MessageRecords 稳定重建；Renderer 不生成 Provider DTO。
 - [ ] active Run 和 pending approval 时禁止重复发送。
 - [ ] Enter、Shift+Enter 和 IME 行为符合规范。
 - [ ] 模型和权限模式只使用紧凑控件，不放入侧栏大卡片。
