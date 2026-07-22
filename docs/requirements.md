@@ -160,6 +160,8 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 - 一个工作区（workspace）= 一个本地目录。
 - Session 是持久化对话实体，绑定一个工作区、当前模型选择与权限模式；UI 中的“对话”是 Session 的展示名称，不存在独立 Conversation 领域记录或 `conversationId -> sessionId` 映射。
 - SQLite 只持久化 Session 元数据和完整 Message history。Goal/Plan 属于 Session 元数据；完整 assistant/tool/harness 内容统一表示为 Message。Renderer 只保存这些 backend records 的副本，不得单独创建已提交消息。
+- 每个 `MessageRecord` 同时保存内部 `kind` 和 provider-neutral 的 `role/content/reasoningContent/toolCalls/toolCallId` 字段。`kind` 用于区分真实用户输入、编排消息、runtime context、harness、assistant、tool result 和 compact summary；它不发送给 Provider。`role = 'user'` 不等于用户亲自输入。
+- SQLite 不保存 OpenAI、DeepSeek、Anthropic 或其他 Provider SDK 的请求 DTO。发起请求时，backend 从 `inHistory = true` 的完整 `MessageRecord` 编译 provider-neutral messages，再由 Provider Adapter 转换成 wire DTO；Persistence layer 不依赖 Provider。
 - Draft 和 draft attachments 是 renderer UI 状态，不进入 backend 或 SQLite，也不要求在切换 Session、renderer reload 或应用重启后保留。
 - 每次用户提交形成 backend memory 中的 Active Run；它在开始时冻结实际 `ModelRouteSnapshot` 和权限模式，但不单独落盘。完成的 assistant message 记录实际 route；Session 的模型/模式修改只影响后续 Run。
 - Active Run、stream delta、pending approval、未完成 tool batch、writer lease 和 PTY/process 都是 backend runtime state，不进入 SQLite。
@@ -342,7 +344,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - UI 中一个项目对应一个 workspace，不重复展示两个概念。
 - 左侧项目侧栏提供新对话、对话搜索，以及项目下的二级对话列表；不引入 Task 概念。
 - “对话”直接对应 backend-owned Session；标题、完整消息历史、所属项目、创建/更新时间和模型/权限模式由后端持久化并推送给 renderer。Draft 仅属于 renderer 输入组件。
-- 搜索通过本地后端查询 Session 标题、用户消息和 Agent 文本，不检索工作区文件、工具原始输出、reasoning 或 trace，也不访问 Provider。
+- 搜索通过本地后端查询 Session 标题、`kind = 'user_input'` 的用户消息和 `kind = 'assistant_turn'` 的 Agent 文本，不把 user-role orchestrator/harness/runtime context 当成用户消息；不检索工作区文件、工具原始输出、reasoning 或 trace，也不访问 Provider。
 - 新建对话时立即创建持久化 Session；首次发送消息启动内存 Active Run。Session/Run ID 不作为常驻产品信息展示。
 - 正式 UI 不得使用硬编码项目、对话或工具活动作为占位数据。
 

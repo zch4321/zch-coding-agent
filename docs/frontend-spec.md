@@ -37,6 +37,7 @@
 
 - “对话”是持久化 `Session` 在 UI 中的产品名称，不是另一种领域实体。
 - 对话标题、项目、完整消息、模型、权限模式、Goal/Plan 和时间来自 backend-owned Session state。
+- Renderer 使用 shared `MessageRecord` 原样保存 backend 副本，并根据内部 `kind` 决定展示；不能根据 provider `role` 重新发明另一套消息类型。
 - Draft 和 draft attachments 只属于 renderer 输入组件，不要求跨 Session 切换、renderer reload 或应用重启恢复。
 - 创建对话即通过后端创建并持久化 Session；不存在 renderer-only Conversation、临时 Conversation 或 `conversationId -> sessionId` 绑定。
 - Renderer 可以分页缓存 Session 数据并派生 timeline，但不能保存或回写另一套 ConversationRecord。
@@ -220,6 +221,8 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 
 消息流要求：
 
+- 只有 `kind = 'user_input'` 的 Message 显示为用户气泡；`role = 'user'` 的 orchestrator、runtime context、harness 或 compact summary 不能伪装成用户亲自输入。
+- `kind = 'assistant_turn'` / `'tool_result'` 的完整 records 用于重建稳定消息和工具卡；Active Run 的 delta/runtime events 只负责未完成状态，不能由 renderer 自行提交为 Message。
 - 自动跟随流式输出；用户主动向上滚动后停止强制跟随，并显示“回到底部”。
 - 长代码和长路径不撑破布局。
 - Markdown 禁止 raw HTML；外链协议白名单化并通过受控主进程动作打开。
@@ -636,6 +639,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 16.3 对话与输入
 
 - [ ] 流式文本、折叠 reasoning、工具卡和结构化错误正常。
+- [ ] `kind = 'user_input'` 才渲染为用户气泡；user-role orchestrator/runtime context/harness 不伪装成用户输入。
 - [ ] active Run 和 pending approval 时禁止重复发送。
 - [ ] Enter、Shift+Enter 和 IME 行为符合规范。
 - [ ] 模型和权限模式只使用紧凑控件，不放入侧栏大卡片。

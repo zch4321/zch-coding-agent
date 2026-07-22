@@ -101,7 +101,7 @@ decode(encode(record)) deep-equals record
 ```text
 shared/
   session.ts              # SessionRecord / SessionSnapshot
-  message.ts              # MessageRecord / provider-history projection
+  message.ts              # canonical MessageRecord
   runtime-events.ts       # ephemeral Run/stream events
   commands.ts             # commands / queries / results
   ipc-contract.ts
@@ -115,12 +115,15 @@ shared/
 
 ```text
 electron/
-  application/            # Session commands、queries、transactions
+  application/
+    session-service.ts
+    message-history-compiler.ts
   persistence/
-    database.ts
+    database-service.ts
     migrations/
-    session-repository.ts
-    message-repository.ts
+    repositories/
+      session-repository.ts
+      message-repository.ts
     codecs/
   runtime/
     live-session-context.ts
@@ -137,7 +140,16 @@ electron/
   ipc/                    # host adapter，不包含领域逻辑
 ```
 
-IPC handler 只负责边界校验、调用 application service 和编码结果，不能直接修改 repository 或 runtime map。
+Persistence 是独立代码层，但不是独立进程、IPC service 或通用 ORM：
+
+- `DatabaseService` 拥有 SQLite connection、migration、PRAGMA、关闭流程和 `withTransaction()`。
+- Repository 只执行领域相关 SQL，输入输出都是 shared canonical record；它们接受 transaction handle，但不自行 begin、commit 或发布事件。
+- Codec 只负责 SQLite row 与 `SessionRecord/MessageRecord` 的字段名、JSON 和时间格式转换，并在边界执行 shared schema 校验。
+- Application service 拥有业务事务边界，负责在同一个 transaction 中分配 seq、插入 messages、递增 Session revision，并在 commit 后发布 records。
+
+Persistence 不导入 provider adapter，不判断哪些消息进入模型请求，也不把 `MessageRecord` 转成 provider DTO。禁止为了抽象而引入 `BaseRepository`、动态 query DSL，或另一套语义不同的 `DatabaseSession/DatabaseMessage` 领域模型。
+
+IPC handler 只负责边界校验、调用 application service 和编码结果，不能直接修改 repository、SQLite connection 或 runtime map。
 
 ### 3.3 `src/`
 
@@ -254,16 +266,16 @@ interface MessageRecord {
   turnId?: string
   clientRequestId?: string
 
-  type:
-    | 'user'
-    | 'assistant'
-    | 'tool'
+  kind:
+    | 'user_input'
+    | 'assistant_turn'
+    | 'tool_result'
     | 'harness'
     | 'runtime_context'
     | 'agents_context'
     | 'orchestrator'
     | 'interjection'
-    | 'compact'
+    | 'compact_summary'
 
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | null
@@ -281,12 +293,40 @@ interface MessageRecord {
 
 字段职责：
 
-- `type`：应用语义，renderer 用它决定展示、隐藏或折叠。
-- `role/content/reasoningContent/toolCalls/toolCallId`：完整 OpenAI-compatible message 语义。
+- `kind`：应用内部语义，renderer、搜索、导出和 compact policy 用它区分用户输入、编排注入和其他消息；它永远不发送给 Provider。
+- `role/content/reasoningContent/toolCalls/toolCallId`：provider-neutral、可无损重建模型请求的消息语义。不能根据 `kind` 或内容标签临时猜测这些字段。
 - `providerState`：可选的 provider-native continuation，不要求 renderer 解释。
 - `modelRoute`：已完成 assistant turn 实际使用的 route，便于 UI 和审计。
 - `metadata`：attachments、prompt id/hash、usage、approval summary、tool reason 等非 provider 核心字段。
 - `inHistory`：是否属于下一次 provider request 的 canonical active history。
+
+`kind` 与 `role` 正交。相同的 provider role 不代表相同的产品语义：
+
+| `kind`            | 常见 `role` | 含义                                    |
+| ----------------- | ----------- | --------------------------------------- |
+| `user_input`      | `user`      | 用户亲自提交的消息                      |
+| `orchestrator`    | `user`      | 编排器注入的 tagged user-role message   |
+| `runtime_context` | `user`      | Runtime context 注入                    |
+| `harness`         | `system`    | Base instructions 或其他 harness layer  |
+| `assistant_turn`  | `assistant` | 完整 assistant 文本或 tool-call turn    |
+| `tool_result`     | `tool`      | 一个 tool call 的 terminal result       |
+| `compact_summary` | `user`      | 代替旧 active history prefix 的完整摘要 |
+
+持久化和请求边界固定为：
+
+```text
+SQLite row
+  <-> Message codec
+MessageRecord[]
+  -> MessageHistoryCompiler
+CompiledProviderHistory
+  ├─ ProviderMessage[]
+  └─ opaque continuation references
+  -> ProviderAdapter
+OpenAI / DeepSeek / Anthropic request DTO
+```
+
+SQLite 不保存某个 Provider SDK 的原始请求 DTO。`MessageRecord` 保存公共、完整的消息字段，以及恢复 continuation 所需的可选 opaque `providerState`；它不保存完整 wire request。`MessageHistoryCompiler` 校验 active history 的协议完整性，移除 `kind`、数据库 ID 和 UI metadata，并把 provider state 作为独立 opaque continuation reference 交给 Adapter；最后由 Provider Adapter 转成具体 wire DTO。对 OpenAI-compatible Provider，这通常只是字段选择和命名转换，但仍必须保留该边界。
 
 ### 5.3 SessionSnapshot
 
@@ -353,6 +393,7 @@ PRAGMA busy_timeout = 5000;
 
 ```sql
 CREATE TABLE sessions (
+  schema_version     INTEGER NOT NULL,
   id                 TEXT PRIMARY KEY,
   project_id         TEXT NOT NULL REFERENCES projects(id),
   title              TEXT NOT NULL,
@@ -380,12 +421,13 @@ CREATE TABLE sessions (
 
 ```sql
 CREATE TABLE messages (
+  schema_version       INTEGER NOT NULL,
   id                   TEXT PRIMARY KEY,
   session_id           TEXT NOT NULL REFERENCES sessions(id),
   seq                  INTEGER NOT NULL,
   turn_id              TEXT,
   client_request_id    TEXT,
-  type                 TEXT NOT NULL,
+  kind                 TEXT NOT NULL,
   role                 TEXT NOT NULL,
   content              TEXT,
   reasoning_content    TEXT,
@@ -409,11 +451,11 @@ CREATE INDEX messages_turn_idx
 
 所有 JSON 列在 application boundary 按 shared schema 校验，并使用 `CHECK(json_valid(...))` 或等价 codec 约束。Nullable JSON 需要允许 SQL `NULL`。
 
-`UNIQUE(session_id, client_request_id)` 只对 user message 的非空 request id 生效，用于阻止一次发送被重复插入；其他 message 的该字段为 `NULL`。
+`UNIQUE(session_id, client_request_id)` 只对 `kind = 'user_input'` message 的非空 request id 生效，用于阻止一次发送被重复插入；其他 message 的该字段为 `NULL`。
 
 ### 6.5 Seq 与 transaction
 
-Backend 在 transaction 内：
+Application service 通过 `DatabaseService.withTransaction()`：
 
 1. 读取并递增 `sessions.last_seq`。
 2. 插入一条或一组完整 messages。
@@ -421,7 +463,7 @@ Backend 在 transaction 内：
 4. Commit。
 5. 发布已提交 records。
 
-多条 tool messages 必须在同一 transaction 获得连续 seq。
+`SessionRepository` 和 `MessageRepository` 接受同一个 transaction handle，不能在各自方法里提前 commit。多条 tool messages 必须在同一 transaction 获得连续 seq。
 
 ---
 
@@ -432,19 +474,30 @@ Backend 在 transaction 内：
 下一次请求的 canonical history 来自：
 
 ```sql
-SELECT role,
+SELECT schema_version,
+       id,
+       session_id,
+       seq,
+       turn_id,
+       client_request_id,
+       kind,
+       role,
        content,
        reasoning_content,
        tool_calls_json,
        tool_call_id,
-       provider_state_json
+       provider_state_json,
+       model_route_json,
+       metadata_json,
+       in_history,
+       created_at
 FROM messages
 WHERE session_id = ?
   AND in_history = 1
 ORDER BY seq ASC;
 ```
 
-Repository 将每一行无损解码为 provider-neutral message；provider adapter 再转换成具体 wire request。
+`MessageRepository` 通过 codec 将每一行无损解码为完整 `MessageRecord`。`MessageHistoryCompiler` 检查顺序、role 字段和 assistant tool-call/tool-result 配对，投影为包含 provider-neutral messages 与 opaque continuation references 的 `CompiledProviderHistory`；Provider Adapter 再转换成具体 wire request。Repository 不返回 Provider DTO。
 
 Session history 不再依赖 main-process `ProviderMessage[]`。Backend 可以缓存查询结果，但缓存只按 Session revision 失效，不能成为真相源。
 
@@ -452,11 +505,11 @@ Session history 不再依赖 main-process `ProviderMessage[]`。Backend 可以�
 
 #### User message
 
-用户发送时，backend 先预留并发 slot/writer lease，再在 transaction 中插入完整 user message。Commit 后才开始 provider call。
+用户发送时，backend 先预留并发 slot/writer lease，再在 transaction 中插入完整 `kind = 'user_input'` message。Commit 后才开始 provider call。
 
 #### Assistant final message
 
-Text/reasoning delta 只进入 `ActiveRunExecution` memory buffer，并通过 `run:stream` 推送。Provider 发出 completed turn 后，backend 插入一条完整 assistant message。
+Text/reasoning delta 只进入 `ActiveRunExecution` memory buffer，并通过 `run:stream` 推送。Provider 发出 completed turn 后，backend 插入一条完整 `kind = 'assistant_turn'` message。
 
 #### Tool call batch
 
@@ -464,7 +517,7 @@ Text/reasoning delta 只进入 `ActiveRunExecution` memory buffer，并通过 `r
 
 1. Provider completed assistant turn，backend 在内存保存完整 assistant tool-call message。
 2. 执行权限、审批和全部 tool calls，得到每个 call 的 terminal result。
-3. 单一 transaction 依次插入 assistant message 和所有对应 tool messages。
+3. 单一 transaction 依次插入 `kind = 'assistant_turn'` message 和所有对应的 `kind = 'tool_result'` messages。
 4. Commit 后才发起下一次 provider call。
 
 拒绝、取消、超时也形成完整 tool message。这样数据库任何时刻都不存在“assistant tool call 已持久化，但 required tool result 缺失”的协议断裂状态。
@@ -482,7 +535,7 @@ Tool/approval 的实时卡片来自 runtime event；完成后 renderer 从 assis
 1. 选择完整 provider turn/tool batch 边界。
 2. 生成完整 compact summary message。
 3. 把被替代的非 pinned messages 设置为 `in_history = 0`。
-4. 插入 `type = compact`、`in_history = 1` 的 summary message。
+4. 插入 `kind = 'compact_summary'`、`in_history = 1` 的 summary message。
 5. 递增 Session revision。
 
 原消息仍在数据库，UI 和导出可以读取；只是后续 provider request 不再携带。
@@ -682,7 +735,7 @@ Goal/Plan 会跨越多个 provider turn，并影响下一次 prompt 和 continua
 
 ### 11.2 Interjection
 
-Queued interjection 属于 ActiveRun memory。只有真正注入 provider history 时，才作为完整 `type = interjection` message 插入 SQLite。
+Queued interjection 属于 ActiveRun memory。只有真正注入 provider history 时，才作为完整 `kind = 'interjection'` message 插入 SQLite。
 
 应用崩溃前仍未注入的 interjection 可以丢失。
 
@@ -716,7 +769,7 @@ ui-store                 navigation/layout/scroll/panel state
 Renderer 可以：
 
 - 按 `seq` 渲染 MessageRecord。
-- 根据 `type` 隐藏 harness、折叠 internal message、组合 assistant tool calls 和 tool results。
+- 根据 `kind` 隐藏 harness、折叠 internal message、组合 assistant tool calls 和 tool results；不能把所有 `role = 'user'` 都渲染成用户气泡。
 - 根据 `inHistory` 展示 compact 边界。
 - 缓存 message pages。
 - 在输入组件中临时保存 draft。
@@ -849,7 +902,10 @@ historyFidelity = legacy_display_only
 必须覆盖：
 
 - Session/Message codec round-trip。
+- `kind` 与 provider `role` 独立 round-trip，同为 `role = 'user'` 的 user/orchestrator/runtime context 重启后仍可区分。
+- MessageHistoryCompiler 只投影 provider 字段；相同 active MessageRecords、route 和 adapter config 生成确定性的 Provider DTO。
 - SQLite migration、foreign key、transaction rollback 和 seq uniqueness。
+- Application service 的 Session/Message 多表事务回滚时，Repository 不得留下独立 commit。
 - User send 重试不重复插入 message。
 - Assistant text/reasoning 只有 completed 后才落盘。
 - 每个持久化 assistant tool-call message 后都有完整 tool result messages。
