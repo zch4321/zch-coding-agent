@@ -215,7 +215,7 @@ Message 必须完整后才写入数据库：
 
 ### 4.4 Run
 
-Run 是一次活动执行，不是持久化领域实体。Backend 为它分配临时 `runId/turnId`，用于：
+Run 是一次活动执行，不是持久化领域实体。Backend 为它分配临时 `runId`，用于：
 
 - IPC stream routing。
 - 中断、interjection 和 approval。
@@ -224,7 +224,7 @@ Run 是一次活动执行，不是持久化领域实体。Backend 为它分配�
 
 Run 完成或应用退出后，`ActiveRunExecution` 销毁。完成的结果已经体现在 messages；失败、取消和详细执行轨迹由可选 trace 记录。
 
-Messages 可以保存 `turnId` 作为相关性字段，但不存在 `runs` foreign key 或 `runs` table。
+`runId` 只出现在 runtime IPC events 和可选 trace，不写入 Messages 或 FileChanges。完成后的持久化关系已由 Message `seq`、tool `callId` 和 user `clientRequestId` 表达；不保留没有持久化消费者的 `turnId`。
 
 ---
 
@@ -335,7 +335,6 @@ interface MessageRecord {
   id: MessageId
   sessionId: SessionId
   seq: number
-  turnId?: string
   clientRequestId?: string
 
   kind:
@@ -427,7 +426,6 @@ interface FileChangeSummary {
   schemaVersion: 1
   id: FileChangeId
   sessionId: SessionId
-  turnId?: string
   callId: string
   path: string
   operation: 'write' | 'patch' | 'delete'
@@ -598,7 +596,6 @@ CREATE TABLE messages (
   id                   TEXT PRIMARY KEY,
   session_id           TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   seq                  INTEGER NOT NULL,
-  turn_id              TEXT,
   client_request_id    TEXT,
   kind                 TEXT NOT NULL,
   role                 TEXT NOT NULL,
@@ -625,9 +622,6 @@ CREATE TABLE messages (
 
 CREATE INDEX messages_history_idx
   ON messages(session_id, in_history, seq);
-
-CREATE INDEX messages_turn_idx
-  ON messages(session_id, turn_id, seq);
 ```
 
 `provider_continuation_json` 保存完整 `ProviderContinuationEnvelope` JSON；`data` 保留 Adapter 提供的原始 JSON 结构和数组顺序。若供应商状态需要逐字节保持，Adapter 必须把原始字节编码成 envelope `data` 中带明确 format 的 base64/string，通用 codec 不得解析后重组。Repository 只验证 envelope 外层，Adapter 再按 `adapterId/format` 验证 `data`。
@@ -645,7 +639,6 @@ CREATE TABLE file_changes (
   schema_version  INTEGER NOT NULL,
   id              TEXT PRIMARY KEY,
   session_id      TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  turn_id         TEXT,
   call_id         TEXT NOT NULL,
   path            TEXT NOT NULL,
   operation       TEXT NOT NULL CHECK (operation IN ('write', 'patch', 'delete')),
@@ -678,7 +671,7 @@ CREATE INDEX file_changes_session_idx
 1. Diff 面板在应用重启后仍能按 Session 查看 Agent 的文件修改历史。
 2. 用户可以不依赖 Git，安全回退某一项 `create_file/apply_patch/delete_file` 变更。
 
-它不是 provider message、Run journal、trace 或通用 filesystem audit log，不进入 `messages`、`inHistory` 或下一次模型请求。`turn_id/call_id` 仅用于与 runtime/tool card 关联，不表示 Run 已持久化。
+它不是 provider message、Run journal、trace 或通用 filesystem audit log，不进入 `messages`、`inHistory` 或下一次模型请求。`call_id` 只用于与对应 tool call/result 关联，不表示 Run 已持久化。
 
 `operation = 'write'` 同时覆盖 `create_file` 和其他整体写入；`before_exists` 能区分“创建新文件”与“替换已有文件”，不需要再增加一个与恢复语义重复的 `create` 枚举。
 
@@ -727,7 +720,6 @@ SELECT schema_version,
        id,
        session_id,
        seq,
-       turn_id,
        client_request_id,
        kind,
        role,
@@ -1011,7 +1003,6 @@ interface LiveSessionContext {
 ```ts
 interface ActiveRunExecution {
   runId: string
-  turnId: string
   modelRoute: ModelRouteSnapshot
   permissionMode: PermissionMode
   controller: AbortController
