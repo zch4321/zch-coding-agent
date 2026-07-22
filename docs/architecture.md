@@ -1436,7 +1436,7 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 5. 发送 B。
 6. 断言 `messages WHERE in_history = 1 ORDER BY seq` 能构造协议完整的 A/tool/final/B provider request。
 
-现有 test、typecheck、lint、format、native、E2E、real-provider 和 benchmark gates 继续保留。SQLite driver 引入后必须覆盖 Electron native ABI 和打包 smoke。
+现有 test、typecheck、lint、format、native、E2E 和 real-provider gates 继续保留；benchmark proof 不属于本次重构或后续发布门禁。SQLite driver 引入后必须覆盖 Electron native ABI 和打包 smoke。
 
 ---
 

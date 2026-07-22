@@ -300,6 +300,87 @@ describe('SessionManager approvals', () => {
         failure: 'timeout',
       },
     })
+    expect(provider.requests[1]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'tool',
+          tool_call_id: 'call-command',
+          content: expect.stringContaining('"status":"ok"'),
+        }),
+      ]),
+    )
+    await manager.closeSession(sessionId)
+  })
+
+  it('continues after a user denial with a terminal denied tool result', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-session-denied-command-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+
+    const store = await createConfig(directory)
+    const provider = new ScriptedCommandProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'confirm',
+      provider: 'deepseek',
+    })
+    const runId = manager.startRun({
+      sessionId,
+      message: 'Check the local Node version',
+      clientRequestId: 'request-denied-command',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'approval.requested' &&
+          envelope.event.callId === 'call-command',
+      ),
+    )
+    expect(
+      manager.decideApproval({
+        sessionId,
+        runId,
+        callId: 'call-command' as CallId,
+        decision: 'deny',
+      }),
+    ).toBe(true)
+    await waitFor(() =>
+      sent.some(
+        (envelope) =>
+          envelope.event.type === 'run.status' &&
+          envelope.event.runId === runId &&
+          envelope.event.status === 'completed',
+      ),
+    )
+    await manager.waitForRunSettled(sessionId, runId)
+
+    expect(provider.requests).toHaveLength(2)
+    expect(provider.requests[1]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'tool',
+          tool_call_id: 'call-command',
+          content: expect.stringContaining('"status":"denied"'),
+        }),
+      ]),
+    )
+    expect(
+      sent.find(
+        (envelope) =>
+          envelope.event.type === 'tool.completed' &&
+          envelope.event.callId === 'call-command',
+      )?.event,
+    ).toMatchObject({ result: { status: 'denied' } })
     await manager.closeSession(sessionId)
   })
 

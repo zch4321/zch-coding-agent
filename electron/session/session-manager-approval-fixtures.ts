@@ -1,7 +1,11 @@
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { AutoApprover } from '../permission/auto-approver'
-import type { LLMProvider, ProviderEvent } from '../providers/provider'
+import type {
+  LLMProvider,
+  ProviderChatRequest,
+  ProviderEvent,
+} from '../providers/provider'
 
 export class ScriptedEditProvider implements LLMProvider {
   calls = 0
@@ -72,9 +76,13 @@ export class ScriptedEditProvider implements LLMProvider {
 
 export class ScriptedCommandProvider implements LLMProvider {
   calls = 0
+  requests: ProviderChatRequest['messages'][] = []
 
-  async *streamChat(): AsyncIterable<ProviderEvent> {
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
     this.calls += 1
+    this.requests.push(structuredClone(request.messages))
 
     if (this.calls === 1) {
       yield {

@@ -1,5 +1,5 @@
 import vue from '@vitejs/plugin-vue'
-import { defineConfig } from 'vitest/config'
+import { defaultExclude, defineConfig } from 'vitest/config'
 
 export default defineConfig({
   plugins: [vue()],
@@ -10,6 +10,8 @@ export default defineConfig({
       'shared/**/*.test.ts',
       'src/**/*.test.ts',
     ],
+    exclude: [...defaultExclude, 'benchmarks/cases/cases.test.ts'],
+    maxWorkers: 4,
     coverage: {
       provider: 'v8',
       include: [

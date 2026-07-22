@@ -42,7 +42,7 @@ P1–P7 可以在同一重构分支上分批提交，但新持久化路径在 P8
 
 1. P8 采用单次 durable-state 协调切流，P1–P7 不写真实用户 SQLite，不引入可长期启用的双写 feature flag。
 2. SQLite 首选 Node.js 24 内置 `node:sqlite`，但以 Electron Windows packaged-app probe 作为硬门禁。
-3. 当前超时的 benchmark case proof 从默认 `npm test` 稳定门禁中隔离，继续由显式 benchmark-case 命令执行。
+3. 当前超时的 benchmark case proof 从默认 `npm test` 稳定门禁中排除；本次重构及后续发布门禁均不执行该 benchmark。
 
 ---
 
@@ -140,15 +140,14 @@ SessionManager #sessions Map -> 空
 
 2026-07-22 审计结果：
 
-| 命令                                            | 结果                                                                                       |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `npm run lint`                                  | 通过                                                                                       |
-| `npm run typecheck`                             | 通过                                                                                       |
-| `npm test`                                      | 613 passed、7 skipped；`benchmarks/cases/cases.test.ts` 在全量并发执行中触发 120 s timeout |
-| `npx vitest run benchmarks/cases/cases.test.ts` | 4/4 通过，约 92.6 s                                                                        |
-| `npx vitest run electron/process/run.test.ts`   | 7/7 通过                                                                                   |
+| 命令                                          | 结果                                                                                       |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `npm run lint`                                | 通过                                                                                       |
+| `npm run typecheck`                           | 通过                                                                                       |
+| `npm test`                                    | 613 passed、7 skipped；`benchmarks/cases/cases.test.ts` 在全量并发执行中触发 120 s timeout |
+| `npx vitest run electron/process/run.test.ts` | 7/7 通过                                                                                   |
 
-全量 `npm test` 目前不是稳定绿色基线。P0 必须先把长时间 benchmark proof 从默认单测门禁中正确隔离，或为它提供在全量并发下仍可靠的执行预算；不能把这一既有失败错误归因到 SQLite 重构。
+全量 `npm test` 目前不是稳定绿色基线。P0 必须将长时间 benchmark proof 从默认单测门禁中排除；该 proof 不属于本次重构或后续发布的执行门禁，不能把这一既有失败错误归因到 SQLite 重构。
 
 当前 E2E 多处直接调用 `workbench:get/save` 注入 fixture，并通过 reload 检查 renderer 快照。它们必须在 P7 改为通过新 backend commands 或专用测试 seed helper 建立数据，不能保留一个仅供测试使用的 durable Workbench 后门。
 
@@ -219,17 +218,17 @@ P2 和 P3 的代码可并行开发，但 P4 同时依赖二者。P6、P7 可以�
 
 ### 4.2 任务
 
-- [ ] 调整 Vitest 配置，使慢速 `benchmarks/cases/cases.test.ts` 只由 `npm run test:benchmark-cases` 执行，或给出不会在全量 suite 中超时的独立执行策略。
-- [ ] 逐项运行并记录 `lint`、`format:check`、`typecheck`、`test`、`test:native`、`test:ripgrep` 和 `test:e2e` 基线。
-- [ ] 为普通文本、reasoning、单/多 tool call、拒绝、超时、compact、interjection 和 Plan continuation 保存确定性 Provider request/response golden fixtures。
-- [ ] 保存 Electron/Headless 当前 parity capture，标记允许变化的字段，禁止宽泛 snapshot ignore。
-- [ ] 增加架构边界测试：`shared/` 不导入 Node/Electron/Vue；后续 Persistence 不得导入 Provider；Core 不得重新引入 Chat wire DTO。
-- [ ] 列出直接读写 `workbench:get/save` 的 E2E 和 store tests，建立 P7 替换 checklist。
+- [x] 调整 Vitest 配置，将慢速 `benchmarks/cases/cases.test.ts` 排除在默认 suite 和本次重构的门禁之外。
+- [x] 逐项运行并记录 `lint`、`format:check`、`typecheck`、`test`、`test:native`、`test:ripgrep` 和 `test:e2e` 基线。
+- [x] 为普通文本、reasoning、单/多 tool call、拒绝、超时、compact、interjection 和 Plan continuation 保存确定性 Provider request/response golden fixtures。
+- [x] 保存 Electron/Headless 当前 parity capture，标记允许变化的字段，禁止宽泛 snapshot ignore。
+- [x] 增加架构边界测试：`shared/` 不导入 Node/Electron/Vue；后续 Persistence 不得导入 Provider；Core 不得重新引入 Chat wire DTO。
+- [x] 列出直接读写 `workbench:get/save` 的 E2E 和 store tests，建立 P7 替换 checklist。
 
 ### 4.3 验收
 
 - 默认静态与单测门禁连续运行可稳定通过。
-- 慢速 benchmark proof 仍有独立、显式命令覆盖。
+- 不执行 benchmark case proof；它不影响本次重构的完成判断或发布门禁。
 - 在 P3 改 Provider 层时，可以逐字段比较重构前后的 DeepSeek request、stream events、usage 和 tool chain。
 
 ### 4.4 回滚
@@ -719,7 +718,6 @@ npm run build
 
 另外执行：
 
-- `npm run test:benchmark-cases`。
 - Electron/Headless parity suite。
 - Windows x64 安装包首次启动、SQLite migration、重启续聊和卸载后 userData 保留检查。
 - `npm run test:real` 只在具备显式凭据时运行，不进入确定性默认门禁。

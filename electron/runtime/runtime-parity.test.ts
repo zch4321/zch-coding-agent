@@ -40,6 +40,7 @@ import {
 import {
   assertRuntimeHostParity,
   normalizeRuntimeParityCapture,
+  type NormalizedRuntimeParityCapture,
   type ParityProviderRequest,
   type ParityTraceRequest,
   type RuntimeParityCapture,
@@ -356,6 +357,9 @@ describe('Electron and Headless runtime parity', () => {
       paths.workspace,
     )
     assertRuntimeHostParity(normalizedElectron, normalizedHeadless)
+    expect(parityBaseline(normalizedElectron)).toMatchSnapshot(
+      'p0 shared host trajectory',
+    )
     const semanticDrift = structuredClone(normalizedHeadless)
     const commandArgs = (
       semanticDrift.tools as Array<{ args: Record<string, JsonValue> }>
@@ -474,6 +478,58 @@ interface HostRunInput {
 interface HostRunOutput {
   identity: RuntimeIdentity
   capture: RuntimeParityCapture
+}
+
+function parityBaseline(capture: NormalizedRuntimeParityCapture) {
+  const providerRequests = capture.providerRequests as unknown as Array<{
+    messages: Array<{
+      role: string
+      tool_calls?: Array<{ function?: { name?: string } }>
+    }>
+    tools: Array<{ function?: { name?: string } }>
+  }>
+  const traceRequests = capture.traceRequests as unknown as Array<{
+    promptResources: Array<{ id: string }>
+    promptBuild?: { layers: Array<{ kind: string }> }
+  }>
+  const tools = capture.tools as unknown as Array<{
+    tool: string
+    result: { status?: string }
+  }>
+  const toolCatalog =
+    providerRequests[0]?.tools.flatMap((tool) =>
+      tool.function?.name ? [tool.function.name] : [],
+    ) ?? []
+
+  return {
+    toolCatalog,
+    providerRequests: providerRequests.map((request) => ({
+      roles: request.messages.map((message) => message.role),
+      toolCalls: request.messages.flatMap((message) =>
+        (message.tool_calls ?? []).flatMap((call) =>
+          call.function?.name ? [call.function.name] : [],
+        ),
+      ),
+      usesBaselineToolCatalog:
+        JSON.stringify(request.tools) ===
+        JSON.stringify(providerRequests[0]?.tools),
+    })),
+    traceRequests: traceRequests.map((request) => ({
+      promptResources: request.promptResources.map((resource) => resource.id),
+      promptLayers:
+        request.promptBuild?.layers.map((layer) => layer.kind) ?? [],
+    })),
+    tools: tools.map((tool) => ({
+      tool: tool.tool,
+      status: tool.result.status ?? 'unknown',
+    })),
+    patchFiles: String(capture.patch)
+      .split('\n')
+      .flatMap((line) => {
+        const match = /^diff --git a\/(.+) b\//u.exec(line)
+        return match?.[1] ? [match[1]] : []
+      }),
+  }
 }
 
 async function runElectronHost(input: HostRunInput): Promise<HostRunOutput> {

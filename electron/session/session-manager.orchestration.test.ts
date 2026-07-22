@@ -114,7 +114,7 @@ describe('SessionManager goal and plan orchestration', () => {
       mode: 'readonly',
       provider: 'deepseek',
     })
-    manager.startRun({
+    const runId = manager.startRun({
       sessionId,
       message: '/plan Check something',
       clientRequestId: 'request-plan',
@@ -171,6 +171,7 @@ describe('SessionManager goal and plan orchestration', () => {
           envelope.event.kind === 'plan-warning',
       ),
     ).toBe(false)
+    await manager.waitForRunSettled(sessionId, runId)
     await expect(
       manager.updatePlanStatus({ sessionId, status: 'rejected' }),
     ).resolves.toMatchObject({
