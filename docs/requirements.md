@@ -163,8 +163,10 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 ### 2.4 会话与工作区
 
 - 一个工作区（workspace）= 一个本地目录。
-- Session 是持久化对话实体，绑定一个工作区、当前模型选择与权限模式；UI 中的“对话”是 Session 的展示名称，不存在独立 Conversation 领域记录或 `conversationId -> sessionId` 映射。
-- SQLite 只持久化 Session 元数据和完整 Message history。Goal/Plan 属于 Session 元数据；完整 assistant/tool/harness 内容统一表示为 Message。Renderer 只保存这些 backend records 的副本，不得单独创建已提交消息。
+- Project 是 backend-owned 的持久化 workspace 注册记录，使用稳定 `projectId` 和规范化绝对路径。移动目录后通过重新关联更新 Project path，不改写 Session identity。移除 Project 会删除应用中它的 Sessions/Messages/FileChanges，绝不删除 workspace 目录或项目文件。
+- Session 是持久化对话实体，绑定一个 `projectId`、当前模型选择与权限模式；UI 中的“对话”是 Session 的展示名称，不存在独立 Conversation 领域记录或 `conversationId -> sessionId` 映射。
+- SQLite 持久化 schema migrations、Projects、Session 元数据、完整 Message history 和有界 FileChanges。Goal/Plan 属于 Session 元数据；完整 assistant/tool/harness 内容统一表示为 Message。Renderer 只保存 backend public records 的副本，不得单独创建已提交消息。
+- Database migrations 必须按版本前向执行，在单个 transaction 内提交 schema/data change 和 migration record；已应用文件 checksum 改变或数据库版本高于当前应用时明确拒绝打开，不静默猜测兼容。
 - 每个 `MessageRecord` 同时保存内部 `kind` 和 provider-neutral 的 `role/content/toolCalls/toolCallId` 字段。`kind` 用于区分真实用户输入、编排消息、runtime context、harness、assistant、tool result 和 compact summary；它不发送给 Provider。`role = 'user'` 不等于用户亲自输入。
 - Message metadata 是按 `kind` 校验的 application-owned typed annotations，可包含 attachment provenance、prompt id/version/hash、标准化 usage、tool/approval/compact 摘要和 reasoning projection 状态。Metadata 可以来源于 Provider，但删除它不能破坏下一次 Provider 请求；协议关键或只能由 Adapter 理解的数据必须放入 `providerContinuation`。
 - SQLite 不保存 OpenAI、DeepSeek、Anthropic 或其他 Provider SDK 的请求 DTO。发起请求时，backend 从 `inHistory = true` 的完整 `MessageRecord` 编译 provider-neutral messages，再由 Provider Adapter 转换成 wire DTO；Persistence layer 不依赖 Provider。
@@ -179,6 +181,7 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 - Assistant stream delta 只保存在 backend memory；Provider turn 完成后才插入 Message。包含 tool calls 的 assistant turn 必须等每个 call 都有 terminal result 后，与对应 tool messages 在同一 transaction 写入，数据库不得保存协议半截。
 - 应用崩溃可以丢失尚未完成的 assistant text/reasoning、tool batch 和 Active Run，不保存 partial message，也不生成持久化 interrupted Run。最后一条已提交 user message 可以暂时没有 assistant reply。
 - 如果副作用工具已经修改 workspace、但应用在完整 tool batch transaction 前崩溃，文件变化可以保留而 tool messages 丢失；系统以下一次读取到的实际 workspace 为准。V2.1 不承诺文件系统与消息数据库之间的 crash-atomic journal。
+- 如果文件副作用已成功但 `file_changes` 持久化失败，terminal tool result 必须如实报告 `mutationSucceeded = true`、`CHANGE_HISTORY_PERSIST_FAILED` 和 `revertAvailable = false`；不得把已发生的文件操作报成未发生或自动重试。
 - JSONL trace 是可选审计记录，不是事务恢复日志，也不能作为 Session 状态的唯一来源。
 
 ### 2.5 Skills（渐进式专家指令）
@@ -370,7 +373,8 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - 使用有界只读 Diff viewer，支持语法高亮、截断提示和审批状态；P3 不引入 Monaco/CodeMirror 等完整编辑器。
 - 每次成功的 `create_file` / `apply_patch` / `delete_file` 按 Session 保存变更记录、before/after hash 和有界恢复快照；Diff 面板可查看上次及更早的 Session 变更。
 - 用户可显式回退单项变更。回退前必须再次确认，并校验当前文件仍等于该记录的 after 状态；检测到用户或后续工具修改时拒绝覆盖。回退不依赖 Git，也不影响其他文件。
-- 变更历史仅保存在主进程 `userData`，不向 renderer 暴露恢复快照；记录数量和总字节数必须有硬上限。
+- 变更历史保存在主进程 `userData/agent.db` 的 `file_changes` 表。它不是 Message、Run journal、trace 或模型历史；恢复用 `beforeContent` 只对 backend 可见，renderer 只获得不含快照的 `FileChangeSummary`。
+- `file_changes` 的记录数量和 `beforeContent + diff` UTF-8 总字节数必须有硬上限。单条恢复 payload 已超过总上限时，文件工具必须在副作用前拒绝；Retention 只会让过旧单项丧失 Diff/revert 能力，不能删除 Message 或改动 workspace。
 
 ### 4.4 UI 组件库
 

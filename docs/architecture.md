@@ -10,14 +10,14 @@
 
 ## 1. 架构目标
 
-Zch Coding Agent 是 Electron + Vue 3 桌面 coding agent。Backend 负责 Session 元数据、完整消息历史、Agent 编排和宿主能力；renderer 负责展示、收集输入并保存后端状态的副本。
+Zch Coding Agent 是 Electron + Vue 3 桌面 coding agent。Backend 负责 Project 注册表、Session 元数据、完整消息历史、文件变更历史、Agent 编排和宿主能力；renderer 负责展示、收集输入并保存后端状态的副本。
 
 目标结构：
 
 ```text
 Renderer (Vue + Pinia)
   ├─ UI-only state：draft、draft attachments、layout、selection
-  └─ backend replicas：Session、complete Messages、Goal、Plan
+  └─ backend replicas：Project、Session、complete Messages、Goal、Plan、FileChangeSummary
           │ commands / queries
           ▼
 Preload typed bridge
@@ -31,8 +31,9 @@ Backend application services
           │ commit complete records
           ▼
 SQLite
-  ├─ Session metadata
-  └─ complete, ordered Messages
+  ├─ Project registry / Session metadata
+  ├─ complete, ordered Messages
+  └─ bounded FileChanges / revert payloads
 ```
 
 本次重构解决：
@@ -54,7 +55,7 @@ SQLite
 
 1. Renderer 发送 typed command。
 2. Backend 校验 command。
-3. Backend 在 SQLite transaction 中更新 Session 或插入完整 Message。
+3. Backend 在 SQLite transaction 中更新 Project/Session、插入完整 Message，或记录完整 FileChange。
 4. Commit 成功后返回并推送新的 record/revision。
 5. Renderer 用 backend record 更新本地副本。
 
@@ -62,11 +63,11 @@ SQLite
 
 ### 2.2 状态分为三类
 
-| 类别                       | 所有者           | 是否落盘 | 示例                                                                                           |
-| -------------------------- | ---------------- | -------- | ---------------------------------------------------------------------------------------------- |
-| Durable conversation state | backend + SQLite | 是       | Session metadata、完整 messages、model selection、Goal、Plan                                   |
-| Ephemeral execution state  | backend memory   | 否       | active Run、stream buffer、AbortController、pending approval、writer lease、PTY/MCP connection |
-| UI-only state              | renderer         | 否       | draft、draft attachments、IME composition、scroll、panel、selection                            |
+| 类别                      | 所有者           | 是否落盘 | 示例                                                                                           |
+| ------------------------- | ---------------- | -------- | ---------------------------------------------------------------------------------------------- |
+| Durable application state | backend + SQLite | 是       | Projects、Session metadata、完整 messages、Goal/Plan、有界 FileChanges/revert payloads         |
+| Ephemeral execution state | backend memory   | 否       | active Run、stream buffer、AbortController、pending approval、writer lease、PTY/MCP connection |
+| UI-only state             | renderer         | 否       | draft、draft attachments、IME composition、scroll、panel、selection                            |
 
 “Backend authoritative”不等于“所有 backend 状态必须落盘”。只有应用重启后仍应存在、并参与后续模型历史或产品展示的完整记录才进入 SQLite。
 
@@ -84,7 +85,9 @@ SQLite
 
 ### 2.4 Canonical schema 只定义一次
 
-`SessionRecord` 和 `MessageRecord` 在 `shared/` 用 TypeBox 定义。Renderer、backend、IPC 和 database codec 使用同一 schema，不再在 `src/` 与 `electron/` 分别维护语义不同的 Conversation/Message 类型。
+`ProjectRecord`、`SessionRecord` 和 `MessageRecord` 在 `shared/` 用 TypeBox 定义。Renderer、backend、IPC 和 database codec 使用同一 schema，不再在 `src/` 与 `electron/` 分别维护语义不同的 Project/Conversation/Message 类型。
+
+`file_changes.before_content` 是唯一一个明确的宿主私有恢复 payload：它有 backend 内部 codec，但不属于 renderer 状态。`shared/` 只定义不含该字段的 `FileChangeSummary` IPC schema。
 
 SQLite 可以使用关系型列名，但必须满足：
 
@@ -100,8 +103,10 @@ decode(encode(record)) deep-equals record
 
 ```text
 shared/
+  project.ts              # ProjectRecord
   session.ts              # SessionRecord / SessionSnapshot
   message.ts              # canonical MessageRecord
+  file-change.ts          # FileChangeSummary IPC schema
   runtime-events.ts       # ephemeral Run/stream events
   commands.ts             # commands / queries / results
   ipc-contract.ts
@@ -122,8 +127,10 @@ electron/
     database-service.ts
     migrations/
     repositories/
+      project-repository.ts
       session-repository.ts
       message-repository.ts
+      file-change-repository.ts
     codecs/
   runtime/
     live-session-context.ts
@@ -143,8 +150,8 @@ electron/
 Persistence 是独立代码层，但不是独立进程、IPC service 或通用 ORM：
 
 - `DatabaseService` 拥有 SQLite connection、migration、PRAGMA、关闭流程和 `withTransaction()`。
-- Repository 只执行领域相关 SQL，输入输出都是 shared canonical record；它们接受 transaction handle，但不自行 begin、commit 或发布事件。
-- Codec 只负责 SQLite row 与 `SessionRecord/MessageRecord` 的字段名、JSON 和时间格式转换，并在边界执行 shared schema 校验。
+- Repository 只执行领域相关 SQL，输入输出是 shared canonical record，或明确的 backend-private `StoredFileChangeRecord`；它们接受 transaction handle，但不自行 begin、commit 或发布事件。
+- Codec 只负责 SQLite row 与 `ProjectRecord/SessionRecord/MessageRecord/StoredFileChangeRecord` 的字段名、JSON 和时间格式转换，并在边界执行对应 schema 校验。
 - Application service 拥有业务事务边界，负责在同一个 transaction 中分配 seq、插入 messages、递增 Session revision，并在 commit 后发布 records。
 
 Persistence 不导入 provider adapter，不判断哪些消息进入模型请求，也不把 `MessageRecord` 转成 provider DTO。禁止为了抽象而引入 `BaseRepository`、动态 query DSL，或另一套语义不同的 `DatabaseSession/DatabaseMessage` 领域模型。
@@ -155,12 +162,12 @@ IPC handler 只负责边界校验、调用 application service 和编码结果�
 
 Renderer 只保存：
 
-- Session/Message/backend settings 的副本。
+- Project/Session/Message/FileChangeSummary/backend settings 的副本。
 - Run stream 的瞬时展示状态。
 - command pending/error。
 - draft、附件选择和其他纯 UI 状态。
 
-它不能访问 SQLite、workspace、secrets 或 provider，也不能持久化 Session。
+它不能访问 SQLite、workspace、secrets 或 provider，也不能持久化 Project/Session/FileChange。
 
 ### 3.4 Host-neutral runtime
 
@@ -223,7 +230,25 @@ Messages 可以保存 `turnId` 作为相关性字段，但不存在 `runs` forei
 
 ## 5. Canonical 数据结构
 
-### 5.1 SessionRecord
+### 5.1 ProjectRecord
+
+```ts
+interface ProjectRecord {
+  schemaVersion: 1
+  id: ProjectId
+  path: string
+  name: string
+  revision: number
+  createdAt: string
+  updatedAt: string
+}
+```
+
+`path` 是 Backend 在添加项目时通过平台路径规则和 `realpath` 规范化的绝对 workspace 路径；数据库以它去重，但 Session 只保存稳定 `projectId`。目录移动或用户显式重新关联后可以更新 `path`，不能通过路径级联重写 Session。
+
+`name` 默认取目录名。ProjectModel、module、Serena/code intelligence 配置不进入 `projects` 表，继续由 workspace 内 `.zch/project-model.json` 管理。
+
+### 5.2 SessionRecord
 
 ```ts
 interface SessionRecord {
@@ -255,7 +280,7 @@ interface SessionRecord {
 
 `modelSelection` 是下一次执行使用的当前选择。已完成 assistant message 另外记录实际使用的 `ModelRouteSnapshot`。
 
-### 5.2 MessageRecord
+### 5.3 MessageRecord
 
 ```ts
 interface ProviderContinuationEnvelope {
@@ -393,7 +418,49 @@ interface CompiledProviderHistory {
 
 SQLite 不保存某个 Provider SDK 的原始请求 DTO。`MessageRecord` 保存公共、完整的消息字段、可读 reasoning 投影，以及恢复 continuation 所需的可选 opaque envelope；它不保存完整 wire request。`MessageHistoryCompiler` 校验 active history 的协议完整性，不把 `kind`、数据库 ID、`normalizedReasoningText` 或 UI metadata 放入 `ProviderMessage`；`sourceMessageId` 只在内存中关联对应 `providerContinuation`，最终也不会进入 wire request。最后由 Provider Adapter 转成具体 DTO。对 OpenAI-compatible Provider，这通常只是字段选择和命名转换，但仍必须保留该边界。
 
-### 5.3 SessionSnapshot
+### 5.4 FileChangeSummary 与 StoredFileChangeRecord
+
+Renderer 只需要展示 Diff 历史并发起“回退” command，因此 `shared/` 中的公开结构不包含文件恢复内容：
+
+```ts
+interface FileChangeSummary {
+  schemaVersion: 1
+  id: FileChangeId
+  sessionId: SessionId
+  turnId?: string
+  callId: string
+  path: string
+  operation: 'write' | 'patch' | 'delete'
+  diff: string
+  diffHash: string
+  diffTruncated: boolean
+  beforeExists: boolean
+  beforeHash: string
+  afterExists: boolean
+  afterHash: string
+  revision: number
+  createdAt: string
+  updatedAt: string
+  revertedAt?: string
+}
+
+interface StoredFileChangeRecord extends FileChangeSummary {
+  beforeContent: string | null
+  payloadBytes: number
+}
+```
+
+`StoredFileChangeRecord` 只属于 Backend repository 和 SQLite。`path` 是相对于 Project workspace 的路径。`beforeContent` 是回退 payload：
+
+- 修改或删除已有文件时，保存完整、受限的 UTF-8 修改前内容。
+- 创建新文件时，`beforeExists = false` 且 `beforeContent = null`；回退动作删除该文件。
+- 不保存 `afterContent`；回退只需要 `beforeContent`，冲突检查使用当前文件的 existence 与 `afterHash`。
+
+Hash 都是对 UTF-8 内容计算的 SHA-256。文件不存在时使用 `exists = false` 区分状态，hash 列保存空字节串的 SHA-256，不把空文件和不存在混为一种状态。
+
+Renderer 只能通过 IPC 获得 `FileChangeSummary`。这不违反“Session 数据在前端、后端、数据库一致”的约束：FileChange 是独立的宿主恢复记录，不是 Session 字段或 Message。Renderer 不执行回退，也不持有恢复快照。
+
+### 5.5 SessionSnapshot
 
 ```ts
 interface SessionSnapshot {
@@ -454,13 +521,54 @@ PRAGMA busy_timeout = 5000;
 - `session_change_log`。
 - `processed_commands`。
 
-### 6.3 `sessions`
+### 6.3 `schema_migrations`
+
+```sql
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version          INTEGER PRIMARY KEY CHECK (version > 0),
+  name             TEXT NOT NULL UNIQUE,
+  checksum_sha256  TEXT NOT NULL CHECK (length(checksum_sha256) = 64),
+  app_version      TEXT NOT NULL,
+  applied_at       TEXT NOT NULL
+);
+```
+
+这是 SQLite infrastructure state，不是产品领域记录，不进入 shared schema、IPC 或 renderer。`version` 定义顺序，`name` 提供可读识别，`checksum_sha256` 检测已应用文件被修改，`app_version/applied_at` 用于诊断数据库由哪一版应用在何时升级。
+
+Migration 规则：
+
+1. `DatabaseService` 打开 connection、设置 PRAGMA，并 bootstrap 这张表。
+2. Migration 文件以递增版本命名，例如 `0001_initial.sql`。
+3. 每个 pending migration 使用 `BEGIN IMMEDIATE`，schema/data change 与对应 migration row 在同一 transaction commit。
+4. 已应用 migration 不得修改；启动时发现相同 version 的 checksum 不一致必须失败，不得静默覆盖。
+5. 数据库版本高于当前应用支持版本时拒绝启动该 repository，并返回明确升级/降级错误。
+6. Desktop runtime 只执行 forward migration，不自动执行 destructive down migration。
+
+### 6.4 `projects`
+
+```sql
+CREATE TABLE projects (
+  schema_version  INTEGER NOT NULL,
+  id              TEXT PRIMARY KEY,
+  path            TEXT NOT NULL UNIQUE,
+  name            TEXT NOT NULL,
+  revision        INTEGER NOT NULL,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+```
+
+Backend 在 insert/update 前规范化并校验 `path`。`UNIQUE(path)` 防止同一个 canonical workspace 被重复添加；`id` 才是其他表使用的稳定 identity。
+
+`project:remove` 表示删除应用中的 Project、Sessions、Messages 和 FileChanges，不删除 workspace 目录或其中任何文件。Application service 必须先确认该 Project 没有 active Run/approval/runtime resource，再在单一 transaction 删除 Project；外键 cascade 清理其应用记录。
+
+### 6.5 `sessions`
 
 ```sql
 CREATE TABLE sessions (
   schema_version     INTEGER NOT NULL,
   id                 TEXT PRIMARY KEY,
-  project_id         TEXT NOT NULL REFERENCES projects(id),
+  project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   title              TEXT NOT NULL,
   lifecycle          TEXT NOT NULL,
   permission_mode    TEXT NOT NULL,
@@ -469,7 +577,7 @@ CREATE TABLE sessions (
   reasoning          TEXT NOT NULL,
   goal_json          TEXT,
   plan_json          TEXT,
-  parent_session_id  TEXT REFERENCES sessions(id),
+  parent_session_id  TEXT REFERENCES sessions(id) ON DELETE SET NULL,
   forked_from_seq    INTEGER,
   history_fidelity   TEXT NOT NULL,
   revision           INTEGER NOT NULL,
@@ -482,13 +590,13 @@ CREATE TABLE sessions (
 
 `goal_json` 和 `plan_json` 使用 shared schema 校验。当前产品只按 Session 读取，不需要为 Plan item 建立跨 Session 查询，因此不拆表。
 
-### 6.4 `messages`
+### 6.6 `messages`
 
 ```sql
 CREATE TABLE messages (
   schema_version       INTEGER NOT NULL,
   id                   TEXT PRIMARY KEY,
-  session_id           TEXT NOT NULL REFERENCES sessions(id),
+  session_id           TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   seq                  INTEGER NOT NULL,
   turn_id              TEXT,
   client_request_id    TEXT,
@@ -530,7 +638,71 @@ CREATE INDEX messages_turn_idx
 
 `UNIQUE(session_id, client_request_id)` 只对 `kind = 'user_input'` message 的非空 request id 生效，用于阻止一次发送被重复插入；其他 message 的该字段为 `NULL`。
 
-### 6.5 Seq 与 transaction
+### 6.7 `file_changes`
+
+```sql
+CREATE TABLE file_changes (
+  schema_version  INTEGER NOT NULL,
+  id              TEXT PRIMARY KEY,
+  session_id      TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  turn_id         TEXT,
+  call_id         TEXT NOT NULL,
+  path            TEXT NOT NULL,
+  operation       TEXT NOT NULL CHECK (operation IN ('write', 'patch', 'delete')),
+  diff            TEXT NOT NULL,
+  diff_hash       TEXT NOT NULL CHECK (length(diff_hash) = 64),
+  diff_truncated  INTEGER NOT NULL CHECK (diff_truncated IN (0, 1)),
+  before_exists   INTEGER NOT NULL CHECK (before_exists IN (0, 1)),
+  before_hash     TEXT NOT NULL CHECK (length(before_hash) = 64),
+  before_content  TEXT,
+  after_exists    INTEGER NOT NULL CHECK (after_exists IN (0, 1)),
+  after_hash      TEXT NOT NULL CHECK (length(after_hash) = 64),
+  payload_bytes   INTEGER NOT NULL CHECK (payload_bytes >= 0),
+  revision        INTEGER NOT NULL,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  reverted_at     TEXT,
+  UNIQUE (session_id, call_id, path),
+  CHECK (
+    (before_exists = 0 AND before_content IS NULL)
+    OR (before_exists = 1 AND before_content IS NOT NULL)
+  )
+);
+
+CREATE INDEX file_changes_session_idx
+  ON file_changes(session_id, created_at DESC);
+```
+
+`file_changes` 只服务两个产品能力：
+
+1. Diff 面板在应用重启后仍能按 Session 查看 Agent 的文件修改历史。
+2. 用户可以不依赖 Git，安全回退某一项 `create_file/apply_patch/delete_file` 变更。
+
+它不是 provider message、Run journal、trace 或通用 filesystem audit log，不进入 `messages`、`inHistory` 或下一次模型请求。`turn_id/call_id` 仅用于与 runtime/tool card 关联，不表示 Run 已持久化。
+
+`operation = 'write'` 同时覆盖 `create_file` 和其他整体写入；`before_exists` 能区分“创建新文件”与“替换已有文件”，不需要再增加一个与恢复语义重复的 `create` 枚举。
+
+记录流程：
+
+1. 副作用前已有 resource precondition 中的 before content 和 diff，先计算 `payloadBytes = utf8(beforeContent) + utf8(diff)`。单条记录已超过总容量上限时，在修改文件前返回 `CHANGE_HISTORY_LIMIT_EXCEEDED`。
+2. 文件工具完成原子写入/删除，并重新读取或校验实际 after existence/hash。
+3. 在工具结果成为 terminal result 前，同一 FileChange transaction 先删除最旧记录以满足容量/数量上限，再插入完整 `StoredFileChangeRecord`。
+4. Commit 后，工具结果才可以声明该变更支持 revert；随后按 §7.2 与其余 tool batch messages 一起写入对话历史。
+
+如果 filesystem mutation 已成功但 FileChange transaction 失败，terminal result 必须同时如实返回 `mutationSucceeded = true`、`warningCode = 'CHANGE_HISTORY_PERSIST_FAILED'` 和 `revertAvailable = false`，不能宣称整个文件操作未发生，也不能自动重试副作用。Filesystem 与 SQLite 仍不是同一原子事务；崩溃可能留下文件变化但没有 FileChange/Message，这与 §7.2 的 crash tradeoff 一致。
+
+FileChange 与 Message 故意不在同一个 transaction 落盘：前者紧跟每次已完成的文件副作用，后者要等当前 assistant tool-call batch 的所有 terminal results 齐全后才能原子提交。Message history 是 append-only 且参与 provider context；FileChange 会更新 `revertedAt`、按独立容量规则清理，并携带大容量恢复 snapshot。将两者混在 Message 中会破坏这些边界。
+
+回退流程：
+
+1. 获取 workspace writer lease，并确认 Session/Project ownership。
+2. 当前文件 existence/hash 必须严格等于记录的 `afterExists/afterHash`；否则返回 `RESOURCE_CHANGED`，不能覆盖用户或后续工具的新修改。
+3. `beforeExists = true` 时用 `beforeContent` 原子恢复；否则删除 Agent 创建的文件。
+4. 成功后更新 `reverted_at`、`updated_at` 和 `revision`。
+
+V1 延续现有配置值：全应用最多 200 条记录，`payloadBytes` 总量最多 50,000,000 bytes。目标实现必须修正 legacy JSON store 在“单条记录已超上限”时仍保留该记录的边界缺陷。Retention 删除最旧记录时只失去该项 Diff/revert 能力，不修改 Messages 或 workspace。恢复 snapshot 永远不经 IPC；renderer 只接收 `FileChangeSummary`。
+
+### 6.8 Message seq 与 transaction
 
 Application service 通过 `DatabaseService.withTransaction()`：
 
@@ -715,24 +887,29 @@ app:get-bootstrap
 project:list / project:add / project:update / project:remove
 session:list / session:get / session:create / session:update / session:archive
 message:list
+file-change:list / file-change:revert
 run:start / run:interrupt / run:interject
 approval:decide
 ```
 
-主进程推送分两类：
+主进程推送分为 durable record changes 与 runtime stream，至少包括：
 
+- `project:changed`：已经 commit 的完整 ProjectRecord list snapshot。
 - `session:changed`：已经 commit 的 Session/Message records 和 revision。
+- `file-change:changed`：受影响 `sessionId` 和 commit 后的完整 FileChangeSummary list snapshot，已包含 retention 结果。
 - `run:stream`：active run status、text/reasoning delta、tool/approval、terminal 等瞬时事件。
 
 ### 8.2 无 durable change log
 
-`session:changed` 由 commit 后的 backend event publisher 发送，不写 `session_change_log`。
+Durable-state changed events 由 commit 后的 backend event publisher 发送，不写 `session_change_log` 或通用 durable outbox。
 
-Renderer 发现 revision gap 时：
+Renderer 发现 Session revision gap 时：
 
 1. 停止应用后续增量。
 2. 调用 `session:get`。
 3. 用最新 Session 和所需 message page 替换副本。
+
+Project 和 FileChange 变更直接推送有界完整 list snapshot；renderer 用新 list 替换副本。Renderer reload 或 main-process restart 后再通过 bootstrap/`file-change:list` 获得当前值。
 
 Desktop 单窗口场景中，主进程崩溃会同时终止 renderer；重启后本来就会 bootstrap，因此不需要 durable outbox/change log。
 
@@ -930,15 +1107,15 @@ Renderer 不可以：
 
 ## 13. 配置、Secrets 与其他存储
 
-| 数据                                                  | 存储                                     | 所有者                  |
-| ----------------------------------------------------- | ---------------------------------------- | ----------------------- |
-| Projects、Sessions、Messages、Goal/Plan、file changes | `userData/agent.db`                      | backend                 |
-| 非敏感应用/provider 配置                              | backend config repository                | backend                 |
-| API keys                                              | Electron safeStorage-backed secret store | backend                 |
-| Trace                                                 | `userData/traces/*.jsonl`                | backend                 |
-| Skills                                                | `userData/skills/`                       | backend manager         |
-| ProjectModel                                          | workspace `.zch/project-model.json`      | backend project service |
-| Prompt resources                                      | versioned application resources          | backend registry        |
+| 数据                                                 | 存储                                     | 所有者                  |
+| ---------------------------------------------------- | ---------------------------------------- | ----------------------- |
+| Projects、Sessions、Messages、Goal/Plan、FileChanges | `userData/agent.db`                      | backend                 |
+| 非敏感应用/provider 配置                             | backend config repository                | backend                 |
+| API keys                                             | Electron safeStorage-backed secret store | backend                 |
+| Trace                                                | `userData/traces/*.jsonl`                | backend                 |
+| Skills                                               | `userData/skills/`                       | backend manager         |
+| ProjectModel                                         | workspace `.zch/project-model.json`      | backend project service |
+| Prompt resources                                     | versioned application resources          | backend registry        |
 
 Renderer 只能读取 public config snapshot。API key、Authorization 和 safeStorage 密文不进入 renderer、Session/Message records 或 trace。
 
@@ -965,7 +1142,7 @@ Preload 只暴露冻结 typed API，不暴露 `ipcRenderer`。Command/query/resu
 
 ## 15. Trace 与产品状态
 
-SQLite 是产品对话状态的真相源；JSONL trace 是可选审计记录，不用于 Session 恢复。
+SQLite 是产品持久状态的真相源；JSONL trace 是可选审计记录，不用于 Project/Session/FileChange 恢复。
 
 Trace 可以记录比 messages 更细的内容：
 
@@ -975,7 +1152,7 @@ Trace 可以记录比 messages 更细的内容：
 - provider request/response/timing/usage。
 - pending approval、tool attempt、writer、terminal 和 runtime diagnostics。
 
-Logging 关闭时这些细节可以不存在，但完整 messages 和 Session metadata 仍必须落盘。
+Logging 关闭时这些细节可以不存在，但 Projects、完整 Messages、Session metadata 和未被 retention 清理的 FileChanges 仍必须落盘。
 
 Restricted transcript 可以组合 SQLite messages 与 trace；缺少 trace 时明确省略 runtime 细节。
 
@@ -1015,13 +1192,13 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 首次打开 v2 database：
 
 1. 创建 `agent.db` 并执行 migrations。
-2. 如果存在 `workbench.json`，先做只读备份。
-3. Transaction 导入 projects、Session metadata 和能可靠转换的完整 messages。
+2. 如果存在 `workbench.json` 或 `change-history.json`，先对原文件做只读备份。
+3. 一个 transaction 内先导入 Projects，为 canonical workspace 生成稳定 `projectId`，再导入 Session metadata 和能可靠转换的完整 Messages。
 4. 旧 tool activity 只有在能够构成完整 assistant tool-call + tool result 协议时才转换为 provider history；否则只导入可见文本或 metadata，不伪造模型历史。
 5. 旧的可见明文 reasoning 只能导入 `normalizedReasoningText`；Importer 不得把它包装成虚假的 `providerContinuation`。
-6. 不承诺迁移未发送 draft。
-7. 写入 import marker 和来源 hash。
-8. Commit 成功后启用新 repository。
+6. `change-history.json` 中的记录只有在 Session/workspace 能唯一对应、路径受 workspace 约束且 snapshot/hash 合法时才导入 `file_changes`；无法验证的记录留在备份中，不提供可能覆盖错误文件的 revert。
+7. 不承诺迁移未发送 draft。
+8. 导入 ID 使用可重现映射。崩溃重试遇到相同 primary/unique key 时，必须 decode 并比较已有记录；内容相同则跳过，内容不同则停止导入，不得覆盖。全部 commit 成功后，将原 JSON 更名为已导入备份并启用新 repository；不为此新增通用 `processed_commands` 或 product metadata table。
 
 旧 Workbench 没有完整 harness/provider history，因此导入 Session 标记：
 
@@ -1032,11 +1209,12 @@ historyFidelity = legacy_display_only
 ### 18.2 切换顺序
 
 1. 引入 shared Session/Message schemas 和 SQLite repositories。
-2. 引入 Message history compiler 和完整 tool batch transaction。
-3. Runtime 改为从 messages 查询 active history。
-4. Renderer 改为 Session/Message replica。
-5. 启用一次性 importer。
-6. 删除 `workbench:save`、frontend conversation persistence 和 memory-only canonical history。
+2. 引入 Project 和 FileChange repositories，将 `workbench.json` project registry 与 `change-history.json` 纳入 SQLite。
+3. 引入 Message history compiler 和完整 tool batch transaction。
+4. Runtime 改为从 messages 查询 active history。
+5. Renderer 改为 Project/Session/Message/FileChangeSummary replica。
+6. 启用一次性 importer。
+7. 删除 `workbench:save`、frontend conversation persistence、legacy change-history JSON 和 memory-only canonical history。
 
 迁移不长期双写。
 
@@ -1046,14 +1224,15 @@ historyFidelity = legacy_display_only
 
 必须覆盖：
 
-- Session/Message codec round-trip。
+- Project/Session/Message codec round-trip，canonical project path 去重，以及 Project path 重新关联不改写 Session `projectId`。
 - `kind` 与 provider `role` 独立 round-trip，同为 `role = 'user'` 的 user/orchestrator/runtime context 重启后仍可区分。
 - MessageHistoryCompiler 只投影 provider 字段；相同 active MessageRecords、route 和 adapter config 生成确定性的 Provider DTO。
 - `normalizedReasoningText` 只包含允许展示的非加密文本；缺失投影时 UI 不显示 reasoning，且不能从它重建 continuation。
 - `ProviderContinuationEnvelope` 外层 schema 校验、`data` 原样 round-trip、数组顺序不变；签名、密文和 opaque item 不被 Core 改写。
 - Adapter、route 或 format 不兼容时忽略 continuation 并重放 canonical messages；损坏状态不得由 normalized reasoning 伪造。
 - 删除或改变 metadata 不改变相同 route/adapter 下编译出的 Provider request；协议关键字段藏入 metadata 的 fixture 必须被拒绝。
-- SQLite migration、foreign key、transaction rollback 和 seq uniqueness。
+- SQLite migration 顺序、checksum 不可变、单步 rollback、高版本拒绝、foreign key cascade 和 seq uniqueness。
+- 移除 Project 会 cascade 删除其 Sessions/Messages/FileChanges，但不删除 workspace 目录或任何项目文件。
 - Application service 的 Session/Message 多表事务回滚时，Repository 不得留下独立 commit。
 - User send 重试不重复插入 message。
 - Assistant text、`normalizedReasoningText` 和 `providerContinuation` 只有 completed 后才落盘。
@@ -1064,6 +1243,10 @@ historyFidelity = legacy_display_only
 - Draft、partial output 和 active Run 不进入 SQLite。
 - Renderer reload 且 main 存活时可读取 ActiveRunPublicSnapshot。
 - App crash/restart 后 partial output 丢失，但完整 messages 可以继续请求模型。
+- FileChange create/patch/delete 都能在重启后列出和回退；当前文件不匹配 after existence/hash 时必须返回 `RESOURCE_CHANGED`。
+- FileChange 持久化失败时不宣称 `revertAvailable`；单条 payload 超限在文件副作用前拒绝；retention 只删除最旧变更记录，不改写 Messages 或 workspace。
+- `FileChangeSummary` IPC 不包含 `beforeContent`，renderer store、DOM、trace 默认记录中不得出现恢复 snapshot。
+- Legacy importer 中断后重试不生成重复 Project/Session/Message/FileChange，损坏或无法归属的变更记录不可导入为可回退项。
 
 核心重启回归：
 
@@ -1083,6 +1266,7 @@ historyFidelity = legacy_display_only
 当前 legacy 实现仍然：
 
 - Renderer Pinia 保存 Conversation/timeline 并整体写 `workbench.json`。
+- Project registry 仍位于 `workbench.json`，文件变更/回退记录仍单独写入 `change-history.json`。
 - Main-process provider history 主要位于内存。
 - Restart 后 UI history 与 provider history 可能不一致。
 - Composer model selection 与实际 route 不是同一 canonical mutation。

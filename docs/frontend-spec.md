@@ -29,6 +29,7 @@
 
 - 一个项目对应一个 canonical workspace，即一个本地目录。
 - UI 使用“项目”作为用户概念，不同时展示“项目”和“工作区”两个重复层级。
+- Renderer 保存 backend `ProjectRecord` 的副本；项目列表、名称、路径和 revision 不从本地 UI 状态单独恢复或改写。
 - 项目项显示目录名；完整路径只在 tooltip、项目设置和 Artifact header 中显示。
 - 添加项目等价于通过主进程目录选择器选择 workspace。
 - 移除项目只移除应用记录，不删除本地目录和文件。
@@ -374,6 +375,7 @@ Files 内部使用二级 tab：
 - Diff 活动时不同时展示 Explorer。
 - 审批按钮可同时出现在对话卡和 Diff footer，但共享同一 store 状态。
 - 审批完成后从后端加载当前 Session 的持久化文件变更历史；切换对话或项目时必须按 `sessionId` 重新查询，不能复用上一对话的列表。
+- Renderer 只缓存后端返回的 `FileChangeSummary`；它不包含 `beforeContent` 恢复快照。变更历史不得从 Message/tool card 反向解析或在 Pinia 中自行合成。
 - 变更列表显示路径、操作、时间、diff hash 和回退状态；选择记录后显示对应统一 diff。
 - “回退此变更”必须先显示明确确认，运行期间禁用。主进程返回 `CONFLICT` 时在当前视口显示错误，不能假装回退成功。
 - 大 Diff 必须有明确截断提示，不能让 UI 假装展示了完整变化。
@@ -628,6 +630,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 16.2 项目与对话
 
 - [ ] 一个项目明确对应一个 workspace。
+- [ ] 项目列表由 backend `ProjectRecord` 驱动；移除项目会清理其应用内对话数据，但不删除 workspace 文件。
 - [ ] 左侧只展示新对话、搜索、项目和二级对话。
 - [ ] 无硬编码示例项目或示例对话。
 - [ ] 新对话在当前项目下创建；无项目时先选择目录。
@@ -659,6 +662,8 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] pending 文件审批自动打开 Diff。
 - [ ] Diff 与对话审批卡共享同一个决定状态。
 - [ ] 大文件和大 Diff 显示截断提示。
+- [ ] 应用重启后仍可按 Session 查看未被 retention 清理的文件变更，并可在 after hash 仍匹配时回退。
+- [ ] Renderer 只接收 `FileChangeSummary`，恢复用 `beforeContent` 不进入 renderer state 或 DOM。
 
 ### 16.5 权限审批
 
