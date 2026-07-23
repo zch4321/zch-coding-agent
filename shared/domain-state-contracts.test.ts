@@ -183,10 +183,16 @@ const messages: MessageRecord[] = [
   },
   {
     ...identity('message:4', 4),
-    kind: 'harness',
+    kind: 'system_instruction',
     parts: [{ type: 'text', text: 'Base instructions' }],
     metadata: {
       schemaVersion: 1,
+      layer: {
+        source: 'prompt:base',
+        trusted: true,
+        editable: false,
+        hash,
+      },
       prompt: { resourceId: 'base', version: '1', hash },
     },
   },

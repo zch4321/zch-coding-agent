@@ -107,6 +107,18 @@ function runElectronChild() {
   const electron = packaged
     ? packagedElectronPath()
     : option('--electron') || require('electron')
+  if (packaged && process.platform !== 'win32') {
+    console.log(
+      [
+        'SQLITE_SKIP',
+        'runtime=electron-packaged',
+        'target=win32',
+        `host=${process.platform}`,
+        'reason=cross-target-executable',
+      ].join(' '),
+    )
+    return
+  }
   const child = spawn(electron, [path.resolve(__filename)], {
     env: {
       ...process.env,

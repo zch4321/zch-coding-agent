@@ -33,6 +33,11 @@ function applyProviderUpdate(
       id: providerId,
       label: request.label ?? providerId,
       protocol: 'openai-compatible',
+      adapterId:
+        request.profile === 'deepseek'
+          ? 'deepseek.chat-completions'
+          : 'openai-compatible.chat-completions',
+      revision: 1,
       profile: request.profile ?? 'generic',
       baseURL: request.baseURL,
       model: request.model,
@@ -43,8 +48,13 @@ function applyProviderUpdate(
     next.providers.push(provider)
   }
 
+  const previousRouteShape = providerRouteShape(provider)
   provider.label = request.label ?? provider.label
   provider.profile = request.profile ?? provider.profile
+  provider.adapterId =
+    provider.profile === 'deepseek'
+      ? 'deepseek.chat-completions'
+      : 'openai-compatible.chat-completions'
   provider.baseURL = request.baseURL
   provider.model = request.model
   provider.reasoning = request.reasoning
@@ -69,10 +79,26 @@ function applyProviderUpdate(
   if (Object.keys(provider.modelOverrides[request.model]).length === 0) {
     delete provider.modelOverrides[request.model]
   }
+  if (providerRouteShape(provider) !== previousRouteShape) {
+    provider.revision += 1
+  }
 
   if (options.activate) {
     next.activeProviderId = provider.id
   }
+}
+
+function providerRouteShape(provider: AppProviderConfig): string {
+  return JSON.stringify({
+    protocol: provider.protocol,
+    adapterId: provider.adapterId,
+    profile: provider.profile,
+    baseURL: provider.baseURL,
+    model: provider.model,
+    reasoning: provider.reasoning,
+    modelOverrides: provider.modelOverrides,
+    apiKeyRef: provider.apiKeyRef,
+  })
 }
 
 function providerFallback(
@@ -172,6 +198,23 @@ export class ConfigStore {
       ? this.#environmentApiKeys[provider.id]
       : undefined
     return stored ?? environment
+  }
+
+  async getProviderApiKeyForRevision(
+    providerId: string,
+    revision: number,
+  ): Promise<string | undefined> {
+    const provider = getAppProvider(this.#config, providerId)
+    if (!provider || provider.revision !== revision) {
+      throw new Error(
+        `Provider configuration changed while freezing route: ${providerId}`,
+      )
+    }
+    const reference = provider.apiKeyRef
+    const stored = reference
+      ? await this.#secretStore.get(reference)
+      : undefined
+    return stored ?? this.#environmentApiKeys[provider.id]
   }
 
   async getWebSearchApiKey(): Promise<string | undefined> {
@@ -309,6 +352,7 @@ export class ConfigStore {
         const previousReference = provider.apiKeyRef
         const newReference = await this.#secretStore.set(request.apiKey)
         provider.apiKeyRef = newReference
+        provider.revision += 1
 
         try {
           await writeJsonAtomic(this.#filePath, next)
@@ -348,6 +392,7 @@ export class ConfigStore {
           ...copy,
           id: request.providerId,
           label: request.label,
+          revision: 1,
         })
         break
       }
@@ -396,6 +441,7 @@ export class ConfigStore {
 
         if (request.action === 'clear') {
           delete provider.apiKeyRef
+          provider.revision += 1
           await writeJsonAtomic(this.#filePath, next)
           this.#config = next
           await this.#secretStore.delete(previousReference)
@@ -404,6 +450,7 @@ export class ConfigStore {
 
         const newReference = await this.#secretStore.set(request.apiKey)
         provider.apiKeyRef = newReference
+        provider.revision += 1
 
         try {
           await writeJsonAtomic(this.#filePath, next)

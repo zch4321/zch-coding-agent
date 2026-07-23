@@ -24,6 +24,7 @@ export interface MessageRow {
   session_id: string
   seq: number
   client_request_id: string | null
+  replayed_from_message_id: string | null
   kind: string
   parts_json: string
   normalized_reasoning_text: string | null
@@ -47,7 +48,15 @@ export function encodeMessageRow(record: MessageRecord): MessageRow {
     session_id: record.sessionId,
     seq: record.seq,
     client_request_id:
-      record.kind === 'user_input' ? record.clientRequestId : null,
+      record.kind === 'user_input' && 'clientRequestId' in record
+        ? record.clientRequestId
+        : null,
+    replayed_from_message_id:
+      record.kind === 'user_input' &&
+      record.metadata &&
+      'replayedFromMessageId' in record.metadata
+        ? record.metadata.replayedFromMessageId
+        : null,
     kind: record.kind,
     parts_json: encodeJsonColumn(record.parts, 'messages.parts_json'),
     normalized_reasoning_text:
@@ -77,6 +86,10 @@ export function decodeMessageRow(row: Record<string, unknown>): MessageRecord {
   const clientRequestId = nullableStringColumn(
     row.client_request_id,
     'messages.client_request_id',
+  )
+  const replayedFromMessageId = nullableStringColumn(
+    row.replayed_from_message_id,
+    'messages.replayed_from_message_id',
   )
   const normalizedReasoningText = nullableStringColumn(
     row.normalized_reasoning_text,
@@ -115,5 +128,14 @@ export function decodeMessageRow(row: Record<string, unknown>): MessageRecord {
     'MessageRecord row',
   )
   assertMessageRecordSemantics(record)
+  if (
+    record.kind === 'user_input' &&
+    replayedFromMessageId !== null &&
+    record.metadata &&
+    'replayedFromMessageId' in record.metadata &&
+    record.metadata.replayedFromMessageId !== replayedFromMessageId
+  ) {
+    throw new TypeError('Replayed user message source does not match metadata')
+  }
   return record
 }

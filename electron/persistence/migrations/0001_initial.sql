@@ -62,12 +62,16 @@ CREATE TABLE messages (
     client_request_id IS NULL
     OR length(client_request_id) BETWEEN 1 AND 128
   ),
+  replayed_from_message_id TEXT REFERENCES messages(id),
   kind                 TEXT NOT NULL CHECK (
     kind IN (
       'user_input',
       'assistant_turn',
       'tool_result',
-      'harness',
+      'system_instruction',
+      'assistant_preferences',
+      'selected_context',
+      'benchmark_context',
       'runtime_context',
       'agents_context',
       'orchestrator',
@@ -96,8 +100,19 @@ CREATE TABLE messages (
   UNIQUE (session_id, seq),
   UNIQUE (session_id, client_request_id),
   CHECK (
-    (kind = 'user_input' AND client_request_id IS NOT NULL)
-    OR (kind <> 'user_input' AND client_request_id IS NULL)
+    (
+      kind = 'user_input'
+      AND (
+        (client_request_id IS NOT NULL AND replayed_from_message_id IS NULL)
+        OR
+        (client_request_id IS NULL AND replayed_from_message_id IS NOT NULL)
+      )
+    )
+    OR (
+      kind <> 'user_input'
+      AND client_request_id IS NULL
+      AND replayed_from_message_id IS NULL
+    )
   ),
   CHECK (
     (kind = 'assistant_turn' AND model_route_json IS NOT NULL)

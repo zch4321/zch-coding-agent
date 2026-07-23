@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DatabaseService,
@@ -260,9 +261,11 @@ describe('DatabaseService', () => {
         migrations: [{ version: 1, name: '0002_wrong', sql: 'SELECT 1;' }],
       }),
     ).toThrowError(expect.objectContaining({ code: 'MIGRATION_INVALID' }))
-    expect(desktopDatabasePath('C:\\UserData')).toBe('C:\\UserData\\agent.db')
+    expect(desktopDatabasePath('C:\\UserData')).toBe(
+      path.join('C:\\UserData', 'agent.db'),
+    )
     expect(headlessTrialDatabasePath('C:\\trial-42')).toBe(
-      'C:\\trial-42\\agent.db',
+      path.join('C:\\trial-42', 'agent.db'),
     )
   })
 

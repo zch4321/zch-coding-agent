@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox'
 import {
   PermissionModeSchema,
+  ProviderAdapterIdSchema,
   ProviderProfileSchema,
   ProviderProtocolSchema,
   PublicConfigSchema,
@@ -21,6 +22,11 @@ export const AppProviderConfigSchema = Type.Object(
     id: Type.String({ minLength: 1, maxLength: 128 }),
     label: Type.String({ minLength: 1, maxLength: 128 }),
     protocol: ProviderProtocolSchema,
+    adapterId: ProviderAdapterIdSchema,
+    revision: Type.Integer({
+      minimum: 1,
+      maximum: Number.MAX_SAFE_INTEGER,
+    }),
     profile: ProviderProfileSchema,
     baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
@@ -53,7 +59,7 @@ export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
 
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(8),
+    schemaVersion: Type.Literal(9),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
@@ -89,13 +95,15 @@ export type AppConfig = Static<typeof AppConfigSchema>
 export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 8,
+  schemaVersion: 9,
   activeProviderId: DEFAULT_PROVIDER_ID,
   providers: [
     {
       id: DEFAULT_PROVIDER_ID,
       label: 'DeepSeek',
       protocol: 'openai-compatible',
+      adapterId: 'deepseek.chat-completions',
+      revision: 1,
       profile: 'deepseek',
       baseURL: 'https://api.deepseek.com',
       model: 'deepseek-v4-pro',
@@ -234,12 +242,14 @@ export function toPublicConfig(
         })
 
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     activeProviderId: config.activeProviderId,
     providers: config.providers.map((provider) => ({
       id: provider.id,
       label: provider.label,
       protocol: provider.protocol,
+      adapterId: provider.adapterId,
+      revision: provider.revision,
       profile: provider.profile,
       baseURL: provider.baseURL,
       model: provider.model,

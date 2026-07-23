@@ -98,6 +98,16 @@ const PromptMetadataSchema = Type.Object(
   { additionalProperties: false },
 )
 
+const PromptLayerMetadataSchema = Type.Object(
+  {
+    source: Type.String({ minLength: 1, maxLength: 512 }),
+    trusted: Type.Boolean(),
+    editable: Type.Boolean(),
+    hash: Sha256Schema,
+  },
+  { additionalProperties: false },
+)
+
 const UsageMetadataSchema = Type.Object(
   {
     inputTokens: Type.Optional(
@@ -173,6 +183,17 @@ export const UserInputMetadataV1Schema = Type.Object(
   { additionalProperties: false },
 )
 
+export const ReplayedUserInputMetadataV1Schema = Type.Object(
+  {
+    schemaVersion: DurableSchemaVersionSchema,
+    replayedFromMessageId: MessageIdSchema,
+    attachments: Type.Optional(
+      Type.Array(AttachmentMetadataSchema, { maxItems: 64 }),
+    ),
+  },
+  { additionalProperties: false },
+)
+
 export const AssistantMetadataV1Schema = Type.Object(
   {
     schemaVersion: DurableSchemaVersionSchema,
@@ -194,7 +215,8 @@ export const ToolResultMetadataV1Schema = Type.Object(
 export const PromptMessageMetadataV1Schema = Type.Object(
   {
     schemaVersion: DurableSchemaVersionSchema,
-    prompt: PromptMetadataSchema,
+    layer: PromptLayerMetadataSchema,
+    prompt: Type.Optional(PromptMetadataSchema),
   },
   { additionalProperties: false },
 )
@@ -210,6 +232,7 @@ export const CompactSummaryMetadataV1Schema = Type.Object(
 
 export const MessageMetadataV1Schema = Type.Union([
   UserInputMetadataV1Schema,
+  ReplayedUserInputMetadataV1Schema,
   AssistantMetadataV1Schema,
   ToolResultMetadataV1Schema,
   PromptMessageMetadataV1Schema,
@@ -226,7 +249,7 @@ const messageIdentityProperties = {
   createdAt: DateTimeSchema,
 }
 
-export const UserInputMessageRecordSchema = Type.Object(
+export const OriginalUserInputMessageRecordSchema = Type.Object(
   {
     ...messageIdentityProperties,
     kind: Type.Literal('user_input'),
@@ -239,6 +262,24 @@ export const UserInputMessageRecordSchema = Type.Object(
   },
   { additionalProperties: false },
 )
+
+export const ReplayedUserInputMessageRecordSchema = Type.Object(
+  {
+    ...messageIdentityProperties,
+    kind: Type.Literal('user_input'),
+    parts: Type.Array(TextPartSchema, {
+      minItems: 1,
+      maxItems: MAX_MESSAGE_PARTS,
+    }),
+    metadata: ReplayedUserInputMetadataV1Schema,
+  },
+  { additionalProperties: false },
+)
+
+export const UserInputMessageRecordSchema = Type.Union([
+  OriginalUserInputMessageRecordSchema,
+  ReplayedUserInputMessageRecordSchema,
+])
 
 export const AssistantTurnMessageRecordSchema = Type.Object(
   {
@@ -270,7 +311,10 @@ export const ToolResultMessageRecordSchema = Type.Object(
 
 function textMessageRecordSchema(
   kind:
-    | 'harness'
+    | 'system_instruction'
+    | 'assistant_preferences'
+    | 'selected_context'
+    | 'benchmark_context'
     | 'runtime_context'
     | 'agents_context'
     | 'orchestrator'
@@ -290,7 +334,15 @@ function textMessageRecordSchema(
   )
 }
 
-export const HarnessMessageRecordSchema = textMessageRecordSchema('harness')
+export const SystemInstructionMessageRecordSchema =
+  textMessageRecordSchema('system_instruction')
+export const AssistantPreferencesMessageRecordSchema = textMessageRecordSchema(
+  'assistant_preferences',
+)
+export const SelectedContextMessageRecordSchema =
+  textMessageRecordSchema('selected_context')
+export const BenchmarkContextMessageRecordSchema =
+  textMessageRecordSchema('benchmark_context')
 export const RuntimeContextMessageRecordSchema =
   textMessageRecordSchema('runtime_context')
 export const AgentsContextMessageRecordSchema =
@@ -317,7 +369,10 @@ export const MessageRecordSchema = Type.Union([
   UserInputMessageRecordSchema,
   AssistantTurnMessageRecordSchema,
   ToolResultMessageRecordSchema,
-  HarnessMessageRecordSchema,
+  SystemInstructionMessageRecordSchema,
+  AssistantPreferencesMessageRecordSchema,
+  SelectedContextMessageRecordSchema,
+  BenchmarkContextMessageRecordSchema,
   RuntimeContextMessageRecordSchema,
   AgentsContextMessageRecordSchema,
   OrchestratorMessageRecordSchema,

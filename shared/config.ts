@@ -99,6 +99,12 @@ export const PromptResourceRefSchema = Type.Object(
 export const ProviderProtocolSchema = Type.Literal('openai-compatible')
 export type ProviderProtocol = Static<typeof ProviderProtocolSchema>
 
+export const ProviderAdapterIdSchema = Type.Union([
+  Type.Literal('deepseek.chat-completions'),
+  Type.Literal('openai-compatible.chat-completions'),
+])
+export type ProviderAdapterId = Static<typeof ProviderAdapterIdSchema>
+
 export const ProviderProfileSchema = Type.Union([
   Type.Literal('deepseek'),
   Type.Literal('generic'),
@@ -110,6 +116,11 @@ export const ProviderPublicConfigSchema = Type.Object(
     id: Type.String({ minLength: 1, maxLength: 128 }),
     label: Type.String({ minLength: 1, maxLength: 128 }),
     protocol: ProviderProtocolSchema,
+    adapterId: ProviderAdapterIdSchema,
+    revision: Type.Integer({
+      minimum: 1,
+      maximum: Number.MAX_SAFE_INTEGER,
+    }),
     profile: ProviderProfileSchema,
     baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
@@ -134,7 +145,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(8),
+    schemaVersion: Type.Literal(9),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,

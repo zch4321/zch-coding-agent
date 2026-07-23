@@ -148,6 +148,11 @@ function buildAppConfig(config: HeadlessConfig): AppConfig {
         label: config.provider.label ?? providerId,
         protocol: config.provider.protocol ?? 'openai-compatible',
         profile: config.provider.profile ?? 'generic',
+        adapterId:
+          (config.provider.profile ?? 'generic') === 'deepseek'
+            ? 'deepseek.chat-completions'
+            : 'openai-compatible.chat-completions',
+        revision: 1,
         baseURL: config.provider.baseURL,
         model: config.provider.model,
         reasoning: config.provider.reasoning ?? 'high',

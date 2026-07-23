@@ -153,7 +153,7 @@ describe('ConfigStore', () => {
     await expect(store.getDeepSeekApiKey()).resolves.toBe('stored-secret')
   })
 
-  it('migrates missing fields onto defaults and writes atomically', async () => {
+  it('writes v9 defaults atomically', async () => {
     const { directory, configStore } = await createStores()
 
     await configStore.update({
@@ -167,7 +167,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(8)
+    expect(parsed.schemaVersion).toBe(9)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(200)
     expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
       80,
@@ -176,6 +176,40 @@ describe('ConfigStore', () => {
       mode: 'conservative',
       bytesPerToken: 3,
     })
+  })
+
+  it('increments provider revision only for route or credential changes', async () => {
+    const { configStore } = await createStores()
+    const initial = configStore.getPublicConfig().providers[0]!
+
+    await configStore.setDeepSeekModelCatalog(
+      [{ id: 'catalog-only', ownedBy: 'provider' }],
+      '2026-07-23T00:00:00.000Z',
+    )
+    expect(configStore.getPublicConfig().providers[0]?.revision).toBe(
+      initial.revision,
+    )
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      baseURL: initial.baseURL,
+      model: 'revision-model',
+      reasoning: initial.reasoning,
+    })
+    expect(configStore.getPublicConfig().providers[0]?.revision).toBe(
+      initial.revision + 1,
+    )
+
+    await configStore.update({
+      version: 1,
+      kind: 'credential',
+      action: 'set',
+      apiKey: 'revision-secret',
+    })
+    expect(configStore.getPublicConfig().providers[0]?.revision).toBe(
+      initial.revision + 2,
+    )
   })
 
   it('reloads handwritten MCP config atomically and exposes no host value', async () => {
@@ -211,7 +245,7 @@ describe('ConfigStore', () => {
     config.schemaVersion = 99
     await writeFile(configPath, JSON.stringify(config), 'utf8')
     await expect(configStore.reloadFromDisk()).rejects.toThrow(
-      'Unsupported config schema version',
+      'P3 requires AppConfig v9',
     )
     expect(configStore.getMcpServers()).toHaveLength(1)
   })

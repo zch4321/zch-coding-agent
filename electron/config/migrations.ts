@@ -1,289 +1,31 @@
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import { AppConfigSchema, DEFAULT_APP_CONFIG, type AppConfig } from './schema'
-import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 
 const validateAppConfig = compileSchema(AppConfigSchema)
 
-function mergeRecord<T extends object>(defaults: T, candidate: unknown): T {
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return structuredClone(defaults)
-  }
-
-  const result = structuredClone(defaults) as Record<string, unknown>
-
-  for (const [key, value] of Object.entries(candidate)) {
-    const defaultValue = result[key]
-
-    if (
-      defaultValue &&
-      typeof defaultValue === 'object' &&
-      !Array.isArray(defaultValue) &&
-      value &&
-      typeof value === 'object' &&
-      !Array.isArray(value)
-    ) {
-      result[key] = mergeRecord(defaultValue as Record<string, unknown>, value)
-    } else {
-      result[key] = value
-    }
-  }
-
-  return result as T
-}
-
+/**
+ * P3 intentionally starts a clean configuration epoch. Older schemas mixed
+ * provider identity, protocol behavior, and mutable defaults, so guessing an
+ * adapter or revision would produce an unreproducible route snapshot.
+ */
 export function migrateConfig(candidate: unknown): AppConfig {
   if (candidate === undefined || candidate === null) {
     return structuredClone(DEFAULT_APP_CONFIG)
   }
 
-  if (typeof candidate !== 'object' || Array.isArray(candidate)) {
-    throw new Error('Config root must be an object')
-  }
-
-  const schemaVersion = Reflect.get(candidate, 'schemaVersion')
-
   if (
-    schemaVersion !== undefined &&
-    schemaVersion !== 0 &&
-    schemaVersion !== 1 &&
-    schemaVersion !== 2 &&
-    schemaVersion !== 3 &&
-    schemaVersion !== 4 &&
-    schemaVersion !== 5 &&
-    schemaVersion !== 6 &&
-    schemaVersion !== 7 &&
-    schemaVersion !== 8
+    typeof candidate !== 'object' ||
+    Array.isArray(candidate) ||
+    Reflect.get(candidate, 'schemaVersion') !== 9
   ) {
     throw new Error(
-      `Unsupported config schema version: ${String(schemaVersion)}`,
+      'Unsupported config schema. P3 requires AppConfig v9; reset or remove the existing config file.',
     )
   }
 
-  const normalized = normalizeConfigShape(candidate)
-  const migrated = mergeRecord(DEFAULT_APP_CONFIG as AppConfig, normalized)
-  migrated.schemaVersion = 8
-  migrated.providers = migrated.providers.map((provider) => ({
-    ...provider,
-    model:
-      provider.profile === 'deepseek'
-        ? normalizeDeepSeekModel(provider.model)
-        : provider.model,
-    reasoning: normalizeReasoning(provider.reasoning),
-  }))
-  const approverProvider = migrated.providers.find(
-    (provider) => provider.id === migrated.approval.approverProviderId,
-  )
-  if (approverProvider?.profile === 'deepseek') {
-    migrated.approval.approverModel = normalizeDeepSeekModel(
-      migrated.approval.approverModel,
-    )
-  }
-
-  // The web search provider union was narrowed to 'brave'. Any config that
-  // still references a removed provider (serper/tavily) is normalized back to
-  // brave, and its apiKeyRef is dropped so a non-Brave credential is never
-  // reused against the Brave endpoint.
-  if (migrated.webSearch.provider !== 'brave') {
-    migrated.webSearch.provider = 'brave'
-    delete migrated.webSearch.apiKeyRef
-  }
-
-  if (
-    !migrated.providers.some(
-      (provider) => provider.id === migrated.activeProviderId,
-    )
-  ) {
-    migrated.activeProviderId = migrated.providers[0]?.id ?? 'deepseek'
-  }
-
-  if (
-    !migrated.providers.some(
-      (provider) => provider.id === migrated.approval.approverProviderId,
-    )
-  ) {
-    migrated.approval.approverProviderId = migrated.activeProviderId
-  }
-
-  migrated.permission.rememberedRules = migrated.permission.rememberedRules.map(
-    (rule) =>
-      rule.toolId === 'write_file' ? { ...rule, toolId: 'create_file' } : rule,
-  )
-
-  if (!validateAppConfig(migrated)) {
+  if (!validateAppConfig(candidate)) {
     throw new Error(formatSchemaErrors(validateAppConfig.errors))
   }
 
-  return migrated
-}
-
-function normalizeDeepSeekModel(value: string): string {
-  if (value === 'deepseek-chat' || value === 'deepseek-reasoner') {
-    return 'deepseek-v4-flash'
-  }
-
-  return value
-}
-
-function normalizeReasoning(value: unknown): 'off' | 'high' | 'max' {
-  if (value === 'off' || value === 'max') {
-    return value
-  }
-
-  // DeepSeek only documents high/max. Legacy `auto`, mistakenly exposed `low`,
-  // OpenAI-compatible `medium`, and `xhigh` compatibility aliases are folded to
-  // the nearest documented DeepSeek value.
-  if (value === 'xhigh') {
-    return 'max'
-  }
-
-  return 'high'
-}
-
-function normalizeConfigShape(candidate: object): Record<string, unknown> {
-  const raw = structuredClone(candidate) as Record<string, unknown>
-  const legacyProviders = raw.providers
-
-  if (!Array.isArray(legacyProviders)) {
-    const deepseek =
-      legacyProviders &&
-      typeof legacyProviders === 'object' &&
-      !Array.isArray(legacyProviders)
-        ? Reflect.get(legacyProviders, 'deepseek')
-        : undefined
-    const legacyDeepSeek =
-      deepseek && typeof deepseek === 'object' && !Array.isArray(deepseek)
-        ? (deepseek as Record<string, unknown>)
-        : {}
-
-    raw.providers = [
-      {
-        ...structuredClone(DEFAULT_APP_CONFIG.providers[0]),
-        ...legacyDeepSeek,
-        id: 'deepseek',
-        label: 'DeepSeek',
-        protocol: 'openai-compatible',
-        profile: 'deepseek',
-        reasoning: normalizeReasoning(legacyDeepSeek.reasoning),
-      },
-    ]
-    raw.activeProviderId =
-      typeof raw.activeProviderId === 'string'
-        ? raw.activeProviderId
-        : typeof raw.activeProvider === 'string'
-          ? raw.activeProvider
-          : 'deepseek'
-    delete raw.activeProvider
-  } else {
-    raw.providers = legacyProviders.map((provider, index) => {
-      const current =
-        provider && typeof provider === 'object' && !Array.isArray(provider)
-          ? (provider as Record<string, unknown>)
-          : {}
-      const id =
-        typeof current.id === 'string' && current.id
-          ? current.id
-          : index === 0
-            ? 'deepseek'
-            : `provider-${index + 1}`
-
-      return {
-        ...structuredClone(DEFAULT_APP_CONFIG.providers[0]),
-        ...current,
-        id,
-        label:
-          typeof current.label === 'string' && current.label
-            ? current.label
-            : id === 'deepseek'
-              ? 'DeepSeek'
-              : id,
-        protocol: 'openai-compatible',
-        profile:
-          current.profile === 'generic' || current.profile === 'deepseek'
-            ? current.profile
-            : id === 'deepseek'
-              ? 'deepseek'
-              : 'generic',
-        reasoning: normalizeReasoning(current.reasoning),
-      }
-    })
-  }
-
-  if (
-    raw.approval &&
-    typeof raw.approval === 'object' &&
-    !Array.isArray(raw.approval)
-  ) {
-    const approval = raw.approval as Record<string, unknown>
-    if (
-      typeof approval.approverProviderId !== 'string' &&
-      typeof approval.approverProvider === 'string'
-    ) {
-      approval.approverProviderId = approval.approverProvider
-    }
-    delete approval.approverProvider
-  }
-
-  normalizeAssistant(raw)
-  normalizePrompts(raw)
-
-  return raw
-}
-
-function legacyPromptPreference(
-  candidate: unknown,
-  locale: keyof typeof LEGACY_DEFAULT_SYSTEM_PROMPTS,
-): string {
-  if (typeof candidate !== 'string') {
-    return ''
-  }
-
-  const trimmed = candidate.trim()
-  return trimmed && trimmed !== LEGACY_DEFAULT_SYSTEM_PROMPTS[locale]
-    ? trimmed
-    : ''
-}
-
-function normalizeAssistant(raw: Record<string, unknown>): void {
-  const assistant =
-    raw.assistant &&
-    typeof raw.assistant === 'object' &&
-    !Array.isArray(raw.assistant)
-      ? (raw.assistant as Record<string, unknown>)
-      : {}
-  const legacy =
-    assistant.systemPrompts &&
-    typeof assistant.systemPrompts === 'object' &&
-    !Array.isArray(assistant.systemPrompts)
-      ? (assistant.systemPrompts as Record<string, unknown>)
-      : undefined
-
-  if (
-    !assistant.preferences ||
-    typeof assistant.preferences !== 'object' ||
-    Array.isArray(assistant.preferences)
-  ) {
-    assistant.preferences = {
-      'zh-CN': legacyPromptPreference(legacy?.['zh-CN'], 'zh-CN'),
-      'en-US': legacyPromptPreference(legacy?.['en-US'], 'en-US'),
-    }
-  }
-
-  delete assistant.systemPrompts
-  raw.assistant = assistant
-}
-
-function normalizePrompts(raw: Record<string, unknown>): void {
-  const prompts =
-    raw.prompts &&
-    typeof raw.prompts === 'object' &&
-    !Array.isArray(raw.prompts)
-      ? (raw.prompts as Record<string, unknown>)
-      : undefined
-
-  if (!prompts) {
-    return
-  }
-
-  delete prompts.system
-  raw.prompts = prompts
+  return structuredClone(candidate as AppConfig)
 }

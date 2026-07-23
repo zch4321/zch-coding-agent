@@ -13,7 +13,8 @@ import { decodeMessageRow, encodeMessageRow } from './message-codec'
 import { PersistenceError } from './persistence-error'
 
 const MESSAGE_COLUMNS = `
-  schema_version, id, session_id, seq, client_request_id, kind, parts_json,
+  schema_version, id, session_id, seq, client_request_id,
+  replayed_from_message_id, kind, parts_json,
   normalized_reasoning_text, provider_continuation_json, model_route_json,
   metadata_json, in_history, created_at
 `
@@ -83,7 +84,9 @@ export class MessageRepository {
           .prepare(
             `SELECT ${MESSAGE_COLUMNS}
              FROM messages
-             WHERE session_id = ? AND seq < ?
+             WHERE session_id = ?
+               AND seq < ?
+               AND (kind <> 'user_input' OR replayed_from_message_id IS NULL)
              ORDER BY seq DESC
              LIMIT ?`,
           )
@@ -93,6 +96,7 @@ export class MessageRepository {
             `SELECT ${MESSAGE_COLUMNS}
              FROM messages
              WHERE session_id = ?
+               AND (kind <> 'user_input' OR replayed_from_message_id IS NULL)
              ORDER BY seq DESC
              LIMIT ?`,
           )
@@ -153,7 +157,9 @@ export class MessageRepository {
       .prepare(
         `SELECT ${MESSAGE_COLUMNS}
          FROM messages
-         WHERE session_id = ? AND kind IN ('user_input', 'assistant_turn')
+         WHERE session_id = ?
+           AND kind IN ('user_input', 'assistant_turn')
+           AND (kind <> 'user_input' OR replayed_from_message_id IS NULL)
          ORDER BY seq DESC
          LIMIT ?`,
       )
@@ -195,10 +201,11 @@ function insertMessageRow(
   transaction
     .prepare(
       `INSERT INTO messages (
-         schema_version, id, session_id, seq, client_request_id, kind,
+         schema_version, id, session_id, seq, client_request_id,
+         replayed_from_message_id, kind,
          parts_json, normalized_reasoning_text, provider_continuation_json,
          model_route_json, metadata_json, in_history, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       row.schema_version,
@@ -206,6 +213,7 @@ function insertMessageRow(
       row.session_id,
       row.seq,
       row.client_request_id,
+      row.replayed_from_message_id,
       row.kind,
       row.parts_json,
       row.normalized_reasoning_text,

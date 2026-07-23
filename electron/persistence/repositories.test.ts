@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { ProjectId, SessionId } from '../../shared/ids'
+import type { MessageId, ProjectId, SessionId } from '../../shared/ids'
+import type { MessageRecord } from '../../shared/message'
 import { decodeMessageRow } from './message-codec'
 import { FileChangeRepository } from './file-change-repository'
 import { MessageRepository } from './message-repository'
@@ -91,7 +92,7 @@ describe('persistence repositories', () => {
     const project = projectFixture()
     const session = sessionFixture()
     const user = messageFixtures()[0]
-    if (!user || user.kind !== 'user_input') {
+    if (!user || user.kind !== 'user_input' || !('clientRequestId' in user)) {
       throw new Error('user fixture is missing')
     }
     try {
@@ -126,6 +127,58 @@ describe('persistence repositories', () => {
           })
         }),
       ).rejects.toThrow(/UNIQUE/u)
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
+  it('keeps replayed users in active history but deduplicates UI pages and search', async () => {
+    const testDatabase = await createTestDatabase()
+    const project = projectFixture()
+    const session = sessionFixture()
+    const user = messageFixtures()[0]
+    if (!user || user.kind !== 'user_input' || !('clientRequestId' in user)) {
+      throw new Error('user fixture is missing')
+    }
+    const replay: MessageRecord = {
+      schemaVersion: user.schemaVersion,
+      id: 'message:replayed' as MessageId,
+      sessionId: user.sessionId,
+      seq: 4,
+      inHistory: user.inHistory,
+      createdAt: user.createdAt,
+      kind: 'user_input',
+      parts: structuredClone(user.parts),
+      metadata: {
+        schemaVersion: 1 as const,
+        replayedFromMessageId: user.id,
+      },
+    }
+    try {
+      await testDatabase.database.withTransaction((transaction) => {
+        projects.insert(transaction, project)
+        sessions.insert(transaction, session)
+        messages.insert(transaction, user)
+        messages.insert(transaction, replay)
+      })
+
+      expect(
+        testDatabase.database.read((reader) =>
+          messages.listActiveHistory(reader, session.id),
+        ),
+      ).toHaveLength(2)
+      expect(
+        testDatabase.database.read((reader) =>
+          messages.listPage(reader, session.id),
+        ).records,
+      ).toEqual([user])
+      expect(
+        testDatabase.database.read((reader) =>
+          messages.searchText(reader, session.id, {
+            text: 'visible search needle',
+          }),
+        ),
+      ).toEqual([user])
     } finally {
       await testDatabase.dispose()
     }
