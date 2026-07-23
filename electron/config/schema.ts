@@ -128,7 +128,7 @@ export const DEFAULT_APP_CONFIG = {
   },
   limits: {
     maxConcurrentRuns: 4,
-    maxStepsPerRun: 200,
+    maxStepsPerRun: 0,
     maxToolOutputBytes: 64 * 1_024,
     maxContextTokens: 64_000,
     autoCompactTriggerPercent: 80,

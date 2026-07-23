@@ -7,7 +7,7 @@ import {
   PersistedWorkbenchSchema,
   type ConversationRecord,
   type PersistedWorkbench,
-  type ProjectRecord,
+  type WorkbenchProjectRecord,
   type WorkbenchFile,
 } from '../../shared/workbench'
 
@@ -24,7 +24,7 @@ function projectName(workspacePath: string): string {
 }
 
 function normalizeWorkbench(candidate: PersistedWorkbench): PersistedWorkbench {
-  const projects = new Map<string, ProjectRecord>()
+  const projects = new Map<string, WorkbenchProjectRecord>()
   const conversations = new Map<string, ConversationRecord>()
 
   for (const project of candidate.projects) {

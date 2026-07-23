@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { JsonValue } from '../../shared/json'
+import type { ModelRouteSnapshot } from '../../shared/model-route'
 import type {
   LLMProvider,
   ProviderChatRequest,
@@ -21,6 +22,17 @@ const input: AutoApproverInput = {
   reason: 'Update the README',
   workspacePath: 'F:/workspace',
   policySignals: [],
+}
+
+const route: ModelRouteSnapshot = {
+  schemaVersion: 1,
+  purpose: 'approval',
+  adapterId: 'deepseek.chat-completions',
+  providerId: 'deepseek',
+  model: 'deepseek-v4-flash',
+  reasoning: 'high',
+  endpoint: 'https://api.deepseek.com/chat/completions',
+  providerConfigRevision: 1,
 }
 
 class ErrorProvider implements LLMProvider {
@@ -106,6 +118,7 @@ describe('P3 auto approver', () => {
   it('accepts only the strict safe decision schema', async () => {
     const approver = new ProviderAutoApprover(
       new TextProvider('{"decision":"safe","note":"bounded edit"}'),
+      route,
     )
 
     await expect(
@@ -119,7 +132,7 @@ describe('P3 auto approver', () => {
 
   it('requests JSON object output from the provider', async () => {
     const provider = new CapturingProvider()
-    const approver = new ProviderAutoApprover(provider)
+    const approver = new ProviderAutoApprover(provider, route)
 
     await expect(
       approver.evaluate(input, new AbortController().signal),
@@ -132,7 +145,7 @@ describe('P3 auto approver', () => {
   })
 
   it('converts network errors to dangerous human-review fallback', async () => {
-    const approver = new ProviderAutoApprover(new ErrorProvider())
+    const approver = new ProviderAutoApprover(new ErrorProvider(), route)
 
     await expect(
       approver.evaluate(input, new AbortController().signal),
@@ -144,7 +157,7 @@ describe('P3 auto approver', () => {
   })
 
   it('converts timeout to dangerous human-review fallback', async () => {
-    const approver = new ProviderAutoApprover(new HangingProvider(), 10)
+    const approver = new ProviderAutoApprover(new HangingProvider(), route, 10)
 
     await expect(
       approver.evaluate(input, new AbortController().signal),

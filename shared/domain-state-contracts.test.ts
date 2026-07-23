@@ -9,11 +9,17 @@ import {
   MessageListPayloadSchema,
   ProjectCommittedChangeSchema,
   SessionCommittedChangeSchema,
+  SessionUpdatePatchSchema,
   type DomainStateApiPayload,
   type DomainStateEvent,
 } from './domain-state-api'
 import { MAX_MESSAGE_PAGE_RECORDS } from './durable'
-import { FileChangeSummarySchema, type FileChangeSummary } from './file-change'
+import {
+  assertFileChangeSummarySemantics,
+  EMPTY_FILE_SHA256,
+  FileChangeSummarySchema,
+  type FileChangeSummary,
+} from './file-change'
 import type {
   CallId,
   FileChangeId,
@@ -53,7 +59,16 @@ const timestamp = '2026-07-22T12:00:00.000Z'
 
 function compileSchema(schema: TSchema) {
   const ajv = new Ajv({ allErrors: true, strict: true })
-  ajv.addFormat('date-time', true)
+  ajv.addFormat('date-time', {
+    type: 'string',
+    validate(value: string) {
+      return (
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u.test(
+          value,
+        ) && Number.isFinite(Date.parse(value))
+      )
+    },
+  })
   return ajv.compile(schema)
 }
 
@@ -272,6 +287,7 @@ describe('domain-state canonical records', () => {
     expect(
       validateFileChange({ ...fileChange, beforeContent: 'private snapshot' }),
     ).toBe(false)
+    expect(validateSession({ ...session, updatedAt: 'not-a-date' })).toBe(false)
   })
 })
 
@@ -315,6 +331,18 @@ describe('canonical Message constraints', () => {
     const compactWithoutMetadata: Record<string, unknown> = { ...compact }
     delete compactWithoutMetadata.metadata
     expect(validate(compactWithoutMetadata)).toBe(false)
+    expect(
+      validate({
+        ...user,
+        metadata: {
+          schemaVersion: 1,
+          replayedFromMessageId: 'message:source',
+        },
+      }),
+    ).toBe(false)
+    const userWithoutIdentity = { ...user } as Record<string, unknown>
+    delete userWithoutIdentity.clientRequestId
+    expect(validate(userWithoutIdentity)).toBe(false)
   })
 
   it('checks local call uniqueness, bounded JSON and route safety', () => {
@@ -346,6 +374,11 @@ describe('canonical Message constraints', () => {
         endpoint: 'https://example.test/v1?api_key=secret',
       }),
     ).toThrow(/credential query/u)
+    for (const endpoint of ['file:///tmp/provider', 'javascript:alert(1)']) {
+      expect(() =>
+        assertModelRouteSnapshotSafe({ ...route, endpoint }),
+      ).toThrow(/HTTP or HTTPS/u)
+    }
   })
 
   it('preserves opaque continuation JSON ordering through a round-trip', () => {
@@ -391,6 +424,23 @@ describe('bounded canonical JSON', () => {
     expect(() => assertBoundedJsonValue(Number.NaN, limits)).toThrow(/finite/u)
     expect(() => assertBoundedJsonValue(new Date(), limits)).toThrow(/plain/u)
     expect(() => assertBoundedJsonValue(cycle, limits)).toThrow(/cycles/u)
+  })
+
+  it('bounds repeated DAG traversal before serialization can explode', () => {
+    let dag: unknown = { value: 1 }
+    for (let index = 0; index < 10; index += 1) {
+      dag = { left: dag, right: dag }
+    }
+    expect(() =>
+      assertBoundedJsonValue(dag, {
+        maxDepth: 32,
+        maxArrayLength: 10,
+        maxObjectKeys: 2,
+        maxStringLength: 100,
+        maxBytes: 1_000_000,
+        maxNodes: 100,
+      }),
+    ).toThrow(/node count/u)
   })
 })
 
@@ -454,6 +504,30 @@ describe('message paging and Session snapshots', () => {
         nextBefore: { updatedAt: newer.updatedAt, sessionId: newer.id },
       }),
     ).toThrow(/descending/u)
+    expect(() =>
+      assertSessionPageSemantics({
+        schemaVersion: 1,
+        records: [{ ...session, updatedAt: 'not-a-date' }],
+        hasMore: false,
+      }),
+    ).toThrow(/invalid updatedAt/u)
+  })
+})
+
+describe('FileChange semantics', () => {
+  it('uses the empty-content hash for missing file states', () => {
+    const missingBefore = {
+      ...fileChange,
+      beforeExists: false,
+      beforeHash: EMPTY_FILE_SHA256,
+    }
+    expect(() => assertFileChangeSummarySemantics(missingBefore)).not.toThrow()
+    expect(() =>
+      assertFileChangeSummarySemantics({
+        ...missingBefore,
+        beforeHash: hash,
+      }),
+    ).toThrow(/empty-content/u)
   })
 })
 
@@ -490,6 +564,7 @@ describe('bounded domain-state API contracts', () => {
       expect(() => compileSchema(contract.payload)).not.toThrow()
       expect(() => compileSchema(contract.result)).not.toThrow()
     }
+    expect(compileSchema(SessionUpdatePatchSchema)({})).toBe(false)
   })
 
   it('round-trips bounded topic changes and supports metadata-only Session commits', () => {

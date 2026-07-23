@@ -3,6 +3,7 @@ import type { CallId } from '../../shared/ids'
 import type { JsonObject, JsonValue } from '../../shared/json'
 import type { ToolCall } from '../tools/types'
 import type { ProviderProfile, ReasoningEffort } from '../../shared/config'
+import { resolveChatCompletionsEndpoint } from '../../shared/model-route'
 import type {
   LLMProvider,
   ProviderAssistantTurn,
@@ -15,6 +16,7 @@ export interface OpenAICompatibleProviderOptions {
   providerId: string
   profile: ProviderProfile
   baseURL: string
+  endpoint?: string
   model: string
   apiKey: string
   reasoning?: ReasoningEffort
@@ -34,11 +36,6 @@ interface AccumulatedToolCall {
   id?: string
   name?: string
   argumentsText: string
-}
-
-function endpoint(baseURL: string): string {
-  const normalized = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
-  return new URL('chat/completions', normalized).toString()
 }
 
 function byteLength(value: JsonValue): number {
@@ -155,6 +152,18 @@ function choiceDelta(chunk: JsonObject): JsonObject | undefined {
     : undefined
 }
 
+function choiceFinishReason(chunk: JsonObject): string | undefined {
+  const choices = chunk.choices
+  if (!Array.isArray(choices) || choices.length === 0) return undefined
+  const first = choices[0]
+  if (!first || typeof first !== 'object' || Array.isArray(first)) {
+    return undefined
+  }
+  return typeof first.finish_reason === 'string'
+    ? first.finish_reason
+    : undefined
+}
+
 function usageFromChunk(chunk: JsonObject): JsonValue | undefined {
   const usage = chunk.usage
   return usage && typeof usage === 'object' ? toJsonValue(usage) : undefined
@@ -176,7 +185,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.#reasoning = options.reasoning ?? 'off'
     this.#transport = new HttpSseTransport({
       providerId: options.providerId,
-      endpoint: endpoint(options.baseURL),
+      endpoint:
+        options.endpoint ?? resolveChatCompletionsEndpoint(options.baseURL),
       apiKey: options.apiKey,
       fetchImpl: options.fetchImpl,
       timeoutMs: options.timeoutMs,
@@ -225,6 +235,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     let rawResponse: JsonValue = null
     let text = ''
     let reasoning = ''
+    let finishReason: string | undefined
     const toolCalls = new Map<number, AccumulatedToolCall>()
     const toolIntentFields = intentFields(request.tools)
 
@@ -240,6 +251,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       request.signal,
     )) {
       rawResponse = chunk as JsonValue
+      finishReason = choiceFinishReason(chunk) ?? finishReason
       const usage = usageFromChunk(chunk)
 
       if (usage !== undefined) {
@@ -370,6 +382,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       turn,
       toolCalls: normalizedToolCalls,
       usage: latestUsage,
+      ...(finishReason ? { finishReason } : {}),
       providerState: toJsonValue({
         provider: this.#providerId,
         profile: this.#profile,

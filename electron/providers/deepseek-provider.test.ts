@@ -18,12 +18,15 @@ describe('DeepSeekProvider', () => {
   it('sends a fork request body exactly while keeping credentials in headers', async () => {
     let body = ''
     let authorization = ''
+    let requestedEndpoint = ''
     const provider = new DeepSeekProvider({
       baseURL: 'https://api.example/v1',
+      endpoint: 'https://gateway.example/custom/chat?api-version=1',
       model: 'current-model',
       apiKey: 'current-secret',
       reasoning: 'off',
-      fetchImpl: async (_input, init) => {
+      fetchImpl: async (input, init) => {
+        requestedEndpoint = String(input)
         body = String(init?.body)
         authorization = new Headers(init?.headers).get('authorization') ?? ''
         return sseResponse([])
@@ -52,6 +55,9 @@ describe('DeepSeekProvider', () => {
     expect(JSON.parse(body)).toEqual(recordedRequest)
     expect(body).not.toContain('current-secret')
     expect(authorization).toBe('Bearer current-secret')
+    expect(requestedEndpoint).toBe(
+      'https://gateway.example/custom/chat?api-version=1',
+    )
   })
 
   it('preserves reasoning continuation, tool calls and raw cache usage fields', async () => {
@@ -95,6 +101,7 @@ describe('DeepSeekProvider', () => {
           {
             choices: [
               {
+                finish_reason: 'tool_calls',
                 delta: {
                   tool_calls: [
                     {
@@ -143,6 +150,7 @@ describe('DeepSeekProvider', () => {
     )
     expect(completed).toMatchObject({
       usage,
+      finishReason: 'tool_calls',
       turn: {
         reasoning_content: 'Think.',
         tool_calls: [
@@ -170,6 +178,41 @@ describe('DeepSeekProvider', () => {
     expect(JSON.parse(wireBody)).toMatchObject({
       thinking: { type: 'enabled' },
       reasoning_effort: 'high',
+    })
+  })
+
+  it('preserves a provider truncation finish reason', async () => {
+    const provider = new DeepSeekProvider({
+      baseURL: 'https://api.example/v1',
+      model: 'fixture',
+      apiKey: 'secret',
+      reasoning: 'off',
+      fetchImpl: async () =>
+        sseResponse([
+          {
+            choices: [
+              {
+                finish_reason: 'length',
+                delta: { content: 'partial' },
+              },
+            ],
+          },
+        ]),
+    })
+    const events: ProviderEvent[] = []
+
+    for await (const event of provider.streamChat({
+      messages: [{ role: 'user', content: 'continue' }],
+      tools: [],
+      signal: new AbortController().signal,
+    })) {
+      events.push(event)
+    }
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'completed',
+      finishReason: 'length',
+      turn: { content: 'partial' },
     })
   })
 

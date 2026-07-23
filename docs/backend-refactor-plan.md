@@ -1,6 +1,6 @@
 # Backend State Architecture v2.1 · 详细重构计划
 
-> 状态：实施中 · P0–P2 已完成 · 2026-07-22
+> 状态：实施中 · P0–P3 已完成 · 2026-07-23
 >
 > 目标架构：[`architecture.md`](./architecture.md)
 >
@@ -219,6 +219,7 @@ P2 和 P3 的代码可并行开发，但 P4 同时依赖二者。P6、P7 可以�
 ### 4.2 任务
 
 - [x] 调整 Vitest 配置，将慢速 `benchmarks/cases/cases.test.ts` 排除在默认 suite 和本次重构的门禁之外。
+- [x] 默认 Vitest worker 数固定为 4，避免全量 suite 在开发机上因过度并行放大内存与计时抖动。
 - [x] 逐项运行并记录 `lint`、`format:check`、`typecheck`、`test`、`test:native`、`test:ripgrep` 和 `test:e2e` 基线。
 - [x] 为普通文本、reasoning、单/多 tool call、拒绝、超时、compact、interjection 和 Plan continuation 保存确定性 Provider request/response golden fixtures。
 - [x] 保存 Electron/Headless 当前 parity capture，标记允许变化的字段，禁止宽泛 snapshot ignore。
@@ -356,6 +357,7 @@ P2 已按该隔离边界完成：production Desktop/Headless composition 尚未�
 - `e2e/support/fake-provider.ts`
 
 目标 grep gate：除 Chat wire DTO/Adapter 内部外，Core、Persistence、Renderer 中不得出现 `ProviderMessage`、`reasoning_content`、`tool_call_id` 或 `tool_calls` wire fields。
+E2E fake provider 本身是 wire 边界，可以保留本地声明的 Chat DTO；它不能被 Core、Persistence 或 Renderer 导入。
 
 ### 7.4 测试
 
@@ -370,7 +372,7 @@ P2 已按该隔离边界完成：production Desktop/Headless composition 尚未�
 
 ### 7.5 验收与回滚
 
-P3 完成后只有 Provider Adapter/transport 与协议 fixtures 理解 wire DTO。P3 使用 reset-only AppConfig v9、Trace v2 和修改后的开发数据库 `0001_initial` checksum；旧配置、旧 trace 和旧 P2 开发数据库不做兼容迁移，错误信息要求显式重置。SQLite 在 P8 前仍不是产品用户状态真相源。
+P3 完成后只有 Provider Adapter/transport 与协议 fixtures 理解 wire DTO。P3 使用 reset-only AppConfig v9、Trace v2 和修改后的开发数据库 `0001_initial` checksum；检测到旧版或不兼容配置时直接删除配置文件并用 v9 默认值重建。旧 trace 和旧 P2 开发数据库不做兼容迁移，仍明确要求删除重建。SQLite 在 P8 前仍不是产品用户状态真相源。
 
 自动 compact 的重建顺序固定为 `system → harness* → root user replay → compact summary`，其中 summary 在 Chat Completions 下编译为最后一个可响应的 user-role continuation；工具进展只由 summary 恢复。手动 `/compact <正文>` 的顺序不同，固定为 `system → harness* → compact summary → new user`；纯 `/compact` 展示 summary 后结束。
 

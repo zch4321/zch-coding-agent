@@ -122,27 +122,32 @@ shared/
 
 ```text
 electron/
-  application/
-    session-service.ts
-    message-history-compiler.ts
+  session/
+    canonical-history.ts          # P3 MessageHistoryCompiler
+    session-provider-turn.ts
+    session-compact-coordinator.ts
   persistence/
     database-service.ts
     migrations/
-    repositories/
-      project-repository.ts
-      session-repository.ts
-      message-repository.ts
-      file-change-repository.ts
-    codecs/
+    project-repository.ts
+    session-repository.ts
+    message-repository.ts
+    file-change-repository.ts
+    project-codec.ts
+    session-codec.ts
+    message-codec.ts
+    file-change-codec.ts
   runtime/
-    live-session-context.ts
-    active-run-execution.ts
+    create-agent-runtime.ts
+    runtime-parity.ts
   providers/
-    protocol-adapters/
-      openai-chat-completions-adapter.ts
-      openai-responses-adapter.ts
-      anthropic-messages-adapter.ts
-    transports/
+    provider-protocol.ts
+    chat-completions-adapter.ts
+    http-sse-transport.ts
+    deepseek-provider.ts
+    model-route-resolver.ts
+    fixtures/
+      protocol-shape-test-adapters.ts # Responses/Anthropic test-only
   prompts/
   tools/
   permission/
@@ -153,6 +158,8 @@ electron/
   logging/
   ipc/                    # host adapter，不包含领域逻辑
 ```
+
+这是 P3 完成后的真实布局。P4 可以在引入 durable application service 时新增 `electron/application/`，但文档不会把尚未存在的目标文件写成当前实现。
 
 Persistence 是独立代码层，但不是独立进程、IPC service 或通用 ORM：
 
@@ -511,7 +518,9 @@ Protocol Adapter 必须消费整个 ordered history，不是对每条 MessageRec
 
 `role` 只是部分 wire 协议的字段，不是 canonical database field。OpenAI 官方把 Chat Completions 的基本单位称为 Message，而 Responses 使用包括 `message/function_call/function_call_output` 的 Items；Anthropic 则把 client tool result 放在 `user` message 的 `tool_result` content block 中。因此一条 MessageRecord 不要求对应一条 wire message/item。协议依据：[OpenAI Responses migration](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)、[Anthropic tool results](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)。
 
-同一供应商的不同协议也是不同 Adapter，例如 `openai.chat-completions`、`openai.responses` 和 `anthropic.messages`。Provider transport 负责 SDK/HTTP、stream 和 abort；Protocol Adapter 负责 request compilation、response decoding 和 continuation compatibility。两者可以由同一 Provider module 组合，但不能让 Chat Completions 形状的通用 `ProviderMessage` 渗透回 Core、Persistence 或 Renderer。
+P3 产品配置只开放 `deepseek.chat-completions` 和 `openai-compatible.chat-completions`；Responses/Anthropic Adapter 仅存在于 test fixture，用来证明一对多和多对一协议形状，不是可选产品路由。Provider transport 负责 SDK/HTTP、stream 和 abort；Protocol Adapter 负责 request compilation、response decoding 和 continuation compatibility。两者可以由同一 Provider module 组合，但不能让 Chat Completions 形状的通用 `ProviderMessage` 渗透回 Core、Persistence 或 Renderer。
+
+当前 Chat Completions Adapter 会把 canonical tool-result part 数组整体 JSON 编码进 `tool` message content。模型会看到带类型标签的内部 part 结构，但这能无损保留 text/JSON part 的顺序，golden test 已固定该权衡；如果以后改为更紧凑的文本投影，必须作为显式协议行为变更处理。
 
 ### 5.4 FileChangeSummary 与 StoredFileChangeRecord
 
@@ -1473,9 +1482,11 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 
 ## 20. 当前迁移状态
 
-P0 regression gates、P1 shared canonical contracts 和 P2 SQLite/Persistence foundation 已实现。P2 已提供 checksummed forward migrations、单连接串行 transaction、Project/Session/Message/FileChange repositories、shared-schema row codecs、有界查询、文件型临时测试数据库，以及 development Electron/Windows x64 package 的 `node:sqlite` 探针。
+P0 regression gates、P1 shared canonical contracts、P2 SQLite/Persistence foundation 和 P3 canonical history/provider boundary 已实现。P2 已提供 checksummed forward migrations、单连接串行 transaction、Project/Session/Message/FileChange repositories、shared-schema row codecs、有界查询、文件型临时测试数据库，以及 development Electron/Windows x64 package 的 `node:sqlite` 探针。
 
-P2 persistence 仍只由 unit/integration tests 和 runtime probe 使用，尚未导入 production Desktop/Headless composition，也不读取或修改真实 `userData`、`workbench.json` 或 `change-history.json`。P1 `domain-state-api` 仍未接入现有 preload/IPC handler 或 renderer；这些接线分别从 P4、P6、P7 开始，并在 P8 协调切流。
+P3 已把进程内 Agent loop 切到 canonical messages 与严格 `MessageHistoryCompiler`，由 Chat Completions Adapter 独占 wire DTO、HTTP/SSE transport、response normalization 和 continuation 恢复。每个 Run 冻结 main/compression/approval route、credential 与 model profile；AppConfig v9 检测到旧版或不兼容文件时删除并按默认值重建，Trace v2 明确拒绝旧 trace，trace fork 已移除。自动 compact 固定为 `system → harness* → root user replay → compact summary`，手动带正文固定为 `system → harness* → compact summary → new user`。
+
+P2 persistence 仍只由 unit/integration tests 和 runtime probe 使用，尚未导入 production Desktop/Headless composition，也不读取或修改真实 `userData/agent.db`、`workbench.json` 或 `change-history.json`。P3 canonical history 仍是 Session 内存状态，不提前把 SQLite 变成用户状态真相源。P1 `domain-state-api` 仍未接入现有 preload/IPC handler 或 renderer；这些接线分别从 P4、P6、P7 开始，并在 P8 协调切流。
 
 当前 legacy 实现仍然：
 

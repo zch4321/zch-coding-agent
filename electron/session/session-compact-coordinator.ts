@@ -1,6 +1,7 @@
 import type { RunStatus } from '../../shared/agent-events'
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
+import type { CanonicalPromptKind } from '../../shared/message'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
@@ -31,7 +32,6 @@ import {
   appendCompactSummary,
   appendPromptMessage,
   appendUserInput,
-  type CanonicalPromptKind,
   canonicalTraceSource,
   deactivateActiveHistory,
   MessageHistoryCompiler,
@@ -126,10 +126,7 @@ export class SessionCompactCoordinator {
       route: binding.snapshot,
       tools,
     }).body
-    const budget = modelPromptBudget(config, tools, {
-      providerId: binding.snapshot.providerId,
-      model: binding.snapshot.model,
-    })
+    const budget = modelPromptBudget(binding.modelProfile)
     const trigger = Math.floor(
       (budget * config.limits.autoCompactTriggerPercent) / 100,
     )
@@ -261,10 +258,7 @@ export class SessionCompactCoordinator {
       route: binding.snapshot,
       tools: [],
     })
-    const budget = modelPromptBudget(config, [], {
-      providerId: binding.snapshot.providerId,
-      model: binding.snapshot.model,
-    })
+    const budget = modelPromptBudget(binding.modelProfile)
     if (
       estimateJsonTokens(compiled.body, config.limits.tokenEstimation) > budget
     ) {
@@ -281,6 +275,7 @@ export class SessionCompactCoordinator {
         binding.snapshot.reasoning,
         binding.apiKey,
         this.#fetchImpl,
+        binding.snapshot.endpoint,
       )
     const callId = id<CallId>('llm')
     let text = ''
@@ -364,6 +359,7 @@ export class SessionCompactCoordinator {
       scope: 'compression',
       config,
       provider: binding.provider,
+      modelProfile: binding.modelProfile,
       raw: completed.usage,
     })
     if (usage) {
@@ -477,10 +473,7 @@ export class SessionCompactCoordinator {
         tools,
       }).body
       const config = this.#configStore.getPublicConfig()
-      const budget = modelPromptBudget(config, tools, {
-        providerId: binding.snapshot.providerId,
-        model: binding.snapshot.model,
-      })
+      const budget = modelPromptBudget(binding.modelProfile)
       if (estimateJsonTokens(body, config.limits.tokenEstimation) > budget) {
         throw new ContextBudgetError(
           'Compacted history still exceeds the model context budget',

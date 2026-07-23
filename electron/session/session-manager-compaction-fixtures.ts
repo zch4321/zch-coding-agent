@@ -5,6 +5,14 @@ import type {
   ProviderEvent,
 } from '../providers/provider'
 
+function deferred(): { resolve: () => void; promise: Promise<void> } {
+  let resolve: () => void = () => undefined
+  const promise = new Promise<void>((settle) => {
+    resolve = settle
+  })
+  return { resolve, promise }
+}
+
 export class CompactProvider implements LLMProvider {
   calls = 0
   requests: Array<{
@@ -102,6 +110,83 @@ export class AutoCompactProvider implements LLMProvider {
       type: 'completed',
       rawResponse: { id: `normal-${this.calls}` },
       turn: { role: 'assistant', content: `Normal response ${this.calls}` },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
+export class AbortCompactProvider implements LLMProvider {
+  calls = 0
+  requests: ProviderChatRequest['messages'][] = []
+  compactStarted = deferred()
+
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    this.requests.push(structuredClone(request.messages))
+
+    if (request.tools.length === 0) {
+      yield { type: 'text.delta', delta: 'partial summary', raw: {} }
+      this.compactStarted.resolve()
+      await new Promise<never>((_resolve, reject) => {
+        request.signal.addEventListener(
+          'abort',
+          () => reject(request.signal.reason ?? new Error('aborted')),
+          { once: true },
+        )
+      })
+    }
+
+    yield {
+      type: 'completed',
+      rawResponse: { id: `main-${this.calls}` },
+      turn: { role: 'assistant', content: `Main response ${this.calls}` },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
+export class InterjectedAutoCompactProvider implements LLMProvider {
+  calls = 0
+  requests: ProviderChatRequest['messages'][] = []
+  compactStarted = deferred()
+  releaseCompact = deferred()
+
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    this.requests.push(structuredClone(request.messages))
+
+    if (request.tools.length === 0) {
+      this.compactStarted.resolve()
+      await this.releaseCompact.promise
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'interjected-compact' },
+        turn: {
+          role: 'assistant',
+          content: 'Interjected compact summary retained',
+        },
+        toolCalls: [],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'interjected-main' },
+      turn: { role: 'assistant', content: 'Handled latest interjection' },
       toolCalls: [],
       usage: {},
       providerState: {},

@@ -48,6 +48,7 @@ export type ProviderEvent =
       turn: ProviderAssistantTurn
       toolCalls: ToolCall[]
       usage: JsonValue
+      finishReason?: string
       providerState: JsonValue
       timing: JsonValue
     }

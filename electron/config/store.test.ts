@@ -63,6 +63,47 @@ async function createStores(adapter = new FakeSafeStorage()) {
 }
 
 describe('ConfigStore', () => {
+  it('deletes a legacy config and rebuilds clean v9 defaults', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
+    const configPath = path.join(directory, 'config.json')
+    await writeFile(
+      configPath,
+      JSON.stringify({ schemaVersion: 8, legacy: true }),
+      'utf8',
+    )
+    const secretStore = new SecretStore(
+      path.join(directory, 'secrets.json'),
+      new FakeSafeStorage(),
+    )
+    const store = new ConfigStore(configPath, secretStore)
+
+    await expect(store.initialize()).resolves.toMatchObject({
+      config: { schemaVersion: 9 },
+    })
+    expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
+      schemaVersion: 9,
+      limits: { maxStepsPerRun: 0 },
+    })
+  })
+
+  it('deletes an incompatible v9 shape and rebuilds clean defaults', async () => {
+    const { directory, configStore } = await createStores()
+    const configPath = path.join(directory, 'config.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >
+    config.legacyField = true
+    await writeFile(configPath, JSON.stringify(config), 'utf8')
+
+    await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
+      schemaVersion: 9,
+    })
+    expect(JSON.parse(await readFile(configPath, 'utf8'))).not.toHaveProperty(
+      'legacyField',
+    )
+  })
+
   it('supports provider-scoped environment credentials for headless hosts', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const secretStore = new SecretStore(
@@ -92,6 +133,11 @@ describe('ConfigStore', () => {
         .providers.find((provider) => provider.id === 'generic')
         ?.credentialSource,
     ).toBe('environment')
+    expect(
+      store
+        .getPublicConfig()
+        .providers.find((provider) => provider.id === 'generic')?.revision,
+    ).toBe(1)
     await expect(store.getProviderApiKey('generic')).resolves.toBe(
       'generic-secret',
     )
@@ -168,7 +214,7 @@ describe('ConfigStore', () => {
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
     expect(parsed.schemaVersion).toBe(9)
-    expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(200)
+    expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(0)
     expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
       80,
     )
@@ -212,7 +258,33 @@ describe('ConfigStore', () => {
     )
   })
 
-  it('reloads handwritten MCP config atomically and exposes no host value', async () => {
+  it('preserves an explicit adapter when an update does not change profile', async () => {
+    const { directory, configStore } = await createStores()
+    const configPath = path.join(directory, 'config.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8')) as {
+      providers: Array<Record<string, unknown>>
+    }
+    config.providers[0]!.adapterId = 'openai-compatible.chat-completions'
+    await writeFile(configPath, JSON.stringify(config), 'utf8')
+    await configStore.reloadFromDisk()
+    const provider = configStore.getPublicConfig().providers[0]!
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      profile: provider.profile,
+      baseURL: 'https://example.test/v1',
+      model: provider.model,
+      reasoning: provider.reasoning,
+    })
+
+    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+      adapterId: 'openai-compatible.chat-completions',
+      revision: provider.revision + 1,
+    })
+  })
+
+  it('reloads handwritten MCP config and resets unsupported schemas', async () => {
     const { directory, configStore } = await createStores()
     const configPath = path.join(directory, 'config.json')
     const config = JSON.parse(await readFile(configPath, 'utf8')) as Record<
@@ -244,10 +316,14 @@ describe('ConfigStore', () => {
 
     config.schemaVersion = 99
     await writeFile(configPath, JSON.stringify(config), 'utf8')
-    await expect(configStore.reloadFromDisk()).rejects.toThrow(
-      'P3 requires AppConfig v9',
-    )
-    expect(configStore.getMcpServers()).toHaveLength(1)
+    await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
+      schemaVersion: 9,
+    })
+    expect(configStore.getMcpServers()).toHaveLength(0)
+    expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
+      schemaVersion: 9,
+      mcpServers: [],
+    })
   })
 
   it('persists model catalogs and per-model capability overrides', async () => {

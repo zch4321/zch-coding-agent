@@ -1,9 +1,5 @@
 import path from 'node:path'
-import {
-  getActiveProviderConfig,
-  getProviderConfig,
-  type PermissionMode,
-} from '../../shared/config'
+import { getProviderConfig, type PermissionMode } from '../../shared/config'
 import type { CallId, RunId, SessionId, TerminalId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { RunContext } from '../../shared/context'
@@ -270,15 +266,19 @@ export class SessionManager {
       )
     }
 
+    const provider = getProviderConfig(publicConfig, input.provider)
+    if (!provider) {
+      ipcFault(
+        'PRECONDITION_FAILED',
+        `Provider is not configured: ${input.provider}`,
+      )
+    }
     const guard = await PathGuard.create(input.workspace)
     await this.#mcpManager?.activateWorkspace(guard.workspacePath)
     const sessionId = id<SessionId>('session')
     const logger = publicConfig.logging.enabled
       ? await JsonlTraceLogger.create(this.#traceDirectory, sessionId)
       : new NullTraceLogger()
-    const provider =
-      getProviderConfig(publicConfig, input.provider) ??
-      getActiveProviderConfig(publicConfig)
     const session: SessionState = {
       sessionId,
       conversationId: input.conversationId,

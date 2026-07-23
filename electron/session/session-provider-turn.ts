@@ -4,7 +4,10 @@ import type { JsonObject, JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { PluginEventBus } from '../plugins/event-bus'
 import { OpenAICompatibleProvider } from '../providers/deepseek-provider'
-import { chatAdapter } from '../providers/chat-completions-adapter'
+import {
+  assertChatCompletionsRequestDto,
+  chatAdapter,
+} from '../providers/chat-completions-adapter'
 import type {
   ProviderEvent,
   ProviderRequestSnapshot,
@@ -35,6 +38,7 @@ export interface ProviderTurnResult {
   toolCalls: ToolCall[]
   text: string
   reasoning: string
+  finishReason: string
   continuation?: {
     schemaVersion: 1
     adapterId: string
@@ -43,11 +47,18 @@ export interface ProviderTurnResult {
   }
 }
 
-const IMMUTABLE_REQUEST_FIELDS = new Set([
-  'model',
-  'tools',
-  'stream',
-  'stream_options',
+const MUTABLE_REQUEST_FIELDS = new Set([
+  'messages',
+  'temperature',
+  'top_p',
+  'max_tokens',
+  'max_completion_tokens',
+  'presence_penalty',
+  'frequency_penalty',
+  'stop',
+  'seed',
+  'logprobs',
+  'top_logprobs',
 ])
 const CREDENTIAL_FIELD =
   /^(?:authorization|api[-_]?key|credential|password|secret|access[-_]?token|bearer)$/iu
@@ -63,7 +74,11 @@ function assertImmutableRequest(
   original: JsonObject,
   candidate: JsonObject,
 ): void {
-  for (const field of IMMUTABLE_REQUEST_FIELDS) {
+  for (const field of new Set([
+    ...Object.keys(original),
+    ...Object.keys(candidate),
+  ])) {
+    if (MUTABLE_REQUEST_FIELDS.has(field)) continue
     if (JSON.stringify(candidate[field]) !== JSON.stringify(original[field])) {
       throw new TypeError(
         `beforeLLMCall cannot modify protected request field: ${field}`,
@@ -71,9 +86,7 @@ function assertImmutableRequest(
     }
   }
   assertNoCredentialFields(candidate)
-  if (!Array.isArray(candidate.messages)) {
-    throw new TypeError('beforeLLMCall request.messages must be an array')
-  }
+  assertChatCompletionsRequestDto(candidate)
 }
 
 function assertNoCredentialFields(value: JsonValue, path = 'request'): void {
@@ -172,10 +185,7 @@ export class SessionProviderTurnRunner {
     const selection = selectPromptMessages({
       state: session,
       tools,
-      maxPromptTokens: modelPromptBudget(config, tools, {
-        providerId: binding.snapshot.providerId,
-        model: binding.snapshot.model,
-      }),
+      maxPromptTokens: modelPromptBudget(binding.modelProfile),
       estimation: config.limits.tokenEstimation,
     })
     const adapter = chatAdapter(binding.snapshot.adapterId)
@@ -211,9 +221,9 @@ export class SessionProviderTurnRunner {
       if (patch.request) body = jsonObject(patch.request, 'Hook request')
       if (patch.params) {
         for (const [key, value] of Object.entries(patch.params)) {
-          if (IMMUTABLE_REQUEST_FIELDS.has(key)) {
+          if (!MUTABLE_REQUEST_FIELDS.has(key) || key === 'messages') {
             throw new TypeError(
-              `beforeLLMCall cannot modify protected parameter: ${key}`,
+              `beforeLLMCall cannot modify unsupported parameter: ${key}`,
             )
           }
           body[key] = structuredClone(value)
@@ -223,10 +233,7 @@ export class SessionProviderTurnRunner {
     }
     assertImmutableRequest(immutableBody, body)
 
-    const promptBudget = modelPromptBudget(config, tools, {
-      providerId: binding.snapshot.providerId,
-      model: binding.snapshot.model,
-    })
+    const promptBudget = modelPromptBudget(binding.modelProfile)
     if (
       estimateJsonTokens(body, config.limits.tokenEstimation) > promptBudget
     ) {
@@ -247,6 +254,7 @@ export class SessionProviderTurnRunner {
         binding.snapshot.reasoning,
         binding.apiKey,
         this.#fetchImpl,
+        binding.snapshot.endpoint,
       )
     const llmCallId = id<CallId>('llm')
     let text = ''
@@ -331,6 +339,7 @@ export class SessionProviderTurnRunner {
       scope: 'main',
       config,
       provider: binding.provider,
+      modelProfile: binding.modelProfile,
       raw: completed.usage,
     })
     if (usage) {
@@ -365,6 +374,7 @@ export class SessionProviderTurnRunner {
       toolCalls: canonical.toolCalls,
       text: canonicalText,
       reasoning: canonical.normalizedReasoningText ?? reasoning,
+      finishReason: canonical.finishReason,
       continuation: canonical.providerContinuation,
     }
   }
@@ -377,6 +387,7 @@ export function createConfiguredProvider(
   reasoning: ProviderPublicConfig['reasoning'],
   apiKey: string,
   fetchImpl?: typeof fetch,
+  endpoint?: string,
 ): OpenAICompatibleProvider {
   return new OpenAICompatibleProvider({
     providerId: provider.id,
@@ -386,5 +397,6 @@ export function createConfiguredProvider(
     reasoning,
     apiKey,
     fetchImpl,
+    endpoint,
   })
 }

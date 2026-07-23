@@ -1,8 +1,8 @@
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import type { ConfigSetRequest, PublicConfig } from '../../shared/config'
 import { writeJsonAtomic } from './atomic-file'
-import { migrateConfig } from './migrations'
+import { migrateConfig, UnsupportedConfigSchemaError } from './migrations'
 import {
   DEFAULT_APP_CONFIG,
   DEFAULT_PROVIDER_ID,
@@ -27,6 +27,7 @@ function applyProviderUpdate(
 ): void {
   const providerId = request.providerId ?? next.activeProviderId
   let provider = getAppProvider(next, providerId)
+  const isNewProvider = !provider
 
   if (!provider) {
     provider = {
@@ -49,12 +50,15 @@ function applyProviderUpdate(
   }
 
   const previousRouteShape = providerRouteShape(provider)
+  const previousProfile = provider.profile
   provider.label = request.label ?? provider.label
   provider.profile = request.profile ?? provider.profile
-  provider.adapterId =
-    provider.profile === 'deepseek'
-      ? 'deepseek.chat-completions'
-      : 'openai-compatible.chat-completions'
+  if (isNewProvider || provider.profile !== previousProfile) {
+    provider.adapterId =
+      provider.profile === 'deepseek'
+        ? 'deepseek.chat-completions'
+        : 'openai-compatible.chat-completions'
+  }
   provider.baseURL = request.baseURL
   provider.model = request.model
   provider.reasoning = request.reasoning
@@ -79,7 +83,7 @@ function applyProviderUpdate(
   if (Object.keys(provider.modelOverrides[request.model]).length === 0) {
     delete provider.modelOverrides[request.model]
   }
-  if (providerRouteShape(provider) !== previousRouteShape) {
+  if (!isNewProvider && providerRouteShape(provider) !== previousRouteShape) {
     provider.revision += 1
   }
 
@@ -569,6 +573,13 @@ export class ConfigStore {
         'code' in error &&
         error.code === 'ENOENT'
       ) {
+        const defaults = migrateConfig(undefined)
+        await writeJsonAtomic(this.#filePath, defaults)
+        return defaults
+      }
+
+      if (error instanceof UnsupportedConfigSchemaError) {
+        await rm(this.#filePath, { force: true })
         const defaults = migrateConfig(undefined)
         await writeJsonAtomic(this.#filePath, defaults)
         return defaults

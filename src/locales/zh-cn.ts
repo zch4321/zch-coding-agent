@@ -369,6 +369,7 @@ const zhCN = {
     approvalAndNetwork: '审批与网络',
     tokenEstimation: 'Token 估算',
     maxStepsPerRun: '每次运行最大步骤数',
+    maxStepsPerRunHint: '设为 0 时不限制 React loop 步数。',
     maxContextTokens: '默认最大上下文 Token',
     autoCompactTriggerPercent: '自动压缩触发阈值',
     maxToolResultTokens: '单次工具结果 Token 上限',

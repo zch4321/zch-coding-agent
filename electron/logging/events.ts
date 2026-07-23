@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox'
+import { Sha256Schema } from '../../shared/durable'
 import {
   CallIdSchema,
   EventIdSchema,
@@ -41,7 +42,7 @@ const PromptResourceSummarySchema = Type.Object(
     id: Type.String({ minLength: 1, maxLength: 256 }),
     version: Type.String({ minLength: 1, maxLength: 64 }),
     path: Type.String({ minLength: 1, maxLength: 4_096 }),
-    sha256: Type.String({ minLength: 64, maxLength: 64 }),
+    sha256: Sha256Schema,
   },
   { additionalProperties: false },
 )
@@ -157,7 +158,7 @@ export const TraceEventSchema = Type.Union([
               Type.String({ minLength: 1, maxLength: 64 }),
               { minItems: 1, maxItems: 256 },
             ),
-            hash: Type.String({ minLength: 64, maxLength: 64 }),
+            hash: Sha256Schema,
           },
           { additionalProperties: false },
         ),

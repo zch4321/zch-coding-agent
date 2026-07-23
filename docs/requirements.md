@@ -48,7 +48,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 - **可审批**：每个可能产生副作用的工具调用前，必须经过权限管线（§3）。
 - **状态明确**：同一 Session 同一时间只允许一个活动 Run；运行中收到新消息时默认拒绝，但切换到其他对话不取消后台 Run。
 - **协议完整**：LLM 一次返回多个工具调用时，每个调用都必须回填一个结果；拒绝、取消、超时也以结构化工具结果回填，不能静默丢失。
-- **有界运行**：配置最大循环轮数、单次和单个 run 的工具输出预算、累计上下文预算；全应用 `maxConcurrentRuns` 范围为 `1..32`、默认 4，达到上限的新 run 直接拒绝。每个 run 同时最多一个 provider call，不设置独立 provider 并发上限。`maxStepsPerRun` 默认值为 200，可在 Limits 设置中调整；上下文达到当前模型 prompt budget 的 `autoCompactTriggerPercent`（默认 80%）时，在安全边界自动压缩旧历史；字节、行数/结果数与估算 token 任一上限先到即截断，并向用户和模型返回续读信息。
+- **有界资源、默认不限 React 步数**：单次和单个 run 的工具输出预算、累计上下文预算继续受限；全应用 `maxConcurrentRuns` 范围为 `1..32`、默认 4，达到上限的新 run 直接拒绝。每个 run 同时最多一个 provider call，不设置独立 provider 并发上限，也不对主聊天流设置默认总墙钟超时。`maxStepsPerRun = 0` 表示 React loop 不限步数并作为默认值；部署或 benchmark 仍可配置正整数上限。上下文达到当前模型 prompt budget 的 `autoCompactTriggerPercent`（默认 80%）时，在安全边界自动压缩旧历史；字节、行数/结果数与估算 token 任一上限先到即截断，并向用户和模型返回续读信息。
 - **可回放**：调试日志开启时，循环的请求、响应、流式事件和工具结果必须完整保存，可确定性离线回放原会话；重新请求模型属于单独的“重放请求”，不保证复现随机输出（§5）。
 - **Prompt Harness**：稳定 base instructions、runtime context、AGENTS、selected context、orchestration request 和 compact history 作为可审计 prompt layers 进入模型请求；runtime context 必须包含 workspace writer 的 `available | writer | readonly_locked` 快照，其他 writer 存在时明确当前 session 只读、禁止副作用并要求 writer 结束后重读文件。状态变化通过 hash 追加新 layer，不修改历史。用户可编辑内容是 assistant preferences，不替换 base harness instructions。
 - **计划审阅门**：模型可用 `plan_set` 创建或替换 Plan，默认进入 `awaiting_review` 并停止执行；UI 批准/拒绝会直接记录顶层 Plan 状态并写入 trace，自然语言批准/拒绝也可由模型通过 `plan_status({status:"active" | "rejected"})` 转成可审计状态。Plan review 不是权限模式，不绕过也不替代工具审批。

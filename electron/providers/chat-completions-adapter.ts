@@ -23,6 +23,143 @@ function toJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
 }
 
+export function assertChatCompletionsRequestDto(candidate: JsonObject): void {
+  if (!Array.isArray(candidate.messages)) {
+    throw new TypeError('beforeLLMCall request.messages must be an array')
+  }
+  if (candidate.messages.length === 0 || candidate.messages.length > 10_000) {
+    throw new TypeError(
+      'beforeLLMCall request.messages must contain 1 to 10000 items',
+    )
+  }
+  for (const [index, message] of candidate.messages.entries()) {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      throw new TypeError(
+        `beforeLLMCall request.messages[${index}] must be an object`,
+      )
+    }
+    if (
+      message.role !== 'system' &&
+      message.role !== 'user' &&
+      message.role !== 'assistant' &&
+      message.role !== 'tool'
+    ) {
+      throw new TypeError(
+        `beforeLLMCall request.messages[${index}].role is invalid`,
+      )
+    }
+    if (
+      'content' in message &&
+      message.content !== null &&
+      typeof message.content !== 'string'
+    ) {
+      throw new TypeError(
+        `beforeLLMCall request.messages[${index}].content must be text or null`,
+      )
+    }
+    if (
+      'reasoning_content' in message &&
+      typeof message.reasoning_content !== 'string'
+    ) {
+      throw new TypeError(
+        `beforeLLMCall request.messages[${index}].reasoning_content must be text`,
+      )
+    }
+    if ('tool_call_id' in message && typeof message.tool_call_id !== 'string') {
+      throw new TypeError(
+        `beforeLLMCall request.messages[${index}].tool_call_id must be text`,
+      )
+    }
+    if ('tool_calls' in message && !Array.isArray(message.tool_calls)) {
+      throw new TypeError(
+        `beforeLLMCall request.messages[${index}].tool_calls must be an array`,
+      )
+    }
+  }
+
+  const temperature = candidate.temperature
+  if (
+    temperature !== undefined &&
+    (typeof temperature !== 'number' ||
+      !Number.isFinite(temperature) ||
+      temperature < 0 ||
+      temperature > 2)
+  ) {
+    throw new TypeError(
+      'beforeLLMCall temperature must be a finite number between 0 and 2',
+    )
+  }
+  const topP = candidate.top_p
+  if (
+    topP !== undefined &&
+    (typeof topP !== 'number' || !Number.isFinite(topP) || topP < 0 || topP > 1)
+  ) {
+    throw new TypeError(
+      'beforeLLMCall top_p must be a finite number between 0 and 1',
+    )
+  }
+  for (const field of ['max_tokens', 'max_completion_tokens'] as const) {
+    const value = candidate[field]
+    if (
+      value !== undefined &&
+      (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)
+    ) {
+      throw new TypeError(
+        `beforeLLMCall ${field} must be a positive safe integer`,
+      )
+    }
+  }
+  const seed = candidate.seed
+  if (
+    seed !== undefined &&
+    (typeof seed !== 'number' || !Number.isSafeInteger(seed))
+  ) {
+    throw new TypeError('beforeLLMCall seed must be a safe integer')
+  }
+  const topLogprobs = candidate.top_logprobs
+  if (
+    topLogprobs !== undefined &&
+    (typeof topLogprobs !== 'number' ||
+      !Number.isSafeInteger(topLogprobs) ||
+      topLogprobs < 0 ||
+      topLogprobs > 20)
+  ) {
+    throw new TypeError(
+      'beforeLLMCall top_logprobs must be a safe integer between 0 and 20',
+    )
+  }
+  for (const field of ['presence_penalty', 'frequency_penalty'] as const) {
+    const value = candidate[field]
+    if (
+      value !== undefined &&
+      (typeof value !== 'number' ||
+        !Number.isFinite(value) ||
+        value < -2 ||
+        value > 2)
+    ) {
+      throw new TypeError(
+        `beforeLLMCall ${field} must be a finite number between -2 and 2`,
+      )
+    }
+  }
+  if (
+    candidate.logprobs !== undefined &&
+    typeof candidate.logprobs !== 'boolean'
+  ) {
+    throw new TypeError('beforeLLMCall logprobs must be a boolean')
+  }
+  if (
+    candidate.stop !== undefined &&
+    typeof candidate.stop !== 'string' &&
+    (!Array.isArray(candidate.stop) ||
+      candidate.stop.some((item) => typeof item !== 'string'))
+  ) {
+    throw new TypeError(
+      'beforeLLMCall stop must be text or an array of text values',
+    )
+  }
+}
+
 function nativeToolCalls(parts: readonly ToolCallPart[]): JsonValue[] {
   return parts.map((part) => ({
     id: part.callId,
@@ -126,6 +263,19 @@ function compileMessage(
   }
 }
 
+function normalizeFinishReason(
+  providerReason: string | undefined,
+  hasToolCalls: boolean,
+): string {
+  if (providerReason === 'length') return 'truncated'
+  if (providerReason === 'content_filter') return 'content_filter'
+  if (providerReason === 'tool_calls' || hasToolCalls) return 'tool_calls'
+  if (providerReason === 'stop' || providerReason === undefined) {
+    return 'completed'
+  }
+  return providerReason
+}
+
 export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompletionsRequestDto> {
   readonly id: string
 
@@ -221,7 +371,10 @@ export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompl
         },
       },
       usage: structuredClone(event.usage),
-      finishReason: event.toolCalls.length > 0 ? 'tool_calls' : 'completed',
+      finishReason: normalizeFinishReason(
+        event.finishReason,
+        event.toolCalls.length > 0,
+      ),
     }
   }
 }

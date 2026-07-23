@@ -484,13 +484,25 @@ function parityBaseline(capture: NormalizedRuntimeParityCapture) {
   const providerRequests = capture.providerRequests as unknown as Array<{
     messages: Array<{
       role: string
+      content?: JsonValue
       tool_calls?: Array<{ function?: { name?: string } }>
     }>
     tools: Array<{ function?: { name?: string } }>
   }>
   const traceRequests = capture.traceRequests as unknown as Array<{
-    promptResources: Array<{ id: string }>
-    promptBuild?: { layers: Array<{ kind: string }> }
+    promptResources: Array<{ id: string; sha256: string }>
+    promptBuild?: {
+      layers: Array<{ kind: string; sha256: string }>
+      sourceHash: string
+    }
+    modelRoute: {
+      adapterId: string
+      providerId: string
+      model: string
+      reasoning: string
+      endpoint: string
+      providerConfigRevision: number
+    }
   }>
   const tools = capture.tools as unknown as Array<{
     tool: string
@@ -505,6 +517,12 @@ function parityBaseline(capture: NormalizedRuntimeParityCapture) {
     toolCatalog,
     providerRequests: providerRequests.map((request) => ({
       roles: request.messages.map((message) => message.role),
+      messageHashes: request.messages.map((message) =>
+        typeof message.content === 'string' &&
+        message.content.startsWith('<environment_context ')
+          ? '<normalized-runtime-context>'
+          : sha256Json(message as unknown as JsonValue),
+      ),
       toolCalls: request.messages.flatMap((message) =>
         (message.tool_calls ?? []).flatMap((call) =>
           call.function?.name ? [call.function.name] : [],
@@ -515,9 +533,17 @@ function parityBaseline(capture: NormalizedRuntimeParityCapture) {
         JSON.stringify(providerRequests[0]?.tools),
     })),
     traceRequests: traceRequests.map((request) => ({
-      promptResources: request.promptResources.map((resource) => resource.id),
+      promptResources: request.promptResources.map((resource) => ({
+        id: resource.id,
+        sha256: resource.sha256,
+      })),
       promptLayers:
-        request.promptBuild?.layers.map((layer) => layer.kind) ?? [],
+        request.promptBuild?.layers.map((layer) => ({
+          kind: layer.kind,
+          sha256: layer.sha256,
+        })) ?? [],
+      promptSourceHash: request.promptBuild?.sourceHash,
+      modelRoute: request.modelRoute,
     })),
     tools: tools.map((tool) => ({
       tool: tool.tool,
@@ -719,5 +745,8 @@ async function readTraceRequests(
             promptBuild: event.promptBuild as ParityTraceRequest['promptBuild'],
           }
         : {}),
+      canonicalSource:
+        event.canonicalSource as ParityTraceRequest['canonicalSource'],
+      modelRoute: event.modelRoute as ParityTraceRequest['modelRoute'],
     }))
 }

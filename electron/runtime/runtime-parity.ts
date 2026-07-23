@@ -1,8 +1,10 @@
 import type { AgentEvent } from '../../shared/agent-events'
 import type { JsonValue } from '../../shared/json'
+import type { ModelRouteSnapshot } from '../../shared/model-route'
 import type { PromptBuildSummary } from '../../shared/trace'
 import type { ChatCompletionsRequestDto } from '../providers/provider-protocol'
 import type { ToolResult } from '../tools/types'
+import { sha256Json } from './runtime-identity'
 
 export interface ParityProviderRequest {
   messages: ChatCompletionsRequestDto['messages']
@@ -16,6 +18,13 @@ export interface ParityTraceRequest {
     sha256: string
   }>
   promptBuild?: PromptBuildSummary
+  canonicalSource: Array<{
+    seq: number
+    kind: string
+    partTypes: string[]
+    hash: string
+  }>
+  modelRoute: ModelRouteSnapshot
 }
 
 export interface RuntimeParityCapture {
@@ -118,33 +127,42 @@ function normalizeTraceRequests(
   requests: ParityTraceRequest[],
   workspace: string,
 ): JsonValue {
-  return requests.map((request) => ({
-    promptResources: [...request.promptResources]
-      .map(({ id, version, sha256 }) => ({ id, version, sha256 }))
-      .sort((left, right) => left.id.localeCompare(right.id)),
-    ...(request.promptBuild
-      ? {
-          promptBuild: {
-            schemaVersion: request.promptBuild.schemaVersion,
-            layers: request.promptBuild.layers
-              .filter((layer) => layer.kind !== 'orchestrator')
-              .map((layer) => ({
-                kind: layer.kind,
-                source: normalizeString(layer.source, workspace),
-                trusted: layer.trusted,
-                editable: layer.editable,
-                sha256:
-                  layer.kind === 'runtime_context'
-                    ? '<normalized-runtime-context>'
-                    : layer.sha256,
-                included: layer.included,
-                truncated: layer.truncated,
-              })),
-            toolsHash: request.promptBuild.toolsHash,
-          },
-        }
-      : {}),
-  })) as JsonValue
+  return requests.map((request) => {
+    const promptLayers = request.promptBuild?.layers
+      .filter((layer) => layer.kind !== 'orchestrator')
+      .map((layer) => ({
+        kind: layer.kind,
+        source: normalizeString(layer.source, workspace),
+        trusted: layer.trusted,
+        editable: layer.editable,
+        sha256:
+          layer.kind === 'runtime_context'
+            ? '<normalized-runtime-context>'
+            : layer.sha256,
+        included: layer.included,
+        truncated: layer.truncated,
+      }))
+
+    return {
+      promptResources: [...request.promptResources]
+        .map(({ id, version, sha256 }) => ({ id, version, sha256 }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      ...(request.promptBuild && promptLayers
+        ? {
+            promptBuild: {
+              schemaVersion: request.promptBuild.schemaVersion,
+              layers: promptLayers,
+              toolsHash: request.promptBuild.toolsHash,
+              sourceHash: sha256Json({
+                layers: promptLayers,
+                toolsHash: request.promptBuild.toolsHash,
+              }),
+            },
+          }
+        : {}),
+      modelRoute: request.modelRoute,
+    }
+  }) as JsonValue
 }
 
 function normalizeToolEvents(
@@ -256,6 +274,7 @@ function normalizeString(
       /writer_conversation_id: [^\n]+/gu,
       'writer_conversation_id: <runtime-id>',
     )
+    .replace(/current_time: [^\n]+/gu, 'current_time: <runtime-time>')
   const trimmed = normalized.trimStart()
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {

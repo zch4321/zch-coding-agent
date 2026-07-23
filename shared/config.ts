@@ -185,7 +185,9 @@ export const PublicConfigSchema = Type.Object(
     limits: Type.Object(
       {
         maxConcurrentRuns: Type.Integer({ minimum: 1, maximum: 32 }),
-        maxStepsPerRun: Type.Integer({ minimum: 1, maximum: 1_000 }),
+        // Zero disables the React-loop step limit. Positive values remain
+        // available for bounded benchmark and deployment profiles.
+        maxStepsPerRun: Type.Integer({ minimum: 0, maximum: 1_000 }),
         maxToolOutputBytes: Type.Integer({
           minimum: 1_024,
           maximum: 100_000_000,

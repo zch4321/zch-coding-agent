@@ -15,6 +15,7 @@ import {
   parseNullableJsonColumn,
   stringColumn,
 } from './codec-helpers'
+import { PersistenceError } from './persistence-error'
 
 const validateMessageRecord = compileSchema(MessageRecordSchema)
 
@@ -128,14 +129,17 @@ export function decodeMessageRow(row: Record<string, unknown>): MessageRecord {
     'MessageRecord row',
   )
   assertMessageRecordSemantics(record)
-  if (
+  const metadataReplaySource =
     record.kind === 'user_input' &&
-    replayedFromMessageId !== null &&
     record.metadata &&
-    'replayedFromMessageId' in record.metadata &&
-    record.metadata.replayedFromMessageId !== replayedFromMessageId
-  ) {
-    throw new TypeError('Replayed user message source does not match metadata')
+    'replayedFromMessageId' in record.metadata
+      ? record.metadata.replayedFromMessageId
+      : null
+  if (metadataReplaySource !== replayedFromMessageId) {
+    throw new PersistenceError(
+      'CODEC_INVALID',
+      'Replayed user message source does not match metadata',
+    )
   }
   return record
 }

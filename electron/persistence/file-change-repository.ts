@@ -118,12 +118,14 @@ export class FileChangeRepository {
   update(
     transaction: PersistenceTransaction,
     record: StoredFileChangeRecord,
+    expectedRevision: number,
   ): boolean {
     assertFileChangePayloadWithinLimit(
       record.payloadBytes,
       this.#maxPayloadBytes,
     )
     const row = encodeStoredFileChangeRow(record)
+    assertRevisionTransition(expectedRevision, row.revision)
     const result = transaction
       .prepare(
         `UPDATE file_changes
@@ -131,7 +133,7 @@ export class FileChangeRepository {
              before_hash = ?, before_content = ?, after_exists = ?,
              after_hash = ?, payload_bytes = ?, revision = ?, updated_at = ?,
              reverted_at = ?
-         WHERE id = ? AND session_id = ?`,
+         WHERE id = ? AND session_id = ? AND revision = ?`,
       )
       .run(
         row.diff,
@@ -148,6 +150,7 @@ export class FileChangeRepository {
         row.reverted_at,
         row.id,
         row.session_id,
+        expectedRevision,
       )
     return Number(result.changes) > 0
   }
@@ -181,6 +184,19 @@ export class FileChangeRepository {
       )
       .all(sessionId, this.#maxRecords)
       .map(decodeFileChangeSummaryRow)
+  }
+}
+
+function assertRevisionTransition(expected: number, next: number): void {
+  if (
+    !Number.isSafeInteger(expected) ||
+    expected < 1 ||
+    next !== expected + 1
+  ) {
+    throw new PersistenceError(
+      'CODEC_INVALID',
+      'FileChange update revision must increment by exactly one',
+    )
   }
 }
 

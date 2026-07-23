@@ -20,6 +20,7 @@ export interface JsonValueLimits {
   maxObjectKeys: number
   maxStringLength: number
   maxBytes: number
+  maxNodes?: number
 }
 
 export const CANONICAL_JSON_LIMITS: JsonValueLimits = {
@@ -28,6 +29,7 @@ export const CANONICAL_JSON_LIMITS: JsonValueLimits = {
   maxObjectKeys: 256,
   maxStringLength: 1_000_000,
   maxBytes: 2_000_000,
+  maxNodes: 100_000,
 }
 
 export function assertBoundedJsonValue(
@@ -35,8 +37,14 @@ export function assertBoundedJsonValue(
   limits: JsonValueLimits = CANONICAL_JSON_LIMITS,
 ): asserts value is JsonValue {
   const active = new Set<object>()
+  const maxNodes = limits.maxNodes ?? CANONICAL_JSON_LIMITS.maxNodes!
+  let visitedNodes = 0
 
   function visit(candidate: unknown, depth: number): void {
+    visitedNodes += 1
+    if (visitedNodes > maxNodes) {
+      throw new RangeError(`JSON value exceeds maximum node count ${maxNodes}`)
+    }
     if (depth > limits.maxDepth) {
       throw new RangeError(
         `JSON value exceeds maximum depth ${limits.maxDepth}`,

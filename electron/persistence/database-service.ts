@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { DATABASE_MIGRATIONS, type DatabaseMigration } from './migrations'
-import { PersistenceError } from './persistence-error'
+import {
+  normalizePersistenceError,
+  PersistenceError,
+} from './persistence-error'
 
 const SCHEMA_MIGRATIONS_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -31,7 +34,11 @@ export class PersistenceReader {
   constructor(protected readonly database: DatabaseSync) {}
 
   prepare(sql: string): StatementSync {
-    return this.database.prepare(sql)
+    try {
+      return wrapStatement(this.database.prepare(sql))
+    } catch (error) {
+      throw normalizePersistenceError(error)
+    }
   }
 }
 
@@ -45,7 +52,11 @@ export class PersistenceTransaction extends PersistenceReader {
 
   exec(sql: string): void {
     this.#assertActive()
-    this.database.exec(sql)
+    try {
+      this.database.exec(sql)
+    } catch (error) {
+      throw normalizePersistenceError(error)
+    }
   }
 
   deactivate(): void {
@@ -72,13 +83,17 @@ export class DatabaseService {
 
   private constructor(options: DatabaseServiceOptions) {
     this.databasePath = options.databasePath
-    this.#database = new DatabaseSync(options.databasePath, {
-      allowExtension: false,
-      defensive: true,
-      enableDoubleQuotedStringLiterals: false,
-      enableForeignKeyConstraints: true,
-      timeout: 5_000,
-    })
+    try {
+      this.#database = new DatabaseSync(options.databasePath, {
+        allowExtension: false,
+        defensive: true,
+        enableDoubleQuotedStringLiterals: false,
+        enableForeignKeyConstraints: true,
+        timeout: 5_000,
+      })
+    } catch (error) {
+      throw normalizePersistenceError(error)
+    }
     this.#reader = new PersistenceReader(this.#database)
 
     try {
@@ -90,7 +105,7 @@ export class DatabaseService {
       )
     } catch (error) {
       this.#database.close()
-      throw error
+      throw normalizePersistenceError(error)
     }
   }
 
@@ -106,8 +121,25 @@ export class DatabaseService {
   withTransaction<Result>(
     work: (transaction: PersistenceTransaction) => Result,
   ): Promise<Result> {
+    if (!this.#acceptingWork) {
+      return Promise.reject(
+        new PersistenceError('DATABASE_CLOSED', 'Database is closed'),
+      )
+    }
+    if (this.#database.isTransaction) {
+      return Promise.reject(
+        new PersistenceError(
+          'NESTED_TRANSACTION_NOT_ALLOWED',
+          'Persistence transactions cannot be nested',
+        ),
+      )
+    }
     return this.#enqueueWrite(() => {
-      this.#database.exec('BEGIN IMMEDIATE')
+      try {
+        this.#database.exec('BEGIN IMMEDIATE')
+      } catch (error) {
+        throw normalizePersistenceError(error)
+      }
       const transaction = new PersistenceTransaction(this.#database)
 
       try {
@@ -123,7 +155,7 @@ export class DatabaseService {
         return result
       } catch (error) {
         if (this.#database.isTransaction) this.#database.exec('ROLLBACK')
-        throw error
+        throw normalizePersistenceError(error)
       } finally {
         transaction.deactivate()
       }
@@ -253,6 +285,22 @@ export class DatabaseService {
       throw new PersistenceError('DATABASE_CLOSED', 'Database is closed')
     }
   }
+}
+
+function wrapStatement(statement: StatementSync): StatementSync {
+  return new Proxy(statement, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target)
+      if (typeof value !== 'function') return value
+      return (...args: unknown[]) => {
+        try {
+          return Reflect.apply(value, target, args)
+        } catch (error) {
+          throw normalizePersistenceError(error)
+        }
+      }
+    },
+  })
 }
 
 export function desktopDatabasePath(userDataPath: string): string {

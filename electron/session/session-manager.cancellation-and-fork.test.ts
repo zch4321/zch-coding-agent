@@ -69,6 +69,56 @@ describe('SessionManager cancellation and forks', () => {
     }
   }
 
+  class MultiToolFailureProvider implements LLMProvider {
+    calls = 0
+    requests: ProviderChatRequest['messages'][] = []
+
+    async *streamChat(
+      request: ProviderChatRequest,
+    ): AsyncIterable<ProviderEvent> {
+      this.calls += 1
+      this.requests.push(structuredClone(request.messages))
+
+      if (this.calls === 1) {
+        const toolCalls = ['first.txt', 'second.txt'].map(
+          (fileName, index) => ({
+            id: `call-read-${index + 1}`,
+            type: 'function',
+            function: {
+              name: 'read_file',
+              arguments: JSON.stringify({ path: fileName }),
+            },
+          }),
+        )
+        yield {
+          type: 'completed',
+          rawResponse: {},
+          turn: { role: 'assistant', content: null, tool_calls: toolCalls },
+          toolCalls: toolCalls.map((toolCall) => ({
+            id: toolCall.id as CallId,
+            toolId: 'read_file',
+            args: JSON.parse(toolCall.function.arguments) as JsonValue,
+            reason: 'Read the failure fixture',
+          })),
+          usage: {},
+          providerState: {},
+          timing: {},
+        }
+        return
+      }
+
+      yield {
+        type: 'completed',
+        rawResponse: {},
+        turn: { role: 'assistant', content: 'Recovered after sink failure' },
+        toolCalls: [],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+    }
+  }
+
   it('fills every tool result when a multi-tool turn is interrupted', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'agent-session-cancel-tools-'),
@@ -131,6 +181,63 @@ describe('SessionManager cancellation and forks', () => {
         () => 'missing',
       ),
     ).toBe('missing')
+    await manager.closeSession(sessionId)
+  })
+
+  it('fills every tool result when a tool batch fails between calls', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-session-failed-tools-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const provider = new MultiToolFailureProvider()
+    const sent: AgentEventEnvelope[] = []
+    let failNextToolCompletion = true
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => {
+        if (
+          failNextToolCompletion &&
+          envelope.event.type === 'tool.completed'
+        ) {
+          failNextToolCompletion = false
+          throw new Error('fixture event sink failure')
+        }
+        sent.push(envelope)
+      }),
+      providerFactory: () => provider,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    const firstRunId = manager.startRun({
+      sessionId,
+      message: 'Read both files',
+      clientRequestId: 'request-failed-tools',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === firstRunId &&
+          event.status === 'failed',
+      ),
+    )
+    manager.startRun({
+      sessionId,
+      message: 'Continue after the infrastructure failure',
+      clientRequestId: 'request-after-failed-tools',
+    })
+    await waitFor(() => provider.calls === 2)
+
+    expect(
+      provider.requests[1]?.filter((message) => message.role === 'tool'),
+    ).toHaveLength(2)
     await manager.closeSession(sessionId)
   })
 })

@@ -6,7 +6,7 @@ import os from 'node:os'
 import type { PublicConfig } from '../../shared/config'
 import type { PromptBuildSummary } from '../../shared/trace'
 import type { JsonValue } from '../../shared/json'
-import type { MessageRecord } from '../../shared/message'
+import type { CanonicalPromptKind, MessageRecord } from '../../shared/message'
 import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
@@ -20,7 +20,6 @@ import {
   latestPromptHash,
   MessageHistoryCompiler,
   type CanonicalHistoryState,
-  type CanonicalPromptKind,
 } from './canonical-history'
 
 const MAX_TREE_DEPTH = 3

@@ -1,7 +1,7 @@
 import type { ProviderPublicConfig, PublicConfig } from '../../shared/config'
 import type { JsonObject, JsonValue } from '../../shared/json'
 import type { LlmUsageRecord } from '../../shared/usage'
-import { resolveModelProfiles } from './model-catalog'
+import { resolveModelProfiles, type ModelProfile } from './model-catalog'
 
 function metric(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
@@ -24,6 +24,7 @@ export function normalizeLlmUsage(input: {
   scope: LlmUsageRecord['scope']
   config: PublicConfig
   provider: ProviderPublicConfig
+  modelProfile?: ModelProfile
   raw: JsonValue
 }): LlmUsageRecord | undefined {
   if (!input.raw || typeof input.raw !== 'object' || Array.isArray(input.raw)) {
@@ -32,9 +33,13 @@ export function normalizeLlmUsage(input: {
 
   const usage = input.raw as JsonObject
   const completionDetails = objectField(usage, 'completion_tokens_details')
-  const model = resolveModelProfiles(input.config, input.provider.id).find(
-    (candidate) => candidate.id === input.provider.model,
-  )
+  const model =
+    input.modelProfile ??
+    resolveModelProfiles(
+      input.config,
+      input.provider.id,
+      input.provider.model,
+    ).find((candidate) => candidate.id === input.provider.model)
 
   return {
     scope: input.scope,

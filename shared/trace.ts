@@ -1,6 +1,17 @@
 import { Type, type Static } from '@sinclair/typebox'
-import { EventIdSchema, RunIdSchema, SessionIdSchema } from './ids'
+import { Sha256Schema } from './durable'
+import {
+  EventIdSchema,
+  MessageIdSchema,
+  RunIdSchema,
+  SessionIdSchema,
+} from './ids'
 import { JsonValueSchema } from './json'
+import {
+  CANONICAL_PROMPT_KINDS,
+  CanonicalMessageKindSchema,
+  type CanonicalMessageKind,
+} from './message'
 
 export const TraceIdSchema = Type.String({
   minLength: 1,
@@ -26,44 +37,27 @@ export const TraceInfoSchema = Type.Object(
 )
 export type TraceInfo = Static<typeof TraceInfoSchema>
 
-export const CanonicalMessageKindSchema = Type.Union([
-  Type.Literal('system_instruction'),
-  Type.Literal('assistant_preferences'),
-  Type.Literal('selected_context'),
-  Type.Literal('benchmark_context'),
-  Type.Literal('runtime_context'),
-  Type.Literal('agents_context'),
-  Type.Literal('orchestrator'),
-  Type.Literal('interjection'),
-  Type.Literal('user_input'),
-  Type.Literal('assistant_turn'),
-  Type.Literal('tool_result'),
-  Type.Literal('compact_summary'),
-])
-export type CanonicalMessageKind = Static<typeof CanonicalMessageKindSchema>
+export { CanonicalMessageKindSchema, type CanonicalMessageKind }
 
-export const PromptLayerKindSchema = Type.Union([
-  Type.Literal('system_instruction'),
-  Type.Literal('runtime_context'),
-  Type.Literal('assistant_preferences'),
-  Type.Literal('agents_context'),
-  Type.Literal('compact_summary'),
-  Type.Literal('selected_context'),
-  Type.Literal('benchmark_context'),
-  Type.Literal('interjection'),
-  Type.Literal('orchestrator'),
-])
-export type PromptLayerKind = Static<typeof PromptLayerKindSchema>
+export const PROMPT_LAYER_KINDS = [
+  ...CANONICAL_PROMPT_KINDS,
+  'compact_summary',
+] as const
+export type PromptLayerKind = (typeof PROMPT_LAYER_KINDS)[number]
+export const PromptLayerKindSchema = Type.Unsafe<PromptLayerKind>({
+  type: 'string',
+  enum: [...PROMPT_LAYER_KINDS],
+})
 
 export const PromptLayerSummarySchema = Type.Object(
   {
     seq: Type.Integer({ minimum: 1 }),
-    messageId: Type.String({ minLength: 1, maxLength: 128 }),
+    messageId: MessageIdSchema,
     kind: PromptLayerKindSchema,
     source: Type.String({ minLength: 1, maxLength: 512 }),
     trusted: Type.Boolean(),
     editable: Type.Boolean(),
-    sha256: Type.String({ minLength: 64, maxLength: 64 }),
+    sha256: Sha256Schema,
     estimatedTokens: Type.Integer({ minimum: 0 }),
     included: Type.Boolean(),
     truncated: Type.Boolean(),
@@ -81,8 +75,8 @@ export const PromptBuildSummarySchema = Type.Object(
     omittedHistoryMessages: Type.Integer({ minimum: 0 }),
     promptBudgetTokens: Type.Integer({ minimum: 0 }),
     estimatedTokens: Type.Integer({ minimum: 0 }),
-    toolsHash: Type.String({ minLength: 64, maxLength: 64 }),
-    sourceHash: Type.String({ minLength: 64, maxLength: 64 }),
+    toolsHash: Sha256Schema,
+    sourceHash: Sha256Schema,
   },
   { additionalProperties: false },
 )

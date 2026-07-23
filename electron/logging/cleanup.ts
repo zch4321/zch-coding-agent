@@ -51,9 +51,15 @@ export async function cleanupTraces(
     }
 
     const filePath = path.join(directory, entry)
+    let fileStat
+    try {
+      fileStat = await stat(filePath)
+    } catch (error) {
+      onDiagnostic(`Failed to stat trace ${entry}`, error)
+      continue
+    }
 
     try {
-      const fileStat = await stat(filePath)
       const events = await readTraceFile(filePath)
       files.push({
         path: filePath,
@@ -63,6 +69,12 @@ export async function cleanupTraces(
       })
     } catch (error) {
       onDiagnostic(`Failed to inspect trace ${entry}`, error)
+      files.push({
+        path: filePath,
+        size: fileStat.size,
+        mtimeMs: fileStat.mtimeMs,
+        closed: true,
+      })
     }
   }
 

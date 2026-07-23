@@ -42,7 +42,7 @@ export const RuntimeIdentitySchema = Type.Object(
     ),
     budgets: Type.Object(
       {
-        maxStepsPerRun: Type.Integer({ minimum: 1 }),
+        maxStepsPerRun: Type.Integer({ minimum: 0 }),
         maxContextTokens: Type.Integer({ minimum: 1 }),
         maxToolResultTokens: Type.Integer({ minimum: 1 }),
         maxToolTokensPerRun: Type.Integer({ minimum: 1 }),

@@ -136,7 +136,7 @@ export class MessageRepository {
     sessionId: SessionId,
     query: MessageSearchQuery,
   ): MessageRecord[] {
-    const needle = query.text.trim().toLocaleLowerCase()
+    const needle = query.text.trim().toLowerCase()
     if (needle.length === 0 || needle.length > 256) {
       throw new PersistenceError(
         'CODEC_INVALID',
@@ -170,8 +170,7 @@ export class MessageRepository {
       .filter((record) =>
         record.parts.some(
           (part) =>
-            part.type === 'text' &&
-            part.text.toLocaleLowerCase().includes(needle),
+            part.type === 'text' && part.text.toLowerCase().includes(needle),
         ),
       )
       .slice(0, limit)

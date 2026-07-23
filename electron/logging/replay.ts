@@ -2,7 +2,6 @@ import type { AgentEvent, RunStatus } from '../../shared/agent-events'
 import type { CallId, RunId, SessionId, TerminalId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import { TraceEventSchema, type TraceEvent } from './events'
-import { TRACE_SCHEMA_VERSION } from './events'
 import { compileSchema } from '../schema-validator'
 
 const validateTraceEvent = compileSchema(TraceEventSchema)
@@ -75,10 +74,6 @@ export const INITIAL_REPLAY_STATE: ReplayState = {
   agentEvents: [],
 }
 
-export interface ReplayReducerOptions {
-  unknownEvent: 'skip' | 'reject'
-}
-
 function normalizeRunStatus(status: string): RunStatus {
   const known: RunStatus[] = [
     'idle',
@@ -132,25 +127,8 @@ function textDelta(providerEvent: JsonValue): {
 export function reduceTraceEvent(
   current: ReplayState,
   candidate: unknown,
-  options: ReplayReducerOptions = { unknownEvent: 'reject' },
 ): ReplayState {
   if (!validateTraceEvent(candidate)) {
-    const version =
-      candidate && typeof candidate === 'object'
-        ? Reflect.get(candidate, 'schemaVersion')
-        : undefined
-
-    if (
-      options.unknownEvent === 'skip' &&
-      typeof version === 'number' &&
-      version > TRACE_SCHEMA_VERSION
-    ) {
-      return {
-        ...current,
-        skippedEvents: current.skippedEvents + 1,
-      }
-    }
-
     throw new Error('Trace event is not supported by this replay version')
   }
 
@@ -322,14 +300,11 @@ export function reduceTraceEvent(
   return state
 }
 
-export function replayTrace(
-  events: readonly unknown[],
-  options: ReplayReducerOptions = { unknownEvent: 'reject' },
-): ReplayState {
+export function replayTrace(events: readonly unknown[]): ReplayState {
   let state = structuredClone(INITIAL_REPLAY_STATE)
 
   for (const event of events) {
-    state = reduceTraceEvent(state, event, options)
+    state = reduceTraceEvent(state, event)
   }
 
   return state
@@ -361,13 +336,4 @@ export function createReplayTimeline(
       delayMs: elapsed / speed,
     }
   })
-}
-
-export interface TraceForkRequest {
-  sourceEventId: string
-  providerRequest: JsonValue
-}
-
-export interface TraceForker {
-  fork(request: TraceForkRequest): Promise<{ sessionId: SessionId }>
 }

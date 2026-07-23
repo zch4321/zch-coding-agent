@@ -24,6 +24,30 @@ import {
 } from './session-manager-test-support'
 
 describe('SessionManager prompt and trace', () => {
+  it('rejects an unknown provider instead of falling back to the active one', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-provider-'))
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const manager = new SessionManager({
+      configStore: await createConfig(directory),
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink(() => undefined),
+    })
+
+    await expect(
+      manager.createSession({
+        workspace,
+        mode: 'readonly',
+        provider: 'missing-provider',
+      }),
+    ).rejects.toMatchObject({
+      error: {
+        code: 'PRECONDITION_FAILED',
+        message: 'Provider is not configured: missing-provider',
+      },
+    })
+  })
+
   it('uses configurable assistant preferences without replacing the base harness system message', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-prompt-'))
     const workspace = path.join(directory, 'workspace')
@@ -444,8 +468,28 @@ describe('SessionManager prompt and trace', () => {
     },
     {
       name: 'over-budget parameters',
-      patch: { params: { temperature_hint: 'x'.repeat(500_000) } },
+      patch: { params: { stop: 'x'.repeat(500_000) } },
       error: 'exceeded the model context budget',
+    },
+    {
+      name: 'thinking mode',
+      patch: { params: { thinking: { type: 'disabled' } } },
+      error: 'unsupported parameter: thinking',
+    },
+    {
+      name: 'reasoning effort',
+      patch: { params: { reasoning_effort: 'off' } },
+      error: 'unsupported parameter: reasoning_effort',
+    },
+    {
+      name: 'response format',
+      patch: { params: { response_format: { type: 'text' } } },
+      error: 'unsupported parameter: response_format',
+    },
+    {
+      name: 'invalid safe parameter',
+      patch: { params: { temperature: { high: true } } },
+      error: 'temperature must be a finite number',
     },
   ])(
     'rejects beforeLLMCall $name before network send',

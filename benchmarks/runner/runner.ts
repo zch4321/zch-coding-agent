@@ -860,10 +860,11 @@ function effectiveHeadlessConfig(
   const config = structuredClone(input.config)
   config.limits = {
     ...config.limits,
-    maxStepsPerRun: Math.min(
-      config.limits?.maxStepsPerRun ?? resources.maxAgentSteps,
-      resources.maxAgentSteps,
-    ),
+    maxStepsPerRun:
+      !config.limits?.maxStepsPerRun ||
+      config.limits.maxStepsPerRun > resources.maxAgentSteps
+        ? resources.maxAgentSteps
+        : config.limits.maxStepsPerRun,
     maxContextTokens: Math.min(
       config.limits?.maxContextTokens ?? resources.maxContextTokens,
       resources.maxContextTokens,

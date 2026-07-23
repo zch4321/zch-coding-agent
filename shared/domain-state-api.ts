@@ -63,6 +63,9 @@ export const SessionMessageChangeSchema = Type.Union([
   ),
   Type.Object(
     {
+      // The records remain append-only. This mode tells renderer replicas to
+      // discard cached pages through the compacted boundary and query a fresh
+      // active-history page; it does not delete durable message records.
       mode: Type.Literal('invalidate'),
       throughSeq: MessageSeqSchema,
     },
@@ -294,14 +297,32 @@ export const SessionCreatePayloadSchema = Type.Object(
   { additionalProperties: false },
 )
 
-export const SessionUpdatePatchSchema = Type.Object(
-  {
-    title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-    permissionMode: Type.Optional(PermissionModeSchema),
-    modelSelection: Type.Optional(ModelSelectionSchema),
-  },
-  { additionalProperties: false, minProperties: 1 },
-)
+export const SessionUpdatePatchSchema = Type.Union([
+  Type.Object(
+    {
+      title: Type.String({ minLength: 1, maxLength: 256 }),
+      permissionMode: Type.Optional(PermissionModeSchema),
+      modelSelection: Type.Optional(ModelSelectionSchema),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      permissionMode: PermissionModeSchema,
+      title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+      modelSelection: Type.Optional(ModelSelectionSchema),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      modelSelection: ModelSelectionSchema,
+      title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+      permissionMode: Type.Optional(PermissionModeSchema),
+    },
+    { additionalProperties: false },
+  ),
+])
 export const SessionUpdatePayloadSchema = Type.Object(
   {
     ...versionProperty,

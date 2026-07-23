@@ -188,7 +188,7 @@ export async function runDockerWorker(
             UPSTREAM_API_KEY_FILE: CONTAINER_UPSTREAM_CREDENTIAL,
             UPSTREAM_BASE_URL: input.config.provider.baseURL,
             MAX_PROVIDER_REQUESTS: String(
-              Math.min(512, (input.config.limits?.maxStepsPerRun ?? 32) * 4),
+              Math.min(512, (input.config.limits?.maxStepsPerRun || 32) * 4),
             ),
           },
           command: ['proxy'],

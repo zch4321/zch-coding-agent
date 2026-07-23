@@ -13,6 +13,7 @@ import type {
 } from './database-service'
 import { PersistenceError } from './persistence-error'
 import { decodeSessionRow, encodeSessionRow } from './session-codec'
+import { dateTimeColumn } from './codec-helpers'
 
 const SESSION_COLUMNS = `
   schema_version, id, project_id, title, lifecycle, permission_mode,
@@ -64,8 +65,13 @@ export class SessionRepository {
       )
   }
 
-  update(transaction: PersistenceTransaction, record: SessionRecord): boolean {
+  update(
+    transaction: PersistenceTransaction,
+    record: SessionRecord,
+    expectedRevision: number,
+  ): boolean {
     const row = encodeSessionRow(record)
+    assertRevisionTransition(expectedRevision, row.revision)
     const result = transaction
       .prepare(
         `UPDATE sessions
@@ -73,7 +79,11 @@ export class SessionRepository {
              provider_id = ?, model = ?, reasoning = ?, goal_json = ?,
              plan_json = ?, parent_session_id = ?, forked_from_seq = ?,
              revision = ?, last_seq = ?, updated_at = ?, archived_at = ?
-         WHERE id = ?`,
+         WHERE id = ? AND revision = ?
+           AND ? >= COALESCE(
+             (SELECT MAX(seq) FROM messages WHERE session_id = ?),
+             0
+           )`,
       )
       .run(
         row.project_id,
@@ -91,6 +101,9 @@ export class SessionRepository {
         row.last_seq,
         row.updated_at,
         row.archived_at,
+        row.id,
+        expectedRevision,
+        row.last_seq,
         row.id,
       )
     return Number(result.changes) > 0
@@ -142,12 +155,12 @@ export class SessionRepository {
       parameters.push(search)
     }
     if (query.before) {
-      clauses.push('(updated_at < ? OR (updated_at = ? AND id < ?))')
-      parameters.push(
+      const updatedAt = dateTimeColumn(
         query.before.updatedAt,
-        query.before.updatedAt,
-        query.before.sessionId,
+        'session cursor updatedAt',
       )
+      clauses.push('(updated_at < ? OR (updated_at = ? AND id < ?))')
+      parameters.push(updatedAt, updatedAt, query.before.sessionId)
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
@@ -175,6 +188,19 @@ export class SessionRepository {
       : { schemaVersion: 1, records, hasMore: false }
     assertSessionPageSemantics(page)
     return page
+  }
+}
+
+function assertRevisionTransition(expected: number, next: number): void {
+  if (
+    !Number.isSafeInteger(expected) ||
+    expected < 1 ||
+    next !== expected + 1
+  ) {
+    throw new PersistenceError(
+      'CODEC_INVALID',
+      'Session update revision must increment by exactly one',
+    )
   }
 }
 

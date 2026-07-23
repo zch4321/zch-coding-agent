@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import type { TraceEvent } from './events'
-import { TraceEventSchema } from './events'
+import { TRACE_SCHEMA_VERSION, TraceEventSchema } from './events'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 
 const validateTraceEvent = compileSchema(TraceEventSchema)
@@ -34,9 +34,9 @@ export async function readTraceFile(filePath: string): Promise<TraceEvent[]> {
         candidate && typeof candidate === 'object'
           ? Reflect.get(candidate, 'schemaVersion')
           : undefined
-      if (version !== 2) {
+      if (version !== TRACE_SCHEMA_VERSION) {
         throw new Error(
-          `Unsupported trace schema in line ${index + 1}; P3 requires trace v2`,
+          `Unsupported trace schema in line ${index + 1}; this build requires trace v${TRACE_SCHEMA_VERSION}`,
         )
       }
       throw new Error(

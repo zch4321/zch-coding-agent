@@ -12,7 +12,7 @@ import {
   sessionFixture,
 } from './repository-fixtures'
 import { SessionRepository } from './session-repository'
-import { decodeSessionRow } from './session-codec'
+import { decodeSessionRow, encodeSessionRow } from './session-codec'
 import { createTestDatabase } from './test-database'
 
 const projects = new ProjectRepository()
@@ -108,7 +108,10 @@ describe('persistence repositories', () => {
             projectFixture({ id: 'project:duplicate-path' as ProjectId }),
           )
         }),
-      ).rejects.toThrow(/UNIQUE/u)
+      ).rejects.toMatchObject({
+        code: 'DATABASE_CONSTRAINT',
+        message: expect.stringMatching(/UNIQUE/u),
+      })
       await expect(
         testDatabase.database.withTransaction((transaction) => {
           messages.insert(transaction, {
@@ -127,6 +130,118 @@ describe('persistence repositories', () => {
           })
         }),
       ).rejects.toThrow(/UNIQUE/u)
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
+  it('uses optimistic revisions and prevents Session lastSeq regression', async () => {
+    const testDatabase = await createTestDatabase()
+    const project = projectFixture()
+    const session = sessionFixture()
+    const user = messageFixtures()[0]!
+    const fileChange = fileChangeFixture()
+    try {
+      await testDatabase.database.withTransaction((transaction) => {
+        projects.insert(transaction, project)
+        sessions.insert(transaction, session)
+        messages.insert(transaction, user)
+        fileChanges.insertWithRetention(transaction, fileChange)
+      })
+
+      await testDatabase.database.withTransaction((transaction) => {
+        expect(
+          projects.update(
+            transaction,
+            { ...project, name: 'updated', revision: 2 },
+            1,
+          ),
+        ).toBe(true)
+        expect(
+          sessions.update(
+            transaction,
+            { ...session, title: 'updated', revision: 2, lastSeq: 1 },
+            1,
+          ),
+        ).toBe(true)
+        expect(
+          fileChanges.update(transaction, { ...fileChange, revision: 2 }, 1),
+        ).toBe(true)
+      })
+
+      await testDatabase.database.withTransaction((transaction) => {
+        expect(
+          projects.update(
+            transaction,
+            { ...project, name: 'stale', revision: 2 },
+            1,
+          ),
+        ).toBe(false)
+        expect(
+          sessions.update(
+            transaction,
+            { ...session, revision: 3, lastSeq: 0 },
+            2,
+          ),
+        ).toBe(false)
+        expect(
+          fileChanges.update(transaction, { ...fileChange, revision: 2 }, 1),
+        ).toBe(false)
+      })
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
+  it('updates compact history flags and rejects cross-Session replay links', async () => {
+    const testDatabase = await createTestDatabase()
+    const project = projectFixture()
+    const firstSession = sessionFixture()
+    const secondSession = sessionFixture({
+      id: 'session:second' as SessionId,
+      title: 'Second',
+    })
+    const user = messageFixtures()[0]!
+    try {
+      await testDatabase.database.withTransaction((transaction) => {
+        projects.insert(transaction, project)
+        sessions.insert(transaction, firstSession)
+        sessions.insert(transaction, secondSession)
+        messages.insert(transaction, user)
+        expect(
+          messages.setInHistoryThrough(
+            transaction,
+            firstSession.id,
+            user.seq,
+            false,
+          ),
+        ).toBe(1)
+      })
+      expect(
+        testDatabase.database.read(
+          (reader) =>
+            messages.listPage(reader, firstSession.id).records[0]?.inHistory,
+        ),
+      ).toBe(false)
+
+      await expect(
+        testDatabase.database.withTransaction((transaction) => {
+          messages.insert(transaction, {
+            schemaVersion: 1,
+            id: 'message:cross-session-replay' as MessageId,
+            sessionId: secondSession.id,
+            seq: 1,
+            inHistory: true,
+            createdAt: user.createdAt,
+            kind: 'user_input',
+            parts: user.parts,
+            metadata: {
+              schemaVersion: 1,
+              replayedFromMessageId: user.id,
+            },
+          } as MessageRecord)
+        }),
+      ).rejects.toMatchObject({ code: 'DATABASE_CONSTRAINT' })
     } finally {
       await testDatabase.dispose()
     }
@@ -218,6 +333,38 @@ describe('persistence repositories', () => {
         messages: { count: 0 },
         fileChanges: { count: 0 },
       })
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
+  it('clears child fork metadata before deleting a parent Session', async () => {
+    const testDatabase = await createTestDatabase()
+    const project = projectFixture()
+    const parent = sessionFixture()
+    const child = sessionFixture({
+      id: 'session:child' as SessionId,
+      title: 'Child',
+      parent: {
+        sessionId: parent.id,
+        forkedFromSeq: 0,
+      },
+    })
+    try {
+      await testDatabase.database.withTransaction((transaction) => {
+        projects.insert(transaction, project)
+        sessions.insert(transaction, parent)
+        sessions.insert(transaction, child)
+      })
+      await testDatabase.database.withTransaction((transaction) => {
+        expect(sessions.delete(transaction, parent.id)).toBe(true)
+      })
+
+      const storedChild = testDatabase.database.read((reader) =>
+        sessions.get(reader, child.id),
+      )
+      expect(storedChild?.id).toBe(child.id)
+      expect(storedChild).not.toHaveProperty('parent')
     } finally {
       await testDatabase.dispose()
     }
@@ -374,11 +521,35 @@ describe('persistence repositories', () => {
         decodeMessageRow({ ...rows.message, in_history: 2 }),
       ).toThrow(/boolean/u)
       expect(() =>
+        decodeMessageRow({
+          ...rows.message,
+          replayed_from_message_id: 'message:missing-metadata',
+        }),
+      ).toThrowError(expect.objectContaining({ code: 'CODEC_INVALID' }))
+      expect(() =>
         decodeSessionRow({ ...rows.session, lifecycle: 'deleted' }),
       ).toThrow(/schema validation/u)
       expect(decodeSessionRow(rows.session)).toEqual(session)
     } finally {
       await testDatabase.dispose()
     }
+  })
+
+  it('normalizes Session timestamps to UTC before storage and paging', () => {
+    const row = encodeSessionRow(
+      sessionFixture({
+        createdAt: '2026-07-22T02:00:00.000+02:00',
+        updatedAt: '2026-07-22T03:30:00.000+02:00',
+      }),
+    )
+
+    expect(row).toMatchObject({
+      created_at: '2026-07-22T00:00:00.000Z',
+      updated_at: '2026-07-22T01:30:00.000Z',
+    })
+    expect(decodeSessionRow({ ...row })).toMatchObject({
+      createdAt: '2026-07-22T00:00:00.000Z',
+      updatedAt: '2026-07-22T01:30:00.000Z',
+    })
   })
 })

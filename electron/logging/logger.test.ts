@@ -1,4 +1,10 @@
-import { appendFile, mkdtemp, utimes, writeFile } from 'node:fs/promises'
+import {
+  access,
+  appendFile,
+  mkdtemp,
+  utimes,
+  writeFile,
+} from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -72,9 +78,7 @@ describe('JsonlTraceLogger', () => {
       })}\n`,
     )
 
-    await expect(readTraceFile(filePath)).rejects.toThrow(
-      'P3 requires trace v2',
-    )
+    await expect(readTraceFile(filePath)).rejects.toThrow('requires trace v2')
   })
 
   it('does not create files when logging is disabled', async () => {
@@ -102,6 +106,23 @@ describe('JsonlTraceLogger', () => {
 })
 
 describe('trace cleanup', () => {
+  it('counts and removes legacy or invalid trace files', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
+    const legacy = path.join(directory, 'legacy.jsonl')
+    await writeFile(legacy, `${JSON.stringify({ schemaVersion: 1, seq: 1 })}\n`)
+    await utimes(legacy, new Date('2025-01-01'), new Date('2025-01-01'))
+
+    const result = await cleanupTraces(directory, {
+      retentionDays: 1,
+      maxTotalBytes: 1_000_000,
+      now: new Date('2026-06-15'),
+    })
+
+    expect(result.deleted).toEqual([legacy])
+    expect(result.retainedBytes).toBe(0)
+    await expect(access(legacy)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('deletes the oldest closed traces and preserves active traces', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
     const oldClosed = path.join(directory, 'old.jsonl')

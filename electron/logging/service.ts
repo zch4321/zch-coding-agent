@@ -250,7 +250,7 @@ export class TraceService {
 
   async replay(traceId: TraceId): Promise<ReplaySummary> {
     const { events } = await this.#read(traceId)
-    const state = replayTrace(events, { unknownEvent: 'skip' })
+    const state = replayTrace(events)
     return {
       traceId,
       lastSeq: state.lastSeq,

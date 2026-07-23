@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { CallId, FileChangeId } from '../../shared/ids'
+import type { CallId, FileChangeId, SessionId } from '../../shared/ids'
 import {
   assertFileChangePayloadWithinLimit,
   FileChangeRepository,
@@ -103,6 +103,67 @@ describe('FileChangeRepository retention', () => {
           repository.getStored(reader, session.id, second.id),
         ),
       ).toEqual(second)
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
+  it('applies the documented retention budget globally across Sessions', async () => {
+    const testDatabase = await createTestDatabase()
+    const repository = new FileChangeRepository({
+      maxRecords: 1,
+      maxPayloadBytes: 100,
+    })
+    const project = projectFixture()
+    const firstSession = sessionFixture({ lastSeq: 0 })
+    const secondSession = sessionFixture({
+      id: 'session:retention-second' as SessionId,
+      title: 'Second retention Session',
+      lastSeq: 0,
+    })
+    try {
+      await testDatabase.database.withTransaction((transaction) => {
+        new ProjectRepository().insert(transaction, project)
+        new SessionRepository().insert(transaction, firstSession)
+        new SessionRepository().insert(transaction, secondSession)
+        repository.insertWithRetention(
+          transaction,
+          fileChangeFixture({
+            id: 'file-change:retention-first' as FileChangeId,
+            sessionId: firstSession.id,
+            callId: 'call:retention-first' as CallId,
+            beforeContent: 'a',
+            diff: 'b',
+            payloadBytes: 2,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          }),
+        )
+        repository.insertWithRetention(
+          transaction,
+          fileChangeFixture({
+            id: 'file-change:retention-second' as FileChangeId,
+            sessionId: secondSession.id,
+            callId: 'call:retention-second' as CallId,
+            beforeContent: 'c',
+            diff: 'd',
+            payloadBytes: 2,
+            createdAt: '2026-01-01T00:00:01.000Z',
+            updatedAt: '2026-01-01T00:00:01.000Z',
+          }),
+        )
+      })
+
+      expect(
+        testDatabase.database.read((reader) =>
+          repository.listSummaries(reader, firstSession.id),
+        ),
+      ).toEqual([])
+      expect(
+        testDatabase.database.read((reader) =>
+          repository.listSummaries(reader, secondSession.id),
+        ),
+      ).toHaveLength(1)
     } finally {
       await testDatabase.dispose()
     }

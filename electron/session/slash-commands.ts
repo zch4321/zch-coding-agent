@@ -132,24 +132,6 @@ export function resolveSlashCommand(input: {
     }
   }
 
-  if (parsed.command === 'compact') {
-    const prompt = orchestrationPrompt(
-      input.promptRegistry,
-      input.config,
-      'compact',
-    )
-
-    return {
-      visibleMessage: input.message,
-      providerMessage: parsed.rest,
-      orchestratorMessage: {
-        kind: 'compact',
-        text: prompt.text,
-        resource: prompt.resource,
-      },
-    }
-  }
-
   if (parsed.command === 'prompt') {
     if (!parsed.rest) {
       throw new Error('/prompt requires instruction text.')

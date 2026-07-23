@@ -24,6 +24,8 @@ Define cross-process payloads once in `shared/` and validate them at IPC boundar
 - `npm test`: deterministic Vitest tests.
 - `npm run lint`, `npm run format:check`, `npm run typecheck`: static quality gates.
 - `npm run test:native` and `npm run test:ripgrep`: native integration smoke tests.
+- `npm run test:sqlite`: development-runtime SQLite smoke test.
+- `npm run test:sqlite:packaged`: packaged Windows x64 SQLite smoke test; non-Windows hosts report an explicit skip.
 - `npm run test:e2e`: build the app, then run serial Playwright Electron tests.
 - `npm run build`: typecheck, run native and ripgrep smoke tests, build the app, and package Windows x64.
 - `npm run test:real`: opt-in DeepSeek tests; requires `DEEPSEEK_API_KEY` and must remain outside the deterministic suite.

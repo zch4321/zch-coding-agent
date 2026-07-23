@@ -1,13 +1,7 @@
-import {
-  getActiveProviderConfig,
-  getProviderConfig,
-  type PublicConfig,
-} from '../../shared/config'
 import type { RunStatus, ToolResultEnvelope } from '../../shared/agent-events'
-import type { JsonValue } from '../../shared/json'
 import type { ToolResult } from '../tools/types'
-import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
-import { resolveModelProfiles } from '../providers/model-catalog'
+import { ContextBudgetError } from '../tools/context-budget'
+import type { ModelProfile } from '../providers/model-catalog'
 
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -59,35 +53,17 @@ export function finalStatusFromError(
 }
 
 export function modelPromptBudget(
-  config: PublicConfig,
-  tools: JsonValue[],
-  selection?: { providerId: string; model: string },
+  model: Pick<ModelProfile, 'contextWindowTokens' | 'maxOutputTokens'>,
 ): number {
-  const provider = selection
-    ? getProviderConfig(config, selection.providerId)
-    : getActiveProviderConfig(config)
-  if (!provider) {
-    throw new ContextBudgetError(
-      `Provider is not configured: ${selection?.providerId}`,
-    )
-  }
-  const model = resolveModelProfiles(config, provider.id).find(
-    (candidate) => candidate.id === (selection?.model ?? provider.model),
-  )
-  const contextWindow =
-    model?.contextWindowTokens ?? config.limits.maxContextTokens
+  const contextWindow = model.contextWindowTokens
   const outputReserve = model?.maxOutputTokens
     ? Math.min(model.maxOutputTokens, Math.floor(contextWindow * 0.4))
     : Math.min(8_192, Math.floor(contextWindow * 0.2))
-  const toolSchemaTokens = estimateJsonTokens(
-    tools,
-    config.limits.tokenEstimation,
-  )
-  const budget = contextWindow - outputReserve - toolSchemaTokens
+  const budget = contextWindow - outputReserve
 
   if (budget < 1_024) {
     throw new ContextBudgetError(
-      'Model output reserve and tool schemas leave no usable prompt budget',
+      'Model output reserve leaves no usable prompt budget',
     )
   }
 

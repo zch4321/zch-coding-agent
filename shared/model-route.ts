@@ -38,6 +38,11 @@ export type ModelRouteSnapshot = Static<typeof ModelRouteSnapshotSchema>
 const CREDENTIAL_QUERY_KEY =
   /(?:api[-_]?key|authorization|credential|password|secret|signature|token)/iu
 
+export function resolveChatCompletionsEndpoint(baseURL: string): string {
+  const normalized = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
+  return new URL('chat/completions', normalized).toString()
+}
+
 export function assertModelRouteSnapshotSafe(route: ModelRouteSnapshot): void {
   let endpoint: URL
   try {

@@ -38,3 +38,21 @@ export const FileChangeSummarySchema = Type.Object(
   { additionalProperties: false },
 )
 export type FileChangeSummary = Static<typeof FileChangeSummarySchema>
+
+export const EMPTY_FILE_SHA256 =
+  'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+
+export function assertFileChangeSummarySemantics(
+  record: FileChangeSummary,
+): void {
+  if (!record.beforeExists && record.beforeHash !== EMPTY_FILE_SHA256) {
+    throw new TypeError(
+      'A missing before-state must use the empty-content SHA-256',
+    )
+  }
+  if (!record.afterExists && record.afterHash !== EMPTY_FILE_SHA256) {
+    throw new TypeError(
+      'A missing after-state must use the empty-content SHA-256',
+    )
+  }
+}

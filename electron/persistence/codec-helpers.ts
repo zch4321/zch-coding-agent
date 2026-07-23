@@ -27,6 +27,22 @@ export function nullableStringColumn(
   throw invalidColumn(column, 'string or null')
 }
 
+export function dateTimeColumn(value: unknown, column: string): string {
+  const source = stringColumn(value, column)
+  const timestamp = Date.parse(source)
+  if (!Number.isFinite(timestamp)) {
+    throw invalidColumn(column, 'valid date-time string')
+  }
+  return new Date(timestamp).toISOString()
+}
+
+export function nullableDateTimeColumn(
+  value: unknown,
+  column: string,
+): string | null {
+  return value === null ? null : dateTimeColumn(value, column)
+}
+
 export function integerColumn(value: unknown, column: string): number {
   if (typeof value === 'number' && Number.isSafeInteger(value)) return value
   throw invalidColumn(column, 'safe integer')

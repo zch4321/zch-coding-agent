@@ -39,10 +39,11 @@ const tokenEstimationOptions = computed(() => [
             <span>{{ t('limits.maxStepsPerRun') }}</span>
             <NInputNumber
               v-model:value="agent.limitsConfig.maxStepsPerRun"
-              :min="1"
+              :min="0"
               :max="1000"
             />
           </label>
+          <p>{{ t('limits.maxStepsPerRunHint') }}</p>
           <label class="settings-field">
             <span>{{ t('limits.maxContextTokens') }}</span>
             <NInputNumber

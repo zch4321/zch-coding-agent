@@ -6,6 +6,7 @@ import type {
   PersistenceReader,
   PersistenceTransaction,
 } from './database-service'
+import { PersistenceError } from './persistence-error'
 
 const PROJECT_COLUMNS = `
   schema_version, id, path, name, revision, created_at, updated_at
@@ -31,15 +32,27 @@ export class ProjectRepository {
       )
   }
 
-  update(transaction: PersistenceTransaction, record: ProjectRecord): boolean {
+  update(
+    transaction: PersistenceTransaction,
+    record: ProjectRecord,
+    expectedRevision: number,
+  ): boolean {
     const row = encodeProjectRow(record)
+    assertRevisionTransition(expectedRevision, row.revision)
     const result = transaction
       .prepare(
         `UPDATE projects
          SET path = ?, name = ?, revision = ?, updated_at = ?
-         WHERE id = ?`,
+         WHERE id = ? AND revision = ?`,
       )
-      .run(row.path, row.name, row.revision, row.updated_at, row.id)
+      .run(
+        row.path,
+        row.name,
+        row.revision,
+        row.updated_at,
+        row.id,
+        expectedRevision,
+      )
     return Number(result.changes) > 0
   }
 
@@ -67,5 +80,18 @@ export class ProjectRepository {
       )
       .all(MAX_PROJECT_RECORDS)
       .map(decodeProjectRow)
+  }
+}
+
+function assertRevisionTransition(expected: number, next: number): void {
+  if (
+    !Number.isSafeInteger(expected) ||
+    expected < 1 ||
+    next !== expected + 1
+  ) {
+    throw new PersistenceError(
+      'CODEC_INVALID',
+      'Project update revision must increment by exactly one',
+    )
   }
 }

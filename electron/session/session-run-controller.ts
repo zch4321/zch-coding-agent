@@ -268,6 +268,7 @@ export class SessionRunController {
         this.#configStore,
         session.modelSelection,
       )
+      const maxStepsPerRun = runConfig.limits.maxStepsPerRun
       if (harnessMessage) {
         const content =
           harnessMessage.kind === 'benchmark_feedback'
@@ -379,7 +380,7 @@ export class SessionRunController {
 
       for (
         let step = 0;
-        step < this.#configStore.getPublicConfig().limits.maxStepsPerRun;
+        maxStepsPerRun === 0 || step < maxStepsPerRun;
         step += 1
       ) {
         if (signal.aborted) {
@@ -392,6 +393,10 @@ export class SessionRunController {
         // tool_result, because executeToolCalls has already finished).
         await this.#interjections.drain(session, run)
         await this.#compact.maybeAutoCompactBeforeProviderCall(session, run)
+        // Compaction itself is a streamed Provider call. Flush interjections
+        // that arrived while the summary was being generated into the newly
+        // rebuilt epoch before issuing the continuation request.
+        await this.#interjections.drain(session, run)
 
         const completed = await this.#providerTurns.callProvider(
           session,
@@ -403,6 +408,7 @@ export class SessionRunController {
           text: completed.text,
           toolCalls: completed.toolCalls,
           reasoning: completed.reasoning,
+          finishReason: completed.finishReason,
           route: run.routes.main.snapshot,
           continuation: completed.continuation,
         })
@@ -459,7 +465,7 @@ export class SessionRunController {
         run.autoCompactEligible = true
       }
 
-      throw new Error('Run exceeded maxStepsPerRun')
+      throw new Error(`Run exceeded maxStepsPerRun (${maxStepsPerRun})`)
     } catch (error) {
       const status = finalStatusFromError(error, signal)
       await this.#finishRun(session, run, status, error)

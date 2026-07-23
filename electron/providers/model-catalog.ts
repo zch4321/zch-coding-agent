@@ -145,6 +145,7 @@ export const fetchDeepSeekModelCatalog = fetchOpenAICompatibleModelCatalog
 export function resolveModelProfiles(
   config: PublicConfig,
   providerId = config.activeProviderId,
+  includeModelId?: string,
 ): ModelProfile[] {
   const provider =
     getProviderConfig(config, providerId) ?? getActiveProviderConfig(config)
@@ -154,6 +155,9 @@ export function resolveModelProfiles(
 
   if (!models.has(provider.model)) {
     models.set(provider.model, { id: provider.model })
+  }
+  if (includeModelId && !models.has(includeModelId)) {
+    models.set(includeModelId, { id: includeModelId })
   }
 
   return [...models.values()]

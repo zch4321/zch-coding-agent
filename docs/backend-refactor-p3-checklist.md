@@ -6,7 +6,7 @@ P3 在 `refactor/backend-state-v2` 分支完成 canonical in-memory history 与 
 
 - [x] Canonical kind 闭集包含 12 种消息，通用 `harness` kind 和 `promptLedger` 已删除。
 - [x] 原始与 replay user identity 使用 `clientRequestId XOR replayedFromMessageId`。
-- [x] AppConfig v9 包含 `adapterId` 与单调 Provider `revision`；旧配置要求重置。
+- [x] AppConfig v9 包含 `adapterId` 与单调 Provider `revision`；旧版或不兼容配置自动删除并用 v9 默认值重建。
 - [x] `0001_initial.sql` 已更新；旧 P2 开发数据库通过 checksum/schema 错误要求删除重建。
 - [x] Trace v2 记录 canonical source、冻结 route、wire request、canonical completion 与 raw response；v1 明确拒绝。
 
@@ -34,6 +34,6 @@ P3 在 `refactor/backend-state-v2` 分支完成 canonical in-memory history 与 
 
 - [x] Trace fork/start-fork shared contract、IPC/preload、Session override、renderer control 与测试已删除。
 - [x] 普通 Session fork 保留。
-- [x] Core/Persistence/Renderer 架构 grep 不出现 Chat wire DTO 字段。
+- [x] 架构门禁扫描 `electron/session`、`electron/runtime`、`electron/persistence`、`src` 与 `shared` 的生产文件；除 Adapter/transport/test fixtures 外不出现 Chat wire DTO 字段。
 - [x] Deterministic unit/integration、DeepSeek golden、Electron/Headless parity 覆盖新边界。
-- [ ] `test:real` 仍为 opt-in，不作为 P3 gate。
+- [x] `test:real` 仍为 opt-in，不作为 P3 gate。

@@ -118,27 +118,9 @@ describe('trace replay', () => {
     expect(timeline.map((item) => item.delayMs)).toEqual([0, 50, 50])
   })
 
-  it('skips future events only when configured and rejects sequence rollback', () => {
+  it('rejects unsupported future events and sequence rollback', () => {
     const future = { schemaVersion: 3, seq: 1, type: 'future.event' }
-    const skipped = reduceTraceEvent(
-      {
-        schemaVersion: 1,
-        lastSeq: 0,
-        skippedEvents: 0,
-        closed: false,
-        runs: {},
-        messages: [],
-        interjections: [],
-        tools: {},
-        approvals: [],
-        terminals: {},
-        agentEvents: [],
-      },
-      future,
-      { unknownEvent: 'skip' },
-    )
-
-    expect(skipped.skippedEvents).toBe(1)
+    expect(() => reduceTraceEvent(replayTrace([]), future)).toThrow()
     expect(() => replayTrace([future])).toThrow()
 
     const duplicate = trace([

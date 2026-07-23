@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CallId, SessionId } from '../../shared/ids'
+import type { CanonicalPromptKind } from '../../shared/message'
 import type { ModelRouteSnapshot } from '../../shared/model-route'
 import {
   appendAssistantTurn,
@@ -10,7 +11,6 @@ import {
   deactivateActiveHistory,
   MessageHistoryCompiler,
   type CanonicalHistoryState,
-  type CanonicalPromptKind,
 } from './canonical-history'
 
 const route: ModelRouteSnapshot = {
@@ -46,6 +46,15 @@ function prompt(
 }
 
 describe('MessageHistoryCompiler', () => {
+  it('rejects blank user input before it reaches canonical history', () => {
+    expect(() =>
+      appendUserInput(state(), {
+        content: ' \n ',
+        clientRequestId: 'request:blank',
+      }),
+    ).toThrow(/must not be empty/u)
+  })
+
   it('compiles every prompt kind and ordinary text in strict seq order', () => {
     const history = state()
     const kinds: CanonicalPromptKind[] = [
@@ -70,6 +79,10 @@ describe('MessageHistoryCompiler', () => {
       'user_input',
     ])
     expect(compiled.sourceHash).toMatch(/^[a-f0-9]{64}$/u)
+    expect(
+      new MessageHistoryCompiler().compile(structuredClone(history.history))
+        .sourceHash,
+    ).toBe(compiled.sourceHash)
   })
 
   it('accepts reasoning plus an ordered multi-tool result batch', () => {

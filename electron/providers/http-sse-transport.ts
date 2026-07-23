@@ -1,6 +1,6 @@
 import type { JsonObject, JsonValue } from '../../shared/json'
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 120_000
+export const MAX_SSE_EVENT_BYTES = 4 * 1_024 * 1_024
 
 export type ProviderTransportErrorCode =
   | 'ABORTED'
@@ -39,8 +39,9 @@ function ssePayloads(buffer: string): { payloads: string[]; rest: string } {
     const lines = chunk
       .split('\n')
       .filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).trimStart())
-    if (lines.length > 0) payloads.push(lines.join('\n'))
+      .map((line) => line.slice(5).replace(/^ /u, ''))
+    const payload = lines.join('\n')
+    if (payload.trim()) payloads.push(payload)
   }
 
   return { payloads, rest }
@@ -79,7 +80,16 @@ export class HttpSseTransport {
     this.#endpoint = options.endpoint
     this.#apiKey = options.apiKey
     this.#fetch = options.fetchImpl ?? fetch
-    this.#timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    this.#timeoutMs = options.timeoutMs ?? 0
+    if (
+      !Number.isFinite(this.#timeoutMs) ||
+      this.#timeoutMs < 0 ||
+      (this.#timeoutMs > 0 && this.#timeoutMs < 100)
+    ) {
+      throw new RangeError(
+        'Provider request timeout must be 0 or at least 100ms',
+      )
+    }
   }
 
   async *postJson(
@@ -91,14 +101,17 @@ export class HttpSseTransport {
     const abort = () => controller.abort(signal.reason)
     if (signal.aborted) abort()
     else signal.addEventListener('abort', abort, { once: true })
-    const timer = setTimeout(() => {
-      timedOut = true
-      controller.abort(new Error('Provider request timed out'))
-    }, this.#timeoutMs)
+    const timer =
+      this.#timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true
+            controller.abort(new Error('Provider request timed out'))
+          }, this.#timeoutMs)
+        : undefined
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
 
-    let response: Response
     try {
-      response = await this.#fetch(this.#endpoint, {
+      const response = await this.#fetch(this.#endpoint, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${this.#apiKey}`,
@@ -107,54 +120,30 @@ export class HttpSseTransport {
         body: JSON.stringify(request),
         signal: controller.signal,
       })
-    } catch (error) {
-      if (timedOut) {
+
+      if (!response.ok || !response.body) {
+        await response.body?.cancel().catch(() => undefined)
         throw new ProviderTransportError(
-          'TIMED_OUT',
-          `${this.#providerId} request timed out`,
-          undefined,
-          { cause: error },
+          'HTTP_ERROR',
+          `${this.#providerId} request failed with status ${response.status}`,
+          response.status,
         )
       }
-      if (signal.aborted || controller.signal.aborted) {
-        throw new ProviderTransportError(
-          'ABORTED',
-          `${this.#providerId} request was aborted`,
-          undefined,
-          { cause: error },
-        )
-      }
-      throw new ProviderTransportError(
-        'NETWORK_ERROR',
-        `${this.#providerId} network request failed`,
-        undefined,
-        { cause: error },
-      )
-    }
 
-    if (!response.ok || !response.body) {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', abort)
-      await response.body?.cancel().catch(() => undefined)
-      throw new ProviderTransportError(
-        'HTTP_ERROR',
-        `${this.#providerId} request failed with status ${response.status}`,
-        response.status,
-      )
-    }
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    try {
+      reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
       while (true) {
         const { value, done } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
         const parsed = ssePayloads(buffer)
         buffer = parsed.rest
+        assertSseSize(buffer)
         for (const payload of parsed.payloads) {
-          if (payload !== '[DONE]') yield parsePayload(payload)
+          assertSseSize(payload)
+          if (payload.trim() === '[DONE]') return
+          yield parsePayload(payload)
         }
       }
       buffer += decoder.decode()
@@ -162,7 +151,9 @@ export class HttpSseTransport {
       if (trailing) {
         const parsed = ssePayloads(`${buffer}\n\n`)
         for (const payload of parsed.payloads) {
-          if (payload !== '[DONE]') yield parsePayload(payload)
+          assertSseSize(payload)
+          if (payload.trim() === '[DONE]') return
+          yield parsePayload(payload)
         }
       }
     } catch (error) {
@@ -190,9 +181,18 @@ export class HttpSseTransport {
         { cause: error },
       )
     } finally {
-      clearTimeout(timer)
+      if (timer) clearTimeout(timer)
       signal.removeEventListener('abort', abort)
-      await reader.cancel().catch(() => undefined)
+      await reader?.cancel().catch(() => undefined)
     }
+  }
+}
+
+function assertSseSize(value: string): void {
+  if (Buffer.byteLength(value, 'utf8') > MAX_SSE_EVENT_BYTES) {
+    throw new ProviderTransportError(
+      'INVALID_SSE',
+      `Provider SSE event exceeds ${MAX_SSE_EVENT_BYTES} bytes`,
+    )
   }
 }

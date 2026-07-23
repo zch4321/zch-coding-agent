@@ -62,7 +62,7 @@ CREATE TABLE messages (
     client_request_id IS NULL
     OR length(client_request_id) BETWEEN 1 AND 128
   ),
-  replayed_from_message_id TEXT REFERENCES messages(id),
+  replayed_from_message_id TEXT,
   kind                 TEXT NOT NULL CHECK (
     kind IN (
       'user_input',
@@ -97,6 +97,9 @@ CREATE TABLE messages (
   ),
   in_history           INTEGER NOT NULL CHECK (in_history IN (0, 1)),
   created_at           TEXT NOT NULL CHECK (length(created_at) BETWEEN 1 AND 64),
+  FOREIGN KEY (replayed_from_message_id, session_id)
+    REFERENCES messages(id, session_id) ON DELETE CASCADE,
+  UNIQUE (id, session_id),
   UNIQUE (session_id, seq),
   UNIQUE (session_id, client_request_id),
   CHECK (
@@ -160,6 +163,14 @@ CREATE TABLE file_changes (
   CHECK (
     (before_exists = 0 AND before_content IS NULL)
     OR (before_exists = 1 AND before_content IS NOT NULL)
+  ),
+  CHECK (
+    before_exists = 1
+    OR before_hash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+  ),
+  CHECK (
+    after_exists = 1
+    OR after_hash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
   )
 ) STRICT;
 

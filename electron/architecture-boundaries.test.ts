@@ -1,35 +1,35 @@
 import { readdir, readFile } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
+import { builtinModules } from 'node:module'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const SOURCE_FILE = /\.(?:ts|tsx|vue)$/u
 const IMPORT_SPECIFIER =
   /(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/gu
-const SHARED_FORBIDDEN_IMPORT =
-  /^(?:node:|electron$|electron\/|vue$|vue\/|pinia$|pinia\/|\.\.\/(?:electron|src)\/)/u
-const TARGET_ROOTS = ['electron/application', 'electron/persistence']
+const DYNAMIC_OR_REQUIRE_SPECIFIER =
+  /(?:import|require)\(\s*['"]([^'"]+)['"]\s*\)/gu
+const NODE_BUILTINS = new Set(
+  builtinModules.flatMap((specifier) => [
+    specifier,
+    specifier.replace(/^node:/u, ''),
+  ]),
+)
+const WIRE_FREE_ROOTS = [
+  'electron/session',
+  'electron/runtime',
+  'electron/persistence',
+  'src',
+  'shared',
+]
 const PROVIDER_IMPORT = /(?:^|\/)providers?(?:\/|$)|provider(?:\.ts)?$/u
-const LEGACY_WORKBENCH_IMPORT = /(?:^|\/)shared\/workbench(?:\.ts)?$/u
 const CHAT_WIRE_IDENTIFIER =
   /\b(?:ProviderMessage|ProviderAssistantTurn|reasoning_content|tool_call_id|tool_calls)\b/u
 
 async function sourceFiles(root: string): Promise<string[]> {
-  let entries: Dirent<string>[]
-
-  try {
-    entries = await readdir(root, { withFileTypes: true })
-  } catch (error) {
-    if (
-      error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      error.code === 'ENOENT'
-    ) {
-      return []
-    }
-    throw error
-  }
+  const entries: Dirent<string>[] = await readdir(root, {
+    withFileTypes: true,
+  })
 
   const files = await Promise.all(
     entries.map(async (entry) => {
@@ -43,51 +43,76 @@ async function sourceFiles(root: string): Promise<string[]> {
 
 async function imports(filePath: string): Promise<string[]> {
   const source = await readFile(filePath, 'utf8')
-  return [...source.matchAll(IMPORT_SPECIFIER)].map((match) => match[1]!)
+  return [
+    ...source.matchAll(IMPORT_SPECIFIER),
+    ...source.matchAll(DYNAMIC_OR_REQUIRE_SPECIFIER),
+  ].map((match) => match[1]!)
 }
 
 function relative(filePath: string): string {
   return path.relative(process.cwd(), filePath).replaceAll(path.sep, '/')
 }
 
+function isForbiddenSharedImport(specifier: string): boolean {
+  const normalized = specifier.replace(/^node:/u, '')
+  return (
+    NODE_BUILTINS.has(normalized) ||
+    /^(?:electron|vue|pinia)(?:\/|$)/u.test(specifier) ||
+    /^\.\.\/(?:electron|src)(?:\/|$)/u.test(specifier)
+  )
+}
+
+function isProductionFile(filePath: string): boolean {
+  const normalized = relative(filePath)
+  return (
+    !normalized.endsWith('.test.ts') &&
+    !normalized.endsWith('-fixtures.ts') &&
+    !normalized.endsWith('-test-support.ts') &&
+    !normalized.includes('/fixtures/') &&
+    !normalized.includes('/__snapshots__/')
+  )
+}
+
 describe('architecture import boundaries', () => {
   it('keeps shared contracts free of host and renderer imports', async () => {
     const violations = (
       await Promise.all(
-        (await sourceFiles(path.resolve('shared'))).map(async (filePath) => ({
-          filePath,
-          imports: await imports(filePath),
-        })),
+        (await sourceFiles(path.resolve('shared')))
+          .filter(isProductionFile)
+          .map(async (filePath) => ({
+            filePath,
+            imports: await imports(filePath),
+          })),
       )
     ).flatMap(({ filePath, imports: specifiers }) =>
       specifiers
-        .filter((specifier) => SHARED_FORBIDDEN_IMPORT.test(specifier))
+        .filter(isForbiddenSharedImport)
         .map((specifier) => `${relative(filePath)} -> ${specifier}`),
     )
 
     expect(violations).toEqual([])
   })
 
-  it('keeps target application and persistence code provider-wire free', async () => {
+  it('keeps core, persistence and renderer production code provider-wire free', async () => {
     const files = (
       await Promise.all(
-        TARGET_ROOTS.map((root) => sourceFiles(path.resolve(root))),
+        WIRE_FREE_ROOTS.map((root) => sourceFiles(path.resolve(root))),
       )
-    ).flat()
+    )
+      .flat()
+      .filter(isProductionFile)
     const violations = await Promise.all(
       files.map(async (filePath) => {
         const source = await readFile(filePath, 'utf8')
         const specifiers = await imports(filePath)
         return [
           ...specifiers
-            .filter((specifier) => PROVIDER_IMPORT.test(specifier))
-            .map((specifier) => `${relative(filePath)} -> ${specifier}`),
-          ...specifiers
-            .filter((specifier) => LEGACY_WORKBENCH_IMPORT.test(specifier))
-            .map(
+            .filter(
               (specifier) =>
-                `${relative(filePath)} -> legacy target import ${specifier}`,
-            ),
+                relative(filePath).startsWith('electron/persistence/') &&
+                PROVIDER_IMPORT.test(specifier),
+            )
+            .map((specifier) => `${relative(filePath)} -> ${specifier}`),
           ...(CHAT_WIRE_IDENTIFIER.test(source)
             ? [`${relative(filePath)} -> Chat Completions wire identifier`]
             : []),

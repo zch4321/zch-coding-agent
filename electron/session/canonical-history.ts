@@ -5,6 +5,7 @@ import {
   assertMessageRecordSemantics,
   MessageRecordSchema,
   type AssistantTurnMessageRecordSchema,
+  type CanonicalPromptKind,
   type MessageRecord,
   type ToolCallPart,
 } from '../../shared/message'
@@ -12,16 +13,6 @@ import type { ModelRouteSnapshot } from '../../shared/model-route'
 import type { Static } from '@sinclair/typebox'
 import type { PromptResourceSummary } from '../prompts/registry'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
-
-export type CanonicalPromptKind =
-  | 'system_instruction'
-  | 'assistant_preferences'
-  | 'selected_context'
-  | 'benchmark_context'
-  | 'runtime_context'
-  | 'agents_context'
-  | 'orchestrator'
-  | 'interjection'
 
 export interface CanonicalHistoryState {
   sessionId: SessionId
@@ -130,6 +121,9 @@ export function appendUserInput(
     replayedFromMessageId?: MessageId
   },
 ): Extract<MessageRecord, { kind: 'user_input' }> {
+  if (!input.content.trim()) {
+    throw new TypeError('Canonical user input must not be empty')
+  }
   if (
     (input.clientRequestId === undefined) ===
     (input.replayedFromMessageId === undefined)
@@ -166,6 +160,7 @@ export function appendAssistantTurn(
       args: JsonValue
     }[]
     reasoning?: string
+    finishReason?: string
     route: ModelRouteSnapshot
     continuation?: Extract<
       MessageRecord,
@@ -202,6 +197,14 @@ export function appendAssistantTurn(
     ...(input.reasoning ? { normalizedReasoningText: input.reasoning } : {}),
     ...(input.continuation
       ? { providerContinuation: structuredClone(input.continuation) }
+      : {}),
+    ...(input.finishReason
+      ? {
+          metadata: {
+            schemaVersion: 1 as const,
+            finishReason: input.finishReason,
+          },
+        }
       : {}),
   } as Extract<MessageRecord, { kind: 'assistant_turn' }>
   state.history.push(record)

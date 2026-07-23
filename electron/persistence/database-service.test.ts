@@ -8,10 +8,28 @@ import {
   migrationChecksum,
 } from './database-service'
 import { DATABASE_MIGRATIONS, type DatabaseMigration } from './migrations'
-import { PersistenceError } from './persistence-error'
+import {
+  normalizePersistenceError,
+  PersistenceError,
+} from './persistence-error'
 import { createTestDatabase } from './test-database'
 
 describe('DatabaseService', () => {
+  it.each([
+    [5, 'DATABASE_BUSY'],
+    [10, 'DATABASE_IO'],
+    [11, 'DATABASE_CORRUPT'],
+    [19, 'DATABASE_CONSTRAINT'],
+    [1, 'DATABASE_ERROR'],
+  ] as const)('maps SQLite primary code %i to %s', (errcode, code) => {
+    const sqliteError = Object.assign(new Error('sqlite fixture'), {
+      code: 'ERR_SQLITE_ERROR',
+      errcode,
+    })
+
+    expect(normalizePersistenceError(sqliteError)).toMatchObject({ code })
+  })
+
   it('opens a file database with required pragmas and migration metadata', async () => {
     const testDatabase = await createTestDatabase({
       appVersion: '0.2.3',
@@ -244,6 +262,21 @@ describe('DatabaseService', () => {
       testDatabase.database.withTransaction(() => undefined),
     ).rejects.toThrowError(expect.objectContaining({ code: 'DATABASE_CLOSED' }))
     await testDatabase.dispose()
+  })
+
+  it('rejects nested transactions before they can escape outer atomicity', async () => {
+    const testDatabase = await createTestDatabase()
+    try {
+      let nested: Promise<unknown> | undefined
+      await testDatabase.database.withTransaction(() => {
+        nested = testDatabase.database.withTransaction(() => 'nested')
+      })
+      await expect(nested).rejects.toMatchObject({
+        code: 'NESTED_TRANSACTION_NOT_ALLOWED',
+      })
+    } finally {
+      await testDatabase.dispose()
+    }
   })
 
   it('validates migration ordering and derives isolated database paths', () => {

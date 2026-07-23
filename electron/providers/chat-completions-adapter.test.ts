@@ -317,4 +317,19 @@ describe('ChatCompletionsAdapter', () => {
       finishReason: 'tool_calls',
     })
   })
+
+  it('normalizes provider truncation and content-filter finish reasons', () => {
+    const adapter = new ChatCompletionsAdapter(route.adapterId)
+
+    expect(
+      adapter.complete(completed({ finishReason: 'length' })),
+    ).toMatchObject({
+      finishReason: 'truncated',
+    })
+    expect(
+      adapter.complete(completed({ finishReason: 'content_filter' })),
+    ).toMatchObject({
+      finishReason: 'content_filter',
+    })
+  })
 })

@@ -99,7 +99,7 @@ export const OrchestratorEntrySchema = Type.Object(
 )
 export type OrchestratorEntry = Static<typeof OrchestratorEntrySchema>
 
-export const ProjectRecordSchema = Type.Object(
+export const WorkbenchProjectRecordSchema = Type.Object(
   {
     path: Type.String({ minLength: 1, maxLength: 4_096 }),
     name: Type.String({ minLength: 1, maxLength: 256 }),
@@ -107,7 +107,7 @@ export const ProjectRecordSchema = Type.Object(
   },
   { additionalProperties: false },
 )
-export type ProjectRecord = Static<typeof ProjectRecordSchema>
+export type WorkbenchProjectRecord = Static<typeof WorkbenchProjectRecordSchema>
 
 export const ConversationRecordSchema = Type.Object(
   {
@@ -145,7 +145,7 @@ export type ConversationRecord = Static<typeof ConversationRecordSchema>
 
 export const PersistedWorkbenchSchema = Type.Object(
   {
-    projects: Type.Array(ProjectRecordSchema, { maxItems: 512 }),
+    projects: Type.Array(WorkbenchProjectRecordSchema, { maxItems: 512 }),
     conversations: Type.Array(ConversationRecordSchema, { maxItems: 10_000 }),
     activeConversationId: Type.Optional(
       Type.String({ minLength: 1, maxLength: 256 }),

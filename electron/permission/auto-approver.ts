@@ -100,18 +100,9 @@ export class ProviderAutoApprover implements AutoApprover {
 
   constructor(
     provider: LLMProvider,
+    route: ModelRouteSnapshot,
     timeoutMs = 60_000,
     systemPrompt?: string,
-    route: ModelRouteSnapshot = {
-      schemaVersion: 1,
-      purpose: 'approval',
-      adapterId: 'deepseek.chat-completions',
-      providerId: 'deepseek',
-      model: 'deepseek-v4-flash',
-      reasoning: 'high',
-      endpoint: 'https://api.deepseek.com/chat/completions',
-      providerConfigRevision: 1,
-    },
   ) {
     this.#provider = provider
     this.#timeoutMs = timeoutMs

@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import {
+  assertFileChangeSummarySemantics,
   FileChangeSummarySchema,
   type FileChangeSummary,
 } from '../../shared/file-change'
@@ -134,6 +135,7 @@ export function decodeFileChangeSummaryRow(
     summary,
     'FileChangeSummary row',
   )
+  assertFileChangeSummarySemantics(summary)
   return summary
 }
 
@@ -162,11 +164,13 @@ export function toFileChangeSummary(
 }
 
 function assertStoredFileChangeRecord(record: StoredFileChangeRecord): void {
+  const summary = toFileChangeSummary(record)
   assertSchemaValue<FileChangeSummary>(
     validateFileChangeSummary,
-    toFileChangeSummary(record),
+    summary,
     'StoredFileChangeRecord summary',
   )
+  assertFileChangeSummarySemantics(summary)
   if (!Number.isSafeInteger(record.payloadBytes) || record.payloadBytes < 0) {
     throw new PersistenceError(
       'CODEC_INVALID',

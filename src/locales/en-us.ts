@@ -379,6 +379,7 @@ const enUS = {
     approvalAndNetwork: 'Approval and network',
     tokenEstimation: 'Token estimation',
     maxStepsPerRun: 'Maximum steps per run',
+    maxStepsPerRunHint: 'Set to 0 for no React-loop step limit.',
     maxContextTokens: 'Default maximum context tokens',
     autoCompactTriggerPercent: 'Auto compact trigger threshold',
     maxToolResultTokens: 'Tool result token limit',

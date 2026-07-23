@@ -142,6 +142,11 @@ export function assertSessionSnapshotSemantics(
 }
 
 export function assertSessionPageSemantics(page: SessionPage): void {
+  for (const record of page.records) {
+    if (!Number.isFinite(Date.parse(record.updatedAt))) {
+      throw new TypeError('Session page contains an invalid updatedAt value')
+    }
+  }
   for (let index = 1; index < page.records.length; index += 1) {
     const previous = page.records[index - 1]!
     const current = page.records[index]!

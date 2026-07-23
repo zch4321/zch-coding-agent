@@ -5,17 +5,18 @@ import type {
   ModelSelection,
   ProviderPurpose,
 } from '../../shared/model-route'
+import {
+  assertModelRouteSnapshotSafe,
+  resolveChatCompletionsEndpoint,
+} from '../../shared/model-route'
 import type { ConfigStore } from '../config/store'
+import { resolveModelProfiles, type ModelProfile } from './model-catalog'
 
 export interface ResolvedModelRoute {
   snapshot: ModelRouteSnapshot
   provider: ProviderPublicConfig
+  modelProfile: ModelProfile
   apiKey: string
-}
-
-function endpoint(baseURL: string): string {
-  const normalized = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
-  return new URL('chat/completions', normalized).toString()
 }
 
 async function resolve(
@@ -28,6 +29,25 @@ async function resolve(
   if (!provider) {
     throw new Error(`Provider is not configured: ${selection.providerId}`)
   }
+  const snapshot: ModelRouteSnapshot = {
+    schemaVersion: 1,
+    purpose,
+    adapterId: provider.adapterId,
+    providerId: provider.id,
+    model: selection.model,
+    reasoning: selection.reasoning,
+    endpoint: resolveChatCompletionsEndpoint(provider.baseURL),
+    providerConfigRevision: provider.revision,
+  }
+  assertModelRouteSnapshotSafe(snapshot)
+  const modelProfile = resolveModelProfiles(
+    config,
+    provider.id,
+    selection.model,
+  ).find((candidate) => candidate.id === selection.model)
+  if (!modelProfile) {
+    throw new Error(`Model profile could not be resolved: ${selection.model}`)
+  }
   const apiKey = await configStore.getProviderApiKeyForRevision(
     provider.id,
     provider.revision,
@@ -36,17 +56,9 @@ async function resolve(
     throw new Error(`${provider.label} credential is not available`)
   }
   return {
-    snapshot: {
-      schemaVersion: 1,
-      purpose,
-      adapterId: provider.adapterId,
-      providerId: provider.id,
-      model: selection.model,
-      reasoning: selection.reasoning,
-      endpoint: endpoint(provider.baseURL),
-      providerConfigRevision: provider.revision,
-    },
+    snapshot,
     provider: structuredClone(provider),
+    modelProfile: structuredClone(modelProfile),
     apiKey,
   }
 }
@@ -72,10 +84,7 @@ export async function resolveRunRoutes(
   const approvalSelection: ModelSelection = {
     providerId: approvalProvider.id,
     model: config.approval.approverModel,
-    reasoning:
-      approvalProvider.reasoning === 'off'
-        ? 'high'
-        : approvalProvider.reasoning,
+    reasoning: approvalProvider.reasoning,
   }
   const [main, compression, approval] = await Promise.all([
     resolve(configStore, config, selection, 'main'),

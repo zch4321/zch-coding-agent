@@ -16,6 +16,38 @@ import {
   ModelRouteSnapshotSchema,
 } from './model-route'
 
+export const CANONICAL_MESSAGE_KINDS = [
+  'system_instruction',
+  'assistant_preferences',
+  'selected_context',
+  'benchmark_context',
+  'runtime_context',
+  'agents_context',
+  'orchestrator',
+  'interjection',
+  'user_input',
+  'assistant_turn',
+  'tool_result',
+  'compact_summary',
+] as const
+export type CanonicalMessageKind = (typeof CANONICAL_MESSAGE_KINDS)[number]
+export const CanonicalMessageKindSchema = Type.Unsafe<CanonicalMessageKind>({
+  type: 'string',
+  enum: [...CANONICAL_MESSAGE_KINDS],
+})
+
+export const CANONICAL_PROMPT_KINDS = [
+  'system_instruction',
+  'assistant_preferences',
+  'selected_context',
+  'benchmark_context',
+  'runtime_context',
+  'agents_context',
+  'orchestrator',
+  'interjection',
+] as const
+export type CanonicalPromptKind = (typeof CANONICAL_PROMPT_KINDS)[number]
+
 export const ProviderContinuationEnvelopeSchema = Type.Object(
   {
     schemaVersion: DurableSchemaVersionSchema,
@@ -197,6 +229,7 @@ export const ReplayedUserInputMetadataV1Schema = Type.Object(
 export const AssistantMetadataV1Schema = Type.Object(
   {
     schemaVersion: DurableSchemaVersionSchema,
+    finishReason: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     usage: Type.Optional(UsageMetadataSchema),
     reasoningProjection: Type.Optional(ReasoningProjectionMetadataSchema),
   },

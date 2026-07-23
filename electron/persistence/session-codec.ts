@@ -3,8 +3,10 @@ import { SessionRecordSchema, type SessionRecord } from '../../shared/session'
 import { compileSchema } from '../schema-validator'
 import {
   assertSchemaValue,
+  dateTimeColumn,
   encodeJsonColumn,
   integerColumn,
+  nullableDateTimeColumn,
   nullableStringColumn,
   parseNullableJsonColumn,
   stringColumn,
@@ -58,9 +60,12 @@ export function encodeSessionRow(record: SessionRecord): SessionRow {
     forked_from_seq: record.parent?.forkedFromSeq ?? null,
     revision: record.revision,
     last_seq: record.lastSeq,
-    created_at: record.createdAt,
-    updated_at: record.updatedAt,
-    archived_at: record.lifecycle === 'archived' ? record.archivedAt : null,
+    created_at: dateTimeColumn(record.createdAt, 'sessions.created_at'),
+    updated_at: dateTimeColumn(record.updatedAt, 'sessions.updated_at'),
+    archived_at:
+      record.lifecycle === 'archived'
+        ? dateTimeColumn(record.archivedAt, 'sessions.archived_at')
+        : null,
   }
 }
 
@@ -80,7 +85,7 @@ export function decodeSessionRow(row: Record<string, unknown>): SessionRecord {
     )
   }
 
-  const archivedAt = nullableStringColumn(
+  const archivedAt = nullableDateTimeColumn(
     row.archived_at,
     'sessions.archived_at',
   )
@@ -112,8 +117,8 @@ export function decodeSessionRow(row: Record<string, unknown>): SessionRecord {
       : {}),
     revision: integerColumn(row.revision, 'sessions.revision'),
     lastSeq: integerColumn(row.last_seq, 'sessions.last_seq'),
-    createdAt: stringColumn(row.created_at, 'sessions.created_at'),
-    updatedAt: stringColumn(row.updated_at, 'sessions.updated_at'),
+    createdAt: dateTimeColumn(row.created_at, 'sessions.created_at'),
+    updatedAt: dateTimeColumn(row.updated_at, 'sessions.updated_at'),
     ...(archivedAt === null ? {} : { archivedAt }),
   }
   assertSchemaValue<SessionRecord>(

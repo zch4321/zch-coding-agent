@@ -3,6 +3,20 @@ import { AppConfigSchema, DEFAULT_APP_CONFIG, type AppConfig } from './schema'
 
 const validateAppConfig = compileSchema(AppConfigSchema)
 
+export class UnsupportedConfigSchemaError extends Error {
+  constructor(
+    readonly schemaVersion: unknown,
+    validationErrors?: string,
+  ) {
+    super(
+      `Unsupported config schema. P3 requires AppConfig v9; the existing config will be reset to defaults.${
+        validationErrors ? ` ${validationErrors}` : ''
+      }`,
+    )
+    this.name = 'UnsupportedConfigSchemaError'
+  }
+}
+
 /**
  * P3 intentionally starts a clean configuration epoch. Older schemas mixed
  * provider identity, protocol behavior, and mutable defaults, so guessing an
@@ -18,13 +32,18 @@ export function migrateConfig(candidate: unknown): AppConfig {
     Array.isArray(candidate) ||
     Reflect.get(candidate, 'schemaVersion') !== 9
   ) {
-    throw new Error(
-      'Unsupported config schema. P3 requires AppConfig v9; reset or remove the existing config file.',
+    throw new UnsupportedConfigSchemaError(
+      candidate && typeof candidate === 'object'
+        ? Reflect.get(candidate, 'schemaVersion')
+        : undefined,
     )
   }
 
   if (!validateAppConfig(candidate)) {
-    throw new Error(formatSchemaErrors(validateAppConfig.errors))
+    throw new UnsupportedConfigSchemaError(
+      Reflect.get(candidate, 'schemaVersion'),
+      formatSchemaErrors(validateAppConfig.errors),
+    )
   }
 
   return structuredClone(candidate as AppConfig)
