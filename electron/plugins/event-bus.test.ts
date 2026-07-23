@@ -11,15 +11,26 @@ describe('PluginEventBus', () => {
     const bus = new PluginEventBus()
     bus.on('beforeLLMCall', (context) => {
       expect(Object.isFrozen(context)).toBe(true)
-      expect(Object.isFrozen(context.messages)).toBe(true)
+      expect(Object.isFrozen(context.request)).toBe(true)
       return { patch: { params: { temperature: 0 } } }
     })
 
     const result = await bus.emit('beforeLLMCall', {
-      version: 1,
+      version: 2,
       sessionId,
       runId,
-      messages: [{ role: 'user', text: 'hello' }],
+      adapterId: 'deepseek.chat-completions',
+      route: {
+        schemaVersion: 1,
+        purpose: 'main',
+        adapterId: 'deepseek.chat-completions',
+        providerId: 'deepseek',
+        model: 'deepseek-v4-pro',
+        reasoning: 'high',
+        endpoint: 'https://api.deepseek.com/chat/completions',
+        providerConfigRevision: 1,
+      },
+      request: { messages: [{ role: 'user', content: 'hello' }] },
       params: { temperature: 1 },
     })
 

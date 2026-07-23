@@ -1,5 +1,6 @@
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonObject, JsonValue } from '../../shared/json'
+import type { ModelRouteSnapshot } from '../../shared/model-route'
 import type { ToolCall, ToolRegistrationPort, ToolResult } from '../tools/types'
 
 export type HookName =
@@ -24,9 +25,13 @@ export interface HookContextMap {
   onSessionEnd: HookContextBase & {
     reason: string
   }
-  beforeLLMCall: HookContextBase & {
+  beforeLLMCall: {
+    version: 2
+    sessionId: SessionId
     runId: RunId
-    messages: readonly JsonValue[]
+    adapterId: string
+    route: Readonly<ModelRouteSnapshot>
+    request: Readonly<JsonObject>
     params: Readonly<JsonObject>
   }
   afterLLMCall: HookContextBase & {
@@ -52,7 +57,7 @@ export interface HookContextMap {
 }
 
 export interface BeforeLLMCallPatch {
-  messages?: JsonValue[]
+  request?: JsonObject
   params?: JsonObject
 }
 

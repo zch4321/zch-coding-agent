@@ -9,6 +9,7 @@ import type {
   ProviderChatRequest,
   ProviderEvent,
 } from './provider'
+import { HttpSseTransport } from './http-sse-transport'
 
 export interface OpenAICompatibleProviderOptions {
   providerId: string
@@ -20,6 +21,7 @@ export interface OpenAICompatibleProviderOptions {
   fetchImpl?: typeof fetch
   now?: () => number
   createCallId?: () => CallId
+  timeoutMs?: number
 }
 
 export type DeepSeekProviderOptions = Omit<
@@ -158,45 +160,27 @@ function usageFromChunk(chunk: JsonObject): JsonValue | undefined {
   return usage && typeof usage === 'object' ? toJsonValue(usage) : undefined
 }
 
-function ssePayloads(buffer: string): { payloads: string[]; rest: string } {
-  const normalized = buffer.replace(/\r\n/g, '\n')
-  const chunks = normalized.split('\n\n')
-  const rest = chunks.pop() ?? ''
-  const payloads: string[] = []
-
-  for (const chunk of chunks) {
-    const lines = chunk
-      .split('\n')
-      .filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).trimStart())
-
-    if (lines.length > 0) {
-      payloads.push(lines.join('\n'))
-    }
-  }
-
-  return { payloads, rest }
-}
-
 export class OpenAICompatibleProvider implements LLMProvider {
   readonly #providerId: string
   readonly #profile: ProviderProfile
-  readonly #baseURL: string
   readonly #model: string
-  readonly #apiKey: string
   readonly #reasoning: ReasoningEffort
-  readonly #fetch: typeof fetch
+  readonly #transport: HttpSseTransport
   readonly #now: () => number
   readonly #createCallId: () => CallId
 
   constructor(options: OpenAICompatibleProviderOptions) {
     this.#providerId = options.providerId
     this.#profile = options.profile
-    this.#baseURL = options.baseURL
     this.#model = options.model
-    this.#apiKey = options.apiKey
     this.#reasoning = options.reasoning ?? 'off'
-    this.#fetch = options.fetchImpl ?? fetch
+    this.#transport = new HttpSseTransport({
+      providerId: options.providerId,
+      endpoint: endpoint(options.baseURL),
+      apiKey: options.apiKey,
+      fetchImpl: options.fetchImpl,
+      timeoutMs: options.timeoutMs,
+    })
     this.#now = options.now ?? (() => performance.now())
     this.#createCallId =
       options.createCallId ?? (() => `call:${randomUUID()}` as CallId)
@@ -251,132 +235,95 @@ export class OpenAICompatibleProvider implements LLMProvider {
       prefixHash: hashJson(toJsonValue(request.messages)),
     })
 
-    const response = await this.#fetch(endpoint(this.#baseURL), {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${this.#apiKey}`,
-        'content-type': 'application/json',
-      },
-      body: requestBody,
-      signal: request.signal,
-    })
+    for await (const chunk of this.#transport.postJson(
+      toJsonValue(providerRequest),
+      request.signal,
+    )) {
+      rawResponse = chunk as JsonValue
+      const usage = usageFromChunk(chunk)
 
-    if (!response.ok || !response.body) {
-      await response.body?.cancel().catch(() => undefined)
-      throw new Error(
-        `${this.#providerId} request failed with status ${response.status}`,
-      )
-    }
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { value, done } = await reader.read()
-
-      if (done) {
-        break
+      if (usage !== undefined) {
+        latestUsage = usage
+        yield {
+          type: 'usage',
+          usage,
+          raw: chunk as JsonValue,
+        }
       }
 
-      buffer += decoder.decode(value, { stream: true })
-      const parsed = ssePayloads(buffer)
-      buffer = parsed.rest
+      const delta = choiceDelta(chunk)
 
-      for (const payload of parsed.payloads) {
-        if (payload === '[DONE]') {
-          continue
+      if (!delta) {
+        continue
+      }
+
+      const reasoningDelta = delta.reasoning_content
+
+      if (typeof reasoningDelta === 'string' && reasoningDelta.length > 0) {
+        firstTokenAt ??= this.#now()
+        reasoning += reasoningDelta
+        yield {
+          type: 'reasoning.delta',
+          delta: reasoningDelta,
+          raw: chunk as JsonValue,
         }
+      }
 
-        const chunk = JSON.parse(payload) as JsonObject
-        rawResponse = chunk as JsonValue
-        const usage = usageFromChunk(chunk)
+      if (typeof delta.content === 'string' && delta.content.length > 0) {
+        firstTokenAt ??= this.#now()
+        text += delta.content
+        yield {
+          type: 'text.delta',
+          delta: delta.content,
+          raw: chunk as JsonValue,
+        }
+      }
 
-        if (usage !== undefined) {
-          latestUsage = usage
-          yield {
-            type: 'usage',
-            usage,
-            raw: chunk as JsonValue,
+      if (Array.isArray(delta.tool_calls)) {
+        for (const rawToolCall of delta.tool_calls) {
+          if (
+            !rawToolCall ||
+            typeof rawToolCall !== 'object' ||
+            Array.isArray(rawToolCall)
+          ) {
+            continue
           }
-        }
 
-        const delta = choiceDelta(chunk)
-
-        if (!delta) {
-          continue
-        }
-
-        const reasoningDelta = delta.reasoning_content
-
-        if (typeof reasoningDelta === 'string' && reasoningDelta.length > 0) {
-          firstTokenAt ??= this.#now()
-          reasoning += reasoningDelta
-          yield {
-            type: 'reasoning.delta',
-            delta: reasoningDelta,
-            raw: chunk as JsonValue,
+          const toolDelta = rawToolCall as JsonObject
+          const index =
+            typeof toolDelta.index === 'number' ? toolDelta.index : 0
+          const current = toolCalls.get(index) ?? {
+            index,
+            argumentsText: '',
           }
-        }
+          const fn =
+            toolDelta.function &&
+            typeof toolDelta.function === 'object' &&
+            !Array.isArray(toolDelta.function)
+              ? (toolDelta.function as JsonObject)
+              : undefined
 
-        if (typeof delta.content === 'string' && delta.content.length > 0) {
-          firstTokenAt ??= this.#now()
-          text += delta.content
-          yield {
-            type: 'text.delta',
-            delta: delta.content,
-            raw: chunk as JsonValue,
+          if (typeof toolDelta.id === 'string') {
+            current.id = toolDelta.id
           }
-        }
 
-        if (Array.isArray(delta.tool_calls)) {
-          for (const rawToolCall of delta.tool_calls) {
-            if (
-              !rawToolCall ||
-              typeof rawToolCall !== 'object' ||
-              Array.isArray(rawToolCall)
-            ) {
-              continue
-            }
+          if (fn && typeof fn.name === 'string') {
+            current.name = fn.name
+          }
 
-            const toolDelta = rawToolCall as JsonObject
-            const index =
-              typeof toolDelta.index === 'number' ? toolDelta.index : 0
-            const current = toolCalls.get(index) ?? {
-              index,
-              argumentsText: '',
-            }
-            const fn =
-              toolDelta.function &&
-              typeof toolDelta.function === 'object' &&
-              !Array.isArray(toolDelta.function)
-                ? (toolDelta.function as JsonObject)
-                : undefined
+          if (fn && typeof fn.arguments === 'string') {
+            current.argumentsText += fn.arguments
+          }
 
-            if (typeof toolDelta.id === 'string') {
-              current.id = toolDelta.id
-            }
-
-            if (fn && typeof fn.name === 'string') {
-              current.name = fn.name
-            }
-
-            if (fn && typeof fn.arguments === 'string') {
-              current.argumentsText += fn.arguments
-            }
-
-            toolCalls.set(index, current)
-            yield {
-              type: 'tool.delta',
-              index,
-              id: current.id,
-              name: current.name,
-              argumentsDelta:
-                fn && typeof fn.arguments === 'string'
-                  ? fn.arguments
-                  : undefined,
-              raw: chunk as JsonValue,
-            }
+          toolCalls.set(index, current)
+          yield {
+            type: 'tool.delta',
+            index,
+            id: current.id,
+            name: current.name,
+            argumentsDelta:
+              fn && typeof fn.arguments === 'string' ? fn.arguments : undefined,
+            raw: chunk as JsonValue,
           }
         }
       }
