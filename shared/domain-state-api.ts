@@ -3,6 +3,7 @@ import { IPC_VERSION } from './channels'
 import { PermissionModeSchema } from './config'
 import {
   BackendEventSequenceSchema,
+  ClientRequestIdSchema,
   DurableSchemaVersionSchema,
   MAX_BOOTSTRAP_SESSION_RECORDS,
   MAX_COMMIT_MESSAGE_RECORDS,
@@ -15,10 +16,19 @@ import {
   RevisionSchema,
 } from './durable'
 import { FileChangeSummarySchema } from './file-change'
-import { FileChangeIdSchema, ProjectIdSchema, SessionIdSchema } from './ids'
+import {
+  FileChangeIdSchema,
+  MessageIdSchema,
+  ProjectIdSchema,
+  RunIdSchema,
+  SessionIdSchema,
+} from './ids'
 import { MessagePageSchema, MessageRecordSchema } from './message'
 import { ModelSelectionSchema } from './model-route'
+import { GoalStateSchema, PlanStateSchema } from './orchestration'
 import { ProjectRecordSchema } from './project'
+import { RunContextSchema } from './context'
+import { ActiveRunPublicSnapshotSchema } from './runtime-state'
 import {
   SessionLifecycleSchema,
   SessionListCursorSchema,
@@ -286,17 +296,6 @@ export const SessionGetResultSchema = Type.Object(
   { additionalProperties: false },
 )
 
-export const SessionCreatePayloadSchema = Type.Object(
-  {
-    ...versionProperty,
-    projectId: ProjectIdSchema,
-    title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-    permissionMode: Type.Optional(PermissionModeSchema),
-    modelSelection: Type.Optional(ModelSelectionSchema),
-  },
-  { additionalProperties: false },
-)
-
 export const SessionUpdatePatchSchema = Type.Union([
   Type.Object(
     {
@@ -358,6 +357,97 @@ export const MessageListResultSchema = Type.Object(
   { additionalProperties: false },
 )
 
+export const MessageSearchPayloadSchema = Type.Object(
+  {
+    ...versionProperty,
+    sessionId: SessionIdSchema,
+    text: Type.String({ minLength: 1, maxLength: 256 }),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+  },
+  { additionalProperties: false },
+)
+export const MessageSearchResultSchema = Type.Object(
+  {
+    ...versionProperty,
+    records: Type.Array(MessageRecordSchema, { maxItems: 100 }),
+  },
+  { additionalProperties: false },
+)
+
+export const SessionForkPayloadSchema = Type.Object(
+  {
+    ...versionProperty,
+    sourceSessionId: SessionIdSchema,
+    expectedRevision: RevisionSchema,
+    sessionId: SessionIdSchema,
+    throughMessageId: Type.Optional(MessageIdSchema),
+    title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+  },
+  { additionalProperties: false },
+)
+
+const RunStartBaseProperties = {
+  message: Type.String({ minLength: 1, maxLength: 1_000_000 }),
+  context: Type.Optional(RunContextSchema),
+  clientRequestId: ClientRequestIdSchema,
+}
+
+export const DurableRunStartPayloadSchema = Type.Union([
+  Type.Object(
+    {
+      ...versionProperty,
+      kind: Type.Literal('new_session'),
+      sessionId: SessionIdSchema,
+      projectId: ProjectIdSchema,
+      title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+      modelSelection: ModelSelectionSchema,
+      permissionMode: PermissionModeSchema,
+      goal: Type.Optional(GoalStateSchema),
+      plan: Type.Optional(PlanStateSchema),
+      ...RunStartBaseProperties,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...versionProperty,
+      kind: Type.Literal('existing_session'),
+      sessionId: SessionIdSchema,
+      ...RunStartBaseProperties,
+    },
+    { additionalProperties: false },
+  ),
+])
+export type DurableRunStartPayload = Static<typeof DurableRunStartPayloadSchema>
+
+export const DurableRunStartedResultSchema = Type.Object(
+  {
+    ...versionProperty,
+    outcome: Type.Literal('started'),
+    commit: SessionCommitEnvelopeSchema,
+    runId: RunIdSchema,
+    runtime: ActiveRunPublicSnapshotSchema,
+  },
+  { additionalProperties: false },
+)
+
+export const DurableRunDeduplicatedResultSchema = Type.Object(
+  {
+    ...versionProperty,
+    outcome: Type.Literal('deduplicated'),
+    session: SessionRecordSchema,
+    userMessage: MessageRecordSchema,
+    runtime: Type.Optional(ActiveRunPublicSnapshotSchema),
+  },
+  { additionalProperties: false },
+)
+
+export const DurableRunStartResultSchema = Type.Union([
+  DurableRunStartedResultSchema,
+  DurableRunDeduplicatedResultSchema,
+])
+export type DurableRunStartResult = Static<typeof DurableRunStartResultSchema>
+
 export const FileChangeListPayloadSchema = Type.Object(
   { ...versionProperty, sessionId: SessionIdSchema },
   { additionalProperties: false },
@@ -412,10 +502,6 @@ export const DOMAIN_STATE_API_CONTRACTS = {
     payload: SessionGetPayloadSchema,
     result: SessionGetResultSchema,
   },
-  'session:create': {
-    payload: SessionCreatePayloadSchema,
-    result: SessionCommandResultSchema,
-  },
   'session:update': {
     payload: SessionUpdatePayloadSchema,
     result: SessionCommandResultSchema,
@@ -427,6 +513,18 @@ export const DOMAIN_STATE_API_CONTRACTS = {
   'message:list': {
     payload: MessageListPayloadSchema,
     result: MessageListResultSchema,
+  },
+  'message:search': {
+    payload: MessageSearchPayloadSchema,
+    result: MessageSearchResultSchema,
+  },
+  'session:fork': {
+    payload: SessionForkPayloadSchema,
+    result: SessionCommandResultSchema,
+  },
+  'run:start': {
+    payload: DurableRunStartPayloadSchema,
+    result: DurableRunStartResultSchema,
   },
   'file-change:list': {
     payload: FileChangeListPayloadSchema,

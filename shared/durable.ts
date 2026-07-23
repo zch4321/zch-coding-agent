@@ -7,11 +7,15 @@ export const MAX_BOOTSTRAP_SESSION_RECORDS = 200
 export const MAX_SESSION_LIST_RECORDS = 200
 export const MAX_MESSAGE_PAGE_RECORDS = 200
 export const MAX_COMMIT_MESSAGE_RECORDS = 512
+export const MAX_FORK_MESSAGE_RECORDS = 512
 export const MAX_FILE_CHANGE_RECORDS = 200
 export const MAX_MESSAGE_PARTS = 256
 export const MAX_MESSAGE_TEXT_LENGTH = 1_000_000
 export const MAX_CLIENT_REQUEST_ID_LENGTH = 128
 export const MAX_PATH_LENGTH = 4_096
+export const MAX_RUNTIME_TEXT_LENGTH = 1_000_000
+export const MAX_RUNTIME_TOOL_RECORDS = 256
+export const MAX_RUNTIME_INTERJECTIONS = 64
 
 export const DurableSchemaVersionSchema = Type.Literal(DURABLE_SCHEMA_VERSION)
 export const RevisionSchema = Type.Integer({

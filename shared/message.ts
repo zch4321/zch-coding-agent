@@ -208,6 +208,7 @@ const ReasoningProjectionMetadataSchema = Type.Object(
 export const UserInputMetadataV1Schema = Type.Object(
   {
     schemaVersion: DurableSchemaVersionSchema,
+    requestHash: Type.Optional(Sha256Schema),
     attachments: Type.Optional(
       Type.Array(AttachmentMetadataSchema, { maxItems: 64 }),
     ),

@@ -15,6 +15,7 @@ import {
 } from './message'
 import { ModelSelectionSchema } from './model-route'
 import { GoalStateSchema, PlanStateSchema } from './orchestration'
+import { ActiveRunPublicSnapshotSchema } from './runtime-state'
 
 export const SessionLifecycleSchema = Type.Union([
   Type.Literal('active'),
@@ -114,6 +115,7 @@ export const SessionSnapshotSchema = Type.Object(
     schemaVersion: DurableSchemaVersionSchema,
     session: SessionRecordSchema,
     messagePage: MessagePageSchema,
+    runtime: Type.Optional(ActiveRunPublicSnapshotSchema),
   },
   { additionalProperties: false },
 )
@@ -138,6 +140,11 @@ export function assertSessionSnapshotSemantics(
   }
   if (snapshot.session.lastSeq === 0 && page.records.length > 0) {
     throw new TypeError('Empty Session cannot contain Message records')
+  }
+  if (snapshot.runtime?.sessionId !== undefined) {
+    if (snapshot.runtime.sessionId !== snapshot.session.id) {
+      throw new TypeError('Session snapshot runtime belongs to another Session')
+    }
   }
 }
 

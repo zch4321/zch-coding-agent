@@ -5,6 +5,8 @@ import {
   AppBootstrapResultSchema,
   DOMAIN_STATE_API_CONTRACTS,
   DomainStateEventSchema,
+  DurableRunStartPayloadSchema,
+  DurableRunStartResultSchema,
   FileChangeCommittedChangeSchema,
   MessageListPayloadSchema,
   ProjectCommittedChangeSchema,
@@ -50,6 +52,7 @@ import {
   SessionSnapshotSchema,
   type SessionRecord,
 } from './session'
+import { ActiveRunPublicSnapshotSchema } from './runtime-state'
 
 const projectId = 'project:one' as ProjectId
 const sessionId = 'session:one' as SessionId
@@ -77,6 +80,18 @@ function roundTrip<Schema extends TSchema>(schema: Schema, value: unknown) {
   const copy = JSON.parse(JSON.stringify(value)) as unknown
   expect(validate(copy), JSON.stringify(validate.errors)).toBe(true)
   expect(copy).toEqual(value)
+}
+
+function everySchemaBranchHasVersion(schema: TSchema): boolean {
+  const candidate = schema as {
+    properties?: Record<string, unknown>
+    anyOf?: TSchema[]
+  }
+  if (candidate.properties?.version) return true
+  return Boolean(
+    candidate.anyOf?.length &&
+    candidate.anyOf.every((branch) => everySchemaBranchHasVersion(branch)),
+  )
 }
 
 const route: ModelRouteSnapshot = {
@@ -551,20 +566,65 @@ describe('bounded domain-state API contracts', () => {
     expect(
       validatePayload({ ...payload, limit: MAX_MESSAGE_PAGE_RECORDS + 1 }),
     ).toBe(false)
-    expect(Object.keys(DOMAIN_STATE_API_CONTRACTS)).toHaveLength(13)
+    expect(Object.keys(DOMAIN_STATE_API_CONTRACTS)).toHaveLength(15)
+    expect(DOMAIN_STATE_API_CONTRACTS).not.toHaveProperty('session:create')
+    expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('run:start')
+    expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('message:search')
+    expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('session:fork')
     for (const contract of Object.values(DOMAIN_STATE_API_CONTRACTS)) {
-      expect(
-        (contract.payload as { properties?: Record<string, unknown> })
-          .properties?.version,
-      ).toBeDefined()
-      expect(
-        (contract.result as { properties?: Record<string, unknown> }).properties
-          ?.version,
-      ).toBeDefined()
+      expect(everySchemaBranchHasVersion(contract.payload)).toBe(true)
+      expect(everySchemaBranchHasVersion(contract.result)).toBe(true)
       expect(() => compileSchema(contract.payload)).not.toThrow()
       expect(() => compileSchema(contract.result)).not.toThrow()
     }
     expect(compileSchema(SessionUpdatePatchSchema)({})).toBe(false)
+  })
+
+  it('models lazy run start and bounded live runtime state', () => {
+    const runtime = {
+      schemaVersion: 1 as const,
+      sessionId,
+      runId: 'run:one',
+      status: 'calling_llm' as const,
+      text: 'partial answer',
+      reasoning: 'partial reasoning',
+      tools: [],
+      interjections: [],
+    }
+    roundTrip(ActiveRunPublicSnapshotSchema, runtime)
+    roundTrip(DurableRunStartPayloadSchema, {
+      version: 1,
+      kind: 'new_session',
+      sessionId,
+      projectId,
+      permissionMode: 'confirm',
+      modelSelection: session.modelSelection,
+      message: 'first message',
+      clientRequestId: 'request:first',
+      context: { attachments: [] },
+    })
+    roundTrip(DurableRunStartPayloadSchema, {
+      version: 1,
+      kind: 'existing_session',
+      sessionId,
+      message: 'continue',
+      clientRequestId: 'request:continue',
+    })
+    roundTrip(DurableRunStartResultSchema, {
+      version: 1,
+      outcome: 'started',
+      commit: {
+        schemaVersion: 1,
+        cursor,
+        topic: 'session.changed',
+        change: {
+          session,
+          messageChange: { mode: 'upsert', records: [messages[0]] },
+        },
+      },
+      runId: runtime.runId,
+      runtime,
+    })
   })
 
   it('round-trips bounded topic changes and supports metadata-only Session commits', () => {
