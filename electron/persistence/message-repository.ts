@@ -1,5 +1,5 @@
 import { MAX_MESSAGE_PAGE_RECORDS } from '../../shared/durable'
-import type { SessionId } from '../../shared/ids'
+import type { MessageId, SessionId } from '../../shared/ids'
 import {
   assertMessagePageSemantics,
   type MessagePage,
@@ -58,6 +58,46 @@ export class MessageRepository {
       )
       .get(sessionId, clientRequestId)
     return row ? decodeMessageRow(row) : undefined
+  }
+
+  get(
+    reader: PersistenceReader,
+    sessionId: SessionId,
+    messageId: MessageId,
+  ): MessageRecord | undefined {
+    const row = reader
+      .prepare(
+        `SELECT ${MESSAGE_COLUMNS}
+         FROM messages
+         WHERE session_id = ? AND id = ?`,
+      )
+      .get(sessionId, messageId)
+    return row ? decodeMessageRow(row) : undefined
+  }
+
+  listThrough(
+    reader: PersistenceReader,
+    sessionId: SessionId,
+    throughSeq: number,
+    limit: number,
+  ): MessageRecord[] {
+    const bounded = boundedLimit(limit, 513, 'Message prefix limit')
+    if (!Number.isSafeInteger(throughSeq) || throughSeq < 1) {
+      throw new PersistenceError(
+        'CODEC_INVALID',
+        'Message prefix seq must be a positive safe integer',
+      )
+    }
+    return reader
+      .prepare(
+        `SELECT ${MESSAGE_COLUMNS}
+         FROM messages
+         WHERE session_id = ? AND seq <= ?
+         ORDER BY seq ASC
+         LIMIT ?`,
+      )
+      .all(sessionId, throughSeq, bounded)
+      .map(decodeMessageRow)
   }
 
   listPage(
