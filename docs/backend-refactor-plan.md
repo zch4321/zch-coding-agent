@@ -388,35 +388,36 @@ P3 完成后只有 Provider Adapter/transport 与协议 fixtures 理解 wire DTO
 
 ```text
 electron/application/
+  application-state-coordinator.ts
   project-service.ts
   session-service.ts
-  message-history-compiler.ts
-
-electron/runtime/
-  live-session-context.ts
-  active-run-execution.ts
+  durable-execution-state-port.ts
+  durable-run-application-service.ts
+  live-session-context-registry.ts
+  create-durable-target-runtime.ts
 ```
 
 现有 `SessionManager` 逐步缩成 facade 或被这些模块替代，不能把 repository SQL、Provider loop、Terminal、Goal/Plan 和 IPC 继续集中进单类。
 
 ### 8.3 任务
 
-- [ ] `ProjectService` 实现 list/add/update/remove，canonicalize path，并在 remove 前检查 active runtime resources。
-- [ ] `SessionService` 实现 list/get/create/update/archive 和 Message paging/search。
-- [ ] 创建 Session 时立即写 SQLite，不访问 Provider、不启动 MCP/Terminal、不生成 harness；Session ID 就是 UI 对话 ID。
-- [ ] `LiveSessionContextRegistry` 按需管理 terminal facade、MCP disclosure、history cache 和一个 active execution。
-- [ ] `ActiveRunExecution` 在启动时冻结 route、permission mode、AbortController、writer/run lease 和 stream buffers。
-- [ ] 第一次 `run:start` 才构造 initial harness/runtime/agents context；同一个 `clientRequestId` transaction 按顺序插入这些完整 Messages 和 user input，后续 context 变化只追加新 records。
-- [ ] `run:start` 先完成并发/writer precondition，再提交完整 Messages；commit 后才调用 Provider。
-- [ ] Stream delta 只写 ActiveRun buffer 和 runtime events。
-- [ ] 无 tool call 的 completed assistant turn 一次插入完整 Message。
-- [ ] 有 tool calls 时先保存在内存，等待全部 terminal results 后用单 transaction 插入 assistant + results。
-- [ ] 拒绝、取消、timeout 和 validation failure 都形成 terminal tool-result part。
-- [ ] Goal/Plan 的模型工具与 UI command 调用同一 SessionService transaction，并在 commit 后发 durable event。
-- [ ] Compact transaction 插入完整 summary、更新旧 prefix `inHistory`、递增 Session revision。
-- [ ] Renderer reload 时 `session:get` 可附带 ActiveRunPublicSnapshot；main restart 不恢复 active execution。
-- [ ] 切换 UI Session 不关闭 durable Session；`session:archive` 修改持久 lifecycle，idle `LiveSessionContext` eviction 是独立的 backend memory 策略。
-- [ ] Session archive/remove、app dispose 和异常路径统一释放 terminal、MCP、run slot、writer 和 logger。
+- [x] `ProjectService` 实现 list/add/update/remove，canonicalize path，并在 path update/remove 前检查 active runtime resources。
+- [x] `SessionService` 实现 list/get/update/archive、Message paging/search、首次发送和普通 Session fork。
+- [x] 点击新对话只创建 renderer draft/候选 ID；首次 `run:start new_session` 才把 Session 与首批 Messages 原子写入 SQLite。
+- [x] `LiveSessionContextRegistry` 按需加载 durable Session/history，管理 terminal/MCP/logger/cache 和一个 active execution。
+- [x] 现有 `ActiveRun` 在启动时冻结 route、permission mode、AbortController、writer/run lease，并维护有界 public stream/tool/approval/interjection snapshot。
+- [x] 第一次 `run:start` 构造 initial harness/runtime/agents context；同一个 transaction 按顺序插入完整 Messages 和 user input，后续 context 变化只追加新 records。
+- [x] `run:start` 先完成并发/writer precondition，再提交完整 Messages；commit 后才调用 Provider。
+- [x] Stream delta 只写 ActiveRun buffer 和 runtime events。
+- [x] 无 tool call 的 completed assistant turn 一次插入完整 Message。
+- [x] 有 tool calls 时等待全部 terminal results 后用单 transaction 插入 assistant + ordered results。
+- [x] 拒绝、取消、timeout 和 validation failure 都形成 terminal tool-result part。
+- [x] Goal/Plan 的模型工具与 UI command 经同一个 durable execution-state port 调用 SessionService transaction。
+- [x] Compact 在内存完成重建/预算校验后，用一个 transaction 插入完整 epoch、更新旧 prefix `inHistory` 并递增 revision。
+- [x] `session:get` 可附带 ActiveRunPublicSnapshot；main restart 不恢复 active execution。
+- [x] `session:archive` 禁止 active Run；idle eviction 与 durable lifecycle 分离。
+- [x] Session archive/Project remove、target dispose 和首次发送异常路径释放 live resources。
+- [x] 普通 fork 支持 historical/latest、完整 tool batch、replay ID remap、compact epoch、Goal/Plan 策略和 512 上限。
 
 ### 8.4 关键 transaction
 
@@ -452,14 +453,15 @@ completed assistant tool-call turn stays in memory
 
 ### 8.5 测试
 
-- [ ] create/update/archive/restart round-trip。
-- [ ] clientRequest retry 只生成一条 user message 并返回同一 durable outcome。
-- [ ] final assistant 完成前数据库无 partial record。
-- [ ] tool batch transaction failure 不留下 assistant 半链。
-- [ ] cancellation 在 user commit 后可留下未回答 user message，但不伪造 interrupted assistant。
-- [ ] renderer reload 获取 runtime snapshot；main restart 只恢复 durable state。
-- [ ] writer lease 与 run slot 在全部 terminal paths 正确释放。
-- [ ] Goal/Plan/compact restart 后继续影响 canonical request。
+- [x] create/update/archive/restart round-trip。
+- [x] clientRequest retry 只生成一条 user message；同进程返回同一 run，重启后只返回 deduplicated。
+- [x] final assistant 完成前数据库无 partial record。
+- [x] tool batch 只提交完整 assistant + terminal results，不留下 assistant 半链。
+- [x] cancellation 在 user commit 后可留下未回答 user message，但不伪造 interrupted assistant。
+- [x] renderer-style reload 获取 runtime snapshot；main restart 只恢复 durable state。
+- [x] writer lease 与 run slot 继续复用现有全部 terminal-path regression suite。
+- [x] Goal/Plan/compact 通过同一 Session mutation primitive 落盘。
+- [x] 临时数据库完成 A/tool/final/reopen/B，并从 SQLite active history 重建第二次 request。
 
 ### 8.6 验收与回滚
 
@@ -505,10 +507,11 @@ project:remove
 
 session:list
 session:get
-session:create
 session:update
 session:archive
+session:fork
 message:list
+message:search
 
 file-change:list
 file-change:revert
@@ -527,7 +530,7 @@ Terminal、Settings、Trace、Skills、MCP、ProjectModel 和 workspace read API
 - [ ] `session:get` 返回 SessionSnapshot、第一页 messages 和可选 ActiveRunPublicSnapshot。
 - [ ] `message:list` 使用稳定 seq cursor，后台严格限制 page size。
 - [ ] `session:update` 支持 title/model selection/mode 等受约束 patch，并携带 `expectedRevision`；冲突返回当前 record。
-- [ ] `session:create` 接收 `projectId` 和可选 selection/mode，不再接收 `conversationId + workspace`。
+- [ ] target UI 不调用 `session:create`；首次发送使用 `run:start new_session`，后续使用 `run:start existing_session`。
 - [ ] `file-change:list/revert` 只接收 `sessionId`/changeId；backend 自己解析 Project workspace。
 - [ ] IPC handler 只调用 application service，不直接访问 repositories/runtime maps。
 - [ ] 每个 durable command 在 commit 后只构造一次 envelope；invoke result 和 push event 复用同一对象语义，到达顺序不作保证，失败 transaction 不发布事件。

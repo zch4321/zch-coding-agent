@@ -165,11 +165,12 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 - 有当前项目时，在该项目下创建新对话并聚焦输入框。
 - 没有项目时，先打开目录选择器，成功后创建项目和新对话。
 - 当前 Run 活动时可以新建或切换对话，不中断后台 Run，也不显示“中断并切换”确认框。
-- 创建对话立即通过后端创建持久化 Session，但不访问 Provider；首次发送消息时只创建新的 Run。
+- 点击新对话只创建当前 renderer 的临时 draft 和候选 `sessionId`，不调用 backend、不进入 Sidebar。
+- 首次发送成功 commit 后才把候选 identity 安装为 durable Session；切换 Session、再次新建或 renderer reload 会直接丢弃未发送 draft。
 
 ### 5.3 对话标题
 
-- 初始显示 `New conversation`。
+- 未发送 draft 可在主区显示 `New conversation`，但不占用 Sidebar；首次发送 commit 后才出现 durable 标题。
 - 第一条用户消息发送成功后，使用本地截断标题或 Provider 标题生成结果更新。
 - Provider 标题生成失败不影响对话执行。
 - 支持重命名和删除。
@@ -486,7 +487,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.6 Session 生命周期
 
 - Settings 不展示 `Start session` / `Close session` 作为主流程按钮。
-- 新建对话时由后端创建持久化 Session；首次发送启动 backend memory 中的 Active Run。
+- 新建对话只产生 renderer draft；首次发送用一个 backend command 创建 durable Session/initial Messages 并启动 Active Run。
 - 切换对话不关闭后台 `LiveSessionContext` 或 `ActiveRunExecution`；归档/删除 Session、移除项目和退出应用才清理对应 runtime 资源。退出时统一取消 active runs、释放 workspace writer 并关闭 PTY。
 - 未发送 draft 与 context attachments 不进入 backend，不保证 A → B → A、renderer reload 或应用重启后恢复。
 - 应用重启后从 backend Session snapshot 恢复完整 messages、Goal/Plan、模型和模式；partial assistant output、pending approval 和 Active Run 可以丢失，不显示伪造的 interrupted message。
@@ -644,7 +645,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] 新对话在当前项目下创建；无项目时先选择目录。
 - [ ] 对话标题可生成、重命名和删除。
 - [ ] 搜索只在本地检索标题和消息，并能打开结果。
-- [ ] 新建对话立即创建 backend-owned Session；首次发送启动内存 Active Run。
+- [ ] 新建对话不调用 backend、不进入 Sidebar；首次发送原子创建 backend-owned Session/initial Messages 并启动内存 Active Run。
 - [ ] A 运行时切到 B 不打断 A，A/B timeline、approval 和 error 不串线；draft 跨切换恢复不属于验收要求。
 - [ ] Sidebar 与搜索结果按规定优先级显示 writer/running/readonly locked/approval/failed/completed 状态。
 - [ ] running/start pending/approval conversation 的 delete、fork、revert 和 remove project 被禁用并说明原因。

@@ -1007,8 +1007,8 @@ Renderer 可以持有同一个 canonical record，但必须把 `providerContinua
 ```text
 app:get-bootstrap
 project:list / project:add / project:update / project:remove
-session:list / session:get / session:create / session:update / session:archive
-message:list
+session:list / session:get / session:update / session:archive / session:fork
+message:list / message:search
 file-change:list / file-change:revert
 run:start / run:interrupt / run:interject
 approval:decide
@@ -1156,15 +1156,15 @@ Desktop 单窗口场景中，主进程崩溃会同时终止 renderer；重启后
 
 ## 9. 核心流程
 
-### 9.1 创建 Session
+### 9.1 Lazy Session creation
 
-1. Renderer 发送 `session:create(projectId, model?, mode?)`。
-2. Backend 从 backend-owned defaults 补齐。
-3. Transaction 插入 Session。
-4. Commit 后通过回包和 `session.changed` 推送同一个 envelope，其中包含 SessionRecord。
-5. Renderer 导航到新 Session。
+1. 点击“新对话”只在 renderer 建立 draft、候选 `sessionId`、model/mode/Goal/Plan 和附件引用；不发送 backend command，Sidebar 也不增加 Session replica。
+2. 首次发送使用 `run:start { kind: "new_session", ... }` 一次提交候选 Session、initial system/harness/context 和原始 user message。
+3. Backend 在外部 I/O 完成且所有 precondition 通过后，用单一 transaction 插入 Session 与首批 Messages。Session 初始 `revision = 1`，`lastSeq` 直接指向首批最后一条 Message。
+4. Commit 后通过回包和 `session.changed` 发布同一个 envelope，候选 identity 此时才成为 durable Session；随后才允许 Provider request。
+5. 已存在 Session 使用 `run:start { kind: "existing_session", ... }`，只追加本次 context/user records。
 
-创建 Session 不访问 Provider。空 Session 是真实 backend record。
+首次发送前的 terminal、interjection、approval 和 `/compact` 都没有 durable owner，必须返回 precondition error。失败前不得留下空 Session。
 
 ### 9.2 Draft
 
@@ -1174,6 +1174,7 @@ Draft 和 draft attachments 只属于当前 renderer 输入组件：
 - 不进入 SQLite。
 - 不保证切换 Session、renderer reload 或应用重启后保留。
 - 点击发送时，renderer 把完整 text 和 attachment refs 一次性交给 backend。
+- 切换 Session、再次点击新对话或 renderer reload 时直接丢弃；draft 不进入 Sidebar 搜索结果。
 
 Backend 校验附件、构造完整 user/harness messages 并落盘。Draft 丢失不会造成 backend state 与 canonical history 不一致。
 
@@ -1187,11 +1188,11 @@ Active Run 开始时解析 immutable `ModelRouteSnapshot` 并保存在 memory；
 
 ### 9.4 发送与执行
 
-1. Backend 校验 Session、Provider、并发和 writer 条件。
-2. 预留 run slot/writer lease。
-3. Transaction 插入完整 user/context messages。
+1. Backend 校验候选/已有 Session、Project、Provider、credential/notices、并发和 writer 条件。
+2. 冻结 route、credential、model profile、permission mode，并预留 run slot/writer lease。
+3. 在 transaction 外异步构造完整 harness/context；transaction 插入 Session（仅首次）和完整 user/context messages。
 4. Commit 后生成 `session.changed` envelope；`run:start` 回包返回该 envelope 和 runtime snapshot，push channel 发送同一 envelope。
-5. 创建 `ActiveRunExecution` 并开始 provider/tool loop；其后 backend 自主完成的 assistant/tool commit 只需通过 push event 通知 renderer。
+5. `ActiveRunExecution` 在 commit 前只持有可释放的 runtime lease；commit 后才开始 provider/tool loop。其后 backend 自主完成的 assistant/tool commit 只需通过 push event 通知 renderer。
 6. Stream delta 只存 memory 并推送 renderer。
 7. 每个完整 assistant turn 或完整 tool batch 按 §7.2 写入 SQLite。
 8. 完成、取消或失败后释放 runtime resources。
@@ -1482,11 +1483,13 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 
 ## 20. 当前迁移状态
 
-P0 regression gates、P1 shared canonical contracts、P2 SQLite/Persistence foundation 和 P3 canonical history/provider boundary 已实现。P2 已提供 checksummed forward migrations、单连接串行 transaction、Project/Session/Message/FileChange repositories、shared-schema row codecs、有界查询、文件型临时测试数据库，以及 development Electron/Windows x64 package 的 `node:sqlite` 探针。
+P0 regression gates、P1 shared canonical contracts、P2 SQLite/Persistence foundation、P3 canonical history/provider boundary 和 P4 isolated durable application/runtime target 已实现。P2 已提供 checksummed forward migrations、单连接串行 transaction、Project/Session/Message/FileChange repositories、shared-schema row codecs、有界查询、文件型临时测试数据库，以及 development Electron/Windows x64 package 的 `node:sqlite` 探针。
 
 P3 已把进程内 Agent loop 切到 canonical messages 与严格 `MessageHistoryCompiler`，由 Chat Completions Adapter 独占 wire DTO、HTTP/SSE transport、response normalization 和 continuation 恢复。每个 Run 冻结 main/compression/approval route、credential 与 model profile；AppConfig v9 检测到旧版或不兼容文件时删除并按默认值重建，Trace v2 明确拒绝旧 trace，trace fork 已移除。自动 compact 固定为 `system → harness* → root user replay → compact summary`，手动带正文固定为 `system → harness* → compact summary → new user`。
 
-P2 persistence 仍只由 unit/integration tests 和 runtime probe 使用，尚未导入 production Desktop/Headless composition，也不读取或修改真实 `userData/agent.db`、`workbench.json` 或 `change-history.json`。P3 canonical history 仍是 Session 内存状态，不提前把 SQLite 变成用户状态真相源。P1 `domain-state-api` 仍未接入现有 preload/IPC handler 或 renderer；这些接线分别从 P4、P6、P7 开始，并在 P8 协调切流。
+P4 在 `electron/application/` 提供串行 application-state coordinator、Project/Session services、lazy `run:start`、普通 Session fork、LiveSessionContextRegistry、bounded runtime snapshot 和 durable execution-state port。该 port 接入现有唯一 Agent loop，在 Provider 前提交首次 input、原子提交 assistant/tool batch、interjection、Goal/Plan 与 compact epoch；临时数据库回归覆盖“发送 A → tool chain → final → dispose → reopen → 发送 B”。
+
+P4 target composition 仍只由 unit/integration tests 使用，尚未导入 production Desktop/Headless、legacy IPC/preload 或 renderer 默认路径，也不读取或修改真实 `userData/agent.db`。FileChange 工具仍使用 legacy store，留给 P5；domain-state IPC/renderer 和正式切流分别留给 P6/P7/P8。
 
 当前 legacy 实现仍然：
 
