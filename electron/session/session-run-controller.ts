@@ -12,7 +12,11 @@ import {
   orchestrationRequestContent,
 } from './prompt-harness'
 import { id, ipcFault, redactJsonSecrets } from './session-common'
-import { appendAssistantTurn, appendUserInput } from './canonical-history'
+import {
+  appendAssistantTurn,
+  appendUserInput,
+  canonicalHash,
+} from './canonical-history'
 import type { SessionCompactCoordinator } from './session-compact-coordinator'
 import type { SessionInterjectionCoordinator } from './session-interjection-coordinator'
 import type { SessionOrchestrationPlanner } from './session-orchestration-planner'
@@ -26,6 +30,7 @@ import type {
   HarnessRunMessage,
   RunHarnessContext,
   SessionState,
+  SessionExecutionStatePort,
 } from './session-types'
 import type { RunAccessLease } from './workspace-access-coordinator'
 
@@ -51,6 +56,7 @@ export class SessionRunController {
     session: SessionState,
     runId: RunId,
   ) => RunAccessLease
+  readonly #executionState?: SessionExecutionStatePort
 
   constructor(options: {
     configStore: ConfigStore
@@ -63,6 +69,7 @@ export class SessionRunController {
     onDiagnostic: (message: string, error?: unknown) => void
     emit: (session: SessionState, event: AgentEventDraft) => void
     acquireRunAccess: (session: SessionState, runId: RunId) => RunAccessLease
+    executionState?: SessionExecutionStatePort
   }) {
     this.#configStore = options.configStore
     this.#providerTurns = options.providerTurns
@@ -74,6 +81,7 @@ export class SessionRunController {
     this.#onDiagnostic = options.onDiagnostic
     this.#emit = options.emit
     this.#acquireRunAccess = options.acquireRunAccess
+    this.#executionState = options.executionState
   }
 
   start(
@@ -119,6 +127,17 @@ export class SessionRunController {
       processedInterjectionIds: new Set(),
       harnessMessageIds: [],
       autoCompactEligible: false,
+      publicTools: new Map(),
+      publicSnapshot: {
+        schemaVersion: 1,
+        sessionId: session.sessionId,
+        runId,
+        status: 'idle',
+        text: '',
+        reasoning: '',
+        tools: [],
+        interjections: [],
+      },
     }
 
     run.done = this.#run(
@@ -259,10 +278,12 @@ export class SessionRunController {
       if (!runProvider) {
         throw new Error(`Provider is not configured: ${session.provider}`)
       }
-      session.modelSelection = {
-        providerId: runProvider.id,
-        model: runProvider.model,
-        reasoning: runProvider.reasoning,
+      if (!session.modelSelectionPinned) {
+        session.modelSelection = {
+          providerId: runProvider.id,
+          model: runProvider.model,
+          reasoning: runProvider.reasoning,
+        }
       }
       run.routes = await resolveRunRoutes(
         this.#configStore,
@@ -361,6 +382,7 @@ export class SessionRunController {
           const userRecord = appendUserInput(session, {
             content: prepared.providerMessage,
             clientRequestId: run.clientRequestId,
+            requestHash: canonicalHash(userMessage),
           })
           run.rootUserMessageId = userRecord.id
           await session.logger.write({
@@ -371,6 +393,7 @@ export class SessionRunController {
           })
         }
       }
+      await this.#executionState?.commit(session, { reason: 'run_input' })
       run.autoCompactEligible = true
       await session.logger.write({
         type: 'run.start',
@@ -391,12 +414,24 @@ export class SessionRunController {
         // next model continuation. This runs after the previous tool batch has
         // completed (and never splits an assistant tool_call from its
         // tool_result, because executeToolCalls has already finished).
+        const beforeInterjectionSeq = session.nextMessageSeq
         await this.#interjections.drain(session, run)
+        if (session.nextMessageSeq !== beforeInterjectionSeq) {
+          await this.#executionState?.commit(session, {
+            reason: 'interjection',
+          })
+        }
         await this.#compact.maybeAutoCompactBeforeProviderCall(session, run)
         // Compaction itself is a streamed Provider call. Flush interjections
         // that arrived while the summary was being generated into the newly
         // rebuilt epoch before issuing the continuation request.
+        const beforePostCompactInterjectionSeq = session.nextMessageSeq
         await this.#interjections.drain(session, run)
+        if (session.nextMessageSeq !== beforePostCompactInterjectionSeq) {
+          await this.#executionState?.commit(session, {
+            reason: 'interjection',
+          })
+        }
 
         const completed = await this.#providerTurns.callProvider(
           session,
@@ -437,7 +472,17 @@ export class SessionRunController {
         }
 
         if (completed.toolCalls.length === 0) {
-          const continuation = await this.#orchestration.nextStep(session, run)
+          let continuation: 'continue' | 'finish' = 'finish'
+          let orchestrationError: unknown
+          try {
+            continuation = await this.#orchestration.nextStep(session, run)
+          } catch (error) {
+            orchestrationError = error
+          }
+          await this.#executionState?.commit(session, {
+            reason: 'assistant_turn',
+          })
+          if (orchestrationError !== undefined) throw orchestrationError
           if (continuation === 'continue') {
             continue
           }
@@ -457,11 +502,20 @@ export class SessionRunController {
 
         this.setRunStatus(session, run, 'evaluating_tools')
         run.lastToolBatchId = id('tool-batch')
-        await this.#toolRunner.executeToolCalls(
-          session,
-          run,
-          completed.toolCalls,
-        )
+        let toolBatchFailed = false
+        let toolBatchError: unknown
+        try {
+          await this.#toolRunner.executeToolCalls(
+            session,
+            run,
+            completed.toolCalls,
+          )
+        } catch (error) {
+          toolBatchFailed = true
+          toolBatchError = error
+        }
+        await this.#executionState?.commit(session, { reason: 'tool_batch' })
+        if (toolBatchFailed) throw toolBatchError
         run.autoCompactEligible = true
       }
 

@@ -20,6 +20,7 @@ import type {
   AgentEventDraft,
   SessionManagerOptions,
   SessionState,
+  SessionExecutionStatePort,
 } from './session-types'
 import type { SessionOrchestratorMessages } from './session-orchestrator-messages'
 import {
@@ -32,6 +33,7 @@ import {
   appendCompactSummary,
   appendPromptMessage,
   appendUserInput,
+  canonicalHash,
   canonicalTraceSource,
   deactivateActiveHistory,
   MessageHistoryCompiler,
@@ -74,6 +76,7 @@ export class SessionCompactCoordinator {
   readonly #getWorkspaceConcurrency: (
     session: SessionState,
   ) => WorkspaceConcurrencyContext
+  readonly #executionState?: SessionExecutionStatePort
 
   constructor(options: {
     configStore: ConfigStore
@@ -94,6 +97,7 @@ export class SessionCompactCoordinator {
     getWorkspaceConcurrency?: (
       session: SessionState,
     ) => WorkspaceConcurrencyContext
+    executionState?: SessionExecutionStatePort
   }) {
     this.#configStore = options.configStore
     this.#toolRegistry = options.toolRegistry
@@ -107,6 +111,7 @@ export class SessionCompactCoordinator {
     this.#setRunStatus = options.setRunStatus
     this.#getWorkspaceConcurrency =
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
+    this.#executionState = options.executionState
   }
 
   async maybeAutoCompactBeforeProviderCall(
@@ -161,6 +166,7 @@ export class SessionCompactCoordinator {
       replacesThroughSeq: history.messages.at(-1)!.seq,
       resource: prompt.resource,
       replayRootUser: true,
+      commit: true,
     })
   }
 
@@ -188,28 +194,45 @@ export class SessionCompactCoordinator {
       history.messages,
       true,
     )
-    await this.#rewrite(session, run, {
-      summary,
-      sourceHash: history.sourceHash,
-      replacesThroughSeq: history.messages.at(-1)!.seq,
-      resource: prompt.resource,
-      replayRootUser: false,
-    })
+    const previousHistory = structuredClone(session.history)
+    const previousNextSeq = session.nextMessageSeq
+    const previousRootUserMessageId = run.rootUserMessageId
+    try {
+      await this.#rewrite(session, run, {
+        summary,
+        sourceHash: history.sourceHash,
+        replacesThroughSeq: history.messages.at(-1)!.seq,
+        resource: prompt.resource,
+        replayRootUser: false,
+        commit: false,
+      })
 
-    const followUp = compactFollowUp(userMessage)
-    if (followUp) {
-      const user = appendUserInput(session, {
-        content: followUp,
-        clientRequestId: run.clientRequestId,
+      const followUp = compactFollowUp(userMessage)
+      if (followUp) {
+        const user = appendUserInput(session, {
+          content: followUp,
+          clientRequestId: run.clientRequestId,
+          requestHash: canonicalHash(userMessage),
+        })
+        run.rootUserMessageId = user.id
+        await session.logger.write({
+          type: 'user.message',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          text: followUp,
+        })
+      }
+      await this.#executionState?.commit(session, {
+        reason: 'compact',
+        deactivateThroughSeq: history.messages.at(-1)!.seq,
+        invalidate: true,
       })
-      run.rootUserMessageId = user.id
-      await session.logger.write({
-        type: 'user.message',
-        sessionId: session.sessionId,
-        runId: run.runId,
-        text: followUp,
-      })
-      return true
+      if (followUp) return true
+    } catch (error) {
+      session.history = previousHistory
+      session.nextMessageSeq = previousNextSeq
+      run.rootUserMessageId = previousRootUserMessageId
+      throw error
     }
 
     this.#emit(session, {
@@ -390,6 +413,7 @@ export class SessionCompactCoordinator {
       replacesThroughSeq: number
       resource?: ReturnType<SessionOrchestratorMessages['prompt']>['resource']
       replayRootUser: boolean
+      commit: boolean
     },
   ): Promise<void> {
     const previousHistory = structuredClone(session.history)
@@ -478,6 +502,13 @@ export class SessionCompactCoordinator {
         throw new ContextBudgetError(
           'Compacted history still exceeds the model context budget',
         )
+      }
+      if (input.commit) {
+        await this.#executionState?.commit(session, {
+          reason: 'compact',
+          deactivateThroughSeq: input.replacesThroughSeq,
+          invalidate: true,
+        })
       }
     } catch (error) {
       session.history = previousHistory

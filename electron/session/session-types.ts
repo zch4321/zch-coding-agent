@@ -22,6 +22,11 @@ import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import type { McpManager } from '../mcp/mcp-manager'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
 import type { ResolvedModelRoute } from '../providers/model-route-resolver'
+import type {
+  ActiveRunPublicSnapshot,
+  ActiveRunToolSnapshot,
+} from '../../shared/runtime-state'
+import type { SessionCommandResult } from '../../shared/domain-state-api'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -69,7 +74,27 @@ export interface SessionManagerOptions {
     config: PublicConfig
     apiKey: string
   }) => AutoApprover
+  executionState?: SessionExecutionStatePort
   onDiagnostic?: (message: string, error?: unknown) => void
+}
+
+export interface SessionExecutionCommit {
+  reason:
+    | 'run_input'
+    | 'interjection'
+    | 'assistant_turn'
+    | 'tool_batch'
+    | 'compact'
+    | 'metadata'
+  deactivateThroughSeq?: number
+  invalidate?: boolean
+}
+
+export interface SessionExecutionStatePort {
+  commit(
+    session: SessionState,
+    input: SessionExecutionCommit,
+  ): Promise<SessionCommandResult | undefined>
 }
 
 export interface PendingApproval {
@@ -112,12 +137,18 @@ export interface ActiveRun {
   rootUserMessageId?: MessageId
   harnessMessageIds: MessageId[]
   autoCompactEligible: boolean
+  publicSnapshot: ActiveRunPublicSnapshot
+  publicTools: Map<CallId, ActiveRunToolSnapshot>
   routes?: {
     main: ResolvedModelRoute
     compression: ResolvedModelRoute
     approval: ResolvedModelRoute
   }
 }
+
+// P4 target terminology. The legacy facade and durable composition share this
+// exact execution object rather than maintaining two provider/tool loops.
+export type ActiveRunExecution = ActiveRun
 
 export interface SessionState {
   sessionId: SessionId
@@ -126,6 +157,7 @@ export interface SessionState {
   mode: PermissionMode
   provider: string
   modelSelection: ModelSelection
+  modelSelectionPinned: boolean
   logger: TraceLogger
   history: MessageRecord[]
   nextMessageSeq: number

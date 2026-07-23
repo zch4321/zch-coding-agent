@@ -15,6 +15,7 @@ import { SkillsManager } from '../skills/manager'
 import { AgentRuntime } from './agent-runtime'
 import { RuntimeEventBus } from './runtime-event-bus'
 import type { RuntimeEventListener } from './runtime-events'
+import type { SessionExecutionStatePort } from '../session/session-types'
 
 export interface CreateAgentRuntimeOptions {
   configStore: ConfigStore
@@ -30,6 +31,7 @@ export interface CreateAgentRuntimeOptions {
     apiKey: string
   }) => AutoApprover
   eventListeners?: RuntimeEventListener[]
+  executionState?: SessionExecutionStatePort
   onDiagnostic?: (message: string, error?: unknown) => void
 }
 
@@ -91,6 +93,7 @@ export async function createAgentRuntime(
       fetchImpl: options.fetchImpl,
       providerFactory: options.providerFactory,
       autoApproverFactory: options.autoApproverFactory,
+      executionState: options.executionState,
       onDiagnostic,
     })
     disposer.add(() => sessions.dispose())

@@ -2,9 +2,17 @@ import path from 'node:path'
 import { getProviderConfig, type PermissionMode } from '../../shared/config'
 import type { CallId, RunId, SessionId, TerminalId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
+import type { MessageRecord } from '../../shared/message'
+import type { ModelSelection } from '../../shared/model-route'
 import type { RunContext } from '../../shared/context'
 import type { TerminalInfo, TerminalSnapshot } from '../../shared/terminal'
-import type { PlanState, PlanStatus } from '../../shared/orchestration'
+import type {
+  GoalState,
+  PlanState,
+  PlanStatus,
+} from '../../shared/orchestration'
+import type { SessionRecord } from '../../shared/session'
+import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
 import { JsonlTraceLogger, NullTraceLogger } from '../logging/logger'
@@ -43,6 +51,7 @@ import { SessionInterjectionCoordinator } from './session-interjection-coordinat
 import { SessionOrchestrationPlanner } from './session-orchestration-planner'
 import { SessionUserTurnPreparer } from './session-user-turn-preparer'
 import { SessionRunController } from './session-run-controller'
+import { updatePublicRunSnapshot } from './session-runtime-snapshot'
 import {
   appendInitialPromptHarness,
   appendRuntimeContextIfChanged,
@@ -96,6 +105,7 @@ export class SessionManager {
   readonly #runs: SessionRunController
   readonly #workspaceAccess: WorkspaceAccessCoordinator
   readonly #permissionPipeline = new PermissionPipeline()
+  readonly #executionState: SessionManagerOptions['executionState']
 
   /**
    * Wires session collaborators around shared session state.
@@ -117,6 +127,7 @@ export class SessionManager {
     this.#providerFactory = options.providerFactory
     this.#fetchImpl = options.fetchImpl
     this.#autoApproverFactory = options.autoApproverFactory
+    this.#executionState = options.executionState
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
     this.#events = new SessionEventEmitter({
       eventSink: options.eventSink,
@@ -176,6 +187,7 @@ export class SessionManager {
         this.#runs.setRunStatus(session, run, status, error),
       getWorkspaceConcurrency: (session) =>
         this.#workspaceConcurrencyContext(session),
+      executionState: this.#executionState,
     })
     this.#interjections = new SessionInterjectionCoordinator({
       configStore: this.#configStore,
@@ -238,6 +250,7 @@ export class SessionManager {
       emit: (session, event) => this.#emit(session, event),
       acquireRunAccess: (session, runId) =>
         this.#acquireRunAccess(session, runId),
+      executionState: this.#executionState,
     })
     this.#pluginBus?.setToolRegistrationPort(this.#toolRegistry)
   }
@@ -252,6 +265,10 @@ export class SessionManager {
     workspace: string
     mode: PermissionMode
     provider: string
+    sessionId?: SessionId
+    modelSelection?: ModelSelection
+    goal?: GoalState
+    plan?: PlanState
   }): Promise<SessionId> {
     const publicConfig = this.#configStore.getPublicConfig()
 
@@ -275,7 +292,10 @@ export class SessionManager {
     }
     const guard = await PathGuard.create(input.workspace)
     await this.#mcpManager?.activateWorkspace(guard.workspacePath)
-    const sessionId = id<SessionId>('session')
+    const sessionId = input.sessionId ?? id<SessionId>('session')
+    if (this.#sessions.has(sessionId)) {
+      ipcFault('CONFLICT', 'Session already exists in the live registry')
+    }
     const logger = publicConfig.logging.enabled
       ? await JsonlTraceLogger.create(this.#traceDirectory, sessionId)
       : new NullTraceLogger()
@@ -285,11 +305,14 @@ export class SessionManager {
       workspace: guard.workspacePath,
       mode: input.mode,
       provider: provider.id,
-      modelSelection: {
-        providerId: provider.id,
-        model: provider.model,
-        reasoning: provider.reasoning,
-      },
+      modelSelection: structuredClone(
+        input.modelSelection ?? {
+          providerId: provider.id,
+          model: provider.model,
+          reasoning: provider.reasoning,
+        },
+      ),
+      modelSelectionPinned: input.modelSelection !== undefined,
       logger,
       history: [],
       nextMessageSeq: 1,
@@ -297,40 +320,115 @@ export class SessionManager {
       closed: false,
       clientRequests: new Map(),
       mcpDisclosures: new Map(),
+      ...(input.goal ? { goal: structuredClone(input.goal) } : {}),
+      ...(input.plan ? { plan: structuredClone(input.plan) } : {}),
     }
 
     this.#sessions.set(sessionId, session)
-    await appendInitialPromptHarness(session, {
-      workspace: session.workspace,
-      mode: session.mode,
-      config: publicConfig,
-      providerId: provider.id,
-      promptRegistry: this.#promptRegistry,
-      projectMetadata: this.#projectMetadata,
-      skillSummary: this.#skillsManager?.summaryPrompt(),
-      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
-      workspaceConcurrency: this.#workspaceConcurrencyContext(session),
-    })
-    await session.logger.write({
-      type: 'session.start',
-      sessionId,
-      conversationId: input.conversationId,
-      workspace: session.workspace,
-      model: provider.model,
-      mode: input.mode,
-    })
-    await this.#pluginBus
-      ?.emit('onSessionStart', {
-        version: 1,
-        sessionId,
+    try {
+      await appendInitialPromptHarness(session, {
         workspace: session.workspace,
+        mode: session.mode,
+        config: publicConfig,
+        providerId: provider.id,
+        promptRegistry: this.#promptRegistry,
+        projectMetadata: this.#projectMetadata,
+        skillSummary: this.#skillsManager?.summaryPrompt(),
+        toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+        workspaceConcurrency: this.#workspaceConcurrencyContext(session),
+      })
+      await session.logger.write({
+        type: 'session.start',
+        sessionId,
+        conversationId: input.conversationId,
+        workspace: session.workspace,
+        model: session.modelSelection.model,
         mode: input.mode,
       })
-      .catch((error: unknown) =>
-        this.#onDiagnostic('Plugin onSessionStart failed', error),
-      )
+      await this.#pluginBus
+        ?.emit('onSessionStart', {
+          version: 1,
+          sessionId,
+          workspace: session.workspace,
+          mode: input.mode,
+        })
+        .catch((error: unknown) =>
+          this.#onDiagnostic('Plugin onSessionStart failed', error),
+        )
+    } catch (error) {
+      this.#sessions.delete(sessionId)
+      await session.logger.dispose().catch(() => undefined)
+      throw error
+    }
 
     return sessionId
+  }
+
+  /**
+   * Loads a durable Session into the live registry without rebuilding its
+   * initial harness. The next provider request is compiled from SQLite-backed
+   * canonical history supplied by the caller.
+   */
+  async restoreSession(input: {
+    record: SessionRecord
+    workspace: string
+    history: readonly MessageRecord[]
+  }): Promise<SessionId> {
+    const existing = this.#sessions.get(input.record.id)
+    if (existing && !existing.closed) return existing.sessionId
+    if (input.record.lifecycle !== 'active') {
+      ipcFault('PRECONDITION_FAILED', 'Archived Session cannot be loaded')
+    }
+    const publicConfig = this.#configStore.getPublicConfig()
+    const provider = getProviderConfig(
+      publicConfig,
+      input.record.modelSelection.providerId,
+    )
+    if (!provider) {
+      ipcFault(
+        'PRECONDITION_FAILED',
+        `Provider is not configured: ${input.record.modelSelection.providerId}`,
+      )
+    }
+    const guard = await PathGuard.create(input.workspace)
+    await this.#mcpManager?.activateWorkspace(guard.workspacePath)
+    const logger = publicConfig.logging.enabled
+      ? await JsonlTraceLogger.create(this.#traceDirectory, input.record.id)
+      : new NullTraceLogger()
+    const session: SessionState = {
+      sessionId: input.record.id,
+      conversationId: input.record.id,
+      workspace: guard.workspacePath,
+      mode: input.record.permissionMode,
+      provider: input.record.modelSelection.providerId,
+      modelSelection: structuredClone(input.record.modelSelection),
+      modelSelectionPinned: true,
+      logger,
+      history: structuredClone([...input.history]),
+      nextMessageSeq: input.record.lastSeq + 1,
+      goal: input.record.goal ? structuredClone(input.record.goal) : undefined,
+      plan: input.record.plan ? structuredClone(input.record.plan) : undefined,
+      eventSeq: 0,
+      closed: false,
+      clientRequests: new Map(),
+      mcpDisclosures: new Map(),
+    }
+    this.#sessions.set(session.sessionId, session)
+    try {
+      await session.logger.write({
+        type: 'session.start',
+        sessionId: session.sessionId,
+        conversationId: session.conversationId,
+        workspace: session.workspace,
+        model: session.modelSelection.model,
+        mode: session.mode,
+      })
+    } catch (error) {
+      this.#sessions.delete(session.sessionId)
+      await session.logger.dispose().catch(() => undefined)
+      throw error
+    }
+    return session.sessionId
   }
 
   /**
@@ -368,6 +466,9 @@ export class SessionManager {
       }
     }
 
+    const previousMode = session.mode
+    const previousHistory = structuredClone(session.history)
+    const previousNextSeq = session.nextMessageSeq
     await session.logger.write({
       type: 'session.mode',
       sessionId,
@@ -385,6 +486,14 @@ export class SessionManager {
       workspaceConcurrency: this.#workspaceConcurrencyContext(session),
       toolNames: this.#toolRegistry.list().map((tool) => tool.id),
     })
+    try {
+      await this.#executionState?.commit(session, { reason: 'metadata' })
+    } catch (error) {
+      session.mode = previousMode
+      session.history = previousHistory
+      session.nextMessageSeq = previousNextSeq
+      throw error
+    }
     return { accepted: true }
   }
 
@@ -416,6 +525,7 @@ export class SessionManager {
       return { accepted: false }
     }
 
+    const previousPlan = structuredClone(session.plan)
     const previousStatus = session.plan.status ?? 'active'
     session.plan.status = input.status
     session.plan.updatedAt = new Date().toISOString()
@@ -433,6 +543,12 @@ export class SessionManager {
       source: input.source ?? 'ui:plan-review',
       plan: toJsonValue(session.plan),
     })
+    try {
+      await this.#executionState?.commit(session, { reason: 'metadata' })
+    } catch (error) {
+      session.plan = previousPlan
+      throw error
+    }
 
     return { accepted: true, plan: structuredClone(session.plan) }
   }
@@ -531,9 +647,49 @@ export class SessionManager {
     return new Set([...this.#sessions.keys()])
   }
 
-  /**
-   * Requests cancellation for a specific active run.
-   */
+  hasLiveSession(sessionId: SessionId): boolean {
+    const session = this.#sessions.get(sessionId)
+    return Boolean(session && !session.closed)
+  }
+
+  hasActiveRun(sessionId: SessionId): boolean {
+    return Boolean(this.#sessions.get(sessionId)?.activeRun)
+  }
+
+  hasUnsettledSideEffects(sessionId: SessionId): boolean {
+    return Boolean(
+      this.#sessions.get(sessionId)?.activeRun?.pendingSideEffects.size,
+    )
+  }
+
+  hasOpenTerminals(sessionId: SessionId): boolean {
+    const session = this.#sessions.get(sessionId)
+    if (!session || session.closed) return false
+    return this.#terminals.list(sessionId).length > 0
+  }
+
+  activeRunSnapshot(sessionId: SessionId): ActiveRunPublicSnapshot | undefined {
+    const snapshot = this.#sessions.get(sessionId)?.activeRun?.publicSnapshot
+    return snapshot ? structuredClone(snapshot) : undefined
+  }
+
+  applyDurableSessionRecord(record: SessionRecord): void {
+    const session = this.#sessions.get(record.id)
+    if (!session || session.closed) return
+    if (session.activeRun) {
+      ipcFault(
+        'CONFLICT',
+        'Session metadata cannot change during an active run',
+      )
+    }
+    session.mode = record.permissionMode
+    session.provider = record.modelSelection.providerId
+    session.modelSelection = structuredClone(record.modelSelection)
+    session.modelSelectionPinned = true
+    session.goal = record.goal ? structuredClone(record.goal) : undefined
+    session.plan = record.plan ? structuredClone(record.plan) : undefined
+  }
+
   interruptRun(sessionId: SessionId, runId: RunId): boolean {
     const session = this.#requireSession(sessionId)
     return this.#runs.interrupt(session, runId)
@@ -586,9 +742,6 @@ export class SessionManager {
     })
   }
 
-  /**
-   * Applies a human approval decision to the active approval coordinator.
-   */
   decideApproval(input: {
     sessionId: SessionId
     runId: RunId
@@ -600,9 +753,6 @@ export class SessionManager {
     return this.#approvals.decide(session, input)
   }
 
-  /**
-   * Opens a PTY terminal owned by the session.
-   */
   async openTerminal(input: {
     sessionId: SessionId
     cwd?: string
@@ -612,16 +762,10 @@ export class SessionManager {
     return this.#terminals.open(input)
   }
 
-  /**
-   * Lists live terminals for a session.
-   */
   listTerminals(sessionId: SessionId): TerminalInfo[] {
     return this.#terminals.list(sessionId)
   }
 
-  /**
-   * Writes raw input to a session terminal.
-   */
   sendTerminalInput(
     sessionId: SessionId,
     terminalId: TerminalId,
@@ -630,9 +774,6 @@ export class SessionManager {
     return this.#terminals.write(sessionId, terminalId, data)
   }
 
-  /**
-   * Resizes a session terminal viewport.
-   */
   resizeTerminal(
     sessionId: SessionId,
     terminalId: TerminalId,
@@ -642,16 +783,10 @@ export class SessionManager {
     return this.#terminals.resize(sessionId, terminalId, cols, rows)
   }
 
-  /**
-   * Closes one terminal in a session.
-   */
   closeTerminal(sessionId: SessionId, terminalId: TerminalId): boolean {
     return this.#terminals.close(sessionId, terminalId)
   }
 
-  /**
-   * Returns a bounded terminal scrollback snapshot.
-   */
   terminalSnapshot(
     sessionId: SessionId,
     terminalId: TerminalId,
@@ -659,9 +794,6 @@ export class SessionManager {
     return this.#terminals.snapshot(sessionId, terminalId)
   }
 
-  /**
-   * Closes every session and disposes terminal infrastructure.
-   */
   async dispose(): Promise<void> {
     await Promise.all(
       [...this.#sessions.keys()].map((idValue) => this.closeSession(idValue)),
@@ -826,6 +958,11 @@ export class SessionManager {
    * Emits a sequenced agent event through the shared event emitter.
    */
   #emit(session: SessionState, event: AgentEventDraft): void {
+    const run =
+      'runId' in event && session.activeRun?.runId === event.runId
+        ? session.activeRun
+        : undefined
+    if (run) updatePublicRunSnapshot(run, event)
     this.#events.emitAgent(session, event)
   }
 

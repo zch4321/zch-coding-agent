@@ -119,6 +119,7 @@ export function appendUserInput(
     content: string
     clientRequestId?: string
     replayedFromMessageId?: MessageId
+    requestHash?: string
   },
 ): Extract<MessageRecord, { kind: 'user_input' }> {
   if (!input.content.trim()) {
@@ -144,7 +145,10 @@ export function appendUserInput(
           schemaVersion: 1 as const,
           replayedFromMessageId: input.replayedFromMessageId,
         }
-      : { schemaVersion: 1 as const },
+      : {
+          schemaVersion: 1 as const,
+          ...(input.requestHash ? { requestHash: input.requestHash } : {}),
+        },
   } as Extract<MessageRecord, { kind: 'user_input' }>
   state.history.push(record)
   return record
