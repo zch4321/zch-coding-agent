@@ -8,11 +8,15 @@ import type {
 
 export class ScriptedProvider implements LLMProvider {
   calls = 0
+  requestBodies: JsonValue[] = []
 
   async *streamChat(
     request: ProviderChatRequest,
   ): AsyncIterable<ProviderEvent> {
     this.calls += 1
+    this.requestBodies.push(
+      structuredClone(request.providerRequestOverride ?? null),
+    )
     await request.onRequest?.({
       normalizedMessages: request.messages as unknown as JsonValue[],
       providerRequest: {
@@ -31,7 +35,7 @@ export class ScriptedProvider implements LLMProvider {
       }
       yield {
         type: 'completed',
-        rawResponse: { id: 'first' },
+        rawResponse: { id: 'first', echo: 'secret-sentinel' },
         turn: {
           role: 'assistant',
           content: null,
@@ -56,7 +60,7 @@ export class ScriptedProvider implements LLMProvider {
           },
         ],
         usage: { total_tokens: 8 },
-        providerState: { turn: 1 },
+        providerState: { turn: 1, echo: 'secret-sentinel' },
         timing: { ttftMs: 1, totalMs: 2 },
       }
       return
@@ -69,11 +73,11 @@ export class ScriptedProvider implements LLMProvider {
     }
     yield {
       type: 'completed',
-      rawResponse: { id: 'second' },
+      rawResponse: { id: 'second', echo: 'secret-sentinel' },
       turn: { role: 'assistant', content: 'README summary' },
       toolCalls: [],
       usage: { total_tokens: 12 },
-      providerState: { turn: 2 },
+      providerState: { turn: 2, echo: 'secret-sentinel' },
       timing: { ttftMs: 1, totalMs: 2 },
     }
   }

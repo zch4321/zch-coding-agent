@@ -16,7 +16,7 @@ import {
 } from './session-manager-test-support'
 
 describe('SessionManager compaction', () => {
-  it('rewrites provider history for /compact and reinjects summary as user context', async () => {
+  it('orders manual /compact follow-up after the compact summary', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-compact-'))
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
@@ -78,14 +78,23 @@ describe('SessionManager compaction', () => {
       promptId: 'orchestration.compact.zh-CN',
     })
     expect(provider.requests[1]?.tools).toEqual([])
-    expect(
-      provider.requests[1]?.messages.some(
-        (message) =>
-          message.role === 'user' &&
-          typeof message.content === 'string' &&
-          message.content.includes('focus on risks'),
-      ),
-    ).toBe(true)
+    expect(JSON.stringify(provider.requests[1]?.messages)).not.toContain(
+      'focus on risks',
+    )
+
+    const compactContinuation = provider.requests[2]?.messages ?? []
+    const compactSummaryIndex = compactContinuation.findIndex(
+      (message) =>
+        message.role === 'user' &&
+        message.content?.includes('<compact_history'),
+    )
+    const newUserIndex = compactContinuation.findIndex(
+      (message) => message.content === 'focus on risks',
+    )
+    expect(JSON.stringify(compactContinuation)).not.toContain('RAW_SHOULD_DROP')
+    expect(compactContinuation[0]?.role).toBe('system')
+    expect(compactSummaryIndex).toBeGreaterThan(0)
+    expect(newUserIndex).toBeGreaterThan(compactSummaryIndex)
 
     manager.startRun({
       sessionId,
@@ -102,26 +111,101 @@ describe('SessionManager compaction', () => {
         ).length >= 3,
     )
 
-    const afterCompactMessages = provider.requests[2]?.messages ?? []
+    const afterCompactMessages = provider.requests[3]?.messages ?? []
     const rendered = JSON.stringify(afterCompactMessages)
 
     expect(rendered).not.toContain('RAW_SHOULD_DROP')
     expect(afterCompactMessages[0]?.role).toBe('system')
-    expect(afterCompactMessages[1]?.role).toBe('user')
-    expect(afterCompactMessages[1]?.content).toContain('<compact_history')
-    expect(afterCompactMessages[1]?.content).toContain(
-      'Compact summary retained',
-    )
-    expect(afterCompactMessages[1]?.content).toContain(
-      'Orchestration state at compaction:',
-    )
-    expect(afterCompactMessages[1]?.content).toContain('Goal: none')
-    expect(afterCompactMessages[1]?.content).toContain('Plan: none')
+    expect(rendered).toContain('<compact_history')
+    expect(rendered).toContain('Compact summary retained')
+    expect(rendered).toContain('Orchestration state at compaction:')
+    expect(rendered).toContain('Goal: none')
+    expect(rendered).toContain('Plan: none')
     expect(
       afterCompactMessages.some(
         (message) => message.content === 'continue after compact',
       ),
     ).toBe(true)
+    await manager.closeSession(sessionId)
+  })
+
+  it('ends pure /compact after rebuilding system, harness, and summary', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-compact-'))
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const provider = new CompactProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: 'history to summarize',
+      clientRequestId: 'pure-before',
+    })
+    await waitFor(
+      () =>
+        sent.filter(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'completed',
+        ).length >= 1,
+    )
+
+    manager.startRun({
+      sessionId,
+      message: '/compact',
+      clientRequestId: 'pure-compact',
+    })
+    await waitFor(
+      () =>
+        sent.filter(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'completed',
+        ).length >= 2,
+    )
+
+    expect(provider.requests).toHaveLength(2)
+    expect(provider.requests[1]?.tools).toEqual([])
+    expect(
+      sent.some(
+        ({ event }) =>
+          event.type === 'assistant.message.completed' &&
+          event.text === 'Compact summary retained',
+      ),
+    ).toBe(true)
+
+    manager.startRun({
+      sessionId,
+      message: 'new task',
+      clientRequestId: 'pure-after',
+    })
+    await waitFor(
+      () =>
+        sent.filter(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'completed',
+        ).length >= 3,
+    )
+    const messages = provider.requests[2]?.messages ?? []
+    const summaryIndex = messages.findIndex((message) =>
+      message.content?.includes('<compact_history'),
+    )
+    const userIndex = messages.findIndex(
+      (message) => message.content === 'new task',
+    )
+    expect(messages[0]?.role).toBe('system')
+    expect(summaryIndex).toBeGreaterThan(0)
+    expect(userIndex).toBeGreaterThan(summaryIndex)
+    expect(JSON.stringify(messages)).not.toContain('history to summarize')
     await manager.closeSession(sessionId)
   })
 
@@ -145,7 +229,7 @@ describe('SessionManager compaction', () => {
       approverModel: 'deepseek-v4-flash',
       limits: {
         ...current.limits,
-        autoCompactTriggerPercent: 50,
+        autoCompactTriggerPercent: 1,
         tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
       },
     })
@@ -167,7 +251,7 @@ describe('SessionManager compaction', () => {
     })
     manager.startRun({
       sessionId,
-      message: `AUTO_OLD_CONTEXT ${'x'.repeat(90_000)}`,
+      message: `AUTO_OLD_CONTEXT ${'x'.repeat(10_000)}`,
       clientRequestId: 'request-auto-compact-old',
     })
 
@@ -176,9 +260,21 @@ describe('SessionManager compaction', () => {
         sent.filter(
           (envelope) =>
             envelope.event.type === 'run.status' &&
-            envelope.event.status === 'completed',
+            ['completed', 'failed', 'cancelled'].includes(
+              envelope.event.status,
+            ),
         ).length >= 1,
+      5_000,
     )
+    const firstTerminal = sent.find(
+      (envelope) =>
+        envelope.event.type === 'run.status' &&
+        ['completed', 'failed', 'cancelled'].includes(envelope.event.status),
+    )?.event
+    expect(
+      firstTerminal?.type === 'run.status' ? firstTerminal.status : undefined,
+      JSON.stringify(firstTerminal),
+    ).toBe('completed')
     await new Promise((resolve) => setTimeout(resolve, 20))
 
     manager.startRun({
@@ -194,9 +290,10 @@ describe('SessionManager compaction', () => {
             envelope.event.type === 'run.status' &&
             envelope.event.status === 'completed',
         ).length >= 2,
+      5_000,
     )
 
-    expect(provider.requests[1]?.tools).toEqual([])
+    expect(provider.requests[2]?.tools).toEqual([])
     expect(
       sent.some(
         (envelope) =>
@@ -205,17 +302,89 @@ describe('SessionManager compaction', () => {
       ),
     ).toBe(true)
 
-    const afterAutoCompactMessages = provider.requests[2]?.messages ?? []
+    const afterAutoCompactMessages = provider.requests[3]?.messages ?? []
     const rendered = JSON.stringify(afterAutoCompactMessages)
 
     expect(rendered).not.toContain('AUTO_OLD_CONTEXT')
     expect(rendered).toContain('AUTO_CURRENT_TURN must remain')
     expect(afterAutoCompactMessages[0]?.role).toBe('system')
-    expect(afterAutoCompactMessages[1]?.role).toBe('user')
-    expect(afterAutoCompactMessages[1]?.content).toContain('<compact_history')
-    expect(afterAutoCompactMessages[1]?.content).toContain(
+    const replayedRootIndex = afterAutoCompactMessages.findIndex(
+      (message) => message.content === 'AUTO_CURRENT_TURN must remain',
+    )
+    const summaryIndex = afterAutoCompactMessages.findIndex(
+      (message) =>
+        message.role === 'user' &&
+        message.content?.includes('<compact_history'),
+    )
+    expect(replayedRootIndex).toBeGreaterThan(0)
+    expect(summaryIndex).toBeGreaterThan(replayedRootIndex)
+    expect(summaryIndex, rendered).toBe(afterAutoCompactMessages.length - 1)
+    expect(afterAutoCompactMessages[summaryIndex]?.content).toContain(
       'Auto compact summary retained',
     )
     await manager.closeSession(sessionId)
-  })
+  }, 20_000)
+
+  it('omits root user replay for a harness-driven automatic compact', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-harness-compact-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const current = store.getPublicConfig()
+    await store.update({
+      version: 1,
+      kind: 'limits',
+      value: {
+        ...current.limits,
+        autoCompactTriggerPercent: 1,
+        tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
+      },
+    })
+    const provider = new AutoCompactProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startHarnessRun({
+      sessionId,
+      clientRequestId: 'harness-compact',
+      message: {
+        kind: 'benchmark_feedback',
+        text: `HARNESS_ONLY ${'x'.repeat(10_000)}`,
+        source: 'test:harness',
+      },
+    })
+    await waitFor(
+      () =>
+        sent.some(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'completed',
+        ),
+      5_000,
+    )
+
+    expect(provider.requests[0]?.tools).toEqual([])
+    const continuation = provider.requests[1]?.messages ?? []
+    expect(continuation.at(-1)?.role).toBe('user')
+    expect(continuation.at(-1)?.content).toContain('<compact_history')
+    const harnessIndex = continuation.findIndex((message) =>
+      message.content?.includes('HARNESS_ONLY'),
+    )
+    expect(harnessIndex).toBeGreaterThan(0)
+    expect(harnessIndex).toBeLessThan(continuation.length - 1)
+    expect(
+      continuation.some((message) => message.content?.includes('<user_input')),
+    ).toBe(false)
+    await manager.closeSession(sessionId)
+  }, 10_000)
 })

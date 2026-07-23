@@ -76,8 +76,7 @@ export class SessionInterjectionCoordinator {
     // even though they all flow into the same model continuation.
     for (const interjection of toInject) {
       appendPromptLayer(session, {
-        kind: 'user_interjection',
-        role: 'user',
+        kind: 'interjection',
         content: liveUserInterjectionContent(interjection.content),
         source: 'run.interjection',
         trusted: false,

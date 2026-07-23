@@ -1,16 +1,17 @@
-import { getActiveProviderConfig } from '../../shared/config'
 import type { RunStatus } from '../../shared/agent-events'
 import type { CallId } from '../../shared/ids'
+import type { JsonValue } from '../../shared/json'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
-import type { ProviderEvent, ProviderMessage } from '../providers/provider'
+import { chatAdapter } from '../providers/chat-completions-adapter'
+import type { ProviderEvent } from '../providers/provider'
 import { normalizeLlmUsage } from '../providers/usage'
 import type { SkillsManager } from '../skills/manager'
-import { ContextBudgetError } from '../tools/context-budget'
+import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import type { ToolRegistry } from '../tools/tool-registry'
-import { id, ipcFault, toJsonValue } from './session-common'
+import { id, redactJsonSecrets, toJsonValue } from './session-common'
 import { createConfiguredProvider } from './session-provider-turn'
 import { modelPromptBudget } from './session-run-utils'
 import type {
@@ -22,21 +23,36 @@ import type {
 import type { SessionOrchestratorMessages } from './session-orchestrator-messages'
 import {
   appendInitialPromptHarness,
-  orchestrationRequestContent,
+  compactHistoryContent,
   promptResources,
-  selectPromptMessages,
   type WorkspaceConcurrencyContext,
 } from './prompt-harness'
-import { resolveSlashCommand } from './slash-commands'
+import {
+  appendCompactSummary,
+  appendPromptMessage,
+  appendUserInput,
+  type CanonicalPromptKind,
+  canonicalTraceSource,
+  deactivateActiveHistory,
+  MessageHistoryCompiler,
+  messageText,
+} from './canonical-history'
 
 function compactOrchestrationState(input: {
   goal?: GoalState
   plan?: PlanState
 }): string {
-  const lines = ['Orchestration state at compaction:']
-  lines.push(`Goal: ${input.goal ? JSON.stringify(input.goal) : 'none'}`)
-  lines.push(`Plan: ${input.plan ? JSON.stringify(input.plan) : 'none'}`)
-  return lines.join('\n')
+  return [
+    'Orchestration state at compaction:',
+    `Goal: ${input.goal ? JSON.stringify(input.goal) : 'none'}`,
+    `Plan: ${input.plan ? JSON.stringify(input.plan) : 'none'}`,
+  ].join('\n')
+}
+
+function compactFollowUp(message: string): string | undefined {
+  const match = /^\s*\/compact(?:\s+([\s\S]*?))?\s*$/iu.exec(message)
+  const followUp = match?.[1]?.trim()
+  return followUp || undefined
 }
 
 export class SessionCompactCoordinator {
@@ -97,131 +113,107 @@ export class SessionCompactCoordinator {
     session: SessionState,
     run: ActiveRun,
   ): Promise<void> {
-    const preserveFromIndex = run.currentTurnStartIndex
-
-    if (
-      preserveFromIndex === undefined ||
-      preserveFromIndex <= 0 ||
-      preserveFromIndex > session.history.length
-    ) {
-      return
-    }
-
+    if (!run.autoCompactEligible) return
+    run.autoCompactEligible = false
+    const binding = run.routes?.main
+    if (!binding) throw new Error('Run model routes were not resolved')
     const config = this.#configStore.getPublicConfig()
     const tools = this.#toolRegistry.providerDefinitions()
-    const promptBudgetTokens = modelPromptBudget(config, tools)
-    const triggerTokens = Math.floor(
-      (promptBudgetTokens * config.limits.autoCompactTriggerPercent) / 100,
+    const compiler = new MessageHistoryCompiler()
+    const history = compiler.compile(session.history)
+    const body = chatAdapter(binding.snapshot.adapterId).compile({
+      history,
+      route: binding.snapshot,
+      tools,
+    }).body
+    const budget = modelPromptBudget(config, tools, {
+      providerId: binding.snapshot.providerId,
+      model: binding.snapshot.model,
+    })
+    const trigger = Math.floor(
+      (budget * config.limits.autoCompactTriggerPercent) / 100,
     )
-    let shouldCompact: boolean
-
-    try {
-      const selection = selectPromptMessages({
-        state: session,
-        tools,
-        maxPromptTokens: promptBudgetTokens,
-        estimation: config.limits.tokenEstimation,
-      })
-      shouldCompact =
-        selection.promptBuild.estimatedTokens >= triggerTokens ||
-        selection.promptBuild.omittedHistoryMessages > 0
-    } catch (error) {
-      if (!(error instanceof ContextBudgetError)) {
-        throw error
-      }
-
-      shouldCompact = true
-    }
-
-    if (!shouldCompact) {
-      return
-    }
-
-    const messagesToSummarize = this.#messagesForCompact(
-      session,
-      0,
-      preserveFromIndex,
-    )
-
-    if (messagesToSummarize.length === 0) {
+    if (estimateJsonTokens(body, config.limits.tokenEstimation) < trigger) {
       return
     }
 
     const prompt = this.#orchestratorMessages.prompt('compact')
-    const text = [
+    const promptText = [
       prompt.text,
       '',
-      `Automatic compact trigger: estimated prompt reached ${config.limits.autoCompactTriggerPercent}% of the current prompt budget.`,
-      'Summarize only the older history before the current user turn; the current turn will remain available verbatim after compaction.',
+      'Summarize the complete active history as a continuation checkpoint.',
+      'The original run-start user request will be replayed before this checkpoint.',
+      'Treat the checkpoint as the latest state and do not repeat completed work.',
     ].join('\n')
-
     await this.#orchestratorMessages.emit(session, run, {
       kind: 'compact-auto',
-      text,
+      text: promptText,
       resource: prompt.resource,
       injectIntoHistory: false,
     })
-
     const summary = await this.#createCompactSummary(
       session,
       run,
-      text,
-      messagesToSummarize,
+      promptText,
+      history.messages,
       false,
     )
-
-    await this.#rewriteHistoryAfterCompact(session, run, summary, {
-      preserveFromIndex,
-      source: 'auto:context-budget',
+    await this.#rewrite(session, run, {
+      summary,
+      sourceHash: history.sourceHash,
+      replacesThroughSeq: history.messages.at(-1)!.seq,
+      resource: prompt.resource,
+      replayRootUser: true,
     })
   }
 
+  /**
+   * Returns true when `/compact <text>` appended a new user input and the
+   * current run must continue into the normal React loop.
+   */
   async runCompactCommand(
     session: SessionState,
     run: ActiveRun,
     userMessage: string,
-  ): Promise<void> {
-    const config = this.#configStore.getPublicConfig()
-    const command = resolveSlashCommand({
-      message: userMessage,
-      config,
-      skillsManager: this.#skillsManager,
-      promptRegistry: this.#promptRegistry,
-    })
-    const compactPrompt = command.orchestratorMessage
-
-    if (!compactPrompt || compactPrompt.kind !== 'compact') {
-      throw new Error('Invalid compact command')
-    }
-
-    await session.logger.write({
-      type: 'user.message',
-      sessionId: session.sessionId,
-      runId: run.runId,
-      text: command.visibleMessage,
-    })
-    await session.logger.write({
-      type: 'run.start',
-      sessionId: session.sessionId,
-      runId: run.runId,
-    })
+  ): Promise<boolean> {
+    const history = new MessageHistoryCompiler().compile(session.history)
+    const prompt = this.#orchestratorMessages.prompt('compact')
     await this.#orchestratorMessages.emit(session, run, {
-      ...compactPrompt,
+      kind: 'compact',
+      text: prompt.text,
+      resource: prompt.resource,
       injectIntoHistory: false,
     })
-
     const summary = await this.#createCompactSummary(
       session,
       run,
-      compactPrompt.text,
-      this.#messagesForCompact(session, 0, session.history.length),
+      prompt.text,
+      history.messages,
       true,
     )
-
-    await this.#rewriteHistoryAfterCompact(session, run, summary, {
-      preserveFromIndex: session.history.length,
-      source: 'slash:/compact',
+    await this.#rewrite(session, run, {
+      summary,
+      sourceHash: history.sourceHash,
+      replacesThroughSeq: history.messages.at(-1)!.seq,
+      resource: prompt.resource,
+      replayRootUser: false,
     })
+
+    const followUp = compactFollowUp(userMessage)
+    if (followUp) {
+      const user = appendUserInput(session, {
+        content: followUp,
+        clientRequestId: run.clientRequestId,
+      })
+      run.rootUserMessageId = user.id
+      await session.logger.write({
+        type: 'user.message',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        text: followUp,
+      })
+      return true
+    }
 
     this.#emit(session, {
       type: 'assistant.message.completed',
@@ -233,70 +225,72 @@ export class SessionCompactCoordinator {
       type: 'agent.message',
       sessionId: session.sessionId,
       runId: run.runId,
-      text: summary,
+      text: redactJsonSecrets(summary, [
+        run.routes!.compression.apiKey,
+      ]) as string,
     })
-  }
-
-  #messagesForCompact(
-    session: SessionState,
-    startIndex: number,
-    endIndex: number,
-  ): ProviderMessage[] {
-    const excludedKinds = new Set([
-      'base_instructions',
-      'runtime_context',
-      'runtime_policy_and_context',
-      'assistant_preferences',
-      'agents',
-    ])
-    const excludedIndexes = new Set(
-      session.promptLedger
-        .filter((entry) => excludedKinds.has(entry.kind))
-        .map((entry) => entry.messageIndex),
-    )
-
-    return session.history
-      .slice(startIndex, endIndex)
-      .filter((_message, index) => !excludedIndexes.has(startIndex + index))
+    return false
   }
 
   async #createCompactSummary(
     session: SessionState,
     run: ActiveRun,
     promptText: string,
-    messagesToSummarize: ProviderMessage[],
+    sourceMessages: readonly SessionState['history'][number][],
     emitText: boolean,
   ): Promise<string> {
+    const binding = run.routes?.compression
+    if (!binding) throw new Error('Compression route was not resolved')
     const config = this.#configStore.getPublicConfig()
-    const providerConfig = getActiveProviderConfig(config)
-    const apiKey = await this.#configStore.getProviderApiKey(providerConfig.id)
-
-    if (!apiKey) {
-      ipcFault(
-        'PRECONDITION_FAILED',
-        `${providerConfig.label} credential is not available`,
+    const temporary = {
+      sessionId: session.sessionId,
+      history: structuredClone(sourceMessages) as SessionState['history'],
+      nextMessageSeq: (sourceMessages.at(-1)?.seq ?? 0) + 1,
+    }
+    appendPromptMessage(temporary, {
+      kind: 'orchestrator',
+      content: promptText,
+      source: 'orchestration.compact',
+      trusted: true,
+      editable: false,
+    })
+    const history = new MessageHistoryCompiler().compile(temporary.history)
+    const adapter = chatAdapter(binding.snapshot.adapterId)
+    const compiled = adapter.compile({
+      history,
+      route: binding.snapshot,
+      tools: [],
+    })
+    const budget = modelPromptBudget(config, [], {
+      providerId: binding.snapshot.providerId,
+      model: binding.snapshot.model,
+    })
+    if (
+      estimateJsonTokens(compiled.body, config.limits.tokenEstimation) > budget
+    ) {
+      throw new ContextBudgetError(
+        'The full active history is too large for the compression route',
       )
     }
-
     const provider =
-      this.#providerFactory?.({ config, apiKey }) ??
-      createConfiguredProvider(config, providerConfig, apiKey, this.#fetchImpl)
+      this.#providerFactory?.({ config, apiKey: binding.apiKey }) ??
+      createConfiguredProvider(
+        config,
+        binding.provider,
+        binding.snapshot.model,
+        binding.snapshot.reasoning,
+        binding.apiKey,
+        this.#fetchImpl,
+      )
     const callId = id<CallId>('llm')
-    const messages: ProviderMessage[] = [
-      ...structuredClone(messagesToSummarize),
-      {
-        role: 'user',
-        content: orchestrationRequestContent('compact', promptText),
-      },
-    ]
     let text = ''
     let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
-
     this.#setRunStatus(session, run, 'calling_llm')
 
     for await (const event of provider.streamChat({
-      messages,
+      messages: compiled.messages,
       tools: [],
+      providerRequestOverride: compiled.body,
       signal: run.controller.signal,
       onRequest: async (snapshot) => {
         await session.logger.write({
@@ -305,12 +299,18 @@ export class SessionCompactCoordinator {
           runId: run.runId,
           callId,
           scope: 'compression',
-          normalizedMessages: snapshot.normalizedMessages,
-          providerRequest: snapshot.providerRequest,
+          normalizedMessages: redactJsonSecrets(snapshot.normalizedMessages, [
+            binding.apiKey,
+          ]) as JsonValue[],
+          providerRequest: redactJsonSecrets(snapshot.providerRequest, [
+            binding.apiKey,
+          ]),
           requestBytes: snapshot.requestBytes,
           prefixHash: snapshot.prefixHash,
           prefixFingerprints: snapshot.prefixFingerprints,
           promptResources: promptResources(session),
+          canonicalSource: canonicalTraceSource(history.messages),
+          modelRoute: binding.snapshot,
         })
       },
     })) {
@@ -328,36 +328,44 @@ export class SessionCompactCoordinator {
         completed = event
       }
     }
-
     if (!completed) {
-      throw new Error(
-        'Compact summary provider stream ended without completion',
-      )
+      throw new Error('Compact provider stream ended without completion')
     }
-
-    if (completed.toolCalls.length > 0) {
+    const canonical = adapter.complete(completed, {
+      text,
+      reasoning: '',
+    })
+    if (canonical.toolCalls.length > 0) {
       throw new Error('Compact summary provider returned tool calls')
     }
+    const summary =
+      text ||
+      canonical.parts
+        .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+        .join('\n')
+    if (!summary.trim()) throw new Error('Compact summary was empty')
 
     await session.logger.write({
       type: 'llm.response',
       sessionId: session.sessionId,
       runId: run.runId,
       callId,
-      rawResponse: completed.rawResponse,
-      normalizedTurn: toJsonValue(completed.turn),
-      providerState: completed.providerState,
+      rawResponse: redactJsonSecrets(completed.rawResponse, [binding.apiKey]),
+      normalizedTurn: redactJsonSecrets(toJsonValue(canonical), [
+        binding.apiKey,
+      ]),
+      providerState: redactJsonSecrets(completed.providerState, [
+        binding.apiKey,
+      ]),
       usage: completed.usage,
       timing: completed.timing,
     })
-
     const usage = normalizeLlmUsage({
       scope: 'compression',
       config,
-      provider: providerConfig,
+      provider: binding.provider,
       raw: completed.usage,
     })
-
     if (usage) {
       await session.logger.write({
         type: 'llm.usage',
@@ -374,73 +382,114 @@ export class SessionCompactCoordinator {
         usage,
       })
     }
-
-    return (
-      text ||
-      (typeof completed.turn.content === 'string' ? completed.turn.content : '')
-    ).trim()
+    return summary.trim()
   }
 
-  async #rewriteHistoryAfterCompact(
+  async #rewrite(
     session: SessionState,
     run: ActiveRun,
-    summary: string,
-    options: {
-      preserveFromIndex: number
-      source: string
+    input: {
+      summary: string
+      sourceHash: string
+      replacesThroughSeq: number
+      resource?: ReturnType<SessionOrchestratorMessages['prompt']>['resource']
+      replayRootUser: boolean
     },
   ): Promise<void> {
-    if (!summary) {
-      throw new Error('Compact summary was empty')
-    }
-
     const previousHistory = structuredClone(session.history)
-    const previousLedger = structuredClone(session.promptLedger)
-    const preserveFromIndex = Math.min(
-      Math.max(options.preserveFromIndex, 0),
-      previousHistory.length,
-    )
-    const preservedMessages = previousHistory.slice(preserveFromIndex)
-    const preservedLedger = previousLedger.filter(
-      (entry) => entry.messageIndex >= preserveFromIndex,
-    )
-
-    session.history = []
-    session.promptLedger = []
-    session.nextPromptSeq = 1
-    delete session.lastRuntimeContextHash
-    delete session.lastAgentsContextHash
-
-    await appendInitialPromptHarness(session, {
-      workspace: session.workspace,
-      mode: session.mode,
-      config: this.#configStore.getPublicConfig(),
-      providerId: session.provider,
-      promptRegistry: this.#promptRegistry,
-      projectMetadata: this.#projectMetadata,
-      workspaceConcurrency: this.#getWorkspaceConcurrency(session),
-      skillSummary: this.#skillsManager?.summaryPrompt(),
-      compactHistory: {
-        summary: [summary, '', compactOrchestrationState(session)].join('\n'),
-        source: options.source,
-      },
-      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
-      signal: run.controller.signal,
+    const previousNextSeq = session.nextMessageSeq
+    const root = run.rootUserMessageId
+      ? session.history.find((record) => record.id === run.rootUserMessageId)
+      : undefined
+    const runHarness = run.harnessMessageIds.flatMap((messageId) => {
+      const record = session.history.find((item) => item.id === messageId)
+      return record ? [record] : []
     })
-
-    const rebasedStartIndex = session.history.length
-    session.history.push(...preservedMessages)
-    run.currentTurnStartIndex =
-      preservedMessages.length > 0 ? rebasedStartIndex : undefined
-
-    for (const entry of preservedLedger) {
-      session.promptLedger.push({
-        ...entry,
-        seq: session.nextPromptSeq,
-        messageIndex:
-          rebasedStartIndex + entry.messageIndex - preserveFromIndex,
+    try {
+      deactivateActiveHistory(session)
+      await appendInitialPromptHarness(session, {
+        workspace: session.workspace,
+        mode: session.mode,
+        config: this.#configStore.getPublicConfig(),
+        providerId: session.modelSelection.providerId,
+        promptRegistry: this.#promptRegistry,
+        projectMetadata: this.#projectMetadata,
+        skillSummary: this.#skillsManager?.summaryPrompt(),
+        workspaceConcurrency: this.#getWorkspaceConcurrency(session),
+        toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+        signal: run.controller.signal,
       })
-      session.nextPromptSeq += 1
+      for (const record of runHarness) {
+        const layer =
+          record.metadata && 'layer' in record.metadata
+            ? record.metadata.layer
+            : undefined
+        if (!layer) continue
+        const prompt =
+          record.metadata && 'prompt' in record.metadata
+            ? record.metadata.prompt
+            : undefined
+        appendPromptMessage(session, {
+          kind: record.kind as CanonicalPromptKind,
+          content: messageText(record),
+          source: layer.source,
+          trusted: layer.trusted,
+          editable: layer.editable,
+          hash: layer.hash,
+          ...(prompt
+            ? {
+                resource: {
+                  id: prompt.resourceId,
+                  version: prompt.version,
+                  path: layer.source,
+                  sha256: prompt.hash,
+                },
+              }
+            : {}),
+        })
+      }
+      if (input.replayRootUser && root?.kind === 'user_input') {
+        const originalId =
+          root.metadata && 'replayedFromMessageId' in root.metadata
+            ? root.metadata.replayedFromMessageId
+            : root.id
+        appendUserInput(session, {
+          content: messageText(root),
+          replayedFromMessageId: originalId,
+        })
+      }
+      appendCompactSummary(session, {
+        content: compactHistoryContent(
+          [input.summary, '', compactOrchestrationState(session)].join('\n'),
+        ),
+        replacesThroughSeq: input.replacesThroughSeq,
+        sourceHash: input.sourceHash,
+        resource: input.resource,
+      })
+
+      const binding = run.routes?.main
+      if (!binding) throw new Error('Run main route was not resolved')
+      const tools = this.#toolRegistry.providerDefinitions()
+      const history = new MessageHistoryCompiler().compile(session.history)
+      const body = chatAdapter(binding.snapshot.adapterId).compile({
+        history,
+        route: binding.snapshot,
+        tools,
+      }).body
+      const config = this.#configStore.getPublicConfig()
+      const budget = modelPromptBudget(config, tools, {
+        providerId: binding.snapshot.providerId,
+        model: binding.snapshot.model,
+      })
+      if (estimateJsonTokens(body, config.limits.tokenEstimation) > budget) {
+        throw new ContextBudgetError(
+          'Compacted history still exceeds the model context budget',
+        )
+      }
+    } catch (error) {
+      session.history = previousHistory
+      session.nextMessageSeq = previousNextSeq
+      throw error
     }
   }
 }

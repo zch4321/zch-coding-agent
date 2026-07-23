@@ -19,7 +19,7 @@ export interface PreparedUserTurn {
   visibleMessage: string
   providerMessage: string
   appMessages: Array<{
-    kind: 'selected_context' | 'orchestration_request' | 'user_interjection'
+    kind: 'selected_context' | 'orchestrator' | 'interjection'
     content: string
     source: string
   }>

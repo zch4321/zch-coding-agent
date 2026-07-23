@@ -19,7 +19,7 @@ export interface SlashCommandResolution {
     resource?: PromptResourceSummary
   }
   providerContextMessages?: Array<{
-    kind: Extract<PromptLayerKind, 'selected_context' | 'orchestration_request'>
+    kind: Extract<PromptLayerKind, 'selected_context' | 'orchestrator'>
     content: string
     source: string
   }>
@@ -138,23 +138,13 @@ export function resolveSlashCommand(input: {
       input.config,
       'compact',
     )
-    const text = parsed.rest
-      ? `${prompt.text}\n\nAdditional user instruction: ${parsed.rest}`
-      : prompt.text
 
     return {
       visibleMessage: input.message,
-      providerMessage: input.message,
-      providerContextMessages: [
-        {
-          kind: 'orchestration_request',
-          source: 'slash:/compact',
-          content: orchestrationRequestContent('compact', text),
-        },
-      ],
+      providerMessage: parsed.rest,
       orchestratorMessage: {
         kind: 'compact',
-        text,
+        text: prompt.text,
         resource: prompt.resource,
       },
     }
@@ -170,7 +160,7 @@ export function resolveSlashCommand(input: {
       providerMessage: input.message,
       providerContextMessages: [
         {
-          kind: 'orchestration_request',
+          kind: 'orchestrator',
           source: 'slash:/prompt',
           content: orchestrationRequestContent('prompt', parsed.rest),
         },
@@ -201,7 +191,7 @@ export function resolveSlashCommand(input: {
       providerMessage: input.message,
       providerContextMessages: [
         {
-          kind: 'orchestration_request',
+          kind: 'orchestrator',
           source: 'slash:/goal',
           content: orchestrationRequestContent('goal-started', instruction),
         },
@@ -233,7 +223,7 @@ export function resolveSlashCommand(input: {
       providerMessage: input.message,
       providerContextMessages: [
         {
-          kind: 'orchestration_request',
+          kind: 'orchestrator',
           source: 'slash:/plan',
           content: orchestrationRequestContent('plan-started', instruction),
         },

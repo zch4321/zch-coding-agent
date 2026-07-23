@@ -1,18 +1,20 @@
-import { getActiveProviderConfig, type PublicConfig } from '../../shared/config'
-import type { JsonValue } from '../../shared/json'
+import type { ProviderPublicConfig, PublicConfig } from '../../shared/config'
+import type { CallId } from '../../shared/ids'
+import type { JsonObject, JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { PluginEventBus } from '../plugins/event-bus'
-import type { ToolCall } from '../tools/types'
-import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import { OpenAICompatibleProvider } from '../providers/deepseek-provider'
+import { chatAdapter } from '../providers/chat-completions-adapter'
 import type {
-  ProviderAssistantTurn,
   ProviderEvent,
-  ProviderMessage,
   ProviderRequestSnapshot,
 } from '../providers/provider'
+import { normalizeLlmUsage } from '../providers/usage'
+import type { ToolCall } from '../tools/types'
+import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import type { ToolRegistry } from '../tools/tool-registry'
-import { id, ipcFault, toJsonValue } from './session-common'
+import { id, redactJsonSecrets, toJsonValue } from './session-common'
+import { canonicalTraceSource } from './canonical-history'
 import { modelPromptBudget } from './session-run-utils'
 import { promptResources, selectPromptMessages } from './prompt-harness'
 import type {
@@ -21,8 +23,6 @@ import type {
   SessionManagerOptions,
   SessionState,
 } from './session-types'
-import type { CallId } from '../../shared/ids'
-import { normalizeLlmUsage } from '../providers/usage'
 import type { PromptRegistry } from '../prompts/registry'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import {
@@ -32,10 +32,66 @@ import {
 } from './prompt-harness'
 
 export interface ProviderTurnResult {
-  turn: ProviderAssistantTurn
   toolCalls: ToolCall[]
   text: string
   reasoning: string
+  continuation?: {
+    schemaVersion: 1
+    adapterId: string
+    format: string
+    data: JsonValue
+  }
+}
+
+const IMMUTABLE_REQUEST_FIELDS = new Set([
+  'model',
+  'tools',
+  'stream',
+  'stream_options',
+])
+const CREDENTIAL_FIELD =
+  /^(?:authorization|api[-_]?key|credential|password|secret|access[-_]?token|bearer)$/iu
+
+function jsonObject(value: unknown, label: string): JsonObject {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${label} must be a JSON object`)
+  }
+  return toJsonValue(value) as JsonObject
+}
+
+function assertImmutableRequest(
+  original: JsonObject,
+  candidate: JsonObject,
+): void {
+  for (const field of IMMUTABLE_REQUEST_FIELDS) {
+    if (JSON.stringify(candidate[field]) !== JSON.stringify(original[field])) {
+      throw new TypeError(
+        `beforeLLMCall cannot modify protected request field: ${field}`,
+      )
+    }
+  }
+  assertNoCredentialFields(candidate)
+  if (!Array.isArray(candidate.messages)) {
+    throw new TypeError('beforeLLMCall request.messages must be an array')
+  }
+}
+
+function assertNoCredentialFields(value: JsonValue, path = 'request'): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      assertNoCredentialFields(item, `${path}[${index}]`),
+    )
+    return
+  }
+  if (!value || typeof value !== 'object') return
+  for (const [field, nested] of Object.entries(value)) {
+    if (CREDENTIAL_FIELD.test(field)) {
+      throw new TypeError(
+        `beforeLLMCall cannot add credential field: ${path}.${field}`,
+      )
+    }
+    assertNoCredentialFields(nested, `${path}.${field}`)
+  }
 }
 
 export class SessionProviderTurnRunner {
@@ -85,23 +141,16 @@ export class SessionProviderTurnRunner {
     setRunCalling: () => void,
   ): Promise<ProviderTurnResult> {
     setRunCalling()
+    const binding = run.routes?.main
+    if (!binding) throw new Error('Run model routes were not resolved')
     const config = this.#configStore.getPublicConfig()
-    const providerConfig = getActiveProviderConfig(config)
-    const apiKey = await this.#configStore.getProviderApiKey(providerConfig.id)
-
-    if (!apiKey) {
-      ipcFault(
-        'PRECONDITION_FAILED',
-        `${providerConfig.label} credential is not available`,
-      )
-    }
-
     const tools = this.#toolRegistry.providerDefinitions()
+
     await appendRuntimeContextIfChanged(session, {
       workspace: session.workspace,
       mode: session.mode,
       config,
-      providerId: session.provider,
+      providerId: binding.snapshot.providerId,
       promptRegistry: this.#promptRegistry,
       projectMetadata: this.#projectMetadata,
       reason: 'provider_call',
@@ -113,59 +162,92 @@ export class SessionProviderTurnRunner {
       workspace: session.workspace,
       mode: session.mode,
       config,
-      providerId: session.provider,
+      providerId: binding.snapshot.providerId,
       promptRegistry: this.#promptRegistry,
       projectMetadata: this.#projectMetadata,
       toolNames: this.#toolRegistry.list().map((tool) => tool.id),
       signal: run.controller.signal,
     })
-    let selection = selectPromptMessages({
+
+    const selection = selectPromptMessages({
       state: session,
       tools,
-      maxPromptTokens: modelPromptBudget(config, tools),
+      maxPromptTokens: modelPromptBudget(config, tools, {
+        providerId: binding.snapshot.providerId,
+        model: binding.snapshot.model,
+      }),
       estimation: config.limits.tokenEstimation,
     })
-    let messages = selection.messages
+    const adapter = chatAdapter(binding.snapshot.adapterId)
+    const compiled = adapter.compile({
+      history: {
+        sessionId: session.sessionId,
+        messages: selection.messages,
+        sourceHash: selection.promptBuild.sourceHash,
+      },
+      route: binding.snapshot,
+      tools,
+    })
+    const immutableBody = structuredClone(compiled.body)
+    let body = structuredClone(compiled.body)
     const hookResult = await this.#pluginBus?.emit('beforeLLMCall', {
-      version: 1,
+      version: 2,
       sessionId: session.sessionId,
       runId: run.runId,
-      messages: toJsonValue(messages) as JsonValue[],
-      params: {
-        provider: providerConfig.id,
-        model: providerConfig.model,
-      },
+      adapterId: adapter.id,
+      route: binding.snapshot,
+      request: body,
+      params: {},
     })
 
     for (const patch of hookResult?.patches ?? []) {
-      if (patch.messages) {
-        messages = patch.messages as unknown as ProviderMessage[]
-        selection = {
-          messages,
-          promptBuild: {
-            ...selection.promptBuild,
-            messageCount: messages.length,
-            estimatedTokens: estimateJsonTokens(
-              messages,
-              config.limits.tokenEstimation,
-            ),
-          },
+      for (const field of Object.keys(patch)) {
+        if (field !== 'request' && field !== 'params') {
+          throw new TypeError(
+            `beforeLLMCall cannot modify protected field: ${field}`,
+          )
         }
       }
+      if (patch.request) body = jsonObject(patch.request, 'Hook request')
+      if (patch.params) {
+        for (const [key, value] of Object.entries(patch.params)) {
+          if (IMMUTABLE_REQUEST_FIELDS.has(key)) {
+            throw new TypeError(
+              `beforeLLMCall cannot modify protected parameter: ${key}`,
+            )
+          }
+          body[key] = structuredClone(value)
+        }
+      }
+      assertImmutableRequest(immutableBody, body)
     }
+    assertImmutableRequest(immutableBody, body)
 
+    const promptBudget = modelPromptBudget(config, tools, {
+      providerId: binding.snapshot.providerId,
+      model: binding.snapshot.model,
+    })
     if (
-      estimateJsonTokens(messages, config.limits.tokenEstimation) >
-      modelPromptBudget(config, tools)
+      estimateJsonTokens(body, config.limits.tokenEstimation) > promptBudget
     ) {
       throw new ContextBudgetError(
         'A beforeLLMCall hook exceeded the model context budget',
       )
     }
 
+    compiled.messages = structuredClone(
+      body.messages,
+    ) as unknown as typeof compiled.messages
     const provider =
-      this.#providerFactory?.({ config, apiKey }) ??
-      createConfiguredProvider(config, providerConfig, apiKey, this.#fetchImpl)
+      this.#providerFactory?.({ config, apiKey: binding.apiKey }) ??
+      createConfiguredProvider(
+        config,
+        binding.provider,
+        binding.snapshot.model,
+        binding.snapshot.reasoning,
+        binding.apiKey,
+        this.#fetchImpl,
+      )
     const llmCallId = id<CallId>('llm')
     let text = ''
     let reasoning = ''
@@ -178,23 +260,26 @@ export class SessionProviderTurnRunner {
         runId: run.runId,
         callId: llmCallId,
         scope: 'main',
-        normalizedMessages: snapshot.normalizedMessages,
-        providerRequest: snapshot.providerRequest,
+        normalizedMessages: redactJsonSecrets(snapshot.normalizedMessages, [
+          binding.apiKey,
+        ]) as JsonValue[],
+        providerRequest: redactJsonSecrets(snapshot.providerRequest, [
+          binding.apiKey,
+        ]),
         requestBytes: snapshot.requestBytes,
         prefixHash: snapshot.prefixHash,
         prefixFingerprints: snapshot.prefixFingerprints,
         promptResources: promptResources(session),
         promptBuild: selection.promptBuild,
+        canonicalSource: canonicalTraceSource(selection.messages),
+        modelRoute: binding.snapshot,
       })
     }
 
-    const providerRequestOverride = session.providerRequestOverride
-    session.providerRequestOverride = undefined
-
     for await (const event of provider.streamChat({
-      messages,
-      tools,
-      providerRequestOverride,
+      messages: compiled.messages,
+      tools: compiled.tools,
+      providerRequestOverride: body,
       signal: run.controller.signal,
       onRequest,
     })) {
@@ -207,7 +292,7 @@ export class SessionProviderTurnRunner {
           delta: event.delta,
         })
       } else if (event.type === 'reasoning.delta') {
-        if (providerConfig.reasoning !== 'off') {
+        if (binding.snapshot.reasoning !== 'off') {
           reasoning += event.delta
           this.#emit(session, {
             type: 'assistant.reasoning.delta',
@@ -221,28 +306,33 @@ export class SessionProviderTurnRunner {
       }
     }
 
-    if (!completed) {
-      throw new Error('Provider stream ended without completion')
-    }
+    if (!completed) throw new Error('Provider stream ended without completion')
+    const canonical = adapter.complete(completed, { text, reasoning })
+    const canonicalText = canonical.parts
+      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+      .join('\n')
 
     await session.logger.write({
       type: 'llm.response',
       sessionId: session.sessionId,
       runId: run.runId,
       callId: llmCallId,
-      rawResponse: completed.rawResponse,
-      normalizedTurn: toJsonValue(completed.turn),
-      providerState: completed.providerState,
+      rawResponse: redactJsonSecrets(completed.rawResponse, [binding.apiKey]),
+      normalizedTurn: redactJsonSecrets(toJsonValue(canonical), [
+        binding.apiKey,
+      ]),
+      providerState: redactJsonSecrets(completed.providerState, [
+        binding.apiKey,
+      ]),
       usage: completed.usage,
       timing: completed.timing,
     })
     const usage = normalizeLlmUsage({
       scope: 'main',
       config,
-      provider: providerConfig,
+      provider: binding.provider,
       raw: completed.usage,
     })
-
     if (usage) {
       await session.logger.write({
         type: 'llm.usage',
@@ -272,17 +362,19 @@ export class SessionProviderTurnRunner {
       )
 
     return {
-      turn: completed.turn,
-      toolCalls: completed.toolCalls,
-      text,
-      reasoning,
+      toolCalls: canonical.toolCalls,
+      text: canonicalText,
+      reasoning: canonical.normalizedReasoningText ?? reasoning,
+      continuation: canonical.providerContinuation,
     }
   }
 }
 
 export function createConfiguredProvider(
   _config: PublicConfig,
-  provider: ReturnType<typeof getActiveProviderConfig>,
+  provider: ProviderPublicConfig,
+  model: string,
+  reasoning: ProviderPublicConfig['reasoning'],
   apiKey: string,
   fetchImpl?: typeof fetch,
 ): OpenAICompatibleProvider {
@@ -290,8 +382,8 @@ export function createConfiguredProvider(
     providerId: provider.id,
     profile: provider.profile,
     baseURL: provider.baseURL,
-    model: provider.model,
-    reasoning: provider.reasoning,
+    model,
+    reasoning,
     apiKey,
     fetchImpl,
   })

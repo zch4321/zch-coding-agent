@@ -4,13 +4,7 @@ import {
   getProviderConfig,
   type PermissionMode,
 } from '../../shared/config'
-import type {
-  CallId,
-  EventId,
-  RunId,
-  SessionId,
-  TerminalId,
-} from '../../shared/ids'
+import type { CallId, RunId, SessionId, TerminalId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { RunContext } from '../../shared/context'
 import type { TerminalInfo, TerminalSnapshot } from '../../shared/terminal'
@@ -21,7 +15,6 @@ import { JsonlTraceLogger, NullTraceLogger } from '../logging/logger'
 import { cleanupTraces } from '../logging/cleanup'
 import type { PluginEventBus } from '../plugins/event-bus'
 import { PathGuard } from '../safety/path-guard'
-import type { ProviderMessage } from '../providers/provider'
 import {
   PermissionPipeline,
   type RememberApprovalInput,
@@ -256,19 +249,13 @@ export class SessionManager {
   /**
    * Creates a session bound to a guarded workspace and optional trace logger.
    *
-   * Normal sessions receive the initial prompt harness immediately. Trace fork
-   * sessions can skip that harness because they replay an exact recorded
-   * provider request.
+   * Every session receives canonical initial harness messages immediately.
    */
   async createSession(input: {
     conversationId?: string
     workspace: string
     mode: PermissionMode
     provider: string
-    initialHistory?: ProviderMessage[]
-    providerRequestOverride?: JsonValue
-    forkedFromEventId?: EventId
-    skipInitialHarness?: boolean
   }): Promise<SessionId> {
     const publicConfig = this.#configStore.getPublicConfig()
 
@@ -283,35 +270,29 @@ export class SessionManager {
       )
     }
 
-    if (
-      input.forkedFromEventId &&
-      publicConfig.privacy.traceNoticeAccepted?.version !== TRACE_NOTICE_VERSION
-    ) {
-      ipcFault(
-        'PRECONDITION_FAILED',
-        'Trace logging notice must be accepted before forking a trace',
-      )
-    }
-
     const guard = await PathGuard.create(input.workspace)
     await this.#mcpManager?.activateWorkspace(guard.workspacePath)
     const sessionId = id<SessionId>('session')
-    const logger =
-      publicConfig.logging.enabled || input.forkedFromEventId
-        ? await JsonlTraceLogger.create(this.#traceDirectory, sessionId)
-        : new NullTraceLogger()
+    const logger = publicConfig.logging.enabled
+      ? await JsonlTraceLogger.create(this.#traceDirectory, sessionId)
+      : new NullTraceLogger()
+    const provider =
+      getProviderConfig(publicConfig, input.provider) ??
+      getActiveProviderConfig(publicConfig)
     const session: SessionState = {
       sessionId,
       conversationId: input.conversationId,
       workspace: guard.workspacePath,
       mode: input.mode,
-      provider: input.provider,
+      provider: provider.id,
+      modelSelection: {
+        providerId: provider.id,
+        model: provider.model,
+        reasoning: provider.reasoning,
+      },
       logger,
-      history: structuredClone(input.initialHistory ?? []),
-      promptLedger: [],
-      nextPromptSeq: 1,
-      providerRequestOverride: structuredClone(input.providerRequestOverride),
-      forkedFromEventId: input.forkedFromEventId,
+      history: [],
+      nextMessageSeq: 1,
       eventSeq: 0,
       closed: false,
       clientRequests: new Map(),
@@ -319,29 +300,24 @@ export class SessionManager {
     }
 
     this.#sessions.set(sessionId, session)
-    if (!input.skipInitialHarness) {
-      await appendInitialPromptHarness(session, {
-        workspace: session.workspace,
-        mode: session.mode,
-        config: publicConfig,
-        providerId: input.provider,
-        promptRegistry: this.#promptRegistry,
-        projectMetadata: this.#projectMetadata,
-        skillSummary: this.#skillsManager?.summaryPrompt(),
-        toolNames: this.#toolRegistry.list().map((tool) => tool.id),
-        workspaceConcurrency: this.#workspaceConcurrencyContext(session),
-      })
-    }
+    await appendInitialPromptHarness(session, {
+      workspace: session.workspace,
+      mode: session.mode,
+      config: publicConfig,
+      providerId: provider.id,
+      promptRegistry: this.#promptRegistry,
+      projectMetadata: this.#projectMetadata,
+      skillSummary: this.#skillsManager?.summaryPrompt(),
+      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+      workspaceConcurrency: this.#workspaceConcurrencyContext(session),
+    })
     await session.logger.write({
       type: 'session.start',
       sessionId,
       conversationId: input.conversationId,
       workspace: session.workspace,
-      model:
-        getProviderConfig(publicConfig, input.provider)?.model ??
-        getActiveProviderConfig(publicConfig).model,
+      model: provider.model,
       mode: input.mode,
-      forkedFromEventId: input.forkedFromEventId,
     })
     await this.#pluginBus
       ?.emit('onSessionStart', {
@@ -546,52 +522,6 @@ export class SessionManager {
       undefined,
       input.message,
     )
-  }
-
-  /**
-   * Creates a prepared fork session from a recorded provider request.
-   *
-   * The fork keeps recorded messages and request override intact so replay can
-   * compare provider behavior without re-emitting historical side effects.
-   */
-  async createForkFromTrace(input: {
-    conversationId: string
-    workspace: string
-    mode: PermissionMode
-    messages: ProviderMessage[]
-    providerRequest: JsonValue
-    sourceEventId: EventId
-  }): Promise<{ sessionId: SessionId }> {
-    const sessionId = await this.createSession({
-      conversationId: input.conversationId,
-      workspace: input.workspace,
-      mode: input.mode,
-      provider: this.#configStore.getPublicConfig().activeProviderId,
-      initialHistory: input.messages,
-      providerRequestOverride: input.providerRequest,
-      forkedFromEventId: input.sourceEventId,
-      skipInitialHarness: true,
-    })
-    return { sessionId }
-  }
-
-  /**
-   * Starts the one allowed run for a prepared trace fork.
-   *
-   * Fork sessions must carry both the source event id and provider request
-   * override; otherwise they are ordinary sessions and cannot use this path.
-   */
-  startForkRun(sessionId: SessionId): RunId {
-    const session = this.#requireSession(sessionId)
-
-    if (
-      session.forkedFromEventId === undefined ||
-      session.providerRequestOverride === undefined
-    ) {
-      ipcFault('PRECONDITION_FAILED', 'Session is not a prepared trace fork')
-    }
-
-    return this.#runs.start(session, `fork-${session.forkedFromEventId}`)
   }
 
   /**

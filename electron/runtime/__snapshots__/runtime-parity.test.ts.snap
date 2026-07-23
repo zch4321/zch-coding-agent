@@ -230,7 +230,7 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
   "traceRequests": [
     {
       "promptLayers": [
-        "base_instructions",
+        "system_instruction",
         "runtime_context",
         "assistant_preferences",
         "runtime_context",
@@ -242,7 +242,7 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
     },
     {
       "promptLayers": [
-        "base_instructions",
+        "system_instruction",
         "runtime_context",
         "assistant_preferences",
         "runtime_context",
@@ -254,20 +254,7 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
     },
     {
       "promptLayers": [
-        "base_instructions",
-        "runtime_context",
-        "assistant_preferences",
-        "runtime_context",
-        "runtime_context",
-      ],
-      "promptResources": [
-        "harness.base-instructions.en-US",
-        "harness.runtime-context.en-US",
-      ],
-    },
-    {
-      "promptLayers": [
-        "base_instructions",
+        "system_instruction",
         "runtime_context",
         "assistant_preferences",
         "runtime_context",
@@ -280,7 +267,7 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
     },
     {
       "promptLayers": [
-        "base_instructions",
+        "system_instruction",
         "runtime_context",
         "assistant_preferences",
         "runtime_context",
@@ -293,7 +280,20 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
     },
     {
       "promptLayers": [
-        "base_instructions",
+        "system_instruction",
+        "runtime_context",
+        "assistant_preferences",
+        "runtime_context",
+        "runtime_context",
+      ],
+      "promptResources": [
+        "harness.base-instructions.en-US",
+        "harness.runtime-context.en-US",
+      ],
+    },
+    {
+      "promptLayers": [
+        "system_instruction",
         "runtime_context",
         "assistant_preferences",
         "runtime_context",
@@ -307,7 +307,7 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
     },
     {
       "promptLayers": [
-        "base_instructions",
+        "system_instruction",
         "runtime_context",
         "assistant_preferences",
         "runtime_context",

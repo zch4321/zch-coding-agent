@@ -1,4 +1,8 @@
-import { getActiveProviderConfig, type PublicConfig } from '../../shared/config'
+import {
+  getActiveProviderConfig,
+  getProviderConfig,
+  type PublicConfig,
+} from '../../shared/config'
 import type { RunStatus, ToolResultEnvelope } from '../../shared/agent-events'
 import type { JsonValue } from '../../shared/json'
 import type { ToolResult } from '../tools/types'
@@ -57,10 +61,18 @@ export function finalStatusFromError(
 export function modelPromptBudget(
   config: PublicConfig,
   tools: JsonValue[],
+  selection?: { providerId: string; model: string },
 ): number {
-  const provider = getActiveProviderConfig(config)
+  const provider = selection
+    ? getProviderConfig(config, selection.providerId)
+    : getActiveProviderConfig(config)
+  if (!provider) {
+    throw new ContextBudgetError(
+      `Provider is not configured: ${selection?.providerId}`,
+    )
+  }
   const model = resolveModelProfiles(config, provider.id).find(
-    (candidate) => candidate.id === provider.model,
+    (candidate) => candidate.id === (selection?.model ?? provider.model),
   )
   const contextWindow =
     model?.contextWindowTokens ?? config.limits.maxContextTokens

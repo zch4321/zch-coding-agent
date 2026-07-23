@@ -1,8 +1,5 @@
 import type { RunStatus, ToolApprovalSummary } from '../../shared/agent-events'
-import {
-  getProviderConfig,
-  type ProviderPublicConfig,
-} from '../../shared/config'
+import type { ProviderPublicConfig } from '../../shared/config'
 import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { ChangeHistoryStore } from './change-history'
@@ -16,11 +13,7 @@ import { ProviderAutoApprover } from '../permission/auto-approver'
 import type { ToolExecutor } from '../tools/tool-registry'
 import { toJsonValue } from './session-common'
 import type { PromptRegistry } from '../prompts/registry'
-import {
-  normalizeToolResult,
-  toolFailure,
-  toolResultForProvider,
-} from './session-run-utils'
+import { normalizeToolResult, toolFailure } from './session-run-utils'
 import type { SessionApprovalCoordinator } from '../permission/session-approval'
 import type { SessionContextGate } from './session-context-gate'
 import { createConfiguredProvider } from './session-provider-turn'
@@ -32,6 +25,7 @@ import type {
 } from './session-types'
 import { normalizeLlmUsage } from '../providers/usage'
 import type { McpToolGateway } from '../tools/mcp-tools'
+import { appendToolResult } from './canonical-history'
 
 type ToolAttemptStage = 'validation' | 'permission' | 'execution'
 
@@ -169,25 +163,16 @@ export class SessionToolRunner {
             attemptStage = 'permission'
             attemptEffects = [...inspected.definition.effects]
             const config = this.#configStore.getPublicConfig()
-            const configuredApproverProvider = getProviderConfig(
-              config,
-              config.approval.approverProviderId,
-            )
+            const approvalBinding = run.routes?.approval
+            const configuredApproverProvider = approvalBinding?.provider
             approvalUsageProvider = configuredApproverProvider
               ? {
                   ...configuredApproverProvider,
-                  model: config.approval.approverModel,
-                  reasoning:
-                    configuredApproverProvider.reasoning === 'off'
-                      ? 'high'
-                      : configuredApproverProvider.reasoning,
+                  model: approvalBinding.snapshot.model,
+                  reasoning: approvalBinding.snapshot.reasoning,
                 }
               : undefined
-            const apiKey = configuredApproverProvider
-              ? await this.#configStore.getProviderApiKey(
-                  configuredApproverProvider.id,
-                )
-              : undefined
+            const apiKey = approvalBinding?.apiKey
             const autoApprover =
               session.mode === 'auto' && apiKey && approvalUsageProvider
                 ? (this.#autoApproverFactory?.({ config, apiKey }) ??
@@ -195,11 +180,14 @@ export class SessionToolRunner {
                     createConfiguredProvider(
                       config,
                       approvalUsageProvider,
+                      approvalBinding.snapshot.model,
+                      approvalBinding.snapshot.reasoning,
                       apiKey,
                       this.#fetchImpl,
                     ),
                     config.limits.autoApprovalTimeoutMs,
                     this.#promptRegistry?.approvalPrompt().content,
+                    approvalBinding.snapshot,
                   ))
                 : undefined
             const authorization = await this.#permissionPipeline.authorize({
@@ -444,10 +432,25 @@ export class SessionToolRunner {
           this.#onDiagnostic('Plugin afterToolCall failed', error),
         )
 
-      session.history.push({
-        role: 'tool',
-        tool_call_id: call.id,
-        content: toolResultForProvider(providerResult),
+      appendToolResult(session, {
+        callId: call.id,
+        content: toJsonValue(providerResult),
+        isError: providerResult.status !== 'ok',
+        name: call.toolId,
+        reason: call.reason,
+        status:
+          providerResult.status === 'ok'
+            ? 'completed'
+            : providerResult.status === 'denied'
+              ? 'denied'
+              : providerResult.status === 'cancelled'
+                ? 'cancelled'
+                : providerResult.status === 'timeout'
+                  ? 'timed_out'
+                  : 'failed',
+        truncated:
+          'truncated' in providerResult && providerResult.truncated === true,
+        durationMs,
       })
     }
 

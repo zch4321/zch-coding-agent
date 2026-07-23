@@ -1,12 +1,12 @@
 import type { AgentEvent } from '../../shared/agent-events'
 import type { JsonValue } from '../../shared/json'
 import type { PromptBuildSummary } from '../../shared/trace'
-import type { ProviderMessage } from '../providers/provider'
+import type { ChatCompletionsRequestDto } from '../providers/provider-protocol'
 import type { ToolResult } from '../tools/types'
 
 export interface ParityProviderRequest {
-  messages: ProviderMessage[]
-  tools: JsonValue[]
+  messages: ChatCompletionsRequestDto['messages']
+  tools: ChatCompletionsRequestDto['tools']
 }
 
 export interface ParityTraceRequest {
@@ -127,11 +127,10 @@ function normalizeTraceRequests(
           promptBuild: {
             schemaVersion: request.promptBuild.schemaVersion,
             layers: request.promptBuild.layers
-              .filter((layer) => layer.kind !== 'orchestration_request')
+              .filter((layer) => layer.kind !== 'orchestrator')
               .map((layer) => ({
                 kind: layer.kind,
                 source: normalizeString(layer.source, workspace),
-                role: layer.role,
                 trusted: layer.trusted,
                 editable: layer.editable,
                 sha256:

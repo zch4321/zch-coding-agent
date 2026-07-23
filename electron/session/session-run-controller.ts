@@ -4,13 +4,15 @@ import type { RunStatus } from '../../shared/agent-events'
 import type { RunId } from '../../shared/ids'
 import { PROVIDER_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
+import { resolveRunRoutes } from '../providers/model-route-resolver'
 import {
   appendPromptLayer,
   benchmarkCaseContent,
   benchmarkFeedbackContent,
   orchestrationRequestContent,
 } from './prompt-harness'
-import { id, ipcFault } from './session-common'
+import { id, ipcFault, redactJsonSecrets } from './session-common'
+import { appendAssistantTurn, appendUserInput } from './canonical-history'
 import type { SessionCompactCoordinator } from './session-compact-coordinator'
 import type { SessionInterjectionCoordinator } from './session-interjection-coordinator'
 import type { SessionOrchestrationPlanner } from './session-orchestration-planner'
@@ -115,6 +117,8 @@ export class SessionRunController {
       writerReleasePending: false,
       pendingInterjections: [],
       processedInterjectionIds: new Set(),
+      harnessMessageIds: [],
+      autoCompactEligible: false,
     }
 
     run.done = this.#run(
@@ -250,6 +254,20 @@ export class SessionRunController {
     const signal = run.controller.signal
 
     try {
+      const runConfig = this.#configStore.getPublicConfig()
+      const runProvider = getProviderConfig(runConfig, session.provider)
+      if (!runProvider) {
+        throw new Error(`Provider is not configured: ${session.provider}`)
+      }
+      session.modelSelection = {
+        providerId: runProvider.id,
+        model: runProvider.model,
+        reasoning: runProvider.reasoning,
+      }
+      run.routes = await resolveRunRoutes(
+        this.#configStore,
+        session.modelSelection,
+      )
       if (harnessMessage) {
         const content =
           harnessMessage.kind === 'benchmark_feedback'
@@ -258,15 +276,15 @@ export class SessionRunController {
                 harnessMessage.kind,
                 harnessMessage.text,
               )
-        appendPromptLayer(session, {
-          kind: 'orchestration_request',
-          role: 'user',
+        const harnessRecord = appendPromptLayer(session, {
+          kind: 'orchestrator',
           content,
           source: harnessMessage.source,
           trusted: true,
           editable: false,
           config: this.#configStore.getPublicConfig(),
         })
+        run.harnessMessageIds.push(harnessRecord.id)
         this.#emit(session, {
           type: 'orchestrator.message',
           sessionId: session.sessionId,
@@ -287,65 +305,72 @@ export class SessionRunController {
         })
       } else if (userMessage !== undefined) {
         if (isCompactSlashCommand(userMessage)) {
-          await this.#compact.runCompactCommand(session, run, userMessage)
-          await this.#finishRun(session, run, 'completed')
-          return
-        }
-
-        const prepared = await this.#userTurns.prepare(
-          session,
-          run,
-          userMessage,
-          context,
-        )
-        run.currentTurnStartIndex = session.history.length
-        for (const appMessage of prepared.appMessages) {
-          appendPromptLayer(session, {
-            kind: appMessage.kind,
-            role: 'user',
-            content: appMessage.content,
-            source: appMessage.source,
-            trusted: false,
-            editable: false,
-            config: this.#configStore.getPublicConfig(),
+          const continueRun = await this.#compact.runCompactCommand(
+            session,
+            run,
+            userMessage,
+          )
+          if (!continueRun) {
+            await this.#finishRun(session, run, 'completed')
+            return
+          }
+        } else {
+          const prepared = await this.#userTurns.prepare(
+            session,
+            run,
+            userMessage,
+            context,
+          )
+          for (const appMessage of prepared.appMessages) {
+            const appRecord = appendPromptLayer(session, {
+              kind: appMessage.kind,
+              content: appMessage.content,
+              source: appMessage.source,
+              trusted: false,
+              editable: false,
+              config: this.#configStore.getPublicConfig(),
+            })
+            run.harnessMessageIds.push(appRecord.id)
+          }
+          for (const harnessContext of harnessContexts ?? []) {
+            const contextRecord = appendPromptLayer(session, {
+              kind: 'benchmark_context',
+              content: benchmarkCaseContent(harnessContext.text),
+              source: harnessContext.source,
+              trusted: true,
+              editable: false,
+              config: this.#configStore.getPublicConfig(),
+            })
+            run.harnessMessageIds.push(contextRecord.id)
+            this.#emit(session, {
+              type: 'orchestrator.message',
+              sessionId: session.sessionId,
+              runId: run.runId,
+              kind: harnessContext.kind,
+              text: harnessContext.text,
+            })
+            await session.logger.write({
+              type: 'orchestrator.message',
+              sessionId: session.sessionId,
+              runId: run.runId,
+              kind: harnessContext.kind,
+              text: harnessContext.text,
+            })
+          }
+          const userRecord = appendUserInput(session, {
+            content: prepared.providerMessage,
+            clientRequestId: run.clientRequestId,
           })
-        }
-        for (const harnessContext of harnessContexts ?? []) {
-          appendPromptLayer(session, {
-            kind: harnessContext.kind,
-            role: 'user',
-            content: benchmarkCaseContent(harnessContext.text),
-            source: harnessContext.source,
-            trusted: true,
-            editable: false,
-            config: this.#configStore.getPublicConfig(),
-          })
-          this.#emit(session, {
-            type: 'orchestrator.message',
-            sessionId: session.sessionId,
-            runId: run.runId,
-            kind: harnessContext.kind,
-            text: harnessContext.text,
-          })
+          run.rootUserMessageId = userRecord.id
           await session.logger.write({
-            type: 'orchestrator.message',
+            type: 'user.message',
             sessionId: session.sessionId,
             runId: run.runId,
-            kind: harnessContext.kind,
-            text: harnessContext.text,
+            text: prepared.visibleMessage,
           })
         }
-        session.history.push({
-          role: 'user',
-          content: prepared.providerMessage,
-        })
-        await session.logger.write({
-          type: 'user.message',
-          sessionId: session.sessionId,
-          runId: run.runId,
-          text: prepared.visibleMessage,
-        })
       }
+      run.autoCompactEligible = true
       await session.logger.write({
         type: 'run.start',
         sessionId: session.sessionId,
@@ -374,7 +399,13 @@ export class SessionRunController {
           () => this.setRunStatus(session, run, 'calling_llm'),
         )
 
-        session.history.push(completed.turn)
+        appendAssistantTurn(session, {
+          text: completed.text,
+          toolCalls: completed.toolCalls,
+          reasoning: completed.reasoning,
+          route: run.routes.main.snapshot,
+          continuation: completed.continuation,
+        })
 
         if (completed.text || completed.reasoning) {
           this.#emit(session, {
@@ -388,8 +419,14 @@ export class SessionRunController {
             type: 'agent.message',
             sessionId: session.sessionId,
             runId: run.runId,
-            text: completed.text,
-            reasoning: completed.reasoning || undefined,
+            text: redactJsonSecrets(completed.text, [
+              run.routes.main.apiKey,
+            ]) as string,
+            reasoning: completed.reasoning
+              ? (redactJsonSecrets(completed.reasoning, [
+                  run.routes.main.apiKey,
+                ]) as string)
+              : undefined,
           })
         }
 
@@ -419,6 +456,7 @@ export class SessionRunController {
           run,
           completed.toolCalls,
         )
+        run.autoCompactEligible = true
       }
 
       throw new Error('Run exceeded maxStepsPerRun')

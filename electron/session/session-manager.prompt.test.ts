@@ -9,6 +9,7 @@ import {
   PROMPT_RESOURCE_VERSION,
 } from '../../shared/prompt-resources'
 import { PromptRegistry } from '../prompts/registry'
+import { PluginEventBus } from '../plugins/event-bus'
 import { SessionManager } from './session-manager'
 import {
   PromptAuditProvider,
@@ -61,12 +62,24 @@ describe('SessionManager prompt and trace', () => {
       clientRequestId: 'prompt-request',
     })
 
-    await waitFor(() =>
-      sent.some(
-        ({ event }) =>
-          event.type === 'run.status' && event.status === 'completed',
-      ),
+    await waitFor(
+      () =>
+        sent.some(
+          ({ event }) =>
+            event.type === 'run.status' &&
+            ['completed', 'failed', 'cancelled'].includes(event.status),
+        ),
+      5_000,
     )
+    const terminalEvent = sent.find(
+      ({ event }) =>
+        event.type === 'run.status' &&
+        ['completed', 'failed', 'cancelled'].includes(event.status),
+    )?.event
+    expect(
+      terminalEvent?.type === 'run.status' ? terminalEvent.status : undefined,
+      JSON.stringify(terminalEvent),
+    ).toBe('completed')
     expect(provider.messages[0]?.role).toBe('system')
     expect(provider.messages[1]?.role).toBe('user')
     expect(provider.messages[1]?.content).toContain('<environment_context')
@@ -119,13 +132,26 @@ describe('SessionManager prompt and trace', () => {
       clientRequestId: 'request-1',
     })
 
-    await waitFor(() =>
-      sent.some(
-        (envelope) =>
-          envelope.event.type === 'run.status' &&
-          envelope.event.status === 'completed',
-      ),
+    await waitFor(
+      () =>
+        sent.some(
+          (envelope) =>
+            envelope.event.type === 'run.status' &&
+            ['completed', 'failed', 'cancelled'].includes(
+              envelope.event.status,
+            ),
+        ),
+      5_000,
     )
+    const terminalEvent = sent.find(
+      (envelope) =>
+        envelope.event.type === 'run.status' &&
+        ['completed', 'failed', 'cancelled'].includes(envelope.event.status),
+    )?.event
+    expect(
+      terminalEvent?.type === 'run.status' ? terminalEvent.status : undefined,
+      JSON.stringify(terminalEvent),
+    ).toBe('completed')
 
     expect(
       sent.some(
@@ -193,12 +219,14 @@ describe('SessionManager prompt and trace', () => {
       clientRequestId: 'request-prompt-audit',
     })
 
-    await waitFor(() =>
-      sent.some(
-        (envelope) =>
-          envelope.event.type === 'run.status' &&
-          envelope.event.status === 'completed',
-      ),
+    await waitFor(
+      () =>
+        sent.some(
+          (envelope) =>
+            envelope.event.type === 'run.status' &&
+            envelope.event.status === 'completed',
+        ),
+      5_000,
     )
     await manager.closeSession(sessionId)
 
@@ -216,10 +244,10 @@ describe('SessionManager prompt and trace', () => {
 
     expect(layerKinds).toEqual(
       expect.arrayContaining([
-        'base_instructions',
+        'system_instruction',
         'runtime_context',
         'assistant_preferences',
-        'agents',
+        'agents_context',
       ]),
     )
     expect(resourceIds).toEqual(
@@ -242,4 +270,243 @@ describe('SessionManager prompt and trace', () => {
     )
     expect(provider.requests[0]?.[1]?.role).toBe('user')
   })
+
+  it('freezes a route for the full run and applies config changes to the next run', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-route-'))
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    await writeFile(path.join(workspace, 'README.md'), '# route\n')
+    const store = await createConfig(directory)
+    const initial = store.getPublicConfig().providers[0]!
+    const provider = new ScriptedProvider()
+    const pluginBus = new PluginEventBus()
+    let updated = false
+    pluginBus.on('beforeLLMCall', async () => {
+      if (updated) return
+      updated = true
+      await store.update({
+        version: 1,
+        kind: 'provider',
+        baseURL: initial.baseURL,
+        model: 'next-run-model',
+        reasoning: initial.reasoning,
+      })
+    })
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+      pluginBus,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+
+    manager.startRun({
+      sessionId,
+      message: 'Read README',
+      clientRequestId: 'route-run-one',
+    })
+    await waitFor(
+      () =>
+        sent.filter(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'completed',
+        ).length >= 1,
+      5_000,
+    )
+    expect(
+      provider.requestBodies
+        .slice(0, 2)
+        .map((body) =>
+          body && typeof body === 'object' && !Array.isArray(body)
+            ? body.model
+            : undefined,
+        ),
+    ).toEqual([initial.model, initial.model])
+
+    manager.startRun({
+      sessionId,
+      message: 'Continue',
+      clientRequestId: 'route-run-two',
+    })
+    await waitFor(
+      () =>
+        sent.filter(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'completed',
+        ).length >= 2,
+      5_000,
+    )
+    const nextBody = provider.requestBodies.at(-1)
+    expect(
+      nextBody && typeof nextBody === 'object' && !Array.isArray(nextBody)
+        ? nextBody.model
+        : undefined,
+    ).toBe('next-run-model')
+    await manager.closeSession(sessionId)
+  }, 15_000)
+
+  it('keeps provider routes isolated between sessions', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-routes-'))
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    await store.update({
+      version: 1,
+      kind: 'provider',
+      providerId: 'generic',
+      label: 'Generic',
+      profile: 'generic',
+      baseURL: 'https://generic.invalid/v1',
+      model: 'generic-model',
+      reasoning: 'off',
+    })
+    await store.update({
+      version: 1,
+      kind: 'credential',
+      providerId: 'generic',
+      action: 'set',
+      apiKey: 'generic-secret',
+    })
+    const provider = new ForkProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+    })
+    const deepSeekSession = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    const genericSession = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'generic',
+    })
+    manager.startRun({
+      sessionId: deepSeekSession,
+      message: 'deepseek',
+      clientRequestId: 'route-deepseek',
+    })
+    manager.startRun({
+      sessionId: genericSession,
+      message: 'generic',
+      clientRequestId: 'route-generic',
+    })
+    await waitFor(
+      () =>
+        sent.filter(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'completed',
+        ).length >= 2,
+      5_000,
+    )
+
+    expect(
+      provider.providerRequestOverrides.map((body) =>
+        body && typeof body === 'object' && !Array.isArray(body)
+          ? {
+              model: body.model,
+              hasThinking: 'thinking' in body,
+            }
+          : undefined,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        { model: 'deepseek-v4-pro', hasThinking: true },
+        { model: 'generic-model', hasThinking: false },
+      ]),
+    )
+    await Promise.all([
+      manager.closeSession(deepSeekSession),
+      manager.closeSession(genericSession),
+    ])
+  })
+
+  it.each([
+    {
+      name: 'protected route fields',
+      patch: { route: { model: 'forbidden' } },
+      error: 'protected field: route',
+    },
+    {
+      name: 'invalid wire DTOs',
+      patch: { request: { messages: 'invalid' } },
+      error: 'protected request field: model',
+    },
+    {
+      name: 'over-budget parameters',
+      patch: { params: { temperature_hint: 'x'.repeat(500_000) } },
+      error: 'exceeded the model context budget',
+    },
+  ])(
+    'rejects beforeLLMCall $name before network send',
+    async (fixture) => {
+      const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-hook-'))
+      const workspace = path.join(directory, 'workspace')
+      await mkdir(workspace)
+      const store = await createConfig(directory)
+      if (fixture.name === 'over-budget parameters') {
+        const providerConfig = store.getPublicConfig().providers[0]!
+        await store.update({
+          version: 1,
+          kind: 'provider',
+          baseURL: providerConfig.baseURL,
+          model: providerConfig.model,
+          reasoning: providerConfig.reasoning,
+          contextWindowTokens: 160_000,
+          maxOutputTokens: 8_000,
+        })
+      }
+      const provider = new ForkProvider()
+      const pluginBus = new PluginEventBus()
+      pluginBus.on('beforeLLMCall', () => ({ patch: fixture.patch }) as never)
+      const sent: AgentEventEnvelope[] = []
+      const manager = new SessionManager({
+        configStore: store,
+        traceDirectory: path.join(directory, 'traces'),
+        eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+        providerFactory: () => provider,
+        pluginBus,
+      })
+      const sessionId = await manager.createSession({
+        workspace,
+        mode: 'readonly',
+        provider: 'deepseek',
+      })
+      manager.startRun({
+        sessionId,
+        message: 'hook validation',
+        clientRequestId: `hook-${fixture.name}`,
+      })
+      await waitFor(
+        () =>
+          sent.some(
+            ({ event }) =>
+              event.type === 'run.status' && event.status === 'failed',
+          ),
+        5_000,
+      )
+      expect(
+        sent.find(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'failed',
+        )?.event,
+      ).toMatchObject({
+        type: 'run.status',
+        error: { message: expect.stringContaining(fixture.error) },
+      })
+      expect(provider.calls).toBe(0)
+      await manager.closeSession(sessionId)
+    },
+    15_000,
+  )
 })

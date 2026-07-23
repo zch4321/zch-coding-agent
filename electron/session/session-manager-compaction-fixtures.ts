@@ -31,20 +31,7 @@ export class CompactProvider implements LLMProvider {
       prefixHash: `compact-${this.calls}`,
     })
 
-    if (this.calls === 1) {
-      yield {
-        type: 'completed',
-        rawResponse: { id: 'old-run' },
-        turn: { role: 'assistant', content: 'Old answer' },
-        toolCalls: [],
-        usage: {},
-        providerState: {},
-        timing: {},
-      }
-      return
-    }
-
-    if (this.calls === 2) {
+    if (request.tools.length === 0) {
       yield {
         type: 'completed',
         rawResponse: { id: 'compact' },
@@ -59,8 +46,11 @@ export class CompactProvider implements LLMProvider {
 
     yield {
       type: 'completed',
-      rawResponse: { id: 'after-compact' },
-      turn: { role: 'assistant', content: 'After compact' },
+      rawResponse: { id: `main-${this.calls}` },
+      turn: {
+        role: 'assistant',
+        content: this.calls === 1 ? 'Old answer' : 'After compact',
+      },
       toolCalls: [],
       usage: {},
       providerState: {},
@@ -95,7 +85,7 @@ export class AutoCompactProvider implements LLMProvider {
       prefixHash: `auto-compact-${this.calls}`,
     })
 
-    if (this.calls === 2) {
+    if (request.tools.length === 0) {
       yield {
         type: 'completed',
         rawResponse: { id: 'auto-compact' },

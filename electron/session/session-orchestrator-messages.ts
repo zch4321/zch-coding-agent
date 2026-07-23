@@ -82,8 +82,7 @@ export class SessionOrchestratorMessages {
 
     if (input.injectIntoHistory) {
       appendPromptLayer(session, {
-        kind: 'orchestration_request',
-        role: 'user',
+        kind: 'orchestrator',
         content: orchestrationRequestContent(input.kind, input.text),
         source: `orchestration.${input.kind}`,
         trusted: false,

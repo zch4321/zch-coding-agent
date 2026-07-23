@@ -4,23 +4,24 @@ import type {
   RunStatus,
   TerminalEvent,
 } from '../../shared/agent-events'
-import type { CallId, EventId, RunId, SessionId } from '../../shared/ids'
-import type { JsonValue } from '../../shared/json'
+import type { CallId, MessageId, RunId, SessionId } from '../../shared/ids'
+import type { MessageRecord } from '../../shared/message'
+import type { ModelSelection } from '../../shared/model-route'
 import type { ConfigStore } from '../config/store'
 import type { TraceLogger } from '../logging/logger'
 import type { PluginEventBus } from '../plugins/event-bus'
 import type { ChangeHistoryStore } from './change-history'
 import type { AutoApprover } from '../permission/auto-approver'
-import type { LLMProvider, ProviderMessage } from '../providers/provider'
+import type { LLMProvider } from '../providers/provider'
 import type { HumanApprovalDecision } from '../permission/permission-pipeline'
 import type { SkillsManager } from '../skills/manager'
 import type { PromptRegistry } from '../prompts/registry'
 import type { GoalState, PlanState } from '../../shared/orchestration'
-import type { PromptLedgerEntry } from './prompt-harness'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import type { McpManager } from '../mcp/mcp-manager'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
+import type { ResolvedModelRoute } from '../providers/model-route-resolver'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -108,7 +109,14 @@ export interface ActiveRun {
   // the full interjection lifecycle, not just while queued.
   processedInterjectionIds: Set<string>
   lastToolBatchId?: string
-  currentTurnStartIndex?: number
+  rootUserMessageId?: MessageId
+  harnessMessageIds: MessageId[]
+  autoCompactEligible: boolean
+  routes?: {
+    main: ResolvedModelRoute
+    compression: ResolvedModelRoute
+    approval: ResolvedModelRoute
+  }
 }
 
 export interface SessionState {
@@ -117,14 +125,10 @@ export interface SessionState {
   workspace: string
   mode: PermissionMode
   provider: string
+  modelSelection: ModelSelection
   logger: TraceLogger
-  history: ProviderMessage[]
-  promptLedger: PromptLedgerEntry[]
-  nextPromptSeq: number
-  lastRuntimeContextHash?: string
-  lastAgentsContextHash?: string
-  providerRequestOverride?: JsonValue
-  forkedFromEventId?: EventId
+  history: MessageRecord[]
+  nextMessageSeq: number
   goal?: GoalState
   plan?: PlanState
   eventSeq: number

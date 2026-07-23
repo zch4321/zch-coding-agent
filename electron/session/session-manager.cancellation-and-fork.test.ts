@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { WebContents } from 'electron'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
-import type { CallId, EventId } from '../../shared/ids'
+import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type {
   LLMProvider,
@@ -15,7 +15,6 @@ import { SessionManager } from './session-manager'
 import {
   createConfig,
   createIpcTestEventSink,
-  ForkProvider,
   waitFor,
 } from './session-manager-test-support'
 
@@ -133,82 +132,5 @@ describe('SessionManager cancellation and forks', () => {
       ),
     ).toBe('missing')
     await manager.closeSession(sessionId)
-  })
-
-  it('forks recorded context without replaying historical side effects', async () => {
-    const directory = await mkdtemp(
-      path.join(os.tmpdir(), 'agent-session-fork-'),
-    )
-    const workspace = path.join(directory, 'workspace')
-    await mkdir(workspace)
-    const notePath = path.join(workspace, 'note.txt')
-    await writeFile(notePath, 'unchanged\n')
-    const store = await createConfig(directory)
-    const provider = new ForkProvider()
-    const manager = new SessionManager({
-      configStore: store,
-      traceDirectory: path.join(directory, 'traces'),
-      eventSink: createIpcTestEventSink(() => undefined),
-      providerFactory: () => provider,
-    })
-    const sourceEventId = 'event-source-request' as EventId
-    const fork = await manager.createForkFromTrace({
-      conversationId: 'conversation:fork-test',
-      workspace,
-      mode: 'confirm',
-      sourceEventId,
-      providerRequest: { model: 'recorded-model', temperature: 0.25 },
-      messages: [
-        { role: 'system', content: 'Recorded system prompt' },
-        { role: 'user', content: 'Previously requested edit' },
-        {
-          role: 'assistant',
-          content: null,
-          tool_calls: [
-            {
-              id: 'historical-call',
-              type: 'function',
-              function: { name: 'apply_patch', arguments: '{}' },
-            },
-          ],
-        },
-        {
-          role: 'tool',
-          tool_call_id: 'historical-call',
-          content: '{"status":"ok"}',
-        },
-      ],
-    })
-    manager.startForkRun(fork.sessionId)
-
-    await waitFor(() => provider.calls === 1)
-    await manager.closeSession(fork.sessionId)
-    expect(await readFile(notePath, 'utf8')).toBe('unchanged\n')
-    expect(provider.messages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: 'tool',
-          tool_call_id: 'historical-call',
-        }),
-      ]),
-    )
-    expect(provider.providerRequestOverride).toEqual({
-      model: 'recorded-model',
-      temperature: 0.25,
-    })
-
-    const trace = (
-      await readFile(
-        path.join(directory, 'traces', `${fork.sessionId}.jsonl`),
-        'utf8',
-      )
-    )
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as Record<string, unknown>)
-    expect(trace[0]).toMatchObject({
-      type: 'session.start',
-      forkedFromEventId: sourceEventId,
-    })
   })
 })

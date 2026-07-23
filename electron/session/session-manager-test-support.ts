@@ -72,6 +72,7 @@ export class ForkProvider implements LLMProvider {
   calls = 0
   messages: ProviderChatRequest['messages'] = []
   providerRequestOverride: JsonValue | undefined
+  providerRequestOverrides: JsonValue[] = []
 
   async *streamChat(
     request: ProviderChatRequest,
@@ -80,6 +81,9 @@ export class ForkProvider implements LLMProvider {
     this.messages = structuredClone(request.messages)
     this.providerRequestOverride = structuredClone(
       request.providerRequestOverride,
+    )
+    this.providerRequestOverrides.push(
+      structuredClone(request.providerRequestOverride ?? null),
     )
     yield {
       type: 'completed',
