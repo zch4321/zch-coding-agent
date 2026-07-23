@@ -800,35 +800,6 @@ export const IPC_CONTRACTS = {
     ),
     result: ipcResultSchema(ProviderStatsSchema),
   },
-  'trace:fork': {
-    payload: Type.Object(
-      {
-        version: Type.Literal(IPC_VERSION),
-        traceId: TraceIdSchema,
-        eventId: EventIdSchema,
-        conversationId: Type.String({ minLength: 1, maxLength: 256 }),
-      },
-      { additionalProperties: false },
-    ),
-    result: ipcResultSchema(
-      Type.Object(
-        { sessionId: SessionIdSchema },
-        { additionalProperties: false },
-      ),
-    ),
-  },
-  'trace:start-fork': {
-    payload: Type.Object(
-      {
-        version: Type.Literal(IPC_VERSION),
-        sessionId: SessionIdSchema,
-      },
-      { additionalProperties: false },
-    ),
-    result: ipcResultSchema(
-      Type.Object({ runId: RunIdSchema }, { additionalProperties: false }),
-    ),
-  },
   'logs:open-directory': {
     payload: EmptyPayloadSchema,
     result: ipcResultSchema(AcceptedSchema),

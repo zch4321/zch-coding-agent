@@ -216,7 +216,7 @@ function event(
   fields: Record<string, unknown>,
 ): TraceEvent {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     seq,
     eventId: `event-${seq}`,
     ts: new Date(Date.UTC(2026, 0, 1, 0, 0, 0, offsetMs)).toISOString(),

@@ -30,6 +30,15 @@ export async function readTraceFile(filePath: string): Promise<TraceEvent[]> {
     }
 
     if (!validateTraceEvent(candidate)) {
+      const version =
+        candidate && typeof candidate === 'object'
+          ? Reflect.get(candidate, 'schemaVersion')
+          : undefined
+      if (version !== 2) {
+        throw new Error(
+          `Unsupported trace schema in line ${index + 1}; P3 requires trace v2`,
+        )
+      }
       throw new Error(
         `Invalid trace line ${index + 1}: ${formatSchemaErrors(
           validateTraceEvent.errors,

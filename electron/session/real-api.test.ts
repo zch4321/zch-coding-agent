@@ -282,32 +282,9 @@ describe.skipIf(!live)('real DeepSeek endpoint', () => {
     const readTraceId = readSessionId as unknown as TraceId
     const replay = await traceService.replay(readTraceId)
     expect(replay.closed).toBe(true)
-    expect(replay.forkPoints.length).toBeGreaterThan(0)
     expect(
       (await traceService.stats(readTraceId)).requestCount,
     ).toBeGreaterThan(0)
-    const lastForkPoint = replay.forkPoints.at(-1)!
-    const preparedFork = await manager.createForkFromTrace({
-      ...(await traceService.forkPoint(readTraceId, lastForkPoint.eventId)),
-      conversationId: 'conversation:real-api-fork',
-    })
-    const forkRunId = manager.startForkRun(preparedFork.sessionId)
-    await waitFor(() =>
-      events.some(
-        (event) =>
-          event.type === 'run.status' &&
-          event.runId === forkRunId &&
-          (event.status === 'completed' || event.status === 'failed'),
-      ),
-    )
-    expect(
-      events
-        .filter(
-          (event) => event.type === 'run.status' && event.runId === forkRunId,
-        )
-        .at(-1),
-    ).toMatchObject({ status: 'completed' })
-    await manager.closeSession(preparedFork.sessionId)
 
     const writeSessionId = await manager.createSession({
       workspace,

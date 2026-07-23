@@ -444,7 +444,7 @@ session.end     { ts }
 
 - 每条事件包含 `schemaVersion + seq + eventId`，异步流事件可用 `parentId/callId/runId` 建立因果关系。
 - **离线回放**：不访问模型、不执行工具，按原始流事件和已记录结果确定性重现 UI、消息历史和 Agent 状态机。
-- **请求重放/分叉**：从任一 `llm.call` 重建完全相同的 Provider 请求体，用当前凭据重新请求模型；用于比较上下文调整与 cache 行为，但不保证得到相同随机输出。
+- **请求检查**：保留最终 Provider 请求体用于离线检查、导出和 cache 行为分析；不使用当前凭据在线重放，也不从 trace 创建 Session 分叉。
 - **工具重放**默认只注入已记录结果；真实重新执行副作用工具必须是独立显式操作。
 - 保存 Provider 返回的完整 usage，包括可用时的 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`、输入/输出 token；同时记录 TTFT、总延迟、请求字节数和稳定前缀 hash，供 KV cache 分析。
 - DeepSeek 流式调用必须请求最终 usage chunk；cache 命中以 Provider 返回字段为准，不能仅根据本地消息前缀推断。

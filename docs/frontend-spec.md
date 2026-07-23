@@ -479,7 +479,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - retention days。
 - max total bytes。
 - P5 提供受控的打开日志目录和清理已关闭 trace 入口。
-- 提供 trace 列表、离线 replay 摘要、`llm.request` fork 点和当前 Provider 凭据分叉动作。
+- 提供 trace 列表、离线 replay 摘要和 Prompt Inspector；不提供 trace fork 或使用当前凭据重放 Provider 请求的入口。
 - 展示 Provider 原始 usage 派生的 token/cache 指标与 TTFT/总时延；字段缺失时明确显示 `Provider not provided`。
 - 完整事件时间轴、搜索、导出和批量管理属于 Post-MVP。
 

@@ -393,14 +393,17 @@ interface MessageRecord {
   clientRequestId?: string
 
   kind:
-    | 'user_input'
-    | 'assistant_turn'
-    | 'tool_result'
-    | 'harness'
+    | 'system_instruction'
+    | 'assistant_preferences'
+    | 'selected_context'
+    | 'benchmark_context'
     | 'runtime_context'
     | 'agents_context'
     | 'orchestrator'
     | 'interjection'
+    | 'user_input'
+    | 'assistant_turn'
+    | 'tool_result'
     | 'compact_summary'
 
   parts: MessagePart[]
@@ -428,10 +431,10 @@ interface MessageRecord {
 
 实际 shared schema 必须是以 `kind` 为 discriminator 的闭集 union，而不是上面这个允许所有组合的宽松 interface：
 
-- `user_input`：`clientRequestId` 必填，V1 只允许非空 text parts。
+- 原始 `user_input`：`clientRequestId` 必填；自动 compact 的 replay user 改为携带 `replayedFromMessageId`，两者严格 XOR。UI、搜索和导出按 replay source 去重。
 - `assistant_turn`：只允许 text/tool-call parts，至少一项；`modelRoute` 必填，可携带 reasoning projection 和 continuation。
 - `tool_result`：每条 record 正好包含一个 terminal tool-result part；`callId` 必须对应之前 active assistant turn 中的 tool-call part。
-- `harness/runtime_context/agents_context/orchestrator/interjection/compact_summary`：V1 只允许非空 text parts。
+- `system_instruction/assistant_preferences/selected_context/benchmark_context/runtime_context/agents_context/orchestrator/interjection/compact_summary`：V1 只允许非空 text parts；不存在通用 `harness` kind。
 - `normalizedReasoningText/providerContinuation` 不能出现在非 assistant record。
 - `MessageMetadataV1` 也必须按 `kind` 收紧，不接受任意键。
 
@@ -460,7 +463,7 @@ CompiledCanonicalHistory
 OpenAI Chat Completions / OpenAI Responses / Anthropic Messages DTO
 ```
 
-`MessageHistoryCompiler` 只负责 provider-independent policy：按 `seq` 排序、选择 `inHistory`、应用 compact 边界、校验 `kind/parts` 和 tool-call/result 完整性，并删除不应外发的 application metadata。它不生成 `role`、Provider message 或任何 SDK DTO。
+`MessageHistoryCompiler` 只负责 provider-independent policy：按 `seq` 排序、选择 `inHistory`、应用 compact 边界、校验 record schema、payload bounds、Session/identity 和严格有序的完整 tool-call/result batch。它不生成 `role`、Provider message 或任何 SDK DTO。
 
 ```ts
 interface CompiledCanonicalHistory {
@@ -890,17 +893,16 @@ Tool/approval 的实时卡片来自 runtime event；完成后 renderer 从 assis
 
 `inHistory` 表示下一次请求使用的 canonical active history，不表示消息是否在 UI 可见。
 
-显式或自动 compact 在一个 transaction 中：
+P3 runtime 中，自动 compact 只在新用户输入后或完整 tool-result batch 后执行：
 
-1. 选择完整 provider turn/tool batch 边界。
-2. 生成完整 compact summary message。
-3. 把被替代的非 pinned messages 设置为 `in_history = 0`。
-4. 插入 `kind = 'compact_summary'`、`in_history = 1` 的 summary message。
-5. 递增 Session revision。
+1. 用完整 pre-compact active history（包括当前用户、interjection、assistant 与工具进展）生成 summary。
+2. summary 成功后才把旧 active records 全部置为 `in_history = 0`；失败、abort 或空 summary 保持历史不变。
+3. 依次追加 `system_instruction → 当前 harness* → Run 起始 user_input replay → compact_summary`。replay 使用新 ID/seq、记录 `replayedFromMessageId`，不复制 `clientRequestId`。
+4. Chat Completions Adapter 把末尾 summary 编译为 user-role continuation；重建后仍超硬限制直接返回 `CONTEXT_TOO_LARGE`，不递归 compact。
 
 原消息仍在数据库，UI 和导出可以读取；只是后续 provider request 不再携带。
 
-V1 为保持 `ORDER BY seq` 可以直接重建历史，compact 必须替代当前全部非 pinned active prefix，并在下一条新用户消息之前完成。若未来需要“摘要旧前缀但保留部分近期 suffix”，再增加独立 `history_order`；V1 不提前引入。
+手动 compact 使用独立顺序：纯 `/compact` 重建 `system → harness* → summary`、展示 summary 后结束；`/compact <正文>` 再把正文作为新的普通 user 追加到 summary 之后并开始 React。命令文本本身不进入 canonical history，正文也不是摘要指令。无 root user 的 harness-driven Run 省略 replay user。
 
 Compact summary 的 `metadata` 至少记录：
 
@@ -1360,17 +1362,19 @@ Preload 只暴露冻结 typed API，不暴露 `ipcRenderer`。Command/query/resu
 
 SQLite 是产品持久状态的真相源；JSONL trace 是可选审计记录，不用于 Project/Session/FileChange 恢复。
 
-Trace 可以记录比 messages 更细的内容：
+Trace v2 可以记录比 messages 更细的内容：
 
 - Run lifecycle 和失败/取消原因。
 - stream delta 和 partial output。
-- prompt build 和 request-specific selection。
-- provider request/response/timing/usage。
+- canonical source 摘要、冻结 route、prompt build 和 request-specific selection。
+- 最终 wire request、canonical completion、必要 raw response、timing 和 usage。
 - pending approval、tool attempt、writer、terminal 和 runtime diagnostics。
 
 Logging 关闭时这些细节可以不存在，但 Projects、完整 Messages、Session metadata 和未被 retention 清理的 FileChanges 仍必须落盘。
 
 Restricted transcript 可以组合 SQLite messages 与 trace；缺少 trace 时明确省略 runtime 细节。
+
+Trace 不记录 credentials。P3 的 trace reader 明确拒绝 v1，不提供转换；trace fork/start-fork API 和 UI 已移除，普通 Session fork 不受影响。
 
 ---
 

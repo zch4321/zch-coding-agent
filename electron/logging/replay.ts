@@ -2,6 +2,7 @@ import type { AgentEvent, RunStatus } from '../../shared/agent-events'
 import type { CallId, RunId, SessionId, TerminalId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import { TraceEventSchema, type TraceEvent } from './events'
+import { TRACE_SCHEMA_VERSION } from './events'
 import { compileSchema } from '../schema-validator'
 
 const validateTraceEvent = compileSchema(TraceEventSchema)
@@ -142,7 +143,7 @@ export function reduceTraceEvent(
     if (
       options.unknownEvent === 'skip' &&
       typeof version === 'number' &&
-      version > 1
+      version > TRACE_SCHEMA_VERSION
     ) {
       return {
         ...current,

@@ -13,8 +13,6 @@ import type {
   SessionTranscriptPage,
   SessionTranscriptRequestMessagesPage,
 } from '../../shared/session-transcript'
-import type { PermissionMode } from '../../shared/config'
-import type { ProviderMessage } from '../providers/provider'
 import type { TraceEvent } from './events'
 import { readTraceFile } from './reader'
 import { replayTrace } from './replay'
@@ -42,7 +40,6 @@ export class TraceServiceError extends Error {
       | 'INVALID_TRACE'
       | 'TRACE_NOT_FOUND'
       | 'TRACE_TOO_LARGE'
-      | 'FORK_POINT_NOT_FOUND'
       | 'TRACE_CURSOR_INVALID'
       | 'TRACE_CURSOR_STALE'
       | 'TRACE_REQUEST_NOT_FOUND',
@@ -51,14 +48,6 @@ export class TraceServiceError extends Error {
     super(message)
     this.name = 'TraceServiceError'
   }
-}
-
-export interface TraceForkPoint {
-  workspace: string
-  mode: PermissionMode
-  sourceEventId: EventId
-  messages: ProviderMessage[]
-  providerRequest: JsonValue
 }
 
 function jsonObject(value: JsonValue): Record<string, JsonValue> | undefined {
@@ -109,80 +98,6 @@ function averageMetric(events: TraceEvent[], name: string): number | null {
   return values.length > 0
     ? values.reduce((sum, value) => sum + value, 0) / values.length
     : null
-}
-
-function providerMessages(value: JsonValue[]): ProviderMessage[] {
-  return value.map((candidate) => {
-    const object = jsonObject(candidate)
-
-    if (!object) {
-      throw new TraceServiceError(
-        'INVALID_TRACE',
-        'Fork message must be an object',
-      )
-    }
-
-    const role = object?.role
-
-    if (
-      role !== 'system' &&
-      role !== 'user' &&
-      role !== 'assistant' &&
-      role !== 'tool'
-    ) {
-      throw new TraceServiceError(
-        'INVALID_TRACE',
-        'Fork messages contain an invalid role',
-      )
-    }
-
-    const content = object.content
-    const reasoning = object.reasoning_content
-    const toolCallId = object.tool_call_id
-    const toolCalls = object.tool_calls
-
-    if (
-      content !== undefined &&
-      content !== null &&
-      typeof content !== 'string'
-    ) {
-      throw new TraceServiceError(
-        'INVALID_TRACE',
-        'Fork message content is invalid',
-      )
-    }
-
-    if (reasoning !== undefined && typeof reasoning !== 'string') {
-      throw new TraceServiceError(
-        'INVALID_TRACE',
-        'Fork reasoning content is invalid',
-      )
-    }
-
-    if (toolCallId !== undefined && typeof toolCallId !== 'string') {
-      throw new TraceServiceError(
-        'INVALID_TRACE',
-        'Fork tool call id is invalid',
-      )
-    }
-
-    if (toolCalls !== undefined && !Array.isArray(toolCalls)) {
-      throw new TraceServiceError(
-        'INVALID_TRACE',
-        'Fork tool calls are invalid',
-      )
-    }
-
-    return {
-      role,
-      ...(content !== undefined ? { content } : {}),
-      ...(typeof reasoning === 'string'
-        ? { reasoning_content: reasoning }
-        : {}),
-      ...(typeof toolCallId === 'string' ? { tool_call_id: toolCallId } : {}),
-      ...(Array.isArray(toolCalls) ? { tool_calls: toolCalls } : {}),
-    }
-  })
 }
 
 function truncateJsonStrings(value: JsonValue, maxLength = 200_000): JsonValue {
@@ -351,19 +266,6 @@ export class TraceService {
           runId: runId as keyof typeof state.runs,
           status: status ?? 'failed',
         })),
-      forkPoints: events
-        .flatMap((event) =>
-          event.type === 'llm.request'
-            ? [
-                {
-                  eventId: event.eventId,
-                  runId: event.runId,
-                  seq: event.seq,
-                },
-              ]
-            : [],
-        )
-        .slice(-10_000),
       requests: events
         .flatMap((event) =>
           event.type === 'llm.request'
@@ -572,41 +474,6 @@ export class TraceService {
       prefixFingerprints: [
         ...new Set(requests.flatMap((event) => event.prefixFingerprints ?? [])),
       ].slice(-10_000),
-    }
-  }
-
-  async forkPoint(traceId: TraceId, eventId: EventId): Promise<TraceForkPoint> {
-    const { events } = await this.#read(traceId)
-    const source = events.find(
-      (event) => event.type === 'llm.request' && event.eventId === eventId,
-    )
-    const start = events.find((event) => event.type === 'session.start')
-
-    if (
-      !source ||
-      source.type !== 'llm.request' ||
-      !start ||
-      start.type !== 'session.start'
-    ) {
-      throw new TraceServiceError(
-        'FORK_POINT_NOT_FOUND',
-        'Trace fork point was not found',
-      )
-    }
-
-    const mode: PermissionMode =
-      start.mode === 'readonly' ||
-      start.mode === 'auto' ||
-      start.mode === 'confirm' ||
-      start.mode === 'yolo'
-        ? start.mode
-        : 'confirm'
-    return {
-      workspace: start.workspace,
-      mode,
-      sourceEventId: source.eventId,
-      messages: providerMessages(source.normalizedMessages),
-      providerRequest: structuredClone(source.providerRequest),
     }
   }
 

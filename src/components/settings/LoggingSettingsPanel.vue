@@ -140,7 +140,7 @@ function interjectionTitle(interjection: {
     </div>
 
     <div class="trace-debug">
-      <h3>{{ t('logging.replayFork') }}</h3>
+      <h3>{{ t('logging.replayTitle') }}</h3>
       <NSelect
         v-model:value="traces.selectedId"
         :options="traces.options"
@@ -163,23 +163,6 @@ function interjectionTitle(interjection: {
           {{ t('transcript.inspect') }}
         </NButton>
       </div>
-      <label class="settings-field">
-        <span>{{ t('logging.forkEvent') }}</span>
-        <NSelect
-          v-model:value="traces.forkEventId"
-          :options="traces.forkPointOptions"
-          filterable
-          tag
-          placeholder="event-..."
-        />
-      </label>
-      <NButton
-        secondary
-        :disabled="!traces.selectedId || !traces.forkEventId.trim()"
-        @click="traces.forkSelected"
-      >
-        {{ t('logging.fork') }}
-      </NButton>
       <p v-if="traces.replay" class="settings-footnote">
         {{ t('logging.messages', { count: traces.replay.messages.length }) }} ·
         {{ t('logging.tools', { count: traces.replay.toolCount }) }} ·
@@ -238,7 +221,7 @@ function interjectionTitle(interjection: {
         </article>
         <article>
           <span>{{ t('logging.promptLayers') }}</span>
-          <strong>{{ promptRequest.promptBuild.ledgerMessageCount }}</strong>
+          <strong>{{ promptRequest.promptBuild.layers.length }}</strong>
         </article>
         <article>
           <span>{{ t('logging.promptEstimatedTokens') }}</span>
@@ -262,9 +245,8 @@ function interjectionTitle(interjection: {
           <NTag size="small" :type="layer.trusted ? 'success' : 'warning'">
             {{ layer.kind }}
           </NTag>
-          <span>{{ layer.role }}</span>
           <span>{{ layer.source }}</span>
-          <span>#{{ layer.messageIndex }}</span>
+          <span>{{ layer.messageId }}</span>
           <span>{{ layer.estimatedTokens.toLocaleString() }} tokens</span>
           <span>{{ layer.sha256.slice(0, 12) }}</span>
         </article>

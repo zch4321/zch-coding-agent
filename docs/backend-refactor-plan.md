@@ -325,20 +325,20 @@ P2 已按该隔离边界完成：production Desktop/Headless composition 尚未�
 
 ### 7.2 任务
 
-- [ ] 新增 `MessageHistoryCompiler`：排序、active-history 选择、compact boundary、kind/parts 和 call/result 完整性校验。
-- [ ] 将 Prompt Harness、runtime context、agents context、orchestrator 和 interjection 追加为 canonical messages，不再维护独立 `promptLedger + ProviderMessage` 双结构。
-- [ ] 定义 `ProviderProtocolAdapter<RequestDto>` 和 `CompletedAssistantTurn`；Adapter 消费完整 `CompiledCanonicalHistory`。
-- [ ] 把现有 `OpenAICompatibleProvider` 拆为 Chat Completions Protocol Adapter 与 HTTP/stream transport。
-- [ ] DeepSeek production route 使用 `deepseek.chat-completions` adapter，并保持当前 reasoning/tool/usage 行为。
-- [ ] 为 Provider config 增加明确的 protocol/adapter selection 和单调 revision（含 config migration）；修改 endpoint/protocol/profile 时递增 revision，credential 值不参与 shared snapshot。
-- [ ] 实现 route resolver：从 Session model selection 和 backend Provider config 生成不可变 `ModelRouteSnapshot`；所有 main/compact/approval 路径禁止重新读取全局 active Provider。
-- [ ] Context budget 使用 snapshot 对应的 model profile，不再调用 `getActiveProviderConfig()`。
-- [ ] Compact 输入/输出改为 canonical history；只在完整 turn boundary 改 active history。
-- [ ] Auto Approver 使用独立 `purpose = 'approval'` route，不复用 main 的可变 Provider 对象。
-- [ ] `beforeLLMCall` hook 只能修改已编译 request 副本/params，不得返回或改写 persisted MessageRecords。
-- [ ] Trace 同时记录 canonical source summary、route snapshot 和实际 wire request；replay 继续以 recorded wire request 为准。
-- [ ] Runtime parity capture 从“公共 ProviderMessage”改为 canonical inputs + adapter output。
-- [ ] 用 test-only protocol fixtures证明 Adapter 支持一对多、多对一映射；本阶段不在产品设置中开放 Responses/Anthropic。
+- [x] 新增 `MessageHistoryCompiler`：排序、active-history 选择、compact boundary、kind/parts 和 call/result 完整性校验。
+- [x] 将 Prompt Harness、runtime context、agents context、orchestrator 和 interjection 追加为 canonical messages，不再维护独立 `promptLedger + ProviderMessage` 双结构。
+- [x] 定义 `ProviderProtocolAdapter<RequestDto>` 和 `CompletedAssistantTurn`；Adapter 消费完整 `CompiledCanonicalHistory`。
+- [x] 把现有 `OpenAICompatibleProvider` 拆为 Chat Completions Protocol Adapter 与 HTTP/SSE transport。
+- [x] DeepSeek production route 使用 `deepseek.chat-completions` adapter，并保持当前 reasoning/tool/usage 行为。
+- [x] Provider config v9 增加明确 adapter selection 和单调 revision；route/credential 修改递增 revision，credential 值不参与 shared snapshot。
+- [x] 实现 route resolver：每个 Run 冻结 main/compression/approval route、credential 与 provider profile，不在 Run 内重新选择全局 active Provider。
+- [x] Context budget 使用冻结 route 对应的 model profile 和完整 Adapter request/tools，不再静默裁剪 active turns。
+- [x] Compact 输入/输出改为 canonical history；只在新用户输入或完整 tool-result batch 后改变 active history。
+- [x] Auto Approver 使用独立 `purpose = 'approval'` route，不复用 main 的可变 Provider 对象。
+- [x] `beforeLLMCall` hook 只能修改已编译 request 深拷贝/安全 params，不得改写 route、tools、credential 或 canonical records。
+- [x] Trace v2 同时记录 canonical source summary、route snapshot、实际 wire request、canonical completion 和 raw response；旧 trace 明确拒绝。
+- [x] Runtime parity capture 从 Core 共享 `ProviderMessage` 改为 Adapter 边界的 request/output 比较。
+- [x] 用 test-only protocol fixtures 证明 Adapter 支持一对多、多对一映射；产品设置不开放 Responses/Anthropic。
 
 ### 7.3 迁移检查清单
 
@@ -359,18 +359,20 @@ P2 已按该隔离边界完成：production Desktop/Headless composition 尚未�
 
 ### 7.4 测试
 
-- [ ] P0 golden fixtures 在 Chat Adapter 下逐字段等价。
-- [ ] Canonical history 同输入、route、tools 和 adapter config 生成确定 request。
-- [ ] Tool call/result 缺失、重复、顺序错误在 provider call 前失败。
-- [ ] continuation adapter/format compatible、incompatible 和 corrupt paths。
-- [ ] DeepSeek reasoning 原文只进入 continuation，可读投影进入 normalized field。
-- [ ] route 在 Run 内冻结；修改全局 config 不改变已开始 Run。
-- [ ] 两个 Session 使用不同 provider/model 时不会串 route。
-- [ ] Electron/Headless parity 保持通过。
+- [x] P0 golden fixtures 在 Chat Adapter 下逐字段等价。
+- [x] Canonical history 同输入、route、tools 和 adapter config 生成确定 request。
+- [x] Tool call/result 缺失、重复、顺序错误在 provider call 前失败。
+- [x] continuation adapter/format compatible、incompatible、canonical mismatch 和 corrupt paths。
+- [x] DeepSeek reasoning 原文只进入 continuation，可读投影进入 normalized field。
+- [x] route 在 Run 内冻结；修改全局 config 不改变已开始 Run。
+- [x] 两个 Session 使用不同 provider/model 时不会串 route。
+- [x] Electron/Headless parity 保持通过。
 
 ### 7.5 验收与回滚
 
-P3 完成后只有 Provider Adapter/transport 理解 wire DTO。若 golden parity 不通过，不得进入 P4；回滚 P3 不影响用户持久数据格式。
+P3 完成后只有 Provider Adapter/transport 与协议 fixtures 理解 wire DTO。P3 使用 reset-only AppConfig v9、Trace v2 和修改后的开发数据库 `0001_initial` checksum；旧配置、旧 trace 和旧 P2 开发数据库不做兼容迁移，错误信息要求显式重置。SQLite 在 P8 前仍不是产品用户状态真相源。
+
+自动 compact 的重建顺序固定为 `system → harness* → root user replay → compact summary`，其中 summary 在 Chat Completions 下编译为最后一个可响应的 user-role continuation；工具进展只由 summary 恢复。手动 `/compact <正文>` 的顺序不同，固定为 `system → harness* → compact summary → new user`；纯 `/compact` 展示 summary 后结束。
 
 ---
 

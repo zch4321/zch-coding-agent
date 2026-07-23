@@ -57,6 +57,26 @@ describe('JsonlTraceLogger', () => {
     expect(events[0]?.type).toBe('session.start')
   })
 
+  it('rejects complete pre-P3 trace schemas', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
+    const filePath = path.join(directory, `${sessionId}.jsonl`)
+    await writeFile(
+      filePath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        seq: 1,
+        eventId: 'event-v1',
+        ts: '2026-01-01T00:00:00.000Z',
+        type: 'session.end',
+        sessionId,
+      })}\n`,
+    )
+
+    await expect(readTraceFile(filePath)).rejects.toThrow(
+      'P3 requires trace v2',
+    )
+  })
+
   it('does not create files when logging is disabled', async () => {
     const logger = new NullTraceLogger()
     const event = await logger.write({
@@ -89,7 +109,7 @@ describe('trace cleanup', () => {
     const active = path.join(directory, 'active.jsonl')
     const closedLine = (id: string) =>
       `${JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         seq: 1,
         eventId: `event-${id}`,
         type: 'session.end',
@@ -101,7 +121,7 @@ describe('trace cleanup', () => {
     await writeFile(
       active,
       `${JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         seq: 1,
         eventId: 'event-active',
         type: 'session.start',

@@ -164,10 +164,6 @@ export interface AgentApi {
   getTraceStats(
     payload: IpcPayload<'trace:stats'>,
   ): Promise<IpcResult<'trace:stats'>>
-  forkTrace(payload: IpcPayload<'trace:fork'>): Promise<IpcResult<'trace:fork'>>
-  startTraceFork(
-    payload: IpcPayload<'trace:start-fork'>,
-  ): Promise<IpcResult<'trace:start-fork'>>
   openLogDirectory(
     payload: IpcPayload<'logs:open-directory'>,
   ): Promise<IpcResult<'logs:open-directory'>>
@@ -231,8 +227,6 @@ export const AGENT_API_KEYS = [
   'getSessionTranscriptRequestMessages',
   'exportSessionTranscript',
   'getTraceStats',
-  'forkTrace',
-  'startTraceFork',
   'openLogDirectory',
   'clearClosedTraces',
   'onAgentEvent',

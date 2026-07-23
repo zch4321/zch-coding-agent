@@ -11,6 +11,16 @@ const traceId = 'session-replay' as TraceId
 const sessionId = 'session-replay' as SessionId
 const runId = 'run-replay' as RunId
 const llmCallId = 'call-llm' as CallId
+const modelRoute = {
+  schemaVersion: 1 as const,
+  purpose: 'main' as const,
+  adapterId: 'deepseek.chat-completions',
+  providerId: 'deepseek',
+  model: 'fixture',
+  reasoning: 'off' as const,
+  endpoint: 'https://api.example/chat/completions',
+  providerConfigRevision: 1,
+}
 
 async function writeTrace(
   directory: string,
@@ -71,7 +81,6 @@ describe('TraceService', () => {
         { role: 'agent', text: 'world' },
       ],
       runs: [{ runId, status: 'completed' }],
-      forkPoints: [],
     })
   })
 
@@ -98,6 +107,8 @@ describe('TraceService', () => {
         providerRequest: {},
         requestBytes: 10,
         prefixHash: 'hash',
+        canonicalSource: [],
+        modelRoute,
       },
       ...Array.from({ length: 8 }, (_, index) => ({
         type: 'user.message' as const,
@@ -233,6 +244,8 @@ describe('TraceService', () => {
         requestBytes: 123,
         prefixHash: 'hash',
         prefixFingerprints: ['prefix-a'],
+        canonicalSource: [],
+        modelRoute,
       },
       {
         type: 'llm.response',
@@ -263,57 +276,6 @@ describe('TraceService', () => {
       averageTtftMs: 5,
       averageTotalMs: 20,
       prefixFingerprints: ['prefix-a'],
-    })
-  })
-
-  it('extracts only the selected request as a fork point', async () => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'trace-fork-'))
-    const service = new TraceService(directory)
-    await service.initialize()
-    const ids = await writeTrace(directory, [
-      {
-        type: 'session.start',
-        sessionId,
-        workspace: 'F:/workspace',
-        model: 'fixture',
-        mode: 'confirm',
-      },
-      {
-        type: 'tool.call',
-        sessionId,
-        runId,
-        callId: 'call-old-tool' as CallId,
-        tool: 'apply_patch',
-        args: { path: 'note.txt' },
-        result: { status: 'ok' },
-        approvedBy: 'human',
-        policySignals: [],
-        durationMs: 1,
-      },
-      {
-        type: 'llm.request',
-        sessionId,
-        runId,
-        callId: llmCallId,
-        normalizedMessages: [
-          { role: 'system', content: 'system' },
-          { role: 'user', content: 'continue' },
-        ],
-        providerRequest: { opaque: true },
-        requestBytes: 20,
-        prefixHash: 'hash',
-      },
-    ])
-
-    await expect(service.forkPoint(traceId, ids[2]!)).resolves.toEqual({
-      workspace: 'F:/workspace',
-      mode: 'confirm',
-      sourceEventId: ids[2],
-      messages: [
-        { role: 'system', content: 'system' },
-        { role: 'user', content: 'continue' },
-      ],
-      providerRequest: { opaque: true },
     })
   })
 

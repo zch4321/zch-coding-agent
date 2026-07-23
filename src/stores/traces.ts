@@ -7,7 +7,6 @@ import type {
   ReplaySummary,
   TraceInfo,
 } from '../../shared/trace'
-import { useAgentStore } from './agent'
 
 interface PromptRequestView {
   eventId: EventId
@@ -74,7 +73,6 @@ export const useTraceStore = defineStore('traces', {
     selectedId: undefined as string | undefined,
     replay: undefined as ReplayView | undefined,
     providerStats: undefined as ProviderStats | undefined,
-    forkEventId: '',
     promptRequestEventId: '',
     actionMessage: '',
     loading: false,
@@ -101,11 +99,6 @@ export const useTraceStore = defineStore('traces', {
           trace.eventCount +
           ' events',
         value: trace.traceId,
-      })),
-    forkPointOptions: (state) =>
-      (state.replay?.forkPoints ?? []).map((point) => ({
-        label: '#' + point.seq + ' · ' + point.runId + ' · ' + point.eventId,
-        value: point.eventId,
       })),
     promptRequestOptions: (state) =>
       (state.replay?.requests ?? []).map((request) => ({
@@ -259,63 +252,6 @@ export const useTraceStore = defineStore('traces', {
       else if (!result.value.canceled && result.value.path) {
         this.actionMessage = 'Exported transcript to ' + result.value.path
       }
-    },
-    async forkSelected() {
-      const bridge = window.agentApi
-      const agent = useAgentStore()
-      if (
-        !bridge ||
-        !this.selectedId ||
-        !this.forkEventId.trim() ||
-        !this.replay?.workspace
-      ) {
-        return
-      }
-
-      agent.saveActiveConversation()
-      await agent.activateWorkspace(this.replay.workspace)
-      const conversation = agent.createConversation(this.replay.workspace)
-      if (!conversation) {
-        this.error = 'Unable to create a conversation for the trace fork'
-        return
-      }
-
-      conversation.title = ('Fork ' + this.selectedId).slice(0, 120)
-      agent.setStartPending(conversation.id, true)
-      try {
-        const prepared = await bridge.forkTrace({
-          version: IPC_VERSION,
-          traceId: this.selectedId,
-          eventId: this.forkEventId.trim() as EventId,
-          conversationId: conversation.id,
-        })
-        if (!prepared.ok) {
-          agent.setStartPending(conversation.id, false)
-          await agent.deleteConversation(conversation.id)
-          this.error = prepared.error.message
-          return
-        }
-
-        agent.registerSession(conversation.id, prepared.value.sessionId)
-        const started = await bridge.startTraceFork({
-          version: IPC_VERSION,
-          sessionId: prepared.value.sessionId,
-        })
-        if (!started.ok) {
-          await agent.closeRuntimeSession(conversation.id)
-          this.error = started.error.message
-          return
-        }
-
-        agent.registerRun(conversation.id, started.value.runId)
-      } finally {
-        agent.setStartPending(conversation.id, false)
-      }
-      this.actionMessage =
-        'Fork started in conversation “' +
-        conversation.title +
-        '”. Historical tools were not replayed.'
-      agent.persistWorkbench()
     },
     async openDirectory() {
       const bridge = window.agentApi

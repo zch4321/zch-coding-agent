@@ -224,7 +224,7 @@ test.describe.serial('Electron settings workflows', () => {
     const traceId = 'prompt-inspector-e2e'
     const traceLines = [
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         seq: 1,
         eventId: 'event-prompt-e2e-1',
         ts: '2026-06-25T00:00:00.000Z',
@@ -235,7 +235,7 @@ test.describe.serial('Electron settings workflows', () => {
         mode: 'readonly',
       },
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         seq: 2,
         eventId: 'event-prompt-e2e-2',
         ts: '2026-06-25T00:00:01.000Z',
@@ -244,7 +244,7 @@ test.describe.serial('Electron settings workflows', () => {
         runId: 'run-prompt-e2e',
       },
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         seq: 3,
         eventId: 'event-prompt-e2e-3',
         ts: '2026-06-25T00:00:02.000Z',
@@ -266,21 +266,62 @@ test.describe.serial('Electron settings workflows', () => {
         providerRequest: { messages: [] },
         requestBytes: 128,
         prefixHash: 'a'.repeat(64),
-        promptBuild: {
+        canonicalSource: [
+          {
+            seq: 1,
+            kind: 'system_instruction',
+            partTypes: ['text'],
+            hash: '1'.repeat(64),
+          },
+          {
+            seq: 2,
+            kind: 'runtime_context',
+            partTypes: ['text'],
+            hash: '2'.repeat(64),
+          },
+          {
+            seq: 3,
+            kind: 'assistant_preferences',
+            partTypes: ['text'],
+            hash: '3'.repeat(64),
+          },
+          {
+            seq: 4,
+            kind: 'agents_context',
+            partTypes: ['text'],
+            hash: '4'.repeat(64),
+          },
+          {
+            seq: 5,
+            kind: 'user_input',
+            partTypes: ['text'],
+            hash: '5'.repeat(64),
+          },
+        ],
+        modelRoute: {
           schemaVersion: 1,
+          purpose: 'main',
+          adapterId: 'deepseek.chat-completions',
+          providerId: 'deepseek',
+          model: 'deepseek-chat',
+          reasoning: 'off',
+          endpoint: 'https://api.deepseek.com/chat/completions',
+          providerConfigRevision: 1,
+        },
+        promptBuild: {
+          schemaVersion: 2,
           messageCount: 5,
-          historyMessageCount: 5,
-          ledgerMessageCount: 4,
+          activeMessageCount: 5,
           omittedHistoryMessages: 0,
           promptBudgetTokens: 64000,
           estimatedTokens: 128,
           toolsHash: 'b'.repeat(64),
+          sourceHash: '9'.repeat(64),
           layers: [
             {
               seq: 1,
-              messageIndex: 0,
-              kind: 'base_instructions',
-              role: 'system',
+              messageId: 'message-prompt-e2e-1',
+              kind: 'system_instruction',
               source: 'resources/prompts/harness/base-instructions.zh-CN.md',
               trusted: true,
               editable: false,
@@ -291,9 +332,8 @@ test.describe.serial('Electron settings workflows', () => {
             },
             {
               seq: 2,
-              messageIndex: 1,
-              kind: 'runtime_policy_and_context',
-              role: 'system',
+              messageId: 'message-prompt-e2e-2',
+              kind: 'runtime_context',
               source: 'resources/prompts/harness/runtime-context.zh-CN.md',
               trusted: true,
               editable: false,
@@ -304,9 +344,8 @@ test.describe.serial('Electron settings workflows', () => {
             },
             {
               seq: 3,
-              messageIndex: 2,
+              messageId: 'message-prompt-e2e-3',
               kind: 'assistant_preferences',
-              role: 'user',
               source: 'config.assistant.preferences',
               trusted: false,
               editable: true,
@@ -317,9 +356,8 @@ test.describe.serial('Electron settings workflows', () => {
             },
             {
               seq: 4,
-              messageIndex: 3,
-              kind: 'agents',
-              role: 'user',
+              messageId: 'message-prompt-e2e-4',
+              kind: 'agents_context',
               source: 'workspace:AGENTS',
               trusted: false,
               editable: false,
@@ -332,7 +370,7 @@ test.describe.serial('Electron settings workflows', () => {
         },
       },
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         seq: 4,
         eventId: 'event-prompt-e2e-4',
         ts: '2026-06-25T00:00:03.000Z',
@@ -342,7 +380,7 @@ test.describe.serial('Electron settings workflows', () => {
         status: 'completed',
       },
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         seq: 5,
         eventId: 'event-prompt-e2e-5',
         ts: '2026-06-25T00:00:04.000Z',
@@ -364,17 +402,19 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       logging.getByRole('button', { name: '清理已关闭 Trace' }),
     ).toBeVisible()
-    await expect(logging.getByText('离线回放与分叉')).toBeVisible()
+    await expect(
+      logging.getByRole('heading', { name: '离线回放', exact: true }),
+    ).toBeVisible()
     await expect(logging.getByText('请求数', { exact: true })).toBeVisible()
     await logging.getByRole('button', { name: '刷新 Trace' }).click()
     await logging.locator('.trace-debug').locator('.n-select').first().click()
     await page.getByText(traceId).click()
     await logging.getByRole('button', { name: '离线回放' }).click()
     await expect(logging.getByText('Prompt Inspector')).toBeVisible()
-    await expect(logging.getByText('base_instructions')).toBeVisible()
-    await expect(logging.getByText('runtime_policy_and_context')).toBeVisible()
+    await expect(logging.getByText('system_instruction')).toBeVisible()
+    await expect(logging.getByText('runtime_context')).toBeVisible()
     await expect(logging.getByText('assistant_preferences')).toBeVisible()
-    await expect(logging.getByText('agents', { exact: true })).toBeVisible()
+    await expect(logging.getByText('agents_context')).toBeVisible()
     await logging.getByText('#2 · user').click()
     await expect(logging.getByText('E2E preference')).toBeVisible()
   })

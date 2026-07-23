@@ -13,6 +13,16 @@ const runId = 'run-transcript' as RunId
 const callId = 'call-tool' as CallId
 const llmCallId = 'call-llm' as CallId
 const traceId = 'session-transcript' as TraceId
+const modelRoute = {
+  schemaVersion: 1 as const,
+  purpose: 'main' as const,
+  adapterId: 'deepseek.chat-completions',
+  providerId: 'deepseek',
+  model: 'fixture',
+  reasoning: 'off' as const,
+  endpoint: 'https://api.example/chat/completions',
+  providerConfigRevision: 1,
+}
 
 function trace(inputs: TraceEventInput[]) {
   return inputs.map((input, index) =>
@@ -60,6 +70,8 @@ describe('session transcript', () => {
         providerRequest: { tools: [{ secretSchema: true }] },
         requestBytes: 123,
         prefixHash: 'prefix',
+        canonicalSource: [],
+        modelRoute,
       },
       {
         type: 'agent.message',

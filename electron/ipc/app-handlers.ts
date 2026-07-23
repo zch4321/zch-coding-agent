@@ -67,7 +67,6 @@ function traceFault(error: unknown): IpcFault | undefined {
   return new IpcFault({
     code:
       error.code === 'TRACE_NOT_FOUND' ||
-      error.code === 'FORK_POINT_NOT_FOUND' ||
       error.code === 'TRACE_REQUEST_NOT_FOUND'
         ? 'NOT_FOUND'
         : 'PRECONDITION_FAILED',
@@ -770,25 +769,6 @@ export function createAppIpcHandlers(
       }
     },
     'trace:stats': (payload) => traceService.stats(payload.traceId),
-    'trace:fork': async (payload) => {
-      try {
-        const point = await traceService.forkPoint(
-          payload.traceId,
-          payload.eventId,
-        )
-        return await sessionManager.createForkFromTrace({
-          ...point,
-          conversationId: payload.conversationId,
-        })
-      } catch (error) {
-        const fault = traceFault(error)
-        if (fault) throw fault
-        throw error
-      }
-    },
-    'trace:start-fork': (payload) => ({
-      runId: sessionManager.startForkRun(payload.sessionId),
-    }),
     'logs:open-directory': async () => {
       await traceService.initialize()
       const error = await shell.openPath(traceService.directory)

@@ -26,33 +26,40 @@ export const TraceInfoSchema = Type.Object(
 )
 export type TraceInfo = Static<typeof TraceInfoSchema>
 
-export const PromptLayerKindSchema = Type.Union([
-  Type.Literal('base_instructions'),
-  Type.Literal('runtime_context'),
-  // Legacy trace compatibility for prompt builds produced before runtime policy
-  // was folded into base instructions.
-  Type.Literal('runtime_policy_and_context'),
+export const CanonicalMessageKindSchema = Type.Union([
+  Type.Literal('system_instruction'),
   Type.Literal('assistant_preferences'),
-  Type.Literal('agents'),
-  Type.Literal('compact_history'),
   Type.Literal('selected_context'),
-  Type.Literal('benchmark_case'),
-  Type.Literal('user_interjection'),
-  Type.Literal('orchestration_request'),
+  Type.Literal('benchmark_context'),
+  Type.Literal('runtime_context'),
+  Type.Literal('agents_context'),
+  Type.Literal('orchestrator'),
+  Type.Literal('interjection'),
+  Type.Literal('user_input'),
+  Type.Literal('assistant_turn'),
+  Type.Literal('tool_result'),
+  Type.Literal('compact_summary'),
+])
+export type CanonicalMessageKind = Static<typeof CanonicalMessageKindSchema>
+
+export const PromptLayerKindSchema = Type.Union([
+  Type.Literal('system_instruction'),
+  Type.Literal('runtime_context'),
+  Type.Literal('assistant_preferences'),
+  Type.Literal('agents_context'),
+  Type.Literal('compact_summary'),
+  Type.Literal('selected_context'),
+  Type.Literal('benchmark_context'),
+  Type.Literal('interjection'),
+  Type.Literal('orchestrator'),
 ])
 export type PromptLayerKind = Static<typeof PromptLayerKindSchema>
 
 export const PromptLayerSummarySchema = Type.Object(
   {
     seq: Type.Integer({ minimum: 1 }),
-    messageIndex: Type.Integer({ minimum: 0 }),
+    messageId: Type.String({ minLength: 1, maxLength: 128 }),
     kind: PromptLayerKindSchema,
-    role: Type.Union([
-      Type.Literal('system'),
-      Type.Literal('user'),
-      Type.Literal('assistant'),
-      Type.Literal('tool'),
-    ]),
     source: Type.String({ minLength: 1, maxLength: 512 }),
     trusted: Type.Boolean(),
     editable: Type.Boolean(),
@@ -67,15 +74,15 @@ export type PromptLayerSummary = Static<typeof PromptLayerSummarySchema>
 
 export const PromptBuildSummarySchema = Type.Object(
   {
-    schemaVersion: Type.Literal(1),
+    schemaVersion: Type.Literal(2),
     layers: Type.Array(PromptLayerSummarySchema, { maxItems: 10_000 }),
     messageCount: Type.Integer({ minimum: 0 }),
-    historyMessageCount: Type.Integer({ minimum: 0 }),
-    ledgerMessageCount: Type.Integer({ minimum: 0 }),
+    activeMessageCount: Type.Integer({ minimum: 0 }),
     omittedHistoryMessages: Type.Integer({ minimum: 0 }),
     promptBudgetTokens: Type.Integer({ minimum: 0 }),
     estimatedTokens: Type.Integer({ minimum: 0 }),
     toolsHash: Type.String({ minLength: 64, maxLength: 64 }),
+    sourceHash: Type.String({ minLength: 64, maxLength: 64 }),
   },
   { additionalProperties: false },
 )
@@ -108,17 +115,6 @@ export const ReplaySummarySchema = Type.Object(
         {
           runId: RunIdSchema,
           status: Type.String({ maxLength: 64 }),
-        },
-        { additionalProperties: false },
-      ),
-      { maxItems: 10_000 },
-    ),
-    forkPoints: Type.Array(
-      Type.Object(
-        {
-          eventId: EventIdSchema,
-          runId: RunIdSchema,
-          seq: Type.Integer({ minimum: 1 }),
         },
         { additionalProperties: false },
       ),

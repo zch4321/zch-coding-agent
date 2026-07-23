@@ -123,7 +123,7 @@ M5.10已经完成：`core-harness-8`固定8项确定性回归；`benchmark:exter
 ### 4.3 Trace / Replay 增强
 
 - trace 记录并发 Run 的 sessionId、runId、provider purpose、adapterId、workspace writer ownership、prompt resource、prompt build 和不可变 route snapshot。
-- 支持从任一 `llm.request` fork/replay 当前 provider request。
+- 保留离线 replay、Prompt Inspector、导出和统计；不提供 trace fork 或在线重放 provider request。
 - 增加 prompt cache 指标、usage 趋势、tool timing、compact 前后 token 变化。
 - 后端、MCP、Serena、provider retry、approval model 的关键事件进入统一 trace。
 

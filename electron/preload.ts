@@ -86,8 +86,6 @@ const api: AgentApi = {
   exportSessionTranscript: (payload) =>
     invoke('trace:export-transcript', payload),
   getTraceStats: (payload) => invoke('trace:stats', payload),
-  forkTrace: (payload) => invoke('trace:fork', payload),
-  startTraceFork: (payload) => invoke('trace:start-fork', payload),
   openLogDirectory: (payload) => invoke('logs:open-directory', payload),
   clearClosedTraces: (payload) => invoke('logs:clear-closed', payload),
   onAgentEvent: (listener) =>

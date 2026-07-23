@@ -119,7 +119,7 @@ describe('trace replay', () => {
   })
 
   it('skips future events only when configured and rejects sequence rollback', () => {
-    const future = { schemaVersion: 2, seq: 1, type: 'future.event' }
+    const future = { schemaVersion: 3, seq: 1, type: 'future.event' }
     const skipped = reduceTraceEvent(
       {
         schemaVersion: 1,

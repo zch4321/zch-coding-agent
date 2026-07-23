@@ -250,7 +250,7 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
         path.join(traceDirectory, 'metrics-session.jsonl'),
         `${[
           {
-            schemaVersion: 1,
+            schemaVersion: 2,
             seq: 1,
             eventId: 'event-1',
             ts: '2026-01-01T00:00:00.000Z',
@@ -261,7 +261,7 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
             mode: 'yolo',
           },
           {
-            schemaVersion: 1,
+            schemaVersion: 2,
             seq: 2,
             eventId: 'event-2',
             ts: '2026-01-01T00:00:00.001Z',
@@ -272,7 +272,7 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
             text: '{"allowedPaths":["src/**"]}',
           },
           {
-            schemaVersion: 1,
+            schemaVersion: 2,
             seq: 3,
             eventId: 'event-3',
             ts: '2026-01-01T00:00:00.002Z',
@@ -282,7 +282,7 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
             text: 'Fix the benchmark case',
           },
           {
-            schemaVersion: 1,
+            schemaVersion: 2,
             seq: 4,
             eventId: 'event-4',
             ts: '2026-01-01T00:00:00.003Z',
@@ -295,20 +295,31 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
             providerRequest: {},
             requestBytes: 10,
             prefixHash: 'prefix',
-            promptBuild: {
+            canonicalSource: [],
+            modelRoute: {
               schemaVersion: 1,
+              purpose: 'main',
+              adapterId: 'openai-compatible.chat-completions',
+              providerId: 'benchmark-test',
+              model: 'fake-model',
+              reasoning: 'off',
+              endpoint: 'https://benchmark.invalid/chat/completions',
+              providerConfigRevision: 1,
+            },
+            promptBuild: {
+              schemaVersion: 2,
               layers: [],
               messageCount: 0,
-              historyMessageCount: 0,
-              ledgerMessageCount: 0,
+              activeMessageCount: 0,
               omittedHistoryMessages: 0,
               promptBudgetTokens: 1_000,
               estimatedTokens: 1,
               toolsHash: 'f'.repeat(64),
+              sourceHash: 'e'.repeat(64),
             },
           },
           {
-            schemaVersion: 1,
+            schemaVersion: 2,
             seq: 5,
             eventId: 'event-5',
             ts: '2026-01-01T00:00:00.010Z',
@@ -333,7 +344,7 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
             },
           },
           {
-            schemaVersion: 1,
+            schemaVersion: 2,
             seq: 6,
             eventId: 'event-6',
             ts: '2026-01-01T00:00:00.011Z',
@@ -353,7 +364,7 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
             durationMs: 1,
           },
           {
-            schemaVersion: 1,
+            schemaVersion: 2,
             seq: 7,
             eventId: 'event-7',
             ts: '2026-01-01T00:00:00.012Z',
@@ -363,7 +374,7 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
             text: 'Implemented the fix.',
           },
           {
-            schemaVersion: 1,
+            schemaVersion: 2,
             seq: 8,
             eventId: 'event-8',
             ts: '2026-01-01T00:00:00.013Z',

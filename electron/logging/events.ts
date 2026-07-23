@@ -13,17 +13,24 @@ import {
 } from '../../shared/ids'
 import { JsonValueSchema, type JsonValue } from '../../shared/json'
 import {
+  ModelRouteSnapshotSchema,
+  type ModelRouteSnapshot,
+} from '../../shared/model-route'
+import {
   LlmUsageRecordSchema,
   LlmUsageScopeSchema,
   type LlmUsageRecord,
 } from '../../shared/usage'
 import {
+  CanonicalMessageKindSchema,
   PromptBuildSummarySchema,
   type PromptBuildSummary,
 } from '../../shared/trace'
 
+export const TRACE_SCHEMA_VERSION = 2 as const
+
 const TraceBaseSchema = Type.Object({
-  schemaVersion: Type.Literal(1),
+  schemaVersion: Type.Literal(TRACE_SCHEMA_VERSION),
   seq: Type.Integer({ minimum: 1 }),
   eventId: EventIdSchema,
   ts: Type.String({ format: 'date-time' }),
@@ -51,7 +58,6 @@ export const TraceEventSchema = Type.Union([
       workspace: Type.String({ maxLength: 4_096 }),
       model: Type.String({ maxLength: 256 }),
       mode: Type.String({ maxLength: 64 }),
-      forkedFromEventId: Type.Optional(EventIdSchema),
     }),
   ]),
   Type.Composite([
@@ -142,6 +148,22 @@ export const TraceEventSchema = Type.Union([
         Type.Array(PromptResourceSummarySchema, { maxItems: 32 }),
       ),
       promptBuild: Type.Optional(PromptBuildSummarySchema),
+      canonicalSource: Type.Array(
+        Type.Object(
+          {
+            seq: Type.Integer({ minimum: 1 }),
+            kind: CanonicalMessageKindSchema,
+            partTypes: Type.Array(
+              Type.String({ minLength: 1, maxLength: 64 }),
+              { minItems: 1, maxItems: 256 },
+            ),
+            hash: Type.String({ minLength: 64, maxLength: 64 }),
+          },
+          { additionalProperties: false },
+        ),
+        { maxItems: 10_000 },
+      ),
+      modelRoute: ModelRouteSnapshotSchema,
     }),
   ]),
   Type.Composite([
@@ -340,7 +362,6 @@ export type TraceEventInput =
       workspace: string
       model: string
       mode: string
-      forkedFromEventId?: EventId
     })
   | (TraceInputBase & { type: 'session.end' })
   | (TraceInputBase & { type: 'session.mode'; mode: string })
@@ -380,6 +401,13 @@ export type TraceEventInput =
       prefixFingerprints?: string[]
       promptResources?: Static<typeof PromptResourceSummarySchema>[]
       promptBuild?: PromptBuildSummary
+      canonicalSource: Array<{
+        seq: number
+        kind: Static<typeof CanonicalMessageKindSchema>
+        partTypes: string[]
+        hash: string
+      }>
+      modelRoute: ModelRouteSnapshot
     })
   | (TraceInputBase & {
       type: 'llm.stream'
@@ -511,7 +539,7 @@ export function createTraceEvent(
   ts = new Date().toISOString(),
 ): TraceEvent {
   return {
-    schemaVersion: 1,
+    schemaVersion: TRACE_SCHEMA_VERSION,
     seq,
     eventId,
     ts,
