@@ -1,0 +1,408 @@
+import { createHash, randomUUID } from 'node:crypto'
+import type { CallId, MessageId, SessionId } from '../../shared/ids'
+import type { JsonValue } from '../../shared/json'
+import {
+  assertMessageRecordSemantics,
+  MessageRecordSchema,
+  type AssistantTurnMessageRecordSchema,
+  type MessageRecord,
+  type ToolCallPart,
+} from '../../shared/message'
+import type { ModelRouteSnapshot } from '../../shared/model-route'
+import type { Static } from '@sinclair/typebox'
+import type { PromptResourceSummary } from '../prompts/registry'
+import { compileSchema, formatSchemaErrors } from '../schema-validator'
+
+export type CanonicalPromptKind =
+  | 'system_instruction'
+  | 'assistant_preferences'
+  | 'selected_context'
+  | 'benchmark_context'
+  | 'runtime_context'
+  | 'agents_context'
+  | 'orchestrator'
+  | 'interjection'
+
+export interface CanonicalHistoryState {
+  sessionId: SessionId
+  history: MessageRecord[]
+  nextMessageSeq: number
+}
+
+export interface CompiledCanonicalHistory {
+  sessionId: SessionId
+  messages: readonly MessageRecord[]
+  sourceHash: string
+}
+
+export type CompletedAssistantRecord = Static<
+  typeof AssistantTurnMessageRecordSchema
+>
+
+const validateMessageRecord = compileSchema(MessageRecordSchema)
+
+function nextIdentity(state: CanonicalHistoryState) {
+  const seq = state.nextMessageSeq
+  state.nextMessageSeq += 1
+  return {
+    schemaVersion: 1 as const,
+    id: `message:${randomUUID()}` as MessageId,
+    sessionId: state.sessionId,
+    seq,
+    inHistory: true,
+    createdAt: new Date().toISOString(),
+  }
+}
+
+export function canonicalHash(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+}
+
+export function canonicalTraceSource(records: readonly MessageRecord[]): Array<{
+  seq: number
+  kind: MessageRecord['kind']
+  partTypes: string[]
+  hash: string
+}> {
+  return records.map((record) => ({
+    seq: record.seq,
+    kind: record.kind,
+    partTypes: record.parts.map((part) => part.type),
+    hash: canonicalHash(record.parts),
+  }))
+}
+
+export function messageText(record: MessageRecord): string {
+  return record.parts
+    .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+    .join('\n')
+}
+
+export function appendPromptMessage(
+  state: CanonicalHistoryState,
+  input: {
+    kind: CanonicalPromptKind
+    content: string
+    source: string
+    trusted: boolean
+    editable: boolean
+    resource?: PromptResourceSummary
+    hash?: string
+  },
+): MessageRecord {
+  const content = input.content.trim()
+  if (!content) {
+    throw new TypeError(`Canonical ${input.kind} content must not be empty`)
+  }
+  const hash = input.hash ?? createHash('sha256').update(content).digest('hex')
+  const record = {
+    ...nextIdentity(state),
+    kind: input.kind,
+    parts: [{ type: 'text' as const, text: content }],
+    metadata: {
+      schemaVersion: 1 as const,
+      layer: {
+        source: input.source,
+        trusted: input.trusted,
+        editable: input.editable,
+        hash,
+      },
+      ...(input.resource
+        ? {
+            prompt: {
+              resourceId: input.resource.id,
+              version: input.resource.version,
+              hash: input.resource.sha256,
+            },
+          }
+        : {}),
+    },
+  } as MessageRecord
+  state.history.push(record)
+  return record
+}
+
+export function appendUserInput(
+  state: CanonicalHistoryState,
+  input: {
+    content: string
+    clientRequestId?: string
+    replayedFromMessageId?: MessageId
+  },
+): Extract<MessageRecord, { kind: 'user_input' }> {
+  if (
+    (input.clientRequestId === undefined) ===
+    (input.replayedFromMessageId === undefined)
+  ) {
+    throw new TypeError(
+      'User input must have exactly one client request or replay source',
+    )
+  }
+  const record = {
+    ...nextIdentity(state),
+    kind: 'user_input' as const,
+    ...(input.clientRequestId
+      ? { clientRequestId: input.clientRequestId }
+      : {}),
+    parts: [{ type: 'text' as const, text: input.content }],
+    metadata: input.replayedFromMessageId
+      ? {
+          schemaVersion: 1 as const,
+          replayedFromMessageId: input.replayedFromMessageId,
+        }
+      : { schemaVersion: 1 as const },
+  } as Extract<MessageRecord, { kind: 'user_input' }>
+  state.history.push(record)
+  return record
+}
+
+export function appendAssistantTurn(
+  state: CanonicalHistoryState,
+  input: {
+    text: string
+    toolCalls: readonly {
+      id: CallId
+      toolId: string
+      args: JsonValue
+    }[]
+    reasoning?: string
+    route: ModelRouteSnapshot
+    continuation?: Extract<
+      MessageRecord,
+      { kind: 'assistant_turn' }
+    >['providerContinuation']
+  },
+): Extract<MessageRecord, { kind: 'assistant_turn' }> {
+  const parts: Array<
+    | { type: 'text'; text: string }
+    | {
+        type: 'tool_call'
+        callId: CallId
+        name: string
+        arguments: JsonValue
+      }
+  > = []
+  if (input.text) parts.push({ type: 'text', text: input.text })
+  for (const call of input.toolCalls) {
+    parts.push({
+      type: 'tool_call',
+      callId: call.id,
+      name: call.toolId,
+      arguments: structuredClone(call.args),
+    })
+  }
+  if (parts.length === 0) {
+    throw new TypeError('Completed assistant turn must not be empty')
+  }
+  const record = {
+    ...nextIdentity(state),
+    kind: 'assistant_turn' as const,
+    parts,
+    modelRoute: structuredClone(input.route),
+    ...(input.reasoning ? { normalizedReasoningText: input.reasoning } : {}),
+    ...(input.continuation
+      ? { providerContinuation: structuredClone(input.continuation) }
+      : {}),
+  } as Extract<MessageRecord, { kind: 'assistant_turn' }>
+  state.history.push(record)
+  return record
+}
+
+export function appendToolResult(
+  state: CanonicalHistoryState,
+  input: {
+    callId: CallId
+    content: JsonValue
+    isError: boolean
+    name: string
+    reason?: string
+    status: 'completed' | 'denied' | 'failed' | 'cancelled' | 'timed_out'
+    truncated: boolean
+    durationMs?: number
+  },
+): Extract<MessageRecord, { kind: 'tool_result' }> {
+  const record = {
+    ...nextIdentity(state),
+    kind: 'tool_result' as const,
+    parts: [
+      {
+        type: 'tool_result' as const,
+        callId: input.callId,
+        content: [{ type: 'json' as const, value: input.content }],
+        isError: input.isError,
+      },
+    ],
+    metadata: {
+      schemaVersion: 1 as const,
+      tool: {
+        name: input.name,
+        ...(input.reason ? { reason: input.reason } : {}),
+        status: input.status,
+        truncated: input.truncated,
+        ...(input.durationMs === undefined
+          ? {}
+          : { durationMs: Math.max(0, Math.round(input.durationMs)) }),
+      },
+    },
+  } as Extract<MessageRecord, { kind: 'tool_result' }>
+  state.history.push(record)
+  return record
+}
+
+export function appendCompactSummary(
+  state: CanonicalHistoryState,
+  input: {
+    content: string
+    replacesThroughSeq: number
+    sourceHash: string
+    resource?: PromptResourceSummary
+  },
+): Extract<MessageRecord, { kind: 'compact_summary' }> {
+  const record = {
+    ...nextIdentity(state),
+    kind: 'compact_summary' as const,
+    parts: [{ type: 'text' as const, text: input.content }],
+    metadata: {
+      schemaVersion: 1 as const,
+      compact: {
+        replacesThroughSeq: input.replacesThroughSeq,
+        sourceHash: input.sourceHash,
+      },
+      ...(input.resource
+        ? {
+            prompt: {
+              resourceId: input.resource.id,
+              version: input.resource.version,
+              hash: input.resource.sha256,
+            },
+          }
+        : {}),
+    },
+  } as Extract<MessageRecord, { kind: 'compact_summary' }>
+  state.history.push(record)
+  return record
+}
+
+export function latestPromptHash(
+  state: CanonicalHistoryState,
+  kind: CanonicalPromptKind,
+): string | undefined {
+  for (let index = state.history.length - 1; index >= 0; index -= 1) {
+    const record = state.history[index]!
+    if (!record.inHistory || record.kind !== kind) continue
+    return record.metadata?.layer.hash
+  }
+  return undefined
+}
+
+export function deactivateActiveHistory(
+  state: CanonicalHistoryState,
+): MessageRecord[] {
+  const active = state.history.filter((record) => record.inHistory)
+  for (const record of active) record.inHistory = false
+  return active
+}
+
+export class MessageHistoryCompiler {
+  compile(records: readonly MessageRecord[]): CompiledCanonicalHistory {
+    const active = records
+      .filter((record) => record.inHistory)
+      .sort((left, right) => left.seq - right.seq)
+    if (active.length === 0) {
+      throw new TypeError('Canonical history must not be empty')
+    }
+    const sessionId = active[0]!.sessionId
+    const ids = new Set<string>()
+    const calls = new Set<string>()
+    let previousSeq = 0
+    let pending: string[] | undefined
+    let compactBoundary: number | undefined
+
+    for (const record of active) {
+      if (!validateMessageRecord(record)) {
+        throw new TypeError(
+          `Canonical message is invalid: ${formatSchemaErrors(
+            validateMessageRecord.errors,
+          )}`,
+        )
+      }
+      assertMessageRecordSemantics(record)
+      if (record.sessionId !== sessionId) {
+        throw new TypeError('Canonical history contains multiple sessions')
+      }
+      if (record.seq <= previousSeq || ids.has(record.id)) {
+        throw new TypeError('Canonical history identity/order is invalid')
+      }
+      previousSeq = record.seq
+      ids.add(record.id)
+      if (compactBoundary !== undefined && record.seq <= compactBoundary) {
+        throw new TypeError('Active history crosses its compact boundary')
+      }
+      if (record.kind === 'compact_summary') {
+        if (compactBoundary !== undefined) {
+          throw new TypeError(
+            'Active history contains multiple compact summaries',
+          )
+        }
+        const boundary = record.metadata.compact.replacesThroughSeq
+        compactBoundary = boundary
+        if (
+          boundary >= record.seq ||
+          active.some((candidate) => candidate.seq <= boundary)
+        ) {
+          throw new TypeError('Compact summary boundary is invalid')
+        }
+      }
+
+      if (pending) {
+        if (record.kind !== 'tool_result') {
+          throw new TypeError('Assistant tool calls require terminal results')
+        }
+        const callId = record.parts[0].callId
+        const expected = pending.shift()
+        if (callId !== expected) {
+          throw new TypeError(
+            `Tool result is out of order; expected ${expected}, received ${callId}`,
+          )
+        }
+        if (pending.length === 0) pending = undefined
+        continue
+      }
+
+      if (record.kind === 'tool_result') {
+        throw new TypeError(
+          `Tool result has no preceding assistant call: ${record.parts[0].callId}`,
+        )
+      }
+      if (record.kind !== 'assistant_turn') continue
+      const turnCalls = record.parts.filter(
+        (part): part is ToolCallPart => part.type === 'tool_call',
+      )
+      if (turnCalls.length === 0) continue
+      pending = []
+      for (const call of turnCalls) {
+        if (calls.has(call.callId)) {
+          throw new TypeError(`Duplicate tool call id: ${call.callId}`)
+        }
+        calls.add(call.callId)
+        pending.push(call.callId)
+      }
+    }
+    if (pending) {
+      throw new TypeError('Canonical history ends inside a tool batch')
+    }
+
+    return {
+      sessionId,
+      messages: active,
+      sourceHash: canonicalHash(
+        active.map((record) => ({
+          id: record.id,
+          seq: record.seq,
+          kind: record.kind,
+          parts: record.parts,
+        })),
+      ),
+    }
+  }
+}

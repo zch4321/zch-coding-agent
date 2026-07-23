@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
-import type { ProviderMessage } from '../providers/provider'
-import {
-  boundToolResultForContext,
-  estimateTextTokens,
-  selectContextMessages,
-} from './context-budget'
+import { boundToolResultForContext, estimateTextTokens } from './context-budget'
 
 const limits = toPublicConfig(DEFAULT_APP_CONFIG, false).limits
 
@@ -56,57 +51,5 @@ describe('context budget', () => {
           .result,
       ),
     ).toContain('-TAIL')
-  })
-
-  it('drops complete old turns without orphaning tool results', () => {
-    const oldToolCall = { id: 'call-old', type: 'function' }
-    const history: ProviderMessage[] = [
-      { role: 'user', content: `old-${'x'.repeat(3_000)}` },
-      { role: 'assistant', content: null, tool_calls: [oldToolCall] },
-      { role: 'tool', tool_call_id: 'call-old', content: 'old result' },
-      { role: 'assistant', content: 'old answer' },
-      { role: 'user', content: 'latest question' },
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [{ id: 'call-new', type: 'function' }],
-      },
-      { role: 'tool', tool_call_id: 'call-new', content: 'latest result' },
-    ]
-    const selected = selectContextMessages({
-      system: { role: 'system', content: 'system' },
-      history,
-      maxPromptTokens: 300,
-      estimation: limits.tokenEstimation,
-    })
-
-    expect(
-      selected.some((message) => message.tool_call_id === 'call-old'),
-    ).toBe(false)
-    expect(
-      selected.some((message) => message.tool_call_id === 'call-new'),
-    ).toBe(true)
-    expect(
-      selected.some((message) =>
-        message.tool_calls?.some(
-          (call) =>
-            call &&
-            typeof call === 'object' &&
-            !Array.isArray(call) &&
-            call.id === 'call-new',
-        ),
-      ),
-    ).toBe(true)
-  })
-
-  it('rejects a latest turn that cannot fit without breaking protocol', () => {
-    expect(() =>
-      selectContextMessages({
-        system: { role: 'system', content: 'system' },
-        history: [{ role: 'user', content: 'x'.repeat(10_000) }],
-        maxPromptTokens: 100,
-        estimation: limits.tokenEstimation,
-      }),
-    ).toThrow('latest complete conversation turn')
   })
 })

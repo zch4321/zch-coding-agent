@@ -1,6 +1,5 @@
 import type { PublicConfig } from '../../shared/config'
 import type { ToolResult } from './types'
-import type { ProviderMessage } from '../providers/provider'
 
 const TRUNCATION_MARKER = '\n... output truncated ...\n'
 const EXHAUSTED_TOOL_RESULT_PREVIEW_TOKENS = 512
@@ -101,46 +100,4 @@ export function boundToolResultForContext(
     result: bounded,
     tokens: estimateJsonTokens(bounded, limits.tokenEstimation),
   }
-}
-
-function historyGroups(history: ProviderMessage[]): ProviderMessage[][] {
-  const groups: ProviderMessage[][] = []
-
-  for (const message of history) {
-    if (message.role === 'user' || groups.length === 0) {
-      groups.push([message])
-    } else {
-      groups.at(-1)!.push(message)
-    }
-  }
-
-  return groups
-}
-
-export function selectContextMessages(options: {
-  system: ProviderMessage
-  history: ProviderMessage[]
-  maxPromptTokens: number
-  estimation: PublicConfig['limits']['tokenEstimation']
-}): ProviderMessage[] {
-  const groups = historyGroups(options.history)
-  let messages = [options.system, ...groups.flat()]
-
-  while (
-    groups.length > 1 &&
-    estimateJsonTokens(messages, options.estimation) > options.maxPromptTokens
-  ) {
-    groups.shift()
-    messages = [options.system, ...groups.flat()]
-  }
-
-  if (
-    estimateJsonTokens(messages, options.estimation) > options.maxPromptTokens
-  ) {
-    throw new ContextBudgetError(
-      'The latest complete conversation turn exceeds the model context budget',
-    )
-  }
-
-  return messages
 }

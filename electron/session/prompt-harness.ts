@@ -4,13 +4,10 @@ import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import type { PublicConfig } from '../../shared/config'
-import type {
-  PromptBuildSummary,
-  PromptLayerKind,
-  PromptLayerSummary,
-} from '../../shared/trace'
+import type { PromptBuildSummary } from '../../shared/trace'
 import type { JsonValue } from '../../shared/json'
-import type { ProviderMessage } from '../providers/provider'
+import type { MessageRecord } from '../../shared/message'
+import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
@@ -18,6 +15,13 @@ import {
   formatAgentsInstructions,
   loadAgentsInstructions,
 } from './agents-context'
+import {
+  appendPromptMessage,
+  latestPromptHash,
+  MessageHistoryCompiler,
+  type CanonicalHistoryState,
+  type CanonicalPromptKind,
+} from './canonical-history'
 
 const MAX_TREE_DEPTH = 3
 const MAX_TREE_ENTRIES = 300
@@ -27,29 +31,10 @@ const GIT_TIMEOUT_MS = 1_500
 const GIT_MAX_OUTPUT_BYTES = 8 * 1_024
 const EMPTY_AGENTS_CONTEXT_HASH = sha256('')
 
-export interface PromptLedgerEntry {
-  seq: number
-  messageIndex: number
-  kind: PromptLayerKind
-  role: ProviderMessage['role']
-  source: string
-  trusted: boolean
-  editable: boolean
-  sha256: string
-  estimatedTokens: number
-  resource?: PromptResourceSummary
-}
-
-export interface PromptLedgerState {
-  history: ProviderMessage[]
-  promptLedger: PromptLedgerEntry[]
-  nextPromptSeq: number
-  lastRuntimeContextHash?: string
-  lastAgentsContextHash?: string
-}
+export type PromptHistoryState = CanonicalHistoryState
 
 export interface PromptSelection {
-  messages: ProviderMessage[]
+  messages: readonly MessageRecord[]
   promptBuild: PromptBuildSummary
 }
 
@@ -84,10 +69,6 @@ interface HarnessPromptInput {
   projectMetadata?: ProjectMetadataStore
   skillSummary?: string
   workspaceConcurrency?: WorkspaceConcurrencyContext
-  compactHistory?: {
-    summary: string
-    source: string
-  }
   toolNames?: readonly string[]
   signal?: AbortSignal
 }
@@ -129,46 +110,55 @@ function resourceContent(
     return { content: resolved.content, resource: resolved.resource }
   }
 
-  return { content: '' }
+  if (kind === 'baseInstructions') {
+    return { content: LEGACY_DEFAULT_SYSTEM_PROMPTS[locale] }
+  }
+  return {
+    content: [
+      '<environment_context>',
+      'current_date: ${currentDate}',
+      'current_time: ${currentTime}',
+      'timezone: ${timezone}',
+      'workspace: ${workspace}',
+      'cwd: ${cwd}',
+      'shell: ${shell}',
+      'os: ${osInfo}',
+      'assistant_language: ${assistantLanguage}',
+      'permission_mode: ${permissionMode}',
+      'provider: ${providerLabel} (${providerId})',
+      'model: ${model}',
+      'builtin_policies: ${builtinPolicies}',
+      'remembered_rules: ${rememberedRules}',
+      'sensitive_data_mode: ${sensitiveDataMode}',
+      'available_tools: ${availableTools}',
+      '${gitSummary}',
+      'project_tree_depth_${projectTreeDepth}:',
+      '${projectTree}',
+      '<project_model status="${moduleStatus}">',
+      '${moduleContent}',
+      '</project_model>',
+      '<workspace_concurrency status="${workspaceConcurrencyStatus}">',
+      '${workspaceConcurrencyContent}',
+      '</workspace_concurrency>',
+      '</environment_context>',
+    ].join('\n'),
+  }
 }
 
 export function appendPromptLayer(
-  state: PromptLedgerState,
+  state: PromptHistoryState,
   input: {
-    kind: PromptLayerKind
-    role: ProviderMessage['role']
+    kind: CanonicalPromptKind
     content: string
     source: string
     trusted: boolean
     editable: boolean
     config: PublicConfig
     resource?: PromptResourceSummary
+    hash?: string
   },
-): PromptLedgerEntry {
-  const message: ProviderMessage = {
-    role: input.role,
-    content: input.content,
-  }
-  const entry: PromptLedgerEntry = {
-    seq: state.nextPromptSeq,
-    messageIndex: state.history.length,
-    kind: input.kind,
-    role: input.role,
-    source: input.source,
-    trusted: input.trusted,
-    editable: input.editable,
-    sha256: sha256(input.content),
-    estimatedTokens: estimateJsonTokens(
-      message,
-      input.config.limits.tokenEstimation,
-    ),
-    ...(input.resource ? { resource: input.resource } : {}),
-  }
-
-  state.nextPromptSeq += 1
-  state.history.push(message)
-  state.promptLedger.push(entry)
-  return entry
+): MessageRecord {
+  return appendPromptMessage(state, input)
 }
 
 function tagged(
@@ -637,14 +627,13 @@ async function agentsContext(input: HarnessPromptInput): Promise<{
 }
 
 export async function appendInitialPromptHarness(
-  state: PromptLedgerState,
+  state: PromptHistoryState,
   input: HarnessPromptInput,
 ): Promise<void> {
   const locale = input.config.assistant.language
   const base = resourceContent(input.promptRegistry, 'baseInstructions', locale)
   appendPromptLayer(state, {
-    kind: 'base_instructions',
-    role: 'system',
+    kind: 'system_instruction',
     content: base.content,
     source: base.resource?.path ?? 'fallback:harness.base-instructions',
     trusted: true,
@@ -652,20 +641,6 @@ export async function appendInitialPromptHarness(
     config: input.config,
     ...(base.resource ? { resource: base.resource } : {}),
   })
-
-  const compactHistory = input.compactHistory
-  const compactSummary = compactHistory?.summary.trim()
-  if (compactHistory && compactSummary) {
-    appendPromptLayer(state, {
-      kind: 'compact_history',
-      role: 'user',
-      content: compactHistoryContent(compactSummary),
-      source: compactHistory.source,
-      trusted: false,
-      editable: false,
-      config: input.config,
-    })
-  }
 
   await appendRuntimeContextIfChanged(state, {
     ...input,
@@ -675,7 +650,6 @@ export async function appendInitialPromptHarness(
   const preferences = input.config.assistant.preferences[locale].trim()
   appendPromptLayer(state, {
     kind: 'assistant_preferences',
-    role: 'user',
     content: tagged(
       'assistant_preferences',
       { language: locale, status: preferences ? 'configured' : 'empty' },
@@ -688,11 +662,9 @@ export async function appendInitialPromptHarness(
   })
 
   const agents = await agentsContext(input)
-  state.lastAgentsContextHash = agents?.hash ?? EMPTY_AGENTS_CONTEXT_HASH
   if (agents) {
     appendPromptLayer(state, {
-      kind: 'agents',
-      role: 'user',
+      kind: 'agents_context',
       content: agents.content,
       source: 'workspace:AGENTS',
       trusted: false,
@@ -705,7 +677,6 @@ export async function appendInitialPromptHarness(
   if (skillSummary) {
     appendPromptLayer(state, {
       kind: 'selected_context',
-      role: 'user',
       content: tagged(
         'selected_context',
         { source: 'skills', status: 'enabled' },
@@ -720,48 +691,45 @@ export async function appendInitialPromptHarness(
 }
 
 export async function appendRuntimeContextIfChanged(
-  state: PromptLedgerState,
+  state: PromptHistoryState,
   input: RuntimeContextInput,
 ): Promise<boolean> {
   const runtime = await runtimeContext(input)
 
-  if (state.lastRuntimeContextHash === runtime.hash) {
+  if (latestPromptHash(state, 'runtime_context') === runtime.hash) {
     return false
   }
 
-  state.lastRuntimeContextHash = runtime.hash
   appendPromptLayer(state, {
     kind: 'runtime_context',
-    role: 'user',
     content: runtime.content,
     source: runtime.resource?.path ?? 'fallback:harness.runtime-context',
     trusted: true,
     editable: false,
     config: input.config,
+    hash: runtime.hash,
     ...(runtime.resource ? { resource: runtime.resource } : {}),
   })
   return true
 }
 
 export async function appendAgentsContextIfChanged(
-  state: PromptLedgerState,
+  state: PromptHistoryState,
   input: HarnessPromptInput,
 ): Promise<boolean> {
   const agents = await agentsContext(input)
   const hash = agents?.hash ?? EMPTY_AGENTS_CONTEXT_HASH
 
-  if (state.lastAgentsContextHash === hash) {
+  if (latestPromptHash(state, 'agents_context') === hash) {
     return false
   }
 
-  state.lastAgentsContextHash = hash
   if (!agents) {
     return false
   }
 
   appendPromptLayer(state, {
-    kind: 'agents',
-    role: 'user',
+    kind: 'agents_context',
     content: agents.content,
     source: 'workspace:AGENTS',
     trusted: false,
@@ -771,125 +739,85 @@ export async function appendAgentsContextIfChanged(
   return true
 }
 
-function isPinned(
-  index: number,
-  ledgerByIndex: Map<number, PromptLedgerEntry>,
-) {
-  return ledgerByIndex.has(index)
-}
-
-function nonPinnedGroups(
-  history: readonly ProviderMessage[],
-  ledgerByIndex: Map<number, PromptLedgerEntry>,
-): number[][] {
-  const groups: number[][] = []
-
-  for (let index = 0; index < history.length; index += 1) {
-    if (isPinned(index, ledgerByIndex)) {
-      continue
-    }
-
-    const message = history[index]
-    if (message?.role === 'user' || groups.length === 0) {
-      groups.push([index])
-    } else {
-      groups.at(-1)!.push(index)
-    }
-  }
-
-  return groups
-}
-
-function selectedMessages(
-  history: readonly ProviderMessage[],
-  includedIndexes: ReadonlySet<number>,
-): ProviderMessage[] {
-  return history.filter((_message, index) => includedIndexes.has(index))
-}
-
 export function selectPromptMessages(options: {
-  state: PromptLedgerState
+  state: PromptHistoryState
   tools: JsonValue[]
   maxPromptTokens: number
   estimation: PublicConfig['limits']['tokenEstimation']
 }): PromptSelection {
-  const ledgerByIndex = new Map(
-    options.state.promptLedger.map((entry) => [entry.messageIndex, entry]),
-  )
-  const groups = nonPinnedGroups(options.state.history, ledgerByIndex)
-  const selectedGroups = [...groups]
+  const compiled = new MessageHistoryCompiler().compile(options.state.history)
+  const messages = compiled.messages
   const toolsHash = hashJson(options.tools)
-  let included = new Set<number>()
-
-  const rebuildIncluded = () => {
-    included = new Set(
-      options.state.promptLedger.map((entry) => entry.messageIndex),
-    )
-    for (const group of selectedGroups) {
-      for (const index of group) {
-        included.add(index)
-      }
-    }
-  }
-
-  rebuildIncluded()
-  let messages = selectedMessages(options.state.history, included)
-
-  while (
-    selectedGroups.length > 1 &&
-    estimateJsonTokens(messages, options.estimation) > options.maxPromptTokens
-  ) {
-    selectedGroups.shift()
-    rebuildIncluded()
-    messages = selectedMessages(options.state.history, included)
-  }
-
-  const estimatedTokens = estimateJsonTokens(messages, options.estimation)
+  const estimatedTokens = estimateJsonTokens(
+    { messages, tools: options.tools },
+    options.estimation,
+  )
 
   if (estimatedTokens > options.maxPromptTokens) {
     throw new ContextBudgetError(
-      'The latest complete conversation turn exceeds the model context budget',
+      'The active canonical history exceeds the model context budget',
     )
   }
 
-  const layers: PromptLayerSummary[] = options.state.promptLedger.map(
-    (entry) => ({
-      seq: entry.seq,
-      messageIndex: entry.messageIndex,
-      kind: entry.kind,
-      role: entry.role,
-      source: entry.source,
-      trusted: entry.trusted,
-      editable: entry.editable,
-      sha256: entry.sha256,
-      estimatedTokens: entry.estimatedTokens,
-      included: included.has(entry.messageIndex),
-      truncated: false,
-    }),
-  )
+  const layers = messages.flatMap((record) => {
+    const layer =
+      record.metadata && 'layer' in record.metadata
+        ? record.metadata.layer
+        : undefined
+    if (!layer) return []
+    return [
+      {
+        seq: record.seq,
+        messageId: record.id,
+        kind: record.kind as CanonicalPromptKind,
+        source: layer.source,
+        trusted: layer.trusted,
+        editable: layer.editable,
+        sha256: layer.hash,
+        estimatedTokens: estimateJsonTokens(record.parts, options.estimation),
+        included: true,
+        truncated: false,
+      },
+    ]
+  })
 
   return {
     messages,
     promptBuild: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       layers,
       messageCount: messages.length,
-      historyMessageCount: options.state.history.length,
-      ledgerMessageCount: options.state.promptLedger.length,
-      omittedHistoryMessages: options.state.history.length - messages.length,
+      activeMessageCount: messages.length,
+      omittedHistoryMessages: 0,
       promptBudgetTokens: options.maxPromptTokens,
       estimatedTokens,
       toolsHash,
+      sourceHash: compiled.sourceHash,
     },
   }
 }
 
 export function promptResources(
-  state: PromptLedgerState,
+  state: PromptHistoryState,
 ): PromptResourceSummary[] {
-  const resources = state.promptLedger.flatMap((entry) =>
-    entry.resource ? [entry.resource] : [],
-  )
+  const resources = state.history.flatMap((record) => {
+    if (
+      !record.inHistory ||
+      !record.metadata ||
+      !('layer' in record.metadata) ||
+      !record.metadata.prompt
+    ) {
+      return []
+    }
+    return [
+      {
+        id: record.metadata.prompt.resourceId,
+        version: record.metadata.prompt.version,
+        path: record.metadata.layer.source,
+        sha256: record.metadata.prompt.hash,
+      },
+    ]
+  })
   const seen = new Set<string>()
   return resources.filter((resource) => {
     const key = `${resource.id}:${resource.sha256}`
