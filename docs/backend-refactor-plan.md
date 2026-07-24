@@ -418,6 +418,10 @@ electron/application/
 - [x] `session:archive` 禁止 active Run；idle eviction 与 durable lifecycle 分离。
 - [x] Session archive/Project remove、target dispose 和首次发送异常路径释放 live resources。
 - [x] 普通 fork 支持 historical/latest、完整 tool batch、replay ID remap、compact epoch、Goal/Plan 策略和 512 上限。
+- [x] 接受的 `/compact` 先提交隐藏 control-command `user_input`；带正文时 compact epoch 追加无 `clientRequestId` 的 derived user，失败保留命令并严格 dedupe。
+- [x] Provider completion 在任何 append/approval/tool 前校验 canonical schema、总 JSON bounds、normalized calls 和 active epoch 全局 callId；DeepSeek SSE 累积阶段限制 text/reasoning/tool/arguments。
+- [x] Durable execution port 使用 per-Session commit queue；失败从 SQLite 恢复完整 live state，reload 失败或 tool-batch commit 失败隔离并驱逐 binding。
+- [x] LiveSessionContextRegistry 使用 ownership token 和 `reserved/loading/live/evicting/releasing` 状态机；new-session 竞争、lazy restore 与 archive/Project path mutation 共用 lifecycle lease。
 
 ### 8.4 关键 transaction
 
@@ -462,6 +466,9 @@ completed assistant tool-call turn stays in memory
 - [x] writer lease 与 run slot 继续复用现有全部 terminal-path regression suite。
 - [x] Goal/Plan/compact 通过同一 Session mutation primitive 落盘。
 - [x] 临时数据库完成 A/tool/final/reopen/B，并从 SQLite active history 重建第二次 request。
+- [x] 控制命令 raw audit、Provider/search 隐藏、pure/follow-up compact、失败/abort/restart dedupe。
+- [x] run-input/assistant/tool-batch commit failure不捎带旧记录；reload failure 隔离；metadata mutation lease 阻止并发 Run。
+- [x] 同候选 Session 并发首发只有一方成功；deferred restore 期间 archive、Project path update/remove 稳定冲突。
 
 ### 8.6 验收与回滚
 

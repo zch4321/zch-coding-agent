@@ -354,6 +354,99 @@ describe('SessionService durable transactions', () => {
 })
 
 describe('ordinary Session fork', () => {
+  it('remaps derived command references and hides control records in a fork', async () => {
+    const setup = await setupServices()
+    try {
+      const sourceId = 'session:control-source' as SessionId
+      await setup.sessions.commitFirstTurn({
+        session: activeSession(sourceId, setup.project.id),
+        messages: firstTurn(sourceId),
+        requestHash: canonicalHash('hello durable state'),
+      })
+      const commandId = 'message:control-command' as MessageId
+      const command: MessageRecord = {
+        ...messageIdentity(sourceId, 3, commandId),
+        inHistory: false,
+        kind: 'user_input',
+        clientRequestId: 'request:control-command',
+        parts: [{ type: 'text', text: '/compact focus on safety' }],
+        metadata: {
+          schemaVersion: 1,
+          requestHash: canonicalHash('/compact focus on safety'),
+          submission: { type: 'control_command', command: 'compact' },
+        },
+      }
+      const derived: MessageRecord = {
+        ...messageIdentity(sourceId, 4, 'message:control-derived'),
+        kind: 'user_input',
+        parts: [{ type: 'text', text: 'focus on safety' }],
+        metadata: {
+          schemaVersion: 1,
+          derivedFromMessageId: commandId,
+          derivation: 'control_command_payload',
+        },
+      }
+      await setup.sessions.commitMutation({
+        sessionId: sourceId,
+        expectedRevision: 1,
+        expectedLastSeq: 2,
+        messages: [command, derived],
+      })
+
+      await expect(
+        setup.sessions.fork({
+          sourceSessionId: sourceId,
+          expectedRevision: 2,
+          sessionId: 'session:invalid-control-fork' as SessionId,
+          throughMessageId: commandId,
+        }),
+      ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+
+      const forkId = 'session:control-fork' as SessionId
+      await setup.sessions.fork({
+        sourceSessionId: sourceId,
+        expectedRevision: 2,
+        sessionId: forkId,
+      })
+      const page = await setup.sessions.listMessages(forkId)
+      const clonedCommand = page.records.find(
+        (record) =>
+          record.kind === 'user_input' &&
+          'clientRequestId' in record &&
+          record.clientRequestId === 'request:control-command',
+      )
+      const clonedDerived = page.records.find(
+        (record) =>
+          record.kind === 'user_input' &&
+          record.metadata &&
+          'derivedFromMessageId' in record.metadata,
+      )
+      expect(clonedCommand).toMatchObject({
+        inHistory: false,
+        metadata: {
+          submission: { type: 'control_command', command: 'compact' },
+        },
+      })
+      expect(clonedDerived).toMatchObject({
+        inHistory: true,
+        metadata: {
+          derivedFromMessageId: clonedCommand?.id,
+          derivation: 'control_command_payload',
+        },
+      })
+      expect(
+        await setup.sessions.searchMessages(forkId, { text: '/compact' }),
+      ).toEqual([])
+      expect(
+        await setup.sessions.searchMessages(forkId, {
+          text: 'focus on safety',
+        }),
+      ).toEqual([clonedDerived])
+    } finally {
+      await setup.testDatabase.dispose()
+    }
+  })
+
   it('extends an assistant fork point through its terminal tool batch', async () => {
     const setup = await setupServices()
     try {

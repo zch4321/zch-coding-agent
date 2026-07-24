@@ -138,6 +138,7 @@ export interface ActiveRun {
   rootUserMessageId?: MessageId
   harnessMessageIds: MessageId[]
   autoCompactEligible: boolean
+  requestCommitted: boolean
   publicSnapshot: ActiveRunPublicSnapshot
   publicTools: Map<CallId, ActiveRunToolSnapshot>
   routes?: {

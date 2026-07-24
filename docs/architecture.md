@@ -432,13 +432,15 @@ interface MessageRecord {
 - `providerContinuation`：可选的 provider-native continuation envelope。Core 只验证外壳并原样搬运 `data`；只有 `adapterId + format` 对应的 Provider Adapter 可以解释它。
 - `modelRoute`：已完成 assistant turn 实际使用的 route，便于 UI 和审计。
 - `metadata`：应用拥有并理解的 typed annotations，例如 attachment provenance、prompt id/hash、标准化 usage、approval/tool/compact 摘要和 reasoning projection 状态。
-- `inHistory`：是否属于下一次 provider request 的 canonical active history。
+- `inHistory`：是否属于下一次 provider request 的 canonical active history；它不决定本地审计记录是否存在，也不直接决定 renderer 是否展示。
 
 `metadata`“与 Provider 协议无关”指的是：它可以来源于 Provider，例如标准化 usage，但删除 metadata 只能损失 UI、统计或审计信息，不能让下一次 Provider request 失去协议完整性。任何必须原样回传、只由 Adapter 理解、或影响 continuation 正确性的字段都必须进入 `providerContinuation`，不能藏在 metadata 中。完整原始 Provider request/response、headers 和 stream events 属于可选 trace，也不进入 metadata。
 
 实际 shared schema 必须是以 `kind` 为 discriminator 的闭集 union，而不是上面这个允许所有组合的宽松 interface：
 
-- 原始 `user_input`：`clientRequestId` 必填；自动 compact 的 replay user 改为携带 `replayedFromMessageId`，两者严格 XOR。UI、搜索和导出按 replay source 去重。
+- 原始 `user_input`：`clientRequestId` 必填，并用 `metadata.submission` 区分普通 `message` 与本地 `control_command`。
+- 自动 compact 的 replay user 携带 `replayedFromMessageId`；控制命令生成的模型正文携带 `derivedFromMessageId + derivation = control_command_payload`。原始、replay、derived 三种 identity 严格 XOR，后两者都不复制 `clientRequestId`。
+- 本地控制命令是 durable canonical log 的一部分，但永久 `inHistory = false`；普通 transcript/search 投影排除它，raw Message paging 仍保留它用于审计。Fork 会复制并 remap control/derived reference，但控制命令不能作为可见 fork point。
 - `assistant_turn`：只允许 text/tool-call parts，至少一项；`modelRoute` 必填，可携带 reasoning projection 和 continuation。
 - `tool_result`：每条 record 正好包含一个 terminal tool-result part；`callId` 必须对应之前 active assistant turn 中的 tool-call part。
 - `system_instruction/assistant_preferences/selected_context/benchmark_context/runtime_context/agents_context/orchestrator/interjection/compact_summary`：V1 只允许非空 text parts；不存在通用 `harness` kind。
@@ -446,6 +448,16 @@ interface MessageRecord {
 - `MessageMetadataV1` 也必须按 `kind` 收紧，不接受任意键。
 
 MessageRecord 是持久化、排序、分页、compact 和 UI 派生的单位；MessagePart 是同一个逻辑消息内部的有序 payload atom。这是两层逻辑类型，不代表需要 `message_parts` 表；V1 将整个 parts array 作为受 shared schema 校验的 JSON 落在 `messages.parts_json`。
+
+持久化 log、Provider active history 和 renderer transcript 是三个独立投影：
+
+| 投影                    | 选择规则                                                              | 用途                              |
+| ----------------------- | --------------------------------------------------------------------- | --------------------------------- |
+| Durable canonical log   | 所有已接受并 commit 的 canonical records，包括隐藏控制命令            | 幂等、审计、fork/reference 完整性 |
+| Provider active history | `inHistory = true`，再经 `MessageHistoryCompiler` 校验                | Protocol Adapter request          |
+| Renderer transcript     | 从 durable log 选择用户可见 records，排除 replay 去重项与隐藏控制命令 | Chat timeline、普通搜索与导出     |
+
+因此“某条命令不发送给模型”不意味着“不落库”；同样，`inHistory = false` 也不等于删除或不可审计。
 
 这两层不是从某一家 Provider DTO 原样复制出来的，而是从应用自己的两个不同问题推导出来：
 
@@ -887,10 +899,11 @@ Text/reasoning delta 只进入 `ActiveRunExecution` memory buffer，并通过 `r
 
 不能在 provider 刚提出 tool call 时写一条缺少 tool result 的持久历史。流程固定为：
 
-1. Provider completed assistant turn，backend 在内存保存完整 assistant tool-call message。
-2. 执行权限、审批和全部 tool calls，得到每个 call 的 terminal result。
-3. 单一 transaction 依次插入 `kind = 'assistant_turn'` message 和所有对应的 `kind = 'tool_result'` messages。
-4. Commit 后才发起下一次 provider call。
+1. Provider completed 后，Adapter 先构造不修改 Session 的 canonical assistant candidate。
+2. Backend 在任何 completion event/plugin、canonical append、approval 或工具执行前校验 schema、parts/text/reasoning/JSON bounds、normalized tool-call 一致性，以及 active epoch 内全局唯一的 `callId`；失败只保留脱敏 raw trace/diagnostic。
+3. 校验通过后，backend 在内存保存完整 assistant tool-call message，再执行权限、审批和全部 tool calls，得到每个 call 的 terminal result。
+4. 单一 transaction 依次插入 `kind = 'assistant_turn'` message 和所有对应的 `kind = 'tool_result'` messages。
+5. Commit 后才发起下一次 provider call。
 
 拒绝、取消、超时也形成完整 tool message。这样数据库任何时刻都不存在“assistant tool call 已持久化，但 required tool result 缺失”的协议断裂状态。
 
@@ -911,7 +924,14 @@ P3 runtime 中，自动 compact 只在新用户输入后或完整 tool-result ba
 
 原消息仍在数据库，UI 和导出可以读取；只是后续 provider request 不再携带。
 
-手动 compact 使用独立顺序：纯 `/compact` 重建 `system → harness* → summary`、展示 summary 后结束；`/compact <正文>` 再把正文作为新的普通 user 追加到 summary 之后并开始 React。命令文本本身不进入 canonical history，正文也不是摘要指令。无 root user 的 harness-driven Run 省略 replay user。
+手动 compact 使用独立 durable command journal：
+
+1. existing Session 在完成语法、route、credential、active-history 和 compression budget 前置校验后，先提交原始 `/compact...` 为 `submission.type = control_command` 的隐藏 `user_input`；它永久 `inHistory = false`。`run:start` 返回的就是这次 command-input commit，随后才允许 compression Provider 调用。
+2. 纯 `/compact` 成功后重建 `system → harness* → summary`、展示 summary 并结束。
+3. `/compact <正文>` 成功后重建 `system → harness* → summary → derived user`；derived user 通过 `derivedFromMessageId` 指向原始命令，Provider 只看到正文。
+4. compression 失败、abort、空摘要或重建超限时 epoch 不变，但已接受的原始命令记录保留；相同 `clientRequestId` 只 dedupe，不再次执行。
+
+自动 compact 不是新的用户提交，因此不创建控制命令。无 root user 的 harness-driven Run 省略 replay user。
 
 Compact summary 的 `metadata` 至少记录：
 
@@ -1146,6 +1166,7 @@ Desktop 单窗口场景中，主进程崩溃会同时终止 renderer；重启后
 幂等使用业务键：
 
 - User send：`UNIQUE(session_id, client_request_id)`。
+- Local control command：同样先写原始 `user_input` 并使用 `UNIQUE(session_id, client_request_id)`；执行失败保留记录，同 ID 不重放副作用。
 - Message：稳定 message id 和 seq unique constraint。
 - Approval：active runtime 中一个 approval id 只接受一次 terminal decision。
 - Session metadata update：backend 串行 command 和 revisioned response。
@@ -1196,6 +1217,10 @@ Active Run 开始时解析 immutable `ModelRouteSnapshot` 并保存在 memory；
 6. Stream delta 只存 memory 并推送 renderer。
 7. 每个完整 assistant turn 或完整 tool batch 按 §7.2 写入 SQLite。
 8. 完成、取消或失败后释放 runtime resources。
+
+Durable execution port 对每个 Session 串行 commit。commit 失败时从 SQLite 单次恢复 SessionRecord、active history、next seq、mode/model/Goal/Plan，并清除未提交 request 映射；恢复也失败时 binding 标记为 invalid，当前 Run settle 后强制驱逐。tool-batch commit 失败即使恢复成功也会隔离当前 live binding，避免带着已发生但未落库的副作用继续 React。
+
+`LiveSessionContextRegistry` 使用带 ownership token 的 `reserved → loading → live → evicting/releasing` 状态机。并发候选 Session 只有 owner 能清理自己的 manager context/binding；lazy restore 从首次串行 durable read 起就参与 Session/Project lifecycle guard。Archive、Project path update/remove 会先取得 eviction lease，成功 commit 后的资源清理失败只记录诊断，不把已提交事务改报失败。
 
 ### 9.5 应用崩溃与重启
 
@@ -1487,7 +1512,7 @@ P0 regression gates、P1 shared canonical contracts、P2 SQLite/Persistence foun
 
 P3 已把进程内 Agent loop 切到 canonical messages 与严格 `MessageHistoryCompiler`，由 Chat Completions Adapter 独占 wire DTO、HTTP/SSE transport、response normalization 和 continuation 恢复。每个 Run 冻结 main/compression/approval route、credential 与 model profile；AppConfig v9 检测到旧版或不兼容文件时删除并按默认值重建，Trace v2 明确拒绝旧 trace，trace fork 已移除。自动 compact 固定为 `system → harness* → root user replay → compact summary`，手动带正文固定为 `system → harness* → compact summary → new user`。
 
-P4 在 `electron/application/` 提供串行 application-state coordinator、Project/Session services、lazy `run:start`、普通 Session fork、LiveSessionContextRegistry、bounded runtime snapshot 和 durable execution-state port。该 port 接入现有唯一 Agent loop，在 Provider 前提交首次 input、原子提交 assistant/tool batch、interjection、Goal/Plan 与 compact epoch；临时数据库回归覆盖“发送 A → tool chain → final → dispose → reopen → 发送 B”。
+P4 在 `electron/application/` 提供串行 application-state coordinator、Project/Session services、lazy `run:start`、普通 Session fork、带 ownership token 的 LiveSessionContextRegistry、bounded runtime snapshot 和 per-Session 串行 durable execution-state port。该 port 接入现有唯一 Agent loop，在 Provider 前提交首次 input；手动 compact 先提交隐藏 command journal，再异步提交 compact epoch；assistant/tool batch、interjection 与 Goal/Plan 保持事务原子。Provider completion 在任何工具/approval/append 前完成 canonical bounds 与 active-epoch callId 校验，commit 失败会从 SQLite 恢复或隔离 binding。临时数据库回归覆盖“发送 A → tool chain → final → dispose → reopen → 发送 B”、并发候选 ownership、deferred restore lifecycle guard 和 commit failure recovery。
 
 P4 target composition 仍只由 unit/integration tests 使用，尚未导入 production Desktop/Headless、legacy IPC/preload 或 renderer 默认路径，也不读取或修改真实 `userData/agent.db`。FileChange 工具仍使用 legacy store，留给 P5；domain-state IPC/renderer 和正式切流分别留给 P6/P7/P8。
 

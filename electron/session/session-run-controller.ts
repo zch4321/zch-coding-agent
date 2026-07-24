@@ -127,6 +127,7 @@ export class SessionRunController {
       processedInterjectionIds: new Set(),
       harnessMessageIds: [],
       autoCompactEligible: false,
+      requestCommitted: false,
       publicTools: new Map(),
       publicSnapshot: {
         schemaVersion: 1,
@@ -418,6 +419,7 @@ export class SessionRunController {
       if (!runInputCommitted) {
         await this.#executionState?.commit(session, { reason: 'run_input' })
       }
+      run.requestCommitted = true
       run.autoCompactEligible = true
       await session.logger.write({
         type: 'run.start',
@@ -544,6 +546,9 @@ export class SessionRunController {
 
       throw new Error(`Run exceeded maxStepsPerRun (${maxStepsPerRun})`)
     } catch (error) {
+      if (!run.requestCommitted) {
+        session.clientRequests.delete(run.clientRequestId)
+      }
       const status = finalStatusFromError(error, signal)
       await this.#finishRun(session, run, status, error)
     }

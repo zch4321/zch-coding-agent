@@ -15,7 +15,10 @@ import type {
   ProviderChatRequest,
   ProviderEvent,
 } from '../providers/provider'
-import { CompactProvider } from '../session/session-manager-compaction-fixtures'
+import {
+  AbortCompactProvider,
+  CompactProvider,
+} from '../session/session-manager-compaction-fixtures'
 import {
   createDurableTargetRuntime,
   type DurableTargetRuntime,
@@ -706,5 +709,233 @@ describe('P4 isolated durable target runtime', () => {
     })
     expect(afterRestartProvider.calls).toBe(0)
     await secondTarget.dispose()
+  })
+
+  it('returns started for a pure durable compact and ends after the summary', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'zch-p4-runtime-'))
+    cleanup.push(() => rm(root, { recursive: true, force: true }))
+    const workspace = path.join(root, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(root)
+    const provider = new CompactProvider()
+    const target = await createDurableTargetRuntime({
+      configStore: store,
+      promptDirectory: path.resolve('resources', 'prompts'),
+      targetDirectory: path.join(root, 'target'),
+      providerFactory: () => provider,
+    })
+    const project = (await target.projects.add({ path: workspace })).commit
+      .change.projects[0]!
+    const sessionId = 'session:pure-durable-compact' as SessionId
+    const seed = await target.runs.start({
+      version: 1,
+      kind: 'new_session',
+      sessionId,
+      projectId: project.id,
+      permissionMode: 'readonly',
+      modelSelection: {
+        providerId: store.getPublicConfig().activeProviderId,
+        model: store.getPublicConfig().providers[0]!.model,
+        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+      },
+      message: 'history before pure compact',
+      clientRequestId: 'request:pure-compact-seed',
+    })
+    if (seed.outcome !== 'started') throw new Error('Run did not start')
+    await target.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      seed.runId,
+    )
+
+    const compact = await target.runs.start({
+      version: 1,
+      kind: 'existing_session',
+      sessionId,
+      message: '/compact',
+      clientRequestId: 'request:pure-durable-compact',
+    })
+    expect(compact).toMatchObject({
+      outcome: 'started',
+      commit: {
+        change: {
+          messageChange: {
+            mode: 'upsert',
+            records: [
+              {
+                clientRequestId: 'request:pure-durable-compact',
+                inHistory: false,
+              },
+            ],
+          },
+        },
+      },
+    })
+    if (compact.outcome !== 'started') throw new Error('Run did not start')
+    await target.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      compact.runId,
+    )
+    const active = await target.sessions.listActiveHistory(sessionId)
+    expect(active.at(-1)?.kind).toBe('compact_summary')
+    expect(
+      active.some(
+        (record) =>
+          record.kind === 'user_input' &&
+          record.metadata &&
+          'derivedFromMessageId' in record.metadata,
+      ),
+    ).toBe(false)
+    expect(provider.calls).toBe(2)
+    await target.dispose()
+  })
+
+  it('keeps the durable command but rolls back an aborted compact epoch', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'zch-p4-runtime-'))
+    cleanup.push(() => rm(root, { recursive: true, force: true }))
+    const workspace = path.join(root, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(root)
+    const provider = new AbortCompactProvider()
+    const target = await createDurableTargetRuntime({
+      configStore: store,
+      promptDirectory: path.resolve('resources', 'prompts'),
+      targetDirectory: path.join(root, 'target'),
+      providerFactory: () => provider,
+    })
+    const project = (await target.projects.add({ path: workspace })).commit
+      .change.projects[0]!
+    const sessionId = 'session:aborted-durable-compact' as SessionId
+    const seed = await target.runs.start({
+      version: 1,
+      kind: 'new_session',
+      sessionId,
+      projectId: project.id,
+      permissionMode: 'readonly',
+      modelSelection: {
+        providerId: store.getPublicConfig().activeProviderId,
+        model: store.getPublicConfig().providers[0]!.model,
+        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+      },
+      message: 'history survives durable compact abort',
+      clientRequestId: 'request:abort-compact-seed',
+    })
+    if (seed.outcome !== 'started') throw new Error('Run did not start')
+    await target.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      seed.runId,
+    )
+
+    const compact = await target.runs.start({
+      version: 1,
+      kind: 'existing_session',
+      sessionId,
+      message: '/compact',
+      clientRequestId: 'request:aborted-durable-compact',
+    })
+    if (compact.outcome !== 'started') throw new Error('Run did not start')
+    await provider.compactStarted.promise
+    expect(
+      target.runtime.services.sessions.interruptRun(sessionId, compact.runId),
+    ).toBe(true)
+    await target.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      compact.runId,
+    )
+
+    const active = await target.sessions.listActiveHistory(sessionId)
+    expect(JSON.stringify(active)).toContain(
+      'history survives durable compact abort',
+    )
+    expect(active.some((record) => record.kind === 'compact_summary')).toBe(
+      false,
+    )
+    expect((await target.sessions.get(sessionId)).messagePage.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          clientRequestId: 'request:aborted-durable-compact',
+          inHistory: false,
+          parts: [{ type: 'text', text: '/compact' }],
+        }),
+      ]),
+    )
+    await target.dispose()
+  })
+
+  it('does not journal rejected slash commands and allows corrected retry ids', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'zch-p4-runtime-'))
+    cleanup.push(() => rm(root, { recursive: true, force: true }))
+    const workspace = path.join(root, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(root)
+    const provider = new OrderedProvider([])
+    const target = await createTarget({ root, store, provider })
+    const project = (await target.projects.add({ path: workspace })).commit
+      .change.projects[0]!
+    const sessionId = 'session:rejected-commands' as SessionId
+    const seed = await target.runs.start({
+      version: 1,
+      kind: 'new_session',
+      sessionId,
+      projectId: project.id,
+      permissionMode: 'readonly',
+      modelSelection: {
+        providerId: store.getPublicConfig().activeProviderId,
+        model: store.getPublicConfig().providers[0]!.model,
+        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+      },
+      message: 'seed before rejected commands',
+      clientRequestId: 'request:rejected-seed',
+    })
+    if (seed.outcome !== 'started') throw new Error('Run did not start')
+    await target.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      seed.runId,
+    )
+
+    for (const [message, clientRequestId] of [
+      ['/unknown-command', 'request:unknown-command'],
+      ['/goal', 'request:missing-goal'],
+      ['/plan', 'request:missing-plan'],
+      ['/prompt', 'request:missing-prompt'],
+      ['/skill', 'request:missing-skill'],
+    ] as const) {
+      await expect(
+        target.runs.start({
+          version: 1,
+          kind: 'existing_session',
+          sessionId,
+          message,
+          clientRequestId,
+        }),
+      ).rejects.toBeInstanceOf(Error)
+    }
+
+    const audit = JSON.stringify(await target.sessions.get(sessionId))
+    expect(audit).not.toContain('/unknown-command')
+    expect(audit).not.toContain('request:missing-goal')
+    expect(audit).not.toContain('request:missing-plan')
+    expect(audit).not.toContain('request:missing-prompt')
+    expect(audit).not.toContain('request:missing-skill')
+    expect(provider.calls).toBe(1)
+
+    const corrected = await target.runs.start({
+      version: 1,
+      kind: 'existing_session',
+      sessionId,
+      message: 'corrected ordinary input',
+      clientRequestId: 'request:missing-goal',
+    })
+    if (corrected.outcome !== 'started') {
+      throw new Error('Corrected Run did not start')
+    }
+    await target.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      corrected.runId,
+    )
+    expect(JSON.stringify(await target.sessions.get(sessionId))).toContain(
+      'corrected ordinary input',
+    )
+    expect(provider.calls).toBe(2)
+    await target.dispose()
   })
 })

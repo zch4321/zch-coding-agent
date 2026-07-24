@@ -96,12 +96,13 @@ describe('DeepSeekProvider', () => {
     })
 
     await expect(async () => {
-      for await (const _event of provider.streamChat({
+      for await (const event of provider.streamChat({
         messages: [{ role: 'user', content: 'continue' }],
         tools: [],
         signal: new AbortController().signal,
       })) {
         // Consume until the provider rejects the oversized accumulation.
+        void event
       }
     }).rejects.toThrow(expected)
   })

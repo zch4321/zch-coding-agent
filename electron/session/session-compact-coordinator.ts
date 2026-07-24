@@ -204,6 +204,7 @@ export class SessionCompactCoordinator {
           await this.#executionState?.commit(session, {
             reason: 'command_input',
           })
+          run.requestCommitted = true
         } catch (error) {
           session.history = beforeCommandHistory
           session.nextMessageSeq = beforeCommandNextSeq
