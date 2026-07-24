@@ -1,6 +1,7 @@
 import type { ProviderPublicConfig, PublicConfig } from '../../shared/config'
 import type { CallId } from '../../shared/ids'
 import type { JsonObject, JsonValue } from '../../shared/json'
+import type { MessagePart } from '../../shared/message'
 import type { ConfigStore } from '../config/store'
 import type { PluginEventBus } from '../plugins/event-bus'
 import { OpenAICompatibleProvider } from '../providers/deepseek-provider'
@@ -8,6 +9,7 @@ import {
   assertChatCompletionsRequestDto,
   chatAdapter,
 } from '../providers/chat-completions-adapter'
+import type { CompletedAssistantTurn } from '../providers/provider-protocol'
 import type {
   ProviderEvent,
   ProviderRequestSnapshot,
@@ -17,7 +19,10 @@ import type { ToolCall } from '../tools/types'
 import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { id, redactJsonSecrets, toJsonValue } from './session-common'
-import { canonicalTraceSource } from './canonical-history'
+import {
+  assertAssistantTurnCandidate,
+  canonicalTraceSource,
+} from './canonical-history'
 import { modelPromptBudget } from './session-run-utils'
 import { promptResources, selectPromptMessages } from './prompt-harness'
 import type {
@@ -35,6 +40,7 @@ import {
 } from './prompt-harness'
 
 export interface ProviderTurnResult {
+  parts: MessagePart[]
   toolCalls: ToolCall[]
   text: string
   reasoning: string
@@ -315,7 +321,34 @@ export class SessionProviderTurnRunner {
     }
 
     if (!completed) throw new Error('Provider stream ended without completion')
-    const canonical = adapter.complete(completed, { text, reasoning })
+    let canonical
+    try {
+      canonical = adapter.complete(completed, { text, reasoning })
+      assertCompletedAssistantTurn(canonical)
+      assertAssistantTurnCandidate(session, {
+        parts: canonical.parts,
+        reasoning: canonical.normalizedReasoningText,
+        finishReason: canonical.finishReason,
+        route: binding.snapshot,
+        continuation: canonical.providerContinuation,
+      })
+    } catch (error) {
+      await session.logger.write({
+        type: 'llm.response',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: llmCallId,
+        rawResponse: redactJsonSecrets(completed.rawResponse, [binding.apiKey]),
+        normalizedTurn: null,
+        providerState: redactJsonSecrets(completed.providerState, [
+          binding.apiKey,
+        ]),
+        usage: completed.usage,
+        timing: completed.timing,
+      })
+      this.#onDiagnostic('Provider completion validation failed', error)
+      throw error
+    }
     const canonicalText = canonical.parts
       .flatMap((part) => (part.type === 'text' ? [part.text] : []))
       .join('\n')
@@ -371,11 +404,36 @@ export class SessionProviderTurnRunner {
       )
 
     return {
+      parts: structuredClone(canonical.parts),
       toolCalls: canonical.toolCalls,
       text: canonicalText,
       reasoning: canonical.normalizedReasoningText ?? reasoning,
       finishReason: canonical.finishReason,
       continuation: canonical.providerContinuation,
+    }
+  }
+}
+
+function assertCompletedAssistantTurn(completed: CompletedAssistantTurn): void {
+  const parts = completed.parts.filter(
+    (part): part is Extract<MessagePart, { type: 'tool_call' }> =>
+      part.type === 'tool_call',
+  )
+  if (parts.length !== completed.toolCalls.length) {
+    throw new TypeError(
+      'Provider completion parts do not match normalized tool calls',
+    )
+  }
+  for (const [index, call] of completed.toolCalls.entries()) {
+    const part = parts[index]!
+    if (
+      part.callId !== call.id ||
+      part.name !== call.toolId ||
+      JSON.stringify(part.arguments) !== JSON.stringify(call.args)
+    ) {
+      throw new TypeError(
+        'Provider completion parts do not match normalized tool calls',
+      )
     }
   }
 }

@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { CallId, MessageId, SessionId } from '../../shared/ids'
-import type { JsonValue } from '../../shared/json'
+import { assertBoundedJsonValue, type JsonValue } from '../../shared/json'
 import {
   assertMessageRecordSemantics,
   MessageRecordSchema,
   type AssistantTurnMessageRecordSchema,
   type CanonicalPromptKind,
+  type MessagePart,
   type MessageRecord,
   type ToolCallPart,
 } from '../../shared/message'
@@ -31,6 +32,17 @@ export type CompletedAssistantRecord = Static<
 >
 
 const validateMessageRecord = compileSchema(MessageRecordSchema)
+
+export interface AssistantTurnCandidateInput {
+  parts: readonly MessagePart[]
+  reasoning?: string
+  finishReason?: string
+  route: ModelRouteSnapshot
+  continuation?: Extract<
+    MessageRecord,
+    { kind: 'assistant_turn' }
+  >['providerContinuation']
+}
 
 function nextIdentity(state: CanonicalHistoryState) {
   const seq = state.nextMessageSeq
@@ -228,13 +240,74 @@ export function appendAssistantTurn(
       arguments: structuredClone(call.args),
     })
   }
-  if (parts.length === 0) {
-    throw new TypeError('Completed assistant turn must not be empty')
-  }
-  const record = {
-    ...nextIdentity(state),
-    kind: 'assistant_turn' as const,
+  return appendCompletedAssistantTurn(state, {
     parts,
+    reasoning: input.reasoning,
+    finishReason: input.finishReason,
+    route: input.route,
+    continuation: input.continuation,
+  })
+}
+
+export function assertAssistantTurnCandidate(
+  state: CanonicalHistoryState,
+  input: AssistantTurnCandidateInput,
+): void {
+  const record = assistantTurnCandidate(state, input)
+  if (!validateMessageRecord(record)) {
+    throw new TypeError(
+      `Canonical assistant completion is invalid: ${formatSchemaErrors(
+        validateMessageRecord.errors,
+      )}`,
+    )
+  }
+  assertMessageRecordSemantics(record)
+  assertBoundedJsonValue(record)
+
+  const existingCallIds = new Set<string>()
+  for (const existing of state.history) {
+    if (!existing.inHistory || existing.kind !== 'assistant_turn') continue
+    for (const part of existing.parts) {
+      if (part.type === 'tool_call') existingCallIds.add(part.callId)
+    }
+  }
+  for (const part of record.parts) {
+    if (part.type !== 'tool_call') continue
+    if (existingCallIds.has(part.callId)) {
+      throw new TypeError(
+        `Duplicate tool call id in active history: ${part.callId}`,
+      )
+    }
+    existingCallIds.add(part.callId)
+  }
+}
+
+export function appendCompletedAssistantTurn(
+  state: CanonicalHistoryState,
+  input: AssistantTurnCandidateInput,
+): Extract<MessageRecord, { kind: 'assistant_turn' }> {
+  assertAssistantTurnCandidate(state, input)
+  const record = assistantTurnCandidate(state, input, nextIdentity(state))
+  state.history.push(record)
+  return record
+}
+
+function assistantTurnCandidate(
+  state: CanonicalHistoryState,
+  input: AssistantTurnCandidateInput,
+  identity: ReturnType<typeof nextIdentity> = {
+    schemaVersion: 1,
+    id: 'message:assistant-validation-candidate' as MessageId,
+    sessionId: state.sessionId,
+    seq: state.nextMessageSeq,
+    inHistory: true,
+    createdAt: new Date().toISOString(),
+  },
+): Extract<MessageRecord, { kind: 'assistant_turn' }> {
+  const record = {
+    ...identity,
+    kind: 'assistant_turn' as const,
+    parts: structuredClone(input.parts),
     modelRoute: structuredClone(input.route),
     ...(input.reasoning ? { normalizedReasoningText: input.reasoning } : {}),
     ...(input.continuation
@@ -249,7 +322,6 @@ export function appendAssistantTurn(
         }
       : {}),
   } as Extract<MessageRecord, { kind: 'assistant_turn' }>
-  state.history.push(record)
   return record
 }
 

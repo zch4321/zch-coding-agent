@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import {
+  MAX_MESSAGE_PARTS,
+  MAX_MESSAGE_TEXT_LENGTH,
+} from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
-import type { JsonValue } from '../../shared/json'
+import { CANONICAL_JSON_LIMITS, type JsonValue } from '../../shared/json'
 import { DeepSeekProvider, OpenAICompatibleProvider } from './deepseek-provider'
 import type { ProviderEvent } from './provider'
 
@@ -15,6 +19,93 @@ function sseResponse(payloads: JsonValue[]): Response {
 }
 
 describe('DeepSeekProvider', () => {
+  it.each([
+    [
+      'text',
+      {
+        choices: [
+          {
+            delta: { content: 'x'.repeat(MAX_MESSAGE_TEXT_LENGTH + 1) },
+          },
+        ],
+      },
+      /Provider text exceeds maximum length/u,
+    ],
+    [
+      'reasoning',
+      {
+        choices: [
+          {
+            delta: {
+              reasoning_content: 'x'.repeat(MAX_MESSAGE_TEXT_LENGTH + 1),
+            },
+          },
+        ],
+      },
+      /Provider reasoning exceeds maximum length/u,
+    ],
+    [
+      'tool arguments',
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call:large',
+                  function: {
+                    name: 'read_file',
+                    arguments: 'x'.repeat(CANONICAL_JSON_LIMITS.maxBytes + 1),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      /Provider tool arguments exceed maximum size/u,
+    ],
+    [
+      'tool count',
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: Array.from(
+                { length: MAX_MESSAGE_PARTS + 1 },
+                (_value, index) => ({
+                  index,
+                  id: `call:${index}`,
+                  function: { name: 'read_file', arguments: '{}' },
+                }),
+              ),
+            },
+          },
+        ],
+      },
+      /Provider tool calls exceed maximum count/u,
+    ],
+  ])('stops accumulating oversized %s', async (_label, chunk, expected) => {
+    const provider = new DeepSeekProvider({
+      baseURL: 'https://api.example/v1',
+      model: 'fixture',
+      apiKey: 'secret',
+      reasoning: 'high',
+      fetchImpl: async () => sseResponse([chunk as JsonValue]),
+    })
+
+    await expect(async () => {
+      for await (const _event of provider.streamChat({
+        messages: [{ role: 'user', content: 'continue' }],
+        tools: [],
+        signal: new AbortController().signal,
+      })) {
+        // Consume until the provider rejects the oversized accumulation.
+      }
+    }).rejects.toThrow(expected)
+  })
+
   it('sends a fork request body exactly while keeping credentials in headers', async () => {
     let body = ''
     let authorization = ''

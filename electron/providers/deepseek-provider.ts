@@ -1,6 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto'
+import {
+  MAX_MESSAGE_PARTS,
+  MAX_MESSAGE_TEXT_LENGTH,
+} from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
-import type { JsonObject, JsonValue } from '../../shared/json'
+import {
+  CANONICAL_JSON_LIMITS,
+  type JsonObject,
+  type JsonValue,
+} from '../../shared/json'
 import type { ToolCall } from '../tools/types'
 import type { ProviderProfile, ReasoningEffort } from '../../shared/config'
 import { resolveChatCompletionsEndpoint } from '../../shared/model-route'
@@ -36,6 +44,7 @@ interface AccumulatedToolCall {
   id?: string
   name?: string
   argumentsText: string
+  argumentsBytes: number
 }
 
 function byteLength(value: JsonValue): number {
@@ -169,6 +178,19 @@ function usageFromChunk(chunk: JsonObject): JsonValue | undefined {
   return usage && typeof usage === 'object' ? toJsonValue(usage) : undefined
 }
 
+function appendBoundedText(
+  current: string,
+  delta: string,
+  label: string,
+): string {
+  if (current.length + delta.length > MAX_MESSAGE_TEXT_LENGTH) {
+    throw new RangeError(
+      `${label} exceeds maximum length ${MAX_MESSAGE_TEXT_LENGTH}`,
+    )
+  }
+  return current + delta
+}
+
 export class OpenAICompatibleProvider implements LLMProvider {
   readonly #providerId: string
   readonly #profile: ProviderProfile
@@ -273,7 +295,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
       if (typeof reasoningDelta === 'string' && reasoningDelta.length > 0) {
         firstTokenAt ??= this.#now()
-        reasoning += reasoningDelta
+        reasoning = appendBoundedText(
+          reasoning,
+          reasoningDelta,
+          'Provider reasoning',
+        )
         yield {
           type: 'reasoning.delta',
           delta: reasoningDelta,
@@ -283,7 +309,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
       if (typeof delta.content === 'string' && delta.content.length > 0) {
         firstTokenAt ??= this.#now()
-        text += delta.content
+        text = appendBoundedText(text, delta.content, 'Provider text')
         yield {
           type: 'text.delta',
           delta: delta.content,
@@ -304,9 +330,15 @@ export class OpenAICompatibleProvider implements LLMProvider {
           const toolDelta = rawToolCall as JsonObject
           const index =
             typeof toolDelta.index === 'number' ? toolDelta.index : 0
+          if (!toolCalls.has(index) && toolCalls.size >= MAX_MESSAGE_PARTS) {
+            throw new RangeError(
+              `Provider tool calls exceed maximum count ${MAX_MESSAGE_PARTS}`,
+            )
+          }
           const current = toolCalls.get(index) ?? {
             index,
             argumentsText: '',
+            argumentsBytes: 0,
           }
           const fn =
             toolDelta.function &&
@@ -324,6 +356,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
           }
 
           if (fn && typeof fn.arguments === 'string') {
+            current.argumentsBytes += Buffer.byteLength(fn.arguments, 'utf8')
+            if (current.argumentsBytes > CANONICAL_JSON_LIMITS.maxBytes) {
+              throw new RangeError(
+                `Provider tool arguments exceed maximum size ${CANONICAL_JSON_LIMITS.maxBytes}`,
+              )
+            }
             current.argumentsText += fn.arguments
           }
 

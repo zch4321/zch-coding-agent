@@ -9,6 +9,7 @@ import {
   appendPromptMessage,
   appendToolResult,
   appendUserInput,
+  assertAssistantTurnCandidate,
   deactivateActiveHistory,
   MessageHistoryCompiler,
   type CanonicalHistoryState,
@@ -156,6 +157,63 @@ describe('MessageHistoryCompiler', () => {
     expect(
       new MessageHistoryCompiler().compile(history.history).messages,
     ).toHaveLength(5)
+  })
+
+  it('rejects a tool call id already used in the active epoch', () => {
+    const history = state()
+    prompt(history)
+    appendAssistantTurn(history, {
+      text: '',
+      route,
+      toolCalls: [
+        {
+          id: 'call:epoch-duplicate' as CallId,
+          toolId: 'read_file',
+          args: { path: 'a.txt' },
+        },
+      ],
+    })
+    appendToolResult(history, {
+      callId: 'call:epoch-duplicate' as CallId,
+      content: { path: 'a.txt' },
+      isError: false,
+      name: 'read_file',
+      status: 'completed',
+      truncated: false,
+    })
+
+    expect(() =>
+      assertAssistantTurnCandidate(history, {
+        parts: [
+          {
+            type: 'tool_call',
+            callId: 'call:epoch-duplicate' as CallId,
+            name: 'read_file',
+            arguments: { path: 'b.txt' },
+          },
+        ],
+        route,
+      }),
+    ).toThrow(/Duplicate tool call id in active history/u)
+  })
+
+  it('validates the entire assistant candidate before changing state', () => {
+    const history = state()
+    prompt(history)
+    const before = structuredClone(history)
+
+    expect(() =>
+      assertAssistantTurnCandidate(history, {
+        parts: Array.from({ length: 257 }, (_value, index) => ({
+          type: 'tool_call' as const,
+          callId: `call:too-many:${index}` as CallId,
+          name: 'read_file',
+          arguments: { path: `${index}.txt` },
+        })),
+        route,
+      }),
+    ).toThrow(/Canonical assistant completion is invalid/u)
+    expect(history).toEqual(before)
   })
 
   it.each([

@@ -13,7 +13,7 @@ import {
 } from './prompt-harness'
 import { id, ipcFault, redactJsonSecrets } from './session-common'
 import {
-  appendAssistantTurn,
+  appendCompletedAssistantTurn,
   appendUserInput,
   canonicalHash,
 } from './canonical-history'
@@ -439,15 +439,6 @@ export class SessionRunController {
           () => this.setRunStatus(session, run, 'calling_llm'),
         )
 
-        appendAssistantTurn(session, {
-          text: completed.text,
-          toolCalls: completed.toolCalls,
-          reasoning: completed.reasoning,
-          finishReason: completed.finishReason,
-          route: run.routes.main.snapshot,
-          continuation: completed.continuation,
-        })
-
         if (completed.text || completed.reasoning) {
           this.#emit(session, {
             type: 'assistant.message.completed',
@@ -470,6 +461,14 @@ export class SessionRunController {
               : undefined,
           })
         }
+
+        appendCompletedAssistantTurn(session, {
+          parts: completed.parts,
+          reasoning: completed.reasoning,
+          finishReason: completed.finishReason,
+          route: run.routes.main.snapshot,
+          continuation: completed.continuation,
+        })
 
         if (completed.toolCalls.length === 0) {
           let continuation: 'continue' | 'finish' = 'finish'
