@@ -6,7 +6,10 @@ import type {
   SessionMessageChange,
 } from '../../shared/domain-state-api'
 import type { MessageId, SessionId } from '../../shared/ids'
-import type { MessageRecord } from '../../shared/message'
+import {
+  isControlCommandUserInput,
+  type MessageRecord,
+} from '../../shared/message'
 import type { ModelSelection } from '../../shared/model-route'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type {
@@ -409,7 +412,11 @@ export class SessionService {
         }
         if (
           point.kind !== 'assistant_turn' &&
-          !(point.kind === 'user_input' && 'clientRequestId' in point)
+          !(
+            point.kind === 'user_input' &&
+            'clientRequestId' in point &&
+            !isControlCommandUserInput(point)
+          )
         ) {
           throw new ApplicationError(
             'PRECONDITION_FAILED',
@@ -477,7 +484,7 @@ export class SessionService {
           record,
           input.sessionId,
           idMap,
-          record.seq > activeBoundary,
+          record.seq > activeBoundary && !isControlCommandUserInput(record),
         ),
       )
       const timestamp = this.#now()
@@ -704,6 +711,26 @@ function cloneForkMessage(
       metadata: {
         ...clone.metadata,
         replayedFromMessageId,
+      },
+    }
+  }
+  if (
+    clone.kind === 'user_input' &&
+    clone.metadata &&
+    'derivedFromMessageId' in clone.metadata
+  ) {
+    const derivedFromMessageId = idMap.get(clone.metadata.derivedFromMessageId)
+    if (!derivedFromMessageId) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Fork derived reference leaves the copied Session',
+      )
+    }
+    return {
+      ...clone,
+      metadata: {
+        ...clone.metadata,
+        derivedFromMessageId,
       },
     }
   }

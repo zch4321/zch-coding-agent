@@ -53,6 +53,9 @@ CREATE INDEX sessions_project_updated_idx
 CREATE INDEX sessions_lifecycle_updated_idx
   ON sessions(lifecycle, updated_at DESC, id DESC);
 
+CREATE INDEX sessions_parent_idx
+  ON sessions(parent_session_id);
+
 CREATE TABLE messages (
   schema_version       INTEGER NOT NULL CHECK (schema_version = 1),
   id                   TEXT PRIMARY KEY,
@@ -63,6 +66,7 @@ CREATE TABLE messages (
     OR length(client_request_id) BETWEEN 1 AND 128
   ),
   replayed_from_message_id TEXT,
+  derived_from_message_id TEXT,
   kind                 TEXT NOT NULL CHECK (
     kind IN (
       'user_input',
@@ -99,6 +103,8 @@ CREATE TABLE messages (
   created_at           TEXT NOT NULL CHECK (length(created_at) BETWEEN 1 AND 64),
   FOREIGN KEY (replayed_from_message_id, session_id)
     REFERENCES messages(id, session_id) ON DELETE CASCADE,
+  FOREIGN KEY (derived_from_message_id, session_id)
+    REFERENCES messages(id, session_id) ON DELETE CASCADE,
   UNIQUE (id, session_id),
   UNIQUE (session_id, seq),
   UNIQUE (session_id, client_request_id),
@@ -106,15 +112,30 @@ CREATE TABLE messages (
     (
       kind = 'user_input'
       AND (
-        (client_request_id IS NOT NULL AND replayed_from_message_id IS NULL)
+        (
+          client_request_id IS NOT NULL
+          AND replayed_from_message_id IS NULL
+          AND derived_from_message_id IS NULL
+        )
         OR
-        (client_request_id IS NULL AND replayed_from_message_id IS NOT NULL)
+        (
+          client_request_id IS NULL
+          AND replayed_from_message_id IS NOT NULL
+          AND derived_from_message_id IS NULL
+        )
+        OR
+        (
+          client_request_id IS NULL
+          AND replayed_from_message_id IS NULL
+          AND derived_from_message_id IS NOT NULL
+        )
       )
     )
     OR (
       kind <> 'user_input'
       AND client_request_id IS NULL
       AND replayed_from_message_id IS NULL
+      AND derived_from_message_id IS NULL
     )
   ),
   CHECK (
@@ -132,6 +153,12 @@ CREATE TABLE messages (
 
 CREATE INDEX messages_history_idx
   ON messages(session_id, in_history, seq);
+
+CREATE INDEX messages_replayed_from_idx
+  ON messages(replayed_from_message_id, session_id);
+
+CREATE INDEX messages_derived_from_idx
+  ON messages(derived_from_message_id, session_id);
 
 CREATE TABLE file_changes (
   schema_version  INTEGER NOT NULL CHECK (schema_version = 1),

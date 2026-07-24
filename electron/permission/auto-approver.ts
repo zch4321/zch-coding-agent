@@ -146,6 +146,10 @@ export class ProviderAutoApprover implements AutoApprover {
         kind: 'user_input',
         clientRequestId: 'approval-request',
         parts: [{ type: 'text', text: JSON.stringify(jsonValue(input)) }],
+        metadata: {
+          schemaVersion: 1,
+          submission: { type: 'message' },
+        },
       },
     ]
     const adapter = chatAdapter(this.#route.adapterId)

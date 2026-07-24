@@ -154,6 +154,7 @@ const messages: MessageRecord[] = [
     parts: [{ type: 'text', text: 'Inspect the repository' }],
     metadata: {
       schemaVersion: 1,
+      submission: { type: 'message' },
       attachments: [
         { ref: 'README.md', name: 'README.md', snapshotHash: hash },
       ],

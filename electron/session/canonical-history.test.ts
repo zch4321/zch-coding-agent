@@ -5,6 +5,7 @@ import type { ModelRouteSnapshot } from '../../shared/model-route'
 import {
   appendAssistantTurn,
   appendCompactSummary,
+  appendControlCommand,
   appendPromptMessage,
   appendToolResult,
   appendUserInput,
@@ -83,6 +84,35 @@ describe('MessageHistoryCompiler', () => {
       new MessageHistoryCompiler().compile(structuredClone(history.history))
         .sourceHash,
     ).toBe(compiled.sourceHash)
+  })
+
+  it('keeps control commands outside history and identifies derived payloads', () => {
+    const history = state()
+    const command = appendControlCommand(history, {
+      content: '/compact focus on risks',
+      clientRequestId: 'request:compact',
+      requestHash: 'a'.repeat(64),
+      command: 'compact',
+    })
+    const derived = appendUserInput(history, {
+      content: 'focus on risks',
+      derivedFromMessageId: command.id,
+    })
+
+    expect(command).toMatchObject({
+      inHistory: false,
+      metadata: {
+        submission: { type: 'control_command', command: 'compact' },
+      },
+    })
+    expect(derived).toMatchObject({
+      inHistory: true,
+      metadata: {
+        derivedFromMessageId: command.id,
+        derivation: 'control_command_payload',
+      },
+    })
+    expect('clientRequestId' in derived).toBe(false)
   })
 
   it('accepts reasoning plus an ordered multi-tool result batch', () => {

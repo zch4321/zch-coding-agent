@@ -209,6 +209,23 @@ export const UserInputMetadataV1Schema = Type.Object(
   {
     schemaVersion: DurableSchemaVersionSchema,
     requestHash: Type.Optional(Sha256Schema),
+    submission: Type.Union([
+      Type.Object(
+        { type: Type.Literal('message') },
+        { additionalProperties: false },
+      ),
+      Type.Object(
+        {
+          type: Type.Literal('control_command'),
+          command: Type.String({
+            minLength: 1,
+            maxLength: 64,
+            pattern: '^[a-z][a-z0-9-]*$',
+          }),
+        },
+        { additionalProperties: false },
+      ),
+    ]),
     attachments: Type.Optional(
       Type.Array(AttachmentMetadataSchema, { maxItems: 64 }),
     ),
@@ -223,6 +240,15 @@ export const ReplayedUserInputMetadataV1Schema = Type.Object(
     attachments: Type.Optional(
       Type.Array(AttachmentMetadataSchema, { maxItems: 64 }),
     ),
+  },
+  { additionalProperties: false },
+)
+
+export const DerivedUserInputMetadataV1Schema = Type.Object(
+  {
+    schemaVersion: DurableSchemaVersionSchema,
+    derivedFromMessageId: MessageIdSchema,
+    derivation: Type.Literal('control_command_payload'),
   },
   { additionalProperties: false },
 )
@@ -267,6 +293,7 @@ export const CompactSummaryMetadataV1Schema = Type.Object(
 export const MessageMetadataV1Schema = Type.Union([
   UserInputMetadataV1Schema,
   ReplayedUserInputMetadataV1Schema,
+  DerivedUserInputMetadataV1Schema,
   AssistantMetadataV1Schema,
   ToolResultMetadataV1Schema,
   PromptMessageMetadataV1Schema,
@@ -292,7 +319,7 @@ export const OriginalUserInputMessageRecordSchema = Type.Object(
       minItems: 1,
       maxItems: MAX_MESSAGE_PARTS,
     }),
-    metadata: Type.Optional(UserInputMetadataV1Schema),
+    metadata: UserInputMetadataV1Schema,
   },
   { additionalProperties: false },
 )
@@ -310,9 +337,23 @@ export const ReplayedUserInputMessageRecordSchema = Type.Object(
   { additionalProperties: false },
 )
 
+export const DerivedUserInputMessageRecordSchema = Type.Object(
+  {
+    ...messageIdentityProperties,
+    kind: Type.Literal('user_input'),
+    parts: Type.Array(TextPartSchema, {
+      minItems: 1,
+      maxItems: MAX_MESSAGE_PARTS,
+    }),
+    metadata: DerivedUserInputMetadataV1Schema,
+  },
+  { additionalProperties: false },
+)
+
 export const UserInputMessageRecordSchema = Type.Union([
   OriginalUserInputMessageRecordSchema,
   ReplayedUserInputMessageRecordSchema,
+  DerivedUserInputMessageRecordSchema,
 ])
 
 export const AssistantTurnMessageRecordSchema = Type.Object(
@@ -415,6 +456,22 @@ export const MessageRecordSchema = Type.Union([
 ])
 export type MessageRecord = Static<typeof MessageRecordSchema>
 
+export function isControlCommandUserInput(
+  record: MessageRecord,
+): record is Extract<MessageRecord, { kind: 'user_input' }> & {
+  clientRequestId: string
+  metadata: {
+    schemaVersion: 1
+    submission: { type: 'control_command'; command: string }
+  }
+} {
+  return (
+    record.kind === 'user_input' &&
+    'clientRequestId' in record &&
+    record.metadata?.submission?.type === 'control_command'
+  )
+}
+
 const messagePageProperties = {
   schemaVersion: DurableSchemaVersionSchema,
   sessionId: SessionIdSchema,
@@ -447,6 +504,10 @@ export const MessagePageSchema = Type.Union([
 export type MessagePage = Static<typeof MessagePageSchema>
 
 export function assertMessageRecordSemantics(record: MessageRecord): void {
+  if (isControlCommandUserInput(record) && record.inHistory) {
+    throw new TypeError('Control command user input must not enter history')
+  }
+
   if (record.kind === 'assistant_turn') {
     assertModelRouteSnapshotSafe(record.modelRoute)
     const callIds = new Set<string>()

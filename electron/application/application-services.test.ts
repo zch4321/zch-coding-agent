@@ -56,6 +56,7 @@ function firstTurn(
       metadata: {
         schemaVersion: 1,
         requestHash: canonicalHash(text),
+        submission: { type: 'message' },
       },
     },
   ]

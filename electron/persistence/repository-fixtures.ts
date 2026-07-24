@@ -74,6 +74,10 @@ export function messageFixtures(
       kind: 'user_input',
       clientRequestId: 'request:fixture',
       parts: [{ type: 'text', text: 'visible search needle' }],
+      metadata: {
+        schemaVersion: 1,
+        submission: { type: 'message' },
+      },
     },
     {
       ...identity('message:2', 2),

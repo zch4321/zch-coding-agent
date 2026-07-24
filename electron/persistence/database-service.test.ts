@@ -63,6 +63,52 @@ describe('DatabaseService', () => {
     }
   })
 
+  it('indexes every child-side composite foreign key lookup', async () => {
+    const testDatabase = await createTestDatabase()
+    try {
+      const queryPlans = testDatabase.database.read((reader) => ({
+        sessionParent: reader
+          .prepare(
+            `EXPLAIN QUERY PLAN
+             SELECT id FROM sessions WHERE parent_session_id = ?`,
+          )
+          .all('session:parent'),
+        replaySource: reader
+          .prepare(
+            `EXPLAIN QUERY PLAN
+             SELECT id FROM messages
+             WHERE replayed_from_message_id = ? AND session_id = ?`,
+          )
+          .all('message:source', 'session:fixture'),
+        derivationSource: reader
+          .prepare(
+            `EXPLAIN QUERY PLAN
+             SELECT id FROM messages
+             WHERE derived_from_message_id = ? AND session_id = ?`,
+          )
+          .all('message:source', 'session:fixture'),
+      }))
+
+      expect(queryPlans.sessionParent).toEqual([
+        expect.objectContaining({
+          detail: expect.stringContaining('sessions_parent_idx'),
+        }),
+      ])
+      expect(queryPlans.replaySource).toEqual([
+        expect.objectContaining({
+          detail: expect.stringContaining('messages_replayed_from_idx'),
+        }),
+      ])
+      expect(queryPlans.derivationSource).toEqual([
+        expect.objectContaining({
+          detail: expect.stringContaining('messages_derived_from_idx'),
+        }),
+      ])
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
   it('reopens an already migrated database without reapplying migrations', async () => {
     const testDatabase = await createTestDatabase()
     const databasePath = testDatabase.databasePath

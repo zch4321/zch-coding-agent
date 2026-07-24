@@ -26,6 +26,7 @@ export interface MessageRow {
   seq: number
   client_request_id: string | null
   replayed_from_message_id: string | null
+  derived_from_message_id: string | null
   kind: string
   parts_json: string
   normalized_reasoning_text: string | null
@@ -57,6 +58,12 @@ export function encodeMessageRow(record: MessageRecord): MessageRow {
       record.metadata &&
       'replayedFromMessageId' in record.metadata
         ? record.metadata.replayedFromMessageId
+        : null,
+    derived_from_message_id:
+      record.kind === 'user_input' &&
+      record.metadata &&
+      'derivedFromMessageId' in record.metadata
+        ? record.metadata.derivedFromMessageId
         : null,
     kind: record.kind,
     parts_json: encodeJsonColumn(record.parts, 'messages.parts_json'),
@@ -91,6 +98,10 @@ export function decodeMessageRow(row: Record<string, unknown>): MessageRecord {
   const replayedFromMessageId = nullableStringColumn(
     row.replayed_from_message_id,
     'messages.replayed_from_message_id',
+  )
+  const derivedFromMessageId = nullableStringColumn(
+    row.derived_from_message_id,
+    'messages.derived_from_message_id',
   )
   const normalizedReasoningText = nullableStringColumn(
     row.normalized_reasoning_text,
@@ -139,6 +150,18 @@ export function decodeMessageRow(row: Record<string, unknown>): MessageRecord {
     throw new PersistenceError(
       'CODEC_INVALID',
       'Replayed user message source does not match metadata',
+    )
+  }
+  const metadataDerivationSource =
+    record.kind === 'user_input' &&
+    record.metadata &&
+    'derivedFromMessageId' in record.metadata
+      ? record.metadata.derivedFromMessageId
+      : null
+  if (metadataDerivationSource !== derivedFromMessageId) {
+    throw new PersistenceError(
+      'CODEC_INVALID',
+      'Derived user message source does not match metadata',
     )
   }
   return record

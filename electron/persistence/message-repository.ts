@@ -2,6 +2,7 @@ import { MAX_MESSAGE_PAGE_RECORDS } from '../../shared/durable'
 import type { MessageId, SessionId } from '../../shared/ids'
 import {
   assertMessagePageSemantics,
+  isControlCommandUserInput,
   type MessagePage,
   type MessageRecord,
 } from '../../shared/message'
@@ -14,7 +15,7 @@ import { PersistenceError } from './persistence-error'
 
 const MESSAGE_COLUMNS = `
   schema_version, id, session_id, seq, client_request_id,
-  replayed_from_message_id, kind, parts_json,
+  replayed_from_message_id, derived_from_message_id, kind, parts_json,
   normalized_reasoning_text, provider_continuation_json, model_route_json,
   metadata_json, in_history, created_at
 `
@@ -207,11 +208,13 @@ export class MessageRepository {
       .map(decodeMessageRow)
 
     return candidates
-      .filter((record) =>
-        record.parts.some(
-          (part) =>
-            part.type === 'text' && part.text.toLowerCase().includes(needle),
-        ),
+      .filter(
+        (record) =>
+          !isControlCommandUserInput(record) &&
+          record.parts.some(
+            (part) =>
+              part.type === 'text' && part.text.toLowerCase().includes(needle),
+          ),
       )
       .slice(0, limit)
   }
@@ -241,10 +244,10 @@ function insertMessageRow(
     .prepare(
       `INSERT INTO messages (
          schema_version, id, session_id, seq, client_request_id,
-         replayed_from_message_id, kind,
+         replayed_from_message_id, derived_from_message_id, kind,
          parts_json, normalized_reasoning_text, provider_continuation_json,
          model_route_json, metadata_json, in_history, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       row.schema_version,
@@ -253,6 +256,7 @@ function insertMessageRow(
       row.seq,
       row.client_request_id,
       row.replayed_from_message_id,
+      row.derived_from_message_id,
       row.kind,
       row.parts_json,
       row.normalized_reasoning_text,

@@ -119,22 +119,29 @@ export function appendUserInput(
     content: string
     clientRequestId?: string
     replayedFromMessageId?: MessageId
+    derivedFromMessageId?: MessageId
     requestHash?: string
+    submission?: 'message' | { controlCommand: string }
+    inHistory?: boolean
   },
 ): Extract<MessageRecord, { kind: 'user_input' }> {
   if (!input.content.trim()) {
     throw new TypeError('Canonical user input must not be empty')
   }
-  if (
-    (input.clientRequestId === undefined) ===
-    (input.replayedFromMessageId === undefined)
-  ) {
+  const identityCount = [
+    input.clientRequestId,
+    input.replayedFromMessageId,
+    input.derivedFromMessageId,
+  ].filter((value) => value !== undefined).length
+  if (identityCount !== 1) {
     throw new TypeError(
-      'User input must have exactly one client request or replay source',
+      'User input must have exactly one client request, replay source, or derivation source',
     )
   }
+  const identity = nextIdentity(state)
   const record = {
-    ...nextIdentity(state),
+    ...identity,
+    inHistory: input.inHistory ?? identity.inHistory,
     kind: 'user_input' as const,
     ...(input.clientRequestId
       ? { clientRequestId: input.clientRequestId }
@@ -145,13 +152,44 @@ export function appendUserInput(
           schemaVersion: 1 as const,
           replayedFromMessageId: input.replayedFromMessageId,
         }
-      : {
-          schemaVersion: 1 as const,
-          ...(input.requestHash ? { requestHash: input.requestHash } : {}),
-        },
+      : input.derivedFromMessageId
+        ? {
+            schemaVersion: 1 as const,
+            derivedFromMessageId: input.derivedFromMessageId,
+            derivation: 'control_command_payload' as const,
+          }
+        : {
+            schemaVersion: 1 as const,
+            ...(input.requestHash ? { requestHash: input.requestHash } : {}),
+            submission:
+              typeof input.submission === 'object'
+                ? {
+                    type: 'control_command' as const,
+                    command: input.submission.controlCommand,
+                  }
+                : { type: 'message' as const },
+          },
   } as Extract<MessageRecord, { kind: 'user_input' }>
   state.history.push(record)
   return record
+}
+
+export function appendControlCommand(
+  state: CanonicalHistoryState,
+  input: {
+    content: string
+    clientRequestId: string
+    requestHash: string
+    command: string
+  },
+): Extract<MessageRecord, { kind: 'user_input' }> {
+  return appendUserInput(state, {
+    content: input.content,
+    clientRequestId: input.clientRequestId,
+    requestHash: input.requestHash,
+    submission: { controlCommand: input.command },
+    inHistory: false,
+  })
 }
 
 export function appendAssistantTurn(
