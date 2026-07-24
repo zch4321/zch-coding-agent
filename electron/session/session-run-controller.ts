@@ -290,6 +290,7 @@ export class SessionRunController {
         session.modelSelection,
       )
       const maxStepsPerRun = runConfig.limits.maxStepsPerRun
+      let runInputCommitted = false
       if (harnessMessage) {
         const content =
           harnessMessage.kind === 'benchmark_feedback'
@@ -336,13 +337,31 @@ export class SessionRunController {
             await this.#finishRun(session, run, 'completed')
             return
           }
+          runInputCommitted = true
         } else {
-          const prepared = await this.#userTurns.prepare(
-            session,
-            run,
-            userMessage,
-            context,
-          )
+          const previousHistory = structuredClone(session.history)
+          const previousNextSeq = session.nextMessageSeq
+          const previousGoal = session.goal
+            ? structuredClone(session.goal)
+            : undefined
+          const previousPlan = session.plan
+            ? structuredClone(session.plan)
+            : undefined
+          let prepared
+          try {
+            prepared = await this.#userTurns.prepare(
+              session,
+              run,
+              userMessage,
+              context,
+            )
+          } catch (error) {
+            session.history = previousHistory
+            session.nextMessageSeq = previousNextSeq
+            session.goal = previousGoal
+            session.plan = previousPlan
+            throw error
+          }
           for (const appMessage of prepared.appMessages) {
             const appRecord = appendPromptLayer(session, {
               kind: appMessage.kind,
@@ -393,7 +412,9 @@ export class SessionRunController {
           })
         }
       }
-      await this.#executionState?.commit(session, { reason: 'run_input' })
+      if (!runInputCommitted) {
+        await this.#executionState?.commit(session, { reason: 'run_input' })
+      }
       run.autoCompactEligible = true
       await session.logger.write({
         type: 'run.start',

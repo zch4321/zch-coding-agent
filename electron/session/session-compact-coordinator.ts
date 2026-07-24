@@ -1,5 +1,5 @@
 import type { RunStatus } from '../../shared/agent-events'
-import type { CallId } from '../../shared/ids'
+import type { CallId, MessageId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { CanonicalPromptKind } from '../../shared/message'
 import type { GoalState, PlanState } from '../../shared/orchestration'
@@ -31,6 +31,7 @@ import {
 } from './prompt-harness'
 import {
   appendCompactSummary,
+  appendControlCommand,
   appendPromptMessage,
   appendUserInput,
   canonicalHash,
@@ -181,40 +182,71 @@ export class SessionCompactCoordinator {
   ): Promise<boolean> {
     const history = new MessageHistoryCompiler().compile(session.history)
     const prompt = this.#orchestratorMessages.prompt('compact')
-    await this.#orchestratorMessages.emit(session, run, {
-      kind: 'compact',
-      text: prompt.text,
-      resource: prompt.resource,
-      injectIntoHistory: false,
-    })
+    const beforeCommandHistory = structuredClone(session.history)
+    const beforeCommandNextSeq = session.nextMessageSeq
+    let commandRecord:
+      | Extract<SessionState['history'][number], { kind: 'user_input' }>
+      | undefined
     const summary = await this.#createCompactSummary(
       session,
       run,
       prompt.text,
       history.messages,
       true,
+      async () => {
+        commandRecord = appendControlCommand(session, {
+          content: userMessage,
+          clientRequestId: run.clientRequestId,
+          requestHash: canonicalHash(userMessage),
+          command: 'compact',
+        })
+        try {
+          await this.#executionState?.commit(session, {
+            reason: 'command_input',
+          })
+        } catch (error) {
+          session.history = beforeCommandHistory
+          session.nextMessageSeq = beforeCommandNextSeq
+          throw error
+        }
+        await this.#orchestratorMessages.emit(session, run, {
+          kind: 'compact',
+          text: prompt.text,
+          resource: prompt.resource,
+          injectIntoHistory: false,
+        })
+      },
     )
+    if (!commandRecord) {
+      throw new Error('Compact command was not journaled before Provider use')
+    }
     const previousHistory = structuredClone(session.history)
     const previousNextSeq = session.nextMessageSeq
     const previousRootUserMessageId = run.rootUserMessageId
     try {
-      await this.#rewrite(session, run, {
+      const followUp = compactFollowUp(userMessage)
+      const derivedUserMessageId = await this.#rewrite(session, run, {
         summary,
         sourceHash: history.sourceHash,
         replacesThroughSeq: history.messages.at(-1)!.seq,
         resource: prompt.resource,
         replayRootUser: false,
         commit: false,
+        ...(followUp
+          ? {
+              derivedPayload: {
+                content: followUp,
+                sourceMessageId: commandRecord.id,
+              },
+            }
+          : {}),
       })
 
-      const followUp = compactFollowUp(userMessage)
       if (followUp) {
-        const user = appendUserInput(session, {
-          content: followUp,
-          clientRequestId: run.clientRequestId,
-          requestHash: canonicalHash(userMessage),
-        })
-        run.rootUserMessageId = user.id
+        if (!derivedUserMessageId) {
+          throw new Error('Compact follow-up payload was not rebuilt')
+        }
+        run.rootUserMessageId = derivedUserMessageId
         await session.logger.write({
           type: 'user.message',
           sessionId: session.sessionId,
@@ -258,6 +290,7 @@ export class SessionCompactCoordinator {
     promptText: string,
     sourceMessages: readonly SessionState['history'][number][],
     emitText: boolean,
+    beforeProvider?: () => Promise<void>,
   ): Promise<string> {
     const binding = run.routes?.compression
     if (!binding) throw new Error('Compression route was not resolved')
@@ -289,6 +322,7 @@ export class SessionCompactCoordinator {
         'The full active history is too large for the compression route',
       )
     }
+    await beforeProvider?.()
     const provider =
       this.#providerFactory?.({ config, apiKey: binding.apiKey }) ??
       createConfiguredProvider(
@@ -414,8 +448,12 @@ export class SessionCompactCoordinator {
       resource?: ReturnType<SessionOrchestratorMessages['prompt']>['resource']
       replayRootUser: boolean
       commit: boolean
+      derivedPayload?: {
+        content: string
+        sourceMessageId: MessageId
+      }
     },
-  ): Promise<void> {
+  ): Promise<MessageId | undefined> {
     const previousHistory = structuredClone(session.history)
     const previousNextSeq = session.nextMessageSeq
     const root = run.rootUserMessageId
@@ -486,6 +524,12 @@ export class SessionCompactCoordinator {
         sourceHash: input.sourceHash,
         resource: input.resource,
       })
+      const derivedUser = input.derivedPayload
+        ? appendUserInput(session, {
+            content: input.derivedPayload.content,
+            derivedFromMessageId: input.derivedPayload.sourceMessageId,
+          })
+        : undefined
 
       const binding = run.routes?.main
       if (!binding) throw new Error('Run main route was not resolved')
@@ -510,6 +554,7 @@ export class SessionCompactCoordinator {
           invalidate: true,
         })
       }
+      return derivedUser?.id
     } catch (error) {
       session.history = previousHistory
       session.nextMessageSeq = previousNextSeq

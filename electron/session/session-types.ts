@@ -81,6 +81,7 @@ export interface SessionManagerOptions {
 export interface SessionExecutionCommit {
   reason:
     | 'run_input'
+    | 'command_input'
     | 'interjection'
     | 'assistant_turn'
     | 'tool_batch'

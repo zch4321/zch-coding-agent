@@ -158,6 +158,37 @@ class BlockingProvider implements LLMProvider {
   }
 }
 
+class EmptyCompactProvider implements LLMProvider {
+  calls = 0
+
+  async *streamChat(
+    request: ProviderChatRequest,
+  ): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    if (request.tools.length === 0) {
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'empty-compact' },
+        turn: { role: 'assistant', content: null },
+        toolCalls: [],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'normal-before-compact' },
+      turn: { role: 'assistant', content: 'History is durable' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
 const cleanup: Array<() => Promise<void>> = []
 
 afterEach(async () => {
@@ -445,7 +476,7 @@ describe('P4 isolated durable target runtime', () => {
     await target.dispose()
   })
 
-  it('commits manual compact rebuild and follow-up as one durable epoch', async () => {
+  it('journals manual compact before Provider and rebuilds a derived follow-up epoch', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'zch-p4-runtime-'))
     cleanup.push(() => rm(root, { recursive: true, force: true }))
     const workspace = path.join(root, 'workspace')
@@ -492,21 +523,32 @@ describe('P4 isolated durable target runtime', () => {
       outcome: 'started',
       commit: {
         change: {
-          messageChange: { mode: 'invalidate' },
+          messageChange: {
+            mode: 'upsert',
+            records: [
+              {
+                kind: 'user_input',
+                clientRequestId: 'request:compact-follow-up',
+                inHistory: false,
+                parts: [{ type: 'text', text: '/compact focus on risks' }],
+                metadata: {
+                  submission: {
+                    type: 'control_command',
+                    command: 'compact',
+                  },
+                },
+              },
+            ],
+          },
         },
       },
     })
     if (compact.outcome !== 'started') throw new Error('Run did not start')
-    const activeAtCommit = await target.sessions.listActiveHistory(sessionId)
-    expect(activeAtCommit.at(-2)?.kind).toBe('compact_summary')
-    expect(activeAtCommit.at(-1)).toMatchObject({
-      kind: 'user_input',
-      clientRequestId: 'request:compact-follow-up',
-      parts: [{ type: 'text', text: 'focus on risks' }],
-    })
-    expect(JSON.stringify(activeAtCommit)).not.toContain(
-      'history that must be replaced',
-    )
+    const commandRecord =
+      compact.commit.change.messageChange.mode === 'upsert'
+        ? compact.commit.change.messageChange.records[0]
+        : undefined
+    expect(commandRecord?.kind).toBe('user_input')
 
     await target.runtime.services.sessions.waitForRunSettled(
       sessionId,
@@ -517,6 +559,152 @@ describe('P4 isolated durable target runtime', () => {
     expect(
       reopened.filter((message) => message.kind === 'compact_summary'),
     ).toHaveLength(1)
+    const derived = reopened.find(
+      (message) =>
+        message.kind === 'user_input' &&
+        message.metadata &&
+        'derivedFromMessageId' in message.metadata,
+    )
+    expect(derived).toMatchObject({
+      kind: 'user_input',
+      parts: [{ type: 'text', text: 'focus on risks' }],
+      metadata: {
+        derivedFromMessageId: commandRecord?.id,
+        derivation: 'control_command_payload',
+      },
+    })
+    expect(derived && 'clientRequestId' in derived).toBe(false)
+    expect(JSON.stringify(reopened)).not.toContain('/compact focus on risks')
+    expect(JSON.stringify(reopened)).not.toContain(
+      'history that must be replaced',
+    )
+
+    const audit = await target.sessions.get(sessionId)
+    expect(audit.messagePage.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: commandRecord?.id,
+          inHistory: false,
+          parts: [{ type: 'text', text: '/compact focus on risks' }],
+        }),
+      ]),
+    )
+    expect(
+      await target.sessions.searchMessages(sessionId, {
+        text: '/compact',
+      }),
+    ).toEqual([])
+    expect(JSON.stringify(provider.requests)).not.toContain(
+      '/compact focus on risks',
+    )
     await target.dispose()
+  })
+
+  it('retains a failed compact command and deduplicates it after restart', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'zch-p4-runtime-'))
+    cleanup.push(() => rm(root, { recursive: true, force: true }))
+    const workspace = path.join(root, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(root)
+    const provider = new EmptyCompactProvider()
+    const firstTarget = await createDurableTargetRuntime({
+      configStore: store,
+      promptDirectory: path.resolve('resources', 'prompts'),
+      targetDirectory: path.join(root, 'target'),
+      providerFactory: () => provider,
+    })
+    const project = (await firstTarget.projects.add({ path: workspace })).commit
+      .change.projects[0]!
+    const sessionId = 'session:failed-compact' as SessionId
+    const first = await firstTarget.runs.start({
+      version: 1,
+      kind: 'new_session',
+      sessionId,
+      projectId: project.id,
+      permissionMode: 'readonly',
+      modelSelection: {
+        providerId: store.getPublicConfig().activeProviderId,
+        model: store.getPublicConfig().providers[0]!.model,
+        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+      },
+      message: 'history survives compact failure',
+      clientRequestId: 'request:failed-compact-history',
+    })
+    if (first.outcome !== 'started') throw new Error('Run did not start')
+    await firstTarget.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      first.runId,
+    )
+
+    const commandPayload = {
+      version: 1 as const,
+      kind: 'existing_session' as const,
+      sessionId,
+      message: '/compact',
+      clientRequestId: 'request:failed-compact',
+    }
+    const compact = await firstTarget.runs.start(commandPayload)
+    expect(compact).toMatchObject({
+      outcome: 'started',
+      commit: {
+        change: {
+          messageChange: {
+            mode: 'upsert',
+            records: [
+              {
+                inHistory: false,
+                metadata: {
+                  submission: {
+                    type: 'control_command',
+                    command: 'compact',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    })
+    if (compact.outcome !== 'started') throw new Error('Run did not start')
+    await firstTarget.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      compact.runId,
+    )
+
+    const active = await firstTarget.sessions.listActiveHistory(sessionId)
+    expect(JSON.stringify(active)).toContain('history survives compact failure')
+    expect(active.some((record) => record.kind === 'compact_summary')).toBe(
+      false,
+    )
+    const audit = await firstTarget.sessions.get(sessionId)
+    expect(audit.messagePage.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          clientRequestId: 'request:failed-compact',
+          inHistory: false,
+          parts: [{ type: 'text', text: '/compact' }],
+        }),
+      ]),
+    )
+    expect(await firstTarget.runs.start(commandPayload)).toEqual(compact)
+    expect(provider.calls).toBe(2)
+    await firstTarget.dispose()
+
+    const afterRestartProvider = new OrderedProvider([])
+    const secondTarget = await createDurableTargetRuntime({
+      configStore: store,
+      promptDirectory: path.resolve('resources', 'prompts'),
+      targetDirectory: path.join(root, 'target'),
+      providerFactory: () => afterRestartProvider,
+    })
+    expect(await secondTarget.runs.start(commandPayload)).toMatchObject({
+      outcome: 'deduplicated',
+      userMessage: {
+        clientRequestId: 'request:failed-compact',
+        inHistory: false,
+      },
+    })
+    expect(afterRestartProvider.calls).toBe(0)
+    await secondTarget.dispose()
   })
 })

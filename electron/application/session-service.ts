@@ -589,11 +589,11 @@ function assertAppendBatch(
     if (
       record.sessionId !== current.id ||
       record.seq !== expectedSeq ||
-      !record.inHistory
+      (!record.inHistory && !isControlCommandUserInput(record))
     ) {
       throw new ApplicationError(
         'PRECONDITION_FAILED',
-        'Message append batch must be contiguous and active',
+        'Message append batch must be contiguous and Provider-active unless it is a control command',
       )
     }
     expectedSeq += 1
