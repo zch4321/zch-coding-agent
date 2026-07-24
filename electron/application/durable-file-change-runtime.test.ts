@@ -140,6 +140,37 @@ describe('P5 durable file tool execution', () => {
     expect(legacy.records).toEqual([])
     expect(JSON.stringify(page)).not.toContain('beforeContent')
     expect(JSON.stringify(messages)).not.toContain('beforeContent')
+
+    await setup.target.dispose()
+    const reopened = await createDurableTargetRuntime({
+      configStore: setup.store,
+      promptDirectory: path.resolve('resources', 'prompts'),
+      targetDirectory: setup.targetDirectory,
+      providerFactory: () => setup.provider,
+    })
+    try {
+      const durablePage = await reopened.fileChanges.list(sessionId)
+      const durableChange = durablePage.records[0]!
+      const reverted = await reopened.fileChanges.revert(
+        sessionId,
+        durableChange.id,
+        durableChange.revision,
+      )
+      expect(reverted.commit.change).toMatchObject({
+        mode: 'upsert',
+        sessionId,
+        fileChange: {
+          id: durableChange.id,
+          revision: 2,
+          revertedAt: expect.any(String),
+        },
+      })
+      await expect(
+        readFile(path.join(setup.workspace, 'created.txt'), 'utf8'),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await reopened.dispose()
+    }
   })
 })
 
@@ -153,20 +184,19 @@ async function setupTarget(provider: FileMutationProvider): Promise<{
   projectId: Parameters<DurableTargetRuntime['projects']['get']>[0]
 }> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'zch-p5-runtime-'))
-  let target: DurableTargetRuntime | undefined
-  cleanup.push(async () => {
-    await target?.dispose()
-    await rm(root, { recursive: true, force: true })
-  })
   const workspace = path.join(root, 'workspace')
   const targetDirectory = path.join(root, 'target')
   await mkdir(workspace)
   const store = await createConfig(root)
-  target = await createDurableTargetRuntime({
+  const target = await createDurableTargetRuntime({
     configStore: store,
     promptDirectory: path.resolve('resources', 'prompts'),
     targetDirectory,
     providerFactory: () => provider,
+  })
+  cleanup.push(async () => {
+    await target.dispose()
+    await rm(root, { recursive: true, force: true })
   })
   const projectId = (await target.projects.add({ path: workspace })).commit
     .change.projects[0]!.id

@@ -176,6 +176,16 @@ export async function createDurableTargetRuntime(
         targetState.runs?.evictRequestCacheForSession(sessionId),
       onDiagnostic: options.onDiagnostic,
     })
+    fileChanges.setRuntimeGuard({
+      reserveSessionMutation: (sessionId) =>
+        liveSessions!.reserveSessionMutation(sessionId),
+      bindSessionMutationProject: (sessionId, token, projectId) =>
+        liveSessions!.bindSessionMutationProject(sessionId, token, projectId),
+      releaseSessionMutation: (sessionId, token) =>
+        liveSessions!.releaseSessionMutation(sessionId, token),
+      acquireFileChangeRevertWriter: (input) =>
+        runtime!.services.sessions.acquireFileChangeRevertWriter(input),
+    })
     executionState.setInvalidationHandler((sessionId, runId) =>
       liveSessions?.invalidate(sessionId, runId),
     )

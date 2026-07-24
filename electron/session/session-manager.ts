@@ -59,6 +59,7 @@ import {
 } from './prompt-harness'
 import {
   WorkspaceAccessCoordinator,
+  type FileChangeRevertAccessResult,
   type RunAccessLease,
   type RunAccessRejection,
   type WorkspaceWriterOwner,
@@ -464,8 +465,12 @@ export class SessionManager {
       return {
         accepted: false,
         reason: 'workspace_writer_active',
-        writerConversationId: writer.conversationId,
-        writerRunId: writer.runId,
+        ...(writer.kind === 'provider_run'
+          ? {
+              writerConversationId: writer.conversationId,
+              writerRunId: writer.runId,
+            }
+          : {}),
       }
     }
 
@@ -727,6 +732,14 @@ export class SessionManager {
     if (run?.runId === runId) await run.done
   }
 
+  acquireFileChangeRevertWriter(input: {
+    workspace: string
+    sessionId: SessionId
+    operationId: string
+  }): FileChangeRevertAccessResult {
+    return this.#workspaceAccess.acquireFileChangeRevert(input)
+  }
+
   /**
    * Queues a live user interjection for an active run.
    *
@@ -845,8 +858,13 @@ export class SessionManager {
 
     ipcFault('CONFLICT', 'Another run is modifying this workspace', {
       reason: result.rejection.reason,
-      writerConversationId: result.rejection.writer.conversationId,
-      writerRunId: result.rejection.writer.runId,
+      writerKind: result.rejection.writer.kind,
+      ...(result.rejection.writer.kind === 'provider_run'
+        ? {
+            writerConversationId: result.rejection.writer.conversationId,
+            writerRunId: result.rejection.writer.runId,
+          }
+        : { writerOperationId: result.rejection.writer.operationId }),
     })
   }
 
@@ -871,8 +889,12 @@ export class SessionManager {
         : {
             ...common,
             reason: rejection.reason,
-            writerConversationId: rejection.writer.conversationId,
-            writerRunId: rejection.writer.runId,
+            ...(rejection.writer.kind === 'provider_run'
+              ? {
+                  writerConversationId: rejection.writer.conversationId,
+                  writerRunId: rejection.writer.runId,
+                }
+              : {}),
           }
     void session.logger
       .write(event)
@@ -881,6 +903,7 @@ export class SessionManager {
       )
 
     if (rejection.reason === 'workspace_writer_active') {
+      if (rejection.writer.kind !== 'provider_run') return
       void session.logger
         .write({
           type: 'workspace.writer',
@@ -905,6 +928,7 @@ export class SessionManager {
     status: 'acquired' | 'released',
     owner: WorkspaceWriterOwner,
   ): void {
+    if (owner.kind !== 'provider_run') return
     const session =
       this.#sessions.get(owner.sessionId) ??
       this.#writerEventSessions.get(owner.runId)
@@ -940,6 +964,14 @@ export class SessionManager {
   ): WorkspaceConcurrencyContext {
     const writer = this.#workspaceAccess.writerFor(session.workspace)
     if (!writer) return { status: 'available' }
+
+    if (writer.kind === 'file_change_revert') {
+      return {
+        status: 'readonly_locked',
+        writerConversationId: writer.sessionId,
+        writerRunId: writer.operationId,
+      }
+    }
 
     if (writer.sessionId === session.sessionId) {
       return {

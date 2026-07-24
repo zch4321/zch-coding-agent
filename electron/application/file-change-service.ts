@@ -5,7 +5,7 @@ import type {
   FileChangeListCursor,
   FileChangePage,
 } from '../../shared/file-change'
-import type { FileChangeId, SessionId } from '../../shared/ids'
+import type { FileChangeId, ProjectId, SessionId } from '../../shared/ids'
 import type { ConfigStore } from '../config/store'
 import {
   toFileChangeSummary,
@@ -17,6 +17,7 @@ import {
 } from '../persistence/file-change-repository'
 import { ProjectRepository } from '../persistence/project-repository'
 import { SessionRepository } from '../persistence/session-repository'
+import type { PersistenceReader } from '../persistence/database-service'
 import type {
   FileChangeExecutionPort,
   FileChangeMutationOutcome,
@@ -31,8 +32,10 @@ import {
   assertFileContentState,
   FileChangeResourceError,
   readFileContentState,
+  restoreFileContent,
   sha256,
 } from './file-change-filesystem'
+import type { FileChangeRevertAccessResult } from '../session/workspace-access-coordinator'
 
 const FILE_CHANGE_TOOL_OPERATIONS = {
   create_file: 'write',
@@ -51,6 +54,21 @@ export interface FileChangeServiceOptions {
   onDiagnostic?: (message: string, error?: unknown) => void
 }
 
+export interface FileChangeRuntimeGuard {
+  reserveSessionMutation(sessionId: SessionId): string
+  bindSessionMutationProject(
+    sessionId: SessionId,
+    operationToken: string,
+    projectId: ProjectId,
+  ): void
+  releaseSessionMutation(sessionId: SessionId, operationToken: string): void
+  acquireFileChangeRevertWriter(input: {
+    workspace: string
+    sessionId: SessionId
+    operationId: string
+  }): FileChangeRevertAccessResult
+}
+
 export class FileChangeService implements FileChangeExecutionPort {
   readonly #coordinator: ApplicationStateCoordinator
   readonly #configStore: ConfigStore
@@ -60,6 +78,7 @@ export class FileChangeService implements FileChangeExecutionPort {
   readonly #now: () => string
   readonly #createId: () => FileChangeId
   readonly #onDiagnostic: (message: string, error?: unknown) => void
+  #runtimeGuard: FileChangeRuntimeGuard | undefined
 
   constructor(options: FileChangeServiceOptions) {
     this.#coordinator = options.coordinator
@@ -71,6 +90,13 @@ export class FileChangeService implements FileChangeExecutionPort {
     this.#createId =
       options.createId ?? (() => `file-change:${randomUUID()}` as FileChangeId)
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
+  }
+
+  setRuntimeGuard(runtimeGuard: FileChangeRuntimeGuard): void {
+    if (this.#runtimeGuard) {
+      throw new Error('FileChange runtime guard is already configured')
+    }
+    this.#runtimeGuard = runtimeGuard
   }
 
   async list(
@@ -189,7 +215,20 @@ export class FileChangeService implements FileChangeExecutionPort {
     const timestamp = this.#now()
     const stored: StoredFileChangeRecord = {
       schemaVersion: 1,
-      ...input.prepared,
+      id: input.prepared.id,
+      sessionId: input.prepared.sessionId,
+      callId: input.prepared.callId,
+      path: input.prepared.path,
+      operation: input.prepared.operation,
+      diff: input.prepared.diff,
+      diffHash: input.prepared.diffHash,
+      diffTruncated: input.prepared.diffTruncated,
+      beforeExists: input.prepared.beforeExists,
+      beforeHash: input.prepared.beforeHash,
+      beforeContent: input.prepared.beforeContent,
+      afterExists: input.prepared.afterExists,
+      afterHash: input.prepared.afterHash,
+      payloadBytes: input.prepared.payloadBytes,
       revision: 1,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -251,18 +290,196 @@ export class FileChangeService implements FileChangeExecutionPort {
     })
   }
 
-  // Implemented with writer/lifecycle ownership in the P5 revert group.
-  revert(
-    _sessionId: SessionId,
-    _fileChangeId: FileChangeId,
-    _expectedRevision: number,
+  async revert(
+    sessionId: SessionId,
+    fileChangeId: FileChangeId,
+    expectedRevision: number,
   ): Promise<FileChangeCommandResult> {
-    return Promise.reject(
-      new ApplicationError(
+    const runtimeGuard = this.#runtimeGuard
+    if (!runtimeGuard) {
+      throw new ApplicationError(
         'PRECONDITION_FAILED',
-        'File change revert is not initialized',
-      ),
-    )
+        'File change revert runtime is not initialized',
+      )
+    }
+    const operationToken = runtimeGuard.reserveSessionMutation(sessionId)
+    const operationId = `file-change-revert:${randomUUID()}`
+    let releaseWriter: (() => void) | undefined
+    try {
+      const initial = (
+        await this.#coordinator.query((reader) =>
+          this.#readRevertTarget(
+            reader,
+            sessionId,
+            fileChangeId,
+            expectedRevision,
+          ),
+        )
+      ).value
+      runtimeGuard.bindSessionMutationProject(
+        sessionId,
+        operationToken,
+        initial.projectId,
+      )
+      const writer = runtimeGuard.acquireFileChangeRevertWriter({
+        workspace: initial.workspace,
+        sessionId,
+        operationId,
+      })
+      if (!writer.acquired) {
+        throw new ApplicationError(
+          'CONFLICT',
+          'Another operation is modifying this workspace',
+          {
+            details: {
+              writerKind: writer.rejection.writer.kind,
+            },
+          },
+        )
+      }
+      releaseWriter = writer.release
+
+      const target = (
+        await this.#coordinator.query((reader) =>
+          this.#readRevertTarget(
+            reader,
+            sessionId,
+            fileChangeId,
+            expectedRevision,
+          ),
+        )
+      ).value
+      try {
+        await restoreFileContent({
+          workspace: target.workspace,
+          path: target.record.path,
+          beforeExists: target.record.beforeExists,
+          beforeContent: target.record.beforeContent,
+          afterExists: target.record.afterExists,
+          afterHash: target.record.afterHash,
+        })
+      } catch (error) {
+        if (error instanceof FileChangeResourceError) {
+          throw new ApplicationError('RESOURCE_CHANGED', error.message, {
+            cause: error,
+          })
+        }
+        throw new ApplicationError(
+          'PRECONDITION_FAILED',
+          'The file change could not be reverted',
+          { cause: error },
+        )
+      }
+      try {
+        const timestamp = this.#now()
+        return await this.#coordinator.command(
+          'file-change.changed',
+          (transaction) => {
+            const current = this.#readRevertTarget(
+              transaction,
+              sessionId,
+              fileChangeId,
+              expectedRevision,
+            ).record
+            const reverted: StoredFileChangeRecord = {
+              ...current,
+              revision: current.revision + 1,
+              revertedAt: timestamp,
+              updatedAt: timestamp,
+            }
+            if (
+              !this.#fileChanges.markReverted(
+                transaction,
+                {
+                  sessionId,
+                  id: fileChangeId,
+                  revision: reverted.revision,
+                  revertedAt: timestamp,
+                  updatedAt: timestamp,
+                },
+                expectedRevision,
+              )
+            ) {
+              throw new ApplicationError(
+                'CONFLICT',
+                'FileChange revision changed before revert commit',
+              )
+            }
+            return {
+              mode: 'upsert',
+              sessionId,
+              fileChange: toFileChangeSummary(reverted),
+            }
+          },
+        )
+      } catch (error) {
+        this.#onDiagnostic(
+          'File was reverted but durable FileChange state was not saved',
+          error,
+        )
+        throw new ApplicationError(
+          'PERSISTENCE_FAILURE',
+          'The file was reverted but its durable state was not saved',
+          {
+            details: {
+              mutationSucceeded: true,
+              warningCode: 'FILE_CHANGE_REVERT_STATE_PERSIST_FAILED',
+              fileChangeId,
+            },
+            cause: error,
+          },
+        )
+      }
+    } finally {
+      releaseWriter?.()
+      runtimeGuard.releaseSessionMutation(sessionId, operationToken)
+    }
+  }
+
+  #readRevertTarget(
+    reader: PersistenceReader,
+    sessionId: SessionId,
+    fileChangeId: FileChangeId,
+    expectedRevision: number,
+  ): {
+    projectId: ProjectId
+    workspace: string
+    record: StoredFileChangeRecord
+  } {
+    const session = this.#sessions.get(reader, sessionId)
+    if (!session) {
+      throw new ApplicationError('NOT_FOUND', 'Session was not found')
+    }
+    if (session.lifecycle !== 'active') {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Archived Session cannot revert file changes',
+      )
+    }
+    const project = this.#projects.get(reader, session.projectId)
+    if (!project) {
+      throw new ApplicationError('NOT_FOUND', 'Project was not found')
+    }
+    const record = this.#fileChanges.getStored(reader, sessionId, fileChangeId)
+    if (!record) {
+      throw new ApplicationError('NOT_FOUND', 'FileChange was not found')
+    }
+    if (record.revertedAt) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'FileChange was already reverted',
+      )
+    }
+    if (record.revision !== expectedRevision) {
+      throw new ApplicationError('CONFLICT', 'FileChange revision changed', {
+        details: { currentRevision: record.revision },
+      })
+    }
+    return {
+      projectId: project.id,
+      workspace: project.path,
+      record,
+    }
   }
 }
 

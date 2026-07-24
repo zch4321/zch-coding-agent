@@ -12,6 +12,7 @@ type LifecyclePhase =
   | 'reserved'
   | 'loading'
   | 'live'
+  | 'mutating'
   | 'releasing'
   | 'evicting'
   | 'invalid'
@@ -146,8 +147,14 @@ export class LiveSessionContextRegistry
       throw new ApplicationError('CONFLICT', 'Project lifecycle is evicting')
     }
     for (const [sessionId, entry] of this.#entries) {
-      if (entry.phase === 'loading' && entry.projectId === undefined) {
-        throw new ApplicationError('CONFLICT', 'A Session lifecycle is loading')
+      if (
+        (entry.phase === 'loading' || entry.phase === 'mutating') &&
+        entry.projectId === undefined
+      ) {
+        throw new ApplicationError(
+          'CONFLICT',
+          `A Session lifecycle is ${entry.phase}`,
+        )
       }
       if (entry.projectId !== projectId) continue
       if (entry.phase !== 'live') {
@@ -158,6 +165,64 @@ export class LiveSessionContextRegistry
       }
       this.#assertManagerSessionIdle(sessionId)
     }
+  }
+
+  reserveSessionMutation(sessionId: SessionId): string {
+    const entry = this.#entries.get(sessionId)
+    if (entry && entry.phase !== 'live') {
+      throw new ApplicationError(
+        'CONFLICT',
+        `Session lifecycle is ${entry.phase}`,
+      )
+    }
+    this.#assertManagerSessionMutationIdle(sessionId)
+    const operationToken = randomUUID()
+    if (entry) {
+      entry.phase = 'mutating'
+      entry.operationToken = operationToken
+    } else {
+      this.#entries.set(sessionId, {
+        phase: 'mutating',
+        ownerToken: randomUUID(),
+        operationToken,
+      })
+    }
+    return operationToken
+  }
+
+  bindSessionMutationProject(
+    sessionId: SessionId,
+    operationToken: string,
+    projectId: ProjectId,
+  ): void {
+    const entry = this.#entries.get(sessionId)
+    if (
+      !entry ||
+      entry.phase !== 'mutating' ||
+      entry.operationToken !== operationToken ||
+      (entry.projectId !== undefined && entry.projectId !== projectId) ||
+      this.#projectEvictions.has(projectId)
+    ) {
+      throw new ApplicationError(
+        'CONFLICT',
+        'Session mutation lifecycle ownership changed',
+      )
+    }
+    entry.projectId = projectId
+  }
+
+  releaseSessionMutation(sessionId: SessionId, operationToken: string): void {
+    const entry = this.#entries.get(sessionId)
+    if (
+      !entry ||
+      entry.phase !== 'mutating' ||
+      entry.operationToken !== operationToken
+    ) {
+      return
+    }
+    delete entry.operationToken
+    if (this.#manager.hasLiveSession(sessionId)) entry.phase = 'live'
+    else this.#entries.delete(sessionId)
   }
 
   reserveSessionEviction(sessionId: SessionId): string {
@@ -413,6 +478,13 @@ export class LiveSessionContextRegistry
   }
 
   #assertManagerSessionIdle(sessionId: SessionId): void {
+    this.#assertManagerSessionMutationIdle(sessionId)
+    if (this.#manager.hasOpenTerminals(sessionId)) {
+      throw new ApplicationError('CONFLICT', 'Session has an open terminal')
+    }
+  }
+
+  #assertManagerSessionMutationIdle(sessionId: SessionId): void {
     if (this.#manager.hasActiveRun(sessionId)) {
       throw new ApplicationError('CONFLICT', 'Session has an active Run')
     }
@@ -421,9 +493,6 @@ export class LiveSessionContextRegistry
         'CONFLICT',
         'Session has an unfinished side effect',
       )
-    }
-    if (this.#manager.hasOpenTerminals(sessionId)) {
-      throw new ApplicationError('CONFLICT', 'Session has an open terminal')
     }
   }
 

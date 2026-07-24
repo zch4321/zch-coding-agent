@@ -110,4 +110,62 @@ describe('WorkspaceAccessCoordinator', () => {
     lease.lease.releaseWriter()
     expect(coordinator.writerFor('/workspace')).toBeUndefined()
   })
+
+  it('shares writer exclusion with revert without consuming a run slot', () => {
+    const coordinator = new WorkspaceAccessCoordinator()
+    const revert = coordinator.acquireFileChangeRevert({
+      workspace: '/workspace',
+      sessionId: 'session:revert' as SessionId,
+      operationId: 'revert:1',
+    })
+    expect(revert).toMatchObject({ acquired: true })
+    expect(coordinator.activeRunCount()).toBe(0)
+    expect(coordinator.writerFor('/workspace')).toEqual({
+      kind: 'file_change_revert',
+      workspace: '/workspace',
+      sessionId: 'session:revert',
+      operationId: 'revert:1',
+    })
+    expect(coordinator.acquire(owner(1))).toMatchObject({
+      acquired: false,
+      rejection: {
+        reason: 'workspace_writer_active',
+        writer: { kind: 'file_change_revert', operationId: 'revert:1' },
+      },
+    })
+    expect(
+      coordinator.acquire({
+        ...owner(2),
+        mode: 'readonly',
+      }).acquired,
+    ).toBe(true)
+    expect(coordinator.acquire(owner(3, '/workspace/other')).acquired).toBe(
+      true,
+    )
+
+    if (revert.acquired) {
+      revert.release()
+      revert.release()
+    }
+    expect(coordinator.writerFor('/workspace')).toBeUndefined()
+  })
+
+  it('rejects revert while a provider writer owns the workspace', () => {
+    const coordinator = new WorkspaceAccessCoordinator()
+    const run = coordinator.acquire(owner(1))
+    expect(run.acquired).toBe(true)
+    expect(
+      coordinator.acquireFileChangeRevert({
+        workspace: '/workspace',
+        sessionId: 'session:revert' as SessionId,
+        operationId: 'revert:2',
+      }),
+    ).toMatchObject({
+      acquired: false,
+      rejection: {
+        reason: 'workspace_writer_active',
+        writer: { kind: 'provider_run', runId: 'run:1' },
+      },
+    })
+  })
 })
