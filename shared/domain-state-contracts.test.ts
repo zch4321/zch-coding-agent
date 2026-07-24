@@ -19,6 +19,7 @@ import { MAX_MESSAGE_PAGE_RECORDS } from './durable'
 import {
   assertFileChangeSummarySemantics,
   EMPTY_FILE_SHA256,
+  FileChangePageSchema,
   FileChangeSummarySchema,
   type FileChangeSummary,
 } from './file-change'
@@ -639,8 +640,20 @@ describe('bounded domain-state API contracts', () => {
       messageChange: { mode: 'upsert', records: messages.slice(0, 3) },
     })
     roundTrip(FileChangeCommittedChangeSchema, {
+      mode: 'upsert',
       sessionId,
-      fileChanges: [fileChange],
+      fileChange,
+    })
+    roundTrip(FileChangeCommittedChangeSchema, { mode: 'invalidate_all' })
+    roundTrip(FileChangePageSchema, {
+      schemaVersion: 1,
+      sessionId,
+      records: [fileChange],
+      hasMore: true,
+      nextBefore: {
+        createdAt: fileChange.createdAt,
+        fileChangeId: fileChange.id,
+      },
     })
 
     const event: DomainStateEvent = {

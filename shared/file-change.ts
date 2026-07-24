@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox'
 import {
   DateTimeSchema,
   DurableSchemaVersionSchema,
+  MAX_FILE_CHANGE_PAGE_RECORDS,
   MAX_PATH_LENGTH,
   RevisionSchema,
   Sha256Schema,
@@ -38,6 +39,66 @@ export const FileChangeSummarySchema = Type.Object(
   { additionalProperties: false },
 )
 export type FileChangeSummary = Static<typeof FileChangeSummarySchema>
+
+export const FileChangeListCursorSchema = Type.Object(
+  {
+    createdAt: DateTimeSchema,
+    fileChangeId: FileChangeIdSchema,
+  },
+  { additionalProperties: false },
+)
+export type FileChangeListCursor = Static<typeof FileChangeListCursorSchema>
+
+const fileChangePageProperties = {
+  schemaVersion: DurableSchemaVersionSchema,
+  sessionId: SessionIdSchema,
+}
+
+export const FileChangePageSchema = Type.Union([
+  Type.Object(
+    {
+      ...fileChangePageProperties,
+      records: Type.Array(FileChangeSummarySchema, {
+        minItems: 1,
+        maxItems: MAX_FILE_CHANGE_PAGE_RECORDS,
+      }),
+      hasMore: Type.Literal(true),
+      nextBefore: FileChangeListCursorSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...fileChangePageProperties,
+      records: Type.Array(FileChangeSummarySchema, {
+        maxItems: MAX_FILE_CHANGE_PAGE_RECORDS,
+      }),
+      hasMore: Type.Literal(false),
+    },
+    { additionalProperties: false },
+  ),
+])
+export type FileChangePage = Static<typeof FileChangePageSchema>
+
+export function assertFileChangePageSemantics(page: FileChangePage): void {
+  for (const record of page.records) {
+    if (record.sessionId !== page.sessionId) {
+      throw new TypeError('FileChange page contains a different Session')
+    }
+  }
+  if (page.hasMore) {
+    const last = page.records.at(-1)
+    if (
+      !last ||
+      page.nextBefore.createdAt !== last.createdAt ||
+      page.nextBefore.fileChangeId !== last.id
+    ) {
+      throw new TypeError(
+        'FileChange next cursor must identify the final page record',
+      )
+    }
+  }
+}
 
 export const EMPTY_FILE_SHA256 =
   'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'

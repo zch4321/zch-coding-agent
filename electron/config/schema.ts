@@ -145,6 +145,7 @@ export const DEFAULT_APP_CONFIG = {
     writeFileBytes: 256 * 1_024,
     patchBytes: 64 * 1_024,
     diffChars: 120_000,
+    fileChangeHistoryBytes: 100_000_000,
     approvalTimeoutMs: 10 * 60_000,
     autoApprovalTimeoutMs: 60_000,
     modelCatalogTimeoutMs: 15_000,

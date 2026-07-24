@@ -7,7 +7,7 @@ import {
   DurableSchemaVersionSchema,
   MAX_BOOTSTRAP_SESSION_RECORDS,
   MAX_COMMIT_MESSAGE_RECORDS,
-  MAX_FILE_CHANGE_RECORDS,
+  MAX_FILE_CHANGE_PAGE_RECORDS,
   MAX_MESSAGE_PAGE_RECORDS,
   MAX_PATH_LENGTH,
   MAX_PROJECT_RECORDS,
@@ -15,7 +15,11 @@ import {
   MessageSeqSchema,
   RevisionSchema,
 } from './durable'
-import { FileChangeSummarySchema } from './file-change'
+import {
+  FileChangeListCursorSchema,
+  FileChangePageSchema,
+  FileChangeSummarySchema,
+} from './file-change'
 import {
   FileChangeIdSchema,
   MessageIdSchema,
@@ -93,15 +97,20 @@ export const SessionCommittedChangeSchema = Type.Object(
 )
 export type SessionCommittedChange = Static<typeof SessionCommittedChangeSchema>
 
-export const FileChangeCommittedChangeSchema = Type.Object(
-  {
-    sessionId: SessionIdSchema,
-    fileChanges: Type.Array(FileChangeSummarySchema, {
-      maxItems: MAX_FILE_CHANGE_RECORDS,
-    }),
-  },
-  { additionalProperties: false },
-)
+export const FileChangeCommittedChangeSchema = Type.Union([
+  Type.Object(
+    {
+      mode: Type.Literal('upsert'),
+      sessionId: SessionIdSchema,
+      fileChange: FileChangeSummarySchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    { mode: Type.Literal('invalidate_all') },
+    { additionalProperties: false },
+  ),
+])
 export type FileChangeCommittedChange = Static<
   typeof FileChangeCommittedChangeSchema
 >
@@ -449,16 +458,21 @@ export const DurableRunStartResultSchema = Type.Union([
 export type DurableRunStartResult = Static<typeof DurableRunStartResultSchema>
 
 export const FileChangeListPayloadSchema = Type.Object(
-  { ...versionProperty, sessionId: SessionIdSchema },
+  {
+    ...versionProperty,
+    sessionId: SessionIdSchema,
+    before: Type.Optional(FileChangeListCursorSchema),
+    limit: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: MAX_FILE_CHANGE_PAGE_RECORDS }),
+    ),
+  },
   { additionalProperties: false },
 )
 export const FileChangeListResultSchema = Type.Object(
   {
     ...versionProperty,
     sessionId: SessionIdSchema,
-    fileChanges: Type.Array(FileChangeSummarySchema, {
-      maxItems: MAX_FILE_CHANGE_RECORDS,
-    }),
+    page: FileChangePageSchema,
   },
   { additionalProperties: false },
 )

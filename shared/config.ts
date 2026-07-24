@@ -228,6 +228,10 @@ export const PublicConfigSchema = Type.Object(
           minimum: 1_024,
           maximum: 10_000_000,
         }),
+        fileChangeHistoryBytes: Type.Integer({
+          minimum: 1_000_000,
+          maximum: 10_000_000_000,
+        }),
         approvalTimeoutMs: Type.Integer({
           minimum: 1_000,
           maximum: 86_400_000,
