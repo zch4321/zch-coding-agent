@@ -5,6 +5,7 @@ export type ApplicationErrorCode =
   | 'CONFLICT'
   | 'PRECONDITION_FAILED'
   | 'PAYLOAD_TOO_LARGE'
+  | 'RESOURCE_CHANGED'
   | 'PERSISTENCE_FAILURE'
 
 export class ApplicationError extends Error {

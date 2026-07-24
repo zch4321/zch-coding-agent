@@ -165,7 +165,17 @@ describe('persistence repositories', () => {
           ),
         ).toBe(true)
         expect(
-          fileChanges.update(transaction, { ...fileChange, revision: 2 }, 1),
+          fileChanges.markReverted(
+            transaction,
+            {
+              sessionId: fileChange.sessionId,
+              id: fileChange.id,
+              revision: 2,
+              updatedAt: '2026-07-22T00:00:01.000Z',
+              revertedAt: '2026-07-22T00:00:01.000Z',
+            },
+            1,
+          ),
         ).toBe(true)
       })
 
@@ -185,7 +195,17 @@ describe('persistence repositories', () => {
           ),
         ).toBe(false)
         expect(
-          fileChanges.update(transaction, { ...fileChange, revision: 2 }, 1),
+          fileChanges.markReverted(
+            transaction,
+            {
+              sessionId: fileChange.sessionId,
+              id: fileChange.id,
+              revision: 2,
+              updatedAt: '2026-07-22T00:00:01.000Z',
+              revertedAt: '2026-07-22T00:00:01.000Z',
+            },
+            1,
+          ),
         ).toBe(false)
       })
     } finally {

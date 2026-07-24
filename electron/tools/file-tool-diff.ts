@@ -1,11 +1,13 @@
 import { MAX_DIFF_CHARS } from './file-tool-limits'
 
+const TRUNCATED_DIFF_MARKER = '\n... diff truncated ...\n'
+
 function truncateDiff(value: string): string {
   if (value.length <= MAX_DIFF_CHARS) {
     return value
   }
 
-  return `${value.slice(0, MAX_DIFF_CHARS)}\n... diff truncated ...\n`
+  return `${value.slice(0, MAX_DIFF_CHARS)}${TRUNCATED_DIFF_MARKER}`
 }
 
 export function createFileDiff(
@@ -24,4 +26,8 @@ export function createFileDiff(
   ].join('\n')
 
   return truncateDiff(`${body}\n`)
+}
+
+export function isFileDiffTruncated(value: string): boolean {
+  return value.endsWith(TRUNCATED_DIFF_MARKER)
 }

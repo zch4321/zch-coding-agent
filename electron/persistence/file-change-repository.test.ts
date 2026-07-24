@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { CallId, FileChangeId, SessionId } from '../../shared/ids'
 import {
   assertFileChangePayloadWithinLimit,
+  DEFAULT_FILE_CHANGE_HISTORY_BYTES,
   FileChangeRepository,
-  MAX_FILE_CHANGE_PAYLOAD_BYTES,
 } from './file-change-repository'
 import { ProjectRepository } from './project-repository'
 import {
@@ -15,7 +15,7 @@ import { SessionRepository } from './session-repository'
 import { createTestDatabase } from './test-database'
 
 describe('FileChangeRepository retention', () => {
-  it('retains the newest 200 records with the production defaults', async () => {
+  it('retains more than 200 records and pages them without gaps', async () => {
     const testDatabase = await createTestDatabase()
     const repository = new FileChangeRepository()
     const project = projectFixture()
@@ -24,7 +24,7 @@ describe('FileChangeRepository retention', () => {
       await testDatabase.database.withTransaction((transaction) => {
         new ProjectRepository().insert(transaction, project)
         new SessionRepository().insert(transaction, session)
-        for (let index = 0; index < 201; index += 1) {
+        for (let index = 0; index < 205; index += 1) {
           const timestamp = new Date(
             Date.parse('2026-01-01T00:00:00.000Z') + index * 1_000,
           ).toISOString()
@@ -43,14 +43,26 @@ describe('FileChangeRepository retention', () => {
           )
         }
       })
-      const summaries = testDatabase.database.read((reader) =>
-        repository.listSummaries(reader, session.id),
+      const first = testDatabase.database.read((reader) =>
+        repository.listPage(reader, session.id, { limit: 200 }),
       )
-      expect(summaries).toHaveLength(200)
-      expect(summaries.some((record) => record.id === 'file-change:000')).toBe(
-        false,
+      expect(first.records).toHaveLength(200)
+      expect(first.hasMore).toBe(true)
+      if (!first.hasMore) throw new Error('Expected another page')
+      const second = testDatabase.database.read((reader) =>
+        repository.listPage(reader, session.id, {
+          before: first.nextBefore,
+          limit: 200,
+        }),
       )
-      expect(summaries[0]?.id).toBe('file-change:200')
+      expect(second.records).toHaveLength(5)
+      expect(second.hasMore).toBe(false)
+      const ids = [...first.records, ...second.records].map(
+        (record) => record.id,
+      )
+      expect(new Set(ids).size).toBe(205)
+      expect(ids[0]).toBe('file-change:204')
+      expect(ids.at(-1)).toBe('file-change:000')
     } finally {
       await testDatabase.dispose()
     }
@@ -59,7 +71,6 @@ describe('FileChangeRepository retention', () => {
   it('applies byte retention in the same transaction and keeps snapshots private', async () => {
     const testDatabase = await createTestDatabase()
     const repository = new FileChangeRepository({
-      maxRecords: 10,
       maxPayloadBytes: 12,
     })
     const project = projectFixture()
@@ -91,8 +102,8 @@ describe('FileChangeRepository retention', () => {
         repository.insertWithRetention(transaction, first)
         repository.insertWithRetention(transaction, second)
       })
-      const summaries = testDatabase.database.read((reader) =>
-        repository.listSummaries(reader, session.id),
+      const summaries = testDatabase.database.read(
+        (reader) => repository.listPage(reader, session.id).records,
       )
       expect(summaries).toEqual([
         expect.objectContaining({ id: second.id, path: second.path }),
@@ -111,8 +122,7 @@ describe('FileChangeRepository retention', () => {
   it('applies the documented retention budget globally across Sessions', async () => {
     const testDatabase = await createTestDatabase()
     const repository = new FileChangeRepository({
-      maxRecords: 1,
-      maxPayloadBytes: 100,
+      maxPayloadBytes: 3,
     })
     const project = projectFixture()
     const firstSession = sessionFixture({ lastSeq: 0 })
@@ -155,13 +165,13 @@ describe('FileChangeRepository retention', () => {
       })
 
       expect(
-        testDatabase.database.read((reader) =>
-          repository.listSummaries(reader, firstSession.id),
+        testDatabase.database.read(
+          (reader) => repository.listPage(reader, firstSession.id).records,
         ),
       ).toEqual([])
       expect(
-        testDatabase.database.read((reader) =>
-          repository.listSummaries(reader, secondSession.id),
+        testDatabase.database.read(
+          (reader) => repository.listPage(reader, secondSession.id).records,
         ),
       ).toHaveLength(1)
     } finally {
@@ -169,10 +179,10 @@ describe('FileChangeRepository retention', () => {
     }
   })
 
-  it('rejects a single payload above the fixed 50 MB product limit', () => {
-    expect(MAX_FILE_CHANGE_PAYLOAD_BYTES).toBe(50_000_000)
+  it('rejects a single payload above the default 100 MB product limit', () => {
+    expect(DEFAULT_FILE_CHANGE_HISTORY_BYTES).toBe(100_000_000)
     expect(() =>
-      assertFileChangePayloadWithinLimit(MAX_FILE_CHANGE_PAYLOAD_BYTES + 1),
+      assertFileChangePayloadWithinLimit(DEFAULT_FILE_CHANGE_HISTORY_BYTES + 1),
     ).toThrowError(
       expect.objectContaining({ code: 'FILE_CHANGE_LIMIT_EXCEEDED' }),
     )
