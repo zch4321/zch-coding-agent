@@ -62,8 +62,23 @@ export class DurableRunApplicationService {
       }
       return existing.promise
     }
-    const request = this.#start(input).catch((error) => {
+    let ownerToken: string | undefined
+    if (input.kind === 'new_session') {
+      try {
+        ownerToken = this.#registry.reserveNew(
+          input.sessionId,
+          input.projectId,
+          input.clientRequestId,
+        )
+      } catch (error) {
+        return Promise.reject(error)
+      }
+    }
+    const request = this.#start(input, ownerToken).catch(async (error) => {
       this.#requests.delete(key)
+      if (ownerToken) {
+        await this.#registry.releaseOwned(input.sessionId, ownerToken)
+      }
       throw error
     })
     this.#requests.set(key, { requestHash, promise: request })
@@ -82,11 +97,17 @@ export class DurableRunApplicationService {
     }
   }
 
-  async #start(input: DurableRunStartPayload): Promise<DurableRunStartResult> {
+  async #start(
+    input: DurableRunStartPayload,
+    ownerToken?: string,
+  ): Promise<DurableRunStartResult> {
     if (
       input.kind === 'new_session' &&
       /^\/compact(?:\s|$)/iu.test(input.message.trimStart())
     ) {
+      if (ownerToken) {
+        await this.#registry.releaseOwned(input.sessionId, ownerToken)
+      }
       throw new ApplicationError(
         'PRECONDITION_FAILED',
         'Cannot compact a draft before its first durable message',
@@ -99,6 +120,9 @@ export class DurableRunApplicationService {
       requestHash,
     )
     if (duplicate) {
+      if (ownerToken) {
+        await this.#registry.releaseOwned(input.sessionId, ownerToken)
+      }
       return {
         version: 1,
         outcome: 'deduplicated',
@@ -111,7 +135,13 @@ export class DurableRunApplicationService {
     }
 
     if (input.kind === 'new_session') {
-      return this.#startNew(input, requestHash)
+      if (!ownerToken) {
+        throw new ApplicationError(
+          'PRECONDITION_FAILED',
+          'New Session lifecycle was not reserved',
+        )
+      }
+      return this.#startNew(input, requestHash, ownerToken)
     }
     return this.#startExisting(input)
   }
@@ -119,6 +149,7 @@ export class DurableRunApplicationService {
   async #startNew(
     input: Extract<DurableRunStartPayload, { kind: 'new_session' }>,
     requestHash: string,
+    ownerToken: string,
   ): Promise<DurableRunStartResult> {
     await this.#assertCandidateAvailable(input.sessionId)
     const project = await this.#projects.get(input.projectId)
@@ -138,7 +169,6 @@ export class DurableRunApplicationService {
       createdAt: timestamp,
       updatedAt: timestamp,
     }
-    let created = false
     try {
       await this.#manager.createSession({
         conversationId: input.sessionId,
@@ -150,9 +180,8 @@ export class DurableRunApplicationService {
         ...(input.goal ? { goal: input.goal } : {}),
         ...(input.plan ? { plan: input.plan } : {}),
       })
-      created = true
-      this.#registry.adoptNew(input.sessionId, input.projectId)
-      this.#executionState.registerNew(seed)
+      this.#executionState.registerNew(seed, ownerToken)
+      this.#registry.adoptNew(input.sessionId, input.projectId, ownerToken)
       return await this.#startLoaded(input)
     } catch (error) {
       const duplicate = await this.#sessions.lookupRequest(
@@ -161,6 +190,7 @@ export class DurableRunApplicationService {
         requestHash,
       )
       if (duplicate) {
+        await this.#registry.releaseOwned(input.sessionId, ownerToken)
         return {
           version: 1,
           outcome: 'deduplicated',
@@ -168,8 +198,7 @@ export class DurableRunApplicationService {
           userMessage: duplicate.userMessage,
         }
       }
-      if (created) await this.#manager.closeSession(input.sessionId)
-      this.#executionState.forget(input.sessionId)
+      await this.#registry.releaseOwned(input.sessionId, ownerToken)
       throw error
     }
   }

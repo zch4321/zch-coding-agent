@@ -167,6 +167,7 @@ export interface SessionState {
   eventSeq: number
   closed: boolean
   activeRun?: ActiveRun
+  mutationInProgress?: boolean
   clientRequests: Map<string, RunId>
   mcpDisclosures: Map<string, { revision: string; toolNames: Set<string> }>
 }

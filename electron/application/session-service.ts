@@ -34,7 +34,12 @@ import { ApplicationStateCoordinator } from './application-state-coordinator'
 export interface SessionRuntimeGuard {
   assertSessionIdle(sessionId: SessionId): void
   snapshot(sessionId: SessionId): ActiveRunPublicSnapshot | undefined
-  releaseSession(sessionId: SessionId): void | Promise<void>
+  reserveSessionEviction?(sessionId: SessionId): string
+  cancelSessionEviction?(sessionId: SessionId, token: string): void
+  releaseSession(
+    sessionId: SessionId,
+    operationToken?: string,
+  ): void | Promise<void>
   applySessionRecord?(record: SessionRecord): void | Promise<void>
 }
 
@@ -45,6 +50,7 @@ export interface SessionServiceOptions {
   runtimeGuard?: SessionRuntimeGuard
   now?: () => string
   createMessageId?: () => MessageId
+  onDiagnostic?: (message: string, error?: unknown) => void
 }
 
 export interface SessionMetadataPatch {
@@ -88,6 +94,7 @@ export class SessionService {
   readonly #runtimeGuard?: SessionRuntimeGuard
   readonly #now: () => string
   readonly #createMessageId: () => MessageId
+  readonly #onDiagnostic: (message: string, error?: unknown) => void
 
   constructor(options: SessionServiceOptions) {
     this.#coordinator = options.coordinator
@@ -97,6 +104,7 @@ export class SessionService {
     this.#now = options.now ?? (() => new Date().toISOString())
     this.#createMessageId =
       options.createMessageId ?? (() => `message:${randomUUID()}` as MessageId)
+    this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
   async list(
@@ -153,6 +161,39 @@ export class SessionService {
           throw new ApplicationError('NOT_FOUND', 'Session was not found')
         }
         return this.#messages.listActiveHistory(reader, sessionId)
+      })
+    ).value
+  }
+
+  async loadRuntimeState(
+    sessionId: SessionId,
+    clientRequestIds: readonly string[] = [],
+    onRecord?: (record: SessionRecord) => void,
+  ): Promise<{
+    record: SessionRecord
+    activeHistory: MessageRecord[]
+    committedClientRequestIds: string[]
+  }> {
+    return (
+      await this.#coordinator.query((reader) => {
+        const record = this.#sessions.get(reader, sessionId)
+        if (!record) {
+          throw new ApplicationError('NOT_FOUND', 'Session was not found')
+        }
+        onRecord?.(record)
+        const committedClientRequestIds = clientRequestIds.filter(
+          (clientRequestId) =>
+            this.#messages.findByClientRequestId(
+              reader,
+              sessionId,
+              clientRequestId,
+            ) !== undefined,
+        )
+        return {
+          record,
+          activeHistory: this.#messages.listActiveHistory(reader, sessionId),
+          committedClientRequestIds,
+        }
       })
     ).value
   }
@@ -345,35 +386,61 @@ export class SessionService {
     sessionId: SessionId
     expectedRevision: number
   }): Promise<SessionCommandResult> {
-    const result = await this.#coordinator.command(
-      'session.changed',
-      (transaction) => {
-        this.#runtimeGuard?.assertSessionIdle(input.sessionId)
-        const current = this.#sessions.get(transaction, input.sessionId)
-        if (!current) {
-          throw new ApplicationError('NOT_FOUND', 'Session was not found')
-        }
-        if (current.revision !== input.expectedRevision) {
-          throw revisionConflict(current)
-        }
-        if (current.lifecycle === 'archived') {
-          throw new ApplicationError('CONFLICT', 'Session is already archived')
-        }
-        const timestamp = this.#now()
-        const next: SessionRecord = {
-          ...current,
-          lifecycle: 'archived',
-          archivedAt: timestamp,
-          revision: current.revision + 1,
-          updatedAt: timestamp,
-        }
-        if (!this.#sessions.update(transaction, next, current.revision)) {
-          throw revisionConflict(current)
-        }
-        return { session: next, messageChange: { mode: 'none' as const } }
-      },
+    const operationToken = this.#runtimeGuard?.reserveSessionEviction?.(
+      input.sessionId,
     )
-    await this.#runtimeGuard?.releaseSession(input.sessionId)
+    let result: SessionCommandResult
+    try {
+      result = await this.#coordinator.command(
+        'session.changed',
+        (transaction) => {
+          if (!operationToken) {
+            this.#runtimeGuard?.assertSessionIdle(input.sessionId)
+          }
+          const current = this.#sessions.get(transaction, input.sessionId)
+          if (!current) {
+            throw new ApplicationError('NOT_FOUND', 'Session was not found')
+          }
+          if (current.revision !== input.expectedRevision) {
+            throw revisionConflict(current)
+          }
+          if (current.lifecycle === 'archived') {
+            throw new ApplicationError(
+              'CONFLICT',
+              'Session is already archived',
+            )
+          }
+          const timestamp = this.#now()
+          const next: SessionRecord = {
+            ...current,
+            lifecycle: 'archived',
+            archivedAt: timestamp,
+            revision: current.revision + 1,
+            updatedAt: timestamp,
+          }
+          if (!this.#sessions.update(transaction, next, current.revision)) {
+            throw revisionConflict(current)
+          }
+          return { session: next, messageChange: { mode: 'none' as const } }
+        },
+      )
+    } catch (error) {
+      if (operationToken) {
+        this.#runtimeGuard?.cancelSessionEviction?.(
+          input.sessionId,
+          operationToken,
+        )
+      }
+      throw error
+    }
+    try {
+      await this.#runtimeGuard?.releaseSession(input.sessionId, operationToken)
+    } catch (error) {
+      this.#onDiagnostic(
+        `Archived Session ${input.sessionId} could not release its runtime context`,
+        error,
+      )
+    }
     return result
   }
 

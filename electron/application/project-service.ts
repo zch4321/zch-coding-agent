@@ -17,7 +17,12 @@ import { ApplicationStateCoordinator } from './application-state-coordinator'
 
 export interface ProjectRuntimeGuard {
   assertProjectIdle(projectId: ProjectId): void
-  evictIdleProject?(projectId: ProjectId): void | Promise<void>
+  reserveProjectEviction?(projectId: ProjectId): string
+  cancelProjectEviction?(projectId: ProjectId, token: string): void
+  evictIdleProject?(
+    projectId: ProjectId,
+    operationToken?: string,
+  ): void | Promise<void>
 }
 
 export interface ProjectServiceOptions {
@@ -26,6 +31,7 @@ export interface ProjectServiceOptions {
   runtimeGuard?: ProjectRuntimeGuard
   now?: () => string
   createId?: () => ProjectId
+  onDiagnostic?: (message: string, error?: unknown) => void
 }
 
 type ProjectUpdatePatch = Static<typeof ProjectUpdatePayloadSchema>['patch']
@@ -36,6 +42,7 @@ export class ProjectService {
   readonly #runtimeGuard?: ProjectRuntimeGuard
   readonly #now: () => string
   readonly #createId: () => ProjectId
+  readonly #onDiagnostic: (message: string, error?: unknown) => void
 
   constructor(options: ProjectServiceOptions) {
     this.#coordinator = options.coordinator
@@ -44,6 +51,7 @@ export class ProjectService {
     this.#now = options.now ?? (() => new Date().toISOString())
     this.#createId =
       options.createId ?? (() => `project:${randomUUID()}` as ProjectId)
+    this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
   async list(): Promise<ProjectRecord[]> {
@@ -101,34 +109,61 @@ export class ProjectService {
       input.patch.path === undefined
         ? undefined
         : await canonicalWorkspacePath(input.patch.path)
-    const result = await this.#coordinator.command(
-      'project.changed',
-      (transaction) => {
-        this.#runtimeGuard?.assertProjectIdle(input.projectId)
-        const current = this.#repository.get(transaction, input.projectId)
-        if (!current) {
-          throw new ApplicationError('NOT_FOUND', 'Project was not found')
-        }
-        if (current.revision !== input.expectedRevision) {
-          throw revisionConflict('Project', current.revision)
-        }
-        const next: ProjectRecord = {
-          ...current,
-          ...(canonicalPath === undefined ? {} : { path: canonicalPath }),
-          ...(input.patch.name === undefined
-            ? {}
-            : { name: input.patch.name.trim() }),
-          revision: current.revision + 1,
-          updatedAt: this.#now(),
-        }
-        if (!this.#repository.update(transaction, next, current.revision)) {
-          throw revisionConflict('Project', current.revision)
-        }
-        return { projects: this.#repository.list(transaction) }
-      },
-    )
+    const operationToken =
+      canonicalPath === undefined
+        ? undefined
+        : this.#runtimeGuard?.reserveProjectEviction?.(input.projectId)
+    let result: ProjectCommandResult
+    try {
+      result = await this.#coordinator.command(
+        'project.changed',
+        (transaction) => {
+          if (canonicalPath !== undefined && !operationToken) {
+            this.#runtimeGuard?.assertProjectIdle(input.projectId)
+          }
+          const current = this.#repository.get(transaction, input.projectId)
+          if (!current) {
+            throw new ApplicationError('NOT_FOUND', 'Project was not found')
+          }
+          if (current.revision !== input.expectedRevision) {
+            throw revisionConflict('Project', current.revision)
+          }
+          const next: ProjectRecord = {
+            ...current,
+            ...(canonicalPath === undefined ? {} : { path: canonicalPath }),
+            ...(input.patch.name === undefined
+              ? {}
+              : { name: input.patch.name.trim() }),
+            revision: current.revision + 1,
+            updatedAt: this.#now(),
+          }
+          if (!this.#repository.update(transaction, next, current.revision)) {
+            throw revisionConflict('Project', current.revision)
+          }
+          return { projects: this.#repository.list(transaction) }
+        },
+      )
+    } catch (error) {
+      if (operationToken) {
+        this.#runtimeGuard?.cancelProjectEviction?.(
+          input.projectId,
+          operationToken,
+        )
+      }
+      throw error
+    }
     if (canonicalPath !== undefined) {
-      await this.#runtimeGuard?.evictIdleProject?.(input.projectId)
+      try {
+        await this.#runtimeGuard?.evictIdleProject?.(
+          input.projectId,
+          operationToken,
+        )
+      } catch (error) {
+        this.#onDiagnostic(
+          `Updated Project ${input.projectId} could not evict its runtime contexts`,
+          error,
+        )
+      }
     }
     return result
   }
@@ -137,24 +172,50 @@ export class ProjectService {
     projectId: ProjectId
     expectedRevision: number
   }): Promise<ProjectCommandResult> {
-    const result = await this.#coordinator.command(
-      'project.changed',
-      (transaction) => {
-        this.#runtimeGuard?.assertProjectIdle(input.projectId)
-        const current = this.#repository.get(transaction, input.projectId)
-        if (!current) {
-          throw new ApplicationError('NOT_FOUND', 'Project was not found')
-        }
-        if (current.revision !== input.expectedRevision) {
-          throw revisionConflict('Project', current.revision)
-        }
-        if (!this.#repository.delete(transaction, input.projectId)) {
-          throw revisionConflict('Project', current.revision)
-        }
-        return { projects: this.#repository.list(transaction) }
-      },
+    const operationToken = this.#runtimeGuard?.reserveProjectEviction?.(
+      input.projectId,
     )
-    await this.#runtimeGuard?.evictIdleProject?.(input.projectId)
+    let result: ProjectCommandResult
+    try {
+      result = await this.#coordinator.command(
+        'project.changed',
+        (transaction) => {
+          if (!operationToken) {
+            this.#runtimeGuard?.assertProjectIdle(input.projectId)
+          }
+          const current = this.#repository.get(transaction, input.projectId)
+          if (!current) {
+            throw new ApplicationError('NOT_FOUND', 'Project was not found')
+          }
+          if (current.revision !== input.expectedRevision) {
+            throw revisionConflict('Project', current.revision)
+          }
+          if (!this.#repository.delete(transaction, input.projectId)) {
+            throw revisionConflict('Project', current.revision)
+          }
+          return { projects: this.#repository.list(transaction) }
+        },
+      )
+    } catch (error) {
+      if (operationToken) {
+        this.#runtimeGuard?.cancelProjectEviction?.(
+          input.projectId,
+          operationToken,
+        )
+      }
+      throw error
+    }
+    try {
+      await this.#runtimeGuard?.evictIdleProject?.(
+        input.projectId,
+        operationToken,
+      )
+    } catch (error) {
+      this.#onDiagnostic(
+        `Removed Project ${input.projectId} could not evict its runtime contexts`,
+        error,
+      )
+    }
     return result
   }
 }

@@ -452,7 +452,7 @@ export class SessionManager {
       return { accepted: false }
     }
 
-    if (session.activeRun) {
+    if (session.activeRun || session.mutationInProgress) {
       return { accepted: false, reason: 'active_run' }
     }
 
@@ -469,30 +469,33 @@ export class SessionManager {
     const previousMode = session.mode
     const previousHistory = structuredClone(session.history)
     const previousNextSeq = session.nextMessageSeq
-    await session.logger.write({
-      type: 'session.mode',
-      sessionId,
-      mode,
-    })
-    session.mode = mode
-    await appendRuntimeContextIfChanged(session, {
-      workspace: session.workspace,
-      mode: session.mode,
-      config: this.#configStore.getPublicConfig(),
-      providerId: session.provider,
-      promptRegistry: this.#promptRegistry,
-      projectMetadata: this.#projectMetadata,
-      reason: 'permission_mode_changed',
-      workspaceConcurrency: this.#workspaceConcurrencyContext(session),
-      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
-    })
+    session.mutationInProgress = true
     try {
+      await session.logger.write({
+        type: 'session.mode',
+        sessionId,
+        mode,
+      })
+      session.mode = mode
+      await appendRuntimeContextIfChanged(session, {
+        workspace: session.workspace,
+        mode: session.mode,
+        config: this.#configStore.getPublicConfig(),
+        providerId: session.provider,
+        promptRegistry: this.#promptRegistry,
+        projectMetadata: this.#projectMetadata,
+        reason: 'permission_mode_changed',
+        workspaceConcurrency: this.#workspaceConcurrencyContext(session),
+        toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+      })
       await this.#executionState?.commit(session, { reason: 'metadata' })
     } catch (error) {
       session.mode = previousMode
       session.history = previousHistory
       session.nextMessageSeq = previousNextSeq
       throw error
+    } finally {
+      session.mutationInProgress = false
     }
     return { accepted: true }
   }
@@ -513,7 +516,13 @@ export class SessionManager {
   }> {
     const session = this.#sessions.get(input.sessionId)
 
-    if (!session || session.closed || session.activeRun || !session.plan) {
+    if (
+      !session ||
+      session.closed ||
+      session.activeRun ||
+      session.mutationInProgress ||
+      !session.plan
+    ) {
       return { accepted: false }
     }
 
@@ -527,27 +536,30 @@ export class SessionManager {
 
     const previousPlan = structuredClone(session.plan)
     const previousStatus = session.plan.status ?? 'active'
-    session.plan.status = input.status
-    session.plan.updatedAt = new Date().toISOString()
-
-    if (input.status === 'active' && previousStatus !== 'active') {
-      session.plan.continuationCount = 0
-      delete session.plan.warning
-    }
-
-    await session.logger.write({
-      type: 'plan.status',
-      sessionId: input.sessionId,
-      previousStatus,
-      status: input.status,
-      source: input.source ?? 'ui:plan-review',
-      plan: toJsonValue(session.plan),
-    })
+    session.mutationInProgress = true
     try {
+      session.plan.status = input.status
+      session.plan.updatedAt = new Date().toISOString()
+
+      if (input.status === 'active' && previousStatus !== 'active') {
+        session.plan.continuationCount = 0
+        delete session.plan.warning
+      }
+
+      await session.logger.write({
+        type: 'plan.status',
+        sessionId: input.sessionId,
+        previousStatus,
+        status: input.status,
+        source: input.source ?? 'ui:plan-review',
+        plan: toJsonValue(session.plan),
+      })
       await this.#executionState?.commit(session, { reason: 'metadata' })
     } catch (error) {
       session.plan = previousPlan
       throw error
+    } finally {
+      session.mutationInProgress = false
     }
 
     return { accepted: true, plan: structuredClone(session.plan) }

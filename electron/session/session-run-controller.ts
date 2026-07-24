@@ -242,6 +242,9 @@ export class SessionRunController {
   }
 
   #assertRunPreconditions(config: PublicConfig, session: SessionState): void {
+    if (session.mutationInProgress) {
+      ipcFault('CONFLICT', 'Session metadata mutation is still being committed')
+    }
     if (
       config.privacy.providerNoticeAccepted?.version !== PROVIDER_NOTICE_VERSION
     ) {

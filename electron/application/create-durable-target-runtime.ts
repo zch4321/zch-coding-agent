@@ -90,8 +90,17 @@ export async function createDurableTargetRuntime(
     assertProjectIdle(projectId) {
       liveSessions?.assertProjectIdle(projectId)
     },
-    evictIdleProject(projectId) {
-      return liveSessions?.evictIdleProject(projectId)
+    evictIdleProject(projectId, operationToken) {
+      return liveSessions?.evictIdleProject(projectId, operationToken)
+    },
+    reserveProjectEviction(projectId) {
+      if (!liveSessions) {
+        throw new Error('Live Session registry is not initialized')
+      }
+      return liveSessions.reserveProjectEviction(projectId)
+    },
+    cancelProjectEviction(projectId, token) {
+      liveSessions?.cancelProjectEviction(projectId, token)
     },
   }
   const sessionGuard: SessionRuntimeGuard = {
@@ -101,8 +110,17 @@ export async function createDurableTargetRuntime(
     snapshot(sessionId) {
       return liveSessions?.snapshot(sessionId)
     },
-    releaseSession(sessionId) {
-      return liveSessions?.releaseSession(sessionId)
+    reserveSessionEviction(sessionId) {
+      if (!liveSessions) {
+        throw new Error('Live Session registry is not initialized')
+      }
+      return liveSessions.reserveSessionEviction(sessionId)
+    },
+    cancelSessionEviction(sessionId, token) {
+      liveSessions?.cancelSessionEviction(sessionId, token)
+    },
+    releaseSession(sessionId, operationToken) {
+      return liveSessions?.releaseSession(sessionId, operationToken)
     },
     applySessionRecord(record) {
       return liveSessions?.applySessionRecord(record)
@@ -112,12 +130,14 @@ export async function createDurableTargetRuntime(
     coordinator,
     repository: projectRepository,
     runtimeGuard: projectGuard,
+    onDiagnostic: options.onDiagnostic,
   })
   const sessions = new SessionService({
     coordinator,
     sessions: sessionRepository,
     messages: messageRepository,
     runtimeGuard: sessionGuard,
+    onDiagnostic: options.onDiagnostic,
   })
   const executionState = new DurableExecutionStatePort(sessions)
   let runtime: AgentRuntime | undefined
@@ -141,7 +161,11 @@ export async function createDurableTargetRuntime(
       executionState,
       onSessionEvicted: (sessionId) =>
         targetState.runs?.evictRequestCacheForSession(sessionId),
+      onDiagnostic: options.onDiagnostic,
     })
+    executionState.setInvalidationHandler((sessionId, runId) =>
+      liveSessions?.invalidate(sessionId, runId),
+    )
     const runs = new DurableRunApplicationService({
       manager: runtime.services.sessions,
       projects,

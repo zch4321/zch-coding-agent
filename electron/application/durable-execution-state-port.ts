@@ -1,5 +1,5 @@
 import type { SessionCommandResult } from '../../shared/domain-state-api'
-import type { SessionId } from '../../shared/ids'
+import type { RunId, SessionId } from '../../shared/ids'
 import type { SessionRecord } from '../../shared/session'
 import type {
   SessionExecutionCommit,
@@ -18,37 +18,55 @@ interface CommitWaiter {
 interface DurableSessionBinding {
   record: SessionRecord
   isNew: boolean
+  ownerToken: string
   waiters: Map<string, CommitWaiter>
+  commitTail: Promise<void>
+  invalid: boolean
 }
 
 export class DurableExecutionStatePort implements SessionExecutionStatePort {
   readonly #sessions: SessionService
   readonly #bindings = new Map<SessionId, DurableSessionBinding>()
+  #onInvalid: (sessionId: SessionId, runId?: RunId) => void = () => undefined
 
   constructor(sessions: SessionService) {
     this.#sessions = sessions
   }
 
-  registerNew(record: SessionRecord): void {
+  setInvalidationHandler(
+    handler: (sessionId: SessionId, runId?: RunId) => void,
+  ): void {
+    this.#onInvalid = handler
+  }
+
+  registerNew(record: SessionRecord, ownerToken: string): void {
     if (record.lastSeq !== 0 || record.revision !== 1) {
       throw new ApplicationError(
         'PRECONDITION_FAILED',
         'New durable binding must start at revision 1 with no messages',
       )
     }
-    this.#bindings.set(record.id, {
-      record: structuredClone(record),
-      isNew: true,
-      waiters: new Map(),
-    })
+    this.#register(record, true, ownerToken)
   }
 
-  registerExisting(record: SessionRecord): void {
-    this.#bindings.set(record.id, {
-      record: structuredClone(record),
-      isNew: false,
-      waiters: new Map(),
-    })
+  registerExisting(record: SessionRecord, ownerToken: string): void {
+    this.#register(record, false, ownerToken)
+  }
+
+  applyRecord(
+    sessionId: SessionId,
+    record: SessionRecord,
+    ownerToken: string,
+  ): void {
+    const binding = this.#requireOwner(sessionId, ownerToken)
+    if (binding.invalid) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Durable Session binding is invalid',
+      )
+    }
+    binding.record = structuredClone(record)
+    binding.isNew = false
   }
 
   beginRequest(
@@ -56,6 +74,12 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     clientRequestId: string,
   ): Promise<SessionCommandResult> {
     const binding = this.#requireBinding(sessionId)
+    if (binding.invalid) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Durable Session binding is invalid',
+      )
+    }
     const existing = binding.waiters.get(clientRequestId)
     if (existing) return existing.promise
     let resolve!: (result: SessionCommandResult) => void
@@ -73,15 +97,16 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     clientRequestId: string,
     error: unknown,
   ): void {
-    const waiter = this.#bindings.get(sessionId)?.waiters.get(clientRequestId)
-    if (!waiter) return
-    this.#bindings.get(sessionId)?.waiters.delete(clientRequestId)
+    const binding = this.#bindings.get(sessionId)
+    const waiter = binding?.waiters.get(clientRequestId)
+    if (!binding || !waiter) return
+    binding.waiters.delete(clientRequestId)
     waiter.reject(error)
   }
 
-  forget(sessionId: SessionId): void {
+  forget(sessionId: SessionId, ownerToken: string): void {
     const binding = this.#bindings.get(sessionId)
-    if (!binding) return
+    if (!binding || binding.ownerToken !== ownerToken) return
     this.#bindings.delete(sessionId)
     const error = new ApplicationError(
       'PRECONDITION_FAILED',
@@ -91,83 +116,185 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     binding.waiters.clear()
   }
 
-  async commit(
+  commit(
     session: SessionState,
     input: SessionExecutionCommit,
   ): Promise<SessionCommandResult | undefined> {
     const binding = this.#requireBinding(session.sessionId)
-    const records = session.history
-      .filter((record) => record.seq > binding.record.lastSeq)
-      .sort((left, right) => left.seq - right.seq)
-
-    if (binding.isNew) {
-      const finalRecord: SessionRecord = {
-        ...binding.record,
-        permissionMode: session.mode,
-        modelSelection: structuredClone(session.modelSelection),
-        goal: session.goal ? structuredClone(session.goal) : null,
-        plan: session.plan ? structuredClone(session.plan) : null,
-        lastSeq: records.at(-1)?.seq ?? 0,
-        updatedAt: new Date().toISOString(),
-      }
-      const requestHash = originalRequestHash(records)
-      const committed = await this.#sessions.commitFirstTurn({
-        session: finalRecord,
-        messages: records,
-        requestHash,
-      })
-      if (committed.outcome === 'deduplicated') {
-        throw new ApplicationError(
-          'CONFLICT',
-          'First-turn request was committed by another runtime',
-        )
-      }
-      binding.record = structuredClone(committed.result.commit.change.session)
-      binding.isNew = false
-      this.#resolveCommittedRequests(binding, records, committed.result)
-      return committed.result
+    if (binding.invalid) {
+      return Promise.reject(
+        new ApplicationError(
+          'PRECONDITION_FAILED',
+          'Durable Session binding is invalid',
+        ),
+      )
     }
-
-    const metadataChanged =
-      session.mode !== binding.record.permissionMode ||
-      JSON.stringify(session.modelSelection) !==
-        JSON.stringify(binding.record.modelSelection) ||
-      JSON.stringify(session.goal ?? null) !==
-        JSON.stringify(binding.record.goal) ||
-      JSON.stringify(session.plan ?? null) !==
-        JSON.stringify(binding.record.plan)
-    if (
-      records.length === 0 &&
-      !metadataChanged &&
-      input.deactivateThroughSeq === undefined
-    ) {
-      return undefined
-    }
-
-    const result = await this.#sessions.commitMutation({
-      sessionId: session.sessionId,
-      expectedRevision: binding.record.revision,
-      expectedLastSeq: binding.record.lastSeq,
-      messages: records,
-      metadata: {
-        permissionMode: session.mode,
-        modelSelection: structuredClone(session.modelSelection),
-        goal: session.goal ? structuredClone(session.goal) : null,
-        plan: session.plan ? structuredClone(session.plan) : null,
-      },
-      ...(input.deactivateThroughSeq === undefined
-        ? {}
-        : { deactivateThroughSeq: input.deactivateThroughSeq }),
-      messageChange: input.invalidate ? 'invalidate' : undefined,
-    })
-    binding.record = structuredClone(result.commit.change.session)
-    this.#resolveCommittedRequests(binding, records, result)
+    const ownerToken = binding.ownerToken
+    const execute = () => this.#commitOwned(session, input, ownerToken, binding)
+    const result = binding.commitTail.then(execute, execute)
+    binding.commitTail = result.then(
+      () => undefined,
+      () => undefined,
+    )
     return result
   }
 
   record(sessionId: SessionId): SessionRecord | undefined {
-    const record = this.#bindings.get(sessionId)?.record
-    return record ? structuredClone(record) : undefined
+    const binding = this.#bindings.get(sessionId)
+    if (!binding || binding.invalid) return undefined
+    return structuredClone(binding.record)
+  }
+
+  async #commitOwned(
+    session: SessionState,
+    input: SessionExecutionCommit,
+    ownerToken: string,
+    queuedBinding: DurableSessionBinding,
+  ): Promise<SessionCommandResult | undefined> {
+    const binding = this.#requireOwner(session.sessionId, ownerToken)
+    if (binding !== queuedBinding || binding.invalid) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Durable Session binding changed before commit',
+      )
+    }
+    const records = session.history
+      .filter((record) => record.seq > binding.record.lastSeq)
+      .sort((left, right) => left.seq - right.seq)
+
+    try {
+      if (binding.isNew) {
+        const finalRecord: SessionRecord = {
+          ...binding.record,
+          permissionMode: session.mode,
+          modelSelection: structuredClone(session.modelSelection),
+          goal: session.goal ? structuredClone(session.goal) : null,
+          plan: session.plan ? structuredClone(session.plan) : null,
+          lastSeq: records.at(-1)?.seq ?? 0,
+          updatedAt: new Date().toISOString(),
+        }
+        const requestHash = originalRequestHash(records)
+        const committed = await this.#sessions.commitFirstTurn({
+          session: finalRecord,
+          messages: records,
+          requestHash,
+        })
+        if (committed.outcome === 'deduplicated') {
+          throw new ApplicationError(
+            'CONFLICT',
+            'First-turn request was committed by another runtime',
+          )
+        }
+        binding.record = structuredClone(committed.result.commit.change.session)
+        binding.isNew = false
+        this.#resolveCommittedRequests(binding, records, committed.result)
+        return committed.result
+      }
+
+      const metadataChanged =
+        session.mode !== binding.record.permissionMode ||
+        JSON.stringify(session.modelSelection) !==
+          JSON.stringify(binding.record.modelSelection) ||
+        JSON.stringify(session.goal ?? null) !==
+          JSON.stringify(binding.record.goal) ||
+        JSON.stringify(session.plan ?? null) !==
+          JSON.stringify(binding.record.plan)
+      if (
+        records.length === 0 &&
+        !metadataChanged &&
+        input.deactivateThroughSeq === undefined
+      ) {
+        return undefined
+      }
+
+      const result = await this.#sessions.commitMutation({
+        sessionId: session.sessionId,
+        expectedRevision: binding.record.revision,
+        expectedLastSeq: binding.record.lastSeq,
+        messages: records,
+        metadata: {
+          permissionMode: session.mode,
+          modelSelection: structuredClone(session.modelSelection),
+          goal: session.goal ? structuredClone(session.goal) : null,
+          plan: session.plan ? structuredClone(session.plan) : null,
+        },
+        ...(input.deactivateThroughSeq === undefined
+          ? {}
+          : { deactivateThroughSeq: input.deactivateThroughSeq }),
+        messageChange: input.invalidate ? 'invalidate' : undefined,
+      })
+      binding.record = structuredClone(result.commit.change.session)
+      this.#resolveCommittedRequests(binding, records, result)
+      return result
+    } catch (error) {
+      await this.#recoverAfterFailure(session, binding, records, error)
+      if (input.reason === 'tool_batch' && !binding.invalid) {
+        binding.invalid = true
+        this.#onInvalid(session.sessionId, session.activeRun?.runId)
+      }
+      throw error
+    }
+  }
+
+  async #recoverAfterFailure(
+    session: SessionState,
+    binding: DurableSessionBinding,
+    attemptedRecords: readonly SessionState['history'][number][],
+    commitError: unknown,
+  ): Promise<void> {
+    const attemptedRequestIds = attemptedRecords.flatMap((record) =>
+      record.kind === 'user_input' && 'clientRequestId' in record
+        ? [record.clientRequestId]
+        : [],
+    )
+    try {
+      const durable = await this.#sessions.loadRuntimeState(
+        session.sessionId,
+        attemptedRequestIds,
+      )
+      const committedRequestIds = new Set(durable.committedClientRequestIds)
+      session.history = structuredClone(durable.activeHistory)
+      session.nextMessageSeq = durable.record.lastSeq + 1
+      session.mode = durable.record.permissionMode
+      session.provider = durable.record.modelSelection.providerId
+      session.modelSelection = structuredClone(durable.record.modelSelection)
+      session.modelSelectionPinned = true
+      session.goal = durable.record.goal
+        ? structuredClone(durable.record.goal)
+        : undefined
+      session.plan = durable.record.plan
+        ? structuredClone(durable.record.plan)
+        : undefined
+      binding.record = structuredClone(durable.record)
+      binding.isNew = false
+      for (const clientRequestId of attemptedRequestIds) {
+        if (committedRequestIds.has(clientRequestId)) continue
+        session.clientRequests.delete(clientRequestId)
+        const waiter = binding.waiters.get(clientRequestId)
+        if (waiter) {
+          binding.waiters.delete(clientRequestId)
+          waiter.reject(commitError)
+        }
+      }
+    } catch {
+      if (binding.isNew) {
+        session.history = []
+        session.nextMessageSeq = 1
+        for (const clientRequestId of attemptedRequestIds) {
+          session.clientRequests.delete(clientRequestId)
+          const waiter = binding.waiters.get(clientRequestId)
+          if (waiter) {
+            binding.waiters.delete(clientRequestId)
+            waiter.reject(commitError)
+          }
+        }
+        return
+      }
+      binding.invalid = true
+      for (const waiter of binding.waiters.values()) waiter.reject(commitError)
+      binding.waiters.clear()
+      this.#onInvalid(session.sessionId, session.activeRun?.runId)
+    }
   }
 
   #resolveCommittedRequests(
@@ -184,6 +311,38 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
       binding.waiters.delete(record.clientRequestId)
       waiter.resolve(result)
     }
+  }
+
+  #register(record: SessionRecord, isNew: boolean, ownerToken: string): void {
+    const existing = this.#bindings.get(record.id)
+    if (existing && existing.ownerToken !== ownerToken) {
+      throw new ApplicationError(
+        'CONFLICT',
+        'Durable Session binding has another owner',
+      )
+    }
+    this.#bindings.set(record.id, {
+      record: structuredClone(record),
+      isNew,
+      ownerToken,
+      waiters: existing?.waiters ?? new Map(),
+      commitTail: existing?.commitTail ?? Promise.resolve(),
+      invalid: false,
+    })
+  }
+
+  #requireOwner(
+    sessionId: SessionId,
+    ownerToken: string,
+  ): DurableSessionBinding {
+    const binding = this.#requireBinding(sessionId)
+    if (binding.ownerToken !== ownerToken) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Durable Session binding ownership changed',
+      )
+    }
+    return binding
   }
 
   #requireBinding(sessionId: SessionId): DurableSessionBinding {
