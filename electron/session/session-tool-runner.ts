@@ -27,6 +27,10 @@ import type {
 import { normalizeLlmUsage } from '../providers/usage'
 import type { McpToolGateway } from '../tools/mcp-tools'
 import { appendToolResult } from './canonical-history'
+import type {
+  FileChangeExecutionPort,
+  PreparedFileChange,
+} from './file-change-execution'
 
 type ToolAttemptStage = 'validation' | 'permission' | 'execution'
 
@@ -49,6 +53,7 @@ export class SessionToolRunner {
   readonly #configStore: ConfigStore
   readonly #pluginBus: PluginEventBus | undefined
   readonly #changeHistory: ChangeHistoryStore | undefined
+  readonly #fileChangeExecution: FileChangeExecutionPort | undefined
   readonly #promptRegistry: PromptRegistry | undefined
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #autoApproverFactory: SessionManagerOptions['autoApproverFactory']
@@ -70,6 +75,7 @@ export class SessionToolRunner {
     configStore: ConfigStore
     pluginBus?: PluginEventBus
     changeHistory?: ChangeHistoryStore
+    fileChangeExecution?: FileChangeExecutionPort
     promptRegistry?: PromptRegistry
     fetchImpl?: typeof fetch
     autoApproverFactory: SessionManagerOptions['autoApproverFactory']
@@ -90,6 +96,7 @@ export class SessionToolRunner {
     this.#configStore = options.configStore
     this.#pluginBus = options.pluginBus
     this.#changeHistory = options.changeHistory
+    this.#fileChangeExecution = options.fileChangeExecution
     this.#promptRegistry = options.promptRegistry
     this.#fetchImpl = options.fetchImpl
     this.#autoApproverFactory = options.autoApproverFactory
@@ -144,6 +151,7 @@ export class SessionToolRunner {
         let policySignals: JsonValue[] = []
         let diffHash: string | undefined
         let approvedCall: ApprovedToolCall | undefined
+        let preparedFileChange: PreparedFileChange | undefined
         let approvedDiff = ''
         let approvalUsageProvider: ProviderPublicConfig | undefined
         let approvalSummary: ToolApprovalSummary | undefined
@@ -307,26 +315,37 @@ export class SessionToolRunner {
                   result = preflight.result
                 } else {
                   attemptStage = 'execution'
-                  result = await this.#toolExecutor.execute(
-                    authorization.approvedCall,
-                    {
-                      sessionId: session.sessionId,
-                      runId: run.runId,
-                      workspace: {
-                        canonicalPath: session.workspace,
+                  try {
+                    preparedFileChange =
+                      await this.#fileChangeExecution?.prepareMutation({
+                        sessionId: session.sessionId,
+                        workspace: session.workspace,
+                        approvedCall: authorization.approvedCall,
+                        diff: approvedDiff,
+                      })
+                    result = await this.#toolExecutor.execute(
+                      authorization.approvedCall,
+                      {
+                        sessionId: session.sessionId,
+                        runId: run.runId,
+                        workspace: {
+                          canonicalPath: session.workspace,
+                        },
                       },
-                    },
-                    run.controller.signal,
-                    hasSideEffects(inspected.definition)
-                      ? (settlement) => {
-                          run.pendingSideEffects.add(settlement)
-                          void settlement.then(() =>
-                            run.pendingSideEffects.delete(settlement),
-                          )
-                        }
-                      : undefined,
-                    definitionOverride,
-                  )
+                      run.controller.signal,
+                      hasSideEffects(inspected.definition)
+                        ? (settlement) => {
+                            run.pendingSideEffects.add(settlement)
+                            void settlement.then(() =>
+                              run.pendingSideEffects.delete(settlement),
+                            )
+                          }
+                        : undefined,
+                      definitionOverride,
+                    )
+                  } catch (error) {
+                    result = toolFailure(error, run.controller.signal)
+                  }
                 }
               }
             }
@@ -337,6 +356,28 @@ export class SessionToolRunner {
 
         if (
           result.status === 'ok' &&
+          preparedFileChange &&
+          this.#fileChangeExecution
+        ) {
+          const mutation = await this.#fileChangeExecution
+            .commitMutation({
+              workspace: session.workspace,
+              prepared: preparedFileChange,
+            })
+            .catch((error: unknown) => {
+              this.#onDiagnostic(
+                'Failed to finalize durable file change',
+                error,
+              )
+              return {
+                status: 'warning' as const,
+                warningCode: 'CHANGE_HISTORY_PERSIST_FAILED' as const,
+              }
+            })
+          result = annotateFileMutationResult(result, mutation)
+        } else if (
+          result.status === 'ok' &&
+          !this.#fileChangeExecution &&
           approvedCall &&
           session.conversationId &&
           this.#changeHistory
@@ -488,5 +529,34 @@ export class SessionToolRunner {
     if (run.controller.signal.aborted) {
       throw run.controller.signal.reason ?? new Error('Run cancelled')
     }
+  }
+}
+
+function annotateFileMutationResult(
+  result: Extract<ToolResult, { status: 'ok' }>,
+  mutation: Awaited<ReturnType<FileChangeExecutionPort['commitMutation']>>,
+): ToolResult {
+  const content =
+    result.content &&
+    typeof result.content === 'object' &&
+    !Array.isArray(result.content)
+      ? result.content
+      : { result: result.content }
+  return {
+    ...result,
+    content:
+      mutation.status === 'recorded'
+        ? {
+            ...content,
+            mutationSucceeded: true,
+            revertAvailable: true,
+            fileChangeId: mutation.fileChange.id,
+          }
+        : {
+            ...content,
+            mutationSucceeded: true,
+            warningCode: mutation.warningCode,
+            revertAvailable: false,
+          },
   }
 }

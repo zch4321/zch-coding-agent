@@ -16,6 +16,7 @@ import { AgentRuntime } from './agent-runtime'
 import { RuntimeEventBus } from './runtime-event-bus'
 import type { RuntimeEventListener } from './runtime-events'
 import type { SessionExecutionStatePort } from '../session/session-types'
+import type { FileChangeExecutionPort } from '../session/file-change-execution'
 
 export interface CreateAgentRuntimeOptions {
   configStore: ConfigStore
@@ -32,6 +33,7 @@ export interface CreateAgentRuntimeOptions {
   }) => AutoApprover
   eventListeners?: RuntimeEventListener[]
   executionState?: SessionExecutionStatePort
+  fileChangeExecution?: FileChangeExecutionPort
   onDiagnostic?: (message: string, error?: unknown) => void
 }
 
@@ -86,6 +88,7 @@ export async function createAgentRuntime(
       pluginBus,
       skillsManager: skills,
       changeHistory: changes,
+      fileChangeExecution: options.fileChangeExecution,
       projectMetadata: projects,
       codeBackends,
       mcpManager: mcp,

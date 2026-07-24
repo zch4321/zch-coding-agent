@@ -12,6 +12,7 @@ import {
   type DatabaseServiceOptions,
 } from '../persistence/database-service'
 import { MessageRepository } from '../persistence/message-repository'
+import { FileChangeRepository } from '../persistence/file-change-repository'
 import { ProjectRepository } from '../persistence/project-repository'
 import { SessionRepository } from '../persistence/session-repository'
 import type { AutoApprover } from '../permission/auto-approver'
@@ -22,6 +23,7 @@ import {
 } from '../runtime/create-agent-runtime'
 import type { AgentRuntime } from '../runtime/agent-runtime'
 import { ApplicationStateCoordinator } from './application-state-coordinator'
+import { FileChangeService } from './file-change-service'
 import { DurableExecutionStatePort } from './durable-execution-state-port'
 import { DurableRunApplicationService } from './durable-run-application-service'
 import { LiveSessionContextRegistry } from './live-session-context-registry'
@@ -47,6 +49,7 @@ export interface DurableTargetRuntime {
   coordinator: ApplicationStateCoordinator
   projects: ProjectService
   sessions: SessionService
+  fileChanges: FileChangeService
   runs: DurableRunApplicationService
   liveSessions: LiveSessionContextRegistry
   bootstrap(): Promise<AppBootstrapResult>
@@ -84,6 +87,7 @@ export async function createDurableTargetRuntime(
   const projectRepository = new ProjectRepository()
   const sessionRepository = new SessionRepository()
   const messageRepository = new MessageRepository()
+  const fileChangeRepository = new FileChangeRepository()
 
   let liveSessions: LiveSessionContextRegistry | undefined
   const projectGuard: ProjectRuntimeGuard = {
@@ -139,6 +143,14 @@ export async function createDurableTargetRuntime(
     runtimeGuard: sessionGuard,
     onDiagnostic: options.onDiagnostic,
   })
+  const fileChanges = new FileChangeService({
+    coordinator,
+    configStore: options.configStore,
+    fileChanges: fileChangeRepository,
+    sessions: sessionRepository,
+    projects: projectRepository,
+    onDiagnostic: options.onDiagnostic,
+  })
   const executionState = new DurableExecutionStatePort(sessions)
   let runtime: AgentRuntime | undefined
 
@@ -151,6 +163,7 @@ export async function createDurableTargetRuntime(
       providerFactory: options.providerFactory,
       autoApproverFactory: options.autoApproverFactory,
       executionState,
+      fileChangeExecution: fileChanges,
       onDiagnostic: options.onDiagnostic,
     })
     const targetState: { runs?: DurableRunApplicationService } = {}
@@ -181,6 +194,7 @@ export async function createDurableTargetRuntime(
       coordinator,
       projects,
       sessions,
+      fileChanges,
       runs,
       liveSessions,
       async bootstrap() {

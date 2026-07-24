@@ -27,6 +27,7 @@ import type {
   ActiveRunToolSnapshot,
 } from '../../shared/runtime-state'
 import type { SessionCommandResult } from '../../shared/domain-state-api'
+import type { FileChangeExecutionPort } from './file-change-execution'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -61,6 +62,7 @@ export interface SessionManagerOptions {
   pluginBus?: PluginEventBus
   skillsManager?: SkillsManager
   changeHistory?: ChangeHistoryStore
+  fileChangeExecution?: FileChangeExecutionPort
   projectMetadata?: ProjectMetadataStore
   codeBackends?: CodeBackendManager
   mcpManager?: McpManager

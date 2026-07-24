@@ -7,7 +7,10 @@ function truncateDiff(value: string): string {
     return value
   }
 
-  return `${value.slice(0, MAX_DIFF_CHARS)}${TRUNCATED_DIFF_MARKER}`
+  return `${value.slice(
+    0,
+    MAX_DIFF_CHARS - TRUNCATED_DIFF_MARKER.length,
+  )}${TRUNCATED_DIFF_MARKER}`
 }
 
 export function createFileDiff(

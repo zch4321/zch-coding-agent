@@ -19,6 +19,7 @@ import { createTestDatabase } from '../persistence/test-database'
 import { approvedCallBrand } from '../tools/approved-tool-call'
 import { hash } from '../tools/file-tool-preconditions'
 import { createConfig } from '../session/session-manager-test-support'
+import { FileChangeExecutionError } from '../session/file-change-execution'
 import { ApplicationStateCoordinator } from './application-state-coordinator'
 import { FileChangeService } from './file-change-service'
 
@@ -107,6 +108,45 @@ describe('FileChangeService mutation records', () => {
       await setup.dispose()
     }
   })
+
+  it('rejects a recovery payload above the frozen byte limit before I/O', async () => {
+    const setup = await setupService()
+    try {
+      await setup.configStore.update({
+        version: 1,
+        kind: 'limits',
+        value: {
+          ...setup.configStore.getPublicConfig().limits,
+          fileChangeHistoryBytes: 1_000_000,
+        },
+      })
+      const beforeContent = 'b'.repeat(900_000)
+      const afterContent = `${beforeContent.slice(0, -1)}a`
+      const diff = 'd'.repeat(120_000)
+      const error = await setup.service
+        .prepareMutation({
+          sessionId: setup.sessionId,
+          workspace: setup.workspace,
+          approvedCall: approvedPatchCall(
+            setup.sessionId,
+            setup.workspace,
+            beforeContent,
+            afterContent,
+            diff,
+          ),
+          diff,
+        })
+        .catch((cause: unknown) => cause)
+
+      expect(error).toBeInstanceOf(FileChangeExecutionError)
+      expect(error).toMatchObject({
+        code: 'CHANGE_HISTORY_LIMIT_EXCEEDED',
+      })
+      expect((await setup.service.list(setup.sessionId)).records).toEqual([])
+    } finally {
+      await setup.dispose()
+    }
+  })
 })
 
 async function setupService() {
@@ -151,9 +191,53 @@ async function setupService() {
     testDatabase,
     workspace,
     sessionId,
+    configStore,
     commits,
     service,
     dispose: () => testDatabase.dispose(),
+  }
+}
+
+function approvedPatchCall(
+  sessionId: SessionId,
+  workspace: string,
+  beforeContent: string,
+  afterContent: string,
+  diff: string,
+) {
+  const args = {
+    path: 'created.txt',
+    patch: '@@ -1 +1 @@\n-before\n+after',
+  }
+  return {
+    [approvedCallBrand]: true as const,
+    sessionId,
+    runId: 'run:file-change' as RunId,
+    callId: 'call:file-change-patch' as CallId,
+    toolId: 'apply_patch',
+    args,
+    argsHash: createArgsHash(args),
+    resourcePreconditions: [
+      {
+        kind: 'file' as const,
+        operation: 'patch' as const,
+        path: 'created.txt',
+        absolutePath: path.join(workspace, 'created.txt'),
+        parentRealPath: workspace,
+        expectedParentId: 'fixture-parent',
+        expectedParentExists: true,
+        expectedExists: true,
+        expectedRealPath: path.join(workspace, 'created.txt'),
+        expectedFileId: 'fixture-file',
+        expectedContentHash: hash(beforeContent),
+        expectedContent: beforeContent,
+        expectedResultHash: hash(afterContent),
+        expectedResultContent: afterContent,
+      },
+    ],
+    diffHash: hash(diff),
+    approvedBy: 'human' as const,
+    approvedAt: '2026-07-24T00:00:00.000Z',
   }
 }
 

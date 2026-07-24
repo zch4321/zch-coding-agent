@@ -80,6 +80,7 @@ export class SessionManager {
   readonly #pluginBus: PluginEventBus | undefined
   readonly #skillsManager: SkillsManager | undefined
   readonly #changeHistory: ChangeHistoryStore | undefined
+  readonly #fileChangeExecution: SessionManagerOptions['fileChangeExecution']
   readonly #projectMetadata: ProjectMetadataStore | undefined
   readonly #codeBackends: CodeBackendManager | undefined
   readonly #mcpManager: McpManager | undefined
@@ -120,6 +121,7 @@ export class SessionManager {
     this.#pluginBus = options.pluginBus
     this.#skillsManager = options.skillsManager
     this.#changeHistory = options.changeHistory
+    this.#fileChangeExecution = options.fileChangeExecution
     this.#projectMetadata = options.projectMetadata
     this.#codeBackends = options.codeBackends
     this.#mcpManager = options.mcpManager
@@ -225,6 +227,7 @@ export class SessionManager {
       configStore: this.#configStore,
       pluginBus: this.#pluginBus,
       changeHistory: this.#changeHistory,
+      fileChangeExecution: this.#fileChangeExecution,
       promptRegistry: options.promptRegistry,
       fetchImpl: this.#fetchImpl,
       autoApproverFactory: this.#autoApproverFactory,
