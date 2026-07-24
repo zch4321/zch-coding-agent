@@ -2,6 +2,9 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { ConfigSetRequestSchema } from '../../shared/config'
+import { compileSchema } from '../schema-validator'
+import { DEFAULT_APP_CONFIG } from './schema'
 import type { SafeStorageAdapter } from './secret-store'
 import { SecretStorageUnavailableError, SecretStore } from './secret-store'
 import { ConfigStore } from './store'
@@ -103,6 +106,40 @@ describe('ConfigStore', () => {
       'legacyField',
     )
   })
+
+  it('resets a v9 file that predates the required FileChange budget', async () => {
+    const { directory, configStore } = await createStores()
+    const configPath = path.join(directory, 'config.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8')) as {
+      limits: Record<string, unknown>
+    }
+    delete config.limits.fileChangeHistoryBytes
+    await writeFile(configPath, JSON.stringify(config), 'utf8')
+
+    await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
+      schemaVersion: 9,
+      limits: { fileChangeHistoryBytes: 100_000_000 },
+    })
+    expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
+      limits: { fileChangeHistoryBytes: 100_000_000 },
+    })
+  })
+
+  it.each([999_999, 10_000_000_001])(
+    'rejects an out-of-range FileChange history budget: %s',
+    (fileChangeHistoryBytes) => {
+      const validate = compileSchema(ConfigSetRequestSchema)
+      const request = {
+        version: 1,
+        kind: 'limits',
+        value: {
+          ...DEFAULT_APP_CONFIG.limits,
+          fileChangeHistoryBytes,
+        },
+      }
+      expect(validate(request)).toBe(false)
+    },
+  )
 
   it('supports provider-scoped environment credentials for headless hosts', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))

@@ -20,7 +20,6 @@ import {
 } from '../persistence/repository-fixtures'
 import { SessionRepository } from '../persistence/session-repository'
 import { createTestDatabase } from '../persistence/test-database'
-import { createConfig } from '../session/session-manager-test-support'
 import type { FileChangeRevertAccessResult } from '../session/workspace-access-coordinator'
 import { hash } from '../tools/file-tool-preconditions'
 import { ApplicationError } from './application-error'
@@ -283,7 +282,6 @@ async function setupRevert(
   const guard = new TestRuntimeGuard()
   const service = new FileChangeService({
     coordinator,
-    configStore: await createConfig(testDatabase.directory),
     fileChanges,
   })
   service.setRuntimeGuard(guard)

@@ -389,7 +389,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - 每次成功的 `create_file` / `apply_patch` / `delete_file` 按 Session 保存变更记录、before/after hash 和有界恢复快照；Diff 面板可查看上次及更早的 Session 变更。
 - 用户可显式回退单项变更。回退前必须再次确认，并校验当前文件仍等于该记录的 after 状态；检测到用户或后续工具修改时拒绝覆盖。回退不依赖 Git，也不影响其他文件。
 - 变更历史保存在主进程 `userData/agent.db` 的 `file_changes` 表。它不是 Message、Run journal、trace 或模型历史；恢复用 `beforeContent` 只对 backend 可见，renderer 只获得不含快照的 `FileChangeSummary`。
-- `file_changes` 的记录数量和 `beforeContent + diff` UTF-8 总字节数必须有硬上限。单条恢复 payload 已超过总上限时，文件工具必须在副作用前拒绝；Retention 只会让过旧单项丧失 Diff/revert 能力，不能删除 Message 或改动 workspace。
+- `file_changes` 不限制记录条数，只受全应用可配置的 `beforeContent + diff` UTF-8 总字节预算约束（默认 100 MB）；200 仅是单页查询上限。单条恢复 payload 已超过当前 Run 冻结预算时，文件工具必须在副作用前拒绝；Retention 只会让最旧单项丧失 Diff/revert 能力，不能删除 Message 或改动 workspace。
 
 ### 4.4 UI 组件库
 

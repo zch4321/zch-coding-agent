@@ -130,6 +130,7 @@ export interface ActiveRun {
   writerReleasePending: boolean
   status: RunStatus
   toolTokensUsed: number
+  fileChangeHistoryBytes: number
   pendingApproval?: PendingApproval
   pendingInterjections: RunInterjection[]
   // Tracks every clientRequestId this run has accepted (queued, injected,

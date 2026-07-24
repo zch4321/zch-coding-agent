@@ -159,7 +159,7 @@ electron/
   ipc/                    # host adapter，不包含领域逻辑
 ```
 
-这是 P3 完成后的真实布局。P4 可以在引入 durable application service 时新增 `electron/application/`，但文档不会把尚未存在的目标文件写成当前实现。
+这是 P5 完成后的目标实现布局。`electron/application/` 已包含 isolated durable target 使用的 coordinator、Project/Session/FileChange services 和 live-session registry；production Desktop/Headless composition 仍未切到该 target，见 §20。
 
 Persistence 是独立代码层，但不是独立进程、IPC service 或通用 ORM：
 
@@ -185,13 +185,9 @@ Renderer 只保存：
 
 ### 3.4 Host-neutral runtime
 
-Electron 和 Headless 复用同一个 application/runtime composition：
+当前唯一 Agent loop 已可注入 legacy memory port 或 durable execution port。P5 isolated target 使用临时 SQLite database 组合 application/runtime；Repository tests 也使用真实临时 SQLite 文件。Desktop、Headless 和 benchmark 的 production composition 尚未切流，仍保留 legacy 持久化入口。
 
-- Desktop 使用 `userData/agent.db`。
-- Headless/benchmark 使用任务独立的临时 SQLite database。
-- Repository tests 使用真实临时 SQLite 文件。
-
-Headless 不复制 Prompt、Provider、Tool、Permission、compact 或 Agent loop。
+P8 切流后的目标是 Desktop 使用 `userData/agent.db`，Headless/benchmark 使用任务独立的临时 SQLite database，同时继续共用 Prompt、Provider、Tool、Permission、compact 和 Agent loop。
 
 ---
 
@@ -244,7 +240,7 @@ Run 完成或应用退出后，`ActiveRunExecution` 销毁。完成的结果已�
 
 ## 5. Canonical 数据结构
 
-V1 record `schemaVersion` 固定为 1。Project、Session 和 FileChange `revision` 从 1 开始；空 Session 的 `lastSeq = 0`，首条 Message 的 `seq = 1`。所有计数使用不超过 JavaScript safe integer 的非负或正整数。Message page 最大 200 条并按 `seq` 升序返回；Session summary page 最大 200 条，按 `(updatedAt, id)` 降序并使用同一复合 cursor；Project list 最大 512 条，FileChange list 最大 200 条，单次 Session commit 最多携带 512 条 Message records。
+V1 record `schemaVersion` 固定为 1。Project、Session 和 FileChange `revision` 从 1 开始；空 Session 的 `lastSeq = 0`，首条 Message 的 `seq = 1`。所有计数使用不超过 JavaScript safe integer 的非负或正整数。Message page 最大 200 条并按 `seq` 升序返回；Session summary page 最大 200 条，按 `(updatedAt, id)` 降序并使用同一复合 cursor；Project list 最大 512 条；FileChange history 不设条数上限，但单页最多 200 条并按 `(createdAt, id)` 降序稳定分页；单次 Session commit 最多携带 512 条 Message records。
 
 TypeBox schema 负责单 record 的闭集字段、枚举、长度和 `kind + parts` 组合；`assertBoundedJsonValue`、route/page semantic validators 负责 JSON 深度/总字节、secret-safe endpoint、本地 call ID 唯一性和升序 page 等不能可靠表达为可组合 JSON Schema 的约束。跨 records 的 tool call/result 配对不属于 P1 schema，由 `MessageHistoryCompiler` 在 P3 校验。
 
@@ -809,7 +805,10 @@ CREATE TABLE file_changes (
 );
 
 CREATE INDEX file_changes_session_idx
-  ON file_changes(session_id, created_at DESC);
+  ON file_changes(session_id, created_at DESC, id DESC);
+
+CREATE INDEX file_changes_retention_idx
+  ON file_changes(created_at ASC, id ASC);
 ```
 
 `file_changes` 只服务两个产品能力：
@@ -825,21 +824,25 @@ CREATE INDEX file_changes_session_idx
 
 1. 副作用前已有 resource precondition 中的 before content 和 diff，先计算 `payloadBytes = utf8(beforeContent) + utf8(diff)`。单条记录已超过总容量上限时，在修改文件前返回 `CHANGE_HISTORY_LIMIT_EXCEEDED`。
 2. 文件工具完成原子写入/删除，并重新读取或校验实际 after existence/hash。
-3. 在工具结果成为 terminal result 前，同一 FileChange transaction 先删除最旧记录以满足容量/数量上限，再插入完整 `StoredFileChangeRecord`。
+3. 在工具结果成为 terminal result 前，同一 FileChange transaction 先按 `(createdAt, id)` 删除最旧记录以满足全应用字节容量，再插入完整 `StoredFileChangeRecord`。删除使用有界 SQL batch，不把无界历史加载进内存。
 4. Commit 后，工具结果才可以声明该变更支持 revert；随后按 §7.2 与其余 tool batch messages 一起写入对话历史。
 
 如果 filesystem mutation 已成功但 FileChange transaction 失败，terminal result 必须同时如实返回 `mutationSucceeded = true`、`warningCode = 'CHANGE_HISTORY_PERSIST_FAILED'` 和 `revertAvailable = false`，不能宣称整个文件操作未发生，也不能自动重试副作用。Filesystem 与 SQLite 仍不是同一原子事务；崩溃可能留下文件变化但没有 FileChange/Message，这与 §7.2 的 crash tradeoff 一致。
+
+如果副作用完成后重新读取的 after existence/hash 已不匹配审批结果，不保存 FileChange；tool result 仍保持成功并返回 `CHANGE_HISTORY_AFTER_STATE_MISMATCH`、`mutationSucceeded = true` 和 `revertAvailable = false`，React loop 可以继续。
 
 FileChange 与 Message 故意不在同一个 transaction 落盘：前者紧跟每次已完成的文件副作用，后者要等当前 assistant tool-call batch 的所有 terminal results 齐全后才能原子提交。Message history 是 append-only 且参与 provider context；FileChange 会更新 `revertedAt`、按独立容量规则清理，并携带大容量恢复 snapshot。将两者混在 Message 中会破坏这些边界。
 
 回退流程：
 
-1. 获取 workspace writer lease，并确认 Session/Project ownership。
+1. 在第一次 await 前取得 Session `mutating` lifecycle token，阻止同 Session Run/archive、Project path update/remove 和并发 revert；随后获取与 Provider Run 共用的 workspace writer lease。Revert 不占 Provider run slot。
 2. 当前文件 existence/hash 必须严格等于记录的 `afterExists/afterHash`；否则返回 `RESOURCE_CHANGED`，不能覆盖用户或后续工具的新修改。
 3. `beforeExists = true` 时用 `beforeContent` 原子恢复；否则删除 Agent 创建的文件。
-4. 成功后更新 `reverted_at`、`updated_at` 和 `revision`。
+4. 成功后以 expected revision OCC 更新 `reverted_at`、`updated_at` 和 `revision`，最后释放 writer/lifecycle token。
 
-V1 延续现有配置值：全应用最多 200 条记录，`payloadBytes` 总量最多 50,000,000 bytes。目标实现必须修正 legacy JSON store 在“单条记录已超上限”时仍保留该记录的边界缺陷。Retention 删除最旧记录时只失去该项 Diff/revert 能力，不修改 Messages 或 workspace。恢复 snapshot 永远不经 IPC；renderer 只接收 `FileChangeSummary`。
+文件已经恢复但 `markReverted` 持久化失败时，不自动重做或补偿文件副作用；返回 `PERSISTENCE_FAILURE`，details 明确包含 `mutationSucceeded = true` 和 `FILE_CHANGE_REVERT_STATE_PERSIST_FAILED`。后续重试会因当前文件不再等于 after hash 而安全返回 `RESOURCE_CHANGED`。
+
+AppConfig v9 的 `limits.fileChangeHistoryBytes` 是全应用总预算，默认 `100_000_000` bytes，允许 `1_000_000`～`10_000_000_000`。记录条数不设上限，200 仅是单页上限。降低配置不启动后台清理；下一次 insert 在同一 transaction 内收敛到新预算。Retention 只会让最旧单项失去 Diff/revert 能力，不修改 Messages 或 workspace。恢复 snapshot 永远不经 IPC；renderer 只接收 `FileChangeSummary`。
 
 ### 6.8 Message seq 与 transaction
 
@@ -1038,7 +1041,7 @@ approval:decide
 
 - `project:changed`：已经 commit 的完整 ProjectRecord list snapshot。
 - `session:changed`：已经 commit 的 Session/Message records 和 revision。
-- `file-change:changed`：受影响 `sessionId` 和 commit 后的完整 FileChangeSummary list snapshot，已包含 retention 结果。
+- `file-change:changed`：无 retention 时发送单条 `upsert` summary；retention 删除旧记录时发送 `invalidate_all`，未来 renderer 清空全部 FileChange page cache 并按需重查。
 - `run:stream`：active run status、text/reasoning delta、tool/approval、terminal 等瞬时事件。
 
 ### 8.2 Commit 回包与 Commit Event
@@ -1087,13 +1090,16 @@ interface SessionCommittedChange {
     | { mode: 'invalidate'; throughSeq: number }
 }
 
-interface FileChangeCommittedChange {
-  sessionId: SessionId
-  fileChanges: FileChangeSummary[]
-}
+type FileChangeCommittedChange =
+  | {
+      mode: 'upsert'
+      sessionId: SessionId
+      fileChange: FileChangeSummary
+    }
+  | { mode: 'invalidate_all' }
 ```
 
-Project 和 FileChange 集合有明确上限，因此提交完整 list snapshot。Session event 总是携带完整 `SessionRecord`；纯标题、模型或权限等 metadata 更新使用 `mode = 'none'`，常规消息提交使用非空 `upsert` records。Compact 等操作如果影响的旧 Message 太多、会超过 IPC 上限，则使用 `mode = 'invalidate'`，renderer 丢弃该 Session 的已缓存 message pages，并通过 `session:get/message:list` 重取；不能发送无界事件。
+Project 集合有明确上限，因此提交完整 list snapshot。FileChange history 无条数上限，event 只能携带单条 summary 或全局 cache invalidation，不能携带完整历史。Session event 总是携带完整 `SessionRecord`；纯标题、模型或权限等 metadata 更新使用 `mode = 'none'`，常规消息提交使用非空 `upsert` records。Compact 等操作如果影响的旧 Message 太多、会超过 IPC 上限，则使用 `mode = 'invalidate'`，renderer 丢弃该 Session 的已缓存 message pages，并通过 `session:get/message:list` 重取；不能发送无界事件。
 
 Application service 的固定顺序是：
 
@@ -1157,7 +1163,7 @@ Backend 自主产生的 durable state 一律通过 commit event 通知；invoke 
 
 Durable-state changed events 由 commit 后的 backend event publisher 发送，不写 `session_change_log` 或通用 durable outbox。
 
-Project 和 FileChange 变更直接推送有界完整 list snapshot；renderer 用新 list 替换副本。Renderer reload 或 main-process restart 后再通过 bootstrap/`file-change:list` 获得当前值。
+Project 变更直接推送有界完整 list snapshot。FileChange `upsert` 更新命中的 page cache；`invalidate_all` 清空全部 FileChange pages，当前视图再按需调用 `file-change:list`。Renderer reload 或 main-process restart 后同样通过按需分页查询获得当前值。
 
 Desktop 单窗口场景中，主进程崩溃会同时终止 renderer；重启后本来就会 bootstrap，因此不需要 durable outbox/change log。
 
@@ -1508,13 +1514,15 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 
 ## 20. 当前迁移状态
 
-P0 regression gates、P1 shared canonical contracts、P2 SQLite/Persistence foundation、P3 canonical history/provider boundary 和 P4 isolated durable application/runtime target 已实现。P2 已提供 checksummed forward migrations、单连接串行 transaction、Project/Session/Message/FileChange repositories、shared-schema row codecs、有界查询、文件型临时测试数据库，以及 development Electron/Windows x64 package 的 `node:sqlite` 探针。
+P0 regression gates、P1 shared canonical contracts、P2 SQLite/Persistence foundation、P3 canonical history/provider boundary、P4 isolated durable application/runtime target 和 P5 durable FileChanges 已实现。P2 已提供 checksummed forward migrations、单连接串行 transaction、Project/Session/Message/FileChange repositories、shared-schema row codecs、有界查询、文件型临时测试数据库，以及 development Electron/Windows x64 package 的 `node:sqlite` 探针。
 
 P3 已把进程内 Agent loop 切到 canonical messages 与严格 `MessageHistoryCompiler`，由 Chat Completions Adapter 独占 wire DTO、HTTP/SSE transport、response normalization 和 continuation 恢复。每个 Run 冻结 main/compression/approval route、credential 与 model profile；AppConfig v9 检测到旧版或不兼容文件时删除并按默认值重建，Trace v2 明确拒绝旧 trace，trace fork 已移除。自动 compact 固定为 `system → harness* → root user replay → compact summary`，手动带正文固定为 `system → harness* → compact summary → new user`。
 
 P4 在 `electron/application/` 提供串行 application-state coordinator、Project/Session services、lazy `run:start`、普通 Session fork、带 ownership token 的 LiveSessionContextRegistry、bounded runtime snapshot 和 per-Session 串行 durable execution-state port。该 port 接入现有唯一 Agent loop，在 Provider 前提交首次 input；手动 compact 先提交隐藏 command journal，再异步提交 compact epoch；assistant/tool batch、interjection 与 Goal/Plan 保持事务原子。Provider completion 在任何工具/approval/append 前完成 canonical bounds 与 active-epoch callId 校验，commit 失败会从 SQLite 恢复或隔离 binding。临时数据库回归覆盖“发送 A → tool chain → final → dispose → reopen → 发送 B”、并发候选 ownership、deferred restore lifecycle guard 和 commit failure recovery。
 
-P4 target composition 仍只由 unit/integration tests 使用，尚未导入 production Desktop/Headless、legacy IPC/preload 或 renderer 默认路径，也不读取或修改真实 `userData/agent.db`。FileChange 工具仍使用 legacy store，留给 P5；domain-state IPC/renderer 和正式切流分别留给 P6/P7/P8。
+P5 为 target composition 注入 `FileChangeService` port：内建 `create_file/apply_patch/delete_file` 在副作用后校验 after state并立即写 SQLite，tool batch Message 仍稍后原子提交；历史按全应用字节预算 retention 并以 `(createdAt, id)` 分页。Revert 取得 Session lifecycle token 和共享 workspace writer，校验 after hash 后恢复 before snapshot，再以 OCC 标记记录。Target 的重启回归覆盖 durable list/revert、冲突、异常落库和 private snapshot 边界。
+
+P4/P5 target composition 仍只由 unit/integration tests 使用，尚未导入 production Desktop/Headless、legacy IPC/preload 或 renderer 默认路径，也不读取或修改真实 `userData/agent.db`。Production FileChange 工具因此仍使用 legacy JSON store；domain-state IPC/renderer 和正式切流分别留给 P6/P7/P8。
 
 当前 legacy 实现仍然：
 

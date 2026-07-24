@@ -18,7 +18,6 @@ import { SessionRepository } from '../persistence/session-repository'
 import { createTestDatabase } from '../persistence/test-database'
 import { approvedCallBrand } from '../tools/approved-tool-call'
 import { hash } from '../tools/file-tool-preconditions'
-import { createConfig } from '../session/session-manager-test-support'
 import { FileChangeExecutionError } from '../session/file-change-execution'
 import { ApplicationStateCoordinator } from './application-state-coordinator'
 import { FileChangeService } from './file-change-service'
@@ -36,6 +35,7 @@ describe('FileChangeService mutation records', () => {
           'durable content',
         ),
         diff: fileDiff('durable content'),
+        maximumPayloadBytes: 100_000_000,
       })
       expect(prepared).toBeDefined()
       await writeFile(
@@ -88,6 +88,7 @@ describe('FileChangeService mutation records', () => {
           'approved content',
         ),
         diff: fileDiff('approved content'),
+        maximumPayloadBytes: 100_000_000,
       })
       await writeFile(
         path.join(setup.workspace, 'created.txt'),
@@ -112,14 +113,6 @@ describe('FileChangeService mutation records', () => {
   it('rejects a recovery payload above the frozen byte limit before I/O', async () => {
     const setup = await setupService()
     try {
-      await setup.configStore.update({
-        version: 1,
-        kind: 'limits',
-        value: {
-          ...setup.configStore.getPublicConfig().limits,
-          fileChangeHistoryBytes: 1_000_000,
-        },
-      })
       const beforeContent = 'b'.repeat(900_000)
       const afterContent = `${beforeContent.slice(0, -1)}a`
       const diff = 'd'.repeat(120_000)
@@ -135,6 +128,7 @@ describe('FileChangeService mutation records', () => {
             diff,
           ),
           diff,
+          maximumPayloadBytes: 1_000_000,
         })
         .catch((cause: unknown) => cause)
 
@@ -153,7 +147,6 @@ async function setupService() {
   const testDatabase = await createTestDatabase()
   const workspace = path.join(testDatabase.directory, 'workspace')
   await mkdir(workspace)
-  const configStore = await createConfig(testDatabase.directory)
   const projectId = 'project:file-change' as ProjectId
   const sessionId = 'session:file-change' as SessionId
   await testDatabase.database.withTransaction((transaction) => {
@@ -184,14 +177,12 @@ async function setupService() {
   })
   const service = new FileChangeService({
     coordinator,
-    configStore,
     createId: () => 'file-change:test' as FileChangeId,
   })
   return {
     testDatabase,
     workspace,
     sessionId,
-    configStore,
     commits,
     service,
     dispose: () => testDatabase.dispose(),

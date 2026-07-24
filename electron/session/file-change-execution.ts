@@ -52,6 +52,7 @@ export interface FileChangeExecutionPort {
     workspace: string
     approvedCall: ApprovedToolCall
     diff: string
+    maximumPayloadBytes: number
   }): Promise<PreparedFileChange | undefined>
 
   commitMutation(input: {

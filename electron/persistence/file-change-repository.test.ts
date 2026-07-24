@@ -179,6 +179,139 @@ describe('FileChangeRepository retention', () => {
     }
   })
 
+  it('rolls back retention deletes when the surrounding insert transaction fails', async () => {
+    const testDatabase = await createTestDatabase()
+    const repository = new FileChangeRepository({ maxPayloadBytes: 4 })
+    const project = projectFixture()
+    const session = sessionFixture({ lastSeq: 0 })
+    const first = fileChangeFixture({
+      id: 'file-change:rollback-first' as FileChangeId,
+      callId: 'call:rollback-first' as CallId,
+      beforeContent: 'a',
+      diff: 'b',
+      payloadBytes: 2,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    })
+    try {
+      await testDatabase.database.withTransaction((transaction) => {
+        new ProjectRepository().insert(transaction, project)
+        new SessionRepository().insert(transaction, session)
+        repository.insertWithRetention(transaction, first)
+      })
+      await expect(
+        testDatabase.database.withTransaction((transaction) => {
+          repository.insertWithRetention(
+            transaction,
+            fileChangeFixture({
+              id: 'file-change:rollback-second' as FileChangeId,
+              callId: 'call:rollback-second' as CallId,
+              beforeContent: 'abc',
+              diff: 'd',
+              payloadBytes: 4,
+              createdAt: '2026-01-01T00:00:01.000Z',
+              updatedAt: '2026-01-01T00:00:01.000Z',
+            }),
+          )
+          throw new Error('rollback after retention')
+        }),
+      ).rejects.toThrow('rollback after retention')
+      expect(
+        testDatabase.database.read(
+          (reader) => repository.listPage(reader, session.id).records,
+        ),
+      ).toEqual([expect.objectContaining({ id: first.id })])
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
+  it('evicts equal timestamps deterministically by id', async () => {
+    const testDatabase = await createTestDatabase()
+    const repository = new FileChangeRepository({ maxPayloadBytes: 4 })
+    const project = projectFixture()
+    const session = sessionFixture({ lastSeq: 0 })
+    const timestamp = '2026-01-01T00:00:00.000Z'
+    try {
+      await testDatabase.database.withTransaction((transaction) => {
+        new ProjectRepository().insert(transaction, project)
+        new SessionRepository().insert(transaction, session)
+        for (const suffix of ['b', 'a', 'c']) {
+          repository.insertWithRetention(
+            transaction,
+            fileChangeFixture({
+              id: `file-change:stable-${suffix}` as FileChangeId,
+              callId: `call:stable-${suffix}` as CallId,
+              path: `${suffix}.txt`,
+              beforeContent: suffix,
+              diff: suffix,
+              payloadBytes: 2,
+              createdAt:
+                suffix === 'c' ? '2026-01-01T00:00:01.000Z' : timestamp,
+              updatedAt: timestamp,
+            }),
+          )
+        }
+      })
+      expect(
+        testDatabase.database
+          .read((reader) => repository.listPage(reader, session.id).records)
+          .map((record) => record.id),
+      ).toEqual(['file-change:stable-c', 'file-change:stable-b'])
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
+  it('converges to a lowered byte budget on the next insert', async () => {
+    const testDatabase = await createTestDatabase()
+    const repository = new FileChangeRepository({ maxPayloadBytes: 10 })
+    const project = projectFixture()
+    const session = sessionFixture({ lastSeq: 0 })
+    try {
+      await testDatabase.database.withTransaction((transaction) => {
+        new ProjectRepository().insert(transaction, project)
+        new SessionRepository().insert(transaction, session)
+        for (let index = 0; index < 2; index += 1) {
+          repository.insertWithRetention(
+            transaction,
+            fileChangeFixture({
+              id: `file-change:lower-${index}` as FileChangeId,
+              callId: `call:lower-${index}` as CallId,
+              path: `${index}.txt`,
+              beforeContent: 'abc',
+              diff: 'd',
+              payloadBytes: 4,
+              createdAt: `2026-01-01T00:00:0${index}.000Z`,
+              updatedAt: `2026-01-01T00:00:0${index}.000Z`,
+            }),
+          )
+        }
+        repository.insertWithRetention(
+          transaction,
+          fileChangeFixture({
+            id: 'file-change:lower-next' as FileChangeId,
+            callId: 'call:lower-next' as CallId,
+            path: 'next.txt',
+            beforeContent: 'a',
+            diff: 'b',
+            payloadBytes: 2,
+            createdAt: '2026-01-01T00:00:02.000Z',
+            updatedAt: '2026-01-01T00:00:02.000Z',
+          }),
+          5,
+        )
+      })
+      expect(
+        testDatabase.database
+          .read((reader) => repository.listPage(reader, session.id).records)
+          .map((record) => record.id),
+      ).toEqual(['file-change:lower-next'])
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
   it('rejects a single payload above the default 100 MB product limit', () => {
     expect(DEFAULT_FILE_CHANGE_HISTORY_BYTES).toBe(100_000_000)
     expect(() =>

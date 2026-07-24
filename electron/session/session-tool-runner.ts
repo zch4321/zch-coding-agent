@@ -322,6 +322,7 @@ export class SessionToolRunner {
                         workspace: session.workspace,
                         approvedCall: authorization.approvedCall,
                         diff: approvedDiff,
+                        maximumPayloadBytes: run.fileChangeHistoryBytes,
                       })
                     result = await this.#toolExecutor.execute(
                       authorization.approvedCall,

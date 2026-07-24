@@ -118,6 +118,7 @@ export class SessionRunController {
       controller,
       status: 'idle',
       toolTokensUsed: 0,
+      fileChangeHistoryBytes: config.limits.fileChangeHistoryBytes,
       done: Promise.resolve(),
       releaseRunSlot: access.releaseRunSlot,
       releaseWriter: access.releaseWriter,

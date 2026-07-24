@@ -6,7 +6,6 @@ import type {
   FileChangePage,
 } from '../../shared/file-change'
 import type { FileChangeId, ProjectId, SessionId } from '../../shared/ids'
-import type { ConfigStore } from '../config/store'
 import {
   toFileChangeSummary,
   type StoredFileChangeRecord,
@@ -45,7 +44,6 @@ const FILE_CHANGE_TOOL_OPERATIONS = {
 
 export interface FileChangeServiceOptions {
   coordinator: ApplicationStateCoordinator
-  configStore: ConfigStore
   fileChanges?: FileChangeRepository
   sessions?: SessionRepository
   projects?: ProjectRepository
@@ -71,7 +69,6 @@ export interface FileChangeRuntimeGuard {
 
 export class FileChangeService implements FileChangeExecutionPort {
   readonly #coordinator: ApplicationStateCoordinator
-  readonly #configStore: ConfigStore
   readonly #fileChanges: FileChangeRepository
   readonly #sessions: SessionRepository
   readonly #projects: ProjectRepository
@@ -82,7 +79,6 @@ export class FileChangeService implements FileChangeExecutionPort {
 
   constructor(options: FileChangeServiceOptions) {
     this.#coordinator = options.coordinator
-    this.#configStore = options.configStore
     this.#fileChanges = options.fileChanges ?? new FileChangeRepository()
     this.#sessions = options.sessions ?? new SessionRepository()
     this.#projects = options.projects ?? new ProjectRepository()
@@ -148,8 +144,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     const payloadBytes =
       Buffer.byteLength(beforeContent ?? '', 'utf8') +
       Buffer.byteLength(input.diff, 'utf8')
-    const maximumPayloadBytes =
-      this.#configStore.getPublicConfig().limits.fileChangeHistoryBytes
+    const maximumPayloadBytes = input.maximumPayloadBytes
     try {
       assertFileChangePayloadWithinLimit(payloadBytes, maximumPayloadBytes)
     } catch (error) {

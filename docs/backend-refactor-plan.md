@@ -307,7 +307,7 @@ V1 使用单 connection、串行 write queue 和短 transaction。数据库不�
 - [x] codec deep-equality、损坏 JSON/enum 拒绝和 nullable JSON。
 - [x] Project path uniqueness、Session cascade、Message seq/clientRequest uniqueness。
 - [x] 跨 Repository transaction rollback 不留下半条 Session/Message。
-- [x] 200 条/50 MB FileChange retention 与单条超限预检查。
+- [x] P2 建立 FileChange retention/repository 基线；P5 将其收敛为无条数上限、默认全应用 100 MB 字节预算和单条超限预检查。
 - [x] Electron development、Headless Node 24、Windows x64 packaged app 都能 open/migrate/query/close。
 
 ### 6.5 验收与回滚
@@ -480,19 +480,25 @@ P4 target composition 必须能在临时数据库中完成“发送 A → tool c
 
 ### 9.1 任务
 
-- [ ] 用 `FileChangeService/Repository` 替换 JSON store 的目标实现，公开只返回 `FileChangeSummary`。
-- [ ] 单条 payload 超限必须在 filesystem mutation 前拒绝。
-- [ ] filesystem mutation 后重新验证 after existence/hash，再写 FileChange。
-- [ ] FileChange 持久化失败时 terminal tool result 明确返回 `mutationSucceeded = true`、`CHANGE_HISTORY_PERSIST_FAILED`、`revertAvailable = false`。
-- [ ] 不保存 `afterContent`；revert 使用 beforeContent，冲突检查使用 after existence/hash。
-- [ ] retention 与 insert 在同一 transaction；只删除最旧 FileChanges，不修改 Messages/workspace。
-- [ ] revert 获取 workspace writer lease，成功后 revisioned update record。
+- [x] Durable target 注入 `FileChangeService/Repository`，legacy composition 继续使用 JSON store；公开只返回 `FileChangeSummary`。
+- [x] 单条 payload 使用 Run 起始冻结的配置预算，并在 filesystem mutation 前拒绝超限。
+- [x] filesystem mutation 后重新验证 after existence/hash，再写 FileChange；不匹配时返回成功警告且不伪造恢复记录。
+- [x] FileChange 持久化失败时 terminal tool result 明确返回 `mutationSucceeded = true`、`CHANGE_HISTORY_PERSIST_FAILED`、`revertAvailable = false`。
+- [x] 不保存 `afterContent`；revert 使用 beforeContent，冲突检查使用 after existence/hash。
+- [x] retention 与 insert 在同一 transaction；无条数上限，按冻结的全应用字节预算和 `(createdAt, id)` 只删除最旧 FileChanges。
+- [x] revert 获取 Session lifecycle token 和 workspace writer lease，成功后以 expected revision OCC 更新 record。
+- [x] FileChange 与 tool-batch Message 分开提交，FileChange commit/event 必须先于对应 Message commit。
+- [x] `beforeContent` 保持 backend-private，不进入 event、tool result、trace 或 public page。
 
 ### 9.2 测试与验收
 
-- [ ] create/patch/delete 重启后 list/revert。
-- [ ] RESOURCE_CHANGED、重复 revert、超限和 persistence failure。
-- [ ] `beforeContent` 不进入 IPC、renderer store、DOM 或默认 trace。
+- [x] create/patch/delete list/revert；isolated target 覆盖 dispose/reopen 后 list/revert。
+- [x] RESOURCE_CHANGED、stale revision、重复/并发 revert、超限、after mismatch 和 persistence failure。
+- [x] 超过 200 条可稳定分页；全应用 byte retention、降低预算后收敛、transaction rollback 和相同时间戳排序。
+- [x] 同 workspace writer Run/revert 互斥；不同 workspace 和 readonly Run 可并行；mutation lifecycle 阻止 load/archive/project eviction。
+- [x] `beforeContent` 不进入 shared contract、commit event、tool result、public page 或默认 trace；P6/P7 再验证正式 IPC/renderer/DOM。
+
+P5 保持 isolated target 边界：不注册新的 preload/IPC handler，不修改 renderer Diff 面板，不切 Desktop/Headless 默认 composition，也不迁移 `change-history.json`。这些分别由 P6/P7/P8/P9 处理。
 
 ---
 

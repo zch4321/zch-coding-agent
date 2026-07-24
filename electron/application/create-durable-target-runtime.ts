@@ -145,7 +145,6 @@ export async function createDurableTargetRuntime(
   })
   const fileChanges = new FileChangeService({
     coordinator,
-    configStore: options.configStore,
     fileChanges: fileChangeRepository,
     sessions: sessionRepository,
     projects: projectRepository,
