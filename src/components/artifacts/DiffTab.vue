@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NButton, NSelect, type SelectOption } from 'naive-ui'
+import {
+  NButton,
+  NEmpty,
+  NList,
+  NListItem,
+  NSelect,
+  NSpin,
+  NTag,
+  type SelectOption,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { FileChangeSummary } from '../../../shared/file-change'
 import { useAgentStore } from '../../stores/agent'
@@ -104,7 +113,9 @@ watch(
   <section class="artifact-content diff-view">
     <template v-if="agent.pendingApproval?.diff">
       <div class="diff-summary">
-        <span>{{ t('artifact.pendingChange') }}</span>
+        <span class="diff-summary-label">{{
+          t('artifact.pendingChange')
+        }}</span>
         <strong>{{ agent.pendingApproval.tool }}</strong>
         <p>{{ agent.pendingApproval.reason }}</p>
         <code v-if="agent.pendingApproval.diffHash">
@@ -145,11 +156,16 @@ watch(
           <span>{{
             t('artifact.changeCount', { count: agent.changes.length })
           }}</span>
-          <span v-if="agent.selectedFileChangeHasMore">
+          <NTag
+            v-if="agent.selectedFileChangeHasMore"
+            round
+            size="small"
+            type="warning"
+          >
             {{ t('artifact.historyTruncated') }}
-          </span>
+          </NTag>
         </div>
-        <span v-if="agent.changesLoading">{{ t('common.loading') }}</span>
+        <NSpin v-if="agent.changesLoading" size="small" />
       </div>
       <div class="change-filters">
         <NSelect
@@ -176,30 +192,45 @@ watch(
           class="change-filter-select"
         />
       </div>
-      <div
+      <NList
         v-if="filteredChanges.length"
         class="change-history-list"
-        role="list"
+        role="listbox"
+        hoverable
+        clickable
       >
-        <button
+        <NListItem
           v-for="change in filteredChanges"
           :key="change.id"
-          type="button"
+          class="change-history-item"
           :class="{ active: change.id === selectedChange.id }"
-          role="listitem"
+          role="option"
+          tabindex="0"
+          :aria-selected="change.id === selectedChange.id"
           @click="selectedChangeId = change.id"
+          @keydown.enter="selectedChangeId = change.id"
+          @keydown.space.prevent="selectedChangeId = change.id"
         >
-          <span>{{ change.path }}</span>
-          <small>
-            {{ t(`artifact.operation.${change.operation}`) }} ·
-            {{ new Date(change.createdAt).toLocaleString() }}
-          </small>
-          <em v-if="change.revertedAt">{{ t('artifact.reverted') }}</em>
-        </button>
-      </div>
-      <p v-else class="artifact-message">
-        {{ t('artifact.noFilteredChanges') }}
-      </p>
+          <div class="change-history-item-content">
+            <span>{{ change.path }}</span>
+            <small>
+              {{ t(`artifact.operation.${change.operation}`) }} ·
+              {{ new Date(change.createdAt).toLocaleString() }}
+            </small>
+          </div>
+          <template #suffix>
+            <NTag v-if="change.revertedAt" round size="small" type="success">
+              {{ t('artifact.reverted') }}
+            </NTag>
+          </template>
+        </NListItem>
+      </NList>
+      <NEmpty
+        v-else
+        class="artifact-message"
+        size="small"
+        :description="t('artifact.noFilteredChanges')"
+      />
       <div v-if="agent.selectedFileChangeHasMore" class="change-load-more">
         <NButton
           size="small"
@@ -211,10 +242,17 @@ watch(
         </NButton>
       </div>
       <div class="diff-summary">
-        <span>{{ t(`artifact.operation.${selectedChange.operation}`) }}</span>
-        <span v-if="selectedChange.diffTruncated">
-          {{ t('artifact.truncated') }}
+        <span class="diff-summary-label">
+          {{ t(`artifact.operation.${selectedChange.operation}`) }}
         </span>
+        <NTag
+          v-if="selectedChange.diffTruncated"
+          round
+          size="small"
+          type="warning"
+        >
+          {{ t('artifact.truncated') }}
+        </NTag>
         <strong>{{ selectedChange.path }}</strong>
         <code v-if="selectedChange.diffHash">{{
           selectedChange.diffHash
@@ -244,7 +282,7 @@ watch(
     </template>
     <template v-else-if="agent.latestReviewedApproval?.diff">
       <div class="diff-summary">
-        <span>
+        <span class="diff-summary-label">
           {{
             t('artifact.reviewed', {
               decision: agent.latestReviewedApproval.decision,
@@ -256,11 +294,12 @@ watch(
       </div>
       <pre class="diff-content">{{ agent.latestReviewedApproval.diff }}</pre>
     </template>
-    <div v-else class="artifact-empty">
-      <UiIcon name="diff" />
-      <h2>{{ t('artifact.noDiff') }}</h2>
-      <p>{{ t('artifact.noDiffHint') }}</p>
-    </div>
+    <NEmpty v-else class="artifact-empty" :description="t('artifact.noDiff')">
+      <template #icon><UiIcon name="diff" /></template>
+      <template #extra>
+        <span class="artifact-empty-hint">{{ t('artifact.noDiffHint') }}</span>
+      </template>
+    </NEmpty>
     <ConfirmDialog
       :show="Boolean(revertCandidate)"
       :title="t('artifact.revertDialogTitle')"

@@ -11,17 +11,8 @@
 }
 
 .context-chip {
-  display: inline-flex;
   min-width: 0;
   max-width: 100%;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 7px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-secondary);
-  background: var(--surface);
-  font-size: 11px;
 }
 
 .context-chip > span {
@@ -33,18 +24,6 @@
 
 .context-chip small {
   color: var(--text-muted);
-}
-
-.context-chip button {
-  display: grid;
-  width: 16px;
-  height: 16px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 0;
-  border-radius: 999px;
-  color: var(--text-muted);
-  background: transparent;
 }
 
 .context-chip .ui-icon {
@@ -279,13 +258,6 @@ code {
   word-break: break-word;
 }
 
-.approval-header > span {
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: capitalize;
-}
-
 .approval-card > p {
   color: var(--text-secondary);
   font-size: 13px;
@@ -297,14 +269,11 @@ code {
 }
 
 .approval-card {
-  border-color: #d4a72c;
-  background: #fff8c5;
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  background: color-mix(in srgb, var(--warning) 9%, var(--background));
 }
 
 .approval-meta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
   margin: 12px 0;
 }
 
@@ -312,35 +281,11 @@ code {
   margin: 0;
 }
 
-.approval-meta div {
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid rgba(154, 103, 0, 0.2);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.5);
-}
-
-.approval-meta dt {
-  color: var(--warning);
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
 .tool-approval-usage span {
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-}
-
-.approval-meta dd {
-  margin: 3px 0 0;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .tool-approval-note,
@@ -392,41 +337,23 @@ code {
 }
 
 .conversation-empty {
-  display: grid;
   min-height: 300px;
-  place-content: center;
-  justify-items: center;
-  gap: 9px;
-  color: var(--text-secondary);
-  text-align: center;
 }
 
-.empty-icon {
-  width: 42px;
-  height: 42px;
-  margin-bottom: 6px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: var(--surface);
-}
-
-.empty-icon .ui-icon {
+.conversation-empty .ui-icon {
   width: 21px;
   height: 21px;
 }
 
-.conversation-empty h2,
-.conversation-empty p {
-  margin: 0;
+.conversation-empty-extra {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
 }
 
-.conversation-empty h2 {
-  color: var(--text);
-  font-size: 18px;
-}
-
-.conversation-empty p {
+.conversation-empty-extra p {
   max-width: 430px;
+  margin: 0;
   font-size: 13px;
   line-height: 1.5;
 }

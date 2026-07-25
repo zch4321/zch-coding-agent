@@ -32,15 +32,6 @@
   font-size: 10px;
 }
 
-.truncated-badge {
-  flex: 0 0 auto;
-  padding: 4px 7px;
-  border-radius: 999px;
-  color: var(--warning) !important;
-  background: #fff8c5;
-  font-weight: 700;
-}
-
 .code-preview {
   min-width: max-content;
   padding: 10px 0 24px;
@@ -115,12 +106,12 @@
   background: var(--surface);
 }
 
-.diff-summary span,
+.diff-summary-label,
 .diff-summary strong {
   display: block;
 }
 
-.diff-summary span {
+.diff-summary-label {
   color: var(--warning);
   font-size: 10px;
   font-weight: 700;
@@ -192,14 +183,10 @@
 }
 
 .change-history-list {
-  display: flex;
   min-height: 44px;
   max-height: 132px;
   flex: 0 0 auto;
-  flex-direction: column;
-  gap: 2px;
   overflow: auto;
-  padding: 6px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -224,25 +211,20 @@
   min-width: 0;
 }
 
-.change-history-list button {
+.change-history-item {
   position: relative;
-  display: grid;
-  gap: 2px;
-  padding: 7px 9px;
-  border: 0;
-  border-radius: 6px;
-  color: var(--text-secondary);
-  background: transparent;
-  text-align: left;
 }
 
-.change-history-list button:hover,
-.change-history-list button.active {
-  color: var(--text);
-  background: #eaeef2;
+.change-history-item.active {
+  background: var(--surface-hover);
 }
 
-.change-history-list button span {
+.change-history-item-content {
+  min-width: 0;
+}
+
+.change-history-item-content > span {
+  display: block;
   overflow: hidden;
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 11px;
@@ -250,16 +232,9 @@
   white-space: nowrap;
 }
 
-.change-history-list button small {
+.change-history-item-content > small {
+  display: block;
+  margin-top: 2px;
   color: var(--text-muted);
   font-size: 9px;
-}
-
-.change-history-list button em {
-  position: absolute;
-  top: 7px;
-  right: 9px;
-  color: var(--success);
-  font-size: 9px;
-  font-style: normal;
 }

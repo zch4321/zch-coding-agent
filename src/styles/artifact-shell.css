@@ -64,18 +64,6 @@
   min-width: 0;
 }
 
-.provider-settings-button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-secondary);
-  background: var(--background);
-}
-
 .file-tab-label > span {
   max-width: 150px;
   min-width: 0;

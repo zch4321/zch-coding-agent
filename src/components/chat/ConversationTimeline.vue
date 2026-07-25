@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NAlert, NButton } from 'naive-ui'
+import { NAlert, NButton, NEmpty, NFloatButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
@@ -310,7 +310,7 @@ onBeforeUnmount(() => {
 
       <ApprovalCard v-if="agent.pendingApproval" :project-name="projectName" />
 
-      <div
+      <NEmpty
         v-if="
           visibleMessages.length === 0 &&
           durableTools.length === 0 &&
@@ -318,29 +318,39 @@ onBeforeUnmount(() => {
           !agent.pendingApproval
         "
         class="conversation-empty"
+        :description="
+          agent.workspacePath ? t('chat.workQuestion') : t('chat.openWorkspace')
+        "
       >
-        <span class="empty-icon"><UiIcon name="app" /></span>
-        <template v-if="!agent.workspacePath">
-          <h2>{{ t('chat.openWorkspace') }}</h2>
-          <p>{{ t('chat.openWorkspaceHint') }}</p>
-          <NButton type="primary" @click="agent.chooseWorkspace">
-            {{ t('app.chooseWorkspace') }}
-          </NButton>
+        <template #icon><UiIcon name="app" /></template>
+        <template #extra>
+          <div class="conversation-empty-extra">
+            <p>
+              {{
+                agent.workspacePath
+                  ? t('chat.workHint')
+                  : t('chat.openWorkspaceHint')
+              }}
+            </p>
+            <NButton
+              v-if="!agent.workspacePath"
+              type="primary"
+              @click="agent.chooseWorkspace"
+            >
+              {{ t('app.chooseWorkspace') }}
+            </NButton>
+          </div>
         </template>
-        <template v-else>
-          <h2>{{ t('chat.workQuestion') }}</h2>
-          <p>{{ t('chat.workHint') }}</p>
-        </template>
-      </div>
+      </NEmpty>
 
-      <button
+      <NFloatButton
         v-if="!followingOutput"
         class="back-to-bottom"
-        type="button"
+        :aria-label="t('chat.backBottom')"
         @click="scrollToBottom(true)"
       >
-        {{ t('chat.backBottom') }}
-      </button>
+        <UiIcon name="chevron-down" />
+      </NFloatButton>
       <span
         ref="bottomSentinel"
         class="conversation-bottom-sentinel"

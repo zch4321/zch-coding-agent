@@ -35,27 +35,5 @@
 }
 
 .send-button {
-  display: grid;
-  width: 34px;
-  height: 34px;
   flex: 0 0 auto;
-  place-items: center;
-  border: 0;
-  border-radius: 9px;
-  color: #ffffff;
-  background: var(--accent);
-}
-
-.send-button:hover:not(:disabled) {
-  background: #0550ae;
-}
-
-.send-button:disabled {
-  cursor: not-allowed;
-  color: #8c959f;
-  background: #eaeef2;
-}
-
-.send-button.stop {
-  background: var(--danger);
 }

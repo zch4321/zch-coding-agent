@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NCollapse, NCollapseItem, NTooltip } from 'naive-ui'
+import { NButton, NCollapse, NCollapseItem, NTag, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { RunId } from '../../../shared/ids'
 import type { ChatMessage } from '../../stores/agent-types'
@@ -31,47 +31,57 @@ function roleLabel(): string {
   <article class="chat-message" :class="message.role">
     <div class="message-meta">
       <strong>{{ roleLabel() }}</strong>
-      <span
+      <NTag
         v-if="message.role === 'assistant' && message.runId === activeRunId"
+        round
+        size="small"
+        type="info"
       >
         {{ t('chat.streaming') }}
-      </span>
-      <span
+      </NTag>
+      <NTag
         v-else-if="
           message.role === 'interjection' &&
           message.interjectionStatus === 'queued'
         "
-        class="interjection-status"
+        round
+        size="small"
+        type="warning"
       >
         {{ t('chat.interjectionQueued') }}
-      </span>
-      <span
+      </NTag>
+      <NTag
         v-else-if="
           message.role === 'interjection' &&
           message.interjectionStatus === 'injected'
         "
-        class="interjection-status"
+        round
+        size="small"
+        type="success"
       >
         {{ t('chat.interjectionInjected') }}
-      </span>
-      <span
+      </NTag>
+      <NTag
         v-else-if="
           message.role === 'interjection' &&
           message.interjectionStatus === 'superseded'
         "
-        class="interjection-status superseded"
+        round
+        size="small"
       >
         {{ t('chat.interjectionSuperseded') }}
-      </span>
-      <span
+      </NTag>
+      <NTag
         v-else-if="
           message.role === 'interjection' &&
           message.interjectionStatus === 'carryover'
         "
-        class="interjection-status carryover"
+        round
+        size="small"
+        type="info"
       >
         {{ t('chat.interjectionCarryover') }}
-      </span>
+      </NTag>
     </div>
     <div v-if="message.attachments?.length" class="message-attachments">
       <NTooltip
@@ -79,13 +89,15 @@ function roleLabel(): string {
         :key="attachment.kind + ':' + attachment.path"
       >
         <template #trigger>
-          <span class="context-chip">
-            <UiIcon
-              :name="attachment.kind === 'directory' ? 'folder' : 'file'"
-            />
+          <NTag class="context-chip" round size="small">
+            <template #icon>
+              <UiIcon
+                :name="attachment.kind === 'directory' ? 'folder' : 'file'"
+              />
+            </template>
             <span>{{ attachment.path }}</span>
             <small>{{ attachment.source }}</small>
-          </span>
+          </NTag>
         </template>
         {{ attachment.path }}
       </NTooltip>
@@ -104,53 +116,61 @@ function roleLabel(): string {
     >
       <NTooltip v-if="message.retryable">
         <template #trigger>
-          <button
-            type="button"
+          <NButton
             class="message-action"
+            quaternary
+            circle
+            size="small"
             :aria-label="t('chat.retryMessage')"
             @click="emit('retry', message.id, message.text)"
           >
-            <UiIcon name="restore" />
-          </button>
+            <template #icon><UiIcon name="restore" /></template>
+          </NButton>
         </template>
         {{ t('chat.retryMessageTitle') }}
       </NTooltip>
       <NTooltip v-if="message.editable">
         <template #trigger>
-          <button
-            type="button"
+          <NButton
             class="message-action"
+            quaternary
+            circle
+            size="small"
             :aria-label="t('chat.editMessage')"
             @click="emit('edit', message.id, message.text)"
           >
-            <UiIcon name="edit" />
-          </button>
+            <template #icon><UiIcon name="edit" /></template>
+          </NButton>
         </template>
         {{ t('chat.editMessageTitle') }}
       </NTooltip>
       <NTooltip>
         <template #trigger>
-          <button
-            type="button"
+          <NButton
             class="message-action"
+            quaternary
+            circle
+            size="small"
             :aria-label="t('chat.revertToHere')"
             @click="emit('revert', message.id, message.text)"
           >
-            <UiIcon name="undo" />
-          </button>
+            <template #icon><UiIcon name="undo" /></template>
+          </NButton>
         </template>
         {{ t('chat.revertToHereTitle') }}
       </NTooltip>
       <NTooltip>
         <template #trigger>
-          <button
-            type="button"
+          <NButton
             class="message-action"
+            quaternary
+            circle
+            size="small"
             :aria-label="t('chat.forkFromHere')"
             @click="emit('fork', message.id)"
           >
-            <UiIcon name="git-branch" />
-          </button>
+            <template #icon><UiIcon name="git-branch" /></template>
+          </NButton>
         </template>
         {{ t('chat.forkFromHereTitle') }}
       </NTooltip>

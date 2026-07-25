@@ -57,6 +57,11 @@ test.describe('Electron chat and tool workflows', () => {
     const composer = page.locator('.message-input-area textarea')
     await expect(composer).toBeEnabled()
     await composer.fill('Summarize @notes.md')
+    const suggestions = page.locator('.composer-suggestions')
+    await expect(suggestions).toBeVisible()
+    await expect(suggestions).toContainText('notes.md')
+    await composer.press('Escape')
+    await expect(suggestions).toBeHidden()
     await expect(page.getByRole('button', { name: '发送消息' })).toBeEnabled()
     await page.getByRole('button', { name: '发送消息' }).click()
 

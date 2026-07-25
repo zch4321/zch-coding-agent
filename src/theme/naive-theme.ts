@@ -1,6 +1,6 @@
 import type { GlobalThemeOverrides } from 'naive-ui'
 
-const palette = {
+export const palette = {
   background: '#ffffff',
   surface: '#f6f8fa',
   canvas: '#f3f3f3',

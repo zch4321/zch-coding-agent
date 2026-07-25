@@ -4,7 +4,9 @@ import {
   NButton,
   NDropdown,
   NInput,
+  NPopover,
   NSelect,
+  NTag,
   NTooltip,
   type DropdownOption,
   type GlobalThemeOverrides,
@@ -441,54 +443,65 @@ watch(inputDisabled, (disabled) => {
 
 <template>
   <footer class="message-input-area">
-    <ComposerSuggestionPanel
-      v-if="suggestionPanelVisible"
-      :items="suggestionItems"
-      :active-index="activeSuggestionIndex"
-      :title="suggestionTitle"
-      :loading="suggestionLoading"
-      :empty-text="suggestionEmptyText"
-      @hover="activeSuggestionIndex = $event"
-      @select="selectSuggestion"
-    />
     <div v-if="agent.contextAttachments.length" class="composer-context-chips">
       <NTooltip
         v-for="attachment in agent.contextAttachments"
         :key="attachment.kind + ':' + attachment.path"
       >
         <template #trigger>
-          <span class="context-chip">
-            <UiIcon
-              :name="attachment.kind === 'directory' ? 'folder' : 'file'"
-            />
+          <NTag
+            class="context-chip"
+            round
+            size="small"
+            closable
+            @close="
+              agent.removeContextAttachment(attachment.path, attachment.kind)
+            "
+          >
+            <template #icon>
+              <UiIcon
+                :name="attachment.kind === 'directory' ? 'folder' : 'file'"
+              />
+            </template>
             <span>{{ attachment.path }}</span>
-            <button
-              type="button"
-              :aria-label="t('chat.removeContext')"
-              @click="
-                agent.removeContextAttachment(attachment.path, attachment.kind)
-              "
-            >
-              <UiIcon name="close" />
-            </button>
-          </span>
+          </NTag>
         </template>
         {{ attachment.path }}
       </NTooltip>
     </div>
-    <NInput
-      ref="composerInput"
-      v-model:value="agent.input"
-      type="textarea"
-      :autosize="{ minRows: 2, maxRows: 7 }"
-      :placeholder="sendHint"
-      :disabled="textareaDisabled"
-      :theme-overrides="composerInputThemeOverrides"
-      @keydown="handleKeydown"
-      @click="scheduleSuggestionRefresh"
-      @keyup="handleKeyup"
-      @focus="scheduleSuggestionRefresh"
-    />
+    <NPopover
+      trigger="manual"
+      placement="top-start"
+      raw
+      :show="suggestionPanelVisible"
+      :show-arrow="false"
+      :to="false"
+    >
+      <template #trigger>
+        <NInput
+          ref="composerInput"
+          v-model:value="agent.input"
+          type="textarea"
+          :autosize="{ minRows: 2, maxRows: 7 }"
+          :placeholder="sendHint"
+          :disabled="textareaDisabled"
+          :theme-overrides="composerInputThemeOverrides"
+          @keydown="handleKeydown"
+          @click="scheduleSuggestionRefresh"
+          @keyup="handleKeyup"
+          @focus="scheduleSuggestionRefresh"
+        />
+      </template>
+      <ComposerSuggestionPanel
+        :items="suggestionItems"
+        :active-index="activeSuggestionIndex"
+        :title="suggestionTitle"
+        :loading="suggestionLoading"
+        :empty-text="suggestionEmptyText"
+        @hover="activeSuggestionIndex = $event"
+        @select="selectSuggestion"
+      />
+    </NPopover>
     <div class="message-input-toolbar">
       <div class="input-selectors">
         <NDropdown
@@ -497,8 +510,14 @@ watch(inputDisabled, (disabled) => {
           :disabled="inputDisabled"
           @select="handleContextSelect"
         >
-          <NButton size="small" secondary :disabled="inputDisabled">
-            <UiIcon name="plus" />
+          <NButton
+            size="small"
+            secondary
+            circle
+            :aria-label="t('chat.addFileContext')"
+            :disabled="inputDisabled"
+          >
+            <template #icon><UiIcon name="plus" /></template>
           </NButton>
         </NDropdown>
         <NSelect
@@ -525,14 +544,16 @@ watch(inputDisabled, (disabled) => {
         />
         <NTooltip>
           <template #trigger>
-            <button
+            <NButton
               class="provider-settings-button"
-              type="button"
+              quaternary
+              circle
+              size="small"
               :aria-label="t('chat.providerSettings')"
               @click="emit('provider')"
             >
-              <UiIcon name="settings" />
-            </button>
+              <template #icon><UiIcon name="settings" /></template>
+            </NButton>
           </template>
           {{ t('chat.providerSettings') }}
         </NTooltip>
@@ -561,39 +582,42 @@ watch(inputDisabled, (disabled) => {
       <NTooltip v-if="agent.activeRunId">
         <template #trigger>
           <div class="run-actions">
-            <button
+            <NButton
               class="send-button interject"
-              type="button"
+              circle
+              type="primary"
               :aria-label="t('chat.interjectionSend')"
               :disabled="!agent.canInterject"
               @click="agent.sendInterjection"
             >
-              <UiIcon name="send" />
-            </button>
-            <button
+              <template #icon><UiIcon name="send" /></template>
+            </NButton>
+            <NButton
               class="send-button stop"
-              type="button"
+              circle
+              type="error"
               :aria-label="t('chat.stop')"
               :disabled="agent.runStatus === 'cancelling'"
               @click="() => agent.interruptRun()"
             >
-              <UiIcon name="stop" />
-            </button>
+              <template #icon><UiIcon name="stop" /></template>
+            </NButton>
           </div>
         </template>
         {{ t('chat.interjectionSend') }} / {{ t('chat.stop') }}
       </NTooltip>
       <NTooltip v-else>
         <template #trigger>
-          <button
+          <NButton
             class="send-button"
-            type="button"
+            circle
+            type="primary"
             :aria-label="t('chat.send')"
             :disabled="!agent.canSend"
             @click="agent.sendMessage"
           >
-            <UiIcon name="send" />
-          </button>
+            <template #icon><UiIcon name="send" /></template>
+          </NButton>
         </template>
         {{ t('chat.send') }}
       </NTooltip>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NButton } from 'naive-ui'
+import { NButton, NDescriptions, NDescriptionsItem, NTag } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
@@ -23,19 +23,25 @@ const { t } = useI18n()
         <span class="tool-kicker">{{ t('chat.approvalRequired') }}</span>
         <strong>{{ agent.pendingApproval.tool }}</strong>
       </div>
-      <span>{{ agent.pendingApproval.kind }}</span>
+      <NTag round size="small" type="warning">
+        {{ agent.pendingApproval.kind }}
+      </NTag>
     </div>
     <p>{{ agent.pendingApproval.reason }}</p>
-    <dl class="approval-meta">
-      <div>
-        <dt>{{ t('chat.workspaceScope') }}</dt>
-        <dd>{{ projectName }}</dd>
-      </div>
-      <div>
-        <dt>{{ t('chat.expires') }}</dt>
-        <dd>{{ agent.pendingApproval.expiresAt }}</dd>
-      </div>
-    </dl>
+    <NDescriptions
+      class="approval-meta"
+      label-placement="top"
+      :column="2"
+      size="small"
+      bordered
+    >
+      <NDescriptionsItem :label="t('chat.workspaceScope')">
+        {{ projectName }}
+      </NDescriptionsItem>
+      <NDescriptionsItem :label="t('chat.expires')">
+        {{ agent.pendingApproval.expiresAt }}
+      </NDescriptionsItem>
+    </NDescriptions>
     <pre class="approval-args">{{
       JSON.stringify(agent.pendingApproval.args, null, 2)
     }}</pre>

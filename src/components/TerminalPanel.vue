@@ -19,6 +19,7 @@ import type { TerminalId } from '../../shared/ids'
 import type { TerminalInfo } from '../../shared/terminal'
 import { useAgentStore } from '../stores/agent'
 import { TerminalSequenceTracker } from '../terminal-sequence'
+import { palette } from '../theme/naive-theme'
 import UiIcon from './UiIcon.vue'
 
 const emit = defineEmits<{
@@ -83,21 +84,21 @@ async function attachView(
     lineHeight: 1.25,
     scrollback: 5_000,
     theme: {
-      background: '#fbfbfb',
-      foreground: '#24292f',
-      cursor: '#0969da',
-      selectionBackground: '#add6ff',
-      black: '#24292f',
-      red: '#cf222e',
-      green: '#116329',
-      yellow: '#9a6700',
-      blue: '#0969da',
+      background: palette.background,
+      foreground: palette.text,
+      cursor: palette.accent,
+      selectionBackground: palette.accentSoft,
+      black: palette.text,
+      red: palette.danger,
+      green: palette.successHover,
+      yellow: palette.warning,
+      blue: palette.accent,
       magenta: '#8250df',
       cyan: '#1b7c83',
       white: '#d0d7de',
       brightBlack: '#57606a',
-      brightRed: '#a40e26',
-      brightGreen: '#1a7f37',
+      brightRed: palette.dangerHover,
+      brightGreen: palette.success,
       brightYellow: '#bf8700',
       brightBlue: '#218bff',
       brightMagenta: '#a475f9',
