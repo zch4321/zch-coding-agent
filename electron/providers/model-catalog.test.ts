@@ -73,6 +73,47 @@ describe('DeepSeek model catalog', () => {
     )
   })
 
+  it('cancels a streamed catalog as soon as its byte limit is exceeded', async () => {
+    let cancelled = false
+    const chunk = new Uint8Array(600_000)
+    const fetchImpl = vi.fn(async () => {
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.enqueue(chunk)
+          },
+          cancel() {
+            cancelled = true
+          },
+        }),
+        { status: 200 },
+      )
+    }) as typeof fetch
+
+    await expect(
+      fetchDeepSeekModelCatalog({
+        baseURL: 'https://api.deepseek.com',
+        apiKey: 'secret',
+        fetchImpl,
+      }),
+    ).rejects.toThrow('Provider model catalog is too large')
+    expect(cancelled).toBe(true)
+  })
+
+  it('rejects an empty response body as an invalid catalog', async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(null, { status: 200 }),
+    ) as typeof fetch
+
+    await expect(
+      fetchDeepSeekModelCatalog({
+        baseURL: 'https://api.deepseek.com',
+        apiKey: 'secret',
+        fetchImpl,
+      }),
+    ).rejects.toThrow('Provider returned an invalid model catalog')
+  })
+
   it('uses override, builtin and conservative capability sources in order', () => {
     const internal: AppConfig = structuredClone(DEFAULT_APP_CONFIG)
     const provider = internal.providers[0]

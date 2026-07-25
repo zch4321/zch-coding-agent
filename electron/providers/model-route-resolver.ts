@@ -63,33 +63,60 @@ async function resolve(
   }
 }
 
+/**
+ * Freezes the main and compression routes for a run while treating the
+ * automatic-approval route as an optional enhancement.
+ */
 export async function resolveRunRoutes(
   configStore: ConfigStore,
   selection: ModelSelection,
+  options: {
+    onDiagnostic?: (message: string, error?: unknown) => void
+  } = {},
 ): Promise<{
   main: ResolvedModelRoute
   compression: ResolvedModelRoute
-  approval: ResolvedModelRoute
+  approval?: ResolvedModelRoute
 }> {
   const config = configStore.getPublicConfig()
   const approvalProvider = getProviderConfig(
     config,
     config.approval.approverProviderId,
   )
+  const [main, compression] = await Promise.all([
+    resolve(configStore, config, selection, 'main'),
+    resolve(configStore, config, selection, 'compression'),
+  ])
   if (!approvalProvider) {
-    throw new Error(
+    options.onDiagnostic?.(
       `Approval Provider is not configured: ${config.approval.approverProviderId}`,
     )
+    return { main, compression }
   }
   const approvalSelection: ModelSelection = {
     providerId: approvalProvider.id,
     model: config.approval.approverModel,
-    reasoning: approvalProvider.reasoning,
+    reasoning:
+      approvalProvider.reasoning === 'off'
+        ? 'high'
+        : approvalProvider.reasoning,
   }
-  const [main, compression, approval] = await Promise.all([
-    resolve(configStore, config, selection, 'main'),
-    resolve(configStore, config, selection, 'compression'),
-    resolve(configStore, config, approvalSelection, 'approval'),
-  ])
-  return { main, compression, approval }
+  try {
+    return {
+      main,
+      compression,
+      approval: await resolve(
+        configStore,
+        config,
+        approvalSelection,
+        'approval',
+      ),
+    }
+  } catch (error) {
+    options.onDiagnostic?.(
+      'Automatic approval route is unavailable; human approval remains enabled',
+      error,
+    )
+    return { main, compression }
+  }
 }

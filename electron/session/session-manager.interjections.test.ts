@@ -263,6 +263,14 @@ describe('SessionManager live interjections', () => {
       type: 'interjection.carryover',
       content: 'Actually also mention the interjection',
     })
+    expect(() =>
+      manager.interjectRun({
+        sessionId,
+        runId,
+        message: 'Too late for the completed run',
+        clientRequestId: 'request-final-too-late',
+      }),
+    ).toThrow('does not have an active run')
 
     const nextRunId = manager.startRun({
       sessionId,
@@ -344,6 +352,68 @@ describe('SessionManager live interjections', () => {
           envelope.event.status === 'superseded',
       ),
     ).toBe(true)
+    await manager.closeSession(sessionId)
+  })
+
+  it('re-queues a drained interjection when its durable commit fails', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-interject-commit-failure-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    await writeFile(path.join(workspace, 'notes.md'), 'note body\n')
+    const store = await createConfig(directory)
+    const provider = new InterjectionProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+      executionState: {
+        async commit(_session, input) {
+          if (input.reason === 'interjection') {
+            throw new Error('durable commit failed')
+          }
+          return undefined
+        },
+      },
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'yolo',
+      provider: 'deepseek',
+    })
+    const runId = manager.startRun({
+      sessionId,
+      message: 'Read notes.md',
+      clientRequestId: 'request-interject-commit-base',
+    })
+
+    await provider.firstTurnConsumed.promise
+    expect(
+      manager.interjectRun({
+        sessionId,
+        runId,
+        message: 'Restore this queued interjection',
+        clientRequestId: 'request-interject-commit-failure',
+      }),
+    ).toBe(true)
+
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === runId &&
+          event.status === 'failed',
+      ),
+    )
+    const statuses = sent.flatMap(({ event }) =>
+      event.type === 'interjection.updated' ? [event.status] : [],
+    )
+    expect(statuses).toContain('injected')
+    expect(statuses.at(-1)).toBe('superseded')
+    expect(provider.calls).toBe(1)
     await manager.closeSession(sessionId)
   })
 })

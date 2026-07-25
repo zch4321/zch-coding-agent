@@ -103,7 +103,7 @@ describe('SessionManager approvals', () => {
     expect(toolCall?.diffHash).toEqual(expect.any(String))
   })
 
-  it('uses JSON mode and respects disabled reasoning for Auto approval requests', async () => {
+  it('uses JSON mode and raises disabled reasoning for Auto approval requests', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'agent-session-auto-approval-json-'),
     )
@@ -194,10 +194,10 @@ describe('SessionManager approvals', () => {
       expect.objectContaining({
         model: 'approval-model',
         response_format: { type: 'json_object' },
-        thinking: { type: 'disabled' },
+        thinking: { type: 'enabled' },
+        reasoning_effort: 'high',
       }),
     ])
-    expect(approvalBodies[0]).not.toHaveProperty('reasoning_effort')
     await manager.closeSession(sessionId)
   })
 

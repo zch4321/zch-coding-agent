@@ -124,52 +124,52 @@ export class ProviderAutoApprover implements AutoApprover {
     }, this.#timeoutMs)
     const relayAbort = () => controller.abort(signal.reason)
     signal.addEventListener('abort', relayAbort, { once: true })
-    const sessionId = 'approval:session' as SessionId
-    const messages: MessageRecord[] = [
-      {
-        schemaVersion: 1,
-        id: 'approval:system' as MessageId,
-        sessionId,
-        seq: 1,
-        visibility: 'hidden',
-        inHistory: true,
-        createdAt: new Date().toISOString(),
-        kind: 'system_instruction',
-        parts: [{ type: 'text', text: this.#systemPrompt }],
-      },
-      {
-        schemaVersion: 1,
-        id: 'approval:user' as MessageId,
-        sessionId,
-        seq: 2,
-        visibility: 'visible',
-        turnId: 'approval:user' as MessageId,
-        inHistory: true,
-        createdAt: new Date().toISOString(),
-        kind: 'user_input',
-        clientRequestId: 'approval-request',
-        parts: [{ type: 'text', text: JSON.stringify(jsonValue(input)) }],
-        metadata: {
-          schemaVersion: 1,
-          submission: { type: 'message' },
-        },
-      },
-    ]
-    const adapter = chatAdapter(this.#route.adapterId)
-    const compiled = adapter.compile({
-      history: {
-        sessionId,
-        messages,
-        sourceHash: canonicalHash(messages),
-      },
-      route: this.#route,
-      tools: [],
-      responseFormat: { type: 'json_object' },
-    })
     let text = ''
     let usage: JsonValue | undefined
 
     try {
+      const sessionId = 'approval:session' as SessionId
+      const messages: MessageRecord[] = [
+        {
+          schemaVersion: 1,
+          id: 'approval:system' as MessageId,
+          sessionId,
+          seq: 1,
+          visibility: 'hidden',
+          inHistory: true,
+          createdAt: new Date().toISOString(),
+          kind: 'system_instruction',
+          parts: [{ type: 'text', text: this.#systemPrompt }],
+        },
+        {
+          schemaVersion: 1,
+          id: 'approval:user' as MessageId,
+          sessionId,
+          seq: 2,
+          visibility: 'visible',
+          turnId: 'approval:user' as MessageId,
+          inHistory: true,
+          createdAt: new Date().toISOString(),
+          kind: 'user_input',
+          clientRequestId: 'approval-request',
+          parts: [{ type: 'text', text: JSON.stringify(jsonValue(input)) }],
+          metadata: {
+            schemaVersion: 1,
+            submission: { type: 'message' },
+          },
+        },
+      ]
+      const adapter = chatAdapter(this.#route.adapterId)
+      const compiled = adapter.compile({
+        history: {
+          sessionId,
+          messages,
+          sourceHash: canonicalHash(messages),
+        },
+        route: this.#route,
+        tools: [],
+        responseFormat: { type: 'json_object' },
+      })
       for await (const event of this.#provider.streamChat({
         messages: compiled.messages,
         tools: [],

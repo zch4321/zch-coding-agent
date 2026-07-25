@@ -161,7 +161,7 @@ export class SessionCompactCoordinator {
       history.messages,
       false,
     )
-    await this.#rewrite(session, run, {
+    const replayedRootUserMessageId = await this.#rewrite(session, run, {
       summary,
       sourceHash: history.sourceHash,
       replacesThroughSeq: history.messages.at(-1)!.seq,
@@ -169,6 +169,10 @@ export class SessionCompactCoordinator {
       replayRootUser: true,
       commit: true,
     })
+    if (run.rootUserMessageId && !replayedRootUserMessageId) {
+      throw new Error('Auto-compact root user message was not rebuilt')
+    }
+    run.rootUserMessageId = replayedRootUserMessageId
   }
 
   /**
@@ -417,6 +421,7 @@ export class SessionCompactCoordinator {
       scope: 'compression',
       config,
       provider: binding.provider,
+      model: binding.snapshot.model,
       modelProfile: binding.modelProfile,
       raw: completed.usage,
     })
@@ -507,16 +512,16 @@ export class SessionCompactCoordinator {
             : {}),
         })
       }
-      if (input.replayRootUser && root?.kind === 'user_input') {
-        const originalId =
-          root.metadata && 'replayedFromMessageId' in root.metadata
-            ? root.metadata.replayedFromMessageId
-            : root.id
-        appendUserInput(session, {
-          content: messageText(root),
-          replayedFromMessageId: originalId,
-        })
-      }
+      const replayedRootUser =
+        input.replayRootUser && root?.kind === 'user_input'
+          ? appendUserInput(session, {
+              content: messageText(root),
+              replayedFromMessageId:
+                root.metadata && 'replayedFromMessageId' in root.metadata
+                  ? root.metadata.replayedFromMessageId
+                  : root.id,
+            })
+          : undefined
       appendCompactSummary(session, {
         content: compactHistoryContent(
           [input.summary, '', compactOrchestrationState(session)].join('\n'),
@@ -555,7 +560,7 @@ export class SessionCompactCoordinator {
           invalidate: true,
         })
       }
-      return derivedUser?.id
+      return derivedUser?.id ?? replayedRootUser?.id
     } catch (error) {
       session.history = previousHistory
       session.nextMessageSeq = previousNextSeq

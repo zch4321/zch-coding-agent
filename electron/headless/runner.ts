@@ -15,6 +15,7 @@ import type { RunCompletion } from '../runtime/runtime-events'
 import type { RuntimeEventListener } from '../runtime/runtime-events'
 import type { BenchmarkAgentCase } from '../../shared/benchmark'
 import type { ProjectId, SessionId } from '../../shared/ids'
+import { getProviderConfig } from '../../shared/config'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import { writeJsonAtomic } from '../config/atomic-file'
 import { prepareHeadlessConfig } from './config'
@@ -101,6 +102,16 @@ export async function runHeadlessAgent(
     artifactsDirectory,
     environment: options.environment,
   })
+  const provider = options.config.provider
+  const resolvedProvider = getProviderConfig(
+    prepared.configStore.getPublicConfig(),
+    provider.id,
+  )
+  if (!resolvedProvider) {
+    throw new HeadlessRunInputError(
+      `Prepared provider is not available: ${provider.id}`,
+    )
+  }
   const writer = new HeadlessEventWriter(options.output)
   const metrics = new HeadlessRunMetrics(writer)
   let forwardRuntimeEvents = true
@@ -138,7 +149,6 @@ export async function runHeadlessAgent(
       options.signal?.reason ?? new Error('Headless run cancelled'),
     )
 
-  const provider = options.config.provider
   writer.write({
     type: 'runtime.started',
     workspace,
@@ -187,7 +197,7 @@ export async function runHeadlessAgent(
           modelSelection: {
             providerId: provider.id,
             model: provider.model,
-            reasoning: provider.reasoning ?? 'off',
+            reasoning: resolvedProvider.reasoning,
           },
           permissionMode: 'yolo',
           message: options.task,

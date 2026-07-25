@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { JsonValue } from '../../shared/json'
 import type { CallId, FileChangeId } from '../../shared/ids'
 import type {
@@ -18,6 +19,7 @@ import { SessionManager } from './session-manager'
 import {
   createConfig,
   createIpcTestEventSink,
+  waitFor,
 } from './session-manager-test-support'
 
 class DeferredReadProvider implements LLMProvider {
@@ -189,6 +191,58 @@ describe('SessionManager durable FileChange port', () => {
     expect(JSON.stringify(provider.requests[1])).toContain(
       '\\"revertAvailable\\":false',
     )
+    await manager.closeSession(sessionId)
+  })
+
+  it('fails closed before file I/O when durable mutation preparation fails', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-file-change-prepare-failure-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const configStore = await createConfig(directory)
+    const provider = new CreateWarningProvider()
+    const sent: AgentEventEnvelope[] = []
+    const commitMutation = vi.fn()
+    const manager = new SessionManager({
+      configStore,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
+      fileChangeExecution: {
+        prepareMutation: vi.fn(async () => {
+          throw new Error('database unavailable')
+        }),
+        commitMutation,
+      },
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'auto',
+      provider: 'deepseek',
+    })
+    const runId = manager.startRun({
+      sessionId,
+      message: 'Create the file only after durable preparation',
+      clientRequestId: 'request:file-change-prepare-failure',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === runId &&
+          event.status === 'failed',
+      ),
+    )
+    await expect(
+      readFile(path.join(workspace, 'warning.txt'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(commitMutation).not.toHaveBeenCalled()
+    expect(provider.calls).toBe(1)
     await manager.closeSession(sessionId)
   })
 })

@@ -165,6 +165,24 @@ describe('SessionManager cancellation and forks', () => {
           envelope.event.status === 'cancelled',
       ),
     )
+    const cancellingIndex = sent.findIndex(
+      ({ event }) =>
+        event.type === 'run.status' &&
+        event.runId === firstRunId &&
+        event.status === 'cancelling',
+    )
+    expect(cancellingIndex).toBeGreaterThanOrEqual(0)
+    expect(
+      sent
+        .slice(cancellingIndex + 1)
+        .some(
+          ({ event }) =>
+            event.type === 'run.status' &&
+            event.runId === firstRunId &&
+            event.status === 'running_tools',
+        ),
+    ).toBe(false)
+    expect(manager.interruptRun(sessionId, firstRunId)).toBe(false)
 
     manager.startRun({
       sessionId,

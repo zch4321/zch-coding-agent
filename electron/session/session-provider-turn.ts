@@ -372,6 +372,7 @@ export class SessionProviderTurnRunner {
       scope: 'main',
       config,
       provider: binding.provider,
+      model: binding.snapshot.model,
       modelProfile: binding.modelProfile,
       raw: completed.usage,
     })

@@ -133,6 +133,7 @@ export interface ActiveRun {
   fileChangeHistoryBytes: number
   pendingApproval?: PendingApproval
   pendingInterjections: RunInterjection[]
+  acceptingInterjections: boolean
   // Tracks every clientRequestId this run has accepted (queued, injected,
   // superseded or carried over) so duplicate IPC retries are no-ops across
   // the full interjection lifecycle, not just while queued.
@@ -147,7 +148,7 @@ export interface ActiveRun {
   routes?: {
     main: ResolvedModelRoute
     compression: ResolvedModelRoute
-    approval: ResolvedModelRoute
+    approval?: ResolvedModelRoute
   }
 }
 

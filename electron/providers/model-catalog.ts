@@ -78,11 +78,7 @@ export async function fetchOpenAICompatibleModelCatalog(options: {
         signal: controller.signal,
       },
     )
-    const body = await response.text()
-
-    if (Buffer.byteLength(body, 'utf8') > MAX_CATALOG_BYTES) {
-      throw new ModelCatalogError('Provider model catalog is too large')
-    }
+    const body = await readBoundedResponseBody(response)
 
     if (!response.ok) {
       throw new ModelCatalogError(
@@ -138,6 +134,42 @@ export async function fetchOpenAICompatibleModelCatalog(options: {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', relayAbort)
   }
+}
+
+async function readBoundedResponseBody(response: Response): Promise<string> {
+  if (!response.body) {
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    if (bytes.byteLength > MAX_CATALOG_BYTES) {
+      throw new ModelCatalogError('Provider model catalog is too large')
+    }
+    return new TextDecoder().decode(bytes)
+  }
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let totalBytes = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      totalBytes += value.byteLength
+      if (totalBytes > MAX_CATALOG_BYTES) {
+        await reader.cancel().catch(() => undefined)
+        throw new ModelCatalogError('Provider model catalog is too large')
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const body = new Uint8Array(totalBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    body.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(body)
 }
 
 export const fetchDeepSeekModelCatalog = fetchOpenAICompatibleModelCatalog

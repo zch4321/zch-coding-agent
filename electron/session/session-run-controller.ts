@@ -131,6 +131,7 @@ export class SessionRunController {
       pendingSideEffects: new Set(),
       writerReleasePending: false,
       pendingInterjections: [],
+      acceptingInterjections: true,
       processedInterjectionIds: new Set(),
       ...(retryUserMessageId ? { rootUserMessageId: retryUserMessageId } : {}),
       harnessMessageIds: [],
@@ -177,7 +178,11 @@ export class SessionRunController {
     if (!session.activeRun || session.activeRun.runId !== runId) {
       return false
     }
+    if (isTerminalRunStatus(session.activeRun.status)) {
+      return false
+    }
 
+    session.activeRun.acceptingInterjections = false
     this.setRunStatus(session, session.activeRun, 'cancelling')
     this.#interjections.supersedePending(session, session.activeRun)
     session.activeRun.pendingApproval?.resolve({ decision: 'cancelled' })
@@ -194,6 +199,7 @@ export class SessionRunController {
       return true
     }
 
+    session.activeRun.acceptingInterjections = false
     this.#interjections.supersedePending(session, session.activeRun)
     session.activeRun.controller.abort(new Error('Session closed'))
     session.activeRun.pendingApproval?.resolve({ decision: 'cancelled' })
@@ -251,6 +257,9 @@ export class SessionRunController {
 
     run.writerReleasePending = true
     void Promise.allSettled(pending).then(() => {
+      for (const settlement of pending) {
+        run.pendingSideEffects.delete(settlement)
+      }
       run.writerReleasePending = false
       this.#releaseWriterWhenSettled(run)
     })
@@ -315,6 +324,7 @@ export class SessionRunController {
       run.routes = await resolveRunRoutes(
         this.#configStore,
         session.modelSelection,
+        { onDiagnostic: this.#onDiagnostic },
       )
       const maxStepsPerRun = runConfig.limits.maxStepsPerRun
       let runInputCommitted = retryUserMessageId !== undefined
@@ -470,24 +480,12 @@ export class SessionRunController {
         // next model continuation. This runs after the previous tool batch has
         // completed (and never splits an assistant tool_call from its
         // tool_result, because executeToolCalls has already finished).
-        const beforeInterjectionSeq = session.nextMessageSeq
-        await this.#interjections.drain(session, run)
-        if (session.nextMessageSeq !== beforeInterjectionSeq) {
-          await this.#executionState?.commit(session, {
-            reason: 'interjection',
-          })
-        }
+        await this.#drainInterjections(session, run)
         await this.#compact.maybeAutoCompactBeforeProviderCall(session, run)
         // Compaction itself is a streamed Provider call. Flush interjections
         // that arrived while the summary was being generated into the newly
         // rebuilt epoch before issuing the continuation request.
-        const beforePostCompactInterjectionSeq = session.nextMessageSeq
-        await this.#interjections.drain(session, run)
-        if (session.nextMessageSeq !== beforePostCompactInterjectionSeq) {
-          await this.#executionState?.commit(session, {
-            reason: 'interjection',
-          })
-        }
+        await this.#drainInterjections(session, run)
 
         const completed = await this.#providerTurns.callProvider(
           session,
@@ -543,14 +541,10 @@ export class SessionRunController {
             continue
           }
 
-          if (run.pendingInterjections.length > 0) {
-            // The assistant reached a final answer with no further
-            // continuation. Per the roadmap, pending interjections become the
-            // next ordinary user turn rather than forcing extra continuations
-            // of this run (which would overwrite the final answer in the
-            // renderer). Carry them over so the renderer starts a fresh run.
-            await this.#interjections.carryOver(session, run)
-          }
+          // No interjection can be accepted after this synchronous boundary.
+          // Anything accepted earlier is carried into a fresh ordinary turn.
+          run.acceptingInterjections = false
+          await this.#interjections.carryOver(session, run)
 
           await this.#finishRun(session, run, 'completed')
           return
@@ -586,7 +580,25 @@ export class SessionRunController {
         session.clientRequests.delete(run.clientRequestId)
       }
       const status = finalStatusFromError(error, signal)
+      run.acceptingInterjections = false
+      this.#interjections.supersedePending(session, run)
       await this.#finishRun(session, run, status, error)
+    }
+  }
+
+  async #drainInterjections(
+    session: SessionState,
+    run: ActiveRun,
+  ): Promise<void> {
+    const batch = await this.#interjections.drain(session, run)
+    if (!batch) return
+    try {
+      await this.#executionState?.commit(session, {
+        reason: 'interjection',
+      })
+    } catch (error) {
+      this.#interjections.restore(session, run, batch)
+      throw error
     }
   }
 

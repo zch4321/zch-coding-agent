@@ -32,6 +32,13 @@ import type {
 
 type ToolAttemptStage = 'validation' | 'permission' | 'execution'
 
+class FileChangePreparationFailure extends Error {
+  constructor(readonly cause: unknown) {
+    super('Durable file change preparation failed')
+    this.name = 'FileChangePreparationFailure'
+  }
+}
+
 function attemptOutcome(
   stage: ToolAttemptStage,
   result: ToolResult,
@@ -251,6 +258,7 @@ export class SessionToolRunner {
                         scope: 'approval',
                         config,
                         provider: approvalUsageProvider,
+                        model: approvalBinding!.snapshot.model,
                         modelProfile: approvalBinding?.modelProfile,
                         raw: authorization.autoDecision.usage,
                       })
@@ -310,15 +318,19 @@ export class SessionToolRunner {
                 } else {
                   attemptStage = 'execution'
                   try {
-                    preparedFileChange =
-                      await this.#fileChangeExecution?.prepareMutation({
-                        sessionId: session.sessionId,
-                        assistantMessageId,
-                        workspace: session.workspace,
-                        approvedCall: authorization.approvedCall,
-                        diff: approvedDiff,
-                        maximumPayloadBytes: run.fileChangeHistoryBytes,
-                      })
+                    try {
+                      preparedFileChange =
+                        await this.#fileChangeExecution?.prepareMutation({
+                          sessionId: session.sessionId,
+                          assistantMessageId,
+                          workspace: session.workspace,
+                          approvedCall: authorization.approvedCall,
+                          diff: approvedDiff,
+                          maximumPayloadBytes: run.fileChangeHistoryBytes,
+                        })
+                    } catch (error) {
+                      throw new FileChangePreparationFailure(error)
+                    }
                     result = await this.#toolExecutor.execute(
                       authorization.approvedCall,
                       {
@@ -332,14 +344,19 @@ export class SessionToolRunner {
                       hasSideEffects(inspected.definition)
                         ? (settlement) => {
                             run.pendingSideEffects.add(settlement)
-                            void settlement.then(() =>
-                              run.pendingSideEffects.delete(settlement),
-                            )
+                            void settlement
+                              .finally(() =>
+                                run.pendingSideEffects.delete(settlement),
+                              )
+                              .catch(() => undefined)
                           }
                         : undefined,
                       definitionOverride,
                     )
                   } catch (error) {
+                    if (error instanceof FileChangePreparationFailure) {
+                      throw error
+                    }
                     result = toolFailure(error, run.controller.signal)
                   }
                 }
@@ -347,6 +364,9 @@ export class SessionToolRunner {
             }
           }
         } catch (error) {
+          if (error instanceof FileChangePreparationFailure) {
+            throw error.cause
+          }
           result = toolFailure(error, run.controller.signal)
         }
 

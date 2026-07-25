@@ -20,10 +20,12 @@ function objectField(value: unknown, key: string): JsonObject | undefined {
     : undefined
 }
 
+/** Normalizes provider usage against the exact model frozen for the call. */
 export function normalizeLlmUsage(input: {
   scope: LlmUsageRecord['scope']
   config: PublicConfig
   provider: ProviderPublicConfig
+  model: string
   modelProfile?: ModelProfile
   raw: JsonValue
 }): LlmUsageRecord | undefined {
@@ -35,17 +37,15 @@ export function normalizeLlmUsage(input: {
   const completionDetails = objectField(usage, 'completion_tokens_details')
   const model =
     input.modelProfile ??
-    resolveModelProfiles(
-      input.config,
-      input.provider.id,
-      input.provider.model,
-    ).find((candidate) => candidate.id === input.provider.model)
+    resolveModelProfiles(input.config, input.provider.id, input.model).find(
+      (candidate) => candidate.id === input.model,
+    )
 
   return {
     scope: input.scope,
     providerId: input.provider.id,
     providerLabel: input.provider.label,
-    model: input.provider.model,
+    model: input.model,
     promptTokens: metric(usage.prompt_tokens),
     completionTokens: metric(usage.completion_tokens),
     totalTokens: metric(usage.total_tokens),

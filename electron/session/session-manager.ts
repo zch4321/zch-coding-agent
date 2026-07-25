@@ -800,8 +800,14 @@ export class SessionManager {
       ipcFault('CONFLICT', 'The session does not have an active run')
     }
 
-    if (run.status === 'cancelling') {
-      ipcFault('CONFLICT', 'The active run is already cancelling')
+    if (
+      run.status === 'cancelling' ||
+      run.status === 'completed' ||
+      run.status === 'cancelled' ||
+      run.status === 'failed' ||
+      !run.acceptingInterjections
+    ) {
+      ipcFault('CONFLICT', 'The active run no longer accepts interjections')
     }
 
     return this.#interjections.queue(session, run, {

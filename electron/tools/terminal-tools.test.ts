@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { CallId } from '../../shared/ids'
 import type { TerminalPool } from '../terminal/pool'
 import { evaluatePolicy } from '../permission/policy-engine'
-import { registerTerminalTools } from './terminal-tools'
+import { normalizeTerminalInput, registerTerminalTools } from './terminal-tools'
 import { ToolRegistry } from './tool-registry'
 
 function definitions() {
@@ -35,6 +35,14 @@ function outcome(
 }
 
 describe('terminal tool permission matrix', () => {
+  it('normalizes only bare Windows line feeds to Enter', () => {
+    expect(normalizeTerminalInput('echo one\n', 'win32')).toBe('echo one\r')
+    expect(normalizeTerminalInput('one\r\ntwo\nthree\r', 'win32')).toBe(
+      'one\r\ntwo\rthree\r',
+    )
+    expect(normalizeTerminalInput('echo one\n', 'linux')).toBe('echo one\n')
+  })
+
   it.each(['terminal_open', 'terminal_send', 'terminal_close'])(
     'routes %s through side-effect policy',
     (toolId) => {

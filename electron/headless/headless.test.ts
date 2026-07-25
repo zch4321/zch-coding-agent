@@ -136,12 +136,16 @@ class HangingProvider implements LLMProvider {
 class RepairProvider implements LLMProvider {
   calls = 0
   requests: ProviderChatRequest['messages'][] = []
+  requestBodies: JsonValue[] = []
 
   async *streamChat(
     request: ProviderChatRequest,
   ): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.messages))
+    this.requestBodies.push(
+      structuredClone(request.providerRequestOverride ?? null),
+    )
     yield messageCompletion(
       `repair-${this.calls}`,
       this.calls === 1 ? 'Initial attempt complete.' : 'Repair complete.',
@@ -493,6 +497,32 @@ describe('Headless host', () => {
     expect(trace).not.toContain(
       '"type":"user.message","text":"{\\n  \\"schemaVersion\\"',
     )
+  })
+
+  it('uses the prepared Desktop default reasoning when headless reasoning is omitted', async () => {
+    const { workspace, artifacts } = await fixture()
+    const output = new StringSink()
+    const provider = new RepairProvider()
+    const omittedReasoning = config()
+    omittedReasoning.provider.profile = 'deepseek'
+    delete omittedReasoning.provider.reasoning
+
+    const result = await runHeadlessAgent({
+      config: omittedReasoning,
+      workspace,
+      task: 'Use the configured default reasoning',
+      artifactsDirectory: artifacts,
+      timeoutMs: 5_000,
+      output,
+      environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },
+      providerFactory: () => provider,
+    })
+
+    expect(result.status).toBe('completed')
+    expect(provider.requestBodies[0]).toMatchObject({
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
+    })
   })
 
   it('auto-approves a reviewed plan using trusted harness context', async () => {

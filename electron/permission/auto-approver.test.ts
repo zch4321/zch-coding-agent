@@ -156,6 +156,21 @@ describe('P3 auto approver', () => {
     })
   })
 
+  it('cleans up and falls back when adapter compilation fails', async () => {
+    const approver = new ProviderAutoApprover(new ErrorProvider(), {
+      ...route,
+      adapterId: 'missing.adapter',
+    })
+
+    await expect(
+      approver.evaluate(input, new AbortController().signal),
+    ).resolves.toMatchObject({
+      decision: 'dangerous',
+      valid: false,
+      failure: 'network',
+    })
+  })
+
   it('converts timeout to dangerous human-review fallback', async () => {
     const approver = new ProviderAutoApprover(new HangingProvider(), route, 10)
 

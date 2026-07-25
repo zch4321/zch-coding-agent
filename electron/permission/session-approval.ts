@@ -143,7 +143,9 @@ export class SessionApprovalCoordinator {
             ? 'Denied by user'
             : 'Approval cancelled',
     })
-    this.#setRunStatus(session, run, 'running_tools')
+    if (decision.decision !== 'cancelled' && !run.controller.signal.aborted) {
+      this.#setRunStatus(session, run, 'running_tools')
+    }
     return decision
   }
 
@@ -214,7 +216,9 @@ export class SessionApprovalCoordinator {
             ? 'Denied by user'
             : 'Approval cancelled',
     })
-    this.#setRunStatus(session, run, 'running_tools')
+    if (approval.decision !== 'cancelled' && !run.controller.signal.aborted) {
+      this.#setRunStatus(session, run, 'running_tools')
+    }
     return approval
   }
 

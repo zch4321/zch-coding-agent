@@ -56,7 +56,7 @@ const SendSchema = Type.Object(
       minLength: 1,
       maxLength: 262_144,
       description:
-        'Input bytes to send to the terminal. Include a trailing newline to press Enter.',
+        'Input bytes to send to the terminal. Include a trailing newline to press Enter; Windows normalizes bare LF to the terminal Enter key.',
     }),
   },
   { additionalProperties: false },
@@ -133,7 +133,7 @@ export function registerTerminalTools(
   registry.registerTool({
     id: 'terminal_send',
     description:
-      'Send input to a persistent terminal owned by this session. Include a newline to start a command. For long-running commands, follow with delay and terminal_read instead of run_command.',
+      'Send input to a persistent terminal owned by this session. Include a newline to press Enter; on Windows a bare LF is normalized to CR. For long-running commands, follow with delay and terminal_read instead of run_command.',
     inputSchema: SendSchema,
     effects: ['terminal.write'],
     defaultRisk: 'review',
@@ -147,7 +147,7 @@ export function registerTerminalTools(
           accepted: terminalPool.write(
             context.sessionId,
             args.terminalId,
-            args.data,
+            normalizeTerminalInput(args.data),
           ),
         },
       }
@@ -240,4 +240,12 @@ export function registerTerminalTools(
       }
     },
   } satisfies ToolDefinition<typeof ResizeSchema>)
+}
+
+/** Converts renderer newlines to the control sequence expected by the platform PTY. */
+export function normalizeTerminalInput(
+  data: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return platform === 'win32' ? data.replace(/(?<!\r)\n/gu, '\r') : data
 }
