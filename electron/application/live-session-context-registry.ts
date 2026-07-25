@@ -24,6 +24,7 @@ interface LifecycleEntry {
   projectId?: ProjectId
   operationToken?: string
   loading?: Promise<void>
+  teardown?: Promise<void>
 }
 
 export class LiveSessionContextRegistry
@@ -102,8 +103,7 @@ export class LiveSessionContextRegistry
   async releaseOwned(sessionId: SessionId, ownerToken: string): Promise<void> {
     const entry = this.#entries.get(sessionId)
     if (!entry || entry.ownerToken !== ownerToken) return
-    entry.phase = 'releasing'
-    await this.#closeOwnedContext(sessionId, entry)
+    await this.#scheduleTeardown(sessionId, entry)
   }
 
   async ensureLoaded(sessionId: SessionId): Promise<void> {
@@ -113,6 +113,10 @@ export class LiveSessionContextRegistry
     }
     if (existing?.phase === 'loading' && existing.loading) {
       return existing.loading
+    }
+    if (existing?.teardown) {
+      await existing.teardown
+      return this.ensureLoaded(sessionId)
     }
     if (existing) {
       throw new ApplicationError(
@@ -282,8 +286,7 @@ export class LiveSessionContextRegistry
       this.#onSessionEvicted(sessionId)
       return
     }
-    entry.phase = 'releasing'
-    await this.#closeOwnedContext(sessionId, entry)
+    await this.#scheduleTeardown(sessionId, entry)
   }
 
   reserveProjectEviction(projectId: ProjectId): string {
@@ -335,8 +338,7 @@ export class LiveSessionContextRegistry
           : [],
     )
     for (const [sessionId, entry] of sessions) {
-      entry.phase = 'releasing'
-      await this.#closeOwnedContext(sessionId, entry)
+      await this.#scheduleTeardown(sessionId, entry)
     }
     if (this.#projectEvictions.get(projectId) === operationToken) {
       this.#projectEvictions.delete(projectId)
@@ -369,7 +371,7 @@ export class LiveSessionContextRegistry
             ),
           )
       : Promise.resolve()
-    void settle.then(() => this.releaseOwned(sessionId, entry.ownerToken))
+    void this.#scheduleTeardown(sessionId, entry, settle)
   }
 
   async dispose(): Promise<void> {
@@ -460,21 +462,37 @@ export class LiveSessionContextRegistry
     sessionId: SessionId,
     entry: LifecycleEntry,
   ): Promise<void> {
-    if (this.#manager.hasLiveSession(sessionId)) {
-      await this.#manager
-        .closeSession(sessionId)
-        .catch((error) =>
-          this.#onDiagnostic(
-            `Session ${sessionId} runtime cleanup failed after durable commit`,
-            error,
-          ),
-        )
+    try {
+      if (this.#manager.hasLiveSession(sessionId)) {
+        await this.#manager
+          .closeSession(sessionId)
+          .catch((error) =>
+            this.#onDiagnostic(
+              `Session ${sessionId} runtime cleanup failed after durable commit`,
+              error,
+            ),
+          )
+      }
+      this.#executionState.forget(sessionId, entry.ownerToken)
+    } finally {
+      if (this.#entries.get(sessionId) === entry) {
+        this.#entries.delete(sessionId)
+      }
+      this.#onSessionEvicted(sessionId)
     }
-    this.#executionState.forget(sessionId, entry.ownerToken)
-    if (this.#entries.get(sessionId) === entry) {
-      this.#entries.delete(sessionId)
-    }
-    this.#onSessionEvicted(sessionId)
+  }
+
+  async #scheduleTeardown(
+    sessionId: SessionId,
+    entry: LifecycleEntry,
+    before: Promise<unknown> = Promise.resolve(),
+  ): Promise<void> {
+    if (entry.teardown) return entry.teardown
+    entry.phase = 'releasing'
+    entry.teardown = before.then(() =>
+      this.#closeOwnedContext(sessionId, entry),
+    )
+    return entry.teardown
   }
 
   #assertManagerSessionIdle(sessionId: SessionId): void {

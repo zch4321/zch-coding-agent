@@ -15,7 +15,9 @@ import { compileSchema } from '../schema-validator'
 import {
   assertSchemaValue,
   booleanColumn,
+  dateTimeColumn,
   integerColumn,
+  nullableDateTimeColumn,
   nullableStringColumn,
   stringColumn,
 } from './codec-helpers'
@@ -26,6 +28,7 @@ const validateMessageId = compileSchema(MessageIdSchema)
 
 export interface StoredFileChangeRecord extends FileChangeSummary {
   assistantMessageId: MessageId
+  workspacePath: string
   beforeContent: string | null
   beforeMode: number | null
   payloadBytes: number
@@ -53,6 +56,7 @@ export interface FileChangeSummaryRow {
 
 export interface StoredFileChangeRow extends FileChangeSummaryRow {
   assistant_message_id: string
+  workspace_path: string
   before_content: string | null
   before_mode: number | null
   payload_bytes: number
@@ -68,6 +72,7 @@ export function encodeStoredFileChangeRow(
     session_id: record.sessionId,
     assistant_message_id: record.assistantMessageId,
     call_id: record.callId,
+    workspace_path: record.workspacePath,
     path: record.path,
     operation: record.operation,
     diff: record.diff,
@@ -81,9 +86,12 @@ export function encodeStoredFileChangeRow(
     after_hash: record.afterHash,
     payload_bytes: record.payloadBytes,
     revision: record.revision,
-    created_at: record.createdAt,
-    updated_at: record.updatedAt,
-    reverted_at: record.revertedAt ?? null,
+    created_at: dateTimeColumn(record.createdAt, 'file_changes.created_at'),
+    updated_at: dateTimeColumn(record.updatedAt, 'file_changes.updated_at'),
+    reverted_at: nullableDateTimeColumn(
+      record.revertedAt ?? null,
+      'file_changes.reverted_at',
+    ),
   }
 }
 
@@ -96,6 +104,10 @@ export function decodeStoredFileChangeRow(
       row.assistant_message_id,
       'file_changes.assistant_message_id',
     ) as MessageId,
+    workspacePath: stringColumn(
+      row.workspace_path,
+      'file_changes.workspace_path',
+    ),
     beforeContent: nullableStringColumn(
       row.before_content,
       'file_changes.before_content',
@@ -116,7 +128,7 @@ export function decodeStoredFileChangeRow(
 export function decodeFileChangeSummaryRow(
   row: Record<string, unknown>,
 ): FileChangeSummary {
-  const revertedAt = nullableStringColumn(
+  const revertedAt = nullableDateTimeColumn(
     row.reverted_at,
     'file_changes.reverted_at',
   )
@@ -147,8 +159,8 @@ export function decodeFileChangeSummaryRow(
     afterExists: booleanColumn(row.after_exists, 'file_changes.after_exists'),
     afterHash: stringColumn(row.after_hash, 'file_changes.after_hash'),
     revision: integerColumn(row.revision, 'file_changes.revision'),
-    createdAt: stringColumn(row.created_at, 'file_changes.created_at'),
-    updatedAt: stringColumn(row.updated_at, 'file_changes.updated_at'),
+    createdAt: dateTimeColumn(row.created_at, 'file_changes.created_at'),
+    updatedAt: dateTimeColumn(row.updated_at, 'file_changes.updated_at'),
     ...(revertedAt === null ? {} : { revertedAt }),
   }
   assertSchemaValue<FileChangeSummary>(
@@ -197,6 +209,12 @@ function assertStoredFileChangeRecord(record: StoredFileChangeRecord): void {
     record.assistantMessageId,
     'StoredFileChangeRecord assistantMessageId',
   )
+  if (record.workspacePath.length < 1 || record.workspacePath.length > 4_096) {
+    throw new PersistenceError(
+      'CODEC_INVALID',
+      'StoredFileChangeRecord workspacePath must contain between 1 and 4096 characters',
+    )
+  }
   if (!Number.isSafeInteger(record.payloadBytes) || record.payloadBytes < 0) {
     throw new PersistenceError(
       'CODEC_INVALID',

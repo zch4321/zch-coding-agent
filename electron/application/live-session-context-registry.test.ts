@@ -95,4 +95,68 @@ describe('LiveSessionContextRegistry mutation ownership', () => {
 
     expect(calls).toEqual(['manager', 'binding'])
   })
+
+  it('waits for teardown before reloading an invalid Session', async () => {
+    const sessionId = 'session:teardown' as SessionId
+    const projectId = 'project:teardown' as ProjectId
+    const record = {
+      id: sessionId,
+      projectId,
+      lifecycle: 'active',
+      revision: 1,
+    } as SessionRecord
+    let live = true
+    let finishClose: (() => void) | undefined
+    const closeGate = new Promise<void>((resolve) => {
+      finishClose = resolve
+    })
+    const manager = {
+      hasLiveSession: vi.fn(() => live),
+      closeSession: vi.fn(async () => {
+        await closeGate
+        live = false
+        return true
+      }),
+      restoreSession: vi.fn(async () => {
+        live = true
+      }),
+      hasActiveRun: vi.fn(() => false),
+      hasUnsettledSideEffects: vi.fn(() => false),
+      hasOpenTerminals: vi.fn(() => false),
+      activeRunSnapshot: vi.fn(() => undefined),
+    } as unknown as SessionManager
+    const sessions = {
+      loadRuntimeState: vi.fn(async () => ({
+        record,
+        activeHistory: [],
+      })),
+      getRecord: vi.fn(async () => record),
+    } as unknown as SessionService
+    const projects = {
+      get: vi.fn(async () => ({ id: projectId, path: 'C:/workspace' })),
+    } as unknown as ProjectService
+    const executionState = {
+      forget: vi.fn(),
+      registerExisting: vi.fn(),
+    } as unknown as DurableExecutionStatePort
+    const registry = new LiveSessionContextRegistry({
+      manager,
+      sessions,
+      projects,
+      executionState,
+    })
+    const owner = registry.reserveNew(sessionId, projectId, 'request:teardown')
+    registry.adoptNew(sessionId, projectId, owner)
+    registry.invalidate(sessionId)
+
+    const loading = registry.ensureLoaded(sessionId)
+    await Promise.resolve()
+    expect(sessions.loadRuntimeState).not.toHaveBeenCalled()
+    finishClose?.()
+    await loading
+
+    expect(manager.closeSession).toHaveBeenCalledOnce()
+    expect(sessions.loadRuntimeState).toHaveBeenCalledOnce()
+    expect(manager.restoreSession).toHaveBeenCalledOnce()
+  })
 })

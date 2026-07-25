@@ -219,6 +219,7 @@ export class FileChangeService implements FileChangeExecutionPort {
       sessionId: input.prepared.sessionId,
       assistantMessageId: input.prepared.assistantMessageId,
       callId: input.prepared.callId,
+      workspacePath: input.workspace,
       path: input.prepared.path,
       operation: input.prepared.operation,
       diff: input.prepared.diff,
@@ -477,6 +478,12 @@ export class FileChangeService implements FileChangeExecutionPort {
       throw new ApplicationError('CONFLICT', 'FileChange revision changed', {
         details: { currentRevision: record.revision },
       })
+    }
+    if (normalizePath(record.workspacePath) !== normalizePath(project.path)) {
+      throw new ApplicationError(
+        'RESOURCE_CHANGED',
+        'FileChange belongs to a different Project workspace',
+      )
     }
     return {
       projectId: project.id,

@@ -308,6 +308,52 @@ describe('FileChangeService revert', () => {
       await setup.dispose()
     }
   })
+
+  it('rejects a FileChange after its Project is relinked', async () => {
+    const setup = await setupRevert()
+    const replacement = path.join(setup.testDatabase.directory, 'replacement')
+    await mkdir(replacement)
+    try {
+      const record = await seedChange(setup, {
+        operation: 'patch',
+        beforeContent: 'before patch',
+        afterContent: 'after patch',
+      })
+      await writeFile(
+        path.join(replacement, record.path),
+        'after patch',
+        'utf8',
+      )
+      const projects = new ProjectRepository()
+      await setup.testDatabase.database.withTransaction((transaction) => {
+        const current = projects.get(transaction, setup.projectId)!
+        expect(
+          projects.update(
+            transaction,
+            {
+              ...current,
+              path: replacement,
+              revision: current.revision + 1,
+              updatedAt: '2026-07-24T00:00:01.000Z',
+            },
+            current.revision,
+          ),
+        ).toBe(true)
+      })
+
+      await expect(
+        setup.service.revert(setup.sessionId, record.id, record.revision),
+      ).rejects.toMatchObject({ code: 'RESOURCE_CHANGED' })
+      expect(await readFile(path.join(replacement, record.path), 'utf8')).toBe(
+        'after patch',
+      )
+      expect(
+        await readFile(path.join(setup.workspace, record.path), 'utf8'),
+      ).toBe('after patch')
+    } finally {
+      await setup.dispose()
+    }
+  })
 })
 
 async function setupRevert(
@@ -367,6 +413,7 @@ async function seedChange(
     sessionId: setup.sessionId,
     assistantMessageId: `message:assistant-${input.operation}` as MessageId,
     callId: `call:${input.operation}` as CallId,
+    workspacePath: setup.workspace,
     path: pathValue,
     operation: input.operation,
     diff: `diff:${input.operation}`,

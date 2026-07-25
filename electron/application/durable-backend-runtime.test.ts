@@ -482,13 +482,22 @@ describe('durable backend runtime', () => {
       }),
     ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
 
-    const retried = await target.runs.retry({
+    const retryPayload = {
       version: 1,
       sessionId,
       expectedRevision: before.session.revision,
       userMessageId: firstUser.id,
       clientRequestId: 'request:retry-first-user',
-    })
+    } as const
+    const retried = await target.runs.retry(retryPayload)
+    const duplicateRetry = await target.runs.retry(retryPayload)
+    expect(duplicateRetry).toEqual(retried)
+    await expect(
+      target.runs.retry({
+        ...retryPayload,
+        userMessageId: assistant.id,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
     await target.runtime.services.sessions.waitForRunSettled(
       sessionId,
       retried.runId,

@@ -13,6 +13,17 @@ const PROJECT_COLUMNS = `
 `
 
 export class ProjectRepository {
+  /** Returns the complete number of durable Project records. */
+  count(reader: PersistenceReader): number {
+    const row = reader.prepare('SELECT COUNT(*) AS total FROM projects').get()
+    const total = Number(row?.total)
+    if (Number.isSafeInteger(total) && total >= 0) return total
+    throw new PersistenceError(
+      'CODEC_INVALID',
+      'Project count must be a non-negative safe integer',
+    )
+  }
+
   insert(transaction: PersistenceTransaction, record: ProjectRecord): void {
     const row = encodeProjectRow(record)
     transaction

@@ -7,6 +7,7 @@ import type {
 } from '../../shared/domain-state-api'
 import type { ProjectId } from '../../shared/ids'
 import type { ProjectRecord } from '../../shared/project'
+import { MAX_PROJECT_RECORDS } from '../../shared/durable'
 import type { Static } from '@sinclair/typebox'
 import { ProjectRepository } from '../persistence/project-repository'
 import {
@@ -91,6 +92,12 @@ export class ProjectService {
       return await this.#coordinator.command(
         'project.changed',
         (transaction) => {
+          if (this.#repository.count(transaction) >= MAX_PROJECT_RECORDS) {
+            throw new ApplicationError(
+              'PRECONDITION_FAILED',
+              `Project limit of ${MAX_PROJECT_RECORDS} has been reached`,
+            )
+          }
           this.#repository.insert(transaction, record)
           return { projects: this.#repository.list(transaction) }
         },

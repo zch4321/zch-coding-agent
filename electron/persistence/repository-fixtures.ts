@@ -167,6 +167,7 @@ export function fileChangeFixture(
     sessionId: 'session:fixture' as SessionId,
     assistantMessageId: 'message:assistant-fixture' as MessageId,
     callId: 'call:file-change' as CallId,
+    workspacePath: 'C:/workspace',
     path: 'README.md',
     operation: 'patch',
     diff,

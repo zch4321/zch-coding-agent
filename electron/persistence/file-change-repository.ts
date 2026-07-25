@@ -25,7 +25,7 @@ const FILE_CHANGE_SUMMARY_COLUMNS = `
 `
 const STORED_FILE_CHANGE_COLUMNS = `
   ${FILE_CHANGE_SUMMARY_COLUMNS}, assistant_message_id, before_content,
-  before_mode, payload_bytes
+  before_mode, payload_bytes, workspace_path
 `
 
 export const DEFAULT_FILE_CHANGE_HISTORY_BYTES = 100_000_000
@@ -88,10 +88,10 @@ export class FileChangeRepository {
       .prepare(
         `INSERT INTO file_changes (
            schema_version, id, session_id, assistant_message_id, call_id, path,
-           operation, diff, diff_hash, diff_truncated, before_exists,
+           workspace_path, operation, diff, diff_hash, diff_truncated, before_exists,
            before_hash, before_content, before_mode, after_exists, after_hash,
            payload_bytes, revision, created_at, updated_at, reverted_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.schema_version,
@@ -100,6 +100,7 @@ export class FileChangeRepository {
         row.assistant_message_id,
         row.call_id,
         row.path,
+        row.workspace_path,
         row.operation,
         row.diff,
         row.diff_hash,

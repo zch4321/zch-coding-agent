@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { MessageId, ProjectId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
-import { decodeMessageRow } from './message-codec'
+import { decodeMessageRow, encodeMessageRow } from './message-codec'
+import {
+  decodeStoredFileChangeRow,
+  encodeStoredFileChangeRow,
+} from './file-change-codec'
 import { FileChangeRepository } from './file-change-repository'
 import { MessageRepository } from './message-repository'
 import { ProjectRepository } from './project-repository'
@@ -13,6 +17,7 @@ import {
 } from './repository-fixtures'
 import { SessionRepository } from './session-repository'
 import { decodeSessionRow, encodeSessionRow } from './session-codec'
+import { decodeProjectRow, encodeProjectRow } from './project-codec'
 import { createTestDatabase } from './test-database'
 
 const projects = new ProjectRepository()
@@ -572,6 +577,39 @@ describe('persistence repositories', () => {
     expect(decodeSessionRow({ ...row })).toMatchObject({
       createdAt: '2026-07-22T00:00:00.000Z',
       updatedAt: '2026-07-22T01:30:00.000Z',
+    })
+  })
+
+  it('normalizes Project, Message and FileChange timestamps to UTC', () => {
+    const projectRow = encodeProjectRow(
+      projectFixture({
+        createdAt: '2026-07-22T02:00:00.000+02:00',
+        updatedAt: '2026-07-22T03:00:00.000+02:00',
+      }),
+    )
+    const messageRow = encodeMessageRow({
+      ...messageFixtures()[0]!,
+      createdAt: '2026-07-22T04:00:00.000+02:00',
+    })
+    const fileChangeRow = encodeStoredFileChangeRow(
+      fileChangeFixture({
+        createdAt: '2026-07-22T05:00:00.000+02:00',
+        updatedAt: '2026-07-22T06:00:00.000+02:00',
+        revertedAt: '2026-07-22T07:00:00.000+02:00',
+      }),
+    )
+
+    expect(decodeProjectRow({ ...projectRow })).toMatchObject({
+      createdAt: '2026-07-22T00:00:00.000Z',
+      updatedAt: '2026-07-22T01:00:00.000Z',
+    })
+    expect(decodeMessageRow({ ...messageRow })).toMatchObject({
+      createdAt: '2026-07-22T02:00:00.000Z',
+    })
+    expect(decodeStoredFileChangeRow({ ...fileChangeRow })).toMatchObject({
+      createdAt: '2026-07-22T03:00:00.000Z',
+      updatedAt: '2026-07-22T04:00:00.000Z',
+      revertedAt: '2026-07-22T05:00:00.000Z',
     })
   })
 })

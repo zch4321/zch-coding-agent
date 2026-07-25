@@ -35,6 +35,13 @@ export class DurableRunApplicationService {
       promise: Promise<DurableRunStartResult>
     }
   >()
+  readonly #retryRequests = new Map<
+    string,
+    {
+      requestHash: string
+      promise: Promise<DurableRunRetryResult>
+    }
+  >()
 
   constructor(options: {
     manager: SessionManager
@@ -68,27 +75,10 @@ export class DurableRunApplicationService {
       }
       return existing.promise
     }
-    let ownerToken: string | undefined
-    if (input.kind === 'new_session') {
-      try {
-        ownerToken = this.#registry.reserveNew(
-          input.sessionId,
-          input.projectId,
-          input.clientRequestId,
-        )
-      } catch (error) {
-        return Promise.reject(error)
-      }
-    }
-    const request = this.#start(input, ownerToken, options).catch(
-      async (error) => {
-        this.#requests.delete(key)
-        if (ownerToken) {
-          await this.#registry.releaseOwned(input.sessionId, ownerToken)
-        }
-        throw error
-      },
-    )
+    const request = this.#reserveAndStart(input, options).catch((error) => {
+      this.#requests.delete(key)
+      throw error
+    })
     this.#requests.set(key, { requestHash, promise: request })
     while (this.#requests.size > MAX_CACHED_RUN_STARTS) {
       const oldest = this.#requests.keys().next().value
@@ -105,7 +95,32 @@ export class DurableRunApplicationService {
     }
   }
 
-  async retry(input: DurableRunRetryPayload): Promise<DurableRunRetryResult> {
+  retry(input: DurableRunRetryPayload): Promise<DurableRunRetryResult> {
+    const key = `${input.sessionId}\u0000${input.clientRequestId}`
+    const requestHash = canonicalHash(input.userMessageId)
+    const existing = this.#retryRequests.get(key)
+    if (existing) {
+      if (existing.requestHash !== requestHash) {
+        return Promise.reject(
+          new ApplicationError(
+            'CONFLICT',
+            'clientRequestId was already used for a different retry target',
+          ),
+        )
+      }
+      return existing.promise
+    }
+    const request = this.#retry(input)
+    this.#retryRequests.set(key, { requestHash, promise: request })
+    while (this.#retryRequests.size > MAX_CACHED_RUN_STARTS) {
+      const oldest = this.#retryRequests.keys().next().value
+      if (oldest === undefined) break
+      this.#retryRequests.delete(oldest)
+    }
+    return request
+  }
+
+  async #retry(input: DurableRunRetryPayload): Promise<DurableRunRetryResult> {
     const user = await this.#sessions.getOriginalVisibleUser(
       input.sessionId,
       input.userMessageId,
@@ -116,12 +131,31 @@ export class DurableRunApplicationService {
       messageId: user.id,
       boundary: 'after_message',
     })
-    await this.#registry.ensureLoaded(input.sessionId)
-    const runId = this.#manager.retryRun({
-      sessionId: input.sessionId,
-      userMessageId: user.id,
-      clientRequestId: input.clientRequestId,
-    })
+    let runId: RunId
+    try {
+      await this.#registry.ensureLoaded(input.sessionId)
+      runId = this.#manager.retryRun({
+        sessionId: input.sessionId,
+        userMessageId: user.id,
+        clientRequestId: input.clientRequestId,
+      })
+    } catch (error) {
+      const normalized =
+        error instanceof ApplicationError
+          ? error
+          : new ApplicationError(
+              'PERSISTENCE_FAILURE',
+              'The retried Session could not start',
+              { cause: error },
+            )
+      throw new ApplicationError(normalized.code, normalized.message, {
+        details: {
+          ...normalized.details,
+          mutationSucceeded: true,
+        },
+        cause: normalized.cause ?? error,
+      })
+    }
     const runtime =
       this.#manager.activeRunSnapshot(input.sessionId) ??
       emptyRuntimeSnapshot(input.sessionId, runId)
@@ -130,6 +164,45 @@ export class DurableRunApplicationService {
       commit: command.commit,
       runId,
       runtime,
+    }
+  }
+
+  async #reserveAndStart(
+    input: DurableRunStartPayload,
+    options: { harnessContexts?: RunHarnessContext[] },
+  ): Promise<DurableRunStartResult> {
+    let ownerToken: string | undefined
+    if (input.kind === 'new_session') {
+      const requestHash = canonicalHash(input.message)
+      const duplicate = await this.#sessions.lookupRequest(
+        input.sessionId,
+        input.clientRequestId,
+        requestHash,
+      )
+      if (duplicate) {
+        return {
+          version: 1,
+          outcome: 'deduplicated',
+          session: duplicate.session,
+          userMessage: duplicate.userMessage,
+          ...(this.#manager.activeRunSnapshot(input.sessionId)
+            ? { runtime: this.#manager.activeRunSnapshot(input.sessionId) }
+            : {}),
+        }
+      }
+      ownerToken = this.#registry.reserveNew(
+        input.sessionId,
+        input.projectId,
+        input.clientRequestId,
+      )
+    }
+    try {
+      return await this.#start(input, ownerToken, options)
+    } catch (error) {
+      if (ownerToken) {
+        await this.#registry.releaseOwned(input.sessionId, ownerToken)
+      }
+      throw error
     }
   }
 

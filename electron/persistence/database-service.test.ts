@@ -13,6 +13,15 @@ import {
   PersistenceError,
 } from './persistence-error'
 import { createTestDatabase } from './test-database'
+import { ProjectRepository } from './project-repository'
+import { SessionRepository } from './session-repository'
+import {
+  fileChangeFixture,
+  projectFixture,
+  sessionFixture,
+} from './repository-fixtures'
+import { encodeStoredFileChangeRow } from './file-change-codec'
+import { FileChangeRepository } from './file-change-repository'
 
 describe('DatabaseService', () => {
   it.each([
@@ -122,10 +131,76 @@ describe('DatabaseService', () => {
       const count = reopened.read((reader) =>
         reader.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
       )
-      expect(count).toEqual({ count: 1 })
+      expect(count).toEqual({ count: 2 })
     } finally {
       await reopened.close()
       await testDatabase.dispose()
+    }
+  })
+
+  it('backfills the FileChange workspace when migrating a v1 database', async () => {
+    const legacy = await createTestDatabase({
+      migrations: [DATABASE_MIGRATIONS[0]!],
+    })
+    const databasePath = legacy.databasePath
+    const project = projectFixture({ path: 'C:/legacy-workspace' })
+    const session = sessionFixture({ lastSeq: 0 })
+    const record = fileChangeFixture({
+      workspacePath: project.path,
+      sessionId: session.id,
+    })
+    const row = encodeStoredFileChangeRow(record)
+    await legacy.database.withTransaction((transaction) => {
+      new ProjectRepository().insert(transaction, project)
+      new SessionRepository().insert(transaction, session)
+      transaction
+        .prepare(
+          `INSERT INTO file_changes (
+             schema_version, id, session_id, assistant_message_id, call_id,
+             path, operation, diff, diff_hash, diff_truncated, before_exists,
+             before_hash, before_content, before_mode, after_exists, after_hash,
+             payload_bytes, revision, created_at, updated_at, reverted_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          row.schema_version,
+          row.id,
+          row.session_id,
+          row.assistant_message_id,
+          row.call_id,
+          row.path,
+          row.operation,
+          row.diff,
+          row.diff_hash,
+          row.diff_truncated,
+          row.before_exists,
+          row.before_hash,
+          row.before_content,
+          row.before_mode,
+          row.after_exists,
+          row.after_hash,
+          row.payload_bytes,
+          row.revision,
+          row.created_at,
+          row.updated_at,
+          row.reverted_at,
+        )
+    })
+    await legacy.database.close()
+
+    const migrated = DatabaseService.open({
+      databasePath,
+      appVersion: 'test-v2',
+    })
+    try {
+      expect(
+        migrated.read((reader) =>
+          new FileChangeRepository().getStored(reader, session.id, record.id),
+        ),
+      ).toMatchObject({ workspacePath: project.path })
+    } finally {
+      await migrated.close()
+      await legacy.dispose()
     }
   })
 
@@ -143,6 +218,7 @@ describe('DatabaseService', () => {
             ...DATABASE_MIGRATIONS[0]!,
             sql: `${DATABASE_MIGRATIONS[0]!.sql}\n-- modified`,
           },
+          DATABASE_MIGRATIONS[1]!,
         ],
       }),
     ).toThrowError(
@@ -153,10 +229,10 @@ describe('DatabaseService', () => {
 
   it('rejects a database created by a newer migration set', async () => {
     const migrations: DatabaseMigration[] = [
-      DATABASE_MIGRATIONS[0]!,
+      ...DATABASE_MIGRATIONS,
       {
-        version: 2,
-        name: '0002_future',
+        version: 3,
+        name: '0003_future',
         sql: 'CREATE TABLE future_state (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -174,15 +250,15 @@ describe('DatabaseService', () => {
 
   it('rejects a gap in applied migration history', async () => {
     const migrations: DatabaseMigration[] = [
-      DATABASE_MIGRATIONS[0]!,
+      ...DATABASE_MIGRATIONS,
       {
-        version: 2,
-        name: '0002_second',
+        version: 3,
+        name: '0003_second',
         sql: 'CREATE TABLE second_step (id TEXT PRIMARY KEY) STRICT;',
       },
       {
-        version: 3,
-        name: '0003_third',
+        version: 4,
+        name: '0004_third',
         sql: 'CREATE TABLE third_step (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -191,7 +267,7 @@ describe('DatabaseService', () => {
     await testDatabase.database.withTransaction((transaction) => {
       transaction
         .prepare('DELETE FROM schema_migrations WHERE version = ?')
-        .run(2)
+        .run(3)
     })
     await testDatabase.database.close()
 
@@ -210,10 +286,10 @@ describe('DatabaseService', () => {
     const databasePath = first.databasePath
     await first.database.close()
     const brokenMigrations: DatabaseMigration[] = [
-      DATABASE_MIGRATIONS[0]!,
+      ...DATABASE_MIGRATIONS,
       {
-        version: 2,
-        name: '0002_broken',
+        version: 3,
+        name: '0003_broken',
         sql: `
           CREATE TABLE should_rollback (id TEXT PRIMARY KEY) STRICT;
           INSERT INTO table_that_does_not_exist VALUES (1);
@@ -241,7 +317,7 @@ describe('DatabaseService', () => {
       ).toBeUndefined()
       expect(
         raw.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
-      ).toEqual({ count: 1 })
+      ).toEqual({ count: 2 })
     } finally {
       raw.close()
       await first.dispose()
@@ -249,13 +325,21 @@ describe('DatabaseService', () => {
   })
 
   it('serializes transactions and rolls back failed work', async () => {
-    const testDatabase = await createTestDatabase()
+    const testDatabase = await createTestDatabase({
+      migrations: [
+        ...DATABASE_MIGRATIONS,
+        {
+          version: 3,
+          name: '0003_transaction_probe',
+          sql: `
+            CREATE TABLE transaction_probe (
+              id INTEGER PRIMARY KEY
+            ) STRICT;
+          `,
+        },
+      ],
+    })
     try {
-      await testDatabase.database.withTransaction((transaction) => {
-        transaction.exec(
-          'CREATE TABLE transaction_probe (id INTEGER PRIMARY KEY) STRICT;',
-        )
-      })
       const first = testDatabase.database.withTransaction((transaction) => {
         transaction
           .prepare('INSERT INTO transaction_probe (id) VALUES (?)')

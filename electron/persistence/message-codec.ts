@@ -8,6 +8,7 @@ import { compileSchema } from '../schema-validator'
 import {
   assertSchemaValue,
   booleanColumn,
+  dateTimeColumn,
   encodeJsonColumn,
   integerColumn,
   nullableStringColumn,
@@ -90,7 +91,7 @@ export function encodeMessageRow(record: MessageRecord): MessageRow {
     visibility: record.visibility,
     turn_id: record.turnId ?? null,
     in_history: record.inHistory ? 1 : 0,
-    created_at: record.createdAt,
+    created_at: dateTimeColumn(record.createdAt, 'messages.created_at'),
   }
 }
 
@@ -133,7 +134,7 @@ export function decodeMessageRow(row: Record<string, unknown>): MessageRecord {
     parts: parseJsonColumn(row.parts_json, 'messages.parts_json'),
     visibility: stringColumn(row.visibility, 'messages.visibility'),
     inHistory: booleanColumn(row.in_history, 'messages.in_history'),
-    createdAt: stringColumn(row.created_at, 'messages.created_at'),
+    createdAt: dateTimeColumn(row.created_at, 'messages.created_at'),
     ...(clientRequestId === null ? {} : { clientRequestId }),
     ...(normalizedReasoningText === null ? {} : { normalizedReasoningText }),
     ...(providerContinuation === null ? {} : { providerContinuation }),

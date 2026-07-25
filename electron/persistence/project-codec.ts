@@ -1,7 +1,12 @@
 import type { ProjectId } from '../../shared/ids'
 import { ProjectRecordSchema, type ProjectRecord } from '../../shared/project'
 import { compileSchema } from '../schema-validator'
-import { assertSchemaValue, integerColumn, stringColumn } from './codec-helpers'
+import {
+  assertSchemaValue,
+  dateTimeColumn,
+  integerColumn,
+  stringColumn,
+} from './codec-helpers'
 
 const validateProjectRecord = compileSchema(ProjectRecordSchema)
 
@@ -27,8 +32,8 @@ export function encodeProjectRow(record: ProjectRecord): ProjectRow {
     path: record.path,
     name: record.name,
     revision: record.revision,
-    created_at: record.createdAt,
-    updated_at: record.updatedAt,
+    created_at: dateTimeColumn(record.createdAt, 'projects.created_at'),
+    updated_at: dateTimeColumn(record.updatedAt, 'projects.updated_at'),
   }
 }
 
@@ -39,8 +44,8 @@ export function decodeProjectRow(row: Record<string, unknown>): ProjectRecord {
     path: stringColumn(row.path, 'projects.path'),
     name: stringColumn(row.name, 'projects.name'),
     revision: integerColumn(row.revision, 'projects.revision'),
-    createdAt: stringColumn(row.created_at, 'projects.created_at'),
-    updatedAt: stringColumn(row.updated_at, 'projects.updated_at'),
+    createdAt: dateTimeColumn(row.created_at, 'projects.created_at'),
+    updatedAt: dateTimeColumn(row.updated_at, 'projects.updated_at'),
   }
   assertSchemaValue<ProjectRecord>(
     validateProjectRecord,

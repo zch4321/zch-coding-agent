@@ -50,15 +50,6 @@ export class PersistenceTransaction extends PersistenceReader {
     return super.prepare(sql)
   }
 
-  exec(sql: string): void {
-    this.#assertActive()
-    try {
-      this.database.exec(sql)
-    } catch (error) {
-      throw normalizePersistenceError(error)
-    }
-  }
-
   deactivate(): void {
     this.#active = false
   }

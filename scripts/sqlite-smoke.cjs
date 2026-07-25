@@ -104,9 +104,6 @@ function packagedElectronPath() {
 
 function runElectronChild() {
   const packaged = process.argv.includes('--packaged')
-  const electron = packaged
-    ? packagedElectronPath()
-    : option('--electron') || require('electron')
   if (packaged && process.platform !== 'win32') {
     console.log(
       [
@@ -119,6 +116,9 @@ function runElectronChild() {
     )
     return
   }
+  const electron = packaged
+    ? packagedElectronPath()
+    : option('--electron') || require('electron')
   const child = spawn(electron, [path.resolve(__filename)], {
     env: {
       ...process.env,

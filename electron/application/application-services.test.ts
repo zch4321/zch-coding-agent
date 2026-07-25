@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { realpath } from 'node:fs/promises'
+import { mkdir, realpath } from 'node:fs/promises'
 import type { CallId, MessageId, ProjectId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { SessionRecord } from '../../shared/session'
 import { canonicalHash } from '../session/canonical-history'
 import { MessageRepository } from '../persistence/message-repository'
+import { ProjectRepository } from '../persistence/project-repository'
+import { projectFixture } from '../persistence/repository-fixtures'
 import { createTestDatabase } from '../persistence/test-database'
 import { ApplicationError } from './application-error'
 import { ApplicationStateCoordinator } from './application-state-coordinator'
@@ -172,6 +174,46 @@ describe('application-state coordinator and ProjectService', () => {
         name: 'changed',
         revision: 2,
       })
+    } finally {
+      await setup.testDatabase.dispose()
+    }
+  })
+
+  it('rejects the 513th Project without persisting it', async () => {
+    const setup = await setupServices()
+    const repository = new ProjectRepository()
+    const overflowPath = `${setup.testDatabase.directory}/overflow`
+    await mkdir(overflowPath)
+    try {
+      await setup.testDatabase.database.withTransaction((transaction) => {
+        for (let index = 1; index < 512; index += 1) {
+          repository.insert(
+            transaction,
+            projectFixture({
+              id: `project:capacity-${index}` as ProjectId,
+              path: `C:/capacity/${index}`,
+              createdAt: new Date(Date.parse(timestamp) + index).toISOString(),
+              updatedAt: new Date(Date.parse(timestamp) + index).toISOString(),
+            }),
+          )
+        }
+      })
+      const capped = new ProjectService({
+        coordinator: setup.coordinator,
+        createId: () => 'project:overflow' as ProjectId,
+      })
+
+      await expect(
+        capped.add({ path: overflowPath, name: 'overflow' }),
+      ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+      expect(
+        setup.testDatabase.database.read((reader) => repository.count(reader)),
+      ).toBe(512)
+      expect(
+        setup.testDatabase.database.read((reader) =>
+          repository.get(reader, 'project:overflow' as ProjectId),
+        ),
+      ).toBeUndefined()
     } finally {
       await setup.testDatabase.dispose()
     }
