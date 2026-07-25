@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { NProgress, NTag, type TagProps } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
@@ -37,6 +38,12 @@ const statusLabel = computed(() => {
   }
 
   return ''
+})
+
+const statusType = computed<TagProps['type']>(() => {
+  if (agent.pendingApproval) return 'warning'
+  if (agent.runStatus === 'failed') return 'error'
+  return 'info'
 })
 
 const usageMetrics = computed(() => {
@@ -103,8 +110,13 @@ const usageMetrics = computed(() => {
             }}
           </span>
         </div>
-        <div
+        <NProgress
           class="usage-progress"
+          type="line"
+          :percentage="usageMetrics.contextPercent"
+          :show-indicator="false"
+          :height="5"
+          :border-radius="999"
           :aria-label="
             t('app.usageContext', {
               used: usageMetrics.usedContextTokens.toLocaleString(),
@@ -113,13 +125,7 @@ const usageMetrics = computed(() => {
               source: usageMetrics.contextWindowSource,
             })
           "
-        >
-          <span
-            :style="{
-              width: usageMetrics.contextPercent + '%',
-            }"
-          ></span>
-        </div>
+        />
         <p>
           {{
             t('app.usageCache', {
@@ -131,12 +137,14 @@ const usageMetrics = computed(() => {
         </p>
       </div>
     </div>
-    <span
+    <NTag
       v-if="statusLabel"
       class="run-status"
-      :class="agent.pendingApproval ? 'approval' : agent.runStatus"
+      round
+      size="small"
+      :type="statusType"
     >
-      <span></span>{{ statusLabel }}
-    </span>
+      {{ statusLabel }}
+    </NTag>
   </header>
 </template>

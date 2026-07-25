@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NAlert, NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { ToolActivity } from '../../stores/agent'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 import ApprovalCard from './ApprovalCard.vue'
@@ -44,7 +43,6 @@ const durableMessages = computed(() =>
 const liveMessages = computed(() =>
   visibleMessages.value.filter((message) => message.live),
 )
-const expandedToolDetails = ref<string[]>([])
 let resizeObserver: ResizeObserver | undefined
 
 function requestRevert(messageId: string, text: string) {
@@ -62,32 +60,6 @@ function requestRetry(messageId: string, text: string) {
 
 function requestEdit(messageId: string, text: string) {
   emit('edit', messageId, text.replace(/\s+/g, ' ').slice(0, 80))
-}
-
-function toolDetailsName(tool: ToolActivity): string {
-  return `${tool.callId}:details`
-}
-
-function isToolDetailsExpanded(tool: ToolActivity): boolean {
-  return expandedToolDetails.value.includes(toolDetailsName(tool))
-}
-
-function setToolDetailsExpanded(tool: ToolActivity, expanded: boolean) {
-  const name = toolDetailsName(tool)
-  const next = new Set(expandedToolDetails.value)
-
-  if (expanded) {
-    next.add(name)
-  } else {
-    next.delete(name)
-  }
-
-  expandedToolDetails.value = [...next]
-  onContentResized()
-}
-
-function toggleToolDetails(tool: ToolActivity) {
-  setToolDetailsExpanded(tool, !isToolDetailsExpanded(tool))
 }
 
 const toolRenderSignature = computed(() =>
@@ -195,7 +167,6 @@ watch(
   () => agent.activeConversationId,
   () => {
     followingOutput.value = true
-    expandedToolDetails.value = []
     void scrollToBottom(true)
   },
 )
@@ -314,9 +285,7 @@ onBeforeUnmount(() => {
           v-for="tool in durableTools"
           :key="tool.callId"
           :tool="tool"
-          :expanded="isToolDetailsExpanded(tool)"
           :style="{ order: tool.order ?? 0 }"
-          @toggle="toggleToolDetails(tool)"
         />
       </div>
 
@@ -325,8 +294,6 @@ onBeforeUnmount(() => {
           v-for="tool in liveTools"
           :key="tool.callId"
           :tool="tool"
-          :expanded="isToolDetailsExpanded(tool)"
-          @toggle="toggleToolDetails(tool)"
         />
         <ChatMessageItem
           v-for="message in liveMessages"

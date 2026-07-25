@@ -1,4 +1,11 @@
 <script setup lang="ts">
+import {
+  NCollapse,
+  NCollapseItem,
+  NDescriptions,
+  NDescriptionsItem,
+  NTag,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type {
   PendingApproval,
@@ -9,13 +16,7 @@ import type { UsageActivity } from '../../stores/agent-types'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 
-defineProps<{
-  tool: ToolActivity
-  expanded: boolean
-}>()
-const emit = defineEmits<{
-  toggle: []
-}>()
+defineProps<{ tool: ToolActivity }>()
 
 const agent = useAgentStore()
 const { t } = useI18n()
@@ -32,10 +33,6 @@ function toolResultSummary(tool: ToolActivity): string {
   }
 
   return t('chat.completed')
-}
-
-function toolDetailsName(tool: ToolActivity): string {
-  return `${tool.callId}:details`
 }
 
 function stringifyJson(value: unknown, space = 2): string {
@@ -101,125 +98,137 @@ function approvalUsageSummaryForTool(tool: ToolActivity): string {
 
 <template>
   <article class="tool-call-card">
-    <button
-      type="button"
-      class="tool-call-row"
-      :title="tool.reason || tool.tool"
-      :aria-controls="toolDetailsName(tool)"
-      :aria-expanded="expanded"
-      @click="emit('toggle')"
-    >
-      <div class="tool-call-summary" :title="tool.reason || tool.tool">
-        <span class="tool-call-muted">{{ t('chat.toolCall') }}</span>
-        <strong>{{ tool.tool }}</strong>
-        <span
-          class="tool-status"
-          :class="tool.status === 'completed' ? 'complete' : ''"
-        >
-          {{ toolResultSummary(tool) }}
-        </span>
-      </div>
-      <span class="tool-details-toggle" aria-hidden="true">
-        <UiIcon :name="expanded ? 'chevron-down' : 'chevron-right'" />
-      </span>
-    </button>
-    <div v-if="expanded" :id="toolDetailsName(tool)" class="tool-call-details">
-      <div class="tool-detail-block">
-        <strong>{{ t('chat.arguments') }}</strong>
-        <pre class="tool-args-json">{{ stringifyJson(tool.args) }}</pre>
-      </div>
-      <div v-if="hasToolResult(tool)" class="tool-detail-block">
-        <strong>{{ t('chat.result') }}</strong>
-        <pre class="tool-result-json">{{ stringifyJson(tool.result) }}</pre>
-      </div>
-      <div v-if="hasApprovalDetails(tool)" class="tool-detail-block">
-        <strong>{{ t('chat.approvalDetails') }}</strong>
-        <dl v-if="tool.approval" class="tool-approval-meta">
-          <div>
-            <dt>{{ t('chat.approver') }}</dt>
-            <dd>{{ tool.approval.approver }}</dd>
+    <NCollapse arrow-placement="right">
+      <NCollapseItem :name="tool.callId">
+        <template #header>
+          <div class="tool-call-row" :title="tool.reason || tool.tool">
+            <div class="tool-call-summary" :title="tool.reason || tool.tool">
+              <span class="tool-call-muted">{{ t('chat.toolCall') }}</span>
+              <strong>{{ tool.tool }}</strong>
+              <NTag
+                round
+                size="small"
+                :type="tool.status === 'completed' ? 'success' : 'info'"
+              >
+                {{ toolResultSummary(tool) }}
+              </NTag>
+            </div>
           </div>
-          <div>
-            <dt>{{ t('chat.approvalDecision') }}</dt>
-            <dd>{{ tool.approval.decision }}</dd>
+        </template>
+
+        <div class="tool-call-details">
+          <div class="tool-detail-block">
+            <strong>{{ t('chat.arguments') }}</strong>
+            <pre class="tool-args-json">{{ stringifyJson(tool.args) }}</pre>
           </div>
-          <div>
-            <dt>{{ t('chat.approvalValid') }}</dt>
-            <dd>
-              {{ tool.approval.valid ? t('common.yes') : t('common.no') }}
-            </dd>
+          <div v-if="hasToolResult(tool)" class="tool-detail-block">
+            <strong>{{ t('chat.result') }}</strong>
+            <pre class="tool-result-json">{{ stringifyJson(tool.result) }}</pre>
           </div>
-          <div v-if="tool.approval.failure">
-            <dt>{{ t('chat.approvalFailure') }}</dt>
-            <dd>{{ tool.approval.failure }}</dd>
+          <div v-if="hasApprovalDetails(tool)" class="tool-detail-block">
+            <strong>{{ t('chat.approvalDetails') }}</strong>
+            <NDescriptions
+              v-if="tool.approval"
+              class="tool-approval-meta"
+              label-placement="left"
+              :column="2"
+              size="small"
+            >
+              <NDescriptionsItem :label="t('chat.approver')">
+                {{ tool.approval.approver }}
+              </NDescriptionsItem>
+              <NDescriptionsItem :label="t('chat.approvalDecision')">
+                {{ tool.approval.decision }}
+              </NDescriptionsItem>
+              <NDescriptionsItem :label="t('chat.approvalValid')">
+                {{ tool.approval.valid ? t('common.yes') : t('common.no') }}
+              </NDescriptionsItem>
+              <NDescriptionsItem
+                v-if="tool.approval.failure"
+                :label="t('chat.approvalFailure')"
+              >
+                {{ tool.approval.failure }}
+              </NDescriptionsItem>
+            </NDescriptions>
+            <p v-if="tool.approval?.reason" class="tool-approval-note">
+              {{ tool.approval.reason }}
+            </p>
+            <NDescriptions
+              v-if="pendingApprovalForTool(tool)"
+              class="tool-approval-meta"
+              label-placement="left"
+              :column="2"
+              size="small"
+            >
+              <NDescriptionsItem :label="t('chat.approvalRequired')">
+                {{ pendingApprovalForTool(tool)?.kind }}
+              </NDescriptionsItem>
+              <NDescriptionsItem :label="t('chat.expires')">
+                {{ pendingApprovalForTool(tool)?.expiresAt }}
+              </NDescriptionsItem>
+            </NDescriptions>
+            <p
+              v-if="pendingApprovalForTool(tool)?.reason"
+              class="tool-approval-note"
+            >
+              {{ pendingApprovalForTool(tool)?.reason }}
+            </p>
+            <ul
+              v-if="pendingApprovalForTool(tool)?.signals.length"
+              class="policy-signals compact"
+            >
+              <li
+                v-for="signal in pendingApprovalForTool(tool)?.signals"
+                :key="signal.code + signal.detail"
+              >
+                <UiIcon name="warning" />{{ signal.detail }}
+              </li>
+            </ul>
+            <pre
+              v-if="pendingApprovalForTool(tool)?.diff"
+              class="tool-approval-json"
+              >{{ pendingApprovalForTool(tool)?.diff }}</pre
+            >
+            <NDescriptions
+              v-if="reviewedApprovalForTool(tool)"
+              class="tool-approval-meta"
+              label-placement="left"
+              :column="2"
+              size="small"
+            >
+              <NDescriptionsItem :label="t('chat.approvalDecision')">
+                {{ reviewedApprovalForTool(tool)?.decision }}
+              </NDescriptionsItem>
+              <NDescriptionsItem
+                v-if="reviewedApprovalForTool(tool)?.diffHash"
+                :label="t('chat.diffHash')"
+              >
+                {{ reviewedApprovalForTool(tool)?.diffHash }}
+              </NDescriptionsItem>
+            </NDescriptions>
+            <p
+              v-if="reviewedApprovalForTool(tool)?.reason"
+              class="tool-approval-note"
+            >
+              {{ reviewedApprovalForTool(tool)?.reason }}
+            </p>
+            <pre
+              v-if="reviewedApprovalForTool(tool)?.diff"
+              class="tool-approval-json"
+              >{{ reviewedApprovalForTool(tool)?.diff }}</pre
+            >
+            <div v-if="approvalUsageForTool(tool)" class="tool-approval-usage">
+              <span>{{ t('chat.approvalUsage') }}</span>
+              <p>{{ approvalUsageSummaryForTool(tool) }}</p>
+              <pre
+                v-if="approvalUsageForTool(tool)?.usage.raw"
+                class="tool-approval-json"
+                >{{ stringifyJson(approvalUsageForTool(tool)?.usage.raw) }}</pre
+              >
+            </div>
           </div>
-        </dl>
-        <p v-if="tool.approval?.reason" class="tool-approval-note">
-          {{ tool.approval.reason }}
-        </p>
-        <dl v-if="pendingApprovalForTool(tool)" class="tool-approval-meta">
-          <div>
-            <dt>{{ t('chat.approvalRequired') }}</dt>
-            <dd>{{ pendingApprovalForTool(tool)?.kind }}</dd>
-          </div>
-          <div>
-            <dt>{{ t('chat.expires') }}</dt>
-            <dd>{{ pendingApprovalForTool(tool)?.expiresAt }}</dd>
-          </div>
-        </dl>
-        <p
-          v-if="pendingApprovalForTool(tool)?.reason"
-          class="tool-approval-note"
-        >
-          {{ pendingApprovalForTool(tool)?.reason }}
-        </p>
-        <ul
-          v-if="pendingApprovalForTool(tool)?.signals.length"
-          class="policy-signals compact"
-        >
-          <li
-            v-for="signal in pendingApprovalForTool(tool)?.signals"
-            :key="signal.code + signal.detail"
-          >
-            <UiIcon name="warning" />{{ signal.detail }}
-          </li>
-        </ul>
-        <pre
-          v-if="pendingApprovalForTool(tool)?.diff"
-          class="tool-approval-json"
-          >{{ pendingApprovalForTool(tool)?.diff }}</pre
-        >
-        <dl v-if="reviewedApprovalForTool(tool)" class="tool-approval-meta">
-          <div>
-            <dt>{{ t('chat.approvalDecision') }}</dt>
-            <dd>{{ reviewedApprovalForTool(tool)?.decision }}</dd>
-          </div>
-          <div v-if="reviewedApprovalForTool(tool)?.diffHash">
-            <dt>{{ t('chat.diffHash') }}</dt>
-            <dd>{{ reviewedApprovalForTool(tool)?.diffHash }}</dd>
-          </div>
-        </dl>
-        <p
-          v-if="reviewedApprovalForTool(tool)?.reason"
-          class="tool-approval-note"
-        >
-          {{ reviewedApprovalForTool(tool)?.reason }}
-        </p>
-        <pre
-          v-if="reviewedApprovalForTool(tool)?.diff"
-          class="tool-approval-json"
-          >{{ reviewedApprovalForTool(tool)?.diff }}</pre
-        >
-        <div v-if="approvalUsageForTool(tool)" class="tool-approval-usage">
-          <span>{{ t('chat.approvalUsage') }}</span>
-          <p>{{ approvalUsageSummaryForTool(tool) }}</p>
-          <pre
-            v-if="approvalUsageForTool(tool)?.usage.raw"
-            class="tool-approval-json"
-            >{{ stringifyJson(approvalUsageForTool(tool)?.usage.raw) }}</pre
-          >
         </div>
-      </div>
-    </div>
+      </NCollapseItem>
+    </NCollapse>
   </article>
 </template>

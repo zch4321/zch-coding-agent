@@ -95,7 +95,7 @@ test.describe('Electron prompt and selected-context workflows', () => {
     const providerRequest = transcript
       .locator('.transcript-entry[data-kind="provider_request"]')
       .first()
-    await providerRequest.locator('summary').click()
+    await providerRequest.locator('.n-collapse-item__header').click()
     await providerRequest
       .getByRole('button', { name: '加载 Provider 上下文快照' })
       .click()

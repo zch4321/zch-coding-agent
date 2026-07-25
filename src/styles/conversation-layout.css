@@ -99,46 +99,10 @@
 
 .usage-progress {
   width: 100%;
-  height: 5px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #eaeef2;
-}
-
-.usage-progress span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent);
 }
 
 .run-status {
-  gap: 7px;
-  padding: 5px 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--accent);
-  background: var(--accent-soft);
-  font-size: 11px;
-  font-weight: 700;
   white-space: nowrap;
-}
-
-.run-status span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.run-status.approval {
-  color: #8250df;
-  background: #fbefff;
-}
-
-.run-status.failed {
-  color: var(--danger);
-  background: #ffebe9;
 }
 
 .conversation-timeline {

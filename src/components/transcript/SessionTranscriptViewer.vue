@@ -5,6 +5,8 @@ import {
   NButton,
   NCheckbox,
   NCheckboxGroup,
+  NCollapse,
+  NCollapseItem,
   NModal,
   NSpin,
   NTag,
@@ -90,6 +92,12 @@ function loadRequest(entry: TranscriptEntryView) {
   }
 }
 
+function defaultExpandedEntryNames(entries: TranscriptEntryView[]): string[] {
+  return entries
+    .filter((entry) => !collapsedKinds.has(entry.kind))
+    .map((entry) => entry.id)
+}
+
 async function confirmExport() {
   if (exportPending.value) return
   exportPending.value = true
@@ -172,25 +180,30 @@ async function confirmExport() {
         <div class="transcript-groups">
           <section v-for="group in groups" :key="group.key">
             <h3>{{ group.label }}</h3>
-            <article
-              v-for="entry in group.entries"
-              :key="entry.id"
-              class="transcript-entry"
-              :data-kind="entry.kind"
+            <NCollapse
+              :default-expanded-names="defaultExpandedEntryNames(group.entries)"
             >
-              <details :open="!collapsedKinds.has(entry.kind)">
-                <summary>
-                  <span>#{{ entry.seq }}</span>
-                  <time :datetime="entry.ts">{{ entry.ts }}</time>
-                  <strong>{{ entry.title }}</strong>
-                  <NTag
-                    v-for="category in entry.categories"
-                    :key="category"
-                    size="small"
-                  >
-                    {{ category }}
-                  </NTag>
-                </summary>
+              <NCollapseItem
+                v-for="entry in group.entries"
+                :key="entry.id"
+                :name="entry.id"
+                class="transcript-entry"
+                :data-kind="entry.kind"
+              >
+                <template #header>
+                  <div class="transcript-entry-header">
+                    <span>#{{ entry.seq }}</span>
+                    <time :datetime="entry.ts">{{ entry.ts }}</time>
+                    <strong>{{ entry.title }}</strong>
+                    <NTag
+                      v-for="category in entry.categories"
+                      :key="category"
+                      size="small"
+                    >
+                      {{ category }}
+                    </NTag>
+                  </div>
+                </template>
                 <div class="transcript-entry-body">
                   <pre v-if="entry.text">{{ entry.text }}</pre>
                   <pre v-if="entry.data">{{ json(entry.data) }}</pre>
@@ -217,8 +230,8 @@ async function confirmExport() {
                     </template>
                   </div>
                 </div>
-              </details>
-            </article>
+              </NCollapseItem>
+            </NCollapse>
           </section>
         </div>
       </NSpin>
@@ -276,28 +289,27 @@ async function confirmExport() {
 
 .transcript-entry {
   margin-bottom: 7px;
+  padding: 0 11px;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   background: var(--background);
 }
 
-.transcript-entry summary {
+.transcript-entry-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 9px 11px;
-  cursor: pointer;
 }
 
-.transcript-entry summary time,
-.transcript-entry summary > span:first-child {
+.transcript-entry-header time,
+.transcript-entry-header > span:first-child {
   color: var(--text-secondary);
   font-size: 12px;
 }
 
 .transcript-entry-body {
-  padding: 0 11px 11px;
+  padding-bottom: 11px;
 }
 
 .transcript-entry pre {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NButton } from 'naive-ui'
+import { NAlert, NButton, NEmpty, NTag, type TagProps } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { PlanItem } from '../../../shared/orchestration'
 import { useAgentStore } from '../../stores/agent'
@@ -27,9 +27,12 @@ function planStatusClass(item: PlanItem): string {
   return `status-${item.status.replace(/_/g, '-')}`
 }
 
-function planWorkflowStatusClass(): string {
-  return `state-${planWorkflowStatus.value.replace(/_/g, '-')}`
-}
+const planWorkflowStatusType = computed<TagProps['type']>(() => {
+  if (planWorkflowStatus.value === 'completed') return 'success'
+  if (planWorkflowStatus.value === 'rejected') return 'error'
+  if (planWorkflowStatus.value === 'awaiting_review') return 'warning'
+  return 'info'
+})
 
 function formatTimestamp(value: string): string {
   return new Date(value).toLocaleString()
@@ -43,9 +46,9 @@ function formatTimestamp(value: string): string {
         <div>
           <div class="plan-title-row">
             <span>{{ t('artifact.plan') }}</span>
-            <span class="plan-state-badge" :class="planWorkflowStatusClass()">
+            <NTag round size="small" :type="planWorkflowStatusType">
               {{ t(`artifact.planState.${planWorkflowStatus}`) }}
-            </span>
+            </NTag>
           </div>
           <strong>{{ agent.plan.objective }}</strong>
         </div>
@@ -80,9 +83,14 @@ function formatTimestamp(value: string): string {
         </NButton>
         <small>{{ t('artifact.planReviewHint') }}</small>
       </div>
-      <p v-if="agent.plan.warning" class="plan-warning">
-        <UiIcon name="warning" />{{ agent.plan.warning }}
-      </p>
+      <NAlert
+        v-if="agent.plan.warning"
+        class="plan-warning"
+        type="warning"
+        :show-icon="false"
+      >
+        {{ agent.plan.warning }}
+      </NAlert>
       <ol v-if="agent.plan.items.length" class="artifact-plan-list">
         <li
           v-for="item in agent.plan.items"
@@ -120,10 +128,11 @@ function formatTimestamp(value: string): string {
         <span>{{ formatTimestamp(agent.plan.updatedAt) }}</span>
       </footer>
     </template>
-    <div v-else class="artifact-empty">
-      <UiIcon name="check" />
-      <h2>{{ t('artifact.noPlan') }}</h2>
-      <p>{{ t('artifact.noPlanHint') }}</p>
-    </div>
+    <NEmpty v-else class="artifact-empty" :description="t('artifact.noPlan')">
+      <template #icon><UiIcon name="check" /></template>
+      <template #extra>
+        <span class="artifact-empty-hint">{{ t('artifact.noPlanHint') }}</span>
+      </template>
+    </NEmpty>
   </section>
 </template>

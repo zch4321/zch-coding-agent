@@ -150,3 +150,8 @@
   width: 26px;
   height: 26px;
 }
+
+.artifact-empty-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}

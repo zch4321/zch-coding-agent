@@ -59,25 +59,6 @@
 
 .orchestration-card {
   min-width: 0;
-  padding: 11px 13px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
-}
-
-.orchestration-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.orchestration-card-header strong {
-  color: var(--accent);
 }
 
 .orchestration-card p,
@@ -263,28 +244,6 @@ code {
   text-transform: uppercase;
 }
 
-.tool-details-toggle {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 0;
-  border-radius: 6px;
-  color: var(--text-muted);
-  background: transparent;
-}
-
-.tool-call-row:hover .tool-details-toggle {
-  color: var(--accent);
-  background: var(--surface);
-}
-
-.tool-details-toggle .ui-icon {
-  width: 14px;
-  height: 14px;
-}
-
 .tool-call-details {
   display: grid;
   min-width: 0;
@@ -320,16 +279,11 @@ code {
   word-break: break-word;
 }
 
-.tool-status,
 .approval-header > span {
   color: var(--accent);
   font-size: 11px;
   font-weight: 700;
   text-transform: capitalize;
-}
-
-.tool-status.complete {
-  color: var(--success);
 }
 
 .approval-card > p {
@@ -355,9 +309,6 @@ code {
 }
 
 .tool-approval-meta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
   margin: 0;
 }
 
@@ -369,14 +320,6 @@ code {
   background: rgba(255, 255, 255, 0.5);
 }
 
-.tool-approval-meta div {
-  min-width: 0;
-  padding: 7px 9px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 7px;
-  background: var(--background);
-}
-
 .approval-meta dt {
   color: var(--warning);
   font-size: 10px;
@@ -384,7 +327,6 @@ code {
   text-transform: uppercase;
 }
 
-.tool-approval-meta dt,
 .tool-approval-usage span {
   color: var(--text-muted);
   font-size: 10px;
@@ -393,15 +335,6 @@ code {
 }
 
 .approval-meta dd {
-  margin: 3px 0 0;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tool-approval-meta dd {
   margin: 3px 0 0;
   overflow: hidden;
   color: var(--text-secondary);
