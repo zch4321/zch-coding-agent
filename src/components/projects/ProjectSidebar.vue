@@ -11,8 +11,10 @@ import {
   NScrollbar,
   NTag,
   NTooltip,
+  type GlobalThemeOverrides,
 } from 'naive-ui'
 import { useAgentStore } from '../../stores/agent'
+import { palette } from '../../theme/naive-theme'
 import { useI18n } from 'vue-i18n'
 import UiIcon from '../UiIcon.vue'
 
@@ -31,6 +33,11 @@ const { t } = useI18n()
 const searchQuery = ref('')
 const collapsedProjects = reactive(new Set<string>())
 let searchGeneration = 0
+const sidebarListThemeOverrides = {
+  color: palette.surface,
+  colorHover: palette.surfaceHover,
+  borderColor: 'transparent',
+} satisfies NonNullable<GlobalThemeOverrides['List']>
 
 function createProjectConversation(workspacePath: string) {
   if (collapsedProjects.has(workspacePath)) {
@@ -119,7 +126,6 @@ function updateExpandedProjects(
     <div class="new-conversation-row">
       <NButton
         class="new-conversation-button"
-        block
         secondary
         @click="emit('create')"
       >
@@ -175,6 +181,7 @@ function updateExpandedProjects(
             hoverable
             clickable
             class="conversation-search-results"
+            :theme-overrides="sidebarListThemeOverrides"
           >
             <NListItem
               v-for="conversation in project.conversations"
@@ -290,6 +297,7 @@ function updateExpandedProjects(
               hoverable
               clickable
               class="conversation-list"
+              :theme-overrides="sidebarListThemeOverrides"
             >
               <NListItem
                 v-for="conversation in project.conversations"

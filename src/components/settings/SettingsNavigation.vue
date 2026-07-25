@@ -46,15 +46,17 @@ function selectTab(key: string | number) {
 
 <template>
   <aside class="settings-sidebar">
-    <NButton
-      class="settings-back-button"
-      secondary
-      block
-      @click="emit('close')"
-    >
-      <UiIcon name="arrow-left" />
-      <span>{{ t('settings.backToChat') }}</span>
-    </NButton>
+    <div class="settings-back-row">
+      <NButton
+        class="settings-back-button"
+        secondary
+        block
+        @click="emit('close')"
+      >
+        <UiIcon name="arrow-left" />
+        <span>{{ t('settings.backToChat') }}</span>
+      </NButton>
+    </div>
     <nav class="settings-nav" :aria-label="t('settings.sections')">
       <NMenu
         :value="activeTab"

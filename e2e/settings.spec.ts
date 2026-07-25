@@ -25,6 +25,30 @@ test.describe.serial('Electron settings workflows', () => {
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.locator('.sidebar-settings-button').click()
+    const settingsSidebar = page.locator('.settings-sidebar')
+    const settingsSidebarLayout = await settingsSidebar.evaluate((sidebar) => {
+      const sidebarBounds = sidebar.getBoundingClientRect()
+      const buttonBounds = (
+        sidebar.querySelector('.settings-back-button') as HTMLElement
+      ).getBoundingClientRect()
+      return {
+        clientWidth: sidebar.clientWidth,
+        scrollWidth: sidebar.scrollWidth,
+        sidebarLeft: sidebarBounds.left,
+        sidebarRight: sidebarBounds.right,
+        buttonLeft: buttonBounds.left,
+        buttonRight: buttonBounds.right,
+      }
+    })
+    expect(settingsSidebarLayout.scrollWidth).toBeLessThanOrEqual(
+      settingsSidebarLayout.clientWidth,
+    )
+    expect(settingsSidebarLayout.buttonLeft).toBeGreaterThanOrEqual(
+      settingsSidebarLayout.sidebarLeft,
+    )
+    expect(settingsSidebarLayout.buttonRight).toBeLessThanOrEqual(
+      settingsSidebarLayout.sidebarRight,
+    )
     const settingsNavigation = page.getByRole('navigation', {
       name: '设置分类',
     })

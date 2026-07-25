@@ -18,9 +18,14 @@
   background: var(--surface);
 }
 
+.settings-back-row {
+  flex: 0 0 auto;
+  padding: 12px 12px 8px;
+}
+
 .settings-back-button {
+  min-width: 0;
   min-height: 42px;
-  margin: 12px 12px 8px;
   justify-content: flex-start;
 }
 

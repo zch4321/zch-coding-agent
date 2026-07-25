@@ -57,7 +57,48 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     if ((await projectToggle.getAttribute('aria-pressed')) !== 'true') {
       await projectToggle.click()
     }
-    await expect(page.locator('.project-sidebar')).toBeVisible()
+    const projectSidebar = page.locator('.project-sidebar')
+    await expect(projectSidebar).toBeVisible()
+    const sidebarLayout = await projectSidebar.evaluate((sidebar) => {
+      const sidebarBounds = sidebar.getBoundingClientRect()
+      const selectors = [
+        '.new-conversation-button',
+        '.import-conversation-button',
+        '.conversation-list',
+      ]
+      return {
+        clientWidth: sidebar.clientWidth,
+        scrollWidth: sidebar.scrollWidth,
+        background: getComputedStyle(sidebar).backgroundColor,
+        listBackground: getComputedStyle(
+          sidebar.querySelector('.conversation-list') as HTMLElement,
+        ).backgroundColor,
+        children: selectors.map((selector) => {
+          const bounds = (
+            sidebar.querySelector(selector) as HTMLElement
+          ).getBoundingClientRect()
+          return {
+            selector,
+            left: bounds.left,
+            right: bounds.right,
+            sidebarLeft: sidebarBounds.left,
+            sidebarRight: sidebarBounds.right,
+          }
+        }),
+      }
+    })
+    expect(sidebarLayout.scrollWidth).toBeLessThanOrEqual(
+      sidebarLayout.clientWidth,
+    )
+    expect(sidebarLayout.listBackground).toBe(sidebarLayout.background)
+    for (const child of sidebarLayout.children) {
+      expect(child.left, child.selector).toBeGreaterThanOrEqual(
+        child.sidebarLeft,
+      )
+      expect(child.right, child.selector).toBeLessThanOrEqual(
+        child.sidebarRight,
+      )
+    }
     const projectHeading = page.locator('.project-heading').first()
     const conversationList = page.locator('.conversation-list').first()
     await expect(projectHeading).toHaveAttribute('aria-expanded', 'true')

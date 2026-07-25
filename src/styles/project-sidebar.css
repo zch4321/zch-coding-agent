@@ -18,8 +18,10 @@
 }
 
 .new-conversation-button {
+  width: auto;
   min-width: 0;
   min-height: 38px;
+  flex: 1 1 auto;
 }
 
 .new-conversation-button .ui-icon {
@@ -67,7 +69,7 @@
 }
 
 .project-groups {
-  padding: 0 4px;
+  min-width: 0;
 }
 
 .project-group {
@@ -94,11 +96,15 @@
 }
 
 .conversation-list {
-  margin-left: 18px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
 }
 
 .conversation-row {
+  width: 100%;
   min-width: 0;
+  overflow: hidden;
 }
 
 .conversation-row.active {
@@ -145,8 +151,7 @@
 }
 
 .conversation-row:hover .conversation-actions,
-.conversation-row:focus-within .conversation-actions,
-.conversation-row.active .conversation-actions {
+.conversation-row:focus-within .conversation-actions {
   display: flex;
 }
 
@@ -157,7 +162,9 @@
 }
 
 .conversation-search-results {
-  margin: 0 4px 10px;
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 10px;
 }
 
 .search-result {
