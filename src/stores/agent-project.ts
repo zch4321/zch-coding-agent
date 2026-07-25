@@ -7,9 +7,14 @@ import type {
   ProjectModel,
   ProjectModule,
 } from '../../shared/project-model'
+import { useAgentReplicaStore } from './agent-replica'
 
 function bridge() {
   return window.agentApi
+}
+
+function activeProjectId() {
+  return useAgentReplicaStore().selectedProjectId
 }
 
 export const useAgentProjectStore = defineStore('agent-project', {
@@ -26,10 +31,11 @@ export const useAgentProjectStore = defineStore('agent-project', {
   actions: {
     async loadProject(workspace: string) {
       const api = bridge()
-      if (!api?.getProject || !workspace) return
+      const projectId = activeProjectId()
+      if (!api?.getProject || !workspace || !projectId) return
       this.loading = true
       this.error = ''
-      const result = await api.getProject({ version: IPC_VERSION, workspace })
+      const result = await api.getProject({ version: IPC_VERSION, projectId })
       this.loading = false
 
       if (result.ok) {
@@ -41,10 +47,11 @@ export const useAgentProjectStore = defineStore('agent-project', {
     },
     async loadBackendStatus(workspace: string) {
       const api = bridge()
-      if (!api?.getProjectBackendStatus || !workspace) return
+      const projectId = activeProjectId()
+      if (!api?.getProjectBackendStatus || !workspace || !projectId) return
       const result = await api.getProjectBackendStatus({
         version: IPC_VERSION,
-        workspace,
+        projectId,
       })
 
       if (result.ok) this.backendStatuses = result.value.statuses
@@ -52,12 +59,13 @@ export const useAgentProjectStore = defineStore('agent-project', {
     },
     async detectModules(workspace: string) {
       const api = bridge()
-      if (!api?.detectProjectModules || !workspace) return
+      const projectId = activeProjectId()
+      if (!api?.detectProjectModules || !workspace || !projectId) return
       this.detecting = true
       this.error = ''
       const result = await api.detectProjectModules({
         version: IPC_VERSION,
-        workspace,
+        projectId,
       })
       this.detecting = false
 
@@ -66,12 +74,13 @@ export const useAgentProjectStore = defineStore('agent-project', {
     },
     async saveProject(workspace: string, project: ProjectModel) {
       const api = bridge()
-      if (!api?.saveProject || !workspace) return false
+      const projectId = activeProjectId()
+      if (!api?.saveProject || !workspace || !projectId) return false
       this.saving = true
       this.error = ''
       const result = await api.saveProject({
         version: IPC_VERSION,
-        workspace,
+        projectId,
         project,
       })
       this.saving = false
@@ -110,12 +119,13 @@ export const useAgentProjectStore = defineStore('agent-project', {
     },
     async restartBackend(workspace: string, backendId: string) {
       const api = bridge()
-      if (!api?.restartProjectBackend || !workspace) return
+      const projectId = activeProjectId()
+      if (!api?.restartProjectBackend || !workspace || !projectId) return
       this.restartingBackendId = backendId
       this.error = ''
       const result = await api.restartProjectBackend({
         version: IPC_VERSION,
-        workspace,
+        projectId,
         backendId,
       })
       this.restartingBackendId = ''

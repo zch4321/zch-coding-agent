@@ -6,6 +6,7 @@ import os from 'node:os'
 import type { PublicConfig } from '../../shared/config'
 import type { PromptBuildSummary } from '../../shared/trace'
 import type { JsonValue } from '../../shared/json'
+import type { MessageId } from '../../shared/ids'
 import type { CanonicalPromptKind, MessageRecord } from '../../shared/message'
 import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
@@ -39,10 +40,10 @@ export interface PromptSelection {
 
 export type WorkspaceConcurrencyContext =
   | { status: 'available' }
-  | { status: 'writer'; writerConversationId: string; writerRunId: string }
+  | { status: 'writer'; writerSessionId: string; writerRunId: string }
   | {
       status: 'readonly_locked'
-      writerConversationId: string
+      writerSessionId: string
       writerRunId: string
     }
 
@@ -155,6 +156,7 @@ export function appendPromptLayer(
     config: PublicConfig
     resource?: PromptResourceSummary
     hash?: string
+    turnId?: MessageId
   },
 ): MessageRecord {
   return appendPromptMessage(state, input)
@@ -570,7 +572,7 @@ function workspaceConcurrencyContentEn(
   if (context.status === 'writer') {
     return [
       'This session owns the workspace writer for its complete run.',
-      `writer_conversation_id: ${escapeAttribute(context.writerConversationId)}`,
+      `writer_session_id: ${escapeAttribute(context.writerSessionId)}`,
       `writer_run_id: ${escapeAttribute(context.writerRunId)}`,
     ].join('\n')
   }
@@ -579,7 +581,7 @@ function workspaceConcurrencyContentEn(
     'Another agent run is modifying this workspace. This session is forcibly restricted to readonly access.',
     'Do not write or delete files, modify Git or project metadata, write to terminals, spawn side-effecting processes, access the network for side effects, or call any other mutating tool.',
     'After the writer finishes, reread relevant files before drawing conclusions because prior workspace state may be stale.',
-    `writer_conversation_id: ${escapeAttribute(context.writerConversationId)}`,
+    `writer_session_id: ${escapeAttribute(context.writerSessionId)}`,
     `writer_run_id: ${escapeAttribute(context.writerRunId)}`,
   ].join('\n')
 }
@@ -594,7 +596,7 @@ function workspaceConcurrencyContentZh(
   if (context.status === 'writer') {
     return [
       '当前 session 在完整 run 生命周期内持有 workspace writer。',
-      `writer_conversation_id: ${escapeAttribute(context.writerConversationId)}`,
+      `writer_session_id: ${escapeAttribute(context.writerSessionId)}`,
       `writer_run_id: ${escapeAttribute(context.writerRunId)}`,
     ].join('\n')
   }
@@ -603,7 +605,7 @@ function workspaceConcurrencyContentZh(
     '另一个 agent run 正在修改同一 workspace；当前 session 被强制限制为只读。',
     '不得写入或删除文件、修改 Git 或项目元数据、写入终端、启动有副作用的进程、执行有副作用的网络访问，或调用任何其他 mutating tool。',
     'writer 结束后必须重新读取相关文件再下结论，避免依据过期的 workspace 状态。',
-    `writer_conversation_id: ${escapeAttribute(context.writerConversationId)}`,
+    `writer_session_id: ${escapeAttribute(context.writerSessionId)}`,
     `writer_run_id: ${escapeAttribute(context.writerRunId)}`,
   ].join('\n')
 }

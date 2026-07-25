@@ -48,9 +48,6 @@ export const SessionTranscriptMetadataSchema = Type.Object(
     traceId: TraceIdSchema,
     revision: Type.String({ minLength: 1, maxLength: 128 }),
     sessionId: Type.Optional(SessionIdSchema),
-    conversationId: Type.Optional(
-      Type.String({ minLength: 1, maxLength: 256 }),
-    ),
     workspace: Type.Optional(Type.String({ maxLength: 4_096 })),
     model: Type.Optional(Type.String({ maxLength: 256 })),
     mode: Type.Optional(Type.String({ maxLength: 64 })),

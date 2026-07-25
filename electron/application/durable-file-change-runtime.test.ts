@@ -18,9 +18,26 @@ import type {
 } from '../providers/provider'
 import { createConfig } from '../session/session-manager-test-support'
 import {
-  createDurableTargetRuntime,
-  type DurableTargetRuntime,
-} from './create-durable-target-runtime'
+  createBackendRuntime,
+  type BackendRuntime,
+  type CreateBackendRuntimeOptions,
+} from './create-backend-runtime'
+
+type DurableTargetRuntime = BackendRuntime
+
+function createBackendForTest(
+  options: Omit<
+    CreateBackendRuntimeOptions,
+    'databasePath' | 'runtimeDataDirectory'
+  > & { targetDirectory: string },
+) {
+  const { targetDirectory, ...runtimeOptions } = options
+  return createBackendRuntime({
+    ...runtimeOptions,
+    databasePath: path.join(targetDirectory, 'agent.db'),
+    runtimeDataDirectory: targetDirectory,
+  })
+}
 
 class FileMutationProvider implements LLMProvider {
   calls = 0
@@ -204,13 +221,9 @@ describe('P5 durable file tool execution', () => {
     expect(fileChangeCommit).toBeGreaterThanOrEqual(0)
     expect(topics.slice(fileChangeCommit + 1)).toContain('session.changed')
 
-    const legacy = JSON.parse(
-      await readFile(
-        path.join(setup.targetDirectory, 'change-history.json'),
-        'utf8',
-      ),
-    ) as { records: unknown[] }
-    expect(legacy.records).toEqual([])
+    await expect(
+      readFile(path.join(setup.targetDirectory, 'change-history.json'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
     expect(JSON.stringify(page)).not.toContain('beforeContent')
     expect(JSON.stringify(messages)).not.toContain('beforeContent')
     const traceFiles = (
@@ -232,7 +245,7 @@ describe('P5 durable file tool execution', () => {
     expect(traces).not.toContain('before_content')
 
     await setup.target.dispose()
-    const reopened = await createDurableTargetRuntime({
+    const reopened = await createBackendForTest({
       configStore: setup.store,
       promptDirectory: path.resolve('resources', 'prompts'),
       targetDirectory: setup.targetDirectory,
@@ -347,7 +360,7 @@ describe('P5 durable file tool execution', () => {
       ).toBe(after)
 
       await setup.target.dispose()
-      const reopened = await createDurableTargetRuntime({
+      const reopened = await createBackendForTest({
         configStore: setup.store,
         promptDirectory: path.resolve('resources', 'prompts'),
         targetDirectory: setup.targetDirectory,
@@ -385,7 +398,7 @@ async function setupTarget(provider: FileMutationProvider): Promise<{
   const targetDirectory = path.join(root, 'target')
   await mkdir(workspace)
   const store = await createConfig(root)
-  const target = await createDurableTargetRuntime({
+  const target = await createBackendForTest({
     configStore: store,
     promptDirectory: path.resolve('resources', 'prompts'),
     targetDirectory,

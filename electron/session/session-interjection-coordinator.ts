@@ -7,19 +7,6 @@ import type {
   SessionState,
 } from './session-types'
 
-const INTERJECTION_RULE_NOTE =
-  'Messages tagged as <live_user_interjection> are real user messages received while the current run was already in progress. They are not tool output. Treat them as the latest user instruction for the next reasoning step, while respecting system, developer, runtime, repository, and tool-safety instructions.'
-
-function liveUserInterjectionContent(content: string): string {
-  return [
-    '<live_user_interjection>',
-    content,
-    '</live_user_interjection>',
-    '',
-    INTERJECTION_RULE_NOTE,
-  ].join('\n')
-}
-
 export class SessionInterjectionCoordinator {
   readonly #configStore: ConfigStore
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
@@ -50,7 +37,6 @@ export class SessionInterjectionCoordinator {
     const interjection: RunInterjection = {
       id: input.clientRequestId,
       clientRequestId: input.clientRequestId,
-      conversationId: session.conversationId,
       runId: run.runId,
       content: input.message,
       createdAt: new Date().toISOString(),
@@ -77,11 +63,12 @@ export class SessionInterjectionCoordinator {
     for (const interjection of toInject) {
       appendPromptLayer(session, {
         kind: 'interjection',
-        content: liveUserInterjectionContent(interjection.content),
+        content: interjection.content,
         source: 'run.interjection',
         trusted: false,
         editable: false,
         config,
+        turnId: run.rootUserMessageId,
       })
       interjection.status = 'injected'
       if (batchId) {

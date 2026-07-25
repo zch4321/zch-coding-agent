@@ -24,9 +24,6 @@ export const TraceInfoSchema = Type.Object(
   {
     traceId: TraceIdSchema,
     sessionId: Type.Optional(SessionIdSchema),
-    conversationId: Type.Optional(
-      Type.String({ minLength: 1, maxLength: 256 }),
-    ),
     startedAt: Type.Optional(Type.String({ format: 'date-time' })),
     endedAt: Type.Optional(Type.String({ format: 'date-time' })),
     closed: Type.Boolean(),

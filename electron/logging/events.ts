@@ -53,9 +53,6 @@ export const TraceEventSchema = Type.Union([
     Type.Object({
       type: Type.Literal('session.start'),
       sessionId: SessionIdSchema,
-      conversationId: Type.Optional(
-        Type.String({ minLength: 1, maxLength: 256 }),
-      ),
       workspace: Type.String({ maxLength: 4_096 }),
       model: Type.String({ maxLength: 256 }),
       mode: Type.String({ maxLength: 64 }),
@@ -88,9 +85,7 @@ export const TraceEventSchema = Type.Union([
       ]),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 32 })),
       active: Type.Optional(Type.Integer({ minimum: 0, maximum: 32 })),
-      writerConversationId: Type.Optional(
-        Type.String({ minLength: 1, maxLength: 256 }),
-      ),
+      writerSessionId: Type.Optional(SessionIdSchema),
       writerRunId: Type.Optional(RunIdSchema),
     }),
   ]),
@@ -101,15 +96,12 @@ export const TraceEventSchema = Type.Union([
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
       workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
-      conversationId: Type.String({ minLength: 1, maxLength: 256 }),
       status: Type.Union([
         Type.Literal('acquired'),
         Type.Literal('released'),
         Type.Literal('rejected'),
       ]),
-      writerConversationId: Type.Optional(
-        Type.String({ minLength: 1, maxLength: 256 }),
-      ),
+      writerSessionId: Type.Optional(SessionIdSchema),
       writerRunId: Type.Optional(RunIdSchema),
     }),
   ]),
@@ -359,7 +351,6 @@ interface TraceInputBase {
 export type TraceEventInput =
   | (TraceInputBase & {
       type: 'session.start'
-      conversationId?: string
       workspace: string
       model: string
       mode: string
@@ -372,16 +363,15 @@ export type TraceEventInput =
       reason: 'max_concurrent_runs' | 'workspace_writer_active'
       limit?: number
       active?: number
-      writerConversationId?: string
+      writerSessionId?: SessionId
       writerRunId?: RunId
     })
   | (TraceInputBase & {
       type: 'workspace.writer'
       runId: RunId
       workspace: string
-      conversationId: string
       status: 'acquired' | 'released' | 'rejected'
-      writerConversationId?: string
+      writerSessionId?: SessionId
       writerRunId?: RunId
     })
   | (TraceInputBase & { type: 'run.start'; runId: RunId })

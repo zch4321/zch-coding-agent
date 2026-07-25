@@ -1,8 +1,9 @@
 import { createWriteStream, type WriteStream } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { EventId, SessionId } from '../../shared/ids'
+import type { TraceId } from '../../shared/trace'
 import {
   createTraceEvent,
   type TraceEvent,
@@ -24,6 +25,18 @@ interface QueueItem {
 export interface JsonlTraceLoggerOptions {
   maxQueueSize?: number
   highWaterMark?: number
+}
+
+const SAFE_TRACE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
+
+export function traceIdForSession(sessionId: SessionId): TraceId {
+  if (SAFE_TRACE_ID.test(sessionId)) return sessionId as TraceId
+  const digest = createHash('sha256')
+    .update(sessionId)
+    .digest('hex')
+    .slice(0, 16)
+  const readable = sessionId.replace(/[^A-Za-z0-9._-]/gu, '-').slice(0, 110)
+  return `${readable}-${digest}` as TraceId
 }
 
 export class JsonlTraceLogger implements TraceLogger {
@@ -66,7 +79,7 @@ export class JsonlTraceLogger implements TraceLogger {
   ): Promise<JsonlTraceLogger> {
     await mkdir(directory, { recursive: true })
     return new JsonlTraceLogger(
-      path.join(directory, `${sessionId}.jsonl`),
+      path.join(directory, `${traceIdForSession(sessionId)}.jsonl`),
       options,
     )
   }

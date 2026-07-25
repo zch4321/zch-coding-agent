@@ -12,9 +12,26 @@ import type {
 import type { ConfigStore } from '../config/store'
 import { createConfig, waitFor } from '../session/session-manager-test-support'
 import {
-  createDurableTargetRuntime,
-  type DurableTargetRuntime,
-} from './create-durable-target-runtime'
+  createBackendRuntime,
+  type BackendRuntime,
+  type CreateBackendRuntimeOptions,
+} from './create-backend-runtime'
+
+type DurableTargetRuntime = BackendRuntime
+
+function createBackendForTest(
+  options: Omit<
+    CreateBackendRuntimeOptions,
+    'databasePath' | 'runtimeDataDirectory'
+  > & { targetDirectory: string },
+) {
+  const { targetDirectory, ...runtimeOptions } = options
+  return createBackendRuntime({
+    ...runtimeOptions,
+    databasePath: path.join(targetDirectory, 'agent.db'),
+    runtimeDataDirectory: targetDirectory,
+  })
+}
 
 class RecoveryProvider implements LLMProvider {
   calls = 0
@@ -105,7 +122,7 @@ async function setupTarget(): Promise<{
           ? 'max'
           : 'high',
   }
-  const target = await createDurableTargetRuntime({
+  const target = await createBackendForTest({
     configStore: store,
     promptDirectory: path.resolve('resources', 'prompts'),
     targetDirectory: path.join(root, 'target'),
@@ -491,7 +508,7 @@ describe('durable lifecycle ownership and recovery', () => {
     await first.target.dispose()
 
     const provider = new RecoveryProvider()
-    const second = await createDurableTargetRuntime({
+    const second = await createBackendForTest({
       configStore: first.store,
       promptDirectory: path.resolve('resources', 'prompts'),
       targetDirectory: path.join(first.root, 'target'),

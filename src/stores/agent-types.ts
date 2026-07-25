@@ -22,6 +22,12 @@ export interface UiLlmUsageRecord {
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'orchestrator' | 'interjection'
+  durableKind:
+    | 'user_input'
+    | 'assistant_turn'
+    | 'orchestrator'
+    | 'interjection'
+    | 'stream'
   runId?: RunId
   text: string
   reasoning: string
@@ -29,6 +35,8 @@ export interface ChatMessage {
   attachments?: ContextAttachmentChip[]
   interjectionId?: string
   interjectionStatus?: 'queued' | 'injected' | 'superseded' | 'carryover'
+  retryable?: boolean
+  editable?: boolean
 }
 
 export interface ToolActivity {
@@ -71,44 +79,32 @@ export interface OrchestratorEntry {
   order?: number
 }
 
-export interface ProjectRecord {
+export interface ProjectView {
+  id: string
   path: string
   name: string
   addedAt: string
 }
 
-export interface ConversationRecord {
+export interface SessionView {
   id: string
+  projectId: string
   projectPath: string
   title: string
   model: string
   mode: import('../../shared/config').PermissionMode
-  draft?: string
-  contextAttachments?: ContextAttachmentChip[]
-  messages: ChatMessage[]
-  tools?: ToolActivity[]
-  usage?: UsageActivity[]
   goal?: GoalState
   plan?: PlanState
   orchestratorEntries?: OrchestratorEntry[]
-  latestReviewedApproval?: ReviewedApproval
   parentId?: string
-  parentTitle?: string
-  forkPointMessageId?: string
   forkedAt?: string
-  importedFrom?: string
   createdAt: string
   updatedAt: string
-  transient?: boolean
+  revision: number
+  archived: boolean
 }
 
 export type { ContextAttachmentChip, GoalState, PlanState }
-
-export interface PersistedWorkbench {
-  projects: ProjectRecord[]
-  conversations: ConversationRecord[]
-  activeConversationId?: string
-}
 
 export interface PendingApproval {
   runId: RunId

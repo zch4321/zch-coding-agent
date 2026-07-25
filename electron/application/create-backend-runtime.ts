@@ -1,5 +1,4 @@
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import os from 'node:os'
+import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import type {
   AppBootstrapResultSchema,
@@ -32,18 +31,20 @@ import { SessionService, type SessionRuntimeGuard } from './session-service'
 
 type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
-export interface CreateDurableTargetRuntimeOptions {
+export interface CreateBackendRuntimeOptions {
   configStore: ConfigStore
   promptDirectory: string
-  targetDirectory?: string
+  databasePath: string
+  runtimeDataDirectory: string
   appVersion?: string
   fetchImpl?: typeof fetch
   providerFactory?: CreateAgentRuntimeOptions['providerFactory']
   autoApproverFactory?: CreateAgentRuntimeOptions['autoApproverFactory']
+  eventListeners?: CreateAgentRuntimeOptions['eventListeners']
   onDiagnostic?: (message: string, error?: unknown) => void
 }
 
-export interface DurableTargetRuntime {
+export interface BackendRuntime {
   databasePath: string
   runtime: AgentRuntime
   coordinator: ApplicationStateCoordinator
@@ -57,24 +58,17 @@ export interface DurableTargetRuntime {
   dispose(): Promise<void>
 }
 
-/**
- * Creates the P4 target composition against an isolated SQLite database.
- *
- * Desktop, Headless, preload and renderer continue to use createAgentRuntime
- * directly until the P8 cut-over.
- */
-export async function createDurableTargetRuntime(
-  options: CreateDurableTargetRuntimeOptions,
-): Promise<DurableTargetRuntime> {
-  const ownsDirectory = options.targetDirectory === undefined
-  const targetDirectory =
-    options.targetDirectory ??
-    (await mkdtemp(path.join(os.tmpdir(), 'zch-p4-target-')))
-  await mkdir(targetDirectory, { recursive: true })
-  const databasePath = path.join(targetDirectory, 'agent.target.db')
+/** Creates the sole production backend composition against SQLite. */
+export async function createBackendRuntime(
+  options: CreateBackendRuntimeOptions,
+): Promise<BackendRuntime> {
+  const databasePath = path.resolve(options.databasePath)
+  const runtimeDataDirectory = path.resolve(options.runtimeDataDirectory)
+  await mkdir(path.dirname(databasePath), { recursive: true })
+  await mkdir(runtimeDataDirectory, { recursive: true })
   const database = DatabaseService.open({
     databasePath,
-    appVersion: options.appVersion ?? 'p4-target',
+    appVersion: options.appVersion ?? 'development',
   })
   const listeners = new Set<(commit: DurableCommitEnvelope) => void>()
   const coordinator = new ApplicationStateCoordinator({
@@ -156,11 +150,12 @@ export async function createDurableTargetRuntime(
   try {
     runtime = await createAgentRuntime({
       configStore: options.configStore,
-      userDataDirectory: targetDirectory,
+      userDataDirectory: runtimeDataDirectory,
       promptDirectory: options.promptDirectory,
       fetchImpl: options.fetchImpl,
       providerFactory: options.providerFactory,
       autoApproverFactory: options.autoApproverFactory,
+      eventListeners: options.eventListeners,
       executionState,
       fileChangeExecution: fileChanges,
       onDiagnostic: options.onDiagnostic,
@@ -228,19 +223,14 @@ export async function createDurableTargetRuntime(
         if (disposed) return
         disposed = true
         listeners.clear()
+        await liveSessions?.dispose()
         await runtime?.dispose()
         await database.close()
-        if (ownsDirectory) {
-          await rm(targetDirectory, { recursive: true, force: true })
-        }
       },
     }
   } catch (error) {
     await runtime?.dispose()
     await database.close()
-    if (ownsDirectory) {
-      await rm(targetDirectory, { recursive: true, force: true })
-    }
     throw error
   }
 }

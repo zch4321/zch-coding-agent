@@ -10,7 +10,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { SessionId } from '../../shared/ids'
 import { cleanupTraces } from './cleanup'
-import { JsonlTraceLogger, NullTraceLogger } from './logger'
+import { JsonlTraceLogger, NullTraceLogger, traceIdForSession } from './logger'
 import { readTraceFile } from './reader'
 
 const sessionId = 'session-trace' as SessionId
@@ -61,6 +61,23 @@ describe('JsonlTraceLogger', () => {
     const events = await readTraceFile(filePath)
     expect(events).toHaveLength(1)
     expect(events[0]?.type).toBe('session.start')
+  })
+
+  it('maps Session ids with Windows-reserved characters to safe trace files', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
+    const durableSessionId = 'session:durable:one' as SessionId
+    const traceId = traceIdForSession(durableSessionId)
+    const logger = await JsonlTraceLogger.create(directory, durableSessionId)
+    await logger.write({
+      type: 'session.end',
+      sessionId: durableSessionId,
+    })
+    await logger.dispose()
+
+    expect(traceId).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u)
+    await expect(
+      readTraceFile(path.join(directory, `${traceId}.jsonl`)),
+    ).resolves.toHaveLength(1)
   })
 
   it('rejects complete pre-P3 trace schemas', async () => {

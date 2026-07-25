@@ -47,10 +47,7 @@ import type {
   RunBenchmarkTrialsInput,
 } from './contracts'
 import { createBenchmarkFeedback } from './feedback'
-import {
-  benchmarkConversationMarkdown,
-  benchmarkSessionTranscriptMarkdown,
-} from './conversation-artifact'
+import { benchmarkSessionTranscriptMarkdown } from './conversation-artifact'
 import {
   aggregateBenchmarkMetrics,
   validateBenchmarkPriceSnapshot,
@@ -327,13 +324,6 @@ async function runTrial(input: {
           priceSnapshot: input.input.priceSnapshot,
         })
       : undefined
-  const conversationMarkdown =
-    headless && trace
-      ? benchmarkConversationMarkdown({
-          trace,
-          caseId: input.input.loadedCase.manifest.id,
-        })
-      : undefined
   const sessionTranscriptMarkdown = trace
     ? benchmarkSessionTranscriptMarkdown({ trace })
     : undefined
@@ -347,17 +337,10 @@ async function runTrial(input: {
     workerStatus: worker.status,
     sessionId: headless?.sessionId,
     metrics,
-    ...(conversationMarkdown || sessionTranscriptMarkdown
+    ...(sessionTranscriptMarkdown
       ? {
           artifacts: {
-            ...(conversationMarkdown
-              ? { conversationMarkdown: 'conversation.restricted.md' }
-              : {}),
-            ...(sessionTranscriptMarkdown
-              ? {
-                  sessionTranscript: 'session-transcript.restricted.md',
-                }
-              : {}),
+            sessionTranscript: 'session-transcript.restricted.md',
           },
         }
       : {}),
@@ -384,13 +367,6 @@ async function runTrial(input: {
   await rm(workspace, { recursive: true, force: true })
   if (metrics) {
     await writeJsonAtomic(path.join(stagingDirectory, 'metrics.json'), metrics)
-  }
-  if (conversationMarkdown) {
-    await writeFile(
-      path.join(stagingDirectory, 'conversation.restricted.md'),
-      conversationMarkdown,
-      'utf8',
-    )
   }
   if (sessionTranscriptMarkdown) {
     await writeFile(

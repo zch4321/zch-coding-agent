@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { NButton, NSelect, type SelectOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { FileChangeRecord } from '../../../shared/change-history'
+import type { FileChangeSummary } from '../../../shared/file-change'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 
@@ -24,7 +24,7 @@ const selectedChange = computed(
 const runOptions = computed<SelectOption[]>(() => {
   const runs = new Map<string, number>()
   for (const change of agent.changes) {
-    runs.set(change.runId, (runs.get(change.runId) ?? 0) + 1)
+    runs.set(change.callId, (runs.get(change.callId) ?? 0) + 1)
   }
   return [
     { label: t('artifact.filterAll'), value: undefined },
@@ -57,7 +57,7 @@ const statusOptions = computed<SelectOption[]>(
 )
 const filteredChanges = computed(() =>
   agent.changes.filter((change) => {
-    if (filterRunId.value && change.runId !== filterRunId.value) return false
+    if (filterRunId.value && change.callId !== filterRunId.value) return false
     if (filterPath.value && change.path !== filterPath.value) return false
     if (filterStatus.value === 'active' && change.revertedAt) return false
     if (filterStatus.value === 'reverted' && !change.revertedAt) return false
@@ -65,7 +65,7 @@ const filteredChanges = computed(() =>
   }),
 )
 
-async function revertChange(change: FileChangeRecord) {
+async function revertChange(change: FileChangeSummary) {
   if (!window.confirm(t('artifact.revertConfirm', { path: change.path }))) {
     return
   }
@@ -113,7 +113,6 @@ watch(
           :disabled="agent.approvalSubmitting"
           @click="
             agent.decideApproval({
-              conversationId: agent.activeConversationId!,
               decision: 'allow',
             })
           "
@@ -125,7 +124,6 @@ watch(
           :disabled="agent.approvalSubmitting"
           @click="
             agent.decideApproval({
-              conversationId: agent.activeConversationId!,
               decision: 'deny',
             })
           "

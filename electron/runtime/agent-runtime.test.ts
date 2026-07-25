@@ -12,6 +12,15 @@ import { ScriptedEditProvider } from '../session/session-manager-approval-fixtur
 import { createConfig } from '../session/session-manager-test-support'
 import { createAgentRuntime } from './create-agent-runtime'
 
+const noFileChangeAudit = {
+  prepareMutation: async () => undefined,
+  commitMutation: async () =>
+    ({
+      status: 'warning',
+      warningCode: 'CHANGE_HISTORY_PERSIST_FAILED',
+    }) as const,
+}
+
 describe('AgentRuntime Node boundary', () => {
   it('runs and disposes without BrowserWindow, WebContents, preload, or IPC', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-runtime-'))
@@ -25,6 +34,7 @@ describe('AgentRuntime Node boundary', () => {
       configStore,
       userDataDirectory: directory,
       promptDirectory: path.resolve('resources', 'prompts'),
+      fileChangeExecution: noFileChangeAudit,
       providerFactory: () => provider,
       eventListeners: [{ onAgentEvent: (event) => events.push(event) }],
     })
@@ -98,6 +108,7 @@ describe('AgentRuntime Node boundary', () => {
       configStore,
       userDataDirectory: directory,
       promptDirectory: path.resolve('resources', 'prompts'),
+      fileChangeExecution: noFileChangeAudit,
       providerFactory: () => new BlockingProvider(),
     })
     const sessionId = await runtime.createSession({

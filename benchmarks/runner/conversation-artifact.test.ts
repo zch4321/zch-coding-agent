@@ -1,13 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../electron/logging/events'
-import { markdownToConversation } from '../../shared/conversation-markdown'
-import {
-  benchmarkConversationMarkdown,
-  benchmarkSessionTranscriptMarkdown,
-} from './conversation-artifact'
+import { benchmarkSessionTranscriptMarkdown } from './conversation-artifact'
 
 describe('benchmark conversation artifact', () => {
-  it('reuses the Electron markdown format for user, harness, and assistant messages', () => {
+  it('exports the restricted trace transcript', () => {
     const trace = [
       event('session.start', 1, {
         workspace: '/workspace',
@@ -40,23 +36,6 @@ describe('benchmark conversation artifact', () => {
       }),
       event('session.end', 6, {}),
     ] as TraceEvent[]
-
-    const markdown = benchmarkConversationMarkdown({
-      trace,
-      caseId: 'case-one',
-    })
-    const parsed = markdownToConversation(markdown)
-
-    expect(markdown).toContain('format: "zch-conversation"')
-    expect(markdown).toContain('title: "Benchmark: case-one"')
-    expect(parsed.messages.map((message) => message.role)).toEqual([
-      'orchestrator',
-      'user',
-      'assistant',
-    ])
-    expect(parsed.messages[0]?.text).toContain('allowedPaths')
-    expect(parsed.messages[2]?.reasoning).toBe('Checked the public behavior.')
-    expect(markdown).not.toContain('run_command')
 
     const transcript = benchmarkSessionTranscriptMarkdown({ trace })
     expect(transcript).toContain('format: "zch-session-transcript"')

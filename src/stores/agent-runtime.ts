@@ -10,1030 +10,809 @@ import type {
 import type {
   ContextAttachmentChip,
   ContextAttachmentKind,
-  ContextAttachmentRef,
 } from '../../shared/context'
-import type { RunId, SessionId } from '../../shared/ids'
+import type { MessageId, RunId, SessionId } from '../../shared/ids'
 import type { PlanStatus } from '../../shared/orchestration'
+import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
+import type { DurableRunStartResult } from '../../shared/domain-state-api'
 import type {
   ChatMessage,
-  ConversationRecord,
   PendingApproval,
+  ReviewedApproval,
+  ToolActivity,
+  UsageActivity,
 } from './agent-types'
-import { useAgentChangesStore } from './agent-changes'
+import { useAgentReplicaStore } from './agent-replica'
+import {
+  attachmentRefs,
+  blankOverlay,
+  messageText,
+  normalizeSendMessageOptions,
+  originalUserRecord,
+  parseMentionAttachments,
+  pendingApprovalFromSnapshot,
+  projectName,
+  requestId,
+  TERMINAL_RUN_STATUSES,
+  type SendMessageOptions,
+  type SessionOverlay,
+} from './agent-runtime-helpers'
 import { useAgentSettingsStore } from './agent-settings'
 import { useAgentShellStore } from './agent-shell'
-import { useAgentTimelineStore } from './agent-timeline'
-import { useAgentWorkbenchStore } from './agent-workbench'
-import {
-  carryoverFromMessages,
-  handleRuntimeAgentEvent,
-  type PendingCarryoverInterjection,
-  type RuntimeEventTimeline,
-} from './runtime-events'
-import { requestId } from './workbench-persistence'
 
-let persistTimer: number | undefined
-
-interface SendMessageOptions {
-  text?: string
-  includeContext?: boolean
-  clearInput?: boolean
+interface ApprovalDecisionInput {
+  decision: 'allow' | 'deny'
+  remember?: boolean
 }
 
-function normalizeSendMessageOptions(
-  value: SendMessageOptions | Event,
-): SendMessageOptions {
-  if (!value || typeof value !== 'object') return {}
-  if ('text' in value || 'includeContext' in value || 'clearInput' in value) {
-    return value as SendMessageOptions
-  }
-  return {}
-}
-
-function parseMentionAttachments(message: string): ContextAttachmentChip[] {
-  const attachments: ContextAttachmentChip[] = []
-  const seen = new Set<string>()
-  const pattern = /(^|\s)@([^\s@]+)/gu
-  let match: RegExpExecArray | null
-
-  while ((match = pattern.exec(message))) {
-    const raw = match[2]?.trim()
-    if (!raw || raw.startsWith('http://') || raw.startsWith('https://')) {
-      continue
-    }
-
-    const normalizedPath = raw.replace(/^["']|["']$/gu, '').replace(/\\/gu, '/')
-    const kind: ContextAttachmentKind = normalizedPath.endsWith('/')
-      ? 'directory'
-      : 'file'
-    const path =
-      kind === 'directory'
-        ? normalizedPath.replace(/\/+$/gu, '')
-        : normalizedPath
-    const key = `${kind}:${path}`
-    if (!path || seen.has(key)) continue
-    seen.add(key)
-    attachments.push({ kind, path, source: 'mention' })
-  }
-
-  return attachments
-}
-
-function attachmentRefs(
-  attachments: ContextAttachmentChip[],
-): ContextAttachmentRef[] {
-  return attachments.map((attachment) => ({
-    kind: attachment.kind,
-    path: attachment.path,
-    source: attachment.source,
-  }))
-}
-
-interface ConversationRuntimeState {
-  conversationId: string
-  sessionId: SessionId | undefined
-  activeRunId: RunId | undefined
-  runStatus: RunStatus | 'idle'
-  startPending: boolean
-  pendingApproval: PendingApproval | undefined
-  pendingCarryover: PendingCarryoverInterjection[]
-  error: string
-  modeSyncError: string
-  lastEventSessionId: SessionId | undefined
-  lastEventSeq: number
-  diagnostics: string[]
-  timelineCounter: number
-}
-
-interface WorkspaceWriterState {
-  workspace: string
-  writerConversationId: string
-  writerSessionId: SessionId
-  writerRunId: RunId
-}
-
-function createConversationRuntime(
-  conversationId: string,
-): ConversationRuntimeState {
-  return {
-    conversationId,
-    sessionId: undefined,
-    activeRunId: undefined,
-    runStatus: 'idle',
-    startPending: false,
-    pendingApproval: undefined,
-    pendingCarryover: [],
-    error: '',
-    modeSyncError: '',
-    lastEventSessionId: undefined,
-    lastEventSeq: 0,
-    diagnostics: [],
-    timelineCounter: 0,
-  }
-}
-
-function runtimeBusy(runtime: ConversationRuntimeState | undefined): boolean {
-  return Boolean(
-    runtime?.startPending || runtime?.activeRunId || runtime?.pendingApproval,
-  )
-}
-
-function conversationTimelineCounter(
-  conversation: ConversationRecord,
-  pendingApproval?: PendingApproval,
-): number {
-  return Math.max(
-    conversation.messages.reduce(
-      (maximum, message) => Math.max(maximum, message.order ?? 0),
-      0,
-    ),
-    (conversation.tools ?? []).reduce(
-      (maximum, tool) => Math.max(maximum, tool.order ?? 0),
-      0,
-    ),
-    (conversation.usage ?? []).reduce(
-      (maximum, item) => Math.max(maximum, item.order ?? 0),
-      0,
-    ),
-    pendingApproval?.order ?? 0,
-  )
-}
-
-function timelineAdapterFromConversation(
-  conversation: ConversationRecord,
-  runtime: ConversationRuntimeState,
-): RuntimeEventTimeline {
-  conversation.tools ??= []
-  conversation.usage ??= []
-  runtime.timelineCounter = Math.max(
-    runtime.timelineCounter,
-    conversationTimelineCounter(conversation, runtime.pendingApproval),
-  )
-
-  const adapter: RuntimeEventTimeline = {
-    get messages() {
-      return conversation.messages
-    },
-    set messages(value) {
-      conversation.messages = value
-    },
-    get tools() {
-      return conversation.tools ?? []
-    },
-    set tools(value) {
-      conversation.tools = value
-    },
-    get usage() {
-      return conversation.usage ?? []
-    },
-    set usage(value) {
-      conversation.usage = value
-    },
-    get goal() {
-      return conversation.goal
-    },
-    set goal(value) {
-      conversation.goal = value
-    },
-    get plan() {
-      return conversation.plan
-    },
-    set plan(value) {
-      conversation.plan = value
-    },
-    get latestReviewedApproval() {
-      return conversation.latestReviewedApproval
-    },
-    set latestReviewedApproval(value) {
-      conversation.latestReviewedApproval = value
-    },
-    assistantMessage(runId: RunId): ChatMessage {
-      const latestToolOrder = adapter.tools.reduce(
-        (maximum, tool) =>
-          tool.runId === runId ? Math.max(maximum, tool.order ?? 0) : maximum,
-        0,
-      )
-      let message = adapter.messages
-        .filter((item) => item.role === 'assistant' && item.runId === runId)
-        .sort((left, right) => (right.order ?? 0) - (left.order ?? 0))[0]
-
-      if (!message || (message.order ?? 0) < latestToolOrder) {
-        message = {
-          id: requestId(),
-          role: 'assistant',
-          runId,
-          text: '',
-          reasoning: '',
-          order: adapter.nextTimelineOrder(),
-        }
-        adapter.messages.push(message)
-      }
-      return message
-    },
-    nextTimelineOrder(): number {
-      runtime.timelineCounter += 1
-      return runtime.timelineCounter
-    },
-  }
-  return adapter
-}
-
-/**
- * This store is intentionally a large renderer-side coordination boundary.
- * Its actions jointly own cross-store conversation transitions, IPC calls,
- * runtime session state, and persistence. Splitting those actions into files
- * would require a broad dependency context or introduce Pinia cycles.
- *
- * Keep narrow pure helpers and event handlers outside this store (for example
- * `runtime-events/`). Revisit a larger split only with a redesigned ownership
- * model, not merely to reduce this file's line count.
- */
 export const useAgentRuntimeStore = defineStore('agent-runtime', {
   state: () => ({
     globalError: '',
-    conversationRuntimes: {} as Record<string, ConversationRuntimeState>,
-    conversationIdBySessionId: {} as Record<string, string>,
-    workspaceWriters: {} as Record<string, WorkspaceWriterState>,
-    diagnostics: [] as string[],
+    input: '',
+    contextAttachments: [] as ContextAttachmentChip[],
     mode: 'readonly' as PermissionMode,
+    startPendingSessionId: undefined as SessionId | 'draft' | undefined,
+    overlays: {} as Record<string, SessionOverlay>,
+    workspaceWriters: {} as Record<string, SessionId>,
+    approvalSubmitting: false,
+    workspaceFileRevision: 0,
   }),
   getters: {
-    activeConversationRuntime(state): ConversationRuntimeState | undefined {
-      const conversationId = useAgentWorkbenchStore().activeConversationId
-      return conversationId
-        ? state.conversationRuntimes[conversationId]
-        : undefined
+    activeOverlay(state): SessionOverlay | undefined {
+      const sessionId = useAgentReplicaStore().selectedSessionId
+      return sessionId ? state.overlays[sessionId] : undefined
     },
     sessionId(): SessionId | undefined {
-      return this.activeConversationRuntime?.sessionId
+      return useAgentReplicaStore().selectedSessionId
     },
     activeRunId(): RunId | undefined {
-      return this.activeConversationRuntime?.activeRunId
+      return this.activeOverlay?.runId
+    },
+    runStatus(): RunStatus {
+      return this.activeOverlay?.status ?? 'idle'
     },
     startPending(): boolean {
-      return this.activeConversationRuntime?.startPending ?? false
-    },
-    runStatus(): RunStatus | 'idle' {
-      return this.activeConversationRuntime?.runStatus ?? 'idle'
-    },
-    pendingApproval(): PendingApproval | undefined {
-      return this.activeConversationRuntime?.pendingApproval
-    },
-    pendingCarryover(): PendingCarryoverInterjection[] {
-      return this.activeConversationRuntime?.pendingCarryover ?? []
-    },
-    error(): string {
-      return this.activeConversationRuntime?.error || this.globalError
-    },
-    agentEventGap(state): string {
+      const sessionId = useAgentReplicaStore().selectedSessionId
       return (
-        this.activeConversationRuntime?.diagnostics.at(-1) ??
-        state.diagnostics.at(-1) ??
-        ''
+        this.startPendingSessionId !== undefined &&
+        (this.startPendingSessionId === 'draft' ||
+          this.startPendingSessionId === sessionId)
       )
     },
-    modeLockedByWriter(state): boolean {
-      const conversation = useAgentWorkbenchStore().activeConversation
-      if (!conversation) return false
-      const writer = state.workspaceWriters[conversation.projectPath]
-      return Boolean(writer && writer.writerConversationId !== conversation.id)
+    pendingApproval(): PendingApproval | undefined {
+      return this.activeOverlay?.approval
     },
-    modeLockTooltip(state): string {
-      const conversation = useAgentWorkbenchStore().activeConversation
-      if (!conversation) return ''
-      const writer = state.workspaceWriters[conversation.projectPath]
-      return writer && writer.writerConversationId !== conversation.id
-        ? `Conversation ${writer.writerConversationId} is modifying this workspace.`
+    messages(): ChatMessage[] {
+      const replica = useAgentReplicaStore()
+      const records = replica.selectedMessages.filter(
+        (record) => record.visibility === 'visible',
+      )
+      const projected = records.flatMap((record): ChatMessage[] => {
+        if (record.kind === 'user_input' && originalUserRecord(record)) {
+          return [
+            {
+              id: record.id,
+              role: 'user',
+              durableKind: 'user_input',
+              text: messageText(record),
+              reasoning: '',
+              order: record.seq,
+              attachments: record.metadata.attachments,
+              retryable: true,
+              editable: true,
+            },
+          ]
+        }
+        if (record.kind === 'assistant_turn') {
+          return [
+            {
+              id: record.id,
+              role: 'assistant',
+              durableKind: 'assistant_turn',
+              text: messageText(record),
+              reasoning: record.normalizedReasoningText ?? '',
+              order: record.seq,
+            },
+          ]
+        }
+        if (record.kind === 'orchestrator' || record.kind === 'interjection') {
+          return [
+            {
+              id: record.id,
+              role:
+                record.kind === 'orchestrator'
+                  ? 'orchestrator'
+                  : 'interjection',
+              durableKind: record.kind,
+              text: messageText(record),
+              reasoning: '',
+              order: record.seq,
+            },
+          ]
+        }
+        return []
+      })
+      const overlay = this.activeOverlay
+      if (
+        overlay?.runId &&
+        (overlay.text.trim() || overlay.reasoning.trim()) &&
+        !TERMINAL_RUN_STATUSES.has(overlay.status)
+      ) {
+        projected.push({
+          id: `stream:${overlay.runId}`,
+          role: 'assistant',
+          durableKind: 'stream',
+          runId: overlay.runId,
+          text: overlay.text,
+          reasoning: overlay.reasoning,
+          order: Number.MAX_SAFE_INTEGER,
+        })
+      }
+      for (const interjection of overlay?.interjections ?? []) {
+        if (
+          records.some(
+            (record) =>
+              record.kind === 'interjection' &&
+              'clientRequestId' in record &&
+              record.clientRequestId === interjection.id,
+          )
+        ) {
+          continue
+        }
+        projected.push({
+          id: `interjection:${interjection.id}`,
+          role: 'interjection',
+          durableKind: 'interjection',
+          runId: overlay?.runId,
+          text: interjection.content,
+          reasoning: '',
+          order: Number.MAX_SAFE_INTEGER - 1,
+          interjectionId: interjection.id,
+          interjectionStatus: interjection.status,
+        })
+      }
+      return projected
+    },
+    tools(): ToolActivity[] {
+      const replica = useAgentReplicaStore()
+      const durable = new Map<string, ToolActivity>()
+      for (const record of replica.selectedMessages) {
+        if (record.visibility !== 'visible') continue
+        if (record.kind === 'assistant_turn') {
+          for (const part of record.parts) {
+            if (part.type !== 'tool_call') continue
+            durable.set(part.callId, {
+              callId: part.callId,
+              runId: (record.turnId ?? record.id) as unknown as RunId,
+              tool: part.name,
+              args: part.arguments,
+              reason: '',
+              status: 'proposed',
+              order: record.seq,
+            })
+          }
+        } else if (record.kind === 'tool_result') {
+          const part = record.parts[0]
+          const tool = durable.get(part.callId)
+          if (!tool) continue
+          tool.status = 'completed'
+          tool.result = part
+          tool.order = record.seq
+        }
+      }
+      for (const tool of this.activeOverlay?.tools ?? []) {
+        durable.set(tool.callId, tool)
+      }
+      return [...durable.values()].sort(
+        (left, right) => (right.order ?? 0) - (left.order ?? 0),
+      )
+    },
+    usage(): UsageActivity[] {
+      return this.activeOverlay?.usage ?? []
+    },
+    latestUsage(): UsageActivity['usage'] | undefined {
+      return this.usage.at(-1)?.usage
+    },
+    latestReviewedApproval(): ReviewedApproval | undefined {
+      return this.activeOverlay?.reviewedApproval
+    },
+    modeLockedByWriter(): boolean {
+      const replica = useAgentReplicaStore()
+      const project = replica.selectedProject
+      const writer = project ? this.workspaceWriters[project.path] : undefined
+      return Boolean(writer && writer !== replica.selectedSessionId)
+    },
+    modeLockTooltip(): string {
+      const replica = useAgentReplicaStore()
+      const project = replica.selectedProject
+      const writer = project ? this.workspaceWriters[project.path] : undefined
+      return writer && writer !== replica.selectedSessionId
+        ? `Session ${writer} is modifying this workspace.`
         : ''
     },
     modeSyncError(): string {
-      return this.activeConversationRuntime?.modeSyncError ?? ''
+      return ''
     },
-    approvalSubmitting(): boolean {
-      return this.pendingApproval?.status === 'submitting'
-    },
-    canSend: (state) => {
-      const shell = useAgentShellStore()
-      const settings = useAgentSettingsStore()
-      const workbench = useAgentWorkbenchStore()
-      const timeline = useAgentTimelineStore()
-      const conversationId = workbench.activeConversationId
-      const runtime = conversationId
-        ? state.conversationRuntimes[conversationId]
-        : undefined
+    canSend(): boolean {
+      const replica = useAgentReplicaStore()
       return Boolean(
-        shell.bridgeAvailable &&
-        settings.providerNoticeAccepted &&
-        settings.credentialConfigured &&
-        workbench.workspacePath &&
-        workbench.activeConversationId &&
-        !runtimeBusy(runtime) &&
-        !runtime?.modeSyncError &&
-        (timeline.input.trim().length > 0 ||
-          timeline.contextAttachments.length > 0) &&
-        !runtime?.pendingApproval,
+        replica.selectedProjectId &&
+        !this.startPending &&
+        !this.activeRunId &&
+        !this.pendingApproval,
       )
     },
-    canInterject: (state) => {
-      const shell = useAgentShellStore()
-      const timeline = useAgentTimelineStore()
-      const conversationId = useAgentWorkbenchStore().activeConversationId
-      const runtime = conversationId
-        ? state.conversationRuntimes[conversationId]
-        : undefined
-      // Interjections are allowed while a run is in progress, including while
-      // it is paused on an approval. They queue and inject at the next
-      // tool-batch boundary; they never cancel the run or the approval.
-      const blockingApproval =
-        runtime?.pendingApproval?.status === 'submitting' ||
-        (runtime?.pendingApproval?.status === 'requested' &&
-          runtime.runStatus !== 'awaiting_approval')
-      return Boolean(
-        shell.bridgeAvailable &&
-        runtime?.sessionId &&
-        runtime.activeRunId &&
-        runtime.runStatus !== 'cancelling' &&
-        !blockingApproval &&
-        timeline.input.trim().length > 0,
-      )
+    canInterject(): boolean {
+      return Boolean(this.activeRunId)
+    },
+    agentEventGap(): string {
+      return this.activeOverlay?.diagnostics.at(-1) ?? ''
     },
   },
   actions: {
-    ensureConversationRuntime(
-      conversationId: string,
-    ): ConversationRuntimeState {
-      const existing = this.conversationRuntimes[conversationId]
-      if (existing) return existing
-
-      const runtime = createConversationRuntime(conversationId)
-      const conversation = useAgentWorkbenchStore().conversations.find(
-        (item) => item.id === conversationId,
-      )
-      if (conversation) {
-        runtime.timelineCounter = conversationTimelineCounter(conversation)
+    ensureOverlay(sessionId: SessionId): SessionOverlay {
+      return (this.overlays[sessionId] ??= blankOverlay())
+    },
+    hydrateRuntime(
+      runtime: ActiveRunPublicSnapshot | undefined,
+      resetEventSequence = false,
+    ) {
+      if (!runtime) return
+      const overlay = this.ensureOverlay(runtime.sessionId)
+      if (resetEventSequence) {
+        overlay.lastEventSeq = 0
+        overlay.diagnostics = []
       }
-      this.conversationRuntimes[conversationId] = runtime
-      return runtime
-    },
-    currentConversationRuntime(): ConversationRuntimeState | undefined {
-      const workbench = useAgentWorkbenchStore()
-      return workbench.activeConversationId
-        ? this.ensureConversationRuntime(workbench.activeConversationId)
-        : undefined
-    },
-    registerSession(conversationId: string, sessionId: SessionId) {
-      const runtime = this.ensureConversationRuntime(conversationId)
-      if (runtime.sessionId && runtime.sessionId !== sessionId) {
-        delete this.conversationIdBySessionId[runtime.sessionId]
-      }
-      if (runtime.lastEventSessionId !== sessionId) {
-        runtime.lastEventSessionId = sessionId
-        runtime.lastEventSeq = 0
-      }
-      runtime.sessionId = sessionId
-      this.conversationIdBySessionId[sessionId] = conversationId
-    },
-    registerRun(conversationId: string, runId: RunId) {
-      const runtime = this.ensureConversationRuntime(conversationId)
-      runtime.activeRunId = runId
-      runtime.runStatus = 'calling_llm'
-    },
-    setStartPending(conversationId: string, pending: boolean) {
-      this.ensureConversationRuntime(conversationId).startPending = pending
-    },
-    setConversationError(conversationId: string | undefined, message: string) {
-      if (conversationId) {
-        this.ensureConversationRuntime(conversationId).error = message
-      } else {
-        this.globalError = message
-      }
-    },
-    addDiagnostic(conversationId: string | undefined, message: string) {
-      const target = conversationId
-        ? this.ensureConversationRuntime(conversationId).diagnostics
-        : this.diagnostics
-      target.push(message)
-      if (target.length > 100) target.splice(0, target.length - 100)
-    },
-    clearDiagnostics() {
-      this.diagnostics = []
-      const runtime = this.currentConversationRuntime()
-      if (runtime) runtime.diagnostics = []
-    },
-    currentConversationIsBusy(): boolean {
-      const workbench = useAgentWorkbenchStore()
-      const conversationId = workbench.activeConversationId
-      if (!conversationId) return false
-      return this.conversationIsBusy(conversationId)
-    },
-    conversationIsBusy(conversationId: string): boolean {
-      const runtime = this.conversationRuntimes[conversationId]
-      return runtimeBusy(runtime)
-    },
-    conversationStatus(
-      conversationId: string,
-    ):
-      | 'awaitingApproval'
-      | 'writer'
-      | 'readonlyLocked'
-      | 'cancelling'
-      | 'running'
-      | 'failed'
-      | 'completed'
-      | undefined {
-      const runtime = this.conversationRuntimes[conversationId]
-      const conversation = useAgentWorkbenchStore().conversations.find(
-        (item) => item.id === conversationId,
-      )
-      if (runtime?.pendingApproval) return 'awaitingApproval'
-      if (conversation) {
-        const writer = this.workspaceWriters[conversation.projectPath]
-        if (writer?.writerConversationId === conversationId) return 'writer'
-        if (writer) return 'readonlyLocked'
-      }
-      if (runtime?.runStatus === 'cancelling') return 'cancelling'
-      if (runtime?.startPending || runtime?.activeRunId) return 'running'
-      if (runtime?.runStatus === 'failed') return 'failed'
-      if (runtime?.runStatus === 'completed') return 'completed'
-      return undefined
-    },
-    conversationIdForSession(sessionId: SessionId): string | undefined {
-      const indexed = this.conversationIdBySessionId[sessionId]
-      if (indexed) return indexed
-      return undefined
+      overlay.runId = runtime.runId
+      overlay.status = runtime.status
+      overlay.text = runtime.text
+      overlay.reasoning = runtime.reasoning
+      overlay.interjections = structuredClone(runtime.interjections)
+      overlay.tools = runtime.tools.map((tool, index) => ({
+        callId: tool.callId,
+        runId: runtime.runId,
+        tool: tool.tool,
+        args: tool.arguments ?? {},
+        reason: '',
+        status: tool.status === 'completed' ? 'completed' : 'proposed',
+        result: tool.result,
+        order: index + 1,
+      }))
+      overlay.approval = pendingApprovalFromSnapshot(runtime)
     },
     async initialize() {
       const shell = useAgentShellStore()
       const settings = useAgentSettingsStore()
-      const workbench = useAgentWorkbenchStore()
-      if (shell.initialized) return
-
-      await workbench.loadPersistedWorkbench()
-      const bridge = window.agentApi
-      shell.bridgeAvailable = Boolean(bridge)
-
-      if (!bridge) {
-        this.restoreActiveConversation()
+      const replica = useAgentReplicaStore()
+      shell.bridgeAvailable = Boolean(window.agentApi)
+      if (!window.agentApi) {
         shell.initialized = true
         return
       }
-
-      const result = await bridge.getConfig({
-        version: IPC_VERSION,
-        section: 'all',
-      })
-      if (result.ok) {
-        this.applyConfig(result.value.config)
-        workbench.workspacePath = result.value.config.workspace.lastOpened ?? ''
-
-        if (workbench.workspacePath) {
-          workbench.registerProject(workbench.workspacePath)
-          const active = workbench.conversations.find(
-            (conversation) =>
-              conversation.id === workbench.activeConversationId &&
-              conversation.projectPath === workbench.workspacePath,
-          )
-          const latest = workbench.conversations
-            .filter(
-              (conversation) =>
-                conversation.projectPath === workbench.workspacePath,
-            )
-            .sort((left, right) =>
-              right.updatedAt.localeCompare(left.updatedAt),
-            )[0]
-
-          if (active || latest) {
-            workbench.activeConversationId = (active ?? latest)?.id
-          } else {
-            this.createConversation(workbench.workspacePath)
-          }
-        }
-      } else {
-        this.globalError = result.error.message
-      }
-
-      await settings.loadProviderModels(false)
-      this.restoreActiveConversation()
+      shell.disposeSubscriptions()
       shell.registerUnsubscriber(
-        bridge.onAgentEvent((envelope) =>
+        window.agentApi.onDomainStateEvent((delivery) => {
+          if (delivery.kind === 'buffer_overflow') {
+            void replica.bootstrap(replica.selectedProject?.path)
+            return
+          }
+          const commit = delivery.event.commit
+          void replica.reconcile(commit).then((outcome) => {
+            if (outcome !== 'duplicate' && commit.topic === 'session.changed') {
+              const overlay = this.overlays[commit.change.session.id]
+              if (overlay) {
+                overlay.goal = commit.change.session.goal
+                  ? structuredClone(commit.change.session.goal)
+                  : undefined
+                overlay.plan = commit.change.session.plan
+                  ? structuredClone(commit.change.session.plan)
+                  : undefined
+              }
+            }
+            if (
+              outcome !== 'duplicate' &&
+              commit.topic === 'session.changed' &&
+              commit.change.messageChange.mode === 'upsert' &&
+              commit.change.messageChange.records.some(
+                (record) => record.kind === 'assistant_turn',
+              )
+            ) {
+              const overlay = this.overlays[commit.change.session.id]
+              if (overlay) {
+                overlay.text = ''
+                overlay.reasoning = ''
+              }
+            }
+          })
+        }),
+      )
+      shell.registerUnsubscriber(
+        window.agentApi.onAgentEvent((envelope) =>
           this.handleAgentEvent(envelope.event),
         ),
       )
+      const config = await window.agentApi.getConfig({
+        version: IPC_VERSION,
+        section: 'all',
+      })
+      if (config.ok) settings.applyConfig(config.value.config)
+      else this.globalError = config.error.message
+      await replica.bootstrap(
+        config.ok ? config.value.config.workspace.lastOpened : undefined,
+      )
+      this.mode =
+        replica.selectedSession?.permissionMode ?? settings.defaultMode
+      this.hydrateRuntime(replica.selectedRuntime)
       shell.initialized = true
-      workbench.persistWorkbench()
     },
     dispose() {
-      const shell = useAgentShellStore()
-      const workbench = useAgentWorkbenchStore()
-      if (persistTimer !== undefined) {
-        window.clearTimeout(persistTimer)
-        persistTimer = undefined
-      }
-      this.saveActiveConversation()
-      workbench.persistWorkbench()
-      shell.disposeSubscriptions()
+      useAgentShellStore().disposeSubscriptions()
     },
     applyConfig(config: PublicConfig, sections: ConfigSection[] = ['all']) {
-      const settings = useAgentSettingsStore()
-      const workbench = useAgentWorkbenchStore()
-      settings.applyConfig(config, sections)
-      const includesPermission =
-        sections.includes('all') || sections.includes('permission')
-      if (includesPermission && !workbench.activeConversationId) {
-        this.mode = config.permission.defaultMode
-      }
+      useAgentSettingsStore().applyConfig(config, sections)
     },
-    createConversation(workspacePath?: string) {
-      const settings = useAgentSettingsStore()
-      const timeline = useAgentTimelineStore()
-      const workbench = useAgentWorkbenchStore()
-      const changes = useAgentChangesStore()
-      const targetWorkspace = workspacePath ?? workbench.workspacePath
-      if (!targetWorkspace) return undefined
-
-      const conversation = workbench.createConversationRecord(
-        targetWorkspace,
-        settings.activeProviderModel,
-        this.workspaceWriters[targetWorkspace] ? 'readonly' : this.mode,
+    clearDiagnostics() {
+      const overlay = this.activeOverlay
+      if (overlay) overlay.diagnostics = []
+    },
+    async chooseWorkspace() {
+      const api = window.agentApi
+      if (!api) return
+      const selected = await api.chooseWorkspace({ version: IPC_VERSION })
+      if (!selected.ok) {
+        this.globalError = selected.error.message
+        return
+      }
+      if (!selected.value.path) return
+      const replica = useAgentReplicaStore()
+      const existing = replica.projects.find(
+        (project) => project.path === selected.value.path,
       )
-      const runtime = this.ensureConversationRuntime(conversation.id)
-      runtime.sessionId = undefined
-      runtime.activeRunId = undefined
-      runtime.runStatus = 'idle'
-      runtime.startPending = false
-      runtime.pendingApproval = undefined
-      runtime.pendingCarryover = []
-      runtime.error = ''
-      runtime.modeSyncError = ''
-      timeline.reset()
-      changes.reset()
-      workbench.persistWorkbench()
-      return conversation
+      if (existing) {
+        await replica.selectProject(existing.id)
+        return
+      }
+      const result = await api.addProject({
+        version: IPC_VERSION,
+        path: selected.value.path,
+        name: projectName(selected.value.path),
+      })
+      if (!result.ok) {
+        this.globalError = result.error.message
+        return
+      }
+      await replica.reconcile(result.value.commit)
+      const project = result.value.commit.change.projects.find(
+        (candidate) => candidate.path === selected.value.path,
+      )
+      if (project) {
+        replica.beginDraft(project.id)
+        this.input = ''
+        this.contextAttachments = []
+      }
     },
     async newConversation(workspacePath?: string) {
-      const workbench = useAgentWorkbenchStore()
-      if (!workspacePath && !workbench.workspacePath) {
-        const selected = await this.chooseWorkspace()
-        if (!selected) return false
-        workspacePath = selected
+      const replica = useAgentReplicaStore()
+      const project =
+        replica.projects.find(
+          (candidate) => candidate.path === workspacePath,
+        ) ?? replica.selectedProject
+      if (!project) {
+        await this.chooseWorkspace()
+        return
       }
-
-      this.saveActiveConversation()
-      const targetWorkspace = workspacePath ?? workbench.workspacePath
-      if (!targetWorkspace) return false
-
-      if (
-        targetWorkspace !== workbench.workspacePath &&
-        !(await workbench.activateWorkspace(targetWorkspace))
-      ) {
-        return false
-      }
-
-      this.createConversation(targetWorkspace)
-      return true
+      replica.beginDraft(project.id)
+      this.mode = useAgentSettingsStore().defaultMode
+      this.input = ''
+      this.contextAttachments = []
     },
-    async selectConversation(conversationId: string) {
-      const workbench = useAgentWorkbenchStore()
-      const conversation = workbench.conversations.find(
-        (item) => item.id === conversationId,
-      )
-      if (!conversation || conversationId === workbench.activeConversationId) {
-        return Boolean(conversation)
+    async selectConversation(sessionId: string) {
+      const replica = useAgentReplicaStore()
+      if (await replica.selectSession(sessionId as SessionId)) {
+        this.mode =
+          replica.sessions.find((session) => session.id === sessionId)
+            ?.permissionMode ?? this.mode
+        this.hydrateRuntime(replica.selectedRuntime)
+        this.input = ''
+        this.contextAttachments = []
       }
-      this.saveActiveConversation()
-      if (!(await workbench.activateWorkspace(conversation.projectPath))) {
-        return false
-      }
-      await this.ensureConversationReadonlyForWriter(conversationId)
-      workbench.activeConversationId = conversation.id
-      this.restoreActiveConversation()
-      workbench.persistWorkbench()
-      return true
     },
-    async ensureConversationReadonlyForWriter(
-      conversationId: string,
-    ): Promise<boolean> {
-      const workbench = useAgentWorkbenchStore()
-      const conversation = workbench.conversations.find(
-        (item) => item.id === conversationId,
+    async renameConversation(sessionId: string, title: string) {
+      const replica = useAgentReplicaStore()
+      const session = replica.sessions.find(
+        (candidate) => candidate.id === sessionId,
       )
-      if (!conversation) return false
-
-      const writer = this.workspaceWriters[conversation.projectPath]
-      if (!writer || writer.writerConversationId === conversationId) {
-        return true
-      }
-
-      const runtime = this.ensureConversationRuntime(conversationId)
-      conversation.mode = 'readonly'
-      if (workbench.activeConversationId === conversationId) {
-        this.mode = 'readonly'
-      }
-      runtime.modeSyncError = ''
-      this.scheduleWorkbenchSave()
-
-      if (
-        !runtime.sessionId ||
-        runtime.activeRunId ||
-        runtime.pendingApproval
-      ) {
-        return true
-      }
-      const bridge = window.agentApi
-      if (!bridge) return true
-
-      const targetSessionId = runtime.sessionId
-      const result = await bridge.updateSessionMode({
+      const value = title.trim()
+      if (!session || !value || !window.agentApi) return
+      const result = await window.agentApi.updateSession({
         version: IPC_VERSION,
-        sessionId: targetSessionId,
-        mode: 'readonly',
+        sessionId: session.id,
+        expectedRevision: session.revision,
+        patch: { title: value },
       })
-      if (runtime.sessionId !== targetSessionId) return false
-      if (result.ok && result.value.accepted) return true
-
-      runtime.modeSyncError = result.ok
-        ? 'Could not synchronize the session to readonly mode.'
-        : result.error.message
-      runtime.error = runtime.modeSyncError
-      return false
+      if (result.ok) await replica.reconcile(result.value.commit)
+      else this.globalError = result.error.message
     },
-    renameConversation(conversationId: string, title: string) {
-      useAgentWorkbenchStore().renameConversation(conversationId, title)
-    },
-    /**
-     * Fork the active conversation (or a specific one) into a new branch. The
-     * new branch becomes active, truncated at forkPointMessageId (inclusive).
-     * Runs are blocked while forking; the forked conversation starts without a
-     * live session, so the next sendMessage creates a fresh session.
-     */
-    async forkConversation(
-      sourceId?: string,
-      forkPointMessageId?: string,
-    ): Promise<boolean> {
-      const workbench = useAgentWorkbenchStore()
-      const timeline = useAgentTimelineStore()
-      const changes = useAgentChangesStore()
-      const source =
-        workbench.conversations.find(
-          (item) => item.id === (sourceId ?? workbench.activeConversationId),
-        ) ?? workbench.activeConversation
-      if (!source || this.conversationIsBusy(source.id)) return false
-
-      const forked = workbench.forkConversation(source.id, forkPointMessageId)
-      if (!forked) return false
-
-      this.ensureConversationRuntime(forked.id)
-      timeline.reset()
-      changes.reset()
-      this.restoreActiveConversation()
-      return true
-    },
-    /**
-     * 回退对话 (in-place): remove every message after the agent reply with
-     * keepMessageId (and the tools/usage/orchestrator updates recorded after
-     * it), keeping the conversation itself. The old runtime session is closed
-     * because its history no longer matches; the next send creates a fresh one.
-     */
-    async revertConversationAfterMessage(
-      keepMessageId: string,
-    ): Promise<boolean> {
-      const workbench = useAgentWorkbenchStore()
-      const timeline = useAgentTimelineStore()
-      const changes = useAgentChangesStore()
-      const conversation = workbench.activeConversation
-      if (!conversation || this.conversationIsBusy(conversation.id))
-        return false
-
-      const updated = workbench.revertConversationAfterMessage(
-        conversation.id,
-        keepMessageId,
+    async deleteConversation(sessionId: string) {
+      const replica = useAgentReplicaStore()
+      const session = replica.sessions.find(
+        (candidate) => candidate.id === sessionId,
       )
-      if (!updated) return false
-
-      // The history changed, so the live session is stale and must be closed.
-      await this.closeRuntimeSession(conversation.id)
-      timeline.reset()
-      changes.reset()
-      this.restoreActiveConversation()
-      return true
+      if (!session || !window.agentApi || this.conversationIsBusy(sessionId)) {
+        return
+      }
+      const result = await window.agentApi.archiveSession({
+        version: IPC_VERSION,
+        sessionId: session.id,
+        expectedRevision: session.revision,
+      })
+      if (result.ok) await replica.reconcile(result.value.commit)
+      else this.globalError = result.error.message
     },
-    async deleteConversation(conversationId: string) {
-      const workbench = useAgentWorkbenchStore()
-      const conversation = workbench.conversations.find(
-        (item) => item.id === conversationId,
+    async forkConversation(_title?: string, messageId?: string) {
+      const replica = useAgentReplicaStore()
+      const session = replica.selectedSession
+      if (!session || !window.agentApi) return
+      const forkId = requestId('session') as SessionId
+      const result = await window.agentApi.forkSession({
+        version: IPC_VERSION,
+        sourceSessionId: session.id,
+        expectedRevision: session.revision,
+        sessionId: forkId,
+        ...(messageId ? { throughMessageId: messageId as MessageId } : {}),
+      })
+      if (!result.ok) {
+        this.globalError = result.error.message
+        return
+      }
+      await replica.reconcile(result.value.commit)
+      await replica.selectSession(forkId)
+    },
+    async rewindMessage(messageId: string) {
+      const replica = useAgentReplicaStore()
+      const session = replica.selectedSession
+      const record = replica.selectedMessages.find(
+        (candidate) => candidate.id === messageId,
       )
-      if (!conversation || this.conversationIsBusy(conversationId)) {
+      if (
+        !session ||
+        !record ||
+        !window.agentApi ||
+        (record.kind !== 'user_input' && record.kind !== 'assistant_turn')
+      ) {
         return false
       }
-
-      if (this.conversationRuntimes[conversationId]?.sessionId) {
-        await this.closeRuntimeSession(conversationId)
+      const result = await window.agentApi.rewindSession({
+        version: IPC_VERSION,
+        sessionId: session.id,
+        expectedRevision: session.revision,
+        messageId: record.id,
+        boundary:
+          record.kind === 'user_input' ? 'before_turn' : 'before_message',
+      })
+      if (!result.ok) {
+        this.globalError = result.error.message
+        return false
       }
-      workbench.removeConversationRecord(conversationId)
-      const runtime = this.conversationRuntimes[conversationId]
-      if (runtime?.sessionId) {
-        delete this.conversationIdBySessionId[runtime.sessionId]
+      await replica.reconcile(result.value.commit)
+      delete this.overlays[session.id]
+      return true
+    },
+    revertConversationAfterMessage(messageId: string) {
+      return this.rewindMessage(messageId)
+    },
+    async retryUserMessage(messageId: string) {
+      const replica = useAgentReplicaStore()
+      const session = replica.selectedSession
+      const record = replica.selectedMessages.find(
+        (candidate) => candidate.id === messageId,
+      )
+      if (!session || !originalUserRecord(record) || !window.agentApi) {
+        this.globalError =
+          'Only an original visible user message can be retried.'
+        return false
       }
-      delete this.conversationRuntimes[conversationId]
-
-      if (conversationId === workbench.activeConversationId) {
-        const next = workbench.conversations
-          .filter((item) => item.projectPath === conversation.projectPath)
-          .sort((left, right) =>
-            right.updatedAt.localeCompare(left.updatedAt),
-          )[0]
-        workbench.activeConversationId = next?.id
-        if (!next && workbench.workspacePath) {
-          this.createConversation(workbench.workspacePath)
-        } else {
-          this.restoreActiveConversation()
-        }
+      this.startPendingSessionId = session.id
+      const result = await window.agentApi.retryRun({
+        version: IPC_VERSION,
+        sessionId: session.id,
+        expectedRevision: session.revision,
+        userMessageId: record.id,
+        clientRequestId: requestId('request'),
+      })
+      this.startPendingSessionId = undefined
+      if (!result.ok) {
+        this.globalError = result.error.message
+        return false
       }
-
-      workbench.persistWorkbench()
+      await replica.reconcile(result.value.commit)
+      this.hydrateRuntime(result.value.runtime, true)
+      return true
+    },
+    async editUserMessage(messageId: string) {
+      const replica = useAgentReplicaStore()
+      const record = replica.selectedMessages.find(
+        (candidate) => candidate.id === messageId,
+      )
+      if (!originalUserRecord(record)) {
+        this.globalError =
+          'Only an original visible user message can be edited.'
+        return false
+      }
+      const text = messageText(record)
+      const attachments = record.metadata.attachments ?? []
+      if (!(await this.rewindMessage(messageId))) return false
+      this.input = text
+      this.contextAttachments = structuredClone(attachments)
       return true
     },
     async removeCurrentProject() {
-      const timeline = useAgentTimelineStore()
-      const workbench = useAgentWorkbenchStore()
-      const changes = useAgentChangesStore()
+      const replica = useAgentReplicaStore()
+      const project = replica.selectedProject
+      if (!project || !window.agentApi) return
       if (
-        !workbench.workspacePath ||
-        workbench.conversations
-          .filter(
-            (conversation) =>
-              conversation.projectPath === workbench.workspacePath,
-          )
-          .some((conversation) => this.conversationIsBusy(conversation.id))
+        replica.sessions.some(
+          (session) =>
+            session.projectId === project.id &&
+            this.conversationIsBusy(session.id),
+        )
       ) {
-        return false
-      }
-
-      const removedPath = workbench.workspacePath
-      const projectConversationIds = workbench.conversations
-        .filter((conversation) => conversation.projectPath === removedPath)
-        .map((conversation) => conversation.id)
-      await Promise.all(
-        projectConversationIds.map((conversationId) =>
-          this.closeRuntimeSession(conversationId),
-        ),
-      )
-      for (const conversationId of projectConversationIds) {
-        delete this.conversationRuntimes[conversationId]
-      }
-      workbench.removeProjectRecords(removedPath)
-      workbench.workspacePath = ''
-      workbench.activeConversationId = undefined
-      timeline.reset()
-      changes.reset()
-
-      const bridge = window.agentApi
-      if (bridge) {
-        const result = await bridge.setConfig({
-          version: IPC_VERSION,
-          kind: 'workspace',
-        })
-        if (!result.ok) this.globalError = result.error.message
-      }
-      workbench.persistWorkbench()
-      return true
-    },
-    restoreActiveConversation() {
-      const timeline = useAgentTimelineStore()
-      const workbench = useAgentWorkbenchStore()
-      const changes = useAgentChangesStore()
-      const conversation = workbench.activeConversation
-      timeline.hydrate(conversation)
-
-      if (conversation) {
-        workbench.workspacePath = conversation.projectPath
-        this.mode = conversation.mode
-        const runtime = this.ensureConversationRuntime(conversation.id)
-        if (runtime.sessionId) {
-          this.conversationIdBySessionId[runtime.sessionId] = conversation.id
-        }
-        runtime.timelineCounter = Math.max(
-          runtime.timelineCounter,
-          conversationTimelineCounter(conversation, runtime.pendingApproval),
-          timeline.timelineCounter,
-        )
-        if (!runtime.activeRunId && !runtime.pendingApproval) {
-          runtime.pendingCarryover = carryoverFromMessages(timeline.messages)
-        }
-      }
-      changes.reset()
-      if (conversation && window.agentApi?.listChanges) {
-        void changes.loadConversationChanges()
-      }
-      useAgentShellStore().error = ''
-      useAgentSettingsStore().error = ''
-      workbench.error = ''
-      changes.error = ''
-      if (conversation) {
-        this.ensureConversationRuntime(conversation.id).error ||= ''
-      }
-      if (!this.activeRunId && this.pendingCarryover.length > 0) {
-        void this.flushCarryoverInterjections()
-      }
-    },
-    saveActiveConversation(touchUpdatedAt = false) {
-      const settings = useAgentSettingsStore()
-      const timeline = useAgentTimelineStore()
-      const workbench = useAgentWorkbenchStore()
-      const conversation = workbench.activeConversation
-      if (!conversation) return
-
-      timeline.writeToConversation(conversation)
-      const runtime = this.ensureConversationRuntime(conversation.id)
-      runtime.timelineCounter = Math.max(
-        runtime.timelineCounter,
-        timeline.timelineCounter,
-        runtime.pendingApproval?.order ?? 0,
-      )
-      conversation.mode = this.mode
-      conversation.model = settings.activeProviderModel
-      if (touchUpdatedAt) conversation.updatedAt = new Date().toISOString()
-    },
-    schedulePersist(touchUpdatedAt = true) {
-      this.saveActiveConversation(touchUpdatedAt)
-      this.scheduleWorkbenchSave()
-    },
-    scheduleWorkbenchSave() {
-      const workbench = useAgentWorkbenchStore()
-      if (persistTimer !== undefined) window.clearTimeout(persistTimer)
-      persistTimer = window.setTimeout(() => {
-        workbench.persistWorkbench()
-        persistTimer = undefined
-      }, 250)
-    },
-    timelineForConversation(
-      conversationId: string,
-    ): RuntimeEventTimeline | undefined {
-      const workbench = useAgentWorkbenchStore()
-      const conversation = workbench.conversations.find(
-        (item) => item.id === conversationId,
-      )
-      if (!conversation) return undefined
-
-      const runtime = this.ensureConversationRuntime(conversationId)
-      if (workbench.activeConversationId === conversationId) {
-        const timeline = useAgentTimelineStore()
-        runtime.timelineCounter = Math.max(
-          runtime.timelineCounter,
-          timeline.timelineCounter,
-          runtime.pendingApproval?.order ?? 0,
-        )
-        return timeline
-      }
-      return timelineAdapterFromConversation(conversation, runtime)
-    },
-    persistConversationMutation(conversationId: string, touchUpdatedAt = true) {
-      const workbench = useAgentWorkbenchStore()
-      const conversation = workbench.conversations.find(
-        (item) => item.id === conversationId,
-      )
-      if (!conversation) return
-      if (workbench.activeConversationId === conversationId) {
-        this.schedulePersist(touchUpdatedAt)
         return
       }
-      if (touchUpdatedAt) conversation.updatedAt = new Date().toISOString()
-      this.scheduleWorkbenchSave()
-    },
-    persistWorkbench() {
-      useAgentWorkbenchStore().persistWorkbench()
-    },
-    async activateWorkspace(workspacePath: string) {
-      return useAgentWorkbenchStore().activateWorkspace(workspacePath)
-    },
-    async saveAssistantSettings(language?: AssistantLanguage) {
-      return useAgentSettingsStore().saveAssistantSettings(language)
-    },
-    async chooseWorkspace() {
-      const workbench = useAgentWorkbenchStore()
-      const bridge = window.agentApi
-      if (!bridge) return undefined
-
-      const result = await bridge.chooseWorkspace({ version: IPC_VERSION })
-      if (!result.ok) {
-        this.globalError = result.error.message
-        return undefined
-      }
-      if (!result.value.path) return undefined
-
-      workbench.workspacePath = result.value.path
-      workbench.registerProject(result.value.path)
-      const latest = workbench.conversations
-        .filter(
-          (conversation) => conversation.projectPath === result.value.path,
-        )
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
-
-      if (latest) {
-        workbench.activeConversationId = latest.id
-        this.restoreActiveConversation()
-      } else {
-        this.createConversation(result.value.path)
-      }
-      workbench.persistWorkbench()
-      return result.value.path
+      const result = await window.agentApi.removeProject({
+        version: IPC_VERSION,
+        projectId: project.id,
+        expectedRevision: project.revision,
+      })
+      if (result.ok) await replica.reconcile(result.value.commit)
+      else this.globalError = result.error.message
     },
     async setMode(mode: PermissionMode) {
-      const workbench = useAgentWorkbenchStore()
-      const conversation = workbench.activeConversation
-      if (!conversation) return false
-      if (mode === conversation.mode) return true
-      if (this.currentConversationIsBusy()) return false
-      if (mode !== 'readonly' && this.modeLockedByWriter) return false
-
-      const conversationId = conversation.id
-      const runtime = this.ensureConversationRuntime(conversationId)
-      const targetSessionId = runtime.sessionId
-      const bridge = window.agentApi
-      if (bridge && targetSessionId) {
-        const result = await bridge.updateSessionMode({
-          version: IPC_VERSION,
-          sessionId: targetSessionId,
-          mode,
-        })
-        if (!result.ok || !result.value.accepted) {
-          runtime.error = result.ok
-            ? result.value.reason === 'workspace_writer_active'
-              ? `Conversation ${result.value.writerConversationId ?? 'unknown'} is modifying this workspace.`
-              : 'The session could not change permission mode while a run is active.'
-            : result.error.message
-          return false
-        }
-      }
-      conversation.mode = mode
-      runtime.modeSyncError = ''
-      runtime.error = ''
-      if (workbench.activeConversationId === conversationId) this.mode = mode
-      this.scheduleWorkbenchSave()
-      return true
-    },
-    async updatePlanStatus(
-      status: PlanStatus,
-      conversationId = useAgentWorkbenchStore().activeConversationId,
-    ) {
-      const bridge = window.agentApi
-      if (
-        !bridge ||
-        !conversationId ||
-        this.conversationIsBusy(conversationId)
-      ) {
+      const replica = useAgentReplicaStore()
+      const session = replica.selectedSession
+      if (this.modeLockedByWriter || this.activeRunId || this.pendingApproval) {
         return false
       }
-      const runtime = this.ensureConversationRuntime(conversationId)
-      const sessionId = runtime.sessionId
-      if (!sessionId) return false
-
-      const result = await bridge.updatePlanStatus({
-        version: IPC_VERSION,
-        sessionId,
-        status,
-      })
-
-      if (result.ok && result.value.accepted) {
-        const targetTimeline = this.timelineForConversation(conversationId)
-        if (!targetTimeline) return false
-        targetTimeline.plan = result.value.plan
-          ? structuredClone(result.value.plan)
-          : undefined
-        this.persistConversationMutation(conversationId, false)
+      if (!session || !window.agentApi) {
+        this.mode = mode
         return true
       }
-
-      runtime.error = result.ok
-        ? 'The current plan state could not be changed.'
-        : result.error.message
-      return false
+      const result = await window.agentApi.updateSession({
+        version: IPC_VERSION,
+        sessionId: session.id,
+        expectedRevision: session.revision,
+        patch: { permissionMode: mode },
+      })
+      if (!result.ok) {
+        this.globalError = result.error.message
+        return false
+      }
+      await replica.reconcile(result.value.commit)
+      this.mode = mode
+      return true
     },
-    async approvePlan() {
+    async setActiveProvider(providerId: string) {
       const settings = useAgentSettingsStore()
-      const bridge = window.agentApi
-      const conversationId = useAgentWorkbenchStore().activeConversationId
-      const runtime = conversationId
-        ? this.ensureConversationRuntime(conversationId)
-        : undefined
+      if (!(await settings.setActiveProvider(providerId))) return false
+      const provider = settings.providers.find((item) => item.id === providerId)
+      if (provider) {
+        await this.updateModelSelection({
+          providerId,
+          model: provider.model,
+          reasoning: provider.reasoning,
+        })
+      }
+      return true
+    },
+    setProviderModel(model: string) {
+      const settings = useAgentSettingsStore()
+      settings.setProviderModel(model)
+      void this.updateModelSelection({
+        providerId: settings.activeProviderId,
+        model,
+        reasoning: settings.providerForm.reasoning,
+      })
+    },
+    async updateModelSelection(modelSelection: {
+      providerId: string
+      model: string
+      reasoning: PublicConfig['providers'][number]['reasoning']
+    }) {
+      const replica = useAgentReplicaStore()
+      const session = replica.selectedSession
+      if (!session || !window.agentApi || this.activeRunId) return
+      const result = await window.agentApi.updateSession({
+        version: IPC_VERSION,
+        sessionId: session.id,
+        expectedRevision: session.revision,
+        patch: { modelSelection },
+      })
+      if (result.ok) await replica.reconcile(result.value.commit)
+      else this.globalError = result.error.message
+    },
+    async sendMessage(value: SendMessageOptions | Event = {}) {
+      const options = normalizeSendMessageOptions(value)
+      const replica = useAgentReplicaStore()
+      const settings = useAgentSettingsStore()
+      const project = replica.selectedProject
+      const text = (options.text ?? this.input).trim()
       if (
-        !bridge ||
-        !conversationId ||
-        !runtime?.sessionId ||
-        !useAgentTimelineStore().plan ||
-        this.conversationIsBusy(conversationId)
+        !window.agentApi ||
+        !project ||
+        !text ||
+        this.activeRunId ||
+        this.pendingApproval
       ) {
         return false
       }
-
-      if (!(await this.updatePlanStatus('active', conversationId))) return false
-
-      const text =
-        settings.assistantForm.language === 'zh-CN'
-          ? '用户已批准当前计划。继续执行已激活的计划。'
-          : 'The user approved the current plan. Continue executing the active plan.'
-      return this.sendMessageForConversation(conversationId, {
-        text,
+      const attachments =
+        options.includeContext === false
+          ? []
+          : [
+              ...this.contextAttachments,
+              ...parseMentionAttachments(text),
+            ].filter(
+              (attachment, index, all) =>
+                all.findIndex(
+                  (candidate) =>
+                    candidate.kind === attachment.kind &&
+                    candidate.path === attachment.path,
+                ) === index,
+            )
+      const session = replica.selectedSession
+      const sessionId = session?.id ?? (requestId('session') as SessionId)
+      this.startPendingSessionId = session?.id ?? 'draft'
+      const result = await window.agentApi.startRun(
+        session
+          ? {
+              version: IPC_VERSION,
+              kind: 'existing_session',
+              sessionId,
+              message: text,
+              context: { attachments: attachmentRefs(attachments) },
+              clientRequestId: requestId('request'),
+            }
+          : {
+              version: IPC_VERSION,
+              kind: 'new_session',
+              sessionId,
+              projectId: project.id,
+              title: text.replace(/\s+/gu, ' ').slice(0, 80),
+              modelSelection: {
+                providerId: settings.activeProviderId,
+                model: settings.activeProviderModel,
+                reasoning:
+                  settings.activeProvider?.reasoning ??
+                  settings.providerForm.reasoning,
+              },
+              permissionMode: this.modeLockedByWriter ? 'readonly' : this.mode,
+              message: text,
+              context: { attachments: attachmentRefs(attachments) },
+              clientRequestId: requestId('request'),
+            },
+      )
+      this.startPendingSessionId = undefined
+      if (!result.ok) {
+        this.globalError = result.error.message
+        return false
+      }
+      const runResult = result.value as DurableRunStartResult
+      if (runResult.outcome === 'started') {
+        await replica.reconcile(runResult.commit)
+        replica.selectedProjectId = project.id
+        replica.selectedSessionId = sessionId
+        this.hydrateRuntime(runResult.runtime)
+      } else {
+        replica.sessions = replica.sessions.filter(
+          (candidate) => candidate.id !== runResult.session.id,
+        )
+        replica.sessions.push(structuredClone(runResult.session))
+        replica.messagesBySessionId[sessionId] = [
+          ...(replica.messagesBySessionId[sessionId] ?? []),
+          structuredClone(runResult.userMessage),
+        ]
+        this.hydrateRuntime(runResult.runtime)
+      }
+      if (options.clearInput !== false) {
+        this.input = ''
+        this.contextAttachments = []
+      }
+      return true
+    },
+    async sendInterjection() {
+      const overlay = this.activeOverlay
+      const sessionId = useAgentReplicaStore().selectedSessionId
+      const message = this.input.trim()
+      if (!window.agentApi || !sessionId || !overlay?.runId || !message) {
+        return false
+      }
+      const result = await window.agentApi.interjectRun({
+        version: IPC_VERSION,
+        sessionId,
+        runId: overlay.runId,
+        message,
+        clientRequestId: requestId('interjection'),
+      })
+      if (!result.ok) {
+        this.globalError = result.error.message
+        return false
+      }
+      this.input = ''
+      return true
+    },
+    async interruptRun() {
+      const overlay = this.activeOverlay
+      const sessionId = useAgentReplicaStore().selectedSessionId
+      if (!window.agentApi || !sessionId || !overlay?.runId) return false
+      const result = await window.agentApi.interruptRun({
+        version: IPC_VERSION,
+        sessionId,
+        runId: overlay.runId,
+      })
+      if (!result.ok) this.globalError = result.error.message
+      return result.ok && result.value.accepted
+    },
+    async decideApproval(input: ApprovalDecisionInput) {
+      const overlay = this.activeOverlay
+      const sessionId = useAgentReplicaStore().selectedSessionId
+      const approval = overlay?.approval
+      if (!window.agentApi || !sessionId || !overlay?.runId || !approval) {
+        return false
+      }
+      this.approvalSubmitting = true
+      approval.status = 'submitting'
+      const result = await window.agentApi.decideApproval({
+        version: IPC_VERSION,
+        sessionId,
+        runId: overlay.runId,
+        callId: approval.callId,
+        decision: input.decision,
+        ...(input.remember
+          ? { remember: { workspaceScope: 'workspace' as const } }
+          : {}),
+      })
+      this.approvalSubmitting = false
+      if (!result.ok) {
+        approval.status = 'requested'
+        this.globalError = result.error.message
+        return false
+      }
+      overlay.reviewedApproval = {
+        runId: overlay.runId,
+        callId: approval.callId,
+        tool: approval.tool,
+        reason: approval.reason,
+        diff: approval.diff ?? '',
+        diffHash: approval.diffHash,
+        decision: input.decision === 'allow' ? 'allowed' : 'denied',
+      }
+      overlay.approval = undefined
+      return true
+    },
+    async updatePlanStatus(status: PlanStatus) {
+      const replica = useAgentReplicaStore()
+      const session = replica.selectedSession
+      if (!window.agentApi || !session) return false
+      const result = await window.agentApi.updatePlanStatus({
+        version: IPC_VERSION,
+        sessionId: session.id,
+        status,
+      })
+      if (!result.ok) {
+        this.globalError = result.error.message
+        return false
+      }
+      await replica.reconcile(result.value.commit)
+      return true
+    },
+    async approvePlan() {
+      if (!(await this.updatePlanStatus('active'))) return false
+      const language = useAgentSettingsStore().assistantForm.language
+      return this.sendMessage({
+        text:
+          language === 'zh-CN'
+            ? '用户已批准当前计划。继续执行已激活的计划。'
+            : 'The user approved the current plan. Continue executing the active plan.',
         includeContext: false,
         clearInput: false,
       })
@@ -1041,560 +820,179 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     async rejectPlan() {
       return this.updatePlanStatus('rejected')
     },
-    async createSession(
-      conversationId = useAgentWorkbenchStore().activeConversationId,
-    ) {
-      const workbench = useAgentWorkbenchStore()
-      const bridge = window.agentApi
-      const conversation = workbench.conversations.find(
-        (item) => item.id === conversationId,
-      )
-      if (!bridge || !conversation) return false
-
-      const runtime = this.ensureConversationRuntime(conversation.id)
-      runtime.error = ''
-      const settings = useAgentSettingsStore()
-      const result = await bridge.createSession({
-        version: IPC_VERSION,
-        conversationId: conversation.id,
-        workspace: conversation.projectPath,
-        mode: conversation.mode,
-        provider: settings.activeProviderId,
-      })
-      if (result.ok) {
-        this.registerSession(conversation.id, result.value.sessionId)
-        return true
-      }
-      runtime.error = result.error.message
-      return false
-    },
-    async closeRuntimeSession(conversationId?: string) {
-      const timeline = useAgentTimelineStore()
-      const workbench = useAgentWorkbenchStore()
-      const targetConversationId =
-        conversationId ?? workbench.activeConversationId
-      const sessionId = targetConversationId
-        ? this.conversationRuntimes[targetConversationId]?.sessionId
-        : undefined
-
-      if (targetConversationId) {
-        const runtime = this.conversationRuntimes[targetConversationId]
-        if (runtime?.sessionId) {
-          delete this.conversationIdBySessionId[runtime.sessionId]
-        }
-        if (runtime) {
-          runtime.sessionId = undefined
-          runtime.lastEventSessionId = undefined
-          runtime.lastEventSeq = 0
-          runtime.activeRunId = undefined
-          runtime.startPending = false
-          runtime.pendingApproval = undefined
-          runtime.pendingCarryover = []
-          runtime.runStatus = 'idle'
-          runtime.error = ''
-        }
-      }
-      if (targetConversationId === workbench.activeConversationId) {
-        timeline.tools = []
-      }
-
-      const bridge = window.agentApi
-      if (bridge && sessionId) {
-        await bridge.closeSession({ version: IPC_VERSION, sessionId })
-      }
-    },
     async chooseContextAttachment(kind: ContextAttachmentKind) {
-      const timeline = useAgentTimelineStore()
-      const workbench = useAgentWorkbenchStore()
-      const bridge = window.agentApi
-      const conversationId = workbench.activeConversationId
-      const workspace = workbench.workspacePath
-      if (!bridge || !conversationId || !workspace) return false
-
-      const result = await bridge.chooseWorkspaceContext({
+      const projectId = useAgentReplicaStore().selectedProjectId
+      if (!window.agentApi || !projectId) return
+      const result = await window.agentApi.chooseWorkspaceContext({
         version: IPC_VERSION,
-        workspace,
+        projectId,
         kind,
       })
-
       if (!result.ok) {
-        this.setConversationError(
-          workbench.activeConversationId,
-          result.error.message,
-        )
-        return false
-      }
-
-      if (
-        workbench.activeConversationId !== conversationId ||
-        workbench.workspacePath !== workspace
-      ) {
-        return false
-      }
-
-      timeline.addContextAttachments(result.value.attachments)
-      return result.value.attachments.length > 0
-    },
-    async sendMessage(options: SendMessageOptions | Event = {}) {
-      const sendOptions = normalizeSendMessageOptions(options)
-      const workbench = useAgentWorkbenchStore()
-      const conversationId = workbench.activeConversationId
-      if (!conversationId) return false
-      const shell = useAgentShellStore()
-      const settings = useAgentSettingsStore()
-      if (
-        !shell.bridgeAvailable ||
-        !settings.providerNoticeAccepted ||
-        !settings.credentialConfigured
-      ) {
-        return false
-      }
-      return this.sendMessageForConversation(conversationId, sendOptions)
-    },
-    async sendMessageForConversation(
-      conversationId: string,
-      sendOptions: SendMessageOptions = {},
-    ) {
-      const timeline = useAgentTimelineStore()
-      const workbench = useAgentWorkbenchStore()
-      const bridge = window.agentApi
-      const conversation = workbench.conversations.find(
-        (item) => item.id === conversationId,
-      )
-      if (!conversation) return false
-      const runtime = this.ensureConversationRuntime(conversationId)
-      const isActive = workbench.activeConversationId === conversationId
-      const explicitText = sendOptions.text?.trim()
-      const draftText = isActive ? timeline.input.trim() : ''
-      const text =
-        explicitText ||
-        draftText ||
-        'Please inspect the attached workspace context.'
-      const hasUserInput =
-        Boolean(explicitText || draftText) ||
-        (isActive && timeline.contextAttachments.length > 0)
-      const canStartRun = Boolean(
-        bridge &&
-        conversation.projectPath &&
-        !runtimeBusy(runtime) &&
-        !runtime.modeSyncError,
-      )
-      if (!bridge || !text || !hasUserInput || !canStartRun) return false
-      runtime.startPending = true
-      runtime.error = ''
-
-      try {
-        if (!(await this.ensureConversationReadonlyForWriter(conversationId))) {
-          return false
-        }
-        if (!runtime.sessionId && !(await this.createSession(conversationId))) {
-          return false
-        }
-        const sessionId = runtime.sessionId
-        if (!sessionId) return false
-
-        const includeContext = sendOptions.includeContext !== false
-        const mentionAttachments = includeContext
-          ? parseMentionAttachments(text)
-          : []
-        const contextAttachments = [
-          ...(includeContext && isActive ? timeline.contextAttachments : []),
-          ...mentionAttachments,
-        ]
-        const result = await bridge.startRun({
-          version: IPC_VERSION,
-          sessionId,
-          message: text,
-          clientRequestId: requestId(),
-          ...(contextAttachments.length
-            ? { context: { attachments: attachmentRefs(contextAttachments) } }
-            : {}),
-        })
-        if (!result.ok) {
-          runtime.error = result.error.message
-          return false
-        }
-
-        const targetTimeline = this.timelineForConversation(conversationId)
-        if (!targetTimeline) return false
-        if (
-          sendOptions.clearInput !== false &&
-          workbench.activeConversationId === conversationId
-        ) {
-          timeline.input = ''
-          timeline.clearContextAttachments()
-        }
-        targetTimeline.messages.push({
-          id: requestId(),
-          role: 'user',
-          text,
-          reasoning: '',
-          attachments: contextAttachments.map((attachment) => ({
-            ...attachment,
-          })),
-          order: targetTimeline.nextTimelineOrder(),
-        })
-        workbench.applyAutoTitle(conversation, text)
-        if (conversation.transient) delete conversation.transient
-        this.registerRun(conversationId, result.value.runId)
-        this.persistConversationMutation(conversationId)
-        return true
-      } finally {
-        runtime.startPending = false
-      }
-    },
-    async sendInterjection() {
-      const timeline = useAgentTimelineStore()
-      const workbench = useAgentWorkbenchStore()
-      const bridge = window.agentApi
-      const text = timeline.input.trim()
-      if (!bridge || !text || !this.canInterject) return
-      const conversationId = workbench.activeConversationId
-      if (!conversationId) return
-      const runtime = this.ensureConversationRuntime(conversationId)
-      const sessionId = runtime.sessionId
-      const runId = runtime.activeRunId
-      if (!sessionId || !runId) return
-
-      const interjectionId = requestId()
-      const result = await bridge.interjectRun({
-        version: IPC_VERSION,
-        sessionId,
-        runId,
-        message: text,
-        clientRequestId: interjectionId,
-      })
-
-      if (result.ok && result.value.accepted) {
-        const targetTimeline = this.timelineForConversation(conversationId)
-        if (!targetTimeline) return
-        // The interjection.updated event may have arrived before the IPC
-        // result resolved (the main process emits it synchronously). Avoid a
-        // duplicate by only pushing when no message for this id exists yet.
-        const alreadyPresent = targetTimeline.messages.some(
-          (item) => item.interjectionId === interjectionId,
-        )
-        if (!alreadyPresent) {
-          targetTimeline.messages.push({
-            id: requestId(),
-            role: 'interjection',
-            runId,
-            text,
-            reasoning: '',
-            interjectionId,
-            interjectionStatus: 'queued',
-            order: targetTimeline.nextTimelineOrder(),
-          })
-        }
-        if (workbench.activeConversationId === conversationId) {
-          timeline.input = ''
-          // Interjections are text-only. Clear any context chips so they do not
-          // leak into the next ordinary user turn.
-          timeline.clearContextAttachments()
-        }
-        this.persistConversationMutation(conversationId)
-      } else if (!result.ok) {
-        runtime.error = result.error.message
-      }
-    },
-    async flushCarryoverInterjections(
-      conversationId = useAgentWorkbenchStore().activeConversationId,
-    ) {
-      // Drain interjections that were carried over from a finished run's final
-      // answer. Each becomes the next ordinary user turn. Only one is sent per
-      // flush because sendMessage starts a new run; the rest drain when that
-      // run terminates.
-      if (!conversationId) return
-      const runtime = this.ensureConversationRuntime(conversationId)
-      if (runtimeBusy(runtime) || runtime.pendingCarryover.length === 0) return
-      const pending = runtime.pendingCarryover[0]
-      if (!pending) return
-      const sent = await this.sendMessageForConversation(conversationId, {
-        text: pending.content,
-        includeContext: false,
-        clearInput: false,
-      })
-      if (!sent) return
-      runtime.pendingCarryover.shift()
-      const targetTimeline = this.timelineForConversation(conversationId)
-      if (!targetTimeline) return
-      const index = targetTimeline.messages.findIndex(
-        (item) =>
-          item.role === 'interjection' &&
-          item.interjectionId === pending.interjectionId,
-      )
-      if (index >= 0) {
-        targetTimeline.messages.splice(index, 1)
-        this.persistConversationMutation(conversationId)
-      }
-    },
-    retryCarryoverInterjections() {
-      for (const runtime of Object.values(this.conversationRuntimes)) {
-        if (runtime.pendingCarryover.length > 0 && !runtimeBusy(runtime)) {
-          void this.flushCarryoverInterjections(runtime.conversationId)
-        }
-      }
-    },
-    async interruptRun(
-      conversationId = useAgentWorkbenchStore().activeConversationId,
-    ) {
-      const bridge = window.agentApi
-      if (!bridge || !conversationId) return
-      const runtime = this.ensureConversationRuntime(conversationId)
-      const sessionId = runtime.sessionId
-      const runId = runtime.activeRunId
-      if (!sessionId || !runId) return
-      await bridge.interruptRun({
-        version: IPC_VERSION,
-        sessionId,
-        runId,
-      })
-    },
-    async decideApproval(input: {
-      conversationId: string
-      decision: 'allow' | 'deny'
-      remember?: boolean
-    }) {
-      const bridge = window.agentApi
-      const runtime = this.ensureConversationRuntime(input.conversationId)
-      const pendingApproval = runtime.pendingApproval
-      if (
-        !bridge ||
-        !runtime.sessionId ||
-        !pendingApproval ||
-        pendingApproval.status === 'submitting'
-      ) {
+        this.globalError = result.error.message
         return
       }
-
-      const pending = pendingApproval
-      pending.status = 'submitting'
-      const rememberInput =
-        input.decision === 'allow' && input.remember && pending.rememberable
-          ? {
-              workspaceScope: 'workspace' as const,
-              expiresAt: new Date(
-                Date.now() + 30 * 24 * 60 * 60_000,
-              ).toISOString(),
-            }
-          : undefined
-      const result = await bridge.decideApproval({
-        version: IPC_VERSION,
-        sessionId: runtime.sessionId,
-        runId: pending.runId,
-        callId: pending.callId,
-        decision: input.decision,
-        ...(rememberInput ? { remember: rememberInput } : {}),
-      })
-
-      if (result.ok && result.value.accepted) {
-        const targetTimeline = this.timelineForConversation(
-          input.conversationId,
-        )
-        if (!targetTimeline) return
-        if (pending.diff) {
-          targetTimeline.latestReviewedApproval = {
-            runId: pending.runId,
-            callId: pending.callId,
-            tool: pending.tool,
-            reason: pending.reason,
-            diff: pending.diff,
-            diffHash: pending.diffHash,
-            decision: input.decision === 'allow' ? 'allowed' : 'denied',
-          }
-        }
-        runtime.pendingApproval = undefined
-        this.persistConversationMutation(input.conversationId)
-      } else if (result.ok) {
-        const targetTimeline = this.timelineForConversation(
-          input.conversationId,
-        )
-        if (!targetTimeline) return
-        if (pending.diff) {
-          targetTimeline.latestReviewedApproval = {
-            runId: pending.runId,
-            callId: pending.callId,
-            tool: pending.tool,
-            reason: pending.reason,
-            diff: pending.diff,
-            diffHash: pending.diffHash,
-            decision: 'stale',
-          }
-        }
-        runtime.pendingApproval = undefined
-        runtime.error =
-          'This approval is no longer active. Review the latest run state.'
-      } else {
-        pending.status = 'requested'
-        runtime.error = result.error.message
+      this.addContextAttachments(result.value.attachments)
+    },
+    addContextAttachments(attachments: ContextAttachmentChip[]) {
+      const existing = new Set(
+        this.contextAttachments.map((item) => `${item.kind}:${item.path}`),
+      )
+      for (const attachment of attachments) {
+        const key = `${attachment.kind}:${attachment.path}`
+        if (existing.has(key)) continue
+        existing.add(key)
+        this.contextAttachments.push(structuredClone(attachment))
       }
     },
-    /**
-     * Applies a sequenced main-process agent event to the renderer stores.
-     *
-     * Keep the ingress rules centralized here: duplicate/gap detection,
-     * session-close cleanup, and current-session filtering all happen before
-     * domain state is updated. The switch below intentionally stays close to
-     * the event contract so ordering-sensitive timeline updates are easy to
-     * audit against `shared/agent-events`.
-     */
+    removeContextAttachment(path: string, kind: ContextAttachmentKind) {
+      this.contextAttachments = this.contextAttachments.filter(
+        (attachment) => attachment.path !== path || attachment.kind !== kind,
+      )
+    },
+    closeRuntimeSession() {
+      return Promise.resolve(false)
+    },
+    conversationIsBusy(sessionId: string): boolean {
+      const overlay = this.overlays[sessionId]
+      return Boolean(
+        overlay?.runId ||
+        overlay?.approval ||
+        this.startPendingSessionId === sessionId,
+      )
+    },
+    conversationStatus(sessionId: string): string | undefined {
+      const overlay = this.overlays[sessionId]
+      if (!overlay) return undefined
+      if (overlay.approval) return 'awaitingApproval'
+      if (overlay.runId) return overlay.status
+      return undefined
+    },
+    saveAssistantSettings(language?: AssistantLanguage) {
+      return useAgentSettingsStore().saveAssistantSettings(language)
+    },
     handleAgentEvent(event: AgentEvent) {
-      const timeline = useAgentTimelineStore()
-      const changes = useAgentChangesStore()
-      const workbench = useAgentWorkbenchStore()
-
       if (event.type === 'workspace.writer.changed') {
-        const runtime = this.ensureConversationRuntime(
-          event.writerConversationId,
-        )
-        if (event.seq <= runtime.lastEventSeq) {
-          this.addDiagnostic(
-            event.writerConversationId,
-            `Ignored stale workspace writer event ${event.seq}.`,
-          )
-          return
-        }
-        if (runtime.lastEventSeq > 0 && event.seq > runtime.lastEventSeq + 1) {
-          this.addDiagnostic(
-            event.writerConversationId,
-            `Agent event gap: expected ${runtime.lastEventSeq + 1}, received ${event.seq}.`,
-          )
-        }
-        runtime.lastEventSeq = event.seq
-        this.registerSession(event.writerConversationId, event.writerSessionId)
-
-        const ownerConversation = workbench.conversations.find(
-          (item) => item.id === event.writerConversationId,
-        )
-        const workspaceKeys = new Set([
-          event.workspace,
-          ownerConversation?.projectPath,
-        ])
         if (event.status === 'acquired') {
-          const writer: WorkspaceWriterState = {
-            workspace: event.workspace,
-            writerConversationId: event.writerConversationId,
-            writerSessionId: event.writerSessionId,
-            writerRunId: event.writerRunId,
-          }
-          for (const workspace of workspaceKeys) {
-            if (workspace) this.workspaceWriters[workspace] = writer
-          }
-
-          const active = workbench.activeConversation
-          if (
-            active &&
-            workspaceKeys.has(active.projectPath) &&
-            active.id !== event.writerConversationId
-          ) {
-            void this.ensureConversationReadonlyForWriter(active.id)
-          }
-        } else {
-          for (const [workspace, writer] of Object.entries(
-            this.workspaceWriters,
-          )) {
-            if (writer.writerRunId === event.writerRunId) {
-              delete this.workspaceWriters[workspace]
-            }
-          }
-          this.retryCarryoverInterjections()
-        }
-        return
-      }
-
-      const conversationId = this.conversationIdForSession(event.sessionId)
-      if (!conversationId) {
-        this.addDiagnostic(
-          undefined,
-          `Ignored event ${event.type} for unknown session ${event.sessionId}.`,
-        )
-        return
-      }
-
-      const runtime = this.ensureConversationRuntime(conversationId)
-      if (event.seq <= runtime.lastEventSeq) {
-        this.addDiagnostic(
-          conversationId,
-          `Ignored stale event ${event.seq} for ${event.type}.`,
-        )
-        return
-      }
-      if (runtime.lastEventSeq > 0 && event.seq > runtime.lastEventSeq + 1) {
-        this.addDiagnostic(
-          conversationId,
-          `Agent event gap: expected ${runtime.lastEventSeq + 1}, received ${event.seq}.`,
-        )
-      }
-      runtime.lastEventSeq = event.seq
-
-      if (event.type === 'session.closed') {
-        runtime.sessionId = undefined
-        runtime.activeRunId = undefined
-        runtime.startPending = false
-        runtime.pendingApproval = undefined
-        runtime.pendingCarryover = []
-        runtime.runStatus = 'idle'
-        delete this.conversationIdBySessionId[event.sessionId]
-        return
-      }
-
-      runtime.sessionId = event.sessionId
-      this.conversationIdBySessionId[event.sessionId] = conversationId
-
-      if (conversationId !== workbench.activeConversationId) {
-        const conversation = workbench.conversations.find(
-          (item) => item.id === conversationId,
-        )
-        if (!conversation) return
-
-        const backgroundTimeline = timelineAdapterFromConversation(
-          conversation,
-          runtime,
-        )
-        const persistBackgroundConversation = (touchUpdatedAt = true) => {
-          if (touchUpdatedAt) conversation.updatedAt = new Date().toISOString()
-          this.scheduleWorkbenchSave()
-        }
-
-        handleRuntimeAgentEvent(event, {
-          runtime,
-          timeline: backgroundTimeline,
-          loadConversationChanges: () => {
-            changes.workspaceFileRevision += 1
-          },
-          schedulePersist: persistBackgroundConversation,
-          flushCarryoverInterjections: () =>
-            this.flushCarryoverInterjections(conversationId),
-        })
-        if (
-          event.type === 'run.status' &&
-          ['completed', 'cancelled', 'failed'].includes(event.status)
+          this.workspaceWriters[event.workspace] = event.writerSessionId
+        } else if (
+          this.workspaceWriters[event.workspace] === event.writerSessionId
         ) {
-          this.retryCarryoverInterjections()
+          delete this.workspaceWriters[event.workspace]
         }
         return
       }
+      if (event.type === 'session.closed') {
+        delete this.overlays[event.sessionId]
+        return
+      }
+      const overlay = this.ensureOverlay(event.sessionId)
+      if (event.seq <= overlay.lastEventSeq) return
+      if (overlay.lastEventSeq && event.seq !== overlay.lastEventSeq + 1) {
+        overlay.diagnostics.push(
+          `Runtime event gap: expected ${overlay.lastEventSeq + 1}, received ${event.seq}.`,
+        )
+        void useAgentReplicaStore()
+          .loadSession(event.sessionId)
+          .then(() =>
+            this.hydrateRuntime(
+              useAgentReplicaStore().runtimeBySessionId[event.sessionId],
+            ),
+          )
+      }
+      overlay.lastEventSeq = event.seq
+      overlay.order += 1
 
-      handleRuntimeAgentEvent(event, {
-        runtime,
-        timeline,
-        loadConversationChanges: () => changes.loadConversationChanges(),
-        schedulePersist: (touchUpdatedAt) =>
-          this.schedulePersist(touchUpdatedAt),
-        flushCarryoverInterjections: () => {
-          return this.flushCarryoverInterjections(conversationId)
-        },
-      })
-      runtime.timelineCounter = Math.max(
-        runtime.timelineCounter,
-        timeline.timelineCounter,
-        runtime.pendingApproval?.order ?? 0,
-      )
-      if (
-        event.type === 'run.status' &&
-        ['completed', 'cancelled', 'failed'].includes(event.status)
-      ) {
-        this.retryCarryoverInterjections()
+      if (event.type === 'run.status') {
+        overlay.status = event.status
+        overlay.runId = TERMINAL_RUN_STATUSES.has(event.status)
+          ? undefined
+          : event.runId
+        if (event.error) this.globalError = event.error.message
+        if (TERMINAL_RUN_STATUSES.has(event.status)) {
+          void useAgentReplicaStore()
+            .loadSession(event.sessionId)
+            .then(() => {
+              overlay.text = ''
+              overlay.reasoning = ''
+              overlay.approval = undefined
+              this.workspaceFileRevision += 1
+            })
+        }
+        return
+      }
+      overlay.runId = event.runId
+      if (event.type === 'assistant.text.delta') {
+        overlay.text += event.delta
+      } else if (event.type === 'assistant.reasoning.delta') {
+        overlay.reasoning += event.delta
+      } else if (event.type === 'assistant.message.completed') {
+        overlay.text = event.text
+        overlay.reasoning = event.reasoning ?? overlay.reasoning
+      } else if (event.type === 'tool.proposed') {
+        overlay.tools = overlay.tools.filter(
+          (tool) => tool.callId !== event.callId,
+        )
+        overlay.tools.unshift({
+          callId: event.callId,
+          runId: event.runId,
+          tool: event.tool,
+          args: event.args,
+          reason: event.reason,
+          status: 'proposed',
+          order: overlay.order,
+        })
+      } else if (event.type === 'tool.completed') {
+        const tool = overlay.tools.find(
+          (candidate) => candidate.callId === event.callId,
+        )
+        if (tool) {
+          tool.status = 'completed'
+          tool.result = event.result
+          tool.approval = event.approval
+        }
+        if (overlay.approval?.callId === event.callId) {
+          overlay.approval = undefined
+        }
+        void useAgentReplicaStore().loadFileChanges(event.sessionId)
+      } else if (event.type === 'approval.requested') {
+        overlay.approval = {
+          runId: event.runId,
+          callId: event.callId,
+          kind: event.kind,
+          tool: event.tool,
+          args: event.args,
+          reason: event.reason,
+          signals: event.policySignals,
+          diff: event.diff,
+          diffHash: event.diffHash,
+          rememberable: event.rememberable,
+          rememberArgConstraints: event.rememberArgConstraints,
+          expiresAt: event.expiresAt,
+          status: 'requested',
+          order: overlay.order,
+        }
+      } else if (event.type === 'llm.usage') {
+        overlay.usage.push({
+          runId: event.runId,
+          callId: event.callId,
+          usage: event.usage,
+          order: overlay.order,
+        })
+      } else if (event.type === 'goal.updated') {
+        overlay.goal = event.goal ? structuredClone(event.goal) : undefined
+      } else if (event.type === 'plan.updated') {
+        overlay.plan = event.plan ? structuredClone(event.plan) : undefined
+      } else if (event.type === 'interjection.updated') {
+        overlay.interjections = overlay.interjections.filter(
+          (interjection) => interjection.id !== event.interjectionId,
+        )
+        overlay.interjections.push({
+          id: event.interjectionId,
+          status: event.status,
+          content: event.content,
+          createdAt: event.createdAt,
+        })
       }
     },
   },

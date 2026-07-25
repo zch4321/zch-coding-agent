@@ -4,6 +4,7 @@ import type { CallId, MessageId, ProjectId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { SessionRecord } from '../../shared/session'
 import { canonicalHash } from '../session/canonical-history'
+import { MessageRepository } from '../persistence/message-repository'
 import { createTestDatabase } from '../persistence/test-database'
 import { ApplicationError } from './application-error'
 import { ApplicationStateCoordinator } from './application-state-coordinator'
@@ -32,6 +33,7 @@ function messageIdentity(
     id: id as MessageId,
     sessionId,
     seq,
+    visibility: 'visible' as const,
     inHistory: true,
     createdAt: new Date(Date.parse(timestamp) + seq * 1_000).toISOString(),
   }
@@ -311,6 +313,217 @@ describe('SessionService durable transactions', () => {
         }),
       ).rejects.toMatchObject({ code: 'CONFLICT' })
       expect((await setup.sessions.getRecord(sessionId)).lastSeq).toBe(5)
+    } finally {
+      await setup.testDatabase.dispose()
+    }
+  })
+
+  it('rewinds across compact, rejects repeated rewind, and forks only the current branch', async () => {
+    const setup = await setupServices()
+    try {
+      const sessionId = 'session:rewind-compact' as SessionId
+      const firstUserId = 'message:rewind-user-1' as MessageId
+      const secondUserId = 'message:rewind-user-2' as MessageId
+      const initial = activeSession(sessionId, setup.project.id, {
+        goal: {
+          id: 'goal:rewind',
+          objective: 'Rewind safely',
+          status: 'paused',
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          continuationCount: 0,
+        },
+        plan: {
+          id: 'plan:rewind',
+          objective: 'Rewind safely',
+          status: 'rejected',
+          items: [],
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          continuationCount: 0,
+        },
+      })
+      const system: MessageRecord = {
+        ...messageIdentity(sessionId, 1, 'message:rewind-system'),
+        visibility: 'hidden',
+        turnId: firstUserId,
+        kind: 'system_instruction',
+        parts: [{ type: 'text', text: 'Stable system instruction' }],
+      }
+      const firstUser: MessageRecord = {
+        ...messageIdentity(sessionId, 2, firstUserId),
+        turnId: firstUserId,
+        kind: 'user_input',
+        clientRequestId: 'request:rewind-user-1',
+        parts: [{ type: 'text', text: 'first durable turn' }],
+        metadata: {
+          schemaVersion: 1,
+          requestHash: canonicalHash('first durable turn'),
+          submission: { type: 'message' },
+        },
+      }
+      await setup.sessions.commitFirstTurn({
+        session: initial,
+        messages: [system, firstUser],
+        requestHash: canonicalHash('first durable turn'),
+      })
+      const firstAssistant: MessageRecord = {
+        ...messageIdentity(sessionId, 3, 'message:rewind-assistant-1'),
+        turnId: firstUserId,
+        kind: 'assistant_turn',
+        parts: [{ type: 'text', text: 'first durable answer' }],
+        modelRoute: route,
+      }
+      await setup.sessions.commitMutation({
+        sessionId,
+        expectedRevision: 1,
+        expectedLastSeq: 2,
+        messages: [firstAssistant],
+      })
+
+      const compactSystem: MessageRecord = {
+        ...messageIdentity(sessionId, 4, 'message:rewind-compact-system'),
+        visibility: 'hidden',
+        kind: 'system_instruction',
+        parts: [{ type: 'text', text: 'Rebuilt system instruction' }],
+      }
+      const replay: MessageRecord = {
+        ...messageIdentity(sessionId, 5, 'message:rewind-replay'),
+        visibility: 'hidden',
+        kind: 'user_input',
+        parts: [{ type: 'text', text: 'first durable turn' }],
+        metadata: {
+          schemaVersion: 1,
+          replayedFromMessageId: firstUserId,
+        },
+      }
+      const summary: MessageRecord = {
+        ...messageIdentity(sessionId, 6, 'message:rewind-summary'),
+        visibility: 'hidden',
+        kind: 'compact_summary',
+        parts: [{ type: 'text', text: 'Compacted first turn' }],
+        metadata: {
+          schemaVersion: 1,
+          compact: {
+            replacesThroughSeq: 3,
+            sourceHash: 'b'.repeat(64),
+          },
+        },
+      }
+      await setup.sessions.commitMutation({
+        sessionId,
+        expectedRevision: 2,
+        expectedLastSeq: 3,
+        deactivateThroughSeq: 3,
+        messages: [compactSystem, replay, summary],
+        messageChange: 'invalidate',
+      })
+
+      const selectedContext: MessageRecord = {
+        ...messageIdentity(sessionId, 7, 'message:rewind-context-2'),
+        visibility: 'hidden',
+        turnId: secondUserId,
+        kind: 'selected_context',
+        parts: [{ type: 'text', text: 'Selected context for turn two' }],
+        metadata: {
+          schemaVersion: 1,
+          layer: {
+            source: 'selected-context',
+            trusted: false,
+            editable: false,
+            hash: 'c'.repeat(64),
+          },
+        },
+      }
+      const secondUser: MessageRecord = {
+        ...messageIdentity(sessionId, 8, secondUserId),
+        turnId: secondUserId,
+        kind: 'user_input',
+        clientRequestId: 'request:rewind-user-2',
+        parts: [{ type: 'text', text: 'second durable turn' }],
+        metadata: {
+          schemaVersion: 1,
+          requestHash: canonicalHash('second durable turn'),
+          submission: { type: 'message' },
+        },
+      }
+      const secondAssistant: MessageRecord = {
+        ...messageIdentity(sessionId, 9, 'message:rewind-assistant-2'),
+        turnId: secondUserId,
+        kind: 'assistant_turn',
+        parts: [{ type: 'text', text: 'second durable answer' }],
+        modelRoute: route,
+      }
+      await setup.sessions.commitMutation({
+        sessionId,
+        expectedRevision: 3,
+        expectedLastSeq: 6,
+        messages: [selectedContext, secondUser, secondAssistant],
+      })
+
+      const rewound = await setup.sessions.rewind({
+        sessionId,
+        expectedRevision: 4,
+        messageId: firstAssistant.id,
+        boundary: 'before_message',
+      })
+      expect(rewound.commit.change).toMatchObject({
+        session: { revision: 5, goal: null, plan: null },
+        messageChange: { mode: 'invalidate_all' },
+      })
+      const records = await setup.coordinator.query((reader) =>
+        new MessageRepository().listAll(reader, sessionId),
+      )
+      expect(
+        records.value
+          .filter((record) => record.visibility !== 'superseded')
+          .map((record) => record.id),
+      ).toEqual([system.id, firstUser.id])
+      expect(
+        records.value
+          .filter((record) => record.inHistory)
+          .map((record) => record.id),
+      ).toEqual([system.id, firstUser.id])
+      expect(
+        records.value
+          .filter((record) => record.visibility === 'superseded')
+          .map((record) => record.id),
+      ).toEqual([
+        firstAssistant.id,
+        compactSystem.id,
+        replay.id,
+        summary.id,
+        selectedContext.id,
+        secondUser.id,
+        secondAssistant.id,
+      ])
+      await expect(
+        setup.sessions.rewind({
+          sessionId,
+          expectedRevision: 5,
+          messageId: firstAssistant.id,
+          boundary: 'before_message',
+        }),
+      ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+
+      const fork = await setup.sessions.fork({
+        sourceSessionId: sessionId,
+        expectedRevision: 5,
+        sessionId: 'session:rewind-fork' as SessionId,
+      })
+      expect(fork.commit.change.messageChange).toMatchObject({
+        mode: 'upsert',
+      })
+      if (fork.commit.change.messageChange.mode !== 'upsert') {
+        throw new Error('Expected fork message records')
+      }
+      expect(fork.commit.change.messageChange.records).toHaveLength(2)
+      expect(
+        fork.commit.change.messageChange.records.every(
+          (record) => record.visibility !== 'superseded',
+        ),
+      ).toBe(true)
+      expect(fork.commit.change.session.parent?.forkedFromSeq).toBe(2)
     } finally {
       await setup.testDatabase.dispose()
     }

@@ -172,7 +172,6 @@ describe('SessionManager Provider completion validation', () => {
       executionState,
     })
     const sessionId = await manager.createSession({
-      conversationId: 'provider-validation',
       workspace,
       mode: 'confirm',
       provider: 'deepseek',
@@ -252,7 +251,6 @@ describe('SessionManager Provider completion validation', () => {
       },
     })
     const sessionId = await manager.createSession({
-      conversationId: 'provider-cross-turn',
       workspace,
       mode: 'readonly',
       provider: 'deepseek',
@@ -324,7 +322,6 @@ describe('SessionManager Provider completion validation', () => {
       providerFactory: () => new ReasoningOnlyProvider(),
     })
     const sessionId = await manager.createSession({
-      conversationId: 'provider-reasoning-only',
       workspace,
       mode: 'readonly',
       provider: 'deepseek',

@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { configureApp } from './support/app-helpers'
+import { configureApp, findDurableMessageText } from './support/app-helpers'
 import {
   providerMessageText,
   textDelta,
@@ -227,31 +227,14 @@ test.describe('Electron concurrency and interjection workflows', () => {
     expect(toolResultIndex).toBeGreaterThanOrEqual(0)
     expect(interjectionIndex).toBeGreaterThan(toolResultIndex)
 
-    // The persisted workbench stores the interjection message.
+    // The Durable Session stores the interjection message.
     await expect
-      .poll(async () =>
-        page.evaluate(async () => {
-          type Message = { role: string; text: string }
-          type Conversation = { messages: Message[] }
-          type WorkbenchResult =
-            | { ok: true; value: { conversations: Conversation[] } }
-            | { ok: false }
-          const api = Reflect.get(window, 'agentApi') as {
-            getWorkbench(payload: unknown): Promise<WorkbenchResult>
-          }
-          const workbench = await api.getWorkbench({ version: 1 })
-          if (!workbench.ok) return ''
-          const conversation = workbench.value.conversations.find((candidate) =>
-            candidate.messages.some((message) =>
-              message.text.includes('Create interject-output.txt'),
-            ),
-          )
-          return (
-            conversation?.messages.find(
-              (message) => message.role === 'interjection',
-            )?.text ?? ''
-          )
-        }),
+      .poll(() =>
+        findDurableMessageText(
+          page,
+          'Create interject-output.txt',
+          'interjection',
+        ),
       )
       .toBe('Remember to mention the interjection')
   })

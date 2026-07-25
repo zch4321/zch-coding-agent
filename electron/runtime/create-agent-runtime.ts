@@ -9,7 +9,6 @@ import { ProjectMetadataStore } from '../project/project-metadata-store'
 import { PromptRegistry } from '../prompts/registry'
 import type { AutoApprover } from '../permission/auto-approver'
 import type { LLMProvider } from '../providers/provider'
-import { ChangeHistoryStore } from '../session/change-history'
 import { SessionManager } from '../session/session-manager'
 import { SkillsManager } from '../skills/manager'
 import { AgentRuntime } from './agent-runtime'
@@ -33,7 +32,7 @@ export interface CreateAgentRuntimeOptions {
   }) => AutoApprover
   eventListeners?: RuntimeEventListener[]
   executionState?: SessionExecutionStatePort
-  fileChangeExecution?: FileChangeExecutionPort
+  fileChangeExecution: FileChangeExecutionPort
   onDiagnostic?: (message: string, error?: unknown) => void
 }
 
@@ -66,10 +65,6 @@ export async function createAgentRuntime(
       path.join(options.userDataDirectory, 'traces'),
     )
     await traces.initialize()
-    const changes = new ChangeHistoryStore(
-      path.join(options.userDataDirectory, 'change-history.json'),
-    )
-    await changes.initialize()
     const projects = new ProjectMetadataStore()
     const codeBackends = new CodeBackendManager({ projectMetadata: projects })
     disposer.add(() => codeBackends.dispose())
@@ -87,7 +82,6 @@ export async function createAgentRuntime(
       eventSink: events,
       pluginBus,
       skillsManager: skills,
-      changeHistory: changes,
       fileChangeExecution: options.fileChangeExecution,
       projectMetadata: projects,
       codeBackends,
@@ -107,7 +101,6 @@ export async function createAgentRuntime(
         sessions,
         skills,
         traces,
-        changes,
         projects,
         codeBackends,
         mcp,

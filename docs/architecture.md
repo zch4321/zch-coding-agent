@@ -1,10 +1,10 @@
 # 架构设计文档 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 目标规范 · 2026-07-22
+> 状态：Backend Architecture v2.1 已完成 P0–P9 切流 · 2026-07-25
 >
 > 配套文档：[`requirements.md`](./requirements.md) 定义产品能力，[`frontend-spec.md`](./frontend-spec.md) 定义前端信息架构与交互验收。
 >
-> 本文是后续重构的规范性目标，不表示所有内容已经实现。迁移期间，新增代码必须遵守本文边界；旧 `workbench.json`、renderer-owned conversation 和 memory-only canonical history 仅作为待移除的兼容实现，不得继续扩展。
+> 本文同时是当前实现的规范。P6–P9 已一次完成 Durable IPC、renderer replica、production composition 切流和旧路径删除；剩余工作属于 P10 hardening。
 
 ---
 
@@ -159,7 +159,7 @@ electron/
   ipc/                    # host adapter，不包含领域逻辑
 ```
 
-这是 P5 完成后的目标实现布局。`electron/application/` 已包含 isolated durable target 使用的 coordinator、Project/Session/FileChange services 和 live-session registry；production Desktop/Headless composition 仍未切到该 target，见 §20。
+`electron/application/` 包含 production 使用的 coordinator、Project/Session/FileChange services、run application service 和 live-session registry；Desktop 与 Headless 通过唯一 `createBackendRuntime` 组装它们。
 
 Persistence 是独立代码层，但不是独立进程、IPC service 或通用 ORM：
 
@@ -185,9 +185,7 @@ Renderer 只保存：
 
 ### 3.4 Host-neutral runtime
 
-当前唯一 Agent loop 已可注入 legacy memory port 或 durable execution port。P5 isolated target 使用临时 SQLite database 组合 application/runtime；Repository tests 也使用真实临时 SQLite 文件。Desktop、Headless 和 benchmark 的 production composition 尚未切流，仍保留 legacy 持久化入口。
-
-P8 切流后的目标是 Desktop 使用 `userData/agent.db`，Headless/benchmark 使用任务独立的临时 SQLite database，同时继续共用 Prompt、Provider、Tool、Permission、compact 和 Agent loop。
+唯一 Agent loop 必须注入 durable execution/FileChange ports。Desktop 使用 `userData/agent.db`；Headless/benchmark 使用任务独立的临时 SQLite database，并继续共用 Prompt、Provider、Tool、Permission、compact 和 Agent loop。产品路径不存在 legacy memory/JSON fallback。
 
 ---
 
@@ -393,6 +391,8 @@ interface MessageRecord {
   id: MessageId
   sessionId: SessionId
   seq: number
+  visibility: 'visible' | 'hidden' | 'superseded'
+  turnId?: MessageId
   clientRequestId?: string
 
   kind:
@@ -428,6 +428,8 @@ interface MessageRecord {
 - `providerContinuation`：可选的 provider-native continuation envelope。Core 只验证外壳并原样搬运 `data`；只有 `adapterId + format` 对应的 Provider Adapter 可以解释它。
 - `modelRoute`：已完成 assistant turn 实际使用的 route，便于 UI 和审计。
 - `metadata`：应用拥有并理解的 typed annotations，例如 attachment provenance、prompt id/hash、标准化 usage、approval/tool/compact 摘要和 reasoning projection 状态。
+- `visibility`：`visible` 可进入普通 timeline/search，`hidden` 是仍可参与模型历史的内部记录，`superseded` 表示已退出当前分支的审计记录。
+- `turnId`：把同一轮的 context、原始 user、assistant、tool result 和 interjection 关联起来；rewind/edit 使用它确定完整轮次边界。
 - `inHistory`：是否属于下一次 provider request 的 canonical active history；它不决定本地审计记录是否存在，也不直接决定 renderer 是否展示。
 
 `metadata`“与 Provider 协议无关”指的是：它可以来源于 Provider，例如标准化 usage，但删除 metadata 只能损失 UI、统计或审计信息，不能让下一次 Provider request 失去协议完整性。任何必须原样回传、只由 Adapter 理解、或影响 continuation 正确性的字段都必须进入 `providerContinuation`，不能藏在 metadata 中。完整原始 Provider request/response、headers 和 stream events 属于可选 trace，也不进入 metadata。
@@ -449,9 +451,9 @@ MessageRecord 是持久化、排序、分页、compact 和 UI 派生的单位；
 
 | 投影                    | 选择规则                                                              | 用途                              |
 | ----------------------- | --------------------------------------------------------------------- | --------------------------------- |
-| Durable canonical log   | 所有已接受并 commit 的 canonical records，包括隐藏控制命令            | 幂等、审计、fork/reference 完整性 |
-| Provider active history | `inHistory = true`，再经 `MessageHistoryCompiler` 校验                | Protocol Adapter request          |
-| Renderer transcript     | 从 durable log 选择用户可见 records，排除 replay 去重项与隐藏控制命令 | Chat timeline、普通搜索与导出     |
+| Durable canonical log   | 所有已接受并 commit 的 records，包括 `hidden` 和 `superseded`          | 幂等、审计、fork/reference 完整性 |
+| Provider active history | `inHistory = true` 且非 `superseded`，再经 compiler 校验               | Protocol Adapter request          |
+| Renderer transcript     | `visibility = visible` 的 user/assistant/编排记录                      | Chat timeline、普通搜索与导出     |
 
 因此“某条命令不发送给模型”不意味着“不落库”；同样，`inHistory = false` 也不等于删除或不可审计。
 
@@ -1205,7 +1207,16 @@ Draft 和 draft attachments 只属于当前 renderer 输入组件：
 
 Backend 校验附件、构造完整 user/harness messages 并落盘。附件正文受 AppConfig v9 的 `limits.maxAttachmentContextTokens` 约束，默认 `64_000`；聚合估算超过预算时，本次附件统一降级为仅注入类型和路径，renderer attachment chips 标记为 truncated。Draft 丢失不会造成 backend state 与 canonical history 不一致。
 
-### 9.3 模型和权限模式
+### 9.3 Rewind、用户消息重试与编辑
+
+- `session:rewind` 只接受当前分支中可见的原始用户或 Assistant 消息。用户边界会移除该用户整轮及之后记录；Assistant 边界保留对应用户消息，从 Assistant 开始移除。
+- “移除”不删除 row：相关 records 改为 `visibility = superseded` 且 `inHistory = false`。每次 rewind 递增 Session revision、清除 Goal/Plan，并从保留前缀重建 `inHistory`；因此可以跨 compact 回退。
+- `run:retry(userMessageId)` 只接受可见原始用户消息。它保留该用户消息及其本轮前置 context，supersede 之后分支，再复用该 user record 运行；不会插入第二条 user message。Assistant、replay、derived、control command 或其他消息类型都返回验证错误。
+- 编辑先按该用户整轮 rewind，将原文和附件引用恢复到 composer，不自动发送；下一次发送创建新的用户轮次。
+- Fork 只复制当前非 superseded 分支，连续重编号并重映射 message/turn/reference IDs 与 compact boundary。
+- 所有操作只修改 Session/Message 状态。文件、终端与 MCP/外部工具副作用不回滚，FileChange 审计继续保留；UI 在操作前明确提示。
+
+### 9.4 模型和权限模式
 
 模型下拉框发送 `session:update`，更新 Session `modelSelection`。它不修改全局 provider default，也不改变已经开始的 Active Run。
 
@@ -1213,7 +1224,7 @@ Active Run 开始时解析 immutable `ModelRouteSnapshot` 并保存在 memory；
 
 权限模式同样由 backend 更新。Active Run 使用启动时的 mode snapshot。
 
-### 9.4 发送与执行
+### 9.5 发送与执行
 
 1. Backend 校验候选/已有 Session、Project、Provider、credential/notices、并发和 writer 条件。
 2. 冻结 route、credential、model profile、permission mode，并预留 run slot/writer lease。
@@ -1228,7 +1239,7 @@ Durable execution port 对每个 Session 串行 commit。commit 失败时从 SQL
 
 `LiveSessionContextRegistry` 使用带 ownership token 的 `reserved → loading → live → evicting/releasing` 状态机。并发候选 Session 只有 owner 能清理自己的 manager context/binding；lazy restore 从首次串行 durable read 起就参与 Session/Project lifecycle guard。Archive、Project path update/remove 会先取得 eviction lease，成功 commit 后的资源清理失败只记录诊断，不把已提交事务改报失败。
 
-### 9.5 应用崩溃与重启
+### 9.6 应用崩溃与重启
 
 重启后：
 
@@ -1349,7 +1360,7 @@ ui-store                 navigation/layout/scroll/panel state
 Renderer 可以：
 
 - 按 `seq` 渲染 MessageRecord。
-- 根据 `kind` 隐藏 harness、折叠 internal message，并按有序 `parts` 组合 assistant text/tool calls 和 tool results；只有 `kind = 'user_input'` 渲染成用户气泡。
+- 根据 `visibility` 与 `kind` 隐藏 internal/superseded records，并按有序 `parts` 组合 assistant text/tool calls 和 tool results；只有当前分支中可见的原始 `user_input` 渲染成用户气泡。
 - 根据 `inHistory` 展示 compact 边界。
 - 缓存 message pages。
 - 在输入组件中临时保存 draft。
@@ -1486,11 +1497,12 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 - Application service 的 Session/Message 多表事务回滚时，Repository 不得留下独立 commit。
 - Durable mutation 的 invoke result 与 push event 携带同一个 envelope；event-first、response-first 和重复 delivery 都只更新一次 renderer replica。
 - Bootstrap 在订阅后读取 snapshot/cursor；握手期间发生 commit 不丢失，cursor gap、backend instance change 或 buffer overflow 会重同步而不是轮询。
-- User send 重试不重复插入 message。
+- User send 和 `run:retry` 不重复插入原始 user message；Assistant target 被拒绝。
 - Assistant text、`normalizedReasoningText` 和 `providerContinuation` 只有 completed 后才落盘。
 - 每个持久化 assistant tool-call message 后都有完整 tool result messages。
 - Tool batch transaction 失败时不留下协议半截。
 - Compact 只在完整 turn boundary 修改 `inHistory`，active history 可直接按 seq 重建。
+- Rewind/edit 跨 compact 重建保留前缀；重复 rewind 被拒绝；rewind 后 fork 只复制非 superseded 当前分支并重映射引用。
 - Renderer revision gap 触发 Session snapshot。
 - Draft、partial output 和 active Run 不进入 SQLite。
 - Renderer reload 且 main 存活时可读取 ActiveRunPublicSnapshot。
@@ -1514,22 +1526,12 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 
 ## 20. 当前迁移状态
 
-P0 regression gates、P1 shared canonical contracts、P2 SQLite/Persistence foundation、P3 canonical history/provider boundary、P4 isolated durable application/runtime target 和 P5 durable FileChanges 已实现。P2 已提供 checksummed forward migrations、单连接串行 transaction、Project/Session/Message/FileChange repositories、shared-schema row codecs、有界查询、文件型临时测试数据库，以及 development Electron/Windows x64 package 的 `node:sqlite` 探针。
+P0–P9 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路径均使用唯一 `createBackendRuntime` 与 SQLite Durable Backend。Desktop 数据库为 `userData/agent.db`；数据库打开或 migration 失败时显示阻塞恢复对话框，不回退 Workbench。Headless 使用任务独立临时数据库并在退出时关闭、删除。
 
-P3 已把进程内 Agent loop 切到 canonical messages 与严格 `MessageHistoryCompiler`，由 Chat Completions Adapter 独占 wire DTO、HTTP/SSE transport、response normalization 和 continuation 恢复。每个 Run 冻结 main/compression/approval route、credential 与 model profile；AppConfig v9 检测到旧版或不兼容文件时删除并按默认值重建，Trace v2 明确拒绝旧 trace，trace fork 已移除。自动 compact 固定为 `system → harness* → root user replay → compact summary`，手动带正文固定为 `system → harness* → compact summary → new user`。
+Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、每 Session runtime overlay 和 UI-only draft/selection。首次发送前不创建空 Session；所有 durable command response 与 `domain-state:event` 经同一 reconciler 处理 cursor/revision、重复 delivery、缺口和 backend instance 变化。
 
-P4 在 `electron/application/` 提供串行 application-state coordinator、Project/Session services、lazy `run:start`、普通 Session fork、带 ownership token 的 LiveSessionContextRegistry、bounded runtime snapshot 和 per-Session 串行 durable execution-state port。该 port 接入现有唯一 Agent loop，在 Provider 前提交首次 input；手动 compact 先提交隐藏 command journal，再异步提交 compact epoch；assistant/tool batch、interjection 与 Goal/Plan 保持事务原子。Provider completion 在任何工具/approval/append 前完成 canonical bounds 与 active-epoch callId 校验，commit 失败会从 SQLite 恢复或隔离 binding。临时数据库回归覆盖“发送 A → tool chain → final → dispose → reopen → 发送 B”、并发候选 ownership、deferred restore lifecycle guard 和 commit failure recovery。
+`MessageRecord` 使用 `visibility + inHistory + turnId` 分离展示、模型历史和轮次归属。Compact 只更新 `inHistory`；rewind 将移除分支标为 `superseded`，清除 Goal/Plan 并重建 active history。只有可见原始用户消息能 retry/edit；Assistant 不能作为 `run:retry` 目标。
 
-P5 为 target composition 注入 `FileChangeService` port：内建 `create_file/apply_patch/delete_file` 在副作用后校验 after state并立即写 SQLite，tool batch Message 仍稍后原子提交；历史按全应用字节预算 retention 并以 `(createdAt, id)` 分页。持久化唯一性以 assistant Message + call ID + path 为范围，因此 compact 后 provider 可以安全重用 call ID。Revert 取得 Session lifecycle token 和共享 workspace writer，校验 after hash 和 10 MB 文件上限后恢复 before snapshot 及 POSIX permission mode，再以 OCC 标记记录。Target 的重启回归覆盖 durable list/revert、冲突、异常落库和 private snapshot 边界。
+Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。Markdown Conversation import/export 暂停并在 UI 中禁用；Trace transcript export 保持可用。
 
-P4/P5 target composition 仍只由 unit/integration tests 使用，尚未导入 production Desktop/Headless、legacy IPC/preload 或 renderer 默认路径，也不读取或修改真实 `userData/agent.db`。Production FileChange 工具因此仍使用 legacy JSON store；domain-state IPC/renderer 和正式切流分别留给 P6/P7/P8。
-
-当前 legacy 实现仍然：
-
-- Renderer Pinia 保存 Conversation/timeline 并整体写 `workbench.json`。
-- Project registry 仍位于 `workbench.json`，文件变更/回退记录仍单独写入 `change-history.json`。
-- Main-process provider history 主要位于内存。
-- Restart 后 UI history 与 provider history 可能不一致。
-- Composer model selection 与实际 route 不是同一 canonical mutation。
-
-这些不是 v2.1 的长期折中。新功能不得继续扩大 legacy 数据流。
+后续工作进入 P10 hardening，不再保留 P6–P9 双轨、兼容开关或 legacy fallback。

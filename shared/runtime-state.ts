@@ -1,5 +1,9 @@
 import { Type, type Static } from '@sinclair/typebox'
-import { RunStatusSchema, ToolResultEnvelopeSchema } from './agent-events'
+import {
+  PolicySignalSchema,
+  RunStatusSchema,
+  ToolResultEnvelopeSchema,
+} from './agent-events'
 import {
   MAX_MESSAGE_TEXT_LENGTH,
   MAX_RUNTIME_INTERJECTIONS,
@@ -31,7 +35,13 @@ export const ActiveRunApprovalSnapshotSchema = Type.Object(
     callId: CallIdSchema,
     kind: Type.Union([Type.Literal('tool'), Type.Literal('context')]),
     tool: Type.String({ minLength: 1, maxLength: 512 }),
+    arguments: JsonValueSchema,
     reason: Type.String({ maxLength: 65_536 }),
+    policySignals: Type.Array(PolicySignalSchema, { maxItems: 256 }),
+    diff: Type.Optional(Type.String({ maxLength: 262_144 })),
+    diffHash: Type.Optional(Type.String({ maxLength: 128 })),
+    rememberable: Type.Boolean(),
+    rememberArgConstraints: Type.Optional(JsonValueSchema),
     expiresAt: Type.String({ format: 'date-time' }),
   },
   { additionalProperties: false },

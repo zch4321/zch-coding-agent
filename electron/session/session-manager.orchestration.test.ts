@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -14,7 +14,6 @@ import {
 import {
   createConfig,
   createIpcTestEventSink,
-  parseTrace,
   waitFor,
 } from './session-manager-test-support'
 
@@ -172,28 +171,6 @@ describe('SessionManager goal and plan orchestration', () => {
       ),
     ).toBe(false)
     await manager.waitForRunSettled(sessionId, runId)
-    await expect(
-      manager.updatePlanStatus({ sessionId, status: 'rejected' }),
-    ).resolves.toMatchObject({
-      accepted: true,
-      plan: { status: 'rejected' },
-    })
-    const trace = parseTrace(
-      await readFile(
-        path.join(directory, 'traces', `${sessionId}.jsonl`),
-        'utf8',
-      ),
-    )
-    expect(trace).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: 'plan.status',
-          previousStatus: 'awaiting_review',
-          status: 'rejected',
-          source: 'ui:plan-review',
-        }),
-      ]),
-    )
     await manager.closeSession(sessionId)
   })
 

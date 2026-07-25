@@ -4,7 +4,6 @@ import type { RunId, SessionId } from '../../shared/ids'
 export interface RunWorkspaceWriterOwner {
   kind: 'provider_run'
   workspace: string
-  conversationId: string
   sessionId: SessionId
   runId: RunId
 }
@@ -77,7 +76,6 @@ export class WorkspaceAccessCoordinator {
     limit: number
     workspace: string
     mode: PermissionMode
-    conversationId: string
     sessionId: SessionId
     runId: RunId
   }): RunAccessResult {
@@ -95,7 +93,6 @@ export class WorkspaceAccessCoordinator {
     const owner: RunWorkspaceWriterOwner = {
       kind: 'provider_run',
       workspace: input.workspace,
-      conversationId: input.conversationId,
       sessionId: input.sessionId,
       runId: input.runId,
     }

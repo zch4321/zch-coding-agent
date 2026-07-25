@@ -5,25 +5,18 @@ import {
   type OpenDialogOptions,
   type SaveDialogOptions,
 } from 'electron'
-import { readFile, stat, writeFile } from 'node:fs/promises'
-import { CONVERSATION_MARKDOWN_MAX_BYTES } from '../../shared/ipc-contract'
+import { stat } from 'node:fs/promises'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
-import {
-  ChangeHistoryError,
-  ChangeHistoryStore,
-} from '../session/change-history'
 import {
   fetchOpenAICompatibleModelCatalog,
   ModelCatalogError,
   resolveModelProfiles,
 } from '../providers/model-catalog'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
-import type { SessionManager } from '../session/session-manager'
 import type { ConfigStore } from '../config/store'
 import { SkillError, type SkillsManager } from '../skills/manager'
 import { TraceServiceError, type TraceService } from '../logging/service'
 import { writeTextAtomic } from '../config/atomic-file'
-import type { WorkbenchStore } from '../workbench/store'
 import type { HttpTransport } from '../net/http-transport'
 import {
   ProjectMetadataError,
@@ -31,15 +24,14 @@ import {
 } from '../project/project-metadata-store'
 import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import type { McpManager } from '../mcp/mcp-manager'
+import type { BackendRuntime } from '../application/create-backend-runtime'
 import { IpcFault, type IpcBusinessHandlers } from './index'
 
 export interface AppIpcHandlerDependencies {
   configStore: ConfigStore
-  sessionManager: SessionManager
+  backend: BackendRuntime
   skillsManager: SkillsManager
   traceService: TraceService
-  changeHistory: ChangeHistoryStore
-  workbenchStore: WorkbenchStore
   projectMetadata: ProjectMetadataStore
   codeBackends: CodeBackendManager
   mcpManager?: McpManager
@@ -84,11 +76,9 @@ export function createAppIpcHandlers(
 ): IpcBusinessHandlers {
   const {
     configStore,
-    sessionManager,
+    backend,
     skillsManager,
     traceService,
-    changeHistory,
-    workbenchStore,
     projectMetadata,
     codeBackends,
     mcpManager,
@@ -96,6 +86,11 @@ export function createAppIpcHandlers(
     refreshHttpTransport,
     getMainWindow,
   } = dependencies
+  const sessionManager = backend.runtime.services.sessions
+
+  const projectWorkspace = async (
+    projectId: Parameters<typeof backend.projects.get>[0],
+  ) => (await backend.projects.get(projectId)).path
 
   return {
     'config:get': (payload) => ({
@@ -223,77 +218,100 @@ export function createAppIpcHandlers(
         stale,
       }
     },
-    'workbench:get': () => workbenchStore.getSnapshot(),
-    'workbench:save': (payload) =>
-      workbenchStore.saveSnapshot(payload.workbench),
-    'workbench:migrate-v1': (payload) =>
-      workbenchStore.mergeSnapshot(payload.workbench),
-    'workbench:export-conversation': async (payload) => {
-      const options: SaveDialogOptions = {
-        defaultPath: payload.suggestedName,
-        filters: [{ name: 'Markdown', extensions: ['md'] }],
-      }
-      const mainWindow = getMainWindow()
-      const result = mainWindow
-        ? await dialog.showSaveDialog(mainWindow, options)
-        : await dialog.showSaveDialog(options)
-
-      if (result.canceled || !result.filePath) {
-        return { canceled: true }
-      }
-
-      try {
-        await writeFile(result.filePath, payload.markdown, 'utf8')
-        return { canceled: false, path: result.filePath }
-      } catch (error) {
-        if (error instanceof PathGuardError) {
-          throw new IpcFault({
-            code: 'PRECONDITION_FAILED',
-            message: error.message,
-          })
-        }
-        throw error
-      }
-    },
-    'workbench:import-conversation': async () => {
-      const options: OpenDialogOptions = {
-        filters: [{ name: 'Markdown', extensions: ['md'] }],
-        properties: ['openFile'],
-      }
-      const mainWindow = getMainWindow()
-      const result = mainWindow
-        ? await dialog.showOpenDialog(mainWindow, options)
-        : await dialog.showOpenDialog(options)
-
-      if (result.canceled || !result.filePaths[0]) {
-        return { canceled: true }
-      }
-
-      try {
-        const raw = await readFile(result.filePaths[0], 'utf8')
-        if (Buffer.byteLength(raw, 'utf8') > CONVERSATION_MARKDOWN_MAX_BYTES) {
-          throw new IpcFault({
-            code: 'PAYLOAD_TOO_LARGE',
-            message: 'Imported markdown exceeds the 5 MB size limit',
-          })
-        }
-        return { canceled: false, markdown: raw }
-      } catch (error) {
-        if (error instanceof IpcFault) throw error
-        if (
-          error &&
-          typeof error === 'object' &&
-          'code' in error &&
-          (error.code === 'ENOENT' || error.code === 'EACCES')
-        ) {
-          throw new IpcFault({
-            code: 'NOT_FOUND',
-            message: 'The selected file could not be read',
-          })
-        }
-        throw error
-      }
-    },
+    'app:get-bootstrap': () => backend.bootstrap(),
+    'project:list': async () => ({
+      version: 1,
+      projects: await backend.projects.list(),
+    }),
+    'project:add': (payload) =>
+      backend.projects.add({ path: payload.path, name: payload.name }),
+    'project:update': (payload) =>
+      backend.projects.update({
+        projectId: payload.projectId,
+        expectedRevision: payload.expectedRevision,
+        patch: payload.patch,
+      }),
+    'project:remove': (payload) =>
+      backend.projects.remove({
+        projectId: payload.projectId,
+        expectedRevision: payload.expectedRevision,
+      }),
+    'session:list': async (payload) => ({
+      version: 1,
+      page: await backend.sessions.list({
+        projectId: payload.projectId,
+        lifecycle: payload.lifecycle,
+        search: payload.search,
+        before: payload.before,
+        limit: payload.limit,
+      }),
+    }),
+    'session:get': async (payload) => ({
+      version: 1,
+      snapshot: await backend.sessions.get(payload.sessionId),
+    }),
+    'session:update': (payload) =>
+      backend.sessions.update({
+        sessionId: payload.sessionId,
+        expectedRevision: payload.expectedRevision,
+        patch: payload.patch,
+      }),
+    'session:archive': (payload) =>
+      backend.sessions.archive({
+        sessionId: payload.sessionId,
+        expectedRevision: payload.expectedRevision,
+      }),
+    'session:fork': (payload) =>
+      backend.sessions.fork({
+        sourceSessionId: payload.sourceSessionId,
+        expectedRevision: payload.expectedRevision,
+        sessionId: payload.sessionId,
+        throughMessageId: payload.throughMessageId,
+        title: payload.title,
+      }),
+    'session:rewind': (payload) =>
+      backend.sessions.rewind({
+        sessionId: payload.sessionId,
+        expectedRevision: payload.expectedRevision,
+        messageId: payload.messageId,
+        boundary: payload.boundary,
+      }),
+    'session:search': async (payload) => ({
+      version: 1,
+      hits: await backend.sessions.searchSessions({
+        text: payload.text,
+        projectId: payload.projectId,
+        limit: payload.limit,
+      }),
+    }),
+    'message:list': async (payload) => ({
+      version: 1,
+      page: await backend.sessions.listMessages(payload.sessionId, {
+        beforeSeq: payload.beforeSeq,
+        limit: payload.limit,
+      }),
+    }),
+    'message:search': async (payload) => ({
+      version: 1,
+      records: await backend.sessions.searchMessages(payload.sessionId, {
+        text: payload.text,
+        limit: payload.limit,
+      }),
+    }),
+    'file-change:list': async (payload) => ({
+      version: 1,
+      sessionId: payload.sessionId,
+      page: await backend.fileChanges.list(payload.sessionId, {
+        before: payload.before,
+        limit: payload.limit,
+      }),
+    }),
+    'file-change:revert': (payload) =>
+      backend.fileChanges.revert(
+        payload.sessionId,
+        payload.fileChangeId,
+        payload.expectedRevision,
+      ),
     'workspace:choose': async () => {
       const options: OpenDialogOptions = {
         properties: ['openDirectory'],
@@ -315,15 +333,7 @@ export function createAppIpcHandlers(
       return { path: selected ?? null }
     },
     'workspace:list-directory': async (payload) => {
-      const workspace =
-        payload.workspace ?? configStore.getPublicConfig().workspace.lastOpened
-
-      if (!workspace) {
-        throw new IpcFault({
-          code: 'PRECONDITION_FAILED',
-          message: 'Choose a workspace before browsing files',
-        })
-      }
+      const workspace = await projectWorkspace(payload.projectId)
 
       try {
         const guard = await PathGuard.create(workspace)
@@ -362,15 +372,7 @@ export function createAppIpcHandlers(
       }
     },
     'workspace:read-file': async (payload) => {
-      const workspace =
-        payload.workspace ?? configStore.getPublicConfig().workspace.lastOpened
-
-      if (!workspace) {
-        throw new IpcFault({
-          code: 'PRECONDITION_FAILED',
-          message: 'Choose a workspace before opening files',
-        })
-      }
+      const workspace = await projectWorkspace(payload.projectId)
 
       try {
         const guard = await PathGuard.create(workspace)
@@ -397,8 +399,9 @@ export function createAppIpcHandlers(
       }
     },
     'workspace:choose-context': async (payload) => {
+      const workspace = await projectWorkspace(payload.projectId)
       const options: OpenDialogOptions = {
-        defaultPath: payload.workspace,
+        defaultPath: workspace,
         properties:
           payload.kind === 'directory'
             ? ['openDirectory', 'multiSelections']
@@ -414,7 +417,7 @@ export function createAppIpcHandlers(
       }
 
       try {
-        const guard = await PathGuard.create(payload.workspace)
+        const guard = await PathGuard.create(workspace)
         const attachments = await Promise.all(
           selected.filePaths.slice(0, 32).map(async (filePath) => {
             const guarded = await guard.resolveExisting(filePath)
@@ -459,7 +462,9 @@ export function createAppIpcHandlers(
     },
     'project:get': async (payload) => {
       try {
-        return await projectMetadata.get(payload.workspace)
+        return await projectMetadata.get(
+          await projectWorkspace(payload.projectId),
+        )
       } catch (error) {
         const fault = projectMetadataFault(error)
         if (fault) throw fault
@@ -468,7 +473,10 @@ export function createAppIpcHandlers(
     },
     'project:save': async (payload) => {
       try {
-        return await projectMetadata.save(payload.workspace, payload.project)
+        return await projectMetadata.save(
+          await projectWorkspace(payload.projectId),
+          payload.project,
+        )
       } catch (error) {
         const fault = projectMetadataFault(error)
         if (fault) throw fault
@@ -478,7 +486,9 @@ export function createAppIpcHandlers(
     'project:detect-modules': async (payload) => {
       try {
         return {
-          modules: await projectMetadata.detectModules(payload.workspace),
+          modules: await projectMetadata.detectModules(
+            await projectWorkspace(payload.projectId),
+          ),
         }
       } catch (error) {
         const fault = projectMetadataFault(error)
@@ -489,7 +499,9 @@ export function createAppIpcHandlers(
     'project:backend-status': async (payload) => {
       try {
         return {
-          statuses: await codeBackends.statuses(payload.workspace),
+          statuses: await codeBackends.statuses(
+            await projectWorkspace(payload.projectId),
+          ),
         }
       } catch (error) {
         const fault = projectMetadataFault(error)
@@ -499,72 +511,25 @@ export function createAppIpcHandlers(
     },
     'project:restart-backend': async (payload) => {
       try {
-        return await codeBackends.restart(payload.workspace, payload.backendId)
+        return await codeBackends.restart(
+          await projectWorkspace(payload.projectId),
+          payload.backendId,
+        )
       } catch (error) {
         const fault = projectMetadataFault(error)
         if (fault) throw fault
         throw error
       }
     },
-    'session:create': async (payload) => ({
-      sessionId: await sessionManager.createSession({
-        conversationId: payload.conversationId,
-        workspace: payload.workspace,
-        mode: payload.mode,
-        provider: payload.provider,
-      }),
-    }),
-    'changes:list': (payload) => ({
-      changes: changeHistory.list(payload.conversationId, payload.workspace),
-    }),
-    'changes:revert': async (payload) => {
-      try {
-        return {
-          change: await changeHistory.revert({
-            id: payload.id,
-            conversationId: payload.conversationId,
-            workspace: payload.workspace,
-          }),
-        }
-      } catch (error) {
-        if (error instanceof ChangeHistoryError) {
-          throw new IpcFault({
-            code:
-              error.code === 'NOT_FOUND'
-                ? 'NOT_FOUND'
-                : error.code === 'RESOURCE_CHANGED'
-                  ? 'CONFLICT'
-                  : 'PRECONDITION_FAILED',
-            message: error.message,
-          })
-        }
-        if (error instanceof PathGuardError) {
-          throw new IpcFault({
-            code: 'PRECONDITION_FAILED',
-            message: error.message,
-          })
-        }
-        throw error
-      }
-    },
-    'session:close': async (payload) => ({
-      accepted: await sessionManager.closeSession(payload.sessionId),
-    }),
-    'session:update-mode': async (payload) =>
-      sessionManager.updateSessionMode(payload.sessionId, payload.mode),
-    'plan:update-status': (payload) =>
-      sessionManager.updatePlanStatus({
+    'plan:update-status': async (payload) => {
+      await backend.liveSessions.ensureLoaded(payload.sessionId)
+      return sessionManager.updatePlanStatus({
         sessionId: payload.sessionId,
         status: payload.status,
-      }),
-    'run:start': (payload) => ({
-      runId: sessionManager.startRun({
-        sessionId: payload.sessionId,
-        message: payload.message,
-        clientRequestId: payload.clientRequestId,
-        context: payload.context,
-      }),
-    }),
+      })
+    },
+    'run:start': (payload) => backend.runs.start(payload),
+    'run:retry': (payload) => backend.runs.retry(payload),
     'run:interrupt': (payload) => ({
       accepted: sessionManager.interruptRun(payload.sessionId, payload.runId),
     }),
@@ -585,40 +550,60 @@ export function createAppIpcHandlers(
         remember: payload.remember,
       }),
     }),
-    'terminal:open': async (payload) => ({
-      terminal: await sessionManager.openTerminal({
-        sessionId: payload.sessionId,
-        cwd: payload.cwd,
-        cols: payload.cols,
-        rows: payload.rows,
-      }),
-    }),
-    'terminal:list': (payload) => ({
-      terminals: sessionManager.listTerminals(payload.sessionId),
-    }),
-    'terminal:input': (payload) => ({
-      accepted: sessionManager.sendTerminalInput(
+    'terminal:open': async (payload) => {
+      await backend.liveSessions.ensureLoaded(payload.sessionId)
+      return {
+        terminal: await sessionManager.openTerminal({
+          sessionId: payload.sessionId,
+          cwd: payload.cwd,
+          cols: payload.cols,
+          rows: payload.rows,
+        }),
+      }
+    },
+    'terminal:list': async (payload) => {
+      await backend.liveSessions.ensureLoaded(payload.sessionId)
+      return {
+        terminals: sessionManager.listTerminals(payload.sessionId),
+      }
+    },
+    'terminal:input': async (payload) => {
+      await backend.liveSessions.ensureLoaded(payload.sessionId)
+      return {
+        accepted: sessionManager.sendTerminalInput(
+          payload.sessionId,
+          payload.terminalId,
+          payload.data,
+        ),
+      }
+    },
+    'terminal:resize': async (payload) => {
+      await backend.liveSessions.ensureLoaded(payload.sessionId)
+      return {
+        accepted: sessionManager.resizeTerminal(
+          payload.sessionId,
+          payload.terminalId,
+          payload.cols,
+          payload.rows,
+        ),
+      }
+    },
+    'terminal:close': async (payload) => {
+      await backend.liveSessions.ensureLoaded(payload.sessionId)
+      return {
+        accepted: sessionManager.closeTerminal(
+          payload.sessionId,
+          payload.terminalId,
+        ),
+      }
+    },
+    'terminal:snapshot': async (payload) => {
+      await backend.liveSessions.ensureLoaded(payload.sessionId)
+      return sessionManager.terminalSnapshot(
         payload.sessionId,
         payload.terminalId,
-        payload.data,
-      ),
-    }),
-    'terminal:resize': (payload) => ({
-      accepted: sessionManager.resizeTerminal(
-        payload.sessionId,
-        payload.terminalId,
-        payload.cols,
-        payload.rows,
-      ),
-    }),
-    'terminal:close': (payload) => ({
-      accepted: sessionManager.closeTerminal(
-        payload.sessionId,
-        payload.terminalId,
-      ),
-    }),
-    'terminal:snapshot': (payload) =>
-      sessionManager.terminalSnapshot(payload.sessionId, payload.terminalId),
+      )
+    },
     'window:minimize': (_payload, event) => {
       BrowserWindow.fromWebContents(event.sender)?.minimize()
       return { accepted: true }
@@ -747,7 +732,7 @@ export function createAppIpcHandlers(
       try {
         const document = await traceService.transcriptDocument(payload.traceId)
         const suggested = `${
-          document.metadata.conversationId ?? payload.traceId
+          document.metadata.sessionId ?? payload.traceId
         }-session-transcript.md`.replace(/[\\/:*?"<>|]/gu, '_')
         const options: SaveDialogOptions = {
           defaultPath: suggested,

@@ -41,7 +41,6 @@ describe('session transcript', () => {
       {
         type: 'session.start',
         sessionId,
-        conversationId: 'conversation-1',
         workspace: 'F:/workspace',
         model: 'fixture',
         mode: 'yolo',
@@ -151,7 +150,6 @@ describe('session transcript', () => {
       generatedAt: '2026-07-12T00:01:00.000Z',
     })
     expect(document.metadata).toMatchObject({
-      conversationId: 'conversation-1',
       active: false,
     })
     expect(document.entries.map((entry) => entry.kind)).toEqual(

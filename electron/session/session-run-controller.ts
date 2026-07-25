@@ -1,7 +1,7 @@
 import { getProviderConfig, type PublicConfig } from '../../shared/config'
 import type { RunContext } from '../../shared/context'
 import type { RunStatus } from '../../shared/agent-events'
-import type { RunId } from '../../shared/ids'
+import type { MessageId, RunId } from '../../shared/ids'
 import { PROVIDER_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
 import { resolveRunRoutes } from '../providers/model-route-resolver'
@@ -96,6 +96,7 @@ export class SessionRunController {
     context?: RunContext,
     harnessMessage?: HarnessRunMessage,
     harnessContexts?: RunHarnessContext[],
+    retryUserMessageId?: MessageId,
   ): RunId {
     const existing = session.clientRequests.get(clientRequestId)
 
@@ -131,6 +132,7 @@ export class SessionRunController {
       writerReleasePending: false,
       pendingInterjections: [],
       processedInterjectionIds: new Set(),
+      ...(retryUserMessageId ? { rootUserMessageId: retryUserMessageId } : {}),
       harnessMessageIds: [],
       autoCompactEligible: false,
       requestCommitted: false,
@@ -154,6 +156,7 @@ export class SessionRunController {
       context,
       harnessMessage,
       harnessContexts,
+      retryUserMessageId,
     )
       .catch((error: unknown) =>
         this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error),
@@ -286,6 +289,7 @@ export class SessionRunController {
     context?: RunContext,
     harnessMessage?: HarnessRunMessage,
     harnessContexts?: RunHarnessContext[],
+    retryUserMessageId?: MessageId,
   ): Promise<void> {
     const signal = run.controller.signal
     const runInputCheckpoint = {
@@ -313,7 +317,7 @@ export class SessionRunController {
         session.modelSelection,
       )
       const maxStepsPerRun = runConfig.limits.maxStepsPerRun
-      let runInputCommitted = false
+      let runInputCommitted = retryUserMessageId !== undefined
       if (harnessMessage) {
         const content =
           harnessMessage.kind === 'benchmark_feedback'
@@ -362,6 +366,7 @@ export class SessionRunController {
           }
           runInputCommitted = true
         } else {
+          const turnStartSeq = session.nextMessageSeq
           const previousHistory = structuredClone(session.history)
           const previousNextSeq = session.nextMessageSeq
           const previousGoal = session.goal
@@ -425,8 +430,14 @@ export class SessionRunController {
             content: prepared.providerMessage,
             clientRequestId: run.clientRequestId,
             requestHash: canonicalHash(userMessage),
+            attachments: prepared.attachments,
           })
           run.rootUserMessageId = userRecord.id
+          for (const record of session.history) {
+            if (record.seq >= turnStartSeq) {
+              record.turnId = userRecord.id
+            }
+          }
           await session.logger.write({
             type: 'user.message',
             sessionId: session.sessionId,
@@ -513,6 +524,7 @@ export class SessionRunController {
           finishReason: completed.finishReason,
           route: run.routes.main.snapshot,
           continuation: completed.continuation,
+          turnId: run.rootUserMessageId,
         })
 
         if (completed.toolCalls.length === 0) {

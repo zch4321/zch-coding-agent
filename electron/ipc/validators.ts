@@ -1,5 +1,6 @@
-import { CONVERSATION_MARKDOWN_MAX_BYTES } from '../../shared/ipc-contract'
 import type { JsonValue } from '../../shared/json'
+
+const MAX_IPC_STRING_BYTES = 5_000_000
 
 export interface PayloadLimits {
   maxDepth: number
@@ -13,8 +14,8 @@ export const DEFAULT_PAYLOAD_LIMITS: PayloadLimits = {
   maxDepth: 24,
   // Markdown export is sent through IPC as JSON; serialized strings can be
   // larger than their UTF-8 document bytes because of escaping.
-  maxSerializedBytes: CONVERSATION_MARKDOWN_MAX_BYTES * 2,
-  maxStringLength: CONVERSATION_MARKDOWN_MAX_BYTES,
+  maxSerializedBytes: MAX_IPC_STRING_BYTES * 2,
+  maxStringLength: MAX_IPC_STRING_BYTES,
   maxArrayLength: 10_000,
   maxObjectKeys: 10_000,
 }

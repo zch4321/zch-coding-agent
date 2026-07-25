@@ -5,7 +5,15 @@ import {
   type IpcChannel,
   type IpcPayload,
 } from '../../shared/ipc-contract'
-import type { CallId, RunId, SessionId, TerminalId } from '../../shared/ids'
+import type {
+  CallId,
+  FileChangeId,
+  MessageId,
+  ProjectId,
+  RunId,
+  SessionId,
+  TerminalId,
+} from '../../shared/ids'
 import type { ProjectModel } from '../../shared/project-model'
 import { handleIpcInvocation, registerIpcHandlers } from './index'
 
@@ -13,6 +21,9 @@ const sessionId = 'session-1' as SessionId
 const runId = 'run-1' as RunId
 const callId = 'call-1' as CallId
 const terminalId = 'terminal-1' as TerminalId
+const projectId = 'project-1' as ProjectId
+const messageId = 'message-1' as MessageId
+const fileChangeId = 'change-1' as FileChangeId
 const projectModel = {
   schemaVersion: 1,
   workspaceRoot: 'F:/workspace',
@@ -74,70 +85,77 @@ const validPayloads: {
   'mcp:disable': { version: 1, serverId: 'github' },
   'mcp:restart': { version: 1, serverId: 'github' },
   'provider:list-models': { version: 1, refresh: false },
-  'workbench:get': { version: 1 },
-  'workbench:save': {
+  'app:get-bootstrap': { version: 1 },
+  'project:list': { version: 1 },
+  'project:add': { version: 1, path: 'F:/workspace' },
+  'project:update': {
     version: 1,
-    workbench: { projects: [], conversations: [] },
+    projectId,
+    expectedRevision: 1,
+    patch: { name: 'Workspace' },
   },
-  'workbench:migrate-v1': {
+  'project:remove': { version: 1, projectId, expectedRevision: 1 },
+  'session:list': { version: 1, projectId },
+  'session:get': { version: 1, sessionId },
+  'session:update': {
     version: 1,
-    workbench: { projects: [], conversations: [] },
+    sessionId,
+    expectedRevision: 1,
+    patch: { title: 'Updated session' },
   },
-  'workbench:export-conversation': {
+  'session:archive': { version: 1, sessionId, expectedRevision: 1 },
+  'session:fork': {
     version: 1,
-    markdown: '# Exported conversation',
-    suggestedName: 'conversation.md',
+    sourceSessionId: sessionId,
+    expectedRevision: 1,
+    sessionId: 'session-fork' as SessionId,
   },
-  'workbench:import-conversation': { version: 1 },
+  'session:rewind': {
+    version: 1,
+    sessionId,
+    expectedRevision: 1,
+    messageId,
+    boundary: 'before_message',
+  },
+  'session:search': { version: 1, text: 'query' },
+  'message:list': { version: 1, sessionId },
+  'message:search': { version: 1, sessionId, text: 'query' },
+  'file-change:list': { version: 1, sessionId },
+  'file-change:revert': {
+    version: 1,
+    sessionId,
+    fileChangeId,
+    expectedRevision: 1,
+  },
   'workspace:choose': { version: 1 },
   'workspace:list-directory': {
     version: 1,
-    workspace: 'F:/workspace',
+    projectId,
     path: '.',
   },
   'workspace:read-file': {
     version: 1,
-    workspace: 'F:/workspace',
+    projectId,
     path: 'README.md',
   },
   'workspace:choose-context': {
     version: 1,
-    workspace: 'F:/workspace',
+    projectId,
     kind: 'file',
   },
-  'project:get': { version: 1, workspace: 'F:/workspace' },
+  'project:get': { version: 1, projectId },
   'project:save': {
     version: 1,
-    workspace: 'F:/workspace',
+    projectId,
     project: projectModel,
   },
-  'project:detect-modules': { version: 1, workspace: 'F:/workspace' },
-  'project:backend-status': { version: 1, workspace: 'F:/workspace' },
+  'project:detect-modules': { version: 1, projectId },
+  'project:backend-status': { version: 1, projectId },
   'project:restart-backend': {
     version: 1,
-    workspace: 'F:/workspace',
+    projectId,
     backendId: 'serena',
   },
-  'session:create': {
-    version: 1,
-    conversationId: 'conversation-1',
-    workspace: 'F:/workspace',
-    mode: 'readonly',
-    provider: 'deepseek',
-  },
-  'session:close': { version: 1, sessionId },
-  'changes:list': {
-    version: 1,
-    conversationId: 'conversation-1',
-    workspace: 'F:/workspace',
-  },
-  'changes:revert': {
-    version: 1,
-    id: 'change-1',
-    conversationId: 'conversation-1',
-    workspace: 'F:/workspace',
-  },
-  'session:update-mode': { version: 1, sessionId, mode: 'auto' },
   'plan:update-status': {
     version: 1,
     sessionId,
@@ -145,9 +163,17 @@ const validPayloads: {
   },
   'run:start': {
     version: 1,
+    kind: 'existing_session',
     sessionId,
     message: 'hello',
     clientRequestId: 'request-1',
+  },
+  'run:retry': {
+    version: 1,
+    sessionId,
+    expectedRevision: 1,
+    userMessageId: messageId,
+    clientRequestId: 'request-retry',
   },
   'run:interrupt': {
     version: 1,

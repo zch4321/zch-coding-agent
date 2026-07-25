@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { NTooltip } from 'naive-ui'
 import { useAgentStore } from '../../stores/agent'
 import { useI18n } from 'vue-i18n'
@@ -8,12 +8,10 @@ import UiIcon from '../UiIcon.vue'
 const emit = defineEmits<{
   add: []
   create: [workspacePath?: string]
-  open: [conversationId: string]
-  rename: [conversationId: string]
-  delete: [conversationId: string]
-  export: [conversationId: string]
-  inspect: [conversationId: string]
-  import: []
+  open: [sessionId: string]
+  rename: [sessionId: string]
+  delete: [sessionId: string]
+  inspect: [sessionId: string]
   settings: []
 }>()
 
@@ -21,6 +19,7 @@ const agent = useAgentStore()
 const { t } = useI18n()
 const searchQuery = ref('')
 const collapsedProjects = reactive(new Set<string>())
+let searchGeneration = 0
 
 function toggleProject(path: string) {
   if (collapsedProjects.has(path)) collapsedProjects.delete(path)
@@ -65,33 +64,29 @@ const sortedProjects = computed(() =>
   })),
 )
 const searchGroups = computed(() => {
-  const query = searchQuery.value.trim().toLocaleLowerCase()
-  if (!query) return []
-
-  return sortedProjects.value
+  if (!searchQuery.value.trim()) return []
+  return agent.projects
     .map((project) => ({
       ...project,
-      conversations: project.conversations
-        .filter(
-          (conversation) =>
-            conversation.title.toLocaleLowerCase().includes(query) ||
-            conversation.messages.some((message) =>
-              message.text.toLocaleLowerCase().includes(query),
-            ),
-        )
-        .map((conversation) => {
-          const matchingMessage = conversation.messages.find((message) =>
-            message.text.toLocaleLowerCase().includes(query),
-          )
-          return {
-            ...conversation,
-            match:
-              matchingMessage?.text.replace(/\s+/g, ' ').slice(0, 90) ??
-              conversation.title,
-          }
-        }),
+      conversations: agent.searchHits
+        .filter((hit) => hit.session.projectId === project.id)
+        .map((hit) => ({
+          ...agent.conversations.find(
+            (conversation) => conversation.id === hit.session.id,
+          )!,
+          match: hit.match.snippet,
+        }))
+        .filter((conversation) => Boolean(conversation.id)),
     }))
     .filter((project) => project.conversations.length > 0)
+})
+
+watch(searchQuery, (value) => {
+  const generation = ++searchGeneration
+  window.setTimeout(() => {
+    if (generation !== searchGeneration) return
+    void agent.searchSessions(value)
+  }, 180)
 })
 </script>
 
@@ -112,19 +107,12 @@ const searchGroups = computed(() => {
             type="button"
             class="import-conversation-button"
             :aria-label="t('sidebar.import')"
-            :disabled="
-              Boolean(
-                agent.startPending ||
-                agent.activeRunId ||
-                agent.pendingApproval,
-              )
-            "
-            @click="emit('import')"
+            disabled
           >
             <UiIcon name="upload" />
           </button>
         </template>
-        {{ t('sidebar.import') }}
+        {{ t('sidebar.durableImportExportPending') }}
       </NTooltip>
     </div>
 
@@ -289,12 +277,12 @@ const searchGroups = computed(() => {
                     <button
                       type="button"
                       :aria-label="t('sidebar.export')"
-                      @click="emit('export', conversation.id)"
+                      disabled
                     >
                       <UiIcon name="download" />
                     </button>
                   </template>
-                  {{ t('sidebar.exportTitle') }}
+                  {{ t('sidebar.durableImportExportPending') }}
                 </NTooltip>
                 <NTooltip>
                   <template #trigger>

@@ -1,4 +1,5 @@
 import type { RunContext } from '../../shared/context'
+import type { ContextAttachmentChip } from '../../shared/context'
 import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
@@ -18,6 +19,7 @@ import type { ActiveRun, AgentEventDraft, SessionState } from './session-types'
 export interface PreparedUserTurn {
   visibleMessage: string
   providerMessage: string
+  attachments: ContextAttachmentChip[]
   appMessages: Array<{
     kind: 'selected_context' | 'orchestrator' | 'interjection'
     content: string
@@ -141,6 +143,7 @@ export class SessionUserTurnPreparer {
     return {
       visibleMessage: command.visibleMessage,
       providerMessage: command.providerMessage,
+      attachments: preparedContext.chips,
       appMessages,
     }
   }

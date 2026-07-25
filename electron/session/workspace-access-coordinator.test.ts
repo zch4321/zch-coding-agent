@@ -7,7 +7,6 @@ function owner(index: number, workspace = '/workspace') {
     limit: 4,
     workspace,
     mode: 'auto' as const,
-    conversationId: `conversation:${index}`,
     sessionId: `session:${index}` as SessionId,
     runId: `run:${index}` as RunId,
   }
@@ -32,7 +31,7 @@ describe('WorkspaceAccessCoordinator', () => {
       acquired: false,
       rejection: {
         reason: 'workspace_writer_active',
-        writer: { conversationId: 'conversation:1', runId: 'run:1' },
+        writer: { sessionId: 'session:1', runId: 'run:1' },
       },
     })
     expect(coordinator.activeRunCount()).toBe(2)

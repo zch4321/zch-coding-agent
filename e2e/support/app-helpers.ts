@@ -59,12 +59,17 @@ export async function configureApp(input: {
       type ConfigValue = {
         config: {
           assistant: { language: string }
+          logging: { enabled: boolean }
           limits: Record<string, unknown>
         }
       }
       type AgentApiForSetup = {
         getConfig(payload: unknown): Promise<IpcResult<ConfigValue>>
         setConfig(payload: unknown): Promise<IpcResult<ConfigValue>>
+        getBootstrap(
+          payload: unknown,
+        ): Promise<IpcResult<{ projects: Array<{ id: string; path: string }> }>>
+        addProject(payload: unknown): Promise<IpcResult<unknown>>
       }
 
       const api = Reflect.get(window, 'agentApi') as AgentApiForSetup
@@ -187,6 +192,30 @@ export async function configureApp(input: {
         }
       }
 
+      const bootstrap = await api.getBootstrap({ version: 1 })
+      if (!bootstrap.ok) {
+        return {
+          ok: false,
+          step: 'app:get-bootstrap',
+          message: bootstrap.error.message,
+        }
+      }
+      if (
+        !bootstrap.value.projects.some((project) => project.path === workspace)
+      ) {
+        const added = await api.addProject({
+          version: 1,
+          path: workspace,
+        })
+        if (!added.ok) {
+          return {
+            ok: false,
+            step: 'project:add',
+            message: added.error.message,
+          }
+        }
+      }
+
       const finalConfig = await api.getConfig({ version: 1, section: 'all' })
       if (!finalConfig.ok) {
         return {
@@ -203,6 +232,13 @@ export async function configureApp(input: {
           ok: false,
           step: 'assistant-final',
           message: `Expected assistant language ${assistantLanguage}, got ${finalConfig.value.config.assistant.language}`,
+        }
+      }
+      if (traceLogging && finalConfig.value.config.logging.enabled !== true) {
+        return {
+          ok: false,
+          step: 'logging-final',
+          message: 'Trace logging was not enabled',
         }
       }
 
@@ -257,4 +293,122 @@ export async function setAssistantLanguage(
   }, language)
 
   expect(result).toEqual({ ok: true, language })
+}
+
+export async function findDurableMessageText(
+  page: Page,
+  query: string,
+  kind: 'user_input' | 'assistant_turn' | 'interjection',
+): Promise<string> {
+  return page.evaluate(
+    async ({ searchText, messageKind }) => {
+      type IpcResult<Value> =
+        | { ok: true; value: Value }
+        | { ok: false; error: { message: string } }
+      type SearchHit = { session: { id: string } }
+      type Message = {
+        kind: string
+        parts: Array<{ type: string; text?: string }>
+      }
+      const api = Reflect.get(window, 'agentApi') as {
+        searchSessions(
+          payload: unknown,
+        ): Promise<IpcResult<{ hits: SearchHit[] }>>
+        listMessages(
+          payload: unknown,
+        ): Promise<IpcResult<{ page: { records: Message[] } }>>
+      }
+      const search = await api.searchSessions({
+        version: 1,
+        text: searchText,
+        limit: 10,
+      })
+      if (!search.ok) return ''
+      for (const hit of search.value.hits) {
+        const listed = await api.listMessages({
+          version: 1,
+          sessionId: hit.session.id,
+          limit: 200,
+        })
+        if (!listed.ok) continue
+        const message = listed.value.page.records.find(
+          (candidate) => candidate.kind === messageKind,
+        )
+        const text = message?.parts
+          .filter((part) => part.type === 'text')
+          .map((part) => part.text ?? '')
+          .join('\n')
+        if (text) return text
+      }
+      return ''
+    },
+    { searchText: query, messageKind: kind },
+  )
+}
+
+export async function startDurableSession(input: {
+  page: Page
+  workspace: string
+  title: string
+  message: string
+}): Promise<string> {
+  const result = await input.page.evaluate(
+    async ({ workspace, title, message }) => {
+      type IpcResult<Value> =
+        | { ok: true; value: Value }
+        | { ok: false; error: { message: string } }
+      type Project = { id: string; path: string }
+      const api = Reflect.get(window, 'agentApi') as {
+        getBootstrap(
+          payload: unknown,
+        ): Promise<IpcResult<{ projects: Project[] }>>
+        addProject(
+          payload: unknown,
+        ): Promise<IpcResult<{ commit: { change: { projects: Project[] } } }>>
+        startRun(
+          payload: unknown,
+        ): Promise<IpcResult<{ outcome: string; runId?: string }>>
+      }
+      const bootstrap = await api.getBootstrap({ version: 1 })
+      if (!bootstrap.ok) throw new Error(bootstrap.error.message)
+      let project = bootstrap.value.projects.find(
+        (candidate) => candidate.path === workspace,
+      )
+      if (!project) {
+        const added = await api.addProject({
+          version: 1,
+          path: workspace,
+        })
+        if (!added.ok) throw new Error(added.error.message)
+        project = added.value.commit.change.projects.find(
+          (candidate) => candidate.path === workspace,
+        )
+      }
+      if (!project) throw new Error('Durable project was not created')
+      const sessionId = `session:e2e:${crypto.randomUUID()}`
+      const started = await api.startRun({
+        version: 1,
+        kind: 'new_session',
+        sessionId,
+        projectId: project.id,
+        title,
+        modelSelection: {
+          providerId: 'deepseek',
+          model: 'e2e-functional-model',
+          reasoning: 'off',
+        },
+        permissionMode: 'readonly',
+        message,
+        clientRequestId: `request:e2e:${crypto.randomUUID()}`,
+      })
+      if (!started.ok) throw new Error(started.error.message)
+      return sessionId
+    },
+    {
+      workspace: input.workspace,
+      title: input.title,
+      message: input.message,
+    },
+  )
+  return result
 }

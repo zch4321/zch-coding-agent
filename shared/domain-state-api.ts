@@ -85,6 +85,10 @@ export const SessionMessageChangeSchema = Type.Union([
     },
     { additionalProperties: false },
   ),
+  Type.Object(
+    { mode: Type.Literal('invalidate_all') },
+    { additionalProperties: false },
+  ),
 ])
 export type SessionMessageChange = Static<typeof SessionMessageChangeSchema>
 
@@ -395,6 +399,65 @@ export const SessionForkPayloadSchema = Type.Object(
   { additionalProperties: false },
 )
 
+export const SessionRewindPayloadSchema = Type.Object(
+  {
+    ...versionProperty,
+    sessionId: SessionIdSchema,
+    expectedRevision: RevisionSchema,
+    messageId: MessageIdSchema,
+    boundary: Type.Union([
+      Type.Literal('after_message'),
+      Type.Literal('before_message'),
+      Type.Literal('before_turn'),
+    ]),
+  },
+  { additionalProperties: false },
+)
+
+export const SessionSearchPayloadSchema = Type.Object(
+  {
+    ...versionProperty,
+    text: Type.String({ minLength: 1, maxLength: 256 }),
+    projectId: Type.Optional(ProjectIdSchema),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+  },
+  { additionalProperties: false },
+)
+
+export const SessionSearchHitSchema = Type.Object(
+  {
+    session: SessionRecordSchema,
+    match: Type.Union([
+      Type.Object(
+        {
+          kind: Type.Literal('title'),
+          snippet: Type.String({ minLength: 1, maxLength: 512 }),
+        },
+        { additionalProperties: false },
+      ),
+      Type.Object(
+        {
+          kind: Type.Literal('message'),
+          messageId: MessageIdSchema,
+          seq: MessageSeqSchema,
+          snippet: Type.String({ minLength: 1, maxLength: 512 }),
+        },
+        { additionalProperties: false },
+      ),
+    ]),
+  },
+  { additionalProperties: false },
+)
+
+export const SessionSearchResultSchema = Type.Object(
+  {
+    ...versionProperty,
+    hits: Type.Array(SessionSearchHitSchema, { maxItems: 100 }),
+  },
+  { additionalProperties: false },
+)
+export type SessionSearchHit = Static<typeof SessionSearchHitSchema>
+
 const RunStartBaseProperties = {
   message: Type.String({ minLength: 1, maxLength: 1_000_000 }),
   context: Type.Optional(RunContextSchema),
@@ -456,6 +519,29 @@ export const DurableRunStartResultSchema = Type.Union([
   DurableRunDeduplicatedResultSchema,
 ])
 export type DurableRunStartResult = Static<typeof DurableRunStartResultSchema>
+
+export const DurableRunRetryPayloadSchema = Type.Object(
+  {
+    ...versionProperty,
+    sessionId: SessionIdSchema,
+    expectedRevision: RevisionSchema,
+    userMessageId: MessageIdSchema,
+    clientRequestId: ClientRequestIdSchema,
+  },
+  { additionalProperties: false },
+)
+
+export const DurableRunRetryResultSchema = Type.Object(
+  {
+    ...versionProperty,
+    commit: SessionCommitEnvelopeSchema,
+    runId: RunIdSchema,
+    runtime: ActiveRunPublicSnapshotSchema,
+  },
+  { additionalProperties: false },
+)
+export type DurableRunRetryPayload = Static<typeof DurableRunRetryPayloadSchema>
+export type DurableRunRetryResult = Static<typeof DurableRunRetryResultSchema>
 
 export const FileChangeListPayloadSchema = Type.Object(
   {
@@ -536,9 +622,21 @@ export const DOMAIN_STATE_API_CONTRACTS = {
     payload: SessionForkPayloadSchema,
     result: SessionCommandResultSchema,
   },
+  'session:rewind': {
+    payload: SessionRewindPayloadSchema,
+    result: SessionCommandResultSchema,
+  },
+  'session:search': {
+    payload: SessionSearchPayloadSchema,
+    result: SessionSearchResultSchema,
+  },
   'run:start': {
     payload: DurableRunStartPayloadSchema,
     result: DurableRunStartResultSchema,
+  },
+  'run:retry': {
+    payload: DurableRunRetryPayloadSchema,
+    result: DurableRunRetryResultSchema,
   },
   'file-change:list': {
     payload: FileChangeListPayloadSchema,

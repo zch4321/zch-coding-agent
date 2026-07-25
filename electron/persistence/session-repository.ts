@@ -30,6 +30,7 @@ export interface SessionListQuery {
 }
 
 export const MAX_SESSION_SEARCH_LENGTH = 256
+export const MAX_CROSS_SESSION_SEARCH_RESULTS = 100
 
 export class SessionRepository {
   insert(transaction: PersistenceTransaction, record: SessionRecord): void {
@@ -188,6 +189,56 @@ export class SessionRepository {
       : { schemaVersion: 1, records, hasMore: false }
     assertSessionPageSemantics(page)
     return page
+  }
+
+  searchCandidateIds(
+    reader: PersistenceReader,
+    input: { text: string; projectId?: ProjectId; limit?: number },
+  ): SessionId[] {
+    const text = input.text.trim()
+    if (text.length < 1 || text.length > MAX_SESSION_SEARCH_LENGTH) {
+      throw new PersistenceError(
+        'CODEC_INVALID',
+        `Session search text must contain between 1 and ${MAX_SESSION_SEARCH_LENGTH} characters`,
+      )
+    }
+    const limit = boundedLimit(
+      input.limit ?? MAX_CROSS_SESSION_SEARCH_RESULTS,
+      MAX_CROSS_SESSION_SEARCH_RESULTS,
+      'Cross-Session search result limit',
+    )
+    const projectClause = input.projectId ? 'AND s.project_id = ?' : ''
+    const parameters: Array<string | number> = [text, text]
+    if (input.projectId) parameters.push(input.projectId)
+    parameters.push(limit)
+    const rows = reader
+      .prepare(
+        `SELECT s.id
+         FROM sessions s
+         WHERE s.lifecycle = 'active'
+           AND (
+             instr(lower(s.title), lower(?)) > 0
+             OR EXISTS (
+               SELECT 1
+               FROM messages m
+               WHERE m.session_id = s.id
+                 AND m.visibility = 'visible'
+                 AND m.kind IN ('user_input', 'assistant_turn')
+                 AND (
+                   m.kind <> 'user_input'
+                   OR m.replayed_from_message_id IS NULL
+                 )
+                 AND instr(lower(m.parts_json), lower(?)) > 0
+             )
+           )
+           ${projectClause}
+         ORDER BY s.updated_at DESC, s.id DESC
+         LIMIT ?`,
+      )
+      .all(...parameters)
+    return rows.map(
+      (row) => String((row as Record<string, unknown>).id) as SessionId,
+    )
   }
 }
 

@@ -1,24 +1,24 @@
 import type { Pinia } from 'pinia'
+import type { ProjectId } from '../../shared/ids'
 import { useAgentChangesStore } from './agent-changes'
+import { useAgentReplicaStore } from './agent-replica'
 import { useAgentRuntimeStore } from './agent-runtime'
 import { useAgentSettingsStore } from './agent-settings'
 import { useAgentShellStore } from './agent-shell'
-import { useAgentTimelineStore } from './agent-timeline'
-import { useAgentWorkbenchStore } from './agent-workbench'
+import type { ProjectView, SessionView } from './agent-types'
 
 export type {
   ChatMessage,
-  ConversationRecord,
   PendingApproval,
-  ProjectRecord,
+  ProjectView,
   ReviewedApproval,
+  SessionView,
   ToolActivity,
 } from './agent-types'
 
 type ShellStore = ReturnType<typeof useAgentShellStore>
 type SettingsStore = ReturnType<typeof useAgentSettingsStore>
-type WorkbenchStore = ReturnType<typeof useAgentWorkbenchStore>
-type TimelineStore = ReturnType<typeof useAgentTimelineStore>
+type ReplicaStore = ReturnType<typeof useAgentReplicaStore>
 type RuntimeStore = ReturnType<typeof useAgentRuntimeStore>
 type ChangesStore = ReturnType<typeof useAgentChangesStore>
 
@@ -27,14 +27,21 @@ export type AgentFacade = Omit<ShellStore, 'error' | '$id'> &
     SettingsStore,
     'error' | '$id' | 'savePermissions' | 'removeRememberedRule'
   > &
-  Omit<WorkbenchStore, 'error' | '$id'> &
-  Omit<TimelineStore, '$id'> &
-  Omit<RuntimeStore, 'error' | '$id'> &
+  Omit<ReplicaStore, 'error' | '$id' | 'projects'> &
+  Omit<RuntimeStore, 'globalError' | '$id'> &
   Omit<ChangesStore, 'error' | '$id' | 'revertChange'> & {
     error: string
+    workspacePath: string
+    projects: ProjectView[]
+    conversations: SessionView[]
+    activeConversationId?: string
+    activeConversation?: SessionView
+    goal: SessionView['goal']
+    plan: SessionView['plan']
     savePermissions(): Promise<void>
     removeRememberedRule(ruleId: string): Promise<void>
     revertChange(changeId: string): Promise<boolean>
+    searchSessions(text: string, projectId?: ProjectId): Promise<void>
   }
 
 const shellProperties = new Set<PropertyKey>([
@@ -85,62 +92,84 @@ const settingsProperties = new Set<PropertyKey>([
   'activeModelProfile',
   'providerDirty',
 ])
-const workbenchProperties = new Set<PropertyKey>([
-  'workspacePath',
-  'projects',
-  'conversations',
-  'activeConversationId',
-  'activeConversation',
-])
-const timelineProperties = new Set<PropertyKey>([
-  'input',
-  'messages',
-  'tools',
-  'usage',
-  'contextAttachments',
-  'goal',
-  'plan',
-  'timelineCounter',
-  'latestReviewedApproval',
-  'latestUsage',
-  'conversationTotalTokens',
+const replicaProperties = new Set<PropertyKey>([
+  'selectedProjectId',
+  'selectedSessionId',
+  'messagesBySessionId',
+  'fileChangesBySessionId',
+  'runtimeBySessionId',
+  'cursor',
+  'searchHits',
+  'loading',
 ])
 const runtimeProperties = new Set<PropertyKey>([
-  'conversationRuntimes',
-  'conversationIdBySessionId',
+  'input',
+  'contextAttachments',
+  'mode',
+  'overlays',
   'workspaceWriters',
+  'approvalSubmitting',
+  'workspaceFileRevision',
   'sessionId',
   'activeRunId',
   'startPending',
   'runStatus',
-  'mode',
   'pendingApproval',
-  'agentEventGap',
+  'messages',
+  'tools',
+  'usage',
+  'latestUsage',
+  'latestReviewedApproval',
   'modeLockedByWriter',
   'modeLockTooltip',
   'modeSyncError',
-  'approvalSubmitting',
   'canSend',
   'canInterject',
+  'agentEventGap',
 ])
 const changesProperties = new Set<PropertyKey>([
   'changes',
   'changesLoading',
   'revertingChangeId',
-  'workspaceFileRevision',
 ])
 
-/**
- * Compatibility facade for existing renderer components.
- *
- * State reads and writes are forwarded instead of copied, so Vue still tracks
- * the owning Pinia store. New code should import the focused domain store.
- */
+function projectViews(replica: ReplicaStore): ProjectView[] {
+  return replica.projects.map((project) => ({
+    id: project.id,
+    path: project.path,
+    name: project.name,
+    addedAt: project.createdAt,
+  }))
+}
+
+function sessionViews(replica: ReplicaStore): SessionView[] {
+  const projects = new Map(
+    replica.projects.map((project) => [project.id, project]),
+  )
+  return replica.sessions
+    .filter((session) => session.lifecycle === 'active')
+    .map((session) => ({
+      id: session.id,
+      projectId: session.projectId,
+      projectPath: projects.get(session.projectId)?.path ?? '',
+      title: session.title,
+      model: session.modelSelection.model,
+      mode: session.permissionMode,
+      goal: session.goal ?? undefined,
+      plan: session.plan ?? undefined,
+      parentId: session.parent?.sessionId,
+      forkedAt: session.parent ? session.createdAt : undefined,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      revision: session.revision,
+      archived: false,
+    }))
+}
+
 export function useAgentStore(pinia?: Pinia): AgentFacade {
   const shell = useAgentShellStore(pinia)
   const settings = useAgentSettingsStore(pinia)
-  const workbench = useAgentWorkbenchStore(pinia)
-  const timeline = useAgentTimelineStore(pinia)
+  const replica = useAgentReplicaStore(pinia)
   const runtime = useAgentRuntimeStore(pinia)
   const changes = useAgentChangesStore(pinia)
 
@@ -148,41 +177,29 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     initialize: runtime.initialize,
     dispose: runtime.dispose,
     applyConfig: runtime.applyConfig,
-    registerProject: workbench.registerProject,
-    createConversation: runtime.createConversation,
     newConversation: runtime.newConversation,
     selectConversation: runtime.selectConversation,
     renameConversation: runtime.renameConversation,
     deleteConversation: runtime.deleteConversation,
     forkConversation: runtime.forkConversation,
+    rewindMessage: runtime.rewindMessage,
     revertConversationAfterMessage: runtime.revertConversationAfterMessage,
-    exportConversationMarkdown: workbench.exportConversationMarkdown,
-    exportConversationViaDialog: workbench.exportConversationViaDialog,
-    importConversationViaDialog: workbench.importConversationViaDialog,
+    retryUserMessage: runtime.retryUserMessage,
+    editUserMessage: runtime.editUserMessage,
     removeCurrentProject: runtime.removeCurrentProject,
-    restoreActiveConversation: runtime.restoreActiveConversation,
-    saveActiveConversation: runtime.saveActiveConversation,
-    schedulePersist: runtime.schedulePersist,
-    persistWorkbench: runtime.persistWorkbench,
-    activateWorkspace: runtime.activateWorkspace,
-    saveAssistantSettings: runtime.saveAssistantSettings,
     chooseWorkspace: runtime.chooseWorkspace,
     setMode: runtime.setMode,
     hydrateSelectedProviderForm: settings.hydrateSelectedProviderForm,
     selectProviderForEditing: settings.selectProviderForEditing,
     resetSelectedProviderDraft: settings.resetSelectedProviderDraft,
     syncModelOverride: settings.syncModelOverride,
-    setProviderModel: settings.setProviderModel,
+    setProviderModel: runtime.setProviderModel,
     loadProviderModels: settings.loadProviderModels,
-    setActiveProvider: settings.setActiveProvider,
+    setActiveProvider: runtime.setActiveProvider,
     createProvider: settings.createProvider,
     copyProvider: settings.copyProvider,
     deleteProvider: settings.deleteProvider,
-    saveProvider: async () => {
-      const saved = await settings.saveProvider()
-      if (saved) runtime.schedulePersist(false)
-      return saved
-    },
+    saveProvider: settings.saveProvider,
     clearCredential: settings.clearCredential,
     saveLimits: settings.saveLimits,
     savePermissions: () => settings.savePermissions(runtime.mode),
@@ -191,7 +208,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     saveLogging: settings.saveLogging,
     acceptProviderNotice: settings.acceptProviderNotice,
     acceptYoloNotice: settings.acceptYoloNotice,
-    createSession: runtime.createSession,
+    saveAssistantSettings: runtime.saveAssistantSettings,
     updatePlanStatus: runtime.updatePlanStatus,
     approvePlan: runtime.approvePlan,
     rejectPlan: runtime.rejectPlan,
@@ -209,26 +226,22 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     sendMessage: runtime.sendMessage,
     sendInterjection: runtime.sendInterjection,
     chooseContextAttachment: runtime.chooseContextAttachment,
-    addContextAttachments: timeline.addContextAttachments,
-    removeContextAttachment: timeline.removeContextAttachment,
+    addContextAttachments: runtime.addContextAttachments,
+    removeContextAttachment: runtime.removeContextAttachment,
     interruptRun: runtime.interruptRun,
     decideApproval: runtime.decideApproval,
     handleAgentEvent: runtime.handleAgentEvent,
-    registerSession: runtime.registerSession,
-    registerRun: runtime.registerRun,
-    setStartPending: runtime.setStartPending,
     clearDiagnostics: runtime.clearDiagnostics,
     conversationIsBusy: runtime.conversationIsBusy,
     conversationStatus: runtime.conversationStatus,
-    assistantMessage: timeline.assistantMessage,
-    nextTimelineOrder: timeline.nextTimelineOrder,
+    searchSessions: replica.search,
+    loadOlderMessages: replica.loadOlderMessages,
   }
 
   const targetStore = (property: PropertyKey): object | undefined => {
     if (shellProperties.has(property)) return shell
     if (settingsProperties.has(property)) return settings
-    if (workbenchProperties.has(property)) return workbench
-    if (timelineProperties.has(property)) return timeline
+    if (replicaProperties.has(property)) return replica
     if (runtimeProperties.has(property)) return runtime
     if (changesProperties.has(property)) return changes
     return undefined
@@ -239,10 +252,37 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
       if (property === 'error') {
         return (
           shell.error ||
-          runtime.error ||
+          runtime.globalError ||
           settings.error ||
-          workbench.error ||
+          replica.error ||
           changes.error
+        )
+      }
+      if (property === 'workspacePath') {
+        return replica.selectedProject?.path ?? ''
+      }
+      if (property === 'projects') return projectViews(replica)
+      if (property === 'conversations') return sessionViews(replica)
+      if (property === 'activeConversationId') {
+        return replica.selectedSessionId
+      }
+      if (property === 'activeConversation') {
+        return sessionViews(replica).find(
+          (session) => session.id === replica.selectedSessionId,
+        )
+      }
+      if (property === 'goal') {
+        return (
+          runtime.activeOverlay?.goal ??
+          replica.selectedSession?.goal ??
+          undefined
+        )
+      }
+      if (property === 'plan') {
+        return (
+          runtime.activeOverlay?.plan ??
+          replica.selectedSession?.plan ??
+          undefined
         )
       }
       if (Object.hasOwn(actions, property)) return actions[property]
@@ -253,9 +293,8 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
         shell.error = String(value)
         if (!value) {
           runtime.globalError = ''
-          runtime.setConversationError(workbench.activeConversationId, '')
           settings.error = ''
-          workbench.error = ''
+          replica.error = ''
           changes.error = ''
         }
         return true

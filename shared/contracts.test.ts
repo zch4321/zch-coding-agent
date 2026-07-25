@@ -92,6 +92,7 @@ describe('shared runtime contracts', () => {
     const channel: IpcChannel = 'run:start'
     const payload: IpcPayload<typeof channel> = {
       version: 1,
+      kind: 'existing_session',
       sessionId,
       message: 'Summarize the repository',
       clientRequestId: 'request-1',

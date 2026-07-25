@@ -1,0 +1,224 @@
+import { expect, test, type Page } from '@playwright/test'
+import type { ChildProcess } from 'node:child_process'
+import type { ElectronApplication } from '@playwright/test'
+import { configureApp } from './support/app-helpers'
+import { textDelta, type FakeProvider } from './support/fake-provider'
+import {
+  disposeFeatureHarness,
+  launchFeatureHarness,
+  type FeatureHarness,
+} from './support/feature-harness'
+
+test.describe.serial('Durable Session and terminal workflows', () => {
+  let harness: FeatureHarness
+  let fakeProvider: FakeProvider
+  let electronApp: ElectronApplication
+  let electronProcess: ChildProcess
+  let page: Page
+  let workspace: string
+
+  test.beforeAll(async () => {
+    harness = await launchFeatureHarness()
+    ;({ fakeProvider, electronApp, electronProcess, page, workspace } = harness)
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await configureApp({
+      page,
+      providerBaseURL: fakeProvider.origin,
+      workspace,
+      defaultMode: 'readonly',
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+  })
+
+  test.afterAll(async () => disposeFeatureHarness(harness))
+
+  test('retries and edits only user messages without duplicating the user turn', async () => {
+    fakeProvider.queue([textDelta('First durable answer')])
+    const composer = page.locator('.message-input-area textarea')
+    await composer.fill('Original durable request')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect(page.locator('.chat-message.assistant')).toContainText(
+      'First durable answer',
+    )
+
+    const userMessage = page.locator('.chat-message.user').filter({
+      hasText: 'Original durable request',
+    })
+    const assistantMessage = page.locator('.chat-message.assistant').filter({
+      hasText: 'First durable answer',
+    })
+    await expect(
+      userMessage.getByRole('button', { name: '重试' }),
+    ).toBeVisible()
+    await expect(
+      userMessage.getByRole('button', { name: '编辑' }),
+    ).toBeVisible()
+    await expect(
+      assistantMessage.getByRole('button', { name: '重试' }),
+    ).toHaveCount(0)
+    await expect(
+      assistantMessage.getByRole('button', { name: '编辑' }),
+    ).toHaveCount(0)
+
+    fakeProvider.queue([textDelta('Retried durable answer')])
+    page.once('dialog', (dialog) => dialog.accept())
+    await userMessage.getByRole('button', { name: '重试' }).click()
+    await expect(page.locator('.chat-message.assistant')).toContainText(
+      'Retried durable answer',
+    )
+
+    const retryState = await page.evaluate(async () => {
+      type Message = { kind: string; visibility: string }
+      type IpcResult<Value> =
+        | { ok: true; value: Value }
+        | { ok: false; error: { message: string } }
+      const api = Reflect.get(window, 'agentApi') as {
+        searchSessions(
+          payload: unknown,
+        ): Promise<IpcResult<{ hits: Array<{ session: { id: string } }> }>>
+        listMessages(
+          payload: unknown,
+        ): Promise<IpcResult<{ page: { records: Message[] } }>>
+      }
+      const search = await api.searchSessions({
+        version: 1,
+        text: 'Original durable request',
+      })
+      if (!search.ok || !search.value.hits[0]) {
+        throw new Error('Durable Session not found')
+      }
+      const sessionId = search.value.hits[0].session.id
+      const listed = await api.listMessages({
+        version: 1,
+        sessionId,
+        limit: 200,
+      })
+      if (!listed.ok) throw new Error(listed.error.message)
+      return {
+        sessionId,
+        userCount: listed.value.page.records.filter(
+          (record) => record.kind === 'user_input',
+        ).length,
+        visibleUsers: listed.value.page.records.filter(
+          (record) =>
+            record.kind === 'user_input' && record.visibility === 'visible',
+        ).length,
+        visibleAssistants: listed.value.page.records.filter(
+          (record) =>
+            record.kind === 'assistant_turn' && record.visibility === 'visible',
+        ).length,
+      }
+    })
+    expect(retryState).toMatchObject({
+      userCount: 1,
+      visibleUsers: 1,
+      visibleAssistants: 1,
+    })
+
+    const requestsBeforeEdit = fakeProvider.requests.length
+    page.once('dialog', (dialog) => dialog.accept())
+    await userMessage.getByRole('button', { name: '编辑' }).click()
+    await expect(composer).toHaveValue('Original durable request')
+    expect(fakeProvider.requests).toHaveLength(requestsBeforeEdit)
+    await expect(page.locator('.chat-message.user')).toHaveCount(0)
+
+    fakeProvider.queue([textDelta('Edited durable answer')])
+    await composer.fill('Edited durable request')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect(page.locator('.chat-message.assistant')).toContainText(
+      'Edited durable answer',
+    )
+    await expect(page.locator('.chat-message.user')).toContainText(
+      'Edited durable request',
+    )
+
+    const editedUser = page.locator('.chat-message.user').filter({
+      hasText: 'Edited durable request',
+    })
+    await editedUser.getByRole('button', { name: '分支' }).click()
+    await expect(page.locator('.conversation-item')).toHaveCount(2)
+  })
+
+  test('opens, drives, restores, and closes terminal tabs for a Session', async () => {
+    const terminalReady = page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const api = Reflect.get(window, 'agentApi') as {
+            onTerminalEvent(
+              listener: (envelope: {
+                event: {
+                  type: string
+                  status?: string
+                }
+              }) => void,
+            ): () => void
+          }
+          const unsubscribe = api.onTerminalEvent((envelope) => {
+            if (
+              envelope.event.type === 'terminal.status' &&
+              envelope.event.status === 'running'
+            ) {
+              unsubscribe()
+              resolve()
+            }
+          })
+        }),
+    )
+    const toggle = page.getByRole('button', { name: /切换终端/ })
+    await expect(toggle).toBeEnabled()
+    await toggle.click()
+    const terminalPanel = page.locator('.terminal-panel')
+    const terminalTabs = terminalPanel.getByRole('tab')
+    await expect(terminalPanel).toBeVisible()
+    await expect(terminalTabs).toHaveCount(1)
+
+    await terminalReady
+    const activeInput = page.locator(
+      '.terminal-surface:visible .xterm-helper-textarea',
+    )
+    await expect(activeInput).toBeAttached()
+    await activeInput.focus()
+    await expect
+      .poll(() =>
+        activeInput.evaluate((element) => document.activeElement === element),
+      )
+      .toBe(true)
+    await page.keyboard.type('Write-Output E2E_PTY_OK', { delay: 2 })
+    await page.keyboard.press('Enter')
+    await expect(
+      page.locator('.terminal-surface:visible .xterm-rows'),
+    ).toContainText('E2E_PTY_OK', { timeout: 15_000 })
+
+    await terminalPanel.getByRole('button', { name: '新建终端' }).click()
+    await expect(terminalTabs).toHaveCount(2)
+
+    await page.keyboard.press('Control+J')
+    await expect(terminalPanel).toBeHidden()
+    await page.keyboard.press('Control+J')
+    await expect(terminalPanel).toBeVisible()
+    await expect(terminalTabs).toHaveCount(2)
+
+    const closeButtons = terminalPanel.getByRole('button', {
+      name: '关闭终端',
+    })
+    await expect(closeButtons).toHaveCount(2)
+    await closeButtons.nth(0).click()
+    await expect(terminalTabs).toHaveCount(1)
+  })
+
+  test('closes cleanly with exit code zero', async () => {
+    const exit = new Promise<{
+      code: number | null
+      signal: NodeJS.Signals | null
+    }>((resolve) => {
+      electronProcess.once('exit', (code, signal) => resolve({ code, signal }))
+    })
+
+    await electronApp.evaluate(({ app }) => {
+      app.quit()
+    })
+
+    await expect(exit).resolves.toEqual({ code: 0, signal: null })
+  })
+})

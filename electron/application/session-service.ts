@@ -4,8 +4,9 @@ import { MAX_FORK_MESSAGE_RECORDS } from '../../shared/durable'
 import type {
   SessionCommandResult,
   SessionMessageChange,
+  SessionSearchHit,
 } from '../../shared/domain-state-api'
-import type { MessageId, SessionId } from '../../shared/ids'
+import type { MessageId, ProjectId, SessionId } from '../../shared/ids'
 import {
   isControlCommandUserInput,
   type MessageRecord,
@@ -30,6 +31,16 @@ import {
   normalizeApplicationError,
 } from './application-error'
 import { ApplicationStateCoordinator } from './application-state-coordinator'
+import {
+  cloneForkMessage,
+  rebuildActiveBranch,
+  rewindBoundarySeq,
+  terminalToolBatchEnd,
+} from './session-branch'
+import {
+  MessageHistoryCompiler,
+  messageText,
+} from '../session/canonical-history'
 
 export interface SessionRuntimeGuard {
   assertSessionIdle(sessionId: SessionId): void
@@ -222,6 +233,77 @@ export class SessionService {
           throw new ApplicationError('NOT_FOUND', 'Session was not found')
         }
         return this.#messages.searchText(reader, sessionId, input)
+      })
+    ).value
+  }
+
+  async searchSessions(input: {
+    text: string
+    projectId?: ProjectId
+    limit?: number
+  }): Promise<SessionSearchHit[]> {
+    return (
+      await this.#coordinator.query((reader) => {
+        const ids = this.#sessions.searchCandidateIds(reader, input)
+        const needle = input.text.trim().toLocaleLowerCase()
+        return ids.flatMap((sessionId): SessionSearchHit[] => {
+          const session = this.#sessions.get(reader, sessionId)
+          if (!session) return []
+          if (session.title.toLocaleLowerCase().includes(needle)) {
+            return [
+              {
+                session,
+                match: {
+                  kind: 'title',
+                  snippet: boundedSnippet(session.title),
+                },
+              },
+            ]
+          }
+          const message = this.#messages.searchText(reader, sessionId, {
+            text: input.text,
+            limit: 1,
+          })[0]
+          if (!message) return []
+          return [
+            {
+              session,
+              match: {
+                kind: 'message',
+                messageId: message.id,
+                seq: message.seq,
+                snippet: boundedSnippet(messageText(message)),
+              },
+            },
+          ]
+        })
+      })
+    ).value
+  }
+
+  async getOriginalVisibleUser(
+    sessionId: SessionId,
+    messageId: MessageId,
+  ): Promise<Extract<MessageRecord, { kind: 'user_input' }>> {
+    return (
+      await this.#coordinator.query((reader) => {
+        if (!this.#sessions.get(reader, sessionId)) {
+          throw new ApplicationError('NOT_FOUND', 'Session was not found')
+        }
+        const message = this.#messages.get(reader, sessionId, messageId)
+        if (
+          !message ||
+          message.visibility !== 'visible' ||
+          message.kind !== 'user_input' ||
+          !('clientRequestId' in message) ||
+          isControlCommandUserInput(message)
+        ) {
+          throw new ApplicationError(
+            'PRECONDITION_FAILED',
+            'Retry target must be a visible original user message',
+          )
+        }
+        return message
       })
     ).value
   }
@@ -453,6 +535,122 @@ export class SessionService {
     return result
   }
 
+  async rewind(input: {
+    sessionId: SessionId
+    expectedRevision: number
+    messageId: MessageId
+    boundary: 'after_message' | 'before_message' | 'before_turn'
+  }): Promise<SessionCommandResult> {
+    const operationToken = this.#runtimeGuard?.reserveSessionEviction?.(
+      input.sessionId,
+    )
+    let result: SessionCommandResult
+    try {
+      result = await this.#coordinator.command(
+        'session.changed',
+        (transaction) => {
+          if (!operationToken) {
+            this.#runtimeGuard?.assertSessionIdle(input.sessionId)
+          }
+          const current = this.#sessions.get(transaction, input.sessionId)
+          if (!current) {
+            throw new ApplicationError('NOT_FOUND', 'Session was not found')
+          }
+          if (current.revision !== input.expectedRevision) {
+            throw revisionConflict(current)
+          }
+          if (current.lifecycle !== 'active') {
+            throw new ApplicationError(
+              'PRECONDITION_FAILED',
+              'Archived Session cannot be rewound',
+            )
+          }
+          const target = this.#messages.get(
+            transaction,
+            input.sessionId,
+            input.messageId,
+          )
+          if (
+            !target ||
+            target.visibility !== 'visible' ||
+            (target.kind !== 'user_input' && target.kind !== 'assistant_turn')
+          ) {
+            throw new ApplicationError(
+              'PRECONDITION_FAILED',
+              'Rewind target must be a visible user or assistant message',
+            )
+          }
+          if (
+            (input.boundary === 'after_message' ||
+              input.boundary === 'before_turn') &&
+            (target.kind !== 'user_input' ||
+              !('clientRequestId' in target) ||
+              isControlCommandUserInput(target))
+          ) {
+            throw new ApplicationError(
+              'PRECONDITION_FAILED',
+              `${input.boundary} requires a visible original user message`,
+            )
+          }
+
+          const records = this.#messages.listAll(transaction, input.sessionId)
+          const boundarySeq = rewindBoundarySeq(records, target, input.boundary)
+          for (const record of records) {
+            if (record.seq > boundarySeq) {
+              record.visibility = 'superseded'
+              record.inHistory = false
+            }
+          }
+          rebuildActiveBranch(records, boundarySeq)
+          const active = records.filter((record) => record.inHistory)
+          if (active.length > 0) {
+            new MessageHistoryCompiler().compile(active)
+          }
+          for (const record of records) {
+            this.#messages.updateBranchState(transaction, record)
+          }
+
+          const next: SessionRecord = {
+            ...current,
+            goal: null,
+            plan: null,
+            revision: current.revision + 1,
+            updatedAt: this.#now(),
+          }
+          if (!this.#sessions.update(transaction, next, current.revision)) {
+            throw revisionConflict(current)
+          }
+          return {
+            session: next,
+            messageChange: { mode: 'invalidate_all' as const },
+          }
+        },
+      )
+    } catch (error) {
+      if (operationToken) {
+        this.#runtimeGuard?.cancelSessionEviction?.(
+          input.sessionId,
+          operationToken,
+        )
+      }
+      throw error
+    }
+    try {
+      await this.#runtimeGuard?.releaseSession(input.sessionId, operationToken)
+    } catch (error) {
+      this.#onDiagnostic(
+        `Rewound Session ${input.sessionId} could not release its runtime context`,
+        error,
+      )
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Session was rewound but its runtime context could not be reset',
+        { details: { mutationSucceeded: true } },
+      )
+    }
+    return result
+  }
+
   async fork(input: {
     sourceSessionId: SessionId
     expectedRevision: number
@@ -487,12 +685,13 @@ export class SessionService {
           throw new ApplicationError('NOT_FOUND', 'Fork point was not found')
         }
         if (
-          point.kind !== 'assistant_turn' &&
-          !(
-            point.kind === 'user_input' &&
-            'clientRequestId' in point &&
-            !isControlCommandUserInput(point)
-          )
+          point.visibility !== 'visible' ||
+          (point.kind !== 'assistant_turn' &&
+            !(
+              point.kind === 'user_input' &&
+              'clientRequestId' in point &&
+              !isControlCommandUserInput(point)
+            ))
         ) {
           throw new ApplicationError(
             'PRECONDITION_FAILED',
@@ -500,14 +699,19 @@ export class SessionService {
           )
         }
         throughSeq = point.seq
+      } else {
+        const currentBranch = this.#messages
+          .listAll(transaction, source.id)
+          .filter((record) => record.visibility !== 'superseded')
+        throughSeq = currentBranch.at(-1)?.seq ?? 0
       }
 
-      let prefix = this.#messages.listThrough(
-        transaction,
-        source.id,
-        throughSeq,
-        MAX_FORK_MESSAGE_RECORDS + 1,
-      )
+      let prefix = this.#messages
+        .listAll(transaction, source.id)
+        .filter(
+          (record) =>
+            record.seq <= throughSeq && record.visibility !== 'superseded',
+        )
       if (prefix.length > MAX_FORK_MESSAGE_RECORDS) {
         throw new ApplicationError(
           'PAYLOAD_TOO_LARGE',
@@ -519,12 +723,9 @@ export class SessionService {
         point?.kind === 'assistant_turn' &&
         point.parts.some((part) => part.type === 'tool_call')
       ) {
-        const completePrefix = this.#messages.listThrough(
-          transaction,
-          source.id,
-          source.lastSeq,
-          MAX_FORK_MESSAGE_RECORDS + 1,
-        )
+        const completePrefix = this.#messages
+          .listAll(transaction, source.id)
+          .filter((record) => record.visibility !== 'superseded')
         const expandedThrough = terminalToolBatchEnd(completePrefix, point.seq)
         prefix = completePrefix.filter(
           (record) => record.seq <= expandedThrough,
@@ -537,7 +738,7 @@ export class SessionService {
           `A Session fork can copy at most ${MAX_FORK_MESSAGE_RECORDS} messages`,
         )
       }
-      if (prefix.length !== throughSeq || prefix.length === 0) {
+      if (prefix.length === 0) {
         throw new ApplicationError(
           'PRECONDITION_FAILED',
           'Fork history is incomplete',
@@ -548,20 +749,14 @@ export class SessionService {
       for (const record of prefix) {
         idMap.set(record.id, this.#createMessageId())
       }
-      const latestCompact = [...prefix]
-        .reverse()
-        .find((record) => record.kind === 'compact_summary')
-      const activeBoundary =
-        latestCompact?.kind === 'compact_summary'
-          ? latestCompact.metadata.compact.replacesThroughSeq
-          : 0
-      const records = prefix.map((record) =>
-        cloneForkMessage(
-          record,
-          input.sessionId,
-          idMap,
-          record.seq > activeBoundary && !isControlCommandUserInput(record),
-        ),
+      const seqMap = new Map<number, number>()
+      prefix.forEach((record, index) => seqMap.set(record.seq, index + 1))
+      const records = prefix.map((record, index) =>
+        cloneForkMessage(record, input.sessionId, idMap, seqMap, index + 1),
+      )
+      rebuildActiveBranch(records, records.at(-1)?.seq ?? 0)
+      new MessageHistoryCompiler().compile(
+        records.filter((record) => record.inHistory),
       )
       const timestamp = this.#now()
       const isLatest = throughSeq === source.lastSeq
@@ -711,6 +906,9 @@ function mutationMessageChange(
       throughSeq: input.deactivateThroughSeq,
     }
   }
+  if (input.messageChange === 'invalidate_all') {
+    return { mode: 'invalidate_all' }
+  }
   if (records.length > 0) return { mode: 'upsert', records }
   return { mode: 'none' }
 }
@@ -724,91 +922,7 @@ function revisionConflict(current: SessionRecord): ApplicationError {
   })
 }
 
-function terminalToolBatchEnd(
-  records: readonly MessageRecord[],
-  assistantSeq: number,
-): number {
-  const assistant = records.find((record) => record.seq === assistantSeq)
-  if (assistant?.kind !== 'assistant_turn') return assistantSeq
-  const pending = assistant.parts.flatMap((part) =>
-    part.type === 'tool_call' ? [part.callId] : [],
-  )
-  if (pending.length === 0) return assistantSeq
-  let cursor = assistantSeq
-  for (const callId of pending) {
-    cursor += 1
-    const result = records.find((record) => record.seq === cursor)
-    if (result?.kind !== 'tool_result' || result.parts[0].callId !== callId) {
-      throw new ApplicationError(
-        'PRECONDITION_FAILED',
-        'Fork point assistant does not have a complete terminal tool batch',
-      )
-    }
-  }
-  return cursor
-}
-
-function cloneForkMessage(
-  source: MessageRecord,
-  sessionId: SessionId,
-  idMap: ReadonlyMap<MessageId, MessageId>,
-  inHistory: boolean,
-): MessageRecord {
-  const record = structuredClone(source)
-  const id = idMap.get(source.id)
-  if (!id) {
-    throw new ApplicationError(
-      'PRECONDITION_FAILED',
-      'Fork message id map is incomplete',
-    )
-  }
-  const clone = {
-    ...record,
-    id,
-    sessionId,
-    inHistory,
-  }
-  if (
-    clone.kind === 'user_input' &&
-    clone.metadata &&
-    'replayedFromMessageId' in clone.metadata
-  ) {
-    const replayedFromMessageId = idMap.get(
-      clone.metadata.replayedFromMessageId,
-    )
-    if (!replayedFromMessageId) {
-      throw new ApplicationError(
-        'PRECONDITION_FAILED',
-        'Fork replay reference leaves the copied Session',
-      )
-    }
-    return {
-      ...clone,
-      metadata: {
-        ...clone.metadata,
-        replayedFromMessageId,
-      },
-    }
-  }
-  if (
-    clone.kind === 'user_input' &&
-    clone.metadata &&
-    'derivedFromMessageId' in clone.metadata
-  ) {
-    const derivedFromMessageId = idMap.get(clone.metadata.derivedFromMessageId)
-    if (!derivedFromMessageId) {
-      throw new ApplicationError(
-        'PRECONDITION_FAILED',
-        'Fork derived reference leaves the copied Session',
-      )
-    }
-    return {
-      ...clone,
-      metadata: {
-        ...clone.metadata,
-        derivedFromMessageId,
-      },
-    }
-  }
-  return clone
+function boundedSnippet(value: string): string {
+  const normalized = value.trim().replace(/\s+/gu, ' ')
+  return normalized.slice(0, 512) || '…'
 }

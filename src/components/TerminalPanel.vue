@@ -36,7 +36,6 @@ const hosts = new Map<TerminalId, HTMLElement>()
 const views = new Map<TerminalId, TerminalView>()
 let unsubscribe: (() => void) | undefined
 let resizeObserver: ResizeObserver | undefined
-let creatingSession = false
 let resizeStartY = 0
 let resizeStartHeight = 0
 const sequence = new TerminalSequenceTracker()
@@ -166,16 +165,6 @@ async function loadTerminals(createWhenEmpty = false): Promise<void> {
     return
   }
 
-  if (!agent.sessionId && createWhenEmpty) {
-    creatingSession = true
-
-    try {
-      await agent.createSession()
-    } finally {
-      creatingSession = false
-    }
-  }
-
   const sessionId = agent.sessionId
 
   if (!sessionId) {
@@ -224,22 +213,6 @@ async function createTerminal(): Promise<void> {
   if (!bridge) {
     error.value = t('terminal.bridgeUnavailable')
     return
-  }
-
-  if (!agent.sessionId) {
-    creatingSession = true
-    let created: boolean
-
-    try {
-      created = await agent.createSession()
-    } finally {
-      creatingSession = false
-    }
-
-    if (!created) {
-      error.value = agent.error || t('terminal.createFailed')
-      return
-    }
   }
 
   const sessionId = agent.sessionId
@@ -443,10 +416,6 @@ function beginPanelResize(event: PointerEvent): void {
 watch(
   () => agent.sessionId,
   async () => {
-    if (creatingSession) {
-      return
-    }
-
     sequence.reset()
     for (const terminalId of [...views.keys()]) {
       disposeView(terminalId)
@@ -539,6 +508,7 @@ onUnmounted(() => {
             <button
               type="button"
               :aria-label="t('terminal.new')"
+              :disabled="!agent.sessionId"
               @click="createTerminal"
             >
               <UiIcon name="plus" />
@@ -579,7 +549,10 @@ onUnmounted(() => {
     <p v-if="recoveryNotice" class="terminal-notice">
       {{ recoveryNotice }}
     </p>
-    <div v-if="terminals.length === 0" class="terminal-empty">
+    <div v-if="!agent.sessionId" class="terminal-empty">
+      <span>{{ t('terminal.sendFirst') }}</span>
+    </div>
+    <div v-else-if="terminals.length === 0" class="terminal-empty">
       <span>{{ t('terminal.empty') }}</span>
       <button type="button" @click="createTerminal">
         {{ t('terminal.new') }}

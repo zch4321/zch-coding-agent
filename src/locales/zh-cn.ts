@@ -49,6 +49,7 @@ const zhCN = {
     exportTitle: '导出',
     inspectTranscript: '检查完整会话记录',
     import: '从 Markdown 导入',
+    durableImportExportPending: '待 Durable Session 导入/导出重设计',
   },
   topbar: {
     terminal: '切换终端（Ctrl+J）',
@@ -134,6 +135,10 @@ const zhCN = {
     },
     revertToHere: '回退',
     revertToHereTitle: '撤销此回复及其后的所有消息',
+    retryMessage: '重试',
+    retryMessageTitle: '保留这条用户消息并重新执行',
+    editMessage: '编辑',
+    editMessageTitle: '回退本轮并把内容恢复到输入框',
     forkFromHere: '分支',
     forkFromHereTitle: '从此回复创建分支',
     forkedBadge: '分支',
@@ -404,11 +409,16 @@ const zhCN = {
     enableYolo: '启用全自动',
     renameTitle: '重命名对话',
     rename: '重命名',
-    deleteTitle: '删除对话？',
-    deleteText: '这会删除本地对话历史并关闭运行资源，但不会删除工作区文件。',
+    deleteTitle: '归档会话？',
+    deleteText:
+      '这会归档该会话。本版本暂不提供恢复入口，工作区文件不会被删除。',
     revertTitle: '回退对话？',
     revertText:
-      '将原地删除此回复及其后的所有消息（包括工具调用），回到该回复处重新输入。此操作不可撤销，且不会新建对话。',
+      '将从此消息开始回退当前分支。文件、终端和外部工具产生的副作用不会撤销，文件变更审计仍会保留。',
+    retryMessageText:
+      '将保留这条用户消息并重新执行，之后的当前分支会被取代。文件、终端和外部工具副作用不会撤销。继续吗？',
+    editMessageText:
+      '将回退这条用户消息所在整轮及后续分支，并把原文和附件恢复到输入框。文件、终端和外部工具副作用不会撤销。继续吗？',
     confirmRevert: '回退',
     exportFailed: '导出失败',
     importFailed: '导入失败',
@@ -516,6 +526,7 @@ const zhCN = {
     trustEnable: '信任并启用',
   },
   terminal: {
+    sendFirst: '先发送一条消息以创建 Durable Session，之后才能使用终端。',
     name: '终端 {index}',
     bridgeUnavailable: '桌面桥接不可用',
     createFailed: '无法创建本地会话',

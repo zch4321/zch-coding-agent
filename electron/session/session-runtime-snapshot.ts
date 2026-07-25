@@ -45,7 +45,19 @@ export function updatePublicRunSnapshot(
       callId: event.callId,
       kind: event.kind,
       tool: event.tool,
+      arguments: structuredClone(event.args),
       reason: event.reason,
+      policySignals: structuredClone(event.policySignals),
+      ...(event.diff ? { diff: event.diff } : {}),
+      ...(event.diffHash ? { diffHash: event.diffHash } : {}),
+      rememberable: event.rememberable,
+      ...(event.rememberArgConstraints
+        ? {
+            rememberArgConstraints: structuredClone(
+              event.rememberArgConstraints,
+            ),
+          }
+        : {}),
       expiresAt: event.expiresAt,
     }
     const tool = run.publicTools.get(event.callId)

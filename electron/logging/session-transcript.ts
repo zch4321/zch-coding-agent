@@ -279,7 +279,6 @@ export function normalizeSessionTranscript(
             workspace: event.workspace,
             model: event.model,
             mode: event.mode,
-            conversationId: event.conversationId ?? null,
           }),
         )
         break
@@ -302,8 +301,7 @@ export function normalizeSessionTranscript(
         entries.push(
           runtimeEntry(event, `Workspace writer · ${event.status}`, {
             workspace: event.workspace,
-            conversationId: event.conversationId,
-            writerConversationId: event.writerConversationId ?? null,
+            writerSessionId: event.writerSessionId ?? null,
             writerRunId: event.writerRunId ?? null,
           }),
         )
@@ -490,9 +488,6 @@ export function normalizeSessionTranscript(
       ...(start
         ? {
             sessionId: start.sessionId,
-            ...(start.conversationId
-              ? { conversationId: start.conversationId }
-              : {}),
             workspace: start.workspace,
             model: start.model,
             mode: start.mode,

@@ -26,7 +26,7 @@ describe('trace transcript store', () => {
       ok([
         {
           traceId: 'session-1',
-          conversationId: 'conversation-1',
+          sessionId: 'session-1',
           closed: true,
           size: 100,
           eventCount: 2,
@@ -87,7 +87,7 @@ describe('trace transcript store', () => {
     })
 
     const store = useTraceStore()
-    await store.openConversationTranscript('conversation-1')
+    await store.openSessionTranscript('session-1')
     expect(store.transcriptOpen).toBe(true)
     expect(store.transcriptEntries.map((entry) => entry.text)).toEqual([
       'hello',
@@ -108,7 +108,7 @@ describe('trace transcript store', () => {
       getTraceStats: vi.fn(async () => ok({})),
     })
     const store = useTraceStore()
-    await store.openConversationTranscript('conversation-missing')
+    await store.openSessionTranscript('session-missing')
     expect(store.transcriptOpen).toBe(true)
     expect(store.transcriptTraceId).toBeUndefined()
     expect(store.transcriptUnavailable).toBe(true)

@@ -1,20 +1,19 @@
 import { Type, type Static, type TSchema } from '@sinclair/typebox'
 import { AgentEventSchema, TerminalEventSchema } from './agent-events'
-import { FileChangeRecordSchema } from './change-history'
 import {
   ConfigSectionSchema,
   ConfigSetRequestSchema,
-  PermissionModeSchema,
   PublicConfigSchema,
 } from './config'
 import {
   CallIdSchema,
+  ProjectIdSchema,
   RunIdSchema,
   SessionIdSchema,
   TerminalIdSchema,
 } from './ids'
 import { JsonValueSchema } from './json'
-import { PlanStateSchema, PlanStatusSchema } from './orchestration'
+import { PlanStatusSchema } from './orchestration'
 import {
   CodeBackendStatusSchema,
   DetectedProjectModulesSchema,
@@ -27,7 +26,6 @@ import { McpServerIdSchema, McpSettingsSnapshotSchema } from './mcp'
 import {
   ContextAttachmentChipSchema,
   ContextAttachmentKindSchema,
-  RunContextSchema,
 } from './context'
 import {
   EventIdSchema,
@@ -36,20 +34,27 @@ import {
   TraceIdSchema,
   TraceInfoSchema,
 } from './trace'
-import { PersistedWorkbenchSchema } from './workbench'
+import {
+  DOMAIN_STATE_API_CONTRACTS,
+  DomainStateEventSchema,
+} from './domain-state-api'
 import {
   SessionTranscriptPageSchema,
   SessionTranscriptRequestMessagesPageSchema,
 } from './session-transcript'
 import {
   AGENT_EVENT_CHANNEL,
+  DOMAIN_STATE_EVENT_CHANNEL,
   IPC_VERSION,
   TERMINAL_EVENT_CHANNEL,
 } from './channels'
 
-export { AGENT_EVENT_CHANNEL, IPC_VERSION, TERMINAL_EVENT_CHANNEL }
-
-export const CONVERSATION_MARKDOWN_MAX_BYTES = 5_000_000
+export {
+  AGENT_EVENT_CHANNEL,
+  DOMAIN_STATE_EVENT_CHANNEL,
+  IPC_VERSION,
+  TERMINAL_EVENT_CHANNEL,
+}
 
 export const IpcErrorSchema = Type.Object(
   {
@@ -62,6 +67,8 @@ export const IpcErrorSchema = Type.Object(
       Type.Literal('CONFLICT'),
       Type.Literal('NOT_FOUND'),
       Type.Literal('CANCELLED'),
+      Type.Literal('RESOURCE_CHANGED'),
+      Type.Literal('PERSISTENCE_FAILURE'),
       Type.Literal('SECRET_STORAGE_UNAVAILABLE'),
       Type.Literal('INTERNAL_ERROR'),
     ]),
@@ -91,6 +98,16 @@ function ipcResultSchema<ValueSchema extends TSchema>(value: ValueSchema) {
       { additionalProperties: false },
     ),
   ])
+}
+
+function domainIpcContract<
+  PayloadSchema extends TSchema,
+  ResultSchema extends TSchema,
+>(contract: { payload: PayloadSchema; result: ResultSchema }) {
+  return {
+    payload: contract.payload,
+    result: ipcResultSchema(contract.result),
+  }
 }
 
 const EmptyPayloadSchema = Type.Object(
@@ -215,66 +232,42 @@ export const IPC_CONTRACTS = {
       ),
     ),
   },
-  'workbench:get': {
-    payload: EmptyPayloadSchema,
-    result: ipcResultSchema(PersistedWorkbenchSchema),
-  },
-  'workbench:save': {
-    payload: Type.Object(
-      {
-        version: Type.Literal(IPC_VERSION),
-        workbench: PersistedWorkbenchSchema,
-      },
-      { additionalProperties: false },
-    ),
-    result: ipcResultSchema(PersistedWorkbenchSchema),
-  },
-  'workbench:migrate-v1': {
-    payload: Type.Object(
-      {
-        version: Type.Literal(IPC_VERSION),
-        workbench: PersistedWorkbenchSchema,
-      },
-      { additionalProperties: false },
-    ),
-    result: ipcResultSchema(PersistedWorkbenchSchema),
-  },
-  'workbench:export-conversation': {
-    payload: Type.Object(
-      {
-        version: Type.Literal(IPC_VERSION),
-        markdown: Type.String({
-          minLength: 1,
-          maxLength: CONVERSATION_MARKDOWN_MAX_BYTES,
-        }),
-        suggestedName: Type.String({ minLength: 1, maxLength: 256 }),
-      },
-      { additionalProperties: false },
-    ),
-    result: ipcResultSchema(
-      Type.Object(
-        {
-          canceled: Type.Boolean(),
-          path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
-        },
-        { additionalProperties: false },
-      ),
-    ),
-  },
-  'workbench:import-conversation': {
-    payload: EmptyPayloadSchema,
-    result: ipcResultSchema(
-      Type.Object(
-        {
-          canceled: Type.Boolean(),
-          markdown: Type.Optional(
-            Type.String({ maxLength: CONVERSATION_MARKDOWN_MAX_BYTES }),
-          ),
-        },
-        { additionalProperties: false },
-      ),
-    ),
-  },
+  'app:get-bootstrap': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['app:get-bootstrap'],
+  ),
+  'project:list': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['project:list']),
+  'project:add': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['project:add']),
+  'project:update': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['project:update'],
+  ),
+  'project:remove': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['project:remove'],
+  ),
+  'session:list': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['session:list']),
+  'session:get': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['session:get']),
+  'session:update': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['session:update'],
+  ),
+  'session:archive': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['session:archive'],
+  ),
+  'session:fork': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['session:fork']),
+  'session:rewind': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['session:rewind'],
+  ),
+  'session:search': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['session:search'],
+  ),
+  'message:list': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['message:list']),
+  'message:search': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['message:search'],
+  ),
+  'file-change:list': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['file-change:list'],
+  ),
+  'file-change:revert': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['file-change:revert'],
+  ),
   'workspace:choose': {
     payload: EmptyPayloadSchema,
     result: ipcResultSchema(
@@ -293,7 +286,7 @@ export const IPC_CONTRACTS = {
     payload: Type.Object(
       {
         version: Type.Literal(IPC_VERSION),
-        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+        projectId: ProjectIdSchema,
         path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
       },
       { additionalProperties: false },
@@ -327,7 +320,7 @@ export const IPC_CONTRACTS = {
     payload: Type.Object(
       {
         version: Type.Literal(IPC_VERSION),
-        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+        projectId: ProjectIdSchema,
         path: Type.String({ minLength: 1, maxLength: 4_096 }),
       },
       { additionalProperties: false },
@@ -349,7 +342,7 @@ export const IPC_CONTRACTS = {
     payload: Type.Object(
       {
         version: Type.Literal(IPC_VERSION),
-        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+        projectId: ProjectIdSchema,
         kind: ContextAttachmentKindSchema,
       },
       { additionalProperties: false },
@@ -369,7 +362,7 @@ export const IPC_CONTRACTS = {
     payload: Type.Object(
       {
         version: Type.Literal(IPC_VERSION),
-        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+        projectId: ProjectIdSchema,
       },
       { additionalProperties: false },
     ),
@@ -379,7 +372,7 @@ export const IPC_CONTRACTS = {
     payload: Type.Object(
       {
         version: Type.Literal(IPC_VERSION),
-        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+        projectId: ProjectIdSchema,
         project: ProjectModelSchema,
       },
       { additionalProperties: false },
@@ -390,7 +383,7 @@ export const IPC_CONTRACTS = {
     payload: Type.Object(
       {
         version: Type.Literal(IPC_VERSION),
-        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+        projectId: ProjectIdSchema,
       },
       { additionalProperties: false },
     ),
@@ -400,7 +393,7 @@ export const IPC_CONTRACTS = {
     payload: Type.Object(
       {
         version: Type.Literal(IPC_VERSION),
-        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+        projectId: ProjectIdSchema,
       },
       { additionalProperties: false },
     ),
@@ -417,101 +410,12 @@ export const IPC_CONTRACTS = {
     payload: Type.Object(
       {
         version: Type.Literal(IPC_VERSION),
-        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
+        projectId: ProjectIdSchema,
         backendId: Type.String({ minLength: 1, maxLength: 128 }),
       },
       { additionalProperties: false },
     ),
     result: ipcResultSchema(CodeBackendStatusSchema),
-  },
-  'session:create': {
-    payload: Type.Object(
-      {
-        version: Type.Literal(IPC_VERSION),
-        conversationId: Type.String({ minLength: 1, maxLength: 256 }),
-        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
-        mode: PermissionModeSchema,
-        provider: Type.String({ minLength: 1, maxLength: 128 }),
-      },
-      { additionalProperties: false },
-    ),
-    result: ipcResultSchema(
-      Type.Object(
-        { sessionId: SessionIdSchema },
-        { additionalProperties: false },
-      ),
-    ),
-  },
-  'session:close': {
-    payload: Type.Object(
-      {
-        version: Type.Literal(IPC_VERSION),
-        sessionId: SessionIdSchema,
-      },
-      { additionalProperties: false },
-    ),
-    result: ipcResultSchema(AcceptedSchema),
-  },
-  'changes:list': {
-    payload: Type.Object(
-      {
-        version: Type.Literal(IPC_VERSION),
-        conversationId: Type.String({ minLength: 1, maxLength: 256 }),
-        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
-      },
-      { additionalProperties: false },
-    ),
-    result: ipcResultSchema(
-      Type.Object(
-        { changes: Type.Array(FileChangeRecordSchema, { maxItems: 200 }) },
-        { additionalProperties: false },
-      ),
-    ),
-  },
-  'changes:revert': {
-    payload: Type.Object(
-      {
-        version: Type.Literal(IPC_VERSION),
-        id: Type.String({ minLength: 1, maxLength: 128 }),
-        conversationId: Type.String({ minLength: 1, maxLength: 256 }),
-        workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
-      },
-      { additionalProperties: false },
-    ),
-    result: ipcResultSchema(
-      Type.Object(
-        { change: FileChangeRecordSchema },
-        { additionalProperties: false },
-      ),
-    ),
-  },
-  'session:update-mode': {
-    payload: Type.Object(
-      {
-        version: Type.Literal(IPC_VERSION),
-        sessionId: SessionIdSchema,
-        mode: PermissionModeSchema,
-      },
-      { additionalProperties: false },
-    ),
-    result: ipcResultSchema(
-      Type.Object(
-        {
-          accepted: Type.Boolean(),
-          reason: Type.Optional(
-            Type.Union([
-              Type.Literal('active_run'),
-              Type.Literal('workspace_writer_active'),
-            ]),
-          ),
-          writerConversationId: Type.Optional(
-            Type.String({ minLength: 1, maxLength: 256 }),
-          ),
-          writerRunId: Type.Optional(RunIdSchema),
-        },
-        { additionalProperties: false },
-      ),
-    ),
   },
   'plan:update-status': {
     payload: Type.Object(
@@ -523,30 +427,11 @@ export const IPC_CONTRACTS = {
       { additionalProperties: false },
     ),
     result: ipcResultSchema(
-      Type.Object(
-        {
-          accepted: Type.Boolean(),
-          plan: Type.Optional(PlanStateSchema),
-        },
-        { additionalProperties: false },
-      ),
+      DOMAIN_STATE_API_CONTRACTS['session:update'].result,
     ),
   },
-  'run:start': {
-    payload: Type.Object(
-      {
-        version: Type.Literal(IPC_VERSION),
-        sessionId: SessionIdSchema,
-        message: Type.String({ minLength: 1, maxLength: 1_000_000 }),
-        clientRequestId: Type.String({ minLength: 1, maxLength: 128 }),
-        context: Type.Optional(RunContextSchema),
-      },
-      { additionalProperties: false },
-    ),
-    result: ipcResultSchema(
-      Type.Object({ runId: RunIdSchema }, { additionalProperties: false }),
-    ),
-  },
+  'run:start': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['run:start']),
+  'run:retry': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['run:retry']),
   'run:interrupt': {
     payload: Type.Object(
       {
@@ -840,3 +725,18 @@ export const TerminalEventEnvelopeSchema = Type.Object(
   { additionalProperties: false },
 )
 export type TerminalEventEnvelope = Static<typeof TerminalEventEnvelopeSchema>
+
+export const DomainStateDeliverySchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal('commit'),
+      event: DomainStateEventSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    { kind: Type.Literal('buffer_overflow') },
+    { additionalProperties: false },
+  ),
+])
+export type DomainStateDelivery = Static<typeof DomainStateDeliverySchema>

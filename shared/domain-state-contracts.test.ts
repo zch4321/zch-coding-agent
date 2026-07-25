@@ -142,6 +142,7 @@ function identity(id: string, seq: number) {
     id: id as MessageId,
     sessionId,
     seq,
+    visibility: 'visible' as const,
     inHistory: true,
     createdAt: timestamp,
   }
@@ -157,7 +158,12 @@ const messages: MessageRecord[] = [
       schemaVersion: 1,
       submission: { type: 'message' },
       attachments: [
-        { ref: 'README.md', name: 'README.md', snapshotHash: hash },
+        {
+          kind: 'file',
+          path: 'README.md',
+          source: 'mention',
+          truncated: false,
+        },
       ],
     },
   },
@@ -568,7 +574,7 @@ describe('bounded domain-state API contracts', () => {
     expect(
       validatePayload({ ...payload, limit: MAX_MESSAGE_PAGE_RECORDS + 1 }),
     ).toBe(false)
-    expect(Object.keys(DOMAIN_STATE_API_CONTRACTS)).toHaveLength(15)
+    expect(Object.keys(DOMAIN_STATE_API_CONTRACTS)).toHaveLength(18)
     expect(DOMAIN_STATE_API_CONTRACTS).not.toHaveProperty('session:create')
     expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('run:start')
     expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('message:search')

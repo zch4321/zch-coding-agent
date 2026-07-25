@@ -1,10 +1,16 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AgentApi, IpcInvoke } from '../shared/agent-api'
-import { AGENT_EVENT_CHANNEL, TERMINAL_EVENT_CHANNEL } from '../shared/channels'
+import {
+  AGENT_EVENT_CHANNEL,
+  DOMAIN_STATE_EVENT_CHANNEL,
+  TERMINAL_EVENT_CHANNEL,
+} from '../shared/channels'
 import type {
   AgentEventEnvelope,
+  DomainStateDelivery,
   TerminalEventEnvelope,
 } from '../shared/ipc-contract'
+import type { DomainStateEvent } from '../shared/domain-state-api'
 
 const invoke: IpcInvoke = (channel, payload) =>
   ipcRenderer.invoke(channel, payload)
@@ -23,6 +29,45 @@ function subscribe<Event>(
   }
 }
 
+const MAX_BUFFERED_DOMAIN_EVENTS = 256
+const domainListeners = new Set<(event: DomainStateDelivery) => void>()
+const bufferedDomainEvents: DomainStateEvent[] = []
+let domainBufferOverflowed = false
+
+ipcRenderer.on(
+  DOMAIN_STATE_EVENT_CHANNEL,
+  (_event, event: DomainStateEvent) => {
+    if (domainListeners.size > 0) {
+      for (const listener of domainListeners) {
+        listener({ kind: 'commit', event })
+      }
+      return
+    }
+    if (bufferedDomainEvents.length >= MAX_BUFFERED_DOMAIN_EVENTS) {
+      bufferedDomainEvents.length = 0
+      domainBufferOverflowed = true
+      return
+    }
+    if (!domainBufferOverflowed) bufferedDomainEvents.push(event)
+  },
+)
+
+function subscribeDomainState(
+  listener: (event: DomainStateDelivery) => void,
+): () => void {
+  domainListeners.add(listener)
+  if (domainBufferOverflowed) {
+    domainBufferOverflowed = false
+    bufferedDomainEvents.length = 0
+    listener({ kind: 'buffer_overflow' })
+  } else {
+    for (const event of bufferedDomainEvents.splice(0)) {
+      listener({ kind: 'commit', event })
+    }
+  }
+  return () => domainListeners.delete(listener)
+}
+
 const api: AgentApi = {
   getConfig: (payload) => invoke('config:get', payload),
   setConfig: (payload) => invoke('config:set', payload),
@@ -32,13 +77,22 @@ const api: AgentApi = {
   disableMcpServer: (payload) => invoke('mcp:disable', payload),
   restartMcpServer: (payload) => invoke('mcp:restart', payload),
   listProviderModels: (payload) => invoke('provider:list-models', payload),
-  getWorkbench: (payload) => invoke('workbench:get', payload),
-  saveWorkbench: (payload) => invoke('workbench:save', payload),
-  migrateWorkbenchV1: (payload) => invoke('workbench:migrate-v1', payload),
-  exportConversationMarkdown: (payload) =>
-    invoke('workbench:export-conversation', payload),
-  importConversationMarkdown: (payload) =>
-    invoke('workbench:import-conversation', payload),
+  getBootstrap: (payload) => invoke('app:get-bootstrap', payload),
+  listProjects: (payload) => invoke('project:list', payload),
+  addProject: (payload) => invoke('project:add', payload),
+  updateProjectRecord: (payload) => invoke('project:update', payload),
+  removeProject: (payload) => invoke('project:remove', payload),
+  listSessions: (payload) => invoke('session:list', payload),
+  getSession: (payload) => invoke('session:get', payload),
+  updateSession: (payload) => invoke('session:update', payload),
+  archiveSession: (payload) => invoke('session:archive', payload),
+  forkSession: (payload) => invoke('session:fork', payload),
+  rewindSession: (payload) => invoke('session:rewind', payload),
+  searchSessions: (payload) => invoke('session:search', payload),
+  listMessages: (payload) => invoke('message:list', payload),
+  searchMessages: (payload) => invoke('message:search', payload),
+  listFileChanges: (payload) => invoke('file-change:list', payload),
+  revertFileChange: (payload) => invoke('file-change:revert', payload),
   chooseWorkspace: (payload) => invoke('workspace:choose', payload),
   listWorkspaceDirectory: (payload) =>
     invoke('workspace:list-directory', payload),
@@ -52,13 +106,9 @@ const api: AgentApi = {
     invoke('project:backend-status', payload),
   restartProjectBackend: (payload) =>
     invoke('project:restart-backend', payload),
-  createSession: (payload) => invoke('session:create', payload),
-  listChanges: (payload) => invoke('changes:list', payload),
-  revertChange: (payload) => invoke('changes:revert', payload),
-  closeSession: (payload) => invoke('session:close', payload),
-  updateSessionMode: (payload) => invoke('session:update-mode', payload),
   updatePlanStatus: (payload) => invoke('plan:update-status', payload),
   startRun: (payload) => invoke('run:start', payload),
+  retryRun: (payload) => invoke('run:retry', payload),
   interruptRun: (payload) => invoke('run:interrupt', payload),
   interjectRun: (payload) => invoke('run:interject', payload),
   decideApproval: (payload) => invoke('approval:decide', payload),
@@ -92,6 +142,7 @@ const api: AgentApi = {
     subscribe<AgentEventEnvelope>(AGENT_EVENT_CHANNEL, listener),
   onTerminalEvent: (listener) =>
     subscribe<TerminalEventEnvelope>(TERMINAL_EVENT_CHANNEL, listener),
+  onDomainStateEvent: subscribeDomainState,
 }
 const agentApi = Object.freeze(api)
 

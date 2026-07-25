@@ -49,6 +49,8 @@ const enUS = {
     exportTitle: 'Export',
     inspectTranscript: 'Inspect full session transcript',
     import: 'Import from Markdown',
+    durableImportExportPending:
+      'Pending Durable Session import/export redesign',
   },
   topbar: {
     terminal: 'Toggle terminal (Ctrl+J)',
@@ -136,6 +138,10 @@ const enUS = {
     },
     revertToHere: 'Revert',
     revertToHereTitle: 'Discard this reply and all messages after it',
+    retryMessage: 'Retry',
+    retryMessageTitle: 'Keep this user message and run it again',
+    editMessage: 'Edit',
+    editMessageTitle: 'Rewind this turn and restore it to the composer',
     forkFromHere: 'Fork',
     forkFromHereTitle: 'Create a branch from this reply',
     forkedBadge: 'Fork',
@@ -414,12 +420,16 @@ const enUS = {
     enableYolo: 'Enable Yolo',
     renameTitle: 'Rename conversation',
     rename: 'Rename',
-    deleteTitle: 'Delete conversation?',
+    deleteTitle: 'Archive session?',
     deleteText:
-      'This removes local conversation history and closes its runtime resources. Workspace files are not deleted.',
+      'This archives the session. This version has no restore UI. Workspace files are not deleted.',
     revertTitle: 'Revert conversation?',
     revertText:
-      'This discards the reply and all messages after it (including tool calls) in place, returning to that reply to type again. This cannot be undone and does not create a new conversation.',
+      'This rewinds the current branch from this message. File, terminal, and external-tool side effects are not undone, and FileChange audit records remain.',
+    retryMessageText:
+      'Keep this user message and run it again, superseding the later branch? File, terminal, and external-tool side effects are not undone.',
+    editMessageText:
+      'Rewind this user turn and the later branch, then restore its text and attachments to the composer? Side effects are not undone.',
     confirmRevert: 'Revert',
     exportFailed: 'Export failed',
     importFailed: 'Import failed',
@@ -528,6 +538,8 @@ const enUS = {
     trustEnable: 'Trust and enable',
   },
   terminal: {
+    sendFirst:
+      'Send a message to create a Durable Session before using the terminal.',
     name: 'Terminal {index}',
     bridgeUnavailable: 'Desktop bridge unavailable',
     createFailed: 'Unable to create a local session',

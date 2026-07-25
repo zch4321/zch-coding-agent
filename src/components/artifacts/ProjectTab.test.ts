@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentApi } from '../../../shared/agent-api'
+import type { ProjectId } from '../../../shared/ids'
 import type {
   CodeBackendStatus,
   ProjectMetadataSnapshot,
@@ -12,6 +13,7 @@ import type {
 } from '../../../shared/project-model'
 import { i18n, setAppLocale } from '../../i18n'
 import { useAgentStore } from '../../stores/agent'
+import { useAgentReplicaStore } from '../../stores/agent-replica'
 import ProjectTab from './ProjectTab.vue'
 
 const workspace = 'F:/workspace/project'
@@ -167,8 +169,20 @@ function bodyButton(label: string): HTMLButtonElement {
 
 async function mountProjectTab() {
   const pinia = createPinia()
-  const agent = useAgentStore(pinia)
-  agent.workspacePath = workspace
+  useAgentStore(pinia)
+  const replica = useAgentReplicaStore(pinia)
+  replica.projects = [
+    {
+      schemaVersion: 1,
+      id: 'project:test' as ProjectId,
+      path: workspace,
+      name: 'project',
+      revision: 1,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+  ]
+  replica.selectedProjectId = 'project:test' as ProjectId
   const wrapper = mount(ProjectTab, {
     attachTo: document.body,
     global: {
@@ -237,7 +251,7 @@ describe('ProjectTab', () => {
 
     expect(api.saveProject).toHaveBeenCalledWith(
       expect.objectContaining({
-        workspace,
+        projectId: 'project:test',
         project: expect.objectContaining({
           modules: [expect.objectContaining({ id: 'api', source: 'detected' })],
           defaultModuleId: 'api',
@@ -282,7 +296,7 @@ describe('ProjectTab', () => {
     const payload = vi.mocked(api.saveProject).mock.calls.at(-1)?.[0]
     expect(payload).toEqual(
       expect.objectContaining({
-        workspace,
+        projectId: 'project:test',
         project: expect.objectContaining({
           serena: expect.objectContaining({
             context: 'codex',

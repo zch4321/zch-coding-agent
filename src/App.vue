@@ -61,9 +61,9 @@ const lastOpenedSidebar = ref<Sidebar>('project')
 const terminalOpen = ref(false)
 const terminalMaximized = ref(false)
 const terminalHeight = ref(280)
-const renameConversationId = ref<string>()
+const renameSessionId = ref<string>()
 const renameValue = ref('')
-const deleteConversationId = ref<string>()
+const deleteSessionId = ref<string>()
 const revertMessageId = ref<string>()
 const revertMessagePreview = ref('')
 
@@ -146,8 +146,8 @@ async function createConversation(workspacePath?: string) {
   await agent.newConversation(workspacePath)
 }
 
-async function openConversation(conversationId: string) {
-  await agent.selectConversation(conversationId)
+async function openConversation(sessionId: string) {
+  await agent.selectConversation(sessionId)
 }
 
 function requestRevert(messageId: string, preview: string) {
@@ -169,54 +169,47 @@ async function forkFromMessage(messageId: string) {
   await agent.forkConversation(undefined, messageId)
 }
 
-async function exportConversation(conversationId: string) {
-  const result = await agent.exportConversationViaDialog(conversationId)
-  if (!result.canceled && result.error) {
-    agent.error = t('dialogs.exportFailed') + ': ' + result.error
-  }
+function inspectConversation(sessionId: string) {
+  void traces.openSessionTranscript(sessionId)
 }
 
-function inspectConversation(conversationId: string) {
-  void traces.openConversationTranscript(conversationId)
-}
-
-async function importConversation() {
+async function retryUserMessage(messageId: string) {
   if (agent.startPending || agent.activeRunId || agent.pendingApproval) return
-  const result = await agent.importConversationViaDialog()
-  if (result.error) {
-    agent.error = t('dialogs.importFailed') + ': ' + result.error
-  } else if (!result.canceled && result.conversationId) {
-    agent.error = ''
-  }
+  if (!window.confirm(t('dialogs.retryMessageText'))) return
+  await agent.retryUserMessage(messageId)
 }
 
-function beginRename(conversationId: string) {
-  const conversation = agent.conversations.find(
-    (item) => item.id === conversationId,
-  )
+async function editUserMessage(messageId: string) {
+  if (agent.startPending || agent.activeRunId || agent.pendingApproval) return
+  if (!window.confirm(t('dialogs.editMessageText'))) return
+  await agent.editUserMessage(messageId)
+}
+
+function beginRename(sessionId: string) {
+  const conversation = agent.conversations.find((item) => item.id === sessionId)
 
   if (!conversation) {
     return
   }
 
-  renameConversationId.value = conversationId
+  renameSessionId.value = sessionId
   renameValue.value = conversation.title
 }
 
 function confirmRename() {
-  if (renameConversationId.value) {
-    agent.renameConversation(renameConversationId.value, renameValue.value)
+  if (renameSessionId.value) {
+    agent.renameConversation(renameSessionId.value, renameValue.value)
   }
 
-  renameConversationId.value = undefined
+  renameSessionId.value = undefined
 }
 
 async function confirmDeleteConversation() {
-  if (deleteConversationId.value) {
-    await agent.deleteConversation(deleteConversationId.value)
+  if (deleteSessionId.value) {
+    await agent.deleteConversation(deleteSessionId.value)
   }
 
-  deleteConversationId.value = undefined
+  deleteSessionId.value = undefined
 }
 
 function closeTerminalPanel() {
@@ -403,10 +396,8 @@ onUnmounted(() => {
               @create="createConversation"
               @open="openConversation"
               @rename="beginRename"
-              @delete="deleteConversationId = $event"
-              @export="exportConversation"
+              @delete="deleteSessionId = $event"
               @inspect="inspectConversation"
-              @import="importConversation"
               @settings="openSettings()"
             />
           </NLayoutSider>
@@ -446,6 +437,8 @@ onUnmounted(() => {
                   :project-name="projectName"
                   @revert="requestRevert"
                   @fork="forkFromMessage"
+                  @retry="retryUserMessage"
+                  @edit="editUserMessage"
                 />
 
                 <MessageComposer
@@ -484,15 +477,15 @@ onUnmounted(() => {
 
       <WorkbenchDialogs
         :yolo-open="yoloWarningOpen"
-        :rename-open="Boolean(renameConversationId)"
+        :rename-open="Boolean(renameSessionId)"
         :rename-value="renameValue"
-        :delete-open="Boolean(deleteConversationId)"
+        :delete-open="Boolean(deleteSessionId)"
         :revert-open="Boolean(revertMessageId)"
         :revert-message-preview="revertMessagePreview"
         @update:yolo-open="yoloWarningOpen = $event"
-        @update:rename-open="!$event && (renameConversationId = undefined)"
+        @update:rename-open="!$event && (renameSessionId = undefined)"
         @update:rename-value="renameValue = $event"
-        @update:delete-open="!$event && (deleteConversationId = undefined)"
+        @update:delete-open="!$event && (deleteSessionId = undefined)"
         @update:revert-open="!$event && (revertMessageId = undefined)"
         @confirm-yolo="confirmYoloMode"
         @confirm-rename="confirmRename"

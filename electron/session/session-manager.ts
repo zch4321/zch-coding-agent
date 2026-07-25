@@ -1,6 +1,12 @@
 import path from 'node:path'
 import { getProviderConfig, type PermissionMode } from '../../shared/config'
-import type { CallId, RunId, SessionId, TerminalId } from '../../shared/ids'
+import type {
+  CallId,
+  MessageId,
+  RunId,
+  SessionId,
+  TerminalId,
+} from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { MessageRecord } from '../../shared/message'
 import type { ModelSelection } from '../../shared/model-route'
@@ -13,9 +19,14 @@ import type {
 } from '../../shared/orchestration'
 import type { SessionRecord } from '../../shared/session'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
+import type { SessionCommandResult } from '../../shared/domain-state-api'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
-import { JsonlTraceLogger, NullTraceLogger } from '../logging/logger'
+import {
+  JsonlTraceLogger,
+  NullTraceLogger,
+  traceIdForSession,
+} from '../logging/logger'
 import { cleanupTraces } from '../logging/cleanup'
 import type { PluginEventBus } from '../plugins/event-bus'
 import { PathGuard } from '../safety/path-guard'
@@ -23,7 +34,6 @@ import {
   PermissionPipeline,
   type RememberApprovalInput,
 } from '../permission/permission-pipeline'
-import type { ChangeHistoryStore } from './change-history'
 import type { ToolExecutor, ToolRegistry } from '../tools/tool-registry'
 import type { SkillsManager } from '../skills/manager'
 import { id, ipcFault, toJsonValue } from './session-common'
@@ -80,7 +90,6 @@ export class SessionManager {
   readonly #traceDirectory: string
   readonly #pluginBus: PluginEventBus | undefined
   readonly #skillsManager: SkillsManager | undefined
-  readonly #changeHistory: ChangeHistoryStore | undefined
   readonly #fileChangeExecution: SessionManagerOptions['fileChangeExecution']
   readonly #projectMetadata: ProjectMetadataStore | undefined
   readonly #codeBackends: CodeBackendManager | undefined
@@ -124,7 +133,6 @@ export class SessionManager {
     this.#traceDirectory = options.traceDirectory
     this.#pluginBus = options.pluginBus
     this.#skillsManager = options.skillsManager
-    this.#changeHistory = options.changeHistory
     this.#fileChangeExecution = options.fileChangeExecution
     this.#projectMetadata = options.projectMetadata
     this.#codeBackends = options.codeBackends
@@ -233,7 +241,6 @@ export class SessionManager {
     const toolRunner = new SessionToolRunner({
       configStore: this.#configStore,
       pluginBus: this.#pluginBus,
-      changeHistory: this.#changeHistory,
       fileChangeExecution: this.#fileChangeExecution,
       promptRegistry: options.promptRegistry,
       fetchImpl: this.#fetchImpl,
@@ -271,7 +278,6 @@ export class SessionManager {
    * Every session receives canonical initial harness messages immediately.
    */
   async createSession(input: {
-    conversationId?: string
     workspace: string
     mode: PermissionMode
     provider: string
@@ -311,7 +317,6 @@ export class SessionManager {
       : new NullTraceLogger()
     const session: SessionState = {
       sessionId,
-      conversationId: input.conversationId,
       workspace: guard.workspacePath,
       mode: input.mode,
       provider: provider.id,
@@ -350,7 +355,6 @@ export class SessionManager {
       await session.logger.write({
         type: 'session.start',
         sessionId,
-        conversationId: input.conversationId,
         workspace: session.workspace,
         model: session.modelSelection.model,
         mode: input.mode,
@@ -407,7 +411,6 @@ export class SessionManager {
       : new NullTraceLogger()
     const session: SessionState = {
       sessionId: input.record.id,
-      conversationId: input.record.id,
       workspace: guard.workspacePath,
       mode: input.record.permissionMode,
       provider: input.record.modelSelection.providerId,
@@ -428,7 +431,6 @@ export class SessionManager {
       await session.logger.write({
         type: 'session.start',
         sessionId: session.sessionId,
-        conversationId: session.conversationId,
         workspace: session.workspace,
         model: session.modelSelection.model,
         mode: session.mode,
@@ -453,7 +455,7 @@ export class SessionManager {
   ): Promise<{
     accepted: boolean
     reason?: 'active_run' | 'workspace_writer_active'
-    writerConversationId?: string
+    writerSessionId?: SessionId
     writerRunId?: RunId
   }> {
     const session = this.#sessions.get(sessionId)
@@ -473,7 +475,7 @@ export class SessionManager {
         reason: 'workspace_writer_active',
         ...(writer.kind === 'provider_run'
           ? {
-              writerConversationId: writer.conversationId,
+              writerSessionId: writer.sessionId,
               writerRunId: writer.runId,
             }
           : {}),
@@ -524,10 +526,7 @@ export class SessionManager {
     sessionId: SessionId
     status: PlanStatus
     source?: 'ui:plan-review' | 'headless:auto-plan-approval'
-  }): Promise<{
-    accepted: boolean
-    plan?: PlanState
-  }> {
+  }): Promise<SessionCommandResult> {
     const session = this.#sessions.get(input.sessionId)
 
     if (
@@ -537,7 +536,10 @@ export class SessionManager {
       session.mutationInProgress ||
       !session.plan
     ) {
-      return { accepted: false }
+      ipcFault(
+        'PRECONDITION_FAILED',
+        'Plan status cannot be changed in the current Session state',
+      )
     }
 
     const openItems = session.plan.items.filter(
@@ -545,7 +547,10 @@ export class SessionManager {
     )
 
     if (input.status === 'completed' && openItems.length > 0) {
-      return { accepted: false }
+      ipcFault(
+        'PRECONDITION_FAILED',
+        'A plan with open items cannot be completed',
+      )
     }
 
     const previousPlan = structuredClone(session.plan)
@@ -568,15 +573,19 @@ export class SessionManager {
         source: input.source ?? 'ui:plan-review',
         plan: toJsonValue(session.plan),
       })
-      await this.#executionState?.commit(session, { reason: 'metadata' })
+      const result = await this.#executionState?.commit(session, {
+        reason: 'metadata',
+      })
+      if (!result) {
+        throw new Error('Plan status mutation requires durable execution state')
+      }
+      return result
     } catch (error) {
       session.plan = previousPlan
       throw error
     } finally {
       session.mutationInProgress = false
     }
-
-    return { accepted: true, plan: structuredClone(session.plan) }
   }
 
   /**
@@ -651,6 +660,27 @@ export class SessionManager {
     )
   }
 
+  /**
+   * Re-runs the active branch ending at an existing original user message.
+   * No new user record is appended.
+   */
+  retryRun(input: {
+    sessionId: SessionId
+    userMessageId: MessageId
+    clientRequestId: string
+  }): RunId {
+    const session = this.#requireSession(input.sessionId)
+    return this.#runs.start(
+      session,
+      input.clientRequestId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      input.userMessageId,
+    )
+  }
+
   startHarnessRun(input: {
     sessionId: SessionId
     clientRequestId: string
@@ -670,7 +700,11 @@ export class SessionManager {
    * Returns trace ids that must not be deleted by retention cleanup.
    */
   activeTraceIds(): Set<string> {
-    return new Set([...this.#sessions.keys()])
+    return new Set(
+      [...this.#sessions.keys()].map((sessionId) =>
+        traceIdForSession(sessionId),
+      ),
+    )
   }
 
   hasLiveSession(sessionId: SessionId): boolean {
@@ -841,7 +875,6 @@ export class SessionManager {
       limit: this.#configStore.getPublicConfig().limits.maxConcurrentRuns,
       workspace: session.workspace,
       mode: session.mode,
-      conversationId: session.conversationId ?? session.sessionId,
       sessionId: session.sessionId,
       runId,
     })
@@ -867,7 +900,7 @@ export class SessionManager {
       writerKind: result.rejection.writer.kind,
       ...(result.rejection.writer.kind === 'provider_run'
         ? {
-            writerConversationId: result.rejection.writer.conversationId,
+            writerSessionId: result.rejection.writer.sessionId,
             writerRunId: result.rejection.writer.runId,
           }
         : { writerOperationId: result.rejection.writer.operationId }),
@@ -897,7 +930,7 @@ export class SessionManager {
             reason: rejection.reason,
             ...(rejection.writer.kind === 'provider_run'
               ? {
-                  writerConversationId: rejection.writer.conversationId,
+                  writerSessionId: rejection.writer.sessionId,
                   writerRunId: rejection.writer.runId,
                 }
               : {}),
@@ -916,9 +949,8 @@ export class SessionManager {
           sessionId: session.sessionId,
           runId,
           workspace: session.workspace,
-          conversationId: session.conversationId ?? session.sessionId,
           status: 'rejected',
-          writerConversationId: rejection.writer.conversationId,
+          writerSessionId: rejection.writer.sessionId,
           writerRunId: rejection.writer.runId,
         })
         .catch((error: unknown) =>
@@ -946,7 +978,6 @@ export class SessionManager {
         sessionId: owner.sessionId,
         runId: owner.runId,
         workspace: owner.workspace,
-        conversationId: owner.conversationId,
         status,
       })
       .catch((error: unknown) =>
@@ -956,7 +987,6 @@ export class SessionManager {
       type: 'workspace.writer.changed',
       workspace: owner.workspace,
       status,
-      writerConversationId: owner.conversationId,
       writerSessionId: owner.sessionId,
       writerRunId: owner.runId,
     })
@@ -974,7 +1004,7 @@ export class SessionManager {
     if (writer.kind === 'file_change_revert') {
       return {
         status: 'readonly_locked',
-        writerConversationId: writer.sessionId,
+        writerSessionId: writer.sessionId,
         writerRunId: writer.operationId,
       }
     }
@@ -982,14 +1012,14 @@ export class SessionManager {
     if (writer.sessionId === session.sessionId) {
       return {
         status: 'writer',
-        writerConversationId: writer.conversationId,
+        writerSessionId: writer.sessionId,
         writerRunId: writer.runId,
       }
     }
 
     return {
       status: 'readonly_locked',
-      writerConversationId: writer.conversationId,
+      writerSessionId: writer.sessionId,
       writerRunId: writer.runId,
     }
   }
@@ -1026,7 +1056,10 @@ export class SessionManager {
     const config = this.#configStore.getPublicConfig()
     const activeFiles = new Set(
       [...this.#sessions.keys()].map((sessionId) =>
-        path.resolve(this.#traceDirectory, `${sessionId}.jsonl`),
+        path.resolve(
+          this.#traceDirectory,
+          `${traceIdForSession(sessionId)}.jsonl`,
+        ),
       ),
     )
 

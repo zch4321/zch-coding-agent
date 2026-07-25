@@ -76,7 +76,6 @@ class TestRuntimeGuard implements FileChangeRuntimeGuard {
           writer: {
             kind: 'provider_run',
             workspace: '/workspace',
-            conversationId: 'session:writer',
             sessionId: 'session:writer' as SessionId,
             runId: 'run:writer' as RunId,
           },

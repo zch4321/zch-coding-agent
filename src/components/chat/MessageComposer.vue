@@ -65,14 +65,11 @@ const contextOptions = computed<DropdownOption[]>(() => [
 const inputDisabled = computed(
   () =>
     !agent.workspacePath ||
-    !agent.activeConversationId ||
     agent.startPending ||
     Boolean(agent.activeRunId) ||
     Boolean(agent.pendingApproval),
 )
-const textareaDisabled = computed(
-  () => !agent.workspacePath || !agent.activeConversationId,
-)
+const textareaDisabled = computed(() => !agent.workspacePath)
 const sendHint = computed(() => {
   if (!agent.workspacePath) return t('chat.chooseHint')
   if (!agent.credentialConfigured) return t('chat.apiKeyHint')
@@ -177,13 +174,14 @@ async function contextSuggestions(
 ): Promise<ComposerSuggestionItem[]> {
   const bridge = window.agentApi
   const workspace = agent.workspacePath
-  if (!bridge || !workspace) return []
+  const projectId = agent.selectedProjectId
+  if (!bridge || !workspace || !projectId) return []
 
   const lookup = workspaceSuggestionQuery(query)
   suggestionLoading.value = true
   const result = await bridge.listWorkspaceDirectory({
     version: IPC_VERSION,
-    workspace,
+    projectId,
     path: lookup.directory,
   })
 
@@ -414,7 +412,6 @@ async function handleProviderSelect(value: string | number) {
   if (await agent.setActiveProvider(providerId)) {
     await agent.selectProviderForEditing(providerId)
     await agent.closeRuntimeSession()
-    agent.schedulePersist(false)
   }
 }
 

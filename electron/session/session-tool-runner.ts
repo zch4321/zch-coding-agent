@@ -3,11 +3,9 @@ import type { ProviderPublicConfig } from '../../shared/config'
 import type { CallId, MessageId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
-import type { ChangeHistoryStore } from './change-history'
 import { boundToolResultForContext } from '../tools/context-budget'
 import { PermissionPipeline } from '../permission/permission-pipeline'
 import { hasSideEffects } from '../permission/policy-engine'
-import type { ApprovedToolCall } from '../tools/approved-tool-call'
 import type { PluginEventBus } from '../plugins/event-bus'
 import type { ToolCall, ToolDefinition, ToolResult } from '../tools/types'
 import { ProviderAutoApprover } from '../permission/auto-approver'
@@ -52,7 +50,6 @@ function serializedBytes(value: unknown): number {
 export class SessionToolRunner {
   readonly #configStore: ConfigStore
   readonly #pluginBus: PluginEventBus | undefined
-  readonly #changeHistory: ChangeHistoryStore | undefined
   readonly #fileChangeExecution: FileChangeExecutionPort | undefined
   readonly #promptRegistry: PromptRegistry | undefined
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
@@ -74,7 +71,6 @@ export class SessionToolRunner {
   constructor(options: {
     configStore: ConfigStore
     pluginBus?: PluginEventBus
-    changeHistory?: ChangeHistoryStore
     fileChangeExecution?: FileChangeExecutionPort
     promptRegistry?: PromptRegistry
     fetchImpl?: typeof fetch
@@ -95,7 +91,6 @@ export class SessionToolRunner {
   }) {
     this.#configStore = options.configStore
     this.#pluginBus = options.pluginBus
-    this.#changeHistory = options.changeHistory
     this.#fileChangeExecution = options.fileChangeExecution
     this.#promptRegistry = options.promptRegistry
     this.#fetchImpl = options.fetchImpl
@@ -151,7 +146,6 @@ export class SessionToolRunner {
         let approvedBy = 'none'
         let policySignals: JsonValue[] = []
         let diffHash: string | undefined
-        let approvedCall: ApprovedToolCall | undefined
         let preparedFileChange: PreparedFileChange | undefined
         let approvedDiff = ''
         let approvalUsageProvider: ProviderPublicConfig | undefined
@@ -300,7 +294,6 @@ export class SessionToolRunner {
 
                 approvedBy = authorization.approvedCall.approvedBy
                 diffHash = authorization.approvedCall.diffHash
-                approvedCall = authorization.approvedCall
                 approvedDiff = authorization.diff ?? ''
                 const preflight = await this.#contextGate.preflightToolContext(
                   session,
@@ -378,26 +371,6 @@ export class SessionToolRunner {
               }
             })
           result = annotateFileMutationResult(result, mutation)
-        } else if (
-          result.status === 'ok' &&
-          !this.#fileChangeExecution &&
-          approvedCall &&
-          session.conversationId &&
-          this.#changeHistory
-        ) {
-          await this.#changeHistory
-            .record({
-              conversationId: session.conversationId,
-              workspace: session.workspace,
-              approvedCall,
-              diff: approvedDiff,
-            })
-            .catch((error: unknown) =>
-              this.#onDiagnostic(
-                'Failed to persist file change history',
-                error,
-              ),
-            )
         }
 
         const contextResult = boundToolResultForContext(
@@ -503,6 +476,7 @@ export class SessionToolRunner {
           truncated:
             'truncated' in providerResult && providerResult.truncated === true,
           durationMs,
+          turnId: run.rootUserMessageId,
         })
         terminalCallIds.add(providerCall.id)
       }
@@ -523,6 +497,7 @@ export class SessionToolRunner {
           reason: call.reason,
           status: cancelled ? 'cancelled' : 'failed',
           truncated: false,
+          turnId: run.rootUserMessageId,
         })
         terminalCallIds.add(call.id)
       }

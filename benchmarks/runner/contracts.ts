@@ -149,7 +149,6 @@ export interface BenchmarkTrialResult {
   sessionId?: string
   metrics?: BenchmarkTrialMetrics
   artifacts?: {
-    conversationMarkdown?: string
     sessionTranscript?: string
   }
   initial: {

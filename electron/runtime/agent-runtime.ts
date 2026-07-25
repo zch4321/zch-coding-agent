@@ -7,7 +7,6 @@ import type { McpManager } from '../mcp/mcp-manager'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import type { PromptRegistry } from '../prompts/registry'
 import type { SessionManager } from '../session/session-manager'
-import type { ChangeHistoryStore } from '../session/change-history'
 import type { SkillsManager } from '../skills/manager'
 import type { RuntimeEventBus } from './runtime-event-bus'
 import type { RunCompletion } from './runtime-events'
@@ -17,7 +16,6 @@ export interface AgentRuntimeServices {
   sessions: SessionManager
   skills: SkillsManager
   traces: TraceService
-  changes: ChangeHistoryStore
   projects: ProjectMetadataStore
   codeBackends: CodeBackendManager
   mcp: McpManager
@@ -49,7 +47,6 @@ export class AgentRuntime {
   }
 
   createSession(input: {
-    conversationId?: string
     workspace: string
     mode: PermissionMode
     provider: string

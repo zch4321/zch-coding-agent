@@ -17,6 +17,8 @@ const { t } = useI18n()
 const emit = defineEmits<{
   revert: [messageId: string, preview: string]
   fork: [messageId: string]
+  retry: [messageId: string, preview: string]
+  edit: [messageId: string, preview: string]
 }>()
 const scrollElement = ref<HTMLElement>()
 const bottomSentinel = ref<HTMLElement>()
@@ -40,6 +42,14 @@ function requestRevert(messageId: string, text: string) {
 
 function requestFork(messageId: string) {
   emit('fork', messageId)
+}
+
+function requestRetry(messageId: string, text: string) {
+  emit('retry', messageId, text.replace(/\s+/g, ' ').slice(0, 80))
+}
+
+function requestEdit(messageId: string, text: string) {
+  emit('edit', messageId, text.replace(/\s+/g, ' ').slice(0, 80))
 }
 
 function toolDetailsName(tool: ToolActivity): string {
@@ -234,6 +244,8 @@ onBeforeUnmount(() => {
         :style="{ order: message.order ?? 0 }"
         @revert="requestRevert"
         @fork="requestFork"
+        @retry="requestRetry"
+        @edit="requestEdit"
       />
 
       <ToolCallCard

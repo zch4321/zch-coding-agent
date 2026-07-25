@@ -33,6 +33,8 @@ export interface MessageRow {
   provider_continuation_json: string | null
   model_route_json: string | null
   metadata_json: string | null
+  visibility: string
+  turn_id: string | null
   in_history: number
   created_at: string
 }
@@ -85,6 +87,8 @@ export function encodeMessageRow(record: MessageRecord): MessageRow {
     metadata_json: record.metadata
       ? encodeJsonColumn(record.metadata, 'messages.metadata_json')
       : null,
+    visibility: record.visibility,
+    turn_id: record.turnId ?? null,
     in_history: record.inHistory ? 1 : 0,
     created_at: record.createdAt,
   }
@@ -119,6 +123,7 @@ export function decodeMessageRow(row: Record<string, unknown>): MessageRecord {
     row.metadata_json,
     'messages.metadata_json',
   )
+  const turnId = nullableStringColumn(row.turn_id, 'messages.turn_id')
   const record = {
     schemaVersion: integerColumn(row.schema_version, 'messages.schema_version'),
     id: stringColumn(row.id, 'messages.id') as MessageId,
@@ -126,6 +131,7 @@ export function decodeMessageRow(row: Record<string, unknown>): MessageRecord {
     seq: integerColumn(row.seq, 'messages.seq'),
     kind: stringColumn(row.kind, 'messages.kind'),
     parts: parseJsonColumn(row.parts_json, 'messages.parts_json'),
+    visibility: stringColumn(row.visibility, 'messages.visibility'),
     inHistory: booleanColumn(row.in_history, 'messages.in_history'),
     createdAt: stringColumn(row.created_at, 'messages.created_at'),
     ...(clientRequestId === null ? {} : { clientRequestId }),
@@ -133,6 +139,7 @@ export function decodeMessageRow(row: Record<string, unknown>): MessageRecord {
     ...(providerContinuation === null ? {} : { providerContinuation }),
     ...(modelRoute === null ? {} : { modelRoute }),
     ...(metadata === null ? {} : { metadata }),
+    ...(turnId === null ? {} : { turnId: turnId as MessageId }),
   }
   assertSchemaValue<MessageRecord>(
     validateMessageRecord,

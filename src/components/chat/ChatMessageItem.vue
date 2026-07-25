@@ -14,6 +14,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   revert: [messageId: string, text: string]
   fork: [messageId: string]
+  retry: [messageId: string, text: string]
+  edit: [messageId: string, text: string]
 }>()
 const { t } = useI18n()
 
@@ -95,9 +97,37 @@ function roleLabel(): string {
       </NCollapseItem>
     </NCollapse>
     <div
-      v-if="message.role === 'assistant' && message.text && !actionsDisabled"
+      v-if="
+        message.text && !actionsDisabled && message.durableKind !== 'stream'
+      "
       class="message-actions"
     >
+      <NTooltip v-if="message.retryable">
+        <template #trigger>
+          <button
+            type="button"
+            class="message-action"
+            :aria-label="t('chat.retryMessage')"
+            @click="emit('retry', message.id, message.text)"
+          >
+            <UiIcon name="restore" />
+          </button>
+        </template>
+        {{ t('chat.retryMessageTitle') }}
+      </NTooltip>
+      <NTooltip v-if="message.editable">
+        <template #trigger>
+          <button
+            type="button"
+            class="message-action"
+            :aria-label="t('chat.editMessage')"
+            @click="emit('edit', message.id, message.text)"
+          >
+            <UiIcon name="edit" />
+          </button>
+        </template>
+        {{ t('chat.editMessageTitle') }}
+      </NTooltip>
       <NTooltip>
         <template #trigger>
           <button

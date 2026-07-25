@@ -62,6 +62,7 @@ export function messageFixtures(
     id: id as MessageId,
     sessionId,
     seq,
+    visibility: 'visible' as const,
     inHistory: true,
     createdAt: new Date(
       Date.parse(FIXTURE_TIMESTAMP) + seq * 1_000,

@@ -9,6 +9,7 @@ import {
   MessageSeqSchema,
   Sha256Schema,
 } from './durable'
+import { ContextAttachmentChipSchema } from './context'
 import { CallIdSchema, MessageIdSchema, SessionIdSchema } from './ids'
 import { assertBoundedJsonValue, JsonValueSchema } from './json'
 import {
@@ -47,6 +48,13 @@ export const CANONICAL_PROMPT_KINDS = [
   'interjection',
 ] as const
 export type CanonicalPromptKind = (typeof CANONICAL_PROMPT_KINDS)[number]
+
+export const MESSAGE_VISIBILITIES = ['visible', 'hidden', 'superseded'] as const
+export type MessageVisibility = (typeof MESSAGE_VISIBILITIES)[number]
+export const MessageVisibilitySchema = Type.Unsafe<MessageVisibility>({
+  type: 'string',
+  enum: [...MESSAGE_VISIBILITIES],
+})
 
 export const ProviderContinuationEnvelopeSchema = Type.Object(
   {
@@ -113,10 +121,7 @@ export type MessagePart = Static<typeof MessagePartSchema>
 
 const AttachmentMetadataSchema = Type.Object(
   {
-    ref: Type.String({ minLength: 1, maxLength: 4_096 }),
-    name: Type.String({ minLength: 1, maxLength: 512 }),
-    mimeType: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-    snapshotHash: Type.Optional(Sha256Schema),
+    ...ContextAttachmentChipSchema.properties,
   },
   { additionalProperties: false },
 )
@@ -306,6 +311,8 @@ const messageIdentityProperties = {
   id: MessageIdSchema,
   sessionId: SessionIdSchema,
   seq: MessageSeqSchema,
+  visibility: MessageVisibilitySchema,
+  turnId: Type.Optional(MessageIdSchema),
   inHistory: Type.Boolean(),
   createdAt: DateTimeSchema,
 }
@@ -504,6 +511,10 @@ export const MessagePageSchema = Type.Union([
 export type MessagePage = Static<typeof MessagePageSchema>
 
 export function assertMessageRecordSemantics(record: MessageRecord): void {
+  if (record.visibility === 'superseded' && record.inHistory) {
+    throw new TypeError('Superseded messages must not enter history')
+  }
+
   if (isControlCommandUserInput(record) && record.inHistory) {
     throw new TypeError('Control command user input must not enter history')
   }

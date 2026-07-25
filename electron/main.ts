@@ -1,11 +1,13 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   Menu,
   net,
   protocol,
   session,
+  shell,
   type Event,
   type Input,
   type OnHeadersReceivedListenerDetails,
@@ -25,10 +27,10 @@ import {
 } from '../shared/notices'
 import { registerIpcHandlers } from './ipc'
 import { createAppIpcHandlers } from './ipc/app-handlers'
-import { WorkbenchStore } from './workbench/store'
 import { createHttpTransport } from './net/http-transport'
 import { createElectronRuntimeEventListener } from './runtime/electron-runtime-event-sink'
-import { createAgentRuntime } from './runtime/create-agent-runtime'
+import { createBackendRuntime } from './application/create-backend-runtime'
+import { sendDomainStateEvent } from './ipc/event-sink'
 import {
   APP_ENTRY_URL,
   APP_HOST,
@@ -143,42 +145,49 @@ async function installIpc(): Promise<void> {
     )
   }
 
-  const workbenchStore = new WorkbenchStore(
-    path.join(userData, 'workbench.json'),
-  )
-  await workbenchStore.initialize()
-  const runtime = await createAgentRuntime({
-    configStore,
-    userDataDirectory: userData,
-    promptDirectory: path.join(appRoot, 'resources', 'prompts'),
-    eventListeners: [
-      createElectronRuntimeEventListener(() => mainWindow?.webContents),
-    ],
-    fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =>
-      httpTransport.fetch(input, init),
-    onDiagnostic: (message, error) => console.error(message, error),
+  const backend = await openBackendWithRecovery({
+    userData,
+    create: () =>
+      createBackendRuntime({
+        configStore,
+        databasePath: path.join(userData, 'agent.db'),
+        runtimeDataDirectory: userData,
+        promptDirectory: path.join(appRoot, 'resources', 'prompts'),
+        appVersion: app.getVersion(),
+        eventListeners: [
+          createElectronRuntimeEventListener(() => mainWindow?.webContents),
+        ],
+        fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =>
+          httpTransport.fetch(input, init),
+        onDiagnostic: (message, error) => console.error(message, error),
+      }),
   })
-  appDisposer.add(() => runtime.dispose())
+  appDisposer.add(() => backend.dispose())
+  const unsubscribeDomainState = backend.subscribe((commit) => {
+    const webContents = mainWindow?.webContents
+    if (!webContents) return
+    sendDomainStateEvent(webContents, {
+      kind: 'commit',
+      event: { version: 1, commit },
+    })
+  })
+  appDisposer.add(unsubscribeDomainState)
   const {
-    sessions: sessionManager,
     skills: skillsManager,
     traces: traceService,
-    changes: changeHistory,
     projects: projectMetadata,
     codeBackends,
     mcp: mcpManager,
-  } = runtime.services
+  } = backend.runtime.services
   const unregister = registerIpcHandlers({
     ipcMain,
     getTrustedWebContents: () => mainWindow?.webContents,
     isAllowedUrl: (url) => isAllowedApplicationUrl(url, devServerUrl),
     handlers: createAppIpcHandlers({
       configStore,
-      sessionManager,
+      backend,
       skillsManager,
       traceService,
-      changeHistory,
-      workbenchStore,
       projectMetadata,
       codeBackends,
       mcpManager,
@@ -193,6 +202,36 @@ async function installIpc(): Promise<void> {
     `P2 notices: provider=${PROVIDER_NOTICE_VERSION}, trace=${TRACE_NOTICE_VERSION}`,
   )
   appDisposer.add(unregister)
+}
+
+async function openBackendWithRecovery<T>(input: {
+  userData: string
+  create: () => Promise<T>
+}): Promise<T> {
+  for (;;) {
+    try {
+      return await input.create()
+    } catch (error) {
+      console.error('Durable backend startup failed', error)
+      const choice = dialog.showMessageBoxSync({
+        type: 'error',
+        title: 'Durable backend unavailable',
+        message: 'The local database could not be opened or migrated.',
+        detail:
+          'Retry after resolving the problem, open the data directory for recovery, or exit the application.',
+        buttons: ['Retry', 'Open data directory', 'Exit'],
+        defaultId: 0,
+        cancelId: 2,
+        noLink: true,
+      })
+      if (choice === 0) continue
+      if (choice === 1) {
+        await shell.openPath(input.userData)
+        continue
+      }
+      throw error
+    }
+  }
 }
 
 function guardNavigation(

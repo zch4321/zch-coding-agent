@@ -6,7 +6,6 @@ import type { WebContents } from 'electron'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
-import { ChangeHistoryStore } from './change-history'
 import { SessionManager } from './session-manager'
 import {
   safeAutoApprover,
@@ -29,10 +28,6 @@ describe('SessionManager approvals', () => {
     await writeFile(target, 'alpha\nbeta\n')
 
     const store = await createConfig(directory)
-    const changeHistory = new ChangeHistoryStore(
-      path.join(directory, 'change-history.json'),
-    )
-    await changeHistory.initialize()
     const provider = new ScriptedEditProvider()
     const sent: AgentEventEnvelope[] = []
     const webContents = {
@@ -49,10 +44,8 @@ describe('SessionManager approvals', () => {
       ),
       providerFactory: () => provider,
       autoApproverFactory: () => safeAutoApprover,
-      changeHistory,
     })
     const sessionId = await manager.createSession({
-      conversationId: 'conversation-p3',
       workspace,
       mode: 'auto',
       provider: 'deepseek',
@@ -79,12 +72,6 @@ describe('SessionManager approvals', () => {
           envelope.event.callId === 'call-edit',
       )?.event,
     ).not.toHaveProperty('approval')
-    expect(changeHistory.list('conversation-p3', workspace)).toMatchObject([
-      {
-        path: 'note.txt',
-        operation: 'patch',
-      },
-    ])
     await manager.closeSession(sessionId)
     const trace = (
       await readFile(
@@ -185,7 +172,6 @@ describe('SessionManager approvals', () => {
       },
     })
     const sessionId = await manager.createSession({
-      conversationId: 'conversation-auto-approval-json',
       workspace,
       mode: 'auto',
       provider: 'deepseek',
@@ -250,7 +236,6 @@ describe('SessionManager approvals', () => {
       }),
     })
     const sessionId = await manager.createSession({
-      conversationId: 'conversation-auto-approval-timeout',
       workspace,
       mode: 'auto',
       provider: 'deepseek',

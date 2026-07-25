@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { configureApp } from './support/app-helpers'
+import { configureApp, findDurableMessageText } from './support/app-helpers'
 import {
   providerApiKey,
   providerMessageText,
@@ -85,29 +85,8 @@ test.describe('Electron chat and tool workflows', () => {
     expect(requestMessages).toContain('Summarize @notes.md')
 
     await expect
-      .poll(async () =>
-        page.evaluate(async () => {
-          type Message = { role: string; text: string }
-          type Conversation = { messages: Message[] }
-          type WorkbenchResult =
-            | { ok: true; value: { conversations: Conversation[] } }
-            | { ok: false }
-          const api = Reflect.get(window, 'agentApi') as {
-            getWorkbench(payload: unknown): Promise<WorkbenchResult>
-          }
-          const workbench = await api.getWorkbench({ version: 1 })
-          if (!workbench.ok) return ''
-          const conversation = workbench.value.conversations.find((candidate) =>
-            candidate.messages.some((message) =>
-              message.text.includes('Summarize @notes.md'),
-            ),
-          )
-          return (
-            conversation?.messages.find(
-              (message) => message.role === 'assistant',
-            )?.text ?? ''
-          )
-        }),
+      .poll(() =>
+        findDurableMessageText(page, 'Summarize @notes.md', 'assistant_turn'),
       )
       .toBe('E2E provider saw the workspace context.')
   })

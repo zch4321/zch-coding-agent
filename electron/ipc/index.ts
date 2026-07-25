@@ -16,6 +16,11 @@ import {
   validatePayloadLimits,
   type PayloadLimits,
 } from './validators'
+import {
+  ApplicationError,
+  normalizeApplicationError,
+} from '../application/application-error'
+import { PersistenceError } from '../persistence/persistence-error'
 
 export type IpcBusinessHandler<Channel extends IpcChannel> = (
   payload: IpcPayload<Channel>,
@@ -151,6 +156,21 @@ export async function handleIpcInvocation<Channel extends IpcChannel>(
   } catch (error) {
     if (error instanceof IpcFault) {
       return failure(error.error)
+    }
+
+    if (
+      error instanceof ApplicationError ||
+      error instanceof PersistenceError
+    ) {
+      const normalized = normalizeApplicationError(error)
+      options.onDiagnostic?.(`IPC handler ${channel} failed`, error)
+      return failure({
+        code: normalized.code,
+        message: normalized.message,
+        ...(normalized.details
+          ? { details: toJsonDetails(normalized.details) }
+          : {}),
+      })
     }
 
     const code =

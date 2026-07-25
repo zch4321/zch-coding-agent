@@ -66,7 +66,6 @@ const { t } = useI18n()
         :disabled="agent.approvalSubmitting"
         @click="
           agent.decideApproval({
-            conversationId: agent.activeConversationId!,
             decision: 'allow',
           })
         "
@@ -84,7 +83,6 @@ const { t } = useI18n()
         :disabled="agent.approvalSubmitting"
         @click="
           agent.decideApproval({
-            conversationId: agent.activeConversationId!,
             decision: 'allow',
             remember: true,
           })
@@ -97,7 +95,6 @@ const { t } = useI18n()
         :disabled="agent.approvalSubmitting"
         @click="
           agent.decideApproval({
-            conversationId: agent.activeConversationId!,
             decision: 'deny',
           })
         "

@@ -51,7 +51,6 @@ describe('TraceService', () => {
       {
         type: 'session.start',
         sessionId,
-        conversationId: 'conversation-replay',
         workspace: 'F:/workspace',
         model: 'fixture',
         mode: 'readonly',
@@ -66,7 +65,6 @@ describe('TraceService', () => {
     await expect(service.list()).resolves.toMatchObject([
       {
         traceId,
-        conversationId: 'conversation-replay',
         closed: true,
         eventCount: 6,
       },

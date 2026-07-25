@@ -1,37 +1,28 @@
-# P7 Legacy Workbench Replacement Checklist
+# P7 Renderer Replica Replacement Checklist
 
-P0 audit, 2026-07-22. These callers currently use `workbench:get` or
-`workbench:save` directly and must move to durable backend commands or the
-restricted target seed helper before P8 cutover.
+> 状态：完成 · 2026-07-25
+
+P7 与 P6、P8、P9 一次切流完成。Renderer 不再读取或写入 Workbench snapshot，也不存在仅供测试使用的 legacy 后门。
 
 ## E2E fixtures and assertions
 
-- `e2e/artifact-layout.spec.ts`: seeds and edits conversations through the
-  Workbench snapshot in three scenarios.
-- `e2e/features.chat-tools.spec.ts`: reads the persisted Workbench after a
-  tool trajectory.
-- `e2e/features.concurrency.spec.ts`: reads the Workbench to assert
-  background-session state.
-- `e2e/workbench-terminal.spec.ts`: seeds conversations and verifies reload
-  state through the Workbench bridge.
+- [x] `e2e/artifact-layout.spec.ts` 通过 Durable Project/Session commands 建立 fixture。
+- [x] `e2e/features.chat-tools.spec.ts` 通过 `session:search` + `message:list` 验证 SQLite assistant message。
+- [x] `e2e/features.concurrency.spec.ts` 通过 Durable Message query 验证 interjection。
+- [x] `e2e/durable-session-terminal.spec.ts` 覆盖用户消息 retry/edit、Assistant 无 retry/edit 入口、fork 和 Session-owned terminal。
+- [x] 全部 E2E 不调用 `getWorkbench`、`saveWorkbench` 或 `migrateWorkbenchV1`。
 
-## Renderer store tests
+## Renderer stores
 
-- `src/stores/agent.history.test.ts`
-- `src/stores/agent.concurrency.test.ts`
-- `src/stores/agent.facade-settings.test.ts`
-- `src/stores/agent-test-support.ts`
-
-These tests currently stub `AgentApi.saveWorkbench` or assert complete
-Workbench snapshots. P7 replaces them with command-result/durable-event
-reconciliation assertions. They must not retain a test-only durable
-`workbench:save` backdoor.
+- [x] `agent-replica.ts` 保存 Project/Session replica、分页 Message/FileChange cache、runtime snapshot 和 cursor。
+- [x] `agent-runtime.ts` 只保存每 Session stream/approval/tool overlay，以及未发送 composer draft。
+- [x] command response 与 domain event 共用 reconciler；重复事件幂等，cursor/backend instance/revision 缺口触发对应重同步。
+- [x] Timeline 从 canonical `MessageRecord` 投影，不写 Conversation 副本。
+- [x] Workbench persistence/schema、legacy timeline event reducers 和旧 snapshot tests 已删除。
 
 ## Cutover verification
 
-- Replace E2E fixture writes with target Project/Session/Message commands or
-  a backend-private seed helper that does not exist in the production preload
-  API.
-- Assert reload through `app:get-bootstrap`, `session:get` and paged messages.
-- Remove `getWorkbench`, `saveWorkbench` and `migrateWorkbenchV1` from test
-  stubs, `AgentApi`, preload and IPC contracts in P9.
+- [x] Preload 在 renderer hydrate 前有界缓存 domain events。
+- [x] Reload 通过 `app:get-bootstrap`、`session:get` 和分页 query 恢复。
+- [x] `AgentApi`、preload、IPC contracts 和 handlers 不暴露旧 Workbench API。
+- [x] 旧 `workbench.json`、`change-history.json` 和 localStorage 数据不迁移、不读取、不删除、不改写。

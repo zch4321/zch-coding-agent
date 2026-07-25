@@ -1,4 +1,6 @@
-import { access, mkdir, realpath } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import os from 'node:os'
 import path from 'node:path'
 import type { Writable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -6,11 +8,13 @@ import type { AutoApprover } from '../permission/auto-approver'
 import { RuntimeIdentitySchema } from '../../shared/runtime-identity'
 import type { RuntimeIdentity } from '../../shared/runtime-identity'
 import type { LLMProvider } from '../providers/provider'
-import { createAgentRuntime } from '../runtime/create-agent-runtime'
+import { createBackendRuntime } from '../application/create-backend-runtime'
+import { traceIdForSession } from '../logging/logger'
 import { createRuntimeIdentity, sha256Json } from '../runtime/runtime-identity'
 import type { RunCompletion } from '../runtime/runtime-events'
 import type { RuntimeEventListener } from '../runtime/runtime-events'
 import type { BenchmarkAgentCase } from '../../shared/benchmark'
+import type { ProjectId, SessionId } from '../../shared/ids'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import { writeJsonAtomic } from '../config/atomic-file'
 import { prepareHeadlessConfig } from './config'
@@ -99,16 +103,33 @@ export async function runHeadlessAgent(
   })
   const writer = new HeadlessEventWriter(options.output)
   const metrics = new HeadlessRunMetrics(writer)
-  const runtime = await createAgentRuntime({
+  let forwardRuntimeEvents = true
+  const metricsListener: RuntimeEventListener = {
+    onAgentEvent: (event) => {
+      if (forwardRuntimeEvents) metrics.onAgentEvent(event)
+    },
+    onTerminalEvent: (event) => {
+      if (forwardRuntimeEvents) metrics.onTerminalEvent(event)
+    },
+  }
+  const databaseDirectory = await mkdtemp(
+    path.join(os.tmpdir(), 'zch-headless-db-'),
+  )
+  const backend = await createBackendRuntime({
     configStore: prepared.configStore,
-    userDataDirectory: prepared.userDataDirectory,
+    databasePath: path.join(databaseDirectory, 'agent.db'),
+    runtimeDataDirectory: prepared.userDataDirectory,
     promptDirectory: await resolvePromptDirectory(options.promptDirectory),
     fetchImpl: options.fetchImpl,
     providerFactory: options.providerFactory,
     autoApproverFactory: options.autoApproverFactory,
-    eventListeners: [metrics, ...(options.eventListeners ?? [])],
+    eventListeners: [metricsListener, ...(options.eventListeners ?? [])],
     onDiagnostic: options.onDiagnostic,
+  }).catch(async (error: unknown) => {
+    await rm(databaseDirectory, { recursive: true, force: true })
+    throw error
   })
+  const runtime = backend.runtime
   const controller = new AbortController()
   let timedOut = false
   let timeout: ReturnType<typeof setTimeout> | undefined
@@ -127,7 +148,7 @@ export async function runHeadlessAgent(
     configHash: prepared.configHash,
   })
 
-  let sessionId: Awaited<ReturnType<typeof runtime.createSession>> | undefined
+  let sessionId: SessionId | undefined
   const runIds: HeadlessResult['runIds'] = []
   let initialRunIds: HeadlessResult['runIds'] | undefined
   const repairRunIds: HeadlessResult['runIds'] = []
@@ -149,33 +170,61 @@ export async function runHeadlessAgent(
 
   try {
     try {
-      sessionId = await runtime.createSession({
-        workspace,
-        mode: 'yolo',
-        provider: provider.id,
-      })
-      const firstRun = runtime.run({
-        sessionId,
-        message: options.task,
-        clientRequestId: 'headless-task-1',
-        ...(options.benchmarkCase
-          ? {
-              harnessContexts: [
-                {
-                  kind: 'benchmark_case' as const,
-                  text: JSON.stringify(options.benchmarkCase, null, 2),
-                  source: `benchmark:${options.benchmarkCase.suiteId}/${options.benchmarkCase.caseId}`,
-                },
-              ],
-            }
-          : {}),
-        signal: controller.signal,
-      })
+      const projectResult = await backend.projects.add({ path: workspace })
+      const project = projectResult.commit.change.projects.find(
+        (candidate) => candidate.path === workspace,
+      )
+      if (!project) {
+        throw new Error('Headless durable Project was not created')
+      }
+      sessionId = `session:${randomUUID()}` as SessionId
+      const firstRun = await backend.runs.start(
+        {
+          version: 1,
+          kind: 'new_session',
+          sessionId,
+          projectId: project.id as ProjectId,
+          modelSelection: {
+            providerId: provider.id,
+            model: provider.model,
+            reasoning: provider.reasoning ?? 'off',
+          },
+          permissionMode: 'yolo',
+          message: options.task,
+          clientRequestId: 'headless-task-1',
+        },
+        {
+          ...(options.benchmarkCase
+            ? {
+                harnessContexts: [
+                  {
+                    kind: 'benchmark_case' as const,
+                    text: JSON.stringify(options.benchmarkCase, null, 2),
+                    source: `benchmark:${options.benchmarkCase.suiteId}/${options.benchmarkCase.caseId}`,
+                  },
+                ],
+              }
+            : {}),
+        },
+      )
+      if (firstRun.outcome !== 'started') {
+        throw new Error('Headless first run was unexpectedly deduplicated')
+      }
+      const firstRunId = firstRun.runId
+      const interruptFirstRun = () => runtime.interrupt(sessionId!, firstRunId)
       options.signal?.addEventListener('abort', relayAbort, { once: true })
+      controller.signal.addEventListener('abort', interruptFirstRun, {
+        once: true,
+      })
       if (options.signal?.aborted) relayAbort()
       armTimeout()
-      runIds.push(firstRun.runId)
-      completion = await firstRun.completion
+      runIds.push(firstRunId)
+      try {
+        completion = await runtime.events.waitForRun(sessionId, firstRunId)
+        await runtime.services.sessions.waitForRunSettled(sessionId, firstRunId)
+      } finally {
+        controller.signal.removeEventListener('abort', interruptFirstRun)
+      }
 
       const approvalLimit = options.config.maxAutoPlanApprovals ?? 1
       while (
@@ -190,8 +239,7 @@ export async function runHeadlessAgent(
           status: 'active',
           source: 'headless:auto-plan-approval',
         })
-        if (!updated.accepted) break
-        metrics.plan = updated.plan
+        metrics.plan = updated.commit.change.session.plan ?? undefined
         const prompt = runtime.services.prompts.headlessPrompt(
           'autonomousPlanApproval',
           prepared.configStore.getPublicConfig().assistant.language,
@@ -333,7 +381,7 @@ export async function runHeadlessAgent(
         tracePath: path.join(
           prepared.userDataDirectory,
           'traces',
-          `${sessionId!}.jsonl`,
+          `${traceIdForSession(sessionId!)}.jsonl`,
         ),
         ...(patch.path ? { patchPath: patch.path } : {}),
         patchStatus: patch.status,
@@ -349,14 +397,14 @@ export async function runHeadlessAgent(
     }
     await writeJsonAtomic(identityPath, identity)
     await writeJsonAtomic(resultPath, result)
-    await runtime.closeSession(sessionId)
     writer.write({ type: 'runtime.completed', status, resultPath })
+    forwardRuntimeEvents = false
     return result
   } finally {
     if (timeout) clearTimeout(timeout)
     options.signal?.removeEventListener('abort', relayAbort)
-    if (sessionId) await runtime.closeSession(sessionId).catch(() => false)
-    await runtime.dispose()
+    await backend.dispose()
+    await rm(databaseDirectory, { recursive: true, force: true })
   }
 }
 

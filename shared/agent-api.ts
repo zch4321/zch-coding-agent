@@ -1,5 +1,6 @@
 import type {
   AgentEventEnvelope,
+  DomainStateDelivery,
   IpcChannel,
   IpcPayload,
   IpcResult,
@@ -34,21 +35,54 @@ export interface AgentApi {
   listProviderModels(
     payload: IpcPayload<'provider:list-models'>,
   ): Promise<IpcResult<'provider:list-models'>>
-  getWorkbench(
-    payload: IpcPayload<'workbench:get'>,
-  ): Promise<IpcResult<'workbench:get'>>
-  saveWorkbench(
-    payload: IpcPayload<'workbench:save'>,
-  ): Promise<IpcResult<'workbench:save'>>
-  migrateWorkbenchV1(
-    payload: IpcPayload<'workbench:migrate-v1'>,
-  ): Promise<IpcResult<'workbench:migrate-v1'>>
-  exportConversationMarkdown(
-    payload: IpcPayload<'workbench:export-conversation'>,
-  ): Promise<IpcResult<'workbench:export-conversation'>>
-  importConversationMarkdown(
-    payload: IpcPayload<'workbench:import-conversation'>,
-  ): Promise<IpcResult<'workbench:import-conversation'>>
+  getBootstrap(
+    payload: IpcPayload<'app:get-bootstrap'>,
+  ): Promise<IpcResult<'app:get-bootstrap'>>
+  listProjects(
+    payload: IpcPayload<'project:list'>,
+  ): Promise<IpcResult<'project:list'>>
+  addProject(
+    payload: IpcPayload<'project:add'>,
+  ): Promise<IpcResult<'project:add'>>
+  updateProjectRecord(
+    payload: IpcPayload<'project:update'>,
+  ): Promise<IpcResult<'project:update'>>
+  removeProject(
+    payload: IpcPayload<'project:remove'>,
+  ): Promise<IpcResult<'project:remove'>>
+  listSessions(
+    payload: IpcPayload<'session:list'>,
+  ): Promise<IpcResult<'session:list'>>
+  getSession(
+    payload: IpcPayload<'session:get'>,
+  ): Promise<IpcResult<'session:get'>>
+  updateSession(
+    payload: IpcPayload<'session:update'>,
+  ): Promise<IpcResult<'session:update'>>
+  archiveSession(
+    payload: IpcPayload<'session:archive'>,
+  ): Promise<IpcResult<'session:archive'>>
+  forkSession(
+    payload: IpcPayload<'session:fork'>,
+  ): Promise<IpcResult<'session:fork'>>
+  rewindSession(
+    payload: IpcPayload<'session:rewind'>,
+  ): Promise<IpcResult<'session:rewind'>>
+  searchSessions(
+    payload: IpcPayload<'session:search'>,
+  ): Promise<IpcResult<'session:search'>>
+  listMessages(
+    payload: IpcPayload<'message:list'>,
+  ): Promise<IpcResult<'message:list'>>
+  searchMessages(
+    payload: IpcPayload<'message:search'>,
+  ): Promise<IpcResult<'message:search'>>
+  listFileChanges(
+    payload: IpcPayload<'file-change:list'>,
+  ): Promise<IpcResult<'file-change:list'>>
+  revertFileChange(
+    payload: IpcPayload<'file-change:revert'>,
+  ): Promise<IpcResult<'file-change:revert'>>
   chooseWorkspace(
     payload: IpcPayload<'workspace:choose'>,
   ): Promise<IpcResult<'workspace:choose'>>
@@ -76,25 +110,11 @@ export interface AgentApi {
   restartProjectBackend(
     payload: IpcPayload<'project:restart-backend'>,
   ): Promise<IpcResult<'project:restart-backend'>>
-  createSession(
-    payload: IpcPayload<'session:create'>,
-  ): Promise<IpcResult<'session:create'>>
-  listChanges(
-    payload: IpcPayload<'changes:list'>,
-  ): Promise<IpcResult<'changes:list'>>
-  revertChange(
-    payload: IpcPayload<'changes:revert'>,
-  ): Promise<IpcResult<'changes:revert'>>
-  closeSession(
-    payload: IpcPayload<'session:close'>,
-  ): Promise<IpcResult<'session:close'>>
-  updateSessionMode(
-    payload: IpcPayload<'session:update-mode'>,
-  ): Promise<IpcResult<'session:update-mode'>>
   updatePlanStatus(
     payload: IpcPayload<'plan:update-status'>,
   ): Promise<IpcResult<'plan:update-status'>>
   startRun(payload: IpcPayload<'run:start'>): Promise<IpcResult<'run:start'>>
+  retryRun(payload: IpcPayload<'run:retry'>): Promise<IpcResult<'run:retry'>>
   interruptRun(
     payload: IpcPayload<'run:interrupt'>,
   ): Promise<IpcResult<'run:interrupt'>>
@@ -172,6 +192,9 @@ export interface AgentApi {
   ): Promise<IpcResult<'logs:clear-closed'>>
   onAgentEvent(listener: (event: AgentEventEnvelope) => void): Unsubscribe
   onTerminalEvent(listener: (event: TerminalEventEnvelope) => void): Unsubscribe
+  onDomainStateEvent(
+    listener: (event: DomainStateDelivery) => void,
+  ): Unsubscribe
 }
 
 export const AGENT_API_KEYS = [
@@ -183,11 +206,22 @@ export const AGENT_API_KEYS = [
   'disableMcpServer',
   'restartMcpServer',
   'listProviderModels',
-  'getWorkbench',
-  'saveWorkbench',
-  'migrateWorkbenchV1',
-  'exportConversationMarkdown',
-  'importConversationMarkdown',
+  'getBootstrap',
+  'listProjects',
+  'addProject',
+  'updateProjectRecord',
+  'removeProject',
+  'listSessions',
+  'getSession',
+  'updateSession',
+  'archiveSession',
+  'forkSession',
+  'rewindSession',
+  'searchSessions',
+  'listMessages',
+  'searchMessages',
+  'listFileChanges',
+  'revertFileChange',
   'chooseWorkspace',
   'listWorkspaceDirectory',
   'readWorkspaceFile',
@@ -197,13 +231,9 @@ export const AGENT_API_KEYS = [
   'detectProjectModules',
   'getProjectBackendStatus',
   'restartProjectBackend',
-  'createSession',
-  'listChanges',
-  'revertChange',
-  'closeSession',
-  'updateSessionMode',
   'updatePlanStatus',
   'startRun',
+  'retryRun',
   'interruptRun',
   'interjectRun',
   'decideApproval',
@@ -231,4 +261,5 @@ export const AGENT_API_KEYS = [
   'clearClosedTraces',
   'onAgentEvent',
   'onTerminalEvent',
+  'onDomainStateEvent',
 ] as const satisfies readonly (keyof AgentApi)[]

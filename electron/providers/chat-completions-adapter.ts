@@ -4,6 +4,7 @@ import type {
   MessageRecord,
   ToolCallPart,
 } from '../../shared/message'
+import { renderLiveUserInterjection } from '../../shared/live-interjection'
 import { canonicalHash, messageText } from '../session/canonical-history'
 import type {
   AdapterCompileInput,
@@ -258,6 +259,13 @@ function compileMessage(
         },
       ]
     }
+    case 'interjection':
+      return [
+        {
+          role: 'user',
+          content: renderLiveUserInterjection(messageText(record)),
+        },
+      ]
     default:
       return [{ role: 'user', content: messageText(record) }]
   }

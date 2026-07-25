@@ -88,6 +88,7 @@ export class SessionOrchestratorMessages {
         trusted: false,
         editable: false,
         config: this.#configStore.getPublicConfig(),
+        turnId: run.rootUserMessageId,
       })
     }
   }

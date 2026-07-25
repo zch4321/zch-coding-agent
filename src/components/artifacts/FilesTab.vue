@@ -52,14 +52,15 @@ async function fetchDirectory(
 ): Promise<TreeOption[] | undefined> {
   const bridge = window.agentApi
   const workspace = agent.workspacePath
-  if (!bridge || !workspace) {
+  const projectId = agent.selectedProjectId
+  if (!bridge || !workspace || !projectId) {
     return undefined
   }
 
   explorerError.value = ''
   const result = await bridge.listWorkspaceDirectory({
     version: IPC_VERSION,
-    workspace,
+    projectId,
     path,
   })
 
@@ -113,12 +114,13 @@ function renderTreePrefix({ option }: { option: TreeOption }) {
 async function openExplorerFile(path: string) {
   const bridge = window.agentApi
   const workspace = agent.workspacePath
+  const projectId = agent.selectedProjectId
   const generation = ++fileRequestGeneration
-  if (!bridge || !workspace) return
+  if (!bridge || !workspace || !projectId) return
   explorerError.value = ''
   const result = await bridge.readWorkspaceFile({
     version: IPC_VERSION,
-    workspace,
+    projectId,
     path,
   })
 

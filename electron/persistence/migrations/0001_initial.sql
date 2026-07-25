@@ -99,6 +99,10 @@ CREATE TABLE messages (
   metadata_json        TEXT CHECK (
     metadata_json IS NULL OR json_valid(metadata_json)
   ),
+  visibility           TEXT NOT NULL CHECK (
+    visibility IN ('visible', 'hidden', 'superseded')
+  ),
+  turn_id              TEXT,
   in_history           INTEGER NOT NULL CHECK (in_history IN (0, 1)),
   created_at           TEXT NOT NULL CHECK (length(created_at) BETWEEN 1 AND 64),
   FOREIGN KEY (replayed_from_message_id, session_id)
@@ -148,11 +152,17 @@ CREATE TABLE messages (
       normalized_reasoning_text IS NULL
       AND provider_continuation_json IS NULL
     )
+  ),
+  CHECK (
+    visibility <> 'superseded' OR in_history = 0
   )
 ) STRICT;
 
 CREATE INDEX messages_history_idx
-  ON messages(session_id, in_history, seq);
+  ON messages(session_id, visibility, in_history, seq);
+
+CREATE INDEX messages_turn_idx
+  ON messages(session_id, turn_id, seq);
 
 CREATE INDEX messages_replayed_from_idx
   ON messages(replayed_from_message_id, session_id);

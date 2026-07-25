@@ -42,7 +42,6 @@ interface TranscriptMetadataView {
   traceId: string
   revision: string
   sessionId?: string
-  conversationId?: string
   workspace?: string
   model?: string
   mode?: string
@@ -161,10 +160,10 @@ export const useTraceStore = defineStore('traces', {
       this.transcriptUnavailable = false
       await this.loadTranscript(true)
     },
-    async openConversationTranscript(conversationId: string) {
+    async openSessionTranscript(sessionId: string) {
       await this.load()
       const trace = this.items.find(
-        (candidate) => candidate.conversationId === conversationId,
+        (candidate) => candidate.sessionId === sessionId,
       )
       if (!trace) {
         this.transcriptOpen = true

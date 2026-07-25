@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -20,9 +20,26 @@ import {
   CompactProvider,
 } from '../session/session-manager-compaction-fixtures'
 import {
-  createDurableTargetRuntime,
-  type DurableTargetRuntime,
-} from './create-durable-target-runtime'
+  createBackendRuntime,
+  type BackendRuntime,
+  type CreateBackendRuntimeOptions,
+} from './create-backend-runtime'
+
+type DurableTargetRuntime = BackendRuntime
+
+function createBackendForTest(
+  options: Omit<
+    CreateBackendRuntimeOptions,
+    'databasePath' | 'runtimeDataDirectory'
+  > & { targetDirectory: string },
+) {
+  const { targetDirectory, ...runtimeOptions } = options
+  return createBackendRuntime({
+    ...runtimeOptions,
+    databasePath: path.join(targetDirectory, 'agent.db'),
+    runtimeDataDirectory: targetDirectory,
+  })
+}
 
 class TestSafeStorage implements SafeStorageAdapter {
   readonly platform = 'win32'
@@ -225,7 +242,7 @@ async function createTarget(input: {
   store: ConfigStore
   provider: OrderedProvider
 }): Promise<DurableTargetRuntime> {
-  return createDurableTargetRuntime({
+  return createBackendForTest({
     configStore: input.store,
     promptDirectory: path.resolve('resources', 'prompts'),
     targetDirectory: path.join(input.root, 'target'),
@@ -233,7 +250,42 @@ async function createTarget(input: {
   })
 }
 
-describe('P4 isolated durable target runtime', () => {
+describe('durable backend runtime', () => {
+  it('leaves legacy JSON state files untouched', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'zch-legacy-ignore-'))
+    cleanup.push(() => rm(root, { recursive: true, force: true }))
+    const targetDirectory = path.join(root, 'target')
+    await mkdir(targetDirectory)
+    const workbenchContents = '{"legacy":"workbench sentinel"}\n'
+    const changeHistoryContents = '{"legacy":"change history sentinel"}\n'
+    await writeFile(
+      path.join(targetDirectory, 'workbench.json'),
+      workbenchContents,
+      'utf8',
+    )
+    await writeFile(
+      path.join(targetDirectory, 'change-history.json'),
+      changeHistoryContents,
+      'utf8',
+    )
+    const store = await createConfig(root)
+    const target = await createBackendForTest({
+      configStore: store,
+      promptDirectory: path.resolve('resources', 'prompts'),
+      targetDirectory,
+      providerFactory: () => new OrderedProvider([]),
+    })
+    await target.bootstrap()
+    await target.dispose()
+
+    await expect(
+      readFile(path.join(targetDirectory, 'workbench.json'), 'utf8'),
+    ).resolves.toBe(workbenchContents)
+    await expect(
+      readFile(path.join(targetDirectory, 'change-history.json'), 'utf8'),
+    ).resolves.toBe(changeHistoryContents)
+  })
+
   it('commits first send before Provider and deduplicates after restart', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'zch-p4-runtime-'))
     cleanup.push(() => rm(root, { recursive: true, force: true }))
@@ -347,6 +399,120 @@ describe('P4 isolated durable target runtime', () => {
     await secondTarget.dispose()
   })
 
+  it('retries only original user messages without duplicating the user turn', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'zch-retry-runtime-'))
+    cleanup.push(() => rm(root, { recursive: true, force: true }))
+    const workspace = path.join(root, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(root)
+    const provider = new OrderedProvider([])
+    const target = await createTarget({ root, store, provider })
+    const project = (await target.projects.add({ path: workspace })).commit
+      .change.projects[0]!
+    const sessionId = 'session:user-retry' as SessionId
+    const first = await target.runs.start({
+      version: 1,
+      kind: 'new_session',
+      sessionId,
+      projectId: project.id,
+      title: 'Retry branch',
+      permissionMode: 'readonly',
+      modelSelection: {
+        providerId: store.getPublicConfig().activeProviderId,
+        model: store.getPublicConfig().providers[0]!.model,
+        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+      },
+      goal: {
+        id: 'goal:retry',
+        objective: 'Verify retry',
+        status: 'paused',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        continuationCount: 0,
+      },
+      plan: {
+        id: 'plan:retry',
+        objective: 'Verify retry',
+        status: 'rejected',
+        items: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        continuationCount: 0,
+      },
+      message: 'first user turn',
+      clientRequestId: 'request:first-user-turn',
+    })
+    if (first.outcome !== 'started') throw new Error('Run did not start')
+    await target.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      first.runId,
+    )
+    const second = await target.runs.start({
+      version: 1,
+      kind: 'existing_session',
+      sessionId,
+      message: 'second user turn',
+      clientRequestId: 'request:second-user-turn',
+    })
+    if (second.outcome !== 'started') throw new Error('Run did not start')
+    await target.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      second.runId,
+    )
+
+    const before = await target.sessions.get(sessionId)
+    const firstUser = before.messagePage.records.find(
+      (record) =>
+        record.kind === 'user_input' &&
+        'clientRequestId' in record &&
+        record.clientRequestId === 'request:first-user-turn',
+    )
+    const assistant = before.messagePage.records.find(
+      (record) => record.kind === 'assistant_turn',
+    )
+    if (!firstUser || !assistant) throw new Error('Expected durable messages')
+
+    await expect(
+      target.runs.retry({
+        version: 1,
+        sessionId,
+        expectedRevision: before.session.revision,
+        userMessageId: assistant.id,
+        clientRequestId: 'request:invalid-assistant-retry',
+      }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+
+    const retried = await target.runs.retry({
+      version: 1,
+      sessionId,
+      expectedRevision: before.session.revision,
+      userMessageId: firstUser.id,
+      clientRequestId: 'request:retry-first-user',
+    })
+    await target.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      retried.runId,
+    )
+    const after = await target.sessions.get(sessionId)
+    const activeUsers = after.messagePage.records.filter(
+      (record) =>
+        record.kind === 'user_input' &&
+        record.visibility === 'visible' &&
+        'clientRequestId' in record,
+    )
+    expect(activeUsers).toHaveLength(1)
+    expect(activeUsers[0]?.id).toBe(firstUser.id)
+    expect(after.session).toMatchObject({ goal: null, plan: null })
+    expect(
+      after.messagePage.records.filter(
+        (record) =>
+          record.kind === 'assistant_turn' && record.visibility === 'visible',
+      ),
+    ).toHaveLength(1)
+    expect(provider.calls).toBe(3)
+    await target.dispose()
+  })
+
   it('leaves no empty Session when context preparation fails', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'zch-p4-runtime-'))
     cleanup.push(() => rm(root, { recursive: true, force: true }))
@@ -414,7 +580,7 @@ describe('P4 isolated durable target runtime', () => {
     await mkdir(workspace)
     const store = await createConfig(root)
     const provider = new BlockingProvider()
-    const target = await createDurableTargetRuntime({
+    const target = await createBackendForTest({
       configStore: store,
       promptDirectory: path.resolve('resources', 'prompts'),
       targetDirectory: path.join(root, 'target'),
@@ -486,7 +652,7 @@ describe('P4 isolated durable target runtime', () => {
     await mkdir(workspace)
     const store = await createConfig(root)
     const provider = new CompactProvider()
-    const target = await createDurableTargetRuntime({
+    const target = await createBackendForTest({
       configStore: store,
       promptDirectory: path.resolve('resources', 'prompts'),
       targetDirectory: path.join(root, 'target'),
@@ -610,7 +776,7 @@ describe('P4 isolated durable target runtime', () => {
     await mkdir(workspace)
     const store = await createConfig(root)
     const provider = new EmptyCompactProvider()
-    const firstTarget = await createDurableTargetRuntime({
+    const firstTarget = await createBackendForTest({
       configStore: store,
       promptDirectory: path.resolve('resources', 'prompts'),
       targetDirectory: path.join(root, 'target'),
@@ -694,7 +860,7 @@ describe('P4 isolated durable target runtime', () => {
     await firstTarget.dispose()
 
     const afterRestartProvider = new OrderedProvider([])
-    const secondTarget = await createDurableTargetRuntime({
+    const secondTarget = await createBackendForTest({
       configStore: store,
       promptDirectory: path.resolve('resources', 'prompts'),
       targetDirectory: path.join(root, 'target'),
@@ -718,7 +884,7 @@ describe('P4 isolated durable target runtime', () => {
     await mkdir(workspace)
     const store = await createConfig(root)
     const provider = new CompactProvider()
-    const target = await createDurableTargetRuntime({
+    const target = await createBackendForTest({
       configStore: store,
       promptDirectory: path.resolve('resources', 'prompts'),
       targetDirectory: path.join(root, 'target'),
@@ -796,7 +962,7 @@ describe('P4 isolated durable target runtime', () => {
     await mkdir(workspace)
     const store = await createConfig(root)
     const provider = new AbortCompactProvider()
-    const target = await createDurableTargetRuntime({
+    const target = await createBackendForTest({
       configStore: store,
       promptDirectory: path.resolve('resources', 'prompts'),
       targetDirectory: path.join(root, 'target'),

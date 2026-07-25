@@ -175,31 +175,26 @@ describe('SessionManager M1 workspace concurrency', () => {
       ),
     })
     const writerSession = await manager.createSession({
-      conversationId: 'conversation:writer-a',
       workspace: workspaceA,
       mode: 'auto',
       provider: 'deepseek',
     })
     const readerSession = await manager.createSession({
-      conversationId: 'conversation:reader-a',
       workspace: workspaceA,
       mode: 'confirm',
       provider: 'deepseek',
     })
     const otherWriterSession = await manager.createSession({
-      conversationId: 'conversation:writer-b',
       workspace: workspaceB,
       mode: 'yolo',
       provider: 'deepseek',
     })
     const otherReaderSession = await manager.createSession({
-      conversationId: 'conversation:reader-b',
       workspace: workspaceB,
       mode: 'readonly',
       provider: 'deepseek',
     })
     const fifthSession = await manager.createSession({
-      conversationId: 'conversation:fifth',
       workspace: workspaceC,
       mode: 'readonly',
       provider: 'deepseek',
@@ -228,7 +223,7 @@ describe('SessionManager M1 workspace concurrency', () => {
     ).resolves.toMatchObject({
       accepted: false,
       reason: 'workspace_writer_active',
-      writerConversationId: 'conversation:writer-a',
+      writerSessionId: writerSession,
       writerRunId: writerRun,
     })
     expect(() =>
@@ -264,9 +259,7 @@ describe('SessionManager M1 workspace concurrency', () => {
     expect(lastWorkspaceConcurrency(readerARequest)).toContain(
       'status="readonly_locked"',
     )
-    expect(lastWorkspaceConcurrency(readerARequest)).toContain(
-      'conversation:writer-a',
-    )
+    expect(lastWorkspaceConcurrency(readerARequest)).toContain(writerSession)
     expect(
       lastWorkspaceConcurrency(provider.requestContaining('Hold writer B')!),
     ).toContain('status="writer"')
@@ -394,13 +387,11 @@ describe('SessionManager M1 workspace concurrency', () => {
       projectMetadata,
     })
     const writerSession = await manager.createSession({
-      conversationId: 'conversation:non-abortable-writer',
       workspace,
       mode: 'yolo',
       provider: 'deepseek',
     })
     const contenderSession = await manager.createSession({
-      conversationId: 'conversation:lease-contender',
       workspace,
       mode: 'yolo',
       provider: 'deepseek',

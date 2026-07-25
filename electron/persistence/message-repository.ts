@@ -17,7 +17,7 @@ const MESSAGE_COLUMNS = `
   schema_version, id, session_id, seq, client_request_id,
   replayed_from_message_id, derived_from_message_id, kind, parts_json,
   normalized_reasoning_text, provider_continuation_json, model_route_json,
-  metadata_json, in_history, created_at
+  metadata_json, visibility, turn_id, in_history, created_at
 `
 
 export const MAX_MESSAGE_SEARCH_RESULTS = 100
@@ -93,7 +93,7 @@ export class MessageRepository {
       .prepare(
         `SELECT ${MESSAGE_COLUMNS}
          FROM messages
-         WHERE session_id = ? AND seq <= ?
+         WHERE session_id = ? AND seq <= ? AND visibility <> 'superseded'
          ORDER BY seq ASC
          LIMIT ?`,
       )
@@ -127,6 +127,7 @@ export class MessageRepository {
              FROM messages
              WHERE session_id = ?
                AND seq < ?
+               AND visibility <> 'superseded'
                AND (kind <> 'user_input' OR replayed_from_message_id IS NULL)
              ORDER BY seq DESC
              LIMIT ?`,
@@ -137,6 +138,7 @@ export class MessageRepository {
             `SELECT ${MESSAGE_COLUMNS}
              FROM messages
              WHERE session_id = ?
+               AND visibility <> 'superseded'
                AND (kind <> 'user_input' OR replayed_from_message_id IS NULL)
              ORDER BY seq DESC
              LIMIT ?`,
@@ -165,7 +167,9 @@ export class MessageRepository {
       .prepare(
         `SELECT ${MESSAGE_COLUMNS}
          FROM messages
-         WHERE session_id = ? AND in_history = 1
+         WHERE session_id = ?
+           AND visibility <> 'superseded'
+           AND in_history = 1
          ORDER BY seq ASC`,
       )
       .all(sessionId)
@@ -200,6 +204,7 @@ export class MessageRepository {
          FROM messages
          WHERE session_id = ?
            AND kind IN ('user_input', 'assistant_turn')
+           AND visibility = 'visible'
            AND (kind <> 'user_input' OR replayed_from_message_id IS NULL)
          ORDER BY seq DESC
          LIMIT ?`,
@@ -234,6 +239,45 @@ export class MessageRepository {
       .run(inHistory ? 1 : 0, sessionId, throughSeq)
     return Number(result.changes)
   }
+
+  listAll(reader: PersistenceReader, sessionId: SessionId): MessageRecord[] {
+    return reader
+      .prepare(
+        `SELECT ${MESSAGE_COLUMNS}
+         FROM messages
+         WHERE session_id = ?
+         ORDER BY seq ASC`,
+      )
+      .all(sessionId)
+      .map(decodeMessageRow)
+  }
+
+  updateBranchState(
+    transaction: PersistenceTransaction,
+    record: Pick<
+      MessageRecord,
+      'id' | 'sessionId' | 'visibility' | 'inHistory'
+    >,
+  ): void {
+    const result = transaction
+      .prepare(
+        `UPDATE messages
+         SET visibility = ?, in_history = ?
+         WHERE id = ? AND session_id = ?`,
+      )
+      .run(
+        record.visibility,
+        record.inHistory ? 1 : 0,
+        record.id,
+        record.sessionId,
+      )
+    if (Number(result.changes) !== 1) {
+      throw new PersistenceError(
+        'DATABASE_CONSTRAINT',
+        'Message branch state update lost its target',
+      )
+    }
+  }
 }
 
 function insertMessageRow(
@@ -246,8 +290,9 @@ function insertMessageRow(
          schema_version, id, session_id, seq, client_request_id,
          replayed_from_message_id, derived_from_message_id, kind,
          parts_json, normalized_reasoning_text, provider_continuation_json,
-         model_route_json, metadata_json, in_history, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         model_route_json, metadata_json, visibility, turn_id, in_history,
+         created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       row.schema_version,
@@ -263,6 +308,8 @@ function insertMessageRow(
       row.provider_continuation_json,
       row.model_route_json,
       row.metadata_json,
+      row.visibility,
+      row.turn_id,
       row.in_history,
       row.created_at,
     )

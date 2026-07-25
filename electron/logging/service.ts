@@ -228,9 +228,6 @@ export class TraceService {
         traces.push({
           traceId: traceId as TraceId,
           ...(start ? { sessionId: start.sessionId, startedAt: start.ts } : {}),
-          ...(start?.conversationId
-            ? { conversationId: start.conversationId }
-            : {}),
           ...(end ? { endedAt: end.ts } : {}),
           closed: Boolean(end),
           size,

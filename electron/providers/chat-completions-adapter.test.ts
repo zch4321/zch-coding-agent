@@ -168,6 +168,33 @@ describe('ChatCompletionsAdapter', () => {
     })
   })
 
+  it('keeps interjection records raw and adds the harness tag at the provider boundary', () => {
+    const history = state()
+    system(history)
+    const record = appendPromptMessage(history, {
+      kind: 'interjection',
+      content: 'Use the updated constraint',
+      source: 'run.interjection',
+      trusted: false,
+      editable: false,
+    })
+    const request = new ChatCompletionsAdapter(route.adapterId).compile({
+      history: new MessageHistoryCompiler().compile(history.history),
+      route,
+      tools: [],
+    })
+
+    expect(record.parts).toEqual([
+      { type: 'text', text: 'Use the updated constraint' },
+    ])
+    expect(request.messages.at(-1)).toMatchObject({
+      role: 'user',
+      content: expect.stringContaining(
+        '<live_user_interjection>\nUse the updated constraint\n</live_user_interjection>',
+      ),
+    })
+  })
+
   it('restores compatible continuation and rebuilds incompatible or mismatched data', () => {
     const history = state()
     system(history)

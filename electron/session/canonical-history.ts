@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { CallId, MessageId, SessionId } from '../../shared/ids'
+import type { ContextAttachmentChip } from '../../shared/context'
 import { assertBoundedJsonValue, type JsonValue } from '../../shared/json'
 import {
   assertMessageRecordSemantics,
@@ -38,6 +39,7 @@ export interface AssistantTurnCandidateInput {
   reasoning?: string
   finishReason?: string
   route: ModelRouteSnapshot
+  turnId?: MessageId
   continuation?: Extract<
     MessageRecord,
     { kind: 'assistant_turn' }
@@ -52,6 +54,7 @@ function nextIdentity(state: CanonicalHistoryState) {
     id: `message:${randomUUID()}` as MessageId,
     sessionId: state.sessionId,
     seq,
+    visibility: 'visible' as const,
     inHistory: true,
     createdAt: new Date().toISOString(),
   }
@@ -91,6 +94,7 @@ export function appendPromptMessage(
     editable: boolean
     resource?: PromptResourceSummary
     hash?: string
+    turnId?: MessageId
   },
 ): MessageRecord {
   const content = input.content.trim()
@@ -100,6 +104,11 @@ export function appendPromptMessage(
   const hash = input.hash ?? createHash('sha256').update(content).digest('hex')
   const record = {
     ...nextIdentity(state),
+    visibility:
+      input.kind === 'orchestrator' || input.kind === 'interjection'
+        ? ('visible' as const)
+        : ('hidden' as const),
+    ...(input.turnId ? { turnId: input.turnId } : {}),
     kind: input.kind,
     parts: [{ type: 'text' as const, text: content }],
     metadata: {
@@ -135,6 +144,9 @@ export function appendUserInput(
     requestHash?: string
     submission?: 'message' | { controlCommand: string }
     inHistory?: boolean
+    messageId?: MessageId
+    turnId?: MessageId
+    attachments?: ContextAttachmentChip[]
   },
 ): Extract<MessageRecord, { kind: 'user_input' }> {
   if (!input.content.trim()) {
@@ -151,8 +163,17 @@ export function appendUserInput(
     )
   }
   const identity = nextIdentity(state)
+  const messageId = input.messageId ?? identity.id
   const record = {
     ...identity,
+    id: messageId,
+    visibility:
+      input.submission && typeof input.submission === 'object'
+        ? ('hidden' as const)
+        : input.replayedFromMessageId || input.derivedFromMessageId
+          ? ('hidden' as const)
+          : ('visible' as const),
+    turnId: input.turnId ?? messageId,
     inHistory: input.inHistory ?? identity.inHistory,
     kind: 'user_input' as const,
     ...(input.clientRequestId
@@ -173,6 +194,9 @@ export function appendUserInput(
         : {
             schemaVersion: 1 as const,
             ...(input.requestHash ? { requestHash: input.requestHash } : {}),
+            ...(input.attachments
+              ? { attachments: structuredClone(input.attachments) }
+              : {}),
             submission:
               typeof input.submission === 'object'
                 ? {
@@ -300,12 +324,14 @@ function assistantTurnCandidate(
     id: 'message:assistant-validation-candidate' as MessageId,
     sessionId: state.sessionId,
     seq: state.nextMessageSeq,
+    visibility: 'visible',
     inHistory: true,
     createdAt: new Date().toISOString(),
   },
 ): Extract<MessageRecord, { kind: 'assistant_turn' }> {
   const record = {
     ...identity,
+    ...(input.turnId ? { turnId: input.turnId } : {}),
     kind: 'assistant_turn' as const,
     parts: structuredClone(input.parts),
     modelRoute: structuredClone(input.route),
@@ -336,10 +362,12 @@ export function appendToolResult(
     status: 'completed' | 'denied' | 'failed' | 'cancelled' | 'timed_out'
     truncated: boolean
     durationMs?: number
+    turnId?: MessageId
   },
 ): Extract<MessageRecord, { kind: 'tool_result' }> {
   const record = {
     ...nextIdentity(state),
+    ...(input.turnId ? { turnId: input.turnId } : {}),
     kind: 'tool_result' as const,
     parts: [
       {
@@ -373,10 +401,13 @@ export function appendCompactSummary(
     replacesThroughSeq: number
     sourceHash: string
     resource?: PromptResourceSummary
+    turnId?: MessageId
   },
 ): Extract<MessageRecord, { kind: 'compact_summary' }> {
   const record = {
     ...nextIdentity(state),
+    visibility: 'hidden' as const,
+    ...(input.turnId ? { turnId: input.turnId } : {}),
     kind: 'compact_summary' as const,
     parts: [{ type: 'text' as const, text: input.content }],
     metadata: {
@@ -423,7 +454,9 @@ export function deactivateActiveHistory(
 export class MessageHistoryCompiler {
   compile(records: readonly MessageRecord[]): CompiledCanonicalHistory {
     const active = records
-      .filter((record) => record.inHistory)
+      .filter(
+        (record) => record.inHistory && record.visibility !== 'superseded',
+      )
       .sort((left, right) => left.seq - right.seq)
     if (active.length === 0) {
       throw new TypeError('Canonical history must not be empty')

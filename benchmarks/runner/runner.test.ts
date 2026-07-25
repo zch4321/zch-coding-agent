@@ -412,16 +412,6 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
     await expect(
       stat(path.join(trial.directory, 'metrics.json')),
     ).resolves.toBeDefined()
-    const conversation = await readFile(
-      path.join(trial.directory, 'conversation.restricted.md'),
-      'utf8',
-    )
-    expect(conversation).toContain('## orchestrator')
-    expect(conversation).toContain('Fix the benchmark case')
-    expect(conversation).toContain('Implemented the fix.')
-    expect(trial.result.artifacts?.conversationMarkdown).toBe(
-      'conversation.restricted.md',
-    )
     const transcript = await readFile(
       path.join(trial.directory, 'session-transcript.restricted.md'),
       'utf8',

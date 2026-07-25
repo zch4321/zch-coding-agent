@@ -10,7 +10,6 @@ import type { ModelSelection } from '../../shared/model-route'
 import type { ConfigStore } from '../config/store'
 import type { TraceLogger } from '../logging/logger'
 import type { PluginEventBus } from '../plugins/event-bus'
-import type { ChangeHistoryStore } from './change-history'
 import type { AutoApprover } from '../permission/auto-approver'
 import type { LLMProvider } from '../providers/provider'
 import type { HumanApprovalDecision } from '../permission/permission-pipeline'
@@ -61,7 +60,6 @@ export interface SessionManagerOptions {
   eventSink: RuntimeEventSink
   pluginBus?: PluginEventBus
   skillsManager?: SkillsManager
-  changeHistory?: ChangeHistoryStore
   fileChangeExecution?: FileChangeExecutionPort
   projectMetadata?: ProjectMetadataStore
   codeBackends?: CodeBackendManager
@@ -114,7 +112,6 @@ export type InterjectionStatus = 'queued' | 'injected' | 'superseded'
 export interface RunInterjection {
   id: string
   clientRequestId: string
-  conversationId?: string
   runId: RunId
   content: string
   createdAt: string
@@ -160,7 +157,6 @@ export type ActiveRunExecution = ActiveRun
 
 export interface SessionState {
   sessionId: SessionId
-  conversationId?: string
   workspace: string
   mode: PermissionMode
   provider: string
