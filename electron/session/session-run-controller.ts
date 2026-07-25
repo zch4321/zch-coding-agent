@@ -34,14 +34,17 @@ import type {
 } from './session-types'
 import type { RunAccessLease } from './workspace-access-coordinator'
 
+/** Returns whether a run status cannot transition any further. */
 function isTerminalRunStatus(status: RunStatus): boolean {
   return status === 'completed' || status === 'cancelled' || status === 'failed'
 }
 
+/** Returns whether a user message requests an explicit history compaction. */
 function isCompactSlashCommand(message: string): boolean {
   return /^\/compact(?:\s|$)/iu.test(message.trimStart())
 }
 
+/** Coordinates the lifecycle, persistence, and access control of a session run. */
 export class SessionRunController {
   readonly #configStore: ConfigStore
   readonly #providerTurns: SessionProviderTurnRunner
@@ -58,6 +61,7 @@ export class SessionRunController {
   ) => RunAccessLease
   readonly #executionState?: SessionExecutionStatePort
 
+  /** Creates a controller with the collaborators needed to execute session runs. */
   constructor(options: {
     configStore: ConfigStore
     providerTurns: SessionProviderTurnRunner
@@ -84,6 +88,7 @@ export class SessionRunController {
     this.#executionState = options.executionState
   }
 
+  /** Starts a new run, or returns the existing run for a repeated client request. */
   start(
     session: SessionState,
     clientRequestId: string,
@@ -164,6 +169,7 @@ export class SessionRunController {
     return runId
   }
 
+  /** Requests cancellation of the specified active run. */
   interrupt(session: SessionState, runId: RunId): boolean {
     if (!session.activeRun || session.activeRun.runId !== runId) {
       return false
@@ -176,6 +182,7 @@ export class SessionRunController {
     return true
   }
 
+  /** Cancels an active run and waits up to the supplied grace period for it to settle. */
   async cancelForSessionClose(
     session: SessionState,
     graceMs: number,
@@ -193,6 +200,7 @@ export class SessionRunController {
     ])
   }
 
+  /** Updates a run status and emits the matching renderer-facing status event. */
   setRunStatus(
     session: SessionState,
     run: ActiveRun,
@@ -222,11 +230,13 @@ export class SessionRunController {
     })
   }
 
+  /** Releases the run slot immediately and the workspace writer after side effects settle. */
   releaseAccess(run: ActiveRun): void {
     run.releaseRunSlot()
     this.#releaseWriterWhenSettled(run)
   }
 
+  /** Defers writer release until all side effects associated with the run finish. */
   #releaseWriterWhenSettled(run: ActiveRun): void {
     if (run.writerReleasePending) return
 
@@ -243,6 +253,7 @@ export class SessionRunController {
     })
   }
 
+  /** Verifies that the session and provider are ready to accept a new run. */
   #assertRunPreconditions(config: PublicConfig, session: SessionState): void {
     if (session.mutationInProgress) {
       ipcFault('CONFLICT', 'Session metadata mutation is still being committed')
@@ -267,6 +278,7 @@ export class SessionRunController {
     }
   }
 
+  /** Executes the provider-and-tool loop for an initialized active run. */
   async #run(
     session: SessionState,
     run: ActiveRun,
@@ -555,6 +567,7 @@ export class SessionRunController {
     }
   }
 
+  /** Records a terminal run status and writes its completion event to the session log. */
   async #finishRun(
     session: SessionState,
     run: ActiveRun,
