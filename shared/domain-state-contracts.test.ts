@@ -681,7 +681,11 @@ describe('bounded domain-state API contracts', () => {
         version: 1,
         cursor,
         projects: [project],
-        sessions: [session],
+        sessionPage: {
+          schemaVersion: 1,
+          records: [session],
+          hasMore: false,
+        },
       }),
     ).toBe(true)
     expect(
@@ -689,7 +693,11 @@ describe('bounded domain-state API contracts', () => {
         version: 1,
         cursor,
         projects: [project],
-        sessions: [session],
+        sessionPage: {
+          schemaVersion: 1,
+          records: [session],
+          hasMore: false,
+        },
         workbench: {},
       }),
     ).toBe(false)

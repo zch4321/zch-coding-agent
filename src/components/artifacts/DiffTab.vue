@@ -12,7 +12,7 @@ const agent = useAgentStore()
 const { t } = useI18n()
 
 const selectedChangeId = ref<string>()
-const filterRunId = ref<string | undefined>(undefined)
+const filterCallId = ref<string | undefined>(undefined)
 const filterPath = ref<string | undefined>(undefined)
 const filterStatus = ref<ChangeStatusFilter>('all')
 
@@ -21,16 +21,16 @@ const selectedChange = computed(
     agent.changes.find((change) => change.id === selectedChangeId.value) ??
     filteredChanges.value[0],
 )
-const runOptions = computed<SelectOption[]>(() => {
-  const runs = new Map<string, number>()
+const callOptions = computed<SelectOption[]>(() => {
+  const calls = new Map<string, number>()
   for (const change of agent.changes) {
-    runs.set(change.callId, (runs.get(change.callId) ?? 0) + 1)
+    calls.set(change.callId, (calls.get(change.callId) ?? 0) + 1)
   }
   return [
     { label: t('artifact.filterAll'), value: undefined },
-    ...[...runs.entries()].map(([runId, count]) => ({
-      label: `${runId} (${count})`,
-      value: runId,
+    ...[...calls.entries()].map(([callId, count]) => ({
+      label: `${callId} (${count})`,
+      value: callId,
     })),
   ]
 })
@@ -57,7 +57,7 @@ const statusOptions = computed<SelectOption[]>(
 )
 const filteredChanges = computed(() =>
   agent.changes.filter((change) => {
-    if (filterRunId.value && change.callId !== filterRunId.value) return false
+    if (filterCallId.value && change.callId !== filterCallId.value) return false
     if (filterPath.value && change.path !== filterPath.value) return false
     if (filterStatus.value === 'active' && change.revertedAt) return false
     if (filterStatus.value === 'reverted' && !change.revertedAt) return false
@@ -75,7 +75,7 @@ async function revertChange(change: FileChangeSummary) {
 watch(
   () => [agent.activeConversationId, agent.workspacePath] as const,
   () => {
-    filterRunId.value = undefined
+    filterCallId.value = undefined
     filterPath.value = undefined
     filterStatus.value = 'all'
     void agent.loadConversationChanges()
@@ -139,14 +139,17 @@ watch(
           <span>{{
             t('artifact.changeCount', { count: agent.changes.length })
           }}</span>
+          <span v-if="agent.selectedFileChangeHasMore">
+            {{ t('artifact.historyTruncated') }}
+          </span>
         </div>
         <span v-if="agent.changesLoading">{{ t('common.loading') }}</span>
       </div>
       <div class="change-filters">
         <NSelect
-          v-model:value="filterRunId"
-          :options="runOptions"
-          :placeholder="t('artifact.filterByRun')"
+          v-model:value="filterCallId"
+          :options="callOptions"
+          :placeholder="t('artifact.filterByToolCall')"
           size="small"
           filterable
           class="change-filter-select"
@@ -191,8 +194,21 @@ watch(
       <p v-else class="artifact-message">
         {{ t('artifact.noFilteredChanges') }}
       </p>
+      <div v-if="agent.selectedFileChangeHasMore" class="change-load-more">
+        <NButton
+          size="small"
+          secondary
+          :loading="agent.changesLoading"
+          @click="agent.loadOlderConversationChanges()"
+        >
+          {{ t('artifact.loadMoreChanges') }}
+        </NButton>
+      </div>
       <div class="diff-summary">
         <span>{{ t(`artifact.operation.${selectedChange.operation}`) }}</span>
+        <span v-if="selectedChange.diffTruncated">
+          {{ t('artifact.truncated') }}
+        </span>
         <strong>{{ selectedChange.path }}</strong>
         <code v-if="selectedChange.diffHash">{{
           selectedChange.diffHash

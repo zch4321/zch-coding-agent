@@ -37,6 +37,7 @@ const enUS = {
     newConversationInProject: 'New conversation in this project',
     noMatches: 'No matching conversations',
     noConversations: 'No conversations',
+    loadOlderSessions: 'Load earlier conversations',
     noWorkspace: 'No workspace yet',
     rename: 'Rename conversation',
     renameTitle: 'Rename',
@@ -100,6 +101,7 @@ const enUS = {
     workHint:
       'Ask the Agent to inspect code, explain behavior or prepare a reviewed change.',
     backBottom: 'Back to bottom',
+    loadEarlierMessages: 'Load earlier messages',
     requestFailed: 'Request failed',
     bridgeUnavailable: 'Desktop bridge unavailable',
     bridgeHint:
@@ -203,7 +205,9 @@ const enUS = {
     revertConfirm:
       'Revert this change to {path}? It will proceed only if the file still matches the agent change.',
     revertSafetyHint: 'Revert is refused when newer file changes are detected.',
-    filterByRun: 'Filter by run',
+    filterByToolCall: 'Filter by tool call',
+    historyTruncated: 'Earlier changes are not loaded yet.',
+    loadMoreChanges: 'Load more changes',
     filterByFile: 'Filter by file',
     filterByStatus: 'Filter by status',
     filterAll: 'All',

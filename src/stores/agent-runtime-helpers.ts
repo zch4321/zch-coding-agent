@@ -21,6 +21,14 @@ export const TERMINAL_RUN_STATUSES = new Set<RunStatus>([
   'failed',
 ])
 
+export interface UiInterjection {
+  id: string
+  content: string
+  createdAt: string
+  status: 'queued' | 'injected' | 'superseded' | 'carryover'
+  injectedAfterToolBatchId?: string
+}
+
 export interface SessionOverlay {
   runId?: RunId
   status: RunStatus
@@ -32,10 +40,18 @@ export interface SessionOverlay {
   reviewedApproval?: ReviewedApproval
   goal?: GoalState
   plan?: PlanState
-  interjections: ActiveRunPublicSnapshot['interjections']
+  interjections: UiInterjection[]
+  terminalReloadRunId?: RunId
   lastEventSeq: number
   diagnostics: string[]
   order: number
+}
+
+export interface CarryoverInterjection {
+  id: string
+  runId: RunId
+  content: string
+  createdAt: string
 }
 
 export interface SendMessageOptions {

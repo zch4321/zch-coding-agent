@@ -288,6 +288,7 @@ export const AgentEventSchema = Type.Union([
     EventBaseSchema,
     Type.Object({
       type: Type.Literal('workspace.writer.changed'),
+      sessionId: SessionIdSchema,
       workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
       status: Type.Union([Type.Literal('acquired'), Type.Literal('released')]),
       writerSessionId: SessionIdSchema,

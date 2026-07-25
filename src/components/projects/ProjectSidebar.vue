@@ -70,13 +70,14 @@ const searchGroups = computed(() => {
       ...project,
       conversations: agent.searchHits
         .filter((hit) => hit.session.projectId === project.id)
-        .map((hit) => ({
-          ...agent.conversations.find(
+        .flatMap((hit) => {
+          const conversation = agent.conversations.find(
             (conversation) => conversation.id === hit.session.id,
-          )!,
-          match: hit.match.snippet,
-        }))
-        .filter((conversation) => Boolean(conversation.id)),
+          )
+          return conversation
+            ? [{ ...conversation, match: hit.match.snippet }]
+            : []
+        }),
     }))
     .filter((project) => project.conversations.length > 0)
 })
@@ -320,6 +321,15 @@ watch(searchQuery, (value) => {
             </p>
           </div>
         </section>
+        <button
+          v-if="agent.sessionHasMore"
+          type="button"
+          class="load-older-sessions-button"
+          :disabled="agent.loading"
+          @click="agent.loadOlderSessions()"
+        >
+          {{ t('sidebar.loadOlderSessions') }}
+        </button>
         <div v-if="sortedProjects.length === 0" class="sidebar-empty-state">
           <UiIcon name="folder" />
           <p>{{ t('sidebar.noWorkspace') }}</p>

@@ -23,6 +23,7 @@ import type {
   UsageActivity,
 } from './agent-types'
 import { useAgentReplicaStore } from './agent-replica'
+import { handleRuntimeAgentEvent } from './agent-runtime-events'
 import {
   attachmentRefs,
   blankOverlay,
@@ -34,6 +35,7 @@ import {
   projectName,
   requestId,
   TERMINAL_RUN_STATUSES,
+  type CarryoverInterjection,
   type SendMessageOptions,
   type SessionOverlay,
 } from './agent-runtime-helpers'
@@ -52,6 +54,8 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     contextAttachments: [] as ContextAttachmentChip[],
     mode: 'readonly' as PermissionMode,
     startPendingSessionId: undefined as SessionId | 'draft' | undefined,
+    carryoversBySessionId: {} as Record<string, CarryoverInterjection[]>,
+    carryoverStartingBySessionId: {} as Record<string, boolean>,
     overlays: {} as Record<string, SessionOverlay>,
     workspaceWriters: {} as Record<string, SessionId>,
     approvalSubmitting: false,
@@ -146,6 +150,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           text: overlay.text,
           reasoning: overlay.reasoning,
           order: Number.MAX_SAFE_INTEGER,
+          live: true,
         })
       }
       for (const interjection of overlay?.interjections ?? []) {
@@ -153,8 +158,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           records.some(
             (record) =>
               record.kind === 'interjection' &&
-              'clientRequestId' in record &&
-              record.clientRequestId === interjection.id,
+              record.metadata?.interjectionId === interjection.id,
           )
         ) {
           continue
@@ -169,6 +173,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           order: Number.MAX_SAFE_INTEGER - 1,
           interjectionId: interjection.id,
           interjectionStatus: interjection.status,
+          live: true,
         })
       }
       return projected
@@ -201,7 +206,9 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         }
       }
       for (const tool of this.activeOverlay?.tools ?? []) {
-        durable.set(tool.callId, tool)
+        if (!durable.has(tool.callId)) {
+          durable.set(tool.callId, { ...tool, live: true })
+        }
       }
       return [...durable.values()].sort(
         (left, right) => (right.order ?? 0) - (left.order ?? 0),
@@ -235,11 +242,15 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     canSend(): boolean {
       const replica = useAgentReplicaStore()
+      const sessionId = replica.selectedSessionId
       return Boolean(
         replica.selectedProjectId &&
         !this.startPending &&
         !this.activeRunId &&
-        !this.pendingApproval,
+        !this.pendingApproval &&
+        (!sessionId ||
+          (!this.carryoverStartingBySessionId[sessionId] &&
+            !this.carryoversBySessionId[sessionId]?.length)),
       )
     },
     canInterject(): boolean {
@@ -264,6 +275,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         overlay.diagnostics = []
       }
       overlay.runId = runtime.runId
+      overlay.terminalReloadRunId = undefined
       overlay.status = runtime.status
       overlay.text = runtime.text
       overlay.reasoning = runtime.reasoning
@@ -277,6 +289,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         status: tool.status === 'completed' ? 'completed' : 'proposed',
         result: tool.result,
         order: index + 1,
+        live: true,
       }))
       overlay.approval = pendingApprovalFromSnapshot(runtime)
     },
@@ -312,15 +325,22 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
             if (
               outcome !== 'duplicate' &&
               commit.topic === 'session.changed' &&
-              commit.change.messageChange.mode === 'upsert' &&
-              commit.change.messageChange.records.some(
-                (record) => record.kind === 'assistant_turn',
-              )
+              commit.change.messageChange.mode === 'upsert'
             ) {
               const overlay = this.overlays[commit.change.session.id]
               if (overlay) {
-                overlay.text = ''
-                overlay.reasoning = ''
+                const durableInterjectionIds = new Set(
+                  commit.change.messageChange.records.flatMap((record) =>
+                    record.kind === 'interjection' &&
+                    record.metadata?.interjectionId
+                      ? [record.metadata.interjectionId]
+                      : [],
+                  ),
+                )
+                overlay.interjections = overlay.interjections.filter(
+                  (interjection) =>
+                    !durableInterjectionIds.has(interjection.id),
+                )
               }
             }
           })
@@ -512,21 +532,35 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           'Only an original visible user message can be retried.'
         return false
       }
+      if (
+        this.startPending ||
+        this.activeRunId ||
+        this.pendingApproval ||
+        this.carryoverStartingBySessionId[session.id] ||
+        this.carryoversBySessionId[session.id]?.length
+      ) {
+        return false
+      }
       this.startPendingSessionId = session.id
-      const result = await window.agentApi.retryRun({
-        version: IPC_VERSION,
-        sessionId: session.id,
-        expectedRevision: session.revision,
-        userMessageId: record.id,
-        clientRequestId: requestId('request'),
-      })
-      this.startPendingSessionId = undefined
+      const result = await window.agentApi
+        .retryRun({
+          version: IPC_VERSION,
+          sessionId: session.id,
+          expectedRevision: session.revision,
+          userMessageId: record.id,
+          clientRequestId: requestId('request'),
+        })
+        .finally(() => {
+          if (this.startPendingSessionId === session.id) {
+            this.startPendingSessionId = undefined
+          }
+        })
       if (!result.ok) {
         this.globalError = result.error.message
         return false
       }
       await replica.reconcile(result.value.commit)
-      this.hydrateRuntime(result.value.runtime, true)
+      this.hydrateRuntime(result.value.runtime)
       return true
     },
     async editUserMessage(messageId: string) {
@@ -635,13 +669,18 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const replica = useAgentReplicaStore()
       const settings = useAgentSettingsStore()
       const project = replica.selectedProject
+      const session = replica.selectedSession
       const text = (options.text ?? this.input).trim()
       if (
         !window.agentApi ||
         !project ||
         !text ||
+        this.startPending ||
         this.activeRunId ||
-        this.pendingApproval
+        this.pendingApproval ||
+        (session &&
+          (this.carryoverStartingBySessionId[session.id] ||
+            this.carryoversBySessionId[session.id]?.length))
       ) {
         return false
       }
@@ -659,65 +698,132 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
                     candidate.path === attachment.path,
                 ) === index,
             )
-      const session = replica.selectedSession
       const sessionId = session?.id ?? (requestId('session') as SessionId)
       this.startPendingSessionId = session?.id ?? 'draft'
-      const result = await window.agentApi.startRun(
-        session
-          ? {
-              version: IPC_VERSION,
-              kind: 'existing_session',
-              sessionId,
-              message: text,
-              context: { attachments: attachmentRefs(attachments) },
-              clientRequestId: requestId('request'),
-            }
-          : {
-              version: IPC_VERSION,
-              kind: 'new_session',
-              sessionId,
-              projectId: project.id,
-              title: text.replace(/\s+/gu, ' ').slice(0, 80),
-              modelSelection: {
-                providerId: settings.activeProviderId,
-                model: settings.activeProviderModel,
-                reasoning:
-                  settings.activeProvider?.reasoning ??
-                  settings.providerForm.reasoning,
+      const pendingMarker = this.startPendingSessionId
+      const result = await window.agentApi
+        .startRun(
+          session
+            ? {
+                version: IPC_VERSION,
+                kind: 'existing_session',
+                sessionId,
+                message: text,
+                context: { attachments: attachmentRefs(attachments) },
+                clientRequestId: requestId('request'),
+              }
+            : {
+                version: IPC_VERSION,
+                kind: 'new_session',
+                sessionId,
+                projectId: project.id,
+                title: text.replace(/\s+/gu, ' ').slice(0, 80),
+                modelSelection: {
+                  providerId: settings.activeProviderId,
+                  model: settings.activeProviderModel,
+                  reasoning:
+                    settings.activeProvider?.reasoning ??
+                    settings.providerForm.reasoning,
+                },
+                permissionMode: this.modeLockedByWriter
+                  ? 'readonly'
+                  : this.mode,
+                message: text,
+                context: { attachments: attachmentRefs(attachments) },
+                clientRequestId: requestId('request'),
               },
-              permissionMode: this.modeLockedByWriter ? 'readonly' : this.mode,
-              message: text,
-              context: { attachments: attachmentRefs(attachments) },
-              clientRequestId: requestId('request'),
-            },
-      )
-      this.startPendingSessionId = undefined
+        )
+        .finally(() => {
+          if (this.startPendingSessionId === pendingMarker) {
+            this.startPendingSessionId = undefined
+          }
+        })
       if (!result.ok) {
         this.globalError = result.error.message
         return false
       }
       const runResult = result.value as DurableRunStartResult
-      if (runResult.outcome === 'started') {
-        await replica.reconcile(runResult.commit)
-        replica.selectedProjectId = project.id
-        replica.selectedSessionId = sessionId
-        this.hydrateRuntime(runResult.runtime)
-      } else {
-        replica.sessions = replica.sessions.filter(
-          (candidate) => candidate.id !== runResult.session.id,
-        )
-        replica.sessions.push(structuredClone(runResult.session))
-        replica.messagesBySessionId[sessionId] = [
-          ...(replica.messagesBySessionId[sessionId] ?? []),
-          structuredClone(runResult.userMessage),
-        ]
-        this.hydrateRuntime(runResult.runtime)
-      }
+      await this.applyRunStartResult(sessionId, runResult)
+      replica.selectedProjectId = project.id
+      replica.selectedSessionId = sessionId
       if (options.clearInput !== false) {
         this.input = ''
         this.contextAttachments = []
       }
       return true
+    },
+    /** Applies either a fresh or deduplicated durable run-start result. */
+    async applyRunStartResult(
+      sessionId: SessionId,
+      runResult: DurableRunStartResult,
+    ): Promise<void> {
+      const replica = useAgentReplicaStore()
+      if (runResult.outcome === 'started') {
+        await replica.reconcile(runResult.commit)
+        this.hydrateRuntime(runResult.runtime)
+        return
+      }
+      replica.sessions = [
+        ...replica.sessions.filter(
+          (candidate) => candidate.id !== runResult.session.id,
+        ),
+        structuredClone(runResult.session),
+      ]
+      replica.messagesBySessionId[sessionId] = [
+        ...(replica.messagesBySessionId[sessionId] ?? []).filter(
+          (record) => record.id !== runResult.userMessage.id,
+        ),
+        structuredClone(runResult.userMessage),
+      ].sort((left, right) => left.seq - right.seq)
+      this.hydrateRuntime(runResult.runtime)
+    },
+    /** Starts the next carried-over interjection for one Session in FIFO order. */
+    async flushCarryovers(sessionId: SessionId): Promise<boolean> {
+      const api = window.agentApi
+      const queue = this.carryoversBySessionId[sessionId]
+      const overlay = this.overlays[sessionId]
+      const session = useAgentReplicaStore().sessions.find(
+        (candidate) =>
+          candidate.id === sessionId && candidate.lifecycle === 'active',
+      )
+      if (
+        !api ||
+        !session ||
+        !queue?.length ||
+        overlay?.runId ||
+        this.carryoverStartingBySessionId[sessionId]
+      ) {
+        return false
+      }
+      const carryover = queue[0]!
+      this.carryoverStartingBySessionId[sessionId] = true
+      try {
+        const result = await api.startRun({
+          version: IPC_VERSION,
+          kind: 'existing_session',
+          sessionId,
+          message: carryover.content,
+          context: { attachments: [] },
+          clientRequestId: `carryover:${carryover.id}`,
+        })
+        if (!result.ok) {
+          this.globalError = result.error.message
+          return false
+        }
+        await this.applyRunStartResult(sessionId, result.value)
+        this.carryoversBySessionId[sessionId] = queue.filter(
+          (candidate) => candidate.id !== carryover.id,
+        )
+        if (
+          this.carryoversBySessionId[sessionId]?.length &&
+          !this.overlays[sessionId]?.runId
+        ) {
+          queueMicrotask(() => void this.flushCarryovers(sessionId))
+        }
+        return true
+      } finally {
+        delete this.carryoverStartingBySessionId[sessionId]
+      }
     },
     async sendInterjection() {
       const overlay = this.activeOverlay
@@ -858,7 +964,9 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       return Boolean(
         overlay?.runId ||
         overlay?.approval ||
-        this.startPendingSessionId === sessionId,
+        this.startPendingSessionId === sessionId ||
+        this.carryoverStartingBySessionId[sessionId] ||
+        Boolean(this.carryoversBySessionId[sessionId]?.length),
       )
     },
     conversationStatus(sessionId: string): string | undefined {
@@ -872,128 +980,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       return useAgentSettingsStore().saveAssistantSettings(language)
     },
     handleAgentEvent(event: AgentEvent) {
-      if (event.type === 'workspace.writer.changed') {
-        if (event.status === 'acquired') {
-          this.workspaceWriters[event.workspace] = event.writerSessionId
-        } else if (
-          this.workspaceWriters[event.workspace] === event.writerSessionId
-        ) {
-          delete this.workspaceWriters[event.workspace]
-        }
-        return
-      }
-      if (event.type === 'session.closed') {
-        delete this.overlays[event.sessionId]
-        return
-      }
-      const overlay = this.ensureOverlay(event.sessionId)
-      if (event.seq <= overlay.lastEventSeq) return
-      if (overlay.lastEventSeq && event.seq !== overlay.lastEventSeq + 1) {
-        overlay.diagnostics.push(
-          `Runtime event gap: expected ${overlay.lastEventSeq + 1}, received ${event.seq}.`,
-        )
-        void useAgentReplicaStore()
-          .loadSession(event.sessionId)
-          .then(() =>
-            this.hydrateRuntime(
-              useAgentReplicaStore().runtimeBySessionId[event.sessionId],
-            ),
-          )
-      }
-      overlay.lastEventSeq = event.seq
-      overlay.order += 1
-
-      if (event.type === 'run.status') {
-        overlay.status = event.status
-        overlay.runId = TERMINAL_RUN_STATUSES.has(event.status)
-          ? undefined
-          : event.runId
-        if (event.error) this.globalError = event.error.message
-        if (TERMINAL_RUN_STATUSES.has(event.status)) {
-          void useAgentReplicaStore()
-            .loadSession(event.sessionId)
-            .then(() => {
-              overlay.text = ''
-              overlay.reasoning = ''
-              overlay.approval = undefined
-              this.workspaceFileRevision += 1
-            })
-        }
-        return
-      }
-      overlay.runId = event.runId
-      if (event.type === 'assistant.text.delta') {
-        overlay.text += event.delta
-      } else if (event.type === 'assistant.reasoning.delta') {
-        overlay.reasoning += event.delta
-      } else if (event.type === 'assistant.message.completed') {
-        overlay.text = event.text
-        overlay.reasoning = event.reasoning ?? overlay.reasoning
-      } else if (event.type === 'tool.proposed') {
-        overlay.tools = overlay.tools.filter(
-          (tool) => tool.callId !== event.callId,
-        )
-        overlay.tools.unshift({
-          callId: event.callId,
-          runId: event.runId,
-          tool: event.tool,
-          args: event.args,
-          reason: event.reason,
-          status: 'proposed',
-          order: overlay.order,
-        })
-      } else if (event.type === 'tool.completed') {
-        const tool = overlay.tools.find(
-          (candidate) => candidate.callId === event.callId,
-        )
-        if (tool) {
-          tool.status = 'completed'
-          tool.result = event.result
-          tool.approval = event.approval
-        }
-        if (overlay.approval?.callId === event.callId) {
-          overlay.approval = undefined
-        }
-        void useAgentReplicaStore().loadFileChanges(event.sessionId)
-      } else if (event.type === 'approval.requested') {
-        overlay.approval = {
-          runId: event.runId,
-          callId: event.callId,
-          kind: event.kind,
-          tool: event.tool,
-          args: event.args,
-          reason: event.reason,
-          signals: event.policySignals,
-          diff: event.diff,
-          diffHash: event.diffHash,
-          rememberable: event.rememberable,
-          rememberArgConstraints: event.rememberArgConstraints,
-          expiresAt: event.expiresAt,
-          status: 'requested',
-          order: overlay.order,
-        }
-      } else if (event.type === 'llm.usage') {
-        overlay.usage.push({
-          runId: event.runId,
-          callId: event.callId,
-          usage: event.usage,
-          order: overlay.order,
-        })
-      } else if (event.type === 'goal.updated') {
-        overlay.goal = event.goal ? structuredClone(event.goal) : undefined
-      } else if (event.type === 'plan.updated') {
-        overlay.plan = event.plan ? structuredClone(event.plan) : undefined
-      } else if (event.type === 'interjection.updated') {
-        overlay.interjections = overlay.interjections.filter(
-          (interjection) => interjection.id !== event.interjectionId,
-        )
-        overlay.interjections.push({
-          id: event.interjectionId,
-          status: event.status,
-          content: event.content,
-          createdAt: event.createdAt,
-        })
-      }
+      handleRuntimeAgentEvent(this, event)
     },
   },
 })

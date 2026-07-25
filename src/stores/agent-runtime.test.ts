@@ -1,0 +1,526 @@
+// @vitest-environment jsdom
+
+import { createPinia, setActivePinia } from 'pinia'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AgentEvent } from '../../shared/agent-events'
+import type { AgentApi } from '../../shared/agent-api'
+import type { DurableRunStartPayload } from '../../shared/domain-state-api'
+import type {
+  CallId,
+  MessageId,
+  ProjectId,
+  RunId,
+  SessionId,
+} from '../../shared/ids'
+import type { MessageRecord } from '../../shared/message'
+import type { ProjectRecord } from '../../shared/project'
+import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
+import type { SessionRecord } from '../../shared/session'
+import { useAgentReplicaStore } from './agent-replica'
+import { useAgentRuntimeStore } from './agent-runtime'
+
+const projectId = 'project:runtime-test' as ProjectId
+const selectedSessionId = 'session:selected' as SessionId
+const backgroundSessionId = 'session:background' as SessionId
+const timestamp = '2026-07-25T00:00:00.000Z'
+
+const project: ProjectRecord = {
+  schemaVersion: 1,
+  id: projectId,
+  path: 'F:/workspace/runtime-test',
+  name: 'runtime-test',
+  revision: 1,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+}
+
+function session(
+  id: SessionId = selectedSessionId,
+  revision = 1,
+): SessionRecord {
+  return {
+    schemaVersion: 1,
+    id,
+    projectId,
+    title: `Session ${id}`,
+    lifecycle: 'active',
+    permissionMode: 'readonly',
+    modelSelection: {
+      providerId: 'deepseek',
+      model: 'deepseek-chat',
+      reasoning: 'off',
+    },
+    goal: null,
+    plan: null,
+    revision,
+    lastSeq: 2,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }
+}
+
+function userMessage(
+  id: SessionId = selectedSessionId,
+  messageId = 'message:user' as MessageId,
+): Extract<MessageRecord, { kind: 'user_input' }> {
+  return {
+    schemaVersion: 1,
+    id: messageId,
+    sessionId: id,
+    seq: 1,
+    visibility: 'visible',
+    turnId: messageId,
+    inHistory: true,
+    createdAt: timestamp,
+    kind: 'user_input',
+    clientRequestId: `request:${messageId}`,
+    parts: [{ type: 'text', text: 'User request' }],
+    metadata: {
+      schemaVersion: 1,
+      submission: { type: 'message' },
+    },
+  }
+}
+
+function runtimeSnapshot(id: SessionId, runId: RunId): ActiveRunPublicSnapshot {
+  return {
+    schemaVersion: 1,
+    sessionId: id,
+    runId,
+    status: 'running_tools',
+    text: '',
+    reasoning: '',
+    tools: [],
+    interjections: [],
+  }
+}
+
+function success<T>(value: T) {
+  return { version: 1 as const, ok: true as const, value }
+}
+
+function failure(message: string) {
+  return {
+    version: 1 as const,
+    ok: false as const,
+    error: { code: 'CONFLICT' as const, message },
+  }
+}
+
+type AgentEventDraft = AgentEvent extends infer Event
+  ? Event extends AgentEvent
+    ? Omit<Event, 'schemaVersion' | 'ts'>
+    : never
+  : never
+
+function event(value: AgentEventDraft): AgentEvent {
+  return {
+    schemaVersion: 1,
+    ts: timestamp,
+    ...value,
+  } as AgentEvent
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve }
+}
+
+function installApi(api: Partial<AgentApi>): void {
+  Object.defineProperty(window, 'agentApi', {
+    configurable: true,
+    value: {
+      getSession: async (payload: { sessionId: SessionId }) =>
+        success({
+          version: 1 as const,
+          snapshot: {
+            schemaVersion: 1 as const,
+            session: session(payload.sessionId),
+            messagePage: {
+              schemaVersion: 1 as const,
+              sessionId: payload.sessionId,
+              records: [],
+              hasMore: false as const,
+            },
+          },
+        }),
+      ...api,
+    } as AgentApi,
+  })
+}
+
+function seedReplica(includeBackground = false) {
+  const replica = useAgentReplicaStore()
+  replica.projects = [project]
+  replica.sessions = [
+    session(),
+    ...(includeBackground ? [session(backgroundSessionId)] : []),
+  ]
+  replica.selectedProjectId = projectId
+  replica.selectedSessionId = selectedSessionId
+  replica.messagesBySessionId[selectedSessionId] = [userMessage()]
+  return replica
+}
+
+describe('agent runtime store', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'agentApi')
+    vi.restoreAllMocks()
+  })
+
+  it('blocks a second draft submission while the first start IPC is pending', async () => {
+    const replica = useAgentReplicaStore()
+    replica.projects = [project]
+    replica.selectedProjectId = projectId
+    const pending = deferred<ReturnType<typeof success>>()
+    const startRun = vi.fn(async (payload: DurableRunStartPayload) => {
+      void payload
+      return (await pending.promise) as Awaited<
+        ReturnType<AgentApi['startRun']>
+      >
+    })
+    installApi({ startRun })
+    const runtime = useAgentRuntimeStore()
+
+    const first = runtime.sendMessage({ text: 'Only once' })
+    const second = await runtime.sendMessage({ text: 'Only once' })
+
+    expect(second).toBe(false)
+    expect(startRun).toHaveBeenCalledTimes(1)
+    const payload = startRun.mock.calls[0]![0]
+    const createdSessionId = payload.sessionId
+    pending.resolve(
+      success({
+        version: 1 as const,
+        outcome: 'deduplicated' as const,
+        session: session(createdSessionId),
+        userMessage: userMessage(createdSessionId),
+      }),
+    )
+    await expect(first).resolves.toBe(true)
+    expect(runtime.startPending).toBe(false)
+  })
+
+  it('blocks duplicate retry IPC calls and preserves the event cursor', async () => {
+    const replica = seedReplica()
+    replica.cursor = {
+      schemaVersion: 1,
+      backendInstanceId: 'backend:runtime-test',
+      sequence: 9,
+    }
+    const pending = deferred<ReturnType<typeof failure>>()
+    const retryRun = vi.fn(async () => pending.promise)
+    installApi({ retryRun: retryRun as AgentApi['retryRun'] })
+    const runtime = useAgentRuntimeStore()
+
+    const first = runtime.retryUserMessage('message:user')
+    const second = await runtime.retryUserMessage('message:user')
+
+    expect(second).toBe(false)
+    expect(retryRun).toHaveBeenCalledTimes(1)
+    pending.resolve(failure('retry failed'))
+    await expect(first).resolves.toBe(false)
+    expect(replica.cursor.sequence).toBe(9)
+    expect(runtime.startPending).toBe(false)
+  })
+
+  it('runs background carryovers in FIFO order with stable request ids', async () => {
+    const replica = seedReplica(true)
+    const startRun = vi.fn(async (payload: DurableRunStartPayload) =>
+      success({
+        version: 1 as const,
+        outcome: 'deduplicated' as const,
+        session: session(payload.sessionId),
+        userMessage: userMessage(
+          payload.sessionId,
+          `message:${payload.clientRequestId}` as MessageId,
+        ),
+        runtime: runtimeSnapshot(
+          payload.sessionId,
+          `run:${payload.clientRequestId}` as RunId,
+        ),
+      }),
+    )
+    installApi({ startRun: startRun as AgentApi['startRun'] })
+    const runtime = useAgentRuntimeStore()
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'interjection.carryover',
+        seq: 1,
+        sessionId: backgroundSessionId,
+        runId: 'run:old' as RunId,
+        interjectionId: 'interjection:first',
+        content: 'first',
+        createdAt: '2026-07-25T00:00:01.000Z',
+      }),
+    )
+    runtime.handleAgentEvent(
+      event({
+        type: 'interjection.carryover',
+        seq: 2,
+        sessionId: backgroundSessionId,
+        runId: 'run:old' as RunId,
+        interjectionId: 'interjection:second',
+        content: 'second',
+        createdAt: '2026-07-25T00:00:02.000Z',
+      }),
+    )
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 3,
+        sessionId: backgroundSessionId,
+        runId: 'run:old' as RunId,
+        status: 'completed',
+      }),
+    )
+
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
+    expect(startRun.mock.calls[0]![0]).toMatchObject({
+      sessionId: backgroundSessionId,
+      message: 'first',
+      clientRequestId: 'carryover:interjection:first',
+    })
+    expect(replica.selectedSessionId).toBe(selectedSessionId)
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 4,
+        sessionId: backgroundSessionId,
+        runId: 'run:carryover:interjection:first' as RunId,
+        status: 'completed',
+      }),
+    )
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(2))
+    expect(startRun.mock.calls[1]![0]).toMatchObject({
+      sessionId: backgroundSessionId,
+      message: 'second',
+      clientRequestId: 'carryover:interjection:second',
+    })
+  })
+
+  it('lets durable interjections and tools replace their live overlays', () => {
+    const replica = seedReplica()
+    const rootId = 'message:root' as MessageId
+    const callId = 'call:durable' as CallId
+    replica.messagesBySessionId[selectedSessionId] = [
+      {
+        schemaVersion: 1,
+        id: 'message:interjection' as MessageId,
+        sessionId: selectedSessionId,
+        seq: 90,
+        visibility: 'visible',
+        turnId: rootId,
+        inHistory: true,
+        createdAt: timestamp,
+        kind: 'interjection',
+        parts: [{ type: 'text', text: 'durable interjection' }],
+        metadata: {
+          schemaVersion: 1,
+          layer: {
+            source: 'run.interjection',
+            trusted: false,
+            editable: false,
+            hash: 'a'.repeat(64),
+          },
+          interjectionId: 'interjection:durable',
+        },
+      },
+      {
+        schemaVersion: 1,
+        id: 'message:assistant-tool' as MessageId,
+        sessionId: selectedSessionId,
+        seq: 100,
+        visibility: 'visible',
+        turnId: rootId,
+        inHistory: true,
+        createdAt: timestamp,
+        kind: 'assistant_turn',
+        modelRoute: {
+          schemaVersion: 1,
+          purpose: 'main',
+          adapterId: 'deepseek.chat-completions',
+          providerId: 'deepseek',
+          model: 'deepseek-chat',
+          reasoning: 'off',
+          endpoint: 'https://provider.invalid/v1/chat/completions',
+          providerConfigRevision: 1,
+        },
+        parts: [
+          {
+            type: 'tool_call',
+            callId,
+            name: 'read_file',
+            arguments: { path: 'README.md' },
+          },
+        ],
+      },
+      {
+        schemaVersion: 1,
+        id: 'message:tool-result' as MessageId,
+        sessionId: selectedSessionId,
+        seq: 101,
+        visibility: 'visible',
+        turnId: rootId,
+        inHistory: true,
+        createdAt: timestamp,
+        kind: 'tool_result',
+        parts: [
+          {
+            type: 'tool_result',
+            callId,
+            content: [{ type: 'json', value: { status: 'ok' } }],
+            isError: false,
+          },
+        ],
+        metadata: {
+          schemaVersion: 1,
+          tool: {
+            name: 'read_file',
+            status: 'completed',
+            reason: 'Read',
+            truncated: false,
+          },
+        },
+      },
+    ]
+    const runtime = useAgentRuntimeStore()
+    const overlay = runtime.ensureOverlay(selectedSessionId)
+    overlay.runId = 'run:live' as RunId
+    overlay.interjections = [
+      {
+        id: 'interjection:durable',
+        status: 'injected',
+        content: 'durable interjection',
+        createdAt: timestamp,
+      },
+    ]
+    overlay.tools = [
+      {
+        callId,
+        runId: 'run:live' as RunId,
+        tool: 'wrong-live-copy',
+        args: {},
+        reason: '',
+        status: 'completed',
+        order: 1,
+      },
+      {
+        callId: 'call:live' as CallId,
+        runId: 'run:live' as RunId,
+        tool: 'run_command',
+        args: {},
+        reason: '',
+        status: 'proposed',
+        order: 2,
+      },
+    ]
+
+    expect(
+      runtime.messages.filter((message) => message.role === 'interjection'),
+    ).toHaveLength(1)
+    expect(
+      runtime.messages.find((message) => message.role === 'interjection'),
+    ).not.toHaveProperty('live', true)
+    expect(runtime.tools.find((tool) => tool.callId === callId)).toMatchObject({
+      tool: 'read_file',
+      order: 101,
+    })
+    expect(
+      runtime.tools.find((tool) => tool.callId === 'call:live'),
+    ).toMatchObject({ live: true })
+  })
+
+  it('accounts writer events in the Session event sequence', () => {
+    seedReplica()
+    const runtime = useAgentRuntimeStore()
+    runtime.handleAgentEvent(
+      event({
+        type: 'workspace.writer.changed',
+        seq: 1,
+        sessionId: selectedSessionId,
+        workspace: project.path,
+        status: 'acquired',
+        writerSessionId: selectedSessionId,
+        writerRunId: 'run:writer' as RunId,
+      }),
+    )
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 2,
+        sessionId: selectedSessionId,
+        runId: 'run:writer' as RunId,
+        status: 'running_tools',
+      }),
+    )
+
+    expect(runtime.ensureOverlay(selectedSessionId).lastEventSeq).toBe(2)
+    expect(runtime.agentEventGap).toBe('')
+  })
+
+  it('does not let an old terminal reload clear a newer run overlay', async () => {
+    seedReplica()
+    const pending = deferred<Awaited<ReturnType<AgentApi['getSession']>>>()
+    installApi({ getSession: vi.fn(async () => pending.promise) })
+    const runtime = useAgentRuntimeStore()
+    const overlay = runtime.ensureOverlay(selectedSessionId)
+    overlay.runId = 'run:old' as RunId
+    overlay.text = 'old'
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 1,
+        sessionId: selectedSessionId,
+        runId: 'run:old' as RunId,
+        status: 'completed',
+      }),
+    )
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 2,
+        sessionId: selectedSessionId,
+        runId: 'run:new' as RunId,
+        status: 'calling_llm',
+      }),
+    )
+    runtime.handleAgentEvent(
+      event({
+        type: 'assistant.text.delta',
+        seq: 3,
+        sessionId: selectedSessionId,
+        runId: 'run:new' as RunId,
+        delta: 'new text',
+      }),
+    )
+    pending.resolve(
+      success({
+        version: 1 as const,
+        snapshot: {
+          schemaVersion: 1 as const,
+          session: session(),
+          messagePage: {
+            schemaVersion: 1 as const,
+            sessionId: selectedSessionId,
+            records: [userMessage()],
+            hasMore: false as const,
+          },
+          runtime: runtimeSnapshot(selectedSessionId, 'run:new' as RunId),
+        },
+      }),
+    )
+    await pending.promise
+    await Promise.resolve()
+
+    expect(overlay.runId).toBe('run:new')
+    expect(overlay.text).toBe('new text')
+  })
+})

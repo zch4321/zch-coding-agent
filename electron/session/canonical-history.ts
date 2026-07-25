@@ -95,6 +95,7 @@ export function appendPromptMessage(
     resource?: PromptResourceSummary
     hash?: string
     turnId?: MessageId
+    interjectionId?: string
   },
 ): MessageRecord {
   const content = input.content.trim()
@@ -128,6 +129,7 @@ export function appendPromptMessage(
             },
           }
         : {}),
+      ...(input.interjectionId ? { interjectionId: input.interjectionId } : {}),
     },
   } as MessageRecord
   state.history.push(record)

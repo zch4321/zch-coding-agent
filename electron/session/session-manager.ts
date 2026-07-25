@@ -991,6 +991,7 @@ export class SessionManager {
       )
     this.#emit(session, {
       type: 'workspace.writer.changed',
+      sessionId: owner.sessionId,
       workspace: owner.workspace,
       status,
       writerSessionId: owner.sessionId,

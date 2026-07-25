@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
+import type { MessageRecord } from '../../shared/message'
 import { SessionManager } from './session-manager'
 import {
   FinalAnswerInterjectionProvider,
@@ -23,11 +24,22 @@ describe('SessionManager live interjections', () => {
     const store = await createConfig(directory)
     const provider = new InterjectionProvider()
     const sent: AgentEventEnvelope[] = []
+    let committedInterjection: MessageRecord | undefined
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
       eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
+      executionState: {
+        async commit(session, input) {
+          if (input.reason === 'interjection') {
+            committedInterjection = structuredClone(
+              session.history.find((record) => record.kind === 'interjection'),
+            )
+          }
+          return undefined
+        },
+      },
     })
     const sessionId = await manager.createSession({
       workspace,
@@ -96,6 +108,11 @@ describe('SessionManager live interjections', () => {
     )
     expect(toolResultIndex).toBeGreaterThanOrEqual(0)
     expect(interjectionIndex).toBeGreaterThan(toolResultIndex)
+    expect(
+      committedInterjection?.kind === 'interjection'
+        ? committedInterjection.metadata?.interjectionId
+        : undefined,
+    ).toBe('request-interject-1')
 
     await manager.closeSession(sessionId)
     const trace = await readFile(

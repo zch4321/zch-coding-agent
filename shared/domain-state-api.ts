@@ -5,7 +5,6 @@ import {
   BackendEventSequenceSchema,
   ClientRequestIdSchema,
   DurableSchemaVersionSchema,
-  MAX_BOOTSTRAP_SESSION_RECORDS,
   MAX_COMMIT_MESSAGE_RECORDS,
   MAX_FILE_CHANGE_PAGE_RECORDS,
   MAX_MESSAGE_PAGE_RECORDS,
@@ -212,9 +211,7 @@ export const AppBootstrapResultSchema = Type.Object(
     projects: Type.Array(ProjectRecordSchema, {
       maxItems: MAX_PROJECT_RECORDS,
     }),
-    sessions: Type.Array(SessionRecordSchema, {
-      maxItems: MAX_BOOTSTRAP_SESSION_RECORDS,
-    }),
+    sessionPage: SessionPageSchema,
   },
   { additionalProperties: false },
 )

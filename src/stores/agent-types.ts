@@ -37,6 +37,7 @@ export interface ChatMessage {
   interjectionStatus?: 'queued' | 'injected' | 'superseded' | 'carryover'
   retryable?: boolean
   editable?: boolean
+  live?: boolean
 }
 
 export interface ToolActivity {
@@ -49,6 +50,7 @@ export interface ToolActivity {
   result?: unknown
   approval?: ToolApprovalSummary
   order?: number
+  live?: boolean
 }
 
 export interface UsageActivity {

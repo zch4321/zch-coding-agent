@@ -23,7 +23,13 @@ const emit = defineEmits<{
 const scrollElement = ref<HTMLElement>()
 const bottomSentinel = ref<HTMLElement>()
 const followingOutput = ref(true)
-const chronologicalTools = computed(() => [...agent.tools].reverse())
+const loadingOlderMessages = ref(false)
+const durableTools = computed(() =>
+  agent.tools.filter((tool) => !tool.live).reverse(),
+)
+const liveTools = computed(() =>
+  agent.tools.filter((tool) => tool.live).reverse(),
+)
 const visibleMessages = computed(() =>
   agent.messages.filter(
     (message) =>
@@ -31,6 +37,12 @@ const visibleMessages = computed(() =>
       message.text.trim().length > 0 ||
       message.reasoning.trim().length > 0,
   ),
+)
+const durableMessages = computed(() =>
+  visibleMessages.value.filter((message) => !message.live),
+)
+const liveMessages = computed(() =>
+  visibleMessages.value.filter((message) => message.live),
 )
 const expandedToolDetails = ref<string[]>([])
 let resizeObserver: ResizeObserver | undefined
@@ -148,6 +160,24 @@ async function scrollToBottom(force = false) {
   followingOutput.value = true
 }
 
+async function loadOlderMessages() {
+  const element = scrollElement.value
+  if (!element || loadingOlderMessages.value) return
+  const previousHeight = element.scrollHeight
+  const previousTop = element.scrollTop
+  loadingOlderMessages.value = true
+  followingOutput.value = false
+  try {
+    if (!(await agent.loadOlderMessages())) return
+    await nextTick()
+    await animationFrame()
+    element.scrollTop =
+      previousTop + Math.max(0, element.scrollHeight - previousHeight)
+  } finally {
+    loadingOlderMessages.value = false
+  }
+}
+
 watch(
   () => [
     visibleMessages.value.length,
@@ -229,40 +259,75 @@ onBeforeUnmount(() => {
         {{ agent.agentEventGap }}
       </NAlert>
 
-      <GoalPanel v-if="agent.goal" :style="{ order: 0 }" />
+      <NButton
+        v-if="agent.selectedMessageHasMore"
+        class="load-earlier"
+        size="small"
+        secondary
+        :loading="loadingOlderMessages"
+        @click="loadOlderMessages"
+      >
+        {{ t('chat.loadEarlierMessages') }}
+      </NButton>
 
-      <ChatMessageItem
-        v-for="message in visibleMessages"
-        :key="message.id"
-        :message="message"
-        :active-run-id="agent.activeRunId"
-        :actions-disabled="
-          Boolean(
-            agent.startPending || agent.activeRunId || agent.pendingApproval,
-          )
-        "
-        :style="{ order: message.order ?? 0 }"
-        @revert="requestRevert"
-        @fork="requestFork"
-        @retry="requestRetry"
-        @edit="requestEdit"
-      />
+      <GoalPanel v-if="agent.goal" />
 
-      <ToolCallCard
-        v-for="tool in chronologicalTools"
-        :key="tool.callId"
-        :tool="tool"
-        :expanded="isToolDetailsExpanded(tool)"
-        :style="{ order: tool.order ?? 0 }"
-        @toggle="toggleToolDetails(tool)"
-      />
+      <div class="durable-timeline">
+        <ChatMessageItem
+          v-for="message in durableMessages"
+          :key="message.id"
+          :message="message"
+          :active-run-id="agent.activeRunId"
+          :actions-disabled="
+            Boolean(
+              agent.startPending || agent.activeRunId || agent.pendingApproval,
+            )
+          "
+          :style="{ order: message.order ?? 0 }"
+          @revert="requestRevert"
+          @fork="requestFork"
+          @retry="requestRetry"
+          @edit="requestEdit"
+        />
+
+        <ToolCallCard
+          v-for="tool in durableTools"
+          :key="tool.callId"
+          :tool="tool"
+          :expanded="isToolDetailsExpanded(tool)"
+          :style="{ order: tool.order ?? 0 }"
+          @toggle="toggleToolDetails(tool)"
+        />
+      </div>
+
+      <div class="live-run-timeline">
+        <ToolCallCard
+          v-for="tool in liveTools"
+          :key="tool.callId"
+          :tool="tool"
+          :expanded="isToolDetailsExpanded(tool)"
+          @toggle="toggleToolDetails(tool)"
+        />
+        <ChatMessageItem
+          v-for="message in liveMessages"
+          :key="message.id"
+          :message="message"
+          :active-run-id="agent.activeRunId"
+          :actions-disabled="true"
+          @revert="requestRevert"
+          @fork="requestFork"
+          @retry="requestRetry"
+          @edit="requestEdit"
+        />
+      </div>
 
       <ApprovalCard v-if="agent.pendingApproval" :project-name="projectName" />
 
       <div
         v-if="
           visibleMessages.length === 0 &&
-          chronologicalTools.length === 0 &&
+          durableTools.length === 0 &&
+          liveTools.length === 0 &&
           !agent.pendingApproval
         "
         class="conversation-empty"

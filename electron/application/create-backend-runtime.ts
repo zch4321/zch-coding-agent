@@ -204,15 +204,16 @@ export async function createBackendRuntime(
       async bootstrap() {
         const snapshot = await coordinator.query((reader) => ({
           projects: projectRepository.list(reader),
-          sessions: sessionRepository.listPage(reader, {
+          sessionPage: sessionRepository.listPage(reader, {
+            lifecycle: 'active',
             limit: 200,
-          }).records,
+          }),
         }))
         return {
           version: 1,
           cursor: snapshot.cursor,
           projects: snapshot.value.projects,
-          sessions: snapshot.value.sessions,
+          sessionPage: snapshot.value.sessionPage,
         }
       },
       subscribe(listener) {

@@ -87,6 +87,7 @@ export class SessionInterjectionCoordinator {
           editable: false,
           config,
           turnId: run.rootUserMessageId,
+          interjectionId: interjection.id,
         })
         batch.appendedMessageIds.push(record.id)
         interjection.status = 'injected'

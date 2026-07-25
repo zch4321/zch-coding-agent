@@ -98,6 +98,14 @@ const replicaProperties = new Set<PropertyKey>([
   'messagesBySessionId',
   'fileChangesBySessionId',
   'runtimeBySessionId',
+  'sessionHasMore',
+  'sessionNextBefore',
+  'messageHasMoreBySessionId',
+  'messageNextBeforeSeqBySessionId',
+  'fileChangeHasMoreBySessionId',
+  'fileChangeNextBeforeBySessionId',
+  'selectedMessageHasMore',
+  'selectedFileChangeHasMore',
   'cursor',
   'searchHits',
   'loading',
@@ -213,6 +221,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     approvePlan: runtime.approvePlan,
     rejectPlan: runtime.rejectPlan,
     loadConversationChanges: changes.loadConversationChanges,
+    loadOlderConversationChanges: changes.loadOlderConversationChanges,
     revertChange: (changeId: string) =>
       changes.revertChange(
         changeId,
@@ -235,7 +244,9 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     conversationIsBusy: runtime.conversationIsBusy,
     conversationStatus: runtime.conversationStatus,
     searchSessions: replica.search,
+    loadOlderSessions: replica.loadOlderSessions,
     loadOlderMessages: replica.loadOlderMessages,
+    loadOlderFileChanges: replica.loadOlderFileChanges,
   }
 
   const targetStore = (property: PropertyKey): object | undefined => {

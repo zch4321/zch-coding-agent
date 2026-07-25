@@ -5,12 +5,17 @@ import type {
   DurableCommitEnvelope,
   SessionSearchHit,
 } from '../../shared/domain-state-api'
-import type { FileChangeSummary } from '../../shared/file-change'
+import type {
+  FileChangeListCursor,
+  FileChangeSummary,
+} from '../../shared/file-change'
 import type { ProjectId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { ProjectRecord } from '../../shared/project'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
-import type { SessionRecord } from '../../shared/session'
+import type { SessionListCursor, SessionRecord } from '../../shared/session'
+
+let bootstrapInFlight: Promise<boolean> | undefined
 
 function upsertById<T extends { id: string }>(records: T[], record: T): T[] {
   const next = records.filter((candidate) => candidate.id !== record.id)
@@ -27,6 +32,33 @@ function mergeMessages(
   return [...byId.values()].sort((left, right) => left.seq - right.seq)
 }
 
+function mergeSessions(
+  current: SessionRecord[],
+  records: readonly SessionRecord[],
+): SessionRecord[] {
+  const byId = new Map(current.map((record) => [record.id, record]))
+  for (const record of records) byId.set(record.id, structuredClone(record))
+  return [...byId.values()].sort(
+    (left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt) ||
+      right.id.localeCompare(left.id),
+  )
+}
+
+function mergeFileChanges(
+  current: FileChangeSummary[],
+  records: readonly FileChangeSummary[],
+): FileChangeSummary[] {
+  const byId = new Map(current.map((record) => [record.id, record]))
+  for (const record of records) byId.set(record.id, structuredClone(record))
+  return [...byId.values()].sort(
+    (left, right) =>
+      right.createdAt.localeCompare(left.createdAt) ||
+      right.id.localeCompare(left.id),
+  )
+}
+
+/** Stores the server-authoritative durable Project, Session, and page caches. */
 export const useAgentReplicaStore = defineStore('agent-replica', {
   state: () => ({
     projects: [] as ProjectRecord[],
@@ -39,10 +71,18 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
       string,
       ActiveRunPublicSnapshot | undefined
     >,
+    sessionHasMore: false,
+    sessionNextBefore: undefined as SessionListCursor | undefined,
     messageHasMoreBySessionId: {} as Record<string, boolean>,
+    messageNextBeforeSeqBySessionId: {} as Record<string, number | undefined>,
     fileChangeHasMoreBySessionId: {} as Record<string, boolean>,
+    fileChangeNextBeforeBySessionId: {} as Record<
+      string,
+      FileChangeListCursor | undefined
+    >,
     cursor: undefined as BackendEventCursor | undefined,
     searchHits: [] as SessionSearchHit[],
+    searchGeneration: 0,
     loading: false,
     error: '',
   }),
@@ -72,14 +112,39 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         ? state.runtimeBySessionId[state.selectedSessionId]
         : undefined
     },
+    selectedMessageHasMore(state): boolean {
+      return state.selectedSessionId
+        ? (state.messageHasMoreBySessionId[state.selectedSessionId] ?? false)
+        : false
+    },
+    selectedFileChangeHasMore(state): boolean {
+      return state.selectedSessionId
+        ? (state.fileChangeHasMoreBySessionId[state.selectedSessionId] ?? false)
+        : false
+    },
   },
   actions: {
-    async bootstrap(preferredProjectPath?: string) {
+    /** Coalesces concurrent bootstrap requests into one backend round trip. */
+    async bootstrap(preferredProjectPath?: string): Promise<boolean> {
+      if (bootstrapInFlight) return bootstrapInFlight
+      const pending = this.performBootstrap(preferredProjectPath)
+      bootstrapInFlight = pending
+      try {
+        return await pending
+      } finally {
+        if (bootstrapInFlight === pending) bootstrapInFlight = undefined
+      }
+    },
+    /** Replaces durable list state from a single backend bootstrap snapshot. */
+    async performBootstrap(preferredProjectPath?: string): Promise<boolean> {
       const api = window.agentApi
       if (!api) return false
       this.loading = true
-      const result = await api.getBootstrap({ version: IPC_VERSION })
-      this.loading = false
+      const result = await api
+        .getBootstrap({ version: IPC_VERSION })
+        .finally(() => {
+          this.loading = false
+        })
       if (!result.ok) {
         this.error = result.error.message
         return false
@@ -88,7 +153,11 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
       const previousProjectId = this.selectedProjectId
       const previousSessionId = this.selectedSessionId
       this.projects = structuredClone(result.value.projects)
-      this.sessions = structuredClone(result.value.sessions)
+      this.sessions = structuredClone(result.value.sessionPage.records)
+      this.sessionHasMore = result.value.sessionPage.hasMore
+      this.sessionNextBefore = result.value.sessionPage.hasMore
+        ? structuredClone(result.value.sessionPage.nextBefore)
+        : undefined
       this.cursor = structuredClone(result.value.cursor)
       this.selectedProjectId =
         this.projects.find((project) => project.id === previousProjectId)?.id ??
@@ -108,8 +177,38 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
             session.lifecycle === 'active',
         )?.id
       this.pruneCaches()
-      if (this.selectedSessionId) await this.loadSession(this.selectedSessionId)
+      if (
+        this.selectedSessionId &&
+        !(await this.loadSession(this.selectedSessionId))
+      ) {
+        return false
+      }
       this.error = ''
+      return true
+    },
+    /** Loads the next older active Session page into the sidebar cache. */
+    async loadOlderSessions(): Promise<boolean> {
+      const api = window.agentApi
+      const before = this.sessionNextBefore
+      if (!api || !this.sessionHasMore || !before) return false
+      const result = await api.listSessions({
+        version: IPC_VERSION,
+        lifecycle: 'active',
+        before: {
+          updatedAt: before.updatedAt,
+          sessionId: before.sessionId,
+        },
+        limit: 200,
+      })
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+      this.sessions = mergeSessions(this.sessions, result.value.page.records)
+      this.sessionHasMore = result.value.page.hasMore
+      this.sessionNextBefore = result.value.page.hasMore
+        ? structuredClone(result.value.page.nextBefore)
+        : undefined
       return true
     },
     async selectProject(projectId: ProjectId, selectLatest = true) {
@@ -123,10 +222,15 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
       }
       if (this.selectedSessionId) await this.loadSession(this.selectedSessionId)
     },
-    async selectSession(sessionId: SessionId) {
-      const session = this.sessions.find(
+    /** Selects a cached Session or loads an uncached search target by id. */
+    async selectSession(sessionId: SessionId): Promise<boolean> {
+      let session = this.sessions.find(
         (candidate) => candidate.id === sessionId,
       )
+      if (!session) {
+        if (!(await this.loadSession(sessionId))) return false
+        session = this.sessions.find((candidate) => candidate.id === sessionId)
+      }
       if (!session || session.lifecycle !== 'active') return false
       this.selectedProjectId = session.projectId
       this.selectedSessionId = session.id
@@ -145,17 +249,28 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         return false
       }
       const snapshot = result.value.snapshot
+      const current = this.sessions.find(
+        (candidate) => candidate.id === sessionId,
+      )
+      if (current && current.revision > snapshot.session.revision) {
+        return true
+      }
       this.sessions = upsertById(this.sessions, snapshot.session)
       this.messagesBySessionId[sessionId] = structuredClone(
         snapshot.messagePage.records,
       )
       this.messageHasMoreBySessionId[sessionId] = snapshot.messagePage.hasMore
+      this.messageNextBeforeSeqBySessionId[sessionId] = snapshot.messagePage
+        .hasMore
+        ? snapshot.messagePage.nextBeforeSeq
+        : undefined
       this.runtimeBySessionId[sessionId] = snapshot.runtime
         ? structuredClone(snapshot.runtime)
         : undefined
       return true
     },
-    async loadOlderMessages(targetSessionId?: SessionId) {
+    /** Prepends one older Message page without changing durable ordering. */
+    async loadOlderMessages(targetSessionId?: SessionId): Promise<boolean> {
       const sessionId = targetSessionId ?? this.selectedSessionId
       const api = window.agentApi
       if (
@@ -163,29 +278,35 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         !sessionId ||
         this.messageHasMoreBySessionId[sessionId] === false
       ) {
-        return
+        return false
       }
-      const first = this.messagesBySessionId[sessionId]?.[0]
+      const beforeSeq = this.messageNextBeforeSeqBySessionId[sessionId]
       const result = await api.listMessages({
         version: IPC_VERSION,
         sessionId,
-        ...(first ? { beforeSeq: first.seq } : {}),
+        ...(beforeSeq ? { beforeSeq } : {}),
         limit: 200,
       })
       if (!result.ok) {
         this.error = result.error.message
-        return
+        return false
       }
       this.messagesBySessionId[sessionId] = mergeMessages(
         this.messagesBySessionId[sessionId] ?? [],
         result.value.page.records,
       )
       this.messageHasMoreBySessionId[sessionId] = result.value.page.hasMore
+      this.messageNextBeforeSeqBySessionId[sessionId] = result.value.page
+        .hasMore
+        ? result.value.page.nextBeforeSeq
+        : undefined
+      return true
     },
-    async loadFileChanges(targetSessionId?: SessionId) {
+    /** Replaces the cached FileChange page for a Session. */
+    async loadFileChanges(targetSessionId?: SessionId): Promise<boolean> {
       const sessionId = targetSessionId ?? this.selectedSessionId
       const api = window.agentApi
-      if (!api || !sessionId) return
+      if (!api || !sessionId) return false
       const result = await api.listFileChanges({
         version: IPC_VERSION,
         sessionId,
@@ -193,16 +314,62 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
       })
       if (!result.ok) {
         this.error = result.error.message
-        return
+        return false
       }
       this.fileChangesBySessionId[sessionId] = structuredClone(
         result.value.page.records,
       )
       this.fileChangeHasMoreBySessionId[sessionId] = result.value.page.hasMore
+      this.fileChangeNextBeforeBySessionId[sessionId] = result.value.page
+        .hasMore
+        ? structuredClone(result.value.page.nextBefore)
+        : undefined
+      return true
     },
-    async search(text: string, projectId?: ProjectId) {
+    /** Appends one older FileChange page using its stable compound cursor. */
+    async loadOlderFileChanges(targetSessionId?: SessionId): Promise<boolean> {
+      const sessionId = targetSessionId ?? this.selectedSessionId
+      const api = window.agentApi
+      const before = sessionId
+        ? this.fileChangeNextBeforeBySessionId[sessionId]
+        : undefined
+      if (
+        !api ||
+        !sessionId ||
+        !this.fileChangeHasMoreBySessionId[sessionId] ||
+        !before
+      ) {
+        return false
+      }
+      const result = await api.listFileChanges({
+        version: IPC_VERSION,
+        sessionId,
+        before: {
+          createdAt: before.createdAt,
+          fileChangeId: before.fileChangeId,
+        },
+        limit: 200,
+      })
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+      this.fileChangesBySessionId[sessionId] = mergeFileChanges(
+        this.fileChangesBySessionId[sessionId] ?? [],
+        result.value.page.records,
+      )
+      this.fileChangeHasMoreBySessionId[sessionId] = result.value.page.hasMore
+      this.fileChangeNextBeforeBySessionId[sessionId] = result.value.page
+        .hasMore
+        ? structuredClone(result.value.page.nextBefore)
+        : undefined
+      return true
+    },
+    /** Searches active Sessions and upserts uncached hit summaries. */
+    async search(text: string, projectId?: ProjectId): Promise<void> {
       const api = window.agentApi
       const query = text.trim()
+      const generation = ++this.searchGeneration
       if (!api || !query) {
         this.searchHits = []
         return
@@ -213,8 +380,16 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         ...(projectId ? { projectId } : {}),
         limit: 100,
       })
-      if (result.ok) this.searchHits = structuredClone(result.value.hits)
-      else this.error = result.error.message
+      if (generation !== this.searchGeneration) return
+      if (result.ok) {
+        this.searchHits = structuredClone(result.value.hits)
+        this.sessions = mergeSessions(
+          this.sessions,
+          result.value.hits.map((hit) => hit.session),
+        )
+      } else {
+        this.error = result.error.message
+      }
     },
     async reconcile(commit: DurableCommitEnvelope) {
       const current = this.cursor
@@ -258,7 +433,7 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
           await this.loadSession(incoming.id)
           return 'resynced' as const
         }
-        this.sessions = upsertById(this.sessions, incoming)
+        this.sessions = mergeSessions(this.sessions, [incoming])
         const change = commit.change.messageChange
         if (change.mode === 'upsert') {
           this.messagesBySessionId[incoming.id] = mergeMessages(
@@ -271,6 +446,7 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         ) {
           delete this.messagesBySessionId[incoming.id]
           delete this.messageHasMoreBySessionId[incoming.id]
+          delete this.messageNextBeforeSeqBySessionId[incoming.id]
           if (incoming.id === this.selectedSessionId) {
             await this.loadSession(incoming.id)
           }
@@ -295,22 +471,33 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
       if (change.mode === 'invalidate_all') {
         this.fileChangesBySessionId = {}
         this.fileChangeHasMoreBySessionId = {}
+        this.fileChangeNextBeforeBySessionId = {}
         return 'applied' as const
       }
       const sessionId = change.sessionId
-      this.fileChangesBySessionId[sessionId] = upsertById(
+      this.fileChangesBySessionId[sessionId] = mergeFileChanges(
         this.fileChangesBySessionId[sessionId] ?? [],
-        change.fileChange,
+        [change.fileChange],
       )
       return 'applied' as const
     },
+    /** Removes every cache whose Session is no longer represented locally. */
     pruneCaches() {
       const sessionIds = new Set(this.sessions.map((session) => session.id))
-      for (const key of Object.keys(this.messagesBySessionId)) {
+      const keys = new Set([
+        ...Object.keys(this.messagesBySessionId),
+        ...Object.keys(this.fileChangesBySessionId),
+        ...Object.keys(this.runtimeBySessionId),
+      ])
+      for (const key of keys) {
         if (!sessionIds.has(key as SessionId)) {
           delete this.messagesBySessionId[key]
           delete this.fileChangesBySessionId[key]
           delete this.runtimeBySessionId[key]
+          delete this.messageHasMoreBySessionId[key]
+          delete this.messageNextBeforeSeqBySessionId[key]
+          delete this.fileChangeHasMoreBySessionId[key]
+          delete this.fileChangeNextBeforeBySessionId[key]
         }
       }
     },

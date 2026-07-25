@@ -3,7 +3,6 @@ import { Type } from '@sinclair/typebox'
 export const DURABLE_SCHEMA_VERSION = 1 as const
 
 export const MAX_PROJECT_RECORDS = 512
-export const MAX_BOOTSTRAP_SESSION_RECORDS = 200
 export const MAX_SESSION_LIST_RECORDS = 200
 export const MAX_MESSAGE_PAGE_RECORDS = 200
 export const MAX_COMMIT_MESSAGE_RECORDS = 512

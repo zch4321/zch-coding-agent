@@ -18,6 +18,15 @@ export const useAgentChangesStore = defineStore('agent-changes', {
       await useAgentReplicaStore().loadFileChanges()
       this.changesLoading = false
     },
+    /** Loads the next older durable FileChange page for the selected Session. */
+    async loadOlderConversationChanges() {
+      this.changesLoading = true
+      try {
+        return await useAgentReplicaStore().loadOlderFileChanges()
+      } finally {
+        this.changesLoading = false
+      }
+    },
     async revertChange(changeId: string, runBusy = false) {
       const replica = useAgentReplicaStore()
       const session = replica.selectedSession

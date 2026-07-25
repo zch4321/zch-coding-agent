@@ -157,6 +157,7 @@ export function appendPromptLayer(
     resource?: PromptResourceSummary
     hash?: string
     turnId?: MessageId
+    interjectionId?: string
   },
 ): MessageRecord {
   return appendPromptMessage(state, input)

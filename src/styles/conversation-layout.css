@@ -159,6 +159,21 @@
   padding: 24px clamp(18px, 5vw, 52px);
 }
 
+.durable-timeline,
+.live-run-timeline {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-direction: column;
+}
+
+.load-earlier {
+  width: fit-content;
+  flex: 0 0 auto;
+  margin: 0 auto 16px;
+}
+
 .conversation-error-overlay {
   position: absolute;
   z-index: 8;

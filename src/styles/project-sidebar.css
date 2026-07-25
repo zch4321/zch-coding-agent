@@ -131,6 +131,23 @@
   justify-content: space-between;
 }
 
+.load-older-sessions-button {
+  display: block;
+  width: calc(100% - 16px);
+  min-height: 32px;
+  margin: 4px 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: var(--background);
+  font-size: 12px;
+}
+
+.load-older-sessions-button:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .add-project-button {
   display: grid;
   width: 26px;

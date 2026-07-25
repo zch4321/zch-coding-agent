@@ -282,6 +282,9 @@ export const PromptMessageMetadataV1Schema = Type.Object(
     schemaVersion: DurableSchemaVersionSchema,
     layer: PromptLayerMetadataSchema,
     prompt: Type.Optional(PromptMetadataSchema),
+    interjectionId: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 128 }),
+    ),
   },
   { additionalProperties: false },
 )
