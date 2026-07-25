@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import {
   MAX_MESSAGE_PARTS,
   MAX_MESSAGE_TEXT_LENGTH,
+  MAX_TOOL_INTENT_LENGTH,
 } from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
 import {
@@ -136,7 +137,10 @@ function normalizeToolArgs(
   }
 
   const args = structuredClone(parsed)
-  const reason = typeof args[intentField] === 'string' ? args[intentField] : ''
+  const reason =
+    typeof args[intentField] === 'string'
+      ? args[intentField].slice(0, MAX_TOOL_INTENT_LENGTH)
+      : ''
   delete args[intentField]
   return { args, reason }
 }

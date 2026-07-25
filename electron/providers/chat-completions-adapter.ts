@@ -353,6 +353,11 @@ export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompl
       })
     }
     if (parts.length === 0) {
+      if (turn.reasoning_content) {
+        throw new TypeError(
+          'Provider returned reasoning without an assistant answer; retry the request',
+        )
+      }
       throw new TypeError('Provider completed with an empty assistant turn')
     }
     return {

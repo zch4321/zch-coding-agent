@@ -10,11 +10,13 @@ import {
 import path from 'node:path'
 import { EMPTY_FILE_SHA256 } from '../../shared/file-change'
 import { PathGuard } from '../safety/path-guard'
+import { MAX_MUTATION_FILE_BYTES } from '../tools/file-tool-limits'
 
 export interface FileContentState {
   exists: boolean
   hash: string
   content: string | null
+  mode: number | null
   absolutePath: string
 }
 
@@ -42,6 +44,12 @@ export async function readFileContentState(
         'The change target is no longer a regular file',
       )
     }
+    if (value.size > MAX_MUTATION_FILE_BYTES) {
+      throw new FileChangeResourceError(
+        'RESOURCE_CHANGED',
+        `The change target exceeds the ${MAX_MUTATION_FILE_BYTES} byte mutation limit`,
+      )
+    }
     const canonical = path.resolve(await realpath(absolutePath))
     guard.assertInside(canonical)
     const content = await readFile(canonical, 'utf8')
@@ -49,6 +57,7 @@ export async function readFileContentState(
       exists: true,
       hash: sha256(content),
       content,
+      mode: value.mode & 0o777,
       absolutePath,
     }
   } catch (error) {
@@ -57,6 +66,7 @@ export async function readFileContentState(
         exists: false,
         hash: EMPTY_FILE_SHA256,
         content: null,
+        mode: null,
         absolutePath,
       }
     }
@@ -82,6 +92,7 @@ export async function restoreFileContent(input: {
   path: string
   beforeExists: boolean
   beforeContent: string | null
+  beforeMode: number | null
   afterExists: boolean
   afterHash: string
 }): Promise<void> {
@@ -93,10 +104,10 @@ export async function restoreFileContent(input: {
   guard.assertInside(parentRealPath)
 
   if (input.beforeExists) {
-    if (input.beforeContent === null) {
+    if (input.beforeContent === null || input.beforeMode === null) {
       throw new FileChangeResourceError(
         'RESOURCE_CHANGED',
-        'The stored recovery snapshot is missing',
+        'The stored recovery snapshot or file mode is missing',
       )
     }
     const temporaryPath = path.join(
@@ -106,6 +117,7 @@ export async function restoreFileContent(input: {
     const file = await open(temporaryPath, 'wx', 0o600)
     try {
       await file.writeFile(input.beforeContent, 'utf8')
+      await file.chmod(input.beforeMode)
       await file.sync()
       await file.close()
       state = await readFileContentState(input.workspace, input.path)

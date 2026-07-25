@@ -1,10 +1,19 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  truncate,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { FileChangeOperation } from '../../shared/file-change'
 import type {
   CallId,
   FileChangeId,
+  MessageId,
   ProjectId,
   RunId,
   SessionId,
@@ -22,6 +31,7 @@ import { SessionRepository } from '../persistence/session-repository'
 import { createTestDatabase } from '../persistence/test-database'
 import type { FileChangeRevertAccessResult } from '../session/workspace-access-coordinator'
 import { hash } from '../tools/file-tool-preconditions'
+import { MAX_MUTATION_FILE_BYTES } from '../tools/file-tool-limits'
 import { ApplicationError } from './application-error'
 import { ApplicationStateCoordinator } from './application-state-coordinator'
 import {
@@ -196,6 +206,50 @@ describe('FileChangeService revert', () => {
     }
   })
 
+  it('rejects an oversized replacement before reading or reverting it', async () => {
+    const setup = await setupRevert()
+    try {
+      const record = await seedChange(setup, {
+        operation: 'patch',
+        beforeContent: 'before patch',
+        afterContent: 'after patch',
+      })
+      const target = path.join(setup.workspace, record.path)
+      await truncate(target, MAX_MUTATION_FILE_BYTES + 1)
+
+      await expect(
+        setup.service.revert(setup.sessionId, record.id, 1),
+      ).rejects.toMatchObject({ code: 'RESOURCE_CHANGED' })
+      await expect(stat(target)).resolves.toMatchObject({
+        size: MAX_MUTATION_FILE_BYTES + 1,
+      })
+    } finally {
+      await setup.dispose()
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'restores the original POSIX file mode',
+    async () => {
+      const setup = await setupRevert()
+      try {
+        const record = await seedChange(setup, {
+          operation: 'delete',
+          beforeContent: '#!/bin/sh\necho restored\n',
+          beforeMode: 0o755,
+          afterContent: null,
+        })
+        const target = path.join(setup.workspace, record.path)
+
+        await setup.service.revert(setup.sessionId, record.id, 1)
+
+        expect((await stat(target)).mode & 0o777).toBe(0o755)
+      } finally {
+        await setup.dispose()
+      }
+    },
+  )
+
   it('reports a completed filesystem restore when markReverted fails', async () => {
     const setup = await setupRevert(new FailingMarkRepository())
     try {
@@ -303,6 +357,7 @@ async function seedChange(
   input: {
     operation: FileChangeOperation
     beforeContent: string | null
+    beforeMode?: number
     afterContent: string | null
   },
 ): Promise<StoredFileChangeRecord> {
@@ -311,6 +366,7 @@ async function seedChange(
     schemaVersion: 1,
     id: `file-change:${input.operation}` as FileChangeId,
     sessionId: setup.sessionId,
+    assistantMessageId: `message:assistant-${input.operation}` as MessageId,
     callId: `call:${input.operation}` as CallId,
     path: pathValue,
     operation: input.operation,
@@ -318,6 +374,8 @@ async function seedChange(
     diffHash: hash(`diff:${input.operation}`),
     diffTruncated: false,
     beforeExists: input.beforeContent !== null,
+    beforeMode:
+      input.beforeContent === null ? null : (input.beforeMode ?? 0o644),
     beforeHash: hash(input.beforeContent ?? ''),
     beforeContent: input.beforeContent,
     afterExists: input.afterContent !== null,
@@ -333,6 +391,7 @@ async function seedChange(
     await rm(path.join(setup.workspace, pathValue), { force: true })
   } else {
     await writeFile(path.join(setup.workspace, pathValue), input.afterContent)
+    await chmod(path.join(setup.workspace, pathValue), 0o600)
   }
   await setup.testDatabase.database.withTransaction((transaction) => {
     setup.fileChanges.insertWithRetention(transaction, record)

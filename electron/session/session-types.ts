@@ -76,6 +76,9 @@ export interface SessionManagerOptions {
     config: PublicConfig
     apiKey: string
   }) => AutoApprover
+  traceLoggerFactory?: (
+    sessionId: SessionId,
+  ) => TraceLogger | Promise<TraceLogger>
   executionState?: SessionExecutionStatePort
   onDiagnostic?: (message: string, error?: unknown) => void
 }

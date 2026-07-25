@@ -63,4 +63,41 @@ describe('R4 run context attachments', () => {
     expect(context.providerContent).toContain('file src/index.ts')
     expect(context.providerContent).not.toContain('secret body')
   })
+
+  it('falls back to attachment names when aggregate content exceeds its token budget', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-context-budget-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(path.join(workspace, 'docs'), { recursive: true })
+    await writeFile(
+      path.join(workspace, 'docs', 'first.md'),
+      `first-secret-${'a'.repeat(2_000)}`,
+    )
+    await writeFile(
+      path.join(workspace, 'docs', 'second.md'),
+      `second-secret-${'b'.repeat(2_000)}`,
+    )
+    const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
+    config.limits.maxAttachmentContextTokens = 1_024
+
+    const context = await prepareRunContext({
+      workspace,
+      attachments: [
+        { kind: 'file', path: 'docs/first.md', source: 'mention' },
+        { kind: 'file', path: 'docs/second.md', source: 'picker' },
+      ],
+      config,
+    })
+
+    expect(context.providerContent).toContain('content="filenames_only"')
+    expect(context.providerContent).toContain('file docs/first.md')
+    expect(context.providerContent).toContain('file docs/second.md')
+    expect(context.providerContent).not.toContain('first-secret')
+    expect(context.providerContent).not.toContain('second-secret')
+    expect(context.chips).toEqual([
+      expect.objectContaining({ path: 'docs/first.md', truncated: true }),
+      expect.objectContaining({ path: 'docs/second.md', truncated: true }),
+    ])
+  })
 })

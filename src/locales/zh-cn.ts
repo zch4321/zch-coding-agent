@@ -371,6 +371,7 @@ const zhCN = {
     maxStepsPerRun: '每次运行最大步骤数',
     maxStepsPerRunHint: '设为 0 时不限制 React loop 步数。',
     maxContextTokens: '默认最大上下文 Token',
+    maxAttachmentContextTokens: '附件内容 Token 上限',
     autoCompactTriggerPercent: '自动压缩触发阈值',
     maxToolResultTokens: '单次工具结果 Token 上限',
     maxToolTokensPerRun: '每次运行工具结果 Token 总上限',

@@ -129,6 +129,9 @@ export class FileChangeService implements FileChangeExecutionPort {
       'expected result content',
     )
     const beforeHash = sha256(beforeContent ?? '')
+    const beforeMode = precondition.expectedExists
+      ? requireFileMode(precondition.expectedMode)
+      : null
     const afterHash = sha256(afterContent)
     const diffHash = sha256(input.diff)
     if (
@@ -159,6 +162,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     return {
       id: this.#createId(),
       sessionId: input.sessionId,
+      assistantMessageId: input.assistantMessageId,
       callId: input.approvedCall.callId,
       path: precondition.path,
       operation,
@@ -166,6 +170,7 @@ export class FileChangeService implements FileChangeExecutionPort {
       diffHash,
       diffTruncated: isFileDiffTruncated(input.diff),
       beforeExists: precondition.expectedExists,
+      beforeMode,
       beforeHash,
       beforeContent,
       afterExists: operation !== 'delete',
@@ -212,6 +217,7 @@ export class FileChangeService implements FileChangeExecutionPort {
       schemaVersion: 1,
       id: input.prepared.id,
       sessionId: input.prepared.sessionId,
+      assistantMessageId: input.prepared.assistantMessageId,
       callId: input.prepared.callId,
       path: input.prepared.path,
       operation: input.prepared.operation,
@@ -219,6 +225,7 @@ export class FileChangeService implements FileChangeExecutionPort {
       diffHash: input.prepared.diffHash,
       diffTruncated: input.prepared.diffTruncated,
       beforeExists: input.prepared.beforeExists,
+      beforeMode: input.prepared.beforeMode,
       beforeHash: input.prepared.beforeHash,
       beforeContent: input.prepared.beforeContent,
       afterExists: input.prepared.afterExists,
@@ -350,6 +357,7 @@ export class FileChangeService implements FileChangeExecutionPort {
           path: target.record.path,
           beforeExists: target.record.beforeExists,
           beforeContent: target.record.beforeContent,
+          beforeMode: target.record.beforeMode,
           afterExists: target.record.afterExists,
           afterHash: target.record.afterHash,
         })
@@ -497,6 +505,16 @@ function requireText(value: string | undefined, label: string): string {
   throw new FileChangeExecutionError(
     'RESOURCE_CHANGED',
     `Approved file mutation is missing ${label}`,
+  )
+}
+
+function requireFileMode(value: number | undefined): number {
+  if (Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 0o777) {
+    return Number(value)
+  }
+  throw new FileChangeExecutionError(
+    'RESOURCE_CHANGED',
+    'Approved file mutation is missing the original file mode',
   )
 }
 

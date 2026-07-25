@@ -332,4 +332,23 @@ describe('ChatCompletionsAdapter', () => {
       finishReason: 'content_filter',
     })
   })
+
+  it('treats reasoning-only completion as a retryable request failure', () => {
+    const adapter = new ChatCompletionsAdapter(route.adapterId)
+
+    expect(() =>
+      adapter.complete(
+        completed({
+          turn: {
+            role: 'assistant',
+            content: null,
+            reasoning_content: 'Unfinished reasoning',
+          },
+          finishReason: 'length',
+        }),
+      ),
+    ).toThrow(
+      'Provider returned reasoning without an assistant answer; retry the request',
+    )
+  })
 })

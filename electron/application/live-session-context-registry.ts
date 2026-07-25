@@ -349,10 +349,10 @@ export class LiveSessionContextRegistry
 
   applySessionRecord(record: SessionRecord): void {
     const entry = this.#entries.get(record.id)
+    this.#manager.applyDurableSessionRecord(record)
     if (entry?.phase === 'live' && this.#manager.hasLiveSession(record.id)) {
       this.#executionState.applyRecord(record.id, record, entry.ownerToken)
     }
-    this.#manager.applyDurableSessionRecord(record)
   }
 
   invalidate(sessionId: SessionId, runId?: RunId): void {

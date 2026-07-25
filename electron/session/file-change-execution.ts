@@ -2,12 +2,18 @@ import type {
   FileChangeOperation,
   FileChangeSummary,
 } from '../../shared/file-change'
-import type { CallId, FileChangeId, SessionId } from '../../shared/ids'
+import type {
+  CallId,
+  FileChangeId,
+  MessageId,
+  SessionId,
+} from '../../shared/ids'
 import type { ApprovedToolCall } from '../tools/approved-tool-call'
 
 export interface PreparedFileChange {
   id: FileChangeId
   sessionId: SessionId
+  assistantMessageId: MessageId
   callId: CallId
   path: string
   operation: FileChangeOperation
@@ -15,6 +21,7 @@ export interface PreparedFileChange {
   diffHash: string
   diffTruncated: boolean
   beforeExists: boolean
+  beforeMode: number | null
   beforeHash: string
   beforeContent: string | null
   afterExists: boolean
@@ -49,6 +56,7 @@ export class FileChangeExecutionError extends Error {
 export interface FileChangeExecutionPort {
   prepareMutation(input: {
     sessionId: SessionId
+    assistantMessageId: MessageId
     workspace: string
     approvedCall: ApprovedToolCall
     diff: string

@@ -89,6 +89,9 @@ export class SessionManager {
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #autoApproverFactory: SessionManagerOptions['autoApproverFactory']
+  readonly #traceLoggerFactory: NonNullable<
+    SessionManagerOptions['traceLoggerFactory']
+  >
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   readonly #sessions = new Map<SessionId, SessionState>()
   readonly #writerEventSessions = new Map<RunId, SessionState>()
@@ -130,6 +133,9 @@ export class SessionManager {
     this.#providerFactory = options.providerFactory
     this.#fetchImpl = options.fetchImpl
     this.#autoApproverFactory = options.autoApproverFactory
+    this.#traceLoggerFactory =
+      options.traceLoggerFactory ??
+      ((sessionId) => JsonlTraceLogger.create(this.#traceDirectory, sessionId))
     this.#executionState = options.executionState
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
     this.#events = new SessionEventEmitter({
@@ -301,7 +307,7 @@ export class SessionManager {
       ipcFault('CONFLICT', 'Session already exists in the live registry')
     }
     const logger = publicConfig.logging.enabled
-      ? await JsonlTraceLogger.create(this.#traceDirectory, sessionId)
+      ? await this.#traceLoggerFactory(sessionId)
       : new NullTraceLogger()
     const session: SessionState = {
       sessionId,
@@ -397,7 +403,7 @@ export class SessionManager {
     const guard = await PathGuard.create(input.workspace)
     await this.#mcpManager?.activateWorkspace(guard.workspacePath)
     const logger = publicConfig.logging.enabled
-      ? await JsonlTraceLogger.create(this.#traceDirectory, input.record.id)
+      ? await this.#traceLoggerFactory(input.record.id)
       : new NullTraceLogger()
     const session: SessionState = {
       sessionId: input.record.id,

@@ -5,6 +5,7 @@ import type {
 } from '../../shared/context'
 import type { PublicConfig } from '../../shared/config'
 import { PathGuard } from '../safety/path-guard'
+import { estimateTextTokens } from '../tools/context-budget'
 import {
   formatAgentsInstructions,
   loadAgentsInstructions,
@@ -62,7 +63,7 @@ export async function prepareRunContext(input: {
   const attachments = dedupeAttachments(input.attachments)
   const guard = await PathGuard.create(input.workspace)
   const chips: ContextAttachmentChip[] = []
-  const sections: string[] = []
+  const attachmentSections: string[] = []
   const agents = await loadAgentsInstructions({
     workspace: input.workspace,
     attachments,
@@ -70,10 +71,6 @@ export async function prepareRunContext(input: {
     signal: input.signal,
   })
   const agentsContent = formatAgentsInstructions(agents)
-
-  if (agentsContent) {
-    sections.push(agentsContent)
-  }
 
   for (const attachment of attachments) {
     if (input.signal?.aborted) {
@@ -93,7 +90,7 @@ export async function prepareRunContext(input: {
         totalBytes: file.totalBytes,
         truncated: file.truncated,
       })
-      sections.push(
+      attachmentSections.push(
         [
           `<context_file path="${file.path}" sha256="${sha256(file.content)}" bytes="${file.totalBytes}" truncated="${file.truncated}">`,
           file.content,
@@ -120,7 +117,7 @@ export async function prepareRunContext(input: {
       source: attachment.source ?? 'mention',
       truncated: visible.length > limited.length,
     })
-    sections.push(
+    attachmentSections.push(
       [
         `<context_directory path="${attachment.path}" entries="${visible.length}" truncated="${visible.length > limited.length}">`,
         limited
@@ -134,12 +131,38 @@ export async function prepareRunContext(input: {
     )
   }
 
-  if (sections.length === 0) {
+  if (!agentsContent && attachmentSections.length === 0) {
     return { providerContent: '', chips }
   }
 
+  const providerContent = [agentsContent, ...attachmentSections]
+    .filter(Boolean)
+    .join('\n\n')
+  const estimatedTokens = estimateTextTokens(
+    attachmentSections.join('\n\n'),
+    input.config.limits.tokenEstimation,
+  )
+  if (estimatedTokens > input.config.limits.maxAttachmentContextTokens) {
+    const references = attachments.map(
+      (attachment) => `${attachment.kind} ${attachment.path}`,
+    )
+    return {
+      providerContent: [
+        agentsContent,
+        [
+          `<context_attachments content="filenames_only" reason="token_budget_exceeded" estimated_tokens="${estimatedTokens}" max_tokens="${input.config.limits.maxAttachmentContextTokens}">`,
+          ...references,
+          '</context_attachments>',
+        ].join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      chips: chips.map((chip) => ({ ...chip, truncated: true })),
+    }
+  }
+
   return {
-    providerContent: sections.join('\n\n'),
+    providerContent,
     chips,
   }
 }

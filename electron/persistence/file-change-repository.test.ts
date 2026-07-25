@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { CallId, FileChangeId, SessionId } from '../../shared/ids'
+import type {
+  CallId,
+  FileChangeId,
+  MessageId,
+  SessionId,
+} from '../../shared/ids'
 import {
   assertFileChangePayloadWithinLimit,
   DEFAULT_FILE_CHANGE_HISTORY_BYTES,
@@ -63,6 +68,45 @@ describe('FileChangeRepository retention', () => {
       expect(new Set(ids).size).toBe(205)
       expect(ids[0]).toBe('file-change:204')
       expect(ids.at(-1)).toBe('file-change:000')
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
+  it('allows a call id and path to be reused by a later assistant turn', async () => {
+    const testDatabase = await createTestDatabase()
+    const repository = new FileChangeRepository()
+    const project = projectFixture()
+    const session = sessionFixture({ lastSeq: 0 })
+    const first = fileChangeFixture({
+      id: 'file-change:turn-one' as FileChangeId,
+      assistantMessageId: 'message:turn-one' as MessageId,
+      callId: 'call:reused' as CallId,
+      path: 'reused.txt',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    })
+    const second = fileChangeFixture({
+      id: 'file-change:turn-two' as FileChangeId,
+      assistantMessageId: 'message:turn-two' as MessageId,
+      callId: first.callId,
+      path: first.path,
+      createdAt: '2026-01-01T00:00:01.000Z',
+      updatedAt: '2026-01-01T00:00:01.000Z',
+    })
+    try {
+      await testDatabase.database.withTransaction((transaction) => {
+        new ProjectRepository().insert(transaction, project)
+        new SessionRepository().insert(transaction, session)
+        repository.insertWithRetention(transaction, first)
+        repository.insertWithRetention(transaction, second)
+      })
+
+      expect(
+        testDatabase.database
+          .read((reader) => repository.listPage(reader, session.id).records)
+          .map((record) => record.id),
+      ).toEqual([second.id, first.id])
     } finally {
       await testDatabase.dispose()
     }

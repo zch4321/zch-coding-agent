@@ -53,6 +53,14 @@ const tokenEstimationOptions = computed(() => [
             />
           </label>
           <label class="settings-field">
+            <span>{{ t('limits.maxAttachmentContextTokens') }}</span>
+            <NInputNumber
+              v-model:value="agent.limitsConfig.maxAttachmentContextTokens"
+              :min="1024"
+              :max="1000000"
+            />
+          </label>
+          <label class="settings-field">
             <span>{{ t('limits.autoCompactTriggerPercent') }}</span>
             <NInputNumber
               v-model:value="agent.limitsConfig.autoCompactTriggerPercent"

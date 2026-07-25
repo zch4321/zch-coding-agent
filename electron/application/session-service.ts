@@ -378,7 +378,16 @@ export class SessionService {
       messageChange: 'none',
       requireIdle: true,
     })
-    await this.#runtimeGuard?.applySessionRecord?.(result.commit.change.session)
+    try {
+      await this.#runtimeGuard?.applySessionRecord?.(
+        result.commit.change.session,
+      )
+    } catch (error) {
+      this.#onDiagnostic(
+        `Updated Session ${input.sessionId} could not refresh its runtime context`,
+        error,
+      )
+    }
     return result
   }
 

@@ -131,6 +131,7 @@ export const DEFAULT_APP_CONFIG = {
     maxStepsPerRun: 0,
     maxToolOutputBytes: 64 * 1_024,
     maxContextTokens: 64_000,
+    maxAttachmentContextTokens: 64_000,
     autoCompactTriggerPercent: 80,
     maxToolResultTokens: 8_000,
     maxToolTokensPerRun: 24_000,

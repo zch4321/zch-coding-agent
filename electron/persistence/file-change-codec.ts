@@ -4,7 +4,13 @@ import {
   FileChangeSummarySchema,
   type FileChangeSummary,
 } from '../../shared/file-change'
-import type { CallId, FileChangeId, SessionId } from '../../shared/ids'
+import {
+  MessageIdSchema,
+  type CallId,
+  type FileChangeId,
+  type MessageId,
+  type SessionId,
+} from '../../shared/ids'
 import { compileSchema } from '../schema-validator'
 import {
   assertSchemaValue,
@@ -16,9 +22,12 @@ import {
 import { PersistenceError } from './persistence-error'
 
 const validateFileChangeSummary = compileSchema(FileChangeSummarySchema)
+const validateMessageId = compileSchema(MessageIdSchema)
 
 export interface StoredFileChangeRecord extends FileChangeSummary {
+  assistantMessageId: MessageId
   beforeContent: string | null
+  beforeMode: number | null
   payloadBytes: number
 }
 
@@ -43,7 +52,9 @@ export interface FileChangeSummaryRow {
 }
 
 export interface StoredFileChangeRow extends FileChangeSummaryRow {
+  assistant_message_id: string
   before_content: string | null
+  before_mode: number | null
   payload_bytes: number
 }
 
@@ -55,6 +66,7 @@ export function encodeStoredFileChangeRow(
     schema_version: record.schemaVersion,
     id: record.id,
     session_id: record.sessionId,
+    assistant_message_id: record.assistantMessageId,
     call_id: record.callId,
     path: record.path,
     operation: record.operation,
@@ -64,6 +76,7 @@ export function encodeStoredFileChangeRow(
     before_exists: record.beforeExists ? 1 : 0,
     before_hash: record.beforeHash,
     before_content: record.beforeContent,
+    before_mode: record.beforeMode,
     after_exists: record.afterExists ? 1 : 0,
     after_hash: record.afterHash,
     payload_bytes: record.payloadBytes,
@@ -79,10 +92,18 @@ export function decodeStoredFileChangeRow(
 ): StoredFileChangeRecord {
   const record = {
     ...decodeFileChangeSummaryRow(row),
+    assistantMessageId: stringColumn(
+      row.assistant_message_id,
+      'file_changes.assistant_message_id',
+    ) as MessageId,
     beforeContent: nullableStringColumn(
       row.before_content,
       'file_changes.before_content',
     ),
+    beforeMode:
+      row.before_mode === null
+        ? null
+        : integerColumn(row.before_mode, 'file_changes.before_mode'),
     payloadBytes: integerColumn(
       row.payload_bytes,
       'file_changes.payload_bytes',
@@ -171,6 +192,11 @@ function assertStoredFileChangeRecord(record: StoredFileChangeRecord): void {
     'StoredFileChangeRecord summary',
   )
   assertFileChangeSummarySemantics(summary)
+  assertSchemaValue<MessageId>(
+    validateMessageId,
+    record.assistantMessageId,
+    'StoredFileChangeRecord assistantMessageId',
+  )
   if (!Number.isSafeInteger(record.payloadBytes) || record.payloadBytes < 0) {
     throw new PersistenceError(
       'CODEC_INVALID',
@@ -181,6 +207,18 @@ function assertStoredFileChangeRecord(record: StoredFileChangeRecord): void {
     throw new PersistenceError(
       'CODEC_INVALID',
       'StoredFileChangeRecord beforeContent does not match beforeExists',
+    )
+  }
+  if (
+    record.beforeExists !== (record.beforeMode !== null) ||
+    (record.beforeMode !== null &&
+      (!Number.isInteger(record.beforeMode) ||
+        record.beforeMode < 0 ||
+        record.beforeMode > 0o777))
+  ) {
+    throw new PersistenceError(
+      'CODEC_INVALID',
+      'StoredFileChangeRecord beforeMode must match beforeExists and be between 0 and 0777',
     )
   }
   const expectedBytes =

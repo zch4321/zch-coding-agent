@@ -1,6 +1,6 @@
 import type { RunStatus, ToolApprovalSummary } from '../../shared/agent-events'
 import type { ProviderPublicConfig } from '../../shared/config'
-import type { CallId } from '../../shared/ids'
+import type { CallId, MessageId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { ChangeHistoryStore } from './change-history'
@@ -114,6 +114,7 @@ export class SessionToolRunner {
     session: SessionState,
     run: ActiveRun,
     toolCalls: ToolCall[],
+    assistantMessageId: MessageId,
   ): Promise<void> {
     this.#setRunStatus(session, run, 'running_tools')
     const terminalCallIds = new Set<CallId>()
@@ -319,6 +320,7 @@ export class SessionToolRunner {
                     preparedFileChange =
                       await this.#fileChangeExecution?.prepareMutation({
                         sessionId: session.sessionId,
+                        assistantMessageId,
                         workspace: session.workspace,
                         approvedCall: authorization.approvedCall,
                         diff: approvedDiff,

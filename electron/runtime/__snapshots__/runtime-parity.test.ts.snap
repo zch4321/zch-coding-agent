@@ -92,8 +92,8 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
         "cd0159a1c6934d8c9ef167f74dd9bd1a5cf0b133057124a3a5fdef09cb085e06",
         "d87ef5f9c55d3818f5060dd6e502fa7f9cb79610e19f4769dd12cc46bf71649c",
         "<normalized-runtime-context>",
-        "1663882b5112d1f9dde067a7c2dbad1588466bd648344395c3375ecb96bb83fd",
-        "497a98a5a3ca514de8182b2fbdbd860ecbf9023b98eebf3d407d59bc6ef56eb8",
+        "9075774122e9aaf7a73f884d5410cf2c9c28685073f8d978277d5c97d9706e87",
+        "8e3d6481fc9b7f24e42f7e54891e4c12e994c98e63feda36d862d484e7681916",
       ],
       "roles": [
         "system",
@@ -128,8 +128,8 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
         "cd0159a1c6934d8c9ef167f74dd9bd1a5cf0b133057124a3a5fdef09cb085e06",
         "d87ef5f9c55d3818f5060dd6e502fa7f9cb79610e19f4769dd12cc46bf71649c",
         "<normalized-runtime-context>",
-        "1663882b5112d1f9dde067a7c2dbad1588466bd648344395c3375ecb96bb83fd",
-        "497a98a5a3ca514de8182b2fbdbd860ecbf9023b98eebf3d407d59bc6ef56eb8",
+        "9075774122e9aaf7a73f884d5410cf2c9c28685073f8d978277d5c97d9706e87",
+        "8e3d6481fc9b7f24e42f7e54891e4c12e994c98e63feda36d862d484e7681916",
         "52214fa66164aa093372bcac82383c1e2db8ea3e7d135b98a3a354a29dadc129",
         "8d77474ef7bf098273e2e26bff2fa894c819cc0124578e37f335c15e25d29250",
       ],
@@ -169,8 +169,8 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
         "cd0159a1c6934d8c9ef167f74dd9bd1a5cf0b133057124a3a5fdef09cb085e06",
         "d87ef5f9c55d3818f5060dd6e502fa7f9cb79610e19f4769dd12cc46bf71649c",
         "<normalized-runtime-context>",
-        "1663882b5112d1f9dde067a7c2dbad1588466bd648344395c3375ecb96bb83fd",
-        "497a98a5a3ca514de8182b2fbdbd860ecbf9023b98eebf3d407d59bc6ef56eb8",
+        "9075774122e9aaf7a73f884d5410cf2c9c28685073f8d978277d5c97d9706e87",
+        "8e3d6481fc9b7f24e42f7e54891e4c12e994c98e63feda36d862d484e7681916",
         "52214fa66164aa093372bcac82383c1e2db8ea3e7d135b98a3a354a29dadc129",
         "8d77474ef7bf098273e2e26bff2fa894c819cc0124578e37f335c15e25d29250",
         "914f3d7c3e7116a2eca2dfedbf4434276f169d8761f171a15f5dd22b70efac74",
@@ -216,8 +216,8 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
         "cd0159a1c6934d8c9ef167f74dd9bd1a5cf0b133057124a3a5fdef09cb085e06",
         "d87ef5f9c55d3818f5060dd6e502fa7f9cb79610e19f4769dd12cc46bf71649c",
         "<normalized-runtime-context>",
-        "1663882b5112d1f9dde067a7c2dbad1588466bd648344395c3375ecb96bb83fd",
-        "497a98a5a3ca514de8182b2fbdbd860ecbf9023b98eebf3d407d59bc6ef56eb8",
+        "9075774122e9aaf7a73f884d5410cf2c9c28685073f8d978277d5c97d9706e87",
+        "8e3d6481fc9b7f24e42f7e54891e4c12e994c98e63feda36d862d484e7681916",
         "52214fa66164aa093372bcac82383c1e2db8ea3e7d135b98a3a354a29dadc129",
         "8d77474ef7bf098273e2e26bff2fa894c819cc0124578e37f335c15e25d29250",
         "914f3d7c3e7116a2eca2dfedbf4434276f169d8761f171a15f5dd22b70efac74",
@@ -365,7 +365,7 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
           "sha256": "41f56b7c194774513da00cb52468129518b37a14c4af4050451c9113085162e7",
         },
       ],
-      "promptSourceHash": "28d6aa11e3762202eddbf4d4da05cd90cb29b71f16e3c94c7ff61c8899a48393",
+      "promptSourceHash": "e4a26702b7a7d2beaba74e2bf2cdd2f1cfd091bb45beff61f274cd30ebff969c",
     },
     {
       "modelRoute": {
@@ -406,52 +406,7 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
           "sha256": "41f56b7c194774513da00cb52468129518b37a14c4af4050451c9113085162e7",
         },
       ],
-      "promptSourceHash": "28d6aa11e3762202eddbf4d4da05cd90cb29b71f16e3c94c7ff61c8899a48393",
-    },
-    {
-      "modelRoute": {
-        "adapterId": "openai-compatible.chat-completions",
-        "endpoint": "https://provider.invalid/chat/completions",
-        "model": "parity-model",
-        "providerConfigRevision": 1,
-        "providerId": "parity",
-        "purpose": "main",
-        "reasoning": "off",
-        "schemaVersion": 1,
-      },
-      "promptLayers": [
-        {
-          "kind": "system_instruction",
-          "sha256": "8a089487c79b82e7260e007fd938658f6b81741699493d73a9f75842437568e0",
-        },
-        {
-          "kind": "runtime_context",
-          "sha256": "<normalized-runtime-context>",
-        },
-        {
-          "kind": "assistant_preferences",
-          "sha256": "799722b4d29e3ce719b1ac87b2978e7a6f7d3288cdf09b9f811047d9bbb5b74f",
-        },
-        {
-          "kind": "runtime_context",
-          "sha256": "<normalized-runtime-context>",
-        },
-        {
-          "kind": "runtime_context",
-          "sha256": "<normalized-runtime-context>",
-        },
-      ],
-      "promptResources": [
-        {
-          "id": "harness.base-instructions.en-US",
-          "sha256": "8a089487c79b82e7260e007fd938658f6b81741699493d73a9f75842437568e0",
-        },
-        {
-          "id": "harness.runtime-context.en-US",
-          "sha256": "41f56b7c194774513da00cb52468129518b37a14c4af4050451c9113085162e7",
-        },
-      ],
-      "promptSourceHash": "9e0a1c35a11a03aebcf7927353803e5f82ec85274612522e9e71b846f6d0f500",
+      "promptSourceHash": "e4a26702b7a7d2beaba74e2bf2cdd2f1cfd091bb45beff61f274cd30ebff969c",
     },
     {
       "modelRoute": {
@@ -496,7 +451,7 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
           "sha256": "41f56b7c194774513da00cb52468129518b37a14c4af4050451c9113085162e7",
         },
       ],
-      "promptSourceHash": "9e0a1c35a11a03aebcf7927353803e5f82ec85274612522e9e71b846f6d0f500",
+      "promptSourceHash": "2ddb3a1d70cb2b4beca80eb0beaf4cdea4041c9cf3b22cfef3e91f2e0d00413e",
     },
     {
       "modelRoute": {
@@ -541,7 +496,7 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
           "sha256": "41f56b7c194774513da00cb52468129518b37a14c4af4050451c9113085162e7",
         },
       ],
-      "promptSourceHash": "9e0a1c35a11a03aebcf7927353803e5f82ec85274612522e9e71b846f6d0f500",
+      "promptSourceHash": "2ddb3a1d70cb2b4beca80eb0beaf4cdea4041c9cf3b22cfef3e91f2e0d00413e",
     },
     {
       "modelRoute": {
@@ -575,10 +530,6 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
           "kind": "runtime_context",
           "sha256": "<normalized-runtime-context>",
         },
-        {
-          "kind": "runtime_context",
-          "sha256": "<normalized-runtime-context>",
-        },
       ],
       "promptResources": [
         {
@@ -590,7 +541,7 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
           "sha256": "41f56b7c194774513da00cb52468129518b37a14c4af4050451c9113085162e7",
         },
       ],
-      "promptSourceHash": "025cd9c294f186a2e36f625714d08e73da9a9959d4e6b7ea45f7646380de08b0",
+      "promptSourceHash": "2ddb3a1d70cb2b4beca80eb0beaf4cdea4041c9cf3b22cfef3e91f2e0d00413e",
     },
     {
       "modelRoute": {
@@ -639,7 +590,56 @@ exports[`Electron and Headless runtime parity > matches read, write, command, pl
           "sha256": "41f56b7c194774513da00cb52468129518b37a14c4af4050451c9113085162e7",
         },
       ],
-      "promptSourceHash": "025cd9c294f186a2e36f625714d08e73da9a9959d4e6b7ea45f7646380de08b0",
+      "promptSourceHash": "e56622af7d43d5426f73d23540b41b933a24a7944a7859a12accfaba13e8a0f7",
+    },
+    {
+      "modelRoute": {
+        "adapterId": "openai-compatible.chat-completions",
+        "endpoint": "https://provider.invalid/chat/completions",
+        "model": "parity-model",
+        "providerConfigRevision": 1,
+        "providerId": "parity",
+        "purpose": "main",
+        "reasoning": "off",
+        "schemaVersion": 1,
+      },
+      "promptLayers": [
+        {
+          "kind": "system_instruction",
+          "sha256": "8a089487c79b82e7260e007fd938658f6b81741699493d73a9f75842437568e0",
+        },
+        {
+          "kind": "runtime_context",
+          "sha256": "<normalized-runtime-context>",
+        },
+        {
+          "kind": "assistant_preferences",
+          "sha256": "799722b4d29e3ce719b1ac87b2978e7a6f7d3288cdf09b9f811047d9bbb5b74f",
+        },
+        {
+          "kind": "runtime_context",
+          "sha256": "<normalized-runtime-context>",
+        },
+        {
+          "kind": "runtime_context",
+          "sha256": "<normalized-runtime-context>",
+        },
+        {
+          "kind": "runtime_context",
+          "sha256": "<normalized-runtime-context>",
+        },
+      ],
+      "promptResources": [
+        {
+          "id": "harness.base-instructions.en-US",
+          "sha256": "8a089487c79b82e7260e007fd938658f6b81741699493d73a9f75842437568e0",
+        },
+        {
+          "id": "harness.runtime-context.en-US",
+          "sha256": "41f56b7c194774513da00cb52468129518b37a14c4af4050451c9113085162e7",
+        },
+      ],
+      "promptSourceHash": "e56622af7d43d5426f73d23540b41b933a24a7944a7859a12accfaba13e8a0f7",
     },
   ],
 }

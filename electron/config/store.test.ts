@@ -107,21 +107,24 @@ describe('ConfigStore', () => {
     )
   })
 
-  it('resets a v9 file that predates the required FileChange budget', async () => {
+  it.each([
+    ['fileChangeHistoryBytes', 100_000_000],
+    ['maxAttachmentContextTokens', 64_000],
+  ])('resets a v9 file missing required limit %s', async (field, value) => {
     const { directory, configStore } = await createStores()
     const configPath = path.join(directory, 'config.json')
     const config = JSON.parse(await readFile(configPath, 'utf8')) as {
       limits: Record<string, unknown>
     }
-    delete config.limits.fileChangeHistoryBytes
+    delete config.limits[field]
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
       schemaVersion: 9,
-      limits: { fileChangeHistoryBytes: 100_000_000 },
+      limits: { [field]: value },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      limits: { fileChangeHistoryBytes: 100_000_000 },
+      limits: { [field]: value },
     })
   })
 

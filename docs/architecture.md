@@ -837,7 +837,7 @@ FileChange 与 Message 故意不在同一个 transaction 落盘：前者紧跟�
 
 1. 在第一次 await 前取得 Session `mutating` lifecycle token，阻止同 Session Run/archive、Project path update/remove 和并发 revert；随后获取与 Provider Run 共用的 workspace writer lease。Revert 不占 Provider run slot。
 2. 当前文件 existence/hash 必须严格等于记录的 `afterExists/afterHash`；否则返回 `RESOURCE_CHANGED`，不能覆盖用户或后续工具的新修改。
-3. `beforeExists = true` 时用 `beforeContent` 原子恢复；否则删除 Agent 创建的文件。
+3. `beforeExists = true` 时用 `beforeContent` 原子恢复，并把临时文件恢复为快照记录的 POSIX permission mode 后再替换目标；否则删除 Agent 创建的文件。ACL、owner、xattr 和特殊位不属于 v1 恢复承诺。
 4. 成功后以 expected revision OCC 更新 `reverted_at`、`updated_at` 和 `revision`，最后释放 writer/lifecycle token。
 
 文件已经恢复但 `markReverted` 持久化失败时，不自动重做或补偿文件副作用；返回 `PERSISTENCE_FAILURE`，details 明确包含 `mutationSucceeded = true` 和 `FILE_CHANGE_REVERT_STATE_PERSIST_FAILED`。后续重试会因当前文件不再等于 after hash 而安全返回 `RESOURCE_CHANGED`。
@@ -1203,7 +1203,7 @@ Draft 和 draft attachments 只属于当前 renderer 输入组件：
 - 点击发送时，renderer 把完整 text 和 attachment refs 一次性交给 backend。
 - 切换 Session、再次点击新对话或 renderer reload 时直接丢弃；draft 不进入 Sidebar 搜索结果。
 
-Backend 校验附件、构造完整 user/harness messages 并落盘。Draft 丢失不会造成 backend state 与 canonical history 不一致。
+Backend 校验附件、构造完整 user/harness messages 并落盘。附件正文受 AppConfig v9 的 `limits.maxAttachmentContextTokens` 约束，默认 `64_000`；聚合估算超过预算时，本次附件统一降级为仅注入类型和路径，renderer attachment chips 标记为 truncated。Draft 丢失不会造成 backend state 与 canonical history 不一致。
 
 ### 9.3 模型和权限模式
 
@@ -1520,7 +1520,7 @@ P3 已把进程内 Agent loop 切到 canonical messages 与严格 `MessageHistor
 
 P4 在 `electron/application/` 提供串行 application-state coordinator、Project/Session services、lazy `run:start`、普通 Session fork、带 ownership token 的 LiveSessionContextRegistry、bounded runtime snapshot 和 per-Session 串行 durable execution-state port。该 port 接入现有唯一 Agent loop，在 Provider 前提交首次 input；手动 compact 先提交隐藏 command journal，再异步提交 compact epoch；assistant/tool batch、interjection 与 Goal/Plan 保持事务原子。Provider completion 在任何工具/approval/append 前完成 canonical bounds 与 active-epoch callId 校验，commit 失败会从 SQLite 恢复或隔离 binding。临时数据库回归覆盖“发送 A → tool chain → final → dispose → reopen → 发送 B”、并发候选 ownership、deferred restore lifecycle guard 和 commit failure recovery。
 
-P5 为 target composition 注入 `FileChangeService` port：内建 `create_file/apply_patch/delete_file` 在副作用后校验 after state并立即写 SQLite，tool batch Message 仍稍后原子提交；历史按全应用字节预算 retention 并以 `(createdAt, id)` 分页。Revert 取得 Session lifecycle token 和共享 workspace writer，校验 after hash 后恢复 before snapshot，再以 OCC 标记记录。Target 的重启回归覆盖 durable list/revert、冲突、异常落库和 private snapshot 边界。
+P5 为 target composition 注入 `FileChangeService` port：内建 `create_file/apply_patch/delete_file` 在副作用后校验 after state并立即写 SQLite，tool batch Message 仍稍后原子提交；历史按全应用字节预算 retention 并以 `(createdAt, id)` 分页。持久化唯一性以 assistant Message + call ID + path 为范围，因此 compact 后 provider 可以安全重用 call ID。Revert 取得 Session lifecycle token 和共享 workspace writer，校验 after hash 和 10 MB 文件上限后恢复 before snapshot 及 POSIX permission mode，再以 OCC 标记记录。Target 的重启回归覆盖 durable list/revert、冲突、异常落库和 private snapshot 边界。
 
 P4/P5 target composition 仍只由 unit/integration tests 使用，尚未导入 production Desktop/Headless、legacy IPC/preload 或 renderer 默认路径，也不读取或修改真实 `userData/agent.db`。Production FileChange 工具因此仍使用 legacy JSON store；domain-state IPC/renderer 和正式切流分别留给 P6/P7/P8。
 

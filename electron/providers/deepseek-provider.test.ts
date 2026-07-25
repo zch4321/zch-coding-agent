@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MAX_MESSAGE_PARTS,
   MAX_MESSAGE_TEXT_LENGTH,
+  MAX_TOOL_INTENT_LENGTH,
 } from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
 import { CANONICAL_JSON_LIMITS, type JsonValue } from '../../shared/json'
@@ -271,6 +272,70 @@ describe('DeepSeekProvider', () => {
       thinking: { type: 'enabled' },
       reasoning_effort: 'high',
     })
+  })
+
+  it('truncates provider tool intent to the advertised schema limit', async () => {
+    const intent = 'x'.repeat(MAX_TOOL_INTENT_LENGTH + 128)
+    const provider = new DeepSeekProvider({
+      baseURL: 'https://api.example/v1',
+      model: 'fixture',
+      apiKey: 'secret',
+      reasoning: 'off',
+      fetchImpl: async () =>
+        sseResponse([
+          {
+            choices: [
+              {
+                finish_reason: 'tool_calls',
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call-tool',
+                      function: {
+                        name: 'read_file',
+                        arguments: JSON.stringify({
+                          path: 'README.md',
+                          _agent_intent: intent,
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ]),
+    })
+    const events: ProviderEvent[] = []
+
+    for await (const event of provider.streamChat({
+      messages: [{ role: 'user', content: 'Read the file' }],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'read_file',
+            parameters: {
+              type: 'object',
+              properties: { _agent_intent: { type: 'string' } },
+            },
+            'x-agent-intent-property': '_agent_intent',
+          },
+        },
+      ],
+      signal: new AbortController().signal,
+    })) {
+      events.push(event)
+    }
+
+    const completed = events.find(
+      (event): event is Extract<ProviderEvent, { type: 'completed' }> =>
+        event.type === 'completed',
+    )
+    expect(completed?.toolCalls[0]?.reason).toBe(
+      intent.slice(0, MAX_TOOL_INTENT_LENGTH),
+    )
   })
 
   it('preserves a provider truncation finish reason', async () => {

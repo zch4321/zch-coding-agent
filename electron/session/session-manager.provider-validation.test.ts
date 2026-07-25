@@ -128,6 +128,25 @@ class CrossTurnDuplicateProvider implements LLMProvider {
   }
 }
 
+class ReasoningOnlyProvider implements LLMProvider {
+  async *streamChat(): AsyncIterable<ProviderEvent> {
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'reasoning-only' },
+      turn: {
+        role: 'assistant',
+        content: null,
+        reasoning_content: 'Unfinished reasoning',
+      },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+      finishReason: 'length',
+    }
+  }
+}
+
 describe('SessionManager Provider completion validation', () => {
   it('rejects before tools or canonical append and accepts the next run', async () => {
     const directory = await mkdtemp(
@@ -288,6 +307,57 @@ describe('SessionManager Provider completion validation', () => {
       ),
     )
     expect(provider.calls).toBe(3)
+    await manager.closeSession(sessionId)
+  })
+
+  it('reports a reasoning-only completion as a retryable run failure', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-provider-reasoning-only-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const events: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: await createConfig(directory),
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((event) => events.push(event)),
+      providerFactory: () => new ReasoningOnlyProvider(),
+    })
+    const sessionId = await manager.createSession({
+      conversationId: 'provider-reasoning-only',
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+
+    const runId = manager.startRun({
+      sessionId,
+      message: 'Finish the answer',
+      clientRequestId: 'request:reasoning-only',
+    })
+    await waitFor(() =>
+      events.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === runId &&
+          event.status === 'failed',
+      ),
+    )
+
+    expect(
+      events.find(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === runId &&
+          event.status === 'failed',
+      )?.event,
+    ).toMatchObject({
+      error: {
+        code: 'RUN_FAILED',
+        message:
+          'Provider returned reasoning without an assistant answer; retry the request',
+      },
+    })
     await manager.closeSession(sessionId)
   })
 })

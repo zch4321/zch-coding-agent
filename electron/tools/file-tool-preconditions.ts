@@ -218,6 +218,7 @@ export async function captureFilePrecondition(
     expectedExistingParentRealPath: parent.expectedExistingParentRealPath,
     expectedExistingParentId: parent.expectedExistingParentId,
     expectedExists: true,
+    expectedMode: targetStat.mode & 0o777,
     expectedRealPath: targetRealPath,
     expectedFileId: resourceId(targetStat),
     expectedContentHash: hash(content),
@@ -279,6 +280,7 @@ export async function assertFilePrecondition(
       normalizeForCompare(expected.absolutePath) ||
     parentChanged ||
     current.expectedExists !== expected.expectedExists ||
+    current.expectedMode !== expected.expectedMode ||
     normalizeForCompare(current.expectedRealPath ?? '') !==
       normalizeForCompare(expected.expectedRealPath ?? '') ||
     current.expectedRealPath !== expected.expectedRealPath ||

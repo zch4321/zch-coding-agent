@@ -164,6 +164,9 @@ CREATE TABLE file_changes (
   schema_version  INTEGER NOT NULL CHECK (schema_version = 1),
   id              TEXT PRIMARY KEY,
   session_id      TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  assistant_message_id TEXT NOT NULL CHECK (
+    length(assistant_message_id) BETWEEN 1 AND 128
+  ),
   call_id         TEXT NOT NULL CHECK (length(call_id) BETWEEN 1 AND 128),
   path            TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 4096),
   operation       TEXT NOT NULL CHECK (operation IN ('write', 'patch', 'delete')),
@@ -177,6 +180,9 @@ CREATE TABLE file_changes (
     length(before_hash) = 64 AND before_hash NOT GLOB '*[^a-f0-9]*'
   ),
   before_content  TEXT,
+  before_mode     INTEGER CHECK (
+    before_mode IS NULL OR before_mode BETWEEN 0 AND 511
+  ),
   after_exists    INTEGER NOT NULL CHECK (after_exists IN (0, 1)),
   after_hash      TEXT NOT NULL CHECK (
     length(after_hash) = 64 AND after_hash NOT GLOB '*[^a-f0-9]*'
@@ -186,10 +192,14 @@ CREATE TABLE file_changes (
   created_at      TEXT NOT NULL CHECK (length(created_at) BETWEEN 1 AND 64),
   updated_at      TEXT NOT NULL CHECK (length(updated_at) BETWEEN 1 AND 64),
   reverted_at     TEXT CHECK (reverted_at IS NULL OR length(reverted_at) BETWEEN 1 AND 64),
-  UNIQUE (session_id, call_id, path),
+  UNIQUE (session_id, assistant_message_id, call_id, path),
   CHECK (
     (before_exists = 0 AND before_content IS NULL)
     OR (before_exists = 1 AND before_content IS NOT NULL)
+  ),
+  CHECK (
+    (before_exists = 0 AND before_mode IS NULL)
+    OR (before_exists = 1 AND before_mode IS NOT NULL)
   ),
   CHECK (
     before_exists = 1

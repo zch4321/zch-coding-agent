@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { realpath } from 'node:fs/promises'
 import type { CallId, MessageId, ProjectId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
@@ -89,7 +89,10 @@ function activeSession(
   } as SessionRecord
 }
 
-async function setupServices(runtimeGuard?: SessionRuntimeGuard) {
+async function setupServices(
+  runtimeGuard?: SessionRuntimeGuard,
+  onDiagnostic?: (message: string, error?: unknown) => void,
+) {
   const testDatabase = await createTestDatabase()
   const commits: unknown[] = []
   const coordinator = new ApplicationStateCoordinator({
@@ -107,6 +110,7 @@ async function setupServices(runtimeGuard?: SessionRuntimeGuard) {
   const sessions = new SessionService({
     coordinator,
     runtimeGuard,
+    onDiagnostic,
     now: () => timestamp,
     createMessageId: (() => {
       let value = 0
@@ -347,6 +351,48 @@ describe('SessionService durable transactions', () => {
         revision: 2,
       })
       expect(releases).toBe(1)
+    } finally {
+      await setup.testDatabase.dispose()
+    }
+  })
+
+  it('keeps a committed update successful when runtime refresh fails', async () => {
+    const onDiagnostic = vi.fn()
+    const guard: SessionRuntimeGuard = {
+      assertSessionIdle() {},
+      snapshot: () => undefined,
+      releaseSession() {},
+      applySessionRecord() {
+        throw new ApplicationError('CONFLICT', 'run started after commit')
+      },
+    }
+    const setup = await setupServices(guard, onDiagnostic)
+    try {
+      const sessionId = 'session:update-refresh' as SessionId
+      await setup.sessions.commitFirstTurn({
+        session: activeSession(sessionId, setup.project.id),
+        messages: firstTurn(sessionId),
+        requestHash: canonicalHash('hello durable state'),
+      })
+
+      const updated = await setup.sessions.update({
+        sessionId,
+        expectedRevision: 1,
+        patch: { title: 'Committed title' },
+      })
+
+      expect(updated.commit.change.session).toMatchObject({
+        title: 'Committed title',
+        revision: 2,
+      })
+      await expect(setup.sessions.getRecord(sessionId)).resolves.toMatchObject({
+        title: 'Committed title',
+        revision: 2,
+      })
+      expect(onDiagnostic).toHaveBeenCalledWith(
+        `Updated Session ${sessionId} could not refresh its runtime context`,
+        expect.objectContaining({ code: 'CONFLICT' }),
+      )
     } finally {
       await setup.testDatabase.dispose()
     }

@@ -133,6 +133,7 @@ describe('SessionManager durable FileChange port', () => {
         return {
           id: 'file-change:warning' as FileChangeId,
           sessionId: input.sessionId,
+          assistantMessageId: input.assistantMessageId,
           callId: input.approvedCall.callId,
           path: 'warning.txt',
           operation: 'write',
@@ -140,6 +141,7 @@ describe('SessionManager durable FileChange port', () => {
           diffHash: input.approvedCall.diffHash!,
           diffTruncated: false,
           beforeExists: false,
+          beforeMode: null,
           beforeHash:
             'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
           beforeContent: null,

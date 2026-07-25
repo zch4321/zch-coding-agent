@@ -381,6 +381,7 @@ const enUS = {
     maxStepsPerRun: 'Maximum steps per run',
     maxStepsPerRunHint: 'Set to 0 for no React-loop step limit.',
     maxContextTokens: 'Default maximum context tokens',
+    maxAttachmentContextTokens: 'Attachment content token limit',
     autoCompactTriggerPercent: 'Auto compact trigger threshold',
     maxToolResultTokens: 'Tool result token limit',
     maxToolTokensPerRun: 'Tool result token budget per run',

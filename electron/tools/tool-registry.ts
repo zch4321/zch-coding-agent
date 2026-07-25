@@ -1,6 +1,7 @@
 import type { Static, TSchema } from '@sinclair/typebox'
 import type { ValidateFunction } from 'ajv'
 import type { JsonValue } from '../../shared/json'
+import { MAX_TOOL_INTENT_LENGTH } from '../../shared/durable'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import type {
   ToolCall,
@@ -44,7 +45,7 @@ function providerParameters(definition: ToolDefinition): {
   properties[intentField] = {
     type: 'string',
     minLength: 1,
-    maxLength: 2_048,
+    maxLength: MAX_TOOL_INTENT_LENGTH,
     description:
       'Briefly state why this tool call is needed. This metadata is removed before tool execution.',
   }

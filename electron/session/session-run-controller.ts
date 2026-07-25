@@ -288,6 +288,12 @@ export class SessionRunController {
     harnessContexts?: RunHarnessContext[],
   ): Promise<void> {
     const signal = run.controller.signal
+    const runInputCheckpoint = {
+      history: structuredClone(session.history),
+      nextMessageSeq: session.nextMessageSeq,
+      goal: session.goal ? structuredClone(session.goal) : undefined,
+      plan: session.plan ? structuredClone(session.plan) : undefined,
+    }
 
     try {
       const runConfig = this.#configStore.getPublicConfig()
@@ -501,7 +507,7 @@ export class SessionRunController {
           })
         }
 
-        appendCompletedAssistantTurn(session, {
+        const assistantRecord = appendCompletedAssistantTurn(session, {
           parts: completed.parts,
           reasoning: completed.reasoning,
           finishReason: completed.finishReason,
@@ -547,6 +553,7 @@ export class SessionRunController {
             session,
             run,
             completed.toolCalls,
+            assistantRecord.id,
           )
         } catch (error) {
           toolBatchFailed = true
@@ -560,6 +567,10 @@ export class SessionRunController {
       throw new Error(`Run exceeded maxStepsPerRun (${maxStepsPerRun})`)
     } catch (error) {
       if (!run.requestCommitted) {
+        session.history = runInputCheckpoint.history
+        session.nextMessageSeq = runInputCheckpoint.nextMessageSeq
+        session.goal = runInputCheckpoint.goal
+        session.plan = runInputCheckpoint.plan
         session.clientRequests.delete(run.clientRequestId)
       }
       const status = finalStatusFromError(error, signal)

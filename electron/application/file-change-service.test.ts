@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type {
   CallId,
   FileChangeId,
+  MessageId,
   ProjectId,
   RunId,
   SessionId,
@@ -28,6 +29,7 @@ describe('FileChangeService mutation records', () => {
     try {
       const prepared = await setup.service.prepareMutation({
         sessionId: setup.sessionId,
+        assistantMessageId: 'message:assistant-create' as MessageId,
         workspace: setup.workspace,
         approvedCall: approvedCreateCall(
           setup.sessionId,
@@ -81,6 +83,7 @@ describe('FileChangeService mutation records', () => {
     try {
       const prepared = await setup.service.prepareMutation({
         sessionId: setup.sessionId,
+        assistantMessageId: 'message:assistant-warning' as MessageId,
         workspace: setup.workspace,
         approvedCall: approvedCreateCall(
           setup.sessionId,
@@ -119,6 +122,7 @@ describe('FileChangeService mutation records', () => {
       const error = await setup.service
         .prepareMutation({
           sessionId: setup.sessionId,
+          assistantMessageId: 'message:assistant-limit' as MessageId,
           workspace: setup.workspace,
           approvedCall: approvedPatchCall(
             setup.sessionId,
@@ -218,6 +222,7 @@ function approvedPatchCall(
         expectedParentId: 'fixture-parent',
         expectedParentExists: true,
         expectedExists: true,
+        expectedMode: 0o644,
         expectedRealPath: path.join(workspace, 'created.txt'),
         expectedFileId: 'fixture-file',
         expectedContentHash: hash(beforeContent),
