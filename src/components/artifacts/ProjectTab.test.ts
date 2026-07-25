@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentApi } from '../../../shared/agent-api'
@@ -268,15 +268,25 @@ describe('ProjectTab', () => {
       wrapper.find('[data-testid="serena-launch-preview"]').text(),
     ).toContain('--open-web-dashboard false')
 
-    await wrapper.find('[data-testid="serena-context"]').setValue('codex')
-    await wrapper.find('[data-testid="serena-project-mode"]').setValue('none')
+    await wrapper.find('[data-testid="serena-context"] input').setValue('codex')
+    const projectModeSelect = wrapper.findComponent(
+      '[data-testid="serena-project-mode"]',
+    ) as VueWrapper
+    const languageBackendSelect = wrapper.findComponent(
+      '[data-testid="serena-language-backend"]',
+    ) as VueWrapper
+    const toolTimeoutInput = wrapper.findComponent(
+      '[data-testid="serena-tool-timeout"]',
+    ) as VueWrapper
+    const openDashboardCheckbox = wrapper.findComponent(
+      '[data-testid="serena-open-dashboard"]',
+    ) as VueWrapper
+    projectModeSelect.vm.$emit('update:value', 'none')
+    languageBackendSelect.vm.$emit('update:value', 'LSP')
+    toolTimeoutInput.vm.$emit('update:value', 60_000)
+    openDashboardCheckbox.vm.$emit('update:checked', true)
     await wrapper
-      .find('[data-testid="serena-language-backend"]')
-      .setValue('LSP')
-    await wrapper.find('[data-testid="serena-tool-timeout"]').setValue('60000')
-    await wrapper.find('[data-testid="serena-open-dashboard"]').setValue(true)
-    await wrapper
-      .find('[data-testid="serena-extra-args"]')
+      .find('[data-testid="serena-extra-args"] textarea')
       .setValue('--experimental\n${workspace}/extra')
     await flushPromises()
 

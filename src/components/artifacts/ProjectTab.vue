@@ -1,8 +1,28 @@
 <script setup lang="ts">
 import { computed, ref, toRaw, watch } from 'vue'
-import { NButton, NSwitch } from 'naive-ui'
+import {
+  NAlert,
+  NButton,
+  NCheckbox,
+  NEmpty,
+  NForm,
+  NFormItem,
+  NGi,
+  NGrid,
+  NInput,
+  NInputNumber,
+  NList,
+  NListItem,
+  NSelect,
+  NSpin,
+  NSwitch,
+  NTag,
+  NThing,
+  type SelectOption,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type {
+  CodeBackendStatus,
   ProjectModel,
   SerenaLanguageBackend,
   SerenaLogLevel,
@@ -28,6 +48,31 @@ const extraArgsDraft = ref('')
 
 const snapshot = computed(() => project.projectSnapshot)
 const model = computed(() => snapshot.value?.project)
+const projectModeOptions = computed<SelectOption[]>(() => [
+  {
+    label: t('artifact.backendProjectModeWorkspace'),
+    value: 'workspacePath',
+  },
+  { label: t('artifact.backendProjectModeCwd'), value: 'projectFromCwd' },
+  { label: t('artifact.backendProjectModeNone'), value: 'none' },
+])
+const languageBackendOptions = computed<SelectOption[]>(() => [
+  { label: t('artifact.backendLanguageAuto'), value: '' },
+  { label: 'LSP', value: 'LSP' },
+  { label: 'JetBrains', value: 'JetBrains' },
+])
+const logLevelOptions = computed<SelectOption[]>(() => [
+  { label: t('artifact.backendLogAuto'), value: '' },
+  ...['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'].map((value) => ({
+    label: value,
+    value,
+  })),
+])
+const dashboardOptions = computed<SelectOption[]>(() => [
+  { label: t('artifact.backendDashboardDefault'), value: 'default' },
+  { label: t('common.enabled'), value: 'true' },
+  { label: t('common.disabled'), value: 'false' },
+])
 const draftSerena = computed(() => {
   const base = model.value?.serena
   if (!base) return undefined
@@ -97,6 +142,23 @@ function currentWorkspace() {
   return agent.workspacePath
 }
 
+function backendStateType(
+  state: CodeBackendStatus['state'],
+): 'default' | 'error' | 'info' | 'success' | 'warning' {
+  switch (state) {
+    case 'ready':
+      return 'success'
+    case 'error':
+      return 'error'
+    case 'starting':
+      return 'info'
+    case 'stopped':
+      return 'warning'
+    default:
+      return 'default'
+  }
+}
+
 async function load() {
   const workspace = currentWorkspace()
   if (workspace) await project.loadProject(workspace)
@@ -148,14 +210,20 @@ watch(
 
 <template>
   <section class="artifact-content project-view">
-    <p v-if="!agent.workspacePath" class="artifact-empty">
-      {{ t('artifact.chooseHint') }}
-    </p>
+    <NEmpty
+      v-if="!agent.workspacePath"
+      :description="t('artifact.chooseHint')"
+    />
 
-    <template v-else>
-      <div v-if="project.error" class="artifact-error">
+    <NSpin v-else class="project-spin" :show="project.loading">
+      <NAlert
+        v-if="project.error"
+        type="error"
+        closable
+        @close="project.error = ''"
+      >
         {{ project.error }}
-      </div>
+      </NAlert>
 
       <section class="project-section">
         <div class="project-section-header">
@@ -172,39 +240,38 @@ watch(
           </NButton>
         </div>
 
-        <p v-if="snapshot?.gitIgnoreRecommended" class="project-warning">
+        <NAlert v-if="snapshot?.gitIgnoreRecommended" type="warning">
           {{ t('artifact.zchGitIgnoreHint') }}
-        </p>
+        </NAlert>
 
-        <div v-if="model?.modules.length" class="module-list">
-          <article
-            v-for="module in model.modules"
-            :key="module.id"
-            class="module-row"
-          >
-            <strong>{{ module.name }}</strong>
-            <span>{{ module.root }}</span>
-            <small>
-              {{ module.languages.join(', ') || t('artifact.unknownLanguage') }}
-              · {{ module.source }} · {{ module.confidence }}
-            </small>
-          </article>
-        </div>
-        <p v-else class="artifact-empty">{{ t('artifact.noModules') }}</p>
+        <NList v-if="model?.modules.length" :show-divider="false" bordered>
+          <NListItem v-for="module in model.modules" :key="module.id">
+            <NThing :title="module.name" :description="module.root">
+              <small class="project-module-meta">
+                {{
+                  module.languages.join(', ') || t('artifact.unknownLanguage')
+                }}
+                · {{ module.source }} · {{ module.confidence }}
+              </small>
+            </NThing>
+          </NListItem>
+        </NList>
+        <NEmpty v-else size="small" :description="t('artifact.noModules')" />
 
         <div v-if="project.detectedModules.length" class="detected-modules">
           <h4>{{ t('artifact.detectedModules') }}</h4>
-          <div class="module-list">
-            <article
+          <NList :show-divider="false" bordered>
+            <NListItem
               v-for="module in project.detectedModules"
               :key="module.id"
-              class="module-row"
             >
-              <strong>{{ module.name }}</strong>
-              <span>{{ module.root }}</span>
-              <small>{{ module.manifests.join(', ') }}</small>
-            </article>
-          </div>
+              <NThing :title="module.name" :description="module.root">
+                <small class="project-module-meta">
+                  {{ module.manifests.join(', ') }}
+                </small>
+              </NThing>
+            </NListItem>
+          </NList>
           <NButton
             size="small"
             type="primary"
@@ -228,115 +295,107 @@ watch(
           />
         </div>
 
-        <label class="project-field">
-          <span>{{ t('artifact.backendCommand') }}</span>
-          <input v-model="commandDraft" data-testid="serena-command" />
-        </label>
+        <NForm label-placement="top" size="small" :show-feedback="false">
+          <NFormItem :label="t('artifact.backendCommand')">
+            <NInput v-model:value="commandDraft" data-testid="serena-command" />
+          </NFormItem>
 
-        <div class="project-field-grid">
-          <label class="project-field">
-            <span>{{ t('artifact.backendContext') }}</span>
-            <input v-model="contextDraft" data-testid="serena-context" />
-          </label>
-          <label class="project-field">
-            <span>{{ t('artifact.backendProjectMode') }}</span>
-            <select
-              v-model="projectModeDraft"
-              data-testid="serena-project-mode"
-            >
-              <option value="workspacePath">
-                {{ t('artifact.backendProjectModeWorkspace') }}
-              </option>
-              <option value="projectFromCwd">
-                {{ t('artifact.backendProjectModeCwd') }}
-              </option>
-              <option value="none">
-                {{ t('artifact.backendProjectModeNone') }}
-              </option>
-            </select>
-          </label>
-        </div>
+          <NGrid :cols="2" :x-gap="8">
+            <NGi>
+              <NFormItem :label="t('artifact.backendContext')">
+                <NInput
+                  v-model:value="contextDraft"
+                  data-testid="serena-context"
+                />
+              </NFormItem>
+            </NGi>
+            <NGi>
+              <NFormItem :label="t('artifact.backendProjectMode')">
+                <NSelect
+                  v-model:value="projectModeDraft"
+                  data-testid="serena-project-mode"
+                  :options="projectModeOptions"
+                />
+              </NFormItem>
+            </NGi>
+          </NGrid>
 
-        <div class="project-field-grid">
-          <label class="project-field">
-            <span>{{ t('artifact.backendLanguageBackend') }}</span>
-            <select
-              v-model="languageBackendDraft"
-              data-testid="serena-language-backend"
-            >
-              <option value="">{{ t('artifact.backendLanguageAuto') }}</option>
-              <option value="LSP">LSP</option>
-              <option value="JetBrains">JetBrains</option>
-            </select>
-          </label>
-          <label class="project-field">
-            <span>{{ t('artifact.backendLogLevel') }}</span>
-            <select v-model="logLevelDraft" data-testid="serena-log-level">
-              <option value="">{{ t('artifact.backendLogAuto') }}</option>
-              <option value="DEBUG">DEBUG</option>
-              <option value="INFO">INFO</option>
-              <option value="WARNING">WARNING</option>
-              <option value="ERROR">ERROR</option>
-              <option value="CRITICAL">CRITICAL</option>
-            </select>
-          </label>
-        </div>
+          <NGrid :cols="2" :x-gap="8">
+            <NGi>
+              <NFormItem :label="t('artifact.backendLanguageBackend')">
+                <NSelect
+                  v-model:value="languageBackendDraft"
+                  data-testid="serena-language-backend"
+                  :options="languageBackendOptions"
+                />
+              </NFormItem>
+            </NGi>
+            <NGi>
+              <NFormItem :label="t('artifact.backendLogLevel')">
+                <NSelect
+                  v-model:value="logLevelDraft"
+                  data-testid="serena-log-level"
+                  :options="logLevelOptions"
+                />
+              </NFormItem>
+            </NGi>
+          </NGrid>
 
-        <div class="project-field-grid">
-          <label class="project-field">
-            <span>{{ t('artifact.backendStartupTimeout') }}</span>
-            <input
-              v-model.number="startupTimeoutDraft"
-              data-testid="serena-startup-timeout"
-              min="1000"
-              step="1000"
-              type="number"
+          <NGrid :cols="2" :x-gap="8">
+            <NGi>
+              <NFormItem :label="t('artifact.backendStartupTimeout')">
+                <NInputNumber
+                  :value="startupTimeoutDraft"
+                  data-testid="serena-startup-timeout"
+                  :min="1000"
+                  :step="1000"
+                  @update:value="startupTimeoutDraft = $event ?? 15_000"
+                />
+              </NFormItem>
+            </NGi>
+            <NGi>
+              <NFormItem :label="t('artifact.backendToolTimeout')">
+                <NInputNumber
+                  :value="toolTimeoutDraft"
+                  data-testid="serena-tool-timeout"
+                  :min="1000"
+                  :step="1000"
+                  @update:value="toolTimeoutDraft = $event ?? 30_000"
+                />
+              </NFormItem>
+            </NGi>
+          </NGrid>
+
+          <NGrid :cols="2" :x-gap="8">
+            <NGi>
+              <NFormItem :label="t('artifact.backendEnableDashboard')">
+                <NSelect
+                  v-model:value="enableWebDashboardDraft"
+                  data-testid="serena-enable-dashboard"
+                  :options="dashboardOptions"
+                />
+              </NFormItem>
+            </NGi>
+            <NGi>
+              <NFormItem :label="t('artifact.backendOpenDashboard')">
+                <NCheckbox
+                  v-model:checked="openWebDashboardDraft"
+                  data-testid="serena-open-dashboard"
+                  :aria-label="t('artifact.backendOpenDashboard')"
+                />
+              </NFormItem>
+            </NGi>
+          </NGrid>
+
+          <NFormItem :label="t('artifact.backendExtraArgs')">
+            <NInput
+              v-model:value="extraArgsDraft"
+              data-testid="serena-extra-args"
+              type="textarea"
+              :autosize="{ minRows: 4, maxRows: 8 }"
             />
-          </label>
-          <label class="project-field">
-            <span>{{ t('artifact.backendToolTimeout') }}</span>
-            <input
-              v-model.number="toolTimeoutDraft"
-              data-testid="serena-tool-timeout"
-              min="1000"
-              step="1000"
-              type="number"
-            />
-          </label>
-        </div>
-
-        <div class="project-field-grid">
-          <label class="project-field">
-            <span>{{ t('artifact.backendEnableDashboard') }}</span>
-            <select
-              v-model="enableWebDashboardDraft"
-              data-testid="serena-enable-dashboard"
-            >
-              <option value="default">
-                {{ t('artifact.backendDashboardDefault') }}
-              </option>
-              <option value="true">{{ t('common.enabled') }}</option>
-              <option value="false">{{ t('common.disabled') }}</option>
-            </select>
-          </label>
-          <label class="project-checkbox">
-            <input
-              v-model="openWebDashboardDraft"
-              data-testid="serena-open-dashboard"
-              type="checkbox"
-            />
-            <span>{{ t('artifact.backendOpenDashboard') }}</span>
-          </label>
-        </div>
-
-        <label class="project-field">
-          <span>{{ t('artifact.backendExtraArgs') }}</span>
-          <textarea
-            v-model="extraArgsDraft"
-            data-testid="serena-extra-args"
-            rows="4"
-          ></textarea>
-        </label>
+          </NFormItem>
+        </NForm>
 
         <div class="launch-preview">
           <span>{{ t('artifact.backendLaunchPreview') }}</span>
@@ -351,32 +410,43 @@ watch(
           {{ t('artifact.saveProjectConfig') }}
         </NButton>
 
-        <div class="backend-status-list">
-          <article
+        <NList
+          v-if="project.backendStatuses.length"
+          :show-divider="false"
+          bordered
+          class="backend-status-list"
+        >
+          <NListItem
             v-for="status in project.backendStatuses"
             :key="status.backendId"
-            class="backend-status"
           >
-            <div>
-              <strong>{{ status.backendId }}</strong>
-              <span :class="['backend-state', status.state]">
-                {{ status.state }}
-              </span>
-            </div>
-            <small>{{ status.message }}</small>
-            <small>{{
-              status.capabilities.join(', ') || 'no capabilities'
-            }}</small>
-            <NButton
-              size="tiny"
-              :loading="project.restartingBackendId === status.backendId"
-              @click="restartBackend(status.backendId)"
-            >
-              {{ t('artifact.restartBackend') }}
-            </NButton>
-          </article>
-        </div>
+            <NThing :title="status.backendId" :description="status.message">
+              <template #header-extra>
+                <NTag
+                  size="small"
+                  round
+                  :bordered="false"
+                  :type="backendStateType(status.state)"
+                >
+                  {{ status.state }}
+                </NTag>
+              </template>
+              <small class="backend-status-meta">
+                {{ status.capabilities.join(', ') || 'no capabilities' }}
+              </small>
+              <template #action>
+                <NButton
+                  size="tiny"
+                  :loading="project.restartingBackendId === status.backendId"
+                  @click="restartBackend(status.backendId)"
+                >
+                  {{ t('artifact.restartBackend') }}
+                </NButton>
+              </template>
+            </NThing>
+          </NListItem>
+        </NList>
       </section>
-    </template>
+    </NSpin>
   </section>
 </template>

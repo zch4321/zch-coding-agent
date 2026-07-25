@@ -89,13 +89,15 @@ const sensitiveModeOptions = computed(() => [
             t('permissions.expires', { time: rule.expiresAt })
           }}</small>
         </div>
-        <button
-          type="button"
+        <NButton
+          quaternary
+          circle
+          size="small"
           :aria-label="t('permissions.deleteRule')"
           @click="agent.removeRememberedRule(rule.id)"
         >
           <UiIcon name="trash" />
-        </button>
+        </NButton>
       </article>
     </div>
   </section>
