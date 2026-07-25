@@ -13,15 +13,18 @@ import {
 
 class FailFirstUserMessageLogger implements TraceLogger {
   readonly #delegate = new NullTraceLogger()
-  #failed = false
+  readonly #failUserMessage: boolean
+
+  constructor(failUserMessage: boolean) {
+    this.#failUserMessage = failUserMessage
+  }
 
   get queuePeak(): number {
     return this.#delegate.queuePeak
   }
 
   async write(input: TraceEventInput): Promise<TraceEvent> {
-    if (!this.#failed && input.type === 'user.message') {
-      this.#failed = true
+    if (this.#failUserMessage && input.type === 'user.message') {
       throw new Error('Injected user trace failure')
     }
     return this.#delegate.write(input)
@@ -33,7 +36,7 @@ class FailFirstUserMessageLogger implements TraceLogger {
 }
 
 describe('SessionManager precommit recovery', () => {
-  it('does not carry a failed user input into the next run', async () => {
+  it('degrades trace failures without failing a run and retries next run', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'agent-precommit-recovery-'),
     )
@@ -41,12 +44,14 @@ describe('SessionManager precommit recovery', () => {
     await mkdir(workspace)
     const configStore = await createConfig(directory)
     const provider = new ForkProvider()
+    let loggerCreations = 0
     const manager = new SessionManager({
       configStore,
       traceDirectory: path.join(directory, 'traces'),
       eventSink: createIpcTestEventSink(() => undefined),
       providerFactory: () => provider,
-      traceLoggerFactory: () => new FailFirstUserMessageLogger(),
+      traceLoggerFactory: () =>
+        new FailFirstUserMessageLogger(loggerCreations++ === 0),
     })
     const sessionId = await manager.createSession({
       workspace,
@@ -55,26 +60,37 @@ describe('SessionManager precommit recovery', () => {
     })
 
     try {
-      const failedRun = manager.startRun({
+      const firstRun = manager.startRun({
         sessionId,
-        message: 'failed input must not survive',
-        clientRequestId: 'request:failed-input',
+        message: 'first input survives trace failure',
+        clientRequestId: 'request:first-input',
       })
-      await manager.waitForRunSettled(sessionId, failedRun)
-      expect(provider.calls).toBe(0)
-
-      const successfulRun = manager.startRun({
-        sessionId,
-        message: 'fresh input',
-        clientRequestId: 'request:fresh-input',
-      })
-      await manager.waitForRunSettled(sessionId, successfulRun)
-
+      await manager.waitForRunSettled(sessionId, firstRun)
       expect(provider.calls).toBe(1)
-      expect(JSON.stringify(provider.messages)).toContain('fresh input')
-      expect(JSON.stringify(provider.messages)).not.toContain(
-        'failed input must not survive',
+      expect(loggerCreations).toBe(1)
+      expect(manager.traceCaptureStatus(sessionId)).toMatchObject({
+        configuredEnabled: true,
+        state: 'degraded',
+        warning: 'Injected user trace failure',
+      })
+
+      const secondRun = manager.startRun({
+        sessionId,
+        message: 'second input',
+        clientRequestId: 'request:second-input',
+      })
+      await manager.waitForRunSettled(sessionId, secondRun)
+
+      expect(provider.calls).toBe(2)
+      expect(loggerCreations).toBe(2)
+      expect(manager.traceCaptureStatus(sessionId)).toMatchObject({
+        configuredEnabled: true,
+        state: 'active',
+      })
+      expect(JSON.stringify(provider.messages)).toContain(
+        'first input survives trace failure',
       )
+      expect(JSON.stringify(provider.messages)).toContain('second input')
     } finally {
       await manager.dispose()
     }

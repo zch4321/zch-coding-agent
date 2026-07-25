@@ -253,14 +253,17 @@ describe.skipIf(!enabled)('Linux Docker worker', () => {
         path.join(trial.directory, 'worker', 'result.json'),
         'utf8',
       ),
-    ) as { sessionId: string }
+    ) as {
+      sessionId: string
+      artifacts: { tracePath: string }
+    }
     const trace = await readFile(
       path.join(
         trial.directory,
         'worker',
         'runtime',
         'traces',
-        `${headless.sessionId}.jsonl`,
+        path.basename(headless.artifacts.tracePath),
       ),
       'utf8',
     )

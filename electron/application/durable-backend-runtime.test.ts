@@ -623,6 +623,10 @@ describe('durable backend runtime', () => {
       status: 'calling_llm',
       text: 'partial durable answer',
     })
+    expect(reloaded.traceCapture).toMatchObject({
+      configuredEnabled: false,
+      state: 'disabled',
+    })
     await expect(
       target.sessions.archive({
         sessionId,

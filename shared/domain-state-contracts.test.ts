@@ -492,7 +492,16 @@ describe('message paging and Session snapshots', () => {
   })
 
   it('keeps Session and page ownership aligned', () => {
-    const snapshot = { schemaVersion: 1 as const, session, messagePage: page }
+    const snapshot = {
+      schemaVersion: 1 as const,
+      session,
+      messagePage: page,
+      traceCapture: {
+        configuredEnabled: true,
+        state: 'active' as const,
+        traceId: 'capture-session-one',
+      },
+    }
     roundTrip(SessionSnapshotSchema, snapshot)
     expect(() => assertSessionSnapshotSemantics(snapshot)).not.toThrow()
     expect(() =>

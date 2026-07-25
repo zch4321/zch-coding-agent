@@ -60,6 +60,8 @@ export class SessionRunController {
     runId: RunId,
   ) => RunAccessLease
   readonly #executionState?: SessionExecutionStatePort
+  readonly #beforeRun?: (session: SessionState) => Promise<void>
+  readonly #afterRun?: (session: SessionState) => Promise<void>
 
   /** Creates a controller with the collaborators needed to execute session runs. */
   constructor(options: {
@@ -74,6 +76,8 @@ export class SessionRunController {
     emit: (session: SessionState, event: AgentEventDraft) => void
     acquireRunAccess: (session: SessionState, runId: RunId) => RunAccessLease
     executionState?: SessionExecutionStatePort
+    beforeRun?: (session: SessionState) => Promise<void>
+    afterRun?: (session: SessionState) => Promise<void>
   }) {
     this.#configStore = options.configStore
     this.#providerTurns = options.providerTurns
@@ -86,6 +90,8 @@ export class SessionRunController {
     this.#emit = options.emit
     this.#acquireRunAccess = options.acquireRunAccess
     this.#executionState = options.executionState
+    this.#beforeRun = options.beforeRun
+    this.#afterRun = options.afterRun
   }
 
   /** Starts a new run, or returns the existing run for a repeated client request. */
@@ -309,6 +315,7 @@ export class SessionRunController {
     }
 
     try {
+      await this.#beforeRun?.(session)
       const runConfig = this.#configStore.getPublicConfig()
       const runProvider = getProviderConfig(runConfig, session.provider)
       if (!runProvider) {
@@ -616,5 +623,6 @@ export class SessionRunController {
       runId: run.runId,
       status,
     })
+    await this.#afterRun?.(session)
   }
 }

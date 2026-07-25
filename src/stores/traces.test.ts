@@ -21,14 +21,21 @@ describe('trace transcript store', () => {
     vi.restoreAllMocks()
   })
 
-  it('resolves a conversation trace and appends paginated entries', async () => {
+  it('resolves the latest Session capture and appends paginated entries', async () => {
     const listTraces = vi.fn(async () =>
       ok([
         {
-          traceId: 'session-1',
+          traceId: 'capture-latest',
           sessionId: 'session-1',
           closed: true,
           size: 100,
+          eventCount: 2,
+        },
+        {
+          traceId: 'capture-older',
+          sessionId: 'session-1',
+          closed: true,
+          size: 90,
           eventCount: 2,
         },
       ]),
@@ -38,7 +45,7 @@ describe('trace transcript store', () => {
       .mockResolvedValueOnce(
         ok({
           metadata: {
-            traceId: 'session-1',
+            traceId: 'capture-latest',
             revision: 'revision',
             lastSeq: 2,
             active: false,
@@ -61,7 +68,7 @@ describe('trace transcript store', () => {
       .mockResolvedValueOnce(
         ok({
           metadata: {
-            traceId: 'session-1',
+            traceId: 'capture-latest',
             revision: 'revision',
             lastSeq: 2,
             active: false,
@@ -89,6 +96,7 @@ describe('trace transcript store', () => {
     const store = useTraceStore()
     await store.openSessionTranscript('session-1')
     expect(store.transcriptOpen).toBe(true)
+    expect(store.transcriptTraceId).toBe('capture-latest')
     expect(store.transcriptEntries.map((entry) => entry.text)).toEqual([
       'hello',
     ])

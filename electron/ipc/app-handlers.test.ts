@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 
 const { showMessageBox, showSaveDialog, writeTextAtomic } = vi.hoisted(() => ({
   showMessageBox: vi.fn(),
@@ -25,8 +26,14 @@ const stubEvent = {} as never
 function createHandlers(input?: {
   traceService?: Record<string, unknown>
   backend?: Record<string, unknown>
+  sessions?: Record<string, unknown>
+  configStore?: Record<string, unknown>
 }) {
-  const sessions = { activeTraceIds: vi.fn(() => new Set<string>()) }
+  const sessions = {
+    activeTraceIds: vi.fn(() => new Set<string>()),
+    reconfigureTraceLogging: vi.fn(async () => []),
+    ...input?.sessions,
+  }
   const projects = {
     list: vi.fn(async () => []),
     add: vi.fn(),
@@ -52,7 +59,7 @@ function createHandlers(input?: {
 
   return {
     handlers: createAppIpcHandlers({
-      configStore: {} as never,
+      configStore: (input?.configStore ?? {}) as never,
       backend: backend as never,
       skillsManager: {} as never,
       traceService: traceService as never,
@@ -62,6 +69,7 @@ function createHandlers(input?: {
     }),
     backend,
     projects,
+    sessions,
     traceService,
   }
 }
@@ -134,5 +142,42 @@ describe('app IPC handlers', () => {
       handlers['project:list']!({ version: 1 }, stubEvent),
     ).resolves.toEqual({ version: 1, projects: records })
     expect(list).toHaveBeenCalledOnce()
+  })
+
+  it('reconfigures live Session captures after saving logging settings', async () => {
+    const config = {
+      privacy: {
+        traceNoticeAccepted: {
+          version: TRACE_NOTICE_VERSION,
+          acceptedAt: '2026-07-25T00:00:00Z',
+        },
+      },
+      logging: { enabled: true },
+    }
+    const update = vi.fn(async () => config)
+    const reconfigureTraceLogging = vi.fn(async () => [
+      'session-test: trace directory unavailable',
+    ])
+    const { handlers } = createHandlers({
+      configStore: {
+        getPublicConfig: vi.fn(() => config),
+        update,
+      },
+      sessions: { reconfigureTraceLogging },
+    })
+    const payload = {
+      version: 1,
+      kind: 'logging',
+      value: { enabled: true },
+    } as const
+
+    await expect(
+      handlers['config:set']!(payload as never, stubEvent),
+    ).resolves.toEqual({
+      config,
+      warnings: ['session-test: trace directory unavailable'],
+    })
+    expect(update).toHaveBeenCalledWith(payload)
+    expect(reconfigureTraceLogging).toHaveBeenCalledWith(true)
   })
 })

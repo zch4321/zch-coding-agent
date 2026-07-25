@@ -448,7 +448,7 @@ const zhCN = {
   },
   logging: {
     title: '日志',
-    hint: '记录最终请求、响应、工具、审批、用量和耗时；不记录流式 chunk。',
+    hint: '现有和新对话的后续操作会被记录；既有历史不会补录。不记录流式 chunk。',
     full: '完整 Trace 日志',
     fullHint: '可能包含提示词、代码、工具参数和输出。',
     retention: '保留天数',
@@ -474,6 +474,11 @@ const zhCN = {
     interjections: '{count} 条插话',
     closed: '已关闭',
     active: '活动中',
+    capturePendingTitle: '日志切换待生效',
+    capturePending: '已保存的日志设置会在当前请求完整结束后生效。',
+    captureDegradedTitle: '日志记录已降级',
+    captureDegraded: '对话仍可继续使用；下次请求会重试创建日志片段。{warning}',
+    degradedSession: '{sessionId}：日志记录已降级 — {warning}',
     promptInspector: 'Prompt Inspector',
     promptRequest: 'LLM Request',
     promptRequestPlaceholder: '选择一次 LLM request',
@@ -495,7 +500,7 @@ const zhCN = {
     loadMoreMessages: '加载更多请求消息',
     loadMore: '加载更多时间线事件',
     unavailable:
-      '此对话没有完整 Trace。请先启用完整 Trace 日志；该设置只对未来创建的会话生效。',
+      '此对话没有完整 Trace。启用后会记录后续操作，但不会补录既有历史。',
     categories: {
       user: '用户',
       assistant: 'Assistant',

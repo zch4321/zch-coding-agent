@@ -1,7 +1,7 @@
-import { createWriteStream, type WriteStream } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
+import type { WriteStream } from 'node:fs'
+import { mkdir, open } from 'node:fs/promises'
 import path from 'node:path'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import type { EventId, SessionId } from '../../shared/ids'
 import type { TraceId } from '../../shared/trace'
 import {
@@ -11,6 +11,7 @@ import {
 } from './events'
 
 export interface TraceLogger {
+  readonly traceId?: TraceId
   readonly queuePeak: number
   write(input: TraceEventInput): Promise<TraceEvent>
   dispose(): Promise<void>
@@ -27,19 +28,14 @@ export interface JsonlTraceLoggerOptions {
   highWaterMark?: number
 }
 
-const SAFE_TRACE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
-
-export function traceIdForSession(sessionId: SessionId): TraceId {
-  if (SAFE_TRACE_ID.test(sessionId)) return sessionId as TraceId
-  const digest = createHash('sha256')
-    .update(sessionId)
-    .digest('hex')
-    .slice(0, 16)
-  const readable = sessionId.replace(/[^A-Za-z0-9._-]/gu, '-').slice(0, 110)
-  return `${readable}-${digest}` as TraceId
+function captureIdForSession(sessionId: SessionId): TraceId {
+  const readable =
+    sessionId.replace(/[^A-Za-z0-9._-]/gu, '-').slice(0, 80) || 'session'
+  return `capture-${readable}-${randomUUID()}` as TraceId
 }
 
 export class JsonlTraceLogger implements TraceLogger {
+  readonly traceId: TraceId
   readonly #stream: WriteStream
   readonly #maxQueueSize: number
   readonly #queue: QueueItem[] = []
@@ -54,18 +50,19 @@ export class JsonlTraceLogger implements TraceLogger {
   #queuePeak = 0
   #disposePromise: Promise<void> | undefined
 
-  private constructor(filePath: string, options: JsonlTraceLoggerOptions = {}) {
+  private constructor(
+    traceId: TraceId,
+    stream: WriteStream,
+    options: JsonlTraceLoggerOptions = {},
+  ) {
+    this.traceId = traceId
     this.#maxQueueSize = options.maxQueueSize ?? 256
 
     if (!Number.isInteger(this.#maxQueueSize) || this.#maxQueueSize < 1) {
       throw new RangeError('maxQueueSize must be a positive integer')
     }
 
-    this.#stream = createWriteStream(filePath, {
-      flags: 'a',
-      encoding: 'utf8',
-      highWaterMark: options.highWaterMark ?? 64 * 1024,
-    })
+    this.#stream = stream
     this.#stream.on('error', (error) => {
       this.#failure = error
       this.#rejectQueued(error)
@@ -77,11 +74,23 @@ export class JsonlTraceLogger implements TraceLogger {
     sessionId: SessionId,
     options: JsonlTraceLoggerOptions = {},
   ): Promise<JsonlTraceLogger> {
+    const maxQueueSize = options.maxQueueSize ?? 256
+    if (!Number.isInteger(maxQueueSize) || maxQueueSize < 1) {
+      throw new RangeError('maxQueueSize must be a positive integer')
+    }
     await mkdir(directory, { recursive: true })
-    return new JsonlTraceLogger(
-      path.join(directory, `${traceIdForSession(sessionId)}.jsonl`),
-      options,
-    )
+    const traceId = captureIdForSession(sessionId)
+    const file = await open(path.join(directory, `${traceId}.jsonl`), 'wx')
+    try {
+      const stream = file.createWriteStream({
+        encoding: 'utf8',
+        highWaterMark: options.highWaterMark ?? 64 * 1024,
+      })
+      return new JsonlTraceLogger(traceId, stream, options)
+    } catch (error) {
+      await file.close().catch(() => undefined)
+      throw error
+    }
   }
 
   get queuePeak(): number {
@@ -245,6 +254,7 @@ export class JsonlTraceLogger implements TraceLogger {
 }
 
 export class NullTraceLogger implements TraceLogger {
+  readonly traceId = undefined
   #nextSeq = 1
 
   get queuePeak(): number {

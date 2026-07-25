@@ -172,4 +172,31 @@ describe('shared runtime contracts', () => {
     delete missingSession.sessionId
     expect(validateAgentEvent(missingSession)).toBe(false)
   })
+
+  it('validates bounded trace capture status events', () => {
+    const validateAgentEvent = compileSchema(AgentEventSchema)
+    const capture: AgentEvent = {
+      schemaVersion: 1,
+      type: 'trace.capture.changed',
+      sessionId,
+      capture: {
+        configuredEnabled: true,
+        state: 'degraded',
+        warning: 'trace directory unavailable',
+      },
+      seq: 3,
+      ts: '2026-06-26T00:00:00.000Z',
+    }
+
+    expect(validateAgentEvent(capture)).toBe(true)
+    expect(
+      validateAgentEvent({
+        ...capture,
+        capture: {
+          ...capture.capture,
+          warning: 'x'.repeat(1_025),
+        },
+      }),
+    ).toBe(false)
+  })
 })

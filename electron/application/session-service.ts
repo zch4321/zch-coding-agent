@@ -21,6 +21,7 @@ import type {
   SessionSnapshot,
 } from '../../shared/session'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
+import type { TraceCaptureStatus } from '../../shared/trace'
 import { MessageRepository } from '../persistence/message-repository'
 import {
   SessionRepository,
@@ -45,6 +46,7 @@ import {
 export interface SessionRuntimeGuard {
   assertSessionIdle(sessionId: SessionId): void
   snapshot(sessionId: SessionId): ActiveRunPublicSnapshot | undefined
+  traceCaptureStatus?(sessionId: SessionId): TraceCaptureStatus | undefined
   reserveSessionEviction?(sessionId: SessionId): string
   cancelSessionEviction?(sessionId: SessionId, token: string): void
   releaseSession(
@@ -150,7 +152,12 @@ export class SessionService {
       throw new ApplicationError('NOT_FOUND', 'Session was not found')
     }
     const runtime = this.#runtimeGuard?.snapshot(sessionId)
-    return runtime ? { ...snapshot, runtime } : snapshot
+    const traceCapture = this.#runtimeGuard?.traceCaptureStatus?.(sessionId)
+    return {
+      ...snapshot,
+      ...(runtime ? { runtime } : {}),
+      ...(traceCapture ? { traceCapture } : {}),
+    }
   }
 
   async getRecord(sessionId: SessionId): Promise<SessionRecord> {

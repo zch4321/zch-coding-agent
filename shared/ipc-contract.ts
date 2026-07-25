@@ -166,6 +166,11 @@ export const IPC_CONTRACTS = {
       Type.Object(
         {
           config: PublicConfigSchema,
+          warnings: Type.Optional(
+            Type.Array(Type.String({ minLength: 1, maxLength: 1_024 }), {
+              maxItems: 512,
+            }),
+          ),
         },
         { additionalProperties: false },
       ),

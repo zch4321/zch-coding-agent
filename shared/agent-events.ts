@@ -9,6 +9,7 @@ import { JsonValueSchema } from './json'
 import { TerminalStatusSchema } from './terminal'
 import { LlmUsageRecordSchema } from './usage'
 import { GoalStateSchema, PlanStateSchema } from './orchestration'
+import { TraceCaptureStatusSchema } from './trace'
 
 const EventBaseSchema = Type.Object({
   schemaVersion: Type.Literal(1),
@@ -293,6 +294,14 @@ export const AgentEventSchema = Type.Union([
       status: Type.Union([Type.Literal('acquired'), Type.Literal('released')]),
       writerSessionId: SessionIdSchema,
       writerRunId: RunIdSchema,
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
+      type: Type.Literal('trace.capture.changed'),
+      sessionId: SessionIdSchema,
+      capture: TraceCaptureStatusSchema,
     }),
   ]),
   Type.Composite([

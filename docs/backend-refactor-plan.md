@@ -662,6 +662,7 @@ Config/Secrets initialize
 - [x] 停止注册/调用 `workbench:save` 和 JSON ChangeHistory 写路径。
 - [x] Headless 为每个 run/trial 创建独立临时数据库，退出时释放并删除，并调用同一 composition。
 - [x] Trace replay 使用 canonical transcript/request 数据，不注入第二套 history；trace fork 已移除。
+- [x] Trace 使用唯一 segmented capture；live Session 可热切换日志，active Run 在完整边界应用，创建/写入失败降级且不影响业务请求。
 
 ### 12.4 切流验收场景
 
@@ -729,6 +730,7 @@ P8 稳定后立即删除，不保留“以后可能用”的双实现。
 - [ ] Project remove cascade 不删除 workspace。
 - [ ] FileChange private snapshot 不进入 IPC/DOM/trace 默认记录。
 - [ ] app dispose、session archive、run cancel 和不可中止 side effect 没有资源泄漏。
+- [x] 日志 idle/active 热切换、连续开关、Session restore、新片段 seq、degraded warning 与下一 Run 恢复。
 
 ### 14.2 全部门禁
 

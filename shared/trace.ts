@@ -20,6 +20,22 @@ export const TraceIdSchema = Type.String({
 })
 export type TraceId = Static<typeof TraceIdSchema>
 
+export const TraceCaptureStatusSchema = Type.Object(
+  {
+    configuredEnabled: Type.Boolean(),
+    state: Type.Union([
+      Type.Literal('disabled'),
+      Type.Literal('pending'),
+      Type.Literal('active'),
+      Type.Literal('degraded'),
+    ]),
+    traceId: Type.Optional(TraceIdSchema),
+    warning: Type.Optional(Type.String({ minLength: 1, maxLength: 1_024 })),
+  },
+  { additionalProperties: false },
+)
+export type TraceCaptureStatus = Static<typeof TraceCaptureStatusSchema>
+
 export const TraceInfoSchema = Type.Object(
   {
     traceId: TraceIdSchema,

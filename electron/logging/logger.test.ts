@@ -10,7 +10,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { SessionId } from '../../shared/ids'
 import { cleanupTraces } from './cleanup'
-import { JsonlTraceLogger, NullTraceLogger, traceIdForSession } from './logger'
+import { JsonlTraceLogger, NullTraceLogger } from './logger'
 import {
   CorruptTraceError,
   readTraceFile,
@@ -39,7 +39,7 @@ describe('JsonlTraceLogger', () => {
     await logger.dispose()
 
     const events = await readTraceFile(
-      path.join(directory, `${sessionId}.jsonl`),
+      path.join(directory, `${logger.traceId}.jsonl`),
     )
     expect(events).toHaveLength(10_000)
     expect(events.map((event) => event.seq)).toEqual(
@@ -50,8 +50,8 @@ describe('JsonlTraceLogger', () => {
 
   it('ignores an incomplete final line after a crash', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
-    const filePath = path.join(directory, `${sessionId}.jsonl`)
     const logger = await JsonlTraceLogger.create(directory, sessionId)
+    const filePath = path.join(directory, `${logger.traceId}.jsonl`)
     await logger.write({
       type: 'session.start',
       sessionId,
@@ -67,20 +67,28 @@ describe('JsonlTraceLogger', () => {
     expect(events[0]?.type).toBe('session.start')
   })
 
-  it('maps Session ids with Windows-reserved characters to safe trace files', async () => {
+  it('creates unique safe captures for Session ids with reserved characters', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
     const durableSessionId = 'session:durable:one' as SessionId
-    const traceId = traceIdForSession(durableSessionId)
-    const logger = await JsonlTraceLogger.create(directory, durableSessionId)
-    await logger.write({
+    const first = await JsonlTraceLogger.create(directory, durableSessionId)
+    const second = await JsonlTraceLogger.create(directory, durableSessionId)
+    await first.write({
       type: 'session.end',
       sessionId: durableSessionId,
     })
-    await logger.dispose()
+    await second.write({
+      type: 'session.end',
+      sessionId: durableSessionId,
+    })
+    await Promise.all([first.dispose(), second.dispose()])
 
-    expect(traceId).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u)
+    expect(first.traceId).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u)
+    expect(second.traceId).not.toBe(first.traceId)
     await expect(
-      readTraceFile(path.join(directory, `${traceId}.jsonl`)),
+      readTraceFile(path.join(directory, `${first.traceId}.jsonl`)),
+    ).resolves.toHaveLength(1)
+    await expect(
+      readTraceFile(path.join(directory, `${second.traceId}.jsonl`)),
     ).resolves.toHaveLength(1)
   })
 

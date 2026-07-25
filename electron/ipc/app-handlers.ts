@@ -113,12 +113,16 @@ export function createAppIpcHandlers(
       }
 
       const config = await configStore.update(payload)
+      const warnings =
+        payload.kind === 'logging'
+          ? await sessionManager.reconfigureTraceLogging(config.logging.enabled)
+          : []
 
       if (payload.kind === 'network') {
         refreshHttpTransport?.(config.network.httpProxy)
       }
 
-      return { config }
+      return { config, ...(warnings.length > 0 ? { warnings } : {}) }
     },
     'mcp:list': () => ({ servers: mcpManager?.listStatuses() ?? [] }),
     'mcp:reload': async () => {

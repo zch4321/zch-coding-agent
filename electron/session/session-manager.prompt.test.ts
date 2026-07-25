@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -20,6 +20,7 @@ import {
   createIpcTestEventSink,
   ForkProvider,
   parseTrace,
+  readSessionTrace,
   waitFor,
 } from './session-manager-test-support'
 
@@ -200,10 +201,7 @@ describe('SessionManager prompt and trace', () => {
     ).toBe(true)
 
     await manager.closeSession(sessionId as SessionId)
-    const trace = await readFile(
-      path.join(directory, 'traces', `${sessionId}.jsonl`),
-      'utf8',
-    )
+    const trace = await readSessionTrace(directory, sessionId as SessionId)
     expect(trace).toContain('tool.call')
     expect(trace).not.toContain('llm.stream')
     expect(trace).toContain('llm.response')
@@ -255,10 +253,7 @@ describe('SessionManager prompt and trace', () => {
     await manager.closeSession(sessionId)
 
     const trace = parseTrace(
-      await readFile(
-        path.join(directory, 'traces', `${sessionId}.jsonl`),
-        'utf8',
-      ),
+      await readSessionTrace(directory, sessionId as SessionId),
     )
     const llmRequest = trace.find((event) => event.type === 'llm.request')
     const layerKinds =

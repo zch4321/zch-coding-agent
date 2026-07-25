@@ -63,6 +63,7 @@ export const TraceEventSchema = Type.Union([
     Type.Object({
       type: Type.Literal('session.end'),
       sessionId: SessionIdSchema,
+      reason: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     }),
   ]),
   Type.Composite([
@@ -355,7 +356,7 @@ export type TraceEventInput =
       model: string
       mode: string
     })
-  | (TraceInputBase & { type: 'session.end' })
+  | (TraceInputBase & { type: 'session.end'; reason?: string })
   | (TraceInputBase & { type: 'session.mode'; mode: string })
   | (TraceInputBase & {
       type: 'run.rejected'

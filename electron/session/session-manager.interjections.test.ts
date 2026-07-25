@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -12,6 +12,7 @@ import {
 import {
   createConfig,
   createIpcTestEventSink,
+  readSessionTrace,
   waitFor,
 } from './session-manager-test-support'
 
@@ -115,10 +116,7 @@ describe('SessionManager live interjections', () => {
     ).toBe('request-interject-1')
 
     await manager.closeSession(sessionId)
-    const trace = await readFile(
-      path.join(directory, 'traces', `${sessionId}.jsonl`),
-      'utf8',
-    )
+    const trace = await readSessionTrace(directory, sessionId)
     expect(trace).toContain('interjection.message')
     expect(trace).toContain('"status":"queued"')
     expect(trace).toContain('"status":"injected"')
@@ -310,10 +308,7 @@ describe('SessionManager live interjections', () => {
     ).toBe(true)
 
     await manager.closeSession(sessionId)
-    const trace = await readFile(
-      path.join(directory, 'traces', `${sessionId}.jsonl`),
-      'utf8',
-    )
+    const trace = await readSessionTrace(directory, sessionId)
     expect(trace).toContain('"status":"carryover"')
     expect(trace).toContain('Actually also mention the interjection')
   })

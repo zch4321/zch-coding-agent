@@ -26,6 +26,7 @@ export function handleRuntimeAgentEvent(
   event: AgentEvent,
 ): void {
   if (event.type === 'session.closed') {
+    delete useAgentReplicaStore().traceCaptureBySessionId[event.sessionId]
     delete target.overlays[event.sessionId]
     delete target.carryoversBySessionId[event.sessionId]
     delete target.carryoverStartingBySessionId[event.sessionId]
@@ -56,6 +57,12 @@ export function handleRuntimeAgentEvent(
     ) {
       delete target.workspaceWriters[event.workspace]
     }
+    return
+  }
+
+  if (event.type === 'trace.capture.changed') {
+    useAgentReplicaStore().traceCaptureBySessionId[event.sessionId] =
+      structuredClone(event.capture)
     return
   }
 

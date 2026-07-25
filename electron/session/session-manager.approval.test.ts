@@ -16,6 +16,7 @@ import {
 import {
   createConfig,
   createIpcTestEventSink,
+  readSessionTrace,
   waitFor,
 } from './session-manager-test-support'
 
@@ -73,12 +74,7 @@ describe('SessionManager approvals', () => {
       )?.event,
     ).not.toHaveProperty('approval')
     await manager.closeSession(sessionId)
-    const trace = (
-      await readFile(
-        path.join(directory, 'traces', `${sessionId}.jsonl`),
-        'utf8',
-      )
-    )
+    const trace = (await readSessionTrace(directory, sessionId))
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as Record<string, unknown>)

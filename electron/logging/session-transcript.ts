@@ -283,7 +283,13 @@ export function normalizeSessionTranscript(
         )
         break
       case 'session.end':
-        entries.push(runtimeEntry(event, 'Session ended'))
+        entries.push(
+          runtimeEntry(
+            event,
+            'Session ended',
+            event.reason ? { reason: event.reason } : undefined,
+          ),
+        )
         break
       case 'session.mode':
         entries.push(runtimeEntry(event, `Mode changed to ${event.mode}`))

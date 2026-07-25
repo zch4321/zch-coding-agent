@@ -27,6 +27,7 @@ import type {
 } from '../../shared/runtime-state'
 import type { SessionCommandResult } from '../../shared/domain-state-api'
 import type { FileChangeExecutionPort } from './file-change-execution'
+import type { SessionTraceController } from './session-trace-controller'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -163,6 +164,7 @@ export interface SessionState {
   provider: string
   modelSelection: ModelSelection
   modelSelectionPinned: boolean
+  trace: SessionTraceController
   logger: TraceLogger
   history: MessageRecord[]
   nextMessageSeq: number

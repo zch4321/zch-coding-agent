@@ -113,6 +113,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       retentionDays: 14,
       maxTotalMegabytes: 100,
     },
+    loggingWarnings: [] as string[],
     assistantForm: {
       language: 'zh-CN' as AssistantLanguage,
       preferences: structuredClone(DEFAULT_ASSISTANT_PREFERENCES),
@@ -742,8 +743,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           ),
         },
       })
-      if (result.ok) this.applyConfig(result.value.config, ['logging'])
-      else this.error = result.error.message
+      if (result.ok) {
+        this.applyConfig(result.value.config, ['logging'])
+        this.loggingWarnings = [...(result.value.warnings ?? [])]
+      } else this.error = result.error.message
     },
     async acceptProviderNotice() {
       const bridge = window.agentApi

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -15,6 +15,7 @@ import { SessionManager } from './session-manager'
 import {
   createConfig,
   createIpcTestEventSink,
+  readSessionTrace,
   waitFor,
 } from './session-manager-test-support'
 
@@ -335,10 +336,7 @@ describe('SessionManager M1 workspace concurrency', () => {
     )
 
     await manager.dispose()
-    const trace = await readFile(
-      path.join(directory, 'traces', `${readerSession}.jsonl`),
-      'utf8',
-    )
+    const trace = await readSessionTrace(directory, readerSession)
     expect(trace).toContain('"type":"run.rejected"')
     expect(trace).toContain('"status":"rejected"')
     expect(trace).toContain('"status":"acquired"')

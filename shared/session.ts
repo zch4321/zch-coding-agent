@@ -16,6 +16,7 @@ import {
 import { ModelSelectionSchema } from './model-route'
 import { GoalStateSchema, PlanStateSchema } from './orchestration'
 import { ActiveRunPublicSnapshotSchema } from './runtime-state'
+import { TraceCaptureStatusSchema } from './trace'
 
 export const SessionLifecycleSchema = Type.Union([
   Type.Literal('active'),
@@ -116,6 +117,7 @@ export const SessionSnapshotSchema = Type.Object(
     session: SessionRecordSchema,
     messagePage: MessagePageSchema,
     runtime: Type.Optional(ActiveRunPublicSnapshotSchema),
+    traceCapture: Type.Optional(TraceCaptureStatusSchema),
   },
   { additionalProperties: false },
 )

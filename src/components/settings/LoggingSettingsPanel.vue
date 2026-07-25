@@ -26,6 +26,11 @@ const promptMessages = computed(() => promptRequest.value?.messages ?? [])
 const replayInterjections = computed(() =>
   (traces.replay?.interjections ?? []).slice(-20),
 )
+const degradedCaptures = computed(() =>
+  Object.entries(agent.traceCaptureBySessionId).filter(
+    ([, capture]) => capture?.state === 'degraded',
+  ),
+)
 
 function providerMetric(value: number | null | undefined, suffix = '') {
   return value === null || value === undefined
@@ -92,6 +97,19 @@ function interjectionTitle(interjection: {
     <NButton type="primary" @click="agent.saveLogging">
       {{ t('logging.save') }}
     </NButton>
+    <NAlert v-if="agent.loggingWarnings.length" type="warning">
+      {{ agent.loggingWarnings.join('\n') }}
+    </NAlert>
+    <NAlert v-if="degradedCaptures.length" type="warning">
+      <div v-for="[sessionId, capture] in degradedCaptures" :key="sessionId">
+        {{
+          t('logging.degradedSession', {
+            sessionId,
+            warning: capture?.warning ?? '',
+          })
+        }}
+      </div>
+    </NAlert>
     <div class="settings-actions">
       <NButton secondary @click="traces.openDirectory">
         {{ t('logging.openDirectory') }}

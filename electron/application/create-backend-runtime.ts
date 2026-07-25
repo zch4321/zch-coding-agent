@@ -108,6 +108,9 @@ export async function createBackendRuntime(
     snapshot(sessionId) {
       return liveSessions?.snapshot(sessionId)
     },
+    traceCaptureStatus(sessionId) {
+      return liveSessions?.traceCaptureStatus(sessionId)
+    },
     reserveSessionEviction(sessionId) {
       if (!liveSessions) {
         throw new Error('Live Session registry is not initialized')

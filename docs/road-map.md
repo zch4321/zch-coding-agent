@@ -4,7 +4,7 @@
 
 Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`backend-refactor-plan.md`](./backend-refactor-plan.md)。
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、固定 Core Harness 8、Monthly-SWEBench/SWE-rebench滚动mixed-16、不可变cohort、strict/repair-once runner、隔离 grader、硬门禁和L0–L5评分、trace/tool/usage/cost/paired comparison、完整session transcript查看/导出，以及正式benchmark命令、档位和分层artifacts已经落地。下一阶段用真实任务信号指导Project / Code Intelligence和Provider Routing的后续改动。
+当前基线：基础桌面 Agent、Backend Architecture v2.1 Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、固定 Core Harness 8、Monthly-SWEBench/SWE-rebench滚动mixed-16、不可变cohort、strict/repair-once runner、隔离 grader、硬门禁和L0–L5评分、可热切换的 segmented trace capture、trace/tool/usage/cost/paired comparison、完整session transcript查看/导出，以及正式benchmark命令、档位和分层artifacts已经落地。下一阶段用真实任务信号指导Project / Code Intelligence和Provider Routing的后续改动。
 
 ## 0. 未完成概览
 

@@ -258,6 +258,26 @@ onBeforeUnmount(() => {
       >
         {{ agent.agentEventGap }}
       </NAlert>
+      <NAlert
+        v-if="agent.selectedTraceCapture?.state === 'pending'"
+        type="info"
+        :title="t('logging.capturePendingTitle')"
+        class="inline-alert"
+      >
+        {{ t('logging.capturePending') }}
+      </NAlert>
+      <NAlert
+        v-if="agent.selectedTraceCapture?.state === 'degraded'"
+        type="warning"
+        :title="t('logging.captureDegradedTitle')"
+        class="inline-alert"
+      >
+        {{
+          t('logging.captureDegraded', {
+            warning: agent.selectedTraceCapture.warning ?? '',
+          })
+        }}
+      </NAlert>
 
       <NButton
         v-if="agent.selectedMessageHasMore"

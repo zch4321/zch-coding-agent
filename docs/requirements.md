@@ -418,15 +418,19 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 
 ### 5.1 形态
 
-- 每个 Session 一个 **JSONL 文件**，存于 Electron `userData/traces/`。
+- 每次日志启用或 Durable Session 恢复创建一个独立 **JSONL capture 文件**，存于 Electron `userData/traces/`；同一 Session 可以关联多个 capture，不能把 `traceId` 等同于 `sessionId`。
+- 每个 capture 使用唯一 `traceId`、以独占新文件创建且 `seq` 从 1 开始；旧 capture 不追加、不改名、不回填。
 - 日志是**调试功能**，配置项 `logging.enabled` 默认 `false`；只有用户显式开启后才创建 trace。
+- 保存日志开关后必须通知所有已加载 Session：idle Session 立即启停；active Run 在该 Run 完整结束后应用最终保存值。运行中开启不记录当前 Run，运行中关闭仍记录当前 Run 的终态；未加载 Session 在下次 restore 时按当前配置创建 capture。
+- `TraceCaptureStatus` 必须公开 `configuredEnabled` 与 `disabled | pending | active | degraded` 状态，并可携带当前 `traceId` 或有界 warning；状态变化通过有序 Session event 同步 renderer。
+- capture 创建或写入失败必须降级为 Null logger，不得让模型、工具或 Terminal 操作失败；不完整文件留作诊断，下一 Run 开始前重试创建新 capture。
 - 开启后采用完整记录模式，不做上下文脱敏或摘要化：完整保存规范化消息、实际 Provider 请求体、原始流事件、聚合响应、reasoning/continuation state、工具参数与结果、审批事件和配置快照。
 - “完整”以 Agent 实际可见数据为边界：工具因输出上限而未进入 Agent 的丢弃字节记录 `totalBytes/truncated/discardedHash`，不要求无限落盘；进入模型上下文的内容必须逐字保存。
 - 不记录请求传输层凭据，例如 API Key、Authorization header 和 safeStorage 密文；这些信息不属于模型上下文，也不是回放所需数据。
 - 开启时必须明确提示日志可能包含源代码、用户输入、模型推理、工具输出以及工作区中被读取的凭据，并支持保留天数/总大小上限。
 - 完整 trace 必须可规范化为只读 `zch-session-transcript`：按 run 展示用户/Assistant/明文 reasoning、内部编排、工具与审批、Provider上下文、Plan、interjection、usage、terminal和生命周期。该格式不可导入或重放；每次 Electron 导出前必须警告，导出内容不做敏感信息扫描或脱敏，用户负责本地保存和后续分享。
 - Transcript 不输出 provider wire request/raw response/provider continuation、流式重复分片、工具schema、加密/opaque reasoning或多模态原始载荷；中断且没有final message的明文delta标为partial，多模态只保留类型/MIME/已知大小占位。
-- 产品 Session 状态使用 SQLite 持久化；Trace 继续按每个 Session 一个 JSONL 文件保存，不能因数据库存在而降低 trace 保真度。日志清理 GUI 留待后续版本。
+- 产品 Session 状态使用 SQLite 持久化；Trace 继续按 capture 分段保存，并通过 `sessionId` 归属同一 Session，不能因数据库存在而降低 trace 保真度。清理活动日志时必须使用真实 active `traceId`，不能把 `sessionId` 当作文件标识。
 
 ### 5.2 必须记录的事件（每条一行 JSON）
 
@@ -441,7 +445,7 @@ tool.call       { callId, runId, tool, args, result, approvedBy, duration, ts }
 terminal.event  { terminalId, direction, data/status, seq, ts }
 user.message    { text, ts }
 agent.message   { text, ts }
-session.end     { ts }
+session.end     { reason, ts }
 ```
 
 ### 5.3 保真度要求

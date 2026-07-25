@@ -20,13 +20,10 @@ import type {
 import type { SessionRecord } from '../../shared/session'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { SessionCommandResult } from '../../shared/domain-state-api'
+import type { TraceCaptureStatus } from '../../shared/trace'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
-import {
-  JsonlTraceLogger,
-  NullTraceLogger,
-  traceIdForSession,
-} from '../logging/logger'
+import { JsonlTraceLogger, NullTraceLogger } from '../logging/logger'
 import { cleanupTraces } from '../logging/cleanup'
 import type { PluginEventBus } from '../plugins/event-bus'
 import { PathGuard } from '../safety/path-guard'
@@ -74,6 +71,7 @@ import {
   type RunAccessRejection,
   type WorkspaceWriterOwner,
 } from './workspace-access-coordinator'
+import { SessionTraceController } from './session-trace-controller'
 
 const RUN_CANCEL_GRACE_MS = 2_000
 
@@ -268,6 +266,8 @@ export class SessionManager {
       acquireRunAccess: (session, runId) =>
         this.#acquireRunAccess(session, runId),
       executionState: this.#executionState,
+      beforeRun: (session) => session.trace.beforeRun(),
+      afterRun: (session) => session.trace.afterRun(),
     })
     this.#pluginBus?.setToolRegistrationPort(this.#toolRegistry)
   }
@@ -312,23 +312,38 @@ export class SessionManager {
     if (this.#sessions.has(sessionId)) {
       ipcFault('CONFLICT', 'Session already exists in the live registry')
     }
-    const logger = publicConfig.logging.enabled
-      ? await this.#traceLoggerFactory(sessionId)
-      : new NullTraceLogger()
+    const initialModelSelection = structuredClone(
+      input.modelSelection ?? {
+        providerId: provider.id,
+        model: provider.model,
+        reasoning: provider.reasoning,
+      },
+    )
+    const sessionRef: { current?: SessionState } = {}
+    const trace = await SessionTraceController.create({
+      sessionId,
+      workspace: guard.workspacePath,
+      model: () =>
+        sessionRef.current?.modelSelection.model ?? initialModelSelection.model,
+      mode: () => sessionRef.current?.mode ?? input.mode,
+      configuredEnabled: publicConfig.logging.enabled,
+      factory: this.#traceLoggerFactory,
+      onStatus: (capture) => {
+        if (sessionRef.current) {
+          this.#emitTraceCaptureStatus(sessionRef.current, capture)
+        }
+      },
+      onDiagnostic: this.#onDiagnostic,
+    })
     const session: SessionState = {
       sessionId,
       workspace: guard.workspacePath,
       mode: input.mode,
       provider: provider.id,
-      modelSelection: structuredClone(
-        input.modelSelection ?? {
-          providerId: provider.id,
-          model: provider.model,
-          reasoning: provider.reasoning,
-        },
-      ),
+      modelSelection: initialModelSelection,
       modelSelectionPinned: input.modelSelection !== undefined,
-      logger,
+      trace,
+      logger: trace,
       history: [],
       nextMessageSeq: 1,
       eventSeq: 0,
@@ -338,6 +353,7 @@ export class SessionManager {
       ...(input.goal ? { goal: structuredClone(input.goal) } : {}),
       ...(input.plan ? { plan: structuredClone(input.plan) } : {}),
     }
+    sessionRef.current = session
 
     this.#sessions.set(sessionId, session)
     try {
@@ -352,13 +368,7 @@ export class SessionManager {
         toolNames: this.#toolRegistry.list().map((tool) => tool.id),
         workspaceConcurrency: this.#workspaceConcurrencyContext(session),
       })
-      await session.logger.write({
-        type: 'session.start',
-        sessionId,
-        workspace: session.workspace,
-        model: session.modelSelection.model,
-        mode: input.mode,
-      })
+      this.#emitTraceCaptureStatus(session, trace.status())
       await this.#pluginBus
         ?.emit('onSessionStart', {
           version: 1,
@@ -371,7 +381,7 @@ export class SessionManager {
         )
     } catch (error) {
       this.#sessions.delete(sessionId)
-      await session.logger.dispose().catch(() => undefined)
+      await session.trace.dispose().catch(() => undefined)
       throw error
     }
 
@@ -406,9 +416,23 @@ export class SessionManager {
     }
     const guard = await PathGuard.create(input.workspace)
     await this.#mcpManager?.activateWorkspace(guard.workspacePath)
-    const logger = publicConfig.logging.enabled
-      ? await this.#traceLoggerFactory(input.record.id)
-      : new NullTraceLogger()
+    const sessionRef: { current?: SessionState } = {}
+    const trace = await SessionTraceController.create({
+      sessionId: input.record.id,
+      workspace: guard.workspacePath,
+      model: () =>
+        sessionRef.current?.modelSelection.model ??
+        input.record.modelSelection.model,
+      mode: () => sessionRef.current?.mode ?? input.record.permissionMode,
+      configuredEnabled: publicConfig.logging.enabled,
+      factory: this.#traceLoggerFactory,
+      onStatus: (capture) => {
+        if (sessionRef.current) {
+          this.#emitTraceCaptureStatus(sessionRef.current, capture)
+        }
+      },
+      onDiagnostic: this.#onDiagnostic,
+    })
     const session: SessionState = {
       sessionId: input.record.id,
       workspace: guard.workspacePath,
@@ -416,7 +440,8 @@ export class SessionManager {
       provider: input.record.modelSelection.providerId,
       modelSelection: structuredClone(input.record.modelSelection),
       modelSelectionPinned: true,
-      logger,
+      trace,
+      logger: trace,
       history: structuredClone([...input.history]),
       nextMessageSeq: input.record.lastSeq + 1,
       goal: input.record.goal ? structuredClone(input.record.goal) : undefined,
@@ -426,20 +451,9 @@ export class SessionManager {
       clientRequests: new Map(),
       mcpDisclosures: new Map(),
     }
+    sessionRef.current = session
     this.#sessions.set(session.sessionId, session)
-    try {
-      await session.logger.write({
-        type: 'session.start',
-        sessionId: session.sessionId,
-        workspace: session.workspace,
-        model: session.modelSelection.model,
-        mode: session.mode,
-      })
-    } catch (error) {
-      this.#sessions.delete(session.sessionId)
-      await session.logger.dispose().catch(() => undefined)
-      throw error
-    }
+    this.#emitTraceCaptureStatus(session, trace.status())
     return session.sessionId
   }
 
@@ -600,7 +614,7 @@ export class SessionManager {
     }
 
     session.closed = true
-    const logger = session.logger
+    const trace = session.trace
 
     if (session.activeRun) {
       const completed = await this.#runs.cancelForSessionClose(
@@ -628,8 +642,7 @@ export class SessionManager {
       .catch((error: unknown) =>
         this.#onDiagnostic('Plugin onSessionEnd failed', error),
       )
-    await logger.write({ type: 'session.end', sessionId })
-    await logger.dispose()
+    await trace.dispose()
     this.#emit(session, { type: 'session.closed', sessionId })
     this.#sessions.delete(sessionId)
     await this.#cleanupTraces()
@@ -701,10 +714,37 @@ export class SessionManager {
    */
   activeTraceIds(): Set<string> {
     return new Set(
-      [...this.#sessions.keys()].map((sessionId) =>
-        traceIdForSession(sessionId),
+      [...this.#sessions.values()].flatMap((session) =>
+        session.trace.traceId ? [session.trace.traceId] : [],
       ),
     )
+  }
+
+  /** Returns the live trace capture status for one loaded Session. */
+  traceCaptureStatus(sessionId: SessionId): TraceCaptureStatus | undefined {
+    const session = this.#sessions.get(sessionId)
+    return session && !session.closed ? session.trace.status() : undefined
+  }
+
+  /**
+   * Applies a saved logging setting to every live Session and returns bounded
+   * warnings for captures that could not be created.
+   */
+  async reconfigureTraceLogging(enabled: boolean): Promise<string[]> {
+    const sessions = [...this.#sessions.values()]
+    const statuses = await Promise.all(
+      sessions.map(async (session) => {
+        if (session.closed) return
+        return session.trace.configure(enabled)
+      }),
+    )
+    return statuses
+      .flatMap((status, index) =>
+        status?.warning
+          ? [`${sessions[index]!.sessionId}: ${status.warning}`.slice(0, 1_024)]
+          : [],
+      )
+      .slice(0, 512)
   }
 
   hasLiveSession(sessionId: SessionId): boolean {
@@ -1056,17 +1096,25 @@ export class SessionManager {
     this.#events.emitAgent(session, event)
   }
 
+  #emitTraceCaptureStatus(
+    session: SessionState,
+    capture: TraceCaptureStatus,
+  ): void {
+    this.#emit(session, {
+      type: 'trace.capture.changed',
+      sessionId: session.sessionId,
+      capture,
+    })
+  }
+
   /**
    * Applies trace retention while preserving trace files for active sessions.
    */
   async #cleanupTraces(): Promise<void> {
     const config = this.#configStore.getPublicConfig()
     const activeFiles = new Set(
-      [...this.#sessions.keys()].map((sessionId) =>
-        path.resolve(
-          this.#traceDirectory,
-          `${traceIdForSession(sessionId)}.jsonl`,
-        ),
+      [...this.activeTraceIds()].map((traceId) =>
+        path.resolve(this.#traceDirectory, `${traceId}.jsonl`),
       ),
     )
 

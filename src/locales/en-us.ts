@@ -459,7 +459,7 @@ const enUS = {
   },
   logging: {
     title: 'Logging',
-    hint: 'Capture final requests, responses, tools, approvals, usage and timing. Streaming chunks are not written.',
+    hint: 'Future actions in existing and new conversations are captured; existing history is not backfilled. Streaming chunks are not written.',
     full: 'Full trace logging',
     fullHint: 'May contain prompts, code, tool arguments and outputs.',
     retention: 'Retention days',
@@ -486,6 +486,13 @@ const enUS = {
     interjections: '{count} interjections',
     closed: 'closed',
     active: 'active',
+    capturePendingTitle: 'Logging change pending',
+    capturePending:
+      'The saved logging setting takes effect after the current request finishes.',
+    captureDegradedTitle: 'Logging is degraded',
+    captureDegraded:
+      'The conversation remains usable. Capture will retry on the next request. {warning}',
+    degradedSession: '{sessionId}: logging degraded — {warning}',
     promptInspector: 'Prompt Inspector',
     promptRequest: 'LLM request',
     promptRequestPlaceholder: 'Select an LLM request',
@@ -507,7 +514,7 @@ const enUS = {
     loadMoreMessages: 'Load more request messages',
     loadMore: 'Load more timeline entries',
     unavailable:
-      'No full trace exists for this conversation. Enable full trace logging before starting a future session.',
+      'No full trace exists for this conversation. Enable full trace logging to capture future actions; existing history is not backfilled.',
     categories: {
       user: 'User',
       assistant: 'Assistant',

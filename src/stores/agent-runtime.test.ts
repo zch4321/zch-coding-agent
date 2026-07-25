@@ -465,6 +465,42 @@ describe('agent runtime store', () => {
     expect(runtime.agentEventGap).toBe('')
   })
 
+  it('reconciles trace capture status in the Session event sequence', () => {
+    const replica = seedReplica()
+    const runtime = useAgentRuntimeStore()
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'trace.capture.changed',
+        seq: 1,
+        sessionId: selectedSessionId,
+        capture: {
+          configuredEnabled: true,
+          state: 'pending',
+        },
+      }),
+    )
+    runtime.handleAgentEvent(
+      event({
+        type: 'trace.capture.changed',
+        seq: 2,
+        sessionId: selectedSessionId,
+        capture: {
+          configuredEnabled: true,
+          state: 'active',
+          traceId: 'capture-runtime-test',
+        },
+      }),
+    )
+
+    expect(replica.traceCaptureBySessionId[selectedSessionId]).toEqual({
+      configuredEnabled: true,
+      state: 'active',
+      traceId: 'capture-runtime-test',
+    })
+    expect(runtime.ensureOverlay(selectedSessionId).lastEventSeq).toBe(2)
+  })
+
   it('does not let an old terminal reload clear a newer run overlay', async () => {
     seedReplica()
     const pending = deferred<Awaited<ReturnType<AgentApi['getSession']>>>()

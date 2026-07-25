@@ -1413,6 +1413,12 @@ Preload 只暴露冻结 typed API，不暴露 `ipcRenderer`。Command/query/resu
 
 SQLite 是产品持久状态的真相源；JSONL trace 是可选审计记录，不用于 Project/Session/FileChange 恢复。
 
+Trace 文件采用 segmented capture，而不是“一 Session 一固定文件”。每次在 idle 状态启用日志或恢复一个已存在的 Durable Session，`SessionTraceController` 都以唯一 `traceId` 独占创建新文件，写入 `session.start`，并令该片段的 `seq` 从 1 开始。关闭日志、关闭 Session 或切换 capture 时写入带原因的 `session.end`；旧文件保持只读，不追加、不改名、不补录历史。`TraceInfo.sessionId` 负责把多个 capture 归属到同一 Session，Session transcript 入口选择最新片段，日志设置页仍列出全部片段。
+
+日志开关在 `config:set(logging)` 保存后广播到所有 live Sessions。idle Session 立即切换；active Run 仅记录 pending 值，并在该 Run 的 `run.end` 完整写入后应用最后一次保存的设置。因此运行中开启不会产生半截当前 Run，运行中关闭也不会丢失当前 Run 终态。未加载 Session 在 restore 时读取当前配置。主进程通过 `TraceCaptureStatus` 和 `trace.capture.changed` 暴露 `disabled | pending | active | degraded`，renderer 只显示状态，不拥有日志生命周期。
+
+日志是 failure-isolated side channel。创建或写入失败时 controller 保留不完整文件用于诊断、切换为 Null logger 并发布有界 warning，业务请求继续；配置仍开启时，下一 Run 开始前尝试新建独立 capture。Retention 保护集合使用当前 controller 的真实 `traceId`。
+
 Trace v2 可以记录比 messages 更细的内容：
 
 - Run lifecycle 和失败/取消原因。

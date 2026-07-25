@@ -14,6 +14,7 @@ import type { MessageRecord } from '../../shared/message'
 import type { ProjectRecord } from '../../shared/project'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { SessionListCursor, SessionRecord } from '../../shared/session'
+import type { TraceCaptureStatus } from '../../shared/trace'
 
 let bootstrapInFlight: Promise<boolean> | undefined
 
@@ -71,6 +72,10 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
       string,
       ActiveRunPublicSnapshot | undefined
     >,
+    traceCaptureBySessionId: {} as Record<
+      string,
+      TraceCaptureStatus | undefined
+    >,
     sessionHasMore: false,
     sessionNextBefore: undefined as SessionListCursor | undefined,
     messageHasMoreBySessionId: {} as Record<string, boolean>,
@@ -110,6 +115,11 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
     selectedRuntime(state): ActiveRunPublicSnapshot | undefined {
       return state.selectedSessionId
         ? state.runtimeBySessionId[state.selectedSessionId]
+        : undefined
+    },
+    selectedTraceCapture(state): TraceCaptureStatus | undefined {
+      return state.selectedSessionId
+        ? state.traceCaptureBySessionId[state.selectedSessionId]
         : undefined
     },
     selectedMessageHasMore(state): boolean {
@@ -266,6 +276,9 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         : undefined
       this.runtimeBySessionId[sessionId] = snapshot.runtime
         ? structuredClone(snapshot.runtime)
+        : undefined
+      this.traceCaptureBySessionId[sessionId] = snapshot.traceCapture
+        ? structuredClone(snapshot.traceCapture)
         : undefined
       return true
     },
@@ -488,12 +501,14 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         ...Object.keys(this.messagesBySessionId),
         ...Object.keys(this.fileChangesBySessionId),
         ...Object.keys(this.runtimeBySessionId),
+        ...Object.keys(this.traceCaptureBySessionId),
       ])
       for (const key of keys) {
         if (!sessionIds.has(key as SessionId)) {
           delete this.messagesBySessionId[key]
           delete this.fileChangesBySessionId[key]
           delete this.runtimeBySessionId[key]
+          delete this.traceCaptureBySessionId[key]
           delete this.messageHasMoreBySessionId[key]
           delete this.messageNextBeforeSeqBySessionId[key]
           delete this.fileChangeHasMoreBySessionId[key]

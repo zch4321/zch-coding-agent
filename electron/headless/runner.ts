@@ -9,7 +9,6 @@ import { RuntimeIdentitySchema } from '../../shared/runtime-identity'
 import type { RuntimeIdentity } from '../../shared/runtime-identity'
 import type { LLMProvider } from '../providers/provider'
 import { createBackendRuntime } from '../application/create-backend-runtime'
-import { traceIdForSession } from '../logging/logger'
 import { createRuntimeIdentity, sha256Json } from '../runtime/runtime-identity'
 import type { RunCompletion } from '../runtime/runtime-events'
 import type { RuntimeEventListener } from '../runtime/runtime-events'
@@ -391,7 +390,10 @@ export async function runHeadlessAgent(
         tracePath: path.join(
           prepared.userDataDirectory,
           'traces',
-          `${traceIdForSession(sessionId!)}.jsonl`,
+          `${
+            runtime.services.sessions.traceCaptureStatus(sessionId!)?.traceId ??
+            'capture-unavailable'
+          }.jsonl`,
         ),
         ...(patch.path ? { patchPath: patch.path } : {}),
         patchStatus: patch.status,

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { ProjectId, RunId, SessionId } from '../../shared/ids'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { SessionRecord } from '../../shared/session'
+import type { TraceCaptureStatus } from '../../shared/trace'
 import type { SessionManager } from '../session/session-manager'
 import { ApplicationError } from './application-error'
 import type { DurableExecutionStatePort } from './durable-execution-state-port'
@@ -347,6 +348,11 @@ export class LiveSessionContextRegistry
 
   snapshot(sessionId: SessionId): ActiveRunPublicSnapshot | undefined {
     return this.#manager.activeRunSnapshot(sessionId)
+  }
+
+  /** Returns the logging capture state for a currently loaded Session. */
+  traceCaptureStatus(sessionId: SessionId): TraceCaptureStatus | undefined {
+    return this.#manager.traceCaptureStatus(sessionId)
   }
 
   applySessionRecord(record: SessionRecord): void {

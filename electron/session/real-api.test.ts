@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { WebContents } from 'electron'
 import type { AgentEvent } from '../../shared/agent-events'
 import type { RunId, SessionId } from '../../shared/ids'
-import type { TraceId } from '../../shared/trace'
 import {
   PROVIDER_NOTICE_VERSION,
   TRACE_NOTICE_VERSION,
@@ -276,10 +275,11 @@ describe.skipIf(!live)('real DeepSeek endpoint', () => {
         .map((event) => event.delta)
         .join(''),
     ).toContain(sentinel)
+    const readTraceId = manager.traceCaptureStatus(readSessionId)?.traceId
+    if (!readTraceId) throw new Error('Read Session trace is unavailable')
     await manager.closeSession(readSessionId)
 
     const traceService = new TraceService(path.join(directory, 'traces'))
-    const readTraceId = readSessionId as unknown as TraceId
     const replay = await traceService.replay(readTraceId)
     expect(replay.closed).toBe(true)
     expect(
@@ -296,6 +296,13 @@ describe.skipIf(!live)('real DeepSeek endpoint', () => {
       message: `Use create_file to create live-created.txt with the exact content ${sentinel}.`,
       clientRequestId: 'real-write-run',
     })
+    const writeTraceId = manager.traceCaptureStatus(writeSessionId)?.traceId
+    if (!writeTraceId) throw new Error('Write Session trace is unavailable')
+    const writeTracePath = path.join(
+      directory,
+      'traces',
+      `${writeTraceId}.jsonl`,
+    )
     await waitForConfirmedWrite({
       manager,
       events,
@@ -303,17 +310,14 @@ describe.skipIf(!live)('real DeepSeek endpoint', () => {
       runId: writeRunId,
       expectedPath: 'live-created.txt',
       expectedContent: sentinel,
-      tracePath: path.join(directory, 'traces', `${writeSessionId}.jsonl`),
+      tracePath: writeTracePath,
     })
     expect(
       await readFile(path.join(workspace, 'live-created.txt'), 'utf8'),
     ).toBe(sentinel)
     await manager.closeSession(writeSessionId)
 
-    const traces = await readFile(
-      path.join(directory, 'traces', `${writeSessionId}.jsonl`),
-      'utf8',
-    )
+    const traces = await readFile(writeTracePath, 'utf8')
     expect(traces).toContain('llm.request')
     expect(traces).toContain('tool.call')
     expect(traces).not.toContain(apiKey)

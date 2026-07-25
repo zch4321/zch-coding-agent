@@ -1,5 +1,7 @@
 import path from 'node:path'
+import { readFile } from 'node:fs/promises'
 import type { JsonValue } from '../../shared/json'
+import type { SessionId } from '../../shared/ids'
 import { IPC_VERSION } from '../../shared/channels'
 import type {
   AgentEventEnvelope,
@@ -17,6 +19,7 @@ import type {
   ProviderEvent,
 } from '../providers/provider'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
+import { TraceService } from '../logging/service'
 
 export interface TraceObject {
   type?: string
@@ -136,6 +139,18 @@ export async function createConfig(
     },
   })
   return store
+}
+
+export async function readSessionTrace(
+  directory: string,
+  sessionId: SessionId,
+): Promise<string> {
+  const traceDirectory = path.join(directory, 'traces')
+  const trace = (await new TraceService(traceDirectory).list()).find(
+    (candidate) => candidate.sessionId === sessionId,
+  )
+  if (!trace) throw new Error(`Trace not found for ${sessionId}`)
+  return readFile(path.join(traceDirectory, `${trace.traceId}.jsonl`), 'utf8')
 }
 
 export function parseTrace(raw: string): TraceObject[] {
