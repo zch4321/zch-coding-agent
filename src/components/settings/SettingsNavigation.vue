@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, h } from 'vue'
+import { NButton, NMenu, type MenuOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import UiIcon from '../UiIcon.vue'
 import type { SettingsTab } from './settings-tabs'
@@ -29,25 +30,39 @@ const tabs = computed<
   { value: 'logging', label: t('settings.logging'), icon: 'file' },
   { value: 'websearch', label: t('settings.webSearchTitle'), icon: 'app' },
 ])
+const menuOptions = computed<MenuOption[]>(() =>
+  tabs.value.map((tab) => ({
+    key: tab.value,
+    label: tab.label,
+    icon: () => h(UiIcon, { name: tab.icon }),
+  })),
+)
+
+function selectTab(key: string | number) {
+  const tab = tabs.value.find((candidate) => candidate.value === key)
+  if (tab) emit('update:activeTab', tab.value)
+}
 </script>
 
 <template>
   <aside class="settings-sidebar">
-    <button class="settings-back-button" type="button" @click="emit('close')">
+    <NButton
+      class="settings-back-button"
+      secondary
+      block
+      @click="emit('close')"
+    >
       <UiIcon name="arrow-left" />
       <span>{{ t('settings.backToChat') }}</span>
-    </button>
+    </NButton>
     <nav class="settings-nav" :aria-label="t('settings.sections')">
-      <button
-        v-for="tab in tabs"
-        :key="tab.value"
-        type="button"
-        :class="{ active: activeTab === tab.value }"
-        @click="emit('update:activeTab', tab.value)"
-      >
-        <UiIcon :name="tab.icon" />
-        {{ tab.label }}
-      </button>
+      <NMenu
+        :value="activeTab"
+        :options="menuOptions"
+        :root-indent="12"
+        :indent="12"
+        @update:value="selectTab"
+      />
     </nav>
   </aside>
 </template>

@@ -46,7 +46,7 @@ test.describe('Electron MCP gateway workflows', () => {
 
     await page.locator('.sidebar-settings-button').click()
     const navigation = page.getByRole('navigation', { name: '设置分类' })
-    await navigation.getByRole('button', { name: 'MCP 连接' }).click()
+    await navigation.getByRole('menuitem', { name: 'MCP 连接' }).click()
     const settings = page.locator('.settings-section')
     await settings.getByRole('button', { name: '重新加载配置' }).click()
 
@@ -157,7 +157,7 @@ test.describe('Electron MCP gateway workflows', () => {
     await page.locator('.sidebar-settings-button').click()
     await page
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: 'MCP 连接' })
+      .getByRole('menuitem', { name: 'MCP 连接' })
       .click()
     const activeCard = page.locator('.settings-section .skill-list article', {
       hasText: 'E2E MCP fixture',

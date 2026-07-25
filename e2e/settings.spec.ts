@@ -28,7 +28,7 @@ test.describe.serial('Electron settings workflows', () => {
     const settingsNavigation = page.getByRole('navigation', {
       name: '设置分类',
     })
-    await settingsNavigation.getByRole('button', { name: '通用' }).click()
+    await settingsNavigation.getByRole('menuitem', { name: '通用' }).click()
     const general = page.locator('.settings-section')
     await expect(general.getByText('中文助手偏好')).toBeVisible()
     await expect(general.getByText('英文助手偏好')).toBeVisible()
@@ -65,7 +65,7 @@ test.describe.serial('Electron settings workflows', () => {
     await general.getByRole('button', { name: '保存助手偏好' }).click()
     await expect(saveStatus).toHaveText('已保存')
 
-    await settingsNavigation.getByRole('button', { name: '模型服务' }).click()
+    await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
     const provider = page.locator('.settings-section')
 
     await expect(provider.locator('.provider-card')).toHaveCount(1)
@@ -131,7 +131,7 @@ test.describe.serial('Electron settings workflows', () => {
     const navigation = page.getByRole('navigation', {
       name: '设置分类',
     })
-    await navigation.getByRole('button', { name: '模型服务' }).click()
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
     const provider = page.locator('.settings-section')
 
     await expect(provider.locator('.provider-card')).toHaveCount(2)
@@ -193,7 +193,7 @@ test.describe.serial('Electron settings workflows', () => {
     const navigation = page.getByRole('navigation', {
       name: '设置分类',
     })
-    await navigation.getByRole('button', { name: '技能' }).click()
+    await navigation.getByRole('menuitem', { name: '技能' }).click()
     const skills = page.locator('.settings-section')
     await expect(skills.getByText('未找到有效技能。')).toBeVisible()
     await expect(
@@ -211,7 +211,7 @@ test.describe.serial('Electron settings workflows', () => {
       skills.getByText('E2E skill without optional trigger'),
     ).toBeVisible()
 
-    await navigation.getByRole('button', { name: 'MCP 连接' }).click()
+    await navigation.getByRole('menuitem', { name: 'MCP 连接' }).click()
     const mcp = page.locator('.settings-section')
     await expect(mcp.getByRole('heading', { name: 'MCP 连接' })).toBeVisible()
     await expect(mcp.getByText('配置中没有 MCP server。')).toBeVisible()
@@ -394,7 +394,7 @@ test.describe.serial('Electron settings workflows', () => {
       'utf8',
     )
 
-    await navigation.getByRole('button', { name: '日志' }).click()
+    await navigation.getByRole('menuitem', { name: '日志' }).click()
     const logging = page.locator('.settings-section')
     await expect(
       logging.getByRole('button', { name: '打开日志目录' }),

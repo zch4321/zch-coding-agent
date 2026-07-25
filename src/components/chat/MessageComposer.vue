@@ -540,6 +540,7 @@ watch(inputDisabled, (disabled) => {
           <template #trigger>
             <NSelect
               :value="agent.modeLockedByWriter ? 'readonly' : agent.mode"
+              class="mode-select"
               style="width: 112px"
               size="small"
               :options="modeOptions"

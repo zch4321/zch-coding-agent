@@ -1,6 +1,17 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { NTooltip } from 'naive-ui'
+import {
+  NButton,
+  NCollapse,
+  NCollapseItem,
+  NEmpty,
+  NInput,
+  NList,
+  NListItem,
+  NScrollbar,
+  NTag,
+  NTooltip,
+} from 'naive-ui'
 import { useAgentStore } from '../../stores/agent'
 import { useI18n } from 'vue-i18n'
 import UiIcon from '../UiIcon.vue'
@@ -20,11 +31,6 @@ const { t } = useI18n()
 const searchQuery = ref('')
 const collapsedProjects = reactive(new Set<string>())
 let searchGeneration = 0
-
-function toggleProject(path: string) {
-  if (collapsedProjects.has(path)) collapsedProjects.delete(path)
-  else collapsedProjects.add(path)
-}
 
 function createProjectConversation(workspacePath: string) {
   if (collapsedProjects.has(workspacePath)) {
@@ -63,6 +69,11 @@ const sortedProjects = computed(() =>
       .sort(compareConversations),
   })),
 )
+const expandedProjectPaths = computed(() =>
+  sortedProjects.value
+    .filter((project) => !collapsedProjects.has(project.path))
+    .map((project) => project.path),
+)
 const searchGroups = computed(() => {
   if (!searchQuery.value.trim()) return []
   return agent.projects
@@ -89,45 +100,60 @@ watch(searchQuery, (value) => {
     void agent.searchSessions(value)
   }, 180)
 })
+
+function updateExpandedProjects(
+  names: string | number | Array<string | number> | null,
+) {
+  const expanded = new Set(
+    (Array.isArray(names) ? names : names === null ? [] : [names]).map(String),
+  )
+  for (const project of sortedProjects.value) {
+    if (expanded.has(project.path)) collapsedProjects.delete(project.path)
+    else collapsedProjects.add(project.path)
+  }
+}
 </script>
 
 <template>
   <aside class="project-sidebar">
     <div class="new-conversation-row">
-      <button
+      <NButton
         class="new-conversation-button"
-        type="button"
+        block
+        secondary
         @click="emit('create')"
       >
         <UiIcon name="plus" />
         <span>{{ t('app.newConversation') }}</span>
-      </button>
+      </NButton>
       <NTooltip>
         <template #trigger>
-          <button
-            type="button"
+          <NButton
             class="import-conversation-button"
             :aria-label="t('sidebar.import')"
+            secondary
             disabled
           >
             <UiIcon name="upload" />
-          </button>
+          </NButton>
         </template>
         {{ t('sidebar.durableImportExportPending') }}
       </NTooltip>
     </div>
 
-    <label class="conversation-search">
-      <UiIcon name="search" />
-      <input
-        v-model="searchQuery"
-        type="search"
-        :placeholder="t('sidebar.search')"
-        :aria-label="t('sidebar.search')"
-      />
-    </label>
+    <NInput
+      v-model:value="searchQuery"
+      class="conversation-search"
+      type="text"
+      size="small"
+      clearable
+      :placeholder="t('sidebar.search')"
+      :aria-label="t('sidebar.search')"
+    >
+      <template #prefix><UiIcon name="search" /></template>
+    </NInput>
 
-    <div class="project-list">
+    <NScrollbar class="project-list">
       <template v-if="searchQuery.trim()">
         <p class="sidebar-section-title">{{ t('sidebar.searchResults') }}</p>
         <section
@@ -144,33 +170,56 @@ watch(searchQuery, (value) => {
             </template>
             {{ project.path }}
           </NTooltip>
-          <button
-            v-for="conversation in project.conversations"
-            :key="conversation.id"
-            class="conversation-item search-result"
-            type="button"
-            @click="emit('open', conversation.id)"
+          <NList
+            :show-divider="false"
+            hoverable
+            clickable
+            class="conversation-search-results"
           >
-            <span>{{ displayConversationTitle(conversation.title) }}</span>
-            <span
-              v-if="conversationBadges(conversation).length"
-              class="conversation-badges"
+            <NListItem
+              v-for="conversation in project.conversations"
+              :key="conversation.id"
+              style="padding: 0"
             >
-              <em
-                v-for="badge in conversationBadges(conversation)"
-                :key="badge"
-                >{{ badge }}</em
+              <NButton
+                text
+                block
+                class="conversation-item search-result"
+                @click="emit('open', conversation.id)"
               >
-            </span>
-            <small>{{ conversation.match }}</small>
-            <time :datetime="conversation.updatedAt">
-              {{ new Date(conversation.updatedAt).toLocaleString() }}
-            </time>
-          </button>
+                <span class="conversation-item-content">
+                  <span>{{
+                    displayConversationTitle(conversation.title)
+                  }}</span>
+                  <span
+                    v-if="conversationBadges(conversation).length"
+                    class="conversation-badges"
+                  >
+                    <NTag
+                      v-for="badge in conversationBadges(conversation)"
+                      :key="badge"
+                      size="small"
+                      round
+                      :bordered="false"
+                    >
+                      {{ badge }}
+                    </NTag>
+                  </span>
+                  <small>{{ conversation.match }}</small>
+                  <time :datetime="conversation.updatedAt">
+                    {{ new Date(conversation.updatedAt).toLocaleString() }}
+                  </time>
+                </span>
+              </NButton>
+            </NListItem>
+          </NList>
         </section>
-        <p v-if="searchGroups.length === 0" class="sidebar-empty">
-          {{ t('sidebar.noMatches') }}
-        </p>
+        <NEmpty
+          v-if="searchGroups.length === 0"
+          size="small"
+          class="sidebar-empty"
+          :description="t('sidebar.noMatches')"
+        />
       </template>
 
       <template v-else>
@@ -178,177 +227,220 @@ watch(searchQuery, (value) => {
           <p class="sidebar-section-title">{{ t('sidebar.projects') }}</p>
           <NTooltip>
             <template #trigger>
-              <button
-                type="button"
+              <NButton
                 class="add-project-button"
                 :aria-label="t('sidebar.addWorkspace')"
+                quaternary
+                circle
+                size="small"
                 @click="emit('add')"
               >
                 <UiIcon name="plus" />
-              </button>
+              </NButton>
             </template>
             {{ t('sidebar.addWorkspace') }}
           </NTooltip>
         </div>
-        <section
-          v-for="project in sortedProjects"
-          :key="project.path"
-          class="project-group"
+        <NCollapse
+          :expanded-names="expandedProjectPaths"
+          :trigger-areas="['main', 'arrow']"
+          display-directive="show"
+          class="project-groups"
+          @update:expanded-names="updateExpandedProjects"
         >
-          <div class="project-heading-row">
-            <NTooltip>
-              <template #trigger>
-                <button
-                  type="button"
-                  class="project-heading"
-                  :aria-expanded="!collapsedProjects.has(project.path)"
-                  @click="toggleProject(project.path)"
-                >
-                  <UiIcon
-                    :name="
-                      collapsedProjects.has(project.path)
-                        ? 'chevron-right'
-                        : 'chevron-down'
-                    "
-                  />
-                  <UiIcon name="folder" />
-                  <strong>{{ project.name }}</strong>
-                </button>
-              </template>
-              {{ project.path }}
-            </NTooltip>
-            <NTooltip>
-              <template #trigger>
-                <button
-                  type="button"
-                  class="project-new-conversation-button"
-                  :aria-label="t('sidebar.newConversationInProject')"
-                  @click="createProjectConversation(project.path)"
-                >
-                  <UiIcon name="plus" />
-                </button>
-              </template>
-              {{ t('sidebar.newConversationInProject') }}
-            </NTooltip>
-          </div>
-          <div
-            v-show="!collapsedProjects.has(project.path)"
-            class="conversation-list"
+          <NCollapseItem
+            v-for="project in sortedProjects"
+            :key="project.path"
+            :name="project.path"
+            class="project-group"
           >
-            <div
-              v-for="conversation in project.conversations"
-              :key="conversation.id"
-              class="conversation-row"
-              :class="{
-                active: conversation.id === agent.activeConversationId,
-              }"
-            >
-              <button
-                class="conversation-item"
-                type="button"
-                @click="emit('open', conversation.id)"
-              >
-                {{ displayConversationTitle(conversation.title) }}
-                <span
-                  v-if="conversationBadges(conversation).length"
-                  class="conversation-badges"
-                >
-                  <em
-                    v-for="badge in conversationBadges(conversation)"
-                    :key="badge"
-                    >{{ badge }}</em
+            <template #header>
+              <NTooltip>
+                <template #trigger>
+                  <span
+                    class="project-heading"
+                    :aria-expanded="!collapsedProjects.has(project.path)"
                   >
-                </span>
-              </button>
-              <div class="conversation-actions">
-                <NTooltip>
-                  <template #trigger>
-                    <button
-                      type="button"
-                      :aria-label="t('sidebar.inspectTranscript')"
-                      @click="emit('inspect', conversation.id)"
+                    <UiIcon name="folder" />
+                    <strong>{{ project.name }}</strong>
+                  </span>
+                </template>
+                {{ project.path }}
+              </NTooltip>
+            </template>
+            <template #header-extra>
+              <NTooltip>
+                <template #trigger>
+                  <NButton
+                    quaternary
+                    circle
+                    size="small"
+                    class="project-new-conversation-button"
+                    :aria-label="t('sidebar.newConversationInProject')"
+                    @click.stop="createProjectConversation(project.path)"
+                  >
+                    <UiIcon name="plus" />
+                  </NButton>
+                </template>
+                {{ t('sidebar.newConversationInProject') }}
+              </NTooltip>
+            </template>
+            <NList
+              :show-divider="false"
+              hoverable
+              clickable
+              class="conversation-list"
+            >
+              <NListItem
+                v-for="conversation in project.conversations"
+                :key="conversation.id"
+                class="conversation-row"
+                style="padding: 0"
+                :class="{
+                  active: conversation.id === agent.activeConversationId,
+                }"
+              >
+                <NButton
+                  text
+                  block
+                  class="conversation-item"
+                  @click="emit('open', conversation.id)"
+                >
+                  <span class="conversation-item-content">
+                    <span>{{
+                      displayConversationTitle(conversation.title)
+                    }}</span>
+                    <span
+                      v-if="conversationBadges(conversation).length"
+                      class="conversation-badges"
                     >
-                      <UiIcon name="search" />
-                    </button>
-                  </template>
-                  {{ t('sidebar.inspectTranscript') }}
-                </NTooltip>
-                <NTooltip>
-                  <template #trigger>
-                    <button
-                      type="button"
-                      :aria-label="t('sidebar.export')"
-                      disabled
-                    >
-                      <UiIcon name="download" />
-                    </button>
-                  </template>
-                  {{ t('sidebar.durableImportExportPending') }}
-                </NTooltip>
-                <NTooltip>
-                  <template #trigger>
-                    <button
-                      type="button"
-                      :aria-label="t('sidebar.rename')"
-                      @click="emit('rename', conversation.id)"
-                    >
-                      <UiIcon name="edit" />
-                    </button>
-                  </template>
-                  {{ t('sidebar.renameTitle') }}
-                </NTooltip>
-                <NTooltip>
-                  <template #trigger>
-                    <button
-                      type="button"
-                      :aria-label="t('sidebar.delete')"
-                      :disabled="agent.conversationIsBusy(conversation.id)"
-                      @click="emit('delete', conversation.id)"
-                    >
-                      <UiIcon name="trash" />
-                    </button>
-                  </template>
-                  {{
-                    agent.conversationIsBusy(conversation.id)
-                      ? t('sidebar.busyActionBlocked')
-                      : t('sidebar.deleteTitle')
-                  }}
-                </NTooltip>
-              </div>
-            </div>
-            <p v-if="project.conversations.length === 0" class="sidebar-empty">
-              {{ t('sidebar.noConversations') }}
-            </p>
-          </div>
-        </section>
-        <button
+                      <NTag
+                        v-for="badge in conversationBadges(conversation)"
+                        :key="badge"
+                        size="small"
+                        round
+                        :bordered="false"
+                      >
+                        {{ badge }}
+                      </NTag>
+                    </span>
+                  </span>
+                </NButton>
+                <template #suffix>
+                  <div class="conversation-actions">
+                    <NTooltip>
+                      <template #trigger>
+                        <NButton
+                          quaternary
+                          circle
+                          size="small"
+                          :aria-label="t('sidebar.inspectTranscript')"
+                          @click="emit('inspect', conversation.id)"
+                        >
+                          <UiIcon name="search" />
+                        </NButton>
+                      </template>
+                      {{ t('sidebar.inspectTranscript') }}
+                    </NTooltip>
+                    <NTooltip>
+                      <template #trigger>
+                        <NButton
+                          quaternary
+                          circle
+                          size="small"
+                          :aria-label="t('sidebar.export')"
+                          disabled
+                        >
+                          <UiIcon name="download" />
+                        </NButton>
+                      </template>
+                      {{ t('sidebar.durableImportExportPending') }}
+                    </NTooltip>
+                    <NTooltip>
+                      <template #trigger>
+                        <NButton
+                          quaternary
+                          circle
+                          size="small"
+                          :aria-label="t('sidebar.rename')"
+                          @click="emit('rename', conversation.id)"
+                        >
+                          <UiIcon name="edit" />
+                        </NButton>
+                      </template>
+                      {{ t('sidebar.renameTitle') }}
+                    </NTooltip>
+                    <NTooltip>
+                      <template #trigger>
+                        <NButton
+                          quaternary
+                          circle
+                          size="small"
+                          :aria-label="t('sidebar.delete')"
+                          :disabled="agent.conversationIsBusy(conversation.id)"
+                          @click="emit('delete', conversation.id)"
+                        >
+                          <UiIcon name="trash" />
+                        </NButton>
+                      </template>
+                      {{
+                        agent.conversationIsBusy(conversation.id)
+                          ? t('sidebar.busyActionBlocked')
+                          : t('sidebar.deleteTitle')
+                      }}
+                    </NTooltip>
+                  </div>
+                </template>
+              </NListItem>
+              <NListItem
+                v-if="project.conversations.length === 0"
+                style="padding: 8px"
+              >
+                <NEmpty
+                  size="small"
+                  class="sidebar-empty"
+                  :description="t('sidebar.noConversations')"
+                />
+              </NListItem>
+            </NList>
+          </NCollapseItem>
+        </NCollapse>
+        <NButton
           v-if="agent.sessionHasMore"
-          type="button"
           class="load-older-sessions-button"
-          :disabled="agent.loading"
+          block
+          secondary
+          size="small"
+          :loading="agent.loading"
           @click="agent.loadOlderSessions()"
         >
           {{ t('sidebar.loadOlderSessions') }}
-        </button>
-        <div v-if="sortedProjects.length === 0" class="sidebar-empty-state">
-          <UiIcon name="folder" />
-          <p>{{ t('sidebar.noWorkspace') }}</p>
-          <button type="button" @click="agent.chooseWorkspace">
-            {{ t('sidebar.addWorkspace') }}
-          </button>
-        </div>
+        </NButton>
+        <NEmpty
+          v-if="sortedProjects.length === 0"
+          class="sidebar-empty-state"
+          :description="t('sidebar.noWorkspace')"
+        >
+          <template #icon><UiIcon name="folder" /></template>
+          <template #extra>
+            <NButton text type="primary" @click="agent.chooseWorkspace">
+              {{ t('sidebar.addWorkspace') }}
+            </NButton>
+          </template>
+        </NEmpty>
       </template>
-    </div>
+    </NScrollbar>
 
     <div class="project-sidebar-footer">
-      <button
+      <NButton
         class="sidebar-settings-button"
-        type="button"
+        block
+        quaternary
         @click="emit('settings')"
       >
         <UiIcon name="settings" />
         <span>{{ t('app.settings') }}</span>
-      </button>
+      </NButton>
     </div>
   </aside>
 </template>

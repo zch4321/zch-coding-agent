@@ -76,7 +76,7 @@ test.describe('Electron prompt and selected-context workflows', () => {
     const navigation = page.getByRole('navigation', {
       name: '设置分类',
     })
-    await navigation.getByRole('button', { name: '日志' }).click()
+    await navigation.getByRole('menuitem', { name: '日志' }).click()
     const logging = page.locator('.settings-section')
     await logging.getByRole('button', { name: '刷新 Trace' }).click()
     await logging.locator('.trace-debug').locator('.n-select').first().click()

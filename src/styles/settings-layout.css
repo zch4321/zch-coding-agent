@@ -19,22 +19,9 @@
 }
 
 .settings-back-button {
-  display: flex;
   min-height: 42px;
-  align-items: center;
-  gap: 8px;
   margin: 12px 12px 8px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  background: var(--background);
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.settings-back-button:hover {
-  border-color: #8c959f;
+  justify-content: flex-start;
 }
 
 .settings-layout {
@@ -44,11 +31,8 @@
 }
 
 .settings-nav {
-  display: flex;
   min-height: 0;
   flex: 1 1 auto;
-  flex-direction: column;
-  gap: 3px;
   padding: 12px;
   border-right: 1px solid var(--border);
   background: var(--surface);
@@ -58,26 +42,6 @@
 .settings-sidebar .settings-nav {
   border-right: 0;
   padding-top: 0;
-}
-
-.settings-nav button {
-  min-height: 36px;
-  padding: 0 11px;
-  border: 0;
-  border-radius: 8px;
-  color: var(--text-secondary);
-  background: transparent;
-  text-align: left;
-}
-
-.settings-nav button:hover,
-.settings-nav button.active {
-  color: var(--text);
-  background: #eaeef2;
-}
-
-.settings-nav button.active {
-  font-weight: 650;
 }
 
 .settings-content {
