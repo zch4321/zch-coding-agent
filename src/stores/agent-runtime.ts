@@ -329,6 +329,16 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
             ) {
               const overlay = this.overlays[commit.change.session.id]
               if (overlay) {
+                if (
+                  commit.change.messageChange.records.some(
+                    (record) =>
+                      record.kind === 'assistant_turn' &&
+                      record.visibility === 'visible',
+                  )
+                ) {
+                  overlay.text = ''
+                  overlay.reasoning = ''
+                }
                 const durableInterjectionIds = new Set(
                   commit.change.messageChange.records.flatMap((record) =>
                     record.kind === 'interjection' &&

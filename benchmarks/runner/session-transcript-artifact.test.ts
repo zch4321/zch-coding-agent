@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../electron/logging/events'
-import { benchmarkSessionTranscriptMarkdown } from './conversation-artifact'
+import { benchmarkSessionTranscriptMarkdown } from './session-transcript-artifact'
 
-describe('benchmark conversation artifact', () => {
+describe('benchmark session transcript artifact', () => {
   it('exports the restricted trace transcript', () => {
     const trace = [
       event('session.start', 1, {

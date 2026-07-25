@@ -107,6 +107,20 @@ describe('ConfigStore', () => {
     )
   })
 
+  it('deletes malformed JSON and rebuilds clean defaults', async () => {
+    const { directory, configStore } = await createStores()
+    const configPath = path.join(directory, 'config.json')
+    await writeFile(configPath, '{"schemaVersion":9', 'utf8')
+
+    await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
+      schemaVersion: 9,
+    })
+    expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
+      schemaVersion: 9,
+      limits: { maxStepsPerRun: 0 },
+    })
+  })
+
   it.each([
     ['fileChangeHistoryBytes', 100_000_000],
     ['maxAttachmentContextTokens', 64_000],

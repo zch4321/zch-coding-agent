@@ -284,14 +284,6 @@ describe.skipIf(!enabled)('Linux Docker worker', () => {
     expect(benchmarkContext?.text).toContain('src/**')
     expect(trace).not.toContain('Café déjà')
     expect(trace).not.toContain('edge-separators')
-    const conversation = await readFile(
-      path.join(trial.directory, 'conversation.restricted.md'),
-      'utf8',
-    )
-    expect(conversation).toContain('## orchestrator')
-    expect(conversation).toContain('## user')
-    expect(conversation).toContain('## assistant')
-    expect(conversation).not.toContain('Café déjà')
     const sessionTranscript = await readFile(
       path.join(trial.directory, 'session-transcript.restricted.md'),
       'utf8',

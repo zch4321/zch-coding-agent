@@ -11,7 +11,11 @@ import { describe, expect, it } from 'vitest'
 import type { SessionId } from '../../shared/ids'
 import { cleanupTraces } from './cleanup'
 import { JsonlTraceLogger, NullTraceLogger, traceIdForSession } from './logger'
-import { readTraceFile } from './reader'
+import {
+  CorruptTraceError,
+  readTraceFile,
+  UnsupportedTraceSchemaError,
+} from './reader'
 
 const sessionId = 'session-trace' as SessionId
 
@@ -95,7 +99,29 @@ describe('JsonlTraceLogger', () => {
       })}\n`,
     )
 
-    await expect(readTraceFile(filePath)).rejects.toThrow('requires trace v2')
+    await expect(readTraceFile(filePath)).rejects.toBeInstanceOf(
+      UnsupportedTraceSchemaError,
+    )
+  })
+
+  it('classifies malformed current-schema records as corrupt', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
+    const filePath = path.join(directory, `${sessionId}.jsonl`)
+    await writeFile(
+      filePath,
+      `${JSON.stringify({
+        schemaVersion: 2,
+        seq: 1,
+        eventId: 'event-corrupt',
+        ts: '2026-01-01T00:00:00.000Z',
+        type: 'session.start',
+        sessionId,
+      })}\n`,
+    )
+
+    await expect(readTraceFile(filePath)).rejects.toBeInstanceOf(
+      CorruptTraceError,
+    )
   })
 
   it('does not create files when logging is disabled', async () => {
@@ -138,6 +164,31 @@ describe('trace cleanup', () => {
     expect(result.deleted).toEqual([legacy])
     expect(result.retainedBytes).toBe(0)
     await expect(access(legacy)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('preserves corrupt current traces for diagnosis', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
+    const corrupt = path.join(directory, 'corrupt-current.jsonl')
+    await writeFile(
+      corrupt,
+      '{"schemaVersion":2,"seq":1,"type":"session.end"}\n',
+    )
+    await utimes(corrupt, new Date('2025-01-01'), new Date('2025-01-01'))
+
+    const diagnostics: string[] = []
+    const result = await cleanupTraces(directory, {
+      retentionDays: 1,
+      maxTotalBytes: 1,
+      now: new Date('2026-06-15'),
+      onDiagnostic: (message) => diagnostics.push(message),
+    })
+
+    expect(result.deleted).toEqual([])
+    expect(result.retainedBytes).toBeGreaterThan(0)
+    expect(diagnostics).toEqual([
+      'Failed to inspect trace corrupt-current.jsonl',
+    ])
+    await expect(access(corrupt)).resolves.toBeUndefined()
   })
 
   it('deletes the oldest closed traces and preserves active traces', async () => {

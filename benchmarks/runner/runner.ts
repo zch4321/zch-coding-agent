@@ -47,7 +47,7 @@ import type {
   RunBenchmarkTrialsInput,
 } from './contracts'
 import { createBenchmarkFeedback } from './feedback'
-import { benchmarkSessionTranscriptMarkdown } from './conversation-artifact'
+import { benchmarkSessionTranscriptMarkdown } from './session-transcript-artifact'
 import {
   aggregateBenchmarkMetrics,
   validateBenchmarkPriceSnapshot,

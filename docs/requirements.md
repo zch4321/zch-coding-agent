@@ -524,8 +524,7 @@ session.end     { ts }
 - Artifact必须按 run-group/suite/case/trial/attempt分层，足以离线复核manifest、task、runtime identity、patch、grader、trace、JSONL、stderr、usage/tool metrics、泄漏扫描和最终等级。缺失trace metrics的执行必须标为incomplete，不能生成虚假效率汇总。
 - `shareable-report.json`只能包含公开evaluation、聚合metrics、comparison identity和无路径summary。Raw trace/JSONL/stderr、config snapshot、case-result、grader input/private check/command/output必须列入restricted artifact清单；redaction文件必须声明删除字段。
 - External summary必须分别显示Monthly、SWE-rebench、50/50 source macro与总体结果；不同来源的trial不能相互替补或隐藏单项结果。
-- 有完整trace的trial必须复用共享conversation Markdown serializer生成 `conversation.restricted.md`，包含user/assistant/orchestrator正文和reasoning，且在leak scan与artifact hash之前写入。该文件只用于人工阅读，不得伪造tool消息，也不得进入shareable report。
-- 有完整trace的trial还必须用桌面端同一normalizer生成 `session-transcript.restricted.md`，包含工具、审批、内部编排、明文reasoning和折叠Provider上下文；它进入artifact hash和restricted清单，但从credential scan的输入中按精确artifact路径排除。
+- 有完整trace的trial必须用桌面端同一normalizer生成 `session-transcript.restricted.md`，包含用户与 Assistant 正文、工具、审批、内部编排、明文reasoning和折叠Provider上下文；它进入artifact hash和restricted清单，但从credential scan的输入中按精确artifact路径排除。
 
 ---
 

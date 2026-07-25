@@ -2,7 +2,11 @@ import { expect, test, type Page } from '@playwright/test'
 import type { ChildProcess } from 'node:child_process'
 import type { ElectronApplication } from '@playwright/test'
 import { configureApp } from './support/app-helpers'
-import { textDelta, type FakeProvider } from './support/fake-provider'
+import {
+  textDelta,
+  toolCallDelta,
+  type FakeProvider,
+} from './support/fake-provider'
 import {
   disposeFeatureHarness,
   launchFeatureHarness,
@@ -205,6 +209,107 @@ test.describe.serial('Durable Session and terminal workflows', () => {
     await expect(closeButtons).toHaveCount(2)
     await closeButtons.nth(0).click()
     await expect(terminalTabs).toHaveCount(1)
+  })
+
+  test('executes a Windows terminal_send command terminated by a bare LF', async () => {
+    test.skip(process.platform !== 'win32', 'Windows PTY behavior')
+    const target = await page.evaluate(async () => {
+      type IpcResult<Value> =
+        | { ok: true; value: Value }
+        | { ok: false; error: { message: string } }
+      type Snapshot = { session: { id: string; revision: number } }
+      const api = Reflect.get(window, 'agentApi') as {
+        searchSessions(
+          payload: unknown,
+        ): Promise<IpcResult<{ hits: Array<{ session: { id: string } }> }>>
+        getSession(payload: unknown): Promise<IpcResult<{ snapshot: Snapshot }>>
+        updateSession(payload: unknown): Promise<IpcResult<unknown>>
+        openTerminal(
+          payload: unknown,
+        ): Promise<
+          IpcResult<{ terminal: { terminalId: string; status: string } }>
+        >
+        closeTerminal(
+          payload: unknown,
+        ): Promise<IpcResult<{ accepted: boolean }>>
+        listTerminals(payload: unknown): Promise<
+          IpcResult<{
+            terminals: Array<{ terminalId: string; status: string }>
+          }>
+        >
+      }
+      const search = await api.searchSessions({
+        version: 1,
+        text: 'Edited durable request',
+        limit: 10,
+      })
+      if (!search.ok || !search.value.hits[0]) {
+        throw new Error('Expected the durable Session')
+      }
+      const sessionId = search.value.hits[0].session.id
+      const loaded = await api.getSession({ version: 1, sessionId })
+      if (!loaded.ok) throw new Error(loaded.error.message)
+      const existing = await api.listTerminals({ version: 1, sessionId })
+      if (!existing.ok) throw new Error(existing.error.message)
+      for (const terminal of existing.value.terminals) {
+        const closed = await api.closeTerminal({
+          version: 1,
+          sessionId,
+          terminalId: terminal.terminalId,
+        })
+        if (!closed.ok) throw new Error(closed.error.message)
+      }
+      const updated = await api.updateSession({
+        version: 1,
+        sessionId,
+        expectedRevision: loaded.value.snapshot.session.revision,
+        patch: { permissionMode: 'confirm' },
+      })
+      if (!updated.ok) throw new Error(updated.error.message)
+      const opened = await api.openTerminal({ version: 1, sessionId })
+      if (!opened.ok) throw new Error(opened.error.message)
+      return { sessionId, terminalId: opened.value.terminal.terminalId }
+    })
+
+    fakeProvider.queue([
+      toolCallDelta({
+        id: 'call:e2e-terminal-lf',
+        name: 'terminal_send',
+        args: {
+          terminalId: target.terminalId,
+          data: 'Write-Output E2E_TERMINAL_SEND_LF_OK\n',
+        },
+      }),
+    ])
+    fakeProvider.queue([textDelta('Terminal command sent.')])
+
+    const composer = page.locator('.message-input-area textarea')
+    await composer.fill('Send the prepared command to the terminal')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    const approval = page.locator('.approval-card')
+    await expect(approval).toBeVisible()
+    await approval.getByRole('button', { name: '批准', exact: true }).click()
+
+    await expect
+      .poll(() =>
+        page.evaluate(async ({ sessionId, terminalId }) => {
+          type IpcResult<Value> =
+            | { ok: true; value: Value }
+            | { ok: false; error: { message: string } }
+          const api = Reflect.get(window, 'agentApi') as {
+            getTerminalSnapshot(
+              payload: unknown,
+            ): Promise<IpcResult<{ data: string }>>
+          }
+          const result = await api.getTerminalSnapshot({
+            version: 1,
+            sessionId,
+            terminalId,
+          })
+          return result.ok ? result.value.data : ''
+        }, target),
+      )
+      .toContain('E2E_TERMINAL_SEND_LF_OK')
   })
 
   test('closes cleanly with exit code zero', async () => {

@@ -578,7 +578,10 @@ export class ConfigStore {
         return defaults
       }
 
-      if (error instanceof UnsupportedConfigSchemaError) {
+      if (
+        error instanceof UnsupportedConfigSchemaError ||
+        error instanceof SyntaxError
+      ) {
         await rm(this.#filePath, { force: true })
         const defaults = migrateConfig(undefined)
         await writeJsonAtomic(this.#filePath, defaults)

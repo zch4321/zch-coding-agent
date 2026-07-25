@@ -152,4 +152,69 @@ test.describe('Electron chat and tool workflows', () => {
       '"path":"e2e-output.txt"',
     )
   })
+
+  test('contains a 20,000-character tool result inside the tool card', async () => {
+    fakeProvider.queue([
+      toolCallDelta({
+        id: 'call:e2e-long-output',
+        name: 'run_command',
+        args: {
+          mode: 'process',
+          executable: 'node',
+          args: ['-e', "process.stdout.write('x'.repeat(20000))"],
+        },
+      }),
+    ])
+    fakeProvider.queue([textDelta('Long output checked.')])
+
+    await configureApp({
+      page,
+      providerBaseURL: fakeProvider.origin,
+      workspace,
+      defaultMode: 'confirm',
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+
+    const composer = page.locator('.message-input-area textarea')
+    await composer.fill('Produce one long tool result')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    const approval = page.locator('.approval-card')
+    await expect(approval).toBeVisible()
+    await approval.getByRole('button', { name: '批准', exact: true }).click()
+
+    const card = page.locator('.tool-call-card', {
+      hasText: 'run_command',
+    })
+    await expect(card).toContainText('已完成')
+    await card.locator('.tool-call-row').click()
+    await expect(card.locator('.tool-result-json')).toBeVisible()
+    const metrics = await card.evaluate((element) => {
+      const pane = document.querySelector('.conversation-pane')
+      const scroll = document.querySelector('.conversation-scroll')
+      const result = element.querySelector('.tool-result-json')
+      if (!pane || !scroll || !result) {
+        throw new Error('Expected tool result layout')
+      }
+      const paneRect = pane.getBoundingClientRect()
+      const cardRect = element.getBoundingClientRect()
+      return {
+        cardLeft: cardRect.left,
+        cardRight: cardRect.right,
+        paneLeft: paneRect.left,
+        paneRight: paneRect.right,
+        outerClientWidth: scroll.clientWidth,
+        outerScrollWidth: scroll.scrollWidth,
+        resultClientWidth: result.clientWidth,
+        resultScrollWidth: result.scrollWidth,
+      }
+    })
+
+    expect(metrics.cardLeft).toBeGreaterThanOrEqual(metrics.paneLeft)
+    expect(metrics.cardRight).toBeLessThanOrEqual(metrics.paneRight)
+    expect(metrics.outerScrollWidth).toBe(metrics.outerClientWidth)
+    expect(metrics.resultScrollWidth).toBeLessThanOrEqual(
+      metrics.resultClientWidth,
+    )
+  })
 })

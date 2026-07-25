@@ -15,7 +15,7 @@ describe('config v9 reset boundary', () => {
           ...structuredClone(DEFAULT_APP_CONFIG),
           schemaVersion,
         }),
-      ).toThrow('P3 requires AppConfig v9')
+      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v9`)
     }
   })
 

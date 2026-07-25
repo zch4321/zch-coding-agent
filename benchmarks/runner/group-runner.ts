@@ -543,7 +543,6 @@ function shareableReport(
       policy: 'benchmark-shareable-v1',
       restrictedArtifacts: [
         'config.snapshot.json',
-        'cases/*/*/trials/*/conversation.restricted.md',
         'cases/*/*/trials/*/session-transcript.restricted.md',
         'cases/*/*/case-result.restricted.json',
         'cases/*/*/trials/*/worker/**',

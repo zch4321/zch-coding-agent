@@ -31,17 +31,11 @@ workstream.
 | Interjection                   | `session-manager.interjections.test.ts` verifies tool-batch ordering and injected context                        |
 | Plan continuation              | `session-manager.orchestration.test.ts` verifies reviewed and active Plan continuation trajectories              |
 
-## Electron/Headless parity capture
+## Electron/Headless parity
 
-`runtime-parity.test.ts` stores a compact P0 snapshot of the shared host
-trajectory: tool catalog, ordered request roles/tool calls, prompt resources
-and layer kinds, terminal tool statuses, and changed files. It compares the
-full normalized Electron and Headless captures before checking the baseline.
-
-The only normalized fields are explicit runtime noise already documented in
-`runtime-parity.ts`: workspace path, timestamps, generated runtime IDs,
-execution metrics, request prefix hashes and Git diff index hashes. The test
-does not use a broad snapshot-ignore rule.
+Desktop and Headless use the same runtime factory. Their parity is protected by
+the shared runtime integration suites instead of a separate normalized snapshot
+implementation.
 
 ## P7 preparation
 

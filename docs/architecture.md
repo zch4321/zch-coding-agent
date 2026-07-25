@@ -139,7 +139,6 @@ electron/
     file-change-codec.ts
   runtime/
     create-agent-runtime.ts
-    runtime-parity.ts
   providers/
     provider-protocol.ts
     chat-completions-adapter.ts

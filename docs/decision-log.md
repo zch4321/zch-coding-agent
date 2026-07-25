@@ -36,7 +36,7 @@
 ## 2026-07-25 — M-6：未发布 AppConfig v9 的 reset-only 策略
 
 - 状态：接受当前行为，不为尚未发布的 v9 中间形态增加迁移。
-- 决定：AppConfig v9 在首次正式发布前仍是一个可重建的开发期配置 epoch。同一 `schemaVersion` 内新增必填字段或调整结构后，旧文件若不再通过完整 schema 校验，ConfigStore 删除该文件并写入当前默认配置；未知版本同样沿用当前 reset-only 路径。
+- 决定：AppConfig v9 在首次正式发布前仍是一个可重建的开发期配置 epoch。同一 `schemaVersion` 内新增必填字段或调整结构后，旧文件若不再通过完整 schema 校验，ConfigStore 删除该文件并写入当前默认配置；未知版本以及无法解析的损坏 JSON 同样沿用当前 reset-only 路径。
 - 背景：v9 尚未随任何正式版本发布，没有需要兼容的用户配置。当前分支继续增加 `limits.maxAttachmentContextTokens` 等必填字段，如果为每个分支内中间结构维护迁移，会形成没有用户价值的临时兼容代码。
 - 已知代价：分支开发机可能丢失 providers、MCP servers、permission rules 等本地配置；重置前不创建备份，旧 secret 引用也不会在该路径自动清理。开发者应把这些文件视为可丢弃状态。
 - 重新评估条件：冻结首个对外发布的 v9 配置结构，或任何构建开始面向真实用户分发。自该时点起，新增字段必须升版本并提供保字段迁移；未知更高版本、备份与 secret orphan 策略也必须重新决策，不能默认继承本条开发期取舍。

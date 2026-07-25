@@ -5,6 +5,28 @@ import { compileSchema, formatSchemaErrors } from '../schema-validator'
 
 const validateTraceEvent = compileSchema(TraceEventSchema)
 
+/** Reports a complete trace record written with an unsupported schema. */
+export class UnsupportedTraceSchemaError extends Error {
+  constructor(
+    readonly schemaVersion: unknown,
+    readonly line: number,
+  ) {
+    super(
+      `Unsupported trace schema in line ${line}; this build requires trace v${TRACE_SCHEMA_VERSION}`,
+    )
+    this.name = 'UnsupportedTraceSchemaError'
+  }
+}
+
+/** Reports malformed data that claims the current trace schema. */
+export class CorruptTraceError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CorruptTraceError'
+  }
+}
+
+/** Reads and validates all complete JSONL records in one trace file. */
 export async function readTraceFile(filePath: string): Promise<TraceEvent[]> {
   const content = await readFile(filePath, 'utf8')
   const hasCompleteLastLine = content.endsWith('\n')
@@ -26,7 +48,7 @@ export async function readTraceFile(filePath: string): Promise<TraceEvent[]> {
     try {
       candidate = JSON.parse(line)
     } catch {
-      throw new Error(`Invalid JSON in trace line ${index + 1}`)
+      throw new CorruptTraceError(`Invalid JSON in trace line ${index + 1}`)
     }
 
     if (!validateTraceEvent(candidate)) {
@@ -35,11 +57,9 @@ export async function readTraceFile(filePath: string): Promise<TraceEvent[]> {
           ? Reflect.get(candidate, 'schemaVersion')
           : undefined
       if (version !== TRACE_SCHEMA_VERSION) {
-        throw new Error(
-          `Unsupported trace schema in line ${index + 1}; this build requires trace v${TRACE_SCHEMA_VERSION}`,
-        )
+        throw new UnsupportedTraceSchemaError(version, index + 1)
       }
-      throw new Error(
+      throw new CorruptTraceError(
         `Invalid trace line ${index + 1}: ${formatSchemaErrors(
           validateTraceEvent.errors,
         )}`,

@@ -9,7 +9,7 @@ export class UnsupportedConfigSchemaError extends Error {
     validationErrors?: string,
   ) {
     super(
-      `Unsupported config schema. P3 requires AppConfig v9; the existing config will be reset to defaults.${
+      `Unsupported config schema ${String(schemaVersion)}; this build requires AppConfig v9 and will reset the existing config to defaults.${
         validationErrors ? ` ${validationErrors}` : ''
       }`,
     )

@@ -353,7 +353,6 @@ P2 已按该隔离边界完成：production Desktop/Headless composition 尚未�
 - `electron/permission/auto-approver.ts`
 - `electron/tools/context-budget.ts`
 - `electron/logging/service.ts`
-- `electron/runtime/runtime-parity.ts`
 - `e2e/support/fake-provider.ts`
 
 目标 grep gate：除 Chat wire DTO/Adapter 内部外，Core、Persistence、Renderer 中不得出现 `ProviderMessage`、`reasoning_content`、`tool_call_id` 或 `tool_calls` wire fields。

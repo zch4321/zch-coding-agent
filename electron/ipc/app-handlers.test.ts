@@ -1,0 +1,138 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const { showMessageBox, showSaveDialog, writeTextAtomic } = vi.hoisted(() => ({
+  showMessageBox: vi.fn(),
+  showSaveDialog: vi.fn(),
+  writeTextAtomic: vi.fn(),
+}))
+
+vi.mock('electron', () => ({
+  BrowserWindow: { fromWebContents: vi.fn() },
+  dialog: {
+    showMessageBox,
+    showSaveDialog,
+    showOpenDialog: vi.fn(),
+  },
+  shell: { openPath: vi.fn() },
+}))
+
+vi.mock('../config/atomic-file', () => ({ writeTextAtomic }))
+
+import { createAppIpcHandlers } from './app-handlers'
+
+const stubEvent = {} as never
+
+function createHandlers(input?: {
+  traceService?: Record<string, unknown>
+  backend?: Record<string, unknown>
+}) {
+  const sessions = { activeTraceIds: vi.fn(() => new Set<string>()) }
+  const projects = {
+    list: vi.fn(async () => []),
+    add: vi.fn(),
+    update: vi.fn(),
+    remove: vi.fn(),
+    get: vi.fn(),
+  }
+  const backend = {
+    runtime: { services: { sessions } },
+    bootstrap: vi.fn(),
+    projects,
+    sessions: {},
+    fileChanges: {},
+    runs: {},
+    liveSessions: {},
+    ...input?.backend,
+  }
+  const traceService = {
+    transcriptDocument: vi.fn(),
+    transcriptMarkdown: vi.fn(),
+    ...input?.traceService,
+  }
+
+  return {
+    handlers: createAppIpcHandlers({
+      configStore: {} as never,
+      backend: backend as never,
+      skillsManager: {} as never,
+      traceService: traceService as never,
+      projectMetadata: {} as never,
+      codeBackends: {} as never,
+      getMainWindow: () => undefined,
+    }),
+    backend,
+    projects,
+    traceService,
+  }
+}
+
+describe('app IPC handlers', () => {
+  beforeEach(() => {
+    showMessageBox.mockReset()
+    showSaveDialog.mockReset()
+    writeTextAtomic.mockReset()
+  })
+
+  it('warns on every transcript export and stops before save when declined', async () => {
+    showMessageBox.mockResolvedValue({ response: 0 })
+    const { handlers, traceService } = createHandlers()
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(
+        handlers['trace:export-transcript']!(
+          { version: 1, traceId: 'trace-test' },
+          stubEvent,
+        ),
+      ).resolves.toEqual({ canceled: true })
+    }
+
+    expect(showMessageBox).toHaveBeenCalledTimes(2)
+    expect(showSaveDialog).not.toHaveBeenCalled()
+    expect(traceService.transcriptDocument).not.toHaveBeenCalled()
+    expect(writeTextAtomic).not.toHaveBeenCalled()
+  })
+
+  it('does not write a transcript when the save dialog is cancelled', async () => {
+    showMessageBox.mockResolvedValue({ response: 1 })
+    showSaveDialog.mockResolvedValue({ canceled: true })
+    const transcriptDocument = vi.fn(async () => ({
+      metadata: { sessionId: 'session-test' },
+    }))
+    const transcriptMarkdown = vi.fn(async () => '# transcript')
+    const { handlers } = createHandlers({
+      traceService: { transcriptDocument, transcriptMarkdown },
+    })
+
+    await expect(
+      handlers['trace:export-transcript']!(
+        { version: 1, traceId: 'trace-test' },
+        stubEvent,
+      ),
+    ).resolves.toEqual({ canceled: true })
+
+    expect(transcriptDocument).toHaveBeenCalledWith('trace-test')
+    expect(transcriptMarkdown).not.toHaveBeenCalled()
+    expect(writeTextAtomic).not.toHaveBeenCalled()
+  })
+
+  it('passes domain list requests through to the durable project service', async () => {
+    const records = [{ id: 'project-test' }]
+    const list = vi.fn(async () => records)
+    const { handlers } = createHandlers({
+      backend: {
+        projects: {
+          list,
+          add: vi.fn(),
+          update: vi.fn(),
+          remove: vi.fn(),
+          get: vi.fn(),
+        },
+      },
+    })
+
+    await expect(
+      handlers['project:list']!({ version: 1 }, stubEvent),
+    ).resolves.toEqual({ version: 1, projects: records })
+    expect(list).toHaveBeenCalledOnce()
+  })
+})

@@ -1,6 +1,7 @@
 import { readdir, stat, unlink } from 'node:fs/promises'
 import path from 'node:path'
-import { readTraceFile } from './reader'
+import { TRACE_SCHEMA_VERSION } from './events'
+import { readTraceFile, UnsupportedTraceSchemaError } from './reader'
 
 export interface TraceCleanupOptions {
   retentionDays: number
@@ -17,6 +18,7 @@ interface TraceFileInfo {
   closed: boolean
 }
 
+/** Applies age and size retention without deleting active or corrupt traces. */
 export async function cleanupTraces(
   directory: string,
   options: TraceCleanupOptions,
@@ -73,7 +75,10 @@ export async function cleanupTraces(
         path: filePath,
         size: fileStat.size,
         mtimeMs: fileStat.mtimeMs,
-        closed: true,
+        closed:
+          error instanceof UnsupportedTraceSchemaError &&
+          typeof error.schemaVersion === 'number' &&
+          error.schemaVersion < TRACE_SCHEMA_VERSION,
       })
     }
   }
