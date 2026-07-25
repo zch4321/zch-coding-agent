@@ -107,6 +107,8 @@ async function confirmExport() {
     :show="traces.transcriptOpen"
     preset="card"
     class="transcript-modal"
+    style="width: min(1180px, 94vw); height: min(860px, 92vh)"
+    content-style="overflow: auto"
     :title="t('transcript.title')"
     :bordered="false"
     @update:show="!$event && close()"
@@ -247,15 +249,6 @@ async function confirmExport() {
 </template>
 
 <style scoped>
-.transcript-modal {
-  width: min(1180px, 94vw);
-  height: min(860px, 92vh);
-}
-
-.transcript-modal :deep(.n-card__content) {
-  overflow: auto;
-}
-
 .transcript-actions,
 .transcript-meta,
 .transcript-filters {

@@ -1,11 +1,3 @@
-.message-input-area .n-input {
-  --n-border: 0 !important;
-  --n-border-hover: 0 !important;
-  --n-border-focus: 0 !important;
-  --n-box-shadow-focus: none !important;
-  --n-color-disabled: transparent !important;
-}
-
 .message-input-toolbar {
   min-width: 0;
   min-height: 34px;
@@ -40,14 +32,6 @@
 .model-button .ui-icon {
   width: 13px;
   height: 13px;
-}
-
-.mode-select {
-  width: 112px;
-}
-
-.mode-select .n-base-selection {
-  border-radius: 8px !important;
 }
 
 .send-button {

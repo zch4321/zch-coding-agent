@@ -50,15 +50,6 @@
   min-width: 0;
 }
 
-.composer-suggestion-menu .n-menu-item {
-  margin: 0;
-}
-
-.composer-suggestion-menu .n-menu-item-content {
-  padding-right: 7px !important;
-  border-radius: 8px !important;
-}
-
 .composer-suggestion-label {
   display: grid;
   min-width: 0;

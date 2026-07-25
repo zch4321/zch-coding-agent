@@ -71,7 +71,7 @@ const messageActionPositiveText = computed(() => {
   <NModal
     :show="yoloOpen"
     preset="card"
-    class="risk-modal"
+    style="width: min(620px, calc(100vw - 40px))"
     :title="t('dialogs.yoloTitle')"
     @update:show="emit('update:yoloOpen', $event)"
   >
@@ -91,7 +91,7 @@ const messageActionPositiveText = computed(() => {
   <NModal
     :show="renameOpen"
     preset="card"
-    class="small-modal"
+    style="width: min(460px, calc(100vw - 40px))"
     content-class="small-modal-content"
     :title="t('dialogs.renameTitle')"
     @update:show="emit('update:renameOpen', $event)"

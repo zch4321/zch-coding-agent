@@ -30,6 +30,7 @@ import { useAgentStore } from './stores/agent'
 import { useTraceStore } from './stores/traces'
 import type { PermissionMode } from '../shared/config'
 import { setAppLocale, type AppLocale } from './i18n'
+import { naiveThemeOverrides } from './theme/naive-theme'
 import type { SettingsTab } from './components/settings/settings-tabs'
 
 type Sidebar = 'project' | 'artifact'
@@ -367,7 +368,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <NConfigProvider :locale="naiveLocale" inline-theme-disabled>
+  <NConfigProvider
+    :locale="naiveLocale"
+    :theme-overrides="naiveThemeOverrides"
+    inline-theme-disabled
+  >
     <main class="app-frame" data-testid="app-ready">
       <AppTopbar
         :project-name="projectName"

@@ -7,6 +7,8 @@ import {
   NSelect,
   NTooltip,
   type DropdownOption,
+  type GlobalThemeOverrides,
+  type InputInst,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { IPC_VERSION } from '../../../shared/channels'
@@ -37,7 +39,7 @@ const emit = defineEmits<{
 const agent = useAgentStore()
 const skills = useSkillsStore()
 const { t } = useI18n()
-const composerInputHost = ref<HTMLElement>()
+const composerInput = ref<InputInst>()
 const suggestionTrigger = ref<ComposerSuggestionTrigger>()
 const suggestionItems = ref<ComposerSuggestionItem[]>([])
 const suggestionLoading = ref(false)
@@ -46,6 +48,13 @@ const skillsLoadedOnce = ref(false)
 let suggestionRequestGeneration = 0
 let suggestionRefreshTimer: number | undefined
 let suppressNextSuggestionRefresh = false
+const composerInputThemeOverrides = {
+  border: '0',
+  borderHover: '0',
+  borderFocus: '0',
+  boxShadowFocus: 'none',
+  colorDisabled: 'transparent',
+} satisfies NonNullable<GlobalThemeOverrides['Input']>
 
 const modeOptions = computed(() => [
   { label: t('chat.readonly'), value: 'readonly' },
@@ -102,7 +111,7 @@ const suggestionEmptyText = computed(() => {
 })
 
 function textareaElement(): HTMLTextAreaElement | undefined {
-  return composerInputHost.value?.querySelector('textarea') ?? undefined
+  return composerInput.value?.textareaElRef ?? undefined
 }
 
 function inputCursor(): number {
@@ -467,19 +476,19 @@ watch(inputDisabled, (disabled) => {
         {{ attachment.path }}
       </NTooltip>
     </div>
-    <div ref="composerInputHost">
-      <NInput
-        v-model:value="agent.input"
-        type="textarea"
-        :autosize="{ minRows: 2, maxRows: 7 }"
-        :placeholder="sendHint"
-        :disabled="textareaDisabled"
-        @keydown="handleKeydown"
-        @click="scheduleSuggestionRefresh"
-        @keyup="handleKeyup"
-        @focus="scheduleSuggestionRefresh"
-      />
-    </div>
+    <NInput
+      ref="composerInput"
+      v-model:value="agent.input"
+      type="textarea"
+      :autosize="{ minRows: 2, maxRows: 7 }"
+      :placeholder="sendHint"
+      :disabled="textareaDisabled"
+      :theme-overrides="composerInputThemeOverrides"
+      @keydown="handleKeydown"
+      @click="scheduleSuggestionRefresh"
+      @keyup="handleKeyup"
+      @focus="scheduleSuggestionRefresh"
+    />
     <div class="message-input-toolbar">
       <div class="input-selectors">
         <NDropdown
@@ -494,7 +503,7 @@ watch(inputDisabled, (disabled) => {
         </NDropdown>
         <NSelect
           :value="agent.activeProviderId"
-          class="composer-provider-select"
+          style="width: min(180px, 24vw); min-width: 120px; flex: 0 1 180px"
           size="small"
           :options="agent.providerOptions"
           :disabled="
@@ -507,7 +516,7 @@ watch(inputDisabled, (disabled) => {
         />
         <NSelect
           :value="agent.providerForm.model"
-          class="composer-model-select"
+          style="width: min(220px, 28vw); min-width: 0; flex: 1 1 auto"
           size="small"
           :options="agent.modelOptions"
           filterable
@@ -531,7 +540,7 @@ watch(inputDisabled, (disabled) => {
           <template #trigger>
             <NSelect
               :value="agent.modeLockedByWriter ? 'readonly' : agent.mode"
-              class="mode-select"
+              style="width: 112px"
               size="small"
               :options="modeOptions"
               :disabled="

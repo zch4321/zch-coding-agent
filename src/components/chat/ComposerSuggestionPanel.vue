@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h } from 'vue'
-import { NMenu, type MenuOption } from 'naive-ui'
+import { NMenu, type GlobalThemeOverrides, type MenuOption } from 'naive-ui'
 import type { ComposerSuggestionItem } from './composer-suggestions'
 import UiIcon from '../UiIcon.vue'
 
@@ -38,13 +38,14 @@ const menuOptions = computed<MenuOption[]>(() =>
 )
 const menuThemeOverrides = {
   itemHeight: '34px',
+  borderRadius: '8px',
   itemColorActive: '#ddf4ff',
   itemColorActiveHover: '#ddf4ff',
   itemTextColorActive: '#0969da',
   itemTextColorActiveHover: '#0969da',
   itemIconColorActive: '#0969da',
   itemIconColorActiveHover: '#0969da',
-}
+} satisfies NonNullable<GlobalThemeOverrides['Menu']>
 
 function handleUpdateValue(key: string | number) {
   const item = props.items.find((candidate) => candidate.id === key)

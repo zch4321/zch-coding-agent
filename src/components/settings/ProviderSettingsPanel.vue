@@ -420,7 +420,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
     <NModal
       :show="Boolean(dirtyAction)"
       preset="card"
-      class="small-modal"
+      style="width: min(460px, calc(100vw - 40px))"
       content-class="small-modal-content"
       @update:show="!$event && (dirtyAction = undefined)"
     >

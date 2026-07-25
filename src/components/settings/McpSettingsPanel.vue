@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
-import { NAlert, NButton, NCard, NModal, NSwitch } from 'naive-ui'
+import { NAlert, NButton, NModal, NSwitch } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { McpServerStatus } from '../../../shared/mcp'
 import { useMcpStore } from '../../stores/mcp'
@@ -95,25 +95,22 @@ function restartServer(server: McpServerStatus) {
 
     <NModal
       :show="Boolean(trustTarget)"
+      preset="card"
+      style="width: min(620px, calc(100vw - 40px))"
+      :title="t('mcp.trustTitle')"
       :mask-closable="false"
       @update:show="(show) => !show && (trustTarget = undefined)"
     >
-      <NCard class="settings-modal-card" :title="t('mcp.trustTitle')">
-        <p>{{ t('mcp.trustHint') }}</p>
-        <pre class="mcp-launch-preview">{{ trustTarget?.launchPreview }}</pre>
-        <div class="settings-actions">
-          <NButton @click="trustTarget = undefined">
-            {{ t('common.cancel') }}
-          </NButton>
-          <NButton
-            type="primary"
-            :loading="mcp.loading"
-            @click="trustAndEnable"
-          >
-            {{ t('mcp.trustEnable') }}
-          </NButton>
-        </div>
-      </NCard>
+      <p>{{ t('mcp.trustHint') }}</p>
+      <pre class="mcp-launch-preview">{{ trustTarget?.launchPreview }}</pre>
+      <div class="settings-actions">
+        <NButton @click="trustTarget = undefined">
+          {{ t('common.cancel') }}
+        </NButton>
+        <NButton type="primary" :loading="mcp.loading" @click="trustAndEnable">
+          {{ t('mcp.trustEnable') }}
+        </NButton>
+      </div>
     </NModal>
   </section>
 </template>

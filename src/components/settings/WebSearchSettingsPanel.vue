@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NButton, NInputNumber, NSelect } from 'naive-ui'
+import { NButton, NInput, NInputNumber, NSelect } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentSettingsStore } from '../../stores/agent-settings'
 
@@ -35,7 +35,7 @@ const providerOptions = computed(() => [
     </label>
     <label class="settings-field">
       <span>{{ t('settings.webSearchApiKey') }}</span>
-      <input
+      <NInput
         v-model="settings.webSearchForm.apiKey"
         type="password"
         autocomplete="off"
