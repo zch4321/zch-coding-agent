@@ -27,6 +27,7 @@ const enUS = {
     disabled: 'Disabled',
     yes: 'Yes',
     no: 'No',
+    confirm: 'Confirm',
     loading: 'Loading…',
   },
   sidebar: {
@@ -204,6 +205,7 @@ const enUS = {
     reverted: 'Reverted',
     revertConfirm:
       'Revert this change to {path}? It will proceed only if the file still matches the agent change.',
+    revertDialogTitle: 'Revert file change?',
     revertSafetyHint: 'Revert is refused when newer file changes are detected.',
     filterByToolCall: 'Filter by tool call',
     historyTruncated: 'Earlier changes are not loaded yet.',
@@ -301,6 +303,7 @@ const enUS = {
       'Select the workspace used by file, command, and Agent operations.',
     currentWorkspace: 'Current workspace',
     removeProject: 'Remove project',
+    removeProjectTitle: 'Remove project?',
     removeProjectBusy:
       'A conversation in this project is running, starting, or awaiting approval',
     removeConfirm:
@@ -432,8 +435,16 @@ const enUS = {
       'This rewinds the current branch from this message. File, terminal, and external-tool side effects are not undone, and FileChange audit records remain.',
     retryMessageText:
       'Keep this user message and run it again, superseding the later branch? File, terminal, and external-tool side effects are not undone.',
+    retryMessageTitle: 'Retry this user message?',
     editMessageText:
       'Rewind this user turn and the later branch, then restore its text and attachments to the composer? Side effects are not undone.',
+    editMessageTitle: 'Edit this user message?',
+    forkMessageTitle: 'Create a branch from here?',
+    forkMessageText:
+      'Copy the valid current branch through this message into an independent session. File, terminal, and external-tool side effects are neither copied nor undone.',
+    confirmRetry: 'Retry',
+    confirmEdit: 'Edit',
+    confirmFork: 'Create branch',
     confirmRevert: 'Revert',
     exportFailed: 'Export failed',
     importFailed: 'Import failed',
@@ -468,6 +479,7 @@ const enUS = {
     openDirectory: 'Open log directory',
     refresh: 'Refresh traces',
     clear: 'Clear closed traces',
+    clearTitle: 'Clear closed traces?',
     clearConfirm:
       'Delete every closed trace? Active session traces will be preserved.',
     unavailable: 'Provider not provided',
@@ -506,6 +518,10 @@ const enUS = {
     inspect: 'Inspect full timeline',
     refresh: 'Refresh snapshot',
     export: 'Export Markdown',
+    exportWarningTitle: 'Export restricted session transcript?',
+    exportWarningText:
+      'The export is not scanned or redacted. It may contain source code, file paths, commands, tool arguments and results, internal orchestration, and plaintext reasoning. Save it only to a trusted location and share it carefully.',
+    confirmExport: 'Continue export',
     active: 'active trace',
     closed: 'closed trace',
     run: 'Run',

@@ -25,6 +25,7 @@ const WIRE_FREE_ROOTS = [
 const PROVIDER_IMPORT = /(?:^|\/)providers?(?:\/|$)|provider(?:\.ts)?$/u
 const CHAT_WIRE_IDENTIFIER =
   /\b(?:ProviderMessage|ProviderAssistantTurn|reasoning_content|tool_call_id|tool_calls)\b/u
+const NATIVE_RENDERER_DIALOG = /\b(?:window\.)?(?:alert|confirm|prompt)\s*\(/u
 
 async function sourceFiles(root: string): Promise<string[]> {
   const entries: Dirent<string>[] = await readdir(root, {
@@ -121,5 +122,18 @@ describe('architecture import boundaries', () => {
     )
 
     expect(violations.flat()).toEqual([])
+  })
+
+  it('keeps renderer confirmations inside the application UI', async () => {
+    const violations = await Promise.all(
+      (await sourceFiles(path.resolve('src')))
+        .filter(isProductionFile)
+        .map(async (filePath) => {
+          const source = await readFile(filePath, 'utf8')
+          return NATIVE_RENDERER_DIALOG.test(source) ? relative(filePath) : ''
+        }),
+    )
+
+    expect(violations.filter(Boolean)).toEqual([])
   })
 })

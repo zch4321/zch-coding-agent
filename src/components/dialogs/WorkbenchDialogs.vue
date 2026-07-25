@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { NAlert, NButton, NInput, NModal, NSpace } from 'naive-ui'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ConfirmDialog from './ConfirmDialog.vue'
 
-defineProps<{
+type MessageAction = 'edit' | 'fork' | 'retry'
+
+const props = defineProps<{
   yoloOpen: boolean
   renameOpen: boolean
   renameValue: string
   deleteOpen: boolean
   revertOpen: boolean
   revertMessagePreview: string
+  messageAction?: MessageAction
 }>()
 const emit = defineEmits<{
   'update:yoloOpen': [value: boolean]
@@ -20,8 +25,46 @@ const emit = defineEmits<{
   'confirm-rename': []
   'confirm-delete': []
   'confirm-revert': []
+  'confirm-message-action': []
+  'update:messageAction': [value: MessageAction | undefined]
 }>()
 const { t } = useI18n()
+const messageActionTitle = computed(() => {
+  switch (props.messageAction) {
+    case 'retry':
+      return t('dialogs.retryMessageTitle')
+    case 'edit':
+      return t('dialogs.editMessageTitle')
+    case 'fork':
+      return t('dialogs.forkMessageTitle')
+    default:
+      return ''
+  }
+})
+const messageActionText = computed(() => {
+  switch (props.messageAction) {
+    case 'retry':
+      return t('dialogs.retryMessageText')
+    case 'edit':
+      return t('dialogs.editMessageText')
+    case 'fork':
+      return t('dialogs.forkMessageText')
+    default:
+      return ''
+  }
+})
+const messageActionPositiveText = computed(() => {
+  switch (props.messageAction) {
+    case 'retry':
+      return t('dialogs.confirmRetry')
+    case 'edit':
+      return t('dialogs.confirmEdit')
+    case 'fork':
+      return t('dialogs.confirmFork')
+    default:
+      return ''
+  }
+})
 </script>
 
 <template>
@@ -68,48 +111,43 @@ const { t } = useI18n()
     </NSpace>
   </NModal>
 
-  <NModal
+  <ConfirmDialog
     :show="deleteOpen"
-    preset="card"
-    class="small-modal"
-    content-class="small-modal-content"
     :title="t('dialogs.deleteTitle')"
+    :positive-text="t('common.delete')"
+    :negative-text="t('common.cancel')"
+    type="warning"
+    positive-type="error"
     @update:show="emit('update:deleteOpen', $event)"
+    @positive="emit('confirm-delete')"
   >
-    <p>
-      {{ t('dialogs.deleteText') }}
-    </p>
-    <NSpace justify="end" class="modal-actions">
-      <NButton @click="emit('update:deleteOpen', false)">{{
-        t('common.cancel')
-      }}</NButton>
-      <NButton type="error" @click="emit('confirm-delete')">{{
-        t('common.delete')
-      }}</NButton>
-    </NSpace>
-  </NModal>
+    {{ t('dialogs.deleteText') }}
+  </ConfirmDialog>
 
-  <NModal
+  <ConfirmDialog
     :show="revertOpen"
-    preset="card"
-    class="small-modal"
-    content-class="small-modal-content"
     :title="t('dialogs.revertTitle')"
+    :positive-text="t('dialogs.confirmRevert')"
+    :negative-text="t('common.cancel')"
+    type="warning"
     @update:show="emit('update:revertOpen', $event)"
+    @positive="emit('confirm-revert')"
   >
-    <p>
-      {{ t('dialogs.revertText') }}
-    </p>
+    <p>{{ t('dialogs.revertText') }}</p>
     <p v-if="revertMessagePreview" class="revert-preview">
       {{ revertMessagePreview }}
     </p>
-    <NSpace justify="end" class="modal-actions">
-      <NButton @click="emit('update:revertOpen', false)">{{
-        t('common.cancel')
-      }}</NButton>
-      <NButton type="primary" @click="emit('confirm-revert')">
-        {{ t('dialogs.confirmRevert') }}
-      </NButton>
-    </NSpace>
-  </NModal>
+  </ConfirmDialog>
+
+  <ConfirmDialog
+    :show="Boolean(messageAction)"
+    :title="messageActionTitle"
+    :positive-text="messageActionPositiveText"
+    :negative-text="t('common.cancel')"
+    type="warning"
+    @update:show="!$event && emit('update:messageAction', undefined)"
+    @positive="emit('confirm-message-action')"
+  >
+    {{ messageActionText }}
+  </ConfirmDialog>
 </template>

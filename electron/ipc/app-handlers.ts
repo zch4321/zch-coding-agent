@@ -717,21 +717,6 @@ export function createAppIpcHandlers(
     },
     'trace:export-transcript': async (payload) => {
       const mainWindow = getMainWindow()
-      const warningOptions = {
-        type: 'warning' as const,
-        buttons: ['Cancel', 'Continue export'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-        title: 'Export restricted session transcript',
-        message: 'This export is not scanned or redacted',
-        detail:
-          'The file may contain source code, file paths, commands, tool arguments and results, internal orchestration, and plaintext reasoning. Save it only to a trusted location and take care when sharing it.',
-      }
-      const warning = mainWindow
-        ? await dialog.showMessageBox(mainWindow, warningOptions)
-        : await dialog.showMessageBox(warningOptions)
-      if (warning.response !== 1) return { canceled: true }
 
       try {
         const document = await traceService.transcriptDocument(payload.traceId)

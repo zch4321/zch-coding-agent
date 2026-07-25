@@ -145,10 +145,13 @@ describe('trace transcript store', () => {
     expect(store.transcriptRequests['event-request']?.messages).toEqual([
       { role: 'system', content: 'system' },
     ])
-    await store.exportTranscript()
+    await store.exportTranscript(false)
+    expect(exportSessionTranscript).not.toHaveBeenCalled()
+    await store.exportTranscript(true)
     expect(exportSessionTranscript).toHaveBeenCalledWith({
       version: 1,
       traceId: 'session-1',
+      confirmed: true,
     })
   })
 })

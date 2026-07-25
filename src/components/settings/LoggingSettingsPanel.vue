@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   NAlert,
   NButton,
@@ -13,10 +13,13 @@ import {
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import { useTraceStore } from '../../stores/traces'
+import ConfirmDialog from '../dialogs/ConfirmDialog.vue'
 
 const agent = useAgentStore()
 const traces = useTraceStore()
 const { t } = useI18n()
+const clearDialogOpen = ref(false)
+const clearPending = ref(false)
 onMounted(() => void traces.load())
 const promptRequest = computed(() => traces.selectedPromptRequest)
 const promptLayers = computed(
@@ -38,9 +41,14 @@ function providerMetric(value: number | null | undefined, suffix = '') {
     : Math.round(value).toLocaleString() + suffix
 }
 
-function clearClosedTraces() {
-  if (window.confirm(t('logging.clearConfirm'))) {
-    void traces.clearClosed()
+async function clearClosedTraces() {
+  if (clearPending.value) return
+  clearPending.value = true
+  try {
+    await traces.clearClosed()
+    clearDialogOpen.value = false
+  } finally {
+    clearPending.value = false
   }
 }
 
@@ -117,10 +125,22 @@ function interjectionTitle(interjection: {
       <NButton secondary :loading="traces.loading" @click="traces.load">
         {{ t('logging.refresh') }}
       </NButton>
-      <NButton secondary type="error" @click="clearClosedTraces">
+      <NButton secondary type="error" @click="clearDialogOpen = true">
         {{ t('logging.clear') }}
       </NButton>
     </div>
+    <ConfirmDialog
+      v-model:show="clearDialogOpen"
+      :title="t('logging.clearTitle')"
+      :positive-text="t('logging.clear')"
+      :negative-text="t('common.cancel')"
+      :loading="clearPending"
+      type="warning"
+      positive-type="error"
+      @positive="clearClosedTraces"
+    >
+      {{ t('logging.clearConfirm') }}
+    </ConfirmDialog>
 
     <div v-if="traces.providerStats" class="trace-stats">
       <article>

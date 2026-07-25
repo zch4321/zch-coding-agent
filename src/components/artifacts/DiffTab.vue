@@ -4,6 +4,7 @@ import { NButton, NSelect, type SelectOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { FileChangeSummary } from '../../../shared/file-change'
 import { useAgentStore } from '../../stores/agent'
+import ConfirmDialog from '../dialogs/ConfirmDialog.vue'
 import UiIcon from '../UiIcon.vue'
 
 type ChangeStatusFilter = 'all' | 'active' | 'reverted'
@@ -15,6 +16,7 @@ const selectedChangeId = ref<string>()
 const filterCallId = ref<string | undefined>(undefined)
 const filterPath = ref<string | undefined>(undefined)
 const filterStatus = ref<ChangeStatusFilter>('all')
+const revertCandidate = ref<FileChangeSummary>()
 
 const selectedChange = computed(
   () =>
@@ -65,11 +67,15 @@ const filteredChanges = computed(() =>
   }),
 )
 
-async function revertChange(change: FileChangeSummary) {
-  if (!window.confirm(t('artifact.revertConfirm', { path: change.path }))) {
-    return
-  }
-  await agent.revertChange(change.id)
+function requestRevertChange(change: FileChangeSummary) {
+  revertCandidate.value = change
+}
+
+async function confirmRevertChange() {
+  const changeId = revertCandidate.value?.id
+  if (!changeId) return
+  await agent.revertChange(changeId)
+  revertCandidate.value = undefined
 }
 
 watch(
@@ -225,7 +231,7 @@ watch(
             Boolean(agent.activeRunId) ||
             Boolean(agent.pendingApproval)
           "
-          @click="revertChange(selectedChange)"
+          @click="requestRevertChange(selectedChange)"
         >
           {{
             selectedChange.revertedAt
@@ -255,5 +261,25 @@ watch(
       <h2>{{ t('artifact.noDiff') }}</h2>
       <p>{{ t('artifact.noDiffHint') }}</p>
     </div>
+    <ConfirmDialog
+      :show="Boolean(revertCandidate)"
+      :title="t('artifact.revertDialogTitle')"
+      :positive-text="t('artifact.revert')"
+      :negative-text="t('common.cancel')"
+      :loading="
+        Boolean(
+          revertCandidate && agent.revertingChangeId === revertCandidate.id,
+        )
+      "
+      type="warning"
+      @update:show="!$event && (revertCandidate = undefined)"
+      @positive="confirmRevertChange"
+    >
+      {{
+        t('artifact.revertConfirm', {
+          path: revertCandidate?.path ?? '',
+        })
+      }}
+    </ConfirmDialog>
   </section>
 </template>

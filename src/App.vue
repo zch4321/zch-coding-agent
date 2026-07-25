@@ -35,6 +35,7 @@ import type { SettingsTab } from './components/settings/settings-tabs'
 type Sidebar = 'project' | 'artifact'
 type ArtifactTab = 'files' | 'diff' | 'plan' | 'project'
 type AppView = 'chat' | 'settings'
+type MessageAction = 'edit' | 'fork' | 'retry'
 
 const PROJECT_SIDEBAR_WIDTH = 240
 const ARTIFACT_SIDEBAR_WIDTH = 440
@@ -66,6 +67,8 @@ const renameValue = ref('')
 const deleteSessionId = ref<string>()
 const revertMessageId = ref<string>()
 const revertMessagePreview = ref('')
+const messageAction = ref<MessageAction>()
+const messageActionId = ref<string>()
 
 const projectName = computed(() => {
   if (!agent.workspacePath) {
@@ -164,25 +167,39 @@ async function confirmRevert() {
   await agent.revertConversationAfterMessage(messageId)
 }
 
-async function forkFromMessage(messageId: string) {
+function requestMessageAction(action: MessageAction, messageId: string) {
   if (agent.startPending || agent.activeRunId || agent.pendingApproval) return
-  await agent.forkConversation(undefined, messageId)
+  messageAction.value = action
+  messageActionId.value = messageId
+}
+
+function updateMessageAction(value?: MessageAction) {
+  messageAction.value = value
+  if (!value) messageActionId.value = undefined
 }
 
 function inspectConversation(sessionId: string) {
   void traces.openSessionTranscript(sessionId)
 }
 
-async function retryUserMessage(messageId: string) {
-  if (agent.startPending || agent.activeRunId || agent.pendingApproval) return
-  if (!window.confirm(t('dialogs.retryMessageText'))) return
-  await agent.retryUserMessage(messageId)
-}
+async function confirmMessageAction() {
+  const action = messageAction.value
+  const messageId = messageActionId.value
+  messageAction.value = undefined
+  messageActionId.value = undefined
+  if (!action || !messageId) return
 
-async function editUserMessage(messageId: string) {
-  if (agent.startPending || agent.activeRunId || agent.pendingApproval) return
-  if (!window.confirm(t('dialogs.editMessageText'))) return
-  await agent.editUserMessage(messageId)
+  switch (action) {
+    case 'retry':
+      await agent.retryUserMessage(messageId)
+      break
+    case 'edit':
+      await agent.editUserMessage(messageId)
+      break
+    case 'fork':
+      await agent.forkConversation(undefined, messageId)
+      break
+  }
 }
 
 function beginRename(sessionId: string) {
@@ -436,9 +453,9 @@ onUnmounted(() => {
                 <ConversationTimeline
                   :project-name="projectName"
                   @revert="requestRevert"
-                  @fork="forkFromMessage"
-                  @retry="retryUserMessage"
-                  @edit="editUserMessage"
+                  @fork="requestMessageAction('fork', $event)"
+                  @retry="requestMessageAction('retry', $event)"
+                  @edit="requestMessageAction('edit', $event)"
                 />
 
                 <MessageComposer
@@ -482,15 +499,18 @@ onUnmounted(() => {
         :delete-open="Boolean(deleteSessionId)"
         :revert-open="Boolean(revertMessageId)"
         :revert-message-preview="revertMessagePreview"
+        :message-action="messageAction"
         @update:yolo-open="yoloWarningOpen = $event"
         @update:rename-open="!$event && (renameSessionId = undefined)"
         @update:rename-value="renameValue = $event"
         @update:delete-open="!$event && (deleteSessionId = undefined)"
         @update:revert-open="!$event && (revertMessageId = undefined)"
+        @update:message-action="updateMessageAction"
         @confirm-yolo="confirmYoloMode"
         @confirm-rename="confirmRename"
         @confirm-delete="confirmDeleteConversation"
         @confirm-revert="confirmRevert"
+        @confirm-message-action="confirmMessageAction"
       />
       <SessionTranscriptViewer />
     </main>

@@ -27,6 +27,7 @@ const zhCN = {
     disabled: '已关闭',
     yes: '是',
     no: '否',
+    confirm: '确认',
     loading: '加载中…',
   },
   sidebar: {
@@ -200,6 +201,7 @@ const zhCN = {
     reverted: '已回退',
     revertConfirm:
       '确定回退对 {path} 的这次变更吗？仅当文件仍保持该次修改后的内容时才会执行。',
+    revertDialogTitle: '回退文件变更？',
     revertSafetyHint: '检测到文件有后续修改时，回退会被拒绝。',
     filterByToolCall: '按工具调用过滤',
     historyTruncated: '更早的变更尚未加载。',
@@ -296,6 +298,7 @@ const zhCN = {
     projectHint: '选择供文件、命令和助手操作使用的工作区。',
     currentWorkspace: '当前工作区',
     removeProject: '移除项目',
+    removeProjectTitle: '移除项目？',
     removeProjectBusy: '项目中仍有运行中、启动中或等待审批的对话',
     removeConfirm: '从应用中移除此项目及其本地对话历史？',
     removeHint: '移除项目会清理应用历史和运行资源，但不会删除磁盘文件。',
@@ -421,8 +424,16 @@ const zhCN = {
       '将从此消息开始回退当前分支。文件、终端和外部工具产生的副作用不会撤销，文件变更审计仍会保留。',
     retryMessageText:
       '将保留这条用户消息并重新执行，之后的当前分支会被取代。文件、终端和外部工具副作用不会撤销。继续吗？',
+    retryMessageTitle: '重试这条用户消息？',
     editMessageText:
       '将回退这条用户消息所在整轮及后续分支，并把原文和附件恢复到输入框。文件、终端和外部工具副作用不会撤销。继续吗？',
+    editMessageTitle: '编辑这条用户消息？',
+    forkMessageTitle: '从此处创建分支？',
+    forkMessageText:
+      '将复制当前分支到这条消息为止的有效记录，并创建一个独立会话。文件、终端和外部工具副作用不会被复制或撤销。',
+    confirmRetry: '重试',
+    confirmEdit: '编辑',
+    confirmFork: '创建分支',
     confirmRevert: '回退',
     exportFailed: '导出失败',
     importFailed: '导入失败',
@@ -457,6 +468,7 @@ const zhCN = {
     openDirectory: '打开日志目录',
     refresh: '刷新 Trace',
     clear: '清理已关闭 Trace',
+    clearTitle: '清理已关闭 Trace？',
     clearConfirm: '删除所有已关闭的 Trace？活动会话的 Trace 会保留。',
     unavailable: '模型服务未提供',
     requests: '请求数',
@@ -492,6 +504,10 @@ const zhCN = {
     inspect: '查看完整时间线',
     refresh: '刷新快照',
     export: '导出 Markdown',
+    exportWarningTitle: '导出受限的完整会话记录？',
+    exportWarningText:
+      '导出内容不会经过敏感信息扫描或脱敏，可能包含源代码、文件路径、命令、工具参数与结果、内部编排和明文推理。请只保存到可信位置，并谨慎分享。',
+    confirmExport: '继续导出',
     active: '活动 Trace',
     closed: '已关闭 Trace',
     run: '运行',

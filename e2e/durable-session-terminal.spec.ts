@@ -66,8 +66,8 @@ test.describe.serial('Durable Session and terminal workflows', () => {
     ).toHaveCount(0)
 
     fakeProvider.queue([textDelta('Retried durable answer')])
-    page.once('dialog', (dialog) => dialog.accept())
     await userMessage.getByRole('button', { name: '重试' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: '重试' }).click()
     await expect(page.locator('.chat-message.assistant')).toContainText(
       'Retried durable answer',
     )
@@ -121,8 +121,8 @@ test.describe.serial('Durable Session and terminal workflows', () => {
     })
 
     const requestsBeforeEdit = fakeProvider.requests.length
-    page.once('dialog', (dialog) => dialog.accept())
     await userMessage.getByRole('button', { name: '编辑' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: '编辑' }).click()
     await expect(composer).toHaveValue('Original durable request')
     expect(fakeProvider.requests).toHaveLength(requestsBeforeEdit)
     await expect(page.locator('.chat-message.user')).toHaveCount(0)
@@ -141,6 +141,10 @@ test.describe.serial('Durable Session and terminal workflows', () => {
       hasText: 'Edited durable request',
     })
     await editedUser.getByRole('button', { name: '分支' }).click()
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: '创建分支' })
+      .click()
     await expect(page.locator('.conversation-item')).toHaveCount(2)
   })
 

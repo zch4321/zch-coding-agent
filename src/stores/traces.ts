@@ -240,12 +240,13 @@ export const useTraceStore = defineStore('traces', {
       request.nextCursor = page.nextCursor
       request.loading = false
     },
-    async exportTranscript() {
+    async exportTranscript(confirmed: boolean) {
       const bridge = window.agentApi
-      if (!bridge || !this.transcriptTraceId) return
+      if (!bridge || !this.transcriptTraceId || !confirmed) return
       const result = await bridge.exportSessionTranscript({
         version: IPC_VERSION,
         traceId: this.transcriptTraceId,
+        confirmed: true,
       })
       if (!result.ok) this.transcriptError = result.error.message
       else if (!result.value.canceled && result.value.path) {

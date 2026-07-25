@@ -12,6 +12,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import type { SessionTranscriptCategory } from '../../../shared/session-transcript'
 import { useTraceStore, type TranscriptEntryView } from '../../stores/traces'
+import ConfirmDialog from '../dialogs/ConfirmDialog.vue'
 
 const traces = useTraceStore()
 const { t } = useI18n()
@@ -27,6 +28,8 @@ const categories: SessionTranscriptCategory[] = [
   'terminal',
 ]
 const selectedCategories = ref<SessionTranscriptCategory[]>([...categories])
+const exportDialogOpen = ref(false)
+const exportPending = ref(false)
 const collapsedKinds = new Set([
   'tool',
   'provider_request',
@@ -86,6 +89,17 @@ function loadRequest(entry: TranscriptEntryView) {
     void traces.loadTranscriptRequest(entry.requestEventId)
   }
 }
+
+async function confirmExport() {
+  if (exportPending.value) return
+  exportPending.value = true
+  try {
+    await traces.exportTranscript(true)
+    exportDialogOpen.value = false
+  } finally {
+    exportPending.value = false
+  }
+}
 </script>
 
 <template>
@@ -111,7 +125,7 @@ function loadRequest(entry: TranscriptEntryView) {
           type="primary"
           size="small"
           :disabled="!traces.transcriptTraceId"
-          @click="traces.exportTranscript"
+          @click="exportDialogOpen = true"
         >
           {{ t('transcript.export') }}
         </NButton>
@@ -219,6 +233,17 @@ function loadRequest(entry: TranscriptEntryView) {
       </NButton>
     </template>
   </NModal>
+  <ConfirmDialog
+    v-model:show="exportDialogOpen"
+    :title="t('transcript.exportWarningTitle')"
+    :positive-text="t('transcript.confirmExport')"
+    :negative-text="t('common.cancel')"
+    :loading="exportPending"
+    type="warning"
+    @positive="confirmExport"
+  >
+    {{ t('transcript.exportWarningText') }}
+  </ConfirmDialog>
 </template>
 
 <style scoped>

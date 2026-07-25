@@ -667,7 +667,11 @@ export const IPC_CONTRACTS = {
   },
   'trace:export-transcript': {
     payload: Type.Object(
-      { version: Type.Literal(IPC_VERSION), traceId: TraceIdSchema },
+      {
+        version: Type.Literal(IPC_VERSION),
+        traceId: TraceIdSchema,
+        confirmed: Type.Literal(true),
+      },
       { additionalProperties: false },
     ),
     result: ipcResultSchema(

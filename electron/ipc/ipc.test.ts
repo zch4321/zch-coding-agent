@@ -230,7 +230,11 @@ const validPayloads: {
     traceId: 'session-test',
     requestEventId: 'event-1' as import('../../shared/ids').EventId,
   },
-  'trace:export-transcript': { version: 1, traceId: 'session-test' },
+  'trace:export-transcript': {
+    version: 1,
+    traceId: 'session-test',
+    confirmed: true,
+  },
   'trace:stats': { version: 1 },
   'logs:open-directory': { version: 1 },
   'logs:clear-closed': { version: 1 },
@@ -369,6 +373,24 @@ describe('IPC security registrar', () => {
     expect(result).toMatchObject({
       ok: false,
       error: { code: 'NOT_AVAILABLE' },
+    })
+  })
+
+  it('requires explicit renderer confirmation for transcript export', async () => {
+    const { event, trusted } = createEvent({})
+    const result = await handleIpcInvocation(
+      'trace:export-transcript',
+      event,
+      { version: 1, traceId: 'session-test', confirmed: false },
+      {
+        getTrustedWebContents: () => trusted,
+        isAllowedUrl: () => true,
+      },
+    )
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'INVALID_PAYLOAD' },
     })
   })
 })

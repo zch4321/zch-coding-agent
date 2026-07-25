@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 
-const { showMessageBox, showSaveDialog, writeTextAtomic } = vi.hoisted(() => ({
-  showMessageBox: vi.fn(),
+const { showSaveDialog, writeTextAtomic } = vi.hoisted(() => ({
   showSaveDialog: vi.fn(),
   writeTextAtomic: vi.fn(),
 }))
@@ -10,7 +9,6 @@ const { showMessageBox, showSaveDialog, writeTextAtomic } = vi.hoisted(() => ({
 vi.mock('electron', () => ({
   BrowserWindow: { fromWebContents: vi.fn() },
   dialog: {
-    showMessageBox,
     showSaveDialog,
     showOpenDialog: vi.fn(),
   },
@@ -76,32 +74,11 @@ function createHandlers(input?: {
 
 describe('app IPC handlers', () => {
   beforeEach(() => {
-    showMessageBox.mockReset()
     showSaveDialog.mockReset()
     writeTextAtomic.mockReset()
   })
 
-  it('warns on every transcript export and stops before save when declined', async () => {
-    showMessageBox.mockResolvedValue({ response: 0 })
-    const { handlers, traceService } = createHandlers()
-
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      await expect(
-        handlers['trace:export-transcript']!(
-          { version: 1, traceId: 'trace-test' },
-          stubEvent,
-        ),
-      ).resolves.toEqual({ canceled: true })
-    }
-
-    expect(showMessageBox).toHaveBeenCalledTimes(2)
-    expect(showSaveDialog).not.toHaveBeenCalled()
-    expect(traceService.transcriptDocument).not.toHaveBeenCalled()
-    expect(writeTextAtomic).not.toHaveBeenCalled()
-  })
-
   it('does not write a transcript when the save dialog is cancelled', async () => {
-    showMessageBox.mockResolvedValue({ response: 1 })
     showSaveDialog.mockResolvedValue({ canceled: true })
     const transcriptDocument = vi.fn(async () => ({
       metadata: { sessionId: 'session-test' },
@@ -113,7 +90,7 @@ describe('app IPC handlers', () => {
 
     await expect(
       handlers['trace:export-transcript']!(
-        { version: 1, traceId: 'trace-test' },
+        { version: 1, traceId: 'trace-test', confirmed: true },
         stubEvent,
       ),
     ).resolves.toEqual({ canceled: true })
