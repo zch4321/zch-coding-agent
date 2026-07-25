@@ -102,7 +102,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 | `run_command` | 一次性执行进程或 shell 命令，等待结束，返回 stdout/stderr/exit code | 有     | **是**   |
 | `delay`       | 等待一个有界毫秒数，供 terminal 轮询输出时使用                      | 无     | **是**   |
 
-> `run_command` 用于短测试、构建、一次性脚本。长时间测试、watch、开发服务器、REPL 或需要反复观察输出的命令应使用 `terminal_open` / `terminal_send`，再配合 `delay` 和 `terminal_read` 轮询。
+> `run_command` 用于短测试、构建、一次性脚本。长时间测试、watch、开发服务器、REPL 或需要反复观察输出的命令应使用 `terminal_open` / `terminal_send`，再配合 `terminal_send.delayMs` 或独立 `delay` 和 `terminal_read` 轮询。
 >
 > 参数必须区分 `mode: "process"`（`executable + args[]`，默认优先）和 `mode: "shell"`（命令字符串，支持管道/重定向但风险更高）。不能把两者混成一个无法可靠审查的字符串。
 >
@@ -115,7 +115,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 | 工具                                   | 作用                              | 副作用 | `reason` |
 | -------------------------------------- | --------------------------------- | ------ | -------- |
 | `terminal_open(cwd, opts)`             | 打开新终端，返回 `terminalId`     | 有     | **是**   |
-| `terminal_send(id, text)`              | 向终端写入                        | 有     | **是**   |
+| `terminal_send(id, text, delayMs?)`    | 向终端写入，可在成功后有界等待    | 有     | **是**   |
 | `terminal_read(id, {cursor?, lines?})` | 读最近 N 行或指定 cursor 后的输出 | 无     | **是**   |
 | `terminal_list()`                      | 列出所有打开的终端句柄            | 无     | **是**   |
 | `terminal_close(id)`                   | 关闭终端                          | 有     | **是**   |
@@ -125,7 +125,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 - `terminal_read` 返回给 **LLM** 的内容是**去 ANSI 的纯文本**（便于模型理解）。
 - **UI** 上人类看到的终端流是**原始带色流**。两者订阅同一 PTY，渲染层不同。
-- 与 `run_command` 并存：一次性命令用前者；长跑服务/交互式 REPL/实时观察用 terminal，并使用 `delay` 等待后读取增量输出。
+- 与 `run_command` 并存：一次性命令用前者；长跑服务/交互式 REPL/实时观察用 terminal。`terminal_send.delayMs` 在输入成功后等待最多 60 秒，便于紧随其后的 `terminal_read` 读取增量输出；等待期间取消不会撤回已经写入 PTY 的输入。独立 `delay` 继续用于纯等待。
 - 终端归属于会话而不是单次 run：中断 run 不自动关闭终端；会话关闭或应用退出时必须清理。
 
 ### 2.3 LLM Provider 适配

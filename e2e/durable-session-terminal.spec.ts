@@ -211,7 +211,7 @@ test.describe.serial('Durable Session and terminal workflows', () => {
     await expect(terminalTabs).toHaveCount(1)
   })
 
-  test('executes a Windows terminal_send command terminated by a bare LF', async () => {
+  test('executes a delayed Windows terminal_send command terminated by a bare LF', async () => {
     test.skip(process.platform !== 'win32', 'Windows PTY behavior')
     const target = await page.evaluate(async () => {
       type IpcResult<Value> =
@@ -278,6 +278,7 @@ test.describe.serial('Durable Session and terminal workflows', () => {
         args: {
           terminalId: target.terminalId,
           data: 'Write-Output E2E_TERMINAL_SEND_LF_OK\n',
+          delayMs: 100,
         },
       }),
     ])

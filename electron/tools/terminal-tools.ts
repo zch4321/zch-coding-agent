@@ -1,7 +1,9 @@
 import { Type } from '@sinclair/typebox'
 import type { TerminalId } from '../../shared/ids'
 import type { TerminalPool } from '../terminal/pool'
-import type { ToolDefinition, ToolRegistrationPort } from './types'
+import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
+
+const MAX_TERMINAL_SEND_DELAY_MS = 60_000
 
 const TerminalIdField = Type.Unsafe<TerminalId>(
   Type.String({
@@ -58,6 +60,14 @@ const SendSchema = Type.Object(
       description:
         'Input bytes to send to the terminal. Include a trailing newline to press Enter; Windows normalizes bare LF to the terminal Enter key.',
     }),
+    delayMs: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: MAX_TERMINAL_SEND_DELAY_MS,
+        description:
+          'Optional milliseconds to wait after the input is accepted. Use before a sequential terminal_read when the command needs time to produce output.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
@@ -133,22 +143,32 @@ export function registerTerminalTools(
   registry.registerTool({
     id: 'terminal_send',
     description:
-      'Send input to a persistent terminal owned by this session. Include a newline to press Enter; on Windows a bare LF is normalized to CR. For long-running commands, follow with delay and terminal_read instead of run_command.',
+      'Send input to a persistent terminal owned by this session. Include a newline to press Enter; on Windows a bare LF is normalized to CR. Optional delayMs waits after accepted input before returning so a sequential terminal_read can observe command output.',
     inputSchema: SendSchema,
     effects: ['terminal.write'],
     defaultRisk: 'review',
     supportsAbort: true,
-    defaultTimeoutMs: 10_000,
+    defaultTimeoutMs: MAX_TERMINAL_SEND_DELAY_MS + 5_000,
     maxOutputBytes: 16_384,
-    async execute(args, context) {
+    async execute(args, context): Promise<ToolResult> {
+      const accepted = terminalPool.write(
+        context.sessionId,
+        args.terminalId,
+        normalizeTerminalInput(args.data),
+      )
+      if (!accepted || args.delayMs === undefined) {
+        return {
+          status: 'ok',
+          content: { accepted },
+        }
+      }
+      const startedAt = performance.now()
+      await waitForTerminalDelay(args.delayMs, context.signal)
       return {
         status: 'ok',
         content: {
-          accepted: terminalPool.write(
-            context.sessionId,
-            args.terminalId,
-            normalizeTerminalInput(args.data),
-          ),
+          accepted,
+          waitedMs: Math.round(performance.now() - startedAt),
         },
       }
     },
@@ -240,6 +260,31 @@ export function registerTerminalTools(
       }
     },
   } satisfies ToolDefinition<typeof ResizeSchema>)
+}
+
+/** Waits after a successful terminal write while honoring run cancellation. */
+function waitForTerminalDelay(
+  durationMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }
+    const timer = setTimeout(finish, durationMs)
+    const abort = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+      reject(signal.reason ?? new Error('terminal send delay aborted'))
+    }
+
+    if (signal.aborted) {
+      abort()
+      return
+    }
+    signal.addEventListener('abort', abort, { once: true })
+  })
 }
 
 /** Converts renderer newlines to the control sequence expected by the platform PTY. */
