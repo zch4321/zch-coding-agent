@@ -308,33 +308,32 @@ function updateExpandedProjects(
                   active: conversation.id === agent.activeConversationId,
                 }"
               >
-                <NButton
-                  text
-                  block
-                  class="conversation-item"
-                  @click="emit('open', conversation.id)"
-                >
-                  <span class="conversation-item-content">
-                    <span>{{
-                      displayConversationTitle(conversation.title)
-                    }}</span>
-                    <span
-                      v-if="conversationBadges(conversation).length"
-                      class="conversation-badges"
-                    >
-                      <NTag
-                        v-for="badge in conversationBadges(conversation)"
-                        :key="badge"
-                        size="small"
-                        round
-                        :bordered="false"
+                <div class="conversation-row-content">
+                  <NButton
+                    text
+                    class="conversation-item"
+                    @click="emit('open', conversation.id)"
+                  >
+                    <span class="conversation-item-content">
+                      <span>{{
+                        displayConversationTitle(conversation.title)
+                      }}</span>
+                      <span
+                        v-if="conversationBadges(conversation).length"
+                        class="conversation-badges"
                       >
-                        {{ badge }}
-                      </NTag>
+                        <NTag
+                          v-for="badge in conversationBadges(conversation)"
+                          :key="badge"
+                          size="small"
+                          round
+                          :bordered="false"
+                        >
+                          {{ badge }}
+                        </NTag>
+                      </span>
                     </span>
-                  </span>
-                </NButton>
-                <template #suffix>
+                  </NButton>
                   <div class="conversation-actions">
                     <NTooltip>
                       <template #trigger>
@@ -398,7 +397,7 @@ function updateExpandedProjects(
                       }}
                     </NTooltip>
                   </div>
-                </template>
+                </div>
               </NListItem>
               <NListItem
                 v-if="project.conversations.length === 0"

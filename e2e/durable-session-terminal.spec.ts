@@ -146,6 +146,37 @@ test.describe.serial('Durable Session and terminal workflows', () => {
       .getByRole('button', { name: '创建分支' })
       .click()
     await expect(page.locator('.conversation-item')).toHaveCount(2)
+
+    const sessionRow = page.locator('.conversation-row').first()
+    await sessionRow.hover()
+    const sessionActions = sessionRow.locator('.conversation-actions button')
+    await expect(sessionActions).toHaveCount(4)
+    const sessionRowLayout = await sessionRow.evaluate((row) => {
+      const rowBounds = row.getBoundingClientRect()
+      const titleBounds = (
+        row.querySelector('.conversation-item') as HTMLElement
+      ).getBoundingClientRect()
+      const actionBounds = [
+        ...row.querySelectorAll<HTMLElement>('.conversation-actions button'),
+      ].map((button) => button.getBoundingClientRect())
+      return {
+        rowLeft: rowBounds.left,
+        rowRight: rowBounds.right,
+        titleRight: titleBounds.right,
+        actionsLeft: actionBounds[0]?.left ?? rowBounds.right,
+        actionBounds: actionBounds.map((bounds) => ({
+          left: bounds.left,
+          right: bounds.right,
+        })),
+      }
+    })
+    expect(sessionRowLayout.titleRight).toBeLessThanOrEqual(
+      sessionRowLayout.actionsLeft,
+    )
+    for (const bounds of sessionRowLayout.actionBounds) {
+      expect(bounds.left).toBeGreaterThanOrEqual(sessionRowLayout.rowLeft)
+      expect(bounds.right).toBeLessThanOrEqual(sessionRowLayout.rowRight)
+    }
   })
 
   test('opens, drives, restores, and closes terminal tabs for a Session', async () => {
