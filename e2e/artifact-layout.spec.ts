@@ -76,16 +76,15 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     await expect(page.locator('.explorer-tree')).toContainText('cached.txt')
 
     await page.getByText('blog.pen', { exact: true }).click()
-    const activeFileTab = page.locator('.file-tab.active')
+    const activeFileTab = page.locator('.file-tabs .n-tabs-tab--active')
     await expect(activeFileTab).toContainText('blog.pen')
     await expect(page.locator('.file-viewer-header')).toContainText('blog.pen')
     const tabLayout = await activeFileTab.evaluate((tab) => {
       const label = tab.querySelector('.file-tab-label')
-      const close = tab.querySelector('.tab-close')
+      const close = tab.querySelector('.n-tabs-tab__close')
       return {
         childCount: tab.children.length,
         display: getComputedStyle(tab).display,
-        activeUnderline: getComputedStyle(tab).boxShadow,
         labelHeight: label?.getBoundingClientRect().height,
         closeHeight: close?.getBoundingClientRect().height,
       }
@@ -93,9 +92,9 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     expect(tabLayout).toMatchObject({
       childCount: 2,
       display: 'flex',
-      labelHeight: tabLayout.closeHeight,
     })
-    expect(tabLayout.activeUnderline).not.toBe('none')
+    expect(tabLayout.labelHeight).toBeGreaterThan(0)
+    expect(tabLayout.closeHeight).toBeGreaterThan(0)
   })
 
   test('keeps the file tree bound to the selected Durable Session project', async () => {

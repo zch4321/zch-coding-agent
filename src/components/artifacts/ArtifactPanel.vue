@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { NTooltip } from 'naive-ui'
+import { NBadge, NTabPane, NTabs, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
@@ -58,55 +58,84 @@ watch(
           {{ agent.workspacePath || t('app.noWorkspace') }}
         </NTooltip>
       </div>
-      <nav
-        class="artifact-tabs"
-        :aria-label="t('artifact.openFiles')"
-        role="tablist"
-      >
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="activeArtifact === 'files'"
-          :class="{ active: activeArtifact === 'files' }"
-          @click="activeArtifact = 'files'"
-        >
-          <UiIcon name="explorer" />{{ t('artifact.files') }}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="activeArtifact === 'plan'"
-          :class="{ active: activeArtifact === 'plan' }"
-          @click="activeArtifact = 'plan'"
-        >
-          <UiIcon name="check" />{{ t('artifact.plan') }}
-          <span v-if="agent.plan" class="tab-dot"></span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="activeArtifact === 'diff'"
-          :class="{ active: activeArtifact === 'diff' }"
-          @click="activeArtifact = 'diff'"
-        >
-          <UiIcon name="diff" />{{ t('artifact.diff') }}
-          <span v-if="agent.pendingApproval?.diff" class="tab-dot"></span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="activeArtifact === 'project'"
-          :class="{ active: activeArtifact === 'project' }"
-          @click="activeArtifact = 'project'"
-        >
-          <UiIcon name="settings" />{{ t('artifact.project') }}
-        </button>
-      </nav>
     </header>
 
-    <FilesTab v-show="activeArtifact === 'files'" />
-    <PlanTab v-show="activeArtifact === 'plan'" />
-    <DiffTab v-show="activeArtifact === 'diff'" />
-    <ProjectTab v-show="activeArtifact === 'project'" />
+    <NTabs
+      v-model:value="activeArtifact"
+      class="artifact-tabs"
+      size="small"
+      type="line"
+      role="tablist"
+      :aria-label="t('artifact.openFiles')"
+      :animated="false"
+      :pane-style="{ height: '100%', minHeight: '0' }"
+    >
+      <NTabPane
+        name="files"
+        display-directive="show"
+        style="height: 100%"
+        :tab-props="{
+          role: 'tab',
+          'aria-selected': activeArtifact === 'files',
+        }"
+      >
+        <template #tab>
+          <span class="artifact-tab-label">
+            <UiIcon name="explorer" />{{ t('artifact.files') }}
+          </span>
+        </template>
+        <FilesTab />
+      </NTabPane>
+      <NTabPane
+        name="plan"
+        display-directive="show"
+        style="height: 100%"
+        :tab-props="{
+          role: 'tab',
+          'aria-selected': activeArtifact === 'plan',
+        }"
+      >
+        <template #tab>
+          <span class="artifact-tab-label">
+            <UiIcon name="check" />{{ t('artifact.plan') }}
+            <NBadge v-if="agent.plan" dot type="warning" />
+          </span>
+        </template>
+        <PlanTab />
+      </NTabPane>
+      <NTabPane
+        name="diff"
+        display-directive="show"
+        style="height: 100%"
+        :tab-props="{
+          role: 'tab',
+          'aria-selected': activeArtifact === 'diff',
+        }"
+      >
+        <template #tab>
+          <span class="artifact-tab-label">
+            <UiIcon name="diff" />{{ t('artifact.diff') }}
+            <NBadge v-if="agent.pendingApproval?.diff" dot type="warning" />
+          </span>
+        </template>
+        <DiffTab />
+      </NTabPane>
+      <NTabPane
+        name="project"
+        display-directive="show"
+        style="height: 100%"
+        :tab-props="{
+          role: 'tab',
+          'aria-selected': activeArtifact === 'project',
+        }"
+      >
+        <template #tab>
+          <span class="artifact-tab-label">
+            <UiIcon name="settings" />{{ t('artifact.project') }}
+          </span>
+        </template>
+        <ProjectTab />
+      </NTabPane>
+    </NTabs>
   </aside>
 </template>

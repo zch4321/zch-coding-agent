@@ -9,7 +9,7 @@
 }
 
 .artifact-header {
-  padding: 14px 16px 0;
+  padding: 14px 16px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
@@ -40,107 +40,28 @@
 }
 
 .artifact-tabs {
-  gap: 4px;
-  margin-top: 10px;
+  min-width: 0;
+  min-height: 0;
 }
 
-.artifact-tabs button {
-  position: relative;
-  min-height: 34px;
+.artifact-tab-label,
+.file-tab-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
   gap: 6px;
-  padding: 0 10px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  color: var(--text-muted);
-  background: transparent;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.artifact-tabs button.active {
-  border-bottom-color: var(--accent);
-  color: var(--text);
-}
-
-.tab-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--warning);
 }
 
 .artifact-content {
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
 .file-tabs {
-  min-width: 0;
-  height: 38px;
-  gap: 0;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  scrollbar-width: thin;
-}
-
-.file-tabs > button,
-.file-tab-label {
-  min-width: 0;
-  max-width: 180px;
   height: 100%;
-  gap: 6px;
-  padding: 0 9px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  color: var(--text-secondary);
-  background: transparent;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.file-tabs > button {
-  flex: 0 0 auto;
-  border-right: 1px solid var(--border-subtle);
-}
-
-.file-tabs > button.active {
-  border-bottom-color: var(--accent);
-  color: var(--text);
-  background: var(--background);
-}
-
-.file-tab {
-  display: flex;
-  min-width: 92px;
-  max-width: 220px;
-  height: 100%;
-  flex: 0 0 auto;
-  align-items: stretch;
-  border-right: 1px solid var(--border-subtle);
-}
-
-.file-tab-label {
   min-width: 0;
-  flex: 1;
-  border: 0;
-}
-
-.file-tab.active {
-  background: var(--background);
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
-
-.file-tab .tab-close {
-  width: 26px;
-  height: 100%;
-  flex: 0 0 auto;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  border-bottom: 0;
-  background: transparent;
 }
 
 .provider-settings-button {
@@ -156,31 +77,16 @@
 }
 
 .file-tab-label > span {
+  max-width: 150px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.tab-close {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  border-radius: 4px;
-}
-
-.tab-close:hover {
-  background: #e5e7eb;
-}
-
-.tab-close .ui-icon {
-  width: 12px;
-  height: 12px;
+  white-space: nowrap;
 }
 
 .explorer-view,
 .file-viewer {
-  height: calc(100% - 38px);
+  height: 100%;
   min-height: 0;
 }
 
@@ -196,9 +102,13 @@
   overflow: hidden;
 }
 
-.explorer-tree {
+.explorer-tree-loader {
   min-height: 0;
   flex: 1;
+}
+
+.explorer-tree {
+  height: 100%;
   padding: 8px 7px 14px;
 }
 
@@ -217,13 +127,7 @@
 }
 
 .artifact-message {
-  margin: 16px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.artifact-message.error {
-  color: var(--danger);
+  margin: 10px;
 }
 
 .artifact-error {
@@ -237,32 +141,12 @@
 }
 
 .artifact-empty {
-  display: grid;
   height: 100%;
   min-height: 260px;
-  place-content: center;
-  justify-items: center;
-  gap: 7px;
   padding: 24px;
-  color: var(--text-muted);
-  text-align: center;
 }
 
-.artifact-empty > .ui-icon {
+.artifact-empty .ui-icon {
   width: 26px;
   height: 26px;
-}
-
-.artifact-empty h2,
-.artifact-empty p {
-  margin: 0;
-}
-
-.artifact-empty h2 {
-  color: var(--text);
-  font-size: 15px;
-}
-
-.artifact-empty p {
-  font-size: 12px;
 }

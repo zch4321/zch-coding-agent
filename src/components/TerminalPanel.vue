@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NTooltip } from 'naive-ui'
+import {
+  NAlert,
+  NButton,
+  NEmpty,
+  NTabPane,
+  NTabs,
+  NTag,
+  NTooltip,
+} from 'naive-ui'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { useI18n } from 'vue-i18n'
@@ -463,111 +471,141 @@ onUnmounted(() => {
       @pointerdown="beginPanelResize"
     ></div>
     <header class="terminal-toolbar">
-      <div
+      <NTabs
         class="terminal-tabs"
+        type="card"
+        size="small"
         role="tablist"
         :aria-label="t('terminal.terminals')"
+        :animated="false"
+        :value="activeTerminalId"
+        @update:value="selectTerminal"
+        @close="closeTerminal"
       >
-        <div
+        <NTabPane
           v-for="(terminal, index) in terminals"
           :key="terminal.terminalId"
-          class="terminal-tab"
-          :class="{ active: terminal.terminalId === activeTerminalId }"
+          :name="terminal.terminalId"
+          closable
+          :tab-props="{
+            role: 'tab',
+            'aria-selected': terminal.terminalId === activeTerminalId,
+          }"
         >
-          <button
-            type="button"
-            role="tab"
-            :aria-selected="terminal.terminalId === activeTerminalId"
-            @click="selectTerminal(terminal.terminalId)"
-          >
-            <UiIcon name="terminal" />
-            <span>{{ terminalLabel(terminal, index) }}</span>
-            <small v-if="terminal.status !== 'running'">{{
-              terminal.status
-            }}</small>
-          </button>
-          <NTooltip>
-            <template #trigger>
-              <button
-                type="button"
-                class="terminal-tab-close"
-                :aria-label="t('terminal.close')"
-                @click="closeTerminal(terminal.terminalId)"
+          <template #tab>
+            <span class="terminal-tab-label">
+              <UiIcon name="terminal" />
+              <span>{{ terminalLabel(terminal, index) }}</span>
+              <NTag
+                v-if="terminal.status !== 'running'"
+                round
+                size="small"
+                type="warning"
               >
-                <UiIcon name="close" />
-              </button>
-            </template>
-            {{ t('terminal.close') }}
-          </NTooltip>
-        </div>
-      </div>
+                {{ terminal.status }}
+              </NTag>
+            </span>
+          </template>
+        </NTabPane>
+      </NTabs>
 
       <div class="terminal-actions">
         <NTooltip>
           <template #trigger>
-            <button
-              type="button"
+            <NButton
+              quaternary
+              circle
+              size="small"
               :aria-label="t('terminal.new')"
               :disabled="!agent.sessionId"
               @click="createTerminal"
             >
-              <UiIcon name="plus" />
-            </button>
+              <template #icon><UiIcon name="plus" /></template>
+            </NButton>
           </template>
           {{ t('terminal.new') }}
         </NTooltip>
         <NTooltip>
           <template #trigger>
-            <button
-              type="button"
+            <NButton
+              quaternary
+              circle
+              size="small"
               :aria-label="
                 maximized ? t('terminal.restore') : t('terminal.maximize')
               "
               @click="toggleMaximized"
             >
-              <UiIcon :name="maximized ? 'restore' : 'maximize-panel'" />
-            </button>
+              <template #icon>
+                <UiIcon :name="maximized ? 'restore' : 'maximize-panel'" />
+              </template>
+            </NButton>
           </template>
           {{ maximized ? t('terminal.restore') : t('terminal.maximize') }}
         </NTooltip>
         <NTooltip>
           <template #trigger>
-            <button
-              type="button"
+            <NButton
+              quaternary
+              circle
+              size="small"
               :aria-label="t('terminal.hide')"
               @click="emit('close')"
             >
-              <UiIcon name="chevron-down" />
-            </button>
+              <template #icon><UiIcon name="chevron-down" /></template>
+            </NButton>
           </template>
           {{ t('terminal.hide') }}
         </NTooltip>
       </div>
     </header>
 
-    <p v-if="error" class="terminal-error">{{ error }}</p>
-    <p v-if="recoveryNotice" class="terminal-notice">
-      {{ recoveryNotice }}
-    </p>
-    <div v-if="!agent.sessionId" class="terminal-empty">
-      <span>{{ t('terminal.sendFirst') }}</span>
-    </div>
-    <div v-else-if="terminals.length === 0" class="terminal-empty">
-      <span>{{ t('terminal.empty') }}</span>
-      <button type="button" @click="createTerminal">
-        {{ t('terminal.new') }}
-      </button>
-    </div>
-    <div v-else class="terminal-views">
-      <div
-        v-for="terminal in terminals"
-        v-show="terminal.terminalId === activeTerminalId"
-        :key="terminal.terminalId"
-        :ref="
-          (element) => setHost(terminal.terminalId, element as Element | null)
-        "
-        class="terminal-surface"
-      ></div>
+    <div class="terminal-body">
+      <NAlert
+        v-if="error"
+        class="terminal-error"
+        type="error"
+        :show-icon="false"
+      >
+        {{ error }}
+      </NAlert>
+      <NAlert
+        v-if="recoveryNotice"
+        class="terminal-notice"
+        type="warning"
+        :show-icon="false"
+      >
+        {{ recoveryNotice }}
+      </NAlert>
+      <NEmpty
+        v-if="!agent.sessionId"
+        class="terminal-empty"
+        size="small"
+        :description="t('terminal.sendFirst')"
+      />
+      <NEmpty
+        v-else-if="terminals.length === 0"
+        class="terminal-empty"
+        size="small"
+        :description="t('terminal.empty')"
+      >
+        <template #extra>
+          <NButton size="small" @click="createTerminal">
+            {{ t('terminal.new') }}
+          </NButton>
+        </template>
+      </NEmpty>
+      <div v-else class="terminal-views">
+        <div
+          v-for="terminal in terminals"
+          v-show="terminal.terminalId === activeTerminalId"
+          :key="terminal.terminalId"
+          :ref="
+            (element) => setHost(terminal.terminalId, element as Element | null)
+          "
+          class="terminal-surface"
+        ></div>
+      </div>
     </div>
   </section>
 </template>

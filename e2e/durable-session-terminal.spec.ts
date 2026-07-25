@@ -208,7 +208,7 @@ test.describe.serial('Durable Session and terminal workflows', () => {
     await expect(terminalTabs).toHaveCount(2)
 
     const closeButtons = terminalPanel.getByRole('button', {
-      name: '关闭终端',
+      name: 'close',
     })
     await expect(closeButtons).toHaveCount(2)
     await closeButtons.nth(0).click()

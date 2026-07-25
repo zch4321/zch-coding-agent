@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
-import { NTooltip, NTree, type TreeOption } from 'naive-ui'
+import {
+  NAlert,
+  NEmpty,
+  NSpin,
+  NTabPane,
+  NTabs,
+  NTag,
+  NTooltip,
+  NTree,
+  type TreeOption,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { IPC_VERSION } from '../../../shared/channels'
 import { useAgentStore } from '../../stores/agent'
@@ -199,102 +209,131 @@ watch(
 
 <template>
   <section class="artifact-content">
-    <div class="file-tabs" role="tablist" :aria-label="t('artifact.openFiles')">
-      <button
-        type="button"
-        role="tab"
-        :aria-selected="activeFilePath === 'explorer'"
-        :class="{ active: activeFilePath === 'explorer' }"
-        @click="activeFilePath = 'explorer'"
+    <NTabs
+      v-model:value="activeFilePath"
+      class="file-tabs"
+      type="card"
+      size="small"
+      role="tablist"
+      :aria-label="t('artifact.openFiles')"
+      :animated="false"
+      :pane-style="{ height: '100%', minHeight: '0' }"
+      @close="closeFile"
+    >
+      <NTabPane
+        name="explorer"
+        display-directive="show"
+        style="height: 100%"
+        :tab-props="{
+          role: 'tab',
+          'aria-selected': activeFilePath === 'explorer',
+        }"
       >
-        <UiIcon name="explorer" />{{ t('artifact.explorer') }}
-      </button>
-      <div
+        <template #tab>
+          <span class="file-tab-label">
+            <UiIcon name="explorer" />{{ t('artifact.explorer') }}
+          </span>
+        </template>
+
+        <div class="explorer-view">
+          <NEmpty
+            v-if="!agent.workspacePath"
+            class="artifact-empty"
+            :description="t('artifact.chooseHint')"
+          >
+            <template #icon>
+              <UiIcon name="folder" />
+            </template>
+          </NEmpty>
+          <div v-else class="explorer-tree-state">
+            <NAlert
+              v-if="explorerError"
+              class="artifact-message"
+              type="error"
+              :show-icon="false"
+            >
+              {{ explorerError }}
+            </NAlert>
+            <NSpin
+              class="explorer-tree-loader"
+              :show="explorerLoading"
+              size="small"
+            >
+              <NTree
+                v-if="explorerTree.length"
+                class="explorer-tree"
+                :data="explorerTree"
+                :on-load="loadTreeNode"
+                :render-prefix="renderTreePrefix"
+                :override-default-node-click-behavior="treeClickBehavior"
+                block-line
+                show-line
+                virtual-scroll
+                @update:selected-keys="handleTreeSelection"
+              />
+              <NEmpty
+                v-else-if="!explorerLoading && !explorerError"
+                class="artifact-empty"
+                size="small"
+                :description="t('artifact.emptyDirectory')"
+              />
+            </NSpin>
+            <NAlert
+              v-if="explorerTruncated"
+              class="artifact-message"
+              type="warning"
+              :show-icon="false"
+            >
+              {{ t('artifact.truncatedList') }}
+            </NAlert>
+          </div>
+        </div>
+      </NTabPane>
+
+      <NTabPane
         v-for="file in openedFiles"
         :key="file.path"
-        class="file-tab"
-        :class="{ active: activeFilePath === file.path }"
+        :name="file.path"
+        closable
+        display-directive="show"
+        style="height: 100%"
+        :tab-props="{
+          role: 'tab',
+          'aria-selected': activeFilePath === file.path,
+        }"
       >
-        <NTooltip>
-          <template #trigger>
-            <button
-              class="file-tab-label"
-              type="button"
-              role="tab"
-              :aria-selected="activeFilePath === file.path"
-              @click="activeFilePath = file.path"
-            >
-              <UiIcon name="file" />
-              <span>{{ file.path.split('/').at(-1) }}</span>
-            </button>
-          </template>
-          {{ file.path }}
-        </NTooltip>
-        <button
-          class="tab-close"
-          type="button"
-          :aria-label="t('artifact.closeFile')"
-          @click="closeFile(file.path)"
-        >
-          <UiIcon name="close" />
-        </button>
-      </div>
-    </div>
+        <template #tab>
+          <NTooltip>
+            <template #trigger>
+              <span class="file-tab-label">
+                <UiIcon name="file" />
+                <span>{{ file.path.split('/').at(-1) }}</span>
+              </span>
+            </template>
+            {{ file.path }}
+          </NTooltip>
+        </template>
 
-    <div v-if="activeFilePath === 'explorer'" class="explorer-view">
-      <div v-if="!agent.workspacePath" class="artifact-empty">
-        <UiIcon name="folder" />
-        <p>{{ t('artifact.chooseHint') }}</p>
-      </div>
-      <div v-else class="explorer-tree-state">
-        <p v-if="explorerLoading" class="artifact-message">
-          {{ t('artifact.loading') }}
-        </p>
-        <p v-if="explorerError" class="artifact-message error">
-          {{ explorerError }}
-        </p>
-        <NTree
-          v-if="explorerTree.length"
-          class="explorer-tree"
-          :data="explorerTree"
-          :on-load="loadTreeNode"
-          :render-prefix="renderTreePrefix"
-          :override-default-node-click-behavior="treeClickBehavior"
-          block-line
-          show-line
-          virtual-scroll
-          @update:selected-keys="handleTreeSelection"
-        />
-        <p
-          v-else-if="!explorerLoading && !explorerError"
-          class="artifact-message"
-        >
-          {{ t('artifact.emptyDirectory') }}
-        </p>
-        <p v-if="explorerTruncated" class="artifact-message">
-          {{ t('artifact.truncatedList') }}
-        </p>
-      </div>
-    </div>
-
-    <div v-else-if="activeFile" class="file-viewer">
-      <div class="file-viewer-header">
-        <div>
-          <strong>{{ activeFile.path }}</strong>
-          <span>
-            {{ t('artifact.readonly') }} ·
-            {{
-              t('artifact.bytes', {
-                count: activeFile.totalBytes.toLocaleString(),
-              })
-            }}
-          </span>
+        <div class="file-viewer">
+          <div class="file-viewer-header">
+            <div>
+              <strong>{{ file.path }}</strong>
+              <span>
+                {{ t('artifact.readonly') }} ·
+                {{
+                  t('artifact.bytes', {
+                    count: file.totalBytes.toLocaleString(),
+                  })
+                }}
+              </span>
+            </div>
+            <NTag v-if="file.truncated" round size="small" type="warning">
+              {{ t('artifact.truncated') }}
+            </NTag>
+          </div>
+          <FileCodePreview :path="file.path" :content="file.content" />
         </div>
-        <span v-if="activeFile.truncated" class="truncated-badge">
-          {{ t('artifact.truncated') }}
-        </span>
-      </div>
-      <FileCodePreview :path="activeFile.path" :content="activeFile.content" />
-    </div>
+      </NTabPane>
+    </NTabs>
   </section>
 </template>
