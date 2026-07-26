@@ -18,6 +18,7 @@ export const DEFAULT_PROVIDER_FORM = {
 
 export type ProviderForm = typeof DEFAULT_PROVIDER_FORM
 
+/** Returns or updates provider form signature state. */
 export function providerFormSignature(form: ProviderForm): string {
   return JSON.stringify({
     baseURL: form.baseURL,

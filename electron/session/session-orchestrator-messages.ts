@@ -19,6 +19,7 @@ export interface ResolvedOrchestrationPrompt {
   resource?: PromptResourceSummary
 }
 
+/** Encapsulates session orchestrator messages behavior. */
 export class SessionOrchestratorMessages {
   readonly #configStore: ConfigStore
   readonly #promptRegistry: PromptRegistry | undefined
@@ -34,6 +35,7 @@ export class SessionOrchestratorMessages {
     this.#emit = options.emit
   }
 
+  /** Returns or updates prompt state. */
   prompt(kind: OrchestrationPromptKind): ResolvedOrchestrationPrompt {
     const config = this.#configStore.getPublicConfig()
     const resolved = this.#promptRegistry?.orchestrationPrompt(
@@ -50,6 +52,7 @@ export class SessionOrchestratorMessages {
     }
   }
 
+  /** Emits an event to registered listeners. */
   async emit(
     session: SessionState,
     run: ActiveRun,

@@ -42,6 +42,7 @@ function toJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
 }
 
+/** Validates chat completions request dto and throws when it is invalid. */
 export function assertChatCompletionsRequestDto(candidate: JsonObject): void {
   if (!Array.isArray(candidate.messages)) {
     throw new TypeError('beforeLLMCall request.messages must be an array')
@@ -319,6 +320,7 @@ function normalizeFinishReason(
   return providerReason
 }
 
+/** Adapts chat completions to its host interface. */
 export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompletionsRequestDto> {
   readonly id: string
 
@@ -326,6 +328,7 @@ export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompl
     this.id = id
   }
 
+  /** Returns or updates compile state. */
   compile(input: AdapterCompileInput): ChatCompletionsRequestDto {
     if (input.route.adapterId !== this.id) {
       throw new TypeError(
@@ -365,6 +368,7 @@ export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompl
     }
   }
 
+  /** Returns or updates complete state. */
   complete(
     event: Extract<ProviderEvent, { type: 'completed' }>,
     streamed: { text: string; reasoning: string } = {
@@ -425,6 +429,7 @@ export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompl
   }
 }
 
+/** Returns or updates chat adapter state. */
 export function chatAdapter(adapterId: string): ChatCompletionsAdapter {
   if (
     adapterId !== 'deepseek.chat-completions' &&

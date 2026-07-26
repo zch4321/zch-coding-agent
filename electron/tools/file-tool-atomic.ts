@@ -33,6 +33,7 @@ async function ensureParentDirectory(
   return parentRealPath
 }
 
+/** Returns or updates atomic replace state. */
 export async function atomicReplace(
   workspace: string,
   precondition: FilePrecondition,
@@ -72,6 +73,7 @@ export async function atomicReplace(
   }
 }
 
+/** Returns or updates atomic delete state. */
 export async function atomicDelete(
   workspace: string,
   precondition: FilePrecondition,

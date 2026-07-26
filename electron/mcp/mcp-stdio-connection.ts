@@ -34,6 +34,7 @@ export interface McpStdioConnectionOptions {
   onError?: (error: unknown) => void
 }
 
+/** Encapsulates mcp stdio connection behavior. */
 export class McpStdioConnection {
   readonly #launch: McpStdioLaunch
   readonly #onCatalogChanged: () => void
@@ -78,14 +79,17 @@ export class McpStdioConnection {
     this.#client.onerror = (error) => this.#onError(error)
   }
 
+  /** Returns or updates pid state. */
   get pid(): number | undefined {
     return this.#transport.pid ?? undefined
   }
 
+  /** Returns or updates stderr tail state. */
   get stderrTail(): string {
     return this.#stderr.slice(-8_192)
   }
 
+  /** Returns or updates connect state. */
   async connect(): Promise<McpConnectionCatalog> {
     await this.#client.connect(this.#transport, {
       timeout: this.#launch.startupTimeoutMs,
@@ -94,6 +98,7 @@ export class McpStdioConnection {
     return this.readCatalog(this.#launch.startupTimeoutMs)
   }
 
+  /** Reads catalog. */
   async readCatalog(timeoutMs: number): Promise<McpConnectionCatalog> {
     const tools: Tool[] = []
     const cursors = new Set<string>()
@@ -137,6 +142,7 @@ export class McpStdioConnection {
     throw codedError('MCP_CATALOG_TOO_LARGE', 'MCP catalog exceeds 100 pages')
   }
 
+  /** Returns or updates call tool state. */
   callTool(
     name: string,
     args: Record<string, unknown>,
@@ -149,6 +155,7 @@ export class McpStdioConnection {
     }) as unknown as Promise<CallToolResult>
   }
 
+  /** Closes the resource and releases its handles. */
   async close(): Promise<void> {
     if (this.#closed) return
     this.#closed = true

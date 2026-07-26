@@ -5,6 +5,7 @@ import type {
 } from '../runner/contracts'
 import type { GraderCommandOutcome, IsolatedGraderRunResult } from './contracts'
 
+/** Returns or updates score isolated grader state. */
 export function scoreIsolatedGrader(input: {
   loadedCase: LoadedBenchmarkCase
   grader: IsolatedGraderRunResult

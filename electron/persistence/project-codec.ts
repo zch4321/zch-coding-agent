@@ -20,6 +20,7 @@ export interface ProjectRow {
   updated_at: string
 }
 
+/** Returns or updates encode project row state. */
 export function encodeProjectRow(record: ProjectRecord): ProjectRow {
   assertSchemaValue<ProjectRecord>(
     validateProjectRecord,
@@ -37,6 +38,7 @@ export function encodeProjectRow(record: ProjectRecord): ProjectRow {
   }
 }
 
+/** Returns or updates decode project row state. */
 export function decodeProjectRow(row: Record<string, unknown>): ProjectRecord {
   const record = {
     schemaVersion: integerColumn(row.schema_version, 'projects.schema_version'),

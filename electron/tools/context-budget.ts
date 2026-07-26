@@ -4,6 +4,7 @@ import type { ToolResult } from './types'
 const TRUNCATION_MARKER = '\n... output truncated ...\n'
 const EXHAUSTED_TOOL_RESULT_PREVIEW_TOKENS = 512
 
+/** Reports context budget failures. */
 export class ContextBudgetError extends Error {
   constructor(message: string) {
     super(message)
@@ -11,6 +12,7 @@ export class ContextBudgetError extends Error {
   }
 }
 
+/** Estimates text tokens. */
 export function estimateTextTokens(
   value: string,
   estimation: PublicConfig['limits']['tokenEstimation'],
@@ -21,6 +23,7 @@ export function estimateTextTokens(
   return Math.ceil(bytes / bytesPerToken)
 }
 
+/** Estimates json tokens. */
 export function estimateJsonTokens(
   value: unknown,
   estimation: PublicConfig['limits']['tokenEstimation'],
@@ -32,6 +35,7 @@ function decodeUtf8Slice(value: Buffer): string {
   return new TextDecoder('utf-8', { fatal: false }).decode(value)
 }
 
+/** Truncates text head tail to its configured bound. */
 export function truncateTextHeadTail(
   value: string,
   maxTokens: number,
@@ -53,6 +57,7 @@ export function truncateTextHeadTail(
   return `${decodeUtf8Slice(source.subarray(0, headBytes))}${TRUNCATION_MARKER}${decodeUtf8Slice(source.subarray(Math.max(headBytes, source.length - tailBytes)))}`
 }
 
+/** Bounds tool result for context. */
 export function boundToolResultForContext(
   result: ToolResult,
   limits: PublicConfig['limits'],

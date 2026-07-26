@@ -694,6 +694,7 @@ export class SessionManager {
     )
   }
 
+  /** Starts harness run. */
   startHarnessRun(input: {
     sessionId: SessionId
     clientRequestId: string
@@ -747,32 +748,38 @@ export class SessionManager {
       .slice(0, 512)
   }
 
+  /** Determines whether has live session. */
   hasLiveSession(sessionId: SessionId): boolean {
     const session = this.#sessions.get(sessionId)
     return Boolean(session && !session.closed)
   }
 
+  /** Determines whether has active run. */
   hasActiveRun(sessionId: SessionId): boolean {
     return Boolean(this.#sessions.get(sessionId)?.activeRun)
   }
 
+  /** Determines whether has unsettled side effects. */
   hasUnsettledSideEffects(sessionId: SessionId): boolean {
     return Boolean(
       this.#sessions.get(sessionId)?.activeRun?.pendingSideEffects.size,
     )
   }
 
+  /** Determines whether has open terminals. */
   hasOpenTerminals(sessionId: SessionId): boolean {
     const session = this.#sessions.get(sessionId)
     if (!session || session.closed) return false
     return this.#terminals.list(sessionId).length > 0
   }
 
+  /** Returns or updates active run snapshot state. */
   activeRunSnapshot(sessionId: SessionId): ActiveRunPublicSnapshot | undefined {
     const snapshot = this.#sessions.get(sessionId)?.activeRun?.publicSnapshot
     return snapshot ? structuredClone(snapshot) : undefined
   }
 
+  /** Applies durable session record. */
   applyDurableSessionRecord(record: SessionRecord): void {
     const session = this.#sessions.get(record.id)
     if (!session || session.closed) return
@@ -790,15 +797,18 @@ export class SessionManager {
     session.plan = record.plan ? structuredClone(record.plan) : undefined
   }
 
+  /** Interrupts run. */
   interruptRun(sessionId: SessionId, runId: RunId): boolean {
     const session = this.#requireSession(sessionId)
     return this.#runs.interrupt(session, runId)
   }
 
+  /** Returns or updates provider tool definitions state. */
   providerToolDefinitions(): JsonValue[] {
     return structuredClone(this.#toolRegistry.providerDefinitions())
   }
 
+  /** Returns or updates tool names state. */
   toolNames(): string[] {
     return this.#toolRegistry
       .list()
@@ -806,12 +816,14 @@ export class SessionManager {
       .sort()
   }
 
+  /** Waits for for run settled. */
   async waitForRunSettled(sessionId: SessionId, runId: RunId): Promise<void> {
     const session = this.#requireSession(sessionId)
     const run = session.activeRun
     if (run?.runId === runId) await run.done
   }
 
+  /** Acquires file change revert writer. */
   acquireFileChangeRevertWriter(input: {
     workspace: string
     sessionId: SessionId
@@ -856,6 +868,7 @@ export class SessionManager {
     })
   }
 
+  /** Records the decision for approval. */
   decideApproval(input: {
     sessionId: SessionId
     runId: RunId
@@ -867,6 +880,7 @@ export class SessionManager {
     return this.#approvals.decide(session, input)
   }
 
+  /** Opens terminal. */
   async openTerminal(input: {
     sessionId: SessionId
     cwd?: string
@@ -876,10 +890,12 @@ export class SessionManager {
     return this.#terminals.open(input)
   }
 
+  /** Lists terminals. */
   listTerminals(sessionId: SessionId): TerminalInfo[] {
     return this.#terminals.list(sessionId)
   }
 
+  /** Sends terminal input. */
   sendTerminalInput(
     sessionId: SessionId,
     terminalId: TerminalId,
@@ -888,6 +904,7 @@ export class SessionManager {
     return this.#terminals.write(sessionId, terminalId, data)
   }
 
+  /** Returns or updates resize terminal state. */
   resizeTerminal(
     sessionId: SessionId,
     terminalId: TerminalId,
@@ -897,10 +914,12 @@ export class SessionManager {
     return this.#terminals.resize(sessionId, terminalId, cols, rows)
   }
 
+  /** Closes terminal. */
   closeTerminal(sessionId: SessionId, terminalId: TerminalId): boolean {
     return this.#terminals.close(sessionId, terminalId)
   }
 
+  /** Returns or updates terminal snapshot state. */
   terminalSnapshot(
     sessionId: SessionId,
     terminalId: TerminalId,
@@ -908,6 +927,7 @@ export class SessionManager {
     return this.#terminals.snapshot(sessionId, terminalId)
   }
 
+  /** Releases all owned resources. */
   async dispose(): Promise<void> {
     await Promise.all(
       [...this.#sessions.keys()].map((idValue) => this.closeSession(idValue)),

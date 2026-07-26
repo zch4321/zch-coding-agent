@@ -28,6 +28,7 @@ export interface CaseSelfCheckEvidence {
   stableSignature: string
 }
 
+/** Returns or updates self check benchmark case state. */
 export async function selfCheckBenchmarkCase(
   loaded: LoadedBenchmarkCase,
 ): Promise<CaseSelfCheckEvidence> {

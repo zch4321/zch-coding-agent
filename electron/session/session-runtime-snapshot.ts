@@ -12,6 +12,7 @@ function boundedRuntimeText(current: string, delta: string): string {
     : combined.slice(-MAX_RUNTIME_TEXT_LENGTH)
 }
 
+/** Updates public run snapshot. */
 export function updatePublicRunSnapshot(
   run: ActiveRun,
   event: AgentEventDraft,

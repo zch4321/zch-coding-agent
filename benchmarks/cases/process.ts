@@ -9,6 +9,7 @@ export interface BenchmarkCommandResult {
   timedOut: boolean
 }
 
+/** Runs benchmark command. */
 export async function runBenchmarkCommand(input: {
   command: BenchmarkCommand
   workspace: string
@@ -25,6 +26,7 @@ export async function runBenchmarkCommand(input: {
   })
 }
 
+/** Runs git. */
 export async function runGit(input: {
   workspace: string
   args: string[]

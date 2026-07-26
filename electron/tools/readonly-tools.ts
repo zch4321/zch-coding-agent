@@ -167,6 +167,7 @@ function errorResult(error: unknown): ToolResult {
   }
 }
 
+/** Creates read only tool definitions. */
 export function createReadOnlyToolDefinitions(
   getLimits: () => Pick<
     PublicConfig['limits'],
@@ -456,6 +457,7 @@ export function createReadOnlyToolDefinitions(
   return [readFileTool, listDirTool, globTool, grepTool]
 }
 
+/** Registers read only tools. */
 export function registerReadOnlyTools(
   registry: ToolRegistry,
   getLimits?: () => Pick<

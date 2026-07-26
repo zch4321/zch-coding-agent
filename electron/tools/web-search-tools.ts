@@ -47,6 +47,7 @@ function errorResult(error: unknown): ToolResult {
   }
 }
 
+/** Registers web search tools. */
 export function registerWebSearchTools(
   registry: ToolRegistrationPort,
   configStore: Pick<ConfigStore, 'getPublicConfig' | 'getWebSearchApiKey'>,

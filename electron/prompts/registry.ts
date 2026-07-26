@@ -25,6 +25,7 @@ export interface ResolvedPrompt {
 
 export type PromptResourceSummary = Omit<PromptResource, 'content'>
 
+/** Registers and resolves prompt entries. */
 export class PromptRegistry {
   readonly #resources: Map<string, PromptResource>
 
@@ -34,6 +35,7 @@ export class PromptRegistry {
     )
   }
 
+  /** Returns or updates load state. */
   static async load(rootDirectory: string): Promise<PromptRegistry> {
     const resources = await Promise.all([
       ...Object.values(DEFAULT_HARNESS_PROMPT_REFS).flatMap((localized) =>
@@ -84,16 +86,19 @@ export class PromptRegistry {
     return new PromptRegistry(resources)
   }
 
+  /** Creates the result from resources. */
   static fromResources(resources: PromptResource[]): PromptRegistry {
     return new PromptRegistry(resources)
   }
 
+  /** Lists the currently available records. */
   list(): PromptResourceSummary[] {
     return [...this.#resources.values()].map((resource) =>
       withoutContent(resource),
     )
   }
 
+  /** Returns the requested record. */
   get(id: string): PromptResource {
     const resource = this.#resources.get(id)
     if (!resource) {
@@ -102,6 +107,7 @@ export class PromptRegistry {
     return resource
   }
 
+  /** Returns or updates harness prompt state. */
   harnessPrompt(
     kind: keyof typeof DEFAULT_HARNESS_PROMPT_REFS,
     locale: AssistantLanguage,
@@ -114,6 +120,7 @@ export class PromptRegistry {
     }
   }
 
+  /** Returns or updates approval prompt state. */
   approvalPrompt(): ResolvedPrompt {
     const resource = this.get(DEFAULT_APPROVAL_PROMPT_REFS.classifyRisk.id)
     return {
@@ -123,6 +130,7 @@ export class PromptRegistry {
     }
   }
 
+  /** Returns or updates headless prompt state. */
   headlessPrompt(
     kind: keyof typeof DEFAULT_HEADLESS_PROMPT_REFS,
     locale: AssistantLanguage,
@@ -135,6 +143,7 @@ export class PromptRegistry {
     }
   }
 
+  /** Returns or updates orchestration prompt state. */
   orchestrationPrompt(
     kind: keyof typeof DEFAULT_ORCHESTRATION_PROMPT_REFS,
     locale: AssistantLanguage,

@@ -9,6 +9,7 @@ export interface DockerCommandResult {
   stderr: string
 }
 
+/** Starts attached docker container. */
 export async function startAttachedDockerContainer(input: {
   container: string
   timeoutMs: number
@@ -102,6 +103,7 @@ export async function startAttachedDockerContainer(input: {
   })
 }
 
+/** Reports docker command failures. */
 export class DockerCommandError extends Error {
   readonly code: string
   readonly result?: DockerCommandResult
@@ -114,6 +116,7 @@ export class DockerCommandError extends Error {
   }
 }
 
+/** Runs docker command. */
 export async function runDockerCommand(
   args: string[],
   options: {

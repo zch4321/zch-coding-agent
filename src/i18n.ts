@@ -31,6 +31,7 @@ export const i18n = createI18n({
   messages,
 })
 
+/** Sets app locale. */
 export function setAppLocale(locale: AppLocale) {
   i18n.global.locale.value = locale
   document.documentElement.lang = locale

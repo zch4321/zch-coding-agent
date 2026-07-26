@@ -59,6 +59,7 @@ function ssrfErrorResult(error: unknown): ToolResult {
   }
 }
 
+/** Registers fetch tools. */
 export function registerFetchTools(
   registry: ToolRegistrationPort,
   getConfig: () => PublicConfig,

@@ -5,6 +5,7 @@ import { ContextIngressFilter } from './context-ingress'
 import type { SessionApprovalCoordinator } from '../permission/session-approval'
 import type { ActiveRun, SessionState } from './session-types'
 
+/** Encapsulates session context gate behavior. */
 export class SessionContextGate {
   readonly #configStore: ConfigStore
   readonly #approvals: SessionApprovalCoordinator
@@ -18,6 +19,7 @@ export class SessionContextGate {
     this.#approvals = options.approvals
   }
 
+  /** Returns or updates preflight tool context state. */
   async preflightToolContext(
     session: SessionState,
     run: ActiveRun,
@@ -64,6 +66,7 @@ export class SessionContextGate {
     }
   }
 
+  /** Returns or updates filter tool result for provider state. */
   async filterToolResultForProvider(
     session: SessionState,
     run: ActiveRun,

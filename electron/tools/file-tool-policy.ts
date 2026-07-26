@@ -3,6 +3,7 @@ import type { JsonValue } from '../../shared/json'
 import type { ToolCall } from './types'
 import type { FileOperation } from './file-tool-types'
 
+/** Returns or updates args object state. */
 export function argsObject(call: ToolCall): Record<string, JsonValue> {
   if (!call.args || typeof call.args !== 'object' || Array.isArray(call.args)) {
     throw new Error('Tool args must be an object')
@@ -11,6 +12,7 @@ export function argsObject(call: ToolCall): Record<string, JsonValue> {
   return call.args
 }
 
+/** Returns or updates operation for state. */
 export function operationFor(toolId: string): FileOperation | undefined {
   if (toolId === 'create_file') {
     return 'write'
@@ -23,6 +25,7 @@ export function operationFor(toolId: string): FileOperation | undefined {
   return toolId === 'delete_file' ? 'delete' : undefined
 }
 
+/** Returns or updates process policy signals state. */
 export function processPolicySignals(call: ToolCall): PolicySignal[] {
   if (call.toolId !== 'run_command') {
     return []
@@ -99,6 +102,7 @@ export function processPolicySignals(call: ToolCall): PolicySignal[] {
   return signals
 }
 
+/** Returns or updates file policy signals state. */
 export function filePolicySignals(
   operation: FileOperation,
   targetPath: string,

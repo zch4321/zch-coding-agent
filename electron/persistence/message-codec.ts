@@ -40,6 +40,7 @@ export interface MessageRow {
   created_at: string
 }
 
+/** Returns or updates encode message row state. */
 export function encodeMessageRow(record: MessageRecord): MessageRow {
   assertSchemaValue<MessageRecord>(
     validateMessageRecord,
@@ -95,6 +96,7 @@ export function encodeMessageRow(record: MessageRecord): MessageRow {
   }
 }
 
+/** Returns or updates decode message row state. */
 export function decodeMessageRow(row: Record<string, unknown>): MessageRecord {
   const clientRequestId = nullableStringColumn(
     row.client_request_id,

@@ -27,6 +27,7 @@ export interface PreparedUserTurn {
   }>
 }
 
+/** Encapsulates session user turn preparer behavior. */
 export class SessionUserTurnPreparer {
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
@@ -62,6 +63,7 @@ export class SessionUserTurnPreparer {
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
   }
 
+  /** Returns or updates prepare state. */
   async prepare(
     session: SessionState,
     run: ActiveRun,

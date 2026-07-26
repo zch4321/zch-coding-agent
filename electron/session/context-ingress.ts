@@ -97,7 +97,9 @@ function summarize(result: ToolResult): string {
   return text.length > 2_000 ? `${text.slice(0, 2_000)}...` : text
 }
 
+/** Filters context ingress input. */
 export class ContextIngressFilter {
+  /** Returns or updates evaluate path state. */
   evaluatePath(
     config: PublicConfig['permission']['sensitiveData'],
     call: ToolCall,
@@ -139,6 +141,7 @@ export class ContextIngressFilter {
       : { action: 'warn', signals }
   }
 
+  /** Returns or updates evaluate state. */
   evaluate(
     config: PublicConfig['permission']['sensitiveData'],
     input: EvaluationInput,

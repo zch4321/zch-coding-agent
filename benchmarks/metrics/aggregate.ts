@@ -44,6 +44,7 @@ interface UsageObservation {
   usage?: LlmUsageRecord
 }
 
+/** Aggregates benchmark metrics. */
 export function aggregateBenchmarkMetrics(input: {
   trace: readonly TraceEvent[]
   agentEvents?: readonly AgentEvent[]
@@ -378,6 +379,7 @@ function scopeCost(
   )
 }
 
+/** Validates benchmark price snapshot. */
 export function validateBenchmarkPriceSnapshot(
   snapshot: BenchmarkPriceSnapshot,
 ): void {

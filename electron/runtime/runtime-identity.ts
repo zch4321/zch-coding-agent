@@ -12,6 +12,7 @@ declare const __ZCH_SOURCE_TREE_STATE__:
   | RuntimeIdentity['sourceTree']
   | undefined
 
+/** Reports runtime identity mismatch failures. */
 export class RuntimeIdentityMismatchError extends Error {
   readonly code = 'RUNTIME_IDENTITY_MISMATCH'
   readonly differences: RuntimeIdentityDifference[]
@@ -27,10 +28,12 @@ export class RuntimeIdentityMismatchError extends Error {
   }
 }
 
+/** Returns or updates sha256 json state. */
 export function sha256Json(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
+/** Creates runtime identity. */
 export function createRuntimeIdentity(input: {
   runtime: AgentRuntime
   config: PublicConfig
@@ -105,6 +108,7 @@ export function createRuntimeIdentity(input: {
   }
 }
 
+/** Validates comparable runtime identities and throws when it is invalid. */
 export function assertComparableRuntimeIdentities(
   left: RuntimeIdentity,
   right: RuntimeIdentity,

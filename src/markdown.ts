@@ -125,6 +125,7 @@ function getHighlighter(): Promise<MarkdownHighlighter> {
   return highlighterPromise
 }
 
+/** Renders code. */
 export async function renderCode(
   source: string,
   requestedLanguage: string,
@@ -138,6 +139,7 @@ export async function renderCode(
       })
 }
 
+/** Renders markdown. */
 export async function renderMarkdown(source: string): Promise<string> {
   const fences: FenceBlock[] = []
   let html = markdown.render(source, { fences })

@@ -35,6 +35,7 @@ export interface HeadlessMainOptions {
   manageSignals?: boolean
 }
 
+/** Runs headless main. */
 export async function runHeadlessMain(
   argv: string[],
   options: HeadlessMainOptions = {},

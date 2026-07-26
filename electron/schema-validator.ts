@@ -1,6 +1,7 @@
 import Ajv, { type ErrorObject, type ValidateFunction } from 'ajv'
 import type { TSchema } from '@sinclair/typebox'
 
+/** Creates ajv. */
 export function createAjv(): Ajv {
   const ajv = new Ajv({
     allErrors: true,
@@ -18,12 +19,14 @@ export function createAjv(): Ajv {
   return ajv
 }
 
+/** Returns or updates compile schema state. */
 export function compileSchema<Schema extends TSchema>(
   schema: Schema,
 ): ValidateFunction {
   return createAjv().compile(schema)
 }
 
+/** Formats schema errors. */
 export function formatSchemaErrors(
   errors: ErrorObject[] | null | undefined,
 ): string {

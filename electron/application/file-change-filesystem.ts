@@ -20,6 +20,7 @@ export interface FileContentState {
   absolutePath: string
 }
 
+/** Reports file change resource failures. */
 export class FileChangeResourceError extends Error {
   constructor(
     readonly code: 'RESOURCE_CHANGED',
@@ -30,6 +31,7 @@ export class FileChangeResourceError extends Error {
   }
 }
 
+/** Reads file content state. */
 export async function readFileContentState(
   workspace: string,
   relativePath: string,
@@ -74,6 +76,7 @@ export async function readFileContentState(
   }
 }
 
+/** Validates file content state and throws when it is invalid. */
 export function assertFileContentState(
   state: Pick<FileContentState, 'exists' | 'hash'>,
   expectedExists: boolean,
@@ -87,6 +90,7 @@ export function assertFileContentState(
   }
 }
 
+/** Restores file content. */
 export async function restoreFileContent(input: {
   workspace: string
   path: string
@@ -146,6 +150,7 @@ export async function restoreFileContent(input: {
   }
 }
 
+/** Returns or updates sha256 state. */
 export function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }

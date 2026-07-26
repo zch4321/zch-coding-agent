@@ -70,6 +70,7 @@ export interface RunCommandResult extends BoundedOutputSnapshot {
   terminationStrategy: 'none' | 'taskkill' | 'process-group'
 }
 
+/** Creates command environment. */
 export function createCommandEnvironment(
   source: Record<string, string | undefined> = process.env,
 ): NodeJS.ProcessEnv {
@@ -185,6 +186,7 @@ function requestTreeExit(
   return 'process-group'
 }
 
+/** Runs command. */
 export async function runCommand(
   options: RunCommandOptions,
 ): Promise<RunCommandResult> {

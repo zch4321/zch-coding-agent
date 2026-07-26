@@ -67,6 +67,7 @@ export class RipgrepSearcher implements Searcher {
     }
   }
 
+  /** Determines whether is available. */
   async isAvailable(): Promise<boolean> {
     if (this.#available !== undefined) {
       return this.#available
@@ -98,6 +99,7 @@ export class RipgrepSearcher implements Searcher {
     return this.#available
   }
 
+  /** Searches for records matching the request. */
   async search(input: SearchInput): Promise<SearchOutcome> {
     const rgPath = await this.resolveRgPath()
 

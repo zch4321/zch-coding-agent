@@ -12,6 +12,7 @@ export type PathGuardErrorCode =
   | 'NOT_A_DIRECTORY'
   | 'NOT_A_FILE'
 
+/** Reports path guard failures. */
 export class PathGuardError extends Error {
   readonly code: PathGuardErrorCode
 
@@ -90,6 +91,7 @@ async function nearestExistingParent(target: string): Promise<string> {
   }
 }
 
+/** Enforces path preconditions. */
 export class PathGuard {
   readonly workspacePath: string
   readonly #workspaceAliases: readonly string[]
@@ -99,6 +101,7 @@ export class PathGuard {
     this.#workspaceAliases = [...new Set([workspacePath, ...aliases])]
   }
 
+  /** Creates the result from canonical. */
   static fromCanonical(workspacePath: string): PathGuard {
     assertReasonableInput(workspacePath)
     const resolvedWorkspacePath = path.resolve(workspacePath)
@@ -113,6 +116,7 @@ export class PathGuard {
     }
   }
 
+  /** Creates a new instance. */
   static async create(workspacePath: string): Promise<PathGuard> {
     assertReasonableInput(workspacePath)
     const resolvedWorkspacePath = path.resolve(workspacePath)
@@ -137,6 +141,7 @@ export class PathGuard {
     )
   }
 
+  /** Resolves candidate. */
   resolveCandidate(inputPath: string): string {
     assertReasonableInput(inputPath)
     const absolutePath = path.isAbsolute(inputPath)
@@ -153,6 +158,7 @@ export class PathGuard {
     return absolutePath
   }
 
+  /** Resolves existing. */
   async resolveExisting(inputPath: string): Promise<GuardedPath> {
     const absolutePath = this.resolveCandidate(inputPath)
     const parent = await nearestExistingParent(absolutePath)
@@ -199,6 +205,7 @@ export class PathGuard {
     }
   }
 
+  /** Validates inside and throws when it is invalid. */
   assertInside(realPathValue: string): void {
     if (!this.#isInsideWorkspace(realPathValue)) {
       throw new PathGuardError(
@@ -208,6 +215,7 @@ export class PathGuard {
     }
   }
 
+  /** Reads file bounded. */
   async readFileBounded(
     inputPath: string,
     maxBytes: number,
@@ -263,6 +271,7 @@ export class PathGuard {
     }
   }
 
+  /** Lists directory. */
   async listDirectory(inputPath: string): Promise<DirectoryEntry[]> {
     const guarded = await this.resolveExisting(inputPath)
     const directoryStat = await stat(guarded.realPath)

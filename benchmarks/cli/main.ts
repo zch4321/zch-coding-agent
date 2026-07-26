@@ -3,6 +3,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runBenchmarkCli } from './cli'
 
+/** Runs benchmark main. */
 export async function runBenchmarkMain(argv: string[]): Promise<number> {
   const controller = new AbortController()
   const abort = () =>

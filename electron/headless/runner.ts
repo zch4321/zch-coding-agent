@@ -31,6 +31,7 @@ import { collectWorkspacePatch } from './patch'
 const validateResult = compileSchema(HeadlessResultSchema)
 const validateRuntimeIdentity = compileSchema(RuntimeIdentitySchema)
 
+/** Reports headless run input failures. */
 export class HeadlessRunInputError extends Error {
   readonly code = 'HEADLESS_RUN_INPUT_INVALID'
 
@@ -68,6 +69,7 @@ export interface RunHeadlessAgentOptions {
   benchmarkCase?: BenchmarkAgentCase
 }
 
+/** Runs headless agent. */
 export async function runHeadlessAgent(
   options: RunHeadlessAgentOptions,
 ): Promise<HeadlessResult> {

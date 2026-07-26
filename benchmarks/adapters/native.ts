@@ -49,6 +49,7 @@ export type NativeBenchmarkSuite = LoadedBenchmarkSuite & {
   suiteIdentitySha256: string
 }
 
+/** Loads native benchmark suite. */
 export async function loadNativeBenchmarkSuite(input: {
   benchmarkRoot: string
   suiteFile: string
@@ -69,6 +70,7 @@ export async function loadNativeBenchmarkSuite(input: {
   }
 }
 
+/** Converts the input to agent case descriptor. */
 export function toAgentCaseDescriptor(
   loaded: LoadedBenchmarkCase,
 ): AgentCaseDescriptor {

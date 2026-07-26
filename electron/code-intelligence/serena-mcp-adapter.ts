@@ -519,6 +519,7 @@ function launchMessage(input: {
   return lines.join('\n').slice(0, 4_096)
 }
 
+/** Adapts serena mcp to its host interface. */
 export class SerenaMcpAdapter implements CodeIntelligenceBackend {
   readonly #sessions = new Map<string, SerenaSession>()
   readonly #starts = new Map<string, Promise<SerenaSession>>()
@@ -529,6 +530,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     this.#launch = options.launch ?? defaultLaunch
   }
 
+  /** Returns the current status. */
   status(project: ProjectModel): CodeBackendStatus {
     const key = this.#key(project)
     const session = this.#sessions.get(key)
@@ -558,6 +560,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     }
   }
 
+  /** Restarts the managed resource. */
   async restart(project: ProjectModel): Promise<CodeBackendStatus> {
     await this.close(project)
     if (!project.serena.enabled) return this.status(project)
@@ -576,6 +579,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     }
   }
 
+  /** Closes the resource and releases its handles. */
   async close(project: ProjectModel): Promise<void> {
     const key = this.#key(project)
     const session = this.#sessions.get(key)
@@ -594,6 +598,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     })
   }
 
+  /** Releases all owned resources. */
   async dispose(): Promise<void> {
     const sessions = [...this.#sessions.values()]
     this.#sessions.clear()
@@ -606,6 +611,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     )
   }
 
+  /** Returns or updates query state. */
   async query(
     project: ProjectModel,
     input: CodeIntelligenceQuery,

@@ -21,6 +21,7 @@ export type { SearchInput, SearchMatch, SearchOutcome, Searcher }
 export class JavaScriptSearcher implements Searcher {
   readonly backend = 'javascript' as const
 
+  /** Searches for records matching the request. */
   async search(input: SearchInput): Promise<SearchOutcome> {
     const {
       guard,

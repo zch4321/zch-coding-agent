@@ -18,6 +18,7 @@ interface InternalCheckOutcome {
   passed: boolean
 }
 
+/** Collects benchmark patch. */
 export async function collectBenchmarkPatch(input: {
   workspace: string
   maxPatchBytes: number
@@ -33,6 +34,7 @@ export async function collectBenchmarkPatch(input: {
   return result.stdout
 }
 
+/** Returns or updates evaluate native patch state. */
 export async function evaluateNativePatch(input: {
   loadedCase: LoadedBenchmarkCase
   patch: string

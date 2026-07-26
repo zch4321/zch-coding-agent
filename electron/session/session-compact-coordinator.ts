@@ -58,6 +58,7 @@ function compactFollowUp(message: string): string | undefined {
   return followUp || undefined
 }
 
+/** Coordinates session compact workflows. */
 export class SessionCompactCoordinator {
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
@@ -115,6 +116,7 @@ export class SessionCompactCoordinator {
     this.#executionState = options.executionState
   }
 
+  /** Returns or updates maybe auto compact before provider call state. */
   async maybeAutoCompactBeforeProviderCall(
     session: SessionState,
     run: ActiveRun,

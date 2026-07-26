@@ -35,6 +35,7 @@ export function sendBackendNotification(
   }
 }
 
+/** Sends agent event. */
 export function sendAgentEvent(
   webContents: WebContents,
   envelope: AgentEventEnvelope,
@@ -48,6 +49,7 @@ export function sendAgentEvent(
   }
 }
 
+/** Sends terminal event. */
 export function sendTerminalEvent(
   webContents: WebContents,
   envelope: TerminalEventEnvelope,
@@ -61,6 +63,7 @@ export function sendTerminalEvent(
   }
 }
 
+/** Sends domain state event. */
 export function sendDomainStateEvent(
   webContents: WebContents,
   delivery: DomainStateDelivery,

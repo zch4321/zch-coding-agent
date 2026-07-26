@@ -5,8 +5,10 @@ const MAX_EXTERNAL_MEMORY_BYTES = 32 * 1024 * 1024 * 1024
 const MAX_EXTERNAL_STORAGE_BYTES = 32 * 1024 * 1024 * 1024
 const MAX_EXTERNAL_VERIFIER_SECONDS = 2 * 60 * 60
 
+/** Reports external resource limit failures. */
 export class ExternalResourceLimitError extends Error {}
 
+/** Returns or updates infer monthly language state. */
 export function inferMonthlyLanguage(taskToml: string): string {
   const value = taskToml.toLowerCase()
   for (const language of [
@@ -25,6 +27,7 @@ export function inferMonthlyLanguage(taskToml: string): string {
   return 'unknown'
 }
 
+/** Validates monthly resources and throws when it is invalid. */
 export function assertMonthlyResources(taskToml: string): void {
   const cpus = tomlNumber(taskToml, 'cpus')
   const memoryMb = tomlNumber(taskToml, 'memory_mb')
@@ -45,6 +48,7 @@ export function assertMonthlyResources(taskToml: string): void {
   }
 }
 
+/** Validates rebench resources and throws when it is invalid. */
 export function assertRebenchResources(
   candidate: ExternalBenchmarkCandidate,
 ): void {

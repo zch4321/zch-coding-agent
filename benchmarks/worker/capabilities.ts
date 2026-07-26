@@ -25,6 +25,7 @@ interface DockerImageInspect {
   }
 }
 
+/** Reports docker worker unsupported failures. */
 export class DockerWorkerUnsupportedError extends Error {
   readonly code = 'DOCKER_WORKER_UNSUPPORTED'
 
@@ -34,6 +35,7 @@ export class DockerWorkerUnsupportedError extends Error {
   }
 }
 
+/** Inspects docker capability. */
 export async function inspectDockerCapability(): Promise<DockerWorkerCapability> {
   const result = await runDockerCommand(['info', '--format', '{{json .}}'])
   const info = parseJson<DockerInfo>(result.stdout, 'Docker info')
@@ -70,6 +72,7 @@ export async function inspectDockerCapability(): Promise<DockerWorkerCapability>
   }
 }
 
+/** Inspects worker image. */
 export async function inspectWorkerImage(
   reference: string,
   expectedSourceCommit?: string,

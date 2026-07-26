@@ -124,6 +124,7 @@ function textDelta(providerEvent: JsonValue): {
   return null
 }
 
+/** Reduces trace event. */
 export function reduceTraceEvent(
   current: ReplayState,
   candidate: unknown,
@@ -300,6 +301,7 @@ export function reduceTraceEvent(
   return state
 }
 
+/** Returns or updates replay trace state. */
 export function replayTrace(events: readonly unknown[]): ReplayState {
   let state = structuredClone(INITIAL_REPLAY_STATE)
 
@@ -315,6 +317,7 @@ export interface ReplayTimelineItem {
   delayMs: number
 }
 
+/** Creates replay timeline. */
 export function createReplayTimeline(
   events: readonly TraceEvent[],
   speed = 1,

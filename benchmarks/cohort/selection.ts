@@ -27,6 +27,7 @@ export interface BuildRollingMixedCohortInput {
   ) => Promise<ResolvedExternalImage>
 }
 
+/** Builds rolling mixed cohort. */
 export async function buildRollingMixedCohort(
   input: BuildRollingMixedCohortInput,
 ): Promise<BenchmarkCohort> {
@@ -178,16 +179,19 @@ async function takeEligible(input: {
   }
 }
 
+/** Returns or updates candidate hash state. */
 export function candidateHash(candidate: ExternalBenchmarkCandidate): string {
   return sha256Canonical(candidate)
 }
 
+/** Returns or updates patch scale state. */
 export function patchScale(bytes: number): 'small' | 'medium' | 'large' {
   if (bytes <= 2_048) return 'small'
   if (bytes <= 12_288) return 'medium'
   return 'large'
 }
 
+/** Returns or updates verify cohort state. */
 export function verifyCohort(cohort: BenchmarkCohort): void {
   const { cohortHash, ...draft } = cohort
   if (sha256Canonical(draft) !== cohortHash) {
@@ -205,6 +209,7 @@ export function verifyCohort(cohort: BenchmarkCohort): void {
   }
 }
 
+/** Validates same cohort and throws when it is invalid. */
 export function assertSameCohort(
   left: BenchmarkCohort,
   right: BenchmarkCohort,

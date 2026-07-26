@@ -229,6 +229,7 @@ function requireSession(
   return getSession(sessionId) ?? error('Session was not found')
 }
 
+/** Registers orchestration tools. */
 export function registerOrchestrationTools(
   registry: ToolRegistrationPort,
   options: {

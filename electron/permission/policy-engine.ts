@@ -25,6 +25,7 @@ export interface PolicyInput {
   now?: Date
 }
 
+/** Determines whether has side effects. */
 export function hasSideEffects(definition: ToolDefinition): boolean {
   return definition.effects.some(
     (effect) =>
@@ -95,6 +96,7 @@ function isAutoAllowedWorkspaceFileMutation(input: PolicyInput): boolean {
   )
 }
 
+/** Returns or updates evaluate policy state. */
 export function evaluatePolicy(input: PolicyInput): PolicyOutcome {
   const sideEffects = hasSideEffects(input.definition)
 

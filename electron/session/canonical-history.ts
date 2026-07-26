@@ -60,10 +60,12 @@ function nextIdentity(state: CanonicalHistoryState) {
   }
 }
 
+/** Returns or updates canonical hash state. */
 export function canonicalHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
+/** Returns or updates canonical trace source state. */
 export function canonicalTraceSource(records: readonly MessageRecord[]): Array<{
   seq: number
   kind: MessageRecord['kind']
@@ -78,12 +80,14 @@ export function canonicalTraceSource(records: readonly MessageRecord[]): Array<{
   }))
 }
 
+/** Returns or updates message text state. */
 export function messageText(record: MessageRecord): string {
   return record.parts
     .flatMap((part) => (part.type === 'text' ? [part.text] : []))
     .join('\n')
 }
 
+/** Appends prompt message. */
 export function appendPromptMessage(
   state: CanonicalHistoryState,
   input: {
@@ -136,6 +140,7 @@ export function appendPromptMessage(
   return record
 }
 
+/** Appends user input. */
 export function appendUserInput(
   state: CanonicalHistoryState,
   input: {
@@ -212,6 +217,7 @@ export function appendUserInput(
   return record
 }
 
+/** Appends control command. */
 export function appendControlCommand(
   state: CanonicalHistoryState,
   input: {
@@ -230,6 +236,7 @@ export function appendControlCommand(
   })
 }
 
+/** Appends assistant turn. */
 export function appendAssistantTurn(
   state: CanonicalHistoryState,
   input: {
@@ -275,6 +282,7 @@ export function appendAssistantTurn(
   })
 }
 
+/** Validates assistant turn candidate and throws when it is invalid. */
 export function assertAssistantTurnCandidate(
   state: CanonicalHistoryState,
   input: AssistantTurnCandidateInput,
@@ -308,6 +316,7 @@ export function assertAssistantTurnCandidate(
   }
 }
 
+/** Appends completed assistant turn. */
 export function appendCompletedAssistantTurn(
   state: CanonicalHistoryState,
   input: AssistantTurnCandidateInput,
@@ -353,6 +362,7 @@ function assistantTurnCandidate(
   return record
 }
 
+/** Appends tool result. */
 export function appendToolResult(
   state: CanonicalHistoryState,
   input: {
@@ -396,6 +406,7 @@ export function appendToolResult(
   return record
 }
 
+/** Appends compact summary. */
 export function appendCompactSummary(
   state: CanonicalHistoryState,
   input: {
@@ -433,6 +444,7 @@ export function appendCompactSummary(
   return record
 }
 
+/** Returns or updates latest prompt hash state. */
 export function latestPromptHash(
   state: CanonicalHistoryState,
   kind: CanonicalPromptKind,
@@ -445,6 +457,7 @@ export function latestPromptHash(
   return undefined
 }
 
+/** Deactivates active history. */
 export function deactivateActiveHistory(
   state: CanonicalHistoryState,
 ): MessageRecord[] {
@@ -453,7 +466,9 @@ export function deactivateActiveHistory(
   return active
 }
 
+/** Encapsulates message history compiler behavior. */
 export class MessageHistoryCompiler {
+  /** Returns or updates compile state. */
   compile(records: readonly MessageRecord[]): CompiledCanonicalHistory {
     const active = records
       .filter(

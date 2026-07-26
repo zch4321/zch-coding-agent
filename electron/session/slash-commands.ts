@@ -80,6 +80,7 @@ function orchestrationPrompt(
   }
 }
 
+/** Resolves slash command. */
 export function resolveSlashCommand(input: {
   message: string
   config: PublicConfig

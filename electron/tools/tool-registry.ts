@@ -58,9 +58,11 @@ function providerParameters(definition: ToolDefinition): {
   return { parameters: schema as JsonValue, intentField }
 }
 
+/** Registers and resolves tool entries. */
 export class ToolRegistry implements ToolRegistrationPort {
   readonly #tools = new Map<string, RegisteredTool>()
 
+  /** Registers tool. */
   registerTool(definition: ToolDefinition): void {
     if (this.#tools.has(definition.id)) {
       throw new Error(`Tool already registered: ${definition.id}`)
@@ -72,14 +74,17 @@ export class ToolRegistry implements ToolRegistrationPort {
     })
   }
 
+  /** Returns the requested record. */
   get(toolId: string): ToolDefinition | undefined {
     return this.#tools.get(toolId)?.definition
   }
 
+  /** Lists the currently available records. */
   list(): ToolDefinition[] {
     return [...this.#tools.values()].map((tool) => tool.definition)
   }
 
+  /** Returns or updates provider definitions state. */
   providerDefinitions(): JsonValue[] {
     return this.list().map((definition) => {
       const { parameters, intentField } = providerParameters(definition)
@@ -95,6 +100,7 @@ export class ToolRegistry implements ToolRegistrationPort {
     })
   }
 
+  /** Validates args. */
   validateArgs<Schema extends TSchema>(
     definition: ToolDefinition<Schema>,
     args: JsonValue,
@@ -191,6 +197,7 @@ function boundResult(result: ToolResult, maxBytes: number): ToolResult {
   return bounded
 }
 
+/** Encapsulates tool executor behavior. */
 export class ToolExecutor {
   readonly #registry: ToolRegistry
 
@@ -198,6 +205,7 @@ export class ToolExecutor {
     this.#registry = registry
   }
 
+  /** Inspects call. */
   inspectCall(
     call: ToolCall,
     definitionOverride?: ToolDefinition,
@@ -238,6 +246,7 @@ export class ToolExecutor {
     return { ok: true, definition }
   }
 
+  /** Returns or updates execute state. */
   async execute(
     approvedCall: ApprovedToolCall,
     context: Omit<ToolExecutionContext, 'approvedCall' | 'signal'>,

@@ -36,6 +36,7 @@ export interface SessionRow {
   archived_at: string | null
 }
 
+/** Returns or updates encode session row state. */
 export function encodeSessionRow(record: SessionRecord): SessionRow {
   assertSchemaValue<SessionRecord>(
     validateSessionRecord,
@@ -69,6 +70,7 @@ export function encodeSessionRow(record: SessionRecord): SessionRow {
   }
 }
 
+/** Returns or updates decode session row state. */
 export function decodeSessionRow(row: Record<string, unknown>): SessionRecord {
   const parentSessionId = nullableStringColumn(
     row.parent_session_id,

@@ -66,6 +66,7 @@ function pickModule(
   )
 }
 
+/** Coordinates code backend lifecycle and operations. */
 export class CodeBackendManager {
   readonly #projectMetadata: ProjectMetadataStore
   readonly #serena: SerenaMcpAdapter
@@ -78,11 +79,13 @@ export class CodeBackendManager {
     this.#serena = options.serena ?? new SerenaMcpAdapter()
   }
 
+  /** Returns the current statuses. */
   async statuses(workspace: string): Promise<CodeBackendStatus[]> {
     const { project } = await this.#projectMetadata.get(workspace)
     return [this.#serena.status(project)]
   }
 
+  /** Restarts the managed resource. */
   async restart(
     workspace: string,
     backendId: string,
@@ -103,6 +106,7 @@ export class CodeBackendManager {
     return this.#serena.restart(project)
   }
 
+  /** Returns or updates query state. */
   async query(input: CodeIntelligenceQuery): Promise<CodeIntelligenceResult> {
     const snapshot = await this.#projectMetadata.get(input.workspace)
     const project = snapshot.project
@@ -195,6 +199,7 @@ export class CodeBackendManager {
     })
   }
 
+  /** Releases all owned resources. */
   dispose(): Promise<void> {
     return this.#serena.dispose()
   }

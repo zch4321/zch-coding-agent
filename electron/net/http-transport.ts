@@ -8,6 +8,7 @@ export interface HttpTransport {
   fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>
 }
 
+/** Creates http transport. */
 export function createHttpTransport(
   proxy: HttpProxyConfig = { mode: 'off' },
 ): HttpTransport {

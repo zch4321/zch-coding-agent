@@ -80,6 +80,7 @@ export const FileChangePageSchema = Type.Union([
 ])
 export type FileChangePage = Static<typeof FileChangePageSchema>
 
+/** Validates file change page semantics and throws when it is invalid. */
 export function assertFileChangePageSemantics(page: FileChangePage): void {
   for (const record of page.records) {
     if (record.sessionId !== page.sessionId) {
@@ -103,6 +104,7 @@ export function assertFileChangePageSemantics(page: FileChangePage): void {
 export const EMPTY_FILE_SHA256 =
   'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 
+/** Validates file change summary semantics and throws when it is invalid. */
 export function assertFileChangeSummarySemantics(
   record: FileChangeSummary,
 ): void {

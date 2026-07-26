@@ -113,6 +113,7 @@ function assertNoCredentialFields(value: JsonValue, path = 'request'): void {
   }
 }
 
+/** Runs session provider turn workflows. */
 export class SessionProviderTurnRunner {
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
@@ -154,6 +155,7 @@ export class SessionProviderTurnRunner {
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
   }
 
+  /** Returns or updates call provider state. */
   async callProvider(
     session: SessionState,
     run: ActiveRun,
@@ -434,6 +436,7 @@ function assertCompletedAssistantTurn(completed: CompletedAssistantTurn): void {
   }
 }
 
+/** Creates configured provider. */
 export function createConfiguredProvider(
   provider: ProviderPublicConfig,
   apiKey: string,

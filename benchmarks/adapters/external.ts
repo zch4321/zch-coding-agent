@@ -72,6 +72,7 @@ export interface LoadExternalSuitesInput {
   runtime: ExternalAdapterRuntime
 }
 
+/** Loads external benchmark suites. */
 export function loadExternalBenchmarkSuites(
   input: LoadExternalSuitesInput,
 ): LoadedAdapterSuite[] {
@@ -357,6 +358,7 @@ function safeRevision(release: string): string {
   return release.toLowerCase().replace(/[^a-z0-9._-]+/gu, '-')
 }
 
+/** Returns or updates external agent descriptor state. */
 export function externalAgentDescriptor(
   loadedCase: LoadedBenchmarkCase,
   adapter: BenchmarkCaseAdapter,

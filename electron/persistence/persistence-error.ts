@@ -14,6 +14,7 @@ export type PersistenceErrorCode =
   | 'CODEC_INVALID'
   | 'FILE_CHANGE_LIMIT_EXCEEDED'
 
+/** Reports persistence failures. */
 export class PersistenceError extends Error {
   readonly code: PersistenceErrorCode
   readonly cause?: unknown
@@ -30,6 +31,7 @@ export class PersistenceError extends Error {
   }
 }
 
+/** Normalizes persistence error. */
 export function normalizePersistenceError(error: unknown): unknown {
   if (error instanceof PersistenceError) return error
   const code =

@@ -94,6 +94,7 @@ function freezeDeep<Value>(value: Value): Value {
   return value
 }
 
+/** Creates args hash. */
 export function createArgsHash(args: JsonValue): string {
   return createHash('sha256').update(JSON.stringify(args)).digest('hex')
 }
@@ -249,6 +250,7 @@ function rememberedRule(input: {
   }
 }
 
+/** Revalidates approved tool call. */
 export async function revalidateApprovedToolCall(
   approvedCall: ApprovedToolCall,
   context: {
@@ -287,7 +289,9 @@ export async function revalidateApprovedToolCall(
   )
 }
 
+/** Applies permission policies in order. */
 export class PermissionPipeline {
+  /** Returns or updates authorize state. */
   async authorize(
     input: PermissionPipelineInput,
   ): Promise<AuthorizationResult> {

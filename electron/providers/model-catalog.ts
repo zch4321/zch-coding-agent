@@ -36,6 +36,7 @@ export interface ModelProfile {
   maxOutputTokens?: number
 }
 
+/** Reports model catalog failures. */
 export class ModelCatalogError extends Error {
   readonly status: number | undefined
 
@@ -46,11 +47,13 @@ export class ModelCatalogError extends Error {
   }
 }
 
+/** Returns or updates model catalog endpoint state. */
 export function modelCatalogEndpoint(baseURL: string): string {
   const normalized = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
   return new URL('models', normalized).toString()
 }
 
+/** Returns or updates fetch open ai compatible model catalog state. */
 export async function fetchOpenAICompatibleModelCatalog(options: {
   baseURL: string
   apiKey: string
@@ -174,6 +177,7 @@ async function readBoundedResponseBody(response: Response): Promise<string> {
 
 export const fetchDeepSeekModelCatalog = fetchOpenAICompatibleModelCatalog
 
+/** Resolves model profiles. */
 export function resolveModelProfiles(
   config: PublicConfig,
   providerId = config.activeProviderId,

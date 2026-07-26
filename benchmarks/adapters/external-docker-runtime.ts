@@ -69,6 +69,7 @@ export interface ExternalDockerRuntimeOptions {
   onProgress?: (message: string) => void
 }
 
+/** Runs external docker workflows. */
 export class ExternalDockerRuntime implements ExternalAdapterRuntime {
   readonly #options: ExternalDockerRuntimeOptions
   readonly #images = new Map<string, ExternalImageInfo>()
@@ -79,6 +80,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     this.#options = options
   }
 
+  /** Resolves image. */
   async resolveImage(
     candidate: ExternalBenchmarkCandidate,
   ): Promise<ResolvedExternalImage> {
@@ -104,6 +106,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     }
   }
 
+  /** Returns or updates prepare state. */
   async prepare(
     input: Parameters<ExternalAdapterRuntime['prepare']>[0],
   ): Promise<ExternalPreparedWorkspace> {
@@ -134,6 +137,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     }
   }
 
+  /** Captures patch. */
   async capturePatch(
     input: Parameters<ExternalAdapterRuntime['capturePatch']>[0],
   ): Promise<string> {
@@ -168,6 +172,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     return result.stdout
   }
 
+  /** Returns or updates grade state. */
   async grade(
     input: Parameters<ExternalAdapterRuntime['grade']>[0],
   ): Promise<IsolatedGraderRunResult> {
@@ -289,12 +294,14 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     return result
   }
 
+  /** Releases all owned resources. */
   async dispose(workspaces: ExternalPreparedWorkspace[]): Promise<void> {
     await Promise.all(
       workspaces.map((workspace) => this.#removeVolume(workspace.mount.name)),
     )
   }
 
+  /** Returns or updates cleanup images state. */
   async cleanupImages(): Promise<{ removed: number; failed: number }> {
     await Promise.all(
       [...this.#volumes].map((volume) => this.#removeVolume(volume)),
@@ -775,6 +782,7 @@ interface VerifierResult {
   targetResults: boolean[]
 }
 
+/** Returns or updates external volume initializer args state. */
 export function externalVolumeInitializerArgs(input: {
   container: string
   image: string
@@ -815,6 +823,7 @@ function compatibilityDiagnostic(result: VerifierResult) {
   }
 }
 
+/** Parses external verifier. */
 export function parseExternalVerifier(
   candidate: ExternalBenchmarkCandidate,
   command: DockerCommandResult,

@@ -55,6 +55,7 @@ interface StopReason {
   message: string
 }
 
+/** Runs docker worker. */
 export async function runDockerWorker(
   input: DockerWorkerRunInput,
 ): Promise<DockerWorkerResult> {

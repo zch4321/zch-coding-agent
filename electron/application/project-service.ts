@@ -37,6 +37,7 @@ export interface ProjectServiceOptions {
 
 type ProjectUpdatePatch = Static<typeof ProjectUpdatePayloadSchema>['patch']
 
+/** Provides project operations. */
 export class ProjectService {
   readonly #coordinator: ApplicationStateCoordinator
   readonly #repository: ProjectRepository
@@ -55,12 +56,14 @@ export class ProjectService {
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
+  /** Lists the currently available records. */
   async list(): Promise<ProjectRecord[]> {
     return (
       await this.#coordinator.query((reader) => this.#repository.list(reader))
     ).value
   }
 
+  /** Returns the requested record. */
   async get(projectId: ProjectId): Promise<ProjectRecord> {
     const record = (
       await this.#coordinator.query((reader) =>
@@ -73,6 +76,7 @@ export class ProjectService {
     return record
   }
 
+  /** Returns or updates add state. */
   async add(input: {
     path: string
     name?: string
@@ -107,6 +111,7 @@ export class ProjectService {
     }
   }
 
+  /** Updates the requested record. */
   async update(input: {
     projectId: ProjectId
     expectedRevision: number
@@ -175,6 +180,7 @@ export class ProjectService {
     return result
   }
 
+  /** Removes the requested record. */
   async remove(input: {
     projectId: ProjectId
     expectedRevision: number

@@ -12,6 +12,7 @@ export interface BoundedOutputSnapshot {
   discardedHash?: string
 }
 
+/** Encapsulates bounded process output behavior. */
 export class BoundedProcessOutput {
   readonly #maxBytes: number
   readonly #headBytesLimit: number
@@ -31,6 +32,7 @@ export class BoundedProcessOutput {
     this.#tailBytesLimit = this.#maxBytes - this.#headBytesLimit
   }
 
+  /** Returns or updates append state. */
   append(stream: OutputStream, value: Buffer | string): void {
     const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
 
@@ -117,6 +119,7 @@ export class BoundedProcessOutput {
     ).toString('utf8')
   }
 
+  /** Returns a snapshot of the current state. */
   snapshot(): BoundedOutputSnapshot {
     return {
       stdout: this.#streamContent('stdout'),

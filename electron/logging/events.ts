@@ -524,6 +524,7 @@ export interface TraceEventFactory {
   next(input: TraceEventInput): TraceEvent
 }
 
+/** Creates trace event. */
 export function createTraceEvent(
   input: TraceEventInput,
   seq: number,

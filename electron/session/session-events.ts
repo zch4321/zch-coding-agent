@@ -8,6 +8,7 @@ import type {
   TerminalEventDraftEnvelope,
 } from './session-types'
 
+/** Publishes session event events. */
 export class SessionEventEmitter {
   readonly #eventSink: RuntimeEventSink
   readonly #getSession: (sessionId: SessionId) => SessionState | undefined
@@ -20,6 +21,7 @@ export class SessionEventEmitter {
     this.#getSession = options.getSession
   }
 
+  /** Emits agent. */
   emitAgent(session: SessionState, event: AgentEventDraft): void {
     if (
       session.closed &&
@@ -37,6 +39,7 @@ export class SessionEventEmitter {
     } as Parameters<RuntimeEventSink['publishAgent']>[0])
   }
 
+  /** Emits terminal. */
   emitTerminal(event: TerminalEventDraft): void {
     const session = this.#getSession(event.sessionId)
     if (!session) {

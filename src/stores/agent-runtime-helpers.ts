@@ -60,10 +60,12 @@ export interface SendMessageOptions {
   clearInput?: boolean
 }
 
+/** Returns or updates request id state. */
 export function requestId(prefix: string): string {
   return `${prefix}:${crypto.randomUUID()}`
 }
 
+/** Normalizes send message options. */
 export function normalizeSendMessageOptions(
   value: SendMessageOptions | Event = {},
 ): SendMessageOptions {
@@ -74,6 +76,7 @@ export function normalizeSendMessageOptions(
   return {}
 }
 
+/** Parses mention attachments. */
 export function parseMentionAttachments(
   message: string,
 ): ContextAttachmentChip[] {
@@ -98,12 +101,14 @@ export function parseMentionAttachments(
   return attachments
 }
 
+/** Returns or updates attachment refs state. */
 export function attachmentRefs(
   attachments: ContextAttachmentChip[],
 ): ContextAttachmentRef[] {
   return attachments.map(({ kind, path, source }) => ({ kind, path, source }))
 }
 
+/** Returns or updates message text state. */
 export function messageText(record: MessageRecord): string {
   return record.parts
     .filter(
@@ -116,6 +121,7 @@ export function messageText(record: MessageRecord): string {
     .join('\n')
 }
 
+/** Returns or updates original user record state. */
 export function originalUserRecord(
   record: MessageRecord | undefined,
 ): record is Extract<MessageRecord, { kind: 'user_input' }> & {
@@ -135,11 +141,13 @@ export function originalUserRecord(
   )
 }
 
+/** Returns or updates project name state. */
 export function projectName(path: string): string {
   const normalized = path.replace(/\\/gu, '/')
   return normalized.split('/').filter(Boolean).at(-1) ?? path
 }
 
+/** Returns or updates blank overlay state. */
 export function blankOverlay(): SessionOverlay {
   return {
     status: 'idle',
@@ -154,6 +162,7 @@ export function blankOverlay(): SessionOverlay {
   }
 }
 
+/** Returns or updates pending approval from snapshot state. */
 export function pendingApprovalFromSnapshot(
   runtime: ActiveRunPublicSnapshot,
 ): PendingApproval | undefined {

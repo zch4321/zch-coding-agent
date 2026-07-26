@@ -34,11 +34,14 @@ export interface MessageSearchQuery {
   scanLimit?: number
 }
 
+/** Persists and queries message records. */
 export class MessageRepository {
+  /** Returns or updates insert state. */
   insert(transaction: PersistenceTransaction, record: MessageRecord): void {
     insertMessageRow(transaction, encodeMessageRow(record))
   }
 
+  /** Returns or updates insert many state. */
   insertMany(
     transaction: PersistenceTransaction,
     records: readonly MessageRecord[],
@@ -46,6 +49,7 @@ export class MessageRepository {
     for (const record of records) this.insert(transaction, record)
   }
 
+  /** Finds by client request id. */
   findByClientRequestId(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -61,6 +65,7 @@ export class MessageRepository {
     return row ? decodeMessageRow(row) : undefined
   }
 
+  /** Returns the requested record. */
   get(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -76,6 +81,7 @@ export class MessageRepository {
     return row ? decodeMessageRow(row) : undefined
   }
 
+  /** Lists through. */
   listThrough(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -101,6 +107,7 @@ export class MessageRepository {
       .map(decodeMessageRow)
   }
 
+  /** Lists page. */
   listPage(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -159,6 +166,7 @@ export class MessageRepository {
     return page
   }
 
+  /** Lists active history. */
   listActiveHistory(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -176,6 +184,7 @@ export class MessageRepository {
       .map(decodeMessageRow)
   }
 
+  /** Searches text. */
   searchText(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -224,6 +233,7 @@ export class MessageRepository {
       .slice(0, limit)
   }
 
+  /** Sets in history through. */
   setInHistoryThrough(
     transaction: PersistenceTransaction,
     sessionId: SessionId,
@@ -240,6 +250,7 @@ export class MessageRepository {
     return Number(result.changes)
   }
 
+  /** Lists all. */
   listAll(reader: PersistenceReader, sessionId: SessionId): MessageRecord[] {
     return reader
       .prepare(
@@ -252,6 +263,7 @@ export class MessageRepository {
       .map(decodeMessageRow)
   }
 
+  /** Updates branch state. */
   updateBranchState(
     transaction: PersistenceTransaction,
     record: Pick<

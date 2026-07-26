@@ -62,6 +62,7 @@ export interface StoredFileChangeRow extends FileChangeSummaryRow {
   payload_bytes: number
 }
 
+/** Returns or updates encode stored file change row state. */
 export function encodeStoredFileChangeRow(
   record: StoredFileChangeRecord,
 ): StoredFileChangeRow {
@@ -95,6 +96,7 @@ export function encodeStoredFileChangeRow(
   }
 }
 
+/** Returns or updates decode stored file change row state. */
 export function decodeStoredFileChangeRow(
   row: Record<string, unknown>,
 ): StoredFileChangeRecord {
@@ -125,6 +127,7 @@ export function decodeStoredFileChangeRow(
   return record
 }
 
+/** Returns or updates decode file change summary row state. */
 export function decodeFileChangeSummaryRow(
   row: Record<string, unknown>,
 ): FileChangeSummary {
@@ -172,6 +175,7 @@ export function decodeFileChangeSummaryRow(
   return summary
 }
 
+/** Converts the input to file change summary. */
 export function toFileChangeSummary(
   record: StoredFileChangeRecord,
 ): FileChangeSummary {

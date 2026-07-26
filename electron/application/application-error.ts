@@ -8,6 +8,7 @@ export type ApplicationErrorCode =
   | 'RESOURCE_CHANGED'
   | 'PERSISTENCE_FAILURE'
 
+/** Reports application failures. */
 export class ApplicationError extends Error {
   readonly code: ApplicationErrorCode
   readonly details?: Readonly<Record<string, unknown>>
@@ -29,6 +30,7 @@ export class ApplicationError extends Error {
   }
 }
 
+/** Normalizes application error. */
 export function normalizeApplicationError(error: unknown): ApplicationError {
   if (error instanceof ApplicationError) return error
   if (error instanceof PersistenceError) {

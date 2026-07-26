@@ -66,6 +66,7 @@ export interface BenchmarkCliArguments {
   externalImageRetention: 'run' | 'keep'
 }
 
+/** Reports benchmark cli failures. */
 export class BenchmarkCliError extends Error {
   readonly code = 'BENCHMARK_CLI_INVALID'
 
@@ -97,6 +98,7 @@ export interface BenchmarkCliOptions {
   }
 }
 
+/** Parses benchmark arguments. */
 export function parseBenchmarkArguments(argv: string[]): BenchmarkCliArguments {
   if (argv[0] !== 'run') throw new BenchmarkCliError('Expected the run command')
   const single = new Map<string, string>()
@@ -227,6 +229,7 @@ export function parseBenchmarkArguments(argv: string[]): BenchmarkCliArguments {
   }
 }
 
+/** Runs benchmark cli. */
 export async function runBenchmarkCli(
   argv: string[],
   options: BenchmarkCliOptions = {},

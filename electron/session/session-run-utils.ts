@@ -3,18 +3,22 @@ import type { ToolResult } from '../tools/types'
 import { ContextBudgetError } from '../tools/context-budget'
 import type { ModelProfile } from '../providers/model-catalog'
 
+/** Returns or updates delay state. */
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** Returns or updates tool result for provider state. */
 export function toolResultForProvider(result: ToolResult): string {
   return JSON.stringify(result)
 }
 
+/** Normalizes tool result. */
 export function normalizeToolResult(result: ToolResult): ToolResultEnvelope {
   return result as ToolResultEnvelope
 }
 
+/** Returns or updates tool failure state. */
 export function toolFailure(error: unknown, signal: AbortSignal): ToolResult {
   if (signal.aborted) {
     return { status: 'cancelled', message: 'The run was cancelled' }
@@ -32,6 +36,7 @@ export function toolFailure(error: unknown, signal: AbortSignal): ToolResult {
   }
 }
 
+/** Returns or updates final status from error state. */
 export function finalStatusFromError(
   error: unknown,
   signal: AbortSignal,
@@ -52,6 +57,7 @@ export function finalStatusFromError(
   return 'failed'
 }
 
+/** Returns or updates model prompt budget state. */
 export function modelPromptBudget(
   model: Pick<ModelProfile, 'contextWindowTokens' | 'maxOutputTokens'>,
 ): number {

@@ -29,6 +29,7 @@ export interface SessionTooling {
   mcpGateway?: McpToolGateway
 }
 
+/** Creates session tooling. */
 export function createSessionTooling(options: {
   configStore: ConfigStore
   terminals: SessionTerminalController

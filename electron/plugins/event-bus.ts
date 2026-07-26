@@ -34,6 +34,7 @@ function readonlySnapshot<Value>(value: Value): Readonly<Value> {
   return deepFreeze(structuredClone(value))
 }
 
+/** Encapsulates plugin event bus behavior. */
 export class PluginEventBus implements PluginApi {
   readonly #timeoutMs: number
   readonly #onDiagnostic: PluginEventBusOptions['onDiagnostic']
@@ -45,6 +46,7 @@ export class PluginEventBus implements PluginApi {
     this.#onDiagnostic = options.onDiagnostic
   }
 
+  /** Returns or updates on state. */
   on<Name extends HookName>(
     hook: Name,
     handler: HookHandler<Name>,
@@ -62,10 +64,12 @@ export class PluginEventBus implements PluginApi {
     }
   }
 
+  /** Sets tool registration port. */
   setToolRegistrationPort(port: ToolRegistrationPort | undefined): void {
     this.#toolRegistrationPort = port
   }
 
+  /** Registers tool. */
   registerTool(definition: ToolDefinition): void {
     if (!this.#toolRegistrationPort) {
       throw new Error('Tool registration is not available in the current stage')
@@ -74,6 +78,7 @@ export class PluginEventBus implements PluginApi {
     this.#toolRegistrationPort.registerTool(definition)
   }
 
+  /** Emits an event to registered listeners. */
   emit(
     hook: 'beforeLLMCall',
     context: HookContextMap['beforeLLMCall'],

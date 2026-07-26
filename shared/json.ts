@@ -32,6 +32,7 @@ export const CANONICAL_JSON_LIMITS: JsonValueLimits = {
   maxNodes: 100_000,
 }
 
+/** Validates bounded json value and throws when it is invalid. */
 export function assertBoundedJsonValue(
   value: unknown,
   limits: JsonValueLimits = CANONICAL_JSON_LIMITS,

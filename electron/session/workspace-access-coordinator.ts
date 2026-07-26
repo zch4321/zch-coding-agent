@@ -72,6 +72,7 @@ export class WorkspaceAccessCoordinator {
     this.#onWriterChanged = options?.onWriterChanged ?? (() => undefined)
   }
 
+  /** Acquires the requested resource lease. */
   acquire(input: {
     limit: number
     workspace: string
@@ -147,6 +148,7 @@ export class WorkspaceAccessCoordinator {
     }
   }
 
+  /** Acquires file change revert. */
   acquireFileChangeRevert(input: {
     workspace: string
     sessionId: SessionId
@@ -183,15 +185,18 @@ export class WorkspaceAccessCoordinator {
     }
   }
 
+  /** Returns or updates writer for state. */
   writerFor(workspace: string): WorkspaceWriterOwner | undefined {
     const owner = this.#writers.get(workspace)
     return owner ? { ...owner } : undefined
   }
 
+  /** Returns or updates active run count state. */
   activeRunCount(): number {
     return this.#activeRuns.size
   }
 
+  /** Releases all. */
   releaseAll(): void {
     const writers = [...this.#writers.values()]
     this.#activeRuns.clear()

@@ -2,10 +2,12 @@ function escapeRegExp(value: string): string {
   return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&')
 }
 
+/** Normalizes portable path. */
 export function normalizePortablePath(value: string): string {
   return value.replace(/\\/g, '/').replace(/^\/+/, '')
 }
 
+/** Returns or updates glob to reg exp state. */
 export function globToRegExp(pattern: string): RegExp {
   const normalized = normalizePortablePath(pattern || '**/*')
   let source = '^'
@@ -42,6 +44,7 @@ export function globToRegExp(pattern: string): RegExp {
   return new RegExp(source)
 }
 
+/** Returns or updates matches glob state. */
 export function matchesGlob(pattern: string, value: string): boolean {
   return globToRegExp(pattern).test(normalizePortablePath(value))
 }

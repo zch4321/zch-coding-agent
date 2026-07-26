@@ -1,5 +1,6 @@
 import { sha256Bytes } from '../cases/hash'
 
+/** Returns or updates sha256 canonical state. */
 export function sha256Canonical(value: unknown): string {
   return sha256Bytes(JSON.stringify(canonicalize(value)))
 }

@@ -30,6 +30,7 @@ export interface PreparedBenchmarkWorkspace {
   files: string[]
 }
 
+/** Prepares benchmark workspace. */
 export async function prepareBenchmarkWorkspace(input: {
   loadedCase: LoadedBenchmarkCase
   destination: string
@@ -123,6 +124,7 @@ export async function prepareBenchmarkWorkspace(input: {
   return { workspace: input.destination, baselineCommit, treeSha256, files }
 }
 
+/** Scans agent visible workspace. */
 export async function scanAgentVisibleWorkspace(input: {
   workspace: string
   expectedFiles: string[]

@@ -57,6 +57,7 @@ export type IsolatedGraderRunner = (
   input: RunIsolatedGraderInput,
 ) => Promise<IsolatedGraderRunResult>
 
+/** Runs isolated grader. */
 export async function runIsolatedGrader(
   input: RunIsolatedGraderInput,
 ): Promise<IsolatedGraderRunResult> {

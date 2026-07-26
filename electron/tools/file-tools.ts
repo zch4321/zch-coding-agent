@@ -112,6 +112,7 @@ function fileLimits(limits?: Partial<FileToolLimits>): FileToolLimits {
   }
 }
 
+/** Prepares tool resource plan. */
 export async function prepareToolResourcePlan(input: {
   workspace: string
   call: ToolCall
@@ -243,6 +244,7 @@ function errorResult(error: unknown): ToolResult {
   }
 }
 
+/** Creates file tool definitions. */
 export function createFileToolDefinitions(
   getLimits: () => Partial<FileToolLimits> = () => DEFAULT_FILE_TOOL_LIMITS,
 ): ToolDefinition[] {
@@ -380,6 +382,7 @@ export function createFileToolDefinitions(
   return [createFile, applyPatch, deleteFile]
 }
 
+/** Registers file tools. */
 export function registerFileTools(
   registry: ToolRegistry,
   getLimits?: () => Partial<FileToolLimits>,

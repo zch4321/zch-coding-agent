@@ -44,6 +44,7 @@ export interface SkillRecord extends SkillSummary {
   body: string
 }
 
+/** Reports skill failures. */
 export class SkillError extends Error {
   constructor(
     readonly code: string,
@@ -114,6 +115,7 @@ function isSkillIndexEntry(value: unknown): value is SkillIndexEntry {
   )
 }
 
+/** Parses skill document. */
 export function parseSkillDocument(
   content: string,
   fileName = 'skill.md',
@@ -223,6 +225,7 @@ export function parseSkillDocument(
   }
 }
 
+/** Validates skill url. */
 export function validateSkillUrl(input: string): URL {
   let url: URL
 
@@ -309,6 +312,7 @@ function defaultConnectHttps(
   })
 }
 
+/** Coordinates skills lifecycle and operations. */
 export class SkillsManager {
   readonly #directory: string
   readonly #indexPath: string
@@ -327,12 +331,14 @@ export class SkillsManager {
     this.#now = options.now ?? (() => new Date())
   }
 
+  /** Initializes the component and its dependencies. */
   async initialize(): Promise<SkillList> {
     await mkdir(this.#directory, { recursive: true })
     await this.#loadIndex()
     return this.refresh()
   }
 
+  /** Lists the currently available records. */
   list(): SkillList {
     return {
       skills: [...this.#records.values()]
@@ -350,6 +356,7 @@ export class SkillsManager {
     }
   }
 
+  /** Reads the requested data. */
   read(name: string): SkillRecord | undefined {
     if (!SKILL_NAME.test(name)) {
       return undefined
@@ -359,6 +366,7 @@ export class SkillsManager {
     return skill?.enabled ? structuredClone(skill) : undefined
   }
 
+  /** Returns or updates summary prompt state. */
   summaryPrompt(maxChars = 12_000): string {
     const enabled = [...this.#records.values()]
       .filter((skill) => skill.enabled)
@@ -397,6 +405,7 @@ export class SkillsManager {
     return result.trimEnd()
   }
 
+  /** Returns or updates refresh state. */
   async refresh(): Promise<SkillList> {
     const diagnostics = this.#diagnostics.filter(
       (item) => item.file === 'index.json',
@@ -486,6 +495,7 @@ export class SkillsManager {
     return this.list()
   }
 
+  /** Sets enabled. */
   async setEnabled(name: string, enabled: boolean): Promise<boolean> {
     const skill = this.#records.get(name)
 
@@ -507,6 +517,7 @@ export class SkillsManager {
     return true
   }
 
+  /** Returns or updates install from file state. */
   async installFromFile(filePath: string): Promise<SkillSummary> {
     const fileStat = await lstat(filePath)
 
@@ -527,6 +538,7 @@ export class SkillsManager {
     )
   }
 
+  /** Returns or updates install from url state. */
   async installFromUrl(input: string): Promise<SkillSummary> {
     let url = validateSkillUrl(input)
     const controller = new AbortController()

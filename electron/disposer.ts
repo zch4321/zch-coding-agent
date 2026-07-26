@@ -23,6 +23,7 @@ interface RegisteredTask {
 
 const DEFAULT_TIMEOUT_MS = 5_000
 
+/** Encapsulates disposer behavior. */
 export class Disposer {
   readonly #timeoutMs: number
   readonly #onError: (error: unknown) => void
@@ -40,6 +41,7 @@ export class Disposer {
     this.#onError = options.onError ?? (() => undefined)
   }
 
+  /** Returns or updates add state. */
   add(disposable: Disposable | DisposeTask): () => void {
     if (this.#disposePromise) {
       throw new Error('Cannot register a resource after disposal has started')
@@ -60,6 +62,7 @@ export class Disposer {
     }
   }
 
+  /** Releases all owned resources. */
   dispose(): Promise<DisposeReport> {
     this.#disposePromise ??= this.#run()
     return this.#disposePromise

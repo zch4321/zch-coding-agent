@@ -52,6 +52,7 @@ export type McpCallResolution =
       definition: ToolDefinition
     }
 
+/** Mediates mcp tool calls. */
 export class McpToolGateway {
   readonly #manager: McpManager
   readonly #configStore: ConfigStore
@@ -62,6 +63,7 @@ export class McpToolGateway {
     this.#configStore = configStore
   }
 
+  /** Resolves call. */
   resolveCall(session: SessionState, call: ToolCall): McpCallResolution {
     if (call.toolId !== MCP_CALL_TOOL_ID) return { matched: false }
     if (!this.#validateCall(call.args)) {
@@ -155,6 +157,7 @@ export class McpToolGateway {
   }
 }
 
+/** Registers mcp tools. */
 export function registerMcpTools(
   registry: ToolRegistry,
   options: {

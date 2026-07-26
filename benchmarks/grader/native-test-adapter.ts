@@ -10,6 +10,7 @@ import {
 } from './contracts'
 import type { IsolatedGraderRunner } from './coordinator'
 
+/** Runs trusted native test grader. */
 export const runTrustedNativeTestGrader: IsolatedGraderRunner = async (
   input,
 ) => {

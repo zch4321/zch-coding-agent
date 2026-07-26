@@ -28,6 +28,7 @@ const validateCase = compileSchema(BenchmarkCaseSchema)
 const validateArchive = compileSchema(BenchmarkArchiveSchema)
 const validatePrivateSpec = compileSchema(PrivateCaseSpecSchema)
 
+/** Reports benchmark case validation failures. */
 export class BenchmarkCaseValidationError extends Error {
   readonly code = 'BENCHMARK_CASE_INVALID'
 
@@ -37,6 +38,7 @@ export class BenchmarkCaseValidationError extends Error {
   }
 }
 
+/** Loads benchmark suite. */
 export async function loadBenchmarkSuite(input: {
   benchmarkRoot: string
   suiteFile: string
@@ -143,6 +145,7 @@ export async function loadBenchmarkSuite(input: {
   }
 }
 
+/** Loads private case spec. */
 export async function loadPrivateCaseSpec(
   loaded: LoadedBenchmarkCase,
 ): Promise<PrivateCaseSpec> {
@@ -163,6 +166,7 @@ export async function loadPrivateCaseSpec(
   return spec
 }
 
+/** Loads case archive. */
 export async function loadCaseArchive(
   loaded: LoadedBenchmarkCase,
 ): Promise<BenchmarkArchive> {

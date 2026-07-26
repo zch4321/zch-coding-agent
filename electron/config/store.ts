@@ -118,6 +118,7 @@ function providerFallback(
   )
 }
 
+/** Persists and retrieves config state. */
 export class ConfigStore {
   readonly #filePath: string
   readonly #secretStore: SecretStore
@@ -148,6 +149,7 @@ export class ConfigStore {
     )
   }
 
+  /** Initializes the component and its dependencies. */
   async initialize(): Promise<{
     config: PublicConfig
     secretStorage: SecretStorageStatus
@@ -164,6 +166,7 @@ export class ConfigStore {
     }
   }
 
+  /** Returns public config. */
   getPublicConfig(): PublicConfig {
     return toPublicConfig(
       this.#config,
@@ -184,14 +187,17 @@ export class ConfigStore {
     )
   }
 
+  /** Returns internal config. */
   getInternalConfig(): AppConfig {
     return structuredClone(this.#config)
   }
 
+  /** Returns deep seek api key. */
   async getDeepSeekApiKey(): Promise<string | undefined> {
     return this.getProviderApiKey(DEFAULT_PROVIDER_ID)
   }
 
+  /** Returns provider api key. */
   async getProviderApiKey(providerId: string): Promise<string | undefined> {
     const provider = getAppProvider(this.#config, providerId)
     const reference = provider?.apiKeyRef
@@ -204,6 +210,7 @@ export class ConfigStore {
     return stored ?? environment
   }
 
+  /** Returns provider api key for revision. */
   async getProviderApiKeyForRevision(
     providerId: string,
     revision: number,
@@ -221,6 +228,7 @@ export class ConfigStore {
     return stored ?? this.#environmentApiKeys[provider.id]
   }
 
+  /** Returns web search api key. */
   async getWebSearchApiKey(): Promise<string | undefined> {
     const reference = this.#config.webSearch.apiKeyRef
     return reference ? this.#secretStore.get(reference) : undefined
@@ -239,14 +247,17 @@ export class ConfigStore {
     }
   }
 
+  /** Returns active provider. */
   getActiveProvider(): AppProviderConfig {
     return structuredClone(getActiveAppProvider(this.#config))
   }
 
+  /** Returns mcp servers. */
   getMcpServers(): McpServerConfig[] {
     return structuredClone(this.#config.mcpServers)
   }
 
+  /** Returns or updates reload from disk state. */
   reloadFromDisk(): Promise<PublicConfig> {
     const operation = this.#mutation.then(async () => {
       const next = await this.#read()
@@ -261,6 +272,7 @@ export class ConfigStore {
     return operation
   }
 
+  /** Sets mcp server enabled. */
   setMcpServerEnabled(
     serverId: string,
     enabled: boolean,
@@ -289,6 +301,7 @@ export class ConfigStore {
     return operation
   }
 
+  /** Updates the requested record. */
   update(request: ConfigSetRequest): Promise<PublicConfig> {
     const operation = this.#mutation.then(() => this.#apply(request))
     this.#mutation = operation.then(
@@ -298,6 +311,7 @@ export class ConfigStore {
     return operation
   }
 
+  /** Sets provider model catalog. */
   setProviderModelCatalog(
     providerId: string,
     models: AppProviderConfig['modelCatalog'],
@@ -324,6 +338,7 @@ export class ConfigStore {
     return operation
   }
 
+  /** Sets deep seek model catalog. */
   setDeepSeekModelCatalog(
     models: AppProviderConfig['modelCatalog'],
     fetchedAt: string,

@@ -2,6 +2,7 @@ const MAX_PATCH_HUNKS = 100
 const MAX_CHANGED_LINES = 10_000
 const PATCH_ERROR_CONTEXT_LINES = 8
 
+/** Reports text patch failures. */
 export class TextPatchError extends Error {
   readonly code = 'INVALID_PATCH'
 
@@ -207,6 +208,7 @@ function formatPatchPreview(lines: string[], startLine: number): string {
     .join('\n')
 }
 
+/** Applies text patch. */
 export function applyTextPatch(
   source: string,
   patch: string,

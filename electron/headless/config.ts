@@ -16,21 +16,26 @@ import { HeadlessConfigSchema, type HeadlessConfig } from './contracts'
 const MAX_HEADLESS_CONFIG_BYTES = 1_048_576
 const validateHeadlessConfig = compileSchema(HeadlessConfigSchema)
 
+/** Adapts headless secret storage to its host interface. */
 class HeadlessSecretStorageAdapter implements SafeStorageAdapter {
   readonly platform = process.platform
 
+  /** Determines whether is async encryption available. */
   async isAsyncEncryptionAvailable(): Promise<boolean> {
     return false
   }
 
+  /** Returns selected storage backend. */
   getSelectedStorageBackend(): string {
     return 'headless-environment'
   }
 
+  /** Returns or updates encrypt string async state. */
   async encryptStringAsync(): Promise<Buffer> {
     throw new Error('Headless secret persistence is disabled')
   }
 
+  /** Returns or updates decrypt string async state. */
   async decryptStringAsync(): Promise<{
     result: string
     shouldReEncrypt: boolean
@@ -39,6 +44,7 @@ class HeadlessSecretStorageAdapter implements SafeStorageAdapter {
   }
 }
 
+/** Reports headless config failures. */
 export class HeadlessConfigError extends Error {
   readonly code = 'HEADLESS_CONFIG_INVALID'
 
@@ -55,6 +61,7 @@ export interface PreparedHeadlessConfig {
   userDataDirectory: string
 }
 
+/** Loads headless config. */
 export async function loadHeadlessConfig(
   filePath: string,
 ): Promise<HeadlessConfig> {
@@ -82,6 +89,7 @@ export async function loadHeadlessConfig(
   return structuredClone(candidate) as HeadlessConfig
 }
 
+/** Prepares headless config. */
 export async function prepareHeadlessConfig(input: {
   config: HeadlessConfig
   artifactsDirectory: string

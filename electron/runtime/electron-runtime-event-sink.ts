@@ -4,6 +4,7 @@ import type { AgentEvent, TerminalEvent } from '../../shared/agent-events'
 import { sendAgentEvent, sendTerminalEvent } from '../ipc/event-sink'
 import type { RuntimeEventListener } from './runtime-events'
 
+/** Creates electron runtime event listener. */
 export function createElectronRuntimeEventListener(
   getWebContents: () => WebContents | undefined,
 ): RuntimeEventListener {

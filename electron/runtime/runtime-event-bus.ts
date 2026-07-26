@@ -46,6 +46,7 @@ function completionFrom(event: AgentEvent): RunCompletion | undefined {
   }
 }
 
+/** Encapsulates runtime event bus behavior. */
 export class RuntimeEventBus implements RuntimeEventSink {
   readonly #listeners = new Set<RuntimeEventListener>()
   readonly #completions = new Map<string, RunCompletion>()
@@ -61,6 +62,7 @@ export class RuntimeEventBus implements RuntimeEventSink {
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
+  /** Returns or updates publish agent state. */
   publishAgent(event: AgentEvent): void {
     if (this.#disposed) return
     if (!validateAgentEvent(event)) {
@@ -74,6 +76,7 @@ export class RuntimeEventBus implements RuntimeEventSink {
     this.#notify('onAgentEvent', event)
   }
 
+  /** Returns or updates publish terminal state. */
   publishTerminal(event: TerminalEvent): void {
     if (this.#disposed) return
     if (!validateTerminalEvent(event)) {
@@ -82,6 +85,7 @@ export class RuntimeEventBus implements RuntimeEventSink {
     this.#notify('onTerminalEvent', event)
   }
 
+  /** Returns or updates subscribe state. */
   subscribe(listener: RuntimeEventListener): RuntimeEventUnsubscribe {
     if (this.#disposed) {
       throw new Error('Runtime event bus is disposed')
@@ -90,6 +94,7 @@ export class RuntimeEventBus implements RuntimeEventSink {
     return () => this.#listeners.delete(listener)
   }
 
+  /** Waits for for run. */
   waitForRun(
     sessionId: SessionId,
     runId: RunId,
@@ -126,6 +131,7 @@ export class RuntimeEventBus implements RuntimeEventSink {
     })
   }
 
+  /** Releases all owned resources. */
   dispose(): void {
     if (this.#disposed) return
     this.#disposed = true

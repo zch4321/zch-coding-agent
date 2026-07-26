@@ -9,6 +9,7 @@ function openPlanItems(session: SessionState) {
   )
 }
 
+/** Encapsulates session orchestration planner behavior. */
 export class SessionOrchestrationPlanner {
   readonly #orchestratorMessages: SessionOrchestratorMessages
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
@@ -21,6 +22,7 @@ export class SessionOrchestrationPlanner {
     this.#emit = options.emit
   }
 
+  /** Returns or updates next step state. */
   async nextStep(
     session: SessionState,
     run: ActiveRun,

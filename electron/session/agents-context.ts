@@ -85,6 +85,7 @@ function agentsCandidates(
     .slice(0, MAX_AGENTS_FILES)
 }
 
+/** Loads agents instructions. */
 export async function loadAgentsInstructions(input: {
   workspace: string
   attachments: ContextAttachmentRef[]
@@ -130,6 +131,7 @@ export async function loadAgentsInstructions(input: {
   return results
 }
 
+/** Formats agents instructions. */
 export function formatAgentsInstructions(
   instructions: AgentsInstruction[],
 ): string {
@@ -148,6 +150,7 @@ export function formatAgentsInstructions(
   return sections.join('\n\n')
 }
 
+/** Returns or updates agents cache key state. */
 export function agentsCacheKey(
   workspace: string,
   attachmentPath: string,

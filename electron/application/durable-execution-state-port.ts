@@ -24,6 +24,7 @@ interface DurableSessionBinding {
   invalid: boolean
 }
 
+/** Encapsulates durable execution state port behavior. */
 export class DurableExecutionStatePort implements SessionExecutionStatePort {
   readonly #sessions: SessionService
   readonly #bindings = new Map<SessionId, DurableSessionBinding>()
@@ -33,12 +34,14 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     this.#sessions = sessions
   }
 
+  /** Sets invalidation handler. */
   setInvalidationHandler(
     handler: (sessionId: SessionId, runId?: RunId) => void,
   ): void {
     this.#onInvalid = handler
   }
 
+  /** Registers new. */
   registerNew(record: SessionRecord, ownerToken: string): void {
     if (record.lastSeq !== 0 || record.revision !== 1) {
       throw new ApplicationError(
@@ -49,10 +52,12 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     this.#register(record, true, ownerToken)
   }
 
+  /** Registers existing. */
   registerExisting(record: SessionRecord, ownerToken: string): void {
     this.#register(record, false, ownerToken)
   }
 
+  /** Applies record. */
   applyRecord(
     sessionId: SessionId,
     record: SessionRecord,
@@ -69,6 +74,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     binding.isNew = false
   }
 
+  /** Begins request. */
   beginRequest(
     sessionId: SessionId,
     clientRequestId: string,
@@ -92,6 +98,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     return promise
   }
 
+  /** Marks request as failed. */
   failRequest(
     sessionId: SessionId,
     clientRequestId: string,
@@ -104,6 +111,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     waiter.reject(error)
   }
 
+  /** Removes the entry from runtime tracking. */
   forget(sessionId: SessionId, ownerToken: string): void {
     const binding = this.#bindings.get(sessionId)
     if (!binding || binding.ownerToken !== ownerToken) return
@@ -116,6 +124,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     binding.waiters.clear()
   }
 
+  /** Commits the pending durable mutation. */
   commit(
     session: SessionState,
     input: SessionExecutionCommit,
@@ -139,6 +148,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     return result
   }
 
+  /** Records the supplied event. */
   record(sessionId: SessionId): SessionRecord | undefined {
     const binding = this.#bindings.get(sessionId)
     if (!binding || binding.invalid) return undefined

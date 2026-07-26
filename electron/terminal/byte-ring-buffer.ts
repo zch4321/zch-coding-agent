@@ -7,6 +7,7 @@ export interface ByteRingSnapshot {
   truncated: boolean
 }
 
+/** Buffers byte ring data within configured bounds. */
 export class ByteRingBuffer {
   readonly #capacity: number
   #buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0)
@@ -16,6 +17,7 @@ export class ByteRingBuffer {
     this.#capacity = Math.max(1, capacity)
   }
 
+  /** Returns or updates append state. */
   append(value: Buffer | string): void {
     const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
     this.#totalBytes += chunk.byteLength
@@ -32,6 +34,7 @@ export class ByteRingBuffer {
         : combined
   }
 
+  /** Returns a snapshot of the current state. */
   snapshot(cursor?: number): ByteRingSnapshot {
     const startCursor = this.#totalBytes - this.#buffer.byteLength
     const requestedCursor = Math.max(0, cursor ?? startCursor)
@@ -51,6 +54,7 @@ export class ByteRingBuffer {
     }
   }
 
+  /** Clears the accumulated state. */
   clear(): void {
     this.#buffer = Buffer.alloc(0)
     this.#totalBytes = 0

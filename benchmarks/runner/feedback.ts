@@ -14,6 +14,7 @@ const FORBIDDEN_FEEDBACK_TERMS = [
   'test_patch',
 ]
 
+/** Creates benchmark feedback. */
 export function createBenchmarkFeedback(input: {
   evaluation: BenchmarkEvaluationResult
   visibility: BenchmarkFeedbackVisibility
@@ -51,6 +52,7 @@ export function createBenchmarkFeedback(input: {
   return feedback
 }
 
+/** Validates safe feedback and throws when it is invalid. */
 export function assertSafeFeedback(feedback: string): void {
   const lowered = feedback.toLowerCase()
   if (FORBIDDEN_FEEDBACK_TERMS.some((term) => lowered.includes(term))) {

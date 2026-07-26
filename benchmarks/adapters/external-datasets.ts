@@ -23,6 +23,7 @@ export interface ExternalDatasetClientOptions {
   fetch?: typeof fetch
 }
 
+/** Loads latest monthly swebench catalog. */
 export async function loadLatestMonthlySwebenchCatalog(
   options: ExternalDatasetClientOptions = {},
 ): Promise<ExternalDatasetCatalog> {
@@ -40,6 +41,7 @@ export async function loadLatestMonthlySwebenchCatalog(
   return loadMonthlySwebenchCatalog(latest, options)
 }
 
+/** Loads monthly swebench catalog. */
 export async function loadMonthlySwebenchCatalog(
   release: ExternalDatasetRelease,
   options: ExternalDatasetClientOptions = {},
@@ -65,6 +67,7 @@ export async function loadMonthlySwebenchCatalog(
   return { release, candidates, exclusions }
 }
 
+/** Loads latest swe rebench catalog. */
 export async function loadLatestSweRebenchCatalog(
   options: ExternalDatasetClientOptions = {},
 ): Promise<ExternalDatasetCatalog> {
@@ -107,6 +110,7 @@ export async function loadLatestSweRebenchCatalog(
   return { release: datasetRelease, candidates, exclusions }
 }
 
+/** Loads swe rebench catalog. */
 export async function loadSweRebenchCatalog(
   release: ExternalDatasetRelease,
 ): Promise<ExternalDatasetCatalog> {

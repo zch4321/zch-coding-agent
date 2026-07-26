@@ -28,6 +28,7 @@ export type PayloadLimitResult =
       message: string
     }
 
+/** Validates payload limits. */
 export function validatePayloadLimits(
   payload: unknown,
   limits: PayloadLimits = DEFAULT_PAYLOAD_LIMITS,
@@ -157,6 +158,7 @@ export function validatePayloadLimits(
   return { valid: true }
 }
 
+/** Converts the input to json details. */
 export function toJsonDetails(value: unknown): JsonValue | undefined {
   try {
     return JSON.parse(JSON.stringify(value)) as JsonValue

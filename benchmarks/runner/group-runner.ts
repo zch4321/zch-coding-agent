@@ -25,6 +25,7 @@ interface RunGroupState {
   completedAt?: string
 }
 
+/** Runs benchmark group. */
 export async function runBenchmarkGroup(
   input: RunBenchmarkGroupInput,
 ): Promise<BenchmarkRunGroupResult> {

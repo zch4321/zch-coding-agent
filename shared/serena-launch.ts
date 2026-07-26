@@ -14,6 +14,7 @@ function quoteArg(value: string): string {
   return /\s/u.test(value) ? JSON.stringify(value) : value
 }
 
+/** Builds serena launch args. */
 export function buildSerenaLaunchArgs(
   config: SerenaBackendConfig,
   workspace: string,
@@ -57,6 +58,7 @@ export function buildSerenaLaunchArgs(
   return args
 }
 
+/** Builds serena launch preview. */
 export function buildSerenaLaunchPreview(
   config: SerenaBackendConfig,
   workspace: string,

@@ -3,16 +3,19 @@ import type { CallId, MessageId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import { IpcFault } from '../ipc'
 
+/** Returns or updates id state. */
 export function id<Kind extends SessionId | RunId | CallId | MessageId>(
   prefix: string,
 ): Kind {
   return `${prefix}-${randomUUID()}` as Kind
 }
 
+/** Converts the input to json value. */
 export function toJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
 }
 
+/** Returns or updates redact json secrets state. */
 export function redactJsonSecrets(
   value: JsonValue,
   secrets: readonly string[],
@@ -38,6 +41,7 @@ export function redactJsonSecrets(
   return value
 }
 
+/** Returns or updates ipc fault state. */
 export function ipcFault(
   code:
     | 'PRECONDITION_FAILED'

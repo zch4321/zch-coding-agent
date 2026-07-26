@@ -67,6 +67,7 @@ export interface FileChangeRuntimeGuard {
   }): FileChangeRevertAccessResult
 }
 
+/** Provides file change operations. */
 export class FileChangeService implements FileChangeExecutionPort {
   readonly #coordinator: ApplicationStateCoordinator
   readonly #fileChanges: FileChangeRepository
@@ -88,6 +89,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
+  /** Sets runtime guard. */
   setRuntimeGuard(runtimeGuard: FileChangeRuntimeGuard): void {
     if (this.#runtimeGuard) {
       throw new Error('FileChange runtime guard is already configured')
@@ -95,6 +97,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     this.#runtimeGuard = runtimeGuard
   }
 
+  /** Lists the currently available records. */
   async list(
     sessionId: SessionId,
     query: { before?: FileChangeListCursor; limit?: number } = {},
@@ -109,6 +112,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     ).value
   }
 
+  /** Prepares mutation. */
   async prepareMutation(
     input: Parameters<FileChangeExecutionPort['prepareMutation']>[0],
   ): Promise<PreparedFileChange | undefined> {
@@ -180,6 +184,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     }
   }
 
+  /** Commits mutation. */
   async commitMutation(input: {
     workspace: string
     prepared: PreparedFileChange
@@ -293,6 +298,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     })
   }
 
+  /** Returns or updates revert state. */
   async revert(
     sessionId: SessionId,
     fileChangeId: FileChangeId,

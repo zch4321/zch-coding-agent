@@ -34,6 +34,7 @@ function captureIdForSession(sessionId: SessionId): TraceId {
   return `capture-${readable}-${randomUUID()}` as TraceId
 }
 
+/** Writes jsonl trace log records. */
 export class JsonlTraceLogger implements TraceLogger {
   readonly traceId: TraceId
   readonly #stream: WriteStream
@@ -69,6 +70,7 @@ export class JsonlTraceLogger implements TraceLogger {
     })
   }
 
+  /** Creates a new instance. */
   static async create(
     directory: string,
     sessionId: SessionId,
@@ -93,10 +95,12 @@ export class JsonlTraceLogger implements TraceLogger {
     }
   }
 
+  /** Queues peak. */
   get queuePeak(): number {
     return this.#queuePeak
   }
 
+  /** Writes the supplied data. */
   async write(input: TraceEventInput): Promise<TraceEvent> {
     if (this.#closing || this.#closed) {
       throw new Error('Trace logger is closing')
@@ -129,6 +133,7 @@ export class JsonlTraceLogger implements TraceLogger {
     })
   }
 
+  /** Releases all owned resources. */
   dispose(): Promise<void> {
     this.#disposePromise ??= this.#dispose()
     return this.#disposePromise
@@ -253,17 +258,21 @@ export class JsonlTraceLogger implements TraceLogger {
   }
 }
 
+/** Provides a no-op trace logger implementation. */
 export class NullTraceLogger implements TraceLogger {
   readonly traceId = undefined
   #nextSeq = 1
 
+  /** Queues peak. */
   get queuePeak(): number {
     return 0
   }
 
+  /** Writes the supplied data. */
   async write(input: TraceEventInput): Promise<TraceEvent> {
     return createTraceEvent(input, this.#nextSeq++, randomUUID() as EventId)
   }
 
+  /** Releases all owned resources. */
   async dispose(): Promise<void> {}
 }

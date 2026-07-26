@@ -77,6 +77,7 @@ function stripAnsi(value: string): string {
   return value.replace(ANSI_PATTERN, '')
 }
 
+/** Manages pooled terminal resources. */
 export class TerminalPool {
   readonly #options: TerminalPoolOptions
   readonly #resources = new Map<TerminalId, TerminalResource>()
@@ -87,6 +88,7 @@ export class TerminalPool {
     this.#options = options
   }
 
+  /** Opens the requested resource. */
   async open(input: {
     sessionId: SessionId
     workspace: string
@@ -170,12 +172,14 @@ export class TerminalPool {
     return cloneInfo(resource.info)
   }
 
+  /** Lists the currently available records. */
   list(sessionId: SessionId): TerminalInfo[] {
     return [...this.#resources.values()]
       .filter((resource) => resource.sessionId === sessionId)
       .map((resource) => cloneInfo(resource.info))
   }
 
+  /** Writes the supplied data. */
   write(sessionId: SessionId, id: TerminalId, data: string): boolean {
     const resource = this.#requireOwned(sessionId, id)
 
@@ -187,6 +191,7 @@ export class TerminalPool {
     return true
   }
 
+  /** Returns or updates resize state. */
   resize(
     sessionId: SessionId,
     id: TerminalId,
@@ -205,6 +210,7 @@ export class TerminalPool {
     return true
   }
 
+  /** Returns a snapshot of the current state. */
   snapshot(sessionId: SessionId, id: TerminalId): TerminalSnapshot {
     const resource = this.#requireOwned(sessionId, id)
     const snapshot = resource.scrollback.snapshot()
@@ -218,6 +224,7 @@ export class TerminalPool {
     }
   }
 
+  /** Reads the requested data. */
   read(
     sessionId: SessionId,
     id: TerminalId,
@@ -257,6 +264,7 @@ export class TerminalPool {
     }
   }
 
+  /** Closes the resource and releases its handles. */
   close(sessionId: SessionId, id: TerminalId): boolean {
     const resource = this.#resources.get(id)
 
@@ -276,6 +284,7 @@ export class TerminalPool {
     return true
   }
 
+  /** Closes session. */
   closeSession(sessionId: SessionId): void {
     for (const resource of [...this.#resources.values()]) {
       if (resource.sessionId === sessionId) {
@@ -284,6 +293,7 @@ export class TerminalPool {
     }
   }
 
+  /** Releases all owned resources. */
   async dispose(): Promise<void> {
     for (const resource of [...this.#resources.values()]) {
       void this.#disposeResource(resource)

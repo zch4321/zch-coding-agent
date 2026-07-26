@@ -14,6 +14,7 @@ function normalizeForCompare(value: string): string {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved
 }
 
+/** Returns or updates hash state. */
 export function hash(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex')
 }
@@ -144,6 +145,7 @@ async function captureParentPrecondition(
   }
 }
 
+/** Captures file precondition. */
 export async function captureFilePrecondition(
   guard: PathGuard,
   inputPath: string,
@@ -257,6 +259,7 @@ async function assertExistingParentPrecondition(
   }
 }
 
+/** Validates file precondition and throws when it is invalid. */
 export async function assertFilePrecondition(
   workspace: string,
   expected: FilePrecondition,
@@ -295,6 +298,7 @@ export async function assertFilePrecondition(
   }
 }
 
+/** Revalidates resource preconditions. */
 export async function revalidateResourcePreconditions(
   workspace: string,
   preconditions: readonly FilePrecondition[],

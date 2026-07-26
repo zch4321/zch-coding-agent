@@ -32,6 +32,7 @@ import type {
 
 type ToolAttemptStage = 'validation' | 'permission' | 'execution'
 
+/** Encapsulates file change preparation failure behavior. */
 class FileChangePreparationFailure extends Error {
   constructor(readonly cause: unknown) {
     super('Durable file change preparation failed')
@@ -54,6 +55,7 @@ function serializedBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(toJsonValue(value)), 'utf8')
 }
 
+/** Runs session tool workflows. */
 export class SessionToolRunner {
   readonly #configStore: ConfigStore
   readonly #pluginBus: PluginEventBus | undefined
@@ -112,6 +114,7 @@ export class SessionToolRunner {
     this.#setRunStatus = options.setRunStatus
   }
 
+  /** Executes tool calls. */
   async executeToolCalls(
     session: SessionState,
     run: ActiveRun,

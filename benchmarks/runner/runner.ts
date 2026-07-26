@@ -74,6 +74,7 @@ interface CompleteMarker {
   artifactsSha256: string
 }
 
+/** Runs benchmark trials. */
 export async function runBenchmarkTrials(
   input: RunBenchmarkTrialsInput,
 ): Promise<BenchmarkTrialsResult> {
@@ -694,6 +695,7 @@ async function listFiles(directory: string): Promise<string[]> {
   return files.sort()
 }
 
+/** Scans artifacts for credential. */
 export async function scanArtifactsForCredential(input: {
   directory: string
   credential: string

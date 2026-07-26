@@ -32,7 +32,9 @@ export interface SessionListQuery {
 export const MAX_SESSION_SEARCH_LENGTH = 256
 export const MAX_CROSS_SESSION_SEARCH_RESULTS = 100
 
+/** Persists and queries session records. */
 export class SessionRepository {
+  /** Returns or updates insert state. */
   insert(transaction: PersistenceTransaction, record: SessionRecord): void {
     const row = encodeSessionRow(record)
     transaction
@@ -66,6 +68,7 @@ export class SessionRepository {
       )
   }
 
+  /** Updates the requested record. */
   update(
     transaction: PersistenceTransaction,
     record: SessionRecord,
@@ -110,6 +113,7 @@ export class SessionRepository {
     return Number(result.changes) > 0
   }
 
+  /** Deletes the requested record. */
   delete(transaction: PersistenceTransaction, id: SessionId): boolean {
     const result = transaction
       .prepare('DELETE FROM sessions WHERE id = ?')
@@ -117,6 +121,7 @@ export class SessionRepository {
     return Number(result.changes) > 0
   }
 
+  /** Returns the requested record. */
   get(reader: PersistenceReader, id: SessionId): SessionRecord | undefined {
     const row = reader
       .prepare(`SELECT ${SESSION_COLUMNS} FROM sessions WHERE id = ?`)
@@ -124,6 +129,7 @@ export class SessionRepository {
     return row ? decodeSessionRow(row) : undefined
   }
 
+  /** Lists page. */
   listPage(
     reader: PersistenceReader,
     query: SessionListQuery = {},
@@ -191,6 +197,7 @@ export class SessionRepository {
     return page
   }
 
+  /** Searches candidate ids. */
   searchCandidateIds(
     reader: PersistenceReader,
     input: { text: string; projectId?: ProjectId; limit?: number },

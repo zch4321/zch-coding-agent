@@ -54,6 +54,7 @@ function dedupeAttachments(
   return result.slice(0, MAX_CONTEXT_ATTACHMENTS)
 }
 
+/** Prepares run context. */
 export async function prepareRunContext(input: {
   workspace: string
   attachments: ContextAttachmentRef[]

@@ -29,6 +29,7 @@ export interface AgentRunHandle {
   interrupt: () => boolean
 }
 
+/** Runs agent workflows. */
 export class AgentRuntime {
   readonly services: AgentRuntimeServices
   readonly events: RuntimeEventBus
@@ -46,6 +47,7 @@ export class AgentRuntime {
     this.#disposeRuntime = options.dispose
   }
 
+  /** Creates session. */
   createSession(input: {
     workspace: string
     mode: PermissionMode
@@ -55,6 +57,7 @@ export class AgentRuntime {
     return this.services.sessions.createSession(input)
   }
 
+  /** Returns or updates run state. */
   run(input: {
     sessionId: SessionId
     message: string
@@ -90,15 +93,18 @@ export class AgentRuntime {
     }
   }
 
+  /** Returns or updates interrupt state. */
   interrupt(sessionId: SessionId, runId: RunId): boolean {
     this.#assertAvailable()
     return this.services.sessions.interruptRun(sessionId, runId)
   }
 
+  /** Closes session. */
   closeSession(sessionId: SessionId): Promise<boolean> {
     return this.services.sessions.closeSession(sessionId)
   }
 
+  /** Releases all owned resources. */
   dispose(): Promise<void> {
     this.#disposing = true
     this.#disposePromise ??= this.#disposeRuntime()

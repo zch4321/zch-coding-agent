@@ -38,9 +38,11 @@ export interface DatabaseMigrationProgress {
   elapsedMs: number
 }
 
+/** Reads persistence data. */
 export class PersistenceReader {
   constructor(protected readonly database: DatabaseSync) {}
 
+  /** Returns or updates prepare state. */
   prepare(sql: string): StatementSync {
     try {
       return wrapStatement(this.database.prepare(sql))
@@ -50,14 +52,17 @@ export class PersistenceReader {
   }
 }
 
+/** Encapsulates persistence transaction behavior. */
 export class PersistenceTransaction extends PersistenceReader {
   #active = true
 
+  /** Returns or updates prepare state. */
   override prepare(sql: string): StatementSync {
     this.#assertActive()
     return super.prepare(sql)
   }
 
+  /** Returns or updates deactivate state. */
   deactivate(): void {
     this.#active = false
   }
@@ -72,6 +77,7 @@ export class PersistenceTransaction extends PersistenceReader {
   }
 }
 
+/** Provides database operations. */
 export class DatabaseService {
   readonly databasePath: string
   readonly #database: DatabaseSync
@@ -109,15 +115,18 @@ export class DatabaseService {
     }
   }
 
+  /** Opens the requested resource. */
   static open(options: DatabaseServiceOptions): DatabaseService {
     return new DatabaseService(options)
   }
 
+  /** Reads the requested data. */
   read<Result>(work: (reader: PersistenceReader) => Result): Result {
     this.#assertOpen()
     return work(this.#reader)
   }
 
+  /** Returns or updates with transaction state. */
   withTransaction<Result>(
     work: (transaction: PersistenceTransaction) => Result,
   ): Promise<Result> {
@@ -170,6 +179,7 @@ export class DatabaseService {
     })
   }
 
+  /** Closes the resource and releases its handles. */
   close(): Promise<void> {
     if (this.#closePromise) return this.#closePromise
     this.#acceptingWork = false
@@ -343,14 +353,17 @@ function wrapStatement(statement: StatementSync): StatementSync {
   })
 }
 
+/** Returns or updates desktop database path state. */
 export function desktopDatabasePath(userDataPath: string): string {
   return path.join(userDataPath, 'agent.db')
 }
 
+/** Returns or updates headless trial database path state. */
 export function headlessTrialDatabasePath(trialDirectory: string): string {
   return path.join(trialDirectory, 'agent.db')
 }
 
+/** Returns or updates migration checksum state. */
 export function migrationChecksum(sql: string): string {
   return createHash('sha256').update(sql, 'utf8').digest('hex')
 }

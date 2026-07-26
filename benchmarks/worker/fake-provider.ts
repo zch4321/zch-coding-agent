@@ -7,6 +7,7 @@ import {
 
 const DEFAULT_PORT = 8081
 
+/** Runs fake provider. */
 export async function runFakeProvider(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {

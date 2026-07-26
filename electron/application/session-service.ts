@@ -100,6 +100,7 @@ export type FirstTurnCommit =
       value: RequestLookup
     }
 
+/** Provides session operations. */
 export class SessionService {
   readonly #coordinator: ApplicationStateCoordinator
   readonly #sessions: SessionRepository
@@ -120,6 +121,7 @@ export class SessionService {
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
+  /** Lists the currently available records. */
   async list(
     query: {
       projectId?: SessionListQuery['projectId']
@@ -136,6 +138,7 @@ export class SessionService {
     ).value
   }
 
+  /** Returns the requested record. */
   async get(sessionId: SessionId): Promise<SessionSnapshot> {
     const snapshot = (
       await this.#coordinator.query((reader) => {
@@ -160,6 +163,7 @@ export class SessionService {
     }
   }
 
+  /** Returns record. */
   async getRecord(sessionId: SessionId): Promise<SessionRecord> {
     const record = (
       await this.#coordinator.query((reader) =>
@@ -172,6 +176,7 @@ export class SessionService {
     return record
   }
 
+  /** Lists active history. */
   async listActiveHistory(sessionId: SessionId): Promise<MessageRecord[]> {
     return (
       await this.#coordinator.query((reader) => {
@@ -183,6 +188,7 @@ export class SessionService {
     ).value
   }
 
+  /** Loads runtime state. */
   async loadRuntimeState(
     sessionId: SessionId,
     clientRequestIds: readonly string[] = [],
@@ -216,6 +222,7 @@ export class SessionService {
     ).value
   }
 
+  /** Lists messages. */
   async listMessages(
     sessionId: SessionId,
     query: { beforeSeq?: number; limit?: number } = {},
@@ -230,6 +237,7 @@ export class SessionService {
     ).value
   }
 
+  /** Searches messages. */
   async searchMessages(
     sessionId: SessionId,
     input: { text: string; limit?: number },
@@ -244,6 +252,7 @@ export class SessionService {
     ).value
   }
 
+  /** Searches sessions. */
   async searchSessions(input: {
     text: string
     projectId?: ProjectId
@@ -288,6 +297,7 @@ export class SessionService {
     ).value
   }
 
+  /** Returns original visible user. */
   async getOriginalVisibleUser(
     sessionId: SessionId,
     messageId: MessageId,
@@ -315,6 +325,7 @@ export class SessionService {
     ).value
   }
 
+  /** Returns or updates lookup request state. */
   async lookupRequest(
     sessionId: SessionId,
     clientRequestId: string,
@@ -346,6 +357,7 @@ export class SessionService {
     ).value
   }
 
+  /** Commits first turn. */
   async commitFirstTurn(input: {
     session: SessionRecord
     messages: readonly MessageRecord[]
@@ -394,6 +406,7 @@ export class SessionService {
     }
   }
 
+  /** Commits mutation. */
   async commitMutation(input: SessionMutation): Promise<SessionCommandResult> {
     return this.#coordinator.command('session.changed', (transaction) => {
       const current = this.#sessions.get(transaction, input.sessionId)
@@ -454,6 +467,7 @@ export class SessionService {
     })
   }
 
+  /** Updates the requested record. */
   async update(input: {
     sessionId: SessionId
     expectedRevision: number
@@ -480,6 +494,7 @@ export class SessionService {
     return result
   }
 
+  /** Returns or updates archive state. */
   async archive(input: {
     sessionId: SessionId
     expectedRevision: number
@@ -542,6 +557,7 @@ export class SessionService {
     return result
   }
 
+  /** Returns or updates rewind state. */
   async rewind(input: {
     sessionId: SessionId
     expectedRevision: number
@@ -658,6 +674,7 @@ export class SessionService {
     return result
   }
 
+  /** Returns or updates fork state. */
   async fork(input: {
     sourceSessionId: SessionId
     expectedRevision: number

@@ -36,6 +36,7 @@ export interface CreateAgentRuntimeOptions {
   onDiagnostic?: (message: string, error?: unknown) => void
 }
 
+/** Creates agent runtime. */
 export async function createAgentRuntime(
   options: CreateAgentRuntimeOptions,
 ): Promise<AgentRuntime> {

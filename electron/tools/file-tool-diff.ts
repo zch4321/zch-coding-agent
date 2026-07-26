@@ -13,6 +13,7 @@ function truncateDiff(value: string): string {
   )}${TRUNCATED_DIFF_MARKER}`
 }
 
+/** Creates file diff. */
 export function createFileDiff(
   filePath: string,
   before: string,
@@ -31,6 +32,7 @@ export function createFileDiff(
   return truncateDiff(`${body}\n`)
 }
 
+/** Determines whether is file diff truncated. */
 export function isFileDiffTruncated(value: string): boolean {
   return value.endsWith(TRUNCATED_DIFF_MARKER)
 }

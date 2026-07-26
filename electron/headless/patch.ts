@@ -19,6 +19,7 @@ interface GitResult {
   stderr: string
 }
 
+/** Collects workspace patch. */
 export async function collectWorkspacePatch(input: {
   workspace: string
   artifactsDirectory: string

@@ -13,6 +13,7 @@ export interface TestDatabase {
   dispose(): Promise<void>
 }
 
+/** Creates test database. */
 export async function createTestDatabase(
   options: Partial<Omit<DatabaseServiceOptions, 'databasePath'>> = {},
 ): Promise<TestDatabase> {

@@ -30,6 +30,7 @@ interface SessionApprovalCoordinatorOptions {
   ) => void
 }
 
+/** Coordinates session approval workflows. */
 export class SessionApprovalCoordinator {
   readonly #configStore: ConfigStore
   readonly #pluginBus: PluginEventBus | undefined
@@ -45,6 +46,7 @@ export class SessionApprovalCoordinator {
     this.#setRunStatus = options.setRunStatus
   }
 
+  /** Returns or updates decide state. */
   decide(
     session: SessionState,
     input: {
@@ -75,6 +77,7 @@ export class SessionApprovalCoordinator {
     return true
   }
 
+  /** Returns or updates request tool approval state. */
   async requestToolApproval(
     session: SessionState,
     run: ActiveRun,
@@ -149,6 +152,7 @@ export class SessionApprovalCoordinator {
     return decision
   }
 
+  /** Returns or updates request context approval state. */
   async requestContextApproval(
     session: SessionState,
     run: ActiveRun,

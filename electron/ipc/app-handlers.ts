@@ -71,6 +71,7 @@ function notAvailable(message: string): IpcFault {
   return new IpcFault({ code: 'NOT_AVAILABLE', message })
 }
 
+/** Creates app ipc handlers. */
 export function createAppIpcHandlers(
   dependencies: AppIpcHandlerDependencies,
 ): IpcBusinessHandlers {

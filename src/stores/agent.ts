@@ -176,6 +176,7 @@ function sessionViews(replica: ReplicaStore): SessionView[] {
     }))
 }
 
+/** Returns or updates use agent store state. */
 export function useAgentStore(pinia?: Pinia): AgentFacade {
   const shell = useAgentShellStore(pinia)
   const settings = useAgentSettingsStore(pinia)
