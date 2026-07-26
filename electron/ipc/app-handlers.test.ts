@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
@@ -90,6 +90,7 @@ describe('app IPC handlers', () => {
     const outsideTarget = path.join(outside, 'outside.md')
     await writeFile(target, 'workspace file\n')
     await writeFile(outsideTarget, 'outside file\n')
+    const canonicalTarget = await realpath(target)
     openPath.mockResolvedValue('')
     const { handlers } = createHandlers({
       backend: {
@@ -110,7 +111,7 @@ describe('app IPC handlers', () => {
           stubEvent,
         ),
       ).resolves.toEqual({ path: 'README.md' })
-      expect(openPath).toHaveBeenCalledWith(path.resolve(target))
+      expect(openPath).toHaveBeenCalledWith(canonicalTarget)
 
       await expect(
         handlers['workspace:open-file']!(

@@ -4,7 +4,7 @@ import {
   type Page,
 } from '@playwright/test'
 import type { ChildProcess } from 'node:child_process'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -30,9 +30,10 @@ export function cleanEnvironment(): Record<string, string> {
 export async function launchElectronHarness(
   temporaryDirectoryPrefix: string,
 ): Promise<ElectronHarness> {
-  const temporaryRoot = await mkdtemp(
+  const createdTemporaryRoot = await mkdtemp(
     path.join(os.tmpdir(), temporaryDirectoryPrefix),
   )
+  const temporaryRoot = await realpath(createdTemporaryRoot)
   const workspace = path.join(temporaryRoot, 'workspace')
   await mkdir(workspace)
   const electronApp = await electron.launch({

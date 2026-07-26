@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { PermissionMode } from '../../shared/config'
 import {
@@ -43,6 +43,7 @@ export async function configureApp(input: {
   assistantLanguage?: 'zh-CN' | 'en-US'
   traceLogging?: boolean
 }) {
+  const workspace = await realpath(input.workspace)
   const result = await input.page.evaluate(
     async ({
       providerBaseURL,
@@ -246,7 +247,7 @@ export async function configureApp(input: {
     },
     {
       providerBaseURL: input.providerBaseURL,
-      workspace: input.workspace,
+      workspace,
       defaultMode: input.defaultMode,
       assistantLanguage: input.assistantLanguage,
       providerNoticeVersion: PROVIDER_NOTICE_VERSION,
@@ -353,6 +354,7 @@ export async function startDurableSession(input: {
   title: string
   message: string
 }): Promise<string> {
+  const workspace = await realpath(input.workspace)
   const result = await input.page.evaluate(
     async ({ workspace, title, message }) => {
       type IpcResult<Value> =
@@ -478,7 +480,7 @@ export async function startDurableSession(input: {
       }
     },
     {
-      workspace: input.workspace,
+      workspace,
       title: input.title,
       message: input.message,
     },
