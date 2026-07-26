@@ -40,6 +40,7 @@ export class DurableRunApplicationService {
     {
       requestHash: string
       promise: Promise<DurableRunRetryResult>
+      settled: boolean
     }
   >()
 
@@ -93,6 +94,11 @@ export class DurableRunApplicationService {
     for (const key of this.#requests.keys()) {
       if (key.startsWith(prefix)) this.#requests.delete(key)
     }
+    for (const [key, entry] of this.#retryRequests) {
+      if (key.startsWith(prefix) && entry.settled) {
+        this.#retryRequests.delete(key)
+      }
+    }
   }
 
   retry(input: DurableRunRetryPayload): Promise<DurableRunRetryResult> {
@@ -110,8 +116,25 @@ export class DurableRunApplicationService {
       }
       return existing.promise
     }
-    const request = this.#retry(input)
-    this.#retryRequests.set(key, { requestHash, promise: request })
+    const entry = {
+      requestHash,
+      promise: undefined as unknown as Promise<DurableRunRetryResult>,
+      settled: false,
+    }
+    const request = this.#retry(input).then(
+      (result) => {
+        entry.settled = true
+        return result
+      },
+      (error: unknown) => {
+        if (this.#retryRequests.get(key) === entry) {
+          this.#retryRequests.delete(key)
+        }
+        throw error
+      },
+    )
+    entry.promise = request
+    this.#retryRequests.set(key, entry)
     while (this.#retryRequests.size > MAX_CACHED_RUN_STARTS) {
       const oldest = this.#retryRequests.keys().next().value
       if (oldest === undefined) break

@@ -131,7 +131,7 @@ describe('DatabaseService', () => {
       const count = reopened.read((reader) =>
         reader.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
       )
-      expect(count).toEqual({ count: 2 })
+      expect(count).toEqual({ count: 3 })
     } finally {
       await reopened.close()
       await testDatabase.dispose()
@@ -198,6 +198,17 @@ describe('DatabaseService', () => {
           new FileChangeRepository().getStored(reader, session.id, record.id),
         ),
       ).toMatchObject({ workspacePath: project.path })
+      expect(
+        migrated.read((reader) =>
+          reader
+            .prepare(
+              `SELECT total_payload_bytes
+               FROM file_change_retention_state
+               WHERE singleton = 1`,
+            )
+            .get(),
+        ),
+      ).toEqual({ total_payload_bytes: record.payloadBytes })
     } finally {
       await migrated.close()
       await legacy.dispose()
@@ -231,8 +242,8 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 3,
-        name: '0003_future',
+        version: 4,
+        name: '0004_future',
         sql: 'CREATE TABLE future_state (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -252,13 +263,13 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 3,
-        name: '0003_second',
+        version: 4,
+        name: '0004_second',
         sql: 'CREATE TABLE second_step (id TEXT PRIMARY KEY) STRICT;',
       },
       {
-        version: 4,
-        name: '0004_third',
+        version: 5,
+        name: '0005_third',
         sql: 'CREATE TABLE third_step (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -267,7 +278,7 @@ describe('DatabaseService', () => {
     await testDatabase.database.withTransaction((transaction) => {
       transaction
         .prepare('DELETE FROM schema_migrations WHERE version = ?')
-        .run(3)
+        .run(4)
     })
     await testDatabase.database.close()
 
@@ -288,8 +299,8 @@ describe('DatabaseService', () => {
     const brokenMigrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 3,
-        name: '0003_broken',
+        version: 4,
+        name: '0004_broken',
         sql: `
           CREATE TABLE should_rollback (id TEXT PRIMARY KEY) STRICT;
           INSERT INTO table_that_does_not_exist VALUES (1);
@@ -317,7 +328,7 @@ describe('DatabaseService', () => {
       ).toBeUndefined()
       expect(
         raw.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
-      ).toEqual({ count: 2 })
+      ).toEqual({ count: 3 })
     } finally {
       raw.close()
       await first.dispose()
@@ -329,8 +340,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 3,
-          name: '0003_transaction_probe',
+          version: 4,
+          name: '0004_transaction_probe',
           sql: `
             CREATE TABLE transaction_probe (
               id INTEGER PRIMARY KEY
@@ -406,6 +417,80 @@ describe('DatabaseService', () => {
       })
     } finally {
       await testDatabase.dispose()
+    }
+  })
+
+  it.each([
+    'COMMIT',
+    'END',
+    'ROLLBACK',
+    'BEGIN',
+    'BEGIN IMMEDIATE',
+    'SAVEPOINT nested',
+    'RELEASE nested',
+    'ROLLBACK TO nested',
+  ])('rejects transaction control SQL from callbacks: %s', async (sql) => {
+    const testDatabase = await createTestDatabase({
+      migrations: [
+        ...DATABASE_MIGRATIONS,
+        {
+          version: 4,
+          name: '0004_transaction_control_probe',
+          sql: 'CREATE TABLE transaction_control_probe (id INTEGER PRIMARY KEY) STRICT;',
+        },
+      ],
+    })
+    try {
+      await expect(
+        testDatabase.database.withTransaction((transaction) => {
+          transaction
+            .prepare('INSERT INTO transaction_control_probe (id) VALUES (1)')
+            .run()
+          transaction.prepare(sql).run()
+        }),
+      ).rejects.toBeDefined()
+      expect(
+        testDatabase.database.read((reader) =>
+          reader.prepare('SELECT id FROM transaction_control_probe').all(),
+        ),
+      ).toEqual([])
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
+  it('reports bounded migration progress without trusting callbacks', async () => {
+    const progress: Array<{
+      version: number
+      name: string
+      stage: string
+      elapsedMs: number
+    }> = []
+    const database = DatabaseService.open({
+      databasePath: ':memory:',
+      appVersion: 'test',
+      migrations: [DATABASE_MIGRATIONS[0]!],
+      onMigrationProgress(event) {
+        progress.push(event)
+        if (event.stage === 'started') throw new Error('diagnostic failure')
+      },
+    })
+    try {
+      expect(progress).toEqual([
+        expect.objectContaining({
+          version: 1,
+          name: '0001_initial',
+          stage: 'started',
+          elapsedMs: 0,
+        }),
+        expect.objectContaining({
+          version: 1,
+          name: '0001_initial',
+          stage: 'completed',
+        }),
+      ])
+    } finally {
+      await database.close()
     }
   })
 

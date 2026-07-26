@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
-import { DatabaseSync, type StatementSync } from 'node:sqlite'
+import { DatabaseSync, constants, type StatementSync } from 'node:sqlite'
 import { DATABASE_MIGRATIONS, type DatabaseMigration } from './migrations'
 import {
   normalizePersistenceError,
@@ -28,6 +28,14 @@ export interface DatabaseServiceOptions {
   appVersion: string
   migrations?: readonly DatabaseMigration[]
   now?: () => string
+  onMigrationProgress?: (progress: DatabaseMigrationProgress) => void
+}
+
+export interface DatabaseMigrationProgress {
+  version: number
+  name: string
+  stage: 'started' | 'completed' | 'failed'
+  elapsedMs: number
 }
 
 export class PersistenceReader {
@@ -93,6 +101,7 @@ export class DatabaseService {
         options.migrations ?? DATABASE_MIGRATIONS,
         options.appVersion,
         options.now ?? (() => new Date().toISOString()),
+        options.onMigrationProgress,
       )
     } catch (error) {
       this.#database.close()
@@ -134,6 +143,12 @@ export class DatabaseService {
       const transaction = new PersistenceTransaction(this.#database)
 
       try {
+        this.#database.setAuthorizer((actionCode) =>
+          actionCode === constants.SQLITE_TRANSACTION ||
+          actionCode === constants.SQLITE_SAVEPOINT
+            ? constants.SQLITE_DENY
+            : constants.SQLITE_OK,
+        )
         const result = work(transaction)
         if (isPromiseLike(result)) {
           void Promise.resolve(result).catch(() => undefined)
@@ -142,13 +157,15 @@ export class DatabaseService {
             'Persistence transactions must not await external work',
           )
         }
+        transaction.deactivate()
+        this.#database.setAuthorizer(null)
         this.#database.exec('COMMIT')
         return result
       } catch (error) {
+        transaction.deactivate()
+        this.#database.setAuthorizer(null)
         if (this.#database.isTransaction) this.#database.exec('ROLLBACK')
         throw normalizePersistenceError(error)
-      } finally {
-        transaction.deactivate()
       }
     })
   }
@@ -172,6 +189,7 @@ export class DatabaseService {
     migrations: readonly DatabaseMigration[],
     appVersion: string,
     now: () => string,
+    onProgress?: (progress: DatabaseMigrationProgress) => void,
   ): void {
     validateMigrations(migrations)
     this.#database.exec(SCHEMA_MIGRATIONS_SQL)
@@ -220,7 +238,7 @@ export class DatabaseService {
     const appliedVersions = new Set(applied.map((row) => row.version))
     for (const migration of migrations) {
       if (appliedVersions.has(migration.version)) continue
-      this.#applyMigration(migration, appVersion, now())
+      this.#applyMigration(migration, appVersion, now(), onProgress)
     }
   }
 
@@ -228,7 +246,15 @@ export class DatabaseService {
     migration: DatabaseMigration,
     appVersion: string,
     appliedAt: string,
+    onProgress?: (progress: DatabaseMigrationProgress) => void,
   ): void {
+    const startedAt = performance.now()
+    emitMigrationProgress(onProgress, {
+      version: migration.version,
+      name: migration.name,
+      stage: 'started',
+      elapsedMs: 0,
+    })
     this.#database.exec('BEGIN IMMEDIATE')
     try {
       this.#database.exec(migration.sql)
@@ -246,8 +272,20 @@ export class DatabaseService {
           appliedAt,
         )
       this.#database.exec('COMMIT')
+      emitMigrationProgress(onProgress, {
+        version: migration.version,
+        name: migration.name,
+        stage: 'completed',
+        elapsedMs: Math.max(0, performance.now() - startedAt),
+      })
     } catch (error) {
       if (this.#database.isTransaction) this.#database.exec('ROLLBACK')
+      emitMigrationProgress(onProgress, {
+        version: migration.version,
+        name: migration.name,
+        stage: 'failed',
+        elapsedMs: Math.max(0, performance.now() - startedAt),
+      })
       throw new PersistenceError(
         'MIGRATION_FAILED',
         `Migration ${migration.name} failed`,
@@ -275,6 +313,17 @@ export class DatabaseService {
     if (!this.#acceptingWork || !this.#database.isOpen) {
       throw new PersistenceError('DATABASE_CLOSED', 'Database is closed')
     }
+  }
+}
+
+function emitMigrationProgress(
+  listener: DatabaseServiceOptions['onMigrationProgress'],
+  progress: DatabaseMigrationProgress,
+): void {
+  try {
+    listener?.(progress)
+  } catch {
+    // Diagnostic callbacks must never change migration correctness.
   }
 }
 

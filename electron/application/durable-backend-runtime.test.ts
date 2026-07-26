@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { JsonValue } from '../../shared/json'
 import {
   PROVIDER_NOTICE_VERSION,
@@ -245,6 +245,46 @@ async function createTarget(input: {
 }
 
 describe('durable backend runtime', () => {
+  it('isolates commit listeners and drains pending work before disposal', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'zch-listener-drain-'))
+    cleanup.push(() => rm(root, { recursive: true, force: true }))
+    const workspace = path.join(root, 'workspace')
+    await mkdir(workspace)
+    const diagnostics = vi.fn()
+    const delivered = vi.fn()
+    const store = await createConfig(root)
+    const target = await createBackendForTest({
+      configStore: store,
+      promptDirectory: path.resolve('resources', 'prompts'),
+      targetDirectory: path.join(root, 'target'),
+      providerFactory: () => new OrderedProvider([]),
+      onDiagnostic: diagnostics,
+    })
+    target.subscribe(() => {
+      throw new Error('listener fixture')
+    })
+    target.subscribe(delivered)
+
+    await target.projects.add({ path: workspace })
+    const pending = target.coordinator.query((reader) =>
+      reader.prepare('SELECT 1 AS ready').get(),
+    )
+    const firstDispose = target.dispose()
+    const secondDispose = target.dispose()
+
+    expect(secondDispose).toBe(firstDispose)
+    await expect(pending).resolves.toMatchObject({ value: { ready: 1 } })
+    await expect(firstDispose).resolves.toBeUndefined()
+    expect(delivered).toHaveBeenCalledOnce()
+    expect(diagnostics).toHaveBeenCalledWith(
+      'Durable commit listener failed',
+      expect.any(Error),
+    )
+    await expect(
+      target.coordinator.query(() => undefined),
+    ).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' })
+  })
+
   it('leaves legacy JSON state files untouched', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'zch-legacy-ignore-'))
     cleanup.push(() => rm(root, { recursive: true, force: true }))
@@ -476,13 +516,20 @@ describe('durable backend runtime', () => {
       }),
     ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
 
-    const retryPayload = {
+    const staleRetryPayload = {
       version: 1,
       sessionId,
-      expectedRevision: before.session.revision,
+      expectedRevision: before.session.revision - 1,
       userMessageId: firstUser.id,
       clientRequestId: 'request:retry-first-user',
     } as const
+    await expect(target.runs.retry(staleRetryPayload)).rejects.toMatchObject({
+      code: 'CONFLICT',
+    })
+    const retryPayload = {
+      ...staleRetryPayload,
+      expectedRevision: before.session.revision,
+    }
     const retried = await target.runs.retry(retryPayload)
     const duplicateRetry = await target.runs.retry(retryPayload)
     expect(duplicateRetry).toEqual(retried)

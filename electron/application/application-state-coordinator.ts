@@ -13,7 +13,10 @@ import type {
   PersistenceTransaction,
 } from '../persistence/database-service'
 import { DatabaseService } from '../persistence/database-service'
-import { normalizeApplicationError } from './application-error'
+import {
+  ApplicationError,
+  normalizeApplicationError,
+} from './application-error'
 
 type DurableChangeFor<Topic extends DurableCommitTopic> =
   Topic extends 'project.changed'
@@ -42,6 +45,8 @@ export class ApplicationStateCoordinator {
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   #sequence = 0
   #tail: Promise<void> = Promise.resolve()
+  #acceptingWork = true
+  #closePromise?: Promise<void>
 
   /**
    * 创建协调器，并为当前 backend 实例准备独立的事件游标命名空间。
@@ -74,6 +79,11 @@ export class ApplicationStateCoordinator {
     cursor: ReturnType<ApplicationStateCoordinator['getCursor']>
     value: Result
   }> {
+    if (!this.#acceptingWork) {
+      return Promise.reject(
+        new ApplicationError('PERSISTENCE_FAILURE', 'Backend state is closed'),
+      )
+    }
     return this.#enqueue(() => {
       try {
         const value = this.#database.read(work)
@@ -93,6 +103,11 @@ export class ApplicationStateCoordinator {
     topic: Topic,
     work: (transaction: PersistenceTransaction) => DurableChangeFor<Topic>,
   ): Promise<DurableCommandResult<Topic>> {
+    if (!this.#acceptingWork) {
+      return Promise.reject(
+        new ApplicationError('PERSISTENCE_FAILURE', 'Backend state is closed'),
+      )
+    }
     return this.#enqueue(async () => {
       let change: DurableChangeFor<Topic>
       try {
@@ -127,6 +142,14 @@ export class ApplicationStateCoordinator {
    */
   getCursor() {
     return this.cursor
+  }
+
+  /** Stops accepting work and resolves after every queued command is settled. */
+  close(): Promise<void> {
+    if (this.#closePromise) return this.#closePromise
+    this.#acceptingWork = false
+    this.#closePromise = this.#tail
+    return this.#closePromise
   }
 
   /**

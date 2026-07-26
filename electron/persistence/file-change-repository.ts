@@ -57,8 +57,9 @@ export class FileChangeRepository {
     const row = encodeStoredFileChangeRow(record)
     const aggregate = transaction
       .prepare(
-        `SELECT COALESCE(SUM(payload_bytes), 0) AS total_bytes
-         FROM file_changes`,
+        `SELECT total_payload_bytes AS total_bytes
+         FROM file_change_retention_state
+         WHERE singleton = 1`,
       )
       .get()
     let overflow =

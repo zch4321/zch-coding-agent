@@ -69,12 +69,24 @@ export async function createBackendRuntime(
   const database = DatabaseService.open({
     databasePath,
     appVersion: options.appVersion ?? 'development',
+    onMigrationProgress: (progress) => {
+      const duration = Math.round(progress.elapsedMs)
+      options.onDiagnostic?.(
+        `SQLite migration ${progress.version}:${progress.name} ${progress.stage} (${duration}ms)`,
+      )
+    },
   })
   const listeners = new Set<(commit: DurableCommitEnvelope) => void>()
   const coordinator = new ApplicationStateCoordinator({
     database,
     publish: (commit) => {
-      for (const listener of listeners) listener(structuredClone(commit))
+      for (const listener of listeners) {
+        try {
+          listener(structuredClone(commit))
+        } catch (error) {
+          options.onDiagnostic?.('Durable commit listener failed', error)
+        }
+      }
     },
     onDiagnostic: options.onDiagnostic,
   })
@@ -194,7 +206,7 @@ export async function createBackendRuntime(
       executionState,
     })
     targetState.runs = runs
-    let disposed = false
+    let disposePromise: Promise<void> | undefined
     return {
       databasePath,
       runtime,
@@ -223,20 +235,55 @@ export async function createBackendRuntime(
         listeners.add(listener)
         return () => listeners.delete(listener)
       },
-      async dispose() {
-        if (disposed) return
-        disposed = true
-        listeners.clear()
-        await liveSessions?.dispose()
-        await runtime?.dispose()
-        await database.close()
+      dispose() {
+        disposePromise ??= disposeBackendRuntime({
+          liveSessions,
+          runtime,
+          coordinator,
+          listeners,
+          database,
+        })
+        return disposePromise
       },
     }
   } catch (error) {
-    await runtime?.dispose()
-    await database.close()
+    await settleCleanup([
+      () => runtime?.dispose(),
+      () => coordinator.close(),
+      () => database.close(),
+    ])
     throw error
   }
+}
+
+async function disposeBackendRuntime(input: {
+  liveSessions?: LiveSessionContextRegistry
+  runtime?: AgentRuntime
+  coordinator: ApplicationStateCoordinator
+  listeners: Set<(commit: DurableCommitEnvelope) => void>
+  database: DatabaseService
+}): Promise<void> {
+  await settleCleanup([
+    () => input.liveSessions?.dispose(),
+    () => input.runtime?.dispose(),
+    () => input.coordinator.close(),
+    () => input.listeners.clear(),
+    () => input.database.close(),
+  ])
+}
+
+async function settleCleanup(
+  actions: ReadonlyArray<() => unknown | Promise<unknown>>,
+): Promise<void> {
+  let failure: unknown
+  for (const action of actions) {
+    try {
+      await action()
+    } catch (error) {
+      failure ??= error
+    }
+  }
+  if (failure) throw failure
 }
 
 export type { AutoApprover, DatabaseServiceOptions, LLMProvider }

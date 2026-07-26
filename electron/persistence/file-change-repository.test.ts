@@ -158,6 +158,33 @@ describe('FileChangeRepository retention', () => {
           repository.getStored(reader, session.id, second.id),
         ),
       ).toEqual(second)
+      expect(
+        testDatabase.database.read((reader) =>
+          reader
+            .prepare(
+              `SELECT total_payload_bytes
+               FROM file_change_retention_state
+               WHERE singleton = 1`,
+            )
+            .get(),
+        ),
+      ).toEqual({ total_payload_bytes: second.payloadBytes })
+      expect(
+        testDatabase.database.read((reader) =>
+          reader
+            .prepare(
+              `EXPLAIN QUERY PLAN
+               SELECT total_payload_bytes
+               FROM file_change_retention_state
+               WHERE singleton = 1`,
+            )
+            .all(),
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          detail: expect.not.stringContaining('file_changes'),
+        }),
+      ])
     } finally {
       await testDatabase.dispose()
     }
@@ -265,6 +292,43 @@ describe('FileChangeRepository retention', () => {
           (reader) => repository.listPage(reader, session.id).records,
         ),
       ).toEqual([expect.objectContaining({ id: first.id })])
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
+  it('keeps the retained byte total correct across cascade deletes', async () => {
+    const testDatabase = await createTestDatabase()
+    const repository = new FileChangeRepository()
+    const project = projectFixture()
+    const session = sessionFixture({ lastSeq: 0 })
+    try {
+      await testDatabase.database.withTransaction((transaction) => {
+        new ProjectRepository().insert(transaction, project)
+        new SessionRepository().insert(transaction, session)
+        repository.insertWithRetention(
+          transaction,
+          fileChangeFixture({
+            beforeContent: 'a',
+            diff: 'b',
+            payloadBytes: 2,
+          }),
+        )
+      })
+      await testDatabase.database.withTransaction((transaction) => {
+        transaction.prepare('DELETE FROM projects WHERE id = ?').run(project.id)
+      })
+      expect(
+        testDatabase.database.read((reader) =>
+          reader
+            .prepare(
+              `SELECT total_payload_bytes
+               FROM file_change_retention_state
+               WHERE singleton = 1`,
+            )
+            .get(),
+        ),
+      ).toEqual({ total_payload_bytes: 0 })
     } finally {
       await testDatabase.dispose()
     }
