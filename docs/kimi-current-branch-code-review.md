@@ -2,11 +2,13 @@
 
 > 审查日期：2026-07-25
 >
-> 分支：`refactor/backend-state-v2`（HEAD `e035a27`）
+> 终审基线：`refactor/backend-state-v2`（HEAD `e035a27`）
+>
+> 注释收口：`docs/public-api-comments`（基于 `e035a27`，2026-07-26）
 >
 > 对比基线：`master` 的 merge-base `6cb4a0819734ce68166635a82422872011a21b1b`
 >
-> 本稿说明：本报告历经三轮——初审（`c3f0e8d`，11 P1 / 31 P2 / 46 P3）、复检（`db8072a`，确认 11/11 P1 与绝大部分 P2 修复）、终审（`e035a27`，本稿）。**已修复并经复检/终审确认的条目已全部移除，本稿仅保留当前仍未解决的问题**。历史版本见 git 历史。
+> 本稿说明：本报告历经三轮——初审（`c3f0e8d`，11 P1 / 31 P2 / 46 P3）、复检（`db8072a`，确认 11/11 P1 与绝大部分 P2 修复）、终审（`e035a27`，本稿），并在后续注释收口中关闭公共 API 文档存量。**已修复并经复检/终审确认的条目已全部移除，本稿仅保留当前仍未解决的问题**。历史版本见 git 历史。
 
 ---
 
@@ -14,12 +16,14 @@
 
 重构目标（业务状态统一收归后端）已达成，durable 单写者 + commit cursor / event seq 双通道复制 + gap 自愈的主链路健康；naive-ui 迁移（主题单源、组件替换、确认对话框、NMessage 反馈）也已落地。
 
-当前 **无 P0/P1**。剩余 **5 个 P2**（4 个渲染层存量 + 1 个 naive 迁移引入的定位回归）与 **24 个 P3**（结构性健壮性、规范与可接受延后项）。另有 1 项产品决策待定（sendFirst）。
+当前 **无 P0/P1**。剩余 **5 个 P2**（4 个渲染层存量 + 1 个 naive 迁移引入的定位回归）与 **23 个 P3**（结构性健壮性、规范与可接受延后项）。另有 1 项产品决策待定（sendFirst）。
 
 | 检查 | 结果 |
 | --- | --- |
 | `npm run typecheck` / `lint` / `format:check` | 通过 |
 | `npm test`（vitest 确定性套件，含 benchmarks/cases） | 通过：115 文件、776 通过、8 跳过（跳过项为 opt-in docker/real-api） |
+
+注释收口新增 `lint:api-docs` 静态门禁，覆盖 `electron/`、`shared/`、`src/` 与 `benchmarks/` 的生产 TypeScript：所有类、公开类方法和导出函数均必须有职责注释。共补齐并人工复核 677 条注释；扫描结果为零缺口，且注释补齐未引入新的代码行为问题。
 
 ## P2（建议处理，均为用户可感知的行为问题）
 
@@ -52,7 +56,6 @@
 - `event-sink.ts:68-69` 非 commit 投递的报错使用陈旧 validator errors（当前唯一调用点只发 commit）。
 - provider P3 组：纯 tool-call 响应 TTFT 恒 null（`deepseek-provider.ts:246,260,379`）；`prefixFingerprints` 无生产者（`provider.ts:46`）；`'title'` purpose 死契约（`shared/model-route.ts:8`）；resolver 死分支（`model-route-resolver.ts:43-50`）；`assertImmutableRequest` key 顺序敏感（`session-provider-turn.ts:88`）。
 - **新发现**：启动失败清理路径 `settleCleanup` 自身抛错会掩盖原始启动错误（`create-backend-runtime.ts:249-256`）；通知分类/去重基于对诊断消息文本的前缀匹配，与产处文案隐式耦合（`backend-notification-reporter.ts:108-136`）；脱敏正则漏 JSON 带引号形式的凭证（`backend-notification-reporter.ts:81`，当前无产出处，有 1024 有界兜底）。
-- 公共 API doc 注释：有改善（coordinator、provider.ts、`BackendNotificationReporter` 等），但 `DatabaseService`/`MessageRepository`/`DurableRunApplicationService`/`LiveSessionContextRegistry`/`provider-protocol.ts` 等存量仍缺（AGENTS.md 强制规则）。
 
 ### 渲染层
 
@@ -71,6 +74,7 @@
 - **后端**：P1-1 回退跨 workspace（迁移 0002 + 双重校验）、P1-2/P1-3 审批路由（可选增强 + reasoning 强制转换）、M-2/M-3（project 容量、teardown promise）、N-2（retry 缓存失败淘汰）、事务 authorizer 封死事务控制 SQL、发布 listener 逐个隔离、dispose 排空队列、0003 retention totals、provider wire 契约隔离（7b0a5a7，有边界测试钉住）。
 - **渲染层**：P1-4~P1-9（双提交守卫、carryover 流、去重、排序分区、两类分页）、N-1（carryover 锁死）、终态竞态、writer.changed 误报、测试覆盖重建。
 - **基础设施**：cases.test.ts 回归 `npm test`、P10 verify 单一入口（`verification-policy.test.ts` 钉住 CI/release 各恰好一次 `npm run verify`）、损坏 JSON 恢复、trace 清理分类、runtime-parity 删除。
+- **代码规范**：补齐 677 条类、公开类方法和导出函数职责注释；新增 `lint:api-docs`，后续缺口会直接使 `npm run lint` 失败。
 - **前端**：naive 主题单源（`src/theme/naive-theme.ts`，palette 同出 CSS 变量与 themeOverrides）、侧栏/表单/tabs/状态徽章/反馈（NMessage）/确认对话框全部迁移，window.confirm/alert 零残留；主题双轨与 `.n-* !important` 覆盖已收敛。
 - **用户实测项**：事件空洞误报、工具卡片排序、`terminal_send` 裸 `\n`（归一化 + `delayMs`）、日志开启（SessionTraceController 分段捕获，live 会话即时生效）均已修复验证。
 
@@ -90,4 +94,4 @@
 1. **合入前**：NFloatButton 定位回归（P2，naive 迁移新引入）。
 2. **下一迭代**：N-3/N-4/loadProject/carryover 边缘四个渲染层 P2。
 3. **发布门禁**：关闭 M-6（config 备份/提示/orphan 清理）；sendFirst 产品决策。
-4. **持续批次**：后端结构通道（reader 只读化、trigger 拆除、FK 补齐）、doc 注释存量、其余 P3。
+4. **持续批次**：后端结构通道（reader 只读化、trigger 拆除、FK 补齐）与其余 P3。
