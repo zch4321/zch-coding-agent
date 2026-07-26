@@ -37,7 +37,24 @@ test.describe.serial('Electron artifact and layout workflows', () => {
   test.afterAll(async () => disposeFeatureHarness(harness))
 
   test('collapses projects and renders file tabs as one active tab unit', async () => {
-    await writeFile(path.join(workspace, 'blog.pen'), 'sample design\n')
+    await writeFile(
+      path.join(workspace, 'blog.pen'),
+      Array.from(
+        { length: 200 },
+        (_, index) => `sample design ${index}\n`,
+      ).join(''),
+    )
+    await Promise.all(
+      Array.from({ length: 64 }, (_, index) =>
+        writeFile(
+          path.join(
+            workspace,
+            `scroll-fixture-${String(index).padStart(2, '0')}.txt`,
+          ),
+          `fixture ${index}\n`,
+        ),
+      ),
+    )
     const cachedDirectory = path.join(workspace, 'cached-folder')
     await mkdir(cachedDirectory)
     await writeFile(path.join(cachedDirectory, 'cached.txt'), 'cached child\n')
@@ -51,6 +68,31 @@ test.describe.serial('Electron artifact and layout workflows', () => {
       await artifactToggle.click()
     }
     await expect(page.locator('.artifact-sidebar')).toBeVisible()
+    await expect(page.locator('.artifact-tabs')).toHaveClass(
+      /n-tabs--card-type/,
+    )
+    await expect(page.locator('.file-tabs')).toHaveClass(/n-tabs--card-type/)
+
+    const artifactSpacing = await page.evaluate(() => {
+      const sidebar = document.querySelector('.artifact-sidebar')
+      const outerTab = document.querySelector('.artifact-tabs .n-tabs-tab')
+      const innerTab = document.querySelector('.file-tabs .n-tabs-tab')
+      const content = document.querySelector('.explorer-view')
+      if (!sidebar || !outerTab || !innerTab || !content) {
+        throw new Error('Expected artifact tabs and explorer content')
+      }
+      const sidebarRect = sidebar.getBoundingClientRect()
+      return {
+        sidebarLeft: sidebarRect.left,
+        outerTabLeft: outerTab.getBoundingClientRect().left,
+        innerTabLeft: innerTab.getBoundingClientRect().left,
+        contentLeft: content.getBoundingClientRect().left,
+      }
+    })
+    expect(artifactSpacing.outerTabLeft - artifactSpacing.sidebarLeft).toBe(12)
+    expect(artifactSpacing.innerTabLeft - artifactSpacing.sidebarLeft).toBe(12)
+    expect(artifactSpacing.contentLeft - artifactSpacing.sidebarLeft).toBe(0)
+
     const projectToggle = page.getByRole('button', {
       name: '切换项目侧栏（Ctrl+B）',
     })
@@ -108,6 +150,14 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     await projectHeading.click()
     await expect(conversationList).toBeVisible()
 
+    if ((await projectToggle.getAttribute('aria-pressed')) === 'true') {
+      await projectToggle.click()
+    }
+    if ((await artifactToggle.getAttribute('aria-pressed')) !== 'true') {
+      await artifactToggle.click()
+    }
+    await expect(page.locator('.artifact-sidebar')).toBeVisible()
+
     const folderNode = page.getByText('cached-folder', { exact: true })
     await folderNode.click()
     await expect(page.locator('.explorer-tree')).toContainText('cached.txt')
@@ -120,6 +170,16 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     const activeFileTab = page.locator('.file-tabs .n-tabs-tab--active')
     await expect(activeFileTab).toContainText('blog.pen')
     await expect(page.locator('.file-viewer-header')).toContainText('blog.pen')
+    const fileScroll = await page.locator('.file-viewer').evaluate((viewer) => {
+      viewer.scrollTop = viewer.scrollHeight
+      return {
+        clientHeight: viewer.clientHeight,
+        scrollHeight: viewer.scrollHeight,
+        scrollTop: viewer.scrollTop,
+      }
+    })
+    expect(fileScroll.scrollHeight).toBeGreaterThan(fileScroll.clientHeight)
+    expect(fileScroll.scrollTop).toBeGreaterThan(0)
     const tabLayout = await activeFileTab.evaluate((tab) => {
       const label = tab.querySelector('.file-tab-label')
       const close = tab.querySelector('.n-tabs-tab__close')
@@ -136,6 +196,34 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     })
     expect(tabLayout.labelHeight).toBeGreaterThan(0)
     expect(tabLayout.closeHeight).toBeGreaterThan(0)
+
+    await page.getByRole('tab', { name: '资源管理器', exact: true }).click()
+    const explorerTree = page.locator('.explorer-tree')
+    await expect(
+      explorerTree.locator(
+        '.n-scrollbar-rail--vertical .n-scrollbar-rail__scrollbar',
+      ),
+    ).toBeVisible()
+    const treeScroll = await explorerTree.evaluate((tree) => {
+      const container = tree.querySelector('.v-vl')
+      const rail = tree.querySelector('.n-scrollbar-rail--vertical')
+      if (
+        !(container instanceof HTMLElement) ||
+        !(rail instanceof HTMLElement)
+      ) {
+        throw new Error('Expected the resource tree scrollbar')
+      }
+      container.scrollTop = container.scrollHeight
+      return {
+        clientHeight: container.clientHeight,
+        scrollHeight: container.scrollHeight,
+        scrollTop: container.scrollTop,
+        railHeight: rail.getBoundingClientRect().height,
+      }
+    })
+    expect(treeScroll.scrollHeight).toBeGreaterThan(treeScroll.clientHeight)
+    expect(treeScroll.scrollTop).toBeGreaterThan(0)
+    expect(treeScroll.railHeight).toBeGreaterThan(0)
   })
 
   test('keeps the file tree bound to the selected Durable Session project', async () => {
@@ -213,6 +301,12 @@ test.describe.serial('Electron artifact and layout workflows', () => {
       .toBe('Layout session ready')
     await page.reload()
     await page.getByRole('button', { name: title, exact: true }).click()
+    await expect(
+      page.locator('.chat-message.user > .message-meta'),
+    ).toHaveCount(0)
+    await expect(
+      page.locator('.chat-message.assistant > .message-meta > strong'),
+    ).toHaveCount(0)
     await page.setViewportSize({ width: 1000, height: 720 })
 
     const artifactToggle = page.getByRole('button', {
@@ -227,6 +321,9 @@ test.describe.serial('Electron artifact and layout workflows', () => {
       const pane = document.querySelector('.conversation-pane')
       const scroll = document.querySelector('.conversation-scroll')
       const artifact = document.querySelector('.artifact-sidebar')
+      const artifactContainer = artifact?.closest(
+        '.n-layout-sider-scroll-container',
+      )
       const heading = document.querySelector('.conversation-header h1')
       const composer = document.querySelector('.message-input-area')
       const composerToolbar = document.querySelector('.message-input-toolbar')
@@ -234,6 +331,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
         !pane ||
         !scroll ||
         !artifact ||
+        !artifactContainer ||
         !heading ||
         !composer ||
         !composerToolbar
@@ -243,6 +341,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
       const paneRect = pane.getBoundingClientRect()
       const scrollRect = scroll.getBoundingClientRect()
       const artifactRect = artifact.getBoundingClientRect()
+      const artifactContainerRect = artifactContainer.getBoundingClientRect()
       const titleRect = heading.getBoundingClientRect()
       const composerRect = composer.getBoundingClientRect()
       const toolbarRect = composerToolbar.getBoundingClientRect()
@@ -253,6 +352,8 @@ test.describe.serial('Electron artifact and layout workflows', () => {
         composerRight: composerRect.right,
         toolbarRight: toolbarRect.right,
         artifactLeft: artifactRect.left,
+        artifactRight: artifactRect.right,
+        artifactContainerRight: artifactContainerRect.right,
         artifactPosition: getComputedStyle(artifact).position,
         bodyScrollWidth: document.body.scrollWidth,
         viewportWidth: window.innerWidth,
@@ -266,6 +367,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     expect(metrics.titleRight).toBeLessThanOrEqual(artifactLeftBoundary)
     expect(metrics.composerRight).toBeLessThanOrEqual(artifactLeftBoundary)
     expect(metrics.toolbarRight).toBeLessThanOrEqual(artifactLeftBoundary)
+    expect(metrics.artifactContainerRight - metrics.artifactRight).toBe(0)
     expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.viewportWidth)
   })
 

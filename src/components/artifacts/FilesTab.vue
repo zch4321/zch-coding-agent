@@ -228,7 +228,9 @@ watch(explorerError, (message) => {
       role="tablist"
       :aria-label="t('artifact.openFiles')"
       :animated="false"
+      :tabs-padding="12"
       :pane-style="{ height: '100%', minHeight: '0' }"
+      :pane-wrapper-style="{ flex: '1', minHeight: '0' }"
       @close="closeFile"
     >
       <NTabPane
@@ -261,6 +263,7 @@ watch(explorerError, (message) => {
               class="explorer-tree-loader"
               :show="explorerLoading"
               size="small"
+              :content-style="{ height: '100%', minHeight: '0' }"
             >
               <NTree
                 v-if="explorerTree.length"
@@ -272,6 +275,7 @@ watch(explorerError, (message) => {
                 block-line
                 show-line
                 virtual-scroll
+                :scrollbar-props="{ trigger: 'none' }"
                 @update:selected-keys="handleTreeSelection"
               />
               <NEmpty

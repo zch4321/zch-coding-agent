@@ -64,11 +64,13 @@ watch(
       v-model:value="activeArtifact"
       class="artifact-tabs"
       size="small"
-      type="line"
+      type="card"
       role="tablist"
       :aria-label="t('artifact.openFiles')"
       :animated="false"
+      :tabs-padding="12"
       :pane-style="{ height: '100%', minHeight: '0' }"
+      :pane-wrapper-style="{ flex: '1', minHeight: '0' }"
     >
       <NTabPane
         name="files"

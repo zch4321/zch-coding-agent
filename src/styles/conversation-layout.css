@@ -232,6 +232,10 @@
   font-size: 11px;
 }
 
+.message-status {
+  margin-left: auto;
+}
+
 .chat-message.assistant .message-meta strong,
 .chat-message.assistant .message-meta span,
 .chat-message.orchestrator .message-meta strong {

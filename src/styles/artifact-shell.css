@@ -40,6 +40,7 @@
 }
 
 .artifact-tabs {
+  height: 100%;
   min-width: 0;
   min-height: 0;
 }
@@ -78,6 +79,10 @@
   min-height: 0;
 }
 
+.explorer-view {
+  overflow: hidden;
+}
+
 .file-viewer {
   overflow: auto;
 }
@@ -91,11 +96,13 @@
 }
 
 .explorer-tree-loader {
+  height: 100%;
   min-height: 0;
   flex: 1;
 }
 
 .explorer-tree {
+  box-sizing: border-box;
   height: 100%;
   padding: 8px 7px 14px;
 }

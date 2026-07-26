@@ -519,7 +519,7 @@ onUnmounted(() => {
                 :collapsed-width="0"
                 :collapsed="!artifactSidebarOpen"
                 :show-collapsed-content="false"
-                content-style="overflow: hidden; padding-right: 8px"
+                content-style="overflow: hidden"
                 collapse-mode="width"
                 :show-trigger="false"
                 bordered

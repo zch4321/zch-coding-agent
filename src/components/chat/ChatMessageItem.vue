@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NButton, NCollapse, NCollapseItem, NTag, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { RunId } from '../../../shared/ids'
@@ -25,14 +26,32 @@ function roleLabel(): string {
   if (props.message.role === 'interjection') return t('chat.interjection')
   return t('chat.agent')
 }
+
+const visibleRoleLabel = computed(() => {
+  if (
+    props.message.role !== 'orchestrator' &&
+    props.message.role !== 'interjection'
+  ) {
+    return undefined
+  }
+  return roleLabel()
+})
+
+const showMetadata = computed(
+  () =>
+    Boolean(visibleRoleLabel.value) ||
+    (props.message.role === 'assistant' &&
+      props.message.runId === props.activeRunId),
+)
 </script>
 
 <template>
-  <article class="chat-message" :class="message.role">
-    <div class="message-meta">
-      <strong>{{ roleLabel() }}</strong>
+  <article class="chat-message" :class="message.role" :aria-label="roleLabel()">
+    <div v-if="showMetadata" class="message-meta">
+      <strong v-if="visibleRoleLabel">{{ visibleRoleLabel }}</strong>
       <NTag
         v-if="message.role === 'assistant' && message.runId === activeRunId"
+        class="message-status"
         round
         size="small"
         type="info"
@@ -44,6 +63,7 @@ function roleLabel(): string {
           message.role === 'interjection' &&
           message.interjectionStatus === 'queued'
         "
+        class="message-status"
         round
         size="small"
         type="warning"
@@ -55,6 +75,7 @@ function roleLabel(): string {
           message.role === 'interjection' &&
           message.interjectionStatus === 'injected'
         "
+        class="message-status"
         round
         size="small"
         type="success"
@@ -66,6 +87,7 @@ function roleLabel(): string {
           message.role === 'interjection' &&
           message.interjectionStatus === 'superseded'
         "
+        class="message-status"
         round
         size="small"
       >
@@ -76,6 +98,7 @@ function roleLabel(): string {
           message.role === 'interjection' &&
           message.interjectionStatus === 'carryover'
         "
+        class="message-status"
         round
         size="small"
         type="info"
