@@ -1,6 +1,5 @@
 .file-viewer-header {
   position: sticky;
-  z-index: 1;
   top: 0;
   gap: 8px;
   padding: 8px 10px;
