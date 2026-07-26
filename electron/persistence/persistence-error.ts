@@ -59,7 +59,12 @@ export function normalizePersistenceError(error: unknown): unknown {
       { cause: error },
     )
   }
-  if (primaryCode === 10) {
+  if (
+    primaryCode === 8 ||
+    primaryCode === 10 ||
+    primaryCode === 13 ||
+    primaryCode === 14
+  ) {
     return new PersistenceError(
       'DATABASE_IO',
       `SQLite database I/O failed${detail}`,

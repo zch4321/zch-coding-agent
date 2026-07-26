@@ -142,6 +142,6 @@ function runElectronChild() {
 if (process.env[CHILD_MARKER] === '1') {
   runSqliteSmoke()
 } else {
-  runSqliteSmoke()
+  if (!process.argv.includes('--packaged')) runSqliteSmoke()
   runElectronChild()
 }

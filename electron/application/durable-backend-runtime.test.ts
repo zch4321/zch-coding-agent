@@ -427,9 +427,12 @@ describe('durable backend runtime', () => {
       )
     }
     expect(secondProvider.calls).toBe(1)
-    expect(JSON.stringify(secondProvider.requests[0])).toContain(
-      'first durable question',
-    )
+    const reopenedRequest = JSON.stringify(secondProvider.requests[0])
+    expect(reopenedRequest).toContain('first durable question')
+    expect(reopenedRequest).toContain('call:readme')
+    expect(reopenedRequest).toContain('durable tool input')
+    expect(reopenedRequest).toContain('answer 2')
+    expect(reopenedRequest).toContain('second durable question')
     await secondTarget.dispose()
   })
 
@@ -664,6 +667,9 @@ describe('durable backend runtime', () => {
       status: 'calling_llm',
       text: 'partial durable answer',
     })
+    expect(JSON.stringify(reloaded.messagePage.records)).not.toContain(
+      'partial durable answer',
+    )
     expect(reloaded.traceCapture).toMatchObject({
       configuredEnabled: false,
       state: 'disabled',

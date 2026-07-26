@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && npm run test:native && npm run test:ripgrep && npm run test:sqlite && npm run build:app && npm run build:headless && electron-builder --win --x64 --publish never && npm run test:sqlite:packaged",
+    "build": "npm run typecheck && npm run test:runtime && npm run build:app && npm run build:headless && electron-builder --win --x64 --publish never && npm run test:sqlite:packaged",
     "build:app": "vite build",
     "build:headless": "vite build --config vite.headless.config.ts",
     "build:worker-services": "vite build --config vite.worker.config.ts",
@@ -30,11 +30,13 @@
     "test:native": "node scripts/native-pty-smoke.cjs",
     "test:ripgrep": "node scripts/ripgrep-smoke.cjs",
     "test:sqlite": "node scripts/sqlite-smoke.cjs",
+    "test:runtime": "npm run test:native && npm run test:ripgrep && npm run test:sqlite",
     "test:sqlite:packaged": "node scripts/sqlite-smoke.cjs --packaged",
     "test:e2e": "npm run build:app && playwright test",
+    "test:e2e:built": "playwright test",
     "test:docker-worker": "node scripts/run-docker-worker-tests.cjs",
     "test:benchmark-external-real": "node scripts/run-real-external-benchmark-tests.cjs",
-    "test:benchmark-cases": "vitest run --config vitest.benchmark-cases.config.ts",
+    "verify": "npm run lint && npm run format:check && npm test && npm run build && npm run test:e2e:built",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {

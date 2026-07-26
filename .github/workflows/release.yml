@@ -28,31 +28,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Check formatting
-        run: npm run format:check
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Unit tests
-        run: npm test
-
-      - name: Electron E2E
-        run: npm run test:e2e
-
       - name: Sync version from tag
         shell: pwsh
         run: |
           $tag = '${{ github.ref_name }}' -replace '^v', ''
-          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
-          $pkg.version = $tag
-          $pkg | ConvertTo-Json -Depth 32 | Set-Content package.json -NoNewline
+          npm version $tag --no-git-tag-version --allow-same-version
 
-      - name: Build Windows package
-        run: npm run build
+      - name: Verify
+        run: npm run verify
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2

@@ -1,4 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -26,7 +28,10 @@ import { FileChangeRepository } from './file-change-repository'
 describe('DatabaseService', () => {
   it.each([
     [5, 'DATABASE_BUSY'],
+    [8, 'DATABASE_IO'],
     [10, 'DATABASE_IO'],
+    [13, 'DATABASE_IO'],
+    [14, 'DATABASE_IO'],
     [11, 'DATABASE_CORRUPT'],
     [19, 'DATABASE_CONSTRAINT'],
     [1, 'DATABASE_ERROR'],
@@ -37,6 +42,41 @@ describe('DatabaseService', () => {
     })
 
     expect(normalizePersistenceError(sqliteError)).toMatchObject({ code })
+  })
+
+  it('reports corrupt files and unwritable database paths with stable codes', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'zch-database-errors-'))
+    try {
+      const corruptPath = path.join(root, 'corrupt.db')
+      await writeFile(corruptPath, 'not a sqlite database', 'utf8')
+      expect(() =>
+        DatabaseService.open({
+          databasePath: corruptPath,
+          appVersion: 'test',
+        }),
+      ).toThrowError(
+        expect.objectContaining({
+          code: 'DATABASE_CORRUPT',
+          message: expect.stringContaining('corrupt or invalid'),
+        }),
+      )
+
+      const fileInsteadOfDirectory = path.join(root, 'not-a-directory')
+      await writeFile(fileInsteadOfDirectory, 'fixture', 'utf8')
+      expect(() =>
+        DatabaseService.open({
+          databasePath: path.join(fileInsteadOfDirectory, 'agent.db'),
+          appVersion: 'test',
+        }),
+      ).toThrowError(
+        expect.objectContaining({
+          code: 'DATABASE_IO',
+          message: expect.stringContaining('I/O failed'),
+        }),
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('opens a file database with required pragmas and migration metadata', async () => {

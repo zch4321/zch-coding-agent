@@ -372,7 +372,22 @@ describe('Headless host', () => {
     expect(exitCode).toBe(HEADLESS_EXIT_CODES.completed)
     expect(output.value).toContain('"type":"runtime.started"')
     expect(output.value).toContain('"type":"runtime.completed"')
-    expect(diagnostics.value).toBe('')
+    const diagnosticLines = diagnostics.value.trim().split('\n')
+    expect(diagnosticLines.length).toBeGreaterThan(0)
+    expect(
+      diagnosticLines.every((line) =>
+        /^\[headless\] SQLite migration \d+:[a-z0-9_]+ (?:started|completed) \(\d+ms\)$/u.test(
+          line,
+        ),
+      ),
+    ).toBe(true)
+    expect(diagnostics.value).not.toContain(workspace)
+    expect(diagnostics.value).not.toContain(artifacts)
+    expect(diagnostics.value).not.toContain('HEADLESS_TEST_KEY')
+    expect(diagnostics.value).not.toContain('secret')
+    expect(diagnostics.value).not.toMatch(
+      /\b(?:CREATE|ALTER|INSERT|UPDATE|DELETE|SELECT)\b/u,
+    )
     await expect(
       readFile(path.join(artifacts, 'result.json'), 'utf8'),
     ).resolves.toContain('"status": "completed"')

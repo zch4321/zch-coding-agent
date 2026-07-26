@@ -229,6 +229,65 @@ describe('agent runtime store', () => {
     expect(runtime.startPending).toBe(false)
   })
 
+  it('restores an approval after a rejected decision IPC', async () => {
+    seedReplica()
+    const decideApproval = vi.fn(async () => failure('approval unavailable'))
+    installApi({
+      decideApproval: decideApproval as AgentApi['decideApproval'],
+    })
+    const runtime = useAgentRuntimeStore()
+    const overlay = runtime.ensureOverlay(selectedSessionId)
+    overlay.runId = 'run:approval' as RunId
+    overlay.status = 'awaiting_approval'
+    overlay.approval = {
+      runId: overlay.runId,
+      callId: 'call:approval' as CallId,
+      kind: 'tool',
+      tool: 'apply_patch',
+      args: { patch: 'fixture' },
+      reason: 'Apply a change',
+      signals: [],
+      rememberable: false,
+      expiresAt: '2026-07-25T00:05:00.000Z',
+      status: 'requested',
+      order: 1,
+    }
+
+    await expect(runtime.decideApproval({ decision: 'allow' })).resolves.toBe(
+      false,
+    )
+
+    expect(runtime.approvalSubmitting).toBe(false)
+    expect(overlay.approval?.status).toBe('requested')
+    expect(useNotificationStore().pending).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        message: 'approval unavailable',
+        sessionId: selectedSessionId,
+      }),
+    ])
+  })
+
+  it('ignores duplicate runtime events without duplicating stream content', () => {
+    seedReplica()
+    const runtime = useAgentRuntimeStore()
+    const delta = event({
+      type: 'assistant.text.delta',
+      seq: 1,
+      sessionId: selectedSessionId,
+      runId: 'run:duplicate-event' as RunId,
+      delta: 'once',
+    })
+
+    runtime.handleAgentEvent(delta)
+    runtime.handleAgentEvent(delta)
+
+    expect(runtime.ensureOverlay(selectedSessionId)).toMatchObject({
+      text: 'once',
+      lastEventSeq: 1,
+    })
+  })
+
   it('runs background carryovers in FIFO order with stable request ids', async () => {
     const replica = seedReplica(true)
     const startRun = vi.fn(async (payload: DurableRunStartPayload) =>
