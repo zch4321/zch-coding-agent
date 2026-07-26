@@ -1241,7 +1241,9 @@ Active Run 开始时解析 immutable `ModelRouteSnapshot` 并保存在 memory；
 
 Durable execution port 对每个 Session 串行 commit。commit 失败时从 SQLite 单次恢复 SessionRecord、active history、next seq、mode/model/Goal/Plan，并清除未提交 request 映射；恢复也失败时 binding 标记为 invalid，当前 Run settle 后强制驱逐。tool-batch commit 失败即使恢复成功也会隔离当前 live binding，避免带着已发生但未落库的副作用继续 React。
 
-`LiveSessionContextRegistry` 使用带 ownership token 的 `reserved → loading → live → evicting/releasing` 状态机。并发候选 Session 只有 owner 能清理自己的 manager context/binding；lazy restore 从首次串行 durable read 起就参与 Session/Project lifecycle guard。Archive、Project path update/remove 会先取得 eviction lease，成功 commit 后的资源清理失败只记录诊断，不把已提交事务改报失败。
+`LiveSessionContextRegistry` 使用带 ownership token 的 `reserved → loading → live ↔ mutating → evicting/invalid/releasing` 状态机。并发候选 Session 只有 owner 能清理自己的 manager context/binding；lazy restore 从首次串行 durable read 起就参与 Session/Project lifecycle guard。Registry 的 idle 检查同时覆盖 active Run、未完成副作用、terminal 和 SessionManager 的 metadata mutation，避免 plan/mode commit 与 archive、rewind、fork 或 Project eviction 交错。Archive、Project path update/remove 会先取得 eviction lease，成功 commit 后的资源清理失败只记录诊断，不把已提交事务改报失败。
+
+Application boundary 保留显式 `ApplicationError`；SQLite/codec 故障归一化为安全的 `PERSISTENCE_FAILURE`，其他未知异常归一化为 `INTERNAL_ERROR`。原始 cause 只进入主进程诊断，不通过 IPC 暴露路径、SQL 或其他内部消息。Backend 启动失败时始终尝试全部清理；清理或诊断失败不得覆盖最初的启动错误。
 
 ### 9.6 应用崩溃与重启
 

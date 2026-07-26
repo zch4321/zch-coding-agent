@@ -6,6 +6,8 @@
 >
 > 注释收口：`docs/public-api-comments`（基于 `e035a27`，2026-07-26）
 >
+> Persistence/Application P3 收口：`fix/persistence-p3-cleanup`（2026-07-26）
+>
 > 对比基线：`master` 的 merge-base `6cb4a0819734ce68166635a82422872011a21b1b`
 >
 > 本稿说明：本报告历经三轮——初审（`c3f0e8d`，11 P1 / 31 P2 / 46 P3）、复检（`db8072a`，确认 11/11 P1 与绝大部分 P2 修复）、终审（`e035a27`，本稿），并在后续注释收口中关闭公共 API 文档存量。**已修复并经复检/终审确认的条目已全部移除，本稿仅保留当前仍未解决的问题**。历史版本见 git 历史。
@@ -16,12 +18,12 @@
 
 重构目标（业务状态统一收归后端）已达成，durable 单写者 + commit cursor / event seq 双通道复制 + gap 自愈的主链路健康；naive-ui 迁移（主题单源、组件替换、确认对话框、NMessage 反馈）也已落地。
 
-当前 **无 P0/P1**。剩余 **5 个 P2**（4 个渲染层存量 + 1 个 naive 迁移引入的定位回归）与 **15 个 P3**（结构性健壮性、规范与可接受延后项）。另有 1 项产品决策待定（sendFirst）。
+当前 **无 P0/P1**。剩余 **5 个 P2**（4 个渲染层存量 + 1 个 naive 迁移引入的定位回归）与 **12 个 P3**（结构性健壮性、规范与可接受延后项）。另有 1 项产品决策待定（sendFirst）。
 
 | 检查                                                 | 结果                                                                |
 | ---------------------------------------------------- | ------------------------------------------------------------------- |
 | `npm run typecheck` / `lint` / `format:check`        | 通过                                                                |
-| `npm test`（vitest 确定性套件，含 benchmarks/cases） | 通过：115 文件、776 通过、8 跳过（跳过项为 opt-in docker/real-api） |
+| `npm test`（vitest 确定性套件，含 benchmarks/cases） | 通过：121 文件、794 通过、8 跳过（跳过项为 opt-in docker/real-api） |
 
 注释收口新增 `lint:api-docs` 静态门禁，覆盖 `electron/`、`shared/`、`src/` 与 `benchmarks/` 的生产 TypeScript：所有类、公开类方法和导出函数均必须有职责注释。共补齐并人工复核 677 条注释；扫描结果为零缺口，且注释补齐未引入新的代码行为问题。
 
@@ -35,11 +37,6 @@
 
 ## P3（健壮性 / 规范 / 可接受延后）
 
-### 后端结构性通道
-
-- `application-error.ts:48-52` 未知错误统一误标 `PERSISTENCE_FAILURE`，原始 message 被丢弃。
-- idle 守卫不看 `mutationInProgress`（`live-session-context-registry.ts:511-521`；新增 `'mutating'` 相位只接给了 file-change revert，`updateSessionMode`/`updatePlanStatus` 未接入）。
-
 ### 后端死代码/小问题
 
 - headless `runner.ts:415-420`：`dispose()` 抛错跳过临时 DB 目录清理；`rm` 失败掩盖已写出的 result（仅 createBackendRuntime 失败路径已补清理）。
@@ -48,7 +45,7 @@
 - headless auto-plan-approval 无 `updatePlanStatus` 失败的优雅路径（`runner.ts:246-250`）。
 - `event-sink.ts:68-69` 非 commit 投递的报错使用陈旧 validator errors（当前唯一调用点只发 commit）。
 - provider P3 组：纯 tool-call 响应 TTFT 恒 null（`deepseek-provider.ts:246,260,379`）；`prefixFingerprints` 无生产者（`provider.ts:46`）；`'title'` purpose 死契约（`shared/model-route.ts:8`）；resolver 死分支（`model-route-resolver.ts:43-50`）；`assertImmutableRequest` key 顺序敏感（`session-provider-turn.ts:88`）。
-- **新发现**：启动失败清理路径 `settleCleanup` 自身抛错会掩盖原始启动错误（`create-backend-runtime.ts:249-256`）；通知分类/去重基于对诊断消息文本的前缀匹配，与产处文案隐式耦合（`backend-notification-reporter.ts:108-136`）；脱敏正则漏 JSON 带引号形式的凭证（`backend-notification-reporter.ts:81`，当前无产出处，有 1024 有界兜底）。
+- **新发现**：通知分类/去重基于对诊断消息文本的前缀匹配，与产处文案隐式耦合（`backend-notification-reporter.ts:108-136`）；脱敏正则漏 JSON 带引号形式的凭证（`backend-notification-reporter.ts:81`，当前无产出处，有 1024 有界兜底）。
 
 ### 渲染层
 
@@ -64,7 +61,7 @@
 
 ## 已修复并验证（摘要）
 
-- **后端**：P1-1 回退跨 workspace（迁移 0002 + 双重校验）、P1-2/P1-3 审批路由（可选增强 + reasoning 强制转换）、M-2/M-3（project 容量、teardown promise）、N-2（retry 缓存失败淘汰）、事务 authorizer 封死事务控制 SQL、发布 listener 逐个隔离、dispose 排空队列、0003 retention totals、provider wire 契约隔离（7b0a5a7，有边界测试钉住）。
+- **后端**：P1-1 回退跨 workspace（迁移 0002 + 双重校验）、P1-2/P1-3 审批路由（可选增强 + reasoning 强制转换）、M-2/M-3（project 容量、teardown promise）、N-2（retry 缓存失败淘汰）、事务 authorizer 封死事务控制 SQL、发布 listener 逐个隔离、dispose 排空队列、0003 retention totals、provider wire 契约隔离（7b0a5a7，有边界测试钉住）。未知 Application 异常现安全映射为 `INTERNAL_ERROR` 并仅在内部保留 cause；registry idle 守卫纳入 runtime metadata mutation；启动清理失败不再覆盖原始启动错误。FileChange filesystem 新增 symlink/junction、非普通文件、父目录越界与临时文件清理的直接回归。
 - **渲染层**：P1-4~P1-9（双提交守卫、carryover 流、去重、排序分区、两类分页）、N-1（carryover 锁死）、终态竞态、writer.changed 误报、测试覆盖重建。
 - **基础设施**：cases.test.ts 回归 `npm test`、P10 verify 单一入口（`verification-policy.test.ts` 钉住 CI/release 各恰好一次 `npm run verify`）、损坏 JSON 恢复、trace 清理分类、runtime-parity 删除。
 - **持久化清理**：删除无调用方且硬编码 513 的 `listThrough`；Desktop/Headless 接入统一数据库路径 helper；SQLite smoke 子进程改为显式环境白名单并覆盖凭据不透传测试。FileChange Assistant Message ID 按独立审计提交语义确认为软关联，不增加 FK。`PersistenceReader` 改为准确记录 no-write 契约（按产品决策不增加 authorizer）；compact 批量 helper 收窄为只允许 `inHistory=false`；Desktop 在初始化前取得 single-instance lock。归档管理新增 restore 与 leaf-only 永久删除，repository SQL 原子拒绝仍有 fork child 的 Session，因此 parent-clearing trigger 不再能被单 Session 产品路径静默触发。
