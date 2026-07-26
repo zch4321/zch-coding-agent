@@ -44,10 +44,7 @@ async function resolve(
     config,
     provider.id,
     selection.model,
-  ).find((candidate) => candidate.id === selection.model)
-  if (!modelProfile) {
-    throw new Error(`Model profile could not be resolved: ${selection.model}`)
-  }
+  ).find((candidate) => candidate.id === selection.model)!
   const apiKey = await configStore.getProviderApiKeyForRevision(
     provider.id,
     provider.revision,

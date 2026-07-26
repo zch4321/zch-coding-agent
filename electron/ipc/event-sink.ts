@@ -68,7 +68,10 @@ export function sendDomainStateEvent(
   webContents: WebContents,
   delivery: DomainStateDelivery,
 ): void {
-  if (delivery.kind !== 'commit' || !validateDomainStateDelivery(delivery)) {
+  if (delivery.kind !== 'commit') {
+    throw new Error('Domain-state renderer delivery only accepts commits')
+  }
+  if (!validateDomainStateDelivery(delivery)) {
     throw new Error(formatSchemaErrors(validateDomainStateDelivery.errors))
   }
   if (!webContents.isDestroyed()) {

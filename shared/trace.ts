@@ -193,9 +193,6 @@ export const ProviderStatsSchema = Type.Object(
     cacheMissTokens: OptionalMetricSchema,
     averageTtftMs: OptionalMetricSchema,
     averageTotalMs: OptionalMetricSchema,
-    prefixFingerprints: Type.Array(Type.String({ maxLength: 256 }), {
-      maxItems: 10_000,
-    }),
   },
   { additionalProperties: false },
 )

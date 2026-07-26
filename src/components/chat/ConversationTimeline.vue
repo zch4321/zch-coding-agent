@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NEmpty, NFloatButton } from 'naive-ui'
+import { NButton, NEmpty } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
@@ -230,6 +230,7 @@ onBeforeUnmount(() => {
           :key="tool.callId"
           :tool="tool"
           :style="{ order: tool.order ?? 0 }"
+          @content-resized="onContentResized"
         />
       </div>
 
@@ -238,6 +239,7 @@ onBeforeUnmount(() => {
           v-for="tool in liveTools"
           :key="tool.callId"
           :tool="tool"
+          @content-resized="onContentResized"
         />
         <ChatMessageItem
           v-for="message in liveMessages"
@@ -287,14 +289,16 @@ onBeforeUnmount(() => {
         </template>
       </NEmpty>
 
-      <NFloatButton
+      <NButton
         v-if="!followingOutput"
         class="back-to-bottom"
+        circle
+        secondary
         :aria-label="t('chat.backBottom')"
         @click="scrollToBottom(true)"
       >
         <UiIcon name="chevron-down" />
-      </NFloatButton>
+      </NButton>
       <span
         ref="bottomSentinel"
         class="conversation-bottom-sentinel"

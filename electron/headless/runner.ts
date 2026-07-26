@@ -246,11 +246,21 @@ export async function runHeadlessAgent(
         metrics.plan?.status === 'awaiting_review' &&
         autoPlanApprovals < approvalLimit
       ) {
-        const updated = await runtime.services.sessions.updatePlanStatus({
-          sessionId,
-          status: 'active',
-          source: 'headless:auto-plan-approval',
-        })
+        let updated
+        try {
+          updated = await runtime.services.sessions.updatePlanStatus({
+            sessionId,
+            status: 'active',
+            source: 'headless:auto-plan-approval',
+          })
+        } catch (error) {
+          incompleteReason = 'plan_approval_failed'
+          options.onDiagnostic?.(
+            'Headless automatic plan approval could not be persisted',
+            error,
+          )
+          break
+        }
         metrics.plan = updated.commit.change.session.plan ?? undefined
         const prompt = runtime.services.prompts.headlessPrompt(
           'autonomousPlanApproval',
@@ -418,8 +428,22 @@ export async function runHeadlessAgent(
   } finally {
     if (timeout) clearTimeout(timeout)
     options.signal?.removeEventListener('abort', relayAbort)
-    await backend.dispose()
-    await rm(databaseDirectory, { recursive: true, force: true })
+    try {
+      await backend.dispose()
+    } catch (error) {
+      options.onDiagnostic?.(
+        'Headless backend cleanup did not fully complete',
+        error,
+      )
+    }
+    try {
+      await rm(databaseDirectory, { recursive: true, force: true })
+    } catch (error) {
+      options.onDiagnostic?.(
+        'Headless temporary database cleanup did not fully complete',
+        error,
+      )
+    }
   }
 }
 

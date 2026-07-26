@@ -3,6 +3,7 @@ import type { SessionId } from '../../shared/ids'
 import type { TraceCaptureStatus, TraceId } from '../../shared/trace'
 import type { TraceEvent, TraceEventInput } from '../logging/events'
 import { NullTraceLogger, type TraceLogger } from '../logging/logger'
+import type { DiagnosticSink } from '../diagnostics'
 
 const MAX_WARNING_LENGTH = 1_024
 
@@ -18,7 +19,7 @@ export class SessionTraceController implements TraceLogger {
   readonly #mode: () => PermissionMode
   readonly #factory: TraceLoggerFactory
   readonly #onStatus: (status: TraceCaptureStatus) => void
-  readonly #onDiagnostic: (message: string, error?: unknown) => void
+  readonly #onDiagnostic: DiagnosticSink
   #logger: TraceLogger = new NullTraceLogger()
   #configuredEnabled: boolean
   #capturing = false
@@ -38,7 +39,7 @@ export class SessionTraceController implements TraceLogger {
     configuredEnabled: boolean
     factory: TraceLoggerFactory
     onStatus: (status: TraceCaptureStatus) => void
-    onDiagnostic: (message: string, error?: unknown) => void
+    onDiagnostic: DiagnosticSink
   }) {
     this.#sessionId = options.sessionId
     this.#workspace = options.workspace
@@ -59,7 +60,7 @@ export class SessionTraceController implements TraceLogger {
     configuredEnabled: boolean
     factory: TraceLoggerFactory
     onStatus: (status: TraceCaptureStatus) => void
-    onDiagnostic?: (message: string, error?: unknown) => void
+    onDiagnostic?: DiagnosticSink
   }): Promise<SessionTraceController> {
     const controller = new SessionTraceController({
       ...options,
@@ -192,6 +193,7 @@ export class SessionTraceController implements TraceLogger {
       this.#onDiagnostic(
         `Failed to start trace capture for ${this.#sessionId}`,
         error,
+        { audience: 'internal' },
       )
     }
     this.#publish()
@@ -209,6 +211,7 @@ export class SessionTraceController implements TraceLogger {
           this.#onDiagnostic(
             `Failed to close trace capture for ${this.#sessionId}`,
             error,
+            { audience: 'internal' },
           ),
         )
       await logger
@@ -217,6 +220,7 @@ export class SessionTraceController implements TraceLogger {
           this.#onDiagnostic(
             `Failed to dispose trace capture for ${this.#sessionId}`,
             error,
+            { audience: 'internal' },
           ),
         )
     }
@@ -231,7 +235,9 @@ export class SessionTraceController implements TraceLogger {
     this.#capturing = false
     this.#warning = warningFor(error)
     this.#state = this.#configuredEnabled ? 'degraded' : 'disabled'
-    this.#onDiagnostic(`Trace capture failed for ${this.#sessionId}`, error)
+    this.#onDiagnostic(`Trace capture failed for ${this.#sessionId}`, error, {
+      audience: 'internal',
+    })
     await logger.dispose().catch(() => undefined)
     this.#publish()
   }

@@ -135,7 +135,6 @@ const runtimeProperties = new Set<PropertyKey>([
   'modeSyncError',
   'canSend',
   'canInterject',
-  'agentEventGap',
 ])
 const changesProperties = new Set<PropertyKey>([
   'changes',
@@ -234,7 +233,6 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
           runtime.pendingApproval,
         ),
       ),
-    closeRuntimeSession: runtime.closeRuntimeSession,
     sendMessage: runtime.sendMessage,
     sendInterjection: runtime.sendInterjection,
     chooseContextAttachment: runtime.chooseContextAttachment,

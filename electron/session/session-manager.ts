@@ -23,6 +23,7 @@ import type { SessionCommandResult } from '../../shared/domain-state-api'
 import type { TraceCaptureStatus } from '../../shared/trace'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
+import type { DiagnosticSink } from '../diagnostics'
 import { JsonlTraceLogger, NullTraceLogger } from '../logging/logger'
 import { cleanupTraces } from '../logging/cleanup'
 import type { PluginEventBus } from '../plugins/event-bus'
@@ -99,7 +100,7 @@ export class SessionManager {
   readonly #traceLoggerFactory: NonNullable<
     SessionManagerOptions['traceLoggerFactory']
   >
-  readonly #onDiagnostic: (message: string, error?: unknown) => void
+  readonly #onDiagnostic: DiagnosticSink
   readonly #sessions = new Map<SessionId, SessionState>()
   readonly #writerEventSessions = new Map<RunId, SessionState>()
   readonly #toolRegistry: ToolRegistry
@@ -1007,11 +1008,11 @@ export class SessionManager {
                 }
               : {}),
           }
-    void session.logger
-      .write(event)
-      .catch((error: unknown) =>
-        this.#onDiagnostic('Failed to trace rejected run', error),
-      )
+    void session.logger.write(event).catch((error: unknown) =>
+      this.#onDiagnostic('Failed to trace rejected run', error, {
+        audience: 'internal',
+      }),
+    )
 
     if (rejection.reason === 'workspace_writer_active') {
       if (rejection.writer.kind !== 'provider_run') return
@@ -1029,6 +1030,7 @@ export class SessionManager {
           this.#onDiagnostic(
             'Failed to trace rejected workspace writer',
             error,
+            { audience: 'internal' },
           ),
         )
     }
@@ -1053,7 +1055,9 @@ export class SessionManager {
         status,
       })
       .catch((error: unknown) =>
-        this.#onDiagnostic('Failed to trace workspace writer change', error),
+        this.#onDiagnostic('Failed to trace workspace writer change', error, {
+          audience: 'internal',
+        }),
       )
     this.#emit(session, {
       type: 'workspace.writer.changed',

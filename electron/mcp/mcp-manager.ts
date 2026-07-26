@@ -9,6 +9,7 @@ import type {
   McpServerStatus,
 } from '../../shared/mcp'
 import type { ConfigStore } from '../config/store'
+import type { DiagnosticSink } from '../diagnostics'
 import {
   McpStdioConnection,
   type McpConnectionCatalog,
@@ -77,14 +78,14 @@ interface ManagedConnection {
 export interface McpManagerOptions {
   configStore: ConfigStore
   defaultCwd: string
-  onDiagnostic?: (message: string, error?: unknown) => void
+  onDiagnostic?: DiagnosticSink
 }
 
 /** Manages configured MCP servers, trust state, scoped connections, catalogs, and tool calls. */
 export class McpManager {
   readonly #configStore: ConfigStore
   readonly #defaultCwd: string
-  readonly #onDiagnostic: (message: string, error?: unknown) => void
+  readonly #onDiagnostic: DiagnosticSink
   readonly #configs = new Map<string, McpServerConfig>()
   readonly #connections = new Map<string, ManagedConnection>()
   readonly #activeWorkspaces = new Set<string>()
@@ -414,7 +415,11 @@ export class McpManager {
         onCatalogChanged: () => void this.#refreshCatalog(record),
         onClosed: () => this.#handleUnexpectedClose(record),
         onError: (error) =>
-          this.#onDiagnostic(`MCP ${record.serverId} transport error`, error),
+          this.#onDiagnostic(`MCP ${record.serverId} transport error`, error, {
+            audience: 'notification',
+            code: 'MCP_BACKGROUND_FAILURE',
+            message: `MCP server ${record.serverId} reported a transport error.`,
+          }),
       })
       record.connection = connection
       const catalog = await connection.connect()
@@ -427,7 +432,11 @@ export class McpManager {
       record.lastError = error instanceof Error ? error.message : String(error)
       await record.connection?.close().catch(() => undefined)
       record.connection = undefined
-      this.#onDiagnostic(`MCP ${record.serverId} failed to start`, error)
+      this.#onDiagnostic(`MCP ${record.serverId} failed to start`, error, {
+        audience: 'notification',
+        code: 'MCP_BACKGROUND_FAILURE',
+        message: `MCP server ${record.serverId} could not be started.`,
+      })
     }
   }
 
@@ -441,7 +450,15 @@ export class McpManager {
       record.catalog = normalizeCatalog(config.id, catalog)
     } catch (error) {
       record.lastError = error instanceof Error ? error.message : String(error)
-      this.#onDiagnostic(`MCP ${record.serverId} catalog refresh failed`, error)
+      this.#onDiagnostic(
+        `MCP ${record.serverId} catalog refresh failed`,
+        error,
+        {
+          audience: 'notification',
+          code: 'MCP_BACKGROUND_FAILURE',
+          message: `MCP server ${record.serverId} catalog refresh failed.`,
+        },
+      )
     }
   }
 

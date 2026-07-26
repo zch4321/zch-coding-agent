@@ -363,7 +363,6 @@ export class SessionCompactCoordinator {
           ]),
           requestBytes: snapshot.requestBytes,
           prefixHash: snapshot.prefixHash,
-          prefixFingerprints: snapshot.prefixFingerprints,
           promptResources: promptResources(session),
           canonicalSource: canonicalTraceSource(history.messages),
           modelRoute: binding.snapshot,

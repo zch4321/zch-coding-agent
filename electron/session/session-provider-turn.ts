@@ -1,8 +1,10 @@
+import { isDeepStrictEqual } from 'node:util'
 import type { ProviderPublicConfig } from '../../shared/config'
 import type { CallId } from '../../shared/ids'
 import type { JsonObject, JsonValue } from '../../shared/json'
 import type { MessagePart } from '../../shared/message'
 import type { ConfigStore } from '../config/store'
+import type { DiagnosticSink } from '../diagnostics'
 import type { PluginEventBus } from '../plugins/event-bus'
 import { OpenAICompatibleProvider } from '../providers/deepseek-provider'
 import {
@@ -85,7 +87,7 @@ function assertImmutableRequest(
     ...Object.keys(candidate),
   ])) {
     if (MUTABLE_REQUEST_FIELDS.has(field)) continue
-    if (JSON.stringify(candidate[field]) !== JSON.stringify(original[field])) {
+    if (!isDeepStrictEqual(candidate[field], original[field])) {
       throw new TypeError(
         `beforeLLMCall cannot modify protected request field: ${field}`,
       )
@@ -122,7 +124,7 @@ export class SessionProviderTurnRunner {
   readonly #projectMetadata: ProjectMetadataStore | undefined
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #providerFactory: SessionManagerOptions['providerFactory']
-  readonly #onDiagnostic: (message: string, error?: unknown) => void
+  readonly #onDiagnostic: DiagnosticSink
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
   readonly #getWorkspaceConcurrency: (
     session: SessionState,
@@ -136,7 +138,7 @@ export class SessionProviderTurnRunner {
     projectMetadata?: ProjectMetadataStore
     fetchImpl?: typeof fetch
     providerFactory: SessionManagerOptions['providerFactory']
-    onDiagnostic: (message: string, error?: unknown) => void
+    onDiagnostic: DiagnosticSink
     emit: (session: SessionState, event: AgentEventDraft) => void
     getWorkspaceConcurrency?: (
       session: SessionState,
@@ -279,7 +281,6 @@ export class SessionProviderTurnRunner {
         ]),
         requestBytes: snapshot.requestBytes,
         prefixHash: snapshot.prefixHash,
-        prefixFingerprints: snapshot.prefixFingerprints,
         promptResources: promptResources(session),
         promptBuild: selection.promptBuild,
         canonicalSource: canonicalTraceSource(selection.messages),
@@ -343,7 +344,9 @@ export class SessionProviderTurnRunner {
         usage: completed.usage,
         timing: completed.timing,
       })
-      this.#onDiagnostic('Provider completion validation failed', error)
+      this.#onDiagnostic('Provider completion validation failed', error, {
+        audience: 'internal',
+      })
       throw error
     }
     const canonicalText = canonical.parts
@@ -427,7 +430,7 @@ function assertCompletedAssistantTurn(completed: CompletedAssistantTurn): void {
     if (
       part.callId !== call.id ||
       part.name !== call.toolId ||
-      JSON.stringify(part.arguments) !== JSON.stringify(call.args)
+      !isDeepStrictEqual(part.arguments, call.args)
     ) {
       throw new TypeError(
         'Provider completion parts do not match normalized tool calls',

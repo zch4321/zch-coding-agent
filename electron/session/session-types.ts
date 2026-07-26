@@ -11,6 +11,7 @@ import type { ConfigStore } from '../config/store'
 import type { TraceLogger } from '../logging/logger'
 import type { PluginEventBus } from '../plugins/event-bus'
 import type { AutoApprover } from '../permission/auto-approver'
+import type { DiagnosticSink } from '../diagnostics'
 import type { LLMProvider } from '../providers/provider'
 import type { HumanApprovalDecision } from '../permission/permission-pipeline'
 import type { SkillsManager } from '../skills/manager'
@@ -79,7 +80,7 @@ export interface SessionManagerOptions {
     sessionId: SessionId,
   ) => TraceLogger | Promise<TraceLogger>
   executionState?: SessionExecutionStatePort
-  onDiagnostic?: (message: string, error?: unknown) => void
+  onDiagnostic?: DiagnosticSink
 }
 
 export interface SessionExecutionCommit {

@@ -14,6 +14,11 @@ const props = defineProps<{
   revertOpen: boolean
   revertMessagePreview: string
   messageAction?: MessageAction
+  yoloPending: boolean
+  renamePending: boolean
+  deletePending: boolean
+  revertPending: boolean
+  messageActionPending: boolean
 }>()
 const emit = defineEmits<{
   'update:yoloOpen': [value: boolean]
@@ -73,16 +78,24 @@ const messageActionPositiveText = computed(() => {
     preset="card"
     style="width: min(620px, calc(100vw - 40px))"
     :title="t('dialogs.yoloTitle')"
+    :mask-closable="!yoloPending"
+    :close-on-esc="!yoloPending"
     @update:show="emit('update:yoloOpen', $event)"
   >
     <NAlert type="error" :title="t('dialogs.yoloRisk')">
       {{ t('dialogs.yoloText') }}
     </NAlert>
     <NSpace justify="end" class="modal-actions">
-      <NButton @click="emit('update:yoloOpen', false)">{{
-        t('common.cancel')
-      }}</NButton>
-      <NButton type="error" @click="emit('confirm-yolo')">
+      <NButton
+        :disabled="yoloPending"
+        @click="emit('update:yoloOpen', false)"
+        >{{ t('common.cancel') }}</NButton
+      >
+      <NButton
+        type="error"
+        :loading="yoloPending"
+        @click="emit('confirm-yolo')"
+      >
         {{ t('dialogs.enableYolo') }}
       </NButton>
     </NSpace>
@@ -94,6 +107,8 @@ const messageActionPositiveText = computed(() => {
     style="width: min(460px, calc(100vw - 40px))"
     content-class="small-modal-content"
     :title="t('dialogs.renameTitle')"
+    :mask-closable="!renamePending"
+    :close-on-esc="!renamePending"
     @update:show="emit('update:renameOpen', $event)"
   >
     <NInput
@@ -102,12 +117,17 @@ const messageActionPositiveText = computed(() => {
       @update:value="emit('update:renameValue', $event)"
     />
     <NSpace justify="end" class="modal-actions">
-      <NButton @click="emit('update:renameOpen', false)">{{
-        t('common.cancel')
-      }}</NButton>
-      <NButton type="primary" @click="emit('confirm-rename')">{{
-        t('dialogs.rename')
-      }}</NButton>
+      <NButton
+        :disabled="renamePending"
+        @click="emit('update:renameOpen', false)"
+        >{{ t('common.cancel') }}</NButton
+      >
+      <NButton
+        type="primary"
+        :loading="renamePending"
+        @click="emit('confirm-rename')"
+        >{{ t('dialogs.rename') }}</NButton
+      >
     </NSpace>
   </NModal>
 
@@ -118,6 +138,7 @@ const messageActionPositiveText = computed(() => {
     :negative-text="t('common.cancel')"
     type="warning"
     positive-type="error"
+    :loading="deletePending"
     @update:show="emit('update:deleteOpen', $event)"
     @positive="emit('confirm-delete')"
   >
@@ -130,6 +151,7 @@ const messageActionPositiveText = computed(() => {
     :positive-text="t('dialogs.confirmRevert')"
     :negative-text="t('common.cancel')"
     type="warning"
+    :loading="revertPending"
     @update:show="emit('update:revertOpen', $event)"
     @positive="emit('confirm-revert')"
   >
@@ -145,6 +167,7 @@ const messageActionPositiveText = computed(() => {
     :positive-text="messageActionPositiveText"
     :negative-text="t('common.cancel')"
     type="warning"
+    :loading="messageActionPending"
     @update:show="!$event && emit('update:messageAction', undefined)"
     @positive="emit('confirm-message-action')"
   >

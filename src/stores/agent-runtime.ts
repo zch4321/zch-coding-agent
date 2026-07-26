@@ -275,24 +275,14 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     canInterject(): boolean {
       return Boolean(this.activeRunId)
     },
-    agentEventGap(): string {
-      return this.activeOverlay?.diagnostics.at(-1) ?? ''
-    },
   },
   actions: {
     ensureOverlay(sessionId: SessionId): SessionOverlay {
       return (this.overlays[sessionId] ??= blankOverlay())
     },
-    hydrateRuntime(
-      runtime: ActiveRunPublicSnapshot | undefined,
-      resetEventSequence = false,
-    ) {
+    hydrateRuntime(runtime: ActiveRunPublicSnapshot | undefined) {
       if (!runtime) return
       const overlay = this.ensureOverlay(runtime.sessionId)
-      if (resetEventSequence) {
-        overlay.lastEventSeq = 0
-        overlay.diagnostics = []
-      }
       overlay.runId = runtime.runId
       overlay.terminalReloadRunId = undefined
       overlay.status = runtime.status
@@ -310,6 +300,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         order: index + 1,
         live: true,
       }))
+      overlay.order = overlay.tools.length
       overlay.approval = pendingApprovalFromSnapshot(runtime)
     },
     async initialize() {
@@ -828,12 +819,27 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           candidate.id === sessionId && candidate.lifecycle === 'active',
       )
       if (
-        !api ||
-        !session ||
         !queue?.length ||
         overlay?.runId ||
         this.carryoverStartingBySessionId[sessionId]
       ) {
+        return false
+      }
+      if (!api || !session) {
+        const discardedIds = new Set(queue.map((item) => item.id))
+        delete this.carryoversBySessionId[sessionId]
+        delete this.carryoverStartingBySessionId[sessionId]
+        if (overlay) {
+          overlay.interjections = overlay.interjections.filter(
+            (interjection) => !discardedIds.has(interjection.id),
+          )
+        }
+        useNotificationStore().warning({
+          code: 'CARRYOVER_DISCARDED',
+          message:
+            'Carried-over messages could not be started and were discarded.',
+          sessionId,
+        })
         return false
       }
       const carryover = queue[0]!
@@ -1032,9 +1038,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       this.contextAttachments = this.contextAttachments.filter(
         (attachment) => attachment.path !== path || attachment.kind !== kind,
       )
-    },
-    closeRuntimeSession() {
-      return Promise.resolve(false)
     },
     conversationIsBusy(sessionId: string): boolean {
       const overlay = this.overlays[sessionId]

@@ -429,7 +429,6 @@ async function handleProviderSelect(value: string | number) {
 
   if (await agent.setActiveProvider(providerId)) {
     await agent.selectProviderForEditing(providerId)
-    await agent.closeRuntimeSession()
   }
 }
 

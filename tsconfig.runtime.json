@@ -11,7 +11,7 @@
   },
   "include": [
     "electron/js-yaml.d.ts",
-    "electron/sql-raw.d.ts",
+    "shared/sql-raw.d.ts",
     "electron/headless/**/*.ts",
     "benchmarks/**/*.ts",
     "electron/runtime/agent-runtime.ts",

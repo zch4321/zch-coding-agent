@@ -27,7 +27,10 @@ describe('BackendNotificationReporter', () => {
       'Bearer top-secret at C:\\Users\\alice\\workspace\\secret.txt\nstack line',
     )
 
-    reporter.reportDiagnostic('MCP server transport error', error)
+    reporter.reportDiagnostic('MCP server transport error', error, {
+      audience: 'notification',
+      code: 'MCP_BACKGROUND_FAILURE',
+    })
 
     expect(log).toHaveBeenCalledWith('MCP server transport error', error)
     expect(target.send).toHaveBeenCalledWith(
@@ -44,15 +47,25 @@ describe('BackendNotificationReporter', () => {
     expect(JSON.stringify(payload)).not.toContain('alice')
   })
 
-  it('does not duplicate diagnostics already delivered by request or run events', () => {
+  it('does not duplicate diagnostics explicitly classified as internal', () => {
     const target = webContents()
     const reporter = new BackendNotificationReporter({
       getWebContents: () => target,
       log: vi.fn(),
     })
-    reporter.reportDiagnostic('IPC handler session:get failed', new Error())
-    reporter.reportDiagnostic('Run run:1 ended unexpectedly', new Error())
-    reporter.reportDiagnostic('Trace capture failed for session:1', new Error())
+    reporter.reportDiagnostic('IPC handler session:get failed', new Error(), {
+      audience: 'internal',
+    })
+    reporter.reportDiagnostic('Run run:1 ended unexpectedly', new Error(), {
+      audience: 'internal',
+    })
+    reporter.reportDiagnostic(
+      'Trace capture failed for session:1',
+      new Error(),
+      {
+        audience: 'internal',
+      },
+    )
     expect(target.send).not.toHaveBeenCalled()
   })
 
@@ -96,5 +109,10 @@ describe('BackendNotificationReporter', () => {
     expect(safe).not.toContain('alice')
     expect(safe).not.toContain('stack')
     expect(safe.length).toBeLessThanOrEqual(1_024)
+    expect(
+      sanitizeDiagnosticMessage(
+        'Provider rejected {"api_key":"quoted-secret","token": "other-secret"}',
+      ),
+    ).not.toContain('quoted-secret')
   })
 })

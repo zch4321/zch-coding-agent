@@ -6,6 +6,7 @@ import {
   NDescriptionsItem,
   NTag,
 } from 'naive-ui'
+import { nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type {
   PendingApproval,
@@ -17,6 +18,7 @@ import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 
 defineProps<{ tool: ToolActivity }>()
+const emit = defineEmits<{ 'content-resized': [] }>()
 
 const agent = useAgentStore()
 const { t } = useI18n()
@@ -94,11 +96,18 @@ function approvalUsageSummaryForTool(tool: ToolActivity): string {
   const usage = approvalUsageForTool(tool)
   return usage ? approvalUsageSummary(usage) : ''
 }
+
+function notifyContentResized(): void {
+  void nextTick(() => emit('content-resized'))
+}
 </script>
 
 <template>
   <article class="tool-call-card">
-    <NCollapse arrow-placement="right">
+    <NCollapse
+      arrow-placement="right"
+      @update:expanded-names="notifyContentResized"
+    >
       <NCollapseItem :name="tool.callId">
         <template #header>
           <div class="tool-call-row" :title="tool.reason || tool.tool">

@@ -288,6 +288,47 @@ describe('agent runtime store', () => {
     })
   })
 
+  it('continues live tool arrival order after hydrating a running snapshot', () => {
+    seedReplica()
+    const runtime = useAgentRuntimeStore()
+    const snapshot = runtimeSnapshot(
+      selectedSessionId,
+      'run:hydrated-tools' as RunId,
+    )
+    snapshot.tools = [
+      {
+        callId: 'call:first' as CallId,
+        tool: 'read_file',
+        status: 'completed',
+      },
+      {
+        callId: 'call:second' as CallId,
+        tool: 'search_files',
+        status: 'running',
+      },
+    ]
+
+    runtime.hydrateRuntime(snapshot)
+    runtime.handleAgentEvent(
+      event({
+        type: 'tool.proposed',
+        seq: 1,
+        sessionId: selectedSessionId,
+        runId: snapshot.runId,
+        callId: 'call:third' as CallId,
+        tool: 'run_command',
+        args: {},
+        reason: 'Continue after reload',
+      }),
+    )
+
+    expect(runtime.ensureOverlay(selectedSessionId).tools).toEqual([
+      expect.objectContaining({ callId: 'call:third', order: 3 }),
+      expect.objectContaining({ callId: 'call:first', order: 1 }),
+      expect.objectContaining({ callId: 'call:second', order: 2 }),
+    ])
+  })
+
   it('runs background carryovers in FIFO order with stable request ids', async () => {
     const replica = seedReplica(true)
     const startRun = vi.fn(async (payload: DurableRunStartPayload) =>
@@ -439,6 +480,45 @@ describe('agent runtime store', () => {
       message: 'continue with this',
       clientRequestId: 'carryover:interjection:next',
     })
+  })
+
+  it('discards queued carryovers when their Session can no longer run', async () => {
+    seedReplica()
+    const runtime = useAgentRuntimeStore()
+    const overlay = runtime.ensureOverlay(backgroundSessionId)
+    runtime.carryoversBySessionId[backgroundSessionId] = [
+      {
+        id: 'interjection:orphaned',
+        runId: 'run:old' as RunId,
+        content: 'cannot be delivered',
+        createdAt: timestamp,
+      },
+    ]
+    overlay.interjections = [
+      {
+        id: 'interjection:orphaned',
+        status: 'carryover',
+        content: 'cannot be delivered',
+        createdAt: timestamp,
+      },
+    ]
+
+    await expect(runtime.flushCarryovers(backgroundSessionId)).resolves.toBe(
+      false,
+    )
+
+    expect(runtime.carryoversBySessionId[backgroundSessionId]).toBeUndefined()
+    expect(
+      runtime.carryoverStartingBySessionId[backgroundSessionId],
+    ).toBeUndefined()
+    expect(overlay.interjections).toEqual([])
+    expect(useNotificationStore().pending).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'CARRYOVER_DISCARDED',
+        sessionId: backgroundSessionId,
+      }),
+    ])
   })
 
   it('lets durable interjections and tools replace their live overlays', () => {
@@ -598,7 +678,6 @@ describe('agent runtime store', () => {
     )
 
     expect(runtime.ensureOverlay(selectedSessionId).lastEventSeq).toBe(2)
-    expect(runtime.agentEventGap).toBe('')
   })
 
   it('reconciles trace capture status in the Session event sequence', () => {

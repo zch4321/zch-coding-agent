@@ -317,6 +317,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
           }
 
           toolCalls.set(index, current)
+          firstTokenAt ??= this.#now()
           yield {
             type: 'tool.delta',
             index,

@@ -6,6 +6,7 @@ import type {
   FileChangePage,
 } from '../../shared/file-change'
 import type { FileChangeId, ProjectId, SessionId } from '../../shared/ids'
+import type { DiagnosticSink } from '../diagnostics'
 import {
   toFileChangeSummary,
   type StoredFileChangeRecord,
@@ -49,7 +50,7 @@ export interface FileChangeServiceOptions {
   projects?: ProjectRepository
   now?: () => string
   createId?: () => FileChangeId
-  onDiagnostic?: (message: string, error?: unknown) => void
+  onDiagnostic?: DiagnosticSink
 }
 
 export interface FileChangeRuntimeGuard {
@@ -75,7 +76,7 @@ export class FileChangeService implements FileChangeExecutionPort {
   readonly #projects: ProjectRepository
   readonly #now: () => string
   readonly #createId: () => FileChangeId
-  readonly #onDiagnostic: (message: string, error?: unknown) => void
+  readonly #onDiagnostic: DiagnosticSink
   #runtimeGuard: FileChangeRuntimeGuard | undefined
 
   constructor(options: FileChangeServiceOptions) {
@@ -204,13 +205,16 @@ export class FileChangeService implements FileChangeExecutionPort {
         this.#onDiagnostic(
           'File change after-state no longer matches the approved mutation',
           error,
+          { audience: 'internal' },
         )
         return {
           status: 'warning',
           warningCode: 'CHANGE_HISTORY_AFTER_STATE_MISMATCH',
         }
       }
-      this.#onDiagnostic('Failed to verify file change after-state', error)
+      this.#onDiagnostic('Failed to verify file change after-state', error, {
+        audience: 'internal',
+      })
       return {
         status: 'warning',
         warningCode: 'CHANGE_HISTORY_AFTER_STATE_MISMATCH',
@@ -262,7 +266,9 @@ export class FileChangeService implements FileChangeExecutionPort {
         fileChange: toFileChangeSummary(stored),
       }
     } catch (error) {
-      this.#onDiagnostic('Failed to persist durable file change', error)
+      this.#onDiagnostic('Failed to persist durable file change', error, {
+        audience: 'internal',
+      })
       return {
         status: 'warning',
         warningCode: 'CHANGE_HISTORY_PERSIST_FAILED',
@@ -426,6 +432,7 @@ export class FileChangeService implements FileChangeExecutionPort {
         this.#onDiagnostic(
           'File was reverted but durable FileChange state was not saved',
           error,
+          { audience: 'internal' },
         )
         throw new ApplicationError(
           'PERSISTENCE_FAILURE',

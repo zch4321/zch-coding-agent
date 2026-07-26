@@ -43,6 +43,7 @@ import {
   resolveAppResource,
 } from './security'
 import { acquireDesktopSingleInstance } from './single-instance'
+import { backendStartupRecoveryPrompt } from './backend-startup-recovery'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(currentDirectory, '..')
@@ -219,21 +220,24 @@ async function openBackendWithRecovery<T>(input: {
       return await input.create()
     } catch (error) {
       console.error('Durable backend startup failed', error)
+      const prompt = backendStartupRecoveryPrompt(error)
+      const buttons = prompt.retryable
+        ? ['Retry', 'Open data directory', 'Exit']
+        : ['Open data directory', 'Exit']
       const choice = dialog.showMessageBoxSync({
         type: 'error',
         title: 'Durable backend unavailable',
-        message: 'The local database could not be opened or migrated.',
-        detail:
-          'Retry after resolving the problem, open the data directory for recovery, or exit the application.',
-        buttons: ['Retry', 'Open data directory', 'Exit'],
-        defaultId: 0,
-        cancelId: 2,
+        message: prompt.message,
+        detail: prompt.detail,
+        buttons,
+        defaultId: prompt.retryable ? 0 : 1,
+        cancelId: prompt.retryable ? 2 : 1,
         noLink: true,
       })
-      if (choice === 0) continue
-      if (choice === 1) {
+      if (prompt.retryable && choice === 0) continue
+      const openDirectoryChoice = prompt.retryable ? 1 : 0
+      if (choice === openDirectoryChoice) {
         await shell.openPath(input.userData)
-        continue
       }
       throw error
     }

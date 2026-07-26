@@ -5,7 +5,6 @@ import { DurableSchemaVersionSchema, RevisionSchema } from './durable'
 export const ProviderPurposeSchema = Type.Union([
   Type.Literal('main'),
   Type.Literal('approval'),
-  Type.Literal('title'),
   Type.Literal('compression'),
 ])
 export type ProviderPurpose = Static<typeof ProviderPurposeSchema>

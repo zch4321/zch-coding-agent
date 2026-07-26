@@ -332,7 +332,6 @@ export function normalizeSessionTranscript(
             data: jsonClone({
               requestBytes: event.requestBytes,
               prefixHash: event.prefixHash,
-              prefixFingerprints: event.prefixFingerprints ?? [],
               promptResources: event.promptResources ?? [],
               promptBuild: event.promptBuild ?? null,
               messageCount: event.normalizedMessages.length,

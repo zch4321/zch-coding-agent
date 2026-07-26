@@ -27,32 +27,53 @@ export const useAgentProjectStore = defineStore('agent-project', {
     saving: false,
     restartingBackendId: '',
     error: '',
+    loadGeneration: 0,
   }),
   actions: {
     async loadProject(workspace: string) {
       const api = bridge()
       const projectId = activeProjectId()
       if (!api?.getProject || !workspace || !projectId) return
+      const generation = ++this.loadGeneration
       this.loading = true
       this.error = ''
+      this.projectSnapshot = undefined
+      this.backendStatuses = []
       const result = await api.getProject({ version: IPC_VERSION, projectId })
+      if (
+        generation !== this.loadGeneration ||
+        activeProjectId() !== projectId
+      ) {
+        if (generation === this.loadGeneration) this.loading = false
+        return
+      }
       this.loading = false
 
       if (result.ok) {
         this.projectSnapshot = result.value
-        await this.loadBackendStatus(workspace)
+        await this.loadBackendStatus(workspace, projectId, generation)
       } else {
         this.error = result.error.message
       }
     },
-    async loadBackendStatus(workspace: string) {
+    async loadBackendStatus(
+      workspace: string,
+      projectId = activeProjectId(),
+      generation?: number,
+    ) {
       const api = bridge()
-      const projectId = activeProjectId()
       if (!api?.getProjectBackendStatus || !workspace || !projectId) return
+      const expectedGeneration = generation ?? this.loadGeneration
       const result = await api.getProjectBackendStatus({
         version: IPC_VERSION,
         projectId,
       })
+      if (
+        expectedGeneration !== this.loadGeneration ||
+        activeProjectId() !== projectId
+      ) {
+        return
+      }
 
       if (result.ok) this.backendStatuses = result.value.statuses
       else this.error = result.error.message

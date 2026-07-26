@@ -397,6 +397,52 @@ describe('DeepSeekProvider', () => {
     )
   })
 
+  it('records TTFT for a tool-only response', async () => {
+    const timestamps = [100, 125, 175]
+    const provider = new DeepSeekProvider({
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+      now: () => timestamps.shift() ?? 175,
+      fetchImpl: async () =>
+        sseResponse([
+          {
+            choices: [
+              {
+                finish_reason: 'tool_calls',
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call-tool-only',
+                      function: {
+                        name: 'read_file',
+                        arguments: '{"path":"README.md"}',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ]),
+    })
+    const events: ProviderEvent[] = []
+
+    for await (const event of provider.stream(
+      streamRequest({
+        messages: [{ role: 'user', content: 'Read the file' }],
+        tools: [],
+        signal: new AbortController().signal,
+      }),
+    )) {
+      events.push(event)
+    }
+
+    expect(events.find((event) => event.type === 'completed')).toMatchObject({
+      timing: { ttftMs: 25, totalMs: 75 },
+    })
+  })
+
   it('preserves a provider truncation finish reason', async () => {
     const provider = new DeepSeekProvider({
       baseURL: 'https://api.example/v1',

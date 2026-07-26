@@ -478,9 +478,6 @@ export class TraceService {
       ]),
       averageTtftMs: averageMetric(events, 'ttftMs'),
       averageTotalMs: averageMetric(events, 'totalMs'),
-      prefixFingerprints: [
-        ...new Set(requests.flatMap((event) => event.prefixFingerprints ?? [])),
-      ].slice(-10_000),
     }
   }
 

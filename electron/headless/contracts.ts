@@ -112,6 +112,7 @@ export const HeadlessResultSchema = Type.Object(
       Type.Union([
         Type.Literal('goal_blocked'),
         Type.Literal('plan_approval_limit'),
+        Type.Literal('plan_approval_failed'),
       ]),
     ),
     configHash: Type.String({ minLength: 64, maxLength: 64 }),

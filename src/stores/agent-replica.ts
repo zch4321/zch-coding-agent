@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { toRaw } from 'vue'
 import { IPC_VERSION } from '../../shared/channels'
 import type {
   BackendEventCursor,
@@ -162,6 +163,12 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
 
       const previousProjectId = this.selectedProjectId
       const previousSessionId = this.selectedSessionId
+      const selectedBeforeBootstrap = this.sessions.find(
+        (session) => session.id === previousSessionId,
+      )
+      const previousSession = selectedBeforeBootstrap
+        ? structuredClone(toRaw(selectedBeforeBootstrap))
+        : undefined
       this.projects = structuredClone(result.value.projects)
       this.sessions = structuredClone(result.value.sessionPage.records)
       this.sessionHasMore = result.value.sessionPage.hasMore
@@ -174,13 +181,22 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         this.projects.find((project) => project.path === preferredProjectPath)
           ?.id ??
         this.projects[0]?.id
+      const pageSelection = this.sessions.find(
+        (session) =>
+          session.id === previousSessionId &&
+          session.projectId === this.selectedProjectId &&
+          session.lifecycle === 'active',
+      )
+      const restorePrevious =
+        !pageSelection &&
+        previousSession?.projectId === this.selectedProjectId &&
+        previousSession.lifecycle === 'active'
+      if (restorePrevious) {
+        this.sessions = mergeSessions(this.sessions, [previousSession])
+      }
       this.selectedSessionId =
-        this.sessions.find(
-          (session) =>
-            session.id === previousSessionId &&
-            session.projectId === this.selectedProjectId &&
-            session.lifecycle === 'active',
-        )?.id ??
+        pageSelection?.id ??
+        (restorePrevious ? previousSession.id : undefined) ??
         this.sessions.find(
           (session) =>
             session.projectId === this.selectedProjectId &&
@@ -191,7 +207,22 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         this.selectedSessionId &&
         !(await this.loadSession(this.selectedSessionId))
       ) {
-        return false
+        if (!restorePrevious) return false
+        this.sessions = this.sessions.filter(
+          (session) => session.id !== previousSession.id,
+        )
+        this.selectedSessionId = this.sessions.find(
+          (session) =>
+            session.projectId === this.selectedProjectId &&
+            session.lifecycle === 'active',
+        )?.id
+        this.pruneCaches()
+        if (
+          this.selectedSessionId &&
+          !(await this.loadSession(this.selectedSessionId))
+        ) {
+          return false
+        }
       }
       this.error = ''
       return true

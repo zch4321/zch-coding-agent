@@ -23,6 +23,15 @@ export const palette = {
   dangerHover: '#a40e26',
   dangerPressed: '#82071e',
   surfaceHover: '#eaeef2',
+  terminalMagenta: '#8250df',
+  terminalCyan: '#1b7c83',
+  terminalWhite: '#d0d7de',
+  terminalBrightBlack: '#57606a',
+  terminalBrightYellow: '#bf8700',
+  terminalBrightBlue: '#218bff',
+  terminalBrightMagenta: '#a475f9',
+  terminalBrightCyan: '#3192aa',
+  terminalBrightWhite: '#ffffff',
 } as const
 
 const typography = {

@@ -72,6 +72,11 @@ const revertMessageId = ref<string>()
 const revertMessagePreview = ref('')
 const messageAction = ref<MessageAction>()
 const messageActionId = ref<string>()
+const yoloPending = ref(false)
+const renamePending = ref(false)
+const deletePending = ref(false)
+const revertPending = ref(false)
+const messageActionPending = ref(false)
 
 const projectName = computed(() => {
   if (!agent.workspacePath) {
@@ -141,10 +146,16 @@ async function selectMode(value: string | number) {
 }
 
 async function confirmYoloMode() {
-  if (await agent.acceptYoloNotice()) {
-    if (await agent.setMode('yolo')) {
-      yoloWarningOpen.value = false
+  if (yoloPending.value) return
+  yoloPending.value = true
+  try {
+    if (await agent.acceptYoloNotice()) {
+      if (await agent.setMode('yolo')) {
+        yoloWarningOpen.value = false
+      }
     }
+  } finally {
+    yoloPending.value = false
   }
 }
 
@@ -163,11 +174,17 @@ function requestRevert(messageId: string, preview: string) {
 }
 
 async function confirmRevert() {
+  if (revertPending.value) return
   const messageId = revertMessageId.value
-  revertMessageId.value = undefined
-  revertMessagePreview.value = ''
   if (!messageId) return
-  await agent.revertConversationAfterMessage(messageId)
+  revertPending.value = true
+  try {
+    await agent.revertConversationAfterMessage(messageId)
+    revertMessageId.value = undefined
+    revertMessagePreview.value = ''
+  } finally {
+    revertPending.value = false
+  }
 }
 
 function requestMessageAction(action: MessageAction, messageId: string) {
@@ -186,22 +203,27 @@ function inspectConversation(sessionId: string) {
 }
 
 async function confirmMessageAction() {
+  if (messageActionPending.value) return
   const action = messageAction.value
   const messageId = messageActionId.value
+  if (!action || !messageId) return
+  messageActionPending.value = true
   messageAction.value = undefined
   messageActionId.value = undefined
-  if (!action || !messageId) return
-
-  switch (action) {
-    case 'retry':
-      await agent.retryUserMessage(messageId)
-      break
-    case 'edit':
-      await agent.editUserMessage(messageId)
-      break
-    case 'fork':
-      await agent.forkConversation(undefined, messageId)
-      break
+  try {
+    switch (action) {
+      case 'retry':
+        await agent.retryUserMessage(messageId)
+        break
+      case 'edit':
+        await agent.editUserMessage(messageId)
+        break
+      case 'fork':
+        await agent.forkConversation(undefined, messageId)
+        break
+    }
+  } finally {
+    messageActionPending.value = false
   }
 }
 
@@ -216,20 +238,26 @@ function beginRename(sessionId: string) {
   renameValue.value = conversation.title
 }
 
-function confirmRename() {
-  if (renameSessionId.value) {
-    agent.renameConversation(renameSessionId.value, renameValue.value)
+async function confirmRename() {
+  if (!renameSessionId.value || renamePending.value) return
+  renamePending.value = true
+  try {
+    await agent.renameConversation(renameSessionId.value, renameValue.value)
+    renameSessionId.value = undefined
+  } finally {
+    renamePending.value = false
   }
-
-  renameSessionId.value = undefined
 }
 
 async function confirmDeleteConversation() {
-  if (deleteSessionId.value) {
+  if (!deleteSessionId.value || deletePending.value) return
+  deletePending.value = true
+  try {
     await agent.deleteConversation(deleteSessionId.value)
+    deleteSessionId.value = undefined
+  } finally {
+    deletePending.value = false
   }
-
-  deleteSessionId.value = undefined
 }
 
 function closeTerminalPanel() {
@@ -513,6 +541,11 @@ onUnmounted(() => {
           :revert-open="Boolean(revertMessageId)"
           :revert-message-preview="revertMessagePreview"
           :message-action="messageAction"
+          :yolo-pending="yoloPending"
+          :rename-pending="renamePending"
+          :delete-pending="deletePending"
+          :revert-pending="revertPending"
+          :message-action-pending="messageActionPending"
           @update:yolo-open="yoloWarningOpen = $event"
           @update:rename-open="!$event && (renameSessionId = undefined)"
           @update:rename-value="renameValue = $event"

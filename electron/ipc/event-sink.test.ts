@@ -2,7 +2,7 @@ import type { WebContents } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
 import { APP_NOTIFICATION_CHANNEL } from '../../shared/channels'
 import type { BackendNotificationEnvelope } from '../../shared/notifications'
-import { sendBackendNotification } from './event-sink'
+import { sendBackendNotification, sendDomainStateEvent } from './event-sink'
 
 const validNotification: BackendNotificationEnvelope = {
   version: 1,
@@ -40,5 +40,11 @@ describe('backend notification event sink', () => {
     const destroyed = webContents(true)
     sendBackendNotification(destroyed, validNotification)
     expect(destroyed.send).not.toHaveBeenCalled()
+  })
+
+  it('rejects non-commit domain deliveries with a stable error', () => {
+    expect(() =>
+      sendDomainStateEvent(webContents(), { kind: 'buffer_overflow' }),
+    ).toThrow('Domain-state renderer delivery only accepts commits')
   })
 })

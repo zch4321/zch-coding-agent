@@ -387,6 +387,61 @@ describe('agent durable replica', () => {
     ).toBe(true)
   })
 
+  it('preserves an active selected Session outside the bootstrap page', async () => {
+    const getBootstrap = vi.fn(async () =>
+      success({
+        version: 1 as const,
+        cursor: {
+          schemaVersion: 1 as const,
+          backendInstanceId: 'backend:replica',
+          sequence: 2,
+        },
+        projects: [project],
+        sessionPage: {
+          schemaVersion: 1 as const,
+          records: [otherSession(1)],
+          hasMore: true as const,
+          nextBefore: {
+            updatedAt: otherSession(1).updatedAt,
+            sessionId: otherSession(1).id,
+          },
+        },
+      }),
+    )
+    const getSession = vi.fn(async () =>
+      success({
+        version: 1 as const,
+        snapshot: {
+          schemaVersion: 1 as const,
+          session: session(),
+          messagePage: {
+            schemaVersion: 1 as const,
+            sessionId,
+            records: [userMessage],
+            hasMore: false as const,
+          },
+        },
+      }),
+    )
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: { getBootstrap, getSession } as Partial<AgentApi> as AgentApi,
+    })
+    const replica = useAgentReplicaStore()
+    replica.projects = [project]
+    replica.sessions = [session()]
+    replica.selectedProjectId = projectId
+    replica.selectedSessionId = sessionId
+
+    await expect(replica.bootstrap()).resolves.toBe(true)
+
+    expect(getSession).toHaveBeenCalledWith({ version: 1, sessionId })
+    expect(replica.selectedSessionId).toBe(sessionId)
+    expect(replica.sessions.some((record) => record.id === sessionId)).toBe(
+      true,
+    )
+  })
+
   it('ignores a stale search response and can select an uncached Session', async () => {
     const oldSearch =
       deferred<Awaited<ReturnType<AgentApi['searchSessions']>>>()

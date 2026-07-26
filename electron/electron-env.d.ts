@@ -5,8 +5,3 @@ declare namespace NodeJS {
     VITE_DEV_SERVER_URL?: string
   }
 }
-
-declare module '*.sql?raw' {
-  const source: string
-  export default source
-}

@@ -241,7 +241,6 @@ describe('TraceService', () => {
         providerRequest: {},
         requestBytes: 123,
         prefixHash: 'hash',
-        prefixFingerprints: ['prefix-a'],
         canonicalSource: [],
         modelRoute,
       },
@@ -273,7 +272,6 @@ describe('TraceService', () => {
       cacheMissTokens: 3,
       averageTtftMs: 5,
       averageTotalMs: 20,
-      prefixFingerprints: ['prefix-a'],
     })
   })
 

@@ -279,6 +279,11 @@ describe('durable backend runtime', () => {
     expect(diagnostics).toHaveBeenCalledWith(
       'Durable commit listener failed',
       expect.any(Error),
+      {
+        audience: 'notification',
+        code: 'DURABLE_PUBLICATION_FAILURE',
+        message: 'A durable state update could not be published to the UI.',
+      },
     )
     await expect(
       target.coordinator.query(() => undefined),

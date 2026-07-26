@@ -3,6 +3,7 @@ import type { ProviderPublicConfig } from '../../shared/config'
 import type { CallId, MessageId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
+import type { DiagnosticSink } from '../diagnostics'
 import { boundToolResultForContext } from '../tools/context-budget'
 import { PermissionPipeline } from '../permission/permission-pipeline'
 import { hasSideEffects } from '../permission/policy-engine'
@@ -68,7 +69,7 @@ export class SessionToolRunner {
   readonly #approvals: SessionApprovalCoordinator
   readonly #contextGate: SessionContextGate
   readonly #mcpGateway: McpToolGateway | undefined
-  readonly #onDiagnostic: (message: string, error?: unknown) => void
+  readonly #onDiagnostic: DiagnosticSink
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
   readonly #setRunStatus: (
     session: SessionState,
@@ -89,7 +90,7 @@ export class SessionToolRunner {
     approvals: SessionApprovalCoordinator
     contextGate: SessionContextGate
     mcpGateway?: McpToolGateway
-    onDiagnostic: (message: string, error?: unknown) => void
+    onDiagnostic: DiagnosticSink
     emit: (session: SessionState, event: AgentEventDraft) => void
     setRunStatus: (
       session: SessionState,
@@ -384,6 +385,7 @@ export class SessionToolRunner {
               this.#onDiagnostic(
                 'Failed to finalize durable file change',
                 error,
+                { audience: 'internal' },
               )
               return {
                 status: 'warning' as const,

@@ -4,6 +4,7 @@ import { IPC_VERSION } from '../../shared/channels'
 import type { SessionId } from '../../shared/ids'
 import type { BackendNotificationEnvelope } from '../../shared/notifications'
 import { sendBackendNotification } from '../ipc/event-sink'
+import type { DiagnosticSink } from '../diagnostics'
 
 const MAX_NOTIFICATION_MESSAGE_LENGTH = 1_024
 
@@ -29,14 +30,15 @@ export class BackendNotificationReporter {
     this.#createId = options.createId ?? (() => `notification:${randomUUID()}`)
   }
 
-  /** Logs a diagnostic and forwards it when another public channel does not. */
-  readonly reportDiagnostic = (message: string, error?: unknown): void => {
+  /** Logs a diagnostic and publishes it unless the producer marks it internal. */
+  readonly reportDiagnostic: DiagnosticSink = (message, error, delivery) => {
     this.#log(message, error)
-    if (isDeliveredElsewhere(message)) return
+    if (delivery?.audience === 'internal') return
     this.notify({
-      severity: 'warning',
-      code: diagnosticCode(message),
-      message: diagnosticMessage(message, error),
+      severity: delivery?.severity ?? 'warning',
+      code: delivery?.code ?? 'BACKEND_DIAGNOSTIC',
+      message: delivery?.message ?? diagnosticMessage(message, error),
+      ...(delivery?.sessionId ? { sessionId: delivery.sessionId } : {}),
     })
   }
 
@@ -78,6 +80,10 @@ export function sanitizeDiagnosticMessage(message: string): string {
     .replace(/\bBearer\s+[^\s"'<>]+/giu, 'Bearer [redacted]')
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gu, '[redacted]')
     .replace(
+      /(["'])(authorization|api[-_ ]?key|token|secret|password)\1\s*:\s*(["'])[^"']*\3/giu,
+      '$1$2$1: $3[redacted]$3',
+    )
+    .replace(
       /\b(authorization|api[-_ ]?key|token|secret|password)\s*[:=]\s*[^\s,;"']+/giu,
       '$1=[redacted]',
     )
@@ -103,36 +109,6 @@ function diagnosticMessage(message: string, error?: unknown): string {
         : ''
   if (!detail || detail === message) return sanitizeDiagnosticMessage(message)
   return sanitizeDiagnosticMessage(`${message}: ${detail}`)
-}
-
-function isDeliveredElsewhere(message: string): boolean {
-  return (
-    /^IPC handler /u.test(message) ||
-    /^Run .* ended unexpectedly$/u.test(message) ||
-    message === 'Provider completion validation failed' ||
-    /^(?:Failed to (?:start|close|dispose) trace capture|Trace capture failed)/u.test(
-      message,
-    ) ||
-    /^Failed to trace /u.test(message) ||
-    /^SQLite migration /u.test(message)
-  )
-}
-
-function diagnosticCode(message: string): string {
-  if (/^MCP /u.test(message)) return 'MCP_BACKGROUND_FAILURE'
-  if (/Durable commit/u.test(message)) return 'DURABLE_PUBLICATION_FAILURE'
-  if (
-    /runtime context|runtime cleanup|partially loaded Session/u.test(message)
-  ) {
-    return 'SESSION_RUNTIME_DEGRADED'
-  }
-  if (/file change|FileChange|File was reverted/u.test(message)) {
-    return 'FILE_CHANGE_AUDIT_WARNING'
-  }
-  if (/Plugin /u.test(message)) return 'PLUGIN_HOOK_FAILURE'
-  if (/trace directory|trace /u.test(message))
-    return 'TRACE_MAINTENANCE_FAILURE'
-  return 'BACKEND_DIAGNOSTIC'
 }
 
 function normalizeNotificationCode(code: string): string {

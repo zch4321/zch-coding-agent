@@ -43,7 +43,6 @@ export interface ProviderRequestSnapshot {
   providerRequest: JsonValue
   requestBytes: number
   prefixHash: string
-  prefixFingerprints?: string[]
 }
 
 /** Opaque protocol request passed from an adapter to its streaming transport. */

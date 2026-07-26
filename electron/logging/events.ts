@@ -135,9 +135,6 @@ export const TraceEventSchema = Type.Union([
       providerRequest: JsonValueSchema,
       requestBytes: Type.Integer({ minimum: 0 }),
       prefixHash: Type.String({ maxLength: 256 }),
-      prefixFingerprints: Type.Optional(
-        Type.Array(Type.String({ maxLength: 256 })),
-      ),
       promptResources: Type.Optional(
         Type.Array(PromptResourceSummarySchema, { maxItems: 32 }),
       ),
@@ -390,7 +387,6 @@ export type TraceEventInput =
       providerRequest: JsonValue
       requestBytes: number
       prefixHash: string
-      prefixFingerprints?: string[]
       promptResources?: Static<typeof PromptResourceSummarySchema>[]
       promptBuild?: PromptBuildSummary
       canonicalSource: Array<{

@@ -4,6 +4,7 @@ import type { RunStatus } from '../../shared/agent-events'
 import type { MessageId, RunId } from '../../shared/ids'
 import { PROVIDER_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
+import type { DiagnosticSink } from '../diagnostics'
 import { resolveRunRoutes } from '../providers/model-route-resolver'
 import {
   appendPromptLayer,
@@ -53,7 +54,7 @@ export class SessionRunController {
   readonly #interjections: SessionInterjectionCoordinator
   readonly #orchestration: SessionOrchestrationPlanner
   readonly #userTurns: SessionUserTurnPreparer
-  readonly #onDiagnostic: (message: string, error?: unknown) => void
+  readonly #onDiagnostic: DiagnosticSink
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
   readonly #acquireRunAccess: (
     session: SessionState,
@@ -72,7 +73,7 @@ export class SessionRunController {
     interjections: SessionInterjectionCoordinator
     orchestration: SessionOrchestrationPlanner
     userTurns: SessionUserTurnPreparer
-    onDiagnostic: (message: string, error?: unknown) => void
+    onDiagnostic: DiagnosticSink
     emit: (session: SessionState, event: AgentEventDraft) => void
     acquireRunAccess: (session: SessionState, runId: RunId) => RunAccessLease
     executionState?: SessionExecutionStatePort
@@ -166,7 +167,9 @@ export class SessionRunController {
       retryUserMessageId,
     )
       .catch((error: unknown) =>
-        this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error),
+        this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error, {
+          audience: 'internal',
+        }),
       )
       .finally(() => {
         this.releaseAccess(run)

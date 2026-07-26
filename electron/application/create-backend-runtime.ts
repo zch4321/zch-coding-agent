@@ -6,6 +6,7 @@ import type {
 } from '../../shared/domain-state-api'
 import type { Static } from '@sinclair/typebox'
 import type { ConfigStore } from '../config/store'
+import type { DiagnosticSink } from '../diagnostics'
 import {
   DatabaseService,
   type DatabaseServiceOptions,
@@ -41,7 +42,7 @@ export interface CreateBackendRuntimeOptions {
   providerFactory?: CreateAgentRuntimeOptions['providerFactory']
   autoApproverFactory?: CreateAgentRuntimeOptions['autoApproverFactory']
   eventListeners?: CreateAgentRuntimeOptions['eventListeners']
-  onDiagnostic?: (message: string, error?: unknown) => void
+  onDiagnostic?: DiagnosticSink
 }
 
 export interface BackendRuntime {
@@ -73,6 +74,8 @@ export async function createBackendRuntime(
       const duration = Math.round(progress.elapsedMs)
       options.onDiagnostic?.(
         `SQLite migration ${progress.version}:${progress.name} ${progress.stage} (${duration}ms)`,
+        undefined,
+        { audience: 'internal' },
       )
     },
   })
@@ -84,7 +87,11 @@ export async function createBackendRuntime(
         try {
           listener(structuredClone(commit))
         } catch (error) {
-          options.onDiagnostic?.('Durable commit listener failed', error)
+          options.onDiagnostic?.('Durable commit listener failed', error, {
+            audience: 'notification',
+            code: 'DURABLE_PUBLICATION_FAILURE',
+            message: 'A durable state update could not be published to the UI.',
+          })
         }
       }
     },
