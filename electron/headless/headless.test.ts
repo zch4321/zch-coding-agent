@@ -10,7 +10,7 @@ import type { JsonValue } from '../../shared/json'
 import type { BenchmarkAgentCase } from '../../shared/benchmark'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 import { parseHeadlessArguments } from './cli'
@@ -38,7 +38,7 @@ class EditProvider implements LLMProvider {
   receivedApiKey = ''
   calls = 0
 
-  async *streamChat(): AsyncIterable<ProviderEvent> {
+  async *stream(): AsyncIterable<ProviderEvent> {
     this.calls += 1
     if (this.calls > 1) {
       yield messageCompletion('edit-final', 'Created the requested file.')
@@ -82,13 +82,11 @@ class EditProvider implements LLMProvider {
 
 class PlanProvider implements LLMProvider {
   calls = 0
-  requests: ProviderChatRequest['messages'][] = []
+  requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
     if (this.calls === 1) {
       yield toolCompletion(
         'call-plan-set',
@@ -121,9 +119,7 @@ class PlanProvider implements LLMProvider {
 }
 
 class HangingProvider implements LLMProvider {
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     if (request.signal.aborted) throw request.signal.reason
     await new Promise<void>((_resolve, reject) => {
       const abort = () => reject(request.signal.reason)
@@ -135,17 +131,13 @@ class HangingProvider implements LLMProvider {
 
 class RepairProvider implements LLMProvider {
   calls = 0
-  requests: ProviderChatRequest['messages'][] = []
+  requests: ProviderStreamRequest['normalizedMessages'][] = []
   requestBodies: JsonValue[] = []
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
-    this.requestBodies.push(
-      structuredClone(request.providerRequestOverride ?? null),
-    )
+    this.requests.push(structuredClone(request.normalizedMessages))
+    this.requestBodies.push(structuredClone(request.providerRequest ?? null))
     yield messageCompletion(
       `repair-${this.calls}`,
       this.calls === 1 ? 'Initial attempt complete.' : 'Repair complete.',
@@ -481,9 +473,9 @@ describe('Headless host', () => {
     const descriptorIndex = messages.findIndex(
       (message) =>
         message.role === 'user' &&
-        message.content?.includes('<benchmark_case') &&
-        message.content.includes('"deniedPaths"') &&
-        message.content.includes('test/**'),
+        String(message.content ?? '').includes('<benchmark_case') &&
+        String(message.content ?? '').includes('"deniedPaths"') &&
+        String(message.content ?? '').includes('test/**'),
     )
     const taskIndex = messages.findIndex(
       (message) =>
@@ -548,7 +540,7 @@ describe('Headless host', () => {
       provider.requests[2]?.some(
         (message) =>
           message.role === 'user' &&
-          message.content?.includes('<autonomous_plan_approval>'),
+          String(message.content ?? '').includes('<autonomous_plan_approval>'),
       ),
     ).toBe(true)
     const trace = await readFile(result.artifacts.tracePath, 'utf8')

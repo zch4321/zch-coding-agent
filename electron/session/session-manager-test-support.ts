@@ -15,7 +15,7 @@ import { ConfigStore } from '../config/store'
 import { SecretStore, type SafeStorageAdapter } from '../config/secret-store'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
@@ -73,20 +73,16 @@ class FakeSafeStorage implements SafeStorageAdapter {
 
 export class ForkProvider implements LLMProvider {
   calls = 0
-  messages: ProviderChatRequest['messages'] = []
+  messages: ProviderStreamRequest['normalizedMessages'] = []
   providerRequestOverride: JsonValue | undefined
   providerRequestOverrides: JsonValue[] = []
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.messages = structuredClone(request.messages)
-    this.providerRequestOverride = structuredClone(
-      request.providerRequestOverride,
-    )
+    this.messages = structuredClone(request.normalizedMessages)
+    this.providerRequestOverride = structuredClone(request.providerRequest)
     this.providerRequestOverrides.push(
-      structuredClone(request.providerRequestOverride ?? null),
+      structuredClone(request.providerRequest ?? null),
     )
     yield {
       type: 'completed',

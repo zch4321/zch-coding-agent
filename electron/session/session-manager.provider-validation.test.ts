@@ -16,7 +16,7 @@ import { SessionManager } from './session-manager'
 class InvalidThenValidProvider implements LLMProvider {
   calls = 0
 
-  async *streamChat(): AsyncIterable<ProviderEvent> {
+  async *stream(): AsyncIterable<ProviderEvent> {
     this.calls += 1
     if (this.calls === 1) {
       const args = { path: 'README.md' }
@@ -81,7 +81,7 @@ class InvalidThenValidProvider implements LLMProvider {
 class CrossTurnDuplicateProvider implements LLMProvider {
   calls = 0
 
-  async *streamChat(): AsyncIterable<ProviderEvent> {
+  async *stream(): AsyncIterable<ProviderEvent> {
     this.calls += 1
     if (this.calls <= 2) {
       const args = { path: 'README.md' }
@@ -129,7 +129,7 @@ class CrossTurnDuplicateProvider implements LLMProvider {
 }
 
 class ReasoningOnlyProvider implements LLMProvider {
-  async *streamChat(): AsyncIterable<ProviderEvent> {
+  async *stream(): AsyncIterable<ProviderEvent> {
     yield {
       type: 'completed',
       rawResponse: { id: 'reasoning-only' },

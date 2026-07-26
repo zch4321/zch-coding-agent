@@ -1,23 +1,7 @@
-import type { JsonValue } from '../../shared/json'
+import type { JsonObject, JsonValue } from '../../shared/json'
 import type { ToolCall } from '../tools/types'
 
-export type ProviderRole = 'system' | 'user' | 'assistant' | 'tool'
-
-export interface ProviderMessage {
-  role: ProviderRole
-  content?: string | null
-  reasoning_content?: string
-  tool_call_id?: string
-  tool_calls?: JsonValue[]
-}
-
-export interface ProviderAssistantTurn extends ProviderMessage {
-  role: 'assistant'
-  content: string | null
-  reasoning_content?: string
-  tool_calls?: JsonValue[]
-}
-
+/** Events emitted by a provider transport while executing one compiled request. */
 export type ProviderEvent =
   | {
       type: 'text.delta'
@@ -45,7 +29,7 @@ export type ProviderEvent =
   | {
       type: 'completed'
       rawResponse: JsonValue
-      turn: ProviderAssistantTurn
+      turn: JsonValue
       toolCalls: ToolCall[]
       usage: JsonValue
       finishReason?: string
@@ -53,6 +37,7 @@ export type ProviderEvent =
       timing: JsonValue
     }
 
+/** Bounded diagnostics captured immediately before a provider request is sent. */
 export interface ProviderRequestSnapshot {
   normalizedMessages: JsonValue[]
   providerRequest: JsonValue
@@ -61,19 +46,16 @@ export interface ProviderRequestSnapshot {
   prefixFingerprints?: string[]
 }
 
-export interface ProviderResponseFormat {
-  type: 'json_object'
-}
-
-export interface ProviderChatRequest {
-  messages: ProviderMessage[]
-  tools: JsonValue[]
-  responseFormat?: ProviderResponseFormat
-  providerRequestOverride?: JsonValue
+/** Opaque protocol request passed from an adapter to its streaming transport. */
+export interface ProviderStreamRequest {
+  providerRequest: JsonObject
+  normalizedMessages: JsonObject[]
+  toolDefinitions: JsonValue[]
   signal: AbortSignal
   onRequest?: (snapshot: ProviderRequestSnapshot) => Promise<void> | void
 }
 
+/** Protocol-neutral streaming boundary used by the agent runtime. */
 export interface LLMProvider {
-  streamChat(request: ProviderChatRequest): AsyncIterable<ProviderEvent>
+  stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent>
 }

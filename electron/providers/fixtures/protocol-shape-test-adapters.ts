@@ -25,8 +25,15 @@ export interface AnthropicTestRequest {
 function complete(
   event: Extract<ProviderEvent, { type: 'completed' }>,
 ): CompletedAssistantTurn {
-  const parts: MessagePart[] = event.turn.content
-    ? [{ type: 'text', text: event.turn.content }]
+  const content =
+    event.turn &&
+    typeof event.turn === 'object' &&
+    !Array.isArray(event.turn) &&
+    typeof event.turn.content === 'string'
+      ? event.turn.content
+      : ''
+  const parts: MessagePart[] = content
+    ? [{ type: 'text', text: content }]
     : event.toolCalls.map((call) => ({
         type: 'tool_call',
         callId: call.id,

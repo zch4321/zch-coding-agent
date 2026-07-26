@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../../shared/agent-events'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 import { ScriptedEditProvider } from '../session/session-manager-approval-fixtures'
@@ -81,8 +81,8 @@ describe('AgentRuntime Node boundary', () => {
 
   it('connects the caller abort signal to the shared run cancellation path', async () => {
     class BlockingProvider implements LLMProvider {
-      async *streamChat(
-        request: ProviderChatRequest,
+      async *stream(
+        request: ProviderStreamRequest,
       ): AsyncIterable<ProviderEvent> {
         await new Promise<void>((_resolve, reject) => {
           const abort = () => reject(request.signal.reason)

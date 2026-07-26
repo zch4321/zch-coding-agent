@@ -1,13 +1,13 @@
 import type { CallId } from '../../shared/ids'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 
 export class InterjectionProvider implements LLMProvider {
   calls = 0
-  requests: ProviderChatRequest['messages'][] = []
+  requests: ProviderStreamRequest['normalizedMessages'][] = []
   // Resolves when the first tool-bearing turn has been consumed, allowing the
   // test to enqueue an interjection before the second provider call fires.
   firstTurnConsumed: { resolve: () => void; promise: Promise<void> }
@@ -22,11 +22,9 @@ export class InterjectionProvider implements LLMProvider {
     }
   }
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
 
     if (this.calls === 1) {
       yield {
@@ -85,7 +83,7 @@ export class InterjectionProvider implements LLMProvider {
 
 export class FinalAnswerInterjectionProvider implements LLMProvider {
   calls = 0
-  requests: ProviderChatRequest['messages'][] = []
+  requests: ProviderStreamRequest['normalizedMessages'][] = []
   // Gate released by the test once the interjection has been queued, so the
   // first provider turn is held open until the run loop can observe it.
   firstTurnGate: { resolve: () => void; promise: Promise<void> }
@@ -100,11 +98,9 @@ export class FinalAnswerInterjectionProvider implements LLMProvider {
     }
   }
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
 
     if (this.calls === 1) {
       yield {

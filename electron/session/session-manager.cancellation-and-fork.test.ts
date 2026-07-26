@@ -8,7 +8,7 @@ import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 import { SessionManager } from './session-manager'
@@ -21,13 +21,13 @@ import {
 describe('SessionManager cancellation and forks', () => {
   class MultiToolCancellationProvider implements LLMProvider {
     calls = 0
-    requests: ProviderChatRequest['messages'][] = []
+    requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-    async *streamChat(
-      request: ProviderChatRequest,
+    async *stream(
+      request: ProviderStreamRequest,
     ): AsyncIterable<ProviderEvent> {
       this.calls += 1
-      this.requests.push(structuredClone(request.messages))
+      this.requests.push(structuredClone(request.normalizedMessages))
 
       if (this.calls === 1) {
         const toolCalls = ['first.txt', 'second.txt'].map(
@@ -71,13 +71,13 @@ describe('SessionManager cancellation and forks', () => {
 
   class MultiToolFailureProvider implements LLMProvider {
     calls = 0
-    requests: ProviderChatRequest['messages'][] = []
+    requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-    async *streamChat(
-      request: ProviderChatRequest,
+    async *stream(
+      request: ProviderStreamRequest,
     ): AsyncIterable<ProviderEvent> {
       this.calls += 1
-      this.requests.push(structuredClone(request.messages))
+      this.requests.push(structuredClone(request.normalizedMessages))
 
       if (this.calls === 1) {
         const toolCalls = ['first.txt', 'second.txt'].map(

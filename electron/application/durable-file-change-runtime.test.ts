@@ -13,7 +13,7 @@ import type { CallId, SessionId } from '../../shared/ids'
 import { YOLO_NOTICE_VERSION } from '../../shared/notices'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 import { createConfig } from '../session/session-manager-test-support'
@@ -41,18 +41,16 @@ function createBackendForTest(
 
 class FileMutationProvider implements LLMProvider {
   calls = 0
-  readonly requests: ProviderChatRequest['messages'][] = []
+  readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
 
   constructor(
     readonly toolId: 'create_file' | 'apply_patch' | 'delete_file',
     readonly args: Record<string, string>,
   ) {}
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
     if (this.calls === 1) {
       const callId = `call:file-change:${this.toolId}` as CallId
       yield {
@@ -103,11 +101,11 @@ class MultiFileMutationProvider extends FileMutationProvider {
     super('create_file', {})
   }
 
-  override async *streamChat(
-    request: ProviderChatRequest,
+  override async *stream(
+    request: ProviderStreamRequest,
   ): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
     if (this.calls === 1) {
       const mutations = [
         {

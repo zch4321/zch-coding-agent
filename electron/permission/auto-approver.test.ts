@@ -3,7 +3,7 @@ import type { JsonValue } from '../../shared/json'
 import type { ModelRouteSnapshot } from '../../shared/model-route'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 import {
@@ -36,16 +36,14 @@ const route: ModelRouteSnapshot = {
 }
 
 class ErrorProvider implements LLMProvider {
-  async *streamChat(): AsyncIterable<ProviderEvent> {
+  async *stream(): AsyncIterable<ProviderEvent> {
     yield* []
     throw new Error('network failed')
   }
 }
 
 class HangingProvider implements LLMProvider {
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     await new Promise<void>((_resolve, reject) => {
       request.signal.addEventListener(
         'abort',
@@ -64,7 +62,7 @@ class TextProvider implements LLMProvider {
     this.#text = text
   }
 
-  async *streamChat(): AsyncIterable<ProviderEvent> {
+  async *stream(): AsyncIterable<ProviderEvent> {
     yield {
       type: 'text.delta',
       delta: this.#text,
@@ -83,11 +81,9 @@ class TextProvider implements LLMProvider {
 }
 
 class CapturingProvider implements LLMProvider {
-  request: ProviderChatRequest | undefined
+  request: ProviderStreamRequest | undefined
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.request = request
     yield {
       type: 'completed',
@@ -140,8 +136,10 @@ describe('P3 auto approver', () => {
       decision: 'safe',
       valid: true,
     })
-    expect(provider.request?.tools).toEqual([])
-    expect(provider.request?.responseFormat).toEqual({ type: 'json_object' })
+    expect(provider.request?.toolDefinitions).toEqual([])
+    expect(provider.request?.providerRequest).toMatchObject({
+      response_format: { type: 'json_object' },
+    })
   })
 
   it('converts network errors to dangerous human-review fallback', async () => {

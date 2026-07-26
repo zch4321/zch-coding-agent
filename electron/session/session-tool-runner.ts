@@ -191,10 +191,7 @@ export class SessionToolRunner {
                   ? (this.#autoApproverFactory?.({ config, apiKey }) ??
                     new ProviderAutoApprover(
                       createConfiguredProvider(
-                        config,
                         approvalUsageProvider,
-                        approvalBinding.snapshot.model,
-                        approvalBinding.snapshot.reasoning,
                         apiKey,
                         this.#fetchImpl,
                         approvalBinding.snapshot.endpoint,

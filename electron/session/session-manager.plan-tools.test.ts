@@ -17,7 +17,7 @@ describe('SessionManager plan tool batches', () => {
   class SameBatchPlanMutationProvider implements LLMProvider {
     calls = 0
 
-    async *streamChat(): AsyncIterable<ProviderEvent> {
+    async *stream(): AsyncIterable<ProviderEvent> {
       this.calls += 1
 
       if (this.calls === 1) {

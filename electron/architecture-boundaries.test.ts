@@ -25,6 +25,8 @@ const WIRE_FREE_ROOTS = [
 const PROVIDER_IMPORT = /(?:^|\/)providers?(?:\/|$)|provider(?:\.ts)?$/u
 const CHAT_WIRE_IDENTIFIER =
   /\b(?:ProviderMessage|ProviderAssistantTurn|reasoning_content|tool_call_id|tool_calls)\b/u
+const EXPORTED_CHAT_WIRE_TYPE =
+  /\bexport\s+(?:interface|type|class)\s+(?:ProviderMessage|ProviderAssistantTurn|ProviderChatRequest)\b/u
 const NATIVE_RENDERER_DIALOG = /\b(?:window\.)?(?:alert|confirm|prompt)\s*\(/u
 
 async function sourceFiles(root: string): Promise<string[]> {
@@ -122,6 +124,25 @@ describe('architecture import boundaries', () => {
     )
 
     expect(violations.flat()).toEqual([])
+  })
+
+  it('keeps Chat Completions DTOs private to their adapter boundary', async () => {
+    const providerFiles = (
+      await sourceFiles(path.resolve('electron/providers'))
+    ).filter(isProductionFile)
+    const exportedWireTypes = await Promise.all(
+      providerFiles.map(async (filePath) => {
+        const source = await readFile(filePath, 'utf8')
+        return EXPORTED_CHAT_WIRE_TYPE.test(source) ? relative(filePath) : ''
+      }),
+    )
+    const providerBoundary = await readFile(
+      path.resolve('electron/providers/provider.ts'),
+      'utf8',
+    )
+
+    expect(exportedWireTypes.filter(Boolean)).toEqual([])
+    expect(CHAT_WIRE_IDENTIFIER.test(providerBoundary)).toBe(false)
   })
 
   it('keeps renderer confirmations inside the application UI', async () => {

@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox'
 import type { PolicySignal } from '../../shared/agent-events'
-import type { JsonValue } from '../../shared/json'
+import type { JsonObject, JsonValue } from '../../shared/json'
 import type { MessageId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { ModelRouteSnapshot } from '../../shared/model-route'
@@ -168,19 +168,21 @@ export class ProviderAutoApprover implements AutoApprover {
         },
         route: this.#route,
         tools: [],
-        responseFormat: { type: 'json_object' },
+        structuredOutput: 'json_object',
       })
-      for await (const event of this.#provider.streamChat({
-        messages: compiled.messages,
-        tools: [],
-        responseFormat: { type: 'json_object' },
-        providerRequestOverride: compiled.body,
+      for await (const event of this.#provider.stream({
+        providerRequest: compiled.body,
+        normalizedMessages: jsonValue(compiled.messages) as JsonObject[],
+        toolDefinitions: [],
         signal: controller.signal,
       })) {
         if (event.type === 'text.delta') {
           text += event.delta
         } else if (event.type === 'completed') {
-          text = event.turn.content ?? text
+          const completed = adapter.complete(event, { text, reasoning: '' })
+          text = completed.parts
+            .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+            .join('\n')
           if (hasUsageData(event.usage)) {
             usage = event.usage
           }

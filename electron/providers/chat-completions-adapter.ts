@@ -8,15 +8,33 @@ import { renderLiveUserInterjection } from '../../shared/live-interjection'
 import { canonicalHash, messageText } from '../session/canonical-history'
 import type {
   AdapterCompileInput,
-  ChatCompletionsRequestDto,
   CompletedAssistantTurn,
   ProviderProtocolAdapter,
 } from './provider-protocol'
-import type {
-  ProviderAssistantTurn,
-  ProviderEvent,
-  ProviderMessage,
-} from './provider'
+import type { ProviderEvent } from './provider'
+
+type ProviderRole = 'system' | 'user' | 'assistant' | 'tool'
+
+interface ProviderMessage {
+  role: ProviderRole
+  content?: string | null
+  reasoning_content?: string
+  tool_call_id?: string
+  tool_calls?: JsonValue[]
+}
+
+interface ProviderAssistantTurn extends ProviderMessage {
+  role: 'assistant'
+  content: string | null
+  reasoning_content?: string
+  tool_calls?: JsonValue[]
+}
+
+interface ChatCompletionsRequestDto {
+  body: JsonObject
+  messages: ProviderMessage[]
+  tools: JsonValue[]
+}
 
 const CONTINUATION_FORMAT = 'chat-completions.assistant.v1'
 
@@ -238,6 +256,23 @@ function continuationAssistant(
   return structuredClone(assistant) as unknown as ProviderAssistantTurn
 }
 
+function completedAssistant(turn: JsonValue): ProviderAssistantTurn {
+  if (
+    !turn ||
+    typeof turn !== 'object' ||
+    Array.isArray(turn) ||
+    turn.role !== 'assistant' ||
+    !('content' in turn) ||
+    (turn.content !== null && typeof turn.content !== 'string') ||
+    ('reasoning_content' in turn &&
+      typeof turn.reasoning_content !== 'string') ||
+    ('tool_calls' in turn && !Array.isArray(turn.tool_calls))
+  ) {
+    throw new TypeError('Chat completion assistant payload is corrupt')
+  }
+  return structuredClone(turn) as unknown as ProviderAssistantTurn
+}
+
 function compileMessage(
   adapterId: string,
   record: MessageRecord,
@@ -309,8 +344,8 @@ export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompl
       ...(providerTools.length > 0 ? { tools: providerTools } : {}),
       stream: true,
       stream_options: { include_usage: true },
-      ...(input.responseFormat
-        ? { response_format: toJsonValue(input.responseFormat) }
+      ...(input.structuredOutput
+        ? { response_format: { type: input.structuredOutput } }
         : {}),
       ...(deepSeek
         ? {
@@ -327,9 +362,6 @@ export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompl
       body,
       messages,
       tools,
-      ...(input.responseFormat
-        ? { responseFormat: structuredClone(input.responseFormat) }
-        : {}),
     }
   }
 
@@ -340,13 +372,14 @@ export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompl
       reasoning: '',
     },
   ): CompletedAssistantTurn {
+    const completed = completedAssistant(event.turn)
     const turn: ProviderAssistantTurn = {
-      ...event.turn,
-      content: event.turn.content || streamed.text || null,
-      ...(event.turn.reasoning_content || streamed.reasoning
+      ...completed,
+      content: completed.content || streamed.text || null,
+      ...(completed.reasoning_content || streamed.reasoning
         ? {
             reasoning_content:
-              event.turn.reasoning_content || streamed.reasoning,
+              completed.reasoning_content || streamed.reasoning,
           }
         : {}),
     }

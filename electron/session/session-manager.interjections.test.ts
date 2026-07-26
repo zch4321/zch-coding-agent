@@ -105,7 +105,7 @@ describe('SessionManager live interjections', () => {
       (message) =>
         message.role === 'user' &&
         typeof message.content === 'string' &&
-        message.content.includes('<live_user_interjection>'),
+        String(message.content ?? '').includes('<live_user_interjection>'),
     )
     expect(toolResultIndex).toBeGreaterThanOrEqual(0)
     expect(interjectionIndex).toBeGreaterThan(toolResultIndex)

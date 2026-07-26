@@ -1,7 +1,7 @@
 import type { JsonValue } from '../../shared/json'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 
@@ -16,30 +16,28 @@ function deferred(): { resolve: () => void; promise: Promise<void> } {
 export class CompactProvider implements LLMProvider {
   calls = 0
   requests: Array<{
-    messages: ProviderChatRequest['messages']
-    tools: ProviderChatRequest['tools']
+    messages: ProviderStreamRequest['normalizedMessages']
+    tools: ProviderStreamRequest['toolDefinitions']
   }> = []
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push({
-      messages: structuredClone(request.messages),
-      tools: structuredClone(request.tools),
+      messages: structuredClone(request.normalizedMessages),
+      tools: structuredClone(request.toolDefinitions),
     })
     await request.onRequest?.({
-      normalizedMessages: request.messages as unknown as JsonValue[],
+      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
       providerRequest: {
         model: 'fixture',
-        messages: request.messages as unknown as JsonValue[],
-        tools: request.tools,
+        messages: request.normalizedMessages as unknown as JsonValue[],
+        tools: request.toolDefinitions,
       },
       requestBytes: 10,
       prefixHash: `compact-${this.calls}`,
     })
 
-    if (request.tools.length === 0) {
+    if (request.toolDefinitions.length === 0) {
       yield {
         type: 'completed',
         rawResponse: { id: 'compact' },
@@ -70,30 +68,28 @@ export class CompactProvider implements LLMProvider {
 export class AutoCompactProvider implements LLMProvider {
   calls = 0
   requests: Array<{
-    messages: ProviderChatRequest['messages']
-    tools: ProviderChatRequest['tools']
+    messages: ProviderStreamRequest['normalizedMessages']
+    tools: ProviderStreamRequest['toolDefinitions']
   }> = []
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push({
-      messages: structuredClone(request.messages),
-      tools: structuredClone(request.tools),
+      messages: structuredClone(request.normalizedMessages),
+      tools: structuredClone(request.toolDefinitions),
     })
     await request.onRequest?.({
-      normalizedMessages: request.messages as unknown as JsonValue[],
+      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
       providerRequest: {
         model: 'fixture',
-        messages: request.messages as unknown as JsonValue[],
-        tools: request.tools,
+        messages: request.normalizedMessages as unknown as JsonValue[],
+        tools: request.toolDefinitions,
       },
       requestBytes: 10,
       prefixHash: `auto-compact-${this.calls}`,
     })
 
-    if (request.tools.length === 0) {
+    if (request.toolDefinitions.length === 0) {
       yield {
         type: 'completed',
         rawResponse: { id: 'auto-compact' },
@@ -120,16 +116,14 @@ export class AutoCompactProvider implements LLMProvider {
 
 export class AbortCompactProvider implements LLMProvider {
   calls = 0
-  requests: ProviderChatRequest['messages'][] = []
+  requests: ProviderStreamRequest['normalizedMessages'][] = []
   compactStarted = deferred()
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
 
-    if (request.tools.length === 0) {
+    if (request.toolDefinitions.length === 0) {
       yield { type: 'text.delta', delta: 'partial summary', raw: {} }
       this.compactStarted.resolve()
       await new Promise<never>((_resolve, reject) => {
@@ -155,17 +149,15 @@ export class AbortCompactProvider implements LLMProvider {
 
 export class InterjectedAutoCompactProvider implements LLMProvider {
   calls = 0
-  requests: ProviderChatRequest['messages'][] = []
+  requests: ProviderStreamRequest['normalizedMessages'][] = []
   compactStarted = deferred()
   releaseCompact = deferred()
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
 
-    if (request.tools.length === 0) {
+    if (request.toolDefinitions.length === 0) {
       this.compactStarted.resolve()
       await this.releaseCompact.promise
       yield {

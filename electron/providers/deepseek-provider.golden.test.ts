@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { CallId } from '../../shared/ids'
-import type { JsonValue } from '../../shared/json'
+import type { JsonObject, JsonValue } from '../../shared/json'
 import { DeepSeekProvider } from './deepseek-provider'
 import { DEEPSEEK_WIRE_GOLDENS } from './fixtures/deepseek-wire-goldens'
-import type { ProviderEvent } from './provider'
+import type { ProviderEvent, ProviderStreamRequest } from './provider'
 
 function sseResponse(payloads: JsonValue[]): Response {
   return new Response(
@@ -13,6 +13,20 @@ function sseResponse(payloads: JsonValue[]): Response {
       headers: { 'content-type': 'text/event-stream' },
     },
   )
+}
+
+function streamRequest(input: {
+  messages: JsonValue[]
+  tools: JsonValue[]
+  signal: AbortSignal
+  providerRequestOverride: JsonObject
+}): ProviderStreamRequest {
+  return {
+    providerRequest: structuredClone(input.providerRequestOverride),
+    normalizedMessages: structuredClone(input.messages) as JsonObject[],
+    toolDefinitions: structuredClone(input.tools),
+    signal: input.signal,
+  }
 }
 
 function eventProjection(event: ProviderEvent): JsonValue {
@@ -50,9 +64,7 @@ describe('DeepSeek wire golden baseline', () => {
       let now = 0
       const provider = new DeepSeekProvider({
         baseURL: 'https://api.example/v1',
-        model: 'golden-model',
         apiKey: 'secret-not-in-golden',
-        reasoning: golden.reasoning,
         now: () => now++,
         createCallId: () => 'call-generated' as CallId,
         fetchImpl: async (_input, init) => {
@@ -62,11 +74,14 @@ describe('DeepSeek wire golden baseline', () => {
       })
       const events: JsonValue[] = []
 
-      for await (const event of provider.streamChat({
-        messages: golden.messages,
-        tools: golden.tools,
-        signal: new AbortController().signal,
-      })) {
+      for await (const event of provider.stream(
+        streamRequest({
+          messages: golden.messages,
+          tools: golden.tools,
+          providerRequestOverride: golden.expectedRequest as JsonObject,
+          signal: new AbortController().signal,
+        }),
+      )) {
         events.push(eventProjection(event))
       }
 

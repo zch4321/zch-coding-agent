@@ -11,13 +11,12 @@ import {
   type JsonValue,
 } from '../../shared/json'
 import type { ToolCall } from '../tools/types'
-import type { ProviderProfile, ReasoningEffort } from '../../shared/config'
+import type { ProviderProfile } from '../../shared/config'
 import { resolveChatCompletionsEndpoint } from '../../shared/model-route'
 import type {
   LLMProvider,
-  ProviderAssistantTurn,
-  ProviderChatRequest,
   ProviderEvent,
+  ProviderStreamRequest,
 } from './provider'
 import { HttpSseTransport } from './http-sse-transport'
 
@@ -26,9 +25,7 @@ export interface OpenAICompatibleProviderOptions {
   profile: ProviderProfile
   baseURL: string
   endpoint?: string
-  model: string
   apiKey: string
-  reasoning?: ReasoningEffort
   fetchImpl?: typeof fetch
   now?: () => number
   createCallId?: () => CallId
@@ -99,24 +96,6 @@ function intentFields(tools: JsonValue[]): Map<string, string> {
   }
 
   return fields
-}
-
-function wireTools(tools: JsonValue[]): JsonValue[] {
-  return tools.map((candidate) => {
-    const cloned = structuredClone(candidate)
-
-    if (!cloned || typeof cloned !== 'object' || Array.isArray(cloned)) {
-      return cloned
-    }
-
-    const fn = cloned.function
-
-    if (fn && typeof fn === 'object' && !Array.isArray(fn)) {
-      delete fn['x-agent-intent-property']
-    }
-
-    return cloned
-  })
 }
 
 function normalizeToolArgs(
@@ -198,8 +177,6 @@ function appendBoundedText(
 export class OpenAICompatibleProvider implements LLMProvider {
   readonly #providerId: string
   readonly #profile: ProviderProfile
-  readonly #model: string
-  readonly #reasoning: ReasoningEffort
   readonly #transport: HttpSseTransport
   readonly #now: () => number
   readonly #createCallId: () => CallId
@@ -207,8 +184,6 @@ export class OpenAICompatibleProvider implements LLMProvider {
   constructor(options: OpenAICompatibleProviderOptions) {
     this.#providerId = options.providerId
     this.#profile = options.profile
-    this.#model = options.model
-    this.#reasoning = options.reasoning ?? 'off'
     this.#transport = new HttpSseTransport({
       providerId: options.providerId,
       endpoint:
@@ -222,38 +197,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
       options.createCallId ?? (() => `call:${randomUUID()}` as CallId)
   }
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
-    const override = request.providerRequestOverride
-    const providerTools = wireTools(request.tools)
-    const thinking =
-      this.#profile === 'deepseek'
-        ? {
-            thinking: {
-              type: this.#reasoning === 'off' ? 'disabled' : 'enabled',
-            },
-            ...(this.#reasoning === 'off'
-              ? {}
-              : { reasoning_effort: this.#reasoning }),
-          }
-        : {}
-    const providerRequest =
-      override && typeof override === 'object' && !Array.isArray(override)
-        ? structuredClone(override)
-        : {
-            model: this.#model,
-            messages: request.messages,
-            tools: providerTools.length > 0 ? providerTools : undefined,
-            stream: true,
-            stream_options: {
-              include_usage: true,
-            },
-            ...(request.responseFormat
-              ? { response_format: request.responseFormat }
-              : {}),
-            ...thinking,
-          }
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+    const providerRequest = structuredClone(request.providerRequest)
     const requestBody = JSON.stringify(providerRequest)
     const requestStart = this.#now()
     let firstTokenAt: number | undefined
@@ -263,13 +208,13 @@ export class OpenAICompatibleProvider implements LLMProvider {
     let reasoning = ''
     let finishReason: string | undefined
     const toolCalls = new Map<number, AccumulatedToolCall>()
-    const toolIntentFields = intentFields(request.tools)
+    const toolIntentFields = intentFields(request.toolDefinitions)
 
     await request.onRequest?.({
-      normalizedMessages: toJsonValue(request.messages) as JsonValue[],
+      normalizedMessages: structuredClone(request.normalizedMessages),
       providerRequest: toJsonValue(providerRequest),
       requestBytes: Buffer.byteLength(requestBody, 'utf8'),
-      prefixHash: hashJson(toJsonValue(request.messages)),
+      prefixHash: hashJson(toJsonValue(request.normalizedMessages)),
     })
 
     for await (const chunk of this.#transport.postJson(
@@ -408,7 +353,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         reason: normalized.reason,
       }
     })
-    const turn: ProviderAssistantTurn = {
+    const turn = {
       role: 'assistant',
       content: text || null,
       ...(reasoning ? { reasoning_content: reasoning } : {}),
@@ -421,7 +366,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     yield {
       type: 'completed',
       rawResponse,
-      turn,
+      turn: toJsonValue(turn),
       toolCalls: normalizedToolCalls,
       usage: latestUsage,
       ...(finishReason ? { finishReason } : {}),

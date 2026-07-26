@@ -6,7 +6,7 @@ import type { CallId, SessionId } from '../../shared/ids'
 import type { ModelSelection } from '../../shared/model-route'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 import type { ConfigStore } from '../config/store'
@@ -35,14 +35,12 @@ function createBackendForTest(
 
 class RecoveryProvider implements LLMProvider {
   calls = 0
-  readonly requests: ProviderChatRequest['messages'][] = []
+  readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
   toolOnCall?: number
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
     if (this.calls === this.toolOnCall) {
       const args = { path: 'README.md' }
       yield {

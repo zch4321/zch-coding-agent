@@ -5,9 +5,14 @@ import {
   MAX_TOOL_INTENT_LENGTH,
 } from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
-import { CANONICAL_JSON_LIMITS, type JsonValue } from '../../shared/json'
+import type { ProviderProfile, ReasoningEffort } from '../../shared/config'
+import {
+  CANONICAL_JSON_LIMITS,
+  type JsonObject,
+  type JsonValue,
+} from '../../shared/json'
 import { DeepSeekProvider, OpenAICompatibleProvider } from './deepseek-provider'
-import type { ProviderEvent } from './provider'
+import type { ProviderEvent, ProviderStreamRequest } from './provider'
 
 function sseResponse(payloads: JsonValue[]): Response {
   const body = payloads
@@ -17,6 +22,59 @@ function sseResponse(payloads: JsonValue[]): Response {
     status: 200,
     headers: { 'content-type': 'text/event-stream' },
   })
+}
+
+function wireTools(tools: JsonValue[]): JsonValue[] {
+  return tools.map((candidate) => {
+    const cloned = structuredClone(candidate)
+    if (!cloned || typeof cloned !== 'object' || Array.isArray(cloned)) {
+      return cloned
+    }
+    const fn = cloned.function
+    if (fn && typeof fn === 'object' && !Array.isArray(fn)) {
+      delete fn['x-agent-intent-property']
+    }
+    return cloned
+  })
+}
+
+function streamRequest(input: {
+  messages: JsonValue[]
+  tools: JsonValue[]
+  signal: AbortSignal
+  model?: string
+  reasoning?: ReasoningEffort
+  profile?: ProviderProfile
+  responseFormat?: { type: 'json_object' }
+  providerRequestOverride?: JsonObject
+}): ProviderStreamRequest {
+  const reasoning = input.reasoning ?? 'off'
+  const tools = wireTools(input.tools)
+  return {
+    providerRequest:
+      input.providerRequestOverride ??
+      ({
+        model: input.model ?? 'fixture',
+        messages: input.messages,
+        ...(tools.length > 0 ? { tools } : {}),
+        stream: true,
+        stream_options: { include_usage: true },
+        ...(input.responseFormat
+          ? { response_format: input.responseFormat }
+          : {}),
+        ...(input.profile === 'generic'
+          ? {}
+          : {
+              thinking: {
+                type: reasoning === 'off' ? 'disabled' : 'enabled',
+              },
+              ...(reasoning === 'off' ? {} : { reasoning_effort: reasoning }),
+            }),
+      } as JsonObject),
+    normalizedMessages: structuredClone(input.messages) as JsonObject[],
+    toolDefinitions: structuredClone(input.tools),
+    signal: input.signal,
+  }
 }
 
 describe('DeepSeekProvider', () => {
@@ -90,18 +148,18 @@ describe('DeepSeekProvider', () => {
   ])('stops accumulating oversized %s', async (_label, chunk, expected) => {
     const provider = new DeepSeekProvider({
       baseURL: 'https://api.example/v1',
-      model: 'fixture',
       apiKey: 'secret',
-      reasoning: 'high',
       fetchImpl: async () => sseResponse([chunk as JsonValue]),
     })
 
     await expect(async () => {
-      for await (const event of provider.streamChat({
-        messages: [{ role: 'user', content: 'continue' }],
-        tools: [],
-        signal: new AbortController().signal,
-      })) {
+      for await (const event of provider.stream(
+        streamRequest({
+          messages: [{ role: 'user', content: 'continue' }],
+          tools: [],
+          signal: new AbortController().signal,
+        }),
+      )) {
         // Consume until the provider rejects the oversized accumulation.
         void event
       }
@@ -115,9 +173,7 @@ describe('DeepSeekProvider', () => {
     const provider = new DeepSeekProvider({
       baseURL: 'https://api.example/v1',
       endpoint: 'https://gateway.example/custom/chat?api-version=1',
-      model: 'current-model',
       apiKey: 'current-secret',
-      reasoning: 'off',
       fetchImpl: async (input, init) => {
         requestedEndpoint = String(input)
         body = String(init?.body)
@@ -133,12 +189,14 @@ describe('DeepSeekProvider', () => {
     }
 
     const stream = provider
-      .streamChat({
-        messages: [{ role: 'user', content: 'normalized' }],
-        tools: [],
-        providerRequestOverride: recordedRequest,
-        signal: new AbortController().signal,
-      })
+      .stream(
+        streamRequest({
+          messages: [{ role: 'user', content: 'normalized' }],
+          tools: [],
+          providerRequestOverride: recordedRequest,
+          signal: new AbortController().signal,
+        }),
+      )
       [Symbol.asyncIterator]()
 
     while (!(await stream.next()).done) {
@@ -165,9 +223,7 @@ describe('DeepSeekProvider', () => {
     }
     const provider = new DeepSeekProvider({
       baseURL: 'https://api.example/v1',
-      model: 'fixture',
       apiKey: 'secret',
-      reasoning: 'high',
       createCallId: () => 'call-generated' as CallId,
       fetchImpl: async (_input, init) => {
         wireBody = String(init?.body)
@@ -214,23 +270,26 @@ describe('DeepSeekProvider', () => {
     })
     const events: ProviderEvent[] = []
 
-    for await (const event of provider.streamChat({
-      messages: [{ role: 'user', content: 'Read the file' }],
-      tools: [
-        {
-          type: 'function',
-          function: {
-            name: 'read_file',
-            parameters: {
-              type: 'object',
-              properties: { _agent_intent: { type: 'string' } },
+    for await (const event of provider.stream(
+      streamRequest({
+        messages: [{ role: 'user', content: 'Read the file' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'read_file',
+              parameters: {
+                type: 'object',
+                properties: { _agent_intent: { type: 'string' } },
+              },
+              'x-agent-intent-property': '_agent_intent',
             },
-            'x-agent-intent-property': '_agent_intent',
           },
-        },
-      ],
-      signal: new AbortController().signal,
-    })) {
+        ],
+        reasoning: 'high',
+        signal: new AbortController().signal,
+      }),
+    )) {
       events.push(event)
     }
 
@@ -278,9 +337,7 @@ describe('DeepSeekProvider', () => {
     const intent = 'x'.repeat(MAX_TOOL_INTENT_LENGTH + 128)
     const provider = new DeepSeekProvider({
       baseURL: 'https://api.example/v1',
-      model: 'fixture',
       apiKey: 'secret',
-      reasoning: 'off',
       fetchImpl: async () =>
         sseResponse([
           {
@@ -309,23 +366,25 @@ describe('DeepSeekProvider', () => {
     })
     const events: ProviderEvent[] = []
 
-    for await (const event of provider.streamChat({
-      messages: [{ role: 'user', content: 'Read the file' }],
-      tools: [
-        {
-          type: 'function',
-          function: {
-            name: 'read_file',
-            parameters: {
-              type: 'object',
-              properties: { _agent_intent: { type: 'string' } },
+    for await (const event of provider.stream(
+      streamRequest({
+        messages: [{ role: 'user', content: 'Read the file' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'read_file',
+              parameters: {
+                type: 'object',
+                properties: { _agent_intent: { type: 'string' } },
+              },
+              'x-agent-intent-property': '_agent_intent',
             },
-            'x-agent-intent-property': '_agent_intent',
           },
-        },
-      ],
-      signal: new AbortController().signal,
-    })) {
+        ],
+        signal: new AbortController().signal,
+      }),
+    )) {
       events.push(event)
     }
 
@@ -341,9 +400,7 @@ describe('DeepSeekProvider', () => {
   it('preserves a provider truncation finish reason', async () => {
     const provider = new DeepSeekProvider({
       baseURL: 'https://api.example/v1',
-      model: 'fixture',
       apiKey: 'secret',
-      reasoning: 'off',
       fetchImpl: async () =>
         sseResponse([
           {
@@ -358,11 +415,13 @@ describe('DeepSeekProvider', () => {
     })
     const events: ProviderEvent[] = []
 
-    for await (const event of provider.streamChat({
-      messages: [{ role: 'user', content: 'continue' }],
-      tools: [],
-      signal: new AbortController().signal,
-    })) {
+    for await (const event of provider.stream(
+      streamRequest({
+        messages: [{ role: 'user', content: 'continue' }],
+        tools: [],
+        signal: new AbortController().signal,
+      }),
+    )) {
       events.push(event)
     }
 
@@ -378,19 +437,21 @@ describe('DeepSeekProvider', () => {
     for (const reasoning of ['max', 'off'] as const) {
       const provider = new DeepSeekProvider({
         baseURL: 'https://api.example/v1',
-        model: 'deepseek-v4-pro',
         apiKey: 'secret',
-        reasoning,
         fetchImpl: async (_input, init) => {
           bodies.push(JSON.parse(String(init?.body)))
           return sseResponse([])
         },
       })
-      for await (const event of provider.streamChat({
-        messages: [{ role: 'user', content: 'hello' }],
-        tools: [],
-        signal: new AbortController().signal,
-      })) {
+      for await (const event of provider.stream(
+        streamRequest({
+          messages: [{ role: 'user', content: 'hello' }],
+          tools: [],
+          model: 'deepseek-v4-pro',
+          reasoning,
+          signal: new AbortController().signal,
+        }),
+      )) {
         void event
       }
     }
@@ -409,21 +470,23 @@ describe('DeepSeekProvider', () => {
     let body = ''
     const provider = new DeepSeekProvider({
       baseURL: 'https://api.example/v1',
-      model: 'deepseek-v4-flash',
       apiKey: 'secret',
-      reasoning: 'high',
       fetchImpl: async (_input, init) => {
         body = String(init?.body)
         return sseResponse([])
       },
     })
 
-    for await (const event of provider.streamChat({
-      messages: [{ role: 'user', content: 'return json' }],
-      tools: [],
-      responseFormat: { type: 'json_object' },
-      signal: new AbortController().signal,
-    })) {
+    for await (const event of provider.stream(
+      streamRequest({
+        messages: [{ role: 'user', content: 'return json' }],
+        tools: [],
+        model: 'deepseek-v4-flash',
+        reasoning: 'high',
+        responseFormat: { type: 'json_object' },
+        signal: new AbortController().signal,
+      }),
+    )) {
       void event
     }
 
@@ -440,20 +503,23 @@ describe('DeepSeekProvider', () => {
       providerId: 'local-openai',
       profile: 'generic',
       baseURL: 'https://api.example/v1',
-      model: 'generic-model',
       apiKey: 'secret',
-      reasoning: 'max',
       fetchImpl: async (_input, init) => {
         body = String(init?.body)
         return sseResponse([])
       },
     })
 
-    for await (const event of provider.streamChat({
-      messages: [{ role: 'user', content: 'hello' }],
-      tools: [],
-      signal: new AbortController().signal,
-    })) {
+    for await (const event of provider.stream(
+      streamRequest({
+        messages: [{ role: 'user', content: 'hello' }],
+        tools: [],
+        model: 'generic-model',
+        reasoning: 'max',
+        profile: 'generic',
+        signal: new AbortController().signal,
+      }),
+    )) {
       void event
     }
 
@@ -469,9 +535,7 @@ describe('DeepSeekProvider', () => {
   it('preserves hidden reasoning continuation when display is off', async () => {
     const provider = new DeepSeekProvider({
       baseURL: 'https://api.example/v1',
-      model: 'fixture',
       apiKey: 'secret',
-      reasoning: 'off',
       fetchImpl: async () =>
         sseResponse([
           {
@@ -494,11 +558,13 @@ describe('DeepSeekProvider', () => {
     })
     const events: ProviderEvent[] = []
 
-    for await (const event of provider.streamChat({
-      messages: [{ role: 'user', content: 'Read' }],
-      tools: [],
-      signal: new AbortController().signal,
-    })) {
+    for await (const event of provider.stream(
+      streamRequest({
+        messages: [{ role: 'user', content: 'Read' }],
+        tools: [],
+        signal: new AbortController().signal,
+      }),
+    )) {
       events.push(event)
     }
 
@@ -510,9 +576,7 @@ describe('DeepSeekProvider', () => {
   it('does not expose an upstream error body', async () => {
     const provider = new DeepSeekProvider({
       baseURL: 'https://api.example/v1',
-      model: 'fixture',
       apiKey: 'secret',
-      reasoning: 'off',
       fetchImpl: async () =>
         new Response('{"error":{"message":"secret request echo"}}', {
           status: 400,
@@ -521,11 +585,13 @@ describe('DeepSeekProvider', () => {
 
     const consume = async () => {
       const stream = provider
-        .streamChat({
-          messages: [{ role: 'user', content: 'hello' }],
-          tools: [],
-          signal: new AbortController().signal,
-        })
+        .stream(
+          streamRequest({
+            messages: [{ role: 'user', content: 'hello' }],
+            tools: [],
+            signal: new AbortController().signal,
+          }),
+        )
         [Symbol.asyncIterator]()
       await stream.next()
     }

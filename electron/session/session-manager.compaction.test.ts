@@ -88,7 +88,7 @@ describe('SessionManager compaction', () => {
     const compactSummaryIndex = compactContinuation.findIndex(
       (message) =>
         message.role === 'user' &&
-        message.content?.includes('<compact_history'),
+        String(message.content ?? '').includes('<compact_history'),
     )
     const newUserIndex = compactContinuation.findIndex(
       (message) => message.content === 'focus on risks',
@@ -199,7 +199,7 @@ describe('SessionManager compaction', () => {
     )
     const messages = provider.requests[2]?.messages ?? []
     const summaryIndex = messages.findIndex((message) =>
-      message.content?.includes('<compact_history'),
+      String(message.content ?? '').includes('<compact_history'),
     )
     const userIndex = messages.findIndex(
       (message) => message.content === 'new task',
@@ -256,7 +256,9 @@ describe('SessionManager compaction', () => {
 
     const latest = provider.requests[3]?.messages ?? []
     expect(
-      latest.filter((message) => message.content?.includes('<compact_history')),
+      latest.filter((message) =>
+        String(message.content ?? '').includes('<compact_history'),
+      ),
     ).toHaveLength(1)
     expect(JSON.stringify(latest)).not.toContain(
       'history before repeated compact',
@@ -435,7 +437,7 @@ describe('SessionManager compaction', () => {
     const summaryIndex = afterAutoCompactMessages.findIndex(
       (message) =>
         message.role === 'user' &&
-        message.content?.includes('<compact_history'),
+        String(message.content ?? '').includes('<compact_history'),
     )
     expect(replayedRootIndex).toBeGreaterThan(0)
     expect(summaryIndex).toBeGreaterThan(replayedRootIndex)
@@ -499,12 +501,14 @@ describe('SessionManager compaction', () => {
     expect(continuation.at(-1)?.role).toBe('user')
     expect(continuation.at(-1)?.content).toContain('<compact_history')
     const harnessIndex = continuation.findIndex((message) =>
-      message.content?.includes('HARNESS_ONLY'),
+      String(message.content ?? '').includes('HARNESS_ONLY'),
     )
     expect(harnessIndex).toBeGreaterThan(0)
     expect(harnessIndex).toBeLessThan(continuation.length - 1)
     expect(
-      continuation.some((message) => message.content?.includes('<user_input')),
+      continuation.some((message) =>
+        String(message.content ?? '').includes('<user_input'),
+      ),
     ).toBe(false)
     await manager.closeSession(sessionId)
   }, 10_000)
@@ -570,10 +574,10 @@ describe('SessionManager compaction', () => {
         message.content === `ROOT_DURING_COMPACT ${'x'.repeat(10_000)}`,
     )
     const summaryIndex = continuation.findIndex((message) =>
-      message.content?.includes('<compact_history'),
+      String(message.content ?? '').includes('<compact_history'),
     )
     const interjectionIndex = continuation.findIndex((message) =>
-      message.content?.includes('LATEST_DURING_COMPACT'),
+      String(message.content ?? '').includes('LATEST_DURING_COMPACT'),
     )
     expect(rootIndex).toBeGreaterThan(0)
     expect(summaryIndex).toBeGreaterThan(rootIndex)

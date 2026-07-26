@@ -1,6 +1,6 @@
 import type { RunStatus } from '../../shared/agent-events'
 import type { CallId, MessageId } from '../../shared/ids'
-import type { JsonValue } from '../../shared/json'
+import type { JsonObject, JsonValue } from '../../shared/json'
 import type { CanonicalPromptKind } from '../../shared/message'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ConfigStore } from '../config/store'
@@ -331,10 +331,7 @@ export class SessionCompactCoordinator {
     const provider =
       this.#providerFactory?.({ config, apiKey: binding.apiKey }) ??
       createConfiguredProvider(
-        config,
         binding.provider,
-        binding.snapshot.model,
-        binding.snapshot.reasoning,
         binding.apiKey,
         this.#fetchImpl,
         binding.snapshot.endpoint,
@@ -344,10 +341,10 @@ export class SessionCompactCoordinator {
     let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
     this.#setRunStatus(session, run, 'calling_llm')
 
-    for await (const event of provider.streamChat({
-      messages: compiled.messages,
-      tools: [],
-      providerRequestOverride: compiled.body,
+    for await (const event of provider.stream({
+      providerRequest: compiled.body,
+      normalizedMessages: toJsonValue(compiled.messages) as JsonObject[],
+      toolDefinitions: [],
       signal: run.controller.signal,
       onRequest: async (snapshot) => {
         await session.logger.write({

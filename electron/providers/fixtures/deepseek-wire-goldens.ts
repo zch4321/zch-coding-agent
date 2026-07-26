@@ -1,11 +1,10 @@
 import type { JsonValue } from '../../../shared/json'
 import type { ReasoningEffort } from '../../../shared/config'
-import type { ProviderMessage } from '../provider'
 
 export interface DeepSeekWireGolden {
   id: string
   reasoning: ReasoningEffort
-  messages: ProviderMessage[]
+  messages: JsonValue[]
   tools: JsonValue[]
   stream: JsonValue[]
   expectedRequest: JsonValue

@@ -3,14 +3,14 @@ import type { JsonValue } from '../../shared/json'
 import type { AutoApprover } from '../permission/auto-approver'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 
 export class ScriptedEditProvider implements LLMProvider {
   calls = 0
 
-  async *streamChat(): AsyncIterable<ProviderEvent> {
+  async *stream(): AsyncIterable<ProviderEvent> {
     this.calls += 1
 
     if (this.calls === 1) {
@@ -76,13 +76,11 @@ export class ScriptedEditProvider implements LLMProvider {
 
 export class ScriptedCommandProvider implements LLMProvider {
   calls = 0
-  requests: ProviderChatRequest['messages'][] = []
+  requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
 
     if (this.calls === 1) {
       yield {

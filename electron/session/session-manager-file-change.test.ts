@@ -7,7 +7,7 @@ import type { JsonValue } from '../../shared/json'
 import type { CallId, FileChangeId } from '../../shared/ids'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 import { PromptRegistry } from '../prompts/registry'
@@ -42,7 +42,7 @@ class DeferredReadProvider implements LLMProvider {
     this.#release()
   }
 
-  async *streamChat(): AsyncIterable<ProviderEvent> {
+  async *stream(): AsyncIterable<ProviderEvent> {
     this.calls += 1
     if (this.calls === 1) {
       this.#resolveEntered()
@@ -56,13 +56,11 @@ class DeferredReadProvider implements LLMProvider {
 
 class CreateWarningProvider implements LLMProvider {
   calls = 0
-  readonly requests: ProviderChatRequest['messages'][] = []
+  readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
     if (this.calls === 1) {
       yield toolCompletion('create_file', {
         path: 'warning.txt',

@@ -1,4 +1,4 @@
-import type { ProviderPublicConfig, PublicConfig } from '../../shared/config'
+import type { ProviderPublicConfig } from '../../shared/config'
 import type { CallId } from '../../shared/ids'
 import type { JsonObject, JsonValue } from '../../shared/json'
 import type { MessagePart } from '../../shared/message'
@@ -248,16 +248,11 @@ export class SessionProviderTurnRunner {
       )
     }
 
-    compiled.messages = structuredClone(
-      body.messages,
-    ) as unknown as typeof compiled.messages
+    const normalizedMessages = toJsonValue(body.messages) as JsonObject[]
     const provider =
       this.#providerFactory?.({ config, apiKey: binding.apiKey }) ??
       createConfiguredProvider(
-        config,
         binding.provider,
-        binding.snapshot.model,
-        binding.snapshot.reasoning,
         binding.apiKey,
         this.#fetchImpl,
         binding.snapshot.endpoint,
@@ -290,10 +285,10 @@ export class SessionProviderTurnRunner {
       })
     }
 
-    for await (const event of provider.streamChat({
-      messages: compiled.messages,
-      tools: compiled.tools,
-      providerRequestOverride: body,
+    for await (const event of provider.stream({
+      providerRequest: body,
+      normalizedMessages,
+      toolDefinitions: compiled.tools,
       signal: run.controller.signal,
       onRequest,
     })) {
@@ -440,10 +435,7 @@ function assertCompletedAssistantTurn(completed: CompletedAssistantTurn): void {
 }
 
 export function createConfiguredProvider(
-  _config: PublicConfig,
   provider: ProviderPublicConfig,
-  model: string,
-  reasoning: ProviderPublicConfig['reasoning'],
   apiKey: string,
   fetchImpl?: typeof fetch,
   endpoint?: string,
@@ -452,8 +444,6 @@ export function createConfiguredProvider(
     providerId: provider.id,
     profile: provider.profile,
     baseURL: provider.baseURL,
-    model,
-    reasoning,
     apiKey,
     fetchImpl,
     endpoint,

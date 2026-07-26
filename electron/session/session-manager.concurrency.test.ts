@@ -6,7 +6,7 @@ import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { CallId } from '../../shared/ids'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 import { PromptRegistry } from '../prompts/registry'
@@ -21,14 +21,14 @@ import {
 
 describe('SessionManager M1 workspace concurrency', () => {
   class ConcurrentGateProvider implements LLMProvider {
-    readonly requests: ProviderChatRequest['messages'][] = []
+    readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
     readonly #releases: Array<() => void> = []
 
-    async *streamChat(
-      request: ProviderChatRequest,
+    async *stream(
+      request: ProviderStreamRequest,
     ): AsyncIterable<ProviderEvent> {
       const index = this.requests.length
-      this.requests.push(structuredClone(request.messages))
+      this.requests.push(structuredClone(request.normalizedMessages))
       await new Promise<void>((resolve) => {
         this.#releases[index] = resolve
       })
@@ -49,12 +49,12 @@ describe('SessionManager M1 workspace concurrency', () => {
 
     requestContaining(
       text: string,
-    ): ProviderChatRequest['messages'] | undefined {
+    ): ProviderStreamRequest['normalizedMessages'] | undefined {
       return this.requests.find((messages) =>
         messages.some(
           (message) =>
             typeof message.content === 'string' &&
-            message.content.includes(text),
+            String(message.content ?? '').includes(text),
         ),
       )
     }
@@ -64,7 +64,7 @@ describe('SessionManager M1 workspace concurrency', () => {
         messages.some(
           (message) =>
             typeof message.content === 'string' &&
-            message.content.includes(text),
+            String(message.content ?? '').includes(text),
         ),
       )
       if (index < 0) throw new Error(`Provider request not found: ${text}`)
@@ -75,7 +75,7 @@ describe('SessionManager M1 workspace concurrency', () => {
   class NonAbortableMetadataProvider implements LLMProvider {
     calls = 0
 
-    async *streamChat(): AsyncIterable<ProviderEvent> {
+    async *stream(): AsyncIterable<ProviderEvent> {
       this.calls += 1
 
       if (this.calls === 1) {
@@ -127,16 +127,16 @@ describe('SessionManager M1 workspace concurrency', () => {
   }
 
   function lastWorkspaceConcurrency(
-    messages: ProviderChatRequest['messages'],
+    messages: ProviderStreamRequest['normalizedMessages'],
   ): string {
-    return (
+    return String(
       messages
         .filter(
           (message) =>
             typeof message.content === 'string' &&
-            message.content.includes('<workspace_concurrency'),
+            String(message.content ?? '').includes('<workspace_concurrency'),
         )
-        .at(-1)?.content ?? ''
+        .at(-1)?.content ?? '',
     )
   }
 

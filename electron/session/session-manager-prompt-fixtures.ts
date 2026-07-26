@@ -2,7 +2,7 @@ import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 
@@ -10,18 +10,14 @@ export class ScriptedProvider implements LLMProvider {
   calls = 0
   requestBodies: JsonValue[] = []
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requestBodies.push(
-      structuredClone(request.providerRequestOverride ?? null),
-    )
+    this.requestBodies.push(structuredClone(request.providerRequest ?? null))
     await request.onRequest?.({
-      normalizedMessages: request.messages as unknown as JsonValue[],
+      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
       providerRequest: {
         model: 'fixture',
-        messages: request.messages as unknown as JsonValue[],
+        messages: request.normalizedMessages as unknown as JsonValue[],
       },
       requestBytes: 10,
       prefixHash: `fixture-${this.calls}`,
@@ -85,19 +81,17 @@ export class ScriptedProvider implements LLMProvider {
 
 export class PromptAuditProvider implements LLMProvider {
   calls = 0
-  requests: ProviderChatRequest['messages'][] = []
+  requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
     await request.onRequest?.({
-      normalizedMessages: request.messages as unknown as JsonValue[],
+      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
       providerRequest: {
         model: 'fixture',
-        messages: request.messages as unknown as JsonValue[],
-        tools: request.tools,
+        messages: request.normalizedMessages as unknown as JsonValue[],
+        tools: request.toolDefinitions,
       },
       requestBytes: 10,
       prefixHash: `prompt-audit-${this.calls}`,

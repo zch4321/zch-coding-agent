@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue } from '../../shared/json'
+import type { JsonValue } from '../../shared/json'
 import type {
   MessagePart,
   ProviderContinuationEnvelope,
@@ -6,24 +6,13 @@ import type {
 import type { ModelRouteSnapshot } from '../../shared/model-route'
 import type { CompiledCanonicalHistory } from '../session/canonical-history'
 import type { ToolCall } from '../tools/types'
-import type {
-  ProviderEvent,
-  ProviderMessage,
-  ProviderResponseFormat,
-} from './provider'
+import type { ProviderEvent } from './provider'
 
 export interface AdapterCompileInput {
   history: CompiledCanonicalHistory
   route: ModelRouteSnapshot
   tools: JsonValue[]
-  responseFormat?: ProviderResponseFormat
-}
-
-export interface ChatCompletionsRequestDto {
-  body: JsonObject
-  messages: ProviderMessage[]
-  tools: JsonValue[]
-  responseFormat?: ProviderResponseFormat
+  structuredOutput?: 'json_object'
 }
 
 export interface CompletedAssistantTurn {

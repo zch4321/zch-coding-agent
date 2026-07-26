@@ -12,7 +12,7 @@ import { ConfigStore } from '../config/store'
 import { SecretStore, type SafeStorageAdapter } from '../config/secret-store'
 import type {
   LLMProvider,
-  ProviderChatRequest,
+  ProviderStreamRequest,
   ProviderEvent,
 } from '../providers/provider'
 import {
@@ -64,7 +64,7 @@ class TestSafeStorage implements SafeStorageAdapter {
 class OrderedProvider implements LLMProvider {
   calls = 0
   readonly order: string[]
-  readonly requests: ProviderChatRequest['messages'][] = []
+  readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
   readonly #toolChain: boolean
 
   constructor(order: string[], toolChain = false) {
@@ -72,15 +72,13 @@ class OrderedProvider implements LLMProvider {
     this.#toolChain = toolChain
   }
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.order.push('provider')
-    this.requests.push(structuredClone(request.messages))
+    this.requests.push(structuredClone(request.normalizedMessages))
     await request.onRequest?.({
-      normalizedMessages: request.messages as unknown as JsonValue[],
-      providerRequest: request.providerRequestOverride ?? {},
+      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
+      providerRequest: request.providerRequest ?? {},
       requestBytes: 1,
       prefixHash: `request:${this.calls}`,
     })
@@ -150,12 +148,10 @@ class BlockingProvider implements LLMProvider {
     this.#release()
   }
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     await request.onRequest?.({
-      normalizedMessages: request.messages as unknown as JsonValue[],
-      providerRequest: request.providerRequestOverride ?? {},
+      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
+      providerRequest: request.providerRequest ?? {},
       requestBytes: 1,
       prefixHash: 'blocking',
     })
@@ -181,11 +177,9 @@ class BlockingProvider implements LLMProvider {
 class EmptyCompactProvider implements LLMProvider {
   calls = 0
 
-  async *streamChat(
-    request: ProviderChatRequest,
-  ): AsyncIterable<ProviderEvent> {
+  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    if (request.tools.length === 0) {
+    if (request.toolDefinitions.length === 0) {
       yield {
         type: 'completed',
         rawResponse: { id: 'empty-compact' },

@@ -115,7 +115,7 @@ describe('SessionManager prompt and trace', () => {
       provider.messages.some(
         (message) =>
           message.role === 'user' &&
-          message.content?.includes(
+          String(message.content ?? '').includes(
             'English assistant preference selected by the test',
           ),
       ),
