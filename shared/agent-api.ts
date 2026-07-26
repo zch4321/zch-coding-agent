@@ -63,6 +63,12 @@ export interface AgentApi {
   archiveSession(
     payload: IpcPayload<'session:archive'>,
   ): Promise<IpcResult<'session:archive'>>
+  restoreSession(
+    payload: IpcPayload<'session:restore'>,
+  ): Promise<IpcResult<'session:restore'>>
+  deleteSession(
+    payload: IpcPayload<'session:delete'>,
+  ): Promise<IpcResult<'session:delete'>>
   forkSession(
     payload: IpcPayload<'session:fork'>,
   ): Promise<IpcResult<'session:fork'>>
@@ -219,6 +225,8 @@ export const AGENT_API_KEYS = [
   'getSession',
   'updateSession',
   'archiveSession',
+  'restoreSession',
+  'deleteSession',
   'forkSession',
   'rewindSession',
   'searchSessions',

@@ -11,6 +11,7 @@ import {
   MessageListPayloadSchema,
   ProjectCommittedChangeSchema,
   SessionCommittedChangeSchema,
+  SessionRemovedChangeSchema,
   SessionUpdatePatchSchema,
   type DomainStateApiPayload,
   type DomainStateEvent,
@@ -583,7 +584,7 @@ describe('bounded domain-state API contracts', () => {
     expect(
       validatePayload({ ...payload, limit: MAX_MESSAGE_PAGE_RECORDS + 1 }),
     ).toBe(false)
-    expect(Object.keys(DOMAIN_STATE_API_CONTRACTS)).toHaveLength(18)
+    expect(Object.keys(DOMAIN_STATE_API_CONTRACTS)).toHaveLength(20)
     expect(DOMAIN_STATE_API_CONTRACTS).not.toHaveProperty('session:create')
     expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('run:start')
     expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('message:search')
@@ -654,6 +655,7 @@ describe('bounded domain-state API contracts', () => {
       session,
       messageChange: { mode: 'upsert', records: messages.slice(0, 3) },
     })
+    roundTrip(SessionRemovedChangeSchema, { sessionId, projectId })
     roundTrip(FileChangeCommittedChangeSchema, {
       mode: 'upsert',
       sessionId,
@@ -681,6 +683,15 @@ describe('bounded domain-state API contracts', () => {
       },
     }
     roundTrip(DomainStateEventSchema, event)
+    roundTrip(DomainStateEventSchema, {
+      version: 1,
+      commit: {
+        schemaVersion: 1,
+        cursor,
+        topic: 'session.removed',
+        change: { sessionId, projectId },
+      },
+    })
   })
 
   it('bounds bootstrap collections and rejects unknown result fields', () => {

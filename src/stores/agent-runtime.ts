@@ -330,6 +330,9 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           }
           const commit = delivery.event.commit
           void replica.reconcile(commit).then((outcome) => {
+            if (outcome !== 'duplicate' && commit.topic === 'session.removed') {
+              delete this.overlays[commit.change.sessionId]
+            }
             if (outcome !== 'duplicate' && commit.topic === 'session.changed') {
               const overlay = this.overlays[commit.change.session.id]
               if (overlay) {

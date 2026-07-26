@@ -104,6 +104,8 @@ const validPayloads: {
     patch: { title: 'Updated session' },
   },
   'session:archive': { version: 1, sessionId, expectedRevision: 1 },
+  'session:restore': { version: 1, sessionId, expectedRevision: 1 },
+  'session:delete': { version: 1, sessionId, expectedRevision: 1 },
   'session:fork': {
     version: 1,
     sourceSessionId: sessionId,

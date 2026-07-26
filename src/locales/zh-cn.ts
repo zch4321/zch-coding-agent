@@ -270,6 +270,7 @@ const zhCN = {
   settings: {
     general: '通用',
     project: '项目',
+    archived: '已归档对话',
     provider: '模型服务',
     limits: '运行限制',
     permissions: '权限',
@@ -305,6 +306,19 @@ const zhCN = {
     removeProjectBusy: '项目中仍有运行中、启动中或等待审批的对话',
     removeConfirm: '从应用中移除此项目及其本地对话历史？',
     removeHint: '移除项目会清理应用历史和运行资源，但不会删除磁盘文件。',
+    archivedTitle: '已归档对话',
+    archivedHint: '恢复归档对话，或永久删除不再需要的本地历史。',
+    archivedSafety:
+      '永久删除会清理该对话的消息和文件变更审计，但不会改动工作区文件。存在分叉子对话时会拒绝删除；Trace 日志仍在“日志”设置中单独管理。',
+    archivedEmpty: '没有已归档对话。',
+    archivedUnknownProject: '项目已不可用',
+    archivedAt: '归档于 {time}',
+    restoreArchived: '恢复',
+    deleteArchived: '永久删除',
+    deleteArchivedTitle: '永久删除归档对话？',
+    deleteArchivedConfirm:
+      '永久删除“{title}”的本地会话、消息和文件变更审计？此操作不可撤销。工作区文件不会被改动；Trace 日志仍在“日志”设置中单独管理。',
+    loadMoreArchived: '加载更多归档对话',
     providerTitle: '模型服务',
     providerHint: '配置主模型和自动审批模型。',
     addProvider: '新增 Provider',
@@ -421,7 +435,7 @@ const zhCN = {
     rename: '重命名',
     deleteTitle: '归档会话？',
     deleteText:
-      '这会归档该会话。本版本暂不提供恢复入口，工作区文件不会被删除。',
+      '这会归档该会话。之后可在“设置 → 已归档对话”中恢复或永久删除；工作区文件不会被删除。',
     revertTitle: '回退对话？',
     revertText:
       '将从此消息开始回退当前分支。文件、终端和外部工具产生的副作用不会撤销，文件变更审计仍会保留。',

@@ -17,11 +17,12 @@ const tabs = computed<
   Array<{
     value: SettingsTab
     label: string
-    icon: 'folder' | 'settings' | 'warning' | 'app' | 'file'
+    icon: 'folder' | 'settings' | 'warning' | 'app' | 'file' | 'trash'
   }>
 >(() => [
   { value: 'general', label: t('settings.general'), icon: 'settings' },
   { value: 'project', label: t('settings.project'), icon: 'folder' },
+  { value: 'archived', label: t('settings.archived'), icon: 'trash' },
   { value: 'provider', label: t('settings.provider'), icon: 'settings' },
   { value: 'limits', label: t('settings.limits'), icon: 'settings' },
   { value: 'permissions', label: t('settings.permissions'), icon: 'warning' },

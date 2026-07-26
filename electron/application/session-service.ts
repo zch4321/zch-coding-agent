@@ -3,6 +3,7 @@ import type { PermissionMode } from '../../shared/config'
 import { MAX_FORK_MESSAGE_RECORDS } from '../../shared/durable'
 import type {
   SessionCommandResult,
+  SessionDeleteCommandResult,
   SessionMessageChange,
   SessionSearchHit,
 } from '../../shared/domain-state-api'
@@ -440,11 +441,10 @@ export class SessionService {
             'Compact boundary is outside committed history',
           )
         }
-        this.#messages.setInHistoryThrough(
+        this.#messages.deactivateHistoryThrough(
           transaction,
           input.sessionId,
           input.deactivateThroughSeq,
-          false,
         )
       }
       this.#messages.insertMany(transaction, records)
@@ -555,6 +555,67 @@ export class SessionService {
       )
     }
     return result
+  }
+
+  /** Restores an archived Session to the active lifecycle. */
+  async restore(input: {
+    sessionId: SessionId
+    expectedRevision: number
+  }): Promise<SessionCommandResult> {
+    this.#runtimeGuard?.assertSessionIdle(input.sessionId)
+    return this.#coordinator.command('session.changed', (transaction) => {
+      const current = this.#sessions.get(transaction, input.sessionId)
+      if (!current) {
+        throw new ApplicationError('NOT_FOUND', 'Session was not found')
+      }
+      if (current.revision !== input.expectedRevision) {
+        throw revisionConflict(current)
+      }
+      if (current.lifecycle !== 'archived') {
+        throw new ApplicationError(
+          'PRECONDITION_FAILED',
+          'Only archived Sessions can be restored',
+        )
+      }
+      const next = activeSessionRecord(current, this.#now())
+      if (!this.#sessions.update(transaction, next, current.revision)) {
+        throw revisionConflict(current)
+      }
+      return { session: next, messageChange: { mode: 'none' as const } }
+    })
+  }
+
+  /** Permanently deletes an archived leaf Session and its durable child records. */
+  async deleteArchived(input: {
+    sessionId: SessionId
+    expectedRevision: number
+  }): Promise<SessionDeleteCommandResult> {
+    this.#runtimeGuard?.assertSessionIdle(input.sessionId)
+    return this.#coordinator.command('session.removed', (transaction) => {
+      const current = this.#sessions.get(transaction, input.sessionId)
+      if (!current) {
+        throw new ApplicationError('NOT_FOUND', 'Session was not found')
+      }
+      if (current.revision !== input.expectedRevision) {
+        throw revisionConflict(current)
+      }
+      if (current.lifecycle !== 'archived') {
+        throw new ApplicationError(
+          'PRECONDITION_FAILED',
+          'Only archived Sessions can be permanently deleted',
+        )
+      }
+      if (this.#sessions.hasChildren(transaction, current.id)) {
+        throw new ApplicationError(
+          'PRECONDITION_FAILED',
+          'A Session with fork children cannot be permanently deleted',
+        )
+      }
+      if (!this.#sessions.deleteLeaf(transaction, current.id)) {
+        throw new ApplicationError('CONFLICT', 'Session could not be deleted')
+      }
+      return { sessionId: current.id, projectId: current.projectId }
+    })
   }
 
   /** Rebuilds a Session's active branch through a selected boundary and commits the result. */
@@ -810,6 +871,28 @@ export class SessionService {
         messageChange: { mode: 'upsert' as const, records },
       }
     })
+  }
+}
+
+function activeSessionRecord(
+  record: Extract<SessionRecord, { lifecycle: 'archived' }>,
+  timestamp: string,
+): Extract<SessionRecord, { lifecycle: 'active' }> {
+  return {
+    schemaVersion: record.schemaVersion,
+    id: record.id,
+    projectId: record.projectId,
+    title: record.title,
+    permissionMode: record.permissionMode,
+    modelSelection: record.modelSelection,
+    goal: record.goal,
+    plan: record.plan,
+    ...(record.parent ? { parent: record.parent } : {}),
+    revision: record.revision + 1,
+    lastSeq: record.lastSeq,
+    createdAt: record.createdAt,
+    updatedAt: timestamp,
+    lifecycle: 'active',
   }
 }
 

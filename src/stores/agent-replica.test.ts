@@ -273,6 +273,39 @@ describe('agent durable replica', () => {
     expect(replica.selectedMessages).toEqual([userMessage])
   })
 
+  it('removes a deleted Session and every associated replica cache', async () => {
+    const replica = useAgentReplicaStore()
+    replica.projects = [project]
+    replica.sessions = [session()]
+    replica.selectedProjectId = projectId
+    replica.selectedSessionId = sessionId
+    replica.messagesBySessionId[sessionId] = [userMessage]
+    replica.fileChangesBySessionId[sessionId] = [fileChange(1)]
+    replica.runtimeBySessionId[sessionId] = undefined
+    replica.traceCaptureBySessionId[sessionId] = undefined
+    replica.cursor = {
+      schemaVersion: 1,
+      backendInstanceId: 'backend:replica',
+      sequence: 1,
+    }
+
+    await replica.reconcile({
+      schemaVersion: 1,
+      cursor: {
+        schemaVersion: 1,
+        backendInstanceId: 'backend:replica',
+        sequence: 2,
+      },
+      topic: 'session.removed',
+      change: { sessionId, projectId },
+    })
+
+    expect(replica.sessions).toEqual([])
+    expect(replica.selectedSessionId).toBeUndefined()
+    expect(replica.messagesBySessionId).toEqual({})
+    expect(replica.fileChangesBySessionId).toEqual({})
+  })
+
   it('coalesces bootstrap replay and loads the 201st active Session', async () => {
     const pending = new Promise<ReturnType<typeof success>>((resolve) => {
       window.setTimeout(

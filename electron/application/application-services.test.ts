@@ -611,6 +611,97 @@ describe('SessionService durable transactions', () => {
     }
   })
 
+  it('restores archived Sessions and permanently deletes archived leaf Sessions', async () => {
+    const setup = await setupServices()
+    try {
+      const sessionId = 'session:restore-delete' as SessionId
+      await setup.sessions.commitFirstTurn({
+        session: activeSession(sessionId, setup.project.id),
+        messages: firstTurn(sessionId),
+        requestHash: canonicalHash('hello durable state'),
+      })
+      await setup.sessions.archive({ sessionId, expectedRevision: 1 })
+
+      const restored = await setup.sessions.restore({
+        sessionId,
+        expectedRevision: 2,
+      })
+      expect(restored.commit.change.session).toMatchObject({
+        lifecycle: 'active',
+        revision: 3,
+      })
+      expect(restored.commit.change.session).not.toHaveProperty('archivedAt')
+
+      await expect(
+        setup.sessions.deleteArchived({ sessionId, expectedRevision: 3 }),
+      ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+      await setup.sessions.archive({ sessionId, expectedRevision: 3 })
+      const removed = await setup.sessions.deleteArchived({
+        sessionId,
+        expectedRevision: 4,
+      })
+      expect(removed.commit).toMatchObject({
+        topic: 'session.removed',
+        change: { sessionId, projectId: setup.project.id },
+      })
+      await expect(setup.sessions.getRecord(sessionId)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      })
+      const durableCounts = (
+        await setup.coordinator.query((reader) => ({
+          messages: Number(
+            (
+              reader
+                .prepare(
+                  'SELECT COUNT(*) AS count FROM messages WHERE session_id = ?',
+                )
+                .get(sessionId) as { count: number }
+            ).count,
+          ),
+          fileChanges: Number(
+            (
+              reader
+                .prepare(
+                  'SELECT COUNT(*) AS count FROM file_changes WHERE session_id = ?',
+                )
+                .get(sessionId) as { count: number }
+            ).count,
+          ),
+        }))
+      ).value
+      expect(durableCounts).toEqual({ messages: 0, fileChanges: 0 })
+    } finally {
+      await setup.testDatabase.dispose()
+    }
+  })
+
+  it('refuses permanent deletion while fork children still reference the Session', async () => {
+    const setup = await setupServices()
+    try {
+      const sessionId = 'session:delete-parent' as SessionId
+      await setup.sessions.commitFirstTurn({
+        session: activeSession(sessionId, setup.project.id),
+        messages: firstTurn(sessionId),
+        requestHash: canonicalHash('hello durable state'),
+      })
+      await setup.sessions.fork({
+        sourceSessionId: sessionId,
+        expectedRevision: 1,
+        sessionId: 'session:delete-child' as SessionId,
+      })
+      await setup.sessions.archive({ sessionId, expectedRevision: 1 })
+
+      await expect(
+        setup.sessions.deleteArchived({ sessionId, expectedRevision: 2 }),
+      ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+      await expect(setup.sessions.getRecord(sessionId)).resolves.toMatchObject({
+        lifecycle: 'archived',
+      })
+    } finally {
+      await setup.testDatabase.dispose()
+    }
+  })
+
   it('keeps a committed update successful when runtime refresh fails', async () => {
     const onDiagnostic = vi.fn()
     const guard: SessionRuntimeGuard = {

@@ -266,6 +266,16 @@ export function createAppIpcHandlers(
         sessionId: payload.sessionId,
         expectedRevision: payload.expectedRevision,
       }),
+    'session:restore': (payload) =>
+      backend.sessions.restore({
+        sessionId: payload.sessionId,
+        expectedRevision: payload.expectedRevision,
+      }),
+    'session:delete': (payload) =>
+      backend.sessions.deleteArchived({
+        sessionId: payload.sessionId,
+        expectedRevision: payload.expectedRevision,
+      }),
     'session:fork': (payload) =>
       backend.sessions.fork({
         sourceSessionId: payload.sourceSessionId,

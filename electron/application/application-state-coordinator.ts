@@ -7,6 +7,7 @@ import type {
   FileChangeCommittedChange,
   ProjectCommittedChange,
   SessionCommittedChange,
+  SessionRemovedChange,
 } from '../../shared/domain-state-api'
 import type {
   PersistenceReader,
@@ -23,7 +24,9 @@ type DurableChangeFor<Topic extends DurableCommitTopic> =
     ? ProjectCommittedChange
     : Topic extends 'session.changed'
       ? SessionCommittedChange
-      : FileChangeCommittedChange
+      : Topic extends 'session.removed'
+        ? SessionRemovedChange
+        : FileChangeCommittedChange
 
 export interface ApplicationStateCoordinatorOptions {
   database: DatabaseService

@@ -138,6 +138,25 @@ export const SessionCommitEnvelopeSchema = Type.Object(
   { additionalProperties: false },
 )
 
+export const SessionRemovedChangeSchema = Type.Object(
+  {
+    sessionId: SessionIdSchema,
+    projectId: ProjectIdSchema,
+  },
+  { additionalProperties: false },
+)
+export type SessionRemovedChange = Static<typeof SessionRemovedChangeSchema>
+
+export const SessionRemovedCommitEnvelopeSchema = Type.Object(
+  {
+    schemaVersion: DurableSchemaVersionSchema,
+    cursor: BackendEventCursorSchema,
+    topic: Type.Literal('session.removed'),
+    change: SessionRemovedChangeSchema,
+  },
+  { additionalProperties: false },
+)
+
 export const FileChangeCommitEnvelopeSchema = Type.Object(
   {
     schemaVersion: DurableSchemaVersionSchema,
@@ -151,6 +170,7 @@ export const FileChangeCommitEnvelopeSchema = Type.Object(
 export const DurableCommitEnvelopeSchema = Type.Union([
   ProjectCommitEnvelopeSchema,
   SessionCommitEnvelopeSchema,
+  SessionRemovedCommitEnvelopeSchema,
   FileChangeCommitEnvelopeSchema,
 ])
 export type DurableCommitEnvelope = Static<typeof DurableCommitEnvelopeSchema>
@@ -184,6 +204,13 @@ export const SessionCommandResultSchema = commandResultSchema(
   SessionCommitEnvelopeSchema,
 )
 export type SessionCommandResult = Static<typeof SessionCommandResultSchema>
+
+export const SessionDeleteCommandResultSchema = commandResultSchema(
+  SessionRemovedCommitEnvelopeSchema,
+)
+export type SessionDeleteCommandResult = Static<
+  typeof SessionDeleteCommandResultSchema
+>
 
 export const FileChangeCommandResultSchema = commandResultSchema(
   FileChangeCommitEnvelopeSchema,
@@ -343,6 +370,24 @@ export const SessionUpdatePayloadSchema = Type.Object(
 )
 
 export const SessionArchivePayloadSchema = Type.Object(
+  {
+    ...versionProperty,
+    sessionId: SessionIdSchema,
+    expectedRevision: RevisionSchema,
+  },
+  { additionalProperties: false },
+)
+
+export const SessionRestorePayloadSchema = Type.Object(
+  {
+    ...versionProperty,
+    sessionId: SessionIdSchema,
+    expectedRevision: RevisionSchema,
+  },
+  { additionalProperties: false },
+)
+
+export const SessionDeletePayloadSchema = Type.Object(
   {
     ...versionProperty,
     sessionId: SessionIdSchema,
@@ -606,6 +651,14 @@ export const DOMAIN_STATE_API_CONTRACTS = {
   'session:archive': {
     payload: SessionArchivePayloadSchema,
     result: SessionCommandResultSchema,
+  },
+  'session:restore': {
+    payload: SessionRestorePayloadSchema,
+    result: SessionCommandResultSchema,
+  },
+  'session:delete': {
+    payload: SessionDeletePayloadSchema,
+    result: SessionDeleteCommandResultSchema,
   },
   'message:list': {
     payload: MessageListPayloadSchema,

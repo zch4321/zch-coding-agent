@@ -480,6 +480,27 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         return 'applied' as const
       }
 
+      if (commit.topic === 'session.removed') {
+        const { sessionId, projectId } = commit.change
+        this.sessions = this.sessions.filter(
+          (session) => session.id !== sessionId,
+        )
+        this.searchHits = this.searchHits.filter(
+          (hit) => hit.session.id !== sessionId,
+        )
+        if (this.selectedSessionId === sessionId) {
+          this.selectedSessionId = this.sessions.find(
+            (session) =>
+              session.projectId === projectId && session.lifecycle === 'active',
+          )?.id
+        }
+        this.pruneCaches()
+        if (this.selectedSessionId) {
+          await this.loadSession(this.selectedSessionId)
+        }
+        return 'applied' as const
+      }
+
       const change = commit.change
       if (change.mode === 'invalidate_all') {
         this.fileChangesBySessionId = {}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { PermissionMode } from '../../../shared/config'
 import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue'
+import ArchivedSessionsSettingsPanel from './ArchivedSessionsSettingsPanel.vue'
 import LoggingSettingsPanel from './LoggingSettingsPanel.vue'
 import LimitsSettingsPanel from './LimitsSettingsPanel.vue'
 import PermissionsSettingsPanel from './PermissionsSettingsPanel.vue'
@@ -28,6 +29,7 @@ const emit = defineEmits<{
         v-else-if="activeTab === 'project'"
         @removed="emit('close')"
       />
+      <ArchivedSessionsSettingsPanel v-else-if="activeTab === 'archived'" />
       <ProviderSettingsPanel v-else-if="activeTab === 'provider'" />
       <LimitsSettingsPanel v-else-if="activeTab === 'limits'" />
       <PermissionsSettingsPanel

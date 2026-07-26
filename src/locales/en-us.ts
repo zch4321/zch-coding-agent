@@ -274,6 +274,7 @@ const enUS = {
   settings: {
     general: 'General',
     project: 'Project',
+    archived: 'Archived conversations',
     provider: 'Provider',
     limits: 'Limits',
     permissions: 'Permissions',
@@ -313,6 +314,20 @@ const enUS = {
       'Remove this project and its local conversation history from the app?',
     removeHint:
       'Removing a project clears app history and runtime resources. It does not delete files from disk.',
+    archivedTitle: 'Archived conversations',
+    archivedHint:
+      'Restore archived conversations or permanently delete local history you no longer need.',
+    archivedSafety:
+      'Permanent deletion removes the conversation messages and FileChange audit without modifying workspace files. Sessions with fork children are protected. Trace logs remain managed separately under Logging.',
+    archivedEmpty: 'There are no archived conversations.',
+    archivedUnknownProject: 'Project unavailable',
+    archivedAt: 'Archived {time}',
+    restoreArchived: 'Restore',
+    deleteArchived: 'Delete permanently',
+    deleteArchivedTitle: 'Permanently delete archived conversation?',
+    deleteArchivedConfirm:
+      'Permanently delete the local Session, messages, and FileChange audit for “{title}”? This cannot be undone. Workspace files are not modified, and trace logs remain managed separately under Logging.',
+    loadMoreArchived: 'Load more archived conversations',
     providerTitle: 'Provider',
     providerHint: 'Configure the main model and the Auto approval model.',
     addProvider: 'Add provider',
@@ -432,7 +447,7 @@ const enUS = {
     rename: 'Rename',
     deleteTitle: 'Archive session?',
     deleteText:
-      'This archives the session. This version has no restore UI. Workspace files are not deleted.',
+      'This archives the session. You can later restore or permanently delete it under Settings → Archived conversations. Workspace files are not deleted.',
     revertTitle: 'Revert conversation?',
     revertText:
       'This rewinds the current branch from this message. File, terminal, and external-tool side effects are not undone, and FileChange audit records remain.',

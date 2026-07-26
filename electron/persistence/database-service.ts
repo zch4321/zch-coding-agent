@@ -38,7 +38,13 @@ export interface DatabaseMigrationProgress {
   elapsedMs: number
 }
 
-/** Provides read-only prepared statements over the open SQLite database. */
+/**
+ * Provides prepared statements to repository query callbacks.
+ *
+ * SQLite does not enforce this facade as read-only. Callers must not execute
+ * mutating SQL through a PersistenceReader; durable writes belong in
+ * DatabaseService.withTransaction callbacks using PersistenceTransaction.
+ */
 export class PersistenceReader {
   constructor(protected readonly database: DatabaseSync) {}
 
@@ -120,7 +126,7 @@ export class DatabaseService {
     return new DatabaseService(options)
   }
 
-  /** Runs a synchronous read callback against the shared read-only database handle. */
+  /** Runs a synchronous query callback under the PersistenceReader no-write contract. */
   read<Result>(work: (reader: PersistenceReader) => Result): Result {
     this.#assertOpen()
     return work(this.#reader)

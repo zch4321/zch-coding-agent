@@ -113,12 +113,32 @@ export class SessionRepository {
     return Number(result.changes) > 0
   }
 
-  /** Deletes a Session by ID and reports whether a row was removed. */
-  delete(transaction: PersistenceTransaction, id: SessionId): boolean {
+  /** Deletes a Session only when no fork child still references it. */
+  deleteLeaf(transaction: PersistenceTransaction, id: SessionId): boolean {
     const result = transaction
-      .prepare('DELETE FROM sessions WHERE id = ?')
-      .run(id)
+      .prepare(
+        `DELETE FROM sessions
+         WHERE id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM sessions child WHERE child.parent_session_id = ?
+           )`,
+      )
+      .run(id, id)
     return Number(result.changes) > 0
+  }
+
+  /** Reports whether another Session still records this Session as its fork parent. */
+  hasChildren(reader: PersistenceReader, id: SessionId): boolean {
+    return Boolean(
+      reader
+        .prepare(
+          `SELECT 1
+           FROM sessions
+           WHERE parent_session_id = ?
+           LIMIT 1`,
+        )
+        .get(id),
+    )
   }
 
   /** Loads and decodes a Session record by ID. */

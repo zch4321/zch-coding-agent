@@ -234,11 +234,10 @@ describe('persistence repositories', () => {
         sessions.insert(transaction, secondSession)
         messages.insert(transaction, user)
         expect(
-          messages.setInHistoryThrough(
+          messages.deactivateHistoryThrough(
             transaction,
             firstSession.id,
             user.seq,
-            false,
           ),
         ).toBe(1)
       })
@@ -365,7 +364,7 @@ describe('persistence repositories', () => {
     }
   })
 
-  it('clears child fork metadata before deleting a parent Session', async () => {
+  it('refuses to delete a Session while fork children still reference it', async () => {
     const testDatabase = await createTestDatabase()
     const project = projectFixture()
     const parent = sessionFixture()
@@ -384,14 +383,18 @@ describe('persistence repositories', () => {
         sessions.insert(transaction, child)
       })
       await testDatabase.database.withTransaction((transaction) => {
-        expect(sessions.delete(transaction, parent.id)).toBe(true)
+        expect(sessions.deleteLeaf(transaction, parent.id)).toBe(false)
       })
 
+      const storedParent = testDatabase.database.read((reader) =>
+        sessions.get(reader, parent.id),
+      )
       const storedChild = testDatabase.database.read((reader) =>
         sessions.get(reader, child.id),
       )
+      expect(storedParent?.id).toBe(parent.id)
       expect(storedChild?.id).toBe(child.id)
-      expect(storedChild).not.toHaveProperty('parent')
+      expect(storedChild?.parent).toEqual(child.parent)
     } finally {
       await testDatabase.dispose()
     }

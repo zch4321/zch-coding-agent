@@ -262,6 +262,12 @@ export const IPC_CONTRACTS = {
   'session:archive': domainIpcContract(
     DOMAIN_STATE_API_CONTRACTS['session:archive'],
   ),
+  'session:restore': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['session:restore'],
+  ),
+  'session:delete': domainIpcContract(
+    DOMAIN_STATE_API_CONTRACTS['session:delete'],
+  ),
   'session:fork': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['session:fork']),
   'session:rewind': domainIpcContract(
     DOMAIN_STATE_API_CONTRACTS['session:rewind'],

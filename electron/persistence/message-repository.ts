@@ -207,20 +207,19 @@ export class MessageRepository {
       .slice(0, limit)
   }
 
-  /** Sets the history flag for messages through a sequence boundary. */
-  setInHistoryThrough(
+  /** Removes messages through a compaction boundary from provider history. */
+  deactivateHistoryThrough(
     transaction: PersistenceTransaction,
     sessionId: SessionId,
     throughSeq: number,
-    inHistory: boolean,
   ): number {
     const result = transaction
       .prepare(
         `UPDATE messages
-         SET in_history = ?
+         SET in_history = 0
          WHERE session_id = ? AND seq <= ?`,
       )
-      .run(inHistory ? 1 : 0, sessionId, throughSeq)
+      .run(sessionId, throughSeq)
     return Number(result.changes)
   }
 

@@ -83,6 +83,44 @@
   margin: 0;
 }
 
+.archived-session-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.archived-session-details {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 8px;
+}
+
+.archived-session-details > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archived-session-details span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.archived-session-actions {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 720px) {
+  .archived-session-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .settings-switch-row {
   justify-content: space-between;
   gap: 18px;

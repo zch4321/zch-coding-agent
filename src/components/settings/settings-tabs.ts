@@ -1,6 +1,7 @@
 export type SettingsTab =
   | 'general'
   | 'project'
+  | 'archived'
   | 'provider'
   | 'limits'
   | 'permissions'
