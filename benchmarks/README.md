@@ -2,15 +2,14 @@
 
 当前目录实现 Linux Docker execution boundary、BenchmarkCase v1、strict/repair-once runner、独立 grader container、硬门禁、L0–L5 scoring、trace/tool/usage/cost与 paired comparison，以及正式 benchmark命令和分层报告。容器中的 Agent 仍是 `electron/headless/` 构建出的同一个固定 Yolo bundle。
 
-## 构建与验证
+## 显式 opt-in 构建与验证
 
 ```powershell
 npm run build:worker-image
 npm run test:docker-worker
-npm run test:benchmark-cases
 ```
 
-镜像默认命名为 `zch-agent-headless:<HEAD 前 12 位>`，也可通过 `ZCH_WORKER_IMAGE` 指定。构建脚本把完整 HEAD 和 clean/dirty tree 状态注入 bundle 与 OCI labels。正式可比较 run 应使用 clean commit 和不可变 image digest。
+以上 Docker/worker 命令以及所有 `benchmark:*` preset 只在用户明确要求时运行，不属于常规 `npm run verify`。镜像默认命名为 `zch-agent-headless:<HEAD 前 12 位>`，也可通过 `ZCH_WORKER_IMAGE` 指定。构建脚本把完整 HEAD 和 clean/dirty tree 状态注入 bundle 与 OCI labels。正式可比较 run 应使用 clean commit 和不可变 image digest。
 
 `test:docker-worker` 是显式 opt-in，不进入 `npm test`、`npm run build` 或 Electron E2E。它构建镜像后运行五条真实 Docker trajectory：
 
@@ -94,7 +93,7 @@ coordinator 只接受固定 workspace、artifacts、config/task 和 credential m
 
 源码使用可审阅的 `zch-case-archive-v1` JSON archive。准备器校验 raw archive 与规范化 tree hash后才写文件，再创建只有一个 baseline commit 的新 Git 仓库，并删除 reflog、hooks、remote、tag 和不可达历史。Agent 可见树还会扫描私有字段和 grader/oracle/mutant 路径。
 
-`private/core-harness-8/` 只供可信 coordinator/evaluator 和数据质量自检读取，并已从 Docker build context 排除。固定8项覆盖slug、chunk、retry、falsey配置优先级、monorepo最深路由、API兼容重构、有界长日志诊断和正确no-change；每项包含oracle和两个可通过公开检查但会被隐藏行为组拒绝的mutant。`test:benchmark-cases` 对baseline/oracle/mutant从pristine archive重复准备三次，签名不一致即判定flaky。这里的review字段只记录确定性自检，不是语义alignment或人工批准门禁。
+`private/core-harness-8/` 只供可信 coordinator/evaluator 和数据质量自检读取，并已从 Docker build context 排除。固定8项覆盖slug、chunk、retry、falsey配置优先级、monorepo最深路由、API兼容重构、有界长日志诊断和正确no-change；每项包含oracle和两个可通过公开检查但会被隐藏行为组拒绝的mutant。baseline/oracle/mutant 从 pristine archive 重复准备、checksum 和路径安全等确定性自检已由默认 `npm test`（进而 `npm run verify`）覆盖，不再维护或单独运行 benchmark-cases 入口。这里的 review 字段只记录确定性自检，不是语义 alignment 或人工批准门禁。
 
 外部 adapter 不把上游任务伪装成 native archive。Monthly Harbor环境和 SWE-rebench官方image先构建/拉取为 Linux/amd64任务image，再只叠加当前ZCH Headless runtime；Provider proxy仍使用通用worker image。Agent workspace位于任务原生路径的Docker named volume，保留symlink和执行位；gold/solution、test patch、测试ID及verifier配置只存在于grader私有缓存和挂载，Agent descriptor对外部case仅含problem statement、范围与预算。
 

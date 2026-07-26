@@ -2,9 +2,9 @@
 
 安装：普通用户可以直接在 GitHub Releases 下载 `Zch Coding Agent-Windows-*-Setup.exe` 安装包并运行安装；当前发布目标是 Windows x64。开发者需要 Node.js 24，克隆仓库后执行 `npm ci` 安装依赖，开发模式运行 `npm run dev`；如需本地生成安装包，再执行 `npm run build`，产物会输出到 `release/<version>/`。
 
-使用：启动应用后先选择一个工作区目录，在设置里配置模型服务和 API Key，然后在对话框中提出任务。Agent 会在当前工作区内读取文件、搜索代码、应用补丁、执行命令或打开共享终端；涉及文件写入、命令执行、终端输入等副作用时，会根据当前权限模式进入人工审批、自动审批或全自动执行。普通测试使用 `npm test`，端到端测试使用 `npm run test:e2e`，可选真实 Provider 测试使用 `npm run test:real`。
+使用：启动应用后先选择一个工作区目录，在设置里配置模型服务和 API Key，然后在对话框中提出任务。Agent 会在当前工作区内读取文件、搜索代码、应用补丁、执行命令或打开共享终端；涉及文件写入、命令执行、终端输入等副作用时，会根据当前权限模式进入人工审批、自动审批或全自动执行。常规完整验证只运行 `npm run verify`；定位单项失败时再执行对应底层命令。
 
-内部 benchmark host 可通过 `npm run build:headless` 构建，然后用 `npm run agent:headless -- run --workspace <dir> --task-file <file> --config <file> --artifacts <dir> --timeout-ms <ms>` 启动。该入口固定为无人审批的 Yolo，stdout 只输出 JSONL，运行结果和 patch 写入 workspace 外的 artifacts 目录。Linux worker 继续复用这一个 bundle；`npm run build:worker-image` 构建同 commit 的 OCI image，`npm run test:docker-worker` 显式运行 Docker smoke 与强制终止清理测试。
+内部 benchmark host 可通过 `npm run build:headless` 构建，然后用 `npm run agent:headless -- run --workspace <dir> --task-file <file> --config <file> --artifacts <dir> --timeout-ms <ms>` 启动。该入口固定为无人审批的 Yolo，stdout 只输出 JSONL，运行结果和 patch 写入 workspace 外的 artifacts 目录。Linux worker 继续复用这一个 bundle。Benchmark preset、Docker worker/image、外部 benchmark 和真实 Provider 测试都是高成本 opt-in 工作负载，只有在用户明确要求时才运行，不属于 `npm run verify`。
 
 ## 项目简介
 
@@ -93,17 +93,15 @@ Workspace files, child processes, PTY terminals
 ```powershell
 npm ci
 npm run dev
-npm test
+npm run verify
 npm run test:e2e
-npm run lint
-npm run format:check
-npm run typecheck
 npm run build:headless
-npm run build:worker-image
-npm run test:docker-worker
-npm run test:benchmark-cases
 npm run build
 ```
+
+`npm run verify` 已包含 lint、format check、`npm test`、typecheck、native/ripgrep/development SQLite smoke、应用与 Headless 构建、Windows x64 打包、packaged SQLite smoke 和基于现有构建产物的 Electron E2E。不要在完整验证后重复运行这些底层命令，除非正在定位失败。确定性的 benchmark manifest/checksum/路径安全用例已包含在 `npm test`，没有独立 benchmark-cases 门禁。
+
+`benchmark:smoke`、其他 `benchmark:*`、`build:worker-image`、`test:docker-worker`、外部 benchmark 和 `test:real` 只在明确需要相应高成本环境时手动运行；常规开发、CI 和 Release 均不会隐式触发。
 
 Headless config 只保存 credential 环境变量名称，不接受明文 key。例如：
 
@@ -127,6 +125,14 @@ Headless config 只保存 credential 环境变量名称，不接受明文 key。
 $env:DEEPSEEK_API_KEY = '...'
 npm run test:real
 ```
+
+## 数据库、备份与恢复
+
+Desktop 的 Project、Session、Message 和 FileChange 审计只以 Electron `userData/agent.db` 为持久化真相源；Windows 安装版通常位于 `%APPDATA%\Zch Coding Agent\agent.db`，设置中的“打开数据目录”以运行时实际路径为准。SQLite 使用 WAL 模式，运行时可能同时存在 `agent.db-wal` 和 `agent.db-shm`。
+
+做一致备份前应完全退出应用，确认没有 Zch Coding Agent 进程，再复制整个 `userData` 目录，至少保留 `agent.db`、`config.json`、`secrets.json` 和 `traces/`。如果必须在应用运行时复制，需要把数据库及同名 `-wal`/`-shm` 文件作为一个不可拆分的快照；单独复制 `agent.db` 可能缺少尚未 checkpoint 的提交。`secrets.json` 由操作系统 `safeStorage` 保护，不保证可跨 Windows 账户或机器恢复。
+
+启动时若数据库无法打开或迁移，应用会显示原生阻塞恢复窗口，只提供重试、打开数据目录和退出，不会回退到旧 Workbench/JSON 状态。恢复时先退出应用并备份故障目录，再用同一次一致备份替换数据库文件；高版本 schema、checksum 不匹配或损坏数据库会 fail closed。未发布的 v8/v9 开发配置不做保字段迁移；首个正式 v9 发布之后的配置变化必须升版本并另行定义迁移策略。
 
 ## 安全边界
 

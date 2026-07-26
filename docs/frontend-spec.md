@@ -1,9 +1,9 @@
 # 前端产品与验收规范 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 配套规范 · 最后更新 2026-07-22
+> 状态：Backend Architecture v2.1 P0–P10 配套规范 · 最后更新 2026-07-26
 > 配套：[`requirements.md`](./requirements.md)（产品能力）、[`architecture.md`](./architecture.md)（技术边界）、[`road-map.md`](./road-map.md)（实施方向）。
 > 本文档是前端信息架构、交互行为、阶段展示和验收标准的权威依据；发生冲突时以本文档为准。
-> v2.1 状态所有权和恢复行为是迁移目标；当前实现差异见架构文档 §20。
+> v2.1 状态所有权和恢复行为已经实现；明确延后项见架构文档 §20。
 
 ---
 
@@ -14,7 +14,7 @@
 固定原则：
 
 1. **真实功能优先**：未实现的能力不显示可点击占位，不使用假对话、假文件或无行为按钮填充界面。
-2. **对话是主流程**：消息、推理、工具调用和错误集中在对话流；同一工具状态不在多个侧栏重复展示。
+2. **对话是主流程**：消息、推理和工具调用集中在对话流；瞬时操作 warning/error 使用全局 NMessage，不插到历史队列。同一工具状态不在多个侧栏重复展示。
 3. **审查与执行分区**：Files/Diff 位于右侧 Artifact 侧栏；Terminal 位于对话区下方的底部面板。
 4. **内部状态最小暴露**：`sessionId/runId/callId` 不作为常驻产品信息展示；只有运行、等待审批、取消和错误等用户需处理的状态可见。
 5. **阶段能力诚实**：Terminal 到 P4 才出现；Browser 属于 Post-MVP；当前阶段不展示对应 tab 或占位页。
@@ -41,7 +41,7 @@
 - 对话标题、项目、完整消息、模型、权限模式、Goal/Plan 和时间来自 backend-owned Session state。
 - Renderer 使用 shared `MessageRecord` 原样保存 backend 副本，根据内部 `kind` 和有序 `parts` 决定展示；不能补造 Provider wire role、请求 DTO 或另一套消息类型。
 - Draft 和 draft attachments 只属于 renderer 输入组件，不要求跨 Session 切换、renderer reload 或应用重启恢复。
-- 创建对话即通过后端创建并持久化 Session；不存在 renderer-only Conversation、临时 Conversation 或 `conversationId -> sessionId` 绑定。
+- 点击“新对话”只创建 renderer-only composer draft；首次成功发送时才由一个 backend command 原子创建并持久化 Session、initial Messages 和 Active Run。不存在第二套 renderer-owned ConversationRecord，也不存在 `conversationId -> sessionId` 绑定。
 - Renderer 可以分页缓存 Session 数据并派生 timeline，但不能保存或回写另一套 ConversationRecord。
 - 不引入 Task 概念。
 
@@ -498,23 +498,25 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 前端必须覆盖以下显式状态：
 
-| 状态             | 对话区             | 输入区              | Artifact                    |
-| ---------------- | ------------------ | ------------------- | --------------------------- |
-| 未选择项目       | 引导选择目录       | Send disabled       | 空状态                      |
-| Provider 未配置  | 配置提示           | Send disabled       | 可浏览本地文件              |
-| Idle             | 不显示内部 badge   | 可输入              | 保留当前 tab                |
-| Calling LLM      | 流式占位/文本      | Stop                | 保留当前 tab                |
-| Running tool     | 工具卡状态更新     | Stop                | 文件工具可打开相关 Artifact |
-| Waiting approval | 审批卡             | 禁止发送，可 Stop   | 自动显示 Diff 或相关文件    |
-| Workspace writer | Writer badge       | 当前 Run 的普通控制 | 保留内容                    |
-| Read-only locked | Read-only locked   | 允许启动只读分析    | 保留内容并提示状态可能过期  |
-| Cancelling       | 短状态             | Stop disabled       | 保留内容                    |
-| Failed           | 结构化错误、可重试 | 恢复输入            | 保留审查上下文              |
-| Session archived | 历史只读           | Unarchive 后可发送  | 恢复持久化 Artifact 元数据  |
+| 状态             | 对话区           | 输入区                   | Artifact                    |
+| ---------------- | ---------------- | ------------------------ | --------------------------- |
+| 未选择项目       | 引导选择目录     | Send disabled            | 空状态                      |
+| Provider 未配置  | 配置提示         | Send disabled            | 可浏览本地文件              |
+| Idle             | 不显示内部 badge | 可输入                   | 保留当前 tab                |
+| Calling LLM      | 流式占位/文本    | Stop                     | 保留当前 tab                |
+| Running tool     | 工具卡状态更新   | Stop                     | 文件工具可打开相关 Artifact |
+| Waiting approval | 审批卡           | 禁止发送，可 Stop        | 自动显示 Diff 或相关文件    |
+| Workspace writer | Writer badge     | 当前 Run 的普通控制      | 保留内容                    |
+| Read-only locked | Read-only locked | 允许启动只读分析         | 保留内容并提示状态可能过期  |
+| Cancelling       | 短状态           | Stop disabled            | 保留内容                    |
+| Failed           | NMessage error   | 恢复输入，可重试用户消息 | 保留审查上下文              |
+| Session archived | 历史只读         | Unarchive 后可发送       | 恢复持久化 Artifact 元数据  |
 
 要求：
 
 - 错误消息对用户可见但不泄露 API Key、Authorization header 或主进程堆栈。
+- ConversationTimeline 只投影 durable messages、live overlay、工具和审批，不渲染全局 warning/error。NMessage 位于 46px frameless 顶栏下方：warning 10 秒自动消失且可提前关闭，error 不自动消失；最多显示 5 条，其余排队，不挤掉未关闭 error。
+- 相同 code、Session 和 message 在活动/排队期间去重。后台 Session 的通知显示对话标题但不切换当前对话；日志 capture 持续状态显示在 Header/设置，Provider 隐私 notice 保留在 composer 附近。
 - 创建、重命名、归档、切换模型/模式和发送消息期间只设置 pending/error UI，不先改 durable replica；commit 失败时继续显示后端原值。
 - Command 回包和 durable push event 使用同一个 reconciler；相同 event cursor 只应用一次，不依赖两者的到达顺序。
 - Event 已先应用时，重复的成功回包仍结束当前控件的 pending，只是不重复改写副本。
@@ -653,6 +655,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 16.3 对话与输入
 
 - [ ] 流式文本、折叠 reasoning、工具卡和结构化错误正常。
+- [ ] 操作 warning/error 通过 NMessage 展示，不进入 Timeline；10 秒 warning、持久 error、5 条排队、去重和后台 Session 标题符合规范。
 - [ ] Reasoning 折叠区只展示 `normalizedReasoningText`；缺失时不显示，opaque `providerContinuation` 永不进入 UI。
 - [ ] `kind = 'user_input'` 才渲染为用户气泡；orchestrator/runtime context/harness 不伪装成用户输入。
 - [ ] `text/tool_call/tool_result` parts 按原始顺序渲染，工具卡可由完整 MessageRecords 稳定重建；Renderer 不生成 Provider DTO。

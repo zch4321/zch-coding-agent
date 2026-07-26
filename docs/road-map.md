@@ -4,7 +4,7 @@
 
 Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`backend-refactor-plan.md`](./backend-refactor-plan.md)。
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、固定 Core Harness 8、Monthly-SWEBench/SWE-rebench滚动mixed-16、不可变cohort、strict/repair-once runner、隔离 grader、硬门禁和L0–L5评分、可热切换的 segmented trace capture、trace/tool/usage/cost/paired comparison、完整session transcript查看/导出，以及正式benchmark命令、档位和分层artifacts已经落地。下一阶段用真实任务信号指导Project / Code Intelligence和Provider Routing的后续改动。
+当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P10 Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、NMessage 操作通知、可热切换 segmented trace capture、单一 `npm run verify` 发布门禁、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、固定 Core Harness 8、Monthly-SWEBench/SWE-rebench 滚动 mixed-16、不可变 cohort、strict/repair-once runner、隔离 grader、硬门禁和 L0–L5 评分、trace/tool/usage/cost/paired comparison、完整 Session transcript 查看/导出，以及正式 benchmark 命令、档位和分层 artifacts 已经落地。下一阶段用真实任务信号指导 Project / Code Intelligence 和 Provider Routing 的后续改动；P3 review 建议、N-3/N-4 与 201+ Electron E2E 按主题分块讨论和实现。
 
 ## 0. 未完成概览
 
@@ -151,13 +151,8 @@ M5.10已经完成：`core-harness-8`固定8项确定性回归；`benchmark:exter
 
 ## 7. 阶段门禁
 
-每个实现阶段至少通过：
-
-- `npm run lint`
-- `npm run format:check`
-- `npm run typecheck`
-- `npm test`
+每个实现阶段完成时运行唯一完整门禁 `npm run verify`；开发中可以按失败领域运行单项命令，但不要在完整门禁后重复执行已包含的底层检查。
 
 涉及 Electron UI、文件树、审批、终端、设置、浏览器、MCP 进程生命周期、并发 run 或 provider routing 的阶段，还必须补充对应 E2E 或集成测试。
 
-真实 Provider、外部 Serena/LSP、外部 MCP server 和 benchmark 测试继续保持 opt-in，不能进入默认单测链路。
+真实 Provider、外部 Serena/LSP、外部 MCP server、benchmark preset 和 Docker worker/image 继续保持显式 opt-in，不能进入 `npm run verify`。Benchmark manifest/checksum/路径安全等纯确定性契约测试属于默认 `npm test`。

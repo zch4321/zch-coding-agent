@@ -1,8 +1,8 @@
 # 需求文档 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 已切流 · 最后更新 2026-07-25
+> 状态：Backend Architecture v2.1 P0–P10 已完成 · 最后更新 2026-07-26
 > 本文档定义「做什么」。技术怎么做见 [`architecture.md`](./architecture.md)，前端信息架构与验收标准见 [`frontend-spec.md`](./frontend-spec.md)。
-> P0–P9 已实现；剩余未落地项进入 roadmap 或 P10 hardening。
+> P0–P10 已实现；后续产品项与已延后的 P3 review 建议进入 roadmap 或独立设计。
 
 ---
 
@@ -188,6 +188,7 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 - Draft 和 draft attachments 是 renderer UI 状态，不进入 backend 或 SQLite，也不要求在切换 Session、renderer reload 或应用重启后保留。
 - 每次用户提交形成 backend memory 中的 Active Run；它在开始时冻结包含 `adapterId/providerId/model/reasoning profile/config revision` 的实际 `ModelRouteSnapshot` 和权限模式，但不单独落盘。完成的 assistant message 记录实际 route；Session 的模型/模式修改只影响后续 Run。
 - Active Run、stream delta、pending approval、未完成 tool batch、writer lease 和 PTY/process 都是 backend runtime state，不进入 SQLite。
+- Final-answer 边界到达的 live interjection 可转为 renderer carryover，并以稳定 request id 按 FIFO 启动后续 Run。某项启动失败时必须移除队列和 overlay、显示可自动消失的 warning、继续下一项且解除输入锁；不提供 carryover 重试或持久队列。
 - 同一 canonical workspace 同时最多一个非只读 writer run；`auto`、`confirm`、`yolo` 从 run 启动覆盖 provider、工具、等待审批、interjection continuation 和 cancelling。若不可中止的副作用工具在 cancelled/timeout 结果之后仍在执行，writer 必须继续持有到其底层 Promise settle。writer 数固定为 1，不提供配置。
 - `readonly` run 不获取 writer，可与 writer 和其他 readonly run 并行；不同 workspace 可各自拥有 writer。同 workspace 的第二个非只读 run 不排队，返回带 owner Session/Run 的结构化冲突。
 - completed、failed、cancelled、异常、session close 和 app dispose 都必须走幂等释放路径。全局 run slot 在 terminal run status 对 renderer 可见前释放；writer 在没有残留副作用时同步释放，有不可中止副作用时延迟到其真正 settle，禁止为满足 UI 终态而提前开放第二个 writer。
@@ -375,6 +376,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - 新建对话时只建立 renderer draft，不创建空 Session；首次发送以 `run:start new_session` 原子创建 Session、首轮 context/user records 并启动 Active Run。Session 创建前终端不可用。Session/Run ID 不作为常驻产品信息展示。
 - Markdown Conversation 导入/导出在 Durable Session 格式重新设计前保留禁用按钮和明确提示；Trace transcript 查看/导出保持可用。
 - 正式 UI 不得使用硬编码项目、对话或工具活动作为占位数据。
+- 后台异步故障使用版本化、脱敏、有界的 `app:notification`；preload 在 renderer 挂载前缓存最多 64 条。Renderer 的操作 warning/error 使用 `NMessage` 顶部通知，不写入 Timeline 或 durable replica：warning 10 秒自动消失，error 需手动关闭，最多同时 5 条并排队，按 code/Session/message 去重。后台 Session 通知显示对话标题但不得切换当前选择；风险确认、隐私告知、字段校验和持续状态留在所属界面。
 
 ### 4.2 终端面板
 

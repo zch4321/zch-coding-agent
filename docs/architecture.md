@@ -1,10 +1,10 @@
 # 架构设计文档 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 已完成 P0–P9 切流 · 2026-07-25
+> 状态：Backend Architecture v2.1 已完成 P0–P10 · 2026-07-26
 >
 > 配套文档：[`requirements.md`](./requirements.md) 定义产品能力，[`frontend-spec.md`](./frontend-spec.md) 定义前端信息架构与交互验收。
 >
-> 本文同时是当前实现的规范。P6–P9 已一次完成 Durable IPC、renderer replica、production composition 切流和旧路径删除；剩余工作属于 P10 hardening。
+> 本文同时是当前实现的规范。P6–P9 已一次完成 Durable IPC、renderer replica、production composition 切流和旧路径删除；P10 已完成事务、生命周期、通知、恢复与发布门禁收口。
 
 ---
 
@@ -448,11 +448,11 @@ MessageRecord 是持久化、排序、分页、compact 和 UI 派生的单位；
 
 持久化 log、Provider active history 和 renderer transcript 是三个独立投影：
 
-| 投影                    | 选择规则                                                              | 用途                              |
-| ----------------------- | --------------------------------------------------------------------- | --------------------------------- |
-| Durable canonical log   | 所有已接受并 commit 的 records，包括 `hidden` 和 `superseded`          | 幂等、审计、fork/reference 完整性 |
-| Provider active history | `inHistory = true` 且非 `superseded`，再经 compiler 校验               | Protocol Adapter request          |
-| Renderer transcript     | `visibility = visible` 的 user/assistant/编排记录                      | Chat timeline、普通搜索与导出     |
+| 投影                    | 选择规则                                                      | 用途                              |
+| ----------------------- | ------------------------------------------------------------- | --------------------------------- |
+| Durable canonical log   | 所有已接受并 commit 的 records，包括 `hidden` 和 `superseded` | 幂等、审计、fork/reference 完整性 |
+| Provider active history | `inHistory = true` 且非 `superseded`，再经 compiler 校验      | Protocol Adapter request          |
+| Renderer transcript     | `visibility = visible` 的 user/assistant/编排记录             | Chat timeline、普通搜索与导出     |
 
 因此“某条命令不发送给模型”不意味着“不落库”；同样，`inHistory = false` 也不等于删除或不可审计。
 
@@ -1525,18 +1525,22 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 5. 发送 B。
 6. 断言 `messages WHERE in_history = 1 ORDER BY seq` 能构造协议完整的 A/tool/final/B provider request。
 
-现有 test、typecheck、lint、format、native、E2E 和 real-provider gates 继续保留；benchmark proof 不属于本次重构或后续发布门禁。SQLite driver 引入后必须覆盖 Electron native ABI 和打包 smoke。
+常规完整门禁统一为 `npm run verify`：默认 Vitest、静态检查、分进程 native/ripgrep/development SQLite smoke、Desktop/Headless build、Windows package、packaged SQLite 和复用构建产物的 E2E。确定性 benchmark manifest/checksum/路径安全检查属于默认 Vitest；benchmark preset、Docker worker/image、外部 benchmark 和真实 Provider 测试仍是显式 opt-in，不进入该门禁。
 
 ---
 
 ## 20. 当前迁移状态
 
-P0–P9 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路径均使用唯一 `createBackendRuntime` 与 SQLite Durable Backend。Desktop 数据库为 `userData/agent.db`；数据库打开或 migration 失败时显示阻塞恢复对话框，不回退 Workbench。Headless 使用任务独立临时数据库并在退出时关闭、删除。
+P0–P10 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路径均使用唯一 `createBackendRuntime` 与 SQLite Durable Backend。Desktop 数据库为 `userData/agent.db`；数据库打开或 migration 失败时显示阻塞恢复对话框，不回退 Workbench。Headless 使用任务独立临时数据库并在退出时关闭、删除。
 
 Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、每 Session runtime overlay 和 UI-only draft/selection。首次发送前不创建空 Session；所有 durable command response 与 `domain-state:event` 经同一 reconciler 处理 cursor/revision、重复 delivery、缺口和 backend instance 变化。
 
+后台异步故障经版本化 `app:notification` 交付；preload 在 renderer 挂载前做 64 条有界缓存。Renderer 以 `NMessage` 展示瞬时操作反馈：warning 10 秒、error 手动关闭、最多 5 条并排队，且按 code/Session/message 去重。通知不进入 durable replica 或 Timeline；日志 capture 的持续状态留在 Header/设置。
+
 `MessageRecord` 使用 `visibility + inHistory + turnId` 分离展示、模型历史和轮次归属。Compact 只更新 `inHistory`；rewind 将移除分支标为 `superseded`，清除 Goal/Plan 并重建 active history。只有可见原始用户消息能 retry/edit；Assistant 不能作为 `run:retry` 目标。
 
-Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。Markdown Conversation import/export 暂停并在 UI 中禁用；Trace transcript export 保持可用。
+SQLite transaction callback 通过 authorizer 拒绝事务控制 SQL；commit listener 逐项隔离；backend dispose 使用共享 promise 排空 live runtime/coordinator 后关闭数据库。FileChange retention 由 migration 维护单行总量和 trigger，不再每次插入全表 `SUM`。Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。Markdown Conversation import/export 暂停并在 UI 中禁用；Trace transcript export 保持可用。
 
-后续工作进入 P10 hardening，不再保留 P6–P9 双轨、兼容开关或 legacy fallback。
+当前没有已发布用户配置；v8→v9 及 v9 开发期中间结构不做保字段迁移、备份或孤儿 secret 清理，不兼容/损坏配置执行 reset-only。首个 v9 正式版本实际发布后，后续不兼容配置变化必须升版本并重新设计迁移策略。
+
+P3 review 建议、N-3/N-4 和 201+ 数据量的额外 Electron E2E 明确延后，不属于 P10 发布门禁；现有单元/集成测试继续覆盖 201+ Session、Message 和 FileChange 分页。产品路径不再保留双轨、兼容开关或 legacy fallback。

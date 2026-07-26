@@ -1,6 +1,6 @@
 # Backend State Architecture v2.1 · 详细重构计划
 
-> 状态：P0–P9 已完成，进入 P10 hardening · 2026-07-25
+> 状态：P0–P10 已完成；P3 review 建议、N-3/N-4 与 201+ E2E 另行分块推进 · 2026-07-26
 >
 > 目标架构：[`architecture.md`](./architecture.md)
 >
@@ -721,36 +721,23 @@ P8 稳定后立即删除，不保留“以后可能用”的双实现。
 
 ### 14.1 必须新增的核心回归
 
-- [ ] SQLite reopen 后 A/tool/final/B canonical request 完整。
-- [ ] migration checksum、损坏 database、future version 和磁盘写失败有可诊断错误。
-- [ ] Session revision gap 可恢复，durable event 不丢失已提交事实。
-- [ ] 多 tool batch 任一 repository error 都不留下协议半截。
-- [ ] continuation round-trip 与 adapter switch fallback。
-- [ ] compact 后旧 records 仍可展示、active history 只含 summary/new suffix。
-- [ ] Project remove cascade 不删除 workspace。
-- [ ] FileChange private snapshot 不进入 IPC/DOM/trace 默认记录。
-- [ ] app dispose、session archive、run cancel 和不可中止 side effect 没有资源泄漏。
+- [x] SQLite reopen 后 A/tool/final/B canonical request 完整。
+- [x] migration checksum、损坏 database、future version 和磁盘写失败有稳定诊断 code。
+- [x] Session revision/cursor gap 可恢复；durable listener 单项异常不丢失后续订阅者的已提交事实。
+- [x] 多 tool batch 任一 repository error 都不留下协议半截。
+- [x] continuation round-trip 与 adapter switch fallback。
+- [x] compact 后旧 records 仍可展示、active history 只含 summary/new suffix。
+- [x] Project remove cascade 不删除 workspace。
+- [x] FileChange private snapshot 不进入 IPC/DOM/trace 默认记录。
+- [x] app dispose、session archive、run cancel 和不可中止 side effect 没有资源泄漏。
 - [x] 日志 idle/active 热切换、连续开关、Session restore、新片段 seq、degraded warning 与下一 Run 恢复。
+- [x] renderer 操作反馈统一进入有界 NMessage；warning/error、排队、去重、后台 Session 和 preload buffer 有回归测试。
 
 ### 14.2 全部门禁
 
-```text
-npm run lint
-npm run format:check
-npm run typecheck
-npm test
-npm run test:native
-npm run test:ripgrep
-npm run test:e2e
-npm run build:headless
-npm run build
-```
+唯一常规完整门禁为 `npm run verify`。它依次覆盖 lint、format、默认 Vitest（含确定性 benchmark manifest/checksum/路径安全）、typecheck、`test:runtime`、Desktop/Headless build、Windows package、packaged SQLite 和复用构建产物的 Electron E2E。
 
-另外执行：
-
-- Electron/Headless parity suite。
-- Windows x64 安装包首次启动、SQLite migration、重启续聊和卸载后 userData 保留检查。
-- `npm run test:real` 只在具备显式凭据时运行，不进入确定性默认门禁。
+底层 native、ripgrep、development SQLite 仍分进程执行以保留 ABI/二进制故障定位；packaged SQLite 只测试打包 Electron，不重复 host Node。未经用户明确要求，不运行 benchmark preset、独立 benchmark-cases、Docker worker/image、external benchmark 或 `test:real`。
 
 ### 14.3 性能预算
 
@@ -762,11 +749,13 @@ npm run build
 
 ### 14.4 文档收口
 
-- [x] `architecture.md` 状态更新为 P0–P9 已实现，并保留 P10 剩余差距。
+- [x] `architecture.md` 状态更新为 P0–P10 已实现，并记录明确延后项。
 - [x] `requirements.md` 更新 Durable Session、rewind/retry/edit 与 lazy creation 语义。
-- [ ] `frontend-spec.md` 的全部既有验收项在 P10 逐项勾验。
+- [x] `frontend-spec.md` 修正 renderer draft/首次发送语义，并完成 P10 相关验收核对。
 - [x] `road-map.md` 只保留后续产品方向，并加入 Durable Session Markdown import/export 重新设计。
-- [ ] README 更新数据库位置、备份和故障恢复说明。
+- [x] README 更新数据库位置、WAL、备份和故障恢复说明。
+
+P10 收口不扩大到全部 review P3：`PersistenceReader` 可写、parent-clearing trigger、`agent-project` 竞态、`closeRuntimeSession` dead stub、N-3/N-4 和 201+ Electron E2E 在合并主线后按主题讨论。当前没有用户，因此 v8→v9 不做保字段迁移；carryover 启动失败采用“warning 后丢弃并继续 FIFO”的既定语义。
 
 ---
 
