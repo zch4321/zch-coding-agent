@@ -19,6 +19,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate release inputs
+        shell: pwsh
+        run: |
+          $tagVersion = '${{ github.ref_name }}' -replace '^v', ''
+          $packageVersion = (Get-Content -Raw -LiteralPath 'package.json' | ConvertFrom-Json).version
+          if ($tagVersion -ne $packageVersion) {
+            throw "Tag version $tagVersion does not match package version $packageVersion"
+          }
+          $notesPath = "docs/releases/${{ github.ref_name }}.md"
+          if (-not (Test-Path -LiteralPath $notesPath -PathType Leaf)) {
+            throw "Release notes not found: $notesPath"
+          }
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -28,18 +41,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Sync version from tag
-        shell: pwsh
-        run: |
-          $tag = '${{ github.ref_name }}' -replace '^v', ''
-          npm version $tag --no-git-tag-version --allow-same-version
-
       - name: Verify
         run: npm run verify
 
-      - name: Upload Release
+      - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }}
+          body_path: docs/releases/${{ github.ref_name }}.md
+          append_body: false
+          draft: true
           files: release/*/Zch Coding Agent-Windows-*-Setup.exe
           fail_on_unmatched_files: true
-          generate_release_notes: true

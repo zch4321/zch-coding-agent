@@ -43,6 +43,35 @@ describe('release verification policy', () => {
     }
   })
 
+  it('creates draft releases from checked-in notes without duplicating tag CI', async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.resolve('package.json'), 'utf8'),
+    ) as { version: string }
+    const ciWorkflow = await readFile(
+      path.resolve('.github', 'workflows', 'ci.yml'),
+      'utf8',
+    )
+    const releaseWorkflow = await readFile(
+      path.resolve('.github', 'workflows', 'release.yml'),
+      'utf8',
+    )
+
+    expect(ciWorkflow).toContain("branches:\n      - '**'")
+    expect(releaseWorkflow).toContain('Validate release inputs')
+    expect(releaseWorkflow).toContain(
+      'body_path: docs/releases/${{ github.ref_name }}.md',
+    )
+    expect(releaseWorkflow).toContain('append_body: false')
+    expect(releaseWorkflow).toContain('draft: true')
+    expect(releaseWorkflow).not.toContain('generate_release_notes')
+    await expect(
+      readFile(
+        path.resolve('docs', 'releases', `v${packageJson.version}.md`),
+        'utf8',
+      ),
+    ).resolves.toContain(`v${packageJson.version}`)
+  })
+
   it('does not repeat the host Node probe in packaged SQLite mode', async () => {
     const script = await readFile(
       path.resolve('scripts', 'sqlite-smoke.cjs'),
