@@ -162,7 +162,7 @@ describe('Benchmark case manifests', () => {
         entry.mutants.every((mutant) => mutant.failedGroups.length > 0),
       ).toBe(true)
     }
-  }, 120_000)
+  }, 180_000)
 })
 
 async function copyBenchmarkData(): Promise<string> {

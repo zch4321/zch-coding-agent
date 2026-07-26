@@ -83,9 +83,16 @@ test.describe('Electron prompt and selected-context workflows', () => {
     await page.getByText(traceId).click()
     await logging.getByRole('button', { name: '离线回放' }).click()
     await expect(logging.getByText('Prompt Inspector')).toBeVisible()
-    await expect(logging.getByText('system_instruction')).toBeVisible()
-    await expect(logging.getByText('runtime_context')).toBeVisible()
-    await expect(logging.getByText('agents_context')).toBeVisible()
+    const promptLayers = logging.locator('.prompt-layer-list')
+    await expect(
+      promptLayers.getByText('system_instruction', { exact: true }).first(),
+    ).toBeVisible()
+    await expect(
+      promptLayers.getByText('runtime_context', { exact: true }).first(),
+    ).toBeVisible()
+    await expect(
+      promptLayers.getByText('agents_context', { exact: true }).first(),
+    ).toBeVisible()
 
     await logging.getByRole('button', { name: '查看完整时间线' }).click()
     const transcript = page.locator('.transcript-modal')

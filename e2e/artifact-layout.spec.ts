@@ -194,11 +194,25 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     await expect(page.locator('.file-viewer')).toBeHidden()
     await expect(page.locator('.explorer-view')).toBeVisible()
     const explorerTree = page.locator('.explorer-tree')
-    await expect(
-      explorerTree.locator(
-        '.n-scrollbar-rail--vertical .n-scrollbar-rail__scrollbar',
-      ),
-    ).toBeVisible()
+    await expect
+      .poll(
+        () =>
+          explorerTree.evaluate((tree) => {
+            const container = tree.querySelector('.v-vl')
+            const rail = tree.querySelector('.n-scrollbar-rail--vertical')
+            const thumb = rail?.querySelector('.n-scrollbar-rail__scrollbar')
+            return (
+              container instanceof HTMLElement &&
+              rail instanceof HTMLElement &&
+              thumb instanceof HTMLElement &&
+              container.scrollHeight > container.clientHeight &&
+              rail.getBoundingClientRect().height > 0 &&
+              thumb.getBoundingClientRect().height > 0
+            )
+          }),
+        { timeout: 10_000 },
+      )
+      .toBe(true)
     const treeScroll = await explorerTree.evaluate((tree) => {
       const container = tree.querySelector('.v-vl')
       const rail = tree.querySelector('.n-scrollbar-rail--vertical')

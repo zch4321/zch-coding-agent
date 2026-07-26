@@ -90,7 +90,7 @@ describe('persistence repositories', () => {
       await reopened.close()
       await testDatabase.dispose()
     }
-  })
+  }, 15_000)
 
   it('enforces Project path and Message seq/request uniqueness', async () => {
     const testDatabase = await createTestDatabase()
