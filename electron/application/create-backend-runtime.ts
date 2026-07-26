@@ -247,11 +247,19 @@ export async function createBackendRuntime(
       },
     }
   } catch (error) {
-    await settleCleanup([
-      () => runtime?.dispose(),
-      () => coordinator.close(),
-      () => database.close(),
-    ])
+    try {
+      await settleCleanup([
+        () => runtime?.dispose(),
+        () => coordinator.close(),
+        () => database.close(),
+      ])
+    } catch (cleanupError) {
+      try {
+        options.onDiagnostic?.('Backend startup cleanup failed', cleanupError)
+      } catch {
+        // Diagnostics must not replace the original startup failure.
+      }
+    }
     throw error
   }
 }

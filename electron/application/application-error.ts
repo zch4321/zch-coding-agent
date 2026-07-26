@@ -7,6 +7,7 @@ export type ApplicationErrorCode =
   | 'PAYLOAD_TOO_LARGE'
   | 'RESOURCE_CHANGED'
   | 'PERSISTENCE_FAILURE'
+  | 'INTERNAL_ERROR'
 
 /** Represents a normalized failure crossing an application-service boundary. */
 export class ApplicationError extends Error {
@@ -30,7 +31,7 @@ export class ApplicationError extends Error {
   }
 }
 
-/** Maps unknown and persistence failures to stable application error codes and safe details. */
+/** Maps application, persistence, and unknown failures to stable safe error codes. */
 export function normalizeApplicationError(error: unknown): ApplicationError {
   if (error instanceof ApplicationError) return error
   if (error instanceof PersistenceError) {
@@ -48,8 +49,8 @@ export function normalizeApplicationError(error: unknown): ApplicationError {
     )
   }
   return new ApplicationError(
-    'PERSISTENCE_FAILURE',
-    'The durable state operation failed',
+    'INTERNAL_ERROR',
+    'The application operation failed',
     { cause: error },
   )
 }

@@ -759,6 +759,12 @@ export class SessionManager {
     return Boolean(this.#sessions.get(sessionId)?.activeRun)
   }
 
+  /** Reports whether a Session is committing an idle metadata mutation. */
+  hasMutationInProgress(sessionId: SessionId): boolean {
+    const session = this.#sessions.get(sessionId)
+    return Boolean(session && !session.closed && session.mutationInProgress)
+  }
+
   /** Reports whether an active run still has pending side effects. */
   hasUnsettledSideEffects(sessionId: SessionId): boolean {
     return Boolean(

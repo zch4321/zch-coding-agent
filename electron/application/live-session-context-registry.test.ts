@@ -11,6 +11,7 @@ function createRegistry() {
   const calls: string[] = []
   const manager = {
     hasActiveRun: vi.fn(() => false),
+    hasMutationInProgress: vi.fn(() => false),
     hasUnsettledSideEffects: vi.fn(() => false),
     hasOpenTerminals: vi.fn(() => false),
     hasLiveSession: vi.fn(() => false),
@@ -75,6 +76,22 @@ describe('LiveSessionContextRegistry mutation ownership', () => {
     ).toThrowError(expect.objectContaining({ code: 'CONFLICT' }))
   })
 
+  it('rejects idle operations while runtime metadata is being committed', () => {
+    const { manager, registry } = createRegistry()
+    const sessionId = 'session:metadata-mutation' as SessionId
+    vi.mocked(manager.hasMutationInProgress).mockReturnValue(true)
+
+    expect(() => registry.assertSessionIdle(sessionId)).toThrowError(
+      expect.objectContaining({ code: 'CONFLICT' }),
+    )
+    expect(() => registry.reserveSessionMutation(sessionId)).toThrowError(
+      expect.objectContaining({ code: 'CONFLICT' }),
+    )
+    expect(() => registry.reserveSessionEviction(sessionId)).toThrowError(
+      expect.objectContaining({ code: 'CONFLICT' }),
+    )
+  })
+
   it('applies runtime metadata before advancing the durable binding', () => {
     const { calls, manager, registry } = createRegistry()
     const sessionId = 'session:update-order' as SessionId
@@ -121,6 +138,7 @@ describe('LiveSessionContextRegistry mutation ownership', () => {
         live = true
       }),
       hasActiveRun: vi.fn(() => false),
+      hasMutationInProgress: vi.fn(() => false),
       hasUnsettledSideEffects: vi.fn(() => false),
       hasOpenTerminals: vi.fn(() => false),
       activeRunSnapshot: vi.fn(() => undefined),

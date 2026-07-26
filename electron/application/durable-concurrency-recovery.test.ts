@@ -451,10 +451,11 @@ describe('durable lifecycle ownership and recovery', () => {
     await target.dispose()
   })
 
-  it('blocks startRun while an idle metadata mutation owns the Session', async () => {
+  it('blocks runs and lifecycle eviction during an idle metadata mutation', async () => {
     const { target, project, selection } = await setupTarget()
     const sessionId = 'session:metadata-lease' as SessionId
     await seedSession(target, project.id, sessionId, selection)
+    const beforeMutation = await target.sessions.getRecord(sessionId)
     const originalCommit = target.sessions.commitMutation.bind(target.sessions)
     let releaseCommit!: () => void
     const mayCommit = new Promise<void>((resolve) => {
@@ -488,6 +489,12 @@ describe('durable lifecycle ownership and recovery', () => {
         clientRequestId: 'request:during-metadata',
       }),
     ).toThrow(/metadata mutation/u)
+    await expect(
+      target.sessions.archive({
+        sessionId,
+        expectedRevision: beforeMutation.revision,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
     releaseCommit()
     await expect(mutation).resolves.toEqual({ accepted: true })
     await target.dispose()

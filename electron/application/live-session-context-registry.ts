@@ -529,6 +529,12 @@ export class LiveSessionContextRegistry
   }
 
   #assertManagerSessionMutationIdle(sessionId: SessionId): void {
+    if (this.#manager.hasMutationInProgress(sessionId)) {
+      throw new ApplicationError(
+        'CONFLICT',
+        'Session metadata mutation is still being committed',
+      )
+    }
     if (this.#manager.hasActiveRun(sessionId)) {
       throw new ApplicationError('CONFLICT', 'Session has an active Run')
     }
