@@ -42,6 +42,7 @@ import {
   isAllowedApplicationUrl,
   resolveAppResource,
 } from './security'
+import { acquireDesktopSingleInstance } from './single-instance'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(currentDirectory, '..')
@@ -366,48 +367,57 @@ async function createWindow(): Promise<void> {
   }
 }
 
-app.on('before-quit', (event) => {
-  if (cleanupComplete) {
-    return
-  }
-
-  event.preventDefault()
-
-  if (cleanupStarted) {
-    return
-  }
-
-  cleanupStarted = true
-  void appDisposer.dispose().finally(() => {
-    cleanupComplete = true
-    app.quit()
-  })
+const ownsDesktopInstance = acquireDesktopSingleInstance({
+  requestLock: () => app.requestSingleInstanceLock(),
+  onSecondInstance: (listener) => app.on('second-instance', listener),
+  quit: () => app.quit(),
+  getWindow: () => mainWindow,
 })
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-})
+if (ownsDesktopInstance) {
+  app.on('before-quit', (event) => {
+    if (cleanupComplete) {
+      return
+    }
 
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    void createWindow().catch((error) => {
-      console.error('Failed to recreate the main window', error)
+    event.preventDefault()
+
+    if (cleanupStarted) {
+      return
+    }
+
+    cleanupStarted = true
+    void appDisposer.dispose().finally(() => {
+      cleanupComplete = true
+      app.quit()
     })
-  }
-})
+  })
 
-void app
-  .whenReady()
-  .then(async () => {
-    Menu.setApplicationMenu(null)
-    installAppProtocol()
-    installSessionSecurity()
-    await installIpc()
-    await createWindow()
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
+    }
   })
-  .catch((error) => {
-    console.error('Application startup failed', error)
-    app.exit(1)
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      void createWindow().catch((error) => {
+        console.error('Failed to recreate the main window', error)
+      })
+    }
   })
+
+  void app
+    .whenReady()
+    .then(async () => {
+      Menu.setApplicationMenu(null)
+      installAppProtocol()
+      installSessionSecurity()
+      await installIpc()
+      await createWindow()
+    })
+    .catch((error) => {
+      console.error('Application startup failed', error)
+      app.exit(1)
+    })
+}
