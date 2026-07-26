@@ -374,6 +374,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - Durable command 在数据库 commit 后同时返回提交结果并发布同内容事件；renderer 对回包和事件按 cursor/revision 幂等合并。后端自主提交依赖事件通知，不定时轮询；bootstrap、分页/搜索、按需加载和缺口重同步才使用 query。
 - 搜索通过本地后端查询 Session 标题，以及 `kind = 'user_input'/'assistant_turn'` records 中 `type = 'text'` 的 parts；不把 orchestrator/harness/runtime context 当成用户消息，也不检索 tool call 参数、tool result/JSON parts、工作区文件、reasoning、continuation 或 trace，更不访问 Provider。
 - 新建对话时只建立 renderer draft，不创建空 Session；首次发送以 `run:start new_session` 原子创建 Session、首轮 context/user records 并启动 Active Run。Session 创建前终端不可用。Session/Run ID 不作为常驻产品信息展示。
+- 侧栏的删除操作归档 Session；设置页提供分页的已归档对话列表和恢复入口。永久删除只允许 archived、idle 且没有 fork 子 Session 的记录，删除 Session/Message/FileChange durable 数据但不得改动 workspace 文件；Trace capture 继续由日志设置独立管理。
 - Markdown Conversation 导入/导出在 Durable Session 格式重新设计前保留禁用按钮和明确提示；Trace transcript 查看/导出保持可用。
 - 正式 UI 不得使用硬编码项目、对话或工具活动作为占位数据。
 - 后台异步故障使用版本化、脱敏、有界的 `app:notification`；preload 在 renderer 挂载前缓存最多 64 条。Renderer 的操作 warning/error 使用 `NMessage` 顶部通知，不写入 Timeline 或 durable replica：warning 10 秒自动消失，error 需手动关闭，最多同时 5 条并排队，按 code/Session/message 去重。后台 Session 通知显示对话标题但不得切换当前选择；风险确认、隐私告知、字段校验和持续状态留在所属界面。

@@ -755,7 +755,7 @@ P8 稳定后立即删除，不保留“以后可能用”的双实现。
 - [x] `road-map.md` 只保留后续产品方向，并加入 Durable Session Markdown import/export 重新设计。
 - [x] README 更新数据库位置、WAL、备份和故障恢复说明。
 
-P10 收口不扩大到全部 review P3：`PersistenceReader` 可写、parent-clearing trigger、`agent-project` 竞态、`closeRuntimeSession` dead stub、N-3/N-4 和 201+ Electron E2E 在合并主线后按主题讨论。当前没有用户，因此 v8→v9 不做保字段迁移；carryover 启动失败采用“warning 后丢弃并继续 FIFO”的既定语义。
+P10 收口不扩大到全部 review P3。后续持久化批次已把 `PersistenceReader` 明确为 no-write 内部契约、把 compact helper 收窄为只允许停用 history、加入 Desktop single-instance lock，并以 leaf-only 删除保护 parent trigger；归档 Session 的恢复/永久删除入口位于设置页。`agent-project` 竞态、`closeRuntimeSession` dead stub、N-3/N-4 和 201+ Electron E2E 仍按主题延后。当前没有用户，因此 v8→v9 不做保字段迁移；carryover 启动失败采用“warning 后丢弃并继续 FIFO”的既定语义。
 
 ---
 

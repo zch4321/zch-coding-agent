@@ -1031,7 +1031,7 @@ Renderer 可以持有同一个 canonical record，但必须把 `providerContinua
 ```text
 app:get-bootstrap
 project:list / project:add / project:update / project:remove
-session:list / session:get / session:update / session:archive / session:fork
+session:list / session:get / session:update / session:archive / session:restore / session:delete / session:fork
 message:list / message:search
 file-change:list / file-change:revert
 run:start / run:interrupt / run:interject
@@ -1042,6 +1042,7 @@ approval:decide
 
 - `project:changed`：已经 commit 的完整 ProjectRecord list snapshot。
 - `session:changed`：已经 commit 的 Session/Message records 和 revision。
+- `session:removed`：已经永久删除的归档 Session 标识及其 Project 归属；renderer 必须清除相关 page/runtime cache。
 - `file-change:changed`：无 retention 时发送单条 `upsert` summary；retention 删除旧记录时发送 `invalidate_all`，未来 renderer 清空全部 FileChange page cache 并按需重查。
 - `run:stream`：active run status、text/reasoning delta、tool/approval、terminal 等瞬时事件。
 
@@ -1064,7 +1065,11 @@ interface BackendEventCursor {
 interface DurableCommitEnvelope<TChange> {
   schemaVersion: 1
   cursor: BackendEventCursor
-  topic: 'project.changed' | 'session.changed' | 'file-change.changed'
+  topic:
+    | 'project.changed'
+    | 'session.changed'
+    | 'session.removed'
+    | 'file-change.changed'
   change: TChange
 }
 

@@ -16,7 +16,7 @@
 
 重构目标（业务状态统一收归后端）已达成，durable 单写者 + commit cursor / event seq 双通道复制 + gap 自愈的主链路健康；naive-ui 迁移（主题单源、组件替换、确认对话框、NMessage 反馈）也已落地。
 
-当前 **无 P0/P1**。剩余 **5 个 P2**（4 个渲染层存量 + 1 个 naive 迁移引入的定位回归）与 **19 个 P3**（结构性健壮性、规范与可接受延后项）。另有 1 项产品决策待定（sendFirst）。
+当前 **无 P0/P1**。剩余 **5 个 P2**（4 个渲染层存量 + 1 个 naive 迁移引入的定位回归）与 **15 个 P3**（结构性健壮性、规范与可接受延后项）。另有 1 项产品决策待定（sendFirst）。
 
 | 检查                                                 | 结果                                                                |
 | ---------------------------------------------------- | ------------------------------------------------------------------- |
@@ -35,12 +35,8 @@
 
 ## P3（健壮性 / 规范 / 可接受延后）
 
-### 后端结构性通道（"DB 变更绕过 commit 发布"的残留，目前靠不可达/自律）
+### 后端结构性通道
 
-- `PersistenceReader` 可在 `read()` 内同步执行写操作，绕过写队列/事务/cursor/发布（`database-service.ts:41-51,116-119`）。`prepare('COMMIT')` 通道已由 authorizer 封死（`:146-167`），此条是同族的最后一道。
-- parent-clearing trigger 静默 NULL 子会话 `parent_session_id`，不发 commit；将来新增单会话删除入口即静默分叉（`0001_initial.sql:42-48`）。
-- `setInHistoryThrough(true)` 未排除 `visibility='superseded'`，会违反 schema CHECK（`message-repository.ts:211-227`；唯一调用方传 `false`）。
-- 双进程首次打开同一新库存在 migration 竞争（失败方 `MIGRATION_FAILED`，`database-service.ts:197-258`）。复核进一步确认 Desktop 未申请 Electron single-instance lock；第二个实例不仅可能竞争 migration，还会建立独立 coordinator/listener，使跨进程提交无法进入另一个 renderer。Headless 使用独立临时数据库，不受此问题影响。
 - `application-error.ts:48-52` 未知错误统一误标 `PERSISTENCE_FAILURE`，原始 message 被丢弃。
 - idle 守卫不看 `mutationInProgress`（`live-session-context-registry.ts:511-521`；新增 `'mutating'` 相位只接给了 file-change revert，`updateSessionMode`/`updatePlanStatus` 未接入）。
 
@@ -71,7 +67,7 @@
 - **后端**：P1-1 回退跨 workspace（迁移 0002 + 双重校验）、P1-2/P1-3 审批路由（可选增强 + reasoning 强制转换）、M-2/M-3（project 容量、teardown promise）、N-2（retry 缓存失败淘汰）、事务 authorizer 封死事务控制 SQL、发布 listener 逐个隔离、dispose 排空队列、0003 retention totals、provider wire 契约隔离（7b0a5a7，有边界测试钉住）。
 - **渲染层**：P1-4~P1-9（双提交守卫、carryover 流、去重、排序分区、两类分页）、N-1（carryover 锁死）、终态竞态、writer.changed 误报、测试覆盖重建。
 - **基础设施**：cases.test.ts 回归 `npm test`、P10 verify 单一入口（`verification-policy.test.ts` 钉住 CI/release 各恰好一次 `npm run verify`）、损坏 JSON 恢复、trace 清理分类、runtime-parity 删除。
-- **持久化清理**：删除无调用方且硬编码 513 的 `listThrough`；Desktop/Headless 接入统一数据库路径 helper；SQLite smoke 子进程改为显式环境白名单并覆盖凭据不透传测试。FileChange Assistant Message ID 按独立审计提交语义确认为软关联，不增加 FK。
+- **持久化清理**：删除无调用方且硬编码 513 的 `listThrough`；Desktop/Headless 接入统一数据库路径 helper；SQLite smoke 子进程改为显式环境白名单并覆盖凭据不透传测试。FileChange Assistant Message ID 按独立审计提交语义确认为软关联，不增加 FK。`PersistenceReader` 改为准确记录 no-write 契约（按产品决策不增加 authorizer）；compact 批量 helper 收窄为只允许 `inHistory=false`；Desktop 在初始化前取得 single-instance lock。归档管理新增 restore 与 leaf-only 永久删除，repository SQL 原子拒绝仍有 fork child 的 Session，因此 parent-clearing trigger 不再能被单 Session 产品路径静默触发。
 - **代码规范**：补齐 677 条类、公开类方法和导出函数职责注释；新增 `lint:api-docs`，后续缺口会直接使 `npm run lint` 失败。
 - **前端**：naive 主题单源（`src/theme/naive-theme.ts`，palette 同出 CSS 变量与 themeOverrides）、侧栏/表单/tabs/状态徽章/反馈（NMessage）/确认对话框全部迁移，window.confirm/alert 零残留；主题双轨与 `.n-* !important` 覆盖已收敛。
 - **用户实测项**：事件空洞误报、工具卡片排序、`terminal_send` 裸 `\n`（归一化 + `delayMs`）、日志开启（SessionTraceController 分段捕获，live 会话即时生效）均已修复验证。
@@ -85,6 +81,7 @@
 | REQ-1：request hash 只覆盖消息正文                  | 暂缓；renderer 每次生成新 ID                                           |
 | FC-3：`beforeContent`/`beforeHash` 不交叉校验       | 已接受；前提为 DB 损坏/篡改                                            |
 | FileChange Assistant Message ID 软关联              | 已接受；审计允许独立于 Assistant/tool batch commit 保留                |
+| PersistenceReader no-write 仅由内部契约约束         | 已接受；所有 durable 写入仍要求 `withTransaction`                      |
 | M-6：AppConfig v9 reset-only（含损坏 JSON、无备份） | 开发期接受；**分发真实用户前必须关闭**（备份/提示/secret orphan 清理） |
 | M-1：FileChange 预写失败 run 级 fail-closed         | 已决策                                                                 |
 
@@ -93,4 +90,4 @@
 1. **合入前**：NFloatButton 定位回归（P2，naive 迁移新引入）。
 2. **下一迭代**：N-3/N-4/loadProject/carryover 边缘四个渲染层 P2。
 3. **发布门禁**：关闭 M-6（config 备份/提示/orphan 清理）；sendFirst 产品决策。
-4. **持续批次**：后端结构通道（reader 只读化、trigger 拆除、FK 补齐）与其余 P3。
+4. **持续批次**：按 provider、runtime lifecycle、headless cleanup 和 renderer 等主题分块处理其余 P3。

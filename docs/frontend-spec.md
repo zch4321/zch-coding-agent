@@ -487,6 +487,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.6 Session 生命周期
 
 - Settings 不展示 `Start session` / `Close session` 作为主流程按钮。
+- Settings 提供“已归档对话”菜单项：分页列出 archived Session，支持恢复；永久删除使用 Naive UI 确认框，并在存在 fork 子 Session 时由 backend 拒绝。
 - 新建对话只产生 renderer draft；首次发送用一个 backend command 创建 durable Session/initial Messages 并启动 Active Run。
 - 切换对话不关闭后台 `LiveSessionContext` 或 `ActiveRunExecution`；归档/删除 Session、移除项目和退出应用才清理对应 runtime 资源。退出时统一取消 active runs、释放 workspace writer 并关闭 PTY。
 - 未发送 draft 与 context attachments 不进入 backend，不保证 A → B → A、renderer reload 或应用重启后恢复。
@@ -518,6 +519,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - ConversationTimeline 只投影 durable messages、live overlay、工具和审批，不渲染全局 warning/error。NMessage 位于 46px frameless 顶栏下方：warning 10 秒自动消失且可提前关闭，error 不自动消失；最多显示 5 条，其余排队，不挤掉未关闭 error。
 - 相同 code、Session 和 message 在活动/排队期间去重。后台 Session 的通知显示对话标题但不切换当前对话；日志 capture 持续状态显示在 Header/设置，Provider 隐私 notice 保留在 composer 附近。
 - 创建、重命名、归档、切换模型/模式和发送消息期间只设置 pending/error UI，不先改 durable replica；commit 失败时继续显示后端原值。
+- 恢复使用 `session.changed` commit；永久删除使用 `session.removed` commit。删除只清理本地 Session/Message/FileChange durable 数据，不修改 workspace 文件，也不代替日志设置中的 Trace 管理。
 - Command 回包和 durable push event 使用同一个 reconciler；相同 event cursor 只应用一次，不依赖两者的到达顺序。
 - Event 已先应用时，重复的成功回包仍结束当前控件的 pending，只是不重复改写副本。
 - Preload 在 bootstrap query 前开始 buffer durable events；安装带 cursor 的 bootstrap snapshot 后重放更新事件，再进入 live apply，不能采用“先 query、后 subscribe”。
