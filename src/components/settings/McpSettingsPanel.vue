@@ -91,7 +91,6 @@ function restartServer(server: McpServerStatus) {
         />
       </article>
     </div>
-    <NAlert v-if="mcp.error" type="error">{{ mcp.error }}</NAlert>
 
     <NModal
       :show="Boolean(trustTarget)"

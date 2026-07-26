@@ -30,6 +30,9 @@ const zhCN = {
     confirm: '确认',
     loading: '加载中…',
   },
+  notifications: {
+    sessionMessage: '【{title}】{message}',
+  },
   sidebar: {
     search: '搜索对话',
     searchResults: '搜索结果',
@@ -486,6 +489,7 @@ const zhCN = {
     interjections: '{count} 条插话',
     closed: '已关闭',
     active: '活动中',
+    captureActiveTitle: '日志记录中',
     capturePendingTitle: '日志切换待生效',
     capturePending: '已保存的日志设置会在当前请求完整结束后生效。',
     captureDegradedTitle: '日志记录已降级',

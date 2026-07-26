@@ -72,22 +72,6 @@
   scrollbar-width: thin;
 }
 
-.terminal-error {
-  position: absolute;
-  z-index: 2;
-  right: 10px;
-  bottom: 8px;
-  max-width: 70%;
-}
-
-.terminal-notice {
-  position: absolute;
-  z-index: 2;
-  top: 8px;
-  right: 10px;
-  max-width: 70%;
-}
-
 .terminal-empty {
   height: 100%;
 }

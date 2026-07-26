@@ -13,6 +13,7 @@ import {
   NLayout,
   NLayoutContent,
   NLayoutSider,
+  NMessageProvider,
   zhCN,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -23,6 +24,7 @@ import WorkbenchDialogs from './components/dialogs/WorkbenchDialogs.vue'
 import SessionTranscriptViewer from './components/transcript/SessionTranscriptViewer.vue'
 import ArtifactPanel from './components/artifacts/ArtifactPanel.vue'
 import AppTopbar from './components/layout/AppTopbar.vue'
+import AppMessageBridge from './components/layout/AppMessageBridge.vue'
 import ProjectSidebar from './components/projects/ProjectSidebar.vue'
 import SettingsNavigation from './components/settings/SettingsNavigation.vue'
 import SettingsPage from './components/settings/SettingsPage.vue'
@@ -373,151 +375,158 @@ onUnmounted(() => {
     :theme-overrides="naiveThemeOverrides"
     inline-theme-disabled
   >
-    <main class="app-frame" data-testid="app-ready">
-      <AppTopbar
-        :project-name="projectName"
-        :workspace-label="workspaceLabel"
-        :terminal-open="terminalOpen"
-        :project-sidebar-open="projectSidebarOpen"
-        :artifact-sidebar-open="artifactSidebarOpen"
-        :project-sidebar-disabled="projectSidebarDisabled"
-        :artifact-sidebar-disabled="artifactSidebarDisabled"
-        @project="openSettings('project')"
-        @terminal="terminalOpen = !terminalOpen"
-        @project-sidebar="toggleProjectSidebar"
-        @artifact-sidebar="toggleArtifactSidebar"
-      />
+    <NMessageProvider
+      placement="top"
+      :max="5"
+      :container-style="{ top: '58px' }"
+    >
+      <AppMessageBridge />
+      <main class="app-frame" data-testid="app-ready">
+        <AppTopbar
+          :project-name="projectName"
+          :workspace-label="workspaceLabel"
+          :terminal-open="terminalOpen"
+          :project-sidebar-open="projectSidebarOpen"
+          :artifact-sidebar-open="artifactSidebarOpen"
+          :project-sidebar-disabled="projectSidebarDisabled"
+          :artifact-sidebar-disabled="artifactSidebarDisabled"
+          @project="openSettings('project')"
+          @terminal="terminalOpen = !terminalOpen"
+          @project-sidebar="toggleProjectSidebar"
+          @artifact-sidebar="toggleArtifactSidebar"
+        />
 
-      <div ref="workbenchElement" class="workbench-shell">
-        <NLayout
-          class="workbench-layout"
-          content-style="height: 100%; overflow: hidden"
-          has-sider
-        >
-          <NLayoutSider
-            :width="PROJECT_SIDEBAR_WIDTH"
-            :collapsed-width="0"
-            :collapsed="!projectSidebarOpen"
-            :show-collapsed-content="false"
-            content-style="overflow: hidden"
-            collapse-mode="width"
-            :show-trigger="false"
-            bordered
-          >
-            <SettingsNavigation
-              v-if="activeView === 'settings'"
-              :active-tab="settingsTab"
-              :aria-hidden="!projectSidebarOpen"
-              @update:active-tab="settingsTab = $event"
-              @close="closeSettings"
-            />
-            <ProjectSidebar
-              v-else
-              :aria-hidden="!projectSidebarOpen"
-              @add="agent.chooseWorkspace"
-              @create="createConversation"
-              @open="openConversation"
-              @rename="beginRename"
-              @delete="deleteSessionId = $event"
-              @inspect="inspectConversation"
-              @settings="openSettings()"
-            />
-          </NLayoutSider>
-
+        <div ref="workbenchElement" class="workbench-shell">
           <NLayout
-            class="workbench-main-layout"
+            class="workbench-layout"
             content-style="height: 100%; overflow: hidden"
             has-sider
-            sider-placement="right"
           >
-            <NLayoutContent
-              class="conversation-layout"
-              content-class="conversation-layout-content"
-              content-style="overflow: hidden"
-            >
-              <SettingsPage
-                v-if="activeView === 'settings'"
-                :active-tab="settingsTab"
-                @close="closeSettings"
-                @mode="selectMode"
-              />
-              <section
-                v-else
-                class="conversation-pane"
-                :style="{ '--terminal-height': terminalHeight + 'px' }"
-                :class="{
-                  'terminal-open': terminalOpen,
-                  'terminal-maximized': terminalOpen && terminalMaximized,
-                }"
-              >
-                <ConversationHeader
-                  :active-title="activeTitle"
-                  :project-name="projectName"
-                />
-
-                <ConversationTimeline
-                  :project-name="projectName"
-                  @revert="requestRevert"
-                  @fork="requestMessageAction('fork', $event)"
-                  @retry="requestMessageAction('retry', $event)"
-                  @edit="requestMessageAction('edit', $event)"
-                />
-
-                <MessageComposer
-                  @mode="selectMode"
-                  @provider="openSettings('provider')"
-                />
-
-                <TerminalPanel
-                  v-if="terminalOpen"
-                  @close="closeTerminalPanel"
-                  @height-change="terminalHeight = $event"
-                  @maximize-change="terminalMaximized = $event"
-                />
-              </section>
-            </NLayoutContent>
-
             <NLayoutSider
-              v-if="activeView === 'chat'"
-              :width="ARTIFACT_SIDEBAR_WIDTH"
+              :width="PROJECT_SIDEBAR_WIDTH"
               :collapsed-width="0"
-              :collapsed="!artifactSidebarOpen"
+              :collapsed="!projectSidebarOpen"
               :show-collapsed-content="false"
-              content-style="overflow: hidden; padding-right: 8px"
+              content-style="overflow: hidden"
               collapse-mode="width"
               :show-trigger="false"
               bordered
             >
-              <ArtifactPanel
-                v-model:active-tab="artifactTab"
-                :aria-hidden="!artifactSidebarOpen"
+              <SettingsNavigation
+                v-if="activeView === 'settings'"
+                :active-tab="settingsTab"
+                :aria-hidden="!projectSidebarOpen"
+                @update:active-tab="settingsTab = $event"
+                @close="closeSettings"
+              />
+              <ProjectSidebar
+                v-else
+                :aria-hidden="!projectSidebarOpen"
+                @add="agent.chooseWorkspace"
+                @create="createConversation"
+                @open="openConversation"
+                @rename="beginRename"
+                @delete="deleteSessionId = $event"
+                @inspect="inspectConversation"
+                @settings="openSettings()"
               />
             </NLayoutSider>
-          </NLayout>
-        </NLayout>
-      </div>
 
-      <WorkbenchDialogs
-        :yolo-open="yoloWarningOpen"
-        :rename-open="Boolean(renameSessionId)"
-        :rename-value="renameValue"
-        :delete-open="Boolean(deleteSessionId)"
-        :revert-open="Boolean(revertMessageId)"
-        :revert-message-preview="revertMessagePreview"
-        :message-action="messageAction"
-        @update:yolo-open="yoloWarningOpen = $event"
-        @update:rename-open="!$event && (renameSessionId = undefined)"
-        @update:rename-value="renameValue = $event"
-        @update:delete-open="!$event && (deleteSessionId = undefined)"
-        @update:revert-open="!$event && (revertMessageId = undefined)"
-        @update:message-action="updateMessageAction"
-        @confirm-yolo="confirmYoloMode"
-        @confirm-rename="confirmRename"
-        @confirm-delete="confirmDeleteConversation"
-        @confirm-revert="confirmRevert"
-        @confirm-message-action="confirmMessageAction"
-      />
-      <SessionTranscriptViewer />
-    </main>
+            <NLayout
+              class="workbench-main-layout"
+              content-style="height: 100%; overflow: hidden"
+              has-sider
+              sider-placement="right"
+            >
+              <NLayoutContent
+                class="conversation-layout"
+                content-class="conversation-layout-content"
+                content-style="overflow: hidden"
+              >
+                <SettingsPage
+                  v-if="activeView === 'settings'"
+                  :active-tab="settingsTab"
+                  @close="closeSettings"
+                  @mode="selectMode"
+                />
+                <section
+                  v-else
+                  class="conversation-pane"
+                  :style="{ '--terminal-height': terminalHeight + 'px' }"
+                  :class="{
+                    'terminal-open': terminalOpen,
+                    'terminal-maximized': terminalOpen && terminalMaximized,
+                  }"
+                >
+                  <ConversationHeader
+                    :active-title="activeTitle"
+                    :project-name="projectName"
+                  />
+
+                  <ConversationTimeline
+                    :project-name="projectName"
+                    @revert="requestRevert"
+                    @fork="requestMessageAction('fork', $event)"
+                    @retry="requestMessageAction('retry', $event)"
+                    @edit="requestMessageAction('edit', $event)"
+                  />
+
+                  <MessageComposer
+                    @mode="selectMode"
+                    @provider="openSettings('provider')"
+                  />
+
+                  <TerminalPanel
+                    v-if="terminalOpen"
+                    @close="closeTerminalPanel"
+                    @height-change="terminalHeight = $event"
+                    @maximize-change="terminalMaximized = $event"
+                  />
+                </section>
+              </NLayoutContent>
+
+              <NLayoutSider
+                v-if="activeView === 'chat'"
+                :width="ARTIFACT_SIDEBAR_WIDTH"
+                :collapsed-width="0"
+                :collapsed="!artifactSidebarOpen"
+                :show-collapsed-content="false"
+                content-style="overflow: hidden; padding-right: 8px"
+                collapse-mode="width"
+                :show-trigger="false"
+                bordered
+              >
+                <ArtifactPanel
+                  v-model:active-tab="artifactTab"
+                  :aria-hidden="!artifactSidebarOpen"
+                />
+              </NLayoutSider>
+            </NLayout>
+          </NLayout>
+        </div>
+
+        <WorkbenchDialogs
+          :yolo-open="yoloWarningOpen"
+          :rename-open="Boolean(renameSessionId)"
+          :rename-value="renameValue"
+          :delete-open="Boolean(deleteSessionId)"
+          :revert-open="Boolean(revertMessageId)"
+          :revert-message-preview="revertMessagePreview"
+          :message-action="messageAction"
+          @update:yolo-open="yoloWarningOpen = $event"
+          @update:rename-open="!$event && (renameSessionId = undefined)"
+          @update:rename-value="renameValue = $event"
+          @update:delete-open="!$event && (deleteSessionId = undefined)"
+          @update:revert-open="!$event && (revertMessageId = undefined)"
+          @update:message-action="updateMessageAction"
+          @confirm-yolo="confirmYoloMode"
+          @confirm-rename="confirmRename"
+          @confirm-delete="confirmDeleteConversation"
+          @confirm-revert="confirmRevert"
+          @confirm-message-action="confirmMessageAction"
+        />
+        <SessionTranscriptViewer />
+      </main>
+    </NMessageProvider>
   </NConfigProvider>
 </template>

@@ -30,6 +30,9 @@ const enUS = {
     confirm: 'Confirm',
     loading: 'Loading…',
   },
+  notifications: {
+    sessionMessage: '[{title}] {message}',
+  },
   sidebar: {
     search: 'Search conversations',
     searchResults: 'Search results',
@@ -498,6 +501,7 @@ const enUS = {
     interjections: '{count} interjections',
     closed: 'closed',
     active: 'active',
+    captureActiveTitle: 'Logging active',
     capturePendingTitle: 'Logging change pending',
     capturePending:
       'The saved logging setting takes effect after the current request finishes.',

@@ -22,15 +22,14 @@ type ReplicaStore = ReturnType<typeof useAgentReplicaStore>
 type RuntimeStore = ReturnType<typeof useAgentRuntimeStore>
 type ChangesStore = ReturnType<typeof useAgentChangesStore>
 
-export type AgentFacade = Omit<ShellStore, 'error' | '$id'> &
+export type AgentFacade = Omit<ShellStore, '$id'> &
   Omit<
     SettingsStore,
     'error' | '$id' | 'savePermissions' | 'removeRememberedRule'
   > &
   Omit<ReplicaStore, 'error' | '$id' | 'projects'> &
-  Omit<RuntimeStore, 'globalError' | '$id'> &
+  Omit<RuntimeStore, '$id'> &
   Omit<ChangesStore, 'error' | '$id' | 'revertChange'> & {
-    error: string
     workspacePath: string
     projects: ProjectView[]
     conversations: SessionView[]
@@ -263,15 +262,6 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
 
   return new Proxy({} as AgentFacade, {
     get(_target, property) {
-      if (property === 'error') {
-        return (
-          shell.error ||
-          runtime.globalError ||
-          settings.error ||
-          replica.error ||
-          changes.error
-        )
-      }
       if (property === 'workspacePath') {
         return replica.selectedProject?.path ?? ''
       }
@@ -303,25 +293,11 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
       return Reflect.get(targetStore(property) ?? {}, property)
     },
     set(_target, property, value) {
-      if (property === 'error') {
-        shell.error = String(value)
-        if (!value) {
-          runtime.globalError = ''
-          settings.error = ''
-          replica.error = ''
-          changes.error = ''
-        }
-        return true
-      }
       const store = targetStore(property)
       return store ? Reflect.set(store, property, value) : false
     },
     has(_target, property) {
-      return (
-        property === 'error' ||
-        Object.hasOwn(actions, property) ||
-        Boolean(targetStore(property))
-      )
+      return Object.hasOwn(actions, property) || Boolean(targetStore(property))
     },
   })
 }

@@ -1,14 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import {
-  NAlert,
-  NButton,
-  NEmpty,
-  NTabPane,
-  NTabs,
-  NTag,
-  NTooltip,
-} from 'naive-ui'
+import { NButton, NEmpty, NTabPane, NTabs, NTag, NTooltip } from 'naive-ui'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { useI18n } from 'vue-i18n'
@@ -18,6 +10,7 @@ import type { TerminalEvent } from '../../shared/agent-events'
 import type { TerminalId } from '../../shared/ids'
 import type { TerminalInfo } from '../../shared/terminal'
 import { useAgentStore } from '../stores/agent'
+import { useNotificationStore } from '../stores/notifications'
 import { TerminalSequenceTracker } from '../terminal-sequence'
 import { palette } from '../theme/naive-theme'
 import UiIcon from './UiIcon.vue'
@@ -35,6 +28,7 @@ interface TerminalView {
 }
 
 const agent = useAgentStore()
+const notifications = useNotificationStore()
 const { t } = useI18n()
 const terminals = ref<TerminalInfo[]>([])
 const activeTerminalId = ref<TerminalId>()
@@ -48,6 +42,24 @@ let resizeObserver: ResizeObserver | undefined
 let resizeStartY = 0
 let resizeStartHeight = 0
 const sequence = new TerminalSequenceTracker()
+
+watch(error, (message) => {
+  if (!message) return
+  notifications.error({
+    code: 'TERMINAL_OPERATION_FAILED',
+    message,
+    ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
+  })
+})
+
+watch(recoveryNotice, (message) => {
+  if (!message) return
+  notifications.warning({
+    code: 'TERMINAL_RECOVERY_NOTICE',
+    message,
+    ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
+  })
+})
 
 function terminalLabel(terminal: TerminalInfo, index: number): string {
   const shell = terminal.shell.replace(/\\/gu, '/').split('/').at(-1)
@@ -562,22 +574,6 @@ onUnmounted(() => {
     </header>
 
     <div class="terminal-body">
-      <NAlert
-        v-if="error"
-        class="terminal-error"
-        type="error"
-        :show-icon="false"
-      >
-        {{ error }}
-      </NAlert>
-      <NAlert
-        v-if="recoveryNotice"
-        class="terminal-notice"
-        type="warning"
-        :show-icon="false"
-      >
-        {{ recoveryNotice }}
-      </NAlert>
       <NEmpty
         v-if="!agent.sessionId"
         class="terminal-empty"

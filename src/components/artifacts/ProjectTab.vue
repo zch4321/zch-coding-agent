@@ -216,15 +216,6 @@ watch(
     />
 
     <NSpin v-else class="project-spin" :show="project.loading">
-      <NAlert
-        v-if="project.error"
-        type="error"
-        closable
-        @close="project.error = ''"
-      >
-        {{ project.error }}
-      </NAlert>
-
       <section class="project-section">
         <div class="project-section-header">
           <div>

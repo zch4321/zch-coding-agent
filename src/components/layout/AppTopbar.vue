@@ -2,6 +2,7 @@
 import { NButton, NTooltip } from 'naive-ui'
 import { IPC_VERSION } from '../../../shared/channels'
 import { useAgentStore } from '../../stores/agent'
+import { useNotificationStore } from '../../stores/notifications'
 import { useI18n } from 'vue-i18n'
 import UiIcon from '../UiIcon.vue'
 
@@ -21,13 +22,19 @@ const emit = defineEmits<{
   'artifact-sidebar': []
 }>()
 const agent = useAgentStore()
+const notifications = useNotificationStore()
 const { t } = useI18n()
 
 async function windowAction(
   action: 'minimizeWindow' | 'toggleMaximizeWindow' | 'closeWindow',
 ) {
   const result = await window.agentApi?.[action]({ version: IPC_VERSION })
-  if (result && !result.ok) agent.error = result.error.message
+  if (result && !result.ok) {
+    notifications.error({
+      code: result.error.code,
+      message: result.error.message,
+    })
+  }
 }
 </script>
 

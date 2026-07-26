@@ -7,9 +7,9 @@ import {
   type SessionOverlay,
 } from './agent-runtime-helpers'
 import { useAgentReplicaStore } from './agent-replica'
+import { useNotificationStore } from './notifications'
 
 interface RuntimeEventTarget {
-  globalError: string
   overlays: Record<string, SessionOverlay>
   carryoversBySessionId: Record<string, CarryoverInterjection[]>
   carryoverStartingBySessionId: Record<string, boolean>
@@ -35,9 +35,13 @@ export function handleRuntimeAgentEvent(
   const overlay = target.ensureOverlay(event.sessionId)
   if (event.seq <= overlay.lastEventSeq) return
   if (overlay.lastEventSeq && event.seq !== overlay.lastEventSeq + 1) {
-    overlay.diagnostics.push(
-      `Runtime event gap: expected ${overlay.lastEventSeq + 1}, received ${event.seq}.`,
-    )
+    const warning = `Runtime event gap: expected ${overlay.lastEventSeq + 1}, received ${event.seq}. Resynchronizing.`
+    overlay.diagnostics.push(warning)
+    useNotificationStore().warning({
+      code: 'RUNTIME_EVENT_GAP',
+      message: warning,
+      sessionId: event.sessionId,
+    })
     void useAgentReplicaStore()
       .loadSession(event.sessionId)
       .then(() =>
@@ -61,8 +65,22 @@ export function handleRuntimeAgentEvent(
   }
 
   if (event.type === 'trace.capture.changed') {
-    useAgentReplicaStore().traceCaptureBySessionId[event.sessionId] =
-      structuredClone(event.capture)
+    const replica = useAgentReplicaStore()
+    const previous = replica.traceCaptureBySessionId[event.sessionId]
+    replica.traceCaptureBySessionId[event.sessionId] = structuredClone(
+      event.capture,
+    )
+    if (
+      event.capture.state === 'degraded' &&
+      (previous?.state !== 'degraded' ||
+        previous.warning !== event.capture.warning)
+    ) {
+      useNotificationStore().warning({
+        code: 'TRACE_CAPTURE_DEGRADED',
+        message: event.capture.warning ?? 'Trace capture is unavailable.',
+        sessionId: event.sessionId,
+      })
+    }
     return
   }
 
@@ -86,7 +104,13 @@ export function handleRuntimeAgentEvent(
     if (!TERMINAL_RUN_STATUSES.has(event.status)) {
       overlay.terminalReloadRunId = undefined
     }
-    if (event.error) target.globalError = event.error.message
+    if (event.error) {
+      useNotificationStore().error({
+        code: event.error.code,
+        message: event.error.message,
+        sessionId: event.sessionId,
+      })
+    }
     if (TERMINAL_RUN_STATUSES.has(event.status)) {
       const completedRunId = event.runId
       overlay.terminalReloadRunId = completedRunId

@@ -62,6 +62,5 @@ onMounted(() => void skills.load(false))
         {{ item.file }}: {{ item.message }}
       </div>
     </NAlert>
-    <NAlert v-if="skills.error" type="error">{{ skills.error }}</NAlert>
   </section>
 </template>

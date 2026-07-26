@@ -41,15 +41,34 @@ import {
 } from './agent-runtime-helpers'
 import { useAgentSettingsStore } from './agent-settings'
 import { useAgentShellStore } from './agent-shell'
+import { useNotificationStore } from './notifications'
 
 interface ApprovalDecisionInput {
   decision: 'allow' | 'deny'
   remember?: boolean
 }
 
+function showOperationError(
+  error: { code: string; message: string },
+  sessionId?: SessionId,
+): void {
+  useNotificationStore().error({
+    code: error.code,
+    message: error.message,
+    ...(sessionId ? { sessionId } : {}),
+  })
+}
+
+function showValidationError(message: string, sessionId?: SessionId): void {
+  useNotificationStore().error({
+    code: 'VALIDATION_FAILED',
+    message,
+    ...(sessionId ? { sessionId } : {}),
+  })
+}
+
 export const useAgentRuntimeStore = defineStore('agent-runtime', {
   state: () => ({
-    globalError: '',
     input: '',
     contextAttachments: [] as ContextAttachmentChip[],
     mode: 'readonly' as PermissionMode,
@@ -361,12 +380,17 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           this.handleAgentEvent(envelope.event),
         ),
       )
+      shell.registerUnsubscriber(
+        window.agentApi.onBackendNotification((notification) => {
+          useNotificationStore().enqueue(notification)
+        }),
+      )
       const config = await window.agentApi.getConfig({
         version: IPC_VERSION,
         section: 'all',
       })
       if (config.ok) settings.applyConfig(config.value.config)
-      else this.globalError = config.error.message
+      else showOperationError(config.error)
       await replica.bootstrap(
         config.ok ? config.value.config.workspace.lastOpened : undefined,
       )
@@ -390,7 +414,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       if (!api) return
       const selected = await api.chooseWorkspace({ version: IPC_VERSION })
       if (!selected.ok) {
-        this.globalError = selected.error.message
+        showOperationError(selected.error)
         return
       }
       if (!selected.value.path) return
@@ -408,7 +432,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         name: projectName(selected.value.path),
       })
       if (!result.ok) {
-        this.globalError = result.error.message
+        showOperationError(result.error)
         return
       }
       await replica.reconcile(result.value.commit)
@@ -461,7 +485,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         patch: { title: value },
       })
       if (result.ok) await replica.reconcile(result.value.commit)
-      else this.globalError = result.error.message
+      else showOperationError(result.error, session.id)
     },
     async deleteConversation(sessionId: string) {
       const replica = useAgentReplicaStore()
@@ -477,7 +501,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         expectedRevision: session.revision,
       })
       if (result.ok) await replica.reconcile(result.value.commit)
-      else this.globalError = result.error.message
+      else showOperationError(result.error, session.id)
     },
     async forkConversation(_title?: string, messageId?: string) {
       const replica = useAgentReplicaStore()
@@ -492,7 +516,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         ...(messageId ? { throughMessageId: messageId as MessageId } : {}),
       })
       if (!result.ok) {
-        this.globalError = result.error.message
+        showOperationError(result.error, session.id)
         return
       }
       await replica.reconcile(result.value.commit)
@@ -521,7 +545,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           record.kind === 'user_input' ? 'before_turn' : 'before_message',
       })
       if (!result.ok) {
-        this.globalError = result.error.message
+        showOperationError(result.error, session.id)
         return false
       }
       await replica.reconcile(result.value.commit)
@@ -538,8 +562,10 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         (candidate) => candidate.id === messageId,
       )
       if (!session || !originalUserRecord(record) || !window.agentApi) {
-        this.globalError =
-          'Only an original visible user message can be retried.'
+        showValidationError(
+          'Only an original visible user message can be retried.',
+          session?.id,
+        )
         return false
       }
       if (
@@ -566,7 +592,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           }
         })
       if (!result.ok) {
-        this.globalError = result.error.message
+        showOperationError(result.error, session.id)
         return false
       }
       await replica.reconcile(result.value.commit)
@@ -579,8 +605,10 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         (candidate) => candidate.id === messageId,
       )
       if (!originalUserRecord(record)) {
-        this.globalError =
-          'Only an original visible user message can be edited.'
+        showValidationError(
+          'Only an original visible user message can be edited.',
+          replica.selectedSessionId,
+        )
         return false
       }
       const text = messageText(record)
@@ -609,7 +637,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         expectedRevision: project.revision,
       })
       if (result.ok) await replica.reconcile(result.value.commit)
-      else this.globalError = result.error.message
+      else showOperationError(result.error)
     },
     async setMode(mode: PermissionMode) {
       const replica = useAgentReplicaStore()
@@ -628,7 +656,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         patch: { permissionMode: mode },
       })
       if (!result.ok) {
-        this.globalError = result.error.message
+        showOperationError(result.error, session.id)
         return false
       }
       await replica.reconcile(result.value.commit)
@@ -672,7 +700,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         patch: { modelSelection },
       })
       if (result.ok) await replica.reconcile(result.value.commit)
-      else this.globalError = result.error.message
+      else showOperationError(result.error, session.id)
     },
     async sendMessage(value: SendMessageOptions | Event = {}) {
       const options = normalizeSendMessageOptions(value)
@@ -749,7 +777,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           }
         })
       if (!result.ok) {
-        this.globalError = result.error.message
+        showOperationError(result.error, sessionId)
         return false
       }
       const runResult = result.value as DurableRunStartResult
@@ -806,33 +834,69 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         return false
       }
       const carryover = queue[0]!
+      const removeCarryover = () => {
+        this.carryoversBySessionId[sessionId] = (
+          this.carryoversBySessionId[sessionId] ?? []
+        ).filter((candidate) => candidate.id !== carryover.id)
+        const currentOverlay = this.overlays[sessionId]
+        if (currentOverlay) {
+          currentOverlay.interjections = currentOverlay.interjections.filter(
+            (interjection) => interjection.id !== carryover.id,
+          )
+        }
+      }
       this.carryoverStartingBySessionId[sessionId] = true
       try {
-        const result = await api.startRun({
-          version: IPC_VERSION,
-          kind: 'existing_session',
-          sessionId,
-          message: carryover.content,
-          context: { attachments: [] },
-          clientRequestId: `carryover:${carryover.id}`,
-        })
-        if (!result.ok) {
-          this.globalError = result.error.message
+        let result
+        try {
+          result = await api.startRun({
+            version: IPC_VERSION,
+            kind: 'existing_session',
+            sessionId,
+            message: carryover.content,
+            context: { attachments: [] },
+            clientRequestId: `carryover:${carryover.id}`,
+          })
+        } catch {
+          removeCarryover()
+          useNotificationStore().warning({
+            code: 'CARRYOVER_DISCARDED',
+            message:
+              'The carried-over message could not be started and was discarded.',
+            sessionId,
+          })
           return false
         }
-        await this.applyRunStartResult(sessionId, result.value)
-        this.carryoversBySessionId[sessionId] = queue.filter(
-          (candidate) => candidate.id !== carryover.id,
-        )
+        if (!result.ok) {
+          removeCarryover()
+          useNotificationStore().warning({
+            code: 'CARRYOVER_DISCARDED',
+            message: result.error.message,
+            sessionId,
+          })
+          return false
+        }
+        removeCarryover()
+        try {
+          await this.applyRunStartResult(sessionId, result.value)
+        } catch {
+          this.hydrateRuntime(result.value.runtime)
+          showValidationError(
+            'The carried-over request started, but the local view could not be refreshed.',
+            sessionId,
+          )
+          void useAgentReplicaStore().loadSession(sessionId)
+          return false
+        }
+        return true
+      } finally {
+        delete this.carryoverStartingBySessionId[sessionId]
         if (
           this.carryoversBySessionId[sessionId]?.length &&
           !this.overlays[sessionId]?.runId
         ) {
           queueMicrotask(() => void this.flushCarryovers(sessionId))
         }
-        return true
-      } finally {
-        delete this.carryoverStartingBySessionId[sessionId]
       }
     },
     async sendInterjection() {
@@ -850,7 +914,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         clientRequestId: requestId('interjection'),
       })
       if (!result.ok) {
-        this.globalError = result.error.message
+        showOperationError(result.error, sessionId)
         return false
       }
       this.input = ''
@@ -865,7 +929,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         sessionId,
         runId: overlay.runId,
       })
-      if (!result.ok) this.globalError = result.error.message
+      if (!result.ok) showOperationError(result.error, sessionId)
       return result.ok && result.value.accepted
     },
     async decideApproval(input: ApprovalDecisionInput) {
@@ -890,7 +954,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       this.approvalSubmitting = false
       if (!result.ok) {
         approval.status = 'requested'
-        this.globalError = result.error.message
+        showOperationError(result.error, sessionId)
         return false
       }
       overlay.reviewedApproval = {
@@ -915,7 +979,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         status,
       })
       if (!result.ok) {
-        this.globalError = result.error.message
+        showOperationError(result.error, session.id)
         return false
       }
       await replica.reconcile(result.value.commit)
@@ -945,7 +1009,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         kind,
       })
       if (!result.ok) {
-        this.globalError = result.error.message
+        showOperationError(result.error)
         return
       }
       this.addContextAttachments(result.value.attachments)

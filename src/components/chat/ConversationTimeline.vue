@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NAlert, NButton, NEmpty, NFloatButton } from 'naive-ui'
+import { NButton, NEmpty, NFloatButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
@@ -194,62 +194,6 @@ onBeforeUnmount(() => {
       :aria-label="t('chat.messages')"
       @scroll.passive="handleScroll"
     >
-      <NAlert
-        v-if="!agent.bridgeAvailable && agent.initialized"
-        type="warning"
-        :title="t('chat.bridgeUnavailable')"
-        class="inline-alert"
-      >
-        {{ t('chat.bridgeHint') }}
-      </NAlert>
-      <NAlert
-        v-if="agent.bridgeAvailable && !agent.providerNoticeAccepted"
-        type="info"
-        :title="t('chat.providerNotice')"
-        class="inline-alert"
-      >
-        {{ t('chat.providerNoticeText') }}
-        <div class="notice-action">
-          <NButton
-            size="small"
-            type="primary"
-            @click="agent.acceptProviderNotice"
-          >
-            {{ t('chat.understand') }}
-          </NButton>
-        </div>
-      </NAlert>
-      <NAlert
-        v-if="agent.agentEventGap"
-        type="warning"
-        :title="t('chat.eventGap')"
-        class="inline-alert"
-        closable
-        @close="agent.clearDiagnostics()"
-      >
-        {{ agent.agentEventGap }}
-      </NAlert>
-      <NAlert
-        v-if="agent.selectedTraceCapture?.state === 'pending'"
-        type="info"
-        :title="t('logging.capturePendingTitle')"
-        class="inline-alert"
-      >
-        {{ t('logging.capturePending') }}
-      </NAlert>
-      <NAlert
-        v-if="agent.selectedTraceCapture?.state === 'degraded'"
-        type="warning"
-        :title="t('logging.captureDegradedTitle')"
-        class="inline-alert"
-      >
-        {{
-          t('logging.captureDegraded', {
-            warning: agent.selectedTraceCapture.warning ?? '',
-          })
-        }}
-      </NAlert>
-
       <NButton
         v-if="agent.selectedMessageHasMore"
         class="load-earlier"
@@ -357,15 +301,5 @@ onBeforeUnmount(() => {
         aria-hidden="true"
       ></span>
     </div>
-    <NAlert
-      v-if="agent.error"
-      type="error"
-      :title="t('chat.requestFailed')"
-      class="conversation-error-overlay"
-      closable
-      @close="agent.error = ''"
-    >
-      {{ agent.error }}
-    </NAlert>
   </section>
 </template>

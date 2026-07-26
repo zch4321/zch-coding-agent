@@ -14,6 +14,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import { IPC_VERSION } from '../../../shared/channels'
 import { useAgentStore } from '../../stores/agent'
+import { useNotificationStore } from '../../stores/notifications'
 import UiIcon from '../UiIcon.vue'
 import FileCodePreview from './FileCodePreview.vue'
 
@@ -31,6 +32,7 @@ interface OpenFile {
 }
 
 const agent = useAgentStore()
+const notifications = useNotificationStore()
 const { t } = useI18n()
 
 const explorerTree = ref<TreeOption[]>([])
@@ -205,6 +207,15 @@ watch(
     if (activeFile.value) void openExplorerFile(activeFile.value.path)
   },
 )
+
+watch(explorerError, (message) => {
+  if (!message) return
+  notifications.error({
+    code: 'FILE_EXPLORER_OPERATION_FAILED',
+    message,
+    ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
+  })
+})
 </script>
 
 <template>
@@ -246,14 +257,6 @@ watch(
             </template>
           </NEmpty>
           <div v-else class="explorer-tree-state">
-            <NAlert
-              v-if="explorerError"
-              class="artifact-message"
-              type="error"
-              :show-icon="false"
-            >
-              {{ explorerError }}
-            </NAlert>
             <NSpin
               class="explorer-tree-loader"
               :show="explorerLoading"

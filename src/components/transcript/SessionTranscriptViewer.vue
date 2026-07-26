@@ -145,10 +145,6 @@ async function confirmExport() {
     <NAlert v-if="traces.transcriptUnavailable" type="warning">
       {{ t('transcript.unavailable') }}
     </NAlert>
-    <NAlert v-if="traces.transcriptError" type="error">
-      {{ traces.transcriptError }}
-    </NAlert>
-
     <template v-if="traces.transcriptMetadata">
       <div class="transcript-meta">
         <NTag>{{ traces.transcriptMetadata.traceId }}</NTag>

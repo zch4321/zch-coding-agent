@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import {
   NButton,
   NDropdown,
+  NAlert,
   NInput,
   NPopover,
   NSelect,
@@ -21,6 +22,7 @@ import type {
 } from '../../../shared/context'
 import { useAgentStore } from '../../stores/agent'
 import { useSkillsStore } from '../../stores/skills'
+import { useNotificationStore } from '../../stores/notifications'
 import {
   detectComposerSuggestionTrigger,
   formatWorkspaceExpansionPath,
@@ -40,6 +42,7 @@ const emit = defineEmits<{
 }>()
 const agent = useAgentStore()
 const skills = useSkillsStore()
+const notifications = useNotificationStore()
 const { t } = useI18n()
 const composerInput = ref<InputInst>()
 const suggestionTrigger = ref<ComposerSuggestionTrigger>()
@@ -205,7 +208,11 @@ async function contextSuggestions(
   }
 
   if (!result.ok) {
-    agent.error = result.error.message
+    notifications.error({
+      code: result.error.code,
+      message: result.error.message,
+      ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
+    })
     return []
   }
 
@@ -443,6 +450,23 @@ watch(inputDisabled, (disabled) => {
 
 <template>
   <footer class="message-input-area">
+    <NAlert
+      v-if="agent.bridgeAvailable && !agent.providerNoticeAccepted"
+      type="info"
+      :title="t('chat.providerNotice')"
+      class="composer-notice"
+    >
+      {{ t('chat.providerNoticeText') }}
+      <div class="notice-action">
+        <NButton
+          size="small"
+          type="primary"
+          @click="agent.acceptProviderNotice"
+        >
+          {{ t('chat.understand') }}
+        </NButton>
+      </div>
+    </NAlert>
     <div v-if="agent.contextAttachments.length" class="composer-context-chips">
       <NTooltip
         v-for="attachment in agent.contextAttachments"

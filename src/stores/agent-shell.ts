@@ -4,7 +4,6 @@ export const useAgentShellStore = defineStore('agent-shell', {
   state: () => ({
     initialized: false,
     bridgeAvailable: false,
-    error: '',
     unsubscribers: [] as Array<() => void>,
   }),
   actions: {

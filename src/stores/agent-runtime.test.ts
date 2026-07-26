@@ -18,6 +18,7 @@ import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { SessionRecord } from '../../shared/session'
 import { useAgentReplicaStore } from './agent-replica'
 import { useAgentRuntimeStore } from './agent-runtime'
+import { useNotificationStore } from './notifications'
 
 const projectId = 'project:runtime-test' as ProjectId
 const selectedSessionId = 'session:selected' as SessionId
@@ -305,6 +306,82 @@ describe('agent runtime store', () => {
     })
   })
 
+  it('discards a failed carryover, unlocks input, and continues the FIFO', async () => {
+    seedReplica(true)
+    const startRun = vi
+      .fn<AgentApi['startRun']>()
+      .mockResolvedValueOnce(failure('carryover unavailable'))
+      .mockImplementationOnce(async (payload) =>
+        success({
+          version: 1 as const,
+          outcome: 'deduplicated' as const,
+          session: session(payload.sessionId),
+          userMessage: userMessage(
+            payload.sessionId,
+            `message:${payload.clientRequestId}` as MessageId,
+          ),
+          runtime: runtimeSnapshot(
+            payload.sessionId,
+            `run:${payload.clientRequestId}` as RunId,
+          ),
+        }),
+      )
+    installApi({ startRun })
+    const runtime = useAgentRuntimeStore()
+    const overlay = runtime.ensureOverlay(backgroundSessionId)
+    runtime.carryoversBySessionId[backgroundSessionId] = [
+      {
+        id: 'interjection:failed',
+        runId: 'run:old' as RunId,
+        content: 'discard this',
+        createdAt: '2026-07-25T00:00:01.000Z',
+      },
+      {
+        id: 'interjection:next',
+        runId: 'run:old' as RunId,
+        content: 'continue with this',
+        createdAt: '2026-07-25T00:00:02.000Z',
+      },
+    ]
+    overlay.interjections = [
+      {
+        id: 'interjection:failed',
+        status: 'carryover',
+        content: 'discard this',
+        createdAt: '2026-07-25T00:00:01.000Z',
+      },
+      {
+        id: 'interjection:next',
+        status: 'carryover',
+        content: 'continue with this',
+        createdAt: '2026-07-25T00:00:02.000Z',
+      },
+    ]
+
+    await expect(runtime.flushCarryovers(backgroundSessionId)).resolves.toBe(
+      false,
+    )
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(2))
+
+    expect(runtime.carryoverStartingBySessionId[backgroundSessionId]).toBe(
+      undefined,
+    )
+    expect(
+      overlay.interjections.some((item) => item.id === 'interjection:failed'),
+    ).toBe(false)
+    expect(useNotificationStore().pending).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'CARRYOVER_DISCARDED',
+        sessionId: backgroundSessionId,
+      }),
+    ])
+    expect(startRun.mock.calls[1]![0]).toMatchObject({
+      message: 'continue with this',
+      clientRequestId: 'carryover:interjection:next',
+    })
+  })
+
   it('lets durable interjections and tools replace their live overlays', () => {
     const replica = seedReplica()
     const rootId = 'message:root' as MessageId
@@ -499,6 +576,57 @@ describe('agent runtime store', () => {
       traceId: 'capture-runtime-test',
     })
     expect(runtime.ensureOverlay(selectedSessionId).lastEventSeq).toBe(2)
+  })
+
+  it('routes run failures, event gaps, and capture degradation to notifications', async () => {
+    seedReplica()
+    installApi({})
+    const runtime = useAgentRuntimeStore()
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 1,
+        sessionId: selectedSessionId,
+        runId: 'run:failed' as RunId,
+        status: 'failed',
+        error: { code: 'PROVIDER_FAILED', message: 'Provider failed.' },
+      }),
+    )
+    runtime.handleAgentEvent(
+      event({
+        type: 'trace.capture.changed',
+        seq: 3,
+        sessionId: selectedSessionId,
+        capture: {
+          configuredEnabled: true,
+          state: 'degraded',
+          warning: 'Capture unavailable.',
+        },
+      }),
+    )
+
+    await vi.waitFor(() => {
+      expect(useNotificationStore().pending).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            severity: 'error',
+            code: 'PROVIDER_FAILED',
+            sessionId: selectedSessionId,
+          }),
+          expect.objectContaining({
+            severity: 'warning',
+            code: 'RUNTIME_EVENT_GAP',
+            sessionId: selectedSessionId,
+          }),
+          expect.objectContaining({
+            severity: 'warning',
+            code: 'TRACE_CAPTURE_DEGRADED',
+            sessionId: selectedSessionId,
+          }),
+        ]),
+      )
+    })
   })
 
   it('does not let an old terminal reload clear a newer run overlay', async () => {

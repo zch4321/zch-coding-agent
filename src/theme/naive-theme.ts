@@ -138,4 +138,7 @@ export const naiveThemeOverrides: GlobalThemeOverrides = {
     borderRadius: radius.medium,
     borderRadiusSmall: radius.small,
   },
+  Message: {
+    maxWidth: 'min(640px, calc(100vw - 32px))',
+  },
 }

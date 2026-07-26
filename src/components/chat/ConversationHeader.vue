@@ -46,6 +46,22 @@ const statusType = computed<TagProps['type']>(() => {
   return 'info'
 })
 
+const captureStatus = computed(() => {
+  const capture = agent.selectedTraceCapture
+  if (!capture || capture.state === 'disabled') return undefined
+  if (capture.state === 'active') {
+    return { label: t('logging.captureActiveTitle'), type: 'success' as const }
+  }
+  if (capture.state === 'pending') {
+    return { label: t('logging.capturePendingTitle'), type: 'warning' as const }
+  }
+  return {
+    label: t('logging.captureDegradedTitle'),
+    type: 'error' as const,
+    title: capture.warning,
+  }
+})
+
 const usageMetrics = computed(() => {
   const latestContextUsage = [...agent.usage]
     .reverse()
@@ -137,14 +153,25 @@ const usageMetrics = computed(() => {
         </p>
       </div>
     </div>
-    <NTag
-      v-if="statusLabel"
-      class="run-status"
-      round
-      size="small"
-      :type="statusType"
-    >
-      {{ statusLabel }}
-    </NTag>
+    <div class="conversation-statuses">
+      <NTag
+        v-if="captureStatus"
+        round
+        size="small"
+        :type="captureStatus.type"
+        :title="captureStatus.title"
+      >
+        {{ captureStatus.label }}
+      </NTag>
+      <NTag
+        v-if="statusLabel"
+        class="run-status"
+        round
+        size="small"
+        :type="statusType"
+      >
+        {{ statusLabel }}
+      </NTag>
+    </div>
   </header>
 </template>

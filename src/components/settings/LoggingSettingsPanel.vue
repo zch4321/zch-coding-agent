@@ -238,7 +238,6 @@ function interjectionTitle(interjection: {
       <NAlert v-if="traces.actionMessage" type="info">
         {{ traces.actionMessage }}
       </NAlert>
-      <NAlert v-if="traces.error" type="error">{{ traces.error }}</NAlert>
     </div>
 
     <div v-if="traces.replay" class="prompt-inspector">
