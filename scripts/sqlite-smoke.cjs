@@ -5,6 +5,34 @@ const path = require('node:path')
 
 const CHILD_MARKER = 'MY_CODING_AGENT_SQLITE_SMOKE_CHILD'
 const RUNTIME_LABEL = 'MY_CODING_AGENT_SQLITE_RUNTIME'
+const CHILD_ENV_ALLOWLIST = [
+  'APPDATA',
+  'COMSPEC',
+  'HOME',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'LANG',
+  'LC_ALL',
+  'LOCALAPPDATA',
+  'PATH',
+  'PATHEXT',
+  'SYSTEMDRIVE',
+  'SYSTEMROOT',
+  'TEMP',
+  'TMP',
+  'USERPROFILE',
+  'WINDIR',
+]
+
+/** Builds the minimal host environment required by the Electron SQLite child. */
+function buildChildEnvironment(source, additions) {
+  const environment = {}
+  for (const name of CHILD_ENV_ALLOWLIST) {
+    const value = source[name]
+    if (value !== undefined) environment[name] = value
+  }
+  return { ...environment, ...additions }
+}
 
 function option(name) {
   const index = process.argv.indexOf(name)
@@ -120,12 +148,11 @@ function runElectronChild() {
     ? packagedElectronPath()
     : option('--electron') || require('electron')
   const child = spawn(electron, [path.resolve(__filename)], {
-    env: {
-      ...process.env,
+    env: buildChildEnvironment(process.env, {
       ELECTRON_RUN_AS_NODE: '1',
       [CHILD_MARKER]: '1',
       [RUNTIME_LABEL]: packaged ? 'electron-packaged' : 'electron',
-    },
+    }),
     stdio: 'inherit',
     windowsHide: true,
   })
@@ -139,9 +166,13 @@ function runElectronChild() {
   })
 }
 
-if (process.env[CHILD_MARKER] === '1') {
-  runSqliteSmoke()
-} else {
-  if (!process.argv.includes('--packaged')) runSqliteSmoke()
-  runElectronChild()
+module.exports = { buildChildEnvironment }
+
+if (require.main === module) {
+  if (process.env[CHILD_MARKER] === '1') {
+    runSqliteSmoke()
+  } else {
+    if (!process.argv.includes('--packaged')) runSqliteSmoke()
+    runElectronChild()
+  }
 }

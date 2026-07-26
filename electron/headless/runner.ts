@@ -27,6 +27,7 @@ import {
 } from './contracts'
 import { HeadlessEventWriter, HeadlessRunMetrics } from './event-stream'
 import { collectWorkspacePatch } from './patch'
+import { headlessTrialDatabasePath } from '../persistence/database-service'
 
 const validateResult = compileSchema(HeadlessResultSchema)
 const validateRuntimeIdentity = compileSchema(RuntimeIdentitySchema)
@@ -129,7 +130,7 @@ export async function runHeadlessAgent(
   )
   const backend = await createBackendRuntime({
     configStore: prepared.configStore,
-    databasePath: path.join(databaseDirectory, 'agent.db'),
+    databasePath: headlessTrialDatabasePath(databaseDirectory),
     runtimeDataDirectory: prepared.userDataDirectory,
     promptDirectory: await resolvePromptDirectory(options.promptDirectory),
     fetchImpl: options.fetchImpl,

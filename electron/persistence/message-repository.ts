@@ -81,32 +81,6 @@ export class MessageRepository {
     return row ? decodeMessageRow(row) : undefined
   }
 
-  /** Lists non-superseded messages up to a validated sequence boundary. */
-  listThrough(
-    reader: PersistenceReader,
-    sessionId: SessionId,
-    throughSeq: number,
-    limit: number,
-  ): MessageRecord[] {
-    const bounded = boundedLimit(limit, 513, 'Message prefix limit')
-    if (!Number.isSafeInteger(throughSeq) || throughSeq < 1) {
-      throw new PersistenceError(
-        'CODEC_INVALID',
-        'Message prefix seq must be a positive safe integer',
-      )
-    }
-    return reader
-      .prepare(
-        `SELECT ${MESSAGE_COLUMNS}
-         FROM messages
-         WHERE session_id = ? AND seq <= ? AND visibility <> 'superseded'
-         ORDER BY seq ASC
-         LIMIT ?`,
-      )
-      .all(sessionId, throughSeq, bounded)
-      .map(decodeMessageRow)
-  }
-
   /** Lists a bounded message page and returns its older-page cursor when more rows exist. */
   listPage(
     reader: PersistenceReader,

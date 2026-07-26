@@ -32,6 +32,7 @@ import { createElectronRuntimeEventListener } from './runtime/electron-runtime-e
 import { createBackendRuntime } from './application/create-backend-runtime'
 import { sendDomainStateEvent } from './ipc/event-sink'
 import { BackendNotificationReporter } from './notifications/backend-notification-reporter'
+import { desktopDatabasePath } from './persistence/database-service'
 import {
   APP_ENTRY_URL,
   APP_HOST,
@@ -154,7 +155,7 @@ async function installIpc(): Promise<void> {
     create: () =>
       createBackendRuntime({
         configStore,
-        databasePath: path.join(userData, 'agent.db'),
+        databasePath: desktopDatabasePath(userData),
         runtimeDataDirectory: userData,
         promptDirectory: path.join(appRoot, 'resources', 'prompts'),
         appVersion: app.getVersion(),
