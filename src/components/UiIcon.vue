@@ -30,6 +30,7 @@ defineProps<{
     | 'download'
     | 'upload'
     | 'undo'
+    | 'external-link'
 }>()
 </script>
 
@@ -176,6 +177,11 @@ defineProps<{
     <g v-else-if="name === 'undo'">
       <path d="M9 14 4 9l5-5" />
       <path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5h-4" />
+    </g>
+    <g v-else-if="name === 'external-link'">
+      <path d="M14 4h6v6" />
+      <path d="m20 4-9 9" />
+      <path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6" />
     </g>
   </svg>
 </template>

@@ -45,8 +45,7 @@
   min-height: 0;
 }
 
-.artifact-tab-label,
-.file-tab-label {
+.artifact-tab-label {
   display: inline-flex;
   min-width: 0;
   align-items: center;
@@ -58,19 +57,6 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-}
-
-.file-tabs {
-  height: 100%;
-  min-width: 0;
-}
-
-.file-tab-label > span {
-  max-width: 150px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .explorer-view,

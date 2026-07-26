@@ -355,6 +355,24 @@ export const IPC_CONTRACTS = {
       ),
     ),
   },
+  'workspace:open-file': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        projectId: ProjectIdSchema,
+        path: Type.String({ minLength: 1, maxLength: 4_096 }),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          path: Type.String({ minLength: 1, maxLength: 4_096 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
   'workspace:choose-context': {
     payload: Type.Object(
       {

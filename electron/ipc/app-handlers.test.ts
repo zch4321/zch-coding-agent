@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 
-const { showSaveDialog, writeTextAtomic } = vi.hoisted(() => ({
+const { openPath, showSaveDialog, writeTextAtomic } = vi.hoisted(() => ({
+  openPath: vi.fn(),
   showSaveDialog: vi.fn(),
   writeTextAtomic: vi.fn(),
 }))
@@ -12,7 +16,7 @@ vi.mock('electron', () => ({
     showSaveDialog,
     showOpenDialog: vi.fn(),
   },
-  shell: { openPath: vi.fn() },
+  shell: { openPath },
 }))
 
 vi.mock('../config/atomic-file', () => ({ writeTextAtomic }))
@@ -74,8 +78,90 @@ function createHandlers(input?: {
 
 describe('app IPC handlers', () => {
   beforeEach(() => {
+    openPath.mockReset()
     showSaveDialog.mockReset()
     writeTextAtomic.mockReset()
+  })
+
+  it('opens only guarded regular workspace files with an external application', async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), 'agent-open-file-'))
+    const outside = await mkdtemp(path.join(tmpdir(), 'agent-open-outside-'))
+    const target = path.join(workspace, 'README.md')
+    const outsideTarget = path.join(outside, 'outside.md')
+    await writeFile(target, 'workspace file\n')
+    await writeFile(outsideTarget, 'outside file\n')
+    openPath.mockResolvedValue('')
+    const { handlers } = createHandlers({
+      backend: {
+        projects: {
+          get: vi.fn(async () => ({ path: workspace })),
+        },
+      },
+    })
+
+    try {
+      await expect(
+        handlers['workspace:open-file']!(
+          {
+            version: 1,
+            projectId: 'project-test',
+            path: 'README.md',
+          } as never,
+          stubEvent,
+        ),
+      ).resolves.toEqual({ path: 'README.md' })
+      expect(openPath).toHaveBeenCalledWith(path.resolve(target))
+
+      await expect(
+        handlers['workspace:open-file']!(
+          {
+            version: 1,
+            projectId: 'project-test',
+            path: outsideTarget,
+          } as never,
+          stubEvent,
+        ),
+      ).rejects.toMatchObject({
+        error: { code: 'PRECONDITION_FAILED' },
+      })
+      expect(openPath).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('does not expose shell errors when no external application can open a file', async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), 'agent-open-fail-'))
+    await writeFile(path.join(workspace, 'README.md'), 'workspace file\n')
+    openPath.mockResolvedValue('sensitive OS detail')
+    const { handlers } = createHandlers({
+      backend: {
+        projects: {
+          get: vi.fn(async () => ({ path: workspace })),
+        },
+      },
+    })
+
+    try {
+      await expect(
+        handlers['workspace:open-file']!(
+          {
+            version: 1,
+            projectId: 'project-test',
+            path: 'README.md',
+          } as never,
+          stubEvent,
+        ),
+      ).rejects.toMatchObject({
+        error: {
+          code: 'NOT_AVAILABLE',
+          message: 'No external application could open this file',
+        },
+      })
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
   })
 
   it('does not write a transcript when the save dialog is cancelled', async () => {

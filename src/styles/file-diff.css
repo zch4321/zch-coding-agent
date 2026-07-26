@@ -2,32 +2,39 @@
   position: sticky;
   z-index: 1;
   top: 0;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 8px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--background);
 }
 
-.file-viewer-header > div {
+.file-viewer-heading {
   display: grid;
   min-width: 0;
+  flex: 1;
   gap: 3px;
 }
 
-.file-viewer-header strong,
-.file-viewer-header span {
+.file-viewer-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.file-viewer-heading strong,
+.file-viewer-heading span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.file-viewer-header strong {
+.file-viewer-heading strong {
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 11px;
 }
 
-.file-viewer-header span {
+.file-viewer-heading span {
   color: var(--text-muted);
   font-size: 10px;
 }

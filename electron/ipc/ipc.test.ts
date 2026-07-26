@@ -140,6 +140,11 @@ const validPayloads: {
     projectId,
     path: 'README.md',
   },
+  'workspace:open-file': {
+    version: 1,
+    projectId,
+    path: 'README.md',
+  },
   'workspace:choose-context': {
     version: 1,
     projectId,

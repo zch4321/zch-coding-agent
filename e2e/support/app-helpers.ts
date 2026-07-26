@@ -346,6 +346,7 @@ export async function findDurableMessageText(
   )
 }
 
+/** Starts a Durable Session and waits for its initial run to finish successfully. */
 export async function startDurableSession(input: {
   page: Page
   workspace: string
@@ -358,6 +359,13 @@ export async function startDurableSession(input: {
         | { ok: true; value: Value }
         | { ok: false; error: { message: string } }
       type Project = { id: string; path: string }
+      type RunTerminalEvent = {
+        type: 'run.status'
+        sessionId: string
+        runId: string
+        status: 'completed' | 'cancelled' | 'failed'
+        error?: { message: string }
+      }
       const api = Reflect.get(window, 'agentApi') as {
         getBootstrap(
           payload: unknown,
@@ -368,6 +376,17 @@ export async function startDurableSession(input: {
         startRun(
           payload: unknown,
         ): Promise<IpcResult<{ outcome: string; runId?: string }>>
+        onAgentEvent(
+          listener: (envelope: {
+            event: {
+              type: string
+              sessionId?: string
+              runId?: string
+              status?: string
+              error?: { message: string }
+            }
+          }) => void,
+        ): () => void
       }
       const bootstrap = await api.getBootstrap({ version: 1 })
       if (!bootstrap.ok) throw new Error(bootstrap.error.message)
@@ -386,23 +405,77 @@ export async function startDurableSession(input: {
       }
       if (!project) throw new Error('Durable project was not created')
       const sessionId = `session:e2e:${crypto.randomUUID()}`
-      const started = await api.startRun({
-        version: 1,
-        kind: 'new_session',
-        sessionId,
-        projectId: project.id,
-        title,
-        modelSelection: {
-          providerId: 'deepseek',
-          model: 'e2e-functional-model',
-          reasoning: 'off',
-        },
-        permissionMode: 'readonly',
-        message,
-        clientRequestId: `request:e2e:${crypto.randomUUID()}`,
+      let expectedRunId: string | undefined
+      let bufferedTerminal: RunTerminalEvent | undefined
+      let terminalTimeout: number | undefined
+      let resolveTerminal!: (event: RunTerminalEvent) => void
+      const terminal = new Promise<RunTerminalEvent>((resolve) => {
+        resolveTerminal = resolve
       })
-      if (!started.ok) throw new Error(started.error.message)
-      return sessionId
+      const unsubscribe = api.onAgentEvent(({ event }) => {
+        if (
+          event.type !== 'run.status' ||
+          event.sessionId !== sessionId ||
+          !event.runId ||
+          !['completed', 'cancelled', 'failed'].includes(event.status ?? '')
+        ) {
+          return
+        }
+        const terminalEvent = event as RunTerminalEvent
+        if (!expectedRunId) {
+          bufferedTerminal = terminalEvent
+        } else if (terminalEvent.runId === expectedRunId) {
+          resolveTerminal(terminalEvent)
+        }
+      })
+
+      try {
+        const started = await api.startRun({
+          version: 1,
+          kind: 'new_session',
+          sessionId,
+          projectId: project.id,
+          title,
+          modelSelection: {
+            providerId: 'deepseek',
+            model: 'e2e-functional-model',
+            reasoning: 'off',
+          },
+          permissionMode: 'readonly',
+          message,
+          clientRequestId: `request:e2e:${crypto.randomUUID()}`,
+        })
+        if (!started.ok) throw new Error(started.error.message)
+        if (started.value.outcome !== 'started' || !started.value.runId) {
+          throw new Error('Expected the initial Durable run to start')
+        }
+        expectedRunId = started.value.runId
+        if (bufferedTerminal?.runId === expectedRunId) {
+          resolveTerminal(bufferedTerminal)
+        }
+
+        const terminalEvent = await Promise.race([
+          terminal,
+          new Promise<never>((_, reject) => {
+            terminalTimeout = window.setTimeout(
+              () => reject(new Error('Timed out waiting for Durable run')),
+              20_000,
+            )
+          }),
+        ])
+        if (terminalEvent.status !== 'completed') {
+          throw new Error(
+            terminalEvent.error?.message ??
+              `Durable run ended with ${terminalEvent.status}`,
+          )
+        }
+        return sessionId
+      } finally {
+        if (terminalTimeout !== undefined) {
+          window.clearTimeout(terminalTimeout)
+        }
+        unsubscribe()
+      }
     },
     {
       workspace: input.workspace,

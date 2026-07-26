@@ -413,6 +413,41 @@ export function createAppIpcHandlers(
         throw error
       }
     },
+    'workspace:open-file': async (payload) => {
+      const workspace = await projectWorkspace(payload.projectId)
+
+      try {
+        const guard = await PathGuard.create(workspace)
+        const guarded = await guard.resolveExisting(payload.path)
+        const fileStat = await stat(guarded.realPath)
+
+        if (!fileStat.isFile()) {
+          throw new PathGuardError('NOT_A_FILE', 'Path is not a regular file')
+        }
+
+        const openError = await shell.openPath(guarded.realPath)
+        if (openError) {
+          throw new IpcFault({
+            code: 'NOT_AVAILABLE',
+            message: 'No external application could open this file',
+          })
+        }
+
+        return { path: guarded.relativePath }
+      } catch (error) {
+        if (error instanceof PathGuardError) {
+          throw new IpcFault({
+            code:
+              error.code === 'PATH_NOT_FOUND'
+                ? 'NOT_FOUND'
+                : 'PRECONDITION_FAILED',
+            message: error.message,
+          })
+        }
+
+        throw error
+      }
+    },
     'workspace:choose-context': async (payload) => {
       const workspace = await projectWorkspace(payload.projectId)
       const options: OpenDialogOptions = {

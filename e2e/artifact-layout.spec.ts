@@ -36,7 +36,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
 
   test.afterAll(async () => disposeFeatureHarness(harness))
 
-  test('collapses projects and renders file tabs as one active tab unit', async () => {
+  test('collapses projects and drills from the explorer into one file preview', async () => {
     await writeFile(
       path.join(workspace, 'blog.pen'),
       Array.from(
@@ -69,38 +69,41 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     }
     await expect(page.locator('.artifact-sidebar')).toBeVisible()
     await expect(page.locator('.artifact-tabs')).toHaveClass(
-      /n-tabs--card-type/,
+      /n-tabs--line-type/,
     )
-    await expect(page.locator('.file-tabs')).toHaveClass(/n-tabs--card-type/)
+    await expect(page.locator('.artifact-sidebar .n-tabs')).toHaveCount(1)
 
     const artifactSpacing = await page.evaluate(() => {
       const sidebar = document.querySelector('.artifact-sidebar')
       const outerTab = document.querySelector('.artifact-tabs .n-tabs-tab')
-      const innerTab = document.querySelector('.file-tabs .n-tabs-tab')
       const content = document.querySelector('.explorer-view')
-      if (!sidebar || !outerTab || !innerTab || !content) {
-        throw new Error('Expected artifact tabs and explorer content')
+      if (!sidebar || !outerTab || !content) {
+        throw new Error('Expected the artifact tabs and explorer content')
       }
       const sidebarRect = sidebar.getBoundingClientRect()
       return {
         sidebarLeft: sidebarRect.left,
         outerTabLeft: outerTab.getBoundingClientRect().left,
-        innerTabLeft: innerTab.getBoundingClientRect().left,
         contentLeft: content.getBoundingClientRect().left,
       }
     })
     expect(artifactSpacing.outerTabLeft - artifactSpacing.sidebarLeft).toBe(12)
-    expect(artifactSpacing.innerTabLeft - artifactSpacing.sidebarLeft).toBe(12)
     expect(artifactSpacing.contentLeft - artifactSpacing.sidebarLeft).toBe(0)
 
     const projectToggle = page.getByRole('button', {
       name: '切换项目侧栏（Ctrl+B）',
     })
+    if ((await artifactToggle.getAttribute('aria-pressed')) === 'true') {
+      await artifactToggle.click()
+    }
     if ((await projectToggle.getAttribute('aria-pressed')) !== 'true') {
       await projectToggle.click()
     }
     const projectSidebar = page.locator('.project-sidebar')
     await expect(projectSidebar).toBeVisible()
+    await expect
+      .poll(() => projectSidebar.evaluate((sidebar) => sidebar.clientWidth))
+      .toBeGreaterThan(200)
     const sidebarLayout = await projectSidebar.evaluate((sidebar) => {
       const sidebarBounds = sidebar.getBoundingClientRect()
       const selectors = [
@@ -167,9 +170,13 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     await expect(page.locator('.explorer-tree')).toContainText('cached.txt')
 
     await page.getByText('blog.pen', { exact: true }).click()
-    const activeFileTab = page.locator('.file-tabs .n-tabs-tab--active')
-    await expect(activeFileTab).toContainText('blog.pen')
     await expect(page.locator('.file-viewer-header')).toContainText('blog.pen')
+    await expect(page.locator('.explorer-view')).toBeHidden()
+    await expect(
+      page.getByRole('button', {
+        name: '使用系统默认应用打开',
+      }),
+    ).toBeVisible()
     const fileScroll = await page.locator('.file-viewer').evaluate((viewer) => {
       viewer.scrollTop = viewer.scrollHeight
       return {
@@ -180,24 +187,12 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     })
     expect(fileScroll.scrollHeight).toBeGreaterThan(fileScroll.clientHeight)
     expect(fileScroll.scrollTop).toBeGreaterThan(0)
-    const tabLayout = await activeFileTab.evaluate((tab) => {
-      const label = tab.querySelector('.file-tab-label')
-      const close = tab.querySelector('.n-tabs-tab__close')
-      return {
-        childCount: tab.children.length,
-        display: getComputedStyle(tab).display,
-        labelHeight: label?.getBoundingClientRect().height,
-        closeHeight: close?.getBoundingClientRect().height,
-      }
-    })
-    expect(tabLayout).toMatchObject({
-      childCount: 2,
-      display: 'flex',
-    })
-    expect(tabLayout.labelHeight).toBeGreaterThan(0)
-    expect(tabLayout.closeHeight).toBeGreaterThan(0)
 
-    await page.getByRole('tab', { name: '资源管理器', exact: true }).click()
+    await page
+      .getByRole('button', { name: '返回资源管理器', exact: true })
+      .click()
+    await expect(page.locator('.file-viewer')).toBeHidden()
+    await expect(page.locator('.explorer-view')).toBeVisible()
     const explorerTree = page.locator('.explorer-tree')
     await expect(
       explorerTree.locator(
@@ -246,6 +241,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
         findDurableMessageText(page, 'seed project a', 'assistant_turn'),
       )
       .toBe('Project A ready')
+    await expect(page.locator('.n-message')).toHaveCount(0)
 
     fakeProvider.queue([textDelta('Project B ready')])
     await startDurableSession({
@@ -259,6 +255,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
         findDurableMessageText(page, 'seed project b', 'assistant_turn'),
       )
       .toBe('Project B ready')
+    await expect(page.locator('.n-message')).toHaveCount(0)
 
     await page.reload()
     await page

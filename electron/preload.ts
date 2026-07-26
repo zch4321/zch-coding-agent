@@ -117,6 +117,7 @@ const api: AgentApi = {
   listWorkspaceDirectory: (payload) =>
     invoke('workspace:list-directory', payload),
   readWorkspaceFile: (payload) => invoke('workspace:read-file', payload),
+  openWorkspaceFile: (payload) => invoke('workspace:open-file', payload),
   chooseWorkspaceContext: (payload) =>
     invoke('workspace:choose-context', payload),
   getProject: (payload) => invoke('project:get', payload),

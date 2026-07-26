@@ -99,6 +99,10 @@ export interface AgentApi {
   readWorkspaceFile(
     payload: IpcPayload<'workspace:read-file'>,
   ): Promise<IpcResult<'workspace:read-file'>>
+  /** Opens one guarded workspace file with the operating system's default application. */
+  openWorkspaceFile(
+    payload: IpcPayload<'workspace:open-file'>,
+  ): Promise<IpcResult<'workspace:open-file'>>
   chooseWorkspaceContext(
     payload: IpcPayload<'workspace:choose-context'>,
   ): Promise<IpcResult<'workspace:choose-context'>>
@@ -237,6 +241,7 @@ export const AGENT_API_KEYS = [
   'chooseWorkspace',
   'listWorkspaceDirectory',
   'readWorkspaceFile',
+  'openWorkspaceFile',
   'chooseWorkspaceContext',
   'getProject',
   'saveProject',
