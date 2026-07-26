@@ -130,7 +130,7 @@ function toolError(error: unknown): ToolResult {
   }
 }
 
-/** Registers project tools. */
+/** Registers project metadata and module-detection tools. */
 export function registerProjectTools(
   registry: ToolRegistrationPort,
   projectMetadata: ProjectMetadataStore,

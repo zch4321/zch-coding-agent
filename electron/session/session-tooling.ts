@@ -29,7 +29,7 @@ export interface SessionTooling {
   mcpGateway?: McpToolGateway
 }
 
-/** Creates session tooling. */
+/** Builds the Session tool bundle from registry, terminal, skills, project, and runtime services. */
 export function createSessionTooling(options: {
   configStore: ConfigStore
   terminals: SessionTerminalController

@@ -18,7 +18,7 @@ interface InternalCheckOutcome {
   passed: boolean
 }
 
-/** Collects benchmark patch. */
+/** Collects the bounded Git diff produced by the benchmark workspace. */
 export async function collectBenchmarkPatch(input: {
   workspace: string
   maxPatchBytes: number
@@ -34,7 +34,7 @@ export async function collectBenchmarkPatch(input: {
   return result.stdout
 }
 
-/** Returns or updates evaluate native patch state. */
+/** Evaluates a native patch against case policy and public and private hard gates. */
 export async function evaluateNativePatch(input: {
   loadedCase: LoadedBenchmarkCase
   patch: string

@@ -44,7 +44,7 @@ export interface SkillRecord extends SkillSummary {
   body: string
 }
 
-/** Reports skill failures. */
+/** Reports invalid skill metadata, URLs, installation, or storage operations. */
 export class SkillError extends Error {
   constructor(
     readonly code: string,
@@ -115,7 +115,7 @@ function isSkillIndexEntry(value: unknown): value is SkillIndexEntry {
   )
 }
 
-/** Parses skill document. */
+/** Parses SKILL.md metadata and body into normalized fields with required validation. */
 export function parseSkillDocument(
   content: string,
   fileName = 'skill.md',
@@ -225,7 +225,7 @@ export function parseSkillDocument(
   }
 }
 
-/** Validates skill url. */
+/** Validates an HTTP(S) skill URL and returns its normalized URL. */
 export function validateSkillUrl(input: string): URL {
   let url: URL
 
@@ -312,7 +312,7 @@ function defaultConnectHttps(
   })
 }
 
-/** Coordinates skills lifecycle and operations. */
+/** Manages installed skills, index persistence, refresh, enablement, and installation. */
 export class SkillsManager {
   readonly #directory: string
   readonly #indexPath: string
@@ -331,14 +331,14 @@ export class SkillsManager {
     this.#now = options.now ?? (() => new Date())
   }
 
-  /** Initializes the component and its dependencies. */
+  /** Creates the skill directory, loads the index, and refreshes installed records. */
   async initialize(): Promise<SkillList> {
     await mkdir(this.#directory, { recursive: true })
     await this.#loadIndex()
     return this.refresh()
   }
 
-  /** Lists the currently available records. */
+  /** Returns renderer-safe summaries of installed skills. */
   list(): SkillList {
     return {
       skills: [...this.#records.values()]
@@ -356,7 +356,7 @@ export class SkillsManager {
     }
   }
 
-  /** Reads the requested data. */
+  /** Loads the full skill record by validated skill name. */
   read(name: string): SkillRecord | undefined {
     if (!SKILL_NAME.test(name)) {
       return undefined
@@ -366,7 +366,7 @@ export class SkillsManager {
     return skill?.enabled ? structuredClone(skill) : undefined
   }
 
-  /** Returns or updates summary prompt state. */
+  /** Builds a bounded prompt catalog containing enabled skills in stable order. */
   summaryPrompt(maxChars = 12_000): string {
     const enabled = [...this.#records.values()]
       .filter((skill) => skill.enabled)
@@ -405,7 +405,7 @@ export class SkillsManager {
     return result.trimEnd()
   }
 
-  /** Returns or updates refresh state. */
+  /** Reloads the index and skill files, validates records, and returns diagnostics. */
   async refresh(): Promise<SkillList> {
     const diagnostics = this.#diagnostics.filter(
       (item) => item.file === 'index.json',
@@ -495,7 +495,7 @@ export class SkillsManager {
     return this.list()
   }
 
-  /** Sets enabled. */
+  /** Persists the enabled flag for an installed skill. */
   async setEnabled(name: string, enabled: boolean): Promise<boolean> {
     const skill = this.#records.get(name)
 
@@ -517,7 +517,7 @@ export class SkillsManager {
     return true
   }
 
-  /** Returns or updates install from file state. */
+  /** Validates and installs a local skill file or directory into the managed skill store. */
   async installFromFile(filePath: string): Promise<SkillSummary> {
     const fileStat = await lstat(filePath)
 
@@ -538,7 +538,7 @@ export class SkillsManager {
     )
   }
 
-  /** Returns or updates install from url state. */
+  /** Downloads, validates, and installs a skill from an allowed HTTP(S) URL. */
   async installFromUrl(input: string): Promise<SkillSummary> {
     let url = validateSkillUrl(input)
     const controller = new AbortController()

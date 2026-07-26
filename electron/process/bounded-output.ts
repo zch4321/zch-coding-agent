@@ -12,7 +12,7 @@ export interface BoundedOutputSnapshot {
   discardedHash?: string
 }
 
-/** Encapsulates bounded process output behavior. */
+/** Maintains bounded head and tail output for subprocess stdout and stderr streams. */
 export class BoundedProcessOutput {
   readonly #maxBytes: number
   readonly #headBytesLimit: number
@@ -32,7 +32,7 @@ export class BoundedProcessOutput {
     this.#tailBytesLimit = this.#maxBytes - this.#headBytesLimit
   }
 
-  /** Returns or updates append state. */
+  /** Appends output while preserving the configured head/tail bound and discard count. */
   append(stream: OutputStream, value: Buffer | string): void {
     const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
 
@@ -119,7 +119,7 @@ export class BoundedProcessOutput {
     ).toString('utf8')
   }
 
-  /** Returns a snapshot of the current state. */
+  /** Returns bounded stdout/stderr content together with truncation metadata. */
   snapshot(): BoundedOutputSnapshot {
     return {
       stdout: this.#streamContent('stdout'),

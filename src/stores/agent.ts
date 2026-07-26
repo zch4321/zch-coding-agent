@@ -176,7 +176,7 @@ function sessionViews(replica: ReplicaStore): SessionView[] {
     }))
 }
 
-/** Returns or updates use agent store state. */
+/** Creates the facade that combines shell, settings, replica, and runtime Pinia stores. */
 export function useAgentStore(pinia?: Pinia): AgentFacade {
   const shell = useAgentShellStore(pinia)
   const settings = useAgentSettingsStore(pinia)

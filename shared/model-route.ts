@@ -38,13 +38,13 @@ export type ModelRouteSnapshot = Static<typeof ModelRouteSnapshotSchema>
 const CREDENTIAL_QUERY_KEY =
   /(?:api[-_]?key|authorization|credential|password|secret|signature|token)/iu
 
-/** Resolves chat completions endpoint. */
+/** Normalizes a provider base URL and appends the OpenAI-compatible chat completions path. */
 export function resolveChatCompletionsEndpoint(baseURL: string): string {
   const normalized = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
   return new URL('chat/completions', normalized).toString()
 }
 
-/** Validates model route snapshot safe and throws when it is invalid. */
+/** Rejects route snapshots with invalid endpoints or fields that could carry credentials. */
 export function assertModelRouteSnapshotSafe(route: ModelRouteSnapshot): void {
   let endpoint: URL
   try {

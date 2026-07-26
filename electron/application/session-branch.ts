@@ -5,7 +5,7 @@ import {
 } from '../../shared/message'
 import { ApplicationError } from './application-error'
 
-/** Returns or updates terminal tool batch end state. */
+/** Finds the last message sequence belonging to the assistant's terminal-tool batch. */
 export function terminalToolBatchEnd(
   records: readonly MessageRecord[],
   assistantSeq: number,
@@ -30,7 +30,7 @@ export function terminalToolBatchEnd(
   return cursor
 }
 
-/** Returns or updates clone fork message state. */
+/** Clones a message for a forked Session while remapping IDs and sequence references. */
 export function cloneForkMessage(
   source: MessageRecord,
   sessionId: SessionId,
@@ -130,7 +130,7 @@ export function cloneForkMessage(
   return clone
 }
 
-/** Returns or updates rewind boundary seq state. */
+/** Computes the sequence boundary used for an after-message, before-message, or before-turn rewind. */
 export function rewindBoundarySeq(
   records: readonly MessageRecord[],
   target: MessageRecord,
@@ -145,7 +145,7 @@ export function rewindBoundarySeq(
   return (first?.seq ?? target.seq) - 1
 }
 
-/** Rebuilds active branch. */
+/** Rebuilds active-history flags and visibility after a branch is rewound. */
 export function rebuildActiveBranch(
   records: MessageRecord[],
   throughSeq: number,

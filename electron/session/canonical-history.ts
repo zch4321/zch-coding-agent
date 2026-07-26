@@ -60,12 +60,12 @@ function nextIdentity(state: CanonicalHistoryState) {
   }
 }
 
-/** Returns or updates canonical hash state. */
+/** Computes a SHA-256 hash of a canonical JSON value. */
 export function canonicalHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
-/** Returns or updates canonical trace source state. */
+/** Projects message records into deterministic sequence, part-type, and content hashes. */
 export function canonicalTraceSource(records: readonly MessageRecord[]): Array<{
   seq: number
   kind: MessageRecord['kind']
@@ -80,14 +80,14 @@ export function canonicalTraceSource(records: readonly MessageRecord[]): Array<{
   }))
 }
 
-/** Returns or updates message text state. */
+/** Extracts and joins text parts from a MessageRecord. */
 export function messageText(record: MessageRecord): string {
   return record.parts
     .flatMap((part) => (part.type === 'text' ? [part.text] : []))
     .join('\n')
 }
 
-/** Appends prompt message. */
+/** Appends a canonical prompt record with its source kind and content metadata. */
 export function appendPromptMessage(
   state: CanonicalHistoryState,
   input: {
@@ -140,7 +140,7 @@ export function appendPromptMessage(
   return record
 }
 
-/** Appends user input. */
+/** Appends a user-input record and optional client/idempotency metadata to history. */
 export function appendUserInput(
   state: CanonicalHistoryState,
   input: {
@@ -217,7 +217,7 @@ export function appendUserInput(
   return record
 }
 
-/** Appends control command. */
+/** Appends a slash/control command with its client request identity. */
 export function appendControlCommand(
   state: CanonicalHistoryState,
   input: {
@@ -236,7 +236,7 @@ export function appendControlCommand(
   })
 }
 
-/** Appends assistant turn. */
+/** Appends an assistant turn with text, reasoning, tool calls, and usage metadata. */
 export function appendAssistantTurn(
   state: CanonicalHistoryState,
   input: {
@@ -282,7 +282,7 @@ export function appendAssistantTurn(
   })
 }
 
-/** Validates assistant turn candidate and throws when it is invalid. */
+/** Validates an assistant turn against current sequence, tool-call, and history invariants. */
 export function assertAssistantTurnCandidate(
   state: CanonicalHistoryState,
   input: AssistantTurnCandidateInput,
@@ -316,7 +316,7 @@ export function assertAssistantTurnCandidate(
   }
 }
 
-/** Appends completed assistant turn. */
+/** Validates and appends a completed assistant turn to canonical history. */
 export function appendCompletedAssistantTurn(
   state: CanonicalHistoryState,
   input: AssistantTurnCandidateInput,
@@ -362,7 +362,7 @@ function assistantTurnCandidate(
   return record
 }
 
-/** Appends tool result. */
+/** Appends a tool result linked to its provider call ID and optional file-change metadata. */
 export function appendToolResult(
   state: CanonicalHistoryState,
   input: {
@@ -406,7 +406,7 @@ export function appendToolResult(
   return record
 }
 
-/** Appends compact summary. */
+/** Appends a compaction summary and marks the replaced history boundary. */
 export function appendCompactSummary(
   state: CanonicalHistoryState,
   input: {
@@ -444,7 +444,7 @@ export function appendCompactSummary(
   return record
 }
 
-/** Returns or updates latest prompt hash state. */
+/** Finds the most recent content hash for a prompt kind. */
 export function latestPromptHash(
   state: CanonicalHistoryState,
   kind: CanonicalPromptKind,
@@ -457,7 +457,7 @@ export function latestPromptHash(
   return undefined
 }
 
-/** Deactivates active history. */
+/** Marks active-history records inactive and returns the records it changed. */
 export function deactivateActiveHistory(
   state: CanonicalHistoryState,
 ): MessageRecord[] {
@@ -466,9 +466,9 @@ export function deactivateActiveHistory(
   return active
 }
 
-/** Encapsulates message history compiler behavior. */
+/** Compiles persisted message records into provider-ready canonical history. */
 export class MessageHistoryCompiler {
-  /** Returns or updates compile state. */
+  /** Filters active non-superseded records and validates their sequence and turn structure. */
   compile(records: readonly MessageRecord[]): CompiledCanonicalHistory {
     const active = records
       .filter(

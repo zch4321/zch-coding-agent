@@ -17,7 +17,7 @@ export interface WebSearchProvider {
   search(request: WebSearchRequest): Promise<WebSearchResult[]>
 }
 
-/** Reports web search failures. */
+/** Reports web-search provider request and response failures. */
 export class WebSearchError extends Error {
   constructor(
     readonly code: string,
@@ -54,7 +54,7 @@ export class BraveSearchProvider implements WebSearchProvider {
     this.#baseURL = baseURL
   }
 
-  /** Searches for records matching the request. */
+  /** Queries the configured Brave-compatible endpoint with bounded count and timeout. */
   async search(request: WebSearchRequest): Promise<WebSearchResult[]> {
     const url = new URL('/res/v1/web/search', this.#baseURL)
     url.searchParams.set('q', request.query)

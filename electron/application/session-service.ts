@@ -100,7 +100,7 @@ export type FirstTurnCommit =
       value: RequestLookup
     }
 
-/** Provides session operations. */
+/** Provides durable Session queries and revision-checked mutations. */
 export class SessionService {
   readonly #coordinator: ApplicationStateCoordinator
   readonly #sessions: SessionRepository
@@ -121,7 +121,7 @@ export class SessionService {
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
-  /** Lists the currently available records. */
+  /** Lists Sessions with project, lifecycle, search, and cursor filters. */
   async list(
     query: {
       projectId?: SessionListQuery['projectId']
@@ -138,7 +138,7 @@ export class SessionService {
     ).value
   }
 
-  /** Returns the requested record. */
+  /** Builds a Session snapshot with its current message page and runtime state. */
   async get(sessionId: SessionId): Promise<SessionSnapshot> {
     const snapshot = (
       await this.#coordinator.query((reader) => {
@@ -163,7 +163,7 @@ export class SessionService {
     }
   }
 
-  /** Returns record. */
+  /** Reads one durable SessionRecord by ID. */
   async getRecord(sessionId: SessionId): Promise<SessionRecord> {
     const record = (
       await this.#coordinator.query((reader) =>
@@ -176,7 +176,7 @@ export class SessionService {
     return record
   }
 
-  /** Lists active history. */
+  /** Loads active-history messages after verifying that the Session exists. */
   async listActiveHistory(sessionId: SessionId): Promise<MessageRecord[]> {
     return (
       await this.#coordinator.query((reader) => {
@@ -188,7 +188,7 @@ export class SessionService {
     ).value
   }
 
-  /** Loads runtime state. */
+  /** Loads the durable record, active messages, and idempotency results needed for runtime hydration. */
   async loadRuntimeState(
     sessionId: SessionId,
     clientRequestIds: readonly string[] = [],
@@ -222,7 +222,7 @@ export class SessionService {
     ).value
   }
 
-  /** Lists messages. */
+  /** Lists a bounded page of Session messages before an optional sequence cursor. */
   async listMessages(
     sessionId: SessionId,
     query: { beforeSeq?: number; limit?: number } = {},
@@ -237,7 +237,7 @@ export class SessionService {
     ).value
   }
 
-  /** Searches messages. */
+  /** Searches visible message text within one Session. */
   async searchMessages(
     sessionId: SessionId,
     input: { text: string; limit?: number },
@@ -252,7 +252,7 @@ export class SessionService {
     ).value
   }
 
-  /** Searches sessions. */
+  /** Searches Session summaries, optionally restricted to one Project. */
   async searchSessions(input: {
     text: string
     projectId?: ProjectId
@@ -297,7 +297,7 @@ export class SessionService {
     ).value
   }
 
-  /** Returns original visible user. */
+  /** Finds the original visible user message associated with a target message. */
   async getOriginalVisibleUser(
     sessionId: SessionId,
     messageId: MessageId,
@@ -325,7 +325,7 @@ export class SessionService {
     ).value
   }
 
-  /** Returns or updates lookup request state. */
+  /** Looks up idempotency state for a client request and optional request hash. */
   async lookupRequest(
     sessionId: SessionId,
     clientRequestId: string,
@@ -357,7 +357,7 @@ export class SessionService {
     ).value
   }
 
-  /** Commits first turn. */
+  /** Atomically persists a new Session, its initial messages, and request idempotency state. */
   async commitFirstTurn(input: {
     session: SessionRecord
     messages: readonly MessageRecord[]
@@ -406,7 +406,7 @@ export class SessionService {
     }
   }
 
-  /** Commits mutation. */
+  /** Atomically commits messages and metadata after checking revision and sequence expectations. */
   async commitMutation(input: SessionMutation): Promise<SessionCommandResult> {
     return this.#coordinator.command('session.changed', (transaction) => {
       const current = this.#sessions.get(transaction, input.sessionId)
@@ -467,7 +467,7 @@ export class SessionService {
     })
   }
 
-  /** Updates the requested record. */
+  /** Applies a revision-checked metadata update to a Session record. */
   async update(input: {
     sessionId: SessionId
     expectedRevision: number
@@ -494,7 +494,7 @@ export class SessionService {
     return result
   }
 
-  /** Returns or updates archive state. */
+  /** Archives a Session after reserving and completing its lifecycle eviction. */
   async archive(input: {
     sessionId: SessionId
     expectedRevision: number
@@ -557,7 +557,7 @@ export class SessionService {
     return result
   }
 
-  /** Returns or updates rewind state. */
+  /** Rebuilds a Session's active branch through a selected boundary and commits the result. */
   async rewind(input: {
     sessionId: SessionId
     expectedRevision: number
@@ -674,7 +674,7 @@ export class SessionService {
     return result
   }
 
-  /** Returns or updates fork state. */
+  /** Creates a new Session branch from a source Session through an optional message. */
   async fork(input: {
     sourceSessionId: SessionId
     expectedRevision: number

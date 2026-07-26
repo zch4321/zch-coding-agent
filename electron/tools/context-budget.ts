@@ -4,7 +4,7 @@ import type { ToolResult } from './types'
 const TRUNCATION_MARKER = '\n... output truncated ...\n'
 const EXHAUSTED_TOOL_RESULT_PREVIEW_TOKENS = 512
 
-/** Reports context budget failures. */
+/** Reports failures to fit provider context within configured token limits. */
 export class ContextBudgetError extends Error {
   constructor(message: string) {
     super(message)
@@ -12,7 +12,7 @@ export class ContextBudgetError extends Error {
   }
 }
 
-/** Estimates text tokens. */
+/** Estimates text tokens from UTF-8 byte length and the configured estimation ratio. */
 export function estimateTextTokens(
   value: string,
   estimation: PublicConfig['limits']['tokenEstimation'],
@@ -23,7 +23,7 @@ export function estimateTextTokens(
   return Math.ceil(bytes / bytesPerToken)
 }
 
-/** Estimates json tokens. */
+/** Estimates JSON tokens by serializing the value before applying text estimation. */
 export function estimateJsonTokens(
   value: unknown,
   estimation: PublicConfig['limits']['tokenEstimation'],
@@ -35,7 +35,7 @@ function decodeUtf8Slice(value: Buffer): string {
   return new TextDecoder('utf-8', { fatal: false }).decode(value)
 }
 
-/** Truncates text head tail to its configured bound. */
+/** Truncates text around its head and tail so the estimated token count stays bounded. */
 export function truncateTextHeadTail(
   value: string,
   maxTokens: number,
@@ -57,7 +57,7 @@ export function truncateTextHeadTail(
   return `${decodeUtf8Slice(source.subarray(0, headBytes))}${TRUNCATION_MARKER}${decodeUtf8Slice(source.subarray(Math.max(headBytes, source.length - tailBytes)))}`
 }
 
-/** Bounds tool result for context. */
+/** Fits a tool result to the remaining context budget while preserving status and metadata. */
 export function boundToolResultForContext(
   result: ToolResult,
   limits: PublicConfig['limits'],

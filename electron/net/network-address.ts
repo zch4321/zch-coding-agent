@@ -60,7 +60,7 @@ function mappedIpv4Address(address: string): string | undefined {
   return [high >>> 8, high & 0xff, low >>> 8, low & 0xff].join('.')
 }
 
-/** Determines whether is public network address. */
+/** Classifies an IP address as public/routable rather than private or reserved. */
 export function isPublicNetworkAddress(address: string): boolean {
   const family = isIP(address)
 

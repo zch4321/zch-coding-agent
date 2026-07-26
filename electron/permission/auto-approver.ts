@@ -68,7 +68,7 @@ function hasUsageData(value: JsonValue): boolean {
   )
 }
 
-/** Returns or updates strict auto approver output state. */
+/** Parses auto-approver JSON into a strict decision and bounded explanation. */
 export function strictAutoApproverOutput(text: string): AutoApproverResult {
   let value: unknown
 
@@ -93,7 +93,7 @@ export function strictAutoApproverOutput(text: string): AutoApproverResult {
   }
 }
 
-/** Encapsulates provider auto approver behavior. */
+/** Evaluates tool approval requests through a dedicated provider route with strict output checks. */
 export class ProviderAutoApprover implements AutoApprover {
   readonly #provider: LLMProvider
   readonly #timeoutMs: number
@@ -114,7 +114,7 @@ export class ProviderAutoApprover implements AutoApprover {
     this.#route = structuredClone(route)
   }
 
-  /** Returns or updates evaluate state. */
+  /** Prompts the approver model and returns a validated decision before the timeout expires. */
   async evaluate(
     input: AutoApproverInput,
     signal: AbortSignal,
@@ -211,7 +211,7 @@ export class ProviderAutoApprover implements AutoApprover {
   }
 }
 
-/** Returns or updates auto approver input state. */
+/** Builds a redacted approver request containing the tool, policy signals, workspace, and definitions. */
 export function autoApproverInput(input: {
   call: ToolCall
   definition: ToolDefinition

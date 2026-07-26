@@ -27,7 +27,7 @@ export interface BuildRollingMixedCohortInput {
   ) => Promise<ResolvedExternalImage>
 }
 
-/** Builds rolling mixed cohort. */
+/** Builds a reproducible mixed benchmark cohort, applying exclusions and recording its checksum. */
 export async function buildRollingMixedCohort(
   input: BuildRollingMixedCohortInput,
 ): Promise<BenchmarkCohort> {
@@ -179,19 +179,19 @@ async function takeEligible(input: {
   }
 }
 
-/** Returns or updates candidate hash state. */
+/** Computes the canonical identity hash for an external benchmark candidate. */
 export function candidateHash(candidate: ExternalBenchmarkCandidate): string {
   return sha256Canonical(candidate)
 }
 
-/** Returns or updates patch scale state. */
+/** Classifies a patch as small, medium, or large using the configured byte thresholds. */
 export function patchScale(bytes: number): 'small' | 'medium' | 'large' {
   if (bytes <= 2_048) return 'small'
   if (bytes <= 12_288) return 'medium'
   return 'large'
 }
 
-/** Returns or updates verify cohort state. */
+/** Recomputes and verifies the cohort checksum before it is used. */
 export function verifyCohort(cohort: BenchmarkCohort): void {
   const { cohortHash, ...draft } = cohort
   if (sha256Canonical(draft) !== cohortHash) {
@@ -209,7 +209,7 @@ export function verifyCohort(cohort: BenchmarkCohort): void {
   }
 }
 
-/** Validates same cohort and throws when it is invalid. */
+/** Ensures two benchmark cohorts have identical identity and selection metadata. */
 export function assertSameCohort(
   left: BenchmarkCohort,
   right: BenchmarkCohort,

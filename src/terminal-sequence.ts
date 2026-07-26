@@ -3,13 +3,13 @@ import type { TerminalId } from '../shared/ids'
 
 export type TerminalSequenceDecision = 'apply' | 'ignore' | 'recover' | 'queue'
 
-/** Tracks terminal sequence state. */
+/** Tracks per-terminal event sequences and bounds replay while a terminal recovers. */
 export class TerminalSequenceTracker {
   readonly #last = new Map<TerminalId, number>()
   readonly #recovering = new Set<TerminalId>()
   readonly #queued = new Map<TerminalId, TerminalEvent[]>()
 
-  /** Returns or updates observe state. */
+  /** Classifies an event as new, duplicate, queued, or requiring terminal resynchronization. */
   observe(event: TerminalEvent): TerminalSequenceDecision {
     if (this.#recovering.has(event.terminalId)) {
       this.defer(event)
@@ -32,19 +32,19 @@ export class TerminalSequenceTracker {
     return 'apply'
   }
 
-  /** Returns or updates defer state. */
+  /** Queues a terminal event during recovery while retaining only bounded recent history. */
   defer(event: TerminalEvent): void {
     const queued = this.#queued.get(event.terminalId) ?? []
     queued.push(event)
     this.#queued.set(event.terminalId, queued.slice(-256))
   }
 
-  /** Starts recovery. */
+  /** Marks a terminal as recovering so incoming events are deferred until a snapshot arrives. */
   startRecovery(terminalId: TerminalId): void {
     this.#recovering.add(terminalId)
   }
 
-  /** Returns or updates complete recovery state. */
+  /** Installs a snapshot sequence and returns queued events eligible for replay. */
   completeRecovery(
     terminalId: TerminalId,
     snapshotSeq: number,
@@ -58,13 +58,13 @@ export class TerminalSequenceTracker {
       .sort((left, right) => left.seq - right.seq)
   }
 
-  /** Cancels recovery. */
+  /** Drops recovery state and queued events for a terminal without replaying them. */
   cancelRecovery(terminalId: TerminalId): void {
     this.#recovering.delete(terminalId)
     this.#queued.delete(terminalId)
   }
 
-  /** Returns or updates reset state. */
+  /** Clears sequence, recovery, and queued-event state for every terminal. */
   reset(): void {
     this.#last.clear()
     this.#recovering.clear()

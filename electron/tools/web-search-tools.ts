@@ -47,7 +47,7 @@ function errorResult(error: unknown): ToolResult {
   }
 }
 
-/** Registers web search tools. */
+/** Registers the configured web-search tool with credential and result bounds. */
 export function registerWebSearchTools(
   registry: ToolRegistrationPort,
   configStore: Pick<ConfigStore, 'getPublicConfig' | 'getWebSearchApiKey'>,

@@ -20,7 +20,7 @@ export interface HeadlessRunArguments {
   benchmarkCaseFile?: string
 }
 
-/** Reports headless cli failures. */
+/** Reports invalid headless runner arguments or input files. */
 export class HeadlessCliError extends Error {
   readonly code = 'HEADLESS_CLI_INVALID'
 
@@ -30,7 +30,7 @@ export class HeadlessCliError extends Error {
   }
 }
 
-/** Parses headless arguments. */
+/** Parses headless run arguments into config, task, workspace, and output options. */
 export function parseHeadlessArguments(argv: string[]): HeadlessRunArguments {
   if (argv[0] !== 'run') {
     throw new HeadlessCliError('Expected the run command')
@@ -98,7 +98,7 @@ export function parseHeadlessArguments(argv: string[]): HeadlessRunArguments {
   }
 }
 
-/** Reads headless benchmark case. */
+/** Reads and validates a benchmark agent-case JSON document from disk. */
 export async function readHeadlessBenchmarkCase(
   filePath: string,
 ): Promise<BenchmarkAgentCase> {
@@ -123,7 +123,7 @@ export async function readHeadlessBenchmarkCase(
   return structuredClone(value) as BenchmarkAgentCase
 }
 
-/** Reads headless task. */
+/** Reads a bounded UTF-8 task text file for a headless run. */
 export async function readHeadlessTask(filePath: string): Promise<string> {
   let fileStat: Awaited<ReturnType<typeof stat>>
   try {

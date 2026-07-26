@@ -25,7 +25,7 @@ export interface PolicyInput {
   now?: Date
 }
 
-/** Determines whether has side effects. */
+/** Determines whether a tool has effects beyond read-only filesystem and terminal access. */
 export function hasSideEffects(definition: ToolDefinition): boolean {
   return definition.effects.some(
     (effect) =>
@@ -96,7 +96,7 @@ function isAutoAllowedWorkspaceFileMutation(input: PolicyInput): boolean {
   )
 }
 
-/** Returns or updates evaluate policy state. */
+/** Selects an allow, deny, or approval outcome from risk, mode, and remembered policy rules. */
 export function evaluatePolicy(input: PolicyInput): PolicyOutcome {
   const sideEffects = hasSideEffects(input.definition)
 

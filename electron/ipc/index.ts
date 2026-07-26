@@ -40,7 +40,7 @@ export interface IpcRegistrarOptions {
   onDiagnostic?: (message: string, error?: unknown) => void
 }
 
-/** Encapsulates ipc fault behavior. */
+/** Carries a validated IPC error across the main/preload boundary. */
 export class IpcFault extends Error {
   readonly error: IpcError
 
@@ -85,7 +85,7 @@ function success<Channel extends IpcChannel>(
   } as IpcResult<Channel>
 }
 
-/** Handles ipc invocation. */
+/** Validates sender and payload, invokes a channel handler, and validates its result. */
 export async function handleIpcInvocation<Channel extends IpcChannel>(
   channel: Channel,
   event: IpcMainInvokeEvent,
@@ -198,7 +198,7 @@ export async function handleIpcInvocation<Channel extends IpcChannel>(
   }
 }
 
-/** Registers ipc handlers. */
+/** Registers every contract channel with sender, payload, and result validation. */
 export function registerIpcHandlers(options: IpcRegistrarOptions): () => void {
   const channels = Object.keys(IPC_CONTRACTS) as IpcChannel[]
 

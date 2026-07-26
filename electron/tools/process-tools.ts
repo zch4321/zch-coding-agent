@@ -116,7 +116,7 @@ function wait(durationMs: number, signal: AbortSignal): Promise<void> {
   })
 }
 
-/** Registers process tools. */
+/** Registers the bounded process-execution tool and its argument policy. */
 export function registerProcessTools(
   registry: ToolRegistrationPort,
   getConfig: () => PublicConfig,

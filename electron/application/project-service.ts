@@ -37,7 +37,7 @@ export interface ProjectServiceOptions {
 
 type ProjectUpdatePatch = Static<typeof ProjectUpdatePayloadSchema>['patch']
 
-/** Provides project operations. */
+/** Provides durable project CRUD operations with lifecycle guards. */
 export class ProjectService {
   readonly #coordinator: ApplicationStateCoordinator
   readonly #repository: ProjectRepository
@@ -56,14 +56,14 @@ export class ProjectService {
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
-  /** Lists the currently available records. */
+  /** Lists all persisted Project records. */
   async list(): Promise<ProjectRecord[]> {
     return (
       await this.#coordinator.query((reader) => this.#repository.list(reader))
     ).value
   }
 
-  /** Returns the requested record. */
+  /** Loads one Project record or raises a not-found application error. */
   async get(projectId: ProjectId): Promise<ProjectRecord> {
     const record = (
       await this.#coordinator.query((reader) =>
@@ -76,7 +76,7 @@ export class ProjectService {
     return record
   }
 
-  /** Returns or updates add state. */
+  /** Canonicalizes a workspace path, creates a Project record, and commits it. */
   async add(input: {
     path: string
     name?: string
@@ -111,7 +111,7 @@ export class ProjectService {
     }
   }
 
-  /** Updates the requested record. */
+  /** Applies a revision-checked metadata patch to a Project record. */
   async update(input: {
     projectId: ProjectId
     expectedRevision: number
@@ -180,7 +180,7 @@ export class ProjectService {
     return result
   }
 
-  /** Removes the requested record. */
+  /** Removes a Project after checking its revision and evicting live Sessions. */
   async remove(input: {
     projectId: ProjectId
     expectedRevision: number

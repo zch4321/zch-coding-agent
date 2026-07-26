@@ -67,7 +67,7 @@ export interface FileChangeRuntimeGuard {
   }): FileChangeRevertAccessResult
 }
 
-/** Provides file change operations. */
+/** Coordinates durable file-change listing, preparation, commit, and safe revert operations. */
 export class FileChangeService implements FileChangeExecutionPort {
   readonly #coordinator: ApplicationStateCoordinator
   readonly #fileChanges: FileChangeRepository
@@ -89,7 +89,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
-  /** Sets runtime guard. */
+  /** Installs the lifecycle guard used to block mutations during session or project transitions. */
   setRuntimeGuard(runtimeGuard: FileChangeRuntimeGuard): void {
     if (this.#runtimeGuard) {
       throw new Error('FileChange runtime guard is already configured')
@@ -97,7 +97,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     this.#runtimeGuard = runtimeGuard
   }
 
-  /** Lists the currently available records. */
+  /** Lists a bounded page of file changes for a session using the requested cursor. */
   async list(
     sessionId: SessionId,
     query: { before?: FileChangeListCursor; limit?: number } = {},
@@ -112,7 +112,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     ).value
   }
 
-  /** Prepares mutation. */
+  /** Validates the tool operation, workspace, and file preconditions before mutation. */
   async prepareMutation(
     input: Parameters<FileChangeExecutionPort['prepareMutation']>[0],
   ): Promise<PreparedFileChange | undefined> {
@@ -184,7 +184,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     }
   }
 
-  /** Commits mutation. */
+  /** Commits a prepared file mutation and records its resulting FileChange record. */
   async commitMutation(input: {
     workspace: string
     prepared: PreparedFileChange
@@ -298,7 +298,7 @@ export class FileChangeService implements FileChangeExecutionPort {
     })
   }
 
-  /** Returns or updates revert state. */
+  /** Revalidates workspace and message preconditions before restoring a recorded file state. */
   async revert(
     sessionId: SessionId,
     fileChangeId: FileChangeId,

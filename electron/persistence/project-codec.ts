@@ -20,7 +20,7 @@ export interface ProjectRow {
   updated_at: string
 }
 
-/** Returns or updates encode project row state. */
+/** Encodes a ProjectRecord into its SQLite column representation. */
 export function encodeProjectRow(record: ProjectRecord): ProjectRow {
   assertSchemaValue<ProjectRecord>(
     validateProjectRecord,
@@ -38,7 +38,7 @@ export function encodeProjectRow(record: ProjectRecord): ProjectRow {
   }
 }
 
-/** Returns or updates decode project row state. */
+/** Decodes and validates a SQLite row as a ProjectRecord. */
 export function decodeProjectRow(row: Record<string, unknown>): ProjectRecord {
   const record = {
     schemaVersion: integerColumn(row.schema_version, 'projects.schema_version'),

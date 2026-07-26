@@ -1,6 +1,6 @@
 import { runDockerCommand } from '../worker/docker-client'
 
-/** Returns or updates docker image id state. */
+/** Returns the Docker image ID reported by `docker image inspect`. */
 export async function dockerImageId(image: string): Promise<string> {
   const result = await runDockerCommand([
     'image',
@@ -15,7 +15,7 @@ export async function dockerImageId(image: string): Promise<string> {
   return value
 }
 
-/** Returns or updates docker image exists state. */
+/** Checks whether Docker can inspect the requested image. */
 export async function dockerImageExists(image: string): Promise<boolean> {
   const result = await runDockerCommand(
     ['image', 'inspect', '--format', '{{.Id}}', image],
@@ -27,7 +27,7 @@ export async function dockerImageExists(image: string): Promise<boolean> {
   return result.exitCode === 0
 }
 
-/** Returns or updates docker image workspace state. */
+/** Returns the workspace path label stored in the Docker image metadata. */
 export async function dockerImageWorkspace(image: string): Promise<string> {
   const result = await runDockerCommand([
     'image',

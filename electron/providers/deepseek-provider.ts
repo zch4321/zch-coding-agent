@@ -174,7 +174,7 @@ function appendBoundedText(
   return current + delta
 }
 
-/** Encapsulates open ai compatible provider behavior. */
+/** Streams OpenAI-compatible SSE responses and normalizes text, reasoning, tools, usage, and errors. */
 export class OpenAICompatibleProvider implements LLMProvider {
   readonly #providerId: string
   readonly #profile: ProviderProfile
@@ -198,7 +198,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       options.createCallId ?? (() => `call:${randomUUID()}` as CallId)
   }
 
-  /** Returns or updates stream state. */
+  /** Sends a provider request and emits normalized events while parsing its SSE stream. */
   async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     const providerRequest = structuredClone(request.providerRequest)
     const requestBody = JSON.stringify(providerRequest)
@@ -386,7 +386,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
   }
 }
 
-/** Encapsulates deep seek provider behavior. */
+/** Configures the OpenAI-compatible provider with DeepSeek's endpoint and response profile. */
 export class DeepSeekProvider extends OpenAICompatibleProvider {
   constructor(options: DeepSeekProviderOptions) {
     super({

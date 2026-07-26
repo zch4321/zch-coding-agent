@@ -25,7 +25,7 @@ interface RunGroupState {
   completedAt?: string
 }
 
-/** Runs benchmark group. */
+/** Runs one benchmark group, preparing its workspace, invoking trials, and writing artifacts. */
 export async function runBenchmarkGroup(
   input: RunBenchmarkGroupInput,
 ): Promise<BenchmarkRunGroupResult> {

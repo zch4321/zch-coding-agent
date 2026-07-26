@@ -59,7 +59,7 @@ const SERENA_LOG_LEVELS = new Set<SerenaLogLevel>([
 const validateProjectModel = compileSchema(ProjectModelSchema)
 const validateProjectModelFile = compileSchema(ProjectModelFileSchema)
 
-/** Reports project metadata failures. */
+/** Reports invalid, stale, or unsafe persisted project metadata. */
 export class ProjectMetadataError extends Error {
   constructor(
     readonly code:
@@ -365,7 +365,7 @@ async function gitIgnoreRecommended(workspaceRoot: string): Promise<boolean> {
   }
 }
 
-/** Persists and retrieves project metadata state. */
+/** Persists per-workspace project metadata and refreshes detected module information. */
 export class ProjectMetadataStore {
   readonly #detector: ProjectModuleDetector
   readonly #mutations = new Map<string, Promise<unknown>>()
@@ -374,7 +374,7 @@ export class ProjectMetadataStore {
     this.#detector = detector
   }
 
-  /** Returns the requested record. */
+  /** Loads metadata after validating the workspace and repairing missing default state. */
   async get(workspace: string): Promise<ProjectMetadataSnapshot> {
     const guard = await this.#guard(workspace)
     const filePath = this.#filePath(guard)
@@ -402,7 +402,7 @@ export class ProjectMetadataStore {
     return this.#snapshot(guard, project)
   }
 
-  /** Persists the supplied state. */
+  /** Validates and atomically persists project metadata for a workspace. */
   async save(
     workspace: string,
     project: ProjectModel,
@@ -430,7 +430,7 @@ export class ProjectMetadataStore {
     return operation
   }
 
-  /** Returns or updates detect modules state. */
+  /** Runs module detection for the guarded workspace and returns its descriptors. */
   async detectModules(workspace: string) {
     const guard = await this.#guard(workspace)
     return this.#detector.detect(guard.workspacePath)

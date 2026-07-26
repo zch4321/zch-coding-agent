@@ -60,12 +60,12 @@ export interface SendMessageOptions {
   clearInput?: boolean
 }
 
-/** Returns or updates request id state. */
+/** Creates a client request ID by combining the supplied prefix with a UUID. */
 export function requestId(prefix: string): string {
   return `${prefix}:${crypto.randomUUID()}`
 }
 
-/** Normalizes send message options. */
+/** Extracts supported send-message options from a plain object or DOM event. */
 export function normalizeSendMessageOptions(
   value: SendMessageOptions | Event = {},
 ): SendMessageOptions {
@@ -76,7 +76,7 @@ export function normalizeSendMessageOptions(
   return {}
 }
 
-/** Parses mention attachments. */
+/** Parses unique @-mention attachment paths into renderer attachment chips. */
 export function parseMentionAttachments(
   message: string,
 ): ContextAttachmentChip[] {
@@ -101,14 +101,14 @@ export function parseMentionAttachments(
   return attachments
 }
 
-/** Returns or updates attachment refs state. */
+/** Projects attachment chips into the bridge-safe attachment reference shape. */
 export function attachmentRefs(
   attachments: ContextAttachmentChip[],
 ): ContextAttachmentRef[] {
   return attachments.map(({ kind, path, source }) => ({ kind, path, source }))
 }
 
-/** Returns or updates message text state. */
+/** Joins text parts from a message record into the text shown to the user. */
 export function messageText(record: MessageRecord): string {
   return record.parts
     .filter(
@@ -121,7 +121,7 @@ export function messageText(record: MessageRecord): string {
     .join('\n')
 }
 
-/** Returns or updates original user record state. */
+/** Narrows a message to a user-input record with its original request metadata. */
 export function originalUserRecord(
   record: MessageRecord | undefined,
 ): record is Extract<MessageRecord, { kind: 'user_input' }> & {
@@ -141,13 +141,13 @@ export function originalUserRecord(
   )
 }
 
-/** Returns or updates project name state. */
+/** Extracts the final workspace directory name after normalizing path separators. */
 export function projectName(path: string): string {
   const normalized = path.replace(/\\/gu, '/')
   return normalized.split('/').filter(Boolean).at(-1) ?? path
 }
 
-/** Returns or updates blank overlay state. */
+/** Creates the empty renderer overlay used before a run has produced live state. */
 export function blankOverlay(): SessionOverlay {
   return {
     status: 'idle',
@@ -162,7 +162,7 @@ export function blankOverlay(): SessionOverlay {
   }
 }
 
-/** Returns or updates pending approval from snapshot state. */
+/** Converts a runtime approval snapshot into the renderer's pending-approval model. */
 export function pendingApprovalFromSnapshot(
   runtime: ActiveRunPublicSnapshot,
 ): PendingApproval | undefined {

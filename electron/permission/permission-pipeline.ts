@@ -94,7 +94,7 @@ function freezeDeep<Value>(value: Value): Value {
   return value
 }
 
-/** Creates args hash. */
+/** Hashes tool arguments so an approval is bound to the exact call payload. */
 export function createArgsHash(args: JsonValue): string {
   return createHash('sha256').update(JSON.stringify(args)).digest('hex')
 }
@@ -250,7 +250,7 @@ function rememberedRule(input: {
   }
 }
 
-/** Revalidates approved tool call. */
+/** Checks that an approved call still matches its session, run, arguments, workspace, and policy. */
 export async function revalidateApprovedToolCall(
   approvedCall: ApprovedToolCall,
   context: {
@@ -289,9 +289,9 @@ export async function revalidateApprovedToolCall(
   )
 }
 
-/** Applies permission policies in order. */
+/** Applies policy, plugin, auto-approval, and human-approval gates to tool calls. */
 export class PermissionPipeline {
-  /** Returns or updates authorize state. */
+  /** Resolves the resource plan and returns an allow, deny, or approval-required outcome. */
   async authorize(
     input: PermissionPipelineInput,
   ): Promise<AuthorizationResult> {

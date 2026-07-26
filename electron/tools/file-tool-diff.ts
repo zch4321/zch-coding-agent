@@ -13,7 +13,7 @@ function truncateDiff(value: string): string {
   )}${TRUNCATED_DIFF_MARKER}`
 }
 
-/** Creates file diff. */
+/** Creates a bounded unified diff between the recorded and current file contents. */
 export function createFileDiff(
   filePath: string,
   before: string,
@@ -32,7 +32,7 @@ export function createFileDiff(
   return truncateDiff(`${body}\n`)
 }
 
-/** Determines whether is file diff truncated. */
+/** Checks whether a diff ends with the configured truncation marker. */
 export function isFileDiffTruncated(value: string): boolean {
   return value.endsWith(TRUNCATED_DIFF_MARKER)
 }

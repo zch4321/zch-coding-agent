@@ -34,7 +34,7 @@ interface TranscriptCursor {
   requestEventId?: EventId
 }
 
-/** Reports trace service failures. */
+/** Reports invalid, missing, or unreadable trace data. */
 export class TraceServiceError extends Error {
   constructor(
     readonly code:
@@ -197,16 +197,16 @@ function boundedPage<T>(
   }
 }
 
-/** Provides trace operations. */
+/** Reads, replays, paginates, exports, summarizes, and cleans up trace logs. */
 export class TraceService {
   constructor(readonly directory: string) {}
 
-  /** Initializes the component and its dependencies. */
+  /** Creates the trace directory when it does not already exist. */
   async initialize(): Promise<void> {
     await mkdir(this.directory, { recursive: true })
   }
 
-  /** Lists the currently available records. */
+  /** Lists valid trace files and returns their bounded metadata. */
   async list(): Promise<TraceInfo[]> {
     await this.initialize()
     const entries = await readdir(this.directory, { withFileTypes: true })
@@ -249,7 +249,7 @@ export class TraceService {
       .slice(0, 1_000)
   }
 
-  /** Returns or updates replay state. */
+  /** Loads a trace and returns its reduced replay summary. */
   async replay(traceId: TraceId): Promise<ReplaySummary> {
     const { events } = await this.#read(traceId)
     const state = replayTrace(events)
@@ -308,7 +308,7 @@ export class TraceService {
     }
   }
 
-  /** Returns or updates transcript document state. */
+  /** Loads a trace and builds its normalized session transcript document. */
   async transcriptDocument(
     traceId: TraceId,
   ): Promise<SessionTranscriptDocument> {
@@ -327,7 +327,7 @@ export class TraceService {
     })
   }
 
-  /** Returns or updates transcript page state. */
+  /** Returns a bounded transcript page using an opaque cursor. */
   async transcriptPage(input: {
     traceId: TraceId
     cursor?: string
@@ -378,7 +378,7 @@ export class TraceService {
     }
   }
 
-  /** Returns or updates transcript request messages state. */
+  /** Extracts provider request messages for one trace request event with pagination. */
   async transcriptRequestMessages(input: {
     traceId: TraceId
     requestEventId: EventId
@@ -442,12 +442,12 @@ export class TraceService {
     }
   }
 
-  /** Returns or updates transcript markdown state. */
+  /** Renders a trace transcript document as Markdown. */
   async transcriptMarkdown(traceId: TraceId): Promise<string> {
     return sessionTranscriptToMarkdown(await this.transcriptDocument(traceId))
   }
 
-  /** Returns or updates stats state. */
+  /** Aggregates provider statistics for one trace or for all available traces. */
   async stats(traceId?: TraceId): Promise<ProviderStats> {
     const events = traceId
       ? (await this.#read(traceId)).events
@@ -484,7 +484,7 @@ export class TraceService {
     }
   }
 
-  /** Clears closed. */
+  /** Deletes trace files not listed as active and returns the deletion count. */
   async clearClosed(activeTraceIds: ReadonlySet<string>): Promise<number> {
     const traces = await this.list()
     let deleted = 0

@@ -32,7 +32,7 @@ import type {
 
 type ToolAttemptStage = 'validation' | 'permission' | 'execution'
 
-/** Encapsulates file change preparation failure behavior. */
+/** Wraps a durable file-change preparation failure while preserving its original cause. */
 class FileChangePreparationFailure extends Error {
   constructor(readonly cause: unknown) {
     super('Durable file change preparation failed')
@@ -55,7 +55,7 @@ function serializedBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(toJsonValue(value)), 'utf8')
 }
 
-/** Runs session tool workflows. */
+/** Executes tool calls, approvals, file changes, and provider-facing result annotations. */
 export class SessionToolRunner {
   readonly #configStore: ConfigStore
   readonly #pluginBus: PluginEventBus | undefined
@@ -114,7 +114,7 @@ export class SessionToolRunner {
     this.#setRunStatus = options.setRunStatus
   }
 
-  /** Executes tool calls. */
+  /** Runs the requested tool calls, emits results, and records durable file changes. */
   async executeToolCalls(
     session: SessionState,
     run: ActiveRun,

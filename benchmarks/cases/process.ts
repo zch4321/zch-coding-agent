@@ -9,7 +9,7 @@ export interface BenchmarkCommandResult {
   timedOut: boolean
 }
 
-/** Runs benchmark command. */
+/** Runs one benchmark command with bounded output and timeout handling. */
 export async function runBenchmarkCommand(input: {
   command: BenchmarkCommand
   workspace: string
@@ -26,7 +26,7 @@ export async function runBenchmarkCommand(input: {
   })
 }
 
-/** Runs git. */
+/** Runs a Git command in a benchmark workspace with bounded output. */
 export async function runGit(input: {
   workspace: string
   args: string[]

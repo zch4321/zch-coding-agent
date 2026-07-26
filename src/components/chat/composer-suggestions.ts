@@ -37,7 +37,7 @@ function currentLineStart(value: string, cursor: number): number {
   return value.lastIndexOf('\n', Math.max(0, cursor - 1)) + 1
 }
 
-/** Returns or updates detect composer suggestion trigger state. */
+/** Finds the workspace token at the cursor and returns its replacement range and kind. */
 export function detectComposerSuggestionTrigger(
   value: string,
   cursor: number,
@@ -81,7 +81,7 @@ export function detectComposerSuggestionTrigger(
   return undefined
 }
 
-/** Replaces composer range. */
+/** Replaces one composer token range while preserving text outside that range. */
 export function replaceComposerRange(
   value: string,
   start: number,
@@ -91,7 +91,7 @@ export function replaceComposerRange(
   return value.slice(0, start) + replacement + value.slice(end)
 }
 
-/** Returns or updates workspace suggestion query state. */
+/** Splits a workspace suggestion token into a directory prefix and name filter. */
 export function workspaceSuggestionQuery(token: string): {
   directory: string
   filter: string
@@ -108,7 +108,7 @@ export function workspaceSuggestionQuery(token: string): {
   }
 }
 
-/** Formats workspace suggestion path. */
+/** Formats a workspace directory/name pair as a displayable suggestion path. */
 export function formatWorkspaceSuggestionPath(
   directory: string,
   name: string,
@@ -116,7 +116,7 @@ export function formatWorkspaceSuggestionPath(
   return directory === '.' ? name : `${directory.replace(/\/$/u, '')}/${name}`
 }
 
-/** Formats workspace expansion path. */
+/** Normalizes a workspace path and appends a separator for directory expansion. */
 export function formatWorkspaceExpansionPath(path: string): string {
   return `${path.replace(/\/+$/u, '')}/`
 }

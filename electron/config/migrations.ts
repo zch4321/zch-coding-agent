@@ -3,7 +3,7 @@ import { AppConfigSchema, DEFAULT_APP_CONFIG, type AppConfig } from './schema'
 
 const validateAppConfig = compileSchema(AppConfigSchema)
 
-/** Reports unsupported config schema failures. */
+/** Reports that a persisted configuration uses an unsupported schema version. */
 export class UnsupportedConfigSchemaError extends Error {
   constructor(
     readonly schemaVersion: unknown,

@@ -23,7 +23,7 @@ interface RegisteredTask {
 
 const DEFAULT_TIMEOUT_MS = 5_000
 
-/** Encapsulates disposer behavior. */
+/** Coordinates idempotent cleanup of registered synchronous and asynchronous resources. */
 export class Disposer {
   readonly #timeoutMs: number
   readonly #onError: (error: unknown) => void
@@ -41,7 +41,7 @@ export class Disposer {
     this.#onError = options.onError ?? (() => undefined)
   }
 
-  /** Returns or updates add state. */
+  /** Registers a disposable task and returns an idempotent removal callback. */
   add(disposable: Disposable | DisposeTask): () => void {
     if (this.#disposePromise) {
       throw new Error('Cannot register a resource after disposal has started')
@@ -62,7 +62,7 @@ export class Disposer {
     }
   }
 
-  /** Releases all owned resources. */
+  /** Runs registered cleanup tasks with timeout and error isolation, returning a report. */
   dispose(): Promise<DisposeReport> {
     this.#disposePromise ??= this.#run()
     return this.#disposePromise

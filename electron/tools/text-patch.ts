@@ -2,7 +2,7 @@ const MAX_PATCH_HUNKS = 100
 const MAX_CHANGED_LINES = 10_000
 const PATCH_ERROR_CONTEXT_LINES = 8
 
-/** Reports text patch failures. */
+/** Reports malformed or unappliable text patches. */
 export class TextPatchError extends Error {
   readonly code = 'INVALID_PATCH'
 
@@ -208,7 +208,7 @@ function formatPatchPreview(lines: string[], startLine: number): string {
     .join('\n')
 }
 
-/** Applies text patch. */
+/** Applies a patch to the expected file and returns the resulting text and change metadata. */
 export function applyTextPatch(
   source: string,
   patch: string,

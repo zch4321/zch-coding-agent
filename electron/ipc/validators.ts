@@ -28,7 +28,7 @@ export type PayloadLimitResult =
       message: string
     }
 
-/** Validates payload limits. */
+/** Checks serialized payload size and bounded nesting, collection, and string limits. */
 export function validatePayloadLimits(
   payload: unknown,
   limits: PayloadLimits = DEFAULT_PAYLOAD_LIMITS,
@@ -158,7 +158,7 @@ export function validatePayloadLimits(
   return { valid: true }
 }
 
-/** Converts the input to json details. */
+/** Converts unknown details into a JSON-safe clone or returns undefined when impossible. */
 export function toJsonDetails(value: unknown): JsonValue | undefined {
   try {
     return JSON.parse(JSON.stringify(value)) as JsonValue

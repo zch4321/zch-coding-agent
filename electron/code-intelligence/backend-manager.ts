@@ -66,7 +66,7 @@ function pickModule(
   )
 }
 
-/** Coordinates code backend lifecycle and operations. */
+/** Coordinates project backend status, restart, and path-guarded code-intelligence queries. */
 export class CodeBackendManager {
   readonly #projectMetadata: ProjectMetadataStore
   readonly #serena: SerenaMcpAdapter
@@ -79,13 +79,13 @@ export class CodeBackendManager {
     this.#serena = options.serena ?? new SerenaMcpAdapter()
   }
 
-  /** Returns the current statuses. */
+  /** Returns the configured code-backend status for a workspace. */
   async statuses(workspace: string): Promise<CodeBackendStatus[]> {
     const { project } = await this.#projectMetadata.get(workspace)
     return [this.#serena.status(project)]
   }
 
-  /** Restarts the managed resource. */
+  /** Stops and restarts the selected backend after refreshing project metadata. */
   async restart(
     workspace: string,
     backendId: string,
@@ -106,7 +106,7 @@ export class CodeBackendManager {
     return this.#serena.restart(project)
   }
 
-  /** Returns or updates query state. */
+  /** Runs a path-guarded code-intelligence query against the configured backend. */
   async query(input: CodeIntelligenceQuery): Promise<CodeIntelligenceResult> {
     const snapshot = await this.#projectMetadata.get(input.workspace)
     const project = snapshot.project
@@ -199,7 +199,7 @@ export class CodeBackendManager {
     })
   }
 
-  /** Releases all owned resources. */
+  /** Closes backend resources and clears active code-intelligence sessions. */
   dispose(): Promise<void> {
     return this.#serena.dispose()
   }

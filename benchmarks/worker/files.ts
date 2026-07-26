@@ -10,7 +10,7 @@ import {
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 
-/** Ensures safe run directories. */
+/** Creates and validates isolated workspace and artifact directories under the allowed run roots. */
 export async function ensureSafeRunDirectories(input: {
   workspace: string
   artifacts: string
@@ -32,7 +32,7 @@ export async function ensureSafeRunDirectories(input: {
   return { workspace, artifacts }
 }
 
-/** Returns or updates directory bytes state. */
+/** Calculates the total byte size of regular files below a directory. */
 export async function directoryBytes(root: string): Promise<number> {
   let total = 0
   const pending = [root]
@@ -49,7 +49,7 @@ export async function directoryBytes(root: string): Promise<number> {
   return total
 }
 
-/** Writes private file. */
+/** Writes a private artifact with restrictive read-only permissions. */
 export async function writePrivateFile(
   filePath: string,
   content: string,
@@ -57,7 +57,7 @@ export async function writePrivateFile(
   await writeFile(filePath, content, { encoding: 'utf8', mode: 0o444 })
 }
 
-/** Returns or updates copy bounded file state. */
+/** Copies a file while refusing to exceed the configured byte limit. */
 export async function copyBoundedFile(input: {
   source: string
   destination: string
@@ -74,7 +74,7 @@ export async function copyBoundedFile(input: {
   )
 }
 
-/** Removes private directory. */
+/** Removes a private run directory and reports whether it existed. */
 export async function removePrivateDirectory(
   directory: string,
 ): Promise<boolean> {

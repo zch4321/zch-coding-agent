@@ -42,7 +42,7 @@ function toJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
 }
 
-/** Validates chat completions request dto and throws when it is invalid. */
+/** Validates message, sampling, tool, and route constraints for a chat-completions request. */
 export function assertChatCompletionsRequestDto(candidate: JsonObject): void {
   if (!Array.isArray(candidate.messages)) {
     throw new TypeError('beforeLLMCall request.messages must be an array')
@@ -320,7 +320,7 @@ function normalizeFinishReason(
   return providerReason
 }
 
-/** Adapts chat completions to its host interface. */
+/** Compiles provider-neutral requests and translates streaming responses into provider events. */
 export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompletionsRequestDto> {
   readonly id: string
 
@@ -328,7 +328,7 @@ export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompl
     this.id = id
   }
 
-  /** Returns or updates compile state. */
+  /** Maps the frozen route and provider request into an OpenAI-compatible request DTO. */
   compile(input: AdapterCompileInput): ChatCompletionsRequestDto {
     if (input.route.adapterId !== this.id) {
       throw new TypeError(
@@ -368,7 +368,7 @@ export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompl
     }
   }
 
-  /** Returns or updates complete state. */
+  /** Converts a completed provider event into final text, reasoning, usage, and tool-call state. */
   complete(
     event: Extract<ProviderEvent, { type: 'completed' }>,
     streamed: { text: string; reasoning: string } = {
@@ -429,7 +429,7 @@ export class ChatCompletionsAdapter implements ProviderProtocolAdapter<ChatCompl
   }
 }
 
-/** Returns or updates chat adapter state. */
+/** Returns the supported chat-completions adapter for an adapter ID. */
 export function chatAdapter(adapterId: string): ChatCompletionsAdapter {
   if (
     adapterId !== 'deepseek.chat-completions' &&

@@ -3,22 +3,22 @@ import type { ToolResult } from '../tools/types'
 import { ContextBudgetError } from '../tools/context-budget'
 import type { ModelProfile } from '../providers/model-catalog'
 
-/** Returns or updates delay state. */
+/** Resolves after the requested number of milliseconds. */
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** Returns or updates tool result for provider state. */
+/** Serializes a tool result into the provider-facing result text. */
 export function toolResultForProvider(result: ToolResult): string {
   return JSON.stringify(result)
 }
 
-/** Normalizes tool result. */
+/** Converts an internal ToolResult into the provider result envelope. */
 export function normalizeToolResult(result: ToolResult): ToolResultEnvelope {
   return result as ToolResultEnvelope
 }
 
-/** Returns or updates tool failure state. */
+/** Maps an unknown tool failure or abort signal into a safe ToolResult. */
 export function toolFailure(error: unknown, signal: AbortSignal): ToolResult {
   if (signal.aborted) {
     return { status: 'cancelled', message: 'The run was cancelled' }
@@ -36,7 +36,7 @@ export function toolFailure(error: unknown, signal: AbortSignal): ToolResult {
   }
 }
 
-/** Returns or updates final status from error state. */
+/** Maps an exception or abort signal to the terminal RunStatus value. */
 export function finalStatusFromError(
   error: unknown,
   signal: AbortSignal,
@@ -57,7 +57,7 @@ export function finalStatusFromError(
   return 'failed'
 }
 
-/** Returns or updates model prompt budget state. */
+/** Computes the usable prompt budget after reserving the model's output allowance. */
 export function modelPromptBudget(
   model: Pick<ModelProfile, 'contextWindowTokens' | 'maxOutputTokens'>,
 ): number {

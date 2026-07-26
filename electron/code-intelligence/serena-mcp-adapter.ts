@@ -519,7 +519,7 @@ function launchMessage(input: {
   return lines.join('\n').slice(0, 4_096)
 }
 
-/** Adapts serena mcp to its host interface. */
+/** Manages per-project Serena MCP sessions, launch deduplication, status, and queries. */
 export class SerenaMcpAdapter implements CodeIntelligenceBackend {
   readonly #sessions = new Map<string, SerenaSession>()
   readonly #starts = new Map<string, Promise<SerenaSession>>()
@@ -530,7 +530,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     this.#launch = options.launch ?? defaultLaunch
   }
 
-  /** Returns the current status. */
+  /** Returns the cached or derived Serena backend status for a project. */
   status(project: ProjectModel): CodeBackendStatus {
     const key = this.#key(project)
     const session = this.#sessions.get(key)
@@ -560,7 +560,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     }
   }
 
-  /** Restarts the managed resource. */
+  /** Closes a project session and starts it again when Serena is enabled. */
   async restart(project: ProjectModel): Promise<CodeBackendStatus> {
     await this.close(project)
     if (!project.serena.enabled) return this.status(project)
@@ -579,7 +579,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     }
   }
 
-  /** Closes the resource and releases its handles. */
+  /** Stops and removes a project's session, pending start, and cached status. */
   async close(project: ProjectModel): Promise<void> {
     const key = this.#key(project)
     const session = this.#sessions.get(key)
@@ -598,7 +598,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     })
   }
 
-  /** Releases all owned resources. */
+  /** Closes all Serena sessions and clears pending starts and cached statuses. */
   async dispose(): Promise<void> {
     const sessions = [...this.#sessions.values()]
     this.#sessions.clear()
@@ -611,7 +611,7 @@ export class SerenaMcpAdapter implements CodeIntelligenceBackend {
     )
   }
 
-  /** Returns or updates query state. */
+  /** Ensures the project backend is ready and executes a Serena code-intelligence query. */
   async query(
     project: ProjectModel,
     input: CodeIntelligenceQuery,

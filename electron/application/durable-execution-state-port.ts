@@ -24,7 +24,7 @@ interface DurableSessionBinding {
   invalid: boolean
 }
 
-/** Encapsulates durable execution state port behavior. */
+/** Bridges in-memory session execution state to durable records and serialized commits. */
 export class DurableExecutionStatePort implements SessionExecutionStatePort {
   readonly #sessions: SessionService
   readonly #bindings = new Map<SessionId, DurableSessionBinding>()
@@ -34,14 +34,14 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     this.#sessions = sessions
   }
 
-  /** Sets invalidation handler. */
+  /** Installs the callback used when a durable binding can no longer be trusted. */
   setInvalidationHandler(
     handler: (sessionId: SessionId, runId?: RunId) => void,
   ): void {
     this.#onInvalid = handler
   }
 
-  /** Registers new. */
+  /** Creates an owned binding for a new session and enforces its initial revision invariants. */
   registerNew(record: SessionRecord, ownerToken: string): void {
     if (record.lastSeq !== 0 || record.revision !== 1) {
       throw new ApplicationError(
@@ -52,12 +52,12 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     this.#register(record, true, ownerToken)
   }
 
-  /** Registers existing. */
+  /** Attaches an owner token to an existing durable session record. */
   registerExisting(record: SessionRecord, ownerToken: string): void {
     this.#register(record, false, ownerToken)
   }
 
-  /** Applies record. */
+  /** Replaces a binding's durable record after validating ownership and binding state. */
   applyRecord(
     sessionId: SessionId,
     record: SessionRecord,
@@ -74,7 +74,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     binding.isNew = false
   }
 
-  /** Begins request. */
+  /** Creates or reuses the promise tracking one idempotent client request. */
   beginRequest(
     sessionId: SessionId,
     clientRequestId: string,
@@ -98,7 +98,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     return promise
   }
 
-  /** Marks request as failed. */
+  /** Rejects and removes the waiter for a client request that failed before commit. */
   failRequest(
     sessionId: SessionId,
     clientRequestId: string,
@@ -111,7 +111,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     waiter.reject(error)
   }
 
-  /** Removes the entry from runtime tracking. */
+  /** Removes an owned binding and rejects requests still waiting on its commits. */
   forget(sessionId: SessionId, ownerToken: string): void {
     const binding = this.#bindings.get(sessionId)
     if (!binding || binding.ownerToken !== ownerToken) return
@@ -124,7 +124,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     binding.waiters.clear()
   }
 
-  /** Commits the pending durable mutation. */
+  /** Serializes a session commit and reconciles the in-memory state after success or failure. */
   commit(
     session: SessionState,
     input: SessionExecutionCommit,
@@ -148,7 +148,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     return result
   }
 
-  /** Records the supplied event. */
+  /** Returns a cloned durable record when the session has a valid binding. */
   record(sessionId: SessionId): SessionRecord | undefined {
     const binding = this.#bindings.get(sessionId)
     if (!binding || binding.invalid) return undefined

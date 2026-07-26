@@ -67,7 +67,7 @@ export class RipgrepSearcher implements Searcher {
     }
   }
 
-  /** Determines whether is available. */
+  /** Locates the bundled ripgrep binary and caches whether it is usable. */
   async isAvailable(): Promise<boolean> {
     if (this.#available !== undefined) {
       return this.#available
@@ -99,7 +99,7 @@ export class RipgrepSearcher implements Searcher {
     return this.#available
   }
 
-  /** Searches for records matching the request. */
+  /** Runs ripgrep under a guarded workspace with bounded output and result counts. */
   async search(input: SearchInput): Promise<SearchOutcome> {
     const rgPath = await this.resolveRgPath()
 

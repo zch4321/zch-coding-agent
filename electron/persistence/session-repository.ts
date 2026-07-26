@@ -32,9 +32,9 @@ export interface SessionListQuery {
 export const MAX_SESSION_SEARCH_LENGTH = 256
 export const MAX_CROSS_SESSION_SEARCH_RESULTS = 100
 
-/** Persists and queries session records. */
+/** Persists Session records and provides revision-checked queries and pagination. */
 export class SessionRepository {
-  /** Returns or updates insert state. */
+  /** Inserts a new Session record into the active transaction. */
   insert(transaction: PersistenceTransaction, record: SessionRecord): void {
     const row = encodeSessionRow(record)
     transaction
@@ -68,7 +68,7 @@ export class SessionRepository {
       )
   }
 
-  /** Updates the requested record. */
+  /** Updates a Session only when its stored revision matches the expected revision. */
   update(
     transaction: PersistenceTransaction,
     record: SessionRecord,
@@ -113,7 +113,7 @@ export class SessionRepository {
     return Number(result.changes) > 0
   }
 
-  /** Deletes the requested record. */
+  /** Deletes a Session by ID and reports whether a row was removed. */
   delete(transaction: PersistenceTransaction, id: SessionId): boolean {
     const result = transaction
       .prepare('DELETE FROM sessions WHERE id = ?')
@@ -121,7 +121,7 @@ export class SessionRepository {
     return Number(result.changes) > 0
   }
 
-  /** Returns the requested record. */
+  /** Loads and decodes a Session record by ID. */
   get(reader: PersistenceReader, id: SessionId): SessionRecord | undefined {
     const row = reader
       .prepare(`SELECT ${SESSION_COLUMNS} FROM sessions WHERE id = ?`)
@@ -129,7 +129,7 @@ export class SessionRepository {
     return row ? decodeSessionRow(row) : undefined
   }
 
-  /** Lists page. */
+  /** Lists a bounded page of Sessions with lifecycle, project, search, and cursor filters. */
   listPage(
     reader: PersistenceReader,
     query: SessionListQuery = {},
@@ -197,7 +197,7 @@ export class SessionRepository {
     return page
   }
 
-  /** Searches candidate ids. */
+  /** Searches normalized Session text and returns matching Session IDs. */
   searchCandidateIds(
     reader: PersistenceReader,
     input: { text: string; projectId?: ProjectId; limit?: number },

@@ -58,7 +58,7 @@ function compactFollowUp(message: string): string | undefined {
   return followUp || undefined
 }
 
-/** Coordinates session compact workflows. */
+/** Coordinates automatic prompt-history compaction using config, tools, skills, and prompts. */
 export class SessionCompactCoordinator {
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
@@ -116,7 +116,7 @@ export class SessionCompactCoordinator {
     this.#executionState = options.executionState
   }
 
-  /** Returns or updates maybe auto compact before provider call state. */
+  /** Compacts active history before a provider call when eligibility and token budget require it. */
   async maybeAutoCompactBeforeProviderCall(
     session: SessionState,
     run: ActiveRun,

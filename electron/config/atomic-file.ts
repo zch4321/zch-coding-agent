@@ -2,7 +2,7 @@ import { open, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-/** Writes json atomic. */
+/** Replaces a JSON file through a temporary sibling file and atomic rename. */
 export async function writeJsonAtomic(
   filePath: string,
   value: unknown,
@@ -34,7 +34,7 @@ export async function writeJsonAtomic(
   }
 }
 
-/** Writes text atomic. */
+/** Replaces a text file through a temporary sibling file and atomic rename. */
 export async function writeTextAtomic(
   filePath: string,
   data: string,

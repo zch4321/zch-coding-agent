@@ -12,7 +12,7 @@ export type PathGuardErrorCode =
   | 'NOT_A_DIRECTORY'
   | 'NOT_A_FILE'
 
-/** Reports path guard failures. */
+/** Reports traversal, symlink, canonical-path, and bounded-read violations. */
 export class PathGuardError extends Error {
   readonly code: PathGuardErrorCode
 
@@ -91,7 +91,7 @@ async function nearestExistingParent(target: string): Promise<string> {
   }
 }
 
-/** Enforces path preconditions. */
+/** Guards workspace paths against traversal, symlink escapes, and unsafe filesystem access. */
 export class PathGuard {
   readonly workspacePath: string
   readonly #workspaceAliases: readonly string[]
@@ -101,7 +101,7 @@ export class PathGuard {
     this.#workspaceAliases = [...new Set([workspacePath, ...aliases])]
   }
 
-  /** Creates the result from canonical. */
+  /** Creates a guard for an already canonical workspace path and its accepted aliases. */
   static fromCanonical(workspacePath: string): PathGuard {
     assertReasonableInput(workspacePath)
     const resolvedWorkspacePath = path.resolve(workspacePath)
@@ -116,7 +116,7 @@ export class PathGuard {
     }
   }
 
-  /** Creates a new instance. */
+  /** Realpaths the workspace and creates a guard with its canonical alias roots. */
   static async create(workspacePath: string): Promise<PathGuard> {
     assertReasonableInput(workspacePath)
     const resolvedWorkspacePath = path.resolve(workspacePath)
@@ -141,7 +141,7 @@ export class PathGuard {
     )
   }
 
-  /** Resolves candidate. */
+  /** Resolves a relative or absolute candidate under the workspace without filesystem access. */
   resolveCandidate(inputPath: string): string {
     assertReasonableInput(inputPath)
     const absolutePath = path.isAbsolute(inputPath)
@@ -158,7 +158,7 @@ export class PathGuard {
     return absolutePath
   }
 
-  /** Resolves existing. */
+  /** Resolves an existing path and checks real parent containment to block symlink escapes. */
   async resolveExisting(inputPath: string): Promise<GuardedPath> {
     const absolutePath = this.resolveCandidate(inputPath)
     const parent = await nearestExistingParent(absolutePath)
@@ -205,7 +205,7 @@ export class PathGuard {
     }
   }
 
-  /** Validates inside and throws when it is invalid. */
+  /** Ensures a real path remains inside the guarded workspace. */
   assertInside(realPathValue: string): void {
     if (!this.#isInsideWorkspace(realPathValue)) {
       throw new PathGuardError(
@@ -215,7 +215,7 @@ export class PathGuard {
     }
   }
 
-  /** Reads file bounded. */
+  /** Reads a guarded file while enforcing byte and abort limits. */
   async readFileBounded(
     inputPath: string,
     maxBytes: number,
@@ -271,7 +271,7 @@ export class PathGuard {
     }
   }
 
-  /** Lists directory. */
+  /** Lists entries in a guarded directory after validating its real path. */
   async listDirectory(inputPath: string): Promise<DirectoryEntry[]> {
     const guarded = await this.resolveExisting(inputPath)
     const directoryStat = await stat(guarded.realPath)

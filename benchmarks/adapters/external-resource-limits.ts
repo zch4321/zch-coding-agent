@@ -5,10 +5,10 @@ const MAX_EXTERNAL_MEMORY_BYTES = 32 * 1024 * 1024 * 1024
 const MAX_EXTERNAL_STORAGE_BYTES = 32 * 1024 * 1024 * 1024
 const MAX_EXTERNAL_VERIFIER_SECONDS = 2 * 60 * 60
 
-/** Reports external resource limit failures. */
+/** Reports that an external benchmark exceeds its configured resource limits. */
 export class ExternalResourceLimitError extends Error {}
 
-/** Returns or updates infer monthly language state. */
+/** Infers the implementation language from monthly SWE-bench task metadata. */
 export function inferMonthlyLanguage(taskToml: string): string {
   const value = taskToml.toLowerCase()
   for (const language of [
@@ -27,7 +27,7 @@ export function inferMonthlyLanguage(taskToml: string): string {
   return 'unknown'
 }
 
-/** Validates monthly resources and throws when it is invalid. */
+/** Checks CPU, memory, storage, and verifier timeout limits for a monthly task. */
 export function assertMonthlyResources(taskToml: string): void {
   const cpus = tomlNumber(taskToml, 'cpus')
   const memoryMb = tomlNumber(taskToml, 'memory_mb')
@@ -48,7 +48,7 @@ export function assertMonthlyResources(taskToml: string): void {
   }
 }
 
-/** Validates rebench resources and throws when it is invalid. */
+/** Checks SWE-rebench verifier and resource settings against the supported limits. */
 export function assertRebenchResources(
   candidate: ExternalBenchmarkCandidate,
 ): void {

@@ -9,7 +9,7 @@ export interface DockerCommandResult {
   stderr: string
 }
 
-/** Starts attached docker container. */
+/** Starts an attached Docker container, streams bounded output, and stops it on timeout or callback request. */
 export async function startAttachedDockerContainer(input: {
   container: string
   timeoutMs: number
@@ -103,7 +103,7 @@ export async function startAttachedDockerContainer(input: {
   })
 }
 
-/** Reports docker command failures. */
+/** Reports a failed Docker command together with its exit result when available. */
 export class DockerCommandError extends Error {
   readonly code: string
   readonly result?: DockerCommandResult
@@ -116,7 +116,7 @@ export class DockerCommandError extends Error {
   }
 }
 
-/** Runs docker command. */
+/** Executes a Docker CLI command with bounded output and timeout handling. */
 export async function runDockerCommand(
   args: string[],
   options: {

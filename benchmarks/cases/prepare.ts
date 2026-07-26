@@ -30,7 +30,7 @@ export interface PreparedBenchmarkWorkspace {
   files: string[]
 }
 
-/** Prepares benchmark workspace. */
+/** Extracts a case archive into a fresh workspace and returns its execution metadata. */
 export async function prepareBenchmarkWorkspace(input: {
   loadedCase: LoadedBenchmarkCase
   destination: string
@@ -124,7 +124,7 @@ export async function prepareBenchmarkWorkspace(input: {
   return { workspace: input.destination, baselineCommit, treeSha256, files }
 }
 
-/** Scans agent visible workspace. */
+/** Lists visible workspace files and verifies that the expected files are present. */
 export async function scanAgentVisibleWorkspace(input: {
   workspace: string
   expectedFiles: string[]

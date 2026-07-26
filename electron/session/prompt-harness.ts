@@ -145,7 +145,7 @@ function resourceContent(
   }
 }
 
-/** Appends prompt layer. */
+/** Appends a prompt layer with provenance and stable canonical-history metadata. */
 export function appendPromptLayer(
   state: PromptHistoryState,
   input: {
@@ -179,7 +179,7 @@ function tagged(
   )
 }
 
-/** Renders prompt template. */
+/** Replaces required template variables and rejects unresolved placeholders. */
 export function renderPromptTemplate(
   template: string,
   variables: Record<string, string>,
@@ -630,7 +630,7 @@ async function agentsContext(input: HarnessPromptInput): Promise<{
   return { content: formatted, hash: sha256(formatted) }
 }
 
-/** Appends initial prompt harness. */
+/** Appends localized initial harness resources when they are absent from prompt history. */
 export async function appendInitialPromptHarness(
   state: PromptHistoryState,
   input: HarnessPromptInput,
@@ -695,7 +695,7 @@ export async function appendInitialPromptHarness(
   }
 }
 
-/** Appends runtime context if changed. */
+/** Appends runtime context only when its canonical content differs from the previous version. */
 export async function appendRuntimeContextIfChanged(
   state: PromptHistoryState,
   input: RuntimeContextInput,
@@ -719,7 +719,7 @@ export async function appendRuntimeContextIfChanged(
   return true
 }
 
-/** Appends agents context if changed. */
+/** Loads AGENTS context and appends it only when its cache key has changed. */
 export async function appendAgentsContextIfChanged(
   state: PromptHistoryState,
   input: HarnessPromptInput,
@@ -746,7 +746,7 @@ export async function appendAgentsContextIfChanged(
   return true
 }
 
-/** Selects prompt messages. */
+/** Selects history and tool context under the prompt-token budget while preserving required layers. */
 export function selectPromptMessages(options: {
   state: PromptHistoryState
   tools: JsonValue[]
@@ -805,7 +805,7 @@ export function selectPromptMessages(options: {
   }
 }
 
-/** Returns or updates prompt resources state. */
+/** Returns the prompt-resource summaries present in prompt history. */
 export function promptResources(
   state: PromptHistoryState,
 ): PromptResourceSummary[] {
@@ -836,7 +836,7 @@ export function promptResources(
   })
 }
 
-/** Returns or updates selected context content state. */
+/** Wraps selected context in the tagged prompt block consumed by the provider. */
 export function selectedContextContent(
   content: string,
   source: string,
@@ -844,7 +844,7 @@ export function selectedContextContent(
   return tagged('selected_context', { source }, content)
 }
 
-/** Returns or updates orchestration request content state. */
+/** Wraps an orchestration request in its tagged prompt block. */
 export function orchestrationRequestContent(
   kind: string,
   content: string,
@@ -852,17 +852,17 @@ export function orchestrationRequestContent(
   return tagged('orchestration_request', { kind }, content)
 }
 
-/** Returns or updates benchmark feedback content state. */
+/** Wraps grader feedback in the tagged benchmark-feedback prompt block. */
 export function benchmarkFeedbackContent(content: string): string {
   return tagged('benchmark_feedback', { source: 'grader' }, content)
 }
 
-/** Returns or updates benchmark case content state. */
+/** Wraps the public benchmark case manifest in its tagged prompt block. */
 export function benchmarkCaseContent(content: string): string {
   return tagged('benchmark_case', { source: 'public_manifest' }, content)
 }
 
-/** Returns or updates compact history content state. */
+/** Wraps a history-compaction summary in its tagged prompt block. */
 export function compactHistoryContent(content: string): string {
   return tagged('compact_history', { source: 'history_compaction' }, content)
 }

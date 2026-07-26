@@ -125,7 +125,7 @@ function getHighlighter(): Promise<MarkdownHighlighter> {
   return highlighterPromise
 }
 
-/** Renders code. */
+/** Highlights a code block with the requested language and returns sanitized HTML. */
 export async function renderCode(
   source: string,
   requestedLanguage: string,
@@ -139,7 +139,7 @@ export async function renderCode(
       })
 }
 
-/** Renders markdown. */
+/** Renders Markdown, sanitizes the result, and highlights its fenced code blocks. */
 export async function renderMarkdown(source: string): Promise<string> {
   const fences: FenceBlock[] = []
   let html = markdown.render(source, { fences })

@@ -35,7 +35,7 @@ export interface HeadlessMainOptions {
   manageSignals?: boolean
 }
 
-/** Runs headless main. */
+/** Runs the headless agent process with abort handling and returns its exit code. */
 export async function runHeadlessMain(
   argv: string[],
   options: HeadlessMainOptions = {},

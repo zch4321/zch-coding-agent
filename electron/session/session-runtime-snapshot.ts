@@ -12,7 +12,7 @@ function boundedRuntimeText(current: string, delta: string): string {
     : combined.slice(-MAX_RUNTIME_TEXT_LENGTH)
 }
 
-/** Updates public run snapshot. */
+/** Applies an agent event's live text, reasoning, usage, and status fields to the public run snapshot. */
 export function updatePublicRunSnapshot(
   run: ActiveRun,
   event: AgentEventDraft,

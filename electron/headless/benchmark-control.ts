@@ -10,7 +10,7 @@ import {
 const MAX_DECISION_BYTES = 32 * 1024
 const validateDecision = compileSchema(HeadlessBenchmarkDecisionSchema)
 
-/** Controls stdin benchmark lifecycle and operations. */
+/** Reads one benchmark decision from stdin and exposes it through the headless controller. */
 export class StdinBenchmarkController implements HeadlessBenchmarkController {
   readonly protocol = 'repair-once' as const
   readonly #decision: Promise<HeadlessBenchmarkDecision>
@@ -19,7 +19,7 @@ export class StdinBenchmarkController implements HeadlessBenchmarkController {
     this.#decision = readDecision(input)
   }
 
-  /** Waits for for decision. */
+  /** Waits for a stdin decision or the supplied abort signal. */
   async waitForDecision(input: {
     signal: AbortSignal
   }): Promise<HeadlessBenchmarkDecision> {

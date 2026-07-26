@@ -5,7 +5,7 @@ import {
   sessionTranscriptToMarkdown,
 } from '../../electron/logging/session-transcript'
 
-/** Returns or updates benchmark session transcript markdown state. */
+/** Renders a session trace as bounded Markdown for a benchmark artifact. */
 export function benchmarkSessionTranscriptMarkdown(input: {
   trace: readonly TraceEvent[]
 }): string {

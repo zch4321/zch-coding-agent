@@ -70,7 +70,7 @@ export interface RunCommandResult extends BoundedOutputSnapshot {
   terminationStrategy: 'none' | 'taskkill' | 'process-group'
 }
 
-/** Creates command environment. */
+/** Builds a child-process environment with the allowed variables and safe proxy settings. */
 export function createCommandEnvironment(
   source: Record<string, string | undefined> = process.env,
 ): NodeJS.ProcessEnv {
@@ -186,7 +186,7 @@ function requestTreeExit(
   return 'process-group'
 }
 
-/** Runs command. */
+/** Executes a command with bounded output, timeout, abort, and exit-status handling. */
 export async function runCommand(
   options: RunCommandOptions,
 ): Promise<RunCommandResult> {

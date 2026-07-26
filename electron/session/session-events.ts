@@ -8,7 +8,7 @@ import type {
   TerminalEventDraftEnvelope,
 } from './session-types'
 
-/** Publishes session event events. */
+/** Emits Session agent and terminal events through RuntimeEventSink with lifecycle checks. */
 export class SessionEventEmitter {
   readonly #eventSink: RuntimeEventSink
   readonly #getSession: (sessionId: SessionId) => SessionState | undefined
@@ -21,7 +21,7 @@ export class SessionEventEmitter {
     this.#getSession = options.getSession
   }
 
-  /** Emits agent. */
+  /** Emits a session-scoped agent event while enforcing closed-session event rules. */
   emitAgent(session: SessionState, event: AgentEventDraft): void {
     if (
       session.closed &&
@@ -39,7 +39,7 @@ export class SessionEventEmitter {
     } as Parameters<RuntimeEventSink['publishAgent']>[0])
   }
 
-  /** Emits terminal. */
+  /** Looks up the target Session and emits a terminal event when it is still loaded. */
   emitTerminal(event: TerminalEventDraft): void {
     const session = this.#getSession(event.sessionId)
     if (!session) {

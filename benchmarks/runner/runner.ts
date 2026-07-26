@@ -74,7 +74,7 @@ interface CompleteMarker {
   artifactsSha256: string
 }
 
-/** Runs benchmark trials. */
+/** Runs the configured benchmark trials and persists restricted session artifacts and summaries. */
 export async function runBenchmarkTrials(
   input: RunBenchmarkTrialsInput,
 ): Promise<BenchmarkTrialsResult> {
@@ -695,7 +695,7 @@ async function listFiles(directory: string): Promise<string[]> {
   return files.sort()
 }
 
-/** Scans artifacts for credential. */
+/** Recursively scans artifact files for a credential, excluding explicitly allowed files. */
 export async function scanArtifactsForCredential(input: {
   directory: string
   credential: string

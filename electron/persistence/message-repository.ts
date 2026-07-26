@@ -34,14 +34,14 @@ export interface MessageSearchQuery {
   scanLimit?: number
 }
 
-/** Persists and queries message records. */
+/** Persists Message records and provides history, pagination, search, and branch queries. */
 export class MessageRepository {
-  /** Returns or updates insert state. */
+  /** Inserts one encoded MessageRecord into the active transaction. */
   insert(transaction: PersistenceTransaction, record: MessageRecord): void {
     insertMessageRow(transaction, encodeMessageRow(record))
   }
 
-  /** Returns or updates insert many state. */
+  /** Inserts a sequence of MessageRecords in their supplied order. */
   insertMany(
     transaction: PersistenceTransaction,
     records: readonly MessageRecord[],
@@ -49,7 +49,7 @@ export class MessageRepository {
     for (const record of records) this.insert(transaction, record)
   }
 
-  /** Finds by client request id. */
+  /** Finds the user-input message associated with a client request ID. */
   findByClientRequestId(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -65,7 +65,7 @@ export class MessageRepository {
     return row ? decodeMessageRow(row) : undefined
   }
 
-  /** Returns the requested record. */
+  /** Loads and decodes one MessageRecord by Session and message ID. */
   get(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -81,7 +81,7 @@ export class MessageRepository {
     return row ? decodeMessageRow(row) : undefined
   }
 
-  /** Lists through. */
+  /** Lists non-superseded messages up to a validated sequence boundary. */
   listThrough(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -107,7 +107,7 @@ export class MessageRepository {
       .map(decodeMessageRow)
   }
 
-  /** Lists page. */
+  /** Lists a bounded message page and returns its older-page cursor when more rows exist. */
   listPage(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -166,7 +166,7 @@ export class MessageRepository {
     return page
   }
 
-  /** Lists active history. */
+  /** Loads non-superseded messages currently marked as active history. */
   listActiveHistory(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -184,7 +184,7 @@ export class MessageRepository {
       .map(decodeMessageRow)
   }
 
-  /** Searches text. */
+  /** Searches visible user and assistant text while excluding control commands and replays. */
   searchText(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -233,7 +233,7 @@ export class MessageRepository {
       .slice(0, limit)
   }
 
-  /** Sets in history through. */
+  /** Sets the history flag for messages through a sequence boundary. */
   setInHistoryThrough(
     transaction: PersistenceTransaction,
     sessionId: SessionId,
@@ -250,7 +250,7 @@ export class MessageRepository {
     return Number(result.changes)
   }
 
-  /** Lists all. */
+  /** Loads every MessageRecord for a Session in sequence order. */
   listAll(reader: PersistenceReader, sessionId: SessionId): MessageRecord[] {
     return reader
       .prepare(
@@ -263,7 +263,7 @@ export class MessageRepository {
       .map(decodeMessageRow)
   }
 
-  /** Updates branch state. */
+  /** Updates visibility and history flags for one message in the active transaction. */
   updateBranchState(
     transaction: PersistenceTransaction,
     record: Pick<

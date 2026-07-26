@@ -58,11 +58,11 @@ function providerParameters(definition: ToolDefinition): {
   return { parameters: schema as JsonValue, intentField }
 }
 
-/** Registers and resolves tool entries. */
+/** Registers tool definitions and validates provider and executor access to them. */
 export class ToolRegistry implements ToolRegistrationPort {
   readonly #tools = new Map<string, RegisteredTool>()
 
-  /** Registers tool. */
+  /** Adds a unique tool definition to the registry. */
   registerTool(definition: ToolDefinition): void {
     if (this.#tools.has(definition.id)) {
       throw new Error(`Tool already registered: ${definition.id}`)
@@ -74,17 +74,17 @@ export class ToolRegistry implements ToolRegistrationPort {
     })
   }
 
-  /** Returns the requested record. */
+  /** Returns a registered tool definition by ID. */
   get(toolId: string): ToolDefinition | undefined {
     return this.#tools.get(toolId)?.definition
   }
 
-  /** Lists the currently available records. */
+  /** Returns all registered tool definitions in registration order. */
   list(): ToolDefinition[] {
     return [...this.#tools.values()].map((tool) => tool.definition)
   }
 
-  /** Returns or updates provider definitions state. */
+  /** Converts registered definitions into provider function schemas and intent metadata. */
   providerDefinitions(): JsonValue[] {
     return this.list().map((definition) => {
       const { parameters, intentField } = providerParameters(definition)
@@ -100,7 +100,7 @@ export class ToolRegistry implements ToolRegistrationPort {
     })
   }
 
-  /** Validates args. */
+  /** Validates JSON arguments against a tool schema and returns typed arguments or an error. */
   validateArgs<Schema extends TSchema>(
     definition: ToolDefinition<Schema>,
     args: JsonValue,
@@ -197,7 +197,7 @@ function boundResult(result: ToolResult, maxBytes: number): ToolResult {
   return bounded
 }
 
-/** Encapsulates tool executor behavior. */
+/** Validates approved calls and executes definitions with abort and settlement tracking. */
 export class ToolExecutor {
   readonly #registry: ToolRegistry
 
@@ -205,7 +205,7 @@ export class ToolExecutor {
     this.#registry = registry
   }
 
-  /** Inspects call. */
+  /** Checks that a call references a known definition and matches approved arguments. */
   inspectCall(
     call: ToolCall,
     definitionOverride?: ToolDefinition,
@@ -246,7 +246,7 @@ export class ToolExecutor {
     return { ok: true, definition }
   }
 
-  /** Returns or updates execute state. */
+  /** Executes an approved tool and normalizes abort, policy, and handler failures. */
   async execute(
     approvedCall: ApprovedToolCall,
     context: Omit<ToolExecutionContext, 'approvedCall' | 'signal'>,

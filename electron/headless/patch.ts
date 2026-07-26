@@ -19,7 +19,7 @@ interface GitResult {
   stderr: string
 }
 
-/** Collects workspace patch. */
+/** Collects a bounded Git patch from the workspace and writes its artifact metadata. */
 export async function collectWorkspacePatch(input: {
   workspace: string
   artifactsDirectory: string

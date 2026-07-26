@@ -167,7 +167,7 @@ function errorResult(error: unknown): ToolResult {
   }
 }
 
-/** Creates read only tool definitions. */
+/** Creates definitions for bounded read-only workspace, search, and metadata tools. */
 export function createReadOnlyToolDefinitions(
   getLimits: () => Pick<
     PublicConfig['limits'],
@@ -457,7 +457,7 @@ export function createReadOnlyToolDefinitions(
   return [readFileTool, listDirTool, globTool, grepTool]
 }
 
-/** Registers read only tools. */
+/** Registers all read-only tool definitions with the ToolRegistry. */
 export function registerReadOnlyTools(
   registry: ToolRegistry,
   getLimits?: () => Pick<

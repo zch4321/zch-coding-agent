@@ -36,7 +36,7 @@ export interface ModelProfile {
   maxOutputTokens?: number
 }
 
-/** Reports model catalog failures. */
+/** Reports model-catalog request, response, and normalization failures. */
 export class ModelCatalogError extends Error {
   readonly status: number | undefined
 
@@ -47,13 +47,13 @@ export class ModelCatalogError extends Error {
   }
 }
 
-/** Returns or updates model catalog endpoint state. */
+/** Normalizes a provider base URL and appends its OpenAI-compatible models path. */
 export function modelCatalogEndpoint(baseURL: string): string {
   const normalized = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
   return new URL('models', normalized).toString()
 }
 
-/** Returns or updates fetch open ai compatible model catalog state. */
+/** Fetches an OpenAI-compatible model list with authentication, timeout, and response bounds. */
 export async function fetchOpenAICompatibleModelCatalog(options: {
   baseURL: string
   apiKey: string
@@ -177,7 +177,7 @@ async function readBoundedResponseBody(response: Response): Promise<string> {
 
 export const fetchDeepSeekModelCatalog = fetchOpenAICompatibleModelCatalog
 
-/** Resolves model profiles. */
+/** Builds model profiles for a provider and includes the selected model when absent from its catalog. */
 export function resolveModelProfiles(
   config: PublicConfig,
   providerId = config.activeProviderId,

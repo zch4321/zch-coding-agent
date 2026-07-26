@@ -19,7 +19,7 @@ export interface ResolvedOrchestrationPrompt {
   resource?: PromptResourceSummary
 }
 
-/** Encapsulates session orchestrator messages behavior. */
+/** Builds localized orchestration prompts and emits them into Session history and events. */
 export class SessionOrchestratorMessages {
   readonly #configStore: ConfigStore
   readonly #promptRegistry: PromptRegistry | undefined
@@ -35,7 +35,7 @@ export class SessionOrchestratorMessages {
     this.#emit = options.emit
   }
 
-  /** Returns or updates prompt state. */
+  /** Resolves a localized orchestration prompt from config and the prompt registry. */
   prompt(kind: OrchestrationPromptKind): ResolvedOrchestrationPrompt {
     const config = this.#configStore.getPublicConfig()
     const resolved = this.#promptRegistry?.orchestrationPrompt(
@@ -52,7 +52,7 @@ export class SessionOrchestratorMessages {
     }
   }
 
-  /** Emits an event to registered listeners. */
+  /** Appends and emits a canonical orchestration message for the active run. */
   async emit(
     session: SessionState,
     run: ActiveRun,

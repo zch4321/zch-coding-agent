@@ -115,7 +115,7 @@ const ResizeSchema = Type.Object(
   { additionalProperties: false },
 )
 
-/** Registers terminal tools. */
+/** Registers Session terminal open, list, input, resize, and close tools. */
 export function registerTerminalTools(
   registry: ToolRegistrationPort,
   terminalPool: TerminalPool,

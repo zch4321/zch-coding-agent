@@ -80,7 +80,7 @@ export interface McpManagerOptions {
   onDiagnostic?: (message: string, error?: unknown) => void
 }
 
-/** Coordinates mcp lifecycle and operations. */
+/** Manages configured MCP servers, trust state, scoped connections, catalogs, and tool calls. */
 export class McpManager {
   readonly #configStore: ConfigStore
   readonly #defaultCwd: string
@@ -96,26 +96,26 @@ export class McpManager {
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
-  /** Initializes the component and its dependencies. */
+  /** Loads persisted server configuration and applies the initial connection state. */
   async initialize(): Promise<void> {
     await this.#applyConfigs(this.#configStore.getMcpServers())
   }
 
-  /** Activates workspace. */
+  /** Registers a workspace so scoped MCP servers can be started and exposed. */
   async activateWorkspace(workspace: string): Promise<void> {
     const canonical = path.resolve(workspace)
     this.#activeWorkspaces.add(canonical)
     await this.#applyConfigs(this.#configStore.getMcpServers())
   }
 
-  /** Returns or updates reload state. */
+  /** Reloads server configuration from disk, reapplies connections, and returns statuses. */
   async reload(): Promise<McpServerStatus[]> {
     await this.#configStore.reloadFromDisk()
     await this.#applyConfigs(this.#configStore.getMcpServers())
     return this.listStatuses()
   }
 
-  /** Returns or updates trust and enable state. */
+  /** Persists a server fingerprint trust decision and enables the server. */
   async trustAndEnable(
     serverId: string,
     fingerprint: string,
@@ -136,7 +136,7 @@ export class McpManager {
     return this.listStatuses()
   }
 
-  /** Returns or updates disable state. */
+  /** Persists a server as disabled and stops its active connections. */
   async disable(serverId: string): Promise<McpServerStatus[]> {
     this.#requireConfig(serverId)
     await this.#configStore.setMcpServerEnabled(serverId, false)
@@ -144,7 +144,7 @@ export class McpManager {
     return this.listStatuses()
   }
 
-  /** Restarts the managed resource. */
+  /** Stops and restarts one server connection for an optional workspace. */
   async restart(
     serverId: string,
     workspace?: string,
@@ -161,7 +161,7 @@ export class McpManager {
     return this.listStatuses()
   }
 
-  /** Lists statuses. */
+  /** Builds sorted status snapshots including trust, connection, catalog, and error state. */
   listStatuses(): McpServerStatus[] {
     const statuses: McpServerStatus[] = []
     for (const config of [...this.#configs.values()].sort((a, b) =>
@@ -179,7 +179,7 @@ export class McpManager {
     return statuses
   }
 
-  /** Lists visible. */
+  /** Filters enabled and trusted servers to those visible from a workspace scope. */
   listVisible(workspace: string): McpServerStatus[] {
     return this.listStatuses().filter((status) => {
       if (!status.enabled || !status.trusted) return false
@@ -188,7 +188,7 @@ export class McpManager {
     })
   }
 
-  /** Returns the currently available catalog. */
+  /** Reads a server's tool catalog after ensuring visibility and connection readiness. */
   async catalog(
     serverId: string,
     workspace: string,
@@ -208,7 +208,7 @@ export class McpManager {
     return publicCatalog(record.catalog, config, record)
   }
 
-  /** Resolves tool. */
+  /** Resolves a named MCP tool after checking workspace visibility and catalog revision. */
   resolveTool(
     serverId: string,
     workspace: string,
@@ -236,7 +236,7 @@ export class McpManager {
     return { descriptor: publicTool(tool), validate: tool.validateInput }
   }
 
-  /** Returns or updates call tool state. */
+  /** Calls an MCP tool after checking visibility, revision, arguments, and timeout limits. */
   async callTool(input: {
     serverId: string
     workspace: string
@@ -298,7 +298,7 @@ export class McpManager {
     }
   }
 
-  /** Releases all owned resources. */
+  /** Stops all MCP connections and prevents later server activity. */
   async dispose(): Promise<void> {
     this.#disposed = true
     await Promise.all(
@@ -556,7 +556,7 @@ export class McpManager {
   }
 }
 
-/** Returns or updates launch fingerprint state. */
+/** Hashes launch-affecting server configuration to detect when a restart is required. */
 export function launchFingerprint(config: McpServerConfig): string {
   const stable = {
     command: config.command,

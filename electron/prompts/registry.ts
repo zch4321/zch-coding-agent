@@ -25,7 +25,7 @@ export interface ResolvedPrompt {
 
 export type PromptResourceSummary = Omit<PromptResource, 'content'>
 
-/** Registers and resolves prompt entries. */
+/** Loads versioned localized prompt resources and resolves typed prompt references. */
 export class PromptRegistry {
   readonly #resources: Map<string, PromptResource>
 
@@ -35,7 +35,7 @@ export class PromptRegistry {
     )
   }
 
-  /** Returns or updates load state. */
+  /** Loads known prompt files for every supported locale and validates their identities. */
   static async load(rootDirectory: string): Promise<PromptRegistry> {
     const resources = await Promise.all([
       ...Object.values(DEFAULT_HARNESS_PROMPT_REFS).flatMap((localized) =>
@@ -86,19 +86,19 @@ export class PromptRegistry {
     return new PromptRegistry(resources)
   }
 
-  /** Creates the result from resources. */
+  /** Builds a registry from an already validated set of prompt resources. */
   static fromResources(resources: PromptResource[]): PromptRegistry {
     return new PromptRegistry(resources)
   }
 
-  /** Lists the currently available records. */
+  /** Returns prompt metadata without exposing resource content. */
   list(): PromptResourceSummary[] {
     return [...this.#resources.values()].map((resource) =>
       withoutContent(resource),
     )
   }
 
-  /** Returns the requested record. */
+  /** Returns a prompt resource by stable ID or raises when it is unregistered. */
   get(id: string): PromptResource {
     const resource = this.#resources.get(id)
     if (!resource) {
@@ -107,7 +107,7 @@ export class PromptRegistry {
     return resource
   }
 
-  /** Returns or updates harness prompt state. */
+  /** Resolves a localized harness prompt by kind and language. */
   harnessPrompt(
     kind: keyof typeof DEFAULT_HARNESS_PROMPT_REFS,
     locale: AssistantLanguage,
@@ -120,7 +120,7 @@ export class PromptRegistry {
     }
   }
 
-  /** Returns or updates approval prompt state. */
+  /** Resolves the localized risk-classification prompt used for approvals. */
   approvalPrompt(): ResolvedPrompt {
     const resource = this.get(DEFAULT_APPROVAL_PROMPT_REFS.classifyRisk.id)
     return {
@@ -130,7 +130,7 @@ export class PromptRegistry {
     }
   }
 
-  /** Returns or updates headless prompt state. */
+  /** Resolves a localized headless-run prompt by kind and language. */
   headlessPrompt(
     kind: keyof typeof DEFAULT_HEADLESS_PROMPT_REFS,
     locale: AssistantLanguage,
@@ -143,7 +143,7 @@ export class PromptRegistry {
     }
   }
 
-  /** Returns or updates orchestration prompt state. */
+  /** Resolves a localized orchestration prompt by kind and language. */
   orchestrationPrompt(
     kind: keyof typeof DEFAULT_ORCHESTRATION_PROMPT_REFS,
     locale: AssistantLanguage,

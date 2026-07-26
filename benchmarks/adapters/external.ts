@@ -72,7 +72,7 @@ export interface LoadExternalSuitesInput {
   runtime: ExternalAdapterRuntime
 }
 
-/** Loads external benchmark suites. */
+/** Loads the requested benchmark adapters and applies the verified cohort selection. */
 export function loadExternalBenchmarkSuites(
   input: LoadExternalSuitesInput,
 ): LoadedAdapterSuite[] {
@@ -358,7 +358,7 @@ function safeRevision(release: string): string {
   return release.toLowerCase().replace(/[^a-z0-9._-]+/gu, '-')
 }
 
-/** Returns or updates external agent descriptor state. */
+/** Converts a loaded benchmark case into the agent-visible descriptor supplied by its adapter. */
 export function externalAgentDescriptor(
   loadedCase: LoadedBenchmarkCase,
   adapter: BenchmarkCaseAdapter,

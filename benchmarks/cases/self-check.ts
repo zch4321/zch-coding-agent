@@ -28,7 +28,7 @@ export interface CaseSelfCheckEvidence {
   stableSignature: string
 }
 
-/** Returns or updates self check benchmark case state. */
+/** Verifies that a case's private spec and archive agree with their recorded signatures. */
 export async function selfCheckBenchmarkCase(
   loaded: LoadedBenchmarkCase,
 ): Promise<CaseSelfCheckEvidence> {

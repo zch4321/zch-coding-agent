@@ -62,7 +62,7 @@ export interface StoredFileChangeRow extends FileChangeSummaryRow {
   payload_bytes: number
 }
 
-/** Returns or updates encode stored file change row state. */
+/** Encodes a FileChangeRecord into SQLite columns after schema validation. */
 export function encodeStoredFileChangeRow(
   record: StoredFileChangeRecord,
 ): StoredFileChangeRow {
@@ -96,7 +96,7 @@ export function encodeStoredFileChangeRow(
   }
 }
 
-/** Returns or updates decode stored file change row state. */
+/** Decodes a SQLite row into a FileChangeRecord and validates stored fields. */
 export function decodeStoredFileChangeRow(
   row: Record<string, unknown>,
 ): StoredFileChangeRecord {
@@ -127,7 +127,7 @@ export function decodeStoredFileChangeRow(
   return record
 }
 
-/** Returns or updates decode file change summary row state. */
+/** Decodes a SQLite row into the bounded FileChange summary shape used by pagination. */
 export function decodeFileChangeSummaryRow(
   row: Record<string, unknown>,
 ): FileChangeSummary {
@@ -175,7 +175,7 @@ export function decodeFileChangeSummaryRow(
   return summary
 }
 
-/** Converts the input to file change summary. */
+/** Projects a full FileChangeRecord into its list-summary representation. */
 export function toFileChangeSummary(
   record: StoredFileChangeRecord,
 ): FileChangeSummary {

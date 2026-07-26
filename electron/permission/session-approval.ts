@@ -30,7 +30,7 @@ interface SessionApprovalCoordinatorOptions {
   ) => void
 }
 
-/** Coordinates session approval workflows. */
+/** Coordinates human approval requests and emits their lifecycle events for a Session. */
 export class SessionApprovalCoordinator {
   readonly #configStore: ConfigStore
   readonly #pluginBus: PluginEventBus | undefined
@@ -46,7 +46,7 @@ export class SessionApprovalCoordinator {
     this.#setRunStatus = options.setRunStatus
   }
 
-  /** Returns or updates decide state. */
+  /** Resolves a pending decision only when its Session, run, and call identifiers match. */
   decide(
     session: SessionState,
     input: {
@@ -77,7 +77,7 @@ export class SessionApprovalCoordinator {
     return true
   }
 
-  /** Returns or updates request tool approval state. */
+  /** Emits a tool approval request and waits for the human or plugin decision. */
   async requestToolApproval(
     session: SessionState,
     run: ActiveRun,
@@ -152,7 +152,7 @@ export class SessionApprovalCoordinator {
     return decision
   }
 
-  /** Returns or updates request context approval state. */
+  /** Requests approval for exposing context attachments to a provider call. */
   async requestContextApproval(
     session: SessionState,
     run: ActiveRun,

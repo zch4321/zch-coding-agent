@@ -15,7 +15,7 @@ export interface DrainedInterjectionBatch {
   previousNextMessageSeq: number
 }
 
-/** Coordinates session interjection workflows. */
+/** Queues live user interjections and emits their queued, superseded, and carryover states. */
 export class SessionInterjectionCoordinator {
   readonly #configStore: ConfigStore
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
@@ -28,7 +28,7 @@ export class SessionInterjectionCoordinator {
     this.#emit = options.emit
   }
 
-  /** Returns or updates queue state. */
+  /** Adds an interjection to the active run queue with a stable request identity. */
   queue(
     session: SessionState,
     run: ActiveRun,
@@ -129,7 +129,7 @@ export class SessionInterjectionCoordinator {
     ]
   }
 
-  /** Returns or updates supersede pending state. */
+  /** Marks queued interjections superseded and emits the corresponding state changes. */
   supersedePending(session: SessionState, run: ActiveRun): void {
     for (const interjection of run.pendingInterjections) {
       if (interjection.status === 'queued') {
@@ -141,7 +141,7 @@ export class SessionInterjectionCoordinator {
     run.pendingInterjections = []
   }
 
-  /** Returns or updates carry over state. */
+  /** Moves pending interjections to the next ordinary turn and emits carryover signals. */
   async carryOver(session: SessionState, run: ActiveRun): Promise<void> {
     // Final-answer branch: pending interjections become the next ordinary
     // user turn. Emit a carryover signal (and trace) for each, then drop them

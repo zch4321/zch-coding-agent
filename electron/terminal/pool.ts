@@ -77,7 +77,7 @@ function stripAnsi(value: string): string {
   return value.replace(ANSI_PATTERN, '')
 }
 
-/** Manages pooled terminal resources. */
+/** Owns PTY terminal processes per Session, bounded scrollback, and cleanup state. */
 export class TerminalPool {
   readonly #options: TerminalPoolOptions
   readonly #resources = new Map<TerminalId, TerminalResource>()
@@ -88,7 +88,7 @@ export class TerminalPool {
     this.#options = options
   }
 
-  /** Opens the requested resource. */
+  /** Creates a PTY terminal for a Session and returns its renderer-safe info. */
   async open(input: {
     sessionId: SessionId
     workspace: string
@@ -172,14 +172,14 @@ export class TerminalPool {
     return cloneInfo(resource.info)
   }
 
-  /** Lists the currently available records. */
+  /** Returns cloned terminal info for terminals owned by a Session. */
   list(sessionId: SessionId): TerminalInfo[] {
     return [...this.#resources.values()]
       .filter((resource) => resource.sessionId === sessionId)
       .map((resource) => cloneInfo(resource.info))
   }
 
-  /** Writes the supplied data. */
+  /** Writes input to a running Session-owned PTY. */
   write(sessionId: SessionId, id: TerminalId, data: string): boolean {
     const resource = this.#requireOwned(sessionId, id)
 
@@ -191,7 +191,7 @@ export class TerminalPool {
     return true
   }
 
-  /** Returns or updates resize state. */
+  /** Resizes a Session-owned PTY after validating its dimensions. */
   resize(
     sessionId: SessionId,
     id: TerminalId,
@@ -210,7 +210,7 @@ export class TerminalPool {
     return true
   }
 
-  /** Returns a snapshot of the current state. */
+  /** Returns terminal process state and bounded scrollback from an optional cursor. */
   snapshot(sessionId: SessionId, id: TerminalId): TerminalSnapshot {
     const resource = this.#requireOwned(sessionId, id)
     const snapshot = resource.scrollback.snapshot()
@@ -224,7 +224,7 @@ export class TerminalPool {
     }
   }
 
-  /** Reads the requested data. */
+  /** Reads bounded scrollback lines and bytes from a Session-owned terminal. */
   read(
     sessionId: SessionId,
     id: TerminalId,
@@ -264,7 +264,7 @@ export class TerminalPool {
     }
   }
 
-  /** Closes the resource and releases its handles. */
+  /** Closes one terminal and records its owner for idempotent repeated close calls. */
   close(sessionId: SessionId, id: TerminalId): boolean {
     const resource = this.#resources.get(id)
 
@@ -284,7 +284,7 @@ export class TerminalPool {
     return true
   }
 
-  /** Closes session. */
+  /** Closes every terminal owned by a Session. */
   closeSession(sessionId: SessionId): void {
     for (const resource of [...this.#resources.values()]) {
       if (resource.sessionId === sessionId) {
@@ -293,7 +293,7 @@ export class TerminalPool {
     }
   }
 
-  /** Releases all owned resources. */
+  /** Closes all terminals and waits for pending PTY cleanup. */
   async dispose(): Promise<void> {
     for (const resource of [...this.#resources.values()]) {
       void this.#disposeResource(resource)

@@ -694,7 +694,7 @@ export class SessionManager {
     )
   }
 
-  /** Starts harness run. */
+  /** Starts a prompt-harness run for an existing Session and client request. */
   startHarnessRun(input: {
     sessionId: SessionId
     clientRequestId: string
@@ -748,38 +748,38 @@ export class SessionManager {
       .slice(0, 512)
   }
 
-  /** Determines whether has live session. */
+  /** Reports whether a Session is loaded and open in the manager. */
   hasLiveSession(sessionId: SessionId): boolean {
     const session = this.#sessions.get(sessionId)
     return Boolean(session && !session.closed)
   }
 
-  /** Determines whether has active run. */
+  /** Reports whether a Session currently owns an active run. */
   hasActiveRun(sessionId: SessionId): boolean {
     return Boolean(this.#sessions.get(sessionId)?.activeRun)
   }
 
-  /** Determines whether has unsettled side effects. */
+  /** Reports whether an active run still has pending side effects. */
   hasUnsettledSideEffects(sessionId: SessionId): boolean {
     return Boolean(
       this.#sessions.get(sessionId)?.activeRun?.pendingSideEffects.size,
     )
   }
 
-  /** Determines whether has open terminals. */
+  /** Reports whether a Session currently owns any open terminals. */
   hasOpenTerminals(sessionId: SessionId): boolean {
     const session = this.#sessions.get(sessionId)
     if (!session || session.closed) return false
     return this.#terminals.list(sessionId).length > 0
   }
 
-  /** Returns or updates active run snapshot state. */
+  /** Returns a cloned public snapshot for a Session's active run. */
   activeRunSnapshot(sessionId: SessionId): ActiveRunPublicSnapshot | undefined {
     const snapshot = this.#sessions.get(sessionId)?.activeRun?.publicSnapshot
     return snapshot ? structuredClone(snapshot) : undefined
   }
 
-  /** Applies durable session record. */
+  /** Applies committed Session metadata and history to live state and its durable binding. */
   applyDurableSessionRecord(record: SessionRecord): void {
     const session = this.#sessions.get(record.id)
     if (!session || session.closed) return
@@ -797,18 +797,18 @@ export class SessionManager {
     session.plan = record.plan ? structuredClone(record.plan) : undefined
   }
 
-  /** Interrupts run. */
+  /** Requests cancellation of a specific active run. */
   interruptRun(sessionId: SessionId, runId: RunId): boolean {
     const session = this.#requireSession(sessionId)
     return this.#runs.interrupt(session, runId)
   }
 
-  /** Returns or updates provider tool definitions state. */
+  /** Returns cloned tool definitions in the shape exposed to the provider. */
   providerToolDefinitions(): JsonValue[] {
     return structuredClone(this.#toolRegistry.providerDefinitions())
   }
 
-  /** Returns or updates tool names state. */
+  /** Returns registered tool IDs in stable sorted order. */
   toolNames(): string[] {
     return this.#toolRegistry
       .list()
@@ -816,14 +816,14 @@ export class SessionManager {
       .sort()
   }
 
-  /** Waits for for run settled. */
+  /** Waits for the specified active run to settle when it is still current. */
   async waitForRunSettled(sessionId: SessionId, runId: RunId): Promise<void> {
     const session = this.#requireSession(sessionId)
     const run = session.activeRun
     if (run?.runId === runId) await run.done
   }
 
-  /** Acquires file change revert writer. */
+  /** Acquires exclusive workspace access for a file-change revert operation. */
   acquireFileChangeRevertWriter(input: {
     workspace: string
     sessionId: SessionId
@@ -868,7 +868,7 @@ export class SessionManager {
     })
   }
 
-  /** Records the decision for approval. */
+  /** Resolves a pending approval decision for the matching Session, run, and call. */
   decideApproval(input: {
     sessionId: SessionId
     runId: RunId
@@ -880,7 +880,7 @@ export class SessionManager {
     return this.#approvals.decide(session, input)
   }
 
-  /** Opens terminal. */
+  /** Opens a terminal owned by the specified Session. */
   async openTerminal(input: {
     sessionId: SessionId
     cwd?: string
@@ -890,12 +890,12 @@ export class SessionManager {
     return this.#terminals.open(input)
   }
 
-  /** Lists terminals. */
+  /** Lists terminals owned by a Session. */
   listTerminals(sessionId: SessionId): TerminalInfo[] {
     return this.#terminals.list(sessionId)
   }
 
-  /** Sends terminal input. */
+  /** Writes input to a Session-owned terminal. */
   sendTerminalInput(
     sessionId: SessionId,
     terminalId: TerminalId,
@@ -904,7 +904,7 @@ export class SessionManager {
     return this.#terminals.write(sessionId, terminalId, data)
   }
 
-  /** Returns or updates resize terminal state. */
+  /** Changes the dimensions of a Session-owned terminal. */
   resizeTerminal(
     sessionId: SessionId,
     terminalId: TerminalId,
@@ -914,12 +914,12 @@ export class SessionManager {
     return this.#terminals.resize(sessionId, terminalId, cols, rows)
   }
 
-  /** Closes terminal. */
+  /** Closes a Session-owned terminal. */
   closeTerminal(sessionId: SessionId, terminalId: TerminalId): boolean {
     return this.#terminals.close(sessionId, terminalId)
   }
 
-  /** Returns or updates terminal snapshot state. */
+  /** Returns scrollback and process state for a Session-owned terminal. */
   terminalSnapshot(
     sessionId: SessionId,
     terminalId: TerminalId,
@@ -927,7 +927,7 @@ export class SessionManager {
     return this.#terminals.snapshot(sessionId, terminalId)
   }
 
-  /** Releases all owned resources. */
+  /** Closes every Session and releases workspace access and terminal resources. */
   async dispose(): Promise<void> {
     await Promise.all(
       [...this.#sessions.keys()].map((idValue) => this.closeSession(idValue)),

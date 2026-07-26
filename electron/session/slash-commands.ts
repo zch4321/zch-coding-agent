@@ -80,7 +80,7 @@ function orchestrationPrompt(
   }
 }
 
-/** Resolves slash command. */
+/** Parses a slash command and returns its normalized command effects and prompt content. */
 export function resolveSlashCommand(input: {
   message: string
   config: PublicConfig

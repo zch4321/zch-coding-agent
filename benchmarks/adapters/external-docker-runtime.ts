@@ -69,7 +69,7 @@ export interface ExternalDockerRuntimeOptions {
   onProgress?: (message: string) => void
 }
 
-/** Runs external docker workflows. */
+/** Runs external benchmark candidates in isolated Docker images and volumes. */
 export class ExternalDockerRuntime implements ExternalAdapterRuntime {
   readonly #options: ExternalDockerRuntimeOptions
   readonly #images = new Map<string, ExternalImageInfo>()
@@ -80,7 +80,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     this.#options = options
   }
 
-  /** Resolves image. */
+  /** Resolves or builds the Docker image required by an external benchmark candidate. */
   async resolveImage(
     candidate: ExternalBenchmarkCandidate,
   ): Promise<ResolvedExternalImage> {
@@ -106,7 +106,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     }
   }
 
-  /** Returns or updates prepare state. */
+  /** Creates the candidate's isolated Docker volume and prepares its workspace. */
   async prepare(
     input: Parameters<ExternalAdapterRuntime['prepare']>[0],
   ): Promise<ExternalPreparedWorkspace> {
@@ -137,7 +137,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     }
   }
 
-  /** Captures patch. */
+  /** Reads the patch produced in the candidate workspace from the running container. */
   async capturePatch(
     input: Parameters<ExternalAdapterRuntime['capturePatch']>[0],
   ): Promise<string> {
@@ -172,7 +172,7 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     return result.stdout
   }
 
-  /** Returns or updates grade state. */
+  /** Runs the candidate's isolated verifier and records timing, output, and resource results. */
   async grade(
     input: Parameters<ExternalAdapterRuntime['grade']>[0],
   ): Promise<IsolatedGraderRunResult> {
@@ -294,14 +294,14 @@ export class ExternalDockerRuntime implements ExternalAdapterRuntime {
     return result
   }
 
-  /** Releases all owned resources. */
+  /** Removes the prepared workspaces' Docker volumes after a trial completes. */
   async dispose(workspaces: ExternalPreparedWorkspace[]): Promise<void> {
     await Promise.all(
       workspaces.map((workspace) => this.#removeVolume(workspace.mount.name)),
     )
   }
 
-  /** Returns or updates cleanup images state. */
+  /** Removes tracked Docker volumes and created images, returning removal counts. */
   async cleanupImages(): Promise<{ removed: number; failed: number }> {
     await Promise.all(
       [...this.#volumes].map((volume) => this.#removeVolume(volume)),
@@ -782,7 +782,7 @@ interface VerifierResult {
   targetResults: boolean[]
 }
 
-/** Returns or updates external volume initializer args state. */
+/** Builds the command arguments used to initialize an external benchmark volume. */
 export function externalVolumeInitializerArgs(input: {
   container: string
   image: string
@@ -823,7 +823,7 @@ function compatibilityDiagnostic(result: VerifierResult) {
   }
 }
 
-/** Parses external verifier. */
+/** Parses verifier output into pass/fail status and bounded diagnostic details. */
 export function parseExternalVerifier(
   candidate: ExternalBenchmarkCandidate,
   command: DockerCommandResult,

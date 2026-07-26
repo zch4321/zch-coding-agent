@@ -466,7 +466,7 @@ export const MessageRecordSchema = Type.Union([
 ])
 export type MessageRecord = Static<typeof MessageRecordSchema>
 
-/** Determines whether is control command user input. */
+/** Identifies user-input records that represent supported control commands with a request ID. */
 export function isControlCommandUserInput(
   record: MessageRecord,
 ): record is Extract<MessageRecord, { kind: 'user_input' }> & {
@@ -514,7 +514,7 @@ export const MessagePageSchema = Type.Union([
 ])
 export type MessagePage = Static<typeof MessagePageSchema>
 
-/** Validates message record semantics and throws when it is invalid. */
+/** Validates visibility, history, sequence, parent, and part invariants for a persisted message. */
 export function assertMessageRecordSemantics(record: MessageRecord): void {
   if (record.visibility === 'superseded' && record.inHistory) {
     throw new TypeError('Superseded messages must not enter history')
@@ -547,7 +547,7 @@ export function assertMessageRecordSemantics(record: MessageRecord): void {
   }
 }
 
-/** Validates message page semantics and throws when it is invalid. */
+/** Validates session identity, sequence ordering, and pagination cursors for a message page. */
 export function assertMessagePageSemantics(page: MessagePage): void {
   let previousSeq = 0
   for (const record of page.records) {

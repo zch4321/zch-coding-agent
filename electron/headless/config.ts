@@ -16,26 +16,26 @@ import { HeadlessConfigSchema, type HeadlessConfig } from './contracts'
 const MAX_HEADLESS_CONFIG_BYTES = 1_048_576
 const validateHeadlessConfig = compileSchema(HeadlessConfigSchema)
 
-/** Adapts headless secret storage to its host interface. */
+/** Provides a no-persistence SafeStorageAdapter for headless environment credentials. */
 class HeadlessSecretStorageAdapter implements SafeStorageAdapter {
   readonly platform = process.platform
 
-  /** Determines whether is async encryption available. */
+  /** Reports that headless mode never persists secrets through safe storage. */
   async isAsyncEncryptionAvailable(): Promise<boolean> {
     return false
   }
 
-  /** Returns selected storage backend. */
+  /** Identifies the environment-backed headless credential source. */
   getSelectedStorageBackend(): string {
     return 'headless-environment'
   }
 
-  /** Returns or updates encrypt string async state. */
+  /** Rejects encryption because headless mode does not persist credentials. */
   async encryptStringAsync(): Promise<Buffer> {
     throw new Error('Headless secret persistence is disabled')
   }
 
-  /** Returns or updates decrypt string async state. */
+  /** Rejects decryption because headless mode does not persist credentials. */
   async decryptStringAsync(): Promise<{
     result: string
     shouldReEncrypt: boolean
@@ -44,7 +44,7 @@ class HeadlessSecretStorageAdapter implements SafeStorageAdapter {
   }
 }
 
-/** Reports headless config failures. */
+/** Reports malformed or unsupported headless configuration. */
 export class HeadlessConfigError extends Error {
   readonly code = 'HEADLESS_CONFIG_INVALID'
 
@@ -61,7 +61,7 @@ export interface PreparedHeadlessConfig {
   userDataDirectory: string
 }
 
-/** Loads headless config. */
+/** Reads and validates the headless configuration JSON from disk. */
 export async function loadHeadlessConfig(
   filePath: string,
 ): Promise<HeadlessConfig> {
@@ -89,7 +89,7 @@ export async function loadHeadlessConfig(
   return structuredClone(candidate) as HeadlessConfig
 }
 
-/** Prepares headless config. */
+/** Combines headless config with artifact paths and environment-backed runtime settings. */
 export async function prepareHeadlessConfig(input: {
   config: HeadlessConfig
   artifactsDirectory: string

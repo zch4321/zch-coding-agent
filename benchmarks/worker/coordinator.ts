@@ -55,7 +55,7 @@ interface StopReason {
   message: string
 }
 
-/** Runs docker worker. */
+/** Runs the Docker worker trial, collects its bounded result, and records timing and artifacts. */
 export async function runDockerWorker(
   input: DockerWorkerRunInput,
 ): Promise<DockerWorkerResult> {

@@ -1,28 +1,28 @@
 import { safeStorage } from 'electron'
 import type { SafeStorageAdapter } from './secret-store'
 
-/** Adapts electron safe storage to its host interface. */
+/** Adapts Electron safeStorage encryption to the process-neutral SecretStore interface. */
 export class ElectronSafeStorageAdapter implements SafeStorageAdapter {
   readonly platform = process.platform
 
-  /** Determines whether is async encryption available. */
+  /** Reports whether the current platform supports asynchronous safeStorage encryption. */
   isAsyncEncryptionAvailable(): Promise<boolean> {
     return safeStorage.isAsyncEncryptionAvailable()
   }
 
-  /** Returns selected storage backend. */
+  /** Returns the storage backend selected by Electron for the current platform. */
   getSelectedStorageBackend(): string {
     return this.platform === 'linux'
       ? safeStorage.getSelectedStorageBackend()
       : 'system'
   }
 
-  /** Returns or updates encrypt string async state. */
+  /** Encrypts plaintext through Electron safeStorage and returns ciphertext bytes. */
   encryptStringAsync(value: string): Promise<Buffer> {
     return safeStorage.encryptStringAsync(value)
   }
 
-  /** Returns or updates decrypt string async state. */
+  /** Decrypts safeStorage ciphertext and reports whether it should be re-encrypted. */
   decryptStringAsync(
     value: Buffer,
   ): Promise<{ result: string; shouldReEncrypt: boolean }> {

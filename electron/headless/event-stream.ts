@@ -11,7 +11,7 @@ import {
 
 const validateStreamEvent = compileSchema(HeadlessStreamEventSchema)
 
-/** Writes headless event output. */
+/** Writes sequenced headless events to a writable output stream. */
 export class HeadlessEventWriter {
   readonly #stream: Writable
   #sequence = 0
@@ -20,7 +20,7 @@ export class HeadlessEventWriter {
     this.#stream = stream
   }
 
-  /** Writes the supplied data. */
+  /** Assigns schema version, sequence, and timestamp before writing one event. */
   write(draft: HeadlessStreamEventDraft): HeadlessStreamEvent {
     const event = {
       schemaVersion: 1,
@@ -46,7 +46,7 @@ export interface HeadlessUsageTotals {
   cacheMissTokens: number
 }
 
-/** Accumulates headless run metrics. */
+/** Accumulates usage, response, goal, and terminal metrics from runtime events. */
 export class HeadlessRunMetrics implements RuntimeEventListener {
   readonly usage: HeadlessUsageTotals = {
     records: 0,
@@ -64,7 +64,7 @@ export class HeadlessRunMetrics implements RuntimeEventListener {
 
   constructor(private readonly writer: HeadlessEventWriter) {}
 
-  /** Returns or updates on agent event state. */
+  /** Writes an agent event and updates final response, goal, and usage metrics. */
   onAgentEvent = (event: AgentEvent): void => {
     this.writer.write({ type: 'agent.event', event })
     if (event.type === 'assistant.message.completed') {
@@ -90,7 +90,7 @@ export class HeadlessRunMetrics implements RuntimeEventListener {
     }
   }
 
-  /** Returns or updates on terminal event state. */
+  /** Writes a terminal event to the headless event stream. */
   onTerminalEvent = (event: TerminalEvent): void => {
     this.writer.write({ type: 'terminal.event', event })
   }

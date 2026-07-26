@@ -33,7 +33,7 @@ async function ensureParentDirectory(
   return parentRealPath
 }
 
-/** Returns or updates atomic replace state. */
+/** Replaces a guarded workspace file atomically after checking its precondition. */
 export async function atomicReplace(
   workspace: string,
   precondition: FilePrecondition,
@@ -73,7 +73,7 @@ export async function atomicReplace(
   }
 }
 
-/** Returns or updates atomic delete state. */
+/** Deletes a guarded workspace file after checking its precondition and abort signal. */
 export async function atomicDelete(
   workspace: string,
   precondition: FilePrecondition,

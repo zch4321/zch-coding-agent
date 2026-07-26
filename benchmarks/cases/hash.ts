@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto'
 import type { BenchmarkArchive } from './contracts'
 
-/** Returns or updates sha256 bytes state. */
+/** Computes a SHA-256 hex digest for a string or byte buffer. */
 export function sha256Bytes(value: Buffer | string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-/** Returns or updates archive tree sha256 state. */
+/** Computes a deterministic SHA-256 digest over the sorted files in a benchmark archive. */
 export function archiveTreeSha256(archive: BenchmarkArchive): string {
   const hash = createHash('sha256')
   for (const file of [...archive.files].sort((left, right) =>

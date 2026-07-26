@@ -59,7 +59,7 @@ function ssrfErrorResult(error: unknown): ToolResult {
   }
 }
 
-/** Registers fetch tools. */
+/** Registers the bounded network-fetch tool with configuration and SSRF policy checks. */
 export function registerFetchTools(
   registry: ToolRegistrationPort,
   getConfig: () => PublicConfig,

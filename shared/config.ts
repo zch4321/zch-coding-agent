@@ -415,7 +415,7 @@ export const PublicConfigSchema = Type.Object(
 )
 export type PublicConfig = Static<typeof PublicConfigSchema>
 
-/** Returns provider config. */
+/** Finds the configured provider with the given ID. */
 export function getProviderConfig(
   config: PublicConfig,
   providerId: string,
@@ -423,7 +423,7 @@ export function getProviderConfig(
   return config.providers.find((provider) => provider.id === providerId)
 }
 
-/** Returns active provider config. */
+/** Selects the active provider, falling back to the first configured provider when necessary. */
 export function getActiveProviderConfig(
   config: PublicConfig,
 ): ProviderPublicConfig {

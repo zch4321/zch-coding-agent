@@ -9,7 +9,7 @@ function openPlanItems(session: SessionState) {
   )
 }
 
-/** Encapsulates session orchestration planner behavior. */
+/** Advances goal and plan orchestration and emits the next prompt-driven step. */
 export class SessionOrchestrationPlanner {
   readonly #orchestratorMessages: SessionOrchestratorMessages
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
@@ -22,7 +22,7 @@ export class SessionOrchestrationPlanner {
     this.#emit = options.emit
   }
 
-  /** Returns or updates next step state. */
+  /** Completes finished plan items and selects whether orchestration should continue or finish. */
   async nextStep(
     session: SessionState,
     run: ActiveRun,

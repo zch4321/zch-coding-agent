@@ -152,9 +152,9 @@ async function existingRoots(
   return found
 }
 
-/** Encapsulates project module detector behavior. */
+/** Detects project modules by inspecting guarded workspace roots and known manifests. */
 export class ProjectModuleDetector {
-  /** Returns or updates detect state. */
+  /** Scans workspace roots and returns module descriptors with current detection timestamps. */
   async detect(workspace: string): Promise<ProjectModule[]> {
     const guard = await PathGuard.create(workspace)
     const roots = await discoverRoots(guard.workspacePath)

@@ -524,7 +524,7 @@ export interface TraceEventFactory {
   next(input: TraceEventInput): TraceEvent
 }
 
-/** Creates trace event. */
+/** Creates a schema-validated trace event with stable sequence, ID, and timestamp fields. */
 export function createTraceEvent(
   input: TraceEventInput,
   seq: number,

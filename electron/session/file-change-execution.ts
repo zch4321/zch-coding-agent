@@ -42,7 +42,7 @@ export type FileChangeMutationOutcome =
         | 'CHANGE_HISTORY_AFTER_STATE_MISMATCH'
     }
 
-/** Reports file change execution failures. */
+/** Reports failures while preparing, applying, or recording a file-change tool operation. */
 export class FileChangeExecutionError extends Error {
   constructor(
     readonly code: string,

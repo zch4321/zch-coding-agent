@@ -21,7 +21,7 @@ export type { SearchInput, SearchMatch, SearchOutcome, Searcher }
 export class JavaScriptSearcher implements Searcher {
   readonly backend = 'javascript' as const
 
-  /** Searches for records matching the request. */
+  /** Searches guarded workspace files with include, exclude, and result limits. */
   async search(input: SearchInput): Promise<SearchOutcome> {
     const {
       guard,

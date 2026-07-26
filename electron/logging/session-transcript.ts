@@ -59,7 +59,7 @@ function mediaPlaceholder(input: {
   }
 }
 
-/** Omits multimodal content. */
+/** Replaces embedded data URLs with bounded textual placeholders for transcript safety. */
 export function omitMultimodalContent(value: JsonValue): JsonValue {
   if (typeof value === 'string') {
     const match = value.match(DATA_URL)
@@ -186,7 +186,7 @@ function toolEntry(aggregate: ToolAggregate): SessionTranscriptEntry {
   })
 }
 
-/** Normalizes session transcript. */
+/** Orders trace events and derives the normalized transcript document and metadata. */
 export function normalizeSessionTranscript(
   events: readonly TraceEvent[],
   options: TranscriptOptions,
@@ -558,7 +558,7 @@ function renderEntry(
   return parts.join('\n\n')
 }
 
-/** Returns or updates session transcript to markdown state. */
+/** Renders a normalized session transcript document as bounded Markdown. */
 export function sessionTranscriptToMarkdown(
   document: SessionTranscriptDocument,
 ): string {

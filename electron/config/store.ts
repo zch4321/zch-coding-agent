@@ -118,7 +118,7 @@ function providerFallback(
   )
 }
 
-/** Persists and retrieves config state. */
+/** Serializes configuration mutations, persists settings, and delegates credentials to SecretStore. */
 export class ConfigStore {
   readonly #filePath: string
   readonly #secretStore: SecretStore
@@ -149,7 +149,7 @@ export class ConfigStore {
     )
   }
 
-  /** Initializes the component and its dependencies. */
+  /** Creates the config directory, loads and migrates settings, and initializes secret storage. */
   async initialize(): Promise<{
     config: PublicConfig
     secretStorage: SecretStorageStatus
@@ -166,7 +166,7 @@ export class ConfigStore {
     }
   }
 
-  /** Returns public config. */
+  /** Returns renderer-safe settings with credential presence and source but no secret values. */
   getPublicConfig(): PublicConfig {
     return toPublicConfig(
       this.#config,
@@ -187,17 +187,17 @@ export class ConfigStore {
     )
   }
 
-  /** Returns internal config. */
+  /** Returns a cloned privileged configuration including stored credential references. */
   getInternalConfig(): AppConfig {
     return structuredClone(this.#config)
   }
 
-  /** Returns deep seek api key. */
+  /** Loads the credential for the default DeepSeek provider. */
   async getDeepSeekApiKey(): Promise<string | undefined> {
     return this.getProviderApiKey(DEFAULT_PROVIDER_ID)
   }
 
-  /** Returns provider api key. */
+  /** Returns a provider credential from safe storage, falling back to its environment value. */
   async getProviderApiKey(providerId: string): Promise<string | undefined> {
     const provider = getAppProvider(this.#config, providerId)
     const reference = provider?.apiKeyRef
@@ -210,7 +210,7 @@ export class ConfigStore {
     return stored ?? environment
   }
 
-  /** Returns provider api key for revision. */
+  /** Returns a provider credential only when its revision still matches the frozen route. */
   async getProviderApiKeyForRevision(
     providerId: string,
     revision: number,
@@ -228,7 +228,7 @@ export class ConfigStore {
     return stored ?? this.#environmentApiKeys[provider.id]
   }
 
-  /** Returns web search api key. */
+  /** Returns the stored credential for the configured web-search provider. */
   async getWebSearchApiKey(): Promise<string | undefined> {
     const reference = this.#config.webSearch.apiKeyRef
     return reference ? this.#secretStore.get(reference) : undefined
@@ -247,17 +247,17 @@ export class ConfigStore {
     }
   }
 
-  /** Returns active provider. */
+  /** Returns a cloned configuration for the active provider. */
   getActiveProvider(): AppProviderConfig {
     return structuredClone(getActiveAppProvider(this.#config))
   }
 
-  /** Returns mcp servers. */
+  /** Returns cloned MCP server configurations for privileged callers. */
   getMcpServers(): McpServerConfig[] {
     return structuredClone(this.#config.mcpServers)
   }
 
-  /** Returns or updates reload from disk state. */
+  /** Reloads settings from disk behind the mutation queue and returns public configuration. */
   reloadFromDisk(): Promise<PublicConfig> {
     const operation = this.#mutation.then(async () => {
       const next = await this.#read()
@@ -272,7 +272,7 @@ export class ConfigStore {
     return operation
   }
 
-  /** Sets mcp server enabled. */
+  /** Persists an MCP server's enabled flag and optional launch-trust decision. */
   setMcpServerEnabled(
     serverId: string,
     enabled: boolean,
@@ -301,7 +301,7 @@ export class ConfigStore {
     return operation
   }
 
-  /** Updates the requested record. */
+  /** Serializes and persists a typed configuration update. */
   update(request: ConfigSetRequest): Promise<PublicConfig> {
     const operation = this.#mutation.then(() => this.#apply(request))
     this.#mutation = operation.then(
@@ -311,7 +311,7 @@ export class ConfigStore {
     return operation
   }
 
-  /** Sets provider model catalog. */
+  /** Persists a fetched model catalog and timestamp for one provider. */
   setProviderModelCatalog(
     providerId: string,
     models: AppProviderConfig['modelCatalog'],
@@ -338,7 +338,7 @@ export class ConfigStore {
     return operation
   }
 
-  /** Sets deep seek model catalog. */
+  /** Persists the fetched model catalog for the default DeepSeek provider. */
   setDeepSeekModelCatalog(
     models: AppProviderConfig['modelCatalog'],
     fetchedAt: string,

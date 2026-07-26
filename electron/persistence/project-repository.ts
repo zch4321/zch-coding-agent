@@ -12,9 +12,9 @@ const PROJECT_COLUMNS = `
   schema_version, id, path, name, revision, created_at, updated_at
 `
 
-/** Persists and queries project records. */
+/** Persists Project records and provides revision-checked CRUD queries. */
 export class ProjectRepository {
-  /** Returns the complete number of durable Project records. */
+  /** Counts all durable Project records in the database. */
   count(reader: PersistenceReader): number {
     const row = reader.prepare('SELECT COUNT(*) AS total FROM projects').get()
     const total = Number(row?.total)
@@ -25,7 +25,7 @@ export class ProjectRepository {
     )
   }
 
-  /** Returns or updates insert state. */
+  /** Inserts a new Project record into the active transaction. */
   insert(transaction: PersistenceTransaction, record: ProjectRecord): void {
     const row = encodeProjectRow(record)
     transaction
@@ -45,7 +45,7 @@ export class ProjectRepository {
       )
   }
 
-  /** Updates the requested record. */
+  /** Updates a Project only when its stored revision matches the expected revision. */
   update(
     transaction: PersistenceTransaction,
     record: ProjectRecord,
@@ -70,7 +70,7 @@ export class ProjectRepository {
     return Number(result.changes) > 0
   }
 
-  /** Deletes the requested record. */
+  /** Deletes a Project by ID and reports whether a row was removed. */
   delete(transaction: PersistenceTransaction, id: ProjectId): boolean {
     const result = transaction
       .prepare('DELETE FROM projects WHERE id = ?')
@@ -78,7 +78,7 @@ export class ProjectRepository {
     return Number(result.changes) > 0
   }
 
-  /** Returns the requested record. */
+  /** Loads and decodes a Project record by ID. */
   get(reader: PersistenceReader, id: ProjectId): ProjectRecord | undefined {
     const row = reader
       .prepare(`SELECT ${PROJECT_COLUMNS} FROM projects WHERE id = ?`)
@@ -86,7 +86,7 @@ export class ProjectRepository {
     return row ? decodeProjectRow(row) : undefined
   }
 
-  /** Lists the currently available records. */
+  /** Lists Project records in stable updated-time order. */
   list(reader: PersistenceReader): ProjectRecord[] {
     return reader
       .prepare(

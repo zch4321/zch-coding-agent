@@ -34,7 +34,7 @@ export interface FileChangeRepositoryOptions {
   maxPayloadBytes?: number
 }
 
-/** Persists and queries file change records. */
+/** Persists file-change records and provides bounded history and summary queries. */
 export class FileChangeRepository {
   readonly #maxPayloadBytes: number
 
@@ -45,7 +45,7 @@ export class FileChangeRepository {
     )
   }
 
-  /** Returns or updates insert with retention state. */
+  /** Inserts a file-change record and enforces the configured retention total. */
   insertWithRetention(
     transaction: PersistenceTransaction,
     record: StoredFileChangeRecord,
@@ -123,7 +123,7 @@ export class FileChangeRepository {
     return { retentionApplied }
   }
 
-  /** Marks reverted. */
+  /** Marks a file-change record as reverted after checking its expected revision. */
   markReverted(
     transaction: PersistenceTransaction,
     input: {
@@ -153,7 +153,7 @@ export class FileChangeRepository {
     return Number(result.changes) > 0
   }
 
-  /** Returns stored. */
+  /** Loads one persisted file-change record by Session and ID. */
   getStored(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -169,7 +169,7 @@ export class FileChangeRepository {
     return row ? decodeStoredFileChangeRow(row) : undefined
   }
 
-  /** Lists page. */
+  /** Lists a bounded FileChange page before an optional cursor. */
   listPage(
     reader: PersistenceReader,
     sessionId: SessionId,
@@ -237,7 +237,7 @@ function assertRevisionTransition(expected: number, next: number): void {
   }
 }
 
-/** Validates file change payload within limit and throws when it is invalid. */
+/** Validates file-change content and metadata against storage size limits. */
 export function assertFileChangePayloadWithinLimit(
   payloadBytes: number,
   maximum = DEFAULT_FILE_CHANGE_HISTORY_BYTES,

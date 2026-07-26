@@ -40,7 +40,7 @@ export interface SsrfFetchResponse {
   totalBytes: number
 }
 
-/** Reports ssrf fetch failures. */
+/** Reports blocked or failed SSRF-safe fetches with the relevant network code. */
 export class SsrfFetchError extends Error {
   constructor(
     readonly code: string,
@@ -87,14 +87,14 @@ const SENSITIVE_HEADER_PREFIXES = [
   'proxy-authorization',
 ]
 
-/** Returns or updates same origin state. */
+/** Compares two URLs by protocol, hostname, and effective port. */
 export function sameOrigin(a: URL, b: URL): boolean {
   return (
     a.protocol === b.protocol && a.hostname === b.hostname && a.port === b.port
   )
 }
 
-/** Returns or updates strip sensitive headers state. */
+/** Removes authorization and cookie headers before forwarding a cross-origin request. */
 export function stripSensitiveHeaders(
   headers: Record<string, string>,
 ): Record<string, string> {

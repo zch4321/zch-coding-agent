@@ -113,7 +113,7 @@ function assertNoCredentialFields(value: JsonValue, path = 'request'): void {
   }
 }
 
-/** Runs session provider turn workflows. */
+/** Runs provider-turn lifecycle, plugin hooks, streaming provider calls, and tool validation. */
 export class SessionProviderTurnRunner {
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
@@ -155,7 +155,7 @@ export class SessionProviderTurnRunner {
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
   }
 
-  /** Returns or updates call provider state. */
+  /** Builds an immutable provider request, invokes the provider, and returns its normalized turn. */
   async callProvider(
     session: SessionState,
     run: ActiveRun,
@@ -436,7 +436,7 @@ function assertCompletedAssistantTurn(completed: CompletedAssistantTurn): void {
   }
 }
 
-/** Creates configured provider. */
+/** Creates the configured provider adapter from public settings, credential, and endpoint overrides. */
 export function createConfiguredProvider(
   provider: ProviderPublicConfig,
   apiKey: string,

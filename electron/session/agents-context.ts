@@ -85,7 +85,7 @@ function agentsCandidates(
     .slice(0, MAX_AGENTS_FILES)
 }
 
-/** Loads agents instructions. */
+/** Loads AGENTS instructions from the workspace and selected attachments under path guards. */
 export async function loadAgentsInstructions(input: {
   workspace: string
   attachments: ContextAttachmentRef[]
@@ -131,7 +131,7 @@ export async function loadAgentsInstructions(input: {
   return results
 }
 
-/** Formats agents instructions. */
+/** Combines instruction files into a labeled prompt section in load order. */
 export function formatAgentsInstructions(
   instructions: AgentsInstruction[],
 ): string {
@@ -150,7 +150,7 @@ export function formatAgentsInstructions(
   return sections.join('\n\n')
 }
 
-/** Returns or updates agents cache key state. */
+/** Builds a stable cache key from the workspace and attachment path. */
 export function agentsCacheKey(
   workspace: string,
   attachmentPath: string,

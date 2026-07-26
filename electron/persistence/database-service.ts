@@ -38,11 +38,11 @@ export interface DatabaseMigrationProgress {
   elapsedMs: number
 }
 
-/** Reads persistence data. */
+/** Provides read-only prepared statements over the open SQLite database. */
 export class PersistenceReader {
   constructor(protected readonly database: DatabaseSync) {}
 
-  /** Returns or updates prepare state. */
+  /** Prepares a SQL statement and normalizes driver errors into PersistenceError. */
   prepare(sql: string): StatementSync {
     try {
       return wrapStatement(this.database.prepare(sql))
@@ -52,17 +52,17 @@ export class PersistenceReader {
   }
 }
 
-/** Encapsulates persistence transaction behavior. */
+/** Restricts prepared statements to an active write transaction. */
 export class PersistenceTransaction extends PersistenceReader {
   #active = true
 
-  /** Returns or updates prepare state. */
+  /** Prepares a statement only while this transaction is active. */
   override prepare(sql: string): StatementSync {
     this.#assertActive()
     return super.prepare(sql)
   }
 
-  /** Returns or updates deactivate state. */
+  /** Marks the transaction inactive so no further statements can be prepared. */
   deactivate(): void {
     this.#active = false
   }
@@ -77,7 +77,7 @@ export class PersistenceTransaction extends PersistenceReader {
   }
 }
 
-/** Provides database operations. */
+/** Owns SQLite configuration, migrations, serialized writes, and orderly shutdown. */
 export class DatabaseService {
   readonly databasePath: string
   readonly #database: DatabaseSync
@@ -115,18 +115,18 @@ export class DatabaseService {
     }
   }
 
-  /** Opens the requested resource. */
+  /** Opens a configured SQLite database and applies its validated migrations. */
   static open(options: DatabaseServiceOptions): DatabaseService {
     return new DatabaseService(options)
   }
 
-  /** Reads the requested data. */
+  /** Runs a synchronous read callback against the shared read-only database handle. */
   read<Result>(work: (reader: PersistenceReader) => Result): Result {
     this.#assertOpen()
     return work(this.#reader)
   }
 
-  /** Returns or updates with transaction state. */
+  /** Queues a synchronous transaction, rejecting nested or asynchronous transaction work. */
   withTransaction<Result>(
     work: (transaction: PersistenceTransaction) => Result,
   ): Promise<Result> {
@@ -179,7 +179,7 @@ export class DatabaseService {
     })
   }
 
-  /** Closes the resource and releases its handles. */
+  /** Stops accepting work and closes SQLite after all queued writes settle. */
   close(): Promise<void> {
     if (this.#closePromise) return this.#closePromise
     this.#acceptingWork = false
@@ -353,17 +353,17 @@ function wrapStatement(statement: StatementSync): StatementSync {
   })
 }
 
-/** Returns or updates desktop database path state. */
+/** Returns the default SQLite path used by the desktop application. */
 export function desktopDatabasePath(userDataPath: string): string {
   return path.join(userDataPath, 'agent.db')
 }
 
-/** Returns or updates headless trial database path state. */
+/** Returns the isolated SQLite path used by a headless benchmark trial. */
 export function headlessTrialDatabasePath(trialDirectory: string): string {
   return path.join(trialDirectory, 'agent.db')
 }
 
-/** Returns or updates migration checksum state. */
+/** Computes the SHA-256 checksum used to identify migration SQL content. */
 export function migrationChecksum(sql: string): string {
   return createHash('sha256').update(sql, 'utf8').digest('hex')
 }

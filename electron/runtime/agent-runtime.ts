@@ -29,7 +29,7 @@ export interface AgentRunHandle {
   interrupt: () => boolean
 }
 
-/** Runs agent workflows. */
+/** Composes privileged agent services and exposes Session and run lifecycle operations. */
 export class AgentRuntime {
   readonly services: AgentRuntimeServices
   readonly events: RuntimeEventBus
@@ -47,7 +47,7 @@ export class AgentRuntime {
     this.#disposeRuntime = options.dispose
   }
 
-  /** Creates session. */
+  /** Creates a live Session in a workspace with the selected permission mode and provider. */
   createSession(input: {
     workspace: string
     mode: PermissionMode
@@ -57,7 +57,7 @@ export class AgentRuntime {
     return this.services.sessions.createSession(input)
   }
 
-  /** Returns or updates run state. */
+  /** Starts or reuses a run for a client request and returns its durable result. */
   run(input: {
     sessionId: SessionId
     message: string
@@ -93,18 +93,18 @@ export class AgentRuntime {
     }
   }
 
-  /** Returns or updates interrupt state. */
+  /** Requests interruption of a specific active run. */
   interrupt(sessionId: SessionId, runId: RunId): boolean {
     this.#assertAvailable()
     return this.services.sessions.interruptRun(sessionId, runId)
   }
 
-  /** Closes session. */
+  /** Closes a live Session and releases its runtime resources. */
   closeSession(sessionId: SessionId): Promise<boolean> {
     return this.services.sessions.closeSession(sessionId)
   }
 
-  /** Releases all owned resources. */
+  /** Disposes runtime services once and waits for their shutdown to complete. */
   dispose(): Promise<void> {
     this.#disposing = true
     this.#disposePromise ??= this.#disposeRuntime()

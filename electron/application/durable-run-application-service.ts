@@ -22,7 +22,7 @@ const MAX_CACHED_RUN_STARTS = 1_000
 
 type SessionCommitEnvelope = Static<typeof SessionCommitEnvelopeSchema>
 
-/** Provides durable run application operations. */
+/** Coordinates idempotent durable run starts and retries with live session ownership. */
 export class DurableRunApplicationService {
   readonly #manager: SessionManager
   readonly #projects: ProjectService
@@ -59,7 +59,7 @@ export class DurableRunApplicationService {
     this.#executionState = options.executionState
   }
 
-  /** Starts the requested operation. */
+  /** Starts or reuses a durable run for a client request and commits its initial context. */
   start(
     input: DurableRunStartPayload,
     options: { harnessContexts?: RunHarnessContext[] } = {},
@@ -91,7 +91,7 @@ export class DurableRunApplicationService {
     return request
   }
 
-  /** Evicts request cache for session. */
+  /** Removes cached start and retry results for a session after it is evicted. */
   evictRequestCacheForSession(sessionId: SessionId): void {
     const prefix = `${sessionId}\u0000`
     for (const key of this.#requests.keys()) {
@@ -104,7 +104,7 @@ export class DurableRunApplicationService {
     }
   }
 
-  /** Retries the requested operation. */
+  /** Retries a user message idempotently while coordinating with the live session context. */
   retry(input: DurableRunRetryPayload): Promise<DurableRunRetryResult> {
     const key = `${input.sessionId}\u0000${input.clientRequestId}`
     const requestHash = canonicalHash(input.userMessageId)

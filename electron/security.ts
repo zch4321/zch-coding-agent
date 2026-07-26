@@ -5,7 +5,7 @@ export const APP_HOST = 'bundle'
 export const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`
 export const APP_ENTRY_URL = `${APP_ORIGIN}/index.html`
 
-/** Returns dev server url. */
+/** Parses a configured development-server URL and rejects invalid values. */
 export function getDevServerUrl(value: string | undefined): URL | undefined {
   if (!value) {
     return undefined
@@ -24,7 +24,7 @@ export function getDevServerUrl(value: string | undefined): URL | undefined {
   return url
 }
 
-/** Determines whether is allowed application url. */
+/** Allows only the packaged renderer origin or the configured development origin. */
 export function isAllowedApplicationUrl(
   candidate: string,
   devServerUrl?: URL,
@@ -42,7 +42,7 @@ export function isAllowedApplicationUrl(
   }
 }
 
-/** Resolves app resource. */
+/** Resolves a request URL beneath the renderer root while rejecting traversal and non-file URLs. */
 export function resolveAppResource(
   rendererRoot: string,
   requestUrl: string,
@@ -77,7 +77,7 @@ export function resolveAppResource(
   return resourcePath
 }
 
-/** Creates content security policy. */
+/** Builds the renderer Content-Security-Policy for packaged and development origins. */
 export function createContentSecurityPolicy(devServerUrl?: URL): string {
   const connectSources = new Set(["'self'"])
 

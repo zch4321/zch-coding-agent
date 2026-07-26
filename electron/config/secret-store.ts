@@ -31,7 +31,7 @@ export type SecretStorageStatus =
       reason: 'unavailable' | 'weak_backend' | 'temporary_failure'
     }
 
-/** Reports secret storage unavailable failures. */
+/** Reports that encrypted secret storage is unavailable or cannot complete an operation. */
 export class SecretStorageUnavailableError extends Error {
   readonly code = 'SECRET_STORAGE_UNAVAILABLE'
 
@@ -41,7 +41,7 @@ export class SecretStorageUnavailableError extends Error {
   }
 }
 
-/** Persists and retrieves secret state. */
+/** Persists encrypted credentials and exposes only decrypted values to privileged callers. */
 export class SecretStore {
   readonly #filePath: string
   readonly #adapter: SafeStorageAdapter
@@ -57,12 +57,12 @@ export class SecretStore {
     this.#adapter = adapter
   }
 
-  /** Returns the current status. */
+  /** Returns a clone of the current storage availability and backend status. */
   get status(): SecretStorageStatus {
     return structuredClone(this.#status)
   }
 
-  /** Initializes the component and its dependencies. */
+  /** Loads the secret file and determines whether the configured encrypted backend is usable. */
   async initialize(): Promise<SecretStorageStatus> {
     await mkdir(path.dirname(this.#filePath), { recursive: true })
     this.#data = await this.#read()
@@ -93,12 +93,12 @@ export class SecretStore {
     return this.status
   }
 
-  /** Returns or updates has state. */
+  /** Checks whether an encrypted record exists for a reference. */
   has(reference: string | undefined): boolean {
     return reference !== undefined && reference in this.#data.records
   }
 
-  /** Returns or updates set state. */
+  /** Encrypts and persists a credential, returning its generated or supplied reference. */
   async set(
     value: string,
     reference = `secret:${randomUUID()}`,
@@ -123,7 +123,7 @@ export class SecretStore {
     return reference
   }
 
-  /** Returns the requested record. */
+  /** Decrypts a credential and transparently re-encrypts it when the backend requests rotation. */
   async get(reference: string): Promise<string | undefined> {
     this.#assertAvailable()
     const record = this.#data.records[reference]
@@ -151,7 +151,7 @@ export class SecretStore {
     return decrypted.result
   }
 
-  /** Deletes the requested record. */
+  /** Removes an encrypted credential reference and persists the updated secret store. */
   async delete(reference: string | undefined): Promise<void> {
     if (!reference || !(reference in this.#data.records)) {
       return

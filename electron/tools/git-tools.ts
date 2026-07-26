@@ -238,7 +238,7 @@ function timeoutAndOutput(getConfig: () => PublicConfig): {
   }
 }
 
-/** Registers git read only tools. */
+/** Registers read-only Git status, diff, log, and related workspace tools. */
 export function registerGitReadOnlyTools(
   registry: ToolRegistrationPort,
   getConfig: () => PublicConfig,

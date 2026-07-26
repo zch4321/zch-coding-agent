@@ -4,7 +4,7 @@ export type SenderValidationResult =
   | { valid: true }
   | { valid: false; reason: string }
 
-/** Validates ipc sender. */
+/** Checks WebContents identity and frame URL against the trusted renderer origin. */
 export function validateIpcSender(
   event: Pick<IpcMainInvokeEvent, 'sender' | 'senderFrame'>,
   trustedWebContents: WebContents | undefined,

@@ -27,7 +27,7 @@ export interface PreparedUserTurn {
   }>
 }
 
-/** Encapsulates session user turn preparer behavior. */
+/** Prepares user messages, slash commands, prompt layers, and run context for a provider turn. */
 export class SessionUserTurnPreparer {
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
@@ -63,7 +63,7 @@ export class SessionUserTurnPreparer {
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
   }
 
-  /** Returns or updates prepare state. */
+  /** Appends the user turn, selected context, and harness prompts before provider execution. */
   async prepare(
     session: SessionState,
     run: ActiveRun,

@@ -34,7 +34,7 @@ function captureIdForSession(sessionId: SessionId): TraceId {
   return `capture-${readable}-${randomUUID()}` as TraceId
 }
 
-/** Writes jsonl trace log records. */
+/** Writes bounded trace events as JSON Lines while serializing writes and close operations. */
 export class JsonlTraceLogger implements TraceLogger {
   readonly traceId: TraceId
   readonly #stream: WriteStream
@@ -70,7 +70,7 @@ export class JsonlTraceLogger implements TraceLogger {
     })
   }
 
-  /** Creates a new instance. */
+  /** Creates the trace directory and opens a session logger with configured queue limits. */
   static async create(
     directory: string,
     sessionId: SessionId,
@@ -95,12 +95,12 @@ export class JsonlTraceLogger implements TraceLogger {
     }
   }
 
-  /** Queues peak. */
+  /** Returns the largest number of writes queued at one time. */
   get queuePeak(): number {
     return this.#queuePeak
   }
 
-  /** Writes the supplied data. */
+  /** Appends one trace event to the JSONL stream while enforcing queue and flush limits. */
   async write(input: TraceEventInput): Promise<TraceEvent> {
     if (this.#closing || this.#closed) {
       throw new Error('Trace logger is closing')
@@ -133,7 +133,7 @@ export class JsonlTraceLogger implements TraceLogger {
     })
   }
 
-  /** Releases all owned resources. */
+  /** Stops new writes, drains the queue, and closes the trace stream idempotently. */
   dispose(): Promise<void> {
     this.#disposePromise ??= this.#dispose()
     return this.#disposePromise
@@ -258,21 +258,21 @@ export class JsonlTraceLogger implements TraceLogger {
   }
 }
 
-/** Provides a no-op trace logger implementation. */
+/** Implements TraceLogger without persisting events when tracing is disabled. */
 export class NullTraceLogger implements TraceLogger {
   readonly traceId = undefined
   #nextSeq = 1
 
-  /** Queues peak. */
+  /** Returns zero because the no-op logger never queues writes. */
   get queuePeak(): number {
     return 0
   }
 
-  /** Writes the supplied data. */
+  /** Creates an in-memory trace event with a monotonic sequence and no disk write. */
   async write(input: TraceEventInput): Promise<TraceEvent> {
     return createTraceEvent(input, this.#nextSeq++, randomUUID() as EventId)
   }
 
-  /** Releases all owned resources. */
+  /** Completes immediately because the no-op logger owns no resources. */
   async dispose(): Promise<void> {}
 }

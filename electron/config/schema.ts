@@ -184,7 +184,7 @@ export const DEFAULT_APP_CONFIG = {
   mcpServers: [],
 } satisfies AppConfig
 
-/** Returns app provider. */
+/** Finds an application provider by its stable provider ID. */
 export function getAppProvider(
   config: AppConfig,
   providerId: string,
@@ -192,7 +192,7 @@ export function getAppProvider(
   return config.providers.find((provider) => provider.id === providerId)
 }
 
-/** Returns active app provider. */
+/** Selects the active application provider, falling back to the first configured provider. */
 export function getActiveAppProvider(config: AppConfig): AppProviderConfig {
   return (
     getAppProvider(config, config.activeProviderId) ??
@@ -201,7 +201,7 @@ export function getActiveAppProvider(config: AppConfig): AppProviderConfig {
   )
 }
 
-/** Converts the input to public config. */
+/** Projects privileged configuration into renderer-safe public settings and credential metadata. */
 export function toPublicConfig(
   config: AppConfig,
   credentialConfigured: boolean,

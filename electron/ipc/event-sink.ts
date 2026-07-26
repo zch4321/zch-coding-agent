@@ -35,7 +35,7 @@ export function sendBackendNotification(
   }
 }
 
-/** Sends agent event. */
+/** Validates and sends an agent event envelope to the renderer. */
 export function sendAgentEvent(
   webContents: WebContents,
   envelope: AgentEventEnvelope,
@@ -49,7 +49,7 @@ export function sendAgentEvent(
   }
 }
 
-/** Sends terminal event. */
+/** Validates and sends a terminal event envelope to the renderer. */
 export function sendTerminalEvent(
   webContents: WebContents,
   envelope: TerminalEventEnvelope,
@@ -63,7 +63,7 @@ export function sendTerminalEvent(
   }
 }
 
-/** Sends domain state event. */
+/** Validates and sends a domain-state delivery, preserving commit delivery guarantees. */
 export function sendDomainStateEvent(
   webContents: WebContents,
   delivery: DomainStateDelivery,

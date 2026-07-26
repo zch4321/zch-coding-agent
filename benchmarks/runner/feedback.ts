@@ -14,7 +14,7 @@ const FORBIDDEN_FEEDBACK_TERMS = [
   'test_patch',
 ]
 
-/** Creates benchmark feedback. */
+/** Builds evaluator-safe feedback from public checks and the selected feedback visibility. */
 export function createBenchmarkFeedback(input: {
   evaluation: BenchmarkEvaluationResult
   visibility: BenchmarkFeedbackVisibility
@@ -52,7 +52,7 @@ export function createBenchmarkFeedback(input: {
   return feedback
 }
 
-/** Validates safe feedback and throws when it is invalid. */
+/** Rejects feedback containing evaluator-only terms before it is shown to an agent. */
 export function assertSafeFeedback(feedback: string): void {
   const lowered = feedback.toLowerCase()
   if (FORBIDDEN_FEEDBACK_TERMS.some((term) => lowered.includes(term))) {

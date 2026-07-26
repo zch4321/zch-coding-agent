@@ -229,7 +229,7 @@ function requireSession(
   return getSession(sessionId) ?? error('Session was not found')
 }
 
-/** Registers orchestration tools. */
+/** Registers goal and plan tools against Session state and its event sink. */
 export function registerOrchestrationTools(
   registry: ToolRegistrationPort,
   options: {

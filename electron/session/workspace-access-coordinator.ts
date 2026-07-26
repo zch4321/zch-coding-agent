@@ -72,7 +72,7 @@ export class WorkspaceAccessCoordinator {
     this.#onWriterChanged = options?.onWriterChanged ?? (() => undefined)
   }
 
-  /** Acquires the requested resource lease. */
+  /** Acquires a bounded workspace run/write lease for a Session and operation. */
   acquire(input: {
     limit: number
     workspace: string
@@ -148,7 +148,7 @@ export class WorkspaceAccessCoordinator {
     }
   }
 
-  /** Acquires file change revert. */
+  /** Acquires exclusive workspace writer access for a file-change revert operation. */
   acquireFileChangeRevert(input: {
     workspace: string
     sessionId: SessionId
@@ -185,18 +185,18 @@ export class WorkspaceAccessCoordinator {
     }
   }
 
-  /** Returns or updates writer for state. */
+  /** Returns the current workspace writer ownership snapshot. */
   writerFor(workspace: string): WorkspaceWriterOwner | undefined {
     const owner = this.#writers.get(workspace)
     return owner ? { ...owner } : undefined
   }
 
-  /** Returns or updates active run count state. */
+  /** Returns the number of active workspace run leases. */
   activeRunCount(): number {
     return this.#activeRuns.size
   }
 
-  /** Releases all. */
+  /** Releases all run and writer leases and waits for pending releases to settle. */
   releaseAll(): void {
     const writers = [...this.#writers.values()]
     this.#activeRuns.clear()

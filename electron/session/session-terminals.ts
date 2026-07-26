@@ -3,7 +3,7 @@ import type { TerminalInfo, TerminalSnapshot } from '../../shared/terminal'
 import { TerminalPool, type TerminalEventDraft } from '../terminal/pool'
 import type { SessionState } from './session-types'
 
-/** Controls session terminal lifecycle and operations. */
+/** Mediates Session-owned terminal lifecycle and I/O through TerminalPool. */
 export class SessionTerminalController {
   readonly pool: TerminalPool
   readonly #requireSession: (sessionId: SessionId) => SessionState
@@ -20,7 +20,7 @@ export class SessionTerminalController {
     })
   }
 
-  /** Opens the requested resource. */
+  /** Opens a terminal after verifying that its Session exists. */
   async open(input: {
     sessionId: SessionId
     cwd?: string
@@ -37,19 +37,19 @@ export class SessionTerminalController {
     })
   }
 
-  /** Lists the currently available records. */
+  /** Lists terminals after verifying that the Session exists. */
   list(sessionId: SessionId): TerminalInfo[] {
     this.#requireSession(sessionId)
     return this.pool.list(sessionId)
   }
 
-  /** Writes the supplied data. */
+  /** Writes input to a Session-owned terminal after ownership validation. */
   write(sessionId: SessionId, terminalId: TerminalId, data: string): boolean {
     this.#requireSession(sessionId)
     return this.pool.write(sessionId, terminalId, data)
   }
 
-  /** Returns or updates resize state. */
+  /** Resizes a Session-owned terminal after validating its dimensions. */
   resize(
     sessionId: SessionId,
     terminalId: TerminalId,
@@ -60,24 +60,24 @@ export class SessionTerminalController {
     return this.pool.resize(sessionId, terminalId, cols, rows)
   }
 
-  /** Closes the resource and releases its handles. */
+  /** Closes one Session-owned terminal. */
   close(sessionId: SessionId, terminalId: TerminalId): boolean {
     this.#requireSession(sessionId)
     return this.pool.close(sessionId, terminalId)
   }
 
-  /** Closes session. */
+  /** Closes every terminal owned by a Session. */
   closeSession(sessionId: SessionId): void {
     this.pool.closeSession(sessionId)
   }
 
-  /** Returns a snapshot of the current state. */
+  /** Returns a Session-owned terminal's process and scrollback snapshot. */
   snapshot(sessionId: SessionId, terminalId: TerminalId): TerminalSnapshot {
     this.#requireSession(sessionId)
     return this.pool.snapshot(sessionId, terminalId)
   }
 
-  /** Releases all owned resources. */
+  /** Disposes the underlying TerminalPool and waits for terminal cleanup. */
   async dispose(): Promise<void> {
     await this.pool.dispose()
   }

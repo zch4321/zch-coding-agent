@@ -34,7 +34,7 @@ export interface McpStdioConnectionOptions {
   onError?: (error: unknown) => void
 }
 
-/** Encapsulates mcp stdio connection behavior. */
+/** Manages an MCP server's stdio transport, client lifecycle, and bounded catalog state. */
 export class McpStdioConnection {
   readonly #launch: McpStdioLaunch
   readonly #onCatalogChanged: () => void
@@ -79,17 +79,17 @@ export class McpStdioConnection {
     this.#client.onerror = (error) => this.#onError(error)
   }
 
-  /** Returns or updates pid state. */
+  /** Returns the child process ID when the stdio transport has spawned one. */
   get pid(): number | undefined {
     return this.#transport.pid ?? undefined
   }
 
-  /** Returns or updates stderr tail state. */
+  /** Returns the bounded tail of stderr collected from the MCP process. */
   get stderrTail(): string {
     return this.#stderr.slice(-8_192)
   }
 
-  /** Returns or updates connect state. */
+  /** Connects the MCP client with startup timeouts and loads its initial catalog. */
   async connect(): Promise<McpConnectionCatalog> {
     await this.#client.connect(this.#transport, {
       timeout: this.#launch.startupTimeoutMs,
@@ -98,7 +98,7 @@ export class McpStdioConnection {
     return this.readCatalog(this.#launch.startupTimeoutMs)
   }
 
-  /** Reads catalog. */
+  /** Paginates MCP tools/list, bounds the response, and rejects cursor loops. */
   async readCatalog(timeoutMs: number): Promise<McpConnectionCatalog> {
     const tools: Tool[] = []
     const cursors = new Set<string>()
@@ -142,7 +142,7 @@ export class McpStdioConnection {
     throw codedError('MCP_CATALOG_TOO_LARGE', 'MCP catalog exceeds 100 pages')
   }
 
-  /** Returns or updates call tool state. */
+  /** Invokes an MCP tool with timeout and abort handling, returning its normalized result. */
   callTool(
     name: string,
     args: Record<string, unknown>,
@@ -155,7 +155,7 @@ export class McpStdioConnection {
     }) as unknown as Promise<CallToolResult>
   }
 
-  /** Closes the resource and releases its handles. */
+  /** Closes the MCP client and stdio transport idempotently. */
   async close(): Promise<void> {
     if (this.#closed) return
     this.#closed = true

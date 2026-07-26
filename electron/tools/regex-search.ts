@@ -27,7 +27,7 @@ parentPort.on('message', ({ id, pattern, flags, content, maxResults }) => {
 })
 `
 
-/** Reports regex search failures. */
+/** Reports invalid patterns, worker timeouts, and bounded regex-search failures. */
 export class RegexSearchError extends Error {
   constructor(
     readonly code: 'INVALID_REGEX' | 'REGEX_TIMEOUT' | 'REGEX_FAILED',
@@ -50,13 +50,13 @@ interface WorkerResponse {
   message?: string
 }
 
-/** Searches bounded regex data within configured bounds. */
+/** Searches regular expressions in an isolated worker with result and time bounds. */
 export class BoundedRegexSearcher {
   readonly #worker = new Worker(WORKER_SOURCE, { eval: true })
   #nextId = 1
   #closed = false
 
-  /** Searches for records matching the request. */
+  /** Executes one regex search and returns bounded matches or a normalized failure. */
   async search(input: {
     pattern: string
     caseSensitive: boolean
@@ -135,7 +135,7 @@ export class BoundedRegexSearcher {
     })
   }
 
-  /** Closes the resource and releases its handles. */
+  /** Terminates the regex worker and rejects no-longer-valid pending searches. */
   async close(): Promise<void> {
     if (this.#closed) {
       return

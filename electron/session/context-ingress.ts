@@ -97,9 +97,9 @@ function summarize(result: ToolResult): string {
   return text.length > 2_000 ? `${text.slice(0, 2_000)}...` : text
 }
 
-/** Filters context ingress input. */
+/** Evaluates tool paths and content against sensitive-data exposure policy. */
 export class ContextIngressFilter {
-  /** Returns or updates evaluate path state. */
+  /** Checks a tool path and returns the configured allow, redact, or approval decision. */
   evaluatePath(
     config: PublicConfig['permission']['sensitiveData'],
     call: ToolCall,
@@ -141,7 +141,7 @@ export class ContextIngressFilter {
       : { action: 'warn', signals }
   }
 
-  /** Returns or updates evaluate state. */
+  /** Aggregates path and content checks into one provider-context ingress decision. */
   evaluate(
     config: PublicConfig['permission']['sensitiveData'],
     input: EvaluationInput,

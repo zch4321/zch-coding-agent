@@ -28,7 +28,7 @@ interface LifecycleEntry {
   teardown?: Promise<void>
 }
 
-/** Registers and resolves live session context entries. */
+/** Coordinates loading, ownership, mutation, and eviction of live Session contexts. */
 export class LiveSessionContextRegistry
   implements SessionRuntimeGuard, ProjectRuntimeGuard
 {
@@ -57,7 +57,7 @@ export class LiveSessionContextRegistry
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
-  /** Reserves new. */
+  /** Reserves a new Session lifecycle slot for one request and returns its owner token. */
   reserveNew(
     sessionId: SessionId,
     projectId: ProjectId,
@@ -87,7 +87,7 @@ export class LiveSessionContextRegistry
     return ownerToken
   }
 
-  /** Returns or updates adopt new state. */
+  /** Promotes a reserved new Session to live after durable registration succeeds. */
   adoptNew(
     sessionId: SessionId,
     projectId: ProjectId,
@@ -104,14 +104,14 @@ export class LiveSessionContextRegistry
     delete entry.ownerRequestId
   }
 
-  /** Releases owned. */
+  /** Tears down a live Session when the caller still owns its lifecycle slot. */
   async releaseOwned(sessionId: SessionId, ownerToken: string): Promise<void> {
     const entry = this.#entries.get(sessionId)
     if (!entry || entry.ownerToken !== ownerToken) return
     await this.#scheduleTeardown(sessionId, entry)
   }
 
-  /** Ensures loaded. */
+  /** Loads a persisted Session, sharing in-flight loads and waiting for prior teardown. */
   async ensureLoaded(sessionId: SessionId): Promise<void> {
     const existing = this.#entries.get(sessionId)
     if (existing?.phase === 'live' && this.#manager.hasLiveSession(sessionId)) {
@@ -141,7 +141,7 @@ export class LiveSessionContextRegistry
     return loading
   }
 
-  /** Validates session idle and throws when it is invalid. */
+  /** Rejects session operations while lifecycle or active runtime work is in progress. */
   assertSessionIdle(sessionId: SessionId): void {
     const entry = this.#entries.get(sessionId)
     if (entry && entry.phase !== 'live') {
@@ -153,7 +153,7 @@ export class LiveSessionContextRegistry
     this.#assertManagerSessionIdle(sessionId)
   }
 
-  /** Validates project idle and throws when it is invalid. */
+  /** Rejects project operations while related Sessions or the project are being evicted. */
   assertProjectIdle(projectId: ProjectId): void {
     if (this.#projectEvictions.has(projectId)) {
       throw new ApplicationError('CONFLICT', 'Project lifecycle is evicting')
@@ -179,7 +179,7 @@ export class LiveSessionContextRegistry
     }
   }
 
-  /** Reserves session mutation. */
+  /** Marks a Session as mutating after checking runtime and lifecycle idleness. */
   reserveSessionMutation(sessionId: SessionId): string {
     const entry = this.#entries.get(sessionId)
     if (entry && entry.phase !== 'live') {
@@ -203,7 +203,7 @@ export class LiveSessionContextRegistry
     return operationToken
   }
 
-  /** Binds session mutation project. */
+  /** Associates an in-flight Session mutation with its Project for eviction checks. */
   bindSessionMutationProject(
     sessionId: SessionId,
     operationToken: string,
@@ -225,7 +225,7 @@ export class LiveSessionContextRegistry
     entry.projectId = projectId
   }
 
-  /** Releases session mutation. */
+  /** Clears a matching Session mutation reservation and returns it to the live phase. */
   releaseSessionMutation(sessionId: SessionId, operationToken: string): void {
     const entry = this.#entries.get(sessionId)
     if (
@@ -240,7 +240,7 @@ export class LiveSessionContextRegistry
     else this.#entries.delete(sessionId)
   }
 
-  /** Reserves session eviction. */
+  /** Marks a Session as evicting and returns an operation token for the eviction. */
   reserveSessionEviction(sessionId: SessionId): string {
     const entry = this.#entries.get(sessionId)
     if (entry && entry.phase !== 'live') {
@@ -264,7 +264,7 @@ export class LiveSessionContextRegistry
     return operationToken
   }
 
-  /** Cancels session eviction. */
+  /** Cancels a matching Session eviction and restores the live lifecycle phase. */
   cancelSessionEviction(sessionId: SessionId, operationToken: string): void {
     const entry = this.#entries.get(sessionId)
     if (
@@ -279,7 +279,7 @@ export class LiveSessionContextRegistry
     else this.#entries.delete(sessionId)
   }
 
-  /** Releases session. */
+  /** Releases a Session's runtime resources, optionally requiring an operation owner. */
   async releaseSession(
     sessionId: SessionId,
     operationToken?: string,
@@ -303,7 +303,7 @@ export class LiveSessionContextRegistry
     await this.#scheduleTeardown(sessionId, entry)
   }
 
-  /** Reserves project eviction. */
+  /** Marks a Project and its live Sessions for coordinated eviction. */
   reserveProjectEviction(projectId: ProjectId): string {
     this.assertProjectIdle(projectId)
     const operationToken = randomUUID()
@@ -316,7 +316,7 @@ export class LiveSessionContextRegistry
     return operationToken
   }
 
-  /** Cancels project eviction. */
+  /** Cancels a matching Project eviction and restores affected Sessions to live state. */
   cancelProjectEviction(projectId: ProjectId, operationToken: string): void {
     if (this.#projectEvictions.get(projectId) !== operationToken) return
     this.#projectEvictions.delete(projectId)
@@ -332,7 +332,7 @@ export class LiveSessionContextRegistry
     }
   }
 
-  /** Evicts idle project. */
+  /** Evicts every idle Session belonging to a Project after validating its operation token. */
   async evictIdleProject(
     projectId: ProjectId,
     operationToken?: string,
@@ -362,7 +362,7 @@ export class LiveSessionContextRegistry
     }
   }
 
-  /** Returns a snapshot of the current state. */
+  /** Returns a cloned active-run snapshot for a loaded Session. */
   snapshot(sessionId: SessionId): ActiveRunPublicSnapshot | undefined {
     return this.#manager.activeRunSnapshot(sessionId)
   }
@@ -372,7 +372,7 @@ export class LiveSessionContextRegistry
     return this.#manager.traceCaptureStatus(sessionId)
   }
 
-  /** Applies session record. */
+  /** Applies a committed Session record to the live runtime and durable execution binding. */
   applySessionRecord(record: SessionRecord): void {
     const entry = this.#entries.get(record.id)
     this.#manager.applyDurableSessionRecord(record)
@@ -381,7 +381,7 @@ export class LiveSessionContextRegistry
     }
   }
 
-  /** Returns or updates invalidate state. */
+  /** Marks a Session binding invalid and notifies the active run that state must be reloaded. */
   invalidate(sessionId: SessionId, runId?: RunId): void {
     const entry = this.#entries.get(sessionId)
     if (!entry) return
@@ -399,7 +399,7 @@ export class LiveSessionContextRegistry
     void this.#scheduleTeardown(sessionId, entry, settle)
   }
 
-  /** Releases all owned resources. */
+  /** Releases every live Session entry and waits for its teardown work to finish. */
   async dispose(): Promise<void> {
     const loading = [...this.#entries.values()].flatMap((entry) =>
       entry.loading ? [entry.loading] : [],

@@ -16,7 +16,7 @@ const ReadSkillArgsSchema = Type.Object(
   { additionalProperties: false },
 )
 
-/** Registers skill tools. */
+/** Registers skill listing, reading, enablement, and installation tools. */
 export function registerSkillTools(
   registry: ToolRegistry,
   skills: SkillsManager,

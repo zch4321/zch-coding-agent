@@ -123,7 +123,7 @@ export const SessionSnapshotSchema = Type.Object(
 )
 export type SessionSnapshot = Static<typeof SessionSnapshotSchema>
 
-/** Validates session snapshot semantics and throws when it is invalid. */
+/** Validates that a session snapshot's nested pages and metadata share its session identity. */
 export function assertSessionSnapshotSemantics(
   snapshot: SessionSnapshot,
 ): void {
@@ -151,7 +151,7 @@ export function assertSessionSnapshotSemantics(
   }
 }
 
-/** Validates session page semantics and throws when it is invalid. */
+/** Validates session IDs, timestamps, revisions, and pagination metadata for a session page. */
 export function assertSessionPageSemantics(page: SessionPage): void {
   for (const record of page.records) {
     if (!Number.isFinite(Date.parse(record.updatedAt))) {

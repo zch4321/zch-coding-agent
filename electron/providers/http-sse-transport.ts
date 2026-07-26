@@ -9,7 +9,7 @@ export type ProviderTransportErrorCode =
   | 'NETWORK_ERROR'
   | 'TIMED_OUT'
 
-/** Reports provider transport failures. */
+/** Reports HTTP or SSE transport failures with a stable code and optional status. */
 export class ProviderTransportError extends Error {
   constructor(
     readonly code: ProviderTransportErrorCode,
@@ -69,7 +69,7 @@ function parsePayload(payload: string): JsonObject {
   return value as JsonObject
 }
 
-/** Encapsulates http sse transport behavior. */
+/** Posts JSON to a provider SSE endpoint and exposes bounded parsed response objects. */
 export class HttpSseTransport {
   readonly #providerId: string
   readonly #endpoint: string
@@ -94,7 +94,7 @@ export class HttpSseTransport {
     }
   }
 
-  /** Returns or updates post json state. */
+  /** Sends an authenticated JSON request, enforces timeout/abort, and parses SSE data objects. */
   async *postJson(
     request: JsonValue,
     signal: AbortSignal,

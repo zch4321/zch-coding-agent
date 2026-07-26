@@ -8,7 +8,7 @@ import {
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024
 const DEFAULT_PORT = 8080
 
-/** Runs provider proxy. */
+/** Runs the provider proxy, reading the worker token and forwarding bounded requests. */
 export async function runProviderProxy(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
@@ -123,7 +123,7 @@ async function handleRequest(input: {
   }
 }
 
-/** Reports request limit failures. */
+/** Reports that a provider-proxy request exceeded its configured size or time limit. */
 class RequestLimitError extends Error {}
 
 async function readBoundedBody(request: IncomingMessage): Promise<Buffer> {

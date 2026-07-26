@@ -84,7 +84,7 @@ function toolError(error: unknown): ToolResult {
   }
 }
 
-/** Registers code intelligence tools. */
+/** Registers code-intelligence status, restart, and guarded query tools. */
 export function registerCodeIntelligenceTools(
   registry: ToolRegistrationPort,
   codeBackends: CodeBackendManager,

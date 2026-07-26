@@ -17,7 +17,7 @@ import {
 const MAX_INPUT_BYTES = 8 * 1024 * 1024
 const validateInput = compileSchema(IsolatedGraderInputSchema)
 
-/** Runs grader service. */
+/** Runs the standalone grader service for the input artifact and writes its serialized result. */
 export async function runGraderService(
   argv = process.argv.slice(2),
 ): Promise<void> {

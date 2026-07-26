@@ -49,7 +49,7 @@ export type NativeBenchmarkSuite = LoadedBenchmarkSuite & {
   suiteIdentitySha256: string
 }
 
-/** Loads native benchmark suite. */
+/** Loads a native benchmark suite from its manifest under the benchmark root. */
 export async function loadNativeBenchmarkSuite(input: {
   benchmarkRoot: string
   suiteFile: string
@@ -70,7 +70,7 @@ export async function loadNativeBenchmarkSuite(input: {
   }
 }
 
-/** Converts the input to agent case descriptor. */
+/** Builds the agent-facing case descriptor from a loaded benchmark case manifest. */
 export function toAgentCaseDescriptor(
   loaded: LoadedBenchmarkCase,
 ): AgentCaseDescriptor {

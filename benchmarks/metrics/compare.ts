@@ -7,7 +7,7 @@ import type {
 } from './contracts'
 import type { BenchmarkTrialsResult } from '../runner/contracts'
 
-/** Reports benchmark comparison identity failures. */
+/** Reports that benchmark run groups differ in fields required for a valid comparison. */
 export class BenchmarkComparisonIdentityError extends Error {
   readonly code = 'BENCHMARK_COMPARISON_IDENTITY_MISMATCH'
 
@@ -17,7 +17,7 @@ export class BenchmarkComparisonIdentityError extends Error {
   }
 }
 
-/** Returns or updates summarize benchmark run group state. */
+/** Summarizes comparable trials by identity, counts, pass rates, cost, and latency. */
 export function summarizeBenchmarkRunGroup(
   trials: readonly BenchmarkComparableTrial[],
 ): BenchmarkRunGroupSummary {
@@ -65,7 +65,7 @@ export function summarizeBenchmarkRunGroup(
   }
 }
 
-/** Compares benchmark run groups. */
+/** Compares baseline and candidate trial groups and computes per-metric deltas. */
 export function compareBenchmarkRunGroups(input: {
   baseline: readonly BenchmarkComparableTrial[]
   candidate: readonly BenchmarkComparableTrial[]
@@ -98,7 +98,7 @@ export function compareBenchmarkRunGroups(input: {
   }
 }
 
-/** Compares benchmark trial results. */
+/** Compares the trial groups contained in two benchmark result objects. */
 export function compareBenchmarkTrialResults(input: {
   baseline: BenchmarkTrialsResult
   candidate: BenchmarkTrialsResult
@@ -109,7 +109,7 @@ export function compareBenchmarkTrialResults(input: {
   })
 }
 
-/** Returns or updates benchmark trial to comparable state. */
+/** Converts a completed trial into the identity and metrics shape required for comparison. */
 export function benchmarkTrialToComparable(
   trial: BenchmarkTrialsResult['trials'][number],
 ): BenchmarkComparableTrial {

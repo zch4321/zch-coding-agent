@@ -14,7 +14,7 @@ function quoteArg(value: string): string {
   return /\s/u.test(value) ? JSON.stringify(value) : value
 }
 
-/** Builds serena launch args. */
+/** Builds the argv used to launch Serena with the configured backend and workspace. */
 export function buildSerenaLaunchArgs(
   config: SerenaBackendConfig,
   workspace: string,
@@ -58,7 +58,7 @@ export function buildSerenaLaunchArgs(
   return args
 }
 
-/** Builds serena launch preview. */
+/** Builds a redacted human-readable Serena launch command without exposing secrets. */
 export function buildSerenaLaunchPreview(
   config: SerenaBackendConfig,
   workspace: string,
