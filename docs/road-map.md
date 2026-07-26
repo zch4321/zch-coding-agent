@@ -4,6 +4,8 @@
 
 Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`backend-refactor-plan.md`](./backend-refactor-plan.md)。
 
+通用只读子 Agent、模型池与 Swarm Tool 的已确认产品语义和分阶段计划见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
+
 当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P10 Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、NMessage 操作通知、可热切换 segmented trace capture、单一 `npm run verify` 发布门禁、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、固定 Core Harness 8、Monthly-SWEBench/SWE-rebench 滚动 mixed-16、不可变 cohort、strict/repair-once runner、隔离 grader、硬门禁和 L0–L5 评分、trace/tool/usage/cost/paired comparison、完整 Session transcript 查看/导出，以及正式 benchmark 命令、档位和分层 artifacts 已经落地。下一阶段用真实任务信号指导 Project / Code Intelligence 和 Provider Routing 的后续改动；P3 review 建议、N-3/N-4 与 201+ Electron E2E 按主题分块讨论和实现。
 
 ## 0. 未完成概览
@@ -13,6 +15,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 | P1     | Benchmark Harness              | 用同一 Agent Runtime 在 Linux Docker 评估真实任务        | 双实现漂移、环境复杂、grader 信号失真 |
 | P2     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断          |
 | P2     | Provider Routing               | Session selection、Active Run route 与用途路由           | 全局 active provider 静默影响已有会话 |
+| P2     | Subagent / Swarm               | 通用只读子 Agent、模型池和 `/swarm` 批量委派 Tool         | 递归调用、费用失控、并发与上下文膨胀  |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张      |
 
 ## 5. M5 · Headless Agent Runtime And Benchmark Harness
