@@ -1,5 +1,6 @@
 import type {
   AgentEventEnvelope,
+  BackendNotificationEnvelope,
   DomainStateDelivery,
   IpcChannel,
   IpcPayload,
@@ -191,6 +192,9 @@ export interface AgentApi {
     payload: IpcPayload<'logs:clear-closed'>,
   ): Promise<IpcResult<'logs:clear-closed'>>
   onAgentEvent(listener: (event: AgentEventEnvelope) => void): Unsubscribe
+  onBackendNotification(
+    listener: (event: BackendNotificationEnvelope) => void,
+  ): Unsubscribe
   onTerminalEvent(listener: (event: TerminalEventEnvelope) => void): Unsubscribe
   onDomainStateEvent(
     listener: (event: DomainStateDelivery) => void,
@@ -260,6 +264,7 @@ export const AGENT_API_KEYS = [
   'openLogDirectory',
   'clearClosedTraces',
   'onAgentEvent',
+  'onBackendNotification',
   'onTerminalEvent',
   'onDomainStateEvent',
 ] as const satisfies readonly (keyof AgentApi)[]

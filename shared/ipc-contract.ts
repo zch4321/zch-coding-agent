@@ -43,13 +43,19 @@ import {
   SessionTranscriptRequestMessagesPageSchema,
 } from './session-transcript'
 import {
+  APP_NOTIFICATION_CHANNEL,
   AGENT_EVENT_CHANNEL,
   DOMAIN_STATE_EVENT_CHANNEL,
   IPC_VERSION,
   TERMINAL_EVENT_CHANNEL,
 } from './channels'
+export {
+  BackendNotificationEnvelopeSchema,
+  type BackendNotificationEnvelope,
+} from './notifications'
 
 export {
+  APP_NOTIFICATION_CHANNEL,
   AGENT_EVENT_CHANNEL,
   DOMAIN_STATE_EVENT_CHANNEL,
   IPC_VERSION,

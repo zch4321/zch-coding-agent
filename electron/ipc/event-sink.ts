@@ -1,5 +1,6 @@
 import type { WebContents } from 'electron'
 import {
+  APP_NOTIFICATION_CHANNEL,
   AGENT_EVENT_CHANNEL,
   AgentEventEnvelopeSchema,
   DOMAIN_STATE_EVENT_CHANNEL,
@@ -7,14 +8,32 @@ import {
   TERMINAL_EVENT_CHANNEL,
   TerminalEventEnvelopeSchema,
   type AgentEventEnvelope,
+  type BackendNotificationEnvelope,
   type DomainStateDelivery,
   type TerminalEventEnvelope,
 } from '../../shared/ipc-contract'
+import { BackendNotificationEnvelopeSchema } from '../../shared/notifications'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 
 const validateAgentEvent = compileSchema(AgentEventEnvelopeSchema)
 const validateTerminalEvent = compileSchema(TerminalEventEnvelopeSchema)
 const validateDomainStateDelivery = compileSchema(DomainStateDeliverySchema)
+const validateBackendNotification = compileSchema(
+  BackendNotificationEnvelopeSchema,
+)
+
+/** Sends one validated, user-safe backend notification to the renderer. */
+export function sendBackendNotification(
+  webContents: WebContents,
+  envelope: BackendNotificationEnvelope,
+): void {
+  if (!validateBackendNotification(envelope)) {
+    throw new Error(formatSchemaErrors(validateBackendNotification.errors))
+  }
+  if (!webContents.isDestroyed()) {
+    webContents.send(APP_NOTIFICATION_CHANNEL, envelope)
+  }
+}
 
 export function sendAgentEvent(
   webContents: WebContents,

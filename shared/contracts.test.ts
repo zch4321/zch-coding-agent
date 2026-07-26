@@ -8,6 +8,10 @@ import {
 } from './agent-events'
 import { IPC_CONTRACTS, type IpcChannel, type IpcPayload } from './ipc-contract'
 import type { CallId, RunId, SessionId, TerminalId } from './ids'
+import {
+  BackendNotificationEnvelopeSchema,
+  type BackendNotificationEnvelope,
+} from './notifications'
 
 const sessionId = 'session-1' as SessionId
 const runId = 'run-1' as RunId
@@ -21,6 +25,25 @@ function compileSchema(schema: object) {
 }
 
 describe('shared runtime contracts', () => {
+  it('bounds backend notifications and rejects diagnostic internals', () => {
+    const validate = compileSchema(BackendNotificationEnvelopeSchema)
+    const notification: BackendNotificationEnvelope = {
+      version: 1,
+      id: 'notification:fixture',
+      severity: 'warning',
+      code: 'BACKEND_DIAGNOSTIC',
+      message: 'A background operation was degraded.',
+      occurredAt: '2026-07-26T00:00:00.000Z',
+      sessionId,
+    }
+    expect(validate(notification)).toBe(true)
+    expect(validate({ ...notification, stack: 'secret stack' })).toBe(false)
+    expect(validate({ ...notification, code: 'invalid-code' })).toBe(false)
+    expect(validate({ ...notification, message: 'x'.repeat(1_025) })).toBe(
+      false,
+    )
+  })
+
   it('validates representative AgentEvent and TerminalEvent values', () => {
     const validateAgentEvent = compileSchema(AgentEventSchema)
     const validateTerminalEvent = compileSchema(TerminalEventSchema)

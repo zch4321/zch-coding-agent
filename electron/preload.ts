@@ -1,19 +1,37 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AgentApi, IpcInvoke } from '../shared/agent-api'
 import {
+  APP_NOTIFICATION_CHANNEL,
   AGENT_EVENT_CHANNEL,
   DOMAIN_STATE_EVENT_CHANNEL,
   TERMINAL_EVENT_CHANNEL,
 } from '../shared/channels'
 import type {
   AgentEventEnvelope,
+  BackendNotificationEnvelope,
   DomainStateDelivery,
   TerminalEventEnvelope,
 } from '../shared/ipc-contract'
+import { BackendNotificationEnvelopeSchema } from '../shared/notifications'
 import type { DomainStateEvent } from '../shared/domain-state-api'
+import { compileSchema } from './schema-validator'
+import { BackendNotificationBuffer } from './preload-notification-buffer'
 
 const invoke: IpcInvoke = (channel, payload) =>
   ipcRenderer.invoke(channel, payload)
+
+const validateBackendNotification = compileSchema(
+  BackendNotificationEnvelopeSchema,
+)
+const backendNotifications = new BackendNotificationBuffer({ capacity: 64 })
+
+ipcRenderer.on(APP_NOTIFICATION_CHANNEL, (_event, payload: unknown) => {
+  if (!validateBackendNotification(payload)) {
+    console.error('Rejected invalid backend notification')
+    return
+  }
+  backendNotifications.push(payload as BackendNotificationEnvelope)
+})
 
 function subscribe<Event>(
   channel: string,
@@ -140,6 +158,7 @@ const api: AgentApi = {
   clearClosedTraces: (payload) => invoke('logs:clear-closed', payload),
   onAgentEvent: (listener) =>
     subscribe<AgentEventEnvelope>(AGENT_EVENT_CHANNEL, listener),
+  onBackendNotification: (listener) => backendNotifications.subscribe(listener),
   onTerminalEvent: (listener) =>
     subscribe<TerminalEventEnvelope>(TERMINAL_EVENT_CHANNEL, listener),
   onDomainStateEvent: subscribeDomainState,

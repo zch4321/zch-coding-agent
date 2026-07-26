@@ -31,6 +31,7 @@ import { createHttpTransport } from './net/http-transport'
 import { createElectronRuntimeEventListener } from './runtime/electron-runtime-event-sink'
 import { createBackendRuntime } from './application/create-backend-runtime'
 import { sendDomainStateEvent } from './ipc/event-sink'
+import { BackendNotificationReporter } from './notifications/backend-notification-reporter'
 import {
   APP_ENTRY_URL,
   APP_HOST,
@@ -132,6 +133,9 @@ async function installIpc(): Promise<void> {
     },
   )
   const initialized = await configStore.initialize()
+  const notifications = new BackendNotificationReporter({
+    getWebContents: () => mainWindow?.webContents,
+  })
   let httpTransport = createHttpTransport(initialized.config.network.httpProxy)
   const refreshHttpTransport = (
     proxy: typeof initialized.config.network.httpProxy,
@@ -159,7 +163,7 @@ async function installIpc(): Promise<void> {
         ],
         fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =>
           httpTransport.fetch(input, init),
-        onDiagnostic: (message, error) => console.error(message, error),
+        onDiagnostic: notifications.reportDiagnostic,
       }),
   })
   appDisposer.add(() => backend.dispose())
@@ -195,7 +199,7 @@ async function installIpc(): Promise<void> {
       refreshHttpTransport,
       getMainWindow: () => mainWindow,
     }),
-    onDiagnostic: (message, error) => console.error(message, error),
+    onDiagnostic: notifications.reportInternal,
   })
 
   console.info(
