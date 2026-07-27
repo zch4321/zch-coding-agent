@@ -18,13 +18,7 @@ describe('release verification policy', () => {
     expect(scripts.verify).toBe(
       'npm run lint && npm run format:check && npm test && npm run build && npm run test:e2e:built',
     )
-    expect(scripts['test:benchmark-cases']).toBeUndefined()
-    for (const forbidden of [
-      'benchmark:',
-      'test:docker-worker',
-      'build:worker-image',
-      'test:real',
-    ]) {
+    for (const forbidden of ['test:real']) {
       expect(scripts.verify).not.toContain(forbidden)
       expect(scripts.build).not.toContain(forbidden)
     }

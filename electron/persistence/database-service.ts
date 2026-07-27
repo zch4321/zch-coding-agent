@@ -364,9 +364,9 @@ export function desktopDatabasePath(userDataPath: string): string {
   return path.join(userDataPath, 'agent.db')
 }
 
-/** Returns the isolated SQLite path used by a headless benchmark trial. */
-export function headlessTrialDatabasePath(trialDirectory: string): string {
-  return path.join(trialDirectory, 'agent.db')
+/** Returns the isolated SQLite path used by one headless run. */
+export function headlessDatabasePath(runDirectory: string): string {
+  return path.join(runDirectory, 'agent.db')
 }
 
 /** Computes the SHA-256 checksum used to identify migration SQL content. */

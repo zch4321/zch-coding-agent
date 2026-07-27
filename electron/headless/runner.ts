@@ -12,7 +12,6 @@ import { createBackendRuntime } from '../application/create-backend-runtime'
 import { createRuntimeIdentity, sha256Json } from '../runtime/runtime-identity'
 import type { RunCompletion } from '../runtime/runtime-events'
 import type { RuntimeEventListener } from '../runtime/runtime-events'
-import type { BenchmarkAgentCase } from '../../shared/benchmark'
 import type { ProjectId, SessionId } from '../../shared/ids'
 import { getProviderConfig } from '../../shared/config'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
@@ -21,13 +20,12 @@ import { prepareHeadlessConfig } from './config'
 import {
   HeadlessResultSchema,
   type HeadlessConfig,
-  type HeadlessBenchmarkController,
   type HeadlessResult,
   type HeadlessRunStatus,
 } from './contracts'
 import { HeadlessEventWriter, HeadlessRunMetrics } from './event-stream'
 import { collectWorkspacePatch } from './patch'
-import { headlessTrialDatabasePath } from '../persistence/database-service'
+import { headlessDatabasePath } from '../persistence/database-service'
 
 const validateResult = compileSchema(HeadlessResultSchema)
 const validateRuntimeIdentity = compileSchema(RuntimeIdentitySchema)
@@ -66,8 +64,6 @@ export interface RunHeadlessAgentOptions {
   sourceTree?: RuntimeIdentity['sourceTree']
   runtimeImageDigest?: string
   eventListeners?: RuntimeEventListener[]
-  benchmarkController?: HeadlessBenchmarkController
-  benchmarkCase?: BenchmarkAgentCase
 }
 
 /** Runs the headless agent, captures events and patch artifacts, and returns its result. */
@@ -130,7 +126,7 @@ export async function runHeadlessAgent(
   )
   const backend = await createBackendRuntime({
     configStore: prepared.configStore,
-    databasePath: headlessTrialDatabasePath(databaseDirectory),
+    databasePath: headlessDatabasePath(databaseDirectory),
     runtimeDataDirectory: prepared.userDataDirectory,
     promptDirectory: await resolvePromptDirectory(options.promptDirectory),
     fetchImpl: options.fetchImpl,
@@ -162,9 +158,6 @@ export async function runHeadlessAgent(
 
   let sessionId: SessionId | undefined
   const runIds: HeadlessResult['runIds'] = []
-  let initialRunIds: HeadlessResult['runIds'] | undefined
-  const repairRunIds: HeadlessResult['runIds'] = []
-  let repairAttempted = false
   let completion: RunCompletion | undefined
   let autoPlanApprovals = 0
   let incompleteReason: HeadlessResult['incompleteReason']
@@ -190,35 +183,20 @@ export async function runHeadlessAgent(
         throw new Error('Headless durable Project was not created')
       }
       sessionId = `session:${randomUUID()}` as SessionId
-      const firstRun = await backend.runs.start(
-        {
-          version: 1,
-          kind: 'new_session',
-          sessionId,
-          projectId: project.id as ProjectId,
-          modelSelection: {
-            providerId: provider.id,
-            model: provider.model,
-            reasoning: resolvedProvider.reasoning,
-          },
-          permissionMode: 'yolo',
-          message: options.task,
-          clientRequestId: 'headless-task-1',
+      const firstRun = await backend.runs.start({
+        version: 1,
+        kind: 'new_session',
+        sessionId,
+        projectId: project.id as ProjectId,
+        modelSelection: {
+          providerId: provider.id,
+          model: provider.model,
+          reasoning: resolvedProvider.reasoning,
         },
-        {
-          ...(options.benchmarkCase
-            ? {
-                harnessContexts: [
-                  {
-                    kind: 'benchmark_case' as const,
-                    text: JSON.stringify(options.benchmarkCase, null, 2),
-                    source: `benchmark:${options.benchmarkCase.suiteId}/${options.benchmarkCase.caseId}`,
-                  },
-                ],
-              }
-            : {}),
-        },
-      )
+        permissionMode: 'yolo',
+        message: options.task,
+        clientRequestId: 'headless-task-1',
+      })
       if (firstRun.outcome !== 'started') {
         throw new Error('Headless first run was unexpectedly deduplicated')
       }
@@ -302,56 +280,6 @@ export async function runHeadlessAgent(
       } else if (metrics.plan?.status === 'awaiting_review') {
         incompleteReason = 'plan_approval_limit'
       }
-      initialRunIds = [...runIds]
-      if (
-        options.benchmarkController &&
-        !timedOut &&
-        !incompleteReason &&
-        !controller.signal.aborted
-      ) {
-        if (timeout) clearTimeout(timeout)
-        const initialStatus = classifyStatus({
-          completion,
-          timedOut,
-          incompleteReason,
-        })
-        writer.write({
-          type: 'benchmark.phase_ready',
-          protocol: 'repair-once',
-          phase: 'initial',
-          status: initialStatus,
-          sessionId,
-          runIds: [...initialRunIds],
-          usage: { ...metrics.usage },
-          tools: { ...metrics.tools },
-        })
-        const decision = await options.benchmarkController.waitForDecision({
-          signal: controller.signal,
-        })
-        if (decision.action === 'repair') {
-          repairAttempted = true
-          const runId = runtime.services.sessions.startHarnessRun({
-            sessionId,
-            clientRequestId: 'headless-benchmark-repair-1',
-            message: {
-              kind: 'benchmark_feedback',
-              text: `Visibility: ${decision.feedback.visibility}\n${decision.feedback.text}`,
-              source: 'headless:benchmark-repair',
-            },
-          })
-          runIds.push(runId)
-          repairRunIds.push(runId)
-          armTimeout()
-          const interrupt = () => runtime.interrupt(sessionId!, runId)
-          controller.signal.addEventListener('abort', interrupt, { once: true })
-          try {
-            completion = await runtime.events.waitForRun(sessionId, runId)
-            await runtime.services.sessions.waitForRunSettled(sessionId, runId)
-          } finally {
-            controller.signal.removeEventListener('abort', interrupt)
-          }
-        }
-      }
     } finally {
       if (timeout) clearTimeout(timeout)
       options.signal?.removeEventListener('abort', relayAbort)
@@ -366,7 +294,7 @@ export async function runHeadlessAgent(
       runtime,
       config: prepared.configStore.getPublicConfig(),
       configHash: prepared.configHash,
-      caseDigest: options.config.caseDigest ?? sha256Json(options.task),
+      taskDigest: sha256Json(options.task),
       sourceCommit: options.sourceCommit,
       sourceTree: options.sourceTree,
       runtimeImageDigest: options.runtimeImageDigest,
@@ -387,16 +315,6 @@ export async function runHeadlessAgent(
       autoPlanApprovals,
       usage: { ...metrics.usage },
       tools: { ...metrics.tools },
-      ...(options.benchmarkController
-        ? {
-            benchmark: {
-              protocol: 'repair-once' as const,
-              repairAttempted,
-              initialRunIds: initialRunIds ?? [...runIds],
-              repairRunIds,
-            },
-          }
-        : {}),
       artifacts: {
         resultPath,
         identityPath,

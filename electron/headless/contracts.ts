@@ -96,13 +96,6 @@ export const HeadlessConfigSchema = Type.Object(
     maxAutoPlanApprovals: Type.Optional(
       Type.Integer({ minimum: 0, maximum: 8 }),
     ),
-    caseDigest: Type.Optional(
-      Type.String({
-        minLength: 64,
-        maxLength: 64,
-        pattern: '^[a-f0-9]{64}$',
-      }),
-    ),
   },
   { additionalProperties: false },
 )
@@ -118,7 +111,6 @@ export const LegacyHeadlessConfigV1Schema = Type.Object(
     network: HeadlessConfigSchema.properties.network,
     mcpServers: HeadlessConfigSchema.properties.mcpServers,
     maxAutoPlanApprovals: HeadlessConfigSchema.properties.maxAutoPlanApprovals,
-    caseDigest: HeadlessConfigSchema.properties.caseDigest,
   },
   { additionalProperties: false },
 )
@@ -154,17 +146,6 @@ export const HeadlessResultSchema = Type.Object(
     autoPlanApprovals: Type.Integer({ minimum: 0, maximum: 8 }),
     usage: HeadlessUsageSchema,
     tools: HeadlessToolTotalsSchema,
-    benchmark: Type.Optional(
-      Type.Object(
-        {
-          protocol: Type.Literal('repair-once'),
-          repairAttempted: Type.Boolean(),
-          initialRunIds: Type.Array(RunIdSchema, { minItems: 1, maxItems: 16 }),
-          repairRunIds: Type.Array(RunIdSchema, { maxItems: 16 }),
-        },
-        { additionalProperties: false },
-      ),
-    ),
     artifacts: Type.Object(
       {
         resultPath: Type.String({ minLength: 1, maxLength: 4_096 }),
@@ -215,19 +196,6 @@ export const HeadlessStreamEventSchema = Type.Union([
   ]),
   Type.Composite([
     HeadlessEventBaseSchema,
-    Type.Object({
-      type: Type.Literal('benchmark.phase_ready'),
-      protocol: Type.Literal('repair-once'),
-      phase: Type.Literal('initial'),
-      status: HeadlessRunStatusSchema,
-      sessionId: SessionIdSchema,
-      runIds: Type.Array(RunIdSchema, { minItems: 1, maxItems: 16 }),
-      usage: HeadlessUsageSchema,
-      tools: HeadlessToolTotalsSchema,
-    }),
-  ]),
-  Type.Composite([
-    HeadlessEventBaseSchema,
     Type.Object({ type: Type.Literal('agent.event'), event: AgentEventSchema }),
   ]),
   Type.Composite([
@@ -264,40 +232,3 @@ export type HeadlessStreamEventDraft = HeadlessStreamEvent extends infer Event
     ? Omit<Event, 'schemaVersion' | 'seq' | 'ts'>
     : never
   : never
-
-export const HeadlessBenchmarkDecisionSchema = Type.Union([
-  Type.Object(
-    {
-      schemaVersion: Type.Literal(1),
-      action: Type.Literal('finish'),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      schemaVersion: Type.Literal(1),
-      action: Type.Literal('repair'),
-      feedback: Type.Object(
-        {
-          visibility: Type.Union([
-            Type.Literal('public'),
-            Type.Literal('diagnostic'),
-          ]),
-          text: Type.String({ minLength: 1, maxLength: 16_384 }),
-        },
-        { additionalProperties: false },
-      ),
-    },
-    { additionalProperties: false },
-  ),
-])
-export type HeadlessBenchmarkDecision = Static<
-  typeof HeadlessBenchmarkDecisionSchema
->
-
-export interface HeadlessBenchmarkController {
-  protocol: 'repair-once'
-  waitForDecision(input: {
-    signal: AbortSignal
-  }): Promise<HeadlessBenchmarkDecision>
-}

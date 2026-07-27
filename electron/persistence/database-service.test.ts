@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DatabaseService,
   desktopDatabasePath,
-  headlessTrialDatabasePath,
+  headlessDatabasePath,
   migrationChecksum,
 } from './database-service'
 import { DATABASE_MIGRATIONS, type DatabaseMigration } from './migrations'
@@ -721,8 +721,8 @@ describe('DatabaseService', () => {
     expect(desktopDatabasePath('C:\\UserData')).toBe(
       path.join('C:\\UserData', 'agent.db'),
     )
-    expect(headlessTrialDatabasePath('C:\\trial-42')).toBe(
-      path.join('C:\\trial-42', 'agent.db'),
+    expect(headlessDatabasePath('C:\\headless-run')).toBe(
+      path.join('C:\\headless-run', 'agent.db'),
     )
   })
 

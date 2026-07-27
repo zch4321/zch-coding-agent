@@ -25,9 +25,8 @@ Define cross-process payloads once in `shared/` and validate them at IPC boundar
 
 - `npm run verify` is the only routine full gate. It runs lint, formatting, deterministic Vitest tests, typecheck, runtime smoke tests, app/headless builds, Windows packaging, packaged SQLite smoke, and Playwright against the built app.
 - Do not repeat commands already included by `npm run verify` unless isolating a failure. `npm run test:runtime` groups native PTY, ripgrep, and development SQLite checks while keeping them in separate child processes for ABI and binary diagnostics.
-- `npm test` includes the deterministic benchmark manifest, checksum, and path-safety tests. Do not run a separate benchmark-cases suite.
 - `npm run test:e2e` remains an independent convenience entry that builds the app before Playwright. `npm run build` automatically runs `test:runtime` and, after Windows packaging, the packaged SQLite-only probe.
-- Do not run `benchmark:smoke`, any other `benchmark:*` command, `test:docker-worker`, worker-image builds, external benchmark commands, or `test:real` unless the user explicitly requests that workload. These commands may require Docker, external data, credentials, substantial time, or paid Provider usage and are not part of `npm run verify`.
+- Do not run `test:real` unless the user explicitly requests that workload. It requires credentials and paid Provider usage and is not part of `npm run verify`.
 
 Add regression coverage for changed policy, parser, IPC, and tool behavior. Exercise security-sensitive branches.
 

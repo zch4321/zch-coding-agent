@@ -50,7 +50,7 @@ describe('session transcript', () => {
         type: 'orchestrator.message',
         sessionId,
         runId,
-        kind: 'benchmark_case',
+        kind: 'test_context',
         text: '{"allowedPaths":["src/**"]}',
       },
       { type: 'user.message', sessionId, runId, text: 'fix it' },

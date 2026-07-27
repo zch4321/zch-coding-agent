@@ -482,7 +482,7 @@ describe('SessionManager compaction', () => {
       sessionId,
       clientRequestId: 'harness-compact',
       message: {
-        kind: 'benchmark_feedback',
+        kind: 'test_followup',
         text: `HARNESS_ONLY ${'x'.repeat(10_000)}`,
         source: 'test:harness',
       },

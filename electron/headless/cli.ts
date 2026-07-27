@@ -1,14 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
-import {
-  BenchmarkAgentCaseSchema,
-  type BenchmarkAgentCase,
-} from '../../shared/benchmark'
-import { compileSchema, formatSchemaErrors } from '../schema-validator'
 
 const MAX_TASK_BYTES = 1_048_576
-const MAX_BENCHMARK_CASE_BYTES = 1_048_576
-const validateBenchmarkCase = compileSchema(BenchmarkAgentCaseSchema)
 
 export interface HeadlessRunArguments {
   workspace: string
@@ -16,8 +9,6 @@ export interface HeadlessRunArguments {
   configFile: string
   artifactsDirectory: string
   timeoutMs: number
-  benchmarkProtocol?: 'repair-once'
-  benchmarkCaseFile?: string
 }
 
 /** Reports invalid headless runner arguments or input files. */
@@ -43,8 +34,6 @@ export function parseHeadlessArguments(argv: string[]): HeadlessRunArguments {
     '--config',
     '--artifacts',
     '--timeout-ms',
-    '--benchmark-protocol',
-    '--benchmark-case-file',
   ])
   for (let index = 1; index < argv.length; index += 2) {
     const flag = argv[index]
@@ -78,49 +67,13 @@ export function parseHeadlessArguments(argv: string[]): HeadlessRunArguments {
   ) {
     throw new HeadlessCliError('--timeout-ms must be between 1 and 86400000')
   }
-  const benchmarkProtocolValue = values.get('--benchmark-protocol')
-  if (benchmarkProtocolValue && benchmarkProtocolValue !== 'repair-once') {
-    throw new HeadlessCliError('Unsupported benchmark protocol')
-  }
-  const benchmarkProtocol = benchmarkProtocolValue ? 'repair-once' : undefined
-  const benchmarkCaseFile = values.get('--benchmark-case-file')
-
   return {
     workspace: required('--workspace'),
     taskFile: required('--task-file'),
     configFile: required('--config'),
     artifactsDirectory: required('--artifacts'),
     timeoutMs,
-    ...(benchmarkProtocol ? { benchmarkProtocol } : {}),
-    ...(benchmarkCaseFile
-      ? { benchmarkCaseFile: path.resolve(benchmarkCaseFile) }
-      : {}),
   }
-}
-
-/** Reads and validates a benchmark agent-case JSON document from disk. */
-export async function readHeadlessBenchmarkCase(
-  filePath: string,
-): Promise<BenchmarkAgentCase> {
-  let raw: Buffer
-  try {
-    raw = await readFile(filePath)
-  } catch {
-    throw new HeadlessCliError('Unable to read benchmark case file')
-  }
-  if (raw.byteLength > MAX_BENCHMARK_CASE_BYTES) {
-    throw new HeadlessCliError('Benchmark case file exceeds 1 MiB')
-  }
-  let value: unknown
-  try {
-    value = JSON.parse(raw.toString('utf8'))
-  } catch {
-    throw new HeadlessCliError('Benchmark case file is not valid JSON')
-  }
-  if (!validateBenchmarkCase(value)) {
-    throw new HeadlessCliError(formatSchemaErrors(validateBenchmarkCase.errors))
-  }
-  return structuredClone(value) as BenchmarkAgentCase
 }
 
 /** Reads a bounded UTF-8 task text file for a headless run. */

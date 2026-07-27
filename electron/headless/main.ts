@@ -5,11 +5,9 @@ import { pathToFileURL } from 'node:url'
 import {
   HeadlessCliError,
   parseHeadlessArguments,
-  readHeadlessBenchmarkCase,
   readHeadlessTask,
 } from './cli'
 import { HeadlessConfigError, loadHeadlessConfig } from './config'
-import { StdinBenchmarkController } from './benchmark-control'
 import type { HeadlessRunStatus } from './contracts'
 import {
   HeadlessRunInputError,
@@ -52,18 +50,14 @@ export async function runHeadlessMain(
 
   try {
     const args = parseHeadlessArguments(argv)
-    const [config, task, benchmarkCase] = await Promise.all([
+    const [config, task] = await Promise.all([
       loadHeadlessConfig(args.configFile),
       readHeadlessTask(args.taskFile),
-      args.benchmarkCaseFile
-        ? readHeadlessBenchmarkCase(args.benchmarkCaseFile)
-        : Promise.resolve(undefined),
     ])
     const result = await runHeadlessAgent({
       config,
       workspace: args.workspace,
       task,
-      benchmarkCase,
       artifactsDirectory: args.artifactsDirectory,
       timeoutMs: args.timeoutMs,
       output,
@@ -71,9 +65,6 @@ export async function runHeadlessMain(
       environment: options.environment,
       providerFactory: options.providerFactory,
       promptDirectory: options.promptDirectory,
-      ...(args.benchmarkProtocol
-        ? { benchmarkController: new StdinBenchmarkController(process.stdin) }
-        : {}),
       onDiagnostic: (message, error) => {
         errorOutput.write(
           `[headless] ${message}${error instanceof Error ? `: ${error.message}` : ''}\n`,

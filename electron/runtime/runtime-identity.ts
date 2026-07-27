@@ -1,10 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { PublicConfig } from '../../shared/config'
-import type { JsonValue } from '../../shared/json'
-import type {
-  RuntimeIdentity,
-  RuntimeIdentityDifference,
-} from '../../shared/runtime-identity'
+import type { RuntimeIdentity } from '../../shared/runtime-identity'
 import type { AgentRuntime } from './agent-runtime'
 
 declare const __ZCH_SOURCE_COMMIT__: string | undefined
@@ -12,33 +8,17 @@ declare const __ZCH_SOURCE_TREE_STATE__:
   | RuntimeIdentity['sourceTree']
   | undefined
 
-/** Reports that two runtime identities cannot be safely compared. */
-export class RuntimeIdentityMismatchError extends Error {
-  readonly code = 'RUNTIME_IDENTITY_MISMATCH'
-  readonly differences: RuntimeIdentityDifference[]
-
-  constructor(differences: RuntimeIdentityDifference[]) {
-    super(
-      `Runtime identities are not comparable: ${differences
-        .map((difference) => difference.path)
-        .join(', ')}`,
-    )
-    this.name = 'RuntimeIdentityMismatchError'
-    this.differences = structuredClone(differences)
-  }
-}
-
 /** Computes a SHA-256 digest from a JSON-serialized value. */
 export function sha256Json(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
-/** Builds runtime identity from configuration, case digest, source, and runtime metadata. */
+/** Builds runtime identity from configuration, task digest, source, and runtime metadata. */
 export function createRuntimeIdentity(input: {
   runtime: AgentRuntime
   config: PublicConfig
   configHash: string
-  caseDigest: string
+  taskDigest: string
   sourceCommit?: string
   sourceTree?: RuntimeIdentity['sourceTree']
   runtimeImageDigest?: string
@@ -61,7 +41,7 @@ export function createRuntimeIdentity(input: {
       input.runtimeImageDigest?.trim() ||
       process.env.ZCH_RUNTIME_IMAGE_DIGEST?.trim() ||
       'local',
-    caseDigest: input.caseDigest,
+    taskDigest: input.taskDigest,
     configHash: input.configHash,
     toolsHash: sha256Json(toolDefinitions),
     promptResources: input.runtime.services.prompts
@@ -107,22 +87,6 @@ export function createRuntimeIdentity(input: {
   }
 }
 
-/** Checks all identity fields required for safe comparison and reports their differences. */
-export function assertComparableRuntimeIdentities(
-  left: RuntimeIdentity,
-  right: RuntimeIdentity,
-): void {
-  const differences: RuntimeIdentityDifference[] = []
-  compareValues(
-    left as unknown as JsonValue,
-    right as unknown as JsonValue,
-    '',
-    differences,
-  )
-  if (differences.length > 0)
-    throw new RuntimeIdentityMismatchError(differences)
-}
-
 function embeddedSourceCommit(): string {
   if (
     typeof __ZCH_SOURCE_COMMIT__ !== 'undefined' &&
@@ -142,44 +106,4 @@ function embeddedSourceTree(): RuntimeIdentity['sourceTree'] {
     return __ZCH_SOURCE_TREE_STATE__
   }
   return 'unknown'
-}
-
-function compareValues(
-  left: JsonValue,
-  right: JsonValue,
-  path: string,
-  differences: RuntimeIdentityDifference[],
-): void {
-  if (differences.length >= 64) return
-  if (Object.is(left, right)) return
-  if (Array.isArray(left) && Array.isArray(right)) {
-    const length = Math.max(left.length, right.length)
-    for (let index = 0; index < length; index += 1) {
-      compareValues(
-        left[index] ?? null,
-        right[index] ?? null,
-        `${path}[${index}]`,
-        differences,
-      )
-    }
-    return
-  }
-  if (isRecord(left) && isRecord(right)) {
-    for (const key of [
-      ...new Set([...Object.keys(left), ...Object.keys(right)]),
-    ].sort()) {
-      compareValues(
-        left[key] ?? null,
-        right[key] ?? null,
-        path ? `${path}.${key}` : key,
-        differences,
-      )
-    }
-    return
-  }
-  differences.push({ path: path || '$', left, right })
-}
-
-function isRecord(value: JsonValue): value is Record<string, JsonValue> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }

@@ -3,7 +3,7 @@ import path from 'node:path'
 import process from 'node:process'
 import ts from 'typescript'
 
-const SOURCE_ROOTS = ['electron', 'shared', 'src', 'benchmarks']
+const SOURCE_ROOTS = ['electron', 'shared', 'src']
 const EXCLUDED_FILE = /(?:\.test|\.spec)\.ts$|test-support|fixtures|\.d\.ts$/u
 
 const exactResponsibilities = new Map([

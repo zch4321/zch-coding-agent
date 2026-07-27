@@ -288,7 +288,7 @@ Tool 层通过专用 port 调用执行服务，避免 `SessionToolRunner` 直接
 - `standard`
 - `strong`
 
-能力由用户标注，系统不能根据模型名、价格或未经用户选择的 benchmark 自动判断。任务指定的是最低等级；Backend 只在满足条件的池项中 round-robin：
+能力由用户标注，系统不能根据模型名、价格或未经用户选择的外部评估自动判断。任务指定的是最低等级；Backend 只在满足条件的池项中 round-robin：
 
 - 未指定等级时，在全部启用池项中轮换。
 - 指定等级时，不静默降级到更弱模型。
@@ -472,7 +472,7 @@ swarm.modelPool[]
 - 普通 Session bootstrap/search 不返回隐藏子 Session，普通 agent event 不泄漏到 renderer replica。
 - `/swarm` capability 只能使用一次且不能从历史或子 Agent 继承。
 
-每阶段完成后执行 `npm run verify`。真实 Provider、benchmark、Docker worker 和外部集群测试保持显式 opt-in，不进入默认门禁。
+每阶段完成后执行 `npm run verify`。真实 Provider 和外部集群测试保持显式 opt-in，不进入默认门禁。
 
 ## 12. 后续扩展
 
@@ -480,7 +480,7 @@ swarm.modelPool[]
 
 - 主 Agent 对指定子 Agent 继续追问的 `subagent_continue`。
 - 共享缓存、snapshot 复用和跨 Job 结果索引。
-- 模型能力 tag 自动选择与经过用户批准的 benchmark 辅助标注。
+- 基于用户明确导入的外部评估证据自动建议模型能力 tag。
 - 允许只读 MCP 的独立 trust/capability 协议。
 - 可运行测试的隔离 sandbox reviewer。
 - 多机器 Worker、claim lease、heartbeat、远程 trace/artifact 上传和断线重试。

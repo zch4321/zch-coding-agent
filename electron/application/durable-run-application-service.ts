@@ -10,7 +10,6 @@ import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { SessionRecord } from '../../shared/session'
 import type { Static } from '@sinclair/typebox'
 import type { SessionManager } from '../session/session-manager'
-import type { RunHarnessContext } from '../session/session-types'
 import { canonicalHash } from '../session/canonical-history'
 import { ApplicationError } from './application-error'
 import type { DurableExecutionStatePort } from './durable-execution-state-port'
@@ -60,10 +59,7 @@ export class DurableRunApplicationService {
   }
 
   /** Starts or reuses a durable run for a client request and commits its initial context. */
-  start(
-    input: DurableRunStartPayload,
-    options: { harnessContexts?: RunHarnessContext[] } = {},
-  ): Promise<DurableRunStartResult> {
+  start(input: DurableRunStartPayload): Promise<DurableRunStartResult> {
     const key = `${input.sessionId}\u0000${input.clientRequestId}`
     const requestHash = canonicalHash(input.message)
     const existing = this.#requests.get(key)
@@ -78,7 +74,7 @@ export class DurableRunApplicationService {
       }
       return existing.promise
     }
-    const request = this.#reserveAndStart(input, options).catch((error) => {
+    const request = this.#reserveAndStart(input).catch((error) => {
       this.#requests.delete(key)
       throw error
     })
@@ -196,7 +192,6 @@ export class DurableRunApplicationService {
 
   async #reserveAndStart(
     input: DurableRunStartPayload,
-    options: { harnessContexts?: RunHarnessContext[] },
   ): Promise<DurableRunStartResult> {
     let ownerToken: string | undefined
     if (input.kind === 'new_session') {
@@ -224,7 +219,7 @@ export class DurableRunApplicationService {
       )
     }
     try {
-      return await this.#start(input, ownerToken, options)
+      return await this.#start(input, ownerToken)
     } catch (error) {
       if (ownerToken) {
         await this.#registry.releaseOwned(input.sessionId, ownerToken)
@@ -236,7 +231,6 @@ export class DurableRunApplicationService {
   async #start(
     input: DurableRunStartPayload,
     ownerToken?: string,
-    options: { harnessContexts?: RunHarnessContext[] } = {},
   ): Promise<DurableRunStartResult> {
     if (
       input.kind === 'new_session' &&
@@ -278,16 +272,15 @@ export class DurableRunApplicationService {
           'New Session lifecycle was not reserved',
         )
       }
-      return this.#startNew(input, requestHash, ownerToken, options)
+      return this.#startNew(input, requestHash, ownerToken)
     }
-    return this.#startExisting(input, options)
+    return this.#startExisting(input)
   }
 
   async #startNew(
     input: Extract<DurableRunStartPayload, { kind: 'new_session' }>,
     requestHash: string,
     ownerToken: string,
-    options: { harnessContexts?: RunHarnessContext[] },
   ): Promise<DurableRunStartResult> {
     await this.#assertCandidateAvailable(input.sessionId)
     const project = await this.#projects.get(input.projectId)
@@ -319,7 +312,7 @@ export class DurableRunApplicationService {
       })
       this.#executionState.registerNew(seed, ownerToken)
       this.#registry.adoptNew(input.sessionId, input.projectId, ownerToken)
-      return await this.#startLoaded(input, options)
+      return await this.#startLoaded(input)
     } catch (error) {
       const duplicate = await this.#sessions.lookupRequest(
         input.sessionId,
@@ -342,7 +335,6 @@ export class DurableRunApplicationService {
 
   async #startExisting(
     input: Extract<DurableRunStartPayload, { kind: 'existing_session' }>,
-    options: { harnessContexts?: RunHarnessContext[] },
   ): Promise<DurableRunStartResult> {
     const current = await this.#sessions.getRecord(input.sessionId)
     if (current.lifecycle !== 'active') {
@@ -359,12 +351,11 @@ export class DurableRunApplicationService {
         'Durable Session binding was not loaded',
       )
     }
-    return this.#startLoaded(input, options)
+    return this.#startLoaded(input)
   }
 
   async #startLoaded(
     input: DurableRunStartPayload,
-    options: { harnessContexts?: RunHarnessContext[] } = {},
   ): Promise<DurableRunStartResult> {
     const commitPromise = this.#executionState.beginRequest(
       input.sessionId,
@@ -377,9 +368,6 @@ export class DurableRunApplicationService {
         message: input.message,
         clientRequestId: input.clientRequestId,
         ...(input.context ? { context: input.context } : {}),
-        ...(options.harnessContexts
-          ? { harnessContexts: options.harnessContexts }
-          : {}),
       })
     } catch (error) {
       this.#executionState.failRequest(

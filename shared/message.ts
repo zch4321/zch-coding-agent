@@ -21,7 +21,6 @@ export const CANONICAL_MESSAGE_KINDS = [
   'system_instruction',
   'assistant_preferences',
   'selected_context',
-  'benchmark_context',
   'runtime_context',
   'agents_context',
   'orchestrator',
@@ -41,7 +40,6 @@ export const CANONICAL_PROMPT_KINDS = [
   'system_instruction',
   'assistant_preferences',
   'selected_context',
-  'benchmark_context',
   'runtime_context',
   'agents_context',
   'orchestrator',
@@ -401,7 +399,6 @@ function textMessageRecordSchema(
     | 'system_instruction'
     | 'assistant_preferences'
     | 'selected_context'
-    | 'benchmark_context'
     | 'runtime_context'
     | 'agents_context'
     | 'orchestrator'
@@ -428,8 +425,6 @@ export const AssistantPreferencesMessageRecordSchema = textMessageRecordSchema(
 )
 export const SelectedContextMessageRecordSchema =
   textMessageRecordSchema('selected_context')
-export const BenchmarkContextMessageRecordSchema =
-  textMessageRecordSchema('benchmark_context')
 export const RuntimeContextMessageRecordSchema =
   textMessageRecordSchema('runtime_context')
 export const AgentsContextMessageRecordSchema =
@@ -459,7 +454,6 @@ export const MessageRecordSchema = Type.Union([
   SystemInstructionMessageRecordSchema,
   AssistantPreferencesMessageRecordSchema,
   SelectedContextMessageRecordSchema,
-  BenchmarkContextMessageRecordSchema,
   RuntimeContextMessageRecordSchema,
   AgentsContextMessageRecordSchema,
   OrchestratorMessageRecordSchema,

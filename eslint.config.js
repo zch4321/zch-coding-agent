@@ -10,8 +10,6 @@ export default [
       'dist/**',
       'dist-electron/**',
       'dist-headless/**',
-      'dist-worker/**',
-      'dist-benchmark/**',
       'node_modules/**',
       'playwright-report/**',
       'release/**',
@@ -61,7 +59,6 @@ export default [
   {
     files: [
       'electron/**/*.ts',
-      'benchmarks/**/*.ts',
       'shared/**/*.ts',
       'e2e/**/*.ts',
       '*.config.ts',

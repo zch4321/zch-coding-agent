@@ -8,8 +8,6 @@ import type { DiagnosticSink } from '../diagnostics'
 import { resolveRunRoutes } from '../providers/model-route-resolver'
 import {
   appendPromptLayer,
-  benchmarkCaseContent,
-  benchmarkFeedbackContent,
   orchestrationRequestContent,
 } from './prompt-harness'
 import { id, ipcFault, redactJsonSecrets } from './session-common'
@@ -29,7 +27,6 @@ import type {
   ActiveRun,
   AgentEventDraft,
   HarnessRunMessage,
-  RunHarnessContext,
   SessionState,
   SessionExecutionStatePort,
 } from './session-types'
@@ -102,7 +99,6 @@ export class SessionRunController {
     userMessage?: string,
     context?: RunContext,
     harnessMessage?: HarnessRunMessage,
-    harnessContexts?: RunHarnessContext[],
     retryUserMessageId?: MessageId,
   ): RunId {
     const existing = session.clientRequests.get(clientRequestId)
@@ -163,7 +159,6 @@ export class SessionRunController {
       userMessage,
       context,
       harnessMessage,
-      harnessContexts,
       retryUserMessageId,
     )
       .catch((error: unknown) =>
@@ -306,7 +301,6 @@ export class SessionRunController {
     userMessage?: string,
     context?: RunContext,
     harnessMessage?: HarnessRunMessage,
-    harnessContexts?: RunHarnessContext[],
     retryUserMessageId?: MessageId,
   ): Promise<void> {
     const signal = run.controller.signal
@@ -339,13 +333,10 @@ export class SessionRunController {
       const maxStepsPerRun = runConfig.limits.maxStepsPerRun
       let runInputCommitted = retryUserMessageId !== undefined
       if (harnessMessage) {
-        const content =
-          harnessMessage.kind === 'benchmark_feedback'
-            ? benchmarkFeedbackContent(harnessMessage.text)
-            : orchestrationRequestContent(
-                harnessMessage.kind,
-                harnessMessage.text,
-              )
+        const content = orchestrationRequestContent(
+          harnessMessage.kind,
+          harnessMessage.text,
+        )
         const harnessRecord = appendPromptLayer(session, {
           kind: 'orchestrator',
           content,
@@ -420,31 +411,6 @@ export class SessionRunController {
               config: this.#configStore.getPublicConfig(),
             })
             run.harnessMessageIds.push(appRecord.id)
-          }
-          for (const harnessContext of harnessContexts ?? []) {
-            const contextRecord = appendPromptLayer(session, {
-              kind: 'benchmark_context',
-              content: benchmarkCaseContent(harnessContext.text),
-              source: harnessContext.source,
-              trusted: true,
-              editable: false,
-              config: this.#configStore.getPublicConfig(),
-            })
-            run.harnessMessageIds.push(contextRecord.id)
-            this.#emit(session, {
-              type: 'orchestrator.message',
-              sessionId: session.sessionId,
-              runId: run.runId,
-              kind: harnessContext.kind,
-              text: harnessContext.text,
-            })
-            await session.logger.write({
-              type: 'orchestrator.message',
-              sessionId: session.sessionId,
-              runId: run.runId,
-              kind: harnessContext.kind,
-              text: harnessContext.text,
-            })
           }
           const userRecord = appendUserInput(session, {
             content: prepared.providerMessage,

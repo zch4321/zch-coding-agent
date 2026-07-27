@@ -13,7 +13,6 @@
     "electron/js-yaml.d.ts",
     "shared/sql-raw.d.ts",
     "electron/headless/**/*.ts",
-    "benchmarks/**/*.ts",
     "electron/runtime/agent-runtime.ts",
     "electron/runtime/create-agent-runtime.ts",
     "electron/runtime/runtime-event-bus.ts",

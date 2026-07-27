@@ -6,35 +6,18 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 通用只读子 Agent、模型池与 Swarm Tool 的已确认产品语义和分阶段计划见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P10 Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Harness/Plan/Goal M0 hardening、compact/goal/plan 编排、live interjection v1、M1 一写多读并发会话、NMessage 操作通知、可热切换 segmented trace capture、单一 `npm run verify` 发布门禁、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity 与 runtime identity、Linux Docker worker、固定 Core Harness 8、Monthly-SWEBench/SWE-rebench 滚动 mixed-16、不可变 cohort、strict/repair-once runner、隔离 grader、硬门禁和 L0–L5 评分、trace/tool/usage/cost/paired comparison、完整 Session transcript 查看/导出，以及正式 benchmark 命令、档位和分层 artifacts 已经落地。下一阶段用真实任务信号指导 Project / Code Intelligence 和 Provider Routing 的后续改动；P3 review 建议、N-3/N-4 与 201+ Electron E2E 按主题分块讨论和实现。
+当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P11、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、compact/goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、单一 `npm run verify` 发布门禁、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider 基础与完整 Session transcript 查看/导出已经落地。下一阶段优先实现 Responses、Anthropic 和 Google Provider，再推进 Subagent/Swarm；P3 review 建议、N-3/N-4 与 201+ Electron E2E 按主题分块讨论和实现。
+
+原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
 
 ## 0. 未完成概览
 
 | 优先级 | 领域                           | 目标                                                     | 主要风险                              |
 | ------ | ------------------------------ | -------------------------------------------------------- | ------------------------------------- |
-| P1     | Benchmark Harness              | 用同一 Agent Runtime 在 Linux Docker 评估真实任务        | 双实现漂移、环境复杂、grader 信号失真 |
 | P2     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断          |
 | P2     | Provider Routing               | Session selection、Active Run route 与用途路由           | 全局 active provider 静默影响已有会话 |
 | P2     | Subagent / Swarm               | 通用只读子 Agent、模型池和 `/swarm` 批量委派 Tool        | 递归调用、费用失控、并发与上下文膨胀  |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张      |
-
-## 5. M5 · Headless Agent Runtime And Benchmark Harness
-
-目标：先建立独立于 renderer、IPC、`npm test` 和 `npm run test:e2e` 的真实 coding-agent benchmark。Electron 与 Headless 必须调用同一份 Agent Runtime；Linux Docker 只替换宿主交互和部署方式，不得复制 Prompt Harness、工具注册、Provider loop、权限、compact、Skills、MCP 或 trace 实现。
-
-M5 保留原编号以维持已有文档和历史引用，但从本阶段起提前为首要里程碑。它首先评估 harness 工程本身，不把 Electron UI 性能混入 coding correctness；UI/IPC 继续由 E2E 覆盖，并通过 parity 测试证明两个宿主没有语义漂移。
-
-M5.10已经完成：`core-harness-8`固定8项确定性回归；`benchmark:external`从最新Monthly-SWEBench与SWE-rebench各抽8项，使用seed和`cohort.json`固定dataset commit、case与image digest。外部数据直接信任上游，不建设prompt/test alignment、本地审核Agent或人工批准系统。任务环境通过named volume和官方verifier执行，ZCH只叠加同一Headless runtime。
-
-后续Benchmark工作只在真实使用信号证明必要时扩展数据源、置信区间或长期趋势展示，不再以扩大自建case数量或建设本地数据审核系统作为独立里程碑。SWE-bench Pro/Verified、SWE-bench-Live、SWE-Lancer等保持可选候选，不进入默认命令。
-
-总体验收：
-
-- Headless 和 Electron 共用唯一 Agent Runtime，没有 Prompt、tool 或 loop 副本。
-- Linux Docker 中可用真实 Provider 在固定 Yolo、无人审批模式完成任务，并由隔离 grader 评分。
-- `benchmark:smoke`、`benchmark` 和 `benchmark:full` 具备明确成本与运行边界。
-- 结果可比较 Prompt Harness、Code Intelligence、Provider Routing、Concurrent Sessions、Skills 和 MCP 改动。
-- 任何结果都可追溯、可重放、可解释，并通过 workspace、权限、credential 和 artifact 安全检查。
 
 ## 3. M3 · Project And Code Intelligence UX
 
@@ -70,7 +53,7 @@ M5.10已经完成：`core-harness-8`固定8项确定性回归；`benchmark:exter
 
 - 设计目录级 overview/diagnostics 的有界能力。
 - diagnostics 支持缓存、过期标记和 UI 展示。
-- Benchmark trace 记录 facade 命中率、读文件 token、首次定位正确文件耗时和 fallback/unsupported 原因。
+- Trace 记录 facade 命中率、读文件 token、首次定位正确文件耗时和 fallback/unsupported 原因。
 - 后续 IDE 级编辑能力单独设计：rename、replace body、update definition、refactor preview、diagnostics refresh。
 - 所有写入类 IDE 能力必须进入现有 diff、审批、change history 和 trace 管线。
 
@@ -158,4 +141,4 @@ M5.10已经完成：`core-harness-8`固定8项确定性回归；`benchmark:exter
 
 涉及 Electron UI、文件树、审批、终端、设置、浏览器、MCP 进程生命周期、并发 run 或 provider routing 的阶段，还必须补充对应 E2E 或集成测试。
 
-真实 Provider、外部 Serena/LSP、外部 MCP server、benchmark preset 和 Docker worker/image 继续保持显式 opt-in，不能进入 `npm run verify`。Benchmark manifest/checksum/路径安全等纯确定性契约测试属于默认 `npm test`。
+真实 Provider、外部 Serena/LSP 和外部 MCP server 继续保持显式 opt-in，不能进入 `npm run verify`。

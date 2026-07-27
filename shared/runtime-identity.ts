@@ -16,7 +16,7 @@ export const RuntimeIdentitySchema = Type.Object(
       Type.Literal('unknown'),
     ]),
     runtimeImageDigest: Type.String({ minLength: 1, maxLength: 256 }),
-    caseDigest: Sha256Schema,
+    taskDigest: Sha256Schema,
     configHash: Sha256Schema,
     toolsHash: Sha256Schema,
     promptResources: Type.Array(
@@ -86,9 +86,3 @@ export const RuntimeIdentitySchema = Type.Object(
   { additionalProperties: false },
 )
 export type RuntimeIdentity = Static<typeof RuntimeIdentitySchema>
-
-export interface RuntimeIdentityDifference {
-  path: string
-  left: unknown
-  right: unknown
-}

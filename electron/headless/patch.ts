@@ -26,7 +26,7 @@ export async function collectWorkspacePatch(input: {
 }): Promise<PatchArtifact> {
   const indexPath = path.join(
     input.artifactsDirectory,
-    `.benchmark-index-${randomUUID()}`,
+    `.headless-index-${randomUUID()}`,
   )
   const environment = {
     ...createCommandEnvironment(),

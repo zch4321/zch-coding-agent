@@ -852,16 +852,6 @@ export function orchestrationRequestContent(
   return tagged('orchestration_request', { kind }, content)
 }
 
-/** Wraps grader feedback in the tagged benchmark-feedback prompt block. */
-export function benchmarkFeedbackContent(content: string): string {
-  return tagged('benchmark_feedback', { source: 'grader' }, content)
-}
-
-/** Wraps the public benchmark case manifest in its tagged prompt block. */
-export function benchmarkCaseContent(content: string): string {
-  return tagged('benchmark_case', { source: 'public_manifest' }, content)
-}
-
 /** Wraps a history-compaction summary in its tagged prompt block. */
 export function compactHistoryContent(content: string): string {
   return tagged('compact_history', { source: 'history_compaction' }, content)

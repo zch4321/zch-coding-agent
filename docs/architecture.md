@@ -184,7 +184,7 @@ Renderer 只保存：
 
 ### 3.4 Host-neutral runtime
 
-唯一 Agent loop 必须注入 durable execution/FileChange ports。Desktop 使用 `userData/agent.db`；Headless/benchmark 使用任务独立的临时 SQLite database，并继续共用 Prompt、Provider、Tool、Permission、compact 和 Agent loop。产品路径不存在 legacy memory/JSON fallback。
+唯一 Agent loop 必须注入 durable execution/FileChange ports。Desktop 使用 `userData/agent.db`；Headless 使用任务独立的临时 SQLite database，并继续共用 Prompt、Provider、Tool、Permission、compact 和 Agent loop。产品路径不存在 legacy memory/JSON fallback。
 
 ---
 
@@ -398,7 +398,6 @@ interface MessageRecord {
     | 'system_instruction'
     | 'assistant_preferences'
     | 'selected_context'
-    | 'benchmark_context'
     | 'runtime_context'
     | 'agents_context'
     | 'orchestrator'
@@ -440,7 +439,7 @@ interface MessageRecord {
 - 本地控制命令是 durable canonical log 的一部分，但永久 `inHistory = false`；普通 transcript/search 投影排除它，raw Message paging 仍保留它用于审计。Fork 会复制并 remap control/derived reference，但控制命令不能作为可见 fork point。
 - `assistant_turn`：只允许 text/tool-call parts，至少一项；`modelRoute` 必填，可携带 reasoning projection 和 continuation。
 - `tool_result`：每条 record 正好包含一个 terminal tool-result part；`callId` 必须对应之前 active assistant turn 中的 tool-call part。
-- `system_instruction/assistant_preferences/selected_context/benchmark_context/runtime_context/agents_context/orchestrator/interjection/compact_summary`：V1 只允许非空 text parts；不存在通用 `harness` kind。
+- `system_instruction/assistant_preferences/selected_context/runtime_context/agents_context/orchestrator/interjection/compact_summary`：V1 只允许非空 text parts；不存在通用 `harness` kind。
 - `normalizedReasoningText/providerContinuation` 不能出现在非 assistant record。
 - `MessageMetadataV1` 也必须按 `kind` 收紧，不接受任意键。
 
@@ -1463,14 +1462,13 @@ Trace 不记录 credentials。P3 的 trace reader 明确拒绝 v1，不提供转
 
 ## 17. Headless 与 Runtime Parity
 
-Headless/Benchmark 继续复用唯一 Agent runtime：
+Headless 继续复用唯一 Agent runtime：
 
-- 每个 trial 使用独立临时 SQLite database。
+- 每次执行使用独立临时 SQLite database。
 - Desktop 和 Headless fake-provider trajectory 比较 active messages、provider requests、tool results、prompt hashes 和 patch。
-- Benchmark artifacts 从 canonical messages 导出 conversation，不依赖 renderer store。
+- Headless 产物从 canonical messages 和 trace 生成，不依赖 renderer store。
 - Run/stream 细节来自 trace，而不是 `runs` table。
-
-Docker worker、isolated grader、credential proxy、case identity、pass@k workspace 和 cleanup hard gate 不因状态模型简化而改变。
+- Runtime identity 固定 source commit/tree、task/config digest、Provider/model、核心预算、prompt/tool hash 和宿主 capability。
 
 ---
 
@@ -1537,7 +1535,7 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 5. 发送 B。
 6. 断言 `messages WHERE in_history = 1 ORDER BY seq` 能构造协议完整的 A/tool/final/B provider request。
 
-常规完整门禁统一为 `npm run verify`：默认 Vitest、静态检查、分进程 native/ripgrep/development SQLite smoke、Desktop/Headless build、Windows package、packaged SQLite 和复用构建产物的 E2E。确定性 benchmark manifest/checksum/路径安全检查属于默认 Vitest；benchmark preset、Docker worker/image、外部 benchmark 和真实 Provider 测试仍是显式 opt-in，不进入该门禁。
+常规完整门禁统一为 `npm run verify`：默认 Vitest、静态检查、分进程 native/ripgrep/development SQLite smoke、Desktop/Headless build、Windows package、packaged SQLite 和复用构建产物的 E2E。真实 Provider 测试仍是显式 opt-in，不进入该门禁。
 
 ---
 

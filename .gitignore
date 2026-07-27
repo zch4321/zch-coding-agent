@@ -12,8 +12,6 @@ dist
 dist-ssr
 dist-electron
 dist-headless
-dist-worker
-dist-benchmark
 release
 playwright-report
 test-results

@@ -63,7 +63,6 @@ describe('MessageHistoryCompiler', () => {
       'system_instruction',
       'assistant_preferences',
       'selected_context',
-      'benchmark_context',
       'runtime_context',
       'agents_context',
       'orchestrator',

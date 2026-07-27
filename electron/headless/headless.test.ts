@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ProviderType } from '../../shared/config'
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
-import type { BenchmarkAgentCase } from '../../shared/benchmark'
 import {
   ScriptedProviderHarness,
   type ScriptedProviderEvent as ProviderEvent,
@@ -16,7 +15,7 @@ import {
 } from '../providers/provider-test-harness'
 import { parseHeadlessArguments } from './cli'
 import { loadHeadlessConfig } from './config'
-import type { HeadlessBenchmarkController, HeadlessConfig } from './contracts'
+import type { HeadlessConfig } from './contracts'
 import { HEADLESS_EXIT_CODES, runHeadlessMain } from './main'
 import { runHeadlessAgent } from './runner'
 
@@ -101,7 +100,7 @@ class PlanProvider extends ScriptedProviderHarness {
       yield toolCompletion(
         'call-plan-set',
         'plan_set',
-        { items: ['Finish the benchmark plan'] },
+        { items: ['Finish the headless plan'] },
         'Create a plan',
       )
       return
@@ -143,7 +142,7 @@ class HangingProvider extends ScriptedProviderHarness {
   }
 }
 
-class RepairProvider extends ScriptedProviderHarness {
+class RecordingProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
   requestBodies: JsonValue[] = []
@@ -156,10 +155,7 @@ class RepairProvider extends ScriptedProviderHarness {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
     this.requestBodies.push(structuredClone(request.providerRequest))
-    yield messageCompletion(
-      `repair-${this.calls}`,
-      this.calls === 1 ? 'Initial attempt complete.' : 'Repair complete.',
-    )
+    yield messageCompletion(`recording-${this.calls}`, 'Recorded the request.')
   }
 }
 
@@ -222,44 +218,6 @@ function config(overrides: Partial<HeadlessConfig> = {}): HeadlessConfig {
     },
     assistant: { language: 'en-US' },
     ...overrides,
-  }
-}
-
-function benchmarkCase(): BenchmarkAgentCase {
-  return {
-    schemaVersion: 1,
-    caseId: 'case-one',
-    suiteId: 'core-harness-8',
-    suiteRevision: 'smoke-v1',
-    task: 'Fix src/example.mjs',
-    publicChecks: [
-      {
-        id: 'public-check',
-        title: 'Public behavior',
-        acceptanceGroupId: 'behavior',
-        command: {
-          executable: 'node',
-          args: ['test/public.test.mjs'],
-          timeoutMs: 5_000,
-          maxOutputBytes: 65_536,
-        },
-      },
-    ],
-    modificationScope: {
-      allowedPaths: ['src/**'],
-      deniedPaths: ['test/**'],
-      maxChangedFiles: 2,
-      maxPatchBytes: 65_536,
-    },
-    resources: {
-      wallTimeMs: 60_000,
-      cpus: 1,
-      memoryBytes: 536_870_912,
-      pids: 64,
-      diskBytes: 268_435_456,
-      maxAgentSteps: 32,
-      maxContextTokens: 65_536,
-    },
   }
 }
 
@@ -356,27 +314,6 @@ describe('Headless host', () => {
       '1000',
     ])
     expect(parsed.timeoutMs).toBe(1_000)
-    const benchmarkParsed = parseHeadlessArguments([
-      'run',
-      '--workspace',
-      '.',
-      '--task-file',
-      'task.md',
-      '--config',
-      'headless.json',
-      '--artifacts',
-      '../artifacts',
-      '--timeout-ms',
-      '1000',
-      '--benchmark-protocol',
-      'repair-once',
-      '--benchmark-case-file',
-      'benchmark-case.json',
-    ])
-    expect(benchmarkParsed.benchmarkProtocol).toBe('repair-once')
-    expect(benchmarkParsed.benchmarkCaseFile).toBe(
-      path.resolve('benchmark-case.json'),
-    )
     expect(() =>
       parseHeadlessArguments([
         'run',
@@ -392,11 +329,9 @@ describe('Headless host', () => {
     const { directory, workspace, artifacts } = await fixture()
     const taskFile = path.join(directory, 'task.md')
     const configFile = path.join(directory, 'headless.json')
-    const benchmarkCaseFile = path.join(directory, 'benchmark-case.json')
     await Promise.all([
       writeFile(taskFile, 'Create headless-created.txt\n'),
       writeFile(configFile, `${JSON.stringify(config())}\n`),
-      writeFile(benchmarkCaseFile, `${JSON.stringify(benchmarkCase())}\n`),
     ])
     const output = new StringSink()
     const diagnostics = new StringSink()
@@ -414,8 +349,6 @@ describe('Headless host', () => {
         artifacts,
         '--timeout-ms',
         '5000',
-        '--benchmark-case-file',
-        benchmarkCaseFile,
       ],
       {
         output,
@@ -524,49 +457,10 @@ describe('Headless host', () => {
     expect(provider.receivedApiKey).toBe(secret)
   }, 20_000)
 
-  it('injects a public benchmark descriptor separately from the user task', async () => {
-    const { workspace, artifacts } = await fixture()
-    const output = new StringSink()
-    const provider = new RepairProvider()
-    const result = await runHeadlessAgent({
-      config: config(),
-      workspace,
-      task: 'Fix the implementation',
-      benchmarkCase: benchmarkCase(),
-      artifactsDirectory: artifacts,
-      timeoutMs: 5_000,
-      output,
-      environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },
-      providerFactory: () => provider,
-    })
-
-    expect(result.status).toBe('completed')
-    const messages = provider.requests[0] ?? []
-    const descriptorIndex = messages.findIndex(
-      (message) =>
-        message.role === 'user' &&
-        String(message.content ?? '').includes('<benchmark_case') &&
-        String(message.content ?? '').includes('"deniedPaths"') &&
-        String(message.content ?? '').includes('test/**'),
-    )
-    const taskIndex = messages.findIndex(
-      (message) =>
-        message.role === 'user' && message.content === 'Fix the implementation',
-    )
-    expect(descriptorIndex).toBeGreaterThanOrEqual(0)
-    expect(taskIndex).toBeGreaterThan(descriptorIndex)
-    const trace = await readFile(result.artifacts.tracePath, 'utf8')
-    expect(trace).toContain('"kind":"benchmark_case"')
-    expect(trace).toContain('"type":"user.message"')
-    expect(trace).not.toContain(
-      '"type":"user.message","text":"{\\n  \\"schemaVersion\\"',
-    )
-  })
-
   it('uses the prepared Desktop default reasoning when headless reasoning is omitted', async () => {
     const { workspace, artifacts } = await fixture()
     const output = new StringSink()
-    const provider = new RepairProvider('deepseek.chat-completions')
+    const provider = new RecordingProvider('deepseek.chat-completions')
     const omittedReasoning = config()
     omittedReasoning.provider.providerType = 'deepseek.chat-completions'
     delete omittedReasoning.provider.reasoning
@@ -665,59 +559,5 @@ describe('Headless host', () => {
     await expect(
       readFile(result.artifacts.resultPath, 'utf8'),
     ).resolves.toContain('"status": "timed_out"')
-  }, 20_000)
-
-  it('appends one benchmark repair as trusted harness context in the same session', async () => {
-    const { workspace, artifacts } = await fixture()
-    const output = new StringSink()
-    const provider = new RepairProvider()
-    const benchmarkController: HeadlessBenchmarkController = {
-      protocol: 'repair-once',
-      async waitForDecision() {
-        return {
-          schemaVersion: 1,
-          action: 'repair',
-          feedback: {
-            visibility: 'diagnostic',
-            text: 'The edge-case acceptance group is still failing.',
-          },
-        }
-      },
-    }
-    const result = await runHeadlessAgent({
-      config: config(),
-      workspace,
-      task: 'Attempt the benchmark task',
-      artifactsDirectory: artifacts,
-      timeoutMs: 5_000,
-      output,
-      environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },
-      providerFactory: () => provider,
-      benchmarkController,
-    })
-
-    expect(result.status).toBe('completed')
-    expect(result.runIds).toHaveLength(2)
-    expect(result.benchmark).toMatchObject({
-      protocol: 'repair-once',
-      repairAttempted: true,
-      initialRunIds: [result.runIds[0]],
-      repairRunIds: [result.runIds[1]],
-    })
-    expect(output.value).toContain('"type":"benchmark.phase_ready"')
-    expect(provider.requests[1]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: 'user',
-          content: expect.stringContaining('<benchmark_feedback'),
-        }),
-      ]),
-    )
-    const trace = await readFile(result.artifacts.tracePath, 'utf8')
-    expect(trace).toContain('"kind":"benchmark_feedback"')
-    expect(trace).toContain('"type":"orchestrator.message"')
-    expect(trace).not.toContain(
-      '"type":"user.message","text":"Visibility: diagnostic',
-    )
   }, 20_000)
 })
