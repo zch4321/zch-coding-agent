@@ -486,4 +486,4 @@ swarm.modelPool[]
 - 多机器 Worker、claim lease、heartbeat、远程 trace/artifact 上传和断线重试。
 - Swarm 模板、角色市场、投票、模型间辩论或自动应用修改。
 
-如果未来扩展到多机器，继续复用 `SubagentExecutionSpec`、Job/Agent ID、route snapshot 和 JSON result contract；远程 Worker 只替换执行 transport，不能复制 Agent loop、Prompt Harness、权限或 Provider adapter。
+如果未来扩展到多机器，继续复用 `SubagentExecutionSpec`、Job/Agent ID、route snapshot 和 JSON result contract；远程 Worker 只替换执行 transport，不能复制 Agent loop、Prompt Harness、权限或 ModelProvider。

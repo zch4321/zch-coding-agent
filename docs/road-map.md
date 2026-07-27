@@ -15,7 +15,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 | P1     | Benchmark Harness              | 用同一 Agent Runtime 在 Linux Docker 评估真实任务        | 双实现漂移、环境复杂、grader 信号失真 |
 | P2     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断          |
 | P2     | Provider Routing               | Session selection、Active Run route 与用途路由           | 全局 active provider 静默影响已有会话 |
-| P2     | Subagent / Swarm               | 通用只读子 Agent、模型池和 `/swarm` 批量委派 Tool         | 递归调用、费用失控、并发与上下文膨胀  |
+| P2     | Subagent / Swarm               | 通用只读子 Agent、模型池和 `/swarm` 批量委派 Tool        | 递归调用、费用失控、并发与上下文膨胀  |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张      |
 
 ## 5. M5 · Headless Agent Runtime And Benchmark Harness
@@ -100,7 +100,7 @@ M5.10已经完成：`core-harness-8`固定8项确定性回归；`benchmark:exter
 ### 4.1 Session Selection 与 Active Run Route Snapshot
 
 - Session 持久化当前 provider/model/reasoning selection；renderer 下拉框必须通过 backend command 更新它，不能只修改本地 form。
-- 每个 Active Run 启动时从 Session selection 解析不可变 `ModelRouteSnapshot`，至少冻结 `adapterId/providerId/model/reasoning profile/config revision`；它保存在 backend memory，完成的 assistant message 记录实际 route。Provider turn 不能直接使用全局 active provider。
+- 每个 Active Run 启动时从 Session selection 解析不可变 `ModelRouteSnapshot`，至少冻结 `providerType/providerId/model/reasoning/config revision`；它保存在 backend memory，完成的 assistant message 记录实际 route。Provider turn 不能直接使用全局 active provider。
 - 修改全局默认 provider 只影响新 Session，或用户显式恢复默认后的后续 Run。
 - 不再使用独立 `ConversationRecord` 或持久化 Run 保存模型状态；Session selection、active route 和 Message metadata 使用 `shared/` canonical schema。
 
@@ -108,14 +108,14 @@ M5.10已经完成：`core-harness-8`固定8项确定性回归；`benchmark:exter
 
 - 已存在 Session 不因全局默认 provider 变化而静默换模型。
 - 两个对话可以使用不同 provider/model 并同时运行。
-- trace 和 usage 显示准确 adapterId/providerId/model/profile。
+- trace 和 usage 显示准确 providerType/providerId/model/reasoning。
 
 ### 4.2 Provider Purpose Binding
 
 - 第一阶段支持 `main` 与 `approval` 两种 purpose；这里的 purpose 表示模型用途，不是 Provider wire role。
 - 后续支持 `planner`、`summarizer`、`code_review`。
 - Provider fallback 必须显式配置；失败后是否切换必须进入 trace，不能静默换服务商。
-- 不同协议的 tools/schema、reasoning、streaming、tool call 格式差异由 Provider Protocol Adapter 处理。Adapter 消费完整 `CompiledCanonicalHistory` 并生成目标 wire DTO，Core 不维护 Chat-Completions-shaped `ProviderMessage`。
+- 不同 API 的 tools/schema、reasoning、streaming、tool call 格式差异由具体 `ModelProvider` 处理。Provider 消费完整 `CompiledCanonicalHistory`、生成目标 wire DTO 并解码 canonical completion，Core 不维护 Chat-Completions-shaped `ProviderMessage`。
 
 验收：
 
@@ -125,7 +125,7 @@ M5.10已经完成：`core-harness-8`固定8项确定性回归；`benchmark:exter
 
 ### 4.3 Trace / Replay 增强
 
-- trace 记录并发 Run 的 sessionId、runId、provider purpose、adapterId、workspace writer ownership、prompt resource、prompt build 和不可变 route snapshot。
+- trace 记录并发 Run 的 sessionId、runId、provider purpose、providerType、workspace writer ownership、prompt resource、prompt build 和不可变 route snapshot。
 - 保留离线 replay、Prompt Inspector、导出和统计；不提供 trace fork 或在线重放 provider request。
 - 增加 prompt cache 指标、usage 趋势、tool timing、compact 前后 token 变化。
 - 后端、MCP、Serena、provider retry、approval model 的关键事件进入统一 trace。

@@ -1,6 +1,6 @@
 # 架构设计文档 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 已完成 P0–P10 · 2026-07-26
+> 状态：Backend Architecture v2.1 已完成 P0–P10；P11 Provider Runtime Foundation 设计已冻结、实现中 · 2026-07-27
 >
 > 配套文档：[`requirements.md`](./requirements.md) 定义产品能力，[`frontend-spec.md`](./frontend-spec.md) 定义前端信息架构与交互验收。
 >
@@ -40,7 +40,7 @@ SQLite
 
 - renderer 不再拥有独立于 backend 的 Conversation 真相。
 - `ConversationRecord` 与 main-process session history 不再表示同一对话的两套不同数据。
-- 应用重启后可以从 SQLite 重建完整 canonical history，再由所选 Protocol Adapter 生成协议有效的 Provider request。
+- 应用重启后可以从 SQLite 重建完整 canonical history，再由所选 `ModelProvider` 生成协议有效的 Provider request。
 - 模型、权限模式、Goal 和 Plan 的提交都经过 backend。
 - renderer 不再保存整个 workbench 快照。
 - Run、stream delta、pending approval 和进程句柄明确属于 backend memory，不因为“后端拥有状态”而过度落盘。
@@ -140,13 +140,15 @@ electron/
   runtime/
     create-agent-runtime.ts
   providers/
-    provider-protocol.ts
-    chat-completions-adapter.ts
+    provider.ts
+    provider-factory.ts
     http-sse-transport.ts
     deepseek-provider.ts
+    generic-chat-completions-provider.ts
+    chat-completions-shared.ts
     model-route-resolver.ts
     fixtures/
-      protocol-shape-test-adapters.ts # Responses/Anthropic test-only
+      protocol-shape-test-providers.ts # Responses/Anthropic test-only
   prompts/
   tools/
   permission/
@@ -288,15 +290,15 @@ interface SessionRecord {
 }
 ```
 
-`modelSelection` 是下一次执行使用的当前选择。Backend 在 Run 开始时将它解析为不可变 `ModelRouteSnapshot`；除 provider/model/reasoning 和端点/配置 revision 外，snapshot 必须包含实际 `adapterId`，以区分同一供应商的 Chat Completions、Responses 等协议。已完成 assistant message 记录该实际 route。
+`modelSelection` 是下一次执行使用的当前选择。Backend 在 Run 开始时将它解析为不可变 `ModelRouteSnapshot`；除 provider/model/reasoning 和端点/配置 revision 外，snapshot 必须包含实际 `providerType`，以选择一个具体、扁平的 Provider 实现。`providerId` 是用户保存的配置实例，`providerType` 是代码实现类型；同一供应商的不同 API surface 使用不同 type。已完成 assistant message 记录该实际 route。
 
 ```ts
 type ProviderPurpose = 'main' | 'approval' | 'title' | 'compression'
 
 interface ModelRouteSnapshot {
-  schemaVersion: 1
+  schemaVersion: 2
   purpose: ProviderPurpose
-  adapterId: string
+  providerType: string
   providerId: string
   model: string
   reasoning: ReasoningEffort
@@ -305,7 +307,7 @@ interface ModelRouteSnapshot {
 }
 ```
 
-Snapshot 保存解析完成后的非凭据 route，而不是指向可变全局 Provider 配置的引用。`purpose` 表示 `main/approval/title/compression` 等模型用途，不是 wire role；API key、Authorization header 和 transport client 不进入 shared record。一次 Run 启动后，即使用户修改 Provider 配置，该 Run 仍使用已冻结的 adapter、endpoint、model 和 reasoning；新配置只影响后续 Run。
+Snapshot 保存解析完成后的非凭据 route，而不是指向可变全局 Provider 配置的引用。`purpose` 表示 `main/approval/title/compression` 等模型用途，不是 wire role；API key、Authorization header 和 transport client 不进入 shared record。一次 Run 启动后，即使用户修改 Provider 配置，该 Run 仍使用已冻结的 provider type、endpoint、model 和 reasoning；新配置只影响后续 Run。
 
 `endpoint` 必须是 HTTP(S) 绝对 URL，并拒绝 URL userinfo、fragment 和凭据型 query key。它是可进入 SQLite、renderer 和 trace 的非 secret route 信息，不能用来携带 API key、token、signature 或 Authorization 数据。
 
@@ -313,8 +315,8 @@ Snapshot 保存解析完成后的非凭据 route，而不是指向可变全局 P
 
 ```ts
 interface ProviderContinuationEnvelope {
-  schemaVersion: 1
-  adapterId: string
+  schemaVersion: 2
+  providerType: string
   format: string
   data: JsonValue
 }
@@ -421,17 +423,17 @@ interface MessageRecord {
 
 字段职责：
 
-- `kind`：应用内部语义，renderer、搜索、导出、compact policy 和 Provider Protocol Adapter 用它区分用户输入、编排注入和其他消息。`kind` 不是任何 Provider 的 wire `role`。
+- `kind`：应用内部语义，renderer、搜索、导出、compact policy 和 `ModelProvider` 用它区分用户输入、编排注入和其他消息。`kind` 不是任何 Provider 的 wire `role`。
 - `parts`：应用理解的、有序的 canonical payload atoms。V1 支持文本、工具调用和工具结果；图片、文件等多模态类型只在产品真正支持时以新的闭集 union member 增加，不接受开放任意 JSON part。
 - `normalizedReasoningText`：可选、非加密、应用标准化后的可读 reasoning 文本或摘要，只用于 UI、导出和通用审计；它不是原始 CoT，也不能用于反向重建 Provider continuation。
-- `providerContinuation`：可选的 provider-native continuation envelope。Core 只验证外壳并原样搬运 `data`；只有 `adapterId + format` 对应的 Provider Adapter 可以解释它。
+- `providerContinuation`：可选的 provider-native continuation envelope。Core 只验证外壳并原样搬运 `data`；只有 `providerType + format` 对应的 Provider 实现可以解释它。
 - `modelRoute`：已完成 assistant turn 实际使用的 route，便于 UI 和审计。
 - `metadata`：应用拥有并理解的 typed annotations，例如 attachment provenance、prompt id/hash、标准化 usage、approval/tool/compact 摘要和 reasoning projection 状态。
 - `visibility`：`visible` 可进入普通 timeline/search，`hidden` 是仍可参与模型历史的内部记录，`superseded` 表示已退出当前分支的审计记录。
 - `turnId`：把同一轮的 context、原始 user、assistant、tool result 和 interjection 关联起来；rewind/edit 使用它确定完整轮次边界。
 - `inHistory`：是否属于下一次 provider request 的 canonical active history；它不决定本地审计记录是否存在，也不直接决定 renderer 是否展示。
 
-`metadata`“与 Provider 协议无关”指的是：它可以来源于 Provider，例如标准化 usage，但删除 metadata 只能损失 UI、统计或审计信息，不能让下一次 Provider request 失去协议完整性。任何必须原样回传、只由 Adapter 理解、或影响 continuation 正确性的字段都必须进入 `providerContinuation`，不能藏在 metadata 中。完整原始 Provider request/response、headers 和 stream events 属于可选 trace，也不进入 metadata。
+`metadata`“与 Provider 协议无关”指的是：它可以来源于 Provider，例如标准化 usage，但删除 metadata 只能损失 UI、统计或审计信息，不能让下一次 Provider request 失去协议完整性。任何必须原样回传、只由对应 Provider 理解、或影响 continuation 正确性的字段都必须进入 `providerContinuation`，不能藏在 metadata 中。完整原始 Provider request/response、headers 和 stream events 属于可选 trace，也不进入 metadata。
 
 实际 shared schema 必须是以 `kind` 为 discriminator 的闭集 union，而不是上面这个允许所有组合的宽松 interface：
 
@@ -451,7 +453,7 @@ MessageRecord 是持久化、排序、分页、compact 和 UI 派生的单位；
 | 投影                    | 选择规则                                                      | 用途                              |
 | ----------------------- | ------------------------------------------------------------- | --------------------------------- |
 | Durable canonical log   | 所有已接受并 commit 的 records，包括 `hidden` 和 `superseded` | 幂等、审计、fork/reference 完整性 |
-| Provider active history | `inHistory = true` 且非 `superseded`，再经 compiler 校验      | Protocol Adapter request          |
+| Provider active history | `inHistory = true` 且非 `superseded`，再经 compiler 校验      | `ModelProvider.compile()` request |
 | Renderer transcript     | `visibility = visible` 的 user/assistant/编排记录             | Chat timeline、普通搜索与导出     |
 
 因此“某条命令不发送给模型”不意味着“不落库”；同样，`inHistory = false` 也不等于删除或不可审计。
@@ -463,9 +465,9 @@ MessageRecord 是持久化、排序、分页、compact 和 UI 派生的单位；
 | `MessageRecord` | identity、Session 归属、全局 `seq`、幂等发送、持久化原子性、分页与 compact | 如果每个内容块都成为独立 record，Session 排序、一次 assistant turn 的原子提交和 UI 分页都会被协议细节打碎 |
 | `MessagePart`   | 单个逻辑消息内的内容类型、局部顺序和 call/result 关联                      | 如果 record 只有一个字符串字段，就无法无损表达“文本 + 多个工具调用”或后续图片/文件等异构内容              |
 
-它借鉴的是多个现代 API 都存在“外层事件/消息 + 内层有序内容单元”这一共同形态，但只保留本应用确实理解的最小语义交集。Chat Completions、Responses 和 Anthropic 的具体 message/item/block 仍由各自 Adapter 生成，所以 canonical parts 不会随着某一家 wire schema 的升级而被迫迁移。
+它借鉴的是多个现代 API 都存在“外层事件/消息 + 内层有序内容单元”这一共同形态，但只保留本应用确实理解的最小语义交集。Chat Completions、Responses 和 Anthropic 的具体 message/item/block 仍由各自 Provider 生成，所以 canonical parts 不会随着某一家 wire schema 的升级而被迫迁移。
 
-### 5.3.1 History Compiler 与 Provider Protocol Adapter
+### 5.3.1 History Compiler 与 ModelProvider
 
 持久化和请求边界固定为：
 
@@ -475,47 +477,52 @@ SQLite row
 MessageRecord[]
   -> MessageHistoryCompiler
 CompiledCanonicalHistory
-  -> ProviderProtocolAdapter.compileRequest(...)
-OpenAI Chat Completions / OpenAI Responses / Anthropic Messages DTO
+  -> ModelProvider.compile(...)
+provider wire request
+  -> read-only hook / budget / trace
+  -> ModelProvider.stream(...)
+canonical ProviderEvent / CompletedAssistantTurn
 ```
 
 `MessageHistoryCompiler` 只负责 provider-independent policy：按 `seq` 排序、选择 `inHistory`、应用 compact 边界、校验 record schema、payload bounds、Session/identity 和严格有序的完整 tool-call/result batch。它不生成 `role`、Provider message 或任何 SDK DTO。
 
 ```ts
-interface CompiledCanonicalHistory {
-  entries: Array<{
-    sourceMessageId: MessageId
-    kind: MessageRecord['kind']
-    parts: MessagePart[]
-    sourceModelRoute?: ModelRouteSnapshot
-    continuation?: ProviderContinuationEnvelope
-  }>
+type ProviderType = 'deepseek.chat-completions' | 'generic.chat-completions'
+
+interface ProviderToolDefinition {
+  name: string
+  description: string
+  inputSchema: JsonValue
+  intentParameter: string
 }
 
-interface ProviderProtocolAdapter<RequestDto> {
-  readonly adapterId: string
+interface ModelProvider {
+  readonly providerType: ProviderType
 
-  compileRequest(input: {
+  compile(input: {
     history: CompiledCanonicalHistory
     route: ModelRouteSnapshot
-    tools: ToolDefinition[]
-  }): RequestDto
+    tools: ProviderToolDefinition[]
+    structuredOutput?: 'json_object'
+  }): CompiledProviderCall
 
-  decodeStream(input: {
-    stream: AsyncIterable<unknown>
-    emit: (event: NormalizedProviderEvent) => void
-  }): Promise<CompletedAssistantTurn>
+  stream(
+    call: CompiledProviderCall,
+    context: { signal: AbortSignal },
+  ): AsyncIterable<ProviderEvent>
 }
 
 interface CompletedAssistantTurn {
   parts: Array<TextPart | ToolCallPart>
+  toolCalls: ToolCall[]
   normalizedReasoningText?: string
   providerContinuation?: ProviderContinuationEnvelope
-  usage?: NormalizedUsage
+  usage: ProviderUsage
+  finishReason: string
 }
 ```
 
-Protocol Adapter 必须消费整个 ordered history，不是对每条 MessageRecord 做一对一 `map()`。编译可以提升 harness、合并相邻记录或将一条 record 展开为多个 wire items，但不能改写持久化 history。Application service 根据 `CompletedAssistantTurn` 生成 ID/Session/seq/metadata 并落盘；Adapter 不直接创建或插入 MessageRecord。
+`compile()` 必须同步、无网络、无凭据且确定性地消费整个 ordered history；它不是对每条 MessageRecord 做一对一 `map()`。编译可以提升 harness、合并相邻记录或将一条 record 展开为多个 wire items，但不能改写持久化 history。`stream()` 负责鉴权、HTTP/SDK、abort、流解码、usage、reasoning、tool-call 累积和最终 canonical completion；错误通过异常返回，成功必须恰好产生一次 `completed`。Application service 校验 `CompletedAssistantTurn` 后生成 ID/Session/seq/metadata 并落盘；Provider 不直接创建或插入 MessageRecord。
 
 | Canonical history                          | Chat Completions              | OpenAI Responses                         | Anthropic Messages                          |
 | ------------------------------------------ | ----------------------------- | ---------------------------------------- | ------------------------------------------- |
@@ -527,9 +534,9 @@ Protocol Adapter 必须消费整个 ordered history，不是对每条 MessageRec
 
 `role` 只是部分 wire 协议的字段，不是 canonical database field。OpenAI 官方把 Chat Completions 的基本单位称为 Message，而 Responses 使用包括 `message/function_call/function_call_output` 的 Items；Anthropic 则把 client tool result 放在 `user` message 的 `tool_result` content block 中。因此一条 MessageRecord 不要求对应一条 wire message/item。协议依据：[OpenAI Responses migration](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)、[Anthropic tool results](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)。
 
-P3 产品配置只开放 `deepseek.chat-completions` 和 `openai-compatible.chat-completions`；Responses/Anthropic Adapter 仅存在于 test fixture，用来证明一对多和多对一协议形状，不是可选产品路由。Provider transport 负责 SDK/HTTP、stream 和 abort；Protocol Adapter 负责 request compilation、response decoding 和 continuation compatibility。两者可以由同一 Provider module 组合，但不能让 Chat Completions 形状的通用 `ProviderMessage` 渗透回 Core、Persistence 或 Renderer。
+Provider 实现保持扁平：`DeepSeekProvider` 和 `GenericChatCompletionsProvider` 都直接实现 `ModelProvider`，互不继承。允许共享 HTTP/SSE、bounds、tool-call 拼接、hash/timing 等纯函数，但不引入 BaseProvider、协议方言层或任意 capability 组合。Provider factory 只按 `providerType` 做穷举选择；模型目录查询是独立服务，不扩充核心接口。
 
-当前 Chat Completions Adapter 会把 canonical tool-result part 数组整体 JSON 编码进 `tool` message content。模型会看到带类型标签的内部 part 结构，但这能无损保留 text/JSON part 的顺序，golden test 已固定该权衡；如果以后改为更紧凑的文本投影，必须作为显式协议行为变更处理。
+三个通用兜底 type 规划为 `generic.chat-completions`、`generic.responses` 和 `generic.anthropic`。P11 首批只提供 DeepSeek 与 Generic Chat；Responses、Anthropic 和 Google 在实际接入时各写独立 Provider。当前 Chat Completions Provider 会把 canonical tool-result part 数组整体 JSON 编码进 `tool` message content；模型会看到带类型标签的内部 part 结构，golden test 固定该现有行为，后续若改投影必须作为显式 wire 行为变更。
 
 ### 5.4 FileChangeSummary 与 StoredFileChangeRecord
 
@@ -767,9 +774,9 @@ CREATE INDEX messages_history_idx
 
 本地对话搜索只读取 `kind = 'user_input'/'assistant_turn'` records 中 `type = 'text'` 的 parts；不索引 tool-call 参数、tool-result/JSON payload、reasoning、continuation 或 metadata。V1 可在 Repository 中解码后查询；数据量需要 FTS 时，FTS 只能是可从这些 text parts 重建的派生索引，不能成为新的真相源。
 
-`provider_continuation_json` 保存完整 `ProviderContinuationEnvelope` JSON；`data` 保留 Adapter 提供的原始 JSON 结构和数组顺序。若供应商状态需要逐字节保持，Adapter 必须把原始字节编码成 envelope `data` 中带明确 format 的 base64/string，通用 codec 不得解析后重组。Repository 只验证 envelope 外层，Adapter 再按 `adapterId/format` 验证 `data`。
+`provider_continuation_json` 保存完整 `ProviderContinuationEnvelope` JSON；`data` 保留 Provider 提供的原始 JSON 结构和数组顺序。若供应商状态需要逐字节保持，Provider 必须把原始字节编码成 envelope `data` 中带明确 format 的 base64/string，通用 codec 不得解析后重组。Repository 只验证 envelope 外层，对应 Provider 再按 `providerType/format` 验证 `data`。
 
-`normalized_reasoning_text` 只保存可读明文投影，不保存签名、密文、redacted block、response cursor 或 provider item id。`metadata_json` 保存按 Message `kind` 校验的 `MessageMetadataV1` JSON；未知键默认拒绝，不能用它绕过 `provider_continuation_json` 的 Adapter ownership。
+`normalized_reasoning_text` 只保存可读明文投影，不保存签名、密文、redacted block、response cursor 或 provider item id。`metadata_json` 保存按 Message `kind` 校验的 `MessageMetadataV1` JSON；未知键默认拒绝，不能用它绕过 `provider_continuation_json` 的 Provider ownership。
 
 所有 JSON 列在 application boundary 按 shared schema 校验，并使用 `CHECK(json_valid(...))` 或等价 codec 约束。Nullable JSON 需要允许 SQL `NULL`。`provider_continuation_json` 通常只在 `kind = 'assistant_turn'` 时非空；它不得包含凭据、Authorization header、完整 wire request、usage 或 timing。
 
@@ -885,9 +892,9 @@ WHERE session_id = ?
 ORDER BY seq ASC;
 ```
 
-`MessageRepository` 通过 codec 将每一行无损解码为完整 `MessageRecord`。`MessageHistoryCompiler` 检查顺序、`kind/parts` 组合和 assistant tool-call/tool-result 配对，投影为 `CompiledCanonicalHistory`；当前 `ProviderProtocolAdapter` 再消费完整 history 并转换成具体 wire request。Repository 不返回 Provider DTO。
+`MessageRepository` 通过 codec 将每一行无损解码为完整 `MessageRecord`。`MessageHistoryCompiler` 检查顺序、`kind/parts` 组合和 assistant tool-call/tool-result 配对，投影为 `CompiledCanonicalHistory`；当前 `providerType` 对应的 `ModelProvider` 再消费完整 history 并转换成具体 wire request。Repository 不返回 Provider DTO。
 
-Session history 不再依赖 main-process `ProviderMessage[]` 或 Responses/Anthropic item arrays。Backend 可以缓存查询结果和已编译 request，但缓存只按 Session revision、route 和 adapter config 失效，不能成为真相源。
+Session history 不再依赖 main-process `ProviderMessage[]` 或 Responses/Anthropic item arrays。Backend 可以缓存查询结果和已编译 request，但缓存只按 Session revision、route 和 Provider config 失效，不能成为真相源。
 
 ### 7.2 完整写入规则
 
@@ -903,7 +910,7 @@ Text/reasoning delta 只进入 `ActiveRunExecution` memory buffer，并通过 `r
 
 不能在 provider 刚提出 tool call 时写一条缺少 tool result 的持久历史。流程固定为：
 
-1. Provider completed 后，Adapter 先构造不修改 Session 的 canonical assistant candidate。
+1. Provider completed event 直接携带不修改 Session 的 canonical assistant candidate。
 2. Backend 在任何 completion event/plugin、canonical append、approval 或工具执行前校验 schema、parts/text/reasoning/JSON bounds、normalized tool-call 一致性，以及 active epoch 内全局唯一的 `callId`；失败只保留脱敏 raw trace/diagnostic。
 3. 校验通过后，backend 在内存保存完整 assistant tool-call message，再执行权限、审批和全部 tool calls，得到每个 call 的 terminal result。
 4. 单一 transaction 依次插入 `kind = 'assistant_turn'` message 和所有对应的 `kind = 'tool_result'` messages。
@@ -924,7 +931,7 @@ P3 runtime 中，自动 compact 只在新用户输入后或完整 tool-result ba
 1. 用完整 pre-compact active history（包括当前用户、interjection、assistant 与工具进展）生成 summary。
 2. summary 成功后才把旧 active records 全部置为 `in_history = 0`；失败、abort 或空 summary 保持历史不变。
 3. 依次追加 `system_instruction → 当前 harness* → Run 起始 user_input replay → compact_summary`。replay 使用新 ID/seq、记录 `replayedFromMessageId`，不复制 `clientRequestId`。
-4. Chat Completions Adapter 把末尾 summary 编译为 user-role continuation；重建后仍超硬限制直接返回 `CONTEXT_TOO_LARGE`，不递归 compact。
+4. 当前 Chat Completions Provider 把末尾 summary 编译为 user-role continuation；重建后仍超硬限制直接返回 `CONTEXT_TOO_LARGE`，不递归 compact。
 
 原消息仍在数据库，UI 和导出可以读取；只是后续 provider request 不再携带。
 
@@ -953,19 +960,19 @@ Compact summary 的 `metadata` 至少记录：
 
 ```ts
 interface ProviderContinuationEnvelope {
-  schemaVersion: 1
-  adapterId: string
+  schemaVersion: 2
+  providerType: string
   format: string
   data: JsonValue
 }
 ```
 
-它表示“这个已完成 assistant turn 若由兼容 Provider 继续，Adapter 需要原样恢复的 provider-native 状态”。它不是 Session 全局 cursor，也不是标准化 reasoning。常见 payload：
+它表示“这个已完成 assistant turn 若由兼容 Provider 继续，对应实现需要原样恢复的 provider-native 状态”。它不是 Session 全局 cursor，也不是标准化 reasoning。常见 payload：
 
 ```json
 {
-  "schemaVersion": 1,
-  "adapterId": "deepseek.chat-completions",
+  "schemaVersion": 2,
+  "providerType": "deepseek.chat-completions",
   "format": "assistant-turn.v1",
   "data": {
     "reasoning_content": "exact provider text"
@@ -975,8 +982,8 @@ interface ProviderContinuationEnvelope {
 
 ```json
 {
-  "schemaVersion": 1,
-  "adapterId": "anthropic.messages",
+  "schemaVersion": 2,
+  "providerType": "generic.anthropic",
   "format": "thinking-blocks.v1",
   "data": {
     "contentBlocks": [
@@ -996,8 +1003,8 @@ interface ProviderContinuationEnvelope {
 
 ```json
 {
-  "schemaVersion": 1,
-  "adapterId": "openai.responses",
+  "schemaVersion": 2,
+  "providerType": "generic.responses",
   "format": "response-state.v1",
   "data": {
     "responseId": "resp_xxx",
@@ -1012,9 +1019,9 @@ interface ProviderContinuationEnvelope {
 }
 ```
 
-`MessageHistoryCompiler` 不解析 `data`。Provider Protocol Adapter 使用 Message 的 `modelRoute.adapterId` 加 envelope 的 `adapterId/format` 判断兼容性：
+`MessageHistoryCompiler` 不解析 `data`。具体 Provider 使用 Message 的 `modelRoute.providerType` 加 envelope 的 `providerType/format` 判断兼容性：
 
-- 兼容：按该 Adapter 的协议使用原始 continuation。
+- 兼容：由该 Provider 使用原始 continuation。
 - 不兼容、用户切换 Provider/protocol 或 format 未知：忽略 continuation，使用 canonical active `kind + parts` history 重放。
 - continuation 损坏：不得从 `normalizedReasoningText` 伪造签名、密文、item id 或原始 block 顺序；只能明确降级重放或返回错误。
 
@@ -1250,7 +1257,7 @@ Application boundary 保留显式 `ApplicationError`；SQLite/codec 故障归一
 重启后：
 
 - Session metadata 和完整 messages 从 SQLite 恢复。
-- `inHistory = 1` 的 rows 重建 `CompiledCanonicalHistory`，再由当前 Protocol Adapter 编译 request。
+- `inHistory = 1` 的 rows 重建 `CompiledCanonicalHistory`，再由当前 `ModelProvider` 编译 request。
 - 所有上次的 active Run、pending approval、partial text/reasoning 和未完成 tool batch 丢失。
 - 最后一条已提交 user message 可能没有 assistant reply；UI 可以展示为未回答并允许用户重试。
 - 崩溃前已经发生但尚未形成完整 tool batch message 的 workspace side effect 可能保留；系统以下一次实际文件状态为准。
@@ -1450,7 +1457,7 @@ Trace 不记录 credentials。P3 的 trace reader 明确拒绝 v1，不提供转
 - PTY process、scrollback 和 ownership 属于 LiveSessionContext；应用重启不恢复真实 PTY。
 - Skills manager 扫描、安装和启用 skill。
 - MCP manager 拥有连接、目录 revision、tool normalization 和调用。
-- Plugin event bus 是 backend hook/event mechanism。
+- Plugin event bus 是 backend hook/event mechanism。P11 的 `beforeLLMCall` 只收到不含凭据的编译请求深拷贝；它只能观察，不能 patch、阻断调用或改写 canonical history，handler 失败只产生诊断。
 
 它们需要加入模型历史时，只能创建完整 Message；不能把半完成内部状态写进 messages。
 
@@ -1481,7 +1488,7 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 
 1. 引入 shared Session/Message/MessagePart schemas 和 SQLite repositories。
 2. 引入 Project 和 FileChange repositories。
-3. 引入只输出 `CompiledCanonicalHistory` 的 Message history compiler、Provider Protocol Adapter contract 和完整 tool batch transaction。
+3. 引入只输出 `CompiledCanonicalHistory` 的 Message history compiler、Provider contract 和完整 tool batch transaction。
 4. Runtime 改为从 messages 查询 active history。
 5. Renderer 改为 Project/Session/Message/FileChangeSummary replica。
 6. 删除 `workbench:save`、frontend conversation persistence、legacy change-history JSON 和 memory-only canonical history。
@@ -1497,12 +1504,12 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 - Project/Session/Message codec round-trip，canonical project path 去重，以及 Project path 重新关联不改写 Session `projectId`。
 - `kind + parts` discriminated union round-trip；单条记录的非法组合（例如 assistant 携带 tool-result part）在 shared/repository boundary 被拒绝，跨记录的缺失/重复 call 在 MessageHistoryCompiler 被拒绝。
 - MessageHistoryCompiler 只执行 active-history policy 并生成 `CompiledCanonicalHistory`，不生成 wire `role` 或 Provider DTO。
-- 相同 active MessageRecords、route 和 adapter config 生成确定性的 Provider DTO；不同 protocol adapter 的 golden tests 覆盖 Chat Completions messages、Responses items 和 Anthropic content blocks。
+- 相同 active MessageRecords、route 和 Provider config 生成确定性的 Provider DTO；不同 Provider 的 golden tests 覆盖 Chat Completions messages、Responses items 和 Anthropic content blocks。
 - Chat Completions 将 assistant tool-call parts 编译为 `tool_calls[]`、将每个 tool-result record 编译为 `role = 'tool'`；Responses 编译为 `function_call/function_call_output` items；Anthropic 把相邻 results 合并为 `user` message 中排在前面的 `tool_result` blocks。
-- Protocol Adapter 可以将一条 canonical record 展开为多个 wire items，或把多条相邻 canonical records 合并为一条 wire message；不依赖一对一映射。
+- Provider 可以将一条 canonical record 展开为多个 wire items，或把多条相邻 canonical records 合并为一条 wire message；不依赖一对一映射。
 - `normalizedReasoningText` 只包含允许展示的非加密文本；缺失投影时 UI 不显示 reasoning，且不能从它重建 continuation。
 - `ProviderContinuationEnvelope` 外层 schema 校验、`data` 原样 round-trip、数组顺序不变；签名、密文和 opaque item 不被 Core 改写。
-- Adapter、route 或 format 不兼容时忽略 continuation 并重放 canonical history；损坏状态不得由 normalized reasoning 伪造。
+- Provider type、route 或 format 不兼容时忽略 continuation 并重放 canonical history；损坏状态不得由 normalized reasoning 伪造。
 - 删除或改变 metadata 不改变相同 route/adapter 下编译出的 Provider request；协议关键字段藏入 metadata 的 fixture 必须被拒绝。
 - SQLite migration 顺序、checksum 不可变、单步 rollback、高版本拒绝、foreign key cascade 和 seq uniqueness。
 - 移除 Project 会 cascade 删除其 Sessions/Messages/FileChanges，但不删除 workspace 目录或任何项目文件。
@@ -1539,6 +1546,8 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 ## 20. 当前迁移状态
 
 P0–P10 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路径均使用唯一 `createBackendRuntime` 与 SQLite Durable Backend。Desktop 数据库为 `userData/agent.db`；数据库打开或 migration 失败时显示阻塞恢复对话框，不回退 Workbench。Headless 使用任务独立临时数据库并在退出时关闭、删除。
+
+P11 Provider Runtime Foundation 的目标设计已冻结，正在把 `Protocol Adapter + transport` 双层调用切换为扁平 `ModelProvider.compile/stream`。首批生产实现为 `deepseek.chat-completions` 与 `generic.chat-completions`；配置、route 和 continuation 统一使用 `providerType`，Responses、Anthropic 与 Google 延后到独立阶段。
 
 Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、每 Session runtime overlay 和 UI-only draft/selection。首次发送前不创建空 Session；所有 durable command response 与 `domain-state:event` 经同一 reconciler 处理 cursor/revision、重复 delivery、缺口和 backend instance 变化。
 
