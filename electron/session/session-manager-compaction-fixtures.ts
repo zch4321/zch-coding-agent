@@ -1,4 +1,3 @@
-import type { JsonValue } from '../../shared/json'
 import {
   ScriptedProviderHarness,
   type ScriptedProviderEvent as ProviderEvent,
@@ -25,16 +24,6 @@ export class CompactProvider extends ScriptedProviderHarness {
     this.requests.push({
       messages: structuredClone(request.normalizedMessages),
       tools: structuredClone(request.toolDefinitions),
-    })
-    await request.onRequest?.({
-      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
-      providerRequest: {
-        model: 'fixture',
-        messages: request.normalizedMessages as unknown as JsonValue[],
-        tools: request.toolDefinitions as unknown as JsonValue[],
-      } as JsonValue,
-      requestBytes: 10,
-      prefixHash: `compact-${this.calls}`,
     })
 
     if (request.toolDefinitions.length === 0) {
@@ -77,16 +66,6 @@ export class AutoCompactProvider extends ScriptedProviderHarness {
     this.requests.push({
       messages: structuredClone(request.normalizedMessages),
       tools: structuredClone(request.toolDefinitions),
-    })
-    await request.onRequest?.({
-      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
-      providerRequest: {
-        model: 'fixture',
-        messages: request.normalizedMessages as unknown as JsonValue[],
-        tools: request.toolDefinitions as unknown as JsonValue[],
-      } as JsonValue,
-      requestBytes: 10,
-      prefixHash: `auto-compact-${this.calls}`,
     })
 
     if (request.toolDefinitions.length === 0) {

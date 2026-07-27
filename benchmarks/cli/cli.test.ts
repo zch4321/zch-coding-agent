@@ -36,9 +36,11 @@ describe('benchmark CLI', () => {
 
     expect(config.provider).toMatchObject({
       id: 'deepseek',
+      providerType: 'deepseek.chat-completions',
       model: 'deepseek-chat',
       credentialEnv: 'DEEPSEEK_API_KEY',
     })
+    expect(config.schemaVersion).toBe(2)
     expect(JSON.stringify(config)).not.toMatch(/api[_-]?key\s*:/iu)
   })
 

@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from 'node:util'
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type {
@@ -10,9 +9,12 @@ import type { DiagnosticSink } from '../diagnostics'
 import type { PluginEventBus } from '../plugins/event-bus'
 import { createConfiguredProvider } from '../providers/provider-factory'
 import {
+  assertCompletedAssistantTurn,
+  ProviderCompletionError,
+  providerCompletionDiagnostics,
   providerRequestDiagnostics,
-  type CompletedAssistantTurn,
   type ProviderEvent,
+  type ProviderResponseDiagnostics,
 } from '../providers/provider'
 import { normalizeLlmUsage } from '../providers/usage'
 import type { ToolCall } from '../tools/types'
@@ -88,6 +90,26 @@ export class SessionProviderTurnRunner {
     this.#emit = options.emit
     this.#getWorkspaceConcurrency =
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
+  }
+
+  async #writeFailedResponse(
+    session: SessionState,
+    run: ActiveRun,
+    callId: CallId,
+    apiKey: string,
+    diagnostics: ProviderResponseDiagnostics,
+  ): Promise<void> {
+    await session.logger.write({
+      type: 'llm.response',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId,
+      rawResponse: redactJsonSecrets(diagnostics.rawResponse, [apiKey]),
+      normalizedTurn: null,
+      providerState: redactJsonSecrets(diagnostics.providerState, [apiKey]),
+      usage: diagnostics.usage,
+      timing: toJsonValue(diagnostics.timing),
+    })
   }
 
   /** Builds an immutable provider request, invokes the provider, and returns its normalized turn. */
@@ -193,32 +215,54 @@ export class SessionProviderTurnRunner {
       modelRoute: binding.snapshot,
     })
 
-    for await (const event of provider.stream(compiled, {
-      signal: run.controller.signal,
-    })) {
-      if (event.type === 'text.delta') {
-        this.#emit(session, {
-          type: 'assistant.text.delta',
-          sessionId: session.sessionId,
-          runId: run.runId,
-          delta: event.delta,
-        })
-      } else if (event.type === 'reasoning.delta') {
-        if (binding.snapshot.reasoning !== 'off') {
-          reasoning += event.delta
+    try {
+      for await (const event of provider.stream(compiled, {
+        signal: run.controller.signal,
+      })) {
+        if (event.type === 'text.delta') {
           this.#emit(session, {
-            type: 'assistant.reasoning.delta',
+            type: 'assistant.text.delta',
             sessionId: session.sessionId,
             runId: run.runId,
             delta: event.delta,
           })
+        } else if (event.type === 'reasoning.delta') {
+          if (binding.snapshot.reasoning !== 'off') {
+            reasoning += event.delta
+            this.#emit(session, {
+              type: 'assistant.reasoning.delta',
+              sessionId: session.sessionId,
+              runId: run.runId,
+              delta: event.delta,
+            })
+          }
+        } else if (event.type === 'completed') {
+          if (completed) {
+            throw new Error('Provider stream produced multiple completions')
+          }
+          completed = event
         }
-      } else if (event.type === 'completed') {
-        if (completed) {
-          throw new Error('Provider stream produced multiple completions')
-        }
-        completed = event
       }
+    } catch (error) {
+      const failure =
+        error instanceof ProviderCompletionError
+          ? error.diagnostics
+          : completed
+            ? providerCompletionDiagnostics(completed)
+            : undefined
+      if (failure) {
+        await this.#writeFailedResponse(
+          session,
+          run,
+          llmCallId,
+          binding.apiKey,
+          failure,
+        )
+        this.#onDiagnostic('Provider completion failed', error, {
+          audience: 'internal',
+        })
+      }
+      throw error
     }
 
     if (!completed) throw new Error('Provider stream ended without completion')
@@ -233,19 +277,13 @@ export class SessionProviderTurnRunner {
         continuation: canonical.providerContinuation,
       })
     } catch (error) {
-      await session.logger.write({
-        type: 'llm.response',
-        sessionId: session.sessionId,
-        runId: run.runId,
-        callId: llmCallId,
-        rawResponse: redactJsonSecrets(completed.rawResponse, [binding.apiKey]),
-        normalizedTurn: null,
-        providerState: redactJsonSecrets(completed.providerState, [
-          binding.apiKey,
-        ]),
-        usage: canonical.usage.raw,
-        timing: toJsonValue(completed.timing),
-      })
+      await this.#writeFailedResponse(
+        session,
+        run,
+        llmCallId,
+        binding.apiKey,
+        providerCompletionDiagnostics(completed),
+      )
       this.#onDiagnostic('Provider completion validation failed', error, {
         audience: 'internal',
       })
@@ -313,30 +351,6 @@ export class SessionProviderTurnRunner {
       reasoning: canonical.normalizedReasoningText ?? reasoning,
       finishReason: canonical.finishReason,
       continuation: canonical.providerContinuation,
-    }
-  }
-}
-
-function assertCompletedAssistantTurn(completed: CompletedAssistantTurn): void {
-  const parts = completed.parts.filter(
-    (part): part is Extract<MessagePart, { type: 'tool_call' }> =>
-      part.type === 'tool_call',
-  )
-  if (parts.length !== completed.toolCalls.length) {
-    throw new TypeError(
-      'Provider completion parts do not match normalized tool calls',
-    )
-  }
-  for (const [index, call] of completed.toolCalls.entries()) {
-    const part = parts[index]!
-    if (
-      part.callId !== call.id ||
-      part.name !== call.toolId ||
-      !isDeepStrictEqual(part.arguments, call.args)
-    ) {
-      throw new TypeError(
-        'Provider completion parts do not match normalized tool calls',
-      )
     }
   }
 }

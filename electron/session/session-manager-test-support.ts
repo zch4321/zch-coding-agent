@@ -81,9 +81,7 @@ export class ForkProvider extends ScriptedProviderHarness {
     this.calls += 1
     this.messages = structuredClone(request.normalizedMessages)
     this.providerRequestOverride = structuredClone(request.providerRequest)
-    this.providerRequestOverrides.push(
-      structuredClone(request.providerRequest ?? null),
-    )
+    this.providerRequestOverrides.push(structuredClone(request.providerRequest))
     yield {
       type: 'completed',
       rawResponse: { id: 'fork-complete' },

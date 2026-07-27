@@ -107,9 +107,10 @@ Headless config 只保存 credential 环境变量名称，不接受明文 key。
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "provider": {
     "id": "openai-compatible",
+    "providerType": "generic.chat-completions",
     "baseURL": "https://provider.example/v1",
     "model": "coding-model",
     "reasoning": "high",

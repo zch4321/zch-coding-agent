@@ -22,6 +22,10 @@ import {
 } from '../session/canonical-history'
 import { DeepSeekProvider } from './deepseek-provider'
 import { GenericChatCompletionsProvider } from './generic-chat-completions-provider'
+import {
+  assertCompletedAssistantTurn,
+  ProviderCompletionError,
+} from './provider'
 import type {
   ModelProvider,
   ProviderCompileInput,
@@ -356,6 +360,136 @@ describe('P11 Provider foundation', () => {
       intent.slice(0, MAX_TOOL_INTENT_LENGTH),
     )
     expect(completed(events)?.turn.finishReason).toBe('truncated')
+  })
+
+  it('sorts out-of-order tool indexes and measures tool-only timing', async () => {
+    const chunk = {
+      choices: [
+        {
+          finish_reason: 'tool_calls',
+          delta: {
+            tool_calls: [
+              {
+                index: 1,
+                id: 'call:second',
+                function: {
+                  name: 'read_file',
+                  arguments: '{"path":"second.txt"}',
+                },
+              },
+              {
+                index: 0,
+                id: 'call:first',
+                function: {
+                  name: 'read_file',
+                  arguments: '{"path":"first.txt"}',
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }
+    const timestamps = [100, 125, 175]
+    const provider = new DeepSeekProvider({
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+      now: () => timestamps.shift() ?? 175,
+      fetchImpl: async () => sseResponse([chunk]),
+    })
+    const { events } = await collect(
+      provider,
+      compileInput({
+        providerType: 'deepseek.chat-completions',
+        tools: [neutralReadTool()],
+      }),
+    )
+
+    expect(completed(events)?.turn.toolCalls.map((call) => call.id)).toEqual([
+      'call:first',
+      'call:second',
+    ])
+    expect(completed(events)?.timing).toEqual({
+      ttftMs: 25,
+      totalMs: 75,
+      responseBytes: Buffer.byteLength(JSON.stringify(chunk), 'utf8'),
+    })
+  })
+
+  it('preserves content-filter finish reasons', async () => {
+    const provider = new GenericChatCompletionsProvider({
+      providerId: 'generic',
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+      fetchImpl: async () =>
+        sseResponse([
+          {
+            choices: [
+              {
+                finish_reason: 'content_filter',
+                delta: { content: 'filtered answer' },
+              },
+            ],
+          },
+        ]),
+    })
+    const { events } = await collect(
+      provider,
+      compileInput({ providerType: 'generic.chat-completions' }),
+    )
+
+    expect(completed(events)?.turn.finishReason).toBe('content_filter')
+  })
+
+  it('retains response diagnostics when completion has no canonical output', async () => {
+    const chunk = { usage: { prompt_tokens: 4, total_tokens: 4 } }
+    const timestamps = [200, 260]
+    const provider = new DeepSeekProvider({
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+      now: () => timestamps.shift() ?? 260,
+      fetchImpl: async () => sseResponse([chunk]),
+    })
+
+    let failure: unknown
+    try {
+      await collect(
+        provider,
+        compileInput({ providerType: 'deepseek.chat-completions' }),
+      )
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(ProviderCompletionError)
+    expect(failure).toMatchObject({
+      diagnostics: {
+        rawResponse: chunk,
+        usage: chunk.usage,
+        timing: {
+          ttftMs: null,
+          totalMs: 60,
+          responseBytes: Buffer.byteLength(JSON.stringify(chunk), 'utf8'),
+        },
+      },
+    })
+  })
+
+  it('rejects inconsistent canonical tool-call parts at the shared boundary', () => {
+    expect(() =>
+      assertCompletedAssistantTurn({
+        parts: [
+          {
+            type: 'tool_call',
+            callId: 'call:part',
+            name: 'read_file',
+            arguments: { path: 'README.md' },
+          },
+        ],
+        toolCalls: [],
+        usage: { raw: null },
+        finishReason: 'tool_calls',
+      }),
+    ).toThrow(/parts do not match normalized tool calls/u)
   })
 
   it('compiles structured output and all DeepSeek thinking modes', () => {

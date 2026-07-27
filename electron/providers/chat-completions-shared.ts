@@ -18,6 +18,7 @@ import type {
 import { renderLiveUserInterjection } from '../../shared/live-interjection'
 import { canonicalHash, messageText } from '../session/canonical-history'
 import type { ToolCall } from '../tools/types'
+import { ProviderCompletionError } from './provider'
 import type {
   ProviderCompileInput,
   ProviderEvent,
@@ -70,7 +71,8 @@ export interface ChatCompletionAccumulator {
   readonly toolIntentFields: Map<string, string>
 }
 
-const CONTINUATION_FORMAT = 'chat-completions.assistant.v1'
+export const CHAT_COMPLETIONS_CONTINUATION_FORMAT =
+  'chat-completions.assistant.v1'
 
 function toJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
@@ -116,7 +118,7 @@ function continuationAssistant(
   if (
     !continuation ||
     continuation.providerType !== providerType ||
-    continuation.format !== CONTINUATION_FORMAT
+    continuation.format !== CHAT_COMPLETIONS_CONTINUATION_FORMAT
   ) {
     return undefined
   }
@@ -307,7 +309,8 @@ function appendBoundedText(
   return current + delta
 }
 
-function normalizeFinishReason(
+/** Normalizes provider-native Chat Completions finish reasons. */
+export function normalizeChatFinishReason(
   providerReason: string | undefined,
   hasToolCalls: boolean,
 ): string {
@@ -482,14 +485,6 @@ export function completeChatCompletion(
       arguments: structuredClone(toolCall.args),
     })
   }
-  if (parts.length === 0) {
-    if (state.reasoning) {
-      throw new TypeError(
-        'Provider returned reasoning without an assistant answer; retry the request',
-      )
-    }
-    throw new TypeError('Provider completed with an empty assistant turn')
-  }
   const completedAt = options.now()
   const timing: ProviderTiming = {
     ttftMs:
@@ -498,6 +493,25 @@ export function completeChatCompletion(
         : state.firstTokenAt - state.requestStart,
     totalMs: completedAt - state.requestStart,
     responseBytes: byteLength(state.rawResponse),
+  }
+  const usage = normalizeChatUsage(state.latestUsage)
+  const providerState = toJsonValue({
+    providerId: options.providerId,
+    providerType: options.providerType,
+    assistant,
+  })
+  if (parts.length === 0) {
+    throw new ProviderCompletionError(
+      state.reasoning
+        ? 'Provider returned reasoning without an assistant answer; retry the request'
+        : 'Provider completed with an empty assistant turn',
+      {
+        rawResponse: structuredClone(state.rawResponse),
+        providerState,
+        usage: structuredClone(usage.raw),
+        timing,
+      },
+    )
   }
   return {
     type: 'completed',
@@ -508,24 +522,20 @@ export function completeChatCompletion(
       providerContinuation: {
         schemaVersion: 2,
         providerType: options.providerType,
-        format: CONTINUATION_FORMAT,
+        format: CHAT_COMPLETIONS_CONTINUATION_FORMAT,
         data: {
           partsHash: canonicalHash(parts),
           assistant: toJsonValue(assistant),
         },
       },
-      usage: normalizeChatUsage(state.latestUsage),
-      finishReason: normalizeFinishReason(
+      usage,
+      finishReason: normalizeChatFinishReason(
         state.finishReason,
         normalizedToolCalls.length > 0,
       ),
     },
     rawResponse: structuredClone(state.rawResponse),
-    providerState: toJsonValue({
-      providerId: options.providerId,
-      providerType: options.providerType,
-      assistant,
-    }),
+    providerState,
     timing,
   }
 }

@@ -1,11 +1,13 @@
 import { Type, type Static } from '@sinclair/typebox'
-import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import {
-  AppConfigSchema,
-  AppProviderConfigSchema,
-  DEFAULT_APP_CONFIG,
-  type AppConfig,
-} from './schema'
+  PermissionModeSchema,
+  PublicConfigSchema,
+  ReasoningEffortSchema,
+  RememberedRuleSchema,
+} from '../../shared/config'
+import { McpServerConfigSchema } from '../../shared/mcp'
+import { compileSchema, formatSchemaErrors } from '../schema-validator'
+import { AppConfigSchema, DEFAULT_APP_CONFIG, type AppConfig } from './schema'
 
 const validateAppConfig = compileSchema(AppConfigSchema)
 
@@ -18,36 +20,75 @@ function withoutKey<
   return clone
 }
 
-const legacyProviderProperties = withoutKey(
-  AppProviderConfigSchema.properties,
-  'providerType',
+// This root and Provider shape is the frozen AppConfig v9 boundary. Do not
+// derive it from AppConfigSchema/AppProviderConfigSchema; the literal v9 test
+// fixture must fail loudly if a reused stable shared subsection ever drifts.
+const LegacyAppProviderConfigV9Schema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 128 }),
+    label: Type.String({ minLength: 1, maxLength: 128 }),
+    protocol: Type.Literal('openai-compatible'),
+    adapterId: Type.Union([
+      Type.Literal('deepseek.chat-completions'),
+      Type.Literal('openai-compatible.chat-completions'),
+    ]),
+    revision: Type.Integer({
+      minimum: 1,
+      maximum: Number.MAX_SAFE_INTEGER,
+    }),
+    profile: Type.Union([Type.Literal('deepseek'), Type.Literal('generic')]),
+    baseURL: Type.String({ minLength: 1, maxLength: 2_048 }),
+    model: Type.String({ minLength: 1, maxLength: 256 }),
+    reasoning: ReasoningEffortSchema,
+    modelCatalog: Type.Array(
+      PublicConfigSchema.properties.providers.items.properties.modelCatalog
+        .items,
+      { maxItems: 1_000 },
+    ),
+    modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
+    modelOverrides:
+      PublicConfigSchema.properties.providers.items.properties.modelOverrides,
+    apiKeyRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+  },
+  { additionalProperties: false },
 )
-const legacyAppProperties = withoutKey(
-  withoutKey(AppConfigSchema.properties, 'schemaVersion'),
-  'providers',
-)
+
 const LegacyAppConfigV9Schema = Type.Object(
   {
-    ...legacyAppProperties,
     schemaVersion: Type.Literal(9),
-    providers: Type.Array(
-      Type.Object(
-        {
-          ...legacyProviderProperties,
-          protocol: Type.Literal('openai-compatible'),
-          adapterId: Type.Union([
-            Type.Literal('deepseek.chat-completions'),
-            Type.Literal('openai-compatible.chat-completions'),
-          ]),
-          profile: Type.Union([
-            Type.Literal('deepseek'),
-            Type.Literal('generic'),
-          ]),
-        },
-        { additionalProperties: false },
-      ),
-      { minItems: 1, maxItems: 32 },
+    activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
+    providers: Type.Array(LegacyAppProviderConfigV9Schema, {
+      minItems: 1,
+      maxItems: 32,
+    }),
+    approval: PublicConfigSchema.properties.approval,
+    permission: Type.Object(
+      {
+        defaultMode: PermissionModeSchema,
+        builtinPolicies: Type.Boolean(),
+        rememberedRules: Type.Array(RememberedRuleSchema, { maxItems: 256 }),
+        sensitiveData:
+          PublicConfigSchema.properties.permission.properties.sensitiveData,
+      },
+      { additionalProperties: false },
     ),
+    limits: PublicConfigSchema.properties.limits,
+    logging: PublicConfigSchema.properties.logging,
+    privacy: PublicConfigSchema.properties.privacy,
+    workspace: PublicConfigSchema.properties.workspace,
+    skills: PublicConfigSchema.properties.skills,
+    assistant: PublicConfigSchema.properties.assistant,
+    prompts: PublicConfigSchema.properties.prompts,
+    network: PublicConfigSchema.properties.network,
+    webSearch: Type.Object(
+      {
+        provider: Type.Literal('brave'),
+        apiKeyRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+        count: Type.Integer({ minimum: 1, maximum: 20 }),
+      },
+      { additionalProperties: false },
+    ),
+    mcpServers: Type.Array(McpServerConfigSchema, { maxItems: 32 }),
   },
   { additionalProperties: false },
 )

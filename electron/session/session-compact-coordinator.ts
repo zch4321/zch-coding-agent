@@ -7,8 +7,12 @@ import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import {
+  assertCompletedAssistantTurn,
+  ProviderCompletionError,
+  providerCompletionDiagnostics,
   providerRequestDiagnostics,
   type ProviderEvent,
+  type ProviderResponseDiagnostics,
 } from '../providers/provider'
 import { createConfiguredProvider } from '../providers/provider-factory'
 import { normalizeLlmUsage } from '../providers/usage'
@@ -116,6 +120,26 @@ export class SessionCompactCoordinator {
     this.#getWorkspaceConcurrency =
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
     this.#executionState = options.executionState
+  }
+
+  async #writeFailedResponse(
+    session: SessionState,
+    run: ActiveRun,
+    callId: CallId,
+    apiKey: string,
+    diagnostics: ProviderResponseDiagnostics,
+  ): Promise<void> {
+    await session.logger.write({
+      type: 'llm.response',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId,
+      rawResponse: redactJsonSecrets(diagnostics.rawResponse, [apiKey]),
+      normalizedTurn: null,
+      providerState: redactJsonSecrets(diagnostics.providerState, [apiKey]),
+      usage: diagnostics.usage,
+      timing: toJsonValue(diagnostics.timing),
+    })
   }
 
   /** Compacts active history before a provider call when eligibility and token budget require it. */
@@ -372,39 +396,71 @@ export class SessionCompactCoordinator {
       canonicalSource: canonicalTraceSource(history.messages),
       modelRoute: binding.snapshot,
     })
-    for await (const event of provider.stream(compiled, {
-      signal: run.controller.signal,
-    })) {
-      if (event.type === 'text.delta') {
-        text += event.delta
-        if (emitText) {
-          this.#emit(session, {
-            type: 'assistant.text.delta',
-            sessionId: session.sessionId,
-            runId: run.runId,
-            delta: event.delta,
-          })
+    try {
+      for await (const event of provider.stream(compiled, {
+        signal: run.controller.signal,
+      })) {
+        if (event.type === 'text.delta') {
+          text += event.delta
+          if (emitText) {
+            this.#emit(session, {
+              type: 'assistant.text.delta',
+              sessionId: session.sessionId,
+              runId: run.runId,
+              delta: event.delta,
+            })
+          }
+        } else if (event.type === 'completed') {
+          if (completed) {
+            throw new Error('Compact provider produced multiple completions')
+          }
+          completed = event
         }
-      } else if (event.type === 'completed') {
-        if (completed) {
-          throw new Error('Compact provider produced multiple completions')
-        }
-        completed = event
       }
+    } catch (error) {
+      const failure =
+        error instanceof ProviderCompletionError
+          ? error.diagnostics
+          : completed
+            ? providerCompletionDiagnostics(completed)
+            : undefined
+      if (failure) {
+        await this.#writeFailedResponse(
+          session,
+          run,
+          callId,
+          binding.apiKey,
+          failure,
+        )
+      }
+      throw error
     }
     if (!completed) {
       throw new Error('Compact provider stream ended without completion')
     }
     const canonical = completed.turn
-    if (canonical.toolCalls.length > 0) {
-      throw new Error('Compact summary provider returned tool calls')
+    let summary: string
+    try {
+      assertCompletedAssistantTurn(canonical)
+      if (canonical.toolCalls.length > 0) {
+        throw new Error('Compact summary provider returned tool calls')
+      }
+      summary =
+        text ||
+        canonical.parts
+          .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+          .join('\n')
+      if (!summary.trim()) throw new Error('Compact summary was empty')
+    } catch (error) {
+      await this.#writeFailedResponse(
+        session,
+        run,
+        callId,
+        binding.apiKey,
+        providerCompletionDiagnostics(completed),
+      )
+      throw error
     }
-    const summary =
-      text ||
-      canonical.parts
-        .flatMap((part) => (part.type === 'text' ? [part.text] : []))
-        .join('\n')
-    if (!summary.trim()) throw new Error('Compact summary was empty')
 
     await session.logger.write({
       type: 'llm.response',

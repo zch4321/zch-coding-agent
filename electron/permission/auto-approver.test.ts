@@ -55,6 +55,33 @@ class HangingProvider extends ScriptedProviderHarness {
   }
 }
 
+/** Ends cleanly without the required Provider completion event. */
+class NoCompletionProvider extends ScriptedProviderHarness {
+  async *run(): AsyncIterable<ProviderEvent> {
+    yield* []
+  }
+}
+
+/** Emits two completion events to exercise the exactly-once guard. */
+class MultipleCompletionProvider extends ScriptedProviderHarness {
+  async *run(): AsyncIterable<ProviderEvent> {
+    for (const id of ['first', 'second']) {
+      yield {
+        type: 'completed',
+        rawResponse: { id },
+        turn: {
+          role: 'assistant',
+          content: '{"decision":"safe","note":"bounded"}',
+        },
+        toolCalls: [],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+    }
+  }
+}
+
 class TextProvider extends ScriptedProviderHarness {
   readonly #text: string
 
@@ -155,7 +182,22 @@ describe('P3 auto approver', () => {
     })
   })
 
-  it('cleans up and falls back when adapter compilation fails', async () => {
+  it.each([
+    ['no completion', new NoCompletionProvider()],
+    ['multiple completions', new MultipleCompletionProvider()],
+  ])('classifies %s as invalid Provider output', async (_name, provider) => {
+    const approver = new ProviderAutoApprover(provider, route)
+
+    await expect(
+      approver.evaluate(input, new AbortController().signal),
+    ).resolves.toMatchObject({
+      decision: 'dangerous',
+      valid: false,
+      failure: 'invalid_output',
+    })
+  })
+
+  it('cleans up and falls back when Provider compilation fails', async () => {
     const approver = new ProviderAutoApprover(new ErrorProvider(), {
       ...route,
       providerType: 'missing.adapter',

@@ -392,13 +392,15 @@ describe('SessionManager prompt and trace', () => {
       action: 'set',
       apiKey: 'generic-secret',
     })
-    const provider = new ForkProvider()
+    const deepSeekProvider = new ForkProvider()
+    const genericProvider = new ForkProvider('generic.chat-completions')
     const sent: AgentEventEnvelope[] = []
     const manager = new SessionManager({
       configStore: store,
       traceDirectory: path.join(directory, 'traces'),
       eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
-      providerFactory: () => provider,
+      providerFactory: ({ apiKey }) =>
+        apiKey === 'generic-secret' ? genericProvider : deepSeekProvider,
     })
     const deepSeekSession = await manager.createSession({
       workspace,
@@ -430,7 +432,10 @@ describe('SessionManager prompt and trace', () => {
     )
 
     expect(
-      provider.providerRequestOverrides.map((body) =>
+      [
+        ...deepSeekProvider.providerRequestOverrides,
+        ...genericProvider.providerRequestOverrides,
+      ].map((body) =>
         body && typeof body === 'object' && !Array.isArray(body)
           ? {
               model: body.model,

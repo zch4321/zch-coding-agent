@@ -5,6 +5,7 @@ import path from 'node:path'
 import { Writable } from 'node:stream'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
+import type { ProviderType } from '../../shared/config'
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { BenchmarkAgentCase } from '../../shared/benchmark'
@@ -38,6 +39,10 @@ class StringSink extends Writable {
 class EditProvider extends ScriptedProviderHarness {
   receivedApiKey = ''
   calls = 0
+
+  constructor(providerType: ProviderType = 'generic.chat-completions') {
+    super(providerType)
+  }
 
   async *run(): AsyncIterable<ProviderEvent> {
     this.calls += 1
@@ -85,6 +90,10 @@ class PlanProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
 
+  constructor(providerType: ProviderType = 'generic.chat-completions') {
+    super(providerType)
+  }
+
   async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
@@ -120,6 +129,10 @@ class PlanProvider extends ScriptedProviderHarness {
 }
 
 class HangingProvider extends ScriptedProviderHarness {
+  constructor(providerType: ProviderType = 'generic.chat-completions') {
+    super(providerType)
+  }
+
   async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     if (request.signal.aborted) throw request.signal.reason
     await new Promise<void>((_resolve, reject) => {
@@ -135,10 +148,14 @@ class RepairProvider extends ScriptedProviderHarness {
   requests: ProviderStreamRequest['normalizedMessages'][] = []
   requestBodies: JsonValue[] = []
 
+  constructor(providerType: ProviderType = 'generic.chat-completions') {
+    super(providerType)
+  }
+
   async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
-    this.requestBodies.push(structuredClone(request.providerRequest ?? null))
+    this.requestBodies.push(structuredClone(request.providerRequest))
     yield messageCompletion(
       `repair-${this.calls}`,
       this.calls === 1 ? 'Initial attempt complete.' : 'Repair complete.',
@@ -549,7 +566,7 @@ describe('Headless host', () => {
   it('uses the prepared Desktop default reasoning when headless reasoning is omitted', async () => {
     const { workspace, artifacts } = await fixture()
     const output = new StringSink()
-    const provider = new RepairProvider()
+    const provider = new RepairProvider('deepseek.chat-completions')
     const omittedReasoning = config()
     omittedReasoning.provider.providerType = 'deepseek.chat-completions'
     delete omittedReasoning.provider.reasoning

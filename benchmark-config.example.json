@@ -1,8 +1,8 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "provider": {
     "id": "deepseek",
-    "profile": "deepseek",
+    "providerType": "deepseek.chat-completions",
     "baseURL": "https://api.deepseek.com",
     "model": "deepseek-chat",
     "reasoning": "off",

@@ -24,6 +24,7 @@ import {
 } from './repository-fixtures'
 import { encodeStoredFileChangeRow } from './file-change-codec'
 import { FileChangeRepository } from './file-change-repository'
+import { MessageRepository } from './message-repository'
 
 describe('DatabaseService', () => {
   it.each([
@@ -261,7 +262,7 @@ describe('DatabaseService', () => {
     })
     const databasePath = legacy.databasePath
     const project = projectFixture({ path: 'C:/provider-migration' })
-    const session = sessionFixture({ lastSeq: 1 })
+    const session = sessionFixture({ lastSeq: 2 })
     const modelRoute = {
       schemaVersion: 1,
       purpose: 'main',
@@ -281,31 +282,59 @@ describe('DatabaseService', () => {
         nested: { keep: true },
       },
     }
+    const genericContinuation = {
+      ...continuation,
+      adapterId: 'openai-compatible.chat-completions',
+      data: {
+        ordered: ['generic-first', 'generic-second'],
+        nested: { keep: 'generic' },
+      },
+    }
+    const deepSeekRoute = {
+      ...modelRoute,
+      adapterId: 'deepseek.chat-completions',
+      providerId: 'legacy-deepseek',
+    }
     const parts = [{ type: 'text', text: 'Legacy assistant answer' }]
+    const genericParts = [
+      { type: 'text', text: 'Legacy generic assistant answer' },
+    ]
     await legacy.database.withTransaction((transaction) => {
       new ProjectRepository().insert(transaction, project)
       new SessionRepository().insert(transaction, session)
-      transaction
-        .prepare(
-          `INSERT INTO messages (
+      const insert = transaction.prepare(
+        `INSERT INTO messages (
              schema_version, id, session_id, seq, kind, parts_json,
              provider_continuation_json, model_route_json, visibility,
              in_history, created_at
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          1,
-          'message:provider-migration',
-          session.id,
-          1,
-          'assistant_turn',
-          JSON.stringify(parts),
-          JSON.stringify(continuation),
-          JSON.stringify(modelRoute),
-          'visible',
-          1,
-          '2026-07-27T00:00:00.000Z',
-        )
+      )
+      insert.run(
+        1,
+        'message:provider-migration',
+        session.id,
+        1,
+        'assistant_turn',
+        JSON.stringify(parts),
+        JSON.stringify(continuation),
+        JSON.stringify(modelRoute),
+        'visible',
+        1,
+        '2026-07-27T00:00:00.000Z',
+      )
+      insert.run(
+        1,
+        'message:generic-continuation-migration',
+        session.id,
+        2,
+        'assistant_turn',
+        JSON.stringify(genericParts),
+        JSON.stringify(genericContinuation),
+        JSON.stringify(deepSeekRoute),
+        'visible',
+        1,
+        '2026-07-27T00:00:01.000Z',
+      )
     })
     await legacy.database.close()
 
@@ -314,22 +343,30 @@ describe('DatabaseService', () => {
       appVersion: 'test-v4',
     })
     try {
-      const row = migrated.read((reader) =>
+      const rows = migrated.read((reader) =>
         reader
           .prepare(
             `SELECT parts_json, provider_continuation_json, model_route_json
-             FROM messages WHERE id = ?`,
+             FROM messages WHERE session_id = ? ORDER BY seq ASC`,
           )
-          .get('message:provider-migration'),
-      ) as {
+          .all(session.id),
+      ) as Array<{
         parts_json: string
         provider_continuation_json: string
         model_route_json: string
-      }
+      }>
+      const row = rows[0]!
+      const genericRow = rows[1]!
       const routeRest = { ...modelRoute } as Record<string, unknown>
       const continuationRest = { ...continuation } as Record<string, unknown>
+      const deepSeekRouteRest = { ...deepSeekRoute } as Record<string, unknown>
+      const genericContinuationRest = {
+        ...genericContinuation,
+      } as Record<string, unknown>
       delete routeRest.adapterId
       delete continuationRest.adapterId
+      delete deepSeekRouteRest.adapterId
+      delete genericContinuationRest.adapterId
       expect(JSON.parse(row.parts_json)).toEqual(parts)
       expect(JSON.parse(row.model_route_json)).toEqual({
         ...routeRest,
@@ -340,6 +377,46 @@ describe('DatabaseService', () => {
         ...continuationRest,
         schemaVersion: 2,
         providerType: 'deepseek.chat-completions',
+      })
+      expect(JSON.parse(genericRow.parts_json)).toEqual(genericParts)
+      expect(JSON.parse(genericRow.model_route_json)).toEqual({
+        ...deepSeekRouteRest,
+        schemaVersion: 2,
+        providerType: 'deepseek.chat-completions',
+      })
+      expect(JSON.parse(genericRow.provider_continuation_json)).toEqual({
+        ...genericContinuationRest,
+        schemaVersion: 2,
+        providerType: 'generic.chat-completions',
+      })
+
+      const decoded = migrated.read((reader) =>
+        new MessageRepository().listActiveHistory(reader, session.id),
+      )
+      expect(decoded).toHaveLength(2)
+      expect(decoded[0]).toMatchObject({
+        parts,
+        modelRoute: {
+          schemaVersion: 2,
+          providerType: 'generic.chat-completions',
+        },
+        providerContinuation: {
+          schemaVersion: 2,
+          providerType: 'deepseek.chat-completions',
+          data: continuation.data,
+        },
+      })
+      expect(decoded[1]).toMatchObject({
+        parts: genericParts,
+        modelRoute: {
+          schemaVersion: 2,
+          providerType: 'deepseek.chat-completions',
+        },
+        providerContinuation: {
+          schemaVersion: 2,
+          providerType: 'generic.chat-completions',
+          data: genericContinuation.data,
+        },
       })
     } finally {
       await migrated.close()

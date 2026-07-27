@@ -67,6 +67,14 @@ function hasUsageData(value: JsonValue): boolean {
   )
 }
 
+/** Identifies a Provider stream that violates the exactly-once completion contract. */
+class ApprovalCompletionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ApprovalCompletionError'
+  }
+}
+
 /** Parses auto-approver JSON into a strict decision and bounded explanation. */
 export function strictAutoApproverOutput(text: string): AutoApproverResult {
   let value: unknown
@@ -179,7 +187,9 @@ export class ProviderAutoApprover implements AutoApprover {
           text += event.delta
         } else if (event.type === 'completed') {
           if (completed) {
-            throw new Error('Approval provider produced multiple completions')
+            throw new ApprovalCompletionError(
+              'Approval provider produced multiple completions',
+            )
           }
           completed = true
           text = event.turn.parts
@@ -191,7 +201,9 @@ export class ProviderAutoApprover implements AutoApprover {
         }
       }
       if (!completed) {
-        throw new Error('Approval provider stream ended without completion')
+        throw new ApprovalCompletionError(
+          'Approval provider stream ended without completion',
+        )
       }
 
       return {
@@ -205,7 +217,12 @@ export class ProviderAutoApprover implements AutoApprover {
 
       return timedOut
         ? fallback('timeout', 'Approval model timed out')
-        : fallback('network', 'Approval model request failed')
+        : error instanceof ApprovalCompletionError
+          ? fallback(
+              'invalid_output',
+              'Approval model response did not complete exactly once',
+            )
+          : fallback('network', 'Approval model request failed')
     } finally {
       clearTimeout(timer)
       signal.removeEventListener('abort', relayAbort)

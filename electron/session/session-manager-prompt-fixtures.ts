@@ -12,16 +12,7 @@ export class ScriptedProvider extends ScriptedProviderHarness {
 
   async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
-    this.requestBodies.push(structuredClone(request.providerRequest ?? null))
-    await request.onRequest?.({
-      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
-      providerRequest: {
-        model: 'fixture',
-        messages: request.normalizedMessages as unknown as JsonValue[],
-      },
-      requestBytes: 10,
-      prefixHash: `fixture-${this.calls}`,
-    })
+    this.requestBodies.push(structuredClone(request.providerRequest))
 
     if (this.calls === 1) {
       yield {
@@ -86,16 +77,6 @@ export class PromptAuditProvider extends ScriptedProviderHarness {
   async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
-    await request.onRequest?.({
-      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
-      providerRequest: {
-        model: 'fixture',
-        messages: request.normalizedMessages as unknown as JsonValue[],
-        tools: request.toolDefinitions as unknown as JsonValue[],
-      } as JsonValue,
-      requestBytes: 10,
-      prefixHash: `prompt-audit-${this.calls}`,
-    })
     yield {
       type: 'completed',
       rawResponse: { id: 'prompt-audit' },

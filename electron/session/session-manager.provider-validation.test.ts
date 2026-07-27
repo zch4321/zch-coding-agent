@@ -12,6 +12,8 @@ import type { SessionExecutionStatePort, SessionState } from './session-types'
 import {
   createConfig,
   createIpcTestEventSink,
+  parseTrace,
+  readSessionTrace,
   waitFor,
 } from './session-manager-test-support'
 import { SessionManager } from './session-manager'
@@ -147,6 +149,27 @@ class ReasoningOnlyProvider extends ScriptedProviderHarness {
       timing: {},
       finishReason: 'length',
     }
+  }
+}
+
+/** Bypasses the typed fixture normalizer to return a malformed canonical turn. */
+class MissingUsageProvider extends ScriptedProviderHarness {
+  async *run(): AsyncIterable<never> {
+    yield* []
+  }
+
+  async *stream(): AsyncIterable<never> {
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'missing-usage' },
+      turn: {
+        parts: [{ type: 'text', text: 'Malformed completion' }],
+        toolCalls: [],
+        finishReason: 'completed',
+      },
+      providerState: { stage: 'malformed' },
+      timing: { ttftMs: 1, totalMs: 2, responseBytes: 3 },
+    } as never
   }
 }
 
@@ -318,8 +341,17 @@ describe('SessionManager Provider completion validation', () => {
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
     const events: AgentEventEnvelope[] = []
+    const configStore = await createConfig(directory)
+    await configStore.update({
+      version: 1,
+      kind: 'logging',
+      value: {
+        ...configStore.getPublicConfig().logging,
+        enabled: true,
+      },
+    })
     const manager = new SessionManager({
-      configStore: await createConfig(directory),
+      configStore,
       traceDirectory: path.join(directory, 'traces'),
       eventSink: createIpcTestEventSink((event) => events.push(event)),
       providerFactory: () => new ReasoningOnlyProvider(),
@@ -359,5 +391,81 @@ describe('SessionManager Provider completion validation', () => {
       },
     })
     await manager.closeSession(sessionId)
+    const response = parseTrace(
+      await readSessionTrace(directory, sessionId),
+    ).find((event) => event.type === 'llm.response')
+    expect(response).toMatchObject({
+      rawResponse: { id: 'reasoning-only' },
+      normalizedTurn: null,
+      providerState: {},
+      usage: {},
+      timing: { ttftMs: null, totalMs: 0, responseBytes: 0 },
+    })
+  })
+
+  it('retains the original validation error and trace for a malformed turn', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-provider-malformed-turn-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const events: AgentEventEnvelope[] = []
+    const configStore = await createConfig(directory)
+    await configStore.update({
+      version: 1,
+      kind: 'logging',
+      value: {
+        ...configStore.getPublicConfig().logging,
+        enabled: true,
+      },
+    })
+    const manager = new SessionManager({
+      configStore,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((event) => events.push(event)),
+      providerFactory: () => new MissingUsageProvider(),
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    const runId = manager.startRun({
+      sessionId,
+      message: 'Return a malformed completion',
+      clientRequestId: 'request:malformed-turn',
+    })
+    await waitFor(() =>
+      events.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === runId &&
+          event.status === 'failed',
+      ),
+    )
+
+    expect(
+      events.find(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === runId &&
+          event.status === 'failed',
+      )?.event,
+    ).toMatchObject({
+      error: {
+        message: 'Provider completion is missing canonical fields',
+      },
+    })
+    await manager.closeSession(sessionId)
+    expect(
+      parseTrace(await readSessionTrace(directory, sessionId)).find(
+        (event) => event.type === 'llm.response',
+      ),
+    ).toMatchObject({
+      rawResponse: { id: 'missing-usage' },
+      normalizedTurn: null,
+      providerState: { stage: 'malformed' },
+      usage: null,
+    })
   })
 })

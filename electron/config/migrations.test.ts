@@ -1,23 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import legacyAppConfigV9 from './fixtures/app-config-v9.json'
 import { DEFAULT_APP_CONFIG } from './schema'
 import { migrateConfig } from './migrations'
 
 function legacyV9Config(): Record<string, unknown> {
-  const current = structuredClone(DEFAULT_APP_CONFIG)
-  return {
-    ...current,
-    schemaVersion: 9,
-    providers: current.providers.map((provider) => {
-      const legacy = { ...provider } as Record<string, unknown>
-      Reflect.deleteProperty(legacy, 'providerType')
-      return {
-        ...legacy,
-        protocol: 'openai-compatible',
-        adapterId: 'deepseek.chat-completions',
-        profile: 'deepseek',
-      }
-    }),
-  }
+  return structuredClone(legacyAppConfigV9) as Record<string, unknown>
 }
 
 describe('config v10 migration boundary', () => {
@@ -56,6 +43,15 @@ describe('config v10 migration boundary', () => {
           adapterId: 'deepseek.chat-completions',
         }),
       ]),
+    )
+  })
+
+  it('rejects malformed v9 data instead of adapting the current defaults', () => {
+    const malformed = legacyV9Config()
+    delete malformed.limits
+
+    expect(() => migrateConfig(malformed)).toThrow(
+      "must have required property 'limits'",
     )
   })
 

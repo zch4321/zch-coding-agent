@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { JsonValue } from '../../shared/json'
 import {
   PROVIDER_NOTICE_VERSION,
   TRACE_NOTICE_VERSION,
@@ -77,12 +76,6 @@ class OrderedProvider extends ScriptedProviderHarness {
     this.calls += 1
     this.order.push('provider')
     this.requests.push(structuredClone(request.normalizedMessages))
-    await request.onRequest?.({
-      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
-      providerRequest: request.providerRequest ?? {},
-      requestBytes: 1,
-      prefixHash: `request:${this.calls}`,
-    })
     if (this.#toolChain && this.calls === 1) {
       yield {
         type: 'completed',
@@ -90,6 +83,7 @@ class OrderedProvider extends ScriptedProviderHarness {
         turn: {
           role: 'assistant',
           content: null,
+          provider_marker: 'persisted-continuation',
           tool_calls: [
             {
               id: 'call:readme',
@@ -150,13 +144,7 @@ class BlockingProvider extends ScriptedProviderHarness {
     this.#release()
   }
 
-  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
-    await request.onRequest?.({
-      normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
-      providerRequest: request.providerRequest ?? {},
-      requestBytes: 1,
-      prefixHash: 'blocking',
-    })
+  async *run(): AsyncIterable<ProviderEvent> {
     yield {
       type: 'text.delta',
       delta: 'partial durable answer',
@@ -434,6 +422,14 @@ describe('durable backend runtime', () => {
       )
     }
     expect(secondProvider.calls).toBe(1)
+    expect(secondProvider.requests[0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          provider_marker: 'persisted-continuation',
+        }),
+      ]),
+    )
     const reopenedRequest = JSON.stringify(secondProvider.requests[0])
     expect(reopenedRequest).toContain('first durable question')
     expect(reopenedRequest).toContain('call:readme')

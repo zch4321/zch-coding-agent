@@ -4,6 +4,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ConfigSetRequestSchema } from '../../shared/config'
 import { compileSchema } from '../schema-validator'
+import legacyAppConfigV9 from './fixtures/app-config-v9.json'
 import { DEFAULT_APP_CONFIG } from './schema'
 import type { SafeStorageAdapter } from './secret-store'
 import { SecretStorageUnavailableError, SecretStore } from './secret-store'
@@ -92,25 +93,16 @@ describe('ConfigStore', () => {
   it('migrates valid v9 providers to v10 without losing saved state', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
-    const current = structuredClone(DEFAULT_APP_CONFIG)
-    const providers: Array<Record<string, unknown>> = current.providers.map(
-      (provider) => {
-        const legacy = { ...provider } as Record<string, unknown>
-        Reflect.deleteProperty(legacy, 'providerType')
-        return {
-          ...legacy,
-          protocol: 'openai-compatible' as const,
-          adapterId: 'deepseek.chat-completions' as const,
-          profile: 'deepseek' as const,
-          revision: 7,
-          apiKeyRef: 'provider-key:legacy',
-          modelCatalog: [{ id: 'deepseek-v4-pro', ownedBy: 'deepseek' }],
-          modelOverrides: {
-            'deepseek-v4-pro': { contextWindowTokens: 128_000 },
-          },
-        }
+    const legacy = structuredClone(legacyAppConfigV9) as Record<string, unknown>
+    const providers = legacy.providers as Array<Record<string, unknown>>
+    Object.assign(providers[0]!, {
+      revision: 7,
+      apiKeyRef: 'provider-key:legacy',
+      modelCatalog: [{ id: 'deepseek-v4-pro', ownedBy: 'deepseek' }],
+      modelOverrides: {
+        'deepseek-v4-pro': { contextWindowTokens: 128_000 },
       },
-    )
+    })
     providers.push({
       ...providers[0]!,
       id: 'generic',
@@ -122,11 +114,7 @@ describe('ConfigStore', () => {
       modelCatalog: [{ id: 'generic-model' }],
       modelOverrides: {},
     })
-    await writeFile(
-      configPath,
-      JSON.stringify({ ...current, schemaVersion: 9, providers }),
-      'utf8',
-    )
+    await writeFile(configPath, JSON.stringify(legacy), 'utf8')
     const store = new ConfigStore(
       configPath,
       new SecretStore(
@@ -159,6 +147,32 @@ describe('ConfigStore', () => {
     expect(persisted).toContain('"schemaVersion": 10')
     expect(persisted).not.toContain('adapterId')
     expect(persisted).not.toContain('"profile"')
+  })
+
+  it('resets a malformed v9 file to clean v10 defaults', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
+    const configPath = path.join(directory, 'config.json')
+    const malformed = structuredClone(legacyAppConfigV9) as Record<
+      string,
+      unknown
+    >
+    delete malformed.limits
+    await writeFile(configPath, JSON.stringify(malformed), 'utf8')
+    const store = new ConfigStore(
+      configPath,
+      new SecretStore(
+        path.join(directory, 'secrets.json'),
+        new FakeSafeStorage(),
+      ),
+    )
+
+    await expect(store.initialize()).resolves.toMatchObject({
+      config: { schemaVersion: 10 },
+    })
+    expect(store.getInternalConfig()).toEqual(DEFAULT_APP_CONFIG)
+    expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual(
+      DEFAULT_APP_CONFIG,
+    )
   })
 
   it('deletes an incompatible v10 shape and rebuilds clean defaults', async () => {

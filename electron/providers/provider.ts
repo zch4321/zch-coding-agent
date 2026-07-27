@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import type { ProviderType } from '../../shared/config'
-import type { JsonObject, JsonValue } from '../../shared/json'
+import {
+  assertBoundedJsonValue,
+  type JsonObject,
+  type JsonValue,
+} from '../../shared/json'
 import type {
   MessagePart,
   ProviderContinuationEnvelope,
@@ -65,6 +70,25 @@ export interface ProviderTiming {
   responseBytes: number
 }
 
+/** Redactable response evidence retained when a Provider cannot form a canonical completion. */
+export interface ProviderResponseDiagnostics {
+  rawResponse: JsonValue
+  providerState: JsonValue
+  usage: JsonValue
+  timing: ProviderTiming
+}
+
+/** Reports a response-level completion failure while preserving trace diagnostics. */
+export class ProviderCompletionError extends TypeError {
+  readonly diagnostics: ProviderResponseDiagnostics
+
+  constructor(message: string, diagnostics: ProviderResponseDiagnostics) {
+    super(message)
+    this.name = 'ProviderCompletionError'
+    this.diagnostics = structuredClone(diagnostics)
+  }
+}
+
 /** Events emitted while executing one compiled provider request. */
 export type ProviderEvent =
   | {
@@ -101,6 +125,107 @@ export interface ModelProvider {
     call: CompiledProviderCall,
     context: ProviderStreamContext,
   ): AsyncIterable<ProviderEvent>
+}
+
+/** Validates the canonical completion boundary and tool-call part consistency. */
+export function assertCompletedAssistantTurn(
+  value: unknown,
+): asserts value is CompletedAssistantTurn {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Provider completion must be an object')
+  }
+  const completed = value as Partial<CompletedAssistantTurn>
+  if (
+    !Array.isArray(completed.parts) ||
+    !Array.isArray(completed.toolCalls) ||
+    typeof completed.finishReason !== 'string' ||
+    !completed.usage ||
+    typeof completed.usage !== 'object' ||
+    Array.isArray(completed.usage) ||
+    !('raw' in completed.usage)
+  ) {
+    throw new TypeError('Provider completion is missing canonical fields')
+  }
+  assertBoundedJsonValue(completed.parts)
+  assertBoundedJsonValue(completed.toolCalls)
+  assertBoundedJsonValue(completed.usage.raw)
+
+  const toolParts = completed.parts.filter(
+    (part): part is Extract<MessagePart, { type: 'tool_call' }> =>
+      Boolean(part && typeof part === 'object' && part.type === 'tool_call'),
+  )
+  if (toolParts.length !== completed.toolCalls.length) {
+    throw new TypeError(
+      'Provider completion parts do not match normalized tool calls',
+    )
+  }
+  for (const [index, call] of completed.toolCalls.entries()) {
+    const part = toolParts[index]!
+    if (
+      !call ||
+      typeof call !== 'object' ||
+      part.callId !== call.id ||
+      part.name !== call.toolId ||
+      !isDeepStrictEqual(part.arguments, call.args)
+    ) {
+      throw new TypeError(
+        'Provider completion parts do not match normalized tool calls',
+      )
+    }
+  }
+}
+
+function jsonValueOrNull(value: unknown): JsonValue {
+  try {
+    assertBoundedJsonValue(value)
+    return structuredClone(value)
+  } catch {
+    return null
+  }
+}
+
+/** Extracts non-throwing failure diagnostics from a completed Provider event. */
+export function providerCompletionDiagnostics(
+  event: Extract<ProviderEvent, { type: 'completed' }>,
+): ProviderResponseDiagnostics {
+  const candidate = event as unknown as Record<string, unknown>
+  const turn =
+    candidate.turn &&
+    typeof candidate.turn === 'object' &&
+    !Array.isArray(candidate.turn)
+      ? (candidate.turn as Record<string, unknown>)
+      : undefined
+  const usage =
+    turn?.usage && typeof turn.usage === 'object' && !Array.isArray(turn.usage)
+      ? (turn.usage as Record<string, unknown>).raw
+      : null
+  const timing =
+    candidate.timing &&
+    typeof candidate.timing === 'object' &&
+    !Array.isArray(candidate.timing)
+      ? (candidate.timing as Record<string, unknown>)
+      : {}
+  return {
+    rawResponse: jsonValueOrNull(candidate.rawResponse),
+    providerState: jsonValueOrNull(candidate.providerState),
+    usage: jsonValueOrNull(usage),
+    timing: {
+      ttftMs:
+        timing.ttftMs === null ||
+        (typeof timing.ttftMs === 'number' && Number.isFinite(timing.ttftMs))
+          ? timing.ttftMs
+          : null,
+      totalMs:
+        typeof timing.totalMs === 'number' && Number.isFinite(timing.totalMs)
+          ? timing.totalMs
+          : 0,
+      responseBytes:
+        typeof timing.responseBytes === 'number' &&
+        Number.isFinite(timing.responseBytes)
+          ? timing.responseBytes
+          : 0,
+    },
+  }
 }
 
 /** Computes stable, credential-free diagnostics for a compiled provider call. */

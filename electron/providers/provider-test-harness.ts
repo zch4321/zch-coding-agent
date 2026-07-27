@@ -1,10 +1,16 @@
 import type { ProviderType } from '../../shared/config'
 import type { JsonObject, JsonValue } from '../../shared/json'
 import type { MessagePart } from '../../shared/message'
+import { canonicalHash } from '../session/canonical-history'
 import type { ToolCall } from '../tools/types'
-import { normalizeChatUsage } from './chat-completions-shared'
+import {
+  CHAT_COMPLETIONS_CONTINUATION_FORMAT,
+  normalizeChatFinishReason,
+  normalizeChatUsage,
+} from './chat-completions-shared'
 import { DeepSeekProvider } from './deepseek-provider'
 import { GenericChatCompletionsProvider } from './generic-chat-completions-provider'
+import { ProviderCompletionError } from './provider'
 import type {
   CompiledProviderCall,
   ModelProvider,
@@ -18,12 +24,6 @@ export interface TestProviderStreamRequest extends CompiledProviderCall {
   providerRequest: JsonObject
   toolDefinitions: ProviderToolDefinition[]
   signal: AbortSignal
-  onRequest?: (snapshot: {
-    normalizedMessages: JsonValue[]
-    providerRequest: JsonValue
-    requestBytes: number
-    prefixHash: string
-  }) => Promise<void> | void
 }
 
 export type ScriptedProviderEvent =
@@ -49,24 +49,26 @@ function supportedProviderType(value: string): ProviderType {
   return value
 }
 
-function compileTestCall(input: ProviderCompileInput): CompiledProviderCall {
-  const providerType = supportedProviderType(input.route.providerType)
-  const compiled =
-    providerType === 'deepseek.chat-completions'
-      ? new DeepSeekProvider({
-          baseURL: 'https://provider.invalid/v1',
-          apiKey: 'test-only',
-        }).compile(input)
-      : new GenericChatCompletionsProvider({
-          providerId: 'test-only',
-          baseURL: 'https://provider.invalid/v1',
-          apiKey: 'test-only',
-        }).compile(input)
-  return {
-    ...compiled,
-    providerRequest: compiled.request,
-    toolDefinitions: compiled.tools,
-  } as CompiledProviderCall
+function compileTestCall(
+  input: ProviderCompileInput,
+  providerType: ProviderType,
+): CompiledProviderCall {
+  const routeProviderType = supportedProviderType(input.route.providerType)
+  if (routeProviderType !== providerType) {
+    throw new TypeError(
+      `Route Provider ${routeProviderType} does not match scripted ${providerType}`,
+    )
+  }
+  return providerType === 'deepseek.chat-completions'
+    ? new DeepSeekProvider({
+        baseURL: 'https://provider.invalid/v1',
+        apiKey: 'test-only',
+      }).compile(input)
+    : new GenericChatCompletionsProvider({
+        providerId: 'test-only',
+        baseURL: 'https://provider.invalid/v1',
+        apiKey: 'test-only',
+      }).compile(input)
 }
 
 function timing(value: JsonValue | undefined): {
@@ -86,6 +88,7 @@ function timing(value: JsonValue | undefined): {
 
 function normalizeCompletion(
   event: Extract<ScriptedProviderEvent, { type: 'completed' }>,
+  providerType: ProviderType,
 ): Extract<ProviderEvent, { type: 'completed' }> {
   const toolCalls = structuredClone(event.toolCalls ?? [])
   const content =
@@ -103,42 +106,59 @@ function normalizeCompletion(
       arguments: structuredClone(call.args),
     })
   }
+  const responseTiming = timing(event.timing)
+  const usage = normalizeChatUsage(event.usage ?? null)
   if (parts.length === 0) {
-    if (reasoning) {
-      throw new TypeError(
-        'Provider returned reasoning without an assistant answer; retry the request',
-      )
-    }
-    throw new TypeError('Provider completed with an empty assistant turn')
+    throw new ProviderCompletionError(
+      reasoning
+        ? 'Provider returned reasoning without an assistant answer; retry the request'
+        : 'Provider completed with an empty assistant turn',
+      {
+        rawResponse: structuredClone(event.rawResponse ?? null),
+        providerState: structuredClone(event.providerState ?? null),
+        usage: structuredClone(usage.raw),
+        timing: responseTiming,
+      },
+    )
   }
-  const finishReason =
-    event.finishReason === 'length'
-      ? 'truncated'
-      : toolCalls.length > 0
-        ? 'tool_calls'
-        : 'completed'
   return {
     type: 'completed',
     turn: {
       parts,
       toolCalls,
       ...(reasoning ? { normalizedReasoningText: reasoning } : {}),
-      usage: normalizeChatUsage(event.usage ?? null),
-      finishReason,
+      providerContinuation: {
+        schemaVersion: 2,
+        providerType,
+        format: CHAT_COMPLETIONS_CONTINUATION_FORMAT,
+        data: {
+          partsHash: canonicalHash(parts),
+          assistant: structuredClone(event.turn),
+        },
+      },
+      usage,
+      finishReason: normalizeChatFinishReason(
+        event.finishReason,
+        toolCalls.length > 0,
+      ),
     },
     rawResponse: structuredClone(event.rawResponse ?? null),
     providerState: structuredClone(event.providerState ?? null),
-    timing: timing(event.timing),
+    timing: responseTiming,
   }
 }
 
 /** Adapts concise scripted transport fixtures to the flat ModelProvider API. */
 export abstract class ScriptedProviderHarness implements ModelProvider {
-  readonly providerType = 'deepseek.chat-completions' as const
+  readonly providerType: ProviderType
+
+  constructor(providerType: ProviderType = 'deepseek.chat-completions') {
+    this.providerType = providerType
+  }
 
   /** Compiles canonical history into the Chat-shaped data inspected by tests. */
   compile(input: ProviderCompileInput): CompiledProviderCall {
-    return compileTestCall(input)
+    return compileTestCall(input, this.providerType)
   }
 
   /** Implements one fixture's scripted event sequence. */
@@ -158,7 +178,9 @@ export abstract class ScriptedProviderHarness implements ModelProvider {
       signal: context.signal,
     }
     for await (const event of this.run(request)) {
-      yield event.type === 'completed' ? normalizeCompletion(event) : event
+      yield event.type === 'completed'
+        ? normalizeCompletion(event, this.providerType)
+        : event
     }
   }
 }

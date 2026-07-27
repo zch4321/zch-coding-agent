@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 9,
+  "activeProviderId": "deepseek",
+  "providers": [
+    {
+      "id": "deepseek",
+      "label": "DeepSeek",
+      "protocol": "openai-compatible",
+      "adapterId": "deepseek.chat-completions",
+      "revision": 1,
+      "profile": "deepseek",
+      "baseURL": "https://api.deepseek.com",
+      "model": "deepseek-v4-pro",
+      "reasoning": "high",
+      "modelCatalog": [],
+      "modelOverrides": {}
+    }
+  ],
+  "approval": {
+    "approverProviderId": "deepseek",
+    "approverModel": "deepseek-v4-flash"
+  },
+  "permission": {
+    "defaultMode": "readonly",
+    "builtinPolicies": true,
+    "rememberedRules": [],
+    "sensitiveData": {
+      "mode": "off",
+      "pathGlobs": [],
+      "contentPatterns": []
+    }
+  },
+  "limits": {
+    "maxConcurrentRuns": 4,
+    "maxStepsPerRun": 0,
+    "maxToolOutputBytes": 65536,
+    "maxContextTokens": 64000,
+    "maxAttachmentContextTokens": 64000,
+    "autoCompactTriggerPercent": 80,
+    "maxToolResultTokens": 8000,
+    "maxToolTokensPerRun": 24000,
+    "tokenEstimation": {
+      "mode": "conservative",
+      "bytesPerToken": 3
+    },
+    "commandTimeoutMs": 120000,
+    "readFileSourceBytes": 10000000,
+    "readFileOutputBytes": 65536,
+    "editableFileBytes": 10000000,
+    "writeFileBytes": 262144,
+    "patchBytes": 65536,
+    "diffChars": 120000,
+    "fileChangeHistoryBytes": 100000000,
+    "approvalTimeoutMs": 600000,
+    "autoApprovalTimeoutMs": 60000,
+    "modelCatalogTimeoutMs": 15000,
+    "terminalScrollbackBytes": 2000000,
+    "fetchResponseBytes": 262144,
+    "fetchTimeoutMs": 20000,
+    "fetchMaxRedirects": 5
+  },
+  "logging": {
+    "enabled": false,
+    "retentionDays": 14,
+    "maxTotalBytes": 500000000
+  },
+  "privacy": {},
+  "workspace": {},
+  "skills": {
+    "enabled": true,
+    "maxSummaryChars": 2000
+  },
+  "assistant": {
+    "language": "zh-CN",
+    "preferences": {
+      "zh-CN": "",
+      "en-US": ""
+    }
+  },
+  "prompts": {
+    "approval": {
+      "classifyRisk": {
+        "id": "approval.classify-risk",
+        "version": "2026-07-10.1"
+      }
+    },
+    "orchestration": {
+      "goalStarted": {
+        "zh-CN": {
+          "id": "orchestration.goal-started.zh-CN",
+          "version": "2026-07-10.1"
+        },
+        "en-US": {
+          "id": "orchestration.goal-started.en-US",
+          "version": "2026-07-10.1"
+        }
+      },
+      "goalContinue": {
+        "zh-CN": {
+          "id": "orchestration.goal-continue.zh-CN",
+          "version": "2026-07-10.1"
+        },
+        "en-US": {
+          "id": "orchestration.goal-continue.en-US",
+          "version": "2026-07-10.1"
+        }
+      },
+      "planStarted": {
+        "zh-CN": {
+          "id": "orchestration.plan-started.zh-CN",
+          "version": "2026-07-10.1"
+        },
+        "en-US": {
+          "id": "orchestration.plan-started.en-US",
+          "version": "2026-07-10.1"
+        }
+      },
+      "planContinue": {
+        "zh-CN": {
+          "id": "orchestration.plan-continue.zh-CN",
+          "version": "2026-07-10.1"
+        },
+        "en-US": {
+          "id": "orchestration.plan-continue.en-US",
+          "version": "2026-07-10.1"
+        }
+      },
+      "planWarning": {
+        "zh-CN": {
+          "id": "orchestration.plan-warning.zh-CN",
+          "version": "2026-07-10.1"
+        },
+        "en-US": {
+          "id": "orchestration.plan-warning.en-US",
+          "version": "2026-07-10.1"
+        }
+      },
+      "compact": {
+        "zh-CN": {
+          "id": "orchestration.compact.zh-CN",
+          "version": "2026-07-10.1"
+        },
+        "en-US": {
+          "id": "orchestration.compact.en-US",
+          "version": "2026-07-10.1"
+        }
+      }
+    }
+  },
+  "network": {
+    "httpProxy": {
+      "mode": "off"
+    }
+  },
+  "webSearch": {
+    "provider": "brave",
+    "count": 5
+  },
+  "mcpServers": []
+}
