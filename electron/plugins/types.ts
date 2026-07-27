@@ -26,13 +26,12 @@ export interface HookContextMap {
     reason: string
   }
   beforeLLMCall: {
-    version: 2
+    version: 3
     sessionId: SessionId
     runId: RunId
-    adapterId: string
+    providerType: string
     route: Readonly<ModelRouteSnapshot>
     request: Readonly<JsonObject>
-    params: Readonly<JsonObject>
   }
   afterLLMCall: HookContextBase & {
     runId: RunId
@@ -56,15 +55,10 @@ export interface HookContextMap {
   }
 }
 
-export interface BeforeLLMCallPatch {
-  request?: JsonObject
-  params?: JsonObject
-}
-
 export interface HookHandlerResultMap {
   onSessionStart: void
   onSessionEnd: void
-  beforeLLMCall: { patch?: BeforeLLMCallPatch } | void
+  beforeLLMCall: void
   afterLLMCall: void
   beforeToolCall:
     | {
@@ -87,11 +81,6 @@ export type HookHandler<Name extends HookName> = (
 export interface HookDiagnostic {
   hook: HookName
   message: string
-}
-
-export interface BeforeLLMCallEmitResult {
-  patches: BeforeLLMCallPatch[]
-  diagnostics: HookDiagnostic[]
 }
 
 export interface BeforeToolCallEmitResult {

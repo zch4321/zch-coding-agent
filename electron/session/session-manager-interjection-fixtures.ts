@@ -1,11 +1,11 @@
 import type { CallId } from '../../shared/ids'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 
-export class InterjectionProvider implements LLMProvider {
+export class InterjectionProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
   // Resolves when the first tool-bearing turn has been consumed, allowing the
@@ -13,6 +13,7 @@ export class InterjectionProvider implements LLMProvider {
   firstTurnConsumed: { resolve: () => void; promise: Promise<void> }
 
   constructor() {
+    super()
     let resolve: () => void = () => undefined
     this.firstTurnConsumed = {
       resolve: () => resolve(),
@@ -22,7 +23,7 @@ export class InterjectionProvider implements LLMProvider {
     }
   }
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
 
@@ -81,7 +82,7 @@ export class InterjectionProvider implements LLMProvider {
   }
 }
 
-export class FinalAnswerInterjectionProvider implements LLMProvider {
+export class FinalAnswerInterjectionProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
   // Gate released by the test once the interjection has been queued, so the
@@ -89,6 +90,7 @@ export class FinalAnswerInterjectionProvider implements LLMProvider {
   firstTurnGate: { resolve: () => void; promise: Promise<void> }
 
   constructor() {
+    super()
     let resolve: () => void = () => undefined
     this.firstTurnGate = {
       resolve: () => resolve(),
@@ -98,7 +100,7 @@ export class FinalAnswerInterjectionProvider implements LLMProvider {
     }
   }
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
 

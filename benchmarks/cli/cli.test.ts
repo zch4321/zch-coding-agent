@@ -434,7 +434,7 @@ function fakeResult(directory: string): BenchmarkRunGroupResult {
       provider: {
         id: 'provider',
         model: 'model',
-        profile: 'generic',
+        providerType: 'generic.chat-completions',
         reasoning: 'high',
       },
       protocol: 'strict',

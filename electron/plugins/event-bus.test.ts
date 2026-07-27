@@ -7,34 +7,40 @@ const runId = 'run-1' as RunId
 const callId = 'call-1' as CallId
 
 describe('PluginEventBus', () => {
-  it('collects explicit LLM patches without sharing mutable context', async () => {
+  it('observes a frozen LLM request copy without patching the caller', async () => {
     const bus = new PluginEventBus()
+    let observedRequest: unknown
     bus.on('beforeLLMCall', (context) => {
       expect(Object.isFrozen(context)).toBe(true)
       expect(Object.isFrozen(context.request)).toBe(true)
-      return { patch: { params: { temperature: 0 } } }
+      expect(Object.isFrozen(context.request.messages)).toBe(true)
+      observedRequest = context.request
     })
 
+    const request = { messages: [{ role: 'user', content: 'hello' }] }
     const result = await bus.emit('beforeLLMCall', {
-      version: 2,
+      version: 3,
       sessionId,
       runId,
-      adapterId: 'deepseek.chat-completions',
+      providerType: 'deepseek.chat-completions',
       route: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         purpose: 'main',
-        adapterId: 'deepseek.chat-completions',
+        providerType: 'deepseek.chat-completions',
         providerId: 'deepseek',
         model: 'deepseek-v4-pro',
         reasoning: 'high',
         endpoint: 'https://api.deepseek.com/chat/completions',
         providerConfigRevision: 1,
       },
-      request: { messages: [{ role: 'user', content: 'hello' }] },
-      params: { temperature: 1 },
+      request,
     })
 
-    expect(result.patches).toEqual([{ params: { temperature: 0 } }])
+    expect(result.diagnostics).toEqual([])
+    expect(observedRequest).not.toBe(request)
+    expect(request).toEqual({
+      messages: [{ role: 'user', content: 'hello' }],
+    })
   })
 
   it('fails closed when beforeToolCall throws or times out', async () => {

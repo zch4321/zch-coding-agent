@@ -56,10 +56,12 @@ export const MessageVisibilitySchema = Type.Unsafe<MessageVisibility>({
   enum: [...MESSAGE_VISIBILITIES],
 })
 
+export const PROVIDER_CONTINUATION_SCHEMA_VERSION = 2 as const
+
 export const ProviderContinuationEnvelopeSchema = Type.Object(
   {
-    schemaVersion: DurableSchemaVersionSchema,
-    adapterId: Type.String({ minLength: 1, maxLength: 128 }),
+    schemaVersion: Type.Literal(PROVIDER_CONTINUATION_SCHEMA_VERSION),
+    providerType: Type.String({ minLength: 1, maxLength: 128 }),
     format: Type.String({ minLength: 1, maxLength: 128 }),
     data: JsonValueSchema,
   },

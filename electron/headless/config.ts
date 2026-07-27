@@ -11,10 +11,16 @@ import { ConfigStore } from '../config/store'
 import { DEFAULT_APP_CONFIG, type AppConfig } from '../config/schema'
 import { writeJsonAtomic } from '../config/atomic-file'
 import { SecretStore, type SafeStorageAdapter } from '../config/secret-store'
-import { HeadlessConfigSchema, type HeadlessConfig } from './contracts'
+import {
+  HeadlessConfigSchema,
+  LegacyHeadlessConfigV1Schema,
+  type HeadlessConfig,
+  type LegacyHeadlessConfigV1,
+} from './contracts'
 
 const MAX_HEADLESS_CONFIG_BYTES = 1_048_576
 const validateHeadlessConfig = compileSchema(HeadlessConfigSchema)
+const validateLegacyHeadlessConfig = compileSchema(LegacyHeadlessConfigV1Schema)
 
 /** Provides a no-persistence SafeStorageAdapter for headless environment credentials. */
 class HeadlessSecretStorageAdapter implements SafeStorageAdapter {
@@ -81,12 +87,7 @@ export async function loadHeadlessConfig(
   } catch {
     throw new HeadlessConfigError('Headless config is not valid JSON')
   }
-  if (!validateHeadlessConfig(candidate)) {
-    throw new HeadlessConfigError(
-      formatSchemaErrors(validateHeadlessConfig.errors),
-    )
-  }
-  return structuredClone(candidate) as HeadlessConfig
+  return normalizeHeadlessConfig(candidate)
 }
 
 /** Combines headless config with artifact paths and environment-backed runtime settings. */
@@ -95,24 +96,20 @@ export async function prepareHeadlessConfig(input: {
   artifactsDirectory: string
   environment?: NodeJS.ProcessEnv
 }): Promise<PreparedHeadlessConfig> {
-  if (!validateHeadlessConfig(input.config)) {
-    throw new HeadlessConfigError(
-      formatSchemaErrors(validateHeadlessConfig.errors),
-    )
-  }
+  const config = normalizeHeadlessConfig(input.config)
   const environment = input.environment ?? process.env
-  const credential = environment[input.config.provider.credentialEnv]?.trim()
+  const credential = environment[config.provider.credentialEnv]?.trim()
   if (!credential) {
     throw new HeadlessConfigError(
-      `Provider credential environment variable is missing: ${input.config.provider.credentialEnv}`,
+      `Provider credential environment variable is missing: ${config.provider.credentialEnv}`,
     )
   }
 
   const userDataDirectory = path.join(input.artifactsDirectory, 'runtime')
   await mkdir(userDataDirectory, { recursive: true })
-  const appConfig = buildAppConfig(input.config)
+  const appConfig = buildAppConfig(config)
   const configHash = createHash('sha256')
-    .update(JSON.stringify(canonicalize(input.config)))
+    .update(JSON.stringify(canonicalize(config)))
     .digest('hex')
   const configPath = path.join(userDataDirectory, 'config.json')
   await writeJsonAtomic(configPath, appConfig)
@@ -126,11 +123,41 @@ export async function prepareHeadlessConfig(input: {
   await configStore.initialize()
 
   return {
-    config: structuredClone(input.config),
+    config: structuredClone(config),
     configHash,
     configStore,
     userDataDirectory,
   }
+}
+
+function normalizeHeadlessConfig(candidate: unknown): HeadlessConfig {
+  if (validateHeadlessConfig(candidate)) {
+    return structuredClone(candidate) as HeadlessConfig
+  }
+  if (validateLegacyHeadlessConfig(candidate)) {
+    const legacy = structuredClone(candidate) as LegacyHeadlessConfigV1
+    return {
+      ...legacy,
+      schemaVersion: 2,
+      provider: {
+        id: legacy.provider.id,
+        ...(legacy.provider.label ? { label: legacy.provider.label } : {}),
+        providerType:
+          legacy.provider.profile === 'deepseek'
+            ? 'deepseek.chat-completions'
+            : 'generic.chat-completions',
+        baseURL: legacy.provider.baseURL,
+        model: legacy.provider.model,
+        ...(legacy.provider.reasoning
+          ? { reasoning: legacy.provider.reasoning }
+          : {}),
+        credentialEnv: legacy.provider.credentialEnv,
+      },
+    }
+  }
+  throw new HeadlessConfigError(
+    formatSchemaErrors(validateHeadlessConfig.errors),
+  )
 }
 
 function canonicalize(value: unknown): unknown {
@@ -154,12 +181,7 @@ function buildAppConfig(config: HeadlessConfig): AppConfig {
       {
         id: providerId,
         label: config.provider.label ?? providerId,
-        protocol: config.provider.protocol ?? 'openai-compatible',
-        profile: config.provider.profile ?? 'generic',
-        adapterId:
-          (config.provider.profile ?? 'generic') === 'deepseek'
-            ? 'deepseek.chat-completions'
-            : 'openai-compatible.chat-completions',
+        providerType: config.provider.providerType,
         revision: 1,
         baseURL: config.provider.baseURL,
         model: config.provider.model,

@@ -16,7 +16,7 @@ import type { PromptRegistry } from '../prompts/registry'
 import { normalizeToolResult, toolFailure } from './session-run-utils'
 import type { SessionApprovalCoordinator } from '../permission/session-approval'
 import type { SessionContextGate } from './session-context-gate'
-import { createConfiguredProvider } from './session-provider-turn'
+import { createConfiguredProvider } from '../providers/provider-factory'
 import type {
   ActiveRun,
   AgentEventDraft,
@@ -261,7 +261,7 @@ export class SessionToolRunner {
                         provider: approvalUsageProvider,
                         model: approvalBinding!.snapshot.model,
                         modelProfile: approvalBinding?.modelProfile,
-                        raw: authorization.autoDecision.usage,
+                        usage: authorization.autoDecision.usage,
                       })
                     : undefined
 

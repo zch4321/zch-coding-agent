@@ -8,7 +8,7 @@ const Sha256Schema = Type.String({
 
 export const RuntimeIdentitySchema = Type.Object(
   {
-    schemaVersion: Type.Literal(1),
+    schemaVersion: Type.Literal(2),
     sourceCommit: Type.String({ minLength: 1, maxLength: 128 }),
     sourceTree: Type.Union([
       Type.Literal('clean'),
@@ -33,8 +33,7 @@ export const RuntimeIdentitySchema = Type.Object(
     provider: Type.Object(
       {
         id: Type.String({ minLength: 1, maxLength: 128 }),
-        protocol: Type.String({ minLength: 1, maxLength: 128 }),
-        profile: Type.String({ minLength: 1, maxLength: 128 }),
+        providerType: Type.String({ minLength: 1, maxLength: 128 }),
         model: Type.String({ minLength: 1, maxLength: 256 }),
         reasoning: Type.String({ minLength: 1, maxLength: 64 }),
       },

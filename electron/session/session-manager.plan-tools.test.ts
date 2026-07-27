@@ -4,7 +4,10 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { CallId } from '../../shared/ids'
-import type { LLMProvider, ProviderEvent } from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+} from '../providers/provider-test-harness'
 import { PromptRegistry } from '../prompts/registry'
 import { SessionManager } from './session-manager'
 import {
@@ -14,10 +17,10 @@ import {
 } from './session-manager-test-support'
 
 describe('SessionManager plan tool batches', () => {
-  class SameBatchPlanMutationProvider implements LLMProvider {
+  class SameBatchPlanMutationProvider extends ScriptedProviderHarness {
     calls = 0
 
-    async *stream(): AsyncIterable<ProviderEvent> {
+    async *run(): AsyncIterable<ProviderEvent> {
       this.calls += 1
 
       if (this.calls === 1) {

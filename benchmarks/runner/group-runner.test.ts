@@ -181,9 +181,10 @@ function groupInput(
     runtimeImageDigest: `sha256:${'a'.repeat(64)}`,
     sourceCommit: 'b'.repeat(40),
     config: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       provider: {
         id: 'provider',
+        providerType: 'generic.chat-completions',
         baseURL: 'https://provider.invalid/v1',
         model: 'model',
         reasoning: 'high',
@@ -241,7 +242,7 @@ function fakeTrialRunner(
       graderImageDigest: input.runtimeImageDigest!,
       providerId: input.config.provider.id,
       model: input.config.provider.model,
-      profile: input.config.provider.profile ?? 'generic',
+      providerType: input.config.provider.providerType,
       reasoning: input.config.provider.reasoning ?? 'high',
       budget: {
         ...input.loadedCase.manifest.resources,

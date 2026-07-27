@@ -8,7 +8,7 @@ import { PluginEventBus } from '../plugins/event-bus'
 import { ProjectMetadataStore } from '../project/project-metadata-store'
 import { PromptRegistry } from '../prompts/registry'
 import type { AutoApprover } from '../permission/auto-approver'
-import type { LLMProvider } from '../providers/provider'
+import type { ModelProvider } from '../providers/provider'
 import { SessionManager } from '../session/session-manager'
 import { SkillsManager } from '../skills/manager'
 import { AgentRuntime } from './agent-runtime'
@@ -25,7 +25,7 @@ export interface CreateAgentRuntimeOptions {
   providerFactory?: (options: {
     config: ReturnType<ConfigStore['getPublicConfig']>
     apiKey: string
-  }) => LLMProvider
+  }) => ModelProvider
   autoApproverFactory?: (options: {
     config: ReturnType<ConfigStore['getPublicConfig']>
     apiKey: string

@@ -345,11 +345,11 @@ const enUS = {
     saveAndContinue: 'Save and continue',
     discardAndContinue: 'Discard changes',
     providerLabel: 'Provider label',
-    providerProfile: 'Provider profile',
-    providerProfileDeepSeek: 'DeepSeek',
-    providerProfileGeneric: 'Generic OpenAI-compatible',
-    providerProfileHint:
-      'The DeepSeek profile sends thinking/reasoning_effort. The generic OpenAI-compatible profile does not send DeepSeek-specific parameters.',
+    providerType: 'Provider type',
+    providerTypeDeepSeek: 'DeepSeek Chat Completions',
+    providerTypeGeneric: 'Generic Chat Completions',
+    providerTypeHint:
+      'Provider type selects the code implementation. DeepSeek sends its thinking parameters; Generic is the OpenAI-compatible fallback.',
     baseUrl: 'Base URL',
     mainModel: 'Main model',
     contextOverride: 'Context window override',

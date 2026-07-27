@@ -6,11 +6,11 @@ import type { WebContents } from 'electron'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 import { SessionManager } from './session-manager'
 import {
   createConfig,
@@ -19,13 +19,11 @@ import {
 } from './session-manager-test-support'
 
 describe('SessionManager cancellation and forks', () => {
-  class MultiToolCancellationProvider implements LLMProvider {
+  class MultiToolCancellationProvider extends ScriptedProviderHarness {
     calls = 0
     requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-    async *stream(
-      request: ProviderStreamRequest,
-    ): AsyncIterable<ProviderEvent> {
+    async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
       this.calls += 1
       this.requests.push(structuredClone(request.normalizedMessages))
 
@@ -69,13 +67,11 @@ describe('SessionManager cancellation and forks', () => {
     }
   }
 
-  class MultiToolFailureProvider implements LLMProvider {
+  class MultiToolFailureProvider extends ScriptedProviderHarness {
     calls = 0
     requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-    async *stream(
-      request: ProviderStreamRequest,
-    ): AsyncIterable<ProviderEvent> {
+    async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
       this.calls += 1
       this.requests.push(structuredClone(request.normalizedMessages))
 

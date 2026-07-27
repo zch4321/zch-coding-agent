@@ -171,7 +171,7 @@ describe('DatabaseService', () => {
       const count = reopened.read((reader) =>
         reader.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
       )
-      expect(count).toEqual({ count: 3 })
+      expect(count).toEqual({ count: 4 })
     } finally {
       await reopened.close()
       await testDatabase.dispose()
@@ -255,6 +255,98 @@ describe('DatabaseService', () => {
     }
   })
 
+  it('migrates v3 route and continuation identities without changing payload order', async () => {
+    const legacy = await createTestDatabase({
+      migrations: DATABASE_MIGRATIONS.slice(0, 3),
+    })
+    const databasePath = legacy.databasePath
+    const project = projectFixture({ path: 'C:/provider-migration' })
+    const session = sessionFixture({ lastSeq: 1 })
+    const modelRoute = {
+      schemaVersion: 1,
+      purpose: 'main',
+      adapterId: 'openai-compatible.chat-completions',
+      providerId: 'legacy-generic',
+      model: 'legacy-model',
+      reasoning: 'off',
+      endpoint: 'https://provider.invalid/v1/chat/completions',
+      providerConfigRevision: 4,
+    }
+    const continuation = {
+      schemaVersion: 1,
+      adapterId: 'deepseek.chat-completions',
+      format: 'reasoning-chain-v1',
+      data: {
+        ordered: ['first', 'second', 'third'],
+        nested: { keep: true },
+      },
+    }
+    const parts = [{ type: 'text', text: 'Legacy assistant answer' }]
+    await legacy.database.withTransaction((transaction) => {
+      new ProjectRepository().insert(transaction, project)
+      new SessionRepository().insert(transaction, session)
+      transaction
+        .prepare(
+          `INSERT INTO messages (
+             schema_version, id, session_id, seq, kind, parts_json,
+             provider_continuation_json, model_route_json, visibility,
+             in_history, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          1,
+          'message:provider-migration',
+          session.id,
+          1,
+          'assistant_turn',
+          JSON.stringify(parts),
+          JSON.stringify(continuation),
+          JSON.stringify(modelRoute),
+          'visible',
+          1,
+          '2026-07-27T00:00:00.000Z',
+        )
+    })
+    await legacy.database.close()
+
+    const migrated = DatabaseService.open({
+      databasePath,
+      appVersion: 'test-v4',
+    })
+    try {
+      const row = migrated.read((reader) =>
+        reader
+          .prepare(
+            `SELECT parts_json, provider_continuation_json, model_route_json
+             FROM messages WHERE id = ?`,
+          )
+          .get('message:provider-migration'),
+      ) as {
+        parts_json: string
+        provider_continuation_json: string
+        model_route_json: string
+      }
+      const routeRest = { ...modelRoute } as Record<string, unknown>
+      const continuationRest = { ...continuation } as Record<string, unknown>
+      delete routeRest.adapterId
+      delete continuationRest.adapterId
+      expect(JSON.parse(row.parts_json)).toEqual(parts)
+      expect(JSON.parse(row.model_route_json)).toEqual({
+        ...routeRest,
+        schemaVersion: 2,
+        providerType: 'generic.chat-completions',
+      })
+      expect(JSON.parse(row.provider_continuation_json)).toEqual({
+        ...continuationRest,
+        schemaVersion: 2,
+        providerType: 'deepseek.chat-completions',
+      })
+    } finally {
+      await migrated.close()
+      await legacy.dispose()
+    }
+  })
+
   it('rejects changed checksums for applied migrations', async () => {
     const testDatabase = await createTestDatabase()
     const databasePath = testDatabase.databasePath
@@ -282,8 +374,8 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 4,
-        name: '0004_future',
+        version: 5,
+        name: '0005_future',
         sql: 'CREATE TABLE future_state (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -303,13 +395,13 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 4,
-        name: '0004_second',
+        version: 5,
+        name: '0005_second',
         sql: 'CREATE TABLE second_step (id TEXT PRIMARY KEY) STRICT;',
       },
       {
-        version: 5,
-        name: '0005_third',
+        version: 6,
+        name: '0006_third',
         sql: 'CREATE TABLE third_step (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -318,7 +410,7 @@ describe('DatabaseService', () => {
     await testDatabase.database.withTransaction((transaction) => {
       transaction
         .prepare('DELETE FROM schema_migrations WHERE version = ?')
-        .run(4)
+        .run(5)
     })
     await testDatabase.database.close()
 
@@ -339,8 +431,8 @@ describe('DatabaseService', () => {
     const brokenMigrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 4,
-        name: '0004_broken',
+        version: 5,
+        name: '0005_broken',
         sql: `
           CREATE TABLE should_rollback (id TEXT PRIMARY KEY) STRICT;
           INSERT INTO table_that_does_not_exist VALUES (1);
@@ -368,7 +460,7 @@ describe('DatabaseService', () => {
       ).toBeUndefined()
       expect(
         raw.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
-      ).toEqual({ count: 3 })
+      ).toEqual({ count: 4 })
     } finally {
       raw.close()
       await first.dispose()
@@ -380,8 +472,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 4,
-          name: '0004_transaction_probe',
+          version: 5,
+          name: '0005_transaction_probe',
           sql: `
             CREATE TABLE transaction_probe (
               id INTEGER PRIMARY KEY
@@ -474,8 +566,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 4,
-          name: '0004_transaction_control_probe',
+          version: 5,
+          name: '0005_transaction_control_probe',
           sql: 'CREATE TABLE transaction_control_probe (id INTEGER PRIMARY KEY) STRICT;',
         },
       ],

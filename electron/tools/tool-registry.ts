@@ -12,6 +12,7 @@ import type {
 } from './types'
 import type { ApprovedToolCall } from './approved-tool-call'
 import { revalidateApprovedToolCall } from '../permission/permission-pipeline'
+import type { ProviderToolDefinition } from '../providers/provider'
 
 interface RegisteredTool {
   readonly definition: ToolDefinition
@@ -84,18 +85,15 @@ export class ToolRegistry implements ToolRegistrationPort {
     return [...this.#tools.values()].map((tool) => tool.definition)
   }
 
-  /** Converts registered definitions into provider function schemas and intent metadata. */
-  providerDefinitions(): JsonValue[] {
+  /** Converts registered tools into neutral schemas with intent metadata. */
+  providerDefinitions(): ProviderToolDefinition[] {
     return this.list().map((definition) => {
       const { parameters, intentField } = providerParameters(definition)
       return {
-        type: 'function',
-        function: {
-          name: definition.id,
-          description: definition.description,
-          parameters,
-          'x-agent-intent-property': intentField,
-        },
+        name: definition.id,
+        description: definition.description,
+        inputSchema: parameters,
+        intentParameter: intentField,
       }
     })
   }

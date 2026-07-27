@@ -1,9 +1,9 @@
 import type { JsonValue } from '../../shared/json'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 
 function deferred(): { resolve: () => void; promise: Promise<void> } {
   let resolve: () => void = () => undefined
@@ -13,14 +13,14 @@ function deferred(): { resolve: () => void; promise: Promise<void> } {
   return { resolve, promise }
 }
 
-export class CompactProvider implements LLMProvider {
+export class CompactProvider extends ScriptedProviderHarness {
   calls = 0
   requests: Array<{
     messages: ProviderStreamRequest['normalizedMessages']
     tools: ProviderStreamRequest['toolDefinitions']
   }> = []
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push({
       messages: structuredClone(request.normalizedMessages),
@@ -31,8 +31,8 @@ export class CompactProvider implements LLMProvider {
       providerRequest: {
         model: 'fixture',
         messages: request.normalizedMessages as unknown as JsonValue[],
-        tools: request.toolDefinitions,
-      },
+        tools: request.toolDefinitions as unknown as JsonValue[],
+      } as JsonValue,
       requestBytes: 10,
       prefixHash: `compact-${this.calls}`,
     })
@@ -65,14 +65,14 @@ export class CompactProvider implements LLMProvider {
   }
 }
 
-export class AutoCompactProvider implements LLMProvider {
+export class AutoCompactProvider extends ScriptedProviderHarness {
   calls = 0
   requests: Array<{
     messages: ProviderStreamRequest['normalizedMessages']
     tools: ProviderStreamRequest['toolDefinitions']
   }> = []
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push({
       messages: structuredClone(request.normalizedMessages),
@@ -83,8 +83,8 @@ export class AutoCompactProvider implements LLMProvider {
       providerRequest: {
         model: 'fixture',
         messages: request.normalizedMessages as unknown as JsonValue[],
-        tools: request.toolDefinitions,
-      },
+        tools: request.toolDefinitions as unknown as JsonValue[],
+      } as JsonValue,
       requestBytes: 10,
       prefixHash: `auto-compact-${this.calls}`,
     })
@@ -114,12 +114,12 @@ export class AutoCompactProvider implements LLMProvider {
   }
 }
 
-export class AbortCompactProvider implements LLMProvider {
+export class AbortCompactProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
   compactStarted = deferred()
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
 
@@ -147,13 +147,13 @@ export class AbortCompactProvider implements LLMProvider {
   }
 }
 
-export class InterjectedAutoCompactProvider implements LLMProvider {
+export class InterjectedAutoCompactProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
   compactStarted = deferred()
   releaseCompact = deferred()
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
 

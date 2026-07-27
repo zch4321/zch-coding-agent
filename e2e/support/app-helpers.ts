@@ -85,7 +85,7 @@ export async function configureApp(input: {
         kind: 'provider-settings',
         providerId: 'deepseek',
         label: 'E2E Provider',
-        profile: 'generic',
+        providerType: 'generic.chat-completions',
         baseURL: providerBaseURL,
         model: 'e2e-functional-model',
         contextWindowTokens: null,

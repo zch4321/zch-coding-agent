@@ -181,7 +181,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       state.providers.map((provider) => ({
         id: provider.id,
         label: provider.label,
-        profile: provider.profile,
+        providerType: provider.providerType,
         models: providerPreviewModels(provider),
         isActive: provider.id === state.activeProviderId,
         isSelected: provider.id === state.selectedProviderId,
@@ -219,7 +219,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.selectedProviderId = provider.id
       this.providerForm.providerId = provider.id
       this.providerForm.label = provider.label
-      this.providerForm.profile = provider.profile
+      this.providerForm.providerType = provider.providerType
       this.providerForm.baseURL = provider.baseURL
       this.providerForm.model = provider.model
       this.providerForm.reasoning = provider.reasoning
@@ -469,7 +469,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         kind: 'provider-settings',
         providerId,
         label,
-        profile: 'generic',
+        providerType: 'generic.chat-completions',
         baseURL: 'https://api.example.com/v1',
         model: 'model-name',
         reasoning: 'off',
@@ -567,7 +567,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           reasoning: draft.reasoning,
           providerId: draft.providerId,
           label: draft.label,
-          profile: draft.profile,
+          providerType: draft.providerType,
           approverProviderId: draft.approverProviderId,
           approverModel: draft.approverModel,
           limits: {

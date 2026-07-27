@@ -559,9 +559,9 @@ describe('agent runtime store', () => {
         createdAt: timestamp,
         kind: 'assistant_turn',
         modelRoute: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           purpose: 'main',
-          adapterId: 'deepseek.chat-completions',
+          providerType: 'deepseek.chat-completions',
           providerId: 'deepseek',
           model: 'deepseek-chat',
           reasoning: 'off',

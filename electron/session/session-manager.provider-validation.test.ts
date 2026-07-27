@@ -4,7 +4,10 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { CallId } from '../../shared/ids'
-import type { LLMProvider, ProviderEvent } from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+} from '../providers/provider-test-harness'
 import type { SessionExecutionStatePort, SessionState } from './session-types'
 import {
   createConfig,
@@ -13,10 +16,10 @@ import {
 } from './session-manager-test-support'
 import { SessionManager } from './session-manager'
 
-class InvalidThenValidProvider implements LLMProvider {
+class InvalidThenValidProvider extends ScriptedProviderHarness {
   calls = 0
 
-  async *stream(): AsyncIterable<ProviderEvent> {
+  async *run(): AsyncIterable<ProviderEvent> {
     this.calls += 1
     if (this.calls === 1) {
       const args = { path: 'README.md' }
@@ -78,10 +81,10 @@ class InvalidThenValidProvider implements LLMProvider {
   }
 }
 
-class CrossTurnDuplicateProvider implements LLMProvider {
+class CrossTurnDuplicateProvider extends ScriptedProviderHarness {
   calls = 0
 
-  async *stream(): AsyncIterable<ProviderEvent> {
+  async *run(): AsyncIterable<ProviderEvent> {
     this.calls += 1
     if (this.calls <= 2) {
       const args = { path: 'README.md' }
@@ -128,8 +131,8 @@ class CrossTurnDuplicateProvider implements LLMProvider {
   }
 }
 
-class ReasoningOnlyProvider implements LLMProvider {
-  async *stream(): AsyncIterable<ProviderEvent> {
+class ReasoningOnlyProvider extends ScriptedProviderHarness {
+  async *run(): AsyncIterable<ProviderEvent> {
     yield {
       type: 'completed',
       rawResponse: { id: 'reasoning-only' },

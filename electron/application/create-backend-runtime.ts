@@ -16,7 +16,7 @@ import { FileChangeRepository } from '../persistence/file-change-repository'
 import { ProjectRepository } from '../persistence/project-repository'
 import { SessionRepository } from '../persistence/session-repository'
 import type { AutoApprover } from '../permission/auto-approver'
-import type { LLMProvider } from '../providers/provider'
+import type { ModelProvider } from '../providers/provider'
 import {
   createAgentRuntime,
   type CreateAgentRuntimeOptions,
@@ -301,4 +301,4 @@ async function settleCleanup(
   if (failure) throw failure
 }
 
-export type { AutoApprover, DatabaseServiceOptions, LLMProvider }
+export type { AutoApprover, DatabaseServiceOptions, ModelProvider }

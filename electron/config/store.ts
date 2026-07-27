@@ -33,13 +33,8 @@ function applyProviderUpdate(
     provider = {
       id: providerId,
       label: request.label ?? providerId,
-      protocol: 'openai-compatible',
-      adapterId:
-        request.profile === 'deepseek'
-          ? 'deepseek.chat-completions'
-          : 'openai-compatible.chat-completions',
+      providerType: request.providerType ?? 'generic.chat-completions',
       revision: 1,
-      profile: request.profile ?? 'generic',
       baseURL: request.baseURL,
       model: request.model,
       reasoning: request.reasoning,
@@ -50,15 +45,9 @@ function applyProviderUpdate(
   }
 
   const previousRouteShape = providerRouteShape(provider)
-  const previousProfile = provider.profile
+  const previousProviderType = provider.providerType
   provider.label = request.label ?? provider.label
-  provider.profile = request.profile ?? provider.profile
-  if (isNewProvider || provider.profile !== previousProfile) {
-    provider.adapterId =
-      provider.profile === 'deepseek'
-        ? 'deepseek.chat-completions'
-        : 'openai-compatible.chat-completions'
-  }
+  provider.providerType = request.providerType ?? provider.providerType
   provider.baseURL = request.baseURL
   provider.model = request.model
   provider.reasoning = request.reasoning
@@ -83,6 +72,10 @@ function applyProviderUpdate(
   if (Object.keys(provider.modelOverrides[request.model]).length === 0) {
     delete provider.modelOverrides[request.model]
   }
+  if (!isNewProvider && provider.providerType !== previousProviderType) {
+    provider.modelCatalog = []
+    delete provider.modelCatalogFetchedAt
+  }
   if (!isNewProvider && providerRouteShape(provider) !== previousRouteShape) {
     provider.revision += 1
   }
@@ -94,9 +87,7 @@ function applyProviderUpdate(
 
 function providerRouteShape(provider: AppProviderConfig): string {
   return JSON.stringify({
-    protocol: provider.protocol,
-    adapterId: provider.adapterId,
-    profile: provider.profile,
+    providerType: provider.providerType,
     baseURL: provider.baseURL,
     model: provider.model,
     reasoning: provider.reasoning,
@@ -580,7 +571,16 @@ export class ConfigStore {
   async #read(): Promise<AppConfig> {
     try {
       const content = await readFile(this.#filePath, 'utf8')
-      return migrateConfig(JSON.parse(content))
+      const parsed = JSON.parse(content) as unknown
+      const migrated = migrateConfig(parsed)
+      if (
+        !parsed ||
+        typeof parsed !== 'object' ||
+        Reflect.get(parsed, 'schemaVersion') !== migrated.schemaVersion
+      ) {
+        await writeJsonAtomic(this.#filePath, migrated)
+      }
+      return migrated
     } catch (error) {
       if (
         error &&

@@ -56,7 +56,7 @@ export interface BenchmarkRunGroupIdentity {
   provider: {
     id: string
     model: string
-    profile: string
+    providerType: string
     reasoning: string
   }
   protocol: BenchmarkRunnerProtocol

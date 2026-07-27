@@ -88,7 +88,7 @@ function identity(
     graderImageDigest: `sha256:${'d'.repeat(64)}`,
     providerId: 'provider',
     model: 'model',
-    profile: 'generic',
+    providerType: 'generic.chat-completions',
     reasoning: 'high',
     budget: {
       wallTimeMs: 1_000,

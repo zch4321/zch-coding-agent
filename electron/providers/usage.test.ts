@@ -21,7 +21,10 @@ describe('normalizeLlmUsage', () => {
         config: publicConfig,
         provider: publicConfig.providers[0]!,
         model: 'selected-model',
-        raw: { total_tokens: 42 },
+        usage: {
+          totalTokens: 42,
+          raw: { total_tokens: 42 },
+        },
       }),
     ).toMatchObject({
       model: 'selected-model',

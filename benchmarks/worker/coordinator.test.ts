@@ -111,9 +111,10 @@ describe('Docker worker coordinator', () => {
 
 function config(): HeadlessConfig {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     provider: {
       id: 'docker-test',
+      providerType: 'generic.chat-completions',
       baseURL: 'http://provider.invalid/',
       model: 'fake-model',
       reasoning: 'off',

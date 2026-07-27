@@ -1,15 +1,15 @@
 import type { CallId } from '../../shared/ids'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 
-export class GoalContinuationProvider implements LLMProvider {
+export class GoalContinuationProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
 
@@ -76,13 +76,15 @@ export class GoalContinuationProvider implements LLMProvider {
   }
 }
 
-export class PlanWarningProvider implements LLMProvider {
+export class PlanWarningProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-  constructor(private readonly activatePlan = false) {}
+  constructor(private readonly activatePlan = false) {
+    super()
+  }
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
 
@@ -166,11 +168,11 @@ export class PlanWarningProvider implements LLMProvider {
   }
 }
 
-export class PlanCompletionProvider implements LLMProvider {
+export class PlanCompletionProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
 

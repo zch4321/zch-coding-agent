@@ -113,7 +113,7 @@ describe('SessionManager approvals', () => {
       kind: 'provider-settings',
       providerId: 'deepseek',
       label: 'DeepSeek',
-      profile: 'deepseek',
+      providerType: 'deepseek.chat-completions',
       baseURL: 'https://api.example/v1',
       model: 'main-model',
       reasoning: 'off',

@@ -1,16 +1,16 @@
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 
-export class ScriptedProvider implements LLMProvider {
+export class ScriptedProvider extends ScriptedProviderHarness {
   calls = 0
   requestBodies: JsonValue[] = []
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requestBodies.push(structuredClone(request.providerRequest ?? null))
     await request.onRequest?.({
@@ -79,11 +79,11 @@ export class ScriptedProvider implements LLMProvider {
   }
 }
 
-export class PromptAuditProvider implements LLMProvider {
+export class PromptAuditProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
     await request.onRequest?.({
@@ -91,8 +91,8 @@ export class PromptAuditProvider implements LLMProvider {
       providerRequest: {
         model: 'fixture',
         messages: request.normalizedMessages as unknown as JsonValue[],
-        tools: request.toolDefinitions,
-      },
+        tools: request.toolDefinitions as unknown as JsonValue[],
+      } as JsonValue,
       requestBytes: 10,
       prefixHash: `prompt-audit-${this.calls}`,
     })

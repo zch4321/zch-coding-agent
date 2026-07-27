@@ -97,9 +97,9 @@ function everySchemaBranchHasVersion(schema: TSchema): boolean {
 }
 
 const route: ModelRouteSnapshot = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   purpose: 'main',
-  adapterId: 'deepseek.chat-completions',
+  providerType: 'deepseek.chat-completions',
   providerId: 'deepseek',
   model: 'deepseek-chat',
   reasoning: 'off',
@@ -182,8 +182,8 @@ const messages: MessageRecord[] = [
     ],
     normalizedReasoningText: 'Need repository context.',
     providerContinuation: {
-      schemaVersion: 1,
-      adapterId: 'deepseek.chat-completions',
+      schemaVersion: 2,
+      providerType: 'deepseek.chat-completions',
       format: 'reasoning-content-v1',
       data: { ordered: ['first', 'second'] },
     },

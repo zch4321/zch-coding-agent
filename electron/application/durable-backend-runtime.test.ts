@@ -10,11 +10,11 @@ import {
 import type { CallId, SessionId } from '../../shared/ids'
 import { ConfigStore } from '../config/store'
 import { SecretStore, type SafeStorageAdapter } from '../config/secret-store'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 import {
   AbortCompactProvider,
   CompactProvider,
@@ -61,18 +61,19 @@ class TestSafeStorage implements SafeStorageAdapter {
   }
 }
 
-class OrderedProvider implements LLMProvider {
+class OrderedProvider extends ScriptedProviderHarness {
   calls = 0
   readonly order: string[]
   readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
   readonly #toolChain: boolean
 
   constructor(order: string[], toolChain = false) {
+    super()
     this.order = order
     this.#toolChain = toolChain
   }
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.order.push('provider')
     this.requests.push(structuredClone(request.normalizedMessages))
@@ -129,13 +130,14 @@ class OrderedProvider implements LLMProvider {
   }
 }
 
-class BlockingProvider implements LLMProvider {
+class BlockingProvider extends ScriptedProviderHarness {
   readonly started: Promise<void>
   #markStarted!: () => void
   #release!: () => void
   readonly #released: Promise<void>
 
   constructor() {
+    super()
     this.started = new Promise((resolve) => {
       this.#markStarted = resolve
     })
@@ -148,7 +150,7 @@ class BlockingProvider implements LLMProvider {
     this.#release()
   }
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     await request.onRequest?.({
       normalizedMessages: request.normalizedMessages as unknown as JsonValue[],
       providerRequest: request.providerRequest ?? {},
@@ -174,10 +176,10 @@ class BlockingProvider implements LLMProvider {
   }
 }
 
-class EmptyCompactProvider implements LLMProvider {
+class EmptyCompactProvider extends ScriptedProviderHarness {
   calls = 0
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     if (request.toolDefinitions.length === 0) {
       yield {

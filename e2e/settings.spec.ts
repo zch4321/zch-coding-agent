@@ -105,7 +105,7 @@ test.describe.serial('Electron settings workflows', () => {
       provider.getByText('Token 估算方式', { exact: true }),
     ).toBeVisible()
     await expect(
-      provider.getByText('Provider Profile', { exact: true }),
+      provider.getByText('Provider Type', { exact: true }),
     ).toBeVisible()
     await expect(provider.getByRole('button', { name: '刷新' })).toBeDisabled()
     await expect(provider.getByText('思考深度', { exact: true })).toBeVisible()
@@ -137,7 +137,7 @@ test.describe.serial('Electron settings workflows', () => {
         kind: 'provider-settings',
         providerId: 'e2e-alt',
         label: 'E2E Alt',
-        profile: 'generic',
+        providerType: 'generic.chat-completions',
         baseURL: 'https://provider.example/v1',
         model: 'e2e-alt-chat',
         reasoning: 'off',
@@ -323,9 +323,9 @@ test.describe.serial('Electron settings workflows', () => {
           },
         ],
         modelRoute: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           purpose: 'main',
-          adapterId: 'deepseek.chat-completions',
+          providerType: 'deepseek.chat-completions',
           providerId: 'deepseek',
           model: 'deepseek-chat',
           reasoning: 'off',

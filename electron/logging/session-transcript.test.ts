@@ -14,9 +14,9 @@ const callId = 'call-tool' as CallId
 const llmCallId = 'call-llm' as CallId
 const traceId = 'session-transcript' as TraceId
 const modelRoute = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
   purpose: 'main' as const,
-  adapterId: 'deepseek.chat-completions',
+  providerType: 'deepseek.chat-completions',
   providerId: 'deepseek',
   model: 'fixture',
   reasoning: 'off' as const,

@@ -430,9 +430,10 @@ async function createFixture(mode: 'patch' | 'hang' | 'slug'): Promise<{
 
 function config(baseURL: string): HeadlessConfig {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     provider: {
       id: 'docker-fake',
+      providerType: 'generic.chat-completions',
       baseURL,
       model: 'docker-fake-model',
       reasoning: 'off',

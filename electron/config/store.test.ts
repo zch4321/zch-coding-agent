@@ -66,7 +66,7 @@ async function createStores(adapter = new FakeSafeStorage()) {
 }
 
 describe('ConfigStore', () => {
-  it('deletes a legacy config and rebuilds clean v9 defaults', async () => {
+  it('deletes a legacy config and rebuilds clean v10 defaults', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     await writeFile(
@@ -81,15 +81,87 @@ describe('ConfigStore', () => {
     const store = new ConfigStore(configPath, secretStore)
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 9 },
+      config: { schemaVersion: 10 },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: 10,
       limits: { maxStepsPerRun: 0 },
     })
   })
 
-  it('deletes an incompatible v9 shape and rebuilds clean defaults', async () => {
+  it('migrates valid v9 providers to v10 without losing saved state', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
+    const configPath = path.join(directory, 'config.json')
+    const current = structuredClone(DEFAULT_APP_CONFIG)
+    const providers: Array<Record<string, unknown>> = current.providers.map(
+      (provider) => {
+        const legacy = { ...provider } as Record<string, unknown>
+        Reflect.deleteProperty(legacy, 'providerType')
+        return {
+          ...legacy,
+          protocol: 'openai-compatible' as const,
+          adapterId: 'deepseek.chat-completions' as const,
+          profile: 'deepseek' as const,
+          revision: 7,
+          apiKeyRef: 'provider-key:legacy',
+          modelCatalog: [{ id: 'deepseek-v4-pro', ownedBy: 'deepseek' }],
+          modelOverrides: {
+            'deepseek-v4-pro': { contextWindowTokens: 128_000 },
+          },
+        }
+      },
+    )
+    providers.push({
+      ...providers[0]!,
+      id: 'generic',
+      label: 'Generic',
+      adapterId: 'openai-compatible.chat-completions',
+      profile: 'generic',
+      apiKeyRef: 'provider-key:generic',
+      model: 'generic-model',
+      modelCatalog: [{ id: 'generic-model' }],
+      modelOverrides: {},
+    })
+    await writeFile(
+      configPath,
+      JSON.stringify({ ...current, schemaVersion: 9, providers }),
+      'utf8',
+    )
+    const store = new ConfigStore(
+      configPath,
+      new SecretStore(
+        path.join(directory, 'secrets.json'),
+        new FakeSafeStorage(),
+      ),
+    )
+    await store.initialize()
+
+    expect(store.getInternalConfig()).toMatchObject({
+      schemaVersion: 10,
+      providers: [
+        {
+          providerType: 'deepseek.chat-completions',
+          revision: 7,
+          apiKeyRef: 'provider-key:legacy',
+          modelCatalog: [{ id: 'deepseek-v4-pro', ownedBy: 'deepseek' }],
+          modelOverrides: {
+            'deepseek-v4-pro': { contextWindowTokens: 128_000 },
+          },
+        },
+        {
+          providerType: 'generic.chat-completions',
+          apiKeyRef: 'provider-key:generic',
+          modelCatalog: [{ id: 'generic-model' }],
+        },
+      ],
+    })
+    const persisted = await readFile(configPath, 'utf8')
+    expect(persisted).toContain('"schemaVersion": 10')
+    expect(persisted).not.toContain('adapterId')
+    expect(persisted).not.toContain('"profile"')
+  })
+
+  it('deletes an incompatible v10 shape and rebuilds clean defaults', async () => {
     const { directory, configStore } = await createStores()
     const configPath = path.join(directory, 'config.json')
     const config = JSON.parse(await readFile(configPath, 'utf8')) as Record<
@@ -100,7 +172,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: 10,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).not.toHaveProperty(
       'legacyField',
@@ -110,13 +182,13 @@ describe('ConfigStore', () => {
   it('deletes malformed JSON and rebuilds clean defaults', async () => {
     const { directory, configStore } = await createStores()
     const configPath = path.join(directory, 'config.json')
-    await writeFile(configPath, '{"schemaVersion":9', 'utf8')
+    await writeFile(configPath, '{"schemaVersion":10', 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: 10,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: 10,
       limits: { maxStepsPerRun: 0 },
     })
   })
@@ -124,7 +196,7 @@ describe('ConfigStore', () => {
   it.each([
     ['fileChangeHistoryBytes', 100_000_000],
     ['maxAttachmentContextTokens', 64_000],
-  ])('resets a v9 file missing required limit %s', async (field, value) => {
+  ])('resets a v10 file missing required limit %s', async (field, value) => {
     const { directory, configStore } = await createStores()
     const configPath = path.join(directory, 'config.json')
     const config = JSON.parse(await readFile(configPath, 'utf8')) as {
@@ -134,7 +206,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: 10,
       limits: { [field]: value },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
@@ -175,7 +247,7 @@ describe('ConfigStore', () => {
       kind: 'provider',
       providerId: 'generic',
       label: 'Generic',
-      profile: 'generic',
+      providerType: 'generic.chat-completions',
       baseURL: 'https://provider.invalid',
       model: 'generic-model',
       reasoning: 'high',
@@ -253,7 +325,7 @@ describe('ConfigStore', () => {
     await expect(store.getDeepSeekApiKey()).resolves.toBe('stored-secret')
   })
 
-  it('writes v9 defaults atomically', async () => {
+  it('writes v10 defaults atomically', async () => {
     const { directory, configStore } = await createStores()
 
     await configStore.update({
@@ -267,7 +339,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(9)
+    expect(parsed.schemaVersion).toBe(10)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(0)
     expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
       80,
@@ -312,28 +384,29 @@ describe('ConfigStore', () => {
     )
   })
 
-  it('preserves an explicit adapter when an update does not change profile', async () => {
-    const { directory, configStore } = await createStores()
-    const configPath = path.join(directory, 'config.json')
-    const config = JSON.parse(await readFile(configPath, 'utf8')) as {
-      providers: Array<Record<string, unknown>>
-    }
-    config.providers[0]!.adapterId = 'openai-compatible.chat-completions'
-    await writeFile(configPath, JSON.stringify(config), 'utf8')
-    await configStore.reloadFromDisk()
+  it('preserves Provider Type when a later update omits it', async () => {
+    const { configStore } = await createStores()
+    const initial = configStore.getPublicConfig().providers[0]!
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      providerType: 'generic.chat-completions',
+      baseURL: initial.baseURL,
+      model: initial.model,
+      reasoning: initial.reasoning,
+    })
     const provider = configStore.getPublicConfig().providers[0]!
 
     await configStore.update({
       version: 1,
       kind: 'provider',
-      profile: provider.profile,
       baseURL: 'https://example.test/v1',
       model: provider.model,
       reasoning: provider.reasoning,
     })
 
     expect(configStore.getPublicConfig().providers[0]).toMatchObject({
-      adapterId: 'openai-compatible.chat-completions',
+      providerType: 'generic.chat-completions',
       revision: provider.revision + 1,
     })
   })
@@ -371,11 +444,11 @@ describe('ConfigStore', () => {
     config.schemaVersion = 99
     await writeFile(configPath, JSON.stringify(config), 'utf8')
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: 10,
     })
     expect(configStore.getMcpServers()).toHaveLength(0)
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: 10,
       mcpServers: [],
     })
   })
@@ -495,7 +568,7 @@ describe('ConfigStore', () => {
       kind: 'provider-settings',
       providerId: 'generic',
       label: 'Generic',
-      profile: 'generic',
+      providerType: 'generic.chat-completions',
       baseURL: 'https://generic.example/v1',
       model: 'generic-chat',
       reasoning: 'off',

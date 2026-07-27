@@ -54,7 +54,7 @@ export function createRuntimeIdentity(input: {
     input.runtime.services.sessions.providerToolDefinitions()
   const toolNames = input.runtime.services.sessions.toolNames()
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     sourceCommit: input.sourceCommit?.trim() || embeddedSourceCommit(),
     sourceTree: input.sourceTree ?? embeddedSourceTree(),
     runtimeImageDigest:
@@ -70,8 +70,7 @@ export function createRuntimeIdentity(input: {
       .sort((left, right) => left.id.localeCompare(right.id)),
     provider: {
       id: provider.id,
-      protocol: provider.protocol,
-      profile: provider.profile,
+      providerType: provider.providerType,
       model: provider.model,
       reasoning: provider.reasoning,
     },

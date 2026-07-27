@@ -15,9 +15,9 @@ import { SessionService, type SessionRuntimeGuard } from './session-service'
 
 const timestamp = '2026-07-23T00:00:00.000Z'
 const route = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
   purpose: 'main' as const,
-  adapterId: 'deepseek.chat-completions',
+  providerType: 'deepseek.chat-completions',
   providerId: 'deepseek',
   model: 'deepseek-chat',
   reasoning: 'off' as const,

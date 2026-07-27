@@ -297,9 +297,9 @@ describe('benchmark runner', { timeout: 15_000 }, () => {
             prefixHash: 'prefix',
             canonicalSource: [],
             modelRoute: {
-              schemaVersion: 1,
+              schemaVersion: 2,
               purpose: 'main',
-              adapterId: 'openai-compatible.chat-completions',
+              providerType: 'generic.chat-completions',
               providerId: 'benchmark-test',
               model: 'fake-model',
               reasoning: 'off',
@@ -698,9 +698,10 @@ function usage(totalTokens: number): HeadlessResult['usage'] {
 
 function config(): HeadlessConfig {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     provider: {
       id: 'benchmark-test',
+      providerType: 'generic.chat-completions',
       baseURL: 'http://provider.invalid/',
       model: 'fake-model',
       reasoning: 'off',

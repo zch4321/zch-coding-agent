@@ -96,32 +96,21 @@ export const PromptResourceRefSchema = Type.Object(
   { additionalProperties: false },
 )
 
-export const ProviderProtocolSchema = Type.Literal('openai-compatible')
-export type ProviderProtocol = Static<typeof ProviderProtocolSchema>
-
-export const ProviderAdapterIdSchema = Type.Union([
+export const ProviderTypeSchema = Type.Union([
   Type.Literal('deepseek.chat-completions'),
-  Type.Literal('openai-compatible.chat-completions'),
+  Type.Literal('generic.chat-completions'),
 ])
-export type ProviderAdapterId = Static<typeof ProviderAdapterIdSchema>
-
-export const ProviderProfileSchema = Type.Union([
-  Type.Literal('deepseek'),
-  Type.Literal('generic'),
-])
-export type ProviderProfile = Static<typeof ProviderProfileSchema>
+export type ProviderType = Static<typeof ProviderTypeSchema>
 
 export const ProviderPublicConfigSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
     label: Type.String({ minLength: 1, maxLength: 128 }),
-    protocol: ProviderProtocolSchema,
-    adapterId: ProviderAdapterIdSchema,
+    providerType: ProviderTypeSchema,
     revision: Type.Integer({
       minimum: 1,
       maximum: Number.MAX_SAFE_INTEGER,
     }),
-    profile: ProviderProfileSchema,
     baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
     reasoning: ReasoningEffortSchema,
@@ -145,7 +134,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(9),
+    schemaVersion: Type.Literal(10),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
@@ -457,7 +446,7 @@ export const ConfigSetRequestSchema = Type.Union([
       kind: Type.Literal('provider'),
       providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
       label: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
-      profile: Type.Optional(ProviderProfileSchema),
+      providerType: Type.Optional(ProviderTypeSchema),
       baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
       model: Type.String({ minLength: 1, maxLength: 256 }),
       contextWindowTokens: Type.Optional(
@@ -482,7 +471,7 @@ export const ConfigSetRequestSchema = Type.Union([
       kind: Type.Literal('provider-settings'),
       providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
       label: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
-      profile: Type.Optional(ProviderProfileSchema),
+      providerType: Type.Optional(ProviderTypeSchema),
       baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
       model: Type.String({ minLength: 1, maxLength: 256 }),
       contextWindowTokens: Type.Optional(

@@ -1,9 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox'
 import {
   PermissionModeSchema,
-  ProviderAdapterIdSchema,
-  ProviderProfileSchema,
-  ProviderProtocolSchema,
+  ProviderTypeSchema,
   PublicConfigSchema,
   ReasoningEffortSchema,
   RememberedRuleSchema,
@@ -21,13 +19,11 @@ export const AppProviderConfigSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
     label: Type.String({ minLength: 1, maxLength: 128 }),
-    protocol: ProviderProtocolSchema,
-    adapterId: ProviderAdapterIdSchema,
+    providerType: ProviderTypeSchema,
     revision: Type.Integer({
       minimum: 1,
       maximum: Number.MAX_SAFE_INTEGER,
     }),
-    profile: ProviderProfileSchema,
     baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
     reasoning: ReasoningEffortSchema,
@@ -59,7 +55,7 @@ export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
 
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(9),
+    schemaVersion: Type.Literal(10),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
@@ -95,16 +91,14 @@ export type AppConfig = Static<typeof AppConfigSchema>
 export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 9,
+  schemaVersion: 10,
   activeProviderId: DEFAULT_PROVIDER_ID,
   providers: [
     {
       id: DEFAULT_PROVIDER_ID,
       label: 'DeepSeek',
-      protocol: 'openai-compatible',
-      adapterId: 'deepseek.chat-completions',
+      providerType: 'deepseek.chat-completions',
       revision: 1,
-      profile: 'deepseek',
       baseURL: 'https://api.deepseek.com',
       model: 'deepseek-v4-pro',
       modelCatalog: [],
@@ -247,15 +241,13 @@ export function toPublicConfig(
         })
 
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     activeProviderId: config.activeProviderId,
     providers: config.providers.map((provider) => ({
       id: provider.id,
       label: provider.label,
-      protocol: provider.protocol,
-      adapterId: provider.adapterId,
+      providerType: provider.providerType,
       revision: provider.revision,
-      profile: provider.profile,
       baseURL: provider.baseURL,
       model: provider.model,
       reasoning: provider.reasoning,

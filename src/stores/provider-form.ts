@@ -1,9 +1,9 @@
-import type { ReasoningEffort } from '../../shared/config'
+import type { ProviderType, ReasoningEffort } from '../../shared/config'
 
 export const DEFAULT_PROVIDER_FORM = {
   providerId: 'deepseek',
   label: 'DeepSeek',
-  profile: 'deepseek' as 'deepseek' | 'generic',
+  providerType: 'deepseek.chat-completions' as ProviderType,
   baseURL: 'https://api.deepseek.com',
   model: 'deepseek-v4-pro',
   reasoning: 'high' as ReasoningEffort,
@@ -24,7 +24,7 @@ export function providerFormSignature(form: ProviderForm): string {
     baseURL: form.baseURL,
     providerId: form.providerId,
     label: form.label,
-    profile: form.profile,
+    providerType: form.providerType,
     model: form.model,
     reasoning: form.reasoning,
     approverProviderId: form.approverProviderId,

@@ -1,24 +1,7 @@
 import type { ProviderPublicConfig, PublicConfig } from '../../shared/config'
-import type { JsonObject, JsonValue } from '../../shared/json'
 import type { LlmUsageRecord } from '../../shared/usage'
 import { resolveModelProfiles, type ModelProfile } from './model-catalog'
-
-function metric(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
-    ? Math.floor(value)
-    : undefined
-}
-
-function objectField(value: unknown, key: string): JsonObject | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined
-  }
-
-  const field = Reflect.get(value, key)
-  return field && typeof field === 'object' && !Array.isArray(field)
-    ? (field as JsonObject)
-    : undefined
-}
+import type { ProviderUsage } from './provider'
 
 /** Normalizes provider usage against the exact model frozen for the call. */
 export function normalizeLlmUsage(input: {
@@ -27,14 +10,18 @@ export function normalizeLlmUsage(input: {
   provider: ProviderPublicConfig
   model: string
   modelProfile?: ModelProfile
-  raw: JsonValue
+  usage: ProviderUsage
 }): LlmUsageRecord | undefined {
-  if (!input.raw || typeof input.raw !== 'object' || Array.isArray(input.raw)) {
+  if (
+    input.usage.promptTokens === undefined &&
+    input.usage.completionTokens === undefined &&
+    input.usage.totalTokens === undefined &&
+    input.usage.reasoningTokens === undefined &&
+    input.usage.cacheHitTokens === undefined &&
+    input.usage.cacheMissTokens === undefined
+  ) {
     return undefined
   }
-
-  const usage = input.raw as JsonObject
-  const completionDetails = objectField(usage, 'completion_tokens_details')
   const model =
     input.modelProfile ??
     resolveModelProfiles(input.config, input.provider.id, input.model).find(
@@ -46,15 +33,15 @@ export function normalizeLlmUsage(input: {
     providerId: input.provider.id,
     providerLabel: input.provider.label,
     model: input.model,
-    promptTokens: metric(usage.prompt_tokens),
-    completionTokens: metric(usage.completion_tokens),
-    totalTokens: metric(usage.total_tokens),
-    reasoningTokens: metric(completionDetails?.reasoning_tokens),
-    cacheHitTokens: metric(usage.prompt_cache_hit_tokens),
-    cacheMissTokens: metric(usage.prompt_cache_miss_tokens),
+    promptTokens: input.usage.promptTokens,
+    completionTokens: input.usage.completionTokens,
+    totalTokens: input.usage.totalTokens,
+    reasoningTokens: input.usage.reasoningTokens,
+    cacheHitTokens: input.usage.cacheHitTokens,
+    cacheMissTokens: input.usage.cacheMissTokens,
     contextWindowTokens:
       model?.contextWindowTokens ?? input.config.limits.maxContextTokens,
     contextWindowSource: model?.capabilitySource ?? 'default',
-    raw: input.raw,
+    raw: input.usage.raw,
   }
 }

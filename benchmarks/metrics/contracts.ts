@@ -126,7 +126,7 @@ export interface BenchmarkComparisonIdentity {
   graderImageDigest: string
   providerId: string
   model: string
-  profile: string
+  providerType: string
   reasoning: string
   budget: {
     wallTimeMs: number

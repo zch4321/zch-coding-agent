@@ -63,19 +63,23 @@ function finiteMetric(value: JsonValue | undefined): number | undefined {
     : undefined
 }
 
-function sumMetric(events: TraceEvent[], names: string[]): number | null {
+function sumUsageMetric(
+  events: TraceEvent[],
+  name:
+    | 'promptTokens'
+    | 'completionTokens'
+    | 'totalTokens'
+    | 'cacheHitTokens'
+    | 'cacheMissTokens',
+): number | null {
   let total = 0
   let found = false
 
   for (const event of events) {
-    if (event.type !== 'llm.response') {
+    if (event.type !== 'llm.usage') {
       continue
     }
-
-    const usage = jsonObject(event.usage)
-    const value = names
-      .map((name) => finiteMetric(usage?.[name]))
-      .find((candidate) => candidate !== undefined)
+    const value = event.usage[name]
 
     if (value !== undefined) {
       found = true
@@ -465,17 +469,11 @@ export class TraceService {
         (sum, event) => sum + event.requestBytes,
         0,
       ),
-      promptTokens: sumMetric(events, ['prompt_tokens']),
-      completionTokens: sumMetric(events, ['completion_tokens']),
-      totalTokens: sumMetric(events, ['total_tokens']),
-      cacheHitTokens: sumMetric(events, [
-        'prompt_cache_hit_tokens',
-        'cache_hit_tokens',
-      ]),
-      cacheMissTokens: sumMetric(events, [
-        'prompt_cache_miss_tokens',
-        'cache_miss_tokens',
-      ]),
+      promptTokens: sumUsageMetric(events, 'promptTokens'),
+      completionTokens: sumUsageMetric(events, 'completionTokens'),
+      totalTokens: sumUsageMetric(events, 'totalTokens'),
+      cacheHitTokens: sumUsageMetric(events, 'cacheHitTokens'),
+      cacheMissTokens: sumUsageMetric(events, 'cacheMissTokens'),
       averageTtftMs: averageMetric(events, 'ttftMs'),
       averageTotalMs: averageMetric(events, 'totalMs'),
     }

@@ -2,6 +2,7 @@ import {
   access,
   appendFile,
   mkdtemp,
+  readFile,
   utimes,
   writeFile,
 } from 'node:fs/promises'
@@ -65,6 +66,51 @@ describe('JsonlTraceLogger', () => {
     const events = await readTraceFile(filePath)
     expect(events).toHaveLength(1)
     expect(events[0]?.type).toBe('session.start')
+  })
+
+  it('projects legacy route identity while leaving JSONL bytes unchanged', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
+    const filePath = path.join(directory, 'legacy-route.jsonl')
+    const legacyEvent = {
+      schemaVersion: 2,
+      seq: 1,
+      eventId: 'event:legacy-route',
+      ts: '2026-07-27T00:00:00.000Z',
+      type: 'llm.request',
+      sessionId,
+      runId: 'run:legacy-route',
+      callId: 'call:legacy-route',
+      scope: 'main',
+      normalizedMessages: [],
+      providerRequest: {},
+      requestBytes: 0,
+      prefixHash: '',
+      canonicalSource: [],
+      modelRoute: {
+        schemaVersion: 1,
+        purpose: 'main',
+        adapterId: 'openai-compatible.chat-completions',
+        providerId: 'generic',
+        model: 'legacy-model',
+        reasoning: 'off',
+        endpoint: 'https://provider.invalid/v1/chat/completions',
+        providerConfigRevision: 3,
+      },
+    }
+    const original = `${JSON.stringify(legacyEvent)}\n`
+    await writeFile(filePath, original)
+
+    const events = await readTraceFile(filePath)
+
+    expect(events[0]).toMatchObject({
+      type: 'llm.request',
+      modelRoute: {
+        schemaVersion: 2,
+        providerType: 'generic.chat-completions',
+        providerId: 'generic',
+      },
+    })
+    await expect(readFile(filePath, 'utf8')).resolves.toBe(original)
   })
 
   it('creates unique safe captures for Session ids with reserved characters', async () => {

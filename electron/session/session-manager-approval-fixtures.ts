@@ -1,16 +1,16 @@
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { AutoApprover } from '../permission/auto-approver'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 
-export class ScriptedEditProvider implements LLMProvider {
+export class ScriptedEditProvider extends ScriptedProviderHarness {
   calls = 0
 
-  async *stream(): AsyncIterable<ProviderEvent> {
+  async *run(): AsyncIterable<ProviderEvent> {
     this.calls += 1
 
     if (this.calls === 1) {
@@ -74,11 +74,11 @@ export class ScriptedEditProvider implements LLMProvider {
   }
 }
 
-export class ScriptedCommandProvider implements LLMProvider {
+export class ScriptedCommandProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
 

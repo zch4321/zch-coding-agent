@@ -4,11 +4,11 @@ import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { CallId } from '../../shared/ids'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 import { PromptRegistry } from '../prompts/registry'
 import { ProjectMetadataStore } from '../project/project-metadata-store'
 import { SessionManager } from './session-manager'
@@ -20,13 +20,11 @@ import {
 } from './session-manager-test-support'
 
 describe('SessionManager M1 workspace concurrency', () => {
-  class ConcurrentGateProvider implements LLMProvider {
+  class ConcurrentGateProvider extends ScriptedProviderHarness {
     readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
     readonly #releases: Array<() => void> = []
 
-    async *stream(
-      request: ProviderStreamRequest,
-    ): AsyncIterable<ProviderEvent> {
+    async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
       const index = this.requests.length
       this.requests.push(structuredClone(request.normalizedMessages))
       await new Promise<void>((resolve) => {
@@ -72,10 +70,10 @@ describe('SessionManager M1 workspace concurrency', () => {
     }
   }
 
-  class NonAbortableMetadataProvider implements LLMProvider {
+  class NonAbortableMetadataProvider extends ScriptedProviderHarness {
     calls = 0
 
-    async *stream(): AsyncIterable<ProviderEvent> {
+    async *run(): AsyncIterable<ProviderEvent> {
       this.calls += 1
 
       if (this.calls === 1) {

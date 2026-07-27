@@ -254,7 +254,7 @@ function createRunGroupIdentity(
     provider: {
       id: input.config.provider.id,
       model: input.config.provider.model,
-      profile: input.config.provider.profile ?? 'generic',
+      providerType: input.config.provider.providerType,
       reasoning: input.config.provider.reasoning ?? 'high',
     },
     protocol: input.protocol,

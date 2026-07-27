@@ -1,13 +1,12 @@
 import { Type, type Static } from '@sinclair/typebox'
 import type { PolicySignal } from '../../shared/agent-events'
-import type { JsonObject, JsonValue } from '../../shared/json'
+import type { JsonValue } from '../../shared/json'
 import type { MessageId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { ModelRouteSnapshot } from '../../shared/model-route'
 import { compileSchema } from '../schema-validator'
 import type { ToolCall, ToolDefinition } from '../tools/types'
-import type { LLMProvider } from '../providers/provider'
-import { chatAdapter } from '../providers/chat-completions-adapter'
+import type { ModelProvider, ProviderUsage } from '../providers/provider'
 import { canonicalHash } from '../session/canonical-history'
 
 const AutoApproverOutputSchema = Type.Object(
@@ -31,7 +30,7 @@ export interface AutoApproverInput {
 export interface AutoApproverResult extends AutoApproverOutput {
   valid: boolean
   failure?: 'timeout' | 'network' | 'invalid_output'
-  usage?: JsonValue
+  usage?: ProviderUsage
 }
 
 export interface AutoApprover {
@@ -95,13 +94,13 @@ export function strictAutoApproverOutput(text: string): AutoApproverResult {
 
 /** Evaluates tool approval requests through a dedicated provider route with strict output checks. */
 export class ProviderAutoApprover implements AutoApprover {
-  readonly #provider: LLMProvider
+  readonly #provider: ModelProvider
   readonly #timeoutMs: number
   readonly #systemPrompt: string
   readonly #route: ModelRouteSnapshot
 
   constructor(
-    provider: LLMProvider,
+    provider: ModelProvider,
     route: ModelRouteSnapshot,
     timeoutMs = 60_000,
     systemPrompt?: string,
@@ -128,7 +127,7 @@ export class ProviderAutoApprover implements AutoApprover {
     const relayAbort = () => controller.abort(signal.reason)
     signal.addEventListener('abort', relayAbort, { once: true })
     let text = ''
-    let usage: JsonValue | undefined
+    let usage: ProviderUsage | undefined
 
     try {
       const sessionId = 'approval:session' as SessionId
@@ -162,8 +161,7 @@ export class ProviderAutoApprover implements AutoApprover {
           },
         },
       ]
-      const adapter = chatAdapter(this.#route.adapterId)
-      const compiled = adapter.compile({
+      const compiled = this.#provider.compile({
         history: {
           sessionId,
           messages,
@@ -173,23 +171,27 @@ export class ProviderAutoApprover implements AutoApprover {
         tools: [],
         structuredOutput: 'json_object',
       })
-      for await (const event of this.#provider.stream({
-        providerRequest: compiled.body,
-        normalizedMessages: jsonValue(compiled.messages) as JsonObject[],
-        toolDefinitions: [],
+      let completed = false
+      for await (const event of this.#provider.stream(compiled, {
         signal: controller.signal,
       })) {
         if (event.type === 'text.delta') {
           text += event.delta
         } else if (event.type === 'completed') {
-          const completed = adapter.complete(event, { text, reasoning: '' })
-          text = completed.parts
+          if (completed) {
+            throw new Error('Approval provider produced multiple completions')
+          }
+          completed = true
+          text = event.turn.parts
             .flatMap((part) => (part.type === 'text' ? [part.text] : []))
             .join('\n')
-          if (hasUsageData(event.usage)) {
-            usage = event.usage
+          if (hasUsageData(event.turn.usage.raw)) {
+            usage = structuredClone(event.turn.usage)
           }
         }
+      }
+      if (!completed) {
+        throw new Error('Approval provider stream ended without completion')
       }
 
       return {

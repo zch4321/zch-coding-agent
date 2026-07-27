@@ -5,12 +5,12 @@ import path from 'node:path'
 import os from 'node:os'
 import type { PublicConfig } from '../../shared/config'
 import type { PromptBuildSummary } from '../../shared/trace'
-import type { JsonValue } from '../../shared/json'
 import type { MessageId } from '../../shared/ids'
 import type { CanonicalPromptKind, MessageRecord } from '../../shared/message'
 import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
+import type { ProviderToolDefinition } from '../providers/provider'
 import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import {
   formatAgentsInstructions,
@@ -749,7 +749,7 @@ export async function appendAgentsContextIfChanged(
 /** Selects history and tool context under the prompt-token budget while preserving required layers. */
 export function selectPromptMessages(options: {
   state: PromptHistoryState
-  tools: JsonValue[]
+  tools: ProviderToolDefinition[]
   maxPromptTokens: number
   estimation: PublicConfig['limits']['tokenEstimation']
 }): PromptSelection {

@@ -27,9 +27,15 @@ const agent = useAgentStore()
 const { t } = useI18n()
 const dirtyAction = ref<ProviderAction>()
 const deleteProviderId = ref<string>()
-const profileOptions = computed(() => [
-  { label: t('settings.providerProfileDeepSeek'), value: 'deepseek' },
-  { label: t('settings.providerProfileGeneric'), value: 'generic' },
+const providerTypeOptions = computed(() => [
+  {
+    label: t('settings.providerTypeDeepSeek'),
+    value: 'deepseek.chat-completions',
+  },
+  {
+    label: t('settings.providerTypeGeneric'),
+    value: 'generic.chat-completions',
+  },
 ])
 const reasoningOptions = computed(() => [
   { label: t('settings.reasoningOff'), value: 'off' },
@@ -251,15 +257,15 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <NInput v-model:value="agent.providerForm.label" />
         </label>
         <label class="settings-field">
-          <span>{{ t('settings.providerProfile') }}</span>
+          <span>{{ t('settings.providerType') }}</span>
           <NSelect
-            v-model:value="agent.providerForm.profile"
-            :options="profileOptions"
+            v-model:value="agent.providerForm.providerType"
+            :options="providerTypeOptions"
           />
         </label>
       </div>
       <p class="settings-footnote">
-        {{ t('settings.providerProfileHint') }}
+        {{ t('settings.providerTypeHint') }}
       </p>
       <label class="settings-field">
         <span>{{ t('settings.baseUrl') }}</span>

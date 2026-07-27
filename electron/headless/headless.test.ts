@@ -8,12 +8,13 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { BenchmarkAgentCase } from '../../shared/benchmark'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 import { parseHeadlessArguments } from './cli'
+import { loadHeadlessConfig } from './config'
 import type { HeadlessBenchmarkController, HeadlessConfig } from './contracts'
 import { HEADLESS_EXIT_CODES, runHeadlessMain } from './main'
 import { runHeadlessAgent } from './runner'
@@ -34,11 +35,11 @@ class StringSink extends Writable {
   }
 }
 
-class EditProvider implements LLMProvider {
+class EditProvider extends ScriptedProviderHarness {
   receivedApiKey = ''
   calls = 0
 
-  async *stream(): AsyncIterable<ProviderEvent> {
+  async *run(): AsyncIterable<ProviderEvent> {
     this.calls += 1
     if (this.calls > 1) {
       yield messageCompletion('edit-final', 'Created the requested file.')
@@ -80,11 +81,11 @@ class EditProvider implements LLMProvider {
   }
 }
 
-class PlanProvider implements LLMProvider {
+class PlanProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
     if (this.calls === 1) {
@@ -118,8 +119,8 @@ class PlanProvider implements LLMProvider {
   }
 }
 
-class HangingProvider implements LLMProvider {
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+class HangingProvider extends ScriptedProviderHarness {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     if (request.signal.aborted) throw request.signal.reason
     await new Promise<void>((_resolve, reject) => {
       const abort = () => reject(request.signal.reason)
@@ -129,12 +130,12 @@ class HangingProvider implements LLMProvider {
   }
 }
 
-class RepairProvider implements LLMProvider {
+class RepairProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
   requestBodies: JsonValue[] = []
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
     this.requestBodies.push(structuredClone(request.providerRequest ?? null))
@@ -193,9 +194,10 @@ function toolCompletion(
 
 function config(overrides: Partial<HeadlessConfig> = {}): HeadlessConfig {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     provider: {
       id: 'fake',
+      providerType: 'generic.chat-completions',
       baseURL: 'https://provider.invalid',
       model: 'fake-model',
       reasoning: 'off',
@@ -284,6 +286,44 @@ afterEach(async () => {
 })
 
 describe('Headless host', () => {
+  it('loads valid v1 config through the v2 Provider Type migration', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-v1-'))
+    temporaryDirectories.push(directory)
+    const configPath = path.join(directory, 'headless.json')
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        provider: {
+          id: 'legacy-deepseek',
+          label: 'Legacy DeepSeek',
+          protocol: 'openai-compatible',
+          profile: 'deepseek',
+          baseURL: 'https://api.deepseek.com',
+          model: 'legacy-model',
+          reasoning: 'max',
+          credentialEnv: 'LEGACY_KEY',
+        },
+        maxAutoPlanApprovals: 2,
+      }),
+      'utf8',
+    )
+
+    await expect(loadHeadlessConfig(configPath)).resolves.toEqual({
+      schemaVersion: 2,
+      provider: {
+        id: 'legacy-deepseek',
+        label: 'Legacy DeepSeek',
+        providerType: 'deepseek.chat-completions',
+        baseURL: 'https://api.deepseek.com',
+        model: 'legacy-model',
+        reasoning: 'max',
+        credentialEnv: 'LEGACY_KEY',
+      },
+      maxAutoPlanApprovals: 2,
+    })
+  })
+
   it('parses only the fixed run command surface', () => {
     const parsed = parseHeadlessArguments([
       'run',
@@ -511,7 +551,7 @@ describe('Headless host', () => {
     const output = new StringSink()
     const provider = new RepairProvider()
     const omittedReasoning = config()
-    omittedReasoning.provider.profile = 'deepseek'
+    omittedReasoning.provider.providerType = 'deepseek.chat-completions'
     delete omittedReasoning.provider.reasoning
 
     const result = await runHeadlessAgent({

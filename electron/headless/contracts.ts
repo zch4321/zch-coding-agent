@@ -4,7 +4,7 @@ import {
   TerminalEventSchema,
 } from '../../shared/agent-events'
 import {
-  ProviderProfileSchema,
+  ProviderTypeSchema,
   PublicConfigSchema,
   ReasoningEffortSchema,
 } from '../../shared/config'
@@ -15,8 +15,27 @@ const HeadlessProviderConfigSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
     label: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    providerType: ProviderTypeSchema,
+    baseURL: Type.String({ minLength: 1, maxLength: 2_048 }),
+    model: Type.String({ minLength: 1, maxLength: 256 }),
+    reasoning: Type.Optional(ReasoningEffortSchema),
+    credentialEnv: Type.String({
+      minLength: 1,
+      maxLength: 128,
+      pattern: '^[A-Za-z_][A-Za-z0-9_]*$',
+    }),
+  },
+  { additionalProperties: false },
+)
+
+const LegacyHeadlessProviderConfigV1Schema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 128 }),
+    label: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     protocol: Type.Optional(Type.Literal('openai-compatible')),
-    profile: Type.Optional(ProviderProfileSchema),
+    profile: Type.Optional(
+      Type.Union([Type.Literal('deepseek'), Type.Literal('generic')]),
+    ),
     baseURL: Type.String({ minLength: 1, maxLength: 2_048 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
     reasoning: Type.Optional(ReasoningEffortSchema),
@@ -53,7 +72,7 @@ const HeadlessToolTotalsSchema = Type.Object(
 
 export const HeadlessConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(1),
+    schemaVersion: Type.Literal(2),
     provider: HeadlessProviderConfigSchema,
     limits: Type.Optional(
       Type.Partial(PublicConfigSchema.properties.limits, {
@@ -88,6 +107,22 @@ export const HeadlessConfigSchema = Type.Object(
   { additionalProperties: false },
 )
 export type HeadlessConfig = Static<typeof HeadlessConfigSchema>
+
+export const LegacyHeadlessConfigV1Schema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    provider: LegacyHeadlessProviderConfigV1Schema,
+    limits: HeadlessConfigSchema.properties.limits,
+    assistant: HeadlessConfigSchema.properties.assistant,
+    skills: HeadlessConfigSchema.properties.skills,
+    network: HeadlessConfigSchema.properties.network,
+    mcpServers: HeadlessConfigSchema.properties.mcpServers,
+    maxAutoPlanApprovals: HeadlessConfigSchema.properties.maxAutoPlanApprovals,
+    caseDigest: HeadlessConfigSchema.properties.caseDigest,
+  },
+  { additionalProperties: false },
+)
+export type LegacyHeadlessConfigV1 = Static<typeof LegacyHeadlessConfigV1Schema>
 
 export const HeadlessRunStatusSchema = Type.Union([
   Type.Literal('completed'),

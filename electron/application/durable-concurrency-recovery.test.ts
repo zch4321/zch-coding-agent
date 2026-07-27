@@ -4,11 +4,11 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CallId, SessionId } from '../../shared/ids'
 import type { ModelSelection } from '../../shared/model-route'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 import type { ConfigStore } from '../config/store'
 import { createConfig, waitFor } from '../session/session-manager-test-support'
 import {
@@ -33,12 +33,12 @@ function createBackendForTest(
   })
 }
 
-class RecoveryProvider implements LLMProvider {
+class RecoveryProvider extends ScriptedProviderHarness {
   calls = 0
   readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
   toolOnCall?: number
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
     if (this.calls === this.toolOnCall) {

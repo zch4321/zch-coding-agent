@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import type { AutoApprover } from '../permission/auto-approver'
 import { RuntimeIdentitySchema } from '../../shared/runtime-identity'
 import type { RuntimeIdentity } from '../../shared/runtime-identity'
-import type { LLMProvider } from '../providers/provider'
+import type { ModelProvider } from '../providers/provider'
 import { createBackendRuntime } from '../application/create-backend-runtime'
 import { createRuntimeIdentity, sha256Json } from '../runtime/runtime-identity'
 import type { RunCompletion } from '../runtime/runtime-events'
@@ -56,7 +56,7 @@ export interface RunHeadlessAgentOptions {
   providerFactory?: (options: {
     config: ReturnType<import('../config/store').ConfigStore['getPublicConfig']>
     apiKey: string
-  }) => LLMProvider
+  }) => ModelProvider
   autoApproverFactory?: (options: {
     config: ReturnType<import('../config/store').ConfigStore['getPublicConfig']>
     apiKey: string

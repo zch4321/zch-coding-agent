@@ -11,11 +11,11 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { CallId, SessionId } from '../../shared/ids'
 import { YOLO_NOTICE_VERSION } from '../../shared/notices'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 import { createConfig } from '../session/session-manager-test-support'
 import {
   createBackendRuntime,
@@ -39,16 +39,18 @@ function createBackendForTest(
   })
 }
 
-class FileMutationProvider implements LLMProvider {
+class FileMutationProvider extends ScriptedProviderHarness {
   calls = 0
   readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
 
   constructor(
     readonly toolId: 'create_file' | 'apply_patch' | 'delete_file',
     readonly args: Record<string, string>,
-  ) {}
+  ) {
+    super()
+  }
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
     if (this.calls === 1) {
@@ -101,7 +103,7 @@ class MultiFileMutationProvider extends FileMutationProvider {
     super('create_file', {})
   }
 
-  override async *stream(
+  override async *run(
     request: ProviderStreamRequest,
   ): AsyncIterable<ProviderEvent> {
     this.calls += 1

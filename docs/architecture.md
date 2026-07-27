@@ -1,6 +1,6 @@
 # 架构设计文档 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 已完成 P0–P10；P11 Provider Runtime Foundation 设计已冻结、实现中 · 2026-07-27
+> 状态：Backend Architecture v2.1 已完成 P0–P11 · 2026-07-27
 >
 > 配套文档：[`requirements.md`](./requirements.md) 定义产品能力，[`frontend-spec.md`](./frontend-spec.md) 定义前端信息架构与交互验收。
 >
@@ -147,8 +147,6 @@ electron/
     generic-chat-completions-provider.ts
     chat-completions-shared.ts
     model-route-resolver.ts
-    fixtures/
-      protocol-shape-test-providers.ts # Responses/Anthropic test-only
   prompts/
   tools/
   permission/
@@ -1547,7 +1545,7 @@ Docker worker、isolated grader、credential proxy、case identity、pass@k work
 
 P0–P10 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路径均使用唯一 `createBackendRuntime` 与 SQLite Durable Backend。Desktop 数据库为 `userData/agent.db`；数据库打开或 migration 失败时显示阻塞恢复对话框，不回退 Workbench。Headless 使用任务独立临时数据库并在退出时关闭、删除。
 
-P11 Provider Runtime Foundation 的目标设计已冻结，正在把 `Protocol Adapter + transport` 双层调用切换为扁平 `ModelProvider.compile/stream`。首批生产实现为 `deepseek.chat-completions` 与 `generic.chat-completions`；配置、route 和 continuation 统一使用 `providerType`，Responses、Anthropic 与 Google 延后到独立阶段。
+P11 Provider Runtime Foundation 已完成。Main、compact、auto-compact budget check 与 auto approver 均使用扁平 `ModelProvider.compile/stream`；首批生产实现为互不继承的 `deepseek.chat-completions` 与 `generic.chat-completions`。配置、route 和 continuation 已统一使用 `providerType`，Responses、Anthropic 与 Google 延后到独立阶段。
 
 Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、每 Session runtime overlay 和 UI-only draft/selection。首次发送前不创建空 Session；所有 durable command response 与 `domain-state:event` 经同一 reconciler 处理 cursor/revision、重复 delivery、缺口和 backend instance 变化。
 
@@ -1557,6 +1555,6 @@ Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、
 
 SQLite transaction callback 通过 authorizer 拒绝事务控制 SQL；commit listener 逐项隔离；backend dispose 使用共享 promise 排空 live runtime/coordinator 后关闭数据库。FileChange retention 由 migration 维护单行总量和 trigger，不再每次插入全表 `SUM`。Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。Markdown Conversation import/export 暂停并在 UI 中禁用；Trace transcript export 保持可用。
 
-当前没有已发布用户配置；v8→v9 及 v9 开发期中间结构不做保字段迁移、备份或孤儿 secret 清理，不兼容/损坏配置执行 reset-only。首个 v9 正式版本实际发布后，后续不兼容配置变化必须升版本并重新设计迁移策略。
+AppConfig v10 会把合法 v9 Provider 配置无损迁移为 `providerType`，保留 API-key reference、模型目录、模型覆盖、revision 和其他设置；不兼容、损坏或更早版本仍执行 reset-only。Headless v2 在读取时迁移合法 v1 输入；SQLite v4 原位迁移历史 route/continuation identity，旧 JSONL trace 只在读取时投影而不改写文件。
 
 P3 review 建议、N-3/N-4 和 201+ 数据量的额外 Electron E2E 明确延后，不属于 P10 发布门禁；现有单元/集成测试继续覆盖 201+ Session、Message 和 FileChange 分页。产品路径不再保留双轨、兼容开关或 legacy fallback。

@@ -18,8 +18,8 @@ import type {
   ProviderStreamContext,
 } from './provider'
 
-export interface DeepSeekProviderOptions {
-  providerId?: string
+export interface GenericChatCompletionsProviderOptions {
+  providerId: string
   baseURL: string
   endpoint?: string
   apiKey: string
@@ -29,18 +29,18 @@ export interface DeepSeekProviderOptions {
   timeoutMs?: number
 }
 
-/** Implements DeepSeek's Chat Completions request and response behavior. */
-export class DeepSeekProvider implements ModelProvider {
-  readonly providerType = 'deepseek.chat-completions' as const
+/** Implements the generic OpenAI-compatible Chat Completions fallback. */
+export class GenericChatCompletionsProvider implements ModelProvider {
+  readonly providerType = 'generic.chat-completions' as const
   readonly #providerId: string
   readonly #transport: HttpSseTransport
   readonly #now: () => number
   readonly #createCallId: () => CallId
 
-  constructor(options: DeepSeekProviderOptions) {
-    this.#providerId = options.providerId ?? 'deepseek'
+  constructor(options: GenericChatCompletionsProviderOptions) {
+    this.#providerId = options.providerId
     this.#transport = new HttpSseTransport({
-      providerId: this.#providerId,
+      providerId: options.providerId,
       endpoint:
         options.endpoint ?? resolveChatCompletionsEndpoint(options.baseURL),
       apiKey: options.apiKey,
@@ -51,7 +51,7 @@ export class DeepSeekProvider implements ModelProvider {
     this.#createCallId = options.createCallId ?? createChatCallId
   }
 
-  /** Compiles canonical input with DeepSeek thinking parameters. */
+  /** Compiles canonical input without vendor-specific request fields. */
   compile(input: ProviderCompileInput): CompiledProviderCall {
     if (input.route.providerType !== this.providerType) {
       throw new TypeError(
@@ -73,12 +73,6 @@ export class DeepSeekProvider implements ModelProvider {
       ...(input.structuredOutput
         ? { response_format: { type: input.structuredOutput } }
         : {}),
-      thinking: {
-        type: input.route.reasoning === 'off' ? 'disabled' : 'enabled',
-      },
-      ...(input.route.reasoning === 'off'
-        ? {}
-        : { reasoning_effort: input.route.reasoning }),
     } as JsonObject
     return {
       request,
@@ -87,7 +81,7 @@ export class DeepSeekProvider implements ModelProvider {
     }
   }
 
-  /** Sends and normalizes one compiled DeepSeek request. */
+  /** Sends and normalizes one generic Chat Completions request. */
   async *stream(
     call: CompiledProviderCall,
     context: ProviderStreamContext,

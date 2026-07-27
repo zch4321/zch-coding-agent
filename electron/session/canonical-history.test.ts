@@ -16,9 +16,9 @@ import {
 } from './canonical-history'
 
 const route: ModelRouteSnapshot = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   purpose: 'main',
-  adapterId: 'deepseek.chat-completions',
+  providerType: 'deepseek.chat-completions',
   providerId: 'deepseek',
   model: 'deepseek-chat',
   reasoning: 'high',

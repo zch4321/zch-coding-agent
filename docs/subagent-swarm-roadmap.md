@@ -1,6 +1,6 @@
 # Subagent 与 Swarm Roadmap
 
-> 状态：设计已确认，尚未实现。
+> 状态：P11 Provider Runtime Foundation 前置已完成；Subagent 与 Swarm 尚未实现。
 >
 > 本文定义通用只读子 Agent 和 Swarm Tool 的产品语义、后端边界与实施顺序。已落地后的稳定事实应迁入 `architecture.md` 和 `requirements.md`，本文继续只保留未完成阶段与后续扩展。
 

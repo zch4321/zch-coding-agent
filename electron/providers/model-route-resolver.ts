@@ -5,12 +5,10 @@ import type {
   ModelSelection,
   ProviderPurpose,
 } from '../../shared/model-route'
-import {
-  assertModelRouteSnapshotSafe,
-  resolveChatCompletionsEndpoint,
-} from '../../shared/model-route'
+import { assertModelRouteSnapshotSafe } from '../../shared/model-route'
 import type { ConfigStore } from '../config/store'
 import { resolveModelProfiles, type ModelProfile } from './model-catalog'
+import { resolveProviderEndpoint } from './provider-factory'
 
 export interface ResolvedModelRoute {
   snapshot: ModelRouteSnapshot
@@ -30,13 +28,13 @@ async function resolve(
     throw new Error(`Provider is not configured: ${selection.providerId}`)
   }
   const snapshot: ModelRouteSnapshot = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose,
-    adapterId: provider.adapterId,
+    providerType: provider.providerType,
     providerId: provider.id,
     model: selection.model,
     reasoning: selection.reasoning,
-    endpoint: resolveChatCompletionsEndpoint(provider.baseURL),
+    endpoint: resolveProviderEndpoint(provider.providerType, provider.baseURL),
     providerConfigRevision: provider.revision,
   }
   assertModelRouteSnapshotSafe(snapshot)

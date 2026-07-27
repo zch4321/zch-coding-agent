@@ -7,7 +7,7 @@ import type {
   SessionId,
   TerminalId,
 } from '../../shared/ids'
-import type { JsonValue } from '../../shared/json'
+import type { ProviderToolDefinition } from '../providers/provider'
 import type { MessageRecord } from '../../shared/message'
 import type { ModelSelection } from '../../shared/model-route'
 import type { RunContext } from '../../shared/context'
@@ -811,7 +811,7 @@ export class SessionManager {
   }
 
   /** Returns cloned tool definitions in the shape exposed to the provider. */
-  providerToolDefinitions(): JsonValue[] {
+  providerToolDefinitions(): ProviderToolDefinition[] {
     return structuredClone(this.#toolRegistry.providerDefinitions())
   }
 

@@ -335,11 +335,11 @@ const zhCN = {
     saveAndContinue: '保存并继续',
     discardAndContinue: '放弃修改',
     providerLabel: 'Provider 名称',
-    providerProfile: 'Provider Profile',
-    providerProfileDeepSeek: 'DeepSeek',
-    providerProfileGeneric: '通用 OpenAI 兼容',
-    providerProfileHint:
-      'DeepSeek profile 会发送 thinking/reasoning_effort；通用 OpenAI 兼容 profile 不发送 DeepSeek 专有参数。',
+    providerType: 'Provider Type',
+    providerTypeDeepSeek: 'DeepSeek Chat Completions',
+    providerTypeGeneric: '通用 Chat Completions',
+    providerTypeHint:
+      'Provider Type 对应代码实现。DeepSeek 会发送专有 thinking 参数；通用类型作为 OpenAI 兼容兜底。',
     baseUrl: '基础 URL',
     mainModel: '主模型',
     contextOverride: '上下文窗口覆盖值',

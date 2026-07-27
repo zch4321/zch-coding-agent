@@ -380,7 +380,7 @@ describe('SessionManager prompt and trace', () => {
       kind: 'provider',
       providerId: 'generic',
       label: 'Generic',
-      profile: 'generic',
+      providerType: 'generic.chat-completions',
       baseURL: 'https://generic.invalid/v1',
       model: 'generic-model',
       reasoning: 'off',
@@ -450,102 +450,44 @@ describe('SessionManager prompt and trace', () => {
     ])
   })
 
-  it.each([
-    {
-      name: 'protected route fields',
-      patch: { route: { model: 'forbidden' } },
-      error: 'protected field: route',
-    },
-    {
-      name: 'invalid wire DTOs',
-      patch: { request: { messages: 'invalid' } },
-      error: 'protected request field: model',
-    },
-    {
-      name: 'over-budget parameters',
-      patch: { params: { stop: 'x'.repeat(500_000) } },
-      error: 'exceeded the model context budget',
-    },
-    {
-      name: 'thinking mode',
-      patch: { params: { thinking: { type: 'disabled' } } },
-      error: 'unsupported parameter: thinking',
-    },
-    {
-      name: 'reasoning effort',
-      patch: { params: { reasoning_effort: 'off' } },
-      error: 'unsupported parameter: reasoning_effort',
-    },
-    {
-      name: 'response format',
-      patch: { params: { response_format: { type: 'text' } } },
-      error: 'unsupported parameter: response_format',
-    },
-    {
-      name: 'invalid safe parameter',
-      patch: { params: { temperature: { high: true } } },
-      error: 'temperature must be a finite number',
-    },
-  ])(
-    'rejects beforeLLMCall $name before network send',
-    async (fixture) => {
-      const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-hook-'))
-      const workspace = path.join(directory, 'workspace')
-      await mkdir(workspace)
-      const store = await createConfig(directory)
-      if (fixture.name === 'over-budget parameters') {
-        const providerConfig = store.getPublicConfig().providers[0]!
-        await store.update({
-          version: 1,
-          kind: 'provider',
-          baseURL: providerConfig.baseURL,
-          model: providerConfig.model,
-          reasoning: providerConfig.reasoning,
-          contextWindowTokens: 160_000,
-          maxOutputTokens: 8_000,
-        })
-      }
-      const provider = new ForkProvider()
-      const pluginBus = new PluginEventBus()
-      pluginBus.on('beforeLLMCall', () => ({ patch: fixture.patch }) as never)
-      const sent: AgentEventEnvelope[] = []
-      const manager = new SessionManager({
-        configStore: store,
-        traceDirectory: path.join(directory, 'traces'),
-        eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
-        providerFactory: () => provider,
-        pluginBus,
-      })
-      const sessionId = await manager.createSession({
-        workspace,
-        mode: 'readonly',
-        provider: 'deepseek',
-      })
-      manager.startRun({
-        sessionId,
-        message: 'hook validation',
-        clientRequestId: `hook-${fixture.name}`,
-      })
-      await waitFor(
-        () =>
-          sent.some(
-            ({ event }) =>
-              event.type === 'run.status' && event.status === 'failed',
-          ),
-        5_000,
-      )
-      expect(
-        sent.find(
-          ({ event }) =>
-            event.type === 'run.status' && event.status === 'failed',
-        )?.event,
-      ).toMatchObject({
-        type: 'run.status',
-        error: { message: expect.stringContaining(fixture.error) },
-      })
-      expect(provider.calls).toBe(0)
-      await manager.closeSession(sessionId)
-    },
-    15_000,
-  )
+  it('keeps beforeLLMCall read-only and does not block on hook failure', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-hook-'))
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const provider = new ForkProvider()
+    const diagnostics: string[] = []
+    const pluginBus = new PluginEventBus({
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic.message),
+    })
+    pluginBus.on('beforeLLMCall', (context) => {
+      expect(Object.isFrozen(context.request)).toBe(true)
+      Reflect.set(context.request, 'model', 'forbidden')
+      throw new Error('observer failed')
+    })
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+      pluginBus,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: 'hook observation',
+      clientRequestId: 'hook-observation',
+    })
+    await waitFor(() => provider.calls === 1, 5_000)
+    expect(diagnostics).toContain('observer failed')
+    expect(provider.providerRequestOverride).toMatchObject({
+      model: 'deepseek-v4-pro',
+    })
+    await manager.closeSession(sessionId)
+  }, 15_000)
 })

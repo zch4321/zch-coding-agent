@@ -5,11 +5,11 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { JsonValue } from '../../shared/json'
 import type { CallId, FileChangeId } from '../../shared/ids'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 import { PromptRegistry } from '../prompts/registry'
 import type {
   FileChangeExecutionPort,
@@ -22,7 +22,7 @@ import {
   waitFor,
 } from './session-manager-test-support'
 
-class DeferredReadProvider implements LLMProvider {
+class DeferredReadProvider extends ScriptedProviderHarness {
   readonly entered: Promise<void>
   #resolveEntered!: () => void
   #release!: () => void
@@ -30,6 +30,7 @@ class DeferredReadProvider implements LLMProvider {
   calls = 0
 
   constructor() {
+    super()
     this.entered = new Promise((resolve) => {
       this.#resolveEntered = resolve
     })
@@ -42,7 +43,7 @@ class DeferredReadProvider implements LLMProvider {
     this.#release()
   }
 
-  async *stream(): AsyncIterable<ProviderEvent> {
+  async *run(): AsyncIterable<ProviderEvent> {
     this.calls += 1
     if (this.calls === 1) {
       this.#resolveEntered()
@@ -54,11 +55,11 @@ class DeferredReadProvider implements LLMProvider {
   }
 }
 
-class CreateWarningProvider implements LLMProvider {
+class CreateWarningProvider extends ScriptedProviderHarness {
   calls = 0
   readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
     if (this.calls === 1) {
@@ -248,7 +249,7 @@ describe('SessionManager durable FileChange port', () => {
 async function createManager(input: {
   directory: string
   configStore: Awaited<ReturnType<typeof createConfig>>
-  provider: LLMProvider
+  provider: ScriptedProviderHarness
   fileChangeExecution: FileChangeExecutionPort
 }) {
   return new SessionManager({

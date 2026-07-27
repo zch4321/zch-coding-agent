@@ -1,7 +1,71 @@
+import { createHash } from 'node:crypto'
+import type { ProviderType } from '../../shared/config'
 import type { JsonObject, JsonValue } from '../../shared/json'
+import type {
+  MessagePart,
+  ProviderContinuationEnvelope,
+} from '../../shared/message'
+import type { ModelRouteSnapshot } from '../../shared/model-route'
+import type { CompiledCanonicalHistory } from '../session/canonical-history'
 import type { ToolCall } from '../tools/types'
 
-/** Events emitted by a provider transport while executing one compiled request. */
+/** Provider-neutral tool metadata compiled into one provider's wire schema. */
+export interface ProviderToolDefinition {
+  name: string
+  description: string
+  inputSchema: JsonValue
+  intentParameter: string
+}
+
+/** Canonical input required to compile one provider request without I/O. */
+export interface ProviderCompileInput {
+  history: CompiledCanonicalHistory
+  route: ModelRouteSnapshot
+  tools: ProviderToolDefinition[]
+  structuredOutput?: 'json_object'
+}
+
+/** Deterministic, credential-free provider request ready for tracing and streaming. */
+export interface CompiledProviderCall {
+  request: JsonObject
+  normalizedMessages: JsonObject[]
+  tools: ProviderToolDefinition[]
+}
+
+/** Runtime-only controls used while sending one compiled provider request. */
+export interface ProviderStreamContext {
+  signal: AbortSignal
+}
+
+/** Normalized token metrics plus the exact provider-native usage payload. */
+export interface ProviderUsage {
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  reasoningTokens?: number
+  cacheHitTokens?: number
+  cacheMissTokens?: number
+  raw: JsonValue
+}
+
+/** Canonical assistant turn produced by a completed provider stream. */
+export interface CompletedAssistantTurn {
+  parts: MessagePart[]
+  toolCalls: ToolCall[]
+  normalizedReasoningText?: string
+  providerContinuation?: ProviderContinuationEnvelope
+  usage: ProviderUsage
+  finishReason: string
+}
+
+/** Bounded timing metrics recorded for one provider request. */
+export interface ProviderTiming {
+  ttftMs: number | null
+  totalMs: number
+  responseBytes: number
+}
+
+/** Events emitted while executing one compiled provider request. */
 export type ProviderEvent =
   | {
       type: 'text.delta'
@@ -22,39 +86,32 @@ export type ProviderEvent =
       raw: JsonValue
     }
   | {
-      type: 'usage'
-      usage: JsonValue
-      raw: JsonValue
-    }
-  | {
       type: 'completed'
+      turn: CompletedAssistantTurn
       rawResponse: JsonValue
-      turn: JsonValue
-      toolCalls: ToolCall[]
-      usage: JsonValue
-      finishReason?: string
       providerState: JsonValue
-      timing: JsonValue
+      timing: ProviderTiming
     }
 
-/** Bounded diagnostics captured immediately before a provider request is sent. */
-export interface ProviderRequestSnapshot {
-  normalizedMessages: JsonValue[]
-  providerRequest: JsonValue
+/** Flat provider boundary used by main, compact, and approval model calls. */
+export interface ModelProvider {
+  readonly providerType: ProviderType
+  compile(input: ProviderCompileInput): CompiledProviderCall
+  stream(
+    call: CompiledProviderCall,
+    context: ProviderStreamContext,
+  ): AsyncIterable<ProviderEvent>
+}
+
+/** Computes stable, credential-free diagnostics for a compiled provider call. */
+export function providerRequestDiagnostics(call: CompiledProviderCall): {
   requestBytes: number
   prefixHash: string
-}
-
-/** Opaque protocol request passed from an adapter to its streaming transport. */
-export interface ProviderStreamRequest {
-  providerRequest: JsonObject
-  normalizedMessages: JsonObject[]
-  toolDefinitions: JsonValue[]
-  signal: AbortSignal
-  onRequest?: (snapshot: ProviderRequestSnapshot) => Promise<void> | void
-}
-
-/** Protocol-neutral streaming boundary used by the agent runtime. */
-export interface LLMProvider {
-  stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent>
+} {
+  return {
+    requestBytes: Buffer.byteLength(JSON.stringify(call.request), 'utf8'),
+    prefixHash: createHash('sha256')
+      .update(JSON.stringify(call.normalizedMessages))
+      .digest('hex'),
+  }
 }

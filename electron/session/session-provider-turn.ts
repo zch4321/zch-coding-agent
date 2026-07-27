@@ -1,20 +1,18 @@
 import { isDeepStrictEqual } from 'node:util'
-import type { ProviderPublicConfig } from '../../shared/config'
 import type { CallId } from '../../shared/ids'
-import type { JsonObject, JsonValue } from '../../shared/json'
-import type { MessagePart } from '../../shared/message'
+import type { JsonValue } from '../../shared/json'
+import type {
+  MessagePart,
+  ProviderContinuationEnvelope,
+} from '../../shared/message'
 import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'
 import type { PluginEventBus } from '../plugins/event-bus'
-import { OpenAICompatibleProvider } from '../providers/deepseek-provider'
+import { createConfiguredProvider } from '../providers/provider-factory'
 import {
-  assertChatCompletionsRequestDto,
-  chatAdapter,
-} from '../providers/chat-completions-adapter'
-import type { CompletedAssistantTurn } from '../providers/provider-protocol'
-import type {
-  ProviderEvent,
-  ProviderRequestSnapshot,
+  providerRequestDiagnostics,
+  type CompletedAssistantTurn,
+  type ProviderEvent,
 } from '../providers/provider'
 import { normalizeLlmUsage } from '../providers/usage'
 import type { ToolCall } from '../tools/types'
@@ -47,72 +45,7 @@ export interface ProviderTurnResult {
   text: string
   reasoning: string
   finishReason: string
-  continuation?: {
-    schemaVersion: 1
-    adapterId: string
-    format: string
-    data: JsonValue
-  }
-}
-
-const MUTABLE_REQUEST_FIELDS = new Set([
-  'messages',
-  'temperature',
-  'top_p',
-  'max_tokens',
-  'max_completion_tokens',
-  'presence_penalty',
-  'frequency_penalty',
-  'stop',
-  'seed',
-  'logprobs',
-  'top_logprobs',
-])
-const CREDENTIAL_FIELD =
-  /^(?:authorization|api[-_]?key|credential|password|secret|access[-_]?token|bearer)$/iu
-
-function jsonObject(value: unknown, label: string): JsonObject {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new TypeError(`${label} must be a JSON object`)
-  }
-  return toJsonValue(value) as JsonObject
-}
-
-function assertImmutableRequest(
-  original: JsonObject,
-  candidate: JsonObject,
-): void {
-  for (const field of new Set([
-    ...Object.keys(original),
-    ...Object.keys(candidate),
-  ])) {
-    if (MUTABLE_REQUEST_FIELDS.has(field)) continue
-    if (!isDeepStrictEqual(candidate[field], original[field])) {
-      throw new TypeError(
-        `beforeLLMCall cannot modify protected request field: ${field}`,
-      )
-    }
-  }
-  assertNoCredentialFields(candidate)
-  assertChatCompletionsRequestDto(candidate)
-}
-
-function assertNoCredentialFields(value: JsonValue, path = 'request'): void {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) =>
-      assertNoCredentialFields(item, `${path}[${index}]`),
-    )
-    return
-  }
-  if (!value || typeof value !== 'object') return
-  for (const [field, nested] of Object.entries(value)) {
-    if (CREDENTIAL_FIELD.test(field)) {
-      throw new TypeError(
-        `beforeLLMCall cannot add credential field: ${path}.${field}`,
-      )
-    }
-    assertNoCredentialFields(nested, `${path}.${field}`)
-  }
+  continuation?: ProviderContinuationEnvelope
 }
 
 /** Runs provider-turn lifecycle, plugin hooks, streaming provider calls, and tool validation. */
@@ -198,61 +131,6 @@ export class SessionProviderTurnRunner {
       maxPromptTokens: modelPromptBudget(binding.modelProfile),
       estimation: config.limits.tokenEstimation,
     })
-    const adapter = chatAdapter(binding.snapshot.adapterId)
-    const compiled = adapter.compile({
-      history: {
-        sessionId: session.sessionId,
-        messages: selection.messages,
-        sourceHash: selection.promptBuild.sourceHash,
-      },
-      route: binding.snapshot,
-      tools,
-    })
-    const immutableBody = structuredClone(compiled.body)
-    let body = structuredClone(compiled.body)
-    const hookResult = await this.#pluginBus?.emit('beforeLLMCall', {
-      version: 2,
-      sessionId: session.sessionId,
-      runId: run.runId,
-      adapterId: adapter.id,
-      route: binding.snapshot,
-      request: body,
-      params: {},
-    })
-
-    for (const patch of hookResult?.patches ?? []) {
-      for (const field of Object.keys(patch)) {
-        if (field !== 'request' && field !== 'params') {
-          throw new TypeError(
-            `beforeLLMCall cannot modify protected field: ${field}`,
-          )
-        }
-      }
-      if (patch.request) body = jsonObject(patch.request, 'Hook request')
-      if (patch.params) {
-        for (const [key, value] of Object.entries(patch.params)) {
-          if (!MUTABLE_REQUEST_FIELDS.has(key) || key === 'messages') {
-            throw new TypeError(
-              `beforeLLMCall cannot modify unsupported parameter: ${key}`,
-            )
-          }
-          body[key] = structuredClone(value)
-        }
-      }
-      assertImmutableRequest(immutableBody, body)
-    }
-    assertImmutableRequest(immutableBody, body)
-
-    const promptBudget = modelPromptBudget(binding.modelProfile)
-    if (
-      estimateJsonTokens(body, config.limits.tokenEstimation) > promptBudget
-    ) {
-      throw new ContextBudgetError(
-        'A beforeLLMCall hook exceeded the model context budget',
-      )
-    }
-
-    const normalizedMessages = toJsonValue(body.messages) as JsonObject[]
     const provider =
       this.#providerFactory?.({ config, apiKey: binding.apiKey }) ??
       createConfiguredProvider(
@@ -261,42 +139,64 @@ export class SessionProviderTurnRunner {
         this.#fetchImpl,
         binding.snapshot.endpoint,
       )
-    const llmCallId = id<CallId>('llm')
-    let text = ''
-    let reasoning = ''
-    let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
-
-    const onRequest = async (snapshot: ProviderRequestSnapshot) => {
-      await session.logger.write({
-        type: 'llm.request',
+    const compiled = provider.compile({
+      history: {
+        sessionId: session.sessionId,
+        messages: selection.messages,
+        sourceHash: selection.promptBuild.sourceHash,
+      },
+      route: binding.snapshot,
+      tools,
+    })
+    await this.#pluginBus
+      ?.emit('beforeLLMCall', {
+        version: 3,
         sessionId: session.sessionId,
         runId: run.runId,
-        callId: llmCallId,
-        scope: 'main',
-        normalizedMessages: redactJsonSecrets(snapshot.normalizedMessages, [
-          binding.apiKey,
-        ]) as JsonValue[],
-        providerRequest: redactJsonSecrets(snapshot.providerRequest, [
-          binding.apiKey,
-        ]),
-        requestBytes: snapshot.requestBytes,
-        prefixHash: snapshot.prefixHash,
-        promptResources: promptResources(session),
-        promptBuild: selection.promptBuild,
-        canonicalSource: canonicalTraceSource(selection.messages),
-        modelRoute: binding.snapshot,
+        providerType: provider.providerType,
+        route: binding.snapshot,
+        request: structuredClone(compiled.request),
       })
+      .catch((error: unknown) =>
+        this.#onDiagnostic('Plugin beforeLLMCall failed', error),
+      )
+
+    const promptBudget = modelPromptBudget(binding.modelProfile)
+    if (
+      estimateJsonTokens(compiled.request, config.limits.tokenEstimation) >
+      promptBudget
+    ) {
+      throw new ContextBudgetError(
+        'The compiled provider request exceeds the model context budget',
+      )
     }
 
-    for await (const event of provider.stream({
-      providerRequest: body,
-      normalizedMessages,
-      toolDefinitions: compiled.tools,
+    const llmCallId = id<CallId>('llm')
+    let reasoning = ''
+    let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
+    const diagnostics = providerRequestDiagnostics(compiled)
+    await session.logger.write({
+      type: 'llm.request',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: llmCallId,
+      scope: 'main',
+      normalizedMessages: redactJsonSecrets(compiled.normalizedMessages, [
+        binding.apiKey,
+      ]) as JsonValue[],
+      providerRequest: redactJsonSecrets(compiled.request, [binding.apiKey]),
+      requestBytes: diagnostics.requestBytes,
+      prefixHash: diagnostics.prefixHash,
+      promptResources: promptResources(session),
+      promptBuild: selection.promptBuild,
+      canonicalSource: canonicalTraceSource(selection.messages),
+      modelRoute: binding.snapshot,
+    })
+
+    for await (const event of provider.stream(compiled, {
       signal: run.controller.signal,
-      onRequest,
     })) {
       if (event.type === 'text.delta') {
-        text += event.delta
         this.#emit(session, {
           type: 'assistant.text.delta',
           sessionId: session.sessionId,
@@ -314,14 +214,16 @@ export class SessionProviderTurnRunner {
           })
         }
       } else if (event.type === 'completed') {
+        if (completed) {
+          throw new Error('Provider stream produced multiple completions')
+        }
         completed = event
       }
     }
 
     if (!completed) throw new Error('Provider stream ended without completion')
-    let canonical
+    const canonical = completed.turn
     try {
-      canonical = adapter.complete(completed, { text, reasoning })
       assertCompletedAssistantTurn(canonical)
       assertAssistantTurnCandidate(session, {
         parts: canonical.parts,
@@ -341,8 +243,8 @@ export class SessionProviderTurnRunner {
         providerState: redactJsonSecrets(completed.providerState, [
           binding.apiKey,
         ]),
-        usage: completed.usage,
-        timing: completed.timing,
+        usage: canonical.usage.raw,
+        timing: toJsonValue(completed.timing),
       })
       this.#onDiagnostic('Provider completion validation failed', error, {
         audience: 'internal',
@@ -365,8 +267,8 @@ export class SessionProviderTurnRunner {
       providerState: redactJsonSecrets(completed.providerState, [
         binding.apiKey,
       ]),
-      usage: completed.usage,
-      timing: completed.timing,
+      usage: canonical.usage.raw,
+      timing: toJsonValue(completed.timing),
     })
     const usage = normalizeLlmUsage({
       scope: 'main',
@@ -374,7 +276,7 @@ export class SessionProviderTurnRunner {
       provider: binding.provider,
       model: binding.snapshot.model,
       modelProfile: binding.modelProfile,
-      raw: completed.usage,
+      usage: canonical.usage,
     })
     if (usage) {
       await session.logger.write({
@@ -398,7 +300,7 @@ export class SessionProviderTurnRunner {
         sessionId: session.sessionId,
         runId: run.runId,
         response: completed.rawResponse,
-        usage: completed.usage,
+        usage: canonical.usage.raw,
       })
       .catch((error: unknown) =>
         this.#onDiagnostic('Plugin afterLLMCall failed', error),
@@ -437,21 +339,4 @@ function assertCompletedAssistantTurn(completed: CompletedAssistantTurn): void {
       )
     }
   }
-}
-
-/** Creates the configured provider adapter from public settings, credential, and endpoint overrides. */
-export function createConfiguredProvider(
-  provider: ProviderPublicConfig,
-  apiKey: string,
-  fetchImpl?: typeof fetch,
-  endpoint?: string,
-): OpenAICompatibleProvider {
-  return new OpenAICompatibleProvider({
-    providerId: provider.id,
-    profile: provider.profile,
-    baseURL: provider.baseURL,
-    apiKey,
-    fetchImpl,
-    endpoint,
-  })
 }

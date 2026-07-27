@@ -3,11 +3,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../../shared/agent-events'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 import { ScriptedEditProvider } from '../session/session-manager-approval-fixtures'
 import { createConfig } from '../session/session-manager-test-support'
 import { createAgentRuntime } from './create-agent-runtime'
@@ -80,10 +80,8 @@ describe('AgentRuntime Node boundary', () => {
   })
 
   it('connects the caller abort signal to the shared run cancellation path', async () => {
-    class BlockingProvider implements LLMProvider {
-      async *stream(
-        request: ProviderStreamRequest,
-      ): AsyncIterable<ProviderEvent> {
+    class BlockingProvider extends ScriptedProviderHarness {
+      async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
         await new Promise<void>((_resolve, reject) => {
           const abort = () => reject(request.signal.reason)
           request.signal.addEventListener('abort', abort, { once: true })

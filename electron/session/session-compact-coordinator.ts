@@ -1,19 +1,21 @@
 import type { RunStatus } from '../../shared/agent-events'
 import type { CallId, MessageId } from '../../shared/ids'
-import type { JsonObject, JsonValue } from '../../shared/json'
+import type { JsonValue } from '../../shared/json'
 import type { CanonicalPromptKind } from '../../shared/message'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
 import type { ProjectMetadataStore } from '../project/project-metadata-store'
-import { chatAdapter } from '../providers/chat-completions-adapter'
-import type { ProviderEvent } from '../providers/provider'
+import {
+  providerRequestDiagnostics,
+  type ProviderEvent,
+} from '../providers/provider'
+import { createConfiguredProvider } from '../providers/provider-factory'
 import { normalizeLlmUsage } from '../providers/usage'
 import type { SkillsManager } from '../skills/manager'
 import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { id, redactJsonSecrets, toJsonValue } from './session-common'
-import { createConfiguredProvider } from './session-provider-turn'
 import { modelPromptBudget } from './session-run-utils'
 import type {
   ActiveRun,
@@ -129,16 +131,26 @@ export class SessionCompactCoordinator {
     const tools = this.#toolRegistry.providerDefinitions()
     const compiler = new MessageHistoryCompiler()
     const history = compiler.compile(session.history)
-    const body = chatAdapter(binding.snapshot.adapterId).compile({
+    const provider =
+      this.#providerFactory?.({ config, apiKey: binding.apiKey }) ??
+      createConfiguredProvider(
+        binding.provider,
+        binding.apiKey,
+        this.#fetchImpl,
+        binding.snapshot.endpoint,
+      )
+    const call = provider.compile({
       history,
       route: binding.snapshot,
       tools,
-    }).body
+    })
     const budget = modelPromptBudget(binding.modelProfile)
     const trigger = Math.floor(
       (budget * config.limits.autoCompactTriggerPercent) / 100,
     )
-    if (estimateJsonTokens(body, config.limits.tokenEstimation) < trigger) {
+    if (
+      estimateJsonTokens(call.request, config.limits.tokenEstimation) < trigger
+    ) {
       return
     }
 
@@ -315,21 +327,6 @@ export class SessionCompactCoordinator {
       editable: false,
     })
     const history = new MessageHistoryCompiler().compile(temporary.history)
-    const adapter = chatAdapter(binding.snapshot.adapterId)
-    const compiled = adapter.compile({
-      history,
-      route: binding.snapshot,
-      tools: [],
-    })
-    const budget = modelPromptBudget(binding.modelProfile)
-    if (
-      estimateJsonTokens(compiled.body, config.limits.tokenEstimation) > budget
-    ) {
-      throw new ContextBudgetError(
-        'The full active history is too large for the compression route',
-      )
-    }
-    await beforeProvider?.()
     const provider =
       this.#providerFactory?.({ config, apiKey: binding.apiKey }) ??
       createConfiguredProvider(
@@ -338,36 +335,45 @@ export class SessionCompactCoordinator {
         this.#fetchImpl,
         binding.snapshot.endpoint,
       )
+    const compiled = provider.compile({
+      history,
+      route: binding.snapshot,
+      tools: [],
+    })
+    const budget = modelPromptBudget(binding.modelProfile)
+    if (
+      estimateJsonTokens(compiled.request, config.limits.tokenEstimation) >
+      budget
+    ) {
+      throw new ContextBudgetError(
+        'The full active history is too large for the compression route',
+      )
+    }
+    await beforeProvider?.()
     const callId = id<CallId>('llm')
     let text = ''
     let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
     this.#setRunStatus(session, run, 'calling_llm')
 
-    for await (const event of provider.stream({
-      providerRequest: compiled.body,
-      normalizedMessages: toJsonValue(compiled.messages) as JsonObject[],
-      toolDefinitions: [],
+    const diagnostics = providerRequestDiagnostics(compiled)
+    await session.logger.write({
+      type: 'llm.request',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId,
+      scope: 'compression',
+      normalizedMessages: redactJsonSecrets(compiled.normalizedMessages, [
+        binding.apiKey,
+      ]) as JsonValue[],
+      providerRequest: redactJsonSecrets(compiled.request, [binding.apiKey]),
+      requestBytes: diagnostics.requestBytes,
+      prefixHash: diagnostics.prefixHash,
+      promptResources: promptResources(session),
+      canonicalSource: canonicalTraceSource(history.messages),
+      modelRoute: binding.snapshot,
+    })
+    for await (const event of provider.stream(compiled, {
       signal: run.controller.signal,
-      onRequest: async (snapshot) => {
-        await session.logger.write({
-          type: 'llm.request',
-          sessionId: session.sessionId,
-          runId: run.runId,
-          callId,
-          scope: 'compression',
-          normalizedMessages: redactJsonSecrets(snapshot.normalizedMessages, [
-            binding.apiKey,
-          ]) as JsonValue[],
-          providerRequest: redactJsonSecrets(snapshot.providerRequest, [
-            binding.apiKey,
-          ]),
-          requestBytes: snapshot.requestBytes,
-          prefixHash: snapshot.prefixHash,
-          promptResources: promptResources(session),
-          canonicalSource: canonicalTraceSource(history.messages),
-          modelRoute: binding.snapshot,
-        })
-      },
     })) {
       if (event.type === 'text.delta') {
         text += event.delta
@@ -380,16 +386,16 @@ export class SessionCompactCoordinator {
           })
         }
       } else if (event.type === 'completed') {
+        if (completed) {
+          throw new Error('Compact provider produced multiple completions')
+        }
         completed = event
       }
     }
     if (!completed) {
       throw new Error('Compact provider stream ended without completion')
     }
-    const canonical = adapter.complete(completed, {
-      text,
-      reasoning: '',
-    })
+    const canonical = completed.turn
     if (canonical.toolCalls.length > 0) {
       throw new Error('Compact summary provider returned tool calls')
     }
@@ -412,8 +418,8 @@ export class SessionCompactCoordinator {
       providerState: redactJsonSecrets(completed.providerState, [
         binding.apiKey,
       ]),
-      usage: completed.usage,
-      timing: completed.timing,
+      usage: canonical.usage.raw,
+      timing: toJsonValue(completed.timing),
     })
     const usage = normalizeLlmUsage({
       scope: 'compression',
@@ -421,7 +427,7 @@ export class SessionCompactCoordinator {
       provider: binding.provider,
       model: binding.snapshot.model,
       modelProfile: binding.modelProfile,
-      raw: completed.usage,
+      usage: canonical.usage,
     })
     if (usage) {
       await session.logger.write({
@@ -539,14 +545,25 @@ export class SessionCompactCoordinator {
       if (!binding) throw new Error('Run main route was not resolved')
       const tools = this.#toolRegistry.providerDefinitions()
       const history = new MessageHistoryCompiler().compile(session.history)
-      const body = chatAdapter(binding.snapshot.adapterId).compile({
+      const config = this.#configStore.getPublicConfig()
+      const provider =
+        this.#providerFactory?.({ config, apiKey: binding.apiKey }) ??
+        createConfiguredProvider(
+          binding.provider,
+          binding.apiKey,
+          this.#fetchImpl,
+          binding.snapshot.endpoint,
+        )
+      const compiled = provider.compile({
         history,
         route: binding.snapshot,
         tools,
-      }).body
-      const config = this.#configStore.getPublicConfig()
+      })
       const budget = modelPromptBudget(binding.modelProfile)
-      if (estimateJsonTokens(body, config.limits.tokenEstimation) > budget) {
+      if (
+        estimateJsonTokens(compiled.request, config.limits.tokenEstimation) >
+        budget
+      ) {
         throw new ContextBudgetError(
           'Compacted history still exceeds the model context budget',
         )

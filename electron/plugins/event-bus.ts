@@ -1,5 +1,4 @@
 import type {
-  BeforeLLMCallEmitResult,
   BeforeToolCallEmitResult,
   HookContextMap,
   HookDiagnostic,
@@ -80,46 +79,22 @@ export class PluginEventBus implements PluginApi {
 
   /** Invokes hook handlers with per-handler timeouts and combines their results. */
   emit(
-    hook: 'beforeLLMCall',
-    context: HookContextMap['beforeLLMCall'],
-  ): Promise<BeforeLLMCallEmitResult>
-  emit(
     hook: 'beforeToolCall',
     context: HookContextMap['beforeToolCall'],
   ): Promise<BeforeToolCallEmitResult>
-  emit<Name extends Exclude<HookName, 'beforeLLMCall' | 'beforeToolCall'>>(
+  emit<Name extends Exclude<HookName, 'beforeToolCall'>>(
     hook: Name,
     context: HookContextMap[Name],
   ): Promise<ObservationEmitResult>
   async emit(
     hook: HookName,
     context: HookContextMap[HookName],
-  ): Promise<
-    BeforeLLMCallEmitResult | BeforeToolCallEmitResult | ObservationEmitResult
-  > {
+  ): Promise<BeforeToolCallEmitResult | ObservationEmitResult> {
     const handlers = [
       ...(this.#handlers.get(hook) ?? []),
     ] as HookHandler<HookName>[]
     const snapshot = readonlySnapshot(context)
     const diagnostics: HookDiagnostic[] = []
-
-    if (hook === 'beforeLLMCall') {
-      const patches: BeforeLLMCallEmitResult['patches'] = []
-
-      for (const handler of handlers) {
-        const result = await this.#invoke(hook, handler, snapshot, diagnostics)
-
-        if (result && typeof result === 'object' && 'patch' in result) {
-          const patch = result.patch
-
-          if (patch) {
-            patches.push(structuredClone(patch))
-          }
-        }
-      }
-
-      return { patches, diagnostics }
-    }
 
     if (hook === 'beforeToolCall') {
       let risk: BeforeToolCallEmitResult['risk'] = 'unchanged'

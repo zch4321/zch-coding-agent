@@ -12,7 +12,7 @@ import type { TraceLogger } from '../logging/logger'
 import type { PluginEventBus } from '../plugins/event-bus'
 import type { AutoApprover } from '../permission/auto-approver'
 import type { DiagnosticSink } from '../diagnostics'
-import type { LLMProvider } from '../providers/provider'
+import type { ModelProvider } from '../providers/provider'
 import type { HumanApprovalDecision } from '../permission/permission-pipeline'
 import type { SkillsManager } from '../skills/manager'
 import type { PromptRegistry } from '../prompts/registry'
@@ -71,7 +71,7 @@ export interface SessionManagerOptions {
   providerFactory?: (options: {
     config: PublicConfig
     apiKey: string
-  }) => LLMProvider
+  }) => ModelProvider
   autoApproverFactory?: (options: {
     config: PublicConfig
     apiKey: string

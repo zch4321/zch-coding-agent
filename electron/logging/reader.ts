@@ -5,6 +5,40 @@ import { compileSchema, formatSchemaErrors } from '../schema-validator'
 
 const validateTraceEvent = compileSchema(TraceEventSchema)
 
+function projectLegacyRouteIdentity(candidate: unknown): unknown {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return candidate
+  }
+  const event = candidate as Record<string, unknown>
+  const route = event.modelRoute
+  if (
+    event.type !== 'llm.request' ||
+    !route ||
+    typeof route !== 'object' ||
+    Array.isArray(route)
+  ) {
+    return candidate
+  }
+  const legacy = route as Record<string, unknown>
+  if (legacy.schemaVersion !== 1 || typeof legacy.adapterId !== 'string') {
+    return candidate
+  }
+  const providerType =
+    legacy.adapterId === 'openai-compatible.chat-completions'
+      ? 'generic.chat-completions'
+      : legacy.adapterId
+  const rest = { ...legacy }
+  Reflect.deleteProperty(rest, 'adapterId')
+  return {
+    ...event,
+    modelRoute: {
+      ...rest,
+      schemaVersion: 2,
+      providerType,
+    },
+  }
+}
+
 /** Reports a complete trace record written with an unsupported schema. */
 export class UnsupportedTraceSchemaError extends Error {
   constructor(
@@ -51,6 +85,7 @@ export async function readTraceFile(filePath: string): Promise<TraceEvent[]> {
       throw new CorruptTraceError(`Invalid JSON in trace line ${index + 1}`)
     }
 
+    candidate = projectLegacyRouteIdentity(candidate)
     if (!validateTraceEvent(candidate)) {
       const version =
         candidate && typeof candidate === 'object'

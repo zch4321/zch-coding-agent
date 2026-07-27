@@ -12,9 +12,9 @@ const sessionId = 'session-replay' as SessionId
 const runId = 'run-replay' as RunId
 const llmCallId = 'call-llm' as CallId
 const modelRoute = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
   purpose: 'main' as const,
-  adapterId: 'deepseek.chat-completions',
+  providerType: 'deepseek.chat-completions',
   providerId: 'deepseek',
   model: 'fixture',
   reasoning: 'off' as const,
@@ -258,6 +258,30 @@ describe('TraceService', () => {
           prompt_cache_miss_tokens: 3,
         },
         timing: { ttftMs: 5, totalMs: 20 },
+      },
+      {
+        type: 'llm.usage',
+        sessionId,
+        runId,
+        callId: llmCallId,
+        usage: {
+          scope: 'main',
+          providerId: 'deepseek',
+          providerLabel: 'DeepSeek',
+          model: 'fixture',
+          promptTokens: 10,
+          totalTokens: 14,
+          cacheHitTokens: 7,
+          cacheMissTokens: 3,
+          contextWindowTokens: 64_000,
+          contextWindowSource: 'default',
+          raw: {
+            prompt_tokens: 10,
+            total_tokens: 14,
+            prompt_cache_hit_tokens: 7,
+            prompt_cache_miss_tokens: 3,
+          },
+        },
       },
       { type: 'session.end', sessionId },
     ])

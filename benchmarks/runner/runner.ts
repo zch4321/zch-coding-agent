@@ -914,7 +914,7 @@ function createTrialIdentity(input: {
       graderImageDigest: input.runtimeImageDigest,
       providerId: provider.id,
       model: provider.model,
-      profile: provider.profile ?? 'generic',
+      providerType: provider.providerType,
       reasoning: provider.reasoning ?? 'high',
       budget: {
         wallTimeMs: manifest.resources.wallTimeMs,

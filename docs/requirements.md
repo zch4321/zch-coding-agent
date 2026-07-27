@@ -1,8 +1,8 @@
 # 需求文档 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 P0–P10 已完成 · 最后更新 2026-07-26
+> 状态：Backend Architecture v2.1 P0–P11 已完成 · 最后更新 2026-07-27
 > 本文档定义「做什么」。技术怎么做见 [`architecture.md`](./architecture.md)，前端信息架构与验收标准见 [`frontend-spec.md`](./frontend-spec.md)。
-> P0–P10 已实现；后续产品项与已延后的 P3 review 建议进入 roadmap 或独立设计。
+> P0–P11 已实现；后续产品项与已延后的 P3 review 建议进入 roadmap 或独立设计。
 
 ---
 

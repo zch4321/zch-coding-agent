@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { JsonValue } from '../../shared/json'
 import type { ModelRouteSnapshot } from '../../shared/model-route'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 import {
   ProviderAutoApprover,
   strictAutoApproverOutput,
@@ -25,9 +25,9 @@ const input: AutoApproverInput = {
 }
 
 const route: ModelRouteSnapshot = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   purpose: 'approval',
-  adapterId: 'deepseek.chat-completions',
+  providerType: 'deepseek.chat-completions',
   providerId: 'deepseek',
   model: 'deepseek-v4-flash',
   reasoning: 'high',
@@ -35,15 +35,15 @@ const route: ModelRouteSnapshot = {
   providerConfigRevision: 1,
 }
 
-class ErrorProvider implements LLMProvider {
-  async *stream(): AsyncIterable<ProviderEvent> {
+class ErrorProvider extends ScriptedProviderHarness {
+  async *run(): AsyncIterable<ProviderEvent> {
     yield* []
     throw new Error('network failed')
   }
 }
 
-class HangingProvider implements LLMProvider {
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+class HangingProvider extends ScriptedProviderHarness {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     await new Promise<void>((_resolve, reject) => {
       request.signal.addEventListener(
         'abort',
@@ -55,14 +55,15 @@ class HangingProvider implements LLMProvider {
   }
 }
 
-class TextProvider implements LLMProvider {
+class TextProvider extends ScriptedProviderHarness {
   readonly #text: string
 
   constructor(text: string) {
+    super()
     this.#text = text
   }
 
-  async *stream(): AsyncIterable<ProviderEvent> {
+  async *run(): AsyncIterable<ProviderEvent> {
     yield {
       type: 'text.delta',
       delta: this.#text,
@@ -80,10 +81,10 @@ class TextProvider implements LLMProvider {
   }
 }
 
-class CapturingProvider implements LLMProvider {
+class CapturingProvider extends ScriptedProviderHarness {
   request: ProviderStreamRequest | undefined
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.request = request
     yield {
       type: 'completed',
@@ -157,7 +158,7 @@ describe('P3 auto approver', () => {
   it('cleans up and falls back when adapter compilation fails', async () => {
     const approver = new ProviderAutoApprover(new ErrorProvider(), {
       ...route,
-      adapterId: 'missing.adapter',
+      providerType: 'missing.adapter',
     })
 
     await expect(

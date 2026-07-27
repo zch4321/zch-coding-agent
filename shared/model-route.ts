@@ -1,6 +1,8 @@
 import { Type, type Static } from '@sinclair/typebox'
 import { ReasoningEffortSchema } from './config'
-import { DurableSchemaVersionSchema, RevisionSchema } from './durable'
+import { RevisionSchema } from './durable'
+
+export const MODEL_ROUTE_SCHEMA_VERSION = 2 as const
 
 export const ProviderPurposeSchema = Type.Union([
   Type.Literal('main'),
@@ -21,9 +23,9 @@ export type ModelSelection = Static<typeof ModelSelectionSchema>
 
 export const ModelRouteSnapshotSchema = Type.Object(
   {
-    schemaVersion: DurableSchemaVersionSchema,
+    schemaVersion: Type.Literal(MODEL_ROUTE_SCHEMA_VERSION),
     purpose: ProviderPurposeSchema,
-    adapterId: Type.String({ minLength: 1, maxLength: 128 }),
+    providerType: Type.String({ minLength: 1, maxLength: 128 }),
     providerId: Type.String({ minLength: 1, maxLength: 128 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
     reasoning: ReasoningEffortSchema,

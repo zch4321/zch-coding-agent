@@ -13,11 +13,11 @@ import {
 } from '../../shared/notices'
 import { ConfigStore } from '../config/store'
 import { SecretStore, type SafeStorageAdapter } from '../config/secret-store'
-import type {
-  LLMProvider,
-  ProviderStreamRequest,
-  ProviderEvent,
-} from '../providers/provider'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
 import { TraceService } from '../logging/service'
 
@@ -71,13 +71,13 @@ class FakeSafeStorage implements SafeStorageAdapter {
   }
 }
 
-export class ForkProvider implements LLMProvider {
+export class ForkProvider extends ScriptedProviderHarness {
   calls = 0
   messages: ProviderStreamRequest['normalizedMessages'] = []
   providerRequestOverride: JsonValue | undefined
   providerRequestOverrides: JsonValue[] = []
 
-  async *stream(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.messages = structuredClone(request.normalizedMessages)
     this.providerRequestOverride = structuredClone(request.providerRequest)
