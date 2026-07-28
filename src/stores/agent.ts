@@ -25,7 +25,11 @@ type ChangesStore = ReturnType<typeof useAgentChangesStore>
 export type AgentFacade = Omit<ShellStore, '$id'> &
   Omit<
     SettingsStore,
-    'error' | '$id' | 'savePermissions' | 'removeRememberedRule'
+    | 'error'
+    | '$id'
+    | 'limitsSavedSignature'
+    | 'savePermissions'
+    | 'removeRememberedRule'
   > &
   Omit<ReplicaStore, 'error' | '$id' | 'projects'> &
   Omit<RuntimeStore, '$id'> &
@@ -96,6 +100,7 @@ const settingsProperties = new Set<PropertyKey>([
   'activeModelProfile',
   'providerDirty',
   'providerRefreshAvailable',
+  'limitsDirty',
   'approvalDirty',
 ])
 const replicaProperties = new Set<PropertyKey>([

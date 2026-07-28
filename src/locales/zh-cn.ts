@@ -411,7 +411,7 @@ const zhCN = {
   },
   limits: {
     title: '运行限制',
-    hint: '调整 Agent 循环、上下文、工具输出、审批和网络请求的硬限制。',
+    hint: '调整 Agent 循环、上下文、工具输出、审批和网络请求的硬限制。修改后会自动保存。',
     concurrency: '并发任务',
     maxConcurrentRuns: '最大并发任务数',
     concurrencyHint:
@@ -425,7 +425,7 @@ const zhCN = {
     maxStepsPerRunHint: '设为 0 时不限制 React loop 步数。',
     maxContextTokens: '默认最大上下文 Token',
     maxAttachmentContextTokens: '附件内容 Token 上限',
-    autoCompactTriggerPercent: '自动压缩触发阈值',
+    autoCompactTriggerPercent: '自动压缩触发阈值（%）',
     maxToolResultTokens: '单次工具结果 Token 上限',
     maxToolTokensPerRun: '每次运行工具结果 Token 总上限',
     commandTimeoutMs: '命令超时（毫秒）',

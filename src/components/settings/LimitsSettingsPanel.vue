@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NButton, NInputNumber, NSelect } from 'naive-ui'
+import { computed, onBeforeUnmount, watch } from 'vue'
+import { NButton, NDivider, NInputNumber, NSelect } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 
@@ -10,13 +10,61 @@ const tokenEstimationOptions = computed(() => [
   { label: t('limits.tokenConservative'), value: 'conservative' },
   { label: t('limits.tokenCustom'), value: 'custom-bytes' },
 ])
+
+let autosaveTimer: ReturnType<typeof setTimeout> | undefined
+
+function saveLimitsNow() {
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = undefined
+  void agent.saveLimits()
+}
+
+watch(
+  () => (agent.limitsConfig ? JSON.stringify(agent.limitsConfig) : ''),
+  () => {
+    if (autosaveTimer) clearTimeout(autosaveTimer)
+    if (!agent.limitsDirty) return
+
+    agent.limitsSaveStatus = ''
+    autosaveTimer = setTimeout(() => {
+      autosaveTimer = undefined
+      void agent.saveLimits()
+    }, 600)
+  },
+)
+
+onBeforeUnmount(() => {
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  if (agent.limitsDirty) void agent.saveLimits()
+})
 </script>
 
 <template>
   <section class="settings-section limits-settings-section">
-    <div class="settings-heading">
-      <h2>{{ t('limits.title') }}</h2>
-      <p>{{ t('limits.hint') }}</p>
+    <div class="settings-heading settings-heading-with-actions">
+      <div>
+        <h2>{{ t('limits.title') }}</h2>
+        <p>{{ t('limits.hint') }}</p>
+      </div>
+      <div v-if="agent.limitsConfig" class="settings-heading-actions">
+        <NButton
+          type="primary"
+          :loading="agent.limitsSaving"
+          :disabled="!agent.limitsDirty"
+          @click="saveLimitsNow"
+        >
+          {{ t('limits.save') }}
+        </NButton>
+        <small class="settings-save-status" aria-live="polite">
+          {{
+            agent.limitsDirty
+              ? t('settings.unsaved')
+              : agent.limitsSaveStatus === 'Saved'
+                ? t('settings.saved')
+                : agent.limitsSaveStatus
+          }}
+        </small>
+      </div>
     </div>
 
     <template v-if="agent.limitsConfig">
@@ -33,6 +81,7 @@ const tokenEstimationOptions = computed(() => [
           </label>
           <p>{{ t('limits.concurrencyHint') }}</p>
         </section>
+        <NDivider />
         <section class="limits-group">
           <h3>{{ t('limits.runLoop') }}</h3>
           <label class="settings-field">
@@ -66,8 +115,9 @@ const tokenEstimationOptions = computed(() => [
               v-model:value="agent.limitsConfig.autoCompactTriggerPercent"
               :min="50"
               :max="95"
-              suffix="%"
-            />
+            >
+              <template #suffix>%</template>
+            </NInputNumber>
           </label>
           <label class="settings-field">
             <span>{{ t('limits.maxToolResultTokens') }}</span>
@@ -87,6 +137,7 @@ const tokenEstimationOptions = computed(() => [
           </label>
         </section>
 
+        <NDivider />
         <section class="limits-group">
           <h3>{{ t('limits.commands') }}</h3>
           <label class="settings-field">
@@ -115,6 +166,7 @@ const tokenEstimationOptions = computed(() => [
           </label>
         </section>
 
+        <NDivider />
         <section class="limits-group">
           <h3>{{ t('limits.files') }}</h3>
           <label class="settings-field">
@@ -167,6 +219,7 @@ const tokenEstimationOptions = computed(() => [
           </label>
         </section>
 
+        <NDivider />
         <section class="limits-group">
           <h3>{{ t('limits.approvalAndNetwork') }}</h3>
           <label class="settings-field">
@@ -219,6 +272,7 @@ const tokenEstimationOptions = computed(() => [
           </label>
         </section>
 
+        <NDivider />
         <section class="limits-group">
           <h3>{{ t('limits.tokenEstimation') }}</h3>
           <label class="settings-field">
@@ -241,23 +295,6 @@ const tokenEstimationOptions = computed(() => [
             />
           </label>
         </section>
-      </div>
-
-      <div class="settings-actions">
-        <NButton
-          type="primary"
-          :loading="agent.limitsSaving"
-          @click="agent.saveLimits"
-        >
-          {{ t('limits.save') }}
-        </NButton>
-        <small class="settings-save-status" aria-live="polite">
-          {{
-            agent.limitsSaveStatus === 'Saved'
-              ? t('settings.saved')
-              : agent.limitsSaveStatus
-          }}
-        </small>
       </div>
     </template>
   </section>

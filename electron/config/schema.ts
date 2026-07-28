@@ -14,6 +14,7 @@ import {
 } from '../../shared/prompt-resources'
 import { DEFAULT_ASSISTANT_PREFERENCES } from '../../shared/system-prompts'
 import { McpServerConfigSchema } from '../../shared/mcp'
+import { DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS } from '../../shared/model-settings'
 
 export const AppProviderConfigSchema = Type.Object(
   {
@@ -124,7 +125,7 @@ export const DEFAULT_APP_CONFIG = {
     maxConcurrentRuns: 4,
     maxStepsPerRun: 0,
     maxToolOutputBytes: 64 * 1_024,
-    maxContextTokens: 64_000,
+    maxContextTokens: DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
     maxAttachmentContextTokens: 64_000,
     autoCompactTriggerPercent: 80,
     maxToolResultTokens: 8_000,

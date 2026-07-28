@@ -1,3 +1,5 @@
+export const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 256_000
+
 export interface ModelTokenSettings {
   contextWindowTokens: number
   compactThresholdTokens: number

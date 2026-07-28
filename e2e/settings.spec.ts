@@ -99,6 +99,49 @@ test.describe.serial('Electron settings workflows', () => {
     await general.getByRole('button', { name: '保存助手偏好' }).click()
     await expect(saveStatus).toHaveText('已保存')
 
+    await settingsNavigation.getByRole('menuitem', { name: '运行限制' }).click()
+    const limits = page.locator('.limits-settings-section')
+    const saveLimits = limits
+      .locator('.settings-heading')
+      .getByRole('button', { name: '保存运行限制' })
+    await expect(saveLimits).toBeVisible()
+    await expect(saveLimits).toBeDisabled()
+    await expect(limits.locator('.limits-group')).toHaveCount(6)
+    await expect(limits.locator('.n-divider')).toHaveCount(5)
+    const limitColumnCount = await limits
+      .locator('.limits-grid')
+      .evaluate(
+        (grid) =>
+          getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean)
+            .length,
+      )
+    expect(limitColumnCount).toBe(1)
+    const defaultContext = limits
+      .locator('.settings-field', { hasText: '默认最大上下文 Token' })
+      .locator('input')
+    await expect(defaultContext).toHaveValue('256000')
+    const compactPercent = limits.locator('.settings-field', {
+      hasText: '自动压缩触发阈值（%）',
+    })
+    await expect(compactPercent.locator('.n-input-number-suffix')).toHaveText(
+      '%',
+    )
+    await defaultContext.fill('300000')
+    await expect(limits.locator('.settings-save-status')).toHaveText('已保存')
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          const api = Reflect.get(window, 'agentApi') as {
+            getConfig(payload: unknown): Promise<{
+              value?: { config: { limits: { maxContextTokens: number } } }
+            }>
+          }
+          const result = await api.getConfig({ version: 1, section: 'limits' })
+          return result.value?.config.limits.maxContextTokens
+        }),
+      )
+      .toBe(300_000)
+
     await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
     const provider = page.locator('.settings-section')
 
@@ -164,6 +207,9 @@ test.describe.serial('Electron settings workflows', () => {
     )
     await expect(discoveredModelRow).toBeVisible()
     await expect(discoveredModelRow.locator('.n-input-number')).toHaveCount(3)
+    await expect(discoveredModelRow.locator('input').first()).toHaveValue(
+      '300000',
+    )
     for (const input of await discoveredModelRow.locator('input').all()) {
       await expect(input).not.toHaveValue('')
     }

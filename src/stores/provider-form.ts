@@ -1,4 +1,8 @@
-import type { ProviderType, ReasoningEffort } from '../../shared/config'
+import type {
+  ProviderPublicConfig,
+  ProviderType,
+  ReasoningEffort,
+} from '../../shared/config'
 import type { UiModelProfile } from './agent-types'
 
 export const DEFAULT_PROVIDER_FORM = {
@@ -14,6 +18,24 @@ export const DEFAULT_PROVIDER_FORM = {
 }
 
 export type ProviderForm = typeof DEFAULT_PROVIDER_FORM
+
+/** Serializes only model rows that the user explicitly overrode. */
+export function providerModelOverrides(
+  models: UiModelProfile[],
+): ProviderPublicConfig['modelOverrides'] {
+  return Object.fromEntries(
+    models
+      .filter((model) => model.capabilitySource === 'override')
+      .map((model) => [
+        model.id,
+        {
+          contextWindowTokens: model.contextWindowTokens,
+          compactThresholdTokens: model.compactThresholdTokens,
+          maxOutputTokens: model.maxOutputTokens,
+        },
+      ]),
+  )
+}
 
 /** Serializes the provider form fields that identify a saved provider configuration. */
 export function providerFormSignature(

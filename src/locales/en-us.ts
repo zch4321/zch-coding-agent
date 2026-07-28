@@ -426,7 +426,7 @@ const enUS = {
   },
   limits: {
     title: 'Limits',
-    hint: 'Tune hard limits for the Agent loop, context, tool output, approvals and network requests.',
+    hint: 'Tune hard limits for the Agent loop, context, tool output, approvals and network requests. Changes save automatically.',
     concurrency: 'Concurrent tasks',
     maxConcurrentRuns: 'Maximum concurrent tasks',
     concurrencyHint:
@@ -440,7 +440,7 @@ const enUS = {
     maxStepsPerRunHint: 'Set to 0 for no React-loop step limit.',
     maxContextTokens: 'Default maximum context tokens',
     maxAttachmentContextTokens: 'Attachment content token limit',
-    autoCompactTriggerPercent: 'Auto compact trigger threshold',
+    autoCompactTriggerPercent: 'Auto compact trigger threshold (%)',
     maxToolResultTokens: 'Tool result token limit',
     maxToolTokensPerRun: 'Tool result token budget per run',
     commandTimeoutMs: 'Command timeout (ms)',

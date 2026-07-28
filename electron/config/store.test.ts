@@ -355,6 +355,7 @@ describe('ConfigStore', () => {
     ) as Record<string, unknown>
     expect(parsed.schemaVersion).toBe(10)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(0)
+    expect(configStore.getPublicConfig().limits.maxContextTokens).toBe(256_000)
     expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
       80,
     )

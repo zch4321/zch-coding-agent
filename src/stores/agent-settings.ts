@@ -14,10 +14,17 @@ import {
   YOLO_NOTICE_VERSION,
 } from '../../shared/notices'
 import { DEFAULT_ASSISTANT_PREFERENCES } from '../../shared/system-prompts'
-import { resolveModelTokenSettings } from '../../shared/model-settings'
+import {
+  DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
+  resolveModelTokenSettings,
+} from '../../shared/model-settings'
 import { nowNotice, toUiRememberedRules } from './config-mapping'
 import type { UiModelProfile, UiRememberedRule } from './agent-types'
-import { DEFAULT_PROVIDER_FORM, providerFormSignature } from './provider-form'
+import {
+  DEFAULT_PROVIDER_FORM,
+  providerFormSignature,
+  providerModelOverrides,
+} from './provider-form'
 
 function providerModelProfiles(
   provider: ProviderPublicConfig | undefined,
@@ -100,6 +107,10 @@ function approvalSignature(form: {
   return `${form.providerId}|${form.model}`
 }
 
+function limitsSignature(limits: PublicConfig['limits'] | undefined): string {
+  return limits ? JSON.stringify(limits) : ''
+}
+
 export const useAgentSettingsStore = defineStore('agent-settings', {
   state: () => ({
     error: '',
@@ -117,6 +128,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     modelCatalogStale: true,
     modelCatalogLoading: false,
     limitsConfig: undefined as PublicConfig['limits'] | undefined,
+    limitsSavedSignature: '',
     limitsSaving: false,
     limitsSaveStatus: '',
     providerForm: structuredClone(DEFAULT_PROVIDER_FORM),
@@ -244,6 +256,8 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           (provider) => provider.id === state.selectedProviderId,
         )?.credentialConfigured,
       ),
+    limitsDirty: (state) =>
+      limitsSignature(state.limitsConfig) !== state.limitsSavedSignature,
     approvalDirty: (state) =>
       approvalSignature(state.approvalForm) !== state.approvalSavedSignature,
     webSearchDirty: (state) =>
@@ -275,7 +289,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       const limits = config?.limits ?? this.limitsConfig
       this.modelProfiles = providerModelProfiles(
         provider,
-        limits?.maxContextTokens ?? 64_000,
+        limits?.maxContextTokens ?? DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
         limits?.autoCompactTriggerPercent ?? 80,
       )
       this.modelCatalogFetchedAt = provider.modelCatalogFetchedAt
@@ -322,6 +336,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
 
       if (includes('limits')) {
         this.limitsConfig = structuredClone(config.limits)
+        this.limitsSavedSignature = limitsSignature(config.limits)
         this.providerForm.tokenEstimationMode =
           config.limits.tokenEstimation.mode
         this.providerForm.bytesPerToken =
@@ -428,7 +443,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.providerForm.model = model
 
       if (!this.modelProfiles.some((candidate) => candidate.id === model)) {
-        const fallbackContext = this.limitsConfig?.maxContextTokens ?? 64_000
+        const fallbackContext =
+          this.limitsConfig?.maxContextTokens ??
+          DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS
         this.modelProfiles.push({
           id: model,
           availability: 'custom',
@@ -698,16 +715,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           kind: 'provider-settings',
           baseURL: draft.baseURL,
           model: draft.model,
-          modelOverrides: Object.fromEntries(
-            this.modelProfiles.map((model) => [
-              model.id,
-              {
-                contextWindowTokens: model.contextWindowTokens,
-                compactThresholdTokens: model.compactThresholdTokens,
-                maxOutputTokens: model.maxOutputTokens,
-              },
-            ]),
-          ),
+          modelOverrides: providerModelOverrides(this.modelProfiles),
           reasoning: draft.reasoning,
           providerId: draft.providerId,
           label: draft.label,
@@ -827,27 +835,34 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     },
     async saveLimits() {
       const bridge = window.agentApi
-      const limits = this.limitsConfig
-      if (!bridge || !limits || this.limitsSaving) return false
+      if (!bridge || !this.limitsConfig || this.limitsSaving) return false
 
       this.limitsSaving = true
       this.limitsSaveStatus = ''
       try {
-        const result = await bridge.setConfig({
-          version: IPC_VERSION,
-          kind: 'limits',
-          value: cloneJson(limits),
-        })
+        while (this.limitsConfig) {
+          const draft = cloneJson(this.limitsConfig)
+          const draftSignature = limitsSignature(draft)
+          const result = await bridge.setConfig({
+            version: IPC_VERSION,
+            kind: 'limits',
+            value: draft,
+          })
 
-        if (!result.ok) {
-          this.error = result.error.message
-          this.limitsSaveStatus = result.error.message
-          return false
+          if (!result.ok) {
+            this.error = result.error.message
+            this.limitsSaveStatus = result.error.message
+            return false
+          }
+
+          this.limitsSavedSignature = draftSignature
+          if (limitsSignature(this.limitsConfig) !== draftSignature) continue
+
+          this.applyConfig(result.value.config, ['limits'])
+          this.limitsSaveStatus = 'Saved'
+          return true
         }
-
-        this.applyConfig(result.value.config, ['limits'])
-        this.limitsSaveStatus = 'Saved'
-        return true
+        return false
       } finally {
         this.limitsSaving = false
       }
