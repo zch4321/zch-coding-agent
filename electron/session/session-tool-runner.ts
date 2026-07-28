@@ -131,12 +131,12 @@ export class SessionToolRunner {
 
     try {
       for (const providerCall of toolCalls) {
-        let call = providerCall
+        let call = this.#toolExecutor.normalizeCall(providerCall)
         let definitionOverride: ToolDefinition | undefined
         let resolutionFailure: ToolResult | undefined
         let attemptStage: ToolAttemptStage = 'validation'
         let attemptEffects: string[] = []
-        const resolution = this.#mcpGateway?.resolveCall(session, providerCall)
+        const resolution = this.#mcpGateway?.resolveCall(session, call)
         if (resolution?.matched) {
           if (resolution.ok) {
             call = resolution.call

@@ -12,6 +12,7 @@ import type {
   ContextAttachmentKind,
 } from '../../shared/context'
 import type { MessageId, RunId, SessionId } from '../../shared/ids'
+import type { ModelSelection } from '../../shared/model-route'
 import type { PlanStatus } from '../../shared/orchestration'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { DurableRunStartResult } from '../../shared/domain-state-api'
@@ -79,6 +80,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     workspaceWriters: {} as Record<string, SessionId>,
     approvalSubmitting: false,
     workspaceFileRevision: 0,
+    draftModelSelection: undefined as ModelSelection | undefined,
   }),
   getters: {
     activeOverlay(state): SessionOverlay | undefined {
@@ -275,6 +277,55 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     canInterject(): boolean {
       return Boolean(this.activeRunId)
     },
+    composerModelSelection(state): ModelSelection {
+      const replica = useAgentReplicaStore()
+      const settings = useAgentSettingsStore()
+      const sessionSelection = replica.selectedSession?.modelSelection
+      if (sessionSelection) return sessionSelection
+
+      const draftProvider = state.draftModelSelection
+        ? settings.providers.find(
+            (provider) => provider.id === state.draftModelSelection?.providerId,
+          )
+        : undefined
+      if (state.draftModelSelection && draftProvider) {
+        return state.draftModelSelection
+      }
+
+      const provider =
+        settings.providers.find(
+          (candidate) => candidate.id === settings.activeProviderId,
+        ) ?? settings.providers[0]
+      return {
+        providerId: provider?.id ?? settings.activeProviderId,
+        model: provider?.model ?? settings.providerForm.model,
+        reasoning: provider?.reasoning ?? settings.providerForm.reasoning,
+      }
+    },
+    composerProviderId(): string {
+      return this.composerModelSelection.providerId
+    },
+    composerModel(): string {
+      return this.composerModelSelection.model
+    },
+    composerModelOptions(): Array<{ label: string; value: string }> {
+      const settings = useAgentSettingsStore()
+      const selection = this.composerModelSelection
+      const provider = settings.providers.find(
+        (candidate) => candidate.id === selection.providerId,
+      )
+      const ids = new Set<string>([
+        selection.model,
+        ...(provider
+          ? [
+              provider.model,
+              ...provider.modelCatalog.map((model) => model.id),
+              ...Object.keys(provider.modelOverrides),
+            ]
+          : []),
+      ])
+      return [...ids].map((id) => ({ label: id, value: id }))
+    },
   },
   actions: {
     ensureOverlay(sessionId: SessionId): SessionOverlay {
@@ -435,6 +486,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       )
       if (project) {
         replica.beginDraft(project.id)
+        this.draftModelSelection = undefined
         this.input = ''
         this.contextAttachments = []
       }
@@ -450,6 +502,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         return
       }
       replica.beginDraft(project.id)
+      this.draftModelSelection = undefined
       this.mode = useAgentSettingsStore().defaultMode
       this.input = ''
       this.contextAttachments = []
@@ -662,22 +715,36 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       if (!(await settings.setActiveProvider(providerId))) return false
       const provider = settings.providers.find((item) => item.id === providerId)
       if (provider) {
-        await this.updateModelSelection({
+        const selection = {
           providerId,
           model: provider.model,
           reasoning: provider.reasoning,
-        })
+        }
+        if (useAgentReplicaStore().selectedSession) {
+          await this.updateModelSelection(selection)
+        } else {
+          this.draftModelSelection = selection
+        }
       }
       return true
     },
     setProviderModel(model: string) {
       const settings = useAgentSettingsStore()
-      settings.setProviderModel(model)
-      void this.updateModelSelection({
-        providerId: settings.activeProviderId,
+      const replica = useAgentReplicaStore()
+      const current = this.composerModelSelection
+      const provider = settings.providers.find(
+        (candidate) => candidate.id === current.providerId,
+      )
+      const selection = {
+        providerId: current.providerId,
         model,
-        reasoning: settings.providerForm.reasoning,
-      })
+        reasoning: provider?.reasoning ?? current.reasoning,
+      }
+      if (replica.selectedSession) {
+        void this.updateModelSelection(selection)
+      } else {
+        this.draftModelSelection = selection
+      }
     },
     async updateModelSelection(modelSelection: {
       providerId: string
@@ -699,7 +766,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     async sendMessage(value: SendMessageOptions | Event = {}) {
       const options = normalizeSendMessageOptions(value)
       const replica = useAgentReplicaStore()
-      const settings = useAgentSettingsStore()
       const project = replica.selectedProject
       const session = replica.selectedSession
       const text = (options.text ?? this.input).trim()
@@ -750,13 +816,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
                 sessionId,
                 projectId: project.id,
                 title: text.replace(/\s+/gu, ' ').slice(0, 80),
-                modelSelection: {
-                  providerId: settings.activeProviderId,
-                  model: settings.activeProviderModel,
-                  reasoning:
-                    settings.activeProvider?.reasoning ??
-                    settings.providerForm.reasoning,
-                },
+                modelSelection: structuredClone(this.composerModelSelection),
                 permissionMode: this.modeLockedByWriter
                   ? 'readonly'
                   : this.mode,

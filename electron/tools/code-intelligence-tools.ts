@@ -2,6 +2,14 @@ import { Type, type Static } from '@sinclair/typebox'
 import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
 
+export const CODE_INTELLIGENCE_TOOL_IDS = [
+  'code_symbol_overview',
+  'code_find_definition',
+  'code_find_references',
+  'code_workspace_symbols',
+  'code_diagnostics',
+] as const
+
 const DiagnosticsSchema = Type.Object(
   {
     path: Type.String({

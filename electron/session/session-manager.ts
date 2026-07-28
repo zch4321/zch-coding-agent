@@ -72,6 +72,7 @@ import {
   type WorkspaceWriterOwner,
 } from './workspace-access-coordinator'
 import { SessionTraceController } from './session-trace-controller'
+import { resolveSessionToolCatalog } from './session-tool-catalog'
 
 const RUN_CANCEL_GRACE_MS = 2_000
 
@@ -357,6 +358,11 @@ export class SessionManager {
 
     this.#sessions.set(sessionId, session)
     try {
+      const toolCatalog = await resolveSessionToolCatalog({
+        registry: this.#toolRegistry,
+        projectMetadata: this.#projectMetadata,
+        workspace: session.workspace,
+      })
       await appendInitialPromptHarness(session, {
         workspace: session.workspace,
         mode: session.mode,
@@ -365,7 +371,7 @@ export class SessionManager {
         promptRegistry: this.#promptRegistry,
         projectMetadata: this.#projectMetadata,
         skillSummary: this.#skillsManager?.summaryPrompt(),
-        toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+        toolNames: toolCatalog.names,
         workspaceConcurrency: this.#workspaceConcurrencyContext(session),
       })
       this.#emitTraceCaptureStatus(session, trace.status())
@@ -507,6 +513,11 @@ export class SessionManager {
         mode,
       })
       session.mode = mode
+      const toolCatalog = await resolveSessionToolCatalog({
+        registry: this.#toolRegistry,
+        projectMetadata: this.#projectMetadata,
+        workspace: session.workspace,
+      })
       await appendRuntimeContextIfChanged(session, {
         workspace: session.workspace,
         mode: session.mode,
@@ -516,7 +527,7 @@ export class SessionManager {
         projectMetadata: this.#projectMetadata,
         reason: 'permission_mode_changed',
         workspaceConcurrency: this.#workspaceConcurrencyContext(session),
-        toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+        toolNames: toolCatalog.names,
       })
       await this.#executionState?.commit(session, { reason: 'metadata' })
     } catch (error) {

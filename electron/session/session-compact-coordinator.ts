@@ -46,6 +46,7 @@ import {
   MessageHistoryCompiler,
   messageText,
 } from './canonical-history'
+import { resolveSessionToolCatalog } from './session-tool-catalog'
 
 function compactOrchestrationState(input: {
   goal?: GoalState
@@ -152,7 +153,13 @@ export class SessionCompactCoordinator {
     const binding = run.routes?.main
     if (!binding) throw new Error('Run model routes were not resolved')
     const config = this.#configStore.getPublicConfig()
-    const tools = this.#toolRegistry.providerDefinitions()
+    const tools = (
+      await resolveSessionToolCatalog({
+        registry: this.#toolRegistry,
+        projectMetadata: this.#projectMetadata,
+        workspace: session.workspace,
+      })
+    ).definitions
     const compiler = new MessageHistoryCompiler()
     const history = compiler.compile(session.history)
     const provider =
@@ -523,6 +530,11 @@ export class SessionCompactCoordinator {
       }
     },
   ): Promise<MessageId | undefined> {
+    const toolCatalog = await resolveSessionToolCatalog({
+      registry: this.#toolRegistry,
+      projectMetadata: this.#projectMetadata,
+      workspace: session.workspace,
+    })
     const previousHistory = structuredClone(session.history)
     const previousNextSeq = session.nextMessageSeq
     const root = run.rootUserMessageId
@@ -543,7 +555,7 @@ export class SessionCompactCoordinator {
         projectMetadata: this.#projectMetadata,
         skillSummary: this.#skillsManager?.summaryPrompt(),
         workspaceConcurrency: this.#getWorkspaceConcurrency(session),
-        toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+        toolNames: toolCatalog.names,
         signal: run.controller.signal,
       })
       for (const record of runHarness) {
@@ -602,7 +614,7 @@ export class SessionCompactCoordinator {
 
       const binding = run.routes?.main
       if (!binding) throw new Error('Run main route was not resolved')
-      const tools = this.#toolRegistry.providerDefinitions()
+      const tools = toolCatalog.definitions
       const history = new MessageHistoryCompiler().compile(session.history)
       const config = this.#configStore.getPublicConfig()
       const provider =

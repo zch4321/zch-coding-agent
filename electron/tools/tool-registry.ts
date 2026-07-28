@@ -17,6 +17,7 @@ import type { ProviderToolDefinition } from '../providers/provider'
 interface RegisteredTool {
   readonly definition: ToolDefinition
   readonly validate: ValidateFunction
+  readonly providerDefinition: ProviderToolDefinition
 }
 
 const INTENT_FIELD_BASE = '_agent_intent'
@@ -59,6 +60,26 @@ function providerParameters(definition: ToolDefinition): {
   return { parameters: schema as JsonValue, intentField }
 }
 
+function withoutIntentMetadata(
+  args: JsonValue,
+  intentField: string,
+): { args: JsonValue; reason: string } {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return { args, reason: '' }
+  }
+
+  const normalized = structuredClone(args)
+  const rawReason = normalized[intentField]
+  delete normalized[intentField]
+  return {
+    args: normalized,
+    reason:
+      typeof rawReason === 'string'
+        ? rawReason.slice(0, MAX_TOOL_INTENT_LENGTH)
+        : '',
+  }
+}
+
 /** Registers tool definitions and validates provider and executor access to them. */
 export class ToolRegistry implements ToolRegistrationPort {
   readonly #tools = new Map<string, RegisteredTool>()
@@ -69,9 +90,16 @@ export class ToolRegistry implements ToolRegistrationPort {
       throw new Error(`Tool already registered: ${definition.id}`)
     }
 
+    const { parameters, intentField } = providerParameters(definition)
     this.#tools.set(definition.id, {
       definition,
       validate: compileSchema(definition.inputSchema),
+      providerDefinition: {
+        name: definition.id,
+        description: definition.description,
+        inputSchema: parameters,
+        intentParameter: intentField,
+      },
     })
   }
 
@@ -87,15 +115,24 @@ export class ToolRegistry implements ToolRegistrationPort {
 
   /** Converts registered tools into neutral schemas with intent metadata. */
   providerDefinitions(): ProviderToolDefinition[] {
-    return this.list().map((definition) => {
-      const { parameters, intentField } = providerParameters(definition)
-      return {
-        name: definition.id,
-        description: definition.description,
-        inputSchema: parameters,
-        intentParameter: intentField,
-      }
-    })
+    return [...this.#tools.values()].map((tool) =>
+      structuredClone(tool.providerDefinition),
+    )
+  }
+
+  /** Removes the registered provider-only intent field from a canonical call. */
+  normalizeCall(call: ToolCall): ToolCall {
+    const registered = this.#tools.get(call.toolId)
+    if (!registered) return call
+    const normalized = withoutIntentMetadata(
+      call.args,
+      registered.providerDefinition.intentParameter,
+    )
+    return {
+      ...call,
+      args: normalized.args,
+      reason: call.reason || normalized.reason,
+    }
   }
 
   /** Validates JSON arguments against a tool schema and returns typed arguments or an error. */
@@ -109,14 +146,19 @@ export class ToolRegistry implements ToolRegistrationPort {
       return { ok: false, message: `Unknown tool: ${definition.id}` }
     }
 
-    if (!registered.validate(args)) {
+    const normalized = withoutIntentMetadata(
+      args,
+      registered.providerDefinition.intentParameter,
+    ).args
+
+    if (!registered.validate(normalized)) {
       return {
         ok: false,
         message: formatSchemaErrors(registered.validate.errors),
       }
     }
 
-    const typedArgs = args as Static<Schema>
+    const typedArgs = normalized as Static<Schema>
     const validationMessage = definition.validateArgs?.(typedArgs)
 
     if (validationMessage) {
@@ -201,6 +243,11 @@ export class ToolExecutor {
 
   constructor(registry: ToolRegistry) {
     this.#registry = registry
+  }
+
+  /** Removes provider-only metadata before validation, policy, and execution. */
+  normalizeCall(call: ToolCall): ToolCall {
+    return this.#registry.normalizeCall(call)
   }
 
   /** Checks that a call references a known definition and matches approved arguments. */

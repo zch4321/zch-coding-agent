@@ -358,7 +358,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             :loading="agent.modelCatalogLoading"
             filterable
             tag
-            @update:value="agent.setProviderModel"
+            @update:value="agent.setProviderDraftModel"
           />
           <NButton
             secondary

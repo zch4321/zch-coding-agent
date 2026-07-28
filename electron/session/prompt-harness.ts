@@ -423,7 +423,7 @@ function codeIntelligenceGuidance(project: {
   if (!project.serena.enabled || enabledBindings.length === 0) {
     return [
       'code_intelligence: unavailable',
-      'guidance: code_* tools are registered by the app, but no enabled project backend is configured; use search/read_file unless the user asks to configure the backend.',
+      'guidance: code_* tools are not exposed to the model because no enabled project backend is configured; use search/read_file unless the user asks to configure the backend.',
     ]
   }
 

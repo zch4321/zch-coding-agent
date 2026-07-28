@@ -203,9 +203,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       state.providers.find(
         (provider) => provider.id === state.selectedProviderId,
       )?.credentialSource ?? 'none',
-    activeProviderModel: (state) =>
-      state.providers.find((provider) => provider.id === state.activeProviderId)
-        ?.model ?? state.providerForm.model,
     modelOptions: (state) =>
       state.modelProfiles.map((model) => ({
         label: model.id,

@@ -544,7 +544,15 @@ Provider 实现保持扁平：`DeepSeekProvider`、`GenericChatCompletionsProvid
 
 Renderer 的运行限制表单以单列分节展示，`autoCompactTriggerPercent` 明确显示 `%` 单位。表单变更在 600ms 静默期后调用 versioned `config:set(limits)`；store 对发送中的快照签名，并在请求期间又有编辑时继续保存最新快照，避免用旧响应覆盖新输入。顶部按钮复用同一 action，用于立即提交和错误重试。
 
+默认工具上下文预算为单次 64K token、每个 Run 累计 128K token；通用工具输出与 `read_file` 内容边界为 128 KiB。`read_file` 默认/最多扫描 10,000 行，最终仍由字节与保守 token 估算先到者截断，执行器 envelope 预留独立序列化开销。AppConfig v11 只把仍等于旧默认值的 v10 四项限制迁移到新默认值，自定义限制原样保留。
+
+ToolRegistry 可以注册稳定的 `code_*` facade，但每个 Session/Run 在生成 provider tool catalog 时按当前 ProjectModel 过滤。只有 `serena.enabled` 且至少一个属于该 Serena backend 的 binding 已启用并声明 capability 时，Provider request、runtime context 和 AGENTS context 才包含这些工具；未配置、禁用或读取 ProjectModel 失败都采用 fail-closed 目录。Provider parser 删除 intent metadata 后，ToolRegistry/executor 在权限与 schema 校验前再次按注册时记录的实际 intent field 清理，防止 `_agent_intent` 序列化泄漏导致偶发 `additionalProperties` 错误。
+
 Auto approval 是独立于 Provider 编辑表单的全局 route selection，并归入 Permissions 设置页：`approval.approverProviderId` 只引用一个 Provider 配置实例以取得 `providerType/baseURL/credential`，`approval.approverModel` 单独覆盖模型。它由独立配置命令保存；创建、复制或保存 Provider 不能改写 approval，只有删除当前引用 Provider 时才显式切换到 fallback。这样避免复制第二套 endpoint/credential 配置，同时保证审批模型不跟随当前 Provider 卡片草稿漂移。
+
+Auto approval 的稳定前缀仅包含审批规则 prompt，动态 user payload 包含 tool/args/reason/workspace/policy signals。是否命中由各 Provider 的最小前缀、路由和 cache-control 语义决定；Application 不伪造命中，也不填充无意义文本。标准化 usage 将未被缓存覆盖的 input 记为 `cacheMissTokens`：OpenAI-style 用 input/prompt total 减 cached tokens，缺少 cached 指标时全部视为 miss；Anthropic 使用 uncached input 与 cache-creation input 之和，同时保留 raw usage。
+
+Composer route 与 Provider 编辑草稿互相独立：已有对话始终读取冻结在 Session 上的 `modelSelection`，新对话读取显式 draft 或全局 active Provider；模型选项只合并该 route Provider 的当前模型、目录和 overrides，不能因设置页默认选中第一张 Provider 卡片而串表。
 
 三个通用兜底 type 为 `generic.chat-completions`、`generic.responses` 和 `generic.anthropic`。Responses 固定 `store = false`，不使用 `previous_response_id` 或 Conversations API；完整 output items（含 encrypted reasoning）进入 `responses.output-items.v1` continuation 并由本地 history 精确回放。Anthropic 的 high/max 使用 adaptive thinking 与 `output_config.effort`；完整 thinking、redacted thinking、signature 和 tool-use blocks 进入 `anthropic.message-content.v1` continuation。两者的 Provider Type/hash 不匹配均回退 canonical replay，同类型损坏 payload 明确报错。
 
@@ -1568,6 +1576,6 @@ Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、
 
 SQLite transaction callback 通过 authorizer 拒绝事务控制 SQL；commit listener 逐项隔离；backend dispose 使用共享 promise 排空 live runtime/coordinator 后关闭数据库。FileChange retention 由 migration 维护单行总量和 trigger，不再每次插入全表 `SUM`。Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。Markdown Conversation import/export 暂停并在 UI 中禁用；Trace transcript export 保持可用。
 
-AppConfig v10 会把合法 v9 Provider 配置无损迁移为 `providerType`，保留 API-key reference、模型目录、模型覆盖、revision 和其他设置；不兼容、损坏或更早版本仍执行 reset-only。Headless v2 在读取时迁移合法 v1 输入；SQLite v4 原位迁移历史 route/continuation identity，旧 JSONL trace 只在读取时投影而不改写文件。
+AppConfig v11 会把合法 v9 Provider 配置迁移为 `providerType`，并把合法 v10 配置中仍等于旧默认值的工具/read 预算提升到 64K/128K；API-key reference、模型目录、模型覆盖、revision 和自定义限制保持不变，不兼容、损坏或更早版本仍执行 reset-only。Headless v2 在读取时迁移合法 v1 输入；SQLite v4 原位迁移历史 route/continuation identity，旧 JSONL trace 只在读取时投影而不改写文件。
 
 P3 review 建议、N-3/N-4 和 201+ 数据量的额外 Electron E2E 明确延后，不属于 P10 发布门禁；现有单元/集成测试继续覆盖 201+ Session、Message 和 FileChange 分页。产品路径不再保留双轨、兼容开关或 legacy fallback。

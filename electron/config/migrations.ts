@@ -95,6 +95,55 @@ const LegacyAppConfigV9Schema = Type.Object(
 type LegacyAppConfigV9 = Static<typeof LegacyAppConfigV9Schema>
 const validateLegacyAppConfigV9 = compileSchema(LegacyAppConfigV9Schema)
 
+// AppConfig v10 has the current field shape with the previous version literal.
+// It is retained so existing Provider Foundation installs can adopt the larger
+// tool/read defaults without losing credentials, catalogs, or custom limits.
+const LegacyAppConfigV10Schema = Type.Object(
+  {
+    ...AppConfigSchema.properties,
+    schemaVersion: Type.Literal(10),
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV10 = Static<typeof LegacyAppConfigV10Schema>
+const validateLegacyAppConfigV10 = compileSchema(LegacyAppConfigV10Schema)
+
+function migrateLimitDefaults(
+  limits: LegacyAppConfigV10['limits'],
+): AppConfig['limits'] {
+  const next = structuredClone(limits) as AppConfig['limits']
+
+  if (next.maxToolOutputBytes === 64 * 1_024) {
+    next.maxToolOutputBytes = 128 * 1_024
+  }
+  if (next.maxToolResultTokens === 8_000) {
+    next.maxToolResultTokens = 64_000
+  }
+  if (next.maxToolTokensPerRun === 24_000) {
+    next.maxToolTokensPerRun = 128_000
+  }
+  if (next.readFileOutputBytes === 64 * 1_024) {
+    next.readFileOutputBytes = 128 * 1_024
+  }
+
+  return next
+}
+
+function migrateV10(config: LegacyAppConfigV10): AppConfig {
+  const migrated = {
+    ...config,
+    schemaVersion: 11 as const,
+    limits: migrateLimitDefaults(config.limits),
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      10,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
 /** Reports that a persisted configuration uses an unsupported schema version. */
 export class UnsupportedConfigSchemaError extends Error {
   constructor(
@@ -102,7 +151,7 @@ export class UnsupportedConfigSchemaError extends Error {
     validationErrors?: string,
   ) {
     super(
-      `Unsupported config schema ${String(schemaVersion)}; this build requires AppConfig v10 and will reset the existing config to defaults.${
+      `Unsupported config schema ${String(schemaVersion)}; this build requires AppConfig v11 and will reset the existing config to defaults.${
         validationErrors ? ` ${validationErrors}` : ''
       }`,
     )
@@ -111,7 +160,7 @@ export class UnsupportedConfigSchemaError extends Error {
 }
 
 /**
- * Migrates the P11 provider identity boundary while rejecting older epochs.
+ * Migrates the Provider identity and enlarged tool-limit boundaries.
  */
 export function migrateConfig(candidate: unknown): AppConfig {
   if (candidate === undefined || candidate === null) {
@@ -136,7 +185,8 @@ export function migrateConfig(candidate: unknown): AppConfig {
     const legacy = candidate as LegacyAppConfigV9
     const migrated = {
       ...legacy,
-      schemaVersion: 10 as const,
+      schemaVersion: 11 as const,
+      limits: migrateLimitDefaults(legacy.limits),
       providers: legacy.providers.map((provider) => {
         const adapterId = provider.adapterId
         const rest = withoutKey(
@@ -161,7 +211,17 @@ export function migrateConfig(candidate: unknown): AppConfig {
     return structuredClone(migrated as AppConfig)
   }
 
-  if (Reflect.get(candidate, 'schemaVersion') !== 10) {
+  if (Reflect.get(candidate, 'schemaVersion') === 10) {
+    if (!validateLegacyAppConfigV10(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        10,
+        formatSchemaErrors(validateLegacyAppConfigV10.errors),
+      )
+    }
+    return migrateV10(candidate as LegacyAppConfigV10)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') !== 11) {
     throw new UnsupportedConfigSchemaError(
       Reflect.get(candidate, 'schemaVersion'),
     )

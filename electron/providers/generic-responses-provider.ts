@@ -195,12 +195,18 @@ function responseUsage(value: JsonValue): ProviderUsage {
   const usage = value as JsonObject
   const inputDetails = providerObjectField(usage, 'input_tokens_details')
   const outputDetails = providerObjectField(usage, 'output_tokens_details')
+  const promptTokens = providerMetric(usage.input_tokens)
+  const cacheHitTokens = providerMetric(inputDetails?.cached_tokens)
   return {
-    promptTokens: providerMetric(usage.input_tokens),
+    promptTokens,
     completionTokens: providerMetric(usage.output_tokens),
     totalTokens: providerMetric(usage.total_tokens),
     reasoningTokens: providerMetric(outputDetails?.reasoning_tokens),
-    cacheHitTokens: providerMetric(inputDetails?.cached_tokens),
+    cacheHitTokens,
+    cacheMissTokens:
+      promptTokens !== undefined
+        ? Math.max(0, promptTokens - (cacheHitTokens ?? 0))
+        : undefined,
     raw: structuredClone(value),
   }
 }

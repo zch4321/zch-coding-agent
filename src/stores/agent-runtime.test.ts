@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent } from '../../shared/agent-events'
 import type { AgentApi } from '../../shared/agent-api'
+import type { ProviderPublicConfig } from '../../shared/config'
 import type { DurableRunStartPayload } from '../../shared/domain-state-api'
 import type {
   CallId,
@@ -18,6 +19,7 @@ import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { SessionRecord } from '../../shared/session'
 import { useAgentReplicaStore } from './agent-replica'
 import { useAgentRuntimeStore } from './agent-runtime'
+import { useAgentSettingsStore } from './agent-settings'
 import { useNotificationStore } from './notifications'
 
 const projectId = 'project:runtime-test' as ProjectId
@@ -166,11 +168,67 @@ function seedReplica(includeBackground = false) {
   return replica
 }
 
+function provider(
+  id: string,
+  model: string,
+  catalogModels: string[],
+): ProviderPublicConfig {
+  return {
+    id,
+    label: id,
+    providerType: 'generic.chat-completions',
+    revision: 1,
+    baseURL: 'https://provider.example/v1',
+    model,
+    reasoning: 'off',
+    modelCatalog: catalogModels.map((catalogModel) => ({ id: catalogModel })),
+    modelOverrides: {},
+    credentialConfigured: true,
+    credentialSource: 'safe-storage',
+  }
+}
+
 describe('agent runtime store', () => {
   beforeEach(() => setActivePinia(createPinia()))
   afterEach(() => {
     Reflect.deleteProperty(window, 'agentApi')
     vi.restoreAllMocks()
+  })
+
+  it('derives composer models from the selected Session provider', () => {
+    const replica = seedReplica()
+    replica.sessions[0]!.modelSelection = {
+      providerId: 'provider-b',
+      model: 'provider-b-selected',
+      reasoning: 'off',
+    }
+    const settings = useAgentSettingsStore()
+    settings.activeProviderId = 'provider-a'
+    settings.selectedProviderId = 'provider-a'
+    settings.providers = [
+      provider('provider-a', 'provider-a-default', ['provider-a-catalog']),
+      provider('provider-b', 'provider-b-default', ['provider-b-catalog']),
+    ]
+    settings.modelProfiles = [
+      {
+        id: 'provider-a-catalog',
+        availability: 'provider',
+        capabilitySource: 'default',
+        contextWindowTokens: 256_000,
+        compactThresholdTokens: 198_246,
+        maxOutputTokens: 8_192,
+      },
+    ]
+
+    const runtime = useAgentRuntimeStore()
+
+    expect(runtime.composerProviderId).toBe('provider-b')
+    expect(runtime.composerModel).toBe('provider-b-selected')
+    expect(runtime.composerModelOptions.map((option) => option.value)).toEqual([
+      'provider-b-selected',
+      'provider-b-default',
+      'provider-b-catalog',
+    ])
   })
 
   it('blocks a second draft submission while the first start IPC is pending', async () => {

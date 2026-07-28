@@ -390,7 +390,7 @@ describe('GenericAnthropicProvider', () => {
         totalTokens: 49,
         reasoningTokens: 4,
         cacheHitTokens: 5,
-        cacheMissTokens: 2,
+        cacheMissTokens: 32,
       },
       finishReason: 'tool_calls',
     })

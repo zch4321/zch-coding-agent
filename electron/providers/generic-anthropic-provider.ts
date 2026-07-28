@@ -238,6 +238,10 @@ function normalizedAnthropicUsage(
   const outputDetails =
     providerObjectField(delta, 'output_tokens_details') ??
     providerObjectField(start, 'output_tokens_details')
+  const cacheMissTokens =
+    uncachedInputTokens === undefined && cacheCreationTokens === undefined
+      ? undefined
+      : (uncachedInputTokens ?? 0) + (cacheCreationTokens ?? 0)
   return {
     promptTokens: inputTokens,
     completionTokens: outputTokens,
@@ -246,7 +250,7 @@ function normalizedAnthropicUsage(
       : {}),
     reasoningTokens: providerMetric(outputDetails?.thinking_tokens),
     cacheHitTokens: cacheReadTokens,
-    cacheMissTokens: cacheCreationTokens,
+    cacheMissTokens,
     raw: {
       message_start: structuredClone(startUsage),
       message_delta: structuredClone(deltaUsage),

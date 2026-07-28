@@ -32,7 +32,7 @@ export type AgentFacade = Omit<ShellStore, '$id'> &
     | 'removeRememberedRule'
   > &
   Omit<ReplicaStore, 'error' | '$id' | 'projects'> &
-  Omit<RuntimeStore, '$id'> &
+  Omit<RuntimeStore, '$id' | 'draftModelSelection'> &
   Omit<ChangesStore, 'error' | '$id' | 'revertChange'> & {
     workspacePath: string
     projects: ProjectView[]
@@ -45,6 +45,7 @@ export type AgentFacade = Omit<ShellStore, '$id'> &
     removeRememberedRule(ruleId: string): Promise<void>
     revertChange(changeId: string): Promise<boolean>
     searchSessions(text: string, projectId?: ProjectId): Promise<void>
+    setProviderDraftModel(model: string): void
   }
 
 const shellProperties = new Set<PropertyKey>([
@@ -92,7 +93,6 @@ const settingsProperties = new Set<PropertyKey>([
   'selectedCredentialSource',
   'activeProvider',
   'selectedProvider',
-  'activeProviderModel',
   'modelOptions',
   'providerOptions',
   'approvalModelOptions',
@@ -146,6 +146,10 @@ const runtimeProperties = new Set<PropertyKey>([
   'modeSyncError',
   'canSend',
   'canInterject',
+  'composerModelSelection',
+  'composerProviderId',
+  'composerModel',
+  'composerModelOptions',
 ])
 const changesProperties = new Set<PropertyKey>([
   'changes',
@@ -214,6 +218,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     selectProviderForEditing: settings.selectProviderForEditing,
     resetSelectedProviderDraft: settings.resetSelectedProviderDraft,
     setProviderModel: runtime.setProviderModel,
+    setProviderDraftModel: settings.setProviderModel,
     updateModelConfiguration: settings.updateModelConfiguration,
     loadProviderModels: settings.loadProviderModels,
     enterProviderSettings: settings.enterProviderSettings,

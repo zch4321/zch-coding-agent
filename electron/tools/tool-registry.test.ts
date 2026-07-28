@@ -7,6 +7,55 @@ import { registerOrchestrationTools } from '../session/orchestration-tools'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
 
 describe('ToolRegistry hard output boundary', () => {
+  it('strips provider-only intent metadata again at the executor boundary', () => {
+    const registry = new ToolRegistry()
+    registry.registerTool({
+      id: 'grep_fixture',
+      description: 'Search fixture',
+      inputSchema: Type.Object(
+        {
+          pattern: Type.String(),
+          include: Type.Optional(Type.String()),
+          maxResults: Type.Optional(Type.Integer()),
+        },
+        { additionalProperties: false },
+      ),
+      effects: ['filesystem.read'],
+      defaultRisk: 'low',
+      supportsAbort: true,
+      defaultTimeoutMs: 1_000,
+      maxOutputBytes: 1_024,
+      async execute() {
+        return { status: 'ok', content: [] }
+      },
+    })
+    const intentParameter = registry.providerDefinitions()[0].intentParameter
+    const call = {
+      id: 'call-intent' as CallId,
+      toolId: 'grep_fixture',
+      args: {
+        pattern: 'TODO|FIXME',
+        include: '**/*.ts',
+        maxResults: 100,
+        [intentParameter]: 'Find unfinished work',
+      },
+      reason: '',
+    }
+
+    expect(registry.normalizeCall(call)).toEqual({
+      ...call,
+      args: {
+        pattern: 'TODO|FIXME',
+        include: '**/*.ts',
+        maxResults: 100,
+      },
+      reason: 'Find unfinished work',
+    })
+    expect(new ToolExecutor(registry).inspectCall(call)).toMatchObject({
+      ok: true,
+    })
+  })
+
   it('requires result and evidence for completed plan_update calls', () => {
     const registry = new ToolRegistry()
     registerOrchestrationTools(registry, {

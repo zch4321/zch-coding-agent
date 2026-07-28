@@ -10,9 +10,9 @@ import { DEFAULT_MAX_ENTRIES, walkFiles } from './workspace-walk'
 import { type Searcher, resolveWorkspaceSearcher } from './searcher'
 
 const MAX_READ_SOURCE_BYTES = 10_000_000
-const MAX_READ_OUTPUT_BYTES = 64 * 1_024
-const DEFAULT_READ_LINES = 400
-const MAX_READ_LINES = 1_000
+const MAX_READ_OUTPUT_BYTES = 128 * 1_024
+const MAX_READ_LINES = 10_000
+const DEFAULT_READ_LINES = MAX_READ_LINES
 const DEFAULT_LIMITS: Pick<
   PublicConfig['limits'],
   | 'maxToolResultTokens'
@@ -20,7 +20,7 @@ const DEFAULT_LIMITS: Pick<
   | 'readFileSourceBytes'
   | 'readFileOutputBytes'
 > = {
-  maxToolResultTokens: 8_000,
+  maxToolResultTokens: 64_000,
   tokenEstimation: { mode: 'conservative', bytesPerToken: 3 },
   readFileSourceBytes: MAX_READ_SOURCE_BYTES,
   readFileOutputBytes: MAX_READ_OUTPUT_BYTES,
@@ -187,7 +187,7 @@ export function createReadOnlyToolDefinitions(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 15_000,
-    maxOutputBytes: 96 * 1_024,
+    maxOutputBytes: 160 * 1_024,
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)
@@ -224,7 +224,7 @@ export function createReadOnlyToolDefinitions(
         const requestedStartLine = args.startLine ?? 1
         const startIndex = Math.min(requestedStartLine - 1, lines.length)
         const requestedLines = args.lineCount ?? DEFAULT_READ_LINES
-        const maxTokens = Math.min(8_000, limits.maxToolResultTokens)
+        const maxTokens = Math.min(64_000, limits.maxToolResultTokens)
         const selected: string[] = []
         let selectedBytes = 0
         let selectedTokens = 0

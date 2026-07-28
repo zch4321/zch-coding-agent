@@ -284,14 +284,24 @@ export function normalizeChatUsage(value: JsonValue): ProviderUsage {
     return { raw: value }
   }
   const usage = value as JsonObject
-  const details = objectField(usage, 'completion_tokens_details')
+  const promptTokens = metric(usage.prompt_tokens)
+  const completionDetails = objectField(usage, 'completion_tokens_details')
+  const promptDetails = objectField(usage, 'prompt_tokens_details')
+  const cacheHitTokens =
+    metric(usage.prompt_cache_hit_tokens) ??
+    metric(promptDetails?.cached_tokens)
+  const explicitCacheMissTokens = metric(usage.prompt_cache_miss_tokens)
   return {
-    promptTokens: metric(usage.prompt_tokens),
+    promptTokens,
     completionTokens: metric(usage.completion_tokens),
     totalTokens: metric(usage.total_tokens),
-    reasoningTokens: metric(details?.reasoning_tokens),
-    cacheHitTokens: metric(usage.prompt_cache_hit_tokens),
-    cacheMissTokens: metric(usage.prompt_cache_miss_tokens),
+    reasoningTokens: metric(completionDetails?.reasoning_tokens),
+    cacheHitTokens,
+    cacheMissTokens:
+      explicitCacheMissTokens ??
+      (promptTokens !== undefined
+        ? Math.max(0, promptTokens - (cacheHitTokens ?? 0))
+        : undefined),
     raw: structuredClone(value),
   }
 }

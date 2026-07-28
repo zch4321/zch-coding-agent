@@ -56,7 +56,7 @@ export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
 
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(10),
+    schemaVersion: Type.Literal(11),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
@@ -92,7 +92,7 @@ export type AppConfig = Static<typeof AppConfigSchema>
 export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 10,
+  schemaVersion: 11,
   activeProviderId: DEFAULT_PROVIDER_ID,
   providers: [
     {
@@ -124,19 +124,19 @@ export const DEFAULT_APP_CONFIG = {
   limits: {
     maxConcurrentRuns: 4,
     maxStepsPerRun: 0,
-    maxToolOutputBytes: 64 * 1_024,
+    maxToolOutputBytes: 128 * 1_024,
     maxContextTokens: DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
     maxAttachmentContextTokens: 64_000,
     autoCompactTriggerPercent: 80,
-    maxToolResultTokens: 8_000,
-    maxToolTokensPerRun: 24_000,
+    maxToolResultTokens: 64_000,
+    maxToolTokensPerRun: 128_000,
     tokenEstimation: {
       mode: 'conservative',
       bytesPerToken: 3,
     },
     commandTimeoutMs: 120_000,
     readFileSourceBytes: 10_000_000,
-    readFileOutputBytes: 64 * 1_024,
+    readFileOutputBytes: 128 * 1_024,
     editableFileBytes: 10_000_000,
     writeFileBytes: 256 * 1_024,
     patchBytes: 64 * 1_024,
@@ -242,7 +242,7 @@ export function toPublicConfig(
         })
 
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     activeProviderId: config.activeProviderId,
     providers: config.providers.map((provider) => ({
       id: provider.id,

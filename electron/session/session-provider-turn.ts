@@ -40,6 +40,7 @@ import {
   appendRuntimeContextIfChanged,
   type WorkspaceConcurrencyContext,
 } from './prompt-harness'
+import { resolveSessionToolCatalog } from './session-tool-catalog'
 
 export interface ProviderTurnResult {
   parts: MessagePart[]
@@ -122,7 +123,12 @@ export class SessionProviderTurnRunner {
     const binding = run.routes?.main
     if (!binding) throw new Error('Run model routes were not resolved')
     const config = this.#configStore.getPublicConfig()
-    const tools = this.#toolRegistry.providerDefinitions()
+    const toolCatalog = await resolveSessionToolCatalog({
+      registry: this.#toolRegistry,
+      projectMetadata: this.#projectMetadata,
+      workspace: session.workspace,
+    })
+    const tools = toolCatalog.definitions
 
     await appendRuntimeContextIfChanged(session, {
       workspace: session.workspace,
@@ -133,7 +139,7 @@ export class SessionProviderTurnRunner {
       projectMetadata: this.#projectMetadata,
       reason: 'provider_call',
       workspaceConcurrency: this.#getWorkspaceConcurrency(session),
-      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+      toolNames: toolCatalog.names,
       signal: run.controller.signal,
     })
     await appendAgentsContextIfChanged(session, {
@@ -143,7 +149,7 @@ export class SessionProviderTurnRunner {
       providerId: binding.snapshot.providerId,
       promptRegistry: this.#promptRegistry,
       projectMetadata: this.#projectMetadata,
-      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+      toolNames: toolCatalog.names,
       signal: run.controller.signal,
     })
 

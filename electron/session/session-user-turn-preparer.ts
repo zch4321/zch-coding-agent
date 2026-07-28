@@ -15,6 +15,7 @@ import {
 import type { SessionOrchestratorMessages } from './session-orchestrator-messages'
 import { resolveSlashCommand } from './slash-commands'
 import type { ActiveRun, AgentEventDraft, SessionState } from './session-types'
+import { resolveSessionToolCatalog } from './session-tool-catalog'
 
 export interface PreparedUserTurn {
   visibleMessage: string
@@ -71,6 +72,11 @@ export class SessionUserTurnPreparer {
     context?: RunContext,
   ): Promise<PreparedUserTurn> {
     const config = this.#configStore.getPublicConfig()
+    const toolCatalog = await resolveSessionToolCatalog({
+      registry: this.#toolRegistry,
+      projectMetadata: this.#projectMetadata,
+      workspace: session.workspace,
+    })
     await appendRuntimeContextIfChanged(session, {
       workspace: session.workspace,
       mode: session.mode,
@@ -80,7 +86,7 @@ export class SessionUserTurnPreparer {
       projectMetadata: this.#projectMetadata,
       reason: 'run_started',
       workspaceConcurrency: this.#getWorkspaceConcurrency(session),
-      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+      toolNames: toolCatalog.names,
       signal: run.controller.signal,
     })
     await appendAgentsContextIfChanged(session, {
@@ -91,7 +97,7 @@ export class SessionUserTurnPreparer {
       promptRegistry: this.#promptRegistry,
       projectMetadata: this.#projectMetadata,
       skillSummary: this.#skillsManager?.summaryPrompt(),
-      toolNames: this.#toolRegistry.list().map((tool) => tool.id),
+      toolNames: toolCatalog.names,
       signal: run.controller.signal,
     })
     const command = resolveSlashCommand({

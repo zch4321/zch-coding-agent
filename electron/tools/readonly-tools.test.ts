@@ -238,6 +238,26 @@ describe('read-only tools', () => {
     }
   })
 
+  it('uses byte and token budgets instead of the former 400-line default', async () => {
+    const root = await workspace()
+    await writeFile(
+      path.join(root, 'many-lines.txt'),
+      `${Array.from({ length: 600 }, (_, index) => `line-${index + 1}`).join('\n')}\n`,
+    )
+
+    const result = await executeReadonly(root, {
+      id: 'call-read-default-lines' as CallId,
+      toolId: 'read_file',
+      args: { path: 'many-lines.txt' },
+      reason: '',
+    })
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      content: { endLine: 600, truncated: false },
+    })
+  })
+
   it('returns a structured error for path escapes', async () => {
     const root = await workspace()
     const registry = new ToolRegistry()
@@ -315,7 +335,7 @@ describe('read-only tools', () => {
 
   it('bounds one extremely long line', async () => {
     const root = await workspace()
-    await writeFile(path.join(root, 'one-line.txt'), 'x'.repeat(100_000))
+    await writeFile(path.join(root, 'one-line.txt'), 'x'.repeat(200_000))
     const result = await executeReadonly(root, {
       id: 'call-long-line' as CallId,
       toolId: 'read_file',
@@ -331,7 +351,7 @@ describe('read-only tools', () => {
     if (result.status === 'ok') {
       const content = result.content as { content: string }
       expect(Buffer.byteLength(content.content, 'utf8')).toBeLessThanOrEqual(
-        64 * 1_024,
+        128 * 1_024,
       )
     }
   })

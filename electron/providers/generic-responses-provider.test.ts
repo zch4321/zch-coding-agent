@@ -297,6 +297,7 @@ describe('GenericResponsesProvider', () => {
         totalTokens: 28,
         reasoningTokens: 3,
         cacheHitTokens: 4,
+        cacheMissTokens: 16,
       },
       finishReason: 'tool_calls',
     })

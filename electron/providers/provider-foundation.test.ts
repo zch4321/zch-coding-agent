@@ -20,6 +20,7 @@ import {
   MessageHistoryCompiler,
   type CanonicalHistoryState,
 } from '../session/canonical-history'
+import { normalizeChatUsage } from './chat-completions-shared'
 import { DeepSeekProvider } from './deepseek-provider'
 import { GenericAnthropicProvider } from './generic-anthropic-provider'
 import { GenericChatCompletionsProvider } from './generic-chat-completions-provider'
@@ -136,6 +137,25 @@ function completed(events: ProviderEvent[]) {
 }
 
 describe('P11 Provider foundation', () => {
+  it('derives generic Chat cache misses from prompt token details', () => {
+    expect(
+      normalizeChatUsage({
+        prompt_tokens: 20,
+        prompt_tokens_details: { cached_tokens: 4 },
+        completion_tokens: 3,
+        total_tokens: 23,
+      }),
+    ).toMatchObject({
+      promptTokens: 20,
+      cacheHitTokens: 4,
+      cacheMissTokens: 16,
+    })
+    expect(normalizeChatUsage({ prompt_tokens: 20 })).toMatchObject({
+      promptTokens: 20,
+      cacheMissTokens: 20,
+    })
+  })
+
   it.each([
     {
       name: 'DeepSeek',

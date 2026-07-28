@@ -60,7 +60,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 1. 人类审批界面的意图展示；
 2. 喂给审批模型做判定。
 
-内置工具可在暴露给模型的 schema 中加入保留字段；MCP 等外部工具由 Provider/ToolRegistry 统一包装，规范化后把 `reason` 与业务 `args` 分离，转发外部工具时不得携带该保留字段。`reason` 是不可信声明，不参与工具自身业务参数校验。
+内置工具可在暴露给模型的 schema 中加入保留字段；MCP 等外部工具由 Provider/ToolRegistry 统一包装，规范化后把 `reason` 与业务 `args` 分离，转发外部工具时不得携带该保留字段。Provider parser 与 ToolRegistry/executor 边界都必须删除实际注册的 intent 字段，避免流式解析或序列化异常把 `_agent_intent` 泄漏到 `additionalProperties: false` 的业务 schema。`reason` 是不可信声明，不参与工具自身业务参数校验。
 
 每个工具还必须声明机器可读的能力元数据，而不是只用一个 `readonly` 布尔值：
 
@@ -81,7 +81,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 > 设计意图：把常规删除做成独立工具，便于精确展示路径、数量和审批风险。它不能阻止 `run_command` 间接删除文件，因此命令工具仍必须独立经过权限策略，不能把工具拆分误当成 sandbox。
 
-`read_file` 使用 `startLine + lineCount` 分页，返回实际行范围、总行数、`truncated` 和 `nextStartLine`。默认读取 400 行，单次最多 1000 行，并同时受 64 KiB 与 8K 估算 token 限制；超长单行不能绕过字节/token 上限。
+`read_file` 使用 `startLine + lineCount` 分页，返回实际行范围、总行数、`truncated` 和 `nextStartLine`。默认尽量读取到 10,000 行，单次最多 10,000 行，并同时受 128 KiB 与 64K 估算 token 限制；超长单行不能绕过字节/token 上限。全局工具结果默认单次预算为 64K token、每个 Run 累计预算为 128K token，Token 估算继续按 UTF-8 字节比例保守计算，不能把字节数直接当成真实 token 数。
 
 `apply_patch` 第一版一次只修改一个已存在的 UTF-8 文本文件，可包含多个 hunk。补丁路径必须是 workspace 相对路径；禁止二进制、rename、mode change、绝对路径和越界路径。为适配模型常见的计数错误，hunk header 的行数和 new-file 行号只作为提示；上下文/删除行仍必须精确匹配，old line number 失效时只有在精确上下文唯一命中时才可应用。审批绑定原文件 hash、规范化补丁 hash 与结果 hash，执行前重新验证。`create_file` 只创建不存在的文件，并会自动创建缺失父目录；覆盖已有文件应使用 `apply_patch`。
 
@@ -138,7 +138,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 模型目录查询保持独立服务。OpenAI-compatible API 使用 Bearer `GET /models`，Anthropic 使用 `x-api-key`、版本 header 和有界分页 `GET /models`。目录解析只能采用协议明确返回的字段：Anthropic 的 `max_input_tokens/max_tokens` 归一化为模型容量；OpenAI 与 DeepSeek 的标准列表当前只保证模型身份信息，不能臆测容量。设置页合并 Provider 返回、应用内置模型资料和用户自定义模型，并始终允许手工输入；不得抓取 Provider 文档 HTML 推断运行时能力。Provider 编辑页在底部以模型列表展示每个模型的“最大上下文、压缩阈值、最大输出长度”，目录没有返回的数值必须自动填入应用默认值而不是显示空配置。
 
-模型能力采用 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值`。未知模型默认按 256K 上下文管理，最大输出采用安全默认值，压缩阈值默认为可用 prompt budget 的 80%，并明确标记“能力未知”。自动补齐的模型值不固化为用户覆盖，因此修改全局默认值会同步到仍使用默认能力的模型；手工修改过的三项配置按模型保存并随 route revision 冻结。模型目录请求失败时保留上次成功缓存和当前手工配置。
+模型能力采用 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值`。未知模型默认按 256K 上下文管理，最大输出采用安全默认值，压缩阈值默认为可用 prompt budget 的 80%，并明确标记“能力未知”。自动补齐的模型值不固化为用户覆盖，因此修改全局默认值会同步到仍使用默认能力的模型；手工修改过的三项配置按模型保存并随 route revision 冻结。模型目录请求失败时保留上次成功缓存和当前手工配置。对话 Composer 的 Provider/model route 必须来自当前 Session 或新对话草稿，不能复用 Provider 设置页当前正在编辑的卡片；未操作下拉框时也必须显示当前 route 对应 Provider 的模型目录。
 
 运行限制页采用带分节线的单列布局，百分比配置必须同时显示数值和 `%` 单位。合法修改在短暂防抖后自动保存，页面顶部保留立即保存/失败重试按钮；自动保存不能覆盖保存请求期间产生的更新。
 
@@ -270,7 +270,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - **披露约束**：会话必须先读取包含目标工具的当前 revision 页面才能调用。cursor 绑定 server、revision 和 offset，目录变化后旧 cursor 与旧披露状态失效。
 - **工具命名**：通用调用在权限判断和 `tool.proposed` 前展开为 `mcp:<serverId>:<toolName>`，并以 MCP 原始 input schema 校验业务参数。
 - **权限**：目录工具在 ReadOnly 下可读；MCP 执行在 ReadOnly 下拒绝、Auto 下模型审批并可升级人工审批、Confirm 下人工审批、Yolo 下直接执行。MCP 审批不可记忆、调用不可自动重放。
-- **生命周期**：主进程管理 handshake、目录边界、超时、取消、draining、有限指数退避重启、stderr tail 和应用退出清理。Serena 复用 stdio connection，但只暴露稳定 `code_*` facade。
+- **生命周期**：主进程管理 handshake、目录边界、超时、取消、draining、有限指数退避重启、stderr tail 和应用退出清理。Serena 复用 stdio connection，但只暴露稳定 `code_*` facade；当前项目未启用 Serena、没有有效 capability binding 或 ProjectModel 不可用时，Provider request 与模型可见工具提示都不得包含 `code_*`。
 - **秘密环境变量**：`env` 仅存非敏感值；`envFromHost` 只保存子进程变量名到主机变量名的映射。主机值只在主进程启动子进程时解析，不进入 renderer、public config、trace 或日志。
 
 ---
@@ -321,6 +321,8 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 自动审批模型请求默认超时为 `autoApprovalTimeoutMs = 60000`；超时、无效输出或模型异常一律作为危险信号降级到人工审批，不自动放行。
 
 自动审批路由是独立的全局配置，不属于 Provider 卡片或 Provider 保存事务。它引用一个已配置 Provider 来复用协议、endpoint 和凭据，并独立选择模型；保存任意 Provider 不得隐式覆盖审批路由。若所引用 Provider 不存在或凭据不可用，运行时只记录诊断并回退人工审批。
+
+自动审批请求只有规则提示是稳定前缀，工具、参数、路径和 policy signals 都是动态尾部。Provider 的最小可缓存前缀、路由策略和显式 cache-control 各不相同，因此不能承诺审批调用命中缓存，也不得为追求命中率填充无意义 prompt；统计必须如实记录 Provider usage。
 
 ### 3.3 执行不变量与风险黑名单
 
@@ -463,7 +465,7 @@ session.end     { reason, ts }
 - **离线回放**：不访问模型、不执行工具，按原始流事件和已记录结果确定性重现 UI、消息历史和 Agent 状态机。
 - **请求检查**：保留最终 Provider 请求体用于离线检查、导出和 cache 行为分析；不使用当前凭据在线重放，也不从 trace 创建 Session 分叉。
 - **工具重放**默认只注入已记录结果；真实重新执行副作用工具必须是独立显式操作。
-- 保存 Provider 返回的完整 usage，包括可用时的 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`、输入/输出 token；同时记录 TTFT、总延迟、请求字节数和稳定前缀 hash，供 KV cache 分析。
+- 保存 Provider 返回的完整 usage，包括可用时的 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`、输入/输出 token；同时记录 TTFT、总延迟、请求字节数和稳定前缀 hash，供 KV cache 分析。标准化 `cacheMissTokens` 表示未由缓存提供的输入：协议只返回总输入和 cached tokens 时按差值计算，未返回 cached 指标时把输入视为 miss；Anthropic 按 uncached input 加 cache-creation input 计算。原始 usage 必须保留以便审计。
 - DeepSeek 流式调用必须请求最终 usage chunk；cache 命中以 Provider 返回字段为准，不能仅根据本地消息前缀推断。
 
 ### 5.4 Headless 运行输出

@@ -427,9 +427,7 @@ async function handleProviderSelect(value: string | number) {
     return
   }
 
-  if (await agent.setActiveProvider(providerId)) {
-    await agent.selectProviderForEditing(providerId)
-  }
+  await agent.setActiveProvider(providerId)
 }
 
 watch(
@@ -544,7 +542,7 @@ watch(inputDisabled, (disabled) => {
           </NButton>
         </NDropdown>
         <NSelect
-          :value="agent.activeProviderId"
+          :value="agent.composerProviderId"
           style="width: min(180px, 24vw); min-width: 120px; flex: 0 1 180px"
           size="small"
           :options="agent.providerOptions"
@@ -557,10 +555,10 @@ watch(inputDisabled, (disabled) => {
           @update:value="handleProviderSelect"
         />
         <NSelect
-          :value="agent.providerForm.model"
+          :value="agent.composerModel"
           style="width: min(220px, 28vw); min-width: 0; flex: 1 1 auto"
           size="small"
-          :options="agent.modelOptions"
+          :options="agent.composerModelOptions"
           filterable
           tag
           @update:value="agent.setProviderModel"
