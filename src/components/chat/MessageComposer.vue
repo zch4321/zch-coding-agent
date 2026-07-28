@@ -67,6 +67,20 @@ const modeOptions = computed(() => [
   { label: t('chat.confirm'), value: 'confirm' },
   { label: t('chat.yolo'), value: 'yolo' },
 ])
+const reasoningOptions = computed(() => [
+  {
+    label: `${t('settings.reasoning')} · ${t('settings.reasoningOff')}`,
+    value: 'off',
+  },
+  {
+    label: `${t('settings.reasoning')} · ${t('settings.reasoningHigh')}`,
+    value: 'high',
+  },
+  {
+    label: `${t('settings.reasoning')} · ${t('settings.reasoningMax')}`,
+    value: 'max',
+  },
+])
 const contextOptions = computed<DropdownOption[]>(() => [
   { label: t('chat.addFileContext'), key: 'file' },
   { label: t('chat.addDirectoryContext'), key: 'directory' },
@@ -84,6 +98,9 @@ const inputDisabled = computed(
     Boolean(agent.pendingApproval),
 )
 const textareaDisabled = computed(() => !agent.workspacePath)
+const routeSelectionDisabled = computed(() =>
+  Boolean(agent.startPending || agent.activeRunId || agent.pendingApproval),
+)
 const sendHint = computed(() => {
   if (!agent.workspacePath) return t('chat.chooseHint')
   if (!agent.credentialConfigured) return t('chat.apiKeyHint')
@@ -420,7 +437,7 @@ function handleContextSelect(key: string | number) {
 async function handleProviderSelect(value: string | number) {
   const providerId = String(value)
   if (
-    providerId === agent.activeProviderId ||
+    providerId === agent.composerProviderId ||
     agent.activeRunId ||
     agent.pendingApproval
   ) {
@@ -428,6 +445,12 @@ async function handleProviderSelect(value: string | number) {
   }
 
   await agent.setActiveProvider(providerId)
+}
+
+function handleReasoningSelect(value: string | number) {
+  if (value === 'off' || value === 'high' || value === 'max') {
+    agent.setProviderReasoning(value)
+  }
 }
 
 watch(
@@ -546,11 +569,7 @@ watch(inputDisabled, (disabled) => {
           style="width: min(180px, 24vw); min-width: 120px; flex: 0 1 180px"
           size="small"
           :options="agent.providerOptions"
-          :disabled="
-            Boolean(
-              agent.startPending || agent.activeRunId || agent.pendingApproval,
-            )
-          "
+          :disabled="routeSelectionDisabled"
           filterable
           @update:value="handleProviderSelect"
         />
@@ -559,9 +578,20 @@ watch(inputDisabled, (disabled) => {
           style="width: min(220px, 28vw); min-width: 0; flex: 1 1 auto"
           size="small"
           :options="agent.composerModelOptions"
+          :disabled="routeSelectionDisabled"
           filterable
           tag
           @update:value="agent.setProviderModel"
+        />
+        <NSelect
+          :value="agent.composerReasoning"
+          style="width: min(168px, 22vw); min-width: 118px; flex: 0 1 168px"
+          size="small"
+          :options="reasoningOptions"
+          :disabled="routeSelectionDisabled"
+          :aria-label="t('settings.reasoning')"
+          data-testid="composer-reasoning-select"
+          @update:value="handleReasoningSelect"
         />
         <NTooltip>
           <template #trigger>

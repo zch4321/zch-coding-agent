@@ -149,6 +149,7 @@ const runtimeProperties = new Set<PropertyKey>([
   'composerModelSelection',
   'composerProviderId',
   'composerModel',
+  'composerReasoning',
   'composerModelOptions',
 ])
 const changesProperties = new Set<PropertyKey>([
@@ -218,6 +219,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     selectProviderForEditing: settings.selectProviderForEditing,
     resetSelectedProviderDraft: settings.resetSelectedProviderDraft,
     setProviderModel: runtime.setProviderModel,
+    setProviderReasoning: runtime.setProviderReasoning,
     setProviderDraftModel: settings.setProviderModel,
     updateModelConfiguration: settings.updateModelConfiguration,
     loadProviderModels: settings.loadProviderModels,

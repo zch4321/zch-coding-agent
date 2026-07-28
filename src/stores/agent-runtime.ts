@@ -308,6 +308,9 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     composerModel(): string {
       return this.composerModelSelection.model
     },
+    composerReasoning(): ModelSelection['reasoning'] {
+      return this.composerModelSelection.reasoning
+    },
     composerModelOptions(): Array<{ label: string; value: string }> {
       const settings = useAgentSettingsStore()
       const selection = this.composerModelSelection
@@ -728,17 +731,26 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       }
       return true
     },
+    /** Updates the current Session or draft model while preserving its reasoning effort. */
     setProviderModel(model: string) {
-      const settings = useAgentSettingsStore()
       const replica = useAgentReplicaStore()
       const current = this.composerModelSelection
-      const provider = settings.providers.find(
-        (candidate) => candidate.id === current.providerId,
-      )
       const selection = {
-        providerId: current.providerId,
+        ...current,
         model,
-        reasoning: provider?.reasoning ?? current.reasoning,
+      }
+      if (replica.selectedSession) {
+        void this.updateModelSelection(selection)
+      } else {
+        this.draftModelSelection = selection
+      }
+    },
+    /** Updates the reasoning effort for the current Session or draft route. */
+    setProviderReasoning(reasoning: ModelSelection['reasoning']) {
+      const replica = useAgentReplicaStore()
+      const selection = {
+        ...this.composerModelSelection,
+        reasoning,
       }
       if (replica.selectedSession) {
         void this.updateModelSelection(selection)

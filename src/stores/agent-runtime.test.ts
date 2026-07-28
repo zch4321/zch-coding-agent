@@ -224,11 +224,56 @@ describe('agent runtime store', () => {
 
     expect(runtime.composerProviderId).toBe('provider-b')
     expect(runtime.composerModel).toBe('provider-b-selected')
+    expect(runtime.composerReasoning).toBe('off')
     expect(runtime.composerModelOptions.map((option) => option.value)).toEqual([
       'provider-b-selected',
       'provider-b-default',
       'provider-b-catalog',
     ])
+  })
+
+  it('updates Session model routing without resetting reasoning effort', () => {
+    const replica = seedReplica()
+    replica.sessions[0]!.modelSelection.reasoning = 'max'
+    const runtime = useAgentRuntimeStore()
+    const updateModelSelection = vi
+      .spyOn(runtime, 'updateModelSelection')
+      .mockResolvedValue()
+
+    runtime.setProviderModel('deepseek-reasoner')
+    runtime.setProviderReasoning('high')
+
+    expect(updateModelSelection).toHaveBeenNthCalledWith(1, {
+      providerId: 'deepseek',
+      model: 'deepseek-reasoner',
+      reasoning: 'max',
+    })
+    expect(updateModelSelection).toHaveBeenNthCalledWith(2, {
+      providerId: 'deepseek',
+      model: 'deepseek-chat',
+      reasoning: 'high',
+    })
+  })
+
+  it('stores reasoning effort on a new-conversation draft route', () => {
+    const replica = useAgentReplicaStore()
+    replica.projects = [project]
+    replica.selectedProjectId = projectId
+    const settings = useAgentSettingsStore()
+    settings.activeProviderId = 'provider-a'
+    settings.providers = [
+      provider('provider-a', 'provider-a-default', ['provider-a-catalog']),
+    ]
+    const runtime = useAgentRuntimeStore()
+
+    runtime.setProviderReasoning('max')
+
+    expect(runtime.draftModelSelection).toEqual({
+      providerId: 'provider-a',
+      model: 'provider-a-default',
+      reasoning: 'max',
+    })
+    expect(runtime.composerReasoning).toBe('max')
   })
 
   it('blocks a second draft submission while the first start IPC is pending', async () => {
