@@ -139,7 +139,7 @@ export interface UiModelProfile {
   id: string
   ownedBy?: string
   availability: 'provider' | 'custom'
-  capabilitySource: 'override' | 'builtin' | 'default'
+  capabilitySource: 'override' | 'provider' | 'builtin' | 'default'
   contextWindowTokens: number
   maxOutputTokens?: number
 }

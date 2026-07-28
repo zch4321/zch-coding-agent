@@ -364,8 +364,12 @@ const enUS = {
       'Provider type selects an independent implementation; the three Generic types are fallbacks for Chat Completions, Responses, and Anthropic APIs.',
     baseUrl: 'Base URL',
     mainModel: 'Main model',
-    contextOverride: 'Context window override',
-    outputOverride: 'Maximum output override',
+    contextOverride: 'Context window (optional override)',
+    contextOverrideHint:
+      'Used for local context budgets and compaction. Leave blank to use provider, built-in, or global defaults.',
+    outputOverride: 'Maximum output tokens (optional override)',
+    outputOverrideHint:
+      'Limits one generation and reserves output context. Leave blank to use provider, built-in, or safe defaults.',
     tokenEstimation: 'Token estimation',
     bytesPerToken: 'UTF-8 bytes per token',
     reasoning: 'Reasoning effort',
@@ -385,10 +389,9 @@ const enUS = {
     apiKey: 'API key',
     apiKeyPlaceholder: 'Enter a new key',
     modelRefreshCredentialHint:
-      'Enter or save an API key before refreshing the model catalog.',
-    modelRefreshSavesHint:
-      'Refreshing first saves the current Provider changes.',
-    saveAndRefreshModels: 'Save and refresh',
+      'Save an API key below before refreshing the model catalog.',
+    modelRefreshUnsavedHint:
+      'Save Provider changes below before refreshing the model catalog.',
     saveProvider: 'Save provider',
     saveWebSearch: 'Save web search',
     saved: 'Saved',
@@ -493,7 +496,7 @@ const enUS = {
   },
   permissions: {
     title: 'Permissions',
-    hint: 'Set defaults and review rules remembered from approvals.',
+    hint: 'Set the default mode, Auto approval model, and rules remembered from approvals.',
     defaultMode: 'Default mode',
     sensitiveData: 'Sensitive data',
     off: 'Off',

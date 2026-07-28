@@ -136,9 +136,9 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 生产路径实现互不继承的 `DeepSeekProvider`、`GenericChatCompletionsProvider`、`GenericResponsesProvider` 与 `GenericAnthropicProvider`。三种通用兜底分别对应 Chat Completions、Responses 和 Anthropic API style；Google 和其他具体厂商按实际使用需求分别实现，只共享 HTTP/SSE、bounds、tool-call 拼接等纯函数。
 
-模型目录查询保持独立服务。OpenAI-compatible API 使用 Bearer `GET /models`，Anthropic 使用 `x-api-key`、版本 header 和有界分页 `GET /models`；该端点只作为可用性目录，不能假设会返回上下文长度、最大输出或工具能力。设置页合并 Provider 返回、应用内置模型资料和用户自定义模型，并始终允许手工输入。
+模型目录查询保持独立服务。OpenAI-compatible API 使用 Bearer `GET /models`，Anthropic 使用 `x-api-key`、版本 header 和有界分页 `GET /models`。目录解析只能采用协议明确返回的字段：Anthropic 的 `max_input_tokens/max_tokens` 归一化为模型容量；OpenAI 与 DeepSeek 的标准列表当前只保证模型身份信息，不能臆测容量。设置页合并 Provider 返回、应用内置模型资料和用户自定义模型，并始终允许手工输入；不得抓取 Provider 文档 HTML 推断运行时能力。
 
-模型能力采用 `用户覆盖 > 内置资料 > 保守默认值`。未知模型默认按 64K 上下文管理并明确标记“能力未知”；不得抓取 Provider 文档 HTML 推断运行时能力。模型目录请求失败时保留上次成功缓存和当前手工配置。
+模型能力采用 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值`。未知模型默认按 64K 上下文管理并明确标记“能力未知”。模型目录请求失败时保留上次成功缓存和当前手工配置。
 
 token 预算通过可替换估算器计算。支持 Provider tokenizer、保守估算和用户自定义 `bytesPerToken`；自定义值按 Provider/模型保存。估算只负责上下文规划，所有工具仍必须执行不可关闭的字节、行数/结果数硬上限。Provider 返回的真实 usage 用于记录与校准，不作为事前边界保证。
 

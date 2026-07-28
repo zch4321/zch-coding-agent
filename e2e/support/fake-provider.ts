@@ -25,6 +25,7 @@ export interface TraceObject {
 export interface FakeProvider {
   origin: string
   requests: CapturedProviderRequest[]
+  readonly modelCatalogRequests: number
   queue(chunks: JsonObject[]): void
   armSecondResponseGate(): void
   releaseSecondResponse(): void
@@ -47,6 +48,7 @@ async function parseJsonBody(request: IncomingMessage): Promise<JsonObject> {
 export async function startFakeProvider(): Promise<FakeProvider> {
   const queuedResponses: JsonObject[][] = []
   const requests: CapturedProviderRequest[] = []
+  let modelCatalogRequests = 0
   // Optional gate that holds the second provider request open until the test
   // releases it, so a mid-run interjection can be queued first.
   let secondResponseGate: (() => void) | undefined
@@ -54,6 +56,7 @@ export async function startFakeProvider(): Promise<FakeProvider> {
   const server = createServer(async (request, response) => {
     try {
       if (request.method === 'GET' && request.url === '/models') {
+        modelCatalogRequests += 1
         response.writeHead(200, { 'content-type': 'application/json' })
         response.end(
           JSON.stringify({
@@ -122,6 +125,9 @@ export async function startFakeProvider(): Promise<FakeProvider> {
   return {
     origin: `http://127.0.0.1:${(address as AddressInfo).port}`,
     requests,
+    get modelCatalogRequests() {
+      return modelCatalogRequests
+    },
     queue(chunks) {
       queuedResponses.push(chunks)
     },

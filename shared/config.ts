@@ -44,6 +44,12 @@ export const ProviderModelSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 256 }),
     ownedBy: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    contextWindowTokens: Type.Optional(
+      Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+    ),
+    maxOutputTokens: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+    ),
   },
   { additionalProperties: false },
 )

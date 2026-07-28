@@ -449,8 +449,8 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.2 Provider
 
 - Base URL。
-- 主模型：鉴权调用 `/models` 刷新可用模型，使用可搜索且可输入的下拉框；失败时保留缓存与手工值。刷新可使用已保存凭据或当前 API Key 草稿；存在 Provider 草稿时必须先保存再请求，不能用旧 route 刷新后覆盖用户修改。
-- 模型能力：显示目录/内置/自定义来源；上下文长度和最大输出允许用户覆盖，未知模型显示保守默认值提示。
+- 主模型：进入 Provider 页面或切换 Provider 卡片时，若已有凭据则用已保存 route 静默刷新 `/models`；否则读取缓存。列表旁按钮只执行显式刷新，绝不隐式保存。没有已保存凭据或存在未保存 Provider 草稿时禁用刷新，并引导用户使用页面底部保存按钮；失败时保留缓存与手工值。
+- 模型能力：显示 Provider 返回/内置/自定义来源；上下文长度和最大输出允许用户按模型覆盖，且解释它们分别用于本地上下文预算、自动压缩和单次生成预留。仅采用目录协议明确返回的容量字段，未知模型显示保守默认值提示。
 - Token 估算：默认保守估算，可切换为自定义 `bytesPerToken`；说明该值只影响预算估算，不能关闭字节/行数硬限制。
 - Reasoning 开关。
 - API Key 配置状态、更新和清除。
@@ -459,6 +459,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.3 Auto approval
 
 - Auto approval 是全局路由配置，不属于任一 Provider 卡片草稿，使用独立保存动作。
+- Auto approval 显示在 Permissions 页面，不占用独立设置导航项。
 - 配置引用一个已存在的 Provider 实例以复用 `providerType/baseURL/credential`，并独立选择审批模型。
 - 审批模型候选来自所选 Provider 的模型目录和自定义模型，不得错误复用当前正在编辑的 Provider 模型列表。
 - Provider 保存不能修改 Auto approval；删除正被审批路由引用的 Provider 时回退到明确的可用 Provider。
@@ -466,6 +467,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.4 Permissions
 
 - 默认权限模式。
+- 全局 Auto approval Provider 与模型。
 - Sensitive Data：off/warn/confirm。
 - Path globs。
 - Content patterns。

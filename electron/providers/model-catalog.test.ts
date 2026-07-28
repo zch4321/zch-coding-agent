@@ -91,7 +91,13 @@ describe('DeepSeek model catalog', () => {
                   last_id: 'claude-b',
                 }
               : {
-                  data: [{ id: 'claude-a' }],
+                  data: [
+                    {
+                      id: 'claude-a',
+                      max_input_tokens: 200_000,
+                      max_tokens: 64_000,
+                    },
+                  ],
                   has_more: true,
                   last_id: 'claude-a',
                 },
@@ -107,7 +113,14 @@ describe('DeepSeek model catalog', () => {
         apiKey: 'secret',
         fetchImpl,
       }),
-    ).resolves.toEqual([{ id: 'claude-a' }, { id: 'claude-b' }])
+    ).resolves.toEqual([
+      {
+        id: 'claude-a',
+        contextWindowTokens: 200_000,
+        maxOutputTokens: 64_000,
+      },
+      { id: 'claude-b' },
+    ])
     expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
 
@@ -171,13 +184,18 @@ describe('DeepSeek model catalog', () => {
     ).rejects.toThrow('Provider returned an invalid model catalog')
   })
 
-  it('uses override, builtin and conservative capability sources in order', () => {
+  it('uses override, provider, builtin and conservative capabilities in order', () => {
     const internal: AppConfig = structuredClone(DEFAULT_APP_CONFIG)
     const provider = internal.providers[0]
     provider.model = 'custom-model'
     provider.modelCatalog = [
       { id: 'deepseek-v4-pro', ownedBy: 'deepseek' },
       { id: 'custom-model' },
+      {
+        id: 'provider-model',
+        contextWindowTokens: 200_000,
+        maxOutputTokens: 64_000,
+      },
     ]
     provider.modelOverrides['custom-model'] = {
       contextWindowTokens: 123_456,
@@ -197,6 +215,12 @@ describe('DeepSeek model catalog', () => {
           capabilitySource: 'override',
           contextWindowTokens: 123_456,
           maxOutputTokens: 7_000,
+        }),
+        expect.objectContaining({
+          id: 'provider-model',
+          capabilitySource: 'provider',
+          contextWindowTokens: 200_000,
+          maxOutputTokens: 64_000,
         }),
       ]),
     )

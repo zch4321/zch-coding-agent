@@ -37,12 +37,20 @@ function providerModelProfiles(
       id,
       ownedBy: catalogModel?.ownedBy,
       availability: catalogModel ? 'provider' : 'custom',
-      capabilitySource: override ? 'override' : 'default',
+      capabilitySource: override?.contextWindowTokens
+        ? 'override'
+        : catalogModel?.contextWindowTokens
+          ? 'provider'
+          : 'default',
       contextWindowTokens:
-        override?.contextWindowTokens ?? fallbackContextWindowTokens,
+        override?.contextWindowTokens ??
+        catalogModel?.contextWindowTokens ??
+        fallbackContextWindowTokens,
       ...(override?.maxOutputTokens
         ? { maxOutputTokens: override.maxOutputTokens }
-        : {}),
+        : catalogModel?.maxOutputTokens
+          ? { maxOutputTokens: catalogModel.maxOutputTokens }
+          : {}),
     }
   })
 }
@@ -227,7 +235,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       ),
     providerRefreshAvailable: (state) =>
       Boolean(
-        state.providerForm.apiKey.trim() ||
         state.providers.find(
           (provider) => provider.id === state.selectedProviderId,
         )?.credentialConfigured,
@@ -425,7 +432,8 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         })
       }
     },
-    async loadProviderModels(refresh: boolean) {
+    /** Loads cached profiles or refreshes the saved Provider model catalog. */
+    async loadProviderModels(refresh: boolean, reportError = refresh) {
       const bridge = window.agentApi
 
       if (!bridge || this.modelCatalogLoading) return false
@@ -439,7 +447,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           providerId,
         })
         if (!result.ok) {
-          if (refresh) this.error = result.error.message
+          if (reportError) this.error = result.error.message
           return false
         }
 
@@ -449,7 +457,19 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
             section: 'providers',
           })
           if (configResult.ok) {
-            this.applyConfig(configResult.value.config, ['providers'])
+            const refreshedProvider = configResult.value.config.providers.find(
+              (provider) => provider.id === providerId,
+            )
+            const providerIndex = this.providers.findIndex(
+              (provider) => provider.id === providerId,
+            )
+            if (refreshedProvider && providerIndex >= 0) {
+              this.providers.splice(
+                providerIndex,
+                1,
+                structuredClone(refreshedProvider),
+              )
+            }
           }
         }
 
@@ -462,14 +482,25 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         this.modelCatalogLoading = false
       }
     },
+    /** Refreshes the selected saved Provider when its settings page opens. */
+    async loadSelectedProviderModelsOnEntry() {
+      return this.loadProviderModels(this.providerRefreshAvailable, false)
+    },
+    /** Starts the Provider-page model discovery attempt for the selected card. */
+    async enterProviderSettings() {
+      return this.loadSelectedProviderModelsOnEntry()
+    },
+    /** Explicitly refreshes models without saving or mutating the Provider draft. */
     async refreshSelectedProviderModels() {
       if (!this.providerRefreshAvailable) {
-        this.error =
-          'Save or enter a Provider credential before refreshing models.'
+        this.error = 'Save a Provider credential before refreshing models.'
+        return false
+      }
+      if (this.providerDirty) {
+        this.error = 'Save Provider changes before refreshing models.'
         return false
       }
       this.error = ''
-      if (this.providerDirty && !(await this.saveProvider())) return false
       return this.loadProviderModels(true)
     },
     async setActiveProvider(providerId: string) {

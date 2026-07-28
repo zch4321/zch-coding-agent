@@ -3,7 +3,6 @@ export type SettingsTab =
   | 'project'
   | 'archived'
   | 'provider'
-  | 'approval'
   | 'limits'
   | 'permissions'
   | 'skills'

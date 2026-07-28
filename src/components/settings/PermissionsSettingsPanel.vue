@@ -20,6 +20,11 @@ const sensitiveModeOptions = computed(() => [
   { label: t('permissions.warn'), value: 'warn' },
   { label: t('permissions.confirm'), value: 'confirm' },
 ])
+const approvalProvider = computed(() =>
+  agent.providers.find(
+    (provider) => provider.id === agent.approvalForm.providerId,
+  ),
+)
 </script>
 
 <template>
@@ -49,6 +54,57 @@ const sensitiveModeOptions = computed(() => [
         {{ agent.modeLockTooltip }}
       </NTooltip>
     </label>
+    <div class="settings-subsection">
+      <div class="settings-subsection-heading">
+        <h3>{{ t('settings.approvalTitle') }}</h3>
+        <p>{{ t('settings.approvalHint') }}</p>
+      </div>
+      <label class="settings-field">
+        <span>{{ t('settings.approverProvider') }}</span>
+        <NSelect
+          :value="agent.approvalForm.providerId"
+          :options="agent.providerOptions"
+          filterable
+          @update:value="agent.setApprovalProvider"
+        />
+        <small>
+          {{
+            approvalProvider?.credentialConfigured
+              ? t('settings.approvalCredentialReady')
+              : t('settings.approvalCredentialMissing')
+          }}
+        </small>
+      </label>
+      <label class="settings-field">
+        <span>{{ t('settings.approverModel') }}</span>
+        <NSelect
+          v-model:value="agent.approvalForm.model"
+          :options="agent.approvalModelOptions"
+          filterable
+          tag
+        />
+        <small>{{ t('settings.approvalModelHint') }}</small>
+      </label>
+      <div class="settings-actions">
+        <NButton
+          type="primary"
+          :loading="agent.approvalSaving"
+          :disabled="!agent.approvalDirty"
+          @click="agent.saveApproval"
+        >
+          {{ t('settings.saveApproval') }}
+        </NButton>
+        <small class="settings-save-status" aria-live="polite">
+          {{
+            agent.approvalDirty
+              ? t('settings.unsaved')
+              : agent.approvalSaveStatus
+                ? t('settings.saved')
+                : ''
+          }}
+        </small>
+      </div>
+    </div>
     <label class="settings-field">
       <span>{{ t('permissions.sensitiveData') }}</span>
       <NSelect

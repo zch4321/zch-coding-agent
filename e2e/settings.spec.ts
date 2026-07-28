@@ -106,10 +106,10 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(provider.locator('.provider-card')).toContainText('DeepSeek')
     await expect(provider.getByText('主模型', { exact: true })).toBeVisible()
     await expect(
-      provider.getByText('上下文窗口覆盖值', { exact: true }),
+      provider.getByText('上下文窗口（可选覆盖）', { exact: true }),
     ).toBeVisible()
     await expect(
-      provider.getByText('最大输出覆盖值', { exact: true }),
+      provider.getByText('最大输出 Token（可选覆盖）', { exact: true }),
     ).toBeVisible()
     await expect(
       provider.getByText('Token 估算方式', { exact: true }),
@@ -138,8 +138,14 @@ test.describe.serial('Electron settings workflows', () => {
       .locator('input')
       .fill(fakeProvider.origin)
     await provider.getByPlaceholder('输入新的 Key').fill(providerApiKey)
+    await expect(refreshModels).toBeDisabled()
+    await expect(
+      provider.getByText('先在下方保存 API Key，才能刷新模型目录。'),
+    ).toBeVisible()
+    await provider.getByRole('button', { name: '保存模型服务' }).click()
     await expect(refreshModels).toBeEnabled()
     await refreshModels.click()
+    await expect.poll(() => fakeProvider.modelCatalogRequests).toBe(1)
     await expect(provider.getByText('思考深度', { exact: true })).toBeVisible()
     await expect(provider.locator('.n-input-number')).toHaveCount(3)
 
@@ -155,7 +161,10 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(modelSelect).toContainText('custom-e2e-model')
     await page.keyboard.press('Escape')
 
-    await settingsNavigation.getByRole('menuitem', { name: '自动审批' }).click()
+    await expect(
+      settingsNavigation.getByRole('menuitem', { name: '自动审批' }),
+    ).toHaveCount(0)
+    await settingsNavigation.getByRole('menuitem', { name: '权限' }).click()
     const approval = page.locator('.settings-section')
     await expect(
       approval.getByRole('heading', { name: '自动审批' }),
@@ -167,6 +176,9 @@ test.describe.serial('Electron settings workflows', () => {
     await page.getByText(providerModel, { exact: true }).click()
     await approval.getByRole('button', { name: '保存自动审批' }).click()
     await expect(approval.locator('.settings-save-status')).toHaveText('已保存')
+
+    await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
+    await expect.poll(() => fakeProvider.modelCatalogRequests).toBe(2)
   })
 
   test('manages provider cards through the settings page', async () => {

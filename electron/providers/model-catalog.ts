@@ -32,9 +32,20 @@ export interface ModelProfile {
   id: string
   ownedBy?: string
   availability: 'provider' | 'custom'
-  capabilitySource: 'override' | 'builtin' | 'default'
+  capabilitySource: 'override' | 'provider' | 'builtin' | 'default'
   contextWindowTokens: number
   maxOutputTokens?: number
+}
+
+function catalogTokenLimit(
+  candidate: object,
+  field: string,
+  minimum: number,
+): number | undefined {
+  const value = Reflect.get(candidate, field)
+  return Number.isInteger(value) && value >= minimum && value <= 10_000_000
+    ? (value as number)
+    : undefined
 }
 
 /** Reports model-catalog request, response, and normalization failures. */
@@ -249,7 +260,17 @@ export async function fetchAnthropicModelCatalog(options: {
         if (typeof id !== 'string' || id.length === 0 || id.length > 256) {
           continue
         }
-        models.set(id, { id })
+        const contextWindowTokens = catalogTokenLimit(
+          candidate,
+          'max_input_tokens',
+          1_024,
+        )
+        const maxOutputTokens = catalogTokenLimit(candidate, 'max_tokens', 1)
+        models.set(id, {
+          id,
+          ...(contextWindowTokens ? { contextWindowTokens } : {}),
+          ...(maxOutputTokens ? { maxOutputTokens } : {}),
+        })
         if (models.size > MAX_MODELS) {
           throw new ModelCatalogError(
             'Provider returned an invalid model catalog',
@@ -324,11 +345,17 @@ export function resolveModelProfiles(
     .map((model): ModelProfile => {
       const override = provider.modelOverrides[model.id]
       const builtin = BUILTIN_MODEL_CAPABILITIES[model.id]
-      const capabilitySource = override
+      const capabilitySource = override?.contextWindowTokens
         ? 'override'
-        : builtin
-          ? 'builtin'
-          : 'default'
+        : model.contextWindowTokens
+          ? 'provider'
+          : builtin
+            ? 'builtin'
+            : 'default'
+      const maxOutputTokens =
+        override?.maxOutputTokens ??
+        model.maxOutputTokens ??
+        builtin?.maxOutputTokens
 
       return {
         ...model,
@@ -340,9 +367,10 @@ export function resolveModelProfiles(
         capabilitySource,
         contextWindowTokens:
           override?.contextWindowTokens ??
+          model.contextWindowTokens ??
           builtin?.contextWindowTokens ??
           config.limits.maxContextTokens,
-        maxOutputTokens: override?.maxOutputTokens ?? builtin?.maxOutputTokens,
+        ...(maxOutputTokens ? { maxOutputTokens } : {}),
       }
     })
     .sort((left, right) => left.id.localeCompare(right.id))

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   NButton,
   NCard,
@@ -72,6 +72,10 @@ const deleteProvider = computed(() =>
   agent.providers.find((provider) => provider.id === deleteProviderId.value),
 )
 
+onMounted(() => {
+  void agent.enterProviderSettings()
+})
+
 function providerActions(providerId: string): DropdownOption[] {
   const isActive = providerId === agent.activeProviderId
   return [
@@ -109,7 +113,9 @@ function requestProviderAction(action: ProviderAction) {
 async function runProviderAction(action: ProviderAction) {
   switch (action.kind) {
     case 'select':
-      await agent.selectProviderForEditing(action.providerId)
+      if (await agent.selectProviderForEditing(action.providerId)) {
+        await agent.enterProviderSettings()
+      }
       break
     case 'create':
       await agent.createProvider()
@@ -325,14 +331,10 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <NButton
             secondary
             :loading="agent.modelCatalogLoading"
-            :disabled="!agent.providerRefreshAvailable"
+            :disabled="!agent.providerRefreshAvailable || agent.providerDirty"
             @click="agent.refreshSelectedProviderModels"
           >
-            {{
-              agent.providerDirty
-                ? t('settings.saveAndRefreshModels')
-                : t('common.refresh')
-            }}
+            {{ t('common.refresh') }}
           </NButton>
         </div>
         <small>
@@ -351,7 +353,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           {{ t('settings.modelRefreshCredentialHint') }}
         </small>
         <small v-else-if="agent.providerDirty">
-          {{ t('settings.modelRefreshSavesHint') }}
+          {{ t('settings.modelRefreshUnsavedHint') }}
         </small>
       </label>
       <div class="settings-inline settings-inline-equal">
@@ -364,6 +366,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             clearable
             :placeholder="t('settings.useDefault')"
           />
+          <small>{{ t('settings.contextOverrideHint') }}</small>
         </label>
         <label class="settings-field">
           <span>{{ t('settings.outputOverride') }}</span>
@@ -374,6 +377,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             clearable
             :placeholder="t('settings.useDefault')"
           />
+          <small>{{ t('settings.outputOverrideHint') }}</small>
         </label>
       </div>
       <div class="settings-inline settings-inline-equal">

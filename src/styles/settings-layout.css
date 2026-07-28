@@ -83,6 +83,31 @@
   line-height: 1.5;
 }
 
+.settings-subsection {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.settings-subsection-heading h3,
+.settings-subsection-heading p {
+  margin: 0;
+}
+
+.settings-subsection-heading h3 {
+  font-size: 15px;
+}
+
+.settings-subsection-heading p {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .settings-field {
   display: grid;
   gap: 7px;

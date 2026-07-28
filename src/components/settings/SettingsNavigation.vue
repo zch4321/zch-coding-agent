@@ -24,7 +24,6 @@ const tabs = computed<
   { value: 'project', label: t('settings.project'), icon: 'folder' },
   { value: 'archived', label: t('settings.archived'), icon: 'trash' },
   { value: 'provider', label: t('settings.provider'), icon: 'settings' },
-  { value: 'approval', label: t('settings.approvalTitle'), icon: 'warning' },
   { value: 'limits', label: t('settings.limits'), icon: 'settings' },
   { value: 'permissions', label: t('settings.permissions'), icon: 'warning' },
   { value: 'skills', label: t('settings.skills'), icon: 'app' },

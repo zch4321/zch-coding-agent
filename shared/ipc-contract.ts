@@ -134,6 +134,7 @@ const ModelProfileSchema = Type.Object(
     ]),
     capabilitySource: Type.Union([
       Type.Literal('override'),
+      Type.Literal('provider'),
       Type.Literal('builtin'),
       Type.Literal('default'),
     ]),
