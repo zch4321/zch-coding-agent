@@ -36,7 +36,29 @@ const providerTypeOptions = computed(() => [
     label: t('settings.providerTypeGeneric'),
     value: 'generic.chat-completions',
   },
+  {
+    label: t('settings.providerTypeResponses'),
+    value: 'generic.responses',
+  },
+  {
+    label: t('settings.providerTypeAnthropic'),
+    value: 'generic.anthropic',
+  },
 ])
+const reasoningHint = computed(() => {
+  switch (agent.providerForm.providerType) {
+    case 'deepseek.chat-completions':
+      return t('settings.reasoningHint')
+    case 'generic.responses':
+      return t('settings.reasoningHintResponses')
+    case 'generic.anthropic':
+      return t('settings.reasoningHintAnthropic')
+    case 'generic.chat-completions':
+      return t('settings.reasoningHintGeneric')
+    default:
+      return t('settings.reasoningHintGeneric')
+  }
+})
 const reasoningOptions = computed(() => [
   { label: t('settings.reasoningOff'), value: 'off' },
   { label: t('settings.reasoningHigh'), value: 'high' },
@@ -357,7 +379,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           :options="reasoningOptions"
         />
         <small>
-          {{ t('settings.reasoningHint') }}
+          {{ reasoningHint }}
         </small>
       </label>
       <label class="settings-field">

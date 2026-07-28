@@ -484,7 +484,11 @@ canonical ProviderEvent / CompletedAssistantTurn
 `MessageHistoryCompiler` 只负责 provider-independent policy：按 `seq` 排序、选择 `inHistory`、应用 compact 边界、校验 record schema、payload bounds、Session/identity 和严格有序的完整 tool-call/result batch。它不生成 `role`、Provider message 或任何 SDK DTO。
 
 ```ts
-type ProviderType = 'deepseek.chat-completions' | 'generic.chat-completions'
+type ProviderType =
+  | 'deepseek.chat-completions'
+  | 'generic.chat-completions'
+  | 'generic.responses'
+  | 'generic.anthropic'
 
 interface ProviderToolDefinition {
   name: string
@@ -500,7 +504,10 @@ interface ModelProvider {
     history: CompiledCanonicalHistory
     route: ModelRouteSnapshot
     tools: ProviderToolDefinition[]
-    structuredOutput?: 'json_object'
+    maxOutputTokens: number
+    structuredOutput?:
+      | { type: 'json_object' }
+      | { type: 'json_schema'; name: string; schema: JsonObject }
   }): CompiledProviderCall
 
   stream(
@@ -531,9 +538,11 @@ interface CompletedAssistantTurn {
 
 `role` 只是部分 wire 协议的字段，不是 canonical database field。OpenAI 官方把 Chat Completions 的基本单位称为 Message，而 Responses 使用包括 `message/function_call/function_call_output` 的 Items；Anthropic 则把 client tool result 放在 `user` message 的 `tool_result` content block 中。因此一条 MessageRecord 不要求对应一条 wire message/item。协议依据：[OpenAI Responses migration](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)、[Anthropic tool results](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)。
 
-Provider 实现保持扁平：`DeepSeekProvider` 和 `GenericChatCompletionsProvider` 都直接实现 `ModelProvider`，互不继承。允许共享 HTTP/SSE、bounds、tool-call 拼接、hash/timing 等纯函数，但不引入 BaseProvider、协议方言层或任意 capability 组合。Provider factory 只按 `providerType` 做穷举选择；模型目录查询是独立服务，不扩充核心接口。
+Provider 实现保持扁平：`DeepSeekProvider`、`GenericChatCompletionsProvider`、`GenericResponsesProvider` 和 `GenericAnthropicProvider` 都直接实现 `ModelProvider`，互不继承。允许共享 HTTP/SSE、bounds、tool-call 拼接、hash/timing 等纯函数，但不引入 BaseProvider、协议方言层或任意 capability 组合。Provider factory 只按 `providerType` 做穷举选择；模型目录查询是独立服务，不扩充核心接口。
 
-三个通用兜底 type 规划为 `generic.chat-completions`、`generic.responses` 和 `generic.anthropic`。P11 首批只提供 DeepSeek 与 Generic Chat；Responses、Anthropic 和 Google 在实际接入时各写独立 Provider。当前 Chat Completions Provider 会把 canonical tool-result part 数组整体 JSON 编码进 `tool` message content；模型会看到带类型标签的内部 part 结构，golden test 固定该现有行为，后续若改投影必须作为显式 wire 行为变更。
+三个通用兜底 type 为 `generic.chat-completions`、`generic.responses` 和 `generic.anthropic`。Responses 固定 `store = false`，不使用 `previous_response_id` 或 Conversations API；完整 output items（含 encrypted reasoning）进入 `responses.output-items.v1` continuation 并由本地 history 精确回放。Anthropic 的 high/max 使用 adaptive thinking 与 `output_config.effort`；完整 thinking、redacted thinking、signature 和 tool-use blocks 进入 `anthropic.message-content.v1` continuation。两者的 Provider Type/hash 不匹配均回退 canonical replay，同类型损坏 payload 明确报错。
+
+Structured output 是携带 JSON Schema 的 provider-neutral 请求。Responses 编译为 `text.format`，Anthropic 编译为 `output_config.format`；DeepSeek 与 Generic Chat 为保持现有兼容行为继续降级成 `json_object`，Application 仍执行最终 schema 校验。当前所有 Provider 都把 canonical tool-result part 数组整体 JSON 编码到各自 wire tool-result 字段；模型会看到带类型标签的内部 part 结构，golden test 固定该行为，后续若改投影必须作为显式 wire 行为变更。
 
 ### 5.4 FileChangeSummary 与 StoredFileChangeRecord
 
@@ -1543,7 +1552,7 @@ Headless 继续复用唯一 Agent runtime：
 
 P0–P10 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路径均使用唯一 `createBackendRuntime` 与 SQLite Durable Backend。Desktop 数据库为 `userData/agent.db`；数据库打开或 migration 失败时显示阻塞恢复对话框，不回退 Workbench。Headless 使用任务独立临时数据库并在退出时关闭、删除。
 
-P11 Provider Runtime Foundation 已完成。Main、compact、auto-compact budget check 与 auto approver 均使用扁平 `ModelProvider.compile/stream`；首批生产实现为互不继承的 `deepseek.chat-completions` 与 `generic.chat-completions`。配置、route 和 continuation 已统一使用 `providerType`，Responses、Anthropic 与 Google 延后到独立阶段。
+P11 Provider Runtime Foundation 与 P12 Generic Responses/Anthropic 已完成。Main、compact、auto-compact budget check 与 auto approver 均使用扁平 `ModelProvider.compile/stream`；生产实现为互不继承的 `deepseek.chat-completions`、`generic.chat-completions`、`generic.responses` 与 `generic.anthropic`。配置、route 和 continuation 统一使用 `providerType`；Google 和具体厂商实现继续按实际使用需求独立增加。
 
 Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、每 Session runtime overlay 和 UI-only draft/selection。首次发送前不创建空 Session；所有 durable command response 与 `domain-state:event` 经同一 reconciler 处理 cursor/revision、重复 delivery、缺口和 backend instance 变化。
 

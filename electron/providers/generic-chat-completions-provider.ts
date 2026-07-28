@@ -71,7 +71,7 @@ export class GenericChatCompletionsProvider implements ModelProvider {
       stream: true,
       stream_options: { include_usage: true },
       ...(input.structuredOutput
-        ? { response_format: { type: input.structuredOutput } }
+        ? { response_format: { type: 'json_object' } }
         : {}),
     } as JsonObject
     return {

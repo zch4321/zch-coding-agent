@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import legacyAppConfigV9 from './fixtures/app-config-v9.json'
-import { DEFAULT_APP_CONFIG } from './schema'
+import { DEFAULT_APP_CONFIG, type AppConfig } from './schema'
 import { migrateConfig } from './migrations'
 
 function legacyV9Config(): Record<string, unknown> {
@@ -64,6 +64,20 @@ describe('config v10 migration boundary', () => {
       providerType: 'deepseek.chat-completions',
       revision: 1,
     })
+  })
+
+  it('accepts the new Provider Types without a schema-version migration', () => {
+    for (const providerType of [
+      'generic.responses',
+      'generic.anthropic',
+    ] as const) {
+      const source = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+      source.providers[0].providerType = providerType
+      const migrated = migrateConfig(source)
+
+      expect(migrated.schemaVersion).toBe(10)
+      expect(migrated.providers[0].providerType).toBe(providerType)
+    }
   })
 
   it('rejects malformed v10 data instead of filling missing fields', () => {

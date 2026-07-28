@@ -45,6 +45,18 @@ export function resolveChatCompletionsEndpoint(baseURL: string): string {
   return new URL('chat/completions', normalized).toString()
 }
 
+/** Normalizes a provider base URL and appends the Responses path. */
+export function resolveResponsesEndpoint(baseURL: string): string {
+  const normalized = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
+  return new URL('responses', normalized).toString()
+}
+
+/** Normalizes a provider base URL and appends the Anthropic Messages path. */
+export function resolveAnthropicMessagesEndpoint(baseURL: string): string {
+  const normalized = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
+  return new URL('messages', normalized).toString()
+}
+
 /** Rejects route snapshots with invalid endpoints or fields that could carry credentials. */
 export function assertModelRouteSnapshotSafe(route: ModelRouteSnapshot): void {
   let endpoint: URL

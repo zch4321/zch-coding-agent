@@ -348,8 +348,10 @@ const enUS = {
     providerType: 'Provider type',
     providerTypeDeepSeek: 'DeepSeek Chat Completions',
     providerTypeGeneric: 'Generic Chat Completions',
+    providerTypeResponses: 'Generic Responses',
+    providerTypeAnthropic: 'Generic Anthropic Messages',
     providerTypeHint:
-      'Provider type selects the code implementation. DeepSeek sends its thinking parameters; Generic is the OpenAI-compatible fallback.',
+      'Provider type selects an independent implementation; the three Generic types are fallbacks for Chat Completions, Responses, and Anthropic APIs.',
     baseUrl: 'Base URL',
     mainModel: 'Main model',
     contextOverride: 'Context window override',
@@ -362,6 +364,12 @@ const enUS = {
     reasoningMax: 'Maximum',
     reasoningHint:
       'DeepSeek V4 Pro supports high and max. Off disables thinking.',
+    reasoningHintGeneric:
+      'Generic Chat Completions does not send vendor-specific reasoning fields.',
+    reasoningHintResponses:
+      'Responses sends reasoning effort and replays encrypted reasoning items locally without server state.',
+    reasoningHintAnthropic:
+      'High/max use adaptive thinking; select Off for older models or compatible proxies.',
     approverProvider: 'Auto approver provider',
     approverModel: 'Auto approver model',
     apiKey: 'API key',

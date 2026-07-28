@@ -6,7 +6,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 通用只读子 Agent、模型池与 Swarm Tool 的已确认产品语义和分阶段计划见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P11、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、compact/goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、单一 `npm run verify` 发布门禁、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider 基础与完整 Session transcript 查看/导出已经落地。下一阶段优先实现 Responses、Anthropic 和 Google Provider，再推进 Subagent/Swarm；P3 review 建议、N-3/N-4 与 201+ Electron E2E 按主题分块讨论和实现。
+当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P12、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、compact/goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、单一 `npm run verify` 发布门禁、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic 与完整 Session transcript 查看/导出已经落地。下一阶段优先推进 Subagent/Swarm，再按需求增加 Google 和具体厂商 Provider；P3 review 建议、N-3/N-4 与 201+ Electron E2E 按主题分块讨论和实现。
 
 原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
 

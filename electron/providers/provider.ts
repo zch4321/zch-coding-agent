@@ -22,12 +22,18 @@ export interface ProviderToolDefinition {
   intentParameter: string
 }
 
+/** Provider-neutral structured text output requested by trusted runtime code. */
+export type ProviderStructuredOutput =
+  | { type: 'json_object' }
+  | { type: 'json_schema'; name: string; schema: JsonObject }
+
 /** Canonical input required to compile one provider request without I/O. */
 export interface ProviderCompileInput {
   history: CompiledCanonicalHistory
   route: ModelRouteSnapshot
   tools: ProviderToolDefinition[]
-  structuredOutput?: 'json_object'
+  maxOutputTokens: number
+  structuredOutput?: ProviderStructuredOutput
 }
 
 /** Deterministic, credential-free provider request ready for tracing and streaming. */

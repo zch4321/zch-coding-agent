@@ -299,6 +299,26 @@ describe('Headless host', () => {
     })
   })
 
+  it('accepts Responses and Anthropic Provider Types in v2 config', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-p12-'))
+    temporaryDirectories.push(directory)
+    const configPath = path.join(directory, 'headless.json')
+
+    for (const providerType of [
+      'generic.responses',
+      'generic.anthropic',
+    ] as const) {
+      const source = config({
+        provider: {
+          ...config().provider,
+          providerType,
+        },
+      })
+      await writeFile(configPath, JSON.stringify(source), 'utf8')
+      await expect(loadHeadlessConfig(configPath)).resolves.toEqual(source)
+    }
+  })
+
   it('parses only the fixed run command surface', () => {
     const parsed = parseHeadlessArguments([
       'run',

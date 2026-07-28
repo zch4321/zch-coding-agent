@@ -20,7 +20,7 @@ import type { SkillsManager } from '../skills/manager'
 import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { id, redactJsonSecrets, toJsonValue } from './session-common'
-import { modelPromptBudget } from './session-run-utils'
+import { modelOutputTokenLimit, modelPromptBudget } from './session-run-utils'
 import type {
   ActiveRun,
   AgentEventDraft,
@@ -167,6 +167,7 @@ export class SessionCompactCoordinator {
       history,
       route: binding.snapshot,
       tools,
+      maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
     })
     const budget = modelPromptBudget(binding.modelProfile)
     const trigger = Math.floor(
@@ -363,6 +364,7 @@ export class SessionCompactCoordinator {
       history,
       route: binding.snapshot,
       tools: [],
+      maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
     })
     const budget = modelPromptBudget(binding.modelProfile)
     if (
@@ -614,6 +616,7 @@ export class SessionCompactCoordinator {
         history,
         route: binding.snapshot,
         tools,
+        maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
       })
       const budget = modelPromptBudget(binding.modelProfile)
       if (

@@ -338,8 +338,10 @@ const zhCN = {
     providerType: 'Provider Type',
     providerTypeDeepSeek: 'DeepSeek Chat Completions',
     providerTypeGeneric: '通用 Chat Completions',
+    providerTypeResponses: '通用 Responses',
+    providerTypeAnthropic: '通用 Anthropic Messages',
     providerTypeHint:
-      'Provider Type 对应代码实现。DeepSeek 会发送专有 thinking 参数；通用类型作为 OpenAI 兼容兜底。',
+      'Provider Type 对应独立代码实现；三种通用类型分别作为 Chat Completions、Responses 和 Anthropic API 兜底。',
     baseUrl: '基础 URL',
     mainModel: '主模型',
     contextOverride: '上下文窗口覆盖值',
@@ -351,6 +353,11 @@ const zhCN = {
     reasoningHigh: '高',
     reasoningMax: '最大',
     reasoningHint: 'DeepSeek V4 Pro 支持 high 与 max；关闭会禁用 thinking。',
+    reasoningHintGeneric: '通用 Chat Completions 不发送厂商专有推理参数。',
+    reasoningHintResponses:
+      'Responses 会发送 reasoning effort，并在本地无状态回放加密 reasoning items。',
+    reasoningHintAnthropic:
+      'high/max 使用 adaptive thinking；旧模型或兼容代理请设为关闭。',
     approverProvider: '自动审批 Provider',
     approverModel: '自动审批模型',
     apiKey: 'API Key',

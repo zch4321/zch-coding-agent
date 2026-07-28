@@ -26,6 +26,7 @@ export interface HttpSseTransportOptions {
   providerId: string
   endpoint: string
   apiKey: string
+  headers?: Readonly<Record<string, string>>
   fetchImpl?: typeof fetch
   timeoutMs?: number
 }
@@ -73,14 +74,19 @@ function parsePayload(payload: string): JsonObject {
 export class HttpSseTransport {
   readonly #providerId: string
   readonly #endpoint: string
-  readonly #apiKey: string
+  readonly #headers: Readonly<Record<string, string>>
   readonly #fetch: typeof fetch
   readonly #timeoutMs: number
 
   constructor(options: HttpSseTransportOptions) {
     this.#providerId = options.providerId
     this.#endpoint = options.endpoint
-    this.#apiKey = options.apiKey
+    this.#headers = Object.freeze({
+      ...(options.headers ?? {
+        authorization: `Bearer ${options.apiKey}`,
+      }),
+      'content-type': 'application/json',
+    })
     this.#fetch = options.fetchImpl ?? fetch
     this.#timeoutMs = options.timeoutMs ?? 0
     if (
@@ -116,10 +122,7 @@ export class HttpSseTransport {
     try {
       const response = await this.#fetch(this.#endpoint, {
         method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.#apiKey}`,
-          'content-type': 'application/json',
-        },
+        headers: this.#headers,
         body: JSON.stringify(request),
         signal: controller.signal,
       })

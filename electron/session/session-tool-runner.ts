@@ -13,7 +13,11 @@ import { ProviderAutoApprover } from '../permission/auto-approver'
 import type { ToolExecutor } from '../tools/tool-registry'
 import { toJsonValue } from './session-common'
 import type { PromptRegistry } from '../prompts/registry'
-import { normalizeToolResult, toolFailure } from './session-run-utils'
+import {
+  modelOutputTokenLimit,
+  normalizeToolResult,
+  toolFailure,
+} from './session-run-utils'
 import type { SessionApprovalCoordinator } from '../permission/session-approval'
 import type { SessionContextGate } from './session-context-gate'
 import { createConfiguredProvider } from '../providers/provider-factory'
@@ -203,6 +207,7 @@ export class SessionToolRunner {
                       approvalBinding.snapshot,
                       config.limits.autoApprovalTimeoutMs,
                       this.#promptRegistry?.approvalPrompt().content,
+                      modelOutputTokenLimit(approvalBinding.modelProfile),
                     ))
                   : undefined
               const authorization = await this.#permissionPipeline.authorize({

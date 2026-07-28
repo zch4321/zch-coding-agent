@@ -8,7 +8,7 @@ import {
 import { stat } from 'node:fs/promises'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import {
-  fetchOpenAICompatibleModelCatalog,
+  fetchProviderModelCatalog,
   ModelCatalogError,
   resolveModelProfiles,
 } from '../providers/model-catalog'
@@ -174,7 +174,8 @@ export function createAppIpcHandlers(
         }
 
         try {
-          const models = await fetchOpenAICompatibleModelCatalog({
+          const models = await fetchProviderModelCatalog({
+            providerType: provider.providerType,
             baseURL: provider.baseURL,
             apiKey,
             timeoutMs: config.limits.modelCatalogTimeoutMs,

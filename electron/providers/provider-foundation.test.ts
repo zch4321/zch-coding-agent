@@ -21,7 +21,9 @@ import {
   type CanonicalHistoryState,
 } from '../session/canonical-history'
 import { DeepSeekProvider } from './deepseek-provider'
+import { GenericAnthropicProvider } from './generic-anthropic-provider'
 import { GenericChatCompletionsProvider } from './generic-chat-completions-provider'
+import { GenericResponsesProvider } from './generic-responses-provider'
 import {
   assertCompletedAssistantTurn,
   ProviderCompletionError,
@@ -32,7 +34,10 @@ import type {
   ProviderEvent,
   ProviderToolDefinition,
 } from './provider'
-import { createConfiguredProvider } from './provider-factory'
+import {
+  createConfiguredProvider,
+  resolveProviderEndpoint,
+} from './provider-factory'
 
 function sseResponse(payloads: JsonValue[], done = true): Response {
   const body = [
@@ -79,13 +84,14 @@ function compileInput(input: {
   reasoning?: ModelRouteSnapshot['reasoning']
   state?: CanonicalHistoryState
   tools?: ProviderToolDefinition[]
-  structuredOutput?: 'json_object'
+  structuredOutput?: ProviderCompileInput['structuredOutput']
 }): ProviderCompileInput {
   const state = input.state ?? historyState()
   return {
     history: new MessageHistoryCompiler().compile(state.history),
     route: route(input.providerType, input.reasoning),
     tools: input.tools ?? [],
+    maxOutputTokens: 8_192,
     ...(input.structuredOutput
       ? { structuredOutput: input.structuredOutput }
       : {}),
@@ -501,7 +507,16 @@ describe('P11 Provider foundation', () => {
       compileInput({
         providerType: 'deepseek.chat-completions',
         reasoning: 'max',
-        structuredOutput: 'json_object',
+        structuredOutput: {
+          type: 'json_schema',
+          name: 'approval',
+          schema: {
+            type: 'object',
+            properties: {},
+            required: [],
+            additionalProperties: false,
+          },
+        },
       }),
     )
     const disabled = provider.compile(
@@ -852,11 +867,42 @@ describe('P11 Provider foundation', () => {
         'secret',
       ),
     ).toBeInstanceOf(GenericChatCompletionsProvider)
+    expect(
+      createConfiguredProvider(
+        { ...base, providerType: 'generic.responses' },
+        'secret',
+      ),
+    ).toBeInstanceOf(GenericResponsesProvider)
+    expect(
+      createConfiguredProvider(
+        { ...base, providerType: 'generic.anthropic' },
+        'secret',
+      ),
+    ).toBeInstanceOf(GenericAnthropicProvider)
     expect(Object.getPrototypeOf(DeepSeekProvider.prototype)).toBe(
       Object.prototype,
     )
     expect(
       Object.getPrototypeOf(GenericChatCompletionsProvider.prototype),
     ).toBe(Object.prototype)
+    expect(Object.getPrototypeOf(GenericResponsesProvider.prototype)).toBe(
+      Object.prototype,
+    )
+    expect(Object.getPrototypeOf(GenericAnthropicProvider.prototype)).toBe(
+      Object.prototype,
+    )
+  })
+
+  it('resolves the endpoint owned by each generic Provider Type', () => {
+    const baseURL = 'https://api.example/v1'
+    expect(resolveProviderEndpoint('generic.chat-completions', baseURL)).toBe(
+      'https://api.example/v1/chat/completions',
+    )
+    expect(resolveProviderEndpoint('generic.responses', baseURL)).toBe(
+      'https://api.example/v1/responses',
+    )
+    expect(resolveProviderEndpoint('generic.anthropic', baseURL)).toBe(
+      'https://api.example/v1/messages',
+    )
   })
 })

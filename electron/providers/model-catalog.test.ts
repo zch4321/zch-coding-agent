@@ -5,6 +5,7 @@ import {
   type AppConfig,
 } from '../config/schema'
 import {
+  fetchAnthropicModelCatalog,
   fetchDeepSeekModelCatalog,
   modelCatalogEndpoint,
   resolveModelProfiles,
@@ -71,6 +72,62 @@ describe('DeepSeek model catalog', () => {
         message: 'Provider model catalog request failed with status 401',
       }),
     )
+  })
+
+  it('fetches paginated Anthropic models with native authentication', async () => {
+    const fetchImpl = vi.fn(
+      async (url: string | URL | Request, init?: RequestInit) => {
+        expect(init?.headers).toMatchObject({
+          'x-api-key': 'secret',
+          'anthropic-version': '2023-06-01',
+        })
+        const endpoint = new URL(String(url))
+        return new Response(
+          JSON.stringify(
+            endpoint.searchParams.get('after_id')
+              ? {
+                  data: [{ id: 'claude-b' }],
+                  has_more: false,
+                  last_id: 'claude-b',
+                }
+              : {
+                  data: [{ id: 'claude-a' }],
+                  has_more: true,
+                  last_id: 'claude-a',
+                },
+          ),
+          { status: 200 },
+        )
+      },
+    ) as typeof fetch
+
+    await expect(
+      fetchAnthropicModelCatalog({
+        baseURL: 'https://api.anthropic.com/v1',
+        apiKey: 'secret',
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ id: 'claude-a' }, { id: 'claude-b' }])
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects an oversized Anthropic pagination cursor', async () => {
+    const fetchImpl = vi.fn(async () =>
+      Response.json({
+        data: [{ id: 'claude-a' }],
+        has_more: true,
+        last_id: 'x'.repeat(257),
+      }),
+    ) as typeof fetch
+
+    await expect(
+      fetchAnthropicModelCatalog({
+        baseURL: 'https://api.anthropic.com/v1',
+        apiKey: 'secret',
+        fetchImpl,
+      }),
+    ).rejects.toThrow('invalid model catalog cursor')
+    expect(fetchImpl).toHaveBeenCalledOnce()
   })
 
   it('cancels a streamed catalog as soon as its byte limit is exceeded', async () => {

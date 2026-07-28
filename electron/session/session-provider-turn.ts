@@ -25,7 +25,7 @@ import {
   assertAssistantTurnCandidate,
   canonicalTraceSource,
 } from './canonical-history'
-import { modelPromptBudget } from './session-run-utils'
+import { modelOutputTokenLimit, modelPromptBudget } from './session-run-utils'
 import { promptResources, selectPromptMessages } from './prompt-harness'
 import type {
   ActiveRun,
@@ -169,6 +169,7 @@ export class SessionProviderTurnRunner {
       },
       route: binding.snapshot,
       tools,
+      maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
     })
     await this.#pluginBus
       ?.emit('beforeLLMCall', {

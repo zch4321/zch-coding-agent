@@ -1,7 +1,13 @@
 import type { ProviderPublicConfig, ProviderType } from '../../shared/config'
-import { resolveChatCompletionsEndpoint } from '../../shared/model-route'
+import {
+  resolveAnthropicMessagesEndpoint,
+  resolveChatCompletionsEndpoint,
+  resolveResponsesEndpoint,
+} from '../../shared/model-route'
 import { DeepSeekProvider } from './deepseek-provider'
+import { GenericAnthropicProvider } from './generic-anthropic-provider'
 import { GenericChatCompletionsProvider } from './generic-chat-completions-provider'
+import { GenericResponsesProvider } from './generic-responses-provider'
 import type { ModelProvider } from './provider'
 
 /** Resolves the endpoint owned by one concrete provider implementation. */
@@ -13,6 +19,10 @@ export function resolveProviderEndpoint(
     case 'deepseek.chat-completions':
     case 'generic.chat-completions':
       return resolveChatCompletionsEndpoint(baseURL)
+    case 'generic.responses':
+      return resolveResponsesEndpoint(baseURL)
+    case 'generic.anthropic':
+      return resolveAnthropicMessagesEndpoint(baseURL)
   }
 }
 
@@ -34,6 +44,22 @@ export function createConfiguredProvider(
       })
     case 'generic.chat-completions':
       return new GenericChatCompletionsProvider({
+        providerId: provider.id,
+        baseURL: provider.baseURL,
+        apiKey,
+        fetchImpl,
+        endpoint,
+      })
+    case 'generic.responses':
+      return new GenericResponsesProvider({
+        providerId: provider.id,
+        baseURL: provider.baseURL,
+        apiKey,
+        fetchImpl,
+        endpoint,
+      })
+    case 'generic.anthropic':
+      return new GenericAnthropicProvider({
         providerId: provider.id,
         baseURL: provider.baseURL,
         apiKey,

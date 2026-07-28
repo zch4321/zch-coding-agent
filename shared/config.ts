@@ -99,6 +99,8 @@ export const PromptResourceRefSchema = Type.Object(
 export const ProviderTypeSchema = Type.Union([
   Type.Literal('deepseek.chat-completions'),
   Type.Literal('generic.chat-completions'),
+  Type.Literal('generic.responses'),
+  Type.Literal('generic.anthropic'),
 ])
 export type ProviderType = Static<typeof ProviderTypeSchema>
 

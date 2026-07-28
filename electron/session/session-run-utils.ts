@@ -57,14 +57,22 @@ export function finalStatusFromError(
   return 'failed'
 }
 
+/** Resolves the bounded output allowance used by compilation and prompt budgeting. */
+export function modelOutputTokenLimit(
+  model: Pick<ModelProfile, 'contextWindowTokens' | 'maxOutputTokens'>,
+): number {
+  const contextWindow = model.contextWindowTokens
+  return model.maxOutputTokens
+    ? Math.min(model.maxOutputTokens, Math.floor(contextWindow * 0.4))
+    : Math.min(8_192, Math.floor(contextWindow * 0.2))
+}
+
 /** Computes the usable prompt budget after reserving the model's output allowance. */
 export function modelPromptBudget(
   model: Pick<ModelProfile, 'contextWindowTokens' | 'maxOutputTokens'>,
 ): number {
   const contextWindow = model.contextWindowTokens
-  const outputReserve = model?.maxOutputTokens
-    ? Math.min(model.maxOutputTokens, Math.floor(contextWindow * 0.4))
-    : Math.min(8_192, Math.floor(contextWindow * 0.2))
+  const outputReserve = modelOutputTokenLimit(model)
   const budget = contextWindow - outputReserve
 
   if (budget < 1_024) {

@@ -107,6 +107,17 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       provider.getByText('Provider Type', { exact: true }),
     ).toBeVisible()
+    const providerTypeSelect = provider
+      .locator('.settings-field', { hasText: 'Provider Type' })
+      .locator('.n-select')
+    await providerTypeSelect.click()
+    await expect(
+      page.getByText('通用 Responses', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.getByText('通用 Anthropic Messages', { exact: true }),
+    ).toBeVisible()
+    await page.keyboard.press('Escape')
     await expect(provider.getByRole('button', { name: '刷新' })).toBeDisabled()
     await expect(provider.getByText('思考深度', { exact: true })).toBeVisible()
     await expect(provider.locator('.n-input-number')).toHaveCount(3)

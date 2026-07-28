@@ -134,9 +134,9 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 必须支持接入多家模型供应商。所有实现直接满足同一个扁平 `ModelProvider.compile/stream` 接口：Provider 自己拥有 canonical history 编译、鉴权/HTTP/SDK、stream 解码、reasoning、usage 和 continuation。不能把某个 SDK 的消息类型当成 Core 的公共消息接口，也不引入 BaseProvider、协议方言继承层或任意 capability 组合。
 
-P11 生产路径实现独立 `DeepSeekProvider` 与 `GenericChatCompletionsProvider`。通用兜底规划为 Chat Completions、Responses 和 Anthropic 三种 API style；Responses、Anthropic、Google 和其他具体厂商按实际使用需求分别实现，只共享 HTTP/SSE、bounds、tool-call 拼接等纯函数。
+生产路径实现互不继承的 `DeepSeekProvider`、`GenericChatCompletionsProvider`、`GenericResponsesProvider` 与 `GenericAnthropicProvider`。三种通用兜底分别对应 Chat Completions、Responses 和 Anthropic API style；Google 和其他具体厂商按实际使用需求分别实现，只共享 HTTP/SSE、bounds、tool-call 拼接等纯函数。
 
-Provider 可实现模型目录查询。DeepSeek 使用鉴权后的 `GET /models` 获取当前凭据可用的模型 ID；该端点只作为可用性目录，不能假设会返回上下文长度、最大输出或工具能力。设置页合并 Provider 返回、应用内置模型资料和用户自定义模型，并始终允许手工输入。
+模型目录查询保持独立服务。OpenAI-compatible API 使用 Bearer `GET /models`，Anthropic 使用 `x-api-key`、版本 header 和有界分页 `GET /models`；该端点只作为可用性目录，不能假设会返回上下文长度、最大输出或工具能力。设置页合并 Provider 返回、应用内置模型资料和用户自定义模型，并始终允许手工输入。
 
 模型能力采用 `用户覆盖 > 内置资料 > 保守默认值`。未知模型默认按 64K 上下文管理并明确标记“能力未知”；不得抓取 Provider 文档 HTML 推断运行时能力。模型目录请求失败时保留上次成功缓存和当前手工配置。
 
@@ -151,12 +151,14 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 | **DeepSeek**  | `reasoning_content` 字段                                  | 明文                       | 无工具调用时可省略；发生工具调用后必须按协议回传                        |
 | **智谱 GLM**  | Provider-specific reasoning 字段                          | 依模型协议                 | 独立适配并用契约测试确认，不能仅因字段同名复用 DeepSeek 假设            |
 | **Anthropic** | 有序 `thinking` / `redacted_thinking` block + `signature` | 明文摘要 + 不透明签名/密文 | 工具链路中必须保留完整 block、顺序与不透明字段，不得筛掉 redacted block |
-| **OpenAI**    | Responses API reasoning output items                      | 摘要 + 不透明状态          | 用 `previous_response_id` 或完整回传相关 output items；适配器决定策略   |
+| **OpenAI**    | Responses API reasoning output items                      | 摘要 + 不透明状态          | 固定本地无状态，完整回传 output items，不使用服务端 response cursor     |
 
 需求：抽象统一的 **Provider Continuation Envelope**，但不统一 envelope 内部的 CoT 或 provider-native 数据结构。每个完成的 assistant turn 可以同时保存：
 
 - `normalizedReasoningText`：只包含非加密、应用标准化后的可读 reasoning 文本或摘要，用于 UI、导出和通用审计；允许为空，不能用于重建签名、密文、item id 或原始 block 顺序。
 - `providerContinuation`：包含 `schemaVersion/providerType/format/data` 的版本化 envelope。`data` 原样保留该 Provider 继续请求所需的有序 provider-native items、签名、密文、cursor 或 response id；Agent Core 和 Renderer 只搬运，不解释、不修改。
+
+Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items；Anthropic high/max 必须使用 adaptive thinking 与对应 effort，off 不发送 thinking 参数。Structured output 契约必须携带实际 JSON Schema；Responses 与 Anthropic 使用原生 schema 字段，Chat 兜底实现允许降级为 JSON object mode，但 Application 的本地 schema 校验不能省略。
 
 完整原始 Provider request/response 和 stream events 只属于显式开启的 trace。Message 只保存 canonical message parts、可读 reasoning 投影，以及继续协议所需的最小 opaque state。
 
@@ -533,7 +535,7 @@ session.end     { reason, ts }
 
 **MVP 之后：**
 
-- GLM / Anthropic / OpenAI Provider（含各自 reasoning adapter）
+- GLM / Google 与其他具体厂商 Provider（含各自 reasoning adapter）
 - 代码库 embedding / RAG 检索
 - **MCP 客户端**（stdio + Streamable HTTP，含 server 生命周期管理）
 - 插件加载器
