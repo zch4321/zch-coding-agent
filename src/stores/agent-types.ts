@@ -141,5 +141,6 @@ export interface UiModelProfile {
   availability: 'provider' | 'custom'
   capabilitySource: 'override' | 'provider' | 'builtin' | 'default'
   contextWindowTokens: number
-  maxOutputTokens?: number
+  compactThresholdTokens: number
+  maxOutputTokens: number
 }

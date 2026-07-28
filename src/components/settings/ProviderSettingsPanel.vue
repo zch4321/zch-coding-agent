@@ -8,6 +8,8 @@ import {
   NGrid,
   NInput,
   NInputNumber,
+  NList,
+  NListItem,
   NModal,
   NSelect,
   NTag,
@@ -265,18 +267,39 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <h3>{{ agent.providerForm.label }}</h3>
           <p>{{ agent.providerForm.providerId }}</p>
         </div>
-        <NButton
-          secondary
-          :disabled="agent.selectedProviderId === agent.activeProviderId"
-          @click="
-            requestProviderAction({
-              kind: 'set-active',
-              providerId: agent.selectedProviderId,
-            })
-          "
-        >
-          {{ t('settings.setDefaultProvider') }}
-        </NButton>
+        <div class="provider-detail-toolbar">
+          <div class="provider-detail-actions">
+            <NButton
+              secondary
+              :disabled="agent.selectedProviderId === agent.activeProviderId"
+              @click="
+                requestProviderAction({
+                  kind: 'set-active',
+                  providerId: agent.selectedProviderId,
+                })
+              "
+            >
+              {{ t('settings.setDefaultProvider') }}
+            </NButton>
+            <NButton
+              type="primary"
+              :loading="agent.providerSaving"
+              :disabled="!agent.providerDirty || agent.modelCatalogLoading"
+              @click="agent.saveProvider"
+            >
+              {{ t('settings.saveProvider') }}
+            </NButton>
+          </div>
+          <small class="settings-save-status" aria-live="polite">
+            {{
+              agent.providerDirty
+                ? t('settings.unsaved')
+                : agent.providerSaveStatus
+                  ? t('settings.saved')
+                  : ''
+            }}
+          </small>
+        </div>
       </div>
 
       <div class="settings-inline settings-inline-equal">
@@ -301,12 +324,21 @@ function handleDropdownSelect(key: string | number, providerId: string) {
       </label>
       <label class="settings-field">
         <span>{{ t('settings.apiKey') }}</span>
-        <NInput
-          v-model:value="agent.providerForm.apiKey"
-          type="password"
-          show-password-on="click"
-          :placeholder="t('settings.apiKeyPlaceholder')"
-        />
+        <div class="settings-inline">
+          <NInput
+            v-model:value="agent.providerForm.apiKey"
+            type="password"
+            show-password-on="click"
+            :placeholder="t('settings.apiKeyPlaceholder')"
+          />
+          <NButton
+            v-if="agent.selectedCredentialSource === 'safe-storage'"
+            secondary
+            @click="agent.clearCredential"
+          >
+            {{ t('settings.clearCredential') }}
+          </NButton>
+        </div>
         <small>
           {{
             agent.selectedCredentialConfigured
@@ -358,30 +390,6 @@ function handleDropdownSelect(key: string | number, providerId: string) {
       </label>
       <div class="settings-inline settings-inline-equal">
         <label class="settings-field">
-          <span>{{ t('settings.contextOverride') }}</span>
-          <NInputNumber
-            v-model:value="agent.providerForm.contextWindowTokens"
-            :min="1024"
-            :max="10000000"
-            clearable
-            :placeholder="t('settings.useDefault')"
-          />
-          <small>{{ t('settings.contextOverrideHint') }}</small>
-        </label>
-        <label class="settings-field">
-          <span>{{ t('settings.outputOverride') }}</span>
-          <NInputNumber
-            v-model:value="agent.providerForm.maxOutputTokens"
-            :min="1"
-            :max="10000000"
-            clearable
-            :placeholder="t('settings.useDefault')"
-          />
-          <small>{{ t('settings.outputOverrideHint') }}</small>
-        </label>
-      </div>
-      <div class="settings-inline settings-inline-equal">
-        <label class="settings-field">
           <span>{{ t('settings.tokenEstimation') }}</span>
           <NSelect
             v-model:value="agent.providerForm.tokenEstimationMode"
@@ -414,31 +422,83 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           {{ reasoningHint }}
         </small>
       </label>
-      <div class="settings-actions">
-        <NButton
-          type="primary"
-          :loading="agent.providerSaving"
-          :disabled="!agent.providerDirty"
-          @click="agent.saveProvider"
-        >
-          {{ t('settings.saveProvider') }}
-        </NButton>
-        <NButton
-          v-if="agent.selectedCredentialSource === 'safe-storage'"
-          secondary
-          @click="agent.clearCredential"
-        >
-          {{ t('settings.clearCredential') }}
-        </NButton>
-        <small class="settings-save-status" aria-live="polite">
-          {{
-            agent.providerDirty
-              ? t('settings.unsaved')
-              : agent.providerSaveStatus
-                ? t('settings.saved')
-                : ''
-          }}
-        </small>
+
+      <div class="provider-model-settings">
+        <div>
+          <h4>{{ t('settings.modelSettings') }}</h4>
+          <p>{{ t('settings.modelSettingsHint') }}</p>
+        </div>
+        <div class="provider-model-settings-header" aria-hidden="true">
+          <span>{{ t('settings.modelName') }}</span>
+          <span>{{ t('settings.maximumContext') }}</span>
+          <span>{{ t('settings.compressionThreshold') }}</span>
+          <span>{{ t('settings.maximumOutputLength') }}</span>
+        </div>
+        <NList bordered data-testid="provider-model-settings-list">
+          <NListItem v-for="model in agent.modelProfiles" :key="model.id">
+            <div class="provider-model-settings-row">
+              <div class="provider-model-name">
+                <strong>{{ model.id }}</strong>
+                <NTag
+                  v-if="model.id === agent.providerForm.model"
+                  size="small"
+                  type="info"
+                  :bordered="false"
+                >
+                  {{ t('settings.mainModelTag') }}
+                </NTag>
+              </div>
+              <label class="provider-model-value">
+                <span>{{ t('settings.maximumContext') }}</span>
+                <NInputNumber
+                  :value="model.contextWindowTokens"
+                  :min="2048"
+                  :max="10000000"
+                  :show-button="false"
+                  @update:value="
+                    agent.updateModelConfiguration(
+                      model.id,
+                      'contextWindowTokens',
+                      $event,
+                    )
+                  "
+                />
+              </label>
+              <label class="provider-model-value">
+                <span>{{ t('settings.compressionThreshold') }}</span>
+                <NInputNumber
+                  :value="model.compactThresholdTokens"
+                  :min="1024"
+                  :max="model.contextWindowTokens - model.maxOutputTokens"
+                  :show-button="false"
+                  @update:value="
+                    agent.updateModelConfiguration(
+                      model.id,
+                      'compactThresholdTokens',
+                      $event,
+                    )
+                  "
+                />
+              </label>
+              <label class="provider-model-value">
+                <span>{{ t('settings.maximumOutputLength') }}</span>
+                <NInputNumber
+                  :value="model.maxOutputTokens"
+                  :min="1"
+                  :max="model.contextWindowTokens - 1024"
+                  :show-button="false"
+                  @update:value="
+                    agent.updateModelConfiguration(
+                      model.id,
+                      'maxOutputTokens',
+                      $event,
+                    )
+                  "
+                />
+              </label>
+            </div>
+          </NListItem>
+        </NList>
       </div>
     </div>
 
@@ -455,6 +515,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
         <NButton
           type="primary"
           :loading="agent.providerSaving"
+          :disabled="agent.modelCatalogLoading"
           @click="saveAndContinue"
         >
           {{ t('settings.saveAndContinue') }}

@@ -1,4 +1,5 @@
 import type { ProviderType, ReasoningEffort } from '../../shared/config'
+import type { UiModelProfile } from './agent-types'
 
 export const DEFAULT_PROVIDER_FORM = {
   providerId: 'deepseek',
@@ -8,8 +9,6 @@ export const DEFAULT_PROVIDER_FORM = {
   model: 'deepseek-v4-pro',
   reasoning: 'high' as ReasoningEffort,
   apiKey: '',
-  contextWindowTokens: null as number | null,
-  maxOutputTokens: null as number | null,
   tokenEstimationMode: 'conservative' as 'conservative' | 'custom-bytes',
   bytesPerToken: 3,
 }
@@ -17,7 +16,13 @@ export const DEFAULT_PROVIDER_FORM = {
 export type ProviderForm = typeof DEFAULT_PROVIDER_FORM
 
 /** Serializes the provider form fields that identify a saved provider configuration. */
-export function providerFormSignature(form: ProviderForm): string {
+export function providerFormSignature(
+  form: ProviderForm,
+  models: Pick<
+    UiModelProfile,
+    'id' | 'contextWindowTokens' | 'compactThresholdTokens' | 'maxOutputTokens'
+  >[] = [],
+): string {
   return JSON.stringify({
     baseURL: form.baseURL,
     providerId: form.providerId,
@@ -25,8 +30,14 @@ export function providerFormSignature(form: ProviderForm): string {
     providerType: form.providerType,
     model: form.model,
     reasoning: form.reasoning,
-    contextWindowTokens: form.contextWindowTokens,
-    maxOutputTokens: form.maxOutputTokens,
+    models: models
+      .map((model) => ({
+        id: model.id,
+        contextWindowTokens: model.contextWindowTokens,
+        compactThresholdTokens: model.compactThresholdTokens,
+        maxOutputTokens: model.maxOutputTokens,
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
     tokenEstimationMode: form.tokenEstimationMode,
     bytesPerToken: form.bytesPerToken,
   })

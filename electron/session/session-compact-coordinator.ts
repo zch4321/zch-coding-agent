@@ -170,8 +170,9 @@ export class SessionCompactCoordinator {
       maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
     })
     const budget = modelPromptBudget(binding.modelProfile)
-    const trigger = Math.floor(
-      (budget * config.limits.autoCompactTriggerPercent) / 100,
+    const trigger = Math.min(
+      binding.modelProfile.compactThresholdTokens,
+      budget,
     )
     if (
       estimateJsonTokens(call.request, config.limits.tokenEstimation) < trigger

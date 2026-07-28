@@ -347,10 +347,11 @@ describe('SessionManager compaction', () => {
       model: 'auto-compact-test-model',
       reasoning: 'off',
       contextWindowTokens: 160_000,
+      compactThresholdTokens: 1_024,
       maxOutputTokens: 8_000,
       limits: {
         ...current.limits,
-        autoCompactTriggerPercent: 1,
+        autoCompactTriggerPercent: 95,
         tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
       },
     })

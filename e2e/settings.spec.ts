@@ -104,12 +104,17 @@ test.describe.serial('Electron settings workflows', () => {
 
     await expect(provider.locator('.provider-card')).toHaveCount(1)
     await expect(provider.locator('.provider-card')).toContainText('DeepSeek')
-    await expect(provider.getByText('主模型', { exact: true })).toBeVisible()
     await expect(
-      provider.getByText('上下文窗口（可选覆盖）', { exact: true }),
+      provider.locator('.settings-field > span', { hasText: /^主模型$/ }),
     ).toBeVisible()
     await expect(
-      provider.getByText('最大输出 Token（可选覆盖）', { exact: true }),
+      provider.getByText('最大上下文', { exact: true }).first(),
+    ).toBeVisible()
+    await expect(
+      provider.getByText('压缩阈值', { exact: true }).first(),
+    ).toBeVisible()
+    await expect(
+      provider.getByText('最大输出长度', { exact: true }).first(),
     ).toBeVisible()
     await expect(
       provider.getByText('Token 估算方式', { exact: true }),
@@ -132,6 +137,10 @@ test.describe.serial('Electron settings workflows', () => {
       provider.getByText('自动审批模型', { exact: true }),
     ).toHaveCount(0)
     const refreshModels = provider.getByRole('button', { name: '刷新' })
+    const saveProvider = provider
+      .locator('.provider-detail-heading')
+      .getByRole('button', { name: '保存 Provider' })
+    await expect(saveProvider).toBeVisible()
     await expect(refreshModels).toBeDisabled()
     await provider
       .locator('.settings-field', { hasText: '基础 URL' })
@@ -140,14 +149,24 @@ test.describe.serial('Electron settings workflows', () => {
     await provider.getByPlaceholder('输入新的 Key').fill(providerApiKey)
     await expect(refreshModels).toBeDisabled()
     await expect(
-      provider.getByText('先在下方保存 API Key，才能刷新模型目录。'),
+      provider.getByText('先保存 API Key，才能刷新模型目录。'),
     ).toBeVisible()
-    await provider.getByRole('button', { name: '保存模型服务' }).click()
+    await saveProvider.click()
     await expect(refreshModels).toBeEnabled()
     await refreshModels.click()
     await expect.poll(() => fakeProvider.modelCatalogRequests).toBe(1)
     await expect(provider.getByText('思考深度', { exact: true })).toBeVisible()
-    await expect(provider.locator('.n-input-number')).toHaveCount(3)
+    const discoveredModelRow = provider.locator(
+      '.provider-model-settings-row',
+      {
+        hasText: providerModel,
+      },
+    )
+    await expect(discoveredModelRow).toBeVisible()
+    await expect(discoveredModelRow.locator('.n-input-number')).toHaveCount(3)
+    for (const input of await discoveredModelRow.locator('input').all()) {
+      await expect(input).not.toHaveValue('')
+    }
 
     const modelSelect = provider
       .locator('.settings-field', { hasText: '主模型' })
@@ -230,7 +249,7 @@ test.describe.serial('Electron settings workflows', () => {
       .locator('.settings-field', { hasText: 'Provider 名称' })
       .locator('input')
       .fill('E2E Alt Edited')
-    await provider.getByRole('button', { name: '保存模型服务' }).click()
+    await provider.getByRole('button', { name: '保存 Provider' }).click()
     await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
     await expect(
       provider.locator('.provider-card', { hasText: 'E2E Alt Edited' }),

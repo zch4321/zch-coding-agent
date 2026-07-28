@@ -480,6 +480,7 @@ describe('ConfigStore', () => {
       model: 'model-a',
       reasoning: 'off',
       contextWindowTokens: 200_000,
+      compactThresholdTokens: 150_000,
       maxOutputTokens: 10_000,
     })
 
@@ -489,6 +490,7 @@ describe('ConfigStore', () => {
       modelOverrides: {
         'model-a': {
           contextWindowTokens: 200_000,
+          compactThresholdTokens: 150_000,
           maxOutputTokens: 10_000,
         },
       },
@@ -501,6 +503,7 @@ describe('ConfigStore', () => {
       model: 'model-a',
       reasoning: 'off',
       contextWindowTokens: null,
+      compactThresholdTokens: null,
       maxOutputTokens: null,
     })
     expect(configStore.getPublicConfig().providers[0].modelOverrides).toEqual(
@@ -547,8 +550,18 @@ describe('ConfigStore', () => {
       baseURL: 'https://example.test/v1',
       model: 'model-b',
       reasoning: 'off',
-      contextWindowTokens: 128_000,
-      maxOutputTokens: 8_000,
+      modelOverrides: {
+        'model-b': {
+          contextWindowTokens: 128_000,
+          compactThresholdTokens: 96_000,
+          maxOutputTokens: 8_000,
+        },
+        'model-c': {
+          contextWindowTokens: 64_000,
+          compactThresholdTokens: 44_000,
+          maxOutputTokens: 8_000,
+        },
+      },
       limits: {
         ...limits,
         tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 2.5 },
@@ -564,6 +577,12 @@ describe('ConfigStore', () => {
       modelOverrides: {
         'model-b': {
           contextWindowTokens: 128_000,
+          compactThresholdTokens: 96_000,
+          maxOutputTokens: 8_000,
+        },
+        'model-c': {
+          contextWindowTokens: 64_000,
+          compactThresholdTokens: 44_000,
           maxOutputTokens: 8_000,
         },
       },
@@ -575,6 +594,29 @@ describe('ConfigStore', () => {
       bytesPerToken: 2.5,
     })
     await expect(configStore.getDeepSeekApiKey()).resolves.toBe('atomic-secret')
+  })
+
+  it('rejects model settings whose compression threshold exceeds usable context', async () => {
+    const { configStore } = await createStores()
+    const limits = configStore.getPublicConfig().limits
+
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'provider-settings',
+        baseURL: 'https://example.test/v1',
+        model: 'model-a',
+        reasoning: 'off',
+        modelOverrides: {
+          'model-a': {
+            contextWindowTokens: 64_000,
+            compactThresholdTokens: 60_000,
+            maxOutputTokens: 8_000,
+          },
+        },
+        limits,
+      }),
+    ).rejects.toThrow('Compression threshold exceeds the usable context')
   })
 
   it('selects, copies and deletes providers without copying secrets', async () => {

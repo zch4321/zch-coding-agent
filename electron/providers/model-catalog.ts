@@ -5,6 +5,7 @@ import {
   type PublicConfig,
   type ProviderModel,
 } from '../../shared/config'
+import { resolveModelTokenSettings } from '../../shared/model-settings'
 
 const MAX_CATALOG_BYTES = 1_000_000
 const MAX_MODELS = 1_000
@@ -34,7 +35,8 @@ export interface ModelProfile {
   availability: 'provider' | 'custom'
   capabilitySource: 'override' | 'provider' | 'builtin' | 'default'
   contextWindowTokens: number
-  maxOutputTokens?: number
+  compactThresholdTokens: number
+  maxOutputTokens: number
 }
 
 function catalogTokenLimit(
@@ -333,9 +335,13 @@ export function resolveModelProfiles(
   const models = new Map(
     provider.modelCatalog.map((model) => [model.id, model]),
   )
+  const catalogIds = new Set(provider.modelCatalog.map((model) => model.id))
 
   if (!models.has(provider.model)) {
     models.set(provider.model, { id: provider.model })
+  }
+  for (const modelId of Object.keys(provider.modelOverrides)) {
+    if (!models.has(modelId)) models.set(modelId, { id: modelId })
   }
   if (includeModelId && !models.has(includeModelId)) {
     models.set(includeModelId, { id: includeModelId })
@@ -345,32 +351,34 @@ export function resolveModelProfiles(
     .map((model): ModelProfile => {
       const override = provider.modelOverrides[model.id]
       const builtin = BUILTIN_MODEL_CAPABILITIES[model.id]
-      const capabilitySource = override?.contextWindowTokens
-        ? 'override'
-        : model.contextWindowTokens
-          ? 'provider'
-          : builtin
-            ? 'builtin'
-            : 'default'
-      const maxOutputTokens =
-        override?.maxOutputTokens ??
-        model.maxOutputTokens ??
-        builtin?.maxOutputTokens
+      const capabilitySource =
+        override && Object.keys(override).length > 0
+          ? 'override'
+          : model.contextWindowTokens
+            ? 'provider'
+            : builtin
+              ? 'builtin'
+              : 'default'
+      const contextWindowTokens =
+        override?.contextWindowTokens ??
+        model.contextWindowTokens ??
+        builtin?.contextWindowTokens ??
+        config.limits.maxContextTokens
+      const tokenSettings = resolveModelTokenSettings({
+        contextWindowTokens,
+        maxOutputTokens:
+          override?.maxOutputTokens ??
+          model.maxOutputTokens ??
+          builtin?.maxOutputTokens,
+        compactThresholdTokens: override?.compactThresholdTokens,
+        compactTriggerPercent: config.limits.autoCompactTriggerPercent,
+      })
 
       return {
         ...model,
-        availability: provider.modelCatalog.some(
-          (candidate) => candidate.id === model.id,
-        )
-          ? 'provider'
-          : 'custom',
+        availability: catalogIds.has(model.id) ? 'provider' : 'custom',
         capabilitySource,
-        contextWindowTokens:
-          override?.contextWindowTokens ??
-          model.contextWindowTokens ??
-          builtin?.contextWindowTokens ??
-          config.limits.maxContextTokens,
-        ...(maxOutputTokens ? { maxOutputTokens } : {}),
+        ...tokenSettings,
       }
     })
     .sort((left, right) => left.id.localeCompare(right.id))

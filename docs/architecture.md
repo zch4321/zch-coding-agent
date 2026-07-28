@@ -540,6 +540,8 @@ interface CompletedAssistantTurn {
 
 Provider 实现保持扁平：`DeepSeekProvider`、`GenericChatCompletionsProvider`、`GenericResponsesProvider` 和 `GenericAnthropicProvider` 都直接实现 `ModelProvider`，互不继承。允许共享 HTTP/SSE、bounds、tool-call 拼接、hash/timing 等纯函数，但不引入 BaseProvider、协议方言层或任意 capability 组合。Provider factory 只按 `providerType` 做穷举选择；模型目录查询是独立服务，不扩充核心接口。目录模型容量按 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值` 解析；Anthropic `max_input_tokens/max_tokens` 可以直接归一化，OpenAI-compatible 与 DeepSeek 的标准 `/models` 只返回身份字段时不得猜测容量。
 
+每个解析后的 `ModelProfile` 都携带非空的 `contextWindowTokens`、`compactThresholdTokens` 和 `maxOutputTokens`。Provider 设置页以模型列表编辑这三个绝对 Token 值，保存时整体替换该 Provider 的 per-model overrides；新目录模型即使只有 ID，也会立即用 64K 上下文、安全输出默认值和可用 prompt budget 的 80% 压缩阈值形成完整 profile。运行时从冻结 route binding 的 profile 读取输出上限与压缩阈值，不再从 Provider wire DTO 或当前可变表单推导。全局 `autoCompactTriggerPercent` 只负责为尚未覆盖的模型生成默认阈值。
+
 Auto approval 是独立于 Provider 编辑表单的全局 route selection，并归入 Permissions 设置页：`approval.approverProviderId` 只引用一个 Provider 配置实例以取得 `providerType/baseURL/credential`，`approval.approverModel` 单独覆盖模型。它由独立配置命令保存；创建、复制或保存 Provider 不能改写 approval，只有删除当前引用 Provider 时才显式切换到 fallback。这样避免复制第二套 endpoint/credential 配置，同时保证审批模型不跟随当前 Provider 卡片草稿漂移。
 
 三个通用兜底 type 为 `generic.chat-completions`、`generic.responses` 和 `generic.anthropic`。Responses 固定 `store = false`，不使用 `previous_response_id` 或 Conversations API；完整 output items（含 encrypted reasoning）进入 `responses.output-items.v1` continuation 并由本地 history 精确回放。Anthropic 的 high/max 使用 adaptive thinking 与 `output_config.effort`；完整 thinking、redacted thinking、signature 和 tool-use blocks 进入 `anthropic.message-content.v1` continuation。两者的 Provider Type/hash 不匹配均回退 canonical replay，同类型损坏 payload 明确报错。

@@ -20,6 +20,31 @@ type ProviderUpdate = Extract<
   { kind: 'provider' | 'provider-settings' }
 >
 
+function assertModelOverridesValid(
+  overrides: AppProviderConfig['modelOverrides'],
+): void {
+  for (const [model, settings] of Object.entries(overrides)) {
+    const context = settings.contextWindowTokens
+    const output = settings.maxOutputTokens
+    const threshold = settings.compactThresholdTokens
+
+    if (context !== undefined && output !== undefined && output >= context) {
+      throw new Error(
+        `Maximum output length must be smaller than maximum context for model: ${model}`,
+      )
+    }
+    if (
+      context !== undefined &&
+      threshold !== undefined &&
+      threshold > context - (output ?? 0)
+    ) {
+      throw new Error(
+        `Compression threshold exceeds the usable context for model: ${model}`,
+      )
+    }
+  }
+}
+
 function applyProviderUpdate(
   next: AppConfig,
   request: ProviderUpdate,
@@ -51,27 +76,39 @@ function applyProviderUpdate(
   provider.baseURL = request.baseURL
   provider.model = request.model
   provider.reasoning = request.reasoning
-  provider.modelOverrides[request.model] = {
-    ...provider.modelOverrides[request.model],
-  }
+  if (request.modelOverrides !== undefined) {
+    provider.modelOverrides = structuredClone(request.modelOverrides)
+  } else {
+    provider.modelOverrides[request.model] = {
+      ...provider.modelOverrides[request.model],
+    }
 
-  if (request.contextWindowTokens === null) {
-    delete provider.modelOverrides[request.model].contextWindowTokens
-  } else if (request.contextWindowTokens !== undefined) {
-    provider.modelOverrides[request.model].contextWindowTokens =
-      request.contextWindowTokens
-  }
+    if (request.contextWindowTokens === null) {
+      delete provider.modelOverrides[request.model].contextWindowTokens
+    } else if (request.contextWindowTokens !== undefined) {
+      provider.modelOverrides[request.model].contextWindowTokens =
+        request.contextWindowTokens
+    }
 
-  if (request.maxOutputTokens === null) {
-    delete provider.modelOverrides[request.model].maxOutputTokens
-  } else if (request.maxOutputTokens !== undefined) {
-    provider.modelOverrides[request.model].maxOutputTokens =
-      request.maxOutputTokens
-  }
+    if (request.compactThresholdTokens === null) {
+      delete provider.modelOverrides[request.model].compactThresholdTokens
+    } else if (request.compactThresholdTokens !== undefined) {
+      provider.modelOverrides[request.model].compactThresholdTokens =
+        request.compactThresholdTokens
+    }
 
-  if (Object.keys(provider.modelOverrides[request.model]).length === 0) {
-    delete provider.modelOverrides[request.model]
+    if (request.maxOutputTokens === null) {
+      delete provider.modelOverrides[request.model].maxOutputTokens
+    } else if (request.maxOutputTokens !== undefined) {
+      provider.modelOverrides[request.model].maxOutputTokens =
+        request.maxOutputTokens
+    }
+
+    if (Object.keys(provider.modelOverrides[request.model]).length === 0) {
+      delete provider.modelOverrides[request.model]
+    }
   }
+  assertModelOverridesValid(provider.modelOverrides)
   if (!isNewProvider && provider.providerType !== previousProviderType) {
     provider.modelCatalog = []
     delete provider.modelCatalogFetchedAt

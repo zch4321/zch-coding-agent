@@ -61,10 +61,10 @@ export function finalStatusFromError(
 export function modelOutputTokenLimit(
   model: Pick<ModelProfile, 'contextWindowTokens' | 'maxOutputTokens'>,
 ): number {
-  const contextWindow = model.contextWindowTokens
-  return model.maxOutputTokens
-    ? Math.min(model.maxOutputTokens, Math.floor(contextWindow * 0.4))
-    : Math.min(8_192, Math.floor(contextWindow * 0.2))
+  return Math.min(
+    model.maxOutputTokens,
+    Math.max(1, model.contextWindowTokens - 1_024),
+  )
 }
 
 /** Computes the usable prompt budget after reserving the model's output allowance. */

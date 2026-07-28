@@ -60,6 +60,9 @@ export const ModelCapabilityOverrideSchema = Type.Object(
     contextWindowTokens: Type.Optional(
       Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
     ),
+    compactThresholdTokens: Type.Optional(
+      Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+    ),
     maxOutputTokens: Type.Optional(
       Type.Integer({ minimum: 1, maximum: 10_000_000 }),
     ),
@@ -127,7 +130,7 @@ export const ProviderPublicConfigSchema = Type.Object(
     modelOverrides: Type.Record(
       Type.String({ minLength: 1, maxLength: 256 }),
       ModelCapabilityOverrideSchema,
-      { maxProperties: 256 },
+      { maxProperties: 1_000 },
     ),
     credentialConfigured: Type.Boolean(),
     credentialSource: Type.Union([
@@ -463,11 +466,24 @@ export const ConfigSetRequestSchema = Type.Union([
           Type.Null(),
         ]),
       ),
+      compactThresholdTokens: Type.Optional(
+        Type.Union([
+          Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+          Type.Null(),
+        ]),
+      ),
       maxOutputTokens: Type.Optional(
         Type.Union([
           Type.Integer({ minimum: 1, maximum: 10_000_000 }),
           Type.Null(),
         ]),
+      ),
+      modelOverrides: Type.Optional(
+        Type.Record(
+          Type.String({ minLength: 1, maxLength: 256 }),
+          ModelCapabilityOverrideSchema,
+          { maxProperties: 1_000 },
+        ),
       ),
       reasoning: ReasoningEffortSchema,
     },
@@ -488,11 +504,24 @@ export const ConfigSetRequestSchema = Type.Union([
           Type.Null(),
         ]),
       ),
+      compactThresholdTokens: Type.Optional(
+        Type.Union([
+          Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+          Type.Null(),
+        ]),
+      ),
       maxOutputTokens: Type.Optional(
         Type.Union([
           Type.Integer({ minimum: 1, maximum: 10_000_000 }),
           Type.Null(),
         ]),
+      ),
+      modelOverrides: Type.Optional(
+        Type.Record(
+          Type.String({ minLength: 1, maxLength: 256 }),
+          ModelCapabilityOverrideSchema,
+          { maxProperties: 1_000 },
+        ),
       ),
       reasoning: ReasoningEffortSchema,
       limits: PublicConfigSchema.properties.limits,

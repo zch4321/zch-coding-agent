@@ -191,6 +191,7 @@ describe('DeepSeek model catalog', () => {
     provider.modelCatalog = [
       { id: 'deepseek-v4-pro', ownedBy: 'deepseek' },
       { id: 'custom-model' },
+      { id: 'identity-only' },
       {
         id: 'provider-model',
         contextWindowTokens: 200_000,
@@ -199,6 +200,7 @@ describe('DeepSeek model catalog', () => {
     ]
     provider.modelOverrides['custom-model'] = {
       contextWindowTokens: 123_456,
+      compactThresholdTokens: 90_000,
       maxOutputTokens: 7_000,
     }
     const profiles = resolveModelProfiles(toPublicConfig(internal, true))
@@ -209,17 +211,28 @@ describe('DeepSeek model catalog', () => {
           id: 'deepseek-v4-pro',
           capabilitySource: 'builtin',
           contextWindowTokens: 1_000_000,
+          compactThresholdTokens: 492_800,
+          maxOutputTokens: 384_000,
         }),
         expect.objectContaining({
           id: 'custom-model',
           capabilitySource: 'override',
           contextWindowTokens: 123_456,
+          compactThresholdTokens: 90_000,
           maxOutputTokens: 7_000,
+        }),
+        expect.objectContaining({
+          id: 'identity-only',
+          capabilitySource: 'default',
+          contextWindowTokens: 64_000,
+          compactThresholdTokens: 44_646,
+          maxOutputTokens: 8_192,
         }),
         expect.objectContaining({
           id: 'provider-model',
           capabilitySource: 'provider',
           contextWindowTokens: 200_000,
+          compactThresholdTokens: 108_800,
           maxOutputTokens: 64_000,
         }),
       ]),

@@ -14,6 +14,7 @@ import {
   YOLO_NOTICE_VERSION,
 } from '../../shared/notices'
 import { DEFAULT_ASSISTANT_PREFERENCES } from '../../shared/system-prompts'
+import { resolveModelTokenSettings } from '../../shared/model-settings'
 import { nowNotice, toUiRememberedRules } from './config-mapping'
 import type { UiModelProfile, UiRememberedRule } from './agent-types'
 import { DEFAULT_PROVIDER_FORM, providerFormSignature } from './provider-form'
@@ -21,6 +22,7 @@ import { DEFAULT_PROVIDER_FORM, providerFormSignature } from './provider-form'
 function providerModelProfiles(
   provider: ProviderPublicConfig | undefined,
   fallbackContextWindowTokens: number,
+  compactTriggerPercent: number,
 ): UiModelProfile[] {
   if (!provider) return []
 
@@ -33,24 +35,28 @@ function providerModelProfiles(
   return [...ids].map((id) => {
     const catalogModel = provider.modelCatalog.find((model) => model.id === id)
     const override = provider.modelOverrides[id]
+    const contextWindowTokens =
+      override?.contextWindowTokens ??
+      catalogModel?.contextWindowTokens ??
+      fallbackContextWindowTokens
+    const tokenSettings = resolveModelTokenSettings({
+      contextWindowTokens,
+      maxOutputTokens:
+        override?.maxOutputTokens ?? catalogModel?.maxOutputTokens,
+      compactThresholdTokens: override?.compactThresholdTokens,
+      compactTriggerPercent,
+    })
     return {
       id,
       ownedBy: catalogModel?.ownedBy,
       availability: catalogModel ? 'provider' : 'custom',
-      capabilitySource: override?.contextWindowTokens
-        ? 'override'
-        : catalogModel?.contextWindowTokens
-          ? 'provider'
-          : 'default',
-      contextWindowTokens:
-        override?.contextWindowTokens ??
-        catalogModel?.contextWindowTokens ??
-        fallbackContextWindowTokens,
-      ...(override?.maxOutputTokens
-        ? { maxOutputTokens: override.maxOutputTokens }
-        : catalogModel?.maxOutputTokens
-          ? { maxOutputTokens: catalogModel.maxOutputTokens }
-          : {}),
+      capabilitySource:
+        override && Object.keys(override).length > 0
+          ? 'override'
+          : catalogModel?.contextWindowTokens
+            ? 'provider'
+            : 'default',
+      ...tokenSettings,
     }
   })
 }
@@ -110,7 +116,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     modelCatalogFetchedAt: undefined as string | undefined,
     modelCatalogStale: true,
     modelCatalogLoading: false,
-    modelOverrides: {} as ProviderPublicConfig['modelOverrides'],
     limitsConfig: undefined as PublicConfig['limits'] | undefined,
     limitsSaving: false,
     limitsSaveStatus: '',
@@ -230,7 +235,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     providerDirty: (state) =>
       Boolean(
         state.providerForm.apiKey.trim() ||
-        providerFormSignature(state.providerForm) !==
+        providerFormSignature(state.providerForm, state.modelProfiles) !==
           state.providerSavedSignature,
       ),
     providerRefreshAvailable: (state) =>
@@ -267,10 +272,11 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.providerForm.model = provider.model
       this.providerForm.reasoning = provider.reasoning
       this.providerForm.apiKey = ''
-      this.modelOverrides = cloneJson(provider.modelOverrides)
+      const limits = config?.limits ?? this.limitsConfig
       this.modelProfiles = providerModelProfiles(
         provider,
-        (config?.limits ?? this.limitsConfig)?.maxContextTokens ?? 64_000,
+        limits?.maxContextTokens ?? 64_000,
+        limits?.autoCompactTriggerPercent ?? 80,
       )
       this.modelCatalogFetchedAt = provider.modelCatalogFetchedAt
       this.modelCatalogStale =
@@ -278,13 +284,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         Date.now() - new Date(provider.modelCatalogFetchedAt).getTime() >
           24 * 60 * 60_000
 
-      const limits = config?.limits ?? this.limitsConfig
       if (limits) {
         this.providerForm.tokenEstimationMode = limits.tokenEstimation.mode
         this.providerForm.bytesPerToken = limits.tokenEstimation.bytesPerToken
       }
-
-      this.syncModelOverride(provider.model)
     },
     applyConfig(config: PublicConfig, sections: ConfigSection[] = ['all']) {
       const includes = (section: ConfigSection) =>
@@ -327,7 +330,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
 
       if (includes('providers') || includes('limits')) {
         this.hydrateSelectedProviderForm(config)
-        this.providerSavedSignature = providerFormSignature(this.providerForm)
+        this.providerSavedSignature = providerFormSignature(
+          this.providerForm,
+          this.modelProfiles,
+        )
       }
 
       if (includes('permission')) {
@@ -397,12 +403,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.assistantSaveStatus = 'saved'
       return true
     },
-    syncModelOverride(model: string) {
-      const override = this.modelOverrides[model]
-      this.providerForm.contextWindowTokens =
-        override?.contextWindowTokens ?? null
-      this.providerForm.maxOutputTokens = override?.maxOutputTokens ?? null
-    },
     async selectProviderForEditing(providerId: string, refreshModels = true) {
       if (!this.providers.some((provider) => provider.id === providerId)) {
         return false
@@ -410,17 +410,22 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
 
       this.selectedProviderId = providerId
       this.hydrateSelectedProviderForm()
-      this.providerSavedSignature = providerFormSignature(this.providerForm)
+      this.providerSavedSignature = providerFormSignature(
+        this.providerForm,
+        this.modelProfiles,
+      )
       if (refreshModels) await this.loadProviderModels(false)
       return true
     },
     resetSelectedProviderDraft() {
       this.hydrateSelectedProviderForm()
-      this.providerSavedSignature = providerFormSignature(this.providerForm)
+      this.providerSavedSignature = providerFormSignature(
+        this.providerForm,
+        this.modelProfiles,
+      )
     },
     setProviderModel(model: string) {
       this.providerForm.model = model
-      this.syncModelOverride(model)
 
       if (!this.modelProfiles.some((candidate) => candidate.id === model)) {
         const fallbackContext = this.limitsConfig?.maxContextTokens ?? 64_000
@@ -428,9 +433,54 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           id: model,
           availability: 'custom',
           capabilitySource: 'default',
-          contextWindowTokens: fallbackContext,
+          ...resolveModelTokenSettings({
+            contextWindowTokens: fallbackContext,
+            compactTriggerPercent:
+              this.limitsConfig?.autoCompactTriggerPercent ?? 80,
+          }),
         })
+        this.modelProfiles.sort((left, right) =>
+          left.id.localeCompare(right.id),
+        )
       }
+    },
+    /** Updates one model row while preserving a usable prompt budget. */
+    updateModelConfiguration(
+      modelId: string,
+      field:
+        | 'contextWindowTokens'
+        | 'compactThresholdTokens'
+        | 'maxOutputTokens',
+      value: number | null,
+    ) {
+      if (value === null || !Number.isInteger(value)) return
+      const model = this.modelProfiles.find(
+        (candidate) => candidate.id === modelId,
+      )
+      if (!model) return
+
+      if (field === 'contextWindowTokens') {
+        model.contextWindowTokens = Math.min(10_000_000, Math.max(2_048, value))
+      } else if (field === 'maxOutputTokens') {
+        model.maxOutputTokens = Math.min(
+          Math.max(1, model.contextWindowTokens - 1_024),
+          Math.max(1, value),
+        )
+      } else {
+        model.compactThresholdTokens = Math.max(1_024, value)
+      }
+
+      Object.assign(
+        model,
+        resolveModelTokenSettings({
+          contextWindowTokens: model.contextWindowTokens,
+          compactThresholdTokens: model.compactThresholdTokens,
+          maxOutputTokens: model.maxOutputTokens,
+          compactTriggerPercent:
+            this.limitsConfig?.autoCompactTriggerPercent ?? 80,
+        }),
+      )
+      model.capabilitySource = 'override'
     },
     /** Loads cached profiles or refreshes the saved Provider model catalog. */
     async loadProviderModels(refresh: boolean, reportError = refresh) {
@@ -439,6 +489,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       if (!bridge || this.modelCatalogLoading) return false
       this.modelCatalogLoading = true
       const providerId = this.selectedProviderId
+      const draftSignature = providerFormSignature(
+        this.providerForm,
+        this.modelProfiles,
+      )
 
       try {
         const result = await bridge.listProviderModels({
@@ -474,9 +528,19 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         }
 
         if (providerId !== this.selectedProviderId) return false
+        if (
+          providerFormSignature(this.providerForm, this.modelProfiles) !==
+          draftSignature
+        ) {
+          return true
+        }
         this.modelProfiles = result.value.models
         this.modelCatalogFetchedAt = result.value.fetchedAt
         this.modelCatalogStale = result.value.stale
+        this.providerSavedSignature = providerFormSignature(
+          this.providerForm,
+          this.modelProfiles,
+        )
         return true
       } finally {
         this.modelCatalogLoading = false
@@ -613,7 +677,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     },
     async saveProvider() {
       const bridge = window.agentApi
-      if (!bridge || this.providerSaving) return false
+      if (!bridge || this.providerSaving || this.modelCatalogLoading) {
+        return false
+      }
 
       this.error = ''
       this.providerSaveStatus = ''
@@ -632,8 +698,16 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           kind: 'provider-settings',
           baseURL: draft.baseURL,
           model: draft.model,
-          contextWindowTokens: draft.contextWindowTokens,
-          maxOutputTokens: draft.maxOutputTokens,
+          modelOverrides: Object.fromEntries(
+            this.modelProfiles.map((model) => [
+              model.id,
+              {
+                contextWindowTokens: model.contextWindowTokens,
+                compactThresholdTokens: model.compactThresholdTokens,
+                maxOutputTokens: model.maxOutputTokens,
+              },
+            ]),
+          ),
           reasoning: draft.reasoning,
           providerId: draft.providerId,
           label: draft.label,

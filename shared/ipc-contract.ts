@@ -142,9 +142,11 @@ const ModelProfileSchema = Type.Object(
       minimum: 1_024,
       maximum: 10_000_000,
     }),
-    maxOutputTokens: Type.Optional(
-      Type.Integer({ minimum: 1, maximum: 10_000_000 }),
-    ),
+    compactThresholdTokens: Type.Integer({
+      minimum: 1_024,
+      maximum: 10_000_000,
+    }),
+    maxOutputTokens: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
   },
   { additionalProperties: false },
 )

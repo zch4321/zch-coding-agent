@@ -48,7 +48,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 - **可审批**：每个可能产生副作用的工具调用前，必须经过权限管线（§3）。
 - **状态明确**：同一 Session 同一时间只允许一个活动 Run；运行中收到新消息时默认拒绝，但切换到其他对话不取消后台 Run。
 - **协议完整**：LLM 一次返回多个工具调用时，每个调用都必须回填一个结果；拒绝、取消、超时也以结构化工具结果回填，不能静默丢失。
-- **有界资源、默认不限 React 步数**：单次和单个 run 的工具输出预算、累计上下文预算继续受限；全应用 `maxConcurrentRuns` 范围为 `1..32`、默认 4，达到上限的新 run 直接拒绝。每个 run 同时最多一个 provider call，不设置独立 provider 并发上限，也不对主聊天流设置默认总墙钟超时。`maxStepsPerRun = 0` 表示 React loop 不限步数并作为默认值；有界自动化部署仍可配置正整数上限。上下文达到当前模型 prompt budget 的 `autoCompactTriggerPercent`（默认 80%）时，在安全边界自动压缩旧历史；字节、行数/结果数与估算 token 任一上限先到即截断，并向用户和模型返回续读信息。
+- **有界资源、默认不限 React 步数**：单次和单个 run 的工具输出预算、累计上下文预算继续受限；全应用 `maxConcurrentRuns` 范围为 `1..32`、默认 4，达到上限的新 run 直接拒绝。每个 run 同时最多一个 provider call，不设置独立 provider 并发上限，也不对主聊天流设置默认总墙钟超时。`maxStepsPerRun = 0` 表示 React loop 不限步数并作为默认值；有界自动化部署仍可配置正整数上限。估算输入达到当前模型的绝对 `compactThresholdTokens` 时，在安全边界自动压缩旧历史；未显式配置的模型按可用 prompt budget 的 `autoCompactTriggerPercent`（默认 80%）生成阈值。字节、行数/结果数与估算 token 任一上限先到即截断，并向用户和模型返回续读信息。
 - **可回放**：调试日志开启时，循环的请求、响应、流式事件和工具结果必须完整保存，可确定性离线回放原会话；重新请求模型属于单独的“重放请求”，不保证复现随机输出（§5）。
 - **Prompt Harness**：稳定 base instructions、runtime context、AGENTS、selected context、orchestration request 和 compact history 作为可审计 prompt layers 进入模型请求；runtime context 必须包含 workspace writer 的 `available | writer | readonly_locked` 快照，其他 writer 存在时明确当前 session 只读、禁止副作用并要求 writer 结束后重读文件。状态变化通过 hash 追加新 layer，不修改历史。用户可编辑内容是 assistant preferences，不替换 base harness instructions。
 - **计划审阅门**：模型可用 `plan_set` 创建或替换 Plan，默认进入 `awaiting_review` 并停止执行；UI 批准/拒绝会直接记录顶层 Plan 状态并写入 trace，自然语言批准/拒绝也可由模型通过 `plan_status({status:"active" | "rejected"})` 转成可审计状态。Plan review 不是权限模式，不绕过也不替代工具审批。
@@ -136,9 +136,9 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 生产路径实现互不继承的 `DeepSeekProvider`、`GenericChatCompletionsProvider`、`GenericResponsesProvider` 与 `GenericAnthropicProvider`。三种通用兜底分别对应 Chat Completions、Responses 和 Anthropic API style；Google 和其他具体厂商按实际使用需求分别实现，只共享 HTTP/SSE、bounds、tool-call 拼接等纯函数。
 
-模型目录查询保持独立服务。OpenAI-compatible API 使用 Bearer `GET /models`，Anthropic 使用 `x-api-key`、版本 header 和有界分页 `GET /models`。目录解析只能采用协议明确返回的字段：Anthropic 的 `max_input_tokens/max_tokens` 归一化为模型容量；OpenAI 与 DeepSeek 的标准列表当前只保证模型身份信息，不能臆测容量。设置页合并 Provider 返回、应用内置模型资料和用户自定义模型，并始终允许手工输入；不得抓取 Provider 文档 HTML 推断运行时能力。
+模型目录查询保持独立服务。OpenAI-compatible API 使用 Bearer `GET /models`，Anthropic 使用 `x-api-key`、版本 header 和有界分页 `GET /models`。目录解析只能采用协议明确返回的字段：Anthropic 的 `max_input_tokens/max_tokens` 归一化为模型容量；OpenAI 与 DeepSeek 的标准列表当前只保证模型身份信息，不能臆测容量。设置页合并 Provider 返回、应用内置模型资料和用户自定义模型，并始终允许手工输入；不得抓取 Provider 文档 HTML 推断运行时能力。Provider 编辑页在底部以模型列表展示每个模型的“最大上下文、压缩阈值、最大输出长度”，目录没有返回的数值必须自动填入应用默认值而不是显示空配置。
 
-模型能力采用 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值`。未知模型默认按 64K 上下文管理并明确标记“能力未知”。模型目录请求失败时保留上次成功缓存和当前手工配置。
+模型能力采用 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值`。未知模型默认按 64K 上下文管理，最大输出采用安全默认值，压缩阈值默认为可用 prompt budget 的 80%，并明确标记“能力未知”。三项配置按模型保存并随 route revision 冻结；模型目录请求失败时保留上次成功缓存和当前手工配置。
 
 token 预算通过可替换估算器计算。支持 Provider tokenizer、保守估算和用户自定义 `bytesPerToken`；自定义值按 Provider/模型保存。估算只负责上下文规划，所有工具仍必须执行不可关闭的字节、行数/结果数硬上限。Provider 返回的真实 usage 用于记录与校准，不作为事前边界保证。
 

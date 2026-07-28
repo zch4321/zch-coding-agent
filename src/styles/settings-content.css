@@ -79,6 +79,85 @@
   font-size: 16px;
 }
 
+.provider-detail-toolbar {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.provider-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.provider-model-settings {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.provider-model-settings h4,
+.provider-model-settings p {
+  margin: 0;
+}
+
+.provider-model-settings h4 {
+  font-size: 14px;
+}
+
+.provider-model-settings p {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.provider-model-settings-header,
+.provider-model-settings-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(130px, 1fr));
+  align-items: center;
+  gap: 10px;
+}
+
+.provider-model-settings-header {
+  padding: 0 13px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.provider-model-settings-row {
+  width: 100%;
+}
+
+.provider-model-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.provider-model-name strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-model-value {
+  display: block;
+  min-width: 0;
+}
+
+.provider-model-value > span {
+  display: none;
+}
+
+.provider-model-value .n-input-number {
+  width: 100%;
+}
+
 .settings-footnote {
   margin: 0;
 }
@@ -115,6 +194,45 @@
 }
 
 @media (max-width: 720px) {
+  .provider-detail-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .provider-detail-toolbar {
+    justify-items: stretch;
+  }
+
+  .provider-detail-actions {
+    justify-content: flex-start;
+  }
+
+  .provider-model-settings-header {
+    display: none;
+  }
+
+  .provider-model-settings-row {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+
+  .provider-model-name {
+    padding-bottom: 2px;
+  }
+
+  .provider-model-value {
+    display: grid;
+    grid-template-columns: minmax(130px, 0.7fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 9px;
+  }
+
+  .provider-model-value > span {
+    display: block;
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
   .archived-session-row {
     align-items: stretch;
     flex-direction: column;

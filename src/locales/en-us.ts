@@ -364,12 +364,14 @@ const enUS = {
       'Provider type selects an independent implementation; the three Generic types are fallbacks for Chat Completions, Responses, and Anthropic APIs.',
     baseUrl: 'Base URL',
     mainModel: 'Main model',
-    contextOverride: 'Context window (optional override)',
-    contextOverrideHint:
-      'Used for local context budgets and compaction. Leave blank to use provider, built-in, or global defaults.',
-    outputOverride: 'Maximum output tokens (optional override)',
-    outputOverrideHint:
-      'Limits one generation and reserves output context. Leave blank to use provider, built-in, or safe defaults.',
+    modelSettings: 'Model configuration',
+    modelSettingsHint:
+      'Every model uses explicit token settings. Provider metadata, built-in data, or conservative defaults are filled automatically and saved with the Provider.',
+    modelName: 'Model',
+    maximumContext: 'Maximum context',
+    compressionThreshold: 'Compression threshold',
+    maximumOutputLength: 'Maximum output length',
+    mainModelTag: 'Main model',
     tokenEstimation: 'Token estimation',
     bytesPerToken: 'UTF-8 bytes per token',
     reasoning: 'Reasoning effort',
@@ -389,18 +391,17 @@ const enUS = {
     apiKey: 'API key',
     apiKeyPlaceholder: 'Enter a new key',
     modelRefreshCredentialHint:
-      'Save an API key below before refreshing the model catalog.',
+      'Save an API key before refreshing the model catalog.',
     modelRefreshUnsavedHint:
-      'Save Provider changes below before refreshing the model catalog.',
-    saveProvider: 'Save provider',
+      'Use the button above to save Provider changes before refreshing the model catalog.',
+    saveProvider: 'Save Provider',
     saveWebSearch: 'Save web search',
     saved: 'Saved',
     tokenConservative: 'Conservative default',
     tokenCustom: 'Custom UTF-8 bytes/token',
     modelProfile:
-      '{availability} model · {source} capabilities · {tokens} effective context tokens',
+      '{availability} model · {source} capabilities · {tokens} maximum context tokens',
     customModel: 'Custom model with conservative capability defaults.',
-    useDefault: 'Use model/default value',
     tokenHint:
       'Token estimation plans context usage. Byte, line and result limits remain enforced independently.',
     credentialEnv: 'Using DEEPSEEK_API_KEY from the main-process environment.',
