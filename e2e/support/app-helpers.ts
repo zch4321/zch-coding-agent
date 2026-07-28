@@ -91,8 +91,6 @@ export async function configureApp(input: {
         contextWindowTokens: null,
         maxOutputTokens: null,
         reasoning: 'off',
-        approverProviderId: 'deepseek',
-        approverModel: 'e2e-functional-model',
         limits: current.value.config.limits,
         apiKey: 'e2e-provider-key',
       })
@@ -101,6 +99,20 @@ export async function configureApp(input: {
           ok: false,
           step: 'provider-settings',
           message: provider.error.message,
+        }
+      }
+
+      const approval = await api.setConfig({
+        version: 1,
+        kind: 'approval',
+        approverProviderId: 'deepseek',
+        approverModel: 'e2e-functional-model',
+      })
+      if (!approval.ok) {
+        return {
+          ok: false,
+          step: 'approval',
+          message: approval.error.message,
         }
       }
 

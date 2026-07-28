@@ -320,7 +320,16 @@ const zhCN = {
       '永久删除“{title}”的本地会话、消息和文件变更审计？此操作不可撤销。工作区文件不会被改动；Trace 日志仍在“日志”设置中单独管理。',
     loadMoreArchived: '加载更多归档对话',
     providerTitle: '模型服务',
-    providerHint: '配置主模型和自动审批模型。',
+    providerHint: '配置可复用的模型服务、默认主模型和凭据。',
+    approvalTitle: '自动审批',
+    approvalHint:
+      '这是独立于 Provider 卡片的全局路由。所选 Provider 只负责提供协议、服务地址和凭据。',
+    approvalCredentialReady: '所选 Provider 已配置凭据。',
+    approvalCredentialMissing:
+      '所选 Provider 尚未配置凭据；运行时会回退到人工审批。',
+    approvalModelHint:
+      '模型列表来自所选 Provider 的目录，也可以直接输入自定义模型。',
+    saveApproval: '保存自动审批',
     addProvider: '新增 Provider',
     providerActions: '操作',
     defaultProvider: '默认',
@@ -362,6 +371,9 @@ const zhCN = {
     approverModel: '自动审批模型',
     apiKey: 'API Key',
     apiKeyPlaceholder: '输入新的 Key',
+    modelRefreshCredentialHint: '输入或保存 API Key 后才能刷新模型目录。',
+    modelRefreshSavesHint: '刷新前会先保存当前 Provider 的修改。',
+    saveAndRefreshModels: '保存并刷新',
     saveProvider: '保存模型服务',
     saveWebSearch: '保存网页搜索',
     saved: '已保存',

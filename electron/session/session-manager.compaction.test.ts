@@ -348,8 +348,6 @@ describe('SessionManager compaction', () => {
       reasoning: 'off',
       contextWindowTokens: 160_000,
       maxOutputTokens: 8_000,
-      approverProviderId: 'deepseek',
-      approverModel: 'deepseek-v4-flash',
       limits: {
         ...current.limits,
         autoCompactTriggerPercent: 1,

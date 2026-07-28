@@ -53,6 +53,15 @@ export async function startFakeProvider(): Promise<FakeProvider> {
   let secondResponsePromise: Promise<void> | undefined
   const server = createServer(async (request, response) => {
     try {
+      if (request.method === 'GET' && request.url === '/models') {
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(
+          JSON.stringify({
+            data: [{ id: providerModel, owned_by: 'e2e' }],
+          }),
+        )
+        return
+      }
       if (request.method !== 'POST' || request.url !== '/chat/completions') {
         response.writeHead(404, { 'content-type': 'application/json' })
         response.end(JSON.stringify({ error: 'not found' }))

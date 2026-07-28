@@ -449,15 +449,21 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.2 Provider
 
 - Base URL。
-- 主模型：鉴权调用 `/models` 刷新可用模型，使用可搜索且可输入的下拉框；失败时保留缓存与手工值。
+- 主模型：鉴权调用 `/models` 刷新可用模型，使用可搜索且可输入的下拉框；失败时保留缓存与手工值。刷新可使用已保存凭据或当前 API Key 草稿；存在 Provider 草稿时必须先保存再请求，不能用旧 route 刷新后覆盖用户修改。
 - 模型能力：显示目录/内置/自定义来源；上下文长度和最大输出允许用户覆盖，未知模型显示保守默认值提示。
 - Token 估算：默认保守估算，可切换为自定义 `bytesPerToken`；说明该值只影响预算估算，不能关闭字节/行数硬限制。
 - Reasoning 开关。
 - API Key 配置状态、更新和清除。
-- Auto approver Provider/模型。
 - renderer 不读取或回显已保存 API Key。
 
-### 10.3 Permissions
+### 10.3 Auto approval
+
+- Auto approval 是全局路由配置，不属于任一 Provider 卡片草稿，使用独立保存动作。
+- 配置引用一个已存在的 Provider 实例以复用 `providerType/baseURL/credential`，并独立选择审批模型。
+- 审批模型候选来自所选 Provider 的模型目录和自定义模型，不得错误复用当前正在编辑的 Provider 模型列表。
+- Provider 保存不能修改 Auto approval；删除正被审批路由引用的 Provider 时回退到明确的可用 Provider。
+
+### 10.4 Permissions
 
 - 默认权限模式。
 - Sensitive Data：off/warn/confirm。
@@ -467,14 +473,14 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - 每条规则显示 tool、workspace scope、arg constraints、expiry 和来源 call。
 - 支持删除规则，不支持编辑为更宽松的任意 JSON。
 
-### 10.4 Skills
+### 10.5 Skills
 
 - 展示 name、description、source、sha256 短摘要和启用状态。
 - 支持 HTTPS URL、主进程文件选择器安装和手工目录 refresh。
 - 新安装和首次扫描的手工 skill 默认禁用；必须由用户显式启用。
 - 格式错误、重复名称、符号链接和超限文件显示诊断，不中断设置页。
 
-### 10.5 Logging
+### 10.6 Logging
 
 - Trace 开关和独立风险告知。
 - retention days。
@@ -484,7 +490,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - 展示 Provider 原始 usage 派生的 token/cache 指标与 TTFT/总时延；字段缺失时明确显示 `Provider not provided`。
 - 完整事件时间轴、搜索、导出和批量管理属于 Post-MVP。
 
-### 10.6 Session 生命周期
+### 10.7 Session 生命周期
 
 - Settings 不展示 `Start session` / `Close session` 作为主流程按钮。
 - Settings 提供“已归档对话”菜单项：分页列出 archived Session，支持恢复；永久删除使用 Naive UI 确认框，并在存在 fork 子 Session 时由 backend 拒绝。

@@ -79,6 +79,13 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
+function approvalSignature(form: {
+  providerId: string
+  model: string
+}): string {
+  return `${form.providerId}|${form.model}`
+}
+
 export const useAgentSettingsStore = defineStore('agent-settings', {
   state: () => ({
     error: '',
@@ -103,6 +110,13 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     providerSavedSignature: providerFormSignature(DEFAULT_PROVIDER_FORM),
     providerSaving: false,
     providerSaveStatus: '',
+    approvalForm: {
+      providerId: 'deepseek',
+      model: 'deepseek-v4-flash',
+    },
+    approvalSavedSignature: 'deepseek|deepseek-v4-flash',
+    approvalSaving: false,
+    approvalSaveStatus: '',
     permissionForm: {
       sensitiveMode: 'confirm' as 'off' | 'warn' | 'confirm',
       pathGlobs: '',
@@ -177,6 +191,19 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         label: provider.label,
         value: provider.id,
       })),
+    approvalModelOptions: (state) => {
+      const provider = state.providers.find(
+        (candidate) => candidate.id === state.approvalForm.providerId,
+      )
+      if (!provider) return []
+      const ids = new Set<string>([
+        state.approvalForm.model,
+        provider.model,
+        ...provider.modelCatalog.map((model) => model.id),
+        ...Object.keys(provider.modelOverrides),
+      ])
+      return [...ids].map((id) => ({ label: id, value: id }))
+    },
     providerCardSummaries: (state) =>
       state.providers.map((provider) => ({
         id: provider.id,
@@ -198,6 +225,15 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         providerFormSignature(state.providerForm) !==
           state.providerSavedSignature,
       ),
+    providerRefreshAvailable: (state) =>
+      Boolean(
+        state.providerForm.apiKey.trim() ||
+        state.providers.find(
+          (provider) => provider.id === state.selectedProviderId,
+        )?.credentialConfigured,
+      ),
+    approvalDirty: (state) =>
+      approvalSignature(state.approvalForm) !== state.approvalSavedSignature,
     webSearchDirty: (state) =>
       Boolean(
         state.webSearchForm.apiKey.trim() ||
@@ -235,12 +271,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         Date.now() - new Date(provider.modelCatalogFetchedAt).getTime() >
           24 * 60 * 60_000
 
-      const approval = config?.approval
-      if (approval) {
-        this.providerForm.approverProviderId = approval.approverProviderId
-        this.providerForm.approverModel = approval.approverModel
-      }
-
       const limits = config?.limits ?? this.limitsConfig
       if (limits) {
         this.providerForm.tokenEstimationMode = limits.tokenEstimation.mode
@@ -275,9 +305,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       }
 
       if (includes('approval')) {
-        this.providerForm.approverProviderId =
-          config.approval.approverProviderId
-        this.providerForm.approverModel = config.approval.approverModel
+        this.approvalForm.providerId = config.approval.approverProviderId
+        this.approvalForm.model = config.approval.approverModel
+        this.approvalSavedSignature = approvalSignature(this.approvalForm)
       }
 
       if (includes('limits')) {
@@ -288,7 +318,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           config.limits.tokenEstimation.bytesPerToken
       }
 
-      if (includes('providers') || includes('approval') || includes('limits')) {
+      if (includes('providers') || includes('limits')) {
         this.hydrateSelectedProviderForm(config)
         this.providerSavedSignature = providerFormSignature(this.providerForm)
       }
@@ -398,7 +428,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     async loadProviderModels(refresh: boolean) {
       const bridge = window.agentApi
 
-      if (!bridge || this.modelCatalogLoading) return
+      if (!bridge || this.modelCatalogLoading) return false
       this.modelCatalogLoading = true
       const providerId = this.selectedProviderId
 
@@ -410,7 +440,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         })
         if (!result.ok) {
           if (refresh) this.error = result.error.message
-          return
+          return false
         }
 
         if (refresh) {
@@ -423,13 +453,24 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           }
         }
 
-        if (providerId !== this.selectedProviderId) return
+        if (providerId !== this.selectedProviderId) return false
         this.modelProfiles = result.value.models
         this.modelCatalogFetchedAt = result.value.fetchedAt
         this.modelCatalogStale = result.value.stale
+        return true
       } finally {
         this.modelCatalogLoading = false
       }
+    },
+    async refreshSelectedProviderModels() {
+      if (!this.providerRefreshAvailable) {
+        this.error =
+          'Save or enter a Provider credential before refreshing models.'
+        return false
+      }
+      this.error = ''
+      if (this.providerDirty && !(await this.saveProvider())) return false
+      return this.loadProviderModels(true)
     },
     async setActiveProvider(providerId: string) {
       const bridge = window.agentApi
@@ -473,8 +514,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         baseURL: 'https://api.example.com/v1',
         model: 'model-name',
         reasoning: 'off',
-        approverProviderId: this.providerForm.approverProviderId,
-        approverModel: this.providerForm.approverModel,
         limits: cloneJson(limits),
       })
 
@@ -484,7 +523,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       }
 
       this.selectedProviderId = providerId
-      this.applyConfig(result.value.config, ['providers', 'approval', 'limits'])
+      this.applyConfig(result.value.config, ['providers', 'limits'])
       return true
     },
     async copyProvider(sourceProviderId?: string) {
@@ -568,8 +607,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           providerId: draft.providerId,
           label: draft.label,
           providerType: draft.providerType,
-          approverProviderId: draft.approverProviderId,
-          approverModel: draft.approverModel,
           limits: {
             ...limits,
             tokenEstimation: {
@@ -583,16 +620,44 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           this.error = saved.error.message
           return false
         }
-        this.applyConfig(saved.value.config, [
-          'providers',
-          'approval',
-          'limits',
-        ])
+        this.applyConfig(saved.value.config, ['providers', 'limits'])
         this.providerForm.apiKey = ''
         this.providerSaveStatus = 'Saved'
         return true
       } finally {
         this.providerSaving = false
+      }
+    },
+    setApprovalProvider(providerId: string) {
+      const provider = this.providers.find(
+        (candidate) => candidate.id === providerId,
+      )
+      if (!provider) return
+      this.approvalForm.providerId = provider.id
+      this.approvalForm.model = provider.model
+      this.approvalSaveStatus = ''
+    },
+    async saveApproval() {
+      const bridge = window.agentApi
+      if (!bridge || this.approvalSaving) return false
+      this.approvalSaving = true
+      this.approvalSaveStatus = ''
+      try {
+        const result = await bridge.setConfig({
+          version: IPC_VERSION,
+          kind: 'approval',
+          approverProviderId: this.approvalForm.providerId,
+          approverModel: this.approvalForm.model,
+        })
+        if (!result.ok) {
+          this.error = result.error.message
+          return false
+        }
+        this.applyConfig(result.value.config, ['approval'])
+        this.approvalSaveStatus = 'saved'
+        return true
+      } finally {
+        this.approvalSaving = false
       }
     },
     async clearCredential() {

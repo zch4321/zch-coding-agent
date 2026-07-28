@@ -117,9 +117,13 @@ describe('SessionManager approvals', () => {
       baseURL: 'https://api.example/v1',
       model: 'main-model',
       reasoning: 'off',
+      limits: current.limits,
+    })
+    await store.update({
+      version: 1,
+      kind: 'approval',
       approverProviderId: 'deepseek',
       approverModel: 'approval-model',
-      limits: current.limits,
     })
     const provider = new ScriptedCommandProvider()
     const approvalBodies: JsonValue[] = []

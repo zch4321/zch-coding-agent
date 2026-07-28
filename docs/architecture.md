@@ -540,6 +540,8 @@ interface CompletedAssistantTurn {
 
 Provider 实现保持扁平：`DeepSeekProvider`、`GenericChatCompletionsProvider`、`GenericResponsesProvider` 和 `GenericAnthropicProvider` 都直接实现 `ModelProvider`，互不继承。允许共享 HTTP/SSE、bounds、tool-call 拼接、hash/timing 等纯函数，但不引入 BaseProvider、协议方言层或任意 capability 组合。Provider factory 只按 `providerType` 做穷举选择；模型目录查询是独立服务，不扩充核心接口。
 
+Auto approval 是独立于 Provider 编辑表单的全局 route selection：`approval.approverProviderId` 只引用一个 Provider 配置实例以取得 `providerType/baseURL/credential`，`approval.approverModel` 单独覆盖模型。它由独立配置命令保存；创建、复制或保存 Provider 不能改写 approval，只有删除当前引用 Provider 时才显式切换到 fallback。这样避免复制第二套 endpoint/credential 配置，同时保证审批模型不跟随当前 Provider 卡片草稿漂移。
+
 三个通用兜底 type 为 `generic.chat-completions`、`generic.responses` 和 `generic.anthropic`。Responses 固定 `store = false`，不使用 `previous_response_id` 或 Conversations API；完整 output items（含 encrypted reasoning）进入 `responses.output-items.v1` continuation 并由本地 history 精确回放。Anthropic 的 high/max 使用 adaptive thinking 与 `output_config.effort`；完整 thinking、redacted thinking、signature 和 tool-use blocks 进入 `anthropic.message-content.v1` continuation。两者的 Provider Type/hash 不匹配均回退 canonical replay，同类型损坏 payload 明确报错。
 
 Structured output 是携带 JSON Schema 的 provider-neutral 请求。Responses 编译为 `text.format`，Anthropic 编译为 `output_config.format`；DeepSeek 与 Generic Chat 为保持现有兼容行为继续降级成 `json_object`，Application 仍执行最终 schema 校验。当前所有 Provider 都把 canonical tool-result part 数组整体 JSON 编码到各自 wire tool-result 字段；模型会看到带类型标签的内部 part 结构，golden test 固定该行为，后续若改投影必须作为显式 wire 行为变更。

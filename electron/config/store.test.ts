@@ -531,9 +531,15 @@ describe('ConfigStore', () => {
     })
   })
 
-  it('commits provider settings and an optional credential together', async () => {
+  it('commits provider settings without rewriting global approval', async () => {
     const { configStore } = await createStores()
     const limits = configStore.getPublicConfig().limits
+    await configStore.update({
+      version: 1,
+      kind: 'approval',
+      approverProviderId: 'deepseek',
+      approverModel: 'model-approver',
+    })
 
     const result = await configStore.update({
       version: 1,
@@ -543,8 +549,6 @@ describe('ConfigStore', () => {
       reasoning: 'off',
       contextWindowTokens: 128_000,
       maxOutputTokens: 8_000,
-      approverProviderId: 'deepseek',
-      approverModel: 'model-approver',
       limits: {
         ...limits,
         tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 2.5 },
@@ -586,8 +590,6 @@ describe('ConfigStore', () => {
       baseURL: 'https://generic.example/v1',
       model: 'generic-chat',
       reasoning: 'off',
-      approverProviderId: 'deepseek',
-      approverModel: 'deepseek-v4-flash',
       limits,
       apiKey: 'generic-secret',
     })

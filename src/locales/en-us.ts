@@ -329,7 +329,17 @@ const enUS = {
       'Permanently delete the local Session, messages, and FileChange audit for “{title}”? This cannot be undone. Workspace files are not modified, and trace logs remain managed separately under Logging.',
     loadMoreArchived: 'Load more archived conversations',
     providerTitle: 'Provider',
-    providerHint: 'Configure the main model and the Auto approval model.',
+    providerHint:
+      'Configure reusable model services, defaults, and credentials.',
+    approvalTitle: 'Auto approval',
+    approvalHint:
+      'This global route is independent of Provider-card edits. The selected Provider supplies only the protocol, endpoint, and credential.',
+    approvalCredentialReady: 'The selected Provider has a credential.',
+    approvalCredentialMissing:
+      'The selected Provider has no credential; runtime falls back to human approval.',
+    approvalModelHint:
+      'Models come from the selected Provider catalog; custom model IDs are also accepted.',
+    saveApproval: 'Save Auto approval',
     addProvider: 'Add provider',
     providerActions: 'Actions',
     defaultProvider: 'Default',
@@ -374,6 +384,11 @@ const enUS = {
     approverModel: 'Auto approver model',
     apiKey: 'API key',
     apiKeyPlaceholder: 'Enter a new key',
+    modelRefreshCredentialHint:
+      'Enter or save an API key before refreshing the model catalog.',
+    modelRefreshSavesHint:
+      'Refreshing first saves the current Provider changes.',
+    saveAndRefreshModels: 'Save and refresh',
     saveProvider: 'Save provider',
     saveWebSearch: 'Save web search',
     saved: 'Saved',

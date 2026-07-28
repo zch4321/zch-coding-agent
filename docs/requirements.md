@@ -318,6 +318,8 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 审批模型只判断动作本身的风险，不判断它是否符合完整用户意图。它不是安全边界：`reason` 来自主模型，可能错误或具有误导性；最终仍受执行不变量和确定性策略限制。
 自动审批模型请求默认超时为 `autoApprovalTimeoutMs = 60000`；超时、无效输出或模型异常一律作为危险信号降级到人工审批，不自动放行。
 
+自动审批路由是独立的全局配置，不属于 Provider 卡片或 Provider 保存事务。它引用一个已配置 Provider 来复用协议、endpoint 和凭据，并独立选择模型；保存任意 Provider 不得隐式覆盖审批路由。若所引用 Provider 不存在或凭据不可用，运行时只记录诊断并回退人工审批。
+
 ### 3.3 执行不变量与风险黑名单
 
 - **Workspace writer** 是审批之前的执行不变量：非只读 run 必须先原子取得 workspace writer；Confirm/Yolo 或人工批准都不能绕过另一个 writer owner。

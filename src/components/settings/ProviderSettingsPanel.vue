@@ -294,6 +294,24 @@ function handleDropdownSelect(key: string | number, providerId: string) {
         <NInput v-model:value="agent.providerForm.baseURL" />
       </label>
       <label class="settings-field">
+        <span>{{ t('settings.apiKey') }}</span>
+        <NInput
+          v-model:value="agent.providerForm.apiKey"
+          type="password"
+          show-password-on="click"
+          :placeholder="t('settings.apiKeyPlaceholder')"
+        />
+        <small>
+          {{
+            agent.selectedCredentialConfigured
+              ? agent.selectedCredentialSource === 'environment'
+                ? t('settings.credentialEnv')
+                : t('settings.credentialStored')
+              : t('settings.credentialNone')
+          }}
+        </small>
+      </label>
+      <label class="settings-field">
         <span>{{ t('settings.mainModel') }}</span>
         <div class="settings-inline">
           <NSelect
@@ -307,10 +325,14 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <NButton
             secondary
             :loading="agent.modelCatalogLoading"
-            :disabled="!agent.selectedCredentialConfigured"
-            @click="agent.loadProviderModels(true)"
+            :disabled="!agent.providerRefreshAvailable"
+            @click="agent.refreshSelectedProviderModels"
           >
-            {{ t('common.refresh') }}
+            {{
+              agent.providerDirty
+                ? t('settings.saveAndRefreshModels')
+                : t('common.refresh')
+            }}
           </NButton>
         </div>
         <small>
@@ -324,6 +346,12 @@ function handleDropdownSelect(key: string | number, providerId: string) {
                 })
               : t('settings.customModel')
           }}
+        </small>
+        <small v-if="!agent.providerRefreshAvailable">
+          {{ t('settings.modelRefreshCredentialHint') }}
+        </small>
+        <small v-else-if="agent.providerDirty">
+          {{ t('settings.modelRefreshSavesHint') }}
         </small>
       </label>
       <div class="settings-inline settings-inline-equal">
@@ -380,41 +408,6 @@ function handleDropdownSelect(key: string | number, providerId: string) {
         />
         <small>
           {{ reasoningHint }}
-        </small>
-      </label>
-      <label class="settings-field">
-        <span>{{ t('settings.approverProvider') }}</span>
-        <NSelect
-          v-model:value="agent.providerForm.approverProviderId"
-          :options="agent.providerOptions"
-          filterable
-        />
-      </label>
-      <label class="settings-field">
-        <span>{{ t('settings.approverModel') }}</span>
-        <NSelect
-          v-model:value="agent.providerForm.approverModel"
-          :options="agent.modelOptions"
-          filterable
-          tag
-        />
-      </label>
-      <label class="settings-field">
-        <span>{{ t('settings.apiKey') }}</span>
-        <NInput
-          v-model:value="agent.providerForm.apiKey"
-          type="password"
-          show-password-on="click"
-          :placeholder="t('settings.apiKeyPlaceholder')"
-        />
-        <small>
-          {{
-            agent.selectedCredentialConfigured
-              ? agent.selectedCredentialSource === 'environment'
-                ? t('settings.credentialEnv')
-                : t('settings.credentialStored')
-              : t('settings.credentialNone')
-          }}
         </small>
       </label>
       <div class="settings-actions">

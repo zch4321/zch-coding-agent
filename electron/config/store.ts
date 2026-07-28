@@ -346,10 +346,6 @@ export class ConfigStore {
         break
       case 'provider-settings': {
         applyProviderUpdate(next, request, { activate: false })
-        next.approval = {
-          approverProviderId: request.approverProviderId,
-          approverModel: request.approverModel,
-        }
         next.limits = structuredClone(request.limits)
 
         if (request.apiKey === undefined) {

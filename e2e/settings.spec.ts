@@ -6,20 +6,30 @@ import {
   launchElectronHarness,
   type ElectronHarness,
 } from './support/electron-harness'
+import {
+  providerApiKey,
+  providerModel,
+  startFakeProvider,
+  type FakeProvider,
+} from './support/fake-provider'
 
 test.describe.serial('Electron settings workflows', () => {
   let harness: ElectronHarness
   let page: Page
   let userDataPath: string
   let workspace: string
+  let fakeProvider: FakeProvider
 
   test.beforeAll(async () => {
+    fakeProvider = await startFakeProvider()
     harness = await launchElectronHarness('agent-e2e-')
     ;({ page, userDataPath, workspace } = harness)
     await expect(page.getByTestId('app-ready')).toBeVisible()
   })
 
-  test.afterAll(async () => disposeElectronHarness(harness))
+  test.afterAll(async () => {
+    await Promise.all([disposeElectronHarness(harness), fakeProvider.close()])
+  })
 
   test('shows assistant preferences, model discovery, and budget controls', async () => {
     await page.reload()
@@ -118,7 +128,18 @@ test.describe.serial('Electron settings workflows', () => {
       page.getByText('通用 Anthropic Messages', { exact: true }),
     ).toBeVisible()
     await page.keyboard.press('Escape')
-    await expect(provider.getByRole('button', { name: '刷新' })).toBeDisabled()
+    await expect(
+      provider.getByText('自动审批模型', { exact: true }),
+    ).toHaveCount(0)
+    const refreshModels = provider.getByRole('button', { name: '刷新' })
+    await expect(refreshModels).toBeDisabled()
+    await provider
+      .locator('.settings-field', { hasText: '基础 URL' })
+      .locator('input')
+      .fill(fakeProvider.origin)
+    await provider.getByPlaceholder('输入新的 Key').fill(providerApiKey)
+    await expect(refreshModels).toBeEnabled()
+    await refreshModels.click()
     await expect(provider.getByText('思考深度', { exact: true })).toBeVisible()
     await expect(provider.locator('.n-input-number')).toHaveCount(3)
 
@@ -126,10 +147,26 @@ test.describe.serial('Electron settings workflows', () => {
       .locator('.settings-field', { hasText: '主模型' })
       .locator('.n-select')
     await modelSelect.click()
+    await expect(
+      page.locator('.n-base-select-option', { hasText: providerModel }),
+    ).toBeVisible()
     await page.keyboard.type('custom-e2e-model')
     await page.keyboard.press('Enter')
     await expect(modelSelect).toContainText('custom-e2e-model')
     await page.keyboard.press('Escape')
+
+    await settingsNavigation.getByRole('menuitem', { name: '自动审批' }).click()
+    const approval = page.locator('.settings-section')
+    await expect(
+      approval.getByRole('heading', { name: '自动审批' }),
+    ).toBeVisible()
+    const approvalModel = approval
+      .locator('.settings-field', { hasText: '自动审批模型' })
+      .locator('.n-select')
+    await approvalModel.click()
+    await page.getByText(providerModel, { exact: true }).click()
+    await approval.getByRole('button', { name: '保存自动审批' }).click()
+    await expect(approval.locator('.settings-save-status')).toHaveText('已保存')
   })
 
   test('manages provider cards through the settings page', async () => {
@@ -152,8 +189,6 @@ test.describe.serial('Electron settings workflows', () => {
         baseURL: 'https://provider.example/v1',
         model: 'e2e-alt-chat',
         reasoning: 'off',
-        approverProviderId: 'deepseek',
-        approverModel: 'deepseek-chat',
         limits: current.value.config.limits,
       })
       return result.ok
@@ -212,13 +247,30 @@ test.describe.serial('Electron settings workflows', () => {
       .click()
     await expect(copyCard).toHaveCount(0)
 
-    const configText = await page.evaluate(async () => {
+    const configSnapshot = await page.evaluate(async () => {
       const api = Reflect.get(window, 'agentApi') as {
-        getConfig(payload: unknown): Promise<unknown>
+        getConfig(payload: unknown): Promise<{
+          value?: {
+            config: {
+              approval: {
+                approverProviderId: string
+                approverModel: string
+              }
+            }
+          }
+        }>
       }
-      return JSON.stringify(await api.getConfig({ version: 1, section: 'all' }))
+      const result = await api.getConfig({ version: 1, section: 'all' })
+      return {
+        text: JSON.stringify(result),
+        approval: result.value?.config.approval,
+      }
     })
-    expect(configText).not.toContain('apiKeyRef')
+    expect(configSnapshot.text).not.toContain('apiKeyRef')
+    expect(configSnapshot.approval).toEqual({
+      approverProviderId: 'deepseek',
+      approverModel: providerModel,
+    })
   })
 
   test('exposes skill management and bounded trace diagnostics in settings', async () => {

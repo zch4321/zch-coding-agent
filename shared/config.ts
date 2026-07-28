@@ -489,8 +489,6 @@ export const ConfigSetRequestSchema = Type.Union([
         ]),
       ),
       reasoning: ReasoningEffortSchema,
-      approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
-      approverModel: Type.String({ minLength: 1, maxLength: 256 }),
       limits: PublicConfigSchema.properties.limits,
       apiKey: Type.Optional(Type.String({ minLength: 1, maxLength: 16_384 })),
     },
