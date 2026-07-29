@@ -15,6 +15,7 @@ import { MessageRepository } from '../persistence/message-repository'
 import { FileChangeRepository } from '../persistence/file-change-repository'
 import { ProjectRepository } from '../persistence/project-repository'
 import { SessionRepository } from '../persistence/session-repository'
+import { SubagentRepository } from '../persistence/subagent-repository'
 import type { AutoApprover } from '../permission/auto-approver'
 import type { ModelProvider } from '../providers/provider'
 import {
@@ -29,6 +30,10 @@ import { DurableRunApplicationService } from './durable-run-application-service'
 import { LiveSessionContextRegistry } from './live-session-context-registry'
 import { ProjectService, type ProjectRuntimeGuard } from './project-service'
 import { SessionService, type SessionRuntimeGuard } from './session-service'
+import { SubagentStateService } from './subagent-state-service'
+import { SubagentExecutionBridge } from '../subagent/execution-bridge'
+import { SubagentExecutionService } from '../subagent/execution-service'
+import { WorkspaceSnapshotService } from '../subagent/workspace-snapshot'
 
 type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
@@ -101,6 +106,7 @@ export async function createBackendRuntime(
   const sessionRepository = new SessionRepository()
   const messageRepository = new MessageRepository()
   const fileChangeRepository = new FileChangeRepository()
+  const subagentRepository = new SubagentRepository()
 
   let liveSessions: LiveSessionContextRegistry | undefined
   const projectGuard: ProjectRuntimeGuard = {
@@ -166,10 +172,20 @@ export async function createBackendRuntime(
     projects: projectRepository,
     onDiagnostic: options.onDiagnostic,
   })
-  const executionState = new DurableExecutionStatePort(sessions)
+  const subagentState = new SubagentStateService({
+    coordinator,
+    sessions: sessionRepository,
+    messages: messageRepository,
+    subagents: subagentRepository,
+  })
+  const executionState = new DurableExecutionStatePort(sessions, subagentState)
+  const subagentBridge = new SubagentExecutionBridge()
+  const snapshots = new WorkspaceSnapshotService(runtimeDataDirectory)
   let runtime: AgentRuntime | undefined
+  let subagentExecution: SubagentExecutionService | undefined
 
   try {
+    await snapshots.initialize()
     runtime = await createAgentRuntime({
       configStore: options.configStore,
       userDataDirectory: runtimeDataDirectory,
@@ -180,8 +196,10 @@ export async function createBackendRuntime(
       eventListeners: options.eventListeners,
       executionState,
       fileChangeExecution: fileChanges,
+      subagentExecution: subagentBridge,
       onDiagnostic: options.onDiagnostic,
     })
+    await subagentState.interruptActive()
     const targetState: { runs?: DurableRunApplicationService } = {}
     liveSessions = new LiveSessionContextRegistry({
       manager: runtime.services.sessions,
@@ -212,6 +230,16 @@ export async function createBackendRuntime(
       registry: liveSessions,
       executionState,
     })
+    subagentExecution = new SubagentExecutionService({
+      configStore: options.configStore,
+      manager: runtime.services.sessions,
+      sessions,
+      executionState,
+      state: subagentState,
+      snapshots,
+      onDiagnostic: options.onDiagnostic,
+    })
+    subagentBridge.bind(subagentExecution)
     targetState.runs = runs
     let disposePromise: Promise<void> | undefined
     return {
@@ -245,6 +273,7 @@ export async function createBackendRuntime(
       dispose() {
         disposePromise ??= disposeBackendRuntime({
           liveSessions,
+          subagentExecution,
           runtime,
           coordinator,
           listeners,
@@ -257,6 +286,7 @@ export async function createBackendRuntime(
     try {
       await settleCleanup([
         () => runtime?.dispose(),
+        () => subagentExecution?.dispose(),
         () => coordinator.close(),
         () => database.close(),
       ])
@@ -273,6 +303,7 @@ export async function createBackendRuntime(
 
 async function disposeBackendRuntime(input: {
   liveSessions?: LiveSessionContextRegistry
+  subagentExecution?: SubagentExecutionService
   runtime?: AgentRuntime
   coordinator: ApplicationStateCoordinator
   listeners: Set<(commit: DurableCommitEnvelope) => void>
@@ -280,6 +311,7 @@ async function disposeBackendRuntime(input: {
 }): Promise<void> {
   await settleCleanup([
     () => input.liveSessions?.dispose(),
+    () => input.subagentExecution?.dispose(),
     () => input.runtime?.dispose(),
     () => input.coordinator.close(),
     () => input.listeners.clear(),

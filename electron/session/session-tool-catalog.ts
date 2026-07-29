@@ -7,6 +7,12 @@ import type { ToolRegistry } from '../tools/tool-registry'
 const CODE_INTELLIGENCE_TOOL_ID_SET = new Set<string>(
   CODE_INTELLIGENCE_TOOL_IDS,
 )
+const GIT_READ_ONLY_TOOL_IDS = new Set([
+  'git_status',
+  'git_diff',
+  'git_log',
+  'git_show',
+])
 
 export interface SessionToolCatalog {
   definitions: ProviderToolDefinition[]
@@ -34,8 +40,20 @@ export async function resolveSessionToolCatalog(input: {
   registry: ToolRegistry
   projectMetadata?: Pick<ProjectMetadataStore, 'get'>
   workspace: string
+  allowedToolIds?: ReadonlySet<string>
+  subagentsEnabled?: boolean
+  gitToolsEnabled?: boolean
+  readOnlyWorkspace?: boolean
 }): Promise<SessionToolCatalog> {
-  const definitions = input.registry.providerDefinitions()
+  let definitions = input.registry
+    .providerDefinitions()
+    .filter(
+      (definition) =>
+        (!input.allowedToolIds || input.allowedToolIds.has(definition.name)) &&
+        (input.subagentsEnabled || definition.name !== 'subagent_run') &&
+        (input.gitToolsEnabled !== false ||
+          !GIT_READ_ONLY_TOOL_IDS.has(definition.name)),
+    )
   if (
     !definitions.some((definition) =>
       CODE_INTELLIGENCE_TOOL_ID_SET.has(definition.name),
@@ -48,17 +66,17 @@ export async function resolveSessionToolCatalog(input: {
   }
 
   const exposeCodeIntelligence = await input.projectMetadata
-    ?.get(input.workspace)
+    ?.get(input.workspace, { readOnly: input.readOnlyWorkspace })
     .then((snapshot) => projectHasCodeIntelligence(snapshot.project))
     .catch(() => false)
-  const visible = exposeCodeIntelligence
+  definitions = exposeCodeIntelligence
     ? definitions
     : definitions.filter(
         (definition) => !CODE_INTELLIGENCE_TOOL_ID_SET.has(definition.name),
       )
 
   return {
-    definitions: visible,
-    names: visible.map((definition) => definition.name),
+    definitions,
+    names: definitions.map((definition) => definition.name),
   }
 }

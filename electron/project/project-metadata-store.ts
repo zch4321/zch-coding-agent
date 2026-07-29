@@ -374,8 +374,11 @@ export class ProjectMetadataStore {
     this.#detector = detector
   }
 
-  /** Loads metadata after validating the workspace and repairing missing default state. */
-  async get(workspace: string): Promise<ProjectMetadataSnapshot> {
+  /** Loads metadata, optionally returning an in-memory default without writing it. */
+  async get(
+    workspace: string,
+    options: { readOnly?: boolean } = {},
+  ): Promise<ProjectMetadataSnapshot> {
     const guard = await this.#guard(workspace)
     const filePath = this.#filePath(guard)
     let project: ProjectModel
@@ -393,7 +396,9 @@ export class ProjectMetadataStore {
         'code' in error &&
         error.code === 'ENOENT'
       ) {
-        project = await this.#createDefault(guard)
+        project = options.readOnly
+          ? defaultModel(guard.workspacePath)
+          : await this.#createDefault(guard)
       } else {
         throw error
       }

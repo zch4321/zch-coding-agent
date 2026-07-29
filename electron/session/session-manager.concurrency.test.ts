@@ -155,13 +155,21 @@ describe('SessionManager M1 workspace concurrency', () => {
     throw new Error('Timed out waiting for the session run to settle')
   }
 
-  it('enforces four active runs and one writer per canonical workspace', async () => {
+  it('enforces the configured active-run limit and one writer per canonical workspace', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-m1-'))
     const workspaceA = path.join(directory, 'workspace-a')
     const workspaceB = path.join(directory, 'workspace-b')
     const workspaceC = path.join(directory, 'workspace-c')
     await Promise.all([mkdir(workspaceA), mkdir(workspaceB), mkdir(workspaceC)])
     const store = await createConfig(directory)
+    await store.update({
+      version: 1,
+      kind: 'limits',
+      value: {
+        ...store.getPublicConfig().limits,
+        maxConcurrentRuns: 4,
+      },
+    })
     const provider = new ConcurrentGateProvider()
     const sent: AgentEventEnvelope[] = []
     const manager = new SessionManager({

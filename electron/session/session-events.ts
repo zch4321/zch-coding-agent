@@ -23,6 +23,7 @@ export class SessionEventEmitter {
 
   /** Emits a session-scoped agent event while enforcing closed-session event rules. */
   emitAgent(session: SessionState, event: AgentEventDraft): void {
+    if (session.visibility === 'internal') return
     if (
       session.closed &&
       event.type !== 'session.closed' &&
@@ -42,7 +43,7 @@ export class SessionEventEmitter {
   /** Looks up the target Session and emits a terminal event when it is still loaded. */
   emitTerminal(event: TerminalEventDraft): void {
     const session = this.#getSession(event.sessionId)
-    if (!session) {
+    if (!session || session.visibility === 'internal') {
       return
     }
 

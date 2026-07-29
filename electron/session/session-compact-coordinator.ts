@@ -158,6 +158,10 @@ export class SessionCompactCoordinator {
         registry: this.#toolRegistry,
         projectMetadata: this.#projectMetadata,
         workspace: session.workspace,
+        allowedToolIds: run.allowedToolIds,
+        subagentsEnabled: run.subagentsEnabled,
+        gitToolsEnabled: session.gitToolsEnabled,
+        readOnlyWorkspace: session.readOnlyWorkspace,
       })
     ).definitions
     const compiler = new MessageHistoryCompiler()
@@ -496,6 +500,7 @@ export class SessionCompactCoordinator {
       usage: canonical.usage,
     })
     if (usage) {
+      run.usageRecords.push(structuredClone(usage))
       await session.logger.write({
         type: 'llm.usage',
         sessionId: session.sessionId,
@@ -534,6 +539,10 @@ export class SessionCompactCoordinator {
       registry: this.#toolRegistry,
       projectMetadata: this.#projectMetadata,
       workspace: session.workspace,
+      allowedToolIds: run.allowedToolIds,
+      subagentsEnabled: run.subagentsEnabled,
+      gitToolsEnabled: session.gitToolsEnabled,
+      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     const previousHistory = structuredClone(session.history)
     const previousNextSeq = session.nextMessageSeq
@@ -556,6 +565,7 @@ export class SessionCompactCoordinator {
         skillSummary: this.#skillsManager?.summaryPrompt(),
         workspaceConcurrency: this.#getWorkspaceConcurrency(session),
         toolNames: toolCatalog.names,
+        readOnlyWorkspace: session.readOnlyWorkspace,
         signal: run.controller.signal,
       })
       for (const record of runHarness) {

@@ -1,0 +1,359 @@
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { AgentEvent } from '../../shared/agent-events'
+import type { CallId, SessionId } from '../../shared/ids'
+import type { JsonObject } from '../../shared/json'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent,
+  type TestProviderStreamRequest,
+} from '../providers/provider-test-harness'
+import { createConfig } from '../session/session-manager-test-support'
+import { createBackendRuntime } from '../application/create-backend-runtime'
+
+const execFileAsync = promisify(execFile)
+const cleanup: string[] = []
+
+afterEach(async () => {
+  await Promise.all(
+    cleanup
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
+  )
+})
+
+function toolTurn(input: {
+  id: string
+  calls: Array<{ id: string; toolId: string; args: JsonObject }>
+}): Extract<ScriptedProviderEvent, { type: 'completed' }> {
+  return {
+    type: 'completed',
+    rawResponse: { id: input.id },
+    turn: {
+      role: 'assistant',
+      content: null,
+      tool_calls: input.calls.map((call) => ({
+        id: call.id,
+        type: 'function',
+        function: {
+          name: call.toolId,
+          arguments: JSON.stringify(call.args),
+        },
+      })),
+    },
+    toolCalls: input.calls.map((call) => ({
+      id: call.id as CallId,
+      toolId: call.toolId,
+      args: call.args,
+      reason: `Use ${call.toolId}`,
+    })),
+    usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
+    providerState: {},
+    timing: {},
+  }
+}
+
+class SubagentChainProvider extends ScriptedProviderHarness {
+  readonly parentRequests: TestProviderStreamRequest[] = []
+  readonly childRequests: TestProviderStreamRequest[] = []
+  readonly #workspace: string
+  readonly #hotSwap: () => Promise<void>
+
+  constructor(workspace: string, hotSwap: () => Promise<void>) {
+    super()
+    this.#workspace = workspace
+    this.#hotSwap = hotSwap
+  }
+
+  async *run(
+    request: TestProviderStreamRequest,
+  ): AsyncIterable<ScriptedProviderEvent> {
+    const parent = request.toolDefinitions.some(
+      (definition) => definition.name === 'subagent_run',
+    )
+    if (parent) {
+      this.parentRequests.push(structuredClone(request))
+      if (this.parentRequests.length === 1) {
+        await this.#hotSwap()
+        yield toolTurn({
+          id: 'parent:delegate',
+          calls: [
+            {
+              id: 'call:subagent',
+              toolId: 'subagent_run',
+              args: {
+                name: 'snapshot-audit',
+                task: 'Inspect README.md and the current Git diff, then report both directly.',
+              },
+            },
+          ],
+        })
+        return
+      }
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'parent:complete' },
+        turn: {
+          role: 'assistant',
+          content: 'Parent summarized the Subagent snapshot audit.',
+        },
+        usage: { prompt_tokens: 20, completion_tokens: 6, total_tokens: 26 },
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    this.childRequests.push(structuredClone(request))
+    if (this.childRequests.length === 1) {
+      await writeFile(
+        path.join(this.#workspace, 'README.md'),
+        'mutated after snapshot\n',
+        'utf8',
+      )
+      yield toolTurn({
+        id: 'child:inspect',
+        calls: [
+          {
+            id: 'call:child-read',
+            toolId: 'read_file',
+            args: { path: 'README.md' },
+          },
+          {
+            id: 'call:child-diff',
+            toolId: 'git_diff',
+            args: { flags: [], paths: [] },
+          },
+          {
+            id: 'call:child-forged-write',
+            toolId: 'write_file',
+            args: { path: 'forbidden.txt', content: 'must not be written' },
+          },
+        ],
+      })
+      return
+    }
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'child:complete' },
+      turn: {
+        role: 'assistant',
+        content:
+          'The frozen README and Git diff both show “dirty before snapshot”.',
+      },
+      usage: {
+        prompt_tokens: 30,
+        completion_tokens: 8,
+        total_tokens: 38,
+        prompt_cache_hit_tokens: 5,
+      },
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
+async function git(workspace: string, args: string[]): Promise<void> {
+  await execFileAsync('git', args, { cwd: workspace })
+}
+
+describe('read-only Subagent runtime', () => {
+  it('runs against a frozen file/Git view and returns a hidden durable result', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'zch-subagent-runtime-'))
+    cleanup.push(root)
+    const workspace = path.join(root, 'workspace')
+    const targetDirectory = path.join(root, 'runtime')
+    await mkdir(workspace)
+    await git(workspace, ['init', '--quiet'])
+    await writeFile(
+      path.join(workspace, 'README.md'),
+      'committed base\n',
+      'utf8',
+    )
+    await git(workspace, ['add', 'README.md'])
+    await git(workspace, [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.test',
+      'commit',
+      '--quiet',
+      '-m',
+      'base',
+    ])
+    await writeFile(
+      path.join(workspace, 'README.md'),
+      'dirty before snapshot\n',
+      'utf8',
+    )
+
+    const store = await createConfig(root)
+    await store.update({
+      version: 1,
+      kind: 'subagents',
+      value: { enabled: true, workerTimeoutMs: 60_000 },
+    })
+    const originalModel = store.getPublicConfig().providers[0]!.model
+    let swapped = false
+    const provider = new SubagentChainProvider(workspace, async () => {
+      if (swapped) return
+      swapped = true
+      const configured = store.getPublicConfig().providers[0]!
+      await store.update({
+        version: 1,
+        kind: 'provider',
+        providerId: configured.id,
+        baseURL: configured.baseURL,
+        model: 'hot-swapped-model',
+        reasoning: configured.reasoning,
+      })
+    })
+    const events: AgentEvent[] = []
+    const target = await createBackendRuntime({
+      configStore: store,
+      promptDirectory: path.resolve('resources', 'prompts'),
+      databasePath: path.join(targetDirectory, 'agent.db'),
+      runtimeDataDirectory: targetDirectory,
+      providerFactory: () => provider,
+      eventListeners: [{ onAgentEvent: (event) => events.push(event) }],
+    })
+    try {
+      const project = (await target.projects.add({ path: workspace })).commit
+        .change.projects[0]!
+      const sessionId = 'session:subagent-parent' as SessionId
+      const started = await target.runs.start({
+        version: 1,
+        kind: 'new_session',
+        sessionId,
+        projectId: project.id,
+        permissionMode: 'readonly',
+        modelSelection: {
+          providerId: store.getPublicConfig().activeProviderId,
+          model: originalModel,
+          reasoning: 'off',
+        },
+        message: 'Delegate a frozen workspace audit.',
+        clientRequestId: 'request:subagent-e2e',
+      })
+      if (started.outcome !== 'started')
+        throw new Error('Parent Run did not start')
+      await target.runtime.services.sessions.waitForRunSettled(
+        sessionId,
+        started.runId,
+      )
+
+      expect(
+        events.find(
+          (event) =>
+            event.type === 'run.status' &&
+            event.runId === started.runId &&
+            event.status === 'completed',
+        ),
+      ).toBeDefined()
+      expect(events.every((event) => event.sessionId === sessionId)).toBe(true)
+      expect(
+        events.some(
+          (event) =>
+            event.type === 'llm.usage' && event.usage.scope === 'subagent',
+        ),
+      ).toBe(true)
+
+      expect(provider.parentRequests).toHaveLength(2)
+      expect(provider.childRequests).toHaveLength(2)
+      for (const request of [
+        ...provider.parentRequests,
+        ...provider.childRequests,
+      ]) {
+        expect(request.providerRequest.model).toBe(originalModel)
+      }
+      const childTools = provider.childRequests[0]!.toolDefinitions.map(
+        (definition) => definition.name,
+      )
+      expect(childTools).toEqual(
+        expect.arrayContaining([
+          'read_file',
+          'git_diff',
+          'project_get_modules',
+          'read_skill',
+          'delay',
+        ]),
+      )
+      for (const forbidden of [
+        'subagent_run',
+        'write_file',
+        'apply_patch',
+        'run_command',
+        'web_search',
+        'code_find_definition',
+      ]) {
+        expect(childTools).not.toContain(forbidden)
+      }
+
+      const firstChildHistory = JSON.stringify(
+        provider.childRequests[0]!.normalizedMessages,
+      )
+      expect(firstChildHistory).toContain(
+        'Inspect README.md and the current Git diff, then report both directly.',
+      )
+      expect(firstChildHistory).not.toContain(
+        'Delegate a frozen workspace audit.',
+      )
+      const secondChildHistory = JSON.stringify(
+        provider.childRequests[1]!.normalizedMessages,
+      )
+      expect(secondChildHistory).toContain('dirty before snapshot')
+      expect(secondChildHistory).not.toContain('mutated after snapshot')
+      expect(secondChildHistory).toContain('TOOL_NOT_AVAILABLE')
+      expect(
+        JSON.stringify(provider.parentRequests[1]!.normalizedMessages),
+      ).toContain('The frozen README and Git diff both show')
+
+      const parent = await target.sessions.get(sessionId)
+      const parentJson = JSON.stringify(parent)
+      expect(parentJson).toContain(
+        'Parent summarized the Subagent snapshot audit.',
+      )
+      expect(parentJson).toContain('snapshot-audit')
+      expect(parentJson).not.toContain('subagent-session-')
+      expect(
+        (await target.sessions.list()).records.map((record) => record.id),
+      ).toEqual([sessionId])
+
+      const durable = (
+        await target.coordinator.query((reader) => ({
+          execution: reader
+            .prepare(
+              `SELECT status, route_json, source_identity_json, usage_json,
+                      result_json, error_code
+               FROM subagent_executions`,
+            )
+            .get(),
+          hiddenCount: reader
+            .prepare('SELECT count(*) AS count FROM subagent_sessions')
+            .get(),
+        }))
+      ).value as {
+        execution: Record<string, unknown>
+        hiddenCount: { count: number }
+      }
+      expect(durable.execution).toMatchObject({
+        status: 'completed',
+        error_code: null,
+      })
+      expect(durable.hiddenCount).toEqual({ count: 1 })
+      const persisted = JSON.stringify(durable.execution)
+      expect(persisted).not.toContain('secret-sentinel')
+      expect(persisted).not.toContain('subagent-snapshots')
+      expect(persisted).not.toContain('subagent-session-')
+      expect(
+        await readdir(path.join(targetDirectory, 'subagent-snapshots')),
+      ).toEqual([])
+    } finally {
+      await target.dispose()
+    }
+  }, 30_000)
+})

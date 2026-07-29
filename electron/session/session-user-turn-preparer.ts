@@ -76,6 +76,10 @@ export class SessionUserTurnPreparer {
       registry: this.#toolRegistry,
       projectMetadata: this.#projectMetadata,
       workspace: session.workspace,
+      allowedToolIds: run.allowedToolIds,
+      subagentsEnabled: run.subagentsEnabled,
+      gitToolsEnabled: session.gitToolsEnabled,
+      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     await appendRuntimeContextIfChanged(session, {
       workspace: session.workspace,
@@ -88,6 +92,7 @@ export class SessionUserTurnPreparer {
       workspaceConcurrency: this.#getWorkspaceConcurrency(session),
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
+      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     await appendAgentsContextIfChanged(session, {
       workspace: session.workspace,
@@ -99,6 +104,7 @@ export class SessionUserTurnPreparer {
       skillSummary: this.#skillsManager?.summaryPrompt(),
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
+      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     const command = resolveSlashCommand({
       message: userMessage,

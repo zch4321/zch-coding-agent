@@ -18,10 +18,13 @@ export type Effect =
   | 'code.read'
   | 'external.unknown'
 
+export type ToolBatchPolicy = 'normal' | 'must_run_last' | 'exclusive'
+
 export interface ToolDefinition<Schema extends TSchema = TSchema> {
   id: string
   description: string
   inputSchema: Schema
+  batchPolicy?: ToolBatchPolicy
   effects: readonly Effect[]
   defaultRisk: 'low' | 'review' | 'high'
   supportsAbort: boolean
@@ -47,6 +50,7 @@ export interface ToolExecutionContext {
   workspace: {
     canonicalPath: string
   }
+  readOnlyWorkspace?: boolean
   signal: AbortSignal
   approvedCall: ApprovedToolCall
 }
