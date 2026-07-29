@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
   NDropdown,
+  NEmpty,
   NGi,
   NGrid,
   NInput,
@@ -29,6 +30,7 @@ const agent = useAgentStore()
 const { t } = useI18n()
 const dirtyAction = ref<ProviderAction>()
 const deleteProviderId = ref<string>()
+const modelSearch = ref('')
 const providerTypeOptions = computed(() => [
   {
     label: t('settings.providerTypeDeepSeek'),
@@ -72,6 +74,31 @@ const tokenEstimationOptions = computed(() => [
 ])
 const deleteProvider = computed(() =>
   agent.providers.find((provider) => provider.id === deleteProviderId.value),
+)
+const visibleModelProfiles = computed(() => {
+  const query = modelSearch.value.trim().toLowerCase()
+  return agent.modelProfiles
+    .filter(
+      (model) =>
+        !query ||
+        model.id.toLowerCase().includes(query) ||
+        model.ownedBy?.toLowerCase().includes(query),
+    )
+    .sort((left, right) => {
+      if (left.id === agent.providerForm.model) return -1
+      if (right.id === agent.providerForm.model) return 1
+      return left.id.localeCompare(right.id, undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      })
+    })
+})
+
+watch(
+  () => agent.selectedProviderId,
+  () => {
+    modelSearch.value = ''
+  },
 )
 
 onMounted(() => {
@@ -428,14 +455,35 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <h4>{{ t('settings.modelSettings') }}</h4>
           <p>{{ t('settings.modelSettingsHint') }}</p>
         </div>
+        <div class="provider-model-settings-toolbar">
+          <NInput
+            v-model:value="modelSearch"
+            clearable
+            :placeholder="t('settings.searchModels')"
+            data-testid="provider-model-search"
+          />
+          <span>
+            {{
+              t('settings.modelResultCount', {
+                visible: visibleModelProfiles.length,
+                total: agent.modelProfiles.length,
+              })
+            }}
+          </span>
+        </div>
         <div class="provider-model-settings-header" aria-hidden="true">
           <span>{{ t('settings.modelName') }}</span>
           <span>{{ t('settings.maximumContext') }}</span>
           <span>{{ t('settings.compressionThreshold') }}</span>
           <span>{{ t('settings.maximumOutputLength') }}</span>
         </div>
-        <NList bordered data-testid="provider-model-settings-list">
-          <NListItem v-for="model in agent.modelProfiles" :key="model.id">
+        <NList
+          v-if="visibleModelProfiles.length"
+          bordered
+          class="provider-model-settings-list"
+          data-testid="provider-model-settings-list"
+        >
+          <NListItem v-for="model in visibleModelProfiles" :key="model.id">
             <div class="provider-model-settings-row">
               <div class="provider-model-name">
                 <strong>{{ model.id }}</strong>
@@ -499,6 +547,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             </div>
           </NListItem>
         </NList>
+        <NEmpty v-else :description="t('settings.noMatchingModels')" />
       </div>
     </div>
 

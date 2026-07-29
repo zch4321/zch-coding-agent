@@ -225,8 +225,8 @@ describe('DeepSeek model catalog', () => {
           id: 'identity-only',
           capabilitySource: 'default',
           contextWindowTokens: 256_000,
-          compactThresholdTokens: 198_246,
-          maxOutputTokens: 8_192,
+          compactThresholdTokens: 152_371,
+          maxOutputTokens: 65_536,
         }),
         expect.objectContaining({
           id: 'provider-model',

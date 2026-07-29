@@ -210,9 +210,28 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(discoveredModelRow.locator('input').first()).toHaveValue(
       '300000',
     )
+    await expect(discoveredModelRow.locator('input').last()).toHaveValue(
+      '65536',
+    )
     for (const input of await discoveredModelRow.locator('input').all()) {
       await expect(input).not.toHaveValue('')
     }
+    await expect(
+      provider
+        .locator('.provider-model-settings-row')
+        .first()
+        .getByText('主模型', { exact: true }),
+    ).toBeVisible()
+    const modelSearch = provider
+      .getByTestId('provider-model-search')
+      .locator('input')
+    await modelSearch.fill('model-that-does-not-exist')
+    await expect(provider.getByText('没有匹配的模型')).toBeVisible()
+    await modelSearch.fill(providerModel)
+    await expect(provider.locator('.provider-model-settings-row')).toHaveCount(
+      1,
+    )
+    await modelSearch.clear()
 
     const modelSelect = provider
       .locator('.settings-field', { hasText: '主模型' })

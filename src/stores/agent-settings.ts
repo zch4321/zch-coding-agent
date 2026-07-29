@@ -204,10 +204,19 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         (provider) => provider.id === state.selectedProviderId,
       )?.credentialSource ?? 'none',
     modelOptions: (state) =>
-      state.modelProfiles.map((model) => ({
-        label: model.id,
-        value: model.id,
-      })),
+      [...state.modelProfiles]
+        .sort((left, right) => {
+          if (left.id === state.providerForm.model) return -1
+          if (right.id === state.providerForm.model) return 1
+          return left.id.localeCompare(right.id, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          })
+        })
+        .map((model) => ({
+          label: model.id,
+          value: model.id,
+        })),
     providerOptions: (state) =>
       state.providers.map((provider) => ({
         label: provider.label,

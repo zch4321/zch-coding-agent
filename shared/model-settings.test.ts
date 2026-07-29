@@ -2,7 +2,20 @@ import { describe, expect, it } from 'vitest'
 import { resolveModelTokenSettings } from './model-settings'
 
 describe('model token settings', () => {
-  it('fills safe output and compression defaults for identity-only models', () => {
+  it('fills the default output and compression limits for identity-only models', () => {
+    expect(
+      resolveModelTokenSettings({
+        contextWindowTokens: 256_000,
+        compactTriggerPercent: 80,
+      }),
+    ).toEqual({
+      contextWindowTokens: 256_000,
+      compactThresholdTokens: 152_371,
+      maxOutputTokens: 65_536,
+    })
+  })
+
+  it('clamps the default output to preserve a minimum prompt budget', () => {
     expect(
       resolveModelTokenSettings({
         contextWindowTokens: 64_000,
@@ -10,8 +23,8 @@ describe('model token settings', () => {
       }),
     ).toEqual({
       contextWindowTokens: 64_000,
-      compactThresholdTokens: 44_646,
-      maxOutputTokens: 8_192,
+      compactThresholdTokens: 1_024,
+      maxOutputTokens: 62_976,
     })
   })
 

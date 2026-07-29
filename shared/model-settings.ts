@@ -1,4 +1,5 @@
 export const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 256_000
+export const DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 65_536
 
 export interface ModelTokenSettings {
   contextWindowTokens: number
@@ -14,12 +15,8 @@ export function resolveModelTokenSettings(input: {
   compactTriggerPercent: number
 }): ModelTokenSettings {
   const safeMaximumOutput = Math.max(1, input.contextWindowTokens - 1_024)
-  const defaultOutput = Math.max(
-    1,
-    Math.min(8_192, Math.floor(input.contextWindowTokens * 0.2)),
-  )
   const maxOutputTokens = Math.min(
-    input.maxOutputTokens ?? defaultOutput,
+    input.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
     safeMaximumOutput,
   )
   const promptBudget = Math.max(

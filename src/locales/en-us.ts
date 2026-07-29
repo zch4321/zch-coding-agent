@@ -367,6 +367,9 @@ const enUS = {
     modelSettings: 'Model configuration',
     modelSettingsHint:
       'Every model uses explicit token settings. Provider metadata, built-in data, or conservative defaults are filled automatically and saved with the Provider.',
+    searchModels: 'Search model name or owner',
+    modelResultCount: 'Showing {visible} of {total} models',
+    noMatchingModels: 'No matching models',
     modelName: 'Model',
     maximumContext: 'Maximum context',
     compressionThreshold: 'Compression threshold',
