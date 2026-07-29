@@ -142,6 +142,45 @@ test.describe.serial('Electron settings workflows', () => {
       )
       .toBe(300_000)
 
+    await settingsNavigation.getByRole('menuitem', { name: 'Agents' }).click()
+    const agents = page.locator('.settings-section')
+    await expect(agents.getByRole('heading', { name: 'Agents' })).toBeVisible()
+    await expect(
+      agents.getByText('子 Agent 会发起额外的模型请求', { exact: false }),
+    ).toBeVisible()
+    await expect(agents.getByText('当前为 16', { exact: false })).toBeVisible()
+    const subagentsSwitch = agents.locator('.n-switch')
+    const timeoutMinutes = agents
+      .locator('.settings-field', { hasText: '单个子任务超时' })
+      .locator('input')
+    await expect(subagentsSwitch).not.toHaveClass(/n-switch--active/u)
+    await expect(timeoutMinutes).toHaveValue('30')
+    await subagentsSwitch.click()
+    await timeoutMinutes.fill('45')
+    await expect(agents.locator('.settings-save-status')).toHaveText('已保存')
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          const api = Reflect.get(window, 'agentApi') as {
+            getConfig(payload: unknown): Promise<{
+              value?: {
+                config: {
+                  subagents: { enabled: boolean; workerTimeoutMs: number }
+                }
+              }
+            }>
+          }
+          const result = await api.getConfig({
+            version: 1,
+            section: 'subagents',
+          })
+          return result.value?.config.subagents
+        }),
+      )
+      .toEqual({ enabled: true, workerTimeoutMs: 2_700_000 })
+    await subagentsSwitch.click()
+    await expect(agents.locator('.settings-save-status')).toHaveText('已保存')
+
     await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
     const provider = page.locator('.settings-section')
 

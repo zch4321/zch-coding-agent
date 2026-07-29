@@ -59,13 +59,14 @@ export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
 
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(12),
+    schemaVersion: Type.Literal(13),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
       maxItems: 32,
     }),
     approval: PublicConfigSchema.properties.approval,
+    subagents: PublicConfigSchema.properties.subagents,
     permission: Type.Object(
       {
         defaultMode: PermissionModeSchema,
@@ -95,7 +96,7 @@ export type AppConfig = Static<typeof AppConfigSchema>
 export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 12,
+  schemaVersion: 13,
   activeProviderId: DEFAULT_PROVIDER_ID,
   providers: [
     {
@@ -115,6 +116,10 @@ export const DEFAULT_APP_CONFIG = {
     approverProviderId: DEFAULT_PROVIDER_ID,
     approverModel: 'deepseek-v4-flash',
   },
+  subagents: {
+    enabled: false,
+    workerTimeoutMs: 30 * 60_000,
+  },
   permission: {
     defaultMode: 'readonly',
     builtinPolicies: true,
@@ -126,7 +131,7 @@ export const DEFAULT_APP_CONFIG = {
     },
   },
   limits: {
-    maxConcurrentRuns: 4,
+    maxConcurrentRuns: 16,
     maxStepsPerRun: 0,
     maxToolOutputBytes: 128 * 1_024,
     maxContextTokens: DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
@@ -246,7 +251,7 @@ export function toPublicConfig(
         })
 
   return {
-    schemaVersion: 12,
+    schemaVersion: 13,
     activeProviderId: config.activeProviderId,
     providers: config.providers.map((provider) => ({
       id: provider.id,
@@ -263,6 +268,7 @@ export function toPublicConfig(
       ...credentialForProvider(provider),
     })),
     approval: structuredClone(config.approval),
+    subagents: structuredClone(config.subagents),
     permission: structuredClone(config.permission),
     limits: structuredClone(config.limits),
     logging: structuredClone(config.logging),

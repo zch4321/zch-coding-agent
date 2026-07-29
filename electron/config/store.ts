@@ -530,6 +530,9 @@ export class ConfigStore {
           approverModel: request.approverModel,
         }
         break
+      case 'subagents':
+        next.subagents = structuredClone(request.value)
+        break
       case 'permission':
         next.permission = {
           defaultMode: request.defaultMode,

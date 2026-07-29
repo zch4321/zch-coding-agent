@@ -72,7 +72,7 @@ const HeadlessToolTotalsSchema = Type.Object(
 
 export const HeadlessConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(2),
+    schemaVersion: Type.Literal(3),
     provider: HeadlessProviderConfigSchema,
     limits: Type.Optional(
       Type.Partial(PublicConfigSchema.properties.limits, {
@@ -89,6 +89,7 @@ export const HeadlessConfigSchema = Type.Object(
         additionalProperties: false,
       }),
     ),
+    subagents: Type.Optional(PublicConfigSchema.properties.subagents),
     network: Type.Optional(PublicConfigSchema.properties.network),
     mcpServers: Type.Optional(
       Type.Array(McpServerConfigSchema, { maxItems: 32 }),
@@ -100,6 +101,16 @@ export const HeadlessConfigSchema = Type.Object(
   { additionalProperties: false },
 )
 export type HeadlessConfig = Static<typeof HeadlessConfigSchema>
+
+export const LegacyHeadlessConfigV2Schema = Type.Object(
+  {
+    ...HeadlessConfigSchema.properties,
+    schemaVersion: Type.Literal(2),
+    subagents: Type.Optional(Type.Never()),
+  },
+  { additionalProperties: false },
+)
+export type LegacyHeadlessConfigV2 = Static<typeof LegacyHeadlessConfigV2Schema>
 
 export const LegacyHeadlessConfigV1Schema = Type.Object(
   {

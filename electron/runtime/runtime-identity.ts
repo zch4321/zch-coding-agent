@@ -34,7 +34,7 @@ export function createRuntimeIdentity(input: {
     input.runtime.services.sessions.providerToolDefinitions()
   const toolNames = input.runtime.services.sessions.toolNames()
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     sourceCommit: input.sourceCommit?.trim() || embeddedSourceCommit(),
     sourceTree: input.sourceTree ?? embeddedSourceTree(),
     runtimeImageDigest:
@@ -61,6 +61,7 @@ export function createRuntimeIdentity(input: {
       maxToolTokensPerRun: input.config.limits.maxToolTokensPerRun,
       maxToolOutputBytes: input.config.limits.maxToolOutputBytes,
       commandTimeoutMs: input.config.limits.commandTimeoutMs,
+      subagentWorkerTimeoutMs: input.config.subagents.workerTimeoutMs,
     },
     capabilities: {
       platform: input.platform ?? process.platform,
@@ -68,6 +69,7 @@ export function createRuntimeIdentity(input: {
       nodeVersion: input.nodeVersion ?? process.version,
       permissionMode: 'yolo',
       skillsEnabled: input.config.skills.enabled,
+      subagentsEnabled: input.config.subagents.enabled,
       mcpServerIds: input.config.mcpServers
         .filter((server) => server.enabled)
         .map((server) => server.id)

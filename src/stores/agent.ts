@@ -28,6 +28,7 @@ export type AgentFacade = Omit<ShellStore, '$id'> &
     | 'error'
     | '$id'
     | 'limitsSavedSignature'
+    | 'subagentsSavedSignature'
     | 'savePermissions'
     | 'removeRememberedRule'
   > &
@@ -70,6 +71,9 @@ const settingsProperties = new Set<PropertyKey>([
   'limitsConfig',
   'limitsSaving',
   'limitsSaveStatus',
+  'subagentsConfig',
+  'subagentsSaving',
+  'subagentsSaveStatus',
   'providerForm',
   'providerSavedSignature',
   'providerSaving',
@@ -101,6 +105,7 @@ const settingsProperties = new Set<PropertyKey>([
   'providerDirty',
   'providerRefreshAvailable',
   'limitsDirty',
+  'subagentsDirty',
   'approvalDirty',
 ])
 const replicaProperties = new Set<PropertyKey>([
@@ -236,6 +241,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     saveApproval: settings.saveApproval,
     clearCredential: settings.clearCredential,
     saveLimits: settings.saveLimits,
+    saveSubagents: settings.saveSubagents,
     savePermissions: () => settings.savePermissions(runtime.mode),
     removeRememberedRule: (ruleId: string) =>
       settings.removeRememberedRule(ruleId, runtime.mode),

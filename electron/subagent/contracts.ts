@@ -1,0 +1,97 @@
+import type { LlmUsageRecord } from '../../shared/usage'
+import type { CallId, RunId, SessionId } from '../../shared/ids'
+import type { ResolvedModelRoute } from '../providers/model-route-resolver'
+import type { RunStatus } from '../../shared/agent-events'
+
+export interface SubagentSpec {
+  name: string
+  task: string
+}
+
+export interface SubagentParentContext {
+  sessionId: SessionId
+  runId: RunId
+  callId: CallId
+  workspace: string
+  signal: AbortSignal
+}
+
+export interface InternalSessionOwnership {
+  executionId: string
+  parentSessionId: SessionId
+  createdAt: string
+}
+
+export interface FrozenSubagentRoutes {
+  main: ResolvedModelRoute
+  compression: ResolvedModelRoute
+}
+
+export interface InternalSubagentRunOutcome {
+  status: RunStatus
+  response?: string
+  finishReason?: string
+  usage: LlmUsageRecord[]
+  error?: { code: string; message: string }
+}
+
+/** Carries a stable code through ToolResult normalization without leaking internals. */
+export class SubagentRuntimeError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'SubagentRuntimeError'
+  }
+}
+
+export interface SubagentUsageSummary {
+  records: number
+  promptTokens: number
+  completionTokens: number
+  reasoningTokens: number
+  totalTokens: number
+  cacheHitTokens: number
+  cacheMissTokens: number
+}
+
+export interface SubagentRunResult {
+  results: Record<string, string>
+  meta: {
+    durationMs: number
+    providerId: string
+    model: string
+    usage: SubagentUsageSummary
+    truncated: boolean
+  }
+}
+
+/** Runs one backend-private Subagent against a frozen parent Run context. */
+export interface SubagentExecutionPort {
+  runOne(
+    spec: SubagentSpec,
+    parent: SubagentParentContext,
+  ): Promise<SubagentRunResult>
+}
+
+/** Aggregates normalized usage without retaining Provider-specific raw payloads. */
+export function summarizeSubagentUsage(
+  records: readonly LlmUsageRecord[],
+): SubagentUsageSummary {
+  const sum = (field: keyof LlmUsageRecord): number =>
+    records.reduce((total, record) => {
+      const value = record[field]
+      return total + (typeof value === 'number' ? value : 0)
+    }, 0)
+
+  return {
+    records: records.length,
+    promptTokens: sum('promptTokens'),
+    completionTokens: sum('completionTokens'),
+    reasoningTokens: sum('reasoningTokens'),
+    totalTokens: sum('totalTokens'),
+    cacheHitTokens: sum('cacheHitTokens'),
+    cacheMissTokens: sum('cacheMissTokens'),
+  }
+}

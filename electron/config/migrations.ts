@@ -105,9 +105,19 @@ const LegacyAppProviderConfigV11Schema = Type.Object(
   { additionalProperties: false },
 )
 
+const LegacyAppConfigV12Schema = Type.Object(
+  {
+    ...withoutKey(AppConfigSchema.properties, 'subagents'),
+    schemaVersion: Type.Literal(12),
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV12 = Static<typeof LegacyAppConfigV12Schema>
+const validateLegacyAppConfigV12 = compileSchema(LegacyAppConfigV12Schema)
+
 const LegacyAppConfigV11Schema = Type.Object(
   {
-    ...AppConfigSchema.properties,
+    ...LegacyAppConfigV12Schema.properties,
     schemaVersion: Type.Literal(11),
     providers: Type.Array(LegacyAppProviderConfigV11Schema, {
       minItems: 1,
@@ -156,7 +166,8 @@ function migrateLimitDefaults(
 function migrateV10(config: LegacyAppConfigV10): AppConfig {
   const migrated = {
     ...config,
-    schemaVersion: 12 as const,
+    schemaVersion: 13 as const,
+    subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
     limits: migrateLimitDefaults(config.limits),
     providers: config.providers.map((provider) => ({
       ...provider,
@@ -175,7 +186,8 @@ function migrateV10(config: LegacyAppConfigV10): AppConfig {
 function migrateV11(config: LegacyAppConfigV11): AppConfig {
   const migrated = {
     ...config,
-    schemaVersion: 12 as const,
+    schemaVersion: 13 as const,
+    subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
     providers: config.providers.map((provider) => ({
       ...provider,
       modelConfigurationIds: [provider.model],
@@ -190,6 +202,21 @@ function migrateV11(config: LegacyAppConfigV11): AppConfig {
   return structuredClone(migrated as AppConfig)
 }
 
+function migrateV12(config: LegacyAppConfigV12): AppConfig {
+  const migrated = {
+    ...config,
+    schemaVersion: 13 as const,
+    subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      12,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
 /** Reports that a persisted configuration uses an unsupported schema version. */
 export class UnsupportedConfigSchemaError extends Error {
   constructor(
@@ -197,7 +224,7 @@ export class UnsupportedConfigSchemaError extends Error {
     validationErrors?: string,
   ) {
     super(
-      `Unsupported config schema ${String(schemaVersion)}; this build requires AppConfig v12 and will reset the existing config to defaults.${
+      `Unsupported config schema ${String(schemaVersion)}; this build requires AppConfig v13 and will reset the existing config to defaults.${
         validationErrors ? ` ${validationErrors}` : ''
       }`,
     )
@@ -231,7 +258,8 @@ export function migrateConfig(candidate: unknown): AppConfig {
     const legacy = candidate as LegacyAppConfigV9
     const migrated = {
       ...legacy,
-      schemaVersion: 12 as const,
+      schemaVersion: 13 as const,
+      subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
       limits: migrateLimitDefaults(legacy.limits),
       providers: legacy.providers.map((provider) => {
         const adapterId = provider.adapterId
@@ -278,7 +306,17 @@ export function migrateConfig(candidate: unknown): AppConfig {
     return migrateV11(candidate as LegacyAppConfigV11)
   }
 
-  if (Reflect.get(candidate, 'schemaVersion') !== 12) {
+  if (Reflect.get(candidate, 'schemaVersion') === 12) {
+    if (!validateLegacyAppConfigV12(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        12,
+        formatSchemaErrors(validateLegacyAppConfigV12.errors),
+      )
+    }
+    return migrateV12(candidate as LegacyAppConfigV12)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') !== 13) {
     throw new UnsupportedConfigSchemaError(
       Reflect.get(candidate, 'schemaVersion'),
     )

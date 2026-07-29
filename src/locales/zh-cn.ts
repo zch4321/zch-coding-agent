@@ -273,6 +273,7 @@ const zhCN = {
     archived: '已归档对话',
     provider: '模型服务',
     limits: '运行限制',
+    agents: 'Agents',
     permissions: '权限',
     skills: '技能',
     mcp: 'MCP 连接',
@@ -454,6 +455,22 @@ const zhCN = {
     tokenConservative: '保守默认值',
     tokenCustom: '自定义 UTF-8 字节/Token',
     save: '保存运行限制',
+  },
+  subagents: {
+    title: 'Agents',
+    hint: '配置主 Agent 是否可以启动只读子 Agent，以及单个子任务的最长运行时间。修改后会自动保存。',
+    enabled: '启用只读子 Agent',
+    enabledHint:
+      '设置变更从下一次主 Agent 运行开始生效；当前运行使用启动时冻结的配置。',
+    workerTimeout: '单个子任务超时',
+    workerTimeoutHint:
+      '达到此时限后会取消子任务。关闭父任务也会立即取消正在运行的子任务。',
+    minutes: '分钟',
+    costNotice:
+      '子 Agent 会发起额外的模型请求，并产生相应的 Token 消耗和 Provider 费用。',
+    concurrencyNotice:
+      '子任务与普通任务共用全局并发限制（当前为 {count}）。当全局限制为 1 时，嵌套子任务会被拒绝。',
+    save: '保存 Agent 设置',
   },
   dialogs: {
     yoloTitle: '启用全自动模式？',

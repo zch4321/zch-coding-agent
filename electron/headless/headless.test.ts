@@ -207,7 +207,7 @@ function toolCompletion(
 
 function config(overrides: Partial<HeadlessConfig> = {}): HeadlessConfig {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     provider: {
       id: 'fake',
       providerType: 'generic.chat-completions',
@@ -261,7 +261,7 @@ afterEach(async () => {
 })
 
 describe('Headless host', () => {
-  it('loads valid v1 config through the v2 Provider Type migration', async () => {
+  it('loads valid v1 config through the v3 Provider Type migration', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-v1-'))
     temporaryDirectories.push(directory)
     const configPath = path.join(directory, 'headless.json')
@@ -285,7 +285,7 @@ describe('Headless host', () => {
     )
 
     await expect(loadHeadlessConfig(configPath)).resolves.toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       provider: {
         id: 'legacy-deepseek',
         label: 'Legacy DeepSeek',
@@ -299,7 +299,36 @@ describe('Headless host', () => {
     })
   })
 
-  it('accepts Responses and Anthropic Provider Types in v2 config', async () => {
+  it('loads valid v2 config with disabled default Subagents', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-v2-'))
+    temporaryDirectories.push(directory)
+    const configPath = path.join(directory, 'headless.json')
+    const legacy = {
+      schemaVersion: 2,
+      provider: config().provider,
+      assistant: { language: 'en-US' as const },
+    }
+    await writeFile(configPath, JSON.stringify(legacy), 'utf8')
+
+    await expect(loadHeadlessConfig(configPath)).resolves.toEqual({
+      ...legacy,
+      schemaVersion: 3,
+    })
+  })
+
+  it('accepts bounded Subagent settings in v3 config', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-v3-'))
+    temporaryDirectories.push(directory)
+    const configPath = path.join(directory, 'headless.json')
+    const source = config({
+      subagents: { enabled: true, workerTimeoutMs: 2_700_000 },
+    })
+    await writeFile(configPath, JSON.stringify(source), 'utf8')
+
+    await expect(loadHeadlessConfig(configPath)).resolves.toEqual(source)
+  })
+
+  it('accepts Responses and Anthropic Provider Types in v3 config', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-p12-'))
     temporaryDirectories.push(directory)
     const configPath = path.join(directory, 'headless.json')
@@ -446,14 +475,19 @@ describe('Headless host', () => {
     const identity = JSON.parse(
       await readFile(result.artifacts.identityPath, 'utf8'),
     ) as {
+      schemaVersion: number
       configHash: string
       toolsHash: string
       promptResources: unknown[]
-      capabilities: { toolNames: string[] }
+      budgets: { subagentWorkerTimeoutMs: number }
+      capabilities: { toolNames: string[]; subagentsEnabled: boolean }
     }
+    expect(identity.schemaVersion).toBe(3)
     expect(identity.configHash).toBe(result.configHash)
     expect(identity.toolsHash).toMatch(/^[a-f0-9]{64}$/u)
     expect(identity.promptResources.length).toBeGreaterThan(0)
+    expect(identity.budgets.subagentWorkerTimeoutMs).toBe(1_800_000)
+    expect(identity.capabilities.subagentsEnabled).toBe(false)
     expect(identity.capabilities.toolNames).toContain('call_mcp_tool')
     await expect(
       readFile(result.artifacts.tracePath, 'utf8'),

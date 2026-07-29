@@ -137,6 +137,20 @@ describe('DatabaseService', () => {
              WHERE derived_from_message_id = ? AND session_id = ?`,
           )
           .all('message:source', 'session:fixture'),
+        subagentParent: reader
+          .prepare(
+            `EXPLAIN QUERY PLAN
+             SELECT id FROM subagent_executions
+             WHERE parent_session_id = ?`,
+          )
+          .all('session:parent'),
+        hiddenSessionParent: reader
+          .prepare(
+            `EXPLAIN QUERY PLAN
+             SELECT session_id FROM subagent_sessions
+             WHERE parent_session_id = ?`,
+          )
+          .all('session:parent'),
       }))
 
       expect(queryPlans.sessionParent).toEqual([
@@ -152,6 +166,16 @@ describe('DatabaseService', () => {
       expect(queryPlans.derivationSource).toEqual([
         expect.objectContaining({
           detail: expect.stringContaining('messages_derived_from_idx'),
+        }),
+      ])
+      expect(queryPlans.subagentParent).toEqual([
+        expect.objectContaining({
+          detail: expect.stringContaining('subagent_executions_parent_idx'),
+        }),
+      ])
+      expect(queryPlans.hiddenSessionParent).toEqual([
+        expect.objectContaining({
+          detail: expect.stringContaining('subagent_sessions_parent_idx'),
         }),
       ])
     } finally {
@@ -172,10 +196,50 @@ describe('DatabaseService', () => {
       const count = reopened.read((reader) =>
         reader.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
       )
-      expect(count).toEqual({ count: 4 })
+      expect(count).toEqual({ count: 5 })
     } finally {
       await reopened.close()
       await testDatabase.dispose()
+    }
+  })
+
+  it('migrates a v4 database to the hidden Subagent execution schema', async () => {
+    const legacy = await createTestDatabase({
+      migrations: DATABASE_MIGRATIONS.slice(0, 4),
+    })
+    const databasePath = legacy.databasePath
+    await legacy.database.close()
+
+    const migrated = DatabaseService.open({
+      databasePath,
+      appVersion: 'subagent-migration-test',
+    })
+    try {
+      const state = migrated.read((reader) => ({
+        migrations: reader
+          .prepare(
+            'SELECT version, name FROM schema_migrations ORDER BY version',
+          )
+          .all(),
+        tables: reader
+          .prepare(
+            `SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name LIKE 'subagent_%'
+             ORDER BY name`,
+          )
+          .all(),
+      }))
+      expect(state.migrations.at(-1)).toEqual({
+        version: 5,
+        name: '0005_subagent_executions',
+      })
+      expect(state.tables).toEqual([
+        { name: 'subagent_executions' },
+        { name: 'subagent_sessions' },
+      ])
+    } finally {
+      await migrated.close()
+      await legacy.dispose()
     }
   })
 
@@ -451,8 +515,8 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 5,
-        name: '0005_future',
+        version: 6,
+        name: '0006_future',
         sql: 'CREATE TABLE future_state (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -472,13 +536,13 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 5,
-        name: '0005_second',
+        version: 6,
+        name: '0006_second',
         sql: 'CREATE TABLE second_step (id TEXT PRIMARY KEY) STRICT;',
       },
       {
-        version: 6,
-        name: '0006_third',
+        version: 7,
+        name: '0007_third',
         sql: 'CREATE TABLE third_step (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -487,7 +551,7 @@ describe('DatabaseService', () => {
     await testDatabase.database.withTransaction((transaction) => {
       transaction
         .prepare('DELETE FROM schema_migrations WHERE version = ?')
-        .run(5)
+        .run(6)
     })
     await testDatabase.database.close()
 
@@ -508,8 +572,8 @@ describe('DatabaseService', () => {
     const brokenMigrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 5,
-        name: '0005_broken',
+        version: 6,
+        name: '0006_broken',
         sql: `
           CREATE TABLE should_rollback (id TEXT PRIMARY KEY) STRICT;
           INSERT INTO table_that_does_not_exist VALUES (1);
@@ -537,7 +601,7 @@ describe('DatabaseService', () => {
       ).toBeUndefined()
       expect(
         raw.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
-      ).toEqual({ count: 4 })
+      ).toEqual({ count: 5 })
     } finally {
       raw.close()
       await first.dispose()
@@ -549,8 +613,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 5,
-          name: '0005_transaction_probe',
+          version: 6,
+          name: '0006_transaction_probe',
           sql: `
             CREATE TABLE transaction_probe (
               id INTEGER PRIMARY KEY
@@ -643,8 +707,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 5,
-          name: '0005_transaction_control_probe',
+          version: 6,
+          name: '0006_transaction_control_probe',
           sql: 'CREATE TABLE transaction_control_probe (id INTEGER PRIMARY KEY) STRICT;',
         },
       ],

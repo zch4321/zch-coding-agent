@@ -4,7 +4,7 @@ import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ToolApprovalSummary } from '../../shared/agent-events'
 
 export interface UiLlmUsageRecord {
-  scope: 'main' | 'approval' | 'title' | 'compression'
+  scope: 'main' | 'approval' | 'title' | 'compression' | 'subagent'
   providerId: string
   providerLabel: string
   model: string

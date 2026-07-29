@@ -144,6 +144,22 @@ export class SessionRepository {
   /** Loads and decodes a Session record by ID. */
   get(reader: PersistenceReader, id: SessionId): SessionRecord | undefined {
     const row = reader
+      .prepare(
+        `SELECT ${SESSION_COLUMNS}
+         FROM sessions
+         WHERE id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM subagent_sessions hidden
+             WHERE hidden.session_id = sessions.id
+           )`,
+      )
+      .get(id)
+    return row ? decodeSessionRow(row) : undefined
+  }
+
+  /** Loads any Session record, including a backend-private Subagent Session. */
+  getAny(reader: PersistenceReader, id: SessionId): SessionRecord | undefined {
+    const row = reader
       .prepare(`SELECT ${SESSION_COLUMNS} FROM sessions WHERE id = ?`)
       .get(id)
     return row ? decodeSessionRow(row) : undefined
@@ -159,7 +175,12 @@ export class SessionRepository {
       MAX_SESSION_LIST_RECORDS,
       'Session page limit',
     )
-    const clauses: string[] = []
+    const clauses: string[] = [
+      `NOT EXISTS (
+        SELECT 1 FROM subagent_sessions hidden
+        WHERE hidden.session_id = sessions.id
+      )`,
+    ]
     const parameters: Array<string | number> = []
 
     if (query.projectId) {
@@ -243,6 +264,10 @@ export class SessionRepository {
         `SELECT s.id
          FROM sessions s
          WHERE s.lifecycle = 'active'
+           AND NOT EXISTS (
+             SELECT 1 FROM subagent_sessions hidden
+             WHERE hidden.session_id = s.id
+           )
            AND (
              instr(lower(s.title), lower(?)) > 0
              OR EXISTS (

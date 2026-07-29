@@ -6,6 +6,7 @@ export const LlmUsageScopeSchema = Type.Union([
   Type.Literal('approval'),
   Type.Literal('title'),
   Type.Literal('compression'),
+  Type.Literal('subagent'),
 ])
 
 export const ContextWindowSourceSchema = Type.Union([
