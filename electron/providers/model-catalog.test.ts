@@ -203,6 +203,7 @@ describe('DeepSeek model catalog', () => {
       compactThresholdTokens: 90_000,
       maxOutputTokens: 7_000,
     }
+    provider.modelConfigurationIds.push('saved-selection')
     const profiles = resolveModelProfiles(toPublicConfig(internal, true))
 
     expect(profiles).toEqual(
@@ -234,6 +235,11 @@ describe('DeepSeek model catalog', () => {
           contextWindowTokens: 200_000,
           compactThresholdTokens: 108_800,
           maxOutputTokens: 64_000,
+        }),
+        expect.objectContaining({
+          id: 'saved-selection',
+          availability: 'custom',
+          capabilitySource: 'default',
         }),
       ]),
     )

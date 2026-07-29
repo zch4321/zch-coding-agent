@@ -7,8 +7,22 @@ function legacyV9Config(): Record<string, unknown> {
   return structuredClone(legacyAppConfigV9) as Record<string, unknown>
 }
 
-describe('config v11 migration boundary', () => {
-  it('creates the v11 defaults when no config exists', () => {
+function legacyCurrentShapeConfig(
+  schemaVersion: 10 | 11,
+): Record<string, unknown> {
+  const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
+    string,
+    unknown
+  >
+  source.schemaVersion = schemaVersion
+  for (const provider of source.providers as Array<Record<string, unknown>>) {
+    delete provider.modelConfigurationIds
+  }
+  return source
+}
+
+describe('config v12 migration boundary', () => {
+  it('creates the v12 defaults when no config exists', () => {
     expect(migrateConfig(undefined)).toEqual(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined)).not.toBe(DEFAULT_APP_CONFIG)
   })
@@ -20,7 +34,7 @@ describe('config v11 migration boundary', () => {
           ...structuredClone(DEFAULT_APP_CONFIG),
           schemaVersion,
         }),
-      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v11`)
+      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v12`)
     }
   })
 
@@ -28,11 +42,12 @@ describe('config v11 migration boundary', () => {
     const source = legacyV9Config()
     const migrated = migrateConfig(source)
     expect(migrated).toMatchObject({
-      schemaVersion: 11,
+      schemaVersion: 12,
       providers: [
         {
           providerType: 'deepseek.chat-completions',
           revision: 1,
+          modelConfigurationIds: ['deepseek-v4-pro'],
         },
       ],
     })
@@ -56,11 +71,7 @@ describe('config v11 migration boundary', () => {
   })
 
   it('migrates v10 defaults to the enlarged read and tool budgets', () => {
-    const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
-      string,
-      unknown
-    >
-    source.schemaVersion = 10
+    const source = legacyCurrentShapeConfig(10)
     source.limits = {
       ...(source.limits as Record<string, unknown>),
       maxToolOutputBytes: 64 * 1_024,
@@ -70,7 +81,7 @@ describe('config v11 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 11,
+      schemaVersion: 12,
       limits: {
         maxToolOutputBytes: 128 * 1_024,
         maxToolResultTokens: 64_000,
@@ -81,11 +92,7 @@ describe('config v11 migration boundary', () => {
   })
 
   it('preserves customized v10 budgets', () => {
-    const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
-      string,
-      unknown
-    >
-    source.schemaVersion = 10
+    const source = legacyCurrentShapeConfig(10)
     source.limits = {
       ...(source.limits as Record<string, unknown>),
       maxToolOutputBytes: 72_000,
@@ -95,7 +102,7 @@ describe('config v11 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 11,
+      schemaVersion: 12,
       limits: {
         maxToolOutputBytes: 72_000,
         maxToolResultTokens: 12_000,
@@ -105,7 +112,22 @@ describe('config v11 migration boundary', () => {
     })
   })
 
-  it('accepts and clones a valid v11 config', () => {
+  it('migrates v11 model configuration selections to the main model', () => {
+    const source = legacyCurrentShapeConfig(11)
+    const migrated = migrateConfig(source)
+
+    expect(migrated).toMatchObject({
+      schemaVersion: 12,
+      providers: [
+        {
+          model: 'deepseek-v4-pro',
+          modelConfigurationIds: ['deepseek-v4-pro'],
+        },
+      ],
+    })
+  })
+
+  it('accepts and clones a valid v12 config', () => {
     const source = structuredClone(DEFAULT_APP_CONFIG)
     const migrated = migrateConfig(source)
     expect(migrated).toEqual(source)
@@ -125,12 +147,12 @@ describe('config v11 migration boundary', () => {
       source.providers[0].providerType = providerType
       const migrated = migrateConfig(source)
 
-      expect(migrated.schemaVersion).toBe(11)
+      expect(migrated.schemaVersion).toBe(12)
       expect(migrated.providers[0].providerType).toBe(providerType)
     }
   })
 
-  it('rejects malformed v11 data instead of filling missing fields', () => {
+  it('rejects malformed v12 data instead of filling missing fields', () => {
     const malformed = structuredClone(DEFAULT_APP_CONFIG) as Record<
       string,
       unknown

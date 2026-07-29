@@ -199,6 +199,30 @@ test.describe.serial('Electron settings workflows', () => {
     await refreshModels.click()
     await expect.poll(() => fakeProvider.modelCatalogRequests).toBe(1)
     await expect(provider.getByText('思考深度', { exact: true })).toBeVisible()
+    const modelTransfer = provider.getByTestId('provider-model-transfer')
+    await expect(
+      modelTransfer.getByText('全部模型', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      modelTransfer.getByText('待配置模型', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      provider
+        .locator('.provider-model-settings-row')
+        .first()
+        .getByText('主模型', { exact: true }),
+    ).toBeVisible()
+    const sourceModelFilter = modelTransfer
+      .locator('.n-transfer-list--source')
+      .getByPlaceholder('筛选模型')
+    await sourceModelFilter.fill('model-that-does-not-exist')
+    await expect(
+      modelTransfer.locator('.n-transfer-list--source .n-empty'),
+    ).toBeVisible()
+    await sourceModelFilter.fill(providerModel)
+    await modelTransfer
+      .locator('.n-transfer-list-item--source', { hasText: providerModel })
+      .click()
     const discoveredModelRow = provider.locator(
       '.provider-model-settings-row',
       {
@@ -216,22 +240,30 @@ test.describe.serial('Electron settings workflows', () => {
     for (const input of await discoveredModelRow.locator('input').all()) {
       await expect(input).not.toHaveValue('')
     }
-    await expect(
-      provider
-        .locator('.provider-model-settings-row')
-        .first()
-        .getByText('主模型', { exact: true }),
-    ).toBeVisible()
-    const modelSearch = provider
-      .getByTestId('provider-model-search')
-      .locator('input')
-    await modelSearch.fill('model-that-does-not-exist')
-    await expect(provider.getByText('没有匹配的模型')).toBeVisible()
-    await modelSearch.fill(providerModel)
-    await expect(provider.locator('.provider-model-settings-row')).toHaveCount(
-      1,
-    )
-    await modelSearch.clear()
+    await expect
+      .poll(async () =>
+        page.evaluate(async (modelId) => {
+          const api = Reflect.get(window, 'agentApi') as {
+            getConfig(payload: unknown): Promise<{
+              value?: {
+                config: {
+                  providers: Array<{
+                    modelConfigurationIds: string[]
+                  }>
+                }
+              }
+            }>
+          }
+          const result = await api.getConfig({
+            version: 1,
+            section: 'providers',
+          })
+          return result.value?.config.providers[0]?.modelConfigurationIds.includes(
+            modelId,
+          )
+        }, providerModel),
+      )
+      .toBe(true)
 
     const modelSelect = provider
       .locator('.settings-field', { hasText: '主模型' })
@@ -263,6 +295,9 @@ test.describe.serial('Electron settings workflows', () => {
 
     await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
     await expect.poll(() => fakeProvider.modelCatalogRequests).toBe(2)
+    await expect(
+      page.locator('.provider-model-settings-row', { hasText: providerModel }),
+    ).toBeVisible()
   })
 
   test('manages provider cards through the settings page', async () => {

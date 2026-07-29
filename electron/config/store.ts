@@ -45,6 +45,12 @@ function assertModelOverridesValid(
   }
 }
 
+function ensureMainModelIsConfigured(provider: AppProviderConfig): void {
+  if (!provider.modelConfigurationIds.includes(provider.model)) {
+    provider.modelConfigurationIds.unshift(provider.model)
+  }
+}
+
 function applyProviderUpdate(
   next: AppConfig,
   request: ProviderUpdate,
@@ -65,6 +71,7 @@ function applyProviderUpdate(
       reasoning: request.reasoning,
       modelCatalog: [],
       modelOverrides: {},
+      modelConfigurationIds: [request.model],
     }
     next.providers.push(provider)
   }
@@ -113,6 +120,7 @@ function applyProviderUpdate(
     provider.modelCatalog = []
     delete provider.modelCatalogFetchedAt
   }
+  ensureMainModelIsConfigured(provider)
   if (!isNewProvider && providerRouteShape(provider) !== previousRouteShape) {
     provider.revision += 1
   }
@@ -416,6 +424,16 @@ export class ConfigStore {
         }
 
         next.activeProviderId = provider.id
+        break
+      }
+      case 'provider-model-configuration': {
+        const provider = getAppProvider(next, request.providerId)
+
+        if (!provider) {
+          throw new Error(`Provider not found: ${request.providerId}`)
+        }
+
+        provider.modelConfigurationIds = [...new Set(request.modelIds)]
         break
       }
       case 'provider-copy': {

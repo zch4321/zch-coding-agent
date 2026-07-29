@@ -7,7 +7,12 @@ import {
 } from '../../shared/config'
 import { McpServerConfigSchema } from '../../shared/mcp'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
-import { AppConfigSchema, DEFAULT_APP_CONFIG, type AppConfig } from './schema'
+import {
+  AppConfigSchema,
+  AppProviderConfigSchema,
+  DEFAULT_APP_CONFIG,
+  type AppConfig,
+} from './schema'
 
 const validateAppConfig = compileSchema(AppConfigSchema)
 
@@ -95,12 +100,31 @@ const LegacyAppConfigV9Schema = Type.Object(
 type LegacyAppConfigV9 = Static<typeof LegacyAppConfigV9Schema>
 const validateLegacyAppConfigV9 = compileSchema(LegacyAppConfigV9Schema)
 
-// AppConfig v10 has the current field shape with the previous version literal.
+const LegacyAppProviderConfigV11Schema = Type.Object(
+  withoutKey(AppProviderConfigSchema.properties, 'modelConfigurationIds'),
+  { additionalProperties: false },
+)
+
+const LegacyAppConfigV11Schema = Type.Object(
+  {
+    ...AppConfigSchema.properties,
+    schemaVersion: Type.Literal(11),
+    providers: Type.Array(LegacyAppProviderConfigV11Schema, {
+      minItems: 1,
+      maxItems: 32,
+    }),
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV11 = Static<typeof LegacyAppConfigV11Schema>
+const validateLegacyAppConfigV11 = compileSchema(LegacyAppConfigV11Schema)
+
+// AppConfig v10 has the v11 Provider shape with the previous version literal.
 // It is retained so existing Provider Foundation installs can adopt the larger
 // tool/read defaults without losing credentials, catalogs, or custom limits.
 const LegacyAppConfigV10Schema = Type.Object(
   {
-    ...AppConfigSchema.properties,
+    ...LegacyAppConfigV11Schema.properties,
     schemaVersion: Type.Literal(10),
   },
   { additionalProperties: false },
@@ -132,12 +156,34 @@ function migrateLimitDefaults(
 function migrateV10(config: LegacyAppConfigV10): AppConfig {
   const migrated = {
     ...config,
-    schemaVersion: 11 as const,
+    schemaVersion: 12 as const,
     limits: migrateLimitDefaults(config.limits),
+    providers: config.providers.map((provider) => ({
+      ...provider,
+      modelConfigurationIds: [provider.model],
+    })),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
       10,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
+function migrateV11(config: LegacyAppConfigV11): AppConfig {
+  const migrated = {
+    ...config,
+    schemaVersion: 12 as const,
+    providers: config.providers.map((provider) => ({
+      ...provider,
+      modelConfigurationIds: [provider.model],
+    })),
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      11,
       formatSchemaErrors(validateAppConfig.errors),
     )
   }
@@ -151,7 +197,7 @@ export class UnsupportedConfigSchemaError extends Error {
     validationErrors?: string,
   ) {
     super(
-      `Unsupported config schema ${String(schemaVersion)}; this build requires AppConfig v11 and will reset the existing config to defaults.${
+      `Unsupported config schema ${String(schemaVersion)}; this build requires AppConfig v12 and will reset the existing config to defaults.${
         validationErrors ? ` ${validationErrors}` : ''
       }`,
     )
@@ -160,7 +206,7 @@ export class UnsupportedConfigSchemaError extends Error {
 }
 
 /**
- * Migrates the Provider identity and enlarged tool-limit boundaries.
+ * Migrates Provider identity, tool limits, and model-configuration selections.
  */
 export function migrateConfig(candidate: unknown): AppConfig {
   if (candidate === undefined || candidate === null) {
@@ -185,7 +231,7 @@ export function migrateConfig(candidate: unknown): AppConfig {
     const legacy = candidate as LegacyAppConfigV9
     const migrated = {
       ...legacy,
-      schemaVersion: 11 as const,
+      schemaVersion: 12 as const,
       limits: migrateLimitDefaults(legacy.limits),
       providers: legacy.providers.map((provider) => {
         const adapterId = provider.adapterId
@@ -199,6 +245,7 @@ export function migrateConfig(candidate: unknown): AppConfig {
             adapterId === 'deepseek.chat-completions'
               ? ('deepseek.chat-completions' as const)
               : ('generic.chat-completions' as const),
+          modelConfigurationIds: [provider.model],
         }
       }),
     }
@@ -221,7 +268,17 @@ export function migrateConfig(candidate: unknown): AppConfig {
     return migrateV10(candidate as LegacyAppConfigV10)
   }
 
-  if (Reflect.get(candidate, 'schemaVersion') !== 11) {
+  if (Reflect.get(candidate, 'schemaVersion') === 11) {
+    if (!validateLegacyAppConfigV11(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        11,
+        formatSchemaErrors(validateLegacyAppConfigV11.errors),
+      )
+    }
+    return migrateV11(candidate as LegacyAppConfigV11)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') !== 12) {
     throw new UnsupportedConfigSchemaError(
       Reflect.get(candidate, 'schemaVersion'),
     )

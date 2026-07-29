@@ -540,7 +540,7 @@ interface CompletedAssistantTurn {
 
 Provider 实现保持扁平：`DeepSeekProvider`、`GenericChatCompletionsProvider`、`GenericResponsesProvider` 和 `GenericAnthropicProvider` 都直接实现 `ModelProvider`，互不继承。允许共享 HTTP/SSE、bounds、tool-call 拼接、hash/timing 等纯函数，但不引入 BaseProvider、协议方言层或任意 capability 组合。Provider factory 只按 `providerType` 做穷举选择；模型目录查询是独立服务，不扩充核心接口。目录模型容量按 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值` 解析；Anthropic `max_input_tokens/max_tokens` 可以直接归一化，OpenAI-compatible 与 DeepSeek 的标准 `/models` 只返回身份字段时不得猜测容量。
 
-每个解析后的 `ModelProfile` 都携带非空的 `contextWindowTokens`、`compactThresholdTokens` 和 `maxOutputTokens`。Provider 设置页以可搜索、主模型置顶的模型列表编辑这三个绝对 Token 值；新目录模型即使只有 ID，也会立即用 256K 上下文、65,536 Token 最大输出默认值和可用 prompt budget 的 80% 压缩阈值形成完整 profile；上下文较小时输出默认值会被收窄，以至少保留 1,024 Token prompt budget。保存时只将用户实际修改过的模型行写入 per-model overrides，自动补齐的 profile 继续跟随全局默认值；手工覆盖不被全局设置反向改写。运行时从冻结 route binding 的 profile 读取输出上限与压缩阈值，不再从 Provider wire DTO 或当前可变表单推导。全局 `autoCompactTriggerPercent` 只负责为尚未覆盖的模型生成默认阈值。
+每个解析后的 `ModelProfile` 都携带非空的 `contextWindowTokens`、`compactThresholdTokens` 和 `maxOutputTokens`。Provider 设置页先通过可筛选的穿梭框选择当前要查看或编辑的模型，再在下方列表编辑这三个绝对 Token 值。每个 Provider 的选择以 `modelConfigurationIds` 持久化到 AppConfig，但不进入 route snapshot、Provider revision 或 `modelOverrides`；AppConfig v12 从合法 v11 迁移时默认选择当前主模型。新目录模型即使只有 ID，也会立即用 256K 上下文、65,536 Token 最大输出默认值和可用 prompt budget 的 80% 压缩阈值形成完整 profile；上下文较小时输出默认值会被收窄，以至少保留 1,024 Token prompt budget。保存时只将用户实际修改过的模型行写入 per-model overrides，自动补齐的 profile 继续跟随全局默认值；手工覆盖不被全局设置反向改写。运行时从冻结 route binding 的 profile 读取输出上限与压缩阈值，不再从 Provider wire DTO 或当前可变表单推导。全局 `autoCompactTriggerPercent` 只负责为尚未覆盖的模型生成默认阈值。
 
 Renderer 的运行限制表单以单列分节展示，`autoCompactTriggerPercent` 明确显示 `%` 单位。表单变更在 600ms 静默期后调用 versioned `config:set(limits)`；store 对发送中的快照签名，并在请求期间又有编辑时继续保存最新快照，避免用旧响应覆盖新输入。顶部按钮复用同一 action，用于立即提交和错误重试。
 
@@ -1576,6 +1576,6 @@ Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、
 
 SQLite transaction callback 通过 authorizer 拒绝事务控制 SQL；commit listener 逐项隔离；backend dispose 使用共享 promise 排空 live runtime/coordinator 后关闭数据库。FileChange retention 由 migration 维护单行总量和 trigger，不再每次插入全表 `SUM`。Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。Markdown Conversation import/export 暂停并在 UI 中禁用；Trace transcript export 保持可用。
 
-AppConfig v11 会把合法 v9 Provider 配置迁移为 `providerType`，并把合法 v10 配置中仍等于旧默认值的工具/read 预算提升到 64K/128K；API-key reference、模型目录、模型覆盖、revision 和自定义限制保持不变，不兼容、损坏或更早版本仍执行 reset-only。Headless v2 在读取时迁移合法 v1 输入；SQLite v4 原位迁移历史 route/continuation identity，旧 JSONL trace 只在读取时投影而不改写文件。
+AppConfig v12 会把合法 v9 Provider 配置迁移为 `providerType`，把合法 v10 配置中仍等于旧默认值的工具/read 预算提升到 64K/128K，并为合法 v9/v10/v11 Provider 补充默认包含主模型的 `modelConfigurationIds`；API-key reference、模型目录、模型覆盖、revision 和自定义限制保持不变，不兼容、损坏或更早版本仍执行 reset-only。Headless v2 在读取时迁移合法 v1 输入；SQLite v4 原位迁移历史 route/continuation identity，旧 JSONL trace 只在读取时投影而不改写文件。
 
 P3 review 建议、N-3/N-4 和 201+ 数据量的额外 Electron E2E 明确延后，不属于 P10 发布门禁；现有单元/集成测试继续覆盖 201+ Session、Message 和 FileChange 分页。产品路径不再保留双轨、兼容开关或 legacy fallback。

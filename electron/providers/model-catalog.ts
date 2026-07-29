@@ -343,6 +343,9 @@ export function resolveModelProfiles(
   for (const modelId of Object.keys(provider.modelOverrides)) {
     if (!models.has(modelId)) models.set(modelId, { id: modelId })
   }
+  for (const modelId of provider.modelConfigurationIds) {
+    if (!models.has(modelId)) models.set(modelId, { id: modelId })
+  }
   if (includeModelId && !models.has(includeModelId)) {
     models.set(includeModelId, { id: includeModelId })
   }

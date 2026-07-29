@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   NButton,
   NCard,
@@ -14,6 +14,7 @@ import {
   NModal,
   NSelect,
   NTag,
+  NTransfer,
   type DropdownOption,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -30,7 +31,12 @@ const agent = useAgentStore()
 const { t } = useI18n()
 const dirtyAction = ref<ProviderAction>()
 const deleteProviderId = ref<string>()
-const modelSearch = ref('')
+const pendingModelSelection = ref<{
+  providerId: string
+  modelIds: string[]
+  sequence: number
+}>()
+let modelSelectionSequence = 0
 const providerTypeOptions = computed(() => [
   {
     label: t('settings.providerTypeDeepSeek'),
@@ -75,31 +81,45 @@ const tokenEstimationOptions = computed(() => [
 const deleteProvider = computed(() =>
   agent.providers.find((provider) => provider.id === deleteProviderId.value),
 )
-const visibleModelProfiles = computed(() => {
-  const query = modelSearch.value.trim().toLowerCase()
-  return agent.modelProfiles
-    .filter(
-      (model) =>
-        !query ||
-        model.id.toLowerCase().includes(query) ||
-        model.ownedBy?.toLowerCase().includes(query),
-    )
-    .sort((left, right) => {
-      if (left.id === agent.providerForm.model) return -1
-      if (right.id === agent.providerForm.model) return 1
-      return left.id.localeCompare(right.id, undefined, {
-        numeric: true,
-        sensitivity: 'base',
-      })
-    })
+const modelTransferOptions = computed(() => agent.modelOptions)
+const selectedModelIds = computed(() => {
+  const pending = pendingModelSelection.value
+  if (pending?.providerId === agent.selectedProviderId) {
+    return pending.modelIds
+  }
+  return (
+    agent.providers.find((provider) => provider.id === agent.selectedProviderId)
+      ?.modelConfigurationIds ?? []
+  )
+})
+const selectedModelProfiles = computed(() => {
+  const profilesById = new Map(
+    agent.modelProfiles.map((model) => [model.id, model]),
+  )
+  return selectedModelIds.value.flatMap((id) => {
+    const model = profilesById.get(id)
+    return model ? [model] : []
+  })
 })
 
-watch(
-  () => agent.selectedProviderId,
-  () => {
-    modelSearch.value = ''
-  },
-)
+function handleSelectedModels(value: Array<string | number>): void {
+  const availableIds = new Set(agent.modelProfiles.map((model) => model.id))
+  const nextModelIds = value.map(String).filter((id) => availableIds.has(id))
+  const providerId = agent.selectedProviderId
+  const sequence = ++modelSelectionSequence
+  pendingModelSelection.value = {
+    providerId,
+    modelIds: nextModelIds,
+    sequence,
+  }
+  void agent
+    .saveProviderModelConfigurationSelection(providerId, nextModelIds)
+    .then(() => {
+      if (pendingModelSelection.value?.sequence === sequence) {
+        pendingModelSelection.value = undefined
+      }
+    })
+}
 
 onMounted(() => {
   void agent.enterProviderSettings()
@@ -455,35 +475,40 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <h4>{{ t('settings.modelSettings') }}</h4>
           <p>{{ t('settings.modelSettingsHint') }}</p>
         </div>
-        <div class="provider-model-settings-toolbar">
-          <NInput
-            v-model:value="modelSearch"
-            clearable
-            :placeholder="t('settings.searchModels')"
-            data-testid="provider-model-search"
-          />
-          <span>
-            {{
-              t('settings.modelResultCount', {
-                visible: visibleModelProfiles.length,
-                total: agent.modelProfiles.length,
-              })
-            }}
-          </span>
-        </div>
-        <div class="provider-model-settings-header" aria-hidden="true">
+        <NTransfer
+          :value="selectedModelIds"
+          :options="modelTransferOptions"
+          :source-title="t('settings.availableModels')"
+          :target-title="t('settings.selectedModels')"
+          :source-filter-placeholder="t('settings.filterModels')"
+          :target-filter-placeholder="t('settings.filterModels')"
+          :select-all-text="t('settings.selectAllModels')"
+          :clear-text="t('settings.clearSelectedModels')"
+          :show-selected="false"
+          source-filterable
+          target-filterable
+          virtual-scroll
+          class="provider-model-transfer"
+          data-testid="provider-model-transfer"
+          @update:value="handleSelectedModels"
+        />
+        <div
+          v-if="selectedModelProfiles.length"
+          class="provider-model-settings-header"
+          aria-hidden="true"
+        >
           <span>{{ t('settings.modelName') }}</span>
           <span>{{ t('settings.maximumContext') }}</span>
           <span>{{ t('settings.compressionThreshold') }}</span>
           <span>{{ t('settings.maximumOutputLength') }}</span>
         </div>
         <NList
-          v-if="visibleModelProfiles.length"
+          v-if="selectedModelProfiles.length"
           bordered
           class="provider-model-settings-list"
           data-testid="provider-model-settings-list"
         >
-          <NListItem v-for="model in visibleModelProfiles" :key="model.id">
+          <NListItem v-for="model in selectedModelProfiles" :key="model.id">
             <div class="provider-model-settings-row">
               <div class="provider-model-name">
                 <strong>{{ model.id }}</strong>
@@ -547,7 +572,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             </div>
           </NListItem>
         </NList>
-        <NEmpty v-else :description="t('settings.noMatchingModels')" />
+        <NEmpty v-else :description="t('settings.selectModelsHint')" />
       </div>
     </div>
 

@@ -37,6 +37,7 @@ function providerModelProfiles(
     provider.model,
     ...provider.modelCatalog.map((model) => model.id),
     ...Object.keys(provider.modelOverrides),
+    ...provider.modelConfigurationIds,
   ])
 
   return [...ids].map((id) => {
@@ -606,6 +607,36 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       }
 
       this.applyConfig(result.value.config, ['providers'])
+      return true
+    },
+    /** Persists the model rows selected for one Provider's configuration view. */
+    async saveProviderModelConfigurationSelection(
+      providerId: string,
+      modelIds: string[],
+    ) {
+      const bridge = window.agentApi
+      if (!bridge) return false
+
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'provider-model-configuration',
+        providerId,
+        modelIds: [...new Set(modelIds)],
+      })
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+
+      const savedProvider = result.value.config.providers.find(
+        (provider) => provider.id === providerId,
+      )
+      const providerIndex = this.providers.findIndex(
+        (provider) => provider.id === providerId,
+      )
+      if (savedProvider && providerIndex >= 0) {
+        this.providers.splice(providerIndex, 1, structuredClone(savedProvider))
+      }
       return true
     },
     async createProvider() {

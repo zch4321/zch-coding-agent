@@ -36,6 +36,9 @@ export const AppProviderConfigSchema = Type.Object(
     modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
     modelOverrides:
       PublicConfigSchema.properties.providers.items.properties.modelOverrides,
+    modelConfigurationIds:
+      PublicConfigSchema.properties.providers.items.properties
+        .modelConfigurationIds,
     apiKeyRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   },
   { additionalProperties: false },
@@ -56,7 +59,7 @@ export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
 
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(11),
+    schemaVersion: Type.Literal(12),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
@@ -92,7 +95,7 @@ export type AppConfig = Static<typeof AppConfigSchema>
 export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 11,
+  schemaVersion: 12,
   activeProviderId: DEFAULT_PROVIDER_ID,
   providers: [
     {
@@ -104,6 +107,7 @@ export const DEFAULT_APP_CONFIG = {
       model: 'deepseek-v4-pro',
       modelCatalog: [],
       modelOverrides: {},
+      modelConfigurationIds: ['deepseek-v4-pro'],
       reasoning: 'high',
     },
   ],
@@ -242,7 +246,7 @@ export function toPublicConfig(
         })
 
   return {
-    schemaVersion: 11,
+    schemaVersion: 12,
     activeProviderId: config.activeProviderId,
     providers: config.providers.map((provider) => ({
       id: provider.id,
@@ -255,6 +259,7 @@ export function toPublicConfig(
       modelCatalog: structuredClone(provider.modelCatalog),
       modelCatalogFetchedAt: provider.modelCatalogFetchedAt,
       modelOverrides: structuredClone(provider.modelOverrides),
+      modelConfigurationIds: structuredClone(provider.modelConfigurationIds),
       ...credentialForProvider(provider),
     })),
     approval: structuredClone(config.approval),

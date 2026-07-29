@@ -132,6 +132,10 @@ export const ProviderPublicConfigSchema = Type.Object(
       ModelCapabilityOverrideSchema,
       { maxProperties: 1_000 },
     ),
+    modelConfigurationIds: Type.Array(
+      Type.String({ minLength: 1, maxLength: 256 }),
+      { maxItems: 1_000, uniqueItems: true },
+    ),
     credentialConfigured: Type.Boolean(),
     credentialSource: Type.Union([
       Type.Literal('none'),
@@ -145,7 +149,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(11),
+    schemaVersion: Type.Literal(12),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
@@ -534,6 +538,15 @@ export const ConfigSetRequestSchema = Type.Union([
       version: Type.Literal(1),
       kind: Type.Literal('provider-select'),
       providerId: Type.String({ minLength: 1, maxLength: 128 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('provider-model-configuration'),
+      providerId: Type.String({ minLength: 1, maxLength: 128 }),
+      modelIds: ProviderPublicConfigSchema.properties.modelConfigurationIds,
     },
     { additionalProperties: false },
   ),

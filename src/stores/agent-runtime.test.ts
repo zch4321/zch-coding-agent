@@ -183,6 +183,7 @@ function provider(
     reasoning: 'off',
     modelCatalog: catalogModels.map((catalogModel) => ({ id: catalogModel })),
     modelOverrides: {},
+    modelConfigurationIds: [model],
     credentialConfigured: true,
     credentialSource: 'safe-storage',
   }
