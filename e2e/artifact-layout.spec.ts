@@ -318,6 +318,20 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     await expect(
       page.locator('.chat-message.assistant > .message-meta > strong'),
     ).toHaveCount(0)
+    const messageCenters = await page.evaluate(() => {
+      const user = document.querySelector('.chat-message.user')
+      const assistant = document.querySelector('.chat-message.assistant')
+      if (!user || !assistant) throw new Error('Expected chat messages')
+      const userBounds = user.getBoundingClientRect()
+      const assistantBounds = assistant.getBoundingClientRect()
+      return {
+        user: userBounds.left + userBounds.width / 2,
+        assistant: assistantBounds.left + assistantBounds.width / 2,
+      }
+    })
+    expect(
+      Math.abs(messageCenters.user - messageCenters.assistant),
+    ).toBeLessThan(1)
     await page.setViewportSize({ width: 1000, height: 720 })
 
     const artifactToggle = page.getByRole('button', {
