@@ -15,6 +15,7 @@ import {
   appendCompletedAssistantTurn,
   appendUserInput,
   canonicalHash,
+  LegacyToolResultError,
 } from './canonical-history'
 import type { SessionCompactCoordinator } from './session-compact-coordinator'
 import type { SessionInterjectionCoordinator } from './session-interjection-coordinator'
@@ -144,7 +145,6 @@ export class SessionRunController {
       clientRequestId,
       controller,
       status: 'idle',
-      toolTokensUsed: 0,
       usageRecords: [],
       fileChangeHistoryBytes: config.limits.fileChangeHistoryBytes,
       done: Promise.resolve(),
@@ -260,9 +260,11 @@ export class SessionRunController {
       this.releaseAccess(run)
     }
     run.status = status
+    const failureCode =
+      error instanceof LegacyToolResultError ? error.code : 'RUN_FAILED'
     if (error && status === 'failed') {
       run.failure = {
-        code: 'RUN_FAILED',
+        code: failureCode,
         message:
           error instanceof Error ? error.message : 'Run failed unexpectedly',
       }
@@ -275,7 +277,7 @@ export class SessionRunController {
       ...(error && status === 'failed'
         ? {
             error: {
-              code: 'RUN_FAILED',
+              code: failureCode,
               message:
                 error instanceof Error
                   ? error.message

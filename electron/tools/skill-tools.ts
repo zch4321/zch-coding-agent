@@ -2,6 +2,7 @@ import { Type } from '@sinclair/typebox'
 import type { SkillsManager } from '../skills/manager'
 import type { ToolDefinition } from './types'
 import type { ToolRegistry } from './tool-registry'
+import { projectReadSkillResult } from './tool-result-formatters'
 
 const ReadSkillArgsSchema = Type.Object(
   {
@@ -31,6 +32,7 @@ export function registerSkillTools(
     supportsAbort: true,
     defaultTimeoutMs: 2_000,
     maxOutputBytes: 80 * 1_024,
+    projectResultForModel: projectReadSkillResult,
     async execute(args) {
       const skill = skills.read(args.name)
 

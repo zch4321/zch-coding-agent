@@ -68,7 +68,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 - `risk`：`low | review | high` 的默认风险级别。
 - `supportsAbort`、`defaultTimeoutMs`、`maxOutputBytes`。
 
-所有参数先经 JSON Schema 校验；所有结果使用统一结果信封，明确 `ok/error/cancelled/timeout/truncated`，避免把无限 stdout、二进制或异常对象直接塞进上下文。
+所有参数先经 JSON Schema 校验。Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelled/timeout/truncated`，供安全检查、trace 和插件使用；模型历史不接收该信封。敏感数据过滤后，Tool Registry 将成功正文投影为 canonical `TextPart | JsonPart`，错误投影为统一短文本，再按投影后的实际内容执行单次与 Run 累计 token bound。自定义 projector 必须同步、确定性、无 I/O，异常时回退默认安全投影。
 
 #### 2.2.1 文件类
 
@@ -81,7 +81,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 > 设计意图：把常规删除做成独立工具，便于精确展示路径、数量和审批风险。它不能阻止 `run_command` 间接删除文件，因此命令工具仍必须独立经过权限策略，不能把工具拆分误当成 sandbox。
 
-`read_file` 使用 `startLine + lineCount` 分页，返回实际行范围、总行数、`truncated` 和 `nextStartLine`。默认尽量读取到 10,000 行，单次最多 10,000 行，并同时受 128 KiB 与 64K 估算 token 限制；超长单行不能绕过字节/token 上限。全局工具结果默认单次预算为 64K token、每个 Run 累计预算为 128K token，Token 估算继续按 UTF-8 字节比例保守计算，不能把字节数直接当成真实 token 数。
+`read_file` 使用 `startLine + lineCount` 分页。模型可见结果直接是带行号正文；空文件为 `[empty file]`，只有截断时才追加 `nextStartLine/totalLines/lineTruncated` 尾注，不重复 path 或参数。默认尽量读取到 10,000 行，单次最多 10,000 行，并同时受 128 KiB 与 64K 估算 token 限制；超长单行不能绕过字节/token 上限。每个工具结果独立受默认 64K token 上限保护，不设置跨调用或跨步骤累计的 Run 总预算；Token 估算继续按 UTF-8 字节比例保守计算，不能把字节数直接当成真实 token 数。完整 Provider 请求仍受冻结模型 profile 的 prompt budget 和自动压缩约束。
 
 `apply_patch` 第一版一次只修改一个已存在的 UTF-8 文本文件，可包含多个 hunk。补丁路径必须是 workspace 相对路径；禁止二进制、rename、mode change、绝对路径和越界路径。为适配模型常见的计数错误，hunk header 的行数和 new-file 行号只作为提示；上下文/删除行仍必须精确匹配，old line number 失效时只有在精确上下文唯一命中时才可应用。审批绑定原文件 hash、规范化补丁 hash 与结果 hash，执行前重新验证。`create_file` 只创建不存在的文件，并会自动创建缺失父目录；覆盖已有文件应使用 `apply_patch`。
 
@@ -92,6 +92,8 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 | `list_dir` | 列目录                     | **是**   |
 | `glob`     | 文件名模式匹配             | **是**   |
 | `grep`     | 内容搜索（底层 `ripgrep`） | **是**   |
+
+模型可见的 `grep` 结果使用 `path:line:text`，`glob/list_dir` 每行一个路径且目录追加 `/`；空结果使用 `[no matches]` 或 `[empty directory]`，只有截断时追加短尾注。不得重复回显 pattern/include/path 等调用参数。
 
 > 预留：`CodebaseIndexer` 接口（embedding / 模糊搜索），MVP 不实现，但工具注册表与 Agent Loop 设计要兼容未来新增只读工具。
 
@@ -105,6 +107,8 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 > `run_command` 用于短测试、构建、一次性脚本。长时间测试、watch、开发服务器、REPL 或需要反复观察输出的命令应使用 `terminal_open` / `terminal_send`，再配合 `terminal_send.delayMs` 或独立 `delay` 和 `terminal_read` 轮询。
 >
 > 参数必须区分 `mode: "process"`（`executable + args[]`，默认优先）和 `mode: "shell"`（命令字符串，支持管道/重定向但风险更高）。不能把两者混成一个无法可靠审查的字符串。
+>
+> 模型可见结果以 stdout 为正文，非空 stderr 放在 `[stderr]` 后；只有非零 exit、signal 或截断时追加状态尾注。Git 工具沿用同一 stream 形式，空成功结果返回简短完成提示。
 >
 > **安全边界说明**：MVP 只能保证命令的初始 `cwd` 位于工作区，不能仅靠字符串检查阻止 shell 命令、脚本或子进程访问工作区外资源。若要提供真正的主机级隔离，必须引入容器/OS sandbox；MVP 不承诺该能力。因此 `run_command` 与 PTY 在 Auto/Yolo 下都属于用户主动接受的主机执行风险。
 
@@ -124,6 +128,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 约定：
 
 - `terminal_read` 返回给 **LLM** 的内容是**去 ANSI 的纯文本**（便于模型理解）。
+- `terminal_read` 不重复返回 `terminalId`，但始终追加下一次增量读取需要的 `cursor`；只有截断时追加 `truncated/totalBytes`。`terminal_open` 仍返回后续调用必需的 ID。
 - **UI** 上人类看到的终端流是**原始带色流**。两者订阅同一 PTY，渲染层不同。
 - 与 `run_command` 并存：一次性命令用前者；长跑服务/交互式 REPL/实时观察用 terminal。`terminal_send.delayMs` 在输入成功后等待最多 60 秒，便于紧随其后的 `terminal_read` 读取增量输出；等待期间取消不会撤回已经写入 PTY 的输入。独立 `delay` 继续用于纯等待。
 - 终端归属于会话而不是单次 run：中断 run 不自动关闭终端；会话关闭或应用退出时必须清理。
@@ -176,6 +181,8 @@ Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items
 
 因此 wire `role` 只属于特定协议，不是数据库字段；一条 `MessageRecord` 也不保证对应一条 Provider message/item。Provider 的 `stream()` 把响应解码为 normalized events，并在完成时直接返回 canonical assistant parts、可读 reasoning 投影、标准化 usage 和 continuation envelope；Application Service 为其补齐 Session/Message 字段后一次性持久化完整 turn。
 
+Tool Result 的 canonical renderer 固定为：单 TextPart 原样、单 JsonPart 只序列化 value、多 part 按顺序换行连接；不能把 `type/json/value` 外壳或内部 `status/content/truncated/totalBytes` 发给模型。Chat Completions、Responses 和 Anthropic 只负责映射 wire 字段与 call ID，Anthropic 错误结果继续设置 `is_error = true`。
+
 `providerId` 表示用户保存的配置实例，`providerType` 表示代码实现；同一供应商的不同 API surface 必须使用不同 type。协议差异依据：[OpenAI Responses migration](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)、[Anthropic tool results](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)。
 
 ### 2.4 会话与工作区
@@ -185,7 +192,7 @@ Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items
 - Session 是持久化对话实体，绑定一个 `projectId`、当前模型选择与权限模式；UI 中的“对话”是 Session 的展示名称，不存在独立 Conversation 领域记录或 `conversationId -> sessionId` 映射。
 - SQLite 持久化 schema migrations、Projects、Session 元数据、完整 Message history 和有界 FileChanges。Goal/Plan 属于 Session 元数据；完整 assistant/tool/harness 内容统一表示为 Message。Renderer 只保存 backend public records 的副本，不得单独创建已提交消息。
 - Database migrations 必须按版本前向执行，在单个 transaction 内提交 schema/data change 和 migration record；已应用文件 checksum 改变或数据库版本高于当前应用时明确拒绝打开，不静默猜测兼容。
-- 每个 `MessageRecord` 保存内部 `kind` 与有序 `parts`。`kind` 用于区分真实用户输入、编排消息、runtime context、harness、assistant、tool result 和 compact summary；它不是 Provider wire role。V1 shared schema 必须按 `kind` 校验 part 组合：用户输入是非空 text；assistant turn 只含 text/tool-call 且记录实际 route；tool result record 只含一个 terminal tool-result，并引用历史中未完成的 call。
+- 每个 `MessageRecord` 保存内部 `kind` 与有序 `parts`。`kind` 用于区分真实用户输入、编排消息、runtime context、harness、assistant、tool result 和 compact summary；它不是 Provider wire role。V1 shared schema 必须按 `kind` 校验 part 组合：用户输入是非空 text；assistant turn 只含 text/tool-call 且记录实际 route；tool result record 只含一个 terminal tool-result，并引用历史中未完成的 call。新 tool result 必须带 `resultProjection = model-content.v1`；active history 中缺少 marker 的旧结果必须在 Provider 网络调用和计费前报 `LEGACY_TOOL_RESULT_UNSUPPORTED`，但旧会话仍可查看、导出、删除，也不改写 SQLite 历史。
 - 每个 `MessageRecord` 必须保存 `visibility = visible | hidden | superseded`，并可用 `turnId` 关联同一轮 context、user、assistant、tool 和 interjection。`visibility` 控制当前分支展示；`inHistory` 只控制模型上下文。Compact 只修改 `inHistory`，不得隐藏历史消息；rewind 将退出当前分支的记录标为 `superseded` 且 `inHistory = false`，不得物理删除。
 - Message metadata 是按 `kind` 校验的 application-owned typed annotations，可包含 attachment provenance、prompt id/version/hash、标准化 usage、tool/approval/compact 摘要和 reasoning projection 状态。Metadata 可以来源于 Provider，但删除它不能破坏下一次 Provider 请求；协议关键或只能由对应 Provider 理解的数据必须放入 `providerContinuation`。
 - SQLite 不保存 OpenAI、DeepSeek、Anthropic 或其他 Provider SDK 的请求 DTO。发起请求时，backend 从 `inHistory = true` 的完整 `MessageRecord` 生成 `CompiledCanonicalHistory`，再由当前 `ModelProvider.compile()` 整段编译 wire DTO；Persistence layer 不依赖 Provider。
@@ -203,7 +210,7 @@ Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items
 - Assistant stream delta 只保存在 backend memory；Provider turn 完成后才插入 Message。包含 tool calls 的 assistant turn 必须等每个 call 都有 terminal result 后，与对应 tool messages 在同一 transaction 写入，数据库不得保存协议半截。
 - 应用崩溃可以丢失尚未完成的 assistant text/reasoning、tool batch 和 Active Run，不保存 partial message，也不生成持久化 interrupted Run。最后一条已提交 user message 可以暂时没有 assistant reply。
 - 如果副作用工具已经修改 workspace、但应用在完整 tool batch transaction 前崩溃，文件变化可以保留而 tool messages 丢失；系统以下一次读取到的实际 workspace 为准。V2.1 不承诺文件系统与消息数据库之间的 crash-atomic journal。
-- 如果文件副作用已成功但 `file_changes` 持久化失败，terminal tool result 必须如实报告 `mutationSucceeded = true`、`CHANGE_HISTORY_PERSIST_FAILED` 和 `revertAvailable = false`；不得把已发生的文件操作报成未发生或自动重试。
+- 文件写入工具的模型可见结果是一行成功摘要。如果副作用已成功但 `file_changes` 持久化失败，摘要尾注必须如实保留 `mutationSucceeded = true`、`CHANGE_HISTORY_PERSIST_FAILED` 和 `revertAvailable = false`；不得把已发生的文件操作报成未发生或自动重试。
 - JSONL trace 是可选审计记录，不是事务恢复日志，也不能作为 Session 状态的唯一来源。
 
 ### 2.5 Skills（渐进式专家指令）
@@ -287,7 +294,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - 模型可见且 executor 可执行的 allowlist 仅为 `read_file/list_dir/glob/grep`、Project get/detect、`read_skill`、有界 `delay` 和可用时的四个 Git read Tool。写入、process、terminal、network、MCP、Goal/Plan、code intelligence 和递归 Agent Tool 均不提供。
 - child 复用唯一 Session/Run/Provider loop，Session 固定 readonly 且对普通 bootstrap、分页、搜索、导出和 Renderer events 隐藏。父 Session/Project 删除级联清理；父归档继续保留。
 - child 沿用全局 `maxStepsPerRun`（`0` 表示不限）、模型最大输出和通用 Tool context/output 限制，不增加专属 step/token/result budget。
-- 成功结果只返回 `results[name]` 最终文本，以及耗时、实际 Provider/model、标准化 usage 和输出上限截断标记；不得返回 reasoning、endpoint、凭据、child Session ID、trace 路径或临时绝对路径。
+- 内部成功结果保存 `results[name]` 最终文本，以及耗时、实际 Provider/model、标准化 usage 和输出上限截断标记；进入父模型历史时只投影 `results[name]` 文本，Provider/model/usage 留在内部 meta。不得返回 reasoning、endpoint、凭据、child Session ID、trace 路径或临时绝对路径。
 - `workerTimeoutMs` 默认 30 分钟、可配置 1 分钟至 24 小时。父 Run 取消、timeout、Provider failure 和应用退出都必须中断 child 并清理 snapshot/并发 slot；全局并发上限为 1 时启动前明确拒绝。
 - 相同 parent Session/Run/call 与参数 hash 可复用已完成结果；参数不同返回冲突。应用重启将遗留 active execution 标记为 `interrupted`，不得自动重试或恢复 stream。
 
@@ -498,7 +505,7 @@ session.end     { reason, ts }
 ### 5.4 Headless 运行输出
 
 - 内部 Headless host 必须复用桌面端唯一 Agent Runtime 组装入口，固定 Yolo 且不增加、删除或替换模型可见工具。
-- Headless config v3 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs`；Runtime Identity 记录开关和 timeout，child execution 仍使用相同 snapshot、隐藏 Session、Tool profile 和 usage 归属。
+- Headless config v4 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs`，并迁移 v1–v3 输入；Runtime Identity v4 记录开关和 timeout，child execution 仍使用相同 snapshot、隐藏 Session、Tool profile 和 usage 归属。
 - stdout 只允许版本化 JSONL；host 诊断写 stderr；最终 `result.json` 原子写入 workspace 外的 artifacts 目录。
 - Provider 凭据只能由受信任配置声明的环境变量名称解析，凭据值不得进入配置回包、JSONL、trace、patch 或子进程环境。
 - result 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计、trace 和 patch 路径。`completed` 只表示 Agent run 正常结束，不替代外部业务验收。

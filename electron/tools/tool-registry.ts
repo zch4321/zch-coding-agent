@@ -9,10 +9,12 @@ import type {
   ToolExecutionContext,
   ToolRegistrationPort,
   ToolResult,
+  ToolResultProjection,
 } from './types'
 import type { ApprovedToolCall } from './approved-tool-call'
 import { revalidateApprovedToolCall } from '../permission/permission-pipeline'
 import type { ProviderToolDefinition } from '../providers/provider'
+import { projectToolResultForModel } from './tool-result-projection'
 
 interface RegisteredTool {
   readonly definition: ToolDefinition
@@ -248,6 +250,21 @@ export class ToolExecutor {
   /** Removes provider-only metadata before validation, policy, and execution. */
   normalizeCall(call: ToolCall): ToolCall {
     return this.#registry.normalizeCall(call)
+  }
+
+  /** Projects one safe Tool Result through its registered or dynamic definition. */
+  projectResultForModel(
+    call: ToolCall,
+    result: ToolResult,
+    definitionOverride?: ToolDefinition,
+    onDiagnostic?: (message: string, error: unknown) => void,
+  ): ToolResultProjection {
+    return projectToolResultForModel({
+      call,
+      result,
+      definition: definitionOverride ?? this.#registry.get(call.toolId),
+      onDiagnostic,
+    })
   }
 
   /** Checks that a call references a known definition and matches approved arguments. */

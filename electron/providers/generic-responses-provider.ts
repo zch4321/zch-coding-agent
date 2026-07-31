@@ -4,7 +4,11 @@ import {
 } from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
 import { type JsonObject, type JsonValue } from '../../shared/json'
-import type { MessagePart, MessageRecord } from '../../shared/message'
+import {
+  renderToolResultContent,
+  type MessagePart,
+  type MessageRecord,
+} from '../../shared/message'
 import { renderLiveUserInterjection } from '../../shared/live-interjection'
 import { resolveResponsesEndpoint } from '../../shared/model-route'
 import { canonicalHash, messageText } from '../session/canonical-history'
@@ -134,7 +138,7 @@ function compileResponseRecord(record: MessageRecord): JsonObject[] {
         {
           type: 'function_call_output',
           call_id: result.callId,
-          output: JSON.stringify(result.content),
+          output: renderToolResultContent(result.content),
         },
       ]
     }

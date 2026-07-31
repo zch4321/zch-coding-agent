@@ -7,6 +7,7 @@ import {
   type CommandSpec,
   type RunCommandResult,
 } from '../process/run'
+import { projectGitResult } from './tool-result-formatters'
 
 /**
  * Common git prefix so the pager, colour output and external diff tooling
@@ -139,10 +140,13 @@ async function runGit(options: RunGitOptions): Promise<ToolResult> {
   }
 
   if (result.exitCode !== null && result.exitCode !== 0) {
+    const diagnostic = (result.stderr || result.stdout).trim().slice(0, 32_768)
     return {
       status: 'error',
       code: 'GIT_FAILED',
-      message: `git ${options.subcommand} exited with ${result.exitCode}`,
+      message: `git ${options.subcommand} exited with ${result.exitCode}${
+        diagnostic ? `\n${diagnostic}` : ''
+      }`,
       retryable: false,
     }
   }
@@ -254,6 +258,8 @@ export function registerGitReadOnlyTools(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 128 * 1_024,
+    projectResultForModel: (result) =>
+      projectGitResult(result, '[working tree clean]'),
     async execute(args: GitStatusArgs, context): Promise<ToolResult> {
       const flags = args.flags ?? []
       const flagError = assertFlagsAllowed(
@@ -292,6 +298,7 @@ export function registerGitReadOnlyTools(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 128 * 1_024,
+    projectResultForModel: (result) => projectGitResult(result, '[no changes]'),
     async execute(args: GitDiffArgs, context): Promise<ToolResult> {
       const flags = args.flags ?? []
       const flagError = assertFlagsAllowed(flags, GIT_DIFF_FLAGS, 'git_diff')
@@ -328,6 +335,7 @@ export function registerGitReadOnlyTools(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 128 * 1_024,
+    projectResultForModel: (result) => projectGitResult(result, '[no commits]'),
     async execute(args: GitLogArgs, context): Promise<ToolResult> {
       const flags = args.flags ?? []
       const flagError = assertFlagsAllowed(flags, GIT_LOG_FLAGS, 'git_log')
@@ -379,6 +387,8 @@ export function registerGitReadOnlyTools(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 128 * 1_024,
+    projectResultForModel: (result) =>
+      projectGitResult(result, '[git show completed with no output]'),
     async execute(args: GitShowArgs, context): Promise<ToolResult> {
       const flags = args.flags ?? []
       const flagError = assertFlagsAllowed(flags, GIT_SHOW_FLAGS, 'git_show')
@@ -486,6 +496,8 @@ export function registerGitWriteTools(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 64 * 1_024,
+    projectResultForModel: (result) =>
+      projectGitResult(result, '[git add completed]'),
     async execute(args: GitAddArgs, context): Promise<ToolResult> {
       if (args.all && args.paths && args.paths.length > 0) {
         return {
@@ -533,6 +545,8 @@ export function registerGitWriteTools(
     supportsAbort: true,
     defaultTimeoutMs: 30_000,
     maxOutputBytes: 64 * 1_024,
+    projectResultForModel: (result) =>
+      projectGitResult(result, '[git commit completed]'),
     async execute(args: GitCommitArgs, context): Promise<ToolResult> {
       const { timeoutMs, maxOutputBytes } = timeoutAndOutput(getConfig)
       const amend = args.amend ? ['--amend'] : []
@@ -558,6 +572,8 @@ export function registerGitWriteTools(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 64 * 1_024,
+    projectResultForModel: (result) =>
+      projectGitResult(result, '[git restore completed]'),
     async execute(args: GitRestoreArgs, context): Promise<ToolResult> {
       const { timeoutMs, maxOutputBytes } = timeoutAndOutput(getConfig)
       const staged = args.staged ? ['--staged'] : []

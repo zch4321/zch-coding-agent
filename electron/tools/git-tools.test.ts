@@ -187,6 +187,7 @@ describe('git read-only tools', () => {
     expect(result).toMatchObject({
       status: 'error',
       code: 'GIT_FAILED',
+      message: expect.stringContaining('no-such-ref'),
     })
   })
 

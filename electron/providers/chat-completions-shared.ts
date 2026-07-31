@@ -10,10 +10,11 @@ import {
   type JsonObject,
   type JsonValue,
 } from '../../shared/json'
-import type {
-  MessagePart,
-  MessageRecord,
-  ToolCallPart,
+import {
+  renderToolResultContent,
+  type MessagePart,
+  type MessageRecord,
+  type ToolCallPart,
 } from '../../shared/message'
 import { renderLiveUserInterjection } from '../../shared/live-interjection'
 import { canonicalHash, messageText } from '../session/canonical-history'
@@ -158,7 +159,7 @@ function compileMessage(
         {
           role: 'tool',
           tool_call_id: result.callId,
-          content: JSON.stringify(result.content),
+          content: renderToolResultContent(result.content),
         },
       ]
     }

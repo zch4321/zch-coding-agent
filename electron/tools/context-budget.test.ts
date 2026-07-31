@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
-import { boundToolResultForContext, estimateTextTokens } from './context-budget'
+import {
+  boundToolResultProjectionForContext,
+  estimateTextTokens,
+} from './context-budget'
 
 const limits = toPublicConfig(DEFAULT_APP_CONFIG, false).limits
 
@@ -20,36 +23,61 @@ describe('context budget', () => {
     ).toBe(3)
   })
 
-  it('bounds a result with head and tail and enforces the run budget', () => {
+  it('bounds each result independently with a head and tail preview', () => {
     const large = {
-      status: 'ok' as const,
-      content: `HEAD-${'x'.repeat(20_000)}-TAIL`,
+      content: [
+        {
+          type: 'text' as const,
+          text: `HEAD-${'x'.repeat(20_000)}-TAIL`,
+        },
+      ],
+      isError: false,
+      truncated: false,
     }
-    const bounded = boundToolResultForContext(
-      large,
-      { ...limits, maxToolResultTokens: 256, maxToolTokensPerRun: 300 },
-      0,
-    )
-
-    expect(bounded.result).toMatchObject({ status: 'ok', truncated: true })
-    expect(JSON.stringify(bounded.result)).toContain('HEAD-')
-    expect(JSON.stringify(bounded.result)).toContain('-TAIL')
-
-    expect(
-      boundToolResultForContext(large, limits, limits.maxToolTokensPerRun)
-        .result,
-    ).toMatchObject({
-      status: 'ok',
-      truncated: true,
-      content: expect.objectContaining({
-        message: expect.stringContaining('bounded preview'),
-      }),
+    const bounded = boundToolResultProjectionForContext(large, {
+      ...limits,
+      maxToolResultTokens: 256,
     })
+
+    expect(bounded).toMatchObject({ truncated: true })
+    expect(bounded.content[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining('HEAD-'),
+    })
+    expect(JSON.stringify(bounded.content)).toContain('-TAIL')
+
+    const small = {
+      content: [{ type: 'text' as const, text: 'small later result' }],
+      isError: false,
+      truncated: false,
+    }
     expect(
-      JSON.stringify(
-        boundToolResultForContext(large, limits, limits.maxToolTokensPerRun)
-          .result,
-      ),
-    ).toContain('-TAIL')
+      boundToolResultProjectionForContext(small, {
+        ...limits,
+        maxToolResultTokens: 256,
+      }),
+    ).toEqual(small)
+  })
+
+  it('keeps projected UTF-8 text valid when truncating on byte boundaries', () => {
+    const bounded = boundToolResultProjectionForContext(
+      {
+        content: [
+          {
+            type: 'text',
+            text: `开头-${'界'.repeat(2_000)}-结尾`,
+          },
+        ],
+        isError: false,
+        truncated: false,
+      },
+      { ...limits, maxToolResultTokens: 128 },
+    )
+    const content = bounded.content[0]
+    expect(content?.type).toBe('text')
+    if (content?.type !== 'text') return
+    expect(content.text).not.toContain('\uFFFD')
+    expect(content.text).toContain('开头')
+    expect(content.text).toContain('结尾')
   })
 })

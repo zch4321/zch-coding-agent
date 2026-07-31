@@ -341,6 +341,7 @@ interface MessageMetadataV1 {
   tool?: {
     name: string
     reason?: string
+    resultProjection?: 'model-content.v1'
     status: 'completed' | 'denied' | 'failed' | 'cancelled' | 'timed_out'
     truncated: boolean
     durationMs?: number
@@ -438,12 +439,28 @@ interface MessageRecord {
 - 自动 compact 的 replay user 携带 `replayedFromMessageId`；控制命令生成的模型正文携带 `derivedFromMessageId + derivation = control_command_payload`。原始、replay、derived 三种 identity 严格 XOR，后两者都不复制 `clientRequestId`。
 - 本地控制命令是 durable canonical log 的一部分，但永久 `inHistory = false`；普通 transcript/search 投影排除它，raw Message paging 仍保留它用于审计。Fork 会复制并 remap control/derived reference，但控制命令不能作为可见 fork point。
 - `assistant_turn`：只允许 text/tool-call parts，至少一项；`modelRoute` 必填，可携带 reasoning projection 和 continuation。
-- `tool_result`：每条 record 正好包含一个 terminal tool-result part；`callId` 必须对应之前 active assistant turn 中的 tool-call part。
+- `tool_result`：每条 record 正好包含一个 terminal tool-result part；`callId` 必须对应之前 active assistant turn 中的 tool-call part。新结果必须带 `metadata.tool.resultProjection = 'model-content.v1'`，表示 `content` 已是模型可见的 canonical `TextPart | JsonPart`，不是 executor 的内部结果信封。
 - `system_instruction/assistant_preferences/selected_context/runtime_context/agents_context/orchestrator/interjection/compact_summary`：V1 只允许非空 text parts；不存在通用 `harness` kind。
 - `normalizedReasoningText/providerContinuation` 不能出现在非 assistant record。
 - `MessageMetadataV1` 也必须按 `kind` 收紧，不接受任意键。
 
 MessageRecord 是持久化、排序、分页、compact 和 UI 派生的单位；MessagePart 是同一个逻辑消息内部的有序 payload atom。这是两层逻辑类型，不代表需要 `message_parts` 表；V1 将整个 parts array 作为受 shared schema 校验的 JSON 落在 `messages.parts_json`。
+
+Tool executor 仍使用完整的 backend-private `ToolResult`，让权限、敏感数据检查、trace 和插件看到 `status/content/truncated/totalBytes`。进入模型历史前执行固定投影：
+
+```text
+execute / byte bound
+  -> FileChange annotation
+  -> sensitive-data filter
+  -> ToolDefinition.projectResultForModel() or default projection
+  -> projected token bound
+  -> tool.completed + canonical tool_result
+  -> ModelProvider.compile()
+```
+
+`projectResultForModel()` 同步、确定性、无 I/O，接收结果和参数副本；返回值经 canonical part schema 与 JSON-safe normalization 校验。默认规则是 string → `TextPart`、其他 `JsonValue` → `JsonPart`、空 string → `[no output]`。错误统一成为 `ERROR CODE: message`、`DENIED: message`、`CANCELLED: message` 或 `TIMEOUT: message` 文本。自定义 projector 失败只记录诊断并回退默认安全投影，不改变工具成功状态。单次与 Run 累计 Tool token 预算按投影后的实际模型内容计算；超限时只保留一个带统一截断标记的 head/tail TextPart。
+
+旧记录的 metadata schema 仍允许缺少 marker，以便查看、导出和删除；但 `MessageHistoryCompiler` 遇到 active legacy tool result 时在任何 Provider 网络调用前抛出 `LEGACY_TOOL_RESULT_UNSUPPORTED`。不迁移或重写旧历史；compact/rewind 后已退出 active history 的旧记录不阻断新 epoch。
 
 持久化 log、Provider active history 和 renderer transcript 是三个独立投影：
 
@@ -538,13 +555,15 @@ interface CompletedAssistantTurn {
 
 `role` 只是部分 wire 协议的字段，不是 canonical database field。OpenAI 官方把 Chat Completions 的基本单位称为 Message，而 Responses 使用包括 `message/function_call/function_call_output` 的 Items；Anthropic 则把 client tool result 放在 `user` message 的 `tool_result` content block 中。因此一条 MessageRecord 不要求对应一条 wire message/item。协议依据：[OpenAI Responses migration](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)、[Anthropic tool results](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)。
 
+三个协议使用同一个 canonical Tool Result renderer：单 TextPart 原样返回，单 JsonPart 只 `JSON.stringify(value)`，多 part 按顺序用换行连接，不序列化 `type/text/json/value` 外壳。各 Provider 只把结果放入自己的 `content/output/tool_result` 字段，并继续用 canonical `callId` 生成 `tool_call_id/call_id/tool_use_id`；Anthropic 在 `isError` 时设置 `is_error = true`。
+
 Provider 实现保持扁平：`DeepSeekProvider`、`GenericChatCompletionsProvider`、`GenericResponsesProvider` 和 `GenericAnthropicProvider` 都直接实现 `ModelProvider`，互不继承。允许共享 HTTP/SSE、bounds、tool-call 拼接、hash/timing 等纯函数，但不引入 BaseProvider、协议方言层或任意 capability 组合。Provider factory 只按 `providerType` 做穷举选择；模型目录查询是独立服务，不扩充核心接口。目录模型容量按 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值` 解析；Anthropic `max_input_tokens/max_tokens` 可以直接归一化，OpenAI-compatible 与 DeepSeek 的标准 `/models` 只返回身份字段时不得猜测容量。
 
 每个解析后的 `ModelProfile` 都携带非空的 `contextWindowTokens`、`compactThresholdTokens` 和 `maxOutputTokens`。Provider 设置页先通过可筛选的穿梭框选择当前要查看或编辑的模型，再在下方列表编辑这三个绝对 Token 值。每个 Provider 的选择以 `modelConfigurationIds` 持久化到 AppConfig，但不进入 route snapshot、Provider revision 或 `modelOverrides`；AppConfig v12 从合法 v11 迁移时默认选择当前主模型。新目录模型即使只有 ID，也会立即用 256K 上下文、65,536 Token 最大输出默认值和可用 prompt budget 的 80% 压缩阈值形成完整 profile；上下文较小时输出默认值会被收窄，以至少保留 1,024 Token prompt budget。保存时只将用户实际修改过的模型行写入 per-model overrides，自动补齐的 profile 继续跟随全局默认值；手工覆盖不被全局设置反向改写。运行时从冻结 route binding 的 profile 读取输出上限与压缩阈值，不再从 Provider wire DTO 或当前可变表单推导。全局 `autoCompactTriggerPercent` 只负责为尚未覆盖的模型生成默认阈值。
 
 Renderer 的运行限制表单以单列分节展示，`autoCompactTriggerPercent` 明确显示 `%` 单位。表单变更在 600ms 静默期后调用 versioned `config:set(limits)`；store 对发送中的快照签名，并在请求期间又有编辑时继续保存最新快照，避免用旧响应覆盖新输入。顶部按钮复用同一 action，用于立即提交和错误重试。
 
-默认工具上下文预算为单次 64K token、每个 Run 累计 128K token；通用工具输出与 `read_file` 内容边界为 128 KiB。`read_file` 默认/最多扫描 10,000 行，最终仍由字节与保守 token 估算先到者截断，执行器 envelope 预留独立序列化开销。AppConfig v11 只把仍等于旧默认值的 v10 四项限制迁移到新默认值，自定义限制原样保留。
+每个工具结果的模型投影独立受默认 64K token 上限保护，不再维护跨 Tool batch、Provider step 或整个 Run 累计的工具结果预算；通用工具输出与 `read_file` 内容边界为 128 KiB。`read_file` 默认/最多扫描 10,000 行，最终仍由字节与保守 token 估算先到者截断。执行器先保留独立 byte bound，模型 token 预算随后只计算 canonical projection，不再计算内部结果信封。完整 Provider 请求继续受冻结模型 profile 的 prompt budget 与自动压缩约束。AppConfig v14 从合法 v9–v13 配置删除退役的 `maxToolTokensPerRun`，其余限制保持既有迁移语义。
 
 ToolRegistry 可以注册稳定的 `code_*` facade，但每个 Session/Run 在生成 provider tool catalog 时按当前 ProjectModel 过滤。只有 `serena.enabled` 且至少一个属于该 Serena backend 的 binding 已启用并声明 capability 时，Provider request、runtime context 和 AGENTS context 才包含这些工具；未配置、禁用或读取 ProjectModel 失败都采用 fail-closed 目录。Provider parser 删除 intent metadata 后，ToolRegistry/executor 在权限与 schema 校验前再次按注册时记录的实际 intent field 清理，防止 `_agent_intent` 序列化泄漏导致偶发 `additionalProperties` 错误。
 
@@ -556,7 +575,7 @@ Composer route 与 Provider 编辑草稿互相独立：已有对话始终读取�
 
 三个通用兜底 type 为 `generic.chat-completions`、`generic.responses` 和 `generic.anthropic`。Responses 固定 `store = false`，不使用 `previous_response_id` 或 Conversations API；完整 output items（含 encrypted reasoning）进入 `responses.output-items.v1` continuation 并由本地 history 精确回放。Anthropic 的 high/max 使用 adaptive thinking 与 `output_config.effort`；完整 thinking、redacted thinking、signature 和 tool-use blocks 进入 `anthropic.message-content.v1` continuation。两者的 Provider Type/hash 不匹配均回退 canonical replay，同类型损坏 payload 明确报错。
 
-Structured output 是携带 JSON Schema 的 provider-neutral 请求。Responses 编译为 `text.format`，Anthropic 编译为 `output_config.format`；DeepSeek 与 Generic Chat 为保持现有兼容行为继续降级成 `json_object`，Application 仍执行最终 schema 校验。当前所有 Provider 都把 canonical tool-result part 数组整体 JSON 编码到各自 wire tool-result 字段；模型会看到带类型标签的内部 part 结构，golden test 固定该行为，后续若改投影必须作为显式 wire 行为变更。
+Structured output 是携带 JSON Schema 的 provider-neutral 请求。Responses 编译为 `text.format`，Anthropic 编译为 `output_config.format`；DeepSeek 与 Generic Chat 为保持现有兼容行为继续降级成 `json_object`，Application 仍执行最终 schema 校验。Tool Result wire 字段只包含 canonical renderer 的正文，不包含 executor 的 `status/content/truncated/totalBytes`，也不包含 part 的 `type/value` 标签。
 
 ### 5.4 FileChangeSummary 与 StoredFileChangeRecord
 
@@ -1553,7 +1572,7 @@ durable execution 只保存 source hash、文件数/字节、跳过目录以及�
 
 ### 18.4 Child Run、结果与生命周期
 
-child Session 固定 `permissionMode = 'readonly'`、`visibility = 'internal'`，沿用全局 `limits.maxStepsPerRun`；`0` 仍表示不限步数。Provider 输出沿用冻结模型 profile 的 `maxOutputTokens`，返回父模型时继续经过现有 `maxToolResultTokens`、`maxToolTokensPerRun` 与 Tool byte/token 保护，不增加 Subagent 专属 step/token/result budget。
+child Session 固定 `permissionMode = 'readonly'`、`visibility = 'internal'`，沿用全局 `limits.maxStepsPerRun`；`0` 仍表示不限步数。Provider 输出沿用冻结模型 profile 的 `maxOutputTokens`，返回父模型时继续经过现有单次 `maxToolResultTokens` 与 Tool byte/token 保护，不增加 Subagent 专属 step/token/result budget。
 
 AppConfig/PublicConfig v13 只新增：
 
@@ -1564,9 +1583,9 @@ subagents: {
 }
 ```
 
-新安装 `maxConcurrentRuns` 默认为 16、schema 范围保持 `1..32`；v12→v13 迁移保留已有用户值。父 Run 自身也占全局 slot，因此上限为 1 时明确拒绝嵌套执行。Agents 设置页使用现有自动保存机制配置开关和 timeout，并提示额外 Provider 请求/费用与当前并发值。Headless config v3 支持相同字段；Runtime Identity v3 记录开关和 timeout。
+新安装 `maxConcurrentRuns` 默认为 16、schema 范围保持 `1..32`；v12→v13 迁移保留已有用户值。父 Run 自身也占全局 slot，因此上限为 1 时明确拒绝嵌套执行。Agents 设置页使用现有自动保存机制配置开关和 timeout，并提示额外 Provider 请求/费用与当前并发值。Headless config v3 引入相同字段；v4 迁移 v1–v3 并删除退役的 Run 工具结果预算。Runtime Identity v4 记录当前开关、timeout 与仍有效的预算。
 
-成功结果为 `{ results: { [name]: finalAssistantText }, meta }`；`meta` 只包含耗时、实际 `providerId/model`、标准化 usage 汇总和模型是否因输出上限截断。reasoning、endpoint、凭据、child Session ID、trace 路径和临时绝对路径不能回传。只有 reasoning 或缺少最终 assistant text 时明确失败；长度上限结束则保留已有文本并标记 `truncated`。
+内部成功结果为 `{ results: { [name]: finalAssistantText }, meta }`；`meta` 只包含耗时、实际 `providerId/model`、标准化 usage 汇总和模型是否因输出上限截断。reasoning、endpoint、凭据、child Session ID、trace 路径和临时绝对路径不能回传。进入父模型历史时 `subagent_run` projector 只保留 `results[name]` 最终文本，输出上限截断时追加短尾注；Provider/model/usage 留在内部 meta 和统计。只有 reasoning 或缺少最终 assistant text 时明确失败；长度上限结束则保留已有文本并标记 `truncated`。
 
 child stream/tool/domain event 不发布给 Renderer，也不创建独立 trace capture。标准化 usage 以 `scope = 'subagent'` 和父 Session/Run/call 归属进入现有统计。父 Run 取消、worker timeout、Provider failure、应用 dispose 都通过 AbortSignal/Session interrupt 级联中断，并等待 child Provider/Tool、全局 slot、hidden Session handle 和 snapshot 完整收敛。
 
@@ -1602,6 +1621,9 @@ child stream/tool/domain event 不发布给 Renderer，也不创建独立 trace 
 - MessageHistoryCompiler 只执行 active-history policy 并生成 `CompiledCanonicalHistory`，不生成 wire `role` 或 Provider DTO。
 - 相同 active MessageRecords、route 和 Provider config 生成确定性的 Provider DTO；不同 Provider 的 golden tests 覆盖 Chat Completions messages、Responses items 和 Anthropic content blocks。
 - Chat Completions 将 assistant tool-call parts 编译为 `tool_calls[]`、将每个 tool-result record 编译为 `role = 'tool'`；Responses 编译为 `function_call/function_call_output` items；Anthropic 把相邻 results 合并为 `user` message 中排在前面的 `tool_result` blocks。
+- Tool Result 默认/自定义投影、projector fallback、JSON-safe normalization、UTF-8 head/tail token bound 和错误文本均有 exact tests；Provider golden 断言 wire 不含内部 envelope 或 part 标签。
+- `read_file/grep/glob/list_dir`、terminal/process/Git、fetch/search/skill、FileChange、MCP 与 Subagent 的模型可见格式使用 exact golden；实时 `tool.completed` 与 reload 后 durable ToolCallCard 显示相同 canonical content。
+- 新结果持久化 projection marker；active legacy result 在 Provider factory/stream 和 usage 前失败，inactive old epoch 不阻断新 history。
 - Provider 可以将一条 canonical record 展开为多个 wire items，或把多条相邻 canonical records 合并为一条 wire message；不依赖一对一映射。
 - `normalizedReasoningText` 只包含允许展示的非加密文本；缺失投影时 UI 不显示 reasoning，且不能从它重建 continuation。
 - `ProviderContinuationEnvelope` 外层 schema 校验、`data` 原样 round-trip、数组顺序不变；签名、密文和 opaque item 不被 Core 改写。
@@ -1654,6 +1676,8 @@ P11 Provider Runtime Foundation 与 P12 Generic Responses/Anthropic 已完成。
 
 P13 Read-only Subagent Runtime 的 S1/S2 已完成。默认关闭的 `subagent_run({ name, task })` 复用唯一 Session/Run/Provider loop，在 workspace 外稳定 snapshot 上运行隐藏 readonly Session；task 是不含父历史的普通 user input。Tool catalog/executor 双重限制只读能力，特殊 batch 在任何调用前统一预检；route、全局步骤/输出/Tool 限制、取消与 usage 均沿用现有 runtime。Model Pool 是下一阶段，Swarm、递归委派、code intelligence、自定义 child 工具列表和详细子任务 UI 尚未实现。
 
+Tool Result projection 已统一进入生产主链：完整内部 `ToolResult` 只供安全、trace 和插件使用，模型历史与 `tool.completed` 使用 `model-content.v1` canonical parts。文本密集型内置工具输出紧凑正文，结构化工具保留 JSON value；Chat Completions、Responses 与 Anthropic 共用无 part 外壳的 renderer。旧 active Tool Result 不迁移并明确拒绝续聊。
+
 Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、每 Session runtime overlay 和 UI-only draft/selection。首次发送前不创建空 Session；所有 durable command response 与 `domain-state:event` 经同一 reconciler 处理 cursor/revision、重复 delivery、缺口和 backend instance 变化。
 
 后台异步故障经版本化 `app:notification` 交付；preload 在 renderer 挂载前做 64 条有界缓存。Renderer 以 `NMessage` 展示瞬时操作反馈：warning 10 秒、error 手动关闭、最多 5 条并排队，且按 code/Session/message 去重。通知不进入 durable replica 或 Timeline；日志 capture 的持续状态留在 Header/设置。
@@ -1662,6 +1686,6 @@ Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、
 
 SQLite transaction callback 通过 authorizer 拒绝事务控制 SQL；commit listener 逐项隔离；backend dispose 使用共享 promise 排空 live runtime/coordinator 后关闭数据库。FileChange retention 由 migration 维护单行总量和 trigger，不再每次插入全表 `SUM`。Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。Markdown Conversation import/export 暂停并在 UI 中禁用；Trace transcript export 保持可用。
 
-AppConfig v13 会把合法 v9 Provider 配置迁移为 `providerType`，把合法 v10 配置中仍等于旧默认值的工具/read 预算提升到 64K/128K，为合法 v9/v10/v11 Provider 补充默认包含主模型的 `modelConfigurationIds`，并为合法 v12 增加默认关闭、30 分钟 timeout 的 Subagent 配置；API-key reference、模型目录、模型覆盖、revision、自定义限制和已有 `maxConcurrentRuns` 保持不变，不兼容、损坏或更早版本仍执行 reset-only。Headless v3 在读取时迁移合法 v1/v2 输入；SQLite v5 增加 hidden Subagent execution/session ownership，并保留 v4 对历史 route/continuation identity 的原位迁移。旧 JSONL trace 只在读取时投影而不改写文件。
+AppConfig v14 会把合法 v9 Provider 配置迁移为 `providerType`，把合法 v9/v10 配置中仍等于旧默认值的单次工具 token 与工具/read 字节限制提升到 64K/128KiB，为合法 v9/v10/v11 Provider 补充默认包含主模型的 `modelConfigurationIds`，为合法 v12 增加默认关闭、30 分钟 timeout 的 Subagent 配置，并从所有合法 v9–v13 配置删除退役的 `maxToolTokensPerRun`。API-key reference、模型目录、模型覆盖、revision、其余自定义限制和已有 `maxConcurrentRuns` 保持不变，不兼容、损坏或更早版本仍执行 reset-only。Headless v4 在读取时迁移合法 v1–v3 输入；Runtime Identity v4 不再记录 Run 累计工具预算。SQLite v5 增加 hidden Subagent execution/session ownership，并保留 v4 对历史 route/continuation identity 的原位迁移。旧 JSONL trace 只在读取时投影而不改写文件。
 
 P3 review 建议、N-3/N-4 和 201+ 数据量的额外 Electron E2E 明确延后，不属于 P10 发布门禁；现有单元/集成测试继续覆盖 201+ Session、Message 和 FileChange 分页。产品路径不再保留双轨、兼容开关或 legacy fallback。

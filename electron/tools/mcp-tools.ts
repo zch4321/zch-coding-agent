@@ -8,7 +8,13 @@ import type {
 } from '../mcp/mcp-manager'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import type { SessionState } from '../session/session-types'
-import type { ToolCall, ToolDefinition, ToolResult } from './types'
+import type {
+  SuccessfulToolResult,
+  ToolCall,
+  ToolDefinition,
+  ToolModelContentPart,
+  ToolResult,
+} from './types'
 import type { ToolRegistry } from './tool-registry'
 import type { SessionId } from '../../shared/ids'
 
@@ -135,6 +141,7 @@ export class McpToolGateway {
           resolved.validate(value)
             ? undefined
             : formatSchemaErrors(resolved.validate.errors),
+        projectResultForModel: projectMcpResult,
         execute: async (value) => {
           try {
             const result = await this.#manager.callTool({
@@ -420,6 +427,63 @@ function normalizeMcpResult(result: {
       content,
     },
   }
+}
+
+/** Projects normalized MCP native and structured content without binary bodies. */
+function projectMcpResult(
+  result: SuccessfulToolResult,
+): ToolModelContentPart[] {
+  const value =
+    result.content &&
+    typeof result.content === 'object' &&
+    !Array.isArray(result.content)
+      ? result.content
+      : {}
+  const normalized = Array.isArray(value.content) ? value.content : []
+  const parts: ToolModelContentPart[] = []
+
+  for (const entry of normalized) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const type = typeof entry.type === 'string' ? entry.type : 'unknown'
+    if (type === 'text') {
+      parts.push({
+        type: 'text',
+        text: typeof entry.text === 'string' ? entry.text : '',
+      })
+      continue
+    }
+    if (type === 'resource') {
+      const uri = typeof entry.uri === 'string' ? entry.uri : ''
+      const text = typeof entry.text === 'string' ? entry.text : ''
+      parts.push({
+        type: 'text',
+        text: text
+          ? `${uri ? `Resource ${uri}\n` : ''}${text}`
+          : `[resource omitted${uri ? `: ${uri}` : ''}]`,
+      })
+      continue
+    }
+    if (type === 'resource_link') {
+      const name = typeof entry.name === 'string' ? entry.name : ''
+      const uri = typeof entry.uri === 'string' ? entry.uri : ''
+      parts.push({
+        type: 'text',
+        text: [name || 'Resource', uri].filter(Boolean).join('\n'),
+      })
+      continue
+    }
+    const mimeType =
+      typeof entry.mimeType === 'string' ? ` ${entry.mimeType}` : ''
+    parts.push({ type: 'text', text: `[${type}${mimeType} omitted]` })
+  }
+
+  if (value.structuredContent !== undefined) {
+    parts.push({
+      type: 'json',
+      value: structuredClone(value.structuredContent),
+    })
+  }
+  return parts.length > 0 ? parts : [{ type: 'text', text: '[no output]' }]
 }
 
 function normalizeContent(content: unknown[]): JsonValue[] {

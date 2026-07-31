@@ -3,6 +3,7 @@ import type { PublicConfig } from '../../shared/config'
 import type { JsonValue } from '../../shared/json'
 import type { ToolRegistrationPort, ToolResult } from './types'
 import { fetchWithSsrfGuard, SsrfFetchError } from '../net/ssrf'
+import { projectFetchResult } from './tool-result-formatters'
 
 const FetchSchema = Type.Object(
   {
@@ -74,6 +75,7 @@ export function registerFetchTools(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 256 * 1_024,
+    projectResultForModel: projectFetchResult,
     async execute(args: FetchArgs, context): Promise<ToolResult> {
       try {
         const limits = getConfig().limits

@@ -8,7 +8,7 @@ const Sha256Schema = Type.String({
 
 export const RuntimeIdentitySchema = Type.Object(
   {
-    schemaVersion: Type.Literal(3),
+    schemaVersion: Type.Literal(4),
     sourceCommit: Type.String({ minLength: 1, maxLength: 128 }),
     sourceTree: Type.Union([
       Type.Literal('clean'),
@@ -44,7 +44,6 @@ export const RuntimeIdentitySchema = Type.Object(
         maxStepsPerRun: Type.Integer({ minimum: 0 }),
         maxContextTokens: Type.Integer({ minimum: 1 }),
         maxToolResultTokens: Type.Integer({ minimum: 1 }),
-        maxToolTokensPerRun: Type.Integer({ minimum: 1 }),
         maxToolOutputBytes: Type.Integer({ minimum: 1 }),
         commandTimeoutMs: Type.Integer({ minimum: 1 }),
         subagentWorkerTimeoutMs: Type.Integer({

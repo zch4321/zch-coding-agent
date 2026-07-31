@@ -10,6 +10,7 @@ import {
   type MessagePart,
   type MessageRecord,
   type ToolCallPart,
+  type ToolResultContent,
 } from '../../shared/message'
 import type { ModelRouteSnapshot } from '../../shared/model-route'
 import type { Static } from '@sinclair/typebox'
@@ -31,6 +32,18 @@ export interface CompiledCanonicalHistory {
 export type CompletedAssistantRecord = Static<
   typeof AssistantTurnMessageRecordSchema
 >
+
+/** Rejects active history that predates canonical model-content projections. */
+export class LegacyToolResultError extends TypeError {
+  readonly code = 'LEGACY_TOOL_RESULT_UNSUPPORTED'
+
+  constructor() {
+    super(
+      'LEGACY_TOOL_RESULT_UNSUPPORTED: This conversation contains legacy Tool Results and cannot continue; start a new conversation.',
+    )
+    this.name = 'LegacyToolResultError'
+  }
+}
 
 const validateMessageRecord = compileSchema(MessageRecordSchema)
 
@@ -367,7 +380,7 @@ export function appendToolResult(
   state: CanonicalHistoryState,
   input: {
     callId: CallId
-    content: JsonValue
+    content: ToolResultContent
     isError: boolean
     name: string
     reason?: string
@@ -385,7 +398,7 @@ export function appendToolResult(
       {
         type: 'tool_result' as const,
         callId: input.callId,
-        content: [{ type: 'json' as const, value: input.content }],
+        content: structuredClone(input.content),
         isError: input.isError,
       },
     ],
@@ -394,6 +407,7 @@ export function appendToolResult(
       tool: {
         name: input.name,
         ...(input.reason ? { reason: input.reason } : {}),
+        resultProjection: 'model-content.v1' as const,
         status: input.status,
         truncated: input.truncated,
         ...(input.durationMs === undefined
@@ -494,6 +508,12 @@ export class MessageHistoryCompiler {
         )
       }
       assertMessageRecordSemantics(record)
+      if (
+        record.kind === 'tool_result' &&
+        record.metadata?.tool.resultProjection !== 'model-content.v1'
+      ) {
+        throw new LegacyToolResultError()
+      }
       if (record.sessionId !== sessionId) {
         throw new TypeError('Canonical history contains multiple sessions')
       }

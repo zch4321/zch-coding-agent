@@ -2,6 +2,13 @@ import { Type } from '@sinclair/typebox'
 import type { TerminalId } from '../../shared/ids'
 import type { TerminalPool } from '../terminal/pool'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
+import {
+  projectTerminalCloseResult,
+  projectTerminalOpenResult,
+  projectTerminalReadResult,
+  projectTerminalResizeResult,
+  projectTerminalSendResult,
+} from './tool-result-formatters'
 
 const MAX_TERMINAL_SEND_DELAY_MS = 60_000
 
@@ -131,6 +138,7 @@ export function registerTerminalTools(
     supportsAbort: true,
     defaultTimeoutMs: 10_000,
     maxOutputBytes: 65_536,
+    projectResultForModel: projectTerminalOpenResult,
     async execute(args, context) {
       const terminal = await terminalPool.open({
         sessionId: context.sessionId,
@@ -151,6 +159,7 @@ export function registerTerminalTools(
     supportsAbort: true,
     defaultTimeoutMs: MAX_TERMINAL_SEND_DELAY_MS + 5_000,
     maxOutputBytes: 16_384,
+    projectResultForModel: projectTerminalSendResult,
     async execute(args, context): Promise<ToolResult> {
       const accepted = terminalPool.write(
         context.sessionId,
@@ -185,6 +194,7 @@ export function registerTerminalTools(
     supportsAbort: true,
     defaultTimeoutMs: 10_000,
     maxOutputBytes: 64 * 1_024,
+    projectResultForModel: projectTerminalReadResult,
     async execute(args, context) {
       const result = terminalPool.read(context.sessionId, args.terminalId, {
         cursor: args.cursor,
@@ -228,6 +238,7 @@ export function registerTerminalTools(
     supportsAbort: true,
     defaultTimeoutMs: 10_000,
     maxOutputBytes: 16_384,
+    projectResultForModel: projectTerminalCloseResult,
     async execute(args, context) {
       return {
         status: 'ok',
@@ -247,6 +258,7 @@ export function registerTerminalTools(
     supportsAbort: true,
     defaultTimeoutMs: 10_000,
     maxOutputBytes: 16_384,
+    projectResultForModel: projectTerminalResizeResult,
     async execute(args, context) {
       return {
         status: 'ok',

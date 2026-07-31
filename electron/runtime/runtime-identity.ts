@@ -34,7 +34,7 @@ export function createRuntimeIdentity(input: {
     input.runtime.services.sessions.providerToolDefinitions()
   const toolNames = input.runtime.services.sessions.toolNames()
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     sourceCommit: input.sourceCommit?.trim() || embeddedSourceCommit(),
     sourceTree: input.sourceTree ?? embeddedSourceTree(),
     runtimeImageDigest:
@@ -58,7 +58,6 @@ export function createRuntimeIdentity(input: {
       maxStepsPerRun: input.config.limits.maxStepsPerRun,
       maxContextTokens: input.config.limits.maxContextTokens,
       maxToolResultTokens: input.config.limits.maxToolResultTokens,
-      maxToolTokensPerRun: input.config.limits.maxToolTokensPerRun,
       maxToolOutputBytes: input.config.limits.maxToolOutputBytes,
       commandTimeoutMs: input.config.limits.commandTimeoutMs,
       subagentWorkerTimeoutMs: input.config.subagents.workerTimeoutMs,

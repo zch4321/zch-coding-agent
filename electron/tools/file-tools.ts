@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { Type } from '@sinclair/typebox'
 import type { PublicConfig } from '../../shared/config'
 import type { ToolCall, ToolDefinition, ToolResult } from './types'
+import { projectFileMutationResult } from './tool-result-formatters'
 import { atomicDelete, atomicReplace } from './file-tool-atomic'
 import { createFileDiff } from './file-tool-diff'
 import {
@@ -258,6 +259,8 @@ export function createFileToolDefinitions(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 200_000,
+    projectResultForModel: (result) =>
+      projectFileMutationResult(result, 'created'),
     validateArgs(args) {
       const limit = fileLimits(getLimits()).writeFileBytes
       return Buffer.byteLength(args.content, 'utf8') > limit
@@ -298,6 +301,8 @@ export function createFileToolDefinitions(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 200_000,
+    projectResultForModel: (result) =>
+      projectFileMutationResult(result, 'patched'),
     validateArgs(args) {
       const limit = fileLimits(getLimits()).patchBytes
       return Buffer.byteLength(args.patch, 'utf8') > limit
@@ -354,6 +359,8 @@ export function createFileToolDefinitions(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 100_000,
+    projectResultForModel: (result) =>
+      projectFileMutationResult(result, 'deleted'),
     async execute(_args, context) {
       try {
         const precondition = mutationPrecondition(

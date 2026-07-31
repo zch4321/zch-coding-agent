@@ -3,6 +3,10 @@ import type { PublicConfig } from '../../shared/config'
 import type { JsonValue } from '../../shared/json'
 import type { ToolRegistrationPort, ToolResult } from './types'
 import { runCommand } from '../process/run'
+import {
+  projectDelayResult,
+  projectRunCommandResult,
+} from './tool-result-formatters'
 
 const MAX_DELAY_MS = 60_000
 
@@ -132,6 +136,7 @@ export function registerProcessTools(
     defaultTimeoutMs: 86_400_000,
     maxOutputBytes: 128 * 1_024,
     validateArgs: validateRunCommandArgs,
+    projectResultForModel: projectRunCommandResult,
     async execute(args: RunCommandArgs, context): Promise<ToolResult> {
       const limits = getConfig().limits
       const command =
@@ -188,6 +193,7 @@ export function registerProcessTools(
     supportsAbort: true,
     defaultTimeoutMs: MAX_DELAY_MS + 5_000,
     maxOutputBytes: 4_096,
+    projectResultForModel: projectDelayResult,
     async execute(args: DelayArgs, context): Promise<ToolResult> {
       const startedAt = performance.now()
       await wait(args.durationMs, context.signal)

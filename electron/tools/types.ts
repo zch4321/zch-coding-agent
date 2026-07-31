@@ -1,6 +1,7 @@
 import type { Static, TSchema } from '@sinclair/typebox'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
+import type { ToolResultContent } from '../../shared/message'
 import type { ApprovedToolCall } from './approved-tool-call'
 
 export type Effect =
@@ -20,6 +21,15 @@ export type Effect =
 
 export type ToolBatchPolicy = 'normal' | 'must_run_last' | 'exclusive'
 
+export type SuccessfulToolResult = Extract<ToolResult, { status: 'ok' }>
+export type ToolModelContentPart = ToolResultContent[number]
+
+export interface ToolResultProjection {
+  content: ToolModelContentPart[]
+  isError: boolean
+  truncated: boolean
+}
+
 export interface ToolDefinition<Schema extends TSchema = TSchema> {
   id: string
   description: string
@@ -31,6 +41,11 @@ export interface ToolDefinition<Schema extends TSchema = TSchema> {
   defaultTimeoutMs: number
   maxOutputBytes: number
   validateArgs?(args: Static<Schema>): string | undefined
+  /** Projects a successful internal result into deterministic model-visible parts. */
+  projectResultForModel?(
+    result: SuccessfulToolResult,
+    args: Static<Schema>,
+  ): ToolModelContentPart[]
   execute(
     args: Static<Schema>,
     context: ToolExecutionContext,

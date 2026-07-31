@@ -1,8 +1,8 @@
 import type { PublicConfig } from '../../shared/config'
-import type { ToolResult } from './types'
+import { renderToolResultContent } from '../../shared/message'
+import type { ToolResultProjection } from './types'
 
 const TRUNCATION_MARKER = '\n... output truncated ...\n'
-const EXHAUSTED_TOOL_RESULT_PREVIEW_TOKENS = 512
 
 /** Reports failures to fit provider context within configured token limits. */
 export class ContextBudgetError extends Error {
@@ -32,7 +32,27 @@ export function estimateJsonTokens(
 }
 
 function decodeUtf8Slice(value: Buffer): string {
-  return new TextDecoder('utf-8', { fatal: false }).decode(value)
+  let start = 0
+  while (
+    start < value.length &&
+    (value[start]! & 0b1100_0000) === 0b1000_0000
+  ) {
+    start += 1
+  }
+  for (
+    let end = value.length;
+    end >= Math.max(start, value.length - 3);
+    end -= 1
+  ) {
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(
+        value.subarray(start, end),
+      )
+    } catch {
+      // A UTF-8 code point can span at most four bytes.
+    }
+  }
+  return ''
 }
 
 /** Truncates text around its head and tail so the estimated token count stays bounded. */
@@ -57,52 +77,30 @@ export function truncateTextHeadTail(
   return `${decodeUtf8Slice(source.subarray(0, headBytes))}${TRUNCATION_MARKER}${decodeUtf8Slice(source.subarray(Math.max(headBytes, source.length - tailBytes)))}`
 }
 
-/** Fits a tool result to the remaining context budget while preserving status and metadata. */
-export function boundToolResultForContext(
-  result: ToolResult,
+/** Fits one projected Tool Result to the configured per-result token limit. */
+export function boundToolResultProjectionForContext(
+  projection: ToolResultProjection,
   limits: PublicConfig['limits'],
-  usedTokens: number,
-): { result: ToolResult; tokens: number } {
-  const remaining = Math.max(0, limits.maxToolTokensPerRun - usedTokens)
-  const allowed = Math.min(limits.maxToolResultTokens, remaining)
+): ToolResultProjection {
+  const rendered = renderToolResultContent(projection.content)
+  const tokens = estimateTextTokens(rendered, limits.tokenEstimation)
 
-  const tokens = estimateJsonTokens(result, limits.tokenEstimation)
-
-  if (tokens <= allowed) {
-    return { result, tokens }
-  }
-
-  const serialized = JSON.stringify(result)
-  const previewBudget =
-    allowed <= 0
-      ? Math.min(
-          limits.maxToolResultTokens,
-          EXHAUSTED_TOOL_RESULT_PREVIEW_TOKENS,
-        )
-      : allowed
-  const bounded: ToolResult = {
-    status: 'ok',
-    content: {
-      truncated: true,
-      preview: truncateTextHeadTail(
-        serialized,
-        Math.max(1, previewBudget - 64),
-        limits.tokenEstimation,
-      ),
-      message:
-        allowed <= 0
-          ? 'Tool result exceeded the run tool-context budget; returning a bounded preview'
-          : 'Tool result exceeded the model-context budget',
-    },
-    truncated: true,
-    totalBytes:
-      result.status === 'ok'
-        ? (result.totalBytes ?? Buffer.byteLength(serialized))
-        : Buffer.byteLength(serialized),
+  if (tokens <= limits.maxToolResultTokens) {
+    return projection
   }
 
   return {
-    result: bounded,
-    tokens: estimateJsonTokens(bounded, limits.tokenEstimation),
+    content: [
+      {
+        type: 'text',
+        text: truncateTextHeadTail(
+          rendered,
+          limits.maxToolResultTokens,
+          limits.tokenEstimation,
+        ),
+      },
+    ],
+    isError: projection.isError,
+    truncated: true,
   }
 }

@@ -446,7 +446,6 @@ const enUS = {
     maxAttachmentContextTokens: 'Attachment content token limit',
     autoCompactTriggerPercent: 'Auto compact trigger threshold (%)',
     maxToolResultTokens: 'Tool result token limit',
-    maxToolTokensPerRun: 'Tool result token budget per run',
     commandTimeoutMs: 'Command timeout (ms)',
     maxToolOutputBytes: 'Tool output byte limit',
     terminalScrollbackBytes: 'Terminal scrollback byte limit',

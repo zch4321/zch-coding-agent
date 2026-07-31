@@ -70,9 +70,23 @@ const HeadlessToolTotalsSchema = Type.Object(
   { additionalProperties: false },
 )
 
+const LegacyHeadlessLimitsWithRunToolBudgetSchema = Type.Partial(
+  Type.Object(
+    {
+      ...PublicConfigSchema.properties.limits.properties,
+      maxToolTokensPerRun: Type.Integer({
+        minimum: 256,
+        maximum: 10_000_000,
+      }),
+    },
+    { additionalProperties: false },
+  ),
+  { additionalProperties: false },
+)
+
 export const HeadlessConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(3),
+    schemaVersion: Type.Literal(4),
     provider: HeadlessProviderConfigSchema,
     limits: Type.Optional(
       Type.Partial(PublicConfigSchema.properties.limits, {
@@ -102,9 +116,19 @@ export const HeadlessConfigSchema = Type.Object(
 )
 export type HeadlessConfig = Static<typeof HeadlessConfigSchema>
 
-export const LegacyHeadlessConfigV2Schema = Type.Object(
+export const LegacyHeadlessConfigV3Schema = Type.Object(
   {
     ...HeadlessConfigSchema.properties,
+    schemaVersion: Type.Literal(3),
+    limits: Type.Optional(LegacyHeadlessLimitsWithRunToolBudgetSchema),
+  },
+  { additionalProperties: false },
+)
+export type LegacyHeadlessConfigV3 = Static<typeof LegacyHeadlessConfigV3Schema>
+
+export const LegacyHeadlessConfigV2Schema = Type.Object(
+  {
+    ...LegacyHeadlessConfigV3Schema.properties,
     schemaVersion: Type.Literal(2),
     subagents: Type.Optional(Type.Never()),
   },
@@ -116,7 +140,7 @@ export const LegacyHeadlessConfigV1Schema = Type.Object(
   {
     schemaVersion: Type.Literal(1),
     provider: LegacyHeadlessProviderConfigV1Schema,
-    limits: HeadlessConfigSchema.properties.limits,
+    limits: Type.Optional(LegacyHeadlessLimitsWithRunToolBudgetSchema),
     assistant: HeadlessConfigSchema.properties.assistant,
     skills: HeadlessConfigSchema.properties.skills,
     network: HeadlessConfigSchema.properties.network,

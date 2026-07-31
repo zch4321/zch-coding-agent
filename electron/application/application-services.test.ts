@@ -881,6 +881,15 @@ describe('ordinary Session fork', () => {
             isError: false,
           },
         ],
+        metadata: {
+          schemaVersion: 1,
+          tool: {
+            name: 'read_file',
+            resultProjection: 'model-content.v1',
+            status: 'completed',
+            truncated: false,
+          },
+        },
       }
       const final: MessageRecord = {
         ...messageIdentity(sourceId, 5, 'message:final'),

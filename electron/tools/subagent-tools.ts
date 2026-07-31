@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox'
 import type { SubagentExecutionPort } from '../subagent/contracts'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
 import type { JsonValue } from '../../shared/json'
+import { projectSubagentResult } from './tool-result-formatters'
 
 const MAX_RAW_NAME_LENGTH = 256
 const MAX_RAW_TASK_LENGTH = 65_536
@@ -63,6 +64,8 @@ export function registerSubagentTools(
     defaultTimeoutMs: 86_405_000,
     maxOutputBytes: 2_000_000,
     validateArgs: validateSubagentArgs,
+    projectResultForModel: (result, args) =>
+      projectSubagentResult(result, args.name.trim()),
     async execute(args, context): Promise<ToolResult> {
       const result = await execution.runOne(
         { name: args.name.trim(), task: args.task.trim() },

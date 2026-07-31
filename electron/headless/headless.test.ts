@@ -207,7 +207,7 @@ function toolCompletion(
 
 function config(overrides: Partial<HeadlessConfig> = {}): HeadlessConfig {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     provider: {
       id: 'fake',
       providerType: 'generic.chat-completions',
@@ -261,7 +261,7 @@ afterEach(async () => {
 })
 
 describe('Headless host', () => {
-  it('loads valid v1 config through the v3 Provider Type migration', async () => {
+  it('loads valid v1 config through the current Provider Type migration', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-v1-'))
     temporaryDirectories.push(directory)
     const configPath = path.join(directory, 'headless.json')
@@ -285,7 +285,7 @@ describe('Headless host', () => {
     )
 
     await expect(loadHeadlessConfig(configPath)).resolves.toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       provider: {
         id: 'legacy-deepseek',
         label: 'Legacy DeepSeek',
@@ -312,12 +312,30 @@ describe('Headless host', () => {
 
     await expect(loadHeadlessConfig(configPath)).resolves.toEqual({
       ...legacy,
-      schemaVersion: 3,
+      schemaVersion: 4,
     })
   })
 
-  it('accepts bounded Subagent settings in v3 config', async () => {
+  it('migrates v3 config without the retired run-wide Tool Result budget', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-v3-'))
+    temporaryDirectories.push(directory)
+    const configPath = path.join(directory, 'headless.json')
+    const current = config()
+    const legacy = {
+      ...current,
+      schemaVersion: 3,
+      limits: { maxToolResultTokens: 12_000, maxToolTokensPerRun: 36_000 },
+    }
+    await writeFile(configPath, JSON.stringify(legacy), 'utf8')
+
+    await expect(loadHeadlessConfig(configPath)).resolves.toEqual({
+      ...current,
+      limits: { maxToolResultTokens: 12_000 },
+    })
+  })
+
+  it('accepts bounded Subagent settings in v4 config', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-v4-'))
     temporaryDirectories.push(directory)
     const configPath = path.join(directory, 'headless.json')
     const source = config({
@@ -328,7 +346,7 @@ describe('Headless host', () => {
     await expect(loadHeadlessConfig(configPath)).resolves.toEqual(source)
   })
 
-  it('accepts Responses and Anthropic Provider Types in v3 config', async () => {
+  it('accepts Responses and Anthropic Provider Types in v4 config', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-p12-'))
     temporaryDirectories.push(directory)
     const configPath = path.join(directory, 'headless.json')
@@ -482,7 +500,7 @@ describe('Headless host', () => {
       budgets: { subagentWorkerTimeoutMs: number }
       capabilities: { toolNames: string[]; subagentsEnabled: boolean }
     }
-    expect(identity.schemaVersion).toBe(3)
+    expect(identity.schemaVersion).toBe(4)
     expect(identity.configHash).toBe(result.configHash)
     expect(identity.toolsHash).toMatch(/^[a-f0-9]{64}$/u)
     expect(identity.promptResources.length).toBeGreaterThan(0)

@@ -8,6 +8,12 @@ import type { ToolRegistry } from './tool-registry'
 import { estimateTextTokens, truncateTextHeadTail } from './context-budget'
 import { DEFAULT_MAX_ENTRIES, walkFiles } from './workspace-walk'
 import { type Searcher, resolveWorkspaceSearcher } from './searcher'
+import {
+  projectGlobResult,
+  projectGrepResult,
+  projectListDirResult,
+  projectReadFileResult,
+} from './tool-result-formatters'
 
 const MAX_READ_SOURCE_BYTES = 10_000_000
 const MAX_READ_OUTPUT_BYTES = 128 * 1_024
@@ -188,6 +194,7 @@ export function createReadOnlyToolDefinitions(
     supportsAbort: true,
     defaultTimeoutMs: 15_000,
     maxOutputBytes: 160 * 1_024,
+    projectResultForModel: projectReadFileResult,
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)
@@ -315,6 +322,7 @@ export function createReadOnlyToolDefinitions(
     supportsAbort: true,
     defaultTimeoutMs: 15_000,
     maxOutputBytes: 128 * 1_024,
+    projectResultForModel: projectListDirResult,
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)
@@ -378,6 +386,7 @@ export function createReadOnlyToolDefinitions(
     supportsAbort: true,
     defaultTimeoutMs: 15_000,
     maxOutputBytes: 128 * 1_024,
+    projectResultForModel: projectGlobResult,
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)
@@ -416,6 +425,7 @@ export function createReadOnlyToolDefinitions(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 128 * 1_024,
+    projectResultForModel: projectGrepResult,
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)

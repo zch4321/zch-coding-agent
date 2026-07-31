@@ -145,7 +145,7 @@ describe('MessageHistoryCompiler', () => {
     ] as const) {
       appendToolResult(history, {
         callId: callId as CallId,
-        content: { path: name },
+        content: [{ type: 'json', value: { path: name } }],
         isError: false,
         name: 'read_file',
         status: 'completed',
@@ -174,7 +174,7 @@ describe('MessageHistoryCompiler', () => {
     })
     appendToolResult(history, {
       callId: 'call:epoch-duplicate' as CallId,
-      content: { path: 'a.txt' },
+      content: [{ type: 'json', value: { path: 'a.txt' } }],
       isError: false,
       name: 'read_file',
       status: 'completed',
@@ -194,6 +194,42 @@ describe('MessageHistoryCompiler', () => {
         route,
       }),
     ).toThrow(/Duplicate tool call id in active history/u)
+  })
+
+  it('rejects active legacy Tool Results but ignores inactive old epochs', () => {
+    const history = state()
+    prompt(history)
+    appendAssistantTurn(history, {
+      text: '',
+      route,
+      toolCalls: [
+        {
+          id: 'call:legacy' as CallId,
+          toolId: 'read_file',
+          args: { path: 'old.txt' },
+        },
+      ],
+    })
+    const legacy = appendToolResult(history, {
+      callId: 'call:legacy' as CallId,
+      content: [{ type: 'json', value: { status: 'ok', content: 'old' } }],
+      isError: false,
+      name: 'read_file',
+      status: 'completed',
+      truncated: false,
+    })
+    if (!legacy.metadata) throw new Error('Tool metadata fixture is missing')
+    delete legacy.metadata.tool.resultProjection
+
+    expect(() => new MessageHistoryCompiler().compile(history.history)).toThrow(
+      /LEGACY_TOOL_RESULT_UNSUPPORTED/u,
+    )
+
+    deactivateActiveHistory(history)
+    prompt(history)
+    expect(() =>
+      new MessageHistoryCompiler().compile(history.history),
+    ).not.toThrow()
   })
 
   it('validates the entire assistant candidate before changing state', () => {
@@ -241,7 +277,7 @@ describe('MessageHistoryCompiler', () => {
     for (const callId of results) {
       appendToolResult(history, {
         callId: callId as CallId,
-        content: {},
+        content: [{ type: 'json', value: {} }],
         isError: false,
         name: 'read_file',
         status: 'completed',
@@ -275,7 +311,7 @@ describe('MessageHistoryCompiler', () => {
     })
     appendToolResult(history, {
       callId: 'call:first' as CallId,
-      content: {},
+      content: [{ type: 'json', value: {} }],
       isError: false,
       name: 'read_file',
       status: 'completed',
