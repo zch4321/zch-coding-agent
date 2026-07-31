@@ -17,6 +17,7 @@ P13 已提供默认关闭的单子 Agent 能力：
 - 隐藏 Session 与 execution 使用 SQLite durable ownership；不进入普通 bootstrap、分页、搜索、导出或 Renderer 事件。
 - 父 Run 取消、30 分钟默认 worker timeout、Provider failure 与应用退出都会中断子 Run 并清理 snapshot。
 - 子 Agent 沿用全局 `maxStepsPerRun`、模型最大输出和通用 Tool context 限制，没有专属 step/token/result 预算。
+- Execution 内部保留 `results/meta`；父模型的 canonical Tool Result 只接收 `results[name]` 最终文本，Provider/model/usage 不重复进入上下文。
 - Desktop 与 Headless 共用相同实现；父对话继续显示普通 ToolCallCard。
 
 这些约束是后续 Model Pool 和 Swarm 的底座，不在后续阶段复制第二套 Session、Provider、snapshot、Tool executor 或恢复逻辑。
