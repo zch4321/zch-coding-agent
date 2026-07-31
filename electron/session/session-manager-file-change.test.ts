@@ -185,10 +185,10 @@ describe('SessionManager durable FileChange port', () => {
       'CHANGE_HISTORY_PERSIST_FAILED',
     )
     expect(JSON.stringify(provider.requests[1])).toContain(
-      '\\"mutationSucceeded\\":true',
+      'mutationSucceeded=true',
     )
     expect(JSON.stringify(provider.requests[1])).toContain(
-      '\\"revertAvailable\\":false',
+      'revertAvailable=false',
     )
     await manager.closeSession(sessionId)
   })

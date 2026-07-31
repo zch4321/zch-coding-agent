@@ -290,7 +290,7 @@ describe('SessionManager approvals', () => {
         expect.objectContaining({
           role: 'tool',
           tool_call_id: 'call-command',
-          content: expect.stringContaining('"status":"ok"'),
+          content: expect.stringMatching(/^v\d+/u),
         }),
       ]),
     )
@@ -355,7 +355,8 @@ describe('SessionManager approvals', () => {
         expect.objectContaining({
           role: 'tool',
           tool_call_id: 'call-command',
-          content: expect.stringContaining('"status":"denied"'),
+          content:
+            'DENIED: Confirm mode requires human approval for every side effect',
         }),
       ]),
     )

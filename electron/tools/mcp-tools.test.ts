@@ -87,7 +87,15 @@ describe('MCP gateway tools', () => {
         }
       },
       callTool: async () => ({
-        content: [{ type: 'text', text: 'called' }],
+        content: [
+          { type: 'text', text: 'called' },
+          {
+            type: 'resource',
+            resource: { uri: 'file:///fixture.txt', text: 'resource body' },
+          },
+          { type: 'image', mimeType: 'image/png', data: 'omitted' },
+        ],
+        structuredContent: { count: 1 },
       }),
     } as unknown as McpManager
     const config = toPublicConfig(DEFAULT_APP_CONFIG, false)
@@ -152,6 +160,25 @@ describe('MCP gateway tools', () => {
     expect(policy(alphaCall.definition, 'auto')).toBe('model')
     expect(policy(alphaCall.definition, 'confirm')).toBe('review')
     expect(policy(alphaCall.definition, 'yolo')).toBe('allow')
+    const nativeResult = await alphaCall.definition.execute(
+      { value: 'hello' },
+      executionContext(session),
+    )
+    expect(nativeResult.status).toBe('ok')
+    if (nativeResult.status !== 'ok') return
+    expect(
+      alphaCall.definition.projectResultForModel?.(nativeResult, {
+        value: 'hello',
+      }),
+    ).toEqual([
+      { type: 'text', text: 'called' },
+      {
+        type: 'text',
+        text: 'Resource file:///fixture.txt\nresource body',
+      },
+      { type: 'text', text: '[image image/png omitted]' },
+      { type: 'json', value: { count: 1 } },
+    ])
 
     revision = 'b'.repeat(64)
     const stale = await read.execute(

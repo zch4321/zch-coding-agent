@@ -8,6 +8,7 @@ import {
   WebSearchError,
   type WebSearchProvider,
 } from './web-search-provider'
+import { projectWebSearchResult } from './tool-result-formatters'
 
 const WebSearchSchema = Type.Object(
   {
@@ -62,6 +63,7 @@ export function registerWebSearchTools(
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     maxOutputBytes: 128 * 1_024,
+    projectResultForModel: projectWebSearchResult,
     async execute(args: WebSearchArgs, context): Promise<ToolResult> {
       try {
         const config = configStore.getPublicConfig()

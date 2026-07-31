@@ -210,13 +210,21 @@ describe('P5 durable file tool execution', () => {
       revision: 1,
     })
     const messages = await setup.target.sessions.listMessages(sessionId)
-    expect(JSON.stringify(messages.records)).toContain(
-      `"fileChangeId":"${page.records[0]!.id}"`,
+    const toolResult = messages.records.find(
+      (record) => record.kind === 'tool_result',
     )
-    expect(JSON.stringify(messages.records)).toContain(
-      '"mutationSucceeded":true',
-    )
-    expect(JSON.stringify(messages.records)).toContain('"revertAvailable":true')
+    expect(toolResult).toMatchObject({
+      parts: [
+        {
+          type: 'tool_result',
+          content: [{ type: 'text', text: 'Created file created.txt' }],
+        },
+      ],
+      metadata: {
+        tool: { resultProjection: 'model-content.v1' },
+      },
+    })
+    expect(JSON.stringify(messages.records)).not.toContain('fileChangeId')
     const fileChangeCommit = topics.indexOf('file-change.changed')
     expect(fileChangeCommit).toBeGreaterThanOrEqual(0)
     expect(topics.slice(fileChangeCommit + 1)).toContain('session.changed')

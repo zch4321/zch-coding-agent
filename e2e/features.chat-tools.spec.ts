@@ -148,12 +148,7 @@ test.describe('Electron chat and tool workflows', () => {
     const liveResultText = await toolCard
       .locator('.tool-result-json')
       .innerText()
-    expect(JSON.parse(liveResultText)).toMatchObject({
-      path: 'e2e-output.txt',
-      operation: 'write',
-    })
-    expect(JSON.parse(liveResultText)).not.toHaveProperty('status')
-    expect(JSON.parse(liveResultText)).not.toHaveProperty('content')
+    expect(liveResultText).toBe('Created file e2e-output.txt')
     await expect(page.locator('.chat-message.assistant')).toContainText(
       'Created e2e-output.txt',
     )
@@ -165,7 +160,7 @@ test.describe('Electron chat and tool workflows', () => {
     expect(secondRequestBody).toContain('"role":"tool"')
     expect(secondRequestBody).toContain('"tool_call_id":"call:e2e-write"')
     expect(providerMessageText(secondRequest.body)).toContain(
-      '"path":"e2e-output.txt"',
+      'Created file e2e-output.txt',
     )
 
     await page.reload()
@@ -177,13 +172,8 @@ test.describe('Electron chat and tool workflows', () => {
     const durableResultText = await durableToolCard
       .locator('.tool-result-json')
       .innerText()
-    expect(JSON.parse(durableResultText)).toMatchObject({
-      path: 'e2e-output.txt',
-      operation: 'write',
-    })
+    expect(durableResultText).toBe(liveResultText)
     expect(durableResultText).not.toContain('call:e2e-write')
-    expect(JSON.parse(durableResultText)).not.toHaveProperty('status')
-    expect(JSON.parse(durableResultText)).not.toHaveProperty('content')
   })
 
   test('contains a 20,000-character tool result inside the tool card', async () => {
