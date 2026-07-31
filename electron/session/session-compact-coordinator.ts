@@ -5,7 +5,6 @@ import type { CanonicalPromptKind } from '../../shared/message'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
-import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import {
   assertCompletedAssistantTurn,
   ProviderCompletionError,
@@ -71,7 +70,6 @@ export class SessionCompactCoordinator {
   readonly #toolRegistry: ToolRegistry
   readonly #skillsManager: SkillsManager | undefined
   readonly #promptRegistry: PromptRegistry | undefined
-  readonly #projectMetadata: ProjectMetadataStore | undefined
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #orchestratorMessages: SessionOrchestratorMessages
@@ -92,7 +90,6 @@ export class SessionCompactCoordinator {
     toolRegistry: ToolRegistry
     skillsManager?: SkillsManager
     promptRegistry?: PromptRegistry
-    projectMetadata?: ProjectMetadataStore
     providerFactory: SessionManagerOptions['providerFactory']
     fetchImpl: SessionManagerOptions['fetchImpl']
     orchestratorMessages: SessionOrchestratorMessages
@@ -112,7 +109,6 @@ export class SessionCompactCoordinator {
     this.#toolRegistry = options.toolRegistry
     this.#skillsManager = options.skillsManager
     this.#promptRegistry = options.promptRegistry
-    this.#projectMetadata = options.projectMetadata
     this.#providerFactory = options.providerFactory
     this.#fetchImpl = options.fetchImpl
     this.#orchestratorMessages = options.orchestratorMessages
@@ -156,12 +152,9 @@ export class SessionCompactCoordinator {
     const tools = (
       await resolveSessionToolCatalog({
         registry: this.#toolRegistry,
-        projectMetadata: this.#projectMetadata,
-        workspace: session.workspace,
         allowedToolIds: run.allowedToolIds,
         subagentsEnabled: run.subagentsEnabled,
         gitToolsEnabled: session.gitToolsEnabled,
-        readOnlyWorkspace: session.readOnlyWorkspace,
       })
     ).definitions
     const compiler = new MessageHistoryCompiler()
@@ -537,12 +530,9 @@ export class SessionCompactCoordinator {
   ): Promise<MessageId | undefined> {
     const toolCatalog = await resolveSessionToolCatalog({
       registry: this.#toolRegistry,
-      projectMetadata: this.#projectMetadata,
-      workspace: session.workspace,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
       gitToolsEnabled: session.gitToolsEnabled,
-      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     const previousHistory = structuredClone(session.history)
     const previousNextSeq = session.nextMessageSeq
@@ -561,11 +551,9 @@ export class SessionCompactCoordinator {
         config: this.#configStore.getPublicConfig(),
         providerId: session.modelSelection.providerId,
         promptRegistry: this.#promptRegistry,
-        projectMetadata: this.#projectMetadata,
         skillSummary: this.#skillsManager?.summaryPrompt(),
         workspaceConcurrency: this.#getWorkspaceConcurrency(session),
         toolNames: toolCatalog.names,
-        readOnlyWorkspace: session.readOnlyWorkspace,
         signal: run.controller.signal,
       })
       for (const record of runHarness) {

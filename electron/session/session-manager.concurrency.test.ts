@@ -1,16 +1,14 @@
 import { mkdir, mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
-import type { CallId } from '../../shared/ids'
 import {
   ScriptedProviderHarness,
   type ScriptedProviderEvent as ProviderEvent,
   type TestProviderStreamRequest as ProviderStreamRequest,
 } from '../providers/provider-test-harness'
 import { PromptRegistry } from '../prompts/registry'
-import { ProjectMetadataStore } from '../project/project-metadata-store'
 import { SessionManager } from './session-manager'
 import {
   createConfig,
@@ -67,60 +65,6 @@ describe('SessionManager M1 workspace concurrency', () => {
       )
       if (index < 0) throw new Error(`Provider request not found: ${text}`)
       this.release(index)
-    }
-  }
-
-  class NonAbortableMetadataProvider extends ScriptedProviderHarness {
-    calls = 0
-
-    async *run(): AsyncIterable<ProviderEvent> {
-      this.calls += 1
-
-      if (this.calls === 1) {
-        const args = {
-          modules: [{ root: '.', languages: ['typescript'] }],
-        }
-        yield {
-          type: 'completed',
-          rawResponse: { id: 'non-abortable-metadata-write' },
-          turn: {
-            role: 'assistant',
-            content: null,
-            tool_calls: [
-              {
-                id: 'call:non-abortable-metadata',
-                type: 'function',
-                function: {
-                  name: 'project_set_modules',
-                  arguments: JSON.stringify(args),
-                },
-              },
-            ],
-          },
-          toolCalls: [
-            {
-              id: 'call:non-abortable-metadata' as CallId,
-              toolId: 'project_set_modules',
-              args,
-              reason: 'Persist discovered workspace modules',
-            },
-          ],
-          usage: {},
-          providerState: {},
-          timing: {},
-        }
-        return
-      }
-
-      yield {
-        type: 'completed',
-        rawResponse: { id: 'second-writer' },
-        turn: { role: 'assistant', content: 'Second writer completed' },
-        toolCalls: [],
-        usage: {},
-        providerState: {},
-        timing: {},
-      }
     }
   }
 
@@ -347,113 +291,5 @@ describe('SessionManager M1 workspace concurrency', () => {
     expect(trace).toContain('"status":"rejected"')
     expect(trace).toContain('"status":"acquired"')
     expect(trace).toContain('"status":"released"')
-  })
-
-  it('keeps the writer lease while an aborted non-abortable metadata write is still running', async () => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-m1-lease-'))
-    const workspace = path.join(directory, 'workspace')
-    await mkdir(workspace)
-    const store = await createConfig(directory)
-    await store.update({
-      version: 1,
-      kind: 'logging',
-      value: {
-        ...store.getPublicConfig().logging,
-        enabled: false,
-      },
-    })
-
-    const projectMetadata = new ProjectMetadataStore()
-    const snapshot = await projectMetadata.get(workspace)
-    let markSaveStarted!: () => void
-    const saveStarted = new Promise<void>((resolve) => {
-      markSaveStarted = resolve
-    })
-    let allowSaveToFinish!: () => void
-    const saveMayFinish = new Promise<void>((resolve) => {
-      allowSaveToFinish = resolve
-    })
-    let saveFinished = false
-    vi.spyOn(projectMetadata, 'save').mockImplementation(async () => {
-      markSaveStarted()
-      await saveMayFinish
-      saveFinished = true
-      return snapshot
-    })
-
-    const provider = new NonAbortableMetadataProvider()
-    const sent: AgentEventEnvelope[] = []
-    const manager = new SessionManager({
-      configStore: store,
-      traceDirectory: path.join(directory, 'traces'),
-      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
-      providerFactory: () => provider,
-      projectMetadata,
-    })
-    const writerSession = await manager.createSession({
-      workspace,
-      mode: 'yolo',
-      provider: 'deepseek',
-    })
-    const contenderSession = await manager.createSession({
-      workspace,
-      mode: 'yolo',
-      provider: 'deepseek',
-    })
-    const writerRun = manager.startRun({
-      sessionId: writerSession,
-      message: 'Persist the workspace module metadata',
-      clientRequestId: 'non-abortable-writer',
-    })
-
-    try {
-      await saveStarted
-      expect(manager.interruptRun(writerSession, writerRun)).toBe(true)
-      await waitFor(() =>
-        sent.some(
-          ({ event }) =>
-            event.type === 'run.status' &&
-            event.runId === writerRun &&
-            event.status === 'cancelled',
-        ),
-      )
-      expect(saveFinished).toBe(false)
-
-      expect(() =>
-        manager.startRun({
-          sessionId: contenderSession,
-          message: 'Start another workspace writer',
-          clientRequestId: 'lease-contender',
-        }),
-      ).toThrow('Another run is modifying this workspace')
-
-      allowSaveToFinish()
-      await waitFor(() => saveFinished)
-      await waitFor(() =>
-        sent.some(
-          ({ event }) =>
-            event.type === 'workspace.writer.changed' &&
-            event.status === 'released' &&
-            event.writerRunId === writerRun,
-        ),
-      )
-
-      const contenderRun = manager.startRun({
-        sessionId: contenderSession,
-        message: 'Start another workspace writer',
-        clientRequestId: 'lease-contender-after-settlement',
-      })
-      await waitFor(() =>
-        sent.some(
-          ({ event }) =>
-            event.type === 'run.status' &&
-            event.runId === contenderRun &&
-            event.status === 'completed',
-        ),
-      )
-    } finally {
-      allowSaveToFinish()
-      await manager.dispose()
-    }
   })
 })

@@ -385,16 +385,7 @@ Files 内部使用二级 tab：
 
 ### 8.4 Project
 
-Project tab 展示当前 workspace 专属的项目状态和代码智能配置，不承载全局应用设置。
-
-- Modules：查看当前 module、重新检测 module、预览检测结果并保存为项目元数据；当前 UI 尚未提供完整手动 module 编辑器。
-- Serena backend：展示和编辑当前项目的 Serena MCP 结构化启动配置，包括 command、context、project 参数模式、language backend、启动超时、工具超时、dashboard 行为、日志级别和高级附加参数。
-- Launch preview：展示根据结构化配置生成的启动命令，便于排查 PATH、参数和 dashboard 行为。
-- Backend status：展示后端状态、动态 capabilities、启动失败摘要、stderr 尾部和重启入口。
-- Metadata：展示 module 状态保存位置；当前版本使用 `.zch/project-model.json` 作为 project-local metadata。
-- `.zch/` 由应用按需自动创建；不存 API key、大 trace 或原始工具输出，不自动修改 `.gitignore`，未被忽略时在此 tab 提示用户。
-- Agent 对 module 的自动更新应在此 tab 可审计，并能区分 `detected`、`agent-set`、`user-set` 和 `imported` 来源。
-- 全局凭据、默认 Provider 和应用级偏好仍在 Settings 页面；Project tab 只选择当前项目如何使用这些能力。
+ProjectModel/Serena/code intelligence 暂停期间不显示 Project artifact tab，也不在 Renderer 中加载或编辑 ProjectModel。文件浏览仍由 Files tab 提供；普通 prompt harness 的 module marker 探测只存在于本次 runtime context，不形成 UI 状态或 workspace 文件。Swarm 完成后的 SQLite 迁移与 Project UI 重建见 roadmap。
 
 ---
 

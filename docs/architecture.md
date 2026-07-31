@@ -257,7 +257,7 @@ interface ProjectRecord {
 
 `path` 是 Backend 在添加项目时通过平台路径规则和 `realpath` 规范化的绝对 workspace 路径；数据库以它去重，但 Session 只保存稳定 `projectId`。目录移动或用户显式重新关联后可以更新 `path`，不能通过路径级联重写 Session。
 
-`name` 默认取目录名。ProjectModel、module、Serena/code intelligence 配置不进入 `projects` 表，继续由 workspace 内 `.zch/project-model.json` 管理。
+`name` 默认取目录名。ProjectModel、module 持久化和 Serena/code intelligence 当前整体关闭：生产 runtime 不装配 ProjectMetadataStore/CodeBackendManager，不读取、创建或改写 workspace 内的 `.zch/project-model.json`。普通 prompt harness 只在内存中做有界、只读的 module marker 探测。Swarm 完成后再把 ProjectModel 迁入 SQLite；旧 `.zch` 届时只作为一次性显式导入源，不能继续作为运行时真相源。
 
 ### 5.2 SessionRecord
 
@@ -565,7 +565,7 @@ Renderer 的运行限制表单以单列分节展示，`autoCompactTriggerPercent
 
 每个工具结果的模型投影独立受默认 64K token 上限保护，不再维护跨 Tool batch、Provider step 或整个 Run 累计的工具结果预算；通用工具输出与 `read_file` 内容边界为 128 KiB。`read_file` 默认/最多扫描 10,000 行，最终仍由字节与保守 token 估算先到者截断。执行器先保留独立 byte bound，模型 token 预算随后只计算 canonical projection，不再计算内部结果信封。完整 Provider 请求继续受冻结模型 profile 的 prompt budget 与自动压缩约束。AppConfig v14 从合法 v9–v13 配置删除退役的 `maxToolTokensPerRun`，其余限制保持既有迁移语义。
 
-ToolRegistry 可以注册稳定的 `code_*` facade，但每个 Session/Run 在生成 provider tool catalog 时按当前 ProjectModel 过滤。只有 `serena.enabled` 且至少一个属于该 Serena backend 的 binding 已启用并声明 capability 时，Provider request、runtime context 和 AGENTS context 才包含这些工具；未配置、禁用或读取 ProjectModel 失败都采用 fail-closed 目录。Provider parser 删除 intent metadata 后，ToolRegistry/executor 在权限与 schema 校验前再次按注册时记录的实际 intent field 清理，防止 `_agent_intent` 序列化泄漏导致偶发 `additionalProperties` 错误。
+ProjectModel 与 code intelligence 暂停期间，Session tooling 不注册 `project_*` 或 `code_*`，provider tool catalog 还会无条件过滤这些保留 ID，旧 IPC 调用统一返回 `NOT_AVAILABLE`；因此 Desktop、Headless、main Agent 和 child Agent 都不能启动 Serena 或触发 `.zch` I/O。Provider parser 删除 intent metadata 后，ToolRegistry/executor 在权限与 schema 校验前再次按注册时记录的实际 intent field 清理，防止 `_agent_intent` 序列化泄漏导致偶发 `additionalProperties` 错误。
 
 Auto approval 是独立于 Provider 编辑表单的全局 route selection，并归入 Permissions 设置页：`approval.approverProviderId` 只引用一个 Provider 配置实例以取得 `providerType/baseURL/credential`，`approval.approverModel` 单独覆盖模型。它由独立配置命令保存；创建、复制或保存 Provider 不能改写 approval，只有删除当前引用 Provider 时才显式切换到 fallback。这样避免复制第二套 endpoint/credential 配置，同时保证审批模型不跟随当前 Provider 卡片草稿漂移。
 
@@ -1450,7 +1450,7 @@ Renderer 不可以：
 | API keys                                             | Electron safeStorage-backed secret store | backend                 |
 | Trace                                                | `userData/traces/*.jsonl`                | backend                 |
 | Skills                                               | `userData/skills/`                       | backend manager         |
-| ProjectModel                                         | workspace `.zch/project-model.json`      | backend project service |
+| ProjectModel                                         | 暂停持久化；目标为 `userData/agent.db`   | backend（迁移后）       |
 | Prompt resources                                     | versioned application resources          | backend registry        |
 
 Renderer 只能读取 public config snapshot。API key、Authorization 和 safeStorage 密文不进入 renderer、Session/Message records 或 trace。
@@ -1506,7 +1506,7 @@ Trace 不记录 credentials。P3 的 trace reader 明确拒绝 v1，不提供转
 
 这些服务继续由 backend 拥有：
 
-- Project explorer 和 code intelligence 通过 query 返回 public records。
+- Project explorer 继续读取普通 workspace 文件；ProjectModel/Serena/code intelligence query 暂停，等待 Swarm 后的 SQLite 迁移。
 - PTY process、scrollback 和 ownership 属于 LiveSessionContext；应用重启不恢复真实 PTY。
 - Skills manager 扫描、安装和启用 skill。
 - MCP manager 拥有连接、目录 revision、tool normalization 和调用。
@@ -1556,11 +1556,10 @@ parent ToolCall
 child Provider catalog 只包含：
 
 - `read_file`、`list_dir`、`glob`、`grep`
-- `project_get_modules`、`project_detect_modules`
 - `read_skill` 与有界 `delay`
 - snapshot 支持时的 `git_status`、`git_diff`、`git_log`、`git_show`
 
-写文件、git write、process、terminal、network、MCP、Goal/Plan、code intelligence、`subagent_run` 和未来 `swarm_run` 都不进入模型可见 catalog。实际 executor 再独立校验相同 allowlist 与 `gitToolsEnabled`，所以伪造 tool call 不能绕过 catalog。Project metadata 工具在 child 中读取 snapshot，不修改 live workspace；Git 命令使用 `--no-optional-locks`。
+写文件、git write、process、terminal、network、MCP、Goal/Plan、ProjectModel、code intelligence、`subagent_run` 和未来 `swarm_run` 都不进入模型可见 catalog。实际 executor 再独立校验相同 allowlist 与 `gitToolsEnabled`，所以伪造 tool call 不能绕过 catalog。Git 命令使用 `--no-optional-locks`。
 
 ### 18.3 Stable Workspace/Git snapshot
 
@@ -1674,7 +1673,7 @@ P0–P13 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路�
 
 P11 Provider Runtime Foundation 与 P12 Generic Responses/Anthropic 已完成。Main、compact、auto-compact budget check 与 auto approver 均使用扁平 `ModelProvider.compile/stream`；生产实现为互不继承的 `deepseek.chat-completions`、`generic.chat-completions`、`generic.responses` 与 `generic.anthropic`。配置、route 和 continuation 统一使用 `providerType`；Google 和具体厂商实现继续按实际使用需求独立增加。
 
-P13 Read-only Subagent Runtime 的 S1/S2 已完成。默认关闭的 `subagent_run({ name, task })` 复用唯一 Session/Run/Provider loop，在 workspace 外稳定 snapshot 上运行隐藏 readonly Session；task 是不含父历史的普通 user input。Tool catalog/executor 双重限制只读能力，特殊 batch 在任何调用前统一预检；route、全局步骤/输出/Tool 限制、取消与 usage 均沿用现有 runtime。Model Pool 是下一阶段，Swarm、递归委派、code intelligence、自定义 child 工具列表和详细子任务 UI 尚未实现。
+P13 Read-only Subagent Runtime 的 S1/S2 已完成。默认关闭的 `subagent_run({ name, task })` 复用唯一 Session/Run/Provider loop，在 workspace 外稳定 snapshot 上运行隐藏 readonly Session；task 是不含父历史的普通 user input。Tool catalog/executor 双重限制只读能力，特殊 batch 在任何调用前统一预检；route、全局步骤/输出/Tool 限制、取消与 usage 均沿用现有 runtime。Model Pool 是下一阶段，Swarm、递归委派、自定义 child 工具列表和详细子任务 UI 尚未实现。ProjectModel/Serena/code intelligence 已从生产装配、工具、IPC 可用路径和 Renderer 入口关闭；其 SQLite 迁移及重新启用排在 Swarm 完成之后。
 
 Tool Result projection 已统一进入生产主链：完整内部 `ToolResult` 只供安全、trace 和插件使用，模型历史与 `tool.completed` 使用 `model-content.v1` canonical parts。文本密集型内置工具输出紧凑正文，结构化工具保留 JSON value；Chat Completions、Responses 与 Anthropic 共用无 part 外壳的 renderer。旧 active Tool Result 不迁移并明确拒绝续聊。
 

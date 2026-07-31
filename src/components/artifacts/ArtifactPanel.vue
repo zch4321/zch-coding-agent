@@ -7,9 +7,8 @@ import UiIcon from '../UiIcon.vue'
 import DiffTab from './DiffTab.vue'
 import FilesTab from './FilesTab.vue'
 import PlanTab from './PlanTab.vue'
-import ProjectTab from './ProjectTab.vue'
 
-type ArtifactTab = 'files' | 'diff' | 'plan' | 'project'
+type ArtifactTab = 'files' | 'diff' | 'plan'
 
 const agent = useAgentStore()
 const { t } = useI18n()
@@ -121,22 +120,6 @@ watch(
           </span>
         </template>
         <DiffTab />
-      </NTabPane>
-      <NTabPane
-        name="project"
-        display-directive="show"
-        style="height: 100%"
-        :tab-props="{
-          role: 'tab',
-          'aria-selected': activeArtifact === 'project',
-        }"
-      >
-        <template #tab>
-          <span class="artifact-tab-label">
-            <UiIcon name="settings" />{{ t('artifact.project') }}
-          </span>
-        </template>
-        <ProjectTab />
       </NTabPane>
     </NTabs>
   </aside>

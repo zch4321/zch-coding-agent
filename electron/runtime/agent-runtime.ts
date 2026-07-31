@@ -1,10 +1,8 @@
 import type { PermissionMode } from '../../shared/config'
 import type { RunContext } from '../../shared/context'
 import type { RunId, SessionId } from '../../shared/ids'
-import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import type { TraceService } from '../logging/service'
 import type { McpManager } from '../mcp/mcp-manager'
-import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import type { PromptRegistry } from '../prompts/registry'
 import type { SessionManager } from '../session/session-manager'
 import type { SkillsManager } from '../skills/manager'
@@ -15,8 +13,6 @@ export interface AgentRuntimeServices {
   sessions: SessionManager
   skills: SkillsManager
   traces: TraceService
-  projects: ProjectMetadataStore
-  codeBackends: CodeBackendManager
   mcp: McpManager
   prompts: PromptRegistry
 }

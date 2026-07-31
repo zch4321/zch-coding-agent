@@ -18,11 +18,6 @@ import { SkillError, type SkillsManager } from '../skills/manager'
 import { TraceServiceError, type TraceService } from '../logging/service'
 import { writeTextAtomic } from '../config/atomic-file'
 import type { HttpTransport } from '../net/http-transport'
-import {
-  ProjectMetadataError,
-  type ProjectMetadataStore,
-} from '../project/project-metadata-store'
-import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import type { McpManager } from '../mcp/mcp-manager'
 import type { BackendRuntime } from '../application/create-backend-runtime'
 import { IpcFault, type IpcBusinessHandlers } from './index'
@@ -32,26 +27,12 @@ export interface AppIpcHandlerDependencies {
   backend: BackendRuntime
   skillsManager: SkillsManager
   traceService: TraceService
-  projectMetadata: ProjectMetadataStore
-  codeBackends: CodeBackendManager
   mcpManager?: McpManager
   getHttpTransport?: () => HttpTransport
   refreshHttpTransport?: (
     proxy: ReturnType<ConfigStore['getPublicConfig']>['network']['httpProxy'],
   ) => void
   getMainWindow: () => BrowserWindow | undefined
-}
-
-function projectMetadataFault(error: unknown): IpcFault | undefined {
-  if (!(error instanceof ProjectMetadataError)) return undefined
-
-  return new IpcFault({
-    code:
-      error.code === 'WORKSPACE_NOT_FOUND'
-        ? 'NOT_FOUND'
-        : 'PRECONDITION_FAILED',
-    message: error.message,
-  })
 }
 
 function traceFault(error: unknown): IpcFault | undefined {
@@ -80,8 +61,6 @@ export function createAppIpcHandlers(
     backend,
     skillsManager,
     traceService,
-    projectMetadata,
-    codeBackends,
     mcpManager,
     getHttpTransport,
     refreshHttpTransport,
@@ -511,66 +490,30 @@ export function createAppIpcHandlers(
         throw error
       }
     },
-    'project:get': async (payload) => {
-      try {
-        return await projectMetadata.get(
-          await projectWorkspace(payload.projectId),
-        )
-      } catch (error) {
-        const fault = projectMetadataFault(error)
-        if (fault) throw fault
-        throw error
-      }
+    'project:get': async () => {
+      throw notAvailable(
+        'Project metadata is temporarily disabled pending SQLite migration',
+      )
     },
-    'project:save': async (payload) => {
-      try {
-        return await projectMetadata.save(
-          await projectWorkspace(payload.projectId),
-          payload.project,
-        )
-      } catch (error) {
-        const fault = projectMetadataFault(error)
-        if (fault) throw fault
-        throw error
-      }
+    'project:save': async () => {
+      throw notAvailable(
+        'Project metadata is temporarily disabled pending SQLite migration',
+      )
     },
-    'project:detect-modules': async (payload) => {
-      try {
-        return {
-          modules: await projectMetadata.detectModules(
-            await projectWorkspace(payload.projectId),
-          ),
-        }
-      } catch (error) {
-        const fault = projectMetadataFault(error)
-        if (fault) throw fault
-        throw error
-      }
+    'project:detect-modules': async () => {
+      throw notAvailable(
+        'Project metadata is temporarily disabled pending SQLite migration',
+      )
     },
-    'project:backend-status': async (payload) => {
-      try {
-        return {
-          statuses: await codeBackends.statuses(
-            await projectWorkspace(payload.projectId),
-          ),
-        }
-      } catch (error) {
-        const fault = projectMetadataFault(error)
-        if (fault) throw fault
-        throw error
-      }
+    'project:backend-status': async () => {
+      throw notAvailable(
+        'Code intelligence is temporarily disabled pending SQLite migration',
+      )
     },
-    'project:restart-backend': async (payload) => {
-      try {
-        return await codeBackends.restart(
-          await projectWorkspace(payload.projectId),
-          payload.backendId,
-        )
-      } catch (error) {
-        const fault = projectMetadataFault(error)
-        if (fault) throw fault
-        throw error
-      }
+    'project:restart-backend': async () => {
+      throw notAvailable(
+        'Code intelligence is temporarily disabled pending SQLite migration',
+      )
     },
     'plan:update-status': async (payload) => {
       await backend.liveSessions.ensureLoaded(payload.sessionId)

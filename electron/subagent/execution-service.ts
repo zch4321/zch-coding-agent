@@ -30,8 +30,6 @@ const CHILD_TOOL_IDS = new Set([
   'list_dir',
   'glob',
   'grep',
-  'project_get_modules',
-  'project_detect_modules',
   'read_skill',
   'delay',
 ])

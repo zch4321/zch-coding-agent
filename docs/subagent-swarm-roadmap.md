@@ -1,6 +1,6 @@
 # Subagent 与 Swarm Roadmap
 
-> 状态：P13 已完成 S1 · Subagent Execution Foundation 与 S2 · Generic `subagent_run`；下一阶段是 S3 · Model Pool，Swarm 尚未实现。
+> 状态：P13 已完成 S1 · Subagent Execution Foundation 与 S2 · Generic `subagent_run`；下一阶段是 S3 · Model Pool，Swarm 尚未实现。ProjectModel/Serena/code intelligence 已临时关闭，其 SQLite 迁移排在 Swarm 完成之后。
 >
 > 已实现的稳定契约见 [`architecture.md`](./architecture.md) 与 [`requirements.md`](./requirements.md)。本文只保留尚未完成的演进方向，避免同时维护两套事实来源。
 
@@ -107,7 +107,33 @@ Swarm 结果沿用单子 Agent 的 `results/meta` 思路：
 - 覆盖慢 Provider、排队取消、应用崩溃、Renderer reload 与长结果的压力测试。
 - 评估只读 transcript 诊断入口，但 child Session 仍不可继续聊天。
 
-## 5. 持续不变量与发布门禁
+## 5. S6 · ProjectModel SQLite 与 Serena 恢复（Swarm 之后）
+
+### 5.1 当前暂停边界
+
+- Desktop 与 Headless 的生产 runtime 不装配 ProjectMetadataStore 或 CodeBackendManager，不注册 `project_*`/`code_*` Tool，也不启动 Serena。
+- ProjectModel/Serena artifact UI 暂停；保留的旧 IPC contract 只返回 `NOT_AVAILABLE`，用于让旧 renderer 明确失败，而不是退回 workspace 文件。
+- 普通 Session 仅在内存中做有界、只读的 module marker 探测；应用不得读取、创建或改写 `.zch/project-model.json`。用户已有 `.zch` 保持原样。
+
+这段暂停状态持续到 S3 Model Pool、S4 Swarm 和 S5 hardening 完成，避免在并发编排期间同时重做项目状态所有权。
+
+### 5.2 迁移目标
+
+- 在 `userData/agent.db` 增加由稳定 `projectId` 归属的 versioned ProjectModel record；revision、schema 校验和更新走现有 Backend coordinator/transaction，不在 Session 或 Renderer 自行落盘。
+- ProjectModel query/command 经共享 schema 和 IPC boundary 暴露；Renderer 重建 Project tab 时只消费 backend public record，不能直接接触 workspace metadata 文件。
+- Serena/其他 code backend 的配置引用 SQLite ProjectModel；backend process、status 和 stderr tail 仍是主进程 live state，不把 pid 或原始日志当成 durable ProjectModel。
+- legacy `.zch/project-model.json` 仅支持用户显式触发的一次性导入：先有界读取和完整校验，再用事务写入 SQLite；冲突时要求用户选择，不能静默覆盖。
+- 成功导入后不删除、不改名、不续写旧 `.zch`。可提示用户自行归档或删除，但 Application 不自动修改 workspace 或 `.gitignore`。
+- 只有 SQLite service、迁移/导入、IPC、UI 和 Tool 双重校验全部完成后，才重新注册 `project_*`/`code_*` 和启动 Serena；不能恢复半套路径。
+
+### 5.3 验收
+
+- 新建项目、打开 Session、运行 main/child/swarm 均不会创建 `.zch`；未恢复前所有 Provider catalog 都不含 `project_*`/`code_*`。
+- SQLite ProjectModel 与 Project 删除级联、目录重关联、revision 冲突、备份/恢复和 Renderer reload 行为有持久化回归测试。
+- 合法 legacy 文件可显式导入一次；损坏、超限、workspace 不匹配和 revision 冲突均无部分写入，原文件始终不变。
+- Serena 恢复后只能读取 SQLite 配置；禁用/不可用时 catalog 与 executor 都拒绝伪造的 `code_*` 调用。
+
+## 6. 持续不变量与发布门禁
 
 后续阶段必须持续覆盖：
 
@@ -120,7 +146,7 @@ Swarm 结果沿用单子 Agent 的 `results/meta` 思路：
 
 每阶段完成后只运行常规完整门禁 `npm run verify`。真实 Provider、benchmark、Docker worker 和其他付费测试保持显式 opt-in。
 
-## 6. 明确延后
+## 7. 明确延后
 
 - `subagent_continue` 与对子 Agent 的多轮追问。
 - 子 Agent 之间通信、递归委派、投票、辩论或自动应用修改。

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -23,13 +23,28 @@ const noFileChangeAudit = {
 
 describe('AgentRuntime Node boundary', () => {
   it('runs and disposes without BrowserWindow, WebContents, preload, or IPC', async () => {
+    class InspectingEditProvider extends ScriptedEditProvider {
+      readonly toolNames: string[][] = []
+
+      override async *run(
+        request?: ProviderStreamRequest,
+      ): AsyncIterable<ProviderEvent> {
+        if (request) {
+          this.toolNames.push(
+            request.toolDefinitions.map((definition) => definition.name),
+          )
+        }
+        yield* super.run()
+      }
+    }
+
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-runtime-'))
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
     await writeFile(path.join(workspace, 'note.txt'), 'alpha\nbeta\n')
     const configStore = await createConfig(directory)
     const events: AgentEvent[] = []
-    const provider = new ScriptedEditProvider()
+    const provider = new InspectingEditProvider()
     const runtime = await createAgentRuntime({
       configStore,
       userDataDirectory: directory,
@@ -64,6 +79,18 @@ describe('AgentRuntime Node boundary', () => {
           event.type === 'tool.proposed' && event.tool === 'apply_patch',
       ),
     ).toBe(true)
+    for (const toolName of [
+      'project_get_modules',
+      'project_detect_modules',
+      'project_set_modules',
+      'project_update_module',
+      'code_find_definition',
+    ]) {
+      expect(provider.toolNames.flat()).not.toContain(toolName)
+    }
+    await expect(stat(path.join(workspace, '.zch'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
 
     await runtime.dispose()
     await runtime.dispose()

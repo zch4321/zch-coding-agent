@@ -65,8 +65,6 @@ function createHandlers(input?: {
       backend: backend as never,
       skillsManager: {} as never,
       traceService: traceService as never,
-      projectMetadata: {} as never,
-      codeBackends: {} as never,
       getMainWindow: () => undefined,
     }),
     backend,
@@ -81,6 +79,41 @@ describe('app IPC handlers', () => {
     openPath.mockReset()
     showSaveDialog.mockReset()
     writeTextAtomic.mockReset()
+  })
+
+  it('rejects legacy ProjectModel and code-intelligence IPC while disabled', async () => {
+    const { handlers } = createHandlers()
+    const projectId = 'project-disabled'
+    const calls = [
+      () =>
+        handlers['project:get']!({ version: 1, projectId } as never, stubEvent),
+      () =>
+        handlers['project:save']!(
+          { version: 1, projectId, project: {} } as never,
+          stubEvent,
+        ),
+      () =>
+        handlers['project:detect-modules']!(
+          { version: 1, projectId } as never,
+          stubEvent,
+        ),
+      () =>
+        handlers['project:backend-status']!(
+          { version: 1, projectId } as never,
+          stubEvent,
+        ),
+      () =>
+        handlers['project:restart-backend']!(
+          { version: 1, projectId, backendId: 'serena' } as never,
+          stubEvent,
+        ),
+    ]
+
+    for (const call of calls) {
+      await expect(call()).rejects.toMatchObject({
+        error: { code: 'NOT_AVAILABLE' },
+      })
+    }
   })
 
   it('opens only guarded regular workspace files with an external application', async () => {
