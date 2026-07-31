@@ -37,11 +37,16 @@ const visibleRoleLabel = computed(() => {
   return roleLabel()
 })
 
+const isActiveAssistant = computed(
+  () =>
+    props.message.role === 'assistant' &&
+    props.message.runId === props.activeRunId,
+)
+
 const showMetadata = computed(
   () =>
     Boolean(visibleRoleLabel.value) ||
-    (props.message.role === 'assistant' &&
-      props.message.runId === props.activeRunId),
+    (isActiveAssistant.value && !props.message.reasoning),
 )
 </script>
 
@@ -50,7 +55,7 @@ const showMetadata = computed(
     <div v-if="showMetadata" class="message-meta">
       <strong v-if="visibleRoleLabel">{{ visibleRoleLabel }}</strong>
       <NTag
-        v-if="message.role === 'assistant' && message.runId === activeRunId"
+        v-if="isActiveAssistant"
         class="message-status"
         round
         size="small"
@@ -137,6 +142,9 @@ const showMetadata = computed(
           <div class="tool-call-row">
             <div class="tool-call-summary">
               <span class="tool-call-muted">{{ t('chat.reasoning') }}</span>
+              <NTag v-if="isActiveAssistant" round size="small" type="info">
+                {{ t('chat.streaming') }}
+              </NTag>
             </div>
           </div>
         </template>
