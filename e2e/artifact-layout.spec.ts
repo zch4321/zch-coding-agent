@@ -103,7 +103,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     await expect(projectSidebar).toBeVisible()
     await expect
       .poll(() => projectSidebar.evaluate((sidebar) => sidebar.clientWidth))
-      .toBe(360)
+      .toBe(320)
     const sidebarLayout = await projectSidebar.evaluate((sidebar) => {
       const sidebarBounds = sidebar.getBoundingClientRect()
       const selectors = [

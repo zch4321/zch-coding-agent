@@ -39,8 +39,7 @@ type ArtifactTab = 'files' | 'diff' | 'plan' | 'project'
 type AppView = 'chat' | 'settings'
 type MessageAction = 'edit' | 'fork' | 'retry'
 
-const PROJECT_SIDEBAR_WIDTH = 360
-const SETTINGS_SIDEBAR_WIDTH = 240
+const LEFT_SIDEBAR_WIDTH = 320
 const ARTIFACT_SIDEBAR_WIDTH = 440
 const MIN_CONVERSATION_WIDTH = 440
 
@@ -95,13 +94,8 @@ const activeTitle = computed(() =>
     : agent.activeConversation.title,
 )
 const naiveLocale = computed(() => (locale.value === 'zh-CN' ? zhCN : enUS))
-const leftSidebarWidth = computed(() =>
-  activeView.value === 'settings'
-    ? SETTINGS_SIDEBAR_WIDTH
-    : PROJECT_SIDEBAR_WIDTH,
-)
 const canOpenProjectSidebar = computed(
-  () => workbenchWidth.value >= PROJECT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH,
+  () => workbenchWidth.value >= LEFT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH,
 )
 const canOpenArtifactSidebar = computed(
   () => workbenchWidth.value >= ARTIFACT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH,
@@ -109,7 +103,7 @@ const canOpenArtifactSidebar = computed(
 const canOpenBothSidebars = computed(
   () =>
     workbenchWidth.value >=
-    PROJECT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH + ARTIFACT_SIDEBAR_WIDTH,
+    LEFT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH + ARTIFACT_SIDEBAR_WIDTH,
 )
 const projectSidebarDisabled = computed(
   () => !projectSidebarOpen.value && !canOpenProjectSidebar.value,
@@ -431,7 +425,7 @@ onUnmounted(() => {
             has-sider
           >
             <NLayoutSider
-              :width="leftSidebarWidth"
+              :width="LEFT_SIDEBAR_WIDTH"
               :collapsed-width="0"
               :collapsed="!projectSidebarOpen"
               :show-collapsed-content="false"
