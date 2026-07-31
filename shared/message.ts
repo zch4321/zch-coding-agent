@@ -87,6 +87,15 @@ export const JsonPartSchema = Type.Object(
 )
 export type JsonPart = Static<typeof JsonPartSchema>
 
+export const ToolResultContentSchema = Type.Array(
+  Type.Union([TextPartSchema, JsonPartSchema]),
+  {
+    minItems: 1,
+    maxItems: MAX_MESSAGE_PARTS,
+  },
+)
+export type ToolResultContent = Static<typeof ToolResultContentSchema>
+
 export const ToolCallPartSchema = Type.Object(
   {
     type: Type.Literal('tool_call'),
@@ -102,10 +111,7 @@ export const ToolResultPartSchema = Type.Object(
   {
     type: Type.Literal('tool_result'),
     callId: CallIdSchema,
-    content: Type.Array(Type.Union([TextPartSchema, JsonPartSchema]), {
-      minItems: 1,
-      maxItems: MAX_MESSAGE_PARTS,
-    }),
+    content: ToolResultContentSchema,
     isError: Type.Boolean(),
   },
   { additionalProperties: false },
@@ -167,6 +173,7 @@ const ToolMetadataSchema = Type.Object(
   {
     name: Type.String({ minLength: 1, maxLength: 512 }),
     reason: Type.Optional(Type.String({ maxLength: 16_384 })),
+    resultProjection: Type.Optional(Type.Literal('model-content.v1')),
     status: Type.Union([
       Type.Literal('completed'),
       Type.Literal('denied'),
@@ -509,6 +516,17 @@ export const MessagePageSchema = Type.Union([
   ),
 ])
 export type MessagePage = Static<typeof MessagePageSchema>
+
+/** Renders canonical Tool Result content without exposing internal part tags. */
+export function renderToolResultContent(
+  content: readonly ToolResultContent[number][],
+): string {
+  return content
+    .map((part) =>
+      part.type === 'text' ? part.text : JSON.stringify(part.value),
+    )
+    .join('\n')
+}
 
 /** Validates visibility, history, sequence, parent, and part invariants for a persisted message. */
 export function assertMessageRecordSemantics(record: MessageRecord): void {

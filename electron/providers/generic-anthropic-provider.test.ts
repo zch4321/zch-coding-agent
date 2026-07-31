@@ -282,7 +282,10 @@ describe('GenericAnthropicProvider', () => {
     })
     appendToolResult(history, {
       callId: 'call:first' as CallId,
-      content: 'first',
+      content: [
+        { type: 'text', text: 'first' },
+        { type: 'json', value: { rank: 1 } },
+      ],
       isError: false,
       name: 'read_file',
       status: 'completed',
@@ -290,7 +293,7 @@ describe('GenericAnthropicProvider', () => {
     })
     appendToolResult(history, {
       callId: 'call:second' as CallId,
-      content: { error: 'second' },
+      content: [{ type: 'json', value: { error: 'second' } }],
       isError: true,
       name: 'read_file',
       status: 'failed',
@@ -327,17 +330,22 @@ describe('GenericAnthropicProvider', () => {
           {
             type: 'tool_result',
             tool_use_id: 'call:first',
-            content: '[{"type":"json","value":"first"}]',
+            content: 'first\n{"rank":1}',
           },
           {
             type: 'tool_result',
             tool_use_id: 'call:second',
-            content: '[{"type":"json","value":{"error":"second"}}]',
+            content: '{"error":"second"}',
             is_error: true,
           },
         ],
       },
     ])
+    const wireMessages = JSON.stringify(call.request.messages)
+    expect(wireMessages).not.toContain('"status":"ok"')
+    expect(wireMessages).not.toContain('"type":"json"')
+    expect(wireMessages).not.toContain('"value":')
+    expect(wireMessages).not.toContain('"totalBytes"')
   })
 
   it('streams signed thinking, redacted blocks, text and tool input', async () => {
@@ -455,7 +463,7 @@ describe('GenericAnthropicProvider', () => {
     })
     appendToolResult(replayState, {
       callId: 'call:anthropic' as CallId,
-      content: 'contents',
+      content: [{ type: 'text', text: 'contents' }],
       isError: false,
       name: 'read_file',
       status: 'completed',

@@ -738,7 +738,10 @@ describe('P11 Provider foundation', () => {
     })
     appendToolResult(state, {
       callId: 'call:continuation' as CallId,
-      content: { content: 'docs' },
+      content: [
+        { type: 'text', text: 'docs' },
+        { type: 'json', value: { lines: 1 } },
+      ],
       isError: false,
       name: 'read_file',
       status: 'completed',
@@ -761,8 +764,13 @@ describe('P11 Provider foundation', () => {
     expect((call.request.messages as JsonValue[])[2]).toEqual({
       role: 'tool',
       tool_call_id: 'call:continuation',
-      content: JSON.stringify([{ type: 'json', value: { content: 'docs' } }]),
+      content: 'docs\n{"lines":1}',
     })
+    const wireMessages = JSON.stringify(call.request.messages)
+    expect(wireMessages).not.toContain('"status":"ok"')
+    expect(wireMessages).not.toContain('"type":"json"')
+    expect(wireMessages).not.toContain('"value":')
+    expect(wireMessages).not.toContain('"totalBytes"')
   })
 
   it.each([
@@ -803,7 +811,7 @@ describe('P11 Provider foundation', () => {
     })
     appendToolResult(state, {
       callId,
-      content: [],
+      content: [{ type: 'text', text: '[no output]' }],
       isError: false,
       name: 'read_file',
       status: 'completed',
@@ -845,7 +853,7 @@ describe('P11 Provider foundation', () => {
     })
     appendToolResult(state, {
       callId,
-      content: [],
+      content: [{ type: 'text', text: '[no output]' }],
       isError: false,
       name: 'read_file',
       status: 'completed',

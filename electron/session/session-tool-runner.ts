@@ -4,11 +4,16 @@ import type { CallId, MessageId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'
-import { boundToolResultForContext } from '../tools/context-budget'
+import { boundToolResultProjectionForContext } from '../tools/context-budget'
 import { PermissionPipeline } from '../permission/permission-pipeline'
 import { hasSideEffects } from '../permission/policy-engine'
 import type { PluginEventBus } from '../plugins/event-bus'
-import type { ToolCall, ToolDefinition, ToolResult } from '../tools/types'
+import type {
+  ToolCall,
+  ToolDefinition,
+  ToolResult,
+  ToolResultProjection,
+} from '../tools/types'
 import { ProviderAutoApprover } from '../permission/auto-approver'
 import type { ToolExecutor } from '../tools/tool-registry'
 import { toJsonValue } from './session-common'
@@ -35,6 +40,10 @@ import type {
   FileChangeExecutionPort,
   PreparedFileChange,
 } from './file-change-execution'
+import {
+  toolResultProjectionText,
+  toolResultProjectionValue,
+} from '../tools/tool-result-projection'
 
 type ToolAttemptStage = 'validation' | 'permission' | 'execution'
 
@@ -59,6 +68,36 @@ function attemptOutcome(
 
 function serializedBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(toJsonValue(value)), 'utf8')
+}
+
+function toolResultStatus(
+  result: ToolResult,
+): 'completed' | 'denied' | 'failed' | 'cancelled' | 'timed_out' {
+  if (result.status === 'ok') return 'completed'
+  if (result.status === 'denied') return 'denied'
+  if (result.status === 'cancelled') return 'cancelled'
+  if (result.status === 'timeout') return 'timed_out'
+  return 'failed'
+}
+
+function projectedEventResult(
+  source: ToolResult,
+  projection: ToolResultProjection,
+  totalBytes: number,
+): ToolResult {
+  if (source.status === 'ok') {
+    return {
+      status: 'ok',
+      content: toolResultProjectionValue(projection),
+      truncated: projection.truncated,
+      totalBytes,
+    }
+  }
+  const message = toolResultProjectionText(projection)
+  if (source.status === 'error') {
+    return { ...source, message }
+  }
+  return { status: source.status, message }
 }
 
 /** Executes tool calls, approvals, file changes, and provider-facing result annotations. */
@@ -422,13 +461,7 @@ export class SessionToolRunner {
           result = annotateFileMutationResult(result, mutation)
         }
 
-        const contextResult = boundToolResultForContext(
-          result,
-          this.#configStore.getPublicConfig().limits,
-          run.toolTokensUsed,
-        )
-        run.toolTokensUsed += contextResult.tokens
-        let providerResult = contextResult.result
+        let providerResult = result
 
         try {
           const filtered = await this.#contextGate.filterToolResultForProvider(
@@ -445,6 +478,12 @@ export class SessionToolRunner {
         } catch (error) {
           providerResult = toolFailure(error, run.controller.signal)
         }
+        const projected = this.#projectForContext(
+          run,
+          call,
+          providerResult,
+          definitionOverride,
+        )
 
         const durationMs = performance.now() - startedAt
         const attempt = {
@@ -490,7 +529,7 @@ export class SessionToolRunner {
           sessionId: session.sessionId,
           runId: run.runId,
           callId: call.id,
-          result: normalizeToolResult(providerResult),
+          result: normalizeToolResult(projected.eventResult),
           ...(approvalSummary ? { approval: approvalSummary } : {}),
         })
 
@@ -510,22 +549,12 @@ export class SessionToolRunner {
 
         appendToolResult(session, {
           callId: call.id,
-          content: toJsonValue(providerResult),
-          isError: providerResult.status !== 'ok',
+          content: projected.projection.content,
+          isError: projected.projection.isError,
           name: call.toolId,
           reason: call.reason,
-          status:
-            providerResult.status === 'ok'
-              ? 'completed'
-              : providerResult.status === 'denied'
-                ? 'denied'
-                : providerResult.status === 'cancelled'
-                  ? 'cancelled'
-                  : providerResult.status === 'timeout'
-                    ? 'timed_out'
-                    : 'failed',
-          truncated:
-            'truncated' in providerResult && providerResult.truncated === true,
+          status: toolResultStatus(providerResult),
+          truncated: projected.projection.truncated,
           durationMs,
           turnId: run.rootUserMessageId,
         })
@@ -535,19 +564,27 @@ export class SessionToolRunner {
       const cancelled = run.controller.signal.aborted
       for (const call of toolCalls) {
         if (terminalCallIds.has(call.id)) continue
+        const result: ToolResult = cancelled
+          ? {
+              status: 'cancelled',
+              message: 'The run was cancelled before the tool batch completed',
+            }
+          : {
+              status: 'error',
+              code: 'TOOL_BATCH_FAILED',
+              message:
+                'The tool batch failed before this result could be finalized',
+              retryable: false,
+            }
+        const projected = this.#projectForContext(run, call, result)
         appendToolResult(session, {
           callId: call.id,
-          content: {
-            status: cancelled ? 'cancelled' : 'error',
-            message: cancelled
-              ? 'The run was cancelled before the tool batch completed'
-              : 'The tool batch failed before this result could be finalized',
-          },
+          content: projected.projection.content,
           isError: true,
           name: call.toolId,
           reason: call.reason,
           status: cancelled ? 'cancelled' : 'failed',
-          truncated: false,
+          truncated: projected.projection.truncated,
           turnId: run.rootUserMessageId,
         })
         terminalCallIds.add(call.id)
@@ -557,6 +594,37 @@ export class SessionToolRunner {
 
     if (run.controller.signal.aborted) {
       throw run.controller.signal.reason ?? new Error('Run cancelled')
+    }
+  }
+
+  #projectForContext(
+    run: ActiveRun,
+    call: ToolCall,
+    result: ToolResult,
+    definitionOverride?: ToolDefinition,
+  ): {
+    projection: ToolResultProjection
+    eventResult: ToolResult
+  } {
+    const projection = this.#toolExecutor.projectResultForModel(
+      call,
+      result,
+      definitionOverride,
+      (message, error) => this.#onDiagnostic(message, error),
+    )
+    const totalBytes = Buffer.byteLength(
+      toolResultProjectionText(projection),
+      'utf8',
+    )
+    const bounded = boundToolResultProjectionForContext(
+      projection,
+      this.#configStore.getPublicConfig().limits,
+      run.toolTokensUsed,
+    )
+    run.toolTokensUsed += bounded.tokens
+    return {
+      projection: bounded.projection,
+      eventResult: projectedEventResult(result, bounded.projection, totalBytes),
     }
   }
 
@@ -617,12 +685,7 @@ export class SessionToolRunner {
       await session.logger.write(proposed)
       this.#emit(session, proposed)
 
-      const contextResult = boundToolResultForContext(
-        result,
-        this.#configStore.getPublicConfig().limits,
-        run.toolTokensUsed,
-      )
-      run.toolTokensUsed += contextResult.tokens
+      const projected = this.#projectForContext(run, call, result)
       const attempt = {
         type: 'tool.attempt',
         sessionId: session.sessionId,
@@ -658,16 +721,16 @@ export class SessionToolRunner {
         sessionId: session.sessionId,
         runId: run.runId,
         callId: call.id,
-        result: normalizeToolResult(contextResult.result),
+        result: normalizeToolResult(projected.eventResult),
       })
       appendToolResult(session, {
         callId: call.id,
-        content: toJsonValue(contextResult.result),
+        content: projected.projection.content,
         isError: true,
         name: call.toolId,
         reason: call.reason,
         status: 'failed',
-        truncated: false,
+        truncated: projected.projection.truncated,
         durationMs: 0,
         turnId: run.rootUserMessageId,
       })

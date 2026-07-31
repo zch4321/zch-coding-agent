@@ -8,11 +8,6 @@ export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** Serializes a tool result into the provider-facing result text. */
-export function toolResultForProvider(result: ToolResult): string {
-  return JSON.stringify(result)
-}
-
 /** Converts an internal ToolResult into the provider result envelope. */
 export function normalizeToolResult(result: ToolResult): ToolResultEnvelope {
   return result as ToolResultEnvelope

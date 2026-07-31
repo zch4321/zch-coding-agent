@@ -4,7 +4,11 @@ import {
 } from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
 import type { JsonObject, JsonValue } from '../../shared/json'
-import type { MessagePart, MessageRecord } from '../../shared/message'
+import {
+  renderToolResultContent,
+  type MessagePart,
+  type MessageRecord,
+} from '../../shared/message'
 import { renderLiveUserInterjection } from '../../shared/live-interjection'
 import { resolveAnthropicMessagesEndpoint } from '../../shared/model-route'
 import { canonicalHash, messageText } from '../session/canonical-history'
@@ -163,7 +167,7 @@ function compileAnthropicHistory(history: ProviderCompileInput['history']): {
           {
             type: 'tool_result',
             tool_use_id: result.callId,
-            content: JSON.stringify(result.content),
+            content: renderToolResultContent(result.content),
             ...(result.isError ? { is_error: true } : {}),
           },
         ])

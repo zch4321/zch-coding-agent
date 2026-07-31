@@ -344,7 +344,10 @@ describe('GenericResponsesProvider', () => {
     })
     appendToolResult(replayState, {
       callId: 'call:responses' as CallId,
-      content: [{ type: 'text', text: 'contents' }],
+      content: [
+        { type: 'text', text: 'contents' },
+        { type: 'json', value: { lines: 2 } },
+      ],
       isError: false,
       name: 'read_file',
       status: 'completed',
@@ -360,9 +363,14 @@ describe('GenericResponsesProvider', () => {
       {
         type: 'function_call_output',
         call_id: 'call:responses',
-        output: '[{"type":"json","value":[{"type":"text","text":"contents"}]}]',
+        output: 'contents\n{"lines":2}',
       },
     ])
+    const wireInput = JSON.stringify(replay.request.input)
+    expect(wireInput).not.toContain('"status":"ok"')
+    expect(wireInput).not.toContain('"type":"json"')
+    expect(wireInput).not.toContain('"value":')
+    expect(wireInput).not.toContain('"totalBytes"')
 
     const assistant = replayState.history.find(
       (record) => record.kind === 'assistant_turn',

@@ -152,6 +152,56 @@ class ReasoningOnlyProvider extends ScriptedProviderHarness {
   }
 }
 
+class ToolThenFinalProvider extends ScriptedProviderHarness {
+  calls = 0
+
+  async *run(): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    if (this.calls === 1) {
+      const args = { path: 'README.md' }
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'legacy-fixture-tool' },
+        turn: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call:legacy-fixture',
+              type: 'function',
+              function: {
+                name: 'read_file',
+                arguments: JSON.stringify(args),
+              },
+            },
+          ],
+        },
+        toolCalls: [
+          {
+            id: 'call:legacy-fixture' as CallId,
+            toolId: 'read_file',
+            args,
+            reason: 'Create a projected result fixture',
+          },
+        ],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'legacy-fixture-final' },
+      turn: { role: 'assistant', content: 'Initial run complete' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
 /** Bypasses the typed fixture normalizer to return a malformed canonical turn. */
 class MissingUsageProvider extends ScriptedProviderHarness {
   async *run(): AsyncIterable<never> {
@@ -174,6 +224,100 @@ class MissingUsageProvider extends ScriptedProviderHarness {
 }
 
 describe('SessionManager Provider completion validation', () => {
+  it('rejects an active legacy Tool Result before creating a Provider call', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-provider-legacy-result-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    await writeFile(path.join(workspace, 'README.md'), 'legacy fixture\n')
+    const configStore = await createConfig(directory)
+    const provider = new ToolThenFinalProvider()
+    const events: AgentEventEnvelope[] = []
+    let currentSession: SessionState | undefined
+    const executionState: SessionExecutionStatePort = {
+      commit: async (session) => {
+        currentSession = session
+        return undefined
+      },
+    }
+    let providerFactoryCalls = 0
+    const manager = new SessionManager({
+      configStore,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((event) => events.push(event)),
+      providerFactory: () => {
+        providerFactoryCalls += 1
+        return provider
+      },
+      executionState,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    const initialRunId = manager.startRun({
+      sessionId,
+      message: 'Read the fixture',
+      clientRequestId: 'request:legacy-fixture',
+    })
+    await waitFor(() =>
+      events.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === initialRunId &&
+          event.status === 'completed',
+      ),
+    )
+    const toolResult = currentSession?.history.find(
+      (record) => record.kind === 'tool_result',
+    )
+    if (!toolResult || toolResult.kind !== 'tool_result') {
+      throw new Error('Projected Tool Result fixture is missing')
+    }
+    if (!toolResult.metadata)
+      throw new Error('Tool metadata fixture is missing')
+    expect(toolResult.metadata.tool.resultProjection).toBe('model-content.v1')
+    delete toolResult.metadata.tool.resultProjection
+    const callsBeforeLegacyRun = providerFactoryCalls
+
+    const legacyRunId = manager.startRun({
+      sessionId,
+      message: 'Continue this conversation',
+      clientRequestId: 'request:legacy-rejected',
+    })
+    await waitFor(() =>
+      events.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === legacyRunId &&
+          event.status === 'failed',
+      ),
+    )
+
+    expect(providerFactoryCalls).toBe(callsBeforeLegacyRun)
+    expect(provider.calls).toBe(2)
+    expect(
+      events.find(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === legacyRunId &&
+          event.status === 'failed',
+      )?.event,
+    ).toMatchObject({
+      status: 'failed',
+      error: { code: 'LEGACY_TOOL_RESULT_UNSUPPORTED' },
+    })
+    expect(
+      events.filter(
+        ({ event }) =>
+          event.type === 'llm.usage' && event.runId === legacyRunId,
+      ),
+    ).toEqual([])
+    await manager.closeSession(sessionId)
+  })
+
   it('rejects before tools or canonical append and accepts the next run', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'agent-provider-validation-'),
