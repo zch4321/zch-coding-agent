@@ -200,7 +200,6 @@
 .chat-message.user {
   width: fit-content;
   max-width: min(78%, 680px);
-  margin-right: 0;
   padding: 11px 14px;
   border: 1px solid var(--border);
   border-radius: 14px 14px 4px 14px;
@@ -210,7 +209,6 @@
 .chat-message.interjection {
   width: fit-content;
   max-width: min(78%, 680px);
-  margin-right: 0;
   padding: 11px 14px;
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);

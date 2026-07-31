@@ -50,6 +50,7 @@ test.describe.serial('Electron settings workflows', () => {
         buttonRight: buttonBounds.right,
       }
     })
+    expect(settingsSidebarLayout.clientWidth).toBe(320)
     expect(settingsSidebarLayout.scrollWidth).toBeLessThanOrEqual(
       settingsSidebarLayout.clientWidth,
     )

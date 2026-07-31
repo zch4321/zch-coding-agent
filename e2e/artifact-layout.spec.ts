@@ -103,7 +103,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     await expect(projectSidebar).toBeVisible()
     await expect
       .poll(() => projectSidebar.evaluate((sidebar) => sidebar.clientWidth))
-      .toBeGreaterThan(200)
+      .toBe(320)
     const sidebarLayout = await projectSidebar.evaluate((sidebar) => {
       const sidebarBounds = sidebar.getBoundingClientRect()
       const selectors = [
@@ -318,6 +318,20 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     await expect(
       page.locator('.chat-message.assistant > .message-meta > strong'),
     ).toHaveCount(0)
+    const messageCenters = await page.evaluate(() => {
+      const user = document.querySelector('.chat-message.user')
+      const assistant = document.querySelector('.chat-message.assistant')
+      if (!user || !assistant) throw new Error('Expected chat messages')
+      const userBounds = user.getBoundingClientRect()
+      const assistantBounds = assistant.getBoundingClientRect()
+      return {
+        user: userBounds.left + userBounds.width / 2,
+        assistant: assistantBounds.left + assistantBounds.width / 2,
+      }
+    })
+    expect(
+      Math.abs(messageCenters.user - messageCenters.assistant),
+    ).toBeLessThan(1)
     await page.setViewportSize({ width: 1000, height: 720 })
 
     const artifactToggle = page.getByRole('button', {
@@ -382,7 +396,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.viewportWidth)
   })
 
-  test('keeps legacy Markdown import and export visibly disabled', async () => {
+  test('keeps legacy Markdown import disabled without a placeholder export', async () => {
     fakeProvider.queue([textDelta('Import and export fixture ready.')])
     await startDurableSession({
       page,
@@ -398,7 +412,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
       page.getByRole('button', { name: '从 Markdown 导入' }),
     ).toBeDisabled()
     await expect(
-      page.getByRole('button', { name: '导出为 Markdown' }).first(),
-    ).toBeDisabled()
+      page.getByRole('button', { name: '导出为 Markdown' }),
+    ).toHaveCount(0)
   })
 })

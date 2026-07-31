@@ -50,9 +50,6 @@ const enUS = {
     busyActionBlocked: 'Unavailable while running or awaiting approval',
     fork: 'Create a branched copy',
     forkTitle: 'Fork',
-    export: 'Export as Markdown',
-    exportTitle: 'Export',
-    inspectTranscript: 'Inspect full session transcript',
     import: 'Import from Markdown',
     durableImportExportPending:
       'Pending Durable Session import/export redesign',

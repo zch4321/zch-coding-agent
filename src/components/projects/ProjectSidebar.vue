@@ -24,7 +24,6 @@ const emit = defineEmits<{
   open: [sessionId: string]
   rename: [sessionId: string]
   delete: [sessionId: string]
-  inspect: [sessionId: string]
   settings: []
 }>()
 
@@ -335,34 +334,6 @@ function updateExpandedProjects(
                     </span>
                   </NButton>
                   <div class="conversation-actions">
-                    <NTooltip>
-                      <template #trigger>
-                        <NButton
-                          quaternary
-                          circle
-                          size="small"
-                          :aria-label="t('sidebar.inspectTranscript')"
-                          @click="emit('inspect', conversation.id)"
-                        >
-                          <UiIcon name="search" />
-                        </NButton>
-                      </template>
-                      {{ t('sidebar.inspectTranscript') }}
-                    </NTooltip>
-                    <NTooltip>
-                      <template #trigger>
-                        <NButton
-                          quaternary
-                          circle
-                          size="small"
-                          :aria-label="t('sidebar.export')"
-                          disabled
-                        >
-                          <UiIcon name="download" />
-                        </NButton>
-                      </template>
-                      {{ t('sidebar.durableImportExportPending') }}
-                    </NTooltip>
                     <NTooltip>
                       <template #trigger>
                         <NButton

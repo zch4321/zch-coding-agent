@@ -29,7 +29,6 @@ import ProjectSidebar from './components/projects/ProjectSidebar.vue'
 import SettingsNavigation from './components/settings/SettingsNavigation.vue'
 import SettingsPage from './components/settings/SettingsPage.vue'
 import { useAgentStore } from './stores/agent'
-import { useTraceStore } from './stores/traces'
 import type { PermissionMode } from '../shared/config'
 import { setAppLocale, type AppLocale } from './i18n'
 import { naiveThemeOverrides } from './theme/naive-theme'
@@ -40,7 +39,7 @@ type ArtifactTab = 'files' | 'diff' | 'plan' | 'project'
 type AppView = 'chat' | 'settings'
 type MessageAction = 'edit' | 'fork' | 'retry'
 
-const PROJECT_SIDEBAR_WIDTH = 240
+const LEFT_SIDEBAR_WIDTH = 320
 const ARTIFACT_SIDEBAR_WIDTH = 440
 const MIN_CONVERSATION_WIDTH = 440
 
@@ -49,7 +48,6 @@ const TerminalPanel = defineAsyncComponent(
 )
 
 const agent = useAgentStore()
-const traces = useTraceStore()
 const { locale, t } = useI18n()
 const activeView = ref<AppView>('chat')
 const settingsTab = ref<SettingsTab>('general')
@@ -97,7 +95,7 @@ const activeTitle = computed(() =>
 )
 const naiveLocale = computed(() => (locale.value === 'zh-CN' ? zhCN : enUS))
 const canOpenProjectSidebar = computed(
-  () => workbenchWidth.value >= PROJECT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH,
+  () => workbenchWidth.value >= LEFT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH,
 )
 const canOpenArtifactSidebar = computed(
   () => workbenchWidth.value >= ARTIFACT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH,
@@ -105,7 +103,7 @@ const canOpenArtifactSidebar = computed(
 const canOpenBothSidebars = computed(
   () =>
     workbenchWidth.value >=
-    PROJECT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH + ARTIFACT_SIDEBAR_WIDTH,
+    LEFT_SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH + ARTIFACT_SIDEBAR_WIDTH,
 )
 const projectSidebarDisabled = computed(
   () => !projectSidebarOpen.value && !canOpenProjectSidebar.value,
@@ -196,10 +194,6 @@ function requestMessageAction(action: MessageAction, messageId: string) {
 function updateMessageAction(value?: MessageAction) {
   messageAction.value = value
   if (!value) messageActionId.value = undefined
-}
-
-function inspectConversation(sessionId: string) {
-  void traces.openSessionTranscript(sessionId)
 }
 
 async function confirmMessageAction() {
@@ -431,7 +425,7 @@ onUnmounted(() => {
             has-sider
           >
             <NLayoutSider
-              :width="PROJECT_SIDEBAR_WIDTH"
+              :width="LEFT_SIDEBAR_WIDTH"
               :collapsed-width="0"
               :collapsed="!projectSidebarOpen"
               :show-collapsed-content="false"
@@ -455,7 +449,6 @@ onUnmounted(() => {
                 @open="openConversation"
                 @rename="beginRename"
                 @delete="deleteSessionId = $event"
-                @inspect="inspectConversation"
                 @settings="openSettings()"
               />
             </NLayoutSider>

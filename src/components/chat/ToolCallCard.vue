@@ -16,6 +16,10 @@ import type {
 import type { UsageActivity } from '../../stores/agent-types'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
+import {
+  formatToolResultDisplay,
+  toolResultDisplayContent,
+} from './tool-result-display'
 
 defineProps<{ tool: ToolActivity }>()
 const emit = defineEmits<{ 'content-resized': [] }>()
@@ -132,7 +136,9 @@ function notifyContentResized(): void {
           </div>
           <div v-if="hasToolResult(tool)" class="tool-detail-block">
             <strong>{{ t('chat.result') }}</strong>
-            <pre class="tool-result-json">{{ stringifyJson(tool.result) }}</pre>
+            <pre class="tool-result-json">{{
+              formatToolResultDisplay(toolResultDisplayContent(tool.result))
+            }}</pre>
           </div>
           <div v-if="hasApprovalDetails(tool)" class="tool-detail-block">
             <strong>{{ t('chat.approvalDetails') }}</strong>
