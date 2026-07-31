@@ -149,7 +149,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(13),
+    schemaVersion: Type.Literal(14),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
@@ -215,10 +215,6 @@ export const PublicConfigSchema = Type.Object(
         maxToolResultTokens: Type.Integer({
           minimum: 256,
           maximum: 1_000_000,
-        }),
-        maxToolTokensPerRun: Type.Integer({
-          minimum: 256,
-          maximum: 10_000_000,
         }),
         tokenEstimation: TokenEstimationSchema,
         commandTimeoutMs: Type.Integer({ minimum: 100, maximum: 86_400_000 }),

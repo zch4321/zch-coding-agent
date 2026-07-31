@@ -431,7 +431,6 @@ const zhCN = {
     maxAttachmentContextTokens: '附件内容 Token 上限',
     autoCompactTriggerPercent: '自动压缩触发阈值（%）',
     maxToolResultTokens: '单次工具结果 Token 上限',
-    maxToolTokensPerRun: '每次运行工具结果 Token 总上限',
     commandTimeoutMs: '命令超时（毫秒）',
     maxToolOutputBytes: '工具输出字节上限',
     terminalScrollbackBytes: '终端回滚字节上限',

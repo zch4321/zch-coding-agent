@@ -15,9 +15,11 @@ import {
   HeadlessConfigSchema,
   LegacyHeadlessConfigV1Schema,
   LegacyHeadlessConfigV2Schema,
+  LegacyHeadlessConfigV3Schema,
   type HeadlessConfig,
   type LegacyHeadlessConfigV1,
   type LegacyHeadlessConfigV2,
+  type LegacyHeadlessConfigV3,
 } from './contracts'
 
 const MAX_HEADLESS_CONFIG_BYTES = 1_048_576
@@ -25,6 +27,9 @@ const validateHeadlessConfig = compileSchema(HeadlessConfigSchema)
 const validateLegacyHeadlessConfig = compileSchema(LegacyHeadlessConfigV1Schema)
 const validateLegacyHeadlessConfigV2 = compileSchema(
   LegacyHeadlessConfigV2Schema,
+)
+const validateLegacyHeadlessConfigV3 = compileSchema(
+  LegacyHeadlessConfigV3Schema,
 )
 
 /** Provides a no-persistence SafeStorageAdapter for headless environment credentials. */
@@ -139,18 +144,28 @@ function normalizeHeadlessConfig(candidate: unknown): HeadlessConfig {
   if (validateHeadlessConfig(candidate)) {
     return structuredClone(candidate) as HeadlessConfig
   }
+  if (validateLegacyHeadlessConfigV3(candidate)) {
+    const legacy = structuredClone(candidate) as LegacyHeadlessConfigV3
+    return {
+      ...legacy,
+      schemaVersion: 4,
+      ...(legacy.limits ? { limits: withoutRunToolBudget(legacy.limits) } : {}),
+    }
+  }
   if (validateLegacyHeadlessConfigV2(candidate)) {
     const legacy = structuredClone(candidate) as LegacyHeadlessConfigV2
     return {
       ...legacy,
-      schemaVersion: 3,
+      schemaVersion: 4,
+      ...(legacy.limits ? { limits: withoutRunToolBudget(legacy.limits) } : {}),
     }
   }
   if (validateLegacyHeadlessConfig(candidate)) {
     const legacy = structuredClone(candidate) as LegacyHeadlessConfigV1
     return {
       ...legacy,
-      schemaVersion: 3,
+      schemaVersion: 4,
+      ...(legacy.limits ? { limits: withoutRunToolBudget(legacy.limits) } : {}),
       provider: {
         id: legacy.provider.id,
         ...(legacy.provider.label ? { label: legacy.provider.label } : {}),
@@ -170,6 +185,15 @@ function normalizeHeadlessConfig(candidate: unknown): HeadlessConfig {
   throw new HeadlessConfigError(
     formatSchemaErrors(validateHeadlessConfig.errors),
   )
+}
+
+/** Removes the retired lifetime Tool Result budget from a legacy config. */
+function withoutRunToolBudget<Limits extends Record<string, unknown>>(
+  limits: Limits,
+): Omit<Limits, 'maxToolTokensPerRun'> {
+  const migrated = { ...limits }
+  Reflect.deleteProperty(migrated, 'maxToolTokensPerRun')
+  return migrated
 }
 
 function canonicalize(value: unknown): unknown {

@@ -127,14 +127,6 @@ onBeforeUnmount(() => {
               :max="1000000"
             />
           </label>
-          <label class="settings-field">
-            <span>{{ t('limits.maxToolTokensPerRun') }}</span>
-            <NInputNumber
-              v-model:value="agent.limitsConfig.maxToolTokensPerRun"
-              :min="256"
-              :max="10000000"
-            />
-          </label>
         </section>
 
         <NDivider />

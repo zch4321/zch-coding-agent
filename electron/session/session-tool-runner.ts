@@ -479,7 +479,6 @@ export class SessionToolRunner {
           providerResult = toolFailure(error, run.controller.signal)
         }
         const projected = this.#projectForContext(
-          run,
           call,
           providerResult,
           definitionOverride,
@@ -576,7 +575,7 @@ export class SessionToolRunner {
                 'The tool batch failed before this result could be finalized',
               retryable: false,
             }
-        const projected = this.#projectForContext(run, call, result)
+        const projected = this.#projectForContext(call, result)
         appendToolResult(session, {
           callId: call.id,
           content: projected.projection.content,
@@ -598,7 +597,6 @@ export class SessionToolRunner {
   }
 
   #projectForContext(
-    run: ActiveRun,
     call: ToolCall,
     result: ToolResult,
     definitionOverride?: ToolDefinition,
@@ -619,12 +617,10 @@ export class SessionToolRunner {
     const bounded = boundToolResultProjectionForContext(
       projection,
       this.#configStore.getPublicConfig().limits,
-      run.toolTokensUsed,
     )
-    run.toolTokensUsed += bounded.tokens
     return {
-      projection: bounded.projection,
-      eventResult: projectedEventResult(result, bounded.projection, totalBytes),
+      projection: bounded,
+      eventResult: projectedEventResult(result, bounded, totalBytes),
     }
   }
 
@@ -685,7 +681,7 @@ export class SessionToolRunner {
       await session.logger.write(proposed)
       this.#emit(session, proposed)
 
-      const projected = this.#projectForContext(run, call, result)
+      const projected = this.#projectForContext(call, result)
       const attempt = {
         type: 'tool.attempt',
         sessionId: session.sessionId,

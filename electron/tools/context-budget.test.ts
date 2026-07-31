@@ -23,7 +23,7 @@ describe('context budget', () => {
     ).toBe(3)
   })
 
-  it('bounds a result with head and tail and enforces the run budget', () => {
+  it('bounds each result independently with a head and tail preview', () => {
     const large = {
       content: [
         {
@@ -34,37 +34,29 @@ describe('context budget', () => {
       isError: false,
       truncated: false,
     }
-    const bounded = boundToolResultProjectionForContext(
-      large,
-      { ...limits, maxToolResultTokens: 256, maxToolTokensPerRun: 300 },
-      0,
-    )
+    const bounded = boundToolResultProjectionForContext(large, {
+      ...limits,
+      maxToolResultTokens: 256,
+    })
 
-    expect(bounded.projection).toMatchObject({ truncated: true })
-    expect(bounded.projection.content[0]).toMatchObject({
+    expect(bounded).toMatchObject({ truncated: true })
+    expect(bounded.content[0]).toMatchObject({
       type: 'text',
       text: expect.stringContaining('HEAD-'),
     })
-    expect(JSON.stringify(bounded.projection.content)).toContain('-TAIL')
+    expect(JSON.stringify(bounded.content)).toContain('-TAIL')
 
+    const small = {
+      content: [{ type: 'text' as const, text: 'small later result' }],
+      isError: false,
+      truncated: false,
+    }
     expect(
-      boundToolResultProjectionForContext(
-        large,
-        limits,
-        limits.maxToolTokensPerRun,
-      ).projection,
-    ).toMatchObject({
-      truncated: true,
-    })
-    expect(
-      JSON.stringify(
-        boundToolResultProjectionForContext(
-          large,
-          limits,
-          limits.maxToolTokensPerRun,
-        ).projection,
-      ),
-    ).toContain('-TAIL')
+      boundToolResultProjectionForContext(small, {
+        ...limits,
+        maxToolResultTokens: 256,
+      }),
+    ).toEqual(small)
   })
 
   it('keeps projected UTF-8 text valid when truncating on byte boundaries', () => {
@@ -79,10 +71,9 @@ describe('context budget', () => {
         isError: false,
         truncated: false,
       },
-      { ...limits, maxToolResultTokens: 128, maxToolTokensPerRun: 128 },
-      0,
+      { ...limits, maxToolResultTokens: 128 },
     )
-    const content = bounded.projection.content[0]
+    const content = bounded.content[0]
     expect(content?.type).toBe('text')
     if (content?.type !== 'text') return
     expect(content.text).not.toContain('\uFFFD')

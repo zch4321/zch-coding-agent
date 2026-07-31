@@ -59,7 +59,7 @@ export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
 
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(13),
+    schemaVersion: Type.Literal(14),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
@@ -96,7 +96,7 @@ export type AppConfig = Static<typeof AppConfigSchema>
 export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 13,
+  schemaVersion: 14,
   activeProviderId: DEFAULT_PROVIDER_ID,
   providers: [
     {
@@ -138,7 +138,6 @@ export const DEFAULT_APP_CONFIG = {
     maxAttachmentContextTokens: 64_000,
     autoCompactTriggerPercent: 80,
     maxToolResultTokens: 64_000,
-    maxToolTokensPerRun: 128_000,
     tokenEstimation: {
       mode: 'conservative',
       bytesPerToken: 3,
@@ -251,7 +250,7 @@ export function toPublicConfig(
         })
 
   return {
-    schemaVersion: 13,
+    schemaVersion: 14,
     activeProviderId: config.activeProviderId,
     providers: config.providers.map((provider) => ({
       id: provider.id,

@@ -81,7 +81,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 > 设计意图：把常规删除做成独立工具，便于精确展示路径、数量和审批风险。它不能阻止 `run_command` 间接删除文件，因此命令工具仍必须独立经过权限策略，不能把工具拆分误当成 sandbox。
 
-`read_file` 使用 `startLine + lineCount` 分页。模型可见结果直接是带行号正文；空文件为 `[empty file]`，只有截断时才追加 `nextStartLine/totalLines/lineTruncated` 尾注，不重复 path 或参数。默认尽量读取到 10,000 行，单次最多 10,000 行，并同时受 128 KiB 与 64K 估算 token 限制；超长单行不能绕过字节/token 上限。全局工具结果默认单次预算为 64K token、每个 Run 累计预算为 128K token，Token 估算继续按 UTF-8 字节比例保守计算，不能把字节数直接当成真实 token 数。
+`read_file` 使用 `startLine + lineCount` 分页。模型可见结果直接是带行号正文；空文件为 `[empty file]`，只有截断时才追加 `nextStartLine/totalLines/lineTruncated` 尾注，不重复 path 或参数。默认尽量读取到 10,000 行，单次最多 10,000 行，并同时受 128 KiB 与 64K 估算 token 限制；超长单行不能绕过字节/token 上限。每个工具结果独立受默认 64K token 上限保护，不设置跨调用或跨步骤累计的 Run 总预算；Token 估算继续按 UTF-8 字节比例保守计算，不能把字节数直接当成真实 token 数。完整 Provider 请求仍受冻结模型 profile 的 prompt budget 和自动压缩约束。
 
 `apply_patch` 第一版一次只修改一个已存在的 UTF-8 文本文件，可包含多个 hunk。补丁路径必须是 workspace 相对路径；禁止二进制、rename、mode change、绝对路径和越界路径。为适配模型常见的计数错误，hunk header 的行数和 new-file 行号只作为提示；上下文/删除行仍必须精确匹配，old line number 失效时只有在精确上下文唯一命中时才可应用。审批绑定原文件 hash、规范化补丁 hash 与结果 hash，执行前重新验证。`create_file` 只创建不存在的文件，并会自动创建缺失父目录；覆盖已有文件应使用 `apply_patch`。
 
@@ -505,7 +505,7 @@ session.end     { reason, ts }
 ### 5.4 Headless 运行输出
 
 - 内部 Headless host 必须复用桌面端唯一 Agent Runtime 组装入口，固定 Yolo 且不增加、删除或替换模型可见工具。
-- Headless config v3 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs`；Runtime Identity 记录开关和 timeout，child execution 仍使用相同 snapshot、隐藏 Session、Tool profile 和 usage 归属。
+- Headless config v4 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs`，并迁移 v1–v3 输入；Runtime Identity v4 记录开关和 timeout，child execution 仍使用相同 snapshot、隐藏 Session、Tool profile 和 usage 归属。
 - stdout 只允许版本化 JSONL；host 诊断写 stderr；最终 `result.json` 原子写入 workspace 外的 artifacts 目录。
 - Provider 凭据只能由受信任配置声明的环境变量名称解析，凭据值不得进入配置回包、JSONL、trace、patch 或子进程环境。
 - result 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计、trace 和 patch 路径。`completed` 只表示 Agent run 正常结束，不替代外部业务验收。

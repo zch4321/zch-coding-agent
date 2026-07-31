@@ -3,7 +3,6 @@ import { renderToolResultContent } from '../../shared/message'
 import type { ToolResultProjection } from './types'
 
 const TRUNCATION_MARKER = '\n... output truncated ...\n'
-const EXHAUSTED_TOOL_RESULT_PREVIEW_TOKENS = 512
 
 /** Reports failures to fit provider context within configured token limits. */
 export class ContextBudgetError extends Error {
@@ -78,48 +77,30 @@ export function truncateTextHeadTail(
   return `${decodeUtf8Slice(source.subarray(0, headBytes))}${TRUNCATION_MARKER}${decodeUtf8Slice(source.subarray(Math.max(headBytes, source.length - tailBytes)))}`
 }
 
-/** Fits projected Tool Result content to the remaining model-context budget. */
+/** Fits one projected Tool Result to the configured per-result token limit. */
 export function boundToolResultProjectionForContext(
   projection: ToolResultProjection,
   limits: PublicConfig['limits'],
-  usedTokens: number,
-): { projection: ToolResultProjection; tokens: number } {
-  const remaining = Math.max(0, limits.maxToolTokensPerRun - usedTokens)
-  const allowed = Math.min(limits.maxToolResultTokens, remaining)
+): ToolResultProjection {
   const rendered = renderToolResultContent(projection.content)
   const tokens = estimateTextTokens(rendered, limits.tokenEstimation)
 
-  if (tokens <= allowed) {
-    return { projection, tokens }
+  if (tokens <= limits.maxToolResultTokens) {
+    return projection
   }
 
-  const previewBudget =
-    allowed <= 0
-      ? Math.min(
-          limits.maxToolResultTokens,
-          EXHAUSTED_TOOL_RESULT_PREVIEW_TOKENS,
-        )
-      : allowed
-  const bounded: ToolResultProjection = {
+  return {
     content: [
       {
         type: 'text',
         text: truncateTextHeadTail(
           rendered,
-          Math.max(1, previewBudget),
+          limits.maxToolResultTokens,
           limits.tokenEstimation,
         ),
       },
     ],
     isError: projection.isError,
     truncated: true,
-  }
-
-  return {
-    projection: bounded,
-    tokens: estimateTextTokens(
-      renderToolResultContent(bounded.content),
-      limits.tokenEstimation,
-    ),
   }
 }

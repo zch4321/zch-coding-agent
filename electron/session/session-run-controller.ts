@@ -145,7 +145,6 @@ export class SessionRunController {
       clientRequestId,
       controller,
       status: 'idle',
-      toolTokensUsed: 0,
       usageRecords: [],
       fileChangeHistoryBytes: config.limits.fileChangeHistoryBytes,
       done: Promise.resolve(),

@@ -129,7 +129,6 @@ export interface ActiveRun {
   writerReleasePending: boolean
   status: RunStatus
   failure?: { code: string; message: string }
-  toolTokensUsed: number
   usageRecords: LlmUsageRecord[]
   fileChangeHistoryBytes: number
   pendingApproval?: PendingApproval

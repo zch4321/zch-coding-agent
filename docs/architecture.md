@@ -563,7 +563,7 @@ Provider 实现保持扁平：`DeepSeekProvider`、`GenericChatCompletionsProvid
 
 Renderer 的运行限制表单以单列分节展示，`autoCompactTriggerPercent` 明确显示 `%` 单位。表单变更在 600ms 静默期后调用 versioned `config:set(limits)`；store 对发送中的快照签名，并在请求期间又有编辑时继续保存最新快照，避免用旧响应覆盖新输入。顶部按钮复用同一 action，用于立即提交和错误重试。
 
-默认工具上下文预算为单次 64K token、每个 Run 累计 128K token；通用工具输出与 `read_file` 内容边界为 128 KiB。`read_file` 默认/最多扫描 10,000 行，最终仍由字节与保守 token 估算先到者截断。执行器先保留独立 byte bound，模型 token 预算随后只计算 canonical projection，不再计算内部结果信封。AppConfig v11 只把仍等于旧默认值的 v10 四项限制迁移到新默认值，自定义限制原样保留。
+每个工具结果的模型投影独立受默认 64K token 上限保护，不再维护跨 Tool batch、Provider step 或整个 Run 累计的工具结果预算；通用工具输出与 `read_file` 内容边界为 128 KiB。`read_file` 默认/最多扫描 10,000 行，最终仍由字节与保守 token 估算先到者截断。执行器先保留独立 byte bound，模型 token 预算随后只计算 canonical projection，不再计算内部结果信封。完整 Provider 请求继续受冻结模型 profile 的 prompt budget 与自动压缩约束。AppConfig v14 从合法 v9–v13 配置删除退役的 `maxToolTokensPerRun`，其余限制保持既有迁移语义。
 
 ToolRegistry 可以注册稳定的 `code_*` facade，但每个 Session/Run 在生成 provider tool catalog 时按当前 ProjectModel 过滤。只有 `serena.enabled` 且至少一个属于该 Serena backend 的 binding 已启用并声明 capability 时，Provider request、runtime context 和 AGENTS context 才包含这些工具；未配置、禁用或读取 ProjectModel 失败都采用 fail-closed 目录。Provider parser 删除 intent metadata 后，ToolRegistry/executor 在权限与 schema 校验前再次按注册时记录的实际 intent field 清理，防止 `_agent_intent` 序列化泄漏导致偶发 `additionalProperties` 错误。
 
@@ -1572,7 +1572,7 @@ durable execution 只保存 source hash、文件数/字节、跳过目录以及�
 
 ### 18.4 Child Run、结果与生命周期
 
-child Session 固定 `permissionMode = 'readonly'`、`visibility = 'internal'`，沿用全局 `limits.maxStepsPerRun`；`0` 仍表示不限步数。Provider 输出沿用冻结模型 profile 的 `maxOutputTokens`，返回父模型时继续经过现有 `maxToolResultTokens`、`maxToolTokensPerRun` 与 Tool byte/token 保护，不增加 Subagent 专属 step/token/result budget。
+child Session 固定 `permissionMode = 'readonly'`、`visibility = 'internal'`，沿用全局 `limits.maxStepsPerRun`；`0` 仍表示不限步数。Provider 输出沿用冻结模型 profile 的 `maxOutputTokens`，返回父模型时继续经过现有单次 `maxToolResultTokens` 与 Tool byte/token 保护，不增加 Subagent 专属 step/token/result budget。
 
 AppConfig/PublicConfig v13 只新增：
 
@@ -1583,7 +1583,7 @@ subagents: {
 }
 ```
 
-新安装 `maxConcurrentRuns` 默认为 16、schema 范围保持 `1..32`；v12→v13 迁移保留已有用户值。父 Run 自身也占全局 slot，因此上限为 1 时明确拒绝嵌套执行。Agents 设置页使用现有自动保存机制配置开关和 timeout，并提示额外 Provider 请求/费用与当前并发值。Headless config v3 支持相同字段；Runtime Identity v3 记录开关和 timeout。
+新安装 `maxConcurrentRuns` 默认为 16、schema 范围保持 `1..32`；v12→v13 迁移保留已有用户值。父 Run 自身也占全局 slot，因此上限为 1 时明确拒绝嵌套执行。Agents 设置页使用现有自动保存机制配置开关和 timeout，并提示额外 Provider 请求/费用与当前并发值。Headless config v3 引入相同字段；v4 迁移 v1–v3 并删除退役的 Run 工具结果预算。Runtime Identity v4 记录当前开关、timeout 与仍有效的预算。
 
 内部成功结果为 `{ results: { [name]: finalAssistantText }, meta }`；`meta` 只包含耗时、实际 `providerId/model`、标准化 usage 汇总和模型是否因输出上限截断。reasoning、endpoint、凭据、child Session ID、trace 路径和临时绝对路径不能回传。进入父模型历史时 `subagent_run` projector 只保留 `results[name]` 最终文本，输出上限截断时追加短尾注；Provider/model/usage 留在内部 meta 和统计。只有 reasoning 或缺少最终 assistant text 时明确失败；长度上限结束则保留已有文本并标记 `truncated`。
 
@@ -1686,6 +1686,6 @@ Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、
 
 SQLite transaction callback 通过 authorizer 拒绝事务控制 SQL；commit listener 逐项隔离；backend dispose 使用共享 promise 排空 live runtime/coordinator 后关闭数据库。FileChange retention 由 migration 维护单行总量和 trigger，不再每次插入全表 `SUM`。Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。Markdown Conversation import/export 暂停并在 UI 中禁用；Trace transcript export 保持可用。
 
-AppConfig v13 会把合法 v9 Provider 配置迁移为 `providerType`，把合法 v10 配置中仍等于旧默认值的工具/read 预算提升到 64K/128K，为合法 v9/v10/v11 Provider 补充默认包含主模型的 `modelConfigurationIds`，并为合法 v12 增加默认关闭、30 分钟 timeout 的 Subagent 配置；API-key reference、模型目录、模型覆盖、revision、自定义限制和已有 `maxConcurrentRuns` 保持不变，不兼容、损坏或更早版本仍执行 reset-only。Headless v3 在读取时迁移合法 v1/v2 输入；SQLite v5 增加 hidden Subagent execution/session ownership，并保留 v4 对历史 route/continuation identity 的原位迁移。旧 JSONL trace 只在读取时投影而不改写文件。
+AppConfig v14 会把合法 v9 Provider 配置迁移为 `providerType`，把合法 v9/v10 配置中仍等于旧默认值的单次工具 token 与工具/read 字节限制提升到 64K/128KiB，为合法 v9/v10/v11 Provider 补充默认包含主模型的 `modelConfigurationIds`，为合法 v12 增加默认关闭、30 分钟 timeout 的 Subagent 配置，并从所有合法 v9–v13 配置删除退役的 `maxToolTokensPerRun`。API-key reference、模型目录、模型覆盖、revision、其余自定义限制和已有 `maxConcurrentRuns` 保持不变，不兼容、损坏或更早版本仍执行 reset-only。Headless v4 在读取时迁移合法 v1–v3 输入；Runtime Identity v4 不再记录 Run 累计工具预算。SQLite v5 增加 hidden Subagent execution/session ownership，并保留 v4 对历史 route/continuation identity 的原位迁移。旧 JSONL trace 只在读取时投影而不改写文件。
 
 P3 review 建议、N-3/N-4 和 201+ 数据量的额外 Electron E2E 明确延后，不属于 P10 发布门禁；现有单元/集成测试继续覆盖 201+ Session、Message 和 FileChange 分页。产品路径不再保留双轨、兼容开关或 legacy fallback。
