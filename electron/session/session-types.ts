@@ -17,8 +17,6 @@ import type { HumanApprovalDecision } from '../permission/permission-pipeline'
 import type { SkillsManager } from '../skills/manager'
 import type { PromptRegistry } from '../prompts/registry'
 import type { GoalState, PlanState } from '../../shared/orchestration'
-import type { ProjectMetadataStore } from '../project/project-metadata-store'
-import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import type { McpManager } from '../mcp/mcp-manager'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
 import type { ResolvedModelRoute } from '../providers/model-route-resolver'
@@ -59,8 +57,6 @@ export interface SessionManagerOptions {
   pluginBus?: PluginEventBus
   skillsManager?: SkillsManager
   fileChangeExecution?: FileChangeExecutionPort
-  projectMetadata?: ProjectMetadataStore
-  codeBackends?: CodeBackendManager
   mcpManager?: McpManager
   subagentExecution?: SubagentExecutionPort
   promptRegistry?: PromptRegistry

@@ -182,8 +182,6 @@ async function installIpc(): Promise<void> {
   const {
     skills: skillsManager,
     traces: traceService,
-    projects: projectMetadata,
-    codeBackends,
     mcp: mcpManager,
   } = backend.runtime.services
   const unregister = registerIpcHandlers({
@@ -195,8 +193,6 @@ async function installIpc(): Promise<void> {
       backend,
       skillsManager,
       traceService,
-      projectMetadata,
-      codeBackends,
       mcpManager,
       getHttpTransport: () => httpTransport,
       refreshHttpTransport,

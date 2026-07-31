@@ -6,7 +6,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 通用只读子 Agent、模型池与 Swarm Tool 的已确认产品语义和分阶段计划见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P12、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、compact/goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、单一 `npm run verify` 发布门禁、ProjectModel vertical slice、Code Intelligence Facade v1、Serena MCP 只读 adapter v1、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic 与完整 Session transcript 查看/导出已经落地。下一阶段优先推进 Subagent/Swarm，再按需求增加 Google 和具体厂商 Provider；P3 review 建议、N-3/N-4 与 201+ Electron E2E 按主题分块讨论和实现。
+当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、compact/goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、单一 `npm run verify` 发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run` 与完整 Session transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一阶段优先推进 Model Pool/Swarm，完成后再迁移 ProjectModel 到 SQLite 并恢复代码智能。
 
 原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
 
@@ -14,20 +14,21 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 | 优先级 | 领域                           | 目标                                                     | 主要风险                              |
 | ------ | ------------------------------ | -------------------------------------------------------- | ------------------------------------- |
-| P2     | Project / Code Intelligence UX | 完整 module 编辑、backend routing、Serena 托管与诊断体验 | 项目元数据误改、后端不可诊断          |
 | P2     | Provider Routing               | Session selection、Active Run route 与用途路由           | 全局 active provider 静默影响已有会话 |
 | P2     | Subagent / Swarm               | 通用只读子 Agent、模型池和 `/swarm` 批量委派 Tool        | 递归调用、费用失控、并发与上下文膨胀  |
+| P3     | Project / Code Intelligence UX | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断     | 项目元数据误改、后端不可诊断          |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张      |
 
 ## 3. M3 · Project And Code Intelligence UX
 
-目标：把已落地的 ProjectModel、Code Intelligence Facade 和 Serena v1 从“可用 vertical slice”推进到可配置、可诊断、可维护。
+依赖：只在 Model Pool、Swarm 与其 hardening 完成后启动。本阶段先把已暂停的 ProjectModel 从 workspace `.zch` 迁入 SQLite，再恢复 Code Intelligence Facade 和 Serena；迁移完成前 UI、Tool、IPC 可用路径和 backend process 都保持关闭。
 
-### 3.1 ProjectModel 编辑器
+### 3.1 ProjectModel SQLite 迁移与编辑器
 
+- 以稳定 `projectId` 在 `userData/agent.db` 中持久化 versioned ProjectModel，由 Backend transaction 和 revision 控制更新。
+- 旧 `.zch/project-model.json` 只允许用户显式、一次性、有界导入；成功后不删除、不改写、不续写源文件，也不自动修改 `.gitignore`。
 - Project tab 支持完整手动编辑：module root、languages、sourceRoots、testRoots、excludedRoots、default module、来源说明。
 - module metadata 更新写入 trace/change history 摘要，便于审计和回滚。
-- `.zch/` 继续只提示是否加入 `.gitignore`，不自动修改；可增加复制建议或打开 `.gitignore`。
 - 评估接入受维护 project detector，避免核心长期膨胀语言规则。
 
 验收：
@@ -35,6 +36,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - UI 可创建、编辑、删除 module，并保持 schema 校验。
 - agent 工具和 UI 编辑不会互相覆盖未保存更改。
 - 多 module 路径归属错误返回明确提示。
+- 新项目与正常 Session 永不创建 `.zch`；损坏或冲突的 legacy 导入不产生部分 SQLite 写入且原文件不变。
 
 ### 3.2 Backend Routing UI
 

@@ -3,7 +3,6 @@ import { onBeforeUnmount, onMounted, watch, type WatchStopHandle } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentChangesStore } from '../../stores/agent-changes'
-import { useAgentProjectStore } from '../../stores/agent-project'
 import { useAgentReplicaStore } from '../../stores/agent-replica'
 import { useAgentSettingsStore } from '../../stores/agent-settings'
 import { useAgentShellStore } from '../../stores/agent-shell'
@@ -25,7 +24,6 @@ const shell = useAgentShellStore()
 const settings = useAgentSettingsStore()
 const replica = useAgentReplicaStore()
 const changes = useAgentChangesStore()
-const project = useAgentProjectStore()
 const mcp = useMcpStore()
 const skills = useSkillsStore()
 const traces = useTraceStore()
@@ -122,13 +120,6 @@ forwardStoreError(
   () => changes.error,
   () => {
     changes.error = ''
-  },
-)
-forwardStoreError(
-  'PROJECT_OPERATION_FAILED',
-  () => project.error,
-  () => {
-    project.error = ''
   },
 )
 forwardStoreError(

@@ -277,7 +277,6 @@ describe('read-only Subagent runtime', () => {
         expect.arrayContaining([
           'read_file',
           'git_diff',
-          'project_get_modules',
           'read_skill',
           'delay',
         ]),

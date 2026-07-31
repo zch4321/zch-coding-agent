@@ -1,11 +1,9 @@
 import path from 'node:path'
 import type { ConfigStore } from '../config/store'
-import { CodeBackendManager } from '../code-intelligence/backend-manager'
 import { Disposer } from '../disposer'
 import { TraceService } from '../logging/service'
 import { McpManager } from '../mcp/mcp-manager'
 import { PluginEventBus } from '../plugins/event-bus'
-import { ProjectMetadataStore } from '../project/project-metadata-store'
 import { PromptRegistry } from '../prompts/registry'
 import type { AutoApprover } from '../permission/auto-approver'
 import type { ModelProvider } from '../providers/provider'
@@ -68,9 +66,6 @@ export async function createAgentRuntime(
       path.join(options.userDataDirectory, 'traces'),
     )
     await traces.initialize()
-    const projects = new ProjectMetadataStore()
-    const codeBackends = new CodeBackendManager({ projectMetadata: projects })
-    disposer.add(() => codeBackends.dispose())
     const mcp = new McpManager({
       configStore: options.configStore,
       defaultCwd: options.userDataDirectory,
@@ -86,8 +81,6 @@ export async function createAgentRuntime(
       pluginBus,
       skillsManager: skills,
       fileChangeExecution: options.fileChangeExecution,
-      projectMetadata: projects,
-      codeBackends,
       mcpManager: mcp,
       subagentExecution: options.subagentExecution,
       promptRegistry,
@@ -105,8 +98,6 @@ export async function createAgentRuntime(
         sessions,
         skills,
         traces,
-        projects,
-        codeBackends,
         mcp,
         prompts: promptRegistry,
       },

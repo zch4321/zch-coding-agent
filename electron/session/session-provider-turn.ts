@@ -34,7 +34,6 @@ import type {
   SessionState,
 } from './session-types'
 import type { PromptRegistry } from '../prompts/registry'
-import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import {
   appendAgentsContextIfChanged,
   appendRuntimeContextIfChanged,
@@ -57,7 +56,6 @@ export class SessionProviderTurnRunner {
   readonly #toolRegistry: ToolRegistry
   readonly #pluginBus: PluginEventBus | undefined
   readonly #promptRegistry: PromptRegistry | undefined
-  readonly #projectMetadata: ProjectMetadataStore | undefined
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #onDiagnostic: DiagnosticSink
@@ -71,7 +69,6 @@ export class SessionProviderTurnRunner {
     toolRegistry: ToolRegistry
     pluginBus?: PluginEventBus
     promptRegistry?: PromptRegistry
-    projectMetadata?: ProjectMetadataStore
     fetchImpl?: typeof fetch
     providerFactory: SessionManagerOptions['providerFactory']
     onDiagnostic: DiagnosticSink
@@ -84,7 +81,6 @@ export class SessionProviderTurnRunner {
     this.#toolRegistry = options.toolRegistry
     this.#pluginBus = options.pluginBus
     this.#promptRegistry = options.promptRegistry
-    this.#projectMetadata = options.projectMetadata
     this.#fetchImpl = options.fetchImpl
     this.#providerFactory = options.providerFactory
     this.#onDiagnostic = options.onDiagnostic
@@ -125,12 +121,9 @@ export class SessionProviderTurnRunner {
     const config = this.#configStore.getPublicConfig()
     const toolCatalog = await resolveSessionToolCatalog({
       registry: this.#toolRegistry,
-      projectMetadata: this.#projectMetadata,
-      workspace: session.workspace,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
       gitToolsEnabled: session.gitToolsEnabled,
-      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     const tools = toolCatalog.definitions
 
@@ -140,12 +133,10 @@ export class SessionProviderTurnRunner {
       config,
       providerId: binding.snapshot.providerId,
       promptRegistry: this.#promptRegistry,
-      projectMetadata: this.#projectMetadata,
       reason: 'provider_call',
       workspaceConcurrency: this.#getWorkspaceConcurrency(session),
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
-      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     await appendAgentsContextIfChanged(session, {
       workspace: session.workspace,
@@ -153,10 +144,8 @@ export class SessionProviderTurnRunner {
       config,
       providerId: binding.snapshot.providerId,
       promptRegistry: this.#promptRegistry,
-      projectMetadata: this.#projectMetadata,
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
-      readOnlyWorkspace: session.readOnlyWorkspace,
     })
 
     const selection = selectPromptMessages({

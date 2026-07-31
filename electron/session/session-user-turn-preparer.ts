@@ -2,7 +2,6 @@ import type { RunContext } from '../../shared/context'
 import type { ContextAttachmentChip } from '../../shared/context'
 import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
-import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import type { SkillsManager } from '../skills/manager'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { prepareRunContext } from './context-attachments'
@@ -34,7 +33,6 @@ export class SessionUserTurnPreparer {
   readonly #toolRegistry: ToolRegistry
   readonly #skillsManager: SkillsManager | undefined
   readonly #promptRegistry: PromptRegistry | undefined
-  readonly #projectMetadata: ProjectMetadataStore | undefined
   readonly #orchestratorMessages: SessionOrchestratorMessages
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
   readonly #getWorkspaceConcurrency: (
@@ -46,7 +44,6 @@ export class SessionUserTurnPreparer {
     toolRegistry: ToolRegistry
     skillsManager?: SkillsManager
     promptRegistry?: PromptRegistry
-    projectMetadata?: ProjectMetadataStore
     orchestratorMessages: SessionOrchestratorMessages
     emit: (session: SessionState, event: AgentEventDraft) => void
     getWorkspaceConcurrency?: (
@@ -57,7 +54,6 @@ export class SessionUserTurnPreparer {
     this.#toolRegistry = options.toolRegistry
     this.#skillsManager = options.skillsManager
     this.#promptRegistry = options.promptRegistry
-    this.#projectMetadata = options.projectMetadata
     this.#orchestratorMessages = options.orchestratorMessages
     this.#emit = options.emit
     this.#getWorkspaceConcurrency =
@@ -74,12 +70,9 @@ export class SessionUserTurnPreparer {
     const config = this.#configStore.getPublicConfig()
     const toolCatalog = await resolveSessionToolCatalog({
       registry: this.#toolRegistry,
-      projectMetadata: this.#projectMetadata,
-      workspace: session.workspace,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
       gitToolsEnabled: session.gitToolsEnabled,
-      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     await appendRuntimeContextIfChanged(session, {
       workspace: session.workspace,
@@ -87,12 +80,10 @@ export class SessionUserTurnPreparer {
       config,
       providerId: session.provider,
       promptRegistry: this.#promptRegistry,
-      projectMetadata: this.#projectMetadata,
       reason: 'run_started',
       workspaceConcurrency: this.#getWorkspaceConcurrency(session),
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
-      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     await appendAgentsContextIfChanged(session, {
       workspace: session.workspace,
@@ -100,11 +91,9 @@ export class SessionUserTurnPreparer {
       config,
       providerId: session.provider,
       promptRegistry: this.#promptRegistry,
-      projectMetadata: this.#projectMetadata,
       skillSummary: this.#skillsManager?.summaryPrompt(),
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
-      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     const command = resolveSlashCommand({
       message: userMessage,

@@ -270,7 +270,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - **披露约束**：会话必须先读取包含目标工具的当前 revision 页面才能调用。cursor 绑定 server、revision 和 offset，目录变化后旧 cursor 与旧披露状态失效。
 - **工具命名**：通用调用在权限判断和 `tool.proposed` 前展开为 `mcp:<serverId>:<toolName>`，并以 MCP 原始 input schema 校验业务参数。
 - **权限**：目录工具在 ReadOnly 下可读；MCP 执行在 ReadOnly 下拒绝、Auto 下模型审批并可升级人工审批、Confirm 下人工审批、Yolo 下直接执行。MCP 审批不可记忆、调用不可自动重放。
-- **生命周期**：主进程管理 handshake、目录边界、超时、取消、draining、有限指数退避重启、stderr tail 和应用退出清理。Serena 复用 stdio connection，但只暴露稳定 `code_*` facade；当前项目未启用 Serena、没有有效 capability binding 或 ProjectModel 不可用时，Provider request 与模型可见工具提示都不得包含 `code_*`。
+- **生命周期**：主进程管理 generic MCP 的 handshake、目录边界、超时、取消、draining、有限指数退避重启、stderr tail 和应用退出清理。ProjectModel/Serena/code intelligence 当前整体关闭，生产 runtime 不启动 Serena，Provider request 与模型可见工具提示不得包含 `project_*` 或 `code_*`，普通 Session 不读取、创建或改写 `.zch`。
 - **秘密环境变量**：`env` 仅存非敏感值；`envFromHost` 只保存子进程变量名到主机变量名的映射。主机值只在主进程启动子进程时解析，不进入 renderer、public config、trace 或日志。
 
 ### 2.7 Read-only Subagent
@@ -284,7 +284,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - child 精确继承父 Run 已冻结的 main/compression route，配置热变更不改变正在运行的 Provider、模型、reasoning 或 credential binding。
 - child 只读取 Tool 实际执行时创建的稳定 workspace snapshot；限制为 100,000 个文件、1 GiB 和 60 秒。复制期间检测到变化时不启动 Provider。
 - 仅当 workspace 正好是 Git repository 顶层时提供冻结 dirty/staged/untracked 状态的 `git_status/git_diff/git_log/git_show`；非 Git 或更大 repository 的子目录只提供文件读取。
-- 模型可见且 executor 可执行的 allowlist 仅为 `read_file/list_dir/glob/grep`、Project get/detect、`read_skill`、有界 `delay` 和可用时的四个 Git read Tool。写入、process、terminal、network、MCP、Goal/Plan、code intelligence 和递归 Agent Tool 均不提供。
+- 模型可见且 executor 可执行的 allowlist 仅为 `read_file/list_dir/glob/grep`、`read_skill`、有界 `delay` 和可用时的四个 Git read Tool。写入、process、terminal、network、MCP、ProjectModel、code intelligence、Goal/Plan 和递归 Agent Tool 均不提供。
 - child 复用唯一 Session/Run/Provider loop，Session 固定 readonly 且对普通 bootstrap、分页、搜索、导出和 Renderer events 隐藏。父 Session/Project 删除级联清理；父归档继续保留。
 - child 沿用全局 `maxStepsPerRun`（`0` 表示不限）、模型最大输出和通用 Tool context/output 限制，不增加专属 step/token/result budget。
 - 成功结果只返回 `results[name]` 最终文本，以及耗时、实际 Provider/model、标准化 usage 和输出上限截断标记；不得返回 reasoning、endpoint、凭据、child Session ID、trace 路径或临时绝对路径。

@@ -53,8 +53,6 @@ import { SessionContextGate } from './session-context-gate'
 import { SessionProviderTurnRunner } from './session-provider-turn'
 import { SessionToolRunner } from './session-tool-runner'
 import type { PromptRegistry } from '../prompts/registry'
-import type { ProjectMetadataStore } from '../project/project-metadata-store'
-import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import { SessionOrchestratorMessages } from './session-orchestrator-messages'
 import { createSessionTooling, type SessionTooling } from './session-tooling'
 import type { McpManager } from '../mcp/mcp-manager'
@@ -100,8 +98,6 @@ export class SessionManager {
   readonly #pluginBus: PluginEventBus | undefined
   readonly #skillsManager: SkillsManager | undefined
   readonly #fileChangeExecution: SessionManagerOptions['fileChangeExecution']
-  readonly #projectMetadata: ProjectMetadataStore | undefined
-  readonly #codeBackends: CodeBackendManager | undefined
   readonly #mcpManager: McpManager | undefined
   readonly #promptRegistry: PromptRegistry | undefined
   readonly #providerFactory: SessionManagerOptions['providerFactory']
@@ -143,8 +139,6 @@ export class SessionManager {
     this.#pluginBus = options.pluginBus
     this.#skillsManager = options.skillsManager
     this.#fileChangeExecution = options.fileChangeExecution
-    this.#projectMetadata = options.projectMetadata
-    this.#codeBackends = options.codeBackends
     this.#mcpManager = options.mcpManager
     this.#promptRegistry = options.promptRegistry
     this.#providerFactory = options.providerFactory
@@ -190,8 +184,6 @@ export class SessionManager {
       configStore: this.#configStore,
       terminals: this.#terminals,
       skillsManager: this.#skillsManager,
-      projectMetadata: this.#projectMetadata,
-      codeBackends: this.#codeBackends,
       mcpManager: options.mcpManager,
       subagentExecution: options.subagentExecution,
       getSession: (sessionId) => this.#sessions.get(sessionId),
@@ -205,7 +197,6 @@ export class SessionManager {
       toolRegistry: this.#toolRegistry,
       skillsManager: this.#skillsManager,
       promptRegistry: this.#promptRegistry,
-      projectMetadata: this.#projectMetadata,
       providerFactory: this.#providerFactory,
       fetchImpl: this.#fetchImpl,
       orchestratorMessages: this.#orchestratorMessages,
@@ -229,7 +220,6 @@ export class SessionManager {
       toolRegistry: this.#toolRegistry,
       skillsManager: this.#skillsManager,
       promptRegistry: this.#promptRegistry,
-      projectMetadata: this.#projectMetadata,
       orchestratorMessages: this.#orchestratorMessages,
       emit: (session, event) => this.#emit(session, event),
       getWorkspaceConcurrency: (session) =>
@@ -240,7 +230,6 @@ export class SessionManager {
       toolRegistry: this.#toolRegistry,
       pluginBus: this.#pluginBus,
       promptRegistry: options.promptRegistry,
-      projectMetadata: this.#projectMetadata,
       fetchImpl: this.#fetchImpl,
       providerFactory: this.#providerFactory,
       onDiagnostic: this.#onDiagnostic,
@@ -440,12 +429,9 @@ export class SessionManager {
     try {
       const toolCatalog = await resolveSessionToolCatalog({
         registry: this.#toolRegistry,
-        projectMetadata: this.#projectMetadata,
-        workspace: session.workspace,
         allowedToolIds: session.allowedToolIds,
         subagentsEnabled: internal ? false : publicConfig.subagents.enabled,
         gitToolsEnabled: session.gitToolsEnabled,
-        readOnlyWorkspace: session.readOnlyWorkspace,
       })
       await appendInitialPromptHarness(session, {
         workspace: session.workspace,
@@ -453,11 +439,9 @@ export class SessionManager {
         config: publicConfig,
         providerId: provider.id,
         promptRegistry: this.#promptRegistry,
-        projectMetadata: this.#projectMetadata,
         skillSummary: this.#skillsManager?.summaryPrompt(),
         toolNames: toolCatalog.names,
         workspaceConcurrency: this.#workspaceConcurrencyContext(session),
-        readOnlyWorkspace: session.readOnlyWorkspace,
       })
       this.#emitTraceCaptureStatus(session, trace.status())
       if (!internal) {
@@ -605,11 +589,8 @@ export class SessionManager {
       session.mode = mode
       const toolCatalog = await resolveSessionToolCatalog({
         registry: this.#toolRegistry,
-        projectMetadata: this.#projectMetadata,
-        workspace: session.workspace,
         subagentsEnabled: this.#configStore.getPublicConfig().subagents.enabled,
         gitToolsEnabled: session.gitToolsEnabled,
-        readOnlyWorkspace: session.readOnlyWorkspace,
       })
       await appendRuntimeContextIfChanged(session, {
         workspace: session.workspace,
@@ -617,11 +598,9 @@ export class SessionManager {
         config: this.#configStore.getPublicConfig(),
         providerId: session.provider,
         promptRegistry: this.#promptRegistry,
-        projectMetadata: this.#projectMetadata,
         reason: 'permission_mode_changed',
         workspaceConcurrency: this.#workspaceConcurrencyContext(session),
         toolNames: toolCatalog.names,
-        readOnlyWorkspace: session.readOnlyWorkspace,
       })
       await this.#executionState?.commit(session, { reason: 'metadata' })
     } catch (error) {
