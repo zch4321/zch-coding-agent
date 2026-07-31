@@ -156,6 +156,12 @@ export function textDelta(text: string, usage?: JsonObject): JsonObject {
   }
 }
 
+export function reasoningDelta(reasoning: string): JsonObject {
+  return {
+    choices: [{ delta: { reasoning_content: reasoning } }],
+  }
+}
+
 export function toolCallDelta(input: {
   id: string
   name: string

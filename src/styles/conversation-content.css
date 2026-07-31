@@ -117,8 +117,12 @@ code {
   color: var(--accent);
 }
 
-.reasoning {
+.reasoning-card {
   margin-top: 10px;
+}
+
+.reasoning-card-only {
+  margin-top: 0;
 }
 
 .approval-card {
@@ -140,18 +144,26 @@ code {
   padding: 14px 16px;
 }
 
-.reasoning .n-collapse-item__content-wrapper,
-.reasoning .n-collapse-item__content-inner {
+.reasoning-card .n-collapse-item__content-wrapper,
+.reasoning-card .n-collapse-item__content-inner {
   width: 100%;
   min-width: 0;
   max-width: 100%;
 }
 
-.reasoning pre {
+.reasoning-details {
+  margin-top: 5px;
+}
+
+.reasoning-content {
   width: 100%;
   min-width: 0;
-  overflow-x: auto;
+  max-height: 320px;
+  overflow-x: hidden;
   overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .approval-header {

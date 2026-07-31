@@ -103,7 +103,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     await expect(projectSidebar).toBeVisible()
     await expect
       .poll(() => projectSidebar.evaluate((sidebar) => sidebar.clientWidth))
-      .toBeGreaterThan(200)
+      .toBe(360)
     const sidebarLayout = await projectSidebar.evaluate((sidebar) => {
       const sidebarBounds = sidebar.getBoundingClientRect()
       const selectors = [
@@ -382,7 +382,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.viewportWidth)
   })
 
-  test('keeps legacy Markdown import and export visibly disabled', async () => {
+  test('keeps legacy Markdown import disabled without a placeholder export', async () => {
     fakeProvider.queue([textDelta('Import and export fixture ready.')])
     await startDurableSession({
       page,
@@ -398,7 +398,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
       page.getByRole('button', { name: '从 Markdown 导入' }),
     ).toBeDisabled()
     await expect(
-      page.getByRole('button', { name: '导出为 Markdown' }).first(),
-    ).toBeDisabled()
+      page.getByRole('button', { name: '导出为 Markdown' }),
+    ).toHaveCount(0)
   })
 })

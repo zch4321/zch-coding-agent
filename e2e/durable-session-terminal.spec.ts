@@ -3,6 +3,7 @@ import type { ChildProcess } from 'node:child_process'
 import type { ElectronApplication } from '@playwright/test'
 import { configureApp } from './support/app-helpers'
 import {
+  reasoningDelta,
   textDelta,
   toolCallDelta,
   type FakeProvider,
@@ -150,7 +151,7 @@ test.describe.serial('Durable Session and terminal workflows', () => {
     const sessionRow = page.locator('.conversation-row').first()
     await sessionRow.hover()
     const sessionActions = sessionRow.locator('.conversation-actions button')
-    await expect(sessionActions).toHaveCount(4)
+    await expect(sessionActions).toHaveCount(2)
     const sessionRowLayout = await sessionRow.evaluate((row) => {
       const rowBounds = row.getBoundingClientRect()
       const titleBounds = (
@@ -177,6 +178,43 @@ test.describe.serial('Durable Session and terminal workflows', () => {
       expect(bounds.left).toBeGreaterThanOrEqual(sessionRowLayout.rowLeft)
       expect(bounds.right).toBeLessThanOrEqual(sessionRowLayout.rowRight)
     }
+  })
+
+  test('wraps reasoning inside the shared activity-card layout', async () => {
+    const longReasoning = `First reasoning line\n${'unbroken-reasoning-'.repeat(160)}`
+    fakeProvider.queue([
+      reasoningDelta(longReasoning),
+      textDelta('Reasoning layout fixture'),
+    ])
+    const composer = page.locator('.message-input-area textarea')
+    await composer.fill('Show the reasoning layout')
+    await page.getByRole('button', { name: '发送消息' }).click()
+
+    const assistant = page.locator('.chat-message.assistant').filter({
+      hasText: 'Reasoning layout fixture',
+    })
+    const reasoningCard = assistant.locator('.reasoning-card')
+    await expect(reasoningCard).toBeVisible()
+    await expect(reasoningCard.locator('.tool-call-row')).toHaveCount(1)
+    await reasoningCard.getByText('思考过程', { exact: true }).click()
+
+    const reasoningContent = reasoningCard.locator('.reasoning-content')
+    await expect(reasoningContent).toBeVisible()
+    const layout = await reasoningContent.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        whiteSpace: style.whiteSpace,
+        overflowWrap: style.overflowWrap,
+        overflowX: style.overflowX,
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+      }
+    })
+    expect(layout.whiteSpace).toBe('pre-wrap')
+    expect(layout.overflowWrap).toBe('anywhere')
+    expect(layout.overflowX).toBe('hidden')
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1)
+    await expect(reasoningCard.locator('.tool-call-details')).toBeVisible()
   })
 
   test('opens, drives, restores, and closes terminal tabs for a Session', async () => {

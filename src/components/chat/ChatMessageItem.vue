@@ -126,9 +126,23 @@ const showMetadata = computed(
       </NTooltip>
     </div>
     <MarkdownBlock v-if="message.text.trim()" :content="message.text" />
-    <NCollapse v-if="message.reasoning" class="reasoning">
-      <NCollapseItem :title="t('chat.reasoning')" name="reasoning">
-        <pre>{{ message.reasoning }}</pre>
+    <NCollapse
+      v-if="message.reasoning"
+      class="reasoning-card"
+      :class="{ 'reasoning-card-only': !message.text.trim() }"
+      arrow-placement="right"
+    >
+      <NCollapseItem name="reasoning">
+        <template #header>
+          <div class="tool-call-row">
+            <div class="tool-call-summary">
+              <span class="tool-call-muted">{{ t('chat.reasoning') }}</span>
+            </div>
+          </div>
+        </template>
+        <div class="tool-call-details reasoning-details">
+          <pre class="reasoning-content">{{ message.reasoning }}</pre>
+        </div>
       </NCollapseItem>
     </NCollapse>
     <div
