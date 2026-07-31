@@ -8,6 +8,8 @@ import type {
 } from '../session/session-types'
 import { ApplicationError } from './application-error'
 import { SessionService } from './session-service'
+import { SubagentStateService } from './subagent-state-service'
+import type { InternalSessionOwnership } from '../subagent/contracts'
 
 interface CommitWaiter {
   promise: Promise<SessionCommandResult>
@@ -22,16 +24,22 @@ interface DurableSessionBinding {
   waiters: Map<string, CommitWaiter>
   commitTail: Promise<void>
   invalid: boolean
+  internal?: InternalSessionOwnership
 }
 
 /** Bridges in-memory session execution state to durable records and serialized commits. */
 export class DurableExecutionStatePort implements SessionExecutionStatePort {
   readonly #sessions: SessionService
+  readonly #internalSessions?: SubagentStateService
   readonly #bindings = new Map<SessionId, DurableSessionBinding>()
   #onInvalid: (sessionId: SessionId, runId?: RunId) => void = () => undefined
 
-  constructor(sessions: SessionService) {
+  constructor(
+    sessions: SessionService,
+    internalSessions?: SubagentStateService,
+  ) {
     this.#sessions = sessions
+    this.#internalSessions = internalSessions
   }
 
   /** Installs the callback used when a durable binding can no longer be trusted. */
@@ -50,6 +58,27 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
       )
     }
     this.#register(record, true, ownerToken)
+  }
+
+  /** Creates a durable binding for a backend-private Subagent Session. */
+  registerInternalNew(
+    record: SessionRecord,
+    ownerToken: string,
+    ownership: InternalSessionOwnership,
+  ): void {
+    if (!this.#internalSessions) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Internal Session persistence is not configured',
+      )
+    }
+    if (record.lastSeq !== 0 || record.revision !== 1) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'New internal binding must start at revision 1 with no messages',
+      )
+    }
+    this.#register(record, true, ownerToken, ownership)
   }
 
   /** Attaches an owner token to an existing durable session record. */
@@ -168,6 +197,9 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
         'Durable Session binding changed before commit',
       )
     }
+    if (binding.internal) {
+      return this.#commitInternalOwned(session, input, binding)
+    }
     const records = session.history
       .filter((record) => record.seq > binding.record.lastSeq)
       .sort((left, right) => left.seq - right.seq)
@@ -238,6 +270,101 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
       return result
     } catch (error) {
       await this.#recoverAfterFailure(session, binding, records, error)
+      if (input.reason === 'tool_batch' && !binding.invalid) {
+        binding.invalid = true
+        this.#onInvalid(session.sessionId, session.activeRun?.runId)
+      }
+      throw error
+    }
+  }
+
+  async #commitInternalOwned(
+    session: SessionState,
+    input: SessionExecutionCommit,
+    binding: DurableSessionBinding,
+  ): Promise<undefined> {
+    const service = this.#internalSessions
+    if (!service || !binding.internal) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Internal Session persistence is not configured',
+      )
+    }
+    const records = session.history
+      .filter((record) => record.seq > binding.record.lastSeq)
+      .sort((left, right) => left.seq - right.seq)
+
+    try {
+      if (binding.isNew) {
+        const finalRecord: SessionRecord = {
+          ...binding.record,
+          permissionMode: session.mode,
+          modelSelection: structuredClone(session.modelSelection),
+          goal: session.goal ? structuredClone(session.goal) : null,
+          plan: session.plan ? structuredClone(session.plan) : null,
+          lastSeq: records.at(-1)?.seq ?? 0,
+          updatedAt: new Date().toISOString(),
+        }
+        binding.record = await service.commitFirstTurn({
+          session: finalRecord,
+          messages: records,
+          ownership: binding.internal,
+        })
+        binding.isNew = false
+        return undefined
+      }
+
+      const metadataChanged =
+        session.mode !== binding.record.permissionMode ||
+        JSON.stringify(session.modelSelection) !==
+          JSON.stringify(binding.record.modelSelection) ||
+        JSON.stringify(session.goal ?? null) !==
+          JSON.stringify(binding.record.goal) ||
+        JSON.stringify(session.plan ?? null) !==
+          JSON.stringify(binding.record.plan)
+      if (
+        records.length === 0 &&
+        !metadataChanged &&
+        input.deactivateThroughSeq === undefined
+      ) {
+        return undefined
+      }
+
+      const next: SessionRecord = {
+        ...binding.record,
+        permissionMode: session.mode,
+        modelSelection: structuredClone(session.modelSelection),
+        goal: session.goal ? structuredClone(session.goal) : null,
+        plan: session.plan ? structuredClone(session.plan) : null,
+        revision: binding.record.revision + 1,
+        lastSeq: records.at(-1)?.seq ?? binding.record.lastSeq,
+        updatedAt: new Date().toISOString(),
+      }
+      binding.record = await service.commitMutation({
+        session: next,
+        expectedRevision: binding.record.revision,
+        expectedLastSeq: binding.record.lastSeq,
+        messages: records,
+        ...(input.deactivateThroughSeq === undefined
+          ? {}
+          : { deactivateThroughSeq: input.deactivateThroughSeq }),
+      })
+      return undefined
+    } catch (error) {
+      try {
+        const durable = await service.loadRuntimeState(session.sessionId)
+        session.history = structuredClone(durable.activeHistory)
+        session.nextMessageSeq = durable.record.lastSeq + 1
+        session.mode = durable.record.permissionMode
+        session.provider = durable.record.modelSelection.providerId
+        session.modelSelection = structuredClone(durable.record.modelSelection)
+        session.modelSelectionPinned = true
+        binding.record = structuredClone(durable.record)
+        binding.isNew = false
+      } catch {
+        binding.invalid = true
+        this.#onInvalid(session.sessionId, session.activeRun?.runId)
+      }
       if (input.reason === 'tool_batch' && !binding.invalid) {
         binding.invalid = true
         this.#onInvalid(session.sessionId, session.activeRun?.runId)
@@ -323,7 +450,12 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     }
   }
 
-  #register(record: SessionRecord, isNew: boolean, ownerToken: string): void {
+  #register(
+    record: SessionRecord,
+    isNew: boolean,
+    ownerToken: string,
+    internal?: InternalSessionOwnership,
+  ): void {
     const existing = this.#bindings.get(record.id)
     if (existing && existing.ownerToken !== ownerToken) {
       throw new ApplicationError(
@@ -338,6 +470,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
       waiters: existing?.waiters ?? new Map(),
       commitTail: existing?.commitTail ?? Promise.resolve(),
       invalid: false,
+      ...(internal ? { internal: structuredClone(internal) } : {}),
     })
   }
 

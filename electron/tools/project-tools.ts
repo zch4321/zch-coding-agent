@@ -149,7 +149,9 @@ export function registerProjectTools(
       try {
         return {
           status: 'ok',
-          content: await projectMetadata.get(context.workspace.canonicalPath),
+          content: await projectMetadata.get(context.workspace.canonicalPath, {
+            readOnly: context.readOnlyWorkspace,
+          }),
         }
       } catch (error) {
         return toolError(error)

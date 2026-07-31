@@ -29,6 +29,8 @@ import type {
 import type { SessionCommandResult } from '../../shared/domain-state-api'
 import type { FileChangeExecutionPort } from './file-change-execution'
 import type { SessionTraceController } from './session-trace-controller'
+import type { SubagentExecutionPort } from '../subagent/contracts'
+import type { LlmUsageRecord } from '../../shared/usage'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -60,6 +62,7 @@ export interface SessionManagerOptions {
   projectMetadata?: ProjectMetadataStore
   codeBackends?: CodeBackendManager
   mcpManager?: McpManager
+  subagentExecution?: SubagentExecutionPort
   promptRegistry?: PromptRegistry
   fetchImpl?: typeof fetch
   providerFactory?: (options: {
@@ -125,7 +128,9 @@ export interface ActiveRun {
   pendingSideEffects: Set<Promise<void>>
   writerReleasePending: boolean
   status: RunStatus
+  failure?: { code: string; message: string }
   toolTokensUsed: number
+  usageRecords: LlmUsageRecord[]
   fileChangeHistoryBytes: number
   pendingApproval?: PendingApproval
   pendingInterjections: RunInterjection[]
@@ -146,6 +151,9 @@ export interface ActiveRun {
     compression: ResolvedModelRoute
     approval?: ResolvedModelRoute
   }
+  subagentsEnabled: boolean
+  allowedToolIds?: Set<string>
+  directUserInput: boolean
 }
 
 // P4 target terminology. The legacy facade and durable composition share this
@@ -167,6 +175,10 @@ export interface SessionState {
   plan?: PlanState
   eventSeq: number
   closed: boolean
+  visibility: 'public' | 'internal'
+  readOnlyWorkspace: boolean
+  allowedToolIds?: Set<string>
+  gitToolsEnabled: boolean
   activeRun?: ActiveRun
   mutationInProgress?: boolean
   clientRequests: Map<string, RunId>

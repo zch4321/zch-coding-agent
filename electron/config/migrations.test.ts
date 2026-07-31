@@ -15,16 +15,28 @@ function legacyCurrentShapeConfig(
     unknown
   >
   source.schemaVersion = schemaVersion
+  delete source.subagents
   for (const provider of source.providers as Array<Record<string, unknown>>) {
     delete provider.modelConfigurationIds
   }
   return source
 }
 
-describe('config v12 migration boundary', () => {
-  it('creates the v12 defaults when no config exists', () => {
+function legacyV12Config(): Record<string, unknown> {
+  const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
+    string,
+    unknown
+  >
+  source.schemaVersion = 12
+  delete source.subagents
+  return source
+}
+
+describe('config v13 migration boundary', () => {
+  it('creates the v13 defaults when no config exists', () => {
     expect(migrateConfig(undefined)).toEqual(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined)).not.toBe(DEFAULT_APP_CONFIG)
+    expect(migrateConfig(undefined).limits.maxConcurrentRuns).toBe(16)
   })
 
   it('rejects every legacy schema with reset guidance', () => {
@@ -34,7 +46,7 @@ describe('config v12 migration boundary', () => {
           ...structuredClone(DEFAULT_APP_CONFIG),
           schemaVersion,
         }),
-      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v12`)
+      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v13`)
     }
   })
 
@@ -42,7 +54,7 @@ describe('config v12 migration boundary', () => {
     const source = legacyV9Config()
     const migrated = migrateConfig(source)
     expect(migrated).toMatchObject({
-      schemaVersion: 12,
+      schemaVersion: 13,
       providers: [
         {
           providerType: 'deepseek.chat-completions',
@@ -81,7 +93,7 @@ describe('config v12 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 12,
+      schemaVersion: 13,
       limits: {
         maxToolOutputBytes: 128 * 1_024,
         maxToolResultTokens: 64_000,
@@ -102,7 +114,7 @@ describe('config v12 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 12,
+      schemaVersion: 13,
       limits: {
         maxToolOutputBytes: 72_000,
         maxToolResultTokens: 12_000,
@@ -117,7 +129,7 @@ describe('config v12 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 12,
+      schemaVersion: 13,
       providers: [
         {
           model: 'deepseek-v4-pro',
@@ -127,7 +139,22 @@ describe('config v12 migration boundary', () => {
     })
   })
 
-  it('accepts and clones a valid v12 config', () => {
+  it('migrates v12 with subagent defaults and preserves concurrency', () => {
+    const source = legacyV12Config()
+    ;(source.limits as Record<string, unknown>).maxConcurrentRuns = 7
+    const migrated = migrateConfig(source)
+
+    expect(migrated).toMatchObject({
+      schemaVersion: 13,
+      limits: { maxConcurrentRuns: 7 },
+      subagents: {
+        enabled: false,
+        workerTimeoutMs: 1_800_000,
+      },
+    })
+  })
+
+  it('accepts and clones a valid v13 config', () => {
     const source = structuredClone(DEFAULT_APP_CONFIG)
     const migrated = migrateConfig(source)
     expect(migrated).toEqual(source)
@@ -147,12 +174,12 @@ describe('config v12 migration boundary', () => {
       source.providers[0].providerType = providerType
       const migrated = migrateConfig(source)
 
-      expect(migrated.schemaVersion).toBe(12)
+      expect(migrated.schemaVersion).toBe(13)
       expect(migrated.providers[0].providerType).toBe(providerType)
     }
   })
 
-  it('rejects malformed v12 data instead of filling missing fields', () => {
+  it('rejects malformed v13 data instead of filling missing fields', () => {
     const malformed = structuredClone(DEFAULT_APP_CONFIG) as Record<
       string,
       unknown

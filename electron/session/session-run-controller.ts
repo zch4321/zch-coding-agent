@@ -31,6 +31,19 @@ import type {
   SessionExecutionStatePort,
 } from './session-types'
 import type { RunAccessLease } from './workspace-access-coordinator'
+import type { ResolvedModelRoute } from '../providers/model-route-resolver'
+
+export interface RunStartOptions {
+  routes?: {
+    main: ResolvedModelRoute
+    compression: ResolvedModelRoute
+    approval?: ResolvedModelRoute
+  }
+  allowedToolIds?: ReadonlySet<string>
+  directUserInput?: boolean
+  subagentsEnabled?: boolean
+  skipProviderPreconditions?: boolean
+}
 
 /** Returns whether a run status cannot transition any further. */
 function isTerminalRunStatus(status: RunStatus): boolean {
@@ -100,6 +113,7 @@ export class SessionRunController {
     context?: RunContext,
     harnessMessage?: HarnessRunMessage,
     retryUserMessageId?: MessageId,
+    options: RunStartOptions = {},
   ): RunId {
     const existing = session.clientRequests.get(clientRequestId)
 
@@ -108,7 +122,11 @@ export class SessionRunController {
     }
 
     const config = this.#configStore.getPublicConfig()
-    this.#assertRunPreconditions(config, session)
+    this.#assertRunPreconditions(
+      config,
+      session,
+      options.skipProviderPreconditions ?? false,
+    )
 
     if (session.activeRun && isTerminalRunStatus(session.activeRun.status)) {
       session.activeRun = undefined
@@ -127,6 +145,7 @@ export class SessionRunController {
       controller,
       status: 'idle',
       toolTokensUsed: 0,
+      usageRecords: [],
       fileChangeHistoryBytes: config.limits.fileChangeHistoryBytes,
       done: Promise.resolve(),
       releaseRunSlot: access.releaseRunSlot,
@@ -140,6 +159,14 @@ export class SessionRunController {
       harnessMessageIds: [],
       autoCompactEligible: false,
       requestCommitted: false,
+      subagentsEnabled: options.subagentsEnabled ?? config.subagents.enabled,
+      directUserInput: options.directUserInput ?? false,
+      ...(options.allowedToolIds
+        ? { allowedToolIds: new Set(options.allowedToolIds) }
+        : session.allowedToolIds
+          ? { allowedToolIds: new Set(session.allowedToolIds) }
+          : {}),
+      ...(options.routes ? { routes: structuredClone(options.routes) } : {}),
       publicTools: new Map(),
       publicSnapshot: {
         schemaVersion: 1,
@@ -167,10 +194,19 @@ export class SessionRunController {
         }),
       )
       .finally(() => {
-        this.releaseAccess(run)
-        if (session.activeRun === run) {
-          session.activeRun = undefined
+        const finalize = () => {
+          this.releaseAccess(run)
+          if (session.activeRun === run) {
+            session.activeRun = undefined
+          }
         }
+        if (session.visibility === 'internal') {
+          return Promise.allSettled([...run.pendingSideEffects]).then(() => {
+            run.pendingSideEffects.clear()
+            finalize()
+          })
+        }
+        finalize()
       })
     session.activeRun = run
     session.clientRequests.set(clientRequestId, runId)
@@ -224,6 +260,13 @@ export class SessionRunController {
       this.releaseAccess(run)
     }
     run.status = status
+    if (error && status === 'failed') {
+      run.failure = {
+        code: 'RUN_FAILED',
+        message:
+          error instanceof Error ? error.message : 'Run failed unexpectedly',
+      }
+    }
     this.#emit(session, {
       type: 'run.status',
       sessionId: session.sessionId,
@@ -270,11 +313,16 @@ export class SessionRunController {
   }
 
   /** Verifies that the session and provider are ready to accept a new run. */
-  #assertRunPreconditions(config: PublicConfig, session: SessionState): void {
+  #assertRunPreconditions(
+    config: PublicConfig,
+    session: SessionState,
+    skipProvider: boolean,
+  ): void {
     if (session.mutationInProgress) {
       ipcFault('CONFLICT', 'Session metadata mutation is still being committed')
     }
     if (
+      !skipProvider &&
       config.privacy.providerNoticeAccepted?.version !== PROVIDER_NOTICE_VERSION
     ) {
       ipcFault(
@@ -286,7 +334,7 @@ export class SessionRunController {
 
     const provider = getProviderConfig(config, session.provider)
 
-    if (!provider?.credentialConfigured) {
+    if (!skipProvider && !provider?.credentialConfigured) {
       ipcFault(
         'PRECONDITION_FAILED',
         `${provider?.label ?? session.provider} credential is not configured`,
@@ -315,17 +363,20 @@ export class SessionRunController {
       await this.#beforeRun?.(session)
       const runConfig = this.#configStore.getPublicConfig()
       const runProvider = getProviderConfig(runConfig, session.provider)
-      if (!runProvider) {
+      if (!runProvider && !run.routes) {
         throw new Error(`Provider is not configured: ${session.provider}`)
       }
       if (!session.modelSelectionPinned) {
+        if (!runProvider) {
+          throw new Error(`Provider is not configured: ${session.provider}`)
+        }
         session.modelSelection = {
           providerId: runProvider.id,
           model: runProvider.model,
           reasoning: runProvider.reasoning,
         }
       }
-      run.routes = await resolveRunRoutes(
+      run.routes ??= await resolveRunRoutes(
         this.#configStore,
         session.modelSelection,
         { onDiagnostic: this.#onDiagnostic },
@@ -365,7 +416,24 @@ export class SessionRunController {
           promptHash: harnessMessage.promptHash,
         })
       } else if (userMessage !== undefined) {
-        if (isCompactSlashCommand(userMessage)) {
+        if (run.directUserInput) {
+          const turnStartSeq = session.nextMessageSeq
+          const userRecord = appendUserInput(session, {
+            content: userMessage,
+            clientRequestId: run.clientRequestId,
+            requestHash: canonicalHash(userMessage),
+          })
+          run.rootUserMessageId = userRecord.id
+          for (const record of session.history) {
+            if (record.seq >= turnStartSeq) record.turnId = userRecord.id
+          }
+          await session.logger.write({
+            type: 'user.message',
+            sessionId: session.sessionId,
+            runId: run.runId,
+            text: userMessage,
+          })
+        } else if (isCompactSlashCommand(userMessage)) {
           const continueRun = await this.#compact.runCompactCommand(
             session,
             run,

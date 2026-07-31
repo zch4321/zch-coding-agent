@@ -140,6 +140,24 @@ export class ApplicationStateCoordinator {
     })
   }
 
+  /** Runs a serialized backend-private transaction without publishing a renderer commit. */
+  internalCommand<Result>(
+    work: (transaction: PersistenceTransaction) => Result,
+  ): Promise<Result> {
+    if (!this.#acceptingWork) {
+      return Promise.reject(
+        new ApplicationError('PERSISTENCE_FAILURE', 'Backend state is closed'),
+      )
+    }
+    return this.#enqueue(async () => {
+      try {
+        return await this.#database.withTransaction(work)
+      } catch (error) {
+        throw normalizeApplicationError(error)
+      }
+    })
+  }
+
   /**
    * 以方法形式返回当前游标，供需要稳定函数签名的调用方使用。
    */

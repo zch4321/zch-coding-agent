@@ -14,13 +14,18 @@ import { SecretStore, type SafeStorageAdapter } from '../config/secret-store'
 import {
   HeadlessConfigSchema,
   LegacyHeadlessConfigV1Schema,
+  LegacyHeadlessConfigV2Schema,
   type HeadlessConfig,
   type LegacyHeadlessConfigV1,
+  type LegacyHeadlessConfigV2,
 } from './contracts'
 
 const MAX_HEADLESS_CONFIG_BYTES = 1_048_576
 const validateHeadlessConfig = compileSchema(HeadlessConfigSchema)
 const validateLegacyHeadlessConfig = compileSchema(LegacyHeadlessConfigV1Schema)
+const validateLegacyHeadlessConfigV2 = compileSchema(
+  LegacyHeadlessConfigV2Schema,
+)
 
 /** Provides a no-persistence SafeStorageAdapter for headless environment credentials. */
 class HeadlessSecretStorageAdapter implements SafeStorageAdapter {
@@ -134,11 +139,18 @@ function normalizeHeadlessConfig(candidate: unknown): HeadlessConfig {
   if (validateHeadlessConfig(candidate)) {
     return structuredClone(candidate) as HeadlessConfig
   }
+  if (validateLegacyHeadlessConfigV2(candidate)) {
+    const legacy = structuredClone(candidate) as LegacyHeadlessConfigV2
+    return {
+      ...legacy,
+      schemaVersion: 3,
+    }
+  }
   if (validateLegacyHeadlessConfig(candidate)) {
     const legacy = structuredClone(candidate) as LegacyHeadlessConfigV1
     return {
       ...legacy,
-      schemaVersion: 2,
+      schemaVersion: 3,
       provider: {
         id: legacy.provider.id,
         ...(legacy.provider.label ? { label: legacy.provider.label } : {}),
@@ -201,6 +213,7 @@ function buildAppConfig(config: HeadlessConfig): AppConfig {
       rememberedRules: [],
     },
     limits: { ...defaults.limits, ...config.limits },
+    subagents: { ...defaults.subagents, ...config.subagents },
     logging: { ...defaults.logging, enabled: true },
     privacy: {
       ...defaults.privacy,

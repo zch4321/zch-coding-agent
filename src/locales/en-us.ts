@@ -277,6 +277,7 @@ const enUS = {
     archived: 'Archived conversations',
     provider: 'Provider',
     limits: 'Limits',
+    agents: 'Agents',
     permissions: 'Permissions',
     skills: 'Skills',
     mcp: 'MCP connections',
@@ -469,6 +470,22 @@ const enUS = {
     tokenConservative: 'Conservative default',
     tokenCustom: 'Custom UTF-8 bytes/token',
     save: 'Save limits',
+  },
+  subagents: {
+    title: 'Agents',
+    hint: 'Control whether the main Agent may start read-only subagents and how long each task may run. Changes save automatically.',
+    enabled: 'Enable read-only subagents',
+    enabledHint:
+      'Changes apply to the next main Agent run; an active run keeps the setting frozen at its start.',
+    workerTimeout: 'Subagent task timeout',
+    workerTimeoutHint:
+      'The subtask is cancelled at this limit. Cancelling the parent task also cancels active subagents immediately.',
+    minutes: 'minutes',
+    costNotice:
+      'Subagents make additional model requests and therefore consume tokens and may incur Provider charges.',
+    concurrencyNotice:
+      'Subtasks share the global task concurrency limit (currently {count}). Nested work is rejected when that limit is 1.',
+    save: 'Save Agent settings',
   },
   dialogs: {
     yoloTitle: 'Enable Yolo mode?',

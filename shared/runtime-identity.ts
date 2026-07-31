@@ -8,7 +8,7 @@ const Sha256Schema = Type.String({
 
 export const RuntimeIdentitySchema = Type.Object(
   {
-    schemaVersion: Type.Literal(2),
+    schemaVersion: Type.Literal(3),
     sourceCommit: Type.String({ minLength: 1, maxLength: 128 }),
     sourceTree: Type.Union([
       Type.Literal('clean'),
@@ -47,6 +47,10 @@ export const RuntimeIdentitySchema = Type.Object(
         maxToolTokensPerRun: Type.Integer({ minimum: 1 }),
         maxToolOutputBytes: Type.Integer({ minimum: 1 }),
         commandTimeoutMs: Type.Integer({ minimum: 1 }),
+        subagentWorkerTimeoutMs: Type.Integer({
+          minimum: 60_000,
+          maximum: 86_400_000,
+        }),
       },
       { additionalProperties: false },
     ),
@@ -57,6 +61,7 @@ export const RuntimeIdentitySchema = Type.Object(
         nodeVersion: Type.String({ minLength: 1, maxLength: 64 }),
         permissionMode: Type.Literal('yolo'),
         skillsEnabled: Type.Boolean(),
+        subagentsEnabled: Type.Boolean(),
         mcpServerIds: Type.Array(
           Type.String({ minLength: 1, maxLength: 128 }),
           {

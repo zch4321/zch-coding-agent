@@ -29,6 +29,7 @@ import type {
 } from './session-types'
 import { normalizeLlmUsage } from '../providers/usage'
 import type { McpToolGateway } from '../tools/mcp-tools'
+import { validateToolBatchPolicies } from '../tools/tool-batch-policy'
 import { appendToolResult } from './canonical-history'
 import type {
   FileChangeExecutionPort,
@@ -126,6 +127,11 @@ export class SessionToolRunner {
     toolCalls: ToolCall[],
     assistantMessageId: MessageId,
   ): Promise<void> {
+    const invalidBatch = this.#invalidBatch(toolCalls)
+    if (invalidBatch) {
+      await this.#recordInvalidBatch(session, run, toolCalls, invalidBatch)
+      return
+    }
     this.#setRunStatus(session, run, 'running_tools')
     const terminalCallIds = new Set<CallId>()
 
@@ -136,7 +142,17 @@ export class SessionToolRunner {
         let resolutionFailure: ToolResult | undefined
         let attemptStage: ToolAttemptStage = 'validation'
         let attemptEffects: string[] = []
-        const resolution = this.#mcpGateway?.resolveCall(session, call)
+        if (!this.#isToolAllowed(session, run, call.toolId)) {
+          resolutionFailure = {
+            status: 'error',
+            code: 'TOOL_NOT_AVAILABLE',
+            message: `Tool is not available in this Run: ${call.toolId}`,
+            retryable: false,
+          }
+        }
+        const resolution = resolutionFailure
+          ? undefined
+          : this.#mcpGateway?.resolveCall(session, call)
         if (resolution?.matched) {
           if (resolution.ok) {
             call = resolution.call
@@ -221,13 +237,15 @@ export class SessionToolRunner {
                 signal: run.controller.signal,
                 autoApprover,
                 beforeToolCall: (currentRisk) =>
-                  this.#pluginBus?.emit('beforeToolCall', {
-                    version: 1,
-                    sessionId: session.sessionId,
-                    runId: run.runId,
-                    call,
-                    currentRisk,
-                  }) ?? Promise.resolve(undefined),
+                  session.visibility === 'public'
+                    ? (this.#pluginBus?.emit('beforeToolCall', {
+                        version: 1,
+                        sessionId: session.sessionId,
+                        runId: run.runId,
+                        call,
+                        currentRisk,
+                      }) ?? Promise.resolve(undefined))
+                    : Promise.resolve(undefined),
                 requestHumanApproval: (request) =>
                   this.#approvals.requestToolApproval(session, run, request),
               })
@@ -326,14 +344,16 @@ export class SessionToolRunner {
                   try {
                     try {
                       preparedFileChange =
-                        await this.#fileChangeExecution?.prepareMutation({
-                          sessionId: session.sessionId,
-                          assistantMessageId,
-                          workspace: session.workspace,
-                          approvedCall: authorization.approvedCall,
-                          diff: approvedDiff,
-                          maximumPayloadBytes: run.fileChangeHistoryBytes,
-                        })
+                        session.visibility === 'public'
+                          ? await this.#fileChangeExecution?.prepareMutation({
+                              sessionId: session.sessionId,
+                              assistantMessageId,
+                              workspace: session.workspace,
+                              approvedCall: authorization.approvedCall,
+                              diff: approvedDiff,
+                              maximumPayloadBytes: run.fileChangeHistoryBytes,
+                            })
+                          : undefined
                     } catch (error) {
                       throw new FileChangePreparationFailure(error)
                     }
@@ -345,9 +365,11 @@ export class SessionToolRunner {
                         workspace: {
                           canonicalPath: session.workspace,
                         },
+                        readOnlyWorkspace: session.readOnlyWorkspace,
                       },
                       run.controller.signal,
-                      hasSideEffects(inspected.definition)
+                      hasSideEffects(inspected.definition) ||
+                        session.visibility === 'internal'
                         ? (settlement) => {
                             run.pendingSideEffects.add(settlement)
                             void settlement
@@ -472,17 +494,19 @@ export class SessionToolRunner {
           ...(approvalSummary ? { approval: approvalSummary } : {}),
         })
 
-        await this.#pluginBus
-          ?.emit('afterToolCall', {
-            version: 1,
-            sessionId: session.sessionId,
-            runId: run.runId,
-            call,
-            result,
-          })
-          .catch((error: unknown) =>
-            this.#onDiagnostic('Plugin afterToolCall failed', error),
-          )
+        if (session.visibility === 'public') {
+          await this.#pluginBus
+            ?.emit('afterToolCall', {
+              version: 1,
+              sessionId: session.sessionId,
+              runId: run.runId,
+              call,
+              result,
+            })
+            .catch((error: unknown) =>
+              this.#onDiagnostic('Plugin afterToolCall failed', error),
+            )
+        }
 
         appendToolResult(session, {
           callId: call.id,
@@ -533,6 +557,120 @@ export class SessionToolRunner {
 
     if (run.controller.signal.aborted) {
       throw run.controller.signal.reason ?? new Error('Run cancelled')
+    }
+  }
+
+  #invalidBatch(toolCalls: readonly ToolCall[]): string | undefined {
+    const special = toolCalls.flatMap((providerCall, index) => {
+      const call = this.#toolExecutor.normalizeCall(providerCall)
+      const inspected = this.#toolExecutor.inspectCall(call)
+      const definition = inspected.definition
+      const policy = definition?.batchPolicy ?? 'normal'
+      return policy === 'normal' ? [] : [{ index, toolId: call.toolId, policy }]
+    })
+    return validateToolBatchPolicies(toolCalls.length, special)
+  }
+
+  #isToolAllowed(
+    session: SessionState,
+    run: ActiveRun,
+    toolId: string,
+  ): boolean {
+    if (run.allowedToolIds && !run.allowedToolIds.has(toolId)) return false
+    if (toolId === 'subagent_run' && !run.subagentsEnabled) return false
+    if (
+      !session.gitToolsEnabled &&
+      (toolId === 'git_status' ||
+        toolId === 'git_diff' ||
+        toolId === 'git_log' ||
+        toolId === 'git_show')
+    ) {
+      return false
+    }
+    return true
+  }
+
+  async #recordInvalidBatch(
+    session: SessionState,
+    run: ActiveRun,
+    toolCalls: readonly ToolCall[],
+    message: string,
+  ): Promise<void> {
+    this.#setRunStatus(session, run, 'running_tools')
+    for (const providerCall of toolCalls) {
+      const call = this.#toolExecutor.normalizeCall(providerCall)
+      const result: ToolResult = {
+        status: 'error',
+        code: 'INVALID_TOOL_BATCH',
+        message,
+        retryable: false,
+      }
+      const proposed = {
+        type: 'tool.proposed' as const,
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: call.id,
+        tool: call.toolId,
+        args: call.args,
+        reason: call.reason,
+      }
+      await session.logger.write(proposed)
+      this.#emit(session, proposed)
+
+      const contextResult = boundToolResultForContext(
+        result,
+        this.#configStore.getPublicConfig().limits,
+        run.toolTokensUsed,
+      )
+      run.toolTokensUsed += contextResult.tokens
+      const attempt = {
+        type: 'tool.attempt',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: call.id,
+        tool: call.toolId,
+        stage: 'validation',
+        outcome: 'rejected',
+        effects: [] as string[],
+        durationMs: 0,
+        inputBytes: serializedBytes(call.args),
+        outputBytes: serializedBytes(result),
+        truncated: false,
+        errorCode: 'INVALID_TOOL_BATCH',
+      } as const
+      await session.logger.write(attempt)
+      this.#emit(session, attempt)
+      await session.logger.write({
+        type: 'tool.call',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: call.id,
+        tool: call.toolId,
+        args: call.args,
+        reason: call.reason,
+        result: toJsonValue(result),
+        approvedBy: 'none',
+        policySignals: [],
+        durationMs: 0,
+      })
+      this.#emit(session, {
+        type: 'tool.completed',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: call.id,
+        result: normalizeToolResult(contextResult.result),
+      })
+      appendToolResult(session, {
+        callId: call.id,
+        content: toJsonValue(contextResult.result),
+        isError: true,
+        name: call.toolId,
+        reason: call.reason,
+        status: 'failed',
+        truncated: false,
+        durationMs: 0,
+        turnId: run.rootUserMessageId,
+      })
     }
   }
 }

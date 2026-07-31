@@ -1,9 +1,9 @@
 # 前端产品与验收规范 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 P0–P10 配套规范 · 最后更新 2026-07-26
+> 状态：Backend Architecture v2.1 P0–P13 配套规范 · 最后更新 2026-07-29
 > 配套：[`requirements.md`](./requirements.md)（产品能力）、[`architecture.md`](./architecture.md)（技术边界）、[`road-map.md`](./road-map.md)（实施方向）。
 > 本文档是前端信息架构、交互行为、阶段展示和验收标准的权威依据；发生冲突时以本文档为准。
-> v2.1 状态所有权和恢复行为已经实现；明确延后项见架构文档 §20。
+> v2.1 状态所有权和恢复行为已经实现；明确延后项见架构文档 §21。
 
 ---
 
@@ -49,7 +49,7 @@
 
 - Session 是持久化对话，但 UI 仍显示“对话”而不显示内部 ID；Run 不作为左侧导航层级。
 - 同一 Session 同一时间最多一个 active Run。
-- 全应用默认最多 4 个 active Run，达到 `maxConcurrentRuns` 后新 Run 直接拒绝；不另设 provider call 上限。
+- 全应用 `maxConcurrentRuns` 范围为 `1..32`，新安装默认最多 16 个 active Run，升级保留已有用户值；达到上限后新 Run 直接拒绝，不另设 provider call 上限。
 - 同一 canonical workspace 最多一个非只读 writer Run；ReadOnly Run 可与 writer 和其他 ReadOnly Run 并行，不同 workspace 的 writer 可并行。
 - Run 活动时同一 Session 再次发送普通消息默认拒绝；排队不在当前范围。
 
@@ -475,14 +475,21 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - 每条规则显示 tool、workspace scope、arg constraints、expiry 和来源 call。
 - 支持删除规则，不支持编辑为更宽松的任意 JSON。
 
-### 10.5 Skills
+### 10.5 Agents
+
+- 提供默认关闭的只读 Subagent 开关，以及 1–1,440 分钟的 worker timeout；默认 30 分钟。
+- 使用与运行限制一致的自动保存交互，并保留页首立即保存按钮和保存状态。
+- 明确提示额外 Provider 请求/费用，并显示当前全局并发值；并发为 1 时说明嵌套 Agent 会被拒绝。
+- 设置变更从下一次主 Run 生效；不展示隐藏 child Session、详细 transcript、模型池或自定义 child 工具列表。
+
+### 10.6 Skills
 
 - 展示 name、description、source、sha256 短摘要和启用状态。
 - 支持 HTTPS URL、主进程文件选择器安装和手工目录 refresh。
 - 新安装和首次扫描的手工 skill 默认禁用；必须由用户显式启用。
 - 格式错误、重复名称、符号链接和超限文件显示诊断，不中断设置页。
 
-### 10.6 Logging
+### 10.7 Logging
 
 - Trace 开关和独立风险告知。
 - retention days。
@@ -492,7 +499,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - 展示 Provider 原始 usage 派生的 token/cache 指标与 TTFT/总时延；字段缺失时明确显示 `Provider not provided`。
 - 完整事件时间轴、搜索、导出和批量管理属于 Post-MVP。
 
-### 10.7 Session 生命周期
+### 10.8 Session 生命周期
 
 - Settings 不展示 `Start session` / `Close session` 作为主流程按钮。
 - Settings 提供“已归档对话”菜单项：分页列出 archived Session，支持恢复；永久删除使用 Naive UI 确认框，并在存在 fork 子 Session 时由 backend 拒绝。
@@ -702,7 +709,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 ### 16.6 Settings 与生命周期
 
-- [ ] Project/Provider/Permissions/Logging 分组清晰。
+- [ ] Project/Provider/Agents/Permissions/Logging 分组清晰；Agents 自动保存开关与 timeout，并显示费用和并发提示。
 - [ ] API Key 不回显、不进入 renderer state 和 DOM。
 - [ ] 模型目录刷新、缓存回退、可输入下拉框、未知模型能力提示和手工上下文覆盖可用。
 - [ ] Sensitive Data 和 remembered rules 可配置、查看和删除。

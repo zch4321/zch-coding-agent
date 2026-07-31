@@ -4,6 +4,7 @@ export type SettingsTab =
   | 'archived'
   | 'provider'
   | 'limits'
+  | 'agents'
   | 'permissions'
   | 'skills'
   | 'mcp'

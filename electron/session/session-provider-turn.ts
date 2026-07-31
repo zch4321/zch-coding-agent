@@ -127,6 +127,10 @@ export class SessionProviderTurnRunner {
       registry: this.#toolRegistry,
       projectMetadata: this.#projectMetadata,
       workspace: session.workspace,
+      allowedToolIds: run.allowedToolIds,
+      subagentsEnabled: run.subagentsEnabled,
+      gitToolsEnabled: session.gitToolsEnabled,
+      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     const tools = toolCatalog.definitions
 
@@ -141,6 +145,7 @@ export class SessionProviderTurnRunner {
       workspaceConcurrency: this.#getWorkspaceConcurrency(session),
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
+      readOnlyWorkspace: session.readOnlyWorkspace,
     })
     await appendAgentsContextIfChanged(session, {
       workspace: session.workspace,
@@ -151,6 +156,7 @@ export class SessionProviderTurnRunner {
       projectMetadata: this.#projectMetadata,
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
+      readOnlyWorkspace: session.readOnlyWorkspace,
     })
 
     const selection = selectPromptMessages({
@@ -177,18 +183,20 @@ export class SessionProviderTurnRunner {
       tools,
       maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
     })
-    await this.#pluginBus
-      ?.emit('beforeLLMCall', {
-        version: 3,
-        sessionId: session.sessionId,
-        runId: run.runId,
-        providerType: provider.providerType,
-        route: binding.snapshot,
-        request: structuredClone(compiled.request),
-      })
-      .catch((error: unknown) =>
-        this.#onDiagnostic('Plugin beforeLLMCall failed', error),
-      )
+    if (session.visibility === 'public') {
+      await this.#pluginBus
+        ?.emit('beforeLLMCall', {
+          version: 3,
+          sessionId: session.sessionId,
+          runId: run.runId,
+          providerType: provider.providerType,
+          route: binding.snapshot,
+          request: structuredClone(compiled.request),
+        })
+        .catch((error: unknown) =>
+          this.#onDiagnostic('Plugin beforeLLMCall failed', error),
+        )
+    }
 
     const promptBudget = modelPromptBudget(binding.modelProfile)
     if (
@@ -324,6 +332,7 @@ export class SessionProviderTurnRunner {
       usage: canonical.usage,
     })
     if (usage) {
+      run.usageRecords.push(structuredClone(usage))
       await session.logger.write({
         type: 'llm.usage',
         sessionId: session.sessionId,
@@ -339,17 +348,19 @@ export class SessionProviderTurnRunner {
         usage,
       })
     }
-    await this.#pluginBus
-      ?.emit('afterLLMCall', {
-        version: 1,
-        sessionId: session.sessionId,
-        runId: run.runId,
-        response: completed.rawResponse,
-        usage: canonical.usage.raw,
-      })
-      .catch((error: unknown) =>
-        this.#onDiagnostic('Plugin afterLLMCall failed', error),
-      )
+    if (session.visibility === 'public') {
+      await this.#pluginBus
+        ?.emit('afterLLMCall', {
+          version: 1,
+          sessionId: session.sessionId,
+          runId: run.runId,
+          response: completed.rawResponse,
+          usage: canonical.usage.raw,
+        })
+        .catch((error: unknown) =>
+          this.#onDiagnostic('Plugin afterLLMCall failed', error),
+        )
+    }
 
     return {
       parts: structuredClone(canonical.parts),

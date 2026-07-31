@@ -15,6 +15,7 @@ import {
  */
 const GIT_BASE_ARGS = [
   '--no-pager',
+  '--no-optional-locks',
   '-c',
   'core.pager=',
   '-c',

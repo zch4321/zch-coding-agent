@@ -112,6 +112,12 @@ function limitsSignature(limits: PublicConfig['limits'] | undefined): string {
   return limits ? JSON.stringify(limits) : ''
 }
 
+function subagentsSignature(
+  subagents: PublicConfig['subagents'] | undefined,
+): string {
+  return subagents ? JSON.stringify(subagents) : ''
+}
+
 export const useAgentSettingsStore = defineStore('agent-settings', {
   state: () => ({
     error: '',
@@ -132,6 +138,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     limitsSavedSignature: '',
     limitsSaving: false,
     limitsSaveStatus: '',
+    subagentsConfig: undefined as PublicConfig['subagents'] | undefined,
+    subagentsSavedSignature: '',
+    subagentsSaving: false,
+    subagentsSaveStatus: '',
     providerForm: structuredClone(DEFAULT_PROVIDER_FORM),
     providerSavedSignature: providerFormSignature(DEFAULT_PROVIDER_FORM),
     providerSaving: false,
@@ -265,6 +275,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       ),
     limitsDirty: (state) =>
       limitsSignature(state.limitsConfig) !== state.limitsSavedSignature,
+    subagentsDirty: (state) =>
+      subagentsSignature(state.subagentsConfig) !==
+      state.subagentsSavedSignature,
     approvalDirty: (state) =>
       approvalSignature(state.approvalForm) !== state.approvalSavedSignature,
     webSearchDirty: (state) =>
@@ -348,6 +361,11 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           config.limits.tokenEstimation.mode
         this.providerForm.bytesPerToken =
           config.limits.tokenEstimation.bytesPerToken
+      }
+
+      if (includes('subagents')) {
+        this.subagentsConfig = structuredClone(config.subagents)
+        this.subagentsSavedSignature = subagentsSignature(config.subagents)
       }
 
       if (includes('providers') || includes('limits')) {
@@ -902,6 +920,42 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         return false
       } finally {
         this.limitsSaving = false
+      }
+    },
+    async saveSubagents() {
+      const bridge = window.agentApi
+      if (!bridge || !this.subagentsConfig || this.subagentsSaving) return false
+
+      this.subagentsSaving = true
+      this.subagentsSaveStatus = ''
+      try {
+        while (this.subagentsConfig) {
+          const draft = cloneJson(this.subagentsConfig)
+          const draftSignature = subagentsSignature(draft)
+          const result = await bridge.setConfig({
+            version: IPC_VERSION,
+            kind: 'subagents',
+            value: draft,
+          })
+
+          if (!result.ok) {
+            this.error = result.error.message
+            this.subagentsSaveStatus = result.error.message
+            return false
+          }
+
+          this.subagentsSavedSignature = draftSignature
+          if (subagentsSignature(this.subagentsConfig) !== draftSignature) {
+            continue
+          }
+
+          this.applyConfig(result.value.config, ['subagents'])
+          this.subagentsSaveStatus = 'Saved'
+          return true
+        }
+        return false
+      } finally {
+        this.subagentsSaving = false
       }
     },
     async savePermissions(mode: PermissionMode) {

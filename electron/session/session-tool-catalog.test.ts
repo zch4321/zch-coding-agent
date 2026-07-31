@@ -39,9 +39,11 @@ function project(
   }
 }
 
-function registry(): ToolRegistry {
+function registry(
+  ids: readonly string[] = ['read_file', 'code_find_definition'],
+): ToolRegistry {
   const registry = new ToolRegistry()
-  for (const id of ['read_file', 'code_find_definition']) {
+  for (const id of ids) {
     registry.registerTool({
       id,
       description: `${id} fixture`,
@@ -90,5 +92,36 @@ describe('session tool catalog', () => {
     })
 
     expect(catalog.names).toEqual(['read_file', 'code_find_definition'])
+  })
+
+  it('applies child allowlist, Git availability, and read-only metadata together', async () => {
+    let readOnly: boolean | undefined
+    const catalog = await resolveSessionToolCatalog({
+      registry: registry([
+        'read_file',
+        'git_status',
+        'subagent_run',
+        'code_find_definition',
+      ]),
+      workspace: process.cwd(),
+      allowedToolIds: new Set([
+        'read_file',
+        'git_status',
+        'subagent_run',
+        'code_find_definition',
+      ]),
+      subagentsEnabled: false,
+      gitToolsEnabled: false,
+      readOnlyWorkspace: true,
+      projectMetadata: {
+        get: async (_workspace, options) => {
+          readOnly = options?.readOnly
+          return { project: project(false) } as never
+        },
+      },
+    })
+
+    expect(catalog.names).toEqual(['read_file'])
+    expect(readOnly).toBe(true)
   })
 })

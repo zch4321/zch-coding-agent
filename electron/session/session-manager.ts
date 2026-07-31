@@ -1,5 +1,9 @@
 import path from 'node:path'
-import { getProviderConfig, type PermissionMode } from '../../shared/config'
+import {
+  getProviderConfig,
+  type PermissionMode,
+  type ProviderPublicConfig,
+} from '../../shared/config'
 import type {
   CallId,
   MessageId,
@@ -21,6 +25,7 @@ import type { SessionRecord } from '../../shared/session'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { SessionCommandResult } from '../../shared/domain-state-api'
 import type { TraceCaptureStatus } from '../../shared/trace'
+import type { LlmUsageRecord } from '../../shared/usage'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'
@@ -73,6 +78,11 @@ import {
 } from './workspace-access-coordinator'
 import { SessionTraceController } from './session-trace-controller'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
+import type {
+  FrozenSubagentRoutes,
+  InternalSubagentRunOutcome,
+} from '../subagent/contracts'
+import { SubagentRuntimeError } from '../subagent/contracts'
 
 const RUN_CANCEL_GRACE_MS = 2_000
 
@@ -183,6 +193,7 @@ export class SessionManager {
       projectMetadata: this.#projectMetadata,
       codeBackends: this.#codeBackends,
       mcpManager: options.mcpManager,
+      subagentExecution: options.subagentExecution,
       getSession: (sessionId) => this.#sessions.get(sessionId),
       emit: (session, event) => this.#emit(session, event),
     })
@@ -287,9 +298,70 @@ export class SessionManager {
     goal?: GoalState
     plan?: PlanState
   }): Promise<SessionId> {
-    const publicConfig = this.#configStore.getPublicConfig()
+    return this.#createSession(input)
+  }
+
+  /** Creates an event-hidden read-only Session over a Subagent snapshot. */
+  async createInternalSession(input: {
+    workspace: string
+    provider: string
+    modelSelection: ModelSelection
+    allowedToolIds: ReadonlySet<string>
+    gitToolsEnabled: boolean
+    providerSnapshot: ProviderPublicConfig
+    sessionId?: SessionId
+  }): Promise<SessionId> {
+    return this.#createSession(
+      {
+        workspace: input.workspace,
+        mode: 'readonly',
+        provider: input.provider,
+        modelSelection: input.modelSelection,
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      },
+      {
+        allowedToolIds: input.allowedToolIds,
+        gitToolsEnabled: input.gitToolsEnabled,
+        providerSnapshot: input.providerSnapshot,
+      },
+    )
+  }
+
+  async #createSession(
+    input: {
+      workspace: string
+      mode: PermissionMode
+      provider: string
+      sessionId?: SessionId
+      modelSelection?: ModelSelection
+      goal?: GoalState
+      plan?: PlanState
+    },
+    internal?: {
+      allowedToolIds: ReadonlySet<string>
+      gitToolsEnabled: boolean
+      providerSnapshot: ProviderPublicConfig
+    },
+  ): Promise<SessionId> {
+    const configured = this.#configStore.getPublicConfig()
+    const publicConfig = internal
+      ? {
+          ...configured,
+          providers: getProviderConfig(configured, input.provider)
+            ? configured.providers.map((candidate) =>
+                candidate.id === input.provider
+                  ? structuredClone(internal.providerSnapshot)
+                  : candidate,
+              )
+            : [
+                ...configured.providers,
+                structuredClone(internal.providerSnapshot),
+              ],
+        }
+      : configured
 
     if (
+      !internal &&
       publicConfig.logging.enabled &&
       publicConfig.privacy.traceNoticeAccepted?.version !== TRACE_NOTICE_VERSION
     ) {
@@ -300,7 +372,9 @@ export class SessionManager {
       )
     }
 
-    const provider = getProviderConfig(publicConfig, input.provider)
+    const provider =
+      getProviderConfig(publicConfig, input.provider) ??
+      internal?.providerSnapshot
     if (!provider) {
       ipcFault(
         'PRECONDITION_FAILED',
@@ -308,7 +382,9 @@ export class SessionManager {
       )
     }
     const guard = await PathGuard.create(input.workspace)
-    await this.#mcpManager?.activateWorkspace(guard.workspacePath)
+    if (!internal) {
+      await this.#mcpManager?.activateWorkspace(guard.workspacePath)
+    }
     const sessionId = input.sessionId ?? id<SessionId>('session')
     if (this.#sessions.has(sessionId)) {
       ipcFault('CONFLICT', 'Session already exists in the live registry')
@@ -327,7 +403,7 @@ export class SessionManager {
       model: () =>
         sessionRef.current?.modelSelection.model ?? initialModelSelection.model,
       mode: () => sessionRef.current?.mode ?? input.mode,
-      configuredEnabled: publicConfig.logging.enabled,
+      configuredEnabled: internal ? false : publicConfig.logging.enabled,
       factory: this.#traceLoggerFactory,
       onStatus: (capture) => {
         if (sessionRef.current) {
@@ -349,6 +425,10 @@ export class SessionManager {
       nextMessageSeq: 1,
       eventSeq: 0,
       closed: false,
+      visibility: internal ? 'internal' : 'public',
+      readOnlyWorkspace: Boolean(internal),
+      gitToolsEnabled: internal?.gitToolsEnabled ?? true,
+      ...(internal ? { allowedToolIds: new Set(internal.allowedToolIds) } : {}),
       clientRequests: new Map(),
       mcpDisclosures: new Map(),
       ...(input.goal ? { goal: structuredClone(input.goal) } : {}),
@@ -362,6 +442,10 @@ export class SessionManager {
         registry: this.#toolRegistry,
         projectMetadata: this.#projectMetadata,
         workspace: session.workspace,
+        allowedToolIds: session.allowedToolIds,
+        subagentsEnabled: internal ? false : publicConfig.subagents.enabled,
+        gitToolsEnabled: session.gitToolsEnabled,
+        readOnlyWorkspace: session.readOnlyWorkspace,
       })
       await appendInitialPromptHarness(session, {
         workspace: session.workspace,
@@ -373,18 +457,21 @@ export class SessionManager {
         skillSummary: this.#skillsManager?.summaryPrompt(),
         toolNames: toolCatalog.names,
         workspaceConcurrency: this.#workspaceConcurrencyContext(session),
+        readOnlyWorkspace: session.readOnlyWorkspace,
       })
       this.#emitTraceCaptureStatus(session, trace.status())
-      await this.#pluginBus
-        ?.emit('onSessionStart', {
-          version: 1,
-          sessionId,
-          workspace: session.workspace,
-          mode: input.mode,
-        })
-        .catch((error: unknown) =>
-          this.#onDiagnostic('Plugin onSessionStart failed', error),
-        )
+      if (!internal) {
+        await this.#pluginBus
+          ?.emit('onSessionStart', {
+            version: 1,
+            sessionId,
+            workspace: session.workspace,
+            mode: input.mode,
+          })
+          .catch((error: unknown) =>
+            this.#onDiagnostic('Plugin onSessionStart failed', error),
+          )
+      }
     } catch (error) {
       this.#sessions.delete(sessionId)
       await session.trace.dispose().catch(() => undefined)
@@ -454,6 +541,9 @@ export class SessionManager {
       plan: input.record.plan ? structuredClone(input.record.plan) : undefined,
       eventSeq: 0,
       closed: false,
+      visibility: 'public',
+      readOnlyWorkspace: false,
+      gitToolsEnabled: true,
       clientRequests: new Map(),
       mcpDisclosures: new Map(),
     }
@@ -517,6 +607,9 @@ export class SessionManager {
         registry: this.#toolRegistry,
         projectMetadata: this.#projectMetadata,
         workspace: session.workspace,
+        subagentsEnabled: this.#configStore.getPublicConfig().subagents.enabled,
+        gitToolsEnabled: session.gitToolsEnabled,
+        readOnlyWorkspace: session.readOnlyWorkspace,
       })
       await appendRuntimeContextIfChanged(session, {
         workspace: session.workspace,
@@ -528,6 +621,7 @@ export class SessionManager {
         reason: 'permission_mode_changed',
         workspaceConcurrency: this.#workspaceConcurrencyContext(session),
         toolNames: toolCatalog.names,
+        readOnlyWorkspace: session.readOnlyWorkspace,
       })
       await this.#executionState?.commit(session, { reason: 'metadata' })
     } catch (error) {
@@ -644,15 +738,17 @@ export class SessionManager {
 
     this.#terminals.closeSession(sessionId)
 
-    await this.#pluginBus
-      ?.emit('onSessionEnd', {
-        version: 1,
-        sessionId,
-        reason: 'closed',
-      })
-      .catch((error: unknown) =>
-        this.#onDiagnostic('Plugin onSessionEnd failed', error),
-      )
+    if (session.visibility === 'public') {
+      await this.#pluginBus
+        ?.emit('onSessionEnd', {
+          version: 1,
+          sessionId,
+          reason: 'closed',
+        })
+        .catch((error: unknown) =>
+          this.#onDiagnostic('Plugin onSessionEnd failed', error),
+        )
+    }
     await trace.dispose()
     this.#emit(session, { type: 'session.closed', sessionId })
     this.#sessions.delete(sessionId)
@@ -679,6 +775,144 @@ export class SessionManager {
       input.message,
       input.context,
     )
+  }
+
+  /** Returns the exact routes frozen by an active parent Run. */
+  frozenSubagentRoutes(
+    sessionId: SessionId,
+    runId: RunId,
+  ): FrozenSubagentRoutes {
+    const session = this.#sessions.get(sessionId)
+    const run = session?.activeRun
+    if (
+      !session ||
+      session.closed ||
+      session.visibility !== 'public' ||
+      !run ||
+      run.runId !== runId
+    ) {
+      throw new SubagentRuntimeError(
+        'SUBAGENT_PARENT_NOT_ACTIVE',
+        'The parent Run is no longer active',
+      )
+    }
+    if (!run.subagentsEnabled) {
+      throw new SubagentRuntimeError(
+        'SUBAGENTS_DISABLED',
+        'Subagents were disabled when this Run started',
+      )
+    }
+    if (!run.routes) {
+      throw new SubagentRuntimeError(
+        'SUBAGENT_ROUTE_UNAVAILABLE',
+        'The parent Run has not frozen its model routes',
+      )
+    }
+    return structuredClone({
+      main: run.routes.main,
+      compression: run.routes.compression,
+    })
+  }
+
+  /** Starts one internal Run with a plain user input and exact inherited routes. */
+  startInternalRun(input: {
+    sessionId: SessionId
+    task: string
+    clientRequestId: string
+    routes: FrozenSubagentRoutes
+  }): {
+    runId: RunId
+    completion: Promise<InternalSubagentRunOutcome>
+  } {
+    const session = this.#requireSession(input.sessionId)
+    if (session.visibility !== 'internal') {
+      throw new SubagentRuntimeError(
+        'SUBAGENT_SESSION_INVALID',
+        'Internal Run requires a hidden Subagent Session',
+      )
+    }
+    const runId = this.#runs.start(
+      session,
+      input.clientRequestId,
+      input.task,
+      undefined,
+      undefined,
+      undefined,
+      {
+        routes: input.routes,
+        directUserInput: true,
+        subagentsEnabled: false,
+        allowedToolIds: session.allowedToolIds,
+        skipProviderPreconditions: true,
+      },
+    )
+    const run = session.activeRun
+    if (!run || run.runId !== runId) {
+      throw new SubagentRuntimeError(
+        'SUBAGENT_START_FAILED',
+        'Internal Run did not enter the active registry',
+      )
+    }
+    return {
+      runId,
+      completion: run.done.then(() => {
+        const assistant = [...session.history]
+          .reverse()
+          .find(
+            (record) =>
+              record.kind === 'assistant_turn' &&
+              record.turnId === run.rootUserMessageId,
+          )
+        const response =
+          assistant?.kind === 'assistant_turn'
+            ? assistant.parts
+                .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+                .join('\n')
+                .trim()
+            : ''
+        const finishReason =
+          assistant?.kind === 'assistant_turn'
+            ? assistant.metadata?.finishReason
+            : undefined
+        return {
+          status: run.status,
+          ...(response ? { response } : {}),
+          ...(finishReason ? { finishReason } : {}),
+          usage: structuredClone(run.usageRecords),
+          ...(run.failure ? { error: structuredClone(run.failure) } : {}),
+        }
+      }),
+    }
+  }
+
+  /** Attributes child usage to its active parent Run without exposing child events. */
+  async recordSubagentUsage(input: {
+    sessionId: SessionId
+    runId: RunId
+    callId: CallId
+    usage: readonly LlmUsageRecord[]
+  }): Promise<void> {
+    const session = this.#sessions.get(input.sessionId)
+    const run = session?.activeRun
+    if (!session || !run || run.runId !== input.runId) return
+    for (const record of input.usage) {
+      const usage = { ...structuredClone(record), scope: 'subagent' as const }
+      run.usageRecords.push(usage)
+      await session.logger.write({
+        type: 'llm.usage',
+        sessionId: input.sessionId,
+        runId: input.runId,
+        callId: input.callId,
+        usage,
+      })
+      this.#emit(session, {
+        type: 'llm.usage',
+        sessionId: input.sessionId,
+        runId: input.runId,
+        callId: input.callId,
+        usage,
+      })
+    }
   }
 
   /**

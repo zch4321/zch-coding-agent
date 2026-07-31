@@ -149,7 +149,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(12),
+    schemaVersion: Type.Literal(13),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
@@ -159,6 +159,16 @@ export const PublicConfigSchema = Type.Object(
       {
         approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
         approverModel: Type.String({ minLength: 1, maxLength: 256 }),
+      },
+      { additionalProperties: false },
+    ),
+    subagents: Type.Object(
+      {
+        enabled: Type.Boolean(),
+        workerTimeoutMs: Type.Integer({
+          minimum: 60_000,
+          maximum: 86_400_000,
+        }),
       },
       { additionalProperties: false },
     ),
@@ -440,6 +450,7 @@ export const ConfigSectionSchema = Type.Union([
   Type.Literal('all'),
   Type.Literal('providers'),
   Type.Literal('approval'),
+  Type.Literal('subagents'),
   Type.Literal('permission'),
   Type.Literal('limits'),
   Type.Literal('logging'),
@@ -596,6 +607,14 @@ export const ConfigSetRequestSchema = Type.Union([
       kind: Type.Literal('approval'),
       approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
       approverModel: Type.String({ minLength: 1, maxLength: 256 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('subagents'),
+      value: PublicConfigSchema.properties.subagents,
     },
     { additionalProperties: false },
   ),

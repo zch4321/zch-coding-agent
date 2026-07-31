@@ -22,6 +22,8 @@ import type { ProjectMetadataStore } from '../project/project-metadata-store'
 import type { CodeBackendManager } from '../code-intelligence/backend-manager'
 import type { McpManager } from '../mcp/mcp-manager'
 import { registerMcpTools, type McpToolGateway } from '../tools/mcp-tools'
+import type { SubagentExecutionPort } from '../subagent/contracts'
+import { registerSubagentTools } from '../tools/subagent-tools'
 
 export interface SessionTooling {
   toolRegistry: ToolRegistry
@@ -37,6 +39,7 @@ export function createSessionTooling(options: {
   projectMetadata?: ProjectMetadataStore
   codeBackends?: CodeBackendManager
   mcpManager?: McpManager
+  subagentExecution?: SubagentExecutionPort
   getSession: (sessionId: SessionId) => SessionState | undefined
   emit: (session: SessionState, event: AgentEventDraft) => void
 }): SessionTooling {
@@ -79,6 +82,9 @@ export function createSessionTooling(options: {
     getSession: options.getSession,
     emit: options.emit,
   })
+  if (options.subagentExecution) {
+    registerSubagentTools(toolRegistry, options.subagentExecution)
+  }
 
   const mcpGateway = options.mcpManager
     ? registerMcpTools(toolRegistry, {

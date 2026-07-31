@@ -16,6 +16,7 @@ import { RuntimeEventBus } from './runtime-event-bus'
 import type { RuntimeEventListener } from './runtime-events'
 import type { SessionExecutionStatePort } from '../session/session-types'
 import type { FileChangeExecutionPort } from '../session/file-change-execution'
+import type { SubagentExecutionPort } from '../subagent/contracts'
 
 export interface CreateAgentRuntimeOptions {
   configStore: ConfigStore
@@ -33,6 +34,7 @@ export interface CreateAgentRuntimeOptions {
   eventListeners?: RuntimeEventListener[]
   executionState?: SessionExecutionStatePort
   fileChangeExecution: FileChangeExecutionPort
+  subagentExecution?: SubagentExecutionPort
   onDiagnostic?: (message: string, error?: unknown) => void
 }
 
@@ -87,6 +89,7 @@ export async function createAgentRuntime(
       projectMetadata: projects,
       codeBackends,
       mcpManager: mcp,
+      subagentExecution: options.subagentExecution,
       promptRegistry,
       fetchImpl: options.fetchImpl,
       providerFactory: options.providerFactory,

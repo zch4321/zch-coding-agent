@@ -58,6 +58,7 @@ interface RuntimeContextInput {
   workspaceConcurrency?: WorkspaceConcurrencyContext
   toolNames?: readonly string[]
   signal?: AbortSignal
+  readOnlyWorkspace?: boolean
 }
 
 interface HarnessPromptInput {
@@ -71,6 +72,7 @@ interface HarnessPromptInput {
   workspaceConcurrency?: WorkspaceConcurrencyContext
   toolNames?: readonly string[]
   signal?: AbortSignal
+  readOnlyWorkspace?: boolean
 }
 
 function sha256(value: string): string {
@@ -449,7 +451,9 @@ async function projectContextSummary(input: RuntimeContextInput): Promise<{
   }
 
   try {
-    const snapshot = await input.projectMetadata.get(input.workspace)
+    const snapshot = await input.projectMetadata.get(input.workspace, {
+      readOnly: input.readOnlyWorkspace,
+    })
     const project = snapshot.project
     const moduleLines =
       project.modules.length > 0

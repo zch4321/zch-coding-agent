@@ -25,6 +25,7 @@ const tabs = computed<
   { value: 'archived', label: t('settings.archived'), icon: 'trash' },
   { value: 'provider', label: t('settings.provider'), icon: 'settings' },
   { value: 'limits', label: t('settings.limits'), icon: 'settings' },
+  { value: 'agents', label: t('settings.agents'), icon: 'app' },
   { value: 'permissions', label: t('settings.permissions'), icon: 'warning' },
   { value: 'skills', label: t('settings.skills'), icon: 'app' },
   { value: 'mcp', label: t('settings.mcp'), icon: 'app' },

@@ -1,0 +1,187 @@
+import type { MessageRecord } from '../../shared/message'
+import type { SessionId } from '../../shared/ids'
+import type { SessionRecord } from '../../shared/session'
+import type { ApplicationStateCoordinator } from './application-state-coordinator'
+import { ApplicationError } from './application-error'
+import { MessageRepository } from '../persistence/message-repository'
+import { SessionRepository } from '../persistence/session-repository'
+import {
+  SubagentRepository,
+  type SubagentExecutionRecord,
+} from '../persistence/subagent-repository'
+import type { InternalSessionOwnership } from '../subagent/contracts'
+
+/** Owns backend-private Subagent lifecycle records and hidden Session commits. */
+export class SubagentStateService {
+  readonly #coordinator: ApplicationStateCoordinator
+  readonly #sessions: SessionRepository
+  readonly #messages: MessageRepository
+  readonly #subagents: SubagentRepository
+
+  constructor(options: {
+    coordinator: ApplicationStateCoordinator
+    sessions?: SessionRepository
+    messages?: MessageRepository
+    subagents?: SubagentRepository
+  }) {
+    this.#coordinator = options.coordinator
+    this.#sessions = options.sessions ?? new SessionRepository()
+    this.#messages = options.messages ?? new MessageRepository()
+    this.#subagents = options.subagents ?? new SubagentRepository()
+  }
+
+  /** Creates an execution or returns the existing record for the same parent Tool call. */
+  async createExecution(
+    record: SubagentExecutionRecord,
+  ): Promise<{ created: boolean; record: SubagentExecutionRecord }> {
+    return this.#coordinator.internalCommand((transaction) => {
+      const existing = this.#subagents.findByParentCall(transaction, record)
+      if (existing) return { created: false, record: existing }
+      this.#subagents.insert(transaction, record)
+      return { created: true, record: structuredClone(record) }
+    })
+  }
+
+  /** Persists the latest execution status, result, usage, or diagnostic. */
+  async updateExecution(record: SubagentExecutionRecord): Promise<void> {
+    await this.#coordinator.internalCommand((transaction) => {
+      if (!this.#subagents.update(transaction, record)) {
+        throw new ApplicationError(
+          'NOT_FOUND',
+          'Subagent execution was not found',
+        )
+      }
+    })
+  }
+
+  /** Marks executions abandoned by an earlier process as interrupted. */
+  async interruptActive(timestamp = new Date().toISOString()): Promise<number> {
+    return this.#coordinator.internalCommand((transaction) =>
+      this.#subagents.interruptActive(transaction, timestamp),
+    )
+  }
+
+  /** Atomically inserts a hidden Session, its ownership, and its initial messages. */
+  async commitFirstTurn(input: {
+    session: SessionRecord
+    messages: readonly MessageRecord[]
+    ownership: InternalSessionOwnership
+  }): Promise<SessionRecord> {
+    assertMessageAppend(input.session, 0, input.messages)
+    return this.#coordinator.internalCommand((transaction) => {
+      if (this.#sessions.getAny(transaction, input.session.id)) {
+        throw new ApplicationError(
+          'CONFLICT',
+          'Internal Session already exists',
+        )
+      }
+      this.#sessions.insert(transaction, input.session)
+      this.#subagents.attachSession(transaction, {
+        sessionId: input.session.id,
+        executionId: input.ownership.executionId,
+        parentSessionId: input.ownership.parentSessionId,
+        createdAt: input.ownership.createdAt,
+      })
+      this.#messages.insertMany(transaction, input.messages)
+      return structuredClone(input.session)
+    })
+  }
+
+  /** Atomically appends messages and metadata to an existing hidden Session. */
+  async commitMutation(input: {
+    session: SessionRecord
+    expectedRevision: number
+    expectedLastSeq: number
+    messages: readonly MessageRecord[]
+    deactivateThroughSeq?: number
+  }): Promise<SessionRecord> {
+    assertMessageAppend(input.session, input.expectedLastSeq, input.messages)
+    return this.#coordinator.internalCommand((transaction) => {
+      const current = this.#sessions.getAny(transaction, input.session.id)
+      if (!current) {
+        throw new ApplicationError(
+          'NOT_FOUND',
+          'Internal Session was not found',
+        )
+      }
+      if (
+        current.revision !== input.expectedRevision ||
+        current.lastSeq !== input.expectedLastSeq
+      ) {
+        throw new ApplicationError(
+          'CONFLICT',
+          'Internal Session revision changed before commit',
+        )
+      }
+      if (input.deactivateThroughSeq !== undefined) {
+        this.#messages.deactivateHistoryThrough(
+          transaction,
+          input.session.id,
+          input.deactivateThroughSeq,
+        )
+      }
+      this.#messages.insertMany(transaction, input.messages)
+      if (
+        !this.#sessions.update(transaction, input.session, current.revision)
+      ) {
+        throw new ApplicationError(
+          'CONFLICT',
+          'Internal Session update was lost',
+        )
+      }
+      return structuredClone(input.session)
+    })
+  }
+
+  /** Loads one hidden Session and its active canonical history for recovery. */
+  async loadRuntimeState(sessionId: SessionId): Promise<{
+    record: SessionRecord
+    activeHistory: MessageRecord[]
+  }> {
+    return (
+      await this.#coordinator.query((reader) => {
+        if (!this.#subagents.isInternalSession(reader, sessionId)) {
+          throw new ApplicationError(
+            'NOT_FOUND',
+            'Internal Session was not found',
+          )
+        }
+        const record = this.#sessions.getAny(reader, sessionId)
+        if (!record) {
+          throw new ApplicationError(
+            'NOT_FOUND',
+            'Internal Session was not found',
+          )
+        }
+        return {
+          record,
+          activeHistory: this.#messages.listActiveHistory(reader, sessionId),
+        }
+      })
+    ).value
+  }
+}
+
+function assertMessageAppend(
+  session: SessionRecord,
+  previousLastSeq: number,
+  messages: readonly MessageRecord[],
+): void {
+  let expected = previousLastSeq + 1
+  for (const message of messages) {
+    if (message.sessionId !== session.id || message.seq !== expected) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Internal Session messages must be contiguous and session-scoped',
+      )
+    }
+    expected += 1
+  }
+  const nextLastSeq = messages.at(-1)?.seq ?? previousLastSeq
+  if (session.lastSeq !== nextLastSeq) {
+    throw new ApplicationError(
+      'PRECONDITION_FAILED',
+      'Internal Session lastSeq does not match its append batch',
+    )
+  }
+}
