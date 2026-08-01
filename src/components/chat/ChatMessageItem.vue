@@ -7,12 +7,15 @@ import type { ChatMessage } from '../../stores/agent-types'
 import MarkdownBlock from '../MarkdownBlock.vue'
 import UiIcon from '../UiIcon.vue'
 
-const props = defineProps<{
-  message: ChatMessage
-  activeRunId?: RunId
-  actionsDisabled: boolean
-  showActions?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    message: ChatMessage
+    activeRunId?: RunId
+    actionsDisabled: boolean
+    showActions?: boolean
+  }>(),
+  { activeRunId: undefined, showActions: true },
+)
 const emit = defineEmits<{
   revert: [messageId: string, text: string]
   fork: [messageId: string]

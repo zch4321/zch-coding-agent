@@ -28,6 +28,17 @@ function durableAssistant(): ChatMessage {
   }
 }
 
+function actionableUser(): ChatMessage {
+  return {
+    id: 'message:actionable-user',
+    role: 'user',
+    durableKind: 'user_input',
+    text: 'Actionable request',
+    retryable: true,
+    editable: true,
+  }
+}
+
 function mountMessage() {
   setAppLocale('zh-CN')
   return mount(ChatMessageItem, {
@@ -70,6 +81,24 @@ describe('ChatMessageItem streaming status', () => {
     expect(wrapper.find('.message-status').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('生成中')
     expect(wrapper.text()).toContain('Completed answer')
+    wrapper.unmount()
+  })
+
+  it('shows user message actions when showActions is omitted', async () => {
+    setAppLocale('zh-CN')
+    const wrapper = mount(ChatMessageItem, {
+      props: {
+        message: actionableUser(),
+        actionsDisabled: false,
+      },
+      global: { plugins: [i18n] },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.findAll('.message-action')).toHaveLength(4)
+    expect(wrapper.find('[aria-label="重试"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="编辑"]').exists()).toBe(true)
     wrapper.unmount()
   })
 })
