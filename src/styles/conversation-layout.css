@@ -123,13 +123,36 @@
   padding: 24px clamp(18px, 5vw, 52px);
 }
 
-.durable-timeline,
-.live-run-timeline {
+.conversation-turn-list {
   display: flex;
   width: 100%;
   min-width: 0;
   flex: 0 0 auto;
   flex-direction: column;
+}
+
+.conversation-turn {
+  display: flex;
+  width: min(100%, 760px);
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 auto 18px;
+}
+
+.conversation-turn > .chat-message,
+.conversation-turn > .timeline-disclosure {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+}
+
+.conversation-turn > .chat-message.user,
+.conversation-turn > .chat-message.interjection {
+  width: fit-content;
+  margin: 0 auto;
 }
 
 .load-earlier {
@@ -164,7 +187,6 @@
 }
 
 .chat-message,
-.tool-call-card,
 .approval-card,
 .orchestration-panel,
 .conversation-empty {

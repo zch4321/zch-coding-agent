@@ -9,9 +9,11 @@ import type { ProjectView, SessionView } from './agent-types'
 
 export type {
   ChatMessage,
+  ConversationTurn,
   PendingApproval,
   ProjectView,
   ReviewedApproval,
+  ReasoningSegment,
   SessionView,
   ToolActivity,
 } from './agent-types'
@@ -141,8 +143,7 @@ const runtimeProperties = new Set<PropertyKey>([
   'startPending',
   'runStatus',
   'pendingApproval',
-  'messages',
-  'tools',
+  'timelineTurns',
   'usage',
   'latestUsage',
   'latestReviewedApproval',
