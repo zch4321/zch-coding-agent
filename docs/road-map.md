@@ -12,12 +12,13 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 ## 0. 未完成概览
 
-| 优先级 | 领域                           | 目标                                                     | 主要风险                              |
-| ------ | ------------------------------ | -------------------------------------------------------- | ------------------------------------- |
-| P2     | Provider Routing               | Session selection、Active Run route 与用途路由           | 全局 active provider 静默影响已有会话 |
-| P2     | Subagent / Swarm               | 通用只读子 Agent、模型池和 `/swarm` 批量委派 Tool        | 递归调用、费用失控、并发与上下文膨胀  |
-| P3     | Project / Code Intelligence UX | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断     | 项目元数据误改、后端不可诊断          |
-| P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                     | 基础并发与扩展边界未稳时过早扩张      |
+| 优先级 | 领域                           | 目标                                                  | 主要风险                              |
+| ------ | ------------------------------ | ----------------------------------------------------- | ------------------------------------- |
+| P2     | Provider Routing               | Session selection、Active Run route 与用途路由        | 全局 active provider 静默影响已有会话 |
+| P2     | Subagent / Swarm               | 通用只读子 Agent、模型池和 `/swarm` 批量委派 Tool     | 递归调用、费用失控、并发与上下文膨胀  |
+| P3     | Project / Code Intelligence UX | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断 | 项目元数据误改、后端不可诊断          |
+| P3     | Terminal / Command Environment | Windows Shell 自动发现及终端、命令解释器独立配置      | Shell 参数差异、路径漂移与回退语义    |
+| P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                  | 基础并发与扩展边界未稳时过早扩张      |
 
 ## 3. M3 · Project And Code Intelligence UX
 
@@ -120,6 +121,22 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - 能从 trace 判断一次失败是 provider、tool、审批、上下文、MCP 还是 UI 路由问题。
 - replay 不执行工具副作用。
 - 敏感信息扫描覆盖需要自动分享或判定安全门禁的artifacts；用户明确导出的本地restricted session transcript只做逐次风险警告，不扫描或脱敏。
+
+## 5. M5 · Configurable Terminal And Command Environment
+
+目标：在不改变直接进程执行和内部 Git 命令语义的前提下，自动发现 Windows 上可用的 Shell，并允许用户分别选择交互终端与命令字符串解释器。
+
+- Main process 有界扫描 `pwsh.exe`、`powershell.exe`、`cmd.exe`、Git Bash、Nushell 和 WSL；设置页展示名称、规范化路径、版本、来源与重新扫描操作，并允许经过校验的自定义可执行文件和启动参数。
+- 分别持久化交互式 terminal profile 与 `run_command.shell` profile。已配置程序消失时显示可诊断警告并回退到安全默认值，不静默改写用户配置。
+- `terminal_open` 通过所选 profile 启动 PTY；`run_command.process` 继续以 `shell: false` 直接执行，`run_command.shell` 显式启动所选解释器及其固定参数，不再依赖 Node 在 Windows 上隐式选择 `%COMSPEC%`。
+- WSL 使用独立 adapter 处理发行版、工作目录映射和参数边界，不把它伪装成普通 Windows 可执行 Shell。
+- Prompt Harness 分别报告当前 terminal shell 与 command shell。Subagent snapshot、Git/File 工具和其他内部可执行文件继续直接启动，不受用户 Shell 选择影响。
+
+验收：
+
+- 未安装 PowerShell 7、仅有 Windows PowerShell/CMD、安装 Git Bash/Nushell 及配置失效等环境都有确定性发现与回退测试。
+- 同一工作区可以用 PowerShell 交互终端和 Git Bash 命令解释器；切换 profile 不影响 `run_command.process` 或内部 Git snapshot。
+- quoting、空格路径、Unicode、取消、超时和进程树终止在各受支持 profile 下有集成覆盖；打包后的 Windows 应用至少覆盖一次发现、保存、重启恢复和实际执行 E2E。
 
 ## 6. Later
 
