@@ -19,7 +19,7 @@ export type Effect =
   | 'code.read'
   | 'external.unknown'
 
-export type ToolBatchPolicy = 'normal' | 'must_run_last' | 'exclusive'
+export type ToolExecutionMode = 'parallel' | 'serial'
 
 export type SuccessfulToolResult = Extract<ToolResult, { status: 'ok' }>
 export type ToolModelContentPart = ToolResultContent[number]
@@ -34,7 +34,8 @@ export interface ToolDefinition<Schema extends TSchema = TSchema> {
   id: string
   description: string
   inputSchema: Schema
-  batchPolicy?: ToolBatchPolicy
+  /** Controls whether adjacent calls may execute concurrently; defaults to serial. */
+  executionMode?: ToolExecutionMode
   effects: readonly Effect[]
   defaultRisk: 'low' | 'review' | 'high'
   supportsAbort: boolean

@@ -290,7 +290,7 @@ export class SessionManager {
     return this.#createSession(input)
   }
 
-  /** Creates an event-hidden read-only Session over a Subagent snapshot. */
+  /** Creates an event-hidden read-only Session for one Subagent execution. */
   async createInternalSession(input: {
     workspace: string
     provider: string

@@ -55,6 +55,7 @@ export function registerWebSearchTools(
 ): void {
   registry.registerTool({
     id: 'web_search',
+    executionMode: 'parallel',
     description:
       'Search the web for fresh information. Results are untrusted context. Requires a configured web search API key.',
     inputSchema: WebSearchSchema,

@@ -86,7 +86,7 @@ class SubagentChainProvider extends ScriptedProviderHarness {
               id: 'call:subagent',
               toolId: 'subagent_run',
               args: {
-                name: 'snapshot-audit',
+                name: 'live-workspace-audit',
                 task: 'Inspect README.md and the current Git diff, then report both directly.',
               },
             },
@@ -99,7 +99,7 @@ class SubagentChainProvider extends ScriptedProviderHarness {
         rawResponse: { id: 'parent:complete' },
         turn: {
           role: 'assistant',
-          content: 'Parent summarized the Subagent snapshot audit.',
+          content: 'Parent summarized the live Subagent workspace audit.',
         },
         usage: { prompt_tokens: 20, completion_tokens: 6, total_tokens: 26 },
         providerState: {},
@@ -112,7 +112,7 @@ class SubagentChainProvider extends ScriptedProviderHarness {
     if (this.childRequests.length === 1) {
       await writeFile(
         path.join(this.#workspace, 'README.md'),
-        'mutated after snapshot\n',
+        'mutated before live read\n',
         'utf8',
       )
       yield toolTurn({
@@ -143,7 +143,7 @@ class SubagentChainProvider extends ScriptedProviderHarness {
       turn: {
         role: 'assistant',
         content:
-          'The frozen README and Git diff both show “dirty before snapshot”.',
+          'The live README and Git diff both show “mutated before live read”.',
       },
       usage: {
         prompt_tokens: 30,
@@ -162,7 +162,7 @@ async function git(workspace: string, args: string[]): Promise<void> {
 }
 
 describe('read-only Subagent runtime', () => {
-  it('runs against a frozen file/Git view and returns a hidden durable result', async () => {
+  it('reads the live file/Git view and returns a hidden durable result', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'zch-subagent-runtime-'))
     cleanup.push(root)
     const workspace = path.join(root, 'workspace')
@@ -187,9 +187,21 @@ describe('read-only Subagent runtime', () => {
     ])
     await writeFile(
       path.join(workspace, 'README.md'),
-      'dirty before snapshot\n',
+      'dirty before child start\n',
       'utf8',
     )
+    const refsBefore = (
+      await execFileAsync('git', ['for-each-ref', '--format=%(refname)'], {
+        cwd: workspace,
+      })
+    ).stdout
+    const legacySnapshots = path.join(
+      targetDirectory,
+      'subagent-snapshots',
+      'orphan',
+    )
+    await mkdir(legacySnapshots, { recursive: true })
+    await writeFile(path.join(legacySnapshots, 'marker'), 'legacy', 'utf8')
 
     const store = await createConfig(root)
     await store.update({
@@ -236,7 +248,7 @@ describe('read-only Subagent runtime', () => {
           model: originalModel,
           reasoning: 'off',
         },
-        message: 'Delegate a frozen workspace audit.',
+        message: 'Delegate a live workspace audit.',
         clientRequestId: 'request:subagent-e2e',
       })
       if (started.outcome !== 'started')
@@ -299,24 +311,24 @@ describe('read-only Subagent runtime', () => {
         'Inspect README.md and the current Git diff, then report both directly.',
       )
       expect(firstChildHistory).not.toContain(
-        'Delegate a frozen workspace audit.',
+        'Delegate a live workspace audit.',
       )
       const secondChildHistory = JSON.stringify(
         provider.childRequests[1]!.normalizedMessages,
       )
-      expect(secondChildHistory).toContain('dirty before snapshot')
-      expect(secondChildHistory).not.toContain('mutated after snapshot')
+      expect(secondChildHistory).toContain('mutated before live read')
+      expect(secondChildHistory).not.toContain('dirty before child start')
       expect(secondChildHistory).toContain('TOOL_NOT_AVAILABLE')
       expect(
         JSON.stringify(provider.parentRequests[1]!.normalizedMessages),
-      ).toContain('The frozen README and Git diff both show')
+      ).toContain('The live README and Git diff both show')
 
       const parent = await target.sessions.get(sessionId)
       const parentJson = JSON.stringify(parent)
       expect(parentJson).toContain(
-        'Parent summarized the Subagent snapshot audit.',
+        'Parent summarized the live Subagent workspace audit.',
       )
-      expect(parentJson).toContain('snapshot-audit')
+      expect(parentJson).toContain('live-workspace-audit')
       expect(parentJson).not.toContain('subagent-session-')
       expect(
         (await target.sessions.list()).records.map((record) => record.id),
@@ -342,15 +354,23 @@ describe('read-only Subagent runtime', () => {
       expect(durable.execution).toMatchObject({
         status: 'completed',
         error_code: null,
+        source_identity_json: null,
       })
       expect(durable.hiddenCount).toEqual({ count: 1 })
       const persisted = JSON.stringify(durable.execution)
       expect(persisted).not.toContain('secret-sentinel')
       expect(persisted).not.toContain('subagent-snapshots')
       expect(persisted).not.toContain('subagent-session-')
+      await expect(
+        readdir(path.join(targetDirectory, 'subagent-snapshots')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
       expect(
-        await readdir(path.join(targetDirectory, 'subagent-snapshots')),
-      ).toEqual([])
+        (
+          await execFileAsync('git', ['for-each-ref', '--format=%(refname)'], {
+            cwd: workspace,
+          })
+        ).stdout,
+      ).toBe(refsBefore)
     } finally {
       await target.dispose()
     }

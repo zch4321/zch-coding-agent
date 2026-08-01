@@ -35,10 +35,10 @@ describe('subagent_run Tool', () => {
       .providerDefinitions()
       .find((candidate) => candidate.name === 'subagent_run')!
 
-    expect(definition.batchPolicy).toBe('must_run_last')
+    expect(definition.executionMode).toBe('parallel')
     expect(definition.description).toContain('self-contained')
     expect(definition.description).toContain('final assistant response')
-    expect(definition.description).toContain('last call')
+    expect(definition.description).not.toContain('last call')
     const inputSchema = provider.inputSchema as {
       properties: Record<string, unknown>
     }

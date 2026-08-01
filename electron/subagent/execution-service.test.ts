@@ -6,6 +6,28 @@ import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import { sessionFixture } from '../persistence/repository-fixtures'
 
+type ChildOutcome = {
+  status: 'completed' | 'failed' | 'cancelled'
+  response?: string
+  finishReason?: string
+  usage: Array<{
+    schemaVersion: 1
+    scope: 'main'
+    providerId: string
+    model: string
+    promptTokens: number
+    completionTokens: number
+    reasoningTokens: number
+    totalTokens: number
+    cacheHitTokens: number
+    cacheMissTokens: number
+    contextWindowTokens: number
+    estimated: false
+    raw: Record<string, never>
+  }>
+  error?: { code: string; message: string }
+}
+
 function routes(): FrozenSubagentRoutes {
   const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
   const provider = config.providers[0]!
@@ -38,66 +60,17 @@ function fixture(
   options: {
     timeoutMs?: number
     maxConcurrentRuns?: number
-    createSnapshot?: (
-      workspace: string,
-      signal: AbortSignal,
-    ) => Promise<{
-      workspace: string
-      gitAvailable: boolean
-      identity: {
-        schemaVersion: 1
-        sourceHash: string
-        fileCount: number
-        totalBytes: number
-        skippedDirectories: string[]
-      }
-      dispose(): Promise<void>
-    }>
+    blockRun?: boolean
     reserve?: (
       record: SubagentExecutionRecord,
     ) => Promise<{ created: boolean; record: SubagentExecutionRecord }>
-    outcome?: {
-      status: 'completed' | 'failed' | 'cancelled'
-      response?: string
-      finishReason?: string
-      usage: Array<{
-        schemaVersion: 1
-        scope: 'main'
-        providerId: string
-        model: string
-        promptTokens: number
-        completionTokens: number
-        reasoningTokens: number
-        totalTokens: number
-        cacheHitTokens: number
-        cacheMissTokens: number
-        contextWindowTokens: number
-        estimated: false
-        raw: Record<string, never>
-      }>
-      error?: { code: string; message: string }
-    }
+    outcome?: ChildOutcome
   } = {},
 ) {
   const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
   config.subagents.workerTimeoutMs = options.timeoutMs ?? 60_000
   config.limits.maxConcurrentRuns = options.maxConcurrentRuns ?? 16
   let persisted: SubagentExecutionRecord | undefined
-  const disposeSnapshot = vi.fn(async () => undefined)
-  const createSnapshot =
-    options.createSnapshot ??
-    (async () => ({
-      workspace: '/runtime/snapshot/workspace',
-      gitAvailable: false,
-      identity: {
-        schemaVersion: 1 as const,
-        sourceHash: 'a'.repeat(64),
-        fileCount: 1,
-        totalBytes: 10,
-        skippedDirectories: [],
-      },
-      dispose: disposeSnapshot,
-    }))
   const state = {
     createExecution: vi.fn(async (record: SubagentExecutionRecord) => {
       if (options.reserve) return options.reserve(record)
@@ -109,38 +82,58 @@ function fixture(
     }),
   }
   const inherited = routes()
+  let settleBlockedRun: ((outcome: ChildOutcome) => void) | undefined
+  const blockedCompletion = options.blockRun
+    ? new Promise<ChildOutcome>((resolve) => {
+        settleBlockedRun = resolve
+      })
+    : undefined
   const manager = {
     frozenSubagentRoutes: vi.fn(() => inherited),
-    createInternalSession: vi.fn(async () => 'session:child' as SessionId),
+    createInternalSession: vi.fn(
+      async (input: {
+        workspace: string
+        gitToolsEnabled: boolean
+        allowedToolIds: ReadonlySet<string>
+      }) => {
+        void input
+        return 'session:child' as SessionId
+      },
+    ),
     startInternalRun: vi.fn(() => ({
       runId: 'run:child' as RunId,
-      completion: Promise.resolve(
-        options.outcome ?? {
-          status: 'completed' as const,
-          response: 'child response',
-          finishReason: 'length',
-          usage: [
-            {
-              schemaVersion: 1 as const,
-              scope: 'main' as const,
-              providerId: 'deepseek',
-              model: 'deepseek-v4-pro',
-              promptTokens: 10,
-              completionTokens: 4,
-              reasoningTokens: 1,
-              totalTokens: 14,
-              cacheHitTokens: 3,
-              cacheMissTokens: 7,
-              contextWindowTokens: 256_000,
-              estimated: false as const,
-              raw: {},
-            },
-          ],
-        },
-      ),
+      completion:
+        blockedCompletion ??
+        Promise.resolve(
+          options.outcome ?? {
+            status: 'completed' as const,
+            response: 'child response',
+            finishReason: 'length',
+            usage: [
+              {
+                schemaVersion: 1 as const,
+                scope: 'main' as const,
+                providerId: 'deepseek',
+                model: 'deepseek-v4-pro',
+                promptTokens: 10,
+                completionTokens: 4,
+                reasoningTokens: 1,
+                totalTokens: 14,
+                cacheHitTokens: 3,
+                cacheMissTokens: 7,
+                contextWindowTokens: 256_000,
+                estimated: false as const,
+                raw: {},
+              },
+            ],
+          },
+        ),
     })),
     recordSubagentUsage: vi.fn(async () => undefined),
-    interruptRun: vi.fn(() => true),
+    interruptRun: vi.fn(() => {
+      settleBlockedRun?.({ status: 'cancelled', usage: [] })
+      return true
+    }),
     closeSession: vi.fn(async () => undefined),
   }
   const executionState = {
@@ -155,7 +148,6 @@ function fixture(
     } as never,
     executionState: executionState as never,
     state: state as never,
-    snapshots: { create: vi.fn(createSnapshot) } as never,
   })
   return {
     service,
@@ -163,7 +155,6 @@ function fixture(
     manager,
     executionState,
     inherited,
-    disposeSnapshot,
     persisted: () => persisted,
   }
 }
@@ -193,6 +184,16 @@ describe('SubagentExecutionService', () => {
       }),
     )
     expect(target.manager.recordSubagentUsage).toHaveBeenCalledOnce()
+    expect(target.manager.createInternalSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: '/workspace',
+        gitToolsEnabled: true,
+      }),
+    )
+    const childInput = target.manager.createInternalSession.mock.calls[0]?.[0]
+    expect(childInput?.allowedToolIds.size).toBe(10)
+    expect(childInput?.allowedToolIds.has('git_status')).toBe(true)
+    expect(childInput?.allowedToolIds.has('create_file')).toBe(false)
     expect(result).toEqual({
       results: { worker: 'child response' },
       meta: {
@@ -219,7 +220,7 @@ describe('SubagentExecutionService', () => {
     expect(JSON.stringify(target.persisted())).not.toContain(
       'runtime-only-secret',
     )
-    expect(target.disposeSnapshot).toHaveBeenCalledOnce()
+    expect(target.persisted()).not.toHaveProperty('sourceIdentity')
     expect(target.executionState.forget).toHaveBeenCalledOnce()
   })
 
@@ -228,7 +229,7 @@ describe('SubagentExecutionService', () => {
       outcome: {
         status: 'completed',
         response:
-          '/runtime/snapshot/workspace/README.md runtime-only-secret https://api.deepseek.com/chat/completions',
+          '/workspace/README.md runtime-only-secret https://api.deepseek.com/chat/completions',
         usage: [],
       },
     })
@@ -242,9 +243,7 @@ describe('SubagentExecutionService', () => {
     expect(JSON.stringify(completed.persisted())).not.toContain(
       'runtime-only-secret',
     )
-    expect(JSON.stringify(completed.persisted())).not.toContain(
-      '/runtime/snapshot',
-    )
+    expect(JSON.stringify(completed.persisted())).not.toContain('/workspace')
 
     const failed = fixture({
       outcome: {
@@ -253,7 +252,7 @@ describe('SubagentExecutionService', () => {
         error: {
           code: 'PROVIDER_FAILURE',
           message:
-            'runtime-only-secret https://api.deepseek.com/chat/completions /runtime/snapshot/workspace',
+            'runtime-only-secret https://api.deepseek.com/chat/completions /workspace',
         },
       },
     })
@@ -268,15 +267,10 @@ describe('SubagentExecutionService', () => {
     )
   })
 
-  it('times out preparation and persists a terminal timeout', async () => {
+  it('times out a child run and persists a terminal timeout', async () => {
     const target = fixture({
       timeoutMs: 5,
-      createSnapshot: async (_workspace, signal) =>
-        new Promise((_, reject) => {
-          const abort = () => reject(signal.reason)
-          if (signal.aborted) abort()
-          else signal.addEventListener('abort', abort, { once: true })
-        }),
+      blockRun: true,
     })
 
     await expect(
@@ -286,19 +280,12 @@ describe('SubagentExecutionService', () => {
       status: 'timed_out',
       error: { code: 'SUBAGENT_TIMEOUT' },
     })
-    expect(target.manager.startInternalRun).not.toHaveBeenCalled()
+    expect(target.manager.startInternalRun).toHaveBeenCalledOnce()
   })
 
   it('normalizes parent cancellation and blocks nested work at concurrency one', async () => {
     const controller = new AbortController()
-    const cancelled = fixture({
-      createSnapshot: async (_workspace, signal) =>
-        new Promise((_, reject) => {
-          const abort = () => reject(signal.reason)
-          if (signal.aborted) abort()
-          else signal.addEventListener('abort', abort, { once: true })
-        }),
-    })
+    const cancelled = fixture({ blockRun: true })
     const running = cancelled.service.runOne(
       { name: 'worker', task: 'inspect' },
       parent(controller.signal),
@@ -318,14 +305,7 @@ describe('SubagentExecutionService', () => {
   })
 
   it('cancels active preparation and rejects new work during dispose', async () => {
-    const target = fixture({
-      createSnapshot: async (_workspace, signal) =>
-        new Promise((_, reject) => {
-          const abort = () => reject(signal.reason)
-          if (signal.aborted) abort()
-          else signal.addEventListener('abort', abort, { once: true })
-        }),
-    })
+    const target = fixture({ blockRun: true })
     const running = target.service.runOne(
       { name: 'worker', task: 'inspect' },
       parent(),

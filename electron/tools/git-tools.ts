@@ -250,6 +250,7 @@ export function registerGitReadOnlyTools(
 ): void {
   const gitStatus: ToolDefinition<typeof GitStatusSchema> = {
     id: 'git_status',
+    executionMode: 'parallel',
     description:
       'Show the working tree status (read-only). Accepts --short/--porcelain/--branch/--untracked-files=normal.',
     inputSchema: GitStatusSchema,
@@ -290,6 +291,7 @@ export function registerGitReadOnlyTools(
 
   const gitDiff: ToolDefinition<typeof GitDiffSchema> = {
     id: 'git_diff',
+    executionMode: 'parallel',
     description:
       'Show changes between commits, the working tree and the index (read-only). Accepts --stat/--name-only/--cached and optional pathspecs.',
     inputSchema: GitDiffSchema,
@@ -327,6 +329,7 @@ export function registerGitReadOnlyTools(
 
   const gitLog: ToolDefinition<typeof GitLogSchema> = {
     id: 'git_log',
+    executionMode: 'parallel',
     description:
       'Show commit history (read-only). Accepts --oneline/--stat/--no-merges, an optional revision range and -n <count>.',
     inputSchema: GitLogSchema,
@@ -379,6 +382,7 @@ export function registerGitReadOnlyTools(
 
   const gitShow: ToolDefinition<typeof GitShowSchema> = {
     id: 'git_show',
+    executionMode: 'parallel',
     description:
       'Show the contents of a commit, tag or object (read-only). Accepts --stat/--name-only/--no-patch and a required ref.',
     inputSchema: GitShowSchema,
@@ -488,6 +492,7 @@ export function registerGitWriteTools(
 ): void {
   const gitAdd: ToolDefinition<typeof GitAddSchema> = {
     id: 'git_add',
+    executionMode: 'serial',
     description:
       'Stage file paths in the working tree. Use all=true to stage every change (higher risk).',
     inputSchema: GitAddSchema,
@@ -537,6 +542,7 @@ export function registerGitWriteTools(
 
   const gitCommit: ToolDefinition<typeof GitCommitSchema> = {
     id: 'git_commit',
+    executionMode: 'serial',
     description:
       'Create a commit from the staged changes. Hooks are disabled (--no-verify) so commit-time side effects never run silently. amend=true rewrites the previous commit (high risk).',
     inputSchema: GitCommitSchema,
@@ -564,6 +570,7 @@ export function registerGitWriteTools(
 
   const gitRestore: ToolDefinition<typeof GitRestoreSchema> = {
     id: 'git_restore',
+    executionMode: 'serial',
     description:
       'Restore working tree files, discarding uncommitted changes (default, high risk). staged=true restores the index instead (unstage).',
     inputSchema: GitRestoreSchema,

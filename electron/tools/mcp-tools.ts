@@ -128,6 +128,7 @@ export class McpToolGateway {
       const permissiveSchema = Type.Unsafe<Record<string, JsonValue>>({})
       const definition: ToolDefinition = {
         id: canonicalId,
+        executionMode: 'serial',
         description: mcpToolDescription(args.serverId, resolved.descriptor),
         inputSchema: permissiveSchema,
         effects: ['external.unknown'],
@@ -175,6 +176,7 @@ export function registerMcpTools(
 ): McpToolGateway {
   registry.registerTool({
     id: 'list_mcp_servers',
+    executionMode: 'parallel',
     description:
       'List MCP servers the user enabled for this workspace. Use this to discover external integrations before reading one server.',
     inputSchema: ListMcpServersSchema,
@@ -204,6 +206,7 @@ export function registerMcpTools(
 
   registry.registerTool({
     id: 'read_mcp_server',
+    executionMode: 'parallel',
     description:
       'Read a paginated catalog from one user-enabled external MCP server, including server-provided instructions and full tool schemas. Continue with nextCursor until the needed tool is returned before using call_mcp_tool.',
     inputSchema: ReadMcpServerSchema,
@@ -266,6 +269,7 @@ export function registerMcpTools(
 
   registry.registerTool({
     id: MCP_CALL_TOOL_ID,
+    executionMode: 'serial',
     description:
       'Call one tool from a user-enabled MCP server after read_mcp_server returned that exact tool and schema. The runtime validates and authorizes the real MCP tool before execution.',
     inputSchema: CallMcpToolSchema,

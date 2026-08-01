@@ -1,5 +1,4 @@
 import type { RunStatus, ToolApprovalSummary } from '../../shared/agent-events'
-import type { ProviderPublicConfig } from '../../shared/config'
 import type { CallId, MessageId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
@@ -11,9 +10,11 @@ import type { PluginEventBus } from '../plugins/event-bus'
 import type {
   ToolCall,
   ToolDefinition,
+  ToolExecutionMode,
   ToolResult,
   ToolResultProjection,
 } from '../tools/types'
+import type { ApprovedToolCall } from '../tools/approved-tool-call'
 import { ProviderAutoApprover } from '../permission/auto-approver'
 import type { ToolExecutor } from '../tools/tool-registry'
 import { toJsonValue } from './session-common'
@@ -34,7 +35,6 @@ import type {
 } from './session-types'
 import { normalizeLlmUsage } from '../providers/usage'
 import type { McpToolGateway } from '../tools/mcp-tools'
-import { validateToolBatchPolicies } from '../tools/tool-batch-policy'
 import { appendToolResult } from './canonical-history'
 import type {
   FileChangeExecutionPort,
@@ -46,6 +46,28 @@ import {
 } from '../tools/tool-result-projection'
 
 type ToolAttemptStage = 'validation' | 'permission' | 'execution'
+
+interface ToolCallSegment {
+  mode: ToolExecutionMode
+  calls: ToolCall[]
+}
+
+interface ToolCallExecution {
+  providerCall: ToolCall
+  call: ToolCall
+  definitionOverride?: ToolDefinition
+  definition?: ToolDefinition
+  approvedCall?: ApprovedToolCall
+  attemptStage: ToolAttemptStage
+  attemptEffects: string[]
+  result?: ToolResult
+  approvedBy: string
+  policySignals: JsonValue[]
+  diffHash?: string
+  preparedFileChange?: PreparedFileChange
+  approvalSummary?: ToolApprovalSummary
+  durationMs: number
+}
 
 /** Wraps a durable file-change preparation failure while preserving its original cause. */
 class FileChangePreparationFailure extends Error {
@@ -159,405 +181,59 @@ export class SessionToolRunner {
     this.#setRunStatus = options.setRunStatus
   }
 
-  /** Runs the requested tool calls, emits results, and records durable file changes. */
+  /** Runs tool calls with serial preparation/finalization and parallel-safe bodies. */
   async executeToolCalls(
     session: SessionState,
     run: ActiveRun,
     toolCalls: ToolCall[],
     assistantMessageId: MessageId,
   ): Promise<void> {
-    const invalidBatch = this.#invalidBatch(toolCalls)
-    if (invalidBatch) {
-      await this.#recordInvalidBatch(session, run, toolCalls, invalidBatch)
-      return
-    }
     this.#setRunStatus(session, run, 'running_tools')
     const terminalCallIds = new Set<CallId>()
 
     try {
-      for (const providerCall of toolCalls) {
-        let call = this.#toolExecutor.normalizeCall(providerCall)
-        let definitionOverride: ToolDefinition | undefined
-        let resolutionFailure: ToolResult | undefined
-        let attemptStage: ToolAttemptStage = 'validation'
-        let attemptEffects: string[] = []
-        if (!this.#isToolAllowed(session, run, call.toolId)) {
-          resolutionFailure = {
-            status: 'error',
-            code: 'TOOL_NOT_AVAILABLE',
-            message: `Tool is not available in this Run: ${call.toolId}`,
-            retryable: false,
-          }
+      for (const segment of this.#toolCallSegments(toolCalls)) {
+        const prepared: ToolCallExecution[] = []
+        for (const providerCall of segment.calls) {
+          prepared.push(
+            await this.#prepareToolCall(
+              session,
+              run,
+              providerCall,
+              assistantMessageId,
+            ),
+          )
         }
-        const resolution = resolutionFailure
-          ? undefined
-          : this.#mcpGateway?.resolveCall(session, call)
-        if (resolution?.matched) {
-          if (resolution.ok) {
-            call = resolution.call
-            definitionOverride = resolution.definition
-          } else {
-            resolutionFailure = resolution.result
-          }
-        }
-        const proposed = {
-          type: 'tool.proposed',
-          sessionId: session.sessionId,
-          runId: run.runId,
-          callId: call.id,
-          tool: call.toolId,
-          args: call.args,
-          reason: call.reason,
-        } as const
-        await session.logger.write(proposed)
-        this.#emit(session, proposed)
 
-        let result: ToolResult
-        let approvedBy = 'none'
-        let policySignals: JsonValue[] = []
-        let diffHash: string | undefined
-        let preparedFileChange: PreparedFileChange | undefined
-        let approvedDiff = ''
-        let approvalUsageProvider: ProviderPublicConfig | undefined
-        let approvalSummary: ToolApprovalSummary | undefined
-        const startedAt = performance.now()
-        try {
-          if (run.controller.signal.aborted) {
-            result = { status: 'cancelled', message: 'The run was cancelled' }
-          } else if (resolutionFailure) {
-            result = resolutionFailure
-          } else {
-            const inspected = this.#toolExecutor.inspectCall(
-              call,
-              definitionOverride,
-            )
-
-            if (!inspected.ok) {
-              attemptEffects = [...(inspected.definition?.effects ?? [])]
-              result = inspected.result
-            } else {
-              attemptStage = 'permission'
-              attemptEffects = [...inspected.definition.effects]
-              const config = this.#configStore.getPublicConfig()
-              const approvalBinding = run.routes?.approval
-              const configuredApproverProvider = approvalBinding?.provider
-              approvalUsageProvider = configuredApproverProvider
-                ? {
-                    ...configuredApproverProvider,
-                    model: approvalBinding.snapshot.model,
-                    reasoning: approvalBinding.snapshot.reasoning,
-                  }
-                : undefined
-              const apiKey = approvalBinding?.apiKey
-              const autoApprover =
-                session.mode === 'auto' && apiKey && approvalUsageProvider
-                  ? (this.#autoApproverFactory?.({ config, apiKey }) ??
-                    new ProviderAutoApprover(
-                      createConfiguredProvider(
-                        approvalUsageProvider,
-                        apiKey,
-                        this.#fetchImpl,
-                        approvalBinding.snapshot.endpoint,
-                      ),
-                      approvalBinding.snapshot,
-                      config.limits.autoApprovalTimeoutMs,
-                      this.#promptRegistry?.approvalPrompt().content,
-                      modelOutputTokenLimit(approvalBinding.modelProfile),
-                    ))
-                  : undefined
-              const authorization = await this.#permissionPipeline.authorize({
-                sessionId: session.sessionId,
-                runId: run.runId,
-                workspace: session.workspace,
-                mode: session.mode,
-                call,
-                definition: inspected.definition,
-                config,
-                signal: run.controller.signal,
-                autoApprover,
-                beforeToolCall: (currentRisk) =>
-                  session.visibility === 'public'
-                    ? (this.#pluginBus?.emit('beforeToolCall', {
-                        version: 1,
-                        sessionId: session.sessionId,
-                        runId: run.runId,
-                        call,
-                        currentRisk,
-                      }) ?? Promise.resolve(undefined))
-                    : Promise.resolve(undefined),
-                requestHumanApproval: (request) =>
-                  this.#approvals.requestToolApproval(session, run, request),
-              })
-              policySignals = toJsonValue(
-                authorization.policySignals,
-              ) as JsonValue[]
-
-              if (authorization.autoDecision) {
-                approvalSummary = {
-                  approver: 'model',
-                  decision: authorization.autoDecision.decision,
-                  reason: authorization.autoDecision.note,
-                  valid: authorization.autoDecision.valid,
-                  ...(authorization.autoDecision.failure
-                    ? { failure: authorization.autoDecision.failure }
-                    : {}),
-                }
-                await session.logger.write({
-                  type: 'approval',
-                  sessionId: session.sessionId,
-                  runId: run.runId,
-                  callId: call.id,
-                  policySignals: toJsonValue(
-                    authorization.policySignals,
-                  ) as JsonValue[],
-                  mode: session.mode,
-                  approver: 'model',
-                  decision: authorization.autoDecision.decision,
-                  reason: authorization.autoDecision.note,
-                })
-                const approvalUsage =
-                  approvalUsageProvider && authorization.autoDecision.usage
-                    ? normalizeLlmUsage({
-                        scope: 'approval',
-                        config,
-                        provider: approvalUsageProvider,
-                        model: approvalBinding!.snapshot.model,
-                        modelProfile: approvalBinding?.modelProfile,
-                        usage: authorization.autoDecision.usage,
-                      })
-                    : undefined
-
-                if (approvalUsage) {
-                  await session.logger.write({
-                    type: 'llm.usage',
-                    sessionId: session.sessionId,
-                    runId: run.runId,
-                    callId: call.id,
-                    usage: approvalUsage,
-                  })
-                  this.#emit(session, {
-                    type: 'llm.usage',
-                    sessionId: session.sessionId,
-                    runId: run.runId,
-                    callId: call.id,
-                    usage: approvalUsage,
-                  })
-                }
-              }
-
-              if (!authorization.ok) {
-                result = authorization.result
-              } else {
-                if (authorization.rememberedRule) {
-                  const latest = this.#configStore.getPublicConfig()
-                  await this.#configStore.update({
-                    version: 1,
-                    kind: 'permission',
-                    defaultMode: latest.permission.defaultMode,
-                    builtinPolicies: latest.permission.builtinPolicies,
-                    rememberedRules: [
-                      ...latest.permission.rememberedRules,
-                      authorization.rememberedRule,
-                    ].slice(-256),
-                    sensitiveData: latest.permission.sensitiveData,
-                  })
-                }
-
-                approvedBy = authorization.approvedCall.approvedBy
-                diffHash = authorization.approvedCall.diffHash
-                approvedDiff = authorization.diff ?? ''
-                const preflight = await this.#contextGate.preflightToolContext(
-                  session,
-                  run,
-                  call,
-                )
-                policySignals = [
-                  ...policySignals,
-                  ...(toJsonValue(preflight.signals) as JsonValue[]),
-                ]
-
-                if (preflight.result) {
-                  result = preflight.result
-                } else {
-                  attemptStage = 'execution'
-                  try {
-                    try {
-                      preparedFileChange =
-                        session.visibility === 'public'
-                          ? await this.#fileChangeExecution?.prepareMutation({
-                              sessionId: session.sessionId,
-                              assistantMessageId,
-                              workspace: session.workspace,
-                              approvedCall: authorization.approvedCall,
-                              diff: approvedDiff,
-                              maximumPayloadBytes: run.fileChangeHistoryBytes,
-                            })
-                          : undefined
-                    } catch (error) {
-                      throw new FileChangePreparationFailure(error)
-                    }
-                    result = await this.#toolExecutor.execute(
-                      authorization.approvedCall,
-                      {
-                        sessionId: session.sessionId,
-                        runId: run.runId,
-                        workspace: {
-                          canonicalPath: session.workspace,
-                        },
-                        readOnlyWorkspace: session.readOnlyWorkspace,
-                      },
-                      run.controller.signal,
-                      hasSideEffects(inspected.definition) ||
-                        session.visibility === 'internal'
-                        ? (settlement) => {
-                            run.pendingSideEffects.add(settlement)
-                            void settlement
-                              .finally(() =>
-                                run.pendingSideEffects.delete(settlement),
-                              )
-                              .catch(() => undefined)
-                          }
-                        : undefined,
-                      definitionOverride,
-                    )
-                  } catch (error) {
-                    if (error instanceof FileChangePreparationFailure) {
-                      throw error
-                    }
-                    result = toolFailure(error, run.controller.signal)
-                  }
-                }
-              }
+        if (segment.mode === 'parallel') {
+          const settlements = await Promise.allSettled(
+            prepared.map((execution) =>
+              this.#executePreparedTool(session, run, execution),
+            ),
+          )
+          for (const [index, settlement] of settlements.entries()) {
+            const execution = prepared[index]
+            if (
+              execution &&
+              settlement.status === 'rejected' &&
+              !execution.result
+            ) {
+              execution.result = toolFailure(
+                settlement.reason,
+                run.controller.signal,
+              )
             }
           }
-        } catch (error) {
-          if (error instanceof FileChangePreparationFailure) {
-            throw error.cause
+        } else {
+          const execution = prepared[0]
+          if (execution) {
+            await this.#executePreparedTool(session, run, execution)
           }
-          result = toolFailure(error, run.controller.signal)
         }
 
-        if (
-          result.status === 'ok' &&
-          preparedFileChange &&
-          this.#fileChangeExecution
-        ) {
-          const mutation = await this.#fileChangeExecution
-            .commitMutation({
-              workspace: session.workspace,
-              prepared: preparedFileChange,
-            })
-            .catch((error: unknown) => {
-              this.#onDiagnostic(
-                'Failed to finalize durable file change',
-                error,
-                { audience: 'internal' },
-              )
-              return {
-                status: 'warning' as const,
-                warningCode: 'CHANGE_HISTORY_PERSIST_FAILED' as const,
-              }
-            })
-          result = annotateFileMutationResult(result, mutation)
+        for (const execution of prepared) {
+          await this.#finalizeToolCall(session, run, execution, terminalCallIds)
         }
-
-        let providerResult = result
-
-        try {
-          const filtered = await this.#contextGate.filterToolResultForProvider(
-            session,
-            run,
-            call,
-            providerResult,
-          )
-          providerResult = filtered.result
-          policySignals = [
-            ...policySignals,
-            ...(toJsonValue(filtered.signals) as JsonValue[]),
-          ]
-        } catch (error) {
-          providerResult = toolFailure(error, run.controller.signal)
-        }
-        const projected = this.#projectForContext(
-          call,
-          providerResult,
-          definitionOverride,
-        )
-
-        const durationMs = performance.now() - startedAt
-        const attempt = {
-          type: 'tool.attempt' as const,
-          sessionId: session.sessionId,
-          runId: run.runId,
-          callId: call.id,
-          tool: call.toolId,
-          stage: attemptStage,
-          outcome: attemptOutcome(attemptStage, result),
-          effects: attemptEffects,
-          durationMs,
-          inputBytes: serializedBytes(call.args),
-          outputBytes:
-            'totalBytes' in result && result.totalBytes !== undefined
-              ? result.totalBytes
-              : serializedBytes(result),
-          truncated: 'truncated' in result && result.truncated === true,
-          ...(result.status === 'error' ? { errorCode: result.code } : {}),
-        }
-        await session.logger.write(attempt)
-        this.#emit(session, attempt)
-
-        await session.logger.write({
-          type: 'tool.call',
-          sessionId: session.sessionId,
-          runId: run.runId,
-          callId: call.id,
-          tool: call.toolId,
-          args: call.args,
-          reason: call.reason,
-          result: toJsonValue(result),
-          approvedBy,
-          policySignals,
-          diffHash,
-          durationMs,
-          totalBytes: 'totalBytes' in result ? result.totalBytes : undefined,
-          truncated: 'truncated' in result ? result.truncated : undefined,
-        })
-
-        this.#emit(session, {
-          type: 'tool.completed',
-          sessionId: session.sessionId,
-          runId: run.runId,
-          callId: call.id,
-          result: normalizeToolResult(projected.eventResult),
-          ...(approvalSummary ? { approval: approvalSummary } : {}),
-        })
-
-        if (session.visibility === 'public') {
-          await this.#pluginBus
-            ?.emit('afterToolCall', {
-              version: 1,
-              sessionId: session.sessionId,
-              runId: run.runId,
-              call,
-              result,
-            })
-            .catch((error: unknown) =>
-              this.#onDiagnostic('Plugin afterToolCall failed', error),
-            )
-        }
-
-        appendToolResult(session, {
-          callId: call.id,
-          content: projected.projection.content,
-          isError: projected.projection.isError,
-          name: call.toolId,
-          reason: call.reason,
-          status: toolResultStatus(providerResult),
-          truncated: projected.projection.truncated,
-          durationMs,
-          turnId: run.rootUserMessageId,
-        })
-        terminalCallIds.add(providerCall.id)
       }
     } catch (error) {
       const cancelled = run.controller.signal.aborted
@@ -596,6 +272,455 @@ export class SessionToolRunner {
     }
   }
 
+  /** Splits model calls into maximal parallel groups separated by serial barriers. */
+  #toolCallSegments(toolCalls: readonly ToolCall[]): ToolCallSegment[] {
+    const segments: ToolCallSegment[] = []
+    for (const providerCall of toolCalls) {
+      const call = this.#toolExecutor.normalizeCall(providerCall)
+      const inspected = this.#toolExecutor.inspectCall(call)
+      const mode = inspected.definition?.executionMode ?? 'serial'
+      const previous = segments.at(-1)
+      if (mode === 'parallel' && previous?.mode === 'parallel') {
+        previous.calls.push(providerCall)
+      } else {
+        segments.push({ mode, calls: [providerCall] })
+      }
+    }
+    return segments
+  }
+
+  /** Resolves, authorizes, and preflights one call without starting its body. */
+  async #prepareToolCall(
+    session: SessionState,
+    run: ActiveRun,
+    providerCall: ToolCall,
+    assistantMessageId: MessageId,
+  ): Promise<ToolCallExecution> {
+    let call = this.#toolExecutor.normalizeCall(providerCall)
+    let definitionOverride: ToolDefinition | undefined
+    let resolutionFailure: ToolResult | undefined
+    if (!this.#isToolAllowed(session, run, call.toolId)) {
+      resolutionFailure = {
+        status: 'error',
+        code: 'TOOL_NOT_AVAILABLE',
+        message: 'Tool is not available in this Run: ' + call.toolId,
+        retryable: false,
+      }
+    }
+    const resolution = resolutionFailure
+      ? undefined
+      : this.#mcpGateway?.resolveCall(session, call)
+    if (resolution?.matched) {
+      if (resolution.ok) {
+        call = resolution.call
+        definitionOverride = resolution.definition
+      } else {
+        resolutionFailure = resolution.result
+      }
+    }
+
+    const proposed = {
+      type: 'tool.proposed',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: call.id,
+      tool: call.toolId,
+      args: call.args,
+      reason: call.reason,
+    } as const
+    await session.logger.write(proposed)
+    this.#emit(session, proposed)
+
+    const execution: ToolCallExecution = {
+      providerCall,
+      call,
+      definitionOverride,
+      attemptStage: 'validation',
+      attemptEffects: [],
+      approvedBy: 'none',
+      policySignals: [],
+      durationMs: 0,
+    }
+    const startedAt = performance.now()
+    try {
+      if (run.controller.signal.aborted) {
+        execution.result = {
+          status: 'cancelled',
+          message: 'The run was cancelled',
+        }
+      } else if (resolutionFailure) {
+        execution.result = resolutionFailure
+      } else {
+        const inspected = this.#toolExecutor.inspectCall(
+          call,
+          definitionOverride,
+        )
+        if (!inspected.ok) {
+          execution.attemptEffects = [...(inspected.definition?.effects ?? [])]
+          execution.result = inspected.result
+        } else {
+          execution.attemptStage = 'permission'
+          execution.attemptEffects = [...inspected.definition.effects]
+          const config = this.#configStore.getPublicConfig()
+          const approvalBinding = run.routes?.approval
+          const configuredApproverProvider = approvalBinding?.provider
+          const approvalUsageProvider = configuredApproverProvider
+            ? {
+                ...configuredApproverProvider,
+                model: approvalBinding.snapshot.model,
+                reasoning: approvalBinding.snapshot.reasoning,
+              }
+            : undefined
+          const apiKey = approvalBinding?.apiKey
+          const autoApprover =
+            session.mode === 'auto' && apiKey && approvalUsageProvider
+              ? (this.#autoApproverFactory?.({ config, apiKey }) ??
+                new ProviderAutoApprover(
+                  createConfiguredProvider(
+                    approvalUsageProvider,
+                    apiKey,
+                    this.#fetchImpl,
+                    approvalBinding.snapshot.endpoint,
+                  ),
+                  approvalBinding.snapshot,
+                  config.limits.autoApprovalTimeoutMs,
+                  this.#promptRegistry?.approvalPrompt().content,
+                  modelOutputTokenLimit(approvalBinding.modelProfile),
+                ))
+              : undefined
+          const authorization = await this.#permissionPipeline.authorize({
+            sessionId: session.sessionId,
+            runId: run.runId,
+            workspace: session.workspace,
+            mode: session.mode,
+            call,
+            definition: inspected.definition,
+            config,
+            signal: run.controller.signal,
+            autoApprover,
+            beforeToolCall: (currentRisk) =>
+              session.visibility === 'public'
+                ? (this.#pluginBus?.emit('beforeToolCall', {
+                    version: 1,
+                    sessionId: session.sessionId,
+                    runId: run.runId,
+                    call,
+                    currentRisk,
+                  }) ?? Promise.resolve(undefined))
+                : Promise.resolve(undefined),
+            requestHumanApproval: (request) =>
+              this.#approvals.requestToolApproval(session, run, request),
+          })
+          execution.policySignals = toJsonValue(
+            authorization.policySignals,
+          ) as JsonValue[]
+
+          if (authorization.autoDecision) {
+            execution.approvalSummary = {
+              approver: 'model',
+              decision: authorization.autoDecision.decision,
+              reason: authorization.autoDecision.note,
+              valid: authorization.autoDecision.valid,
+              ...(authorization.autoDecision.failure
+                ? { failure: authorization.autoDecision.failure }
+                : {}),
+            }
+            await session.logger.write({
+              type: 'approval',
+              sessionId: session.sessionId,
+              runId: run.runId,
+              callId: call.id,
+              policySignals: toJsonValue(
+                authorization.policySignals,
+              ) as JsonValue[],
+              mode: session.mode,
+              approver: 'model',
+              decision: authorization.autoDecision.decision,
+              reason: authorization.autoDecision.note,
+            })
+            const approvalUsage =
+              approvalUsageProvider && authorization.autoDecision.usage
+                ? normalizeLlmUsage({
+                    scope: 'approval',
+                    config,
+                    provider: approvalUsageProvider,
+                    model: approvalBinding!.snapshot.model,
+                    modelProfile: approvalBinding?.modelProfile,
+                    usage: authorization.autoDecision.usage,
+                  })
+                : undefined
+            if (approvalUsage) {
+              await session.logger.write({
+                type: 'llm.usage',
+                sessionId: session.sessionId,
+                runId: run.runId,
+                callId: call.id,
+                usage: approvalUsage,
+              })
+              this.#emit(session, {
+                type: 'llm.usage',
+                sessionId: session.sessionId,
+                runId: run.runId,
+                callId: call.id,
+                usage: approvalUsage,
+              })
+            }
+          }
+
+          if (!authorization.ok) {
+            execution.result = authorization.result
+          } else {
+            if (authorization.rememberedRule) {
+              const latest = this.#configStore.getPublicConfig()
+              await this.#configStore.update({
+                version: 1,
+                kind: 'permission',
+                defaultMode: latest.permission.defaultMode,
+                builtinPolicies: latest.permission.builtinPolicies,
+                rememberedRules: [
+                  ...latest.permission.rememberedRules,
+                  authorization.rememberedRule,
+                ].slice(-256),
+                sensitiveData: latest.permission.sensitiveData,
+              })
+            }
+
+            execution.approvedBy = authorization.approvedCall.approvedBy
+            execution.diffHash = authorization.approvedCall.diffHash
+            execution.approvedCall = authorization.approvedCall
+            execution.definition = inspected.definition
+            const preflight = await this.#contextGate.preflightToolContext(
+              session,
+              run,
+              call,
+            )
+            execution.policySignals = [
+              ...execution.policySignals,
+              ...(toJsonValue(preflight.signals) as JsonValue[]),
+            ]
+            if (preflight.result) {
+              execution.result = preflight.result
+            } else {
+              execution.attemptStage = 'execution'
+              try {
+                execution.preparedFileChange =
+                  session.visibility === 'public'
+                    ? await this.#fileChangeExecution?.prepareMutation({
+                        sessionId: session.sessionId,
+                        assistantMessageId,
+                        workspace: session.workspace,
+                        approvedCall: authorization.approvedCall,
+                        diff: authorization.diff ?? '',
+                        maximumPayloadBytes: run.fileChangeHistoryBytes,
+                      })
+                    : undefined
+              } catch (error) {
+                throw new FileChangePreparationFailure(error)
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof FileChangePreparationFailure) {
+        throw error.cause
+      }
+      execution.result = toolFailure(error, run.controller.signal)
+    } finally {
+      execution.durationMs += performance.now() - startedAt
+    }
+    return execution
+  }
+
+  /** Executes one prepared body; callers decide whether sibling bodies overlap. */
+  async #executePreparedTool(
+    session: SessionState,
+    run: ActiveRun,
+    execution: ToolCallExecution,
+  ): Promise<void> {
+    if (execution.result) return
+    const startedAt = performance.now()
+    try {
+      if (run.controller.signal.aborted) {
+        execution.result = {
+          status: 'cancelled',
+          message: 'The run was cancelled',
+        }
+      } else if (!execution.approvedCall || !execution.definition) {
+        execution.result = {
+          status: 'error',
+          code: 'TOOL_EXECUTION_NOT_PREPARED',
+          message: 'The tool call could not be prepared for execution',
+          retryable: false,
+        }
+      } else {
+        execution.result = await this.#toolExecutor.execute(
+          execution.approvedCall,
+          {
+            sessionId: session.sessionId,
+            runId: run.runId,
+            workspace: {
+              canonicalPath: session.workspace,
+            },
+            readOnlyWorkspace: session.readOnlyWorkspace,
+          },
+          run.controller.signal,
+          hasSideEffects(execution.definition) ||
+            session.visibility === 'internal'
+            ? (settlement) => {
+                run.pendingSideEffects.add(settlement)
+                void settlement
+                  .finally(() => run.pendingSideEffects.delete(settlement))
+                  .catch(() => undefined)
+              }
+            : undefined,
+          execution.definitionOverride,
+        )
+      }
+    } catch (error) {
+      execution.result = toolFailure(error, run.controller.signal)
+    } finally {
+      execution.durationMs += performance.now() - startedAt
+    }
+  }
+
+  /** Finalizes one result in provider order and appends its canonical history. */
+  async #finalizeToolCall(
+    session: SessionState,
+    run: ActiveRun,
+    execution: ToolCallExecution,
+    terminalCallIds: Set<CallId>,
+  ): Promise<void> {
+    const startedAt = performance.now()
+    let result: ToolResult = execution.result ?? {
+      status: 'error',
+      code: 'TOOL_EXECUTION_MISSING_RESULT',
+      message: 'The tool call completed without a result',
+      retryable: false,
+    }
+
+    if (
+      result.status === 'ok' &&
+      execution.preparedFileChange &&
+      this.#fileChangeExecution
+    ) {
+      const mutation = await this.#fileChangeExecution
+        .commitMutation({
+          workspace: session.workspace,
+          prepared: execution.preparedFileChange,
+        })
+        .catch((error: unknown) => {
+          this.#onDiagnostic('Failed to finalize durable file change', error, {
+            audience: 'internal',
+          })
+          return {
+            status: 'warning' as const,
+            warningCode: 'CHANGE_HISTORY_PERSIST_FAILED' as const,
+          }
+        })
+      result = annotateFileMutationResult(result, mutation)
+    }
+
+    let providerResult = result
+    try {
+      const filtered = await this.#contextGate.filterToolResultForProvider(
+        session,
+        run,
+        execution.call,
+        providerResult,
+      )
+      providerResult = filtered.result
+      execution.policySignals = [
+        ...execution.policySignals,
+        ...(toJsonValue(filtered.signals) as JsonValue[]),
+      ]
+    } catch (error) {
+      providerResult = toolFailure(error, run.controller.signal)
+    }
+    const projected = this.#projectForContext(
+      execution.call,
+      providerResult,
+      execution.definitionOverride,
+    )
+    execution.durationMs += performance.now() - startedAt
+    const durationMs = execution.durationMs
+    const attempt = {
+      type: 'tool.attempt' as const,
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: execution.call.id,
+      tool: execution.call.toolId,
+      stage: execution.attemptStage,
+      outcome: attemptOutcome(execution.attemptStage, result),
+      effects: execution.attemptEffects,
+      durationMs,
+      inputBytes: serializedBytes(execution.call.args),
+      outputBytes:
+        'totalBytes' in result && result.totalBytes !== undefined
+          ? result.totalBytes
+          : serializedBytes(result),
+      truncated: 'truncated' in result && result.truncated === true,
+      ...(result.status === 'error' ? { errorCode: result.code } : {}),
+    }
+    await session.logger.write(attempt)
+    this.#emit(session, attempt)
+
+    await session.logger.write({
+      type: 'tool.call',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: execution.call.id,
+      tool: execution.call.toolId,
+      args: execution.call.args,
+      reason: execution.call.reason,
+      result: toJsonValue(result),
+      approvedBy: execution.approvedBy,
+      policySignals: execution.policySignals,
+      diffHash: execution.diffHash,
+      durationMs,
+      totalBytes: 'totalBytes' in result ? result.totalBytes : undefined,
+      truncated: 'truncated' in result ? result.truncated : undefined,
+    })
+
+    this.#emit(session, {
+      type: 'tool.completed',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      callId: execution.call.id,
+      result: normalizeToolResult(projected.eventResult),
+      ...(execution.approvalSummary
+        ? { approval: execution.approvalSummary }
+        : {}),
+    })
+
+    if (session.visibility === 'public') {
+      await this.#pluginBus
+        ?.emit('afterToolCall', {
+          version: 1,
+          sessionId: session.sessionId,
+          runId: run.runId,
+          call: execution.call,
+          result,
+        })
+        .catch((error: unknown) =>
+          this.#onDiagnostic('Plugin afterToolCall failed', error),
+        )
+    }
+
+    appendToolResult(session, {
+      callId: execution.call.id,
+      content: projected.projection.content,
+      isError: projected.projection.isError,
+      name: execution.call.toolId,
+      reason: execution.call.reason,
+      status: toolResultStatus(providerResult),
+      truncated: projected.projection.truncated,
+      durationMs,
+      turnId: run.rootUserMessageId,
+    })
+    terminalCallIds.add(execution.providerCall.id)
+  }
+
   #projectForContext(
     call: ToolCall,
     result: ToolResult,
@@ -624,17 +749,6 @@ export class SessionToolRunner {
     }
   }
 
-  #invalidBatch(toolCalls: readonly ToolCall[]): string | undefined {
-    const special = toolCalls.flatMap((providerCall, index) => {
-      const call = this.#toolExecutor.normalizeCall(providerCall)
-      const inspected = this.#toolExecutor.inspectCall(call)
-      const definition = inspected.definition
-      const policy = definition?.batchPolicy ?? 'normal'
-      return policy === 'normal' ? [] : [{ index, toolId: call.toolId, policy }]
-    })
-    return validateToolBatchPolicies(toolCalls.length, special)
-  }
-
   #isToolAllowed(
     session: SessionState,
     run: ActiveRun,
@@ -652,85 +766,6 @@ export class SessionToolRunner {
       return false
     }
     return true
-  }
-
-  async #recordInvalidBatch(
-    session: SessionState,
-    run: ActiveRun,
-    toolCalls: readonly ToolCall[],
-    message: string,
-  ): Promise<void> {
-    this.#setRunStatus(session, run, 'running_tools')
-    for (const providerCall of toolCalls) {
-      const call = this.#toolExecutor.normalizeCall(providerCall)
-      const result: ToolResult = {
-        status: 'error',
-        code: 'INVALID_TOOL_BATCH',
-        message,
-        retryable: false,
-      }
-      const proposed = {
-        type: 'tool.proposed' as const,
-        sessionId: session.sessionId,
-        runId: run.runId,
-        callId: call.id,
-        tool: call.toolId,
-        args: call.args,
-        reason: call.reason,
-      }
-      await session.logger.write(proposed)
-      this.#emit(session, proposed)
-
-      const projected = this.#projectForContext(call, result)
-      const attempt = {
-        type: 'tool.attempt',
-        sessionId: session.sessionId,
-        runId: run.runId,
-        callId: call.id,
-        tool: call.toolId,
-        stage: 'validation',
-        outcome: 'rejected',
-        effects: [] as string[],
-        durationMs: 0,
-        inputBytes: serializedBytes(call.args),
-        outputBytes: serializedBytes(result),
-        truncated: false,
-        errorCode: 'INVALID_TOOL_BATCH',
-      } as const
-      await session.logger.write(attempt)
-      this.#emit(session, attempt)
-      await session.logger.write({
-        type: 'tool.call',
-        sessionId: session.sessionId,
-        runId: run.runId,
-        callId: call.id,
-        tool: call.toolId,
-        args: call.args,
-        reason: call.reason,
-        result: toJsonValue(result),
-        approvedBy: 'none',
-        policySignals: [],
-        durationMs: 0,
-      })
-      this.#emit(session, {
-        type: 'tool.completed',
-        sessionId: session.sessionId,
-        runId: run.runId,
-        callId: call.id,
-        result: normalizeToolResult(projected.eventResult),
-      })
-      appendToolResult(session, {
-        callId: call.id,
-        content: projected.projection.content,
-        isError: true,
-        name: call.toolId,
-        reason: call.reason,
-        status: 'failed',
-        truncated: projected.projection.truncated,
-        durationMs: 0,
-        turnId: run.rootUserMessageId,
-      })
-    }
   }
 }
 

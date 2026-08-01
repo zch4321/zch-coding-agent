@@ -24,6 +24,7 @@ export function registerSkillTools(
 ): void {
   const readSkill: ToolDefinition<typeof ReadSkillArgsSchema> = {
     id: 'read_skill',
+    executionMode: 'parallel',
     description:
       'Read the full instructions for an enabled skill by its exact name. Read a relevant skill before following it.',
     inputSchema: ReadSkillArgsSchema,

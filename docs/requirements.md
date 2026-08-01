@@ -48,6 +48,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 - **可审批**：每个可能产生副作用的工具调用前，必须经过权限管线（§3）。
 - **状态明确**：同一 Session 同一时间只允许一个活动 Run；运行中收到新消息时默认拒绝，但切换到其他对话不取消后台 Run。
 - **协议完整**：LLM 一次返回多个工具调用时，每个调用都必须回填一个结果；拒绝、取消、超时也以结构化工具结果回填，不能静默丢失。
+- **有序并发**：`ToolDefinition.executionMode` 明确区分 `parallel | serial`，未声明时按 `serial` 处理。连续 parallel 调用只并发执行 Tool body，准备/审批和结果提交保持原 call 顺序；serial 调用是前后并行段的完成屏障。
 - **有界资源、默认不限 React 步数**：单次和单个 run 的工具输出预算、累计上下文预算继续受限；全应用 `maxConcurrentRuns` 范围为 `1..32`、新安装默认 16，达到上限的新 run 直接拒绝，升级已有配置时保留用户当前值。每个 run 同时最多一个 provider call，不设置独立 provider 并发上限，也不对主聊天流设置默认总墙钟超时。`maxStepsPerRun = 0` 表示 React loop 不限步数并作为默认值；有界自动化部署仍可配置正整数上限。估算输入达到当前模型的绝对 `compactThresholdTokens` 时，在安全边界自动压缩旧历史；未显式配置的模型按可用 prompt budget 的 `autoCompactTriggerPercent`（默认 80%）生成阈值。字节、行数/结果数与估算 token 任一上限先到即截断，并向用户和模型返回续读信息。
 - **可回放**：调试日志开启时，循环的请求、响应、流式事件和工具结果必须完整保存，可确定性离线回放原会话；重新请求模型属于单独的“重放请求”，不保证复现随机输出（§5）。
 - **Prompt Harness**：稳定 base instructions、runtime context、AGENTS、selected context、orchestration request 和 compact history 作为可审计 prompt layers 进入模型请求；runtime context 必须包含 workspace writer 的 `available | writer | readonly_locked` 快照，其他 writer 存在时明确当前 session 只读、禁止副作用并要求 writer 结束后重读文件。状态变化通过 hash 追加新 layer，不修改历史。用户可编辑内容是 assistant preferences，不替换 base harness instructions。
@@ -286,16 +287,15 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 
 - 输入只包含 `name` 和 `task`。`name` trim 后为 1–64 个 Unicode 字符，拒绝控制/格式字符和危险对象键；`task` trim 后为 1–32,768 个字符。
 - `task` 必须自包含，并作为 child Session 的普通 canonical `user_input`；child 不复制父 Session history，也不接受特殊任务包装。
-- Tool description 要求 child 使用只读工具调查，并把结论直接放在最终 assistant response 中，不把答案写入文件。`subagent_run` 必须位于当前 Tool batch 最后。
-- 整个 Tool batch 在执行任何调用、权限审批或插件 hook 前统一校验特殊位置；非法批次按原顺序为所有调用返回 `INVALID_TOOL_BATCH`，不能执行前置 Tool。
+- Tool description 要求 child 使用只读工具调查，并把结论直接放在最终 assistant response 中，不把答案写入文件。同一 Tool batch 可以包含多个 `subagent_run`，并按普通 parallel Tool 调度。
+- 同一 parallel 段先按 call 顺序逐个完成权限检查和审批，始终最多暴露一个 `pendingApproval`；准备完成后并发执行，结果仍按原 call 顺序进入事件和 canonical history。
 - child 精确继承父 Run 已冻结的 main/compression route，配置热变更不改变正在运行的 Provider、模型、reasoning 或 credential binding。
-- child 只读取 Tool 实际执行时创建的稳定 workspace snapshot；限制为 100,000 个文件、1 GiB 和 60 秒。复制期间检测到变化时不启动 Provider。
-- 仅当 workspace 正好是 Git repository 顶层时提供冻结 dirty/staged/untracked 状态的 `git_status/git_diff/git_log/git_show`；非 Git 或更大 repository 的子目录只提供文件读取。
-- 模型可见且 executor 可执行的 allowlist 仅为 `read_file/list_dir/glob/grep`、`read_skill`、有界 `delay` 和可用时的四个 Git read Tool。写入、process、terminal、network、MCP、ProjectModel、code intelligence、Goal/Plan 和递归 Agent Tool 均不提供。
+- child 直接读取父 Run 的 canonical workspace；每次 Tool 读取看到当时的实时文件与 Git 状态，不创建文件副本、临时 repository、Git bundle 或 refs。
+- 模型可见且 executor 可执行的 allowlist 仅为 `read_file/list_dir/glob/grep`、`read_skill`、有界 `delay` 和四个 Git read Tool。非 Git workspace 由 Git Tool 返回普通错误；写入、process、terminal、network、MCP、ProjectModel、code intelligence、Goal/Plan 和递归 Agent Tool 均不提供。
 - child 复用唯一 Session/Run/Provider loop，Session 固定 readonly 且对普通 bootstrap、分页、搜索、导出和 Renderer events 隐藏。父 Session/Project 删除级联清理；父归档继续保留。
 - child 沿用全局 `maxStepsPerRun`（`0` 表示不限）、模型最大输出和通用 Tool context/output 限制，不增加专属 step/token/result budget。
 - 内部成功结果保存 `results[name]` 最终文本，以及耗时、实际 Provider/model、标准化 usage 和输出上限截断标记；进入父模型历史时只投影 `results[name]` 文本，Provider/model/usage 留在内部 meta。不得返回 reasoning、endpoint、凭据、child Session ID、trace 路径或临时绝对路径。
-- `workerTimeoutMs` 默认 30 分钟、可配置 1 分钟至 24 小时。父 Run 取消、timeout、Provider failure 和应用退出都必须中断 child 并清理 snapshot/并发 slot；全局并发上限为 1 时启动前明确拒绝。
+- `workerTimeoutMs` 默认 30 分钟、可配置 1 分钟至 24 小时。父 Run 取消、timeout、Provider failure 和应用退出都必须中断 child 并清理并发 slot；全局并发上限为 1 时启动前明确拒绝。
 - 相同 parent Session/Run/call 与参数 hash 可复用已完成结果；参数不同返回冲突。应用重启将遗留 active execution 标记为 `interrupted`，不得自动重试或恢复 stream。
 
 当前阶段不包含模型池、Swarm、递归委派、Serena/code intelligence、自定义 child 工具列表或详细 child Session UI；下一阶段见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
@@ -505,7 +505,7 @@ session.end     { reason, ts }
 ### 5.4 Headless 运行输出
 
 - 内部 Headless host 必须复用桌面端唯一 Agent Runtime 组装入口，固定 Yolo 且不增加、删除或替换模型可见工具。
-- Headless config v4 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs`，并迁移 v1–v3 输入；Runtime Identity v4 记录开关和 timeout，child execution 仍使用相同 snapshot、隐藏 Session、Tool profile 和 usage 归属。
+- Headless config v4 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs`，并迁移 v1–v3 输入；Runtime Identity v4 记录开关和 timeout，child execution 仍使用相同 live workspace、隐藏 Session、Tool profile 和 usage 归属。
 - stdout 只允许版本化 JSONL；host 诊断写 stderr；最终 `result.json` 原子写入 workspace 外的 artifacts 目录。
 - Provider 凭据只能由受信任配置声明的环境变量名称解析，凭据值不得进入配置回包、JSONL、trace、patch 或子进程环境。
 - result 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计、trace 和 patch 路径。`completed` 只表示 Agent run 正常结束，不替代外部业务验收。
@@ -572,7 +572,7 @@ session.end     { reason, ts }
 - JSONL 完整调试 trace（默认关闭）+ 离线回放引擎 + cache usage/时延统计
 - IPC 白名单 API、sender/payload 校验、CSP 与安全导航策略
 - 上下文/输出预算与取消、超时、进程树清理
-- 默认关闭的只读 `subagent_run`、稳定 workspace/Git snapshot、隐藏 durable child Session 与取消/usage 归属
+- 默认关闭的只读 `subagent_run`、实时 workspace/Git 读取、隐藏 durable child Session 与取消/usage 归属
 - 插件钩子点（埋点，无加载器）
 
 **MVP 之后：**
@@ -597,4 +597,4 @@ session.end     { reason, ts }
 - **渐进式上下文**：先给目录（摘要便宜常驻），需要时再读全文（按需省 token）的加载策略。
 - **MCP**：Model Context Protocol，连接外部工具 server 的标准协议；本项目只实现客户端。
 - **Subagent Execution**：由父 Session/Run/Tool call 归属的 backend-private durable execution；复用生产 Agent loop，但 child Session 不进入普通产品查询和 Renderer。
-- **Workspace Snapshot**：在 workspace 外创建、带 source identity 且有文件数/字节/时间边界的稳定只读副本；Git 顶层 workspace 额外冻结 HEAD、refs、index 和 working tree 状态。
+- **Live Workspace View**：只读 child Session 直接绑定父 Run 的 canonical workspace；文件与 Git Tool 在各自读取时观察实时状态，不创建副本、checkpoint 或 refs。

@@ -130,12 +130,12 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - 分别持久化交互式 terminal profile 与 `run_command.shell` profile。已配置程序消失时显示可诊断警告并回退到安全默认值，不静默改写用户配置。
 - `terminal_open` 通过所选 profile 启动 PTY；`run_command.process` 继续以 `shell: false` 直接执行，`run_command.shell` 显式启动所选解释器及其固定参数，不再依赖 Node 在 Windows 上隐式选择 `%COMSPEC%`。
 - WSL 使用独立 adapter 处理发行版、工作目录映射和参数边界，不把它伪装成普通 Windows 可执行 Shell。
-- Prompt Harness 分别报告当前 terminal shell 与 command shell。Subagent snapshot、Git/File 工具和其他内部可执行文件继续直接启动，不受用户 Shell 选择影响。
+- Prompt Harness 分别报告当前 terminal shell 与 command shell。Subagent、Git/File 工具和其他内部能力继续使用各自既定执行路径，不受用户 Shell 选择影响。
 
 验收：
 
 - 未安装 PowerShell 7、仅有 Windows PowerShell/CMD、安装 Git Bash/Nushell 及配置失效等环境都有确定性发现与回退测试。
-- 同一工作区可以用 PowerShell 交互终端和 Git Bash 命令解释器；切换 profile 不影响 `run_command.process` 或内部 Git snapshot。
+- 同一工作区可以用 PowerShell 交互终端和 Git Bash 命令解释器；切换 profile 不影响 `run_command.process` 或内部 Git 命令。
 - quoting、空格路径、Unicode、取消、超时和进程树终止在各受支持 profile 下有集成覆盖；打包后的 Windows 应用至少覆盖一次发现、保存、重启恢复和实际执行 E2E。
 
 ## 6. Later

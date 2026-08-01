@@ -99,6 +99,7 @@ export function registerCodeIntelligenceTools(
 ): void {
   registry.registerTool({
     id: 'code_symbol_overview',
+    executionMode: 'parallel',
     description:
       'Use IDE-level code intelligence to summarize symbols in one source file before reading large files. For directories, search with code_workspace_symbols or locate candidate files first.',
     inputSchema: SymbolOverviewSchema,
@@ -126,6 +127,7 @@ export function registerCodeIntelligenceTools(
 
   registry.registerTool({
     id: 'code_find_definition',
+    executionMode: 'parallel',
     description:
       'Find a symbol definition through the configured IDE/code-intelligence backend. When supported, the result includes the definition range plus the function/class body and nearby documentation in items[].context, so prefer this before reading the file.',
     inputSchema: SymbolAtPathSchema,
@@ -154,6 +156,7 @@ export function registerCodeIntelligenceTools(
 
   registry.registerTool({
     id: 'code_find_references',
+    executionMode: 'parallel',
     description:
       'Find references for a symbol through the configured IDE/code-intelligence backend.',
     inputSchema: SymbolAtPathSchema,
@@ -182,6 +185,7 @@ export function registerCodeIntelligenceTools(
 
   registry.registerTool({
     id: 'code_workspace_symbols',
+    executionMode: 'parallel',
     description:
       'Search workspace symbols through the configured IDE/code-intelligence backend.',
     inputSchema: WorkspaceSymbolsSchema,
@@ -209,6 +213,7 @@ export function registerCodeIntelligenceTools(
 
   registry.registerTool({
     id: 'code_diagnostics',
+    executionMode: 'parallel',
     description:
       'Return IDE diagnostics for one source file from the configured code-intelligence backend when supported.',
     inputSchema: DiagnosticsSchema,
