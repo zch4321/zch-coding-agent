@@ -202,6 +202,7 @@ describe('projectConversationTurns', () => {
       'I found the implementation.',
       'The behavior is covered by tests.',
     ])
+    expect(turns[0]?.finalAssistantMessageId).toBe('message:assistant-final')
   })
 
   it('omits hidden and encrypted reasoning while retaining plaintext-only turns', () => {
@@ -326,6 +327,7 @@ describe('projectConversationTurns', () => {
 
     expect(turns).toHaveLength(2)
     expect(turns[0]?.tools).toHaveLength(1)
+    expect(turns[0]?.finalAssistantMessageId).toBeUndefined()
     expect(turns[1]?.userMessage).toMatchObject({
       role: 'interjection',
       text: 'Also check the tests',
@@ -334,5 +336,6 @@ describe('projectConversationTurns', () => {
     expect(turns[1]?.messages.map((message) => message.text)).toEqual([
       'The tests confirm it.',
     ])
+    expect(turns[1]?.finalAssistantMessageId).toBe('message:after-interjection')
   })
 })

@@ -68,6 +68,7 @@ export interface ConversationTurn {
   tools: ToolActivity[]
   reasoningSegments: ReasoningSegment[]
   messages: ChatMessage[]
+  finalAssistantMessageId?: string
 }
 
 export interface UsageActivity {

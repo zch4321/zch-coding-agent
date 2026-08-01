@@ -147,6 +147,7 @@ describe('timeline disclosure groups', () => {
       },
       tools: tools(),
       reasoningSegments: reasoningSegments(),
+      finalAssistantMessageId: 'message:assistant-2',
       messages: [
         {
           id: 'message:assistant-1',
@@ -165,8 +166,7 @@ describe('timeline disclosure groups', () => {
     const wrapper = mount(ConversationTurn, {
       props: {
         turn,
-        activeRunId: runId,
-        actionsDisabled: true,
+        actionsDisabled: false,
       },
       global: { plugins: [i18n] },
     })
@@ -181,6 +181,9 @@ describe('timeline disclosure groups', () => {
       expect.stringContaining('chat-message assistant'),
       expect.stringContaining('chat-message assistant'),
     ])
+    const assistantMessages = wrapper.findAll('.chat-message.assistant')
+    expect(assistantMessages[0]?.find('.message-actions').exists()).toBe(false)
+    expect(assistantMessages[1]?.findAll('.message-action')).toHaveLength(2)
     wrapper.unmount()
   })
 })

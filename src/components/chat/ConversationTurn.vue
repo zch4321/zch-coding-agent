@@ -60,6 +60,10 @@ const reasoningStreaming = computed(
       :message="message"
       :active-run-id="activeRunId"
       :actions-disabled="actionsDisabled"
+      :show-actions="
+        message.role !== 'assistant' ||
+        message.id === turn.finalAssistantMessageId
+      "
       @revert="emit('revert', $event, message.text)"
       @fork="emit('fork', $event)"
       @retry="emit('retry', $event, message.text)"

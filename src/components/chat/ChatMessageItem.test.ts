@@ -19,6 +19,15 @@ function activeAssistant(): ChatMessage {
   }
 }
 
+function durableAssistant(): ChatMessage {
+  return {
+    id: 'message:durable-status',
+    role: 'assistant',
+    durableKind: 'assistant_turn',
+    text: 'Completed answer',
+  }
+}
+
 function mountMessage() {
   setAppLocale('zh-CN')
   return mount(ChatMessageItem, {
@@ -43,6 +52,24 @@ describe('ChatMessageItem streaming status', () => {
 
     expect(wrapper.get('.message-meta .n-tag').text()).toBe('生成中')
     expect(wrapper.text()).toContain('Streaming answer')
+    wrapper.unmount()
+  })
+
+  it('does not mark a completed assistant message as active when both run IDs are absent', async () => {
+    setAppLocale('zh-CN')
+    const wrapper = mount(ChatMessageItem, {
+      props: {
+        message: durableAssistant(),
+        actionsDisabled: true,
+      },
+      global: { plugins: [i18n] },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.message-status').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('生成中')
+    expect(wrapper.text()).toContain('Completed answer')
     wrapper.unmount()
   })
 })

@@ -106,6 +106,7 @@ test.describe('Electron chat and tool workflows', () => {
 
   test('approves a create_file tool call and continues the provider turn', async () => {
     fakeProvider.queue([
+      textDelta('Preparing e2e-output.txt'),
       toolCallDelta({
         id: 'call:e2e-write',
         name: 'create_file',
@@ -158,9 +159,29 @@ test.describe('Electron chat and tool workflows', () => {
       .locator('.tool-result-json')
       .innerText()
     expect(liveResultText).toBe('Created file e2e-output.txt')
-    await expect(page.locator('.chat-message.assistant')).toContainText(
-      'Created e2e-output.txt',
-    )
+    const progressMessage = page.locator('.chat-message.assistant', {
+      hasText: 'Preparing e2e-output.txt',
+    })
+    const finalMessage = page.locator('.chat-message.assistant', {
+      hasText: 'Created e2e-output.txt',
+    })
+    await expect(progressMessage).toBeVisible()
+    await expect(finalMessage).toBeVisible()
+    await expect(
+      progressMessage.getByRole('button', { name: '回退' }),
+    ).toHaveCount(0)
+    await expect(
+      progressMessage.getByRole('button', { name: '分支' }),
+    ).toHaveCount(0)
+    await expect(
+      finalMessage.getByRole('button', { name: '回退' }),
+    ).toBeVisible()
+    await expect(
+      finalMessage.getByRole('button', { name: '分支' }),
+    ).toBeVisible()
+    await expect(
+      page.locator('.message-status', { hasText: '生成中' }),
+    ).toHaveCount(0)
 
     const firstRequest = fakeProvider.requests[0]
     const secondRequest = fakeProvider.requests[1]
@@ -174,6 +195,16 @@ test.describe('Electron chat and tool workflows', () => {
 
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
+    await expect(
+      page.locator('.message-status', { hasText: '生成中' }),
+    ).toHaveCount(0)
+    await expect(
+      page
+        .locator('.chat-message.assistant', {
+          hasText: 'Preparing e2e-output.txt',
+        })
+        .getByRole('button', { name: '回退' }),
+    ).toHaveCount(0)
     const durableToolGroup = await expandLatestToolGroup(page)
     const durableToolCard = durableToolGroup.locator('.tool-call-card', {
       hasText: 'create_file',

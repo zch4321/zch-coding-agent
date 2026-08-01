@@ -11,6 +11,7 @@ const props = defineProps<{
   message: ChatMessage
   activeRunId?: RunId
   actionsDisabled: boolean
+  showActions?: boolean
 }>()
 const emit = defineEmits<{
   revert: [messageId: string, text: string]
@@ -40,6 +41,7 @@ const visibleRoleLabel = computed(() => {
 const isActiveAssistant = computed(
   () =>
     props.message.role === 'assistant' &&
+    Boolean(props.activeRunId) &&
     props.message.runId === props.activeRunId,
 )
 
@@ -131,7 +133,10 @@ const showMetadata = computed(
     <MarkdownBlock v-if="message.text.trim()" :content="message.text" />
     <div
       v-if="
-        message.text && !actionsDisabled && message.durableKind !== 'stream'
+        message.text &&
+        showActions !== false &&
+        !actionsDisabled &&
+        message.durableKind !== 'stream'
       "
       class="message-actions"
     >

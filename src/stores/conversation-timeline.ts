@@ -94,6 +94,32 @@ function sortTurnContent(turn: MutableConversationTurn): void {
   turn.messages.sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
 }
 
+function markFinalAssistantMessages(turns: MutableConversationTurn[]): void {
+  const finalBySourceTurn = new Map<
+    string,
+    { turn: MutableConversationTurn; messageId: string }
+  >()
+
+  for (const turn of turns) {
+    const sourceTurnId = turn.sourceTurnId ?? turn.id
+    for (const message of turn.messages) {
+      if (
+        message.role === 'assistant' &&
+        message.durableKind === 'assistant_turn'
+      ) {
+        finalBySourceTurn.set(sourceTurnId, {
+          turn,
+          messageId: message.id,
+        })
+      }
+    }
+  }
+
+  for (const { turn, messageId } of finalBySourceTurn.values()) {
+    turn.finalAssistantMessageId = messageId
+  }
+}
+
 /** Projects canonical records and the live overlay into user-visible conversation turns. */
 export function projectConversationTurns({
   records,
@@ -316,11 +342,13 @@ export function projectConversationTurns({
   }
 
   for (const turn of turns) sortTurnContent(turn)
-  return turns.filter(
+  const visibleTurns = turns.filter(
     (turn) =>
       turn.userMessage ||
       turn.tools.length > 0 ||
       turn.reasoningSegments.length > 0 ||
       turn.messages.length > 0,
   )
+  markFinalAssistantMessages(visibleTurns)
+  return visibleTurns
 }
