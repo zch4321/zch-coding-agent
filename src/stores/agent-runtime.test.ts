@@ -742,18 +742,24 @@ describe('agent runtime store', () => {
       },
     ]
 
+    const timelineMessages = runtime.timelineTurns.flatMap((turn) => [
+      ...(turn.userMessage ? [turn.userMessage] : []),
+      ...turn.messages,
+    ])
+    const timelineTools = runtime.timelineTurns.flatMap((turn) => turn.tools)
+
     expect(
-      runtime.messages.filter((message) => message.role === 'interjection'),
+      timelineMessages.filter((message) => message.role === 'interjection'),
     ).toHaveLength(1)
     expect(
-      runtime.messages.find((message) => message.role === 'interjection'),
+      timelineMessages.find((message) => message.role === 'interjection'),
     ).not.toHaveProperty('live', true)
-    expect(runtime.tools.find((tool) => tool.callId === callId)).toMatchObject({
+    expect(timelineTools.find((tool) => tool.callId === callId)).toMatchObject({
       tool: 'read_file',
-      order: 101,
+      order: 100,
     })
     expect(
-      runtime.tools.find((tool) => tool.callId === 'call:live'),
+      timelineTools.find((tool) => tool.callId === 'call:live'),
     ).toMatchObject({ live: true })
   })
 

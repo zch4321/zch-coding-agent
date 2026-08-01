@@ -1,4 +1,4 @@
-import type { CallId, RunId } from '../../shared/ids'
+import type { CallId, MessageId, RunId } from '../../shared/ids'
 import type { ContextAttachmentChip } from '../../shared/context'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ToolApprovalSummary } from '../../shared/agent-events'
@@ -30,13 +30,20 @@ export interface ChatMessage {
     | 'stream'
   runId?: RunId
   text: string
-  reasoning: string
   order?: number
   attachments?: ContextAttachmentChip[]
   interjectionId?: string
   interjectionStatus?: 'queued' | 'injected' | 'superseded' | 'carryover'
   retryable?: boolean
   editable?: boolean
+  live?: boolean
+}
+
+export interface ReasoningSegment {
+  id: string
+  runId?: RunId
+  text: string
+  order: number
   live?: boolean
 }
 
@@ -51,6 +58,17 @@ export interface ToolActivity {
   approval?: ToolApprovalSummary
   order?: number
   live?: boolean
+}
+
+export interface ConversationTurn {
+  id: string
+  sourceTurnId?: MessageId
+  order: number
+  userMessage?: ChatMessage
+  tools: ToolActivity[]
+  reasoningSegments: ReasoningSegment[]
+  messages: ChatMessage[]
+  finalAssistantMessageId?: string
 }
 
 export interface UsageActivity {

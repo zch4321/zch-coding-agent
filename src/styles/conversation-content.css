@@ -117,17 +117,12 @@ code {
   color: var(--accent);
 }
 
-.reasoning-card {
-  margin-top: 10px;
-}
-
-.reasoning-card-only {
-  margin-top: 0;
-}
-
 .approval-card {
+  display: grid;
+  height: clamp(280px, 45dvh, 420px);
   min-width: 0;
   max-width: 100%;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -140,33 +135,81 @@ code {
   margin-bottom: 6px;
 }
 
-.approval-card {
-  padding: 14px 16px;
+.timeline-disclosure {
+  min-width: 0;
+  color: var(--text-muted);
 }
 
-.reasoning-card .n-collapse-item__content-wrapper,
-.reasoning-card .n-collapse-item__content-inner {
+.timeline-disclosure .n-collapse-item__content-wrapper,
+.timeline-disclosure .n-collapse-item__content-inner {
   width: 100%;
   min-width: 0;
   max-width: 100%;
 }
 
-.reasoning-details {
-  margin-top: 5px;
+.timeline-disclosure-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.timeline-disclosure-header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-disclosure-list {
+  width: 100%;
+  min-width: 0;
+  margin-top: 4px;
+}
+
+.tool-call-group-list {
+  display: grid;
+  gap: 6px;
+}
+
+.tool-call-group-list .tool-call-card {
+  width: 100%;
+  margin: 0;
+}
+
+.reasoning-segment-list {
+  display: grid;
+  max-height: 320px;
+  gap: 6px;
+  overflow-y: auto;
+  margin-left: 21px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border-subtle);
 }
 
 .reasoning-content {
   width: 100%;
   min-width: 0;
-  max-height: 320px;
-  overflow-x: hidden;
-  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .approval-header {
+  padding: 14px 16px 10px;
   justify-content: space-between;
   gap: 14px;
 }
@@ -270,13 +313,20 @@ code {
   word-break: break-word;
 }
 
-.approval-card > p {
+.approval-card-body {
+  min-height: 0;
+  padding: 0 16px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.approval-reason {
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.5;
 }
 
-.approval-card > p {
+.approval-reason {
   margin: 11px 0;
 }
 
@@ -345,7 +395,10 @@ code {
 .approval-actions {
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 0;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--warning) 5%, var(--background));
 }
 
 .conversation-empty {

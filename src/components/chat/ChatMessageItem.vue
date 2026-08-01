@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NButton, NCollapse, NCollapseItem, NTag, NTooltip } from 'naive-ui'
+import { NButton, NTag, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { RunId } from '../../../shared/ids'
 import type { ChatMessage } from '../../stores/agent-types'
 import MarkdownBlock from '../MarkdownBlock.vue'
 import UiIcon from '../UiIcon.vue'
 
-const props = defineProps<{
-  message: ChatMessage
-  activeRunId?: RunId
-  actionsDisabled: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    message: ChatMessage
+    activeRunId?: RunId
+    actionsDisabled: boolean
+    showActions?: boolean
+  }>(),
+  { activeRunId: undefined, showActions: true },
+)
 const emit = defineEmits<{
   revert: [messageId: string, text: string]
   fork: [messageId: string]
@@ -40,13 +44,12 @@ const visibleRoleLabel = computed(() => {
 const isActiveAssistant = computed(
   () =>
     props.message.role === 'assistant' &&
+    Boolean(props.activeRunId) &&
     props.message.runId === props.activeRunId,
 )
 
 const showMetadata = computed(
-  () =>
-    Boolean(visibleRoleLabel.value) ||
-    (isActiveAssistant.value && !props.message.reasoning),
+  () => Boolean(visibleRoleLabel.value) || isActiveAssistant.value,
 )
 </script>
 
@@ -131,31 +134,12 @@ const showMetadata = computed(
       </NTooltip>
     </div>
     <MarkdownBlock v-if="message.text.trim()" :content="message.text" />
-    <NCollapse
-      v-if="message.reasoning"
-      class="reasoning-card"
-      :class="{ 'reasoning-card-only': !message.text.trim() }"
-      arrow-placement="right"
-    >
-      <NCollapseItem name="reasoning">
-        <template #header>
-          <div class="tool-call-row">
-            <div class="tool-call-summary">
-              <span class="tool-call-muted">{{ t('chat.reasoning') }}</span>
-              <NTag v-if="isActiveAssistant" round size="small" type="info">
-                {{ t('chat.streaming') }}
-              </NTag>
-            </div>
-          </div>
-        </template>
-        <div class="tool-call-details reasoning-details">
-          <pre class="reasoning-content">{{ message.reasoning }}</pre>
-        </div>
-      </NCollapseItem>
-    </NCollapse>
     <div
       v-if="
-        message.text && !actionsDisabled && message.durableKind !== 'stream'
+        message.text &&
+        showActions !== false &&
+        !actionsDisabled &&
+        message.durableKind !== 'stream'
       "
       class="message-actions"
     >

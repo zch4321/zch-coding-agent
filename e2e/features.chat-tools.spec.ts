@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { configureApp, findDurableMessageText } from './support/app-helpers'
@@ -9,6 +9,7 @@ import {
   providerToolNames,
   textDelta,
   toolCallDelta,
+  toolCallsDelta,
   type FakeProvider,
 } from './support/fake-provider'
 import {
@@ -16,6 +17,13 @@ import {
   launchFeatureHarness,
   type FeatureHarness,
 } from './support/feature-harness'
+
+async function expandLatestToolGroup(page: Page): Promise<Locator> {
+  const group = page.locator('.tool-call-group').last()
+  await expect(group).toBeVisible()
+  await group.locator('.n-collapse-item__header-main').first().click()
+  return group
+}
 
 test.describe('Electron chat and tool workflows', () => {
   let harness: FeatureHarness
@@ -98,6 +106,7 @@ test.describe('Electron chat and tool workflows', () => {
 
   test('approves a create_file tool call and continues the provider turn', async () => {
     fakeProvider.queue([
+      textDelta('Preparing e2e-output.txt'),
       toolCallDelta({
         id: 'call:e2e-write',
         name: 'create_file',
@@ -140,7 +149,8 @@ test.describe('Electron chat and tool workflows', () => {
       )
       .toBe('approved by e2e\n')
     await expect.poll(() => fakeProvider.requests.length).toBe(2)
-    const toolCard = page.locator('.tool-call-card', {
+    const liveToolGroup = await expandLatestToolGroup(page)
+    const toolCard = liveToolGroup.locator('.tool-call-card', {
       hasText: 'create_file',
     })
     await expect(toolCard).toContainText('已完成')
@@ -149,9 +159,29 @@ test.describe('Electron chat and tool workflows', () => {
       .locator('.tool-result-json')
       .innerText()
     expect(liveResultText).toBe('Created file e2e-output.txt')
-    await expect(page.locator('.chat-message.assistant')).toContainText(
-      'Created e2e-output.txt',
-    )
+    const progressMessage = page.locator('.chat-message.assistant', {
+      hasText: 'Preparing e2e-output.txt',
+    })
+    const finalMessage = page.locator('.chat-message.assistant', {
+      hasText: 'Created e2e-output.txt',
+    })
+    await expect(progressMessage).toBeVisible()
+    await expect(finalMessage).toBeVisible()
+    await expect(
+      progressMessage.getByRole('button', { name: '回退' }),
+    ).toHaveCount(0)
+    await expect(
+      progressMessage.getByRole('button', { name: '分支' }),
+    ).toHaveCount(0)
+    await expect(
+      finalMessage.getByRole('button', { name: '回退' }),
+    ).toBeVisible()
+    await expect(
+      finalMessage.getByRole('button', { name: '分支' }),
+    ).toBeVisible()
+    await expect(
+      page.locator('.message-status', { hasText: '生成中' }),
+    ).toHaveCount(0)
 
     const firstRequest = fakeProvider.requests[0]
     const secondRequest = fakeProvider.requests[1]
@@ -165,7 +195,18 @@ test.describe('Electron chat and tool workflows', () => {
 
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
-    const durableToolCard = page.locator('.tool-call-card', {
+    await expect(
+      page.locator('.message-status', { hasText: '生成中' }),
+    ).toHaveCount(0)
+    await expect(
+      page
+        .locator('.chat-message.assistant', {
+          hasText: 'Preparing e2e-output.txt',
+        })
+        .getByRole('button', { name: '回退' }),
+    ).toHaveCount(0)
+    const durableToolGroup = await expandLatestToolGroup(page)
+    const durableToolCard = durableToolGroup.locator('.tool-call-card', {
       hasText: 'create_file',
     })
     await durableToolCard.locator('.tool-call-row').click()
@@ -206,7 +247,8 @@ test.describe('Electron chat and tool workflows', () => {
     await expect(approval).toBeVisible()
     await approval.getByRole('button', { name: '批准', exact: true }).click()
 
-    const card = page.locator('.tool-call-card', {
+    const toolGroup = await expandLatestToolGroup(page)
+    const card = toolGroup.locator('.tool-call-card', {
       hasText: 'run_command',
     })
     await expect(card).toContainText('已完成')
@@ -239,5 +281,103 @@ test.describe('Electron chat and tool workflows', () => {
     expect(metrics.resultScrollWidth).toBeLessThanOrEqual(
       metrics.resultClientWidth,
     )
+  })
+
+  test('shows same-batch approvals serially in one stable-height card', async () => {
+    const longContent = 'second approval content line\n'.repeat(240)
+    fakeProvider.queue([
+      toolCallsDelta([
+        {
+          id: 'call:e2e-serial-first',
+          name: 'create_file',
+          args: {
+            path: 'serial-first.txt',
+            content: 'first approval\n',
+            _agent_intent: 'Create the first serial approval fixture',
+          },
+        },
+        {
+          id: 'call:e2e-serial-second',
+          name: 'create_file',
+          args: {
+            path: 'serial-second.txt',
+            content: longContent,
+            _agent_intent: 'Create the second serial approval fixture',
+          },
+        },
+      ]),
+    ])
+    fakeProvider.queue([textDelta('Both serial approvals completed.')])
+
+    await configureApp({
+      page,
+      providerBaseURL: fakeProvider.origin,
+      workspace,
+      defaultMode: 'confirm',
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+
+    const composer = page.locator('.message-input-area textarea')
+    await composer.fill('Create two files with serial approvals')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect.poll(() => fakeProvider.requests.length).toBe(1)
+
+    const approvalCards = page.locator('.approval-card')
+    const firstApproval = page.locator('.approval-card', {
+      hasText: 'serial-first.txt',
+    })
+    await expect(approvalCards).toHaveCount(1)
+    await expect(firstApproval).toBeVisible()
+    const firstHeight = await firstApproval.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    )
+
+    await firstApproval
+      .getByRole('button', { name: '批准', exact: true })
+      .click()
+    await expect(firstApproval).toHaveCount(0)
+
+    const secondApproval = page.locator('.approval-card', {
+      hasText: 'serial-second.txt',
+    })
+    await expect(secondApproval).toBeVisible()
+    await expect(approvalCards).toHaveCount(1)
+    const secondMetrics = await secondApproval.evaluate((element) => {
+      const body = element.querySelector('.approval-card-body')
+      if (!body) throw new Error('Expected approval body')
+      return {
+        height: element.getBoundingClientRect().height,
+        bodyClientHeight: body.clientHeight,
+        bodyScrollHeight: body.scrollHeight,
+      }
+    })
+    expect(Math.abs(secondMetrics.height - firstHeight)).toBeLessThanOrEqual(1)
+    expect(secondMetrics.bodyScrollHeight).toBeGreaterThan(
+      secondMetrics.bodyClientHeight,
+    )
+
+    await secondApproval
+      .getByRole('button', { name: '批准', exact: true })
+      .click()
+    await expect(approvalCards).toHaveCount(0)
+    await expect.poll(() => fakeProvider.requests.length).toBe(2)
+    await expect(page.locator('.chat-message.assistant')).toContainText(
+      'Both serial approvals completed.',
+    )
+    await expect
+      .poll(async () =>
+        readFile(path.join(workspace, 'serial-first.txt'), 'utf8').catch(
+          () => '',
+        ),
+      )
+      .toBe('first approval\n')
+    await expect
+      .poll(async () =>
+        readFile(path.join(workspace, 'serial-second.txt'), 'utf8').catch(
+          () => '',
+        ),
+      )
+      .toBe(longContent)
   })
 })

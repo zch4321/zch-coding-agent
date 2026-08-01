@@ -17,10 +17,9 @@ import type { PlanStatus } from '../../shared/orchestration'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { DurableRunStartResult } from '../../shared/domain-state-api'
 import type {
-  ChatMessage,
+  ConversationTurn,
   PendingApproval,
   ReviewedApproval,
-  ToolActivity,
   UsageActivity,
 } from './agent-types'
 import { useAgentReplicaStore } from './agent-replica'
@@ -35,11 +34,11 @@ import {
   pendingApprovalFromSnapshot,
   projectName,
   requestId,
-  TERMINAL_RUN_STATUSES,
   type CarryoverInterjection,
   type SendMessageOptions,
   type SessionOverlay,
 } from './agent-runtime-helpers'
+import { projectConversationTurns } from './conversation-timeline'
 import { useAgentSettingsStore } from './agent-settings'
 import { useAgentShellStore } from './agent-shell'
 import { useNotificationStore } from './notifications'
@@ -107,133 +106,13 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     pendingApproval(): PendingApproval | undefined {
       return this.activeOverlay?.approval
     },
-    messages(): ChatMessage[] {
+    timelineTurns(): ConversationTurn[] {
       const replica = useAgentReplicaStore()
-      const records = replica.selectedMessages.filter(
-        (record) => record.visibility === 'visible',
-      )
-      const projected = records.flatMap((record): ChatMessage[] => {
-        if (record.kind === 'user_input' && originalUserRecord(record)) {
-          return [
-            {
-              id: record.id,
-              role: 'user',
-              durableKind: 'user_input',
-              text: messageText(record),
-              reasoning: '',
-              order: record.seq,
-              attachments: record.metadata.attachments,
-              retryable: true,
-              editable: true,
-            },
-          ]
-        }
-        if (record.kind === 'assistant_turn') {
-          return [
-            {
-              id: record.id,
-              role: 'assistant',
-              durableKind: 'assistant_turn',
-              text: messageText(record),
-              reasoning: record.normalizedReasoningText ?? '',
-              order: record.seq,
-            },
-          ]
-        }
-        if (record.kind === 'orchestrator' || record.kind === 'interjection') {
-          return [
-            {
-              id: record.id,
-              role:
-                record.kind === 'orchestrator'
-                  ? 'orchestrator'
-                  : 'interjection',
-              durableKind: record.kind,
-              text: messageText(record),
-              reasoning: '',
-              order: record.seq,
-            },
-          ]
-        }
-        return []
+      const sessionId = replica.selectedSessionId
+      return projectConversationTurns({
+        records: replica.selectedMessages,
+        overlay: sessionId ? this.overlays[sessionId] : undefined,
       })
-      const overlay = this.activeOverlay
-      if (
-        overlay?.runId &&
-        (overlay.text.trim() || overlay.reasoning.trim()) &&
-        !TERMINAL_RUN_STATUSES.has(overlay.status)
-      ) {
-        projected.push({
-          id: `stream:${overlay.runId}`,
-          role: 'assistant',
-          durableKind: 'stream',
-          runId: overlay.runId,
-          text: overlay.text,
-          reasoning: overlay.reasoning,
-          order: Number.MAX_SAFE_INTEGER,
-          live: true,
-        })
-      }
-      for (const interjection of overlay?.interjections ?? []) {
-        if (
-          records.some(
-            (record) =>
-              record.kind === 'interjection' &&
-              record.metadata?.interjectionId === interjection.id,
-          )
-        ) {
-          continue
-        }
-        projected.push({
-          id: `interjection:${interjection.id}`,
-          role: 'interjection',
-          durableKind: 'interjection',
-          runId: overlay?.runId,
-          text: interjection.content,
-          reasoning: '',
-          order: Number.MAX_SAFE_INTEGER - 1,
-          interjectionId: interjection.id,
-          interjectionStatus: interjection.status,
-          live: true,
-        })
-      }
-      return projected
-    },
-    tools(): ToolActivity[] {
-      const replica = useAgentReplicaStore()
-      const durable = new Map<string, ToolActivity>()
-      for (const record of replica.selectedMessages) {
-        if (record.visibility !== 'visible') continue
-        if (record.kind === 'assistant_turn') {
-          for (const part of record.parts) {
-            if (part.type !== 'tool_call') continue
-            durable.set(part.callId, {
-              callId: part.callId,
-              runId: (record.turnId ?? record.id) as unknown as RunId,
-              tool: part.name,
-              args: part.arguments,
-              reason: '',
-              status: 'proposed',
-              order: record.seq,
-            })
-          }
-        } else if (record.kind === 'tool_result') {
-          const part = record.parts[0]
-          const tool = durable.get(part.callId)
-          if (!tool) continue
-          tool.status = 'completed'
-          tool.result = part
-          tool.order = record.seq
-        }
-      }
-      for (const tool of this.activeOverlay?.tools ?? []) {
-        if (!durable.has(tool.callId)) {
-          durable.set(tool.callId, { ...tool, live: true })
-        }
-      }
-      return [...durable.values()].sort(
-        (left, right) => (right.order ?? 0) - (left.order ?? 0),
-      )
     },
     usage(): UsageActivity[] {
       return this.activeOverlay?.usage ?? []

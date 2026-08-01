@@ -180,7 +180,7 @@ test.describe.serial('Durable Session and terminal workflows', () => {
     }
   })
 
-  test('wraps reasoning inside the shared activity-card layout', async () => {
+  test('wraps reasoning inside its independent collapsed timeline group', async () => {
     const longReasoning = `First reasoning line\n${'unbroken-reasoning-'.repeat(160)}`
     fakeProvider.queue([
       reasoningDelta(longReasoning),
@@ -193,28 +193,28 @@ test.describe.serial('Durable Session and terminal workflows', () => {
     const assistant = page.locator('.chat-message.assistant').filter({
       hasText: 'Reasoning layout fixture',
     })
-    const reasoningCard = assistant.locator('.reasoning-card')
-    await expect(reasoningCard).toBeVisible()
-    await expect(reasoningCard.locator('.tool-call-row')).toHaveCount(1)
-    await reasoningCard.getByText('思考过程', { exact: true }).click()
+    await expect(assistant).toBeVisible()
+    const turn = page.locator('.conversation-turn').filter({ has: assistant })
+    const reasoningGroup = turn.locator('.reasoning-group')
+    await expect(reasoningGroup).toBeVisible()
+    await expect(reasoningGroup).toContainText('思考过程')
+    await expect(reasoningGroup.locator('.reasoning-content')).toHaveCount(0)
+    await reasoningGroup.locator('.n-collapse-item__header-main').click()
 
-    const reasoningContent = reasoningCard.locator('.reasoning-content')
+    const reasoningContent = reasoningGroup.locator('.reasoning-content')
     await expect(reasoningContent).toBeVisible()
     const layout = await reasoningContent.evaluate((element) => {
       const style = getComputedStyle(element)
       return {
         whiteSpace: style.whiteSpace,
         overflowWrap: style.overflowWrap,
-        overflowX: style.overflowX,
         clientWidth: element.clientWidth,
         scrollWidth: element.scrollWidth,
       }
     })
     expect(layout.whiteSpace).toBe('pre-wrap')
     expect(layout.overflowWrap).toBe('anywhere')
-    expect(layout.overflowX).toBe('hidden')
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1)
-    await expect(reasoningCard.locator('.tool-call-details')).toBeVisible()
   })
 
   test('opens, drives, restores, and closes terminal tabs for a Session', async () => {

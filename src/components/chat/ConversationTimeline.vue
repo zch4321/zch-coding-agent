@@ -5,9 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 import ApprovalCard from './ApprovalCard.vue'
-import ChatMessageItem from './ChatMessageItem.vue'
+import ConversationTurn from './ConversationTurn.vue'
 import GoalPanel from './GoalPanel.vue'
-import ToolCallCard from './ToolCallCard.vue'
 
 defineProps<{ projectName: string }>()
 
@@ -23,26 +22,7 @@ const scrollElement = ref<HTMLElement>()
 const bottomSentinel = ref<HTMLElement>()
 const followingOutput = ref(true)
 const loadingOlderMessages = ref(false)
-const durableTools = computed(() =>
-  agent.tools.filter((tool) => !tool.live).reverse(),
-)
-const liveTools = computed(() =>
-  agent.tools.filter((tool) => tool.live).reverse(),
-)
-const visibleMessages = computed(() =>
-  agent.messages.filter(
-    (message) =>
-      message.role !== 'assistant' ||
-      message.text.trim().length > 0 ||
-      message.reasoning.trim().length > 0,
-  ),
-)
-const durableMessages = computed(() =>
-  visibleMessages.value.filter((message) => !message.live),
-)
-const liveMessages = computed(() =>
-  visibleMessages.value.filter((message) => message.live),
-)
+const timelineTurns = computed(() => agent.timelineTurns)
 let resizeObserver: ResizeObserver | undefined
 
 function requestRevert(messageId: string, text: string) {
@@ -62,24 +42,26 @@ function requestEdit(messageId: string, text: string) {
   emit('edit', messageId, text.replace(/\s+/g, ' ').slice(0, 80))
 }
 
-const toolRenderSignature = computed(() =>
-  agent.tools
-    .map((tool) => {
-      const result =
-        tool.result &&
-        typeof tool.result === 'object' &&
-        !Array.isArray(tool.result)
-          ? tool.result
-          : undefined
-      const resultStatus =
-        result && 'status' in result ? String(result.status) : 'pending'
-      const resultSize = result ? JSON.stringify(result).length : 0
-      const approval = tool.approval
-        ? `${tool.approval.decision}:${tool.approval.reason}`
-        : ''
-      return `${tool.callId}:${tool.status}:${resultStatus}:${resultSize}:${approval}`
+const timelineRenderSignature = computed(() =>
+  timelineTurns.value
+    .map((turn) => {
+      const tools = turn.tools
+        .map((tool) => {
+          const resultSize = tool.result
+            ? JSON.stringify(tool.result).length
+            : 0
+          return `${tool.callId}:${tool.status}:${resultSize}`
+        })
+        .join(',')
+      const reasoning = turn.reasoningSegments
+        .map((segment) => `${segment.id}:${segment.text.length}`)
+        .join(',')
+      const messages = turn.messages
+        .map((message) => `${message.id}:${message.text.length}`)
+        .join(',')
+      return `${turn.id}|${tools}|${reasoning}|${messages}`
     })
-    .join('|'),
+    .join(';'),
 )
 
 function isNearBottom(element: HTMLElement): boolean {
@@ -151,15 +133,7 @@ async function loadOlderMessages() {
 }
 
 watch(
-  () => [
-    visibleMessages.value.length,
-    visibleMessages.value.at(-1)?.text.length ?? 0,
-    visibleMessages.value.at(-1)?.reasoning.length ?? 0,
-    agent.tools.length,
-    toolRenderSignature.value,
-    agent.usage.length,
-    agent.pendingApproval?.callId,
-  ],
+  () => [timelineRenderSignature.value, agent.pendingApproval?.callId],
   () => void scrollToBottom(),
 )
 
@@ -207,62 +181,33 @@ onBeforeUnmount(() => {
 
       <GoalPanel v-if="agent.goal" />
 
-      <div class="durable-timeline">
-        <ChatMessageItem
-          v-for="message in durableMessages"
-          :key="message.id"
-          :message="message"
+      <div class="conversation-turn-list">
+        <ConversationTurn
+          v-for="turn in timelineTurns"
+          :key="turn.id"
+          :turn="turn"
           :active-run-id="agent.activeRunId"
           :actions-disabled="
             Boolean(
               agent.startPending || agent.activeRunId || agent.pendingApproval,
             )
           "
-          :style="{ order: message.order ?? 0 }"
           @revert="requestRevert"
           @fork="requestFork"
           @retry="requestRetry"
           @edit="requestEdit"
-        />
-
-        <ToolCallCard
-          v-for="tool in durableTools"
-          :key="tool.callId"
-          :tool="tool"
-          :style="{ order: tool.order ?? 0 }"
           @content-resized="onContentResized"
         />
       </div>
 
-      <div class="live-run-timeline">
-        <ToolCallCard
-          v-for="tool in liveTools"
-          :key="tool.callId"
-          :tool="tool"
-          @content-resized="onContentResized"
-        />
-        <ChatMessageItem
-          v-for="message in liveMessages"
-          :key="message.id"
-          :message="message"
-          :active-run-id="agent.activeRunId"
-          :actions-disabled="true"
-          @revert="requestRevert"
-          @fork="requestFork"
-          @retry="requestRetry"
-          @edit="requestEdit"
-        />
-      </div>
-
-      <ApprovalCard v-if="agent.pendingApproval" :project-name="projectName" />
+      <ApprovalCard
+        v-if="agent.pendingApproval"
+        :key="agent.pendingApproval.callId"
+        :project-name="projectName"
+      />
 
       <NEmpty
-        v-if="
-          visibleMessages.length === 0 &&
-          durableTools.length === 0 &&
-          liveTools.length === 0 &&
-          !agent.pendingApproval
-        "
+        v-if="timelineTurns.length === 0 && !agent.pendingApproval"
         class="conversation-empty"
         :description="
           agent.workspacePath ? t('chat.workQuestion') : t('chat.openWorkspace')
