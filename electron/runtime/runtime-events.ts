@@ -3,15 +3,21 @@ import type {
   RunStatus,
   TerminalEvent,
 } from '../../shared/agent-events'
+import type {
+  AgentExecutionEvent,
+  AgentExecutionEventDraft,
+} from '../../shared/agent-execution'
 import type { RunId, SessionId } from '../../shared/ids'
 
 export interface RuntimeEventSink {
   publishAgent(event: AgentEvent): void
+  publishAgentExecution(event: AgentExecutionEventDraft): void
   publishTerminal(event: TerminalEvent): void
 }
 
 export interface RuntimeEventListener {
   onAgentEvent?: (event: AgentEvent) => void
+  onAgentExecutionEvent?: (event: AgentExecutionEvent) => void
   onTerminalEvent?: (event: TerminalEvent) => void
 }
 

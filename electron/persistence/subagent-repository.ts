@@ -1,26 +1,26 @@
-import type { CallId, RunId, SessionId } from '../../shared/ids'
+import type {
+  AgentExecutionId,
+  CallId,
+  RunId,
+  SessionId,
+} from '../../shared/ids'
+import type {
+  AgentExecutionListCursor,
+  AgentExecutionStatus,
+} from '../../shared/agent-execution'
 import type { JsonValue } from '../../shared/json'
 import type {
   PersistenceReader,
   PersistenceTransaction,
 } from './database-service'
 
-export type SubagentExecutionStatus =
-  | 'preparing'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'timed_out'
-  | 'interrupted'
-
 export interface SubagentExecutionRecord {
-  id: string
+  id: AgentExecutionId
   parentSessionId: SessionId
   parentRunId: RunId
   parentCallId: CallId
   specHash: string
-  status: SubagentExecutionStatus
+  status: AgentExecutionStatus
   route: JsonValue
   sourceIdentity?: JsonValue
   usage?: JsonValue
@@ -37,7 +37,7 @@ interface SubagentExecutionRow {
   parent_run_id: string
   parent_call_id: string
   spec_hash: string
-  status: SubagentExecutionStatus
+  status: AgentExecutionStatus
   route_json: string
   source_identity_json: string | null
   usage_json: string | null
@@ -49,10 +49,28 @@ interface SubagentExecutionRow {
   completed_at: string | null
 }
 
+export interface SubagentExecutionListEntry {
+  record: SubagentExecutionRecord
+  childSessionId?: SessionId
+}
+
+export interface SubagentExecutionListPage {
+  records: SubagentExecutionListEntry[]
+  hasMore: boolean
+  nextBefore?: AgentExecutionListCursor
+}
+
 const EXECUTION_COLUMNS = `
   id, parent_session_id, parent_run_id, parent_call_id, spec_hash,
   status, route_json, source_identity_json, usage_json,
   result_json, error_code, error_message, created_at, updated_at, completed_at
+`
+
+const ALIASED_EXECUTION_COLUMNS = `
+  e.id, e.parent_session_id, e.parent_run_id, e.parent_call_id, e.spec_hash,
+  e.status, e.route_json, e.source_identity_json, e.usage_json,
+  e.result_json, e.error_code, e.error_message, e.created_at, e.updated_at,
+  e.completed_at
 `
 
 /** Persists hidden Subagent execution identity, lifecycle, results, and Session ownership. */
@@ -107,6 +125,86 @@ export class SubagentRepository {
       | SubagentExecutionRow
       | undefined
     return row ? decodeExecution(row) : undefined
+  }
+
+  /** Lists a bounded execution page owned by one public parent Session. */
+  listByParentSession(
+    reader: PersistenceReader,
+    input: {
+      parentSessionId: SessionId
+      before?: AgentExecutionListCursor
+      limit: number
+    },
+  ): SubagentExecutionListPage {
+    const parameters: Array<string | number> = [input.parentSessionId]
+    const cursor = input.before
+      ? 'AND (e.created_at < ? OR (e.created_at = ? AND e.id < ?))'
+      : ''
+    if (input.before) {
+      parameters.push(
+        input.before.createdAt,
+        input.before.createdAt,
+        input.before.executionId,
+      )
+    }
+    const rows = reader
+      .prepare(
+        `SELECT ${ALIASED_EXECUTION_COLUMNS},
+                child.session_id AS child_session_id
+         FROM subagent_executions e
+         LEFT JOIN subagent_sessions child ON child.execution_id = e.id
+         WHERE e.parent_session_id = ? ${cursor}
+         ORDER BY e.created_at DESC, e.id DESC
+         LIMIT ?`,
+      )
+      .all(...parameters, input.limit + 1) as unknown as Array<
+      SubagentExecutionRow & { child_session_id: string | null }
+    >
+    const hasMore = rows.length > input.limit
+    const records = rows.slice(0, input.limit).map((row) => ({
+      record: decodeExecution(row),
+      ...(row.child_session_id
+        ? { childSessionId: row.child_session_id as SessionId }
+        : {}),
+    }))
+    const last = records.at(-1)?.record
+    return {
+      records,
+      hasMore,
+      ...(hasMore && last
+        ? {
+            nextBefore: {
+              createdAt: last.createdAt,
+              executionId: last.id,
+            },
+          }
+        : {}),
+    }
+  }
+
+  /** Loads one execution only when it belongs to the supplied public parent Session. */
+  getOwned(
+    reader: PersistenceReader,
+    input: { parentSessionId: SessionId; executionId: AgentExecutionId },
+  ): SubagentExecutionListEntry | undefined {
+    const row = reader
+      .prepare(
+        `SELECT ${ALIASED_EXECUTION_COLUMNS},
+                child.session_id AS child_session_id
+         FROM subagent_executions e
+         LEFT JOIN subagent_sessions child ON child.execution_id = e.id
+         WHERE e.parent_session_id = ? AND e.id = ?`,
+      )
+      .get(input.parentSessionId, input.executionId) as
+      | (SubagentExecutionRow & { child_session_id: string | null })
+      | undefined
+    if (!row) return undefined
+    return {
+      record: decodeExecution(row),
+      ...(row.child_session_id
+        ? { childSessionId: row.child_session_id as SessionId }
+        : {}),
+    }
   }
 
   /** Associates a newly committed hidden Session with its execution and parent. */
@@ -191,7 +289,7 @@ export class SubagentRepository {
 
 function decodeExecution(row: SubagentExecutionRow): SubagentExecutionRecord {
   return {
-    id: row.id,
+    id: row.id as AgentExecutionId,
     parentSessionId: row.parent_session_id as SessionId,
     parentRunId: row.parent_run_id as RunId,
     parentCallId: row.parent_call_id as CallId,

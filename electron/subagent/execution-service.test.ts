@@ -148,6 +148,7 @@ function fixture(
     } as never,
     executionState: executionState as never,
     state: state as never,
+    events: { publishAgentExecution: vi.fn() } as never,
   })
   return {
     service,

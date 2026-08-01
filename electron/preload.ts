@@ -3,11 +3,13 @@ import type { AgentApi, IpcInvoke } from '../shared/agent-api'
 import {
   APP_NOTIFICATION_CHANNEL,
   AGENT_EVENT_CHANNEL,
+  AGENT_EXECUTION_EVENT_CHANNEL,
   DOMAIN_STATE_EVENT_CHANNEL,
   TERMINAL_EVENT_CHANNEL,
 } from '../shared/channels'
 import type {
   AgentEventEnvelope,
+  AgentExecutionEventEnvelope,
   BackendNotificationEnvelope,
   DomainStateDelivery,
   TerminalEventEnvelope,
@@ -113,6 +115,8 @@ const api: AgentApi = {
   searchMessages: (payload) => invoke('message:search', payload),
   listFileChanges: (payload) => invoke('file-change:list', payload),
   revertFileChange: (payload) => invoke('file-change:revert', payload),
+  listAgentExecutions: (payload) => invoke('agent-execution:list', payload),
+  getAgentExecution: (payload) => invoke('agent-execution:get', payload),
   chooseWorkspace: (payload) => invoke('workspace:choose', payload),
   listWorkspaceDirectory: (payload) =>
     invoke('workspace:list-directory', payload),
@@ -161,6 +165,11 @@ const api: AgentApi = {
   clearClosedTraces: (payload) => invoke('logs:clear-closed', payload),
   onAgentEvent: (listener) =>
     subscribe<AgentEventEnvelope>(AGENT_EVENT_CHANNEL, listener),
+  onAgentExecutionEvent: (listener) =>
+    subscribe<AgentExecutionEventEnvelope>(
+      AGENT_EXECUTION_EVENT_CHANNEL,
+      listener,
+    ),
   onBackendNotification: (listener) => backendNotifications.subscribe(listener),
   onTerminalEvent: (listener) =>
     subscribe<TerminalEventEnvelope>(TERMINAL_EVENT_CHANNEL, listener),

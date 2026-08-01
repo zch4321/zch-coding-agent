@@ -41,6 +41,7 @@ export function createIpcTestEventSink(
 ): RuntimeEventSink {
   return {
     publishAgent: (event) => onAgentEvent({ version: IPC_VERSION, event }),
+    publishAgentExecution: () => undefined,
     publishTerminal: (event) =>
       onTerminalEvent({ version: IPC_VERSION, event }),
   }

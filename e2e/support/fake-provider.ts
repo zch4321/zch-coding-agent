@@ -28,7 +28,9 @@ export interface FakeProvider {
   readonly modelCatalogRequests: number
   queue(chunks: JsonObject[]): void
   armSecondResponseGate(): void
+  armResponseGate(requestNumbers: number[]): void
   releaseSecondResponse(): void
+  releaseResponseGate(): void
   close(): Promise<void>
 }
 
@@ -49,10 +51,11 @@ export async function startFakeProvider(): Promise<FakeProvider> {
   const queuedResponses: JsonObject[][] = []
   const requests: CapturedProviderRequest[] = []
   let modelCatalogRequests = 0
-  // Optional gate that holds the second provider request open until the test
-  // releases it, so a mid-run interjection can be queued first.
-  let secondResponseGate: (() => void) | undefined
-  let secondResponsePromise: Promise<void> | undefined
+  // Optional gate that holds selected provider requests open until a test
+  // releases them, allowing deterministic inspection of concurrent runs.
+  const gatedRequestNumbers = new Set<number>()
+  let responseGate: (() => void) | undefined
+  let responseGatePromise: Promise<void> | undefined
   const server = createServer(async (request, response) => {
     try {
       if (request.method === 'GET' && request.url === '/models') {
@@ -84,9 +87,8 @@ export async function startFakeProvider(): Promise<FakeProvider> {
         return
       }
 
-      // Hold the second request open until the test queues an interjection.
-      if (requests.length === 2 && secondResponsePromise) {
-        await secondResponsePromise
+      if (gatedRequestNumbers.has(requests.length) && responseGatePromise) {
+        await responseGatePromise
       }
 
       response.writeHead(200, {
@@ -132,16 +134,29 @@ export async function startFakeProvider(): Promise<FakeProvider> {
       queuedResponses.push(chunks)
     },
     armSecondResponseGate() {
-      secondResponsePromise = new Promise<void>((resolve) => {
-        secondResponseGate = resolve
+      gatedRequestNumbers.clear()
+      gatedRequestNumbers.add(2)
+      responseGatePromise = new Promise<void>((resolve) => {
+        responseGate = resolve
+      })
+    },
+    armResponseGate(requestNumbers) {
+      gatedRequestNumbers.clear()
+      for (const requestNumber of requestNumbers) {
+        gatedRequestNumbers.add(requestNumber)
+      }
+      responseGatePromise = new Promise<void>((resolve) => {
+        responseGate = resolve
       })
     },
     releaseSecondResponse() {
-      if (secondResponseGate) {
-        secondResponseGate()
-      }
+      responseGate?.()
+    },
+    releaseResponseGate() {
+      responseGate?.()
     },
     close() {
+      responseGate?.()
       return new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()))
       })

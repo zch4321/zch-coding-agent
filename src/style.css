@@ -7,6 +7,7 @@
 @import './styles/terminal.css';
 @import './styles/composer-controls.css';
 @import './styles/artifact-shell.css';
+@import './styles/agent-executions.css';
 @import './styles/project-plan.css';
 @import './styles/file-diff.css';
 @import './styles/settings-layout.css';

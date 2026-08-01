@@ -21,7 +21,9 @@ import {
   toolResultDisplayContent,
 } from './tool-result-display'
 
-defineProps<{ tool: ToolActivity }>()
+withDefaults(defineProps<{ tool: ToolActivity; compact?: boolean }>(), {
+  compact: false,
+})
 const emit = defineEmits<{ 'content-resized': [] }>()
 
 const agent = useAgentStore()
@@ -107,7 +109,7 @@ function notifyContentResized(): void {
 </script>
 
 <template>
-  <article class="tool-call-card">
+  <article class="tool-call-card" :class="{ compact }">
     <NCollapse
       arrow-placement="right"
       @update:expanded-names="notifyContentResized"

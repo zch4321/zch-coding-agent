@@ -307,6 +307,23 @@ export function createAppIpcHandlers(
         payload.fileChangeId,
         payload.expectedRevision,
       ),
+    'agent-execution:list': async (payload) => ({
+      page: await backend.agentExecutions.list({
+        parentSessionId: payload.parentSessionId,
+        ...(payload.before ? { before: payload.before } : {}),
+        ...(payload.limit === undefined ? {} : { limit: payload.limit }),
+      }),
+    }),
+    'agent-execution:get': async (payload) => ({
+      detail: await backend.agentExecutions.get({
+        parentSessionId: payload.parentSessionId,
+        executionId: payload.executionId,
+        ...(payload.beforeSeq === undefined
+          ? {}
+          : { beforeSeq: payload.beforeSeq }),
+        ...(payload.limit === undefined ? {} : { limit: payload.limit }),
+      }),
+    }),
     'workspace:choose': async () => {
       const options: OpenDialogOptions = {
         properties: ['openDirectory'],

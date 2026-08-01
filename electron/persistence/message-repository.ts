@@ -140,6 +140,81 @@ export class MessageRepository {
     return page
   }
 
+  /** Lists visible user, assistant, and Tool records for a delegated execution view. */
+  listVisibleAgentPage(
+    reader: PersistenceReader,
+    sessionId: SessionId,
+    query: MessagePageQuery = {},
+  ): MessagePage {
+    const limit = boundedLimit(
+      query.limit ?? MAX_MESSAGE_PAGE_RECORDS,
+      MAX_MESSAGE_PAGE_RECORDS,
+      'Agent execution message page limit',
+    )
+    if (
+      query.beforeSeq !== undefined &&
+      (!Number.isSafeInteger(query.beforeSeq) || query.beforeSeq < 1)
+    ) {
+      throw new PersistenceError(
+        'CODEC_INVALID',
+        'Agent execution beforeSeq must be a positive safe integer',
+      )
+    }
+    const rows = query.beforeSeq
+      ? reader
+          .prepare(
+            `SELECT ${MESSAGE_COLUMNS}
+             FROM messages
+             WHERE session_id = ? AND seq < ? AND visibility = 'visible'
+               AND kind IN ('user_input', 'assistant_turn', 'tool_result')
+             ORDER BY seq DESC
+             LIMIT ?`,
+          )
+          .all(sessionId, query.beforeSeq, limit + 1)
+      : reader
+          .prepare(
+            `SELECT ${MESSAGE_COLUMNS}
+             FROM messages
+             WHERE session_id = ? AND visibility = 'visible'
+               AND kind IN ('user_input', 'assistant_turn', 'tool_result')
+             ORDER BY seq DESC
+             LIMIT ?`,
+          )
+          .all(sessionId, limit + 1)
+    const hasMore = rows.length > limit
+    const records = rows.slice(0, limit).map(decodeMessageRow).reverse()
+    const page: MessagePage = hasMore
+      ? {
+          schemaVersion: 1,
+          sessionId,
+          records,
+          hasMore: true,
+          nextBeforeSeq: records[0]!.seq,
+        }
+      : { schemaVersion: 1, sessionId, records, hasMore: false }
+    assertMessagePageSemantics(page)
+    return page
+  }
+
+  /** Finds the first visible user task in one backend-private Session. */
+  firstVisibleUserInput(
+    reader: PersistenceReader,
+    sessionId: SessionId,
+  ): Extract<MessageRecord, { kind: 'user_input' }> | undefined {
+    const row = reader
+      .prepare(
+        `SELECT ${MESSAGE_COLUMNS}
+         FROM messages
+         WHERE session_id = ? AND visibility = 'visible'
+           AND kind = 'user_input'
+         ORDER BY seq ASC
+         LIMIT 1`,
+      )
+      .get(sessionId)
+    const record = row ? decodeMessageRow(row) : undefined
+    return record?.kind === 'user_input' ? record : undefined
+  }
+
   /** Loads non-superseded messages currently marked as active history. */
   listActiveHistory(
     reader: PersistenceReader,

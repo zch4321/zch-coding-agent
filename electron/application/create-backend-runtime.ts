@@ -31,6 +31,7 @@ import { LiveSessionContextRegistry } from './live-session-context-registry'
 import { ProjectService, type ProjectRuntimeGuard } from './project-service'
 import { SessionService, type SessionRuntimeGuard } from './session-service'
 import { SubagentStateService } from './subagent-state-service'
+import { AgentExecutionQueryService } from './agent-execution-query-service'
 import { SubagentExecutionBridge } from '../subagent/execution-bridge'
 import { SubagentExecutionService } from '../subagent/execution-service'
 
@@ -56,6 +57,7 @@ export interface BackendRuntime {
   projects: ProjectService
   sessions: SessionService
   fileChanges: FileChangeService
+  agentExecutions: AgentExecutionQueryService
   runs: DurableRunApplicationService
   liveSessions: LiveSessionContextRegistry
   bootstrap(): Promise<AppBootstrapResult>
@@ -204,6 +206,14 @@ export async function createBackendRuntime(
       subagentExecution: subagentBridge,
       onDiagnostic: options.onDiagnostic,
     })
+    const agentExecutions = new AgentExecutionQueryService({
+      coordinator,
+      sessions: sessionRepository,
+      messages: messageRepository,
+      subagents: subagentRepository,
+      liveSnapshot: (sessionId) =>
+        runtime!.services.sessions.activeRunSnapshot(sessionId),
+    })
     await subagentState.interruptActive()
     const targetState: { runs?: DurableRunApplicationService } = {}
     liveSessions = new LiveSessionContextRegistry({
@@ -241,6 +251,7 @@ export async function createBackendRuntime(
       sessions,
       executionState,
       state: subagentState,
+      events: runtime.events,
       onDiagnostic: options.onDiagnostic,
     })
     subagentBridge.bind(subagentExecution)
@@ -253,6 +264,7 @@ export async function createBackendRuntime(
       projects,
       sessions,
       fileChanges,
+      agentExecutions,
       runs,
       liveSessions,
       async bootstrap() {

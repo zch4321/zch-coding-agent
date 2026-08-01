@@ -19,6 +19,10 @@ export function updatePublicRunSnapshot(
 ): void {
   const snapshot = run.publicSnapshot
   if (event.type === 'run.status') {
+    if (event.status === 'calling_llm' && snapshot.status !== 'calling_llm') {
+      snapshot.text = ''
+      snapshot.reasoning = ''
+    }
     snapshot.status = event.status
   } else if (event.type === 'assistant.text.delta') {
     snapshot.text = boundedRuntimeText(snapshot.text, event.delta)

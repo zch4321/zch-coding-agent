@@ -1,17 +1,27 @@
 import { Type, type Static, type TSchema } from '@sinclair/typebox'
 import { AgentEventSchema, TerminalEventSchema } from './agent-events'
 import {
+  AgentExecutionDetailSchema,
+  AgentExecutionEventEnvelopeSchema,
+  AgentExecutionListCursorSchema,
+  AgentExecutionSummaryPageSchema,
+  MAX_AGENT_EXECUTION_PAGE_RECORDS,
+  type AgentExecutionEventEnvelope,
+} from './agent-execution'
+import {
   ConfigSectionSchema,
   ConfigSetRequestSchema,
   PublicConfigSchema,
 } from './config'
 import {
+  AgentExecutionIdSchema,
   CallIdSchema,
   ProjectIdSchema,
   RunIdSchema,
   SessionIdSchema,
   TerminalIdSchema,
 } from './ids'
+import { MAX_MESSAGE_PAGE_RECORDS } from './durable'
 import { JsonValueSchema } from './json'
 import { PlanStatusSchema } from './orchestration'
 import {
@@ -45,6 +55,7 @@ import {
 import {
   APP_NOTIFICATION_CHANNEL,
   AGENT_EVENT_CHANNEL,
+  AGENT_EXECUTION_EVENT_CHANNEL,
   DOMAIN_STATE_EVENT_CHANNEL,
   IPC_VERSION,
   TERMINAL_EVENT_CHANNEL,
@@ -57,6 +68,7 @@ export {
 export {
   APP_NOTIFICATION_CHANNEL,
   AGENT_EVENT_CHANNEL,
+  AGENT_EXECUTION_EVENT_CHANNEL,
   DOMAIN_STATE_EVENT_CHANNEL,
   IPC_VERSION,
   TERMINAL_EVENT_CHANNEL,
@@ -288,6 +300,48 @@ export const IPC_CONTRACTS = {
   'file-change:revert': domainIpcContract(
     DOMAIN_STATE_API_CONTRACTS['file-change:revert'],
   ),
+  'agent-execution:list': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        parentSessionId: SessionIdSchema,
+        before: Type.Optional(AgentExecutionListCursorSchema),
+        limit: Type.Optional(
+          Type.Integer({
+            minimum: 1,
+            maximum: MAX_AGENT_EXECUTION_PAGE_RECORDS,
+          }),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        { page: AgentExecutionSummaryPageSchema },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'agent-execution:get': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        parentSessionId: SessionIdSchema,
+        executionId: AgentExecutionIdSchema,
+        beforeSeq: Type.Optional(Type.Integer({ minimum: 1 })),
+        limit: Type.Optional(
+          Type.Integer({ minimum: 1, maximum: MAX_MESSAGE_PAGE_RECORDS }),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        { detail: AgentExecutionDetailSchema },
+        { additionalProperties: false },
+      ),
+    ),
+  },
   'workspace:choose': {
     payload: EmptyPayloadSchema,
     result: ipcResultSchema(
@@ -758,6 +812,9 @@ export const AgentEventEnvelopeSchema = Type.Object(
   { additionalProperties: false },
 )
 export type AgentEventEnvelope = Static<typeof AgentEventEnvelopeSchema>
+
+export { AgentExecutionEventEnvelopeSchema }
+export type { AgentExecutionEventEnvelope }
 
 export const TerminalEventEnvelopeSchema = Type.Object(
   {

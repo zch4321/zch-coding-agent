@@ -7,10 +7,13 @@ import UiIcon from '../UiIcon.vue'
 import DiffTab from './DiffTab.vue'
 import FilesTab from './FilesTab.vue'
 import PlanTab from './PlanTab.vue'
+import AgentsTab from './AgentsTab.vue'
+import { useAgentExecutionStore } from '../../stores/agent-executions'
 
-type ArtifactTab = 'files' | 'diff' | 'plan'
+type ArtifactTab = 'files' | 'diff' | 'plan' | 'agents'
 
 const agent = useAgentStore()
+const agentExecutions = useAgentExecutionStore()
 const { t } = useI18n()
 const props = withDefaults(defineProps<{ activeTab?: ArtifactTab }>(), {
   activeTab: 'files',
@@ -103,6 +106,28 @@ watch(
           </span>
         </template>
         <PlanTab />
+      </NTabPane>
+      <NTabPane
+        name="agents"
+        display-directive="show"
+        style="height: 100%"
+        :tab-props="{
+          role: 'tab',
+          'aria-selected': activeArtifact === 'agents',
+        }"
+      >
+        <template #tab>
+          <span class="artifact-tab-label">
+            <UiIcon name="agents" />{{ t('artifact.agents') }}
+            <NBadge
+              v-if="agentExecutions.selectedActiveCount"
+              :value="agentExecutions.selectedActiveCount"
+              :max="99"
+              type="info"
+            />
+          </span>
+        </template>
+        <AgentsTab :active="activeArtifact === 'agents'" />
       </NTabPane>
       <NTabPane
         name="diff"
