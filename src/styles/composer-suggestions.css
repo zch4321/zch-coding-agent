@@ -19,17 +19,20 @@
 }
 
 .composer-suggestions {
-  display: grid;
   width: min(720px, calc(100vw - 48px));
   max-height: 260px;
   min-width: 0;
-  gap: 3px;
-  padding: 6px;
-  overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
   box-shadow: 0 8px 22px rgba(31, 35, 40, 0.1);
+}
+
+.composer-suggestions-content {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 6px;
 }
 
 .composer-suggestions header {

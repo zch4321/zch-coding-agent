@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NAlert, NButton, NEmpty, NTag, type TagProps } from 'naive-ui'
+import {
+  NAlert,
+  NButton,
+  NEmpty,
+  NScrollbar,
+  NTag,
+  type TagProps,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { PlanItem } from '../../../shared/orchestration'
 import { useAgentStore } from '../../stores/agent'
@@ -91,31 +98,33 @@ function formatTimestamp(value: string): string {
       >
         {{ agent.plan.warning }}
       </NAlert>
-      <ol v-if="agent.plan.items.length" class="artifact-plan-list">
-        <li
-          v-for="item in agent.plan.items"
-          :key="item.id"
-          :class="planStatusClass(item)"
-        >
-          <div class="plan-item-main">
-            <span class="plan-status-dot" aria-hidden="true"></span>
-            <div>
-              <strong>{{ item.title }}</strong>
-              <small>
-                {{ t(`artifact.planStatus.${item.status}`) }} ·
-                {{ formatTimestamp(item.updatedAt) }}
-              </small>
+      <NScrollbar v-if="agent.plan.items.length" class="artifact-plan-scroll">
+        <ol class="artifact-plan-list">
+          <li
+            v-for="item in agent.plan.items"
+            :key="item.id"
+            :class="planStatusClass(item)"
+          >
+            <div class="plan-item-main">
+              <span class="plan-status-dot" aria-hidden="true"></span>
+              <div>
+                <strong>{{ item.title }}</strong>
+                <small>
+                  {{ t(`artifact.planStatus.${item.status}`) }} ·
+                  {{ formatTimestamp(item.updatedAt) }}
+                </small>
+              </div>
             </div>
-          </div>
-          <p v-if="item.result">{{ item.result }}</p>
-          <p v-if="item.evidence" class="plan-evidence">
-            {{ item.evidence }}
-          </p>
-          <p v-if="item.cancelReason" class="plan-cancel-reason">
-            {{ t('artifact.planCancelReason') }}: {{ item.cancelReason }}
-          </p>
-        </li>
-      </ol>
+            <p v-if="item.result">{{ item.result }}</p>
+            <p v-if="item.evidence" class="plan-evidence">
+              {{ item.evidence }}
+            </p>
+            <p v-if="item.cancelReason" class="plan-cancel-reason">
+              {{ t('artifact.planCancelReason') }}: {{ item.cancelReason }}
+            </p>
+          </li>
+        </ol>
+      </NScrollbar>
       <p v-else class="artifact-message">{{ t('artifact.planNoItems') }}</p>
       <footer class="plan-panel-footer">
         <span>

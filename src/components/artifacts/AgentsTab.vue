@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NCollapse, NCollapseItem, NEmpty, NSpin } from 'naive-ui'
+import {
+  NButton,
+  NCollapse,
+  NCollapseItem,
+  NEmpty,
+  NScrollbar,
+  NSpin,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type {
   AgentExecutionActivity,
@@ -117,153 +124,155 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="artifact-content agent-executions-view">
-    <NSpin
-      v-if="sessionView?.loading && !sessionView.loaded"
-      class="agent-execution-loader"
-    />
-    <div
-      v-else-if="sessionView?.error && !records.length"
-      class="artifact-error"
-    >
-      <p>{{ sessionView.error }}</p>
-      <NButton
-        v-if="replica.selectedSessionId"
-        size="small"
-        @click="
-          executions.loadSession(replica.selectedSessionId as SessionId, {
-            force: true,
-          })
-        "
+  <NScrollbar class="artifact-content agent-executions-view">
+    <section class="agent-executions-content">
+      <NSpin
+        v-if="sessionView?.loading && !sessionView.loaded"
+        class="agent-execution-loader"
+      />
+      <div
+        v-else-if="sessionView?.error && !records.length"
+        class="artifact-error"
       >
-        {{ t('artifact.agentRetry') }}
-      </NButton>
-    </div>
-    <NCollapse
-      v-else-if="records.length"
-      v-model:expanded-names="expanded"
-      class="agent-execution-list"
-      accordion
-      arrow-placement="right"
-    >
-      <NCollapseItem
-        v-for="summary in records"
-        :key="summary.id"
-        :name="summary.id"
-        class="agent-execution-item"
+        <p>{{ sessionView.error }}</p>
+        <NButton
+          v-if="replica.selectedSessionId"
+          size="small"
+          @click="
+            executions.loadSession(replica.selectedSessionId as SessionId, {
+              force: true,
+            })
+          "
+        >
+          {{ t('artifact.agentRetry') }}
+        </NButton>
+      </div>
+      <NCollapse
+        v-else-if="records.length"
+        v-model:expanded-names="expanded"
+        class="agent-execution-list"
+        accordion
+        arrow-placement="right"
       >
-        <template #header>
-          <div class="agent-execution-header">
-            <span
-              class="agent-execution-status-dot"
-              :class="statusClass(summary)"
-            />
-            <div class="agent-execution-heading">
-              <strong>{{ summary.name }}</strong>
-              <span>{{ currentPhase(summary) }}</span>
+        <NCollapseItem
+          v-for="summary in records"
+          :key="summary.id"
+          :name="summary.id"
+          class="agent-execution-item"
+        >
+          <template #header>
+            <div class="agent-execution-header">
+              <span
+                class="agent-execution-status-dot"
+                :class="statusClass(summary)"
+              />
+              <div class="agent-execution-heading">
+                <strong>{{ summary.name }}</strong>
+                <span>{{ currentPhase(summary) }}</span>
+              </div>
             </div>
-          </div>
-        </template>
-        <div class="agent-execution-detail">
-          <div
-            v-if="executions.details[summary.id]?.error"
-            class="artifact-error"
-          >
-            {{ executions.details[summary.id]?.error }}
-          </div>
-          <NSpin
-            v-if="
-              executions.details[summary.id]?.loading &&
-              !executions.details[summary.id]?.loaded
-            "
-            size="small"
-          />
-          <template v-else>
-            <dl class="agent-execution-stats">
-              <div class="agent-execution-stat">
-                <dt>{{ t('artifact.agentRunTime') }}</dt>
-                <dd>{{ elapsed(summary) }}</dd>
-              </div>
-              <div class="agent-execution-stat agent-execution-tool-count">
-                <dt>{{ t('artifact.agentToolCalls') }}</dt>
-                <dd>{{ toolCallCount(summary) ?? '—' }}</dd>
-              </div>
-              <div class="agent-execution-stat">
-                <dt>{{ t('artifact.agentExecutionStatus') }}</dt>
-                <dd>{{ statusLabel(summary) }}</dd>
-              </div>
-              <div v-if="usageLabel(summary)" class="agent-execution-stat">
-                <dt>{{ t('artifact.agentTokenUsage') }}</dt>
-                <dd>{{ usageLabel(summary) }}</dd>
-              </div>
-              <div
-                v-if="summary.providerId && summary.model"
-                class="agent-execution-stat agent-execution-stat-wide"
-              >
-                <dt>{{ t('artifact.agentModel') }}</dt>
-                <dd>{{ summary.providerId }} · {{ summary.model }}</dd>
-              </div>
-            </dl>
-            <div class="agent-execution-messages">
-              <strong class="agent-execution-output-heading">
-                {{ t('artifact.agentOutput') }}
-              </strong>
-              <article
-                v-for="message in messagesFor(summary)"
-                :key="message.id"
-                class="agent-execution-message"
-              >
-                <MarkdownBlock :content="message.text" />
-              </article>
-              <p
-                v-if="messagesFor(summary).length === 0"
-                class="agent-execution-no-output"
-              >
-                {{ t('artifact.agentNoOutput') }}
-              </p>
+          </template>
+          <div class="agent-execution-detail">
+            <div
+              v-if="executions.details[summary.id]?.error"
+              class="artifact-error"
+            >
+              {{ executions.details[summary.id]?.error }}
             </div>
-            <p v-if="summary.error" class="agent-execution-error">
-              {{ summary.error.message }}
-            </p>
-            <NButton
+            <NSpin
               v-if="
-                executions.details[summary.id]?.detail?.activityPage.hasMore
+                executions.details[summary.id]?.loading &&
+                !executions.details[summary.id]?.loaded
               "
               size="small"
-              secondary
-              :loading="executions.details[summary.id]?.loading"
-              @click.stop="executions.loadDetail(summary.id, { older: true })"
-            >
-              {{ t('artifact.agentLoadMore') }}
-            </NButton>
-          </template>
-        </div>
-      </NCollapseItem>
-    </NCollapse>
-    <NButton
-      v-if="records.length && sessionView?.hasMore"
-      class="agent-execution-load-more"
-      size="small"
-      secondary
-      :loading="sessionView.loading"
-      @click="
-        replica.selectedSessionId &&
-        executions.loadSession(replica.selectedSessionId, { append: true })
-      "
-    >
-      {{ t('artifact.agentLoadMore') }}
-    </NButton>
-    <NEmpty
-      v-else-if="!records.length && !sessionView?.loading"
-      class="artifact-empty"
-      :description="t('artifact.noAgents')"
-    >
-      <template #icon><UiIcon name="agents" /></template>
-      <template #extra>
-        <span class="artifact-empty-hint">{{
-          t('artifact.noAgentsHint')
-        }}</span>
-      </template>
-    </NEmpty>
-  </section>
+            />
+            <template v-else>
+              <dl class="agent-execution-stats">
+                <div class="agent-execution-stat">
+                  <dt>{{ t('artifact.agentRunTime') }}</dt>
+                  <dd>{{ elapsed(summary) }}</dd>
+                </div>
+                <div class="agent-execution-stat agent-execution-tool-count">
+                  <dt>{{ t('artifact.agentToolCalls') }}</dt>
+                  <dd>{{ toolCallCount(summary) ?? '—' }}</dd>
+                </div>
+                <div class="agent-execution-stat">
+                  <dt>{{ t('artifact.agentExecutionStatus') }}</dt>
+                  <dd>{{ statusLabel(summary) }}</dd>
+                </div>
+                <div v-if="usageLabel(summary)" class="agent-execution-stat">
+                  <dt>{{ t('artifact.agentTokenUsage') }}</dt>
+                  <dd>{{ usageLabel(summary) }}</dd>
+                </div>
+                <div
+                  v-if="summary.providerId && summary.model"
+                  class="agent-execution-stat agent-execution-stat-wide"
+                >
+                  <dt>{{ t('artifact.agentModel') }}</dt>
+                  <dd>{{ summary.providerId }} · {{ summary.model }}</dd>
+                </div>
+              </dl>
+              <div class="agent-execution-messages">
+                <strong class="agent-execution-output-heading">
+                  {{ t('artifact.agentOutput') }}
+                </strong>
+                <article
+                  v-for="message in messagesFor(summary)"
+                  :key="message.id"
+                  class="agent-execution-message"
+                >
+                  <MarkdownBlock :content="message.text" />
+                </article>
+                <p
+                  v-if="messagesFor(summary).length === 0"
+                  class="agent-execution-no-output"
+                >
+                  {{ t('artifact.agentNoOutput') }}
+                </p>
+              </div>
+              <p v-if="summary.error" class="agent-execution-error">
+                {{ summary.error.message }}
+              </p>
+              <NButton
+                v-if="
+                  executions.details[summary.id]?.detail?.activityPage.hasMore
+                "
+                size="small"
+                secondary
+                :loading="executions.details[summary.id]?.loading"
+                @click.stop="executions.loadDetail(summary.id, { older: true })"
+              >
+                {{ t('artifact.agentLoadMore') }}
+              </NButton>
+            </template>
+          </div>
+        </NCollapseItem>
+      </NCollapse>
+      <NButton
+        v-if="records.length && sessionView?.hasMore"
+        class="agent-execution-load-more"
+        size="small"
+        secondary
+        :loading="sessionView.loading"
+        @click="
+          replica.selectedSessionId &&
+          executions.loadSession(replica.selectedSessionId, { append: true })
+        "
+      >
+        {{ t('artifact.agentLoadMore') }}
+      </NButton>
+      <NEmpty
+        v-else-if="!records.length && !sessionView?.loading"
+        class="artifact-empty"
+        :description="t('artifact.noAgents')"
+      >
+        <template #icon><UiIcon name="agents" /></template>
+        <template #extra>
+          <span class="artifact-empty-hint">{{
+            t('artifact.noAgentsHint')
+          }}</span>
+        </template>
+      </NEmpty>
+    </section>
+  </NScrollbar>
 </template>

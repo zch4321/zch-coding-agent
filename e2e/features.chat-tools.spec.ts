@@ -256,7 +256,9 @@ test.describe('Electron chat and tool workflows', () => {
     await expect(card.locator('.tool-result-json')).toBeVisible()
     const metrics = await card.evaluate((element) => {
       const pane = document.querySelector('.conversation-pane')
-      const scroll = document.querySelector('.conversation-scroll')
+      const scroll = document.querySelector(
+        '.conversation-scroll .n-scrollbar-container',
+      )
       const result = element.querySelector('.tool-result-json')
       if (!pane || !scroll || !result) {
         throw new Error('Expected tool result layout')
@@ -344,7 +346,9 @@ test.describe('Electron chat and tool workflows', () => {
     await expect(secondApproval).toBeVisible()
     await expect(approvalCards).toHaveCount(1)
     const secondMetrics = await secondApproval.evaluate((element) => {
-      const body = element.querySelector('.approval-card-body')
+      const body = element.querySelector(
+        '.approval-card-body .n-scrollbar-container',
+      )
       if (!body) throw new Error('Expected approval body')
       return {
         height: element.getBoundingClientRect().height,

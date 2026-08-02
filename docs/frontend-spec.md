@@ -1,6 +1,6 @@
 # 前端产品与验收规范 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 P0–P13 配套规范 · 最后更新 2026-07-29
+> 状态：Backend Architecture v2.1 P0–P13 配套规范 · 最后更新 2026-08-02
 > 配套：[`requirements.md`](./requirements.md)（产品能力）、[`architecture.md`](./architecture.md)（技术边界）、[`road-map.md`](./road-map.md)（实施方向）。
 > 本文档是前端信息架构、交互行为、阶段展示和验收标准的权威依据；发生冲突时以本文档为准。
 > v2.1 状态所有权和恢复行为已经实现；明确延后项见架构文档 §21。
@@ -21,6 +21,7 @@
 6. **安全边界不下沉**：renderer 只展示和发起版本化 IPC；workspace、schema、资源归属和权限判断仍由主进程执行。
 7. **后端提交驱动**：durable state 只在收到 command commit 回包或 backend commit event 后更新；两者进入同一个 revision reconciler，不做定时轮询。
 8. **Codex 信息结构 + VS Code 工作区习惯**：整体结构参考 Codex；窗口布局控制、文件审查和底部终端参考 VS Code。
+9. **Naive UI 组件优先**：已有 Naive UI 组件能够满足需求时，不重复用裸 DOM 和自定义 CSS 仿造同类控件。应用自有的滚动区域统一使用 `NScrollbar`，避免原生滚动条出现或消失时改变内容宽度；xterm.js、textarea/input、代码块、JSON 和 Diff 等局部滚动，以及 Naive UI 组件内部已经管理的滚动除外。
 
 ---
 

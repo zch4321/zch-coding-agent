@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { NScrollbar } from 'naive-ui'
 import type { PermissionMode } from '../../../shared/config'
 import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue'
 import AgentsSettingsPanel from './AgentsSettingsPanel.vue'
@@ -24,25 +25,27 @@ const emit = defineEmits<{
 
 <template>
   <section class="settings-page">
-    <div class="settings-content">
-      <AppearanceSettingsPanel v-if="activeTab === 'general'" />
-      <ProjectSettingsPanel
-        v-else-if="activeTab === 'project'"
-        @removed="emit('close')"
-      />
-      <ArchivedSessionsSettingsPanel v-else-if="activeTab === 'archived'" />
-      <ProviderSettingsPanel v-else-if="activeTab === 'provider'" />
-      <LimitsSettingsPanel v-else-if="activeTab === 'limits'" />
-      <AgentsSettingsPanel v-else-if="activeTab === 'agents'" />
-      <PermissionsSettingsPanel
-        v-else-if="activeTab === 'permissions'"
-        @mode="emit('mode', $event)"
-      />
-      <SkillsSettingsPanel v-else-if="activeTab === 'skills'" />
-      <McpSettingsPanel v-else-if="activeTab === 'mcp'" />
-      <LoggingSettingsPanel v-else-if="activeTab === 'logging'" />
-      <WebSearchSettingsPanel v-else-if="activeTab === 'websearch'" />
-      <LoggingSettingsPanel v-else />
-    </div>
+    <NScrollbar class="settings-content">
+      <div class="settings-content-inner">
+        <AppearanceSettingsPanel v-if="activeTab === 'general'" />
+        <ProjectSettingsPanel
+          v-else-if="activeTab === 'project'"
+          @removed="emit('close')"
+        />
+        <ArchivedSessionsSettingsPanel v-else-if="activeTab === 'archived'" />
+        <ProviderSettingsPanel v-else-if="activeTab === 'provider'" />
+        <LimitsSettingsPanel v-else-if="activeTab === 'limits'" />
+        <AgentsSettingsPanel v-else-if="activeTab === 'agents'" />
+        <PermissionsSettingsPanel
+          v-else-if="activeTab === 'permissions'"
+          @mode="emit('mode', $event)"
+        />
+        <SkillsSettingsPanel v-else-if="activeTab === 'skills'" />
+        <McpSettingsPanel v-else-if="activeTab === 'mcp'" />
+        <LoggingSettingsPanel v-else-if="activeTab === 'logging'" />
+        <WebSearchSettingsPanel v-else-if="activeTab === 'websearch'" />
+        <LoggingSettingsPanel v-else />
+      </div>
+    </NScrollbar>
   </section>
 </template>

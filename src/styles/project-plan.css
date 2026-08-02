@@ -4,11 +4,6 @@
   overflow: hidden;
 }
 
-.project-view {
-  padding: 12px;
-  overflow: auto;
-}
-
 .project-spin {
   width: 100%;
 }
@@ -162,14 +157,16 @@
   margin: 0;
 }
 
-.artifact-plan-list {
-  display: grid;
+.artifact-plan-scroll {
   min-height: 0;
   flex: 1 1 auto;
+}
+
+.artifact-plan-list {
+  display: grid;
   gap: 0;
   margin: 0;
   padding: 0;
-  overflow: auto;
   list-style: none;
 }
 

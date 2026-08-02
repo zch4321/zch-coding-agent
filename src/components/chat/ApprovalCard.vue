@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { NButton, NDescriptions, NDescriptionsItem, NTag } from 'naive-ui'
+import {
+  NButton,
+  NDescriptions,
+  NDescriptionsItem,
+  NScrollbar,
+  NTag,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
@@ -23,7 +29,10 @@ const { t } = useI18n()
         {{ agent.pendingApproval.kind }}
       </NTag>
     </header>
-    <div class="approval-card-body">
+    <NScrollbar
+      class="approval-card-body"
+      content-class="approval-card-body-content"
+    >
       <p class="approval-reason">{{ agent.pendingApproval.reason }}</p>
       <NDescriptions
         class="approval-meta"
@@ -62,7 +71,7 @@ const { t } = useI18n()
           JSON.stringify(agent.pendingApproval.rememberArgConstraints, null, 2)
         }}</pre>
       </div>
-    </div>
+    </NScrollbar>
     <div class="approval-actions">
       <NButton
         type="primary"

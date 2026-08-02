@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, h } from 'vue'
-import { NMenu, type GlobalThemeOverrides, type MenuOption } from 'naive-ui'
+import {
+  NMenu,
+  NScrollbar,
+  type GlobalThemeOverrides,
+  type MenuOption,
+} from 'naive-ui'
 import { palette } from '../../theme/naive-theme'
 import type { ComposerSuggestionItem } from './composer-suggestions'
 import UiIcon from '../UiIcon.vue'
@@ -55,24 +60,30 @@ function handleUpdateValue(key: string | number) {
 </script>
 
 <template>
-  <section class="composer-suggestions" role="listbox" :aria-label="title">
-    <header>
-      <span>{{ title }}</span>
-      <small v-if="loading">{{ $t('common.loading') }}</small>
-    </header>
-    <p v-if="!items.length && !loading" class="composer-suggestions-empty">
-      {{ emptyText }}
-    </p>
-    <NMenu
-      v-if="items.length"
-      class="composer-suggestion-menu"
-      :options="menuOptions"
-      :value="selectedKey"
-      :icon-size="15"
-      :root-indent="8"
-      :indent="8"
-      :theme-overrides="menuThemeOverrides"
-      @update:value="handleUpdateValue"
-    />
-  </section>
+  <NScrollbar class="composer-suggestions">
+    <section
+      class="composer-suggestions-content"
+      role="listbox"
+      :aria-label="title"
+    >
+      <header>
+        <span>{{ title }}</span>
+        <small v-if="loading">{{ $t('common.loading') }}</small>
+      </header>
+      <p v-if="!items.length && !loading" class="composer-suggestions-empty">
+        {{ emptyText }}
+      </p>
+      <NMenu
+        v-if="items.length"
+        class="composer-suggestion-menu"
+        :options="menuOptions"
+        :value="selectedKey"
+        :icon-size="15"
+        :root-indent="8"
+        :indent="8"
+        :theme-overrides="menuThemeOverrides"
+        @update:value="handleUpdateValue"
+      />
+    </section>
+  </NScrollbar>
 </template>

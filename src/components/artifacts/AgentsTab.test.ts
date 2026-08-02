@@ -130,6 +130,9 @@ describe('Agents artifact tab', () => {
     expect(wrapper.get('.n-collapse-item').classes()).not.toContain(
       'n-collapse-item--active',
     )
+    expect(wrapper.get('.agent-executions-view').classes()).toContain(
+      'n-scrollbar',
+    )
 
     useAgentExecutionStore().upsertSummary({
       ...execution,

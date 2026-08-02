@@ -6,6 +6,7 @@ import {
   NCollapse,
   NCollapseItem,
   NInputNumber,
+  NScrollbar,
   NSelect,
   NSwitch,
   NTag,
@@ -230,7 +231,9 @@ function interjectionTitle(interjection: {
               <span v-if="entry.injectedAfterToolBatchId">
                 {{ entry.injectedAfterToolBatchId }}
               </span>
-              <pre>{{ entry.content }}</pre>
+              <NScrollbar class="trace-interjection-content">
+                <pre>{{ entry.content }}</pre>
+              </NScrollbar>
             </article>
           </div>
         </NCollapseItem>

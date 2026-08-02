@@ -5,6 +5,7 @@ import {
   NEmpty,
   NList,
   NListItem,
+  NScrollbar,
   NSelect,
   NSpin,
   NTag,
@@ -192,39 +193,35 @@ watch(
           class="change-filter-select"
         />
       </div>
-      <NList
-        v-if="filteredChanges.length"
-        class="change-history-list"
-        role="listbox"
-        hoverable
-        clickable
-      >
-        <NListItem
-          v-for="change in filteredChanges"
-          :key="change.id"
-          class="change-history-item"
-          :class="{ active: change.id === selectedChange.id }"
-          role="option"
-          tabindex="0"
-          :aria-selected="change.id === selectedChange.id"
-          @click="selectedChangeId = change.id"
-          @keydown.enter="selectedChangeId = change.id"
-          @keydown.space.prevent="selectedChangeId = change.id"
-        >
-          <div class="change-history-item-content">
-            <span>{{ change.path }}</span>
-            <small>
-              {{ t(`artifact.operation.${change.operation}`) }} ·
-              {{ new Date(change.createdAt).toLocaleString() }}
-            </small>
-          </div>
-          <template #suffix>
-            <NTag v-if="change.revertedAt" round size="small" type="success">
-              {{ t('artifact.reverted') }}
-            </NTag>
-          </template>
-        </NListItem>
-      </NList>
+      <NScrollbar v-if="filteredChanges.length" class="change-history-scroll">
+        <NList class="change-history-list" role="listbox" hoverable clickable>
+          <NListItem
+            v-for="change in filteredChanges"
+            :key="change.id"
+            class="change-history-item"
+            :class="{ active: change.id === selectedChange.id }"
+            role="option"
+            tabindex="0"
+            :aria-selected="change.id === selectedChange.id"
+            @click="selectedChangeId = change.id"
+            @keydown.enter="selectedChangeId = change.id"
+            @keydown.space.prevent="selectedChangeId = change.id"
+          >
+            <div class="change-history-item-content">
+              <span>{{ change.path }}</span>
+              <small>
+                {{ t(`artifact.operation.${change.operation}`) }} ·
+                {{ new Date(change.createdAt).toLocaleString() }}
+              </small>
+            </div>
+            <template #suffix>
+              <NTag v-if="change.revertedAt" round size="small" type="success">
+                {{ t('artifact.reverted') }}
+              </NTag>
+            </template>
+          </NListItem>
+        </NList>
+      </NScrollbar>
       <NEmpty
         v-else
         class="artifact-message"

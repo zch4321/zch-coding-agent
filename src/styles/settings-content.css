@@ -118,9 +118,8 @@
   min-height: 260px;
 }
 
-.provider-model-settings-list {
+.provider-model-settings-scroll {
   max-height: min(520px, 56vh);
-  overflow-y: auto;
 }
 
 .provider-model-settings-header,
@@ -404,11 +403,14 @@
   white-space: nowrap;
 }
 
-.trace-interjection-history pre {
+.trace-interjection-content {
   grid-column: 1 / -1;
-  overflow: auto;
   max-height: 160px;
+}
+
+.trace-interjection-history pre {
   margin: 0;
+  overflow: visible;
   white-space: pre-wrap;
 }
 

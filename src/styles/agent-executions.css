@@ -1,8 +1,11 @@
 .agent-executions-view {
+  min-height: 0;
+}
+
+.agent-executions-content {
   box-sizing: border-box;
+  min-height: 100%;
   padding: 8px 10px 16px;
-  overflow-x: hidden;
-  overflow-y: auto;
 }
 
 .agent-execution-loader {

@@ -53,6 +53,9 @@ describe('ApprovalCard', () => {
     expect(wrapper.get('.approval-card-body').text()).toContain(
       'Update the application',
     )
+    expect(wrapper.get('.approval-card-body').classes()).toContain(
+      'n-scrollbar',
+    )
     expect(wrapper.get('.approval-actions').text()).toContain('批准')
     wrapper.unmount()
   })

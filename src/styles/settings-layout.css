@@ -38,21 +38,35 @@
 .settings-nav {
   min-height: 0;
   flex: 1 1 auto;
-  padding: 12px;
   border-right: 1px solid var(--border);
   background: var(--surface);
-  overflow: auto;
 }
 
 .settings-sidebar .settings-nav {
   border-right: 0;
+}
+
+.settings-nav-scroll {
+  height: 100%;
+}
+
+.settings-nav-content {
+  padding: 12px;
+}
+
+.settings-sidebar .settings-nav-content {
   padding-top: 0;
 }
 
 .settings-content {
   height: 100%;
   min-width: 0;
-  overflow: auto;
+}
+
+.settings-content-inner {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 100%;
   padding: 24px 28px 32px;
 }
 

@@ -113,13 +113,17 @@
 }
 
 .conversation-scroll {
-  display: flex;
   min-width: 0;
   height: 100%;
-  flex-direction: column;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
+}
+
+.conversation-scroll-content {
+  display: flex;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 100%;
+  flex-direction: column;
   padding: 24px clamp(18px, 5vw, 52px);
 }
 
@@ -161,15 +165,15 @@
   margin: 0 auto 16px;
 }
 
-.conversation-scroll > .conversation-empty {
+.conversation-scroll-content > .conversation-empty {
   order: 0;
 }
 
-.conversation-scroll > .back-to-bottom {
+.conversation-scroll-content > .back-to-bottom {
   order: 2147483647;
 }
 
-.conversation-scroll > .conversation-bottom-sentinel {
+.conversation-scroll-content > .conversation-bottom-sentinel {
   order: 2147483646;
 }
 
