@@ -119,6 +119,14 @@ export class AgentExecutionQueryService {
           summary: projectAgentExecutionSummary(entry.record, { child }),
           ...(task ? { task } : {}),
           ...(live ? { live } : {}),
+          statistics: {
+            toolCallCount: entry.childSessionId
+              ? this.#messages.countVisibleAgentToolCalls(
+                  reader,
+                  entry.childSessionId,
+                )
+              : 0,
+          },
           activityPage: {
             schemaVersion: 1 as const,
             records: projectAgentExecutionActivities(page?.records ?? []),

@@ -176,6 +176,7 @@ describe('AgentExecutionQueryService', () => {
         limit: 3,
       })
       expect(detail.task).toBe('visible search needle')
+      expect(detail.statistics).toEqual({ toolCallCount: 1 })
       expect(detail.activityPage).toMatchObject({
         hasMore: true,
         records: [

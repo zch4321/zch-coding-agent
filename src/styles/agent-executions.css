@@ -17,15 +17,6 @@
 
 .agent-execution-item {
   min-width: 0;
-  margin-bottom: 8px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface);
-}
-
-.agent-execution-item > .n-collapse-item__header {
-  padding: 9px 0;
 }
 
 .agent-execution-item > .n-collapse-item__content-wrapper {
@@ -36,7 +27,7 @@
   display: grid;
   width: 100%;
   min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
 }
@@ -59,8 +50,7 @@
   font-size: 12px;
 }
 
-.agent-execution-heading span,
-.agent-execution-header small {
+.agent-execution-heading span {
   color: var(--text-muted);
   font-size: 10px;
 }
@@ -96,61 +86,49 @@
   display: grid;
   min-width: 0;
   gap: 10px;
-  padding: 2px 0 12px;
 }
 
-.agent-execution-meta {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
-.agent-execution-task {
+.agent-execution-stats {
   display: grid;
   min-width: 0;
-  gap: 5px;
-  padding: 8px 9px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface) 72%, var(--background));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
 }
 
-.agent-execution-task strong {
+.agent-execution-stat {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.agent-execution-stat-wide {
+  grid-column: 1 / -1;
+}
+
+.agent-execution-stat dt {
   color: var(--text-muted);
   font-size: 10px;
-  text-transform: uppercase;
 }
 
-.agent-execution-task pre,
-.agent-execution-reasoning pre {
+.agent-execution-stat dd {
   min-width: 0;
-  max-height: 220px;
   margin: 0;
-  overflow: auto;
   color: var(--text-secondary);
-  font-family: inherit;
   font-size: 11px;
-  line-height: 1.5;
-  white-space: pre-wrap;
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
-.agent-execution-activity-list {
+.agent-execution-messages {
   display: grid;
   min-width: 0;
   gap: 8px;
 }
 
-.agent-execution-reasoning {
-  min-width: 0;
+.agent-execution-output-heading {
   color: var(--text-muted);
-  font-size: 11px;
-}
-
-.agent-execution-reasoning .n-collapse-item__content-inner {
-  padding: 6px 8px 8px 20px;
+  font-size: 10px;
 }
 
 .agent-execution-message {
@@ -169,6 +147,12 @@
   margin-bottom: 0;
 }
 
+.agent-execution-no-output {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .agent-execution-error {
   margin: 0;
   color: var(--danger);
@@ -179,22 +163,4 @@
 .agent-execution-load-more {
   width: 100%;
   margin-top: 4px;
-}
-
-.agent-execution-activity-list .tool-call-card.compact {
-  margin: 0;
-}
-
-.tool-call-card.compact .tool-call-details {
-  max-height: 280px;
-  margin-left: 14px;
-  padding: 8px;
-  overflow: auto;
-}
-
-.tool-call-card.compact .tool-args-json,
-.tool-call-card.compact .tool-result-json,
-.tool-call-card.compact .tool-approval-json {
-  max-height: 180px;
-  overflow: auto;
 }

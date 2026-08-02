@@ -2,7 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NCollapse, NCollapseItem, NEmpty, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { AgentExecutionSummary } from '../../../shared/agent-execution'
+import type {
+  AgentExecutionActivity,
+  AgentExecutionSummary,
+} from '../../../shared/agent-execution'
 import type { AgentExecutionId, SessionId } from '../../../shared/ids'
 import {
   useAgentExecutionStore,
@@ -10,9 +13,8 @@ import {
 } from '../../stores/agent-executions'
 import { useAgentReplicaStore } from '../../stores/agent-replica'
 import UiIcon from '../UiIcon.vue'
-import AgentExecutionActivityFeed from './AgentExecutionActivityFeed.vue'
+import MarkdownBlock from '../MarkdownBlock.vue'
 
-const props = defineProps<{ active: boolean }>()
 const executions = useAgentExecutionStore()
 const replica = useAgentReplicaStore()
 const { t } = useI18n()
@@ -70,6 +72,23 @@ function usageLabel(summary: AgentExecutionSummary): string | undefined {
     : undefined
 }
 
+function toolCallCount(summary: AgentExecutionSummary): number | undefined {
+  return executions.details[summary.id]?.detail?.statistics.toolCallCount
+}
+
+function messagesFor(
+  summary: AgentExecutionSummary,
+): Array<Extract<AgentExecutionActivity, { type: 'message' }>> {
+  return executions
+    .activitiesFor(summary.id)
+    .filter(
+      (
+        activity,
+      ): activity is Extract<AgentExecutionActivity, { type: 'message' }> =>
+        activity.type === 'message',
+    )
+}
+
 async function loadExpanded(values: Array<string | number>): Promise<void> {
   const value = values[0]
   if (typeof value !== 'string') return
@@ -81,23 +100,6 @@ watch(
   (sessionId) => {
     expanded.value = []
     if (sessionId) void executions.loadSession(sessionId)
-  },
-  { immediate: true },
-)
-
-watch(
-  [() => props.active, records],
-  ([tabActive, next]) => {
-    if (!tabActive) return
-    if (
-      expanded.value.length > 0 &&
-      next.some((summary) => summary.id === expanded.value[0])
-    ) {
-      return
-    }
-    const activeSummary = next.find(isActiveAgentExecution)
-    expanded.value = activeSummary ? [activeSummary.id] : []
-    if (activeSummary) void loadExpanded([activeSummary.id])
   },
   { immediate: true },
 )
@@ -160,17 +162,9 @@ onBeforeUnmount(() => {
               <strong>{{ summary.name }}</strong>
               <span>{{ currentPhase(summary) }}</span>
             </div>
-            <small>{{ elapsed(summary) }}</small>
           </div>
         </template>
         <div class="agent-execution-detail">
-          <div class="agent-execution-meta">
-            <span>{{ statusLabel(summary) }}</span>
-            <span v-if="summary.providerId && summary.model">
-              {{ summary.providerId }} · {{ summary.model }}
-            </span>
-            <span v-if="usageLabel(summary)">{{ usageLabel(summary) }}</span>
-          </div>
           <div
             v-if="executions.details[summary.id]?.error"
             class="artifact-error"
@@ -185,17 +179,49 @@ onBeforeUnmount(() => {
             size="small"
           />
           <template v-else>
-            <div
-              v-if="executions.details[summary.id]?.detail?.task"
-              class="agent-execution-task"
-            >
-              <strong>{{ t('artifact.agentTask') }}</strong>
-              <pre>{{ executions.details[summary.id]?.detail?.task }}</pre>
+            <dl class="agent-execution-stats">
+              <div class="agent-execution-stat">
+                <dt>{{ t('artifact.agentRunTime') }}</dt>
+                <dd>{{ elapsed(summary) }}</dd>
+              </div>
+              <div class="agent-execution-stat agent-execution-tool-count">
+                <dt>{{ t('artifact.agentToolCalls') }}</dt>
+                <dd>{{ toolCallCount(summary) ?? '—' }}</dd>
+              </div>
+              <div class="agent-execution-stat">
+                <dt>{{ t('artifact.agentExecutionStatus') }}</dt>
+                <dd>{{ statusLabel(summary) }}</dd>
+              </div>
+              <div v-if="usageLabel(summary)" class="agent-execution-stat">
+                <dt>{{ t('artifact.agentTokenUsage') }}</dt>
+                <dd>{{ usageLabel(summary) }}</dd>
+              </div>
+              <div
+                v-if="summary.providerId && summary.model"
+                class="agent-execution-stat agent-execution-stat-wide"
+              >
+                <dt>{{ t('artifact.agentModel') }}</dt>
+                <dd>{{ summary.providerId }} · {{ summary.model }}</dd>
+              </div>
+            </dl>
+            <div class="agent-execution-messages">
+              <strong class="agent-execution-output-heading">
+                {{ t('artifact.agentOutput') }}
+              </strong>
+              <article
+                v-for="message in messagesFor(summary)"
+                :key="message.id"
+                class="agent-execution-message"
+              >
+                <MarkdownBlock :content="message.text" />
+              </article>
+              <p
+                v-if="messagesFor(summary).length === 0"
+                class="agent-execution-no-output"
+              >
+                {{ t('artifact.agentNoOutput') }}
+              </p>
             </div>
-            <AgentExecutionActivityFeed
-              :summary="summary"
-              :activities="executions.activitiesFor(summary.id)"
-            />
             <p v-if="summary.error" class="agent-execution-error">
               {{ summary.error.message }}
             </p>

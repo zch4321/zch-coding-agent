@@ -241,8 +241,6 @@ const enUS = {
     noAgents: 'No Agent tasks',
     noAgentsHint:
       'Subagent activity will appear here when the Agent delegates work.',
-    agentTask: 'Task',
-    agentReasoning: 'Reasoning',
     agentThinking: 'Thinking',
     agentOutputting: 'Writing response',
     agentRunning: 'Running',
@@ -250,6 +248,13 @@ const enUS = {
     agentLoadMore: 'Load more',
     agentRetry: 'Retry',
     agentTokens: '{count} tokens',
+    agentRunTime: 'Run time',
+    agentToolCalls: 'Tool calls',
+    agentExecutionStatus: 'Status',
+    agentTokenUsage: 'Token usage',
+    agentModel: 'Model',
+    agentOutput: 'Agent messages',
+    agentNoOutput: 'No Agent messages yet',
     agentDurationSeconds: '{count}s',
     agentDurationMinutes: '{minutes}m {seconds}s',
     agentStatus: {

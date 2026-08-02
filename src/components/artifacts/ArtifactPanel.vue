@@ -127,7 +127,7 @@ watch(
             />
           </span>
         </template>
-        <AgentsTab :active="activeArtifact === 'agents'" />
+        <AgentsTab />
       </NTabPane>
       <NTabPane
         name="diff"

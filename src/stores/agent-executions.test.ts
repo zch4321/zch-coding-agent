@@ -47,6 +47,7 @@ function detail(value: AgentExecutionSummary): AgentExecutionDetail {
     schemaVersion: 1,
     summary: value,
     task: `Task for ${value.name}`,
+    statistics: { toolCallCount: 0 },
     activityPage: {
       schemaVersion: 1,
       records: [],

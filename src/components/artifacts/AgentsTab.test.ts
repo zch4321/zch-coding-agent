@@ -41,6 +41,7 @@ const detail: AgentExecutionDetail = {
   schemaVersion: 1,
   summary: execution,
   task: 'Review the current repository.',
+  statistics: { toolCallCount: 1 },
   activityPage: {
     schemaVersion: 1,
     records: [
@@ -91,7 +92,7 @@ describe('Agents artifact tab', () => {
     vi.restoreAllMocks()
   })
 
-  it('waits for the tab to open, then expands the latest active execution', async () => {
+  it('never auto-expands and shows only statistics plus messages after a manual expansion', async () => {
     const listAgentExecutions = vi.fn(async () =>
       success({
         page: {
@@ -111,7 +112,6 @@ describe('Agents artifact tab', () => {
     })
 
     const wrapper = mount(AgentsTab, {
-      props: { active: false },
       global: { plugins: [i18n] },
     })
     await vi.waitFor(() =>
@@ -131,26 +131,32 @@ describe('Agents artifact tab', () => {
       'n-collapse-item--active',
     )
 
-    await wrapper.setProps({ active: true })
+    useAgentExecutionStore().upsertSummary({
+      ...execution,
+      updatedAt: '2026-08-01T00:00:01.000Z',
+    })
+    await wrapper.vm.$nextTick()
+    expect(getAgentExecution).not.toHaveBeenCalled()
+    expect(wrapper.get('.n-collapse-item').classes()).not.toContain(
+      'n-collapse-item--active',
+    )
+
+    await wrapper.get('.n-collapse-item__header-main').trigger('click')
     await flushPromises()
     expect(getAgentExecution).toHaveBeenCalledOnce()
     expect(wrapper.get('.n-collapse-item').classes()).toContain(
       'n-collapse-item--active',
     )
-    expect(wrapper.text()).toContain('Review the current repository.')
-    expect(wrapper.findAll('.tool-call-card.compact')).toHaveLength(1)
-    expect(
-      wrapper.find('.agent-execution-reasoning .n-collapse-item').classes(),
-    ).not.toContain('n-collapse-item--active')
+    expect(wrapper.text()).toContain('运行时间')
+    expect(wrapper.get('.agent-execution-tool-count').text()).toContain('1')
+    expect(wrapper.text()).toContain('The review is in progress.')
+    expect(wrapper.text()).not.toContain('Review the current repository.')
     expect(wrapper.text()).not.toContain(
       'Inspect the implementation carefully.',
     )
+    expect(wrapper.findAll('.tool-call-card')).toHaveLength(0)
+    expect(wrapper.findAll('.agent-execution-reasoning')).toHaveLength(0)
     expect(wrapper.findAll('.message-status')).toHaveLength(0)
-
-    await wrapper
-      .get('.agent-execution-reasoning .n-collapse-item__header-main')
-      .trigger('click')
-    expect(wrapper.text()).toContain('Inspect the implementation carefully.')
     wrapper.unmount()
   })
 
@@ -203,7 +209,6 @@ describe('Agents artifact tab', () => {
       } as Partial<AgentApi> as AgentApi,
     })
     const wrapper = mount(AgentsTab, {
-      props: { active: true },
       global: { plugins: [i18n] },
     })
     await vi.waitFor(() =>
@@ -217,7 +222,9 @@ describe('Agents artifact tab', () => {
     await wrapper.get('.n-collapse-item__header-main').trigger('click')
     await flushPromises()
     expect(getAgentExecution).toHaveBeenCalledOnce()
-    expect(wrapper.findAll('.tool-call-card.compact')).toHaveLength(1)
+    expect(wrapper.get('.agent-execution-tool-count').text()).toContain('1')
+    expect(wrapper.text()).toContain('The review is in progress.')
+    expect(wrapper.findAll('.tool-call-card')).toHaveLength(0)
     wrapper.unmount()
   })
 })

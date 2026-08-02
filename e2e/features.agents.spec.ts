@@ -198,35 +198,18 @@ test.describe('Electron Agents activity panel', () => {
         '.agent-execution-status-dot.status-running, .agent-execution-status-dot.status-preparing',
       ),
     ).toHaveCount(2)
+    await expect(
+      page.locator('.agent-execution-item.n-collapse-item--active'),
+    ).toHaveCount(0)
 
     for (const name of ['first-reviewer', 'second-reviewer']) {
       const item = await expandExecution(page, name)
-      const tool = item.locator('.tool-call-card.compact').first()
-      await expect(tool).toContainText('read_file')
-      await tool.locator('.tool-call-row').click()
-      const result = tool.locator('.tool-result-json')
-      await expect(result).toBeVisible()
-      const metrics = await result.evaluate((element) => {
-        const sidebar = document.querySelector('.artifact-sidebar')
-        if (!sidebar) throw new Error('Expected artifact sidebar')
-        return {
-          resultClientHeight: element.clientHeight,
-          resultScrollHeight: element.scrollHeight,
-          sidebarClientWidth: sidebar.clientWidth,
-          sidebarScrollWidth: sidebar.scrollWidth,
-          bodyClientWidth: document.body.clientWidth,
-          bodyScrollWidth: document.body.scrollWidth,
-        }
-      })
-      expect(metrics.resultScrollHeight).toBeGreaterThan(
-        metrics.resultClientHeight,
+      await expect(item.locator('.agent-execution-tool-count')).toContainText(
+        '1',
       )
-      expect(metrics.sidebarScrollWidth).toBeLessThanOrEqual(
-        metrics.sidebarClientWidth,
-      )
-      expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(
-        metrics.bodyClientWidth,
-      )
+      await expect(item.locator('.tool-call-card')).toHaveCount(0)
+      await expect(item).not.toContainText('Inspect the delegated fixture')
+      await expect(item).not.toContainText('Verify the delegated fixture')
     }
 
     fakeProvider.releaseResponseGate()
@@ -261,10 +244,14 @@ test.describe('Electron Agents activity panel', () => {
     )
     await openAgentsTab(page)
     await expect(page.locator('.agent-execution-item')).toHaveCount(2)
+    await expect(
+      page.locator('.agent-execution-item.n-collapse-item--active'),
+    ).toHaveCount(0)
     const restored = await expandExecution(page, 'first-reviewer')
-    await expect(restored.locator('.tool-call-card.compact')).toContainText(
-      'read_file',
+    await expect(restored.locator('.agent-execution-tool-count')).toContainText(
+      '1',
     )
+    await expect(restored.locator('.tool-call-card')).toHaveCount(0)
     await expect(restored).toContainText('First delegated review completed.')
     await expect(page.locator('button.conversation-item')).toHaveCount(1)
   })

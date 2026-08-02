@@ -182,6 +182,16 @@ export type AgentExecutionActivityPage = Static<
   typeof AgentExecutionActivityPageSchema
 >
 
+export const AgentExecutionStatisticsSchema = Type.Object(
+  {
+    toolCallCount: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+)
+export type AgentExecutionStatistics = Static<
+  typeof AgentExecutionStatisticsSchema
+>
+
 export const AgentExecutionLiveOverlaySchema = Type.Object(
   {
     schemaVersion: Type.Literal(1),
@@ -219,6 +229,7 @@ export const AgentExecutionDetailSchema = Type.Object(
     task: Type.Optional(
       Type.String({ minLength: 1, maxLength: MAX_MESSAGE_TEXT_LENGTH }),
     ),
+    statistics: AgentExecutionStatisticsSchema,
     activityPage: AgentExecutionActivityPageSchema,
     live: Type.Optional(AgentExecutionLiveOverlaySchema),
   },

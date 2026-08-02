@@ -196,6 +196,30 @@ export class MessageRepository {
     return page
   }
 
+  /** Counts distinct visible Tool calls across an entire delegated execution. */
+  countVisibleAgentToolCalls(
+    reader: PersistenceReader,
+    sessionId: SessionId,
+  ): number {
+    const row = reader
+      .prepare(
+        `SELECT COUNT(DISTINCT json_extract(part.value, '$.callId')) AS total
+         FROM messages AS message
+         JOIN json_each(message.parts_json) AS part
+         WHERE message.session_id = ?
+           AND message.visibility = 'visible'
+           AND message.kind = 'assistant_turn'
+           AND json_extract(part.value, '$.type') = 'tool_call'`,
+      )
+      .get(sessionId)
+    const total = Number(row?.total)
+    if (Number.isSafeInteger(total) && total >= 0) return total
+    throw new PersistenceError(
+      'CODEC_INVALID',
+      'Agent execution Tool call count must be a non-negative safe integer',
+    )
+  }
+
   /** Finds the first visible user task in one backend-private Session. */
   firstVisibleUserInput(
     reader: PersistenceReader,
