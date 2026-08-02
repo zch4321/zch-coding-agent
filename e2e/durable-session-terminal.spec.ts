@@ -255,6 +255,33 @@ test.describe.serial('Durable Session and terminal workflows', () => {
       '.terminal-surface:visible .xterm-helper-textarea',
     )
     await expect(activeInput).toBeAttached()
+    const terminalBounds = await terminalPanel.evaluate((panel) => {
+      const body = panel.querySelector('.terminal-body')
+      const surface = panel.querySelector('.terminal-surface')
+      const screen = panel.querySelector('.xterm-screen')
+      if (!body || !surface || !screen) {
+        throw new Error('Expected mounted terminal layout')
+      }
+      const panelRect = panel.getBoundingClientRect()
+      const bodyRect = body.getBoundingClientRect()
+      const surfaceRect = surface.getBoundingClientRect()
+      const screenRect = screen.getBoundingClientRect()
+      return {
+        panelBottom: panelRect.bottom,
+        bodyBottom: bodyRect.bottom,
+        surfaceBottom: surfaceRect.bottom,
+        screenBottom: screenRect.bottom,
+      }
+    })
+    expect(terminalBounds.bodyBottom).toBeLessThanOrEqual(
+      terminalBounds.panelBottom + 1,
+    )
+    expect(terminalBounds.surfaceBottom).toBeLessThanOrEqual(
+      terminalBounds.bodyBottom + 1,
+    )
+    expect(terminalBounds.screenBottom).toBeLessThanOrEqual(
+      terminalBounds.surfaceBottom + 1,
+    )
     await activeInput.focus()
     await expect
       .poll(() =>
