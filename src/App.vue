@@ -120,9 +120,9 @@ function openSettings(tab: SettingsTab = 'general') {
   artifactSidebarOpen.value = false
 }
 
-function closeSettings() {
+async function closeSettings() {
+  if (agent.providerDirty && !(await agent.saveProvider())) return
   activeView.value = 'chat'
-  void agent.selectProviderForEditing(agent.activeProviderId)
 }
 
 async function selectMode(value: string | number) {

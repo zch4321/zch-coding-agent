@@ -45,9 +45,13 @@ function assertModelOverridesValid(
   }
 }
 
-function ensureMainModelIsConfigured(provider: AppProviderConfig): void {
-  if (!provider.modelConfigurationIds.includes(provider.model)) {
-    provider.modelConfigurationIds.unshift(provider.model)
+function normalizedEnabledModelIds(modelIds: readonly string[]): string[] {
+  return [...new Set(modelIds.map((modelId) => modelId.trim()).filter(Boolean))]
+}
+
+function assertMainModelEnabled(provider: AppProviderConfig): void {
+  if (provider.model && !provider.enabledModelIds.includes(provider.model)) {
+    throw new Error('Main model must be enabled for the Provider')
   }
 }
 
@@ -71,7 +75,9 @@ function applyProviderUpdate(
       reasoning: request.reasoning,
       modelCatalog: [],
       modelOverrides: {},
-      modelConfigurationIds: [request.model],
+      enabledModelIds: normalizedEnabledModelIds(
+        request.enabledModelIds ?? (request.model ? [request.model] : []),
+      ),
     }
     next.providers.push(provider)
   }
@@ -83,9 +89,19 @@ function applyProviderUpdate(
   provider.baseURL = request.baseURL
   provider.model = request.model
   provider.reasoning = request.reasoning
+  if (request.enabledModelIds !== undefined) {
+    provider.enabledModelIds = normalizedEnabledModelIds(
+      request.enabledModelIds,
+    )
+  } else if (
+    request.model &&
+    !provider.enabledModelIds.includes(request.model)
+  ) {
+    provider.enabledModelIds.push(request.model)
+  }
   if (request.modelOverrides !== undefined) {
     provider.modelOverrides = structuredClone(request.modelOverrides)
-  } else {
+  } else if (request.model) {
     provider.modelOverrides[request.model] = {
       ...provider.modelOverrides[request.model],
     }
@@ -120,7 +136,7 @@ function applyProviderUpdate(
     provider.modelCatalog = []
     delete provider.modelCatalogFetchedAt
   }
-  ensureMainModelIsConfigured(provider)
+  assertMainModelEnabled(provider)
   if (!isNewProvider && providerRouteShape(provider) !== previousRouteShape) {
     provider.revision += 1
   }
@@ -424,16 +440,6 @@ export class ConfigStore {
         }
 
         next.activeProviderId = provider.id
-        break
-      }
-      case 'provider-model-configuration': {
-        const provider = getAppProvider(next, request.providerId)
-
-        if (!provider) {
-          throw new Error(`Provider not found: ${request.providerId}`)
-        }
-
-        provider.modelConfigurationIds = [...new Set(request.modelIds)]
         break
       }
       case 'provider-copy': {

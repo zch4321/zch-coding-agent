@@ -114,6 +114,7 @@ const enUS = {
     eventGap: 'Conversation event gap',
     chooseHint: 'Choose a workspace to begin',
     apiKeyHint: 'Configure a Provider API key in Settings',
+    modelHint: 'Enable and select a main model in Provider settings',
     noticeHint: 'Review the Provider data notice',
     approvalHint: 'Resolve the pending approval before sending another message',
     inputHint: 'Ask about this workspace',
@@ -330,7 +331,7 @@ const enUS = {
     loadMoreArchived: 'Load more archived conversations',
     providerTitle: 'Provider',
     providerHint:
-      'Configure reusable model services, defaults, and credentials.',
+      'Configure reusable model services, enabled models, and credentials. Changes save automatically.',
     approvalTitle: 'Auto approval',
     approvalHint:
       'This global route is independent of Provider-card edits. The selected Provider supplies only the protocol, endpoint, and credential.',
@@ -338,7 +339,7 @@ const enUS = {
     approvalCredentialMissing:
       'The selected Provider has no credential; runtime falls back to human approval.',
     approvalModelHint:
-      'Models come from the selected Provider catalog; custom model IDs are also accepted.',
+      'Only models enabled for the selected Provider are shown here.',
     saveApproval: 'Save Auto approval',
     addProvider: 'Add provider',
     providerActions: 'Actions',
@@ -366,13 +367,14 @@ const enUS = {
     mainModel: 'Main model',
     modelSettings: 'Model configuration',
     modelSettingsHint:
-      'Every model uses explicit token settings. Provider metadata, built-in data, or conservative defaults are filled automatically and saved with the Provider.',
-    availableModels: 'All models',
-    selectedModels: 'Models to configure',
+      'The right side is this Provider’s enabled model pool. Only enabled models appear in conversation, Provider, and future Swarm selectors. Changes save automatically.',
+    availableModels: 'Provider models',
+    selectedModels: 'Enabled models',
     filterModels: 'Filter models',
     selectAllModels: 'Select all',
     clearSelectedModels: 'Clear all',
-    selectModelsHint: 'Select models above to configure them',
+    selectModelsHint:
+      'Enter an API key to refresh the catalog, then enable at least one model',
     modelName: 'Model',
     maximumContext: 'Maximum context',
     compressionThreshold: 'Compression threshold',
@@ -385,7 +387,7 @@ const enUS = {
     reasoningHigh: 'High',
     reasoningMax: 'Maximum',
     reasoningHint:
-      'DeepSeek V4 Pro supports high and max. Off disables thinking.',
+      'Reasoning-capable DeepSeek models can use High or Maximum. Off disables thinking.',
     reasoningHintGeneric:
       'Generic Chat Completions does not send vendor-specific reasoning fields.',
     reasoningHintResponses:
@@ -397,12 +399,17 @@ const enUS = {
     apiKey: 'API key',
     apiKeyPlaceholder: 'Enter a new key',
     modelRefreshCredentialHint:
-      'Save an API key before refreshing the model catalog.',
+      'Entering an API key saves it and refreshes the model catalog automatically.',
     modelRefreshUnsavedHint:
       'Use the button above to save Provider changes before refreshing the model catalog.',
     saveProvider: 'Save Provider',
     saveWebSearch: 'Save web search',
     saved: 'Saved',
+    saving: 'Saving…',
+    autosavePending: 'Waiting to autosave…',
+    selectMainModel: 'Enable a model first',
+    selectMainModelHint:
+      'Enable a model in the pool below before selecting the main model.',
     tokenConservative: 'Conservative default',
     tokenCustom: 'Custom UTF-8 bytes/token',
     modelProfile:

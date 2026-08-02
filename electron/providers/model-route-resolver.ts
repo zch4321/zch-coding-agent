@@ -27,6 +27,11 @@ async function resolve(
   if (!provider) {
     throw new Error(`Provider is not configured: ${selection.providerId}`)
   }
+  if (!selection.model || !provider.enabledModelIds.includes(selection.model)) {
+    throw new Error(
+      `Model is not enabled for ${provider.label}: ${selection.model || '(none)'}`,
+    )
+  }
   const snapshot: ModelRouteSnapshot = {
     schemaVersion: 2,
     purpose,

@@ -7,9 +7,35 @@ import {
 import type { ConfigStore } from '../config/store'
 import { resolveRunRoutes } from './model-route-resolver'
 
+function configuredAppConfig(): AppConfig {
+  const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+  config.providers[0]!.model = 'deepseek-v4-pro'
+  config.providers[0]!.enabledModelIds = ['deepseek-v4-pro']
+  config.approval.approverModel = 'deepseek-v4-pro'
+  return config
+}
+
 describe('resolveRunRoutes', () => {
+  it('rejects models outside the enabled Provider pool', async () => {
+    const config = configuredAppConfig()
+    const getProviderApiKeyForRevision = vi.fn(async () => 'secret')
+    const store = {
+      getPublicConfig: () => toPublicConfig(config, true),
+      getProviderApiKeyForRevision,
+    } as unknown as ConfigStore
+
+    await expect(
+      resolveRunRoutes(store, {
+        providerId: 'deepseek',
+        model: 'disabled-model',
+        reasoning: 'high',
+      }),
+    ).rejects.toThrow(/not enabled/u)
+    expect(getProviderApiKeyForRevision).not.toHaveBeenCalled()
+  })
+
   it('rejects an unsafe endpoint before reading credentials', async () => {
-    const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+    const config = configuredAppConfig()
     config.providers[0]!.baseURL = 'https://user:secret@provider.example/v1'
     const getProviderApiKeyForRevision = vi.fn(async () => 'secret')
     const store = {
@@ -28,7 +54,7 @@ describe('resolveRunRoutes', () => {
   })
 
   it('freezes the exact endpoint and raises approval reasoning off to high', async () => {
-    const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+    const config = configuredAppConfig()
     config.providers[0]!.baseURL = 'https://provider.example/v1/'
     config.providers[0]!.reasoning = 'off'
     const store = {
@@ -49,7 +75,7 @@ describe('resolveRunRoutes', () => {
   })
 
   it('keeps main and compression routes when approval credentials are absent', async () => {
-    const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+    const config = configuredAppConfig()
     config.providers.push({
       ...structuredClone(config.providers[0]!),
       id: 'approval-only',
@@ -86,7 +112,7 @@ describe('resolveRunRoutes', () => {
   })
 
   it('keeps main and compression routes when approval provider is missing', async () => {
-    const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+    const config = configuredAppConfig()
     config.approval.approverProviderId = 'missing-provider'
     const onDiagnostic = vi.fn()
     const store = {

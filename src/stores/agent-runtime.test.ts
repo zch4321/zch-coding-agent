@@ -183,7 +183,7 @@ function provider(
     reasoning: 'off',
     modelCatalog: catalogModels.map((catalogModel) => ({ id: catalogModel })),
     modelOverrides: {},
-    modelConfigurationIds: [model],
+    enabledModelIds: [model],
     credentialConfigured: true,
     credentialSource: 'safe-storage',
   }
@@ -227,9 +227,7 @@ describe('agent runtime store', () => {
     expect(runtime.composerModel).toBe('provider-b-selected')
     expect(runtime.composerReasoning).toBe('off')
     expect(runtime.composerModelOptions.map((option) => option.value)).toEqual([
-      'provider-b-selected',
       'provider-b-default',
-      'provider-b-catalog',
     ])
   })
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -30,14 +30,8 @@ type ProviderAction =
 
 const agent = useAgentStore()
 const { t } = useI18n()
-const dirtyAction = ref<ProviderAction>()
 const deleteProviderId = ref<string>()
-const pendingModelSelection = ref<{
-  providerId: string
-  modelIds: string[]
-  sequence: number
-}>()
-let modelSelectionSequence = 0
+let autosaveTimer: ReturnType<typeof setTimeout> | undefined
 const providerTypeOptions = computed(() => [
   {
     label: t('settings.providerTypeDeepSeek'),
@@ -82,17 +76,13 @@ const tokenEstimationOptions = computed(() => [
 const deleteProvider = computed(() =>
   agent.providers.find((provider) => provider.id === deleteProviderId.value),
 )
-const modelTransferOptions = computed(() => agent.modelOptions)
-const selectedModelIds = computed(() => {
-  const pending = pendingModelSelection.value
-  if (pending?.providerId === agent.selectedProviderId) {
-    return pending.modelIds
-  }
-  return (
-    agent.providers.find((provider) => provider.id === agent.selectedProviderId)
-      ?.modelConfigurationIds ?? []
-  )
-})
+const selectedProviderReady = computed(
+  () =>
+    Boolean(agent.providerForm.model) &&
+    agent.providerForm.enabledModelIds.includes(agent.providerForm.model),
+)
+const modelTransferOptions = computed(() => agent.modelTransferOptions)
+const selectedModelIds = computed(() => agent.providerForm.enabledModelIds)
 const selectedModelProfiles = computed(() => {
   const profilesById = new Map(
     agent.modelProfiles.map((model) => [model.id, model]),
@@ -105,34 +95,61 @@ const selectedModelProfiles = computed(() => {
 
 function handleSelectedModels(value: Array<string | number>): void {
   const availableIds = new Set(agent.modelProfiles.map((model) => model.id))
-  const nextModelIds = value.map(String).filter((id) => availableIds.has(id))
-  const providerId = agent.selectedProviderId
-  const sequence = ++modelSelectionSequence
-  pendingModelSelection.value = {
-    providerId,
-    modelIds: nextModelIds,
-    sequence,
+  const nextModelIds = [
+    ...new Set(value.map(String).filter((id) => availableIds.has(id))),
+  ]
+  agent.providerForm.enabledModelIds = nextModelIds
+  if (!nextModelIds.includes(agent.providerForm.model)) {
+    agent.providerForm.model = nextModelIds[0] ?? ''
   }
-  void agent
-    .saveProviderModelConfigurationSelection(providerId, nextModelIds)
-    .then(() => {
-      if (pendingModelSelection.value?.sequence === sequence) {
-        pendingModelSelection.value = undefined
-      }
-    })
 }
 
 onMounted(() => {
   void agent.enterProviderSettings()
 })
 
+watch(
+  () =>
+    JSON.stringify({
+      form: agent.providerForm,
+      models: agent.modelProfiles.map((model) => ({
+        id: model.id,
+        contextWindowTokens: model.contextWindowTokens,
+        compactThresholdTokens: model.compactThresholdTokens,
+        maxOutputTokens: model.maxOutputTokens,
+      })),
+    }),
+  () => {
+    if (autosaveTimer) clearTimeout(autosaveTimer)
+    if (!agent.providerDirty) return
+
+    agent.providerSaveStatus = ''
+    autosaveTimer = setTimeout(() => {
+      autosaveTimer = undefined
+      void agent.saveProvider()
+    }, 600)
+  },
+)
+
+onBeforeUnmount(() => {
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = undefined
+  if (agent.providerDirty) void agent.saveProvider()
+})
+
 function providerActions(providerId: string): DropdownOption[] {
   const isActive = providerId === agent.activeProviderId
+  const provider = agent.providers.find(
+    (candidate) => candidate.id === providerId,
+  )
   return [
     {
       label: t('settings.setDefaultProvider'),
       key: 'set-active',
-      disabled: isActive,
+      disabled:
+        isActive ||
+        !provider?.model ||
+        !provider.enabledModelIds.includes(provider.model),
     },
     { label: t('settings.copyProvider'), key: 'copy' },
     {
@@ -143,21 +160,11 @@ function providerActions(providerId: string): DropdownOption[] {
   ]
 }
 
-function requestProviderAction(action: ProviderAction) {
-  if (
-    agent.providerDirty &&
-    (action.kind === 'select' ||
-      action.kind === 'create' ||
-      action.kind === 'copy' ||
-      action.kind === 'set-active' ||
-      (action.kind === 'delete' &&
-        action.providerId === agent.selectedProviderId))
-  ) {
-    dirtyAction.value = action
-    return
-  }
-
-  void runProviderAction(action)
+async function requestProviderAction(action: ProviderAction) {
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = undefined
+  if (agent.providerDirty && !(await agent.saveProvider())) return
+  await runProviderAction(action)
 }
 
 async function runProviderAction(action: ProviderAction) {
@@ -182,25 +189,6 @@ async function runProviderAction(action: ProviderAction) {
   }
 }
 
-async function saveAndContinue() {
-  const action = dirtyAction.value
-  if (!action) return
-
-  if (await agent.saveProvider()) {
-    dirtyAction.value = undefined
-    await runProviderAction(action)
-  }
-}
-
-async function discardAndContinue() {
-  const action = dirtyAction.value
-  if (!action) return
-
-  agent.resetSelectedProviderDraft()
-  dirtyAction.value = undefined
-  await runProviderAction(action)
-}
-
 async function confirmDeleteProvider() {
   const providerId = deleteProviderId.value
   if (!providerId) return
@@ -213,16 +201,16 @@ async function confirmDeleteProvider() {
 function handleCardKeydown(event: KeyboardEvent, providerId: string) {
   if (event.key !== 'Enter' && event.key !== ' ') return
   event.preventDefault()
-  requestProviderAction({ kind: 'select', providerId })
+  void requestProviderAction({ kind: 'select', providerId })
 }
 
 function handleDropdownSelect(key: string | number, providerId: string) {
   if (key === 'set-active') {
-    requestProviderAction({ kind: 'set-active', providerId })
+    void requestProviderAction({ kind: 'set-active', providerId })
   } else if (key === 'copy') {
-    requestProviderAction({ kind: 'copy', providerId })
+    void requestProviderAction({ kind: 'copy', providerId })
   } else if (key === 'delete') {
-    requestProviderAction({ kind: 'delete', providerId })
+    void requestProviderAction({ kind: 'delete', providerId })
   }
 }
 </script>
@@ -319,7 +307,10 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <div class="provider-detail-actions">
             <NButton
               secondary
-              :disabled="agent.selectedProviderId === agent.activeProviderId"
+              :disabled="
+                agent.selectedProviderId === agent.activeProviderId ||
+                !selectedProviderReady
+              "
               @click="
                 requestProviderAction({
                   kind: 'set-active',
@@ -329,22 +320,19 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             >
               {{ t('settings.setDefaultProvider') }}
             </NButton>
-            <NButton
-              type="primary"
-              :loading="agent.providerSaving"
-              :disabled="!agent.providerDirty || agent.modelCatalogLoading"
-              @click="agent.saveProvider"
-            >
-              {{ t('settings.saveProvider') }}
-            </NButton>
           </div>
           <small class="settings-save-status" aria-live="polite">
             {{
-              agent.providerDirty
-                ? t('settings.unsaved')
-                : agent.providerSaveStatus
-                  ? t('settings.saved')
-                  : ''
+              agent.providerSaving
+                ? t('settings.saving')
+                : agent.providerSaveStatus &&
+                    agent.providerSaveStatus !== 'Saved'
+                  ? agent.providerSaveStatus
+                  : agent.providerDirty
+                    ? t('settings.autosavePending')
+                    : agent.providerSaveStatus
+                      ? t('settings.saved')
+                      : ''
             }}
           </small>
         </div>
@@ -404,14 +392,19 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             :value="agent.providerForm.model"
             :options="agent.modelOptions"
             :loading="agent.modelCatalogLoading"
+            :disabled="agent.modelOptions.length === 0"
+            :placeholder="t('settings.selectMainModel')"
             filterable
-            tag
             @update:value="agent.setProviderDraftModel"
           />
           <NButton
             secondary
             :loading="agent.modelCatalogLoading"
-            :disabled="!agent.providerRefreshAvailable || agent.providerDirty"
+            :disabled="
+              agent.providerSaving ||
+              (!agent.providerRefreshAvailable &&
+                !agent.providerForm.apiKey.trim())
+            "
             @click="agent.refreshSelectedProviderModels"
           >
             {{ t('common.refresh') }}
@@ -426,14 +419,11 @@ function handleDropdownSelect(key: string | number, providerId: string) {
                   tokens:
                     agent.activeModelProfile.contextWindowTokens.toLocaleString(),
                 })
-              : t('settings.customModel')
+              : t('settings.selectMainModelHint')
           }}
         </small>
         <small v-if="!agent.providerRefreshAvailable">
           {{ t('settings.modelRefreshCredentialHint') }}
-        </small>
-        <small v-else-if="agent.providerDirty">
-          {{ t('settings.modelRefreshUnsavedHint') }}
         </small>
       </label>
       <div class="settings-inline settings-inline-equal">
@@ -580,33 +570,6 @@ function handleDropdownSelect(key: string | number, providerId: string) {
         <NEmpty v-else :description="t('settings.selectModelsHint')" />
       </div>
     </div>
-
-    <NModal
-      :show="Boolean(dirtyAction)"
-      preset="card"
-      style="width: min(460px, calc(100vw - 40px))"
-      content-class="small-modal-content"
-      @update:show="!$event && (dirtyAction = undefined)"
-    >
-      <template #header>{{ t('settings.unsavedProviderTitle') }}</template>
-      <p>{{ t('settings.unsavedProviderText') }}</p>
-      <div class="modal-actions settings-actions">
-        <NButton
-          type="primary"
-          :loading="agent.providerSaving"
-          :disabled="agent.modelCatalogLoading"
-          @click="saveAndContinue"
-        >
-          {{ t('settings.saveAndContinue') }}
-        </NButton>
-        <NButton secondary @click="discardAndContinue">
-          {{ t('settings.discardAndContinue') }}
-        </NButton>
-        <NButton @click="dirtyAction = undefined">
-          {{ t('common.cancel') }}
-        </NButton>
-      </div>
-    </NModal>
 
     <NModal
       :show="Boolean(deleteProviderId)"

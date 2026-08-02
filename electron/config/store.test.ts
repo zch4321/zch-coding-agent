@@ -67,7 +67,7 @@ async function createStores(adapter = new FakeSafeStorage()) {
 }
 
 describe('ConfigStore', () => {
-  it('deletes a legacy config and rebuilds clean v14 defaults', async () => {
+  it('deletes a legacy config and rebuilds clean v15 defaults', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     await writeFile(
@@ -82,15 +82,15 @@ describe('ConfigStore', () => {
     const store = new ConfigStore(configPath, secretStore)
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 14 },
+      config: { schemaVersion: 15 },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 14,
+      schemaVersion: 15,
       limits: { maxStepsPerRun: 0 },
     })
   })
 
-  it('migrates valid v9 providers to v14 without losing saved state', async () => {
+  it('migrates valid v9 providers to v15 without losing saved state', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     const legacy = structuredClone(legacyAppConfigV9) as Record<string, unknown>
@@ -125,7 +125,7 @@ describe('ConfigStore', () => {
     await store.initialize()
 
     expect(store.getInternalConfig()).toMatchObject({
-      schemaVersion: 14,
+      schemaVersion: 15,
       providers: [
         {
           providerType: 'deepseek.chat-completions',
@@ -135,23 +135,23 @@ describe('ConfigStore', () => {
           modelOverrides: {
             'deepseek-v4-pro': { contextWindowTokens: 128_000 },
           },
-          modelConfigurationIds: ['deepseek-v4-pro'],
+          enabledModelIds: ['deepseek-v4-pro'],
         },
         {
           providerType: 'generic.chat-completions',
           apiKeyRef: 'provider-key:generic',
           modelCatalog: [{ id: 'generic-model' }],
-          modelConfigurationIds: ['generic-model'],
+          enabledModelIds: ['generic-model'],
         },
       ],
     })
     const persisted = await readFile(configPath, 'utf8')
-    expect(persisted).toContain('"schemaVersion": 14')
+    expect(persisted).toContain('"schemaVersion": 15')
     expect(persisted).not.toContain('adapterId')
     expect(persisted).not.toContain('"profile"')
   })
 
-  it('resets a malformed v9 file to clean v14 defaults', async () => {
+  it('resets a malformed v9 file to clean v15 defaults', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     const malformed = structuredClone(legacyAppConfigV9) as Record<
@@ -169,7 +169,7 @@ describe('ConfigStore', () => {
     )
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 14 },
+      config: { schemaVersion: 15 },
     })
     expect(store.getInternalConfig()).toEqual(DEFAULT_APP_CONFIG)
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual(
@@ -188,7 +188,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 14,
+      schemaVersion: 15,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).not.toHaveProperty(
       'legacyField',
@@ -198,13 +198,13 @@ describe('ConfigStore', () => {
   it('deletes malformed JSON and rebuilds clean defaults', async () => {
     const { directory, configStore } = await createStores()
     const configPath = path.join(directory, 'config.json')
-    await writeFile(configPath, '{"schemaVersion":14', 'utf8')
+    await writeFile(configPath, '{"schemaVersion":15', 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 14,
+      schemaVersion: 15,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 14,
+      schemaVersion: 15,
       limits: { maxStepsPerRun: 0 },
     })
   })
@@ -222,7 +222,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 14,
+      schemaVersion: 15,
       limits: { [field]: value },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
@@ -341,7 +341,7 @@ describe('ConfigStore', () => {
     await expect(store.getDeepSeekApiKey()).resolves.toBe('stored-secret')
   })
 
-  it('writes v14 defaults atomically', async () => {
+  it('writes v15 defaults atomically', async () => {
     const { directory, configStore } = await createStores()
 
     await configStore.update({
@@ -355,7 +355,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(14)
+    expect(parsed.schemaVersion).toBe(15)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(0)
     expect(configStore.getPublicConfig().limits.maxContextTokens).toBe(256_000)
     expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
@@ -385,7 +385,7 @@ describe('ConfigStore', () => {
     expect(
       JSON.parse(await readFile(path.join(directory, 'config.json'), 'utf8')),
     ).toMatchObject({
-      schemaVersion: 14,
+      schemaVersion: 15,
       subagents: { enabled: true, workerTimeoutMs: 2_700_000 },
     })
   })
@@ -404,21 +404,43 @@ describe('ConfigStore', () => {
 
     const selection = await configStore.update({
       version: 1,
-      kind: 'provider-model-configuration',
+      kind: 'provider-settings',
       providerId: initial.id,
-      modelIds: ['catalog-only'],
+      label: initial.label,
+      providerType: initial.providerType,
+      baseURL: initial.baseURL,
+      model: 'catalog-only',
+      enabledModelIds: ['catalog-only'],
+      reasoning: initial.reasoning,
+      limits: configStore.getPublicConfig().limits,
     })
     expect(selection.providers[0]).toMatchObject({
-      modelConfigurationIds: ['catalog-only'],
-      revision: initial.revision,
+      enabledModelIds: ['catalog-only'],
+      revision: initial.revision + 1,
+    })
+    const expandedPool = await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      providerId: initial.id,
+      label: initial.label,
+      providerType: initial.providerType,
+      baseURL: initial.baseURL,
+      model: 'catalog-only',
+      enabledModelIds: ['catalog-only', 'secondary-model'],
+      reasoning: initial.reasoning,
+      limits: configStore.getPublicConfig().limits,
+    })
+    expect(expandedPool.providers[0]).toMatchObject({
+      enabledModelIds: ['catalog-only', 'secondary-model'],
+      revision: initial.revision + 1,
     })
     await configStore.setDeepSeekModelCatalog(
       [{ id: 'different-catalog-model' }],
       '2026-07-24T00:00:00.000Z',
     )
     expect(configStore.getPublicConfig().providers[0]).toMatchObject({
-      modelConfigurationIds: ['catalog-only'],
-      revision: initial.revision,
+      enabledModelIds: ['catalog-only', 'secondary-model'],
+      revision: initial.revision + 1,
     })
 
     await configStore.update({
@@ -429,7 +451,7 @@ describe('ConfigStore', () => {
       reasoning: initial.reasoning,
     })
     expect(configStore.getPublicConfig().providers[0]?.revision).toBe(
-      initial.revision + 1,
+      initial.revision + 2,
     )
 
     await configStore.update({
@@ -439,8 +461,28 @@ describe('ConfigStore', () => {
       apiKey: 'revision-secret',
     })
     expect(configStore.getPublicConfig().providers[0]?.revision).toBe(
-      initial.revision + 2,
+      initial.revision + 3,
     )
+  })
+
+  it('rejects a main model outside the enabled Provider pool', async () => {
+    const { configStore } = await createStores()
+    const provider = configStore.getPublicConfig().providers[0]!
+
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'provider-settings',
+        providerId: provider.id,
+        label: provider.label,
+        providerType: provider.providerType,
+        baseURL: provider.baseURL,
+        model: 'disabled-model',
+        enabledModelIds: ['enabled-model'],
+        reasoning: provider.reasoning,
+        limits: configStore.getPublicConfig().limits,
+      }),
+    ).rejects.toThrow('Main model must be enabled')
   })
 
   it('preserves Provider Type when a later update omits it', async () => {
@@ -503,11 +545,11 @@ describe('ConfigStore', () => {
     config.schemaVersion = 99
     await writeFile(configPath, JSON.stringify(config), 'utf8')
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 14,
+      schemaVersion: 15,
     })
     expect(configStore.getMcpServers()).toHaveLength(0)
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 14,
+      schemaVersion: 15,
       mcpServers: [],
     })
   })

@@ -123,7 +123,7 @@ export const ProviderPublicConfigSchema = Type.Object(
       maximum: Number.MAX_SAFE_INTEGER,
     }),
     baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
-    model: Type.String({ minLength: 1, maxLength: 256 }),
+    model: Type.String({ maxLength: 256 }),
     reasoning: ReasoningEffortSchema,
     modelCatalog: Type.Array(ProviderModelSchema, { maxItems: 1_000 }),
     modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
@@ -132,10 +132,10 @@ export const ProviderPublicConfigSchema = Type.Object(
       ModelCapabilityOverrideSchema,
       { maxProperties: 1_000 },
     ),
-    modelConfigurationIds: Type.Array(
-      Type.String({ minLength: 1, maxLength: 256 }),
-      { maxItems: 1_000, uniqueItems: true },
-    ),
+    enabledModelIds: Type.Array(Type.String({ minLength: 1, maxLength: 256 }), {
+      maxItems: 1_000,
+      uniqueItems: true,
+    }),
     credentialConfigured: Type.Boolean(),
     credentialSource: Type.Union([
       Type.Literal('none'),
@@ -149,7 +149,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(14),
+    schemaVersion: Type.Literal(15),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
@@ -158,7 +158,7 @@ export const PublicConfigSchema = Type.Object(
     approval: Type.Object(
       {
         approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
-        approverModel: Type.String({ minLength: 1, maxLength: 256 }),
+        approverModel: Type.String({ maxLength: 256 }),
       },
       { additionalProperties: false },
     ),
@@ -470,7 +470,10 @@ export const ConfigSetRequestSchema = Type.Union([
       label: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
       providerType: Type.Optional(ProviderTypeSchema),
       baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
-      model: Type.String({ minLength: 1, maxLength: 256 }),
+      model: Type.String({ maxLength: 256 }),
+      enabledModelIds: Type.Optional(
+        ProviderPublicConfigSchema.properties.enabledModelIds,
+      ),
       contextWindowTokens: Type.Optional(
         Type.Union([
           Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
@@ -508,7 +511,10 @@ export const ConfigSetRequestSchema = Type.Union([
       label: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
       providerType: Type.Optional(ProviderTypeSchema),
       baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
-      model: Type.String({ minLength: 1, maxLength: 256 }),
+      model: Type.String({ maxLength: 256 }),
+      enabledModelIds: Type.Optional(
+        ProviderPublicConfigSchema.properties.enabledModelIds,
+      ),
       contextWindowTokens: Type.Optional(
         Type.Union([
           Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
@@ -545,15 +551,6 @@ export const ConfigSetRequestSchema = Type.Union([
       version: Type.Literal(1),
       kind: Type.Literal('provider-select'),
       providerId: Type.String({ minLength: 1, maxLength: 128 }),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      version: Type.Literal(1),
-      kind: Type.Literal('provider-model-configuration'),
-      providerId: Type.String({ minLength: 1, maxLength: 128 }),
-      modelIds: ProviderPublicConfigSchema.properties.modelConfigurationIds,
     },
     { additionalProperties: false },
   ),
@@ -602,7 +599,7 @@ export const ConfigSetRequestSchema = Type.Union([
       version: Type.Literal(1),
       kind: Type.Literal('approval'),
       approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
-      approverModel: Type.String({ minLength: 1, maxLength: 256 }),
+      approverModel: Type.String({ maxLength: 256 }),
     },
     { additionalProperties: false },
   ),

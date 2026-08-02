@@ -206,6 +206,19 @@ async function createConfig(root: string): Promise<ConfigStore> {
     { environmentApiKey: 'test-key' },
   )
   await store.initialize()
+  const provider = store.getPublicConfig().providers[0]!
+  await store.update({
+    version: 1,
+    kind: 'provider-settings',
+    providerId: provider.id,
+    label: provider.label,
+    providerType: provider.providerType,
+    baseURL: provider.baseURL,
+    model: 'deepseek-v4-pro',
+    enabledModelIds: ['deepseek-v4-pro'],
+    reasoning: provider.reasoning,
+    limits: store.getPublicConfig().limits,
+  })
   await store.update({
     version: 1,
     kind: 'privacy',
