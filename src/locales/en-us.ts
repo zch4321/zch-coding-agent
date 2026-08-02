@@ -299,18 +299,21 @@ const enUS = {
       'Assistant preferences are injected as low-priority context for new conversations only. They cannot override the Harness, runtime context, permissions, or path boundaries.',
     saveAssistantPreferences: 'Save assistant preferences',
     restoreAssistantPreferences: 'Clear preferences',
-    projectTitle: 'Project',
+    projectTitle: 'Project management',
     projectHint:
-      'Select the workspace used by file, command, and Agent operations.',
-    currentWorkspace: 'Current workspace',
-    removeProject: 'Remove project',
-    removeProjectTitle: 'Remove project?',
+      'Manage the local projects used by file, command, and Agent operations.',
+    addProject: 'Add project',
+    currentProject: 'Current',
+    activeConversationCount: 'Active conversations: {count}',
+    projectEmpty: 'No projects have been added.',
+    removeProject: 'Remove from app',
+    removeProjectTitle: 'Remove project from the app?',
     removeProjectBusy:
       'A conversation in this project is running, starting, or awaiting approval',
     removeConfirm:
-      'Remove this project and its local conversation history from the app?',
-    removeHint:
-      'Removing a project clears app history and runtime resources. It does not delete files from disk.',
+      'Remove “{name}” and all of its local conversation history from the app? This cannot be undone. The project directory at {path} and its files will not be deleted.',
+    projectRemovalSafety:
+      'Removing a project clears its app conversations, messages, FileChange audit, Subagent records, and runtime resources. It never deletes the project directory or files from disk; trace logs remain managed separately under Logging.',
     archivedTitle: 'Archived conversations',
     archivedHint:
       'Restore archived conversations or permanently delete local history you no longer need.',

@@ -11,7 +11,7 @@ import type {
   ContextAttachmentChip,
   ContextAttachmentKind,
 } from '../../shared/context'
-import type { MessageId, RunId, SessionId } from '../../shared/ids'
+import type { MessageId, ProjectId, RunId, SessionId } from '../../shared/ids'
 import type { ModelSelection } from '../../shared/model-route'
 import type { PlanStatus } from '../../shared/orchestration'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
@@ -560,10 +560,17 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       this.contextAttachments = structuredClone(attachments)
       return true
     },
-    async removeCurrentProject() {
+    /** Removes an idle Project and all of its application-owned history. */
+    async removeProject(projectId: ProjectId): Promise<boolean> {
       const replica = useAgentReplicaStore()
-      const project = replica.selectedProject
-      if (!project || !window.agentApi) return
+      const removingSelectedProject = replica.selectedProjectId === projectId
+      const project = replica.projects.find(
+        (candidate) => candidate.id === projectId,
+      )
+      if (!project || !window.agentApi) return false
+      const projectSessionIds = replica.sessions
+        .filter((session) => session.projectId === projectId)
+        .map((session) => session.id)
       if (
         replica.sessions.some(
           (session) =>
@@ -571,15 +578,38 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
             this.conversationIsBusy(session.id),
         )
       ) {
-        return
+        return false
       }
       const result = await window.agentApi.removeProject({
         version: IPC_VERSION,
         projectId: project.id,
         expectedRevision: project.revision,
       })
-      if (result.ok) await replica.reconcile(result.value.commit)
-      else showOperationError(result.error)
+      if (!result.ok) {
+        showOperationError(result.error)
+        return false
+      }
+      await replica.reconcile(result.value.commit)
+      const executions = useAgentExecutionStore()
+      for (const sessionId of projectSessionIds) {
+        delete this.overlays[sessionId]
+        delete this.carryoversBySessionId[sessionId]
+        delete this.carryoverStartingBySessionId[sessionId]
+        executions.removeSession(sessionId)
+      }
+      if (removingSelectedProject) {
+        this.mode =
+          replica.selectedSession?.permissionMode ??
+          useAgentSettingsStore().defaultMode
+        this.hydrateRuntime(replica.selectedRuntime)
+        this.draftModelSelection = undefined
+        this.input = ''
+        this.contextAttachments = []
+        if (replica.selectedSessionId) {
+          await executions.loadSession(replica.selectedSessionId)
+        }
+      }
+      return true
     },
     async setMode(mode: PermissionMode) {
       const replica = useAgentReplicaStore()

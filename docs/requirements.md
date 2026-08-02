@@ -189,7 +189,7 @@ Tool Result 的 canonical renderer 固定为：单 TextPart 原样、单 JsonPar
 ### 2.4 会话与工作区
 
 - 一个工作区（workspace）= 一个本地目录。
-- Project 是 backend-owned 的持久化 workspace 注册记录，使用稳定 `projectId` 和规范化绝对路径。移动目录后通过重新关联更新 Project path，不改写 Session identity。移除 Project 会删除应用中它的 Sessions/Messages/FileChanges，绝不删除 workspace 目录或项目文件。
+- Project 是 backend-owned 的持久化 workspace 注册记录，使用稳定 `projectId` 和规范化绝对路径。移动目录后通过重新关联更新 Project path，不改写 Session identity。设置页以列表管理全部 Project；任意空闲 Project 都可在二次确认后从应用移除。移除会删除应用中归属它的 Sessions/Messages/FileChanges/Subagent 记录并释放运行资源，绝不删除 workspace 目录或项目文件；Trace 日志仍由日志设置独立管理。若移除当前 Project，renderer 必须稳定回退到下一个可用 Project 及其最近的活跃 Session。
 - Session 是持久化对话实体，绑定一个 `projectId`、当前模型选择与权限模式；UI 中的“对话”是 Session 的展示名称，不存在独立 Conversation 领域记录或 `conversationId -> sessionId` 映射。
 - SQLite 持久化 schema migrations、Projects、Session 元数据、完整 Message history 和有界 FileChanges。Goal/Plan 属于 Session 元数据；完整 assistant/tool/harness 内容统一表示为 Message。Renderer 只保存 backend public records 的副本，不得单独创建已提交消息。
 - Database migrations 必须按版本前向执行，在单个 transaction 内提交 schema/data change 和 migration record；已应用文件 checksum 改变或数据库版本高于当前应用时明确拒绝打开，不静默猜测兼容。

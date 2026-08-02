@@ -218,7 +218,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     revertConversationAfterMessage: runtime.revertConversationAfterMessage,
     retryUserMessage: runtime.retryUserMessage,
     editUserMessage: runtime.editUserMessage,
-    removeCurrentProject: runtime.removeCurrentProject,
+    removeProject: runtime.removeProject,
     chooseWorkspace: runtime.chooseWorkspace,
     setMode: runtime.setMode,
     hydrateSelectedProviderForm: settings.hydrateSelectedProviderForm,

@@ -1,4 +1,4 @@
-import type { CallId, MessageId, RunId } from '../../shared/ids'
+import type { CallId, MessageId, ProjectId, RunId } from '../../shared/ids'
 import type { ContextAttachmentChip } from '../../shared/context'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ToolApprovalSummary } from '../../shared/agent-events'
@@ -100,7 +100,7 @@ export interface OrchestratorEntry {
 }
 
 export interface ProjectView {
-  id: string
+  id: ProjectId
   path: string
   name: string
   addedAt: string

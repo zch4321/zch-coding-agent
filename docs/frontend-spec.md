@@ -433,9 +433,10 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 ### 10.1 Project
 
-- 当前项目路径。
-- Choose workspace / Add project。
-- 从应用记录移除项目。
+- 使用项目列表展示所有 backend `ProjectRecord`，每项显示名称、完整路径、当前项目标记和已加载的活跃对话数量。
+- 列表提供 Choose workspace / Add project，并允许从任意空闲项目行发起移除。
+- 移除操作必须二次确认，并明确清理应用内 Session、Message、FileChange、Subagent 和运行资源但不删除 workspace 目录或文件；Trace 日志仍由 Logging 设置单独管理。
+- 项目中存在 running、start pending 或 awaiting approval 的对话时禁用移除并解释原因；移除当前项目后选择下一个可用项目及其最近的活跃对话，没有剩余项目时进入空状态。
 - 不展示内部 session ID。
 
 ### 10.2 Provider

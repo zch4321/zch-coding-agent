@@ -460,11 +460,47 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
             (session) => session.projectId !== projectId,
           )
         }
-        if (this.selectedProjectId && !available.has(this.selectedProjectId)) {
+        this.searchHits = this.searchHits.filter((hit) =>
+          available.has(hit.session.projectId),
+        )
+        const selectedProjectRemoved = Boolean(
+          this.selectedProjectId && !available.has(this.selectedProjectId),
+        )
+        if (selectedProjectRemoved) {
           this.selectedProjectId = this.projects[0]?.id
-          this.selectedSessionId = undefined
+          let fallbackSession = this.sessions.find(
+            (session) =>
+              session.projectId === this.selectedProjectId &&
+              session.lifecycle === 'active',
+          )
+          const api = window.agentApi
+          if (
+            !fallbackSession &&
+            this.selectedProjectId &&
+            typeof api?.listSessions === 'function'
+          ) {
+            const result = await api.listSessions({
+              version: IPC_VERSION,
+              projectId: this.selectedProjectId,
+              lifecycle: 'active',
+              limit: 1,
+            })
+            if (result.ok) {
+              this.sessions = mergeSessions(
+                this.sessions,
+                result.value.page.records,
+              )
+              fallbackSession = result.value.page.records[0]
+            } else {
+              this.error = result.error.message
+            }
+          }
+          this.selectedSessionId = fallbackSession?.id
         }
         this.pruneCaches()
+        if (selectedProjectRemoved && this.selectedSessionId) {
+          await this.loadSession(this.selectedSessionId)
+        }
         return 'applied' as const
       }
 
