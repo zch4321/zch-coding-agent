@@ -42,6 +42,7 @@ export async function configureApp(input: {
   defaultMode: PermissionMode
   assistantLanguage?: 'zh-CN' | 'en-US'
   traceLogging?: boolean
+  subagents?: boolean
 }) {
   const workspace = await realpath(input.workspace)
   const result = await input.page.evaluate(
@@ -53,6 +54,7 @@ export async function configureApp(input: {
       providerNoticeVersion,
       traceNoticeVersion,
       traceLogging,
+      subagents,
     }) => {
       type IpcResult<Value> =
         | { ok: true; value: Value }
@@ -173,6 +175,21 @@ export async function configureApp(input: {
         }
       }
 
+      if (subagents) {
+        const delegated = await api.setConfig({
+          version: 1,
+          kind: 'subagents',
+          value: { enabled: true, workerTimeoutMs: 60_000 },
+        })
+        if (!delegated.ok) {
+          return {
+            ok: false,
+            step: 'subagents',
+            message: delegated.error.message,
+          }
+        }
+      }
+
       if (traceLogging) {
         const logging = await api.setConfig({
           version: 1,
@@ -265,6 +282,7 @@ export async function configureApp(input: {
       providerNoticeVersion: PROVIDER_NOTICE_VERSION,
       traceNoticeVersion: TRACE_NOTICE_VERSION,
       traceLogging: input.traceLogging ?? false,
+      subagents: input.subagents ?? false,
     },
   )
 

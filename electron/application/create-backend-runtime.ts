@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import type {
   AppBootstrapResultSchema,
@@ -31,9 +31,9 @@ import { LiveSessionContextRegistry } from './live-session-context-registry'
 import { ProjectService, type ProjectRuntimeGuard } from './project-service'
 import { SessionService, type SessionRuntimeGuard } from './session-service'
 import { SubagentStateService } from './subagent-state-service'
+import { AgentExecutionQueryService } from './agent-execution-query-service'
 import { SubagentExecutionBridge } from '../subagent/execution-bridge'
 import { SubagentExecutionService } from '../subagent/execution-service'
-import { WorkspaceSnapshotService } from '../subagent/workspace-snapshot'
 
 type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
@@ -57,6 +57,7 @@ export interface BackendRuntime {
   projects: ProjectService
   sessions: SessionService
   fileChanges: FileChangeService
+  agentExecutions: AgentExecutionQueryService
   runs: DurableRunApplicationService
   liveSessions: LiveSessionContextRegistry
   bootstrap(): Promise<AppBootstrapResult>
@@ -72,6 +73,14 @@ export async function createBackendRuntime(
   const runtimeDataDirectory = path.resolve(options.runtimeDataDirectory)
   await mkdir(path.dirname(databasePath), { recursive: true })
   await mkdir(runtimeDataDirectory, { recursive: true })
+  await rm(path.join(runtimeDataDirectory, 'subagent-snapshots'), {
+    recursive: true,
+    force: true,
+  }).catch((error) =>
+    options.onDiagnostic?.('Failed to clean legacy Subagent snapshots', error, {
+      audience: 'internal',
+    }),
+  )
   const database = DatabaseService.open({
     databasePath,
     appVersion: options.appVersion ?? 'development',
@@ -180,12 +189,10 @@ export async function createBackendRuntime(
   })
   const executionState = new DurableExecutionStatePort(sessions, subagentState)
   const subagentBridge = new SubagentExecutionBridge()
-  const snapshots = new WorkspaceSnapshotService(runtimeDataDirectory)
   let runtime: AgentRuntime | undefined
   let subagentExecution: SubagentExecutionService | undefined
 
   try {
-    await snapshots.initialize()
     runtime = await createAgentRuntime({
       configStore: options.configStore,
       userDataDirectory: runtimeDataDirectory,
@@ -198,6 +205,14 @@ export async function createBackendRuntime(
       fileChangeExecution: fileChanges,
       subagentExecution: subagentBridge,
       onDiagnostic: options.onDiagnostic,
+    })
+    const agentExecutions = new AgentExecutionQueryService({
+      coordinator,
+      sessions: sessionRepository,
+      messages: messageRepository,
+      subagents: subagentRepository,
+      liveSnapshot: (sessionId) =>
+        runtime!.services.sessions.activeRunSnapshot(sessionId),
     })
     await subagentState.interruptActive()
     const targetState: { runs?: DurableRunApplicationService } = {}
@@ -236,7 +251,7 @@ export async function createBackendRuntime(
       sessions,
       executionState,
       state: subagentState,
-      snapshots,
+      events: runtime.events,
       onDiagnostic: options.onDiagnostic,
     })
     subagentBridge.bind(subagentExecution)
@@ -249,6 +264,7 @@ export async function createBackendRuntime(
       projects,
       sessions,
       fileChanges,
+      agentExecutions,
       runs,
       liveSessions,
       async bootstrap() {

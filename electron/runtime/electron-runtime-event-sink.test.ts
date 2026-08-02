@@ -1,8 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
-import { AGENT_EVENT_CHANNEL } from '../../shared/channels'
+import {
+  AGENT_EVENT_CHANNEL,
+  AGENT_EXECUTION_EVENT_CHANNEL,
+} from '../../shared/channels'
 import type { AgentEvent } from '../../shared/agent-events'
-import type { RunId, SessionId } from '../../shared/ids'
+import type { AgentExecutionEvent } from '../../shared/agent-execution'
+import type {
+  AgentExecutionId,
+  CallId,
+  RunId,
+  SessionId,
+} from '../../shared/ids'
 import { createElectronRuntimeEventListener } from './electron-runtime-event-sink'
 
 const event: AgentEvent = {
@@ -13,6 +22,18 @@ const event: AgentEvent = {
   sessionId: 'session:electron-runtime' as SessionId,
   runId: 'run:electron-runtime' as RunId,
   status: 'completed',
+}
+
+const executionEvent: AgentExecutionEvent = {
+  schemaVersion: 1,
+  seq: 1,
+  ts: new Date().toISOString(),
+  type: 'run.status',
+  executionId: 'subagent:electron-runtime' as AgentExecutionId,
+  parentSessionId: 'session:electron-runtime' as SessionId,
+  parentRunId: 'run:electron-runtime' as RunId,
+  parentCallId: 'call:electron-runtime' as CallId,
+  status: 'calling_llm',
 }
 
 describe('Electron runtime event listener', () => {
@@ -31,6 +52,12 @@ describe('Electron runtime event listener', () => {
     expect(send).toHaveBeenCalledWith(
       AGENT_EVENT_CHANNEL,
       expect.objectContaining({ event }),
+    )
+
+    listener.onAgentExecutionEvent?.(executionEvent)
+    expect(send).toHaveBeenCalledWith(
+      AGENT_EXECUTION_EVENT_CHANNEL,
+      expect.objectContaining({ event: executionEvent }),
     )
   })
 

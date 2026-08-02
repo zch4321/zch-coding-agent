@@ -34,6 +34,7 @@ describe('run_command provider schema', () => {
       },
     })
     expect(definition?.inputSchema).not.toHaveProperty('anyOf')
+    expect(definition?.executionMode).toBe('parallel')
 
     const providerDefinition = registry.providerDefinitions()[0]
     expect(providerDefinition).toMatchObject({
@@ -104,6 +105,7 @@ describe('delay tool', () => {
     }
 
     expect(definition).toMatchObject({
+      executionMode: 'parallel',
       defaultRisk: 'low',
       effects: [],
     })

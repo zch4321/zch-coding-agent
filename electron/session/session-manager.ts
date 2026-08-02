@@ -6,6 +6,7 @@ import {
 } from '../../shared/config'
 import type {
   CallId,
+  AgentExecutionId,
   MessageId,
   RunId,
   SessionId,
@@ -290,7 +291,7 @@ export class SessionManager {
     return this.#createSession(input)
   }
 
-  /** Creates an event-hidden read-only Session over a Subagent snapshot. */
+  /** Creates an event-hidden read-only Session for one Subagent execution. */
   async createInternalSession(input: {
     workspace: string
     provider: string
@@ -299,6 +300,14 @@ export class SessionManager {
     gitToolsEnabled: boolean
     providerSnapshot: ProviderPublicConfig
     sessionId?: SessionId
+    execution: {
+      executionId: AgentExecutionId
+      parentSessionId: SessionId
+      parentRunId: RunId
+      parentCallId: CallId
+      name: string
+      createdAt: string
+    }
   }): Promise<SessionId> {
     return this.#createSession(
       {
@@ -312,6 +321,7 @@ export class SessionManager {
         allowedToolIds: input.allowedToolIds,
         gitToolsEnabled: input.gitToolsEnabled,
         providerSnapshot: input.providerSnapshot,
+        execution: input.execution,
       },
     )
   }
@@ -330,6 +340,7 @@ export class SessionManager {
       allowedToolIds: ReadonlySet<string>
       gitToolsEnabled: boolean
       providerSnapshot: ProviderPublicConfig
+      execution: NonNullable<SessionState['internalExecution']>
     },
   ): Promise<SessionId> {
     const configured = this.#configStore.getPublicConfig()
@@ -415,6 +426,9 @@ export class SessionManager {
       eventSeq: 0,
       closed: false,
       visibility: internal ? 'internal' : 'public',
+      ...(internal
+        ? { internalExecution: structuredClone(internal.execution) }
+        : {}),
       readOnlyWorkspace: Boolean(internal),
       gitToolsEnabled: internal?.gitToolsEnabled ?? true,
       ...(internal ? { allowedToolIds: new Set(internal.allowedToolIds) } : {}),

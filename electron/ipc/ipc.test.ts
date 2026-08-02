@@ -8,6 +8,7 @@ import {
 import type {
   CallId,
   FileChangeId,
+  AgentExecutionId,
   MessageId,
   ProjectId,
   RunId,
@@ -24,6 +25,7 @@ const terminalId = 'terminal-1' as TerminalId
 const projectId = 'project-1' as ProjectId
 const messageId = 'message-1' as MessageId
 const fileChangeId = 'change-1' as FileChangeId
+const agentExecutionId = 'subagent-1' as AgentExecutionId
 const projectModel = {
   schemaVersion: 1,
   workspaceRoot: 'F:/workspace',
@@ -128,6 +130,12 @@ const validPayloads: {
     sessionId,
     fileChangeId,
     expectedRevision: 1,
+  },
+  'agent-execution:list': { version: 1, parentSessionId: sessionId },
+  'agent-execution:get': {
+    version: 1,
+    parentSessionId: sessionId,
+    executionId: agentExecutionId,
   },
   'workspace:choose': { version: 1 },
   'workspace:list-directory': {

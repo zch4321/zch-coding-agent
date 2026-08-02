@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { CallId, RunId, SessionId } from '../../shared/ids'
+import type {
+  AgentExecutionId,
+  CallId,
+  RunId,
+  SessionId,
+} from '../../shared/ids'
 import type { SubagentExecutionRecord } from './subagent-repository'
 import { MessageRepository } from './message-repository'
 import { ProjectRepository } from './project-repository'
@@ -24,7 +29,7 @@ function execution(
   overrides: Partial<SubagentExecutionRecord> = {},
 ): SubagentExecutionRecord {
   return {
-    id: 'subagent:fixture',
+    id: 'subagent:fixture' as AgentExecutionId,
     parentSessionId,
     parentRunId: 'run:parent' as RunId,
     parentCallId: 'call:subagent' as CallId,
@@ -94,7 +99,7 @@ describe('Subagent persistence', () => {
   it('marks abandoned work interrupted without changing completed results', async () => {
     const { testDatabase, parent, record } = await seedHiddenSession()
     const completed = execution(parent.id, {
-      id: 'subagent:completed',
+      id: 'subagent:completed' as AgentExecutionId,
       parentRunId: 'run:completed' as RunId,
       parentCallId: 'call:completed' as CallId,
       status: 'completed',

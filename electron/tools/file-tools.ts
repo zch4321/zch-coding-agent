@@ -251,6 +251,7 @@ export function createFileToolDefinitions(
 ): ToolDefinition[] {
   const createFile: ToolDefinition<typeof CreateFileArgsSchema> = {
     id: 'create_file',
+    executionMode: 'serial',
     description:
       'Create a new UTF-8 file inside the workspace, creating missing parent directories automatically. Use apply_patch when the file already exists.',
     inputSchema: CreateFileArgsSchema,
@@ -293,6 +294,7 @@ export function createFileToolDefinitions(
 
   const applyPatch: ToolDefinition<typeof ApplyPatchArgsSchema> = {
     id: 'apply_patch',
+    executionMode: 'serial',
     description:
       'Apply a single-file unified diff with one or more hunks. Context/deleted lines must match exactly; hunk line counts and new-file line numbers are advisory. If the old line number is stale, the patch is applied only when the exact context has one unique match.',
     inputSchema: ApplyPatchArgsSchema,
@@ -351,6 +353,7 @@ export function createFileToolDefinitions(
 
   const deleteFile: ToolDefinition<typeof DeleteFileArgsSchema> = {
     id: 'delete_file',
+    executionMode: 'serial',
     description:
       'Delete one regular file inside the workspace. Requires permission approval.',
     inputSchema: DeleteFileArgsSchema,

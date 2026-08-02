@@ -8,6 +8,7 @@ import {
   NCollapse,
   NCollapseItem,
   NModal,
+  NScrollbar,
   NSpin,
   NTag,
 } from 'naive-ui'
@@ -116,7 +117,7 @@ async function confirmExport() {
     preset="card"
     class="transcript-modal"
     style="width: min(1180px, 94vw); height: min(860px, 92vh)"
-    content-style="overflow: auto"
+    content-style="min-height: 0; overflow: hidden"
     :title="t('transcript.title')"
     :bordered="false"
     @update:show="!$event && close()"
@@ -142,107 +143,115 @@ async function confirmExport() {
       </div>
     </template>
 
-    <NAlert v-if="traces.transcriptUnavailable" type="warning">
-      {{ t('transcript.unavailable') }}
-    </NAlert>
-    <template v-if="traces.transcriptMetadata">
-      <div class="transcript-meta">
-        <NTag>{{ traces.transcriptMetadata.traceId }}</NTag>
-        <NTag :type="traces.transcriptMetadata.active ? 'warning' : 'success'">
-          {{
-            traces.transcriptMetadata.active
-              ? t('transcript.active')
-              : t('transcript.closed')
-          }}
-        </NTag>
-        <span>{{ traces.transcriptMetadata.model }}</span>
-        <span>{{ traces.transcriptMetadata.mode }}</span>
-        <span>#{{ traces.transcriptMetadata.lastSeq }}</span>
-      </div>
-
-      <NCheckboxGroup
-        v-model:value="selectedCategories"
-        class="transcript-filters"
-      >
-        <NCheckbox
-          v-for="category in categories"
-          :key="category"
-          :value="category"
-          :label="t(`transcript.categories.${category}`)"
-        />
-      </NCheckboxGroup>
-
-      <NSpin :show="traces.transcriptLoading">
-        <div class="transcript-groups">
-          <section v-for="group in groups" :key="group.key">
-            <h3>{{ group.label }}</h3>
-            <NCollapse
-              :default-expanded-names="defaultExpandedEntryNames(group.entries)"
+    <NScrollbar class="transcript-scroll">
+      <div class="transcript-scroll-content">
+        <NAlert v-if="traces.transcriptUnavailable" type="warning">
+          {{ t('transcript.unavailable') }}
+        </NAlert>
+        <template v-if="traces.transcriptMetadata">
+          <div class="transcript-meta">
+            <NTag>{{ traces.transcriptMetadata.traceId }}</NTag>
+            <NTag
+              :type="traces.transcriptMetadata.active ? 'warning' : 'success'"
             >
-              <NCollapseItem
-                v-for="entry in group.entries"
-                :key="entry.id"
-                :name="entry.id"
-                class="transcript-entry"
-                :data-kind="entry.kind"
-              >
-                <template #header>
-                  <div class="transcript-entry-header">
-                    <span>#{{ entry.seq }}</span>
-                    <time :datetime="entry.ts">{{ entry.ts }}</time>
-                    <strong>{{ entry.title }}</strong>
-                    <NTag
-                      v-for="category in entry.categories"
-                      :key="category"
-                      size="small"
-                    >
-                      {{ category }}
-                    </NTag>
-                  </div>
-                </template>
-                <div class="transcript-entry-body">
-                  <pre v-if="entry.text">{{ entry.text }}</pre>
-                  <pre v-if="entry.data">{{ json(entry.data) }}</pre>
-                  <div v-if="entry.requestEventId" class="request-snapshot">
-                    <NButton
-                      v-if="!request(entry)"
-                      secondary
-                      size="small"
-                      @click="loadRequest(entry)"
-                    >
-                      {{ t('transcript.loadRequest') }}
-                    </NButton>
-                    <template v-else>
-                      <pre>{{ json(request(entry)?.messages) }}</pre>
-                      <NButton
-                        v-if="request(entry)?.nextCursor"
-                        secondary
-                        size="small"
-                        :loading="request(entry)?.loading"
-                        @click="loadRequest(entry)"
-                      >
-                        {{ t('transcript.loadMoreMessages') }}
-                      </NButton>
-                    </template>
-                  </div>
-                </div>
-              </NCollapseItem>
-            </NCollapse>
-          </section>
-        </div>
-      </NSpin>
+              {{
+                traces.transcriptMetadata.active
+                  ? t('transcript.active')
+                  : t('transcript.closed')
+              }}
+            </NTag>
+            <span>{{ traces.transcriptMetadata.model }}</span>
+            <span>{{ traces.transcriptMetadata.mode }}</span>
+            <span>#{{ traces.transcriptMetadata.lastSeq }}</span>
+          </div>
 
-      <NButton
-        v-if="traces.transcriptNextCursor"
-        block
-        secondary
-        :loading="traces.transcriptLoading"
-        @click="traces.loadTranscript(false)"
-      >
-        {{ t('transcript.loadMore') }}
-        ({{ traces.transcriptEntries.length }}/{{ traces.transcriptTotal }})
-      </NButton>
-    </template>
+          <NCheckboxGroup
+            v-model:value="selectedCategories"
+            class="transcript-filters"
+          >
+            <NCheckbox
+              v-for="category in categories"
+              :key="category"
+              :value="category"
+              :label="t(`transcript.categories.${category}`)"
+            />
+          </NCheckboxGroup>
+
+          <NSpin :show="traces.transcriptLoading">
+            <div class="transcript-groups">
+              <section v-for="group in groups" :key="group.key">
+                <h3>{{ group.label }}</h3>
+                <NCollapse
+                  :default-expanded-names="
+                    defaultExpandedEntryNames(group.entries)
+                  "
+                >
+                  <NCollapseItem
+                    v-for="entry in group.entries"
+                    :key="entry.id"
+                    :name="entry.id"
+                    class="transcript-entry"
+                    :data-kind="entry.kind"
+                  >
+                    <template #header>
+                      <div class="transcript-entry-header">
+                        <span>#{{ entry.seq }}</span>
+                        <time :datetime="entry.ts">{{ entry.ts }}</time>
+                        <strong>{{ entry.title }}</strong>
+                        <NTag
+                          v-for="category in entry.categories"
+                          :key="category"
+                          size="small"
+                        >
+                          {{ category }}
+                        </NTag>
+                      </div>
+                    </template>
+                    <div class="transcript-entry-body">
+                      <pre v-if="entry.text">{{ entry.text }}</pre>
+                      <pre v-if="entry.data">{{ json(entry.data) }}</pre>
+                      <div v-if="entry.requestEventId" class="request-snapshot">
+                        <NButton
+                          v-if="!request(entry)"
+                          secondary
+                          size="small"
+                          @click="loadRequest(entry)"
+                        >
+                          {{ t('transcript.loadRequest') }}
+                        </NButton>
+                        <template v-else>
+                          <pre>{{ json(request(entry)?.messages) }}</pre>
+                          <NButton
+                            v-if="request(entry)?.nextCursor"
+                            secondary
+                            size="small"
+                            :loading="request(entry)?.loading"
+                            @click="loadRequest(entry)"
+                          >
+                            {{ t('transcript.loadMoreMessages') }}
+                          </NButton>
+                        </template>
+                      </div>
+                    </div>
+                  </NCollapseItem>
+                </NCollapse>
+              </section>
+            </div>
+          </NSpin>
+
+          <NButton
+            v-if="traces.transcriptNextCursor"
+            block
+            secondary
+            :loading="traces.transcriptLoading"
+            @click="traces.loadTranscript(false)"
+          >
+            {{ t('transcript.loadMore') }}
+            ({{ traces.transcriptEntries.length }}/{{ traces.transcriptTotal }})
+          </NButton>
+        </template>
+      </div>
+    </NScrollbar>
   </NModal>
   <ConfirmDialog
     v-model:show="exportDialogOpen"
@@ -270,6 +279,14 @@ async function confirmExport() {
 .transcript-meta,
 .transcript-filters {
   margin-bottom: 14px;
+}
+
+.transcript-scroll {
+  height: 100%;
+}
+
+.transcript-scroll-content {
+  min-height: 100%;
 }
 
 .transcript-groups {

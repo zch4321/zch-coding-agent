@@ -31,6 +31,7 @@ defineProps<{
     | 'upload'
     | 'undo'
     | 'external-link'
+    | 'agents'
 }>()
 </script>
 
@@ -182,6 +183,12 @@ defineProps<{
       <path d="M14 4h6v6" />
       <path d="m20 4-9 9" />
       <path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6" />
+    </g>
+    <g v-else-if="name === 'agents'">
+      <circle cx="9" cy="8" r="3" />
+      <circle cx="17" cy="10" r="2.5" />
+      <path d="M3.5 20c.4-4 2.2-6 5.5-6s5.1 2 5.5 6" />
+      <path d="M14 15c3.8-.5 5.8 1.2 6.5 4.5" />
     </g>
   </svg>
 </template>

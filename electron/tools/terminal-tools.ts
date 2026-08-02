@@ -130,6 +130,7 @@ export function registerTerminalTools(
 ): void {
   registry.registerTool({
     id: 'terminal_open',
+    executionMode: 'serial',
     description:
       'Open a persistent terminal owned by the current session. Use for long-running tests, watch tasks, dev servers, REPLs, and commands that need repeated observation.',
     inputSchema: OpenSchema,
@@ -151,6 +152,7 @@ export function registerTerminalTools(
 
   registry.registerTool({
     id: 'terminal_send',
+    executionMode: 'serial',
     description:
       'Send input to a persistent terminal owned by this session. Include a newline to press Enter; on Windows a bare LF is normalized to CR. Optional delayMs waits after accepted input before returning so a sequential terminal_read can observe command output.',
     inputSchema: SendSchema,
@@ -186,6 +188,7 @@ export function registerTerminalTools(
 
   registry.registerTool({
     id: 'terminal_read',
+    executionMode: 'serial',
     description:
       'Read bounded, ANSI-free output from a persistent terminal owned by this session. Use cursor for incremental polling after delay while a long-running test, server, watcher, or REPL continues.',
     inputSchema: ReadSchema,
@@ -212,6 +215,7 @@ export function registerTerminalTools(
 
   registry.registerTool({
     id: 'terminal_list',
+    executionMode: 'serial',
     description: 'List persistent terminals owned by this session.',
     inputSchema: ListSchema,
     effects: ['terminal.read'],
@@ -231,6 +235,7 @@ export function registerTerminalTools(
 
   registry.registerTool({
     id: 'terminal_close',
+    executionMode: 'serial',
     description: 'Close a persistent terminal owned by this session.',
     inputSchema: CloseSchema,
     effects: ['terminal.write'],
@@ -251,6 +256,7 @@ export function registerTerminalTools(
 
   registry.registerTool({
     id: 'terminal_resize',
+    executionMode: 'serial',
     description: 'Resize a persistent terminal owned by this session.',
     inputSchema: ResizeSchema,
     effects: ['terminal.read'],

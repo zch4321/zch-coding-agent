@@ -114,6 +114,9 @@ describe('MCP gateway tools', () => {
       getSession: () => session,
     })
     const read = registry.get('read_mcp_server')!
+    expect(registry.get('list_mcp_servers')?.executionMode).toBe('parallel')
+    expect(read.executionMode).toBe('parallel')
+    expect(registry.get('call_mcp_tool')?.executionMode).toBe('serial')
     const first = await read.execute(
       { serverId: 'fixture', limit: 1 },
       executionContext(session),
@@ -156,6 +159,7 @@ describe('MCP gateway tools', () => {
     })
     if (!alphaCall.matched || !alphaCall.ok) return
 
+    expect(alphaCall.definition.executionMode).toBe('serial')
     expect(policy(alphaCall.definition, 'readonly')).toBe('deny')
     expect(policy(alphaCall.definition, 'auto')).toBe('model')
     expect(policy(alphaCall.definition, 'confirm')).toBe('review')

@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../../shared/agent-events'
+import type { AgentExecutionEvent } from '../../shared/agent-execution'
 import type { CallId, SessionId } from '../../shared/ids'
 import type { JsonObject } from '../../shared/json'
 import {
@@ -29,6 +30,7 @@ afterEach(async () => {
 function toolTurn(input: {
   id: string
   calls: Array<{ id: string; toolId: string; args: JsonObject }>
+  reasoning?: string
 }): Extract<ScriptedProviderEvent, { type: 'completed' }> {
   return {
     type: 'completed',
@@ -36,6 +38,7 @@ function toolTurn(input: {
     turn: {
       role: 'assistant',
       content: null,
+      ...(input.reasoning ? { reasoning_content: input.reasoning } : {}),
       tool_calls: input.calls.map((call) => ({
         id: call.id,
         type: 'function',
@@ -86,7 +89,7 @@ class SubagentChainProvider extends ScriptedProviderHarness {
               id: 'call:subagent',
               toolId: 'subagent_run',
               args: {
-                name: 'snapshot-audit',
+                name: 'live-workspace-audit',
                 task: 'Inspect README.md and the current Git diff, then report both directly.',
               },
             },
@@ -99,7 +102,7 @@ class SubagentChainProvider extends ScriptedProviderHarness {
         rawResponse: { id: 'parent:complete' },
         turn: {
           role: 'assistant',
-          content: 'Parent summarized the Subagent snapshot audit.',
+          content: 'Parent summarized the live Subagent workspace audit.',
         },
         usage: { prompt_tokens: 20, completion_tokens: 6, total_tokens: 26 },
         providerState: {},
@@ -112,11 +115,17 @@ class SubagentChainProvider extends ScriptedProviderHarness {
     if (this.childRequests.length === 1) {
       await writeFile(
         path.join(this.#workspace, 'README.md'),
-        'mutated after snapshot\n',
+        'mutated before live read\n',
         'utf8',
       )
+      yield {
+        type: 'reasoning.delta',
+        delta: 'Inspect the live files before reporting.',
+        raw: { fixture: 'child-reasoning' },
+      }
       yield toolTurn({
         id: 'child:inspect',
+        reasoning: 'Inspect the live files before reporting.',
         calls: [
           {
             id: 'call:child-read',
@@ -143,7 +152,8 @@ class SubagentChainProvider extends ScriptedProviderHarness {
       turn: {
         role: 'assistant',
         content:
-          'The frozen README and Git diff both show “dirty before snapshot”.',
+          'The live README and Git diff both show “mutated before live read”.',
+        reasoning_content: 'Summarize the verified workspace evidence.',
       },
       usage: {
         prompt_tokens: 30,
@@ -162,7 +172,7 @@ async function git(workspace: string, args: string[]): Promise<void> {
 }
 
 describe('read-only Subagent runtime', () => {
-  it('runs against a frozen file/Git view and returns a hidden durable result', async () => {
+  it('reads the live file/Git view and returns a hidden durable result', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'zch-subagent-runtime-'))
     cleanup.push(root)
     const workspace = path.join(root, 'workspace')
@@ -187,9 +197,21 @@ describe('read-only Subagent runtime', () => {
     ])
     await writeFile(
       path.join(workspace, 'README.md'),
-      'dirty before snapshot\n',
+      'dirty before child start\n',
       'utf8',
     )
+    const refsBefore = (
+      await execFileAsync('git', ['for-each-ref', '--format=%(refname)'], {
+        cwd: workspace,
+      })
+    ).stdout
+    const legacySnapshots = path.join(
+      targetDirectory,
+      'subagent-snapshots',
+      'orphan',
+    )
+    await mkdir(legacySnapshots, { recursive: true })
+    await writeFile(path.join(legacySnapshots, 'marker'), 'legacy', 'utf8')
 
     const store = await createConfig(root)
     await store.update({
@@ -213,13 +235,19 @@ describe('read-only Subagent runtime', () => {
       })
     })
     const events: AgentEvent[] = []
+    const executionEvents: AgentExecutionEvent[] = []
     const target = await createBackendRuntime({
       configStore: store,
       promptDirectory: path.resolve('resources', 'prompts'),
       databasePath: path.join(targetDirectory, 'agent.db'),
       runtimeDataDirectory: targetDirectory,
       providerFactory: () => provider,
-      eventListeners: [{ onAgentEvent: (event) => events.push(event) }],
+      eventListeners: [
+        {
+          onAgentEvent: (event) => events.push(event),
+          onAgentExecutionEvent: (event) => executionEvents.push(event),
+        },
+      ],
     })
     try {
       const project = (await target.projects.add({ path: workspace })).commit
@@ -236,7 +264,7 @@ describe('read-only Subagent runtime', () => {
           model: originalModel,
           reasoning: 'off',
         },
-        message: 'Delegate a frozen workspace audit.',
+        message: 'Delegate a live workspace audit.',
         clientRequestId: 'request:subagent-e2e',
       })
       if (started.outcome !== 'started')
@@ -261,6 +289,38 @@ describe('read-only Subagent runtime', () => {
             event.type === 'llm.usage' && event.usage.scope === 'subagent',
         ),
       ).toBe(true)
+
+      expect(executionEvents.length).toBeGreaterThan(0)
+      expect(
+        new Set(executionEvents.map((event) => event.executionId)).size,
+      ).toBe(1)
+      expect(executionEvents.map((event) => event.seq)).toEqual(
+        Array.from({ length: executionEvents.length }, (_, index) => index + 1),
+      )
+      expect(
+        executionEvents.every(
+          (event) =>
+            event.parentSessionId === sessionId &&
+            event.parentRunId === started.runId,
+        ),
+      ).toBe(true)
+      expect(executionEvents.map((event) => event.type)).toEqual(
+        expect.arrayContaining([
+          'execution.changed',
+          'run.status',
+          'assistant.message.completed',
+          'tool.proposed',
+          'tool.completed',
+          'llm.usage',
+        ]),
+      )
+      const executionUsage = executionEvents.find(
+        (event) => event.type === 'llm.usage',
+      )
+      expect(executionUsage).toMatchObject({
+        type: 'llm.usage',
+        usage: { scope: 'subagent' },
+      })
 
       expect(provider.parentRequests).toHaveLength(2)
       expect(provider.childRequests).toHaveLength(2)
@@ -299,28 +359,64 @@ describe('read-only Subagent runtime', () => {
         'Inspect README.md and the current Git diff, then report both directly.',
       )
       expect(firstChildHistory).not.toContain(
-        'Delegate a frozen workspace audit.',
+        'Delegate a live workspace audit.',
       )
       const secondChildHistory = JSON.stringify(
         provider.childRequests[1]!.normalizedMessages,
       )
-      expect(secondChildHistory).toContain('dirty before snapshot')
-      expect(secondChildHistory).not.toContain('mutated after snapshot')
+      expect(secondChildHistory).toContain('mutated before live read')
+      expect(secondChildHistory).not.toContain('dirty before child start')
       expect(secondChildHistory).toContain('TOOL_NOT_AVAILABLE')
       expect(
         JSON.stringify(provider.parentRequests[1]!.normalizedMessages),
-      ).toContain('The frozen README and Git diff both show')
+      ).toContain('The live README and Git diff both show')
 
       const parent = await target.sessions.get(sessionId)
       const parentJson = JSON.stringify(parent)
       expect(parentJson).toContain(
-        'Parent summarized the Subagent snapshot audit.',
+        'Parent summarized the live Subagent workspace audit.',
       )
-      expect(parentJson).toContain('snapshot-audit')
+      expect(parentJson).toContain('live-workspace-audit')
       expect(parentJson).not.toContain('subagent-session-')
       expect(
         (await target.sessions.list()).records.map((record) => record.id),
       ).toEqual([sessionId])
+
+      const executionPage = await target.agentExecutions.list({
+        parentSessionId: sessionId,
+      })
+      expect(executionPage).toMatchObject({
+        hasMore: false,
+        records: [
+          {
+            name: 'live-workspace-audit',
+            status: 'completed',
+            usage: { records: 2, totalTokens: 52 },
+          },
+        ],
+      })
+      const executionDetail = await target.agentExecutions.get({
+        parentSessionId: sessionId,
+        executionId: executionPage.records[0]!.id,
+      })
+      expect(executionDetail.task).toContain('Inspect README.md')
+      expect(executionDetail.activityPage.records).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'reasoning',
+            text: 'Inspect the live files before reporting.',
+          }),
+          expect.objectContaining({
+            type: 'tool',
+            tool: 'read_file',
+            status: 'completed',
+          }),
+          expect.objectContaining({
+            type: 'message',
+            text: expect.stringContaining('mutated before live read'),
+          }),
+        ]),
+      )
 
       const durable = (
         await target.coordinator.query((reader) => ({
@@ -342,15 +438,33 @@ describe('read-only Subagent runtime', () => {
       expect(durable.execution).toMatchObject({
         status: 'completed',
         error_code: null,
+        source_identity_json: null,
       })
       expect(durable.hiddenCount).toEqual({ count: 1 })
+      const hiddenSessionId = (
+        await target.coordinator.query((reader) =>
+          reader
+            .prepare('SELECT session_id FROM subagent_sessions LIMIT 1')
+            .get(),
+        )
+      ).value as { session_id: string }
+      expect(JSON.stringify(executionEvents)).not.toContain(
+        hiddenSessionId.session_id,
+      )
       const persisted = JSON.stringify(durable.execution)
       expect(persisted).not.toContain('secret-sentinel')
       expect(persisted).not.toContain('subagent-snapshots')
       expect(persisted).not.toContain('subagent-session-')
+      await expect(
+        readdir(path.join(targetDirectory, 'subagent-snapshots')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
       expect(
-        await readdir(path.join(targetDirectory, 'subagent-snapshots')),
-      ).toEqual([])
+        (
+          await execFileAsync('git', ['for-each-ref', '--format=%(refname)'], {
+            cwd: workspace,
+          })
+        ).stdout,
+      ).toBe(refsBefore)
     } finally {
       await target.dispose()
     }

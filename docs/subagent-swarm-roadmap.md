@@ -12,15 +12,15 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 - `subagent_run` 的公开输入固定为 `{ name, task }`；`task` 作为子 Session 的普通 canonical `user_input`，不复制父 Session 历史。
 - 子 Agent 复用唯一 Session/Run/Provider loop，精确继承父 Run 已冻结的 main/compression route。
-- 每次执行读取 workspace 外的稳定文件/Git snapshot，只能使用明确列出的只读工具。
-- Tool batch 在任何调用、审批或插件 hook 前统一预检；`subagent_run` 必须是本批最后一个调用。
+- 每次执行直接读取父 Run 的 live workspace，只能使用明确列出的只读工具，不创建文件/Git snapshot 或 refs。
+- `subagent_run` 是 parallel Tool；同批可有多个调用，准备/审批和结果提交按 call 顺序，Tool body 可并发。
 - 隐藏 Session 与 execution 使用 SQLite durable ownership；不进入普通 bootstrap、分页、搜索、导出或 Renderer 事件。
-- 父 Run 取消、30 分钟默认 worker timeout、Provider failure 与应用退出都会中断子 Run 并清理 snapshot。
+- 父 Run 取消、30 分钟默认 worker timeout、Provider failure 与应用退出都会中断子 Run 并释放全局 Run slot。
 - 子 Agent 沿用全局 `maxStepsPerRun`、模型最大输出和通用 Tool context 限制，没有专属 step/token/result 预算。
 - Execution 内部保留 `results/meta`；父模型的 canonical Tool Result 只接收 `results[name]` 最终文本，Provider/model/usage 不重复进入上下文。
 - Desktop 与 Headless 共用相同实现；父对话继续显示普通 ToolCallCard。
 
-这些约束是后续 Model Pool 和 Swarm 的底座，不在后续阶段复制第二套 Session、Provider、snapshot、Tool executor 或恢复逻辑。
+这些约束是后续 Model Pool 和 Swarm 的底座，不在后续阶段复制第二套 Session、Provider、Tool executor 或恢复逻辑。
 
 ## 2. S3 · Model Pool（下一阶段）
 
@@ -55,7 +55,7 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 - Agents 设置页增加 pool entry 的增删、排序、启停、Provider/model/reasoning、能力等级与并发配置。
 - 保存前一次性校验 Provider、credential reference、模型和 revision；无效配置不能部分生效。
-- UI 明确展示每个模型会接收 workspace snapshot 内容并产生额外 Provider 请求。
+- UI 明确展示每个模型会读取当前 workspace 内容并产生额外 Provider 请求。
 - Runtime Identity 记录模型池 digest 和调度能力，方便 Headless 结果比较。
 
 ### 2.4 验收
@@ -71,11 +71,11 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 `/swarm <目标>` 为当前 Run 创建一次性 orchestration capability。只有持有该 capability 的主 Agent 才能看到和调用 `swarm_run`；历史消息、普通 Run 和子 Agent 不能继承或重放它。
 
-`swarm_run` 接收一组具名、自包含的只读调查任务。主 Agent负责拆分任务；Backend 负责校验、冻结 assignment、共享 snapshot、排队、取消和聚合结果。SwarmCoordinator 直接并发调用现有 `SubagentExecutionPort.runOne` 原语，不通过循环调用公开 `subagent_run` Tool 实现。
+`swarm_run` 接收一组具名、自包含的只读调查任务。主 Agent负责拆分任务；Backend 负责校验、冻结 assignment、排队、取消和聚合结果。SwarmCoordinator 直接并发调用现有 `SubagentExecutionPort.runOne` 原语，不通过循环调用公开 `subagent_run` Tool 实现。
 
 ### 3.2 运行边界
 
-- 同一 Swarm 的 Agent 共享一次稳定 snapshot 和 source identity。
+- 同一 Swarm 的 Agent 绑定相同 canonical workspace，并在各自读取时观察 live 状态；本阶段不重新引入 source identity 或冻结 snapshot。
 - 调度使用有界队列，受全局 Run slot、pool entry `maxParallel` 和 Job 最大 Agent 数约束；不能直接无界 `Promise.all`。
 - 全局 `maxConcurrentRuns = 1` 时在启动前拒绝，避免父 Run 占满唯一 slot。
 - 父 Run 取消或应用退出时停止 queued assignment，并中断所有 active child Run。
@@ -88,7 +88,7 @@ Swarm 结果沿用单子 Agent 的 `results/meta` 思路：
 
 - `results` 按声明顺序保存每个具名 Agent 的最终文本或失败状态。
 - `meta` 保存 Job 状态、实际 Provider/model、耗时、标准化 usage、截断和有界错误。
-- 不返回 reasoning、endpoint、凭据、子 Session ID、trace 路径、临时绝对路径或完整工具轨迹。
+- 不返回 reasoning、endpoint、凭据、子 Session ID、trace 路径、workspace 绝对路径或完整工具轨迹。
 - 主 Agent 在原 Run 中消费一个标准 Tool Result 并向用户汇总，不启动第二个聚合 Run。
 
 具体多 Agent JSON schema、失败值表示和 Job 级上限在 S4 实现计划中冻结；不提前改变 P13 的单 Agent contract。
@@ -97,13 +97,13 @@ Swarm 结果沿用单子 Agent 的 `results/meta` 思路：
 
 - 未启用、非 `/swarm` Run、重复调用和 capability 重放均在 Provider/Tool 执行前被拒绝。
 - 十个只读 Agent 可在有界并发下完成，主 Session 只出现一个 Swarm Tool call/result 和最终 Assistant 回复。
-- 所有 Agent 读取相同 source identity；部分失败保留成功结果，全部失败返回明确 Tool error。
+- 所有 Agent 绑定相同 canonical workspace；部分失败保留成功结果，全部失败返回明确 Tool error。
 - Renderer reload 不暴露隐藏 Session，也不影响后台 Job 收敛。
 
 ## 4. S5 · Hardening 与体验
 
 - 在现有 ToolCallCard 内展示 queued/running/completed/failed 汇总、模型 assignment、部分失败和截断；不新增普通 Session 入口。
-- 完善大仓库 snapshot 复用、orphan retention、父 call 到 child usage 的诊断关联和成本汇总。
+- 完善 live workspace 变更提示、父 call 到 child usage 的诊断关联和成本汇总。
 - 覆盖慢 Provider、排队取消、应用崩溃、Renderer reload 与长结果的压力测试。
 - 评估只读 transcript 诊断入口，但 child Session 仍不可继续聊天。
 
@@ -138,8 +138,8 @@ Swarm 结果沿用单子 Agent 的 `results/meta` 思路：
 后续阶段必须持续覆盖：
 
 - write/process/terminal/network/MCP/code intelligence/递归 Agent Tool 对 child 不可见，伪造调用也由 executor 拒绝。
-- 特殊 Tool batch 的非法位置在任何前置调用、审批或插件 hook 前拒绝整批。
-- route、source identity、assignment、usage 和终态可审计，但凭据、reasoning 与临时路径不落盘、不回传。
+- parallel/serial Tool 调度持续保持串行屏障、单审批和原 call 顺序结果；未知 Tool 默认 serial。
+- route、canonical workspace、assignment、usage 和终态可审计，但凭据、reasoning 与 workspace 绝对路径不落盘、不回传。
 - 隐藏 Session 不进入 bootstrap、分页、搜索、导出、普通事件或侧栏；父/Project 删除级联清理，归档保留。
 - 重启只把遗留 active execution 标记为 `interrupted`，不恢复 stream、不自动重试 Provider。
 - Desktop 与 Headless 继续复用唯一 runtime，并用 fake-provider trajectory 验证一致性。
@@ -152,5 +152,5 @@ Swarm 结果沿用单子 Agent 的 `results/meta` 思路：
 - 子 Agent 之间通信、递归委派、投票、辩论或自动应用修改。
 - 允许 child 运行测试、终端、命令、网络或只读 MCP 的隔离 sandbox profile。
 - 自定义 child 工具列表；当前 `subagents.enabled` 仅保留功能开关。
-- 共享结果索引、跨 Job snapshot cache 和自动能力评估。
+- 共享结果索引、跨 Job 调查缓存和自动能力评估。
 - 多机器 Worker、claim lease、heartbeat、远程 artifact/trace 上传和断线恢复。

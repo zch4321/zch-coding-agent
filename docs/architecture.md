@@ -909,11 +909,11 @@ Application service 通过 `DatabaseService.withTransaction()`：
 
 SQLite v5 增加 `subagent_executions` 与 `subagent_sessions`。它们是 backend-private durable execution state，不加入 shared `SessionRecord`、IPC 或 Renderer replica：
 
-- `subagent_executions` 以 `(parent_session_id, parent_run_id, parent_call_id)` 唯一标识一次委派，保存参数 hash、`preparing/running/terminal` 状态、安全 route snapshot、source identity、标准化 usage、有界结果/错误和时间戳。它不重复保存 task 明文，也不保存 API key、endpoint、reasoning、trace 路径或 snapshot 绝对路径。
+- `subagent_executions` 以 `(parent_session_id, parent_run_id, parent_call_id)` 唯一标识一次委派，保存参数 hash、`preparing/running/terminal` 状态、安全 route snapshot、标准化 usage、有界结果/错误和时间戳。它不重复保存 task 明文，也不保存 API key、endpoint、reasoning、trace 路径或 workspace 绝对路径；旧版 nullable `source_identity_json` 列只为数据库兼容保留，新执行不再写入。
 - `subagent_sessions` 在 child 首条 canonical message commit 时原子记录 hidden Session 与 execution/parent 的归属。公开 Session get/bootstrap/list/search/export 必须排除这些 Session；backend 内部恢复使用显式 private query，不能靠调用方记得过滤。
 - 相同 parent Session/Run/call 与参数 hash 可以直接复用已完成结果；相同调用标识但参数 hash 不同返回冲突，避免无意重复产生 Provider 费用。
 - 应用启动时把遗留 `preparing/running` execution 标记为 `interrupted`；不恢复 Provider stream，也不自动重试。
-- 删除父 Session 或 Project 时由 foreign key/trigger 级联删除 child Session、execution 和 canonical messages；归档父 Session 时继续保留。临时 snapshot 在完成、取消、失败、dispose 与下次启动恢复清理时删除。
+- 删除父 Session 或 Project 时由 foreign key/trigger 级联删除 child Session、execution 和 canonical messages；归档父 Session 时继续保留。
 
 子 Session 自身仍使用普通 `sessions/messages` schema，从而复用唯一 Message history compiler、Session/Run loop 和 Provider runtime；hidden ownership 是正交关系，不挪用普通 fork 字段。
 
@@ -1443,15 +1443,15 @@ Renderer 不可以：
 
 ## 13. 配置、Secrets 与其他存储
 
-| 数据                                                 | 存储                                     | 所有者                  |
-| ---------------------------------------------------- | ---------------------------------------- | ----------------------- |
-| Projects、Sessions、Messages、Goal/Plan、FileChanges | `userData/agent.db`                      | backend                 |
-| 非敏感应用/provider 配置                             | backend config repository                | backend                 |
-| API keys                                             | Electron safeStorage-backed secret store | backend                 |
-| Trace                                                | `userData/traces/*.jsonl`                | backend                 |
-| Skills                                               | `userData/skills/`                       | backend manager         |
-| ProjectModel                                         | 暂停持久化；目标为 `userData/agent.db`   | backend（迁移后）       |
-| Prompt resources                                     | versioned application resources          | backend registry        |
+| 数据                                                 | 存储                                     | 所有者            |
+| ---------------------------------------------------- | ---------------------------------------- | ----------------- |
+| Projects、Sessions、Messages、Goal/Plan、FileChanges | `userData/agent.db`                      | backend           |
+| 非敏感应用/provider 配置                             | backend config repository                | backend           |
+| API keys                                             | Electron safeStorage-backed secret store | backend           |
+| Trace                                                | `userData/traces/*.jsonl`                | backend           |
+| Skills                                               | `userData/skills/`                       | backend manager   |
+| ProjectModel                                         | 暂停持久化；目标为 `userData/agent.db`   | backend（迁移后） |
+| Prompt resources                                     | versioned application resources          | backend registry  |
 
 Renderer 只能读取 public config snapshot。API key、Authorization 和 safeStorage 密文不进入 renderer、Session/Message records 或 trace。
 
@@ -1530,44 +1530,46 @@ Headless 继续复用唯一 Agent runtime：
 
 ## 18. Read-only Subagent Runtime
 
-### 18.1 调用与冻结边界
+### 18.1 调用与路由冻结边界
 
 `subagent_run` 是由主 Agent 调用的普通 Tool，只接收 `{ name, task }`。`name` trim 后允许 1–64 个 Unicode 字符，但拒绝控制/格式字符和 `__proto__/prototype/constructor`；`task` trim 后允许 1–32,768 个字符。Tool description 要求任务自包含、只读调查，并让 child 把结果直接写入最终 assistant response，而不是写入文件。
 
 ```text
 parent ToolCall
-  → whole-batch policy preflight
+  → ordered Tool preparation/approval
   → SubagentExecutionPort.runOne
-  → stable workspace/Git snapshot
+  → parent canonical workspace
   → hidden readonly Session + ordinary user_input(task)
   → existing Session/Run/Provider loop
   → final assistant text
   → standard ToolResult { results, meta }
 ```
 
-主 Run 开始时冻结 `subagents.enabled`；设置热变更从下一个 Run 生效。child 精确复用父 Run 已冻结的 main/compression `ResolvedModelRoute`，包含模型 profile、Provider revision 和仅存在于内存的 credential binding；运行中配置变化不能换模型、reasoning 或 API key。child 不复制父 canonical history，只加载普通基础 harness、用户偏好、snapshot 内的 AGENTS 和 skill 摘要，随后把 `task` 作为普通 `user_input` 追加。
+主 Run 开始时冻结 `subagents.enabled`；设置热变更从下一个 Run 生效。child 精确复用父 Run 已冻结的 main/compression `ResolvedModelRoute`，包含模型 profile、Provider revision 和仅存在于内存的 credential binding；运行中配置变化不能换模型、reasoning 或 API key。child 不复制父 canonical history，只加载普通基础 harness、用户偏好、当前 workspace 的 AGENTS 和 skill 摘要，随后把 `task` 作为普通 `user_input` 追加。
 
 `SubagentExecutionPort` 是 Tool Registry 与 application/runtime 之间的 backend-private 注入边界；延迟 bridge 解除 runtime 构造环。Desktop 与 Headless 都从 `createBackendRuntime` 注入同一个实现，不创建第二套 Provider loop。
 
 ### 18.2 Tool batch 与 child profile
 
-`ToolDefinition.batchPolicy` 支持 `normal | must_run_last | exclusive`。`subagent_run` 使用 `must_run_last`。SessionToolRunner 在任何 Tool 执行、权限审批或插件 hook 前解析整批定义并一次性预检：一个 batch 最多一个特殊 Tool；位置或 exclusive 约束不合法时，按原 call 顺序为整批生成 `INVALID_TOOL_BATCH`，不得先执行前置调用，也不得重排 Provider 输出。
+`ToolDefinition.executionMode` 支持 `parallel | serial`，未声明时 fail-closed 为 `serial`。SessionToolRunner 按 Provider call 顺序切分最大连续 parallel 段，每个 serial Tool 独占一段并成为前后完成屏障。每段先按顺序完成 normalize、MCP resolution、权限/审批、上下文 preflight 和 mutation preparation；parallel 段只并发 Tool body；文件变更提交、输出过滤、事件、插件 after hook 和 canonical Tool Result 再按原 call 顺序完成。单项拒绝、失败或 timeout 不取消兄弟调用，父 Run 取消则中断所有 active body 并为每个 call 补齐终态结果。
+
+内置 parallel Tool 包含文件/代码/Git/Project/Skill 读取、`fetch`、`web_search`、`delay`、MCP discovery、`run_command` 和 `subagent_run`；文件/Git/Project 写入、实际 MCP、全部 `terminal_*` 以及未知 Tool 为 serial。`run_command` 是明确例外：同一 parallel 段中的其他读取不得假设其文件副作用已经完成，有依赖的工作必须放到后续 Provider turn。
 
 child Provider catalog 只包含：
 
 - `read_file`、`list_dir`、`glob`、`grep`
 - `read_skill` 与有界 `delay`
-- snapshot 支持时的 `git_status`、`git_diff`、`git_log`、`git_show`
+- `git_status`、`git_diff`、`git_log`、`git_show`
 
 写文件、git write、process、terminal、network、MCP、Goal/Plan、ProjectModel、code intelligence、`subagent_run` 和未来 `swarm_run` 都不进入模型可见 catalog。实际 executor 再独立校验相同 allowlist 与 `gitToolsEnabled`，所以伪造 tool call 不能绕过 catalog。Git 命令使用 `--no-optional-locks`。
 
-### 18.3 Stable Workspace/Git snapshot
+### 18.3 Live Workspace/Git view
 
-snapshot 在 `subagent_run` 真正执行时创建，因此本 Tool batch 更早的普通调用已经全部 settle。它位于 runtime data 下、workspace 外部，并有固定边界：100,000 个文件、1 GiB、60 秒；常见未跟踪生成目录被跳过，特殊文件和不安全 symlink 被拒绝。文件清单、内容 hash 和容量在复制后再次验证；复制期间发生变化返回 `SNAPSHOT_CHANGED`，不得启动 Provider。
+child Session 直接绑定父 Run 已规范化的 workspace path，并固定 `permissionMode = 'readonly'`、`readOnlyWorkspace = true`。Provider catalog 与 executor 使用同一只读 allowlist，伪造写入、process、terminal、network、MCP 或递归 Agent call 仍返回 `TOOL_NOT_AVAILABLE`。
 
-只有 workspace 正好位于 Git repository 顶层时才启用 `git_*`。实现通过本地 bundle、冻结 refs/HEAD/index 以及 staged/unstaged/untracked overlay 构造无 remote、无 hooks、禁止 optional lock 的只读 repository；创建前后复核 HEAD、refs、index 和 status。非 Git workspace 或更大 repository 的子目录仍可使用核心文件读取工具，但不暴露 Git 工具。
+文件与 Git Tool 在真正读取时观察 live workspace；不会复制目录、创建临时 Git repository、bundle、checkpoint 或 refs。serial 写 Tool 与所在前后的 parallel 段不会重叠，但显式 parallel 的 `run_command` 可能修改 workspace，因此与同段 child/read Tool 之间不提供冻结一致性。
 
-durable execution 只保存 source hash、文件数/字节、跳过目录以及可用时的 HEAD/refs/index/status hash；不保存临时绝对路径。snapshot handle 在所有 terminal path 收敛后清理，应用启动也先清理遗留目录。
+升级后 Backend 只清理 runtime data 下旧版遗留的 `subagent-snapshots` 目录，不删除 workspace 中任何 Git refs。非 Git workspace 仍展示四个 Git read Tool，由现有 Git Tool 返回普通 repository 错误。
 
 ### 18.4 Child Run、结果与生命周期
 
@@ -1586,7 +1588,7 @@ subagents: {
 
 内部成功结果为 `{ results: { [name]: finalAssistantText }, meta }`；`meta` 只包含耗时、实际 `providerId/model`、标准化 usage 汇总和模型是否因输出上限截断。reasoning、endpoint、凭据、child Session ID、trace 路径和临时绝对路径不能回传。进入父模型历史时 `subagent_run` projector 只保留 `results[name]` 最终文本，输出上限截断时追加短尾注；Provider/model/usage 留在内部 meta 和统计。只有 reasoning 或缺少最终 assistant text 时明确失败；长度上限结束则保留已有文本并标记 `truncated`。
 
-child stream/tool/domain event 不发布给 Renderer，也不创建独立 trace capture。标准化 usage 以 `scope = 'subagent'` 和父 Session/Run/call 归属进入现有统计。父 Run 取消、worker timeout、Provider failure、应用 dispose 都通过 AbortSignal/Session interrupt 级联中断，并等待 child Provider/Tool、全局 slot、hidden Session handle 和 snapshot 完整收敛。
+child stream/tool/domain event 不发布给 Renderer，也不创建独立 trace capture。标准化 usage 以 `scope = 'subagent'` 和父 Session/Run/call 归属进入现有统计。父 Run 取消、worker timeout、Provider failure、应用 dispose 都通过 AbortSignal/Session interrupt 级联中断，并等待 child Provider/Tool、全局 slot 和 hidden Session handle 完整收敛。
 
 ---
 
@@ -1637,13 +1639,13 @@ child stream/tool/domain event 不发布给 Renderer，也不创建独立 trace 
 - Assistant text、`normalizedReasoningText` 和 `providerContinuation` 只有 completed 后才落盘。
 - 每个持久化 assistant tool-call message 后都有完整 tool result messages。
 - Tool batch transaction 失败时不留下协议半截。
-- `must_run_last/exclusive` 在任何 Tool、审批或插件 hook 前预检；非法批次为所有 call 返回 `INVALID_TOOL_BATCH` 且没有前置副作用。
+- parallel Tool body 确实重叠，serial Tool 形成前后屏障；审批和 Tool Result 始终按原 call 顺序，失败/拒绝/取消仍为每个 call 生成终态结果。
 - `subagent_run` 的 Unicode/保留键/控制字符/长度 schema，普通 `user_input` history、无父历史、冻结 route 继承、配置热变更和最终 assistant text 提取。
-- child Provider catalog 与 executor 双重拒绝 write/process/terminal/network/MCP/code intelligence/递归 Agent Tool；无 Git snapshot 时不暴露 `git_*`。
-- snapshot 覆盖普通文件、dirty/staged/untracked Git、非 Git/嵌套 workspace、symlink、生成目录、文件数/字节/超时、复制期间变化与所有 terminal path 清理。
+- child Provider catalog 与 executor 双重拒绝 write/process/terminal/network/MCP/code intelligence/递归 Agent Tool；四个 Git read Tool 在非 Git workspace 返回普通错误。
+- live workspace 覆盖 dirty/staged/untracked Git、child 启动后的文件变化、旧 snapshot 目录清理以及不创建新 Git refs。
 - hidden Session 不进入公开 get/bootstrap/list/search/export 或 Renderer events；父/Project 删除级联、归档保留、启动 interrupted、幂等 completed result 与参数冲突均有持久化回归。
 - 父取消、30 分钟默认/自定义 timeout、应用 dispose、Provider failure、全局并发 1 和 slot 耗尽都不遗留 active child handle。
-- fake-provider E2E 验证 child 从冻结文件和 Git diff 调查、伪造写调用被拒、结果作为标准 tool role 返回、父 Agent 继续总结，并把 usage 归属到父 Run 的 `subagent` scope。
+- fake-provider E2E 验证 child 从实时文件和 Git diff 调查、伪造写调用被拒、结果作为标准 tool role 返回、父 Agent 继续总结，并把 usage 归属到父 Run 的 `subagent` scope。
 - Compact 只在完整 turn boundary 修改 `inHistory`，active history 可直接按 seq 重建。
 - Rewind/edit 跨 compact 重建保留前缀；重复 rewind 被拒绝；rewind 后 fork 只复制非 superseded 当前分支并重映射引用。
 - Renderer revision gap 触发 Session snapshot。
@@ -1673,7 +1675,7 @@ P0–P13 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路�
 
 P11 Provider Runtime Foundation 与 P12 Generic Responses/Anthropic 已完成。Main、compact、auto-compact budget check 与 auto approver 均使用扁平 `ModelProvider.compile/stream`；生产实现为互不继承的 `deepseek.chat-completions`、`generic.chat-completions`、`generic.responses` 与 `generic.anthropic`。配置、route 和 continuation 统一使用 `providerType`；Google 和具体厂商实现继续按实际使用需求独立增加。
 
-P13 Read-only Subagent Runtime 的 S1/S2 已完成。默认关闭的 `subagent_run({ name, task })` 复用唯一 Session/Run/Provider loop，在 workspace 外稳定 snapshot 上运行隐藏 readonly Session；task 是不含父历史的普通 user input。Tool catalog/executor 双重限制只读能力，特殊 batch 在任何调用前统一预检；route、全局步骤/输出/Tool 限制、取消与 usage 均沿用现有 runtime。Model Pool 是下一阶段，Swarm、递归委派、自定义 child 工具列表和详细子任务 UI 尚未实现。ProjectModel/Serena/code intelligence 已从生产装配、工具、IPC 可用路径和 Renderer 入口关闭；其 SQLite 迁移及重新启用排在 Swarm 完成之后。
+P13 Read-only Subagent Runtime 的 S1/S2 已完成。默认关闭的 `subagent_run({ name, task })` 复用唯一 Session/Run/Provider loop，以隐藏 readonly Session 直接读取父 Run 的 live workspace；task 是不含父历史的普通 user input。Tool catalog/executor 双重限制只读能力；通用 Tool scheduler 允许同批多个 Subagent 与其他 parallel Tool 并发执行，并按原 call 顺序提交结果。route、全局步骤/输出/Tool 限制、取消与 usage 均沿用现有 runtime。Model Pool 是下一阶段，Swarm、递归委派、自定义 child 工具列表和详细子任务 UI 尚未实现。ProjectModel/Serena/code intelligence 已从生产装配、工具、IPC 可用路径和 Renderer 入口关闭；其 SQLite 迁移及重新启用排在 Swarm 完成之后。
 
 Tool Result projection 已统一进入生产主链：完整内部 `ToolResult` 只供安全、trace 和插件使用，模型历史与 `tool.completed` 使用 `model-content.v1` canonical parts。文本密集型内置工具输出紧凑正文，结构化工具保留 JSON value；Chat Completions、Responses 与 Anthropic 共用无 part 外壳的 renderer。旧 active Tool Result 不迁移并明确拒绝续聊。
 

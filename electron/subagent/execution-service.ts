@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto'
-import path from 'node:path'
 import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'
 import type { SessionManager } from '../session/session-manager'
@@ -7,10 +6,12 @@ import type { SessionService } from '../application/session-service'
 import type { SubagentStateService } from '../application/subagent-state-service'
 import type { DurableExecutionStatePort } from '../application/durable-execution-state-port'
 import type { SessionRecord } from '../../shared/session'
-import type { SessionId } from '../../shared/ids'
+import type { AgentExecutionId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { LlmUsageRecord } from '../../shared/usage'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
+import type { RuntimeEventSink } from '../runtime/runtime-events'
+import { projectAgentExecutionSummary } from './public-projection'
 import {
   SubagentRuntimeError,
   summarizeSubagentUsage,
@@ -20,10 +21,6 @@ import {
   type SubagentRunResult,
   type SubagentSpec,
 } from './contracts'
-import {
-  WorkspaceSnapshotError,
-  WorkspaceSnapshotService,
-} from './workspace-snapshot'
 
 const CHILD_TOOL_IDS = new Set([
   'read_file',
@@ -157,9 +154,6 @@ function completedResult(
 
 function normalizedFailure(error: unknown): SubagentRuntimeError {
   if (error instanceof SubagentRuntimeError) return error
-  if (error instanceof WorkspaceSnapshotError) {
-    return new SubagentRuntimeError(error.code, error.message)
-  }
   if (error && typeof error === 'object' && 'code' in error) {
     return new SubagentRuntimeError(
       String(error.code).slice(0, 128) || 'SUBAGENT_FAILED',
@@ -183,15 +177,11 @@ function redactText(value: string, secrets: readonly string[]): string {
 
 function safeResultText(
   value: string,
-  snapshotWorkspace: string,
+  workspace: string,
   routes: FrozenSubagentRoutes,
 ): string {
-  const withoutTemporaryWorkspace = value
-    .split(snapshotWorkspace)
-    .join('[workspace]')
-    .split(path.dirname(snapshotWorkspace))
-    .join('[snapshot]')
-  return redactText(withoutTemporaryWorkspace, [
+  const withoutWorkspace = value.split(workspace).join('[workspace]')
+  return redactText(withoutWorkspace, [
     routes.main.apiKey,
     routes.compression.apiKey,
     routes.main.snapshot.endpoint,
@@ -199,14 +189,14 @@ function safeResultText(
   ])
 }
 
-/** Owns snapshot, hidden Session, timeout, idempotency, and cleanup for one-child executions. */
+/** Owns the hidden Session, timeout, idempotency, and cleanup for one child. */
 export class SubagentExecutionService implements SubagentExecutionPort {
   readonly #configStore: ConfigStore
   readonly #manager: SessionManager
   readonly #sessions: SessionService
   readonly #executionState: DurableExecutionStatePort
   readonly #state: SubagentStateService
-  readonly #snapshots: WorkspaceSnapshotService
+  readonly #events: RuntimeEventSink
   readonly #onDiagnostic: DiagnosticSink
   readonly #active = new Map<string, ActiveExecution>()
   #disposing = false
@@ -217,7 +207,7 @@ export class SubagentExecutionService implements SubagentExecutionPort {
     sessions: SessionService
     executionState: DurableExecutionStatePort
     state: SubagentStateService
-    snapshots: WorkspaceSnapshotService
+    events: RuntimeEventSink
     onDiagnostic?: DiagnosticSink
   }) {
     this.#configStore = options.configStore
@@ -225,7 +215,7 @@ export class SubagentExecutionService implements SubagentExecutionPort {
     this.#sessions = options.sessions
     this.#executionState = options.executionState
     this.#state = options.state
-    this.#snapshots = options.snapshots
+    this.#events = options.events
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
@@ -253,7 +243,7 @@ export class SubagentExecutionService implements SubagentExecutionPort {
       parent.runId,
     )
     const timestamp = new Date().toISOString()
-    const executionId = `subagent-${randomUUID()}`
+    const executionId = `subagent-${randomUUID()}` as AgentExecutionId
     const record: SubagentExecutionRecord = {
       id: executionId,
       parentSessionId: parent.sessionId,
@@ -293,6 +283,7 @@ export class SubagentExecutionService implements SubagentExecutionPort {
           `Subagent execution is ${reserved.record.status}`,
       )
     }
+    this.#publishExecutionChanged(record, spec.name)
 
     const controller = new AbortController()
     const timeoutReason = new SubagentRuntimeError(
@@ -333,21 +324,8 @@ export class SubagentExecutionService implements SubagentExecutionPort {
   }): Promise<SubagentRunResult> {
     const startedAt = performance.now()
     let childSessionId: SessionId | undefined
-    let snapshot:
-      | Awaited<ReturnType<WorkspaceSnapshotService['create']>>
-      | undefined
     let usage: LlmUsageRecord[] = []
     try {
-      snapshot = await this.#snapshots.create(
-        input.parent.workspace,
-        input.controller.signal,
-      )
-      input.record.sourceIdentity = WorkspaceSnapshotService.identityJson(
-        snapshot.identity,
-      )
-      input.record.updatedAt = new Date().toISOString()
-      await this.#state.updateExecution(input.record)
-
       const parentRecord = await this.#sessions.getRecord(
         input.parent.sessionId,
       )
@@ -355,7 +333,7 @@ export class SubagentExecutionService implements SubagentExecutionPort {
       const createdAt = new Date().toISOString()
       await this.#manager.createInternalSession({
         sessionId: childSessionId,
-        workspace: snapshot.workspace,
+        workspace: input.parent.workspace,
         provider: input.routes.main.snapshot.providerId,
         modelSelection: {
           providerId: input.routes.main.snapshot.providerId,
@@ -363,11 +341,16 @@ export class SubagentExecutionService implements SubagentExecutionPort {
           reasoning: input.routes.main.snapshot.reasoning,
         },
         providerSnapshot: input.routes.main.provider,
-        allowedToolIds: new Set([
-          ...CHILD_TOOL_IDS,
-          ...(snapshot.gitAvailable ? CHILD_GIT_TOOL_IDS : []),
-        ]),
-        gitToolsEnabled: snapshot.gitAvailable,
+        allowedToolIds: new Set([...CHILD_TOOL_IDS, ...CHILD_GIT_TOOL_IDS]),
+        gitToolsEnabled: true,
+        execution: {
+          executionId: input.record.id,
+          parentSessionId: input.parent.sessionId,
+          parentRunId: input.parent.runId,
+          parentCallId: input.parent.callId,
+          name: input.spec.name,
+          createdAt: input.record.createdAt,
+        },
       })
       const seed: SessionRecord = {
         schemaVersion: 1,
@@ -396,6 +379,7 @@ export class SubagentExecutionService implements SubagentExecutionPort {
       input.record.status = 'running'
       input.record.updatedAt = new Date().toISOString()
       await this.#state.updateExecution(input.record)
+      this.#publishExecutionChanged(input.record, input.spec.name)
 
       const childRun = this.#manager.startInternalRun({
         sessionId: childSessionId,
@@ -438,7 +422,7 @@ export class SubagentExecutionService implements SubagentExecutionPort {
       }
       const response = safeResultText(
         outcome.response,
-        snapshot.workspace,
+        input.parent.workspace,
         input.routes,
       )
       const result: SubagentRunResult = {
@@ -460,6 +444,7 @@ export class SubagentExecutionService implements SubagentExecutionPort {
       input.record.updatedAt = completedAt
       input.record.completedAt = completedAt
       await this.#state.updateExecution(input.record)
+      this.#publishExecutionChanged(input.record, input.spec.name)
       return result
     } catch (error) {
       const failure = input.controller.signal.aborted
@@ -479,9 +464,7 @@ export class SubagentExecutionService implements SubagentExecutionPort {
           input.routes.compression.apiKey,
           input.routes.main.snapshot.endpoint,
           input.routes.compression.snapshot.endpoint,
-          ...(snapshot
-            ? [snapshot.workspace, path.dirname(snapshot.workspace)]
-            : []),
+          input.parent.workspace,
         ]),
       )
       const completedAt = new Date().toISOString()
@@ -499,15 +482,15 @@ export class SubagentExecutionService implements SubagentExecutionPort {
       }
       input.record.updatedAt = completedAt
       input.record.completedAt = completedAt
-      await this.#state
-        .updateExecution(input.record)
-        .catch((stateError) =>
+      await this.#state.updateExecution(input.record).then(
+        () => this.#publishExecutionChanged(input.record, input.spec.name),
+        (stateError) =>
           this.#onDiagnostic(
             'Failed to persist Subagent terminal status',
             stateError,
             { audience: 'internal' },
           ),
-        )
+      )
       throw safeFailure
     } finally {
       if (childSessionId) {
@@ -522,12 +505,21 @@ export class SubagentExecutionService implements SubagentExecutionPort {
         )
         this.#executionState.forget(childSessionId, input.record.id)
       }
-      await snapshot?.dispose().catch((error) =>
-        this.#onDiagnostic('Failed to clean Subagent snapshot', error, {
-          audience: 'internal',
-        }),
-      )
     }
+  }
+
+  #publishExecutionChanged(
+    record: SubagentExecutionRecord,
+    name: string,
+  ): void {
+    this.#events.publishAgentExecution({
+      type: 'execution.changed',
+      executionId: record.id,
+      parentSessionId: record.parentSessionId,
+      parentRunId: record.parentRunId,
+      parentCallId: record.parentCallId,
+      summary: projectAgentExecutionSummary(record, { name }),
+    })
   }
 
   /** Cancels all preparing/running children and waits for their cleanup. */

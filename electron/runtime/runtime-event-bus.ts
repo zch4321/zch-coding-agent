@@ -4,6 +4,11 @@ import {
   type AgentEvent,
   type TerminalEvent,
 } from '../../shared/agent-events'
+import {
+  AgentExecutionEventSchema,
+  type AgentExecutionEvent,
+  type AgentExecutionEventDraft,
+} from '../../shared/agent-execution'
 import type { RunId, SessionId } from '../../shared/ids'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import type {
@@ -15,6 +20,7 @@ import type {
 
 const MAX_COMPLETIONS = 10_000
 const validateAgentEvent = compileSchema(AgentEventSchema)
+const validateAgentExecutionEvent = compileSchema(AgentExecutionEventSchema)
 const validateTerminalEvent = compileSchema(TerminalEventSchema)
 
 interface CompletionWaiter {
@@ -51,6 +57,7 @@ export class RuntimeEventBus implements RuntimeEventSink {
   readonly #listeners = new Set<RuntimeEventListener>()
   readonly #completions = new Map<string, RunCompletion>()
   readonly #waiters = new Map<string, Set<CompletionWaiter>>()
+  readonly #agentExecutionSequences = new Map<string, number>()
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   #disposed = false
 
@@ -74,6 +81,31 @@ export class RuntimeEventBus implements RuntimeEventSink {
       this.#recordCompletion(completion)
     }
     this.#notify('onAgentEvent', event)
+  }
+
+  /** Sequences, validates, and dispatches one parent-scoped delegated execution event. */
+  publishAgentExecution(draft: AgentExecutionEventDraft): void {
+    if (this.#disposed) return
+    const sequence =
+      (this.#agentExecutionSequences.get(draft.executionId) ?? 0) + 1
+    const event = {
+      schemaVersion: 1,
+      seq: sequence,
+      ts: new Date().toISOString(),
+      ...draft,
+    } as AgentExecutionEvent
+    if (!validateAgentExecutionEvent(event)) {
+      throw new Error(formatSchemaErrors(validateAgentExecutionEvent.errors))
+    }
+    this.#agentExecutionSequences.set(draft.executionId, sequence)
+    this.#notify('onAgentExecutionEvent', event)
+    if (
+      event.type === 'execution.changed' &&
+      event.summary.status !== 'preparing' &&
+      event.summary.status !== 'running'
+    ) {
+      this.#agentExecutionSequences.delete(draft.executionId)
+    }
   }
 
   /** Validates and dispatches a terminal event to every active listener. */
@@ -144,6 +176,7 @@ export class RuntimeEventBus implements RuntimeEventSink {
     }
     this.#waiters.clear()
     this.#completions.clear()
+    this.#agentExecutionSequences.clear()
     this.#listeners.clear()
   }
 

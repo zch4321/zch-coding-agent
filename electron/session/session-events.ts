@@ -1,4 +1,5 @@
 import type { TerminalEvent } from '../../shared/agent-events'
+import type { AgentExecutionEventDraft } from '../../shared/agent-execution'
 import type { SessionId } from '../../shared/ids'
 import type { TerminalEventDraft } from '../terminal/pool'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
@@ -23,7 +24,11 @@ export class SessionEventEmitter {
 
   /** Emits a session-scoped agent event while enforcing closed-session event rules. */
   emitAgent(session: SessionState, event: AgentEventDraft): void {
-    if (session.visibility === 'internal') return
+    if (session.visibility === 'internal') {
+      const projected = projectInternalAgentEvent(session, event)
+      if (projected) this.#eventSink.publishAgentExecution(projected)
+      return
+    }
     if (
       session.closed &&
       event.type !== 'session.closed' &&
@@ -71,5 +76,63 @@ export class SessionEventEmitter {
       ts: new Date().toISOString(),
       ...draft,
     } as TerminalEvent)
+  }
+}
+
+function projectInternalAgentEvent(
+  session: SessionState,
+  event: AgentEventDraft,
+): AgentExecutionEventDraft | undefined {
+  const execution = session.internalExecution
+  if (!execution) return undefined
+  const identity = {
+    executionId: execution.executionId,
+    parentSessionId: execution.parentSessionId,
+    parentRunId: execution.parentRunId,
+    parentCallId: execution.parentCallId,
+  }
+  switch (event.type) {
+    case 'run.status':
+      return {
+        ...identity,
+        type: event.type,
+        status: event.status,
+        ...(event.error ? { error: { ...event.error } } : {}),
+      }
+    case 'assistant.text.delta':
+    case 'assistant.reasoning.delta':
+      return { ...identity, type: event.type, delta: event.delta }
+    case 'assistant.message.completed':
+      return {
+        ...identity,
+        type: event.type,
+        text: event.text,
+        ...(event.reasoning ? { reasoning: event.reasoning } : {}),
+      }
+    case 'tool.proposed':
+      return {
+        ...identity,
+        type: event.type,
+        callId: event.callId,
+        tool: event.tool,
+        args: event.args,
+        reason: event.reason,
+      }
+    case 'tool.completed':
+      return {
+        ...identity,
+        type: event.type,
+        callId: event.callId,
+        result: event.result,
+      }
+    case 'llm.usage':
+      return {
+        ...identity,
+        type: event.type,
+        callId: event.callId,
+        usage: { ...event.usage, scope: 'subagent' },
+      }
+    default:
+      return undefined
   }
 }

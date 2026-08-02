@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NEmpty } from 'naive-ui'
+import { NButton, NEmpty, NScrollbar, type ScrollbarInst } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
@@ -18,7 +18,9 @@ const emit = defineEmits<{
   retry: [messageId: string, preview: string]
   edit: [messageId: string, preview: string]
 }>()
+const scrollbar = ref<ScrollbarInst>()
 const scrollElement = ref<HTMLElement>()
+const timelineContent = ref<HTMLElement>()
 const bottomSentinel = ref<HTMLElement>()
 const followingOutput = ref(true)
 const loadingOlderMessages = ref(false)
@@ -68,8 +70,10 @@ function isNearBottom(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight < 48
 }
 
-function handleScroll() {
-  const element = scrollElement.value
+function handleScroll(event: Event) {
+  const element = event.target
+  if (!(element instanceof HTMLElement)) return
+  scrollElement.value = element
   if (!element) return
   followingOutput.value = isNearBottom(element)
 }
@@ -94,39 +98,33 @@ async function scrollToBottom(force = false) {
   if (!followingOutput.value && !force) return
   await nextTick()
   await animationFrame()
-  const element = scrollElement.value
 
   if (
     bottomSentinel.value &&
     typeof bottomSentinel.value.scrollIntoView === 'function'
   ) {
     bottomSentinel.value.scrollIntoView({ block: 'end' })
-  } else if (element) {
-    element.scrollTop = element.scrollHeight
   }
 
-  await nextTick()
-
-  if (element) {
-    element.scrollTop = element.scrollHeight
-  }
+  scrollbar.value?.scrollTo({ top: Number.MAX_SAFE_INTEGER })
 
   followingOutput.value = true
 }
 
 async function loadOlderMessages() {
-  const element = scrollElement.value
-  if (!element || loadingOlderMessages.value) return
-  const previousHeight = element.scrollHeight
-  const previousTop = element.scrollTop
+  const content = timelineContent.value
+  if (!content || loadingOlderMessages.value) return
+  const previousHeight = content.scrollHeight
+  const previousTop = scrollElement.value?.scrollTop ?? 0
   loadingOlderMessages.value = true
   followingOutput.value = false
   try {
     if (!(await agent.loadOlderMessages())) return
     await nextTick()
     await animationFrame()
-    element.scrollTop =
-      previousTop + Math.max(0, element.scrollHeight - previousHeight)
+    scrollbar.value?.scrollTo({
+      top: previousTop + Math.max(0, content.scrollHeight - previousHeight),
+    })
   } finally {
     loadingOlderMessages.value = false
   }
@@ -146,12 +144,13 @@ watch(
 )
 
 onMounted(() => {
-  const element = scrollElement.value
+  const content = timelineContent.value
 
-  if (element && typeof ResizeObserver !== 'undefined') {
+  if (content && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(onContentResized)
-    resizeObserver.observe(element)
+    resizeObserver.observe(content)
   }
+  void scrollToBottom(true)
 })
 
 onBeforeUnmount(() => {
@@ -162,93 +161,99 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="conversation-timeline">
-    <div
-      ref="scrollElement"
+    <NScrollbar
+      ref="scrollbar"
       class="conversation-scroll"
       :aria-label="t('chat.messages')"
-      @scroll.passive="handleScroll"
+      @scroll="handleScroll"
     >
-      <NButton
-        v-if="agent.selectedMessageHasMore"
-        class="load-earlier"
-        size="small"
-        secondary
-        :loading="loadingOlderMessages"
-        @click="loadOlderMessages"
-      >
-        {{ t('chat.loadEarlierMessages') }}
-      </NButton>
+      <div ref="timelineContent" class="conversation-scroll-content">
+        <NButton
+          v-if="agent.selectedMessageHasMore"
+          class="load-earlier"
+          size="small"
+          secondary
+          :loading="loadingOlderMessages"
+          @click="loadOlderMessages"
+        >
+          {{ t('chat.loadEarlierMessages') }}
+        </NButton>
 
-      <GoalPanel v-if="agent.goal" />
+        <GoalPanel v-if="agent.goal" />
 
-      <div class="conversation-turn-list">
-        <ConversationTurn
-          v-for="turn in timelineTurns"
-          :key="turn.id"
-          :turn="turn"
-          :active-run-id="agent.activeRunId"
-          :actions-disabled="
-            Boolean(
-              agent.startPending || agent.activeRunId || agent.pendingApproval,
-            )
-          "
-          @revert="requestRevert"
-          @fork="requestFork"
-          @retry="requestRetry"
-          @edit="requestEdit"
-          @content-resized="onContentResized"
+        <div class="conversation-turn-list">
+          <ConversationTurn
+            v-for="turn in timelineTurns"
+            :key="turn.id"
+            :turn="turn"
+            :active-run-id="agent.activeRunId"
+            :actions-disabled="
+              Boolean(
+                agent.startPending ||
+                agent.activeRunId ||
+                agent.pendingApproval,
+              )
+            "
+            @revert="requestRevert"
+            @fork="requestFork"
+            @retry="requestRetry"
+            @edit="requestEdit"
+            @content-resized="onContentResized"
+          />
+        </div>
+
+        <ApprovalCard
+          v-if="agent.pendingApproval"
+          :key="agent.pendingApproval.callId"
+          :project-name="projectName"
         />
+
+        <NEmpty
+          v-if="timelineTurns.length === 0 && !agent.pendingApproval"
+          class="conversation-empty"
+          :description="
+            agent.workspacePath
+              ? t('chat.workQuestion')
+              : t('chat.openWorkspace')
+          "
+        >
+          <template #icon><UiIcon name="app" /></template>
+          <template #extra>
+            <div class="conversation-empty-extra">
+              <p>
+                {{
+                  agent.workspacePath
+                    ? t('chat.workHint')
+                    : t('chat.openWorkspaceHint')
+                }}
+              </p>
+              <NButton
+                v-if="!agent.workspacePath"
+                type="primary"
+                @click="agent.chooseWorkspace"
+              >
+                {{ t('app.chooseWorkspace') }}
+              </NButton>
+            </div>
+          </template>
+        </NEmpty>
+
+        <NButton
+          v-if="!followingOutput"
+          class="back-to-bottom"
+          circle
+          secondary
+          :aria-label="t('chat.backBottom')"
+          @click="scrollToBottom(true)"
+        >
+          <UiIcon name="chevron-down" />
+        </NButton>
+        <span
+          ref="bottomSentinel"
+          class="conversation-bottom-sentinel"
+          aria-hidden="true"
+        ></span>
       </div>
-
-      <ApprovalCard
-        v-if="agent.pendingApproval"
-        :key="agent.pendingApproval.callId"
-        :project-name="projectName"
-      />
-
-      <NEmpty
-        v-if="timelineTurns.length === 0 && !agent.pendingApproval"
-        class="conversation-empty"
-        :description="
-          agent.workspacePath ? t('chat.workQuestion') : t('chat.openWorkspace')
-        "
-      >
-        <template #icon><UiIcon name="app" /></template>
-        <template #extra>
-          <div class="conversation-empty-extra">
-            <p>
-              {{
-                agent.workspacePath
-                  ? t('chat.workHint')
-                  : t('chat.openWorkspaceHint')
-              }}
-            </p>
-            <NButton
-              v-if="!agent.workspacePath"
-              type="primary"
-              @click="agent.chooseWorkspace"
-            >
-              {{ t('app.chooseWorkspace') }}
-            </NButton>
-          </div>
-        </template>
-      </NEmpty>
-
-      <NButton
-        v-if="!followingOutput"
-        class="back-to-bottom"
-        circle
-        secondary
-        :aria-label="t('chat.backBottom')"
-        @click="scrollToBottom(true)"
-      >
-        <UiIcon name="chevron-down" />
-      </NButton>
-      <span
-        ref="bottomSentinel"
-        class="conversation-bottom-sentinel"
-        aria-hidden="true"
-      ></span>
-    </div>
+    </NScrollbar>
   </section>
 </template>

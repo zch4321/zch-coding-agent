@@ -55,9 +55,9 @@ export function registerSubagentTools(
   registry.registerTool({
     id: 'subagent_run',
     description:
-      'Run one read-only Subagent investigation. Provide a self-contained task because the child receives no parent conversation history. Ask the child to inspect with read-only tools and return its findings directly in its final assistant response; do not ask it to write the answer to a file. This call must be the last call in the current tool batch.',
+      'Run one read-only Subagent investigation. Provide a self-contained task because the child receives no parent conversation history. Ask the child to inspect with read-only tools and return its findings directly in its final assistant response; do not ask it to write the answer to a file.',
     inputSchema: SubagentRunArgsSchema,
-    batchPolicy: 'must_run_last',
+    executionMode: 'parallel',
     effects: [],
     defaultRisk: 'low',
     supportsAbort: true,

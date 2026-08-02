@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick } from 'vue'
-import { NCollapse, NCollapseItem, NTag } from 'naive-ui'
+import { NCollapse, NCollapseItem, NScrollbar, NTag } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { ReasoningSegment } from '../../stores/agent-types'
 
@@ -31,14 +31,17 @@ function notifyContentResized(): void {
             </NTag>
           </div>
         </template>
-        <div class="timeline-disclosure-list reasoning-segment-list">
+        <NScrollbar
+          class="timeline-disclosure-list reasoning-segment-scroll"
+          content-class="reasoning-segment-list"
+        >
           <pre
             v-for="segment in segments"
             :key="segment.id"
             class="reasoning-content"
             >{{ segment.text }}</pre
           >
-        </div>
+        </NScrollbar>
       </NCollapseItem>
     </NCollapse>
   </article>

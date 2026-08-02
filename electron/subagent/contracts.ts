@@ -1,5 +1,10 @@
 import type { LlmUsageRecord } from '../../shared/usage'
-import type { CallId, RunId, SessionId } from '../../shared/ids'
+import type {
+  AgentExecutionId,
+  CallId,
+  RunId,
+  SessionId,
+} from '../../shared/ids'
 import type { ResolvedModelRoute } from '../providers/model-route-resolver'
 import type { RunStatus } from '../../shared/agent-events'
 
@@ -17,7 +22,7 @@ export interface SubagentParentContext {
 }
 
 export interface InternalSessionOwnership {
-  executionId: string
+  executionId: AgentExecutionId
   parentSessionId: SessionId
   createdAt: string
 }

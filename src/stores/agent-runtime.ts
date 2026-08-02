@@ -42,6 +42,7 @@ import { projectConversationTurns } from './conversation-timeline'
 import { useAgentSettingsStore } from './agent-settings'
 import { useAgentShellStore } from './agent-shell'
 import { useNotificationStore } from './notifications'
+import { useAgentExecutionStore } from './agent-executions'
 
 interface ApprovalDecisionInput {
   decision: 'allow' | 'deny'
@@ -240,6 +241,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const shell = useAgentShellStore()
       const settings = useAgentSettingsStore()
       const replica = useAgentReplicaStore()
+      const executions = useAgentExecutionStore()
       shell.bridgeAvailable = Boolean(window.agentApi)
       if (!window.agentApi) {
         shell.initialized = true
@@ -256,6 +258,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           void replica.reconcile(commit).then((outcome) => {
             if (outcome !== 'duplicate' && commit.topic === 'session.removed') {
               delete this.overlays[commit.change.sessionId]
+              executions.removeSession(commit.change.sessionId)
             }
             if (outcome !== 'duplicate' && commit.topic === 'session.changed') {
               const overlay = this.overlays[commit.change.session.id]
@@ -308,6 +311,11 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         ),
       )
       shell.registerUnsubscriber(
+        window.agentApi.onAgentExecutionEvent((envelope) =>
+          executions.handleEvent(envelope.event),
+        ),
+      )
+      shell.registerUnsubscriber(
         window.agentApi.onBackendNotification((notification) => {
           useNotificationStore().enqueue(notification)
         }),
@@ -324,6 +332,9 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       this.mode =
         replica.selectedSession?.permissionMode ?? settings.defaultMode
       this.hydrateRuntime(replica.selectedRuntime)
+      if (replica.selectedSessionId) {
+        await executions.loadSession(replica.selectedSessionId)
+      }
       shell.initialized = true
     },
     dispose() {
@@ -398,6 +409,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         this.hydrateRuntime(replica.selectedRuntime)
         this.input = ''
         this.contextAttachments = []
+        await useAgentExecutionStore().loadSession(sessionId as SessionId)
       }
     },
     async renameConversation(sessionId: string, title: string) {
@@ -450,6 +462,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       }
       await replica.reconcile(result.value.commit)
       await replica.selectSession(forkId)
+      await useAgentExecutionStore().loadSession(forkId)
     },
     async rewindMessage(messageId: string) {
       const replica = useAgentReplicaStore()

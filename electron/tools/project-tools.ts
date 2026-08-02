@@ -137,6 +137,7 @@ export function registerProjectTools(
 ): void {
   registry.registerTool({
     id: 'project_get_modules',
+    executionMode: 'parallel',
     description:
       'Read the current .zch ProjectModel modules and code backend configuration for this workspace.',
     inputSchema: EmptySchema,
@@ -161,6 +162,7 @@ export function registerProjectTools(
 
   registry.registerTool({
     id: 'project_detect_modules',
+    executionMode: 'parallel',
     description:
       'Detect likely project modules from workspace manifests. This is read-only and does not update .zch metadata.',
     inputSchema: EmptySchema,
@@ -187,6 +189,7 @@ export function registerProjectTools(
 
   registry.registerTool({
     id: 'project_set_modules',
+    executionMode: 'serial',
     description:
       'Replace the workspace module list in .zch project metadata. This does not modify source files or git history.',
     inputSchema: SetModulesSchema,
@@ -221,6 +224,7 @@ export function registerProjectTools(
 
   registry.registerTool({
     id: 'project_update_module',
+    executionMode: 'serial',
     description:
       'Create or replace one module in .zch project metadata. Use this when the current module boundary is incomplete or wrong.',
     inputSchema: UpdateModuleSchema,

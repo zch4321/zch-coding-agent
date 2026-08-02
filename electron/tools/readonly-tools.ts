@@ -186,6 +186,7 @@ export function createReadOnlyToolDefinitions(
 ): ToolDefinition[] {
   const readFileTool: ToolDefinition<typeof ReadFileArgsSchema> = {
     id: 'read_file',
+    executionMode: 'parallel',
     description:
       'Read a bounded line range from a UTF-8 workspace file. Each line is prefixed with its line number. Continue with nextStartLine when truncated.',
     inputSchema: ReadFileArgsSchema,
@@ -314,6 +315,7 @@ export function createReadOnlyToolDefinitions(
 
   const listDirTool: ToolDefinition<typeof ListDirArgsSchema> = {
     id: 'list_dir',
+    executionMode: 'parallel',
     description:
       'List files and directories inside the workspace. Recursive listing skips symlinks and large generated folders.',
     inputSchema: ListDirArgsSchema,
@@ -378,6 +380,7 @@ export function createReadOnlyToolDefinitions(
 
   const globTool: ToolDefinition<typeof GlobArgsSchema> = {
     id: 'glob',
+    executionMode: 'parallel',
     description:
       'Find workspace files matching a glob pattern such as **/*.ts. Symlinks are not followed.',
     inputSchema: GlobArgsSchema,
@@ -417,6 +420,7 @@ export function createReadOnlyToolDefinitions(
 
   const grepTool: ToolDefinition<typeof GrepArgsSchema> = {
     id: 'grep',
+    executionMode: 'parallel',
     description:
       'Search text files in the workspace using a regular expression. Prefers ripgrep and falls back to an in-process engine when unavailable.',
     inputSchema: GrepArgsSchema,

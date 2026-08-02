@@ -127,6 +127,7 @@ export function registerProcessTools(
 ): void {
   registry.registerTool({
     id: 'run_command',
+    executionMode: 'parallel',
     description:
       'Run a bounded short-lived child process from the workspace. Prefer process mode with an executable and argument array. Shell mode is higher risk. For long-running tests, watch tasks, dev servers, REPLs, or commands that need periodic observation, open a terminal, send the command, use delay, then read terminal output.',
     inputSchema: RunCommandSchema,
@@ -185,6 +186,7 @@ export function registerProcessTools(
 
   registry.registerTool({
     id: 'delay',
+    executionMode: 'parallel',
     description:
       'Wait for a short bounded interval before continuing. Use with terminal_read polling after terminal_send for long-running tests, watch tasks, dev servers, or REPLs.',
     inputSchema: DelaySchema,

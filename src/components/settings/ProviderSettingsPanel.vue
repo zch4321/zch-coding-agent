@@ -12,6 +12,7 @@ import {
   NList,
   NListItem,
   NModal,
+  NScrollbar,
   NSelect,
   NTag,
   NTransfer,
@@ -502,76 +503,80 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <span>{{ t('settings.compressionThreshold') }}</span>
           <span>{{ t('settings.maximumOutputLength') }}</span>
         </div>
-        <NList
+        <NScrollbar
           v-if="selectedModelProfiles.length"
-          bordered
-          class="provider-model-settings-list"
-          data-testid="provider-model-settings-list"
+          class="provider-model-settings-scroll"
         >
-          <NListItem v-for="model in selectedModelProfiles" :key="model.id">
-            <div class="provider-model-settings-row">
-              <div class="provider-model-name">
-                <strong>{{ model.id }}</strong>
-                <NTag
-                  v-if="model.id === agent.providerForm.model"
-                  size="small"
-                  type="info"
-                  :bordered="false"
-                >
-                  {{ t('settings.mainModelTag') }}
-                </NTag>
+          <NList
+            bordered
+            class="provider-model-settings-list"
+            data-testid="provider-model-settings-list"
+          >
+            <NListItem v-for="model in selectedModelProfiles" :key="model.id">
+              <div class="provider-model-settings-row">
+                <div class="provider-model-name">
+                  <strong>{{ model.id }}</strong>
+                  <NTag
+                    v-if="model.id === agent.providerForm.model"
+                    size="small"
+                    type="info"
+                    :bordered="false"
+                  >
+                    {{ t('settings.mainModelTag') }}
+                  </NTag>
+                </div>
+                <label class="provider-model-value">
+                  <span>{{ t('settings.maximumContext') }}</span>
+                  <NInputNumber
+                    :value="model.contextWindowTokens"
+                    :min="2048"
+                    :max="10000000"
+                    :show-button="false"
+                    @update:value="
+                      agent.updateModelConfiguration(
+                        model.id,
+                        'contextWindowTokens',
+                        $event,
+                      )
+                    "
+                  />
+                </label>
+                <label class="provider-model-value">
+                  <span>{{ t('settings.compressionThreshold') }}</span>
+                  <NInputNumber
+                    :value="model.compactThresholdTokens"
+                    :min="1024"
+                    :max="model.contextWindowTokens - model.maxOutputTokens"
+                    :show-button="false"
+                    @update:value="
+                      agent.updateModelConfiguration(
+                        model.id,
+                        'compactThresholdTokens',
+                        $event,
+                      )
+                    "
+                  />
+                </label>
+                <label class="provider-model-value">
+                  <span>{{ t('settings.maximumOutputLength') }}</span>
+                  <NInputNumber
+                    :value="model.maxOutputTokens"
+                    :min="1"
+                    :max="model.contextWindowTokens - 1024"
+                    :show-button="false"
+                    @update:value="
+                      agent.updateModelConfiguration(
+                        model.id,
+                        'maxOutputTokens',
+                        $event,
+                      )
+                    "
+                  />
+                </label>
               </div>
-              <label class="provider-model-value">
-                <span>{{ t('settings.maximumContext') }}</span>
-                <NInputNumber
-                  :value="model.contextWindowTokens"
-                  :min="2048"
-                  :max="10000000"
-                  :show-button="false"
-                  @update:value="
-                    agent.updateModelConfiguration(
-                      model.id,
-                      'contextWindowTokens',
-                      $event,
-                    )
-                  "
-                />
-              </label>
-              <label class="provider-model-value">
-                <span>{{ t('settings.compressionThreshold') }}</span>
-                <NInputNumber
-                  :value="model.compactThresholdTokens"
-                  :min="1024"
-                  :max="model.contextWindowTokens - model.maxOutputTokens"
-                  :show-button="false"
-                  @update:value="
-                    agent.updateModelConfiguration(
-                      model.id,
-                      'compactThresholdTokens',
-                      $event,
-                    )
-                  "
-                />
-              </label>
-              <label class="provider-model-value">
-                <span>{{ t('settings.maximumOutputLength') }}</span>
-                <NInputNumber
-                  :value="model.maxOutputTokens"
-                  :min="1"
-                  :max="model.contextWindowTokens - 1024"
-                  :show-button="false"
-                  @update:value="
-                    agent.updateModelConfiguration(
-                      model.id,
-                      'maxOutputTokens',
-                      $event,
-                    )
-                  "
-                />
-              </label>
-            </div>
-          </NListItem>
-        </NList>
+            </NListItem>
+          </NList>
+        </NScrollbar>
         <NEmpty v-else :description="t('settings.selectModelsHint')" />
       </div>
     </div>

@@ -35,7 +35,7 @@ import { naiveThemeOverrides } from './theme/naive-theme'
 import type { SettingsTab } from './components/settings/settings-tabs'
 
 type Sidebar = 'project' | 'artifact'
-type ArtifactTab = 'files' | 'diff' | 'plan'
+type ArtifactTab = 'files' | 'diff' | 'plan' | 'agents'
 type AppView = 'chat' | 'settings'
 type MessageAction = 'edit' | 'fork' | 'retry'
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h } from 'vue'
-import { NButton, NMenu, type MenuOption } from 'naive-ui'
+import { NButton, NMenu, NScrollbar, type MenuOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import UiIcon from '../UiIcon.vue'
 import type { SettingsTab } from './settings-tabs'
@@ -60,13 +60,17 @@ function selectTab(key: string | number) {
       </NButton>
     </div>
     <nav class="settings-nav" :aria-label="t('settings.sections')">
-      <NMenu
-        :value="activeTab"
-        :options="menuOptions"
-        :root-indent="12"
-        :indent="12"
-        @update:value="selectTab"
-      />
+      <NScrollbar class="settings-nav-scroll">
+        <div class="settings-nav-content">
+          <NMenu
+            :value="activeTab"
+            :options="menuOptions"
+            :root-indent="12"
+            :indent="12"
+            @update:value="selectTab"
+          />
+        </div>
+      </NScrollbar>
     </nav>
   </aside>
 </template>

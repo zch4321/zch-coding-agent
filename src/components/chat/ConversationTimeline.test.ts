@@ -11,6 +11,10 @@ import ConversationTimeline from './ConversationTimeline.vue'
 
 const sessionId = 'session:timeline-scroll' as SessionId
 const runId = 'run:timeline-scroll' as RunId
+const nativeScrollTo = Object.getOwnPropertyDescriptor(
+  HTMLElement.prototype,
+  'scrollTo',
+)
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -35,10 +39,20 @@ beforeEach(() => {
     callback(0)
     return 1
   })
+  Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+    configurable: true,
+    writable: true,
+    value: vi.fn(),
+  })
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
+  if (nativeScrollTo) {
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', nativeScrollTo)
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo')
+  }
   document.body.innerHTML = ''
 })
 
@@ -51,6 +65,9 @@ describe('ConversationTimeline', () => {
     })
     const sentinel = wrapper.get('.conversation-bottom-sentinel')
       .element as HTMLElement
+    expect(wrapper.get('.conversation-scroll').classes()).toContain(
+      'n-scrollbar',
+    )
     const scrollIntoView = vi.fn()
     Object.defineProperty(sentinel, 'scrollIntoView', {
       configurable: true,

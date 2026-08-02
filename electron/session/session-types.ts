@@ -5,6 +5,7 @@ import type {
   TerminalEvent,
 } from '../../shared/agent-events'
 import type { CallId, MessageId, RunId, SessionId } from '../../shared/ids'
+import type { AgentExecutionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { ModelSelection } from '../../shared/model-route'
 import type { ConfigStore } from '../config/store'
@@ -171,6 +172,14 @@ export interface SessionState {
   eventSeq: number
   closed: boolean
   visibility: 'public' | 'internal'
+  internalExecution?: {
+    executionId: AgentExecutionId
+    parentSessionId: SessionId
+    parentRunId: RunId
+    parentCallId: CallId
+    name: string
+    createdAt: string
+  }
   readOnlyWorkspace: boolean
   allowedToolIds?: Set<string>
   gitToolsEnabled: boolean

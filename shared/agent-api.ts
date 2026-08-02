@@ -1,5 +1,6 @@
 import type {
   AgentEventEnvelope,
+  AgentExecutionEventEnvelope,
   BackendNotificationEnvelope,
   DomainStateDelivery,
   IpcChannel,
@@ -90,6 +91,12 @@ export interface AgentApi {
   revertFileChange(
     payload: IpcPayload<'file-change:revert'>,
   ): Promise<IpcResult<'file-change:revert'>>
+  listAgentExecutions(
+    payload: IpcPayload<'agent-execution:list'>,
+  ): Promise<IpcResult<'agent-execution:list'>>
+  getAgentExecution(
+    payload: IpcPayload<'agent-execution:get'>,
+  ): Promise<IpcResult<'agent-execution:get'>>
   chooseWorkspace(
     payload: IpcPayload<'workspace:choose'>,
   ): Promise<IpcResult<'workspace:choose'>>
@@ -202,6 +209,9 @@ export interface AgentApi {
     payload: IpcPayload<'logs:clear-closed'>,
   ): Promise<IpcResult<'logs:clear-closed'>>
   onAgentEvent(listener: (event: AgentEventEnvelope) => void): Unsubscribe
+  onAgentExecutionEvent(
+    listener: (event: AgentExecutionEventEnvelope) => void,
+  ): Unsubscribe
   onBackendNotification(
     listener: (event: BackendNotificationEnvelope) => void,
   ): Unsubscribe
@@ -238,6 +248,8 @@ export const AGENT_API_KEYS = [
   'searchMessages',
   'listFileChanges',
   'revertFileChange',
+  'listAgentExecutions',
+  'getAgentExecution',
   'chooseWorkspace',
   'listWorkspaceDirectory',
   'readWorkspaceFile',
@@ -277,6 +289,7 @@ export const AGENT_API_KEYS = [
   'openLogDirectory',
   'clearClosedTraces',
   'onAgentEvent',
+  'onAgentExecutionEvent',
   'onBackendNotification',
   'onTerminalEvent',
   'onDomainStateEvent',
