@@ -4,6 +4,7 @@ import path from 'node:path'
 import { configureApp } from './support/app-helpers'
 import {
   providerMessageText,
+  providerMessages,
   reasoningDelta,
   textDelta,
   toolCallDelta,
@@ -150,11 +151,11 @@ test.describe('Electron Agents activity panel', () => {
     ])
     fakeProvider.queue([
       reasoningDelta('Summarize the first completed review.'),
-      textDelta('First delegated review completed.'),
+      textDelta('Delegated review completed.'),
     ])
     fakeProvider.queue([
       reasoningDelta('Summarize the second completed review.'),
-      textDelta('Second delegated review completed.'),
+      textDelta('Delegated review completed.'),
     ])
     fakeProvider.queue([textDelta('Parent collected both reviews.')])
 
@@ -221,14 +222,14 @@ test.describe('Electron Agents activity panel', () => {
       page.locator('.agent-execution-status-dot.status-completed'),
     ).toHaveCount(2)
     const parentFollowup = providerMessageText(fakeProvider.requests[5]!.body)
-    expect(
-      parentFollowup.indexOf('First delegated review completed.'),
-    ).toBeGreaterThanOrEqual(0)
-    expect(
-      parentFollowup.indexOf('Second delegated review completed.'),
-    ).toBeGreaterThan(
-      parentFollowup.indexOf('First delegated review completed.'),
+    expect(parentFollowup.match(/Delegated review completed\./g)).toHaveLength(
+      2,
     )
+    expect(
+      providerMessages(fakeProvider.requests[5]!.body)
+        .filter((message) => message.role === 'tool')
+        .map((message) => message.toolCallId),
+    ).toEqual(['call:e2e-subagent-first', 'call:e2e-subagent-second'])
     await expect(page.locator('button.conversation-item')).toHaveCount(1)
 
     await page.reload()
@@ -252,7 +253,7 @@ test.describe('Electron Agents activity panel', () => {
       '1',
     )
     await expect(restored.locator('.tool-call-card')).toHaveCount(0)
-    await expect(restored).toContainText('First delegated review completed.')
+    await expect(restored).toContainText('Delegated review completed.')
     await expect(page.locator('button.conversation-item')).toHaveCount(1)
   })
 })

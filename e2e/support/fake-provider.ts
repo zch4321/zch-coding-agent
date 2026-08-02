@@ -12,6 +12,7 @@ export interface CapturedProviderRequest {
 export interface ProviderMessage {
   role?: string
   content?: string
+  toolCallId?: string
 }
 
 export interface TraceObject {
@@ -253,10 +254,12 @@ export function providerMessages(body: JsonObject): ProviderMessage[] {
 
     const content = (message as JsonObject).content
     const role = (message as JsonObject).role
+    const toolCallId = (message as JsonObject).tool_call_id
     return [
       {
         role: typeof role === 'string' ? role : undefined,
         content: typeof content === 'string' ? content : undefined,
+        toolCallId: typeof toolCallId === 'string' ? toolCallId : undefined,
       },
     ]
   })
