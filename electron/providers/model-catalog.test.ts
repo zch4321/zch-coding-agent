@@ -203,7 +203,7 @@ describe('DeepSeek model catalog', () => {
       compactThresholdTokens: 90_000,
       maxOutputTokens: 7_000,
     }
-    provider.modelConfigurationIds.push('saved-selection')
+    provider.enabledModelIds.push('saved-selection')
     const profiles = resolveModelProfiles(toPublicConfig(internal, true))
 
     expect(profiles).toEqual(

@@ -224,7 +224,7 @@ function buildAppConfig(config: HeadlessConfig): AppConfig {
         reasoning: config.provider.reasoning ?? 'high',
         modelCatalog: [],
         modelOverrides: {},
-        modelConfigurationIds: [config.provider.model],
+        enabledModelIds: [config.provider.model],
       },
     ],
     approval: {

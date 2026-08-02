@@ -28,10 +28,7 @@ const emit = defineEmits<{
     <NScrollbar class="settings-content">
       <div class="settings-content-inner">
         <AppearanceSettingsPanel v-if="activeTab === 'general'" />
-        <ProjectSettingsPanel
-          v-else-if="activeTab === 'project'"
-          @removed="emit('close')"
-        />
+        <ProjectSettingsPanel v-else-if="activeTab === 'project'" />
         <ArchivedSessionsSettingsPanel v-else-if="activeTab === 'archived'" />
         <ProviderSettingsPanel v-else-if="activeTab === 'provider'" />
         <LimitsSettingsPanel v-else-if="activeTab === 'limits'" />

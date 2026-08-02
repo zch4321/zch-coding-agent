@@ -104,6 +104,13 @@ const routeSelectionDisabled = computed(() =>
 const sendHint = computed(() => {
   if (!agent.workspacePath) return t('chat.chooseHint')
   if (!agent.credentialConfigured) return t('chat.apiKeyHint')
+  if (
+    !agent.composerModelOptions.some(
+      (option) => option.value === agent.composerModel,
+    )
+  ) {
+    return t('chat.modelHint')
+  }
   if (!agent.providerNoticeAccepted) return t('chat.noticeHint')
   if (agent.activeRunId) return t('chat.interjectionHint')
   return t('chat.inputHint')
@@ -578,9 +585,10 @@ watch(inputDisabled, (disabled) => {
           style="width: min(220px, 28vw); min-width: 0; flex: 1 1 auto"
           size="small"
           :options="agent.composerModelOptions"
-          :disabled="routeSelectionDisabled"
+          :disabled="
+            routeSelectionDisabled || agent.composerModelOptions.length === 0
+          "
           filterable
-          tag
           @update:value="agent.setProviderModel"
         />
         <NSelect

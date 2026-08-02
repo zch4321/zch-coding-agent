@@ -306,6 +306,86 @@ describe('agent durable replica', () => {
     expect(replica.fileChangesBySessionId).toEqual({})
   })
 
+  it('loads the latest active Session when a removed current Project falls back outside the cache', async () => {
+    const fallbackProjectId = 'project:replica-fallback' as ProjectId
+    const fallbackSessionId = 'session:replica-fallback' as SessionId
+    const fallbackProject: ProjectRecord = {
+      ...project,
+      id: fallbackProjectId,
+      path: 'F:/workspace/replica-fallback',
+      name: 'replica-fallback',
+    }
+    const fallbackSession: SessionRecord = {
+      ...session(),
+      id: fallbackSessionId,
+      projectId: fallbackProjectId,
+      title: 'Fallback session',
+    }
+    const listSessions = vi.fn(async () =>
+      success({
+        version: 1 as const,
+        page: {
+          schemaVersion: 1 as const,
+          records: [fallbackSession],
+          hasMore: false as const,
+        },
+      }),
+    )
+    const getSession = vi.fn(async () =>
+      success({
+        version: 1 as const,
+        snapshot: {
+          schemaVersion: 1 as const,
+          session: fallbackSession,
+          messagePage: {
+            schemaVersion: 1 as const,
+            sessionId: fallbackSessionId,
+            records: [],
+            hasMore: false as const,
+          },
+        },
+      }),
+    )
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: { listSessions, getSession } as Partial<AgentApi> as AgentApi,
+    })
+    const replica = useAgentReplicaStore()
+    replica.projects = [project, fallbackProject]
+    replica.sessions = [session()]
+    replica.selectedProjectId = projectId
+    replica.selectedSessionId = sessionId
+    replica.cursor = {
+      schemaVersion: 1,
+      backendInstanceId: 'backend:replica',
+      sequence: 1,
+    }
+
+    await replica.reconcile({
+      schemaVersion: 1,
+      cursor: {
+        schemaVersion: 1,
+        backendInstanceId: 'backend:replica',
+        sequence: 2,
+      },
+      topic: 'project.changed',
+      change: { projects: [fallbackProject] },
+    })
+
+    expect(listSessions).toHaveBeenCalledWith({
+      version: 1,
+      projectId: fallbackProjectId,
+      lifecycle: 'active',
+      limit: 1,
+    })
+    expect(getSession).toHaveBeenCalledWith({
+      version: 1,
+      sessionId: fallbackSessionId,
+    })
+    expect(replica.selectedProjectId).toBe(fallbackProjectId)
+    expect(replica.selectedSessionId).toBe(fallbackSessionId)
+  })
+
   it('coalesces bootstrap replay and loads the 201st active Session', async () => {
     const pending = new Promise<ReturnType<typeof success>>((resolve) => {
       window.setTimeout(

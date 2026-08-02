@@ -324,7 +324,7 @@ export function fetchProviderModelCatalog(options: {
   }
 }
 
-/** Builds model profiles for a provider and includes the selected model when absent from its catalog. */
+/** Builds capability profiles for discovered, enabled, overridden, and explicitly requested models. */
 export function resolveModelProfiles(
   config: PublicConfig,
   providerId = config.activeProviderId,
@@ -337,13 +337,13 @@ export function resolveModelProfiles(
   )
   const catalogIds = new Set(provider.modelCatalog.map((model) => model.id))
 
-  if (!models.has(provider.model)) {
+  if (provider.model && !models.has(provider.model)) {
     models.set(provider.model, { id: provider.model })
   }
   for (const modelId of Object.keys(provider.modelOverrides)) {
     if (!models.has(modelId)) models.set(modelId, { id: modelId })
   }
-  for (const modelId of provider.modelConfigurationIds) {
+  for (const modelId of provider.enabledModelIds) {
     if (!models.has(modelId)) models.set(modelId, { id: modelId })
   }
   if (includeModelId && !models.has(includeModelId)) {

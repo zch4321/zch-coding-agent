@@ -880,7 +880,7 @@ describe('P11 Provider foundation', () => {
       reasoning: 'off' as const,
       modelCatalog: [],
       modelOverrides: {},
-      modelConfigurationIds: ['model'],
+      enabledModelIds: ['model'],
       credentialConfigured: true,
       credentialSource: 'safe-storage' as const,
     }
