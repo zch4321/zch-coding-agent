@@ -26,6 +26,8 @@ import {
   providerModelOverrides,
 } from './provider-form'
 
+const providerSaveOperations = new WeakMap<object, Promise<boolean>>()
+
 function providerModelProfiles(
   provider: ProviderPublicConfig | undefined,
   fallbackContextWindowTokens: number,
@@ -33,12 +35,14 @@ function providerModelProfiles(
 ): UiModelProfile[] {
   if (!provider) return []
 
-  const ids = new Set<string>([
-    provider.model,
-    ...provider.modelCatalog.map((model) => model.id),
-    ...Object.keys(provider.modelOverrides),
-    ...provider.modelConfigurationIds,
-  ])
+  const ids = new Set<string>(
+    [
+      provider.model,
+      ...provider.modelCatalog.map((model) => model.id),
+      ...Object.keys(provider.modelOverrides),
+      ...provider.enabledModelIds,
+    ].filter(Boolean),
+  )
 
   return [...ids].map((id) => {
     const catalogModel = provider.modelCatalog.find((model) => model.id === id)
@@ -70,12 +74,7 @@ function providerModelProfiles(
 }
 
 function providerPreviewModels(provider: ProviderPublicConfig): string[] {
-  const ids = new Set<string>([
-    provider.model,
-    ...provider.modelCatalog.map((model) => model.id),
-    ...Object.keys(provider.modelOverrides),
-  ])
-  return [...ids].slice(0, 3)
+  return provider.enabledModelIds.slice(0, 3)
 }
 
 function providerIdFromLabel(label: string, existingIds: Set<string>): string {
@@ -134,6 +133,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     modelCatalogFetchedAt: undefined as string | undefined,
     modelCatalogStale: true,
     modelCatalogLoading: false,
+    pendingModelCatalogRefreshProviderId: undefined as string | undefined,
     limitsConfig: undefined as PublicConfig['limits'] | undefined,
     limitsSavedSignature: '',
     limitsSaving: false,
@@ -148,9 +148,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     providerSaveStatus: '',
     approvalForm: {
       providerId: 'deepseek',
-      model: 'deepseek-v4-flash',
+      model: '',
     },
-    approvalSavedSignature: 'deepseek|deepseek-v4-flash',
+    approvalSavedSignature: 'deepseek|',
     approvalSaving: false,
     approvalSaveStatus: '',
     permissionForm: {
@@ -214,8 +214,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       state.providers.find(
         (provider) => provider.id === state.selectedProviderId,
       )?.credentialSource ?? 'none',
-    modelOptions: (state) =>
-      [...state.modelProfiles]
+    modelOptions: (state) => {
+      const enabled = new Set(state.providerForm.enabledModelIds)
+      return [...state.modelProfiles]
+        .filter((model) => enabled.has(model.id))
         .sort((left, right) => {
           if (left.id === state.providerForm.model) return -1
           if (right.id === state.providerForm.model) return 1
@@ -227,24 +229,30 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         .map((model) => ({
           label: model.id,
           value: model.id,
-        })),
+        }))
+    },
+    modelTransferOptions: (state) =>
+      [...state.modelProfiles]
+        .sort((left, right) =>
+          left.id.localeCompare(right.id, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          }),
+        )
+        .map((model) => ({ label: model.id, value: model.id })),
     providerOptions: (state) =>
       state.providers.map((provider) => ({
         label: provider.label,
         value: provider.id,
+        disabled:
+          !provider.model || !provider.enabledModelIds.includes(provider.model),
       })),
     approvalModelOptions: (state) => {
       const provider = state.providers.find(
         (candidate) => candidate.id === state.approvalForm.providerId,
       )
       if (!provider) return []
-      const ids = new Set<string>([
-        state.approvalForm.model,
-        provider.model,
-        ...provider.modelCatalog.map((model) => model.id),
-        ...Object.keys(provider.modelOverrides),
-      ])
-      return [...ids].map((id) => ({ label: id, value: id }))
+      return provider.enabledModelIds.map((id) => ({ label: id, value: id }))
     },
     providerCardSummaries: (state) =>
       state.providers.map((provider) => ({
@@ -304,6 +312,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.providerForm.providerType = provider.providerType
       this.providerForm.baseURL = provider.baseURL
       this.providerForm.model = provider.model
+      this.providerForm.enabledModelIds = [...provider.enabledModelIds]
       this.providerForm.reasoning = provider.reasoning
       this.providerForm.apiKey = ''
       const limits = config?.limits ?? this.limitsConfig
@@ -465,7 +474,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       )
     },
     setProviderModel(model: string) {
+      if (model && !this.providerForm.enabledModelIds.includes(model)) return
       this.providerForm.model = model
+      if (!model) return
 
       if (!this.modelProfiles.some((candidate) => candidate.id === model)) {
         const fallbackContext =
@@ -525,16 +536,27 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       model.capabilitySource = 'override'
     },
     /** Loads cached profiles or refreshes the saved Provider model catalog. */
-    async loadProviderModels(refresh: boolean, reportError = refresh) {
+    async loadProviderModels(
+      refresh: boolean,
+      reportError = refresh,
+      requestedProviderId?: string,
+    ) {
       const bridge = window.agentApi
 
-      if (!bridge || this.modelCatalogLoading) return false
+      if (!bridge) return false
+      if (this.modelCatalogLoading) {
+        if (refresh) {
+          this.pendingModelCatalogRefreshProviderId =
+            requestedProviderId ?? this.selectedProviderId
+        }
+        return false
+      }
       this.modelCatalogLoading = true
-      const providerId = this.selectedProviderId
-      const draftSignature = providerFormSignature(
-        this.providerForm,
-        this.modelProfiles,
-      )
+      const providerId = requestedProviderId ?? this.selectedProviderId
+      const draftSignature =
+        providerId === this.selectedProviderId
+          ? providerFormSignature(this.providerForm, this.modelProfiles)
+          : ''
 
       try {
         const result = await bridge.listProviderModels({
@@ -569,7 +591,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           }
         }
 
-        if (providerId !== this.selectedProviderId) return false
+        if (providerId !== this.selectedProviderId) return true
         if (
           providerFormSignature(this.providerForm, this.modelProfiles) !==
           draftSignature
@@ -586,6 +608,11 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         return true
       } finally {
         this.modelCatalogLoading = false
+        const pendingProviderId = this.pendingModelCatalogRefreshProviderId
+        this.pendingModelCatalogRefreshProviderId = undefined
+        if (pendingProviderId) {
+          void this.loadProviderModels(true, true, pendingProviderId)
+        }
       }
     },
     /** Refreshes the selected saved Provider when its settings page opens. */
@@ -596,14 +623,11 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     async enterProviderSettings() {
       return this.loadSelectedProviderModelsOnEntry()
     },
-    /** Explicitly refreshes models without saving or mutating the Provider draft. */
+    /** Flushes Provider edits, then explicitly refreshes its model catalog. */
     async refreshSelectedProviderModels() {
+      if (this.providerDirty && !(await this.saveProvider())) return false
       if (!this.providerRefreshAvailable) {
         this.error = 'Save a Provider credential before refreshing models.'
-        return false
-      }
-      if (this.providerDirty) {
-        this.error = 'Save Provider changes before refreshing models.'
         return false
       }
       this.error = ''
@@ -625,36 +649,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       }
 
       this.applyConfig(result.value.config, ['providers'])
-      return true
-    },
-    /** Persists the model rows selected for one Provider's configuration view. */
-    async saveProviderModelConfigurationSelection(
-      providerId: string,
-      modelIds: string[],
-    ) {
-      const bridge = window.agentApi
-      if (!bridge) return false
-
-      const result = await bridge.setConfig({
-        version: IPC_VERSION,
-        kind: 'provider-model-configuration',
-        providerId,
-        modelIds: [...new Set(modelIds)],
-      })
-      if (!result.ok) {
-        this.error = result.error.message
-        return false
-      }
-
-      const savedProvider = result.value.config.providers.find(
-        (provider) => provider.id === providerId,
-      )
-      const providerIndex = this.providers.findIndex(
-        (provider) => provider.id === providerId,
-      )
-      if (savedProvider && providerIndex >= 0) {
-        this.providers.splice(providerIndex, 1, structuredClone(savedProvider))
-      }
       return true
     },
     async createProvider() {
@@ -679,7 +673,8 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         label,
         providerType: 'generic.chat-completions',
         baseURL: 'https://api.example.com/v1',
-        model: 'model-name',
+        model: '',
+        enabledModelIds: [],
         reasoning: 'off',
         limits: cloneJson(limits),
       })
@@ -747,54 +742,116 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.applyConfig(result.value.config, ['providers', 'approval'])
       return true
     },
-    async saveProvider() {
+    async saveProvider(): Promise<boolean> {
       const bridge = window.agentApi
-      if (!bridge || this.providerSaving || this.modelCatalogLoading) {
-        return false
+      if (!bridge) return false
+
+      const activeOperation = providerSaveOperations.get(this)
+      if (activeOperation) {
+        const saved = await activeOperation
+        return saved && this.providerDirty ? this.saveProvider() : saved
       }
 
-      this.error = ''
-      this.providerSaveStatus = ''
-      const draft = { ...this.providerForm }
-      const limits = this.limitsConfig
-      if (!limits) {
-        this.error = 'Provider settings are not initialized.'
-        return false
-      }
+      const operation = (async (): Promise<boolean> => {
+        this.error = ''
+        this.providerSaveStatus = ''
+        this.providerSaving = true
+        const providersToRefresh = new Set<string>()
 
-      this.providerSaving = true
-      try {
-        const apiKey = draft.apiKey.trim()
-        const saved = await bridge.setConfig({
-          version: IPC_VERSION,
-          kind: 'provider-settings',
-          baseURL: draft.baseURL,
-          model: draft.model,
-          modelOverrides: providerModelOverrides(this.modelProfiles),
-          reasoning: draft.reasoning,
-          providerId: draft.providerId,
-          label: draft.label,
-          providerType: draft.providerType,
-          limits: {
-            ...limits,
-            tokenEstimation: {
-              mode: draft.tokenEstimationMode,
-              bytesPerToken: draft.bytesPerToken,
-            },
-          },
-          ...(apiKey ? { apiKey } : {}),
-        })
-        if (!saved.ok) {
-          this.error = saved.error.message
-          return false
+        try {
+          while (this.providerDirty) {
+            const limits = this.limitsConfig
+            if (!limits) {
+              this.error = 'Provider settings are not initialized.'
+              return false
+            }
+
+            const draft = cloneJson(this.providerForm)
+            const draftProfiles = cloneJson(this.modelProfiles)
+            const draftSignature = providerFormSignature(draft, draftProfiles)
+            const apiKey = draft.apiKey.trim()
+            const persistedProvider = this.providers.find(
+              (provider) => provider.id === draft.providerId,
+            )
+            const catalogIdentityChanged = Boolean(
+              persistedProvider?.credentialConfigured &&
+              (persistedProvider.baseURL !== draft.baseURL ||
+                persistedProvider.providerType !== draft.providerType),
+            )
+            const limitsDraft = cloneJson(limits)
+            const limitsDraftSignature = limitsSignature(limitsDraft)
+            const saved = await bridge.setConfig({
+              version: IPC_VERSION,
+              kind: 'provider-settings',
+              baseURL: draft.baseURL,
+              model: draft.model,
+              enabledModelIds: draft.enabledModelIds,
+              modelOverrides: providerModelOverrides(draftProfiles),
+              reasoning: draft.reasoning,
+              providerId: draft.providerId,
+              label: draft.label,
+              providerType: draft.providerType,
+              limits: {
+                ...limitsDraft,
+                tokenEstimation: {
+                  mode: draft.tokenEstimationMode,
+                  bytesPerToken: draft.bytesPerToken,
+                },
+              },
+              ...(apiKey ? { apiKey } : {}),
+            })
+            if (!saved.ok) {
+              this.error = saved.error.message
+              this.providerSaveStatus = saved.error.message
+              return false
+            }
+
+            const currentSignature = providerFormSignature(
+              this.providerForm,
+              this.modelProfiles,
+            )
+            const apiKeyUnchanged = this.providerForm.apiKey === draft.apiKey
+            this.activeProviderId = saved.value.config.activeProviderId
+            this.providers = structuredClone(saved.value.config.providers)
+            if (limitsSignature(this.limitsConfig) === limitsDraftSignature) {
+              this.limitsConfig = structuredClone(saved.value.config.limits)
+              this.limitsSavedSignature = limitsSignature(
+                saved.value.config.limits,
+              )
+            }
+
+            if (this.selectedProviderId === draft.providerId) {
+              this.providerSavedSignature = draftSignature
+              if (currentSignature === draftSignature && apiKeyUnchanged) {
+                this.hydrateSelectedProviderForm(saved.value.config)
+                this.providerSavedSignature = providerFormSignature(
+                  this.providerForm,
+                  this.modelProfiles,
+                )
+              } else if (apiKeyUnchanged) {
+                this.providerForm.apiKey = ''
+              }
+            }
+
+            if (apiKey || catalogIdentityChanged) {
+              providersToRefresh.add(draft.providerId)
+            }
+            this.providerSaveStatus = 'Saved'
+            if (this.selectedProviderId !== draft.providerId) break
+          }
+          return true
+        } finally {
+          this.providerSaving = false
+          for (const providerId of providersToRefresh) {
+            void this.loadProviderModels(true, true, providerId)
+          }
         }
-        this.applyConfig(saved.value.config, ['providers', 'limits'])
-        this.providerForm.apiKey = ''
-        this.providerSaveStatus = 'Saved'
-        return true
-      } finally {
-        this.providerSaving = false
-      }
+      })()
+      const trackedOperation = operation.finally(() => {
+        providerSaveOperations.delete(this)
+      })
+      providerSaveOperations.set(this, trackedOperation)
+      return trackedOperation
     },
     setApprovalProvider(providerId: string) {
       const provider = this.providers.find(
@@ -802,7 +859,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       )
       if (!provider) return
       this.approvalForm.providerId = provider.id
-      this.approvalForm.model = provider.model
+      this.approvalForm.model = provider.enabledModelIds[0] ?? ''
       this.approvalSaveStatus = ''
     },
     async saveApproval() {

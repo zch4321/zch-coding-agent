@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { FrozenSubagentRoutes } from './contracts'
 import { SubagentExecutionService } from './execution-service'
-import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
+import {
+  DEFAULT_APP_CONFIG,
+  toPublicConfig,
+  type AppConfig,
+} from '../config/schema'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import { sessionFixture } from '../persistence/repository-fixtures'
 
@@ -28,8 +32,16 @@ type ChildOutcome = {
   error?: { code: string; message: string }
 }
 
+function configuredPublicConfig() {
+  const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+  config.providers[0]!.model = 'deepseek-v4-pro'
+  config.providers[0]!.enabledModelIds = ['deepseek-v4-pro']
+  config.approval.approverModel = 'deepseek-v4-pro'
+  return toPublicConfig(config, true)
+}
+
 function routes(): FrozenSubagentRoutes {
-  const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
+  const config = configuredPublicConfig()
   const provider = config.providers[0]!
   const route = (purpose: 'main' | 'compression') => ({
     snapshot: {
@@ -67,7 +79,7 @@ function fixture(
     outcome?: ChildOutcome
   } = {},
 ) {
-  const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
+  const config = configuredPublicConfig()
   config.subagents.workerTimeoutMs = options.timeoutMs ?? 60_000
   config.limits.maxConcurrentRuns = options.maxConcurrentRuns ?? 16
   let persisted: SubagentExecutionRecord | undefined

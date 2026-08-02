@@ -146,6 +146,9 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const sessionId = replica.selectedSessionId
       return Boolean(
         replica.selectedProjectId &&
+        this.composerModelOptions.some(
+          (option) => option.value === this.composerModel,
+        ) &&
         !this.startPending &&
         !this.activeRunId &&
         !this.pendingApproval &&
@@ -197,17 +200,10 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const provider = settings.providers.find(
         (candidate) => candidate.id === selection.providerId,
       )
-      const ids = new Set<string>([
-        selection.model,
-        ...(provider
-          ? [
-              provider.model,
-              ...provider.modelCatalog.map((model) => model.id),
-              ...Object.keys(provider.modelOverrides),
-            ]
-          : []),
-      ])
-      return [...ids].map((id) => ({ label: id, value: id }))
+      return (provider?.enabledModelIds ?? []).map((id) => ({
+        label: id,
+        value: id,
+      }))
     },
   },
   actions: {
@@ -609,7 +605,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const settings = useAgentSettingsStore()
       if (!(await settings.setActiveProvider(providerId))) return false
       const provider = settings.providers.find((item) => item.id === providerId)
-      if (provider) {
+      if (provider?.model) {
         const selection = {
           providerId,
           model: provider.model,

@@ -10,7 +10,8 @@ export const DEFAULT_PROVIDER_FORM = {
   label: 'DeepSeek',
   providerType: 'deepseek.chat-completions' as ProviderType,
   baseURL: 'https://api.deepseek.com',
-  model: 'deepseek-v4-pro',
+  model: '',
+  enabledModelIds: [] as string[],
   reasoning: 'high' as ReasoningEffort,
   apiKey: '',
   tokenEstimationMode: 'conservative' as 'conservative' | 'custom-bytes',
@@ -51,6 +52,9 @@ export function providerFormSignature(
     label: form.label,
     providerType: form.providerType,
     model: form.model,
+    enabledModelIds: [...form.enabledModelIds].sort((left, right) =>
+      left.localeCompare(right),
+    ),
     reasoning: form.reasoning,
     models: models
       .map((model) => ({

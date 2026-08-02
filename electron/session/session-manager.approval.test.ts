@@ -116,6 +116,7 @@ describe('SessionManager approvals', () => {
       providerType: 'deepseek.chat-completions',
       baseURL: 'https://api.example/v1',
       model: 'main-model',
+      enabledModelIds: ['main-model', 'approval-model'],
       reasoning: 'off',
       limits: current.limits,
     })

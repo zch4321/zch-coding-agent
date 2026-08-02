@@ -80,8 +80,8 @@ const approvalProvider = computed(() =>
         <NSelect
           v-model:value="agent.approvalForm.model"
           :options="agent.approvalModelOptions"
+          :disabled="agent.approvalModelOptions.length === 0"
           filterable
-          tag
         />
         <small>{{ t('settings.approvalModelHint') }}</small>
       </label>
