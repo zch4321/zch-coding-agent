@@ -5,7 +5,10 @@ import {
   type AppConfig,
 } from '../config/schema'
 import type { ConfigStore } from '../config/store'
-import { resolveRunRoutes } from './model-route-resolver'
+import {
+  resolveModelRoutePairFromConfig,
+  resolveRunRoutes,
+} from './model-route-resolver'
 
 function configuredAppConfig(): AppConfig {
   const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
@@ -16,6 +19,34 @@ function configuredAppConfig(): AppConfig {
 }
 
 describe('resolveRunRoutes', () => {
+  it('resolves a main/compression pair from one supplied snapshot and credential read', async () => {
+    const config = configuredAppConfig()
+    const snapshot = toPublicConfig(config, true)
+    const getProviderApiKeyForRevision = vi.fn(async () => 'secret')
+    const store = {
+      getPublicConfig: vi.fn(() => {
+        throw new Error('explicit pair resolver must not reread config')
+      }),
+      getProviderApiKeyForRevision,
+    } as unknown as ConfigStore
+
+    const pair = await resolveModelRoutePairFromConfig(store, snapshot, {
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+      reasoning: 'max',
+    })
+
+    expect(getProviderApiKeyForRevision).toHaveBeenCalledOnce()
+    expect(pair.main.snapshot).toMatchObject({
+      purpose: 'main',
+      reasoning: 'max',
+    })
+    expect(pair.compression.snapshot).toMatchObject({
+      purpose: 'compression',
+      reasoning: 'max',
+    })
+  })
+
   it('rejects models outside the enabled Provider pool', async () => {
     const config = configuredAppConfig()
     const getProviderApiKeyForRevision = vi.fn(async () => 'secret')

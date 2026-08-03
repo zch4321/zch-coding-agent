@@ -1,6 +1,6 @@
 # Subagent 与 Swarm Roadmap
 
-> 状态：P13 已完成 S1 · Subagent Execution Foundation 与 S2 · Generic `subagent_run`；下一阶段是 S3 · Model Pool，Swarm 尚未实现。ProjectModel/Serena/code intelligence 已临时关闭，其 SQLite 迁移排在 Swarm 完成之后。
+> 状态：P13 已完成 S1 · Subagent Execution Foundation 与 S2 · Generic `subagent_run`；S3 已完成阶段 1–2 的 backend foundation（配置、allocator 与 route freezer），但 UI、Runtime Identity、执行接入和并发队列尚未实现，因此 S3 仍未完成。Swarm 尚未实现。ProjectModel/Serena/code intelligence 已临时关闭，其 SQLite 迁移排在 Swarm 完成之后。
 >
 > 已实现的稳定契约见 [`architecture.md`](./architecture.md) 与 [`requirements.md`](./requirements.md)。本文只保留尚未完成的演进方向，避免同时维护两套事实来源。
 
@@ -22,7 +22,7 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 这些约束是后续 Model Pool 和 Swarm 的底座，不在后续阶段复制第二套 Session、Provider、Tool executor 或恢复逻辑。
 
-## 2. S3 · Model Pool（下一阶段）
+## 2. S3 · Model Pool（backend foundation 已完成，产品接入待完成）
 
 ### 2.1 目标
 
@@ -43,27 +43,37 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 能力等级第一版固定为 `light | standard | strong`，由用户显式标注。系统不根据模型名、价格或未经用户确认的外部评估自动推断能力。
 
-### 2.2 调度规则
+### 2.2 已完成的 backend foundation
 
-- Job 创建时冻结 pool 顺序、Provider revision、模型、reasoning、credential reference 与安全 route snapshot；配置热变更不影响已排队或运行的 assignment。
+- AppConfig v16 增加默认空的 `modelPool.entries`；合法 v9–v15 配置保留 Provider、credential reference、revision 与限制并迁移到 v16。Headless 外部配置和 Runtime Identity 继续保持 v4。
+- `config:set(model-pool)` 使用完整数组和精确 Provider revision 覆盖做一次性校验与原子写盘。disabled entry 可以保留失效引用；Provider 删除、模型移出 `enabledModelIds` 或显式清除凭据时只自动禁用受影响项，恢复后不会自动重启用。
+- 纯 allocator 只接收能力需求序列，按 `light → standard → strong` 最低可满足等级和同等级声明顺序 round-robin；每次调用重置 cursor，`strong` 不向下降级。`maxParallel` 当前只作为 assignment 元数据返回。
+- route freezer 只读取一次 PublicConfig 快照，对所有 enabled entry 与 Provider revision 计算顺序敏感 digest，并对实际选中的每个唯一 entry 解析一次 main/compression pair。prepared plan 只在 backend 内存持有 API key；safe snapshot 只包含 assignment、revision 和安全 route，不含 API key 或 credential reference。
+- `SubagentExecutionPort.runOne` 尚未消费 prepared plan；当前 `subagent_run` 仍精确继承父 Run route。没有 semaphore、Swarm queue 或 SQLite Job 状态。
+
+### 2.3 调度规则
+
+- Job 创建时将复用现有 freezer，冻结 pool digest、Provider revision、模型、reasoning 与安全 route snapshot，并仅在 backend-private prepared plan 中持有已解析凭据；配置热变更不影响已排队或运行的 assignment。
 - 相同能力等级内按稳定顺序 round-robin；需要更强能力时不得静默降级。
 - 每个 Agent 整个 Run 固定一条 route，不能在 React loop 或 continuation 中途轮换模型。
 - 某个 assignment 失败时保留原模型信息，不自动切换 Provider 重跑，避免重复费用和不可审计结果。
 - `maxParallel` 只约束对应 pool entry；实际执行还必须取得全局 Run slot。
 
-### 2.3 配置与 UI
+### 2.4 配置与 UI（待实现）
 
 - Agents 设置页增加 pool entry 的增删、排序、启停、Provider/model/reasoning、能力等级与并发配置。
 - 保存前一次性校验 Provider、credential reference、模型和 revision；无效配置不能部分生效。
 - UI 明确展示每个模型会读取当前 workspace 内容并产生额外 Provider 请求。
 - Runtime Identity 记录模型池 digest 和调度能力，方便 Headless 结果比较。
 
-### 2.4 验收
+### 2.5 验收
 
 - 五个同等级模型、十个任务可确定性分配为每个模型两次。
 - `strong` 任务在没有可用强模型时于启动任何 Agent 前失败，不交给 `light`。
 - queued 期间修改配置不会改变既有 assignment。
 - API key 仍只在主进程内存中解析，不进入 pool 配置、execution、trace 或 Tool Result。
+
+前四项的 backend allocator/freezer 回归已经覆盖；S3 完成仍取决于设置 UI、Runtime Identity/Headless 演进、生产执行接入和并发限制。
 
 ## 3. S4 · `/swarm` 与 `swarm_run`
 

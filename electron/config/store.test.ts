@@ -749,6 +749,31 @@ describe('ConfigStore', () => {
     )
   })
 
+  it('detects Provider revision changes for route-freeze postflight checks', async () => {
+    const { configStore } = await createStores()
+    const initial = configStore.getPublicConfig().providers[0]!
+    expect(() =>
+      configStore.assertProviderRevisions([
+        { providerId: initial.id, revision: initial.revision },
+      ]),
+    ).not.toThrow()
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      providerId: initial.id,
+      baseURL: 'https://revision-change.example/v1',
+      model: initial.model,
+      reasoning: initial.reasoning,
+    })
+
+    expect(() =>
+      configStore.assertProviderRevisions([
+        { providerId: initial.id, revision: initial.revision },
+      ]),
+    ).toThrow('Provider configuration changed while freezing route')
+  })
+
   it('auto-disables entries when a model is removed and never auto-enables them', async () => {
     const { configStore } = await createStores()
     let provider = await configurePoolProvider(configStore)

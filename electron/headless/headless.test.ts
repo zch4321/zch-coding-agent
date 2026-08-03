@@ -351,7 +351,10 @@ describe('Headless host', () => {
     const prepared = await prepareHeadlessConfig({
       config: config(),
       artifactsDirectory: artifacts,
-      environment: { HEADLESS_TEST_KEY: 'headless-secret' },
+      environment: {
+        NODE_ENV: 'test',
+        HEADLESS_TEST_KEY: 'headless-secret',
+      },
     })
 
     expect(prepared.config).toMatchObject({

@@ -410,6 +410,20 @@ export class ConfigStore {
     return stored ?? this.#environmentApiKeys[provider.id]
   }
 
+  /** Rejects when any Provider no longer matches a previously captured revision. */
+  assertProviderRevisions(
+    expected: readonly { providerId: string; revision: number }[],
+  ): void {
+    for (const item of expected) {
+      const provider = getAppProvider(this.#config, item.providerId)
+      if (!provider || provider.revision !== item.revision) {
+        throw new Error(
+          `Provider configuration changed while freezing route: ${item.providerId}`,
+        )
+      }
+    }
+  }
+
   /** Returns the stored credential for the configured web-search provider. */
   async getWebSearchApiKey(): Promise<string | undefined> {
     const reference = this.#config.webSearch.apiKeyRef
