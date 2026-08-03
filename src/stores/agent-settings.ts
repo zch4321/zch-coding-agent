@@ -598,13 +598,16 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         ) {
           return true
         }
+        const draftWasPersisted = this.providerSavedSignature === draftSignature
         this.modelProfiles = result.value.models
         this.modelCatalogFetchedAt = result.value.fetchedAt
         this.modelCatalogStale = result.value.stale
-        this.providerSavedSignature = providerFormSignature(
-          this.providerForm,
-          this.modelProfiles,
-        )
+        if (draftWasPersisted) {
+          this.providerSavedSignature = providerFormSignature(
+            this.providerForm,
+            this.modelProfiles,
+          )
+        }
         return true
       } finally {
         this.modelCatalogLoading = false

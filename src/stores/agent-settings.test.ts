@@ -1,7 +1,11 @@
+// @vitest-environment jsdom
+
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AgentApi } from '../../shared/agent-api'
 import type { ProviderPublicConfig } from '../../shared/config'
 import { useAgentSettingsStore } from './agent-settings'
+import { providerFormSignature } from './provider-form'
 
 function provider(): ProviderPublicConfig {
   return {
@@ -22,6 +26,10 @@ function provider(): ProviderPublicConfig {
 
 describe('agent settings model pool', () => {
   beforeEach(() => setActivePinia(createPinia()))
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'agentApi')
+    vi.restoreAllMocks()
+  })
 
   it('uses enabled models for selectors while retaining the full transfer catalog', () => {
     const settings = useAgentSettingsStore()
@@ -63,5 +71,52 @@ describe('agent settings model pool', () => {
       ['enabled-model'],
     )
     expect(settings.providerCardSummaries[0]?.models).toEqual(['enabled-model'])
+  })
+
+  it('keeps an unsaved Provider draft dirty after loading its model catalog', async () => {
+    const settings = useAgentSettingsStore()
+    const configuredProvider = provider()
+    settings.providers = [configuredProvider]
+    settings.activeProviderId = configuredProvider.id
+    settings.selectedProviderId = configuredProvider.id
+    settings.hydrateSelectedProviderForm()
+    settings.providerSavedSignature = providerFormSignature(
+      settings.providerForm,
+      settings.modelProfiles,
+    )
+    const savedSignature = settings.providerSavedSignature
+    settings.providerForm.label = 'Unsaved Provider label'
+
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        listProviderModels: vi.fn(async () => ({
+          version: 1 as const,
+          ok: true as const,
+          value: {
+            models: [
+              {
+                id: 'enabled-model',
+                availability: 'provider' as const,
+                capabilitySource: 'provider' as const,
+                contextWindowTokens: 300_000,
+                compactThresholdTokens: 200_000,
+                maxOutputTokens: 50_000,
+              },
+            ],
+            fetchedAt: '2026-08-03T00:00:00.000Z',
+            stale: false,
+          },
+        })),
+      } as Partial<AgentApi> as AgentApi,
+    })
+
+    expect(settings.providerDirty).toBe(true)
+    await expect(settings.loadProviderModels(false)).resolves.toBe(true)
+
+    expect(settings.providerSavedSignature).toBe(savedSignature)
+    expect(settings.providerDirty).toBe(true)
+    expect(settings.providerForm.label).toBe('Unsaved Provider label')
+    expect(settings.modelCatalogFetchedAt).toBe('2026-08-03T00:00:00.000Z')
   })
 })
