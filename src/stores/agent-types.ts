@@ -1,4 +1,5 @@
 import type { CallId, MessageId, ProjectId, RunId } from '../../shared/ids'
+import type { ModelCapabilityLevel, ReasoningEffort } from '../../shared/config'
 import type { ContextAttachmentChip } from '../../shared/context'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ToolApprovalSummary } from '../../shared/agent-events'
@@ -161,4 +162,6 @@ export interface UiModelProfile {
   contextWindowTokens: number
   compactThresholdTokens: number
   maxOutputTokens: number
+  reasoningEfforts?: ReasoningEffort[]
+  capability?: ModelCapabilityLevel
 }

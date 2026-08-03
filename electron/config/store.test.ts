@@ -1105,6 +1105,109 @@ describe('ConfigStore', () => {
     )
   })
 
+  it('round-trips reasoning effort and capability annotations', async () => {
+    const { configStore } = await createStores()
+    const limits = configStore.getPublicConfig().limits
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://example.test/v1',
+      model: 'model-a',
+      enabledModelIds: ['model-a', 'model-b'],
+      reasoning: 'low',
+      modelOverrides: {
+        'model-a': { reasoningEfforts: ['low', 'medium'], capability: 'light' },
+        'model-b': { capability: 'strong' },
+      },
+      limits,
+    })
+
+    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+      modelOverrides: {
+        'model-a': { reasoningEfforts: ['low', 'medium'], capability: 'light' },
+        'model-b': { capability: 'strong' },
+      },
+    })
+  })
+
+  it('bumps the provider revision when annotations change', async () => {
+    const { configStore } = await createStores()
+    const limits = configStore.getPublicConfig().limits
+    const base = {
+      version: 1 as const,
+      kind: 'provider-settings' as const,
+      baseURL: 'https://example.test/v1',
+      model: 'model-a',
+      enabledModelIds: ['model-a'],
+      reasoning: 'low' as const,
+      limits,
+    }
+
+    const created = await configStore.update({
+      ...base,
+      modelOverrides: { 'model-a': { reasoningEfforts: ['low', 'medium'] } },
+    })
+    const revision = created.providers[0]!.revision
+
+    const annotated = await configStore.update({
+      ...base,
+      modelOverrides: {
+        'model-a': { reasoningEfforts: ['low', 'medium'], capability: 'light' },
+      },
+    })
+    expect(annotated.providers[0]!.revision).toBe(revision + 1)
+
+    const unchanged = await configStore.update({
+      ...base,
+      modelOverrides: {
+        'model-a': { reasoningEfforts: ['low', 'medium'], capability: 'light' },
+      },
+    })
+    expect(unchanged.providers[0]!.revision).toBe(revision + 1)
+  })
+
+  it('rejects the whole update when the main model annotation excludes the provider reasoning', async () => {
+    const { directory, configStore } = await createStores()
+    const limits = configStore.getPublicConfig().limits
+    await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://example.test/v1',
+      model: 'model-a',
+      enabledModelIds: ['model-a'],
+      reasoning: 'low',
+      limits,
+    })
+    const persistedBefore = await readFile(
+      path.join(directory, 'config.json'),
+      'utf8',
+    )
+
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'provider-settings',
+        baseURL: 'https://example.test/v1',
+        model: 'model-a',
+        enabledModelIds: ['model-a'],
+        reasoning: 'high',
+        modelOverrides: {
+          'model-a': { reasoningEfforts: ['low', 'medium'] },
+        },
+        limits,
+      }),
+    ).rejects.toThrow('Provider reasoning must be supported by the main model')
+
+    expect(await readFile(path.join(directory, 'config.json'), 'utf8')).toBe(
+      persistedBefore,
+    )
+    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+      reasoning: 'low',
+      modelOverrides: {},
+    })
+  })
+
   it('persists localized assistant preferences', async () => {
     const { configStore } = await createStores()
     const result = await configStore.update({

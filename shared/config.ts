@@ -37,12 +37,32 @@ export type PermissionMode = Static<typeof PermissionModeSchema>
 
 export const ReasoningEffortSchema = Type.Union([
   Type.Literal('off'),
+  Type.Literal('low'),
+  Type.Literal('medium'),
   Type.Literal('high'),
+  Type.Literal('xhigh'),
   Type.Literal('max'),
 ])
 export type ReasoningEffort = Static<typeof ReasoningEffortSchema>
 export const DeepSeekReasoningEffortSchema = ReasoningEffortSchema
 export type DeepSeekReasoningEffort = ReasoningEffort
+
+/** All reasoning efforts in ascending strength order, for UI lists and validation. */
+export const REASONING_EFFORTS: readonly ReasoningEffort[] = [
+  'off',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]
+
+export const ModelCapabilityLevelSchema = Type.Union([
+  Type.Literal('light'),
+  Type.Literal('standard'),
+  Type.Literal('strong'),
+])
+export type ModelCapabilityLevel = Static<typeof ModelCapabilityLevelSchema>
 
 export const RememberedRuleSchema = Type.Object(
   {
@@ -84,9 +104,16 @@ export const ModelCapabilityOverrideSchema = Type.Object(
     maxOutputTokens: Type.Optional(
       Type.Integer({ minimum: 1, maximum: 10_000_000 }),
     ),
+    reasoningEfforts: Type.Optional(
+      Type.Array(ReasoningEffortSchema, { minItems: 1, uniqueItems: true }),
+    ),
+    capability: Type.Optional(ModelCapabilityLevelSchema),
   },
   { additionalProperties: false },
 )
+export type ModelCapabilityOverride = Static<
+  typeof ModelCapabilityOverrideSchema
+>
 
 export const TokenEstimationSchema = Type.Object(
   {

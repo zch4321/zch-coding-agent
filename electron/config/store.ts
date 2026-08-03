@@ -68,6 +68,17 @@ function assertMainModelEnabled(provider: AppProviderConfig): void {
   }
 }
 
+function assertMainModelReasoningSupported(provider: AppProviderConfig): void {
+  const supported = provider.model
+    ? provider.modelOverrides[provider.model]?.reasoningEfforts
+    : undefined
+  if (supported?.length && !supported.includes(provider.reasoning)) {
+    throw new Error(
+      `Provider reasoning must be supported by the main model: ${provider.model}`,
+    )
+  }
+}
+
 function applyProviderUpdate(
   next: AppConfig,
   request: ProviderUpdate,
@@ -150,6 +161,7 @@ function applyProviderUpdate(
     delete provider.modelCatalogFetchedAt
   }
   assertMainModelEnabled(provider)
+  assertMainModelReasoningSupported(provider)
   if (!isNewProvider && providerRouteShape(provider) !== previousRouteShape) {
     provider.revision += 1
   }

@@ -11,7 +11,9 @@ import {
 import {
   ConfigSectionSchema,
   ConfigSetRequestSchema,
+  ModelCapabilityLevelSchema,
   PublicConfigSchema,
+  ReasoningEffortSchema,
 } from './config'
 import {
   AgentExecutionIdSchema,
@@ -159,6 +161,10 @@ const ModelProfileSchema = Type.Object(
       maximum: 10_000_000,
     }),
     maxOutputTokens: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+    reasoningEfforts: Type.Optional(
+      Type.Array(ReasoningEffortSchema, { minItems: 1, uniqueItems: true }),
+    ),
+    capability: Type.Optional(ModelCapabilityLevelSchema),
   },
   { additionalProperties: false },
 )

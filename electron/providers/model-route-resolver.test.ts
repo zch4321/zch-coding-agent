@@ -65,6 +65,54 @@ describe('resolveRunRoutes', () => {
     expect(getProviderApiKeyForRevision).not.toHaveBeenCalled()
   })
 
+  it('rejects a reasoning effort outside the model annotation before reading credentials', async () => {
+    const config = configuredAppConfig()
+    config.providers[0]!.modelOverrides['deepseek-v4-pro'] = {
+      reasoningEfforts: ['off', 'high'],
+    }
+    const getProviderApiKeyForRevision = vi.fn(async () => 'secret')
+    const store = {
+      getPublicConfig: () => toPublicConfig(config, true),
+      getProviderApiKeyForRevision,
+    } as unknown as ConfigStore
+
+    await expect(
+      resolveRunRoutes(store, {
+        providerId: 'deepseek',
+        model: 'deepseek-v4-pro',
+        reasoning: 'max',
+      }),
+    ).rejects.toThrow(
+      "Model deepseek-v4-pro does not support reasoning effort 'max' (supported: off, high)",
+    )
+    expect(getProviderApiKeyForRevision).not.toHaveBeenCalled()
+  })
+
+  it('resolves annotated models when the reasoning effort is supported', async () => {
+    const config = configuredAppConfig()
+    config.providers[0]!.modelOverrides['deepseek-v4-pro'] = {
+      reasoningEfforts: ['low', 'high'],
+      capability: 'strong',
+    }
+    const store = {
+      getPublicConfig: () => toPublicConfig(config, true),
+      getProviderApiKeyForRevision: vi.fn(async () => 'secret'),
+    } as unknown as ConfigStore
+
+    const routes = await resolveRunRoutes(store, {
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+      reasoning: 'low',
+    })
+
+    expect(routes.main.snapshot.reasoning).toBe('low')
+    expect(routes.main.modelProfile).toMatchObject({
+      id: 'deepseek-v4-pro',
+      reasoningEfforts: ['low', 'high'],
+      capability: 'strong',
+    })
+  })
+
   it('rejects an unsafe endpoint before reading credentials', async () => {
     const config = configuredAppConfig()
     config.providers[0]!.baseURL = 'https://user:secret@provider.example/v1'

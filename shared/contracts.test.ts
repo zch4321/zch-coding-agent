@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import Ajv from 'ajv'
+import { ModelCapabilityOverrideSchema } from './config'
 import {
   AgentEventSchema,
   TerminalEventSchema,
@@ -221,5 +222,28 @@ describe('shared runtime contracts', () => {
         },
       }),
     ).toBe(false)
+  })
+})
+
+describe('model capability override contract', () => {
+  it('accepts reasoning effort and capability annotations', () => {
+    const validate = compileSchema(ModelCapabilityOverrideSchema)
+
+    expect(
+      validate({
+        reasoningEfforts: ['low', 'high', 'max'],
+        capability: 'strong',
+      }),
+    ).toBe(true)
+    expect(validate({ contextWindowTokens: 128_000 })).toBe(true)
+  })
+
+  it('rejects an empty reasoning effort annotation and unknown values', () => {
+    const validate = compileSchema(ModelCapabilityOverrideSchema)
+
+    expect(validate({ reasoningEfforts: [] })).toBe(false)
+    expect(validate({ reasoningEfforts: ['turbo'] })).toBe(false)
+    expect(validate({ reasoningEfforts: ['low', 'low'] })).toBe(false)
+    expect(validate({ capability: 'frontier' })).toBe(false)
   })
 })

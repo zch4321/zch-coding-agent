@@ -19,7 +19,23 @@ import {
   type DropdownOption,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import {
+  REASONING_EFFORTS,
+  type ModelCapabilityLevel,
+  type ReasoningEffort,
+} from '../../../shared/config'
+import { resolveSupportedReasoningEfforts } from '../../../shared/model-settings'
 import { useAgentStore } from '../../stores/agent'
+
+/** Maps each reasoning effort to its locale label key. */
+const REASONING_LABEL_KEYS: Record<ReasoningEffort, string> = {
+  off: 'settings.reasoningOff',
+  low: 'settings.reasoningLow',
+  medium: 'settings.reasoningMedium',
+  high: 'settings.reasoningHigh',
+  xhigh: 'settings.reasoningXhigh',
+  max: 'settings.reasoningMax',
+}
 
 type ProviderAction =
   | { kind: 'select'; providerId: string }
@@ -64,10 +80,27 @@ const reasoningHint = computed(() => {
       return t('settings.reasoningHintGeneric')
   }
 })
-const reasoningOptions = computed(() => [
-  { label: t('settings.reasoningOff'), value: 'off' },
-  { label: t('settings.reasoningHigh'), value: 'high' },
-  { label: t('settings.reasoningMax'), value: 'max' },
+const reasoningOptions = computed(() => {
+  const mainModel = agent.modelProfiles.find(
+    (model) => model.id === agent.providerForm.model,
+  )
+  return resolveSupportedReasoningEfforts({
+    reasoningEfforts: mainModel?.reasoningEfforts,
+  }).map((effort) => ({
+    label: t(REASONING_LABEL_KEYS[effort]),
+    value: effort,
+  }))
+})
+const reasoningEffortOptions = computed(() =>
+  REASONING_EFFORTS.map((effort) => ({
+    label: t(REASONING_LABEL_KEYS[effort]),
+    value: effort,
+  })),
+)
+const capabilityOptions = computed(() => [
+  { label: t('settings.capabilityLight'), value: 'light' },
+  { label: t('settings.capabilityStandard'), value: 'standard' },
+  { label: t('settings.capabilityStrong'), value: 'strong' },
 ])
 const tokenEstimationOptions = computed(() => [
   { label: t('settings.tokenConservative'), value: 'conservative' },
@@ -104,6 +137,28 @@ function handleSelectedModels(value: Array<string | number>): void {
   }
 }
 
+/** Applies a reasoning-effort annotation edit to one model row. */
+function handleReasoningEffortsChange(
+  modelId: string,
+  value: Array<string | number>,
+): void {
+  agent.updateModelAnnotation(modelId, {
+    reasoningEfforts: value.map(String) as ReasoningEffort[],
+  })
+}
+
+/** Applies a capability annotation edit to one model row. */
+function handleCapabilityChange(
+  modelId: string,
+  value: string | number | null,
+): void {
+  agent.updateModelAnnotation(modelId, {
+    capability: (value === null
+      ? null
+      : String(value)) as ModelCapabilityLevel | null,
+  })
+}
+
 onMounted(() => {
   void agent.enterProviderSettings()
 })
@@ -117,6 +172,8 @@ watch(
         contextWindowTokens: model.contextWindowTokens,
         compactThresholdTokens: model.compactThresholdTokens,
         maxOutputTokens: model.maxOutputTokens,
+        reasoningEfforts: model.reasoningEfforts,
+        capability: model.capability,
       })),
     }),
   () => {
@@ -492,6 +549,8 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <span>{{ t('settings.maximumContext') }}</span>
           <span>{{ t('settings.compressionThreshold') }}</span>
           <span>{{ t('settings.maximumOutputLength') }}</span>
+          <span>{{ t('settings.modelReasoningEfforts') }}</span>
+          <span>{{ t('settings.modelCapability') }}</span>
         </div>
         <NScrollbar
           v-if="selectedModelProfiles.length"
@@ -561,6 +620,31 @@ function handleDropdownSelect(key: string | number, providerId: string) {
                         $event,
                       )
                     "
+                  />
+                </label>
+                <label class="provider-model-value">
+                  <span>{{ t('settings.modelReasoningEfforts') }}</span>
+                  <NSelect
+                    :value="model.reasoningEfforts ?? []"
+                    :options="reasoningEffortOptions"
+                    :placeholder="
+                      t('settings.modelReasoningEffortsPlaceholder')
+                    "
+                    multiple
+                    clearable
+                    @update:value="
+                      handleReasoningEffortsChange(model.id, $event)
+                    "
+                  />
+                </label>
+                <label class="provider-model-value">
+                  <span>{{ t('settings.modelCapability') }}</span>
+                  <NSelect
+                    :value="model.capability ?? null"
+                    :options="capabilityOptions"
+                    :placeholder="t('settings.modelCapabilityPlaceholder')"
+                    clearable
+                    @update:value="handleCapabilityChange(model.id, $event)"
                   />
                 </label>
               </div>

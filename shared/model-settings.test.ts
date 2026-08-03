@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { resolveModelTokenSettings } from './model-settings'
+import { REASONING_EFFORTS } from './config'
+import {
+  resolveModelTokenSettings,
+  resolveSupportedReasoningEfforts,
+} from './model-settings'
 
 describe('model token settings', () => {
   it('fills the default output and compression limits for identity-only models', () => {
@@ -41,5 +45,26 @@ describe('model token settings', () => {
       compactThresholdTokens: 1_024,
       maxOutputTokens: 30_976,
     })
+  })
+})
+
+describe('resolveSupportedReasoningEfforts', () => {
+  it('returns the full ordered effort set for unannotated models', () => {
+    expect(resolveSupportedReasoningEfforts()).toEqual([...REASONING_EFFORTS])
+    expect(resolveSupportedReasoningEfforts({})).toEqual([...REASONING_EFFORTS])
+  })
+
+  it('returns the full effort set for an empty annotation', () => {
+    expect(resolveSupportedReasoningEfforts({ reasoningEfforts: [] })).toEqual([
+      ...REASONING_EFFORTS,
+    ])
+  })
+
+  it('returns the annotated subset in ascending strength order', () => {
+    expect(
+      resolveSupportedReasoningEfforts({
+        reasoningEfforts: ['max', 'low', 'high'],
+      }),
+    ).toEqual(['low', 'high', 'max'])
   })
 })

@@ -3,9 +3,11 @@ import { IPC_VERSION } from '../../shared/channels'
 import type {
   AssistantLanguage,
   ConfigSection,
+  ModelCapabilityLevel,
   PermissionMode,
   ProviderPublicConfig,
   PublicConfig,
+  ReasoningEffort,
 } from '../../shared/config'
 import { getProviderConfig } from '../../shared/config'
 import {
@@ -63,12 +65,19 @@ function providerModelProfiles(
       ownedBy: catalogModel?.ownedBy,
       availability: catalogModel ? 'provider' : 'custom',
       capabilitySource:
-        override && Object.keys(override).length > 0
+        override &&
+        (override.contextWindowTokens !== undefined ||
+          override.compactThresholdTokens !== undefined ||
+          override.maxOutputTokens !== undefined)
           ? 'override'
           : catalogModel?.contextWindowTokens
             ? 'provider'
             : 'default',
       ...tokenSettings,
+      ...(override?.reasoningEfforts?.length
+        ? { reasoningEfforts: [...override.reasoningEfforts] }
+        : {}),
+      ...(override?.capability ? { capability: override.capability } : {}),
     }
   })
 }
@@ -534,6 +543,37 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         }),
       )
       model.capabilitySource = 'override'
+    },
+    /**
+     * Updates per-model reasoning/capability annotation. Clearing an annotation
+     * removes the field; token override semantics (capabilitySource) are untouched.
+     */
+    updateModelAnnotation(
+      modelId: string,
+      patch: {
+        reasoningEfforts?: ReasoningEffort[]
+        capability?: ModelCapabilityLevel | null
+      },
+    ) {
+      const model = this.modelProfiles.find(
+        (candidate) => candidate.id === modelId,
+      )
+      if (!model) return
+
+      if (patch.reasoningEfforts !== undefined) {
+        if (patch.reasoningEfforts.length) {
+          model.reasoningEfforts = [...patch.reasoningEfforts]
+        } else {
+          delete model.reasoningEfforts
+        }
+      }
+      if (patch.capability !== undefined) {
+        if (patch.capability) {
+          model.capability = patch.capability
+        } else {
+          delete model.capability
+        }
+      }
     },
     /** Loads cached profiles or refreshes the saved Provider model catalog. */
     async loadProviderModels(

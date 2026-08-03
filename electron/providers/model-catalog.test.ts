@@ -244,4 +244,45 @@ describe('DeepSeek model catalog', () => {
       ]),
     )
   })
+
+  it('passes annotations through without polluting the capability source', () => {
+    const internal: AppConfig = structuredClone(DEFAULT_APP_CONFIG)
+    const provider = internal.providers[0]
+    provider.model = 'annotated-custom'
+    provider.modelCatalog = [
+      { id: 'deepseek-v4-pro', ownedBy: 'deepseek' },
+      { id: 'annotated-provider', contextWindowTokens: 200_000 },
+      { id: 'annotated-custom' },
+    ]
+    provider.modelOverrides['deepseek-v4-pro'] = { capability: 'strong' }
+    provider.modelOverrides['annotated-provider'] = {
+      reasoningEfforts: ['off', 'high'],
+    }
+    provider.modelOverrides['annotated-custom'] = {
+      reasoningEfforts: ['low'],
+      capability: 'light',
+    }
+    const profiles = resolveModelProfiles(toPublicConfig(internal, true))
+
+    expect(profiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'deepseek-v4-pro',
+          capabilitySource: 'builtin',
+          capability: 'strong',
+        }),
+        expect.objectContaining({
+          id: 'annotated-provider',
+          capabilitySource: 'provider',
+          reasoningEfforts: ['off', 'high'],
+        }),
+        expect.objectContaining({
+          id: 'annotated-custom',
+          capabilitySource: 'default',
+          reasoningEfforts: ['low'],
+          capability: 'light',
+        }),
+      ]),
+    )
+  })
 })

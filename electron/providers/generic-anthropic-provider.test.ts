@@ -262,6 +262,23 @@ describe('GenericAnthropicProvider', () => {
     })
   })
 
+  it.each(['low', 'medium', 'xhigh'] as const)(
+    'passes the %s reasoning effort through unchanged',
+    (reasoning) => {
+      const provider = new GenericAnthropicProvider({
+        providerId: 'anthropic',
+        baseURL: 'https://api.example/v1',
+        apiKey: 'secret',
+      })
+      const call = provider.compile(input(state(), reasoning))
+
+      expect(call.request).toMatchObject({
+        thinking: { type: 'adaptive' },
+        output_config: { effort: reasoning },
+      })
+    },
+  )
+
   it('groups a complete tool-result batch into one user message', () => {
     const history = state()
     appendAssistantTurn(history, {

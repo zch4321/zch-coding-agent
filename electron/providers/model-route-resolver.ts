@@ -58,6 +58,16 @@ async function resolveBinding(
     endpoint,
     providerConfigRevision: provider.revision,
   })
+  const supportedEfforts =
+    provider.modelOverrides[selection.model]?.reasoningEfforts
+  if (
+    supportedEfforts?.length &&
+    !supportedEfforts.includes(selection.reasoning)
+  ) {
+    throw new Error(
+      `Model ${selection.model} does not support reasoning effort '${selection.reasoning}' (supported: ${supportedEfforts.join(', ')})`,
+    )
+  }
   const modelProfile = resolveModelProfiles(
     config,
     provider.id,
@@ -159,6 +169,8 @@ export async function resolveRunRoutes(
   const approvalSelection: ModelSelection = {
     providerId: approvalProvider.id,
     model: config.approval.approverModel,
+    // Deliberate exception to the no-auto-adjust rule: approval is an internal
+    // safety gate whose effort is never user-selected, so 'off' raises to 'high'.
     reasoning:
       approvalProvider.reasoning === 'off'
         ? 'high'

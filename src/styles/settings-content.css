@@ -125,7 +125,9 @@
 .provider-model-settings-header,
 .provider-model-settings-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(130px, 1fr));
+  grid-template-columns:
+    minmax(180px, 1.4fr) repeat(3, minmax(130px, 1fr))
+    minmax(170px, 1.1fr) minmax(110px, 0.8fr);
   align-items: center;
   gap: 10px;
 }
