@@ -120,3 +120,11 @@
 - 决定：在 `archive/integrated-benchmark` 分支保留完整快照，从主产品删除 case/runner/grader/metrics、Docker worker、Provider proxy、专用构建与命令、Headless benchmark protocol 和对应依赖。通用 Headless CLI/API、runtime identity、trace、usage/tool 统计与 Electron parity 保留。
 - 理由：评估系统与产品 runtime、消息契约、构建、测试和文档高度耦合，导致本体复杂度与改造成本持续上升。评估工程不应再定义产品内部协议或引入专用 canonical message kind。
 - 后续边界：如重启自动评估，在独立仓库中实现，只通过稳定 Headless 入口黑盒调用 Zch Coding Agent；产品仓库不再承载评估数据集、grader 或 worker 部署系统。
+
+## 2026-08-03 — 思考力度六档与 per-model 标注，不做自动升降档
+
+- 状态：已采纳。
+- 决定：`ReasoningEffort` 从 `off|high|max` 扩展为 `off|low|medium|high|xhigh|max`；per-model 标注（支持的档位子集 `reasoningEfforts`、能力等级 `capability`）复用现有 `modelOverrides` map，不新建存储结构、不 bump AppConfig 版本（纯 optional 增量，v15 数据仍合法）。
+- 语义：未标注的模型视为全档位支持（即原行为）；已标注模型在 Provider 默认档位与 Composer 档位选择中只呈现子集，配置保存与 route resolver 冻结时拒绝标注集外的档位。系统不做任何自动升/降档——用户永远知道实际请求的是哪一档；未标注模型在 API 层不支持时错误原样透传。approval 路由的 `off→high` 提升是系统内部安全关卡的唯一例外，不由用户选择档位。
+- 理由：供应商目录只返回身份与 token 字段，无法得知各模型的思考档位，因此支持度由用户显式标注而非系统推断。`capability` 标注暂无运行时消费者，为未来 Model Pool 调度预留；pool 分支集成时 entry 的 reasoning schema 需切换到该六档枚举、capability 改由 Provider 元数据解析。
+- 已知代价：携带标注的配置用旧版本应用打开会因 `additionalProperties: false` 校验失败（只影响 downgrade）；档位映射交给各 Provider API，adapter 不做就近取整。
