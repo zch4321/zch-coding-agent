@@ -1,18 +1,15 @@
 import { Type, type Static } from '@sinclair/typebox'
 import {
+  APP_CONFIG_SCHEMA_VERSION,
   PermissionModeSchema,
   PublicConfigSchema,
   ReasoningEffortSchema,
   RememberedRuleSchema,
+  normalizeModelPoolConfig,
 } from '../../shared/config'
 import { McpServerConfigSchema } from '../../shared/mcp'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
-import {
-  AppConfigSchema,
-  AppProviderConfigSchema,
-  DEFAULT_APP_CONFIG,
-  type AppConfig,
-} from './schema'
+import { AppConfigSchema, DEFAULT_APP_CONFIG, type AppConfig } from './schema'
 
 const validateAppConfig = compileSchema(AppConfigSchema)
 
@@ -119,9 +116,75 @@ const LegacyModelConfigurationIdsSchema = Type.Array(
   { maxItems: 1_000, uniqueItems: true },
 )
 
+// AppConfig v15 is frozen independently from the current root and Provider
+// schemas so adding future configuration cannot silently change its boundary.
+const LegacyAppProviderConfigV15Schema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 128 }),
+    label: Type.String({ minLength: 1, maxLength: 128 }),
+    providerType:
+      PublicConfigSchema.properties.providers.items.properties.providerType,
+    revision: Type.Integer({
+      minimum: 1,
+      maximum: Number.MAX_SAFE_INTEGER,
+    }),
+    baseURL: Type.String({ minLength: 1, maxLength: 2_048 }),
+    model: Type.String({ maxLength: 256 }),
+    reasoning: ReasoningEffortSchema,
+    modelCatalog:
+      PublicConfigSchema.properties.providers.items.properties.modelCatalog,
+    modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
+    modelOverrides:
+      PublicConfigSchema.properties.providers.items.properties.modelOverrides,
+    enabledModelIds:
+      PublicConfigSchema.properties.providers.items.properties.enabledModelIds,
+    apiKeyRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+  },
+  { additionalProperties: false },
+)
+
+const LegacyAppWebSearchConfigV15Schema = Type.Object(
+  {
+    provider: Type.Literal('brave'),
+    apiKeyRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    count: Type.Integer({ minimum: 1, maximum: 20 }),
+  },
+  { additionalProperties: false },
+)
+
+const LegacyAppConfigV15Schema = Type.Object(
+  {
+    schemaVersion: Type.Literal(15),
+    activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
+    providers: Type.Array(LegacyAppProviderConfigV15Schema, {
+      minItems: 1,
+      maxItems: 32,
+    }),
+    approval: PublicConfigSchema.properties.approval,
+    subagents: PublicConfigSchema.properties.subagents,
+    permission: PublicConfigSchema.properties.permission,
+    limits: PublicConfigSchema.properties.limits,
+    logging: PublicConfigSchema.properties.logging,
+    privacy: PublicConfigSchema.properties.privacy,
+    workspace: PublicConfigSchema.properties.workspace,
+    skills: PublicConfigSchema.properties.skills,
+    assistant: PublicConfigSchema.properties.assistant,
+    prompts: PublicConfigSchema.properties.prompts,
+    network: PublicConfigSchema.properties.network,
+    webSearch: LegacyAppWebSearchConfigV15Schema,
+    mcpServers: Type.Array(McpServerConfigSchema, { maxItems: 32 }),
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV15 = Static<typeof LegacyAppConfigV15Schema>
+const validateLegacyAppConfigV15 = compileSchema(LegacyAppConfigV15Schema)
+
 const LegacyAppProviderConfigV14Schema = Type.Object(
   {
-    ...withoutKey(AppProviderConfigSchema.properties, 'enabledModelIds'),
+    ...withoutKey(
+      LegacyAppProviderConfigV15Schema.properties,
+      'enabledModelIds',
+    ),
     model: Type.String({ minLength: 1, maxLength: 256 }),
     modelConfigurationIds: LegacyModelConfigurationIdsSchema,
   },
@@ -130,7 +193,7 @@ const LegacyAppProviderConfigV14Schema = Type.Object(
 
 const LegacyAppConfigV14Schema = Type.Object(
   {
-    ...AppConfigSchema.properties,
+    ...LegacyAppConfigV15Schema.properties,
     schemaVersion: Type.Literal(14),
     providers: Type.Array(LegacyAppProviderConfigV14Schema, {
       minItems: 1,
@@ -225,8 +288,9 @@ function migrateLimitDefaults(limits: LegacyAppConfigV10['limits']) {
 function migrateV10(config: LegacyAppConfigV10): AppConfig {
   const migrated = {
     ...config,
-    schemaVersion: 15 as const,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
     subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
+    modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     limits: migrateLimitDefaults(config.limits),
     providers: config.providers.map((provider) => ({
       ...provider,
@@ -245,8 +309,9 @@ function migrateV10(config: LegacyAppConfigV10): AppConfig {
 function migrateV11(config: LegacyAppConfigV11): AppConfig {
   const migrated = {
     ...config,
-    schemaVersion: 15 as const,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
     subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
+    modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     limits: withoutRunToolBudget(config.limits),
     providers: config.providers.map((provider) => ({
       ...provider,
@@ -265,8 +330,9 @@ function migrateV11(config: LegacyAppConfigV11): AppConfig {
 function migrateV12(config: LegacyAppConfigV12): AppConfig {
   const migrated = {
     ...config,
-    schemaVersion: 15 as const,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
     subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
+    modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     limits: withoutRunToolBudget(config.limits),
     providers: config.providers.map((provider) => ({
       ...withoutKey(provider, 'modelConfigurationIds'),
@@ -285,7 +351,8 @@ function migrateV12(config: LegacyAppConfigV12): AppConfig {
 function migrateV13(config: LegacyAppConfigV13): AppConfig {
   const migrated = {
     ...config,
-    schemaVersion: 15 as const,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     limits: withoutRunToolBudget(config.limits),
     providers: config.providers.map((provider) => ({
       ...withoutKey(provider, 'modelConfigurationIds'),
@@ -304,7 +371,8 @@ function migrateV13(config: LegacyAppConfigV13): AppConfig {
 function migrateV14(config: LegacyAppConfigV14): AppConfig {
   const migrated = {
     ...config,
-    schemaVersion: 15 as const,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     providers: config.providers.map((provider) => ({
       ...withoutKey(provider, 'modelConfigurationIds'),
       enabledModelIds: [...provider.modelConfigurationIds],
@@ -326,7 +394,7 @@ export class UnsupportedConfigSchemaError extends Error {
     validationErrors?: string,
   ) {
     super(
-      `Unsupported config schema ${String(schemaVersion)}; this build requires AppConfig v15 and will reset the existing config to defaults.${
+      `Unsupported config schema ${String(schemaVersion)}; this build requires AppConfig v${APP_CONFIG_SCHEMA_VERSION} and will reset the existing config to defaults.${
         validationErrors ? ` ${validationErrors}` : ''
       }`,
     )
@@ -335,7 +403,7 @@ export class UnsupportedConfigSchemaError extends Error {
 }
 
 /**
- * Migrates Provider identity, model selections, Subagents, and retired limits.
+ * Migrates Provider identity, model selections, Subagents, and the model pool.
  */
 export function migrateConfig(candidate: unknown): AppConfig {
   if (candidate === undefined || candidate === null) {
@@ -360,8 +428,9 @@ export function migrateConfig(candidate: unknown): AppConfig {
     const legacy = candidate as LegacyAppConfigV9
     const migrated = {
       ...legacy,
-      schemaVersion: 15 as const,
+      schemaVersion: APP_CONFIG_SCHEMA_VERSION,
       subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
+      modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
       limits: migrateLimitDefaults(legacy.limits),
       providers: legacy.providers.map((provider) => {
         const adapterId = provider.adapterId
@@ -438,7 +507,28 @@ export function migrateConfig(candidate: unknown): AppConfig {
     return migrateV14(candidate as LegacyAppConfigV14)
   }
 
-  if (Reflect.get(candidate, 'schemaVersion') !== 15) {
+  if (Reflect.get(candidate, 'schemaVersion') === 15) {
+    if (!validateLegacyAppConfigV15(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        15,
+        formatSchemaErrors(validateLegacyAppConfigV15.errors),
+      )
+    }
+    const migrated = {
+      ...(candidate as LegacyAppConfigV15),
+      schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+      modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
+    }
+    if (!validateAppConfig(migrated)) {
+      throw new UnsupportedConfigSchemaError(
+        15,
+        formatSchemaErrors(validateAppConfig.errors),
+      )
+    }
+    return structuredClone(migrated as AppConfig)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') !== APP_CONFIG_SCHEMA_VERSION) {
     throw new UnsupportedConfigSchemaError(
       Reflect.get(candidate, 'schemaVersion'),
     )
@@ -451,5 +541,15 @@ export function migrateConfig(candidate: unknown): AppConfig {
     )
   }
 
-  return structuredClone(candidate as AppConfig)
+  try {
+    return {
+      ...structuredClone(candidate as AppConfig),
+      modelPool: normalizeModelPoolConfig((candidate as AppConfig).modelPool),
+    }
+  } catch (error) {
+    throw new UnsupportedConfigSchemaError(
+      APP_CONFIG_SCHEMA_VERSION,
+      error instanceof Error ? error.message : 'Invalid model pool',
+    )
+  }
 }

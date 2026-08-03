@@ -2,10 +2,15 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { ConfigSetRequestSchema } from '../../shared/config'
+import {
+  ConfigSetRequestSchema,
+  type ConfigSetRequest,
+  type ModelPoolEntry,
+  type ProviderPublicConfig,
+} from '../../shared/config'
 import { compileSchema } from '../schema-validator'
 import legacyAppConfigV9 from './fixtures/app-config-v9.json'
-import { DEFAULT_APP_CONFIG } from './schema'
+import { DEFAULT_APP_CONFIG, type AppConfig } from './schema'
 import type { SafeStorageAdapter } from './secret-store'
 import { SecretStorageUnavailableError, SecretStore } from './secret-store'
 import { ConfigStore } from './store'
@@ -66,8 +71,67 @@ async function createStores(adapter = new FakeSafeStorage()) {
   return { directory, adapter, secretStore, configStore }
 }
 
+function modelPoolEntry(
+  overrides: Partial<ModelPoolEntry> = {},
+): ModelPoolEntry {
+  return {
+    id: 'worker-entry',
+    enabled: true,
+    providerId: 'deepseek',
+    model: 'worker-model',
+    reasoning: 'high',
+    capability: 'standard',
+    maxParallel: 3,
+    ...overrides,
+  }
+}
+
+async function configurePoolProvider(
+  configStore: ConfigStore,
+  options: { credential?: boolean } = { credential: true },
+): Promise<ProviderPublicConfig> {
+  const initial = configStore.getPublicConfig().providers[0]!
+  await configStore.update({
+    version: 1,
+    kind: 'provider',
+    providerId: initial.id,
+    label: initial.label,
+    providerType: initial.providerType,
+    baseURL: 'https://provider.example/v1',
+    model: 'main-model',
+    enabledModelIds: ['main-model', 'worker-model'],
+    reasoning: 'high',
+  })
+  if (options.credential !== false) {
+    await configStore.update({
+      version: 1,
+      kind: 'credential',
+      providerId: initial.id,
+      action: 'set',
+      apiKey: 'model-pool-secret',
+    })
+  }
+  return configStore.getPublicConfig().providers[0]!
+}
+
+function modelPoolUpdate(
+  provider: ProviderPublicConfig,
+  entries: ModelPoolEntry[],
+): Extract<ConfigSetRequest, { kind: 'model-pool' }> {
+  return {
+    version: 1,
+    kind: 'model-pool',
+    value: { entries },
+    expectedProviderRevisions: entries.some(
+      (entry) => entry.enabled && entry.providerId === provider.id,
+    )
+      ? [{ providerId: provider.id, revision: provider.revision }]
+      : [],
+  }
+}
+
 describe('ConfigStore', () => {
-  it('deletes a legacy config and rebuilds clean v15 defaults', async () => {
+  it('deletes a legacy config and rebuilds clean v16 defaults', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     await writeFile(
@@ -82,15 +146,15 @@ describe('ConfigStore', () => {
     const store = new ConfigStore(configPath, secretStore)
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 15 },
+      config: { schemaVersion: 16 },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 16,
       limits: { maxStepsPerRun: 0 },
     })
   })
 
-  it('migrates valid v9 providers to v15 without losing saved state', async () => {
+  it('migrates valid v9 providers to v16 without losing saved state', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     const legacy = structuredClone(legacyAppConfigV9) as Record<string, unknown>
@@ -125,7 +189,8 @@ describe('ConfigStore', () => {
     await store.initialize()
 
     expect(store.getInternalConfig()).toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 16,
+      modelPool: { entries: [] },
       providers: [
         {
           providerType: 'deepseek.chat-completions',
@@ -146,12 +211,12 @@ describe('ConfigStore', () => {
       ],
     })
     const persisted = await readFile(configPath, 'utf8')
-    expect(persisted).toContain('"schemaVersion": 15')
+    expect(persisted).toContain('"schemaVersion": 16')
     expect(persisted).not.toContain('adapterId')
     expect(persisted).not.toContain('"profile"')
   })
 
-  it('resets a malformed v9 file to clean v15 defaults', async () => {
+  it('resets a malformed v9 file to clean v16 defaults', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     const malformed = structuredClone(legacyAppConfigV9) as Record<
@@ -169,7 +234,7 @@ describe('ConfigStore', () => {
     )
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 15 },
+      config: { schemaVersion: 16 },
     })
     expect(store.getInternalConfig()).toEqual(DEFAULT_APP_CONFIG)
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual(
@@ -188,7 +253,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 16,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).not.toHaveProperty(
       'legacyField',
@@ -198,13 +263,13 @@ describe('ConfigStore', () => {
   it('deletes malformed JSON and rebuilds clean defaults', async () => {
     const { directory, configStore } = await createStores()
     const configPath = path.join(directory, 'config.json')
-    await writeFile(configPath, '{"schemaVersion":15', 'utf8')
+    await writeFile(configPath, '{"schemaVersion":16', 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 16,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 16,
       limits: { maxStepsPerRun: 0 },
     })
   })
@@ -222,7 +287,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 16,
       limits: { [field]: value },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
@@ -245,6 +310,210 @@ describe('ConfigStore', () => {
       expect(validate(request)).toBe(false)
     },
   )
+
+  it('validates model pool request structure and bounds', () => {
+    const validate = compileSchema(ConfigSetRequestSchema)
+    const valid = {
+      version: 1,
+      kind: 'model-pool',
+      value: { entries: [modelPoolEntry({ enabled: false })] },
+      expectedProviderRevisions: [],
+    }
+
+    expect(validate(valid)).toBe(true)
+    expect(
+      validate({
+        ...valid,
+        value: {
+          entries: [modelPoolEntry({ enabled: false, maxParallel: 0 })],
+        },
+      }),
+    ).toBe(false)
+    expect(
+      validate({
+        ...valid,
+        value: {
+          entries: Array.from({ length: 65 }, (_, index) =>
+            modelPoolEntry({ enabled: false, id: `entry-${index}` }),
+          ),
+        },
+      }),
+    ).toBe(false)
+  })
+
+  it('defends the store against structurally invalid direct model pool updates', async () => {
+    const { configStore } = await createStores()
+    const invalid = {
+      version: 1,
+      kind: 'model-pool',
+      value: {
+        entries: [modelPoolEntry({ enabled: false, maxParallel: 0 })],
+      },
+      expectedProviderRevisions: [],
+    } as unknown as ConfigSetRequest
+
+    await expect(configStore.update(invalid)).rejects.toThrow(
+      'Invalid model pool',
+    )
+    expect(configStore.getPublicConfig().modelPool.entries).toEqual([])
+  })
+
+  it('normalizes and atomically persists a complete model pool', async () => {
+    const { directory, configStore } = await createStores()
+    const provider = await configurePoolProvider(configStore)
+    const publicConfig = await configStore.update(
+      modelPoolUpdate(provider, [
+        modelPoolEntry({ id: ' e\u0301 ' }),
+        modelPoolEntry({
+          id: 'disabled-reference',
+          enabled: false,
+          providerId: 'removed-provider',
+          model: 'removed-model',
+        }),
+      ]),
+    )
+
+    expect(publicConfig.modelPool.entries).toEqual([
+      modelPoolEntry({ id: 'é' }),
+      modelPoolEntry({
+        id: 'disabled-reference',
+        enabled: false,
+        providerId: 'removed-provider',
+        model: 'removed-model',
+      }),
+    ])
+    const persisted = JSON.parse(
+      await readFile(path.join(directory, 'config.json'), 'utf8'),
+    ) as { modelPool: { entries: ModelPoolEntry[] } }
+    expect(persisted.modelPool.entries).toEqual(publicConfig.modelPool.entries)
+    expect(JSON.stringify(publicConfig.modelPool)).not.toContain('apiKeyRef')
+    expect(JSON.stringify(publicConfig.modelPool)).not.toContain(
+      'model-pool-secret',
+    )
+  })
+
+  it('rejects the whole model pool update when any enabled entry is invalid', async () => {
+    const { directory, configStore } = await createStores()
+    const provider = await configurePoolProvider(configStore)
+    const configPath = path.join(directory, 'config.json')
+    const before = await readFile(configPath, 'utf8')
+
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'model-pool',
+        value: {
+          entries: [
+            modelPoolEntry(),
+            modelPoolEntry({
+              id: 'invalid-entry',
+              providerId: 'missing-provider',
+            }),
+          ],
+        },
+        expectedProviderRevisions: [
+          { providerId: provider.id, revision: provider.revision },
+          { providerId: 'missing-provider', revision: 1 },
+        ],
+      }),
+    ).rejects.toThrow('Provider is not configured: missing-provider')
+
+    expect(configStore.getPublicConfig().modelPool.entries).toEqual([])
+    expect(await readFile(configPath, 'utf8')).toBe(before)
+  })
+
+  it('requires an exact, unique, current Provider revision list', async () => {
+    const { configStore } = await createStores()
+    const provider = await configurePoolProvider(configStore)
+    const value = { entries: [modelPoolEntry()] }
+
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'model-pool',
+        value,
+        expectedProviderRevisions: [],
+      }),
+    ).rejects.toThrow('Missing expected Provider revision')
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'model-pool',
+        value,
+        expectedProviderRevisions: [
+          { providerId: provider.id, revision: provider.revision },
+          { providerId: provider.id, revision: provider.revision },
+        ],
+      }),
+    ).rejects.toThrow('Duplicate expected Provider revision')
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'model-pool',
+        value,
+        expectedProviderRevisions: [
+          { providerId: provider.id, revision: provider.revision },
+          { providerId: 'extra-provider', revision: 1 },
+        ],
+      }),
+    ).rejects.toThrow('Unexpected Provider revision')
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'model-pool',
+        value,
+        expectedProviderRevisions: [
+          { providerId: provider.id, revision: provider.revision - 1 },
+        ],
+      }),
+    ).rejects.toThrow('Provider configuration changed')
+    expect(configStore.getPublicConfig().modelPool.entries).toEqual([])
+  })
+
+  it('validates enabled model, endpoint, and credential bindings before saving', async () => {
+    const missingCredential = await createStores()
+    const providerWithoutCredential = await configurePoolProvider(
+      missingCredential.configStore,
+      { credential: false },
+    )
+    await expect(
+      missingCredential.configStore.update(
+        modelPoolUpdate(providerWithoutCredential, [modelPoolEntry()]),
+      ),
+    ).rejects.toThrow('credential is not configured')
+
+    const disabledModel = await createStores()
+    const providerWithCredential = await configurePoolProvider(
+      disabledModel.configStore,
+    )
+    await expect(
+      disabledModel.configStore.update(
+        modelPoolUpdate(providerWithCredential, [
+          modelPoolEntry({ model: 'not-enabled' }),
+        ]),
+      ),
+    ).rejects.toThrow('Model is not enabled')
+
+    const unsafeEndpoint = await createStores()
+    await configurePoolProvider(unsafeEndpoint.configStore)
+    const current = unsafeEndpoint.configStore.getPublicConfig().providers[0]!
+    await unsafeEndpoint.configStore.update({
+      version: 1,
+      kind: 'provider',
+      providerId: current.id,
+      baseURL: 'https://user:secret@provider.example/v1',
+      model: current.model,
+      enabledModelIds: current.enabledModelIds,
+      reasoning: current.reasoning,
+    })
+    const unsafeProvider =
+      unsafeEndpoint.configStore.getPublicConfig().providers[0]!
+    await expect(
+      unsafeEndpoint.configStore.update(
+        modelPoolUpdate(unsafeProvider, [modelPoolEntry()]),
+      ),
+    ).rejects.toThrow('must not contain credentials')
+  })
 
   it('supports provider-scoped environment credentials for headless hosts', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
@@ -283,6 +552,21 @@ describe('ConfigStore', () => {
     await expect(store.getProviderApiKey('generic')).resolves.toBe(
       'generic-secret',
     )
+    const provider = store
+      .getPublicConfig()
+      .providers.find((candidate) => candidate.id === 'generic')!
+    await expect(
+      store.update(
+        modelPoolUpdate(provider, [
+          modelPoolEntry({
+            providerId: 'generic',
+            model: 'generic-model',
+          }),
+        ]),
+      ),
+    ).resolves.toMatchObject({
+      modelPool: { entries: [{ enabled: true, providerId: 'generic' }] },
+    })
   })
 
   it('persists credentials separately and only exposes configured state', async () => {
@@ -341,7 +625,7 @@ describe('ConfigStore', () => {
     await expect(store.getDeepSeekApiKey()).resolves.toBe('stored-secret')
   })
 
-  it('writes v15 defaults atomically', async () => {
+  it('writes v16 defaults atomically', async () => {
     const { directory, configStore } = await createStores()
 
     await configStore.update({
@@ -355,7 +639,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(15)
+    expect(parsed.schemaVersion).toBe(16)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(0)
     expect(configStore.getPublicConfig().limits.maxContextTokens).toBe(256_000)
     expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
@@ -385,7 +669,7 @@ describe('ConfigStore', () => {
     expect(
       JSON.parse(await readFile(path.join(directory, 'config.json'), 'utf8')),
     ).toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 16,
       subagents: { enabled: true, workerTimeoutMs: 2_700_000 },
     })
   })
@@ -463,6 +747,204 @@ describe('ConfigStore', () => {
     expect(configStore.getPublicConfig().providers[0]?.revision).toBe(
       initial.revision + 3,
     )
+  })
+
+  it('auto-disables entries when a model is removed and never auto-enables them', async () => {
+    const { configStore } = await createStores()
+    let provider = await configurePoolProvider(configStore)
+    await configStore.update(modelPoolUpdate(provider, [modelPoolEntry()]))
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      providerId: provider.id,
+      label: provider.label,
+      providerType: provider.providerType,
+      baseURL: provider.baseURL,
+      model: 'main-model',
+      enabledModelIds: ['main-model'],
+      reasoning: provider.reasoning,
+      limits: configStore.getPublicConfig().limits,
+    })
+    expect(configStore.getPublicConfig().modelPool.entries[0]).toMatchObject({
+      enabled: false,
+      providerId: 'deepseek',
+      model: 'worker-model',
+    })
+
+    provider = configStore.getPublicConfig().providers[0]!
+    await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      providerId: provider.id,
+      label: provider.label,
+      providerType: provider.providerType,
+      baseURL: provider.baseURL,
+      model: 'main-model',
+      enabledModelIds: ['main-model', 'worker-model'],
+      reasoning: provider.reasoning,
+      limits: configStore.getPublicConfig().limits,
+    })
+    expect(configStore.getPublicConfig().modelPool.entries[0]?.enabled).toBe(
+      false,
+    )
+  })
+
+  it('auto-disables entries on explicit credential clear without restoring them', async () => {
+    const { configStore } = await createStores()
+    const provider = await configurePoolProvider(configStore)
+    await configStore.update(modelPoolUpdate(provider, [modelPoolEntry()]))
+
+    await configStore.update({
+      version: 1,
+      kind: 'credential',
+      providerId: provider.id,
+      action: 'clear',
+    })
+    expect(configStore.getPublicConfig().modelPool.entries[0]?.enabled).toBe(
+      false,
+    )
+
+    await configStore.update({
+      version: 1,
+      kind: 'credential',
+      providerId: provider.id,
+      action: 'set',
+      apiKey: 'restored-secret',
+    })
+    expect(configStore.getPublicConfig().modelPool.entries[0]?.enabled).toBe(
+      false,
+    )
+  })
+
+  it('keeps entries enabled across valid route edits and key replacement', async () => {
+    const { configStore } = await createStores()
+    let provider = await configurePoolProvider(configStore)
+    await configStore.update(modelPoolUpdate(provider, [modelPoolEntry()]))
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      providerId: provider.id,
+      providerType: 'generic.responses',
+      baseURL: 'https://replacement.example/v2',
+      model: provider.model,
+      enabledModelIds: provider.enabledModelIds,
+      modelOverrides: {
+        'worker-model': { contextWindowTokens: 128_000 },
+      },
+      reasoning: 'max',
+    })
+    await configStore.update({
+      version: 1,
+      kind: 'credential',
+      providerId: provider.id,
+      action: 'set',
+      apiKey: 'replacement-secret',
+    })
+
+    provider = configStore.getPublicConfig().providers[0]!
+    expect(provider.revision).toBeGreaterThan(1)
+    expect(configStore.getPublicConfig().modelPool.entries[0]?.enabled).toBe(
+      true,
+    )
+  })
+
+  it('auto-disables entries when their Provider is deleted and preserves them on recreation', async () => {
+    const { configStore } = await createStores()
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      providerId: 'worker-provider',
+      label: 'Worker Provider',
+      providerType: 'generic.chat-completions',
+      baseURL: 'https://worker.example/v1',
+      model: 'worker-model',
+      enabledModelIds: ['worker-model'],
+      reasoning: 'high',
+    })
+    await configStore.update({
+      version: 1,
+      kind: 'credential',
+      providerId: 'worker-provider',
+      action: 'set',
+      apiKey: 'worker-secret',
+    })
+    const provider = configStore
+      .getPublicConfig()
+      .providers.find((candidate) => candidate.id === 'worker-provider')!
+    const entry = modelPoolEntry({
+      providerId: provider.id,
+      model: provider.model,
+    })
+    await configStore.update(modelPoolUpdate(provider, [entry]))
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider-delete',
+      providerId: provider.id,
+      fallbackProviderId: 'deepseek',
+    })
+    expect(configStore.getPublicConfig().modelPool.entries).toEqual([
+      { ...entry, enabled: false },
+    ])
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      providerId: 'worker-provider',
+      label: 'Recreated Worker',
+      providerType: 'generic.chat-completions',
+      baseURL: 'https://worker.example/v1',
+      model: 'worker-model',
+      enabledModelIds: ['worker-model'],
+      reasoning: 'high',
+    })
+    expect(configStore.getPublicConfig().modelPool.entries[0]?.enabled).toBe(
+      false,
+    )
+  })
+
+  it('repairs handwritten dangling references but preserves temporary credential loss', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
+    const configPath = path.join(directory, 'config.json')
+    const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+    config.providers[0]!.model = 'main-model'
+    config.providers[0]!.enabledModelIds = ['main-model']
+    config.modelPool.entries = [
+      modelPoolEntry({
+        id: 'missing-provider',
+        providerId: 'removed-provider',
+        model: 'preserved-model',
+      }),
+      modelPoolEntry({ id: 'missing-model' }),
+      modelPoolEntry({
+        id: 'credential-temporarily-missing',
+        model: 'main-model',
+      }),
+    ]
+    await writeFile(configPath, JSON.stringify(config), 'utf8')
+    const store = new ConfigStore(
+      configPath,
+      new SecretStore(
+        path.join(directory, 'secrets.json'),
+        new FakeSafeStorage(),
+      ),
+    )
+
+    await store.initialize()
+
+    expect(
+      store.getPublicConfig().modelPool.entries.map((entry) => entry.enabled),
+    ).toEqual([false, false, true])
+    const persisted = JSON.parse(await readFile(configPath, 'utf8')) as {
+      modelPool: { entries: ModelPoolEntry[] }
+    }
+    expect(persisted.modelPool.entries.map((entry) => entry.enabled)).toEqual([
+      false,
+      false,
+      true,
+    ])
   })
 
   it('rejects a main model outside the enabled Provider pool', async () => {
@@ -545,11 +1027,11 @@ describe('ConfigStore', () => {
     config.schemaVersion = 99
     await writeFile(configPath, JSON.stringify(config), 'utf8')
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 16,
     })
     expect(configStore.getMcpServers()).toHaveLength(0)
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 16,
       mcpServers: [],
     })
   })

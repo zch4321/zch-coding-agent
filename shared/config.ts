@@ -2,6 +2,24 @@ import { Type, type Static } from '@sinclair/typebox'
 import { JsonValueSchema } from './json'
 import type { AssistantLanguage } from './system-prompts'
 import { McpServerConfigSchema } from './mcp'
+import {
+  ModelPoolConfigSchema,
+  ModelPoolProviderRevisionSchema,
+} from './model-pool'
+
+export {
+  ModelPoolCapabilitySchema,
+  ModelPoolConfigSchema,
+  ModelPoolEntrySchema,
+  ModelPoolProviderRevisionSchema,
+  normalizeModelPoolConfig,
+  type ModelPoolCapability,
+  type ModelPoolConfig,
+  type ModelPoolEntry,
+  type ModelPoolProviderRevision,
+} from './model-pool'
+
+export const APP_CONFIG_SCHEMA_VERSION = 16 as const
 
 export const AssistantLanguageSchema = Type.Union([
   Type.Literal('zh-CN'),
@@ -149,7 +167,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(15),
+    schemaVersion: Type.Literal(APP_CONFIG_SCHEMA_VERSION),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
@@ -172,6 +190,7 @@ export const PublicConfigSchema = Type.Object(
       },
       { additionalProperties: false },
     ),
+    modelPool: ModelPoolConfigSchema,
     permission: Type.Object(
       {
         defaultMode: PermissionModeSchema,
@@ -447,6 +466,7 @@ export const ConfigSectionSchema = Type.Union([
   Type.Literal('providers'),
   Type.Literal('approval'),
   Type.Literal('subagents'),
+  Type.Literal('modelPool'),
   Type.Literal('permission'),
   Type.Literal('limits'),
   Type.Literal('logging'),
@@ -462,6 +482,17 @@ export const ConfigSectionSchema = Type.Union([
 export type ConfigSection = Static<typeof ConfigSectionSchema>
 
 export const ConfigSetRequestSchema = Type.Union([
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('model-pool'),
+      value: ModelPoolConfigSchema,
+      expectedProviderRevisions: Type.Array(ModelPoolProviderRevisionSchema, {
+        maxItems: 32,
+      }),
+    },
+    { additionalProperties: false },
+  ),
   Type.Object(
     {
       version: Type.Literal(1),

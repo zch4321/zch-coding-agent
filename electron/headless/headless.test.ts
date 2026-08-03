@@ -14,7 +14,7 @@ import {
   type TestProviderStreamRequest as ProviderStreamRequest,
 } from '../providers/provider-test-harness'
 import { parseHeadlessArguments } from './cli'
-import { loadHeadlessConfig } from './config'
+import { loadHeadlessConfig, prepareHeadlessConfig } from './config'
 import type { HeadlessConfig } from './contracts'
 import { HEADLESS_EXIT_CODES, runHeadlessMain } from './main'
 import { runHeadlessAgent } from './runner'
@@ -344,6 +344,25 @@ describe('Headless host', () => {
     await writeFile(configPath, JSON.stringify(source), 'utf8')
 
     await expect(loadHeadlessConfig(configPath)).resolves.toEqual(source)
+  })
+
+  it('keeps external v4 singular Provider config while building an empty v16 model pool', async () => {
+    const { artifacts } = await fixture()
+    const prepared = await prepareHeadlessConfig({
+      config: config(),
+      artifactsDirectory: artifacts,
+      environment: { HEADLESS_TEST_KEY: 'headless-secret' },
+    })
+
+    expect(prepared.config).toMatchObject({
+      schemaVersion: 4,
+      provider: { id: 'fake' },
+    })
+    expect(prepared.configStore.getInternalConfig()).toMatchObject({
+      schemaVersion: 16,
+      activeProviderId: 'fake',
+      modelPool: { entries: [] },
+    })
   })
 
   it('accepts Responses and Anthropic Provider Types in v4 config', async () => {

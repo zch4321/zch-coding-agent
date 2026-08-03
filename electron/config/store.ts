@@ -1,6 +1,13 @@
 import { mkdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
-import type { ConfigSetRequest, PublicConfig } from '../../shared/config'
+import {
+  ModelPoolConfigSchema,
+  normalizeModelPoolConfig,
+  type ConfigSetRequest,
+  type ModelPoolConfig,
+  type PublicConfig,
+} from '../../shared/config'
+import { assertModelRouteSnapshotSafe } from '../../shared/model-route'
 import { writeJsonAtomic } from './atomic-file'
 import { migrateConfig, UnsupportedConfigSchemaError } from './migrations'
 import {
@@ -14,11 +21,17 @@ import {
 } from './schema'
 import type { SecretStore, SecretStorageStatus } from './secret-store'
 import type { McpLaunchTrust, McpServerConfig } from '../../shared/mcp'
+import { resolveModelProfiles } from '../providers/model-catalog'
+import { resolveProviderEndpoint } from '../providers/provider-factory'
+import { compileSchema, formatSchemaErrors } from '../schema-validator'
 
 type ProviderUpdate = Extract<
   ConfigSetRequest,
   { kind: 'provider' | 'provider-settings' }
 >
+type ModelPoolUpdate = Extract<ConfigSetRequest, { kind: 'model-pool' }>
+
+const validateModelPoolConfig = compileSchema(ModelPoolConfigSchema)
 
 function assertModelOverridesValid(
   overrides: AppProviderConfig['modelOverrides'],
@@ -170,6 +183,119 @@ function providerFallback(
   )
 }
 
+function disableModelPoolEntries(
+  config: AppConfig,
+  shouldDisable: (entry: ModelPoolConfig['entries'][number]) => boolean,
+): boolean {
+  let changed = false
+  config.modelPool.entries = config.modelPool.entries.map((entry) => {
+    if (!entry.enabled || !shouldDisable(entry)) return entry
+    changed = true
+    return { ...entry, enabled: false }
+  })
+  return changed
+}
+
+function disableDanglingModelPoolEntries(config: AppConfig): boolean {
+  return disableModelPoolEntries(config, (entry) => {
+    const provider = getAppProvider(config, entry.providerId)
+    return !provider || !provider.enabledModelIds.includes(entry.model)
+  })
+}
+
+function assertModelPoolRevisionCoverage(
+  config: PublicConfig,
+  request: ModelPoolUpdate,
+): void {
+  const requiredProviderIds = new Set(
+    request.value.entries
+      .filter((entry) => entry.enabled)
+      .map((entry) => entry.providerId),
+  )
+  const revisions = new Map<string, number>()
+
+  for (const expected of request.expectedProviderRevisions) {
+    if (revisions.has(expected.providerId)) {
+      throw new Error(
+        `Duplicate expected Provider revision: ${expected.providerId}`,
+      )
+    }
+    if (!requiredProviderIds.has(expected.providerId)) {
+      throw new Error(
+        `Unexpected Provider revision for model pool: ${expected.providerId}`,
+      )
+    }
+    revisions.set(expected.providerId, expected.revision)
+  }
+
+  for (const providerId of requiredProviderIds) {
+    const expectedRevision = revisions.get(providerId)
+    if (expectedRevision === undefined) {
+      throw new Error(
+        `Missing expected Provider revision for model pool: ${providerId}`,
+      )
+    }
+    const provider = config.providers.find(
+      (candidate) => candidate.id === providerId,
+    )
+    if (!provider) {
+      throw new Error(`Provider is not configured: ${providerId}`)
+    }
+    if (provider.revision !== expectedRevision) {
+      throw new Error(
+        `Provider configuration changed before saving model pool: ${providerId}`,
+      )
+    }
+  }
+}
+
+function assertEnabledModelPoolEntriesValid(
+  config: PublicConfig,
+  pool: ModelPoolConfig,
+): void {
+  for (const entry of pool.entries) {
+    if (!entry.enabled) continue
+
+    const provider = config.providers.find(
+      (candidate) => candidate.id === entry.providerId,
+    )
+    if (!provider) {
+      throw new Error(`Provider is not configured: ${entry.providerId}`)
+    }
+    if (!provider.enabledModelIds.includes(entry.model)) {
+      throw new Error(
+        `Model is not enabled for ${provider.label}: ${entry.model}`,
+      )
+    }
+
+    const endpoint = resolveProviderEndpoint(
+      provider.providerType,
+      provider.baseURL,
+    )
+    assertModelRouteSnapshotSafe({
+      schemaVersion: 2,
+      purpose: 'main',
+      providerType: provider.providerType,
+      providerId: provider.id,
+      model: entry.model,
+      reasoning: entry.reasoning,
+      endpoint,
+      providerConfigRevision: provider.revision,
+    })
+    const profile = resolveModelProfiles(config, provider.id, entry.model).find(
+      (candidate) => candidate.id === entry.model,
+    )
+    if (!profile) {
+      throw new Error(
+        `Model profile is not available for ${provider.label}: ${entry.model}`,
+      )
+    }
+    if (!provider.credentialConfigured) {
+      throw new Error(`${provider.label} credential is not configured`)
+    }
+  }
+}
+
 /** Serializes configuration mutations, persists settings, and delegates credentials to SecretStore. */
 export class ConfigStore {
   readonly #filePath: string
@@ -220,8 +346,12 @@ export class ConfigStore {
 
   /** Returns renderer-safe settings with credential presence and source but no secret values. */
   getPublicConfig(): PublicConfig {
+    return this.#toPublicConfig(this.#config)
+  }
+
+  #toPublicConfig(config: AppConfig): PublicConfig {
     return toPublicConfig(
-      this.#config,
+      config,
       (provider) => {
         const stored = this.#secretStore.has(provider.apiKeyRef)
         const environment = Boolean(this.#environmentApiKeys[provider.id])
@@ -404,9 +534,11 @@ export class ConfigStore {
     switch (request.kind) {
       case 'provider':
         applyProviderUpdate(next, request, { activate: true })
+        disableDanglingModelPoolEntries(next)
         break
       case 'provider-settings': {
         applyProviderUpdate(next, request, { activate: false })
+        disableDanglingModelPoolEntries(next)
         next.limits = structuredClone(request.limits)
 
         if (request.apiKey === undefined) {
@@ -495,6 +627,11 @@ export class ConfigStore {
           }
         }
 
+        disableModelPoolEntries(
+          next,
+          (entry) => entry.providerId === request.providerId,
+        )
+
         await writeJsonAtomic(this.#filePath, next)
         this.#config = next
         await this.#secretStore.delete(previousReference)
@@ -509,6 +646,10 @@ export class ConfigStore {
         if (request.action === 'clear') {
           delete provider.apiKeyRef
           provider.revision += 1
+          disableModelPoolEntries(
+            next,
+            (entry) => entry.providerId === provider.id,
+          )
           await writeJsonAtomic(this.#filePath, next)
           this.#config = next
           await this.#secretStore.delete(previousReference)
@@ -539,6 +680,22 @@ export class ConfigStore {
       case 'subagents':
         next.subagents = structuredClone(request.value)
         break
+      case 'model-pool': {
+        if (!validateModelPoolConfig(request.value)) {
+          throw new Error(
+            `Invalid model pool: ${formatSchemaErrors(validateModelPoolConfig.errors)}`,
+          )
+        }
+        const normalized = normalizeModelPoolConfig(request.value)
+        const publicConfig = this.#toPublicConfig(next)
+        assertModelPoolRevisionCoverage(publicConfig, {
+          ...request,
+          value: normalized,
+        })
+        assertEnabledModelPoolEntriesValid(publicConfig, normalized)
+        next.modelPool = normalized
+        break
+      }
       case 'permission':
         next.permission = {
           defaultMode: request.defaultMode,
@@ -633,11 +790,8 @@ export class ConfigStore {
       const content = await readFile(this.#filePath, 'utf8')
       const parsed = JSON.parse(content) as unknown
       const migrated = migrateConfig(parsed)
-      if (
-        !parsed ||
-        typeof parsed !== 'object' ||
-        Reflect.get(parsed, 'schemaVersion') !== migrated.schemaVersion
-      ) {
+      disableDanglingModelPoolEntries(migrated)
+      if (JSON.stringify(parsed) !== JSON.stringify(migrated)) {
         await writeJsonAtomic(this.#filePath, migrated)
       }
       return migrated
