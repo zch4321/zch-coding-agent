@@ -185,6 +185,12 @@ test.describe.serial('Electron settings workflows', () => {
     await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
     const provider = page.locator('.settings-section')
 
+    // Widen the window so the desktop six-column model grid (with header)
+    // applies; narrow widths intentionally switch to the stacked layout.
+    await harness.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setSize(1500, 900)
+    })
+
     await expect(provider.locator('.provider-card')).toHaveCount(1)
     await expect(provider.locator('.provider-card')).toContainText('DeepSeek')
     await expect(
@@ -433,6 +439,115 @@ test.describe.serial('Electron settings workflows', () => {
       approverProviderId: 'deepseek',
       approverModel: providerModel,
     })
+  })
+
+  test('edits per-model annotations with autosave and restores them after reload', async () => {
+    const seeded = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        getConfig(payload: unknown): Promise<{
+          ok: boolean
+          value?: { config: { limits: unknown } }
+        }>
+        setConfig(payload: unknown): Promise<{ ok: boolean }>
+      }
+      const current = await api.getConfig({ version: 1, section: 'all' })
+      if (!current.ok || !current.value) return false
+      const result = await api.setConfig({
+        version: 1,
+        kind: 'provider-settings',
+        providerId: 'e2e-annotated',
+        label: 'E2E Annotated',
+        providerType: 'generic.chat-completions',
+        baseURL: 'https://provider.example/v1',
+        model: 'annotated-model',
+        enabledModelIds: ['annotated-model', 'second-model'],
+        reasoning: 'high',
+        limits: current.value.config.limits,
+      })
+      return result.ok
+    })
+    expect(seeded).toBe(true)
+
+    await harness.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setSize(1120, 800)
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.locator('.sidebar-settings-button').click()
+    const navigation = page.getByRole('navigation', { name: '设置分类' })
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    const provider = page.locator('.settings-section')
+    await provider
+      .locator('.provider-card', { hasText: 'E2E Annotated' })
+      .click()
+
+    // The six-column model grid must not overflow the settings content.
+    const expectNoHorizontalOverflow = async () => {
+      const layout = await provider.evaluate((section) => ({
+        clientWidth: section.clientWidth,
+        scrollWidth: section.scrollWidth,
+      }))
+      expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth)
+    }
+    await expectNoHorizontalOverflow()
+
+    // Annotate efforts excluding the provider default 'high': autosave must
+    // pause with a field-level hint instead of failing in a loop.
+    const clickSelectOption = (text: string) =>
+      page
+        .locator('.n-select-menu:visible .n-base-select-option')
+        .getByText(text, { exact: true })
+        .click()
+    const effortsField = provider.locator(
+      '.provider-model-value[aria-label*="annotated-model"][aria-label*="思考档位"]',
+    )
+    await effortsField.locator('.n-select').click()
+    await clickSelectOption('低')
+    await clickSelectOption('中')
+    await provider.locator('.settings-heading').first().click()
+    await expect(page.locator('.n-select-menu:visible')).toHaveCount(0)
+    await expect(
+      provider.getByText('自动保存已暂停', { exact: false }),
+    ).toBeVisible()
+    await expect(provider.locator('.settings-save-status')).not.toHaveText(
+      '已保存',
+    )
+
+    // Manually picking a supported default resumes autosave.
+    await provider
+      .locator('.settings-field', { hasText: '思考深度' })
+      .locator('.n-select')
+      .click()
+    await clickSelectOption('低')
+    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+
+    const capabilityField = provider.locator(
+      '.provider-model-value[aria-label*="annotated-model"][aria-label*="能力等级"]',
+    )
+    await capabilityField.locator('.n-select').click()
+    await clickSelectOption('强力')
+    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+
+    // The minimum window width must not overflow either.
+    await harness.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setSize(960, 700)
+    })
+    await expectNoHorizontalOverflow()
+    await harness.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setSize(1120, 800)
+    })
+
+    // Reload restores the annotations.
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.locator('.sidebar-settings-button').click()
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    await provider
+      .locator('.provider-card', { hasText: 'E2E Annotated' })
+      .click()
+    await expect(effortsField).toContainText('低')
+    await expect(effortsField).toContainText('中')
+    await expect(capabilityField).toContainText('强力')
   })
 
   test('exposes skill management and bounded trace diagnostics in settings', async () => {

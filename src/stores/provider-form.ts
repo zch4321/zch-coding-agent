@@ -3,6 +3,7 @@ import type {
   ProviderType,
   ReasoningEffort,
 } from '../../shared/config'
+import { normalizeReasoningEfforts } from '../../shared/model-settings'
 import type { UiModelProfile } from './agent-types'
 
 export const DEFAULT_PROVIDER_FORM = {
@@ -50,7 +51,11 @@ export function providerModelOverrides(
               }
             : {}),
           ...(model.reasoningEfforts?.length
-            ? { reasoningEfforts: [...model.reasoningEfforts] }
+            ? {
+                reasoningEfforts: normalizeReasoningEfforts(
+                  model.reasoningEfforts,
+                ),
+              }
             : {}),
           ...(model.capability ? { capability: model.capability } : {}),
         },

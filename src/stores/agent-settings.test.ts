@@ -73,6 +73,31 @@ describe('agent settings model pool', () => {
     expect(settings.providerCardSummaries[0]?.models).toEqual(['enabled-model'])
   })
 
+  it('filters approval models by the effective approval reasoning effort', () => {
+    const settings = useAgentSettingsStore()
+    const configuredProvider = {
+      ...provider(),
+      reasoning: 'off' as const,
+      enabledModelIds: ['enabled-model', 'low-only-model', 'off-only-model'],
+      modelOverrides: {
+        'low-only-model': {
+          reasoningEfforts: ['low' as const],
+        },
+        'off-only-model': {
+          reasoningEfforts: ['off' as const],
+        },
+      },
+    }
+    settings.providers = [configuredProvider]
+    settings.approvalForm.providerId = configuredProvider.id
+
+    // The provider default 'off' escalates to 'high' for approval routing, so
+    // annotated models without 'high' support are not offered.
+    expect(settings.approvalModelOptions.map((option) => option.value)).toEqual(
+      ['enabled-model'],
+    )
+  })
+
   it('keeps an unsaved Provider draft dirty after loading its model catalog', async () => {
     const settings = useAgentSettingsStore()
     const configuredProvider = provider()

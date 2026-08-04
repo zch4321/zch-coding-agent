@@ -25,6 +25,16 @@ const approvalProvider = computed(() =>
     (provider) => provider.id === agent.approvalForm.providerId,
   ),
 )
+/**
+ * True when the selected approval model was filtered out because its
+ * annotation excludes the effective approval reasoning effort.
+ */
+const approvalModelConflict = computed(() => {
+  if (!agent.approvalForm.model) return false
+  return !agent.approvalModelOptions.some(
+    (option) => option.value === agent.approvalForm.model,
+  )
+})
 </script>
 
 <template>
@@ -81,15 +91,19 @@ const approvalProvider = computed(() =>
           v-model:value="agent.approvalForm.model"
           :options="agent.approvalModelOptions"
           :disabled="agent.approvalModelOptions.length === 0"
+          :status="approvalModelConflict ? 'error' : undefined"
           filterable
         />
-        <small>{{ t('settings.approvalModelHint') }}</small>
+        <small v-if="approvalModelConflict" class="settings-field-error">
+          {{ t('settings.approvalReasoningConflictHint') }}
+        </small>
+        <small v-else>{{ t('settings.approvalModelHint') }}</small>
       </label>
       <div class="settings-actions">
         <NButton
           type="primary"
           :loading="agent.approvalSaving"
-          :disabled="!agent.approvalDirty"
+          :disabled="!agent.approvalDirty || approvalModelConflict"
           @click="agent.saveApproval"
         >
           {{ t('settings.saveApproval') }}

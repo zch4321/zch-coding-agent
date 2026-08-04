@@ -19,6 +19,7 @@ import { DEFAULT_ASSISTANT_PREFERENCES } from '../../shared/system-prompts'
 import {
   DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
   resolveModelTokenSettings,
+  resolveSupportedReasoningEfforts,
 } from '../../shared/model-settings'
 import { nowNotice, toUiRememberedRules } from './config-mapping'
 import type { UiModelProfile, UiRememberedRule } from './agent-types'
@@ -261,7 +262,18 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         (candidate) => candidate.id === state.approvalForm.providerId,
       )
       if (!provider) return []
-      return provider.enabledModelIds.map((id) => ({ label: id, value: id }))
+      // The approval route uses the provider default effort with the
+      // deliberate 'off' → 'high' safety floor; only offer models whose
+      // annotation supports that effective effort.
+      const effectiveEffort =
+        provider.reasoning === 'off' ? 'high' : provider.reasoning
+      return provider.enabledModelIds
+        .filter((id) =>
+          resolveSupportedReasoningEfforts(
+            provider.modelOverrides[id],
+          ).includes(effectiveEffort),
+        )
+        .map((id) => ({ label: id, value: id }))
     },
     providerCardSummaries: (state) =>
       state.providers.map((provider) => ({

@@ -63,6 +63,18 @@ describe('provider model overrides', () => {
     })
   })
 
+  it('normalizes reasoning effort order during serialization', () => {
+    expect(
+      providerModelOverrides([
+        profile('annotated-model', 'provider', {
+          reasoningEfforts: ['max', 'low', 'high'],
+        }),
+      ]),
+    ).toEqual({
+      'annotated-model': { reasoningEfforts: ['low', 'high', 'max'] },
+    })
+  })
+
   it('carries annotations alongside explicit token overrides', () => {
     expect(
       providerModelOverrides([

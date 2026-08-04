@@ -230,6 +230,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     setProviderReasoning: runtime.setProviderReasoning,
     setProviderDraftModel: settings.setProviderModel,
     updateModelConfiguration: settings.updateModelConfiguration,
+    updateModelAnnotation: settings.updateModelAnnotation,
     loadProviderModels: settings.loadProviderModels,
     enterProviderSettings: settings.enterProviderSettings,
     refreshSelectedProviderModels: settings.refreshSelectedProviderModels,

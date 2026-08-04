@@ -13,6 +13,7 @@ import type {
 } from '../../shared/context'
 import type { MessageId, ProjectId, RunId, SessionId } from '../../shared/ids'
 import type { ModelSelection } from '../../shared/model-route'
+import { resolveSupportedReasoningEfforts } from '../../shared/model-settings'
 import type { PlanStatus } from '../../shared/orchestration'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { DurableRunStartResult } from '../../shared/domain-state-api'
@@ -149,6 +150,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         this.composerModelOptions.some(
           (option) => option.value === this.composerModel,
         ) &&
+        this.composerReasoningValid &&
         !this.startPending &&
         !this.activeRunId &&
         !this.pendingApproval &&
@@ -193,6 +195,23 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     composerReasoning(): ModelSelection['reasoning'] {
       return this.composerModelSelection.reasoning
+    },
+    /**
+     * True when the current selection's reasoning effort is supported by the
+     * active model. The value is never auto-adjusted; an unsupported value
+     * blocks sending until the user picks a supported one.
+     */
+    composerReasoningValid(): boolean {
+      const settings = useAgentSettingsStore()
+      const selection = this.composerModelSelection
+      const provider = settings.providers.find(
+        (candidate) => candidate.id === selection.providerId,
+      )
+      if (!provider) return true
+      const override = provider.modelOverrides[selection.model]
+      return resolveSupportedReasoningEfforts(override).includes(
+        selection.reasoning,
+      )
     },
     composerModelOptions(): Array<{ label: string; value: string }> {
       const settings = useAgentSettingsStore()

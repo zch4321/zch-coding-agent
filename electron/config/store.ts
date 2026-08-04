@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import {
   ModelPoolConfigSchema,
@@ -8,6 +8,7 @@ import {
   type PublicConfig,
 } from '../../shared/config'
 import { assertModelRouteSnapshotSafe } from '../../shared/model-route'
+import { normalizeReasoningEfforts } from '../../shared/model-settings'
 import { writeJsonAtomic } from './atomic-file'
 import { migrateConfig, UnsupportedConfigSchemaError } from './migrations'
 import {
@@ -79,6 +80,31 @@ function assertMainModelReasoningSupported(provider: AppProviderConfig): void {
   }
 }
 
+/**
+ * The effective approval effort is the approval provider's default with the
+ * deliberate 'off' → 'high' safety floor (see model-route-resolver). The
+ * approval model must support it; otherwise automatic approval silently
+ * degrades to human approval at run time.
+ */
+function assertApprovalModelReasoningSupported(
+  config: AppConfig,
+  providerId: string,
+  model: string,
+): void {
+  const provider = config.providers.find(
+    (candidate) => candidate.id === providerId,
+  )
+  if (!provider) return
+  const effectiveEffort =
+    provider.reasoning === 'off' ? 'high' : provider.reasoning
+  const supported = provider.modelOverrides[model]?.reasoningEfforts
+  if (supported?.length && !supported.includes(effectiveEffort)) {
+    throw new Error(
+      `Approval model ${model} does not support the effective approval reasoning effort: ${effectiveEffort}`,
+    )
+  }
+}
+
 function applyProviderUpdate(
   next: AppConfig,
   request: ProviderUpdate,
@@ -124,7 +150,17 @@ function applyProviderUpdate(
     provider.enabledModelIds.push(request.model)
   }
   if (request.modelOverrides !== undefined) {
-    provider.modelOverrides = structuredClone(request.modelOverrides)
+    // Normalize the effort set order so equivalent annotations cannot produce
+    // spurious route-shape changes (and revision bumps).
+    const normalized = structuredClone(request.modelOverrides)
+    for (const override of Object.values(normalized)) {
+      if (override.reasoningEfforts?.length) {
+        override.reasoningEfforts = normalizeReasoningEfforts(
+          override.reasoningEfforts,
+        )
+      }
+    }
+    provider.modelOverrides = normalized
   } else if (request.model) {
     provider.modelOverrides[request.model] = {
       ...provider.modelOverrides[request.model],
@@ -162,6 +198,13 @@ function applyProviderUpdate(
   }
   assertMainModelEnabled(provider)
   assertMainModelReasoningSupported(provider)
+  if (next.approval.approverProviderId === provider.id) {
+    assertApprovalModelReasoningSupported(
+      next,
+      provider.id,
+      next.approval.approverModel,
+    )
+  }
   if (!isNewProvider && providerRouteShape(provider) !== previousRouteShape) {
     provider.revision += 1
   }
@@ -698,6 +741,11 @@ export class ConfigStore {
         return this.getPublicConfig()
       }
       case 'approval':
+        assertApprovalModelReasoningSupported(
+          next,
+          request.approverProviderId,
+          request.approverModel,
+        )
         next.approval = {
           approverProviderId: request.approverProviderId,
           approverModel: request.approverModel,
@@ -837,6 +885,7 @@ export class ConfigStore {
         error instanceof UnsupportedConfigSchemaError ||
         error instanceof SyntaxError
       ) {
+        await this.#backupUnreadableConfig()
         await rm(this.#filePath, { force: true })
         const defaults = migrateConfig(undefined)
         await writeJsonAtomic(this.#filePath, defaults)
@@ -844,6 +893,23 @@ export class ConfigStore {
       }
 
       throw error
+    }
+  }
+
+  /**
+   * Preserves a config file this version cannot parse before the destructive
+   * reset. Downgrades are unsupported; the backup is the only recovery path.
+   * A failed backup must never block the reset itself.
+   */
+  async #backupUnreadableConfig(): Promise<void> {
+    try {
+      const stamp = new Date().toISOString().replaceAll(':', '-')
+      await copyFile(
+        this.#filePath,
+        `${this.#filePath}.unsupported-${stamp}.bak`,
+      )
+    } catch {
+      // Best effort only.
     }
   }
 }

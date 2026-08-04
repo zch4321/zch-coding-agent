@@ -271,9 +271,12 @@ export class DatabaseService {
       stage: 'started',
       elapsedMs: 0,
     })
+    const pauseForeignKeys = migration.disableForeignKeys === true
+    if (pauseForeignKeys) this.#database.exec('PRAGMA foreign_keys = OFF')
     this.#database.exec('BEGIN IMMEDIATE')
     try {
       this.#database.exec(migration.sql)
+      if (pauseForeignKeys) this.#assertNoForeignKeyViolations(migration)
       this.#database
         .prepare(
           `INSERT INTO schema_migrations (
@@ -306,6 +309,19 @@ export class DatabaseService {
         'MIGRATION_FAILED',
         `Migration ${migration.name} failed`,
         { cause: error },
+      )
+    } finally {
+      if (pauseForeignKeys) this.#database.exec('PRAGMA foreign_keys = ON')
+    }
+  }
+
+  /** Fails a table-rebuild migration when it leaves any foreign key violation. */
+  #assertNoForeignKeyViolations(migration: DatabaseMigration): void {
+    const violations = this.#database.prepare('PRAGMA foreign_key_check').all()
+    if (violations.length > 0) {
+      throw new PersistenceError(
+        'MIGRATION_FAILED',
+        `Migration ${migration.name} left ${violations.length} foreign key violations`,
       )
     }
   }

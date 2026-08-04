@@ -122,6 +122,9 @@ const sendHint = computed(() => {
     return t('chat.modelHint')
   }
   if (!agent.providerNoticeAccepted) return t('chat.noticeHint')
+  if (!agent.composerReasoningValid) {
+    return t('chat.reasoningUnsupportedHint')
+  }
   if (agent.activeRunId) return t('chat.interjectionHint')
   return t('chat.inputHint')
 })
@@ -607,6 +610,7 @@ watch(inputDisabled, (disabled) => {
           size="small"
           :options="reasoningOptions"
           :disabled="routeSelectionDisabled"
+          :status="agent.composerReasoningValid ? undefined : 'error'"
           :aria-label="t('settings.reasoning')"
           data-testid="composer-reasoning-select"
           @update:value="handleReasoningSelect"

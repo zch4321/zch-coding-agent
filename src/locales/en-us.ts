@@ -116,6 +116,8 @@ const enUS = {
     apiKeyHint: 'Configure a Provider API key in Settings',
     modelHint: 'Enable and select a main model in Provider settings',
     noticeHint: 'Review the Provider data notice',
+    reasoningUnsupportedHint:
+      'The selected reasoning effort is not supported by this model; pick a supported one to send',
     approvalHint: 'Resolve the pending approval before sending another message',
     inputHint: 'Ask about this workspace',
     addFileContext: 'Add file context',
@@ -340,6 +342,8 @@ const enUS = {
       'The selected Provider has no credential; runtime falls back to human approval.',
     approvalModelHint:
       'Only models enabled for the selected Provider are shown here.',
+    approvalReasoningConflictHint:
+      'This model does not support the effective approval reasoning effort; choose a compatible model to restore automatic approval.',
     saveApproval: 'Save Auto approval',
     addProvider: 'Add provider',
     providerActions: 'Actions',
@@ -396,6 +400,8 @@ const enUS = {
     reasoningHigh: 'High',
     reasoningXhigh: 'Extra high',
     reasoningMax: 'Maximum',
+    mainReasoningConflictHint:
+      'The main model annotation no longer includes this effort; autosave is paused until you pick a supported one.',
     reasoningHint:
       'The selected effort is sent to the model as-is; annotate a model row to narrow the choices. Off disables thinking.',
     reasoningHintGeneric:
@@ -403,7 +409,7 @@ const enUS = {
     reasoningHintResponses:
       'Responses sends reasoning effort and replays encrypted reasoning items locally without server state.',
     reasoningHintAnthropic:
-      'High/max use adaptive thinking; select Off for older models or compatible proxies.',
+      'Any effort above Off uses adaptive thinking; select Off for older models or compatible proxies.',
     approverProvider: 'Auto approver provider',
     approverModel: 'Auto approver model',
     apiKey: 'API key',

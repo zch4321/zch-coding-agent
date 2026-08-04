@@ -136,6 +136,22 @@ describe('config v16 migration boundary', () => {
     )
   })
 
+  it('rejects v9 configs carrying reasoning values introduced after v9', () => {
+    const source = legacyV9Config()
+    ;(source.providers as Array<Record<string, unknown>>)[0]!.reasoning = 'low'
+
+    expect(() => migrateConfig(source)).toThrow()
+  })
+
+  it('rejects v14 configs carrying per-model annotations introduced after v14', () => {
+    const source = legacyV14Config()
+    ;(source.providers as Array<Record<string, unknown>>)[0]!.modelOverrides = {
+      'deepseek-v4-pro': { reasoningEfforts: ['low'] },
+    }
+
+    expect(() => migrateConfig(source)).toThrow()
+  })
+
   it('migrates v10 defaults to the enlarged read and tool budgets', () => {
     const source = legacyCurrentShapeConfig(10)
     source.limits = {

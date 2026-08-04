@@ -169,8 +169,43 @@
   width: 100%;
 }
 
+/* The six-column grid needs ~900px; stack rows once the settings content
+   itself is too narrow (the 720px viewport media query never matches because
+   the window minWidth is 960px). */
+@container (max-width: 980px) {
+  .provider-model-settings-header {
+    display: none;
+  }
+
+  .provider-model-settings-row {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+
+  .provider-model-name {
+    padding-bottom: 2px;
+  }
+
+  .provider-model-value {
+    display: grid;
+    grid-template-columns: minmax(130px, 0.7fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 9px;
+  }
+
+  .provider-model-value > span {
+    display: block;
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+}
+
 .settings-footnote {
   margin: 0;
+}
+
+.settings-field-error {
+  color: var(--danger);
 }
 
 .project-settings-row {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { REASONING_EFFORTS } from './config'
 import {
+  normalizeReasoningEfforts,
   resolveModelTokenSettings,
   resolveSupportedReasoningEfforts,
 } from './model-settings'
@@ -66,5 +67,16 @@ describe('resolveSupportedReasoningEfforts', () => {
         reasoningEfforts: ['max', 'low', 'high'],
       }),
     ).toEqual(['low', 'high', 'max'])
+  })
+})
+
+describe('normalizeReasoningEfforts', () => {
+  it('deduplicates and sorts efforts in ascending strength order', () => {
+    expect(normalizeReasoningEfforts(['max', 'low', 'high', 'low'])).toEqual([
+      'low',
+      'high',
+      'max',
+    ])
+    expect(normalizeReasoningEfforts([])).toEqual([])
   })
 })

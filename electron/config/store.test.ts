@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -151,6 +151,37 @@ describe('ConfigStore', () => {
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
       schemaVersion: 16,
       limits: { maxStepsPerRun: 0 },
+    })
+  })
+
+  it('backs up an unreadable config before resetting it to defaults', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
+    const configPath = path.join(directory, 'config.json')
+    // A "future" config this build cannot validate, e.g. after a downgrade.
+    const original = JSON.stringify({
+      schemaVersion: 15,
+      providers: 'not-an-array',
+    })
+    await writeFile(configPath, original, 'utf8')
+    const secretStore = new SecretStore(
+      path.join(directory, 'secrets.json'),
+      new FakeSafeStorage(),
+    )
+    const store = new ConfigStore(configPath, secretStore)
+
+    await expect(store.initialize()).resolves.toMatchObject({
+      config: { schemaVersion: 16 },
+    })
+
+    const backups = (await readdir(directory)).filter((name) =>
+      name.startsWith('config.json.unsupported-'),
+    )
+    expect(backups).toHaveLength(1)
+    expect(await readFile(path.join(directory, backups[0]!), 'utf8')).toBe(
+      original,
+    )
+    expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
+      schemaVersion: 16,
     })
   })
 
@@ -1106,7 +1137,7 @@ describe('ConfigStore', () => {
   })
 
   it('round-trips reasoning effort and capability annotations', async () => {
-    const { configStore } = await createStores()
+    const { directory, configStore } = await createStores()
     const limits = configStore.getPublicConfig().limits
 
     await configStore.update({
@@ -1124,6 +1155,22 @@ describe('ConfigStore', () => {
     })
 
     expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+      modelOverrides: {
+        'model-a': { reasoningEfforts: ['low', 'medium'], capability: 'light' },
+        'model-b': { capability: 'strong' },
+      },
+    })
+
+    // A second store instance must read the same annotations back from disk.
+    const reloaded = new ConfigStore(
+      path.join(directory, 'config.json'),
+      new SecretStore(
+        path.join(directory, 'secrets.json'),
+        new FakeSafeStorage(),
+      ),
+    )
+    const result = await reloaded.initialize()
+    expect(result.config.providers[0]).toMatchObject({
       modelOverrides: {
         'model-a': { reasoningEfforts: ['low', 'medium'], capability: 'light' },
         'model-b': { capability: 'strong' },
@@ -1206,6 +1253,125 @@ describe('ConfigStore', () => {
       reasoning: 'low',
       modelOverrides: {},
     })
+  })
+
+  it('rejects an approval model whose annotation excludes the effective approval effort', async () => {
+    const { configStore } = await createStores()
+    const limits = configStore.getPublicConfig().limits
+    const providerId = configStore.getPublicConfig().activeProviderId
+    await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://example.test/v1',
+      model: 'model-a',
+      enabledModelIds: ['model-a', 'model-b'],
+      reasoning: 'off',
+      modelOverrides: {
+        'model-b': { reasoningEfforts: ['off', 'low'] },
+      },
+      limits,
+    })
+
+    // The provider default 'off' escalates to 'high' for approval routing,
+    // which model-b's annotation excludes.
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'approval',
+        approverProviderId: providerId,
+        approverModel: 'model-b',
+      }),
+    ).rejects.toThrow(
+      'does not support the effective approval reasoning effort',
+    )
+
+    await configStore.update({
+      version: 1,
+      kind: 'approval',
+      approverProviderId: providerId,
+      approverModel: 'model-a',
+    })
+    expect(configStore.getPublicConfig().approval.approverModel).toBe('model-a')
+  })
+
+  it('rejects a provider update that would break the saved approval model', async () => {
+    const { configStore } = await createStores()
+    const limits = configStore.getPublicConfig().limits
+    const providerId = configStore.getPublicConfig().activeProviderId
+    await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://example.test/v1',
+      model: 'model-a',
+      enabledModelIds: ['model-a', 'model-b'],
+      reasoning: 'high',
+      limits,
+    })
+    await configStore.update({
+      version: 1,
+      kind: 'approval',
+      approverProviderId: providerId,
+      approverModel: 'model-b',
+    })
+
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'provider-settings',
+        baseURL: 'https://example.test/v1',
+        model: 'model-a',
+        enabledModelIds: ['model-a', 'model-b'],
+        reasoning: 'high',
+        modelOverrides: {
+          'model-b': { reasoningEfforts: ['low'] },
+        },
+        limits,
+      }),
+    ).rejects.toThrow(
+      'does not support the effective approval reasoning effort',
+    )
+    expect(configStore.getPublicConfig().approval.approverModel).toBe('model-b')
+    expect(configStore.getPublicConfig().providers[0]!.modelOverrides).toEqual(
+      {},
+    )
+  })
+
+  it('normalizes reasoning effort set order so equivalent annotations keep the revision', async () => {
+    const { configStore } = await createStores()
+    const limits = configStore.getPublicConfig().limits
+    await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://example.test/v1',
+      model: 'model-a',
+      enabledModelIds: ['model-a'],
+      reasoning: 'high',
+      modelOverrides: {
+        'model-a': { reasoningEfforts: ['max', 'low', 'high'] },
+      },
+      limits,
+    })
+    const provider = configStore.getPublicConfig().providers[0]!
+    expect(provider.modelOverrides['model-a']!.reasoningEfforts).toEqual([
+      'low',
+      'high',
+      'max',
+    ])
+    const revision = provider.revision
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://example.test/v1',
+      model: 'model-a',
+      enabledModelIds: ['model-a'],
+      reasoning: 'high',
+      modelOverrides: {
+        'model-a': { reasoningEfforts: ['high', 'max', 'low'] },
+      },
+      limits,
+    })
+    expect(configStore.getPublicConfig().providers[0]!.revision).toBe(revision)
   })
 
   it('persists localized assistant preferences', async () => {

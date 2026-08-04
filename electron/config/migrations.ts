@@ -39,6 +39,52 @@ type LegacyLimitsWithRunToolBudget = Static<
 // This root and Provider shape is the frozen AppConfig v9 boundary. Do not
 // derive it from AppConfigSchema/AppProviderConfigSchema; the literal v9 test
 // fixture must fail loudly if a reused stable shared subsection ever drifts.
+
+// Frozen v9-era reasoning efforts (three levels). Never reuse the current
+// ReasoningEffortSchema here: later enum values must be rejected as not v9.
+const LegacyReasoningEffortV9Schema = Type.Union([
+  Type.Literal('off'),
+  Type.Literal('high'),
+  Type.Literal('max'),
+])
+
+// Frozen v9-era per-model override shape: token limits only, no annotations.
+const LegacyModelCapabilityOverrideV9Schema = Type.Object(
+  {
+    contextWindowTokens: Type.Optional(
+      Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+    ),
+    compactThresholdTokens: Type.Optional(
+      Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+    ),
+    maxOutputTokens: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+    ),
+  },
+  { additionalProperties: false },
+)
+
+const LegacyModelOverridesV9Schema = Type.Record(
+  Type.String(),
+  LegacyModelCapabilityOverrideV9Schema,
+  { maxProperties: 1_000 },
+)
+
+// Frozen v9-era catalog model shape (identity plus optional token fields).
+const LegacyProviderModelV9Schema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 256 }),
+    ownedBy: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    contextWindowTokens: Type.Optional(
+      Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+    ),
+    maxOutputTokens: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+    ),
+  },
+  { additionalProperties: false },
+)
+
 const LegacyAppProviderConfigV9Schema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
@@ -55,15 +101,10 @@ const LegacyAppProviderConfigV9Schema = Type.Object(
     profile: Type.Union([Type.Literal('deepseek'), Type.Literal('generic')]),
     baseURL: Type.String({ minLength: 1, maxLength: 2_048 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
-    reasoning: ReasoningEffortSchema,
-    modelCatalog: Type.Array(
-      PublicConfigSchema.properties.providers.items.properties.modelCatalog
-        .items,
-      { maxItems: 1_000 },
-    ),
+    reasoning: LegacyReasoningEffortV9Schema,
+    modelCatalog: Type.Array(LegacyProviderModelV9Schema, { maxItems: 1_000 }),
     modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
-    modelOverrides:
-      PublicConfigSchema.properties.providers.items.properties.modelOverrides,
+    modelOverrides: LegacyModelOverridesV9Schema,
     apiKeyRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   },
   { additionalProperties: false },
@@ -185,6 +226,11 @@ const LegacyAppProviderConfigV14Schema = Type.Object(
       LegacyAppProviderConfigV15Schema.properties,
       'enabledModelIds',
     ),
+    // The v14 boundary predates the six-level enum and per-model annotations;
+    // freeze the v14-era shapes instead of inheriting the current schema.
+    reasoning: LegacyReasoningEffortV9Schema,
+    modelCatalog: Type.Array(LegacyProviderModelV9Schema, { maxItems: 1_000 }),
+    modelOverrides: LegacyModelOverridesV9Schema,
     model: Type.String({ minLength: 1, maxLength: 256 }),
     modelConfigurationIds: LegacyModelConfigurationIdsSchema,
   },

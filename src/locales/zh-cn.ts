@@ -113,6 +113,8 @@ const zhCN = {
     apiKeyHint: '请在设置中配置模型服务 API Key',
     modelHint: '请先在模型服务设置中启用并选择主模型',
     noticeHint: '请先确认模型服务数据提示',
+    reasoningUnsupportedHint:
+      '当前模型不支持所选思考档位，请手动选择受支持档位后再发送',
     approvalHint: '请先处理待审批操作',
     inputHint: '询问当前工作区',
     addFileContext: '添加文件上下文',
@@ -330,6 +332,8 @@ const zhCN = {
     approvalCredentialMissing:
       '所选 Provider 尚未配置凭据；运行时会回退到人工审批。',
     approvalModelHint: '这里只显示在所选 Provider 中启用的模型。',
+    approvalReasoningConflictHint:
+      '该模型不支持实际生效的审批思考档位；请选择兼容的模型以恢复自动审批。',
     saveApproval: '保存自动审批',
     addProvider: '新增 Provider',
     providerActions: '操作',
@@ -384,13 +388,15 @@ const zhCN = {
     reasoningHigh: '高',
     reasoningXhigh: '超高',
     reasoningMax: '最高',
+    mainReasoningConflictHint:
+      '主模型的思考档位标注已不包含当前默认档位；自动保存已暂停，请手动改选受支持的档位。',
     reasoningHint:
       '所选档位会原样发送给模型；在模型行中标注思考档位可收窄可选范围，关闭会禁用 thinking。',
     reasoningHintGeneric: '通用 Chat Completions 不发送厂商专有推理参数。',
     reasoningHintResponses:
       'Responses 会发送 reasoning effort，并在本地无状态回放加密 reasoning items。',
     reasoningHintAnthropic:
-      'high/max 使用 adaptive thinking；旧模型或兼容代理请设为关闭。',
+      '所有非关闭档位都会使用 adaptive thinking；旧模型或兼容代理请设为关闭。',
     approverProvider: '自动审批 Provider',
     approverModel: '自动审批模型',
     apiKey: 'API Key',

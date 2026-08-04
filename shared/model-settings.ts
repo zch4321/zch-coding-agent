@@ -40,6 +40,18 @@ export function resolveModelTokenSettings(input: {
   }
 }
 
+/** Returns the effort set deduplicated and sorted in ascending strength order. */
+export function normalizeReasoningEfforts(
+  efforts: readonly ReasoningEffort[],
+): ReasoningEffort[] {
+  const strengthOrder = new Map(
+    REASONING_EFFORTS.map((effort, index) => [effort, index] as const),
+  )
+  return [...new Set(efforts)].sort(
+    (a, b) => (strengthOrder.get(a) ?? 0) - (strengthOrder.get(b) ?? 0),
+  )
+}
+
 /**
  * Resolves which reasoning efforts a model supports: the annotated subset from
  * its capability override when present (returned in ascending strength order),
@@ -51,10 +63,5 @@ export function resolveSupportedReasoningEfforts(override?: {
   if (!override?.reasoningEfforts?.length) {
     return [...REASONING_EFFORTS]
   }
-  const strengthOrder = new Map(
-    REASONING_EFFORTS.map((effort, index) => [effort, index] as const),
-  )
-  return [...override.reasoningEfforts].sort(
-    (a, b) => (strengthOrder.get(a) ?? 0) - (strengthOrder.get(b) ?? 0),
-  )
+  return normalizeReasoningEfforts(override.reasoningEfforts)
 }

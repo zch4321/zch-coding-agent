@@ -577,6 +577,32 @@ describe('Headless host', () => {
     })
   })
 
+  it('runs and persists with a new reasoning level end to end', async () => {
+    const { workspace, artifacts } = await fixture()
+    const output = new StringSink()
+    const provider = new RecordingProvider('deepseek.chat-completions')
+    const mediumReasoning = config()
+    mediumReasoning.provider.providerType = 'deepseek.chat-completions'
+    mediumReasoning.provider.reasoning = 'medium'
+
+    const result = await runHeadlessAgent({
+      config: mediumReasoning,
+      workspace,
+      task: 'Run with a new reasoning level',
+      artifactsDirectory: artifacts,
+      timeoutMs: 5_000,
+      output,
+      environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },
+      providerFactory: () => provider,
+    })
+
+    expect(result.status).toBe('completed')
+    expect(provider.requestBodies[0]).toMatchObject({
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'medium',
+    })
+  })
+
   it('auto-approves a reviewed plan using trusted harness context', async () => {
     const { workspace, artifacts } = await fixture()
     const output = new StringSink()

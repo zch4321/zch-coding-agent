@@ -97,6 +97,19 @@ const reasoningEffortOptions = computed(() =>
     value: effort,
   })),
 )
+/**
+ * True when the draft annotation excludes the provider default effort.
+ * While conflicting, autosave pauses and the field shows an error; the user
+ * must pick a supported effort manually (no automatic adjustment).
+ */
+const mainReasoningConflict = computed(() => {
+  const supported = agent.modelProfiles.find(
+    (model) => model.id === agent.providerForm.model,
+  )?.reasoningEfforts
+  return Boolean(
+    supported?.length && !supported.includes(agent.providerForm.reasoning),
+  )
+})
 const capabilityOptions = computed(() => [
   { label: t('settings.capabilityLight'), value: 'light' },
   { label: t('settings.capabilityStandard'), value: 'standard' },
@@ -179,6 +192,7 @@ watch(
   () => {
     if (autosaveTimer) clearTimeout(autosaveTimer)
     if (!agent.providerDirty) return
+    if (mainReasoningConflict.value) return
 
     agent.providerSaveStatus = ''
     autosaveTimer = setTimeout(() => {
@@ -191,7 +205,9 @@ watch(
 onBeforeUnmount(() => {
   if (autosaveTimer) clearTimeout(autosaveTimer)
   autosaveTimer = undefined
-  if (agent.providerDirty) void agent.saveProvider()
+  if (agent.providerDirty && !mainReasoningConflict.value) {
+    void agent.saveProvider()
+  }
 })
 
 function providerActions(providerId: string): DropdownOption[] {
@@ -512,8 +528,12 @@ function handleDropdownSelect(key: string | number, providerId: string) {
         <NSelect
           v-model:value="agent.providerForm.reasoning"
           :options="reasoningOptions"
+          :status="mainReasoningConflict ? 'error' : undefined"
         />
-        <small>
+        <small v-if="mainReasoningConflict" class="settings-field-error">
+          {{ t('settings.mainReasoningConflictHint') }}
+        </small>
+        <small v-else>
           {{ reasoningHint }}
         </small>
       </label>
@@ -622,7 +642,10 @@ function handleDropdownSelect(key: string | number, providerId: string) {
                     "
                   />
                 </label>
-                <label class="provider-model-value">
+                <label
+                  class="provider-model-value"
+                  :aria-label="`${model.id} · ${t('settings.modelReasoningEfforts')}`"
+                >
                   <span>{{ t('settings.modelReasoningEfforts') }}</span>
                   <NSelect
                     :value="model.reasoningEfforts ?? []"
@@ -637,7 +660,10 @@ function handleDropdownSelect(key: string | number, providerId: string) {
                     "
                   />
                 </label>
-                <label class="provider-model-value">
+                <label
+                  class="provider-model-value"
+                  :aria-label="`${model.id} · ${t('settings.modelCapability')}`"
+                >
                   <span>{{ t('settings.modelCapability') }}</span>
                   <NSelect
                     :value="model.capability ?? null"
