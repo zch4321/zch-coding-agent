@@ -20,6 +20,7 @@ Define cross-process payloads once in `shared/` and validate them at IPC boundar
 - Use TypeScript and Vue SFCs. Prettier enforces two spaces, single quotes, no semicolons, and trailing commas; ESLint handles semantic rules. Use `kebab-case.ts` modules, `PascalCase.vue` components, `camelCase` values, and `PascalCase` types.
 - Document every class and public method or function with a concise comment explaining its responsibility.
 - Keep commits cohesive and use imperative Conventional Commit-style subjects.
+- Do not delegate implementation work to coder subagents unless the user explicitly asks. Read-only exploration and review tasks may use explore/swarm subagents.
 
 ## Verification
 

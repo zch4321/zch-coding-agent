@@ -166,7 +166,7 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 - `normalizedReasoningText`：只包含非加密、应用标准化后的可读 reasoning 文本或摘要，用于 UI、导出和通用审计；允许为空，不能用于重建签名、密文、item id 或原始 block 顺序。
 - `providerContinuation`：包含 `schemaVersion/providerType/format/data` 的版本化 envelope。`data` 原样保留该 Provider 继续请求所需的有序 provider-native items、签名、密文、cursor 或 response id；Agent Core 和 Renderer 只搬运，不解释、不修改。
 
-Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items；Anthropic high/max 必须使用 adaptive thinking 与对应 effort，off 不发送 thinking 参数。Structured output 契约必须携带实际 JSON Schema；Responses 与 Anthropic 使用原生 schema 字段，Chat 兜底实现允许降级为 JSON object mode，但 Application 的本地 schema 校验不能省略。
+Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items；Anthropic 所有非 off 思考档位必须使用 adaptive thinking 与对应 effort，off 不发送 thinking 参数。Structured output 契约必须携带实际 JSON Schema；Responses 与 Anthropic 使用原生 schema 字段，Chat 兜底实现允许降级为 JSON object mode，但 Application 的本地 schema 校验不能省略。
 
 完整原始 Provider request/response 和 stream events 只属于显式开启的 trace。Message 只保存 canonical message parts、可读 reasoning 投影，以及继续协议所需的最小 opaque state。
 
