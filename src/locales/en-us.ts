@@ -519,38 +519,38 @@ const enUS = {
   },
   modelPool: {
     title: 'Model pool',
-    hint: 'Configure reusable models for future Swarm scheduling. Capability is read only from Provider model annotations, and the complete pool saves atomically.',
-    add: 'Add model',
+    hint: 'Select exact Provider, model, and reasoning routes for future Swarm scheduling. Capability remains read only from Provider model annotations, and the complete pool saves atomically.',
     save: 'Save model pool',
-    empty:
-      'The model pool is empty. Add a Provider model with a capability annotation.',
+    empty: 'The model pool is empty. Select routes from the left.',
     noEligibleModels:
-      'No model can be added. Enable a model and annotate its capability under Provider settings first.',
-    entryId: 'Entry name',
-    entryIdPlaceholder: 'For example, strong-coder',
-    idRequired: 'The entry name is required.',
-    idDuplicate: 'Entry names must be unique.',
-    enabled: 'Enabled',
-    provider: 'Provider',
+      'No route is available. Enable a model, annotate its capability, and configure credentials under Provider settings first.',
+    reasoningFloor: 'Minimum candidate reasoning',
+    reasoningFloorHint:
+      'Filters only the candidates on the left. Exact routes already selected in the pool remain visible and unchanged.',
+    reasoningFloorAll: 'All reasoning efforts',
+    reasoningFloorAtLeast: '≥ {reasoning}',
+    availableRoutes: 'Available routes',
+    selectedRoutes: 'Model pool',
+    filterRoutes: 'Filter Provider, model, or reasoning',
+    selectAllRoutes: 'Select all current routes',
+    clearSelectedRoutes: 'Clear current routes',
+    noMatchingRoutes: 'No route matches the current filters.',
     providerMissing:
       'The referenced Provider no longer exists; select another Provider or remove this entry.',
-    model: 'Model',
     modelUnavailable: 'The model is missing or not enabled for this Provider.',
-    reasoning: 'Reasoning effort',
     reasoningUnsupported:
       'This model does not support the selected reasoning effort.',
-    capability: 'Capability',
-    capabilityMissing: 'Not annotated',
     capabilityMissingHint:
       'This model has no capability annotation; configure it under Provider settings first.',
     credentialMissing:
       'This Provider has no configured credential, so the entry cannot be enabled.',
-    maxParallel: 'Maximum concurrency',
-    maxParallelHint:
-      'Stored as scheduling metadata for now; enforcement begins when Swarm execution is connected.',
-    moveUp: 'Move up',
-    moveDown: 'Move down',
-    remove: 'Remove',
+    entryDisabled:
+      'This route is disabled. Remove and select it again to enable it.',
+    routeUnavailable: 'Unavailable',
+    belowReasoningFloor: 'Below filter',
+    belowReasoningFloorHint:
+      'This route remains visible because it is already in the pool; the filter only affects candidates on the left.',
+    maxParallelShort: 'Concurrency',
     externalChange:
       'Provider changes updated the saved pool state; review this draft and save it again.',
   },

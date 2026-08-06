@@ -620,21 +620,28 @@ test.describe.serial('Electron settings workflows', () => {
     const pool = page.locator('.model-pool-section')
 
     await expect(pool.getByRole('heading', { name: '模型池' })).toBeVisible()
-    await pool.getByRole('button', { name: '添加模型' }).click()
-    const entry = pool.getByTestId('model-pool-entry-0')
-    await expect(entry).toBeVisible()
-    await expect(entry).toContainText('E2E Annotated')
-    await expect(entry.getByText('强力', { exact: true })).toBeVisible()
+    const transfer = pool.getByTestId('model-pool-transfer')
+    const source = transfer.locator('.n-transfer-list--source')
+    const target = transfer.locator('.n-transfer-list--target')
+    await expect(
+      source.getByText('E2E Annotated', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      source.getByText('annotated-model', { exact: true }),
+    ).toBeVisible()
+    await expect(source.getByText('强力', { exact: true })).toBeVisible()
+    await expect(source.getByText('低', { exact: true })).toBeVisible()
+    await expect(source.getByText('中', { exact: true })).toBeVisible()
 
-    await entry
-      .locator('.settings-field', { hasText: '条目名称' })
-      .locator('input')
-      .fill('e2e-strong-coder')
-    await entry
-      .locator('.settings-field', { hasText: '最大并发' })
-      .locator('input')
-      .fill('4')
-    await entry.locator('.model-pool-enabled .n-switch').click()
+    await pool.getByTestId('model-pool-reasoning-floor').click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('≥ 中', { exact: true })
+      .click()
+    await expect(source.getByText('低', { exact: true })).toHaveCount(0)
+    await source.getByText('中', { exact: true }).click()
+    await expect(target.getByText('中', { exact: true })).toBeVisible()
+    await target.locator('.model-pool-parallel-input input').fill('4')
     await pool.getByRole('button', { name: '保存模型池' }).click()
     await expect(pool.locator('.settings-save-status')).toHaveText('已保存')
 
@@ -659,11 +666,11 @@ test.describe.serial('Electron settings workflows', () => {
     expect(savedPool).toEqual({
       entries: [
         {
-          id: 'e2e-strong-coder',
+          id: 'worker-1',
           enabled: true,
           providerId: 'e2e-annotated',
           model: 'annotated-model',
-          reasoning: 'low',
+          reasoning: 'medium',
           maxParallel: 4,
         },
       ],
@@ -675,12 +682,17 @@ test.describe.serial('Electron settings workflows', () => {
     await page.locator('.sidebar-settings-button').click()
     await navigation.getByRole('menuitem', { name: 'Agents' }).click()
     await expect(
-      pool
-        .getByTestId('model-pool-entry-0')
-        .locator('.model-pool-entry-id input'),
-    ).toHaveValue('e2e-strong-coder')
+      target.getByText('E2E Annotated', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      target.getByText('annotated-model', { exact: true }),
+    ).toBeVisible()
+    await expect(target.getByText('中', { exact: true })).toBeVisible()
+    await expect(
+      target.locator('.model-pool-parallel-input input'),
+    ).toHaveValue('4')
 
-    await pool.getByRole('button', { name: '删除' }).click()
+    await target.getByText('中', { exact: true }).click()
     await pool.getByRole('button', { name: '保存模型池' }).click()
     await expect(pool.locator('.n-empty')).toBeVisible()
   })

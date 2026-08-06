@@ -7,7 +7,11 @@ import type {
   PublicConfig,
 } from '../../shared/config'
 import { installApi, setupAgentTest } from './agent-test-support'
-import { useModelPoolSettingsStore } from './model-pool-settings'
+import {
+  modelPoolRouteKey,
+  useModelPoolSettingsStore,
+  type ModelPoolSelectableRoute,
+} from './model-pool-settings'
 
 setupAgentTest()
 
@@ -65,34 +69,40 @@ describe('model pool settings', () => {
     expect(pool.dirty).toBe(true)
   })
 
-  it('adds the first annotated model with a compatible visible reasoning effort', () => {
+  it('maps distinct reasoning leaves to exact enabled routes', () => {
     const pool = useModelPoolSettingsStore()
-    const providers = [
-      provider('unannotated', { modelOverrides: {} }),
-      provider('annotated', {
-        reasoning: 'max',
-        model: 'model-b',
-        enabledModelIds: ['model-b'],
-        modelOverrides: {
-          'model-b': {
-            capability: 'strong',
-            reasoningEfforts: ['low', 'medium'],
-          },
+    const routes: Array<ModelPoolSelectableRoute & { rendererLabel?: string }> =
+      [
+        {
+          providerId: 'provider-a',
+          model: 'model-a',
+          reasoning: 'high',
+          rendererLabel: 'Provider A / model-a / high',
         },
-      }),
-    ]
+        { providerId: 'provider-a', model: 'model-a', reasoning: 'max' },
+      ]
 
-    expect(pool.addEntry(providers)).toBe(true)
+    pool.setSelectedRoutes(routes.map(modelPoolRouteKey), routes)
+
     expect(pool.entries).toEqual([
       {
         id: 'worker-1',
-        enabled: false,
-        providerId: 'annotated',
-        model: 'model-b',
-        reasoning: 'low',
+        enabled: true,
+        providerId: 'provider-a',
+        model: 'model-a',
+        reasoning: 'high',
+        maxParallel: 1,
+      },
+      {
+        id: 'worker-2',
+        enabled: true,
+        providerId: 'provider-a',
+        model: 'model-a',
+        reasoning: 'max',
         maxParallel: 1,
       },
     ])
+    expect(JSON.stringify(pool.entries)).not.toContain('rendererLabel')
   })
 
   it('persists one atomic request with unique enabled Provider revisions', async () => {
@@ -100,7 +110,7 @@ describe('model pool settings', () => {
     const providers = [provider('provider-a')]
     pool.entries = [
       entry(),
-      entry({ id: 'worker-2', maxParallel: 4 }),
+      entry({ id: 'worker-2', reasoning: 'max', maxParallel: 4 }),
       entry({
         id: 'disabled-reference',
         enabled: false,
@@ -161,18 +171,22 @@ describe('model pool settings', () => {
     expect(pool.saveStatus).toBe('external-change')
   })
 
-  it('moves and removes entries without mutating their route data', () => {
+  it('preserves retained route metadata and updates leaf concurrency', () => {
     const pool = useModelPoolSettingsStore()
-    pool.entries = [entry(), entry({ id: 'worker-2', model: 'model-b' })]
+    const high = {
+      providerId: 'provider-a',
+      model: 'model-a',
+      reasoning: 'high',
+    } as const
+    const max = { ...high, reasoning: 'max' as const }
+    pool.entries = [entry(), entry({ id: 'worker-2', reasoning: 'max' })]
 
-    pool.moveEntry(1, -1)
-    expect(pool.entries.map((item) => item.id)).toEqual([
-      'worker-2',
-      'worker-1',
+    pool.setMaxParallel(modelPoolRouteKey(max), 6)
+    expect(pool.entries[1]).toMatchObject({ id: 'worker-2', maxParallel: 6 })
+
+    pool.setSelectedRoutes([modelPoolRouteKey(max)], [high, max])
+    expect(pool.entries).toEqual([
+      entry({ id: 'worker-2', reasoning: 'max', maxParallel: 6 }),
     ])
-    expect(pool.entries[0]!.model).toBe('model-b')
-
-    pool.removeEntry(0)
-    expect(pool.entries.map((item) => item.id)).toEqual(['worker-1'])
   })
 })

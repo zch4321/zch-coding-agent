@@ -208,122 +208,27 @@
   color: var(--danger);
 }
 
-.model-pool-section {
-  gap: 16px;
+.model-pool-transfer {
+  height: min(440px, 54vh);
+  min-height: 320px;
 }
 
-.model-pool-heading,
-.model-pool-entry-heading,
-.model-pool-entry-footer,
-.model-pool-capability,
-.model-pool-enabled {
-  display: flex;
+.model-pool-tree-empty {
+  padding-top: 72px;
+}
+
+.model-pool-route-suffix {
   min-width: 0;
-  align-items: center;
 }
 
-.model-pool-heading,
-.model-pool-entry-heading,
-.model-pool-entry-footer {
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.model-pool-heading > :first-child,
-.model-pool-entry-id {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.model-pool-heading-actions {
-  display: grid;
-  grid-template-columns: auto auto;
-  justify-items: end;
-  gap: 6px 8px;
-}
-
-.model-pool-heading-actions .settings-save-status {
-  grid-column: 1 / -1;
-}
-
-.model-pool-empty {
-  padding: 28px 0;
-}
-
-.model-pool-list {
-  display: grid;
-  gap: 12px;
-}
-
-.model-pool-entry {
-  display: grid;
-  min-width: 0;
-  gap: 15px;
-  padding: 15px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--background);
-}
-
-.model-pool-entry-actions {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px;
-}
-
-.model-pool-entry-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 13px;
-}
-
-.model-pool-entry-grid .n-input-number,
-.model-pool-entry-grid .n-select {
-  width: 100%;
-}
-
-.model-pool-capability,
-.model-pool-enabled {
-  gap: 8px;
-}
-
-.model-pool-capability > span,
-.model-pool-enabled > span {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.model-pool-capability small {
+.model-pool-parallel-label {
+  color: var(--text-muted);
   font-size: 11px;
+  white-space: nowrap;
 }
 
-@container (max-width: 680px) {
-  .model-pool-heading,
-  .model-pool-entry-heading,
-  .model-pool-entry-footer {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .model-pool-heading-actions {
-    grid-template-columns: 1fr 1fr;
-    justify-items: stretch;
-  }
-
-  .model-pool-entry-actions {
-    justify-content: flex-start;
-  }
-
-  .model-pool-entry-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .model-pool-enabled {
-    justify-content: space-between;
-  }
+.model-pool-parallel-input {
+  width: 68px;
 }
 
 .project-settings-row {

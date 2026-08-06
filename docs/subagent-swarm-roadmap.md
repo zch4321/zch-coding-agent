@@ -60,7 +60,7 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 ### 2.4 配置与 UI（设置页已完成，执行接入待实现）
 
-- Agents 设置页已经提供 pool entry 的增删、排序、启停、Provider/model/reasoning 与并发配置；能力等级继续只在 Provider 模型配置中维护，pool UI 只读展示该标注。
+- Agents 设置页已经提供 `Provider → model → reasoning` 自定义树形穿梭框；每个 reasoning 叶节点对应一条精确 route，同一模型的多个 reasoning 可以同时入池且互不 fallback。最低 reasoning 下拉栏只筛选左侧候选，已选低档 route 继续显示；右侧按 route 编辑 `maxParallel`。能力等级继续只在 Provider 模型配置中维护，pool UI 只读展示该标注，内部 ID/顺序/enabled 不作为常规配置项暴露。
 - Renderer 使用独立模型池 store 保存草稿，并通过单次完整数组请求校验 Provider、credential binding、模型、能力标注和 revision；无效配置不能部分生效。Provider 编辑导致持久化 entry 自动禁用时不会静默覆盖 dirty 草稿。
 - Swarm 执行接入时，UI 仍需明确展示每个模型会读取当前 workspace 内容并产生额外 Provider 请求。
 - Runtime Identity 记录模型池 digest 和调度能力，方便 Headless 结果比较。

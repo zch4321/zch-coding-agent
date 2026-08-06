@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { IPC_VERSION } from '../../shared/channels'
 import {
-  REASONING_EFFORTS,
   type ConfigSection,
   type ModelPoolConfig,
   type ModelPoolEntry,
@@ -10,7 +9,6 @@ import {
   type ReasoningEffort,
 } from '../../shared/config'
 import { evaluateModelRouteCompatibility } from '../../shared/model-route'
-import { resolveSupportedReasoningEfforts } from '../../shared/model-settings'
 
 const modelPoolSaveOperations = new WeakMap<object, Promise<boolean>>()
 
@@ -22,33 +20,23 @@ function modelPoolSignature(modelPool: ModelPoolConfig): string {
   return JSON.stringify(modelPool)
 }
 
-function annotatedModelIds(provider: ProviderPublicConfig): string[] {
-  return provider.enabledModelIds.filter(
-    (model) => provider.modelOverrides[model]?.capability,
-  )
-}
-
-function defaultReasoning(
-  provider: ProviderPublicConfig,
-  model: string,
-  preferred?: ReasoningEffort,
-): ReasoningEffort {
-  const supported = resolveSupportedReasoningEfforts(
-    provider.modelOverrides[model],
-  )
-  return (
-    (preferred && supported.includes(preferred) ? preferred : undefined) ??
-    (supported.includes(provider.reasoning) ? provider.reasoning : undefined) ??
-    supported[0] ??
-    REASONING_EFFORTS[0]
-  )
-}
-
 function nextEntryId(entries: readonly ModelPoolEntry[]): string {
   const existing = new Set(entries.map((entry) => entry.id.trim()))
   let index = 1
   while (existing.has(`worker-${index}`)) index += 1
   return `worker-${index}`
+}
+
+/** Identifies one exact model-pool route exposed by the renderer catalog. */
+export interface ModelPoolSelectableRoute {
+  providerId: string
+  model: string
+  reasoning: ReasoningEffort
+}
+
+/** Encodes one exact Provider, model, and reasoning route for renderer selection. */
+export function modelPoolRouteKey(route: ModelPoolSelectableRoute): string {
+  return JSON.stringify([route.providerId, route.model, route.reasoning])
 }
 
 function providerForEntry(
@@ -113,70 +101,49 @@ export const useModelPoolSettingsStore = defineStore('model-pool-settings', {
       this.entries = structuredClone(config.modelPool.entries)
       this.saveStatus = ''
     },
-    /** Adds one disabled entry using the first Provider model with a capability annotation. */
-    addEntry(providers: readonly ProviderPublicConfig[]) {
-      const provider = providers.find(
-        (candidate) => annotatedModelIds(candidate).length > 0,
-      )
-      if (!provider) return false
-      const model = annotatedModelIds(provider)[0]!
-      this.entries.push({
-        id: nextEntryId(this.entries),
-        enabled: false,
-        providerId: provider.id,
-        model,
-        reasoning: defaultReasoning(provider, model),
-        maxParallel: 1,
-      })
-      this.saveStatus = ''
-      return true
-    },
-    /** Removes one model-pool entry from the draft. */
-    removeEntry(index: number) {
-      if (index < 0 || index >= this.entries.length) return
-      this.entries.splice(index, 1)
-      this.saveStatus = ''
-    },
-    /** Moves one entry by one position while preserving declaration order. */
-    moveEntry(index: number, direction: -1 | 1) {
-      const target = index + direction
-      if (index < 0 || index >= this.entries.length) return
-      if (target < 0 || target >= this.entries.length) return
-      const [entry] = this.entries.splice(index, 1)
-      this.entries.splice(target, 0, entry!)
-      this.saveStatus = ''
-    },
-    /** Selects a Provider and initializes the dependent model and reasoning fields. */
-    selectProvider(
-      index: number,
-      providerId: string,
-      providers: readonly ProviderPublicConfig[],
+    /** Replaces the pool membership with exact routes selected by the transfer UI. */
+    setSelectedRoutes(
+      selectedKeys: readonly string[],
+      routes: readonly ModelPoolSelectableRoute[],
     ) {
-      const entry = this.entries[index]
-      const provider = providers.find(
-        (candidate) => candidate.id === providerId,
+      const routesByKey = new Map(
+        routes.map((route) => [modelPoolRouteKey(route), route]),
       )
-      if (!entry || !provider) return
-      const model = annotatedModelIds(provider)[0] ?? ''
-      entry.providerId = provider.id
-      entry.model = model
-      if (model) {
-        entry.reasoning = defaultReasoning(provider, model, entry.reasoning)
+      const existingByKey = new Map<string, ModelPoolEntry>()
+      for (const entry of this.entries) {
+        const key = modelPoolRouteKey(entry)
+        if (!existingByKey.has(key)) existingByKey.set(key, entry)
       }
+
+      const nextEntries: ModelPoolEntry[] = []
+      const selected = new Set<string>()
+      for (const key of selectedKeys) {
+        if (selected.has(key)) continue
+        selected.add(key)
+        const existing = existingByKey.get(key)
+        if (existing) {
+          nextEntries.push({ ...existing })
+          continue
+        }
+        const route = routesByKey.get(key)
+        if (!route) continue
+        nextEntries.push({
+          id: nextEntryId([...this.entries, ...nextEntries]),
+          enabled: true,
+          providerId: route.providerId,
+          model: route.model,
+          reasoning: route.reasoning,
+          maxParallel: 1,
+        })
+      }
+      this.entries = nextEntries
       this.saveStatus = ''
     },
-    /** Selects a model and keeps the current reasoning when the model supports it. */
-    selectModel(
-      index: number,
-      model: string,
-      providers: readonly ProviderPublicConfig[],
-    ) {
-      const entry = this.entries[index]
-      if (!entry) return
-      const provider = providerForEntry(providers, entry)
-      entry.model = model
-      if (provider) {
-        entry.reasoning = defaultReasoning(provider, model, entry.reasoning)
+    /** Updates concurrency metadata for every entry sharing one exact route. */
+    setMaxParallel(routeKey: string, value: number) {
+      if (!Number.isInteger(value) || value < 1 || value > 32) return
+      for (const entry of this.entries) {
+        if (modelPoolRouteKey(entry) === routeKey) entry.maxParallel = value
       }
       this.saveStatus = ''
     },
