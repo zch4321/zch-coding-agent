@@ -286,6 +286,50 @@ const LegacyAppConfigV16Schema = Type.Object(
 type LegacyAppConfigV16 = Static<typeof LegacyAppConfigV16Schema>
 const validateLegacyAppConfigV16 = compileSchema(LegacyAppConfigV16Schema)
 
+// AppConfig v17 retained capability on each pool entry while introducing the
+// six-level reasoning enum, per-model annotations, and explicit approval effort.
+const LegacyModelPoolConfigV17Schema = Type.Object(
+  {
+    entries: Type.Array(
+      Type.Object(
+        {
+          id: Type.String({ minLength: 1, maxLength: 64 }),
+          enabled: Type.Boolean(),
+          providerId: Type.String({ minLength: 1, maxLength: 128 }),
+          model: Type.String({ minLength: 1, maxLength: 256 }),
+          reasoning: ReasoningEffortSchema,
+          capability: LegacyModelPoolCapabilityV16Schema,
+          maxParallel: Type.Integer({ minimum: 1, maximum: 32 }),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 64 },
+    ),
+  },
+  { additionalProperties: false },
+)
+
+const LegacyApprovalConfigV17Schema = Type.Object(
+  {
+    approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
+    approverModel: Type.String({ maxLength: 256 }),
+    reasoning: ReasoningEffortSchema,
+  },
+  { additionalProperties: false },
+)
+
+const LegacyAppConfigV17Schema = Type.Object(
+  {
+    ...LegacyAppConfigV15Schema.properties,
+    schemaVersion: Type.Literal(17),
+    approval: LegacyApprovalConfigV17Schema,
+    modelPool: LegacyModelPoolConfigV17Schema,
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV17 = Static<typeof LegacyAppConfigV17Schema>
+const validateLegacyAppConfigV17 = compileSchema(LegacyAppConfigV17Schema)
+
 const LegacyAppProviderConfigV14Schema = Type.Object(
   {
     ...withoutKey(
@@ -539,26 +583,57 @@ function migrateV15(config: LegacyAppConfigV15): AppConfig {
   return structuredClone(migrated as AppConfig)
 }
 
-function migrateV16(config: LegacyAppConfigV16): AppConfig {
-  let modelPool: AppConfig['modelPool']
+type LegacyModelPoolWithCapability = {
+  entries: Array<
+    AppConfig['modelPool']['entries'][number] & {
+      capability: 'light' | 'standard' | 'strong'
+    }
+  >
+}
+
+function migrateLegacyModelPool(
+  modelPool: LegacyModelPoolWithCapability,
+  schemaVersion: 16 | 17,
+): AppConfig['modelPool'] {
   try {
-    modelPool = normalizeModelPoolConfig(config.modelPool)
+    return normalizeModelPoolConfig({
+      entries: modelPool.entries.map((entry) =>
+        structuredClone(withoutKey(entry, 'capability')),
+      ),
+    })
   } catch (error) {
     throw new UnsupportedConfigSchemaError(
-      16,
+      schemaVersion,
       error instanceof Error ? error.message : 'Invalid model pool',
     )
   }
+}
 
+function migrateV16(config: LegacyAppConfigV16): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
     approval: migrateLegacyApproval(config.approval, config.providers),
-    modelPool,
+    modelPool: migrateLegacyModelPool(config.modelPool, 16),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
       16,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
+function migrateV17(config: LegacyAppConfigV17): AppConfig {
+  const migrated = {
+    ...config,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    modelPool: migrateLegacyModelPool(config.modelPool, 17),
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      17,
       formatSchemaErrors(validateAppConfig.errors),
     )
   }
@@ -702,6 +777,16 @@ export function migrateConfig(candidate: unknown): AppConfig {
       )
     }
     return migrateV16(candidate as LegacyAppConfigV16)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') === 17) {
+    if (!validateLegacyAppConfigV17(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        17,
+        formatSchemaErrors(validateLegacyAppConfigV17.errors),
+      )
+    }
+    return migrateV17(candidate as LegacyAppConfigV17)
   }
 
   if (Reflect.get(candidate, 'schemaVersion') !== APP_CONFIG_SCHEMA_VERSION) {

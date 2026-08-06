@@ -80,7 +80,6 @@ function modelPoolEntry(
     providerId: 'deepseek',
     model: 'worker-model',
     reasoning: 'high',
-    capability: 'standard',
     maxParallel: 3,
     ...overrides,
   }
@@ -100,6 +99,9 @@ async function configurePoolProvider(
     baseURL: 'https://provider.example/v1',
     model: 'main-model',
     enabledModelIds: ['main-model', 'worker-model'],
+    modelOverrides: {
+      'worker-model': { capability: 'standard' },
+    },
     reasoning: 'high',
   })
   if (options.credential !== false) {
@@ -131,7 +133,7 @@ function modelPoolUpdate(
 }
 
 describe('ConfigStore', () => {
-  it('deletes a legacy config and rebuilds clean v17 defaults', async () => {
+  it('deletes a legacy config and rebuilds clean v18 defaults', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     await writeFile(
@@ -146,10 +148,10 @@ describe('ConfigStore', () => {
     const store = new ConfigStore(configPath, secretStore)
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 17 },
+      config: { schemaVersion: 18 },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       limits: { maxStepsPerRun: 0 },
     })
   })
@@ -159,7 +161,7 @@ describe('ConfigStore', () => {
     const configPath = path.join(directory, 'config.json')
     // A "future" config this build cannot validate, e.g. after a downgrade.
     const original = JSON.stringify({
-      schemaVersion: 17,
+      schemaVersion: 18,
       providers: 'not-an-array',
     })
     await writeFile(configPath, original, 'utf8')
@@ -170,7 +172,7 @@ describe('ConfigStore', () => {
     const store = new ConfigStore(configPath, secretStore)
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 17 },
+      config: { schemaVersion: 18 },
     })
 
     const backups = (await readdir(directory)).filter((name) =>
@@ -181,11 +183,11 @@ describe('ConfigStore', () => {
       original,
     )
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
     })
   })
 
-  it('migrates valid v9 providers to v17 without losing saved state', async () => {
+  it('migrates valid v9 providers to v18 without losing saved state', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     const legacy = structuredClone(legacyAppConfigV9) as Record<string, unknown>
@@ -220,7 +222,7 @@ describe('ConfigStore', () => {
     await store.initialize()
 
     expect(store.getInternalConfig()).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       modelPool: { entries: [] },
       providers: [
         {
@@ -242,12 +244,12 @@ describe('ConfigStore', () => {
       ],
     })
     const persisted = await readFile(configPath, 'utf8')
-    expect(persisted).toContain('"schemaVersion": 17')
+    expect(persisted).toContain('"schemaVersion": 18')
     expect(persisted).not.toContain('adapterId')
     expect(persisted).not.toContain('"profile"')
   })
 
-  it('resets a malformed v9 file to clean v17 defaults', async () => {
+  it('resets a malformed v9 file to clean v18 defaults', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     const malformed = structuredClone(legacyAppConfigV9) as Record<
@@ -265,7 +267,7 @@ describe('ConfigStore', () => {
     )
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 17 },
+      config: { schemaVersion: 18 },
     })
     expect(store.getInternalConfig()).toEqual(DEFAULT_APP_CONFIG)
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual(
@@ -284,7 +286,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).not.toHaveProperty(
       'legacyField',
@@ -294,13 +296,13 @@ describe('ConfigStore', () => {
   it('deletes malformed JSON and rebuilds clean defaults', async () => {
     const { directory, configStore } = await createStores()
     const configPath = path.join(directory, 'config.json')
-    await writeFile(configPath, '{"schemaVersion":17', 'utf8')
+    await writeFile(configPath, '{"schemaVersion":18', 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       limits: { maxStepsPerRun: 0 },
     })
   })
@@ -318,7 +320,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       limits: { [field]: value },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
@@ -367,6 +369,16 @@ describe('ConfigStore', () => {
         ...valid,
         value: {
           entries: [modelPoolEntry({ enabled: false, maxParallel: 0 })],
+        },
+      }),
+    ).toBe(false)
+    expect(
+      validate({
+        ...valid,
+        value: {
+          entries: [
+            { ...modelPoolEntry({ enabled: false }), capability: 'strong' },
+          ],
         },
       }),
     ).toBe(false)
@@ -556,6 +568,43 @@ describe('ConfigStore', () => {
     ).rejects.toThrow('must not contain credentials')
   })
 
+  it('requires enabled pool models to have a Provider capability annotation', async () => {
+    const { configStore } = await createStores()
+    const initial = configStore.getPublicConfig().providers[0]!
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      providerId: initial.id,
+      label: initial.label,
+      providerType: initial.providerType,
+      baseURL: 'https://provider.example/v1',
+      model: 'main-model',
+      enabledModelIds: ['main-model', 'worker-model'],
+      reasoning: 'high',
+    })
+    await configStore.update({
+      version: 1,
+      kind: 'credential',
+      providerId: initial.id,
+      action: 'set',
+      apiKey: 'model-pool-secret',
+    })
+    const provider = configStore.getPublicConfig().providers[0]!
+
+    await expect(
+      configStore.update(modelPoolUpdate(provider, [modelPoolEntry()])),
+    ).rejects.toThrow(
+      'Model worker-model must have a capability annotation before it can be enabled in the model pool',
+    )
+    await expect(
+      configStore.update(
+        modelPoolUpdate(provider, [modelPoolEntry({ enabled: false })]),
+      ),
+    ).resolves.toMatchObject({
+      modelPool: { entries: [{ enabled: false, model: 'worker-model' }] },
+    })
+  })
+
   it('shares reasoning compatibility between model pool saves and Provider edits', async () => {
     const { configStore } = await createStores()
     let provider = await configurePoolProvider(configStore)
@@ -573,7 +622,10 @@ describe('ConfigStore', () => {
       model: provider.model,
       enabledModelIds: provider.enabledModelIds,
       modelOverrides: {
-        'worker-model': { reasoningEfforts: ['low'] },
+        'worker-model': {
+          reasoningEfforts: ['low'],
+          capability: 'standard',
+        },
       },
       reasoning: provider.reasoning,
     })
@@ -589,6 +641,30 @@ describe('ConfigStore', () => {
     ).rejects.toThrow(
       "does not support reasoning effort 'xhigh' (supported: low)",
     )
+  })
+
+  it('auto-disables pool entries when their Provider capability annotation is removed', async () => {
+    const { configStore } = await createStores()
+    const provider = await configurePoolProvider(configStore)
+    await configStore.update(modelPoolUpdate(provider, [modelPoolEntry()]))
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      providerId: provider.id,
+      label: provider.label,
+      providerType: provider.providerType,
+      baseURL: provider.baseURL,
+      model: provider.model,
+      enabledModelIds: provider.enabledModelIds,
+      modelOverrides: {},
+      reasoning: provider.reasoning,
+    })
+
+    expect(configStore.getPublicConfig().modelPool.entries[0]).toMatchObject({
+      enabled: false,
+      model: 'worker-model',
+    })
   })
 
   it('requires an explicit reasoning effort in approval config requests', () => {
@@ -624,6 +700,9 @@ describe('ConfigStore', () => {
       providerType: 'generic.chat-completions',
       baseURL: 'https://provider.invalid',
       model: 'generic-model',
+      modelOverrides: {
+        'generic-model': { capability: 'standard' },
+      },
       reasoning: 'high',
     })
 
@@ -714,7 +793,7 @@ describe('ConfigStore', () => {
     await expect(store.getDeepSeekApiKey()).resolves.toBe('stored-secret')
   })
 
-  it('writes v17 defaults atomically', async () => {
+  it('writes v18 defaults atomically', async () => {
     const { directory, configStore } = await createStores()
 
     await configStore.update({
@@ -728,7 +807,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(17)
+    expect(parsed.schemaVersion).toBe(18)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(0)
     expect(configStore.getPublicConfig().limits.maxContextTokens).toBe(256_000)
     expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
@@ -758,7 +837,7 @@ describe('ConfigStore', () => {
     expect(
       JSON.parse(await readFile(path.join(directory, 'config.json'), 'utf8')),
     ).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       subagents: { enabled: true, workerTimeoutMs: 2_700_000 },
     })
   })
@@ -945,7 +1024,10 @@ describe('ConfigStore', () => {
       model: provider.model,
       enabledModelIds: provider.enabledModelIds,
       modelOverrides: {
-        'worker-model': { contextWindowTokens: 128_000 },
+        'worker-model': {
+          contextWindowTokens: 128_000,
+          capability: 'standard',
+        },
       },
       reasoning: 'max',
     })
@@ -975,6 +1057,9 @@ describe('ConfigStore', () => {
       baseURL: 'https://worker.example/v1',
       model: 'worker-model',
       enabledModelIds: ['worker-model'],
+      modelOverrides: {
+        'worker-model': { capability: 'standard' },
+      },
       reasoning: 'high',
     })
     await configStore.update({
@@ -1025,6 +1110,9 @@ describe('ConfigStore', () => {
     const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
     config.providers[0]!.model = 'main-model'
     config.providers[0]!.enabledModelIds = ['main-model']
+    config.providers[0]!.modelOverrides = {
+      'main-model': { capability: 'standard' },
+    }
     config.modelPool.entries = [
       modelPoolEntry({
         id: 'missing-provider',
@@ -1141,11 +1229,11 @@ describe('ConfigStore', () => {
     config.schemaVersion = 99
     await writeFile(configPath, JSON.stringify(config), 'utf8')
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
     })
     expect(configStore.getMcpServers()).toHaveLength(0)
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       mcpServers: [],
     })
   })

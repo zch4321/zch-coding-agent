@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type {
-  ModelPoolCapability,
+  ModelCapabilityLevel,
   ProviderPublicConfig,
   PublicConfig,
 } from '../../shared/config'
@@ -14,7 +14,11 @@ import {
   resolveModelRoutePairFromConfig,
   type ResolvedModelRoutePair,
 } from '../providers/model-route-resolver'
-import { planModelPoolAssignments, type ModelPoolAssignment } from './allocator'
+import {
+  planModelPoolAssignments,
+  type ModelPoolAssignment,
+  type ModelPoolCandidate,
+} from './allocator'
 
 type RoutePairResolver = (
   configStore: ConfigStore,
@@ -48,26 +52,45 @@ function enabledProvider(
   return provider
 }
 
-function poolState(config: PublicConfig): {
+function enabledPoolCandidates(config: PublicConfig): ModelPoolCandidate[] {
+  return config.modelPool.entries
+    .filter((entry) => entry.enabled)
+    .map((entry) => {
+      const provider = enabledProvider(config, entry.providerId)
+      const capability = provider.modelOverrides[entry.model]?.capability
+      if (!capability) {
+        throw new Error(
+          `Model ${entry.model} has no capability annotation for model pool entry ${entry.id}`,
+        )
+      }
+      return {
+        ...entry,
+        capability,
+      }
+    })
+}
+
+function poolState(
+  config: PublicConfig,
+  candidates: readonly ModelPoolCandidate[],
+): {
   digest: string
   providerRevisions: Array<{ providerId: string; revision: number }>
 } {
   const revisions = new Map<string, number>()
-  const entries = config.modelPool.entries
-    .filter((entry) => entry.enabled)
-    .map((entry) => {
-      const provider = enabledProvider(config, entry.providerId)
-      revisions.set(provider.id, provider.revision)
-      return {
-        id: entry.id,
-        providerId: entry.providerId,
-        providerRevision: provider.revision,
-        model: entry.model,
-        reasoning: entry.reasoning,
-        capability: entry.capability,
-        maxParallel: entry.maxParallel,
-      }
-    })
+  const entries = candidates.map((entry) => {
+    const provider = enabledProvider(config, entry.providerId)
+    revisions.set(provider.id, provider.revision)
+    return {
+      id: entry.id,
+      providerId: entry.providerId,
+      providerRevision: provider.revision,
+      model: entry.model,
+      reasoning: entry.reasoning,
+      capability: entry.capability,
+      maxParallel: entry.maxParallel,
+    }
+  })
   return {
     digest: createHash('sha256')
       .update(
@@ -87,15 +110,13 @@ function poolState(config: PublicConfig): {
 /** Freezes deterministic model-pool assignments into private routes and a safe snapshot. */
 export async function freezeModelPoolPlan(
   configStore: ConfigStore,
-  requirements: readonly ModelPoolCapability[],
+  requirements: readonly ModelCapabilityLevel[],
   options: FreezeModelPoolPlanOptions = {},
 ): Promise<PreparedModelPoolPlan> {
   const config = configStore.getPublicConfig()
-  const assignments = planModelPoolAssignments(
-    config.modelPool.entries,
-    requirements,
-  )
-  const state = poolState(config)
+  const candidates = enabledPoolCandidates(config)
+  const assignments = planModelPoolAssignments(candidates, requirements)
+  const state = poolState(config, candidates)
   const resolveRoutePair =
     options.resolveRoutePair ?? resolveModelRoutePairFromConfig
   const routesByEntry = new Map<string, Promise<ResolvedModelRoutePair>>()

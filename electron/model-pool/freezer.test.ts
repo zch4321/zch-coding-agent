@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ModelPoolCapability, ModelPoolEntry } from '../../shared/config'
+import type { ModelPoolEntry } from '../../shared/config'
 import { ModelPoolPlanSnapshotSchema } from '../../shared/model-pool-plan'
 import { compileSchema } from '../schema-validator'
 import {
@@ -28,7 +28,9 @@ function provider(
     model: models[0]!,
     reasoning: 'high',
     modelCatalog: [],
-    modelOverrides: {},
+    modelOverrides: Object.fromEntries(
+      models.map((model) => [model, { capability: 'standard' as const }]),
+    ),
     enabledModelIds: models,
     ...overrides,
   }
@@ -36,7 +38,6 @@ function provider(
 
 function entry(
   id: string,
-  capability: ModelPoolCapability = 'standard',
   overrides: Partial<ModelPoolEntry> = {},
 ): ModelPoolEntry {
   return {
@@ -45,7 +46,6 @@ function entry(
     providerId: 'provider-a',
     model: 'model-a',
     reasoning: 'high',
-    capability,
     maxParallel: 4,
     ...overrides,
   }
@@ -129,23 +129,30 @@ describe('freezeModelPoolPlan', () => {
   })
 
   it('produces an order-sensitive digest from all enabled entries and revisions', async () => {
-    const first = entry('first', 'light')
-    const second = entry('second', 'strong')
+    const first = entry('first', { model: 'model-light' })
+    const second = entry('second', { model: 'model-strong' })
+    const providers = [
+      provider('provider-a', ['model-light', 'model-strong'], {
+        modelOverrides: {
+          'model-light': { capability: 'light' },
+          'model-strong': { capability: 'strong' },
+        },
+      }),
+    ]
     const forward = await freezeModelPoolPlan(
-      storeHarness(publicConfig([first, second])).store,
+      storeHarness(publicConfig([first, second], providers)).store,
       [],
     )
     const reverse = await freezeModelPoolPlan(
-      storeHarness(publicConfig([second, first])).store,
+      storeHarness(publicConfig([second, first], providers)).store,
       [],
     )
     const withDisabled = await freezeModelPoolPlan(
       storeHarness(
-        publicConfig([
-          first,
-          second,
-          entry('ignored', 'standard', { enabled: false }),
-        ]),
+        publicConfig(
+          [first, second, entry('ignored', { enabled: false })],
+          providers,
+        ),
       ).store,
       [],
     )
@@ -160,7 +167,16 @@ describe('freezeModelPoolPlan', () => {
   })
 
   it('fails capability preflight before any route or credential resolution', async () => {
-    const harness = storeHarness(publicConfig([entry('light', 'light')]))
+    const harness = storeHarness(
+      publicConfig(
+        [entry('light')],
+        [
+          provider('provider-a', ['model-a'], {
+            modelOverrides: { 'model-a': { capability: 'light' } },
+          }),
+        ],
+      ),
+    )
 
     await expect(
       freezeModelPoolPlan(harness.store, ['light', 'strong']),
@@ -192,14 +208,20 @@ describe('freezeModelPoolPlan', () => {
 
   it('checks revisions for unassigned enabled entries included in the digest', async () => {
     const providers = [
-      provider('provider-a', ['model-a'], { revision: 3 }),
-      provider('provider-b', ['model-b'], { revision: 7 }),
+      provider('provider-a', ['model-a'], {
+        revision: 3,
+        modelOverrides: { 'model-a': { capability: 'light' } },
+      }),
+      provider('provider-b', ['model-b'], {
+        revision: 7,
+        modelOverrides: { 'model-b': { capability: 'strong' } },
+      }),
     ]
     const harness = storeHarness(
       publicConfig(
         [
-          entry('selected', 'light'),
-          entry('unassigned', 'strong', {
+          entry('selected'),
+          entry('unassigned', {
             providerId: 'provider-b',
             model: 'model-b',
           }),
@@ -224,11 +246,11 @@ describe('freezeModelPoolPlan', () => {
     const harness = storeHarness(
       publicConfig(
         [
-          entry('bad-first', 'standard', {
+          entry('bad-first', {
             providerId: 'provider-bad',
             model: 'model-bad',
           }),
-          entry('good-second', 'standard', {
+          entry('good-second', {
             providerId: 'provider-good',
             model: 'model-good',
           }),
@@ -269,6 +291,22 @@ describe('freezeModelPoolPlan', () => {
       providerRevision: 1,
       model: 'model-a',
     })
+  })
+
+  it('rejects an enabled entry whose Provider model has no capability annotation', async () => {
+    const harness = storeHarness(
+      publicConfig(
+        [entry('unannotated')],
+        [provider('provider-a', ['model-a'], { modelOverrides: {} })],
+      ),
+    )
+
+    await expect(
+      freezeModelPoolPlan(harness.store, ['standard']),
+    ).rejects.toThrow(
+      'Model model-a has no capability annotation for model pool entry unannotated',
+    )
+    expect(harness.getProviderApiKeyForRevision).not.toHaveBeenCalled()
   })
 
   it('keeps the safe snapshot, digest, and unavailable errors free of secrets', async () => {

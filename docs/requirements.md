@@ -302,9 +302,9 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 
 ### 2.8 Model Pool backend foundation
 
-- AppConfig v16 首次在根配置加入 `modelPool`，当前 v17 保存最多 64 个命名 entry，并将 entry reasoning 扩展为统一六档；entry 只引用现有 Provider/model/reasoning，能力固定为 `light | standard | strong`，并携带尚未执行的 `maxParallel` 元数据。API key 与 credential reference 不进入 entry。
-- 完整模型池使用单个 `config:set(model-pool)` 原子保存。所有 enabled entry 引用的 Provider 必须由唯一且精确的 expected revision 列表覆盖，并在写盘前通过 Provider 存在、模型启用、安全 endpoint、模型 profile 和当前凭据绑定校验；任一失败时不得部分写入。disabled entry 只要求结构与规范化 ID 唯一，可保留失效引用供未来 UI 修复。
-- 删除 Provider、移除 entry 引用的启用模型、reasoning annotation 变为不兼容或显式清除凭据时，在同一配置写入中把受影响 entry 置为 disabled，保留顺序和引用；恢复配置不会自动启用。启动/reload 会修复手写的 enabled 静态不兼容引用，但环境凭据暂时缺失不会改写持久配置。
+- AppConfig v16 首次在根配置加入 `modelPool`，v17 将 entry reasoning 扩展为统一六档；当前 v18 保存最多 64 个命名 entry。entry 只引用现有 Provider/model/reasoning，并携带尚未执行的 `maxParallel` 元数据，不再重复保存能力等级。调度能力固定为 `light | standard | strong`，唯一来源是对应 Provider 的 `modelOverrides[model].capability`。API key 与 credential reference 不进入 entry。
+- 完整模型池使用单个 `config:set(model-pool)` 原子保存。所有 enabled entry 引用的 Provider 必须由唯一且精确的 expected revision 列表覆盖，并在写盘前通过 Provider 存在、模型启用、能力标注、安全 endpoint、模型 profile 和当前凭据绑定校验；任一失败时不得部分写入。disabled entry 只要求结构与规范化 ID 唯一，可保留失效引用供未来 UI 修复。
+- 删除 Provider、移除 entry 引用的启用模型、移除 capability annotation、reasoning annotation 变为不兼容或显式清除凭据时，在同一配置写入中把受影响 entry 置为 disabled，保留顺序和引用；恢复配置不会自动启用。启动/reload 会修复手写的 enabled 静态不兼容或无能力标注引用，但环境凭据暂时缺失不会改写持久配置。
 - 纯 allocator 对能力需求使用最低能力制和同实际等级的声明顺序 round-robin，每次调用从头开始；缺少能力时在 route/credential 解析前整体失败。route freezer 读取单个 PublicConfig 快照，生成包含全部 enabled entry 及 Provider revision 的顺序敏感 SHA-256 digest，并对实际选择的唯一 entry 各解析一次 main/compression route。
 - prepared plan 是 backend-private 内存结果，包含 `ResolvedModelRoute` 与 API key；safe snapshot 只包含 digest、需求/entry/能力、Provider/model/reasoning/revision、`maxParallel` 与安全 route snapshot。revision 竞态或已选 entry 不可用会使整个 freeze 失败，不会跳过、切换 Provider 或重新分配。
 - 本阶段不修改 Headless v4、Runtime Identity v4、`SubagentExecutionPort.runOne`、Vue/Pinia 或 SQLite Job 状态，也不执行 `maxParallel` semaphore；这些属于 S3 后续接入或 S4。

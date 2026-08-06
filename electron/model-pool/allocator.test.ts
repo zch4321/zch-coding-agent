@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type {
-  ModelPoolCapability,
-  ModelPoolEntry,
-} from '../../shared/model-pool'
-import { ModelPoolAllocationError, planModelPoolAssignments } from './allocator'
+import type { ModelCapabilityLevel } from '../../shared/config'
+import {
+  ModelPoolAllocationError,
+  planModelPoolAssignments,
+  type ModelPoolCandidate,
+} from './allocator'
 
 function entry(
   id: string,
-  capability: ModelPoolCapability,
-  overrides: Partial<ModelPoolEntry> = {},
-): ModelPoolEntry {
+  capability: ModelCapabilityLevel,
+  overrides: Partial<ModelPoolCandidate> = {},
+): ModelPoolCandidate {
   return {
     id,
     enabled: true,
@@ -29,7 +30,7 @@ describe('planModelPoolAssignments', () => {
     )
     const assignments = planModelPoolAssignments(
       entries,
-      Array<ModelPoolCapability>(10).fill('standard'),
+      Array<ModelCapabilityLevel>(10).fill('standard'),
     )
 
     expect(assignments.map((assignment) => assignment.entryId)).toEqual([
@@ -55,7 +56,7 @@ describe('planModelPoolAssignments', () => {
       entry('first', 'light'),
       entry('second', 'light'),
     ]
-    const requirements: ModelPoolCapability[] = ['light', 'light', 'light']
+    const requirements: ModelCapabilityLevel[] = ['light', 'light', 'light']
 
     const first = planModelPoolAssignments(entries, requirements)
     const second = planModelPoolAssignments(entries, requirements)

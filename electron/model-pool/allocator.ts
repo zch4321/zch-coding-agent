@@ -1,19 +1,22 @@
-import type {
-  ModelPoolCapability,
-  ModelPoolEntry,
-} from '../../shared/model-pool'
+import type { ModelCapabilityLevel } from '../../shared/config'
+import type { ModelPoolEntry } from '../../shared/model-pool'
 
-const CAPABILITY_ORDER: readonly ModelPoolCapability[] = [
+const CAPABILITY_ORDER: readonly ModelCapabilityLevel[] = [
   'light',
   'standard',
   'strong',
 ]
 
+/** Combines a persisted pool route with its Provider-owned capability annotation. */
+export interface ModelPoolCandidate extends ModelPoolEntry {
+  capability: ModelCapabilityLevel
+}
+
 export interface ModelPoolAssignment {
   requirementIndex: number
-  requestedCapability: ModelPoolCapability
+  requestedCapability: ModelCapabilityLevel
   entryId: string
-  capability: ModelPoolCapability
+  capability: ModelCapabilityLevel
   providerId: string
   model: string
   reasoning: ModelPoolEntry['reasoning']
@@ -24,7 +27,7 @@ export interface ModelPoolAssignment {
 export class ModelPoolAllocationError extends Error {
   constructor(
     readonly requirementIndex: number,
-    readonly capability: ModelPoolCapability,
+    readonly capability: ModelCapabilityLevel,
   ) {
     super(
       `Model pool cannot satisfy ${capability} requirement at index ${requirementIndex}`,
@@ -35,10 +38,10 @@ export class ModelPoolAllocationError extends Error {
 
 /** Assigns capability requirements deterministically with per-tier round robin. */
 export function planModelPoolAssignments(
-  entries: readonly ModelPoolEntry[],
-  requirements: readonly ModelPoolCapability[],
+  entries: readonly ModelPoolCandidate[],
+  requirements: readonly ModelCapabilityLevel[],
 ): ModelPoolAssignment[] {
-  const tiers = new Map<ModelPoolCapability, readonly ModelPoolEntry[]>(
+  const tiers = new Map<ModelCapabilityLevel, readonly ModelPoolCandidate[]>(
     CAPABILITY_ORDER.map((capability) => [
       capability,
       entries.filter(
@@ -56,7 +59,7 @@ export function planModelPoolAssignments(
     }
     return selected
   })
-  const cursors = new Map<ModelPoolCapability, number>()
+  const cursors = new Map<ModelCapabilityLevel, number>()
 
   return selectedTiers.map((capability, requirementIndex) => {
     const candidates = tiers.get(capability)!

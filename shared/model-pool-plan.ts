@@ -1,5 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox'
-import { ModelPoolCapabilitySchema } from './model-pool'
+import { ModelCapabilityLevelSchema } from './config'
 import { ModelRouteSnapshotSchema } from './model-route'
 import { ReasoningEffortSchema } from './reasoning'
 
@@ -8,9 +8,9 @@ export const MODEL_POOL_PLAN_SCHEMA_VERSION = 1 as const
 export const ModelPoolPlanAssignmentSnapshotSchema = Type.Object(
   {
     requirementIndex: Type.Integer({ minimum: 0 }),
-    requestedCapability: ModelPoolCapabilitySchema,
+    requestedCapability: ModelCapabilityLevelSchema,
     entryId: Type.String({ minLength: 1, maxLength: 64 }),
-    capability: ModelPoolCapabilitySchema,
+    capability: ModelCapabilityLevelSchema,
     providerId: Type.String({ minLength: 1, maxLength: 128 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
     reasoning: ReasoningEffortSchema,

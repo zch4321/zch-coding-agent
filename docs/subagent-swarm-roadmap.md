@@ -36,17 +36,16 @@ P13 已提供默认关闭的单子 Agent 能力：
   "providerId": "provider-b",
   "model": "model-y",
   "reasoning": "high",
-  "capability": "strong",
   "maxParallel": 2
 }
 ```
 
-能力等级第一版固定为 `light | standard | strong`，由用户显式标注。系统不根据模型名、价格或未经用户确认的外部评估自动推断能力。
+能力等级第一版固定为 `light | standard | strong`，由用户在 Provider 的 per-model metadata 中显式标注；pool entry 只引用模型，不复制标注。系统不根据模型名、价格或未经用户确认的外部评估自动推断能力。
 
 ### 2.2 已完成的 backend foundation
 
-- AppConfig v16 增加默认空的 `modelPool.entries`；集成后的 v17 保留并迁移合法 v16 pool，同时加入显式 approval reasoning 和六档 pool reasoning。Headless 外部配置和 Runtime Identity 继续保持 v4。
-- `config:set(model-pool)` 使用完整数组和精确 Provider revision 覆盖做一次性校验与原子写盘。disabled entry 可以保留失效引用；Provider 删除、模型移出 `enabledModelIds`、reasoning annotation 变为不兼容或显式清除凭据时只自动禁用受影响项，恢复后不会自动重启用。
+- AppConfig v16 增加默认空的 `modelPool.entries`；v17 保留并迁移合法 v16 pool，同时加入显式 approval reasoning 和六档 pool reasoning；当前 v18 删除 entry 中重复的 capability，v16/v17 升级会保留并规范化其余 pool 字段。Headless 外部配置和 Runtime Identity 继续保持 v4。
+- `config:set(model-pool)` 使用完整数组和精确 Provider revision 覆盖做一次性校验与原子写盘。enabled entry 的调度能力从 Provider `modelOverrides[model].capability` 读取，缺少标注时拒绝保存；disabled entry 可以保留失效引用。Provider 删除、模型移出 `enabledModelIds`、移除 capability annotation、reasoning annotation 变为不兼容或显式清除凭据时只自动禁用受影响项，恢复后不会自动重启用。
 - 纯 allocator 只接收能力需求序列，按 `light → standard → strong` 最低可满足等级和同等级声明顺序 round-robin；每次调用重置 cursor，`strong` 不向下降级。`maxParallel` 当前只作为 assignment 元数据返回。
 - route freezer 只读取一次 PublicConfig 快照，对所有 enabled entry 与 Provider revision 计算顺序敏感 digest，并对实际选中的每个唯一 entry 解析一次 main/compression pair。prepared plan 只在 backend 内存持有 API key；safe snapshot 只包含 assignment、revision 和安全 route，不含 API key 或 credential reference。
 - `SubagentExecutionPort.runOne` 尚未消费 prepared plan；当前 `subagent_run` 仍精确继承父 Run route。没有 semaphore、Swarm queue 或 SQLite Job 状态。
@@ -61,7 +60,7 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 ### 2.4 配置与 UI（待实现）
 
-- Agents 设置页增加 pool entry 的增删、排序、启停、Provider/model/reasoning、能力等级与并发配置。
+- Agents 设置页增加 pool entry 的增删、排序、启停、Provider/model/reasoning 与并发配置；能力等级继续只在 Provider 模型配置中维护，pool UI 只读展示该标注。
 - 保存前一次性校验 Provider、credential reference、模型和 revision；无效配置不能部分生效。
 - UI 明确展示每个模型会读取当前 workspace 内容并产生额外 Provider 请求。
 - Runtime Identity 记录模型池 digest 和调度能力，方便 Headless 结果比较。

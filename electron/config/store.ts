@@ -295,10 +295,12 @@ function disableModelPoolEntries(
 function disableIncompatibleModelPoolEntries(config: AppConfig): boolean {
   return disableModelPoolEntries(config, (entry) => {
     const provider = getAppProvider(config, entry.providerId)
-    return !evaluateModelRouteCompatibility(provider, {
-      model: entry.model,
-      reasoning: entry.reasoning,
-    }).ok
+    return (
+      !evaluateModelRouteCompatibility(provider, {
+        model: entry.model,
+        reasoning: entry.reasoning,
+      }).ok || !provider?.modelOverrides[entry.model]?.capability
+    )
   })
 }
 
@@ -380,6 +382,11 @@ function assertEnabledModelPoolEntriesValid(
         )
       }
       throw new Error(`Invalid model pool route: ${compatibility.reason}`)
+    }
+    if (!provider.modelOverrides[entry.model]?.capability) {
+      throw new Error(
+        `Model ${entry.model} must have a capability annotation before it can be enabled in the model pool`,
+      )
     }
 
     const endpoint = resolveProviderEndpoint(

@@ -103,8 +103,17 @@ function legacyV16Config(): Record<string, unknown> {
   return source
 }
 
-describe('config v17 migration boundary', () => {
-  it('creates the v17 defaults when no config exists', () => {
+function legacyV17Config(): Record<string, unknown> {
+  const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
+    string,
+    unknown
+  >
+  source.schemaVersion = 17
+  return source
+}
+
+describe('config v18 migration boundary', () => {
+  it('creates the v18 defaults when no config exists', () => {
     expect(migrateConfig(undefined)).toEqual(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined)).not.toBe(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined).limits.maxConcurrentRuns).toBe(16)
@@ -118,7 +127,7 @@ describe('config v17 migration boundary', () => {
           ...structuredClone(DEFAULT_APP_CONFIG),
           schemaVersion,
         }),
-      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v17`)
+      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v18`)
     }
   })
 
@@ -140,12 +149,49 @@ describe('config v17 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       approval: { reasoning: 'high' },
       modelPool: {
         entries: [{ id: 'worker', model: 'worker-model', maxParallel: 3 }],
       },
     })
+    expect(migrateConfig(source).modelPool.entries[0]).not.toHaveProperty(
+      'capability',
+    )
+  })
+
+  it('migrates v17 pool entries without retaining duplicated capability', () => {
+    const source = legacyV17Config()
+    source.modelPool = {
+      entries: [
+        {
+          id: ' worker ',
+          enabled: false,
+          providerId: 'deepseek',
+          model: 'worker-model',
+          reasoning: 'xhigh',
+          capability: 'strong',
+          maxParallel: 5,
+        },
+      ],
+    }
+
+    const migrated = migrateConfig(source)
+
+    expect(migrated).toMatchObject({
+      schemaVersion: 18,
+      modelPool: {
+        entries: [
+          {
+            id: 'worker',
+            model: 'worker-model',
+            reasoning: 'xhigh',
+            maxParallel: 5,
+          },
+        ],
+      },
+    })
+    expect(migrated.modelPool.entries[0]).not.toHaveProperty('capability')
   })
 
   it('keeps the v16 Provider and model pool reasoning boundary frozen', () => {
@@ -188,7 +234,6 @@ describe('config v17 migration boundary', () => {
       providerId: 'deepseek',
       model: `worker-model-${index}`,
       reasoning,
-      capability: 'standard',
       maxParallel: 1,
     }))
 
@@ -199,7 +244,7 @@ describe('config v17 migration boundary', () => {
     const source = legacyV9Config()
     const migrated = migrateConfig(source)
     expect(migrated).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       modelPool: { entries: [] },
       providers: [
         {
@@ -256,7 +301,7 @@ describe('config v17 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       modelPool: { entries: [] },
       limits: {
         maxToolOutputBytes: 128 * 1_024,
@@ -280,7 +325,7 @@ describe('config v17 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       modelPool: { entries: [] },
       limits: {
         maxToolOutputBytes: 72_000,
@@ -298,7 +343,7 @@ describe('config v17 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       modelPool: { entries: [] },
       providers: [
         {
@@ -315,7 +360,7 @@ describe('config v17 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       modelPool: { entries: [] },
       limits: { maxConcurrentRuns: 7 },
       subagents: {
@@ -329,7 +374,7 @@ describe('config v17 migration boundary', () => {
     const source = legacyV13Config()
     const migrated = migrateConfig(source)
 
-    expect(migrated.schemaVersion).toBe(17)
+    expect(migrated.schemaVersion).toBe(18)
     expect(migrated.modelPool).toEqual({ entries: [] })
     expect(migrated.limits).not.toHaveProperty('maxToolTokensPerRun')
     expect((source.limits as Record<string, unknown>).maxToolTokensPerRun).toBe(
@@ -341,7 +386,7 @@ describe('config v17 migration boundary', () => {
     const migrated = migrateConfig(legacyV14Config())
 
     expect(migrated).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       modelPool: { entries: [] },
       providers: [
         {
@@ -375,7 +420,7 @@ describe('config v17 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 17,
+      schemaVersion: 18,
       modelPool: { entries: [] },
       limits: { maxConcurrentRuns: 7 },
     })
@@ -387,7 +432,7 @@ describe('config v17 migration boundary', () => {
     })
   })
 
-  it('accepts and clones a valid v17 config', () => {
+  it('accepts and clones a valid v18 config', () => {
     const source = structuredClone(DEFAULT_APP_CONFIG)
     const migrated = migrateConfig(source)
 
@@ -404,12 +449,12 @@ describe('config v17 migration boundary', () => {
       source.providers[0].providerType = providerType
       const migrated = migrateConfig(source)
 
-      expect(migrated.schemaVersion).toBe(17)
+      expect(migrated.schemaVersion).toBe(18)
       expect(migrated.providers[0].providerType).toBe(providerType)
     }
   })
 
-  it('rejects malformed v17 data instead of filling missing fields', () => {
+  it('rejects malformed v18 data instead of filling missing fields', () => {
     const malformed = structuredClone(DEFAULT_APP_CONFIG) as Record<
       string,
       unknown
@@ -429,7 +474,6 @@ describe('config v17 migration boundary', () => {
         providerId: 'missing-one',
         model: 'preserved-one',
         reasoning: 'off',
-        capability: 'light',
         maxParallel: 1,
       },
       {
@@ -438,7 +482,6 @@ describe('config v17 migration boundary', () => {
         providerId: 'missing-two',
         model: 'preserved-two',
         reasoning: 'max',
-        capability: 'strong',
         maxParallel: 32,
       },
     ]
@@ -457,7 +500,6 @@ describe('config v17 migration boundary', () => {
         providerId: 'missing',
         model: 'preserved',
         reasoning: 'high',
-        capability: 'standard',
         maxParallel: 2,
       },
     ]
