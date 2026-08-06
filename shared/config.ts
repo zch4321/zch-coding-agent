@@ -9,6 +9,7 @@ import {
 import { ReasoningEffortSchema, type ReasoningEffort } from './reasoning'
 
 export {
+  MAX_MODEL_POOL_ENTRIES,
   ModelPoolConfigSchema,
   ModelPoolEntrySchema,
   ModelPoolProviderRevisionSchema,

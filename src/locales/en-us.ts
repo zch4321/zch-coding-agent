@@ -537,6 +537,8 @@ const enUS = {
     filterRoutes: 'Filter Provider, model, or reasoning',
     selectAllRoutes: 'Select all current routes',
     clearSelectedRoutes: 'Clear current routes',
+    selectionLimitExceeded:
+      'The model pool stores up to {count} routes; this over-limit selection was not applied.',
     noMatchingRoutes: 'No route matches the current filters.',
     providerMissing:
       'The referenced Provider no longer exists; select another Provider or remove this entry.',

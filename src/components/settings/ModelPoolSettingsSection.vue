@@ -15,6 +15,7 @@ import {
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
+  MAX_MODEL_POOL_ENTRIES,
   REASONING_EFFORTS,
   type ModelCapabilityLevel,
   type ModelPoolEntry,
@@ -163,6 +164,11 @@ const transferOptions = computed(() =>
 )
 
 const saveStatus = computed(() => {
+  if (pool.selectionLimitExceeded) {
+    return t('modelPool.selectionLimitExceeded', {
+      count: MAX_MODEL_POOL_ENTRIES,
+    })
+  }
   if (pool.saveStatus === 'external-change') {
     return t('modelPool.externalChange')
   }

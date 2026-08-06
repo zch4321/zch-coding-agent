@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from 'vitest'
-import type {
-  ModelPoolEntry,
-  ProviderPublicConfig,
-  PublicConfig,
+import {
+  MAX_MODEL_POOL_ENTRIES,
+  type ModelPoolEntry,
+  type ProviderPublicConfig,
+  type PublicConfig,
 } from '../../shared/config'
 import { installApi, setupAgentTest } from './agent-test-support'
 import {
@@ -180,5 +181,32 @@ describe('model pool settings', () => {
 
     pool.setSelectedRoutes([modelPoolRouteKey(max)], [high, max])
     expect(pool.entries).toEqual([entry({ id: 'worker-2', reasoning: 'max' })])
+  })
+
+  it('accepts 1,000 routes and rejects an over-limit renderer selection', () => {
+    const pool = useModelPoolSettingsStore()
+    const routes = Array.from(
+      { length: MAX_MODEL_POOL_ENTRIES + 1 },
+      (_, index): ModelPoolSelectableRoute => ({
+        providerId: 'provider-a',
+        model: `model-${index}`,
+        reasoning: 'high',
+      }),
+    )
+    const keys = routes.map(modelPoolRouteKey)
+
+    pool.setSelectedRoutes(keys, routes)
+
+    expect(pool.entries).toEqual([])
+    expect(pool.selectionLimitExceeded).toBe(true)
+
+    pool.setSelectedRoutes(keys.slice(0, MAX_MODEL_POOL_ENTRIES), routes)
+
+    expect(pool.entries).toHaveLength(MAX_MODEL_POOL_ENTRIES)
+    expect(pool.entries[0]?.id).toBe('worker-1')
+    expect(pool.entries[MAX_MODEL_POOL_ENTRIES - 1]?.id).toBe(
+      `worker-${MAX_MODEL_POOL_ENTRIES}`,
+    )
+    expect(pool.selectionLimitExceeded).toBe(false)
   })
 })

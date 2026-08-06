@@ -1,6 +1,9 @@
 import { Type, type Static } from '@sinclair/typebox'
 import { ReasoningEffortSchema } from './reasoning'
 
+/** Defensive IPC/config bound for explicitly selected model-pool routes. */
+export const MAX_MODEL_POOL_ENTRIES = 1_000
+
 export const ModelPoolEntrySchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 64 }),
@@ -15,7 +18,9 @@ export type ModelPoolEntry = Static<typeof ModelPoolEntrySchema>
 
 export const ModelPoolConfigSchema = Type.Object(
   {
-    entries: Type.Array(ModelPoolEntrySchema, { maxItems: 64 }),
+    entries: Type.Array(ModelPoolEntrySchema, {
+      maxItems: MAX_MODEL_POOL_ENTRIES,
+    }),
   },
   { additionalProperties: false },
 )

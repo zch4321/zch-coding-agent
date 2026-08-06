@@ -4,6 +4,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   ConfigSetRequestSchema,
+  MAX_MODEL_POOL_ENTRIES,
   type ConfigSetRequest,
   type ModelPoolEntry,
   type ProviderPublicConfig,
@@ -381,13 +382,24 @@ describe('ConfigStore', () => {
         },
       }),
     ).toBe(false)
+    const boundedEntries = Array.from(
+      { length: MAX_MODEL_POOL_ENTRIES },
+      (_, index) => modelPoolEntry({ enabled: false, id: `entry-${index}` }),
+    )
+    expect(validate({ ...valid, value: { entries: boundedEntries } })).toBe(
+      true,
+    )
     expect(
       validate({
         ...valid,
         value: {
-          entries: Array.from({ length: 65 }, (_, index) =>
-            modelPoolEntry({ enabled: false, id: `entry-${index}` }),
-          ),
+          entries: [
+            ...boundedEntries,
+            modelPoolEntry({
+              enabled: false,
+              id: `entry-${MAX_MODEL_POOL_ENTRIES}`,
+            }),
+          ],
         },
       }),
     ).toBe(false)

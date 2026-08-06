@@ -521,6 +521,8 @@ const zhCN = {
     filterRoutes: '筛选 Provider、模型或思考等级',
     selectAllRoutes: '选择当前全部 Route',
     clearSelectedRoutes: '清空当前 Route',
+    selectionLimitExceeded:
+      '模型池最多保存 {count} 条 Route；本次超出上限的选择未应用。',
     noMatchingRoutes: '没有符合当前筛选条件的 Route。',
     providerMissing: '引用的 Provider 已不存在，请重新选择或删除此条目。',
     modelUnavailable: '模型不存在或未在该 Provider 中启用。',

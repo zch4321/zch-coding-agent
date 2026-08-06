@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { IPC_VERSION } from '../../shared/channels'
 import {
+  MAX_MODEL_POOL_ENTRIES,
   type ConfigSection,
   type ModelPoolConfig,
   type ModelPoolEntry,
@@ -20,11 +21,18 @@ function modelPoolSignature(modelPool: ModelPoolConfig): string {
   return JSON.stringify(modelPool)
 }
 
-function nextEntryId(entries: readonly ModelPoolEntry[]): string {
+function createEntryIdAllocator(
+  entries: readonly ModelPoolEntry[],
+): () => string {
   const existing = new Set(entries.map((entry) => entry.id.trim()))
   let index = 1
-  while (existing.has(`worker-${index}`)) index += 1
-  return `worker-${index}`
+  return () => {
+    while (existing.has(`worker-${index}`)) index += 1
+    const id = `worker-${index}`
+    existing.add(id)
+    index += 1
+    return id
+  }
 }
 
 /** Identifies one exact model-pool route exposed by the renderer catalog. */
@@ -73,6 +81,7 @@ export const useModelPoolSettingsStore = defineStore('model-pool-settings', {
     error: '',
     entries: [] as ModelPoolEntry[],
     savedSignature: modelPoolSignature({ entries: [] }),
+    selectionLimitExceeded: false,
     saving: false,
     saveStatus: '',
   }),
@@ -86,6 +95,7 @@ export const useModelPoolSettingsStore = defineStore('model-pool-settings', {
       if (!sections.includes('all') && !sections.includes('modelPool')) return
       this.entries = structuredClone(config.modelPool.entries)
       this.savedSignature = modelPoolSignature(config.modelPool)
+      this.selectionLimitExceeded = false
       this.saveStatus = ''
     },
     /** Reconciles Provider-triggered pool repairs without discarding a dirty draft. */
@@ -99,6 +109,7 @@ export const useModelPoolSettingsStore = defineStore('model-pool-settings', {
         return
       }
       this.entries = structuredClone(config.modelPool.entries)
+      this.selectionLimitExceeded = false
       this.saveStatus = ''
     },
     /** Replaces the pool membership with exact routes selected by the transfer UI. */
@@ -116,19 +127,30 @@ export const useModelPoolSettingsStore = defineStore('model-pool-settings', {
       }
 
       const nextEntries: ModelPoolEntry[] = []
+      const allocateEntryId = createEntryIdAllocator(this.entries)
       const selected = new Set<string>()
       for (const key of selectedKeys) {
         if (selected.has(key)) continue
         selected.add(key)
         const existing = existingByKey.get(key)
         if (existing) {
+          if (nextEntries.length >= MAX_MODEL_POOL_ENTRIES) {
+            this.selectionLimitExceeded = true
+            this.saveStatus = ''
+            return
+          }
           nextEntries.push({ ...existing })
           continue
         }
         const route = routesByKey.get(key)
         if (!route) continue
+        if (nextEntries.length >= MAX_MODEL_POOL_ENTRIES) {
+          this.selectionLimitExceeded = true
+          this.saveStatus = ''
+          return
+        }
         nextEntries.push({
-          id: nextEntryId([...this.entries, ...nextEntries]),
+          id: allocateEntryId(),
           enabled: true,
           providerId: route.providerId,
           model: route.model,
@@ -136,6 +158,7 @@ export const useModelPoolSettingsStore = defineStore('model-pool-settings', {
         })
       }
       this.entries = nextEntries
+      this.selectionLimitExceeded = false
       this.saveStatus = ''
     },
     /** Persists the complete pool with exact revisions for every enabled Provider. */
