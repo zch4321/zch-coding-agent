@@ -44,6 +44,7 @@ import {
 import { projectConversationTurns } from './conversation-timeline'
 import { useAgentSettingsStore } from './agent-settings'
 import { useApprovalSettingsStore } from './approval-settings'
+import { useModelPoolSettingsStore } from './model-pool-settings'
 import { useAgentShellStore } from './agent-shell'
 import { useNotificationStore } from './notifications'
 import { useAgentExecutionStore } from './agent-executions'
@@ -258,6 +259,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const shell = useAgentShellStore()
       const settings = useAgentSettingsStore()
       const approval = useApprovalSettingsStore()
+      const modelPool = useModelPoolSettingsStore()
       const replica = useAgentReplicaStore()
       const executions = useAgentExecutionStore()
       shell.bridgeAvailable = Boolean(window.agentApi)
@@ -345,6 +347,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       if (config.ok) {
         settings.applyConfig(config.value.config)
         approval.applyConfig(config.value.config)
+        modelPool.applyConfig(config.value.config)
       } else showOperationError(config.error)
       await replica.bootstrap(
         config.ok ? config.value.config.workspace.lastOpened : undefined,
@@ -363,6 +366,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     applyConfig(config: PublicConfig, sections: ConfigSection[] = ['all']) {
       useAgentSettingsStore().applyConfig(config, sections)
       useApprovalSettingsStore().applyConfig(config, sections)
+      useModelPoolSettingsStore().applyConfig(config, sections)
     },
     clearDiagnostics() {
       const overlay = this.activeOverlay

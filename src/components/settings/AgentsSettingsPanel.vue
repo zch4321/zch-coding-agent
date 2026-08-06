@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, watch } from 'vue'
 import { NAlert, NButton, NInputNumber, NSwitch } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
+import ModelPoolSettingsSection from './ModelPoolSettingsSection.vue'
 
 const agent = useAgentStore()
 const { t } = useI18n()
@@ -106,5 +107,7 @@ onBeforeUnmount(() => {
         }}
       </NAlert>
     </template>
+
+    <ModelPoolSettingsSection />
   </section>
 </template>

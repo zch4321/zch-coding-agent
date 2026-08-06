@@ -23,6 +23,7 @@ import {
 import { nowNotice, toUiRememberedRules } from './config-mapping'
 import type { UiModelProfile, UiRememberedRule } from './agent-types'
 import { useApprovalSettingsStore } from './approval-settings'
+import { useModelPoolSettingsStore } from './model-pool-settings'
 import {
   DEFAULT_PROVIDER_FORM,
   providerFormSignature,
@@ -764,6 +765,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       }
       this.applyConfig(result.value.config, ['providers'])
       useApprovalSettingsStore().applyConfig(result.value.config, ['approval'])
+      useModelPoolSettingsStore().applyExternalConfig(result.value.config)
       return true
     },
     async saveProvider(): Promise<boolean> {
@@ -837,6 +839,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
             const apiKeyUnchanged = this.providerForm.apiKey === draft.apiKey
             this.activeProviderId = saved.value.config.activeProviderId
             this.providers = structuredClone(saved.value.config.providers)
+            useModelPoolSettingsStore().applyExternalConfig(saved.value.config)
             if (limitsSignature(this.limitsConfig) === limitsDraftSignature) {
               this.limitsConfig = structuredClone(saved.value.config.limits)
               this.limitsSavedSignature = limitsSignature(
@@ -886,8 +889,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         providerId: this.selectedProviderId,
         action: 'clear',
       })
-      if (result.ok) this.applyConfig(result.value.config, ['providers'])
-      else this.error = result.error.message
+      if (result.ok) {
+        this.applyConfig(result.value.config, ['providers'])
+        useModelPoolSettingsStore().applyExternalConfig(result.value.config)
+      } else this.error = result.error.message
     },
     async saveWebSearchSettings() {
       const bridge = window.agentApi

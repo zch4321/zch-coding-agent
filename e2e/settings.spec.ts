@@ -154,11 +154,14 @@ test.describe.serial('Electron settings workflows', () => {
     const timeoutMinutes = agents
       .locator('.settings-field', { hasText: '单个子任务超时' })
       .locator('input')
+    const subagentSaveStatus = agents.locator(
+      '.settings-heading-actions .settings-save-status',
+    )
     await expect(subagentsSwitch).not.toHaveClass(/n-switch--active/u)
     await expect(timeoutMinutes).toHaveValue('30')
     await subagentsSwitch.click()
     await timeoutMinutes.fill('45')
-    await expect(agents.locator('.settings-save-status')).toHaveText('已保存')
+    await expect(subagentSaveStatus).toHaveText('已保存')
     await expect
       .poll(async () =>
         page.evaluate(async () => {
@@ -180,7 +183,7 @@ test.describe.serial('Electron settings workflows', () => {
       )
       .toEqual({ enabled: true, workerTimeoutMs: 2_700_000 })
     await subagentsSwitch.click()
-    await expect(agents.locator('.settings-save-status')).toHaveText('已保存')
+    await expect(subagentSaveStatus).toHaveText('已保存')
 
     await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
     const provider = page.locator('.settings-section')
@@ -591,6 +594,95 @@ test.describe.serial('Electron settings workflows', () => {
     await reasoningSelect.click()
     await clickComposerOption('低')
     await expect(reasoningSelectBox).not.toHaveClass(/error-status/u)
+  })
+
+  test('configures and persists the model pool from Agents settings', async () => {
+    const credentialReady = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        setConfig(payload: unknown): Promise<{ ok: boolean }>
+      }
+      const result = await api.setConfig({
+        version: 1,
+        kind: 'credential',
+        providerId: 'e2e-annotated',
+        action: 'set',
+        apiKey: 'e2e-model-pool-key',
+      })
+      return result.ok
+    })
+    expect(credentialReady).toBe(true)
+
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.locator('.sidebar-settings-button').click()
+    const navigation = page.getByRole('navigation', { name: '设置分类' })
+    await navigation.getByRole('menuitem', { name: 'Agents' }).click()
+    const pool = page.locator('.model-pool-section')
+
+    await expect(pool.getByRole('heading', { name: '模型池' })).toBeVisible()
+    await pool.getByRole('button', { name: '添加模型' }).click()
+    const entry = pool.getByTestId('model-pool-entry-0')
+    await expect(entry).toBeVisible()
+    await expect(entry).toContainText('E2E Annotated')
+    await expect(entry.getByText('强力', { exact: true })).toBeVisible()
+
+    await entry
+      .locator('.settings-field', { hasText: '条目名称' })
+      .locator('input')
+      .fill('e2e-strong-coder')
+    await entry
+      .locator('.settings-field', { hasText: '最大并发' })
+      .locator('input')
+      .fill('4')
+    await entry.locator('.model-pool-enabled .n-switch').click()
+    await pool.getByRole('button', { name: '保存模型池' }).click()
+    await expect(pool.locator('.settings-save-status')).toHaveText('已保存')
+
+    const savedPool = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        getConfig(payload: unknown): Promise<{
+          value?: {
+            config: {
+              modelPool: {
+                entries: Array<Record<string, unknown>>
+              }
+            }
+          }
+        }>
+      }
+      const result = await api.getConfig({
+        version: 1,
+        section: 'modelPool',
+      })
+      return result.value?.config.modelPool
+    })
+    expect(savedPool).toEqual({
+      entries: [
+        {
+          id: 'e2e-strong-coder',
+          enabled: true,
+          providerId: 'e2e-annotated',
+          model: 'annotated-model',
+          reasoning: 'low',
+          maxParallel: 4,
+        },
+      ],
+    })
+    expect(JSON.stringify(savedPool)).not.toContain('capability')
+
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.locator('.sidebar-settings-button').click()
+    await navigation.getByRole('menuitem', { name: 'Agents' }).click()
+    await expect(
+      pool
+        .getByTestId('model-pool-entry-0')
+        .locator('.model-pool-entry-id input'),
+    ).toHaveValue('e2e-strong-coder')
+
+    await pool.getByRole('button', { name: '删除' }).click()
+    await pool.getByRole('button', { name: '保存模型池' }).click()
+    await expect(pool.locator('.n-empty')).toBeVisible()
   })
 
   test('pauses provider autosave when the draft breaks the saved approval route', async () => {

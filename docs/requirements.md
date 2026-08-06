@@ -298,16 +298,17 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - `workerTimeoutMs` 默认 30 分钟、可配置 1 分钟至 24 小时。父 Run 取消、timeout、Provider failure 和应用退出都必须中断 child 并清理并发 slot；全局并发上限为 1 时启动前明确拒绝。
 - 相同 parent Session/Run/call 与参数 hash 可复用已完成结果；参数不同返回冲突。应用重启将遗留 active execution 标记为 `interrupted`，不得自动重试或恢复 stream。
 
-当前阶段已经包含模型池的 backend foundation，但不改变上述 `subagent_run` 执行路径。Swarm、模型池 UI/生产执行接入、递归委派、Serena/code intelligence、自定义 child 工具列表或详细 child Session UI 仍未实现；后续边界见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
+当前阶段已经包含模型池的配置 UI 与 backend foundation，但不改变上述 `subagent_run` 执行路径。Swarm、模型池生产执行接入、递归委派、Serena/code intelligence、自定义 child 工具列表或详细 child Session UI 仍未实现；后续边界见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
 
-### 2.8 Model Pool backend foundation
+### 2.8 Model Pool 配置与 backend foundation
 
 - AppConfig v16 首次在根配置加入 `modelPool`，v17 将 entry reasoning 扩展为统一六档；当前 v18 保存最多 64 个命名 entry。entry 只引用现有 Provider/model/reasoning，并携带尚未执行的 `maxParallel` 元数据，不再重复保存能力等级。调度能力固定为 `light | standard | strong`，唯一来源是对应 Provider 的 `modelOverrides[model].capability`。API key 与 credential reference 不进入 entry。
 - 完整模型池使用单个 `config:set(model-pool)` 原子保存。所有 enabled entry 引用的 Provider 必须由唯一且精确的 expected revision 列表覆盖，并在写盘前通过 Provider 存在、模型启用、能力标注、安全 endpoint、模型 profile 和当前凭据绑定校验；任一失败时不得部分写入。disabled entry 只要求结构与规范化 ID 唯一，可保留失效引用供未来 UI 修复。
+- Agents 设置页提供模型池独立小节，可增删、排序、启停 entry，并配置 Provider、模型、思考深度和 `maxParallel`。能力等级只读展示对应 Provider 模型标注，不在 entry 内编辑或复制。Renderer 使用独立 Pinia store 持有草稿、已保存快照和保存状态；整组修改显式原子保存，不复用 Provider 表单草稿。Provider 编辑触发后端自动禁用时，干净模型池草稿同步回填；未保存草稿则保留并提示重新检查。
 - 删除 Provider、移除 entry 引用的启用模型、移除 capability annotation、reasoning annotation 变为不兼容或显式清除凭据时，在同一配置写入中把受影响 entry 置为 disabled，保留顺序和引用；恢复配置不会自动启用。启动/reload 会修复手写的 enabled 静态不兼容或无能力标注引用，但环境凭据暂时缺失不会改写持久配置。
 - 纯 allocator 对能力需求使用最低能力制和同实际等级的声明顺序 round-robin，每次调用从头开始；缺少能力时在 route/credential 解析前整体失败。route freezer 读取单个 PublicConfig 快照，生成包含全部 enabled entry 及 Provider revision 的顺序敏感 SHA-256 digest，并对实际选择的唯一 entry 各解析一次 main/compression route。
 - prepared plan 是 backend-private 内存结果，包含 `ResolvedModelRoute` 与 API key；safe snapshot 只包含 digest、需求/entry/能力、Provider/model/reasoning/revision、`maxParallel` 与安全 route snapshot。revision 竞态或已选 entry 不可用会使整个 freeze 失败，不会跳过、切换 Provider 或重新分配。
-- 本阶段不修改 Headless v4、Runtime Identity v4、`SubagentExecutionPort.runOne`、Vue/Pinia 或 SQLite Job 状态，也不执行 `maxParallel` semaphore；这些属于 S3 后续接入或 S4。
+- 本阶段不修改 Headless v4、Runtime Identity v4、`SubagentExecutionPort.runOne` 或 SQLite Job 状态，也不执行 `maxParallel` semaphore；这些属于 S3 后续接入或 S4。
 
 ---
 
@@ -464,7 +465,8 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - Agents 设置页提供 Subagent 功能开关和 worker timeout，沿用设置页 600 ms 自动保存及显式立即保存入口。
 - 开关默认关闭；timeout 默认 30 分钟，输入以分钟展示并限制为 1–1,440。
 - 页面必须提示启用后会产生额外 Provider 请求和费用，并展示当前全局 `maxConcurrentRuns`；并发为 1 时说明无法运行嵌套 Agent。
-- 当前不提供 child 工具列表、模型池设置 UI、详细子任务页或隐藏 Session 入口；backend model-pool foundation 不在 Renderer 暴露编辑行为。
+- 同页模型池小节显式原子保存完整 entry 数组；可配置命名、顺序、启停、Provider/model/reasoning 与最大并发，并只读展示 Provider 模型的能力标注。
+- 当前不提供 child 工具列表、详细子任务页或隐藏 Session 入口；模型池仍未接入生产 Subagent 执行。
 
 ---
 

@@ -517,6 +517,43 @@ const enUS = {
       'Subtasks share the global task concurrency limit (currently {count}). Nested work is rejected when that limit is 1.',
     save: 'Save Agent settings',
   },
+  modelPool: {
+    title: 'Model pool',
+    hint: 'Configure reusable models for future Swarm scheduling. Capability is read only from Provider model annotations, and the complete pool saves atomically.',
+    add: 'Add model',
+    save: 'Save model pool',
+    empty:
+      'The model pool is empty. Add a Provider model with a capability annotation.',
+    noEligibleModels:
+      'No model can be added. Enable a model and annotate its capability under Provider settings first.',
+    entryId: 'Entry name',
+    entryIdPlaceholder: 'For example, strong-coder',
+    idRequired: 'The entry name is required.',
+    idDuplicate: 'Entry names must be unique.',
+    enabled: 'Enabled',
+    provider: 'Provider',
+    providerMissing:
+      'The referenced Provider no longer exists; select another Provider or remove this entry.',
+    model: 'Model',
+    modelUnavailable: 'The model is missing or not enabled for this Provider.',
+    reasoning: 'Reasoning effort',
+    reasoningUnsupported:
+      'This model does not support the selected reasoning effort.',
+    capability: 'Capability',
+    capabilityMissing: 'Not annotated',
+    capabilityMissingHint:
+      'This model has no capability annotation; configure it under Provider settings first.',
+    credentialMissing:
+      'This Provider has no configured credential, so the entry cannot be enabled.',
+    maxParallel: 'Maximum concurrency',
+    maxParallelHint:
+      'Stored as scheduling metadata for now; enforcement begins when Swarm execution is connected.',
+    moveUp: 'Move up',
+    moveDown: 'Move down',
+    remove: 'Remove',
+    externalChange:
+      'Provider changes updated the saved pool state; review this draft and save it again.',
+  },
   dialogs: {
     yoloTitle: 'Enable Yolo mode?',
     yoloRisk: 'Host-level side effects',

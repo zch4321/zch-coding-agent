@@ -22,7 +22,7 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 这些约束是后续 Model Pool 和 Swarm 的底座，不在后续阶段复制第二套 Session、Provider、Tool executor 或恢复逻辑。
 
-## 2. S3 · Model Pool（backend foundation 已完成，产品接入待完成）
+## 2. S3 · Model Pool（backend foundation 与设置 UI 已完成，执行接入待完成）
 
 ### 2.1 目标
 
@@ -58,11 +58,11 @@ P13 已提供默认关闭的单子 Agent 能力：
 - 某个 assignment 失败时保留原模型信息，不自动切换 Provider 重跑，避免重复费用和不可审计结果。
 - `maxParallel` 只约束对应 pool entry；实际执行还必须取得全局 Run slot。
 
-### 2.4 配置与 UI（待实现）
+### 2.4 配置与 UI（设置页已完成，执行接入待实现）
 
-- Agents 设置页增加 pool entry 的增删、排序、启停、Provider/model/reasoning 与并发配置；能力等级继续只在 Provider 模型配置中维护，pool UI 只读展示该标注。
-- 保存前一次性校验 Provider、credential reference、模型和 revision；无效配置不能部分生效。
-- UI 明确展示每个模型会读取当前 workspace 内容并产生额外 Provider 请求。
+- Agents 设置页已经提供 pool entry 的增删、排序、启停、Provider/model/reasoning 与并发配置；能力等级继续只在 Provider 模型配置中维护，pool UI 只读展示该标注。
+- Renderer 使用独立模型池 store 保存草稿，并通过单次完整数组请求校验 Provider、credential binding、模型、能力标注和 revision；无效配置不能部分生效。Provider 编辑导致持久化 entry 自动禁用时不会静默覆盖 dirty 草稿。
+- Swarm 执行接入时，UI 仍需明确展示每个模型会读取当前 workspace 内容并产生额外 Provider 请求。
 - Runtime Identity 记录模型池 digest 和调度能力，方便 Headless 结果比较。
 
 ### 2.5 验收
@@ -72,7 +72,7 @@ P13 已提供默认关闭的单子 Agent 能力：
 - queued 期间修改配置不会改变既有 assignment。
 - API key 仍只在主进程内存中解析，不进入 pool 配置、execution、trace 或 Tool Result。
 
-前四项的 backend allocator/freezer 回归已经覆盖；S3 完成仍取决于设置 UI、Runtime Identity/Headless 演进、生产执行接入和并发限制。
+前四项的 backend allocator/freezer 回归已经覆盖，设置 UI 也已接入；S3 完成仍取决于 Runtime Identity/Headless 演进、生产执行接入和并发限制。
 
 ## 3. S4 · `/swarm` 与 `swarm_run`
 

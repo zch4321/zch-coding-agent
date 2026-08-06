@@ -8,6 +8,7 @@ import { useAgentReplicaStore } from '../../stores/agent-replica'
 import { useAgentSettingsStore } from '../../stores/agent-settings'
 import { useAgentShellStore } from '../../stores/agent-shell'
 import { useMcpStore } from '../../stores/mcp'
+import { useModelPoolSettingsStore } from '../../stores/model-pool-settings'
 import {
   useNotificationStore,
   type UiNotification,
@@ -27,6 +28,7 @@ const approval = useApprovalSettingsStore()
 const replica = useAgentReplicaStore()
 const changes = useAgentChangesStore()
 const mcp = useMcpStore()
+const modelPool = useModelPoolSettingsStore()
 const skills = useSkillsStore()
 const traces = useTraceStore()
 const errorWatchers: WatchStopHandle[] = []
@@ -115,6 +117,13 @@ forwardStoreError(
   () => approval.error,
   () => {
     approval.error = ''
+  },
+)
+forwardStoreError(
+  'MODEL_POOL_SETTINGS_OPERATION_FAILED',
+  () => modelPool.error,
+  () => {
+    modelPool.error = ''
   },
 )
 forwardStoreError(
