@@ -230,6 +230,7 @@ function buildAppConfig(config: HeadlessConfig): AppConfig {
     approval: {
       approverProviderId: providerId,
       approverModel: config.provider.model,
+      reasoning: config.provider.reasoning ?? defaults.approval.reasoning,
     },
     permission: {
       ...defaults.permission,

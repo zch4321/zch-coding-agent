@@ -7,7 +7,10 @@ import {
   type ModelPoolConfig,
   type PublicConfig,
 } from '../../shared/config'
-import { assertModelRouteSnapshotSafe } from '../../shared/model-route'
+import {
+  assertModelRouteSnapshotSafe,
+  evaluateModelRouteCompatibility,
+} from '../../shared/model-route'
 import { normalizeReasoningEfforts } from '../../shared/model-settings'
 import { writeJsonAtomic } from './atomic-file'
 import { migrateConfig, UnsupportedConfigSchemaError } from './migrations'
@@ -63,46 +66,85 @@ function normalizedEnabledModelIds(modelIds: readonly string[]): string[] {
   return [...new Set(modelIds.map((modelId) => modelId.trim()).filter(Boolean))]
 }
 
-function assertMainModelEnabled(provider: AppProviderConfig): void {
-  if (provider.model && !provider.enabledModelIds.includes(provider.model)) {
+/** Validates the configured main route while allowing an unconfigured model. */
+function assertMainRouteConfigValid(provider: AppProviderConfig): void {
+  if (!provider.model) return
+  const compatibility = evaluateModelRouteCompatibility(provider, {
+    model: provider.model,
+    reasoning: provider.reasoning,
+  })
+  if (compatibility.ok) return
+  if (compatibility.reason === 'model-disabled') {
     throw new Error('Main model must be enabled for the Provider')
   }
-}
-
-function assertMainModelReasoningSupported(provider: AppProviderConfig): void {
-  const supported = provider.model
-    ? provider.modelOverrides[provider.model]?.reasoningEfforts
-    : undefined
-  if (supported?.length && !supported.includes(provider.reasoning)) {
+  if (compatibility.reason === 'reasoning-unsupported') {
     throw new Error(
       `Provider reasoning must be supported by the main model: ${provider.model}`,
     )
   }
+  throw new Error(`Invalid main model route: ${compatibility.reason}`)
+}
+
+/** Returns the first enabled model compatible with one explicit effort. */
+function firstApprovalCompatibleModel(
+  provider: AppProviderConfig,
+  reasoning: AppConfig['approval']['reasoning'],
+): string | undefined {
+  return provider.enabledModelIds.find(
+    (model) =>
+      evaluateModelRouteCompatibility(provider, { model, reasoning }).ok,
+  )
+}
+
+/** True when the approval route currently resolves to a usable route. */
+function isApprovalRouteUsable(
+  config: AppConfig,
+  approval: AppConfig['approval'],
+): boolean {
+  const provider = config.providers.find(
+    (candidate) => candidate.id === approval.approverProviderId,
+  )
+  return evaluateModelRouteCompatibility(provider, {
+    model: approval.approverModel,
+    reasoning: approval.reasoning,
+  }).ok
 }
 
 /**
- * The effective approval effort is the approval provider's default with the
- * deliberate 'off' → 'high' safety floor (see model-route-resolver). The
- * approval model must support it; otherwise automatic approval silently
- * degrades to human approval at run time.
+ * Validates that an approval route can actually be resolved: the provider
+ * exists, the model is non-empty and still enabled, and its explicitly saved
+ * approval effort is supported by the model annotation. Used when saving
+ * approval settings, and to stop provider updates from breaking a previously
+ * working approval route.
  */
-function assertApprovalModelReasoningSupported(
+function assertApprovalRouteConfigValid(
   config: AppConfig,
-  providerId: string,
-  model: string,
+  approval: AppConfig['approval'],
 ): void {
   const provider = config.providers.find(
-    (candidate) => candidate.id === providerId,
+    (candidate) => candidate.id === approval.approverProviderId,
   )
-  if (!provider) return
-  const effectiveEffort =
-    provider.reasoning === 'off' ? 'high' : provider.reasoning
-  const supported = provider.modelOverrides[model]?.reasoningEfforts
-  if (supported?.length && !supported.includes(effectiveEffort)) {
+  const compatibility = evaluateModelRouteCompatibility(provider, {
+    model: approval.approverModel,
+    reasoning: approval.reasoning,
+  })
+  if (compatibility.ok) return
+  if (compatibility.reason === 'provider-missing') {
     throw new Error(
-      `Approval model ${model} does not support the effective approval reasoning effort: ${effectiveEffort}`,
+      `Approval provider is not configured: ${approval.approverProviderId}`,
     )
   }
+  if (
+    compatibility.reason === 'model-empty' ||
+    compatibility.reason === 'model-disabled'
+  ) {
+    throw new Error(
+      `Approval model ${approval.approverModel || '(empty)'} is not enabled for provider ${approval.approverProviderId}`,
+    )
+  }
+  throw new Error(
+    `Approval model ${approval.approverModel} does not support approval reasoning effort: ${approval.reasoning}`,
+  )
 }
 
 function applyProviderUpdate(
@@ -113,6 +155,10 @@ function applyProviderUpdate(
   const providerId = request.providerId ?? next.activeProviderId
   let provider = getAppProvider(next, providerId)
   const isNewProvider = !provider
+  // Snapshot approval usability before mutating: updates may not break a
+  // working approval route, but an already unconfigured or broken approval
+  // must not block unrelated provider edits.
+  const approvalWasUsable = isApprovalRouteUsable(next, next.approval)
 
   if (!provider) {
     provider = {
@@ -196,14 +242,9 @@ function applyProviderUpdate(
     provider.modelCatalog = []
     delete provider.modelCatalogFetchedAt
   }
-  assertMainModelEnabled(provider)
-  assertMainModelReasoningSupported(provider)
-  if (next.approval.approverProviderId === provider.id) {
-    assertApprovalModelReasoningSupported(
-      next,
-      provider.id,
-      next.approval.approverModel,
-    )
+  assertMainRouteConfigValid(provider)
+  if (approvalWasUsable && next.approval.approverProviderId === provider.id) {
+    assertApprovalRouteConfigValid(next, next.approval)
   }
   if (!isNewProvider && providerRouteShape(provider) !== previousRouteShape) {
     provider.revision += 1
@@ -251,10 +292,13 @@ function disableModelPoolEntries(
   return changed
 }
 
-function disableDanglingModelPoolEntries(config: AppConfig): boolean {
+function disableIncompatibleModelPoolEntries(config: AppConfig): boolean {
   return disableModelPoolEntries(config, (entry) => {
     const provider = getAppProvider(config, entry.providerId)
-    return !provider || !provider.enabledModelIds.includes(entry.model)
+    return !evaluateModelRouteCompatibility(provider, {
+      model: entry.model,
+      reasoning: entry.reasoning,
+    }).ok
   })
 }
 
@@ -317,10 +361,25 @@ function assertEnabledModelPoolEntriesValid(
     if (!provider) {
       throw new Error(`Provider is not configured: ${entry.providerId}`)
     }
-    if (!provider.enabledModelIds.includes(entry.model)) {
-      throw new Error(
-        `Model is not enabled for ${provider.label}: ${entry.model}`,
-      )
+    const compatibility = evaluateModelRouteCompatibility(provider, {
+      model: entry.model,
+      reasoning: entry.reasoning,
+    })
+    if (!compatibility.ok) {
+      if (
+        compatibility.reason === 'model-empty' ||
+        compatibility.reason === 'model-disabled'
+      ) {
+        throw new Error(
+          `Model is not enabled for ${provider.label}: ${entry.model}`,
+        )
+      }
+      if (compatibility.reason === 'reasoning-unsupported') {
+        throw new Error(
+          `Model ${entry.model} does not support reasoning effort '${entry.reasoning}' (supported: ${compatibility.supportedReasoningEfforts.join(', ')})`,
+        )
+      }
+      throw new Error(`Invalid model pool route: ${compatibility.reason}`)
     }
 
     const endpoint = resolveProviderEndpoint(
@@ -603,11 +662,11 @@ export class ConfigStore {
     switch (request.kind) {
       case 'provider':
         applyProviderUpdate(next, request, { activate: true })
-        disableDanglingModelPoolEntries(next)
+        disableIncompatibleModelPoolEntries(next)
         break
       case 'provider-settings': {
         applyProviderUpdate(next, request, { activate: false })
-        disableDanglingModelPoolEntries(next)
+        disableIncompatibleModelPoolEntries(next)
         next.limits = structuredClone(request.limits)
 
         if (request.apiKey === undefined) {
@@ -690,9 +749,18 @@ export class ConfigStore {
         }
 
         if (next.approval.approverProviderId === request.providerId) {
+          const fallbackApprovalModel = next.approval.approverModel
+            ? firstApprovalCompatibleModel(fallback, next.approval.reasoning)
+            : undefined
+          if (next.approval.approverModel && !fallbackApprovalModel) {
+            throw new Error(
+              `No approval-compatible model is enabled for fallback provider ${fallback.id}`,
+            )
+          }
           next.approval = {
             approverProviderId: fallback.id,
-            approverModel: fallback.model,
+            approverModel: fallbackApprovalModel ?? '',
+            reasoning: next.approval.reasoning,
           }
         }
 
@@ -741,14 +809,15 @@ export class ConfigStore {
         return this.getPublicConfig()
       }
       case 'approval':
-        assertApprovalModelReasoningSupported(
-          next,
-          request.approverProviderId,
-          request.approverModel,
-        )
+        assertApprovalRouteConfigValid(next, {
+          approverProviderId: request.approverProviderId,
+          approverModel: request.approverModel,
+          reasoning: request.reasoning,
+        })
         next.approval = {
           approverProviderId: request.approverProviderId,
           approverModel: request.approverModel,
+          reasoning: request.reasoning,
         }
         break
       case 'subagents':
@@ -864,7 +933,7 @@ export class ConfigStore {
       const content = await readFile(this.#filePath, 'utf8')
       const parsed = JSON.parse(content) as unknown
       const migrated = migrateConfig(parsed)
-      disableDanglingModelPoolEntries(migrated)
+      disableIncompatibleModelPoolEntries(migrated)
       if (JSON.stringify(parsed) !== JSON.stringify(migrated)) {
         await writeJsonAtomic(this.#filePath, migrated)
       }

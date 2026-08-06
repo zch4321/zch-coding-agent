@@ -116,6 +116,7 @@ export const DEFAULT_APP_CONFIG = {
   approval: {
     approverProviderId: DEFAULT_PROVIDER_ID,
     approverModel: '',
+    reasoning: 'high',
   },
   subagents: {
     enabled: false,

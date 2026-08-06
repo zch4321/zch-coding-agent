@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox'
+import { ReasoningEffortSchema } from './reasoning'
 
 export const ModelPoolCapabilitySchema = Type.Union([
   Type.Literal('light'),
@@ -7,19 +8,13 @@ export const ModelPoolCapabilitySchema = Type.Union([
 ])
 export type ModelPoolCapability = Static<typeof ModelPoolCapabilitySchema>
 
-const ModelPoolReasoningSchema = Type.Union([
-  Type.Literal('off'),
-  Type.Literal('high'),
-  Type.Literal('max'),
-])
-
 export const ModelPoolEntrySchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 64 }),
     enabled: Type.Boolean(),
     providerId: Type.String({ minLength: 1, maxLength: 128 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
-    reasoning: ModelPoolReasoningSchema,
+    reasoning: ReasoningEffortSchema,
     capability: ModelPoolCapabilitySchema,
     maxParallel: Type.Integer({ minimum: 1, maximum: 32 }),
   },

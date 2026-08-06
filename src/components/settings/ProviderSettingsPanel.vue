@@ -26,6 +26,7 @@ import {
 } from '../../../shared/config'
 import { resolveSupportedReasoningEfforts } from '../../../shared/model-settings'
 import { useAgentStore } from '../../stores/agent'
+import { providerDraftConflicts } from '../../stores/provider-form'
 
 /** Maps each reasoning effort to its locale label key. */
 const REASONING_LABEL_KEYS: Record<ReasoningEffort, string> = {
@@ -98,18 +99,23 @@ const reasoningEffortOptions = computed(() =>
   })),
 )
 /**
- * True when the draft annotation excludes the provider default effort.
- * While conflicting, autosave pauses and the field shows an error; the user
- * must pick a supported effort manually (no automatic adjustment).
+ * Draft conflicts that pause autosave: the main model annotation excluding
+ * the draft default effort, or the saved approval route being incompatible
+ * with the draft. Neither is auto-adjusted; the user resolves them manually.
  */
-const mainReasoningConflict = computed(() => {
-  const supported = agent.modelProfiles.find(
-    (model) => model.id === agent.providerForm.model,
-  )?.reasoningEfforts
-  return Boolean(
-    supported?.length && !supported.includes(agent.providerForm.reasoning),
-  )
-})
+const draftConflicts = computed(() =>
+  providerDraftConflicts({
+    providerId: agent.providerForm.providerId,
+    reasoning: agent.providerForm.reasoning,
+    mainModelId: agent.providerForm.model,
+    enabledModelIds: agent.providerForm.enabledModelIds,
+    profiles: agent.modelProfiles,
+    approval: agent.approvalSavedForm,
+  }),
+)
+const autosaveConflict = computed(
+  () => draftConflicts.value.main || draftConflicts.value.approval,
+)
 const capabilityOptions = computed(() => [
   { label: t('settings.capabilityLight'), value: 'light' },
   { label: t('settings.capabilityStandard'), value: 'standard' },
@@ -180,6 +186,7 @@ watch(
   () =>
     JSON.stringify({
       form: agent.providerForm,
+      approval: agent.approvalSavedForm,
       models: agent.modelProfiles.map((model) => ({
         id: model.id,
         contextWindowTokens: model.contextWindowTokens,
@@ -192,7 +199,7 @@ watch(
   () => {
     if (autosaveTimer) clearTimeout(autosaveTimer)
     if (!agent.providerDirty) return
-    if (mainReasoningConflict.value) return
+    if (autosaveConflict.value) return
 
     agent.providerSaveStatus = ''
     autosaveTimer = setTimeout(() => {
@@ -200,12 +207,13 @@ watch(
       void agent.saveProvider()
     }, 600)
   },
+  { immediate: true },
 )
 
 onBeforeUnmount(() => {
   if (autosaveTimer) clearTimeout(autosaveTimer)
   autosaveTimer = undefined
-  if (agent.providerDirty && !mainReasoningConflict.value) {
+  if (agent.providerDirty && !autosaveConflict.value) {
     void agent.saveProvider()
   }
 })
@@ -528,9 +536,9 @@ function handleDropdownSelect(key: string | number, providerId: string) {
         <NSelect
           v-model:value="agent.providerForm.reasoning"
           :options="reasoningOptions"
-          :status="mainReasoningConflict ? 'error' : undefined"
+          :status="draftConflicts.main ? 'error' : undefined"
         />
-        <small v-if="mainReasoningConflict" class="settings-field-error">
+        <small v-if="draftConflicts.main" class="settings-field-error">
           {{ t('settings.mainReasoningConflictHint') }}
         </small>
         <small v-else>
@@ -543,6 +551,23 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <h4>{{ t('settings.modelSettings') }}</h4>
           <p>{{ t('settings.modelSettingsHint') }}</p>
         </div>
+        <small
+          v-if="draftConflicts.approvalReason === 'model-disabled'"
+          class="settings-field-error"
+        >
+          {{
+            t('settings.approvalDraftModelDisabledHint', {
+              model: agent.approvalSavedForm.model,
+            })
+          }}
+        </small>
+        <small v-else-if="draftConflicts.approval" class="settings-field-error">
+          {{
+            t('settings.approvalDraftConflictHint', {
+              model: agent.approvalSavedForm.model,
+            })
+          }}
+        </small>
         <NTransfer
           :value="selectedModelIds"
           :options="modelTransferOptions"

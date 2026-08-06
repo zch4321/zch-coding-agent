@@ -453,15 +453,17 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.3 Auto approval
 
 - Auto approval 是全局路由配置，不属于任一 Provider 卡片草稿，使用独立保存动作。
+- Renderer 的审批表单、已保存快照和保存状态由独立 Approval store 管理；Agent facade 只组合 Provider 候选投影，不把审批状态重新塞回 Provider settings store。
 - Auto approval 显示在 Permissions 页面，不占用独立设置导航项。
-- 配置引用一个已存在的 Provider 实例以复用 `providerType/baseURL/credential`，并独立选择审批模型。
+- 配置引用一个已存在的 Provider 实例以复用 `providerType/baseURL/credential`，并独立选择审批模型与思考等级；运行时原样使用审批等级，不继承 Provider 默认等级，也不做隐式升降档。
 - 审批模型候选只来自所选 Provider 的 `enabledModelIds`，不得错误复用当前正在编辑的 Provider 模型列表。
-- Provider 保存不能修改 Auto approval；删除正被审批路由引用的 Provider 时回退到明确的可用 Provider。
+- 模型标注不支持当前审批等级时保留用户选择、显示字段错误并禁止保存，由用户手动改选等级或模型。
+- Provider 保存不能修改 Auto approval；草稿兼容性检查读取已保存而非尚未提交的审批表单。删除正被审批路由引用的 Provider 时，按已保存审批等级选择兼容 fallback 模型；没有兼容模型则拒绝删除。
 
 ### 10.4 Permissions
 
 - 默认权限模式。
-- 全局 Auto approval Provider 与模型。
+- 全局 Auto approval Provider、模型与思考等级。
 - Sensitive Data：off/warn/confirm。
 - Path globs。
 - Content patterns。

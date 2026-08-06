@@ -328,6 +328,14 @@ test.describe.serial('Electron settings workflows', () => {
       .locator('.n-select')
     await approvalModel.click()
     await page.getByText(providerModel, { exact: true }).click()
+    const approvalReasoning = approval
+      .locator('.settings-field', { hasText: '自动审批思考深度' })
+      .locator('.n-select')
+    await approvalReasoning.click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('最高', { exact: true })
+      .click()
     await approval.getByRole('button', { name: '保存自动审批' }).click()
     await expect(approval.locator('.settings-save-status')).toHaveText('已保存')
 
@@ -423,6 +431,7 @@ test.describe.serial('Electron settings workflows', () => {
               approval: {
                 approverProviderId: string
                 approverModel: string
+                reasoning: string
               }
             }
           }
@@ -438,6 +447,7 @@ test.describe.serial('Electron settings workflows', () => {
     expect(configSnapshot.approval).toEqual({
       approverProviderId: 'deepseek',
       approverModel: providerModel,
+      reasoning: 'max',
     })
   })
 
@@ -548,6 +558,130 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(effortsField).toContainText('低')
     await expect(effortsField).toContainText('中')
     await expect(capabilityField).toContainText('强力')
+
+    // Make the annotated provider active and exercise the composer reasoning
+    // validity states through the real facade.
+    await provider.getByRole('button', { name: '设为默认' }).click()
+    await page.locator('.settings-back-button').click()
+    // Composer reasoning options are labeled "思考深度 · X", so match loosely.
+    const clickComposerOption = (text: string) =>
+      page
+        .locator('.n-select-menu:visible .n-base-select-option', {
+          hasText: text,
+        })
+        .click()
+    const modelSelect = page.getByTestId('composer-model-select')
+    const reasoningSelect = page.getByTestId('composer-reasoning-select')
+    const reasoningSelectBox = reasoningSelect.locator('.n-base-selection')
+    await expect(reasoningSelectBox).not.toHaveClass(/error-status/u)
+
+    // Switch to the unannotated model and pick 'max' (allowed there).
+    await modelSelect.click()
+    await clickComposerOption('second-model')
+    await reasoningSelect.click()
+    await clickComposerOption('最高')
+
+    // Switching back to the annotated model keeps 'max', which is unsupported:
+    // the select shows an error and send stays blocked until the user fixes it.
+    await modelSelect.click()
+    await clickComposerOption('annotated-model')
+    await expect(reasoningSelectBox).toHaveClass(/error-status/u)
+
+    // Manually picking a supported effort clears the error state.
+    await reasoningSelect.click()
+    await clickComposerOption('低')
+    await expect(reasoningSelectBox).not.toHaveClass(/error-status/u)
+  })
+
+  test('pauses provider autosave when the draft breaks the saved approval route', async () => {
+    // The saved approval route uses the annotated provider's second model.
+    const seeded = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        setConfig(payload: unknown): Promise<{ ok: boolean }>
+      }
+      const result = await api.setConfig({
+        version: 1,
+        kind: 'approval',
+        approverProviderId: 'e2e-annotated',
+        approverModel: 'second-model',
+        reasoning: 'low',
+      })
+      return result.ok
+    })
+    expect(seeded).toBe(true)
+
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.locator('.sidebar-settings-button').click()
+    const navigation = page.getByRole('navigation', { name: '设置分类' })
+    // Leave a different approval model in the form without saving. Provider
+    // conflict checks must still use the persisted second-model route.
+    await navigation.getByRole('menuitem', { name: '权限' }).click()
+    const approval = page.locator('.settings-section')
+    await approval
+      .locator('.settings-field', { hasText: '自动审批模型' })
+      .locator('.n-select')
+      .click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option', {
+        hasText: 'annotated-model',
+      })
+      .click()
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    const provider = page.locator('.settings-section')
+    await provider
+      .locator('.provider-card', { hasText: 'E2E Annotated' })
+      .click()
+
+    // Annotating the approval model so it excludes the saved approval effort
+    // would break that route: autosave pauses with a hint instead of failing
+    // against the backend.
+    const secondEffortsField = provider.locator(
+      '.provider-model-value[aria-label*="second-model"][aria-label*="思考档位"]',
+    )
+    await secondEffortsField.locator('.n-select').click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('中', { exact: true })
+      .click()
+    await provider.locator('.settings-heading').first().click()
+    await expect(
+      provider.getByText('不支持其已配置的审批档位', { exact: false }),
+    ).toBeVisible()
+    await expect(provider.locator('.settings-save-status')).not.toHaveText(
+      '已保存',
+    )
+
+    // Widening the annotation to include the saved effort resumes autosave.
+    await secondEffortsField.locator('.n-select').click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('低', { exact: true })
+      .click()
+    await provider.locator('.settings-heading').first().click()
+    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+
+    // Disabling the persisted approval model must also pause autosave before
+    // the backend rejects the Provider update.
+    const modelTransfer = provider.getByTestId('provider-model-transfer')
+    await modelTransfer
+      .locator('.n-transfer-list-item--target', { hasText: 'second-model' })
+      .getByRole('button', { name: 'close' })
+      .click()
+    await expect(
+      provider.getByText('已不在当前 Provider 草稿的启用模型中', {
+        exact: false,
+      }),
+    ).toBeVisible()
+    await expect(provider.locator('.settings-save-status')).not.toHaveText(
+      '已保存',
+    )
+
+    // Re-enabling the model clears the conflict and resumes autosave.
+    await modelTransfer
+      .locator('.n-transfer-list-item--source', { hasText: 'second-model' })
+      .click()
+    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
   })
 
   test('exposes skill management and bounded trace diagnostics in settings', async () => {

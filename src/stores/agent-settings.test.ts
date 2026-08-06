@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentApi } from '../../shared/agent-api'
 import type { ProviderPublicConfig } from '../../shared/config'
+import { useApprovalSettingsStore } from './approval-settings'
 import { useAgentSettingsStore } from './agent-settings'
 import { providerFormSignature } from './provider-form'
 
@@ -33,6 +34,7 @@ describe('agent settings model pool', () => {
 
   it('uses enabled models for selectors while retaining the full transfer catalog', () => {
     const settings = useAgentSettingsStore()
+    const approval = useApprovalSettingsStore()
     const configuredProvider = provider()
     settings.providers = [configuredProvider]
     settings.activeProviderId = configuredProvider.id
@@ -41,7 +43,7 @@ describe('agent settings model pool', () => {
     settings.providerForm.enabledModelIds = [
       ...configuredProvider.enabledModelIds,
     ]
-    settings.approvalForm.providerId = configuredProvider.id
+    approval.approvalForm.providerId = configuredProvider.id
     settings.modelProfiles = [
       {
         id: 'enabled-model',
@@ -73,8 +75,9 @@ describe('agent settings model pool', () => {
     expect(settings.providerCardSummaries[0]?.models).toEqual(['enabled-model'])
   })
 
-  it('filters approval models by the effective approval reasoning effort', () => {
+  it('keeps every enabled approval model visible regardless of annotation', () => {
     const settings = useAgentSettingsStore()
+    const approval = useApprovalSettingsStore()
     const configuredProvider = {
       ...provider(),
       reasoning: 'off' as const,
@@ -89,12 +92,11 @@ describe('agent settings model pool', () => {
       },
     }
     settings.providers = [configuredProvider]
-    settings.approvalForm.providerId = configuredProvider.id
+    approval.approvalForm.providerId = configuredProvider.id
+    approval.approvalForm.reasoning = 'high'
 
-    // The provider default 'off' escalates to 'high' for approval routing, so
-    // annotated models without 'high' support are not offered.
     expect(settings.approvalModelOptions.map((option) => option.value)).toEqual(
-      ['enabled-model'],
+      ['enabled-model', 'low-only-model', 'off-only-model'],
     )
   })
 

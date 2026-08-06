@@ -99,7 +99,7 @@ describe('SessionManager approvals', () => {
     expect(toolCall?.diffHash).toEqual(expect.any(String))
   })
 
-  it('uses JSON mode and raises disabled reasoning for Auto approval requests', async () => {
+  it('uses JSON mode without changing explicit approval reasoning', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'agent-session-auto-approval-json-'),
     )
@@ -116,7 +116,7 @@ describe('SessionManager approvals', () => {
       providerType: 'deepseek.chat-completions',
       baseURL: 'https://api.example/v1',
       model: 'main-model',
-      enabledModelIds: ['main-model', 'approval-model'],
+      enabledModelIds: ['main-model', 'approval-model', 'deepseek-v4-pro'],
       reasoning: 'off',
       limits: current.limits,
     })
@@ -125,6 +125,7 @@ describe('SessionManager approvals', () => {
       kind: 'approval',
       approverProviderId: 'deepseek',
       approverModel: 'approval-model',
+      reasoning: 'off',
     })
     const provider = new ScriptedCommandProvider()
     const approvalBodies: JsonValue[] = []
@@ -195,10 +196,10 @@ describe('SessionManager approvals', () => {
       expect.objectContaining({
         model: 'approval-model',
         response_format: { type: 'json_object' },
-        thinking: { type: 'enabled' },
-        reasoning_effort: 'high',
+        thinking: { type: 'disabled' },
       }),
     ])
+    expect(approvalBodies[0]).not.toHaveProperty('reasoning_effort')
     await manager.closeSession(sessionId)
   })
 

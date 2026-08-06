@@ -12,8 +12,10 @@ import type {
   ContextAttachmentKind,
 } from '../../shared/context'
 import type { MessageId, ProjectId, RunId, SessionId } from '../../shared/ids'
-import type { ModelSelection } from '../../shared/model-route'
-import { resolveSupportedReasoningEfforts } from '../../shared/model-settings'
+import {
+  evaluateModelRouteCompatibility,
+  type ModelSelection,
+} from '../../shared/model-route'
 import type { PlanStatus } from '../../shared/orchestration'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { DurableRunStartResult } from '../../shared/domain-state-api'
@@ -41,6 +43,7 @@ import {
 } from './agent-runtime-helpers'
 import { projectConversationTurns } from './conversation-timeline'
 import { useAgentSettingsStore } from './agent-settings'
+import { useApprovalSettingsStore } from './approval-settings'
 import { useAgentShellStore } from './agent-shell'
 import { useNotificationStore } from './notifications'
 import { useAgentExecutionStore } from './agent-executions'
@@ -207,10 +210,9 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const provider = settings.providers.find(
         (candidate) => candidate.id === selection.providerId,
       )
-      if (!provider) return true
-      const override = provider.modelOverrides[selection.model]
-      return resolveSupportedReasoningEfforts(override).includes(
-        selection.reasoning,
+      const compatibility = evaluateModelRouteCompatibility(provider, selection)
+      return (
+        compatibility.ok || compatibility.reason !== 'reasoning-unsupported'
       )
     },
     composerModelOptions(): Array<{ label: string; value: string }> {
@@ -255,6 +257,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     async initialize() {
       const shell = useAgentShellStore()
       const settings = useAgentSettingsStore()
+      const approval = useApprovalSettingsStore()
       const replica = useAgentReplicaStore()
       const executions = useAgentExecutionStore()
       shell.bridgeAvailable = Boolean(window.agentApi)
@@ -339,8 +342,10 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         version: IPC_VERSION,
         section: 'all',
       })
-      if (config.ok) settings.applyConfig(config.value.config)
-      else showOperationError(config.error)
+      if (config.ok) {
+        settings.applyConfig(config.value.config)
+        approval.applyConfig(config.value.config)
+      } else showOperationError(config.error)
       await replica.bootstrap(
         config.ok ? config.value.config.workspace.lastOpened : undefined,
       )
@@ -357,6 +362,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     applyConfig(config: PublicConfig, sections: ConfigSection[] = ['all']) {
       useAgentSettingsStore().applyConfig(config, sections)
+      useApprovalSettingsStore().applyConfig(config, sections)
     },
     clearDiagnostics() {
       const overlay = this.activeOverlay

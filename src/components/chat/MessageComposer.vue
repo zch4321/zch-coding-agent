@@ -602,6 +602,7 @@ watch(inputDisabled, (disabled) => {
             routeSelectionDisabled || agent.composerModelOptions.length === 0
           "
           filterable
+          data-testid="composer-model-select"
           @update:value="agent.setProviderModel"
         />
         <NSelect

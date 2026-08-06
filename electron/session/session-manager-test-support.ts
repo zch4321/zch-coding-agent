@@ -125,6 +125,7 @@ export async function createConfig(
     kind: 'approval',
     approverProviderId: provider.id,
     approverModel: 'deepseek-v4-pro',
+    reasoning: 'high',
   })
   await store.update({
     version: 1,

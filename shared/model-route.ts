@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox'
-import { ReasoningEffortSchema } from './config'
 import { RevisionSchema } from './durable'
+import { resolveSupportedReasoningEfforts } from './model-settings'
+import { ReasoningEffortSchema, type ReasoningEffort } from './reasoning'
 
 export const MODEL_ROUTE_SCHEMA_VERSION = 2 as const
 
@@ -20,6 +21,50 @@ export const ModelSelectionSchema = Type.Object(
   { additionalProperties: false },
 )
 export type ModelSelection = Static<typeof ModelSelectionSchema>
+
+export interface ModelRouteCompatibilityProvider {
+  enabledModelIds: readonly string[]
+  modelOverrides: Readonly<
+    Record<string, { reasoningEfforts?: readonly ReasoningEffort[] }>
+  >
+}
+
+export type ModelRouteCompatibility =
+  | { ok: true }
+  | { ok: false; reason: 'provider-missing' }
+  | { ok: false; reason: 'model-empty' }
+  | { ok: false; reason: 'model-disabled' }
+  | {
+      ok: false
+      reason: 'reasoning-unsupported'
+      supportedReasoningEfforts: ReasoningEffort[]
+    }
+
+/**
+ * Evaluates process-neutral configuration compatibility for one model route.
+ * Credentials, endpoints and live Provider availability remain runtime checks.
+ */
+export function evaluateModelRouteCompatibility(
+  provider: ModelRouteCompatibilityProvider | undefined,
+  selection: Pick<ModelSelection, 'model' | 'reasoning'>,
+): ModelRouteCompatibility {
+  if (!provider) return { ok: false, reason: 'provider-missing' }
+  if (!selection.model) return { ok: false, reason: 'model-empty' }
+  if (!provider.enabledModelIds.includes(selection.model)) {
+    return { ok: false, reason: 'model-disabled' }
+  }
+  const supportedReasoningEfforts = resolveSupportedReasoningEfforts(
+    provider.modelOverrides[selection.model],
+  )
+  if (!supportedReasoningEfforts.includes(selection.reasoning)) {
+    return {
+      ok: false,
+      reason: 'reasoning-unsupported',
+      supportedReasoningEfforts,
+    }
+  }
+  return { ok: true }
+}
 
 export const ModelRouteSnapshotSchema = Type.Object(
   {

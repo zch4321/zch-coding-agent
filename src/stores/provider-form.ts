@@ -4,6 +4,7 @@ import type {
   ReasoningEffort,
 } from '../../shared/config'
 import { normalizeReasoningEfforts } from '../../shared/model-settings'
+import { evaluateModelRouteCompatibility } from '../../shared/model-route'
 import type { UiModelProfile } from './agent-types'
 
 export const DEFAULT_PROVIDER_FORM = {
@@ -63,6 +64,74 @@ export function providerModelOverrides(
   )
 }
 
+/**
+ * Computes provider-draft conflicts that must pause autosave. `main` fires
+ * when the main model annotation excludes the draft default effort;
+ * `approval` fires when this provider is the saved approval provider and the
+ * approval model is disabled or its annotation excludes the explicitly saved
+ * approval effort. Neither is auto-adjusted; the user resolves them manually.
+ */
+export function providerDraftConflicts(input: {
+  providerId: string
+  reasoning: ReasoningEffort
+  mainModelId: string
+  enabledModelIds: readonly string[]
+  profiles: ReadonlyArray<Pick<UiModelProfile, 'id' | 'reasoningEfforts'>>
+  approval: {
+    providerId: string
+    model: string
+    reasoning: ReasoningEffort
+  }
+}): {
+  main: boolean
+  approval: boolean
+  approvalReason: 'model-disabled' | 'reasoning-unsupported' | null
+} {
+  const provider = {
+    enabledModelIds: input.enabledModelIds,
+    modelOverrides: Object.fromEntries(
+      input.profiles.map((model) => [
+        model.id,
+        { reasoningEfforts: model.reasoningEfforts },
+      ]),
+    ),
+  }
+  const mainCompatibility = evaluateModelRouteCompatibility(provider, {
+    model: input.mainModelId,
+    reasoning: input.reasoning,
+  })
+  const main =
+    !mainCompatibility.ok &&
+    mainCompatibility.reason === 'reasoning-unsupported'
+
+  if (input.approval.providerId !== input.providerId || !input.approval.model) {
+    return { main, approval: false, approvalReason: null }
+  }
+  const approvalCompatibility = evaluateModelRouteCompatibility(provider, {
+    model: input.approval.model,
+    reasoning: input.approval.reasoning,
+  })
+  if (
+    !approvalCompatibility.ok &&
+    (approvalCompatibility.reason === 'model-empty' ||
+      approvalCompatibility.reason === 'model-disabled')
+  ) {
+    return {
+      main,
+      approval: true,
+      approvalReason: 'model-disabled',
+    }
+  }
+  const approval =
+    !approvalCompatibility.ok &&
+    approvalCompatibility.reason === 'reasoning-unsupported'
+  return {
+    main,
+    approval,
+    approvalReason: approval ? 'reasoning-unsupported' : null,
+  }
+}
+
 /** Serializes the provider form fields that identify a saved provider configuration. */
 export function providerFormSignature(
   form: ProviderForm,
@@ -93,7 +162,7 @@ export function providerFormSignature(
         compactThresholdTokens: model.compactThresholdTokens,
         maxOutputTokens: model.maxOutputTokens,
         reasoningEfforts: model.reasoningEfforts?.length
-          ? [...model.reasoningEfforts]
+          ? normalizeReasoningEfforts(model.reasoningEfforts)
           : null,
         capability: model.capability ?? null,
       }))

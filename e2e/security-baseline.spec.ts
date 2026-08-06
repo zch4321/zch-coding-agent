@@ -57,7 +57,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 16,
+          schemaVersion: 17,
           modelPool: { entries: [] },
           subagents: {
             enabled: false,

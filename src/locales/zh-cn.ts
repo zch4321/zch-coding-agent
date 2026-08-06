@@ -332,8 +332,13 @@ const zhCN = {
     approvalCredentialMissing:
       '所选 Provider 尚未配置凭据；运行时会回退到人工审批。',
     approvalModelHint: '这里只显示在所选 Provider 中启用的模型。',
+    approvalReasoning: '自动审批思考深度',
+    approvalReasoningHint:
+      '自动审批会原样使用该档位；它独立于 Provider 默认档位，系统不会隐式调整。',
     approvalReasoningConflictHint:
-      '该模型不支持实际生效的审批思考档位；请选择兼容的模型以恢复自动审批。',
+      '该模型不支持所选审批思考档位；请选择受支持的档位或其他模型。',
+    approvalModelMissingHint:
+      '审批模型不存在或已停用；请选择已启用的模型以恢复自动审批。',
     saveApproval: '保存自动审批',
     addProvider: '新增 Provider',
     providerActions: '操作',
@@ -390,6 +395,10 @@ const zhCN = {
     reasoningMax: '最高',
     mainReasoningConflictHint:
       '主模型的思考档位标注已不包含当前默认档位；自动保存已暂停，请手动改选受支持的档位。',
+    approvalDraftConflictHint:
+      '已保存的自动审批模型 {model} 不支持其已配置的审批档位；自动保存已暂停，请先调整标注或审批路由。',
+    approvalDraftModelDisabledHint:
+      '已保存的自动审批模型 {model} 已不在当前 Provider 草稿的启用模型中；自动保存已暂停，请重新启用或改选审批模型。',
     reasoningHint:
       '所选档位会原样发送给模型；在模型行中标注思考档位可收窄可选范围，关闭会禁用 thinking。',
     reasoningHintGeneric: '通用 Chat Completions 不发送厂商专有推理参数。',

@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox'
-import { ReasoningEffortSchema } from './config'
 import { ModelPoolCapabilitySchema } from './model-pool'
 import { ModelRouteSnapshotSchema } from './model-route'
+import { ReasoningEffortSchema } from './reasoning'
 
 export const MODEL_POOL_PLAN_SCHEMA_VERSION = 1 as const
 

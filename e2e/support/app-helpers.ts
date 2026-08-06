@@ -109,6 +109,7 @@ export async function configureApp(input: {
         kind: 'approval',
         approverProviderId: 'deepseek',
         approverModel: 'e2e-functional-model',
+        reasoning: 'off',
       })
       if (!approval.ok) {
         return {

@@ -19,10 +19,10 @@ import { DEFAULT_ASSISTANT_PREFERENCES } from '../../shared/system-prompts'
 import {
   DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
   resolveModelTokenSettings,
-  resolveSupportedReasoningEfforts,
 } from '../../shared/model-settings'
 import { nowNotice, toUiRememberedRules } from './config-mapping'
 import type { UiModelProfile, UiRememberedRule } from './agent-types'
+import { useApprovalSettingsStore } from './approval-settings'
 import {
   DEFAULT_PROVIDER_FORM,
   providerFormSignature,
@@ -110,13 +110,6 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-function approvalSignature(form: {
-  providerId: string
-  model: string
-}): string {
-  return `${form.providerId}|${form.model}`
-}
-
 function limitsSignature(limits: PublicConfig['limits'] | undefined): string {
   return limits ? JSON.stringify(limits) : ''
 }
@@ -156,13 +149,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     providerSavedSignature: providerFormSignature(DEFAULT_PROVIDER_FORM),
     providerSaving: false,
     providerSaveStatus: '',
-    approvalForm: {
-      providerId: 'deepseek',
-      model: '',
-    },
-    approvalSavedSignature: 'deepseek|',
-    approvalSaving: false,
-    approvalSaveStatus: '',
     permissionForm: {
       sensitiveMode: 'confirm' as 'off' | 'warn' | 'confirm',
       pathGlobs: '',
@@ -258,22 +244,12 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           !provider.model || !provider.enabledModelIds.includes(provider.model),
       })),
     approvalModelOptions: (state) => {
+      const approval = useApprovalSettingsStore()
       const provider = state.providers.find(
-        (candidate) => candidate.id === state.approvalForm.providerId,
+        (candidate) => candidate.id === approval.approvalForm.providerId,
       )
       if (!provider) return []
-      // The approval route uses the provider default effort with the
-      // deliberate 'off' → 'high' safety floor; only offer models whose
-      // annotation supports that effective effort.
-      const effectiveEffort =
-        provider.reasoning === 'off' ? 'high' : provider.reasoning
-      return provider.enabledModelIds
-        .filter((id) =>
-          resolveSupportedReasoningEfforts(
-            provider.modelOverrides[id],
-          ).includes(effectiveEffort),
-        )
-        .map((id) => ({ label: id, value: id }))
+      return provider.enabledModelIds.map((id) => ({ label: id, value: id }))
     },
     providerCardSummaries: (state) =>
       state.providers.map((provider) => ({
@@ -307,8 +283,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     subagentsDirty: (state) =>
       subagentsSignature(state.subagentsConfig) !==
       state.subagentsSavedSignature,
-    approvalDirty: (state) =>
-      approvalSignature(state.approvalForm) !== state.approvalSavedSignature,
     webSearchDirty: (state) =>
       Boolean(
         state.webSearchForm.apiKey.trim() ||
@@ -376,12 +350,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         ) {
           this.selectedProviderId = config.activeProviderId
         }
-      }
-
-      if (includes('approval')) {
-        this.approvalForm.providerId = config.approval.approverProviderId
-        this.approvalForm.model = config.approval.approverModel
-        this.approvalSavedSignature = approvalSignature(this.approvalForm)
       }
 
       if (includes('limits')) {
@@ -794,7 +762,8 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       if (this.selectedProviderId === providerId) {
         this.selectedProviderId = result.value.config.activeProviderId
       }
-      this.applyConfig(result.value.config, ['providers', 'approval'])
+      this.applyConfig(result.value.config, ['providers'])
+      useApprovalSettingsStore().applyConfig(result.value.config, ['approval'])
       return true
     },
     async saveProvider(): Promise<boolean> {
@@ -907,38 +876,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       })
       providerSaveOperations.set(this, trackedOperation)
       return trackedOperation
-    },
-    setApprovalProvider(providerId: string) {
-      const provider = this.providers.find(
-        (candidate) => candidate.id === providerId,
-      )
-      if (!provider) return
-      this.approvalForm.providerId = provider.id
-      this.approvalForm.model = provider.enabledModelIds[0] ?? ''
-      this.approvalSaveStatus = ''
-    },
-    async saveApproval() {
-      const bridge = window.agentApi
-      if (!bridge || this.approvalSaving) return false
-      this.approvalSaving = true
-      this.approvalSaveStatus = ''
-      try {
-        const result = await bridge.setConfig({
-          version: IPC_VERSION,
-          kind: 'approval',
-          approverProviderId: this.approvalForm.providerId,
-          approverModel: this.approvalForm.model,
-        })
-        if (!result.ok) {
-          this.error = result.error.message
-          return false
-        }
-        this.applyConfig(result.value.config, ['approval'])
-        this.approvalSaveStatus = 'saved'
-        return true
-      } finally {
-        this.approvalSaving = false
-      }
     },
     async clearCredential() {
       const bridge = window.agentApi

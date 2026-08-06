@@ -6,6 +6,7 @@ import {
   ModelPoolConfigSchema,
   ModelPoolProviderRevisionSchema,
 } from './model-pool'
+import { ReasoningEffortSchema, type ReasoningEffort } from './reasoning'
 
 export {
   ModelPoolCapabilitySchema,
@@ -18,8 +19,13 @@ export {
   type ModelPoolEntry,
   type ModelPoolProviderRevision,
 } from './model-pool'
+export {
+  REASONING_EFFORTS,
+  ReasoningEffortSchema,
+  type ReasoningEffort,
+} from './reasoning'
 
-export const APP_CONFIG_SCHEMA_VERSION = 16 as const
+export const APP_CONFIG_SCHEMA_VERSION = 17 as const
 
 export const AssistantLanguageSchema = Type.Union([
   Type.Literal('zh-CN'),
@@ -35,27 +41,8 @@ export const PermissionModeSchema = Type.Union([
 ])
 export type PermissionMode = Static<typeof PermissionModeSchema>
 
-export const ReasoningEffortSchema = Type.Union([
-  Type.Literal('off'),
-  Type.Literal('low'),
-  Type.Literal('medium'),
-  Type.Literal('high'),
-  Type.Literal('xhigh'),
-  Type.Literal('max'),
-])
-export type ReasoningEffort = Static<typeof ReasoningEffortSchema>
 export const DeepSeekReasoningEffortSchema = ReasoningEffortSchema
 export type DeepSeekReasoningEffort = ReasoningEffort
-
-/** All reasoning efforts in ascending strength order, for UI lists and validation. */
-export const REASONING_EFFORTS: readonly ReasoningEffort[] = [
-  'off',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-]
 
 export const ModelCapabilityLevelSchema = Type.Union([
   Type.Literal('light'),
@@ -204,6 +191,7 @@ export const PublicConfigSchema = Type.Object(
       {
         approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
         approverModel: Type.String({ maxLength: 256 }),
+        reasoning: ReasoningEffortSchema,
       },
       { additionalProperties: false },
     ),
@@ -658,6 +646,7 @@ export const ConfigSetRequestSchema = Type.Union([
       kind: Type.Literal('approval'),
       approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
       approverModel: Type.String({ maxLength: 256 }),
+      reasoning: ReasoningEffortSchema,
     },
     { additionalProperties: false },
   ),

@@ -5,7 +5,10 @@ import type {
   ModelSelection,
   ProviderPurpose,
 } from '../../shared/model-route'
-import { assertModelRouteSnapshotSafe } from '../../shared/model-route'
+import {
+  assertModelRouteSnapshotSafe,
+  evaluateModelRouteCompatibility,
+} from '../../shared/model-route'
 import type { ConfigStore } from '../config/store'
 import { resolveModelProfiles, type ModelProfile } from './model-catalog'
 import { resolveProviderEndpoint } from './provider-factory'
@@ -39,9 +42,21 @@ async function resolveBinding(
   if (!provider) {
     throw new Error(`Provider is not configured: ${selection.providerId}`)
   }
-  if (!selection.model || !provider.enabledModelIds.includes(selection.model)) {
+  const compatibility = evaluateModelRouteCompatibility(provider, selection)
+  if (!compatibility.ok) {
+    if (
+      compatibility.reason === 'model-empty' ||
+      compatibility.reason === 'model-disabled'
+    ) {
+      throw new Error(
+        `Model is not enabled for ${provider.label}: ${selection.model || '(none)'}`,
+      )
+    }
+    if (compatibility.reason === 'provider-missing') {
+      throw new Error(`Provider is not configured: ${selection.providerId}`)
+    }
     throw new Error(
-      `Model is not enabled for ${provider.label}: ${selection.model || '(none)'}`,
+      `Model ${selection.model} does not support reasoning effort '${selection.reasoning}' (supported: ${compatibility.supportedReasoningEfforts.join(', ')})`,
     )
   }
   const endpoint = resolveProviderEndpoint(
@@ -58,16 +73,6 @@ async function resolveBinding(
     endpoint,
     providerConfigRevision: provider.revision,
   })
-  const supportedEfforts =
-    provider.modelOverrides[selection.model]?.reasoningEfforts
-  if (
-    supportedEfforts?.length &&
-    !supportedEfforts.includes(selection.reasoning)
-  ) {
-    throw new Error(
-      `Model ${selection.model} does not support reasoning effort '${selection.reasoning}' (supported: ${supportedEfforts.join(', ')})`,
-    )
-  }
   const modelProfile = resolveModelProfiles(
     config,
     provider.id,
@@ -169,12 +174,7 @@ export async function resolveRunRoutes(
   const approvalSelection: ModelSelection = {
     providerId: approvalProvider.id,
     model: config.approval.approverModel,
-    // Deliberate exception to the no-auto-adjust rule: approval is an internal
-    // safety gate whose effort is never user-selected, so 'off' raises to 'high'.
-    reasoning:
-      approvalProvider.reasoning === 'off'
-        ? 'high'
-        : approvalProvider.reasoning,
+    reasoning: config.approval.reasoning,
   }
   try {
     return {

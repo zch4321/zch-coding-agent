@@ -342,8 +342,13 @@ const enUS = {
       'The selected Provider has no credential; runtime falls back to human approval.',
     approvalModelHint:
       'Only models enabled for the selected Provider are shown here.',
+    approvalReasoning: 'Auto approver reasoning effort',
+    approvalReasoningHint:
+      'This exact effort is used for automatic approval; it is independent of the Provider default and is never adjusted implicitly.',
     approvalReasoningConflictHint:
-      'This model does not support the effective approval reasoning effort; choose a compatible model to restore automatic approval.',
+      'This model does not support the selected approval reasoning effort; choose a supported effort or another model.',
+    approvalModelMissingHint:
+      'The approval model is missing or not enabled; choose an enabled model to restore automatic approval.',
     saveApproval: 'Save Auto approval',
     addProvider: 'Add provider',
     providerActions: 'Actions',
@@ -402,6 +407,10 @@ const enUS = {
     reasoningMax: 'Maximum',
     mainReasoningConflictHint:
       'The main model annotation no longer includes this effort; autosave is paused until you pick a supported one.',
+    approvalDraftConflictHint:
+      'The saved approval model {model} does not support its configured approval effort; autosave is paused until you adjust the annotation or approval route.',
+    approvalDraftModelDisabledHint:
+      'The saved approval model {model} is no longer enabled in this Provider draft; autosave is paused until you re-enable it or choose another approval model.',
     reasoningHint:
       'The selected effort is sent to the model as-is; annotate a model row to narrow the choices. Off disables thinking.',
     reasoningHintGeneric:

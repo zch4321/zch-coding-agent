@@ -132,10 +132,11 @@ describe('resolveRunRoutes', () => {
     expect(getProviderApiKeyForRevision).not.toHaveBeenCalled()
   })
 
-  it('freezes the exact endpoint and raises approval reasoning off to high', async () => {
+  it('freezes the exact endpoint and preserves explicit approval reasoning', async () => {
     const config = configuredAppConfig()
     config.providers[0]!.baseURL = 'https://provider.example/v1/'
-    config.providers[0]!.reasoning = 'off'
+    config.providers[0]!.reasoning = 'high'
+    config.approval.reasoning = 'off'
     const store = {
       getPublicConfig: () => toPublicConfig(config, true),
       getProviderApiKeyForRevision: vi.fn(async () => 'secret'),
@@ -148,7 +149,7 @@ describe('resolveRunRoutes', () => {
     })
 
     expect(routes.approval?.snapshot).toMatchObject({
-      reasoning: 'high',
+      reasoning: 'off',
       endpoint: 'https://provider.example/v1/chat/completions',
     })
   })

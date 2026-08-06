@@ -61,6 +61,7 @@ function publicConfig(
   config.approval = {
     approverProviderId: providers[0]!.id,
     approverModel: providers[0]!.model,
+    reasoning: 'high',
   }
   config.modelPool = { entries }
   return toPublicConfig(config, () => ({

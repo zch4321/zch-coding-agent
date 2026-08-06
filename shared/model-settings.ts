@@ -1,4 +1,4 @@
-import { REASONING_EFFORTS, type ReasoningEffort } from './config'
+import { REASONING_EFFORTS, type ReasoningEffort } from './reasoning'
 
 export const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 256_000
 export const DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 65_536
@@ -58,7 +58,7 @@ export function normalizeReasoningEfforts(
  * otherwise every known effort. Unannotated models keep legacy behavior.
  */
 export function resolveSupportedReasoningEfforts(override?: {
-  reasoningEfforts?: ReasoningEffort[]
+  reasoningEfforts?: readonly ReasoningEffort[]
 }): ReasoningEffort[] {
   if (!override?.reasoningEfforts?.length) {
     return [...REASONING_EFFORTS]

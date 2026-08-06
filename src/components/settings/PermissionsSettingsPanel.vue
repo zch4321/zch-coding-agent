@@ -2,7 +2,13 @@
 import { computed } from 'vue'
 import { NButton, NInput, NSelect, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { PermissionMode } from '../../../shared/config'
+import {
+  REASONING_EFFORTS,
+  type PermissionMode,
+  type ReasoningEffort,
+} from '../../../shared/config'
+import { evaluateModelRouteCompatibility } from '../../../shared/model-route'
+import { resolveSupportedReasoningEfforts } from '../../../shared/model-settings'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 
@@ -20,20 +26,50 @@ const sensitiveModeOptions = computed(() => [
   { label: t('permissions.warn'), value: 'warn' },
   { label: t('permissions.confirm'), value: 'confirm' },
 ])
+const REASONING_LABEL_KEYS: Record<ReasoningEffort, string> = {
+  off: 'settings.reasoningOff',
+  low: 'settings.reasoningLow',
+  medium: 'settings.reasoningMedium',
+  high: 'settings.reasoningHigh',
+  xhigh: 'settings.reasoningXhigh',
+  max: 'settings.reasoningMax',
+}
 const approvalProvider = computed(() =>
   agent.providers.find(
     (provider) => provider.id === agent.approvalForm.providerId,
   ),
 )
+const approvalCompatibility = computed(() =>
+  evaluateModelRouteCompatibility(approvalProvider.value, {
+    model: agent.approvalForm.model,
+    reasoning: agent.approvalForm.reasoning,
+  }),
+)
+const approvalReasoningOptions = computed(() => {
+  const supported = resolveSupportedReasoningEfforts(
+    approvalProvider.value?.modelOverrides[agent.approvalForm.model],
+  )
+  return REASONING_EFFORTS.map((effort) => ({
+    label: t(REASONING_LABEL_KEYS[effort]),
+    value: effort,
+    disabled: !supported.includes(effort),
+  }))
+})
 /**
- * True when the selected approval model was filtered out because its
- * annotation excludes the effective approval reasoning effort.
+ * True when the selected approval model is empty or no longer enabled for the
+ * approval provider (distinct from a reasoning-effort conflict).
+ */
+const approvalModelMissing = computed(() => {
+  const compatibility = approvalCompatibility.value
+  return !compatibility.ok && compatibility.reason !== 'reasoning-unsupported'
+})
+/**
+ * True when the selected approval model annotation excludes the explicitly
+ * configured approval reasoning effort.
  */
 const approvalModelConflict = computed(() => {
-  if (!agent.approvalForm.model) return false
-  return !agent.approvalModelOptions.some(
-    (option) => option.value === agent.approvalForm.model,
-  )
+  const compatibility = approvalCompatibility.value
+  return !compatibility.ok && compatibility.reason === 'reasoning-unsupported'
 })
 </script>
 
@@ -91,19 +127,35 @@ const approvalModelConflict = computed(() => {
           v-model:value="agent.approvalForm.model"
           :options="agent.approvalModelOptions"
           :disabled="agent.approvalModelOptions.length === 0"
-          :status="approvalModelConflict ? 'error' : undefined"
+          :status="approvalModelMissing ? 'error' : undefined"
           filterable
+        />
+        <small v-if="approvalModelMissing" class="settings-field-error">
+          {{ t('settings.approvalModelMissingHint') }}
+        </small>
+        <small v-else>{{ t('settings.approvalModelHint') }}</small>
+      </label>
+      <label class="settings-field">
+        <span>{{ t('settings.approvalReasoning') }}</span>
+        <NSelect
+          v-model:value="agent.approvalForm.reasoning"
+          :options="approvalReasoningOptions"
+          :status="approvalModelConflict ? 'error' : undefined"
         />
         <small v-if="approvalModelConflict" class="settings-field-error">
           {{ t('settings.approvalReasoningConflictHint') }}
         </small>
-        <small v-else>{{ t('settings.approvalModelHint') }}</small>
+        <small v-else>{{ t('settings.approvalReasoningHint') }}</small>
       </label>
       <div class="settings-actions">
         <NButton
           type="primary"
           :loading="agent.approvalSaving"
-          :disabled="!agent.approvalDirty || approvalModelConflict"
+          :disabled="
+            !agent.approvalDirty ||
+            approvalModelMissing ||
+            approvalModelConflict
+          "
           @click="agent.saveApproval"
         >
           {{ t('settings.saveApproval') }}
