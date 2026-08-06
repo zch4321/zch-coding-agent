@@ -133,18 +133,9 @@ export const useModelPoolSettingsStore = defineStore('model-pool-settings', {
           providerId: route.providerId,
           model: route.model,
           reasoning: route.reasoning,
-          maxParallel: 1,
         })
       }
       this.entries = nextEntries
-      this.saveStatus = ''
-    },
-    /** Updates concurrency metadata for every entry sharing one exact route. */
-    setMaxParallel(routeKey: string, value: number) {
-      if (!Number.isInteger(value) || value < 1 || value > 32) return
-      for (const entry of this.entries) {
-        if (modelPoolRouteKey(entry) === routeKey) entry.maxParallel = value
-      }
       this.saveStatus = ''
     },
     /** Persists the complete pool with exact revisions for every enabled Provider. */

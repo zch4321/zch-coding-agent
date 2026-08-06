@@ -12,6 +12,10 @@ function removeApprovalReasoning(source: Record<string, unknown>): void {
   delete (source.approval as Record<string, unknown>).reasoning
 }
 
+function removeMaxAgentsPerSwarm(source: Record<string, unknown>): void {
+  delete (source.subagents as Record<string, unknown>).maxAgentsPerSwarm
+}
+
 function legacyCurrentShapeConfig(
   schemaVersion: 10 | 11,
 ): Record<string, unknown> {
@@ -56,6 +60,7 @@ function legacyV13Config(): Record<string, unknown> {
   >
   source.schemaVersion = 13
   removeApprovalReasoning(source)
+  removeMaxAgentsPerSwarm(source)
   delete source.modelPool
   ;(source.limits as Record<string, unknown>).maxToolTokensPerRun = 128_000
   for (const provider of source.providers as Array<Record<string, unknown>>) {
@@ -73,6 +78,7 @@ function legacyV14Config(): Record<string, unknown> {
   >
   source.schemaVersion = 14
   removeApprovalReasoning(source)
+  removeMaxAgentsPerSwarm(source)
   delete source.modelPool
   for (const provider of source.providers as Array<Record<string, unknown>>) {
     provider.model = 'deepseek-v4-pro'
@@ -89,6 +95,7 @@ function legacyV15Config(): Record<string, unknown> {
   >
   source.schemaVersion = 15
   removeApprovalReasoning(source)
+  removeMaxAgentsPerSwarm(source)
   delete source.modelPool
   return source
 }
@@ -100,6 +107,7 @@ function legacyV16Config(): Record<string, unknown> {
   >
   source.schemaVersion = 16
   removeApprovalReasoning(source)
+  removeMaxAgentsPerSwarm(source)
   return source
 }
 
@@ -109,11 +117,22 @@ function legacyV17Config(): Record<string, unknown> {
     unknown
   >
   source.schemaVersion = 17
+  removeMaxAgentsPerSwarm(source)
   return source
 }
 
-describe('config v18 migration boundary', () => {
-  it('creates the v18 defaults when no config exists', () => {
+function legacyV18Config(): Record<string, unknown> {
+  const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
+    string,
+    unknown
+  >
+  source.schemaVersion = 18
+  removeMaxAgentsPerSwarm(source)
+  return source
+}
+
+describe('config v19 migration boundary', () => {
+  it('creates the v19 defaults when no config exists', () => {
     expect(migrateConfig(undefined)).toEqual(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined)).not.toBe(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined).limits.maxConcurrentRuns).toBe(16)
@@ -127,7 +146,7 @@ describe('config v18 migration boundary', () => {
           ...structuredClone(DEFAULT_APP_CONFIG),
           schemaVersion,
         }),
-      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v18`)
+      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v19`)
     }
   })
 
@@ -149,14 +168,17 @@ describe('config v18 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 18,
+      schemaVersion: 19,
       approval: { reasoning: 'high' },
       modelPool: {
-        entries: [{ id: 'worker', model: 'worker-model', maxParallel: 3 }],
+        entries: [{ id: 'worker', model: 'worker-model' }],
       },
     })
     expect(migrateConfig(source).modelPool.entries[0]).not.toHaveProperty(
       'capability',
+    )
+    expect(migrateConfig(source).modelPool.entries[0]).not.toHaveProperty(
+      'maxParallel',
     )
   })
 
@@ -179,19 +201,19 @@ describe('config v18 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 18,
+      schemaVersion: 19,
       modelPool: {
         entries: [
           {
             id: 'worker',
             model: 'worker-model',
             reasoning: 'xhigh',
-            maxParallel: 5,
           },
         ],
       },
     })
     expect(migrated.modelPool.entries[0]).not.toHaveProperty('capability')
+    expect(migrated.modelPool.entries[0]).not.toHaveProperty('maxParallel')
   })
 
   it('keeps the v16 Provider and model pool reasoning boundary frozen', () => {
@@ -234,7 +256,6 @@ describe('config v18 migration boundary', () => {
       providerId: 'deepseek',
       model: `worker-model-${index}`,
       reasoning,
-      maxParallel: 1,
     }))
 
     expect(migrateConfig(source).modelPool).toEqual(source.modelPool)
@@ -244,7 +265,7 @@ describe('config v18 migration boundary', () => {
     const source = legacyV9Config()
     const migrated = migrateConfig(source)
     expect(migrated).toMatchObject({
-      schemaVersion: 18,
+      schemaVersion: 19,
       modelPool: { entries: [] },
       providers: [
         {
@@ -301,7 +322,7 @@ describe('config v18 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 18,
+      schemaVersion: 19,
       modelPool: { entries: [] },
       limits: {
         maxToolOutputBytes: 128 * 1_024,
@@ -325,7 +346,7 @@ describe('config v18 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 18,
+      schemaVersion: 19,
       modelPool: { entries: [] },
       limits: {
         maxToolOutputBytes: 72_000,
@@ -343,7 +364,7 @@ describe('config v18 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 18,
+      schemaVersion: 19,
       modelPool: { entries: [] },
       providers: [
         {
@@ -360,12 +381,13 @@ describe('config v18 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 18,
+      schemaVersion: 19,
       modelPool: { entries: [] },
       limits: { maxConcurrentRuns: 7 },
       subagents: {
         enabled: false,
         workerTimeoutMs: 1_800_000,
+        maxAgentsPerSwarm: 10,
       },
     })
   })
@@ -374,7 +396,7 @@ describe('config v18 migration boundary', () => {
     const source = legacyV13Config()
     const migrated = migrateConfig(source)
 
-    expect(migrated.schemaVersion).toBe(18)
+    expect(migrated.schemaVersion).toBe(19)
     expect(migrated.modelPool).toEqual({ entries: [] })
     expect(migrated.limits).not.toHaveProperty('maxToolTokensPerRun')
     expect((source.limits as Record<string, unknown>).maxToolTokensPerRun).toBe(
@@ -386,7 +408,7 @@ describe('config v18 migration boundary', () => {
     const migrated = migrateConfig(legacyV14Config())
 
     expect(migrated).toMatchObject({
-      schemaVersion: 18,
+      schemaVersion: 19,
       modelPool: { entries: [] },
       providers: [
         {
@@ -420,7 +442,7 @@ describe('config v18 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 18,
+      schemaVersion: 19,
       modelPool: { entries: [] },
       limits: { maxConcurrentRuns: 7 },
     })
@@ -432,7 +454,34 @@ describe('config v18 migration boundary', () => {
     })
   })
 
-  it('accepts and clones a valid v18 config', () => {
+  it('migrates v18 by removing route concurrency and adding the Swarm bound', () => {
+    const source = legacyV18Config()
+    source.modelPool = {
+      entries: [
+        {
+          id: ' worker ',
+          enabled: false,
+          providerId: 'deepseek',
+          model: 'worker-model',
+          reasoning: 'max',
+          maxParallel: 7,
+        },
+      ],
+    }
+
+    const migrated = migrateConfig(source)
+
+    expect(migrated).toMatchObject({
+      schemaVersion: 19,
+      subagents: { maxAgentsPerSwarm: 10 },
+      modelPool: {
+        entries: [{ id: 'worker', reasoning: 'max' }],
+      },
+    })
+    expect(migrated.modelPool.entries[0]).not.toHaveProperty('maxParallel')
+  })
+
+  it('accepts and clones a valid v19 config', () => {
     const source = structuredClone(DEFAULT_APP_CONFIG)
     const migrated = migrateConfig(source)
 
@@ -449,12 +498,12 @@ describe('config v18 migration boundary', () => {
       source.providers[0].providerType = providerType
       const migrated = migrateConfig(source)
 
-      expect(migrated.schemaVersion).toBe(18)
+      expect(migrated.schemaVersion).toBe(19)
       expect(migrated.providers[0].providerType).toBe(providerType)
     }
   })
 
-  it('rejects malformed v18 data instead of filling missing fields', () => {
+  it('rejects malformed v19 data instead of filling missing fields', () => {
     const malformed = structuredClone(DEFAULT_APP_CONFIG) as Record<
       string,
       unknown
@@ -474,7 +523,6 @@ describe('config v18 migration boundary', () => {
         providerId: 'missing-one',
         model: 'preserved-one',
         reasoning: 'off',
-        maxParallel: 1,
       },
       {
         id: 'e\u0301',
@@ -482,7 +530,6 @@ describe('config v18 migration boundary', () => {
         providerId: 'missing-two',
         model: 'preserved-two',
         reasoning: 'max',
-        maxParallel: 32,
       },
     ]
 
@@ -500,7 +547,6 @@ describe('config v18 migration boundary', () => {
         providerId: 'missing',
         model: 'preserved',
         reasoning: 'high',
-        maxParallel: 2,
       },
     ]
 

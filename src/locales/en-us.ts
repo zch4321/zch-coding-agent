@@ -510,6 +510,9 @@ const enUS = {
     workerTimeout: 'Subagent task timeout',
     workerTimeoutHint:
       'The subtask is cancelled at this limit. Cancelling the parent task also cancels active subagents immediately.',
+    maxAgentsPerSwarm: 'Maximum Agents per Swarm',
+    maxAgentsPerSwarmHint:
+      'Limits the total child Agents created by one Swarm. Simultaneous execution remains bounded by the global task concurrency limit. Changes apply to the next /swarm Run.',
     minutes: 'minutes',
     costNotice:
       'Subagents make additional model requests and therefore consume tokens and may incur Provider charges.',
@@ -550,7 +553,6 @@ const enUS = {
     belowReasoningFloor: 'Below filter',
     belowReasoningFloorHint:
       'This route remains visible because it is already in the pool; the filter only affects candidates on the left.',
-    maxParallelShort: 'Concurrency',
     externalChange:
       'Provider changes updated the saved pool state; review this draft and save it again.',
   },

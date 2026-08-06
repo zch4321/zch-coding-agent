@@ -154,13 +154,18 @@ test.describe.serial('Electron settings workflows', () => {
     const timeoutMinutes = agents
       .locator('.settings-field', { hasText: '单个子任务超时' })
       .locator('input')
+    const maxAgentsPerSwarm = agents
+      .locator('.settings-field', { hasText: '单次 Swarm 最大 Agent 数' })
+      .locator('input')
     const subagentSaveStatus = agents.locator(
       '.settings-heading-actions .settings-save-status',
     )
     await expect(subagentsSwitch).not.toHaveClass(/n-switch--active/u)
     await expect(timeoutMinutes).toHaveValue('30')
+    await expect(maxAgentsPerSwarm).toHaveValue('10')
     await subagentsSwitch.click()
     await timeoutMinutes.fill('45')
+    await maxAgentsPerSwarm.fill('12')
     await expect(subagentSaveStatus).toHaveText('已保存')
     await expect
       .poll(async () =>
@@ -169,7 +174,11 @@ test.describe.serial('Electron settings workflows', () => {
             getConfig(payload: unknown): Promise<{
               value?: {
                 config: {
-                  subagents: { enabled: boolean; workerTimeoutMs: number }
+                  subagents: {
+                    enabled: boolean
+                    workerTimeoutMs: number
+                    maxAgentsPerSwarm: number
+                  }
                 }
               }
             }>
@@ -181,7 +190,11 @@ test.describe.serial('Electron settings workflows', () => {
           return result.value?.config.subagents
         }),
       )
-      .toEqual({ enabled: true, workerTimeoutMs: 2_700_000 })
+      .toEqual({
+        enabled: true,
+        workerTimeoutMs: 2_700_000,
+        maxAgentsPerSwarm: 12,
+      })
     await subagentsSwitch.click()
     await expect(subagentSaveStatus).toHaveText('已保存')
 
@@ -641,7 +654,6 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(source.getByText('低', { exact: true })).toHaveCount(0)
     await source.getByText('中', { exact: true }).click()
     await expect(target.getByText('中', { exact: true })).toBeVisible()
-    await target.locator('.model-pool-parallel-input input').fill('4')
     await pool.getByRole('button', { name: '保存模型池' }).click()
     await expect(pool.locator('.settings-save-status')).toHaveText('已保存')
 
@@ -671,7 +683,6 @@ test.describe.serial('Electron settings workflows', () => {
           providerId: 'e2e-annotated',
           model: 'annotated-model',
           reasoning: 'medium',
-          maxParallel: 4,
         },
       ],
     })
@@ -688,9 +699,6 @@ test.describe.serial('Electron settings workflows', () => {
       target.getByText('annotated-model', { exact: true }),
     ).toBeVisible()
     await expect(target.getByText('中', { exact: true })).toBeVisible()
-    await expect(
-      target.locator('.model-pool-parallel-input input'),
-    ).toHaveValue('4')
 
     await target.getByText('中', { exact: true }).click()
     await pool.getByRole('button', { name: '保存模型池' }).click()

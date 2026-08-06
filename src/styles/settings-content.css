@@ -217,20 +217,6 @@
   padding-top: 72px;
 }
 
-.model-pool-route-suffix {
-  min-width: 0;
-}
-
-.model-pool-parallel-label {
-  color: var(--text-muted);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.model-pool-parallel-input {
-  width: 68px;
-}
-
 .project-settings-row {
   display: flex;
   width: 100%;

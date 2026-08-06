@@ -121,6 +121,7 @@ export const DEFAULT_APP_CONFIG = {
   subagents: {
     enabled: false,
     workerTimeoutMs: 30 * 60_000,
+    maxAgentsPerSwarm: 10,
   },
   modelPool: {
     entries: [],

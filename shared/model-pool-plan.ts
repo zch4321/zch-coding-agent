@@ -3,7 +3,7 @@ import { ModelCapabilityLevelSchema } from './config'
 import { ModelRouteSnapshotSchema } from './model-route'
 import { ReasoningEffortSchema } from './reasoning'
 
-export const MODEL_POOL_PLAN_SCHEMA_VERSION = 1 as const
+export const MODEL_POOL_PLAN_SCHEMA_VERSION = 2 as const
 
 export const ModelPoolPlanAssignmentSnapshotSchema = Type.Object(
   {
@@ -18,7 +18,6 @@ export const ModelPoolPlanAssignmentSnapshotSchema = Type.Object(
       minimum: 1,
       maximum: Number.MAX_SAFE_INTEGER,
     }),
-    maxParallel: Type.Integer({ minimum: 1, maximum: 32 }),
     routes: Type.Object(
       {
         main: ModelRouteSnapshotSchema,

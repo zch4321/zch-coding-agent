@@ -6,6 +6,7 @@ import {
   ReasoningEffortSchema,
   RememberedRuleSchema,
   normalizeModelPoolConfig,
+  type ReasoningEffort,
 } from '../../shared/config'
 import { McpServerConfigSchema } from '../../shared/mcp'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
@@ -168,6 +169,20 @@ const LegacyModelConfigurationIdsSchema = Type.Array(
   { maxItems: 1_000, uniqueItems: true },
 )
 
+// AppConfig v13-v18 persisted only the generic Subagent switch and timeout.
+// Swarm job cardinality became explicit in v19.
+const LegacySubagentsConfigSchema = Type.Object(
+  {
+    enabled: Type.Boolean(),
+    workerTimeoutMs: Type.Integer({
+      minimum: 60_000,
+      maximum: 86_400_000,
+    }),
+  },
+  { additionalProperties: false },
+)
+type LegacySubagentsConfig = Static<typeof LegacySubagentsConfigSchema>
+
 // AppConfig v15 is frozen independently from the current root and Provider
 // schemas so adding future configuration cannot silently change its boundary.
 const LegacyAppProviderConfigV15Schema = Type.Object(
@@ -213,7 +228,7 @@ const LegacyAppConfigV15Schema = Type.Object(
       maxItems: 32,
     }),
     approval: LegacyApprovalConfigSchema,
-    subagents: PublicConfigSchema.properties.subagents,
+    subagents: LegacySubagentsConfigSchema,
     permission: PublicConfigSchema.properties.permission,
     limits: PublicConfigSchema.properties.limits,
     logging: PublicConfigSchema.properties.logging,
@@ -329,6 +344,39 @@ const LegacyAppConfigV17Schema = Type.Object(
 )
 type LegacyAppConfigV17 = Static<typeof LegacyAppConfigV17Schema>
 const validateLegacyAppConfigV17 = compileSchema(LegacyAppConfigV17Schema)
+
+// AppConfig v18 removed duplicated capability from model-pool entries but
+// retained the never-enforced per-route maxParallel field.
+const LegacyModelPoolConfigV18Schema = Type.Object(
+  {
+    entries: Type.Array(
+      Type.Object(
+        {
+          id: Type.String({ minLength: 1, maxLength: 64 }),
+          enabled: Type.Boolean(),
+          providerId: Type.String({ minLength: 1, maxLength: 128 }),
+          model: Type.String({ minLength: 1, maxLength: 256 }),
+          reasoning: ReasoningEffortSchema,
+          maxParallel: Type.Integer({ minimum: 1, maximum: 32 }),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 64 },
+    ),
+  },
+  { additionalProperties: false },
+)
+
+const LegacyAppConfigV18Schema = Type.Object(
+  {
+    ...LegacyAppConfigV17Schema.properties,
+    schemaVersion: Type.Literal(18),
+    modelPool: LegacyModelPoolConfigV18Schema,
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV18 = Static<typeof LegacyAppConfigV18Schema>
+const validateLegacyAppConfigV18 = compileSchema(LegacyAppConfigV18Schema)
 
 const LegacyAppProviderConfigV14Schema = Type.Object(
   {
@@ -526,10 +574,20 @@ function migrateV12(config: LegacyAppConfigV12): AppConfig {
   return structuredClone(migrated as AppConfig)
 }
 
+function migrateLegacySubagents(
+  subagents: LegacySubagentsConfig,
+): AppConfig['subagents'] {
+  return {
+    ...structuredClone(subagents),
+    maxAgentsPerSwarm: DEFAULT_APP_CONFIG.subagents.maxAgentsPerSwarm,
+  }
+}
+
 function migrateV13(config: LegacyAppConfigV13): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    subagents: migrateLegacySubagents(config.subagents),
     modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     approval: migrateLegacyApproval(config.approval, config.providers),
     limits: withoutRunToolBudget(config.limits),
@@ -551,6 +609,7 @@ function migrateV14(config: LegacyAppConfigV14): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    subagents: migrateLegacySubagents(config.subagents),
     modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     approval: migrateLegacyApproval(config.approval, config.providers),
     providers: config.providers.map((provider) => ({
@@ -571,6 +630,7 @@ function migrateV15(config: LegacyAppConfigV15): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    subagents: migrateLegacySubagents(config.subagents),
     approval: migrateLegacyApproval(config.approval, config.providers),
     modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
   }
@@ -583,23 +643,30 @@ function migrateV15(config: LegacyAppConfigV15): AppConfig {
   return structuredClone(migrated as AppConfig)
 }
 
-type LegacyModelPoolWithCapability = {
-  entries: Array<
-    AppConfig['modelPool']['entries'][number] & {
-      capability: 'light' | 'standard' | 'strong'
-    }
-  >
+type LegacyModelPoolWithParallel = {
+  entries: Array<{
+    id: string
+    enabled: boolean
+    providerId: string
+    model: string
+    reasoning: ReasoningEffort
+    maxParallel: number
+  }>
 }
 
 function migrateLegacyModelPool(
-  modelPool: LegacyModelPoolWithCapability,
-  schemaVersion: 16 | 17,
+  modelPool: LegacyModelPoolWithParallel,
+  schemaVersion: 16 | 17 | 18,
 ): AppConfig['modelPool'] {
   try {
     return normalizeModelPoolConfig({
-      entries: modelPool.entries.map((entry) =>
-        structuredClone(withoutKey(entry, 'capability')),
-      ),
+      entries: modelPool.entries.map((entry) => ({
+        id: entry.id,
+        enabled: entry.enabled,
+        providerId: entry.providerId,
+        model: entry.model,
+        reasoning: entry.reasoning,
+      })),
     })
   } catch (error) {
     throw new UnsupportedConfigSchemaError(
@@ -613,6 +680,7 @@ function migrateV16(config: LegacyAppConfigV16): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    subagents: migrateLegacySubagents(config.subagents),
     approval: migrateLegacyApproval(config.approval, config.providers),
     modelPool: migrateLegacyModelPool(config.modelPool, 16),
   }
@@ -629,11 +697,28 @@ function migrateV17(config: LegacyAppConfigV17): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    subagents: migrateLegacySubagents(config.subagents),
     modelPool: migrateLegacyModelPool(config.modelPool, 17),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
       17,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
+function migrateV18(config: LegacyAppConfigV18): AppConfig {
+  const migrated = {
+    ...config,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    subagents: migrateLegacySubagents(config.subagents),
+    modelPool: migrateLegacyModelPool(config.modelPool, 18),
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      18,
       formatSchemaErrors(validateAppConfig.errors),
     )
   }
@@ -787,6 +872,16 @@ export function migrateConfig(candidate: unknown): AppConfig {
       )
     }
     return migrateV17(candidate as LegacyAppConfigV17)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') === 18) {
+    if (!validateLegacyAppConfigV18(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        18,
+        formatSchemaErrors(validateLegacyAppConfigV18.errors),
+      )
+    }
+    return migrateV18(candidate as LegacyAppConfigV18)
   }
 
   if (Reflect.get(candidate, 'schemaVersion') !== APP_CONFIG_SCHEMA_VERSION) {

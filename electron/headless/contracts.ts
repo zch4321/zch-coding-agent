@@ -84,6 +84,19 @@ const LegacyHeadlessLimitsWithRunToolBudgetSchema = Type.Partial(
   { additionalProperties: false },
 )
 
+// Headless v4 predates Swarm and keeps its original Subagent shape. Internal
+// AppConfig fills the v19 Swarm cardinality default during preparation.
+const HeadlessSubagentsConfigV4Schema = Type.Object(
+  {
+    enabled: Type.Boolean(),
+    workerTimeoutMs: Type.Integer({
+      minimum: 60_000,
+      maximum: 86_400_000,
+    }),
+  },
+  { additionalProperties: false },
+)
+
 export const HeadlessConfigSchema = Type.Object(
   {
     schemaVersion: Type.Literal(4),
@@ -103,7 +116,7 @@ export const HeadlessConfigSchema = Type.Object(
         additionalProperties: false,
       }),
     ),
-    subagents: Type.Optional(PublicConfigSchema.properties.subagents),
+    subagents: Type.Optional(HeadlessSubagentsConfigV4Schema),
     network: Type.Optional(PublicConfigSchema.properties.network),
     mcpServers: Type.Optional(
       Type.Array(McpServerConfigSchema, { maxItems: 32 }),

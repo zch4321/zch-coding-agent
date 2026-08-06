@@ -20,7 +20,12 @@ export interface ModelPoolAssignment {
   providerId: string
   model: string
   reasoning: ModelPoolEntry['reasoning']
-  maxParallel: number
+}
+
+interface ModelCandidateGroup {
+  key: string
+  capability: ModelCapabilityLevel
+  routes: ModelPoolCandidate[]
 }
 
 /** Reports that no enabled pool entry can meet one capability requirement. */
@@ -36,45 +41,82 @@ export class ModelPoolAllocationError extends Error {
   }
 }
 
-/** Assigns capability requirements deterministically with per-tier round robin. */
+function groupEnabledModels(
+  entries: readonly ModelPoolCandidate[],
+): ModelCandidateGroup[] {
+  const groups = new Map<string, ModelCandidateGroup>()
+  const routeKeys = new Map<string, Set<ModelPoolEntry['reasoning']>>()
+
+  for (const entry of entries) {
+    if (!entry.enabled) continue
+    const key = JSON.stringify([entry.providerId, entry.model])
+    let group = groups.get(key)
+    if (!group) {
+      group = { key, capability: entry.capability, routes: [] }
+      groups.set(key, group)
+      routeKeys.set(key, new Set())
+    } else if (group.capability !== entry.capability) {
+      throw new Error(
+        `Model pool has conflicting capabilities for ${entry.providerId}/${entry.model}`,
+      )
+    }
+
+    const reasoning = routeKeys.get(key)!
+    if (reasoning.has(entry.reasoning)) continue
+    reasoning.add(entry.reasoning)
+    group.routes.push(entry)
+  }
+
+  return [...groups.values()]
+}
+
+function capabilitySatisfies(
+  actual: ModelCapabilityLevel,
+  required: ModelCapabilityLevel,
+): boolean {
+  return CAPABILITY_ORDER.indexOf(actual) >= CAPABILITY_ORDER.indexOf(required)
+}
+
+/** Assigns requirements by cycling satisfying models, then their exact routes. */
 export function planModelPoolAssignments(
   entries: readonly ModelPoolCandidate[],
   requirements: readonly ModelCapabilityLevel[],
 ): ModelPoolAssignment[] {
-  const tiers = new Map<ModelCapabilityLevel, readonly ModelPoolCandidate[]>(
-    CAPABILITY_ORDER.map((capability) => [
-      capability,
-      entries.filter(
-        (entry) => entry.enabled && entry.capability === capability,
-      ),
+  const models = groupEnabledModels(entries)
+  const eligibleModels = new Map(
+    CAPABILITY_ORDER.map((required) => [
+      required,
+      models.filter((model) => capabilitySatisfies(model.capability, required)),
     ]),
   )
-  const selectedTiers = requirements.map((required, requirementIndex) => {
-    const minimumIndex = CAPABILITY_ORDER.indexOf(required)
-    const selected = CAPABILITY_ORDER.slice(minimumIndex).find(
-      (capability) => (tiers.get(capability)?.length ?? 0) > 0,
-    )
-    if (!selected) {
+  for (const [requirementIndex, required] of requirements.entries()) {
+    if ((eligibleModels.get(required)?.length ?? 0) === 0) {
       throw new ModelPoolAllocationError(requirementIndex, required)
     }
-    return selected
-  })
-  const cursors = new Map<ModelCapabilityLevel, number>()
+  }
 
-  return selectedTiers.map((capability, requirementIndex) => {
-    const candidates = tiers.get(capability)!
-    const cursor = cursors.get(capability) ?? 0
-    const entry = candidates[cursor % candidates.length]!
-    cursors.set(capability, cursor + 1)
+  const modelCursors = new Map<ModelCapabilityLevel, number>()
+  const routeCursors = new Map<string, number>()
+
+  return requirements.map((required, requirementIndex) => {
+    const candidates = eligibleModels.get(required)!
+    const modelCursor = modelCursors.get(required) ?? 0
+    const selectedModel = candidates[modelCursor % candidates.length]!
+    modelCursors.set(required, modelCursor + 1)
+
+    const routeCursor = routeCursors.get(selectedModel.key) ?? 0
+    const entry =
+      selectedModel.routes[routeCursor % selectedModel.routes.length]!
+    routeCursors.set(selectedModel.key, routeCursor + 1)
+
     return {
       requirementIndex,
-      requestedCapability: requirements[requirementIndex]!,
+      requestedCapability: required,
       entryId: entry.id,
       capability: entry.capability,
       providerId: entry.providerId,
       model: entry.model,
       reasoning: entry.reasoning,
-      maxParallel: entry.maxParallel,
     }
   })
 }

@@ -494,6 +494,9 @@ const zhCN = {
     workerTimeout: '单个子任务超时',
     workerTimeoutHint:
       '达到此时限后会取消子任务。关闭父任务也会立即取消正在运行的子任务。',
+    maxAgentsPerSwarm: '单次 Swarm 最大 Agent 数',
+    maxAgentsPerSwarmHint:
+      '限制一次 Swarm 创建的子 Agent 总数；实际同时运行数仍受全局最大并发任务数限制。修改从下一次 /swarm Run 生效。',
     minutes: '分钟',
     costNotice:
       '子 Agent 会发起额外的模型请求，并产生相应的 Token 消耗和 Provider 费用。',
@@ -529,7 +532,6 @@ const zhCN = {
     belowReasoningFloor: '低于筛选',
     belowReasoningFloorHint:
       '该 Route 已在模型池中，因此仍然显示；当前筛选只影响左侧候选。',
-    maxParallelShort: '并发',
     externalChange:
       'Provider 配置已改变模型池的已保存状态；请检查当前草稿后重新保存。',
   },

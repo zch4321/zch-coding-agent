@@ -23,7 +23,7 @@ export {
   type ReasoningEffort,
 } from './reasoning'
 
-export const APP_CONFIG_SCHEMA_VERSION = 18 as const
+export const APP_CONFIG_SCHEMA_VERSION = 19 as const
 
 export const AssistantLanguageSchema = Type.Union([
   Type.Literal('zh-CN'),
@@ -200,6 +200,7 @@ export const PublicConfigSchema = Type.Object(
           minimum: 60_000,
           maximum: 86_400_000,
         }),
+        maxAgentsPerSwarm: Type.Integer({ minimum: 1, maximum: 32 }),
       },
       { additionalProperties: false },
     ),

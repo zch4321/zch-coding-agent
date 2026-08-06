@@ -94,6 +94,17 @@ onBeforeUnmount(() => {
           </NInputNumber>
           <small>{{ t('subagents.workerTimeoutHint') }}</small>
         </label>
+
+        <label class="settings-field">
+          <span>{{ t('subagents.maxAgentsPerSwarm') }}</span>
+          <NInputNumber
+            v-model:value="agent.subagentsConfig.maxAgentsPerSwarm"
+            :min="1"
+            :max="32"
+            :step="1"
+          />
+          <small>{{ t('subagents.maxAgentsPerSwarmHint') }}</small>
+        </label>
       </section>
 
       <NAlert type="info" :show-icon="true">

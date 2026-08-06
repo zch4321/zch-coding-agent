@@ -45,7 +45,6 @@ function entry(overrides: Partial<ModelPoolEntry> = {}): ModelPoolEntry {
     providerId: 'provider-a',
     model: 'model-a',
     reasoning: 'high',
-    maxParallel: 2,
     ...overrides,
   }
 }
@@ -91,7 +90,6 @@ describe('model pool settings', () => {
         providerId: 'provider-a',
         model: 'model-a',
         reasoning: 'high',
-        maxParallel: 1,
       },
       {
         id: 'worker-2',
@@ -99,7 +97,6 @@ describe('model pool settings', () => {
         providerId: 'provider-a',
         model: 'model-a',
         reasoning: 'max',
-        maxParallel: 1,
       },
     ])
     expect(JSON.stringify(pool.entries)).not.toContain('rendererLabel')
@@ -110,7 +107,7 @@ describe('model pool settings', () => {
     const providers = [provider('provider-a')]
     pool.entries = [
       entry(),
-      entry({ id: 'worker-2', reasoning: 'max', maxParallel: 4 }),
+      entry({ id: 'worker-2', reasoning: 'max' }),
       entry({
         id: 'disabled-reference',
         enabled: false,
@@ -171,7 +168,7 @@ describe('model pool settings', () => {
     expect(pool.saveStatus).toBe('external-change')
   })
 
-  it('preserves retained route metadata and updates leaf concurrency', () => {
+  it('preserves retained route identity while replacing membership', () => {
     const pool = useModelPoolSettingsStore()
     const high = {
       providerId: 'provider-a',
@@ -181,12 +178,7 @@ describe('model pool settings', () => {
     const max = { ...high, reasoning: 'max' as const }
     pool.entries = [entry(), entry({ id: 'worker-2', reasoning: 'max' })]
 
-    pool.setMaxParallel(modelPoolRouteKey(max), 6)
-    expect(pool.entries[1]).toMatchObject({ id: 'worker-2', maxParallel: 6 })
-
     pool.setSelectedRoutes([modelPoolRouteKey(max)], [high, max])
-    expect(pool.entries).toEqual([
-      entry({ id: 'worker-2', reasoning: 'max', maxParallel: 6 }),
-    ])
+    expect(pool.entries).toEqual([entry({ id: 'worker-2', reasoning: 'max' })])
   })
 })

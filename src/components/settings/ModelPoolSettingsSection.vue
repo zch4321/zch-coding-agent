@@ -7,7 +7,6 @@ import {
   NEmpty,
   NFlex,
   NGrid,
-  NInputNumber,
   NSelect,
   NTag,
   NTransfer,
@@ -318,7 +317,7 @@ function renderTargetSuffix({ option }: { option: TreeOption }): VNodeChild {
   if (!entry) return undefined
   const issue = entryIssue(entry)
   const belowFloor = !meetsReasoningFloor(entry.reasoning)
-  const statusTag = issue
+  return issue
     ? h(
         NTag,
         { size: 'small', type: 'error', title: issue },
@@ -335,34 +334,6 @@ function renderTargetSuffix({ option }: { option: TreeOption }): VNodeChild {
           { default: () => t('modelPool.belowReasoningFloor') },
         )
       : undefined
-  return h(
-    NFlex,
-    {
-      class: 'model-pool-route-suffix',
-      align: 'center',
-      size: 6,
-      wrap: false,
-    },
-    {
-      default: () => [
-        statusTag,
-        h('span', { class: 'model-pool-parallel-label' }, [
-          t('modelPool.maxParallelShort'),
-        ]),
-        h(NInputNumber, {
-          value: entry.maxParallel,
-          min: 1,
-          max: 32,
-          step: 1,
-          size: 'small',
-          class: 'model-pool-parallel-input',
-          'onUpdate:value': (value: number | null) => {
-            if (value !== null) pool.setMaxParallel(node.routeKey!, value)
-          },
-        }),
-      ],
-    },
-  )
 }
 
 function renderEmptyTree(description: string): VNodeChild {

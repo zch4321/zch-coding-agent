@@ -8,7 +8,6 @@ export const ModelPoolEntrySchema = Type.Object(
     providerId: Type.String({ minLength: 1, maxLength: 128 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
     reasoning: ReasoningEffortSchema,
-    maxParallel: Type.Integer({ minimum: 1, maximum: 32 }),
   },
   { additionalProperties: false },
 )

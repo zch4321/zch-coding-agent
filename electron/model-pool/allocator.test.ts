@@ -18,7 +18,6 @@ function entry(
     model: `model-${id}`,
     reasoning: 'high',
     capability,
-    maxParallel: 2,
     ...overrides,
   }
 }
@@ -45,9 +44,6 @@ describe('planModelPoolAssignments', () => {
       'standard-4',
       'standard-5',
     ])
-    expect(assignments.map((assignment) => assignment.maxParallel)).toEqual(
-      Array(10).fill(2),
-    )
   })
 
   it('preserves declaration order and resets every tier cursor per call', () => {
@@ -69,21 +65,60 @@ describe('planModelPoolAssignments', () => {
     expect(second).toEqual(first)
   })
 
-  it('chooses the lowest available satisfying tier for every requirement', () => {
+  it('round-robins all models that satisfy each capability requirement', () => {
     const entries = [entry('standard', 'standard'), entry('strong', 'strong')]
 
     expect(
-      planModelPoolAssignments(entries, ['light', 'standard', 'strong']).map(
-        (assignment) => ({
-          requested: assignment.requestedCapability,
-          assigned: assignment.capability,
-          entryId: assignment.entryId,
-        }),
-      ),
+      planModelPoolAssignments(entries, [
+        'light',
+        'light',
+        'standard',
+        'standard',
+        'strong',
+      ]).map((assignment) => ({
+        requested: assignment.requestedCapability,
+        assigned: assignment.capability,
+        entryId: assignment.entryId,
+      })),
     ).toEqual([
       { requested: 'light', assigned: 'standard', entryId: 'standard' },
+      { requested: 'light', assigned: 'strong', entryId: 'strong' },
       { requested: 'standard', assigned: 'standard', entryId: 'standard' },
+      { requested: 'standard', assigned: 'strong', entryId: 'strong' },
       { requested: 'strong', assigned: 'strong', entryId: 'strong' },
+    ])
+  })
+
+  it('cycles Provider models before cycling reasoning routes within a model', () => {
+    const entries = [
+      entry('model-a-high', 'standard', {
+        providerId: 'provider-a',
+        model: 'model-a',
+        reasoning: 'high',
+      }),
+      entry('model-a-max', 'standard', {
+        providerId: 'provider-a',
+        model: 'model-a',
+        reasoning: 'max',
+      }),
+      entry('model-b-high', 'standard', {
+        providerId: 'provider-a',
+        model: 'model-b',
+        reasoning: 'high',
+      }),
+    ]
+
+    expect(
+      planModelPoolAssignments(
+        entries,
+        Array<ModelCapabilityLevel>(5).fill('standard'),
+      ).map((assignment) => assignment.entryId),
+    ).toEqual([
+      'model-a-high',
+      'model-b-high',
+      'model-a-max',
+      'model-b-high',
+      'model-a-high',
     ])
   })
 

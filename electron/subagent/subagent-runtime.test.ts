@@ -217,7 +217,11 @@ describe('read-only Subagent runtime', () => {
     await store.update({
       version: 1,
       kind: 'subagents',
-      value: { enabled: true, workerTimeoutMs: 60_000 },
+      value: {
+        enabled: true,
+        workerTimeoutMs: 60_000,
+        maxAgentsPerSwarm: 10,
+      },
     })
     const originalModel = store.getPublicConfig().providers[0]!.model
     let swapped = false
@@ -496,7 +500,11 @@ describe('read-only Subagent runtime', () => {
     await store.update({
       version: 1,
       kind: 'subagents',
-      value: { enabled: true, workerTimeoutMs: 60_000 },
+      value: {
+        enabled: true,
+        workerTimeoutMs: 60_000,
+        maxAgentsPerSwarm: 10,
+      },
     })
     const provider = new SubagentChainProvider(workspace, async () => undefined)
     const target = await createBackendRuntime({

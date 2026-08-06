@@ -46,7 +46,6 @@ function entry(
     providerId: 'provider-a',
     model: 'model-a',
     reasoning: 'high',
-    maxParallel: 4,
     ...overrides,
   }
 }
@@ -125,6 +124,9 @@ describe('freezeModelPoolPlan', () => {
       main: { purpose: 'main' },
       compression: { purpose: 'compression' },
     })
+    expect(prepared.safeSnapshot.assignments[0]).not.toHaveProperty(
+      'maxParallel',
+    )
     expect(validateSafeSnapshot(prepared.safeSnapshot)).toBe(true)
   })
 

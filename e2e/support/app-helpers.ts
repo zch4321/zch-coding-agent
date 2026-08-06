@@ -180,7 +180,11 @@ export async function configureApp(input: {
         const delegated = await api.setConfig({
           version: 1,
           kind: 'subagents',
-          value: { enabled: true, workerTimeoutMs: 60_000 },
+          value: {
+            enabled: true,
+            workerTimeoutMs: 60_000,
+            maxAgentsPerSwarm: 10,
+          },
         })
         if (!delegated.ok) {
           return {

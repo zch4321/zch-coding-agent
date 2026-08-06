@@ -88,7 +88,6 @@ function poolState(
       model: entry.model,
       reasoning: entry.reasoning,
       capability: entry.capability,
-      maxParallel: entry.maxParallel,
     }
   })
   return {
@@ -157,7 +156,6 @@ export async function freezeModelPoolPlan(
       model: assignment.model,
       reasoning: assignment.reasoning,
       providerRevision: assignment.routes.main.snapshot.providerConfigRevision,
-      maxParallel: assignment.maxParallel,
       routes: {
         main: structuredClone(assignment.routes.main.snapshot),
         compression: structuredClone(assignment.routes.compression.snapshot),
