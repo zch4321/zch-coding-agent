@@ -30,6 +30,7 @@ import {
   useModelPoolSettingsStore,
   type ModelPoolSelectableRoute,
 } from '../../stores/model-pool-settings'
+import { reconcileVisibleRouteSelection } from './model-pool-transfer'
 
 type ReasoningFloor = 'all' | ReasoningEffort
 
@@ -405,13 +406,13 @@ function renderTargetList({
     renderLabel: renderTreeLabel,
     renderSuffix: renderTargetSuffix,
     'onUpdate:checkedKeys': (keys: Array<string | number>) => {
-      const retainedHidden = selectedRouteKeys.value.filter(
-        (key) => !visibleKeys.has(key),
+      onCheck(
+        reconcileVisibleRouteSelection(
+          selectedRouteKeys.value,
+          visibleKeys,
+          keys,
+        ),
       )
-      const retainedVisible = keys
-        .map(String)
-        .filter((key) => visibleKeys.has(key))
-      onCheck([...retainedHidden, ...retainedVisible])
     },
   })
 }
