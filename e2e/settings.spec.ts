@@ -154,11 +154,19 @@ test.describe.serial('Electron settings workflows', () => {
     const timeoutMinutes = agents
       .locator('.settings-field', { hasText: '单个子任务超时' })
       .locator('input')
+    const maxAgentsPerSwarm = agents
+      .locator('.settings-field', { hasText: '单次 Swarm 最大 Agent 数' })
+      .locator('input')
+    const subagentSaveStatus = agents.locator(
+      '.settings-heading-actions .settings-save-status',
+    )
     await expect(subagentsSwitch).not.toHaveClass(/n-switch--active/u)
     await expect(timeoutMinutes).toHaveValue('30')
+    await expect(maxAgentsPerSwarm).toHaveValue('10')
     await subagentsSwitch.click()
     await timeoutMinutes.fill('45')
-    await expect(agents.locator('.settings-save-status')).toHaveText('已保存')
+    await maxAgentsPerSwarm.fill('12')
+    await expect(subagentSaveStatus).toHaveText('已保存')
     await expect
       .poll(async () =>
         page.evaluate(async () => {
@@ -166,7 +174,11 @@ test.describe.serial('Electron settings workflows', () => {
             getConfig(payload: unknown): Promise<{
               value?: {
                 config: {
-                  subagents: { enabled: boolean; workerTimeoutMs: number }
+                  subagents: {
+                    enabled: boolean
+                    workerTimeoutMs: number
+                    maxAgentsPerSwarm: number
+                  }
                 }
               }
             }>
@@ -178,12 +190,22 @@ test.describe.serial('Electron settings workflows', () => {
           return result.value?.config.subagents
         }),
       )
-      .toEqual({ enabled: true, workerTimeoutMs: 2_700_000 })
+      .toEqual({
+        enabled: true,
+        workerTimeoutMs: 2_700_000,
+        maxAgentsPerSwarm: 12,
+      })
     await subagentsSwitch.click()
-    await expect(agents.locator('.settings-save-status')).toHaveText('已保存')
+    await expect(subagentSaveStatus).toHaveText('已保存')
 
     await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
     const provider = page.locator('.settings-section')
+
+    // Widen the window so the desktop six-column model grid (with header)
+    // applies; narrow widths intentionally switch to the stacked layout.
+    await harness.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setSize(1500, 900)
+    })
 
     await expect(provider.locator('.provider-card')).toHaveCount(1)
     await expect(provider.locator('.provider-card')).toContainText('DeepSeek')
@@ -322,6 +344,14 @@ test.describe.serial('Electron settings workflows', () => {
       .locator('.n-select')
     await approvalModel.click()
     await page.getByText(providerModel, { exact: true }).click()
+    const approvalReasoning = approval
+      .locator('.settings-field', { hasText: '自动审批思考深度' })
+      .locator('.n-select')
+    await approvalReasoning.click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('最高', { exact: true })
+      .click()
     await approval.getByRole('button', { name: '保存自动审批' }).click()
     await expect(approval.locator('.settings-save-status')).toHaveText('已保存')
 
@@ -417,6 +447,7 @@ test.describe.serial('Electron settings workflows', () => {
               approval: {
                 approverProviderId: string
                 approverModel: string
+                reasoning: string
               }
             }
           }
@@ -432,7 +463,337 @@ test.describe.serial('Electron settings workflows', () => {
     expect(configSnapshot.approval).toEqual({
       approverProviderId: 'deepseek',
       approverModel: providerModel,
+      reasoning: 'max',
     })
+  })
+
+  test('edits per-model annotations with autosave and restores them after reload', async () => {
+    const seeded = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        getConfig(payload: unknown): Promise<{
+          ok: boolean
+          value?: { config: { limits: unknown } }
+        }>
+        setConfig(payload: unknown): Promise<{ ok: boolean }>
+      }
+      const current = await api.getConfig({ version: 1, section: 'all' })
+      if (!current.ok || !current.value) return false
+      const result = await api.setConfig({
+        version: 1,
+        kind: 'provider-settings',
+        providerId: 'e2e-annotated',
+        label: 'E2E Annotated',
+        providerType: 'generic.chat-completions',
+        baseURL: 'https://provider.example/v1',
+        model: 'annotated-model',
+        enabledModelIds: ['annotated-model', 'second-model'],
+        reasoning: 'high',
+        limits: current.value.config.limits,
+      })
+      return result.ok
+    })
+    expect(seeded).toBe(true)
+
+    await harness.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setSize(1120, 800)
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.locator('.sidebar-settings-button').click()
+    const navigation = page.getByRole('navigation', { name: '设置分类' })
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    const provider = page.locator('.settings-section')
+    await provider
+      .locator('.provider-card', { hasText: 'E2E Annotated' })
+      .click()
+
+    // The six-column model grid must not overflow the settings content.
+    const expectNoHorizontalOverflow = async () => {
+      const layout = await provider.evaluate((section) => ({
+        clientWidth: section.clientWidth,
+        scrollWidth: section.scrollWidth,
+      }))
+      expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth)
+    }
+    await expectNoHorizontalOverflow()
+
+    // Annotate efforts excluding the provider default 'high': autosave must
+    // pause with a field-level hint instead of failing in a loop.
+    const clickSelectOption = (text: string) =>
+      page
+        .locator('.n-select-menu:visible .n-base-select-option')
+        .getByText(text, { exact: true })
+        .click()
+    const effortsField = provider.locator(
+      '.provider-model-value[aria-label*="annotated-model"][aria-label*="思考档位"]',
+    )
+    await effortsField.locator('.n-select').click()
+    await clickSelectOption('低')
+    await clickSelectOption('中')
+    await provider.locator('.settings-heading').first().click()
+    await expect(page.locator('.n-select-menu:visible')).toHaveCount(0)
+    await expect(
+      provider.getByText('自动保存已暂停', { exact: false }),
+    ).toBeVisible()
+    await expect(provider.locator('.settings-save-status')).not.toHaveText(
+      '已保存',
+    )
+
+    // Manually picking a supported default resumes autosave.
+    await provider
+      .locator('.settings-field', { hasText: '思考深度' })
+      .locator('.n-select')
+      .click()
+    await clickSelectOption('低')
+    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+
+    const capabilityField = provider.locator(
+      '.provider-model-value[aria-label*="annotated-model"][aria-label*="能力等级"]',
+    )
+    await capabilityField.locator('.n-select').click()
+    await clickSelectOption('强力')
+    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+
+    // The minimum window width must not overflow either.
+    await harness.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setSize(960, 700)
+    })
+    await expectNoHorizontalOverflow()
+    await harness.electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setSize(1120, 800)
+    })
+
+    // Reload restores the annotations.
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.locator('.sidebar-settings-button').click()
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    await provider
+      .locator('.provider-card', { hasText: 'E2E Annotated' })
+      .click()
+    await expect(effortsField).toContainText('低')
+    await expect(effortsField).toContainText('中')
+    await expect(capabilityField).toContainText('强力')
+
+    // Make the annotated provider active and exercise the composer reasoning
+    // validity states through the real facade.
+    await provider.getByRole('button', { name: '设为默认' }).click()
+    await page.locator('.settings-back-button').click()
+    // Composer reasoning options are labeled "思考深度 · X", so match loosely.
+    const clickComposerOption = (text: string) =>
+      page
+        .locator('.n-select-menu:visible .n-base-select-option', {
+          hasText: text,
+        })
+        .click()
+    const modelSelect = page.getByTestId('composer-model-select')
+    const reasoningSelect = page.getByTestId('composer-reasoning-select')
+    const reasoningSelectBox = reasoningSelect.locator('.n-base-selection')
+    await expect(reasoningSelectBox).not.toHaveClass(/error-status/u)
+
+    // Switch to the unannotated model and pick 'max' (allowed there).
+    await modelSelect.click()
+    await clickComposerOption('second-model')
+    await reasoningSelect.click()
+    await clickComposerOption('最高')
+
+    // Switching back to the annotated model keeps 'max', which is unsupported:
+    // the select shows an error and send stays blocked until the user fixes it.
+    await modelSelect.click()
+    await clickComposerOption('annotated-model')
+    await expect(reasoningSelectBox).toHaveClass(/error-status/u)
+
+    // Manually picking a supported effort clears the error state.
+    await reasoningSelect.click()
+    await clickComposerOption('低')
+    await expect(reasoningSelectBox).not.toHaveClass(/error-status/u)
+  })
+
+  test('configures and persists the model pool from Agents settings', async () => {
+    const credentialReady = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        setConfig(payload: unknown): Promise<{ ok: boolean }>
+      }
+      const result = await api.setConfig({
+        version: 1,
+        kind: 'credential',
+        providerId: 'e2e-annotated',
+        action: 'set',
+        apiKey: 'e2e-model-pool-key',
+      })
+      return result.ok
+    })
+    expect(credentialReady).toBe(true)
+
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.locator('.sidebar-settings-button').click()
+    const navigation = page.getByRole('navigation', { name: '设置分类' })
+    await navigation.getByRole('menuitem', { name: 'Agents' }).click()
+    const pool = page.locator('.model-pool-section')
+
+    await expect(pool.getByRole('heading', { name: '模型池' })).toBeVisible()
+    const transfer = pool.getByTestId('model-pool-transfer')
+    const source = transfer.locator('.n-transfer-list--source')
+    const target = transfer.locator('.n-transfer-list--target')
+    await expect(
+      source.getByText('E2E Annotated', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      source.getByText('annotated-model', { exact: true }),
+    ).toBeVisible()
+    await expect(source.getByText('强力', { exact: true })).toBeVisible()
+    await expect(source.getByText('低', { exact: true })).toBeVisible()
+    await expect(source.getByText('中', { exact: true })).toBeVisible()
+
+    await pool.getByTestId('model-pool-reasoning-floor').click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('≥ 中', { exact: true })
+      .click()
+    await expect(source.getByText('低', { exact: true })).toHaveCount(0)
+    await source.getByText('中', { exact: true }).click()
+    await expect(target.getByText('中', { exact: true })).toBeVisible()
+    await pool.getByRole('button', { name: '保存模型池' }).click()
+    await expect(pool.locator('.settings-save-status')).toHaveText('已保存')
+
+    const savedPool = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        getConfig(payload: unknown): Promise<{
+          value?: {
+            config: {
+              modelPool: {
+                entries: Array<Record<string, unknown>>
+              }
+            }
+          }
+        }>
+      }
+      const result = await api.getConfig({
+        version: 1,
+        section: 'modelPool',
+      })
+      return result.value?.config.modelPool
+    })
+    expect(savedPool).toEqual({
+      entries: [
+        {
+          id: 'worker-1',
+          enabled: true,
+          providerId: 'e2e-annotated',
+          model: 'annotated-model',
+          reasoning: 'medium',
+        },
+      ],
+    })
+    expect(JSON.stringify(savedPool)).not.toContain('capability')
+
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.locator('.sidebar-settings-button').click()
+    await navigation.getByRole('menuitem', { name: 'Agents' }).click()
+    await expect(
+      target.getByText('E2E Annotated', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      target.getByText('annotated-model', { exact: true }),
+    ).toBeVisible()
+    await expect(target.getByText('中', { exact: true })).toBeVisible()
+
+    await target.getByText('中', { exact: true }).click()
+    await pool.getByRole('button', { name: '保存模型池' }).click()
+    await expect(pool.locator('.n-empty')).toBeVisible()
+  })
+
+  test('pauses provider autosave when the draft breaks the saved approval route', async () => {
+    // The saved approval route uses the annotated provider's second model.
+    const seeded = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        setConfig(payload: unknown): Promise<{ ok: boolean }>
+      }
+      const result = await api.setConfig({
+        version: 1,
+        kind: 'approval',
+        approverProviderId: 'e2e-annotated',
+        approverModel: 'second-model',
+        reasoning: 'low',
+      })
+      return result.ok
+    })
+    expect(seeded).toBe(true)
+
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.locator('.sidebar-settings-button').click()
+    const navigation = page.getByRole('navigation', { name: '设置分类' })
+    // Leave a different approval model in the form without saving. Provider
+    // conflict checks must still use the persisted second-model route.
+    await navigation.getByRole('menuitem', { name: '权限' }).click()
+    const approval = page.locator('.settings-section')
+    await approval
+      .locator('.settings-field', { hasText: '自动审批模型' })
+      .locator('.n-select')
+      .click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option', {
+        hasText: 'annotated-model',
+      })
+      .click()
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    const provider = page.locator('.settings-section')
+    await provider
+      .locator('.provider-card', { hasText: 'E2E Annotated' })
+      .click()
+
+    // Annotating the approval model so it excludes the saved approval effort
+    // would break that route: autosave pauses with a hint instead of failing
+    // against the backend.
+    const secondEffortsField = provider.locator(
+      '.provider-model-value[aria-label*="second-model"][aria-label*="思考档位"]',
+    )
+    await secondEffortsField.locator('.n-select').click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('中', { exact: true })
+      .click()
+    await provider.locator('.settings-heading').first().click()
+    await expect(
+      provider.getByText('不支持其已配置的审批档位', { exact: false }),
+    ).toBeVisible()
+    await expect(provider.locator('.settings-save-status')).not.toHaveText(
+      '已保存',
+    )
+
+    // Widening the annotation to include the saved effort resumes autosave.
+    await secondEffortsField.locator('.n-select').click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('低', { exact: true })
+      .click()
+    await provider.locator('.settings-heading').first().click()
+    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+
+    // Disabling the persisted approval model must also pause autosave before
+    // the backend rejects the Provider update.
+    const modelTransfer = provider.getByTestId('provider-model-transfer')
+    await modelTransfer
+      .locator('.n-transfer-list-item--target', { hasText: 'second-model' })
+      .getByRole('button', { name: 'close' })
+      .click()
+    await expect(
+      provider.getByText('已不在当前 Provider 草稿的启用模型中', {
+        exact: false,
+      }),
+    ).toBeVisible()
+    await expect(provider.locator('.settings-save-status')).not.toHaveText(
+      '已保存',
+    )
+
+    // Re-enabling the model clears the conflict and resumes autosave.
+    await modelTransfer
+      .locator('.n-transfer-list-item--source', { hasText: 'second-model' })
+      .click()
+    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
   })
 
   test('exposes skill management and bounded trace diagnostics in settings', async () => {

@@ -218,6 +218,22 @@ describe('GenericResponsesProvider', () => {
     expect(call.request).not.toHaveProperty('previous_response_id')
   })
 
+  it.each(['low', 'medium', 'xhigh', 'max'] as const)(
+    'passes the %s reasoning effort through to the request body',
+    (effort) => {
+      const provider = new GenericResponsesProvider({
+        providerId: 'responses',
+        baseURL: 'https://api.example/v1',
+        apiKey: 'secret',
+      })
+      const call = provider.compile(input(undefined, effort))
+      expect(call.request).toMatchObject({
+        reasoning: { effort, summary: 'auto' },
+        include: ['reasoning.encrypted_content'],
+      })
+    },
+  )
+
   it('streams reasoning, text and function arguments into one canonical turn', async () => {
     const response = terminalResponse()
     const fetchImpl = vi.fn(async () =>

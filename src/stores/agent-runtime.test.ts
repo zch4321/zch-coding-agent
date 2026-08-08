@@ -254,6 +254,51 @@ describe('agent runtime store', () => {
     })
   })
 
+  it('blocks sending when the kept reasoning effort is unsupported by the model', () => {
+    const replica = seedReplica()
+    const settings = useAgentSettingsStore()
+    settings.activeProviderId = 'deepseek'
+    settings.providers = [
+      {
+        ...provider('deepseek', 'deepseek-chat', [
+          'deepseek-chat',
+          'deepseek-lite',
+        ]),
+        enabledModelIds: ['deepseek-chat', 'deepseek-lite'],
+        modelOverrides: {
+          'deepseek-lite': { reasoningEfforts: ['low'] },
+        },
+      },
+    ]
+    const runtime = useAgentRuntimeStore()
+    // The kept effort is never auto-adjusted, but an unsupported value blocks sending.
+    replica.sessions[0]!.modelSelection = {
+      providerId: 'deepseek',
+      model: 'deepseek-lite',
+      reasoning: 'max',
+    }
+
+    expect(runtime.composerReasoningValid).toBe(false)
+    expect(runtime.canSend).toBe(false)
+
+    // Manually picking a supported effort restores sending.
+    replica.sessions[0]!.modelSelection = {
+      providerId: 'deepseek',
+      model: 'deepseek-lite',
+      reasoning: 'low',
+    }
+    expect(runtime.composerReasoningValid).toBe(true)
+    expect(runtime.canSend).toBe(true)
+
+    // Unannotated models accept every effort (legacy behavior).
+    replica.sessions[0]!.modelSelection = {
+      providerId: 'deepseek',
+      model: 'deepseek-chat',
+      reasoning: 'xhigh',
+    }
+    expect(runtime.composerReasoningValid).toBe(true)
+  })
+
   it('stores reasoning effort on a new-conversation draft route', () => {
     const replica = useAgentReplicaStore()
     replica.projects = [project]

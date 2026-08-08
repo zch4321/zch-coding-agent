@@ -147,7 +147,11 @@ async function fixture(batch: BatchCall[], options: BatchFixtureOptions = {}) {
   await configStore.update({
     version: 1,
     kind: 'subagents',
-    value: { enabled: true, workerTimeoutMs: 60_000 },
+    value: {
+      enabled: true,
+      workerTimeoutMs: 60_000,
+      maxAgentsPerSwarm: 10,
+    },
   })
   const events: AgentEventEnvelope[] = []
   const runOne = vi.fn(

@@ -120,3 +120,53 @@
 - 决定：在 `archive/integrated-benchmark` 分支保留完整快照，从主产品删除 case/runner/grader/metrics、Docker worker、Provider proxy、专用构建与命令、Headless benchmark protocol 和对应依赖。通用 Headless CLI/API、runtime identity、trace、usage/tool 统计与 Electron parity 保留。
 - 理由：评估系统与产品 runtime、消息契约、构建、测试和文档高度耦合，导致本体复杂度与改造成本持续上升。评估工程不应再定义产品内部协议或引入专用 canonical message kind。
 - 后续边界：如重启自动评估，在独立仓库中实现，只通过稳定 Headless 入口黑盒调用 Zch Coding Agent；产品仓库不再承载评估数据集、grader 或 worker 部署系统。
+
+## 2026-08-03 — 思考力度六档与 per-model 标注，不做自动升降档
+
+- 状态：已采纳。
+- 决定：`ReasoningEffort` 从 `off|high|max` 扩展为 `off|low|medium|high|xhigh|max`；per-model 标注（支持的档位子集 `reasoningEfforts`、能力等级 `capability`）复用现有 `modelOverrides` map，不新建存储结构、不 bump AppConfig 版本（纯 optional 增量，v15 数据仍合法）。
+- 语义：未标注的模型视为全档位支持（即原行为）；已标注模型在 Provider 默认档位与 Composer 档位选择中只呈现子集，配置保存与 route resolver 冻结时拒绝标注集外的档位。系统不做任何自动升/降档——用户永远知道实际请求的是哪一档；未标注模型在 API 层不支持时错误原样透传。approval 路由的 `off→high` 提升是系统内部安全关卡的唯一例外，不由用户选择档位。
+- 理由：供应商目录只返回身份与 token 字段，无法得知各模型的思考档位，因此支持度由用户显式标注而非系统推断。`capability` 标注暂无运行时消费者，为未来 Model Pool 调度预留；pool 分支集成时 entry 的 reasoning schema 需切换到该六档枚举、capability 改由 Provider 元数据解析。
+- 已知代价：携带标注的配置用旧版本应用打开会因 `additionalProperties: false` 校验失败（只影响 downgrade）；档位映射交给各 Provider API，adapter 不做就近取整。
+
+## 2026-08-03 — 明确不支持 downgrade，破坏性重置前自动备份配置
+
+- 状态：已采纳。
+- 背景：六档枚举会被多处持久化——Provider 配置与 Headless 配置的 `reasoning`、Session 的 `modelSelection.reasoning`、已完成 assistant message 冻结的 ModelRoute v2。旧版本应用的同版本校验器不接受 `low/medium/xhigh`，遇到含新值的配置或 Session 记录会校验失败。
+- 决定：项目正式声明不支持 downgrade（只向前升级）。不 bump AppConfig/Headless/Route 版本，因为版本号不承担向后兼容语义，且 model pool 分支已占用 AppConfig v16；从本版本起，`ConfigStore` 在因无法解析/迁移而破坏性重置配置前，先把原文件备份为 `<config>.unsupported-<UTC 时间戳>.bak`（备份失败不阻断重置）。
+- 已知边界：旧版本应用（不含备份逻辑）遇到新配置仍会静默重置并丢失 Provider/limits 配置，或无法解码含新档位的 Session/message；备份只保护从本版本开始的重置路径。SQLite v6 迁移后，旧应用打开数据库会以 `DATABASE_VERSION_TOO_NEW` 明确失败而不是迟发 codec 错误。
+- 重新评估条件：出现真实 downgrade 需求（如发布后回滚通道），届时再评估版本门闩或双读协议。
+
+## 2026-08-05 — Auto approval 独立保存 reasoning，并共享静态路由校验
+
+- 状态：已采纳；本条覆盖 2026-08-03 决策中 approval `off→high` 作为运行时例外的部分，其余六档与 per-model 标注语义不变。
+- 决定：由于 model-pool 分支已经占用 v16，本变更使用 AppConfig v17，避免同一版本号对应两种不兼容结构。`approval` 同时持久化 `approverProviderId`、`approverModel` 和 `reasoning`。Permissions 中提供独立审批思考等级表单；运行时原样使用该值，不继承 Provider 默认等级，不做隐式升降档。v9–v15 迁移到默认空 pool 的 v17；v16→v17 组合迁移按 model-pool 分支的冻结结构保留并规范化完整 pool。两条路径都将旧版实际审批等级写成显式值：Provider 为 `off` 时写入 `high`，其余等级原样写入，因此升级不改变既有实际请求，但用户可以看到并修改它。
+- 校验边界：`shared/model-route.ts` 只统一静态配置兼容性——Provider 存在、模型非空且已启用、所选 reasoning 被模型标注支持。Renderer、ConfigStore、Provider 删除 fallback 和 route resolver 共享该判断；凭据、Endpoint 安全性及实时 Provider 可用性仍由运行时检查，不引入新的路由框架或 capability abstraction。
+- 理由：审批模型是独立路由，实际请求等级不应由另一个表单中的 Provider 默认值隐式决定。结构化共享结果消除多层各自实现 annotation/启用池规则造成的分歧，同时保持共享模块 process-neutral。
+- 已知代价：增加一次 AppConfig 迁移与一个审批表单字段；旧版本应用无法读取 v17，沿用项目不支持 downgrade 的既有策略。
+
+## 2026-08-06 — Renderer Approval 状态拆为独立 Store
+
+- 状态：已采纳。
+- 决定：Approval Pinia store 独立拥有审批表单、已保存快照、dirty/saving/status、配置 hydration 和 `config:set(approval)` 保存动作；Agent facade 组合该 store 与 Provider settings store。审批模型候选仍由 Provider 启用池派生，但 Provider settings store 不再持有审批状态或审批保存命令。
+- 理由：审批 route 有独立持久化边界和生命周期。把它继续放在 Provider/limits/permission 聚合 store 中，会让 mutable Provider 草稿与 persisted approval snapshot 更容易被混用，也让 AppConfig section hydration 与错误归属不清。独立 store 使 UI 状态来源与后端 `approval` section 一一对应，同时不复制 Provider 目录。
+- 集成顺序：AppConfig v16 的 model-pool 结构是 v17 approval reasoning 的前置版本，因此 reasoning/approval 分支 rebase 到 model-pool 分支，并实现明确的 v16→v17 迁移；反向 rebase 会让 v16 变更落在 v17 之后并迫使迁移版本重排。该顺序已在集成分支落实。
+
+## 2026-08-06 — Model capability 只由 Provider metadata 持有
+
+- 状态：能力权威边界已采纳；原定的 per-route 并发字段由后续“Swarm 数量归 Job 所有”决策覆盖。
+- 决定：AppConfig v18 从 `modelPool.entries[]` 删除 `capability`。模型能力的唯一配置来源是 `providers[].modelOverrides[model].capability`；freezer 从单次 PublicConfig 快照生成携带派生能力的 backend-only candidate，allocator 和 plan snapshot 只消费派生值，不把它写回 pool 配置。
+- 配置不变量：enabled entry 对应模型必须有能力标注；保存缺少标注的 entry 会整体失败，Provider 编辑或 reload 发现标注被移除时只禁用受影响 entry，disabled entry 仍可保留待修复引用。Provider revision 已覆盖 `modelOverrides`，因此原有 optimistic concurrency 和 freeze 后复核同时覆盖能力变更。
+- 界面边界：Agents 设置页的模型池小节使用 `Provider → model → reasoning` 树形穿梭框选择精确 route；同一模型的不同 reasoning 可以同时入池，不做自动升降档。最低 reasoning 只过滤左侧候选，已选 route 不被隐藏或改写；右侧只读展示派生能力，不配置并发，通过独立 Pinia store 显式原子保存完整数组。Provider 配置仍是模型目录与能力标注的唯一 UI 所有者；模型池不复制这部分表单状态。
+- 迁移：v16/v17 使用冻结 schema 读取，规范化 ID 并保留 entry 的其他字段后剥离旧 capability；没有 Provider 能力标注的 enabled legacy entry 在 reload 修复阶段禁用。冲突时不把旧 pool 值反向写入 Provider metadata，避免迁移重新制造第二个权威来源。
+- 理由：同一 Provider/model 的能力是模型属性，不是某个 pool slot 的属性。移除重复字段可以消除 Provider 标注与 pool entry 漂移、简化未来 pool UI，并让 digest、分配和 revision 检查都基于同一份配置事实。
+
+## 2026-08-06 — Swarm 数量归 Job 所有，模型池只描述可选 Route
+
+- 状态：已采纳；当前落实配置、模型池 UI、allocator/freezer 与文档，`swarm_run`/Job 队列仍在 S4 实现。
+- 配置边界：AppConfig v19 删除 pool entry 中从未执行的 `maxParallel`，并在 `subagents` 增加 `maxAgentsPerSwarm`（默认 10、范围 1–32）。前者避免把执行期容量错误地绑定到模型 route，后者限制单次 Swarm 创建的 child Agent 总数；`limits.maxConcurrentRuns` 继续独立限制全应用同时 active 的 Run，主 Run 自身也占一个 slot。
+- 容量边界：模型池不再采用 64 条 Route 的产品级限制，当前 schema 与 Renderer 共用 1,000 条防御性上限，只用于拒绝异常 IPC/config 负载。它不表达执行容量；真正的运行边界仍由单个 Swarm 的 Agent 总量和全局并发 Run 数控制。
+- 工具契约：未来 `swarm_run.tasks[]` 由主 Agent 显式提供自包含 `task`、`requiredCapability: light|standard|strong` 与 `agentCount`，不增加含义重叠的难度字段，也不由 Backend 猜测能力。Provider 可见 schema 在 `/swarm` Run 启动时根据冻结的 `maxAgentsPerSwarm` 生成，把该值写入 `agentCount.maximum`；设置变化从下一次 `/swarm` Run 生效。数组内 `agentCount` 求和仍由 Backend 在建 Job 前校验，因为 JSON Schema 不能表达跨元素求和；XML 提示不能替代 schema 和执行校验。
+- Tool description 偏好：每个 task 默认 1 个 Agent；只有需要独立交叉验证、多视角调查或高风险复核时才增加数量，并选择足以完成任务的最低 capability，不能为了用满上限而扩张。
+- 分配边界：所有 `actualCapability >= requiredCapability` 的模型都可参与；allocator 按稳定声明顺序先均匀轮询 `Provider + model`，再轮询该模型入池的精确 reasoning route。这样同一模型选择更多 reasoning 叶节点不会获得额外权重；模型数少于所需 Agent 数时自然重复使用。assignment 在 Job 创建时冻结，失败不自动换 Provider 重跑。
+- 理由：任务需要多少独立 Agent 是一次 orchestration 的属性，模型池只回答“哪些精确 route 可以被选”。把数量放到 Tool/Job 并保留一个用户级硬上限，可以让主 Agent 按任务拆分，同时避免 per-route 配额、全局 Run 并发与 Job 总量三套相互重叠的配置。

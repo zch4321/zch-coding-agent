@@ -15,7 +15,12 @@ import {
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { IPC_VERSION } from '../../../shared/channels'
-import type { PermissionMode } from '../../../shared/config'
+import {
+  REASONING_EFFORTS,
+  type PermissionMode,
+  type ReasoningEffort,
+} from '../../../shared/config'
+import { resolveSupportedReasoningEfforts } from '../../../shared/model-settings'
 import type {
   ContextAttachmentChip,
   ContextAttachmentKind,
@@ -67,20 +72,25 @@ const modeOptions = computed(() => [
   { label: t('chat.confirm'), value: 'confirm' },
   { label: t('chat.yolo'), value: 'yolo' },
 ])
-const reasoningOptions = computed(() => [
-  {
-    label: `${t('settings.reasoning')} · ${t('settings.reasoningOff')}`,
-    value: 'off',
-  },
-  {
-    label: `${t('settings.reasoning')} · ${t('settings.reasoningHigh')}`,
-    value: 'high',
-  },
-  {
-    label: `${t('settings.reasoning')} · ${t('settings.reasoningMax')}`,
-    value: 'max',
-  },
-])
+/** Maps each reasoning effort to its locale label key. */
+const REASONING_LABEL_KEYS: Record<ReasoningEffort, string> = {
+  off: 'settings.reasoningOff',
+  low: 'settings.reasoningLow',
+  medium: 'settings.reasoningMedium',
+  high: 'settings.reasoningHigh',
+  xhigh: 'settings.reasoningXhigh',
+  max: 'settings.reasoningMax',
+}
+const reasoningOptions = computed(() => {
+  const provider = agent.providers.find(
+    (candidate) => candidate.id === agent.composerProviderId,
+  )
+  const override = provider?.modelOverrides[agent.composerModel]
+  return resolveSupportedReasoningEfforts(override).map((effort) => ({
+    label: `${t('settings.reasoning')} · ${t(REASONING_LABEL_KEYS[effort])}`,
+    value: effort,
+  }))
+})
 const contextOptions = computed<DropdownOption[]>(() => [
   { label: t('chat.addFileContext'), key: 'file' },
   { label: t('chat.addDirectoryContext'), key: 'directory' },
@@ -112,6 +122,9 @@ const sendHint = computed(() => {
     return t('chat.modelHint')
   }
   if (!agent.providerNoticeAccepted) return t('chat.noticeHint')
+  if (!agent.composerReasoningValid) {
+    return t('chat.reasoningUnsupportedHint')
+  }
   if (agent.activeRunId) return t('chat.interjectionHint')
   return t('chat.inputHint')
 })
@@ -455,8 +468,8 @@ async function handleProviderSelect(value: string | number) {
 }
 
 function handleReasoningSelect(value: string | number) {
-  if (value === 'off' || value === 'high' || value === 'max') {
-    agent.setProviderReasoning(value)
+  if ((REASONING_EFFORTS as readonly string[]).includes(String(value))) {
+    agent.setProviderReasoning(value as ReasoningEffort)
   }
 }
 
@@ -589,6 +602,7 @@ watch(inputDisabled, (disabled) => {
             routeSelectionDisabled || agent.composerModelOptions.length === 0
           "
           filterable
+          data-testid="composer-model-select"
           @update:value="agent.setProviderModel"
         />
         <NSelect
@@ -597,6 +611,7 @@ watch(inputDisabled, (disabled) => {
           size="small"
           :options="reasoningOptions"
           :disabled="routeSelectionDisabled"
+          :status="agent.composerReasoningValid ? undefined : 'error'"
           :aria-label="t('settings.reasoning')"
           data-testid="composer-reasoning-select"
           @update:value="handleReasoningSelect"

@@ -12,7 +12,10 @@ import type {
   ContextAttachmentKind,
 } from '../../shared/context'
 import type { MessageId, ProjectId, RunId, SessionId } from '../../shared/ids'
-import type { ModelSelection } from '../../shared/model-route'
+import {
+  evaluateModelRouteCompatibility,
+  type ModelSelection,
+} from '../../shared/model-route'
 import type { PlanStatus } from '../../shared/orchestration'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { DurableRunStartResult } from '../../shared/domain-state-api'
@@ -38,8 +41,11 @@ import {
   type SendMessageOptions,
   type SessionOverlay,
 } from './agent-runtime-helpers'
+import { registerRuntimeSubscriptions } from './agent-runtime-subscriptions'
 import { projectConversationTurns } from './conversation-timeline'
 import { useAgentSettingsStore } from './agent-settings'
+import { useApprovalSettingsStore } from './approval-settings'
+import { useModelPoolSettingsStore } from './model-pool-settings'
 import { useAgentShellStore } from './agent-shell'
 import { useNotificationStore } from './notifications'
 import { useAgentExecutionStore } from './agent-executions'
@@ -149,6 +155,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         this.composerModelOptions.some(
           (option) => option.value === this.composerModel,
         ) &&
+        this.composerReasoningValid &&
         !this.startPending &&
         !this.activeRunId &&
         !this.pendingApproval &&
@@ -194,6 +201,22 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     composerReasoning(): ModelSelection['reasoning'] {
       return this.composerModelSelection.reasoning
     },
+    /**
+     * True when the current selection's reasoning effort is supported by the
+     * active model. The value is never auto-adjusted; an unsupported value
+     * blocks sending until the user picks a supported one.
+     */
+    composerReasoningValid(): boolean {
+      const settings = useAgentSettingsStore()
+      const selection = this.composerModelSelection
+      const provider = settings.providers.find(
+        (candidate) => candidate.id === selection.providerId,
+      )
+      const compatibility = evaluateModelRouteCompatibility(provider, selection)
+      return (
+        compatibility.ok || compatibility.reason !== 'reasoning-unsupported'
+      )
+    },
     composerModelOptions(): Array<{ label: string; value: string }> {
       const settings = useAgentSettingsStore()
       const selection = this.composerModelSelection
@@ -238,89 +261,25 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const settings = useAgentSettingsStore()
       const replica = useAgentReplicaStore()
       const executions = useAgentExecutionStore()
-      shell.bridgeAvailable = Boolean(window.agentApi)
-      if (!window.agentApi) {
+      const api = window.agentApi
+      shell.bridgeAvailable = Boolean(api)
+      if (!api) {
         shell.initialized = true
         return
       }
-      shell.disposeSubscriptions()
-      shell.registerUnsubscriber(
-        window.agentApi.onDomainStateEvent((delivery) => {
-          if (delivery.kind === 'buffer_overflow') {
-            void replica.bootstrap(replica.selectedProject?.path)
-            return
-          }
-          const commit = delivery.event.commit
-          void replica.reconcile(commit).then((outcome) => {
-            if (outcome !== 'duplicate' && commit.topic === 'session.removed') {
-              delete this.overlays[commit.change.sessionId]
-              executions.removeSession(commit.change.sessionId)
-            }
-            if (outcome !== 'duplicate' && commit.topic === 'session.changed') {
-              const overlay = this.overlays[commit.change.session.id]
-              if (overlay) {
-                overlay.goal = commit.change.session.goal
-                  ? structuredClone(commit.change.session.goal)
-                  : undefined
-                overlay.plan = commit.change.session.plan
-                  ? structuredClone(commit.change.session.plan)
-                  : undefined
-              }
-            }
-            if (
-              outcome !== 'duplicate' &&
-              commit.topic === 'session.changed' &&
-              commit.change.messageChange.mode === 'upsert'
-            ) {
-              const overlay = this.overlays[commit.change.session.id]
-              if (overlay) {
-                if (
-                  commit.change.messageChange.records.some(
-                    (record) =>
-                      record.kind === 'assistant_turn' &&
-                      record.visibility === 'visible',
-                  )
-                ) {
-                  overlay.text = ''
-                  overlay.reasoning = ''
-                }
-                const durableInterjectionIds = new Set(
-                  commit.change.messageChange.records.flatMap((record) =>
-                    record.kind === 'interjection' &&
-                    record.metadata?.interjectionId
-                      ? [record.metadata.interjectionId]
-                      : [],
-                  ),
-                )
-                overlay.interjections = overlay.interjections.filter(
-                  (interjection) =>
-                    !durableInterjectionIds.has(interjection.id),
-                )
-              }
-            }
-          })
-        }),
-      )
-      shell.registerUnsubscriber(
-        window.agentApi.onAgentEvent((envelope) =>
-          this.handleAgentEvent(envelope.event),
-        ),
-      )
-      shell.registerUnsubscriber(
-        window.agentApi.onAgentExecutionEvent((envelope) =>
-          executions.handleEvent(envelope.event),
-        ),
-      )
-      shell.registerUnsubscriber(
-        window.agentApi.onBackendNotification((notification) => {
-          useNotificationStore().enqueue(notification)
-        }),
-      )
-      const config = await window.agentApi.getConfig({
+      registerRuntimeSubscriptions({
+        api,
+        shell,
+        replica,
+        executions,
+        overlays: this.overlays,
+        handleAgentEvent: (event) => this.handleAgentEvent(event),
+      })
+      const config = await api.getConfig({
         version: IPC_VERSION,
         section: 'all',
       })
-      if (config.ok) settings.applyConfig(config.value.config)
+      if (config.ok) this.applyConfig(config.value.config)
       else showOperationError(config.error)
       await replica.bootstrap(
         config.ok ? config.value.config.workspace.lastOpened : undefined,
@@ -338,6 +297,8 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     applyConfig(config: PublicConfig, sections: ConfigSection[] = ['all']) {
       useAgentSettingsStore().applyConfig(config, sections)
+      useApprovalSettingsStore().applyConfig(config, sections)
+      useModelPoolSettingsStore().applyConfig(config, sections)
     },
     clearDiagnostics() {
       const overlay = this.activeOverlay

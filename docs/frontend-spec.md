@@ -443,7 +443,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 - Base URL。
 - 主模型：新 Provider 不预填虚构模型名。用户填写 API Key 后，表单在 600ms 静默期后自动保存并立即刷新 `/models`；已有凭据时进入页面或切换 Provider 卡片也会用已保存 route 静默刷新。显式刷新按钮先排空自动保存再刷新，失败时保留上次成功缓存。
-- 模型启用池与能力：可筛选穿梭框左侧显示完整目录，右侧显示 `enabledModelIds`；只有右侧模型能进入主模型、Composer、自动审批和未来 Swarm 的下拉候选。右侧模型在下方显示 Provider 返回/内置/保守默认来源；上下文长度和最大输出允许用户按模型覆盖，且解释它们分别用于本地上下文预算、自动压缩和单次生成预留。仅采用目录协议明确返回的容量字段，未知模型显示保守默认值提示。
+- 模型启用池与能力：可筛选穿梭框左侧显示完整目录，右侧显示 `enabledModelIds`；只有右侧模型能进入主模型、Composer、自动审批和未来 Swarm 的下拉候选。右侧模型在下方显示 Provider 返回/内置/保守默认来源；上下文长度和最大输出允许用户按模型覆盖，且解释它们分别用于本地上下文预算、自动压缩和单次生成预留。仅采用目录协议明确返回的容量字段，未知模型显示保守默认值提示。每个启用模型还可标注"思考档位"（多选，缺省=全部六档 `off|low|medium|high|xhigh|max`）与"能力等级"（light/standard/strong，为未来模型池预留）；已标注模型在 Provider 默认档位与 Composer 档位选择中只呈现标注子集，标注与默认档位冲突时暂停自动保存并要求用户手动改选，不做自动升降档。
 - Token 估算：默认保守估算，可切换为自定义 `bytesPerToken`；说明该值只影响预算估算，不能关闭字节/行数硬限制。
 - Reasoning 开关。
 - API Key 配置状态、更新和清除。
@@ -453,15 +453,17 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.3 Auto approval
 
 - Auto approval 是全局路由配置，不属于任一 Provider 卡片草稿，使用独立保存动作。
+- Renderer 的审批表单、已保存快照和保存状态由独立 Approval store 管理；Agent facade 只组合 Provider 候选投影，不把审批状态重新塞回 Provider settings store。
 - Auto approval 显示在 Permissions 页面，不占用独立设置导航项。
-- 配置引用一个已存在的 Provider 实例以复用 `providerType/baseURL/credential`，并独立选择审批模型。
+- 配置引用一个已存在的 Provider 实例以复用 `providerType/baseURL/credential`，并独立选择审批模型与思考等级；运行时原样使用审批等级，不继承 Provider 默认等级，也不做隐式升降档。
 - 审批模型候选只来自所选 Provider 的 `enabledModelIds`，不得错误复用当前正在编辑的 Provider 模型列表。
-- Provider 保存不能修改 Auto approval；删除正被审批路由引用的 Provider 时回退到明确的可用 Provider。
+- 模型标注不支持当前审批等级时保留用户选择、显示字段错误并禁止保存，由用户手动改选等级或模型。
+- Provider 保存不能修改 Auto approval；草稿兼容性检查读取已保存而非尚未提交的审批表单。删除正被审批路由引用的 Provider 时，按已保存审批等级选择兼容 fallback 模型；没有兼容模型则拒绝删除。
 
 ### 10.4 Permissions
 
 - 默认权限模式。
-- 全局 Auto approval Provider 与模型。
+- 全局 Auto approval Provider、模型与思考等级。
 - Sensitive Data：off/warn/confirm。
 - Path globs。
 - Content patterns。

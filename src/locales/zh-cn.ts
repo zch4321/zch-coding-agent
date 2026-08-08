@@ -113,6 +113,8 @@ const zhCN = {
     apiKeyHint: '请在设置中配置模型服务 API Key',
     modelHint: '请先在模型服务设置中启用并选择主模型',
     noticeHint: '请先确认模型服务数据提示',
+    reasoningUnsupportedHint:
+      '当前模型不支持所选思考档位，请手动选择受支持档位后再发送',
     approvalHint: '请先处理待审批操作',
     inputHint: '询问当前工作区',
     addFileContext: '添加文件上下文',
@@ -330,6 +332,13 @@ const zhCN = {
     approvalCredentialMissing:
       '所选 Provider 尚未配置凭据；运行时会回退到人工审批。',
     approvalModelHint: '这里只显示在所选 Provider 中启用的模型。',
+    approvalReasoning: '自动审批思考深度',
+    approvalReasoningHint:
+      '自动审批会原样使用该档位；它独立于 Provider 默认档位，系统不会隐式调整。',
+    approvalReasoningConflictHint:
+      '该模型不支持所选审批思考档位；请选择受支持的档位或其他模型。',
+    approvalModelMissingHint:
+      '审批模型不存在或已停用；请选择已启用的模型以恢复自动审批。',
     saveApproval: '保存自动审批',
     addProvider: '新增 Provider',
     providerActions: '操作',
@@ -367,20 +376,36 @@ const zhCN = {
     maximumContext: '最大上下文',
     compressionThreshold: '压缩阈值',
     maximumOutputLength: '最大输出长度',
+    modelReasoningEfforts: '思考档位',
+    modelReasoningEffortsPlaceholder: '全部档位',
+    modelCapability: '能力等级',
+    modelCapabilityPlaceholder: '未标注',
+    capabilityLight: '轻量',
+    capabilityStandard: '标准',
+    capabilityStrong: '强力',
     mainModelTag: '主模型',
     tokenEstimation: 'Token 估算方式',
     bytesPerToken: '每 Token 的 UTF-8 字节数',
     reasoning: '思考深度',
     reasoningOff: '关闭',
+    reasoningLow: '低',
+    reasoningMedium: '中',
     reasoningHigh: '高',
-    reasoningMax: '最大',
+    reasoningXhigh: '超高',
+    reasoningMax: '最高',
+    mainReasoningConflictHint:
+      '主模型的思考档位标注已不包含当前默认档位；自动保存已暂停，请手动改选受支持的档位。',
+    approvalDraftConflictHint:
+      '已保存的自动审批模型 {model} 不支持其已配置的审批档位；自动保存已暂停，请先调整标注或审批路由。',
+    approvalDraftModelDisabledHint:
+      '已保存的自动审批模型 {model} 已不在当前 Provider 草稿的启用模型中；自动保存已暂停，请重新启用或改选审批模型。',
     reasoningHint:
-      '支持推理的 DeepSeek 模型可使用高或最大；关闭会禁用 thinking。',
+      '所选档位会原样发送给模型；在模型行中标注思考档位可收窄可选范围，关闭会禁用 thinking。',
     reasoningHintGeneric: '通用 Chat Completions 不发送厂商专有推理参数。',
     reasoningHintResponses:
       'Responses 会发送 reasoning effort，并在本地无状态回放加密 reasoning items。',
     reasoningHintAnthropic:
-      'high/max 使用 adaptive thinking；旧模型或兼容代理请设为关闭。',
+      '所有非关闭档位都会使用 adaptive thinking；旧模型或兼容代理请设为关闭。',
     approverProvider: '自动审批 Provider',
     approverModel: '自动审批模型',
     apiKey: 'API Key',
@@ -469,12 +494,48 @@ const zhCN = {
     workerTimeout: '单个子任务超时',
     workerTimeoutHint:
       '达到此时限后会取消子任务。关闭父任务也会立即取消正在运行的子任务。',
+    maxAgentsPerSwarm: '单次 Swarm 最大 Agent 数',
+    maxAgentsPerSwarmHint:
+      '限制一次 Swarm 创建的子 Agent 总数；实际同时运行数仍受全局最大并发任务数限制。修改从下一次 /swarm Run 生效。',
     minutes: '分钟',
     costNotice:
       '子 Agent 会发起额外的模型请求，并产生相应的 Token 消耗和 Provider 费用。',
     concurrencyNotice:
       '子任务与普通任务共用全局并发限制（当前为 {count}）。当全局限制为 1 时，嵌套子任务会被拒绝。',
     save: '保存 Agent 设置',
+  },
+  modelPool: {
+    title: '模型池',
+    hint: '按 Provider、模型和精确思考深度选择 Swarm 候选 Route。能力等级只读取 Provider 模型标注，整组修改一次性保存。',
+    save: '保存模型池',
+    empty: '模型池为空，请从左侧选择 Route。',
+    noEligibleModels:
+      '没有可选 Route。请先在“模型服务”中启用模型、标注能力等级并配置凭据。',
+    reasoningFloor: '候选最低思考等级',
+    reasoningFloorHint:
+      '只筛选左侧候选，不会修改或隐藏模型池中已经选择的精确 Route。',
+    reasoningFloorAll: '全部思考等级',
+    reasoningFloorAtLeast: '≥ {reasoning}',
+    availableRoutes: '可用 Route',
+    selectedRoutes: '模型池',
+    filterRoutes: '筛选 Provider、模型或思考等级',
+    selectAllRoutes: '选择当前全部 Route',
+    clearSelectedRoutes: '清空当前 Route',
+    selectionLimitExceeded:
+      '模型池最多保存 {count} 条 Route；本次超出上限的选择未应用。',
+    noMatchingRoutes: '没有符合当前筛选条件的 Route。',
+    providerMissing: '引用的 Provider 已不存在，请重新选择或删除此条目。',
+    modelUnavailable: '模型不存在或未在该 Provider 中启用。',
+    reasoningUnsupported: '该模型不支持当前思考深度，请重新选择。',
+    capabilityMissingHint: '该模型没有能力等级标注；请先到“模型服务”中配置。',
+    credentialMissing: '该 Provider 尚未配置凭据，不能启用此条目。',
+    entryDisabled: '该 Route 当前已禁用；移除后重新选择可再次启用。',
+    routeUnavailable: '不可用',
+    belowReasoningFloor: '低于筛选',
+    belowReasoningFloorHint:
+      '该 Route 已在模型池中，因此仍然显示；当前筛选只影响左侧候选。',
+    externalChange:
+      'Provider 配置已改变模型池的已保存状态；请检查当前草稿后重新保存。',
   },
   dialogs: {
     yoloTitle: '启用全自动模式？',

@@ -1,3 +1,5 @@
+import { REASONING_EFFORTS, type ReasoningEffort } from './reasoning'
+
 export const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 256_000
 export const DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 65_536
 
@@ -36,4 +38,30 @@ export function resolveModelTokenSettings(input: {
     ),
     maxOutputTokens,
   }
+}
+
+/** Returns the effort set deduplicated and sorted in ascending strength order. */
+export function normalizeReasoningEfforts(
+  efforts: readonly ReasoningEffort[],
+): ReasoningEffort[] {
+  const strengthOrder = new Map(
+    REASONING_EFFORTS.map((effort, index) => [effort, index] as const),
+  )
+  return [...new Set(efforts)].sort(
+    (a, b) => (strengthOrder.get(a) ?? 0) - (strengthOrder.get(b) ?? 0),
+  )
+}
+
+/**
+ * Resolves which reasoning efforts a model supports: the annotated subset from
+ * its capability override when present (returned in ascending strength order),
+ * otherwise every known effort. Unannotated models keep legacy behavior.
+ */
+export function resolveSupportedReasoningEfforts(override?: {
+  reasoningEfforts?: readonly ReasoningEffort[]
+}): ReasoningEffort[] {
+  if (!override?.reasoningEfforts?.length) {
+    return [...REASONING_EFFORTS]
+  }
+  return normalizeReasoningEfforts(override.reasoningEfforts)
 }

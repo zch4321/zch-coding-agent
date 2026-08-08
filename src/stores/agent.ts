@@ -1,6 +1,7 @@
 import type { Pinia } from 'pinia'
 import type { ProjectId } from '../../shared/ids'
 import { useAgentChangesStore } from './agent-changes'
+import { useApprovalSettingsStore } from './approval-settings'
 import { useAgentReplicaStore } from './agent-replica'
 import { useAgentRuntimeStore } from './agent-runtime'
 import { useAgentSettingsStore } from './agent-settings'
@@ -19,12 +20,14 @@ export type {
 } from './agent-types'
 
 type ShellStore = ReturnType<typeof useAgentShellStore>
+type ApprovalStore = ReturnType<typeof useApprovalSettingsStore>
 type SettingsStore = ReturnType<typeof useAgentSettingsStore>
 type ReplicaStore = ReturnType<typeof useAgentReplicaStore>
 type RuntimeStore = ReturnType<typeof useAgentRuntimeStore>
 type ChangesStore = ReturnType<typeof useAgentChangesStore>
 
 export type AgentFacade = Omit<ShellStore, '$id'> &
+  Omit<ApprovalStore, 'error' | '$id' | 'applyConfig' | 'selectProvider'> &
   Omit<
     SettingsStore,
     | 'error'
@@ -48,6 +51,7 @@ export type AgentFacade = Omit<ShellStore, '$id'> &
     removeRememberedRule(ruleId: string): Promise<void>
     revertChange(changeId: string): Promise<boolean>
     searchSessions(text: string, projectId?: ProjectId): Promise<void>
+    setApprovalProvider(providerId: string): void
     setProviderDraftModel(model: string): void
   }
 
@@ -81,10 +85,6 @@ const settingsProperties = new Set<PropertyKey>([
   'providerSavedSignature',
   'providerSaving',
   'providerSaveStatus',
-  'approvalForm',
-  'approvalSavedSignature',
-  'approvalSaving',
-  'approvalSaveStatus',
   'permissionForm',
   'loggingForm',
   'loggingWarnings',
@@ -110,6 +110,13 @@ const settingsProperties = new Set<PropertyKey>([
   'providerRefreshAvailable',
   'limitsDirty',
   'subagentsDirty',
+])
+const approvalProperties = new Set<PropertyKey>([
+  'approvalForm',
+  'approvalSavedForm',
+  'approvalSavedSignature',
+  'approvalSaving',
+  'approvalSaveStatus',
   'approvalDirty',
 ])
 const replicaProperties = new Set<PropertyKey>([
@@ -158,6 +165,7 @@ const runtimeProperties = new Set<PropertyKey>([
   'composerProviderId',
   'composerModel',
   'composerReasoning',
+  'composerReasoningValid',
   'composerModelOptions',
 ])
 const changesProperties = new Set<PropertyKey>([
@@ -203,6 +211,7 @@ function sessionViews(replica: ReplicaStore): SessionView[] {
 export function useAgentStore(pinia?: Pinia): AgentFacade {
   const shell = useAgentShellStore(pinia)
   const settings = useAgentSettingsStore(pinia)
+  const approval = useApprovalSettingsStore(pinia)
   const replica = useAgentReplicaStore(pinia)
   const runtime = useAgentRuntimeStore(pinia)
   const changes = useAgentChangesStore(pinia)
@@ -230,6 +239,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     setProviderReasoning: runtime.setProviderReasoning,
     setProviderDraftModel: settings.setProviderModel,
     updateModelConfiguration: settings.updateModelConfiguration,
+    updateModelAnnotation: settings.updateModelAnnotation,
     loadProviderModels: settings.loadProviderModels,
     enterProviderSettings: settings.enterProviderSettings,
     refreshSelectedProviderModels: settings.refreshSelectedProviderModels,
@@ -238,8 +248,13 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     copyProvider: settings.copyProvider,
     deleteProvider: settings.deleteProvider,
     saveProvider: settings.saveProvider,
-    setApprovalProvider: settings.setApprovalProvider,
-    saveApproval: settings.saveApproval,
+    setApprovalProvider: (providerId: string) => {
+      const provider = settings.providers.find(
+        (candidate) => candidate.id === providerId,
+      )
+      if (provider) approval.selectProvider(provider)
+    },
+    saveApproval: approval.saveApproval,
     clearCredential: settings.clearCredential,
     saveLimits: settings.saveLimits,
     saveSubagents: settings.saveSubagents,
@@ -283,6 +298,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
 
   const targetStore = (property: PropertyKey): object | undefined => {
     if (shellProperties.has(property)) return shell
+    if (approvalProperties.has(property)) return approval
     if (settingsProperties.has(property)) return settings
     if (replicaProperties.has(property)) return replica
     if (runtimeProperties.has(property)) return runtime

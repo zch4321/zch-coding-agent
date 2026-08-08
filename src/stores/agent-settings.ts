@@ -3,9 +3,11 @@ import { IPC_VERSION } from '../../shared/channels'
 import type {
   AssistantLanguage,
   ConfigSection,
+  ModelCapabilityLevel,
   PermissionMode,
   ProviderPublicConfig,
   PublicConfig,
+  ReasoningEffort,
 } from '../../shared/config'
 import { getProviderConfig } from '../../shared/config'
 import {
@@ -20,6 +22,8 @@ import {
 } from '../../shared/model-settings'
 import { nowNotice, toUiRememberedRules } from './config-mapping'
 import type { UiModelProfile, UiRememberedRule } from './agent-types'
+import { useApprovalSettingsStore } from './approval-settings'
+import { useModelPoolSettingsStore } from './model-pool-settings'
 import {
   DEFAULT_PROVIDER_FORM,
   providerFormSignature,
@@ -63,12 +67,19 @@ function providerModelProfiles(
       ownedBy: catalogModel?.ownedBy,
       availability: catalogModel ? 'provider' : 'custom',
       capabilitySource:
-        override && Object.keys(override).length > 0
+        override &&
+        (override.contextWindowTokens !== undefined ||
+          override.compactThresholdTokens !== undefined ||
+          override.maxOutputTokens !== undefined)
           ? 'override'
           : catalogModel?.contextWindowTokens
             ? 'provider'
             : 'default',
       ...tokenSettings,
+      ...(override?.reasoningEfforts?.length
+        ? { reasoningEfforts: [...override.reasoningEfforts] }
+        : {}),
+      ...(override?.capability ? { capability: override.capability } : {}),
     }
   })
 }
@@ -98,13 +109,6 @@ function providerIdFromLabel(label: string, existingIds: Set<string>): string {
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
-}
-
-function approvalSignature(form: {
-  providerId: string
-  model: string
-}): string {
-  return `${form.providerId}|${form.model}`
 }
 
 function limitsSignature(limits: PublicConfig['limits'] | undefined): string {
@@ -146,13 +150,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     providerSavedSignature: providerFormSignature(DEFAULT_PROVIDER_FORM),
     providerSaving: false,
     providerSaveStatus: '',
-    approvalForm: {
-      providerId: 'deepseek',
-      model: '',
-    },
-    approvalSavedSignature: 'deepseek|',
-    approvalSaving: false,
-    approvalSaveStatus: '',
     permissionForm: {
       sensitiveMode: 'confirm' as 'off' | 'warn' | 'confirm',
       pathGlobs: '',
@@ -248,8 +245,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           !provider.model || !provider.enabledModelIds.includes(provider.model),
       })),
     approvalModelOptions: (state) => {
+      const approval = useApprovalSettingsStore()
       const provider = state.providers.find(
-        (candidate) => candidate.id === state.approvalForm.providerId,
+        (candidate) => candidate.id === approval.approvalForm.providerId,
       )
       if (!provider) return []
       return provider.enabledModelIds.map((id) => ({ label: id, value: id }))
@@ -286,8 +284,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     subagentsDirty: (state) =>
       subagentsSignature(state.subagentsConfig) !==
       state.subagentsSavedSignature,
-    approvalDirty: (state) =>
-      approvalSignature(state.approvalForm) !== state.approvalSavedSignature,
     webSearchDirty: (state) =>
       Boolean(
         state.webSearchForm.apiKey.trim() ||
@@ -355,12 +351,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         ) {
           this.selectedProviderId = config.activeProviderId
         }
-      }
-
-      if (includes('approval')) {
-        this.approvalForm.providerId = config.approval.approverProviderId
-        this.approvalForm.model = config.approval.approverModel
-        this.approvalSavedSignature = approvalSignature(this.approvalForm)
       }
 
       if (includes('limits')) {
@@ -534,6 +524,37 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         }),
       )
       model.capabilitySource = 'override'
+    },
+    /**
+     * Updates per-model reasoning/capability annotation. Clearing an annotation
+     * removes the field; token override semantics (capabilitySource) are untouched.
+     */
+    updateModelAnnotation(
+      modelId: string,
+      patch: {
+        reasoningEfforts?: ReasoningEffort[]
+        capability?: ModelCapabilityLevel | null
+      },
+    ) {
+      const model = this.modelProfiles.find(
+        (candidate) => candidate.id === modelId,
+      )
+      if (!model) return
+
+      if (patch.reasoningEfforts !== undefined) {
+        if (patch.reasoningEfforts.length) {
+          model.reasoningEfforts = [...patch.reasoningEfforts]
+        } else {
+          delete model.reasoningEfforts
+        }
+      }
+      if (patch.capability !== undefined) {
+        if (patch.capability) {
+          model.capability = patch.capability
+        } else {
+          delete model.capability
+        }
+      }
     },
     /** Loads cached profiles or refreshes the saved Provider model catalog. */
     async loadProviderModels(
@@ -742,7 +763,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       if (this.selectedProviderId === providerId) {
         this.selectedProviderId = result.value.config.activeProviderId
       }
-      this.applyConfig(result.value.config, ['providers', 'approval'])
+      this.applyConfig(result.value.config, ['providers'])
+      useApprovalSettingsStore().applyConfig(result.value.config, ['approval'])
+      useModelPoolSettingsStore().applyExternalConfig(result.value.config)
       return true
     },
     async saveProvider(): Promise<boolean> {
@@ -816,6 +839,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
             const apiKeyUnchanged = this.providerForm.apiKey === draft.apiKey
             this.activeProviderId = saved.value.config.activeProviderId
             this.providers = structuredClone(saved.value.config.providers)
+            useModelPoolSettingsStore().applyExternalConfig(saved.value.config)
             if (limitsSignature(this.limitsConfig) === limitsDraftSignature) {
               this.limitsConfig = structuredClone(saved.value.config.limits)
               this.limitsSavedSignature = limitsSignature(
@@ -856,38 +880,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       providerSaveOperations.set(this, trackedOperation)
       return trackedOperation
     },
-    setApprovalProvider(providerId: string) {
-      const provider = this.providers.find(
-        (candidate) => candidate.id === providerId,
-      )
-      if (!provider) return
-      this.approvalForm.providerId = provider.id
-      this.approvalForm.model = provider.enabledModelIds[0] ?? ''
-      this.approvalSaveStatus = ''
-    },
-    async saveApproval() {
-      const bridge = window.agentApi
-      if (!bridge || this.approvalSaving) return false
-      this.approvalSaving = true
-      this.approvalSaveStatus = ''
-      try {
-        const result = await bridge.setConfig({
-          version: IPC_VERSION,
-          kind: 'approval',
-          approverProviderId: this.approvalForm.providerId,
-          approverModel: this.approvalForm.model,
-        })
-        if (!result.ok) {
-          this.error = result.error.message
-          return false
-        }
-        this.applyConfig(result.value.config, ['approval'])
-        this.approvalSaveStatus = 'saved'
-        return true
-      } finally {
-        this.approvalSaving = false
-      }
-    },
     async clearCredential() {
       const bridge = window.agentApi
       if (!bridge) return
@@ -897,8 +889,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         providerId: this.selectedProviderId,
         action: 'clear',
       })
-      if (result.ok) this.applyConfig(result.value.config, ['providers'])
-      else this.error = result.error.message
+      if (result.ok) {
+        this.applyConfig(result.value.config, ['providers'])
+        useModelPoolSettingsStore().applyExternalConfig(result.value.config)
+      } else this.error = result.error.message
     },
     async saveWebSearchSettings() {
       const bridge = window.agentApi

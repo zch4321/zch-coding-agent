@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest'
+import { REASONING_EFFORTS } from '../../shared/config'
 import legacyAppConfigV9 from './fixtures/app-config-v9.json'
 import { DEFAULT_APP_CONFIG, type AppConfig } from './schema'
 import { migrateConfig } from './migrations'
 
 function legacyV9Config(): Record<string, unknown> {
   return structuredClone(legacyAppConfigV9) as Record<string, unknown>
+}
+
+function removeApprovalReasoning(source: Record<string, unknown>): void {
+  delete (source.approval as Record<string, unknown>).reasoning
+}
+
+function removeMaxAgentsPerSwarm(source: Record<string, unknown>): void {
+  delete (source.subagents as Record<string, unknown>).maxAgentsPerSwarm
 }
 
 function legacyCurrentShapeConfig(
@@ -15,7 +24,9 @@ function legacyCurrentShapeConfig(
     unknown
   >
   source.schemaVersion = schemaVersion
+  removeApprovalReasoning(source)
   delete source.subagents
+  delete source.modelPool
   ;(source.limits as Record<string, unknown>).maxToolTokensPerRun = 128_000
   for (const provider of source.providers as Array<Record<string, unknown>>) {
     provider.model = 'deepseek-v4-pro'
@@ -30,7 +41,9 @@ function legacyV12Config(): Record<string, unknown> {
     unknown
   >
   source.schemaVersion = 12
+  removeApprovalReasoning(source)
   delete source.subagents
+  delete source.modelPool
   ;(source.limits as Record<string, unknown>).maxToolTokensPerRun = 128_000
   for (const provider of source.providers as Array<Record<string, unknown>>) {
     provider.model = 'deepseek-v4-pro'
@@ -46,6 +59,9 @@ function legacyV13Config(): Record<string, unknown> {
     unknown
   >
   source.schemaVersion = 13
+  removeApprovalReasoning(source)
+  removeMaxAgentsPerSwarm(source)
+  delete source.modelPool
   ;(source.limits as Record<string, unknown>).maxToolTokensPerRun = 128_000
   for (const provider of source.providers as Array<Record<string, unknown>>) {
     provider.model = 'deepseek-v4-pro'
@@ -61,6 +77,9 @@ function legacyV14Config(): Record<string, unknown> {
     unknown
   >
   source.schemaVersion = 14
+  removeApprovalReasoning(source)
+  removeMaxAgentsPerSwarm(source)
+  delete source.modelPool
   for (const provider of source.providers as Array<Record<string, unknown>>) {
     provider.model = 'deepseek-v4-pro'
     provider.modelConfigurationIds = ['deepseek-v4-pro']
@@ -69,11 +88,55 @@ function legacyV14Config(): Record<string, unknown> {
   return source
 }
 
-describe('config v15 migration boundary', () => {
-  it('creates the v15 defaults when no config exists', () => {
+function legacyV15Config(): Record<string, unknown> {
+  const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
+    string,
+    unknown
+  >
+  source.schemaVersion = 15
+  removeApprovalReasoning(source)
+  removeMaxAgentsPerSwarm(source)
+  delete source.modelPool
+  return source
+}
+
+function legacyV16Config(): Record<string, unknown> {
+  const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
+    string,
+    unknown
+  >
+  source.schemaVersion = 16
+  removeApprovalReasoning(source)
+  removeMaxAgentsPerSwarm(source)
+  return source
+}
+
+function legacyV17Config(): Record<string, unknown> {
+  const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
+    string,
+    unknown
+  >
+  source.schemaVersion = 17
+  removeMaxAgentsPerSwarm(source)
+  return source
+}
+
+function legacyV18Config(): Record<string, unknown> {
+  const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
+    string,
+    unknown
+  >
+  source.schemaVersion = 18
+  removeMaxAgentsPerSwarm(source)
+  return source
+}
+
+describe('config v19 migration boundary', () => {
+  it('creates the v19 defaults when no config exists', () => {
     expect(migrateConfig(undefined)).toEqual(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined)).not.toBe(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined).limits.maxConcurrentRuns).toBe(16)
+    expect(migrateConfig(undefined).modelPool).toEqual({ entries: [] })
   })
 
   it('rejects every legacy schema with reset guidance', () => {
@@ -83,15 +146,127 @@ describe('config v15 migration boundary', () => {
           ...structuredClone(DEFAULT_APP_CONFIG),
           schemaVersion,
         }),
-      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v15`)
+      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v19`)
     }
+  })
+
+  it('migrates v16 model pool state and makes approval reasoning explicit', () => {
+    const source = legacyV16Config()
+    ;(source.providers as Array<Record<string, unknown>>)[0]!.reasoning = 'off'
+    source.modelPool = {
+      entries: [
+        {
+          id: ' worker ',
+          enabled: false,
+          providerId: 'deepseek',
+          model: 'worker-model',
+          reasoning: 'high',
+          capability: 'standard',
+          maxParallel: 3,
+        },
+      ],
+    }
+
+    expect(migrateConfig(source)).toMatchObject({
+      schemaVersion: 19,
+      approval: { reasoning: 'high' },
+      modelPool: {
+        entries: [{ id: 'worker', model: 'worker-model' }],
+      },
+    })
+    expect(migrateConfig(source).modelPool.entries[0]).not.toHaveProperty(
+      'capability',
+    )
+    expect(migrateConfig(source).modelPool.entries[0]).not.toHaveProperty(
+      'maxParallel',
+    )
+  })
+
+  it('migrates v17 pool entries without retaining duplicated capability', () => {
+    const source = legacyV17Config()
+    source.modelPool = {
+      entries: [
+        {
+          id: ' worker ',
+          enabled: false,
+          providerId: 'deepseek',
+          model: 'worker-model',
+          reasoning: 'xhigh',
+          capability: 'strong',
+          maxParallel: 5,
+        },
+      ],
+    }
+
+    const migrated = migrateConfig(source)
+
+    expect(migrated).toMatchObject({
+      schemaVersion: 19,
+      modelPool: {
+        entries: [
+          {
+            id: 'worker',
+            model: 'worker-model',
+            reasoning: 'xhigh',
+          },
+        ],
+      },
+    })
+    expect(migrated.modelPool.entries[0]).not.toHaveProperty('capability')
+    expect(migrated.modelPool.entries[0]).not.toHaveProperty('maxParallel')
+  })
+
+  it('keeps the v16 Provider and model pool reasoning boundary frozen', () => {
+    const providerReasoning = legacyV16Config()
+    ;(
+      providerReasoning.providers as Array<Record<string, unknown>>
+    )[0]!.reasoning = 'low'
+    expect(() => migrateConfig(providerReasoning)).toThrow()
+
+    const providerAnnotation = legacyV16Config()
+    ;(
+      providerAnnotation.providers as Array<Record<string, unknown>>
+    )[0]!.modelOverrides = {
+      'worker-model': { reasoningEfforts: ['high'] },
+    }
+    expect(() => migrateConfig(providerAnnotation)).toThrow()
+
+    const poolReasoning = legacyV16Config()
+    poolReasoning.modelPool = {
+      entries: [
+        {
+          id: 'worker',
+          enabled: false,
+          providerId: 'deepseek',
+          model: 'worker-model',
+          reasoning: 'xhigh',
+          capability: 'standard',
+          maxParallel: 1,
+        },
+      ],
+    }
+    expect(() => migrateConfig(poolReasoning)).toThrow()
+  })
+
+  it('accepts all six reasoning efforts in a current model pool', () => {
+    const source = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+    source.modelPool.entries = REASONING_EFFORTS.map((reasoning, index) => ({
+      id: `worker-${index}`,
+      enabled: false,
+      providerId: 'deepseek',
+      model: `worker-model-${index}`,
+      reasoning,
+    }))
+
+    expect(migrateConfig(source).modelPool).toEqual(source.modelPool)
   })
 
   it('migrates and clones a valid v9 config', () => {
     const source = legacyV9Config()
     const migrated = migrateConfig(source)
     expect(migrated).toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 19,
+      modelPool: { entries: [] },
       providers: [
         {
           providerType: 'deepseek.chat-completions',
@@ -120,6 +295,22 @@ describe('config v15 migration boundary', () => {
     )
   })
 
+  it('rejects v9 configs carrying reasoning values introduced after v9', () => {
+    const source = legacyV9Config()
+    ;(source.providers as Array<Record<string, unknown>>)[0]!.reasoning = 'low'
+
+    expect(() => migrateConfig(source)).toThrow()
+  })
+
+  it('rejects v14 configs carrying per-model annotations introduced after v14', () => {
+    const source = legacyV14Config()
+    ;(source.providers as Array<Record<string, unknown>>)[0]!.modelOverrides = {
+      'deepseek-v4-pro': { reasoningEfforts: ['low'] },
+    }
+
+    expect(() => migrateConfig(source)).toThrow()
+  })
+
   it('migrates v10 defaults to the enlarged read and tool budgets', () => {
     const source = legacyCurrentShapeConfig(10)
     source.limits = {
@@ -131,7 +322,8 @@ describe('config v15 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 19,
+      modelPool: { entries: [] },
       limits: {
         maxToolOutputBytes: 128 * 1_024,
         maxToolResultTokens: 64_000,
@@ -154,7 +346,8 @@ describe('config v15 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 19,
+      modelPool: { entries: [] },
       limits: {
         maxToolOutputBytes: 72_000,
         maxToolResultTokens: 12_000,
@@ -171,7 +364,8 @@ describe('config v15 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 19,
+      modelPool: { entries: [] },
       providers: [
         {
           model: 'deepseek-v4-pro',
@@ -187,11 +381,13 @@ describe('config v15 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 19,
+      modelPool: { entries: [] },
       limits: { maxConcurrentRuns: 7 },
       subagents: {
         enabled: false,
         workerTimeoutMs: 1_800_000,
+        maxAgentsPerSwarm: 10,
       },
     })
   })
@@ -200,7 +396,8 @@ describe('config v15 migration boundary', () => {
     const source = legacyV13Config()
     const migrated = migrateConfig(source)
 
-    expect(migrated.schemaVersion).toBe(15)
+    expect(migrated.schemaVersion).toBe(19)
+    expect(migrated.modelPool).toEqual({ entries: [] })
     expect(migrated.limits).not.toHaveProperty('maxToolTokensPerRun')
     expect((source.limits as Record<string, unknown>).maxToolTokensPerRun).toBe(
       128_000,
@@ -211,7 +408,8 @@ describe('config v15 migration boundary', () => {
     const migrated = migrateConfig(legacyV14Config())
 
     expect(migrated).toMatchObject({
-      schemaVersion: 15,
+      schemaVersion: 19,
+      modelPool: { entries: [] },
       providers: [
         {
           model: 'deepseek-v4-pro',
@@ -221,15 +419,74 @@ describe('config v15 migration boundary', () => {
     })
   })
 
-  it('accepts and clones a valid v15 config', () => {
-    const source = structuredClone(DEFAULT_APP_CONFIG)
+  it('makes the legacy effective approval reasoning explicit when migrating v15', () => {
+    const source = legacyV15Config()
+    ;(source.providers as Array<Record<string, unknown>>)[0]!.reasoning = 'off'
+
+    expect(migrateConfig(source).approval).toEqual({
+      approverProviderId: 'deepseek',
+      approverModel: '',
+      reasoning: 'high',
+    })
+    ;(source.providers as Array<Record<string, unknown>>)[0]!.reasoning =
+      'medium'
+    expect(migrateConfig(source).approval.reasoning).toBe('medium')
+  })
+
+  it('migrates and clones a valid frozen v15 config', () => {
+    const source = legacyV15Config()
+    const provider = (source.providers as Array<Record<string, unknown>>)[0]!
+    provider.revision = 9
+    provider.apiKeyRef = 'provider-key:preserved'
+    ;(source.limits as Record<string, unknown>).maxConcurrentRuns = 7
     const migrated = migrateConfig(source)
-    expect(migrated).toEqual(source)
+
+    expect(migrated).toMatchObject({
+      schemaVersion: 19,
+      modelPool: { entries: [] },
+      limits: { maxConcurrentRuns: 7 },
+    })
     expect(migrated).not.toBe(source)
     expect(migrated.providers[0]).toMatchObject({
       providerType: 'deepseek.chat-completions',
-      revision: 1,
+      revision: 9,
+      apiKeyRef: 'provider-key:preserved',
     })
+  })
+
+  it('migrates v18 by removing route concurrency and adding the Swarm bound', () => {
+    const source = legacyV18Config()
+    source.modelPool = {
+      entries: [
+        {
+          id: ' worker ',
+          enabled: false,
+          providerId: 'deepseek',
+          model: 'worker-model',
+          reasoning: 'max',
+          maxParallel: 7,
+        },
+      ],
+    }
+
+    const migrated = migrateConfig(source)
+
+    expect(migrated).toMatchObject({
+      schemaVersion: 19,
+      subagents: { maxAgentsPerSwarm: 10 },
+      modelPool: {
+        entries: [{ id: 'worker', reasoning: 'max' }],
+      },
+    })
+    expect(migrated.modelPool.entries[0]).not.toHaveProperty('maxParallel')
+  })
+
+  it('accepts and clones a valid v19 config', () => {
+    const source = structuredClone(DEFAULT_APP_CONFIG)
+    const migrated = migrateConfig(source)
+
+    expect(migrated).toEqual(source)
+    expect(migrated).not.toBe(source)
   })
 
   it('accepts the new Provider Types without a schema-version migration', () => {
@@ -241,12 +498,12 @@ describe('config v15 migration boundary', () => {
       source.providers[0].providerType = providerType
       const migrated = migrateConfig(source)
 
-      expect(migrated.schemaVersion).toBe(15)
+      expect(migrated.schemaVersion).toBe(19)
       expect(migrated.providers[0].providerType).toBe(providerType)
     }
   })
 
-  it('rejects malformed v15 data instead of filling missing fields', () => {
+  it('rejects malformed v19 data instead of filling missing fields', () => {
     const malformed = structuredClone(DEFAULT_APP_CONFIG) as Record<
       string,
       unknown
@@ -254,6 +511,47 @@ describe('config v15 migration boundary', () => {
     delete malformed.providers
     expect(() => migrateConfig(malformed)).toThrow(
       "must have required property 'providers'",
+    )
+  })
+
+  it('rejects model pool IDs that collide after trim and NFC normalization', () => {
+    const malformed = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+    malformed.modelPool.entries = [
+      {
+        id: ' é ',
+        enabled: false,
+        providerId: 'missing-one',
+        model: 'preserved-one',
+        reasoning: 'off',
+      },
+      {
+        id: 'e\u0301',
+        enabled: false,
+        providerId: 'missing-two',
+        model: 'preserved-two',
+        reasoning: 'max',
+      },
+    ]
+
+    expect(() => migrateConfig(malformed)).toThrow(
+      'Duplicate model pool entry id',
+    )
+  })
+
+  it('rejects model pool IDs containing control or format characters', () => {
+    const malformed = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
+    malformed.modelPool.entries = [
+      {
+        id: 'hidden\u200bentry',
+        enabled: false,
+        providerId: 'missing',
+        model: 'preserved',
+        reasoning: 'high',
+      },
+    ]
+
+    expect(() => migrateConfig(malformed)).toThrow(
+      'control or format character',
     )
   })
 })

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, watch } from 'vue'
 import { NAlert, NButton, NInputNumber, NSwitch } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
+import ModelPoolSettingsSection from './ModelPoolSettingsSection.vue'
 
 const agent = useAgentStore()
 const { t } = useI18n()
@@ -93,6 +94,17 @@ onBeforeUnmount(() => {
           </NInputNumber>
           <small>{{ t('subagents.workerTimeoutHint') }}</small>
         </label>
+
+        <label class="settings-field">
+          <span>{{ t('subagents.maxAgentsPerSwarm') }}</span>
+          <NInputNumber
+            v-model:value="agent.subagentsConfig.maxAgentsPerSwarm"
+            :min="1"
+            :max="32"
+            :step="1"
+          />
+          <small>{{ t('subagents.maxAgentsPerSwarmHint') }}</small>
+        </label>
       </section>
 
       <NAlert type="info" :show-icon="true">
@@ -106,5 +118,7 @@ onBeforeUnmount(() => {
         }}
       </NAlert>
     </template>
+
+    <ModelPoolSettingsSection />
   </section>
 </template>

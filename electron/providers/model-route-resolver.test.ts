@@ -5,7 +5,10 @@ import {
   type AppConfig,
 } from '../config/schema'
 import type { ConfigStore } from '../config/store'
-import { resolveRunRoutes } from './model-route-resolver'
+import {
+  resolveModelRoutePairFromConfig,
+  resolveRunRoutes,
+} from './model-route-resolver'
 
 function configuredAppConfig(): AppConfig {
   const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
@@ -16,6 +19,34 @@ function configuredAppConfig(): AppConfig {
 }
 
 describe('resolveRunRoutes', () => {
+  it('resolves a main/compression pair from one supplied snapshot and credential read', async () => {
+    const config = configuredAppConfig()
+    const snapshot = toPublicConfig(config, true)
+    const getProviderApiKeyForRevision = vi.fn(async () => 'secret')
+    const store = {
+      getPublicConfig: vi.fn(() => {
+        throw new Error('explicit pair resolver must not reread config')
+      }),
+      getProviderApiKeyForRevision,
+    } as unknown as ConfigStore
+
+    const pair = await resolveModelRoutePairFromConfig(store, snapshot, {
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+      reasoning: 'max',
+    })
+
+    expect(getProviderApiKeyForRevision).toHaveBeenCalledOnce()
+    expect(pair.main.snapshot).toMatchObject({
+      purpose: 'main',
+      reasoning: 'max',
+    })
+    expect(pair.compression.snapshot).toMatchObject({
+      purpose: 'compression',
+      reasoning: 'max',
+    })
+  })
+
   it('rejects models outside the enabled Provider pool', async () => {
     const config = configuredAppConfig()
     const getProviderApiKeyForRevision = vi.fn(async () => 'secret')
@@ -32,6 +63,54 @@ describe('resolveRunRoutes', () => {
       }),
     ).rejects.toThrow(/not enabled/u)
     expect(getProviderApiKeyForRevision).not.toHaveBeenCalled()
+  })
+
+  it('rejects a reasoning effort outside the model annotation before reading credentials', async () => {
+    const config = configuredAppConfig()
+    config.providers[0]!.modelOverrides['deepseek-v4-pro'] = {
+      reasoningEfforts: ['off', 'high'],
+    }
+    const getProviderApiKeyForRevision = vi.fn(async () => 'secret')
+    const store = {
+      getPublicConfig: () => toPublicConfig(config, true),
+      getProviderApiKeyForRevision,
+    } as unknown as ConfigStore
+
+    await expect(
+      resolveRunRoutes(store, {
+        providerId: 'deepseek',
+        model: 'deepseek-v4-pro',
+        reasoning: 'max',
+      }),
+    ).rejects.toThrow(
+      "Model deepseek-v4-pro does not support reasoning effort 'max' (supported: off, high)",
+    )
+    expect(getProviderApiKeyForRevision).not.toHaveBeenCalled()
+  })
+
+  it('resolves annotated models when the reasoning effort is supported', async () => {
+    const config = configuredAppConfig()
+    config.providers[0]!.modelOverrides['deepseek-v4-pro'] = {
+      reasoningEfforts: ['low', 'high'],
+      capability: 'strong',
+    }
+    const store = {
+      getPublicConfig: () => toPublicConfig(config, true),
+      getProviderApiKeyForRevision: vi.fn(async () => 'secret'),
+    } as unknown as ConfigStore
+
+    const routes = await resolveRunRoutes(store, {
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+      reasoning: 'low',
+    })
+
+    expect(routes.main.snapshot.reasoning).toBe('low')
+    expect(routes.main.modelProfile).toMatchObject({
+      id: 'deepseek-v4-pro',
+      reasoningEfforts: ['low', 'high'],
+      capability: 'strong',
+    })
   })
 
   it('rejects an unsafe endpoint before reading credentials', async () => {
@@ -53,10 +132,11 @@ describe('resolveRunRoutes', () => {
     expect(getProviderApiKeyForRevision).not.toHaveBeenCalled()
   })
 
-  it('freezes the exact endpoint and raises approval reasoning off to high', async () => {
+  it('freezes the exact endpoint and preserves explicit approval reasoning', async () => {
     const config = configuredAppConfig()
     config.providers[0]!.baseURL = 'https://provider.example/v1/'
-    config.providers[0]!.reasoning = 'off'
+    config.providers[0]!.reasoning = 'high'
+    config.approval.reasoning = 'off'
     const store = {
       getPublicConfig: () => toPublicConfig(config, true),
       getProviderApiKeyForRevision: vi.fn(async () => 'secret'),
@@ -69,7 +149,7 @@ describe('resolveRunRoutes', () => {
     })
 
     expect(routes.approval?.snapshot).toMatchObject({
-      reasoning: 'high',
+      reasoning: 'off',
       endpoint: 'https://provider.example/v1/chat/completions',
     })
   })

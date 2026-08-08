@@ -116,6 +116,8 @@ const enUS = {
     apiKeyHint: 'Configure a Provider API key in Settings',
     modelHint: 'Enable and select a main model in Provider settings',
     noticeHint: 'Review the Provider data notice',
+    reasoningUnsupportedHint:
+      'The selected reasoning effort is not supported by this model; pick a supported one to send',
     approvalHint: 'Resolve the pending approval before sending another message',
     inputHint: 'Ask about this workspace',
     addFileContext: 'Add file context',
@@ -340,6 +342,13 @@ const enUS = {
       'The selected Provider has no credential; runtime falls back to human approval.',
     approvalModelHint:
       'Only models enabled for the selected Provider are shown here.',
+    approvalReasoning: 'Auto approver reasoning effort',
+    approvalReasoningHint:
+      'This exact effort is used for automatic approval; it is independent of the Provider default and is never adjusted implicitly.',
+    approvalReasoningConflictHint:
+      'This model does not support the selected approval reasoning effort; choose a supported effort or another model.',
+    approvalModelMissingHint:
+      'The approval model is missing or not enabled; choose an enabled model to restore automatic approval.',
     saveApproval: 'Save Auto approval',
     addProvider: 'Add provider',
     providerActions: 'Actions',
@@ -379,21 +388,37 @@ const enUS = {
     maximumContext: 'Maximum context',
     compressionThreshold: 'Compression threshold',
     maximumOutputLength: 'Maximum output length',
+    modelReasoningEfforts: 'Reasoning efforts',
+    modelReasoningEffortsPlaceholder: 'All efforts',
+    modelCapability: 'Capability',
+    modelCapabilityPlaceholder: 'Not annotated',
+    capabilityLight: 'Light',
+    capabilityStandard: 'Standard',
+    capabilityStrong: 'Strong',
     mainModelTag: 'Main model',
     tokenEstimation: 'Token estimation',
     bytesPerToken: 'UTF-8 bytes per token',
     reasoning: 'Reasoning effort',
     reasoningOff: 'Off',
+    reasoningLow: 'Low',
+    reasoningMedium: 'Medium',
     reasoningHigh: 'High',
+    reasoningXhigh: 'Extra high',
     reasoningMax: 'Maximum',
+    mainReasoningConflictHint:
+      'The main model annotation no longer includes this effort; autosave is paused until you pick a supported one.',
+    approvalDraftConflictHint:
+      'The saved approval model {model} does not support its configured approval effort; autosave is paused until you adjust the annotation or approval route.',
+    approvalDraftModelDisabledHint:
+      'The saved approval model {model} is no longer enabled in this Provider draft; autosave is paused until you re-enable it or choose another approval model.',
     reasoningHint:
-      'Reasoning-capable DeepSeek models can use High or Maximum. Off disables thinking.',
+      'The selected effort is sent to the model as-is; annotate a model row to narrow the choices. Off disables thinking.',
     reasoningHintGeneric:
       'Generic Chat Completions does not send vendor-specific reasoning fields.',
     reasoningHintResponses:
       'Responses sends reasoning effort and replays encrypted reasoning items locally without server state.',
     reasoningHintAnthropic:
-      'High/max use adaptive thinking; select Off for older models or compatible proxies.',
+      'Any effort above Off uses adaptive thinking; select Off for older models or compatible proxies.',
     approverProvider: 'Auto approver provider',
     approverModel: 'Auto approver model',
     apiKey: 'API key',
@@ -485,12 +510,53 @@ const enUS = {
     workerTimeout: 'Subagent task timeout',
     workerTimeoutHint:
       'The subtask is cancelled at this limit. Cancelling the parent task also cancels active subagents immediately.',
+    maxAgentsPerSwarm: 'Maximum Agents per Swarm',
+    maxAgentsPerSwarmHint:
+      'Limits the total child Agents created by one Swarm. Simultaneous execution remains bounded by the global task concurrency limit. Changes apply to the next /swarm Run.',
     minutes: 'minutes',
     costNotice:
       'Subagents make additional model requests and therefore consume tokens and may incur Provider charges.',
     concurrencyNotice:
       'Subtasks share the global task concurrency limit (currently {count}). Nested work is rejected when that limit is 1.',
     save: 'Save Agent settings',
+  },
+  modelPool: {
+    title: 'Model pool',
+    hint: 'Select exact Provider, model, and reasoning routes for future Swarm scheduling. Capability remains read only from Provider model annotations, and the complete pool saves atomically.',
+    save: 'Save model pool',
+    empty: 'The model pool is empty. Select routes from the left.',
+    noEligibleModels:
+      'No route is available. Enable a model, annotate its capability, and configure credentials under Provider settings first.',
+    reasoningFloor: 'Minimum candidate reasoning',
+    reasoningFloorHint:
+      'Filters only the candidates on the left. Exact routes already selected in the pool remain visible and unchanged.',
+    reasoningFloorAll: 'All reasoning efforts',
+    reasoningFloorAtLeast: '≥ {reasoning}',
+    availableRoutes: 'Available routes',
+    selectedRoutes: 'Model pool',
+    filterRoutes: 'Filter Provider, model, or reasoning',
+    selectAllRoutes: 'Select all current routes',
+    clearSelectedRoutes: 'Clear current routes',
+    selectionLimitExceeded:
+      'The model pool stores up to {count} routes; this over-limit selection was not applied.',
+    noMatchingRoutes: 'No route matches the current filters.',
+    providerMissing:
+      'The referenced Provider no longer exists; select another Provider or remove this entry.',
+    modelUnavailable: 'The model is missing or not enabled for this Provider.',
+    reasoningUnsupported:
+      'This model does not support the selected reasoning effort.',
+    capabilityMissingHint:
+      'This model has no capability annotation; configure it under Provider settings first.',
+    credentialMissing:
+      'This Provider has no configured credential, so the entry cannot be enabled.',
+    entryDisabled:
+      'This route is disabled. Remove and select it again to enable it.',
+    routeUnavailable: 'Unavailable',
+    belowReasoningFloor: 'Below filter',
+    belowReasoningFloorHint:
+      'This route remains visible because it is already in the pool; the filter only affects candidates on the left.',
+    externalChange:
+      'Provider changes updated the saved pool state; review this draft and save it again.',
   },
   dialogs: {
     yoloTitle: 'Enable Yolo mode?',

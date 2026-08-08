@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentApi } from '../../shared/agent-api'
 import type { ProviderPublicConfig } from '../../shared/config'
+import { useApprovalSettingsStore } from './approval-settings'
 import { useAgentSettingsStore } from './agent-settings'
 import { providerFormSignature } from './provider-form'
 
@@ -33,6 +34,7 @@ describe('agent settings model pool', () => {
 
   it('uses enabled models for selectors while retaining the full transfer catalog', () => {
     const settings = useAgentSettingsStore()
+    const approval = useApprovalSettingsStore()
     const configuredProvider = provider()
     settings.providers = [configuredProvider]
     settings.activeProviderId = configuredProvider.id
@@ -41,7 +43,7 @@ describe('agent settings model pool', () => {
     settings.providerForm.enabledModelIds = [
       ...configuredProvider.enabledModelIds,
     ]
-    settings.approvalForm.providerId = configuredProvider.id
+    approval.approvalForm.providerId = configuredProvider.id
     settings.modelProfiles = [
       {
         id: 'enabled-model',
@@ -71,6 +73,31 @@ describe('agent settings model pool', () => {
       ['enabled-model'],
     )
     expect(settings.providerCardSummaries[0]?.models).toEqual(['enabled-model'])
+  })
+
+  it('keeps every enabled approval model visible regardless of annotation', () => {
+    const settings = useAgentSettingsStore()
+    const approval = useApprovalSettingsStore()
+    const configuredProvider = {
+      ...provider(),
+      reasoning: 'off' as const,
+      enabledModelIds: ['enabled-model', 'low-only-model', 'off-only-model'],
+      modelOverrides: {
+        'low-only-model': {
+          reasoningEfforts: ['low' as const],
+        },
+        'off-only-model': {
+          reasoningEfforts: ['off' as const],
+        },
+      },
+    }
+    settings.providers = [configuredProvider]
+    approval.approvalForm.providerId = configuredProvider.id
+    approval.approvalForm.reasoning = 'high'
+
+    expect(settings.approvalModelOptions.map((option) => option.value)).toEqual(
+      ['enabled-model', 'low-only-model', 'off-only-model'],
+    )
   })
 
   it('keeps an unsaved Provider draft dirty after loading its model catalog', async () => {
@@ -118,5 +145,60 @@ describe('agent settings model pool', () => {
     expect(settings.providerDirty).toBe(true)
     expect(settings.providerForm.label).toBe('Unsaved Provider label')
     expect(settings.modelCatalogFetchedAt).toBe('2026-08-03T00:00:00.000Z')
+  })
+
+  it('maps saved annotations into profiles without changing token source semantics', () => {
+    const settings = useAgentSettingsStore()
+    const configuredProvider = provider()
+    configuredProvider.modelOverrides = {
+      'enabled-model': {
+        reasoningEfforts: ['low', 'medium'],
+        capability: 'light',
+      },
+    }
+    settings.providers = [configuredProvider]
+    settings.activeProviderId = configuredProvider.id
+    settings.selectedProviderId = configuredProvider.id
+
+    settings.hydrateSelectedProviderForm()
+
+    const profile = settings.modelProfiles.find(
+      (model) => model.id === 'enabled-model',
+    )
+    expect(profile?.reasoningEfforts).toEqual(['low', 'medium'])
+    expect(profile?.capability).toBe('light')
+    expect(profile?.capabilitySource).toBe('default')
+  })
+
+  it('updates and clears per-model annotations without touching capabilitySource', () => {
+    const settings = useAgentSettingsStore()
+    settings.modelProfiles = [
+      {
+        id: 'model-a',
+        availability: 'provider',
+        capabilitySource: 'provider',
+        contextWindowTokens: 256_000,
+        compactThresholdTokens: 198_246,
+        maxOutputTokens: 65_536,
+      },
+    ]
+
+    settings.updateModelAnnotation('model-a', {
+      reasoningEfforts: ['high', 'max'],
+      capability: 'strong',
+    })
+    expect(settings.modelProfiles[0]).toMatchObject({
+      reasoningEfforts: ['high', 'max'],
+      capability: 'strong',
+      capabilitySource: 'provider',
+    })
+
+    settings.updateModelAnnotation('model-a', {
+      reasoningEfforts: [],
+      capability: null,
+    })
+    expect(settings.modelProfiles[0]?.reasoningEfforts).toBeUndefined()
+    expect(settings.modelProfiles[0]?.capability).toBeUndefined()
+    expect(settings.modelProfiles[0]?.capabilitySource).toBe('provider')
   })
 })

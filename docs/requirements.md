@@ -166,7 +166,7 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 - `normalizedReasoningText`：只包含非加密、应用标准化后的可读 reasoning 文本或摘要，用于 UI、导出和通用审计；允许为空，不能用于重建签名、密文、item id 或原始 block 顺序。
 - `providerContinuation`：包含 `schemaVersion/providerType/format/data` 的版本化 envelope。`data` 原样保留该 Provider 继续请求所需的有序 provider-native items、签名、密文、cursor 或 response id；Agent Core 和 Renderer 只搬运，不解释、不修改。
 
-Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items；Anthropic high/max 必须使用 adaptive thinking 与对应 effort，off 不发送 thinking 参数。Structured output 契约必须携带实际 JSON Schema；Responses 与 Anthropic 使用原生 schema 字段，Chat 兜底实现允许降级为 JSON object mode，但 Application 的本地 schema 校验不能省略。
+Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items；Anthropic 所有非 off 思考档位必须使用 adaptive thinking 与对应 effort，off 不发送 thinking 参数。Structured output 契约必须携带实际 JSON Schema；Responses 与 Anthropic 使用原生 schema 字段，Chat 兜底实现允许降级为 JSON object mode，但 Application 的本地 schema 校验不能省略。
 
 完整原始 Provider request/response 和 stream events 只属于显式开启的 trace。Message 只保存 canonical message parts、可读 reasoning 投影，以及继续协议所需的最小 opaque state。
 
@@ -298,7 +298,17 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - `workerTimeoutMs` 默认 30 分钟、可配置 1 分钟至 24 小时。父 Run 取消、timeout、Provider failure 和应用退出都必须中断 child 并清理并发 slot；全局并发上限为 1 时启动前明确拒绝。
 - 相同 parent Session/Run/call 与参数 hash 可复用已完成结果；参数不同返回冲突。应用重启将遗留 active execution 标记为 `interrupted`，不得自动重试或恢复 stream。
 
-当前阶段不包含模型池、Swarm、递归委派、Serena/code intelligence、自定义 child 工具列表或详细 child Session UI；下一阶段见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
+当前阶段已经包含模型池的配置 UI 与 backend foundation，但不改变上述 `subagent_run` 执行路径。Swarm、模型池生产执行接入、递归委派、Serena/code intelligence、自定义 child 工具列表或详细 child Session UI 仍未实现；后续边界见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
+
+### 2.8 Model Pool 配置与 backend foundation
+
+- AppConfig v16 首次在根配置加入 `modelPool`，v17 将 entry reasoning 扩展为统一六档，v18 删除重复 capability；当前 v19 保存最多 1,000 个命名 entry，并删除从未执行的 per-route `maxParallel`。该上限仅作为 IPC/config 异常负载边界，不承担并发或 Agent 数量控制；entry 只引用现有 Provider/model/reasoning。调度能力固定为 `light | standard | strong`，唯一来源是对应 Provider 的 `modelOverrides[model].capability`。API key、credential reference 与并发配额不进入 entry。
+- 完整模型池使用单个 `config:set(model-pool)` 原子保存。所有 enabled entry 引用的 Provider 必须由唯一且精确的 expected revision 列表覆盖，并在写盘前通过 Provider 存在、模型启用、能力标注、安全 endpoint、模型 profile 和当前凭据绑定校验；任一失败时不得部分写入。disabled entry 只要求结构与规范化 ID 唯一，可保留失效引用供未来 UI 修复。
+- Agents 设置页提供模型池独立小节，以 Naive UI Transfer/Tree 按 `Provider → model → reasoning` 展示候选；每个 reasoning 叶节点是一条互不替代的精确 route，同一模型的 `high`、`max` 可以同时入池，且不做自动升降档。顶部“最低思考等级”只过滤左侧候选，低于门槛但已经入池的 route 仍在右侧显示并提示，不改写配置。能力等级只读展示对应 Provider 模型标注；模型池不配置并发，内部 entry ID、顺序和 enabled 状态不作为常规表单暴露。Renderer 使用独立 Pinia store 持有草稿、已保存快照和保存状态；整组修改显式原子保存，不复用 Provider 表单草稿。Provider 编辑触发后端自动禁用时，干净模型池草稿同步回填；未保存草稿则保留并提示重新检查。
+- 删除 Provider、移除 entry 引用的启用模型、移除 capability annotation、reasoning annotation 变为不兼容或显式清除凭据时，在同一配置写入中把受影响 entry 置为 disabled，保留顺序和引用；恢复配置不会自动启用。启动/reload 会修复手写的 enabled 静态不兼容或无能力标注引用，但环境凭据暂时缺失不会改写持久配置。
+- 纯 allocator 让所有 `actualCapability >= requiredCapability` 的模型参与分配，并按声明顺序先 round-robin `Provider + model`、再轮询该模型的精确 reasoning route；选择更多 reasoning 叶节点不会提高模型权重，每次调用从头开始。符合要求的模型少于 Agent 数时自然重复使用；缺少能力时在 route/credential 解析前整体失败。route freezer 读取单个 PublicConfig 快照，生成包含全部 enabled entry 及 Provider revision 的顺序敏感 SHA-256 digest，并对实际选择的唯一 entry 各解析一次 main/compression route。
+- prepared plan 是 backend-private 内存结果，包含 `ResolvedModelRoute` 与 API key；safe snapshot v2 只包含 digest、需求/entry/能力、Provider/model/reasoning/revision 与安全 route snapshot。revision 竞态或已选 entry 不可用会使整个 freeze 失败，不会跳过、切换 Provider 或重新分配。
+- `subagents.maxAgentsPerSwarm` 默认 10、范围 1–32，限制未来单个 Swarm Job 创建的 child Agent 总数；`limits.maxConcurrentRuns` 继续独立限制全应用同时 active 的 Run。当前阶段不修改 Headless v4、Runtime Identity v4、`SubagentExecutionPort.runOne` 或 SQLite Job 状态；这些属于 S3 后续接入或 S4。
 
 ---
 
@@ -452,10 +462,11 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 
 ### 4.7 Agents 设置
 
-- Agents 设置页提供 Subagent 功能开关和 worker timeout，沿用设置页 600 ms 自动保存及显式立即保存入口。
-- 开关默认关闭；timeout 默认 30 分钟，输入以分钟展示并限制为 1–1,440。
+- Agents 设置页提供 Subagent 功能开关、worker timeout 和单次 Swarm Agent 总数上限，沿用设置页 600 ms 自动保存及显式立即保存入口。
+- 开关默认关闭；timeout 默认 30 分钟，输入以分钟展示并限制为 1–1,440；`maxAgentsPerSwarm` 默认 10、范围 1–32，从下一次 `/swarm` Run 生效。
 - 页面必须提示启用后会产生额外 Provider 请求和费用，并展示当前全局 `maxConcurrentRuns`；并发为 1 时说明无法运行嵌套 Agent。
-- 当前不提供 child 工具列表、模型池、详细子任务页或隐藏 Session 入口。
+- 同页模型池小节显式原子保存完整 entry 数组；以 `Provider → model → reasoning` 穿梭树选择精确 route，并只读展示 Provider 模型的能力标注。模型池本身不配置并发或 Agent 数量。
+- 当前不提供 child 工具列表、详细子任务页或隐藏 Session 入口；模型池仍未接入生产 Subagent 执行。
 
 ---
 

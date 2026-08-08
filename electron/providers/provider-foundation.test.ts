@@ -556,6 +556,24 @@ describe('P11 Provider foundation', () => {
     expect(disabled.request).not.toHaveProperty('reasoning_effort')
   })
 
+  it.each(['low', 'medium', 'xhigh'] as const)(
+    'passes the %s reasoning effort through unchanged',
+    (reasoning) => {
+      const provider = new DeepSeekProvider({
+        baseURL: 'https://api.example/v1',
+        apiKey: 'secret',
+      })
+      const call = provider.compile(
+        compileInput({ providerType: 'deepseek.chat-completions', reasoning }),
+      )
+
+      expect(call.request).toMatchObject({
+        thinking: { type: 'enabled' },
+        reasoning_effort: reasoning,
+      })
+    },
+  )
+
   it('sends credentials only in headers and preserves the compiled body', async () => {
     let authorization = ''
     let body = ''

@@ -14,7 +14,7 @@ import {
   type TestProviderStreamRequest as ProviderStreamRequest,
 } from '../providers/provider-test-harness'
 import { parseHeadlessArguments } from './cli'
-import { loadHeadlessConfig } from './config'
+import { loadHeadlessConfig, prepareHeadlessConfig } from './config'
 import type { HeadlessConfig } from './contracts'
 import { HEADLESS_EXIT_CODES, runHeadlessMain } from './main'
 import { runHeadlessAgent } from './runner'
@@ -346,6 +346,28 @@ describe('Headless host', () => {
     await expect(loadHeadlessConfig(configPath)).resolves.toEqual(source)
   })
 
+  it('keeps external v4 singular Provider config while building an empty v19 model pool', async () => {
+    const { artifacts } = await fixture()
+    const prepared = await prepareHeadlessConfig({
+      config: config(),
+      artifactsDirectory: artifacts,
+      environment: {
+        NODE_ENV: 'test',
+        HEADLESS_TEST_KEY: 'headless-secret',
+      },
+    })
+
+    expect(prepared.config).toMatchObject({
+      schemaVersion: 4,
+      provider: { id: 'fake' },
+    })
+    expect(prepared.configStore.getInternalConfig()).toMatchObject({
+      schemaVersion: 19,
+      activeProviderId: 'fake',
+      modelPool: { entries: [] },
+    })
+  })
+
   it('accepts Responses and Anthropic Provider Types in v4 config', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-p12-'))
     temporaryDirectories.push(directory)
@@ -552,6 +574,32 @@ describe('Headless host', () => {
     expect(provider.requestBodies[0]).toMatchObject({
       thinking: { type: 'enabled' },
       reasoning_effort: 'high',
+    })
+  })
+
+  it('runs and persists with a new reasoning level end to end', async () => {
+    const { workspace, artifacts } = await fixture()
+    const output = new StringSink()
+    const provider = new RecordingProvider('deepseek.chat-completions')
+    const mediumReasoning = config()
+    mediumReasoning.provider.providerType = 'deepseek.chat-completions'
+    mediumReasoning.provider.reasoning = 'medium'
+
+    const result = await runHeadlessAgent({
+      config: mediumReasoning,
+      workspace,
+      task: 'Run with a new reasoning level',
+      artifactsDirectory: artifacts,
+      timeoutMs: 5_000,
+      output,
+      environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },
+      providerFactory: () => provider,
+    })
+
+    expect(result.status).toBe('completed')
+    expect(provider.requestBodies[0]).toMatchObject({
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'medium',
     })
   })
 

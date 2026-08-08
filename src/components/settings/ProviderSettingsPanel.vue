@@ -19,7 +19,24 @@ import {
   type DropdownOption,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import {
+  REASONING_EFFORTS,
+  type ModelCapabilityLevel,
+  type ReasoningEffort,
+} from '../../../shared/config'
+import { resolveSupportedReasoningEfforts } from '../../../shared/model-settings'
 import { useAgentStore } from '../../stores/agent'
+import { providerDraftConflicts } from '../../stores/provider-form'
+
+/** Maps each reasoning effort to its locale label key. */
+const REASONING_LABEL_KEYS: Record<ReasoningEffort, string> = {
+  off: 'settings.reasoningOff',
+  low: 'settings.reasoningLow',
+  medium: 'settings.reasoningMedium',
+  high: 'settings.reasoningHigh',
+  xhigh: 'settings.reasoningXhigh',
+  max: 'settings.reasoningMax',
+}
 
 type ProviderAction =
   | { kind: 'select'; providerId: string }
@@ -64,10 +81,45 @@ const reasoningHint = computed(() => {
       return t('settings.reasoningHintGeneric')
   }
 })
-const reasoningOptions = computed(() => [
-  { label: t('settings.reasoningOff'), value: 'off' },
-  { label: t('settings.reasoningHigh'), value: 'high' },
-  { label: t('settings.reasoningMax'), value: 'max' },
+const reasoningOptions = computed(() => {
+  const mainModel = agent.modelProfiles.find(
+    (model) => model.id === agent.providerForm.model,
+  )
+  return resolveSupportedReasoningEfforts({
+    reasoningEfforts: mainModel?.reasoningEfforts,
+  }).map((effort) => ({
+    label: t(REASONING_LABEL_KEYS[effort]),
+    value: effort,
+  }))
+})
+const reasoningEffortOptions = computed(() =>
+  REASONING_EFFORTS.map((effort) => ({
+    label: t(REASONING_LABEL_KEYS[effort]),
+    value: effort,
+  })),
+)
+/**
+ * Draft conflicts that pause autosave: the main model annotation excluding
+ * the draft default effort, or the saved approval route being incompatible
+ * with the draft. Neither is auto-adjusted; the user resolves them manually.
+ */
+const draftConflicts = computed(() =>
+  providerDraftConflicts({
+    providerId: agent.providerForm.providerId,
+    reasoning: agent.providerForm.reasoning,
+    mainModelId: agent.providerForm.model,
+    enabledModelIds: agent.providerForm.enabledModelIds,
+    profiles: agent.modelProfiles,
+    approval: agent.approvalSavedForm,
+  }),
+)
+const autosaveConflict = computed(
+  () => draftConflicts.value.main || draftConflicts.value.approval,
+)
+const capabilityOptions = computed(() => [
+  { label: t('settings.capabilityLight'), value: 'light' },
+  { label: t('settings.capabilityStandard'), value: 'standard' },
+  { label: t('settings.capabilityStrong'), value: 'strong' },
 ])
 const tokenEstimationOptions = computed(() => [
   { label: t('settings.tokenConservative'), value: 'conservative' },
@@ -104,6 +156,28 @@ function handleSelectedModels(value: Array<string | number>): void {
   }
 }
 
+/** Applies a reasoning-effort annotation edit to one model row. */
+function handleReasoningEffortsChange(
+  modelId: string,
+  value: Array<string | number>,
+): void {
+  agent.updateModelAnnotation(modelId, {
+    reasoningEfforts: value.map(String) as ReasoningEffort[],
+  })
+}
+
+/** Applies a capability annotation edit to one model row. */
+function handleCapabilityChange(
+  modelId: string,
+  value: string | number | null,
+): void {
+  agent.updateModelAnnotation(modelId, {
+    capability: (value === null
+      ? null
+      : String(value)) as ModelCapabilityLevel | null,
+  })
+}
+
 onMounted(() => {
   void agent.enterProviderSettings()
 })
@@ -112,16 +186,20 @@ watch(
   () =>
     JSON.stringify({
       form: agent.providerForm,
+      approval: agent.approvalSavedForm,
       models: agent.modelProfiles.map((model) => ({
         id: model.id,
         contextWindowTokens: model.contextWindowTokens,
         compactThresholdTokens: model.compactThresholdTokens,
         maxOutputTokens: model.maxOutputTokens,
+        reasoningEfforts: model.reasoningEfforts,
+        capability: model.capability,
       })),
     }),
   () => {
     if (autosaveTimer) clearTimeout(autosaveTimer)
     if (!agent.providerDirty) return
+    if (autosaveConflict.value) return
 
     agent.providerSaveStatus = ''
     autosaveTimer = setTimeout(() => {
@@ -129,12 +207,15 @@ watch(
       void agent.saveProvider()
     }, 600)
   },
+  { immediate: true },
 )
 
 onBeforeUnmount(() => {
   if (autosaveTimer) clearTimeout(autosaveTimer)
   autosaveTimer = undefined
-  if (agent.providerDirty) void agent.saveProvider()
+  if (agent.providerDirty && !autosaveConflict.value) {
+    void agent.saveProvider()
+  }
 })
 
 function providerActions(providerId: string): DropdownOption[] {
@@ -455,8 +536,12 @@ function handleDropdownSelect(key: string | number, providerId: string) {
         <NSelect
           v-model:value="agent.providerForm.reasoning"
           :options="reasoningOptions"
+          :status="draftConflicts.main ? 'error' : undefined"
         />
-        <small>
+        <small v-if="draftConflicts.main" class="settings-field-error">
+          {{ t('settings.mainReasoningConflictHint') }}
+        </small>
+        <small v-else>
           {{ reasoningHint }}
         </small>
       </label>
@@ -466,6 +551,23 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <h4>{{ t('settings.modelSettings') }}</h4>
           <p>{{ t('settings.modelSettingsHint') }}</p>
         </div>
+        <small
+          v-if="draftConflicts.approvalReason === 'model-disabled'"
+          class="settings-field-error"
+        >
+          {{
+            t('settings.approvalDraftModelDisabledHint', {
+              model: agent.approvalSavedForm.model,
+            })
+          }}
+        </small>
+        <small v-else-if="draftConflicts.approval" class="settings-field-error">
+          {{
+            t('settings.approvalDraftConflictHint', {
+              model: agent.approvalSavedForm.model,
+            })
+          }}
+        </small>
         <NTransfer
           :value="selectedModelIds"
           :options="modelTransferOptions"
@@ -492,6 +594,8 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <span>{{ t('settings.maximumContext') }}</span>
           <span>{{ t('settings.compressionThreshold') }}</span>
           <span>{{ t('settings.maximumOutputLength') }}</span>
+          <span>{{ t('settings.modelReasoningEfforts') }}</span>
+          <span>{{ t('settings.modelCapability') }}</span>
         </div>
         <NScrollbar
           v-if="selectedModelProfiles.length"
@@ -561,6 +665,37 @@ function handleDropdownSelect(key: string | number, providerId: string) {
                         $event,
                       )
                     "
+                  />
+                </label>
+                <label
+                  class="provider-model-value"
+                  :aria-label="`${model.id} · ${t('settings.modelReasoningEfforts')}`"
+                >
+                  <span>{{ t('settings.modelReasoningEfforts') }}</span>
+                  <NSelect
+                    :value="model.reasoningEfforts ?? []"
+                    :options="reasoningEffortOptions"
+                    :placeholder="
+                      t('settings.modelReasoningEffortsPlaceholder')
+                    "
+                    multiple
+                    clearable
+                    @update:value="
+                      handleReasoningEffortsChange(model.id, $event)
+                    "
+                  />
+                </label>
+                <label
+                  class="provider-model-value"
+                  :aria-label="`${model.id} · ${t('settings.modelCapability')}`"
+                >
+                  <span>{{ t('settings.modelCapability') }}</span>
+                  <NSelect
+                    :value="model.capability ?? null"
+                    :options="capabilityOptions"
+                    :placeholder="t('settings.modelCapabilityPlaceholder')"
+                    clearable
+                    @update:value="handleCapabilityChange(model.id, $event)"
                   />
                 </label>
               </div>

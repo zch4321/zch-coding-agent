@@ -1,9 +1,11 @@
 import {
   getActiveProviderConfig,
   getProviderConfig,
+  type ModelCapabilityLevel,
   type ProviderType,
   type PublicConfig,
   type ProviderModel,
+  type ReasoningEffort,
 } from '../../shared/config'
 import { resolveModelTokenSettings } from '../../shared/model-settings'
 
@@ -37,6 +39,8 @@ export interface ModelProfile {
   contextWindowTokens: number
   compactThresholdTokens: number
   maxOutputTokens: number
+  reasoningEfforts?: ReasoningEffort[]
+  capability?: ModelCapabilityLevel
 }
 
 function catalogTokenLimit(
@@ -354,14 +358,21 @@ export function resolveModelProfiles(
     .map((model): ModelProfile => {
       const override = provider.modelOverrides[model.id]
       const builtin = BUILTIN_MODEL_CAPABILITIES[model.id]
-      const capabilitySource =
-        override && Object.keys(override).length > 0
-          ? 'override'
-          : model.contextWindowTokens
-            ? 'provider'
-            : builtin
-              ? 'builtin'
-              : 'default'
+      // Only token overrides mark the capability source as 'override';
+      // annotation-only overrides keep the underlying token source semantics.
+      const hasTokenOverride = Boolean(
+        override &&
+        (override.contextWindowTokens !== undefined ||
+          override.compactThresholdTokens !== undefined ||
+          override.maxOutputTokens !== undefined),
+      )
+      const capabilitySource = hasTokenOverride
+        ? 'override'
+        : model.contextWindowTokens
+          ? 'provider'
+          : builtin
+            ? 'builtin'
+            : 'default'
       const contextWindowTokens =
         override?.contextWindowTokens ??
         model.contextWindowTokens ??
@@ -382,6 +393,10 @@ export function resolveModelProfiles(
         availability: catalogIds.has(model.id) ? 'provider' : 'custom',
         capabilitySource,
         ...tokenSettings,
+        ...(override?.reasoningEfforts
+          ? { reasoningEfforts: [...override.reasoningEfforts] }
+          : {}),
+        ...(override?.capability ? { capability: override.capability } : {}),
       }
     })
     .sort((left, right) => left.id.localeCompare(right.id))

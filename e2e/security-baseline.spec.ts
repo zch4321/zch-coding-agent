@@ -57,10 +57,12 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 15,
+          schemaVersion: 19,
+          modelPool: { entries: [] },
           subagents: {
             enabled: false,
             workerTimeoutMs: 1_800_000,
+            maxAgentsPerSwarm: 10,
           },
           mcpServers: [],
           activeProviderId: 'deepseek',

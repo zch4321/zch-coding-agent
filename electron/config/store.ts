@@ -1,6 +1,17 @@
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
-import type { ConfigSetRequest, PublicConfig } from '../../shared/config'
+import {
+  ModelPoolConfigSchema,
+  normalizeModelPoolConfig,
+  type ConfigSetRequest,
+  type ModelPoolConfig,
+  type PublicConfig,
+} from '../../shared/config'
+import {
+  assertModelRouteSnapshotSafe,
+  evaluateModelRouteCompatibility,
+} from '../../shared/model-route'
+import { normalizeReasoningEfforts } from '../../shared/model-settings'
 import { writeJsonAtomic } from './atomic-file'
 import { migrateConfig, UnsupportedConfigSchemaError } from './migrations'
 import {
@@ -14,11 +25,17 @@ import {
 } from './schema'
 import type { SecretStore, SecretStorageStatus } from './secret-store'
 import type { McpLaunchTrust, McpServerConfig } from '../../shared/mcp'
+import { resolveModelProfiles } from '../providers/model-catalog'
+import { resolveProviderEndpoint } from '../providers/provider-factory'
+import { compileSchema, formatSchemaErrors } from '../schema-validator'
 
 type ProviderUpdate = Extract<
   ConfigSetRequest,
   { kind: 'provider' | 'provider-settings' }
 >
+type ModelPoolUpdate = Extract<ConfigSetRequest, { kind: 'model-pool' }>
+
+const validateModelPoolConfig = compileSchema(ModelPoolConfigSchema)
 
 function assertModelOverridesValid(
   overrides: AppProviderConfig['modelOverrides'],
@@ -49,10 +66,85 @@ function normalizedEnabledModelIds(modelIds: readonly string[]): string[] {
   return [...new Set(modelIds.map((modelId) => modelId.trim()).filter(Boolean))]
 }
 
-function assertMainModelEnabled(provider: AppProviderConfig): void {
-  if (provider.model && !provider.enabledModelIds.includes(provider.model)) {
+/** Validates the configured main route while allowing an unconfigured model. */
+function assertMainRouteConfigValid(provider: AppProviderConfig): void {
+  if (!provider.model) return
+  const compatibility = evaluateModelRouteCompatibility(provider, {
+    model: provider.model,
+    reasoning: provider.reasoning,
+  })
+  if (compatibility.ok) return
+  if (compatibility.reason === 'model-disabled') {
     throw new Error('Main model must be enabled for the Provider')
   }
+  if (compatibility.reason === 'reasoning-unsupported') {
+    throw new Error(
+      `Provider reasoning must be supported by the main model: ${provider.model}`,
+    )
+  }
+  throw new Error(`Invalid main model route: ${compatibility.reason}`)
+}
+
+/** Returns the first enabled model compatible with one explicit effort. */
+function firstApprovalCompatibleModel(
+  provider: AppProviderConfig,
+  reasoning: AppConfig['approval']['reasoning'],
+): string | undefined {
+  return provider.enabledModelIds.find(
+    (model) =>
+      evaluateModelRouteCompatibility(provider, { model, reasoning }).ok,
+  )
+}
+
+/** True when the approval route currently resolves to a usable route. */
+function isApprovalRouteUsable(
+  config: AppConfig,
+  approval: AppConfig['approval'],
+): boolean {
+  const provider = config.providers.find(
+    (candidate) => candidate.id === approval.approverProviderId,
+  )
+  return evaluateModelRouteCompatibility(provider, {
+    model: approval.approverModel,
+    reasoning: approval.reasoning,
+  }).ok
+}
+
+/**
+ * Validates that an approval route can actually be resolved: the provider
+ * exists, the model is non-empty and still enabled, and its explicitly saved
+ * approval effort is supported by the model annotation. Used when saving
+ * approval settings, and to stop provider updates from breaking a previously
+ * working approval route.
+ */
+function assertApprovalRouteConfigValid(
+  config: AppConfig,
+  approval: AppConfig['approval'],
+): void {
+  const provider = config.providers.find(
+    (candidate) => candidate.id === approval.approverProviderId,
+  )
+  const compatibility = evaluateModelRouteCompatibility(provider, {
+    model: approval.approverModel,
+    reasoning: approval.reasoning,
+  })
+  if (compatibility.ok) return
+  if (compatibility.reason === 'provider-missing') {
+    throw new Error(
+      `Approval provider is not configured: ${approval.approverProviderId}`,
+    )
+  }
+  if (
+    compatibility.reason === 'model-empty' ||
+    compatibility.reason === 'model-disabled'
+  ) {
+    throw new Error(
+      `Approval model ${approval.approverModel || '(empty)'} is not enabled for provider ${approval.approverProviderId}`,
+    )
+  }
+  throw new Error(
+    `Approval model ${approval.approverModel} does not support approval reasoning effort: ${approval.reasoning}`,
+  )
 }
 
 function applyProviderUpdate(
@@ -63,6 +155,10 @@ function applyProviderUpdate(
   const providerId = request.providerId ?? next.activeProviderId
   let provider = getAppProvider(next, providerId)
   const isNewProvider = !provider
+  // Snapshot approval usability before mutating: updates may not break a
+  // working approval route, but an already unconfigured or broken approval
+  // must not block unrelated provider edits.
+  const approvalWasUsable = isApprovalRouteUsable(next, next.approval)
 
   if (!provider) {
     provider = {
@@ -100,7 +196,17 @@ function applyProviderUpdate(
     provider.enabledModelIds.push(request.model)
   }
   if (request.modelOverrides !== undefined) {
-    provider.modelOverrides = structuredClone(request.modelOverrides)
+    // Normalize the effort set order so equivalent annotations cannot produce
+    // spurious route-shape changes (and revision bumps).
+    const normalized = structuredClone(request.modelOverrides)
+    for (const override of Object.values(normalized)) {
+      if (override.reasoningEfforts?.length) {
+        override.reasoningEfforts = normalizeReasoningEfforts(
+          override.reasoningEfforts,
+        )
+      }
+    }
+    provider.modelOverrides = normalized
   } else if (request.model) {
     provider.modelOverrides[request.model] = {
       ...provider.modelOverrides[request.model],
@@ -136,7 +242,10 @@ function applyProviderUpdate(
     provider.modelCatalog = []
     delete provider.modelCatalogFetchedAt
   }
-  assertMainModelEnabled(provider)
+  assertMainRouteConfigValid(provider)
+  if (approvalWasUsable && next.approval.approverProviderId === provider.id) {
+    assertApprovalRouteConfigValid(next, next.approval)
+  }
   if (!isNewProvider && providerRouteShape(provider) !== previousRouteShape) {
     provider.revision += 1
   }
@@ -168,6 +277,144 @@ function providerFallback(
     getAppProvider(next, next.activeProviderId) ??
     next.providers[0]
   )
+}
+
+function disableModelPoolEntries(
+  config: AppConfig,
+  shouldDisable: (entry: ModelPoolConfig['entries'][number]) => boolean,
+): boolean {
+  let changed = false
+  config.modelPool.entries = config.modelPool.entries.map((entry) => {
+    if (!entry.enabled || !shouldDisable(entry)) return entry
+    changed = true
+    return { ...entry, enabled: false }
+  })
+  return changed
+}
+
+function disableIncompatibleModelPoolEntries(config: AppConfig): boolean {
+  return disableModelPoolEntries(config, (entry) => {
+    const provider = getAppProvider(config, entry.providerId)
+    return (
+      !evaluateModelRouteCompatibility(provider, {
+        model: entry.model,
+        reasoning: entry.reasoning,
+      }).ok || !provider?.modelOverrides[entry.model]?.capability
+    )
+  })
+}
+
+function assertModelPoolRevisionCoverage(
+  config: PublicConfig,
+  request: ModelPoolUpdate,
+): void {
+  const requiredProviderIds = new Set(
+    request.value.entries
+      .filter((entry) => entry.enabled)
+      .map((entry) => entry.providerId),
+  )
+  const revisions = new Map<string, number>()
+
+  for (const expected of request.expectedProviderRevisions) {
+    if (revisions.has(expected.providerId)) {
+      throw new Error(
+        `Duplicate expected Provider revision: ${expected.providerId}`,
+      )
+    }
+    if (!requiredProviderIds.has(expected.providerId)) {
+      throw new Error(
+        `Unexpected Provider revision for model pool: ${expected.providerId}`,
+      )
+    }
+    revisions.set(expected.providerId, expected.revision)
+  }
+
+  for (const providerId of requiredProviderIds) {
+    const expectedRevision = revisions.get(providerId)
+    if (expectedRevision === undefined) {
+      throw new Error(
+        `Missing expected Provider revision for model pool: ${providerId}`,
+      )
+    }
+    const provider = config.providers.find(
+      (candidate) => candidate.id === providerId,
+    )
+    if (!provider) {
+      throw new Error(`Provider is not configured: ${providerId}`)
+    }
+    if (provider.revision !== expectedRevision) {
+      throw new Error(
+        `Provider configuration changed before saving model pool: ${providerId}`,
+      )
+    }
+  }
+}
+
+function assertEnabledModelPoolEntriesValid(
+  config: PublicConfig,
+  pool: ModelPoolConfig,
+): void {
+  for (const entry of pool.entries) {
+    if (!entry.enabled) continue
+
+    const provider = config.providers.find(
+      (candidate) => candidate.id === entry.providerId,
+    )
+    if (!provider) {
+      throw new Error(`Provider is not configured: ${entry.providerId}`)
+    }
+    const compatibility = evaluateModelRouteCompatibility(provider, {
+      model: entry.model,
+      reasoning: entry.reasoning,
+    })
+    if (!compatibility.ok) {
+      if (
+        compatibility.reason === 'model-empty' ||
+        compatibility.reason === 'model-disabled'
+      ) {
+        throw new Error(
+          `Model is not enabled for ${provider.label}: ${entry.model}`,
+        )
+      }
+      if (compatibility.reason === 'reasoning-unsupported') {
+        throw new Error(
+          `Model ${entry.model} does not support reasoning effort '${entry.reasoning}' (supported: ${compatibility.supportedReasoningEfforts.join(', ')})`,
+        )
+      }
+      throw new Error(`Invalid model pool route: ${compatibility.reason}`)
+    }
+    if (!provider.modelOverrides[entry.model]?.capability) {
+      throw new Error(
+        `Model ${entry.model} must have a capability annotation before it can be enabled in the model pool`,
+      )
+    }
+
+    const endpoint = resolveProviderEndpoint(
+      provider.providerType,
+      provider.baseURL,
+    )
+    assertModelRouteSnapshotSafe({
+      schemaVersion: 2,
+      purpose: 'main',
+      providerType: provider.providerType,
+      providerId: provider.id,
+      model: entry.model,
+      reasoning: entry.reasoning,
+      endpoint,
+      providerConfigRevision: provider.revision,
+    })
+    const profile = resolveModelProfiles(config, provider.id, entry.model).find(
+      (candidate) => candidate.id === entry.model,
+    )
+    if (!profile) {
+      throw new Error(
+        `Model profile is not available for ${provider.label}: ${entry.model}`,
+      )
+    }
+    if (!provider.credentialConfigured) {
+      throw new Error(`${provider.label} credential is not configured`)
+    }
+  }
 }
 
 /** Serializes configuration mutations, persists settings, and delegates credentials to SecretStore. */
@@ -220,8 +467,12 @@ export class ConfigStore {
 
   /** Returns renderer-safe settings with credential presence and source but no secret values. */
   getPublicConfig(): PublicConfig {
+    return this.#toPublicConfig(this.#config)
+  }
+
+  #toPublicConfig(config: AppConfig): PublicConfig {
     return toPublicConfig(
-      this.#config,
+      config,
       (provider) => {
         const stored = this.#secretStore.has(provider.apiKeyRef)
         const environment = Boolean(this.#environmentApiKeys[provider.id])
@@ -278,6 +529,20 @@ export class ConfigStore {
       ? await this.#secretStore.get(reference)
       : undefined
     return stored ?? this.#environmentApiKeys[provider.id]
+  }
+
+  /** Rejects when any Provider no longer matches a previously captured revision. */
+  assertProviderRevisions(
+    expected: readonly { providerId: string; revision: number }[],
+  ): void {
+    for (const item of expected) {
+      const provider = getAppProvider(this.#config, item.providerId)
+      if (!provider || provider.revision !== item.revision) {
+        throw new Error(
+          `Provider configuration changed while freezing route: ${item.providerId}`,
+        )
+      }
+    }
   }
 
   /** Returns the stored credential for the configured web-search provider. */
@@ -404,9 +669,11 @@ export class ConfigStore {
     switch (request.kind) {
       case 'provider':
         applyProviderUpdate(next, request, { activate: true })
+        disableIncompatibleModelPoolEntries(next)
         break
       case 'provider-settings': {
         applyProviderUpdate(next, request, { activate: false })
+        disableIncompatibleModelPoolEntries(next)
         next.limits = structuredClone(request.limits)
 
         if (request.apiKey === undefined) {
@@ -489,11 +756,25 @@ export class ConfigStore {
         }
 
         if (next.approval.approverProviderId === request.providerId) {
+          const fallbackApprovalModel = next.approval.approverModel
+            ? firstApprovalCompatibleModel(fallback, next.approval.reasoning)
+            : undefined
+          if (next.approval.approverModel && !fallbackApprovalModel) {
+            throw new Error(
+              `No approval-compatible model is enabled for fallback provider ${fallback.id}`,
+            )
+          }
           next.approval = {
             approverProviderId: fallback.id,
-            approverModel: fallback.model,
+            approverModel: fallbackApprovalModel ?? '',
+            reasoning: next.approval.reasoning,
           }
         }
+
+        disableModelPoolEntries(
+          next,
+          (entry) => entry.providerId === request.providerId,
+        )
 
         await writeJsonAtomic(this.#filePath, next)
         this.#config = next
@@ -509,6 +790,10 @@ export class ConfigStore {
         if (request.action === 'clear') {
           delete provider.apiKeyRef
           provider.revision += 1
+          disableModelPoolEntries(
+            next,
+            (entry) => entry.providerId === provider.id,
+          )
           await writeJsonAtomic(this.#filePath, next)
           this.#config = next
           await this.#secretStore.delete(previousReference)
@@ -531,14 +816,36 @@ export class ConfigStore {
         return this.getPublicConfig()
       }
       case 'approval':
+        assertApprovalRouteConfigValid(next, {
+          approverProviderId: request.approverProviderId,
+          approverModel: request.approverModel,
+          reasoning: request.reasoning,
+        })
         next.approval = {
           approverProviderId: request.approverProviderId,
           approverModel: request.approverModel,
+          reasoning: request.reasoning,
         }
         break
       case 'subagents':
         next.subagents = structuredClone(request.value)
         break
+      case 'model-pool': {
+        if (!validateModelPoolConfig(request.value)) {
+          throw new Error(
+            `Invalid model pool: ${formatSchemaErrors(validateModelPoolConfig.errors)}`,
+          )
+        }
+        const normalized = normalizeModelPoolConfig(request.value)
+        const publicConfig = this.#toPublicConfig(next)
+        assertModelPoolRevisionCoverage(publicConfig, {
+          ...request,
+          value: normalized,
+        })
+        assertEnabledModelPoolEntriesValid(publicConfig, normalized)
+        next.modelPool = normalized
+        break
+      }
       case 'permission':
         next.permission = {
           defaultMode: request.defaultMode,
@@ -633,11 +940,8 @@ export class ConfigStore {
       const content = await readFile(this.#filePath, 'utf8')
       const parsed = JSON.parse(content) as unknown
       const migrated = migrateConfig(parsed)
-      if (
-        !parsed ||
-        typeof parsed !== 'object' ||
-        Reflect.get(parsed, 'schemaVersion') !== migrated.schemaVersion
-      ) {
+      disableIncompatibleModelPoolEntries(migrated)
+      if (JSON.stringify(parsed) !== JSON.stringify(migrated)) {
         await writeJsonAtomic(this.#filePath, migrated)
       }
       return migrated
@@ -657,6 +961,7 @@ export class ConfigStore {
         error instanceof UnsupportedConfigSchemaError ||
         error instanceof SyntaxError
       ) {
+        await this.#backupUnreadableConfig()
         await rm(this.#filePath, { force: true })
         const defaults = migrateConfig(undefined)
         await writeJsonAtomic(this.#filePath, defaults)
@@ -664,6 +969,23 @@ export class ConfigStore {
       }
 
       throw error
+    }
+  }
+
+  /**
+   * Preserves a config file this version cannot parse before the destructive
+   * reset. Downgrades are unsupported; the backup is the only recovery path.
+   * A failed backup must never block the reset itself.
+   */
+  async #backupUnreadableConfig(): Promise<void> {
+    try {
+      const stamp = new Date().toISOString().replaceAll(':', '-')
+      await copyFile(
+        this.#filePath,
+        `${this.#filePath}.unsupported-${stamp}.bak`,
+      )
+    } catch {
+      // Best effort only.
     }
   }
 }

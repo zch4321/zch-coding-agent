@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox'
 import {
+  APP_CONFIG_SCHEMA_VERSION,
   PermissionModeSchema,
   ProviderTypeSchema,
   PublicConfigSchema,
@@ -58,7 +59,7 @@ export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
 
 export const AppConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(15),
+    schemaVersion: Type.Literal(APP_CONFIG_SCHEMA_VERSION),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
@@ -66,6 +67,7 @@ export const AppConfigSchema = Type.Object(
     }),
     approval: PublicConfigSchema.properties.approval,
     subagents: PublicConfigSchema.properties.subagents,
+    modelPool: PublicConfigSchema.properties.modelPool,
     permission: Type.Object(
       {
         defaultMode: PermissionModeSchema,
@@ -95,7 +97,7 @@ export type AppConfig = Static<typeof AppConfigSchema>
 export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
-  schemaVersion: 15,
+  schemaVersion: APP_CONFIG_SCHEMA_VERSION,
   activeProviderId: DEFAULT_PROVIDER_ID,
   providers: [
     {
@@ -114,10 +116,15 @@ export const DEFAULT_APP_CONFIG = {
   approval: {
     approverProviderId: DEFAULT_PROVIDER_ID,
     approverModel: '',
+    reasoning: 'high',
   },
   subagents: {
     enabled: false,
     workerTimeoutMs: 30 * 60_000,
+    maxAgentsPerSwarm: 10,
+  },
+  modelPool: {
+    entries: [],
   },
   permission: {
     defaultMode: 'readonly',
@@ -249,7 +256,7 @@ export function toPublicConfig(
         })
 
   return {
-    schemaVersion: 15,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
     activeProviderId: config.activeProviderId,
     providers: config.providers.map((provider) => ({
       id: provider.id,
@@ -267,6 +274,7 @@ export function toPublicConfig(
     })),
     approval: structuredClone(config.approval),
     subagents: structuredClone(config.subagents),
+    modelPool: structuredClone(config.modelPool),
     permission: structuredClone(config.permission),
     limits: structuredClone(config.limits),
     logging: structuredClone(config.logging),

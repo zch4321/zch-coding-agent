@@ -2,6 +2,29 @@ import { Type, type Static } from '@sinclair/typebox'
 import { JsonValueSchema } from './json'
 import type { AssistantLanguage } from './system-prompts'
 import { McpServerConfigSchema } from './mcp'
+import {
+  ModelPoolConfigSchema,
+  ModelPoolProviderRevisionSchema,
+} from './model-pool'
+import { ReasoningEffortSchema, type ReasoningEffort } from './reasoning'
+
+export {
+  MAX_MODEL_POOL_ENTRIES,
+  ModelPoolConfigSchema,
+  ModelPoolEntrySchema,
+  ModelPoolProviderRevisionSchema,
+  normalizeModelPoolConfig,
+  type ModelPoolConfig,
+  type ModelPoolEntry,
+  type ModelPoolProviderRevision,
+} from './model-pool'
+export {
+  REASONING_EFFORTS,
+  ReasoningEffortSchema,
+  type ReasoningEffort,
+} from './reasoning'
+
+export const APP_CONFIG_SCHEMA_VERSION = 19 as const
 
 export const AssistantLanguageSchema = Type.Union([
   Type.Literal('zh-CN'),
@@ -17,14 +40,15 @@ export const PermissionModeSchema = Type.Union([
 ])
 export type PermissionMode = Static<typeof PermissionModeSchema>
 
-export const ReasoningEffortSchema = Type.Union([
-  Type.Literal('off'),
-  Type.Literal('high'),
-  Type.Literal('max'),
-])
-export type ReasoningEffort = Static<typeof ReasoningEffortSchema>
 export const DeepSeekReasoningEffortSchema = ReasoningEffortSchema
 export type DeepSeekReasoningEffort = ReasoningEffort
+
+export const ModelCapabilityLevelSchema = Type.Union([
+  Type.Literal('light'),
+  Type.Literal('standard'),
+  Type.Literal('strong'),
+])
+export type ModelCapabilityLevel = Static<typeof ModelCapabilityLevelSchema>
 
 export const RememberedRuleSchema = Type.Object(
   {
@@ -66,9 +90,16 @@ export const ModelCapabilityOverrideSchema = Type.Object(
     maxOutputTokens: Type.Optional(
       Type.Integer({ minimum: 1, maximum: 10_000_000 }),
     ),
+    reasoningEfforts: Type.Optional(
+      Type.Array(ReasoningEffortSchema, { minItems: 1, uniqueItems: true }),
+    ),
+    capability: Type.Optional(ModelCapabilityLevelSchema),
   },
   { additionalProperties: false },
 )
+export type ModelCapabilityOverride = Static<
+  typeof ModelCapabilityOverrideSchema
+>
 
 export const TokenEstimationSchema = Type.Object(
   {
@@ -149,7 +180,7 @@ export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
 export const PublicConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(15),
+    schemaVersion: Type.Literal(APP_CONFIG_SCHEMA_VERSION),
     activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
@@ -159,6 +190,7 @@ export const PublicConfigSchema = Type.Object(
       {
         approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
         approverModel: Type.String({ maxLength: 256 }),
+        reasoning: ReasoningEffortSchema,
       },
       { additionalProperties: false },
     ),
@@ -169,9 +201,11 @@ export const PublicConfigSchema = Type.Object(
           minimum: 60_000,
           maximum: 86_400_000,
         }),
+        maxAgentsPerSwarm: Type.Integer({ minimum: 1, maximum: 32 }),
       },
       { additionalProperties: false },
     ),
+    modelPool: ModelPoolConfigSchema,
     permission: Type.Object(
       {
         defaultMode: PermissionModeSchema,
@@ -447,6 +481,7 @@ export const ConfigSectionSchema = Type.Union([
   Type.Literal('providers'),
   Type.Literal('approval'),
   Type.Literal('subagents'),
+  Type.Literal('modelPool'),
   Type.Literal('permission'),
   Type.Literal('limits'),
   Type.Literal('logging'),
@@ -462,6 +497,17 @@ export const ConfigSectionSchema = Type.Union([
 export type ConfigSection = Static<typeof ConfigSectionSchema>
 
 export const ConfigSetRequestSchema = Type.Union([
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('model-pool'),
+      value: ModelPoolConfigSchema,
+      expectedProviderRevisions: Type.Array(ModelPoolProviderRevisionSchema, {
+        maxItems: 32,
+      }),
+    },
+    { additionalProperties: false },
+  ),
   Type.Object(
     {
       version: Type.Literal(1),
@@ -600,6 +646,7 @@ export const ConfigSetRequestSchema = Type.Union([
       kind: Type.Literal('approval'),
       approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
       approverModel: Type.String({ maxLength: 256 }),
+      reasoning: ReasoningEffortSchema,
     },
     { additionalProperties: false },
   ),

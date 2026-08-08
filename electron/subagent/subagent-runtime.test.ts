@@ -217,7 +217,11 @@ describe('read-only Subagent runtime', () => {
     await store.update({
       version: 1,
       kind: 'subagents',
-      value: { enabled: true, workerTimeoutMs: 60_000 },
+      value: {
+        enabled: true,
+        workerTimeoutMs: 60_000,
+        maxAgentsPerSwarm: 10,
+      },
     })
     const originalModel = store.getPublicConfig().providers[0]!.model
     let swapped = false
@@ -465,6 +469,94 @@ describe('read-only Subagent runtime', () => {
           })
         ).stdout,
       ).toBe(refsBefore)
+    } finally {
+      await target.dispose()
+    }
+  }, 30_000)
+
+  it('inherits a new reasoning level into the hidden child session', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'zch-subagent-reasoning-'),
+    )
+    cleanup.push(root)
+    const workspace = path.join(root, 'workspace')
+    const targetDirectory = path.join(root, 'runtime')
+    await mkdir(workspace)
+    await git(workspace, ['init', '--quiet'])
+    await writeFile(path.join(workspace, 'README.md'), 'base\n', 'utf8')
+    await git(workspace, ['add', 'README.md'])
+    await git(workspace, [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.test',
+      'commit',
+      '--quiet',
+      '-m',
+      'base',
+    ])
+
+    const store = await createConfig(root)
+    await store.update({
+      version: 1,
+      kind: 'subagents',
+      value: {
+        enabled: true,
+        workerTimeoutMs: 60_000,
+        maxAgentsPerSwarm: 10,
+      },
+    })
+    const provider = new SubagentChainProvider(workspace, async () => undefined)
+    const target = await createBackendRuntime({
+      configStore: store,
+      promptDirectory: path.resolve('resources', 'prompts'),
+      databasePath: path.join(targetDirectory, 'agent.db'),
+      runtimeDataDirectory: targetDirectory,
+      providerFactory: () => provider,
+    })
+    try {
+      const project = (await target.projects.add({ path: workspace })).commit
+        .change.projects[0]!
+      const sessionId = 'session:subagent-reasoning-parent' as SessionId
+      const started = await target.runs.start({
+        version: 1,
+        kind: 'new_session',
+        sessionId,
+        projectId: project.id,
+        permissionMode: 'readonly',
+        modelSelection: {
+          providerId: store.getPublicConfig().activeProviderId,
+          model: store.getPublicConfig().providers[0]!.model,
+          reasoning: 'medium',
+        },
+        message: 'Delegate with a new reasoning level.',
+        clientRequestId: 'request:subagent-reasoning',
+      })
+      if (started.outcome !== 'started')
+        throw new Error('Parent Run did not start')
+      await target.runtime.services.sessions.waitForRunSettled(
+        sessionId,
+        started.runId,
+      )
+
+      // The child inherits the parent's frozen route, including the new level.
+      expect(provider.childRequests[0]!.providerRequest).toMatchObject({
+        reasoning_effort: 'medium',
+      })
+
+      // The hidden child session persisted the inherited new level.
+      const durable = (
+        await target.coordinator.query((reader) =>
+          reader
+            .prepare(
+              `SELECT sessions.reasoning AS reasoning
+               FROM subagent_sessions
+               JOIN sessions ON sessions.id = subagent_sessions.session_id`,
+            )
+            .get(),
+        )
+      ).value as { reasoning: string }
+      expect(durable.reasoning).toBe('medium')
     } finally {
       await target.dispose()
     }
