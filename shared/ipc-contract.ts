@@ -296,6 +296,25 @@ export const IPC_CONTRACTS = {
   'session:search': domainIpcContract(
     DOMAIN_STATE_API_CONTRACTS['session:search'],
   ),
+  'session:export-markdown': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        sessionId: SessionIdSchema,
+        confirmed: Type.Literal(true),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          canceled: Type.Boolean(),
+          path: Type.Optional(Type.String({ maxLength: 4_096 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
   'message:list': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['message:list']),
   'message:search': domainIpcContract(
     DOMAIN_STATE_API_CONTRACTS['message:search'],

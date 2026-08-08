@@ -47,12 +47,14 @@ const enUS = {
     renameTitle: 'Rename',
     delete: 'Delete conversation',
     deleteTitle: 'Delete',
+    export: 'Export conversation',
+    exportTitle: 'Export Markdown',
     busyActionBlocked: 'Unavailable while running or awaiting approval',
     fork: 'Create a branched copy',
     forkTitle: 'Fork',
     import: 'Import from Markdown',
     durableImportExportPending:
-      'Pending Durable Session import/export redesign',
+      'Markdown conversation import is not available yet',
   },
   topbar: {
     terminal: 'Toggle terminal (Ctrl+J)',

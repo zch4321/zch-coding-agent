@@ -151,7 +151,7 @@ test.describe.serial('Durable Session and terminal workflows', () => {
     const sessionRow = page.locator('.conversation-row').first()
     await sessionRow.hover()
     const sessionActions = sessionRow.locator('.conversation-actions button')
-    await expect(sessionActions).toHaveCount(2)
+    await expect(sessionActions).toHaveCount(3)
     const sessionRowLayout = await sessionRow.evaluate((row) => {
       const rowBounds = row.getBoundingClientRect()
       const titleBounds = (

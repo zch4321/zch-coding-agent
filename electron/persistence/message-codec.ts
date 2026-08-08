@@ -83,7 +83,7 @@ export function encodeMessageRow(record: MessageRecord): MessageRow {
           )
         : null,
     model_route_json:
-      record.kind === 'assistant_turn'
+      'modelRoute' in record
         ? encodeJsonColumn(record.modelRoute, 'messages.model_route_json')
         : null,
     metadata_json: record.metadata

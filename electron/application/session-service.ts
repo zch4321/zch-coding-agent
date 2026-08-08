@@ -189,6 +189,18 @@ export class SessionService {
     ).value
   }
 
+  /** Loads every durable message in sequence order for transcript projection. */
+  async listAllMessages(sessionId: SessionId): Promise<MessageRecord[]> {
+    return (
+      await this.#coordinator.query((reader) => {
+        if (!this.#sessions.get(reader, sessionId)) {
+          throw new ApplicationError('NOT_FOUND', 'Session was not found')
+        }
+        return this.#messages.listAll(reader, sessionId)
+      })
+    ).value
+  }
+
   /** Loads the durable record, active messages, and idempotency results needed for runtime hydration. */
   async loadRuntimeState(
     sessionId: SessionId,

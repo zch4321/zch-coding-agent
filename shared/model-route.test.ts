@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { evaluateModelRouteCompatibility } from './model-route'
+import type { ModelRouteSnapshot } from './model-route'
+import {
+  areModelRoutesHistoryCompatible,
+  evaluateModelRouteCompatibility,
+  modelRouteCompatibilityKey,
+} from './model-route'
 
 const provider = {
   enabledModelIds: ['unannotated', 'limited'],
@@ -62,5 +67,40 @@ describe('model route compatibility', () => {
         reasoning: 'low',
       }),
     ).toEqual({ ok: true })
+  })
+
+  it('keys opaque history by Provider implementation, model, endpoint and revision', () => {
+    const route: ModelRouteSnapshot = {
+      schemaVersion: 2,
+      purpose: 'main',
+      providerType: 'generic.responses',
+      providerId: 'openai',
+      model: 'gpt-5.6',
+      reasoning: 'high',
+      endpoint: 'https://api.openai.com/v1/responses',
+      providerConfigRevision: 4,
+    }
+    const compression = {
+      ...route,
+      purpose: 'compression' as const,
+      reasoning: 'low' as const,
+    }
+
+    expect(modelRouteCompatibilityKey(compression)).toBe(
+      modelRouteCompatibilityKey(route),
+    )
+    expect(areModelRoutesHistoryCompatible(route, compression)).toBe(true)
+    expect(
+      areModelRoutesHistoryCompatible(route, {
+        ...route,
+        model: 'gpt-5.5',
+      }),
+    ).toBe(false)
+    expect(
+      areModelRoutesHistoryCompatible(route, {
+        ...route,
+        providerConfigRevision: 5,
+      }),
+    ).toBe(false)
   })
 })

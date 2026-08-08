@@ -36,7 +36,10 @@ function state(): CanonicalHistoryState {
 
 function prompt(
   history: CanonicalHistoryState,
-  kind: CanonicalPromptKind = 'system_instruction',
+  kind: Exclude<
+    CanonicalPromptKind,
+    'conversation_transcript'
+  > = 'system_instruction',
 ) {
   return appendPromptMessage(history, {
     kind,
@@ -59,7 +62,9 @@ describe('MessageHistoryCompiler', () => {
 
   it('compiles every prompt kind and ordinary text in strict seq order', () => {
     const history = state()
-    const kinds: CanonicalPromptKind[] = [
+    const kinds: Array<
+      Exclude<CanonicalPromptKind, 'conversation_transcript'>
+    > = [
       'system_instruction',
       'assistant_preferences',
       'selected_context',

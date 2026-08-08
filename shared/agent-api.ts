@@ -79,6 +79,9 @@ export interface AgentApi {
   searchSessions(
     payload: IpcPayload<'session:search'>,
   ): Promise<IpcResult<'session:search'>>
+  exportConversationMarkdown(
+    payload: IpcPayload<'session:export-markdown'>,
+  ): Promise<IpcResult<'session:export-markdown'>>
   listMessages(
     payload: IpcPayload<'message:list'>,
   ): Promise<IpcResult<'message:list'>>
@@ -244,6 +247,7 @@ export const AGENT_API_KEYS = [
   'forkSession',
   'rewindSession',
   'searchSessions',
+  'exportConversationMarkdown',
   'listMessages',
   'searchMessages',
   'listFileChanges',

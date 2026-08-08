@@ -239,6 +239,31 @@ describe('P11 Provider foundation', () => {
     },
   )
 
+  it('appends synthetic compact instructions after the complete Chat history', () => {
+    const provider = new GenericChatCompletionsProvider({
+      providerId: 'generic',
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+    })
+    const source = compileInput({
+      providerType: 'generic.chat-completions',
+    })
+    const call = provider.compileCompact({
+      history: source.history,
+      route: source.route,
+      instructions: 'COMPACT_INSTRUCTION_LAST',
+      maxOutputTokens: 1_024,
+    })
+
+    expect(call.mode).toBe('synthetic')
+    expect(call.normalizedMessages.at(-1)).toEqual({
+      role: 'user',
+      content: 'COMPACT_INSTRUCTION_LAST',
+    })
+    expect(call.request.messages).toEqual(call.normalizedMessages)
+    expect(call.request).not.toHaveProperty('tools')
+  })
+
   it('normalizes DeepSeek reasoning, split tool arguments and raw usage', async () => {
     let wireBody = ''
     const usage = {

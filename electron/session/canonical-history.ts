@@ -1,4 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
+import {
+  MAX_MESSAGE_PARTS,
+  MAX_MESSAGE_TEXT_LENGTH,
+} from '../../shared/durable'
 import type { CallId, MessageId, SessionId } from '../../shared/ids'
 import type { ContextAttachmentChip } from '../../shared/context'
 import { assertBoundedJsonValue, type JsonValue } from '../../shared/json'
@@ -9,6 +13,7 @@ import {
   type CanonicalPromptKind,
   type MessagePart,
   type MessageRecord,
+  type ProviderCompactEnvelope,
   type ToolCallPart,
   type ToolResultContent,
 } from '../../shared/message'
@@ -57,6 +62,16 @@ export interface AssistantTurnCandidateInput {
     MessageRecord,
     { kind: 'assistant_turn' }
   >['providerContinuation']
+  usage?: CanonicalUsageInput
+}
+
+export interface CanonicalUsageInput {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  reasoningTokens?: number
+  cachedInputTokens?: number
+  cacheMissTokens?: number
 }
 
 function nextIdentity(state: CanonicalHistoryState) {
@@ -97,14 +112,14 @@ export function canonicalTraceSource(records: readonly MessageRecord[]): Array<{
 export function messageText(record: MessageRecord): string {
   return record.parts
     .flatMap((part) => (part.type === 'text' ? [part.text] : []))
-    .join('\n')
+    .join(record.kind === 'conversation_transcript' ? '' : '\n')
 }
 
 /** Appends a canonical prompt record with its source kind and content metadata. */
 export function appendPromptMessage(
   state: CanonicalHistoryState,
   input: {
-    kind: CanonicalPromptKind
+    kind: Exclude<CanonicalPromptKind, 'conversation_transcript'>
     content: string
     source: string
     trusted: boolean
@@ -262,6 +277,7 @@ export function appendAssistantTurn(
     reasoning?: string
     finishReason?: string
     route: ModelRouteSnapshot
+    usage?: CanonicalUsageInput
     continuation?: Extract<
       MessageRecord,
       { kind: 'assistant_turn' }
@@ -292,6 +308,7 @@ export function appendAssistantTurn(
     finishReason: input.finishReason,
     route: input.route,
     continuation: input.continuation,
+    usage: input.usage,
   })
 }
 
@@ -363,11 +380,12 @@ function assistantTurnCandidate(
     ...(input.continuation
       ? { providerContinuation: structuredClone(input.continuation) }
       : {}),
-    ...(input.finishReason
+    ...(input.finishReason || input.usage
       ? {
           metadata: {
             schemaVersion: 1 as const,
-            finishReason: input.finishReason,
+            ...(input.finishReason ? { finishReason: input.finishReason } : {}),
+            ...(input.usage ? { usage: structuredClone(input.usage) } : {}),
           },
         }
       : {}),
@@ -454,6 +472,129 @@ export function appendCompactSummary(
         : {}),
     },
   } as Extract<MessageRecord, { kind: 'compact_summary' }>
+  state.history.push(record)
+  return record
+}
+
+/** Appends an opaque Provider-native compact checkpoint. */
+export function appendProviderCompactSummary(
+  state: CanonicalHistoryState,
+  input: {
+    payload: ProviderCompactEnvelope
+    route: ModelRouteSnapshot
+    replacesThroughSeq: number
+    sourceHash: string
+    usage?: CanonicalUsageInput
+    resource?: PromptResourceSummary
+    turnId?: MessageId
+  },
+): Extract<MessageRecord, { kind: 'compact_summary' }> {
+  if (input.payload.providerType !== input.route.providerType) {
+    throw new TypeError('Provider compact payload does not match its route')
+  }
+  const record = {
+    ...nextIdentity(state),
+    visibility: 'hidden' as const,
+    ...(input.turnId ? { turnId: input.turnId } : {}),
+    kind: 'compact_summary' as const,
+    parts: [
+      {
+        type: 'provider_compact' as const,
+        payload: structuredClone(input.payload),
+      },
+    ],
+    modelRoute: structuredClone(input.route),
+    metadata: {
+      schemaVersion: 1 as const,
+      compact: {
+        replacesThroughSeq: input.replacesThroughSeq,
+        sourceHash: input.sourceHash,
+      },
+      ...(input.usage ? { usage: structuredClone(input.usage) } : {}),
+      ...(input.resource
+        ? {
+            prompt: {
+              resourceId: input.resource.id,
+              version: input.resource.version,
+              hash: input.resource.sha256,
+            },
+          }
+        : {}),
+    },
+  } as Extract<MessageRecord, { kind: 'compact_summary' }>
+  if (!validateMessageRecord(record)) {
+    throw new TypeError(
+      `Canonical Provider compact is invalid: ${formatSchemaErrors(
+        validateMessageRecord.errors,
+      )}`,
+    )
+  }
+  assertMessageRecordSemantics(record)
+  state.history.push(record)
+  return record
+}
+
+/** Appends a hidden Markdown transcript used as a portable model-history anchor. */
+export function appendConversationTranscript(
+  state: CanonicalHistoryState,
+  input: {
+    content: string
+    route: ModelRouteSnapshot
+    sourceThroughSeq: number
+    sourceHash: string
+    contentHash: string
+  },
+): Extract<MessageRecord, { kind: 'conversation_transcript' }> {
+  if (!input.content) {
+    throw new TypeError('Conversation transcript content must not be empty')
+  }
+  const parts: Array<{ type: 'text'; text: string }> = []
+  for (
+    let offset = 0;
+    offset < input.content.length;
+    offset += MAX_MESSAGE_TEXT_LENGTH
+  ) {
+    parts.push({
+      type: 'text',
+      text: input.content.slice(offset, offset + MAX_MESSAGE_TEXT_LENGTH),
+    })
+  }
+  if (parts.length > MAX_MESSAGE_PARTS) {
+    throw new RangeError(
+      'Conversation transcript exceeds canonical part limits',
+    )
+  }
+  const record = {
+    ...nextIdentity(state),
+    visibility: 'hidden' as const,
+    kind: 'conversation_transcript' as const,
+    parts,
+    modelRoute: structuredClone(input.route),
+    metadata: {
+      schemaVersion: 1 as const,
+      layer: {
+        source: 'history.conversation-transcript',
+        trusted: true,
+        editable: false,
+        hash: createHash('sha256').update(input.content, 'utf8').digest('hex'),
+      },
+      transcript: {
+        format: 'zch-conversation-markdown' as const,
+        version: 1 as const,
+        sourceThroughSeq: input.sourceThroughSeq,
+        sourceHash: input.sourceHash,
+        contentHash: input.contentHash,
+      },
+    },
+  } as Extract<MessageRecord, { kind: 'conversation_transcript' }>
+  if (!validateMessageRecord(record)) {
+    throw new TypeError(
+      `Canonical conversation transcript is invalid: ${formatSchemaErrors(
+        validateMessageRecord.errors,
+      )}`,
+    )
+  }
+  assertMessageRecordSemantics(record)
   state.history.push(record)
   return record
 }

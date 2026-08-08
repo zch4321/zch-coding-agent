@@ -23,6 +23,7 @@ const emit = defineEmits<{
   create: [workspacePath?: string]
   open: [sessionId: string]
   rename: [sessionId: string]
+  export: [sessionId: string]
   delete: [sessionId: string]
   settings: []
 }>()
@@ -334,6 +335,20 @@ function updateExpandedProjects(
                     </span>
                   </NButton>
                   <div class="conversation-actions">
+                    <NTooltip>
+                      <template #trigger>
+                        <NButton
+                          quaternary
+                          circle
+                          size="small"
+                          :aria-label="t('sidebar.export')"
+                          @click="emit('export', conversation.id)"
+                        >
+                          <UiIcon name="download" />
+                        </NButton>
+                      </template>
+                      {{ t('sidebar.exportTitle') }}
+                    </NTooltip>
                     <NTooltip>
                       <template #trigger>
                         <NButton

@@ -175,4 +175,36 @@ describe('HttpSseTransport', () => {
       }),
     )
   })
+
+  it('parses bounded JSON-object responses for native Provider methods', async () => {
+    const fetchImpl = vi.fn(async () =>
+      Response.json({ object: 'response.compaction', output: [] }),
+    ) as unknown as typeof fetch
+    const target = transport(fetchImpl)
+
+    await expect(
+      target.postJsonObject({ model: 'test' }, new AbortController().signal),
+    ).resolves.toEqual({ object: 'response.compaction', output: [] })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://provider.test/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ model: 'test' }),
+      }),
+    )
+
+    const invalid = transport(
+      vi.fn(async () => new Response('not-json')) as unknown as typeof fetch,
+    )
+    await expect(
+      invalid.postJsonObject({}, new AbortController().signal),
+    ).rejects.toMatchObject({ code: 'INVALID_JSON' })
+
+    const array = transport(
+      vi.fn(async () => Response.json([])) as unknown as typeof fetch,
+    )
+    await expect(
+      array.postJsonObject({}, new AbortController().signal),
+    ).rejects.toMatchObject({ code: 'INVALID_JSON' })
+  })
 })

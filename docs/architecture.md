@@ -319,6 +319,13 @@ interface ProviderContinuationEnvelope {
   data: JsonValue
 }
 
+interface ProviderCompactEnvelope {
+  schemaVersion: 1
+  providerType: string
+  format: string
+  data: JsonValue
+}
+
 interface MessageMetadataV1 {
   schemaVersion: 1
   attachments?: Array<{
@@ -335,8 +342,10 @@ interface MessageMetadataV1 {
   usage?: {
     inputTokens?: number
     outputTokens?: number
+    totalTokens?: number
     reasoningTokens?: number
     cachedInputTokens?: number
+    cacheMissTokens?: number
   }
   tool?: {
     name: string
@@ -353,6 +362,13 @@ interface MessageMetadataV1 {
   compact?: {
     replacesThroughSeq: number
     sourceHash: string
+  }
+  transcript?: {
+    format: 'zch-conversation-markdown'
+    version: 1
+    sourceThroughSeq: number
+    sourceHash: string
+    contentHash: string
   }
   reasoningProjection?: {
     truncated: boolean
@@ -384,6 +400,11 @@ interface ToolResultPart {
   isError: boolean
 }
 
+interface ProviderCompactPart {
+  type: 'provider_compact'
+  payload: ProviderCompactEnvelope
+}
+
 type MessagePart = TextPart | ToolCallPart | ToolResultPart
 
 interface MessageRecord {
@@ -407,8 +428,9 @@ interface MessageRecord {
     | 'assistant_turn'
     | 'tool_result'
     | 'compact_summary'
+    | 'conversation_transcript'
 
-  parts: MessagePart[]
+  parts: Array<MessagePart | ProviderCompactPart>
   normalizedReasoningText?: string
   providerContinuation?: ProviderContinuationEnvelope
   modelRoute?: ModelRouteSnapshot
@@ -425,7 +447,7 @@ interface MessageRecord {
 - `parts`：应用理解的、有序的 canonical payload atoms。V1 支持文本、工具调用和工具结果；图片、文件等多模态类型只在产品真正支持时以新的闭集 union member 增加，不接受开放任意 JSON part。
 - `normalizedReasoningText`：可选、非加密、应用标准化后的可读 reasoning 文本或摘要，只用于 UI、导出和通用审计；它不是原始 CoT，也不能用于反向重建 Provider continuation。
 - `providerContinuation`：可选的 provider-native continuation envelope。Core 只验证外壳并原样搬运 `data`；只有 `providerType + format` 对应的 Provider 实现可以解释它。
-- `modelRoute`：已完成 assistant turn 实际使用的 route，便于 UI 和审计。
+- `modelRoute`：已完成 assistant turn、Provider-native compact 或字面对话历史实际绑定的 route，便于重放、兼容性判断与审计。
 - `metadata`：应用拥有并理解的 typed annotations，例如 attachment provenance、prompt id/hash、标准化 usage、approval/tool/compact 摘要和 reasoning projection 状态。
 - `visibility`：`visible` 可进入普通 timeline/search，`hidden` 是仍可参与模型历史的内部记录，`superseded` 表示已退出当前分支的审计记录。
 - `turnId`：把同一轮的 context、原始 user、assistant、tool result 和 interjection 关联起来；rewind/edit 使用它确定完整轮次边界。
@@ -440,7 +462,9 @@ interface MessageRecord {
 - 本地控制命令是 durable canonical log 的一部分，但永久 `inHistory = false`；普通 transcript/search 投影排除它，raw Message paging 仍保留它用于审计。Fork 会复制并 remap control/derived reference，但控制命令不能作为可见 fork point。
 - `assistant_turn`：只允许 text/tool-call parts，至少一项；`modelRoute` 必填，可携带 reasoning projection 和 continuation。
 - `tool_result`：每条 record 正好包含一个 terminal tool-result part；`callId` 必须对应之前 active assistant turn 中的 tool-call part。新结果必须带 `metadata.tool.resultProjection = 'model-content.v1'`，表示 `content` 已是模型可见的 canonical `TextPart | JsonPart`，不是 executor 的内部结果信封。
-- `system_instruction/assistant_preferences/selected_context/runtime_context/agents_context/orchestrator/interjection/compact_summary`：V1 只允许非空 text parts；不存在通用 `harness` kind。
+- `system_instruction/assistant_preferences/selected_context/runtime_context/agents_context/orchestrator/interjection`：V1 只允许非空 text parts；不存在通用 `harness` kind。
+- `compact_summary`：旧记录允许 text summary；新记录保存单个 `provider_compact` part、实际 `modelRoute` 和 replacement boundary。Core 不解释 opaque payload，只有匹配的 Provider 可以重放；Chat/Anthropic 的合成摘要也使用版本化 `summary-text.v1` envelope。
+- `conversation_transcript`：只允许 text parts，必须隐藏、携带目标 `modelRoute` 与 `zch-conversation-markdown` 的 source/content hash；仅用于不兼容 route 之间的字面历史迁移，不进入普通时间线。
 - `normalizedReasoningText/providerContinuation` 不能出现在非 assistant record。
 - `MessageMetadataV1` 也必须按 `kind` 收紧，不接受任意键。
 
@@ -468,7 +492,8 @@ execute / byte bound
 | ----------------------- | ------------------------------------------------------------- | --------------------------------- |
 | Durable canonical log   | 所有已接受并 commit 的 records，包括 `hidden` 和 `superseded` | 幂等、审计、fork/reference 完整性 |
 | Provider active history | `inHistory = true` 且非 `superseded`，再经 compiler 校验      | `ModelProvider.compile()` request |
-| Renderer transcript     | `visibility = visible` 的 user/assistant/编排记录             | Chat timeline、普通搜索与导出     |
+| Renderer timeline       | `visibility = visible` 的 user/assistant/编排记录             | Chat timeline 与普通搜索          |
+| Conversation Markdown   | 当前非 superseded 分支的 portable 语义投影                    | 用户确认后的本地导出与 route 迁移 |
 
 因此“某条命令不发送给模型”不意味着“不落库”；同样，`inHistory = false` 也不等于删除或不可审计。
 
@@ -531,6 +556,18 @@ interface ModelProvider {
     call: CompiledProviderCall,
     context: { signal: AbortSignal },
   ): AsyncIterable<ProviderEvent>
+
+  compileCompact(input: {
+    history: CompiledCanonicalHistory
+    route: ModelRouteSnapshot
+    instructions: string
+    maxOutputTokens: number
+  }): CompiledProviderCompactCall
+
+  compact(
+    call: CompiledProviderCompactCall,
+    context: { signal: AbortSignal },
+  ): AsyncIterable<ProviderCompactEvent>
 }
 
 interface CompletedAssistantTurn {
@@ -543,7 +580,9 @@ interface CompletedAssistantTurn {
 }
 ```
 
-`compile()` 必须同步、无网络、无凭据且确定性地消费整个 ordered history；它不是对每条 MessageRecord 做一对一 `map()`。编译可以提升 harness、合并相邻记录或将一条 record 展开为多个 wire items，但不能改写持久化 history。`stream()` 负责鉴权、HTTP/SDK、abort、流解码、usage、reasoning、tool-call 累积和最终 canonical completion；错误通过异常返回，成功必须恰好产生一次 `completed`。Application service 校验 `CompletedAssistantTurn` 后生成 ID/Session/seq/metadata 并落盘；Provider 不直接创建或插入 MessageRecord。
+`compile()` 与 `compileCompact()` 必须同步、无网络、无凭据且确定性地消费整个 ordered history；它们不是对每条 MessageRecord 做一对一 `map()`。编译可以提升 harness、合并相邻记录或将一条 record 展开为多个 wire items，但不能改写持久化 history。压缩编排指令由 `compileCompact()` 作为最后一个 wire input 注入。`stream()` 与 `compact()` 负责鉴权、HTTP/SDK、abort、流解码、usage 和恰好一次 terminal completion。Application service 校验结果后生成 ID/Session/seq/metadata 并落盘；Provider 不直接创建或插入 MessageRecord。
+
+`GenericResponsesProvider` 使用原生 `POST /responses/compact`，把返回的 compaction output items 原样放入 `ProviderCompactEnvelope`，下一次同兼容 route 请求再原样编译回 input；接口形态以 [OpenAI Responses Compact reference](https://developers.openai.com/api/reference/resources/responses/methods/compact/) 为准。Chat Completions、DeepSeek 与 Anthropic Messages 没有本项目采用的原生 checkpoint 接口，因此通过无工具模型调用产生 `summary-text.v1` envelope。两条路径对 Core 都表现为同一个 opaque compact record。
 
 | Canonical history                          | Chat Completions              | OpenAI Responses                         | Anthropic Messages                          |
 | ------------------------------------------ | ----------------------------- | ---------------------------------------- | ------------------------------------------- |
@@ -985,33 +1024,46 @@ Tool/approval 的实时卡片来自 runtime event；完成后 renderer 从 assis
 
 `inHistory` 表示下一次请求使用的 canonical active history，不表示消息是否在 UI 可见。
 
-P3 runtime 中，自动 compact 只在新用户输入后或完整 tool-result batch 后执行：
+自动 compact 只由刚完成响应的 Provider usage 驱动，不用本地 token 估算值决定是否触发：
 
-1. 用完整 pre-compact active history（包括当前用户、interjection、assistant 与工具进展）生成 summary。
-2. summary 成功后才把旧 active records 全部置为 `in_history = 0`；失败、abort 或空 summary 保持历史不变。
-3. 依次追加 `system_instruction → 当前 harness* → Run 起始 user_input replay → compact_summary`。replay 使用新 ID/seq、记录 `replayedFromMessageId`，不复制 `clientRequestId`。
-4. 当前 Chat Completions Provider 把末尾 summary 编译为 user-role continuation；重建后仍超硬限制直接返回 `CONTEXT_TOO_LARGE`，不递归 compact。
+1. Provider 未返回 `totalTokens`，且也没有完整的 `promptTokens + completionTokens` 时，本次不主动压缩。
+2. usage 达到或超过冻结模型的 `contextWindowTokens` 时直接以 context budget error 结束；不得先赌一次压缩。
+3. usage 达到 `compactThresholdTokens` 且响应包含 tool calls 时，先执行并原子提交完整 tool-result batch，再把包含这些结果的 active history 一起压缩。
+4. usage 达到阈值且响应是本轮 final answer 时，不在回答结束后后台启动请求；下一次普通用户 Run 在插入新 user message **之前**先压缩旧历史。若应用编排要求同一 Run 继续，则在 continuation 前立即压缩。
+5. 本地估算只保留为 Provider 调用前不可关闭的硬 preflight，防止明显超出目标模型 prompt budget；它不触发主动压缩。
 
-原消息仍在数据库，UI 和导出可以读取；只是后续 provider request 不再携带。
+压缩调用以完整 active history 为输入，由 `compileCompact()` 将编排指令放在最后一个 wire input。Provider 成功后，单一事务把旧 active records 置为 `in_history = 0`，追加 fresh harness 和一个隐藏 `compact_summary`；失败、abort、空结果或重建超限时恢复旧 epoch。原消息始终保留在 append-only 数据库中，只是不再进入后续 Provider request。
+
+Responses 原生 compact 保存 opaque output items；Chat/DeepSeek/Anthropic 保存 opaque envelope 中的文本 summary。Core 只管理 record 的历史归属与可见性，不解释或重写 Provider payload。
 
 手动 compact 使用独立 durable command journal：
 
 1. existing Session 在完成语法、route、credential、active-history 和 compression budget 前置校验后，先提交原始 `/compact...` 为 `submission.type = control_command` 的隐藏 `user_input`；它永久 `inHistory = false`。`run:start` 返回的就是这次 command-input commit，随后才允许 compression Provider 调用。
-2. 纯 `/compact` 成功后重建 `system → harness* → summary`、展示 summary 并结束。
+2. 纯 `/compact` 成功后重建 `system → harness* → compact_summary` 并结束；合成文本摘要可以展示，原生 opaque checkpoint 不伪造可见文本。
 3. `/compact <正文>` 成功后重建 `system → harness* → summary → derived user`；derived user 通过 `derivedFromMessageId` 指向原始命令，Provider 只看到正文。
 4. compression 失败、abort、空摘要或重建超限时 epoch 不变，但已接受的原始命令记录保留；相同 `clientRequestId` 只 dedupe，不再次执行。
 
-自动 compact 不是新的用户提交，因此不创建控制命令。无 root user 的 harness-driven Run 省略 replay user。
+自动 compact 不是新的用户提交，因此不创建控制命令。
 
 Compact summary 的 `metadata` 至少记录：
 
 - `replacesThroughSeq`。
 - source hash。
 - compact prompt id/version/hash。
-- compact model route。
-- 当时 Goal/Plan snapshot。
+- compact model route 与标准化 usage。
 
 不再需要独立 `context_checkpoints` table。
+
+### 7.3.1 Route 兼容迁移与 Conversation Markdown
+
+Opaque continuation/compact 只能在兼容 route 中原样回放。兼容键固定为 `providerType + providerId + model + endpoint + providerConfigRevision`；`purpose` 与 reasoning 档位不单独改变协议族。下一次 Run 若检测到 active assistant、transcript 或 compact anchor 与目标 route 不兼容，必须在插入新用户消息前执行事务式历史迁移：
+
+1. 从 SQLite 读取该 Session 的完整、非 superseded append-only 分支，而不是只依赖当前分页或 active epoch。
+2. 用共同的 `zch-conversation-markdown` 投影恢复用户输入、明文 assistant reasoning/text、orchestrator/interjection、tool call/result 和附件元数据；排除 system/runtime/AGENTS/selected context、控制命令、replay、旧 compact、旧 transcript、Provider continuation 与加密 reasoning。
+3. 将 Markdown 放入 `<conversation_transcript><![CDATA[...]]></conversation_transcript>`；正文中的 `]]>` 拆为 `]]]]><![CDATA[>`，并记录 source boundary/hash 与精确 Markdown SHA-256。
+4. 预检 `fresh harness → hidden conversation_transcript` 对目标模型有效后，单一 commit 停用旧 active history。随后才插入本次新 user input。
+
+任一步失败都不修改旧 epoch，也不插入用户本次提问。普通 Session 侧栏提供同一投影的本地 Markdown 导出：导出不截断 tool result，保存前必须明确警告可能包含源代码、路径、工具参数/结果、内部编排和明文 reasoning。导出不包含 opaque compact、加密 reasoning 或 Provider continuation，也不能重新导入；hidden Subagent Session 仍不进入公开导出接口。
 
 ### 7.4 Provider continuation
 
@@ -1680,7 +1732,7 @@ child stream/tool/domain event 不发布给 Renderer，也不创建独立 trace 
 
 P0–P13 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路径均使用唯一 `createBackendRuntime` 与 SQLite Durable Backend。Desktop 数据库为 `userData/agent.db`；数据库打开或 migration 失败时显示阻塞恢复对话框，不回退 Workbench。Headless 使用任务独立临时数据库并在退出时关闭、删除。
 
-P11 Provider Runtime Foundation 与 P12 Generic Responses/Anthropic 已完成。Main、compact、auto-compact budget check 与 auto approver 均使用扁平 `ModelProvider.compile/stream`；生产实现为互不继承的 `deepseek.chat-completions`、`generic.chat-completions`、`generic.responses` 与 `generic.anthropic`。配置、route 和 continuation 统一使用 `providerType`；Google 和具体厂商实现继续按实际使用需求独立增加。
+P11 Provider Runtime Foundation 与 P12 Generic Responses/Anthropic 已完成。Main 与 auto approver 使用扁平 `ModelProvider.compile/stream`，compact 使用同一实现上的 `compileCompact/compact`；生产实现为互不继承的 `deepseek.chat-completions`、`generic.chat-completions`、`generic.responses` 与 `generic.anthropic`。配置、route、continuation 和 compact envelope 统一使用 `providerType`；Google 和具体厂商实现继续按实际使用需求独立增加。
 
 P13 Read-only Subagent Runtime 的 S1/S2 已完成。默认关闭的 `subagent_run({ name, task })` 复用唯一 Session/Run/Provider loop，以隐藏 readonly Session 直接读取父 Run 的 live workspace；task 是不含父历史的普通 user input。Tool catalog/executor 双重限制只读能力；通用 Tool scheduler 允许同批多个 Subagent 与其他 parallel Tool 并发执行，并按原 call 顺序提交结果。route、全局步骤/输出/Tool 限制、取消与 usage 均沿用现有 runtime。S3 Model Pool 已完成配置 schema、Agents 设置 UI、allocator 与 freezer，但 Runtime Identity、Headless 外部契约、`runOne` 接入和并发队列尚未实现，因此不能标记为 S3 完成。Swarm、递归委派、自定义 child 工具列表和详细子任务 UI 尚未实现。ProjectModel/Serena/code intelligence 已从生产装配、工具、IPC 可用路径和 Renderer 入口关闭；其 SQLite 迁移及重新启用排在 Swarm 完成之后。
 
@@ -1692,10 +1744,10 @@ Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、
 
 `MessageRecord` 使用 `visibility + inHistory + turnId` 分离展示、模型历史和轮次归属。Compact 只更新 `inHistory`；rewind 将移除分支标为 `superseded`，清除 Goal/Plan 并重建 active history。只有可见原始用户消息能 retry/edit；Assistant 不能作为 `run:retry` 目标。
 
-SQLite transaction callback 通过 authorizer 拒绝事务控制 SQL；commit listener 逐项隔离；backend dispose 使用共享 promise 排空 live runtime/coordinator 后关闭数据库。FileChange retention 由 migration 维护单行总量和 trigger，不再每次插入全表 `SUM`。Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。Markdown Conversation import/export 暂停并在 UI 中禁用；Trace transcript export 保持可用。
+SQLite transaction callback 通过 authorizer 拒绝事务控制 SQL；commit listener 逐项隔离；backend dispose 使用共享 promise 排空 live runtime/coordinator 后关闭数据库。FileChange retention 由 migration 维护单行总量和 trigger，不再每次插入全表 `SUM`。Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。普通 Session 已支持受警告保护的 `zch-conversation-markdown` 单向导出；Markdown 导入仍未实现，Trace transcript 查看/导出保持独立。
 
 AppConfig v14 会把合法 v9 Provider 配置迁移为 `providerType`，把合法 v9/v10 配置中仍等于旧默认值的单次工具 token 与工具/read 字节限制提升到 64K/128KiB，为合法 v9/v10/v11 Provider 补充默认包含主模型的 `modelConfigurationIds`，为合法 v12 增加默认关闭、30 分钟 timeout 的 Subagent 配置，并从所有合法 v9–v13 配置删除退役的 `maxToolTokensPerRun`。AppConfig v15 再把合法 v14 `modelConfigurationIds` 原样迁移为 `enabledModelIds`，并让新安装的默认 Provider 从空模型池开始；已有主模型、API-key reference、模型目录、模型覆盖、revision、其余自定义限制和 `maxConcurrentRuns` 保持不变。
 
-AppConfig v16 是 model-pool foundation 的冻结边界：Provider reasoning 与 pool entry reasoning 仅允许当时的 `off|high|max`，per-model annotation 尚不存在。AppConfig v17 集成六档 reasoning、annotation 和 approval route 的必填 `reasoning`，仍在每个 pool entry 保存 capability。AppConfig v18 删除重复 capability，调度时只读取 Provider `modelOverrides[model].capability`；当前 AppConfig v19 再删除从未执行的 pool entry `maxParallel`，并在 `subagents` 增加默认 10、范围 1–32 的 `maxAgentsPerSwarm`。合法 v9–v15 直接迁移到默认空 pool 的 v19；合法 v16/v17 保留并规范化 pool route、剥离旧 capability 与 `maxParallel` 后迁移；合法 v18 剥离 `maxParallel` 后迁移。旧配置中仍 enabled 但对应 Provider 模型没有 capability annotation 的 entry 会在 ConfigStore reload 修复阶段被禁用；disabled entry 原样保留供后续修复。v9–v16 迁移仍把旧版实际审批等级显式化：审批 Provider 默认值为 `off` 时写入 `high`，其余档位原样写入；这只是在升级时保存旧行为，v19 运行时不再隐式提升。v16–v18 pool entry ID 在 trim/NFC 后必须唯一且拒绝控制/格式字符；不符合各自冻结 schema、损坏或更早版本仍执行 reset-only。Headless 外部配置继续为 v4 单 Provider，构造的临时内部 AppConfig 自动使用 v19 空池与默认 Swarm 上限；Runtime Identity 继续为 v4。SQLite v5 增加 hidden Subagent execution/session ownership，并保留 v4 对历史 route/continuation identity 的原位迁移。SQLite v6 通过表重建把 `sessions.reasoning` 的 CHECK 扩展为六档（`off|low|medium|high|xhigh|max`）：迁移在 runner 暂停外键约束下建新表、拷贝、换名并重建触发器与索引，提交前以 `PRAGMA foreign_key_check` 兜底完整性；旧版本应用打开 v6 数据库会以 `DATABASE_VERSION_TOO_NEW` 明确拒绝。旧 JSONL trace 只在读取时投影而不改写文件。
+AppConfig v16 是 model-pool foundation 的冻结边界：Provider reasoning 与 pool entry reasoning 仅允许当时的 `off|high|max`，per-model annotation 尚不存在。AppConfig v17 集成六档 reasoning、annotation 和 approval route 的必填 `reasoning`，仍在每个 pool entry 保存 capability。AppConfig v18 删除重复 capability，调度时只读取 Provider `modelOverrides[model].capability`；当前 AppConfig v19 再删除从未执行的 pool entry `maxParallel`，并在 `subagents` 增加默认 10、范围 1–32 的 `maxAgentsPerSwarm`。合法 v9–v15 直接迁移到默认空 pool 的 v19；合法 v16/v17 保留并规范化 pool route、剥离旧 capability 与 `maxParallel` 后迁移；合法 v18 剥离 `maxParallel` 后迁移。旧配置中仍 enabled 但对应 Provider 模型没有 capability annotation 的 entry 会在 ConfigStore reload 修复阶段被禁用；disabled entry 原样保留供后续修复。v9–v16 迁移仍把旧版实际审批等级显式化：审批 Provider 默认值为 `off` 时写入 `high`，其余档位原样写入；这只是在升级时保存旧行为，v19 运行时不再隐式提升。v16–v18 pool entry ID 在 trim/NFC 后必须唯一且拒绝控制/格式字符；不符合各自冻结 schema、损坏或更早版本仍执行 reset-only。Headless 外部配置继续为 v4 单 Provider，构造的临时内部 AppConfig 自动使用 v19 空池与默认 Swarm 上限；Runtime Identity 继续为 v4。SQLite v5 增加 hidden Subagent execution/session ownership，并保留 v4 对历史 route/continuation identity 的原位迁移。SQLite v6 通过表重建把 `sessions.reasoning` 的 CHECK 扩展为六档（`off|low|medium|high|xhigh|max`）；SQLite v7 再重建 `messages`，加入 `conversation_transcript` 与带 `model_route_json` 的 Provider-native `compact_summary`。两次表重建都由 runner 暂停外键约束、换表并重建索引，提交前以 `PRAGMA foreign_key_check` 兜底完整性；旧版本应用打开更新数据库会以 `DATABASE_VERSION_TOO_NEW` 明确拒绝。旧 JSONL trace 只在读取时投影而不改写文件。
 
 P3 review 建议、N-3/N-4 和 201+ 数据量的额外 Electron E2E 明确延后，不属于 P10 发布门禁；现有单元/集成测试继续覆盖 201+ Session、Message 和 FileChange 分页。产品路径不再保留双轨、兼容开关或 legacy fallback。

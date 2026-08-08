@@ -11,12 +11,14 @@ const props = defineProps<{
   renameOpen: boolean
   renameValue: string
   deleteOpen: boolean
+  exportOpen: boolean
   revertOpen: boolean
   revertMessagePreview: string
   messageAction?: MessageAction
   yoloPending: boolean
   renamePending: boolean
   deletePending: boolean
+  exportPending: boolean
   revertPending: boolean
   messageActionPending: boolean
 }>()
@@ -25,10 +27,12 @@ const emit = defineEmits<{
   'update:renameOpen': [value: boolean]
   'update:renameValue': [value: string]
   'update:deleteOpen': [value: boolean]
+  'update:exportOpen': [value: boolean]
   'update:revertOpen': [value: boolean]
   'confirm-yolo': []
   'confirm-rename': []
   'confirm-delete': []
+  'confirm-export': []
   'confirm-revert': []
   'confirm-message-action': []
   'update:messageAction': [value: MessageAction | undefined]
@@ -143,6 +147,19 @@ const messageActionPositiveText = computed(() => {
     @positive="emit('confirm-delete')"
   >
     {{ t('dialogs.deleteText') }}
+  </ConfirmDialog>
+
+  <ConfirmDialog
+    :show="exportOpen"
+    :title="t('transcript.exportWarningTitle')"
+    :positive-text="t('transcript.confirmExport')"
+    :negative-text="t('common.cancel')"
+    type="warning"
+    :loading="exportPending"
+    @update:show="emit('update:exportOpen', $event)"
+    @positive="emit('confirm-export')"
+  >
+    {{ t('transcript.exportWarningText') }}
   </ConfirmDialog>
 
   <ConfirmDialog

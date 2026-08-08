@@ -29,6 +29,7 @@ export const CANONICAL_MESSAGE_KINDS = [
   'assistant_turn',
   'tool_result',
   'compact_summary',
+  'conversation_transcript',
 ] as const
 export type CanonicalMessageKind = (typeof CANONICAL_MESSAGE_KINDS)[number]
 export const CanonicalMessageKindSchema = Type.Unsafe<CanonicalMessageKind>({
@@ -44,6 +45,7 @@ export const CANONICAL_PROMPT_KINDS = [
   'agents_context',
   'orchestrator',
   'interjection',
+  'conversation_transcript',
 ] as const
 export type CanonicalPromptKind = (typeof CANONICAL_PROMPT_KINDS)[number]
 
@@ -67,6 +69,21 @@ export const ProviderContinuationEnvelopeSchema = Type.Object(
 )
 export type ProviderContinuationEnvelope = Static<
   typeof ProviderContinuationEnvelopeSchema
+>
+
+export const PROVIDER_COMPACT_SCHEMA_VERSION = 1 as const
+
+export const ProviderCompactEnvelopeSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(PROVIDER_COMPACT_SCHEMA_VERSION),
+    providerType: Type.String({ minLength: 1, maxLength: 128 }),
+    format: Type.String({ minLength: 1, maxLength: 128 }),
+    data: JsonValueSchema,
+  },
+  { additionalProperties: false },
+)
+export type ProviderCompactEnvelope = Static<
+  typeof ProviderCompactEnvelopeSchema
 >
 
 export const TextPartSchema = Type.Object(
@@ -118,6 +135,15 @@ export const ToolResultPartSchema = Type.Object(
 )
 export type ToolResultPart = Static<typeof ToolResultPartSchema>
 
+export const ProviderCompactPartSchema = Type.Object(
+  {
+    type: Type.Literal('provider_compact'),
+    payload: ProviderCompactEnvelopeSchema,
+  },
+  { additionalProperties: false },
+)
+export type ProviderCompactPart = Static<typeof ProviderCompactPartSchema>
+
 export const MessagePartSchema = Type.Union([
   TextPartSchema,
   ToolCallPartSchema,
@@ -159,10 +185,16 @@ const UsageMetadataSchema = Type.Object(
     outputTokens: Type.Optional(
       Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
     ),
+    totalTokens: Type.Optional(
+      Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    ),
     reasoningTokens: Type.Optional(
       Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
     ),
     cachedInputTokens: Type.Optional(
+      Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    ),
+    cacheMissTokens: Type.Optional(
       Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
     ),
   },
@@ -301,6 +333,25 @@ export const CompactSummaryMetadataV1Schema = Type.Object(
     schemaVersion: DurableSchemaVersionSchema,
     compact: CompactMetadataSchema,
     prompt: Type.Optional(PromptMetadataSchema),
+    usage: Type.Optional(UsageMetadataSchema),
+  },
+  { additionalProperties: false },
+)
+
+export const ConversationTranscriptMetadataV1Schema = Type.Object(
+  {
+    schemaVersion: DurableSchemaVersionSchema,
+    layer: PromptLayerMetadataSchema,
+    transcript: Type.Object(
+      {
+        format: Type.Literal('zch-conversation-markdown'),
+        version: Type.Literal(1),
+        sourceThroughSeq: MessageSeqSchema,
+        sourceHash: Sha256Schema,
+        contentHash: Sha256Schema,
+      },
+      { additionalProperties: false },
+    ),
   },
   { additionalProperties: false },
 )
@@ -313,6 +364,7 @@ export const MessageMetadataV1Schema = Type.Union([
   ToolResultMetadataV1Schema,
   PromptMessageMetadataV1Schema,
   CompactSummaryMetadataV1Schema,
+  ConversationTranscriptMetadataV1Schema,
 ])
 export type MessageMetadataV1 = Static<typeof MessageMetadataV1Schema>
 
@@ -454,6 +506,31 @@ export const CompactSummaryMessageRecordSchema = Type.Object(
   { additionalProperties: false },
 )
 
+export const ProviderCompactSummaryMessageRecordSchema = Type.Object(
+  {
+    ...messageIdentityProperties,
+    kind: Type.Literal('compact_summary'),
+    parts: Type.Tuple([ProviderCompactPartSchema]),
+    modelRoute: ModelRouteSnapshotSchema,
+    metadata: CompactSummaryMetadataV1Schema,
+  },
+  { additionalProperties: false },
+)
+
+export const ConversationTranscriptMessageRecordSchema = Type.Object(
+  {
+    ...messageIdentityProperties,
+    kind: Type.Literal('conversation_transcript'),
+    parts: Type.Array(TextPartSchema, {
+      minItems: 1,
+      maxItems: MAX_MESSAGE_PARTS,
+    }),
+    modelRoute: ModelRouteSnapshotSchema,
+    metadata: ConversationTranscriptMetadataV1Schema,
+  },
+  { additionalProperties: false },
+)
+
 export const MessageRecordSchema = Type.Union([
   UserInputMessageRecordSchema,
   AssistantTurnMessageRecordSchema,
@@ -465,7 +542,11 @@ export const MessageRecordSchema = Type.Union([
   AgentsContextMessageRecordSchema,
   OrchestratorMessageRecordSchema,
   InterjectionMessageRecordSchema,
-  CompactSummaryMessageRecordSchema,
+  Type.Union([
+    CompactSummaryMessageRecordSchema,
+    ProviderCompactSummaryMessageRecordSchema,
+  ]),
+  ConversationTranscriptMessageRecordSchema,
 ])
 export type MessageRecord = Static<typeof MessageRecordSchema>
 
@@ -538,8 +619,19 @@ export function assertMessageRecordSemantics(record: MessageRecord): void {
     throw new TypeError('Control command user input must not enter history')
   }
 
-  if (record.kind === 'assistant_turn') {
+  if ('modelRoute' in record) {
     assertModelRouteSnapshotSafe(record.modelRoute)
+  }
+
+  if (record.kind === 'compact_summary') {
+    const part = record.parts[0]
+    if (part?.type === 'provider_compact') {
+      assertBoundedJsonValue(part.payload.data)
+    }
+    return
+  }
+
+  if (record.kind === 'assistant_turn') {
     const callIds = new Set<string>()
     for (const part of record.parts) {
       if (part.type !== 'tool_call') continue

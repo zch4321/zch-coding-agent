@@ -10,14 +10,19 @@ import {
 } from './chat-completions-shared'
 import { DeepSeekProvider } from './deepseek-provider'
 import { GenericChatCompletionsProvider } from './generic-chat-completions-provider'
-import { ProviderCompletionError } from './provider'
-import type {
-  CompiledProviderCall,
-  ModelProvider,
-  ProviderCompileInput,
-  ProviderEvent,
-  ProviderStreamContext,
-  ProviderToolDefinition,
+import {
+  ProviderCompletionError,
+  compiledSyntheticCompactCall,
+  syntheticCompactEvents,
+  type CompiledProviderCall,
+  type CompiledProviderCompactCall,
+  type ModelProvider,
+  type ProviderCompactEvent,
+  type ProviderCompactInput,
+  type ProviderCompileInput,
+  type ProviderEvent,
+  type ProviderStreamContext,
+  type ProviderToolDefinition,
 } from './provider'
 
 export interface TestProviderStreamRequest extends CompiledProviderCall {
@@ -161,6 +166,19 @@ export abstract class ScriptedProviderHarness implements ModelProvider {
     return compileTestCall(input, this.providerType)
   }
 
+  /** Compiles scripted compaction as a no-tools test Provider request. */
+  compileCompact(input: ProviderCompactInput): CompiledProviderCompactCall {
+    return compiledSyntheticCompactCall(
+      this.compile({
+        history: input.history,
+        route: input.route,
+        tools: [],
+        maxOutputTokens: input.maxOutputTokens,
+      }),
+      input.instructions,
+    )
+  }
+
   /** Implements one fixture's scripted event sequence. */
   abstract run(
     request: TestProviderStreamRequest,
@@ -182,5 +200,23 @@ export abstract class ScriptedProviderHarness implements ModelProvider {
         ? normalizeCompletion(event, this.providerType)
         : event
     }
+  }
+
+  /** Adapts scripted provider output into a synthetic compact checkpoint. */
+  compact(
+    call: CompiledProviderCompactCall,
+    context: ProviderStreamContext,
+  ): AsyncIterable<ProviderCompactEvent> {
+    return syntheticCompactEvents(
+      this.providerType,
+      this.stream(
+        {
+          request: structuredClone(call.request),
+          normalizedMessages: structuredClone(call.normalizedMessages),
+          tools: [],
+        },
+        context,
+      ),
+    )
   }
 }

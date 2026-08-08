@@ -14,6 +14,7 @@ import {
   providerCompletionDiagnostics,
   providerRequestDiagnostics,
   type ProviderEvent,
+  type ProviderUsage,
   type ProviderResponseDiagnostics,
 } from '../providers/provider'
 import { normalizeLlmUsage } from '../providers/usage'
@@ -48,6 +49,7 @@ export interface ProviderTurnResult {
   reasoning: string
   finishReason: string
   continuation?: ProviderContinuationEnvelope
+  usage: ProviderUsage
 }
 
 /** Runs provider-turn lifecycle, plugin hooks, streaming provider calls, and tool validation. */
@@ -358,6 +360,7 @@ export class SessionProviderTurnRunner {
       reasoning: canonical.normalizedReasoningText ?? reasoning,
       finishReason: canonical.finishReason,
       continuation: canonical.providerContinuation,
+      usage: structuredClone(canonical.usage),
     }
   }
 }

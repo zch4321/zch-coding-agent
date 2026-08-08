@@ -16,8 +16,14 @@ import type { ToolCall } from '../tools/types'
 import { HttpSseTransport } from './http-sse-transport'
 import {
   ProviderCompletionError,
+  compiledSyntheticCompactCall,
+  providerCompactText,
+  syntheticCompactEvents,
   type CompiledProviderCall,
+  type CompiledProviderCompactCall,
   type ModelProvider,
+  type ProviderCompactEvent,
+  type ProviderCompactInput,
   type ProviderCompileInput,
   type ProviderEvent,
   type ProviderResponseDiagnostics,
@@ -139,7 +145,10 @@ function appendAnthropicMessage(
   messages.push({ role, content: blocks })
 }
 
-function compileAnthropicHistory(history: ProviderCompileInput['history']): {
+function compileAnthropicHistory(
+  history: ProviderCompileInput['history'],
+  route: ProviderCompileInput['route'],
+): {
   system?: string
   messages: JsonObject[]
 } {
@@ -179,6 +188,11 @@ function compileAnthropicHistory(history: ProviderCompileInput['history']): {
             type: 'text',
             text: renderLiveUserInterjection(messageText(record)),
           },
+        ])
+        break
+      case 'compact_summary':
+        appendAnthropicMessage(messages, 'user', [
+          { type: 'text', text: providerCompactText(record, route) },
         ])
         break
       default:
@@ -328,7 +342,7 @@ export class GenericAnthropicProvider implements ModelProvider {
         'Provider max output tokens must be a positive integer',
       )
     }
-    const compiled = compileAnthropicHistory(input.history)
+    const compiled = compileAnthropicHistory(input.history, input.route)
     const tools = structuredClone(input.tools)
     const wireTools = anthropicTools(tools)
     const outputConfig = anthropicOutputConfig(input)
@@ -349,6 +363,40 @@ export class GenericAnthropicProvider implements ModelProvider {
       normalizedMessages: structuredClone(compiled.messages),
       tools,
     }
+  }
+
+  /** Compiles a no-tools Anthropic request for synthetic compaction. */
+  compileCompact(input: ProviderCompactInput): CompiledProviderCompactCall {
+    return compiledSyntheticCompactCall(
+      this.compile({
+        history: input.history,
+        route: input.route,
+        tools: [],
+        maxOutputTokens: input.maxOutputTokens,
+      }),
+      input.instructions,
+    )
+  }
+
+  /** Streams a synthetic text checkpoint through Anthropic Messages. */
+  compact(
+    call: CompiledProviderCompactCall,
+    context: ProviderStreamContext,
+  ): AsyncIterable<ProviderCompactEvent> {
+    if (call.mode !== 'synthetic') {
+      throw new TypeError('Anthropic only supports synthetic compaction')
+    }
+    return syntheticCompactEvents(
+      this.providerType,
+      this.stream(
+        {
+          request: structuredClone(call.request),
+          normalizedMessages: structuredClone(call.normalizedMessages),
+          tools: [],
+        },
+        context,
+      ),
+    )
   }
 
   /** Sends one Anthropic Messages request and normalizes content-block SSE. */

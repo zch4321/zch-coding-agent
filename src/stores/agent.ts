@@ -224,6 +224,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     selectConversation: runtime.selectConversation,
     renameConversation: runtime.renameConversation,
     deleteConversation: runtime.deleteConversation,
+    exportConversationMarkdown: runtime.exportConversationMarkdown,
     forkConversation: runtime.forkConversation,
     rewindMessage: runtime.rewindMessage,
     revertConversationAfterMessage: runtime.revertConversationAfterMessage,

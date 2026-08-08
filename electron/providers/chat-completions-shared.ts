@@ -19,7 +19,7 @@ import {
 import { renderLiveUserInterjection } from '../../shared/live-interjection'
 import { canonicalHash, messageText } from '../session/canonical-history'
 import type { ToolCall } from '../tools/types'
-import { ProviderCompletionError } from './provider'
+import { ProviderCompletionError, providerCompactText } from './provider'
 import type {
   ProviderCompileInput,
   ProviderEvent,
@@ -143,6 +143,7 @@ function continuationAssistant(
 
 function compileMessage(
   providerType: ChatCompletionOptions['providerType'],
+  route: ProviderCompileInput['route'],
   record: MessageRecord,
 ): ProviderMessage[] {
   switch (record.kind) {
@@ -170,6 +171,8 @@ function compileMessage(
           content: renderLiveUserInterjection(messageText(record)),
         },
       ]
+    case 'compact_summary':
+      return [{ role: 'user', content: providerCompactText(record, route) }]
     default:
       return [{ role: 'user', content: messageText(record) }]
   }
@@ -193,9 +196,12 @@ export function compileChatTools(
 export function compileChatMessages(
   history: ProviderCompileInput['history'],
   providerType: ChatCompletionOptions['providerType'],
+  route: ProviderCompileInput['route'],
 ): JsonObject[] {
   return toJsonValue(
-    history.messages.flatMap((record) => compileMessage(providerType, record)),
+    history.messages.flatMap((record) =>
+      compileMessage(providerType, route, record),
+    ),
   ) as JsonObject[]
 }
 

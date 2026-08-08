@@ -21,6 +21,7 @@ import type { HttpTransport } from '../net/http-transport'
 import type { McpManager } from '../mcp/mcp-manager'
 import type { BackendRuntime } from '../application/create-backend-runtime'
 import { IpcFault, type IpcBusinessHandlers } from './index'
+import { renderConversationTranscript } from '../session/conversation-transcript'
 
 export interface AppIpcHandlerDependencies {
   configStore: ConfigStore
@@ -256,6 +257,31 @@ export function createAppIpcHandlers(
         sessionId: payload.sessionId,
         expectedRevision: payload.expectedRevision,
       }),
+    'session:export-markdown': async (payload) => {
+      const session = await backend.sessions.getRecord(payload.sessionId)
+      const records = await backend.sessions.listAllMessages(payload.sessionId)
+      const document = renderConversationTranscript(records, {
+        mode: 'export',
+        sessionId: session.id,
+        title: session.title,
+        exportedAt: new Date().toISOString(),
+      })
+      const suggested = `${session.title}-conversation.md`.replace(
+        /[\\/:*?"<>|]/gu,
+        '_',
+      )
+      const options: SaveDialogOptions = {
+        defaultPath: suggested,
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      }
+      const mainWindow = getMainWindow()
+      const result = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, options)
+        : await dialog.showSaveDialog(options)
+      if (result.canceled || !result.filePath) return { canceled: true }
+      await writeTextAtomic(result.filePath, document.markdown)
+      return { canceled: false, path: result.filePath }
+    },
     'session:fork': (payload) =>
       backend.sessions.fork({
         sourceSessionId: payload.sourceSessionId,

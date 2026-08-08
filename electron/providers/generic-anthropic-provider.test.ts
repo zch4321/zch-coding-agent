@@ -262,6 +262,29 @@ describe('GenericAnthropicProvider', () => {
     })
   })
 
+  it('appends synthetic compact instructions after Anthropic history', () => {
+    const provider = new GenericAnthropicProvider({
+      providerId: 'anthropic',
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+    })
+    const source = input()
+    const call = provider.compileCompact({
+      history: source.history,
+      route: source.route,
+      instructions: 'COMPACT_INSTRUCTION_LAST',
+      maxOutputTokens: 1_024,
+    })
+
+    expect(call.mode).toBe('synthetic')
+    expect(call.normalizedMessages.at(-1)).toEqual({
+      role: 'user',
+      content: 'COMPACT_INSTRUCTION_LAST',
+    })
+    expect(call.request.messages).toEqual(call.normalizedMessages)
+    expect(call.request).not.toHaveProperty('tools')
+  })
+
   it.each(['low', 'medium', 'xhigh'] as const)(
     'passes the %s reasoning effort through unchanged',
     (reasoning) => {

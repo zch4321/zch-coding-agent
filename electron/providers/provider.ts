@@ -8,9 +8,14 @@ import {
 } from '../../shared/json'
 import type {
   MessagePart,
+  MessageRecord,
+  ProviderCompactEnvelope,
   ProviderContinuationEnvelope,
 } from '../../shared/message'
-import type { ModelRouteSnapshot } from '../../shared/model-route'
+import {
+  areModelRoutesHistoryCompatible,
+  type ModelRouteSnapshot,
+} from '../../shared/model-route'
 import type { CompiledCanonicalHistory } from '../session/canonical-history'
 import type { ToolCall } from '../tools/types'
 
@@ -43,6 +48,21 @@ export interface CompiledProviderCall {
   tools: ProviderToolDefinition[]
 }
 
+/** Canonical history and controls required for one Provider compaction. */
+export interface ProviderCompactInput {
+  history: CompiledCanonicalHistory
+  route: ModelRouteSnapshot
+  instructions: string
+  maxOutputTokens: number
+}
+
+/** Deterministic Provider compaction request ready for tracing and execution. */
+export interface CompiledProviderCompactCall {
+  mode: 'native' | 'synthetic'
+  request: JsonObject
+  normalizedMessages: JsonObject[]
+}
+
 /** Runtime-only controls used while sending one compiled provider request. */
 export interface ProviderStreamContext {
   signal: AbortSignal
@@ -67,6 +87,13 @@ export interface CompletedAssistantTurn {
   providerContinuation?: ProviderContinuationEnvelope
   usage: ProviderUsage
   finishReason: string
+}
+
+/** Provider-neutral result of an opaque or synthetic history compaction. */
+export interface CompletedProviderCompact {
+  payload: ProviderCompactEnvelope
+  normalizedText?: string
+  usage: ProviderUsage
 }
 
 /** Bounded timing metrics recorded for one provider request. */
@@ -123,6 +150,21 @@ export type ProviderEvent =
       timing: ProviderTiming
     }
 
+/** Events emitted while executing a Provider compaction. */
+export type ProviderCompactEvent =
+  | {
+      type: 'text.delta'
+      delta: string
+      raw: JsonValue
+    }
+  | {
+      type: 'completed'
+      compact: CompletedProviderCompact
+      rawResponse: JsonValue
+      providerState: JsonValue
+      timing: ProviderTiming
+    }
+
 /** Flat provider boundary used by main, compact, and approval model calls. */
 export interface ModelProvider {
   readonly providerType: ProviderType
@@ -131,6 +173,131 @@ export interface ModelProvider {
     call: CompiledProviderCall,
     context: ProviderStreamContext,
   ): AsyncIterable<ProviderEvent>
+  compileCompact(input: ProviderCompactInput): CompiledProviderCompactCall
+  compact(
+    call: CompiledProviderCompactCall,
+    context: ProviderStreamContext,
+  ): AsyncIterable<ProviderCompactEvent>
+}
+
+/** Adapts a regular no-tools Provider call into a synthetic compact call. */
+export function compiledSyntheticCompactCall(
+  call: CompiledProviderCall,
+  instructions: string,
+): CompiledProviderCompactCall {
+  const normalizedMessages = [
+    ...structuredClone(call.normalizedMessages),
+    { role: 'user', content: instructions },
+  ]
+  return {
+    mode: 'synthetic',
+    request: {
+      ...structuredClone(call.request),
+      messages: structuredClone(normalizedMessages),
+    },
+    normalizedMessages,
+  }
+}
+
+/** Converts a normal no-tools provider stream into a versioned text compact envelope. */
+export async function* syntheticCompactEvents(
+  providerType: ProviderType,
+  events: AsyncIterable<ProviderEvent>,
+): AsyncIterable<ProviderCompactEvent> {
+  let streamedText = ''
+  let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
+  for await (const event of events) {
+    if (event.type === 'text.delta') {
+      streamedText += event.delta
+      yield event
+    } else if (event.type === 'completed') {
+      if (completed) {
+        throw new TypeError('Provider compact produced multiple completions')
+      }
+      completed = event
+    }
+  }
+  if (!completed) {
+    throw new TypeError('Provider compact stream ended without completion')
+  }
+  assertCompletedAssistantTurn(completed.turn)
+  if (completed.turn.toolCalls.length > 0) {
+    throw new TypeError('Provider compact returned tool calls')
+  }
+  const text = (
+    streamedText ||
+    completed.turn.parts
+      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+      .join('\n')
+  ).trim()
+  if (!text) throw new TypeError('Provider compact summary was empty')
+  yield {
+    type: 'completed',
+    compact: {
+      payload: {
+        schemaVersion: 1,
+        providerType,
+        format: 'summary-text.v1',
+        data: { text },
+      },
+      normalizedText: text,
+      usage: structuredClone(completed.turn.usage),
+    },
+    rawResponse: structuredClone(completed.rawResponse),
+    providerState: structuredClone(completed.providerState),
+    timing: structuredClone(completed.timing),
+  }
+}
+
+/** Validates an opaque compact record before a Provider attempts to replay it. */
+export function providerCompactPayload(
+  record: Extract<MessageRecord, { kind: 'compact_summary' }>,
+  route: ModelRouteSnapshot,
+): ProviderCompactEnvelope | undefined {
+  const part = record.parts[0]
+  if (part?.type !== 'provider_compact') return undefined
+  if (!('modelRoute' in record)) {
+    throw new TypeError('Provider compact record is missing its model route')
+  }
+  if (!areModelRoutesHistoryCompatible(record.modelRoute, route)) {
+    throw new TypeError(
+      'Provider compact history is incompatible with this route',
+    )
+  }
+  if (part.payload.providerType !== route.providerType) {
+    throw new TypeError('Provider compact payload belongs to another Provider')
+  }
+  assertBoundedJsonValue(part.payload.data)
+  return part.payload
+}
+
+/** Renders legacy and synthetic text checkpoints for text-based Provider protocols. */
+export function providerCompactText(
+  record: Extract<MessageRecord, { kind: 'compact_summary' }>,
+  route: ModelRouteSnapshot,
+): string {
+  const payload = providerCompactPayload(record, route)
+  if (!payload) {
+    return record.parts
+      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+      .join('\n')
+  }
+  if (payload.format !== 'summary-text.v1') {
+    throw new TypeError(
+      `Provider compact format is not text-compatible: ${payload.format}`,
+    )
+  }
+  const data = payload.data
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    Array.isArray(data) ||
+    typeof data.text !== 'string' ||
+    !data.text.trim()
+  ) {
+    throw new TypeError('Provider compact text payload is corrupt')
+  }
+  return `<compact_history>\n${data.text.trim()}\n</compact_history>`
 }
 
 /** Validates the canonical completion boundary and tool-call part consistency. */
@@ -235,7 +402,9 @@ export function providerCompletionDiagnostics(
 }
 
 /** Computes stable, credential-free diagnostics for a compiled provider call. */
-export function providerRequestDiagnostics(call: CompiledProviderCall): {
+export function providerRequestDiagnostics(
+  call: Pick<CompiledProviderCall, 'request' | 'normalizedMessages'>,
+): {
   requestBytes: number
   prefixHash: string
 } {

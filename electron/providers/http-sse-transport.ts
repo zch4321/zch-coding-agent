@@ -6,6 +6,7 @@ export type ProviderTransportErrorCode =
   | 'ABORTED'
   | 'HTTP_ERROR'
   | 'INVALID_SSE'
+  | 'INVALID_JSON'
   | 'NETWORK_ERROR'
   | 'TIMED_OUT'
 
@@ -192,13 +193,126 @@ export class HttpSseTransport {
       await reader?.cancel().catch(() => undefined)
     }
   }
+
+  /** Sends an authenticated JSON request and parses one bounded JSON object response. */
+  async postJsonObject(
+    request: JsonValue,
+    signal: AbortSignal,
+  ): Promise<JsonObject> {
+    const controller = new AbortController()
+    let timedOut = false
+    const abort = () => controller.abort(signal.reason)
+    if (signal.aborted) abort()
+    else signal.addEventListener('abort', abort, { once: true })
+    const timer =
+      this.#timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true
+            controller.abort(new Error('Provider request timed out'))
+          }, this.#timeoutMs)
+        : undefined
+    try {
+      const response = await this.#fetch(this.#endpoint, {
+        method: 'POST',
+        headers: this.#headers,
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined)
+        throw new ProviderTransportError(
+          'HTTP_ERROR',
+          `${this.#providerId} request failed with status ${response.status}`,
+          response.status,
+        )
+      }
+      const text = await readBoundedJsonBody(response)
+      let value: unknown
+      try {
+        value = JSON.parse(text)
+      } catch (error) {
+        throw new ProviderTransportError(
+          'INVALID_JSON',
+          'Provider returned invalid JSON',
+          undefined,
+          { cause: error },
+        )
+      }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new ProviderTransportError(
+          'INVALID_JSON',
+          'Provider JSON response must be an object',
+        )
+      }
+      return value as JsonObject
+    } catch (error) {
+      if (error instanceof ProviderTransportError) throw error
+      if (timedOut) {
+        throw new ProviderTransportError(
+          'TIMED_OUT',
+          `${this.#providerId} request timed out`,
+          undefined,
+          { cause: error },
+        )
+      }
+      if (signal.aborted || controller.signal.aborted) {
+        throw new ProviderTransportError(
+          'ABORTED',
+          `${this.#providerId} request was aborted`,
+          undefined,
+          { cause: error },
+        )
+      }
+      throw new ProviderTransportError(
+        'NETWORK_ERROR',
+        `${this.#providerId} JSON request failed`,
+        undefined,
+        { cause: error },
+      )
+    } finally {
+      if (timer) clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+    }
+  }
 }
 
 function assertSseSize(value: string): void {
+  assertProviderPayloadSize(value, 'INVALID_SSE')
+}
+
+function assertProviderPayloadSize(
+  value: string,
+  code: 'INVALID_SSE' | 'INVALID_JSON',
+): void {
   if (Buffer.byteLength(value, 'utf8') > MAX_SSE_EVENT_BYTES) {
     throw new ProviderTransportError(
-      'INVALID_SSE',
-      `Provider SSE event exceeds ${MAX_SSE_EVENT_BYTES} bytes`,
+      code,
+      `Provider response exceeds ${MAX_SSE_EVENT_BYTES} bytes`,
     )
+  }
+}
+
+async function readBoundedJsonBody(response: Response): Promise<string> {
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let totalBytes = 0
+  let text = ''
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      totalBytes += value.byteLength
+      if (totalBytes > MAX_SSE_EVENT_BYTES) {
+        throw new ProviderTransportError(
+          'INVALID_JSON',
+          `Provider response exceeds ${MAX_SSE_EVENT_BYTES} bytes`,
+        )
+      }
+      text += decoder.decode(value, { stream: true })
+    }
+    return text + decoder.decode()
+  } finally {
+    await reader.cancel().catch(() => undefined)
   }
 }

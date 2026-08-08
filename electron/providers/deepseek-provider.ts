@@ -10,12 +10,17 @@ import {
   createChatCallId,
 } from './chat-completions-shared'
 import { HttpSseTransport } from './http-sse-transport'
-import type {
-  CompiledProviderCall,
-  ModelProvider,
-  ProviderCompileInput,
-  ProviderEvent,
-  ProviderStreamContext,
+import {
+  compiledSyntheticCompactCall,
+  syntheticCompactEvents,
+  type CompiledProviderCall,
+  type CompiledProviderCompactCall,
+  type ModelProvider,
+  type ProviderCompactEvent,
+  type ProviderCompactInput,
+  type ProviderCompileInput,
+  type ProviderEvent,
+  type ProviderStreamContext,
 } from './provider'
 
 export interface DeepSeekProviderOptions {
@@ -61,6 +66,7 @@ export class DeepSeekProvider implements ModelProvider {
     const normalizedMessages = compileChatMessages(
       input.history,
       this.providerType,
+      input.route,
     )
     const tools = structuredClone(input.tools)
     const wireTools = compileChatTools(tools)
@@ -85,6 +91,40 @@ export class DeepSeekProvider implements ModelProvider {
       normalizedMessages: structuredClone(normalizedMessages),
       tools,
     }
+  }
+
+  /** Compiles a no-tools DeepSeek request for synthetic compaction. */
+  compileCompact(input: ProviderCompactInput): CompiledProviderCompactCall {
+    return compiledSyntheticCompactCall(
+      this.compile({
+        history: input.history,
+        route: input.route,
+        tools: [],
+        maxOutputTokens: input.maxOutputTokens,
+      }),
+      input.instructions,
+    )
+  }
+
+  /** Streams a synthetic text checkpoint through DeepSeek. */
+  compact(
+    call: CompiledProviderCompactCall,
+    context: ProviderStreamContext,
+  ): AsyncIterable<ProviderCompactEvent> {
+    if (call.mode !== 'synthetic') {
+      throw new TypeError('DeepSeek only supports synthetic compaction')
+    }
+    return syntheticCompactEvents(
+      this.providerType,
+      this.stream(
+        {
+          request: structuredClone(call.request),
+          normalizedMessages: structuredClone(call.normalizedMessages),
+          tools: [],
+        },
+        context,
+      ),
+    )
   }
 
   /** Sends and normalizes one compiled DeepSeek request. */

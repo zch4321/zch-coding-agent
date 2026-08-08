@@ -174,7 +174,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 - 未发送 draft 可在主区显示 `New conversation`，但不占用 Sidebar；首次发送 commit 后才出现 durable 标题。
 - 第一条用户消息发送成功后，使用本地截断标题或 Provider 标题生成结果更新。
 - Provider 标题生成失败不影响对话执行。
-- 支持重命名和删除。
+- 支持重命名、删除和导出 Markdown。导出前使用 Naive UI 确认框警告源代码、路径、工具参数/结果、内部编排和明文 reasoning 可能进入文件；保存对话框取消时不写文件。
 - 删除对话必须二次确认；不删除项目文件。
 
 ### 5.4 对话搜索
@@ -225,7 +225,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 
 消息流要求：
 
-- 只有 `kind = 'user_input'` 的 Message 显示为用户气泡；orchestrator、runtime context、harness 或 compact summary 不能伪装成用户亲自输入。
+- 只有 `visibility = visible` 且 `kind = 'user_input'` 的 Message 显示为用户气泡；orchestrator、runtime context、harness、compact summary 或 hidden `conversation_transcript` 不能伪装成用户亲自输入。
 - Renderer 按 part 的原始顺序渲染：`text` 进入 Markdown，assistant `tool_call` 与对应 `tool_result` 组成稳定工具卡；受支持的 JSON result 只进入有界、可展开的结构化视图。它不能把 parts 重新编译成 Provider DTO。
 - `kind = 'assistant_turn'` / `'tool_result'` 的完整 records 用于重建稳定消息和工具卡；Active Run 的 delta/runtime events 只负责未完成状态，不能由 renderer 自行提交为 Message。
 - Renderer 只能展示 `normalizedReasoningText`，必须把 `providerContinuation` 当作 opaque canonical data，不解析、不修改，也不展示其中的原始 CoT、signature、encrypted/redacted block、response id 或 output item。

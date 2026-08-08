@@ -5,13 +5,16 @@ import type { MessageRecord } from '../../shared/message'
 import type { ModelRouteSnapshot } from '../../shared/model-route'
 import {
   appendAssistantTurn,
+  appendProviderCompactSummary,
   appendToolResult,
   appendUserInput,
+  deactivateActiveHistory,
   MessageHistoryCompiler,
   type CanonicalHistoryState,
 } from '../session/canonical-history'
 import {
   GenericResponsesProvider,
+  RESPONSES_COMPACT_FORMAT,
   RESPONSES_CONTINUATION_FORMAT,
 } from './generic-responses-provider'
 import type {
@@ -416,6 +419,113 @@ describe('GenericResponsesProvider', () => {
         }),
       ]),
     )
+  })
+
+  it('round-trips native compact output through canonical history', async () => {
+    const compactOutput = [
+      {
+        type: 'compaction',
+        id: 'cmp_1',
+        encrypted_content: 'opaque-provider-checkpoint',
+      },
+    ]
+    const fetchImpl = vi.fn(async () =>
+      Response.json({
+        id: 'resp_compact_1',
+        object: 'response.compaction',
+        output: compactOutput,
+        usage: {
+          input_tokens: 120,
+          output_tokens: 15,
+          total_tokens: 135,
+        },
+      }),
+    ) as unknown as typeof fetch
+    const provider = new GenericResponsesProvider({
+      providerId: 'responses',
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+      fetchImpl,
+      now: (() => {
+        let value = 0
+        return () => (value += 5)
+      })(),
+    })
+    const source = state()
+    const compiledHistory = new MessageHistoryCompiler().compile(source.history)
+    const compactCall = provider.compileCompact({
+      history: compiledHistory,
+      route: route(),
+      instructions: 'Preserve decisions and current work.',
+      maxOutputTokens: 4_096,
+    })
+    const compactEvents = []
+    for await (const event of provider.compact(compactCall, {
+      signal: new AbortController().signal,
+    })) {
+      compactEvents.push(event)
+    }
+
+    expect(compactCall).toMatchObject({
+      mode: 'native',
+      request: {
+        model: 'gpt-test',
+        instructions: 'System guidance',
+      },
+    })
+    expect(compactCall.normalizedMessages.at(-1)).toEqual({
+      role: 'user',
+      content: [
+        {
+          type: 'input_text',
+          text: 'Preserve decisions and current work.',
+        },
+      ],
+    })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://api.example/v1/responses/compact',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer secret',
+          'content-type': 'application/json',
+        },
+      }),
+    )
+    const completed = compactEvents.at(-1)
+    expect(completed).toMatchObject({
+      type: 'completed',
+      compact: {
+        payload: {
+          providerType: 'generic.responses',
+          format: RESPONSES_COMPACT_FORMAT,
+          data: { output: compactOutput },
+        },
+        usage: {
+          promptTokens: 120,
+          completionTokens: 15,
+          totalTokens: 135,
+        },
+      },
+    })
+    if (completed?.type !== 'completed') {
+      throw new Error('missing compact completion')
+    }
+
+    deactivateActiveHistory(source)
+    appendProviderCompactSummary(source, {
+      payload: completed.compact.payload,
+      route: route(),
+      replacesThroughSeq: 2,
+      sourceHash: compiledHistory.sourceHash,
+      usage: {
+        inputTokens: completed.compact.usage.promptTokens,
+        outputTokens: completed.compact.usage.completionTokens,
+        totalTokens: completed.compact.usage.totalTokens,
+      },
+    })
+    const replay = provider.compile(input(source))
+    expect(replay.request.input).toEqual(compactOutput)
   })
 
   it('normalizes incomplete output and rejects failed or unterminated streams', async () => {

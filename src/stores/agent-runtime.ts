@@ -401,6 +401,22 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       if (result.ok) await replica.reconcile(result.value.commit)
       else showOperationError(result.error, session.id)
     },
+    async exportConversationMarkdown(sessionId: string) {
+      const session = useAgentReplicaStore().sessions.find(
+        (candidate) => candidate.id === sessionId,
+      )
+      if (!session || !window.agentApi) return false
+      const result = await window.agentApi.exportConversationMarkdown({
+        version: IPC_VERSION,
+        sessionId: session.id,
+        confirmed: true,
+      })
+      if (!result.ok) {
+        showOperationError(result.error, session.id)
+        return false
+      }
+      return true
+    },
     async forkConversation(_title?: string, messageId?: string) {
       const replica = useAgentReplicaStore()
       const session = replica.selectedSession

@@ -3,7 +3,11 @@ import {
   MAX_MESSAGE_TEXT_LENGTH,
 } from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
-import { type JsonObject, type JsonValue } from '../../shared/json'
+import {
+  assertBoundedJsonValue,
+  type JsonObject,
+  type JsonValue,
+} from '../../shared/json'
 import {
   renderToolResultContent,
   type MessagePart,
@@ -16,8 +20,13 @@ import type { ToolCall } from '../tools/types'
 import { HttpSseTransport } from './http-sse-transport'
 import {
   ProviderCompletionError,
+  providerCompactPayload,
+  providerCompactText,
   type CompiledProviderCall,
+  type CompiledProviderCompactCall,
   type ModelProvider,
+  type ProviderCompactEvent,
+  type ProviderCompactInput,
   type ProviderCompileInput,
   type ProviderEvent,
   type ProviderResponseDiagnostics,
@@ -40,6 +49,7 @@ import {
 } from './provider-shared'
 
 export const RESPONSES_CONTINUATION_FORMAT = 'responses.output-items.v1'
+export const RESPONSES_COMPACT_FORMAT = 'responses.compaction-output.v1'
 
 interface ResponsesAccumulator {
   requestStart: number
@@ -124,7 +134,10 @@ function responseContinuationItems(
   return structuredClone(data.outputItems) as JsonObject[]
 }
 
-function compileResponseRecord(record: MessageRecord): JsonObject[] {
+function compileResponseRecord(
+  record: MessageRecord,
+  route: ProviderCompileInput['route'],
+): JsonObject[] {
   switch (record.kind) {
     case 'system_instruction':
       return []
@@ -154,6 +167,40 @@ function compileResponseRecord(record: MessageRecord): JsonObject[] {
           ],
         },
       ]
+    case 'compact_summary': {
+      const payload = providerCompactPayload(record, route)
+      if (!payload || payload.format === 'summary-text.v1') {
+        return [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: providerCompactText(record, route),
+              },
+            ],
+          },
+        ]
+      }
+      if (payload.format !== RESPONSES_COMPACT_FORMAT) {
+        throw new TypeError(
+          `Unsupported Responses compact format: ${payload.format}`,
+        )
+      }
+      const data = payload.data
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        Array.isArray(data) ||
+        !Array.isArray(data.output) ||
+        data.output.some(
+          (item) => !item || typeof item !== 'object' || Array.isArray(item),
+        )
+      ) {
+        throw new TypeError('Responses compact output is corrupt')
+      }
+      return structuredClone(data.output) as JsonObject[]
+    }
     default:
       return [
         {
@@ -164,7 +211,10 @@ function compileResponseRecord(record: MessageRecord): JsonObject[] {
   }
 }
 
-function compileResponseInput(history: ProviderCompileInput['history']): {
+function compileResponseInput(
+  history: ProviderCompileInput['history'],
+  route: ProviderCompileInput['route'],
+): {
   instructions?: string
   items: JsonObject[]
 } {
@@ -175,7 +225,9 @@ function compileResponseInput(history: ProviderCompileInput['history']): {
     .join('\n\n')
   return {
     ...(instructions ? { instructions } : {}),
-    items: history.messages.flatMap(compileResponseRecord),
+    items: history.messages.flatMap((record) =>
+      compileResponseRecord(record, route),
+    ),
   }
 }
 
@@ -344,14 +396,26 @@ export class GenericResponsesProvider implements ModelProvider {
   readonly providerType = 'generic.responses' as const
   readonly #providerId: string
   readonly #transport: HttpSseTransport
+  readonly #compactTransport: HttpSseTransport
   readonly #now: () => number
   readonly #createCallId: () => CallId
 
   constructor(options: GenericResponsesProviderOptions) {
     this.#providerId = options.providerId
+    const endpoint =
+      options.endpoint ?? resolveResponsesEndpoint(options.baseURL)
     this.#transport = new HttpSseTransport({
       providerId: options.providerId,
-      endpoint: options.endpoint ?? resolveResponsesEndpoint(options.baseURL),
+      endpoint,
+      apiKey: options.apiKey,
+      fetchImpl: options.fetchImpl,
+      timeoutMs: options.timeoutMs,
+    })
+    const compactEndpoint = new URL(endpoint)
+    compactEndpoint.pathname = `${compactEndpoint.pathname.replace(/\/$/u, '')}/compact`
+    this.#compactTransport = new HttpSseTransport({
+      providerId: options.providerId,
+      endpoint: compactEndpoint.toString(),
       apiKey: options.apiKey,
       fetchImpl: options.fetchImpl,
       timeoutMs: options.timeoutMs,
@@ -372,7 +436,7 @@ export class GenericResponsesProvider implements ModelProvider {
         'Provider max output tokens must be a positive integer',
       )
     }
-    const compiled = compileResponseInput(input.history)
+    const compiled = compileResponseInput(input.history, input.route)
     const tools = structuredClone(input.tools)
     const wireTools = responseTools(tools)
     const format = responseTextFormat(input.structuredOutput)
@@ -398,6 +462,81 @@ export class GenericResponsesProvider implements ModelProvider {
       request,
       normalizedMessages: structuredClone(compiled.items),
       tools,
+    }
+  }
+
+  /** Compiles canonical history for the native Responses Compact endpoint. */
+  compileCompact(input: ProviderCompactInput): CompiledProviderCompactCall {
+    if (input.route.providerType !== this.providerType) {
+      throw new TypeError(
+        `Route Provider ${input.route.providerType} does not match ${this.providerType}`,
+      )
+    }
+    const compiled = compileResponseInput(input.history, input.route)
+    const items = [
+      ...compiled.items,
+      {
+        role: 'user',
+        content: [{ type: 'input_text', text: input.instructions }],
+      },
+    ] as JsonObject[]
+    return {
+      mode: 'native',
+      request: {
+        model: input.route.model,
+        ...(compiled.instructions
+          ? { instructions: compiled.instructions }
+          : {}),
+        input: items,
+      },
+      normalizedMessages: structuredClone(items),
+    }
+  }
+
+  /** Calls the native Responses Compact endpoint and preserves replay output items. */
+  async *compact(
+    call: CompiledProviderCompactCall,
+    context: ProviderStreamContext,
+  ): AsyncIterable<ProviderCompactEvent> {
+    if (call.mode !== 'native') {
+      throw new TypeError('Responses compaction requires a native compact call')
+    }
+    const startedAt = this.#now()
+    const response = await this.#compactTransport.postJsonObject(
+      structuredClone(call.request),
+      context.signal,
+    )
+    if (response.object !== 'response.compaction') {
+      throw new TypeError('Responses compact returned an unexpected object')
+    }
+    const output = responseOutput(response)
+    if (output.length === 0) {
+      throw new TypeError('Responses compact returned no replay output')
+    }
+    const data = { output: structuredClone(output) }
+    assertBoundedJsonValue(data)
+    const completedAt = this.#now()
+    yield {
+      type: 'completed',
+      compact: {
+        payload: {
+          schemaVersion: 1,
+          providerType: this.providerType,
+          format: RESPONSES_COMPACT_FORMAT,
+          data,
+        },
+        usage: responseUsage(toProviderJson(response.usage ?? null)),
+      },
+      rawResponse: structuredClone(response),
+      providerState: {
+        object: response.object,
+        ...(typeof response.id === 'string' ? { id: response.id } : {}),
+      },
+      timing: {
+        ttftMs: null,
+        totalMs: completedAt - startedAt,
+        responseBytes: providerJsonBytes(response),
+      },
     }
   }
 

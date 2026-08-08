@@ -1,15 +1,19 @@
-import { mkdir, mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
+import type { ProjectId } from '../../shared/ids'
+import type { SessionRecord } from '../../shared/session'
 import { PromptRegistry } from '../prompts/registry'
 import { SessionManager } from './session-manager'
 import {
   AbortCompactProvider,
   AutoCompactProvider,
   CompactProvider,
+  ContextLimitProvider,
   InterjectedAutoCompactProvider,
+  ToolBatchAutoCompactProvider,
 } from './session-manager-compaction-fixtures'
 import {
   createConfig,
@@ -121,8 +125,6 @@ describe('SessionManager compaction', () => {
     expect(rendered).toContain('<compact_history')
     expect(rendered).toContain('Compact summary retained')
     expect(rendered).toContain('Orchestration state at compaction:')
-    expect(rendered).toContain('Goal: none')
-    expect(rendered).toContain('Plan: none')
     expect(
       afterCompactMessages.some(
         (message) => message.content === 'continue after compact',
@@ -415,7 +417,7 @@ describe('SessionManager compaction', () => {
       5_000,
     )
 
-    expect(provider.requests[2]?.tools).toEqual([])
+    expect(provider.requests[1]?.tools).toEqual([])
     expect(
       sent.some(
         (envelope) =>
@@ -424,7 +426,7 @@ describe('SessionManager compaction', () => {
       ),
     ).toBe(true)
 
-    const afterAutoCompactMessages = provider.requests[3]?.messages ?? []
+    const afterAutoCompactMessages = provider.requests[2]?.messages ?? []
     const rendered = JSON.stringify(afterAutoCompactMessages)
 
     expect(rendered).not.toContain('AUTO_OLD_CONTEXT')
@@ -438,16 +440,18 @@ describe('SessionManager compaction', () => {
         message.role === 'user' &&
         String(message.content ?? '').includes('<compact_history'),
     )
-    expect(replayedRootIndex).toBeGreaterThan(0)
-    expect(summaryIndex).toBeGreaterThan(replayedRootIndex)
-    expect(summaryIndex, rendered).toBe(afterAutoCompactMessages.length - 1)
+    expect(summaryIndex).toBeGreaterThan(0)
+    expect(replayedRootIndex).toBeGreaterThan(summaryIndex)
+    expect(replayedRootIndex, rendered).toBe(
+      afterAutoCompactMessages.length - 1,
+    )
     expect(afterAutoCompactMessages[summaryIndex]?.content).toContain(
       'Auto compact summary retained',
     )
     await manager.closeSession(sessionId)
   }, 20_000)
 
-  it('omits root user replay for a harness-driven automatic compact', async () => {
+  it('does not compact a harness run from local size estimates alone', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'agent-harness-compact-'),
     )
@@ -488,6 +492,73 @@ describe('SessionManager compaction', () => {
     })
     await waitFor(
       () =>
+        sent.filter(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'completed',
+        ).length >= 1,
+      5_000,
+    )
+
+    expect(provider.requests).toHaveLength(1)
+    expect(provider.requests[0]?.tools.length).toBeGreaterThan(0)
+    const request = provider.requests[0]?.messages ?? []
+    const harnessIndex = request.findIndex((message) =>
+      String(message.content ?? '').includes('HARNESS_ONLY'),
+    )
+    expect(harnessIndex).toBeGreaterThan(0)
+    expect(
+      request.some((message) =>
+        String(message.content ?? '').includes('<compact_history'),
+      ),
+    ).toBe(false)
+    await manager.closeSession(sessionId)
+  }, 10_000)
+
+  it('compacts only after a threshold-crossing tool result is committed', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-tool-result-compact-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    await writeFile(
+      path.join(workspace, 'README.md'),
+      'TOOL_RESULT_BEFORE_COMPACT',
+      'utf8',
+    )
+    const store = await createConfig(directory)
+    const current = store.getPublicConfig()
+    await store.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://api.deepseek.com',
+      model: 'tool-result-compact-model',
+      reasoning: 'off',
+      contextWindowTokens: 160_000,
+      compactThresholdTokens: 1_024,
+      maxOutputTokens: 8_000,
+      limits: current.limits,
+    })
+    const provider = new ToolBatchAutoCompactProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    manager.startRun({
+      sessionId,
+      message: 'Read the fixture before continuing.',
+      clientRequestId: 'request:tool-result-compact',
+    })
+
+    await waitFor(
+      () =>
         sent.some(
           ({ event }) =>
             event.type === 'run.status' && event.status === 'completed',
@@ -495,18 +566,311 @@ describe('SessionManager compaction', () => {
       5_000,
     )
 
-    expect(provider.requests[0]?.tools).toEqual([])
-    const continuation = provider.requests[1]?.messages ?? []
-    expect(continuation.at(-1)?.role).toBe('user')
-    expect(continuation.at(-1)?.content).toContain('<compact_history')
-    const harnessIndex = continuation.findIndex((message) =>
-      String(message.content ?? '').includes('HARNESS_ONLY'),
+    expect(provider.requests).toHaveLength(3)
+    expect(provider.requests[0]?.tools.length).toBeGreaterThan(0)
+    expect(provider.requests[1]?.tools).toEqual([])
+    expect(JSON.stringify(provider.requests[1]?.messages)).toContain(
+      'TOOL_RESULT_BEFORE_COMPACT',
     )
-    expect(harnessIndex).toBeGreaterThan(0)
-    expect(harnessIndex).toBeLessThan(continuation.length - 1)
+    expect(JSON.stringify(provider.requests[2]?.messages)).not.toContain(
+      'TOOL_RESULT_BEFORE_COMPACT',
+    )
+    expect(JSON.stringify(provider.requests[2]?.messages)).toContain(
+      'Tool result checkpoint retained',
+    )
+    await manager.closeSession(sessionId)
+  }, 10_000)
+
+  it('replaces incompatible model history with a transcript before new user input', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-model-transition-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const current = store.getPublicConfig()
+    await store.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://api.deepseek.com',
+      model: 'transition-model-a',
+      enabledModelIds: [
+        'deepseek-v4-pro',
+        'transition-model-a',
+        'transition-model-b',
+      ],
+      reasoning: 'off',
+      limits: current.limits,
+    })
+    const provider = new CompactProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+      modelSelection: {
+        providerId: 'deepseek',
+        model: 'transition-model-a',
+        reasoning: 'off',
+      },
+    })
+    manager.startRun({
+      sessionId,
+      message: 'MODEL_A_PRIVATE_TURN',
+      clientRequestId: 'request:model-a',
+    })
+    await waitFor(
+      () =>
+        sent.filter(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'completed',
+        ).length >= 1,
+    )
+
+    const timestamp = '2026-08-08T00:00:00.000Z'
+    const durableRecord: SessionRecord = {
+      schemaVersion: 1,
+      id: sessionId,
+      projectId: 'project:model-transition' as ProjectId,
+      title: 'Model transition fixture',
+      lifecycle: 'active',
+      permissionMode: 'readonly',
+      modelSelection: {
+        providerId: 'deepseek',
+        model: 'transition-model-b',
+        reasoning: 'off',
+      },
+      goal: null,
+      plan: null,
+      revision: 2,
+      lastSeq: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }
+    manager.applyDurableSessionRecord(durableRecord)
+    manager.startRun({
+      sessionId,
+      message: 'MODEL_B_CURRENT_TURN',
+      clientRequestId: 'request:model-b',
+    })
+    await waitFor(
+      () =>
+        sent.filter(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'completed',
+        ).length >= 2,
+      5_000,
+    )
+
+    expect(provider.requests).toHaveLength(2)
+    const transitioned = provider.requests[1]?.messages ?? []
+    const transcriptIndex = transitioned.findIndex(
+      (message) =>
+        message.role === 'user' &&
+        String(message.content ?? '').startsWith(
+          '<conversation_transcript format=',
+        ),
+    )
+    const currentUserIndex = transitioned.findIndex(
+      (message) => message.content === 'MODEL_B_CURRENT_TURN',
+    )
+    expect(transcriptIndex).toBeGreaterThan(0)
+    expect(currentUserIndex).toBeGreaterThan(transcriptIndex)
+    expect(transitioned[currentUserIndex]).toBe(transitioned.at(-1))
+    expect(String(transitioned[transcriptIndex]?.content)).toContain(
+      'MODEL_A_PRIVATE_TURN',
+    )
+    expect(String(transitioned[transcriptIndex]?.content)).toContain(
+      'Old answer',
+    )
+    expect(transitioned.some((message) => message.role === 'assistant')).toBe(
+      false,
+    )
+    await manager.closeSession(sessionId)
+  }, 10_000)
+
+  it('keeps the old epoch active when durable transcript loading fails', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-model-transition-rollback-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const current = store.getPublicConfig()
+    await store.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://api.deepseek.com',
+      model: 'rollback-model-a',
+      enabledModelIds: [
+        'deepseek-v4-pro',
+        'rollback-model-a',
+        'rollback-model-b',
+      ],
+      reasoning: 'off',
+      limits: current.limits,
+    })
+    const provider = new CompactProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+      historySource: {
+        async listAllMessages() {
+          throw new Error('durable history unavailable')
+        },
+      },
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+      modelSelection: {
+        providerId: 'deepseek',
+        model: 'rollback-model-a',
+        reasoning: 'off',
+      },
+    })
+    manager.startRun({
+      sessionId,
+      message: 'SURVIVES_FAILED_TRANSITION',
+      clientRequestId: 'request:rollback-a',
+    })
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' && event.status === 'completed',
+      ),
+    )
+
+    const timestamp = '2026-08-08T00:00:00.000Z'
+    const sessionRecord = (model: string, revision: number): SessionRecord => ({
+      schemaVersion: 1,
+      id: sessionId,
+      projectId: 'project:model-transition-rollback' as ProjectId,
+      title: 'Model transition rollback fixture',
+      lifecycle: 'active',
+      permissionMode: 'readonly',
+      modelSelection: {
+        providerId: 'deepseek',
+        model,
+        reasoning: 'off',
+      },
+      goal: null,
+      plan: null,
+      revision,
+      lastSeq: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+    manager.applyDurableSessionRecord(sessionRecord('rollback-model-b', 2))
+    const failedRunId = manager.startRun({
+      sessionId,
+      message: 'MUST_NOT_BE_INSERTED',
+      clientRequestId: 'request:rollback-b',
+    })
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === failedRunId &&
+          event.status === 'failed',
+      ),
+    )
+    expect(provider.requests).toHaveLength(1)
+
+    manager.applyDurableSessionRecord(sessionRecord('rollback-model-a', 3))
+    const recoveredRunId = manager.startRun({
+      sessionId,
+      message: 'CONTINUE_OLD_MODEL',
+      clientRequestId: 'request:rollback-recovered',
+    })
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === recoveredRunId &&
+          event.status === 'completed',
+      ),
+    )
+
+    const recovered = JSON.stringify(provider.requests[1]?.messages)
+    expect(recovered).toContain('SURVIVES_FAILED_TRANSITION')
+    expect(recovered).toContain('Old answer')
+    expect(recovered).toContain('CONTINUE_OLD_MODEL')
+    expect(recovered).not.toContain('MUST_NOT_BE_INSERTED')
+    expect(recovered).not.toContain('<conversation_transcript format=')
+    await manager.closeSession(sessionId)
+  }, 10_000)
+
+  it('fails instead of compacting when Provider usage reaches the context limit', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-context-limit-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const current = store.getPublicConfig()
+    await store.update({
+      version: 1,
+      kind: 'provider-settings',
+      baseURL: 'https://api.deepseek.com',
+      model: 'deepseek-v4-pro',
+      reasoning: 'off',
+      contextWindowTokens: 160_000,
+      compactThresholdTokens: 100_000,
+      maxOutputTokens: 8_000,
+      limits: current.limits,
+    })
+    const provider = new ContextLimitProvider()
+    const sent: AgentEventEnvelope[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    const runId = manager.startRun({
+      sessionId,
+      message: 'Reach the reported context limit.',
+      clientRequestId: 'request:context-limit',
+    })
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === runId &&
+          event.status === 'failed',
+      ),
+    )
+
+    expect(provider.calls).toBe(1)
     expect(
-      continuation.some((message) =>
-        String(message.content ?? '').includes('<user_input'),
+      sent.some(
+        ({ event }) =>
+          event.type === 'assistant.message.completed' &&
+          event.runId === runId &&
+          event.text === 'Response at the context limit',
+      ),
+    ).toBe(true)
+    expect(
+      sent.some(
+        ({ event }) =>
+          event.type === 'orchestrator.message' &&
+          event.kind === 'compact-auto',
       ),
     ).toBe(false)
     await manager.closeSession(sessionId)
@@ -522,10 +886,15 @@ describe('SessionManager compaction', () => {
     const current = store.getPublicConfig()
     await store.update({
       version: 1,
-      kind: 'limits',
-      value: {
+      kind: 'provider-settings',
+      baseURL: 'https://api.deepseek.com',
+      model: 'interjection-compact-test-model',
+      reasoning: 'off',
+      contextWindowTokens: 160_000,
+      compactThresholdTokens: 1_024,
+      maxOutputTokens: 8_000,
+      limits: {
         ...current.limits,
-        autoCompactTriggerPercent: 1,
         tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
       },
     })
@@ -542,6 +911,18 @@ describe('SessionManager compaction', () => {
       mode: 'readonly',
       provider: 'deepseek',
     })
+    manager.startRun({
+      sessionId,
+      message: 'OLDER_CONTEXT_BEFORE_DEFERRED_COMPACT',
+      clientRequestId: 'interjected-compact-old',
+    })
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' && event.status === 'completed',
+      ),
+    )
+
     const runId = manager.startRun({
       sessionId,
       message: `ROOT_DURING_COMPACT ${'x'.repeat(10_000)}`,
@@ -560,14 +941,14 @@ describe('SessionManager compaction', () => {
     provider.releaseCompact.resolve()
     await waitFor(
       () =>
-        sent.some(
+        sent.filter(
           ({ event }) =>
             event.type === 'run.status' && event.status === 'completed',
-        ),
+        ).length >= 2,
       5_000,
     )
 
-    const continuation = provider.requests[1] ?? []
+    const continuation = provider.requests[2] ?? []
     const rootIndex = continuation.findIndex(
       (message) =>
         message.content === `ROOT_DURING_COMPACT ${'x'.repeat(10_000)}`,
@@ -578,8 +959,8 @@ describe('SessionManager compaction', () => {
     const interjectionIndex = continuation.findIndex((message) =>
       String(message.content ?? '').includes('LATEST_DURING_COMPACT'),
     )
-    expect(rootIndex).toBeGreaterThan(0)
-    expect(summaryIndex).toBeGreaterThan(rootIndex)
+    expect(summaryIndex).toBeGreaterThan(0)
+    expect(rootIndex).toBeGreaterThan(summaryIndex)
     expect(interjectionIndex).toBeGreaterThan(summaryIndex)
     expect(
       sent.some(

@@ -12,7 +12,10 @@ import { SkillsManager } from '../skills/manager'
 import { AgentRuntime } from './agent-runtime'
 import { RuntimeEventBus } from './runtime-event-bus'
 import type { RuntimeEventListener } from './runtime-events'
-import type { SessionExecutionStatePort } from '../session/session-types'
+import type {
+  SessionExecutionStatePort,
+  SessionHistorySourcePort,
+} from '../session/session-types'
 import type { FileChangeExecutionPort } from '../session/file-change-execution'
 import type { SubagentExecutionPort } from '../subagent/contracts'
 
@@ -31,6 +34,7 @@ export interface CreateAgentRuntimeOptions {
   }) => AutoApprover
   eventListeners?: RuntimeEventListener[]
   executionState?: SessionExecutionStatePort
+  historySource?: SessionHistorySourcePort
   fileChangeExecution: FileChangeExecutionPort
   subagentExecution?: SubagentExecutionPort
   onDiagnostic?: (message: string, error?: unknown) => void
@@ -88,6 +92,7 @@ export async function createAgentRuntime(
       providerFactory: options.providerFactory,
       autoApproverFactory: options.autoApproverFactory,
       executionState: options.executionState,
+      historySource: options.historySource,
       onDiagnostic,
     })
     disposer.add(() => sessions.dispose())

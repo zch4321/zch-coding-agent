@@ -81,6 +81,25 @@ export const ModelRouteSnapshotSchema = Type.Object(
 )
 export type ModelRouteSnapshot = Static<typeof ModelRouteSnapshotSchema>
 
+/** Returns the stable identity of Provider history that can be replayed verbatim. */
+export function modelRouteCompatibilityKey(route: ModelRouteSnapshot): string {
+  return JSON.stringify([
+    route.providerType,
+    route.providerId,
+    route.model,
+    route.endpoint,
+    route.providerConfigRevision,
+  ])
+}
+
+/** Tests whether two routes can share opaque Provider history. */
+export function areModelRoutesHistoryCompatible(
+  left: ModelRouteSnapshot,
+  right: ModelRouteSnapshot,
+): boolean {
+  return modelRouteCompatibilityKey(left) === modelRouteCompatibilityKey(right)
+}
+
 const CREDENTIAL_QUERY_KEY =
   /(?:api[-_]?key|authorization|credential|password|secret|signature|token)/iu
 
