@@ -621,6 +621,19 @@ export function deactivateActiveHistory(
   return active
 }
 
+/** Returns the source sequence replaced by a canonical history epoch anchor. */
+export function historyEpochAnchorBoundary(
+  record: MessageRecord,
+): number | undefined {
+  if (record.kind === 'compact_summary') {
+    return record.metadata.compact.replacesThroughSeq
+  }
+  if (record.kind === 'conversation_transcript') {
+    return record.metadata.transcript.sourceThroughSeq
+  }
+  return undefined
+}
+
 /** Compiles persisted message records into provider-ready canonical history. */
 export class MessageHistoryCompiler {
   /** Filters active non-superseded records and validates their sequence and turn structure. */
@@ -638,7 +651,7 @@ export class MessageHistoryCompiler {
     const calls = new Set<string>()
     let previousSeq = 0
     let pending: string[] | undefined
-    let compactBoundary: number | undefined
+    let epochBoundary: number | undefined
 
     for (const record of active) {
       if (!validateMessageRecord(record)) {
@@ -663,22 +676,20 @@ export class MessageHistoryCompiler {
       }
       previousSeq = record.seq
       ids.add(record.id)
-      if (compactBoundary !== undefined && record.seq <= compactBoundary) {
-        throw new TypeError('Active history crosses its compact boundary')
+      if (epochBoundary !== undefined && record.seq <= epochBoundary) {
+        throw new TypeError('Active history crosses its epoch boundary')
       }
-      if (record.kind === 'compact_summary') {
-        if (compactBoundary !== undefined) {
-          throw new TypeError(
-            'Active history contains multiple compact summaries',
-          )
+      const boundary = historyEpochAnchorBoundary(record)
+      if (boundary !== undefined) {
+        if (epochBoundary !== undefined) {
+          throw new TypeError('Active history contains multiple epoch anchors')
         }
-        const boundary = record.metadata.compact.replacesThroughSeq
-        compactBoundary = boundary
+        epochBoundary = boundary
         if (
           boundary >= record.seq ||
           active.some((candidate) => candidate.seq <= boundary)
         ) {
-          throw new TypeError('Compact summary boundary is invalid')
+          throw new TypeError('History epoch anchor boundary is invalid')
         }
       }
 

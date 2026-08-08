@@ -3,7 +3,19 @@ import {
   isControlCommandUserInput,
   type MessageRecord,
 } from '../../shared/message'
+import { historyEpochAnchorBoundary } from '../session/canonical-history'
 import { ApplicationError } from './application-error'
+
+function remapForkBoundary(
+  sourceBoundary: number,
+  seqMap: ReadonlyMap<number, number>,
+): number | undefined {
+  return [...seqMap.entries()]
+    .filter(([sourceSeq]) => sourceSeq <= sourceBoundary)
+    .sort(([left], [right]) => left - right)
+    .map(([, targetSeq]) => targetSeq)
+    .at(-1)
+}
 
 /** Finds the last message sequence belonging to the assistant's terminal-tool batch. */
 export function terminalToolBatchEnd(
@@ -61,28 +73,38 @@ export function cloneForkMessage(
       'Fork turn reference leaves the copied Session',
     )
   }
-  if (clone.kind === 'compact_summary') {
-    const boundary = [...seqMap.entries()]
-      .filter(
-        ([sourceSeq]) => sourceSeq <= clone.metadata.compact.replacesThroughSeq,
-      )
-      .map(([, targetSeq]) => targetSeq)
-      .at(-1)
-    if (!boundary) {
+  const sourceBoundary = historyEpochAnchorBoundary(clone)
+  if (sourceBoundary !== undefined) {
+    const boundary = remapForkBoundary(sourceBoundary, seqMap)
+    if (boundary === undefined) {
       throw new ApplicationError(
         'PRECONDITION_FAILED',
-        'Fork compact boundary leaves the copied Session',
+        'Fork history epoch boundary leaves the copied Session',
       )
     }
-    return {
-      ...clone,
-      metadata: {
-        ...clone.metadata,
-        compact: {
-          ...clone.metadata.compact,
-          replacesThroughSeq: boundary,
+    if (clone.kind === 'compact_summary') {
+      return {
+        ...clone,
+        metadata: {
+          ...clone.metadata,
+          compact: {
+            ...clone.metadata.compact,
+            replacesThroughSeq: boundary,
+          },
         },
-      },
+      }
+    }
+    if (clone.kind === 'conversation_transcript') {
+      return {
+        ...clone,
+        metadata: {
+          ...clone.metadata,
+          transcript: {
+            ...clone.metadata.transcript,
+            sourceThroughSeq: boundary,
+          },
+        },
+      }
     }
   }
   if (
@@ -153,17 +175,14 @@ export function rebuildActiveBranch(
   const prefix = records.filter(
     (record) => record.seq <= throughSeq && record.visibility !== 'superseded',
   )
-  const compact = [...prefix]
+  const anchor = [...prefix]
     .reverse()
-    .find((record) => record.kind === 'compact_summary')
-  const compactBoundary =
-    compact?.kind === 'compact_summary'
-      ? compact.metadata.compact.replacesThroughSeq
-      : 0
+    .find((record) => historyEpochAnchorBoundary(record) !== undefined)
+  const epochBoundary = anchor ? (historyEpochAnchorBoundary(anchor) ?? 0) : 0
   for (const record of records) {
     record.inHistory =
       record.seq <= throughSeq &&
-      record.seq > compactBoundary &&
+      record.seq > epochBoundary &&
       record.visibility !== 'superseded' &&
       !isControlCommandUserInput(record)
   }

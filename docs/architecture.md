@@ -1332,10 +1332,10 @@ Backend 校验附件、构造完整 user/harness messages 并落盘。附件正�
 ### 9.3 Rewind、用户消息重试与编辑
 
 - `session:rewind` 只接受当前分支中可见的原始用户或 Assistant 消息。用户边界会移除该用户整轮及之后记录；Assistant 边界保留对应用户消息，从 Assistant 开始移除。
-- “移除”不删除 row：相关 records 改为 `visibility = superseded` 且 `inHistory = false`。每次 rewind 递增 Session revision、清除 Goal/Plan，并从保留前缀重建 `inHistory`；因此可以跨 compact 回退。
+- “移除”不删除 row：相关 records 改为 `visibility = superseded` 且 `inHistory = false`。每次 rewind 递增 Session revision、清除 Goal/Plan，并从保留前缀重建 `inHistory`；`compact_summary.replacesThroughSeq` 与 `conversation_transcript.sourceThroughSeq` 作为同等 epoch boundary，因此可以跨 compact 或 Provider transition 回退。
 - `run:retry(userMessageId)` 只接受可见原始用户消息。它保留该用户消息及其本轮前置 context，supersede 之后分支，再复用该 user record 运行；不会插入第二条 user message。Assistant、replay、derived、control command 或其他消息类型都返回验证错误。
 - 编辑先按该用户整轮 rewind，将原文和附件引用恢复到 composer，不自动发送；下一次发送创建新的用户轮次。
-- Fork 只复制当前非 superseded 分支，连续重编号并重映射 message/turn/reference IDs 与 compact boundary。
+- Fork 只复制当前非 superseded 分支，连续重编号并重映射 message/turn/reference IDs，以及 compact/transcript epoch boundary。
 - 所有操作只修改 Session/Message 状态。文件、终端与 MCP/外部工具副作用不回滚，FileChange 审计继续保留；UI 在操作前明确提示。
 
 ### 9.4 模型和权限模式
@@ -1706,7 +1706,7 @@ child stream/tool/domain event 不发布给 Renderer，也不创建独立 trace 
 - 父取消、30 分钟默认/自定义 timeout、应用 dispose、Provider failure、全局并发 1 和 slot 耗尽都不遗留 active child handle。
 - fake-provider E2E 验证 child 从实时文件和 Git diff 调查、伪造写调用被拒、结果作为标准 tool role 返回、父 Agent 继续总结，并把 usage 归属到父 Run 的 `subagent` scope。
 - Compact 只在完整 turn boundary 修改 `inHistory`，active history 可直接按 seq 重建。
-- Rewind/edit 跨 compact 重建保留前缀；重复 rewind 被拒绝；rewind 后 fork 只复制非 superseded 当前分支并重映射引用。
+- Rewind/edit 跨 compact 或 Provider-transition transcript epoch 重建保留前缀；重复 rewind 被拒绝；rewind 后 fork 只复制非 superseded 当前分支并重映射引用与 epoch boundary。
 - Renderer revision gap 触发 Session snapshot。
 - Draft、partial output 和 active Run 不进入 SQLite。
 - Renderer reload 且 main 存活时可读取 ActiveRunPublicSnapshot。

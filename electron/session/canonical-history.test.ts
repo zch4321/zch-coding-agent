@@ -6,6 +6,7 @@ import {
   appendAssistantTurn,
   appendCompactSummary,
   appendControlCommand,
+  appendConversationTranscript,
   appendPromptMessage,
   appendToolResult,
   appendUserInput,
@@ -354,6 +355,23 @@ describe('MessageHistoryCompiler', () => {
     compact.metadata.compact.replacesThroughSeq = active[0]!.seq
     expect(() => new MessageHistoryCompiler().compile(history.history)).toThrow(
       'boundary',
+    )
+  })
+
+  it('rejects active records from before a conversation transcript boundary', () => {
+    const history = state()
+    prompt(history)
+    appendConversationTranscript(history, {
+      content:
+        '<conversation_transcript>earlier history</conversation_transcript>',
+      route,
+      sourceThroughSeq: 1,
+      sourceHash: 'a'.repeat(64),
+      contentHash: 'b'.repeat(64),
+    })
+
+    expect(() => new MessageHistoryCompiler().compile(history.history)).toThrow(
+      'epoch anchor boundary',
     )
   })
 })
