@@ -25,6 +25,8 @@ const childSessionId = 'session:projection-child' as SessionId
 function execution(): SubagentExecutionRecord {
   return {
     id: 'subagent:projection' as AgentExecutionId,
+    kind: 'subagent',
+    name: 'fallbackWorker',
     parentSessionId,
     parentRunId: 'run:projection' as RunId,
     parentCallId: 'call:projection' as CallId,
@@ -69,7 +71,7 @@ describe('Subagent public projection', () => {
       id: 'subagent:projection',
       kind: 'subagent',
       parentSessionId,
-      name: 'repository-review',
+      name: 'fallbackWorker',
       providerId: 'deepseek',
       model: 'deepseek-chat',
       status: 'completed',

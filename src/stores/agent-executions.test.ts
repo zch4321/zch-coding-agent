@@ -36,7 +36,7 @@ function summary(
     status,
     createdAt,
     updatedAt: createdAt,
-    ...(status === 'preparing' || status === 'running'
+    ...(status === 'queued' || status === 'preparing' || status === 'running'
       ? {}
       : { completedAt: createdAt }),
   }
@@ -253,6 +253,64 @@ describe('agent execution store', () => {
     )
   })
 
+  it('groups Swarm children under their Job and counts active leaf Agents', () => {
+    const root = {
+      ...summary('swarm:root', 'running'),
+      kind: 'swarm' as const,
+      name: 'Swarm review',
+      agentCounts: {
+        total: 1,
+        queued: 1,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      },
+    }
+    const child = {
+      ...summary('subagent:swarm-child', 'queued'),
+      parentExecutionId: root.id,
+      childOrdinal: 1,
+      name: 'review',
+    }
+    const earlierChild = {
+      ...summary('subagent:swarm-child-earlier', 'queued'),
+      parentExecutionId: root.id,
+      childOrdinal: 0,
+      name: 'review earlier',
+    }
+    const store = useAgentExecutionStore()
+
+    store.upsertSummary(root)
+    store.upsertSummary(child)
+    store.upsertSummary(earlierChild)
+
+    expect(store.selectedExecutions.map((record) => record.id)).toEqual([
+      root.id,
+    ])
+    expect(store.childrenFor(root.id).map((record) => record.id)).toEqual([
+      earlierChild.id,
+      child.id,
+    ])
+    expect(store.selectedActiveCount).toBe(2)
+
+    store.handleEvent({
+      ...eventBase(child, 1),
+      type: 'execution.changed',
+      summary: {
+        ...child,
+        status: 'completed',
+        updatedAt: '2026-08-01T00:00:01.000Z',
+        completedAt: '2026-08-01T00:00:01.000Z',
+      },
+    })
+    expect(store.selectedActiveCount).toBe(1)
+    expect(store.sessions[parentSessionId]?.records).toHaveLength(1)
+
+    store.removeSession(parentSessionId)
+    expect(store.children[root.id]).toBeUndefined()
+    expect(store.live[child.id]).toBeUndefined()
+  })
+
   it('resynchronizes sequence gaps and refreshes terminal durable state', async () => {
     const running = summary('subagent:gap', 'running')
     const completed = {
@@ -339,5 +397,56 @@ describe('agent execution store', () => {
       'completed',
     )
     expect(store.live[running.id]?.text).toBe('')
+  })
+
+  it('recovers a missed first event for a Swarm child by parent ownership', async () => {
+    const root = {
+      ...summary('swarm:resync-root', 'running'),
+      kind: 'swarm' as const,
+    }
+    const child = {
+      ...summary('subagent:resync-child', 'running'),
+      parentExecutionId: root.id,
+    }
+    const listAgentExecutions = vi.fn(async () =>
+      success({
+        page: {
+          schemaVersion: 1 as const,
+          records: [root],
+          hasMore: false as const,
+        },
+      }),
+    )
+    const getAgentExecution = vi.fn(async () =>
+      success({ detail: detail(child) }),
+    )
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        listAgentExecutions,
+        getAgentExecution,
+      } as Partial<AgentApi> as AgentApi,
+    })
+    const store = useAgentExecutionStore()
+
+    store.handleEvent({
+      ...eventBase(child, 2),
+      type: 'run.status',
+      status: 'calling_llm',
+    })
+
+    await vi.waitFor(() => expect(getAgentExecution).toHaveBeenCalledOnce())
+    expect(getAgentExecution).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentSessionId,
+        executionId: child.id,
+      }),
+    )
+    expect(store.childrenFor(root.id)).toEqual([
+      expect.objectContaining({ id: child.id }),
+    ])
+    expect(store.sessions[parentSessionId]?.records).toEqual([
+      expect.objectContaining({ id: root.id }),
+    ])
   })
 })

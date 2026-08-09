@@ -4,6 +4,7 @@ import {
   formatWorkspaceExpansionPath,
   formatWorkspaceSuggestionPath,
   replaceComposerRange,
+  SLASH_COMMANDS,
   workspaceSuggestionQuery,
 } from './composer-suggestions'
 
@@ -20,6 +21,10 @@ describe('composer suggestions', () => {
       query: 'go',
       replaceStart: 4,
       replaceEnd: 7,
+    })
+    expect(SLASH_COMMANDS).toContainEqual({
+      command: 'swarm',
+      usage: '/swarm ',
     })
   })
 

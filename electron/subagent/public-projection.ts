@@ -80,22 +80,33 @@ function childTitleName(child?: SessionRecord): string | undefined {
 /** Produces the bounded, renderer-safe summary for one hidden execution. */
 export function projectAgentExecutionSummary(
   record: SubagentExecutionRecord,
-  input: { name?: string; child?: SessionRecord } = {},
+  input: {
+    name?: string
+    child?: SessionRecord
+    agentCounts?: AgentExecutionSummary['agentCounts']
+  } = {},
 ): AgentExecutionSummary {
   const route = routeIdentity(record)
   const name =
     input.name?.trim() ||
-    childTitleName(input.child) ||
+    (record.name === 'Subagent' ? childTitleName(input.child) : undefined) ||
+    record.name.trim() ||
     completedResultName(record) ||
     'Subagent'
   const usage = usageSummary(record.usage)
   return {
     schemaVersion: 1,
     id: record.id,
-    kind: 'subagent',
+    kind: record.kind,
     parentSessionId: record.parentSessionId,
     parentRunId: record.parentRunId,
     parentCallId: record.parentCallId,
+    ...(record.parentExecutionId
+      ? { parentExecutionId: record.parentExecutionId }
+      : {}),
+    ...(record.childOrdinal === undefined
+      ? {}
+      : { childOrdinal: record.childOrdinal }),
     name: [...name].slice(0, 64).join('') || 'Subagent',
     status: record.status,
     ...(input.child
@@ -105,6 +116,9 @@ export function projectAgentExecutionSummary(
         }
       : route),
     ...(usage ? { usage } : {}),
+    ...(input.agentCounts
+      ? { agentCounts: structuredClone(input.agentCounts) }
+      : {}),
     ...(record.error ? { error: { ...record.error } } : {}),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,

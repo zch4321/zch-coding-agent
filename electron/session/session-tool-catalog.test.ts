@@ -2,6 +2,7 @@ import { Type } from '@sinclair/typebox'
 import { describe, expect, it } from 'vitest'
 import { ToolRegistry } from '../tools/tool-registry'
 import type { ToolDefinition } from '../tools/types'
+import { SwarmRunArgsSchema } from '../../shared/swarm'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 
 function registry(
@@ -68,5 +69,55 @@ describe('session tool catalog', () => {
     })
 
     expect(catalog.names).toEqual(['read_file'])
+  })
+
+  it('exposes swarm only for a capable Run and freezes its per-Job maximum', async () => {
+    const tools = registry(['read_file'])
+    tools.registerTool({
+      id: 'swarm_run',
+      description: 'Swarm fixture',
+      inputSchema: SwarmRunArgsSchema,
+      effects: [],
+      defaultRisk: 'low',
+      supportsAbort: true,
+      defaultTimeoutMs: null,
+      maxOutputBytes: 1_024,
+      async execute() {
+        return { status: 'ok', content: null }
+      },
+    })
+
+    expect(
+      (
+        await resolveSessionToolCatalog({
+          registry: tools,
+          subagentsEnabled: true,
+        })
+      ).names,
+    ).toEqual(['read_file'])
+
+    const catalog = await resolveSessionToolCatalog({
+      registry: tools,
+      subagentsEnabled: true,
+      swarmMaxAgents: 3,
+    })
+    const swarm = catalog.definitions.find(
+      (definition) => definition.name === 'swarm_run',
+    )!
+    const schema = swarm.inputSchema as {
+      properties: {
+        tasks: {
+          maxItems: number
+          items: { properties: { agentCount: { maximum: number } } }
+        }
+      }
+    }
+    expect(catalog.names).toEqual(['read_file', 'swarm_run'])
+    expect(schema.properties.tasks.maxItems).toBe(3)
+    expect(schema.properties.tasks.items.properties.agentCount.maximum).toBe(3)
+    expect(SwarmRunArgsSchema.properties.tasks.maxItems).toBe(32)
+    expect(
+      SwarmRunArgsSchema.properties.tasks.items.properties.agentCount.maximum,
+    ).toBe(32)
   })
 })

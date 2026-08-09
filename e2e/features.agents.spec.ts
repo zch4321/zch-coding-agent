@@ -256,4 +256,97 @@ test.describe('Electron Agents activity panel', () => {
     await expect(restored).toContainText('Delegated review completed.')
     await expect(page.locator('button.conversation-item')).toHaveCount(1)
   })
+
+  test('runs a Swarm as one Job with manually expanded child Agents', async () => {
+    fakeProvider.armResponseGate([2, 3])
+    fakeProvider.queue([
+      toolCallDelta({
+        id: 'call:e2e-swarm',
+        name: 'swarm_run',
+        args: {
+          tasks: [
+            {
+              name: 'review',
+              task: 'Review the repository independently.',
+              requiredCapability: 'standard',
+              agentCount: 2,
+            },
+          ],
+        },
+      }),
+    ])
+    fakeProvider.queue([textDelta('Replica review completed.')])
+    fakeProvider.queue([textDelta('Replica review completed.')])
+    fakeProvider.queue([textDelta('Parent synthesized both Swarm reviews.')])
+
+    await configureApp({
+      page,
+      providerBaseURL: fakeProvider.origin,
+      workspace,
+      defaultMode: 'readonly',
+      swarm: true,
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+
+    await page
+      .locator('.message-input-area textarea')
+      .fill('/swarm Review the repository independently')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect.poll(() => fakeProvider.requests.length).toBe(3)
+
+    await openAgentsTab(page)
+    await expect(page.locator('.agent-execution-item')).toHaveCount(1)
+    await expect(
+      page.locator('.agent-execution-item.n-collapse-item--active'),
+    ).toHaveCount(0)
+    const root = await expandExecution(page, 'Swarm')
+    const children = root.locator('.agent-execution-child-item')
+    await expect(children).toHaveCount(2)
+    await expect(
+      root.locator('.agent-execution-child-item.n-collapse-item--active'),
+    ).toHaveCount(0)
+    await expect(children.nth(0)).toContainText('review · 1/2')
+    await expect(children.nth(1)).toContainText('review · 2/2')
+
+    fakeProvider.releaseResponseGate()
+    await expect.poll(() => fakeProvider.requests.length).toBe(4)
+    await expect(page.locator('.chat-message.assistant')).toContainText(
+      'Parent synthesized both Swarm reviews.',
+    )
+    await expect(
+      root.locator('.agent-execution-status-dot.status-completed'),
+    ).toHaveCount(3)
+
+    await children
+      .nth(0)
+      .locator('.n-collapse-item__header-main')
+      .first()
+      .click()
+    await expect(children.nth(0)).toHaveClass(/n-collapse-item--active/u)
+    await expect(children.nth(0)).toContainText('Replica review completed.')
+    const parentFollowup = providerMessageText(fakeProvider.requests[3]!.body)
+    expect(parentFollowup.match(/Replica review completed\./gu)).toHaveLength(2)
+    expect(parentFollowup.indexOf('review · 1/2')).toBeLessThan(
+      parentFollowup.indexOf('review · 2/2'),
+    )
+    await expect(page.locator('button.conversation-item')).toHaveCount(1)
+
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await openAgentsTab(page)
+    await expect(page.locator('.agent-execution-item')).toHaveCount(1)
+    await expect(
+      page.locator('.agent-execution-item.n-collapse-item--active'),
+    ).toHaveCount(0)
+    const restoredRoot = await expandExecution(page, 'Swarm')
+    await expect(
+      restoredRoot.locator('.agent-execution-child-item'),
+    ).toHaveCount(2)
+    await expect(
+      restoredRoot.locator(
+        '.agent-execution-child-item.n-collapse-item--active',
+      ),
+    ).toHaveCount(0)
+  })
 })

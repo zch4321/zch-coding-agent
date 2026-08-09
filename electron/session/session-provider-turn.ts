@@ -125,6 +125,7 @@ export class SessionProviderTurnRunner {
       registry: this.#toolRegistry,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
+      swarmMaxAgents: run.swarmCapability?.maxAgentsPerJob,
       gitToolsEnabled: session.gitToolsEnabled,
     })
     const tools = toolCatalog.definitions

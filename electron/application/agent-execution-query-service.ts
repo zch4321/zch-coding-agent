@@ -64,12 +64,21 @@ export class AgentExecutionQueryService {
         return {
           schemaVersion: 1 as const,
           records: page.records.map((entry) =>
-            projectAgentExecutionSummary(
-              entry.record,
-              entry.childSessionId
-                ? { child: this.#sessions.getAny(reader, entry.childSessionId) }
-                : {},
-            ),
+            projectAgentExecutionSummary(entry.record, {
+              ...(entry.childSessionId
+                ? {
+                    child: this.#sessions.getAny(reader, entry.childSessionId),
+                  }
+                : {}),
+              ...(entry.record.kind === 'swarm'
+                ? {
+                    agentCounts: this.#subagents.childCounts(
+                      reader,
+                      entry.record.id,
+                    ),
+                  }
+                : {}),
+            }),
           ),
           hasMore: page.hasMore,
           ...(page.nextBefore ? { nextBefore: page.nextBefore } : {}),
@@ -114,18 +123,57 @@ export class AgentExecutionQueryService {
             ? this.#liveSnapshot?.(entry.childSessionId)
             : undefined,
         )
+        const childEntries =
+          entry.record.kind === 'swarm'
+            ? this.#subagents.listChildren(reader, {
+                parentSessionId: input.parentSessionId,
+                parentExecutionId: entry.record.id,
+              })
+            : []
+        const childSummaries = childEntries.map((childEntry) =>
+          projectAgentExecutionSummary(childEntry.record, {
+            ...(childEntry.childSessionId
+              ? {
+                  child: this.#sessions.getAny(
+                    reader,
+                    childEntry.childSessionId,
+                  ),
+                }
+              : {}),
+          }),
+        )
+        const agentCounts =
+          entry.record.kind === 'swarm'
+            ? this.#subagents.childCounts(reader, entry.record.id)
+            : undefined
         return {
           schemaVersion: 1 as const,
-          summary: projectAgentExecutionSummary(entry.record, { child }),
+          summary: projectAgentExecutionSummary(entry.record, {
+            child,
+            ...(agentCounts ? { agentCounts } : {}),
+          }),
           ...(task ? { task } : {}),
           ...(live ? { live } : {}),
+          ...(childSummaries.length > 0 ? { children: childSummaries } : {}),
           statistics: {
-            toolCallCount: entry.childSessionId
-              ? this.#messages.countVisibleAgentToolCalls(
-                  reader,
-                  entry.childSessionId,
-                )
-              : 0,
+            toolCallCount:
+              (entry.childSessionId
+                ? this.#messages.countVisibleAgentToolCalls(
+                    reader,
+                    entry.childSessionId,
+                  )
+                : 0) +
+              childEntries.reduce(
+                (total, childEntry) =>
+                  total +
+                  (childEntry.childSessionId
+                    ? this.#messages.countVisibleAgentToolCalls(
+                        reader,
+                        childEntry.childSessionId,
+                      )
+                    : 0),
+                0,
+              ),
           },
           activityPage: {
             schemaVersion: 1 as const,

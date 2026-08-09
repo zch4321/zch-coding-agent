@@ -4,9 +4,9 @@
 
 Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`backend-refactor-plan.md`](./backend-refactor-plan.md)。
 
-通用只读子 Agent、模型池与 Swarm Tool 的已确认产品语义和分阶段计划见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
+通用只读子 Agent、模型池、Desktop Swarm 与后续 hardening 计划见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run` 与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一阶段优先推进 Model Pool/Swarm，完成后再迁移 ProjectModel 到 SQLite 并恢复代码智能。
+当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run`、Model Pool、Run-scoped Desktop Swarm、两级 Agents 状态视图与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一阶段先完成 Swarm hardening，再迁移 ProjectModel 到 SQLite 并恢复代码智能。
 
 原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
 
@@ -15,14 +15,14 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 | 优先级 | 领域                           | 目标                                                  | 主要风险                              |
 | ------ | ------------------------------ | ----------------------------------------------------- | ------------------------------------- |
 | P2     | Provider Routing               | Session selection、Active Run route 与用途路由        | 全局 active provider 静默影响已有会话 |
-| P2     | Subagent / Swarm               | 通用只读子 Agent、模型池和 `/swarm` 批量委派 Tool     | 递归调用、费用失控、并发与上下文膨胀  |
+| P2     | Swarm Hardening                | 取消体验、压力测试、诊断与成本汇总                    | 费用失控、取消竞态与上下文膨胀        |
 | P3     | Project / Code Intelligence UX | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断 | 项目元数据误改、后端不可诊断          |
 | P3     | Terminal / Command Environment | Windows Shell 自动发现及终端、命令解释器独立配置      | Shell 参数差异、路径漂移与回退语义    |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                  | 基础并发与扩展边界未稳时过早扩张      |
 
 ## 3. M3 · Project And Code Intelligence UX
 
-依赖：只在 Model Pool、Swarm 与其 hardening 完成后启动。本阶段先把已暂停的 ProjectModel 从 workspace `.zch` 迁入 SQLite，再恢复 Code Intelligence Facade 和 Serena；迁移完成前 UI、Tool、IPC 可用路径和 backend process 都保持关闭。
+依赖：只在 Desktop Swarm hardening 完成后启动。本阶段先把已暂停的 ProjectModel 从 workspace `.zch` 迁入 SQLite，再恢复 Code Intelligence Facade 和 Serena；迁移完成前 UI、Tool、IPC 可用路径和 backend process 都保持关闭。
 
 ### 3.1 ProjectModel SQLite 迁移与编辑器
 

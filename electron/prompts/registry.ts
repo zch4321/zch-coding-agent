@@ -7,6 +7,7 @@ import {
   DEFAULT_HEADLESS_PROMPT_REFS,
   DEFAULT_HARNESS_PROMPT_REFS,
   DEFAULT_ORCHESTRATION_PROMPT_REFS,
+  DEFAULT_SWARM_PROMPT_REFS,
 } from '../../shared/prompt-resources'
 
 export interface PromptResource {
@@ -82,6 +83,17 @@ export class PromptRegistry {
           ),
         ),
       ),
+      ...(['zh-CN', 'en-US'] as const).map((locale) =>
+        loadResource(
+          DEFAULT_SWARM_PROMPT_REFS[locale].id,
+          DEFAULT_SWARM_PROMPT_REFS[locale].version,
+          path.join(
+            rootDirectory,
+            'orchestration',
+            `${DEFAULT_SWARM_PROMPT_REFS[locale].id.replace('orchestration.', '')}.md`,
+          ),
+        ),
+      ),
     ])
     return new PromptRegistry(resources)
   }
@@ -151,6 +163,16 @@ export class PromptRegistry {
     const resource = this.get(
       DEFAULT_ORCHESTRATION_PROMPT_REFS[kind][locale].id,
     )
+    return {
+      content: resource.content,
+      resource: withoutContent(resource),
+      customized: false,
+    }
+  }
+
+  /** Resolves the localized, versioned Swarm start prompt. */
+  swarmPrompt(locale: AssistantLanguage): ResolvedPrompt {
+    const resource = this.get(DEFAULT_SWARM_PROMPT_REFS[locale].id)
     return {
       content: resource.content,
       resource: withoutContent(resource),

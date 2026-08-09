@@ -520,15 +520,21 @@ describe('Headless host', () => {
       toolsHash: string
       promptResources: unknown[]
       budgets: { subagentWorkerTimeoutMs: number }
-      capabilities: { toolNames: string[]; subagentsEnabled: boolean }
+      capabilities: {
+        toolNames: string[]
+        subagentsEnabled: boolean
+        swarmsEnabled: boolean
+      }
     }
-    expect(identity.schemaVersion).toBe(4)
+    expect(identity.schemaVersion).toBe(5)
     expect(identity.configHash).toBe(result.configHash)
     expect(identity.toolsHash).toMatch(/^[a-f0-9]{64}$/u)
     expect(identity.promptResources.length).toBeGreaterThan(0)
     expect(identity.budgets.subagentWorkerTimeoutMs).toBe(1_800_000)
     expect(identity.capabilities.subagentsEnabled).toBe(false)
+    expect(identity.capabilities.swarmsEnabled).toBe(false)
     expect(identity.capabilities.toolNames).toContain('call_mcp_tool')
+    expect(identity.capabilities.toolNames).not.toContain('swarm_run')
     await expect(
       readFile(result.artifacts.tracePath, 'utf8'),
     ).resolves.toContain('"type":"tool.call"')

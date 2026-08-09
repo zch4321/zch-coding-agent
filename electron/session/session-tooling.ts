@@ -20,6 +20,8 @@ import type { McpManager } from '../mcp/mcp-manager'
 import { registerMcpTools, type McpToolGateway } from '../tools/mcp-tools'
 import type { SubagentExecutionPort } from '../subagent/contracts'
 import { registerSubagentTools } from '../tools/subagent-tools'
+import type { SwarmExecutionPort } from '../swarm/contracts'
+import { registerSwarmTools } from '../tools/swarm-tools'
 
 export interface SessionTooling {
   toolRegistry: ToolRegistry
@@ -34,6 +36,7 @@ export function createSessionTooling(options: {
   skillsManager?: SkillsManager
   mcpManager?: McpManager
   subagentExecution?: SubagentExecutionPort
+  swarmExecution?: SwarmExecutionPort
   getSession: (sessionId: SessionId) => SessionState | undefined
   emit: (session: SessionState, event: AgentEventDraft) => void
 }): SessionTooling {
@@ -72,6 +75,9 @@ export function createSessionTooling(options: {
   })
   if (options.subagentExecution) {
     registerSubagentTools(toolRegistry, options.subagentExecution)
+  }
+  if (options.swarmExecution) {
+    registerSwarmTools(toolRegistry, options.swarmExecution)
   }
 
   const mcpGateway = options.mcpManager

@@ -45,6 +45,7 @@ export interface RunStartOptions {
   directUserInput?: boolean
   subagentsEnabled?: boolean
   skipProviderPreconditions?: boolean
+  reservedAccess?: { runId: RunId; lease: RunAccessLease }
 }
 
 /** Returns whether a run status cannot transition any further. */
@@ -138,8 +139,9 @@ export class SessionRunController {
       ipcFault('CONFLICT', 'This session already has an active run')
     }
 
-    const runId = id<RunId>('run')
-    const access = this.#acquireRunAccess(session, runId)
+    const runId = options.reservedAccess?.runId ?? id<RunId>('run')
+    const access =
+      options.reservedAccess?.lease ?? this.#acquireRunAccess(session, runId)
     const controller = new AbortController()
     const run: ActiveRun = {
       runId,

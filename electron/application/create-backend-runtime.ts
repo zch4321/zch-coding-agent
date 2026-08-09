@@ -34,6 +34,8 @@ import { SubagentStateService } from './subagent-state-service'
 import { AgentExecutionQueryService } from './agent-execution-query-service'
 import { SubagentExecutionBridge } from '../subagent/execution-bridge'
 import { SubagentExecutionService } from '../subagent/execution-service'
+import { SwarmExecutionBridge } from '../swarm/execution-bridge'
+import { SwarmCoordinator } from '../swarm/coordinator'
 
 type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
@@ -48,6 +50,7 @@ export interface CreateBackendRuntimeOptions {
   autoApproverFactory?: CreateAgentRuntimeOptions['autoApproverFactory']
   eventListeners?: CreateAgentRuntimeOptions['eventListeners']
   onDiagnostic?: DiagnosticSink
+  swarmHostEnabled?: boolean
 }
 
 export interface BackendRuntime {
@@ -189,8 +192,10 @@ export async function createBackendRuntime(
   })
   const executionState = new DurableExecutionStatePort(sessions, subagentState)
   const subagentBridge = new SubagentExecutionBridge()
+  const swarmBridge = new SwarmExecutionBridge()
   let runtime: AgentRuntime | undefined
   let subagentExecution: SubagentExecutionService | undefined
+  let swarmCoordinator: SwarmCoordinator | undefined
 
   try {
     runtime = await createAgentRuntime({
@@ -205,6 +210,8 @@ export async function createBackendRuntime(
       historySource: sessions,
       fileChangeExecution: fileChanges,
       subagentExecution: subagentBridge,
+      swarmExecution: swarmBridge,
+      swarmHostEnabled: options.swarmHostEnabled ?? true,
       onDiagnostic: options.onDiagnostic,
     })
     const agentExecutions = new AgentExecutionQueryService({
@@ -256,6 +263,14 @@ export async function createBackendRuntime(
       onDiagnostic: options.onDiagnostic,
     })
     subagentBridge.bind(subagentExecution)
+    swarmCoordinator = new SwarmCoordinator({
+      configStore: options.configStore,
+      manager: runtime.services.sessions,
+      state: subagentState,
+      subagents: subagentExecution,
+      events: runtime.events,
+    })
+    swarmBridge.bind(swarmCoordinator)
     targetState.runs = runs
     let disposePromise: Promise<void> | undefined
     return {
@@ -291,6 +306,7 @@ export async function createBackendRuntime(
         disposePromise ??= disposeBackendRuntime({
           liveSessions,
           subagentExecution,
+          swarmCoordinator,
           runtime,
           coordinator,
           listeners,
@@ -304,6 +320,7 @@ export async function createBackendRuntime(
       await settleCleanup([
         () => runtime?.dispose(),
         () => subagentExecution?.dispose(),
+        () => swarmCoordinator?.dispose(),
         () => coordinator.close(),
         () => database.close(),
       ])
@@ -321,6 +338,7 @@ export async function createBackendRuntime(
 async function disposeBackendRuntime(input: {
   liveSessions?: LiveSessionContextRegistry
   subagentExecution?: SubagentExecutionService
+  swarmCoordinator?: SwarmCoordinator
   runtime?: AgentRuntime
   coordinator: ApplicationStateCoordinator
   listeners: Set<(commit: DurableCommitEnvelope) => void>
@@ -329,6 +347,8 @@ async function disposeBackendRuntime(input: {
   await settleCleanup([
     () => input.liveSessions?.dispose(),
     () => input.subagentExecution?.dispose(),
+    // Swarm disposal waits for child promises, so abort the child service first.
+    () => input.swarmCoordinator?.dispose(),
     () => input.runtime?.dispose(),
     () => input.coordinator.close(),
     () => input.listeners.clear(),

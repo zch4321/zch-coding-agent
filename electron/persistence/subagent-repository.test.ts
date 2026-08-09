@@ -28,8 +28,10 @@ function execution(
   parentSessionId: SessionId,
   overrides: Partial<SubagentExecutionRecord> = {},
 ): SubagentExecutionRecord {
-  return {
+  const record: SubagentExecutionRecord = {
     id: 'subagent:fixture' as AgentExecutionId,
+    kind: 'subagent',
+    name: 'fixture',
     parentSessionId,
     parentRunId: 'run:parent' as RunId,
     parentCallId: 'call:subagent' as CallId,
@@ -41,7 +43,12 @@ function execution(
     },
     createdAt: FIXTURE_TIMESTAMP,
     updatedAt: FIXTURE_TIMESTAMP,
+  }
+  return {
+    ...record,
     ...overrides,
+    kind: overrides.kind ?? record.kind,
+    name: overrides.name ?? record.name,
   }
 }
 
@@ -106,17 +113,41 @@ describe('Subagent persistence', () => {
       result: { results: { worker: 'done' } },
       completedAt: FIXTURE_TIMESTAMP,
     })
+    const swarm = execution(parent.id, {
+      id: 'swarm:interrupted' as AgentExecutionId,
+      kind: 'swarm',
+      name: 'Swarm interrupted',
+      parentRunId: 'run:swarm-interrupted' as RunId,
+      parentCallId: 'call:swarm-interrupted' as CallId,
+      status: 'running',
+    })
+    const queued = execution(parent.id, {
+      id: 'subagent:queued' as AgentExecutionId,
+      parentExecutionId: swarm.id,
+      childOrdinal: 0,
+      name: 'queued',
+      parentRunId: swarm.parentRunId,
+      parentCallId: swarm.parentCallId,
+      status: 'queued',
+    })
     try {
       await testDatabase.database.withTransaction((transaction) => {
         subagents.insert(transaction, completed)
+        subagents.insert(transaction, swarm)
+        subagents.insert(transaction, queued)
         expect(
           subagents.interruptActive(transaction, '2026-07-22T00:01:00.000Z'),
-        ).toBe(1)
+        ).toBe(3)
       })
 
       const persisted = testDatabase.database.read((reader) => ({
         interrupted: subagents.findByParentCall(reader, record),
         completed: subagents.findByParentCall(reader, completed),
+        swarm: subagents.findByParentCall(reader, swarm),
+        queued: subagents.getOwned(reader, {
+          parentSessionId: parent.id,
+          executionId: queued.id,
+        })?.record,
       }))
       expect(persisted.interrupted).toMatchObject({
         status: 'interrupted',
@@ -125,6 +156,14 @@ describe('Subagent persistence', () => {
       expect(persisted.completed).toMatchObject({
         status: 'completed',
         result: { results: { worker: 'done' } },
+      })
+      expect(persisted.swarm).toMatchObject({
+        status: 'interrupted',
+        error: { code: 'SWARM_INTERRUPTED' },
+      })
+      expect(persisted.queued).toMatchObject({
+        status: 'interrupted',
+        error: { code: 'SUBAGENT_INTERRUPTED' },
       })
     } finally {
       await testDatabase.dispose()

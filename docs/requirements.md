@@ -148,7 +148,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 模型目录查询保持独立服务。OpenAI-compatible API 使用 Bearer `GET /models`，Anthropic 使用 `x-api-key`、版本 header 和有界分页 `GET /models`。目录解析只能采用协议明确返回的字段：Anthropic 的 `max_input_tokens/max_tokens` 归一化为模型容量；OpenAI 与 DeepSeek 的标准列表当前只保证模型身份信息，不能臆测容量。刷新按大小写敏感的模型 ID 只追加当前持久化清单中不存在的模型，不得覆盖旧条目或删除本次响应缺失的条目；404/405 等不提供目录接口的 Provider 必须保留现有清单并允许用户手工新增模型。新增模型对话框必须同时收集最大上下文、压缩阈值、最大输出长度、可选思考档位和能力等级，确认时原子写入目录、启用池与模型覆盖，不能先产生半配置模型。模型配置行必须允许删除非主模型、非当前自动审批模型；删除原子清理本地目录、启用池和模型覆盖，并禁用引用它的模型池条目。Provider 后续仍返回该模型时，目录刷新可以重新发现它。设置页合并 Provider 返回、应用内置模型资料和已保存覆盖；不得抓取 Provider 文档 HTML 推断运行时能力。Provider 编辑页在底部以模型列表展示全部已知模型的“最大上下文、压缩阈值、最大输出长度”，目录没有返回的数值必须自动填入应用默认值而不是显示空配置。
 
-模型能力采用 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值`。未知模型默认按 256K 上下文和 65,536 Token 最大输出管理；上下文不足时收窄输出上限并至少保留 1,024 Token prompt budget。压缩阈值默认为可用 prompt budget 的 80%，并明确标记“能力未知”。Provider 模型配置区必须使用可筛选的穿梭框维护按 Provider 持久化的 `enabledModelIds`；只有启用模型能进入 Composer、自动审批和未来 Swarm 模型池的可选项。主模型可以从完整模型清单中选择，选中后必须原子加入启用池，并在作为主模型期间禁止从穿梭框移除；更换主模型不得自动停用旧主模型。穿梭框只管理运行时候选，不得筛掉下方任何已知模型的 Token 与能力配置行。启用池不进入模型能力覆盖或 Provider revision，但运行 route 必须在开始时确认所选模型仍已启用。新安装不写入虚构模型 ID；未配置 Provider 可以暂时没有主模型和启用模型，此时禁止启动 Run。用户首次填写或替换 API Key 后，Provider 表单自动保存并立即刷新模型目录；其余 Provider 合法修改也在短暂防抖后自动保存，不要求手动点击保存。AppConfig v14 的 `modelConfigurationIds` 原样迁移为启用池。自动补齐的模型值不固化为用户覆盖，因此修改全局默认值会同步到仍使用默认能力的模型；手工修改过的三项配置按模型保存并随 route revision 冻结。模型目录请求失败时保留上次成功缓存和当前手工配置。对话 Composer 的 Provider/model route 必须来自当前 Session 或新对话草稿，不能复用 Provider 设置页当前正在编辑的卡片；已停用的历史 Session 模型可以显示为当前值，但必须先改选启用模型才能再次发送。
+模型能力采用 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值`。未知模型默认按 256K 上下文和 65,536 Token 最大输出管理；上下文不足时收窄输出上限并至少保留 1,024 Token prompt budget。压缩阈值默认为可用 prompt budget 的 80%，并明确标记“能力未知”。Provider 模型配置区必须使用可筛选的穿梭框维护按 Provider 持久化的 `enabledModelIds`；只有启用模型能进入 Composer、自动审批和 Swarm 模型池的可选项。主模型可以从完整模型清单中选择，选中后必须原子加入启用池，并在作为主模型期间禁止从穿梭框移除；更换主模型不得自动停用旧主模型。穿梭框只管理运行时候选，不得筛掉下方任何已知模型的 Token 与能力配置行。启用池不进入模型能力覆盖或 Provider revision，但运行 route 必须在开始时确认所选模型仍已启用。新安装不写入虚构模型 ID；未配置 Provider 可以暂时没有主模型和启用模型，此时禁止启动 Run。用户首次填写或替换 API Key 后，Provider 表单自动保存并立即刷新模型目录；其余 Provider 合法修改也在短暂防抖后自动保存，不要求手动点击保存。AppConfig v14 的 `modelConfigurationIds` 原样迁移为启用池。自动补齐的模型值不固化为用户覆盖，因此修改全局默认值会同步到仍使用默认能力的模型；手工修改过的三项配置按模型保存并随 route revision 冻结。模型目录请求失败时保留上次成功缓存和当前手工配置。对话 Composer 的 Provider/model route 必须来自当前 Session 或新对话草稿，不能复用 Provider 设置页当前正在编辑的卡片；已停用的历史 Session 模型可以显示为当前值，但必须先改选启用模型才能再次发送。
 
 运行限制页采用带分节线的单列布局，百分比配置必须同时显示数值和 `%` 单位。合法修改在短暂防抖后自动保存，页面顶部保留立即保存/失败重试按钮；自动保存不能覆盖保存请求期间产生的更新。
 
@@ -304,9 +304,9 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - `workerTimeoutMs` 默认 30 分钟、可配置 1 分钟至 24 小时。父 Run 取消、timeout、Provider failure 和应用退出都必须中断 child 并清理并发 slot；全局并发上限为 1 时启动前明确拒绝。
 - 相同 parent Session/Run/call 与参数 hash 可复用已完成结果；参数不同返回冲突。应用重启将遗留 active execution 标记为 `interrupted`，不得自动重试或恢复 stream。
 
-当前阶段已经包含模型池的配置 UI 与 backend foundation，但不改变上述 `subagent_run` 执行路径。Swarm、模型池生产执行接入、递归委派、Serena/code intelligence、自定义 child 工具列表或详细 child Session UI 仍未实现；后续边界见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
+模型池与 Desktop Swarm 不改变上述 `subagent_run` 执行路径：普通 Subagent 仍精确继承父 route 并对全局 Run slot fail-fast。Swarm 使用独立 prepared execution 和 FIFO slot 等待；递归委派、Serena/code intelligence、自定义 child 工具列表或可继续聊天的 child Session UI 仍未实现。后续 hardening 边界见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
 
-### 2.8 Model Pool 配置与 backend foundation
+### 2.8 Model Pool 配置与执行
 
 - AppConfig v16 首次在根配置加入 `modelPool`，v17 将 entry reasoning 扩展为统一六档，v18 删除重复 capability，v19 保存最多 1,000 个命名 entry 并删除从未执行的 per-route `maxParallel`；当前 v20 不改变模型池结构，只新增命令解释器选择。该上限仅作为 IPC/config 异常负载边界，不承担并发或 Agent 数量控制；entry 只引用现有 Provider/model/reasoning。调度能力固定为 `light | standard | strong`，唯一来源是对应 Provider 的 `modelOverrides[model].capability`。API key、credential reference 与并发配额不进入 entry。
 - 完整模型池使用单个 `config:set(model-pool)` 原子保存。所有 enabled entry 引用的 Provider 必须由唯一且精确的 expected revision 列表覆盖，并在写盘前通过 Provider 存在、模型启用、能力标注、安全 endpoint、模型 profile 和当前凭据绑定校验；任一失败时不得部分写入。disabled entry 只要求结构与规范化 ID 唯一，可保留失效引用供未来 UI 修复。
@@ -314,7 +314,18 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - 删除 Provider、移除 entry 引用的启用模型、移除 capability annotation、reasoning annotation 变为不兼容或显式清除凭据时，在同一配置写入中把受影响 entry 置为 disabled，保留顺序和引用；恢复配置不会自动启用。启动/reload 会修复手写的 enabled 静态不兼容或无能力标注引用，但环境凭据暂时缺失不会改写持久配置。
 - 纯 allocator 让所有 `actualCapability >= requiredCapability` 的模型参与分配，并按声明顺序先 round-robin `Provider + model`、再轮询该模型的精确 reasoning route；选择更多 reasoning 叶节点不会提高模型权重，每次调用从头开始。符合要求的模型少于 Agent 数时自然重复使用；缺少能力时在 route/credential 解析前整体失败。route freezer 读取单个 PublicConfig 快照，生成包含全部 enabled entry 及 Provider revision 的顺序敏感 SHA-256 digest，并对实际选择的唯一 entry 各解析一次 main/compression route。
 - prepared plan 是 backend-private 内存结果，包含 `ResolvedModelRoute` 与 API key；safe snapshot v2 只包含 digest、需求/entry/能力、Provider/model/reasoning/revision 与安全 route snapshot。revision 竞态或已选 entry 不可用会使整个 freeze 失败，不会跳过、切换 Provider 或重新分配。
-- `subagents.maxAgentsPerSwarm` 默认 10、范围 1–32，限制未来单个 Swarm Job 创建的 child Agent 总数；`limits.maxConcurrentRuns` 继续独立限制全应用同时 active 的 Run。当前阶段不修改 Headless v4、Runtime Identity v4、`SubagentExecutionPort.runOne` 或 SQLite Job 状态；这些属于 S3 后续接入或 S4。
+- `subagents.maxAgentsPerSwarm` 默认 10、范围 1–32，限制单个 Swarm Job 创建的 child Agent 总数；`limits.maxConcurrentRuns` 继续独立限制全应用同时 active 的 Run。`subagent_run` 通过 `runOne` 继承父 route；Swarm 通过 backend-private `runPrepared` 消费冻结 assignment，配置热变更不得影响 queued/running child。
+
+### 2.9 Desktop Swarm
+
+- `/swarm <goal>` 只为本次 Desktop Run 创建 Swarm capability。goal 不能为空；启动时必须已经启用 Subagent、全局并发至少为 2，并有可用模型池 route。普通 Run、历史记录、child Agent 和 Headless 不得继承或伪造该 capability。
+- 只有具备 capability 的主 Agent 可以看到并执行 `swarm_run({ tasks })`。每个 task 必须包含唯一安全 `name`、自包含 `task`、`requiredCapability: light|standard|strong` 和 `agentCount`；单项及总 Agent 数都受本次 Run 冻结的 `maxAgentsPerSwarm` 限制，Provider schema 与 Backend 执行校验必须同时执行。
+- 主 Agent 负责拆解任务；Backend 在任何 child Provider 请求前确定性分配模型池 route、复核 Provider revision，并冻结 main/compression route 与凭据绑定。能力不足、配置竞态或输入超限必须整体失败，不得静默降级、跳过任务或自动换 Provider。
+- Job root 与所有 queued child 必须在一个 SQLite transaction 创建。root/child 只保存安全 assignment、状态、usage、结果与有界错误，不保存 API key、endpoint、reasoning、workspace 绝对路径或 child prompt harness；hidden Session 继续从普通 Session API 隐藏。
+- Swarm child 使用全局 Run coordinator 的可取消 FIFO 队列，取得 slot 后才创建 hidden Session 并启动 worker timeout；父 Run 自身占一个 slot。普通 Run 与 `subagent_run` 继续 fail-fast。同一父 Run 的多个 Job 严格串行，不同父 Run 的 Job 可以并发排队。
+- 父 Run 取消或应用退出必须取消 queued child 并中断 active child。单 child 失败不取消兄弟且不自动重试；结果按 task 声明顺序和 replica 序号稳定返回。至少一个成功时保留 `completed|partial` 结果，全部失败返回明确 Tool error。
+- 每个结果项独立包含成功文本或失败、冻结 assignment、耗时、usage 与截断标记；`meta` 汇总状态、数量、总耗时和 usage。结果不得包含 reasoning、child Session ID、trace 或完整工具轨迹，2 MB 上限不得通过删除 Agent 条目来满足。
+- 同一父 Run 可以多次调用 `swarm_run`，但严格串行；Tool description 应鼓励一个 Assistant turn 只调用一次。相同 call ID 与相同参数可幂等复用 active/durable 结果，相同 call ID 参数不一致必须冲突。
 
 ---
 
@@ -472,7 +483,9 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - 开关默认关闭；timeout 默认 30 分钟，输入以分钟展示并限制为 1–1,440；`maxAgentsPerSwarm` 默认 10、范围 1–32，从下一次 `/swarm` Run 生效。
 - 页面必须提示启用后会产生额外 Provider 请求和费用，并展示当前全局 `maxConcurrentRuns`；并发为 1 时说明无法运行嵌套 Agent。
 - 同页模型池小节显式原子保存完整 entry 数组；以 `Provider → model → reasoning` 穿梭树选择精确 route，并只读展示 Provider 模型的能力标注。模型池本身不配置并发或 Agent 数量。
-- 当前不提供 child 工具列表、详细子任务页或隐藏 Session 入口；模型池仍未接入生产 Subagent 执行。
+- Artifact 侧栏提供只读 Agents Tab。根列表展示普通 Subagent 与 Swarm Job；Swarm 展开后按声明顺序嵌套 child Agent。根与 child 都只能由用户手动展开，不因新任务、状态变化或首次打开自动展开。
+- 活跃数量徽标统计实际 active leaf Agent，不把 Swarm root 重复计数。详情只展示运行时间、工具调用次数、状态、模型、usage、Swarm Agent 计数和可见 Assistant 消息；不展示 reasoning、完整工具轨迹、隐藏 Session ID、prompt harness、route 或 Provider continuation。
+- 当前不提供 child 工具列表、取消按钮、可继续聊天的子任务页或隐藏 Session 入口。
 
 ---
 
@@ -522,7 +535,7 @@ session.end     { reason, ts }
 ### 5.4 Headless 运行输出
 
 - 内部 Headless host 必须复用桌面端唯一 Agent Runtime 组装入口，固定 Yolo 且不增加、删除或替换模型可见工具。
-- Headless config v4 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs`，并迁移 v1–v3 输入；Runtime Identity v4 记录开关和 timeout，child execution 仍使用相同 live workspace、隐藏 Session、Tool profile 和 usage 归属。
+- Headless config v4 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs`，并迁移 v1–v3 输入；Runtime Identity v5 记录开关、timeout 和 `swarmsEnabled = false`，并从 tool 名称/hash 排除 `swarm_run`。普通 child execution 仍使用相同 live workspace、隐藏 Session、Tool profile 和 usage 归属。
 - stdout 只允许版本化 JSONL；host 诊断写 stderr；最终 `result.json` 原子写入 workspace 外的 artifacts 目录。
 - Provider 凭据只能由受信任配置声明的环境变量名称解析，凭据值不得进入配置回包、JSONL、trace、patch 或子进程环境。
 - result 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计、trace 和 patch 路径。`completed` 只表示 Agent run 正常结束，不替代外部业务验收。

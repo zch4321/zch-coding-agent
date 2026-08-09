@@ -167,4 +167,73 @@ describe('WorkspaceAccessCoordinator', () => {
       },
     })
   })
+
+  it('grants queued readonly slots in FIFO order while normal runs stay fail-fast', async () => {
+    const coordinator = new WorkspaceAccessCoordinator()
+    const first = coordinator.acquire({
+      ...owner(1),
+      limit: 1,
+      mode: 'readonly',
+    })
+    if (!first.acquired) throw new Error('Expected first reader lease')
+    const order: number[] = []
+    const second = coordinator
+      .acquireQueued(
+        { ...owner(2), limit: 1, mode: 'readonly' },
+        new AbortController().signal,
+      )
+      .then((lease) => {
+        order.push(2)
+        return lease
+      })
+    const third = coordinator
+      .acquireQueued(
+        { ...owner(3), limit: 1, mode: 'readonly' },
+        new AbortController().signal,
+      )
+      .then((lease) => {
+        order.push(3)
+        return lease
+      })
+
+    expect(
+      coordinator.acquire({ ...owner(4), limit: 1, mode: 'readonly' }),
+    ).toMatchObject({
+      acquired: false,
+      rejection: { reason: 'max_concurrent_runs' },
+    })
+    first.lease.release()
+    const secondLease = await second
+    expect(order).toEqual([2])
+    secondLease.release()
+    const thirdLease = await third
+    expect(order).toEqual([2, 3])
+    thirdLease.release()
+  })
+
+  it('removes an aborted queued request without blocking the next request', async () => {
+    const coordinator = new WorkspaceAccessCoordinator()
+    const first = coordinator.acquire({
+      ...owner(1),
+      limit: 1,
+      mode: 'readonly',
+    })
+    if (!first.acquired) throw new Error('Expected first reader lease')
+    const abort = new AbortController()
+    const cancelled = coordinator.acquireQueued(
+      { ...owner(2), limit: 1, mode: 'readonly' },
+      abort.signal,
+    )
+    const next = coordinator.acquireQueued(
+      { ...owner(3), limit: 1, mode: 'readonly' },
+      new AbortController().signal,
+    )
+
+    abort.abort(new Error('cancelled'))
+    await expect(cancelled).rejects.toThrow('cancelled')
+    first.lease.release()
+    const nextLease = await next
+    expect(coordinator.activeRunCount()).toBe(1)
+    nextLease.release()
+  })
 })

@@ -163,10 +163,10 @@
 
 ## 2026-08-06 — Swarm 数量归 Job 所有，模型池只描述可选 Route
 
-- 状态：已采纳；当前落实配置、模型池 UI、allocator/freezer 与文档，`swarm_run`/Job 队列仍在 S4 实现。
+- 状态：已采纳并在 Desktop S4 落实；Headless 明确不暴露 Swarm。
 - 配置边界：AppConfig v19 删除 pool entry 中从未执行的 `maxParallel`，并在 `subagents` 增加 `maxAgentsPerSwarm`（默认 10、范围 1–32）。前者避免把执行期容量错误地绑定到模型 route，后者限制单次 Swarm 创建的 child Agent 总数；`limits.maxConcurrentRuns` 继续独立限制全应用同时 active 的 Run，主 Run 自身也占一个 slot。
 - 容量边界：模型池不再采用 64 条 Route 的产品级限制，当前 schema 与 Renderer 共用 1,000 条防御性上限，只用于拒绝异常 IPC/config 负载。它不表达执行容量；真正的运行边界仍由单个 Swarm 的 Agent 总量和全局并发 Run 数控制。
-- 工具契约：未来 `swarm_run.tasks[]` 由主 Agent 显式提供自包含 `task`、`requiredCapability: light|standard|strong` 与 `agentCount`，不增加含义重叠的难度字段，也不由 Backend 猜测能力。Provider 可见 schema 在 `/swarm` Run 启动时根据冻结的 `maxAgentsPerSwarm` 生成，把该值写入 `agentCount.maximum`；设置变化从下一次 `/swarm` Run 生效。数组内 `agentCount` 求和仍由 Backend 在建 Job 前校验，因为 JSON Schema 不能表达跨元素求和；XML 提示不能替代 schema 和执行校验。
+- 工具契约：`swarm_run.tasks[]` 由主 Agent 显式提供自包含 `task`、`requiredCapability: light|standard|strong` 与 `agentCount`，不增加含义重叠的难度字段，也不由 Backend 猜测能力。Provider 可见 schema 在 `/swarm` Run 启动时根据冻结的 `maxAgentsPerSwarm` 生成，把该值写入 `agentCount.maximum`；设置变化从下一次 `/swarm` Run 生效。数组内 `agentCount` 求和仍由 Backend 在建 Job 前校验，因为 JSON Schema 不能表达跨元素求和；XML 提示不能替代 schema 和执行校验。
 - Tool description 偏好：每个 task 默认 1 个 Agent；只有需要独立交叉验证、多视角调查或高风险复核时才增加数量，并选择足以完成任务的最低 capability，不能为了用满上限而扩张。
 - 分配边界：所有 `actualCapability >= requiredCapability` 的模型都可参与；allocator 按稳定声明顺序先均匀轮询 `Provider + model`，再轮询该模型入池的精确 reasoning route。这样同一模型选择更多 reasoning 叶节点不会获得额外权重；模型数少于所需 Agent 数时自然重复使用。assignment 在 Job 创建时冻结，失败不自动换 Provider 重跑。
 - 理由：任务需要多少独立 Agent 是一次 orchestration 的属性，模型池只回答“哪些精确 route 可以被选”。把数量放到 Tool/Job 并保留一个用户级硬上限，可以让主 Agent 按任务拆分，同时避免 per-route 配额、全局 Run 并发与 Job 总量三套相互重叠的配置。
@@ -187,3 +187,12 @@
 - 执行边界：`run_command.process` 与 `run_command.shell` 都使用 `spawn(..., { shell: false })`；后者由可信 adapter 传入解释器 executable、固定启动参数和原始命令。内部 Git、Subagent 与当前 PTY 不读取该配置，`run_command` 输出也不实时展示到 Terminal。
 - 编码边界：内置 adapter 请求 UTF-8；捕获层流式验证 stdout/stderr，遇到无效 UTF-8 时按启动时探测的 Windows 代码页解码。第三方程序仍可能忽略控制台编码约定，因此这是确定性解码回退，不是对任意程序输出格式的绝对保证。
 - 理由：让模型从候选列表选择会把宿主安装状态变成不稳定的模型决策，也会扩大命令审查和 quoting 状态空间。用户选择、Main 解析、Prompt 只报告事实，可让审批看到原始命令，同时消除 Node 在 Windows 上隐式落到 CMD 和 OEM code page 的行为。
+
+## 2026-08-09 — Desktop Swarm 使用 Run-scoped capability 与全局 FIFO slot
+
+- 状态：已采纳并实现 S4 基础链路；取消 UI、压力 hardening 与 Headless Swarm 延后。
+- Capability 边界：只有 `/swarm <goal>` 启动的 Desktop 主 Run 能看到并执行 `swarm_run`。catalog 与 executor 双重检查冻结 capability；普通 Run、child Agent、历史重放和 Headless 都不能继承或伪造。Runtime Identity v5 用 `swarmsEnabled` 明确宿主差异，Headless tool 名称/hash 同时排除 `swarm_run`。
+- 持久化边界：一次 Job 在同一 SQLite transaction 创建一个 Swarm root 和全部 queued child；root call 与 child ordinal 分别唯一。公共执行列表只返回 root，详情附带 children；hidden canonical Session 继续不进入普通 Session API。配置、assignment 或上限校验必须在任何 child Provider 请求前完成。
+- 并发边界：普通 Run 与 `subagent_run` 保持 fail-fast；只有 prepared Swarm child 在全局 Run coordinator 上 FIFO 等待空闲 slot，取得 slot 后才创建 hidden Session 并启动 worker timeout。父 Run 占一个 slot。同一父 Run 的多个 Swarm Job 严格串行，不同父 Run 可以并发；取消与应用退出同时覆盖 queued/active child。
+- 结果边界：replica 逐项、按声明顺序进入扁平 `results[]`，父 Agent 自行聚合。部分失败保留兄弟成功结果，不自动重试或换 Provider；全部失败返回 Tool error。2 MB 上限通过公平截断成功文本收敛，不能删除结果项，也不能暴露 reasoning、凭据、child Session 或完整工具轨迹。
+- 界面边界：Agents artifact 使用手动两级 `NCollapse` 展示 Job → Agent，活跃徽标只计 leaf Agent。详情仅展示统计与可见 Assistant 消息，不自动展开、不复制主时间线，也不提供 child 会话导航。

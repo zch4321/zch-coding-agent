@@ -363,14 +363,17 @@ export class ToolExecutor {
     }
 
     const timeoutController = new AbortController()
-    const timeout = setTimeout(
-      () => timeoutController.abort(new Error('Tool timed out')),
-      definition.defaultTimeoutMs,
-    )
+    const timeout =
+      definition.defaultTimeoutMs === null
+        ? undefined
+        : setTimeout(
+            () => timeoutController.abort(new Error('Tool timed out')),
+            definition.defaultTimeoutMs,
+          )
     const relayAbort = () => timeoutController.abort(signal.reason)
 
     if (signal.aborted) {
-      clearTimeout(timeout)
+      if (timeout) clearTimeout(timeout)
       return cancelledResult()
     }
 
@@ -434,7 +437,7 @@ export class ToolExecutor {
         retryable: false,
       }
     } finally {
-      clearTimeout(timeout)
+      if (timeout) clearTimeout(timeout)
       signal.removeEventListener('abort', relayAbort)
     }
   }

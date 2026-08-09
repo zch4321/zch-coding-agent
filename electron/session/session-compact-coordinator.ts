@@ -816,6 +816,7 @@ export class SessionCompactCoordinator {
       registry: this.#toolRegistry,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
+      swarmMaxAgents: run.swarmCapability?.maxAgentsPerJob,
       gitToolsEnabled: session.gitToolsEnabled,
     })
     await appendInitialPromptHarness(session, {
@@ -842,6 +843,7 @@ export class SessionCompactCoordinator {
       registry: this.#toolRegistry,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
+      swarmMaxAgents: run.swarmCapability?.maxAgentsPerJob,
       gitToolsEnabled: session.gitToolsEnabled,
     })
     const provider =

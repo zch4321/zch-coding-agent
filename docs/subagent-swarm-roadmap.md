@@ -1,6 +1,6 @@
 # Subagent 与 Swarm Roadmap
 
-> 状态：P13 已完成 S1 · Subagent Execution Foundation 与 S2 · Generic `subagent_run`；S3 已完成配置、allocator、route freezer 与 Agents 设置 UI，但 Runtime Identity、生产执行接入和 Swarm 有界队列尚未实现，因此 S3 仍未完成。Swarm 尚未实现。ProjectModel/Serena/code intelligence 已临时关闭，其 SQLite 迁移排在 Swarm 完成之后。
+> 状态：P13 已完成 S1 · Subagent Execution Foundation、S2 · Generic `subagent_run`、S3 · Model Pool 与 S4 · Desktop Swarm。当前进入 S5 hardening；Headless 明确不暴露 Swarm capability。ProjectModel/Serena/code intelligence 已临时关闭，其 SQLite 迁移排在 S5 完成之后。
 >
 > 已实现的稳定契约见 [`architecture.md`](./architecture.md) 与 [`requirements.md`](./requirements.md)。本文只保留尚未完成的演进方向，避免同时维护两套事实来源。
 
@@ -22,11 +22,11 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 这些约束是后续 Model Pool 和 Swarm 的底座，不在后续阶段复制第二套 Session、Provider、Tool executor 或恢复逻辑。
 
-## 2. S3 · Model Pool（backend foundation 与设置 UI 已完成，执行接入待完成）
+## 2. S3 · Model Pool（已完成）
 
 ### 2.1 目标
 
-允许用户建立只引用现有 Provider 配置的命名模型池，为未来 Swarm 的多模型调度提供确定性 route assignment。模型池不复制 API key，也不改变当前 `subagent_run({ name, task })` 的公开输入。
+允许用户建立只引用现有 Provider 配置的命名模型池，为 Swarm 的多模型调度提供确定性 route assignment。模型池不复制 API key，也不改变 `subagent_run({ name, task })` 的公开输入。
 
 建议的 pool entry 至少包含：
 
@@ -43,11 +43,11 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 ### 2.2 已完成的 backend foundation
 
-- AppConfig v16 增加默认空的 `modelPool.entries`；v17 保留并迁移合法 v16 pool，同时加入显式 approval reasoning 和六档 pool reasoning；v18 删除 entry 中重复的 capability；v19 再删除从未执行的 per-route `maxParallel`，并在 `subagents` 增加 `maxAgentsPerSwarm`。当前 v20 只新增 command shell 配置，不改变模型池或 Swarm 结构。v16–v18 升级会规范化 pool 并移除旧冗余字段。Headless 外部配置和 Runtime Identity 继续保持 v4。
+- AppConfig v16 增加默认空的 `modelPool.entries`；v17 保留并迁移合法 v16 pool，同时加入显式 approval reasoning 和六档 pool reasoning；v18 删除 entry 中重复的 capability；v19 再删除从未执行的 per-route `maxParallel`，并在 `subagents` 增加 `maxAgentsPerSwarm`。当前 v20 只新增 command shell 配置，不改变模型池或 Swarm 结构。v16–v18 升级会规范化 pool 并移除旧冗余字段。Headless 外部配置保持 v4；Runtime Identity v5 新增显式 `swarmsEnabled`，当前 Headless 固定为 `false`。
 - `config:set(model-pool)` 使用完整数组和精确 Provider revision 覆盖做一次性校验与原子写盘。enabled entry 的调度能力从 Provider `modelOverrides[model].capability` 读取，缺少标注时拒绝保存；disabled entry 可以保留失效引用。Provider 删除、模型移出 `enabledModelIds`、移除 capability annotation、reasoning annotation 变为不兼容或显式清除凭据时只自动禁用受影响项，恢复后不会自动重启用。
 - 纯 allocator 只接收能力需求序列。每项需求可使用能力大于或等于 `requiredCapability` 的任意模型；先按稳定声明顺序 round-robin `Provider + model`，再轮询该模型已选的精确 reasoning route，避免选择更多 reasoning 叶节点的模型获得更高权重。每次调用重置 cursor，`strong` 不向下降级；符合要求的模型少于 Agent 数时自然重复使用模型。
 - route freezer 只读取一次 PublicConfig 快照，对所有 enabled entry 与 Provider revision 计算顺序敏感 digest，并对实际选中的每个唯一 entry 解析一次 main/compression pair。prepared plan 只在 backend 内存持有 API key；safe snapshot 只包含 assignment、revision 和安全 route，不含 API key 或 credential reference。
-- `SubagentExecutionPort.runOne` 尚未消费 prepared plan；当前 `subagent_run` 仍精确继承父 Run route。没有 semaphore、Swarm queue 或 SQLite Job 状态。
+- `subagent_run` 继续通过 `runOne` 精确继承父 Run route；Swarm 则通过 backend-private `runPrepared` 消费冻结 assignment。全局 Run coordinator 为 Swarm child 提供可取消 FIFO 等待，SQLite v8 持久化 Job root、child ordinal、assignment 安全快照和终态。
 
 ### 2.3 调度规则
 
@@ -57,13 +57,13 @@ P13 已提供默认关闭的单子 Agent 能力：
 - 某个 assignment 失败时保留原模型信息，不自动切换 Provider 重跑，避免重复费用和不可审计结果。
 - 模型池不保存并发配额。Job 需要的 Agent 总数由 `swarm_run` 输入声明并受 `subagents.maxAgentsPerSwarm` 约束；实际同时执行数仍必须取得全局 Run slot。
 
-### 2.4 配置与 UI（设置页已完成，执行接入待实现）
+### 2.4 配置与 UI（已完成）
 
 - Agents 设置页已经提供基于 Naive UI Transfer/Tree 的 `Provider → model → reasoning` 自定义树形穿梭框；每个 reasoning 叶节点对应一条精确 route，同一模型的多个 reasoning 可以同时入池且互不 fallback。最低 reasoning 下拉栏只筛选左侧候选，已选低档 route 继续显示并提示；模型池不再提供 per-route 并发配置。能力等级继续只在 Provider 模型配置中维护，pool UI 只读展示该标注，内部 ID/顺序/enabled 不作为常规配置项暴露。
 - 同页 Subagent 设置提供 `maxAgentsPerSwarm`，默认 10、范围 1–32；它限制单次 Swarm 创建的 child Agent 总数，不等同于同时运行数。`limits.maxConcurrentRuns` 继续限制全应用同时 active 的 Run，且主 Run 自身占一个 slot。
 - Renderer 使用独立模型池 store 保存草稿，并通过单次完整数组请求校验 Provider、credential binding、模型、能力标注和 revision；无效配置不能部分生效。Provider 编辑导致持久化 entry 自动禁用时不会静默覆盖 dirty 草稿。
-- Swarm 执行接入时，UI 仍需明确展示每个模型会读取当前 workspace 内容并产生额外 Provider 请求。
-- Runtime Identity 记录模型池 digest、冻结的 Job Agent 上限和调度能力，方便 Headless 结果比较；该项随生产执行接入一起实现，当前 Runtime Identity 仍为 v4。
+- UI 明确提示每个模型会读取当前 workspace 内容并产生额外 Provider 请求；执行时冻结的 pool digest、assignment、Provider revision 和安全 route snapshot 保存在 durable Job/child execution 中，凭据只存在于 backend 内存。
+- Runtime Identity v5 显式记录宿主是否支持 Swarm。当前生成 identity artifact 的 Headless 保持外部 config v4 且 `swarmsEnabled = false`；Desktop 直接支持 Run-scoped Swarm，因此不需要把 Desktop Job assignment 混入 Headless artifact identity。
 
 ### 2.5 验收
 
@@ -72,15 +72,15 @@ P13 已提供默认关闭的单子 Agent 能力：
 - queued 期间修改配置不会改变既有 assignment。
 - API key 仍只在主进程内存中解析，不进入 pool 配置、execution、trace 或 Tool Result。
 
-前四项的 backend allocator/freezer 回归已经覆盖，设置 UI 也已接入；S3 完成仍取决于 Runtime Identity/Headless 演进、生产执行接入和并发限制。
+上述 allocator/freezer、配置/UI、prepared execution 与冻结后配置热变更均已有回归覆盖，S3 已完成。
 
-## 3. S4 · `/swarm` 与 `swarm_run`
+## 3. S4 · `/swarm` 与 `swarm_run`（Desktop 已完成）
 
 ### 3.1 产品语义
 
 `/swarm <目标>` 为当前 Run 创建一次性 orchestration capability。只有持有该 capability 的主 Agent 才能看到和调用 `swarm_run`；历史消息、普通 Run 和子 Agent 不能继承或重放它。
 
-`swarm_run` 接收一组具名、自包含的只读调查任务。主 Agent 负责拆分任务；Backend 负责校验、冻结 assignment、排队、取消和聚合结果。SwarmCoordinator 直接并发调用现有 `SubagentExecutionPort.runOne` 原语，不通过循环调用公开 `subagent_run` Tool 实现。
+`swarm_run` 接收一组具名、自包含的只读调查任务。主 Agent 负责拆分任务；Backend 负责校验、冻结 assignment、排队、取消和聚合结果。SwarmCoordinator 直接调用 backend-private `PreparedSubagentExecutionPort.runPrepared`，不通过循环调用公开 `subagent_run` Tool，也不允许 child 获得递归编排能力。
 
 每个任务由主 Agent 显式声明内容、最低能力与 Agent 数，不增加另一套含义重叠的“难度”字段：
 
@@ -105,36 +105,36 @@ swarm_run({
 ### 3.2 运行边界
 
 - 同一 Swarm 的 Agent 绑定相同 canonical workspace，并在各自读取时观察 live 状态；本阶段不重新引入 source identity 或冻结 snapshot。
-- 调度使用有界队列，同时受冻结的 Job Agent 总数和全局 Run slot 约束；模型池不再提供 per-route 并发配额，不能直接无界 `Promise.all`。
+- Job 会先原子创建 root 与全部 queued child，再并发等待执行；真正 active 的 child 必须通过全局 Run coordinator 的可取消 FIFO 队列取得空闲 slot。冻结的 Job Agent 总数限制待调度规模，全局 `maxConcurrentRuns` 限制实际并发，模型池不再提供 per-route 并发配额。
 - 全局 `maxConcurrentRuns = 1` 时在启动前拒绝，避免父 Run 占满唯一 slot。
+- 同一父 Run 的多个 `swarm_run` Job 严格串行；不同父 Run 的 Job 可以同时排队和运行。普通 Run 与 `subagent_run` 继续 fail-fast，不因 Swarm 引入等待语义。
 - 父 Run 取消或应用退出时停止 queued assignment，并中断所有 active child Run。
-- 每个 child 继续沿用全局 `maxStepsPerRun`、对应模型的最大输出和通用 Tool 输出限制；不增加重复的 per-agent step/token/result 配置。
+- worker timeout 从 child 取得 slot 后开始计算，排队时间不消耗执行时限。每个 child 继续沿用全局 `maxStepsPerRun`、对应模型的最大输出和通用 Tool 输出限制；不增加重复的 per-agent step/token/result 配置。
 - Job 可以返回 partial result；单个 Provider 失败不丢弃其他成功结果，也不自动重试。
 
 ### 3.3 结果契约
 
-Swarm 结果沿用单子 Agent 的 `results/meta` 思路：
+Swarm 结果使用稳定的扁平 `results[] + meta` 契约：
 
-- `results` 按声明顺序保存每个具名 Agent 的最终文本或失败状态。
-- `meta` 保存 Job 状态、实际 Provider/model、耗时、标准化 usage、截断和有界错误。
+- `results` 按 task 声明顺序和 replica 序号保存每个 Agent，包含 `taskIndex/agentIndex/name/status`、成功文本或有界错误、冻结 assignment、耗时、usage 与截断标记；失败不会改变兄弟项顺序。
+- `meta` 保存 `completed|partial` Job 状态、Agent/成功/失败数量、总耗时和聚合 usage。只要至少一个 child 成功就返回完整或 partial 结果；全部失败返回明确 Tool error。
 - 不返回 reasoning、endpoint、凭据、子 Session ID、trace 路径、workspace 绝对路径或完整工具轨迹。
 - 主 Agent 在原 Run 中消费一个标准 Tool Result 并向用户汇总，不启动第二个聚合 Run。
-
-具体多 Agent JSON schema、失败值表示和 Job 级上限在 S4 实现计划中冻结；不提前改变 P13 的单 Agent contract。
+- Tool Result 总 JSON 上限为 2 MB；超限时按各响应或错误正文的 UTF-8 字节公平收窄并标记 `truncated`，不删除 Agent 条目。
 
 ### 3.4 验收
 
-- 未启用、非 `/swarm` Run、重复调用和 capability 重放均在 Provider/Tool 执行前被拒绝。
+- 未启用、非 `/swarm` Run 与 capability 重放均在 Provider/Tool 执行前被拒绝。同一父 Run 可多次调用但 Job 严格串行；同一 call ID 和相同参数可幂等复用，参数不同明确冲突。
 - 十个只读 Agent 可在有界并发下完成，主 Session 只出现一个 Swarm Tool call/result 和最终 Assistant 回复。
 - 所有 Agent 绑定相同 canonical workspace；部分失败保留成功结果，全部失败返回明确 Tool error。
 - Renderer reload 不暴露隐藏 Session，也不影响后台 Job 收敛。
 
-## 4. S5 · Hardening 与体验
+## 4. S5 · Hardening 与体验（下一阶段）
 
-- 在现有 ToolCallCard 内展示 queued/running/completed/failed 汇总、模型 assignment、部分失败和截断；不新增普通 Session 入口。
+- Agents artifact 已使用两级 `NCollapse` 展示 Swarm Job → child Agent，完全手动展开，只显示统计和可见 Assistant 文本；后续评估在主时间线 ToolCallCard 增加 queued/running/completed/failed 汇总、模型 assignment、部分失败和截断。
 - 完善 live workspace 变更提示、父 call 到 child usage 的诊断关联和成本汇总。
 - 覆盖慢 Provider、排队取消、应用崩溃、Renderer reload 与长结果的压力测试。
-- 评估只读 transcript 诊断入口，但 child Session 仍不可继续聊天。
+- 评估取消入口和更完整的只读诊断视图，但 child Session 仍不可继续聊天，也不进入普通 Session 列表。
 
 ## 5. S6 · ProjectModel SQLite 与 Serena 恢复（Swarm 之后）
 

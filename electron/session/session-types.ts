@@ -29,6 +29,7 @@ import type { SessionCommandResult } from '../../shared/domain-state-api'
 import type { FileChangeExecutionPort } from './file-change-execution'
 import type { SessionTraceController } from './session-trace-controller'
 import type { SubagentExecutionPort } from '../subagent/contracts'
+import type { SwarmExecutionPort } from '../swarm/contracts'
 import type { LlmUsageRecord } from '../../shared/usage'
 
 export type AgentEventDraft = AgentEvent extends infer Event
@@ -60,6 +61,8 @@ export interface SessionManagerOptions {
   fileChangeExecution?: FileChangeExecutionPort
   mcpManager?: McpManager
   subagentExecution?: SubagentExecutionPort
+  swarmExecution?: SwarmExecutionPort
+  swarmHostEnabled?: boolean
   promptRegistry?: PromptRegistry
   fetchImpl?: typeof fetch
   providerFactory?: (options: {
@@ -122,6 +125,11 @@ export interface RunInterjection {
   injectedAfterToolBatchId?: string
 }
 
+export interface SwarmRunCapability {
+  goal: string
+  maxAgentsPerJob: number
+}
+
 export interface ActiveRun {
   runId: RunId
   clientRequestId: string
@@ -154,6 +162,7 @@ export interface ActiveRun {
     approval?: ResolvedModelRoute
   }
   subagentsEnabled: boolean
+  swarmCapability?: SwarmRunCapability
   allowedToolIds?: Set<string>
   directUserInput: boolean
 }

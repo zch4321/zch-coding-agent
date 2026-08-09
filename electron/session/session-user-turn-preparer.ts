@@ -38,6 +38,7 @@ export class SessionUserTurnPreparer {
   readonly #getWorkspaceConcurrency: (
     session: SessionState,
   ) => WorkspaceConcurrencyContext
+  readonly #swarmHostEnabled: boolean
 
   constructor(options: {
     configStore: ConfigStore
@@ -49,6 +50,7 @@ export class SessionUserTurnPreparer {
     getWorkspaceConcurrency?: (
       session: SessionState,
     ) => WorkspaceConcurrencyContext
+    swarmHostEnabled?: boolean
   }) {
     this.#configStore = options.configStore
     this.#toolRegistry = options.toolRegistry
@@ -58,6 +60,7 @@ export class SessionUserTurnPreparer {
     this.#emit = options.emit
     this.#getWorkspaceConcurrency =
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
+    this.#swarmHostEnabled = options.swarmHostEnabled ?? false
   }
 
   /** Appends the user turn, selected context, and harness prompts before provider execution. */
@@ -68,10 +71,35 @@ export class SessionUserTurnPreparer {
     context?: RunContext,
   ): Promise<PreparedUserTurn> {
     const config = this.#configStore.getPublicConfig()
+    const command = resolveSlashCommand({
+      message: userMessage,
+      config,
+      skillsManager: this.#skillsManager,
+      promptRegistry: this.#promptRegistry,
+    })
+    if (command.swarmGoal) {
+      if (!this.#swarmHostEnabled) {
+        throw new Error('Swarm is not available in this runtime host.')
+      }
+      if (!config.subagents.enabled) {
+        throw new Error('Subagents must be enabled before starting a Swarm.')
+      }
+      if (config.limits.maxConcurrentRuns < 2) {
+        throw new Error('Swarm requires maxConcurrentRuns to be at least 2.')
+      }
+      if (!config.modelPool.entries.some((entry) => entry.enabled)) {
+        throw new Error('Swarm requires at least one enabled model-pool route.')
+      }
+      run.swarmCapability = {
+        goal: command.swarmGoal,
+        maxAgentsPerJob: config.subagents.maxAgentsPerSwarm,
+      }
+    }
     const toolCatalog = await resolveSessionToolCatalog({
       registry: this.#toolRegistry,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
+      swarmMaxAgents: run.swarmCapability?.maxAgentsPerJob,
       gitToolsEnabled: session.gitToolsEnabled,
     })
     await appendRuntimeContextIfChanged(session, {
@@ -95,13 +123,6 @@ export class SessionUserTurnPreparer {
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
     })
-    const command = resolveSlashCommand({
-      message: userMessage,
-      config,
-      skillsManager: this.#skillsManager,
-      promptRegistry: this.#promptRegistry,
-    })
-
     if (command.goal) {
       session.goal = command.goal
       this.#emit(session, {

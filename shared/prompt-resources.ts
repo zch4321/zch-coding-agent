@@ -2,6 +2,7 @@ import type { AssistantLanguage } from './system-prompts'
 
 export const PROMPT_RESOURCE_VERSION = '2026-07-10.1'
 export const HEADLESS_PROMPT_RESOURCE_VERSION = '2026-07-11.1'
+export const SWARM_PROMPT_RESOURCE_VERSION = '2026-08-09.1'
 
 export interface PromptResourceRef {
   id: string
@@ -125,5 +126,19 @@ export const DEFAULT_ORCHESTRATION_PROMPT_REFS: Record<
       id: 'orchestration.compact.en-US',
       version: PROMPT_RESOURCE_VERSION,
     },
+  },
+}
+
+export const DEFAULT_SWARM_PROMPT_REFS: Record<
+  AssistantLanguage,
+  PromptResourceRef
+> = {
+  'zh-CN': {
+    id: 'orchestration.swarm-started.zh-CN',
+    version: SWARM_PROMPT_RESOURCE_VERSION,
+  },
+  'en-US': {
+    id: 'orchestration.swarm-started.en-US',
+    version: SWARM_PROMPT_RESOURCE_VERSION,
   },
 }

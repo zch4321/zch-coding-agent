@@ -230,4 +230,82 @@ describe('Agents artifact tab', () => {
     expect(wrapper.findAll('.tool-call-card')).toHaveLength(0)
     wrapper.unmount()
   })
+
+  it('renders Swarm Agents as a second manual-only collapse level', async () => {
+    const swarm = {
+      ...execution,
+      id: 'swarm:agents-component' as AgentExecutionId,
+      kind: 'swarm' as const,
+      name: 'Swarm review',
+      agentCounts: {
+        total: 1,
+        queued: 0,
+        running: 1,
+        completed: 0,
+        failed: 0,
+      },
+    }
+    const child = {
+      ...execution,
+      id: 'subagent:swarm-component' as AgentExecutionId,
+      parentExecutionId: swarm.id,
+      name: 'review · 1/1',
+    }
+    const rootDetail: AgentExecutionDetail = {
+      schemaVersion: 1,
+      summary: swarm,
+      statistics: { toolCallCount: 1 },
+      children: [child],
+      activityPage: { schemaVersion: 1, records: [], hasMore: false },
+    }
+    const childDetail: AgentExecutionDetail = {
+      ...detail,
+      summary: child,
+    }
+    const listAgentExecutions = vi.fn(async () =>
+      success({
+        page: {
+          schemaVersion: 1 as const,
+          records: [swarm],
+          hasMore: false as const,
+        },
+      }),
+    )
+    const getAgentExecution = vi.fn(async (request) =>
+      success({
+        detail: request.executionId === swarm.id ? rootDetail : childDetail,
+      }),
+    )
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        listAgentExecutions,
+        getAgentExecution,
+      } as Partial<AgentApi> as AgentApi,
+    })
+    const wrapper = mount(AgentsTab, {
+      global: { plugins: [i18n] },
+    })
+    await vi.waitFor(() =>
+      expect(useAgentExecutionStore().sessions[parentSessionId]?.loaded).toBe(
+        true,
+      ),
+    )
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.agent-execution-child-list').exists()).toBe(false)
+
+    await wrapper.get('.n-collapse-item__header-main').trigger('click')
+    await flushPromises()
+    const childItem = wrapper.get('.agent-execution-child-item')
+    expect(childItem.classes()).not.toContain('n-collapse-item--active')
+    expect(getAgentExecution).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).not.toContain('The review is in progress.')
+
+    await childItem.get('.n-collapse-item__header-main').trigger('click')
+    await flushPromises()
+    expect(getAgentExecution).toHaveBeenCalledTimes(2)
+    expect(childItem.classes()).toContain('n-collapse-item--active')
+    expect(wrapper.text()).toContain('The review is in progress.')
+    wrapper.unmount()
+  })
 })

@@ -5,6 +5,8 @@ import type {
   SessionId,
 } from '../../shared/ids'
 import type {
+  AgentExecutionCounts,
+  AgentExecutionKind,
   AgentExecutionListCursor,
   AgentExecutionStatus,
 } from '../../shared/agent-execution'
@@ -16,6 +18,10 @@ import type {
 
 export interface SubagentExecutionRecord {
   id: AgentExecutionId
+  kind: AgentExecutionKind
+  parentExecutionId?: AgentExecutionId
+  childOrdinal?: number
+  name: string
   parentSessionId: SessionId
   parentRunId: RunId
   parentCallId: CallId
@@ -33,6 +39,10 @@ export interface SubagentExecutionRecord {
 
 interface SubagentExecutionRow {
   id: string
+  kind: AgentExecutionKind
+  parent_execution_id: string | null
+  child_ordinal: number | null
+  name: string
   parent_session_id: string
   parent_run_id: string
   parent_call_id: string
@@ -61,13 +71,15 @@ export interface SubagentExecutionListPage {
 }
 
 const EXECUTION_COLUMNS = `
-  id, parent_session_id, parent_run_id, parent_call_id, spec_hash,
+  id, kind, parent_execution_id, child_ordinal, name,
+  parent_session_id, parent_run_id, parent_call_id, spec_hash,
   status, route_json, source_identity_json, usage_json,
   result_json, error_code, error_message, created_at, updated_at, completed_at
 `
 
 const ALIASED_EXECUTION_COLUMNS = `
-  e.id, e.parent_session_id, e.parent_run_id, e.parent_call_id, e.spec_hash,
+  e.id, e.kind, e.parent_execution_id, e.child_ordinal, e.name,
+  e.parent_session_id, e.parent_run_id, e.parent_call_id, e.spec_hash,
   e.status, e.route_json, e.source_identity_json, e.usage_json,
   e.result_json, e.error_code, e.error_message, e.created_at, e.updated_at,
   e.completed_at
@@ -83,10 +95,14 @@ export class SubagentRepository {
     transaction
       .prepare(
         `INSERT INTO subagent_executions (schema_version, ${EXECUTION_COLUMNS})
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
+        record.kind,
+        record.parentExecutionId ?? null,
+        record.childOrdinal ?? null,
+        record.name,
         record.parentSessionId,
         record.parentRunId,
         record.parentCallId,
@@ -119,7 +135,8 @@ export class SubagentRepository {
       .prepare(
         `SELECT ${EXECUTION_COLUMNS}
          FROM subagent_executions
-         WHERE parent_session_id = ? AND parent_run_id = ? AND parent_call_id = ?`,
+         WHERE parent_session_id = ? AND parent_run_id = ? AND parent_call_id = ?
+           AND parent_execution_id IS NULL`,
       )
       .get(input.parentSessionId, input.parentRunId, input.parentCallId) as
       | SubagentExecutionRow
@@ -153,7 +170,7 @@ export class SubagentRepository {
                 child.session_id AS child_session_id
          FROM subagent_executions e
          LEFT JOIN subagent_sessions child ON child.execution_id = e.id
-         WHERE e.parent_session_id = ? ${cursor}
+         WHERE e.parent_session_id = ? AND e.parent_execution_id IS NULL ${cursor}
          ORDER BY e.created_at DESC, e.id DESC
          LIMIT ?`,
       )
@@ -180,6 +197,72 @@ export class SubagentRepository {
           }
         : {}),
     }
+  }
+
+  /** Lists every child execution for one owned Swarm root in declaration order. */
+  listChildren(
+    reader: PersistenceReader,
+    input: {
+      parentSessionId: SessionId
+      parentExecutionId: AgentExecutionId
+    },
+  ): SubagentExecutionListEntry[] {
+    const rows = reader
+      .prepare(
+        `SELECT ${ALIASED_EXECUTION_COLUMNS},
+                child.session_id AS child_session_id
+         FROM subagent_executions e
+         LEFT JOIN subagent_sessions child ON child.execution_id = e.id
+         WHERE e.parent_session_id = ? AND e.parent_execution_id = ?
+         ORDER BY e.child_ordinal ASC, e.id ASC`,
+      )
+      .all(input.parentSessionId, input.parentExecutionId) as unknown as Array<
+      SubagentExecutionRow & { child_session_id: string | null }
+    >
+    return rows.map((row) => ({
+      record: decodeExecution(row),
+      ...(row.child_session_id
+        ? { childSessionId: row.child_session_id as SessionId }
+        : {}),
+    }))
+  }
+
+  /** Aggregates child lifecycle counts for one Swarm root. */
+  childCounts(
+    reader: PersistenceReader,
+    parentExecutionId: AgentExecutionId,
+  ): AgentExecutionCounts {
+    const rows = reader
+      .prepare(
+        `SELECT status, COUNT(*) AS count
+         FROM subagent_executions
+         WHERE parent_execution_id = ?
+         GROUP BY status`,
+      )
+      .all(parentExecutionId) as unknown as Array<{
+      status: AgentExecutionStatus
+      count: number
+    }>
+    const counts: AgentExecutionCounts = {
+      total: 0,
+      queued: 0,
+      running: 0,
+      completed: 0,
+      failed: 0,
+    }
+    for (const row of rows) {
+      counts.total += row.count
+      if (row.status === 'queued' || row.status === 'preparing') {
+        counts.queued += row.count
+      } else if (row.status === 'running') {
+        counts.running += row.count
+      } else if (row.status === 'completed') {
+        counts.completed += row.count
+      } else {
+        counts.failed += row.count
+      }
+    }
+    return counts
   }
 
   /** Loads one execution only when it belongs to the supplied public parent Session. */
@@ -269,9 +352,16 @@ export class SubagentRepository {
       .prepare(
         `UPDATE subagent_executions
          SET status = 'interrupted', updated_at = ?, completed_at = ?,
-             error_code = 'SUBAGENT_INTERRUPTED',
-             error_message = 'The application stopped before the Subagent completed'
-         WHERE status IN ('preparing', 'running')`,
+             error_code = CASE
+               WHEN kind = 'swarm' THEN 'SWARM_INTERRUPTED'
+               ELSE 'SUBAGENT_INTERRUPTED'
+             END,
+             error_message = CASE
+               WHEN kind = 'swarm'
+                 THEN 'The application stopped before the Swarm completed'
+               ELSE 'The application stopped before the Subagent completed'
+             END
+         WHERE status IN ('queued', 'preparing', 'running')`,
       )
       .run(timestamp, timestamp)
     return Number(result.changes)
@@ -290,6 +380,12 @@ export class SubagentRepository {
 function decodeExecution(row: SubagentExecutionRow): SubagentExecutionRecord {
   return {
     id: row.id as AgentExecutionId,
+    kind: row.kind,
+    ...(row.parent_execution_id
+      ? { parentExecutionId: row.parent_execution_id as AgentExecutionId }
+      : {}),
+    ...(row.child_ordinal !== null ? { childOrdinal: row.child_ordinal } : {}),
+    name: row.name,
     parentSessionId: row.parent_session_id as SessionId,
     parentRunId: row.parent_run_id as RunId,
     parentCallId: row.parent_call_id as CallId,
