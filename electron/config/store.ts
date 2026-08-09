@@ -66,6 +66,30 @@ function normalizedEnabledModelIds(modelIds: readonly string[]): string[] {
   return [...new Set(modelIds.map((modelId) => modelId.trim()).filter(Boolean))]
 }
 
+/** Adds one durable model identity and makes it available to runtime selectors. */
+function addProviderModel(provider: AppProviderConfig, modelId: string): void {
+  const normalizedModelId = modelId.trim()
+  if (!normalizedModelId) throw new Error('Model name is required')
+
+  if (!provider.modelCatalog.some((model) => model.id === normalizedModelId)) {
+    if (provider.modelCatalog.length >= 1_000) {
+      throw new Error(
+        'Provider model list cannot contain more than 1000 models',
+      )
+    }
+    provider.modelCatalog.push({ id: normalizedModelId })
+  }
+
+  if (!provider.enabledModelIds.includes(normalizedModelId)) {
+    if (provider.enabledModelIds.length >= 1_000) {
+      throw new Error('Enabled model list cannot contain more than 1000 models')
+    }
+    provider.enabledModelIds.push(normalizedModelId)
+  }
+
+  if (!provider.model) provider.model = normalizedModelId
+}
+
 /** Validates the configured main route while allowing an unconfigured model. */
 function assertMainRouteConfigValid(provider: AppProviderConfig): void {
   if (!provider.model) return
@@ -642,7 +666,18 @@ export class ConfigStore {
         throw new Error(`Provider not found: ${providerId}`)
       }
 
-      provider.modelCatalog = structuredClone(models)
+      const knownModelIds = new Set(
+        provider.modelCatalog.map((model) => model.id),
+      )
+      const additions: AppProviderConfig['modelCatalog'] = []
+      for (const model of models) {
+        const modelId = model.id.trim()
+        if (!modelId || knownModelIds.has(modelId)) continue
+        if (provider.modelCatalog.length + additions.length >= 1_000) break
+        additions.push({ ...structuredClone(model), id: modelId })
+        knownModelIds.add(modelId)
+      }
+      provider.modelCatalog.push(...structuredClone(additions))
       provider.modelCatalogFetchedAt = fetchedAt
       await writeJsonAtomic(this.#filePath, next)
       this.#config = next
@@ -698,6 +733,19 @@ export class ConfigStore {
         this.#config = next
         await this.#secretStore.delete(previousReference)
         return this.getPublicConfig()
+      }
+      case 'provider-model-add': {
+        const provider = getAppProvider(next, request.providerId)
+        if (!provider) {
+          throw new Error(`Provider not found: ${request.providerId}`)
+        }
+        const previousRouteShape = providerRouteShape(provider)
+        addProviderModel(provider, request.modelId)
+        assertMainRouteConfigValid(provider)
+        if (providerRouteShape(provider) !== previousRouteShape) {
+          provider.revision += 1
+        }
+        break
       }
       case 'provider-select': {
         const provider = getAppProvider(next, request.providerId)

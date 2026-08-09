@@ -3,7 +3,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentApi } from '../../shared/agent-api'
-import type { ProviderPublicConfig } from '../../shared/config'
+import type { ProviderPublicConfig, PublicConfig } from '../../shared/config'
 import { useApprovalSettingsStore } from './approval-settings'
 import { useAgentSettingsStore } from './agent-settings'
 import { providerFormSignature } from './provider-form'
@@ -66,13 +66,109 @@ describe('agent settings model pool', () => {
     expect(settings.modelOptions.map((option) => option.value)).toEqual([
       'enabled-model',
     ])
+    expect(settings.allModelOptions.map((option) => option.value)).toEqual([
+      'enabled-model',
+      'catalog-only-model',
+    ])
     expect(settings.modelTransferOptions.map((option) => option.value)).toEqual(
       ['catalog-only-model', 'enabled-model'],
     )
+    expect(
+      settings.modelTransferOptions.find(
+        (option) => option.value === 'enabled-model',
+      ),
+    ).toMatchObject({ disabled: true })
     expect(settings.approvalModelOptions.map((option) => option.value)).toEqual(
       ['enabled-model'],
     )
     expect(settings.providerCardSummaries[0]?.models).toEqual(['enabled-model'])
+  })
+
+  it('allows any known model to become main and enables it atomically', () => {
+    const settings = useAgentSettingsStore()
+    settings.providerForm.model = 'enabled-model'
+    settings.providerForm.enabledModelIds = ['enabled-model']
+    settings.modelProfiles = [
+      {
+        id: 'enabled-model',
+        availability: 'provider',
+        capabilitySource: 'default',
+        contextWindowTokens: 256_000,
+        compactThresholdTokens: 198_246,
+        maxOutputTokens: 65_536,
+      },
+      {
+        id: 'catalog-only-model',
+        availability: 'provider',
+        capabilitySource: 'default',
+        contextWindowTokens: 256_000,
+        compactThresholdTokens: 198_246,
+        maxOutputTokens: 65_536,
+      },
+    ]
+
+    settings.setProviderModel('catalog-only-model')
+
+    expect(settings.providerForm.model).toBe('catalog-only-model')
+    expect(settings.providerForm.enabledModelIds).toEqual([
+      'enabled-model',
+      'catalog-only-model',
+    ])
+    expect(
+      settings.modelTransferOptions.find(
+        (option) => option.value === 'catalog-only-model',
+      ),
+    ).toMatchObject({ disabled: true })
+  })
+
+  it('persists a manually entered model through the dedicated config action', async () => {
+    const settings = useAgentSettingsStore()
+    const configuredProvider = provider()
+    settings.providers = [configuredProvider]
+    settings.activeProviderId = configuredProvider.id
+    settings.selectedProviderId = configuredProvider.id
+    settings.hydrateSelectedProviderForm()
+    settings.providerSavedSignature = providerFormSignature(
+      settings.providerForm,
+      settings.modelProfiles,
+    )
+    const updatedProvider: ProviderPublicConfig = {
+      ...configuredProvider,
+      revision: configuredProvider.revision + 1,
+      modelCatalog: [
+        ...configuredProvider.modelCatalog,
+        { id: 'manual-model' },
+      ],
+      enabledModelIds: [...configuredProvider.enabledModelIds, 'manual-model'],
+    }
+    const setConfig = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: {
+        config: {
+          activeProviderId: configuredProvider.id,
+          providers: [updatedProvider],
+        } as PublicConfig,
+      },
+    }))
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: { setConfig } as Partial<AgentApi> as AgentApi,
+    })
+
+    await expect(settings.addProviderModel('  manual-model  ')).resolves.toBe(
+      true,
+    )
+    expect(setConfig).toHaveBeenCalledWith({
+      version: 1,
+      kind: 'provider-model-add',
+      providerId: configuredProvider.id,
+      modelId: 'manual-model',
+    })
+    expect(settings.modelProfiles.map((model) => model.id)).toContain(
+      'manual-model',
+    )
+    expect(settings.providerForm.enabledModelIds).toContain('manual-model')
   })
 
   it('keeps every enabled approval model visible regardless of annotation', () => {

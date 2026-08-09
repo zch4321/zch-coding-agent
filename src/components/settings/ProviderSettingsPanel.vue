@@ -48,6 +48,9 @@ type ProviderAction =
 const agent = useAgentStore()
 const { t } = useI18n()
 const deleteProviderId = ref<string>()
+const showAddModel = ref(false)
+const manualModelId = ref('')
+const modelConfigurationFilter = ref('')
 let autosaveTimer: ReturnType<typeof setTimeout> | undefined
 const providerTypeOptions = computed(() => [
   {
@@ -135,25 +138,67 @@ const selectedProviderReady = computed(
 )
 const modelTransferOptions = computed(() => agent.modelTransferOptions)
 const selectedModelIds = computed(() => agent.providerForm.enabledModelIds)
-const selectedModelProfiles = computed(() => {
-  const profilesById = new Map(
-    agent.modelProfiles.map((model) => [model.id, model]),
+const allModelProfiles = computed(() =>
+  [...agent.modelProfiles].sort((left, right) => {
+    if (left.id === agent.providerForm.model) return -1
+    if (right.id === agent.providerForm.model) return 1
+    const leftEnabled = selectedModelIds.value.includes(left.id)
+    const rightEnabled = selectedModelIds.value.includes(right.id)
+    if (leftEnabled !== rightEnabled) return leftEnabled ? -1 : 1
+    return left.id.localeCompare(right.id, undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    })
+  }),
+)
+const visibleModelProfiles = computed(() => {
+  const query = modelConfigurationFilter.value.trim().toLocaleLowerCase()
+  if (!query) return allModelProfiles.value
+  return allModelProfiles.value.filter((model) =>
+    model.id.toLocaleLowerCase().includes(query),
   )
-  return selectedModelIds.value.flatMap((id) => {
-    const model = profilesById.get(id)
-    return model ? [model] : []
-  })
+})
+const manualModelValidation = computed(() => {
+  const modelId = manualModelId.value.trim()
+  if (!modelId) return t('settings.modelNameRequired')
+  if (modelId.length > 256) return t('settings.modelNameTooLong')
+  if (
+    agent.selectedProvider?.modelCatalog.some((model) => model.id === modelId)
+  ) {
+    return t('settings.modelAlreadyExists')
+  }
+  return ''
 })
 
 function handleSelectedModels(value: Array<string | number>): void {
   const availableIds = new Set(agent.modelProfiles.map((model) => model.id))
-  const nextModelIds = [
-    ...new Set(value.map(String).filter((id) => availableIds.has(id))),
-  ]
-  agent.providerForm.enabledModelIds = nextModelIds
-  if (!nextModelIds.includes(agent.providerForm.model)) {
-    agent.providerForm.model = nextModelIds[0] ?? ''
+  const mainModel = agent.providerForm.model
+  const nextModelIds = [...new Set(value.map(String))].filter((id) =>
+    availableIds.has(id),
+  )
+  if (mainModel && !nextModelIds.includes(mainModel)) {
+    nextModelIds.push(mainModel)
   }
+  agent.providerForm.enabledModelIds = nextModelIds
+  if (!mainModel && nextModelIds[0]) {
+    agent.setProviderDraftModel(nextModelIds[0])
+  }
+}
+
+/** Opens the manual-model dialog with a clean draft. */
+function openAddModel(): void {
+  manualModelId.value = ''
+  showAddModel.value = true
+}
+
+/** Persists a manually entered model and keeps the dialog open on failure. */
+async function confirmAddModel(): Promise<boolean> {
+  if (manualModelValidation.value) return false
+  const added = await agent.addProviderModel(manualModelId.value)
+  if (!added) return false
+  showAddModel.value = false
+  manualModelId.value = ''
+  return true
 }
 
 /** Applies a reasoning-effort annotation edit to one model row. */
@@ -471,9 +516,9 @@ function handleDropdownSelect(key: string | number, providerId: string) {
         <div class="settings-inline">
           <NSelect
             :value="agent.providerForm.model"
-            :options="agent.modelOptions"
+            :options="agent.allModelOptions"
             :loading="agent.modelCatalogLoading"
-            :disabled="agent.modelOptions.length === 0"
+            :disabled="agent.allModelOptions.length === 0"
             :placeholder="t('settings.selectMainModel')"
             filterable
             @update:value="agent.setProviderDraftModel"
@@ -547,9 +592,14 @@ function handleDropdownSelect(key: string | number, providerId: string) {
       </label>
 
       <div class="provider-model-settings">
-        <div>
-          <h4>{{ t('settings.modelSettings') }}</h4>
-          <p>{{ t('settings.modelSettingsHint') }}</p>
+        <div class="provider-model-settings-title">
+          <div>
+            <h4>{{ t('settings.modelSettings') }}</h4>
+            <p>{{ t('settings.modelSettingsHint') }}</p>
+          </div>
+          <NButton secondary @click="openAddModel">
+            {{ t('settings.addModel') }}
+          </NButton>
         </div>
         <small
           v-if="draftConflicts.approvalReason === 'model-disabled'"
@@ -585,8 +635,14 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           data-testid="provider-model-transfer"
           @update:value="handleSelectedModels"
         />
+        <NInput
+          v-if="allModelProfiles.length"
+          v-model:value="modelConfigurationFilter"
+          clearable
+          :placeholder="t('settings.filterModelConfiguration')"
+        />
         <div
-          v-if="selectedModelProfiles.length"
+          v-if="visibleModelProfiles.length"
           class="provider-model-settings-header"
           aria-hidden="true"
         >
@@ -598,7 +654,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <span>{{ t('settings.modelCapability') }}</span>
         </div>
         <NScrollbar
-          v-if="selectedModelProfiles.length"
+          v-if="visibleModelProfiles.length"
           class="provider-model-settings-scroll"
         >
           <NList
@@ -606,7 +662,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             class="provider-model-settings-list"
             data-testid="provider-model-settings-list"
           >
-            <NListItem v-for="model in selectedModelProfiles" :key="model.id">
+            <NListItem v-for="model in visibleModelProfiles" :key="model.id">
               <div class="provider-model-settings-row">
                 <div class="provider-model-name">
                   <strong>{{ model.id }}</strong>
@@ -702,9 +758,40 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             </NListItem>
           </NList>
         </NScrollbar>
-        <NEmpty v-else :description="t('settings.selectModelsHint')" />
+        <NEmpty
+          v-else
+          :description="
+            allModelProfiles.length
+              ? t('settings.noMatchingModels')
+              : t('settings.noModelsHint')
+          "
+        />
       </div>
     </div>
+
+    <NModal
+      v-model:show="showAddModel"
+      preset="dialog"
+      :title="t('settings.addModelTitle')"
+      :positive-text="t('settings.addModel')"
+      :negative-text="t('common.cancel')"
+      :positive-button-props="{ disabled: Boolean(manualModelValidation) }"
+      @positive-click="confirmAddModel"
+    >
+      <label class="settings-field">
+        <span>{{ t('settings.modelName') }}</span>
+        <NInput
+          v-model:value="manualModelId"
+          :placeholder="t('settings.addModelPlaceholder')"
+          :maxlength="256"
+          @keyup.enter="confirmAddModel"
+        />
+        <small v-if="manualModelValidation" class="settings-field-error">
+          {{ manualModelValidation }}
+        </small>
+        <small v-else>{{ t('settings.addModelHint') }}</small>
+      </label>
+    </NModal>
 
     <NModal
       :show="Boolean(deleteProviderId)"

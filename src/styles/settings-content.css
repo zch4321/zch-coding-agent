@@ -98,6 +98,13 @@
   padding-top: 4px;
 }
 
+.provider-model-settings-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .provider-model-settings h4,
 .provider-model-settings p {
   margin: 0;

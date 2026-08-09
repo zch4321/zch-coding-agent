@@ -232,6 +232,23 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       provider.getByText('自动审批模型', { exact: true }),
     ).toHaveCount(0)
+    const manualModel = 'manually-added-e2e-model'
+    await provider.getByRole('button', { name: '新增模型' }).click()
+    const addModelDialog = page
+      .getByRole('dialog')
+      .filter({ hasText: '新增模型' })
+    await addModelDialog
+      .getByPlaceholder('输入 Provider 使用的准确模型名称')
+      .fill(manualModel)
+    await addModelDialog.getByRole('button', { name: '新增模型' }).click()
+    await expect(addModelDialog).toBeHidden()
+    const manualModelRow = provider.locator('.provider-model-settings-row', {
+      hasText: manualModel,
+    })
+    await expect(manualModelRow).toBeVisible()
+    await expect(
+      manualModelRow.getByText('主模型', { exact: true }),
+    ).toBeVisible()
     const refreshModels = provider.getByRole('button', { name: '刷新' })
     await expect(
       provider.getByRole('button', { name: '保存 Provider' }),
@@ -283,9 +300,6 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       provider.getByText('最大输出长度', { exact: true }).first(),
     ).toBeVisible()
-    await expect(
-      discoveredModelRow.getByText('主模型', { exact: true }),
-    ).toBeVisible()
     await expect(discoveredModelRow.locator('.n-input-number')).toHaveCount(3)
     await expect(discoveredModelRow.locator('input').first()).toHaveValue(
       '300000',
@@ -324,12 +338,20 @@ test.describe.serial('Electron settings workflows', () => {
     const modelSelect = provider
       .locator('.settings-field', { hasText: '主模型' })
       .locator('.n-select')
-    await expect(modelSelect).toContainText(providerModel)
     await modelSelect.click()
     await expect(
       page.locator('.n-base-select-option', { hasText: providerModel }),
     ).toBeVisible()
-    await page.keyboard.press('Escape')
+    await page
+      .locator('.n-base-select-option', { hasText: providerModel })
+      .click()
+    await expect(modelSelect).toContainText(providerModel)
+    await expect(
+      discoveredModelRow.getByText('主模型', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      manualModelRow.getByText('主模型', { exact: true }),
+    ).toHaveCount(0)
 
     await expect(
       settingsNavigation.getByRole('menuitem', { name: '自动审批' }),
@@ -776,10 +798,19 @@ test.describe.serial('Electron settings workflows', () => {
     // Disabling the persisted approval model must also pause autosave before
     // the backend rejects the Provider update.
     const modelTransfer = provider.getByTestId('provider-model-transfer')
-    await modelTransfer
-      .locator('.n-transfer-list-item--target', { hasText: 'second-model' })
-      .getByRole('button', { name: 'close' })
-      .click()
+    await expect(
+      modelTransfer
+        .locator('.n-transfer-list-item--target', {
+          hasText: 'annotated-model',
+        })
+        .getByRole('button', { name: 'close' }),
+    ).toHaveCount(0)
+    const approvalModelItem = modelTransfer.locator(
+      '.n-transfer-list-item--target',
+      { hasText: 'second-model' },
+    )
+    await approvalModelItem.hover()
+    await approvalModelItem.getByRole('button', { name: 'close' }).click()
     await expect(
       provider.getByText('已不在当前 Provider 草稿的启用模型中', {
         exact: false,

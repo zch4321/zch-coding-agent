@@ -344,6 +344,20 @@ describe('ConfigStore', () => {
     },
   )
 
+  it('validates the bounded manual Provider model action', () => {
+    const validate = compileSchema(ConfigSetRequestSchema)
+    const request = {
+      version: 1,
+      kind: 'provider-model-add',
+      providerId: 'deepseek',
+      modelId: 'manually-added-model',
+    }
+
+    expect(validate(request)).toBe(true)
+    expect(validate({ ...request, modelId: '' })).toBe(false)
+    expect(validate({ ...request, modelId: 'x'.repeat(257) })).toBe(false)
+  })
+
   it('validates model pool request structure and bounds', () => {
     const validate = compileSchema(ConfigSetRequestSchema)
     const valid = {
@@ -1300,6 +1314,67 @@ describe('ConfigStore', () => {
     expect(configStore.getPublicConfig().providers[0].modelOverrides).toEqual(
       {},
     )
+  })
+
+  it('merges refreshed model catalogs without changing or deleting known models', async () => {
+    const { configStore } = await createStores()
+    await configStore.setDeepSeekModelCatalog(
+      [{ id: 'model-a', ownedBy: 'original-owner' }],
+      '2026-08-01T00:00:00.000Z',
+    )
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      baseURL: 'https://api.deepseek.com',
+      model: 'configured-only',
+      enabledModelIds: ['configured-only'],
+      reasoning: 'off',
+    })
+
+    await configStore.setDeepSeekModelCatalog(
+      [
+        { id: 'model-a', ownedBy: 'changed-owner' },
+        { id: 'configured-only', ownedBy: 'provider' },
+        { id: 'MODEL-A', ownedBy: 'case-sensitive' },
+        { id: 'model-b', ownedBy: 'provider' },
+      ],
+      '2026-08-02T00:00:00.000Z',
+    )
+
+    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+      modelCatalog: [
+        { id: 'model-a', ownedBy: 'original-owner' },
+        { id: 'configured-only', ownedBy: 'provider' },
+        { id: 'MODEL-A', ownedBy: 'case-sensitive' },
+        { id: 'model-b', ownedBy: 'provider' },
+      ],
+      modelCatalogFetchedAt: '2026-08-02T00:00:00.000Z',
+    })
+  })
+
+  it('persists a manual model, enables it, and uses it as an empty main route', async () => {
+    const { configStore } = await createStores()
+    const providerId = configStore.getPublicConfig().providers[0]!.id
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider-model-add',
+      providerId,
+      modelId: '  manually-added-model  ',
+    })
+    await configStore.update({
+      version: 1,
+      kind: 'provider-model-add',
+      providerId,
+      modelId: 'manually-added-model',
+    })
+
+    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+      revision: 2,
+      model: 'manually-added-model',
+      modelCatalog: [{ id: 'manually-added-model' }],
+      enabledModelIds: ['manually-added-model'],
+    })
   })
 
   it('round-trips reasoning effort and capability annotations', async () => {
