@@ -378,6 +378,36 @@ const LegacyAppConfigV18Schema = Type.Object(
 type LegacyAppConfigV18 = Static<typeof LegacyAppConfigV18Schema>
 const validateLegacyAppConfigV18 = compileSchema(LegacyAppConfigV18Schema)
 
+// AppConfig v19 added the Swarm cardinality limit but predates configurable
+// command execution environments.
+const LegacyAppConfigV19Schema = Type.Object(
+  {
+    schemaVersion: Type.Literal(19),
+    activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
+    providers: Type.Array(LegacyAppProviderConfigV15Schema, {
+      minItems: 1,
+      maxItems: 32,
+    }),
+    approval: PublicConfigSchema.properties.approval,
+    subagents: PublicConfigSchema.properties.subagents,
+    modelPool: PublicConfigSchema.properties.modelPool,
+    permission: PublicConfigSchema.properties.permission,
+    limits: PublicConfigSchema.properties.limits,
+    logging: PublicConfigSchema.properties.logging,
+    privacy: PublicConfigSchema.properties.privacy,
+    workspace: PublicConfigSchema.properties.workspace,
+    skills: PublicConfigSchema.properties.skills,
+    assistant: PublicConfigSchema.properties.assistant,
+    prompts: PublicConfigSchema.properties.prompts,
+    network: PublicConfigSchema.properties.network,
+    webSearch: LegacyAppWebSearchConfigV15Schema,
+    mcpServers: Type.Array(McpServerConfigSchema, { maxItems: 32 }),
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV19 = Static<typeof LegacyAppConfigV19Schema>
+const validateLegacyAppConfigV19 = compileSchema(LegacyAppConfigV19Schema)
+
 const LegacyAppProviderConfigV14Schema = Type.Object(
   {
     ...withoutKey(
@@ -512,6 +542,9 @@ function migrateV10(config: LegacyAppConfigV10): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    executionEnvironment: structuredClone(
+      DEFAULT_APP_CONFIG.executionEnvironment,
+    ),
     approval: migrateLegacyApproval(config.approval, config.providers),
     subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
     modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
@@ -534,6 +567,9 @@ function migrateV11(config: LegacyAppConfigV11): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    executionEnvironment: structuredClone(
+      DEFAULT_APP_CONFIG.executionEnvironment,
+    ),
     approval: migrateLegacyApproval(config.approval, config.providers),
     subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
     modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
@@ -556,6 +592,9 @@ function migrateV12(config: LegacyAppConfigV12): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    executionEnvironment: structuredClone(
+      DEFAULT_APP_CONFIG.executionEnvironment,
+    ),
     approval: migrateLegacyApproval(config.approval, config.providers),
     subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
     modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
@@ -587,6 +626,9 @@ function migrateV13(config: LegacyAppConfigV13): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    executionEnvironment: structuredClone(
+      DEFAULT_APP_CONFIG.executionEnvironment,
+    ),
     subagents: migrateLegacySubagents(config.subagents),
     modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     approval: migrateLegacyApproval(config.approval, config.providers),
@@ -609,6 +651,9 @@ function migrateV14(config: LegacyAppConfigV14): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    executionEnvironment: structuredClone(
+      DEFAULT_APP_CONFIG.executionEnvironment,
+    ),
     subagents: migrateLegacySubagents(config.subagents),
     modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     approval: migrateLegacyApproval(config.approval, config.providers),
@@ -630,6 +675,9 @@ function migrateV15(config: LegacyAppConfigV15): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    executionEnvironment: structuredClone(
+      DEFAULT_APP_CONFIG.executionEnvironment,
+    ),
     subagents: migrateLegacySubagents(config.subagents),
     approval: migrateLegacyApproval(config.approval, config.providers),
     modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
@@ -680,6 +728,9 @@ function migrateV16(config: LegacyAppConfigV16): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    executionEnvironment: structuredClone(
+      DEFAULT_APP_CONFIG.executionEnvironment,
+    ),
     subagents: migrateLegacySubagents(config.subagents),
     approval: migrateLegacyApproval(config.approval, config.providers),
     modelPool: migrateLegacyModelPool(config.modelPool, 16),
@@ -697,6 +748,9 @@ function migrateV17(config: LegacyAppConfigV17): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    executionEnvironment: structuredClone(
+      DEFAULT_APP_CONFIG.executionEnvironment,
+    ),
     subagents: migrateLegacySubagents(config.subagents),
     modelPool: migrateLegacyModelPool(config.modelPool, 17),
   }
@@ -713,12 +767,32 @@ function migrateV18(config: LegacyAppConfigV18): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    executionEnvironment: structuredClone(
+      DEFAULT_APP_CONFIG.executionEnvironment,
+    ),
     subagents: migrateLegacySubagents(config.subagents),
     modelPool: migrateLegacyModelPool(config.modelPool, 18),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
       18,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
+function migrateV19(config: LegacyAppConfigV19): AppConfig {
+  const migrated = {
+    ...config,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    executionEnvironment: structuredClone(
+      DEFAULT_APP_CONFIG.executionEnvironment,
+    ),
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      19,
       formatSchemaErrors(validateAppConfig.errors),
     )
   }
@@ -765,6 +839,9 @@ export function migrateConfig(candidate: unknown): AppConfig {
     const migrated = {
       ...legacy,
       schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+      executionEnvironment: structuredClone(
+        DEFAULT_APP_CONFIG.executionEnvironment,
+      ),
       approval: migrateLegacyApproval(legacy.approval, legacy.providers),
       subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
       modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
@@ -882,6 +959,16 @@ export function migrateConfig(candidate: unknown): AppConfig {
       )
     }
     return migrateV18(candidate as LegacyAppConfigV18)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') === 19) {
+    if (!validateLegacyAppConfigV19(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        19,
+        formatSchemaErrors(validateLegacyAppConfigV19.errors),
+      )
+    }
+    return migrateV19(candidate as LegacyAppConfigV19)
   }
 
   if (Reflect.get(candidate, 'schemaVersion') !== APP_CONFIG_SCHEMA_VERSION) {

@@ -178,3 +178,12 @@
 - 合并门禁：`npm run verify` 仅在合并、发布或显式要求完整验证时运行；它在 `check` 之上继续覆盖分进程 runtime smoke、Desktop/Headless build、Windows package、packaged SQLite 和 Electron E2E。E2E 不从产品门禁移除，只从每次普通开发修改的必跑路径移出。
 - CI 编排：普通分支 push 只执行快速检查；PR、`master` push 和手动触发将 runtime、E2E、package smoke 分配到独立 Windows runner，并禁用 matrix fail-fast，使互不依赖的失败能在同一次 workflow 中全部呈现。E2E runner 自行构建应用，package runner 自行构建与打包，以少量重复构建换取隔离和更短墙钟时间。
 - 稳定性边界：Playwright 继续单 worker；本地完整门禁也不让 E2E 与 electron-builder 在同一 checkout 并发，避免共享构建目录、native rebuild 和 Windows 文件锁造成非确定性失败。不使用 PR 的直接合并必须在本地先运行 `npm run verify`，远端 `master` 门禁只提供合并后保护。
+
+## 2026-08-09 — `run_command.shell` 由用户配置且显式启动
+
+- 状态：已采纳第一阶段；交互 Terminal profile 与可见 PTY 复用继续留在 M5。
+- 选择权：模型不选择 Shell，也不能在 Tool 参数中提交 Shell ID。AppConfig v20 保存 `executionEnvironment.commandShell`；Prompt Harness 只告诉模型本轮实际解析出的 `command_shell`，要求使用对应语法。
+- 发现与回退：Main process 有界发现 PowerShell 7、Windows PowerShell、CMD、Git Bash 和 Nushell；Windows `auto` 固定为 PowerShell 7 → Windows PowerShell → CMD。显式选择失效时临时回退到 `auto`、设置页显示警告，但不改写用户保存值。Git Bash/Nushell 不进入自动优先级，WSL 与自定义 profile 暂缓。
+- 执行边界：`run_command.process` 与 `run_command.shell` 都使用 `spawn(..., { shell: false })`；后者由可信 adapter 传入解释器 executable、固定启动参数和原始命令。内部 Git、Subagent 与当前 PTY 不读取该配置，`run_command` 输出也不实时展示到 Terminal。
+- 编码边界：内置 adapter 请求 UTF-8；捕获层流式验证 stdout/stderr，遇到无效 UTF-8 时按启动时探测的 Windows 代码页解码。第三方程序仍可能忽略控制台编码约定，因此这是确定性解码回退，不是对任意程序输出格式的绝对保证。
+- 理由：让模型从候选列表选择会把宿主安装状态变成不稳定的模型决策，也会扩大命令审查和 quoting 状态空间。用户选择、Main 解析、Prompt 只报告事实，可让审批看到原始命令，同时消除 Node 在 Windows 上隐式落到 CMD 和 OEM code page 的行为。

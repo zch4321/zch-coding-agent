@@ -43,7 +43,7 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 ### 2.2 已完成的 backend foundation
 
-- AppConfig v16 增加默认空的 `modelPool.entries`；v17 保留并迁移合法 v16 pool，同时加入显式 approval reasoning 和六档 pool reasoning；v18 删除 entry 中重复的 capability；当前 v19 再删除从未执行的 per-route `maxParallel`，并在 `subagents` 增加 `maxAgentsPerSwarm`。v16–v18 升级会规范化 pool 并移除旧冗余字段。Headless 外部配置和 Runtime Identity 继续保持 v4。
+- AppConfig v16 增加默认空的 `modelPool.entries`；v17 保留并迁移合法 v16 pool，同时加入显式 approval reasoning 和六档 pool reasoning；v18 删除 entry 中重复的 capability；v19 再删除从未执行的 per-route `maxParallel`，并在 `subagents` 增加 `maxAgentsPerSwarm`。当前 v20 只新增 command shell 配置，不改变模型池或 Swarm 结构。v16–v18 升级会规范化 pool 并移除旧冗余字段。Headless 外部配置和 Runtime Identity 继续保持 v4。
 - `config:set(model-pool)` 使用完整数组和精确 Provider revision 覆盖做一次性校验与原子写盘。enabled entry 的调度能力从 Provider `modelOverrides[model].capability` 读取，缺少标注时拒绝保存；disabled entry 可以保留失效引用。Provider 删除、模型移出 `enabledModelIds`、移除 capability annotation、reasoning annotation 变为不兼容或显式清除凭据时只自动禁用受影响项，恢复后不会自动重启用。
 - 纯 allocator 只接收能力需求序列。每项需求可使用能力大于或等于 `requiredCapability` 的任意模型；先按稳定声明顺序 round-robin `Provider + model`，再轮询该模型已选的精确 reasoning route，避免选择更多 reasoning 叶节点的模型获得更高权重。每次调用重置 cursor，`strong` 不向下降级；符合要求的模型少于 Agent 数时自然重复使用模型。
 - route freezer 只读取一次 PublicConfig 快照，对所有 enabled entry 与 Provider revision 计算顺序敏感 digest，并对实际选中的每个唯一 entry 解析一次 main/compression pair。prepared plan 只在 backend 内存持有 API key；safe snapshot 只包含 assignment、revision 和安全 route，不含 API key 或 credential reference。

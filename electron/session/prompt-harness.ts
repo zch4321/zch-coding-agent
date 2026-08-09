@@ -11,6 +11,7 @@ import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 import type { ProviderToolDefinition } from '../providers/provider'
 import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
+import { commandShellService } from '../process/command-shell'
 import {
   formatAgentsInstructions,
   loadAgentsInstructions,
@@ -118,7 +119,7 @@ function resourceContent(
       'timezone: ${timezone}',
       'workspace: ${workspace}',
       'cwd: ${cwd}',
-      'shell: ${shell}',
+      'command_shell: ${commandShell}',
       'os: ${osInfo}',
       'assistant_language: ${assistantLanguage}',
       'permission_mode: ${permissionMode}',
@@ -425,10 +426,11 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
   const provider = input.config.providers.find(
     (candidate) => candidate.id === input.providerId,
   )
-  const [git, projectTree, modules] = await Promise.all([
+  const [git, projectTree, modules, commandShell] = await Promise.all([
     gitSummary(input.workspace, input.signal).catch(() => 'git: unavailable'),
     projectTreeSummary(input.workspace).catch(() => 'unavailable'),
     projectContextSummary(input),
+    commandShellService.resolve(input.config.executionEnvironment.commandShell),
   ])
   const currentTime = new Date().toISOString()
   const concurrency = input.workspaceConcurrency ?? { status: 'available' }
@@ -442,8 +444,7 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
     timezone: currentTimeZone(),
     workspace: input.workspace,
     cwd: input.workspace,
-    shell:
-      process.platform === 'win32' ? 'powershell' : process.env.SHELL || 'sh',
+    commandShell: `${commandShell.profile.label} (${commandShell.profile.id})`,
     osInfo: `${os.platform()} ${os.release()}`,
     assistantLanguage: locale,
     permissionMode: input.mode,

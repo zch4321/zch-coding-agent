@@ -945,6 +945,9 @@ export class ConfigStore {
       case 'subagents':
         next.subagents = structuredClone(request.value)
         break
+      case 'execution-environment':
+        next.executionEnvironment = structuredClone(request.value)
+        break
       case 'model-pool': {
         if (!validateModelPoolConfig(request.value)) {
           throw new Error(

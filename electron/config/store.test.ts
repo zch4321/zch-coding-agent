@@ -133,7 +133,7 @@ function modelPoolUpdate(
 }
 
 describe('ConfigStore', () => {
-  it('deletes a legacy config and rebuilds clean v19 defaults', async () => {
+  it('deletes a legacy config and rebuilds clean v20 defaults', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     await writeFile(
@@ -148,10 +148,10 @@ describe('ConfigStore', () => {
     const store = new ConfigStore(configPath, secretStore)
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 19 },
+      config: { schemaVersion: 20 },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 19,
+      schemaVersion: 20,
       limits: { maxStepsPerRun: 0 },
     })
   })
@@ -161,7 +161,7 @@ describe('ConfigStore', () => {
     const configPath = path.join(directory, 'config.json')
     // A "future" config this build cannot validate, e.g. after a downgrade.
     const original = JSON.stringify({
-      schemaVersion: 19,
+      schemaVersion: 20,
       providers: 'not-an-array',
     })
     await writeFile(configPath, original, 'utf8')
@@ -172,7 +172,7 @@ describe('ConfigStore', () => {
     const store = new ConfigStore(configPath, secretStore)
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 19 },
+      config: { schemaVersion: 20 },
     })
 
     const backups = (await readdir(directory)).filter((name) =>
@@ -183,11 +183,11 @@ describe('ConfigStore', () => {
       original,
     )
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 19,
+      schemaVersion: 20,
     })
   })
 
-  it('migrates valid v9 providers to v19 without losing saved state', async () => {
+  it('migrates valid v9 providers to v20 without losing saved state', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     const legacy = structuredClone(legacyAppConfigV9) as Record<string, unknown>
@@ -222,7 +222,7 @@ describe('ConfigStore', () => {
     await store.initialize()
 
     expect(store.getInternalConfig()).toMatchObject({
-      schemaVersion: 19,
+      schemaVersion: 20,
       modelPool: { entries: [] },
       providers: [
         {
@@ -244,12 +244,12 @@ describe('ConfigStore', () => {
       ],
     })
     const persisted = await readFile(configPath, 'utf8')
-    expect(persisted).toContain('"schemaVersion": 19')
+    expect(persisted).toContain('"schemaVersion": 20')
     expect(persisted).not.toContain('adapterId')
     expect(persisted).not.toContain('"profile"')
   })
 
-  it('resets a malformed v9 file to clean v19 defaults', async () => {
+  it('resets a malformed v9 file to clean v20 defaults', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     const malformed = structuredClone(legacyAppConfigV9) as Record<
@@ -267,7 +267,7 @@ describe('ConfigStore', () => {
     )
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 19 },
+      config: { schemaVersion: 20 },
     })
     expect(store.getInternalConfig()).toEqual(DEFAULT_APP_CONFIG)
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual(
@@ -286,7 +286,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 19,
+      schemaVersion: 20,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).not.toHaveProperty(
       'legacyField',
@@ -296,13 +296,13 @@ describe('ConfigStore', () => {
   it('deletes malformed JSON and rebuilds clean defaults', async () => {
     const { directory, configStore } = await createStores()
     const configPath = path.join(directory, 'config.json')
-    await writeFile(configPath, '{"schemaVersion":19', 'utf8')
+    await writeFile(configPath, '{"schemaVersion":20', 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 19,
+      schemaVersion: 20,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 19,
+      schemaVersion: 20,
       limits: { maxStepsPerRun: 0 },
     })
   })
@@ -320,7 +320,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 19,
+      schemaVersion: 20,
       limits: { [field]: value },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
@@ -841,7 +841,7 @@ describe('ConfigStore', () => {
     await expect(store.getDeepSeekApiKey()).resolves.toBe('stored-secret')
   })
 
-  it('writes v19 defaults atomically', async () => {
+  it('writes v20 defaults atomically', async () => {
     const { directory, configStore } = await createStores()
 
     await configStore.update({
@@ -855,7 +855,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(19)
+    expect(parsed.schemaVersion).toBe(20)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(0)
     expect(configStore.getPublicConfig().limits.maxContextTokens).toBe(256_000)
     expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
@@ -890,12 +890,34 @@ describe('ConfigStore', () => {
     expect(
       JSON.parse(await readFile(path.join(directory, 'config.json'), 'utf8')),
     ).toMatchObject({
-      schemaVersion: 19,
+      schemaVersion: 20,
       subagents: {
         enabled: true,
         workerTimeoutMs: 2_700_000,
         maxAgentsPerSwarm: 12,
       },
+    })
+  })
+
+  it('persists the command Shell without changing Provider revisions', async () => {
+    const { directory, configStore } = await createStores()
+    const revision = configStore.getPublicConfig().providers[0]!.revision
+
+    const updated = await configStore.update({
+      version: 1,
+      kind: 'execution-environment',
+      value: { commandShell: 'git-bash' },
+    })
+
+    expect(updated.executionEnvironment).toEqual({
+      commandShell: 'git-bash',
+    })
+    expect(updated.providers[0]!.revision).toBe(revision)
+    expect(
+      JSON.parse(await readFile(path.join(directory, 'config.json'), 'utf8')),
+    ).toMatchObject({
+      schemaVersion: 20,
+      executionEnvironment: { commandShell: 'git-bash' },
     })
   })
 
@@ -1286,11 +1308,11 @@ describe('ConfigStore', () => {
     config.schemaVersion = 99
     await writeFile(configPath, JSON.stringify(config), 'utf8')
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 19,
+      schemaVersion: 20,
     })
     expect(configStore.getMcpServers()).toHaveLength(0)
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 19,
+      schemaVersion: 20,
       mcpServers: [],
     })
   })

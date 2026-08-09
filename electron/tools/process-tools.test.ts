@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { PermissionPipeline } from '../permission/permission-pipeline'
 import { registerProcessTools } from './process-tools'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
+import type { ToolExecutionContext } from './types'
 
 function harness() {
   const registry = new ToolRegistry()
@@ -87,6 +88,58 @@ describe('run_command provider schema', () => {
         reason: 'test validation',
       }).ok,
     ).toBe(true)
+  })
+
+  it('executes shell mode through the configured resolved profile', async () => {
+    const config = toPublicConfig(structuredClone(DEFAULT_APP_CONFIG), false)
+    config.executionEnvironment.commandShell = 'git-bash'
+    const resolved = {
+      profile: {
+        id: 'git-bash',
+        kind: 'bash',
+        label: 'Git Bash',
+        executable: process.execPath,
+        source: 'path',
+      },
+      requested: 'git-bash',
+      fallback: false,
+      fallbackEncoding: 'utf-8',
+    } as const
+    const shells = {
+      resolve: vi.fn(async () => resolved),
+      invocation: vi.fn(() => ({
+        executable: process.execPath,
+        args: ['-e', "process.stdout.write('configured shell')"],
+        environment: {},
+      })),
+    }
+    const registry = new ToolRegistry()
+    registerProcessTools(registry, () => config, shells)
+    const context: ToolExecutionContext = {
+      sessionId: 'session:command-shell' as SessionId,
+      runId: 'run:command-shell' as RunId,
+      workspace: { canonicalPath: process.cwd() },
+      signal: new AbortController().signal,
+      approvedCall: {} as ToolExecutionContext['approvedCall'],
+    }
+
+    await expect(
+      registry
+        .get('run_command')!
+        .execute({ mode: 'shell', command: 'echo ignored' }, context),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      content: {
+        stdout: 'configured shell',
+        commandShell: {
+          id: 'git-bash',
+          label: 'Git Bash',
+          fallback: false,
+        },
+      },
+    })
+    expect(shells.resolve).toHaveBeenCalledWith('git-bash')
+    expect(shells.invocation).toHaveBeenCalledWith(resolved, 'echo ignored')
   })
 })
 

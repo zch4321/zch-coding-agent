@@ -54,6 +54,7 @@ import {
   SessionTranscriptPageSchema,
   SessionTranscriptRequestMessagesPageSchema,
 } from './session-transcript'
+import { CommandShellCatalogSchema } from './command-shell'
 import {
   APP_NOTIFICATION_CHANNEL,
   AGENT_EVENT_CHANNEL,
@@ -202,6 +203,16 @@ export const IPC_CONTRACTS = {
         { additionalProperties: false },
       ),
     ),
+  },
+  'command-shell:list': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        refresh: Type.Optional(Type.Boolean()),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(CommandShellCatalogSchema),
   },
   'mcp:list': {
     payload: EmptyPayloadSchema,

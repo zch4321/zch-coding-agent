@@ -97,6 +97,18 @@ describe('canonical prompt harness', () => {
     expect(state.history.map((record) => record.seq)).toEqual([
       1, 2, 3, 4, 5, 6,
     ])
+    const runtimeContext = state.history.find(
+      (record) => record.kind === 'runtime_context',
+    )
+    expect(runtimeContext?.parts[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringMatching(/\ncommand_shell: .+ \([^)]+\)\n/u),
+    })
+    expect(
+      runtimeContext?.parts[0]?.type === 'text'
+        ? runtimeContext.parts[0].text
+        : '',
+    ).not.toMatch(/\nshell:/u)
     for (const record of state.history.slice(0, -1)) {
       expect(record.metadata).toMatchObject({
         schemaVersion: 1,

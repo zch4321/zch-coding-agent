@@ -3,7 +3,7 @@ current_time: ${currentTime}
 timezone: ${timezone}
 workspace: ${workspace}
 cwd: ${cwd}
-shell: ${shell}
+command_shell: ${commandShell}
 os: ${osInfo}
 assistant_language: ${assistantLanguage}
 permission_mode: ${permissionMode}

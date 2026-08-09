@@ -504,6 +504,17 @@ const enUS = {
     autoCompactTriggerPercent: 'Auto compact trigger threshold (%)',
     maxToolResultTokens: 'Tool result token limit',
     commandTimeoutMs: 'Command timeout (ms)',
+    commandShell: 'One-shot command shell',
+    commandShellAuto: 'Auto (current: {shell})',
+    commandShellMissing: '{shell} (unavailable)',
+    commandShellResolved: 'Resolved: {shell} · {path}',
+    commandShellHint:
+      'Only affects run_command shell mode; process mode still executes the requested program directly. The model receives the resolved shell and does not select one.',
+    commandShellFallbackTitle: 'The configured shell is unavailable',
+    commandShellFallback:
+      'Commands temporarily use the automatic fallback shown above.',
+    shellDetecting: 'detecting',
+    rescanShells: 'Rescan',
     maxToolOutputBytes: 'Tool output byte limit',
     terminalScrollbackBytes: 'Terminal scrollback byte limit',
     readFileSourceBytes: 'Readable source file byte limit',

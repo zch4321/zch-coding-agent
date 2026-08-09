@@ -471,21 +471,28 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - 每条规则显示 tool、workspace scope、arg constraints、expiry 和来源 call。
 - 支持删除规则，不支持编辑为更宽松的任意 JSON。
 
-### 10.5 Agents
+### 10.5 Limits
+
+- 运行限制保持单列分组和自动保存；页首提供立即保存/失败重试与状态，不让旧保存响应覆盖更新中的草稿。
+- Commands 分组提供 `run_command.shell` 的解释器选择与重新扫描。`Auto` 项显示当前实际解析的解释器；显式选择项只来自 Main process 已发现的 profile，并显示实际 executable path。
+- 已保存 profile 不可用时保留原选择、显示 fallback 警告并临时使用自动解释器；Renderer 不自行探测 PATH，也不允许输入任意 executable 或启动参数。
+- 该选择不影响 `run_command.process`、内部 Git 或当前交互 Terminal。模型只接收实际解析后的 `command_shell`，设置页不提供“让模型选择 Shell”的选项。
+
+### 10.6 Agents
 
 - 提供默认关闭的只读 Subagent 开关，以及 1–1,440 分钟的 worker timeout；默认 30 分钟。
 - 使用与运行限制一致的自动保存交互，并保留页首立即保存按钮和保存状态。
 - 明确提示额外 Provider 请求/费用，并显示当前全局并发值；并发为 1 时说明嵌套 Agent 会被拒绝。
 - 设置变更从下一次主 Run 生效；不展示隐藏 child Session、详细 transcript、模型池或自定义 child 工具列表。
 
-### 10.6 Skills
+### 10.7 Skills
 
 - 展示 name、description、source、sha256 短摘要和启用状态。
 - 支持 HTTPS URL、主进程文件选择器安装和手工目录 refresh。
 - 新安装和首次扫描的手工 skill 默认禁用；必须由用户显式启用。
 - 格式错误、重复名称、符号链接和超限文件显示诊断，不中断设置页。
 
-### 10.7 Logging
+### 10.8 Logging
 
 - Trace 开关和独立风险告知。
 - retention days。
@@ -495,7 +502,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - 展示 Provider 原始 usage 派生的 token/cache 指标与 TTFT/总时延；字段缺失时明确显示 `Provider not provided`。
 - 完整事件时间轴、搜索、导出和批量管理属于 Post-MVP。
 
-### 10.8 Session 生命周期
+### 10.9 Session 生命周期
 
 - Settings 不展示 `Start session` / `Close session` 作为主流程按钮。
 - Settings 提供“已归档对话”菜单项：分页列出 archived Session，支持恢复；永久删除使用 Naive UI 确认框，并在存在 fork 子 Session 时由 backend 拒绝。
@@ -676,7 +683,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] Enter、Shift+Enter 和 IME 行为符合规范。
 - [ ] 模型和权限模式只使用紧凑控件，不放入侧栏大卡片。
 - [ ] 同 workspace writer 活跃时，其他 Session 显示 Read-only locked；renderer 不修改其持久化 mode，writer 结束后解除约束。
-- [ ] Limits 只提供最大并发任务数；UI 明确 writer=1 是不可配置安全规则。
+- [ ] Limits 提供运行/工具硬限制与已发现的 command shell；UI 明确 writer=1 是不可配置安全规则，Shell fallback 有可见警告。
 - [ ] 对话输入区没有 Terminal 入口。
 - [ ] Send/Stop 按钮与底部、右侧距离一致。
 
@@ -705,7 +712,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 ### 16.6 Settings 与生命周期
 
-- [ ] Project/Provider/Agents/Permissions/Logging 分组清晰；Agents 自动保存开关与 timeout，并显示费用和并发提示。
+- [ ] Project/Provider/Agents/Permissions/Limits/Logging 分组清晰；Agents 自动保存开关与 timeout，并显示费用和并发提示；Limits 可重新扫描、选择并持久化 command shell。
 - [ ] API Key 不回显、不进入 renderer state 和 DOM。
 - [ ] 模型目录刷新、缓存回退、可输入下拉框、未知模型能力提示和手工上下文覆盖可用。
 - [ ] Sensitive Data 和 remembered rules 可配置、查看和删除。

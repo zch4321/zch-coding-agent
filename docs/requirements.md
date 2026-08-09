@@ -109,6 +109,10 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 >
 > 参数必须区分 `mode: "process"`（`executable + args[]`，默认优先）和 `mode: "shell"`（命令字符串，支持管道/重定向但风险更高）。不能把两者混成一个无法可靠审查的字符串。
 >
+> `mode: "shell"` 不接受模型指定的 Shell 名称。Main process 从 `executionEnvironment.commandShell` 解析当前可用解释器，并始终以 `shell: false` 显式启动该可执行文件；Windows 自动选择顺序固定为 PowerShell 7、Windows PowerShell、CMD，Git Bash 与 Nushell 可由用户显式选择。保存的解释器不可用时，本次执行回退到自动选择且设置页显示警告，不静默改写配置。Prompt Harness 只报告本轮实际解析出的 `command_shell`，要求模型使用对应语法，不把未安装候选暴露给模型选择。`mode: "process"` 和内部 Git 命令不受该配置影响。
+>
+> 已知 Shell adapter 必须在启动参数或环境中请求 UTF-8 输出；捕获层仍逐流校验 UTF-8，在 Windows 程序忽略该请求并输出当前代码页时使用探测到的主机代码页解码。该策略减少中文乱码，但不能保证任意第三方程序遵守控制台编码约定。
+>
 > 模型可见结果以 stdout 为正文，非空 stderr 放在 `[stderr]` 后；只有非零 exit、signal 或截断时追加状态尾注。Git 工具沿用同一 stream 形式，空成功结果返回简短完成提示。
 >
 > **安全边界说明**：MVP 只能保证命令的初始 `cwd` 位于工作区，不能仅靠字符串检查阻止 shell 命令、脚本或子进程访问工作区外资源。若要提供真正的主机级隔离，必须引入容器/OS sandbox；MVP 不承诺该能力。因此 `run_command` 与 PTY 在 Auto/Yolo 下都属于用户主动接受的主机执行风险。
@@ -304,7 +308,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 
 ### 2.8 Model Pool 配置与 backend foundation
 
-- AppConfig v16 首次在根配置加入 `modelPool`，v17 将 entry reasoning 扩展为统一六档，v18 删除重复 capability；当前 v19 保存最多 1,000 个命名 entry，并删除从未执行的 per-route `maxParallel`。该上限仅作为 IPC/config 异常负载边界，不承担并发或 Agent 数量控制；entry 只引用现有 Provider/model/reasoning。调度能力固定为 `light | standard | strong`，唯一来源是对应 Provider 的 `modelOverrides[model].capability`。API key、credential reference 与并发配额不进入 entry。
+- AppConfig v16 首次在根配置加入 `modelPool`，v17 将 entry reasoning 扩展为统一六档，v18 删除重复 capability，v19 保存最多 1,000 个命名 entry 并删除从未执行的 per-route `maxParallel`；当前 v20 不改变模型池结构，只新增命令解释器选择。该上限仅作为 IPC/config 异常负载边界，不承担并发或 Agent 数量控制；entry 只引用现有 Provider/model/reasoning。调度能力固定为 `light | standard | strong`，唯一来源是对应 Provider 的 `modelOverrides[model].capability`。API key、credential reference 与并发配额不进入 entry。
 - 完整模型池使用单个 `config:set(model-pool)` 原子保存。所有 enabled entry 引用的 Provider 必须由唯一且精确的 expected revision 列表覆盖，并在写盘前通过 Provider 存在、模型启用、能力标注、安全 endpoint、模型 profile 和当前凭据绑定校验；任一失败时不得部分写入。disabled entry 只要求结构与规范化 ID 唯一，可保留失效引用供未来 UI 修复。
 - Agents 设置页提供模型池独立小节，以 Naive UI Transfer/Tree 按 `Provider → model → reasoning` 展示候选；每个 reasoning 叶节点是一条互不替代的精确 route，同一模型的 `high`、`max` 可以同时入池，且不做自动升降档。顶部“最低思考等级”只过滤左侧候选，低于门槛但已经入池的 route 仍在右侧显示并提示，不改写配置。能力等级只读展示对应 Provider 模型标注；模型池不配置并发，内部 entry ID、顺序和 enabled 状态不作为常规表单暴露。Renderer 使用独立 Pinia store 持有草稿、已保存快照和保存状态；整组修改显式原子保存，不复用 Provider 表单草稿。Provider 编辑触发后端自动禁用时，干净模型池草稿同步回填；未保存草稿则保留并提示重新检查。
 - 删除 Provider、移除 entry 引用的启用模型、移除 capability annotation、reasoning annotation 变为不兼容或显式清除凭据时，在同一配置写入中把受影响 entry 置为 disabled，保留顺序和引用；恢复配置不会自动启用。启动/reload 会修复手写的 enabled 静态不兼容或无能力标注引用，但环境凭据暂时缺失不会改写持久配置。

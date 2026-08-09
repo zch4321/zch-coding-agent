@@ -89,6 +89,60 @@ describe('agent settings model pool', () => {
     expect(settings.providerCardSummaries[0]?.models).toEqual(['enabled-model'])
   })
 
+  it('loads discovered command Shells and persists the user selection', async () => {
+    const settings = useAgentSettingsStore()
+    const profile = {
+      id: 'powershell-7' as const,
+      kind: 'powershell' as const,
+      label: 'PowerShell 7',
+      executable: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      source: 'well-known' as const,
+    }
+    const listCommandShells = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: {
+        selected: 'powershell-7' as const,
+        resolved: profile,
+        fallback: false,
+        profiles: [profile],
+      },
+    }))
+    const setConfig = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: {
+        config: {
+          executionEnvironment: { commandShell: 'powershell-7' },
+        } as PublicConfig,
+      },
+    }))
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        listCommandShells,
+        setConfig,
+      } as Partial<AgentApi> as AgentApi,
+    })
+
+    await expect(settings.loadCommandShells(true)).resolves.toBe(true)
+    expect(listCommandShells).toHaveBeenCalledWith({
+      version: 1,
+      refresh: true,
+    })
+    expect(settings.commandShellCatalog?.resolved.id).toBe('powershell-7')
+
+    await expect(settings.setCommandShell('powershell-7')).resolves.toBe(true)
+    expect(setConfig).toHaveBeenCalledWith({
+      version: 1,
+      kind: 'execution-environment',
+      value: { commandShell: 'powershell-7' },
+    })
+    expect(settings.executionEnvironmentConfig.commandShell).toBe(
+      'powershell-7',
+    )
+  })
+
   it('allows any known model to become main and enables it atomically', () => {
     const settings = useAgentSettingsStore()
     settings.providerForm.model = 'enabled-model'

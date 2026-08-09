@@ -30,6 +30,7 @@ function createHandlers(input?: {
   backend?: Record<string, unknown>
   sessions?: Record<string, unknown>
   configStore?: Record<string, unknown>
+  commandShells?: Record<string, unknown>
 }) {
   const sessions = {
     activeTraceIds: vi.fn(() => new Set<string>()),
@@ -65,6 +66,7 @@ function createHandlers(input?: {
       backend: backend as never,
       skillsManager: {} as never,
       traceService: traceService as never,
+      commandShells: input?.commandShells as never,
       getMainWindow: () => undefined,
     }),
     backend,
@@ -79,6 +81,35 @@ describe('app IPC handlers', () => {
     openPath.mockReset()
     showSaveDialog.mockReset()
     writeTextAtomic.mockReset()
+  })
+
+  it('lists the Shell catalog for the persisted selection and forwards refresh', async () => {
+    const resolved = {
+      id: 'powershell-7',
+      kind: 'powershell',
+      label: 'PowerShell 7',
+      executable: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      source: 'well-known',
+    }
+    const catalog = vi.fn(async () => ({
+      selected: 'git-bash',
+      resolved,
+      fallback: true,
+      profiles: [resolved],
+    }))
+    const { handlers } = createHandlers({
+      configStore: {
+        getPublicConfig: vi.fn(() => ({
+          executionEnvironment: { commandShell: 'git-bash' },
+        })),
+      },
+      commandShells: { catalog },
+    })
+
+    await expect(
+      handlers['command-shell:list']!({ version: 1, refresh: true }, stubEvent),
+    ).resolves.toMatchObject({ selected: 'git-bash', fallback: true })
+    expect(catalog).toHaveBeenCalledWith('git-bash', true)
   })
 
   it('rejects legacy ProjectModel and code-intelligence IPC while disabled', async () => {

@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createCommandEnvironment, runCommand } from './run'
+import { commandShellService } from './command-shell'
 
 const PROCESS_TERMINATION_TEST_TIMEOUT_MS =
   process.platform === 'win32' ? 30_000 : 10_000
@@ -53,6 +54,54 @@ describe('runCommand', () => {
     expect(path.resolve(result.stdout)).toBe(path.resolve(await realpath(root)))
     expect(result.exitCode).toBe(0)
     expect(result.truncated).toBe(false)
+  })
+
+  it('runs shell mode through an explicit executable without Node shell selection', async () => {
+    const root = await workspace()
+    const result = await runCommand({
+      workspace: root,
+      command: {
+        mode: 'shell',
+        executable: process.execPath,
+        args: ['-e', "process.stdout.write('explicit shell')"],
+        environment: {},
+      },
+      timeoutMs: 5_000,
+      maxOutputBytes: 16_384,
+      signal: new AbortController().signal,
+    })
+
+    expect(result).toMatchObject({
+      stdout: 'explicit shell',
+      stderr: '',
+      exitCode: 0,
+    })
+  })
+
+  it('executes the automatic shell with UTF-8 output and the native exit code', async () => {
+    const root = await workspace()
+    const resolved = await commandShellService.resolve('auto', true)
+    const script =
+      resolved.profile.kind === 'powershell'
+        ? "[Console]::WriteLine('中文'); cmd.exe /d /c exit 7"
+        : resolved.profile.kind === 'cmd'
+          ? 'echo 中文 & exit /b 7'
+          : "printf '中文\\n'; exit 7"
+    const invocation = commandShellService.invocation(resolved, script)
+    const result = await runCommand({
+      workspace: root,
+      command: {
+        mode: 'shell',
+        ...invocation,
+        fallbackEncoding: resolved.fallbackEncoding,
+      },
+      timeoutMs: 5_000,
+      maxOutputBytes: 16_384,
+      signal: new AbortController().signal,
+    })
+
+    expect(result.stdout).toContain('中文')
+    expect(result.exitCode).toBe(7)
   })
 
   it('drains 100MB output while retaining only the configured head and tail', async () => {

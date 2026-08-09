@@ -91,6 +91,7 @@ function subscribeDomainState(
 const api: AgentApi = {
   getConfig: (payload) => invoke('config:get', payload),
   setConfig: (payload) => invoke('config:set', payload),
+  listCommandShells: (payload) => invoke('command-shell:list', payload),
   listMcpServers: (payload) => invoke('mcp:list', payload),
   reloadMcpConfig: (payload) => invoke('mcp:reload', payload),
   trustAndEnableMcpServer: (payload) => invoke('mcp:trust-enable', payload),
