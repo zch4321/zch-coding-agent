@@ -3,7 +3,11 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentApi } from '../../shared/agent-api'
-import type { ProviderPublicConfig, PublicConfig } from '../../shared/config'
+import type {
+  ModelCapabilityOverride,
+  ProviderPublicConfig,
+  PublicConfig,
+} from '../../shared/config'
 import { useApprovalSettingsStore } from './approval-settings'
 import { useAgentSettingsStore } from './agent-settings'
 import { providerFormSignature } from './provider-form'
@@ -124,6 +128,13 @@ describe('agent settings model pool', () => {
   it('persists a manually entered model through the dedicated config action', async () => {
     const settings = useAgentSettingsStore()
     const configuredProvider = provider()
+    const modelOverride: ModelCapabilityOverride = {
+      contextWindowTokens: 400_000,
+      compactThresholdTokens: 250_000,
+      maxOutputTokens: 50_000,
+      reasoningEfforts: ['low', 'high'],
+      capability: 'strong',
+    }
     settings.providers = [configuredProvider]
     settings.activeProviderId = configuredProvider.id
     settings.selectedProviderId = configuredProvider.id
@@ -140,6 +151,10 @@ describe('agent settings model pool', () => {
         { id: 'manual-model' },
       ],
       enabledModelIds: [...configuredProvider.enabledModelIds, 'manual-model'],
+      modelOverrides: {
+        ...configuredProvider.modelOverrides,
+        'manual-model': modelOverride,
+      },
     }
     const setConfig = vi.fn(async () => ({
       version: 1 as const,
@@ -156,19 +171,29 @@ describe('agent settings model pool', () => {
       value: { setConfig } as Partial<AgentApi> as AgentApi,
     })
 
-    await expect(settings.addProviderModel('  manual-model  ')).resolves.toBe(
-      true,
-    )
+    await expect(
+      settings.addProviderModel({
+        modelId: '  manual-model  ',
+        modelOverride,
+      }),
+    ).resolves.toBe(true)
     expect(setConfig).toHaveBeenCalledWith({
       version: 1,
       kind: 'provider-model-add',
       providerId: configuredProvider.id,
       modelId: 'manual-model',
+      modelOverride,
     })
     expect(settings.modelProfiles.map((model) => model.id)).toContain(
       'manual-model',
     )
     expect(settings.providerForm.enabledModelIds).toContain('manual-model')
+    expect(
+      settings.modelProfiles.find((model) => model.id === 'manual-model'),
+    ).toMatchObject({
+      ...modelOverride,
+      capabilitySource: 'override',
+    })
   })
 
   it('keeps every enabled approval model visible regardless of annotation', () => {

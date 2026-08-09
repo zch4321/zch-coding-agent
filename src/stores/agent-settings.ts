@@ -3,6 +3,7 @@ import { IPC_VERSION } from '../../shared/channels'
 import type {
   AssistantLanguage,
   ConfigSection,
+  ModelCapabilityOverride,
   ModelCapabilityLevel,
   PermissionMode,
   ProviderPublicConfig,
@@ -505,10 +506,13 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         )
       }
     },
-    /** Persists one manually entered model and enables it for runtime selection. */
-    async addProviderModel(modelId: string): Promise<boolean> {
+    /** Persists one manually configured model and enables it for runtime selection. */
+    async addProviderModel(input: {
+      modelId: string
+      modelOverride: ModelCapabilityOverride
+    }): Promise<boolean> {
       const bridge = window.agentApi
-      const normalizedModelId = modelId.trim()
+      const normalizedModelId = input.modelId.trim()
       if (!bridge || !normalizedModelId) return false
       if (this.providerDirty && !(await this.saveProvider())) return false
 
@@ -517,6 +521,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         kind: 'provider-model-add',
         providerId: this.selectedProviderId,
         modelId: normalizedModelId,
+        modelOverride: cloneJson(input.modelOverride),
       })
       if (!result.ok) {
         this.error = result.error.message

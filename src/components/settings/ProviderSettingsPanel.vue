@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -24,7 +24,12 @@ import {
   type ModelCapabilityLevel,
   type ReasoningEffort,
 } from '../../../shared/config'
-import { resolveSupportedReasoningEfforts } from '../../../shared/model-settings'
+import {
+  DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
+  resolveModelTokenSettings,
+  resolveSupportedReasoningEfforts,
+  type ModelTokenSettings,
+} from '../../../shared/model-settings'
 import { useAgentStore } from '../../stores/agent'
 import { providerDraftConflicts } from '../../stores/provider-form'
 
@@ -45,12 +50,26 @@ type ProviderAction =
   | { kind: 'delete'; providerId: string }
   | { kind: 'set-active'; providerId: string }
 
+interface ManualModelDraft extends ModelTokenSettings {
+  modelId: string
+  reasoningEfforts: ReasoningEffort[]
+  capability: ModelCapabilityLevel | null
+}
+
 const agent = useAgentStore()
 const { t } = useI18n()
 const deleteProviderId = ref<string>()
 const showAddModel = ref(false)
-const manualModelId = ref('')
 const modelConfigurationFilter = ref('')
+const manualModelDraft = reactive<ManualModelDraft>({
+  modelId: '',
+  ...resolveModelTokenSettings({
+    contextWindowTokens: DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
+    compactTriggerPercent: 80,
+  }),
+  reasoningEfforts: [],
+  capability: null,
+})
 let autosaveTimer: ReturnType<typeof setTimeout> | undefined
 const providerTypeOptions = computed(() => [
   {
@@ -159,13 +178,35 @@ const visibleModelProfiles = computed(() => {
   )
 })
 const manualModelValidation = computed(() => {
-  const modelId = manualModelId.value.trim()
+  const modelId = manualModelDraft.modelId.trim()
   if (!modelId) return t('settings.modelNameRequired')
   if (modelId.length > 256) return t('settings.modelNameTooLong')
   if (
     agent.selectedProvider?.modelCatalog.some((model) => model.id === modelId)
   ) {
     return t('settings.modelAlreadyExists')
+  }
+  if (
+    !Number.isInteger(manualModelDraft.contextWindowTokens) ||
+    manualModelDraft.contextWindowTokens < 2_048 ||
+    manualModelDraft.contextWindowTokens > 10_000_000 ||
+    !Number.isInteger(manualModelDraft.maxOutputTokens) ||
+    manualModelDraft.maxOutputTokens < 1 ||
+    manualModelDraft.maxOutputTokens >
+      manualModelDraft.contextWindowTokens - 1_024 ||
+    !Number.isInteger(manualModelDraft.compactThresholdTokens) ||
+    manualModelDraft.compactThresholdTokens < 1_024 ||
+    manualModelDraft.compactThresholdTokens >
+      manualModelDraft.contextWindowTokens - manualModelDraft.maxOutputTokens
+  ) {
+    return t('settings.modelConfigurationInvalid')
+  }
+  if (
+    !agent.providerForm.model &&
+    manualModelDraft.reasoningEfforts.length > 0 &&
+    !manualModelDraft.reasoningEfforts.includes(agent.providerForm.reasoning)
+  ) {
+    return t('settings.newMainModelReasoningConflict')
   }
   return ''
 })
@@ -187,17 +228,70 @@ function handleSelectedModels(value: Array<string | number>): void {
 
 /** Opens the manual-model dialog with a clean draft. */
 function openAddModel(): void {
-  manualModelId.value = ''
+  Object.assign(manualModelDraft, {
+    modelId: '',
+    ...resolveModelTokenSettings({
+      contextWindowTokens:
+        agent.limitsConfig?.maxContextTokens ??
+        DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
+      compactTriggerPercent:
+        agent.limitsConfig?.autoCompactTriggerPercent ?? 80,
+    }),
+    reasoningEfforts: [],
+    capability: null,
+  })
   showAddModel.value = true
+}
+
+/** Keeps manual token fields within the same usable-budget rules as saved rows. */
+function updateManualModelTokenSetting(
+  field: 'contextWindowTokens' | 'compactThresholdTokens' | 'maxOutputTokens',
+  value: number | null,
+): void {
+  if (value === null || !Number.isInteger(value)) return
+  const contextWindowTokens =
+    field === 'contextWindowTokens'
+      ? Math.min(10_000_000, Math.max(2_048, value))
+      : manualModelDraft.contextWindowTokens
+  const compactThresholdTokens =
+    field === 'compactThresholdTokens'
+      ? Math.max(1_024, value)
+      : manualModelDraft.compactThresholdTokens
+  const maxOutputTokens =
+    field === 'maxOutputTokens'
+      ? Math.max(1, value)
+      : manualModelDraft.maxOutputTokens
+  Object.assign(
+    manualModelDraft,
+    resolveModelTokenSettings({
+      contextWindowTokens,
+      compactThresholdTokens,
+      maxOutputTokens,
+      compactTriggerPercent:
+        agent.limitsConfig?.autoCompactTriggerPercent ?? 80,
+    }),
+  )
 }
 
 /** Persists a manually entered model and keeps the dialog open on failure. */
 async function confirmAddModel(): Promise<boolean> {
   if (manualModelValidation.value) return false
-  const added = await agent.addProviderModel(manualModelId.value)
+  const added = await agent.addProviderModel({
+    modelId: manualModelDraft.modelId,
+    modelOverride: {
+      contextWindowTokens: manualModelDraft.contextWindowTokens,
+      compactThresholdTokens: manualModelDraft.compactThresholdTokens,
+      maxOutputTokens: manualModelDraft.maxOutputTokens,
+      ...(manualModelDraft.reasoningEfforts.length
+        ? { reasoningEfforts: [...manualModelDraft.reasoningEfforts] }
+        : {}),
+      ...(manualModelDraft.capability
+        ? { capability: manualModelDraft.capability }
+        : {}),
+    },
+  })
   if (!added) return false
   showAddModel.value = false
-  manualModelId.value = ''
   return true
 }
 
@@ -778,19 +872,81 @@ function handleDropdownSelect(key: string | number, providerId: string) {
       :positive-button-props="{ disabled: Boolean(manualModelValidation) }"
       @positive-click="confirmAddModel"
     >
-      <label class="settings-field">
-        <span>{{ t('settings.modelName') }}</span>
-        <NInput
-          v-model:value="manualModelId"
-          :placeholder="t('settings.addModelPlaceholder')"
-          :maxlength="256"
-          @keyup.enter="confirmAddModel"
-        />
+      <div class="provider-add-model-fields">
+        <label class="settings-field">
+          <span>{{ t('settings.modelName') }}</span>
+          <NInput
+            v-model:value="manualModelDraft.modelId"
+            :placeholder="t('settings.addModelPlaceholder')"
+            :maxlength="256"
+            @keyup.enter="confirmAddModel"
+          />
+        </label>
+        <div class="provider-add-model-token-grid">
+          <label class="settings-field">
+            <span>{{ t('settings.maximumContext') }}</span>
+            <NInputNumber
+              :value="manualModelDraft.contextWindowTokens"
+              :min="2048"
+              :max="10000000"
+              :show-button="false"
+              @update:value="
+                updateManualModelTokenSetting('contextWindowTokens', $event)
+              "
+            />
+          </label>
+          <label class="settings-field">
+            <span>{{ t('settings.compressionThreshold') }}</span>
+            <NInputNumber
+              :value="manualModelDraft.compactThresholdTokens"
+              :min="1024"
+              :max="
+                manualModelDraft.contextWindowTokens -
+                manualModelDraft.maxOutputTokens
+              "
+              :show-button="false"
+              @update:value="
+                updateManualModelTokenSetting('compactThresholdTokens', $event)
+              "
+            />
+          </label>
+          <label class="settings-field">
+            <span>{{ t('settings.maximumOutputLength') }}</span>
+            <NInputNumber
+              :value="manualModelDraft.maxOutputTokens"
+              :min="1"
+              :max="manualModelDraft.contextWindowTokens - 1024"
+              :show-button="false"
+              @update:value="
+                updateManualModelTokenSetting('maxOutputTokens', $event)
+              "
+            />
+          </label>
+        </div>
+        <label class="settings-field">
+          <span>{{ t('settings.modelReasoningEfforts') }}</span>
+          <NSelect
+            v-model:value="manualModelDraft.reasoningEfforts"
+            :options="reasoningEffortOptions"
+            :placeholder="t('settings.modelReasoningEffortsPlaceholder')"
+            multiple
+            clearable
+          />
+        </label>
+        <label class="settings-field">
+          <span>{{ t('settings.modelCapability') }}</span>
+          <NSelect
+            v-model:value="manualModelDraft.capability"
+            :options="capabilityOptions"
+            :placeholder="t('settings.modelCapabilityPlaceholder')"
+            clearable
+          />
+        </label>
         <small v-if="manualModelValidation" class="settings-field-error">
           {{ manualModelValidation }}
         </small>
         <small v-else>{{ t('settings.addModelHint') }}</small>
-      </label>
+      </div>
     </NModal>
 
     <NModal

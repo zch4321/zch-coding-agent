@@ -240,6 +240,35 @@ test.describe.serial('Electron settings workflows', () => {
     await addModelDialog
       .getByPlaceholder('输入 Provider 使用的准确模型名称')
       .fill(manualModel)
+    const manualContext = addModelDialog
+      .locator('.settings-field', { hasText: '最大上下文' })
+      .locator('input')
+    const manualThreshold = addModelDialog
+      .locator('.settings-field', { hasText: '压缩阈值' })
+      .locator('input')
+    const manualOutput = addModelDialog
+      .locator('.settings-field', { hasText: '最大输出长度' })
+      .locator('input')
+    await manualContext.fill('400000')
+    await manualOutput.fill('50000')
+    await manualThreshold.fill('250000')
+    await addModelDialog
+      .locator('.settings-field', { hasText: '思考档位' })
+      .locator('.n-select')
+      .click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('高', { exact: true })
+      .click()
+    await page.keyboard.press('Escape')
+    await addModelDialog
+      .locator('.settings-field', { hasText: '能力等级' })
+      .locator('.n-select')
+      .click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('强力', { exact: true })
+      .click()
     await addModelDialog.getByRole('button', { name: '新增模型' }).click()
     await expect(addModelDialog).toBeHidden()
     const manualModelRow = provider.locator('.provider-model-settings-row', {
@@ -249,6 +278,41 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       manualModelRow.getByText('主模型', { exact: true }),
     ).toBeVisible()
+    await expect(manualModelRow.locator('input').nth(0)).toHaveValue('400000')
+    await expect(manualModelRow.locator('input').nth(1)).toHaveValue('250000')
+    await expect(manualModelRow.locator('input').nth(2)).toHaveValue('50000')
+    await expect(manualModelRow.locator('.n-select').nth(0)).toContainText('高')
+    await expect(manualModelRow.locator('.n-select').nth(1)).toContainText(
+      '强力',
+    )
+    await expect
+      .poll(async () =>
+        page.evaluate(async (modelId) => {
+          const api = Reflect.get(window, 'agentApi') as {
+            getConfig(payload: unknown): Promise<{
+              value?: {
+                config: {
+                  providers: Array<{
+                    modelOverrides: Record<string, unknown>
+                  }>
+                }
+              }
+            }>
+          }
+          const result = await api.getConfig({
+            version: 1,
+            section: 'providers',
+          })
+          return result.value?.config.providers[0]?.modelOverrides[modelId]
+        }, manualModel),
+      )
+      .toEqual({
+        contextWindowTokens: 400_000,
+        compactThresholdTokens: 250_000,
+        maxOutputTokens: 50_000,
+        reasoningEfforts: ['high'],
+        capability: 'strong',
+      })
     const refreshModels = provider.getByRole('button', { name: '刷新' })
     await expect(
       provider.getByRole('button', { name: '保存 Provider' }),
@@ -664,7 +728,11 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       source.getByText('annotated-model', { exact: true }),
     ).toBeVisible()
-    await expect(source.getByText('强力', { exact: true })).toBeVisible()
+    await expect(
+      source
+        .locator('.n-tree-node-content', { hasText: 'annotated-model' })
+        .getByText('强力', { exact: true }),
+    ).toBeVisible()
     await expect(source.getByText('低', { exact: true })).toBeVisible()
     await expect(source.getByText('中', { exact: true })).toBeVisible()
 

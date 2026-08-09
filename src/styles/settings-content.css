@@ -129,6 +129,21 @@
   max-height: min(520px, 56vh);
 }
 
+.provider-add-model-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.provider-add-model-token-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provider-add-model-token-grid .n-input-number {
+  width: 100%;
+}
+
 .provider-model-settings-header,
 .provider-model-settings-row {
   display: grid;
@@ -305,6 +320,10 @@
 }
 
 @media (max-width: 720px) {
+  .provider-add-model-token-grid {
+    grid-template-columns: 1fr;
+  }
+
   .provider-detail-heading {
     align-items: stretch;
     flex-direction: column;

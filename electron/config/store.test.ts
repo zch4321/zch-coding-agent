@@ -351,11 +351,24 @@ describe('ConfigStore', () => {
       kind: 'provider-model-add',
       providerId: 'deepseek',
       modelId: 'manually-added-model',
+      modelOverride: {
+        contextWindowTokens: 400_000,
+        compactThresholdTokens: 250_000,
+        maxOutputTokens: 50_000,
+        reasoningEfforts: ['low', 'high'],
+        capability: 'strong',
+      },
     }
 
     expect(validate(request)).toBe(true)
     expect(validate({ ...request, modelId: '' })).toBe(false)
     expect(validate({ ...request, modelId: 'x'.repeat(257) })).toBe(false)
+    expect(
+      validate({
+        ...request,
+        modelOverride: { ...request.modelOverride, capability: 'unknown' },
+      }),
+    ).toBe(false)
   })
 
   it('validates model pool request structure and bounds', () => {
@@ -1361,6 +1374,13 @@ describe('ConfigStore', () => {
       kind: 'provider-model-add',
       providerId,
       modelId: '  manually-added-model  ',
+      modelOverride: {
+        contextWindowTokens: 400_000,
+        compactThresholdTokens: 250_000,
+        maxOutputTokens: 50_000,
+        reasoningEfforts: ['high', 'off', 'low'],
+        capability: 'strong',
+      },
     })
     await configStore.update({
       version: 1,
@@ -1374,6 +1394,42 @@ describe('ConfigStore', () => {
       model: 'manually-added-model',
       modelCatalog: [{ id: 'manually-added-model' }],
       enabledModelIds: ['manually-added-model'],
+      modelOverrides: {
+        'manually-added-model': {
+          contextWindowTokens: 400_000,
+          compactThresholdTokens: 250_000,
+          maxOutputTokens: 50_000,
+          reasoningEfforts: ['off', 'low', 'high'],
+          capability: 'strong',
+        },
+      },
+    })
+  })
+
+  it('rejects an inconsistent manual model override atomically', async () => {
+    const { configStore } = await createStores()
+    const providerId = configStore.getPublicConfig().providers[0]!.id
+
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'provider-model-add',
+        providerId,
+        modelId: 'invalid-model',
+        modelOverride: {
+          contextWindowTokens: 10_000,
+          compactThresholdTokens: 7_000,
+          maxOutputTokens: 4_000,
+        },
+      }),
+    ).rejects.toThrow('Compression threshold exceeds the usable context')
+
+    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+      revision: 1,
+      model: '',
+      modelCatalog: [],
+      enabledModelIds: [],
+      modelOverrides: {},
     })
   })
 

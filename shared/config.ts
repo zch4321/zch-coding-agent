@@ -598,6 +598,7 @@ export const ConfigSetRequestSchema = Type.Union([
       kind: Type.Literal('provider-model-add'),
       providerId: Type.String({ minLength: 1, maxLength: 128 }),
       modelId: Type.String({ minLength: 1, maxLength: 256 }),
+      modelOverride: Type.Optional(ModelCapabilityOverrideSchema),
     },
     { additionalProperties: false },
   ),

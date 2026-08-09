@@ -66,8 +66,12 @@ function normalizedEnabledModelIds(modelIds: readonly string[]): string[] {
   return [...new Set(modelIds.map((modelId) => modelId.trim()).filter(Boolean))]
 }
 
-/** Adds one durable model identity and makes it available to runtime selectors. */
-function addProviderModel(provider: AppProviderConfig, modelId: string): void {
+/** Adds one configured model and makes it available to runtime selectors. */
+function addProviderModel(
+  provider: AppProviderConfig,
+  modelId: string,
+  modelOverride?: AppProviderConfig['modelOverrides'][string],
+): void {
   const normalizedModelId = modelId.trim()
   if (!normalizedModelId) throw new Error('Model name is required')
 
@@ -88,6 +92,17 @@ function addProviderModel(provider: AppProviderConfig, modelId: string): void {
   }
 
   if (!provider.model) provider.model = normalizedModelId
+
+  if (modelOverride !== undefined) {
+    const normalizedOverride = structuredClone(modelOverride)
+    if (normalizedOverride.reasoningEfforts?.length) {
+      normalizedOverride.reasoningEfforts = normalizeReasoningEfforts(
+        normalizedOverride.reasoningEfforts,
+      )
+    }
+    provider.modelOverrides[normalizedModelId] = normalizedOverride
+    assertModelOverridesValid(provider.modelOverrides)
+  }
 }
 
 /** Validates the configured main route while allowing an unconfigured model. */
@@ -740,7 +755,7 @@ export class ConfigStore {
           throw new Error(`Provider not found: ${request.providerId}`)
         }
         const previousRouteShape = providerRouteShape(provider)
-        addProviderModel(provider, request.modelId)
+        addProviderModel(provider, request.modelId, request.modelOverride)
         assertMainRouteConfigValid(provider)
         if (providerRouteShape(provider) !== previousRouteShape) {
           provider.revision += 1

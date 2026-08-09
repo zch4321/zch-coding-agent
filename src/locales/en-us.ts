@@ -383,10 +383,14 @@ const enUS = {
     addModelTitle: 'Add model',
     addModelPlaceholder: 'Enter the exact model name used by the Provider',
     addModelHint:
-      'The model is added to the full list and enabled automatically. Names are matched exactly and are case-sensitive.',
+      'Confirming saves the model, enabled state, and configuration together. Names are exact and case-sensitive.',
     modelNameRequired: 'Enter a model name.',
     modelNameTooLong: 'Model names cannot exceed 256 characters.',
     modelAlreadyExists: 'This model is already in the list.',
+    modelConfigurationInvalid:
+      'Check the context, compaction threshold, and maximum output values.',
+    newMainModelReasoningConflict:
+      "This model will become the main model, so its reasoning efforts must include the Provider's current default.",
     availableModels: 'Provider models',
     selectedModels: 'Enabled models',
     filterModels: 'Filter models',

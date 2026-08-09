@@ -371,10 +371,14 @@ const zhCN = {
     addModel: '新增模型',
     addModelTitle: '新增模型',
     addModelPlaceholder: '输入 Provider 使用的准确模型名称',
-    addModelHint: '模型会加入完整列表并自动启用；名称按大小写精确匹配。',
+    addModelHint:
+      '确认后会同时保存模型、启用状态和本页配置；名称按大小写精确匹配。',
     modelNameRequired: '请输入模型名称。',
     modelNameTooLong: '模型名称不能超过 256 个字符。',
     modelAlreadyExists: '该模型已在列表中。',
+    modelConfigurationInvalid: '请检查上下文、压缩阈值和最大输出长度。',
+    newMainModelReasoningConflict:
+      '该模型将成为主模型，其思考档位必须包含当前 Provider 默认档位。',
     availableModels: 'Provider 模型',
     selectedModels: '已启用模型',
     filterModels: '筛选模型',
