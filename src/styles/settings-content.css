@@ -98,6 +98,13 @@
   padding-top: 4px;
 }
 
+.provider-model-settings-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .provider-model-settings h4,
 .provider-model-settings p {
   margin: 0;
@@ -122,12 +129,27 @@
   max-height: min(520px, 56vh);
 }
 
+.provider-add-model-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.provider-add-model-token-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provider-add-model-token-grid .n-input-number {
+  width: 100%;
+}
+
 .provider-model-settings-header,
 .provider-model-settings-row {
   display: grid;
   grid-template-columns:
     minmax(180px, 1.4fr) repeat(3, minmax(130px, 1fr))
-    minmax(170px, 1.1fr) minmax(110px, 0.8fr);
+    minmax(170px, 1.1fr) minmax(110px, 0.8fr) minmax(64px, 0.45fr);
   align-items: center;
   gap: 10px;
 }
@@ -169,10 +191,15 @@
   width: 100%;
 }
 
-/* The six-column grid needs ~900px; stack rows once the settings content
+.provider-model-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* The seven-column grid needs ~980px; stack rows once the settings content
    itself is too narrow (the 720px viewport media query never matches because
    the window minWidth is 960px). */
-@container (max-width: 980px) {
+@container (max-width: 1060px) {
   .provider-model-settings-header {
     display: none;
   }
@@ -197,6 +224,10 @@
     display: block;
     color: var(--text-muted);
     font-size: 11px;
+  }
+
+  .provider-model-actions {
+    justify-content: flex-start;
   }
 }
 
@@ -298,6 +329,10 @@
 }
 
 @media (max-width: 720px) {
+  .provider-add-model-token-grid {
+    grid-template-columns: 1fr;
+  }
+
   .provider-detail-heading {
     align-items: stretch;
     flex-direction: column;

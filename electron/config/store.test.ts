@@ -344,6 +344,43 @@ describe('ConfigStore', () => {
     },
   )
 
+  it('validates the bounded manual Provider model action', () => {
+    const validate = compileSchema(ConfigSetRequestSchema)
+    const request = {
+      version: 1,
+      kind: 'provider-model-add',
+      providerId: 'deepseek',
+      modelId: 'manually-added-model',
+      modelOverride: {
+        contextWindowTokens: 400_000,
+        compactThresholdTokens: 250_000,
+        maxOutputTokens: 50_000,
+        reasoningEfforts: ['low', 'high'],
+        capability: 'strong',
+      },
+    }
+
+    expect(validate(request)).toBe(true)
+    expect(validate({ ...request, modelId: '' })).toBe(false)
+    expect(validate({ ...request, modelId: 'x'.repeat(257) })).toBe(false)
+    expect(
+      validate({
+        ...request,
+        modelOverride: { ...request.modelOverride, capability: 'unknown' },
+      }),
+    ).toBe(false)
+
+    const deleteRequest = {
+      version: 1,
+      kind: 'provider-model-delete',
+      providerId: 'deepseek',
+      modelId: 'manually-added-model',
+    }
+    expect(validate(deleteRequest)).toBe(true)
+    expect(validate({ ...deleteRequest, modelId: '' })).toBe(false)
+    expect(validate({ ...deleteRequest, modelOverride: {} })).toBe(false)
+  })
+
   it('validates model pool request structure and bounds', () => {
     const validate = compileSchema(ConfigSetRequestSchema)
     const valid = {
@@ -1300,6 +1337,179 @@ describe('ConfigStore', () => {
     expect(configStore.getPublicConfig().providers[0].modelOverrides).toEqual(
       {},
     )
+  })
+
+  it('merges refreshed model catalogs without changing or deleting known models', async () => {
+    const { configStore } = await createStores()
+    await configStore.setDeepSeekModelCatalog(
+      [{ id: 'model-a', ownedBy: 'original-owner' }],
+      '2026-08-01T00:00:00.000Z',
+    )
+    await configStore.update({
+      version: 1,
+      kind: 'provider',
+      baseURL: 'https://api.deepseek.com',
+      model: 'configured-only',
+      enabledModelIds: ['configured-only'],
+      reasoning: 'off',
+    })
+
+    await configStore.setDeepSeekModelCatalog(
+      [
+        { id: 'model-a', ownedBy: 'changed-owner' },
+        { id: 'configured-only', ownedBy: 'provider' },
+        { id: 'MODEL-A', ownedBy: 'case-sensitive' },
+        { id: 'model-b', ownedBy: 'provider' },
+      ],
+      '2026-08-02T00:00:00.000Z',
+    )
+
+    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+      modelCatalog: [
+        { id: 'model-a', ownedBy: 'original-owner' },
+        { id: 'configured-only', ownedBy: 'provider' },
+        { id: 'MODEL-A', ownedBy: 'case-sensitive' },
+        { id: 'model-b', ownedBy: 'provider' },
+      ],
+      modelCatalogFetchedAt: '2026-08-02T00:00:00.000Z',
+    })
+  })
+
+  it('persists a manual model, enables it, and uses it as an empty main route', async () => {
+    const { configStore } = await createStores()
+    const providerId = configStore.getPublicConfig().providers[0]!.id
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider-model-add',
+      providerId,
+      modelId: '  manually-added-model  ',
+      modelOverride: {
+        contextWindowTokens: 400_000,
+        compactThresholdTokens: 250_000,
+        maxOutputTokens: 50_000,
+        reasoningEfforts: ['high', 'off', 'low'],
+        capability: 'strong',
+      },
+    })
+    await configStore.update({
+      version: 1,
+      kind: 'provider-model-add',
+      providerId,
+      modelId: 'manually-added-model',
+    })
+
+    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+      revision: 2,
+      model: 'manually-added-model',
+      modelCatalog: [{ id: 'manually-added-model' }],
+      enabledModelIds: ['manually-added-model'],
+      modelOverrides: {
+        'manually-added-model': {
+          contextWindowTokens: 400_000,
+          compactThresholdTokens: 250_000,
+          maxOutputTokens: 50_000,
+          reasoningEfforts: ['off', 'low', 'high'],
+          capability: 'strong',
+        },
+      },
+    })
+  })
+
+  it('rejects an inconsistent manual model override atomically', async () => {
+    const { configStore } = await createStores()
+    const providerId = configStore.getPublicConfig().providers[0]!.id
+
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'provider-model-add',
+        providerId,
+        modelId: 'invalid-model',
+        modelOverride: {
+          contextWindowTokens: 10_000,
+          compactThresholdTokens: 7_000,
+          maxOutputTokens: 4_000,
+        },
+      }),
+    ).rejects.toThrow('Compression threshold exceeds the usable context')
+
+    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+      revision: 1,
+      model: '',
+      modelCatalog: [],
+      enabledModelIds: [],
+      modelOverrides: {},
+    })
+  })
+
+  it('deletes a non-main model and disables its model pool routes', async () => {
+    const { configStore } = await createStores()
+    const provider = await configurePoolProvider(configStore)
+    await configStore.setDeepSeekModelCatalog(
+      [{ id: 'main-model' }, { id: 'worker-model' }],
+      '2026-08-09T00:00:00.000Z',
+    )
+    await configStore.update(modelPoolUpdate(provider, [modelPoolEntry()]))
+
+    await configStore.update({
+      version: 1,
+      kind: 'provider-model-delete',
+      providerId: provider.id,
+      modelId: ' worker-model ',
+    })
+
+    expect(configStore.getPublicConfig()).toMatchObject({
+      providers: [
+        {
+          revision: provider.revision + 1,
+          model: 'main-model',
+          modelCatalog: [{ id: 'main-model' }],
+          enabledModelIds: ['main-model'],
+          modelOverrides: {},
+        },
+      ],
+      modelPool: {
+        entries: [{ model: 'worker-model', enabled: false }],
+      },
+    })
+  })
+
+  it('protects the current main and approval models from deletion', async () => {
+    const { configStore } = await createStores()
+    const provider = await configurePoolProvider(configStore)
+    await configStore.update({
+      version: 1,
+      kind: 'approval',
+      approverProviderId: provider.id,
+      approverModel: 'worker-model',
+      reasoning: 'high',
+    })
+
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'provider-model-delete',
+        providerId: provider.id,
+        modelId: 'main-model',
+      }),
+    ).rejects.toThrow('Cannot delete the current main model')
+    await expect(
+      configStore.update({
+        version: 1,
+        kind: 'provider-model-delete',
+        providerId: provider.id,
+        modelId: 'worker-model',
+      }),
+    ).rejects.toThrow('Cannot delete the current approval model')
+
+    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+      model: 'main-model',
+      enabledModelIds: ['main-model', 'worker-model'],
+      modelOverrides: {
+        'worker-model': { capability: 'standard' },
+      },
+    })
   })
 
   it('round-trips reasoning effort and capability annotations', async () => {

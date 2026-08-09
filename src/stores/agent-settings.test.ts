@@ -3,9 +3,14 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentApi } from '../../shared/agent-api'
-import type { ProviderPublicConfig } from '../../shared/config'
+import type {
+  ModelCapabilityOverride,
+  ProviderPublicConfig,
+  PublicConfig,
+} from '../../shared/config'
 import { useApprovalSettingsStore } from './approval-settings'
 import { useAgentSettingsStore } from './agent-settings'
+import { useModelPoolSettingsStore } from './model-pool-settings'
 import { providerFormSignature } from './provider-form'
 
 function provider(): ProviderPublicConfig {
@@ -66,13 +71,195 @@ describe('agent settings model pool', () => {
     expect(settings.modelOptions.map((option) => option.value)).toEqual([
       'enabled-model',
     ])
+    expect(settings.allModelOptions.map((option) => option.value)).toEqual([
+      'enabled-model',
+      'catalog-only-model',
+    ])
     expect(settings.modelTransferOptions.map((option) => option.value)).toEqual(
       ['catalog-only-model', 'enabled-model'],
     )
+    expect(
+      settings.modelTransferOptions.find(
+        (option) => option.value === 'enabled-model',
+      ),
+    ).toMatchObject({ disabled: true })
     expect(settings.approvalModelOptions.map((option) => option.value)).toEqual(
       ['enabled-model'],
     )
     expect(settings.providerCardSummaries[0]?.models).toEqual(['enabled-model'])
+  })
+
+  it('allows any known model to become main and enables it atomically', () => {
+    const settings = useAgentSettingsStore()
+    settings.providerForm.model = 'enabled-model'
+    settings.providerForm.enabledModelIds = ['enabled-model']
+    settings.modelProfiles = [
+      {
+        id: 'enabled-model',
+        availability: 'provider',
+        capabilitySource: 'default',
+        contextWindowTokens: 256_000,
+        compactThresholdTokens: 198_246,
+        maxOutputTokens: 65_536,
+      },
+      {
+        id: 'catalog-only-model',
+        availability: 'provider',
+        capabilitySource: 'default',
+        contextWindowTokens: 256_000,
+        compactThresholdTokens: 198_246,
+        maxOutputTokens: 65_536,
+      },
+    ]
+
+    settings.setProviderModel('catalog-only-model')
+
+    expect(settings.providerForm.model).toBe('catalog-only-model')
+    expect(settings.providerForm.enabledModelIds).toEqual([
+      'enabled-model',
+      'catalog-only-model',
+    ])
+    expect(
+      settings.modelTransferOptions.find(
+        (option) => option.value === 'catalog-only-model',
+      ),
+    ).toMatchObject({ disabled: true })
+  })
+
+  it('persists a manually entered model through the dedicated config action', async () => {
+    const settings = useAgentSettingsStore()
+    const configuredProvider = provider()
+    const modelOverride: ModelCapabilityOverride = {
+      contextWindowTokens: 400_000,
+      compactThresholdTokens: 250_000,
+      maxOutputTokens: 50_000,
+      reasoningEfforts: ['low', 'high'],
+      capability: 'strong',
+    }
+    settings.providers = [configuredProvider]
+    settings.activeProviderId = configuredProvider.id
+    settings.selectedProviderId = configuredProvider.id
+    settings.hydrateSelectedProviderForm()
+    settings.providerSavedSignature = providerFormSignature(
+      settings.providerForm,
+      settings.modelProfiles,
+    )
+    const updatedProvider: ProviderPublicConfig = {
+      ...configuredProvider,
+      revision: configuredProvider.revision + 1,
+      modelCatalog: [
+        ...configuredProvider.modelCatalog,
+        { id: 'manual-model' },
+      ],
+      enabledModelIds: [...configuredProvider.enabledModelIds, 'manual-model'],
+      modelOverrides: {
+        ...configuredProvider.modelOverrides,
+        'manual-model': modelOverride,
+      },
+    }
+    const setConfig = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: {
+        config: {
+          activeProviderId: configuredProvider.id,
+          providers: [updatedProvider],
+        } as PublicConfig,
+      },
+    }))
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: { setConfig } as Partial<AgentApi> as AgentApi,
+    })
+
+    await expect(
+      settings.addProviderModel({
+        modelId: '  manual-model  ',
+        modelOverride,
+      }),
+    ).resolves.toBe(true)
+    expect(setConfig).toHaveBeenCalledWith({
+      version: 1,
+      kind: 'provider-model-add',
+      providerId: configuredProvider.id,
+      modelId: 'manual-model',
+      modelOverride,
+    })
+    expect(settings.modelProfiles.map((model) => model.id)).toContain(
+      'manual-model',
+    )
+    expect(settings.providerForm.enabledModelIds).toContain('manual-model')
+    expect(
+      settings.modelProfiles.find((model) => model.id === 'manual-model'),
+    ).toMatchObject({
+      ...modelOverride,
+      capabilitySource: 'override',
+    })
+  })
+
+  it('deletes a model through the dedicated config action', async () => {
+    const settings = useAgentSettingsStore()
+    const pool = useModelPoolSettingsStore()
+    const configuredProvider = provider()
+    settings.providers = [configuredProvider]
+    settings.activeProviderId = configuredProvider.id
+    settings.selectedProviderId = configuredProvider.id
+    settings.hydrateSelectedProviderForm()
+    settings.providerSavedSignature = providerFormSignature(
+      settings.providerForm,
+      settings.modelProfiles,
+    )
+    const updatedProvider: ProviderPublicConfig = {
+      ...configuredProvider,
+      modelCatalog: configuredProvider.modelCatalog.filter(
+        (model) => model.id !== 'catalog-only-model',
+      ),
+    }
+    const setConfig = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: {
+        config: {
+          activeProviderId: configuredProvider.id,
+          providers: [updatedProvider],
+          modelPool: {
+            entries: [
+              {
+                id: 'worker-1',
+                enabled: false,
+                providerId: configuredProvider.id,
+                model: 'catalog-only-model',
+                reasoning: 'off',
+              },
+            ],
+          },
+        } as PublicConfig,
+      },
+    }))
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: { setConfig } as Partial<AgentApi> as AgentApi,
+    })
+
+    await expect(
+      settings.deleteProviderModel('  catalog-only-model  '),
+    ).resolves.toBe(true)
+
+    expect(setConfig).toHaveBeenCalledWith({
+      version: 1,
+      kind: 'provider-model-delete',
+      providerId: configuredProvider.id,
+      modelId: 'catalog-only-model',
+    })
+    expect(settings.modelProfiles.map((model) => model.id)).not.toContain(
+      'catalog-only-model',
+    )
+    expect(pool.entries).toEqual([
+      expect.objectContaining({
+        model: 'catalog-only-model',
+        enabled: false,
+      }),
+    ])
   })
 
   it('keeps every enabled approval model visible regardless of annotation', () => {

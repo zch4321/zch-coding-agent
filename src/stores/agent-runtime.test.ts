@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { createPinia, setActivePinia } from 'pinia'
+import { isReactive } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent } from '../../shared/agent-events'
 import type { AgentApi } from '../../shared/agent-api'
@@ -318,6 +319,78 @@ describe('agent runtime store', () => {
       reasoning: 'max',
     })
     expect(runtime.composerReasoning).toBe('max')
+  })
+
+  it('projects a reactive draft route into a clone-safe run payload', async () => {
+    const replica = useAgentReplicaStore()
+    replica.projects = [project]
+    replica.selectedProjectId = projectId
+    const settings = useAgentSettingsStore()
+    settings.activeProviderId = 'provider-a'
+    settings.providers = [
+      provider('provider-a', 'provider-a-default', ['provider-a-default']),
+    ]
+    const startRun = vi.fn(async (payload: DurableRunStartPayload) =>
+      success({
+        version: 1 as const,
+        outcome: 'deduplicated' as const,
+        session: session(payload.sessionId),
+        userMessage: userMessage(payload.sessionId),
+      }),
+    )
+    installApi({ startRun: startRun as AgentApi['startRun'] })
+    const runtime = useAgentRuntimeStore()
+
+    runtime.setProviderReasoning('high')
+    expect(isReactive(runtime.draftModelSelection)).toBe(true)
+
+    await expect(
+      runtime.sendMessage({ text: 'Use the draft route' }),
+    ).resolves.toBe(true)
+
+    const payload = startRun.mock.calls[0]![0]
+    expect(payload).toMatchObject({
+      kind: 'new_session',
+      modelSelection: {
+        providerId: 'provider-a',
+        model: 'provider-a-default',
+        reasoning: 'high',
+      },
+    })
+    expect(() => structuredClone(payload)).not.toThrow()
+    expect(runtime.startPending).toBe(false)
+  })
+
+  it('clears draft pending state when the run bridge throws', async () => {
+    const replica = useAgentReplicaStore()
+    replica.projects = [project]
+    replica.selectedProjectId = projectId
+    const startRun = vi.fn(async () => {
+      throw new Error('Run bridge unavailable')
+    })
+    installApi({ startRun: startRun as AgentApi['startRun'] })
+    const runtime = useAgentRuntimeStore()
+
+    await expect(runtime.sendMessage({ text: 'Try once' })).resolves.toBe(false)
+    expect(runtime.startPending).toBe(false)
+    await expect(runtime.sendMessage({ text: 'Try again' })).resolves.toBe(
+      false,
+    )
+
+    expect(startRun).toHaveBeenCalledTimes(2)
+    expect(runtime.startPending).toBe(false)
+    expect(useNotificationStore().pending).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        code: 'RUN_START_FAILED',
+        message: 'Run bridge unavailable',
+      }),
+      expect.objectContaining({
+        severity: 'error',
+        code: 'RUN_START_FAILED',
+        message: 'Run bridge unavailable',
+      }),
+    ])
   })
 
   it('blocks a second draft submission while the first start IPC is pending', async () => {

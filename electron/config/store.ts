@@ -66,6 +66,72 @@ function normalizedEnabledModelIds(modelIds: readonly string[]): string[] {
   return [...new Set(modelIds.map((modelId) => modelId.trim()).filter(Boolean))]
 }
 
+/** Adds one configured model and makes it available to runtime selectors. */
+function addProviderModel(
+  provider: AppProviderConfig,
+  modelId: string,
+  modelOverride?: AppProviderConfig['modelOverrides'][string],
+): void {
+  const normalizedModelId = modelId.trim()
+  if (!normalizedModelId) throw new Error('Model name is required')
+
+  if (!provider.modelCatalog.some((model) => model.id === normalizedModelId)) {
+    if (provider.modelCatalog.length >= 1_000) {
+      throw new Error(
+        'Provider model list cannot contain more than 1000 models',
+      )
+    }
+    provider.modelCatalog.push({ id: normalizedModelId })
+  }
+
+  if (!provider.enabledModelIds.includes(normalizedModelId)) {
+    if (provider.enabledModelIds.length >= 1_000) {
+      throw new Error('Enabled model list cannot contain more than 1000 models')
+    }
+    provider.enabledModelIds.push(normalizedModelId)
+  }
+
+  if (!provider.model) provider.model = normalizedModelId
+
+  if (modelOverride !== undefined) {
+    const normalizedOverride = structuredClone(modelOverride)
+    if (normalizedOverride.reasoningEfforts?.length) {
+      normalizedOverride.reasoningEfforts = normalizeReasoningEfforts(
+        normalizedOverride.reasoningEfforts,
+      )
+    }
+    provider.modelOverrides[normalizedModelId] = normalizedOverride
+    assertModelOverridesValid(provider.modelOverrides)
+  }
+}
+
+/** Removes one non-main model from every Provider-owned configuration set. */
+function deleteProviderModel(
+  provider: AppProviderConfig,
+  modelId: string,
+): void {
+  const normalizedModelId = modelId.trim()
+  if (!normalizedModelId) throw new Error('Model name is required')
+  if (provider.model === normalizedModelId) {
+    throw new Error('Cannot delete the current main model')
+  }
+  const exists =
+    provider.modelCatalog.some((model) => model.id === normalizedModelId) ||
+    provider.enabledModelIds.includes(normalizedModelId) ||
+    Object.hasOwn(provider.modelOverrides, normalizedModelId)
+  if (!exists) {
+    throw new Error(`Provider model not found: ${normalizedModelId}`)
+  }
+
+  provider.modelCatalog = provider.modelCatalog.filter(
+    (model) => model.id !== normalizedModelId,
+  )
+  provider.enabledModelIds = provider.enabledModelIds.filter(
+    (candidate) => candidate !== normalizedModelId,
+  )
+  delete provider.modelOverrides[normalizedModelId]
+}
+
 /** Validates the configured main route while allowing an unconfigured model. */
 function assertMainRouteConfigValid(provider: AppProviderConfig): void {
   if (!provider.model) return
@@ -642,7 +708,18 @@ export class ConfigStore {
         throw new Error(`Provider not found: ${providerId}`)
       }
 
-      provider.modelCatalog = structuredClone(models)
+      const knownModelIds = new Set(
+        provider.modelCatalog.map((model) => model.id),
+      )
+      const additions: AppProviderConfig['modelCatalog'] = []
+      for (const model of models) {
+        const modelId = model.id.trim()
+        if (!modelId || knownModelIds.has(modelId)) continue
+        if (provider.modelCatalog.length + additions.length >= 1_000) break
+        additions.push({ ...structuredClone(model), id: modelId })
+        knownModelIds.add(modelId)
+      }
+      provider.modelCatalog.push(...structuredClone(additions))
       provider.modelCatalogFetchedAt = fetchedAt
       await writeJsonAtomic(this.#filePath, next)
       this.#config = next
@@ -698,6 +775,44 @@ export class ConfigStore {
         this.#config = next
         await this.#secretStore.delete(previousReference)
         return this.getPublicConfig()
+      }
+      case 'provider-model-add': {
+        const provider = getAppProvider(next, request.providerId)
+        if (!provider) {
+          throw new Error(`Provider not found: ${request.providerId}`)
+        }
+        const previousRouteShape = providerRouteShape(provider)
+        addProviderModel(provider, request.modelId, request.modelOverride)
+        assertMainRouteConfigValid(provider)
+        if (providerRouteShape(provider) !== previousRouteShape) {
+          provider.revision += 1
+        }
+        break
+      }
+      case 'provider-model-delete': {
+        const provider = getAppProvider(next, request.providerId)
+        if (!provider) {
+          throw new Error(`Provider not found: ${request.providerId}`)
+        }
+        const normalizedModelId = request.modelId.trim()
+        if (
+          next.approval.approverProviderId === provider.id &&
+          next.approval.approverModel === normalizedModelId
+        ) {
+          throw new Error('Cannot delete the current approval model')
+        }
+        const previousRouteShape = providerRouteShape(provider)
+        deleteProviderModel(provider, normalizedModelId)
+        disableModelPoolEntries(
+          next,
+          (entry) =>
+            entry.providerId === provider.id &&
+            entry.model === normalizedModelId,
+        )
+        if (providerRouteShape(provider) !== previousRouteShape) {
+          provider.revision += 1
+        }
+        break
       }
       case 'provider-select': {
         const provider = getAppProvider(next, request.providerId)

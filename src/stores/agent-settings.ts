@@ -3,6 +3,7 @@ import { IPC_VERSION } from '../../shared/channels'
 import type {
   AssistantLanguage,
   ConfigSection,
+  ModelCapabilityOverride,
   ModelCapabilityLevel,
   PermissionMode,
   ProviderPublicConfig,
@@ -228,6 +229,17 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           value: model.id,
         }))
     },
+    allModelOptions: (state) =>
+      [...state.modelProfiles]
+        .sort((left, right) => {
+          if (left.id === state.providerForm.model) return -1
+          if (right.id === state.providerForm.model) return 1
+          return left.id.localeCompare(right.id, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          })
+        })
+        .map((model) => ({ label: model.id, value: model.id })),
     modelTransferOptions: (state) =>
       [...state.modelProfiles]
         .sort((left, right) =>
@@ -236,7 +248,11 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
             sensitivity: 'base',
           }),
         )
-        .map((model) => ({ label: model.id, value: model.id })),
+        .map((model) => ({
+          label: model.id,
+          value: model.id,
+          disabled: model.id === state.providerForm.model,
+        })),
     providerOptions: (state) =>
       state.providers.map((provider) => ({
         label: provider.label,
@@ -464,9 +480,12 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       )
     },
     setProviderModel(model: string) {
-      if (model && !this.providerForm.enabledModelIds.includes(model)) return
       this.providerForm.model = model
       if (!model) return
+
+      if (!this.providerForm.enabledModelIds.includes(model)) {
+        this.providerForm.enabledModelIds.push(model)
+      }
 
       if (!this.modelProfiles.some((candidate) => candidate.id === model)) {
         const fallbackContext =
@@ -486,6 +505,53 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           left.id.localeCompare(right.id),
         )
       }
+    },
+    /** Persists one manually configured model and enables it for runtime selection. */
+    async addProviderModel(input: {
+      modelId: string
+      modelOverride: ModelCapabilityOverride
+    }): Promise<boolean> {
+      const bridge = window.agentApi
+      const normalizedModelId = input.modelId.trim()
+      if (!bridge || !normalizedModelId) return false
+      if (this.providerDirty && !(await this.saveProvider())) return false
+
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'provider-model-add',
+        providerId: this.selectedProviderId,
+        modelId: normalizedModelId,
+        modelOverride: cloneJson(input.modelOverride),
+      })
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+
+      this.applyConfig(result.value.config, ['providers'])
+      return true
+    },
+    /** Deletes one non-active model from the selected Provider configuration. */
+    async deleteProviderModel(modelId: string): Promise<boolean> {
+      const bridge = window.agentApi
+      const normalizedModelId = modelId.trim()
+      if (!bridge || !normalizedModelId) return false
+      if (this.providerDirty && !(await this.saveProvider())) return false
+
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'provider-model-delete',
+        providerId: this.selectedProviderId,
+        modelId: normalizedModelId,
+      })
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+
+      this.applyConfig(result.value.config, ['providers'])
+      useModelPoolSettingsStore().applyExternalConfig(result.value.config)
+      return true
     },
     /** Updates one model row while preserving a usable prompt budget. */
     updateModelConfiguration(

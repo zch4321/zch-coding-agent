@@ -178,7 +178,9 @@ export function createAppIpcHandlers(
               message:
                 error.status === 401 || error.status === 403
                   ? `${provider.label} rejected the configured credential`
-                  : error.message,
+                  : error.status === 404 || error.status === 405
+                    ? `${provider.label} does not expose a model catalog; add models manually`
+                    : error.message,
             })
           }
 

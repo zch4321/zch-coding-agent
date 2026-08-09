@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -24,9 +24,15 @@ import {
   type ModelCapabilityLevel,
   type ReasoningEffort,
 } from '../../../shared/config'
-import { resolveSupportedReasoningEfforts } from '../../../shared/model-settings'
+import {
+  DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
+  resolveModelTokenSettings,
+  resolveSupportedReasoningEfforts,
+  type ModelTokenSettings,
+} from '../../../shared/model-settings'
 import { useAgentStore } from '../../stores/agent'
 import { providerDraftConflicts } from '../../stores/provider-form'
+import ProviderModelDeleteAction from './ProviderModelDeleteAction.vue'
 
 /** Maps each reasoning effort to its locale label key. */
 const REASONING_LABEL_KEYS: Record<ReasoningEffort, string> = {
@@ -45,9 +51,26 @@ type ProviderAction =
   | { kind: 'delete'; providerId: string }
   | { kind: 'set-active'; providerId: string }
 
+interface ManualModelDraft extends ModelTokenSettings {
+  modelId: string
+  reasoningEfforts: ReasoningEffort[]
+  capability: ModelCapabilityLevel | null
+}
+
 const agent = useAgentStore()
 const { t } = useI18n()
 const deleteProviderId = ref<string>()
+const showAddModel = ref(false)
+const modelConfigurationFilter = ref('')
+const manualModelDraft = reactive<ManualModelDraft>({
+  modelId: '',
+  ...resolveModelTokenSettings({
+    contextWindowTokens: DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
+    compactTriggerPercent: 80,
+  }),
+  reasoningEfforts: [],
+  capability: null,
+})
 let autosaveTimer: ReturnType<typeof setTimeout> | undefined
 const providerTypeOptions = computed(() => [
   {
@@ -135,25 +158,163 @@ const selectedProviderReady = computed(
 )
 const modelTransferOptions = computed(() => agent.modelTransferOptions)
 const selectedModelIds = computed(() => agent.providerForm.enabledModelIds)
-const selectedModelProfiles = computed(() => {
-  const profilesById = new Map(
-    agent.modelProfiles.map((model) => [model.id, model]),
+const allModelProfiles = computed(() =>
+  [...agent.modelProfiles].sort((left, right) => {
+    if (left.id === agent.providerForm.model) return -1
+    if (right.id === agent.providerForm.model) return 1
+    const leftEnabled = selectedModelIds.value.includes(left.id)
+    const rightEnabled = selectedModelIds.value.includes(right.id)
+    if (leftEnabled !== rightEnabled) return leftEnabled ? -1 : 1
+    return left.id.localeCompare(right.id, undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    })
+  }),
+)
+const visibleModelProfiles = computed(() => {
+  const query = modelConfigurationFilter.value.trim().toLocaleLowerCase()
+  if (!query) return allModelProfiles.value
+  return allModelProfiles.value.filter((model) =>
+    model.id.toLocaleLowerCase().includes(query),
   )
-  return selectedModelIds.value.flatMap((id) => {
-    const model = profilesById.get(id)
-    return model ? [model] : []
-  })
+})
+const manualModelValidation = computed(() => {
+  const modelId = manualModelDraft.modelId.trim()
+  if (!modelId) return t('settings.modelNameRequired')
+  if (modelId.length > 256) return t('settings.modelNameTooLong')
+  if (
+    agent.selectedProvider?.modelCatalog.some((model) => model.id === modelId)
+  ) {
+    return t('settings.modelAlreadyExists')
+  }
+  if (
+    !Number.isInteger(manualModelDraft.contextWindowTokens) ||
+    manualModelDraft.contextWindowTokens < 2_048 ||
+    manualModelDraft.contextWindowTokens > 10_000_000 ||
+    !Number.isInteger(manualModelDraft.maxOutputTokens) ||
+    manualModelDraft.maxOutputTokens < 1 ||
+    manualModelDraft.maxOutputTokens >
+      manualModelDraft.contextWindowTokens - 1_024 ||
+    !Number.isInteger(manualModelDraft.compactThresholdTokens) ||
+    manualModelDraft.compactThresholdTokens < 1_024 ||
+    manualModelDraft.compactThresholdTokens >
+      manualModelDraft.contextWindowTokens - manualModelDraft.maxOutputTokens
+  ) {
+    return t('settings.modelConfigurationInvalid')
+  }
+  if (
+    !agent.providerForm.model &&
+    manualModelDraft.reasoningEfforts.length > 0 &&
+    !manualModelDraft.reasoningEfforts.includes(agent.providerForm.reasoning)
+  ) {
+    return t('settings.newMainModelReasoningConflict')
+  }
+  return ''
 })
 
 function handleSelectedModels(value: Array<string | number>): void {
   const availableIds = new Set(agent.modelProfiles.map((model) => model.id))
-  const nextModelIds = [
-    ...new Set(value.map(String).filter((id) => availableIds.has(id))),
-  ]
-  agent.providerForm.enabledModelIds = nextModelIds
-  if (!nextModelIds.includes(agent.providerForm.model)) {
-    agent.providerForm.model = nextModelIds[0] ?? ''
+  const mainModel = agent.providerForm.model
+  const nextModelIds = [...new Set(value.map(String))].filter((id) =>
+    availableIds.has(id),
+  )
+  if (mainModel && !nextModelIds.includes(mainModel)) {
+    nextModelIds.push(mainModel)
   }
+  agent.providerForm.enabledModelIds = nextModelIds
+  if (!mainModel && nextModelIds[0]) {
+    agent.setProviderDraftModel(nextModelIds[0])
+  }
+}
+
+/** Opens the manual-model dialog with a clean draft. */
+function openAddModel(): void {
+  Object.assign(manualModelDraft, {
+    modelId: '',
+    ...resolveModelTokenSettings({
+      contextWindowTokens:
+        agent.limitsConfig?.maxContextTokens ??
+        DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
+      compactTriggerPercent:
+        agent.limitsConfig?.autoCompactTriggerPercent ?? 80,
+    }),
+    reasoningEfforts: [],
+    capability: null,
+  })
+  showAddModel.value = true
+}
+
+/** Keeps manual token fields within the same usable-budget rules as saved rows. */
+function updateManualModelTokenSetting(
+  field: 'contextWindowTokens' | 'compactThresholdTokens' | 'maxOutputTokens',
+  value: number | null,
+): void {
+  if (value === null || !Number.isInteger(value)) return
+  const contextWindowTokens =
+    field === 'contextWindowTokens'
+      ? Math.min(10_000_000, Math.max(2_048, value))
+      : manualModelDraft.contextWindowTokens
+  const compactThresholdTokens =
+    field === 'compactThresholdTokens'
+      ? Math.max(1_024, value)
+      : manualModelDraft.compactThresholdTokens
+  const maxOutputTokens =
+    field === 'maxOutputTokens'
+      ? Math.max(1, value)
+      : manualModelDraft.maxOutputTokens
+  Object.assign(
+    manualModelDraft,
+    resolveModelTokenSettings({
+      contextWindowTokens,
+      compactThresholdTokens,
+      maxOutputTokens,
+      compactTriggerPercent:
+        agent.limitsConfig?.autoCompactTriggerPercent ?? 80,
+    }),
+  )
+}
+
+/** Persists a manually entered model and keeps the dialog open on failure. */
+async function confirmAddModel(): Promise<boolean> {
+  if (manualModelValidation.value) return false
+  const added = await agent.addProviderModel({
+    modelId: manualModelDraft.modelId,
+    modelOverride: {
+      contextWindowTokens: manualModelDraft.contextWindowTokens,
+      compactThresholdTokens: manualModelDraft.compactThresholdTokens,
+      maxOutputTokens: manualModelDraft.maxOutputTokens,
+      ...(manualModelDraft.reasoningEfforts.length
+        ? { reasoningEfforts: [...manualModelDraft.reasoningEfforts] }
+        : {}),
+      ...(manualModelDraft.capability
+        ? { capability: manualModelDraft.capability }
+        : {}),
+    },
+  })
+  if (!added) return false
+  showAddModel.value = false
+  return true
+}
+
+/** Explains why one model cannot currently be deleted. */
+function modelDeleteDisabledReason(modelId: string): string {
+  if (modelId === agent.providerForm.model) {
+    return t('settings.deleteMainModelBlocked')
+  }
+  if (
+    agent.approvalSavedForm.providerId === agent.selectedProviderId &&
+    agent.approvalSavedForm.model === modelId
+  ) {
+    return t('settings.deleteApprovalModelBlocked')
+  }
+  return ''
+}
+
+/** Flushes pending Provider edits before deleting one configured model. */
+async function confirmDeleteModel(modelId: string): Promise<boolean> {
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = undefined
+  return agent.deleteProviderModel(modelId)
 }
 
 /** Applies a reasoning-effort annotation edit to one model row. */
@@ -471,9 +632,9 @@ function handleDropdownSelect(key: string | number, providerId: string) {
         <div class="settings-inline">
           <NSelect
             :value="agent.providerForm.model"
-            :options="agent.modelOptions"
+            :options="agent.allModelOptions"
             :loading="agent.modelCatalogLoading"
-            :disabled="agent.modelOptions.length === 0"
+            :disabled="agent.allModelOptions.length === 0"
             :placeholder="t('settings.selectMainModel')"
             filterable
             @update:value="agent.setProviderDraftModel"
@@ -547,9 +708,14 @@ function handleDropdownSelect(key: string | number, providerId: string) {
       </label>
 
       <div class="provider-model-settings">
-        <div>
-          <h4>{{ t('settings.modelSettings') }}</h4>
-          <p>{{ t('settings.modelSettingsHint') }}</p>
+        <div class="provider-model-settings-title">
+          <div>
+            <h4>{{ t('settings.modelSettings') }}</h4>
+            <p>{{ t('settings.modelSettingsHint') }}</p>
+          </div>
+          <NButton secondary @click="openAddModel">
+            {{ t('settings.addModel') }}
+          </NButton>
         </div>
         <small
           v-if="draftConflicts.approvalReason === 'model-disabled'"
@@ -585,8 +751,14 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           data-testid="provider-model-transfer"
           @update:value="handleSelectedModels"
         />
+        <NInput
+          v-if="allModelProfiles.length"
+          v-model:value="modelConfigurationFilter"
+          clearable
+          :placeholder="t('settings.filterModelConfiguration')"
+        />
         <div
-          v-if="selectedModelProfiles.length"
+          v-if="visibleModelProfiles.length"
           class="provider-model-settings-header"
           aria-hidden="true"
         >
@@ -596,9 +768,10 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <span>{{ t('settings.maximumOutputLength') }}</span>
           <span>{{ t('settings.modelReasoningEfforts') }}</span>
           <span>{{ t('settings.modelCapability') }}</span>
+          <span>{{ t('settings.modelActions') }}</span>
         </div>
         <NScrollbar
-          v-if="selectedModelProfiles.length"
+          v-if="visibleModelProfiles.length"
           class="provider-model-settings-scroll"
         >
           <NList
@@ -606,7 +779,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             class="provider-model-settings-list"
             data-testid="provider-model-settings-list"
           >
-            <NListItem v-for="model in selectedModelProfiles" :key="model.id">
+            <NListItem v-for="model in visibleModelProfiles" :key="model.id">
               <div class="provider-model-settings-row">
                 <div class="provider-model-name">
                   <strong>{{ model.id }}</strong>
@@ -698,13 +871,111 @@ function handleDropdownSelect(key: string | number, providerId: string) {
                     @update:value="handleCapabilityChange(model.id, $event)"
                   />
                 </label>
+                <ProviderModelDeleteAction
+                  :model-id="model.id"
+                  :disabled-reason="modelDeleteDisabledReason(model.id)"
+                  :delete-model="confirmDeleteModel"
+                />
               </div>
             </NListItem>
           </NList>
         </NScrollbar>
-        <NEmpty v-else :description="t('settings.selectModelsHint')" />
+        <NEmpty
+          v-else
+          :description="
+            allModelProfiles.length
+              ? t('settings.noMatchingModels')
+              : t('settings.noModelsHint')
+          "
+        />
       </div>
     </div>
+
+    <NModal
+      v-model:show="showAddModel"
+      preset="dialog"
+      :title="t('settings.addModelTitle')"
+      :positive-text="t('settings.addModel')"
+      :negative-text="t('common.cancel')"
+      :positive-button-props="{ disabled: Boolean(manualModelValidation) }"
+      @positive-click="confirmAddModel"
+    >
+      <div class="provider-add-model-fields">
+        <label class="settings-field">
+          <span>{{ t('settings.modelName') }}</span>
+          <NInput
+            v-model:value="manualModelDraft.modelId"
+            :placeholder="t('settings.addModelPlaceholder')"
+            :maxlength="256"
+            @keyup.enter="confirmAddModel"
+          />
+        </label>
+        <div class="provider-add-model-token-grid">
+          <label class="settings-field">
+            <span>{{ t('settings.maximumContext') }}</span>
+            <NInputNumber
+              :value="manualModelDraft.contextWindowTokens"
+              :min="2048"
+              :max="10000000"
+              :show-button="false"
+              @update:value="
+                updateManualModelTokenSetting('contextWindowTokens', $event)
+              "
+            />
+          </label>
+          <label class="settings-field">
+            <span>{{ t('settings.compressionThreshold') }}</span>
+            <NInputNumber
+              :value="manualModelDraft.compactThresholdTokens"
+              :min="1024"
+              :max="
+                manualModelDraft.contextWindowTokens -
+                manualModelDraft.maxOutputTokens
+              "
+              :show-button="false"
+              @update:value="
+                updateManualModelTokenSetting('compactThresholdTokens', $event)
+              "
+            />
+          </label>
+          <label class="settings-field">
+            <span>{{ t('settings.maximumOutputLength') }}</span>
+            <NInputNumber
+              :value="manualModelDraft.maxOutputTokens"
+              :min="1"
+              :max="manualModelDraft.contextWindowTokens - 1024"
+              :show-button="false"
+              @update:value="
+                updateManualModelTokenSetting('maxOutputTokens', $event)
+              "
+            />
+          </label>
+        </div>
+        <label class="settings-field">
+          <span>{{ t('settings.modelReasoningEfforts') }}</span>
+          <NSelect
+            v-model:value="manualModelDraft.reasoningEfforts"
+            :options="reasoningEffortOptions"
+            :placeholder="t('settings.modelReasoningEffortsPlaceholder')"
+            multiple
+            clearable
+          />
+        </label>
+        <label class="settings-field">
+          <span>{{ t('settings.modelCapability') }}</span>
+          <NSelect
+            v-model:value="manualModelDraft.capability"
+            :options="capabilityOptions"
+            :placeholder="t('settings.modelCapabilityPlaceholder')"
+            clearable
+          />
+        </label>
+        <small v-if="manualModelValidation" class="settings-field-error">
+          {{ manualModelValidation }}
+        </small>
+        <small v-else>{{ t('settings.addModelHint') }}</small>
+      </div>
+    </NModal>
 
     <NModal
       :show="Boolean(deleteProviderId)"

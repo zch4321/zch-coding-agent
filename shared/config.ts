@@ -595,6 +595,25 @@ export const ConfigSetRequestSchema = Type.Union([
   Type.Object(
     {
       version: Type.Literal(1),
+      kind: Type.Literal('provider-model-add'),
+      providerId: Type.String({ minLength: 1, maxLength: 128 }),
+      modelId: Type.String({ minLength: 1, maxLength: 256 }),
+      modelOverride: Type.Optional(ModelCapabilityOverrideSchema),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('provider-model-delete'),
+      providerId: Type.String({ minLength: 1, maxLength: 128 }),
+      modelId: Type.String({ minLength: 1, maxLength: 256 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
       kind: Type.Literal('provider-select'),
       providerId: Type.String({ minLength: 1, maxLength: 128 }),
     },

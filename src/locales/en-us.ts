@@ -378,14 +378,36 @@ const enUS = {
     mainModel: 'Main model',
     modelSettings: 'Model configuration',
     modelSettingsHint:
-      'The right side is this Provider’s enabled model pool. Only enabled models appear in conversation, Provider, and future Swarm selectors. Changes save automatically.',
+      'The transfer controls models offered in conversations and future Swarms. Configure every known Provider model in the list below; changes save automatically.',
+    addModel: 'Add model',
+    addModelTitle: 'Add model',
+    addModelPlaceholder: 'Enter the exact model name used by the Provider',
+    addModelHint:
+      'Confirming saves the model, enabled state, and configuration together. Names are exact and case-sensitive.',
+    modelNameRequired: 'Enter a model name.',
+    modelNameTooLong: 'Model names cannot exceed 256 characters.',
+    modelAlreadyExists: 'This model is already in the list.',
+    modelConfigurationInvalid:
+      'Check the context, compaction threshold, and maximum output values.',
+    newMainModelReasoningConflict:
+      "This model will become the main model, so its reasoning efforts must include the Provider's current default.",
+    modelActions: 'Actions',
+    deleteModelText:
+      'Delete the local catalog entry, enabled state, and configuration for {model}? If the Provider still returns it, the next refresh will add it again.',
+    deleteMainModelBlocked:
+      'The main model cannot be deleted. Select another main model first.',
+    deleteApprovalModelBlocked:
+      'Automatic approval uses this model. Select another approval model first.',
     availableModels: 'Provider models',
     selectedModels: 'Enabled models',
     filterModels: 'Filter models',
+    filterModelConfiguration: 'Filter all model configurations below',
     selectAllModels: 'Select all',
     clearSelectedModels: 'Clear all',
     selectModelsHint:
       'Enter an API key to refresh the catalog, then enable at least one model',
+    noModelsHint: 'Refresh the model catalog or add a model to configure it.',
+    noMatchingModels: 'No models match this filter.',
     modelName: 'Model',
     maximumContext: 'Maximum context',
     compressionThreshold: 'Compression threshold',
@@ -434,9 +456,8 @@ const enUS = {
     saved: 'Saved',
     saving: 'Saving…',
     autosavePending: 'Waiting to autosave…',
-    selectMainModel: 'Enable a model first',
-    selectMainModelHint:
-      'Enable a model in the pool below before selecting the main model.',
+    selectMainModel: 'Select a main model',
+    selectMainModelHint: 'Refresh the model catalog or add a model first.',
     tokenConservative: 'Conservative default',
     tokenCustom: 'Custom UTF-8 bytes/token',
     modelProfile:
