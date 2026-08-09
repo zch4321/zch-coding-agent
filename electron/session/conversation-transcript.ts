@@ -5,7 +5,11 @@ import {
   renderToolResultContent,
   type MessageRecord,
 } from '../../shared/message'
-import { canonicalHash, messageText } from './canonical-history'
+import {
+  canonicalHash,
+  LegacyToolResultError,
+  messageText,
+} from './canonical-history'
 
 export const CONVERSATION_TRANSCRIPT_FORMAT =
   'zch-conversation-markdown' as const
@@ -121,6 +125,12 @@ function renderRecord(
     case 'tool_result': {
       const part = record.parts[0]
       const metadata = record.metadata?.tool
+      if (
+        options.mode === 'provider_transfer' &&
+        metadata?.resultProjection !== 'model-content.v1'
+      ) {
+        throw new LegacyToolResultError()
+      }
       const name = metadata?.name ?? 'tool'
       const details = [
         `Call ID: ${part.callId}`,

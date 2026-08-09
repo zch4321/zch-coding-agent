@@ -666,6 +666,7 @@ export class SessionCompactCoordinator {
     const all = await this.#allHistory(session)
     if (!this.#historyNeedsTransition(active, all, target)) return false
 
+    new MessageHistoryCompiler().compile(session.history)
     const config = this.#configStore.getPublicConfig()
     const document = renderConversationTranscript(all, {
       mode: 'provider_transfer',

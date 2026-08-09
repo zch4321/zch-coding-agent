@@ -203,4 +203,50 @@ describe('conversation transcript', () => {
     expect(wrapped).toContain(']]]]><![CDATA[>')
     expect(wrapped).toContain(`sha256="${document.contentHash}"`)
   })
+
+  it('exports legacy Tool Results but rejects them from provider transfer', () => {
+    const history = state()
+    appendUserInput(history, {
+      content: 'Read the legacy fixture.',
+      clientRequestId: 'request:legacy-transcript',
+    })
+    appendAssistantTurn(history, {
+      text: '',
+      route,
+      toolCalls: [
+        {
+          id: 'call:legacy-transcript' as CallId,
+          toolId: 'read_file',
+          args: { path: 'legacy.txt' },
+        },
+      ],
+    })
+    const legacy = appendToolResult(history, {
+      callId: 'call:legacy-transcript' as CallId,
+      content: [{ type: 'text', text: 'legacy result remains exportable' }],
+      isError: false,
+      name: 'read_file',
+      status: 'completed',
+      truncated: false,
+    })
+    if (!legacy.metadata) throw new Error('Tool metadata fixture is missing')
+    delete legacy.metadata.tool.resultProjection
+
+    const exported = renderConversationTranscript(history.history, {
+      mode: 'export',
+      sessionId: history.sessionId,
+      title: 'Legacy export fixture',
+      exportedAt: '2026-08-09T00:00:00.000Z',
+    })
+
+    expect(exported.markdown).toContain('legacy result remains exportable')
+    expect(() =>
+      renderConversationTranscript(history.history, {
+        mode: 'provider_transfer',
+        sessionId: history.sessionId,
+        title: 'Legacy transfer fixture',
+        maxToolResultChars: 1_024,
+      }),
+    ).toThrow(/LEGACY_TOOL_RESULT_UNSUPPORTED/u)
+  })
 })
