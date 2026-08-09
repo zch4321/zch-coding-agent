@@ -751,6 +751,7 @@ describe('SessionManager compaction', () => {
           event.type === 'run.status' && event.status === 'completed',
       ),
     )
+    await waitFor(() => !manager.hasActiveRun(sessionId))
 
     const timestamp = '2026-08-08T00:00:00.000Z'
     const sessionRecord = (model: string, revision: number): SessionRecord => ({
@@ -786,6 +787,7 @@ describe('SessionManager compaction', () => {
           event.status === 'failed',
       ),
     )
+    await waitFor(() => !manager.hasActiveRun(sessionId))
     expect(provider.requests).toHaveLength(1)
 
     manager.applyDurableSessionRecord(sessionRecord('rollback-model-a', 3))

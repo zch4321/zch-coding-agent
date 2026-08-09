@@ -1727,7 +1727,7 @@ child stream/tool/domain event 不发布给 Renderer，也不创建独立 trace 
 5. 发送 B。
 6. 断言 `messages WHERE in_history = 1 ORDER BY seq` 能构造协议完整的 A/tool/final/B provider request。
 
-常规完整门禁统一为 `npm run verify`：默认 Vitest、静态检查、分进程 native/ripgrep/development SQLite smoke、Desktop/Headless build、Windows package、packaged SQLite 和复用构建产物的 E2E。真实 Provider 测试仍是显式 opt-in，不进入该门禁。
+验证采用两级门禁：日常 `npm run check` 并行执行 Vitest、lint、format check 和 typecheck，等待全部任务结束后按组汇总失败；合并与发布前的 `npm run verify` 在此基础上增加分进程 native/ripgrep/development SQLite smoke、Desktop/Headless build、Windows package、packaged SQLite 和复用构建产物的 E2E。CI 将完整门禁拆到独立 Windows runner 并行诊断，Playwright 单个任务内部仍使用单 worker 保证 Electron 状态隔离。真实 Provider 测试仍是显式 opt-in，不进入任一默认门禁。
 
 ---
 

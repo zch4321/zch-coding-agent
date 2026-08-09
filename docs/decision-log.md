@@ -103,7 +103,7 @@
 
 ## 2026-07-26 — 发布验证使用单一 verify 入口
 
-- 状态：已采纳。
+- 状态：已由 2026-08-09 的分层验证门禁决策取代。
 - 决定：常规完整门禁只运行 `npm run verify`。`native`、`ripgrep` 和 development SQLite 由 `test:runtime` 分进程串行调度；packaged SQLite 在 Windows package 生成后只测试打包 Electron；E2E 复用该构建产物。
 - 高成本边界：默认不运行独立 benchmark-cases、任何 benchmark preset、Docker worker/image、外部 benchmark 或真实 Provider 测试。确定性的 benchmark manifest/checksum/路径安全用例已经属于 `npm test`；其他工作负载只有用户明确要求时才执行。
 
@@ -170,3 +170,11 @@
 - Tool description 偏好：每个 task 默认 1 个 Agent；只有需要独立交叉验证、多视角调查或高风险复核时才增加数量，并选择足以完成任务的最低 capability，不能为了用满上限而扩张。
 - 分配边界：所有 `actualCapability >= requiredCapability` 的模型都可参与；allocator 按稳定声明顺序先均匀轮询 `Provider + model`，再轮询该模型入池的精确 reasoning route。这样同一模型选择更多 reasoning 叶节点不会获得额外权重；模型数少于所需 Agent 数时自然重复使用。assignment 在 Job 创建时冻结，失败不自动换 Provider 重跑。
 - 理由：任务需要多少独立 Agent 是一次 orchestration 的属性，模型池只回答“哪些精确 route 可以被选”。把数量放到 Tool/Job 并保留一个用户级硬上限，可以让主 Agent 按任务拆分，同时避免 per-route 配额、全局 Run 并发与 Job 总量三套相互重叠的配置。
+
+## 2026-08-09 — 日常检查与合并门禁分层
+
+- 状态：已采纳；取代 2026-07-26 “每次阶段完成只运行完整 verify” 的执行频率，完整门禁覆盖范围不缩减。
+- 日常门禁：`npm run check` 并行运行 lint、format check、typecheck 和确定性 Vitest。并行任务互不取消，全部结束后按任务分组输出失败；这里追求一次收集完整的低成本诊断，而不是全局首错退出。
+- 合并门禁：`npm run verify` 仅在合并、发布或显式要求完整验证时运行；它在 `check` 之上继续覆盖分进程 runtime smoke、Desktop/Headless build、Windows package、packaged SQLite 和 Electron E2E。E2E 不从产品门禁移除，只从每次普通开发修改的必跑路径移出。
+- CI 编排：普通分支 push 只执行快速检查；PR、`master` push 和手动触发将 runtime、E2E、package smoke 分配到独立 Windows runner，并禁用 matrix fail-fast，使互不依赖的失败能在同一次 workflow 中全部呈现。E2E runner 自行构建应用，package runner 自行构建与打包，以少量重复构建换取隔离和更短墙钟时间。
+- 稳定性边界：Playwright 继续单 worker；本地完整门禁也不让 E2E 与 electron-builder 在同一 checkout 并发，避免共享构建目录、native rebuild 和 Windows 文件锁造成非确定性失败。不使用 PR 的直接合并必须在本地先运行 `npm run verify`，远端 `master` 门禁只提供合并后保护。

@@ -3,7 +3,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 describe('release verification policy', () => {
-  it('uses one deterministic verify entry without opt-in workloads', async () => {
+  it('separates the parallel developer gate from the complete gate', async () => {
     const packageJson = JSON.parse(
       await readFile(path.resolve('package.json'), 'utf8'),
     ) as { scripts: Record<string, string> }
@@ -12,29 +12,40 @@ describe('release verification policy', () => {
     expect(scripts['test:runtime']).toBe(
       'npm run test:native && npm run test:ripgrep && npm run test:sqlite',
     )
+    expect(scripts.check).toBe('node scripts/run-parallel-checks.mjs')
     expect(scripts.build).toContain('npm run test:runtime')
-    expect(scripts.build).toContain('npm run test:sqlite:packaged')
+    expect(scripts.build).toContain('npm run verify:package')
+    expect(scripts['verify:package']).toContain('npm run build:app')
+    expect(scripts['verify:package']).toContain('npm run build:headless')
+    expect(scripts['verify:package']).toContain('npm run test:sqlite:packaged')
     expect(scripts['test:e2e:built']).toBe('playwright test')
     expect(scripts.verify).toBe(
-      'npm run lint && npm run format:check && npm test && npm run build && npm run test:e2e:built',
+      'npm run check && npm run test:runtime && npm run verify:package && npm run test:e2e:built',
     )
     for (const forbidden of ['test:real']) {
+      expect(scripts.check).not.toContain(forbidden)
       expect(scripts.verify).not.toContain(forbidden)
       expect(scripts.build).not.toContain(forbidden)
     }
   })
 
-  it('keeps CI and release jobs on the same verify command', async () => {
-    for (const workflow of ['ci.yml', 'release.yml']) {
-      const contents = await readFile(
-        path.resolve('.github', 'workflows', workflow),
-        'utf8',
-      )
-      expect(contents.match(/npm run verify/gu)).toHaveLength(1)
-      expect(contents).not.toMatch(
-        /npm run (?:lint|format:check|typecheck|test:e2e|build)\b/gu,
-      )
-    }
+  it('fans out merge diagnostics without weakening the release gate', async () => {
+    const ciWorkflow = await readFile(
+      path.resolve('.github', 'workflows', 'ci.yml'),
+      'utf8',
+    )
+    const releaseWorkflow = await readFile(
+      path.resolve('.github', 'workflows', 'release.yml'),
+      'utf8',
+    )
+
+    expect(ciWorkflow.match(/npm run check/gu)).toHaveLength(1)
+    expect(ciWorkflow).toContain('fail-fast: false')
+    expect(ciWorkflow).toContain('command: npm run test:runtime')
+    expect(ciWorkflow).toContain('command: npm run test:e2e')
+    expect(ciWorkflow).toContain('command: npm run verify:package')
+    expect(ciWorkflow).toContain("github.ref == 'refs/heads/master'")
+    expect(releaseWorkflow.match(/npm run verify/gu)).toHaveLength(1)
   })
 
   it('creates draft releases from checked-in notes without duplicating tag CI', async () => {
