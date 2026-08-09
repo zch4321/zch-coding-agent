@@ -19,6 +19,7 @@ import {
   type ModelProvider,
   type ProviderCompactEvent,
   type ProviderCompactInput,
+  type ProviderCompactMode,
   type ProviderCompileInput,
   type ProviderEvent,
   type ProviderStreamContext,
@@ -166,8 +167,21 @@ export abstract class ScriptedProviderHarness implements ModelProvider {
     return compileTestCall(input, this.providerType)
   }
 
+  /** Exposes deterministic synthetic compaction to runtime test fixtures. */
+  compactModes(): readonly ProviderCompactMode[] {
+    return ['synthetic']
+  }
+
   /** Compiles scripted compaction as a no-tools test Provider request. */
-  compileCompact(input: ProviderCompactInput): CompiledProviderCompactCall {
+  compileCompact(
+    input: ProviderCompactInput,
+    mode: ProviderCompactMode = 'synthetic',
+  ): CompiledProviderCompactCall {
+    if (mode !== 'synthetic') {
+      throw new TypeError(
+        'Scripted Provider only supports synthetic compaction',
+      )
+    }
     return compiledSyntheticCompactCall(
       this.compile({
         history: input.history,

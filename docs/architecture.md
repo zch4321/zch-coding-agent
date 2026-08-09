@@ -580,9 +580,9 @@ interface CompletedAssistantTurn {
 }
 ```
 
-`compile()` 与 `compileCompact()` 必须同步、无网络、无凭据且确定性地消费整个 ordered history；它们不是对每条 MessageRecord 做一对一 `map()`。编译可以提升 harness、合并相邻记录或将一条 record 展开为多个 wire items，但不能改写持久化 history。压缩编排指令由 `compileCompact()` 作为最后一个 wire input 注入。`stream()` 与 `compact()` 负责鉴权、HTTP/SDK、abort、流解码、usage 和恰好一次 terminal completion。Application service 校验结果后生成 ID/Session/seq/metadata 并落盘；Provider 不直接创建或插入 MessageRecord。
+`compile()` 与 `compileCompact()` 必须同步、无网络、无凭据且确定性地消费整个 ordered history；它们不是对每条 MessageRecord 做一对一 `map()`。编译可以提升 harness、合并相邻记录或将一条 record 展开为多个 wire items，但不能改写持久化 history。Synthetic compact 把压缩编排指令作为最后一个 wire input；原生 compact 则按对应协议的 compact request shape 编译。`stream()` 与 `compact()` 负责鉴权、HTTP/SDK、abort、流解码、usage 和恰好一次 terminal completion。Application service 校验结果后生成 ID/Session/seq/metadata 并落盘；Provider 不直接创建或插入 MessageRecord。
 
-`GenericResponsesProvider` 使用原生 `POST /responses/compact`，把返回的 compaction output items 原样放入 `ProviderCompactEnvelope`，下一次同兼容 route 请求再原样编译回 input；接口形态以 [OpenAI Responses Compact reference](https://developers.openai.com/api/reference/resources/responses/methods/compact/) 为准。Chat Completions、DeepSeek 与 Anthropic Messages 没有本项目采用的原生 checkpoint 接口，因此通过无工具模型调用产生 `summary-text.v1` envelope。两条路径对 Core 都表现为同一个 opaque compact record。
+`GenericResponsesProvider` 优先使用原生 `POST /responses/compact`，把包含有效 `compaction` item 的 output 原样放入 `ProviderCompactEnvelope`，下一次同兼容 route 请求再原样编译回 input；接口形态以 [OpenAI Responses compaction](https://developers.openai.com/api/docs/guides/compaction) 为准。`GenericAnthropicProvider` 优先使用 beta `context_management` compaction，并以 `pause_after_compaction` 取得、保存和作为 assistant content 原样重放 `compaction` block；已知上下文低于 Anthropic 50k 最小 trigger 时直接使用 synthetic，协议依据见 [Anthropic compaction](https://platform.claude.com/docs/en/build-with-claude/compaction)。两种原生实现只在明确的 capability/契约不兼容错误上降级到无工具 `summary-text.v1`；401/403/429、输入超窗、abort、网络错误和 5xx 不降级。进程内按 Provider type/id、endpoint、model 与配置 revision 缓存原生能力缺失；Chat Completions 与 DeepSeek 始终使用 synthetic。所有路径对 Core 都表现为同一个 opaque compact record。
 
 | Canonical history                          | Chat Completions              | OpenAI Responses                         | Anthropic Messages                          |
 | ------------------------------------------ | ----------------------------- | ---------------------------------------- | ------------------------------------------- |
@@ -591,6 +591,7 @@ interface CompletedAssistantTurn {
 | assistant text                             | `assistant` message           | output `message` item                    | `assistant` text block                      |
 | assistant `tool_call` part                 | `assistant.tool_calls[]`      | `function_call` item                     | assistant `tool_use` block                  |
 | one or more adjacent `tool_result` records | one `tool` message per result | one `function_call_output` item per call | one `user` message with result blocks first |
+| native compact checkpoint                  | n/a                           | opaque `compaction` output items          | assistant `compaction` block                 |
 
 `role` 只是部分 wire 协议的字段，不是 canonical database field。OpenAI 官方把 Chat Completions 的基本单位称为 Message，而 Responses 使用包括 `message/function_call/function_call_output` 的 Items；Anthropic 则把 client tool result 放在 `user` message 的 `tool_result` content block 中。因此一条 MessageRecord 不要求对应一条 wire message/item。协议依据：[OpenAI Responses migration](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)、[Anthropic tool results](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)。
 
@@ -1033,11 +1034,11 @@ Tool/approval 的实时卡片来自 runtime event；完成后 renderer 从 assis
 4. usage 达到阈值且响应是本轮 final answer 时，不在回答结束后后台启动请求；下一次普通用户 Run 在插入新 user message **之前**先压缩旧历史。若应用编排要求同一 Run 继续，则在 continuation 前立即压缩。
 5. 本地估算只保留为 Provider 调用前不可关闭的硬 preflight，防止明显超出目标模型 prompt budget；它不触发主动压缩。
 
-压缩调用以完整 active history 为输入，由 `compileCompact()` 将编排指令放在最后一个 wire input。Synthetic compact 只有 terminal `finishReason = completed` 才能形成 checkpoint；截断、内容过滤、拒绝和未知终止都 fail closed。截断最多从同一完整 source history 追加更短摘要约束后纠正重试一次；网络、timeout、rate-limit 与 5xx 最多重试两次，完整但非法的响应最多重试一次，总调用数不超过三次。鉴权、计费、输入超窗、过滤/拒绝和取消不重试；`Retry-After` 等待有 60 秒上限且可被 Run abort。每次尝试使用独立 trace call ID，失败尝试的文本 delta 不进入 Renderer；手动命令的 durable journal 只写一次。
+压缩调用以完整 active history 为输入；Synthetic compact 由 `compileCompact()` 将编排指令放在最后一个 wire input，原生 compact 使用协议专用字段。Synthetic compact 只有 terminal `finishReason = completed` 才能形成 checkpoint；截断、内容过滤、拒绝和未知终止都 fail closed。截断最多从同一完整 source history 追加更短摘要约束后纠正重试一次；网络、timeout、rate-limit 与 5xx 最多重试两次，完整但非法的响应最多重试一次，总调用数不超过三次。鉴权、计费、输入超窗、过滤/拒绝和取消不重试；`Retry-After` 等待有 60 秒上限且可被 Run abort。原生端点明确不支持或返回完整但不符合原生 checkpoint 契约的响应时，立即切换到拥有独立重试预算的 synthetic 请求。每次尝试及降级请求使用独立 trace call ID，失败尝试的文本 delta 不进入 Renderer；手动命令的 durable journal 只写一次。
 
 Provider 成功后，单一事务把旧 active records 置为 `in_history = 0`，追加 fresh harness 和一个隐藏 `compact_summary`；失败、abort、空结果或重建超限时恢复旧 epoch。原消息始终保留在 append-only 数据库中，只是不再进入后续 Provider request。非取消的最终压缩失败统一以 `COMPACTION_FAILED` 结束 Run，Renderer 继续通过既有 Naive UI message 通道显示“压缩失败，请重试或打开新对话。”。
 
-Responses 原生 compact 保存 opaque output items；Chat/DeepSeek/Anthropic 保存 opaque envelope 中的文本 summary。Core 只管理 record 的历史归属与可见性，不解释或重写 Provider payload。
+Responses 原生 compact 保存 opaque output items；Anthropic 原生 compact 保存 opaque assistant compaction blocks；两者不支持原生协议时与 Chat/DeepSeek 一样保存 opaque envelope 中的文本 summary。Core 只管理 record 的历史归属与可见性，不解释或重写 Provider payload。
 
 手动 compact 使用独立 durable command journal：
 

@@ -5,12 +5,16 @@ import type { MessageRecord } from '../../shared/message'
 import type { ModelRouteSnapshot } from '../../shared/model-route'
 import {
   appendAssistantTurn,
+  appendProviderCompactSummary,
   appendToolResult,
   appendUserInput,
+  deactivateActiveHistory,
   MessageHistoryCompiler,
   type CanonicalHistoryState,
 } from '../session/canonical-history'
 import {
+  ANTHROPIC_COMPACT_BETA,
+  ANTHROPIC_COMPACT_FORMAT,
   ANTHROPIC_CONTINUATION_FORMAT,
   GenericAnthropicProvider,
 } from './generic-anthropic-provider'
@@ -269,20 +273,184 @@ describe('GenericAnthropicProvider', () => {
       apiKey: 'secret',
     })
     const source = input()
-    const call = provider.compileCompact({
-      history: source.history,
-      route: source.route,
-      instructions: 'COMPACT_INSTRUCTION_LAST',
-      maxOutputTokens: 1_024,
-    })
+    const call = provider.compileCompact(
+      {
+        history: source.history,
+        route: source.route,
+        instructions: 'COMPACT_INSTRUCTION_LAST',
+        maxOutputTokens: 1_024,
+      },
+      'synthetic',
+    )
 
     expect(call.mode).toBe('synthetic')
-    expect(call.normalizedMessages.at(-1)).toEqual({
-      role: 'user',
-      content: 'COMPACT_INSTRUCTION_LAST',
-    })
+    expect(call.normalizedMessages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Hello' },
+          { type: 'text', text: 'COMPACT_INSTRUCTION_LAST' },
+        ],
+      },
+    ])
     expect(call.request.messages).toEqual(call.normalizedMessages)
     expect(call.request).not.toHaveProperty('tools')
+  })
+
+  it('round-trips native compaction blocks and sums iteration usage', async () => {
+    const compactContent = [
+      { type: 'compaction', content: 'Opaque Anthropic checkpoint' },
+    ]
+    const fetchImpl = vi.fn(async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as JsonObject
+      if (request.stream === true) {
+        return sseResponse([
+          {
+            type: 'message_start',
+            message: { id: 'msg_replay', usage: { input_tokens: 5 } },
+          },
+          {
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'text', text: 'Continued.' },
+          },
+          { type: 'content_block_stop', index: 0 },
+          {
+            type: 'message_delta',
+            delta: { stop_reason: 'end_turn', stop_sequence: null },
+            usage: { output_tokens: 2 },
+          },
+          { type: 'message_stop' },
+        ])
+      }
+      return Response.json({
+        id: 'msg_compact',
+        type: 'message',
+        role: 'assistant',
+        content: compactContent,
+        stop_reason: 'compaction',
+        usage: {
+          iterations: [
+            {
+              input_tokens: 60_000,
+              output_tokens: 10,
+              cache_read_input_tokens: 5_000,
+            },
+            { input_tokens: 4_000, output_tokens: 20 },
+          ],
+        },
+      })
+    }) as unknown as typeof fetch
+    const provider = new GenericAnthropicProvider({
+      providerId: 'anthropic',
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+      fetchImpl,
+    })
+    const source = state()
+    const compiledHistory = new MessageHistoryCompiler().compile(source.history)
+    const call = provider.compileCompact({
+      history: compiledHistory,
+      route: route(),
+      instructions: 'Preserve decisions and current work.',
+      maxOutputTokens: 4_096,
+      contextTokens: 60_000,
+    })
+    const events = []
+    for await (const event of provider.compact(call, {
+      signal: new AbortController().signal,
+    })) {
+      events.push(event)
+    }
+
+    expect(
+      provider.compactModes({
+        history: compiledHistory,
+        route: route(),
+        instructions: 'Compact.',
+        maxOutputTokens: 4_096,
+        contextTokens: 49_999,
+      }),
+    ).toEqual(['synthetic'])
+    expect(call.request).toMatchObject({
+      model: 'claude-test',
+      max_tokens: 4_096,
+      context_management: {
+        edits: [
+          {
+            type: 'compact_20260112',
+            trigger: { type: 'input_tokens', value: 50_000 },
+            pause_after_compaction: true,
+            instructions: 'Preserve decisions and current work.',
+          },
+        ],
+      },
+    })
+    expect(call.request).not.toHaveProperty('stream')
+    expect(call.request).not.toHaveProperty('tools')
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://api.example/v1/messages',
+      expect.objectContaining({
+        headers: {
+          'x-api-key': 'secret',
+          'anthropic-version': '2023-06-01',
+          'anthropic-beta': ANTHROPIC_COMPACT_BETA,
+          'content-type': 'application/json',
+        },
+      }),
+    )
+    const completed = events.at(-1)
+    expect(completed).toMatchObject({
+      type: 'completed',
+      compact: {
+        payload: {
+          providerType: 'generic.anthropic',
+          format: ANTHROPIC_COMPACT_FORMAT,
+          data: { content: compactContent },
+        },
+        usage: {
+          promptTokens: 69_000,
+          completionTokens: 30,
+          totalTokens: 69_030,
+          cacheHitTokens: 5_000,
+          cacheMissTokens: 64_000,
+        },
+      },
+    })
+    if (completed?.type !== 'completed') {
+      throw new Error('missing compact completion')
+    }
+
+    deactivateActiveHistory(source)
+    appendProviderCompactSummary(source, {
+      payload: completed.compact.payload,
+      route: route(),
+      replacesThroughSeq: 2,
+      sourceHash: compiledHistory.sourceHash,
+      usage: {
+        inputTokens: completed.compact.usage.promptTokens,
+        outputTokens: completed.compact.usage.completionTokens,
+        totalTokens: completed.compact.usage.totalTokens,
+      },
+    })
+    const replay = provider.compile(input(source))
+    expect(replay.request.messages).toEqual([
+      { role: 'assistant', content: compactContent },
+    ])
+    for await (const event of provider.stream(replay, {
+      signal: new AbortController().signal,
+    })) {
+      expect(event.type).toBeTruthy()
+    }
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'https://api.example/v1/messages',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'anthropic-beta': ANTHROPIC_COMPACT_BETA,
+        }),
+      }),
+    )
   })
 
   it.each(['low', 'medium', 'xhigh'] as const)(

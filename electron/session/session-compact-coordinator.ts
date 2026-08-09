@@ -2,15 +2,20 @@ import type { RunStatus } from '../../shared/agent-events'
 import type { CallId, MessageId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { ProviderUsage } from '../providers/provider'
-import { areModelRoutesHistoryCompatible } from '../../shared/model-route'
+import {
+  areModelRoutesHistoryCompatible,
+  type ModelRouteSnapshot,
+} from '../../shared/model-route'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
 import {
   ProviderCompletionError,
+  ProviderCompactUnsupportedError,
   providerRequestDiagnostics,
   type CompletedProviderCompact,
   type ProviderCompactEvent,
+  type ProviderCompactMode,
   type ProviderResponseDiagnostics,
 } from '../providers/provider'
 import { createConfiguredProvider } from '../providers/provider-factory'
@@ -56,6 +61,7 @@ import {
   createCompactRetryBudget,
   MAX_COMPACT_ATTEMPTS,
   rethrowCompactionFailure,
+  shouldFallbackNativeCompact,
   waitForCompactRetry,
 } from './session-compact-retry'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
@@ -105,6 +111,16 @@ function authoritativeContextTokens(usage: ProviderUsage): number | undefined {
   return undefined
 }
 
+function nativeCompactCapabilityKey(route: ModelRouteSnapshot): string {
+  return JSON.stringify([
+    route.providerType,
+    route.providerId,
+    route.endpoint,
+    route.model,
+    route.providerConfigRevision,
+  ])
+}
+
 function durableUsage(usage: ProviderUsage) {
   const normalized = {
     ...(usage.promptTokens === undefined
@@ -150,6 +166,7 @@ export class SessionCompactCoordinator {
   ) => WorkspaceConcurrencyContext
   readonly #executionState?: SessionExecutionStatePort
   readonly #historySource?: SessionHistorySourcePort
+  readonly #unsupportedNativeCompaction = new Set<string>()
 
   constructor(options: {
     configStore: ConfigStore
@@ -449,13 +466,45 @@ export class SessionCompactCoordinator {
         this.#fetchImpl,
         binding.snapshot.endpoint,
       )
-    const compile = (instructions: string) => {
-      const candidate = provider.compileCompact({
-        history,
-        route: binding.snapshot,
-        instructions,
-        maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
-      })
+    const latestUsage = this.#latestActiveAssistantUsage(session)
+    const contextTokens = latestUsage
+      ? authoritativeContextTokens(latestUsage)
+      : undefined
+    const compactInput = (instructions: string) => ({
+      history,
+      route: binding.snapshot,
+      instructions,
+      maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
+      ...(contextTokens === undefined ? {} : { contextTokens }),
+    })
+    const availableModes = [
+      ...provider.compactModes(compactInput(input.promptText)),
+    ]
+    if (
+      availableModes.length === 0 ||
+      availableModes.some((mode) => mode !== 'native' && mode !== 'synthetic')
+    ) {
+      throw new TypeError('Provider returned invalid compact modes')
+    }
+    const capabilityKey = nativeCompactCapabilityKey(binding.snapshot)
+    let mode: ProviderCompactMode =
+      availableModes.includes('native') &&
+      !this.#unsupportedNativeCompaction.has(capabilityKey)
+        ? 'native'
+        : availableModes.includes('synthetic')
+          ? 'synthetic'
+          : availableModes[0]!
+    const compile = (
+      instructions: string,
+      compactMode: ProviderCompactMode,
+    ) => {
+      const candidate = provider.compileCompact(
+        compactInput(instructions),
+        compactMode,
+      )
+      if (candidate.mode !== compactMode) {
+        throw new TypeError('Provider compiled a different compact mode')
+      }
       if (
         estimateJsonTokens(candidate.request, config.limits.tokenEstimation) >
         modelPromptBudget(binding.modelProfile)
@@ -467,11 +516,12 @@ export class SessionCompactCoordinator {
       return candidate
     }
     let instructions = input.promptText
-    let compiled = compile(instructions)
+    let compiled = compile(instructions, mode)
     await input.beforeProvider?.()
-    const retryBudget = createCompactRetryBudget()
+    let retryBudget = createCompactRetryBudget()
+    let attempt = 1
 
-    for (let attempt = 1; attempt <= MAX_COMPACT_ATTEMPTS; attempt += 1) {
+    while (attempt <= MAX_COMPACT_ATTEMPTS) {
       const callId = id<CallId>('llm')
       let completed:
         | Extract<ProviderCompactEvent, { type: 'completed' }>
@@ -515,14 +565,32 @@ export class SessionCompactCoordinator {
           )
         }
       } catch (error) {
-        if (error instanceof ProviderCompletionError) {
+        const responseDiagnostics =
+          error instanceof ProviderCompletionError ||
+          error instanceof ProviderCompactUnsupportedError
+            ? error.diagnostics
+            : undefined
+        if (responseDiagnostics) {
           await this.#writeFailedResponse(
             session,
             run,
             callId,
             binding.apiKey,
-            error.diagnostics,
+            responseDiagnostics,
           )
+        }
+        if (
+          mode === 'native' &&
+          availableModes.includes('synthetic') &&
+          shouldFallbackNativeCompact(error)
+        ) {
+          this.#unsupportedNativeCompaction.add(capabilityKey)
+          mode = 'synthetic'
+          instructions = input.promptText
+          retryBudget = createCompactRetryBudget()
+          compiled = compile(instructions, mode)
+          attempt = 1
+          continue
         }
         const retry =
           attempt < MAX_COMPACT_ATTEMPTS
@@ -533,7 +601,8 @@ export class SessionCompactCoordinator {
         if (retry.corrective) {
           instructions = correctiveCompactPrompt(input.promptText)
         }
-        compiled = compile(instructions)
+        compiled = compile(instructions, mode)
+        attempt += 1
         continue
       }
       await session.logger.write({

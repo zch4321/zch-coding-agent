@@ -54,11 +54,15 @@ export interface ProviderCompactInput {
   route: ModelRouteSnapshot
   instructions: string
   maxOutputTokens: number
+  contextTokens?: number
 }
+
+/** Provider-native checkpointing or portable model-generated summarization. */
+export type ProviderCompactMode = 'native' | 'synthetic'
 
 /** Deterministic Provider compaction request ready for tracing and execution. */
 export interface CompiledProviderCompactCall {
-  mode: 'native' | 'synthetic'
+  mode: ProviderCompactMode
   request: JsonObject
   normalizedMessages: JsonObject[]
 }
@@ -147,6 +151,22 @@ export class ProviderCompactCompletionError extends ProviderCompletionError {
   }
 }
 
+/** Signals that a native compact protocol is unavailable or incompatible. */
+export class ProviderCompactUnsupportedError extends TypeError {
+  readonly diagnostics: ProviderResponseDiagnostics | undefined
+
+  constructor(
+    message: string,
+    options?: ErrorOptions & { diagnostics?: ProviderResponseDiagnostics },
+  ) {
+    super(message, options)
+    this.name = 'ProviderCompactUnsupportedError'
+    this.diagnostics = options?.diagnostics
+      ? structuredClone(options.diagnostics)
+      : undefined
+  }
+}
+
 /** Events emitted while executing one compiled provider request. */
 export type ProviderEvent =
   | {
@@ -198,7 +218,11 @@ export interface ModelProvider {
     call: CompiledProviderCall,
     context: ProviderStreamContext,
   ): AsyncIterable<ProviderEvent>
-  compileCompact(input: ProviderCompactInput): CompiledProviderCompactCall
+  compactModes(input: ProviderCompactInput): readonly ProviderCompactMode[]
+  compileCompact(
+    input: ProviderCompactInput,
+    mode?: ProviderCompactMode,
+  ): CompiledProviderCompactCall
   compact(
     call: CompiledProviderCompactCall,
     context: ProviderStreamContext,

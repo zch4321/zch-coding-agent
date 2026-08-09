@@ -1,5 +1,6 @@
 import {
   ProviderCompactCompletionError,
+  ProviderCompactUnsupportedError,
   ProviderCompletionError,
 } from '../providers/provider'
 import { ProviderTransportError } from '../providers/http-sse-transport'
@@ -13,6 +14,13 @@ const NON_RETRYABLE_PROVIDER_CODES = new Set([
   'insufficient_quota',
   'payment_required',
 ])
+const CONTEXT_LIMIT_PROVIDER_CODES = new Set([
+  'context_length_exceeded',
+  'input_too_long',
+  'model_context_window_exceeded',
+  'prompt_too_long',
+])
+const NATIVE_COMPACT_FALLBACK_STATUSES = new Set([404, 405, 415, 422, 501])
 
 export const MAX_COMPACT_ATTEMPTS = 3
 
@@ -51,6 +59,34 @@ export function createCompactRetryBudget(): CompactRetryBudget {
     incompleteRetried: false,
     invalidRetried: false,
   }
+}
+
+/** Returns whether one native protocol failure should switch to text compaction. */
+export function shouldFallbackNativeCompact(error: unknown): boolean {
+  if (error instanceof ProviderCompactUnsupportedError) return true
+  if (
+    !(error instanceof ProviderTransportError) ||
+    error.code !== 'HTTP_ERROR' ||
+    error.status === undefined
+  ) {
+    return false
+  }
+  const providerCode = error.providerErrorCode?.toLowerCase()
+  if (
+    providerCode &&
+    (NON_RETRYABLE_PROVIDER_CODES.has(providerCode) ||
+      CONTEXT_LIMIT_PROVIDER_CODES.has(providerCode))
+  ) {
+    return false
+  }
+  if (NATIVE_COMPACT_FALLBACK_STATUSES.has(error.status)) return true
+  if (error.status !== 400) return false
+  return (
+    providerCode === undefined ||
+    providerCode === 'invalid_request_error' ||
+    providerCode.includes('unsupported') ||
+    providerCode.includes('unknown')
+  )
 }
 
 function retryableHttpFailure(error: ProviderTransportError): boolean {

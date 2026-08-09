@@ -20,13 +20,16 @@ import type { ToolCall } from '../tools/types'
 import { HttpSseTransport } from './http-sse-transport'
 import {
   ProviderCompletionError,
+  ProviderCompactUnsupportedError,
   providerCompactPayload,
   providerCompactText,
+  syntheticCompactEvents,
   type CompiledProviderCall,
   type CompiledProviderCompactCall,
   type ModelProvider,
   type ProviderCompactEvent,
   type ProviderCompactInput,
+  type ProviderCompactMode,
   type ProviderCompileInput,
   type ProviderEvent,
   type ProviderResponseDiagnostics,
@@ -274,6 +277,33 @@ function responseOutput(response: JsonObject): JsonObject[] {
   )
 }
 
+function strictCompactOutput(response: JsonObject): JsonObject[] | undefined {
+  if (
+    !Array.isArray(response.output) ||
+    response.output.some(
+      (item) =>
+        !item ||
+        typeof item !== 'object' ||
+        Array.isArray(item) ||
+        typeof item.type !== 'string' ||
+        item.type.length === 0,
+    )
+  ) {
+    return undefined
+  }
+  return response.output as JsonObject[]
+}
+
+function isCompactionOutput(item: JsonObject): boolean {
+  return (
+    item.type === 'compaction' &&
+    typeof item.id === 'string' &&
+    item.id.length > 0 &&
+    typeof item.encrypted_content === 'string' &&
+    item.encrypted_content.length > 0
+  )
+}
+
 function responseText(output: readonly JsonObject[]): {
   text: string
   refusal: boolean
@@ -465,12 +495,46 @@ export class GenericResponsesProvider implements ModelProvider {
     }
   }
 
-  /** Compiles canonical history for the native Responses Compact endpoint. */
-  compileCompact(input: ProviderCompactInput): CompiledProviderCompactCall {
+  /** Exposes native checkpointing with portable summarization as fallback. */
+  compactModes(): readonly ProviderCompactMode[] {
+    return ['native', 'synthetic']
+  }
+
+  /** Compiles canonical history for native or portable Responses compaction. */
+  compileCompact(
+    input: ProviderCompactInput,
+    mode: ProviderCompactMode = 'native',
+  ): CompiledProviderCompactCall {
     if (input.route.providerType !== this.providerType) {
       throw new TypeError(
         `Route Provider ${input.route.providerType} does not match ${this.providerType}`,
       )
+    }
+    if (mode === 'synthetic') {
+      const call = this.compile({
+        history: input.history,
+        route: input.route,
+        tools: [],
+        maxOutputTokens: input.maxOutputTokens,
+      })
+      const items = [
+        ...structuredClone(call.normalizedMessages),
+        {
+          role: 'user',
+          content: [{ type: 'input_text', text: input.instructions }],
+        },
+      ] as JsonObject[]
+      return {
+        mode,
+        request: {
+          ...structuredClone(call.request),
+          input: structuredClone(items),
+        },
+        normalizedMessages: structuredClone(items),
+      }
+    }
+    if (mode !== 'native') {
+      throw new TypeError(`Unsupported Responses compact mode: ${mode}`)
     }
     const compiled = compileResponseInput(input.history, input.route)
     const items = [
@@ -481,7 +545,7 @@ export class GenericResponsesProvider implements ModelProvider {
       },
     ] as JsonObject[]
     return {
-      mode: 'native',
+      mode,
       request: {
         model: input.route.model,
         ...(compiled.instructions
@@ -493,29 +557,67 @@ export class GenericResponsesProvider implements ModelProvider {
     }
   }
 
-  /** Calls the native Responses Compact endpoint and preserves replay output items. */
+  /** Executes native checkpointing or a regular text-summary request. */
   async *compact(
     call: CompiledProviderCompactCall,
     context: ProviderStreamContext,
   ): AsyncIterable<ProviderCompactEvent> {
+    if (call.mode === 'synthetic') {
+      yield* syntheticCompactEvents(
+        this.providerType,
+        this.stream(
+          {
+            request: structuredClone(call.request),
+            normalizedMessages: structuredClone(call.normalizedMessages),
+            tools: [],
+          },
+          context,
+        ),
+      )
+      return
+    }
     if (call.mode !== 'native') {
-      throw new TypeError('Responses compaction requires a native compact call')
+      throw new TypeError(`Unsupported Responses compact mode: ${call.mode}`)
     }
     const startedAt = this.#now()
     const response = await this.#compactTransport.postJsonObject(
       structuredClone(call.request),
       context.signal,
     )
-    if (response.object !== 'response.compaction') {
-      throw new TypeError('Responses compact returned an unexpected object')
+    const completedAt = this.#now()
+    const usage = responseUsage(toProviderJson(response.usage ?? null))
+    const compactTiming = {
+      ttftMs: null,
+      totalMs: completedAt - startedAt,
+      responseBytes: providerJsonBytes(response),
     }
-    const output = responseOutput(response)
-    if (output.length === 0) {
-      throw new TypeError('Responses compact returned no replay output')
+    const providerState = toProviderJson({
+      providerId: this.#providerId,
+      providerType: this.providerType,
+      object: response.object ?? null,
+      responseId: response.id ?? null,
+      output: response.output ?? null,
+    })
+    const diagnostics: ProviderResponseDiagnostics = {
+      rawResponse: structuredClone(response),
+      providerState,
+      usage: structuredClone(usage.raw),
+      timing: compactTiming,
+    }
+    const output = strictCompactOutput(response)
+    if (
+      response.object !== 'response.compaction' ||
+      !output ||
+      output.length === 0 ||
+      !output.some(isCompactionOutput)
+    ) {
+      throw new ProviderCompactUnsupportedError(
+        'Responses compact returned an incompatible replay payload',
+        { diagnostics },
+      )
     }
     const data = { output: structuredClone(output) }
     assertBoundedJsonValue(data)
-    const completedAt = this.#now()
     yield {
       type: 'completed',
       compact: {
@@ -525,18 +627,11 @@ export class GenericResponsesProvider implements ModelProvider {
           format: RESPONSES_COMPACT_FORMAT,
           data,
         },
-        usage: responseUsage(toProviderJson(response.usage ?? null)),
+        usage,
       },
       rawResponse: structuredClone(response),
-      providerState: {
-        object: response.object,
-        ...(typeof response.id === 'string' ? { id: response.id } : {}),
-      },
-      timing: {
-        ttftMs: null,
-        totalMs: completedAt - startedAt,
-        responseBytes: providerJsonBytes(response),
-      },
+      providerState,
+      timing: compactTiming,
     }
   }
 

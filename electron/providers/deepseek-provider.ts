@@ -18,6 +18,7 @@ import {
   type ModelProvider,
   type ProviderCompactEvent,
   type ProviderCompactInput,
+  type ProviderCompactMode,
   type ProviderCompileInput,
   type ProviderEvent,
   type ProviderStreamContext,
@@ -93,8 +94,19 @@ export class DeepSeekProvider implements ModelProvider {
     }
   }
 
+  /** Exposes portable summarization as this protocol's only compact strategy. */
+  compactModes(): readonly ProviderCompactMode[] {
+    return ['synthetic']
+  }
+
   /** Compiles a no-tools DeepSeek request for synthetic compaction. */
-  compileCompact(input: ProviderCompactInput): CompiledProviderCompactCall {
+  compileCompact(
+    input: ProviderCompactInput,
+    mode: ProviderCompactMode = 'synthetic',
+  ): CompiledProviderCompactCall {
+    if (mode !== 'synthetic') {
+      throw new TypeError('DeepSeek only supports synthetic compaction')
+    }
     return compiledSyntheticCompactCall(
       this.compile({
         history: input.history,

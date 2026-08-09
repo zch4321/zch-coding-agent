@@ -8,6 +8,13 @@ import {
   type ScriptedProviderEvent,
   type TestProviderStreamRequest,
 } from '../providers/provider-test-harness'
+import type {
+  CompiledProviderCompactCall,
+  ProviderCompactEvent,
+  ProviderCompactInput,
+  ProviderCompactMode,
+  ProviderStreamContext,
+} from '../providers/provider'
 import { ProviderTransportError } from '../providers/http-sse-transport'
 import { MessageHistoryCompiler } from './canonical-history'
 import { SessionManager } from './session-manager'
@@ -77,12 +84,55 @@ class CompactFailureProvider extends ScriptedProviderHarness {
   }
 }
 
-async function setup(actions: readonly CompactAction[]) {
+class NativeFallbackProvider extends CompactFailureProvider {
+  nativeCalls = 0
+  syntheticCalls = 0
+
+  constructor() {
+    super(['completed', 'completed'])
+  }
+
+  /** Offers a deliberately unsupported native mode before synthetic fallback. */
+  override compactModes(): readonly ProviderCompactMode[] {
+    return ['native', 'synthetic']
+  }
+
+  /** Tags the scripted request with the coordinator-selected compact mode. */
+  override compileCompact(
+    input: ProviderCompactInput,
+    mode: ProviderCompactMode = 'native',
+  ): CompiledProviderCompactCall {
+    return {
+      ...super.compileCompact(input, 'synthetic'),
+      mode,
+    }
+  }
+
+  /** Rejects native execution and delegates portable execution to the fixture. */
+  override async *compact(
+    call: CompiledProviderCompactCall,
+    context: ProviderStreamContext,
+  ): AsyncIterable<ProviderCompactEvent> {
+    if (call.mode === 'native') {
+      this.nativeCalls += 1
+      throw new ProviderTransportError(
+        'HTTP_ERROR',
+        'Native compact endpoint is unavailable',
+        404,
+      )
+    }
+    this.syntheticCalls += 1
+    yield* super.compact(call, context)
+  }
+}
+
+async function setupProvider<TProvider extends CompactFailureProvider>(
+  provider: TProvider,
+) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-compact-fail-'))
   const workspace = path.join(directory, 'workspace')
   await mkdir(workspace)
   const configStore = await createConfig(directory)
-  const provider = new CompactFailureProvider(actions)
   const events: AgentEventEnvelope[] = []
   let liveSession: SessionState | undefined
   const executionState: SessionExecutionStatePort = {
@@ -124,6 +174,10 @@ async function setup(actions: readonly CompactAction[]) {
     sessionId,
     session: () => liveSession,
   }
+}
+
+async function setup(actions: readonly CompactAction[]) {
+  return setupProvider(new CompactFailureProvider(actions))
 }
 
 describe('SessionManager compaction failures', () => {
@@ -246,6 +300,34 @@ describe('SessionManager compaction failures', () => {
       ),
     ).toBe(true)
     expect(() => new MessageHistoryCompiler().compile(history)).not.toThrow()
+    await target.manager.closeSession(target.sessionId)
+  }, 10_000)
+
+  it('falls back once and caches an unsupported native compact capability', async () => {
+    const target = await setupProvider(new NativeFallbackProvider())
+    for (const [index, requestId] of [
+      'request:native-fallback-first',
+      'request:native-fallback-second',
+    ].entries()) {
+      const runId = target.manager.startRun({
+        sessionId: target.sessionId,
+        message: '/compact',
+        clientRequestId: requestId,
+      })
+      await waitFor(() =>
+        target.events.some(
+          ({ event }) =>
+            event.type === 'run.status' &&
+            event.runId === runId &&
+            event.status === 'completed',
+        ),
+      )
+      await waitFor(() => !target.manager.hasActiveRun(target.sessionId))
+      expect(target.provider.compactCalls).toBe(index + 1)
+    }
+
+    expect(target.provider.nativeCalls).toBe(1)
+    expect(target.provider.syntheticCalls).toBe(2)
     await target.manager.closeSession(target.sessionId)
   }, 10_000)
 })

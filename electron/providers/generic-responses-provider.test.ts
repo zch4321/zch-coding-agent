@@ -17,10 +17,11 @@ import {
   RESPONSES_COMPACT_FORMAT,
   RESPONSES_CONTINUATION_FORMAT,
 } from './generic-responses-provider'
-import type {
-  ProviderCompileInput,
-  ProviderEvent,
-  ProviderToolDefinition,
+import {
+  ProviderCompactUnsupportedError,
+  type ProviderCompileInput,
+  type ProviderEvent,
+  type ProviderToolDefinition,
 } from './provider'
 
 function sseResponse(payloads: JsonValue[]): Response {
@@ -526,6 +527,106 @@ describe('GenericResponsesProvider', () => {
     })
     const replay = provider.compile(input(source))
     expect(replay.request.input).toEqual(compactOutput)
+  })
+
+  it('uses the regular Responses stream for synthetic fallback', async () => {
+    const response = {
+      id: 'resp_summary',
+      object: 'response',
+      status: 'completed',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [
+            {
+              type: 'output_text',
+              text: 'Portable compact summary',
+              annotations: [],
+            },
+          ],
+        },
+      ],
+      usage: { input_tokens: 30, output_tokens: 4, total_tokens: 34 },
+    }
+    const provider = new GenericResponsesProvider({
+      providerId: 'responses',
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+      fetchImpl: async () =>
+        sseResponse([{ type: 'response.completed', response }]),
+    })
+    const source = input()
+    const call = provider.compileCompact(
+      {
+        history: source.history,
+        route: source.route,
+        instructions: 'Summarize this conversation.',
+        maxOutputTokens: 1_024,
+      },
+      'synthetic',
+    )
+    const events = []
+    for await (const event of provider.compact(call, {
+      signal: new AbortController().signal,
+    })) {
+      events.push(event)
+    }
+
+    expect(call.mode).toBe('synthetic')
+    expect(call.request).toMatchObject({
+      stream: true,
+      input: [
+        expect.anything(),
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'Summarize this conversation.' },
+          ],
+        },
+      ],
+    })
+    expect(events.at(-1)).toMatchObject({
+      type: 'completed',
+      compact: {
+        payload: { format: 'summary-text.v1' },
+        normalizedText: 'Portable compact summary',
+      },
+    })
+  })
+
+  it('rejects native responses without a valid compaction replay item', async () => {
+    const provider = new GenericResponsesProvider({
+      providerId: 'responses',
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+      fetchImpl: async () =>
+        Response.json({
+          id: 'resp_not_compact',
+          object: 'response.compaction',
+          output: [{ type: 'message', role: 'assistant', content: [] }],
+          usage: { input_tokens: 20, output_tokens: 1, total_tokens: 21 },
+        }),
+    })
+    const source = input()
+    const call = provider.compileCompact({
+      history: source.history,
+      route: source.route,
+      instructions: 'Compact.',
+      maxOutputTokens: 1_024,
+    })
+    const consume = async () => {
+      for await (const event of provider.compact(call, {
+        signal: new AbortController().signal,
+      })) {
+        expect(event.type).toBeTruthy()
+      }
+    }
+
+    await expect(consume()).rejects.toBeInstanceOf(
+      ProviderCompactUnsupportedError,
+    )
   })
 
   it('normalizes incomplete output and rejects failed or unterminated streams', async () => {

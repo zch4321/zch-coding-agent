@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { ProviderCompactCompletionError } from '../providers/provider'
+import {
+  ProviderCompactCompletionError,
+  ProviderCompactUnsupportedError,
+} from '../providers/provider'
 import { ProviderTransportError } from '../providers/http-sse-transport'
 import {
   compactRetryDecision,
   createCompactRetryBudget,
+  shouldFallbackNativeCompact,
   waitForCompactRetry,
 } from './session-compact-retry'
 
@@ -54,6 +58,43 @@ describe('compact retry policy', () => {
         createCompactRetryBudget(),
       ),
     ).toBeUndefined()
+  })
+
+  it('falls back only for native capability failures', () => {
+    expect(
+      shouldFallbackNativeCompact(
+        new ProviderCompactUnsupportedError('malformed native response'),
+      ),
+    ).toBe(true)
+    expect(
+      shouldFallbackNativeCompact(
+        new ProviderTransportError('HTTP_ERROR', 'missing endpoint', 404),
+      ),
+    ).toBe(true)
+    expect(
+      shouldFallbackNativeCompact(
+        new ProviderTransportError('HTTP_ERROR', 'unsupported field', 400, {
+          providerErrorCode: 'invalid_request_error',
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      shouldFallbackNativeCompact(
+        new ProviderTransportError('HTTP_ERROR', 'too large', 400, {
+          providerErrorCode: 'context_length_exceeded',
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      shouldFallbackNativeCompact(
+        new ProviderTransportError('HTTP_ERROR', 'unauthorized', 401),
+      ),
+    ).toBe(false)
+    expect(
+      shouldFallbackNativeCompact(
+        new ProviderTransportError('HTTP_ERROR', 'busy', 503),
+      ),
+    ).toBe(false)
   })
 
   it('interrupts a pending retry delay', async () => {
