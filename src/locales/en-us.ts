@@ -391,6 +391,13 @@ const enUS = {
       'Check the context, compaction threshold, and maximum output values.',
     newMainModelReasoningConflict:
       "This model will become the main model, so its reasoning efforts must include the Provider's current default.",
+    modelActions: 'Actions',
+    deleteModelText:
+      'Delete the local catalog entry, enabled state, and configuration for {model}? If the Provider still returns it, the next refresh will add it again.',
+    deleteMainModelBlocked:
+      'The main model cannot be deleted. Select another main model first.',
+    deleteApprovalModelBlocked:
+      'Automatic approval uses this model. Select another approval model first.',
     availableModels: 'Provider models',
     selectedModels: 'Enabled models',
     filterModels: 'Filter models',

@@ -531,6 +531,28 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.applyConfig(result.value.config, ['providers'])
       return true
     },
+    /** Deletes one non-active model from the selected Provider configuration. */
+    async deleteProviderModel(modelId: string): Promise<boolean> {
+      const bridge = window.agentApi
+      const normalizedModelId = modelId.trim()
+      if (!bridge || !normalizedModelId) return false
+      if (this.providerDirty && !(await this.saveProvider())) return false
+
+      const result = await bridge.setConfig({
+        version: IPC_VERSION,
+        kind: 'provider-model-delete',
+        providerId: this.selectedProviderId,
+        modelId: normalizedModelId,
+      })
+      if (!result.ok) {
+        this.error = result.error.message
+        return false
+      }
+
+      this.applyConfig(result.value.config, ['providers'])
+      useModelPoolSettingsStore().applyExternalConfig(result.value.config)
+      return true
+    },
     /** Updates one model row while preserving a usable prompt budget. */
     updateModelConfiguration(
       modelId: string,

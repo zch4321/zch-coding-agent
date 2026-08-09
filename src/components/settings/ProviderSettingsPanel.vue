@@ -32,6 +32,7 @@ import {
 } from '../../../shared/model-settings'
 import { useAgentStore } from '../../stores/agent'
 import { providerDraftConflicts } from '../../stores/provider-form'
+import ProviderModelDeleteAction from './ProviderModelDeleteAction.vue'
 
 /** Maps each reasoning effort to its locale label key. */
 const REASONING_LABEL_KEYS: Record<ReasoningEffort, string> = {
@@ -293,6 +294,27 @@ async function confirmAddModel(): Promise<boolean> {
   if (!added) return false
   showAddModel.value = false
   return true
+}
+
+/** Explains why one model cannot currently be deleted. */
+function modelDeleteDisabledReason(modelId: string): string {
+  if (modelId === agent.providerForm.model) {
+    return t('settings.deleteMainModelBlocked')
+  }
+  if (
+    agent.approvalSavedForm.providerId === agent.selectedProviderId &&
+    agent.approvalSavedForm.model === modelId
+  ) {
+    return t('settings.deleteApprovalModelBlocked')
+  }
+  return ''
+}
+
+/** Flushes pending Provider edits before deleting one configured model. */
+async function confirmDeleteModel(modelId: string): Promise<boolean> {
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = undefined
+  return agent.deleteProviderModel(modelId)
 }
 
 /** Applies a reasoning-effort annotation edit to one model row. */
@@ -746,6 +768,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <span>{{ t('settings.maximumOutputLength') }}</span>
           <span>{{ t('settings.modelReasoningEfforts') }}</span>
           <span>{{ t('settings.modelCapability') }}</span>
+          <span>{{ t('settings.modelActions') }}</span>
         </div>
         <NScrollbar
           v-if="visibleModelProfiles.length"
@@ -848,6 +871,11 @@ function handleDropdownSelect(key: string | number, providerId: string) {
                     @update:value="handleCapabilityChange(model.id, $event)"
                   />
                 </label>
+                <ProviderModelDeleteAction
+                  :model-id="model.id"
+                  :disabled-reason="modelDeleteDisabledReason(model.id)"
+                  :delete-model="confirmDeleteModel"
+                />
               </div>
             </NListItem>
           </NList>

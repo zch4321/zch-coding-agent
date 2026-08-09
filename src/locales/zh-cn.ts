@@ -379,6 +379,12 @@ const zhCN = {
     modelConfigurationInvalid: '请检查上下文、压缩阈值和最大输出长度。',
     newMainModelReasoningConflict:
       '该模型将成为主模型，其思考档位必须包含当前 Provider 默认档位。',
+    modelActions: '操作',
+    deleteModelText:
+      '删除模型 {model} 的本地目录记录、启用状态和配置？如果 Provider 仍返回它，下次刷新会重新加入。',
+    deleteMainModelBlocked: '主模型不能删除，请先更换主模型。',
+    deleteApprovalModelBlocked:
+      '自动审批正在使用该模型，请先更换自动审批模型。',
     availableModels: 'Provider 模型',
     selectedModels: '已启用模型',
     filterModels: '筛选模型',

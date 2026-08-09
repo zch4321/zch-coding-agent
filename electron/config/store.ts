@@ -105,6 +105,33 @@ function addProviderModel(
   }
 }
 
+/** Removes one non-main model from every Provider-owned configuration set. */
+function deleteProviderModel(
+  provider: AppProviderConfig,
+  modelId: string,
+): void {
+  const normalizedModelId = modelId.trim()
+  if (!normalizedModelId) throw new Error('Model name is required')
+  if (provider.model === normalizedModelId) {
+    throw new Error('Cannot delete the current main model')
+  }
+  const exists =
+    provider.modelCatalog.some((model) => model.id === normalizedModelId) ||
+    provider.enabledModelIds.includes(normalizedModelId) ||
+    Object.hasOwn(provider.modelOverrides, normalizedModelId)
+  if (!exists) {
+    throw new Error(`Provider model not found: ${normalizedModelId}`)
+  }
+
+  provider.modelCatalog = provider.modelCatalog.filter(
+    (model) => model.id !== normalizedModelId,
+  )
+  provider.enabledModelIds = provider.enabledModelIds.filter(
+    (candidate) => candidate !== normalizedModelId,
+  )
+  delete provider.modelOverrides[normalizedModelId]
+}
+
 /** Validates the configured main route while allowing an unconfigured model. */
 function assertMainRouteConfigValid(provider: AppProviderConfig): void {
   if (!provider.model) return
@@ -757,6 +784,31 @@ export class ConfigStore {
         const previousRouteShape = providerRouteShape(provider)
         addProviderModel(provider, request.modelId, request.modelOverride)
         assertMainRouteConfigValid(provider)
+        if (providerRouteShape(provider) !== previousRouteShape) {
+          provider.revision += 1
+        }
+        break
+      }
+      case 'provider-model-delete': {
+        const provider = getAppProvider(next, request.providerId)
+        if (!provider) {
+          throw new Error(`Provider not found: ${request.providerId}`)
+        }
+        const normalizedModelId = request.modelId.trim()
+        if (
+          next.approval.approverProviderId === provider.id &&
+          next.approval.approverModel === normalizedModelId
+        ) {
+          throw new Error('Cannot delete the current approval model')
+        }
+        const previousRouteShape = providerRouteShape(provider)
+        deleteProviderModel(provider, normalizedModelId)
+        disableModelPoolEntries(
+          next,
+          (entry) =>
+            entry.providerId === provider.id &&
+            entry.model === normalizedModelId,
+        )
         if (providerRouteShape(provider) !== previousRouteShape) {
           provider.revision += 1
         }

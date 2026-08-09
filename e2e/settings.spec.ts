@@ -278,6 +278,10 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       manualModelRow.getByText('主模型', { exact: true }),
     ).toBeVisible()
+    const manualModelDelete = manualModelRow.getByRole('button', {
+      name: '删除',
+    })
+    await expect(manualModelDelete).toBeDisabled()
     await expect(manualModelRow.locator('input').nth(0)).toHaveValue('400000')
     await expect(manualModelRow.locator('input').nth(1)).toHaveValue('250000')
     await expect(manualModelRow.locator('input').nth(2)).toHaveValue('50000')
@@ -416,6 +420,46 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       manualModelRow.getByText('主模型', { exact: true }),
     ).toHaveCount(0)
+    await expect(manualModelDelete).toBeEnabled()
+    await manualModelDelete.click()
+    const deleteModelConfirm = page.locator('.n-popconfirm:visible')
+    await expect(deleteModelConfirm).toContainText(manualModel)
+    await deleteModelConfirm.getByRole('button', { name: '删除' }).click()
+    await expect(manualModelRow).toHaveCount(0)
+    await expect
+      .poll(async () =>
+        page.evaluate(async (modelId) => {
+          const api = Reflect.get(window, 'agentApi') as {
+            getConfig(payload: unknown): Promise<{
+              value?: {
+                config: {
+                  providers: Array<{
+                    modelCatalog: Array<{ id: string }>
+                    enabledModelIds: string[]
+                    modelOverrides: Record<string, unknown>
+                  }>
+                }
+              }
+            }>
+          }
+          const result = await api.getConfig({
+            version: 1,
+            section: 'providers',
+          })
+          const configured = result.value?.config.providers[0]
+          return {
+            catalog: configured?.modelCatalog.some(
+              (model) => model.id === modelId,
+            ),
+            enabled: configured?.enabledModelIds.includes(modelId),
+            configured: Object.hasOwn(
+              configured?.modelOverrides ?? {},
+              modelId,
+            ),
+          }
+        }, manualModel),
+      )
+      .toEqual({ catalog: false, enabled: false, configured: false })
 
     await expect(
       settingsNavigation.getByRole('menuitem', { name: '自动审批' }),

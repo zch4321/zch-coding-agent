@@ -10,6 +10,7 @@ import type {
 } from '../../shared/config'
 import { useApprovalSettingsStore } from './approval-settings'
 import { useAgentSettingsStore } from './agent-settings'
+import { useModelPoolSettingsStore } from './model-pool-settings'
 import { providerFormSignature } from './provider-form'
 
 function provider(): ProviderPublicConfig {
@@ -194,6 +195,71 @@ describe('agent settings model pool', () => {
       ...modelOverride,
       capabilitySource: 'override',
     })
+  })
+
+  it('deletes a model through the dedicated config action', async () => {
+    const settings = useAgentSettingsStore()
+    const pool = useModelPoolSettingsStore()
+    const configuredProvider = provider()
+    settings.providers = [configuredProvider]
+    settings.activeProviderId = configuredProvider.id
+    settings.selectedProviderId = configuredProvider.id
+    settings.hydrateSelectedProviderForm()
+    settings.providerSavedSignature = providerFormSignature(
+      settings.providerForm,
+      settings.modelProfiles,
+    )
+    const updatedProvider: ProviderPublicConfig = {
+      ...configuredProvider,
+      modelCatalog: configuredProvider.modelCatalog.filter(
+        (model) => model.id !== 'catalog-only-model',
+      ),
+    }
+    const setConfig = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: {
+        config: {
+          activeProviderId: configuredProvider.id,
+          providers: [updatedProvider],
+          modelPool: {
+            entries: [
+              {
+                id: 'worker-1',
+                enabled: false,
+                providerId: configuredProvider.id,
+                model: 'catalog-only-model',
+                reasoning: 'off',
+              },
+            ],
+          },
+        } as PublicConfig,
+      },
+    }))
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: { setConfig } as Partial<AgentApi> as AgentApi,
+    })
+
+    await expect(
+      settings.deleteProviderModel('  catalog-only-model  '),
+    ).resolves.toBe(true)
+
+    expect(setConfig).toHaveBeenCalledWith({
+      version: 1,
+      kind: 'provider-model-delete',
+      providerId: configuredProvider.id,
+      modelId: 'catalog-only-model',
+    })
+    expect(settings.modelProfiles.map((model) => model.id)).not.toContain(
+      'catalog-only-model',
+    )
+    expect(pool.entries).toEqual([
+      expect.objectContaining({
+        model: 'catalog-only-model',
+        enabled: false,
+      }),
+    ])
   })
 
   it('keeps every enabled approval model visible regardless of annotation', () => {
