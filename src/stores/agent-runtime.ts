@@ -18,7 +18,10 @@ import {
 } from '../../shared/model-route'
 import type { PlanStatus } from '../../shared/orchestration'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
-import type { DurableRunStartResult } from '../../shared/domain-state-api'
+import type {
+  DurableRunStartPayload,
+  DurableRunStartResult,
+} from '../../shared/domain-state-api'
 import type {
   ConversationTurn,
   PendingApproval,
@@ -704,39 +707,54 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
                 ) === index,
             )
       const sessionId = session?.id ?? (requestId('session') as SessionId)
+      const selection = this.composerModelSelection
+      const request: DurableRunStartPayload = session
+        ? {
+            version: IPC_VERSION,
+            kind: 'existing_session',
+            sessionId,
+            message: text,
+            context: { attachments: attachmentRefs(attachments) },
+            clientRequestId: requestId('request'),
+          }
+        : {
+            version: IPC_VERSION,
+            kind: 'new_session',
+            sessionId,
+            projectId: project.id,
+            title: text.replace(/\s+/gu, ' ').slice(0, 80),
+            modelSelection: {
+              providerId: selection.providerId,
+              model: selection.model,
+              reasoning: selection.reasoning,
+            },
+            permissionMode: this.modeLockedByWriter ? 'readonly' : this.mode,
+            message: text,
+            context: { attachments: attachmentRefs(attachments) },
+            clientRequestId: requestId('request'),
+          }
       this.startPendingSessionId = session?.id ?? 'draft'
       const pendingMarker = this.startPendingSessionId
-      const result = await window.agentApi
-        .startRun(
-          session
-            ? {
-                version: IPC_VERSION,
-                kind: 'existing_session',
-                sessionId,
-                message: text,
-                context: { attachments: attachmentRefs(attachments) },
-                clientRequestId: requestId('request'),
-              }
-            : {
-                version: IPC_VERSION,
-                kind: 'new_session',
-                sessionId,
-                projectId: project.id,
-                title: text.replace(/\s+/gu, ' ').slice(0, 80),
-                modelSelection: structuredClone(this.composerModelSelection),
-                permissionMode: this.modeLockedByWriter
-                  ? 'readonly'
-                  : this.mode,
-                message: text,
-                context: { attachments: attachmentRefs(attachments) },
-                clientRequestId: requestId('request'),
-              },
+      let result: Awaited<ReturnType<typeof window.agentApi.startRun>>
+      try {
+        result = await window.agentApi.startRun(request)
+      } catch (error) {
+        showOperationError(
+          {
+            code: 'RUN_START_FAILED',
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Failed to start the conversation.',
+          },
+          sessionId,
         )
-        .finally(() => {
-          if (this.startPendingSessionId === pendingMarker) {
-            this.startPendingSessionId = undefined
-          }
-        })
+        return false
+      } finally {
+        if (this.startPendingSessionId === pendingMarker) {
+          this.startPendingSessionId = undefined
+        }
+      }
       if (!result.ok) {
         showOperationError(result.error, sessionId)
         return false
