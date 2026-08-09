@@ -159,6 +159,23 @@ describe('HttpSseTransport', () => {
       status: 503,
     })
 
+    const rateLimitedFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { code: 'rate_limit_exceeded' } }),
+          {
+            status: 429,
+            headers: { 'retry-after': '1.5' },
+          },
+        ),
+    ) as unknown as typeof fetch
+    await expect(collect(transport(rateLimitedFetch))).rejects.toMatchObject({
+      code: 'HTTP_ERROR',
+      status: 429,
+      retryAfterMs: 1_500,
+      providerErrorCode: 'rate_limit_exceeded',
+    })
+
     const invalidFetch = vi.fn(async () =>
       streamResponse(['data: not-json\n\n']),
     ) as unknown as typeof fetch

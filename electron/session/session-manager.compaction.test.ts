@@ -632,6 +632,7 @@ describe('SessionManager compaction', () => {
             event.type === 'run.status' && event.status === 'completed',
         ).length >= 1,
     )
+    await waitFor(() => !manager.hasActiveRun(sessionId))
 
     const timestamp = '2026-08-08T00:00:00.000Z'
     const durableRecord: SessionRecord = {
@@ -865,7 +866,7 @@ describe('SessionManager compaction', () => {
           event.runId === runId &&
           event.text === 'Response at the context limit',
       ),
-    ).toBe(true)
+    ).toBe(false)
     expect(
       sent.some(
         ({ event }) =>

@@ -251,13 +251,55 @@ export class ToolBatchAutoCompactProvider extends ScriptedProviderHarness {
 export class ContextLimitProvider extends ScriptedProviderHarness {
   calls = 0
 
+  constructor(readonly toolCallCount = 0) {
+    super()
+  }
+
   async *run(): AsyncIterable<ProviderEvent> {
     this.calls += 1
+    if (this.calls > 1) {
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'context-limit-recovered' },
+        turn: { role: 'assistant', content: 'Recovered after context limit' },
+        toolCalls: [],
+        usage: { total_tokens: 10 },
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+    const toolCalls = Array.from(
+      { length: this.toolCallCount },
+      (_, index) => ({
+        id: `call:context-limit-${index + 1}` as CallId,
+        toolId: 'read_file',
+        args: { path: `fixture-${index + 1}.txt` },
+        reason: `Inspect context-limit fixture ${index + 1}`,
+      }),
+    )
     yield {
       type: 'completed',
       rawResponse: { id: 'context-limit' },
-      turn: { role: 'assistant', content: 'Response at the context limit' },
-      toolCalls: [],
+      turn:
+        toolCalls.length === 0
+          ? { role: 'assistant', content: 'Response at the context limit' }
+          : {
+              role: 'assistant',
+              content: null,
+              tool_calls: toolCalls.map((call) => ({
+                id: call.id,
+                type: 'function',
+                function: {
+                  name: call.toolId,
+                  arguments: JSON.stringify({
+                    ...call.args,
+                    _agent_intent: call.reason,
+                  }),
+                },
+              })),
+            },
+      toolCalls,
       usage: { total_tokens: 160_000 },
       providerState: {},
       timing: {},

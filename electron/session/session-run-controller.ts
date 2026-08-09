@@ -18,6 +18,7 @@ import {
   LegacyToolResultError,
 } from './canonical-history'
 import type { SessionCompactCoordinator } from './session-compact-coordinator'
+import { CompactionFailedError } from './session-compact-retry'
 import type { SessionInterjectionCoordinator } from './session-interjection-coordinator'
 import type { SessionOrchestrationPlanner } from './session-orchestration-planner'
 import type { SessionProviderTurnRunner } from './session-provider-turn'
@@ -260,7 +261,11 @@ export class SessionRunController {
     }
     run.status = status
     const failureCode =
-      error instanceof LegacyToolResultError ? error.code : 'RUN_FAILED'
+      error instanceof LegacyToolResultError
+        ? error.code
+        : error instanceof CompactionFailedError
+          ? 'COMPACTION_FAILED'
+          : 'RUN_FAILED'
     if (error && status === 'failed') {
       run.failure = {
         code: failureCode,
@@ -543,6 +548,9 @@ export class SessionRunController {
           () => this.setRunStatus(session, run, 'calling_llm'),
         )
 
+        const compactRequired =
+          this.#compact.assessProviderUsage(run, completed.usage) === 'compact'
+
         if (completed.text || completed.reasoning) {
           this.#emit(session, {
             type: 'assistant.message.completed',
@@ -597,18 +605,6 @@ export class SessionRunController {
             : {}),
           turnId: run.rootUserMessageId,
         })
-
-        let compactRequired = false
-        try {
-          compactRequired =
-            this.#compact.assessProviderUsage(run, completed.usage) ===
-            'compact'
-        } catch (error) {
-          await this.#executionState?.commit(session, {
-            reason: 'assistant_turn',
-          })
-          throw error
-        }
 
         if (completed.toolCalls.length === 0) {
           let continuation: 'continue' | 'finish' = 'finish'

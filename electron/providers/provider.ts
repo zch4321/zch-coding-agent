@@ -115,10 +115,35 @@ export interface ProviderResponseDiagnostics {
 export class ProviderCompletionError extends TypeError {
   readonly diagnostics: ProviderResponseDiagnostics
 
-  constructor(message: string, diagnostics: ProviderResponseDiagnostics) {
-    super(message)
+  constructor(
+    message: string,
+    diagnostics: ProviderResponseDiagnostics,
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
     this.name = 'ProviderCompletionError'
     this.diagnostics = structuredClone(diagnostics)
+  }
+}
+
+export type ProviderCompactCompletionFailure =
+  | 'incomplete'
+  | 'rejected'
+  | 'invalid'
+
+/** Reports why a complete synthetic compact response cannot become a checkpoint. */
+export class ProviderCompactCompletionError extends ProviderCompletionError {
+  readonly failure: ProviderCompactCompletionFailure
+
+  constructor(
+    message: string,
+    failure: ProviderCompactCompletionFailure,
+    diagnostics: ProviderResponseDiagnostics,
+    options?: ErrorOptions,
+  ) {
+    super(message, diagnostics, options)
+    this.name = 'ProviderCompactCompletionError'
+    this.failure = failure
   }
 }
 
@@ -212,7 +237,11 @@ export async function* syntheticCompactEvents(
       yield event
     } else if (event.type === 'completed') {
       if (completed) {
-        throw new TypeError('Provider compact produced multiple completions')
+        throw new ProviderCompactCompletionError(
+          'Provider compact produced multiple completions',
+          'invalid',
+          providerCompletionDiagnostics(event),
+        )
       }
       completed = event
     }
@@ -220,9 +249,30 @@ export async function* syntheticCompactEvents(
   if (!completed) {
     throw new TypeError('Provider compact stream ended without completion')
   }
-  assertCompletedAssistantTurn(completed.turn)
+  const diagnostics = providerCompletionDiagnostics(completed)
+  try {
+    assertCompletedAssistantTurn(completed.turn)
+  } catch (error) {
+    throw new ProviderCompactCompletionError(
+      'Provider compact returned an invalid assistant turn',
+      'invalid',
+      diagnostics,
+      { cause: error },
+    )
+  }
+  if (completed.turn.finishReason !== 'completed') {
+    throw new ProviderCompactCompletionError(
+      `Provider compact did not complete successfully (${completed.turn.finishReason})`,
+      completed.turn.finishReason === 'truncated' ? 'incomplete' : 'rejected',
+      diagnostics,
+    )
+  }
   if (completed.turn.toolCalls.length > 0) {
-    throw new TypeError('Provider compact returned tool calls')
+    throw new ProviderCompactCompletionError(
+      'Provider compact returned tool calls',
+      'invalid',
+      diagnostics,
+    )
   }
   const text = (
     streamedText ||
@@ -230,7 +280,13 @@ export async function* syntheticCompactEvents(
       .flatMap((part) => (part.type === 'text' ? [part.text] : []))
       .join('\n')
   ).trim()
-  if (!text) throw new TypeError('Provider compact summary was empty')
+  if (!text) {
+    throw new ProviderCompactCompletionError(
+      'Provider compact summary was empty',
+      'invalid',
+      diagnostics,
+    )
+  }
   yield {
     type: 'completed',
     compact: {

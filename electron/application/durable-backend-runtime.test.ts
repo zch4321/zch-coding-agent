@@ -932,7 +932,7 @@ describe('durable backend runtime', () => {
       ]),
     )
     expect(await firstTarget.runs.start(commandPayload)).toEqual(compact)
-    expect(provider.calls).toBe(2)
+    expect(provider.calls).toBe(3)
     await firstTarget.dispose()
 
     const afterRestartProvider = new OrderedProvider([])

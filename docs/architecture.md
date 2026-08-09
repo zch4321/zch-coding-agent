@@ -1010,9 +1010,10 @@ Text/reasoning delta 只进入 `ActiveRunExecution` memory buffer，并通过 `r
 
 1. Provider completed event 直接携带不修改 Session 的 canonical assistant candidate。
 2. Backend 在任何 completion event/plugin、canonical append、approval 或工具执行前校验 schema、parts/text/reasoning/JSON bounds、normalized tool-call 一致性，以及 active epoch 内全局唯一的 `callId`；失败只保留脱敏 raw trace/diagnostic。
-3. 校验通过后，backend 在内存保存完整 assistant tool-call message，再执行权限、审批和全部 tool calls，得到每个 call 的 terminal result。
-4. 单一 transaction 依次插入 `kind = 'assistant_turn'` message 和所有对应的 `kind = 'tool_result'` messages。
-5. Commit 后才发起下一次 provider call。
+3. Backend 使用 Provider usage 先完成 hard context-window 判定；达到上限时不发 completion event、不 append assistant candidate，也不执行工具，历史停在上一个完整边界。
+4. 校验通过后，backend 在内存保存完整 assistant tool-call message，再执行权限、审批和全部 tool calls，得到每个 call 的 terminal result。
+5. 单一 transaction 依次插入 `kind = 'assistant_turn'` message 和所有对应的 `kind = 'tool_result'` messages。
+6. Commit 后才发起下一次 provider call。
 
 拒绝、取消、超时也形成完整 tool message。这样数据库任何时刻都不存在“assistant tool call 已持久化，但 required tool result 缺失”的协议断裂状态。
 
@@ -1032,7 +1033,9 @@ Tool/approval 的实时卡片来自 runtime event；完成后 renderer 从 assis
 4. usage 达到阈值且响应是本轮 final answer 时，不在回答结束后后台启动请求；下一次普通用户 Run 在插入新 user message **之前**先压缩旧历史。若应用编排要求同一 Run 继续，则在 continuation 前立即压缩。
 5. 本地估算只保留为 Provider 调用前不可关闭的硬 preflight，防止明显超出目标模型 prompt budget；它不触发主动压缩。
 
-压缩调用以完整 active history 为输入，由 `compileCompact()` 将编排指令放在最后一个 wire input。Provider 成功后，单一事务把旧 active records 置为 `in_history = 0`，追加 fresh harness 和一个隐藏 `compact_summary`；失败、abort、空结果或重建超限时恢复旧 epoch。原消息始终保留在 append-only 数据库中，只是不再进入后续 Provider request。
+压缩调用以完整 active history 为输入，由 `compileCompact()` 将编排指令放在最后一个 wire input。Synthetic compact 只有 terminal `finishReason = completed` 才能形成 checkpoint；截断、内容过滤、拒绝和未知终止都 fail closed。截断最多从同一完整 source history 追加更短摘要约束后纠正重试一次；网络、timeout、rate-limit 与 5xx 最多重试两次，完整但非法的响应最多重试一次，总调用数不超过三次。鉴权、计费、输入超窗、过滤/拒绝和取消不重试；`Retry-After` 等待有 60 秒上限且可被 Run abort。每次尝试使用独立 trace call ID，失败尝试的文本 delta 不进入 Renderer；手动命令的 durable journal 只写一次。
+
+Provider 成功后，单一事务把旧 active records 置为 `in_history = 0`，追加 fresh harness 和一个隐藏 `compact_summary`；失败、abort、空结果或重建超限时恢复旧 epoch。原消息始终保留在 append-only 数据库中，只是不再进入后续 Provider request。非取消的最终压缩失败统一以 `COMPACTION_FAILED` 结束 Run，Renderer 继续通过既有 Naive UI message 通道显示“压缩失败，请重试或打开新对话。”。
 
 Responses 原生 compact 保存 opaque output items；Chat/DeepSeek/Anthropic 保存 opaque envelope 中的文本 summary。Core 只管理 record 的历史归属与可见性，不解释或重写 Provider payload。
 

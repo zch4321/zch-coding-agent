@@ -50,6 +50,14 @@ import {
   conversationTranscriptContent,
   renderConversationTranscript,
 } from './conversation-transcript'
+import {
+  compactRetryDecision,
+  correctiveCompactPrompt,
+  createCompactRetryBudget,
+  MAX_COMPACT_ATTEMPTS,
+  rethrowCompactionFailure,
+  waitForCompactRetry,
+} from './session-compact-retry'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 
 function compactOrchestrationState(input: {
@@ -240,6 +248,18 @@ export class SessionCompactCoordinator {
     run: ActiveRun,
     userMessage: string,
   ): Promise<boolean> {
+    try {
+      return await this.#runCompactCommand(session, run, userMessage)
+    } catch (error) {
+      rethrowCompactionFailure(error, run.controller.signal)
+    }
+  }
+
+  async #runCompactCommand(
+    session: SessionState,
+    run: ActiveRun,
+    userMessage: string,
+  ): Promise<boolean> {
     const source = new MessageHistoryCompiler().compile(session.history)
     const prompt = this.#orchestratorMessages.prompt('compact')
     const beforeCommandHistory = structuredClone(session.history)
@@ -349,6 +369,18 @@ export class SessionCompactCoordinator {
     run: ActiveRun,
     input: { emitText: boolean; replayReason: string },
   ): Promise<void> {
+    try {
+      await this.#compactActiveHistoryOperation(session, run, input)
+    } catch (error) {
+      rethrowCompactionFailure(error, run.controller.signal)
+    }
+  }
+
+  async #compactActiveHistoryOperation(
+    session: SessionState,
+    run: ActiveRun,
+    input: { emitText: boolean; replayReason: string },
+  ): Promise<void> {
     const source = new MessageHistoryCompiler().compile(session.history)
     const prompt = this.#orchestratorMessages.prompt('compact')
     const promptText = [
@@ -388,6 +420,23 @@ export class SessionCompactCoordinator {
       beforeProvider?: () => Promise<void>
     },
   ): Promise<CompletedProviderCompact> {
+    try {
+      return await this.#performCompactWithRetry(session, run, input)
+    } catch (error) {
+      rethrowCompactionFailure(error, run.controller.signal)
+    }
+  }
+
+  async #performCompactWithRetry(
+    session: SessionState,
+    run: ActiveRun,
+    input: {
+      promptText: string
+      sourceMessages: readonly SessionState['history'][number][]
+      emitText: boolean
+      beforeProvider?: () => Promise<void>
+    },
+  ): Promise<CompletedProviderCompact> {
     const binding = run.routes?.compression
     if (!binding) throw new Error('Compression route was not resolved')
     const config = this.#configStore.getPublicConfig()
@@ -400,118 +449,146 @@ export class SessionCompactCoordinator {
         this.#fetchImpl,
         binding.snapshot.endpoint,
       )
-    const compiled = provider.compileCompact({
-      history,
-      route: binding.snapshot,
-      instructions: input.promptText,
-      maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
-    })
-    if (
-      estimateJsonTokens(compiled.request, config.limits.tokenEstimation) >
-      modelPromptBudget(binding.modelProfile)
-    ) {
-      throw new ContextBudgetError(
-        'The active history is too large for the compression route',
-      )
-    }
-    await input.beforeProvider?.()
-    const callId = id<CallId>('llm')
-    let completed:
-      | Extract<ProviderCompactEvent, { type: 'completed' }>
-      | undefined
-    this.#setRunStatus(session, run, 'calling_llm')
-    const diagnostics = providerRequestDiagnostics(compiled)
-    await session.logger.write({
-      type: 'llm.request',
-      sessionId: session.sessionId,
-      runId: run.runId,
-      callId,
-      scope: 'compression',
-      normalizedMessages: redactJsonSecrets(compiled.normalizedMessages, [
-        binding.apiKey,
-      ]) as JsonValue[],
-      providerRequest: redactJsonSecrets(compiled.request, [binding.apiKey]),
-      requestBytes: diagnostics.requestBytes,
-      prefixHash: diagnostics.prefixHash,
-      promptResources: promptResources(session),
-      canonicalSource: canonicalTraceSource(history.messages),
-      modelRoute: binding.snapshot,
-    })
-    try {
-      for await (const event of provider.compact(compiled, {
-        signal: run.controller.signal,
-      })) {
-        if (event.type === 'text.delta') {
-          if (input.emitText) {
-            this.#emit(session, {
-              type: 'assistant.text.delta',
-              sessionId: session.sessionId,
-              runId: run.runId,
-              delta: event.delta,
-            })
-          }
-        } else if (completed) {
-          throw new Error('Compact provider produced multiple completions')
-        } else {
-          completed = event
-        }
-      }
-    } catch (error) {
-      if (error instanceof ProviderCompletionError) {
-        await this.#writeFailedResponse(
-          session,
-          run,
-          callId,
-          binding.apiKey,
-          error.diagnostics,
+    const compile = (instructions: string) => {
+      const candidate = provider.compileCompact({
+        history,
+        route: binding.snapshot,
+        instructions,
+        maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
+      })
+      if (
+        estimateJsonTokens(candidate.request, config.limits.tokenEstimation) >
+        modelPromptBudget(binding.modelProfile)
+      ) {
+        throw new ContextBudgetError(
+          'The active history is too large for the compression route',
         )
       }
-      throw error
+      return candidate
     }
-    if (!completed) {
-      throw new Error('Compact provider stream ended without completion')
-    }
-    await session.logger.write({
-      type: 'llm.response',
-      sessionId: session.sessionId,
-      runId: run.runId,
-      callId,
-      rawResponse: redactJsonSecrets(completed.rawResponse, [binding.apiKey]),
-      normalizedTurn: redactJsonSecrets(toJsonValue(completed.compact), [
-        binding.apiKey,
-      ]),
-      providerState: redactJsonSecrets(completed.providerState, [
-        binding.apiKey,
-      ]),
-      usage: completed.compact.usage.raw,
-      timing: toJsonValue(completed.timing),
-    })
-    const usage = normalizeLlmUsage({
-      scope: 'compression',
-      config,
-      provider: binding.provider,
-      model: binding.snapshot.model,
-      modelProfile: binding.modelProfile,
-      usage: completed.compact.usage,
-    })
-    if (usage) {
-      run.usageRecords.push(structuredClone(usage))
+    let instructions = input.promptText
+    let compiled = compile(instructions)
+    await input.beforeProvider?.()
+    const retryBudget = createCompactRetryBudget()
+
+    for (let attempt = 1; attempt <= MAX_COMPACT_ATTEMPTS; attempt += 1) {
+      const callId = id<CallId>('llm')
+      let completed:
+        | Extract<ProviderCompactEvent, { type: 'completed' }>
+        | undefined
+      const textDeltas: string[] = []
+      this.#setRunStatus(session, run, 'calling_llm')
+      const diagnostics = providerRequestDiagnostics(compiled)
       await session.logger.write({
-        type: 'llm.usage',
+        type: 'llm.request',
         sessionId: session.sessionId,
         runId: run.runId,
         callId,
-        usage,
+        scope: 'compression',
+        normalizedMessages: redactJsonSecrets(compiled.normalizedMessages, [
+          binding.apiKey,
+        ]) as JsonValue[],
+        providerRequest: redactJsonSecrets(compiled.request, [binding.apiKey]),
+        requestBytes: diagnostics.requestBytes,
+        prefixHash: diagnostics.prefixHash,
+        promptResources: promptResources(session),
+        canonicalSource: canonicalTraceSource(history.messages),
+        modelRoute: binding.snapshot,
       })
-      this.#emit(session, {
-        type: 'llm.usage',
+      try {
+        for await (const event of provider.compact(compiled, {
+          signal: run.controller.signal,
+        })) {
+          if (event.type === 'text.delta') {
+            textDeltas.push(event.delta)
+          } else if (completed) {
+            throw new TypeError(
+              'Compact provider produced multiple completions',
+            )
+          } else {
+            completed = event
+          }
+        }
+        if (!completed) {
+          throw new TypeError(
+            'Compact provider stream ended without completion',
+          )
+        }
+      } catch (error) {
+        if (error instanceof ProviderCompletionError) {
+          await this.#writeFailedResponse(
+            session,
+            run,
+            callId,
+            binding.apiKey,
+            error.diagnostics,
+          )
+        }
+        const retry =
+          attempt < MAX_COMPACT_ATTEMPTS
+            ? compactRetryDecision(error, retryBudget)
+            : undefined
+        if (!retry) throw error
+        await waitForCompactRetry(retry.delayMs, run.controller.signal)
+        if (retry.corrective) {
+          instructions = correctiveCompactPrompt(input.promptText)
+        }
+        compiled = compile(instructions)
+        continue
+      }
+      await session.logger.write({
+        type: 'llm.response',
         sessionId: session.sessionId,
         runId: run.runId,
         callId,
-        usage,
+        rawResponse: redactJsonSecrets(completed.rawResponse, [binding.apiKey]),
+        normalizedTurn: redactJsonSecrets(toJsonValue(completed.compact), [
+          binding.apiKey,
+        ]),
+        providerState: redactJsonSecrets(completed.providerState, [
+          binding.apiKey,
+        ]),
+        usage: completed.compact.usage.raw,
+        timing: toJsonValue(completed.timing),
       })
+      const usage = normalizeLlmUsage({
+        scope: 'compression',
+        config,
+        provider: binding.provider,
+        model: binding.snapshot.model,
+        modelProfile: binding.modelProfile,
+        usage: completed.compact.usage,
+      })
+      if (usage) {
+        run.usageRecords.push(structuredClone(usage))
+        await session.logger.write({
+          type: 'llm.usage',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          callId,
+          usage,
+        })
+        this.#emit(session, {
+          type: 'llm.usage',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          callId,
+          usage,
+        })
+      }
+      if (input.emitText) {
+        for (const delta of textDeltas) {
+          this.#emit(session, {
+            type: 'assistant.text.delta',
+            sessionId: session.sessionId,
+            runId: run.runId,
+            delta,
+          })
+        }
+      }
+      return structuredClone(completed.compact)
     }
-    return structuredClone(completed.compact)
+    throw new Error('Compact retry loop ended unexpectedly')
   }
 
   async #rewriteCompact(

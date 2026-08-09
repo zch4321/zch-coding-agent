@@ -10,16 +10,26 @@ export type ProviderTransportErrorCode =
   | 'NETWORK_ERROR'
   | 'TIMED_OUT'
 
-/** Reports HTTP or SSE transport failures with a stable code and optional status. */
+export interface ProviderTransportErrorOptions extends ErrorOptions {
+  retryAfterMs?: number
+  providerErrorCode?: string
+}
+
+/** Reports bounded HTTP or SSE transport failures and retry metadata. */
 export class ProviderTransportError extends Error {
+  readonly retryAfterMs: number | undefined
+  readonly providerErrorCode: string | undefined
+
   constructor(
     readonly code: ProviderTransportErrorCode,
     message: string,
     readonly status?: number,
-    options?: ErrorOptions,
+    options?: ProviderTransportErrorOptions,
   ) {
     super(message, options)
     this.name = 'ProviderTransportError'
+    this.retryAfterMs = options?.retryAfterMs
+    this.providerErrorCode = options?.providerErrorCode
   }
 }
 
@@ -129,11 +139,12 @@ export class HttpSseTransport {
       })
 
       if (!response.ok || !response.body) {
-        await response.body?.cancel().catch(() => undefined)
+        const metadata = await httpErrorMetadata(response)
         throw new ProviderTransportError(
           'HTTP_ERROR',
           `${this.#providerId} request failed with status ${response.status}`,
           response.status,
+          metadata,
         )
       }
 
@@ -219,11 +230,12 @@ export class HttpSseTransport {
         signal: controller.signal,
       })
       if (!response.ok) {
-        await response.body?.cancel().catch(() => undefined)
+        const metadata = await httpErrorMetadata(response)
         throw new ProviderTransportError(
           'HTTP_ERROR',
           `${this.#providerId} request failed with status ${response.status}`,
           response.status,
+          metadata,
         )
       }
       const text = await readBoundedJsonBody(response)
@@ -314,5 +326,57 @@ async function readBoundedJsonBody(response: Response): Promise<string> {
     return text + decoder.decode()
   } finally {
     await reader.cancel().catch(() => undefined)
+  }
+}
+
+function retryAfterMilliseconds(value: string | null): number | undefined {
+  const normalized = value?.trim()
+  if (!normalized) return undefined
+  const seconds = Number(normalized)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1_000)
+  }
+  const timestamp = Date.parse(normalized)
+  if (!Number.isFinite(timestamp)) return undefined
+  return Math.max(0, timestamp - Date.now())
+}
+
+function providerErrorCode(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined
+  }
+  const record = value as Record<string, unknown>
+  const error =
+    record.error &&
+    typeof record.error === 'object' &&
+    !Array.isArray(record.error)
+      ? (record.error as Record<string, unknown>)
+      : record
+  const code =
+    typeof error.code === 'string'
+      ? error.code
+      : typeof error.type === 'string'
+        ? error.type
+        : undefined
+  return code?.trim().slice(0, 128) || undefined
+}
+
+async function httpErrorMetadata(
+  response: Response,
+): Promise<ProviderTransportErrorOptions> {
+  const retryAfterMs = retryAfterMilliseconds(
+    response.headers.get('retry-after'),
+  )
+  let parsed: unknown
+  try {
+    const text = await readBoundedJsonBody(response)
+    if (text.trim()) parsed = JSON.parse(text)
+  } catch {
+    await response.body?.cancel().catch(() => undefined)
+  }
+  const code = providerErrorCode(parsed)
+  return {
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+    ...(code ? { providerErrorCode: code } : {}),
   }
 }
