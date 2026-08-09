@@ -146,7 +146,7 @@ function resourceContent(
 export function appendPromptLayer(
   state: PromptHistoryState,
   input: {
-    kind: CanonicalPromptKind
+    kind: Exclude<CanonicalPromptKind, 'conversation_transcript'>
     content: string
     source: string
     trusted: boolean
@@ -722,6 +722,7 @@ export function promptResources(
       !record.inHistory ||
       !record.metadata ||
       !('layer' in record.metadata) ||
+      !('prompt' in record.metadata) ||
       !record.metadata.prompt
     ) {
       return []

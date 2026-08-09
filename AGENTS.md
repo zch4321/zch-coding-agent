@@ -24,8 +24,10 @@ Define cross-process payloads once in `shared/` and validate them at IPC boundar
 
 ## Verification
 
-- `npm run verify` is the only routine full gate. It runs lint, formatting, deterministic Vitest tests, typecheck, runtime smoke tests, app/headless builds, Windows packaging, packaged SQLite smoke, and Playwright against the built app.
-- Do not repeat commands already included by `npm run verify` unless isolating a failure. `npm run test:runtime` groups native PTY, ripgrep, and development SQLite checks while keeping them in separate child processes for ABI and binary diagnostics.
+- Before `npm run check`, format the files changed by the task. Use `npm run format` when the worktree contains no unrelated user edits; otherwise run Prettier in write mode only on task-owned files so formatting does not modify unrelated work.
+- `npm run check` is the routine developer gate. It runs lint, formatting, deterministic Vitest tests, and typecheck in parallel, waits for every sibling check, and reports all failures together.
+- `npm run verify` is the complete merge and release gate. It adds runtime smoke tests, app/headless builds, Windows packaging, packaged SQLite smoke, and Playwright against the built app. Run it before merging or releasing, or when the user explicitly requests the full gate; do not run it after every ordinary edit.
+- Do not repeat commands already included by the selected gate unless isolating a failure. `npm run test:runtime` groups native PTY, ripgrep, and development SQLite checks while keeping them in separate child processes for ABI and binary diagnostics.
 - `npm run test:e2e` remains an independent convenience entry that builds the app before Playwright. `npm run build` automatically runs `test:runtime` and, after Windows packaging, the packaged SQLite-only probe.
 - Do not run `test:real` unless the user explicitly requests that workload. It requires credentials and paid Provider usage and is not part of `npm run verify`.
 

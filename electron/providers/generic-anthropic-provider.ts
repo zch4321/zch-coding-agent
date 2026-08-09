@@ -3,7 +3,11 @@ import {
   MAX_MESSAGE_TEXT_LENGTH,
 } from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
-import type { JsonObject, JsonValue } from '../../shared/json'
+import {
+  assertBoundedJsonValue,
+  type JsonObject,
+  type JsonValue,
+} from '../../shared/json'
 import {
   renderToolResultContent,
   type MessagePart,
@@ -13,18 +17,29 @@ import { renderLiveUserInterjection } from '../../shared/live-interjection'
 import { resolveAnthropicMessagesEndpoint } from '../../shared/model-route'
 import { canonicalHash, messageText } from '../session/canonical-history'
 import type { ToolCall } from '../tools/types'
+import {
+  normalizedAnthropicCompactUsage,
+  normalizedAnthropicUsage,
+} from './anthropic-usage'
 import { HttpSseTransport } from './http-sse-transport'
 import {
   ProviderCompletionError,
+  ProviderCompactUnsupportedError,
+  providerCompactPayload,
+  providerCompactText,
+  syntheticCompactEvents,
   type CompiledProviderCall,
+  type CompiledProviderCompactCall,
   type ModelProvider,
+  type ProviderCompactEvent,
+  type ProviderCompactInput,
+  type ProviderCompactMode,
   type ProviderCompileInput,
   type ProviderEvent,
   type ProviderResponseDiagnostics,
   type ProviderStreamContext,
   type ProviderTiming,
   type ProviderToolDefinition,
-  type ProviderUsage,
 } from './provider'
 import {
   appendProviderArguments,
@@ -39,7 +54,10 @@ import {
 } from './provider-shared'
 
 export const ANTHROPIC_CONTINUATION_FORMAT = 'anthropic.message-content.v1'
+export const ANTHROPIC_COMPACT_FORMAT = 'anthropic.compaction-block.v1'
 export const ANTHROPIC_API_VERSION = '2023-06-01'
+export const ANTHROPIC_COMPACT_BETA = 'compact-2026-01-12'
+const ANTHROPIC_COMPACT_MIN_INPUT_TOKENS = 50_000
 
 interface AnthropicAccumulator {
   requestStart: number
@@ -122,6 +140,59 @@ function anthropicContinuationContent(
   return structuredClone(data.content) as JsonObject[]
 }
 
+function isAnthropicCompactionBlock(block: JsonValue): block is JsonObject {
+  return Boolean(
+    block &&
+    typeof block === 'object' &&
+    !Array.isArray(block) &&
+    block.type === 'compaction' &&
+    typeof block.content === 'string' &&
+    block.content.trim().length > 0,
+  )
+}
+
+function containsAnthropicCompactionBlock(
+  messages: readonly JsonObject[],
+): boolean {
+  return messages.some(
+    (message) =>
+      Array.isArray(message.content) &&
+      message.content.some(isAnthropicCompactionBlock),
+  )
+}
+
+function anthropicCompactContent(
+  record: Extract<MessageRecord, { kind: 'compact_summary' }>,
+  route: ProviderCompileInput['route'],
+): JsonObject[] | undefined {
+  const payload = providerCompactPayload(record, route)
+  if (!payload || payload.format === 'summary-text.v1') return undefined
+  if (payload.format !== ANTHROPIC_COMPACT_FORMAT) {
+    throw new TypeError(
+      `Unsupported Anthropic compact format: ${payload.format}`,
+    )
+  }
+  const data = payload.data
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    Array.isArray(data) ||
+    !Array.isArray(data.content) ||
+    data.content.length === 0 ||
+    data.content.some(
+      (block) =>
+        !block ||
+        typeof block !== 'object' ||
+        Array.isArray(block) ||
+        typeof block.type !== 'string',
+    ) ||
+    !data.content.some(isAnthropicCompactionBlock)
+  ) {
+    throw new TypeError('Anthropic compact content is corrupt')
+  }
+  return structuredClone(data.content) as JsonObject[]
+}
+
 function appendAnthropicMessage(
   messages: JsonObject[],
   role: 'user' | 'assistant',
@@ -139,7 +210,10 @@ function appendAnthropicMessage(
   messages.push({ role, content: blocks })
 }
 
-function compileAnthropicHistory(history: ProviderCompileInput['history']): {
+function compileAnthropicHistory(
+  history: ProviderCompileInput['history'],
+  route: ProviderCompileInput['route'],
+): {
   system?: string
   messages: JsonObject[]
 } {
@@ -181,6 +255,17 @@ function compileAnthropicHistory(history: ProviderCompileInput['history']): {
           },
         ])
         break
+      case 'compact_summary': {
+        const nativeContent = anthropicCompactContent(record, route)
+        appendAnthropicMessage(
+          messages,
+          nativeContent ? 'assistant' : 'user',
+          nativeContent ?? [
+            { type: 'text', text: providerCompactText(record, route) },
+          ],
+        )
+        break
+      }
       default:
         appendAnthropicMessage(messages, 'user', [
           { type: 'text', text: messageText(record) },
@@ -207,59 +292,6 @@ function anthropicOutputConfig(
     }
   }
   return Object.keys(outputConfig).length > 0 ? outputConfig : undefined
-}
-
-function normalizedAnthropicUsage(
-  startUsage: JsonValue,
-  deltaUsage: JsonValue,
-): ProviderUsage {
-  const start =
-    startUsage && typeof startUsage === 'object' && !Array.isArray(startUsage)
-      ? (startUsage as JsonObject)
-      : {}
-  const delta =
-    deltaUsage && typeof deltaUsage === 'object' && !Array.isArray(deltaUsage)
-      ? (deltaUsage as JsonObject)
-      : {}
-  const uncachedInputTokens =
-    providerMetric(delta.input_tokens) ?? providerMetric(start.input_tokens)
-  const cacheCreationTokens =
-    providerMetric(delta.cache_creation_input_tokens) ??
-    providerMetric(start.cache_creation_input_tokens)
-  const cacheReadTokens =
-    providerMetric(delta.cache_read_input_tokens) ??
-    providerMetric(start.cache_read_input_tokens)
-  const inputTokens =
-    uncachedInputTokens === undefined &&
-    cacheCreationTokens === undefined &&
-    cacheReadTokens === undefined
-      ? undefined
-      : (uncachedInputTokens ?? 0) +
-        (cacheCreationTokens ?? 0) +
-        (cacheReadTokens ?? 0)
-  const outputTokens =
-    providerMetric(delta.output_tokens) ?? providerMetric(start.output_tokens)
-  const outputDetails =
-    providerObjectField(delta, 'output_tokens_details') ??
-    providerObjectField(start, 'output_tokens_details')
-  const cacheMissTokens =
-    uncachedInputTokens === undefined && cacheCreationTokens === undefined
-      ? undefined
-      : (uncachedInputTokens ?? 0) + (cacheCreationTokens ?? 0)
-  return {
-    promptTokens: inputTokens,
-    completionTokens: outputTokens,
-    ...(inputTokens !== undefined && outputTokens !== undefined
-      ? { totalTokens: inputTokens + outputTokens }
-      : {}),
-    reasoningTokens: providerMetric(outputDetails?.thinking_tokens),
-    cacheHitTokens: cacheReadTokens,
-    cacheMissTokens,
-    raw: {
-      message_start: structuredClone(startUsage),
-      message_delta: structuredClone(deltaUsage),
-    },
-  }
 }
 
 function anthropicFinishReason(
@@ -295,19 +327,34 @@ export class GenericAnthropicProvider implements ModelProvider {
   readonly providerType = 'generic.anthropic' as const
   readonly #providerId: string
   readonly #transport: HttpSseTransport
+  readonly #compactTransport: HttpSseTransport
   readonly #now: () => number
   readonly #createCallId: () => CallId
 
   constructor(options: GenericAnthropicProviderOptions) {
     this.#providerId = options.providerId
+    const endpoint =
+      options.endpoint ?? resolveAnthropicMessagesEndpoint(options.baseURL)
+    const apiVersion = options.apiVersion ?? ANTHROPIC_API_VERSION
     this.#transport = new HttpSseTransport({
       providerId: options.providerId,
-      endpoint:
-        options.endpoint ?? resolveAnthropicMessagesEndpoint(options.baseURL),
+      endpoint,
       apiKey: options.apiKey,
       headers: {
         'x-api-key': options.apiKey,
-        'anthropic-version': options.apiVersion ?? ANTHROPIC_API_VERSION,
+        'anthropic-version': apiVersion,
+      },
+      fetchImpl: options.fetchImpl,
+      timeoutMs: options.timeoutMs,
+    })
+    this.#compactTransport = new HttpSseTransport({
+      providerId: options.providerId,
+      endpoint,
+      apiKey: options.apiKey,
+      headers: {
+        'x-api-key': options.apiKey,
+        'anthropic-version': apiVersion,
+        'anthropic-beta': ANTHROPIC_COMPACT_BETA,
       },
       fetchImpl: options.fetchImpl,
       timeoutMs: options.timeoutMs,
@@ -328,7 +375,7 @@ export class GenericAnthropicProvider implements ModelProvider {
         'Provider max output tokens must be a positive integer',
       )
     }
-    const compiled = compileAnthropicHistory(input.history)
+    const compiled = compileAnthropicHistory(input.history, input.route)
     const tools = structuredClone(input.tools)
     const wireTools = anthropicTools(tools)
     const outputConfig = anthropicOutputConfig(input)
@@ -351,6 +398,160 @@ export class GenericAnthropicProvider implements ModelProvider {
     }
   }
 
+  /** Exposes native compaction when Anthropic's minimum trigger can be met. */
+  compactModes(input: ProviderCompactInput): readonly ProviderCompactMode[] {
+    return input.contextTokens !== undefined &&
+      input.contextTokens < ANTHROPIC_COMPACT_MIN_INPUT_TOKENS
+      ? ['synthetic']
+      : ['native', 'synthetic']
+  }
+
+  /** Compiles native Anthropic context management or portable summarization. */
+  compileCompact(
+    input: ProviderCompactInput,
+    mode: ProviderCompactMode = 'native',
+  ): CompiledProviderCompactCall {
+    if (input.route.providerType !== this.providerType) {
+      throw new TypeError(
+        `Route Provider ${input.route.providerType} does not match ${this.providerType}`,
+      )
+    }
+    const compiled = compileAnthropicHistory(input.history, input.route)
+    if (mode === 'synthetic') {
+      const messages = structuredClone(compiled.messages)
+      appendAnthropicMessage(messages, 'user', [
+        { type: 'text', text: input.instructions },
+      ])
+      const call = this.compile({
+        history: input.history,
+        route: input.route,
+        tools: [],
+        maxOutputTokens: input.maxOutputTokens,
+      })
+      return {
+        mode,
+        request: {
+          ...structuredClone(call.request),
+          messages: structuredClone(messages),
+        },
+        normalizedMessages: structuredClone(messages),
+      }
+    }
+    if (mode !== 'native') {
+      throw new TypeError(`Unsupported Anthropic compact mode: ${mode}`)
+    }
+    return {
+      mode,
+      request: {
+        model: input.route.model,
+        ...(compiled.system ? { system: compiled.system } : {}),
+        messages: structuredClone(compiled.messages),
+        max_tokens: input.maxOutputTokens,
+        context_management: {
+          edits: [
+            {
+              type: 'compact_20260112',
+              trigger: {
+                type: 'input_tokens',
+                value: ANTHROPIC_COMPACT_MIN_INPUT_TOKENS,
+              },
+              pause_after_compaction: true,
+              instructions: input.instructions,
+            },
+          ],
+        },
+      },
+      normalizedMessages: structuredClone(compiled.messages),
+    }
+  }
+
+  /** Executes native context management or a regular text-summary request. */
+  async *compact(
+    call: CompiledProviderCompactCall,
+    context: ProviderStreamContext,
+  ): AsyncIterable<ProviderCompactEvent> {
+    if (call.mode === 'synthetic') {
+      yield* syntheticCompactEvents(
+        this.providerType,
+        this.stream(
+          {
+            request: structuredClone(call.request),
+            normalizedMessages: structuredClone(call.normalizedMessages),
+            tools: [],
+          },
+          context,
+        ),
+      )
+      return
+    }
+    if (call.mode !== 'native') {
+      throw new TypeError(`Unsupported Anthropic compact mode: ${call.mode}`)
+    }
+    const startedAt = this.#now()
+    const response = await this.#compactTransport.postJsonObject(
+      structuredClone(call.request),
+      context.signal,
+    )
+    const completedAt = this.#now()
+    const usage = normalizedAnthropicCompactUsage(
+      toProviderJson(response.usage ?? null),
+    )
+    const compactTiming: ProviderTiming = {
+      ttftMs: null,
+      totalMs: completedAt - startedAt,
+      responseBytes: providerJsonBytes(response),
+    }
+    const providerState = toProviderJson({
+      providerId: this.#providerId,
+      providerType: this.providerType,
+      message: response,
+    })
+    const diagnostics: ProviderResponseDiagnostics = {
+      rawResponse: structuredClone(response),
+      providerState,
+      usage: structuredClone(usage.raw),
+      timing: compactTiming,
+    }
+    const content = Array.isArray(response.content)
+      ? response.content
+      : undefined
+    if (
+      response.stop_reason !== 'compaction' ||
+      !content ||
+      content.length === 0 ||
+      content.some(
+        (block) =>
+          !block ||
+          typeof block !== 'object' ||
+          Array.isArray(block) ||
+          typeof block.type !== 'string',
+      ) ||
+      !content.some(isAnthropicCompactionBlock)
+    ) {
+      throw new ProviderCompactUnsupportedError(
+        'Anthropic compact returned an incompatible compaction block',
+        { diagnostics },
+      )
+    }
+    const data = { content: structuredClone(content) }
+    assertBoundedJsonValue(data)
+    yield {
+      type: 'completed',
+      compact: {
+        payload: {
+          schemaVersion: 1,
+          providerType: this.providerType,
+          format: ANTHROPIC_COMPACT_FORMAT,
+          data,
+        },
+        usage,
+      },
+      rawResponse: structuredClone(response),
+      providerState,
+      timing: compactTiming,
+    }
+  }
+
   /** Sends one Anthropic Messages request and normalizes content-block SSE. */
   async *stream(
     call: CompiledProviderCall,
@@ -368,7 +569,10 @@ export class GenericAnthropicProvider implements ModelProvider {
       startUsage: null,
       deltaUsage: null,
     }
-    for await (const event of this.#transport.postJson(
+    const transport = containsAnthropicCompactionBlock(call.normalizedMessages)
+      ? this.#compactTransport
+      : this.#transport
+    for await (const event of transport.postJson(
       structuredClone(call.request),
       context.signal,
     )) {

@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && npm run test:runtime && npm run build:app && npm run build:headless && electron-builder --win --x64 --publish never && npm run test:sqlite:packaged",
+    "build": "npm run typecheck && npm run test:runtime && npm run verify:package",
     "build:app": "vite build",
     "build:headless": "vite build --config vite.headless.config.ts",
     "agent:headless": "node dist-headless/zch-agent-headless.mjs",
@@ -28,7 +28,9 @@
     "test:sqlite:packaged": "node scripts/sqlite-smoke.cjs --packaged",
     "test:e2e": "npm run build:app && playwright test",
     "test:e2e:built": "playwright test",
-    "verify": "npm run lint && npm run format:check && npm test && npm run build && npm run test:e2e:built",
+    "check": "node scripts/run-parallel-checks.mjs",
+    "verify:package": "npm run build:app && npm run build:headless && electron-builder --win --x64 --publish never && npm run test:sqlite:packaged",
+    "verify": "npm run check && npm run test:runtime && npm run verify:package && npm run test:e2e:built",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {

@@ -88,6 +88,11 @@ const validPayloads: {
   'mcp:restart': { version: 1, serverId: 'github' },
   'provider:list-models': { version: 1, refresh: false },
   'app:get-bootstrap': { version: 1 },
+  'session:export-markdown': {
+    version: 1,
+    sessionId: 'session:one' as never,
+    confirmed: true,
+  },
   'project:list': { version: 1 },
   'project:add': { version: 1, path: 'F:/workspace' },
   'project:update': {
@@ -391,21 +396,25 @@ describe('IPC security registrar', () => {
     })
   })
 
-  it('requires explicit renderer confirmation for transcript export', async () => {
-    const { event, trusted } = createEvent({})
-    const result = await handleIpcInvocation(
+  it.each([
+    [
       'trace:export-transcript',
-      event,
       { version: 1, traceId: 'session-test', confirmed: false },
-      {
+    ],
+    ['session:export-markdown', { version: 1, sessionId, confirmed: false }],
+  ] as const)(
+    'requires explicit renderer confirmation for %s',
+    async (channel, payload) => {
+      const { event, trusted } = createEvent({})
+      const result = await handleIpcInvocation(channel, event, payload, {
         getTrustedWebContents: () => trusted,
         isAllowedUrl: () => true,
-      },
-    )
+      })
 
-    expect(result).toMatchObject({
-      ok: false,
-      error: { code: 'INVALID_PAYLOAD' },
-    })
-  })
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'INVALID_PAYLOAD' },
+      })
+    },
+  )
 })

@@ -202,6 +202,7 @@ export async function createBackendRuntime(
       autoApproverFactory: options.autoApproverFactory,
       eventListeners: options.eventListeners,
       executionState,
+      historySource: sessions,
       fileChangeExecution: fileChanges,
       subagentExecution: subagentBridge,
       onDiagnostic: options.onDiagnostic,

@@ -5,9 +5,11 @@ on:
     branches:
       - '**'
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  windows:
+  check:
+    name: Fast checks
     runs-on: windows-latest
     timeout-minutes: 30
     env:
@@ -26,5 +28,39 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify
-        run: npm run verify
+      - name: Check
+        run: npm run check
+
+  merge-gate:
+    name: ${{ matrix.task.name }}
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    strategy:
+      fail-fast: false
+      matrix:
+        task:
+          - name: Runtime smoke
+            command: npm run test:runtime
+          - name: Electron E2E
+            command: npm run test:e2e
+          - name: Windows package smoke
+            command: npm run verify:package
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ${{ matrix.task.name }}
+        run: ${{ matrix.task.command }}

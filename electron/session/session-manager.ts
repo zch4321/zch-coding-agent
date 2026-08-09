@@ -207,6 +207,7 @@ export class SessionManager {
       getWorkspaceConcurrency: (session) =>
         this.#workspaceConcurrencyContext(session),
       executionState: this.#executionState,
+      historySource: options.historySource,
     })
     this.#interjections = new SessionInterjectionCoordinator({
       configStore: this.#configStore,

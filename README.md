@@ -2,7 +2,7 @@
 
 安装：普通用户可以直接在 GitHub Releases 下载 `Zch Coding Agent-Windows-*-Setup.exe` 安装包并运行安装；当前发布目标是 Windows x64。开发者需要 Node.js 24，克隆仓库后执行 `npm ci` 安装依赖，开发模式运行 `npm run dev`；如需本地生成安装包，再执行 `npm run build`，产物会输出到 `release/<version>/`。
 
-使用：启动应用后先选择一个工作区目录，在设置里配置模型服务和 API Key，然后在对话框中提出任务。Agent 会在当前工作区内读取文件、搜索代码、应用补丁、执行命令或打开共享终端；涉及文件写入、命令执行、终端输入等副作用时，会根据当前权限模式进入人工审批、自动审批或全自动执行。常规完整验证只运行 `npm run verify`；定位单项失败时再执行对应底层命令。
+使用：启动应用后先选择一个工作区目录，在设置里配置模型服务和 API Key，然后在对话框中提出任务。Agent 会在当前工作区内读取文件、搜索代码、应用补丁、执行命令或打开共享终端；涉及文件写入、命令执行、终端输入等副作用时，会根据当前权限模式进入人工审批、自动审批或全自动执行。日常修改运行 `npm run check`；合并或发布前运行完整的 `npm run verify`。
 
 Headless host 可通过 `npm run build:headless` 构建，然后用 `npm run agent:headless -- run --workspace <dir> --task-file <file> --config <file> --artifacts <dir> --timeout-ms <ms>` 启动。该入口固定为无人审批的 Yolo，stdout 只输出 JSONL，运行结果和 patch 写入 workspace 外的 artifacts 目录。真实 Provider 测试仍是高成本 opt-in 工作负载，不属于 `npm run verify`。
 
@@ -88,13 +88,16 @@ Workspace files, child processes, PTY terminals
 ```powershell
 npm ci
 npm run dev
+npm run check
 npm run verify
 npm run test:e2e
 npm run build:headless
 npm run build
 ```
 
-`npm run verify` 已包含 lint、format check、`npm test`、typecheck、native/ripgrep/development SQLite smoke、应用与 Headless 构建、Windows x64 打包、packaged SQLite smoke 和基于现有构建产物的 Electron E2E。不要在完整验证后重复运行这些底层命令，除非正在定位失败。
+`npm run check` 会并行运行 lint、format check、`npm test` 和 typecheck；一个任务失败不会取消其他任务，结束后会按任务分组输出全部错误。`npm run verify` 是合并与发布门禁，在 `check` 之上增加 native/ripgrep/development SQLite smoke、应用与 Headless 构建、Windows x64 打包、packaged SQLite smoke 和基于现有构建产物的 Electron E2E。不要在所选门禁通过后重复运行它已经包含的底层命令，除非正在定位失败。
+
+GitHub CI 对普通分支 push 只运行快速检查；PR、`master` push 和手动触发会在独立 Windows runner 上并行运行 runtime smoke、Electron E2E 与 Windows package smoke，并等待所有任务报告结果。直接合并而不使用 PR 时，应先在本地运行 `npm run verify`，否则完整门禁只能在 `master` 更新后发现问题。
 
 `test:real` 只在明确需要真实 Provider 环境时手动运行；常规开发、CI 和 Release 均不会隐式触发。
 

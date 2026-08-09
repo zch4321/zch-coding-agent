@@ -3,6 +3,7 @@ import {
   type ScriptedProviderEvent as ProviderEvent,
   type TestProviderStreamRequest as ProviderStreamRequest,
 } from '../providers/provider-test-harness'
+import type { CallId } from '../../shared/ids'
 
 function deferred(): { resolve: () => void; promise: Promise<void> } {
   let resolve: () => void = () => undefined
@@ -86,7 +87,7 @@ export class AutoCompactProvider extends ScriptedProviderHarness {
       rawResponse: { id: `normal-${this.calls}` },
       turn: { role: 'assistant', content: `Normal response ${this.calls}` },
       toolCalls: [],
-      usage: {},
+      usage: { total_tokens: 2_000 },
       providerState: {},
       timing: {},
     }
@@ -159,7 +160,147 @@ export class InterjectedAutoCompactProvider extends ScriptedProviderHarness {
       rawResponse: { id: 'interjected-main' },
       turn: { role: 'assistant', content: 'Handled latest interjection' },
       toolCalls: [],
-      usage: {},
+      usage: { total_tokens: 2_000 },
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
+export class ToolBatchAutoCompactProvider extends ScriptedProviderHarness {
+  calls = 0
+  requests: Array<{
+    messages: ProviderStreamRequest['normalizedMessages']
+    tools: ProviderStreamRequest['toolDefinitions']
+  }> = []
+
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    this.requests.push({
+      messages: structuredClone(request.normalizedMessages),
+      tools: structuredClone(request.toolDefinitions),
+    })
+
+    if (request.toolDefinitions.length === 0) {
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'tool-batch-compact' },
+        turn: {
+          role: 'assistant',
+          content: 'Tool result checkpoint retained',
+        },
+        toolCalls: [],
+        usage: { total_tokens: 20 },
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    if (this.calls === 1) {
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'tool-batch-main' },
+        turn: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call:compact-read',
+              type: 'function',
+              function: {
+                name: 'read_file',
+                arguments: JSON.stringify({
+                  path: 'README.md',
+                  _agent_intent: 'Inspect the fixture before compaction',
+                }),
+              },
+            },
+          ],
+        },
+        toolCalls: [
+          {
+            id: 'call:compact-read' as CallId,
+            toolId: 'read_file',
+            args: { path: 'README.md' },
+            reason: 'Inspect the fixture before compaction',
+          },
+        ],
+        usage: { total_tokens: 2_000 },
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'tool-batch-finished' },
+      turn: {
+        role: 'assistant',
+        content: 'Finished after compacting the tool.',
+      },
+      toolCalls: [],
+      usage: { total_tokens: 30 },
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
+export class ContextLimitProvider extends ScriptedProviderHarness {
+  calls = 0
+
+  constructor(readonly toolCallCount = 0) {
+    super()
+  }
+
+  async *run(): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    if (this.calls > 1) {
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'context-limit-recovered' },
+        turn: { role: 'assistant', content: 'Recovered after context limit' },
+        toolCalls: [],
+        usage: { total_tokens: 10 },
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+    const toolCalls = Array.from(
+      { length: this.toolCallCount },
+      (_, index) => ({
+        id: `call:context-limit-${index + 1}` as CallId,
+        toolId: 'read_file',
+        args: { path: `fixture-${index + 1}.txt` },
+        reason: `Inspect context-limit fixture ${index + 1}`,
+      }),
+    )
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'context-limit' },
+      turn:
+        toolCalls.length === 0
+          ? { role: 'assistant', content: 'Response at the context limit' }
+          : {
+              role: 'assistant',
+              content: null,
+              tool_calls: toolCalls.map((call) => ({
+                id: call.id,
+                type: 'function',
+                function: {
+                  name: call.toolId,
+                  arguments: JSON.stringify({
+                    ...call.args,
+                    _agent_intent: call.reason,
+                  }),
+                },
+              })),
+            },
+      toolCalls,
+      usage: { total_tokens: 160_000 },
       providerState: {},
       timing: {},
     }

@@ -49,7 +49,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 - **状态明确**：同一 Session 同一时间只允许一个活动 Run；运行中收到新消息时默认拒绝，但切换到其他对话不取消后台 Run。
 - **协议完整**：LLM 一次返回多个工具调用时，每个调用都必须回填一个结果；拒绝、取消、超时也以结构化工具结果回填，不能静默丢失。
 - **有序并发**：`ToolDefinition.executionMode` 明确区分 `parallel | serial`，未声明时按 `serial` 处理。连续 parallel 调用只并发执行 Tool body，准备/审批和结果提交保持原 call 顺序；serial 调用是前后并行段的完成屏障。
-- **有界资源、默认不限 React 步数**：单次和单个 run 的工具输出预算、累计上下文预算继续受限；全应用 `maxConcurrentRuns` 范围为 `1..32`、新安装默认 16，达到上限的新 run 直接拒绝，升级已有配置时保留用户当前值。每个 run 同时最多一个 provider call，不设置独立 provider 并发上限，也不对主聊天流设置默认总墙钟超时。`maxStepsPerRun = 0` 表示 React loop 不限步数并作为默认值；有界自动化部署仍可配置正整数上限。估算输入达到当前模型的绝对 `compactThresholdTokens` 时，在安全边界自动压缩旧历史；未显式配置的模型按可用 prompt budget 的 `autoCompactTriggerPercent`（默认 80%）生成阈值。字节、行数/结果数与估算 token 任一上限先到即截断，并向用户和模型返回续读信息。
+- **有界资源、默认不限 React 步数**：单次和单个 run 的工具输出预算、累计上下文预算继续受限；全应用 `maxConcurrentRuns` 范围为 `1..32`、新安装默认 16，达到上限的新 run 直接拒绝，升级已有配置时保留用户当前值。每个 run 同时最多一个 provider call，不设置独立 provider 并发上限，也不对主聊天流设置默认总墙钟超时。`maxStepsPerRun = 0` 表示 React loop 不限步数并作为默认值；有界自动化部署仍可配置正整数上限。自动压缩只由刚完成响应的 Provider usage 达到当前模型绝对 `compactThresholdTokens` 触发；达到 `contextWindowTokens` 必须在 assistant completion 事件、canonical append 和工具执行前直接失败，不能持久化半个 Tool batch；usage 缺失时不主动压缩。工具响应在完整结果 batch 提交后压缩，final answer 延迟到下一次用户 Run 且在插入新提问前压缩。未显式配置的模型仍按可用 prompt budget 的 `autoCompactTriggerPercent`（默认 80%）生成绝对阈值；本地 token 估算只做调用前硬 preflight 和输出截断，不决定主动压缩。字节、行数/结果数与估算 token 任一上限先到即截断，并向用户和模型返回续读信息。
 - **可回放**：调试日志开启时，循环的请求、响应、流式事件和工具结果必须完整保存，可确定性离线回放原会话；重新请求模型属于单独的“重放请求”，不保证复现随机输出（§5）。
 - **Prompt Harness**：稳定 base instructions、runtime context、AGENTS、selected context、orchestration request 和 compact history 作为可审计 prompt layers 进入模型请求；runtime context 必须包含 workspace writer 的 `available | writer | readonly_locked` 快照，其他 writer 存在时明确当前 session 只读、禁止副作用并要求 writer 结束后重读文件。状态变化通过 hash 追加新 layer，不修改历史。用户可编辑内容是 assistant preferences，不替换 base harness instructions。
 - **计划审阅门**：模型可用 `plan_set` 创建或替换 Plan，默认进入 `awaiting_review` 并停止执行；UI 批准/拒绝会直接记录顶层 Plan 状态并写入 trace，自然语言批准/拒绝也可由模型通过 `plan_status({status:"active" | "rejected"})` 转成可审计状态。Plan review 不是权限模式，不绕过也不替代工具审批。
@@ -138,7 +138,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 #### 2.3.1 多 Provider 支持
 
-必须支持接入多家模型供应商。所有实现直接满足同一个扁平 `ModelProvider.compile/stream` 接口：Provider 自己拥有 canonical history 编译、鉴权/HTTP/SDK、stream 解码、reasoning、usage 和 continuation。不能把某个 SDK 的消息类型当成 Core 的公共消息接口，也不引入 BaseProvider、协议方言继承层或任意 capability 组合。
+必须支持接入多家模型供应商。所有实现直接满足同一个扁平 `ModelProvider.compile/stream + compileCompact/compact` 接口：Provider 自己拥有 canonical history 编译、鉴权/HTTP/SDK、stream 解码、reasoning、usage、continuation 与压缩 checkpoint。不能把某个 SDK 的消息类型当成 Core 的公共消息接口，也不引入 BaseProvider、协议方言继承层或任意 capability 组合。
 
 生产路径实现互不继承的 `DeepSeekProvider`、`GenericChatCompletionsProvider`、`GenericResponsesProvider` 与 `GenericAnthropicProvider`。三种通用兜底分别对应 Chat Completions、Responses 和 Anthropic API style；Google 和其他具体厂商按实际使用需求分别实现，只共享 HTTP/SSE、bounds、tool-call 拼接等纯函数。
 
@@ -148,7 +148,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 运行限制页采用带分节线的单列布局，百分比配置必须同时显示数值和 `%` 单位。合法修改在短暂防抖后自动保存，页面顶部保留立即保存/失败重试按钮；自动保存不能覆盖保存请求期间产生的更新。
 
-token 预算通过可替换估算器计算。支持 Provider tokenizer、保守估算和用户自定义 `bytesPerToken`；自定义值按 Provider/模型保存。估算只负责上下文规划，所有工具仍必须执行不可关闭的字节、行数/结果数硬上限。Provider 返回的真实 usage 用于记录与校准，不作为事前边界保证。
+token 预算通过可替换估算器计算。支持 Provider tokenizer、保守估算和用户自定义 `bytesPerToken`；自定义值按 Provider/模型保存。估算只负责调用前硬预算与输出规划，所有工具仍必须执行不可关闭的字节、行数/结果数硬上限。Provider 返回的真实 usage 既用于记录，也是在响应安全边界决定是否进入下一次 compaction 的唯一占用依据；它仍不能替代事前硬边界。
 
 #### 2.3.2 Reasoning（推理过程）适配
 
@@ -172,7 +172,7 @@ Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items
 
 #### 2.3.3 Canonical History 与 ModelProvider
 
-持久化历史使用应用自己的 `MessageRecord`：`kind` 表达内部语义，`parts` 是有序、封闭的 canonical payload。V1 part 只包含 `text`、`tool_call` 和 `tool_result`；不保存 Provider DTO 派生出来的 `role/content/toolCalls/toolCallId`，也不把任一 SDK 类型暴露给 Persistence、Renderer 或 Agent Core。
+持久化历史使用应用自己的 `MessageRecord`：`kind` 表达内部语义，`parts` 是有序、封闭的 canonical payload。普通 V1 message part 只包含 `text`、`tool_call` 和 `tool_result`；`compact_summary` 另允许单个版本化 `provider_compact` part，以 opaque envelope 保存对应 Provider 的原生 checkpoint 或合成文本摘要。不保存 Provider DTO 派生出来的 `role/content/toolCalls/toolCallId`，也不把任一 SDK 类型暴露给 Persistence、Renderer 或 Agent Core。
 
 `MessageHistoryCompiler` 只按 `seq/inHistory/compact boundary` 选择历史、校验 `kind/parts` 约束和 tool call/result 配对，并生成 `CompiledCanonicalHistory`。随后由 `ModelRouteSnapshot.providerType` 指定的 `ModelProvider.compile()` 消费**完整有序历史**，执行可能是一对多、多对一的协议编译：
 
@@ -181,6 +181,8 @@ Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items
 - Anthropic Messages 可把相邻 tool results 合并到一个 `user` message，并将 `tool_result` blocks 放在其他 content blocks 前面。
 
 因此 wire `role` 只属于特定协议，不是数据库字段；一条 `MessageRecord` 也不保证对应一条 Provider message/item。Provider 的 `stream()` 把响应解码为 normalized events，并在完成时直接返回 canonical assistant parts、可读 reasoning 投影、标准化 usage 和 continuation envelope；Application Service 为其补齐 Session/Message 字段后一次性持久化完整 turn。
+
+同一个扁平 `ModelProvider` 还必须实现 `compactModes/compileCompact/compact`。Synthetic compact 把压缩编排消息放在 wire input 最后一项；原生 compact 按协议专用 request shape 编译。Responses 优先调用原生 `POST /responses/compact` 并保存返回 output items；Anthropic 优先调用 beta context-management compaction 并保存、以 assistant content 重放返回的 compaction block，已知上下文低于其 50k 最小 trigger 时直接使用 synthetic；Chat Completions 与 DeepSeek 始终使用无工具的合成文本摘要。原生端点明确不支持或返回不兼容 checkpoint 时切换到拥有独立重试预算的 synthetic 请求，并按 Provider 配置在进程内缓存能力缺失；鉴权、计费、限流、输入超窗、网络/timeout、5xx 和用户取消不得触发该降级。Synthetic compact 只接受 `finishReason = completed`；截断响应最多从同一完整 source history 以更短的摘要要求纠正重试一次，过滤、拒绝和未知终止原因直接失败。网络、timeout、rate-limit 和 5xx 最多自动重试两次并遵守有界 `Retry-After`，完整但非法的响应最多重试一次，单一 mode 最多三次 Provider call。Core 只验证 `ProviderCompactEnvelope` 的版本、route 兼容性和 JSON bounds，不解释 opaque data。Provider compaction 成功后才以单个事务停用旧 active history、追加 fresh harness 与隐藏 `compact_summary`；失败不得破坏旧 epoch，并通过既有 Renderer message 通道显示“压缩失败，请重试或打开新对话。”。
 
 Tool Result 的 canonical renderer 固定为：单 TextPart 原样、单 JsonPart 只序列化 value、多 part 按顺序换行连接；不能把 `type/json/value` 外壳或内部 `status/content/truncated/totalBytes` 发给模型。Chat Completions、Responses 和 Anthropic 只负责映射 wire 字段与 call ID，Anthropic 错误结果继续设置 `is_error = true`。
 
@@ -193,9 +195,9 @@ Tool Result 的 canonical renderer 固定为：单 TextPart 原样、单 JsonPar
 - Session 是持久化对话实体，绑定一个 `projectId`、当前模型选择与权限模式；UI 中的“对话”是 Session 的展示名称，不存在独立 Conversation 领域记录或 `conversationId -> sessionId` 映射。
 - SQLite 持久化 schema migrations、Projects、Session 元数据、完整 Message history 和有界 FileChanges。Goal/Plan 属于 Session 元数据；完整 assistant/tool/harness 内容统一表示为 Message。Renderer 只保存 backend public records 的副本，不得单独创建已提交消息。
 - Database migrations 必须按版本前向执行，在单个 transaction 内提交 schema/data change 和 migration record；已应用文件 checksum 改变或数据库版本高于当前应用时明确拒绝打开，不静默猜测兼容。
-- 每个 `MessageRecord` 保存内部 `kind` 与有序 `parts`。`kind` 用于区分真实用户输入、编排消息、runtime context、harness、assistant、tool result 和 compact summary；它不是 Provider wire role。V1 shared schema 必须按 `kind` 校验 part 组合：用户输入是非空 text；assistant turn 只含 text/tool-call 且记录实际 route；tool result record 只含一个 terminal tool-result，并引用历史中未完成的 call。新 tool result 必须带 `resultProjection = model-content.v1`；active history 中缺少 marker 的旧结果必须在 Provider 网络调用和计费前报 `LEGACY_TOOL_RESULT_UNSUPPORTED`，但旧会话仍可查看、导出、删除，也不改写 SQLite 历史。
+- 每个 `MessageRecord` 保存内部 `kind` 与有序 `parts`。`kind` 用于区分真实用户输入、编排消息、runtime context、harness、assistant、tool result、compact summary 和 conversation transcript；它不是 Provider wire role。V1 shared schema 必须按 `kind` 校验 part 组合：用户输入是非空 text；assistant turn 只含 text/tool-call 且记录实际 route；tool result record 只含一个 terminal tool-result，并引用历史中未完成的 call；compact summary 是 legacy text 或单个 provider-compact；conversation transcript 是隐藏 text parts 并绑定目标 route。新 tool result 必须带 `resultProjection = model-content.v1`；active history 中缺少 marker 的旧结果必须在 Provider 网络调用和计费前报 `LEGACY_TOOL_RESULT_UNSUPPORTED`，provider-transfer transcript 对它实际纳入的任何 legacy result 同样 fail closed，但旧会话仍可查看、导出、删除，也不改写 SQLite 历史。
 - 每个 `MessageRecord` 必须保存 `visibility = visible | hidden | superseded`，并可用 `turnId` 关联同一轮 context、user、assistant、tool 和 interjection。`visibility` 控制当前分支展示；`inHistory` 只控制模型上下文。Compact 只修改 `inHistory`，不得隐藏历史消息；rewind 将退出当前分支的记录标为 `superseded` 且 `inHistory = false`，不得物理删除。
-- Message metadata 是按 `kind` 校验的 application-owned typed annotations，可包含 attachment provenance、prompt id/version/hash、标准化 usage、tool/approval/compact 摘要和 reasoning projection 状态。Metadata 可以来源于 Provider，但删除它不能破坏下一次 Provider 请求；协议关键或只能由对应 Provider 理解的数据必须放入 `providerContinuation`。
+- Message metadata 是按 `kind` 校验的 application-owned typed annotations，可包含 attachment provenance、prompt id/version/hash、标准化 usage、tool/approval/compact boundary、conversation transcript hash 和 reasoning projection 状态。Metadata 可以来源于 Provider，但删除它不能破坏下一次 Provider 请求；assistant continuation 必须放入 `providerContinuation`，compact 的协议关键状态必须放入 `provider_compact.payload`。
 - SQLite 不保存 OpenAI、DeepSeek、Anthropic 或其他 Provider SDK 的请求 DTO。发起请求时，backend 从 `inHistory = true` 的完整 `MessageRecord` 生成 `CompiledCanonicalHistory`，再由当前 `ModelProvider.compile()` 整段编译 wire DTO；Persistence layer 不依赖 Provider。
 - Draft 和 draft attachments 是 renderer UI 状态，不进入 backend 或 SQLite，也不要求在切换 Session、renderer reload 或应用重启后保留。
 - 每次用户提交形成 backend memory 中的 Active Run；它在开始时冻结包含 `providerType/providerId/model/reasoning/config revision` 的实际 `ModelRouteSnapshot` 和权限模式，但不单独落盘。完成的 assistant message 记录实际 route；Session 的模型/模式修改只影响后续 Run。
@@ -205,9 +207,9 @@ Tool Result 的 canonical renderer 固定为：单 TextPart 原样、单 JsonPar
 - `readonly` run 不获取 writer，可与 writer 和其他 readonly run 并行；不同 workspace 可各自拥有 writer。同 workspace 的第二个非只读 run 不排队，返回带 owner Session/Run 的结构化冲突。
 - completed、failed、cancelled、异常、session close 和 app dispose 都必须走幂等释放路径。全局 run slot 在 terminal run status 对 renderer 可见前释放；writer 在没有残留副作用时同步释放，有不可中止副作用时延迟到其真正 settle，禁止为满足 UI 终态而提前开放第二个 writer。
 - 文件工具必须约束在工作区边界内（规范化路径、真实路径与符号链接逃逸检测）。
-- Session canonical history 必须以完整 Message 持久化。应用重启后按 `inHistory = true` 和 `seq` 重建 `CompiledCanonicalHistory`，再由当前 route 的 ModelProvider 生成请求；compact 通过完整 summary message 和显式 `inHistory` 变更替代旧前缀。
+- Session canonical history 必须以完整 Message 持久化。应用重启后按 `inHistory = true` 和 `seq` 重建 `CompiledCanonicalHistory`，再由当前 route 的 ModelProvider 生成请求；compact 通过版本化 checkpoint message 和显式 `inHistory` 变更替代旧前缀。若 `providerType + providerId + model + endpoint + providerConfigRevision` 与 active assistant/compact/transcript anchor 不兼容，下一次 Run 必须在插入用户消息前把 SQLite 完整非 superseded 分支投影成 `zch-conversation-markdown`，以 fresh harness + hidden `conversation_transcript` 建立新 epoch；迁移预检或 commit 失败时旧 epoch 原样保留。Fork/rewind 重建 active branch 时必须把 `compact_summary.replacesThroughSeq` 与 `conversation_transcript.sourceThroughSeq` 作为同等 epoch boundary，并在 fork 连续重编号时重映射该边界。
 - 只有当前分支中可见的原始用户消息支持重试和编辑。重试保留该用户消息及本轮 context、supersede 后续分支并复用原记录运行，不能插入重复 user message；Assistant 和其他 message kind 必须被 `run:retry` 拒绝。编辑 supersede 该用户整轮及后续，将原文和附件引用恢复到 composer，不自动发送。
-- 仅回退可以作用于用户或 Assistant：用户边界移除该用户整轮及之后记录，Assistant 边界保留对应用户消息并从 Assistant 开始移除。每次回退清除当前 Goal/Plan，并在跨 compact 时重建保留前缀的有效 history。文件、终端和 MCP/外部工具副作用不回滚，FileChange 审计继续保留，UI 操作前必须提示。
+- 仅回退可以作用于用户或 Assistant：用户边界移除该用户整轮及之后记录，Assistant 边界保留对应用户消息并从 Assistant 开始移除。每次回退清除当前 Goal/Plan，并在跨 compact 或 conversation transcript epoch 时重建保留前缀的有效 history。文件、终端和 MCP/外部工具副作用不回滚，FileChange 审计继续保留，UI 操作前必须提示。
 - Assistant stream delta 只保存在 backend memory；Provider turn 完成后才插入 Message。包含 tool calls 的 assistant turn 必须等每个 call 都有 terminal result 后，与对应 tool messages 在同一 transaction 写入，数据库不得保存协议半截。
 - 应用崩溃可以丢失尚未完成的 assistant text/reasoning、tool batch 和 Active Run，不保存 partial message，也不生成持久化 interrupted Run。最后一条已提交 user message 可以暂时没有 assistant reply。
 - 如果副作用工具已经修改 workspace、但应用在完整 tool batch transaction 前崩溃，文件变化可以保留而 tool messages 丢失；系统以下一次读取到的实际 workspace 为准。V2.1 不承诺文件系统与消息数据库之间的 crash-atomic journal。
@@ -420,7 +422,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - 搜索通过本地后端查询 Session 标题，以及 `kind = 'user_input'/'assistant_turn'` records 中 `type = 'text'` 的 parts；不把 orchestrator/harness/runtime context 当成用户消息，也不检索 tool call 参数、tool result/JSON parts、工作区文件、reasoning、continuation 或 trace，更不访问 Provider。
 - 新建对话时只建立 renderer draft，不创建空 Session；首次发送以 `run:start new_session` 原子创建 Session、首轮 context/user records 并启动 Active Run。Session 创建前终端不可用。Session/Run ID 不作为常驻产品信息展示。
 - 侧栏的删除操作归档 Session；设置页提供分页的已归档对话列表和恢复入口。永久删除只允许 archived、idle 且没有 fork 子 Session 的记录，删除 Session/Message/FileChange durable 数据但不得改动 workspace 文件；Trace capture 继续由日志设置独立管理。
-- Markdown Conversation 导入/导出在 Durable Session 格式重新设计前保留禁用按钮和明确提示；Trace transcript 查看/导出保持可用。
+- 普通 Session 提供单向 Markdown Conversation 导出：用户确认风险后，由 backend 从完整 canonical log 生成 `zch-conversation-markdown` 并原子保存。它恢复用户/Assistant/明文 reasoning、编排、tool call/result 与附件元数据，但排除 system/runtime/AGENTS/selected context、控制命令/replay、compact、generated transcript、Provider continuation 和加密 reasoning。Markdown 导入仍明确不可用；Trace transcript 查看/导出保持独立。
 - 正式 UI 不得使用硬编码项目、对话或工具活动作为占位数据。
 - 后台异步故障使用版本化、脱敏、有界的 `app:notification`；preload 在 renderer 挂载前缓存最多 64 条。Renderer 的操作 warning/error 使用 `NMessage` 顶部通知，不写入 Timeline 或 durable replica：warning 10 秒自动消失，error 需手动关闭，最多同时 5 条并排队，按 code/Session/message 去重。后台 Session 通知显示对话标题但不得切换当前选择；风险确认、隐私告知、字段校验和持续状态留在所属界面。
 

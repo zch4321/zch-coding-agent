@@ -74,6 +74,7 @@ export interface SessionManagerOptions {
     sessionId: SessionId,
   ) => TraceLogger | Promise<TraceLogger>
   executionState?: SessionExecutionStatePort
+  historySource?: SessionHistorySourcePort
   onDiagnostic?: DiagnosticSink
 }
 
@@ -85,6 +86,7 @@ export interface SessionExecutionCommit {
     | 'assistant_turn'
     | 'tool_batch'
     | 'compact'
+    | 'history_transition'
     | 'metadata'
   deactivateThroughSeq?: number
   invalidate?: boolean
@@ -95,6 +97,11 @@ export interface SessionExecutionStatePort {
     session: SessionState,
     input: SessionExecutionCommit,
   ): Promise<SessionCommandResult | undefined>
+}
+
+/** Reads the append-only durable history needed for portable transcript projection. */
+export interface SessionHistorySourcePort {
+  listAllMessages(sessionId: SessionId): Promise<MessageRecord[]>
 }
 
 export interface PendingApproval {
@@ -138,7 +145,6 @@ export interface ActiveRun {
   lastToolBatchId?: string
   rootUserMessageId?: MessageId
   harnessMessageIds: MessageId[]
-  autoCompactEligible: boolean
   requestCommitted: boolean
   publicSnapshot: ActiveRunPublicSnapshot
   publicTools: Map<CallId, ActiveRunToolSnapshot>

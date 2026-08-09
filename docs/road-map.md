@@ -6,7 +6,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 通用只读子 Agent、模型池与 Swarm Tool 的已确认产品语义和分阶段计划见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、compact/goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、单一 `npm run verify` 发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run` 与完整 Session transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一阶段优先推进 Model Pool/Swarm，完成后再迁移 ProjectModel 到 SQLite 并恢复代码智能。
+当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run` 与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一阶段优先推进 Model Pool/Swarm，完成后再迁移 ProjectModel 到 SQLite 并恢复代码智能。
 
 原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
 
@@ -140,7 +140,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 ## 6. Later
 
-- Durable Session Markdown import/export：重新定义基于 canonical Message/attachment/reference 的格式、冲突策略、可见性与 compact 语义；完成前 UI 按钮保持禁用，Trace transcript export 不受影响。
+- Durable Session Markdown import：定义从 `zch-conversation-markdown` 新建 Session 时的 attachment/reference 恢复、冲突策略与可信边界；当前导出文件只用于阅读和模型 route 迁移，不能导入或重放。Trace transcript export 继续保持独立。
 - 外部 JS 插件加载器：签名、来源、隔离、权限声明、工具注册。
 - 内置隔离浏览器工具。
 - 浏览器 Comments/Annotations。
@@ -156,7 +156,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 ## 7. 阶段门禁
 
-每个实现阶段完成时运行唯一完整门禁 `npm run verify`；开发中可以按失败领域运行单项命令，但不要在完整门禁后重复执行已包含的底层检查。
+每个实现阶段完成时运行日常门禁 `npm run check`；准备合并或发布时运行完整门禁 `npm run verify`。定位失败时可以运行对应底层命令，但不要在所选门禁通过后重复执行其已包含的检查。
 
 涉及 Electron UI、文件树、审批、终端、设置、浏览器、MCP 进程生命周期、并发 run 或 provider routing 的阶段，还必须补充对应 E2E 或集成测试。
 

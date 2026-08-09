@@ -18,6 +18,7 @@ import {
   LegacyToolResultError,
 } from './canonical-history'
 import type { SessionCompactCoordinator } from './session-compact-coordinator'
+import { CompactionFailedError } from './session-compact-retry'
 import type { SessionInterjectionCoordinator } from './session-interjection-coordinator'
 import type { SessionOrchestrationPlanner } from './session-orchestration-planner'
 import type { SessionProviderTurnRunner } from './session-provider-turn'
@@ -157,7 +158,6 @@ export class SessionRunController {
       processedInterjectionIds: new Set(),
       ...(retryUserMessageId ? { rootUserMessageId: retryUserMessageId } : {}),
       harnessMessageIds: [],
-      autoCompactEligible: false,
       requestCommitted: false,
       subagentsEnabled: options.subagentsEnabled ?? config.subagents.enabled,
       directUserInput: options.directUserInput ?? false,
@@ -261,7 +261,11 @@ export class SessionRunController {
     }
     run.status = status
     const failureCode =
-      error instanceof LegacyToolResultError ? error.code : 'RUN_FAILED'
+      error instanceof LegacyToolResultError
+        ? error.code
+        : error instanceof CompactionFailedError
+          ? 'COMPACTION_FAILED'
+          : 'RUN_FAILED'
     if (error && status === 'failed') {
       run.failure = {
         code: failureCode,
@@ -354,7 +358,7 @@ export class SessionRunController {
     retryUserMessageId?: MessageId,
   ): Promise<void> {
     const signal = run.controller.signal
-    const runInputCheckpoint = {
+    let runInputCheckpoint = {
       history: structuredClone(session.history),
       nextMessageSeq: session.nextMessageSeq,
       goal: session.goal ? structuredClone(session.goal) : undefined,
@@ -383,6 +387,18 @@ export class SessionRunController {
         session.modelSelection,
         { onDiagnostic: this.#onDiagnostic },
       )
+      await this.#compact.prepareBeforeRunInput(session, run, {
+        compactCommand:
+          userMessage !== undefined &&
+          !run.directUserInput &&
+          isCompactSlashCommand(userMessage),
+      })
+      runInputCheckpoint = {
+        history: structuredClone(session.history),
+        nextMessageSeq: session.nextMessageSeq,
+        goal: session.goal ? structuredClone(session.goal) : undefined,
+        plan: session.plan ? structuredClone(session.plan) : undefined,
+      }
       const maxStepsPerRun = runConfig.limits.maxStepsPerRun
       let runInputCommitted = retryUserMessageId !== undefined
       if (harnessMessage) {
@@ -506,7 +522,6 @@ export class SessionRunController {
         await this.#executionState?.commit(session, { reason: 'run_input' })
       }
       run.requestCommitted = true
-      run.autoCompactEligible = true
       await session.logger.write({
         type: 'run.start',
         sessionId: session.sessionId,
@@ -527,17 +542,14 @@ export class SessionRunController {
         // completed (and never splits an assistant tool_call from its
         // tool_result, because executeToolCalls has already finished).
         await this.#drainInterjections(session, run)
-        await this.#compact.maybeAutoCompactBeforeProviderCall(session, run)
-        // Compaction itself is a streamed Provider call. Flush interjections
-        // that arrived while the summary was being generated into the newly
-        // rebuilt epoch before issuing the continuation request.
-        await this.#drainInterjections(session, run)
-
         const completed = await this.#providerTurns.callProvider(
           session,
           run,
           () => this.setRunStatus(session, run, 'calling_llm'),
         )
+
+        const compactRequired =
+          this.#compact.assessProviderUsage(run, completed.usage) === 'compact'
 
         if (completed.text || completed.reasoning) {
           this.#emit(session, {
@@ -562,12 +574,35 @@ export class SessionRunController {
           })
         }
 
+        const durableAssistantUsage = {
+          ...(completed.usage.promptTokens === undefined
+            ? {}
+            : { inputTokens: completed.usage.promptTokens }),
+          ...(completed.usage.completionTokens === undefined
+            ? {}
+            : { outputTokens: completed.usage.completionTokens }),
+          ...(completed.usage.totalTokens === undefined
+            ? {}
+            : { totalTokens: completed.usage.totalTokens }),
+          ...(completed.usage.reasoningTokens === undefined
+            ? {}
+            : { reasoningTokens: completed.usage.reasoningTokens }),
+          ...(completed.usage.cacheHitTokens === undefined
+            ? {}
+            : { cachedInputTokens: completed.usage.cacheHitTokens }),
+          ...(completed.usage.cacheMissTokens === undefined
+            ? {}
+            : { cacheMissTokens: completed.usage.cacheMissTokens }),
+        }
         const assistantRecord = appendCompletedAssistantTurn(session, {
           parts: completed.parts,
           reasoning: completed.reasoning,
           finishReason: completed.finishReason,
           route: run.routes.main.snapshot,
           continuation: completed.continuation,
+          ...(Object.keys(durableAssistantUsage).length > 0
+            ? { usage: durableAssistantUsage }
+            : {}),
           turnId: run.rootUserMessageId,
         })
 
@@ -584,6 +619,9 @@ export class SessionRunController {
           })
           if (orchestrationError !== undefined) throw orchestrationError
           if (continuation === 'continue') {
+            if (compactRequired) {
+              await this.#compact.compactBeforeContinuation(session, run)
+            }
             continue
           }
 
@@ -613,7 +651,9 @@ export class SessionRunController {
         }
         await this.#executionState?.commit(session, { reason: 'tool_batch' })
         if (toolBatchFailed) throw toolBatchError
-        run.autoCompactEligible = true
+        if (compactRequired) {
+          await this.#compact.compactAfterToolBatch(session, run)
+        }
       }
 
       throw new Error(`Run exceeded maxStepsPerRun (${maxStepsPerRun})`)

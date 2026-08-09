@@ -173,7 +173,7 @@ Swarm 结果沿用单子 Agent 的 `results/meta` 思路：
 - 重启只把遗留 active execution 标记为 `interrupted`，不恢复 stream、不自动重试 Provider。
 - Desktop 与 Headless 继续复用唯一 runtime，并用 fake-provider trajectory 验证一致性。
 
-每阶段完成后只运行常规完整门禁 `npm run verify`。真实 Provider、benchmark、Docker worker 和其他付费测试保持显式 opt-in。
+每阶段完成后运行日常门禁 `npm run check`；准备合并或发布时运行完整门禁 `npm run verify`。真实 Provider、benchmark、Docker worker 和其他付费测试保持显式 opt-in。
 
 ## 7. 明确延后
 

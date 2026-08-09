@@ -3,7 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
-import type { CallId } from '../../shared/ids'
+import type { CallId, ProjectId } from '../../shared/ids'
+import type { SessionRecord } from '../../shared/session'
 import {
   ScriptedProviderHarness,
   type ScriptedProviderEvent as ProviderEvent,
@@ -224,7 +225,7 @@ class MissingUsageProvider extends ScriptedProviderHarness {
 }
 
 describe('SessionManager Provider completion validation', () => {
-  it('rejects an active legacy Tool Result before creating a Provider call', async () => {
+  it('rejects legacy Tool Results before same-route and route-transition Provider calls', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'agent-provider-legacy-result-'),
     )
@@ -232,6 +233,20 @@ describe('SessionManager Provider completion validation', () => {
     await mkdir(workspace)
     await writeFile(path.join(workspace, 'README.md'), 'legacy fixture\n')
     const configStore = await createConfig(directory)
+    const config = configStore.getPublicConfig()
+    const configuredProvider = config.providers[0]!
+    await configStore.update({
+      version: 1,
+      kind: 'provider-settings',
+      providerId: configuredProvider.id,
+      label: configuredProvider.label,
+      providerType: configuredProvider.providerType,
+      baseURL: configuredProvider.baseURL,
+      model: configuredProvider.model,
+      enabledModelIds: [configuredProvider.model, 'legacy-transition-model'],
+      reasoning: configuredProvider.reasoning,
+      limits: config.limits,
+    })
     const provider = new ToolThenFinalProvider()
     const events: AgentEventEnvelope[] = []
     let currentSession: SessionState | undefined
@@ -270,6 +285,7 @@ describe('SessionManager Provider completion validation', () => {
           event.status === 'completed',
       ),
     )
+    await waitFor(() => !manager.hasActiveRun(sessionId))
     const toolResult = currentSession?.history.find(
       (record) => record.kind === 'tool_result',
     )
@@ -315,6 +331,62 @@ describe('SessionManager Provider completion validation', () => {
           event.type === 'llm.usage' && event.runId === legacyRunId,
       ),
     ).toEqual([])
+
+    await waitFor(() => !manager.hasActiveRun(sessionId))
+    const timestamp = '2026-08-09T00:00:00.000Z'
+    const transitionRecord: SessionRecord = {
+      schemaVersion: 1,
+      id: sessionId,
+      projectId: 'project:legacy-transition' as ProjectId,
+      title: 'Legacy transition fixture',
+      lifecycle: 'active',
+      permissionMode: 'readonly',
+      modelSelection: {
+        providerId: configuredProvider.id,
+        model: 'legacy-transition-model',
+        reasoning: configuredProvider.reasoning,
+      },
+      goal: null,
+      plan: null,
+      revision: 2,
+      lastSeq: currentSession?.history.at(-1)?.seq ?? 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }
+    manager.applyDurableSessionRecord(transitionRecord)
+    const callsBeforeTransition = providerFactoryCalls
+    const transitionRunId = manager.startRun({
+      sessionId,
+      message: 'Attempt a route transition',
+      clientRequestId: 'request:legacy-transition-rejected',
+    })
+    await waitFor(() =>
+      events.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === transitionRunId &&
+          event.status === 'failed',
+      ),
+    )
+
+    expect(providerFactoryCalls).toBe(callsBeforeTransition)
+    expect(provider.calls).toBe(2)
+    expect(
+      events.find(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === transitionRunId &&
+          event.status === 'failed',
+      )?.event,
+    ).toMatchObject({
+      status: 'failed',
+      error: { code: 'LEGACY_TOOL_RESULT_UNSUPPORTED' },
+    })
+    expect(
+      currentSession?.history.some(
+        (record) => record.kind === 'conversation_transcript',
+      ),
+    ).toBe(false)
     await manager.closeSession(sessionId)
   })
 

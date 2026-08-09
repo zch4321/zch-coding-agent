@@ -159,6 +159,23 @@ describe('HttpSseTransport', () => {
       status: 503,
     })
 
+    const rateLimitedFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { code: 'rate_limit_exceeded' } }),
+          {
+            status: 429,
+            headers: { 'retry-after': '1.5' },
+          },
+        ),
+    ) as unknown as typeof fetch
+    await expect(collect(transport(rateLimitedFetch))).rejects.toMatchObject({
+      code: 'HTTP_ERROR',
+      status: 429,
+      retryAfterMs: 1_500,
+      providerErrorCode: 'rate_limit_exceeded',
+    })
+
     const invalidFetch = vi.fn(async () =>
       streamResponse(['data: not-json\n\n']),
     ) as unknown as typeof fetch
@@ -174,5 +191,37 @@ describe('HttpSseTransport', () => {
         code: 'INVALID_SSE',
       }),
     )
+  })
+
+  it('parses bounded JSON-object responses for native Provider methods', async () => {
+    const fetchImpl = vi.fn(async () =>
+      Response.json({ object: 'response.compaction', output: [] }),
+    ) as unknown as typeof fetch
+    const target = transport(fetchImpl)
+
+    await expect(
+      target.postJsonObject({ model: 'test' }, new AbortController().signal),
+    ).resolves.toEqual({ object: 'response.compaction', output: [] })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://provider.test/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ model: 'test' }),
+      }),
+    )
+
+    const invalid = transport(
+      vi.fn(async () => new Response('not-json')) as unknown as typeof fetch,
+    )
+    await expect(
+      invalid.postJsonObject({}, new AbortController().signal),
+    ).rejects.toMatchObject({ code: 'INVALID_JSON' })
+
+    const array = transport(
+      vi.fn(async () => Response.json([])) as unknown as typeof fetch,
+    )
+    await expect(
+      array.postJsonObject({}, new AbortController().signal),
+    ).rejects.toMatchObject({ code: 'INVALID_JSON' })
   })
 })

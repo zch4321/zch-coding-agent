@@ -111,6 +111,8 @@ const api: AgentApi = {
   forkSession: (payload) => invoke('session:fork', payload),
   rewindSession: (payload) => invoke('session:rewind', payload),
   searchSessions: (payload) => invoke('session:search', payload),
+  exportConversationMarkdown: (payload) =>
+    invoke('session:export-markdown', payload),
   listMessages: (payload) => invoke('message:list', payload),
   searchMessages: (payload) => invoke('message:search', payload),
   listFileChanges: (payload) => invoke('file-change:list', payload),

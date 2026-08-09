@@ -66,6 +66,7 @@ const terminalHeight = ref(280)
 const renameSessionId = ref<string>()
 const renameValue = ref('')
 const deleteSessionId = ref<string>()
+const exportSessionId = ref<string>()
 const revertMessageId = ref<string>()
 const revertMessagePreview = ref('')
 const messageAction = ref<MessageAction>()
@@ -73,6 +74,7 @@ const messageActionId = ref<string>()
 const yoloPending = ref(false)
 const renamePending = ref(false)
 const deletePending = ref(false)
+const exportPending = ref(false)
 const revertPending = ref(false)
 const messageActionPending = ref(false)
 
@@ -251,6 +253,18 @@ async function confirmDeleteConversation() {
     deleteSessionId.value = undefined
   } finally {
     deletePending.value = false
+  }
+}
+
+async function confirmExportConversation() {
+  if (!exportSessionId.value || exportPending.value) return
+  exportPending.value = true
+  try {
+    if (await agent.exportConversationMarkdown(exportSessionId.value)) {
+      exportSessionId.value = undefined
+    }
+  } finally {
+    exportPending.value = false
   }
 }
 
@@ -448,6 +462,7 @@ onUnmounted(() => {
                 @create="createConversation"
                 @open="openConversation"
                 @rename="beginRename"
+                @export="exportSessionId = $event"
                 @delete="deleteSessionId = $event"
                 @settings="openSettings()"
               />
@@ -531,23 +546,27 @@ onUnmounted(() => {
           :rename-open="Boolean(renameSessionId)"
           :rename-value="renameValue"
           :delete-open="Boolean(deleteSessionId)"
+          :export-open="Boolean(exportSessionId)"
           :revert-open="Boolean(revertMessageId)"
           :revert-message-preview="revertMessagePreview"
           :message-action="messageAction"
           :yolo-pending="yoloPending"
           :rename-pending="renamePending"
           :delete-pending="deletePending"
+          :export-pending="exportPending"
           :revert-pending="revertPending"
           :message-action-pending="messageActionPending"
           @update:yolo-open="yoloWarningOpen = $event"
           @update:rename-open="!$event && (renameSessionId = undefined)"
           @update:rename-value="renameValue = $event"
           @update:delete-open="!$event && (deleteSessionId = undefined)"
+          @update:export-open="!$event && (exportSessionId = undefined)"
           @update:revert-open="!$event && (revertMessageId = undefined)"
           @update:message-action="updateMessageAction"
           @confirm-yolo="confirmYoloMode"
           @confirm-rename="confirmRename"
           @confirm-delete="confirmDeleteConversation"
+          @confirm-export="confirmExportConversation"
           @confirm-revert="confirmRevert"
           @confirm-message-action="confirmMessageAction"
         />

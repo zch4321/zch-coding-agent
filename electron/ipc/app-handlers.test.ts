@@ -220,6 +220,102 @@ describe('app IPC handlers', () => {
     expect(writeTextAtomic).not.toHaveBeenCalled()
   })
 
+  it('exports a portable Session transcript without Provider continuation data', async () => {
+    const filePath = 'F:/exports/session-conversation.md'
+    showSaveDialog.mockResolvedValue({ canceled: false, filePath })
+    const getRecord = vi.fn(async () => ({
+      id: 'session:export',
+      title: 'Review: current/project',
+    }))
+    const listAllMessages = vi.fn(async () => [
+      {
+        schemaVersion: 1,
+        id: 'message:system',
+        sessionId: 'session:export',
+        seq: 1,
+        kind: 'system_instruction',
+        parts: [{ type: 'text', text: 'SECRET SYSTEM' }],
+        visibility: 'hidden',
+        inHistory: true,
+        createdAt: '2026-08-08T00:00:00.000Z',
+      },
+      {
+        schemaVersion: 1,
+        id: 'message:user',
+        sessionId: 'session:export',
+        seq: 2,
+        clientRequestId: 'request:export',
+        turnId: 'message:user',
+        kind: 'user_input',
+        parts: [{ type: 'text', text: 'PORTABLE USER' }],
+        metadata: {
+          schemaVersion: 1,
+          submission: { type: 'message' },
+        },
+        visibility: 'visible',
+        inHistory: true,
+        createdAt: '2026-08-08T00:00:01.000Z',
+      },
+      {
+        schemaVersion: 1,
+        id: 'message:assistant',
+        sessionId: 'session:export',
+        seq: 3,
+        kind: 'assistant_turn',
+        parts: [{ type: 'text', text: 'PORTABLE ASSISTANT' }],
+        modelRoute: {
+          schemaVersion: 2,
+          purpose: 'main',
+          providerType: 'openai.responses',
+          providerId: 'openai',
+          model: 'gpt-5.6',
+          reasoning: 'high',
+          endpoint: 'https://api.openai.com/v1/responses',
+          providerConfigRevision: 1,
+        },
+        providerContinuation: {
+          schemaVersion: 2,
+          providerType: 'openai.responses',
+          format: 'responses.output-items.v1',
+          data: { encrypted_content: 'SECRET CONTINUATION' },
+        },
+        visibility: 'visible',
+        inHistory: true,
+        createdAt: '2026-08-08T00:00:02.000Z',
+      },
+    ])
+    const { handlers } = createHandlers({
+      backend: {
+        sessions: { getRecord, listAllMessages },
+      },
+    })
+
+    await expect(
+      handlers['session:export-markdown']!(
+        {
+          version: 1,
+          sessionId: 'session:export',
+          confirmed: true,
+        } as never,
+        stubEvent,
+      ),
+    ).resolves.toEqual({ canceled: false, path: filePath })
+
+    expect(getRecord).toHaveBeenCalledWith('session:export')
+    expect(listAllMessages).toHaveBeenCalledWith('session:export')
+    expect(showSaveDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: 'Review_ current_project-conversation.md',
+      }),
+    )
+    const markdown = writeTextAtomic.mock.calls[0]?.[1]
+    expect(markdown).toContain('PORTABLE USER')
+    expect(markdown).toContain('PORTABLE ASSISTANT')
+    expect(markdown).not.toContain('SECRET SYSTEM')
+    expect(markdown).not.toContain('SECRET CONTINUATION')
+    expect(writeTextAtomic).toHaveBeenCalledWith(filePath, markdown)
+  })
+
   it('passes domain list requests through to the durable project service', async () => {
     const records = [{ id: 'project-test' }]
     const list = vi.fn(async () => records)
