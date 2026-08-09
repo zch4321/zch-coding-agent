@@ -127,6 +127,35 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(compactPercent.locator('.n-input-number-suffix')).toHaveText(
       '%',
     )
+    const commandShell = limits.locator('.settings-field', {
+      hasText: '一次性命令 Shell',
+    })
+    await expect(commandShell.getByText('实际使用：')).toBeVisible()
+    await commandShell.locator('.n-select').click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .filter({ hasText: /^Command Prompt$/u })
+      .click()
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          const api = Reflect.get(window, 'agentApi') as {
+            getConfig(payload: unknown): Promise<{
+              value?: {
+                config: {
+                  executionEnvironment: { commandShell: string }
+                }
+              }
+            }>
+          }
+          const result = await api.getConfig({
+            version: 1,
+            section: 'executionEnvironment',
+          })
+          return result.value?.config.executionEnvironment.commandShell
+        }),
+      )
+      .toBe('cmd')
     await defaultContext.fill('300000')
     await expect(limits.locator('.settings-save-status')).toHaveText('已保存')
     await expect

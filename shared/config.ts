@@ -7,6 +7,7 @@ import {
   ModelPoolProviderRevisionSchema,
 } from './model-pool'
 import { ReasoningEffortSchema, type ReasoningEffort } from './reasoning'
+import { CommandShellSelectionSchema } from './command-shell'
 
 export {
   MAX_MODEL_POOL_ENTRIES,
@@ -24,7 +25,7 @@ export {
   type ReasoningEffort,
 } from './reasoning'
 
-export const APP_CONFIG_SCHEMA_VERSION = 19 as const
+export const APP_CONFIG_SCHEMA_VERSION = 20 as const
 
 export const AssistantLanguageSchema = Type.Union([
   Type.Literal('zh-CN'),
@@ -206,6 +207,12 @@ export const PublicConfigSchema = Type.Object(
       { additionalProperties: false },
     ),
     modelPool: ModelPoolConfigSchema,
+    executionEnvironment: Type.Object(
+      {
+        commandShell: CommandShellSelectionSchema,
+      },
+      { additionalProperties: false },
+    ),
     permission: Type.Object(
       {
         defaultMode: PermissionModeSchema,
@@ -482,6 +489,7 @@ export const ConfigSectionSchema = Type.Union([
   Type.Literal('approval'),
   Type.Literal('subagents'),
   Type.Literal('modelPool'),
+  Type.Literal('executionEnvironment'),
   Type.Literal('permission'),
   Type.Literal('limits'),
   Type.Literal('logging'),
@@ -674,6 +682,14 @@ export const ConfigSetRequestSchema = Type.Union([
       version: Type.Literal(1),
       kind: Type.Literal('subagents'),
       value: PublicConfigSchema.properties.subagents,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      kind: Type.Literal('execution-environment'),
+      value: PublicConfigSchema.properties.executionEnvironment,
     },
     { additionalProperties: false },
   ),

@@ -68,6 +68,7 @@ export const AppConfigSchema = Type.Object(
     approval: PublicConfigSchema.properties.approval,
     subagents: PublicConfigSchema.properties.subagents,
     modelPool: PublicConfigSchema.properties.modelPool,
+    executionEnvironment: PublicConfigSchema.properties.executionEnvironment,
     permission: Type.Object(
       {
         defaultMode: PermissionModeSchema,
@@ -125,6 +126,9 @@ export const DEFAULT_APP_CONFIG = {
   },
   modelPool: {
     entries: [],
+  },
+  executionEnvironment: {
+    commandShell: 'auto',
   },
   permission: {
     defaultMode: 'readonly',
@@ -275,6 +279,7 @@ export function toPublicConfig(
     approval: structuredClone(config.approval),
     subagents: structuredClone(config.subagents),
     modelPool: structuredClone(config.modelPool),
+    executionEnvironment: structuredClone(config.executionEnvironment),
     permission: structuredClone(config.permission),
     limits: structuredClone(config.limits),
     logging: structuredClone(config.logging),

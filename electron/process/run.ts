@@ -47,7 +47,10 @@ export type CommandSpec =
     }
   | {
       mode: 'shell'
-      command: string
+      executable: string
+      args: string[]
+      environment?: Record<string, string | undefined>
+      fallbackEncoding?: string
       cwd?: string
     }
 
@@ -198,7 +201,12 @@ export async function runCommand(
     path.resolve(options.workspace),
     options.command.cwd,
   )
-  const output = new BoundedProcessOutput(options.maxOutputBytes)
+  const output = new BoundedProcessOutput(
+    options.maxOutputBytes,
+    options.command.mode === 'shell'
+      ? options.command.fallbackEncoding
+      : undefined,
+  )
   const startedAt = performance.now()
   let child: ChildProcess
 
@@ -212,10 +220,13 @@ export async function runCommand(
       stdio: ['ignore', 'pipe', 'pipe'],
     })
   } else {
-    child = spawn(options.command.command, {
+    child = spawn(options.command.executable, options.command.args, {
       cwd,
-      env: createCommandEnvironment(),
-      shell: true,
+      env: {
+        ...createCommandEnvironment(),
+        ...options.command.environment,
+      },
+      shell: false,
       windowsHide: true,
       detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],

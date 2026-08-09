@@ -22,6 +22,10 @@ import {
   resolveModelTokenSettings,
 } from '../../shared/model-settings'
 import { nowNotice, toUiRememberedRules } from './config-mapping'
+import type {
+  CommandShellCatalog,
+  CommandShellSelection,
+} from '../../shared/command-shell'
 import type { UiModelProfile, UiRememberedRule } from './agent-types'
 import { useApprovalSettingsStore } from './approval-settings'
 import { useModelPoolSettingsStore } from './model-pool-settings'
@@ -147,6 +151,13 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     subagentsSavedSignature: '',
     subagentsSaving: false,
     subagentsSaveStatus: '',
+    executionEnvironmentConfig: {
+      commandShell: 'auto',
+    } as PublicConfig['executionEnvironment'],
+    commandShellCatalog: undefined as CommandShellCatalog | undefined,
+    commandShellLoading: false,
+    commandShellSaving: false,
+    commandShellSaveStatus: '',
     providerForm: structuredClone(DEFAULT_PROVIDER_FORM),
     providerSavedSignature: providerFormSignature(DEFAULT_PROVIDER_FORM),
     providerSaving: false,
@@ -383,6 +394,12 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         this.subagentsSavedSignature = subagentsSignature(config.subagents)
       }
 
+      if (includes('executionEnvironment')) {
+        this.executionEnvironmentConfig = structuredClone(
+          config.executionEnvironment,
+        )
+      }
+
       if (includes('providers') || includes('limits')) {
         this.hydrateSelectedProviderForm(config)
         this.providerSavedSignature = providerFormSignature(
@@ -457,6 +474,57 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.applyConfig(result.value.config, ['assistant'])
       this.assistantSaveStatus = 'saved'
       return true
+    },
+    async loadCommandShells(refresh = false): Promise<boolean> {
+      const bridge = window.agentApi
+      if (!bridge || this.commandShellLoading) return false
+      this.commandShellLoading = true
+      this.commandShellSaveStatus = ''
+      try {
+        const result = await bridge.listCommandShells({
+          version: IPC_VERSION,
+          ...(refresh ? { refresh: true } : {}),
+        })
+        if (!result.ok) {
+          this.error = result.error.message
+          this.commandShellSaveStatus = result.error.message
+          return false
+        }
+        this.commandShellCatalog = structuredClone(result.value)
+        return true
+      } finally {
+        this.commandShellLoading = false
+      }
+    },
+    async setCommandShell(
+      commandShell: CommandShellSelection,
+    ): Promise<boolean> {
+      const bridge = window.agentApi
+      if (!bridge || this.commandShellSaving) return false
+      const previous = this.executionEnvironmentConfig.commandShell
+      this.executionEnvironmentConfig.commandShell = commandShell
+      this.commandShellSaving = true
+      this.commandShellSaveStatus = ''
+      try {
+        const result = await bridge.setConfig({
+          version: IPC_VERSION,
+          kind: 'execution-environment',
+          value: { commandShell },
+        })
+        if (!result.ok) {
+          this.executionEnvironmentConfig.commandShell = previous
+          this.error = result.error.message
+          this.commandShellSaveStatus = result.error.message
+          return false
+        }
+        this.applyConfig(result.value.config, ['executionEnvironment'])
+        if (await this.loadCommandShells()) {
+          this.commandShellSaveStatus = 'Saved'
+        }
+        return true
+      } finally {
+        this.commandShellSaving = false
+      }
     },
     async selectProviderForEditing(providerId: string, refreshModels = true) {
       if (!this.providers.some((provider) => provider.id === providerId)) {

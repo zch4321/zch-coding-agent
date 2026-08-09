@@ -22,12 +22,17 @@ import type { McpManager } from '../mcp/mcp-manager'
 import type { BackendRuntime } from '../application/create-backend-runtime'
 import { IpcFault, type IpcBusinessHandlers } from './index'
 import { renderConversationTranscript } from '../session/conversation-transcript'
+import {
+  commandShellService,
+  type CommandShellService,
+} from '../process/command-shell'
 
 export interface AppIpcHandlerDependencies {
   configStore: ConfigStore
   backend: BackendRuntime
   skillsManager: SkillsManager
   traceService: TraceService
+  commandShells?: Pick<CommandShellService, 'catalog'>
   mcpManager?: McpManager
   getHttpTransport?: () => HttpTransport
   refreshHttpTransport?: (
@@ -62,6 +67,7 @@ export function createAppIpcHandlers(
     backend,
     skillsManager,
     traceService,
+    commandShells = commandShellService,
     mcpManager,
     getHttpTransport,
     refreshHttpTransport,
@@ -105,6 +111,11 @@ export function createAppIpcHandlers(
 
       return { config, ...(warnings.length > 0 ? { warnings } : {}) }
     },
+    'command-shell:list': (payload) =>
+      commandShells.catalog(
+        configStore.getPublicConfig().executionEnvironment.commandShell,
+        payload.refresh ?? false,
+      ),
     'mcp:list': () => ({ servers: mcpManager?.listStatuses() ?? [] }),
     'mcp:reload': async () => {
       if (!mcpManager) throw notAvailable('MCP manager is unavailable')

@@ -77,6 +77,7 @@ const validPayloads: {
     kind: 'workspace',
     lastOpened: 'F:/workspace',
   },
+  'command-shell:list': { version: 1 },
   'mcp:list': { version: 1 },
   'mcp:reload': { version: 1 },
   'mcp:trust-enable': {

@@ -4,6 +4,10 @@ import type { JsonValue } from '../../shared/json'
 import type { ToolRegistrationPort, ToolResult } from './types'
 import { runCommand } from '../process/run'
 import {
+  commandShellService,
+  type CommandShellService,
+} from '../process/command-shell'
+import {
   projectDelayResult,
   projectRunCommandResult,
 } from './tool-result-formatters'
@@ -124,12 +128,16 @@ function wait(durationMs: number, signal: AbortSignal): Promise<void> {
 export function registerProcessTools(
   registry: ToolRegistrationPort,
   getConfig: () => PublicConfig,
+  shells: Pick<
+    CommandShellService,
+    'resolve' | 'invocation'
+  > = commandShellService,
 ): void {
   registry.registerTool({
     id: 'run_command',
     executionMode: 'parallel',
     description:
-      'Run a bounded short-lived child process from the workspace. Prefer process mode with an executable and argument array. Shell mode is higher risk. For long-running tests, watch tasks, dev servers, REPLs, or commands that need periodic observation, open a terminal, send the command, use delay, then read terminal output.',
+      'Run a bounded short-lived child process from the workspace. Prefer process mode with an executable and argument array. Shell mode uses the configured command_shell reported in environment_context and is higher risk; do not assume another shell syntax. For long-running tests, watch tasks, dev servers, REPLs, or commands that need periodic observation, open a terminal, send the command, use delay, then read terminal output.',
     inputSchema: RunCommandSchema,
     effects: ['process.spawn'],
     defaultRisk: 'review',
@@ -139,7 +147,16 @@ export function registerProcessTools(
     validateArgs: validateRunCommandArgs,
     projectResultForModel: projectRunCommandResult,
     async execute(args: RunCommandArgs, context): Promise<ToolResult> {
-      const limits = getConfig().limits
+      const config = getConfig()
+      const limits = config.limits
+      const resolvedShell =
+        args.mode === 'shell'
+          ? await shells.resolve(config.executionEnvironment.commandShell)
+          : undefined
+      const invocation =
+        args.mode === 'shell' && resolvedShell
+          ? shells.invocation(resolvedShell, args.command!)
+          : undefined
       const command =
         args.mode === 'process'
           ? {
@@ -150,7 +167,10 @@ export function registerProcessTools(
             }
           : {
               mode: args.mode,
-              command: args.command!,
+              executable: invocation!.executable,
+              args: invocation!.args,
+              environment: invocation!.environment,
+              fallbackEncoding: resolvedShell!.fallbackEncoding,
               cwd: args.cwd,
             }
       const result = await runCommand({
@@ -177,7 +197,20 @@ export function registerProcessTools(
 
       return {
         status: 'ok',
-        content: JSON.parse(JSON.stringify(result)) as JsonValue,
+        content: JSON.parse(
+          JSON.stringify({
+            ...result,
+            ...(resolvedShell
+              ? {
+                  commandShell: {
+                    id: resolvedShell.profile.id,
+                    label: resolvedShell.profile.label,
+                    fallback: resolvedShell.fallback,
+                  },
+                }
+              : {}),
+          }),
+        ) as JsonValue,
         truncated: result.truncated,
         totalBytes: result.totalBytes,
       }

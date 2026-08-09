@@ -12,6 +12,22 @@ export interface BoundedOutputSnapshot {
   discardedHash?: string
 }
 
+function decodeOutput(
+  value: Buffer,
+  validUtf8: boolean,
+  fallbackEncoding: string | undefined,
+): string {
+  if (!fallbackEncoding || validUtf8) {
+    return value.toString('utf8')
+  }
+
+  try {
+    return new TextDecoder(fallbackEncoding).decode(value)
+  } catch {
+    return value.toString('utf8')
+  }
+}
+
 /** Maintains bounded head and tail output for subprocess stdout and stderr streams. */
 export class BoundedProcessOutput {
   readonly #maxBytes: number
@@ -20,21 +36,38 @@ export class BoundedProcessOutput {
   readonly #head: Array<{ stream: OutputStream; value: Buffer }> = []
   readonly #tail: Array<{ stream: OutputStream; value: Buffer }> = []
   readonly #discarded = createHash('sha256')
+  readonly #fallbackEncoding: string | undefined
+  readonly #utf8Decoders: Record<OutputStream, TextDecoder> = {
+    stdout: new TextDecoder('utf-8', { fatal: true }),
+    stderr: new TextDecoder('utf-8', { fatal: true }),
+  }
+  readonly #validUtf8: Record<OutputStream, boolean> = {
+    stdout: true,
+    stderr: true,
+  }
   #headBytes = 0
   #tailBytes = 0
   #discardedBytes = 0
   #stdoutBytes = 0
   #stderrBytes = 0
 
-  constructor(maxBytes: number) {
+  constructor(maxBytes: number, fallbackEncoding?: string) {
     this.#maxBytes = Math.max(0, maxBytes)
     this.#headBytesLimit = Math.floor(this.#maxBytes * 0.4)
     this.#tailBytesLimit = this.#maxBytes - this.#headBytesLimit
+    this.#fallbackEncoding = fallbackEncoding
   }
 
   /** Appends output while preserving the configured head/tail bound and discard count. */
   append(stream: OutputStream, value: Buffer | string): void {
     const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
+    if (this.#validUtf8[stream]) {
+      try {
+        this.#utf8Decoders[stream].decode(chunk, { stream: true })
+      } catch {
+        this.#validUtf8[stream] = false
+      }
+    }
 
     if (stream === 'stdout') {
       this.#stdoutBytes += chunk.byteLength
@@ -112,11 +145,16 @@ export class BoundedProcessOutput {
   }
 
   #streamContent(stream: OutputStream): string {
-    return Buffer.concat(
+    const retained = Buffer.concat(
       [...this.#head, ...this.#tail]
         .filter((entry) => entry.stream === stream)
         .map((entry) => entry.value),
-    ).toString('utf8')
+    )
+    return decodeOutput(
+      retained,
+      this.#validUtf8[stream],
+      this.#fallbackEncoding,
+    )
   }
 
   /** Returns bounded stdout/stderr content together with truncation metadata. */

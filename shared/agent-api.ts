@@ -19,6 +19,9 @@ type Unsubscribe = () => void
 export interface AgentApi {
   getConfig(payload: IpcPayload<'config:get'>): Promise<IpcResult<'config:get'>>
   setConfig(payload: IpcPayload<'config:set'>): Promise<IpcResult<'config:set'>>
+  listCommandShells(
+    payload: IpcPayload<'command-shell:list'>,
+  ): Promise<IpcResult<'command-shell:list'>>
   listMcpServers(
     payload: IpcPayload<'mcp:list'>,
   ): Promise<IpcResult<'mcp:list'>>
@@ -227,6 +230,7 @@ export interface AgentApi {
 export const AGENT_API_KEYS = [
   'getConfig',
   'setConfig',
+  'listCommandShells',
   'listMcpServers',
   'reloadMcpConfig',
   'trustAndEnableMcpServer',

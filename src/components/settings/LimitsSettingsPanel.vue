@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, watch } from 'vue'
-import { NButton, NDivider, NInputNumber, NSelect } from 'naive-ui'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NDivider,
+  NInputNumber,
+  NSelect,
+  type SelectOption,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import type { CommandShellSelection } from '../../../shared/command-shell'
 import { useAgentStore } from '../../stores/agent'
 
 const agent = useAgentStore()
@@ -10,6 +18,32 @@ const tokenEstimationOptions = computed(() => [
   { label: t('limits.tokenConservative'), value: 'conservative' },
   { label: t('limits.tokenCustom'), value: 'custom-bytes' },
 ])
+const commandShellOptions = computed<SelectOption[]>(() => {
+  const catalog = agent.commandShellCatalog
+  const resolvedLabel = catalog?.resolved.label ?? t('limits.shellDetecting')
+  const options: SelectOption[] = [
+    {
+      label: t('limits.commandShellAuto', { shell: resolvedLabel }),
+      value: 'auto',
+    },
+    ...(catalog?.profiles.map((profile) => ({
+      label: profile.label,
+      value: profile.id,
+    })) ?? []),
+  ]
+  const selected = agent.executionEnvironmentConfig.commandShell
+  if (
+    selected !== 'auto' &&
+    !options.some((option) => option.value === selected)
+  ) {
+    options.push({
+      label: t('limits.commandShellMissing', { shell: selected }),
+      value: selected,
+      disabled: true,
+    })
+  }
+  return options
+})
 
 let autosaveTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -18,6 +52,14 @@ function saveLimitsNow() {
   autosaveTimer = undefined
   void agent.saveLimits()
 }
+
+function selectCommandShell(value: string) {
+  void agent.setCommandShell(value as CommandShellSelection)
+}
+
+onMounted(() => {
+  void agent.loadCommandShells()
+})
 
 watch(
   () => (agent.limitsConfig ? JSON.stringify(agent.limitsConfig) : ''),
@@ -132,6 +174,41 @@ onBeforeUnmount(() => {
         <NDivider />
         <section class="limits-group">
           <h3>{{ t('limits.commands') }}</h3>
+          <label class="settings-field">
+            <span>{{ t('limits.commandShell') }}</span>
+            <div class="settings-inline">
+              <NSelect
+                :value="agent.executionEnvironmentConfig.commandShell"
+                :options="commandShellOptions"
+                :loading="agent.commandShellLoading"
+                :disabled="agent.commandShellSaving"
+                @update:value="selectCommandShell"
+              />
+              <NButton
+                :loading="agent.commandShellLoading"
+                :disabled="agent.commandShellSaving"
+                @click="agent.loadCommandShells(true)"
+              >
+                {{ t('limits.rescanShells') }}
+              </NButton>
+            </div>
+            <small v-if="agent.commandShellCatalog">
+              {{
+                t('limits.commandShellResolved', {
+                  shell: agent.commandShellCatalog.resolved.label,
+                  path: agent.commandShellCatalog.resolved.executable,
+                })
+              }}
+            </small>
+          </label>
+          <NAlert
+            v-if="agent.commandShellCatalog?.fallback"
+            type="warning"
+            :title="t('limits.commandShellFallbackTitle')"
+          >
+            {{ t('limits.commandShellFallback') }}
+          </NAlert>
+          <p>{{ t('limits.commandShellHint') }}</p>
           <label class="settings-field">
             <span>{{ t('limits.commandTimeoutMs') }}</span>
             <NInputNumber
