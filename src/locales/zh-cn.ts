@@ -104,6 +104,7 @@ const zhCN = {
       'Swarm 会产生额外的模型请求和费用。批准前请检查每项任务、能力等级和 Agent 数量。',
     swarmTaskCount: '任务数量',
     swarmTotalAgents: 'Agent 总数',
+    swarmSharedContext: '公共上下文',
     swarmAgents: '{count} 个 Agent',
     swarmInvalidArguments: 'Swarm 参数无法安全展示',
     openWorkspace: '打开工作区',

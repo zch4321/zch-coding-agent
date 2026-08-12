@@ -842,6 +842,7 @@ export class SessionManager {
   startInternalRun(input: {
     sessionId: SessionId
     task: string
+    context?: { content: string; source: string }
     clientRequestId: string
     routes: FrozenSubagentRoutes
     reservation?: InternalRunReservation
@@ -866,6 +867,7 @@ export class SessionManager {
       {
         routes: input.routes,
         directUserInput: true,
+        ...(input.context ? { directContext: input.context } : {}),
         subagentsEnabled: false,
         allowedToolIds: session.allowedToolIds,
         skipProviderPreconditions: true,

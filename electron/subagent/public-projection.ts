@@ -9,6 +9,7 @@ import type { MessageRecord } from '../../shared/message'
 import type { SessionRecord } from '../../shared/session'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
+import { unwrapSwarmTaskContent } from './assignment-prompt'
 
 const USAGE_FIELDS = [
   'records',
@@ -134,7 +135,7 @@ export function projectAgentExecutionTask(
     .flatMap((part) => (part.type === 'text' ? [part.text] : []))
     .join('\n')
     .trim()
-  return task || undefined
+  return (task && unwrapSwarmTaskContent(task)) || task || undefined
 }
 
 /** Removes child run identity and approval state from one active internal snapshot. */

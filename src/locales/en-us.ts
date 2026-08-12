@@ -105,6 +105,7 @@ const enUS = {
       'Swarm creates additional Provider requests and cost. Review every task, capability and Agent count before approving.',
     swarmTaskCount: 'Tasks',
     swarmTotalAgents: 'Total Agents',
+    swarmSharedContext: 'Shared context',
     swarmAgents: '{count} Agents',
     swarmInvalidArguments: 'Swarm arguments cannot be displayed safely',
     openWorkspace: 'Open a workspace',

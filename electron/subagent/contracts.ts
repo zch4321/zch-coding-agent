@@ -11,6 +11,7 @@ import type { RunStatus } from '../../shared/agent-events'
 export interface SubagentSpec {
   name: string
   task: string
+  sharedContext?: string
 }
 
 export interface SubagentParentContext {

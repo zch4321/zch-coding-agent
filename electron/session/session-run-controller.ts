@@ -43,6 +43,7 @@ export interface RunStartOptions {
   }
   allowedToolIds?: ReadonlySet<string>
   directUserInput?: boolean
+  directContext?: { content: string; source: string }
   subagentsEnabled?: boolean
   skipProviderPreconditions?: boolean
   reservedAccess?: { runId: RunId; lease: RunAccessLease }
@@ -163,6 +164,9 @@ export class SessionRunController {
       requestCommitted: false,
       subagentsEnabled: options.subagentsEnabled ?? config.subagents.enabled,
       directUserInput: options.directUserInput ?? false,
+      ...(options.directContext
+        ? { directContext: structuredClone(options.directContext) }
+        : {}),
       ...(options.allowedToolIds
         ? { allowedToolIds: new Set(options.allowedToolIds) }
         : session.allowedToolIds
@@ -438,6 +442,17 @@ export class SessionRunController {
       } else if (userMessage !== undefined) {
         if (run.directUserInput) {
           const turnStartSeq = session.nextMessageSeq
+          if (run.directContext) {
+            const contextRecord = appendPromptLayer(session, {
+              kind: 'selected_context',
+              content: run.directContext.content,
+              source: run.directContext.source,
+              trusted: false,
+              editable: false,
+              config: runConfig,
+            })
+            run.harnessMessageIds.push(contextRecord.id)
+          }
           const userRecord = appendUserInput(session, {
             content: userMessage,
             clientRequestId: run.clientRequestId,

@@ -9,9 +9,14 @@ import type { SessionRecord } from '../../shared/session'
 import type { AgentExecutionId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { LlmUsageRecord } from '../../shared/usage'
+import { MAX_SWARM_SHARED_CONTEXT_LENGTH } from '../../shared/swarm'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
 import { projectAgentExecutionSummary } from './public-projection'
+import {
+  swarmSharedContextContent,
+  swarmTaskContent,
+} from './assignment-prompt'
 import {
   SubagentRuntimeError,
   summarizeSubagentUsage,
@@ -57,6 +62,7 @@ function json(value: unknown): JsonValue {
 function normalizeSpec(spec: SubagentSpec): SubagentSpec {
   const name = spec.name.trim()
   const task = spec.task.trim()
+  const sharedContext = spec.sharedContext?.trim()
   if (
     name.length < 1 ||
     [...name].length > 64 ||
@@ -74,7 +80,17 @@ function normalizeSpec(spec: SubagentSpec): SubagentSpec {
       'Subagent task must contain 1-32768 characters',
     )
   }
-  return { name, task }
+  if (
+    spec.sharedContext !== undefined &&
+    (!sharedContext ||
+      [...sharedContext].length > MAX_SWARM_SHARED_CONTEXT_LENGTH)
+  ) {
+    throw new SubagentRuntimeError(
+      'INVALID_SUBAGENT_SHARED_CONTEXT',
+      `Subagent shared context must contain 1-${MAX_SWARM_SHARED_CONTEXT_LENGTH} characters`,
+    )
+  }
+  return { name, task, ...(sharedContext ? { sharedContext } : {}) }
 }
 
 function completedResult(
@@ -479,9 +495,19 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
 
       let childRun
       try {
+        const swarmAssignment = input.spec.sharedContext
+          ? {
+              context: {
+                content: swarmSharedContextContent(input.spec.sharedContext),
+                source: 'swarm:shared-context',
+              },
+              task: swarmTaskContent(input.spec.task),
+            }
+          : undefined
         childRun = this.#manager.startInternalRun({
           sessionId: childSessionId,
-          task: input.spec.task,
+          task: swarmAssignment?.task ?? input.spec.task,
+          ...(swarmAssignment ? { context: swarmAssignment.context } : {}),
           clientRequestId: `subagent-${randomUUID()}`,
           routes: input.routes,
           ...(reservation ? { reservation } : {}),

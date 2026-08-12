@@ -318,9 +318,11 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 
 ### 2.9 Desktop Swarm
 
-- Desktop 主 Run 在 Subagent 已启用、全局并发至少为 2 且模型池至少有一条 enabled route 时，把 `swarm_run({ tasks })` 作为普通 Tool 暴露给 Provider。`/swarm <goal>` 只保留为显式目标编排快捷命令，不授予特殊 capability；历史重放、child Agent 和 Headless 不得继承或伪造该工具能力。
-- Tool description 必须要求用户未明确提出 Swarm、多 Agent、并行调查或独立交叉检查时不得调用。`defaultRisk` 固定为 `review`，readonly、auto、confirm 与 YOLO 均逐次要求人工审批，不得经过模型自动审批或记忆批准。专用审批卡必须展示任务数、Agent 总数、每项任务正文、能力等级、副本数以及额外 Provider 请求和费用提示。
-- 每个 task 必须包含唯一安全 `name`、自包含 `task`、`requiredCapability: light|standard|strong` 和 `agentCount`；单项及总 Agent 数都受本次 Run 冻结的 `maxAgentsPerSwarm` 限制，Provider schema 与 Backend 执行校验必须同时执行。
+- Desktop 主 Run 在 Subagent 已启用、全局并发至少为 2 且模型池至少有一条 enabled route 时，把 `swarm_run({ sharedContext, tasks })` 作为普通 Tool 暴露给 Provider。`/swarm <goal>` 只保留为显式目标编排快捷命令，不授予特殊 capability；历史重放、child Agent 和 Headless 不得继承或伪造该工具能力。
+- Tool description 必须要求用户未明确提出 Swarm、多 Agent、并行调查或独立交叉检查时不得调用，并明确 Child 无法执行命令、构建或测试。父 Agent 在可行时必须先执行相关验证，把命令、退出码和精简关键输出放入 `sharedContext`；无法验证时在其中明确说明。适合独立交叉检查时鼓励接近本次 Job 上限，并允许同一 task 分配多个 Agent；描述只能承诺优先轮换合格模型，不能保证池不足时仍使用不同模型。
+- `defaultRisk` 固定为 `review`，readonly、auto、confirm 与 YOLO 均逐次要求人工审批，不得经过模型自动审批或记忆批准。专用审批卡必须展示公共上下文、任务数、Agent 总数、每项任务正文、能力等级、副本数以及额外 Provider 请求和费用提示。
+- `sharedContext` 必须是非空有界文本，承载所有 Child 共用的背景、证据、约束、验证结果和输出要求；每个 task 必须包含唯一安全 `name`、仅针对该 Child 的 `task`、`requiredCapability: light|standard|strong` 和 `agentCount`。`sharedContext + task` 合起来必须自包含。单项及总 Agent 数都受本次 Run 冻结的 `maxAgentsPerSwarm` 限制，Provider schema 与 Backend 执行校验必须同时执行。
+- 每个 Child hidden Session 必须把 XML-text 转义后的 `<swarm_shared_context>` 与 `<swarm_task>` 分别持久化为公共 prompt layer 和本轮 user input。基础 harness 必须说明两种 tag 的信任与任务语义；详情投影返回解包后的原始 task，不能把 tag 或公共上下文伪装成用户输入。
 - 主 Agent 负责拆解任务；Backend 在任何 child Provider 请求前确定性分配模型池 route、复核 Provider revision，并冻结 main/compression route 与凭据绑定。能力不足、配置竞态或输入超限必须整体失败，不得静默降级、跳过任务或自动换 Provider。
 - Job root 与所有 queued child 必须在一个 SQLite transaction 创建。root/child 只保存安全 assignment、状态、usage、结果与有界错误，不保存 API key、endpoint、reasoning、workspace 绝对路径或 child prompt harness；hidden Session 继续从普通 Session API 隐藏。
 - Swarm child 使用全局 Run coordinator 的可取消 FIFO 队列，取得 slot 后才创建 hidden Session 并启动 worker timeout；父 Run 自身占一个 slot。普通 Run 与 `subagent_run` 继续 fail-fast。同一父 Run 的多个 Job 严格串行，不同父 Run 的 Job 可以并发排队。

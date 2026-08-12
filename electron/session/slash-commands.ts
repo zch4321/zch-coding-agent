@@ -166,7 +166,7 @@ export function resolveSlashCommand(input: {
     const prompt = resolved
       ? { text: resolved.content, resource: resolved.resource }
       : {
-          text: 'Coordinate this Swarm objective: ${objective}\n\nUse swarm_run with self-contained read-only tasks, then compare every returned replica and produce the final synthesis.',
+          text: 'Coordinate this Swarm objective: ${objective}\n\nRun relevant verification first when feasible. Put its commands, exit codes, and concise output with common background in sharedContext, then use swarm_run with focused read-only tasks. Use multiple replicas for independent cross-model checks, compare every result, and produce the final synthesis.',
         }
     const instruction = renderPromptTemplate(prompt.text, {
       objective: parsed.rest,

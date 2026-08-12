@@ -30,6 +30,11 @@ interface SwarmApprovalTask {
   agentCount: number
 }
 
+interface SwarmApprovalArgs {
+  sharedContext: string
+  tasks: SwarmApprovalTask[]
+}
+
 const capabilities = new Set<ModelCapabilityLevel>([
   'light',
   'standard',
@@ -41,12 +46,20 @@ const capabilityLabels: Record<ModelCapabilityLevel, string> = {
   strong: 'settings.capabilityStrong',
 }
 
-function swarmTasksFromArgs(value: unknown): SwarmApprovalTask[] | undefined {
+function swarmArgsFromValue(value: unknown): SwarmApprovalArgs | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined
   }
+  const sharedContext = Reflect.get(value, 'sharedContext')
   const tasks = Reflect.get(value, 'tasks')
-  if (!Array.isArray(tasks) || tasks.length === 0) return undefined
+  if (
+    typeof sharedContext !== 'string' ||
+    !sharedContext.trim() ||
+    !Array.isArray(tasks) ||
+    tasks.length === 0
+  ) {
+    return undefined
+  }
   const parsed: SwarmApprovalTask[] = []
   for (const candidate of tasks) {
     if (
@@ -76,17 +89,18 @@ function swarmTasksFromArgs(value: unknown): SwarmApprovalTask[] | undefined {
       agentCount,
     })
   }
-  return parsed
+  return { sharedContext, tasks: parsed }
 }
 
 const isSwarmApproval = computed(
   () => agent.pendingApproval?.tool === 'swarm_run',
 )
-const swarmTasks = computed(() =>
+const swarmArgs = computed(() =>
   isSwarmApproval.value
-    ? swarmTasksFromArgs(agent.pendingApproval?.args)
+    ? swarmArgsFromValue(agent.pendingApproval?.args)
     : undefined,
 )
+const swarmTasks = computed(() => swarmArgs.value?.tasks)
 const swarmAgentCount = computed(
   () =>
     swarmTasks.value?.reduce((total, task) => total + task.agentCount, 0) ?? 0,
@@ -151,7 +165,17 @@ function swarmCapabilityLabel(capability: ModelCapabilityLevel): string {
             {{ swarmAgentCount }}
           </NDescriptionsItem>
         </NDescriptions>
-        <NList v-if="swarmTasks" class="swarm-approval-tasks" bordered>
+        <section
+          v-if="swarmArgs"
+          class="swarm-approval-shared-context"
+          aria-labelledby="swarm-shared-context-title"
+        >
+          <strong id="swarm-shared-context-title">
+            {{ t('chat.swarmSharedContext') }}
+          </strong>
+          <p>{{ swarmArgs.sharedContext }}</p>
+        </section>
+        <NList v-if="swarmArgs" class="swarm-approval-tasks" bordered>
           <NListItem
             v-for="(task, index) in swarmTasks"
             :key="`${index}:${task.name}`"

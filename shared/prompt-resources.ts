@@ -1,8 +1,8 @@
 import type { AssistantLanguage } from './system-prompts'
 
-export const PROMPT_RESOURCE_VERSION = '2026-07-10.1'
+export const PROMPT_RESOURCE_VERSION = '2026-08-12.1'
 export const HEADLESS_PROMPT_RESOURCE_VERSION = '2026-07-11.1'
-export const SWARM_PROMPT_RESOURCE_VERSION = '2026-08-09.1'
+export const SWARM_PROMPT_RESOURCE_VERSION = '2026-08-12.1'
 
 export interface PromptResourceRef {
   id: string

@@ -13,6 +13,7 @@ import {
   sessionFixture,
 } from '../persistence/repository-fixtures'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
+import { swarmTaskContent } from './assignment-prompt'
 import {
   projectAgentExecutionActivities,
   projectAgentExecutionSummary,
@@ -147,6 +148,15 @@ describe('Subagent public projection', () => {
     expect(
       projectAgentExecutionTask(task?.kind === 'user_input' ? task : undefined),
     ).toBe('visible search needle')
+    if (task?.kind === 'user_input') {
+      const tagged = structuredClone(task)
+      tagged.parts = [
+        { type: 'text', text: swarmTaskContent('review <session> & report') },
+      ]
+      expect(projectAgentExecutionTask(tagged)).toBe(
+        'review <session> & report',
+      )
+    }
     expect(projectAgentExecutionTask(undefined)).toBeUndefined()
   })
 

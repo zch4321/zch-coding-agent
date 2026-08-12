@@ -1666,11 +1666,13 @@ child stream/tool/domain event 不发布给 Renderer，也不创建独立 trace 
 
 ### 18.5 Desktop Swarm Job 与模型池调度
 
-`swarm_run` 是满足运行条件的 Desktop 主 Run 的普通 Tool：Subagent 必须已启用、全局 Run 上限至少为 2，并且模型池至少有一条 enabled route。普通用户消息也能获得该工具；`/swarm <goal>` 仅作为显式请求与目标编排快捷命令，不再授予特殊 capability。child Run、历史重放和 Headless 仍不获得该工具，catalog 与 executor 对伪造调用执行相同检查。Provider 可见 schema 按 Run 开始时的 `maxAgentsPerSwarm` 克隆并收窄 `tasks.maxItems` 与 `agentCount.maximum`，Backend 在创建 Job 前再次校验所有 `agentCount` 的总和。
+`swarm_run` 是满足运行条件的 Desktop 主 Run 的普通 Tool：Subagent 必须已启用、全局 Run 上限至少为 2，并且模型池至少有一条 enabled route。普通用户消息也能获得该工具；`/swarm <goal>` 仅作为显式请求与目标编排快捷命令，不再授予特殊 capability。child Run、历史重放和 Headless 仍不获得该工具，catalog 与 executor 对伪造调用执行相同检查。Provider 可见 schema 要求有界非空 `sharedContext`，并按 Run 开始时的 `maxAgentsPerSwarm` 克隆、收窄 `tasks.maxItems` 与 `agentCount.maximum`；Backend 在创建 Job 前再次校验公共上下文、各 task 和所有 `agentCount` 的总和。
 
-Tool description 明确要求只有用户已经提出 Swarm、多 Agent、并行调查或独立交叉检查时才能调用，不能仅因任务复杂而自行启动。`swarm_run` 保持无工作区副作用但使用 `defaultRisk = review`，因此 readonly、auto、confirm 与 YOLO 都逐次进入人工审批，不经过自动审批模型，也不能记忆批准。专用审批卡展示任务数、Agent 总数、每项任务正文、能力等级和副本数，并提示额外 Provider 请求与费用；一次批准绑定完整 Tool 参数，而不是逐 child 审批。
+Tool description 明确要求只有用户已经提出 Swarm、多 Agent、并行调查或独立交叉检查时才能调用，不能仅因任务复杂而自行启动。它同时说明 Child 没有命令、构建或测试能力：父 Agent 可行时先运行相关验证，再把命令、退出码和精简关键输出写入 `sharedContext`；无法验证时明确说明。适合独立交叉检查时鼓励接近当前 Job 上限，并允许同一 task 使用多个副本。allocator 会优先轮换合格 `Provider + model`，池不足时仍可能复用，Tool 不作绝对异构承诺。
 
-`swarm_run({ tasks })` 是 serial Tool；每项 task 提供唯一安全名称、自包含任务、`light|standard|strong` 最低能力和 replica 数量。Coordinator 从一次 PublicConfig 快照确定性分配并冻结全部 route，再在一个 SQLite transaction 中创建 Swarm root 和所有 queued child。assignment 失败、配置 revision 竞态或总量超限都发生在任何 child Provider 请求之前；冻结后配置热变更不重分配，失败 child 也不自动切换 Provider 重试。
+`swarm_run({ sharedContext, tasks })` 是 serial Tool；顶层 `sharedContext` 保存全部 Child 共用的背景、证据、约束、验证结果和输出要求，每项 task 只提供唯一安全名称、Child-specific 任务、`light|standard|strong` 最低能力和 replica 数量。两部分合起来自包含。工具保持无工作区副作用但使用 `defaultRisk = review`，因此 readonly、auto、confirm 与 YOLO 都逐次进入人工审批，不经过自动审批模型，也不能记忆批准。专用审批卡展示完整公共上下文、任务数、Agent 总数、每项任务正文、能力等级和副本数，并提示额外 Provider 请求与费用；一次批准绑定完整 Tool 参数，而不是逐 child 审批。
+
+Coordinator trim 并校验公共上下文和 task 后，把同一 `sharedContext` 复制到每个 prepared child spec，再从一次 PublicConfig 快照确定性分配并冻结全部 route。Subagent execution 将 XML-text 转义后的公共部分作为独立 `selected_context` canonical record 注入，将转义后的 `<swarm_task>` 作为该 Child 的 `user_input`；基础 system harness 把前者定义为背景、后者定义为当前委派任务。公共上下文和 task 不拼成不可分割字符串，Agents 详情从 user record 安全解包原始 task。随后 Backend 在一个 SQLite transaction 中创建 Swarm root 和所有 queued child。assignment 失败、配置 revision 竞态或总量超限都发生在任何 child Provider 请求之前；冻结后配置热变更不重分配，失败 child 也不自动切换 Provider 重试。
 
 Swarm child 使用 backend-private prepared execution 路径。普通 Run 与 `subagent_run` 仍通过全局 coordinator fail-fast；只有 prepared Swarm child 进入同一 coordinator 的可取消 FIFO 队列，取得空闲 Run slot 后才创建 hidden Session 并启动 worker timeout。父 Run 自身占一个 slot。同一父 Run 的多个 Swarm Job 严格串行，不同父 Run 可以并发排队；父取消或应用退出同时停止 queued child 并中断 active child。
 

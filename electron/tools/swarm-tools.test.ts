@@ -20,6 +20,9 @@ describe('swarm_run Tool', () => {
     )
     expect(definition.description).toContain('self-contained')
     expect(definition.description).toContain('strictly serially')
+    expect(definition.description).toContain('cannot execute commands')
+    expect(definition.description).toContain('close to the per-Job Agent limit')
+    expect(definition.description).not.toContain('agentCount 1 by default')
   })
 
   it.each<PermissionMode>(['readonly', 'auto', 'confirm', 'yolo'])(
@@ -38,7 +41,7 @@ describe('swarm_run Tool', () => {
           rememberedRules: [],
           builtinPolicies: true,
           workspace: 'F:\\workspace\\fixture',
-          args: { tasks: [] },
+          args: { sharedContext: 'Verification was not run.', tasks: [] },
           callId: 'call:swarm-review' as CallId,
         }).kind,
       ).toBe('review')
@@ -70,6 +73,7 @@ describe('swarm_run Tool', () => {
     const definition = registry.get('swarm_run')!
     const controller = new AbortController()
     const args = {
+      sharedContext: 'npm run check exited 0 with no failures.',
       tasks: [
         {
           name: 'review',

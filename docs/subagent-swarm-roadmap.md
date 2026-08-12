@@ -80,12 +80,14 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 满足运行条件的 Desktop 主 Run 会把 `swarm_run` 作为普通 Tool 暴露给 Provider；`/swarm <目标>` 只保留为用户显式请求 Swarm 的编排快捷命令，不再授予一次性 capability。普通消息可以使用该工具，历史重放、子 Agent 和 Headless 仍不能继承或伪造它。Tool description 要求用户未明确提出 Swarm、多 Agent、并行调查或独立交叉检查时不得主动调用；每次调用使用 review risk 进入人工审批，包括 YOLO 模式。
 
-`swarm_run` 接收一组具名、自包含的只读调查任务。主 Agent 负责拆分任务；Backend 负责校验、冻结 assignment、排队、取消和聚合结果。SwarmCoordinator 直接调用 backend-private `PreparedSubagentExecutionPort.runPrepared`，不通过循环调用公开 `subagent_run` Tool，也不允许 child 获得递归编排能力。
+`swarm_run` 接收一份所有 Child 共用的 `sharedContext` 和一组具名的只读调查任务；两部分合起来必须自包含。主 Agent 负责先执行相关验证、整理公共证据并拆分任务；Backend 负责校验、冻结 assignment、排队、取消和聚合结果。SwarmCoordinator 直接调用 backend-private `PreparedSubagentExecutionPort.runPrepared`，不通过循环调用公开 `subagent_run` Tool，也不允许 child 获得递归编排能力。
 
 每个任务由主 Agent 显式声明内容、最低能力与 Agent 数，不增加另一套含义重叠的“难度”字段：
 
 ```ts
 swarm_run({
+  sharedContext:
+    'npm run check 已执行，exitCode = 0。审查当前分支相对 master 的改动，只读，不修改文件。',
   tasks: [
     {
       name: 'security-review',
@@ -98,13 +100,15 @@ swarm_run({
 ```
 
 - `requiredCapability` 必填且只允许 `light | standard | strong`，Backend 不根据任务文本、模型名或价格猜测能力。
+- `sharedContext` 必填，承载每个 Child 都需要的背景、证据、约束、输出要求以及父 Agent 预先执行的命令、退出码和精简关键输出；无法执行验证时必须明确说明。每个 task 只描述该 Child 的具体职责，避免重复公共内容。
 - `agentCount` 必须为 `1..frozenMaxAgentsPerSwarm`。Provider 可见的 `swarm_run` schema 在普通主 Run 启动时按当时的 `subagents.maxAgentsPerSwarm` 生成，因此 JSON Schema 的 `maximum` 会直接显示用户设置；设置变化从下一次 Run 生效，不能改写 active Run 已看到的工具契约。
 - 多个 task 的 `agentCount` 总和也不得超过同一冻结上限。JSON Schema 无法表达跨数组元素求和，Backend 必须在创建 Job 前再次校验并整体拒绝超限输入；XML tag 只可作为冗余提示，不能成为权限或上限的权威来源。
-- Tool description 偏好每个 task 默认使用 1 个 Agent；只有需要独立交叉验证、不同调查视角或高风险复核时才增加数量，并选择足以完成任务的最低 `requiredCapability`，不能因为上限较大就主动占满。
+- Tool description 说明 Child 没有命令、构建或测试能力，要求父 Agent 在可行时先验证，再把结果写入 `sharedContext`。适合独立交叉验证时鼓励使用接近当前上限的 Agent 数，也允许同一 task 使用多个副本；allocator 会优先轮换合格 `Provider + model`，但池不足时仍可能复用模型。每项任务继续选择足以完成任务的最低 `requiredCapability`。
 
 ### 3.2 运行边界
 
 - 同一 Swarm 的 Agent 绑定相同 canonical workspace，并在各自读取时观察 live 状态；本阶段不重新引入 source identity 或冻结 snapshot。
+- 每个 Child hidden Session 把转义后的 `<swarm_shared_context>` 作为独立 selected-context canonical record，把转义后的 `<swarm_task>` 作为本轮 `user_input`；基础 harness 明确前者是公共背景、后者是当前委派任务。Renderer 投影只展示解包后的 task，不把公共 prompt layer 暴露成用户消息。
 - Job 会先原子创建 root 与全部 queued child，再并发等待执行；真正 active 的 child 必须通过全局 Run coordinator 的可取消 FIFO 队列取得空闲 slot。冻结的 Job Agent 总数限制待调度规模，全局 `maxConcurrentRuns` 限制实际并发，模型池不再提供 per-route 并发配额。
 - 全局 `maxConcurrentRuns = 1` 时在启动前拒绝，避免父 Run 占满唯一 slot。
 - 同一父 Run 的多个 `swarm_run` Job 严格串行；不同父 Run 的 Job 可以同时排队和运行。普通 Run 与 `subagent_run` 继续 fail-fast，不因 Swarm 引入等待语义。

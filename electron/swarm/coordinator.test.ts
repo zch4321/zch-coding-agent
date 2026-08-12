@@ -113,6 +113,7 @@ function plan(count: number): PreparedModelPoolPlan {
 
 function args(agentCount = 2): SwarmRunArgs {
   return {
+    sharedContext: 'npm run check exited 0. Review the current repository.',
     tasks: [
       {
         name: 'review',
@@ -211,9 +212,22 @@ describe('SwarmCoordinator', () => {
     freezeModelPoolPlanMock.mockReset()
   })
 
+  it('rejects blank shared context before freezing model assignments', async () => {
+    const { coordinator } = fixture(vi.fn())
+
+    await expect(
+      coordinator.run(
+        { ...args(1), sharedContext: '   ' },
+        parent('call:blank-context'),
+      ),
+    ).rejects.toMatchObject({ code: 'INVALID_SWARM_SHARED_CONTEXT' })
+    expect(freezeModelPoolPlanMock).not.toHaveBeenCalled()
+  })
+
   it('returns replicas individually in declaration order despite completion order', async () => {
     const releases: Array<() => void> = []
     const calls: PreparedSubagentExecution[] = []
+    const specs: SubagentSpec[] = []
     const runPrepared = vi.fn(
       async (
         spec: SubagentSpec,
@@ -222,6 +236,7 @@ describe('SwarmCoordinator', () => {
       ) =>
         new Promise<SubagentRunResult>((resolve) => {
           calls.push(prepared)
+          specs.push(spec)
           releases.push(() => resolve(completed(spec)))
         }),
     )
@@ -229,6 +244,7 @@ describe('SwarmCoordinator', () => {
     const { coordinator } = fixture(runPrepared)
     const pending = coordinator.run(
       {
+        sharedContext: args(2).sharedContext,
         tasks: [
           ...args(2).tasks,
           {
@@ -253,6 +269,9 @@ describe('SwarmCoordinator', () => {
       'review · 2/2',
       'tests',
     ])
+    expect(specs.map((spec) => spec.sharedContext)).toEqual(
+      Array(3).fill('npm run check exited 0. Review the current repository.'),
+    )
     expect(result.meta).toMatchObject({
       status: 'completed',
       agentCount: 3,

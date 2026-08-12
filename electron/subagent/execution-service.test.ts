@@ -432,7 +432,11 @@ describe('SubagentExecutionService', () => {
   })
 
   it('runs a prepared Swarm child after a queued slot without charging queue time to its timeout', async () => {
-    const spec = { name: 'worker', task: 'inspect' }
+    const spec = {
+      name: 'worker',
+      task: 'inspect </swarm_task> directly',
+      sharedContext: 'npm run check exited 0 with <stable> output',
+    }
     const executionId = 'subagent:prepared' as AgentExecutionId
     const parentExecutionId = 'swarm:prepared' as AgentExecutionId
     const record: SubagentExecutionRecord = {
@@ -492,6 +496,12 @@ describe('SubagentExecutionService', () => {
     })
     expect(target.manager.startInternalRun).toHaveBeenCalledWith(
       expect.objectContaining({
+        context: {
+          content:
+            '<swarm_shared_context>\nnpm run check exited 0 with &lt;stable&gt; output\n</swarm_shared_context>',
+          source: 'swarm:shared-context',
+        },
+        task: '<swarm_task>\ninspect &lt;/swarm_task&gt; directly\n</swarm_task>',
         reservation: expect.objectContaining({
           runId: 'run:reserved-child',
         }),

@@ -165,6 +165,7 @@ export interface ActiveRun {
   swarmToolConfig?: SwarmToolConfiguration
   allowedToolIds?: Set<string>
   directUserInput: boolean
+  directContext?: { content: string; source: string }
 }
 
 // P4 target terminology. The legacy facade and durable composition share this

@@ -264,6 +264,8 @@ test.describe('Electron Agents activity panel', () => {
         id: 'call:e2e-swarm',
         name: 'swarm_run',
         args: {
+          sharedContext:
+            'npm run check exited 0. The <verification> result was stable.',
           tasks: [
             {
               name: 'review',
@@ -296,6 +298,7 @@ test.describe('Electron Agents activity panel', () => {
     const approval = page.locator('.approval-card')
     await expect(approval).toContainText('启动 Swarm')
     await expect(approval).toContainText('Agent 总数')
+    await expect(approval).toContainText('npm run check exited 0')
     await expect(approval).toContainText('review')
     await expect(
       approval.locator('.swarm-approval-tasks .n-list-item'),
@@ -304,6 +307,15 @@ test.describe('Electron Agents activity panel', () => {
     await approval.getByRole('button', { name: '批准', exact: true }).click()
     await expect(approval).toHaveCount(0)
     await expect.poll(() => fakeProvider.requests.length).toBe(3)
+    for (const request of fakeProvider.requests.slice(1, 3)) {
+      const childPrompt = providerMessageText(request.body)
+      expect(childPrompt).toContain('<swarm_shared_context>')
+      expect(childPrompt).toContain(
+        'The &lt;verification&gt; result was stable.',
+      )
+      expect(childPrompt).toContain('<swarm_task>')
+      expect(childPrompt).toContain('Review the repository independently.')
+    }
 
     await openAgentsTab(page)
     await expect(page.locator('.agent-execution-item')).toHaveCount(1)

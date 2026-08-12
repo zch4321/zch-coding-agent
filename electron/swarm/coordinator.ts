@@ -3,6 +3,7 @@ import type { ModelCapabilityLevel } from '../../shared/config'
 import type { AgentExecutionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import {
+  MAX_SWARM_SHARED_CONTEXT_LENGTH,
   MAX_SWARM_TASK_LENGTH,
   MAX_SWARM_TASK_NAME_LENGTH,
   SwarmRunResultSchema,
@@ -90,6 +91,16 @@ function displayRootName(
 }
 
 function normalizeArgs(args: SwarmRunArgs, maximum: number): SwarmRunArgs {
+  const sharedContext = args.sharedContext.trim()
+  if (
+    [...sharedContext].length < 1 ||
+    [...sharedContext].length > MAX_SWARM_SHARED_CONTEXT_LENGTH
+  ) {
+    throw new SwarmRuntimeError(
+      'INVALID_SWARM_SHARED_CONTEXT',
+      `Swarm shared context must contain 1-${MAX_SWARM_SHARED_CONTEXT_LENGTH} characters`,
+    )
+  }
   const names = new Set<string>()
   let total = 0
   const tasks = args.tasks.map((candidate) => {
@@ -128,10 +139,13 @@ function normalizeArgs(args: SwarmRunArgs, maximum: number): SwarmRunArgs {
       `A Swarm Job may create at most ${maximum} Agents`,
     )
   }
-  return { tasks }
+  return { sharedContext, tasks }
 }
 
-function expandTasks(tasks: readonly SwarmTask[]): ExpandedChild[] {
+function expandTasks(
+  sharedContext: string,
+  tasks: readonly SwarmTask[],
+): ExpandedChild[] {
   return tasks.flatMap((task, taskIndex) =>
     Array.from({ length: task.agentCount }, (_, index) => ({
       taskIndex,
@@ -139,6 +153,7 @@ function expandTasks(tasks: readonly SwarmTask[]): ExpandedChild[] {
       spec: {
         name: displayChildName(task, index + 1),
         task: task.task,
+        sharedContext,
       },
     })),
   )
@@ -335,7 +350,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
       parentCallId: parent.callId,
     })
     if (existing) return this.#reuseExisting(existing, argsHash)
-    const expanded = expandTasks(args.tasks)
+    const expanded = expandTasks(args.sharedContext, args.tasks)
     const requirements = expanded.map(
       (child) =>
         args.tasks[child.taskIndex]!.requiredCapability as ModelCapabilityLevel,

@@ -204,3 +204,11 @@
 - 使用约束：Tool description 明确要求只有用户已提出 Swarm、多 Agent、并行调查或独立交叉检查时才能调用，不能仅因任务复杂自行启动。工具保持只读 effects，但 `defaultRisk = review`；当前策略引擎因此在 readonly、auto、confirm 与 YOLO 中都请求人工审批，不经过自动审批模型，也不支持记忆批准。
 - 审批界面：一次审批绑定完整 `swarm_run` 参数并覆盖整个 Job，不逐 child 弹卡。专用卡显示任务与 Agent 总数、每项名称/正文/能力/副本数，并提示额外 Provider 请求和费用；参数异常时回退到安全原始 JSON，不能因 Renderer 投影失败而隐去审批信息。
 - 理由：普通 Tool 比一次性 slash capability 更符合模型原生工具编排，也允许用户用自然语言明确要求 Swarm；强提示减少误调用，逐次人工审批则在模型仍误判时保留成本与调度控制。YOLO 继续审批是刻意接受的简单语义，避免为单个工具扩展额外权限策略枚举。
+
+## 2026-08-12 — Swarm assignment 拆分公共上下文与 Child task
+
+- 状态：已采纳；本条更新 S4 Tool 输入与 Child prompt 注入方式。
+- 输入边界：`swarm_run` 使用必填 `sharedContext + tasks[]`。公共字段承载全部 Child 共用的背景、证据、约束、验证结果和输出要求，每个 task 只声明 Child-specific 职责；两部分合起来自包含。专用审批卡必须同时展示公共上下文和全部任务。
+- 验证边界：Child 工具 profile 不含命令、终端、构建或测试能力。父 Agent 可行时先运行相关验证，在下一轮把命令、退出码和精简关键输出写入 `sharedContext`；无法执行时明确说明，不能在同一 Tool batch 中假定尚未返回的测试结果。
+- 副本策略：适合交叉验证时鼓励使用接近本次 Job 上限的 Agent 数，并允许同一 task 多副本。allocator 只保证优先轮换满足能力要求的不同 `Provider + model`，合格模型不足时允许复用，提示词不得承诺绝对异构。
+- 历史边界：每个 hidden Child Session 分别持久化 XML-text 转义后的 `<swarm_shared_context>` prompt layer 与 `<swarm_task>` user input。基础 harness 明确 tag 语义；Renderer 解包 task，公共上下文不进入普通用户消息投影。

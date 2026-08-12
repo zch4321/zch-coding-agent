@@ -4,15 +4,34 @@ import { AgentExecutionUsageSummarySchema } from './agent-execution'
 import { ReasoningEffortSchema } from './reasoning'
 
 export const MAX_SWARM_AGENTS = 32
+export const MAX_SWARM_SHARED_CONTEXT_LENGTH = 32_768
 export const MAX_SWARM_TASK_NAME_LENGTH = 64
 export const MAX_SWARM_TASK_LENGTH = 32_768
 
 export const SwarmTaskSchema = Type.Object(
   {
-    name: Type.String({ minLength: 1, maxLength: MAX_SWARM_TASK_NAME_LENGTH }),
-    task: Type.String({ minLength: 1, maxLength: MAX_SWARM_TASK_LENGTH }),
-    requiredCapability: ModelCapabilityLevelSchema,
-    agentCount: Type.Integer({ minimum: 1, maximum: MAX_SWARM_AGENTS }),
+    name: Type.String({
+      minLength: 1,
+      maxLength: MAX_SWARM_TASK_NAME_LENGTH,
+      description: 'Short unique name for this investigation task.',
+    }),
+    task: Type.String({
+      minLength: 1,
+      maxLength: MAX_SWARM_TASK_LENGTH,
+      description:
+        'Child-specific assignment. Do not repeat background or verification already supplied in sharedContext.',
+    }),
+    requiredCapability: Type.Unsafe<Static<typeof ModelCapabilityLevelSchema>>({
+      ...ModelCapabilityLevelSchema,
+      description:
+        'Lowest model capability sufficient for this task: light, standard, or strong.',
+    }),
+    agentCount: Type.Integer({
+      minimum: 1,
+      maximum: MAX_SWARM_AGENTS,
+      description:
+        'Number of independent replicas for this task. Use multiple replicas for cross-model verification.',
+    }),
   },
   { additionalProperties: false },
 )
@@ -20,9 +39,17 @@ export type SwarmTask = Static<typeof SwarmTaskSchema>
 
 export const SwarmRunArgsSchema = Type.Object(
   {
+    sharedContext: Type.String({
+      minLength: 1,
+      maxLength: MAX_SWARM_SHARED_CONTEXT_LENGTH,
+      description:
+        'Common background injected into every child Agent. Include relevant verification commands, exit codes, and concise key output; explicitly state when verification could not be run.',
+    }),
     tasks: Type.Array(SwarmTaskSchema, {
       minItems: 1,
       maxItems: MAX_SWARM_AGENTS,
+      description:
+        'Independent read-only assignments. The total of all agentCount values must stay within the per-Job Agent limit.',
     }),
   },
   { additionalProperties: false },

@@ -66,6 +66,8 @@ describe('ApprovalCard', () => {
       ...overlay.approval!,
       tool: 'swarm_run',
       args: {
+        sharedContext:
+          'npm run check\nexitCode: 0\nAll deterministic checks passed.',
         tasks: [
           {
             name: 'Architecture review',
@@ -94,6 +96,9 @@ describe('ApprovalCard', () => {
     )
     expect(wrapper.get('.approval-meta').text()).toContain('Agent 总数')
     expect(wrapper.get('.approval-meta').text()).toContain('3')
+    expect(wrapper.get('.swarm-approval-shared-context').text()).toContain(
+      'All deterministic checks passed.',
+    )
     expect(wrapper.findAll('.swarm-approval-tasks .n-list-item')).toHaveLength(
       2,
     )
