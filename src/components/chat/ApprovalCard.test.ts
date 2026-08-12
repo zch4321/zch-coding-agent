@@ -60,6 +60,51 @@ describe('ApprovalCard', () => {
     wrapper.unmount()
   })
 
+  it('renders a dedicated Swarm review instead of raw task JSON', () => {
+    const overlay = useAgentRuntimeStore().ensureOverlay(sessionId)
+    overlay.approval = {
+      ...overlay.approval!,
+      tool: 'swarm_run',
+      args: {
+        tasks: [
+          {
+            name: 'Architecture review',
+            task: 'Inspect module boundaries and report risks.',
+            requiredCapability: 'strong',
+            agentCount: 2,
+          },
+          {
+            name: 'Test review',
+            task: 'Inspect deterministic test coverage.',
+            requiredCapability: 'light',
+            agentCount: 1,
+          },
+        ],
+      },
+      reason: 'Run independent reviews',
+    }
+    const wrapper = mount(ApprovalCard, {
+      props: { projectName: 'timeline-project' },
+      global: { plugins: [i18n] },
+    })
+
+    expect(wrapper.get('.approval-header').text()).toContain('启动 Swarm')
+    expect(wrapper.get('.swarm-approval-warning').text()).toContain(
+      '额外的模型请求和费用',
+    )
+    expect(wrapper.get('.approval-meta').text()).toContain('Agent 总数')
+    expect(wrapper.get('.approval-meta').text()).toContain('3')
+    expect(wrapper.findAll('.swarm-approval-tasks .n-list-item')).toHaveLength(
+      2,
+    )
+    expect(wrapper.get('.swarm-approval-tasks').text()).toContain(
+      'Architecture review',
+    )
+    expect(wrapper.get('.swarm-approval-tasks').text()).toContain('强')
+    expect(wrapper.find('.approval-args').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('removes the current card after the serial approval is accepted', async () => {
     const decideApproval = vi.fn(async () => ({
       version: 1 as const,

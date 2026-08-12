@@ -756,7 +756,7 @@ export class SessionToolRunner {
   ): boolean {
     if (run.allowedToolIds && !run.allowedToolIds.has(toolId)) return false
     if (toolId === 'subagent_run' && !run.subagentsEnabled) return false
-    if (toolId === 'swarm_run' && !run.swarmCapability) return false
+    if (toolId === 'swarm_run' && !run.swarmToolConfig) return false
     if (
       !session.gitToolsEnabled &&
       (toolId === 'git_status' ||

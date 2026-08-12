@@ -1,6 +1,6 @@
 # Subagent 与 Swarm Roadmap
 
-> 状态：P13 已完成 S1 · Subagent Execution Foundation、S2 · Generic `subagent_run`、S3 · Model Pool 与 S4 · Desktop Swarm。当前进入 S5 hardening；Headless 明确不暴露 Swarm capability。ProjectModel/Serena/code intelligence 已临时关闭，其 SQLite 迁移排在 S5 完成之后。
+> 状态：P13 已完成 S1 · Subagent Execution Foundation、S2 · Generic `subagent_run`、S3 · Model Pool 与 S4 · Desktop Swarm。当前进入 S5 hardening；Headless 明确不暴露普通 Swarm Tool。ProjectModel/Serena/code intelligence 已临时关闭，其 SQLite 迁移排在 S5 完成之后。
 >
 > 已实现的稳定契约见 [`architecture.md`](./architecture.md) 与 [`requirements.md`](./requirements.md)。本文只保留尚未完成的演进方向，避免同时维护两套事实来源。
 
@@ -63,7 +63,7 @@ P13 已提供默认关闭的单子 Agent 能力：
 - 同页 Subagent 设置提供 `maxAgentsPerSwarm`，默认 10、范围 1–32；它限制单次 Swarm 创建的 child Agent 总数，不等同于同时运行数。`limits.maxConcurrentRuns` 继续限制全应用同时 active 的 Run，且主 Run 自身占一个 slot。
 - Renderer 使用独立模型池 store 保存草稿，并通过单次完整数组请求校验 Provider、credential binding、模型、能力标注和 revision；无效配置不能部分生效。Provider 编辑导致持久化 entry 自动禁用时不会静默覆盖 dirty 草稿。
 - UI 明确提示每个模型会读取当前 workspace 内容并产生额外 Provider 请求；执行时冻结的 pool digest、assignment、Provider revision 和安全 route snapshot 保存在 durable Job/child execution 中，凭据只存在于 backend 内存。
-- Runtime Identity v5 显式记录宿主是否支持 Swarm。当前生成 identity artifact 的 Headless 保持外部 config v4 且 `swarmsEnabled = false`；Desktop 直接支持 Run-scoped Swarm，因此不需要把 Desktop Job assignment 混入 Headless artifact identity。
+- Runtime Identity v5 显式记录宿主是否支持 Swarm。当前生成 identity artifact 的 Headless 保持外部 config v4 且 `swarmsEnabled = false`；Desktop 直接支持普通 Swarm Tool，因此不需要把 Desktop Job assignment 混入 Headless artifact identity。
 
 ### 2.5 验收
 
@@ -74,11 +74,11 @@ P13 已提供默认关闭的单子 Agent 能力：
 
 上述 allocator/freezer、配置/UI、prepared execution 与冻结后配置热变更均已有回归覆盖，S3 已完成。
 
-## 3. S4 · `/swarm` 与 `swarm_run`（Desktop 已完成）
+## 3. S4 · 普通 `swarm_run` Tool（Desktop 已完成）
 
 ### 3.1 产品语义
 
-`/swarm <目标>` 为当前 Run 创建一次性 orchestration capability。只有持有该 capability 的主 Agent 才能看到和调用 `swarm_run`；历史消息、普通 Run 和子 Agent 不能继承或重放它。
+满足运行条件的 Desktop 主 Run 会把 `swarm_run` 作为普通 Tool 暴露给 Provider；`/swarm <目标>` 只保留为用户显式请求 Swarm 的编排快捷命令，不再授予一次性 capability。普通消息可以使用该工具，历史重放、子 Agent 和 Headless 仍不能继承或伪造它。Tool description 要求用户未明确提出 Swarm、多 Agent、并行调查或独立交叉检查时不得主动调用；每次调用使用 review risk 进入人工审批，包括 YOLO 模式。
 
 `swarm_run` 接收一组具名、自包含的只读调查任务。主 Agent 负责拆分任务；Backend 负责校验、冻结 assignment、排队、取消和聚合结果。SwarmCoordinator 直接调用 backend-private `PreparedSubagentExecutionPort.runPrepared`，不通过循环调用公开 `subagent_run` Tool，也不允许 child 获得递归编排能力。
 
@@ -98,7 +98,7 @@ swarm_run({
 ```
 
 - `requiredCapability` 必填且只允许 `light | standard | strong`，Backend 不根据任务文本、模型名或价格猜测能力。
-- `agentCount` 必须为 `1..frozenMaxAgentsPerSwarm`。Provider 可见的 `swarm_run` schema 在 `/swarm` Run 启动时按当时的 `subagents.maxAgentsPerSwarm` 生成，因此 JSON Schema 的 `maximum` 会直接显示用户设置；设置变化从下一次 `/swarm` Run 生效，不能改写 active Run 已看到的工具契约。
+- `agentCount` 必须为 `1..frozenMaxAgentsPerSwarm`。Provider 可见的 `swarm_run` schema 在普通主 Run 启动时按当时的 `subagents.maxAgentsPerSwarm` 生成，因此 JSON Schema 的 `maximum` 会直接显示用户设置；设置变化从下一次 Run 生效，不能改写 active Run 已看到的工具契约。
 - 多个 task 的 `agentCount` 总和也不得超过同一冻结上限。JSON Schema 无法表达跨数组元素求和，Backend 必须在创建 Job 前再次校验并整体拒绝超限输入；XML tag 只可作为冗余提示，不能成为权限或上限的权威来源。
 - Tool description 偏好每个 task 默认使用 1 个 Agent；只有需要独立交叉验证、不同调查视角或高风险复核时才增加数量，并选择足以完成任务的最低 `requiredCapability`，不能因为上限较大就主动占满。
 
@@ -124,7 +124,7 @@ Swarm 结果使用稳定的扁平 `results[] + meta` 契约：
 
 ### 3.4 验收
 
-- 未启用、非 `/swarm` Run 与 capability 重放均在 Provider/Tool 执行前被拒绝。同一父 Run 可多次调用但 Job 严格串行；同一 call ID 和相同参数可幂等复用，参数不同明确冲突。
+- 未启用、运行条件不足、child/Headless 调用与普通 catalog 之外的伪造调用均在 Provider/Tool 执行前被拒绝。所有权限模式逐次展示专用 Swarm 审批卡；同一父 Run 可多次调用但 Job 严格串行，同一 call ID 和相同参数可幂等复用，参数不同明确冲突。
 - 十个只读 Agent 可在有界并发下完成，主 Session 只出现一个 Swarm Tool call/result 和最终 Assistant 回复。
 - 所有 Agent 绑定相同 canonical workspace；部分失败保留成功结果，全部失败返回明确 Tool error。
 - Renderer reload 不暴露隐藏 Session，也不影响后台 Job 收敛。

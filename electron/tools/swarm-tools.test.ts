@@ -1,19 +1,49 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { PermissionMode } from '../../shared/config'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
+import { evaluatePolicy } from '../permission/policy-engine'
 import { ToolRegistry } from './tool-registry'
 import { registerSwarmTools } from './swarm-tools'
 
 describe('swarm_run Tool', () => {
-  it('registers a serial, Run-scoped Job without a fixed Tool timeout', () => {
+  it('registers a serial, review-risk Job without a fixed Tool timeout', () => {
     const registry = new ToolRegistry()
     registerSwarmTools(registry, { run: vi.fn() })
     const definition = registry.get('swarm_run')!
 
     expect(definition.executionMode).toBe('serial')
+    expect(definition.defaultRisk).toBe('review')
     expect(definition.defaultTimeoutMs).toBeNull()
+    expect(definition.description).toContain('user explicitly requests')
+    expect(definition.description).toContain(
+      'Every call requires user approval',
+    )
     expect(definition.description).toContain('self-contained')
     expect(definition.description).toContain('strictly serially')
   })
+
+  it.each<PermissionMode>(['readonly', 'auto', 'confirm', 'yolo'])(
+    'requires human review in %s mode',
+    (mode) => {
+      const registry = new ToolRegistry()
+      registerSwarmTools(registry, { run: vi.fn() })
+      const definition = registry.get('swarm_run')!
+
+      expect(
+        evaluatePolicy({
+          mode,
+          definition,
+          effectiveRisk: definition.defaultRisk,
+          policySignals: [],
+          rememberedRules: [],
+          builtinPolicies: true,
+          workspace: 'F:\\workspace\\fixture',
+          args: { tasks: [] },
+          callId: 'call:swarm-review' as CallId,
+        }).kind,
+      ).toBe('review')
+    },
+  )
 
   it('forwards ordered task declarations and parent cancellation identity', async () => {
     const run = vi.fn(async () => ({

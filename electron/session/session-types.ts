@@ -125,8 +125,8 @@ export interface RunInterjection {
   injectedAfterToolBatchId?: string
 }
 
-export interface SwarmRunCapability {
-  goal: string
+export interface SwarmToolConfiguration {
+  goal?: string
   maxAgentsPerJob: number
 }
 
@@ -162,7 +162,7 @@ export interface ActiveRun {
     approval?: ResolvedModelRoute
   }
   subagentsEnabled: boolean
-  swarmCapability?: SwarmRunCapability
+  swarmToolConfig?: SwarmToolConfiguration
   allowedToolIds?: Set<string>
   directUserInput: boolean
 }

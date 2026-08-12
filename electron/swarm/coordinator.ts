@@ -78,6 +78,17 @@ function displayChildName(task: SwarmTask, agentIndex: number): string {
   )}${suffix}`
 }
 
+function displayRootName(
+  goal: string | undefined,
+  tasks: readonly SwarmTask[],
+): string {
+  const firstTask = tasks[0]?.name ?? 'Swarm'
+  const label =
+    goal?.trim() ||
+    (tasks.length === 1 ? firstTask : `${firstTask} +${tasks.length - 1}`)
+  return unicodeSlice(`Swarm · ${label}`, MAX_SWARM_TASK_NAME_LENGTH) || 'Swarm'
+}
+
 function normalizeArgs(args: SwarmRunArgs, maximum: number): SwarmRunArgs {
   const names = new Set<string>()
   let total = 0
@@ -342,9 +353,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     const root: SubagentExecutionRecord = {
       id: rootId,
       kind: 'swarm',
-      name:
-        unicodeSlice(`Swarm · ${context.goal}`, MAX_SWARM_TASK_NAME_LENGTH) ||
-        'Swarm',
+      name: displayRootName(context.goal, args.tasks),
       parentSessionId: parent.sessionId,
       parentRunId: parent.runId,
       parentCallId: parent.callId,

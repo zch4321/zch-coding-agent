@@ -3,7 +3,7 @@ import { SwarmRunArgsSchema, type SwarmRunArgs } from '../../shared/swarm'
 import type { SwarmExecutionPort } from '../swarm/contracts'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
 
-/** Registers the Run-scoped, model-pool Swarm orchestration Tool. */
+/** Registers the model-pool Swarm orchestration Tool for eligible public Runs. */
 export function registerSwarmTools(
   registry: ToolRegistrationPort,
   execution: SwarmExecutionPort,
@@ -11,11 +11,11 @@ export function registerSwarmTools(
   registry.registerTool({
     id: 'swarm_run',
     description:
-      'Run one read-only model-pool Swarm Job. Provide self-contained tasks because child Agents receive no parent history. Prefer one swarm_run call per assistant turn: multiple Swarm Jobs owned by the same parent Run execute strictly serially and can take a long time. Use agentCount 1 by default, increase it only for independent cross-checking, and request the lowest capability that can complete each task.',
+      'Run one read-only model-pool Swarm Job. Call this only when the user explicitly requests a Swarm, multiple Agents, parallel investigation, or independent cross-checking; do not invoke it merely because a task is complex. Every call requires user approval. Provide self-contained tasks because child Agents receive no parent history. Prefer one swarm_run call per assistant turn: multiple Swarm Jobs owned by the same parent Run execute strictly serially and can take a long time. Use agentCount 1 by default, increase it only for independent cross-checking, and request the lowest capability that can complete each task.',
     inputSchema: SwarmRunArgsSchema,
     executionMode: 'serial',
     effects: [],
-    defaultRisk: 'low',
+    defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: null,
     maxOutputBytes: 2_000_000,

@@ -815,11 +815,11 @@ export class SessionManager {
     })
   }
 
-  /** Returns the Run-scoped Swarm capability after validating its live parent. */
+  /** Returns the frozen Swarm limits and optional slash-command goal for a live parent Run. */
   frozenSwarmContext(
     sessionId: SessionId,
     runId: RunId,
-  ): { goal: string; maxAgentsPerJob: number } {
+  ): { goal?: string; maxAgentsPerJob: number } {
     const session = this.#sessions.get(sessionId)
     const run = session?.activeRun
     if (
@@ -828,14 +828,14 @@ export class SessionManager {
       session.visibility !== 'public' ||
       !run ||
       run.runId !== runId ||
-      !run.swarmCapability
+      !run.swarmToolConfig
     ) {
       throw new SubagentRuntimeError(
         'SWARM_NOT_AVAILABLE',
         'Swarm is not available in this Run',
       )
     }
-    return structuredClone(run.swarmCapability)
+    return structuredClone(run.swarmToolConfig)
   }
 
   /** Starts one internal Run with a plain user input and exact inherited routes. */

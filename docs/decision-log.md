@@ -196,3 +196,11 @@
 - 并发边界：普通 Run 与 `subagent_run` 保持 fail-fast；只有 prepared Swarm child 在全局 Run coordinator 上 FIFO 等待空闲 slot，取得 slot 后才创建 hidden Session 并启动 worker timeout。父 Run 占一个 slot。同一父 Run 的多个 Swarm Job 严格串行，不同父 Run 可以并发；取消与应用退出同时覆盖 queued/active child。
 - 结果边界：replica 逐项、按声明顺序进入扁平 `results[]`，父 Agent 自行聚合。部分失败保留兄弟成功结果，不自动重试或换 Provider；全部失败返回 Tool error。2 MB 上限通过公平截断成功文本收敛，不能删除结果项，也不能暴露 reasoning、凭据、child Session 或完整工具轨迹。
 - 界面边界：Agents artifact 使用手动两级 `NCollapse` 展示 Job → Agent，活跃徽标只计 leaf Agent。详情仅展示统计与可见 Assistant 消息，不自动展开、不复制主时间线，也不提供 child 会话导航。
+
+## 2026-08-12 — Swarm 改为普通 Tool，并在所有权限模式逐次人工审批
+
+- 状态：已采纳；本条取代 2026-08-09 决策中的 Run-scoped capability 边界，持久化、并发、结果与 Agents artifact 边界保持不变。
+- Tool 可见性：满足 Desktop host、Subagent 开关、至少两个全局 Run slot 和 enabled 模型池 route 的普通主 Run 都能看到 `swarm_run`。`/swarm <goal>` 仅作为显式请求与目标编排快捷命令，不再授予特殊 capability；child、历史重放和 Headless 继续被 catalog/executor 双重拒绝。
+- 使用约束：Tool description 明确要求只有用户已提出 Swarm、多 Agent、并行调查或独立交叉检查时才能调用，不能仅因任务复杂自行启动。工具保持只读 effects，但 `defaultRisk = review`；当前策略引擎因此在 readonly、auto、confirm 与 YOLO 中都请求人工审批，不经过自动审批模型，也不支持记忆批准。
+- 审批界面：一次审批绑定完整 `swarm_run` 参数并覆盖整个 Job，不逐 child 弹卡。专用卡显示任务与 Agent 总数、每项名称/正文/能力/副本数，并提示额外 Provider 请求和费用；参数异常时回退到安全原始 JSON，不能因 Renderer 投影失败而隐去审批信息。
+- 理由：普通 Tool 比一次性 slash capability 更符合模型原生工具编排，也允许用户用自然语言明确要求 Swarm；强提示减少误调用，逐次人工审批则在模型仍误判时保留成本与调度控制。YOLO 继续审批是刻意接受的简单语义，避免为单个工具扩展额外权限策略枚举。

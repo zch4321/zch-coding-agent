@@ -291,8 +291,18 @@ test.describe('Electron Agents activity panel', () => {
 
     await page
       .locator('.message-input-area textarea')
-      .fill('/swarm Review the repository independently')
+      .fill('Use a Swarm to review the repository independently')
     await page.getByRole('button', { name: '发送消息' }).click()
+    const approval = page.locator('.approval-card')
+    await expect(approval).toContainText('启动 Swarm')
+    await expect(approval).toContainText('Agent 总数')
+    await expect(approval).toContainText('review')
+    await expect(
+      approval.locator('.swarm-approval-tasks .n-list-item'),
+    ).toHaveCount(1)
+    await expect.poll(() => fakeProvider.requests.length).toBe(1)
+    await approval.getByRole('button', { name: '批准', exact: true }).click()
+    await expect(approval).toHaveCount(0)
     await expect.poll(() => fakeProvider.requests.length).toBe(3)
 
     await openAgentsTab(page)

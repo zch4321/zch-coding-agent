@@ -14,6 +14,7 @@ import {
 import type { SessionOrchestratorMessages } from './session-orchestrator-messages'
 import { resolveSlashCommand } from './slash-commands'
 import type { ActiveRun, AgentEventDraft, SessionState } from './session-types'
+import { resolveSwarmAvailability } from './session-swarm-availability'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 
 export interface PreparedUserTurn {
@@ -77,29 +78,21 @@ export class SessionUserTurnPreparer {
       skillsManager: this.#skillsManager,
       promptRegistry: this.#promptRegistry,
     })
-    if (command.swarmGoal) {
-      if (!this.#swarmHostEnabled) {
-        throw new Error('Swarm is not available in this runtime host.')
-      }
-      if (!config.subagents.enabled) {
-        throw new Error('Subagents must be enabled before starting a Swarm.')
-      }
-      if (config.limits.maxConcurrentRuns < 2) {
-        throw new Error('Swarm requires maxConcurrentRuns to be at least 2.')
-      }
-      if (!config.modelPool.entries.some((entry) => entry.enabled)) {
-        throw new Error('Swarm requires at least one enabled model-pool route.')
-      }
-      run.swarmCapability = {
-        goal: command.swarmGoal,
-        maxAgentsPerJob: config.subagents.maxAgentsPerSwarm,
-      }
+    const swarm = resolveSwarmAvailability({
+      hostEnabled: this.#swarmHostEnabled,
+      runSubagentsEnabled: run.subagentsEnabled,
+      config,
+      requestedGoal: command.swarmGoal,
+    })
+    run.swarmToolConfig = swarm.toolConfig
+    if (command.swarmGoal && swarm.unavailableReason) {
+      throw new Error(swarm.unavailableReason)
     }
     const toolCatalog = await resolveSessionToolCatalog({
       registry: this.#toolRegistry,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
-      swarmMaxAgents: run.swarmCapability?.maxAgentsPerJob,
+      swarmMaxAgents: run.swarmToolConfig?.maxAgentsPerJob,
       gitToolsEnabled: session.gitToolsEnabled,
     })
     await appendRuntimeContextIfChanged(session, {

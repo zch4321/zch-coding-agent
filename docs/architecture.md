@@ -1658,7 +1658,7 @@ subagents: {
 }
 ```
 
-新安装 `maxConcurrentRuns` 默认为 16、schema 范围保持 `1..32`；v12→v13 迁移保留已有用户值。父 Run 自身也占全局 slot，因此上限为 1 时明确拒绝嵌套执行。`maxAgentsPerSwarm` 限制单个 Swarm Job 创建的 child Agent 总数，和同时 active 的 Run 数是两个独立边界；v13–v18→v19 迁移写入默认值 10。Agents 设置页使用现有自动保存机制配置开关、timeout 和该 Job 上限，并提示额外 Provider 请求/费用与当前全局并发值。Headless config v3 引入开关与 timeout；v4 迁移 v1–v3 并删除退役的 Run 工具结果预算，暂不暴露 `maxAgentsPerSwarm`，构造临时内部 AppConfig 时使用默认值。Runtime Identity v5 增加 `swarmsEnabled` 宿主能力位；当前只生成该 artifact 的 Headless 固定为 `false`，Desktop runtime 则直接启用 Run-scoped Swarm。
+新安装 `maxConcurrentRuns` 默认为 16、schema 范围保持 `1..32`；v12→v13 迁移保留已有用户值。父 Run 自身也占全局 slot，因此上限为 1 时明确拒绝嵌套执行。`maxAgentsPerSwarm` 限制单个 Swarm Job 创建的 child Agent 总数，和同时 active 的 Run 数是两个独立边界；v13–v18→v19 迁移写入默认值 10。Agents 设置页使用现有自动保存机制配置开关、timeout 和该 Job 上限，并提示额外 Provider 请求/费用与当前全局并发值。Headless config v3 引入开关与 timeout；v4 迁移 v1–v3 并删除退役的 Run 工具结果预算，暂不暴露 `maxAgentsPerSwarm`，构造临时内部 AppConfig 时使用默认值。Runtime Identity v5 增加 `swarmsEnabled` 宿主能力位；当前只生成该 artifact 的 Headless 固定为 `false`，Desktop runtime 则直接支持普通 Swarm Tool。
 
 内部成功结果为 `{ results: { [name]: finalAssistantText }, meta }`；`meta` 只包含耗时、实际 `providerId/model`、标准化 usage 汇总和模型是否因输出上限截断。reasoning、endpoint、凭据、child Session ID、trace 路径和临时绝对路径不能回传。进入父模型历史时 `subagent_run` projector 只保留 `results[name]` 最终文本，输出上限截断时追加短尾注；Provider/model/usage 留在内部 meta 和统计。只有 reasoning 或缺少最终 assistant text 时明确失败；长度上限结束则保留已有文本并标记 `truncated`。
 
@@ -1666,7 +1666,9 @@ child stream/tool/domain event 不发布给 Renderer，也不创建独立 trace 
 
 ### 18.5 Desktop Swarm Job 与模型池调度
 
-`/swarm <goal>` 只为本次 Desktop Run 冻结 Swarm capability。启动前要求 Subagent 已启用、全局 Run 上限至少为 2，并且模型池至少有一条可用 route；普通消息、历史重放、child Run 和 Headless 不获得该 capability。只有带 capability 的主 Run catalog 才包含 `swarm_run`，executor 对伪造调用执行同一检查。Provider 可见 schema 按 Run 开始时的 `maxAgentsPerSwarm` 克隆并收窄 `tasks.maxItems` 与 `agentCount.maximum`，Backend 在创建 Job 前再次校验所有 `agentCount` 的总和。
+`swarm_run` 是满足运行条件的 Desktop 主 Run 的普通 Tool：Subagent 必须已启用、全局 Run 上限至少为 2，并且模型池至少有一条 enabled route。普通用户消息也能获得该工具；`/swarm <goal>` 仅作为显式请求与目标编排快捷命令，不再授予特殊 capability。child Run、历史重放和 Headless 仍不获得该工具，catalog 与 executor 对伪造调用执行相同检查。Provider 可见 schema 按 Run 开始时的 `maxAgentsPerSwarm` 克隆并收窄 `tasks.maxItems` 与 `agentCount.maximum`，Backend 在创建 Job 前再次校验所有 `agentCount` 的总和。
+
+Tool description 明确要求只有用户已经提出 Swarm、多 Agent、并行调查或独立交叉检查时才能调用，不能仅因任务复杂而自行启动。`swarm_run` 保持无工作区副作用但使用 `defaultRisk = review`，因此 readonly、auto、confirm 与 YOLO 都逐次进入人工审批，不经过自动审批模型，也不能记忆批准。专用审批卡展示任务数、Agent 总数、每项任务正文、能力等级和副本数，并提示额外 Provider 请求与费用；一次批准绑定完整 Tool 参数，而不是逐 child 审批。
 
 `swarm_run({ tasks })` 是 serial Tool；每项 task 提供唯一安全名称、自包含任务、`light|standard|strong` 最低能力和 replica 数量。Coordinator 从一次 PublicConfig 快照确定性分配并冻结全部 route，再在一个 SQLite transaction 中创建 Swarm root 和所有 queued child。assignment 失败、配置 revision 竞态或总量超限都发生在任何 child Provider 请求之前；冻结后配置热变更不重分配，失败 child 也不自动切换 Provider 重试。
 
@@ -1761,7 +1763,7 @@ P0–P13 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路�
 
 P11 Provider Runtime Foundation 与 P12 Generic Responses/Anthropic 已完成。Main 与 auto approver 使用扁平 `ModelProvider.compile/stream`，compact 使用同一实现上的 `compileCompact/compact`；生产实现为互不继承的 `deepseek.chat-completions`、`generic.chat-completions`、`generic.responses` 与 `generic.anthropic`。配置、route、continuation 和 compact envelope 统一使用 `providerType`；Google 和具体厂商实现继续按实际使用需求独立增加。
 
-P13 Read-only Subagent Runtime 的 S1–S4 已完成。默认关闭的 `subagent_run({ name, task })` 复用唯一 Session/Run/Provider loop，以隐藏 readonly Session 直接读取父 Run 的 live workspace；task 是不含父历史的普通 user input。Tool catalog/executor 双重限制只读能力；通用 Tool scheduler 允许同批多个 Subagent 与其他 parallel Tool 并发执行，并按原 call 顺序提交结果。S3 Model Pool 已完成配置、Agents 设置、allocator/freezer 与 prepared execution 接入。S4 Desktop Swarm 通过 Run-scoped `/swarm` capability、`swarm_run` serial Tool、SQLite root/child execution、全局 FIFO child slot 和两级 Agents artifact 完成有界批量委派；Headless Runtime Identity 明确声明不支持 Swarm。递归委派、自定义 child 工具列表、取消 UI 和完整 child transcript 仍未实现。ProjectModel/Serena/code intelligence 已从生产装配、工具、IPC 可用路径和 Renderer 入口关闭；其 SQLite 迁移及重新启用排在 S5 hardening 之后。
+P13 Read-only Subagent Runtime 的 S1–S4 已完成。默认关闭的 `subagent_run({ name, task })` 复用唯一 Session/Run/Provider loop，以隐藏 readonly Session 直接读取父 Run 的 live workspace；task 是不含父历史的普通 user input。Tool catalog/executor 双重限制只读能力；通用 Tool scheduler 允许同批多个 Subagent 与其他 parallel Tool 并发执行，并按原 call 顺序提交结果。S3 Model Pool 已完成配置、Agents 设置、allocator/freezer 与 prepared execution 接入。S4 Desktop Swarm 通过普通但逐次人工审批的 `swarm_run` serial Tool、SQLite root/child execution、全局 FIFO child slot 和两级 Agents artifact 完成有界批量委派；`/swarm` 只保留为显式编排快捷命令，Headless Runtime Identity 明确声明不支持 Swarm。递归委派、自定义 child 工具列表、取消 UI 和完整 child transcript 仍未实现。ProjectModel/Serena/code intelligence 已从生产装配、工具、IPC 可用路径和 Renderer 入口关闭；其 SQLite 迁移及重新启用排在 S5 hardening 之后。
 
 Tool Result projection 已统一进入生产主链：完整内部 `ToolResult` 只供安全、trace 和插件使用，模型历史与 `tool.completed` 使用 `model-content.v1` canonical parts。文本密集型内置工具输出紧凑正文，结构化工具保留 JSON value；Chat Completions、Responses 与 Anthropic 共用无 part 外壳的 renderer。旧 active Tool Result 不迁移并明确拒绝续聊。
 
