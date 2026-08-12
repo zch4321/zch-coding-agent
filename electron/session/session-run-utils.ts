@@ -1,6 +1,5 @@
 import type { RunStatus, ToolResultEnvelope } from '../../shared/agent-events'
 import type { ToolResult } from '../tools/types'
-import { ContextBudgetError } from '../tools/context-budget'
 import type { ModelProfile } from '../providers/model-catalog'
 
 /** Resolves after the requested number of milliseconds. */
@@ -62,19 +61,11 @@ export function modelOutputTokenLimit(
   )
 }
 
-/** Computes the usable prompt budget after reserving the model's output allowance. */
+/** Computes the advisory prompt budget after reserving the model's output allowance. */
 export function modelPromptBudget(
   model: Pick<ModelProfile, 'contextWindowTokens' | 'maxOutputTokens'>,
 ): number {
   const contextWindow = model.contextWindowTokens
   const outputReserve = modelOutputTokenLimit(model)
-  const budget = contextWindow - outputReserve
-
-  if (budget < 1_024) {
-    throw new ContextBudgetError(
-      'Model output reserve leaves no usable prompt budget',
-    )
-  }
-
-  return budget
+  return Math.max(0, contextWindow - outputReserve)
 }

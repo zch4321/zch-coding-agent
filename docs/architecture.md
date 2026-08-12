@@ -1030,10 +1030,10 @@ Tool/approval 的实时卡片来自 runtime event；完成后 renderer 从 assis
 自动 compact 只由刚完成响应的 Provider usage 驱动，不用本地 token 估算值决定是否触发：
 
 1. Provider 未返回 `totalTokens`，且也没有完整的 `promptTokens + completionTokens` 时，本次不主动压缩。
-2. usage 达到或超过冻结模型的 `contextWindowTokens` 时直接以 context budget error 结束；不得先赌一次压缩。
+2. Provider 已成功返回时，其响应是否适配上下文窗口具有最终权威；usage 达到或超过冻结模型的 `contextWindowTokens` 时保留完整 assistant turn，并按达到压缩阈值处理，不得因本地 profile 拒绝或回滚这次成功响应。
 3. usage 达到 `compactThresholdTokens` 且响应包含 tool calls 时，先执行并原子提交完整 tool-result batch，再把包含这些结果的 active history 一起压缩。
 4. usage 达到阈值且响应是本轮 final answer 时，不在回答结束后后台启动请求；下一次普通用户 Run 在插入新 user message **之前**先压缩旧历史。若应用编排要求同一 Run 继续，则在 continuation 前立即压缩。
-5. 本地估算只保留为 Provider 调用前不可关闭的硬 preflight，防止明显超出目标模型 prompt budget；它不触发主动压缩。
+5. 本地估算只记录为 prompt trace 与诊断信息，并继续用于工具、附件等有界输出投影；它既不触发主动压缩，也不得成为普通、压缩或历史转换 Provider 请求的硬门。真实上下文超限由 Provider 拒绝。
 
 压缩调用以完整 active history 为输入；Synthetic compact 由 `compileCompact()` 将编排指令放在最后一个 wire input，原生 compact 使用协议专用字段。Synthetic compact 只有 terminal `finishReason = completed` 才能形成 checkpoint；截断、内容过滤、拒绝和未知终止都 fail closed。截断最多从同一完整 source history 追加更短摘要约束后纠正重试一次；网络、timeout、rate-limit 与 5xx 最多重试两次，完整但非法的响应最多重试一次，总调用数不超过三次。鉴权、计费、输入超窗、过滤/拒绝和取消不重试；`Retry-After` 等待有 60 秒上限且可被 Run abort。原生端点明确不支持或返回完整但不符合原生 checkpoint 契约的响应时，立即切换到拥有独立重试预算的 synthetic 请求。每次尝试及降级请求使用独立 trace call ID，失败尝试的文本 delta 不进入 Renderer；手动命令的 durable journal 只写一次。
 

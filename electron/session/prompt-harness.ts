@@ -10,7 +10,7 @@ import type { CanonicalPromptKind, MessageRecord } from '../../shared/message'
 import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 import type { ProviderToolDefinition } from '../providers/provider'
-import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
+import { estimateJsonTokens } from '../tools/context-budget'
 import { commandShellService } from '../process/command-shell'
 import {
   formatAgentsInstructions,
@@ -655,7 +655,7 @@ export async function appendAgentsContextIfChanged(
   return true
 }
 
-/** Selects history and tool context under the prompt-token budget while preserving required layers. */
+/** Selects all active history and records an advisory prompt-token estimate. */
 export function selectPromptMessages(options: {
   state: PromptHistoryState
   tools: ProviderToolDefinition[]
@@ -669,12 +669,6 @@ export function selectPromptMessages(options: {
     { messages, tools: options.tools },
     options.estimation,
   )
-
-  if (estimatedTokens > options.maxPromptTokens) {
-    throw new ContextBudgetError(
-      'The active canonical history exceeds the model context budget',
-    )
-  }
 
   const layers = messages.flatMap((record) => {
     const layer =

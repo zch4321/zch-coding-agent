@@ -21,10 +21,9 @@ import {
 import { createConfiguredProvider } from '../providers/provider-factory'
 import { normalizeLlmUsage } from '../providers/usage'
 import type { SkillsManager } from '../skills/manager'
-import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { id, redactJsonSecrets, toJsonValue } from './session-common'
-import { modelOutputTokenLimit, modelPromptBudget } from './session-run-utils'
+import { modelOutputTokenLimit } from './session-run-utils'
 import type {
   ActiveRun,
   AgentEventDraft,
@@ -229,11 +228,6 @@ export class SessionCompactCoordinator {
     if (!profile) throw new Error('Run model routes were not resolved')
     const contextTokens = authoritativeContextTokens(usage)
     if (contextTokens === undefined) return 'none'
-    if (contextTokens >= profile.contextWindowTokens) {
-      throw new ContextBudgetError(
-        'Provider usage reached or exceeded the model context window',
-      )
-    }
     return contextTokens >= profile.compactThresholdTokens ? 'compact' : 'none'
   }
 
@@ -505,14 +499,6 @@ export class SessionCompactCoordinator {
       if (candidate.mode !== compactMode) {
         throw new TypeError('Provider compiled a different compact mode')
       }
-      if (
-        estimateJsonTokens(candidate.request, config.limits.tokenEstimation) >
-        modelPromptBudget(binding.modelProfile)
-      ) {
-        throw new ContextBudgetError(
-          'The active history is too large for the compression route',
-        )
-      }
       return candidate
     }
     let instructions = input.promptText
@@ -693,7 +679,7 @@ export class SessionCompactCoordinator {
             derivedFromMessageId: input.derivedPayload.sourceMessageId,
           })
         : undefined
-      await this.#preflightActiveHistory(session, run)
+      await this.#validateActiveHistoryCompilation(session, run)
       if (input.commit) {
         await this.#executionState?.commit(session, {
           reason: 'compact',
@@ -758,7 +744,7 @@ export class SessionCompactCoordinator {
         sourceHash: document.sourceHash,
         contentHash: document.contentHash,
       })
-      await this.#preflightActiveHistory(session, run)
+      await this.#validateActiveHistoryCompilation(session, run)
       await this.#executionState?.commit(session, {
         reason: 'history_transition',
         deactivateThroughSeq: document.sourceThroughSeq,
@@ -832,7 +818,7 @@ export class SessionCompactCoordinator {
     })
   }
 
-  async #preflightActiveHistory(
+  async #validateActiveHistoryCompilation(
     session: SessionState,
     run: ActiveRun,
   ): Promise<void> {
@@ -854,20 +840,12 @@ export class SessionCompactCoordinator {
         this.#fetchImpl,
         binding.snapshot.endpoint,
       )
-    const compiled = provider.compile({
+    provider.compile({
       history: new MessageHistoryCompiler().compile(session.history),
       route: binding.snapshot,
       tools: catalog.definitions,
       maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
     })
-    if (
-      estimateJsonTokens(compiled.request, config.limits.tokenEstimation) >
-      modelPromptBudget(binding.modelProfile)
-    ) {
-      throw new ContextBudgetError(
-        'Rebuilt history exceeds the target model context budget',
-      )
-    }
   }
 
   async #allHistory(session: SessionState): Promise<SessionState['history']> {

@@ -814,7 +814,7 @@ describe('SessionManager compaction', () => {
     await manager.closeSession(sessionId)
   }, 10_000)
 
-  it('fails instead of compacting when Provider usage reaches the context limit', async () => {
+  it('accepts a Provider response at the configured limit and defers compaction', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'agent-context-limit-'),
     )
@@ -856,7 +856,7 @@ describe('SessionManager compaction', () => {
         ({ event }) =>
           event.type === 'run.status' &&
           event.runId === runId &&
-          event.status === 'failed',
+          event.status === 'completed',
       ),
     )
 
@@ -868,7 +868,7 @@ describe('SessionManager compaction', () => {
           event.runId === runId &&
           event.text === 'Response at the context limit',
       ),
-    ).toBe(false)
+    ).toBe(true)
     expect(
       sent.some(
         ({ event }) =>
@@ -876,6 +876,29 @@ describe('SessionManager compaction', () => {
           event.kind === 'compact-auto',
       ),
     ).toBe(false)
+
+    const nextRunId = manager.startRun({
+      sessionId,
+      message: 'Continue after the accepted response.',
+      clientRequestId: 'request:context-limit-next',
+    })
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === nextRunId &&
+          event.status === 'completed',
+      ),
+    )
+
+    expect(provider.calls).toBe(3)
+    expect(
+      sent.some(
+        ({ event }) =>
+          event.type === 'orchestrator.message' &&
+          event.kind === 'compact-auto',
+      ),
+    ).toBe(true)
     await manager.closeSession(sessionId)
   }, 10_000)
 

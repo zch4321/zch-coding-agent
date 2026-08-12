@@ -18,8 +18,8 @@ import {
   type ProviderResponseDiagnostics,
 } from '../providers/provider'
 import { normalizeLlmUsage } from '../providers/usage'
+import { estimateJsonTokens } from '../tools/context-budget'
 import type { ToolCall } from '../tools/types'
-import { ContextBudgetError, estimateJsonTokens } from '../tools/context-budget'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { id, redactJsonSecrets, toJsonValue } from './session-common'
 import {
@@ -175,6 +175,10 @@ export class SessionProviderTurnRunner {
       tools,
       maxOutputTokens: modelOutputTokenLimit(binding.modelProfile),
     })
+    selection.promptBuild.estimatedTokens = estimateJsonTokens(
+      compiled.request,
+      config.limits.tokenEstimation,
+    )
     if (session.visibility === 'public') {
       await this.#pluginBus
         ?.emit('beforeLLMCall', {
@@ -188,16 +192,6 @@ export class SessionProviderTurnRunner {
         .catch((error: unknown) =>
           this.#onDiagnostic('Plugin beforeLLMCall failed', error),
         )
-    }
-
-    const promptBudget = modelPromptBudget(binding.modelProfile)
-    if (
-      estimateJsonTokens(compiled.request, config.limits.tokenEstimation) >
-      promptBudget
-    ) {
-      throw new ContextBudgetError(
-        'The compiled provider request exceeds the model context budget',
-      )
     }
 
     const llmCallId = id<CallId>('llm')

@@ -5,7 +5,6 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import type { SessionId } from '../../shared/ids'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { PromptRegistry } from '../prompts/registry'
-import { ContextBudgetError } from '../tools/context-budget'
 import { appendUserInput } from './canonical-history'
 import {
   appendAgentsContextIfChanged,
@@ -192,7 +191,7 @@ describe('canonical prompt harness', () => {
     expect(promptResources(state).length).toBeGreaterThan(0)
   })
 
-  it('never silently drops active canonical history for budget pressure', async () => {
+  it('records budget pressure without dropping or rejecting active history', async () => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), 'prompt-budget-'))
     const state = history()
     const config = publicConfig()
@@ -208,14 +207,16 @@ describe('canonical prompt harness', () => {
       clientRequestId: 'request:large',
     })
 
-    expect(() =>
-      selectPromptMessages({
-        state,
-        tools: [],
-        maxPromptTokens: 64,
-        estimation: config.limits.tokenEstimation,
-      }),
-    ).toThrow(ContextBudgetError)
+    const selected = selectPromptMessages({
+      state,
+      tools: [],
+      maxPromptTokens: 64,
+      estimation: config.limits.tokenEstimation,
+    })
+
+    expect(selected.messages).toHaveLength(state.history.length)
+    expect(selected.promptBuild.promptBudgetTokens).toBe(64)
+    expect(selected.promptBuild.estimatedTokens).toBeGreaterThan(64)
     expect(state.history.every((record) => record.inHistory)).toBe(true)
   })
 })
