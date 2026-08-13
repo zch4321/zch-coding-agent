@@ -396,7 +396,7 @@ Files 内部使用二级 tab：
 
 ### 8.5 Project
 
-ProjectModel/Serena/code intelligence 暂停期间不显示 Project artifact tab，也不在 Renderer 中加载或编辑 ProjectModel。文件浏览仍由 Files tab 提供；普通 prompt harness 的 module marker 探测只存在于本次 runtime context，不形成 UI 状态或 workspace 文件。Desktop Swarm S5 hardening 完成后的 SQLite 迁移与 Project UI 重建见 roadmap。
+ProjectModel/Serena/code intelligence 暂停期间不显示 Project artifact tab，也不在 Renderer 中加载或编辑 ProjectModel。文件浏览仍由 Files tab 提供；普通 prompt harness 的 module marker 探测只存在于本次 runtime context，不形成 UI 状态或 workspace 文件。Swarm hardening 完成后的 SQLite 迁移与 Project UI 重建见总路线图。
 
 ---
 

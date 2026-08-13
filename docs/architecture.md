@@ -257,7 +257,7 @@ interface ProjectRecord {
 
 `path` 是 Backend 在添加项目时通过平台路径规则和 `realpath` 规范化的绝对 workspace 路径；数据库以它去重，但 Session 只保存稳定 `projectId`。目录移动或用户显式重新关联后可以更新 `path`，不能通过路径级联重写 Session。
 
-`name` 默认取目录名。ProjectModel、module 持久化和 Serena/code intelligence 当前整体关闭：生产 runtime 不装配 ProjectMetadataStore/CodeBackendManager，不读取、创建或改写 workspace 内的 `.zch/project-model.json`。普通 prompt harness 只在内存中做有界、只读的 module marker 探测。Desktop Swarm S5 hardening 完成后再把 ProjectModel 迁入 SQLite；旧 `.zch` 届时只作为一次性显式导入源，不能继续作为运行时真相源。
+`name` 默认取目录名。ProjectModel、module 持久化和 Serena/code intelligence 当前整体关闭：生产 runtime 不装配 ProjectMetadataStore/CodeBackendManager，不读取、创建或改写 workspace 内的 `.zch/project-model.json`。普通 prompt harness 只在内存中做有界、只读的 module marker 探测。总路线图中的 Swarm hardening 完成后再把 ProjectModel 迁入 SQLite；旧 `.zch` 届时只作为一次性显式导入源，不能继续作为运行时真相源。
 
 ### 5.2 SessionRecord
 
@@ -591,7 +591,7 @@ interface CompletedAssistantTurn {
 | assistant text                             | `assistant` message           | output `message` item                    | `assistant` text block                      |
 | assistant `tool_call` part                 | `assistant.tool_calls[]`      | `function_call` item                     | assistant `tool_use` block                  |
 | one or more adjacent `tool_result` records | one `tool` message per result | one `function_call_output` item per call | one `user` message with result blocks first |
-| native compact checkpoint                  | n/a                           | opaque `compaction` output items          | assistant `compaction` block                 |
+| native compact checkpoint                  | n/a                           | opaque `compaction` output items         | assistant `compaction` block                |
 
 `role` 只是部分 wire 协议的字段，不是 canonical database field。OpenAI 官方把 Chat Completions 的基本单位称为 Message，而 Responses 使用包括 `message/function_call/function_call_output` 的 Items；Anthropic 则把 client tool result 放在 `user` message 的 `tool_result` content block 中。因此一条 MessageRecord 不要求对应一条 wire message/item。协议依据：[OpenAI Responses migration](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)、[Anthropic tool results](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)。
 
@@ -725,15 +725,15 @@ PRAGMA busy_timeout = 5000;
 
 目标持久化模型刻意保持小：
 
-| 表                    | 用途                                                     |
-| --------------------- | -------------------------------------------------------- |
-| `schema_migrations`   | 数据库 schema 迁移                                       |
-| `projects`            | Project/workspace 元数据                                 |
-| `sessions`            | Session 元数据和当前 Goal/Plan                           |
-| `messages`            | 完整、排序、可编译 Provider request 的 canonical history |
-| `file_changes`        | 文件变更与有界 revert 数据；不属于消息历史               |
+| 表                    | 用途                                                      |
+| --------------------- | --------------------------------------------------------- |
+| `schema_migrations`   | 数据库 schema 迁移                                        |
+| `projects`            | Project/workspace 元数据                                  |
+| `sessions`            | Session 元数据和当前 Goal/Plan                            |
+| `messages`            | 完整、排序、可编译 Provider request 的 canonical history  |
+| `file_changes`        | 文件变更与有界 revert 数据；不属于消息历史                |
 | `subagent_executions` | Backend-private Agent/Swarm root-child 执行状态与安全结果 |
-| `subagent_sessions`   | 隐藏 child Session 与 execution/parent 的归属关系        |
+| `subagent_sessions`   | 隐藏 child Session 与 execution/parent 的归属关系         |
 
 ### 6.3 `schema_migrations`
 
@@ -1569,7 +1569,7 @@ Trace 不记录 credentials。P3 的 trace reader 明确拒绝 v1，不提供转
 
 这些服务继续由 backend 拥有：
 
-- Project explorer 继续读取普通 workspace 文件；ProjectModel/Serena/code intelligence query 暂停，等待 Desktop Swarm S5 hardening 后的 SQLite 迁移。
+- Project explorer 继续读取普通 workspace 文件；ProjectModel/Serena/code intelligence query 暂停，等待总路线图中的 Swarm hardening 完成后迁移到 SQLite。
 - PTY process、scrollback 和 ownership 属于 LiveSessionContext；应用重启不恢复真实 PTY。
 - Skills manager 扫描、安装和启用 skill。
 - MCP manager 拥有连接、目录 revision、tool normalization 和调用。
@@ -1765,7 +1765,7 @@ P0–P13 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路�
 
 P11 Provider Runtime Foundation 与 P12 Generic Responses/Anthropic 已完成。Main 与 auto approver 使用扁平 `ModelProvider.compile/stream`，compact 使用同一实现上的 `compileCompact/compact`；生产实现为互不继承的 `deepseek.chat-completions`、`generic.chat-completions`、`generic.responses` 与 `generic.anthropic`。配置、route、continuation 和 compact envelope 统一使用 `providerType`；Google 和具体厂商实现继续按实际使用需求独立增加。
 
-P13 Read-only Subagent Runtime 的 S1–S4 已完成。默认关闭的 `subagent_run({ name, task })` 复用唯一 Session/Run/Provider loop，以隐藏 readonly Session 直接读取父 Run 的 live workspace；task 是不含父历史的普通 user input。Tool catalog/executor 双重限制只读能力；通用 Tool scheduler 允许同批多个 Subagent 与其他 parallel Tool 并发执行，并按原 call 顺序提交结果。S3 Model Pool 已完成配置、Agents 设置、allocator/freezer 与 prepared execution 接入。S4 Desktop Swarm 通过普通但逐次人工审批的 `swarm_run` serial Tool、SQLite root/child execution、全局 FIFO child slot 和两级 Agents artifact 完成有界批量委派；`/swarm` 只保留为显式编排快捷命令，Headless Runtime Identity 明确声明不支持 Swarm。递归委派、自定义 child 工具列表、取消 UI 和完整 child transcript 仍未实现。ProjectModel/Serena/code intelligence 已从生产装配、工具、IPC 可用路径和 Renderer 入口关闭；其 SQLite 迁移及重新启用排在 S5 hardening 之后。
+P13 Read-only Subagent Runtime 的 S1–S4 已完成。默认关闭的 `subagent_run({ name, task })` 复用唯一 Session/Run/Provider loop，以隐藏 readonly Session 直接读取父 Run 的 live workspace；task 是不含父历史的普通 user input。Tool catalog/executor 双重限制只读能力；通用 Tool scheduler 允许同批多个 Subagent 与其他 parallel Tool 并发执行，并按原 call 顺序提交结果。S3 Model Pool 已完成配置、Agents 设置、allocator/freezer 与 prepared execution 接入。S4 Desktop Swarm 通过普通但逐次人工审批的 `swarm_run` serial Tool、SQLite root/child execution、全局 FIFO child slot 和两级 Agents artifact 完成有界批量委派；`/swarm` 只保留为显式编排快捷命令，Headless Runtime Identity 明确声明不支持 Swarm。递归委派、自定义 child 工具列表、取消 UI 和完整 child transcript 仍未实现。ProjectModel/Serena/code intelligence 已从生产装配、工具、IPC 可用路径和 Renderer 入口关闭；其 SQLite 迁移及重新启用排在总路线图的 Swarm hardening 之后。
 
 Tool Result projection 已统一进入生产主链：完整内部 `ToolResult` 只供安全、trace 和插件使用，模型历史与 `tool.completed` 使用 `model-content.v1` canonical parts。文本密集型内置工具输出紧凑正文，结构化工具保留 JSON value；Chat Completions、Responses 与 Anthropic 共用无 part 外壳的 renderer。旧 active Tool Result 不迁移并明确拒绝续聊。
 

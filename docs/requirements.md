@@ -304,7 +304,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - `workerTimeoutMs` 默认 30 分钟、可配置 1 分钟至 24 小时。父 Run 取消、timeout、Provider failure 和应用退出都必须中断 child 并清理并发 slot；全局并发上限为 1 时启动前明确拒绝。
 - 相同 parent Session/Run/call 与参数 hash 可复用已完成结果；参数不同返回冲突。应用重启将遗留 active execution 标记为 `interrupted`，不得自动重试或恢复 stream。
 
-模型池与 Desktop Swarm 不改变上述 `subagent_run` 执行路径：普通 Subagent 仍精确继承父 route 并对全局 Run slot fail-fast。Swarm 使用独立 prepared execution 和 FIFO slot 等待；递归委派、Serena/code intelligence、自定义 child 工具列表或可继续聊天的 child Session UI 仍未实现。后续 hardening 边界见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
+模型池与 Desktop Swarm 不改变上述 `subagent_run` 执行路径：普通 Subagent 仍精确继承父 route 并对全局 Run slot fail-fast。Swarm 使用独立 prepared execution 和 FIFO slot 等待；递归委派、Serena/code intelligence、自定义 child 工具列表或可继续聊天的 child Session UI 仍未实现。后续 hardening 边界见 [`road-map.md`](./road-map.md#2-m2--swarm-hardening)。
 
 ### 2.8 Model Pool 配置与执行
 

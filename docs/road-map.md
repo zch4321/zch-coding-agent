@@ -4,9 +4,7 @@
 
 Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`backend-refactor-plan.md`](./backend-refactor-plan.md)。
 
-通用只读子 Agent、模型池、Desktop Swarm 与后续 hardening 计划见 [`subagent-swarm-roadmap.md`](./subagent-swarm-roadmap.md)。
-
-当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run`、Model Pool、逐次人工审批的普通 Desktop Swarm Tool、两级 Agents 状态视图与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一阶段先完成 Swarm hardening，再迁移 ProjectModel 到 SQLite 并恢复代码智能。
+当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run`、Model Pool、逐次人工审批的普通 Desktop Swarm Tool、两级 Agents 状态视图与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一步先增加 Run-scoped Todo List，再完成 Swarm hardening，随后迁移 ProjectModel 到 SQLite 并恢复代码智能。
 
 原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
 
@@ -14,11 +12,78 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 | 优先级 | 领域                           | 目标                                                  | 主要风险                              |
 | ------ | ------------------------------ | ----------------------------------------------------- | ------------------------------------- |
-| P2     | Provider Routing               | Session selection、Active Run route 与用途路由        | 全局 active provider 静默影响已有会话 |
+| P2     | Run Planning                   | 模型自行维护的单 Run Todo List                        | 与 Durable Plan 混淆、状态跨 Run 泄漏 |
 | P2     | Swarm Hardening                | 取消体验、压力测试、诊断与成本汇总                    | 费用失控、取消竞态与上下文膨胀        |
+| P2     | Provider Routing               | Session selection、Active Run route 与用途路由        | 全局 active provider 静默影响已有会话 |
 | P3     | Project / Code Intelligence UX | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断 | 项目元数据误改、后端不可诊断          |
 | P3     | Terminal / Command Environment | Windows Shell 自动发现及终端、命令解释器独立配置      | Shell 参数差异、路径漂移与回退语义    |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                  | 基础并发与扩展边界未稳时过早扩张      |
+
+## 1. M1 · Run-scoped Todo List（下一步）
+
+目标：提供一个通用、由模型自行维护的当前 Run 执行清单。Todo List 用于把本次回答或实现过程拆成短步骤、标记当前进展和避免遗漏；它不是需要用户批准的长期承诺。
+
+### 1.1 与 Goal / Plan 的边界
+
+- Goal 与 Plan 继续属于 Session durable metadata，可以跨多个 Run；Plan 具有 `awaiting_review | active | rejected | completed` 顶层状态、用户审阅门、continuation 和完成证据语义。
+- Todo List 属于 `ActiveRun` runtime state，只覆盖创建它的 Run。Run 完成、失败或取消后结束生命周期，下一 Run 默认从空清单开始。
+- Todo List 由模型自行创建、替换、重排和更新，不触发用户审阅，不暂停 Run，不启动自动 continuation，也不自动创建、修改或完成 Goal/Plan。
+- Goal、Plan 和 Todo List 可以同时存在。Todo List 可以细化当前 Plan item 的执行动作，但二者不做双向隐式同步。
+- Todo Tool 不修改 workspace 或外部系统，不经过普通副作用审批；catalog 与 executor 仍必须按 Run/Session ownership 校验调用。
+
+### 1.2 Runtime、Tool 与上下文
+
+- 设计一组有界的结构化 Todo Tool，至少支持读取当前清单、原子设置有序条目和更新单项状态；公开命名、完整替换还是增量更新在实现设计中确定，不能复用现有 `plan_*` 的审阅语义。
+- 第一版状态保持精简，覆盖 `pending | in_progress | completed`；是否允许多个 `in_progress`、取消项、备注和稳定 item ID 必须在 shared schema 中一次定义。
+- Todo 状态由 backend Active Run 持有，并通过明确的 Run-scoped event/snapshot 投影给 Renderer；Renderer 不得成为状态真相源。
+- 同一 Run 内发生 Provider compaction、Renderer reload 或 Session 切换时，当前 Todo 仍可恢复并重新进入后续 Provider context；应用进程重启不恢复已中断 Run 的 Todo。
+- Todo Tool call/result 可以审计，但后续 Run 的 Provider context 不应把旧清单误认为当前任务状态；存储历史、context selection 和 transcript 展示需要分别定义。
+- Todo 作为通用无副作用 Agent Tool，面向普通 Main Run、只读 Subagent、Swarm child 和支持 Provider Tool call 的 Headless Run；Runtime Identity、catalog 与 executor 必须使用一致契约。Todo 本身不得成为递归 Agent capability。
+- 条目数量、单项文本、总 payload、更新频率和事件大小必须有界；未知 ID、重复 ID、非法状态转换和跨 Run 调用返回稳定错误。
+
+### 1.3 UI 与验收
+
+- 对话运行中以紧凑、稳定布局展示 Todo 状态和当前项；更新状态不能持续挤压流式消息或把模型内部清单伪装成用户消息。
+- 用户可以查看但第一版不直接编辑模型 Todo；Todo 与 Plan 审阅卡、Goal/Plan artifact 使用不同名称和视觉层级。
+- 模型可以在一次 Run 中创建、重排和逐项完成清单；并发 Session 的 Todo event 不串线。
+- Provider compaction 与 Renderer reload 后，模型和 UI 看到相同的当前清单；Run 终态后下一 Run 不继承旧 active Todo。
+- Todo 更新不会改变 Session revision 中的 Goal/Plan，不会触发 Plan review、自动 continuation、workspace writer 或工具审批。
+- Main、Subagent、Swarm child 与 Headless 使用相同 Todo schema 和生命周期；hidden child 的 Todo 不泄漏到父 Session 或普通会话列表。
+- deterministic fake-provider trajectory 覆盖创建、增量更新、非法更新、取消、失败、compaction、reload 和终态清理。
+
+## 2. M2 · Swarm Hardening
+
+目标：在不改变已经落地的只读 child、模型池分配、逐次人工审批和全局 FIFO Run slot 契约的前提下，补齐 Desktop Swarm 的运行反馈、取消、统计、诊断与高并发回归覆盖。
+
+### 2.1 运行反馈与取消体验
+
+- 评估在主时间线 Swarm ToolCallCard 中展示 queued/running/completed/failed 汇总、模型 assignment、部分失败和结果截断；与 Agents artifact 的 Job → child 两级视图保持同一状态定义。
+- 提供明确的 Job 取消入口和取消中状态。父 Run 取消、单 Job 取消、queued child 与 active child 的终态必须可区分，并保持 call/result 与 durable execution 收敛。
+- 完善 live workspace 变化提示；child 读取 live canonical workspace 的既有语义不变，不把提示包装成快照保证。
+- 评估更完整的只读诊断视图，但 child Session 仍不可继续聊天，也不进入普通 Session 列表、搜索、导出或主对话事件。
+
+### 2.2 统计、诊断与成本
+
+- 建立 parent Session/Run/call → Swarm Job → child execution → Provider call 的可审计关联，并汇总 route assignment、usage、费用相关指标、耗时和错误分类。
+- 让运行中的 Tool call 数、child 状态和 usage 聚合与终态 durable 统计确定性收敛；Renderer live overlay、详情查询、Trace 和最终结果采用明确且一致的统计口径。
+- 完善部分失败、排队等待、取消、Provider failure、输出截断和 Trace degradation 的诊断信息，同时保持凭据、reasoning、workspace 绝对路径和 hidden Session ID 不进入公共结果。
+- 主时间线、Agents artifact 和日志/Trace 对同一 Job 的名称、数量和终态不应互相矛盾。
+
+### 2.3 压力测试与持续不变量
+
+- 覆盖慢 Provider、全局 slot 长时间占用、FIFO 排队取消、父 Run 取消、应用退出/崩溃、Renderer reload、事件缺口、长结果和最大 Agent 数的压力测试。
+- 持续验证 write/process/terminal/network/MCP/code intelligence/递归 Agent Tool 对 child 不可见，伪造调用也由 executor 拒绝。
+- 持续验证 parallel/serial Tool 调度的串行屏障、单审批和原 call 顺序结果；未知 Tool 默认 serial。
+- 持续验证 route、canonical workspace、assignment、usage 和终态可审计，而凭据、reasoning 与 workspace 绝对路径不落盘、不回传。
+- 持续验证 hidden Session 不进入 bootstrap、分页、搜索、导出、普通事件或侧栏；父/Project 删除级联清理，父归档保留。
+- 重启只把遗留 active execution 标记为 `interrupted`，不恢复 stream、不自动重试 Provider；Desktop 与 Headless 继续复用唯一 runtime，并用 fake-provider trajectory 验证身份和能力边界。
+
+验收：
+
+- 用户能在主时间线或 Agents artifact 准确判断 Job 是否排队、运行、部分完成、失败、取消或被截断，并能取消仍在进行的 Job。
+- 运行中统计最终与 SQLite durable 查询一致；Renderer reload、事件丢失重同步和长结果不会暴露 hidden Session 或破坏排序。
+- 压力场景不遗留 active child、Run slot、AbortController、pending approval 或无法清理的 execution；费用与 usage 可以追溯到父 call 和具体 child。
+- `npm run check` 覆盖确定性单元/集成回归；涉及窗口生命周期和取消 UI 的路径进入构建后 Playwright，真实付费 Provider 继续显式 opt-in。
 
 ## 3. M3 · Project And Code Intelligence UX
 
@@ -31,6 +96,9 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - Project tab 支持完整手动编辑：module root、languages、sourceRoots、testRoots、excludedRoots、default module、来源说明。
 - module metadata 更新写入 trace/change history 摘要，便于审计和回滚。
 - 评估接入受维护 project detector，避免核心长期膨胀语言规则。
+- ProjectModel query/command 通过 shared schema 和 backend transaction 暴露；Project 删除级联、目录重关联、revision 冲突、备份/恢复和 Renderer reload 都以 SQLite record 为权威。
+- Serena 和其他 code backend 只能引用 SQLite ProjectModel；backend pid、状态和 stderr tail 保持 Main process live state，不写入 ProjectModel。
+- 只有 SQLite service、legacy import、IPC、UI、catalog 与 executor 双重校验全部完成后，才重新注册 `project_*`/`code_*` Tool 并启动 Serena，不能恢复半套路径。
 
 验收：
 
@@ -38,6 +106,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - agent 工具和 UI 编辑不会互相覆盖未保存更改。
 - 多 module 路径归属错误返回明确提示。
 - 新项目与正常 Session 永不创建 `.zch`；损坏或冲突的 legacy 导入不产生部分 SQLite 写入且原文件不变。
+- Project 删除级联、目录重关联、revision 冲突、备份/恢复和 Renderer reload 有持久化回归测试；恢复前所有 Provider catalog 都不含 `project_*`/`code_*`。
 
 ### 3.2 Backend Routing UI
 
@@ -142,6 +211,10 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 ## 6. Later
 
+- Subagent / Swarm 后续演进：`subagent_continue` 与多轮追问；child 间通信、递归委派、投票、辩论或自动应用修改；自定义 child 工具列表。
+- Child sandbox profile：在明确隔离后评估运行测试、终端、命令、网络或只读 MCP；当前 readonly child 边界不变。
+- Swarm 共享结果索引、跨 Job 调查缓存和自动能力评估。
+- 多机器 Worker、claim lease、heartbeat、远程 artifact/trace 上传和断线恢复。
 - Durable Session Markdown import：定义从 `zch-conversation-markdown` 新建 Session 时的 attachment/reference 恢复、冲突策略与可信边界；当前导出文件只用于阅读和模型 route 迁移，不能导入或重放。Trace transcript export 继续保持独立。
 - 外部 JS 插件加载器：签名、来源、隔离、权限声明、工具注册。
 - 内置隔离浏览器工具。
