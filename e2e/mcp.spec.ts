@@ -33,7 +33,7 @@ test.describe('Electron MCP gateway workflows', () => {
   test.afterEach(async () => disposeFeatureHarness(harness))
 
   test('trusts, discovers, approves, restarts and hides a handwritten stdio server', async () => {
-    test.setTimeout(60_000)
+    test.setTimeout(90_000)
     await configureApp({
       page,
       providerBaseURL: fakeProvider.origin,

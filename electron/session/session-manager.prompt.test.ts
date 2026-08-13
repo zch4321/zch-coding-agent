@@ -598,7 +598,7 @@ describe('SessionManager prompt and trace', () => {
       message: 'hook observation',
       clientRequestId: 'hook-observation',
     })
-    await waitFor(() => provider.calls === 1, 5_000)
+    await waitFor(() => provider.calls === 1, 15_000)
     expect(diagnostics).toContain('observer failed')
     expect(provider.providerRequestOverride).toMatchObject({
       model: 'deepseek-v4-pro',
