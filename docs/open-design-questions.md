@@ -218,6 +218,7 @@
 - 单个对话 Turn 当前按 Tool call、思考过程、assistant 消息的固定顺序渲染；思考过程不位于 Tool call 上方。
 - 流式 reasoning 会在“思考过程”折叠栏标题中显示“生成中” `NTag`；流式 assistant 消息还会在正文上方新增一行 metadata 和“生成中” `NTag`。这些元素会在运行阶段切换时进入或离开布局。
 - 对话头部另有 Run 级状态 `NTag`，显示运行中、取消中、等待审批或失败；运行状态分散在头部、思考折叠栏和消息 metadata 三处。
+- Tool call 折叠栏标题当前显示“工具调用 · 最近一个 Tool 名称”；每个对话 Turn 独立生成一个折叠栏，标题不显示当前组或更大范围内的累计调用次数。
 - Provider 协议已经产生 `text.delta`、`reasoning.delta` 和 `tool.delta`。主 Session Provider runner 当前只把 text/reasoning delta 投影为 Agent event，没有把 `tool.delta` 投影给 Renderer。
 - Renderer 通常要等 Provider 完成整个 assistant turn、Session Core 发出 `tool.proposed` 后，才会首次看到 Tool card。因此模型只在生成 Tool name/arguments 且没有 text/reasoning delta 时，界面可能长时间没有新增内容。
 - `run.status` 已包含 `calling_llm`、`evaluating_tools`、`waiting_approval`、`executing_tools` 等阶段，但普通对话目前主要把它们概括为“运行中”，没有在思考过程标题位置持续展示具体阶段。
@@ -233,6 +234,11 @@
 - Naive UI loading spinner 应在哪些状态显示，如何处理 reduced motion、无障碍标签和多个并行 Tool call？
 - 如何避免状态文字长度变化、Tag 出现/消失、折叠栏创建以及首个 assistant token 到达造成消息正文纵向跳变？
 - Main Agent 与 Agents/Swarm 面板是否应共享同一套阶段词汇和状态映射？
+- Tool call 折叠栏后的“累计调用次数”应累计当前折叠组、当前 Run、当前 Session，还是其他范围？
+- 累计次数在 Tool call 开始生成、`tool.proposed`、获批、开始执行或执行结束的哪个时点增加？
+- 被拒绝、取消、失败、重试以及相同 `callId` 的状态更新应如何计入累计次数？
+- Swarm root、child Agent、审批模型和压缩流程中的 Tool call 是否进入普通对话栏显示的累计值？
+- Run 完成、Renderer reload 或重新打开历史 Session 后，累计次数是否继续显示，权威数据来源是什么？
 
 ### 关联实现
 
@@ -245,6 +251,7 @@
 - `src/components/chat/ConversationTurn.vue`
 - `src/components/chat/ReasoningGroup.vue`
 - `src/components/chat/ChatMessageItem.vue`
+- `src/components/chat/ToolCallGroup.vue`
 
 ## 8. Swarm 运行中 Tool call 统计的一致性
 
