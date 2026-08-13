@@ -282,3 +282,28 @@
 - `shared/agent-execution.ts`
 - `src/stores/agent-executions.ts`
 - `src/components/artifacts/AgentExecutionBody.vue`
+
+## 9. 用户消息的视觉容器与对齐方式
+
+### 当前行为
+
+- 每个对话 Turn 使用最大 `760px` 的内容列并整体居中；用户消息在该内容列内又使用 `fit-content` 和水平自动外边距，因此消息块本身会居中。
+- 用户消息设置了边框、背景、内边距和不对称圆角，并将宽度限制为内容列的 `78%` 且不超过 `680px`，视觉上将每条用户消息表达为独立卡片。
+- 用户消息没有可见的角色 metadata；文本、附件 Tag 以及重试、编辑、分叉等消息操作都放在同一个卡片容器中。
+- `interjection` 消息也使用居中的 `fit-content` 容器，但通过左侧强调边框和斜体与普通用户消息区分。
+
+### 待讨论问题
+
+- 用户消息是否应继续使用独立卡片容器，还是与主对话内容列采用其他视觉层级？
+- 用户消息应在内容列中左对齐、右对齐、居中，还是根据消息类型采用不同对齐方式？
+- 短文本、多段 Markdown、代码块、宽表格、超长路径和大量附件分别需要什么宽度、换行和溢出规则？
+- 如果弱化或取消卡片边界，应通过哪些元素区分用户输入、assistant 输出、`interjection` 和内部编排内容？
+- 消息操作的位置、出现时机和可点击范围是否依赖当前卡片容器？
+- 窄屏、辅助技术和历史会话中的用户消息应如何保持一致且可识别？
+
+### 关联实现
+
+- `src/components/chat/ConversationTurn.vue`
+- `src/components/chat/ChatMessageItem.vue`
+- `src/components/MarkdownBlock.vue`
+- `src/styles/conversation-layout.css`
