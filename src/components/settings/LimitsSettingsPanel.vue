@@ -174,10 +174,11 @@ onBeforeUnmount(() => {
         <NDivider />
         <section class="limits-group">
           <h3>{{ t('limits.commands') }}</h3>
-          <label class="settings-field">
+          <div class="settings-field">
             <span>{{ t('limits.commandShell') }}</span>
             <div class="settings-inline">
               <NSelect
+                :aria-label="t('limits.commandShell')"
                 :value="agent.executionEnvironmentConfig.commandShell"
                 :options="commandShellOptions"
                 :loading="agent.commandShellLoading"
@@ -200,7 +201,7 @@ onBeforeUnmount(() => {
                 })
               }}
             </small>
-          </label>
+          </div>
           <NAlert
             v-if="agent.commandShellCatalog?.fallback"
             type="warning"
