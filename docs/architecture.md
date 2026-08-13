@@ -1585,7 +1585,9 @@ Windows 发现只扫描 PATH 与有限的系统/安装目录，内置 profile �
 
 Prompt Harness 在每次 Provider 调用前读取同一配置并只注入实际解析后的 `command_shell: label (id)`；`run_command` schema 不接受 shell ID，因此模型不能自行选择未安装解释器。工具执行前会再次解析，以应对调用期间安装状态变化。内部 Git、Subagent 和其他直接进程不读取该选项。
 
-PowerShell adapter 设置 Console 与 pipeline 输出编码，CMD adapter 先切到 code page 65001，Bash/Nushell adapter 设置 UTF-8 locale。`BoundedProcessOutput` 对 stdout/stderr 独立流式校验 UTF-8；若实际字节无效，则使用启动时探测到的 Windows 当前代码页解码保留区。字节上限、head/tail 截断、discard hash、超时、取消、进程树终止和子进程环境 allowlist 均保持原有边界。`run_command` 是一次性 Tool，不把实时输出投影进 Renderer Terminal；未来只有 `terminal_*` 复用可见 PTY。
+PowerShell adapter 固定传入 `-ExecutionPolicy Bypass`，并设置 Console 与 pipeline 输出编码；CMD adapter 先切到 code page 65001，Bash/Nushell adapter 设置 UTF-8 locale。应用不预检 Execution Policy，也不把相关失败改写为专用错误；原始 stderr 和 exit code 沿普通 Tool Result 返回。`BoundedProcessOutput` 对 stdout/stderr 独立流式校验 UTF-8；若实际字节无效，则使用启动时探测到的 Windows 当前代码页解码保留区。字节上限、head/tail 截断、discard hash、超时、取消、进程树终止和子进程环境 allowlist 均保持原有边界。`run_command` 是一次性 Tool，不把实时输出投影进 Renderer Terminal。
+
+`terminal_open` 未显式指定 executable 时，在 Windows 上复用同一自动发现顺序选择 PowerShell 7、Windows PowerShell 或 CMD，但仍不读取 `executionEnvironment.commandShell` 的用户选择。默认或显式启动 PowerShell Terminal 时同样传入 `-ExecutionPolicy Bypass`；其他 Shell 不附加该参数。独立持久化的交互 Terminal profile 仍属于 M5 后续范围。
 
 ---
 

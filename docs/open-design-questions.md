@@ -39,7 +39,7 @@
 - `run_command.mode = process` 直接执行模型提交的 `executable + args`，不读取命令 Shell 配置。
 - `run_command.mode = shell` 读取 `executionEnvironment.commandShell`，由 Main process 解析实际解释器和固定启动参数，最终仍以 `shell: false` 启动。
 - Renderer 在 `Settings → Limits → Commands` 中提供“一次性命令 Shell”选择、重新扫描、实际路径和失效回退提示。
-- `terminal_open` 使用另一条持久 PTY 链路。它当前允许 Tool 参数提供可选 `shell`；未提供时，Windows 默认 `powershell.exe`，其他平台默认 `$SHELL` 或 `/bin/sh`。
+- `terminal_open` 使用另一条持久 PTY 链路。它当前允许 Tool 参数提供可选 `shell`；未提供时，Windows 按 PowerShell 7、Windows PowerShell、CMD 自动选择，其他平台默认 `$SHELL` 或 `/bin/sh`。PowerShell PTY 使用 `-ExecutionPolicy Bypass`。
 - `terminal_open` 不读取 `executionEnvironment.commandShell`，当前也没有独立的用户侧 Terminal profile 配置。
 
 ### 待讨论问题

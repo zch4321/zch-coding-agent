@@ -195,11 +195,11 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 目标：在不改变直接进程执行和内部 Git 命令语义的前提下，自动发现 Windows 上可用的 Shell，并允许用户分别选择交互终端与命令字符串解释器。
 
-状态：第一阶段已完成 `run_command.shell` 的内置 profile 发现、选择、失效回退、Prompt 注入、显式解释器启动与 UTF-8/fallback 解码；`run_command` 仍是一次性 Tool，不在前端 Terminal 展示。以下交互 Terminal 复用、自定义 profile、版本探测、WSL 与完整打包 E2E 仍待实现。
+状态：第一阶段已完成 `run_command.shell` 的内置 profile 发现、选择、失效回退、Prompt 注入、显式解释器启动与 UTF-8/fallback 解码；PowerShell 一次性命令和持久 PTY 已使用进程级 `Bypass`，Windows 默认 Terminal 也已复用 PowerShell 7 → Windows PowerShell → CMD 的自动发现顺序。`run_command` 仍是一次性 Tool，不在前端 Terminal 展示；以下独立交互 Terminal profile、自定义 profile、版本探测、WSL 与完整打包 E2E 仍待实现。
 
 - Main process 已有界扫描 `pwsh.exe`、`powershell.exe`、`cmd.exe`、Git Bash 和 Nushell；后续增加 WSL adapter、版本展示以及经过校验的自定义可执行文件和启动参数。
 - 分别持久化交互式 terminal profile 与 `run_command.shell` profile。已配置程序消失时显示可诊断警告并回退到安全默认值，不静默改写用户配置。
-- `run_command.process` 已继续以 `shell: false` 直接执行，`run_command.shell` 已显式启动所选解释器及其固定参数，不再依赖 Node 在 Windows 上隐式选择 `%COMSPEC%`；后续让 `terminal_open` 通过独立的所选 profile 启动可见 PTY。
+- `run_command.process` 已继续以 `shell: false` 直接执行，`run_command.shell` 已显式启动所选解释器及其固定参数，不再依赖 Node 在 Windows 上隐式选择 `%COMSPEC%`；后续让 `terminal_open` 从当前自动发现迁移到独立的用户所选 profile。
 - WSL 使用独立 adapter 处理发行版、工作目录映射和参数边界，不把它伪装成普通 Windows 可执行 Shell。
 - Prompt Harness 已报告实际 command shell；后续再独立报告 terminal shell。Subagent、Git/File 工具和其他内部能力继续使用各自既定执行路径，不受用户 Shell 选择影响。
 

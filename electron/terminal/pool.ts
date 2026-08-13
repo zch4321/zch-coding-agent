@@ -3,6 +3,7 @@ import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import * as nodePty from 'node-pty'
 import type { SessionId, TerminalId } from '../../shared/ids'
+import type { CommandShellProfile } from '../../shared/command-shell'
 import type {
   TerminalInfo,
   TerminalSnapshot,
@@ -10,6 +11,10 @@ import type {
 } from '../../shared/terminal'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
 import { createCommandEnvironment } from '../process/run'
+import {
+  commandShellService,
+  POWERSHELL_PROCESS_EXECUTION_POLICY_ARGS,
+} from '../process/command-shell'
 import { ByteRingBuffer } from './byte-ring-buffer'
 
 const ANSI_PATTERN =
@@ -40,6 +45,10 @@ export interface TerminalEventDraft {
 export interface TerminalPoolOptions {
   getScrollbackBytes: () => number
   emit: (event: TerminalEventDraft) => void
+  platform?: NodeJS.Platform
+  resolveDefaultWindowsShell?: () => Promise<
+    Pick<CommandShellProfile, 'executable' | 'kind'>
+  >
   spawnPty?: (
     shell: string,
     args: string[],
@@ -63,10 +72,18 @@ function terminalId(): TerminalId {
   return `terminal:${randomUUID()}` as TerminalId
 }
 
-function defaultShell(): string {
-  return process.platform === 'win32'
-    ? 'powershell.exe'
-    : (process.env.SHELL ?? '/bin/sh')
+function terminalShellArgs(
+  executable: string,
+  platform: NodeJS.Platform,
+): string[] {
+  if (platform !== 'win32') return []
+  const name = path.win32.basename(executable).toLowerCase()
+  return name === 'pwsh.exe' ||
+    name === 'pwsh' ||
+    name === 'powershell.exe' ||
+    name === 'powershell'
+    ? [...POWERSHELL_PROCESS_EXECUTION_POLICY_ARGS]
+    : []
 }
 
 function cloneInfo(info: TerminalInfo): TerminalInfo {
@@ -109,7 +126,18 @@ export class TerminalPool {
     }
 
     const id = terminalId()
-    const shell = input.shell ?? defaultShell()
+    const platform = this.#options.platform ?? process.platform
+    const shell = input.shell
+      ? input.shell
+      : platform === 'win32'
+        ? (
+            await (
+              this.#options.resolveDefaultWindowsShell ??
+              (() => commandShellService.automaticProfile())
+            )()
+          ).executable
+        : (process.env.SHELL ?? '/bin/sh')
+    const shellArgs = terminalShellArgs(shell, platform)
     const cols = input.cols ?? 100
     const rows = input.rows ?? 30
     const environment = createCommandEnvironment()
@@ -117,7 +145,7 @@ export class TerminalPool {
     environment.TERM = 'xterm-256color'
     environment.COLORTERM = 'truecolor'
     const spawnPty = this.#options.spawnPty ?? nodePty.spawn
-    const pty = spawnPty(shell, [], {
+    const pty = spawnPty(shell, shellArgs, {
       name: 'xterm-256color',
       cwd: guarded.realPath,
       cols,
