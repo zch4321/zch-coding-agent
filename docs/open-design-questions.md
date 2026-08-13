@@ -73,6 +73,8 @@
 - Provider 只返回 `totalTokens` 时，当前进度条无法据此形成正确已用量。
 - Provider 响应完成后新增的 assistant 输出，以及后续尚未发给 Provider 的工具结果或编排层，不一定反映在当前进度条中。
 - usage 主要保存在活动 Run overlay；刷新、重新选择 Session、活动 Run 恢复和 Run 结束后的展示语义尚不完整。
+- 进度条下方的累计明细会把当前活动 Run overlay 中全部 usage record 的 `cacheHitTokens`、`cacheMissTokens` 和 `completionTokens` 分别相加，缺失字段当前按 `0` 处理；该汇总不限于最近一条 `scope = main` usage。
+- 当前明细显示“缓存命中输入、未命中输入、输出”三个统计量，不显示缓存命中率。
 
 ### 待讨论问题
 
@@ -84,6 +86,10 @@
 - UI、自动压缩、usage 统计和 Trace 是否必须使用同一个上下文 token 定义？
 - 进度条是否应跨 Renderer reload、Session 切换和已完成 Run 恢复？若需要，权威数据源是什么？
 - 模型切换、Provider transfer 和 compact epoch 切换后，旧 usage 是否仍能代表当前上下文？
+- “缓存命中率”的分子和分母分别采用哪些 token 字段，是否只在 Provider 明确返回缓存统计时才有定义？
+- 缓存命中率应覆盖最近一次主模型请求、当前 Run 的全部请求，还是包括审批、压缩、Subagent 等 scope 的更大范围？
+- 不提供缓存统计、只提供部分字段、明确返回零值和混用不同 Provider 的 usage 时，缓存命中率应如何表达？
+- 缓存命中率的精度、舍入、零分母和辅助说明采用什么展示语义？
 
 ### 关联实现
 
@@ -175,3 +181,97 @@
 - `electron/session/session-run-controller.ts`
 - `electron/main.ts`
 - `src/components/settings/LoggingSettingsPanel.vue`
+
+## 6. Terminal 标识符与生命周期
+
+### 当前行为
+
+- `terminal_open` 当前生成 `terminal:<UUID>` 形式的 `terminalId`，并把它返回给模型；`terminal_send`、`terminal_read`、`terminal_resize` 和 `terminal_close` 都要求模型原样传回该标识符。
+- `terminal_list` 可以重新列出当前 Session 拥有的 Terminal；Main process 在每次 Terminal 操作时同时校验 `sessionId` 和 `terminalId` 的归属关系。
+- Terminal 资源归属于 Session，而不是创建它的 Run。单次 Run 正常完成或失败不会关闭 Terminal，后续 Run 可以继续使用同一 Terminal。
+- Terminal 会在显式调用 `terminal_close`、Session 关闭或应用运行时释放时清理。PTY 自行退出时会变为 `closed`，当前资源和 scrollback 仍可被列出、读取，直至后续清理。
+- Terminal 资源表当前以 `terminalId` 作为进程内主键；已显式关闭的最近 256 个标识符还会保留其 Session owner，用于重复关闭的幂等判断。
+
+### 待讨论问题
+
+- 模型可见的 Terminal 标识符应采用应用级、Session 级还是 Run 级作用域？
+- 如果标识符改为自增序号，序号何时重置，跨 Session 的同号 Terminal 如何区分？
+- 模型使用的短标识符与 Main process 内部资源主键是否需要保持相同？
+- Run 级编号如何表达 Terminal 跨 Run 持续存在的当前语义？Session 级编号又如何处理 Session 恢复、进程重启和历史 Tool result？
+- 关闭后的编号是否允许复用，旧 Tool call、延迟事件和重复 close 如何避免指向新资源？
+- 模型输错、引用已关闭 Terminal 或引用其他 Session 的同号 Terminal 时，需要返回什么稳定错误信息？
+- Terminal 数量上限、`terminal_list` 的排序和模型选择目标 Terminal 的上下文是否需要一并定义？
+
+### 关联实现
+
+- `shared/ids.ts`
+- `shared/terminal.ts`
+- `electron/terminal/pool.ts`
+- `electron/tools/terminal-tools.ts`
+- `electron/session/session-manager.ts`
+- `src/stores/agent-runtime.ts`
+
+## 7. 对话运行阶段、布局稳定性与 Tool call 生成可见性
+
+### 当前行为
+
+- 单个对话 Turn 当前按 Tool call、思考过程、assistant 消息的固定顺序渲染；思考过程不位于 Tool call 上方。
+- 流式 reasoning 会在“思考过程”折叠栏标题中显示“生成中” `NTag`；流式 assistant 消息还会在正文上方新增一行 metadata 和“生成中” `NTag`。这些元素会在运行阶段切换时进入或离开布局。
+- 对话头部另有 Run 级状态 `NTag`，显示运行中、取消中、等待审批或失败；运行状态分散在头部、思考折叠栏和消息 metadata 三处。
+- Provider 协议已经产生 `text.delta`、`reasoning.delta` 和 `tool.delta`。主 Session Provider runner 当前只把 text/reasoning delta 投影为 Agent event，没有把 `tool.delta` 投影给 Renderer。
+- Renderer 通常要等 Provider 完成整个 assistant turn、Session Core 发出 `tool.proposed` 后，才会首次看到 Tool card。因此模型只在生成 Tool name/arguments 且没有 text/reasoning delta 时，界面可能长时间没有新增内容。
+- `run.status` 已包含 `calling_llm`、`evaluating_tools`、`waiting_approval`、`executing_tools` 等阶段，但普通对话目前主要把它们概括为“运行中”，没有在思考过程标题位置持续展示具体阶段。
+
+### 待讨论问题
+
+- 对话 Turn 中思考过程、Tool call 和 assistant 消息应采用什么固定顺序？
+- 是否需要一个不改变占位高度的统一运行状态区域；它与对话头部状态、思考过程标题和消息 metadata 各自承担什么职责？
+- “正在思考”“正在生成 Tool call”“正在调用工具”“等待审批”“正在输出”“正在取消”等状态的完整集合、优先级和切换边界是什么？
+- 状态应由 Main process 发送明确事件，还是由 Renderer 根据 `run.status`、delta 和 Tool event 推导？
+- Provider `tool.delta` 中哪些信息可以实时展示：Tool 名称、参数生成进度、部分参数正文或仅阶段状态？
+- Tool call 流式生成被取消、Provider 失败、arguments 不完整或最终 completion 与 delta 不一致时，临时状态如何收敛？
+- Naive UI loading spinner 应在哪些状态显示，如何处理 reduced motion、无障碍标签和多个并行 Tool call？
+- 如何避免状态文字长度变化、Tag 出现/消失、折叠栏创建以及首个 assistant token 到达造成消息正文纵向跳变？
+- Main Agent 与 Agents/Swarm 面板是否应共享同一套阶段词汇和状态映射？
+
+### 关联实现
+
+- `electron/providers/provider.ts`
+- `electron/session/session-provider-turn.ts`
+- `shared/agent-events.ts`
+- `src/stores/agent-runtime-events.ts`
+- `src/stores/conversation-timeline.ts`
+- `src/components/chat/ConversationHeader.vue`
+- `src/components/chat/ConversationTurn.vue`
+- `src/components/chat/ReasoningGroup.vue`
+- `src/components/chat/ChatMessageItem.vue`
+
+## 8. Swarm 运行中 Tool call 统计的一致性
+
+### 当前行为
+
+- Agents 面板中的“工具调用”读取 `AgentExecutionDetail.statistics.toolCallCount`，不会直接计算当前 Renderer live activities 中的 Tool card 数量。
+- Main process 查询该统计时，会从隐藏 child Session 的可见 assistant turn 中按 `callId` 统计不同的 `tool_call`；Swarm root 的统计是 root 自身 Session 和所有 child Session 统计之和。
+- `AgentExecutionDetail.statistics` 是详情查询时返回的快照。Renderer 收到 `tool.proposed` 或 `tool.completed` 时会更新 live activities，但不会同步修改该统计字段。
+- Swarm child 状态变化会更新 child summary；Coordinator 也会在每个 child 结束时发布新的 root summary 和 agent counts，但 `execution.changed` event 不包含 Tool call 统计。
+- Renderer 只会在 execution 进入终态时无条件刷新已加载的详情；运行中的 root summary 更新不会刷新 root 详情统计。因此展开 Swarm 后看到的 Tool call 数量可能在运行中保持旧快照，而 Job 结束后的边界刷新会得到完整持久化计数。
+
+### 待讨论问题
+
+- 运行中 Tool call 数量应统计已开始生成、已 `proposed`、已获批、已执行还是已持久化的调用？
+- Swarm root 的数量应只汇总 child Agent Tool call，还是还包括 root/orchestrator 自身调用？
+- Tool 重试、相同 `callId` 的状态更新、拒绝、取消和失败分别计为几次？
+- 运行中统计的权威来源应是 durable Message、Agent execution event、Renderer live overlay，还是三者的组合？
+- Child Tool event 到达时，root 聚合统计如何同步，允许多大的延迟和暂时不一致？
+- Renderer event 丢失、乱序、详情分页或 reload 后，运行中数字如何恢复并与最终统计收敛？
+- Agents 面板、Trace、日志和最终 Swarm result 是否需要共享同一个 Tool call 统计定义？
+
+### 关联实现
+
+- `electron/persistence/message-repository.ts`
+- `electron/application/agent-execution-query-service.ts`
+- `electron/swarm/coordinator.ts`
+- `electron/session/session-events.ts`
+- `shared/agent-execution.ts`
+- `src/stores/agent-executions.ts`
+- `src/components/artifacts/AgentExecutionBody.vue`
