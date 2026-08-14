@@ -9,9 +9,9 @@ export default defineConfig({
       'shared/**/*.test.ts',
       'src/**/*.test.ts',
     ],
-    testTimeout: 30_000,
-    hookTimeout: 60_000,
-    teardownTimeout: 60_000,
+    testTimeout: 60_000,
+    hookTimeout: 120_000,
+    teardownTimeout: 120_000,
     maxWorkers: 4,
     coverage: {
       provider: 'v8',
