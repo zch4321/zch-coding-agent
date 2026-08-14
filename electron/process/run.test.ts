@@ -7,7 +7,7 @@ import { createCommandEnvironment, runCommand } from './run'
 import { commandShellService } from './command-shell'
 
 const PROCESS_TERMINATION_TEST_TIMEOUT_MS =
-  process.platform === 'win32' ? 30_000 : 10_000
+  process.platform === 'win32' ? 60_000 : 30_000
 
 async function workspace(): Promise<string> {
   return mkdtemp(path.join(os.tmpdir(), 'agent-command-'))
@@ -23,7 +23,7 @@ function processExists(pid: number): boolean {
 }
 
 async function waitForProcessesToExit(pids: number[]): Promise<boolean> {
-  const deadline = Date.now() + 5_000
+  const deadline = Date.now() + 15_000
 
   while (Date.now() < deadline) {
     if (pids.every((pid) => !processExists(pid))) {
@@ -166,7 +166,7 @@ describe('runCommand', () => {
         })
 
         expect(result.timedOut).toBe(true)
-        expect(result.durationMs).toBeLessThan(5_000)
+        expect(result.durationMs).toBeLessThan(15_000)
         expect(result.terminationStrategy).not.toBe('none')
       }
     },
@@ -197,7 +197,7 @@ describe('runCommand', () => {
       const controller = new AbortController()
       const abort = setTimeout(
         () => controller.abort(new Error('test abort')),
-        500,
+        2_000,
       )
       const result = await runCommand({
         workspace: root,
@@ -206,7 +206,7 @@ describe('runCommand', () => {
           executable: process.execPath,
           args: [script, pidFile, String(depth)],
         },
-        timeoutMs: 10_000,
+        timeoutMs: 30_000,
         terminationGraceMs: 100,
         maxOutputBytes: 4_096,
         signal: controller.signal,

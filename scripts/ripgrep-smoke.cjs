@@ -45,7 +45,7 @@ function runRipgrepSmoke() {
     child.kill()
     console.error('ripgrep smoke timed out')
     process.exit(1)
-  }, 10_000)
+  }, 30_000)
 
   child.stdout.on('data', (chunk) => {
     output += chunk

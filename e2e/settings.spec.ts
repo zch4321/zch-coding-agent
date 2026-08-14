@@ -131,11 +131,34 @@ test.describe.serial('Electron settings workflows', () => {
       hasText: '一次性命令 Shell',
     })
     await expect(commandShell.getByText('实际使用：')).toBeVisible()
+    const explicitShell = await page.evaluate(async () => {
+      const api = Reflect.get(window, 'agentApi') as {
+        listCommandShells(payload: unknown): Promise<
+          | {
+              ok: true
+              value: {
+                profiles: Array<{ id: string; label: string }>
+              }
+            }
+          | { ok: false; error: { message: string } }
+        >
+      }
+      const result = await api.listCommandShells({ version: 1 })
+      if (!result.ok) throw new Error(result.error.message)
+      const preferredIndex = result.value.profiles.findIndex(
+        (profile) => profile.id === 'cmd',
+      )
+      const profileIndex = preferredIndex >= 0 ? preferredIndex : 0
+      const profile = result.value.profiles[profileIndex]
+      if (!profile) throw new Error('No command shell profile is available')
+      return { ...profile, optionIndex: profileIndex + 1 }
+    })
     await commandShell.locator('.n-select').click()
-    await page
+    const explicitShellOption = page
       .locator('.n-select-menu:visible .n-base-select-option')
-      .filter({ hasText: /^Command Prompt$/u })
-      .click()
+      .nth(explicitShell.optionIndex)
+    await expect(explicitShellOption).toHaveText(explicitShell.label)
+    await explicitShellOption.click()
     await expect
       .poll(async () =>
         page.evaluate(async () => {
@@ -155,7 +178,7 @@ test.describe.serial('Electron settings workflows', () => {
           return result.value?.config.executionEnvironment.commandShell
         }),
       )
-      .toBe('cmd')
+      .toBe(explicitShell.id)
     await defaultContext.fill('300000')
     await expect(limits.locator('.settings-save-status')).toHaveText('已保存')
     await expect

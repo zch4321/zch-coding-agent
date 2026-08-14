@@ -4,14 +4,6 @@ import type { ToolResultProjection } from './types'
 
 const TRUNCATION_MARKER = '\n... output truncated ...\n'
 
-/** Reports failures to fit provider context within configured token limits. */
-export class ContextBudgetError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'ContextBudgetError'
-  }
-}
-
 /** Estimates text tokens from UTF-8 byte length and the configured estimation ratio. */
 export function estimateTextTokens(
   value: string,

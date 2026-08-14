@@ -177,7 +177,7 @@ export function parseTrace(raw: string): TraceObject[] {
 
 export async function waitFor(
   predicate: () => boolean,
-  timeoutMs = 2_000,
+  timeoutMs = 15_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs
 

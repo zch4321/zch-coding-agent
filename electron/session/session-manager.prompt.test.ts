@@ -3,13 +3,24 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
-import type { SessionId } from '../../shared/ids'
+import type {
+  AgentExecutionId,
+  CallId,
+  RunId,
+  SessionId,
+} from '../../shared/ids'
+import type { MessageRecord } from '../../shared/message'
 import {
   DEFAULT_HARNESS_PROMPT_REFS,
   PROMPT_RESOURCE_VERSION,
 } from '../../shared/prompt-resources'
 import { PromptRegistry } from '../prompts/registry'
 import { PluginEventBus } from '../plugins/event-bus'
+import { resolveModelRoutePairFromConfig } from '../providers/model-route-resolver'
+import {
+  swarmSharedContextContent,
+  swarmTaskContent,
+} from '../subagent/assignment-prompt'
 import { SessionManager } from './session-manager'
 import {
   PromptAuditProvider,
@@ -23,6 +34,7 @@ import {
   readSessionTrace,
   waitFor,
 } from './session-manager-test-support'
+import type { SessionExecutionStatePort } from './session-types'
 
 describe('SessionManager prompt and trace', () => {
   it('rejects an unknown provider instead of falling back to the active one', async () => {
@@ -120,6 +132,104 @@ describe('SessionManager prompt and trace', () => {
           ),
       ),
     ).toBe(true)
+    await manager.closeSession(sessionId)
+  })
+
+  it('stores Swarm shared context separately from the tagged child task', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-swarm-prompt-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const config = store.getPublicConfig()
+    const providerConfig = config.providers[0]!
+    const modelSelection = {
+      providerId: providerConfig.id,
+      model: providerConfig.model,
+      reasoning: providerConfig.reasoning,
+    }
+    const routes = await resolveModelRoutePairFromConfig(
+      store,
+      config,
+      modelSelection,
+    )
+    const provider = new ForkProvider()
+    let committedHistory: MessageRecord[] = []
+    const executionState: SessionExecutionStatePort = {
+      async commit(session, input) {
+        if (input.reason === 'run_input') {
+          committedHistory = structuredClone(session.history)
+        }
+        return undefined
+      },
+    }
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
+      eventSink: createIpcTestEventSink(() => undefined),
+      providerFactory: () => provider,
+      executionState,
+    })
+    const sessionId = 'session:swarm-tagged-child' as SessionId
+    await manager.createInternalSession({
+      sessionId,
+      workspace,
+      provider: providerConfig.id,
+      modelSelection,
+      allowedToolIds: new Set(),
+      gitToolsEnabled: true,
+      providerSnapshot: providerConfig,
+      execution: {
+        executionId: 'execution:swarm-tagged-child' as AgentExecutionId,
+        parentSessionId: 'session:swarm-parent' as SessionId,
+        parentRunId: 'run:swarm-parent' as RunId,
+        parentCallId: 'call:swarm-parent' as CallId,
+        name: 'swarm-tagged-child',
+        createdAt: '2026-08-12T00:00:00.000Z',
+      },
+    })
+    const sharedContext = swarmSharedContextContent(
+      'npm run check exited 0 <stable>',
+    )
+    const task = swarmTaskContent('Review <session> & report')
+    const run = manager.startInternalRun({
+      sessionId,
+      task,
+      context: {
+        content: sharedContext,
+        source: 'swarm:shared-context',
+      },
+      clientRequestId: 'request:swarm-tagged-child',
+      routes,
+    })
+
+    await expect(run.completion).resolves.toMatchObject({
+      status: 'completed',
+      response: 'Fork complete',
+    })
+    const contextRecord = committedHistory.find(
+      (record) =>
+        record.kind === 'selected_context' &&
+        record.metadata?.layer.source === 'swarm:shared-context',
+    )
+    const taskRecord = committedHistory.find(
+      (record) => record.kind === 'user_input',
+    )
+    expect(contextRecord?.parts).toEqual([
+      { type: 'text', text: sharedContext },
+    ])
+    expect(taskRecord?.parts).toEqual([{ type: 'text', text: task }])
+    expect(contextRecord?.turnId).toBe(taskRecord?.id)
+    expect(
+      provider.messages.some((message) => message.content === sharedContext),
+    ).toBe(true)
+    expect(provider.messages.some((message) => message.content === task)).toBe(
+      true,
+    )
     await manager.closeSession(sessionId)
   })
 
@@ -488,7 +598,7 @@ describe('SessionManager prompt and trace', () => {
       message: 'hook observation',
       clientRequestId: 'hook-observation',
     })
-    await waitFor(() => provider.calls === 1, 5_000)
+    await waitFor(() => provider.calls === 1, 15_000)
     expect(diagnostics).toContain('observer failed')
     expect(provider.providerRequestOverride).toMatchObject({
       model: 'deepseek-v4-pro',

@@ -43,6 +43,7 @@ export async function configureApp(input: {
   assistantLanguage?: 'zh-CN' | 'en-US'
   traceLogging?: boolean
   subagents?: boolean
+  swarm?: boolean
 }) {
   const workspace = await realpath(input.workspace)
   const result = await input.page.evaluate(
@@ -55,6 +56,7 @@ export async function configureApp(input: {
       traceNoticeVersion,
       traceLogging,
       subagents,
+      swarm,
     }) => {
       type IpcResult<Value> =
         | { ok: true; value: Value }
@@ -64,6 +66,7 @@ export async function configureApp(input: {
           assistant: { language: string }
           logging: { enabled: boolean }
           limits: Record<string, unknown>
+          providers: Array<{ id: string; revision: number }>
         }
       }
       type AgentApiForSetup = {
@@ -90,6 +93,10 @@ export async function configureApp(input: {
         providerType: 'generic.chat-completions',
         baseURL: providerBaseURL,
         model: 'e2e-functional-model',
+        enabledModelIds: ['e2e-functional-model'],
+        modelOverrides: {
+          'e2e-functional-model': { capability: 'standard' },
+        },
         contextWindowTokens: null,
         maxOutputTokens: null,
         reasoning: 'off',
@@ -176,7 +183,7 @@ export async function configureApp(input: {
         }
       }
 
-      if (subagents) {
+      if (subagents || swarm) {
         const delegated = await api.setConfig({
           version: 1,
           kind: 'subagents',
@@ -191,6 +198,47 @@ export async function configureApp(input: {
             ok: false,
             step: 'subagents',
             message: delegated.error.message,
+          }
+        }
+      }
+
+      if (swarm) {
+        const configuredProvider = provider.value.config.providers.find(
+          (candidate) => candidate.id === 'deepseek',
+        )
+        if (!configuredProvider) {
+          return {
+            ok: false,
+            step: 'model-pool-provider',
+            message: 'Configured Provider was not returned',
+          }
+        }
+        const pool = await api.setConfig({
+          version: 1,
+          kind: 'model-pool',
+          value: {
+            entries: [
+              {
+                id: 'e2e-swarm-route',
+                enabled: true,
+                providerId: 'deepseek',
+                model: 'e2e-functional-model',
+                reasoning: 'off',
+              },
+            ],
+          },
+          expectedProviderRevisions: [
+            {
+              providerId: configuredProvider.id,
+              revision: configuredProvider.revision,
+            },
+          ],
+        })
+        if (!pool.ok) {
+          return {
+            ok: false,
+            step: 'model-pool',
+            message: pool.error.message,
           }
         }
       }
@@ -288,6 +336,7 @@ export async function configureApp(input: {
       traceNoticeVersion: TRACE_NOTICE_VERSION,
       traceLogging: input.traceLogging ?? false,
       subagents: input.subagents ?? false,
+      swarm: input.swarm ?? false,
     },
   )
 

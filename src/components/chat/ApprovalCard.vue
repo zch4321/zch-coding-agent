@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import {
+  NAlert,
   NButton,
   NDescriptions,
   NDescriptionsItem,
+  NList,
+  NListItem,
   NScrollbar,
   NTag,
+  NThing,
 } from 'naive-ui'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { ModelCapabilityLevel } from '../../../shared/config'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 
@@ -16,6 +22,93 @@ defineProps<{
 
 const agent = useAgentStore()
 const { t } = useI18n()
+
+interface SwarmApprovalTask {
+  name: string
+  task: string
+  requiredCapability: ModelCapabilityLevel
+  agentCount: number
+}
+
+interface SwarmApprovalArgs {
+  sharedContext: string
+  tasks: SwarmApprovalTask[]
+}
+
+const capabilities = new Set<ModelCapabilityLevel>([
+  'light',
+  'standard',
+  'strong',
+])
+const capabilityLabels: Record<ModelCapabilityLevel, string> = {
+  light: 'settings.capabilityLight',
+  standard: 'settings.capabilityStandard',
+  strong: 'settings.capabilityStrong',
+}
+
+function swarmArgsFromValue(value: unknown): SwarmApprovalArgs | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined
+  }
+  const sharedContext = Reflect.get(value, 'sharedContext')
+  const tasks = Reflect.get(value, 'tasks')
+  if (
+    typeof sharedContext !== 'string' ||
+    !sharedContext.trim() ||
+    !Array.isArray(tasks) ||
+    tasks.length === 0
+  ) {
+    return undefined
+  }
+  const parsed: SwarmApprovalTask[] = []
+  for (const candidate of tasks) {
+    if (
+      !candidate ||
+      typeof candidate !== 'object' ||
+      Array.isArray(candidate)
+    ) {
+      return undefined
+    }
+    const name = Reflect.get(candidate, 'name')
+    const task = Reflect.get(candidate, 'task')
+    const requiredCapability = Reflect.get(candidate, 'requiredCapability')
+    const agentCount = Reflect.get(candidate, 'agentCount')
+    if (
+      typeof name !== 'string' ||
+      typeof task !== 'string' ||
+      !capabilities.has(requiredCapability as ModelCapabilityLevel) ||
+      !Number.isSafeInteger(agentCount) ||
+      agentCount < 1
+    ) {
+      return undefined
+    }
+    parsed.push({
+      name,
+      task,
+      requiredCapability: requiredCapability as ModelCapabilityLevel,
+      agentCount,
+    })
+  }
+  return { sharedContext, tasks: parsed }
+}
+
+const isSwarmApproval = computed(
+  () => agent.pendingApproval?.tool === 'swarm_run',
+)
+const swarmArgs = computed(() =>
+  isSwarmApproval.value
+    ? swarmArgsFromValue(agent.pendingApproval?.args)
+    : undefined,
+)
+const swarmTasks = computed(() => swarmArgs.value?.tasks)
+const swarmAgentCount = computed(
+  () =>
+    swarmTasks.value?.reduce((total, task) => total + task.agentCount, 0) ?? 0,
+)
+
+function swarmCapabilityLabel(capability: ModelCapabilityLevel): string {
+  return t(capabilityLabels[capability])
+}
 </script>
 
 <template>
@@ -23,10 +116,20 @@ const { t } = useI18n()
     <header class="approval-header">
       <div>
         <span class="tool-kicker">{{ t('chat.approvalRequired') }}</span>
-        <strong>{{ agent.pendingApproval.tool }}</strong>
+        <strong>
+          {{
+            isSwarmApproval
+              ? t('chat.swarmApprovalTitle')
+              : agent.pendingApproval.tool
+          }}
+        </strong>
       </div>
       <NTag round size="small" type="warning">
-        {{ agent.pendingApproval.kind }}
+        {{
+          isSwarmApproval
+            ? t('chat.swarmApprovalTag')
+            : agent.pendingApproval.kind
+        }}
       </NTag>
     </header>
     <NScrollbar
@@ -34,23 +137,90 @@ const { t } = useI18n()
       content-class="approval-card-body-content"
     >
       <p class="approval-reason">{{ agent.pendingApproval.reason }}</p>
-      <NDescriptions
-        class="approval-meta"
-        label-placement="top"
-        :column="2"
-        size="small"
-        bordered
-      >
-        <NDescriptionsItem :label="t('chat.workspaceScope')">
-          {{ projectName }}
-        </NDescriptionsItem>
-        <NDescriptionsItem :label="t('chat.expires')">
-          {{ agent.pendingApproval.expiresAt }}
-        </NDescriptionsItem>
-      </NDescriptions>
-      <pre class="approval-args">{{
-        JSON.stringify(agent.pendingApproval.args, null, 2)
-      }}</pre>
+      <template v-if="isSwarmApproval">
+        <NAlert
+          class="swarm-approval-warning"
+          type="warning"
+          :title="t('chat.swarmApprovalNoticeTitle')"
+        >
+          {{ t('chat.swarmApprovalNotice') }}
+        </NAlert>
+        <NDescriptions
+          class="approval-meta"
+          label-placement="top"
+          :column="2"
+          size="small"
+          bordered
+        >
+          <NDescriptionsItem :label="t('chat.workspaceScope')">
+            {{ projectName }}
+          </NDescriptionsItem>
+          <NDescriptionsItem :label="t('chat.expires')">
+            {{ agent.pendingApproval.expiresAt }}
+          </NDescriptionsItem>
+          <NDescriptionsItem :label="t('chat.swarmTaskCount')">
+            {{ swarmTasks?.length ?? 0 }}
+          </NDescriptionsItem>
+          <NDescriptionsItem :label="t('chat.swarmTotalAgents')">
+            {{ swarmAgentCount }}
+          </NDescriptionsItem>
+        </NDescriptions>
+        <section
+          v-if="swarmArgs"
+          class="swarm-approval-shared-context"
+          aria-labelledby="swarm-shared-context-title"
+        >
+          <strong id="swarm-shared-context-title">
+            {{ t('chat.swarmSharedContext') }}
+          </strong>
+          <p>{{ swarmArgs.sharedContext }}</p>
+        </section>
+        <NList v-if="swarmArgs" class="swarm-approval-tasks" bordered>
+          <NListItem
+            v-for="(task, index) in swarmTasks"
+            :key="`${index}:${task.name}`"
+          >
+            <NThing :title="task.name">
+              <template #description>
+                <div class="swarm-approval-task-meta">
+                  <NTag size="small" :bordered="false">
+                    {{ swarmCapabilityLabel(task.requiredCapability) }}
+                  </NTag>
+                  <NTag size="small" :bordered="false">
+                    {{ t('chat.swarmAgents', { count: task.agentCount }) }}
+                  </NTag>
+                </div>
+              </template>
+              <p class="swarm-approval-task-text">{{ task.task }}</p>
+            </NThing>
+          </NListItem>
+        </NList>
+        <template v-else>
+          <NAlert type="error" :title="t('chat.swarmInvalidArguments')" />
+          <pre class="approval-args">{{
+            JSON.stringify(agent.pendingApproval.args, null, 2)
+          }}</pre>
+        </template>
+      </template>
+      <template v-else>
+        <NDescriptions
+          class="approval-meta"
+          label-placement="top"
+          :column="2"
+          size="small"
+          bordered
+        >
+          <NDescriptionsItem :label="t('chat.workspaceScope')">
+            {{ projectName }}
+          </NDescriptionsItem>
+          <NDescriptionsItem :label="t('chat.expires')">
+            {{ agent.pendingApproval.expiresAt }}
+          </NDescriptionsItem>
+        </NDescriptions>
+        <pre class="approval-args">{{
+          JSON.stringify(agent.pendingApproval.args, null, 2)
+        }}</pre>
+      </template>
       <ul class="policy-signals">
         <li
           v-for="signal in agent.pendingApproval.signals"

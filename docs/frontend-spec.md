@@ -344,10 +344,11 @@ Context Ingress 审批必须显示：
 - Files
 - Diff
 - Plan
-- Project
+- Agents
 
 不显示：
 
+- Project
 - Terminal
 - Browser
 
@@ -384,9 +385,18 @@ Files 内部使用二级 tab：
 - “回退此变更”必须先显示明确确认，运行期间禁用。主进程返回 `CONFLICT` 时在当前视口显示错误，不能假装回退成功。
 - 大 Diff 必须有明确截断提示，不能让 UI 假装展示了完整变化。
 
-### 8.4 Project
+### 8.4 Agents
 
-ProjectModel/Serena/code intelligence 暂停期间不显示 Project artifact tab，也不在 Renderer 中加载或编辑 ProjectModel。文件浏览仍由 Files tab 提供；普通 prompt harness 的 module marker 探测只存在于本次 runtime context，不形成 UI 状态或 workspace 文件。Swarm 完成后的 SQLite 迁移与 Project UI 重建见 roadmap。
+- Tab 不因新 execution 自动打开，也不自动切换；徽标显示当前 Session 下的 active leaf Agent 数量，Swarm root 不重复计数。
+- 第一层 `NCollapse` 只列出普通 Subagent 与 Swarm Job root，活跃项置顶，其余按创建时间倒序并支持分页；所有项默认折叠，用户首次打开、收到实时事件或状态变化都不得自动展开。
+- 展开 Swarm root 后显示第二层 child Agent，按 durable `childOrdinal` 排列。第二层同样只手动单项展开；展开 child 才按需读取详情，不能让一个 child 的流式状态污染兄弟项。
+- root/child header 显示名称、状态、耗时或当前阶段；详情只显示运行时间、工具调用次数、状态、模型、usage、Swarm Agent 计数和可见 Assistant 消息。Swarm root 不伪造聚合消息。
+- 不展示 reasoning、完整工具调用时间线、hidden Session ID、prompt harness、route、Provider continuation 或加密 reasoning。长内容在 440px 侧栏内收敛，纵向滚动使用 `NScrollbar`。
+- execution 终态后仍可历史回看，应用刷新从 durable root/child 投影恢复；hidden Session 继续不进入左侧对话列表。
+
+### 8.5 Project
+
+ProjectModel/Serena/code intelligence 暂停期间不显示 Project artifact tab，也不在 Renderer 中加载或编辑 ProjectModel。文件浏览仍由 Files tab 提供；普通 prompt harness 的 module marker 探测只存在于本次 runtime context，不形成 UI 状态或 workspace 文件。Swarm hardening 完成后的 SQLite 迁移与 Project UI 重建见总路线图。
 
 ---
 
@@ -443,7 +453,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 - Base URL。
 - 主模型：新 Provider 不预填虚构模型名。用户填写 API Key 后，表单在 600ms 静默期后自动保存并立即刷新 `/models`；已有凭据时进入页面或切换 Provider 卡片也会用已保存 route 静默刷新。显式刷新按钮先排空自动保存再刷新，失败时保留上次成功缓存。
-- 模型清单、启用池与能力：模型目录刷新只按大小写敏感的模型 ID 增量追加，不覆盖或删除旧条目；目录接口不可用时可手工新增模型。“新增模型”对话框同时填写模型 ID、最大上下文、压缩阈值、最大输出、思考档位和能力等级；确认后一次保存并启用，校验失败时保留对话框内容。每个模型配置行提供删除确认；主模型和当前自动审批模型禁用删除，其余模型删除后同时退出本地目录和启用池、清除覆盖配置，Provider 再次返回时允许刷新重新发现。可筛选穿梭框左侧显示完整清单，右侧显示 `enabledModelIds`，只有右侧模型能进入 Composer、自动审批和未来 Swarm 的下拉候选。主模型下拉读取完整清单；选择主模型会自动把它加入右侧并禁用移除，更换后旧主模型恢复可移除。穿梭框下方始终显示全部已知模型的 Provider 返回/内置/保守默认来源与配置，不只显示右侧模型；上下文长度和最大输出允许用户按模型覆盖，且解释它们分别用于本地上下文预算、自动压缩和单次生成预留。仅采用目录协议明确返回的容量字段，未知模型显示保守默认值提示。每个模型还可标注“思考档位”（多选，缺省=全部六档 `off|low|medium|high|xhigh|max`）与“能力等级”（light/standard/strong，为未来模型池预留）；已标注模型在 Provider 默认档位与 Composer 档位选择中只呈现标注子集，标注与默认档位冲突时暂停自动保存并要求用户手动改选，不做自动升降档。
+- 模型清单、启用池与能力：模型目录刷新只按大小写敏感的模型 ID 增量追加，不覆盖或删除旧条目；目录接口不可用时可手工新增模型。“新增模型”对话框同时填写模型 ID、最大上下文、压缩阈值、最大输出、思考档位和能力等级；确认后一次保存并启用，校验失败时保留对话框内容。每个模型配置行提供删除确认；主模型和当前自动审批模型禁用删除，其余模型删除后同时退出本地目录和启用池、清除覆盖配置，Provider 再次返回时允许刷新重新发现。可筛选穿梭框左侧显示完整清单，右侧显示 `enabledModelIds`，只有右侧模型能进入 Composer、自动审批和 Swarm 的下拉候选。主模型下拉读取完整清单；选择主模型会自动把它加入右侧并禁用移除，更换后旧主模型恢复可移除。穿梭框下方始终显示全部已知模型的 Provider 返回/内置/保守默认来源与配置，不只显示右侧模型；上下文长度和最大输出允许用户按模型覆盖，且解释它们分别用于本地上下文预算、自动压缩和单次生成预留。仅采用目录协议明确返回的容量字段，未知模型显示保守默认值提示。每个模型还可标注“思考档位”（多选，缺省=全部六档 `off|low|medium|high|xhigh|max`）与“能力等级”（light/standard/strong，为模型池调度提供权威标注）；已标注模型在 Provider 默认档位与 Composer 档位选择中只呈现标注子集，标注与默认档位冲突时暂停自动保存并要求用户手动改选，不做自动升降档。
 - Token 估算：默认保守估算，可切换为自定义 `bytesPerToken`；说明该值只影响预算估算，不能关闭字节/行数硬限制。
 - Reasoning 开关。
 - API Key 配置状态、更新和清除。
@@ -483,7 +493,8 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - 提供默认关闭的只读 Subagent 开关，以及 1–1,440 分钟的 worker timeout；默认 30 分钟。
 - 使用与运行限制一致的自动保存交互，并保留页首立即保存按钮和保存状态。
 - 明确提示额外 Provider 请求/费用，并显示当前全局并发值；并发为 1 时说明嵌套 Agent 会被拒绝。
-- 设置变更从下一次主 Run 生效；不展示隐藏 child Session、详细 transcript、模型池或自定义 child 工具列表。
+- 提供 `maxAgentsPerSwarm`（1–32）与模型池配置。模型池使用 `Provider → model → reasoning` 穿梭树选择精确 route，只读展示 Provider 模型能力，不在模型池重复配置并发或 Agent 数量。
+- 设置变更从下一次主 Run 生效；不提供隐藏 child Session 入口、完整 transcript、取消操作或自定义 child 工具列表。运行状态和历史回看位于 Artifact 的 Agents Tab，不与设置表单混合。
 
 ### 10.7 Skills
 

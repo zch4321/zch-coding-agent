@@ -25,16 +25,21 @@ export function createRuntimeIdentity(input: {
   platform?: string
   arch?: string
   nodeVersion?: string
+  swarmsEnabled?: boolean
 }): RuntimeIdentity {
   const provider =
     input.config.providers.find(
       (candidate) => candidate.id === input.config.activeProviderId,
     ) ?? input.config.providers[0]!
-  const toolDefinitions =
-    input.runtime.services.sessions.providerToolDefinitions()
-  const toolNames = input.runtime.services.sessions.toolNames()
+  const swarmsEnabled = input.swarmsEnabled ?? false
+  const toolDefinitions = input.runtime.services.sessions
+    .providerToolDefinitions()
+    .filter((tool) => swarmsEnabled || tool.name !== 'swarm_run')
+  const toolNames = input.runtime.services.sessions
+    .toolNames()
+    .filter((toolName) => swarmsEnabled || toolName !== 'swarm_run')
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     sourceCommit: input.sourceCommit?.trim() || embeddedSourceCommit(),
     sourceTree: input.sourceTree ?? embeddedSourceTree(),
     runtimeImageDigest:
@@ -69,6 +74,7 @@ export function createRuntimeIdentity(input: {
       permissionMode: 'yolo',
       skillsEnabled: input.config.skills.enabled,
       subagentsEnabled: input.config.subagents.enabled,
+      swarmsEnabled,
       mcpServerIds: input.config.mcpServers
         .filter((server) => server.enabled)
         .map((server) => server.id)

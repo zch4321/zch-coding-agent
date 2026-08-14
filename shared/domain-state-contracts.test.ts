@@ -62,7 +62,7 @@ const callId = 'call:one' as CallId
 const hash = 'a'.repeat(64)
 const timestamp = '2026-07-22T12:00:00.000Z'
 
-function compileSchema(schema: TSchema) {
+function createSchemaCompiler(): Ajv {
   const ajv = new Ajv({ allErrors: true, strict: true })
   ajv.addFormat('date-time', {
     type: 'string',
@@ -74,7 +74,13 @@ function compileSchema(schema: TSchema) {
       )
     },
   })
-  return ajv.compile(schema)
+  return ajv
+}
+
+const schemaCompiler = createSchemaCompiler()
+
+function compileSchema(schema: TSchema) {
+  return schemaCompiler.compile(schema)
 }
 
 function roundTrip<Schema extends TSchema>(schema: Schema, value: unknown) {
@@ -570,6 +576,7 @@ describe('bounded domain-state API contracts', () => {
     backendInstanceId: 'backend:one',
     sequence: 1,
   }
+  const contractEntries = Object.entries(DOMAIN_STATE_API_CONTRACTS)
 
   it('keeps payload and result versions explicit', () => {
     const payload: DomainStateApiPayload<'message:list'> = {
@@ -584,19 +591,25 @@ describe('bounded domain-state API contracts', () => {
     expect(
       validatePayload({ ...payload, limit: MAX_MESSAGE_PAGE_RECORDS + 1 }),
     ).toBe(false)
-    expect(Object.keys(DOMAIN_STATE_API_CONTRACTS)).toHaveLength(20)
+    expect(contractEntries).toHaveLength(20)
     expect(DOMAIN_STATE_API_CONTRACTS).not.toHaveProperty('session:create')
     expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('run:start')
     expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('message:search')
     expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('session:fork')
-    for (const contract of Object.values(DOMAIN_STATE_API_CONTRACTS)) {
+    for (const [, contract] of contractEntries) {
       expect(everySchemaBranchHasVersion(contract.payload)).toBe(true)
       expect(everySchemaBranchHasVersion(contract.result)).toBe(true)
-      expect(() => compileSchema(contract.payload)).not.toThrow()
-      expect(() => compileSchema(contract.result)).not.toThrow()
     }
     expect(compileSchema(SessionUpdatePatchSchema)({})).toBe(false)
   })
+
+  it.each(contractEntries)(
+    'compiles the %s payload and result schemas',
+    (_name, contract) => {
+      expect(() => compileSchema(contract.payload)).not.toThrow()
+      expect(() => compileSchema(contract.result)).not.toThrow()
+    },
+  )
 
   it('models lazy run start and bounded live runtime state', () => {
     const runtime = {

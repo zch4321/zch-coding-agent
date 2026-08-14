@@ -1,5 +1,11 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import type { CallId, RunId, SessionId } from '../../shared/ids'
+import type {
+  AgentExecutionId,
+  CallId,
+  RunId,
+  SessionId,
+} from '../../shared/ids'
 import type { FrozenSubagentRoutes } from './contracts'
 import { SubagentExecutionService } from './execution-service'
 import {
@@ -77,12 +83,15 @@ function fixture(
       record: SubagentExecutionRecord,
     ) => Promise<{ created: boolean; record: SubagentExecutionRecord }>
     outcome?: ChildOutcome
+    preparedRecord?: SubagentExecutionRecord
   } = {},
 ) {
   const config = configuredPublicConfig()
   config.subagents.workerTimeoutMs = options.timeoutMs ?? 60_000
   config.limits.maxConcurrentRuns = options.maxConcurrentRuns ?? 16
-  let persisted: SubagentExecutionRecord | undefined
+  let persisted = options.preparedRecord
+    ? structuredClone(options.preparedRecord)
+    : undefined
   const state = {
     createExecution: vi.fn(async (record: SubagentExecutionRecord) => {
       if (options.reserve) return options.reserve(record)
@@ -92,6 +101,9 @@ function fixture(
     updateExecution: vi.fn(async (record: SubagentExecutionRecord) => {
       persisted = structuredClone(record)
     }),
+    getExecution: vi.fn(async () =>
+      persisted ? structuredClone(persisted) : undefined,
+    ),
   }
   const inherited = routes()
   let settleBlockedRun: ((outcome: ChildOutcome) => void) | undefined
@@ -102,6 +114,14 @@ function fixture(
     : undefined
   const manager = {
     frozenSubagentRoutes: vi.fn(() => inherited),
+    reserveQueuedInternalRun: vi.fn(async () => ({
+      runId: 'run:reserved-child' as RunId,
+      lease: {
+        releaseRunSlot: (): void => undefined,
+        releaseWriter: (): void => undefined,
+        release: (): void => undefined,
+      },
+    })),
     createInternalSession: vi.fn(
       async (input: {
         workspace: string
@@ -409,5 +429,85 @@ describe('SubagentExecutionService', () => {
     await expect(
       corrupt.service.runOne({ name: 'worker', task: 'inspect' }, parent()),
     ).rejects.toMatchObject({ code: 'SUBAGENT_RESULT_CORRUPT' })
+  })
+
+  it('runs a prepared Swarm child after a queued slot without charging queue time to its timeout', async () => {
+    const spec = {
+      name: 'worker',
+      task: 'inspect </swarm_task> directly',
+      sharedContext: 'npm run check exited 0 with <stable> output',
+    }
+    const executionId = 'subagent:prepared' as AgentExecutionId
+    const parentExecutionId = 'swarm:prepared' as AgentExecutionId
+    const record: SubagentExecutionRecord = {
+      id: executionId,
+      kind: 'subagent',
+      parentExecutionId,
+      childOrdinal: 0,
+      name: spec.name,
+      parentSessionId: 'session:parent' as SessionId,
+      parentRunId: 'run:parent' as RunId,
+      parentCallId: 'call:subagent' as CallId,
+      specHash: createHash('sha256').update(JSON.stringify(spec)).digest('hex'),
+      status: 'queued',
+      route: { schemaVersion: 1 },
+      createdAt: '2026-08-09T00:00:00.000Z',
+      updatedAt: '2026-08-09T00:00:00.000Z',
+    }
+    const target = fixture({
+      timeoutMs: 5,
+      preparedRecord: record,
+    })
+    let grant!: (reservation: {
+      runId: RunId
+      lease: {
+        releaseRunSlot: () => void
+        releaseWriter: () => void
+        release: () => void
+      }
+    }) => void
+    target.manager.reserveQueuedInternalRun.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          grant = resolve
+        }),
+    )
+    const running = target.service.runPrepared(spec, parent(), {
+      executionId,
+      parentExecutionId,
+      childOrdinal: 0,
+      routes: target.inherited,
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 15))
+    expect(target.manager.startInternalRun).not.toHaveBeenCalled()
+    const release = vi.fn()
+    grant({
+      runId: 'run:reserved-child' as RunId,
+      lease: {
+        releaseRunSlot: vi.fn(),
+        releaseWriter: vi.fn(),
+        release,
+      },
+    })
+
+    await expect(running).resolves.toMatchObject({
+      results: { worker: 'child response' },
+    })
+    expect(target.manager.startInternalRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: {
+          content:
+            '<swarm_shared_context>\nnpm run check exited 0 with &lt;stable&gt; output\n</swarm_shared_context>',
+          source: 'swarm:shared-context',
+        },
+        task: '<swarm_task>\ninspect &lt;/swarm_task&gt; directly\n</swarm_task>',
+        reservation: expect.objectContaining({
+          runId: 'run:reserved-child',
+        }),
+        routes: target.inherited,
+      }),
+    )
+    expect(release).not.toHaveBeenCalled()
   })
 })

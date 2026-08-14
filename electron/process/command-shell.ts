@@ -15,6 +15,11 @@ const WINDOWS_AUTO_ORDER: readonly CommandShellProfileId[] = [
 ]
 const DISCOVERY_TIMEOUT_MS = 2_000
 
+export const POWERSHELL_PROCESS_EXECUTION_POLICY_ARGS = [
+  '-ExecutionPolicy',
+  'Bypass',
+] as const
+
 export interface ResolvedCommandShell {
   profile: CommandShellProfile
   requested: CommandShellSelection
@@ -54,8 +59,10 @@ async function defaultFileExists(candidate: string): Promise<boolean> {
 }
 
 function pathEntries(dependencies: DiscoveryDependencies): string[] {
+  const platformPath =
+    dependencies.platform === 'win32' ? path.win32 : path.posix
   return (environmentValue(dependencies.environment, 'PATH') ?? '')
-    .split(path.delimiter)
+    .split(platformPath.delimiter)
     .map((entry) => entry.trim().replace(/^"|"$/gu, ''))
     .filter(Boolean)
 }
@@ -66,10 +73,12 @@ async function firstExisting(
 ): Promise<
   { executable: string; source: CommandShellProfile['source'] } | undefined
 > {
+  const platformPath =
+    dependencies.platform === 'win32' ? path.win32 : path.posix
   for (const candidate of candidates) {
     if (await dependencies.fileExists(candidate)) {
       return {
-        executable: path.resolve(candidate),
+        executable: platformPath.resolve(candidate),
         source: 'well-known',
       }
     }
@@ -84,10 +93,12 @@ async function findOnPath(
 ): Promise<
   { executable: string; source: CommandShellProfile['source'] } | undefined
 > {
+  const platformPath =
+    dependencies.platform === 'win32' ? path.win32 : path.posix
   for (const entry of pathEntries(dependencies)) {
-    const candidate = path.join(entry, executableName)
+    const candidate = platformPath.join(entry, executableName)
     if (accept(candidate) && (await dependencies.fileExists(candidate))) {
-      return { executable: path.resolve(candidate), source: 'path' }
+      return { executable: platformPath.resolve(candidate), source: 'path' }
     }
   }
   return undefined
@@ -105,6 +116,7 @@ function profile(
 async function discoverWindowsShells(
   dependencies: DiscoveryDependencies,
 ): Promise<CommandShellProfile[]> {
+  const windowsPath = path.win32
   const entries: CommandShellProfile[] = []
   const programFiles = environmentValue(
     dependencies.environment,
@@ -118,14 +130,14 @@ async function discoverWindowsShells(
   const [pwsh, windowsPowerShell, cmd, gitBash, nushell] = await Promise.all([
     firstExisting(
       programFiles
-        ? [path.join(programFiles, 'PowerShell', '7', 'pwsh.exe')]
+        ? [windowsPath.join(programFiles, 'PowerShell', '7', 'pwsh.exe')]
         : [],
       dependencies,
     ).then((located) => located ?? findOnPath('pwsh.exe', dependencies)),
     firstExisting(
       windowsDirectory
         ? [
-            path.join(
+            windowsPath.join(
               windowsDirectory,
               'System32',
               'WindowsPowerShell',
@@ -138,7 +150,7 @@ async function discoverWindowsShells(
     ).then((located) => located ?? findOnPath('powershell.exe', dependencies)),
     firstExisting(
       windowsDirectory
-        ? [path.join(windowsDirectory, 'System32', 'cmd.exe')]
+        ? [windowsPath.join(windowsDirectory, 'System32', 'cmd.exe')]
         : [],
       dependencies,
     ).then((located) => located ?? findOnPath('cmd.exe', dependencies)),
@@ -146,12 +158,20 @@ async function discoverWindowsShells(
       [
         ...(programFiles
           ? [
-              path.join(programFiles, 'Git', 'bin', 'bash.exe'),
-              path.join(programFiles, 'Git', 'usr', 'bin', 'bash.exe'),
+              windowsPath.join(programFiles, 'Git', 'bin', 'bash.exe'),
+              windowsPath.join(programFiles, 'Git', 'usr', 'bin', 'bash.exe'),
             ]
           : []),
         ...(localAppData
-          ? [path.join(localAppData, 'Programs', 'Git', 'bin', 'bash.exe')]
+          ? [
+              windowsPath.join(
+                localAppData,
+                'Programs',
+                'Git',
+                'bin',
+                'bash.exe',
+              ),
+            ]
           : []),
       ],
       dependencies,
@@ -162,7 +182,9 @@ async function discoverWindowsShells(
           'bash.exe',
           dependencies,
           (candidate) =>
-            !candidate.toLowerCase().includes(`${path.sep}system32${path.sep}`),
+            !candidate
+              .toLowerCase()
+              .includes(`${windowsPath.sep}system32${windowsPath.sep}`),
         ),
     ),
     findOnPath('nu.exe', dependencies),
@@ -195,8 +217,8 @@ async function discoverPosixShells(
       ? configured
       : '/bin/sh'
   return [
-    profile('system-shell', 'posix', path.basename(executable), {
-      executable: path.resolve(executable),
+    profile('system-shell', 'posix', path.posix.basename(executable), {
+      executable: path.posix.resolve(executable),
       source: 'system',
     }),
   ]
@@ -340,6 +362,12 @@ export class CommandShellService {
     }
   }
 
+  /** Returns the fixed automatic profile for the current platform. */
+  async automaticProfile(refresh = false): Promise<CommandShellProfile> {
+    const profiles = await this.list(refresh)
+    return structuredClone(autoProfile(profiles, this.#dependencies.platform))
+  }
+
   /** Builds a renderer-safe catalog for the current configured selection. */
   async catalog(
     selected: CommandShellSelection,
@@ -369,6 +397,7 @@ export class CommandShellService {
             '-NoLogo',
             '-NoProfile',
             '-NonInteractive',
+            ...POWERSHELL_PROCESS_EXECUTION_POLICY_ARGS,
             '-Command',
             powershellScript(command),
           ],

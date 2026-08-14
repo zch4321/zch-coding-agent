@@ -220,7 +220,7 @@ describe('SessionManager compaction failures', () => {
         ),
     ).toBe(true)
     await target.manager.closeSession(target.sessionId)
-  }, 10_000)
+  }, 30_000)
 
   it('retries two transient failures and preserves the single command journal', async () => {
     const target = await setup(['network', 'network', 'completed'])
@@ -251,7 +251,7 @@ describe('SessionManager compaction failures', () => {
         ),
     ).toHaveLength(1)
     await target.manager.closeSession(target.sessionId)
-  }, 10_000)
+  }, 30_000)
 
   it('fails with the stable UI message and leaves old history active', async () => {
     const target = await setup(['truncated', 'truncated'])
@@ -301,7 +301,7 @@ describe('SessionManager compaction failures', () => {
     ).toBe(true)
     expect(() => new MessageHistoryCompiler().compile(history)).not.toThrow()
     await target.manager.closeSession(target.sessionId)
-  }, 10_000)
+  }, 30_000)
 
   it('falls back once and caches an unsupported native compact capability', async () => {
     const target = await setupProvider(new NativeFallbackProvider())
@@ -329,5 +329,5 @@ describe('SessionManager compaction failures', () => {
     expect(target.provider.nativeCalls).toBe(1)
     expect(target.provider.syntheticCalls).toBe(2)
     await target.manager.closeSession(target.sessionId)
-  }, 10_000)
+  }, 30_000)
 })

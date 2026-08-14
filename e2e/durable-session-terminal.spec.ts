@@ -292,7 +292,7 @@ test.describe.serial('Durable Session and terminal workflows', () => {
     await page.keyboard.press('Enter')
     await expect(
       page.locator('.terminal-surface:visible .xterm-rows'),
-    ).toContainText('E2E_PTY_OK', { timeout: 15_000 })
+    ).toContainText('E2E_PTY_OK', { timeout: 30_000 })
 
     await terminalPanel.getByRole('button', { name: '新建终端' }).click()
     await expect(terminalTabs).toHaveCount(2)

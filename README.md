@@ -139,4 +139,4 @@ Desktop 的 Project、Session、Message 和 FileChange 审计只以 Electron `us
 
 ## 当前状态
 
-当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek、Generic Chat Completions、Generic Responses 与 Generic Anthropic Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、ProjectModel、Serena 只读代码智能、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity 和完整 Session transcript。后续方向包括 Google 与具体厂商 Provider、Subagent/Swarm、插件加载器与 IDE 级编辑能力。
+当前版本以 Windows x64 为主要桌面发布目标，已覆盖桌面 UI、DeepSeek、Generic Chat Completions、Generic Responses 与 Generic Anthropic Provider、文件/命令/终端工具、权限审批、上下文预算、可配置提示词、Skills 管理、Generic MCP gateway、固定 Yolo Headless host、Electron/Headless parity、只读 Subagent、模型池、Run-scoped Desktop Swarm、Agents 运行状态与完整 Session transcript。ProjectModel 与 Serena 代码智能目前暂停，待完成总路线图中的 Swarm hardening 后迁移到 SQLite 再恢复；后续方向还包括 Google 与具体厂商 Provider、插件加载器与 IDE 级编辑能力。

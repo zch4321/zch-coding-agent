@@ -24,6 +24,7 @@ export interface SlashCommandResolution {
     source: string
   }>
   goal?: GoalState
+  swarmGoal?: string
 }
 
 function now(): string {
@@ -155,6 +156,40 @@ export function resolveSlashCommand(input: {
     }
   }
 
+  if (parsed.command === 'swarm') {
+    if (!parsed.rest) {
+      throw new Error('/swarm requires an objective.')
+    }
+    const resolved = input.promptRegistry?.swarmPrompt(
+      input.config.assistant.language,
+    )
+    const prompt = resolved
+      ? { text: resolved.content, resource: resolved.resource }
+      : {
+          text: 'Coordinate this Swarm objective: ${objective}\n\nRun relevant verification first when feasible. Put its commands, exit codes, and concise output with common background in sharedContext, then use swarm_run with focused read-only tasks. Use multiple replicas for independent cross-model checks, compare every result, and produce the final synthesis.',
+        }
+    const instruction = renderPromptTemplate(prompt.text, {
+      objective: parsed.rest,
+    })
+    return {
+      visibleMessage: input.message,
+      providerMessage: input.message,
+      providerContextMessages: [
+        {
+          kind: 'orchestrator',
+          source: 'slash:/swarm',
+          content: orchestrationRequestContent('swarm', instruction),
+        },
+      ],
+      swarmGoal: parsed.rest,
+      orchestratorMessage: {
+        kind: 'swarm-started',
+        text: `Swarm requested: ${parsed.rest}`,
+        resource: prompt.resource,
+      },
+    }
+  }
+
   if (parsed.command === 'goal') {
     if (!parsed.rest) {
       throw new Error('/goal requires an objective.')
@@ -220,6 +255,6 @@ export function resolveSlashCommand(input: {
   }
 
   throw new Error(
-    `Unknown slash command "/${parsed.command}". Supported commands: /prompt, /skill, /compact, /goal, /plan.`,
+    `Unknown slash command "/${parsed.command}". Supported commands: /prompt, /skill, /compact, /goal, /plan, /swarm.`,
   )
 }

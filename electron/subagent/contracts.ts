@@ -11,6 +11,7 @@ import type { RunStatus } from '../../shared/agent-events'
 export interface SubagentSpec {
   name: string
   task: string
+  sharedContext?: string
 }
 
 export interface SubagentParentContext {
@@ -72,11 +73,27 @@ export interface SubagentRunResult {
   }
 }
 
+export interface PreparedSubagentExecution {
+  executionId: AgentExecutionId
+  parentExecutionId: AgentExecutionId
+  childOrdinal: number
+  routes: FrozenSubagentRoutes
+}
+
 /** Runs one backend-private Subagent against a frozen parent Run context. */
 export interface SubagentExecutionPort {
   runOne(
     spec: SubagentSpec,
     parent: SubagentParentContext,
+  ): Promise<SubagentRunResult>
+}
+
+/** Runs both standalone and pre-persisted model-pool Subagent executions. */
+export interface PreparedSubagentExecutionPort extends SubagentExecutionPort {
+  runPrepared(
+    spec: SubagentSpec,
+    parent: SubagentParentContext,
+    prepared: PreparedSubagentExecution,
   ): Promise<SubagentRunResult>
 }
 

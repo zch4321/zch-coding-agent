@@ -8,7 +8,7 @@ const Sha256Schema = Type.String({
 
 export const RuntimeIdentitySchema = Type.Object(
   {
-    schemaVersion: Type.Literal(4),
+    schemaVersion: Type.Literal(5),
     sourceCommit: Type.String({ minLength: 1, maxLength: 128 }),
     sourceTree: Type.Union([
       Type.Literal('clean'),
@@ -61,6 +61,7 @@ export const RuntimeIdentitySchema = Type.Object(
         permissionMode: Type.Literal('yolo'),
         skillsEnabled: Type.Boolean(),
         subagentsEnabled: Type.Boolean(),
+        swarmsEnabled: Type.Boolean(),
         mcpServerIds: Type.Array(
           Type.String({ minLength: 1, maxLength: 128 }),
           {

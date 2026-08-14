@@ -40,6 +40,20 @@ export interface RunAccessLease {
   release: () => void
 }
 
+interface QueuedRunAccessRequest {
+  input: {
+    limit: number
+    workspace: string
+    mode: 'readonly'
+    sessionId: SessionId
+    runId: RunId
+  }
+  signal: AbortSignal
+  resolve: (lease: RunAccessLease) => void
+  reject: (error: unknown) => void
+  onAbort: () => void
+}
+
 export type FileChangeRevertAccessResult =
   | { acquired: true; release: () => void }
   | {
@@ -58,6 +72,7 @@ export type FileChangeRevertAccessResult =
 export class WorkspaceAccessCoordinator {
   readonly #activeRuns = new Map<RunId, RunWorkspaceWriterOwner | undefined>()
   readonly #writers = new Map<string, WorkspaceWriterOwner>()
+  readonly #queuedRuns: QueuedRunAccessRequest[] = []
   readonly #onWriterChanged: (
     status: 'acquired' | 'released',
     owner: WorkspaceWriterOwner,
@@ -124,6 +139,7 @@ export class WorkspaceAccessCoordinator {
       if (runSlotReleased) return
       runSlotReleased = true
       this.#activeRuns.delete(input.runId)
+      this.#drainQueuedRuns()
     }
     const releaseWriter = () => {
       if (writerReleased) return
@@ -146,6 +162,50 @@ export class WorkspaceAccessCoordinator {
         },
       },
     }
+  }
+
+  /** Waits in FIFO order for a run slot while preserving normal fail-fast acquisition. */
+  acquireQueued(
+    input: {
+      limit: number
+      workspace: string
+      mode: 'readonly'
+      sessionId: SessionId
+      runId: RunId
+    },
+    signal: AbortSignal,
+  ): Promise<RunAccessLease> {
+    if (signal.aborted) {
+      return Promise.reject(
+        signal.reason ?? new Error('Run slot wait cancelled'),
+      )
+    }
+    if (this.#queuedRuns.length === 0) {
+      const immediate = this.acquire(input)
+      if (immediate.acquired) return Promise.resolve(immediate.lease)
+      if (immediate.rejection.reason !== 'max_concurrent_runs') {
+        return Promise.reject(
+          new Error('Workspace writer access is unavailable'),
+        )
+      }
+    }
+    return new Promise<RunAccessLease>((resolve, reject) => {
+      const request = {
+        input: { ...input },
+        signal,
+        resolve,
+        reject,
+        onAbort: () => undefined,
+      } satisfies QueuedRunAccessRequest
+      request.onAbort = () => {
+        const index = this.#queuedRuns.indexOf(request)
+        if (index >= 0) this.#queuedRuns.splice(index, 1)
+        reject(signal.reason ?? new Error('Run slot wait cancelled'))
+      }
+      signal.addEventListener('abort', request.onAbort, { once: true })
+      this.#queuedRuns.push(request)
+      this.#drainQueuedRuns()
+    })
   }
 
   /** Acquires exclusive workspace writer access for a file-change revert operation. */
@@ -201,8 +261,38 @@ export class WorkspaceAccessCoordinator {
     const writers = [...this.#writers.values()]
     this.#activeRuns.clear()
     this.#writers.clear()
+    const queued = this.#queuedRuns.splice(0)
+    for (const request of queued) {
+      request.signal.removeEventListener('abort', request.onAbort)
+      request.reject(new Error('Workspace access coordinator was released'))
+    }
     for (const owner of writers) {
       this.#onWriterChanged('released', owner)
+    }
+  }
+
+  #drainQueuedRuns(): void {
+    while (this.#queuedRuns.length > 0) {
+      const request = this.#queuedRuns[0]!
+      if (request.signal.aborted) {
+        this.#queuedRuns.shift()
+        request.signal.removeEventListener('abort', request.onAbort)
+        request.reject(
+          request.signal.reason ?? new Error('Run slot wait cancelled'),
+        )
+        continue
+      }
+      const acquired = this.acquire(request.input)
+      if (!acquired.acquired) {
+        if (acquired.rejection.reason === 'max_concurrent_runs') return
+        this.#queuedRuns.shift()
+        request.signal.removeEventListener('abort', request.onAbort)
+        request.reject(new Error('Workspace writer access is unavailable'))
+        continue
+      }
+      this.#queuedRuns.shift()
+      request.signal.removeEventListener('abort', request.onAbort)
+      request.resolve(acquired.lease)
     }
   }
 }

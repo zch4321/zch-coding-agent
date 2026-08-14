@@ -14,6 +14,7 @@ import {
 import type { SessionOrchestratorMessages } from './session-orchestrator-messages'
 import { resolveSlashCommand } from './slash-commands'
 import type { ActiveRun, AgentEventDraft, SessionState } from './session-types'
+import { resolveSwarmAvailability } from './session-swarm-availability'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 
 export interface PreparedUserTurn {
@@ -38,6 +39,7 @@ export class SessionUserTurnPreparer {
   readonly #getWorkspaceConcurrency: (
     session: SessionState,
   ) => WorkspaceConcurrencyContext
+  readonly #swarmHostEnabled: boolean
 
   constructor(options: {
     configStore: ConfigStore
@@ -49,6 +51,7 @@ export class SessionUserTurnPreparer {
     getWorkspaceConcurrency?: (
       session: SessionState,
     ) => WorkspaceConcurrencyContext
+    swarmHostEnabled?: boolean
   }) {
     this.#configStore = options.configStore
     this.#toolRegistry = options.toolRegistry
@@ -58,6 +61,7 @@ export class SessionUserTurnPreparer {
     this.#emit = options.emit
     this.#getWorkspaceConcurrency =
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
+    this.#swarmHostEnabled = options.swarmHostEnabled ?? false
   }
 
   /** Appends the user turn, selected context, and harness prompts before provider execution. */
@@ -68,10 +72,27 @@ export class SessionUserTurnPreparer {
     context?: RunContext,
   ): Promise<PreparedUserTurn> {
     const config = this.#configStore.getPublicConfig()
+    const command = resolveSlashCommand({
+      message: userMessage,
+      config,
+      skillsManager: this.#skillsManager,
+      promptRegistry: this.#promptRegistry,
+    })
+    const swarm = resolveSwarmAvailability({
+      hostEnabled: this.#swarmHostEnabled,
+      runSubagentsEnabled: run.subagentsEnabled,
+      config,
+      requestedGoal: command.swarmGoal,
+    })
+    run.swarmToolConfig = swarm.toolConfig
+    if (command.swarmGoal && swarm.unavailableReason) {
+      throw new Error(swarm.unavailableReason)
+    }
     const toolCatalog = await resolveSessionToolCatalog({
       registry: this.#toolRegistry,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
+      swarmMaxAgents: run.swarmToolConfig?.maxAgentsPerJob,
       gitToolsEnabled: session.gitToolsEnabled,
     })
     await appendRuntimeContextIfChanged(session, {
@@ -95,13 +116,6 @@ export class SessionUserTurnPreparer {
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
     })
-    const command = resolveSlashCommand({
-      message: userMessage,
-      config,
-      skillsManager: this.#skillsManager,
-      promptRegistry: this.#promptRegistry,
-    })
-
     if (command.goal) {
       session.goal = command.goal
       this.#emit(session, {

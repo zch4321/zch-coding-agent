@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '../../shared/ids'
+import type { CommandShellProfile } from '../../shared/command-shell'
 import type { PtyLike, TerminalEventDraft } from './pool'
 import { TerminalPool } from './pool'
 
@@ -49,20 +50,34 @@ class FakePty implements PtyLike {
 const sessionA = 'session:a' as SessionId
 const sessionB = 'session:b' as SessionId
 
-async function harness(scrollbackBytes = 1_024) {
+async function harness(
+  scrollbackBytes = 1_024,
+  options: {
+    platform?: NodeJS.Platform
+    defaultWindowsShell?: Pick<CommandShellProfile, 'executable' | 'kind'>
+  } = {},
+) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agent-terminal-'))
   const events: TerminalEventDraft[] = []
   const ptys: FakePty[] = []
+  const launches: Array<{ shell: string; args: string[] }> = []
   const pool = new TerminalPool({
     getScrollbackBytes: () => scrollbackBytes,
     emit: (event) => events.push(event),
-    spawnPty: () => {
+    ...(options.platform ? { platform: options.platform } : {}),
+    ...(options.defaultWindowsShell
+      ? {
+          resolveDefaultWindowsShell: async () => options.defaultWindowsShell!,
+        }
+      : {}),
+    spawnPty: (shell, args) => {
+      launches.push({ shell, args: [...args] })
       const pty = new FakePty()
       ptys.push(pty)
       return pty
     },
   })
-  return { root, events, ptys, pool }
+  return { root, events, launches, ptys, pool }
 }
 
 describe('TerminalPool', () => {
@@ -129,5 +144,41 @@ describe('TerminalPool', () => {
     const open = vi.spyOn(pool, 'open')
     await pool.open({ sessionId: sessionA, workspace: root })
     expect(open).toHaveBeenCalledOnce()
+  })
+
+  it('starts the preferred Windows PowerShell with process-level script execution', async () => {
+    const { root, launches, pool } = await harness(1_024, {
+      platform: 'win32',
+      defaultWindowsShell: {
+        executable: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+        kind: 'powershell',
+      },
+    })
+
+    await pool.open({ sessionId: sessionA, workspace: root })
+
+    expect(launches).toEqual([
+      {
+        shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+        args: ['-ExecutionPolicy', 'Bypass'],
+      },
+    ])
+  })
+
+  it('applies the same PowerShell arguments to an explicit Windows shell', async () => {
+    const { root, launches, pool } = await harness(1_024, {
+      platform: 'win32',
+    })
+
+    await pool.open({
+      sessionId: sessionA,
+      workspace: root,
+      shell: 'powershell.exe',
+    })
+
+    expect(launches[0]).toEqual({
+      shell: 'powershell.exe',
+      args: ['-ExecutionPolicy', 'Bypass'],
+    })
   })
 })

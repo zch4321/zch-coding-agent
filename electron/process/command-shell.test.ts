@@ -4,19 +4,20 @@ import { CommandShellService } from './command-shell'
 
 function windowsService(files: readonly string[]): CommandShellService {
   const available = new Set(
-    files.map((file) => path.resolve(file).toLowerCase()),
+    files.map((file) => path.win32.resolve(file).toLowerCase()),
   )
   return new CommandShellService({
     platform: 'win32',
     environment: {
       PATH: ['C:\\Shells\\PowerShell7', 'C:\\Windows\\System32'].join(
-        path.delimiter,
+        path.win32.delimiter,
       ),
       ProgramFiles: 'C:\\Program Files',
       LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local',
+      WINDIR: 'C:\\Windows',
     },
     fileExists: async (candidate) =>
-      available.has(path.resolve(candidate).toLowerCase()),
+      available.has(path.win32.resolve(candidate).toLowerCase()),
   })
 }
 
@@ -50,7 +51,9 @@ describe('CommandShellService', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: 'git-bash',
-          executable: path.resolve('C:\\Program Files\\Git\\bin\\bash.exe'),
+          executable: path.win32.resolve(
+            'C:\\Program Files\\Git\\bin\\bash.exe',
+          ),
         }),
       ]),
     )
@@ -68,10 +71,16 @@ describe('CommandShellService', () => {
     )
 
     expect(powershellInvocation.executable).toBe(
-      path.resolve('C:\\Shells\\PowerShell7\\pwsh.exe'),
+      path.win32.resolve('C:\\Shells\\PowerShell7\\pwsh.exe'),
     )
     expect(powershellInvocation.args).toEqual(
-      expect.arrayContaining(['-NoProfile', '-NonInteractive', '-Command']),
+      expect.arrayContaining([
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+      ]),
     )
     expect(powershellInvocation.args.at(-1)).toContain(
       '[Console]::OutputEncoding',
@@ -85,5 +94,28 @@ describe('CommandShellService', () => {
       '/c',
       'chcp 65001>nul & echo 中文',
     ])
+  })
+
+  it('uses pwsh, Windows PowerShell, then CMD for Windows automatic selection', async () => {
+    const all = windowsService([
+      'C:\\Shells\\PowerShell7\\pwsh.exe',
+      'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      'C:\\Windows\\System32\\cmd.exe',
+    ])
+    const withoutPwsh = windowsService([
+      'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      'C:\\Windows\\System32\\cmd.exe',
+    ])
+    const cmdOnly = windowsService(['C:\\Windows\\System32\\cmd.exe'])
+
+    await expect(all.automaticProfile()).resolves.toMatchObject({
+      id: 'powershell-7',
+    })
+    await expect(withoutPwsh.automaticProfile()).resolves.toMatchObject({
+      id: 'windows-powershell',
+    })
+    await expect(cmdOnly.automaticProfile()).resolves.toMatchObject({
+      id: 'cmd',
+    })
   })
 })

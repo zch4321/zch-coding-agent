@@ -85,6 +85,11 @@ import { SubagentRuntimeError } from '../subagent/contracts'
 
 const RUN_CANCEL_GRACE_MS = 2_000
 
+export interface InternalRunReservation {
+  runId: RunId
+  lease: RunAccessLease
+}
+
 /**
  * Main-process facade for agent sessions.
  *
@@ -187,6 +192,7 @@ export class SessionManager {
       skillsManager: this.#skillsManager,
       mcpManager: options.mcpManager,
       subagentExecution: options.subagentExecution,
+      swarmExecution: options.swarmExecution,
       getSession: (sessionId) => this.#sessions.get(sessionId),
       emit: (session, event) => this.#emit(session, event),
     })
@@ -226,6 +232,7 @@ export class SessionManager {
       emit: (session, event) => this.#emit(session, event),
       getWorkspaceConcurrency: (session) =>
         this.#workspaceConcurrencyContext(session),
+      swarmHostEnabled: options.swarmHostEnabled ?? false,
     })
     const providerTurns = new SessionProviderTurnRunner({
       configStore: this.#configStore,
@@ -808,12 +815,37 @@ export class SessionManager {
     })
   }
 
+  /** Returns the frozen Swarm limits and optional slash-command goal for a live parent Run. */
+  frozenSwarmContext(
+    sessionId: SessionId,
+    runId: RunId,
+  ): { goal?: string; maxAgentsPerJob: number } {
+    const session = this.#sessions.get(sessionId)
+    const run = session?.activeRun
+    if (
+      !session ||
+      session.closed ||
+      session.visibility !== 'public' ||
+      !run ||
+      run.runId !== runId ||
+      !run.swarmToolConfig
+    ) {
+      throw new SubagentRuntimeError(
+        'SWARM_NOT_AVAILABLE',
+        'Swarm is not available in this Run',
+      )
+    }
+    return structuredClone(run.swarmToolConfig)
+  }
+
   /** Starts one internal Run with a plain user input and exact inherited routes. */
   startInternalRun(input: {
     sessionId: SessionId
     task: string
+    context?: { content: string; source: string }
     clientRequestId: string
     routes: FrozenSubagentRoutes
+    reservation?: InternalRunReservation
   }): {
     runId: RunId
     completion: Promise<InternalSubagentRunOutcome>
@@ -835,9 +867,11 @@ export class SessionManager {
       {
         routes: input.routes,
         directUserInput: true,
+        ...(input.context ? { directContext: input.context } : {}),
         subagentsEnabled: false,
         allowedToolIds: session.allowedToolIds,
         skipProviderPreconditions: true,
+        ...(input.reservation ? { reservedAccess: input.reservation } : {}),
       },
     )
     const run = session.activeRun
@@ -877,6 +911,33 @@ export class SessionManager {
         }
       }),
     }
+  }
+
+  /** Waits for and reserves one readonly global Run slot for a Swarm child. */
+  async reserveQueuedInternalRun(input: {
+    sessionId: SessionId
+    workspace: string
+    signal: AbortSignal
+  }): Promise<InternalRunReservation> {
+    const limit = this.#configStore.getPublicConfig().limits.maxConcurrentRuns
+    if (limit < 2) {
+      throw new SubagentRuntimeError(
+        'SUBAGENT_CONCURRENCY_DISABLED',
+        'Queued Subagent execution requires maxConcurrentRuns to be at least 2',
+      )
+    }
+    const runId = id<RunId>('run')
+    const lease = await this.#workspaceAccess.acquireQueued(
+      {
+        limit,
+        workspace: input.workspace,
+        mode: 'readonly',
+        sessionId: input.sessionId,
+        runId,
+      },
+      input.signal,
+    )
+    return { runId, lease }
   }
 
   /** Attributes child usage to its active parent Run without exposing child events. */

@@ -66,6 +66,7 @@
 }
 
 .agent-execution-status-dot.status-preparing,
+.agent-execution-status-dot.status-queued,
 .agent-execution-status-dot.status-running {
   background: var(--primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
@@ -81,6 +82,7 @@
 }
 
 .agent-execution-status-dot.status-cancelled,
+.agent-execution-status-dot.status-partial,
 .agent-execution-status-dot.status-interrupted {
   background: var(--warning);
 }
@@ -89,6 +91,18 @@
   display: grid;
   min-width: 0;
   gap: 10px;
+}
+
+.agent-execution-child-list {
+  min-width: 0;
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.agent-execution-child-item,
+.agent-execution-child-item > .n-collapse-item__content-wrapper {
+  min-width: 0;
 }
 
 .agent-execution-stats {

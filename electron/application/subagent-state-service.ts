@@ -1,5 +1,11 @@
 import type { MessageRecord } from '../../shared/message'
-import type { SessionId } from '../../shared/ids'
+import type { AgentExecutionCounts } from '../../shared/agent-execution'
+import type {
+  AgentExecutionId,
+  CallId,
+  RunId,
+  SessionId,
+} from '../../shared/ids'
 import type { SessionRecord } from '../../shared/session'
 import type { ApplicationStateCoordinator } from './application-state-coordinator'
 import { ApplicationError } from './application-error'
@@ -40,6 +46,97 @@ export class SubagentStateService {
       this.#subagents.insert(transaction, record)
       return { created: true, record: structuredClone(record) }
     })
+  }
+
+  /** Atomically reserves one Swarm root and every prepared child execution. */
+  async createSwarmJob(
+    root: SubagentExecutionRecord,
+    children: readonly SubagentExecutionRecord[],
+  ): Promise<{
+    created: boolean
+    root: SubagentExecutionRecord
+    children: SubagentExecutionRecord[]
+  }> {
+    return this.#coordinator.internalCommand((transaction) => {
+      const existing = this.#subagents.findByParentCall(transaction, root)
+      if (existing) {
+        return {
+          created: false,
+          root: existing,
+          children: this.#subagents
+            .listChildren(transaction, {
+              parentSessionId: root.parentSessionId,
+              parentExecutionId: existing.id,
+            })
+            .map((entry) => entry.record),
+        }
+      }
+      if (
+        root.kind !== 'swarm' ||
+        root.parentExecutionId ||
+        children.some(
+          (child, index) =>
+            child.kind !== 'subagent' ||
+            child.parentExecutionId !== root.id ||
+            child.childOrdinal !== index ||
+            child.parentSessionId !== root.parentSessionId ||
+            child.parentRunId !== root.parentRunId ||
+            child.parentCallId !== root.parentCallId,
+        )
+      ) {
+        throw new ApplicationError(
+          'PRECONDITION_FAILED',
+          'Swarm execution identities are not contiguous and parent-scoped',
+        )
+      }
+      this.#subagents.insert(transaction, root)
+      for (const child of children) this.#subagents.insert(transaction, child)
+      return {
+        created: true,
+        root: structuredClone(root),
+        children: structuredClone([...children]),
+      }
+    })
+  }
+
+  /** Loads one execution record after verifying its public parent Session. */
+  async getExecution(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<SubagentExecutionRecord | undefined> {
+    return (
+      await this.#coordinator.query(
+        (reader) =>
+          this.#subagents.getOwned(reader, {
+            parentSessionId,
+            executionId,
+          })?.record,
+      )
+    ).value
+  }
+
+  /** Loads the root execution reserved by one parent Tool-call identity. */
+  async getRootExecution(input: {
+    parentSessionId: SessionId
+    parentRunId: RunId
+    parentCallId: CallId
+  }): Promise<SubagentExecutionRecord | undefined> {
+    return (
+      await this.#coordinator.query((reader) =>
+        this.#subagents.findByParentCall(reader, input),
+      )
+    ).value
+  }
+
+  /** Returns durable child lifecycle counts for a Swarm root. */
+  async executionCounts(
+    parentExecutionId: AgentExecutionId,
+  ): Promise<AgentExecutionCounts> {
+    return (
+      await this.#coordinator.query((reader) =>
+        this.#subagents.childCounts(reader, parentExecutionId),
+      )
+    ).value
   }
 
   /** Persists the latest execution status, result, usage, or diagnostic. */

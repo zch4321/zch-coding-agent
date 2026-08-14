@@ -9,14 +9,20 @@ import type { SessionRecord } from '../../shared/session'
 import type { AgentExecutionId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { LlmUsageRecord } from '../../shared/usage'
+import { MAX_SWARM_SHARED_CONTEXT_LENGTH } from '../../shared/swarm'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
 import { projectAgentExecutionSummary } from './public-projection'
 import {
+  swarmSharedContextContent,
+  swarmTaskContent,
+} from './assignment-prompt'
+import {
   SubagentRuntimeError,
   summarizeSubagentUsage,
-  type SubagentExecutionPort,
   type FrozenSubagentRoutes,
+  type PreparedSubagentExecution,
+  type PreparedSubagentExecutionPort,
   type SubagentParentContext,
   type SubagentRunResult,
   type SubagentSpec,
@@ -56,6 +62,7 @@ function json(value: unknown): JsonValue {
 function normalizeSpec(spec: SubagentSpec): SubagentSpec {
   const name = spec.name.trim()
   const task = spec.task.trim()
+  const sharedContext = spec.sharedContext?.trim()
   if (
     name.length < 1 ||
     [...name].length > 64 ||
@@ -73,7 +80,17 @@ function normalizeSpec(spec: SubagentSpec): SubagentSpec {
       'Subagent task must contain 1-32768 characters',
     )
   }
-  return { name, task }
+  if (
+    spec.sharedContext !== undefined &&
+    (!sharedContext ||
+      [...sharedContext].length > MAX_SWARM_SHARED_CONTEXT_LENGTH)
+  ) {
+    throw new SubagentRuntimeError(
+      'INVALID_SUBAGENT_SHARED_CONTEXT',
+      `Subagent shared context must contain 1-${MAX_SWARM_SHARED_CONTEXT_LENGTH} characters`,
+    )
+  }
+  return { name, task, ...(sharedContext ? { sharedContext } : {}) }
 }
 
 function completedResult(
@@ -190,7 +207,7 @@ function safeResultText(
 }
 
 /** Owns the hidden Session, timeout, idempotency, and cleanup for one child. */
-export class SubagentExecutionService implements SubagentExecutionPort {
+export class SubagentExecutionService implements PreparedSubagentExecutionPort {
   readonly #configStore: ConfigStore
   readonly #manager: SessionManager
   readonly #sessions: SessionService
@@ -246,6 +263,8 @@ export class SubagentExecutionService implements SubagentExecutionPort {
     const executionId = `subagent-${randomUUID()}` as AgentExecutionId
     const record: SubagentExecutionRecord = {
       id: executionId,
+      kind: 'subagent',
+      name: spec.name,
       parentSessionId: parent.sessionId,
       parentRunId: parent.runId,
       parentCallId: parent.callId,
@@ -285,32 +304,103 @@ export class SubagentExecutionService implements SubagentExecutionPort {
     }
     this.#publishExecutionChanged(record, spec.name)
 
+    return this.#launch({
+      spec,
+      parent,
+      routes,
+      record,
+      workerTimeoutMs: config.subagents.workerTimeoutMs,
+      queued: false,
+    })
+  }
+
+  /** Runs one atomically prepared Swarm child with its explicit frozen route. */
+  async runPrepared(
+    candidate: SubagentSpec,
+    parent: SubagentParentContext,
+    prepared: PreparedSubagentExecution,
+  ): Promise<SubagentRunResult> {
+    if (this.#disposing) {
+      throw new SubagentRuntimeError(
+        'SUBAGENT_RUNTIME_DISPOSING',
+        'Subagent runtime is shutting down',
+      )
+    }
+    const spec = normalizeSpec(candidate)
+    const config = this.#configStore.getPublicConfig()
+    this.#manager.frozenSubagentRoutes(parent.sessionId, parent.runId)
+    const record = await this.#state.getExecution(
+      parent.sessionId,
+      prepared.executionId,
+    )
+    if (
+      !record ||
+      record.kind !== 'subagent' ||
+      record.parentExecutionId !== prepared.parentExecutionId ||
+      record.childOrdinal !== prepared.childOrdinal ||
+      record.parentRunId !== parent.runId ||
+      record.parentCallId !== parent.callId ||
+      record.specHash !== specHash(spec)
+    ) {
+      throw new SubagentRuntimeError(
+        'SUBAGENT_PREPARED_EXECUTION_INVALID',
+        'Prepared Subagent execution does not match its durable identity',
+      )
+    }
+    const active = this.#active.get(record.id)
+    if (active) return active.promise
+    if (record.status === 'completed') {
+      const result = completedResult(record, spec.name)
+      if (result) return result
+      throw new SubagentRuntimeError(
+        'SUBAGENT_RESULT_CORRUPT',
+        'The persisted Subagent result is invalid',
+      )
+    }
+    if (record.status !== 'queued') {
+      throw new SubagentRuntimeError(
+        record.error?.code ?? 'SUBAGENT_ALREADY_FINALIZED',
+        record.error?.message ?? `Subagent execution is ${record.status}`,
+      )
+    }
+    return this.#launch({
+      spec,
+      parent,
+      routes: prepared.routes,
+      record,
+      workerTimeoutMs: config.subagents.workerTimeoutMs,
+      queued: true,
+    })
+  }
+
+  #launch(input: {
+    spec: SubagentSpec
+    parent: SubagentParentContext
+    routes: FrozenSubagentRoutes
+    record: SubagentExecutionRecord
+    workerTimeoutMs: number
+    queued: boolean
+  }): Promise<SubagentRunResult> {
     const controller = new AbortController()
     const timeoutReason = new SubagentRuntimeError(
       'SUBAGENT_TIMEOUT',
       'Subagent worker exceeded its configured timeout',
     )
-    const relayParentAbort = () => controller.abort(parent.signal.reason)
-    if (parent.signal.aborted) relayParentAbort()
+    const relayParentAbort = () => controller.abort(input.parent.signal.reason)
+    if (input.parent.signal.aborted) relayParentAbort()
     else
-      parent.signal.addEventListener('abort', relayParentAbort, { once: true })
-    const timeout = setTimeout(
-      () => controller.abort(timeoutReason),
-      config.subagents.workerTimeoutMs,
-    )
+      input.parent.signal.addEventListener('abort', relayParentAbort, {
+        once: true,
+      })
     const promise = this.#execute({
-      spec,
-      parent,
-      routes,
-      record,
+      ...input,
       controller,
       timeoutReason,
     }).finally(() => {
-      clearTimeout(timeout)
-      parent.signal.removeEventListener('abort', relayParentAbort)
-      this.#active.delete(executionId)
+      input.parent.signal.removeEventListener('abort', relayParentAbort)
+      this.#active.delete(input.record.id)
     })
-    this.#active.set(executionId, { controller, promise })
+    this.#active.set(input.record.id, { controller, promise })
     return promise
   }
 
@@ -321,15 +411,36 @@ export class SubagentExecutionService implements SubagentExecutionPort {
     record: SubagentExecutionRecord
     controller: AbortController
     timeoutReason: SubagentRuntimeError
+    workerTimeoutMs: number
+    queued: boolean
   }): Promise<SubagentRunResult> {
     const startedAt = performance.now()
     let childSessionId: SessionId | undefined
+    let sessionCreated = false
+    let reservation:
+      | Awaited<ReturnType<SessionManager['reserveQueuedInternalRun']>>
+      | undefined
+    let timeout: ReturnType<typeof setTimeout> | undefined
     let usage: LlmUsageRecord[] = []
     try {
       const parentRecord = await this.#sessions.getRecord(
         input.parent.sessionId,
       )
       childSessionId = `subagent-session-${randomUUID()}` as SessionId
+      if (input.queued) {
+        reservation = await this.#manager.reserveQueuedInternalRun({
+          sessionId: childSessionId,
+          workspace: input.parent.workspace,
+          signal: input.controller.signal,
+        })
+      }
+      if (input.controller.signal.aborted) {
+        throw input.controller.signal.reason
+      }
+      timeout = setTimeout(
+        () => input.controller.abort(input.timeoutReason),
+        input.workerTimeoutMs,
+      )
       const createdAt = new Date().toISOString()
       await this.#manager.createInternalSession({
         sessionId: childSessionId,
@@ -352,6 +463,7 @@ export class SubagentExecutionService implements SubagentExecutionPort {
           createdAt: input.record.createdAt,
         },
       })
+      sessionCreated = true
       const seed: SessionRecord = {
         schemaVersion: 1,
         id: childSessionId,
@@ -381,12 +493,31 @@ export class SubagentExecutionService implements SubagentExecutionPort {
       await this.#state.updateExecution(input.record)
       this.#publishExecutionChanged(input.record, input.spec.name)
 
-      const childRun = this.#manager.startInternalRun({
-        sessionId: childSessionId,
-        task: input.spec.task,
-        clientRequestId: `subagent-${randomUUID()}`,
-        routes: input.routes,
-      })
+      let childRun
+      try {
+        const swarmAssignment = input.spec.sharedContext
+          ? {
+              context: {
+                content: swarmSharedContextContent(input.spec.sharedContext),
+                source: 'swarm:shared-context',
+              },
+              task: swarmTaskContent(input.spec.task),
+            }
+          : undefined
+        childRun = this.#manager.startInternalRun({
+          sessionId: childSessionId,
+          task: swarmAssignment?.task ?? input.spec.task,
+          ...(swarmAssignment ? { context: swarmAssignment.context } : {}),
+          clientRequestId: `subagent-${randomUUID()}`,
+          routes: input.routes,
+          ...(reservation ? { reservation } : {}),
+        })
+        reservation = undefined
+      } catch (error) {
+        reservation?.lease.release()
+        reservation = undefined
+        throw error
+      }
       const interrupt = () =>
         this.#manager.interruptRun(childSessionId!, childRun.runId)
       if (input.controller.signal.aborted) interrupt()
@@ -493,7 +624,9 @@ export class SubagentExecutionService implements SubagentExecutionPort {
       )
       throw safeFailure
     } finally {
-      if (childSessionId) {
+      if (timeout) clearTimeout(timeout)
+      reservation?.lease.release()
+      if (childSessionId && sessionCreated) {
         await this.#manager.closeSession(childSessionId).catch((error) =>
           this.#onDiagnostic(
             'Failed to close internal Subagent Session',
@@ -522,7 +655,7 @@ export class SubagentExecutionService implements SubagentExecutionPort {
     })
   }
 
-  /** Cancels all preparing/running children and waits for their cleanup. */
+  /** Cancels all queued/preparing/running children and waits for their cleanup. */
   async dispose(): Promise<void> {
     this.#disposing = true
     const active = [...this.#active.values()]

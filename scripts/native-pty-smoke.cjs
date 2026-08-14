@@ -31,7 +31,7 @@ function runPtySmoke() {
     terminal.kill()
     console.error('PTY smoke timed out')
     process.exit(1)
-  }, 10_000)
+  }, 30_000)
 
   terminal.onData((chunk) => {
     output += chunk

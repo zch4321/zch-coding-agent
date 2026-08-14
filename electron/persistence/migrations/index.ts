@@ -5,6 +5,7 @@ import providerTypeSql from './0004_provider_type.sql?raw'
 import subagentExecutionsSql from './0005_subagent_executions.sql?raw'
 import reasoningLevelsSql from './0006_reasoning_levels.sql?raw'
 import conversationTranscriptSql from './0007_conversation_transcript.sql?raw'
+import swarmExecutionsSql from './0008_swarm_executions.sql?raw'
 
 export interface DatabaseMigration {
   version: number
@@ -53,6 +54,12 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
     version: 7,
     name: '0007_conversation_transcript',
     sql: conversationTranscriptSql,
+    disableForeignKeys: true,
+  },
+  {
+    version: 8,
+    name: '0008_swarm_executions',
+    sql: swarmExecutionsSql,
     disableForeignKeys: true,
   },
 ]

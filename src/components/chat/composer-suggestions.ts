@@ -31,6 +31,7 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
   { command: 'plan', usage: '/plan ' },
   { command: 'prompt', usage: '/prompt ' },
   { command: 'skill', usage: '/skill ' },
+  { command: 'swarm', usage: '/swarm ' },
 ]
 
 function currentLineStart(value: string, cursor: number): number {

@@ -36,6 +36,8 @@ function execution(input: {
 }): SubagentExecutionRecord {
   return {
     id: input.id as AgentExecutionId,
+    kind: 'subagent',
+    name: 'Subagent',
     parentSessionId: input.parentSessionId,
     parentRunId: `run:${input.id}` as RunId,
     parentCallId: `call:${input.id}` as CallId,
@@ -211,6 +213,95 @@ describe('AgentExecutionQueryService', () => {
       await expect(
         service.list({ parentSessionId: child.id }),
       ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
+  it('lists Swarm roots and projects ordered child summaries with counts', async () => {
+    const testDatabase = await createTestDatabase()
+    const coordinator = new ApplicationStateCoordinator({
+      database: testDatabase.database,
+      backendInstanceId: 'backend:swarm-execution-query',
+      publish: () => undefined,
+    })
+    const service = new AgentExecutionQueryService({ coordinator })
+    const parent = sessionFixture({
+      id: 'session:swarm-query-parent' as SessionId,
+      lastSeq: 0,
+    })
+    const root = {
+      ...execution({
+        id: 'swarm:query-root',
+        parentSessionId: parent.id,
+        createdAt: FIXTURE_TIMESTAMP,
+        status: 'running',
+      }),
+      kind: 'swarm' as const,
+      name: 'Swarm review',
+      completedAt: undefined,
+      result: undefined,
+    }
+    const first = {
+      ...execution({
+        id: 'subagent:query-child-first',
+        parentSessionId: parent.id,
+        createdAt: FIXTURE_TIMESTAMP,
+        status: 'running',
+      }),
+      parentExecutionId: root.id,
+      childOrdinal: 0,
+      parentRunId: root.parentRunId,
+      parentCallId: root.parentCallId,
+      name: 'review · 1/2',
+      completedAt: undefined,
+      result: undefined,
+    }
+    const second = {
+      ...execution({
+        id: 'subagent:query-child-second',
+        parentSessionId: parent.id,
+        createdAt: FIXTURE_TIMESTAMP,
+      }),
+      parentExecutionId: root.id,
+      childOrdinal: 1,
+      parentRunId: root.parentRunId,
+      parentCallId: root.parentCallId,
+      name: 'review · 2/2',
+    }
+    try {
+      await testDatabase.database.withTransaction((transaction) => {
+        projects.insert(transaction, projectFixture())
+        sessions.insert(transaction, parent)
+        subagents.insert(transaction, root)
+        subagents.insert(transaction, first)
+        subagents.insert(transaction, second)
+      })
+
+      const page = await service.list({ parentSessionId: parent.id })
+      expect(page.records).toHaveLength(1)
+      expect(page.records[0]).toMatchObject({
+        id: root.id,
+        kind: 'swarm',
+        agentCounts: {
+          total: 2,
+          running: 1,
+          completed: 1,
+        },
+      })
+
+      const detail = await service.get({
+        parentSessionId: parent.id,
+        executionId: root.id,
+      })
+      expect(detail.children?.map((child) => child.id)).toEqual([
+        first.id,
+        second.id,
+      ])
+      expect(detail.children?.map((child) => child.parentExecutionId)).toEqual([
+        root.id,
+        root.id,
+      ])
     } finally {
       await testDatabase.dispose()
     }

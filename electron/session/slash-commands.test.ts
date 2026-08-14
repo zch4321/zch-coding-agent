@@ -2,7 +2,10 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { PromptRegistry } from '../prompts/registry'
-import { DEFAULT_ORCHESTRATION_PROMPT_REFS } from '../../shared/prompt-resources'
+import {
+  DEFAULT_ORCHESTRATION_PROMPT_REFS,
+  DEFAULT_SWARM_PROMPT_REFS,
+} from '../../shared/prompt-resources'
 import { resolveSlashCommand } from './slash-commands'
 
 function publicConfig() {
@@ -55,6 +58,31 @@ describe('resolveSlashCommand', () => {
     expect(content).not.toContain('${objective}')
     expect(result.orchestratorMessage?.resource?.id).toBe(
       DEFAULT_ORCHESTRATION_PROMPT_REFS.goalStarted['en-US'].id,
+    )
+  })
+
+  it('renders /swarm as a versioned Run-scoped orchestration request', async () => {
+    const registry = await PromptRegistry.load(
+      path.resolve('resources', 'prompts'),
+    )
+    const config = publicConfig()
+    config.assistant.language = 'en-US'
+    const result = resolveSlashCommand({
+      message: '/swarm Review the repository',
+      config,
+      promptRegistry: registry,
+    })
+
+    const content = result.providerContextMessages?.[0]?.content ?? ''
+    expect(content).toContain('<orchestration_request kind="swarm">')
+    expect(content).toContain(
+      'Coordinate this Swarm objective: Review the repository',
+    )
+    expect(content).toContain('Child Agents receive no parent conversation')
+    expect(content).not.toContain('${objective}')
+    expect(result.swarmGoal).toBe('Review the repository')
+    expect(result.orchestratorMessage?.resource?.id).toBe(
+      DEFAULT_SWARM_PROMPT_REFS['en-US'].id,
     )
   })
 })

@@ -13,6 +13,7 @@ import {
   sessionFixture,
 } from '../persistence/repository-fixtures'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
+import { swarmTaskContent } from './assignment-prompt'
 import {
   projectAgentExecutionActivities,
   projectAgentExecutionSummary,
@@ -25,6 +26,8 @@ const childSessionId = 'session:projection-child' as SessionId
 function execution(): SubagentExecutionRecord {
   return {
     id: 'subagent:projection' as AgentExecutionId,
+    kind: 'subagent',
+    name: 'fallbackWorker',
     parentSessionId,
     parentRunId: 'run:projection' as RunId,
     parentCallId: 'call:projection' as CallId,
@@ -69,7 +72,7 @@ describe('Subagent public projection', () => {
       id: 'subagent:projection',
       kind: 'subagent',
       parentSessionId,
-      name: 'repository-review',
+      name: 'fallbackWorker',
       providerId: 'deepseek',
       model: 'deepseek-chat',
       status: 'completed',
@@ -145,6 +148,15 @@ describe('Subagent public projection', () => {
     expect(
       projectAgentExecutionTask(task?.kind === 'user_input' ? task : undefined),
     ).toBe('visible search needle')
+    if (task?.kind === 'user_input') {
+      const tagged = structuredClone(task)
+      tagged.parts = [
+        { type: 'text', text: swarmTaskContent('review <session> & report') },
+      ]
+      expect(projectAgentExecutionTask(tagged)).toBe(
+        'review <session> & report',
+      )
+    }
     expect(projectAgentExecutionTask(undefined)).toBeUndefined()
   })
 

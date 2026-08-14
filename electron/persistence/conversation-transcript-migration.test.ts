@@ -75,8 +75,8 @@ describe('0007_conversation_transcript migration', () => {
             .get(),
         ),
       ).toEqual({
-        version: 7,
-        name: '0007_conversation_transcript',
+        version: 8,
+        name: '0008_swarm_executions',
       })
       expect(
         upgraded

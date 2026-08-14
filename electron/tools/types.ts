@@ -39,7 +39,8 @@ export interface ToolDefinition<Schema extends TSchema = TSchema> {
   effects: readonly Effect[]
   defaultRisk: 'low' | 'review' | 'high'
   supportsAbort: boolean
-  defaultTimeoutMs: number
+  /** Null delegates lifetime bounds to the abortable orchestration body. */
+  defaultTimeoutMs: number | null
   maxOutputBytes: number
   validateArgs?(args: Static<Schema>): string | undefined
   /** Projects a successful internal result into deterministic model-visible parts. */

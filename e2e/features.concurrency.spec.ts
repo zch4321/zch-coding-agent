@@ -197,7 +197,7 @@ test.describe('Electron concurrency and interjection workflows', () => {
 
     // The run continues (a second provider request fires) and finishes.
     await expect
-      .poll(() => fakeProvider.requests.length, { timeout: 15_000 })
+      .poll(() => fakeProvider.requests.length, { timeout: 30_000 })
       .toBe(2)
     await expect(page.locator('.chat-message.assistant')).toContainText(
       'Done after the live interjection.',

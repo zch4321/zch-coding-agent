@@ -40,6 +40,7 @@ interface LiveExecutionView {
 }
 
 const ACTIVE_STATUSES = new Set<AgentExecutionSummary['status']>([
+  'queued',
   'preparing',
   'running',
 ])
@@ -163,6 +164,7 @@ function summarizedUsage(records: readonly LlmUsageRecord[]) {
 export const useAgentExecutionStore = defineStore('agent-executions', {
   state: () => ({
     sessions: {} as Record<string, ExecutionSessionView>,
+    children: {} as Record<string, AgentExecutionSummary[]>,
     details: {} as Record<string, ExecutionDetailView>,
     live: {} as Record<string, LiveExecutionView>,
   }),
@@ -183,13 +185,30 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
         )
       })
     },
-    selectedActiveCount(): number {
-      return this.selectedExecutions.filter(isActiveAgentExecution).length
+    selectedActiveCount(state): number {
+      return this.selectedExecutions.reduce((total, summary) => {
+        if (summary.kind !== 'swarm') {
+          return total + Number(isActiveAgentExecution(summary))
+        }
+        const children = state.children[summary.id]
+        if (children?.length) {
+          return total + children.filter(isActiveAgentExecution).length
+        }
+        return (
+          total +
+          (summary.agentCounts?.queued ?? 0) +
+          (summary.agentCounts?.running ?? 0)
+        )
+      }, 0)
     },
     selectedSessionView(state): ExecutionSessionView | undefined {
       const sessionId = useAgentReplicaStore().selectedSessionId
       return sessionId ? state.sessions[sessionId] : undefined
     },
+    childrenFor:
+      (state) =>
+      (executionId: AgentExecutionId): AgentExecutionSummary[] =>
+        state.children[executionId] ?? [],
     activitiesFor:
       (state) =>
       (executionId: AgentExecutionId): AgentExecutionActivity[] => {
@@ -233,6 +252,21 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       return this.live[executionId]!
     },
     upsertSummary(summary: AgentExecutionSummary): void {
+      if (summary.parentExecutionId) {
+        const records = this.children[summary.parentExecutionId] ?? []
+        this.children[summary.parentExecutionId] = mergeSummaries(records, [
+          summary,
+        ])
+        const parentDetail = this.details[summary.parentExecutionId]?.detail
+        if (parentDetail) {
+          parentDetail.children = mergeSummaries(parentDetail.children ?? [], [
+            summary,
+          ])
+        }
+        const detail = this.details[summary.id]?.detail
+        if (detail) detail.summary = structuredClone(summary)
+        return
+      }
       const session = this.ensureSession(summary.parentSessionId)
       const index = session.records.findIndex(
         (record) => record.id === summary.id,
@@ -243,9 +277,22 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       if (detail) detail.summary = structuredClone(summary)
     },
     removeSession(sessionId: SessionId): void {
+      const executionIds = new Set<AgentExecutionId>()
       for (const summary of this.sessions[sessionId]?.records ?? []) {
-        delete this.details[summary.id]
-        delete this.live[summary.id]
+        executionIds.add(summary.id)
+        for (const child of this.children[summary.id] ?? []) {
+          executionIds.add(child.id)
+        }
+      }
+      for (const [executionId, detail] of Object.entries(this.details)) {
+        if (detail.detail?.summary.parentSessionId === sessionId) {
+          executionIds.add(executionId as AgentExecutionId)
+        }
+      }
+      for (const executionId of executionIds) {
+        delete this.details[executionId]
+        delete this.live[executionId]
+        delete this.children[executionId]
       }
       delete this.sessions[sessionId]
     },
@@ -290,12 +337,18 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
     },
     async loadDetail(
       executionId: AgentExecutionId,
-      options: { older?: boolean; refresh?: boolean } = {},
+      options: {
+        older?: boolean
+        refresh?: boolean
+        parentSessionId?: SessionId
+      } = {},
     ): Promise<boolean> {
       const api = window.agentApi
       if (!api) return false
-      const summary = findSummary(this.sessions, executionId)
-      if (!summary) return false
+      const summary = findSummary(this.sessions, this.children, executionId)
+      const parentSessionId =
+        summary?.parentSessionId ?? options.parentSessionId
+      if (!parentSessionId) return false
       if (!this.details[executionId]) {
         this.details[executionId] = {
           loaded: false,
@@ -317,7 +370,7 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       const result = await api
         .getAgentExecution({
           version: IPC_VERSION,
-          parentSessionId: summary.parentSessionId,
+          parentSessionId,
           executionId,
           ...(options.older && view.detail?.activityPage.nextBeforeSeq
             ? { beforeSeq: view.detail.activityPage.nextBeforeSeq }
@@ -346,6 +399,13 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       view.detail = structuredClone(incoming)
       view.loaded = true
       this.upsertSummary(incoming.summary)
+      if (incoming.children) {
+        this.children[incoming.summary.id] = mergeSummaries(
+          this.children[incoming.summary.id] ?? [],
+          incoming.children,
+        )
+        for (const child of incoming.children) this.upsertSummary(child)
+      }
       this.reconcileLiveActivities(executionId)
       if (
         incoming.live &&
@@ -417,7 +477,7 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       executionId: AgentExecutionId,
     ): Promise<void> {
       await this.loadSession(parentSessionId, { force: true })
-      await this.loadDetail(executionId, { refresh: true })
+      await this.loadDetail(executionId, { refresh: true, parentSessionId })
     },
     handleEvent(event: AgentExecutionEvent): void {
       const live = this.ensureLive(event.executionId)
@@ -514,7 +574,11 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
         ])
       } else if (event.type === 'llm.usage') {
         live.usage.push(structuredClone(event.usage))
-        const summary = findSummary(this.sessions, event.executionId)
+        const summary = findSummary(
+          this.sessions,
+          this.children,
+          event.executionId,
+        )
         if (summary) summary.usage = summarizedUsage(live.usage)
       }
     },
@@ -526,17 +590,41 @@ function mergeSummaries(
   incoming: readonly AgentExecutionSummary[],
 ): AgentExecutionSummary[] {
   const records = new Map(current.map((summary) => [summary.id, summary]))
-  for (const summary of incoming)
-    records.set(summary.id, structuredClone(summary))
-  return [...records.values()]
+  for (const summary of incoming) {
+    const currentSummary = records.get(summary.id)
+    if (
+      !currentSummary ||
+      summary.updatedAt.localeCompare(currentSummary.updatedAt) >= 0
+    ) {
+      records.set(summary.id, structuredClone(summary))
+    }
+  }
+  return [...records.values()].sort((left, right) => {
+    if (
+      !left.parentExecutionId ||
+      left.parentExecutionId !== right.parentExecutionId
+    ) {
+      return 0
+    }
+    return (
+      (left.childOrdinal ?? Number.MAX_SAFE_INTEGER) -
+        (right.childOrdinal ?? Number.MAX_SAFE_INTEGER) ||
+      left.id.localeCompare(right.id)
+    )
+  })
 }
 
 function findSummary(
   sessions: Record<string, ExecutionSessionView>,
+  children: Record<string, AgentExecutionSummary[]>,
   executionId: AgentExecutionId,
 ): AgentExecutionSummary | undefined {
   for (const session of Object.values(sessions)) {
     const summary = session.records.find((record) => record.id === executionId)
+    if (summary) return summary
+  }
+  for (const records of Object.values(children)) {
+    const summary = records.find((record) => record.id === executionId)
     if (summary) return summary
   }
   return undefined

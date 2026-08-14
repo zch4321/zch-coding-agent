@@ -18,6 +18,7 @@ import type {
 } from '../session/session-types'
 import type { FileChangeExecutionPort } from '../session/file-change-execution'
 import type { SubagentExecutionPort } from '../subagent/contracts'
+import type { SwarmExecutionPort } from '../swarm/contracts'
 
 export interface CreateAgentRuntimeOptions {
   configStore: ConfigStore
@@ -37,6 +38,8 @@ export interface CreateAgentRuntimeOptions {
   historySource?: SessionHistorySourcePort
   fileChangeExecution: FileChangeExecutionPort
   subagentExecution?: SubagentExecutionPort
+  swarmExecution?: SwarmExecutionPort
+  swarmHostEnabled?: boolean
   onDiagnostic?: (message: string, error?: unknown) => void
 }
 
@@ -87,6 +90,8 @@ export async function createAgentRuntime(
       fileChangeExecution: options.fileChangeExecution,
       mcpManager: mcp,
       subagentExecution: options.subagentExecution,
+      swarmExecution: options.swarmExecution,
+      swarmHostEnabled: options.swarmHostEnabled,
       promptRegistry,
       fetchImpl: options.fetchImpl,
       providerFactory: options.providerFactory,

@@ -6,7 +6,7 @@ import {
   DEFAULT_HEADLESS_PROMPT_REFS,
   DEFAULT_HARNESS_PROMPT_REFS,
   DEFAULT_ORCHESTRATION_PROMPT_REFS,
-  PROMPT_RESOURCE_VERSION,
+  DEFAULT_SWARM_PROMPT_REFS,
   type PromptResourceRef,
 } from '../../shared/prompt-resources'
 import { PromptRegistry } from './registry'
@@ -110,6 +110,9 @@ describe('PromptRegistry', () => {
     expect(registry.orchestrationPrompt('compact', 'en-US').content).toContain(
       'Current Plan state',
     )
+    expect(registry.swarmPrompt('en-US').resource.id).toBe(
+      DEFAULT_SWARM_PROMPT_REFS['en-US'].id,
+    )
   })
 
   it('resolves every default prompt ref to a non-empty versioned resource', async () => {
@@ -125,12 +128,11 @@ describe('PromptRegistry', () => {
 
       expect(listed.get(ref.id)).toMatchObject({
         id: ref.id,
-        version: PROMPT_RESOURCE_VERSION,
+        version: ref.version,
         path: resource.path,
         sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
       })
       expect(resource.version).toBe(ref.version)
-      expect(resource.version).toBe(PROMPT_RESOURCE_VERSION)
       expect(resource.path).toBeTruthy()
       expect(resource.content.trim()).not.toBe('')
       await expect(readFile(resource.path, 'utf8')).resolves.toContain(

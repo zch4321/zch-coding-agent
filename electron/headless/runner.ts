@@ -128,6 +128,7 @@ export async function runHeadlessAgent(
     configStore: prepared.configStore,
     databasePath: headlessDatabasePath(databaseDirectory),
     runtimeDataDirectory: prepared.userDataDirectory,
+    swarmHostEnabled: false,
     promptDirectory: await resolvePromptDirectory(options.promptDirectory),
     fetchImpl: options.fetchImpl,
     providerFactory: options.providerFactory,
@@ -298,6 +299,7 @@ export async function runHeadlessAgent(
       sourceCommit: options.sourceCommit,
       sourceTree: options.sourceTree,
       runtimeImageDigest: options.runtimeImageDigest,
+      swarmsEnabled: false,
     })
     const result: HeadlessResult = {
       schemaVersion: 1,

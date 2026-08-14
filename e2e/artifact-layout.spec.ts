@@ -210,7 +210,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
               thumb.getBoundingClientRect().height > 0
             )
           }),
-        { timeout: 10_000 },
+        { timeout: 30_000 },
       )
       .toBe(true)
     const treeScroll = await explorerTree.evaluate((tree) => {

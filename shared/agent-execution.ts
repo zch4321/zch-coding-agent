@@ -28,9 +28,11 @@ export const AgentExecutionKindSchema = Type.Union([
 export type AgentExecutionKind = Static<typeof AgentExecutionKindSchema>
 
 export const AgentExecutionStatusSchema = Type.Union([
+  Type.Literal('queued'),
   Type.Literal('preparing'),
   Type.Literal('running'),
   Type.Literal('completed'),
+  Type.Literal('partial'),
   Type.Literal('failed'),
   Type.Literal('cancelled'),
   Type.Literal('timed_out'),
@@ -69,6 +71,18 @@ export type AgentExecutionUsageSummary = Static<
   typeof AgentExecutionUsageSummarySchema
 >
 
+export const AgentExecutionCountsSchema = Type.Object(
+  {
+    total: Type.Integer({ minimum: 0, maximum: 32 }),
+    queued: Type.Integer({ minimum: 0, maximum: 32 }),
+    running: Type.Integer({ minimum: 0, maximum: 32 }),
+    completed: Type.Integer({ minimum: 0, maximum: 32 }),
+    failed: Type.Integer({ minimum: 0, maximum: 32 }),
+  },
+  { additionalProperties: false },
+)
+export type AgentExecutionCounts = Static<typeof AgentExecutionCountsSchema>
+
 export const AgentExecutionSummarySchema = Type.Object(
   {
     schemaVersion: Type.Literal(1),
@@ -78,11 +92,13 @@ export const AgentExecutionSummarySchema = Type.Object(
     parentRunId: RunIdSchema,
     parentCallId: CallIdSchema,
     parentExecutionId: Type.Optional(AgentExecutionIdSchema),
+    childOrdinal: Type.Optional(Type.Integer({ minimum: 0, maximum: 31 })),
     name: Type.String({ minLength: 1, maxLength: 64 }),
     status: AgentExecutionStatusSchema,
     providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     usage: Type.Optional(AgentExecutionUsageSummarySchema),
+    agentCounts: Type.Optional(AgentExecutionCountsSchema),
     error: Type.Optional(
       Type.Object(
         {
@@ -230,6 +246,9 @@ export const AgentExecutionDetailSchema = Type.Object(
       Type.String({ minLength: 1, maxLength: MAX_MESSAGE_TEXT_LENGTH }),
     ),
     statistics: AgentExecutionStatisticsSchema,
+    children: Type.Optional(
+      Type.Array(AgentExecutionSummarySchema, { maxItems: 32 }),
+    ),
     activityPage: AgentExecutionActivityPageSchema,
     live: Type.Optional(AgentExecutionLiveOverlaySchema),
   },

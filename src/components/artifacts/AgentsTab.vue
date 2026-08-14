@@ -9,10 +9,7 @@ import {
   NSpin,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type {
-  AgentExecutionActivity,
-  AgentExecutionSummary,
-} from '../../../shared/agent-execution'
+import type { AgentExecutionSummary } from '../../../shared/agent-execution'
 import type { AgentExecutionId, SessionId } from '../../../shared/ids'
 import {
   useAgentExecutionStore,
@@ -20,12 +17,13 @@ import {
 } from '../../stores/agent-executions'
 import { useAgentReplicaStore } from '../../stores/agent-replica'
 import UiIcon from '../UiIcon.vue'
-import MarkdownBlock from '../MarkdownBlock.vue'
+import AgentExecutionBody from './AgentExecutionBody.vue'
 
 const executions = useAgentExecutionStore()
 const replica = useAgentReplicaStore()
 const { t } = useI18n()
 const expanded = ref<Array<string | number>>([])
+const expandedChildren = ref<Record<string, Array<string | number>>>({})
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
 
@@ -42,6 +40,21 @@ function statusLabel(summary: AgentExecutionSummary): string {
 
 function currentPhase(summary: AgentExecutionSummary): string {
   if (!isActiveAgentExecution(summary)) return statusLabel(summary)
+  if (summary.status === 'queued' || summary.status === 'preparing') {
+    return statusLabel(summary)
+  }
+  if (summary.kind === 'swarm') {
+    const children = executions.childrenFor(summary.id)
+    const counts = summary.agentCounts
+    const completed = children.length
+      ? children.filter((child) => child.status === 'completed').length
+      : (counts?.completed ?? 0)
+    const active = children.length
+      ? children.filter(isActiveAgentExecution).length
+      : (counts?.queued ?? 0) + (counts?.running ?? 0)
+    const total = children.length || counts?.total || active
+    return t('artifact.swarmProgress', { completed, total, active })
+  }
   const live = executions.live[summary.id]
   const activities = executions.activitiesFor(summary.id)
   const lastTool = [...activities]
@@ -57,46 +70,15 @@ function currentPhase(summary: AgentExecutionSummary): string {
   return t('artifact.agentRunning')
 }
 
-function elapsed(summary: AgentExecutionSummary): string {
-  const end = summary.completedAt
-    ? new Date(summary.completedAt).getTime()
-    : now.value
-  const start = new Date(summary.createdAt).getTime()
-  const seconds = Math.max(0, Math.floor((end - start) / 1_000))
-  if (seconds < 60)
-    return t('artifact.agentDurationSeconds', { count: seconds })
-  const minutes = Math.floor(seconds / 60)
-  const remainder = seconds % 60
-  return t('artifact.agentDurationMinutes', {
-    minutes,
-    seconds: remainder,
-  })
-}
-
-function usageLabel(summary: AgentExecutionSummary): string | undefined {
-  return summary.usage
-    ? t('artifact.agentTokens', { count: summary.usage.totalTokens })
-    : undefined
-}
-
-function toolCallCount(summary: AgentExecutionSummary): number | undefined {
-  return executions.details[summary.id]?.detail?.statistics.toolCallCount
-}
-
-function messagesFor(
-  summary: AgentExecutionSummary,
-): Array<Extract<AgentExecutionActivity, { type: 'message' }>> {
-  return executions
-    .activitiesFor(summary.id)
-    .filter(
-      (
-        activity,
-      ): activity is Extract<AgentExecutionActivity, { type: 'message' }> =>
-        activity.type === 'message',
-    )
-}
-
 async function loadExpanded(values: Array<string | number>): Promise<void> {
+  const value = values[0]
+  if (typeof value !== 'string') return
+  await executions.loadDetail(value as AgentExecutionId)
+}
+
+async function loadExpandedChild(
+  values: Array<string | number>,
+): Promise<void> {
   const value = values[0]
   if (typeof value !== 'string') return
   await executions.loadDetail(value as AgentExecutionId)
@@ -106,6 +88,7 @@ watch(
   () => replica.selectedSessionId,
   (sessionId) => {
     expanded.value = []
+    expandedChildren.value = {}
     if (sessionId) void executions.loadSession(sessionId)
   },
   { immediate: true },
@@ -172,80 +155,39 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
-          <div class="agent-execution-detail">
-            <div
-              v-if="executions.details[summary.id]?.error"
-              class="artifact-error"
+          <AgentExecutionBody :summary="summary" :now="now" />
+          <NCollapse
+            v-if="
+              summary.kind === 'swarm' &&
+              executions.childrenFor(summary.id).length
+            "
+            v-model:expanded-names="expandedChildren[summary.id]"
+            class="agent-execution-child-list"
+            accordion
+            arrow-placement="right"
+            @update:expanded-names="loadExpandedChild"
+          >
+            <NCollapseItem
+              v-for="child in executions.childrenFor(summary.id)"
+              :key="child.id"
+              :name="child.id"
+              class="agent-execution-child-item"
             >
-              {{ executions.details[summary.id]?.error }}
-            </div>
-            <NSpin
-              v-if="
-                executions.details[summary.id]?.loading &&
-                !executions.details[summary.id]?.loaded
-              "
-              size="small"
-            />
-            <template v-else>
-              <dl class="agent-execution-stats">
-                <div class="agent-execution-stat">
-                  <dt>{{ t('artifact.agentRunTime') }}</dt>
-                  <dd>{{ elapsed(summary) }}</dd>
+              <template #header>
+                <div class="agent-execution-header">
+                  <span
+                    class="agent-execution-status-dot"
+                    :class="statusClass(child)"
+                  />
+                  <div class="agent-execution-heading">
+                    <strong>{{ child.name }}</strong>
+                    <span>{{ currentPhase(child) }}</span>
+                  </div>
                 </div>
-                <div class="agent-execution-stat agent-execution-tool-count">
-                  <dt>{{ t('artifact.agentToolCalls') }}</dt>
-                  <dd>{{ toolCallCount(summary) ?? '—' }}</dd>
-                </div>
-                <div class="agent-execution-stat">
-                  <dt>{{ t('artifact.agentExecutionStatus') }}</dt>
-                  <dd>{{ statusLabel(summary) }}</dd>
-                </div>
-                <div v-if="usageLabel(summary)" class="agent-execution-stat">
-                  <dt>{{ t('artifact.agentTokenUsage') }}</dt>
-                  <dd>{{ usageLabel(summary) }}</dd>
-                </div>
-                <div
-                  v-if="summary.providerId && summary.model"
-                  class="agent-execution-stat agent-execution-stat-wide"
-                >
-                  <dt>{{ t('artifact.agentModel') }}</dt>
-                  <dd>{{ summary.providerId }} · {{ summary.model }}</dd>
-                </div>
-              </dl>
-              <div class="agent-execution-messages">
-                <strong class="agent-execution-output-heading">
-                  {{ t('artifact.agentOutput') }}
-                </strong>
-                <article
-                  v-for="message in messagesFor(summary)"
-                  :key="message.id"
-                  class="agent-execution-message"
-                >
-                  <MarkdownBlock :content="message.text" />
-                </article>
-                <p
-                  v-if="messagesFor(summary).length === 0"
-                  class="agent-execution-no-output"
-                >
-                  {{ t('artifact.agentNoOutput') }}
-                </p>
-              </div>
-              <p v-if="summary.error" class="agent-execution-error">
-                {{ summary.error.message }}
-              </p>
-              <NButton
-                v-if="
-                  executions.details[summary.id]?.detail?.activityPage.hasMore
-                "
-                size="small"
-                secondary
-                :loading="executions.details[summary.id]?.loading"
-                @click.stop="executions.loadDetail(summary.id, { older: true })"
-              >
-                {{ t('artifact.agentLoadMore') }}
-              </NButton>
-            </template>
-          </div>
+              </template>
+              <AgentExecutionBody :summary="child" :now="now" />
+            </NCollapseItem>
+          </NCollapse>
         </NCollapseItem>
       </NCollapse>
       <NButton

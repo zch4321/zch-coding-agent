@@ -110,4 +110,61 @@ describe('RuntimeEventBus', () => {
       [first, 2, 'assistant.reasoning.delta'],
     ])
   })
+
+  it('keeps queued execution sequencing active until a terminal status', () => {
+    const received: AgentExecutionEvent[] = []
+    const bus = new RuntimeEventBus()
+    bus.subscribe({
+      onAgentExecutionEvent: (event) => received.push(event),
+    })
+    const executionId = 'subagent:queued-sequence' as AgentExecutionId
+    const summary = {
+      schemaVersion: 1 as const,
+      id: executionId,
+      kind: 'subagent' as const,
+      parentSessionId: sessionId,
+      parentRunId: runId,
+      parentCallId,
+      name: 'queued child',
+      status: 'queued' as const,
+      createdAt: '2026-08-10T00:00:00.000Z',
+      updatedAt: '2026-08-10T00:00:00.000Z',
+    }
+
+    bus.publishAgentExecution({
+      type: 'execution.changed',
+      executionId,
+      parentSessionId: sessionId,
+      parentRunId: runId,
+      parentCallId,
+      summary,
+    })
+    bus.publishAgentExecution({
+      type: 'execution.changed',
+      executionId,
+      parentSessionId: sessionId,
+      parentRunId: runId,
+      parentCallId,
+      summary: {
+        ...summary,
+        status: 'running',
+        updatedAt: '2026-08-10T00:00:01.000Z',
+      },
+    })
+    bus.publishAgentExecution({
+      type: 'execution.changed',
+      executionId,
+      parentSessionId: sessionId,
+      parentRunId: runId,
+      parentCallId,
+      summary: {
+        ...summary,
+        status: 'completed',
+        updatedAt: '2026-08-10T00:00:02.000Z',
+        completedAt: '2026-08-10T00:00:02.000Z',
+      },
+    })
+
+    expect(received.map((event) => event.seq)).toEqual([1, 2, 3])
+  })
 })
