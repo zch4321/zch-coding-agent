@@ -92,6 +92,24 @@ describe('MessageHistoryCompiler', () => {
     ).toBe(compiled.sourceHash)
   })
 
+  it('keeps an explicitly hidden orchestration prompt in model history', () => {
+    const history = state()
+    const record = appendPromptMessage(history, {
+      kind: 'orchestrator',
+      content:
+        '<orchestration_request kind="swarm">review</orchestration_request>',
+      source: 'slash:/swarm',
+      trusted: false,
+      editable: false,
+      visibility: 'hidden',
+    })
+
+    expect(record.visibility).toBe('hidden')
+    expect(
+      new MessageHistoryCompiler().compile(history.history).messages,
+    ).toEqual([record])
+  })
+
   it('keeps control commands outside history and identifies derived payloads', () => {
     const history = state()
     const command = appendControlCommand(history, {

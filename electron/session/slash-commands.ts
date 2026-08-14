@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { PublicConfig } from '../../shared/config'
+import type { MessageVisibility } from '../../shared/message'
 import type { PromptLayerKind } from '../../shared/trace'
 import type { GoalState } from '../../shared/orchestration'
 import type { SkillsManager } from '../skills/manager'
@@ -22,6 +23,7 @@ export interface SlashCommandResolution {
     kind: Extract<PromptLayerKind, 'selected_context' | 'orchestrator'>
     content: string
     source: string
+    visibility?: Exclude<MessageVisibility, 'superseded'>
   }>
   goal?: GoalState
   swarmGoal?: string
@@ -179,6 +181,7 @@ export function resolveSlashCommand(input: {
           kind: 'orchestrator',
           source: 'slash:/swarm',
           content: orchestrationRequestContent('swarm', instruction),
+          visibility: 'hidden',
         },
       ],
       swarmGoal: parsed.rest,

@@ -322,6 +322,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 ### 2.9 Desktop Swarm
 
 - Desktop 主 Run 在 Subagent 已启用、全局并发至少为 2 且模型池至少有一条 enabled route 时，把 `swarm_run({ sharedContext, tasks })` 作为普通 Tool 暴露给 Provider。`/swarm <goal>` 只保留为显式目标编排快捷命令，不授予特殊 capability；历史重放、child Agent 和 Headless 不得继承或伪造该工具能力。
+- `/swarm` 原始用户输入保持可见；它生成的 `<orchestration_request kind="swarm">` canonical `orchestrator` Prompt 必须以 `visibility = hidden`、`inHistory = true` 持久化，只进入 Provider 上下文而不进入普通对话时间线。不得改写旧 SQLite 记录；Renderer 必须按 `slash:/swarm` 来源抑制已经持久化为 visible 的旧 Prompt。该规则不改变其他 slash orchestration、interjection、工具审批、Agents artifact、完整导出或 Trace 的现有投影。
 - Tool description 必须要求用户未明确提出 Swarm、多 Agent、并行调查或独立交叉检查时不得调用，并明确 Child 无法执行命令、构建或测试。父 Agent 在可行时必须先执行相关验证，把命令、退出码和精简关键输出放入 `sharedContext`；无法验证时在其中明确说明。适合独立交叉检查时鼓励接近本次 Job 上限，并允许同一 task 分配多个 Agent；描述只能承诺优先轮换合格模型，不能保证池不足时仍使用不同模型。
 - `defaultRisk` 固定为 `review`，readonly、auto、confirm 与 YOLO 均逐次要求人工审批，不得经过模型自动审批或记忆批准。专用审批卡必须展示公共上下文、任务数、Agent 总数、每项任务正文、能力等级、副本数以及额外 Provider 请求和费用提示。
 - `sharedContext` 必须是非空有界文本，承载所有 Child 共用的背景、证据、约束、验证结果和输出要求；每个 task 必须包含唯一安全 `name`、仅针对该 Child 的 `task`、`requiredCapability: light|standard|strong` 和 `agentCount`。`sharedContext + task` 合起来必须自包含。单项及总 Agent 数都受本次 Run 冻结的 `maxAgentsPerSwarm` 限制，Provider schema 与 Backend 执行校验必须同时执行。

@@ -512,6 +512,7 @@ export class SessionRunController {
               trusted: false,
               editable: false,
               config: this.#configStore.getPublicConfig(),
+              visibility: appMessage.visibility,
             })
             run.harnessMessageIds.push(appRecord.id)
           }

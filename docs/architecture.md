@@ -1670,6 +1670,8 @@ child stream/tool/domain event 不发布给 Renderer，也不创建独立 trace 
 
 `swarm_run` 是满足运行条件的 Desktop 主 Run 的普通 Tool：Subagent 必须已启用、全局 Run 上限至少为 2，并且模型池至少有一条 enabled route。普通用户消息也能获得该工具；`/swarm <goal>` 仅作为显式请求与目标编排快捷命令，不再授予特殊 capability。child Run、历史重放和 Headless 仍不获得该工具，catalog 与 executor 对伪造调用执行相同检查。Provider 可见 schema 要求有界非空 `sharedContext`，并按 Run 开始时的 `maxAgentsPerSwarm` 克隆、收窄 `tasks.maxItems` 与 `agentCount.maximum`；Backend 在创建 Job 前再次校验公共上下文、各 task 和所有 `agentCount` 的总和。
 
+`/swarm` 的原始斜杠命令作为 visible `user_input` 留在普通对话中；解析器额外生成的 `slash:/swarm` canonical `orchestrator` Prompt 以 `visibility = hidden`、`inHistory = true` 追加。MessageHistoryCompiler 继续把该 Prompt 交给 Provider，Renderer 时间线不投影它。兼容旧数据时不修改 append-only canonical history，而由 Renderer 同样抑制已写为 visible 的 `slash:/swarm` 记录；其他 orchestration 与 interjection 的默认可见性不受影响。Provider-transfer transcript、显式 Conversation 导出与完整 Trace 可以保留内部编排内容。
+
 Tool description 明确要求只有用户已经提出 Swarm、多 Agent、并行调查或独立交叉检查时才能调用，不能仅因任务复杂而自行启动。它同时说明 Child 没有命令、构建或测试能力：父 Agent 可行时先运行相关验证，再把命令、退出码和精简关键输出写入 `sharedContext`；无法验证时明确说明。适合独立交叉检查时鼓励接近当前 Job 上限，并允许同一 task 使用多个副本。allocator 会优先轮换合格 `Provider + model`，池不足时仍可能复用，Tool 不作绝对异构承诺。
 
 `swarm_run({ sharedContext, tasks })` 是 serial Tool；顶层 `sharedContext` 保存全部 Child 共用的背景、证据、约束、验证结果和输出要求，每项 task 只提供唯一安全名称、Child-specific 任务、`light|standard|strong` 最低能力和 replica 数量。两部分合起来自包含。工具保持无工作区副作用但使用 `defaultRisk = review`，因此 readonly、auto、confirm 与 YOLO 都逐次进入人工审批，不经过自动审批模型，也不能记忆批准。专用审批卡展示完整公共上下文、任务数、Agent 总数、每项任务正文、能力等级和副本数，并提示额外 Provider 请求与费用；一次批准绑定完整 Tool 参数，而不是逐 child 审批。
