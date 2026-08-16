@@ -69,7 +69,9 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 - `risk`：`low | review | high` 的默认风险级别。
 - `supportsAbort`、`defaultTimeoutMs`、`maxOutputBytes`。
 
-所有参数先经 JSON Schema 校验。Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelled/timeout/truncated`，供安全检查、trace 和插件使用；模型历史不接收该信封。敏感数据过滤后，Tool Registry 将成功正文投影为 canonical `TextPart | JsonPart`，错误投影为统一短文本，再按投影后的实际内容执行单次与 Run 累计 token bound。自定义 projector 必须同步、确定性、无 I/O，异常时回退默认安全投影。
+Provider 生成的参数在记录 `tool.proposed` 和进入权限审批前先规范化：递归删除 schema 明确禁止的多余字段，并转换无歧义的 JSON 标量类型（数字字符串转 number/integer、`true|false` 字符串转 boolean、number/boolean 转 string）。不得把字符串猜测为 JSON object/array、把单值包装成数组、把 null 转成可执行值，也不得把未知工具名自动映射到另一个工具。规范化后的参数仍须通过完整 JSON Schema、工具语义校验、路径边界和权限策略；审批卡、日志与实际执行读取同一份规范化参数。无法修复时，模型可见错误必须包含工具名、具体 JSON Pointer 字段和预期约束，并明确允许修正后重试。
+
+Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelled/timeout/truncated`，供安全检查、trace 和插件使用；模型历史不接收该信封。敏感数据过滤后，Tool Registry 将成功正文投影为 canonical `TextPart | JsonPart`，错误投影为统一短文本，再按投影后的实际内容执行单次与 Run 累计 token bound。自定义 projector 必须同步、确定性、无 I/O，异常时回退默认安全投影。
 
 #### 2.2.1 文件类
 

@@ -357,9 +357,7 @@ describe('config v21 migration boundary', () => {
     const malformed = legacyV9Config()
     delete malformed.limits
 
-    expect(() => migrateConfig(malformed)).toThrow(
-      "must have required property 'limits'",
-    )
+    expect(() => migrateConfig(malformed)).toThrow('/limits is required')
   })
 
   it('rejects v9 configs carrying reasoning values introduced after v9', () => {
@@ -629,7 +627,7 @@ describe('config v21 migration boundary', () => {
     const malformed = legacyV20Config()
     delete malformed.executionEnvironment
     expect(() => migrateConfig(malformed)).toThrow(
-      "must have required property 'executionEnvironment'",
+      '/executionEnvironment is required',
     )
   })
 

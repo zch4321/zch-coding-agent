@@ -14,6 +14,7 @@ import type {
 import type { ApprovedToolCall } from './approved-tool-call'
 import { revalidateApprovedToolCall } from '../permission/permission-pipeline'
 import type { ProviderToolDefinition } from '../providers/provider'
+import { normalizeToolInput } from './tool-input-normalizer'
 import { projectToolResultForModel } from './tool-result-projection'
 
 interface RegisteredTool {
@@ -126,14 +127,17 @@ export class ToolRegistry implements ToolRegistrationPort {
   normalizeCall(call: ToolCall): ToolCall {
     const registered = this.#tools.get(call.toolId)
     if (!registered) return call
-    const normalized = withoutIntentMetadata(
+    const withoutIntent = withoutIntentMetadata(
       call.args,
       registered.providerDefinition.intentParameter,
     )
     return {
       ...call,
-      args: normalized.args,
-      reason: call.reason || normalized.reason,
+      args: normalizeToolInput(
+        registered.definition.inputSchema,
+        withoutIntent.args,
+      ),
+      reason: call.reason || withoutIntent.reason,
     }
   }
 
@@ -148,10 +152,11 @@ export class ToolRegistry implements ToolRegistrationPort {
       return { ok: false, message: `Unknown tool: ${definition.id}` }
     }
 
-    const normalized = withoutIntentMetadata(
+    const withoutIntent = withoutIntentMetadata(
       args,
       registered.providerDefinition.intentParameter,
     ).args
+    const normalized = normalizeToolInput(definition.inputSchema, withoutIntent)
 
     if (!registered.validate(normalized)) {
       return {
@@ -168,6 +173,32 @@ export class ToolRegistry implements ToolRegistrationPort {
     }
 
     return { ok: true, args: typedArgs }
+  }
+
+  /** Strictly validates already-normalized arguments at the execution boundary. */
+  validateCanonicalArgs<Schema extends TSchema>(
+    definition: ToolDefinition<Schema>,
+    args: JsonValue,
+  ): { ok: true; args: Static<Schema> } | { ok: false; message: string } {
+    const registered = this.#tools.get(definition.id)
+    if (!registered) {
+      return { ok: false, message: `Unknown tool: ${definition.id}` }
+    }
+    const canonical = withoutIntentMetadata(
+      args,
+      registered.providerDefinition.intentParameter,
+    ).args
+    if (!registered.validate(canonical)) {
+      return {
+        ok: false,
+        message: formatSchemaErrors(registered.validate.errors),
+      }
+    }
+    const typedArgs = canonical as Static<Schema>
+    const validationMessage = definition.validateArgs?.(typedArgs)
+    return validationMessage
+      ? { ok: false, message: validationMessage }
+      : { ok: true, args: typedArgs }
   }
 }
 
@@ -282,8 +313,8 @@ export class ToolExecutor {
         result: {
           status: 'error',
           code: 'UNKNOWN_TOOL',
-          message: `Unknown tool: ${call.toolId}`,
-          retryable: false,
+          message: `Unknown tool: ${call.toolId}. Choose a tool exposed for this Run and try again.`,
+          retryable: true,
         },
       }
     }
@@ -299,8 +330,8 @@ export class ToolExecutor {
         result: {
           status: 'error',
           code: 'INVALID_TOOL_ARGS',
-          message: validation.message,
-          retryable: false,
+          message: `Invalid arguments for ${call.toolId}: ${validation.message}. Correct the listed fields and call the tool again.`,
+          retryable: true,
         },
       }
     }
@@ -323,21 +354,21 @@ export class ToolExecutor {
       return {
         status: 'error',
         code: 'UNKNOWN_TOOL',
-        message: `Unknown tool: ${approvedCall.toolId}`,
-        retryable: false,
+        message: `Unknown tool: ${approvedCall.toolId}. Choose a tool exposed for this Run and try again.`,
+        retryable: true,
       }
     }
 
     const validation = definitionOverride
-      ? validateUnregisteredDefinition(definition, approvedCall.args)
-      : this.#registry.validateArgs(definition, approvedCall.args)
+      ? validateUnregisteredDefinition(definition, approvedCall.args, false)
+      : this.#registry.validateCanonicalArgs(definition, approvedCall.args)
 
     if (!validation.ok) {
       return {
         status: 'error',
         code: 'INVALID_TOOL_ARGS',
-        message: validation.message,
-        retryable: false,
+        message: `Invalid arguments for ${approvedCall.toolId}: ${validation.message}. Correct the listed fields and call the tool again.`,
+        retryable: true,
       }
     }
 
@@ -446,12 +477,16 @@ export class ToolExecutor {
 function validateUnregisteredDefinition<Schema extends TSchema>(
   definition: ToolDefinition<Schema>,
   args: JsonValue,
+  normalize = true,
 ): { ok: true; args: Static<Schema> } | { ok: false; message: string } {
   const validate = compileSchema(definition.inputSchema)
-  if (!validate(args)) {
+  const normalized = normalize
+    ? normalizeToolInput(definition.inputSchema, args)
+    : structuredClone(args)
+  if (!validate(normalized)) {
     return { ok: false, message: formatSchemaErrors(validate.errors) }
   }
-  const typedArgs = args as Static<Schema>
+  const typedArgs = normalized as Static<Schema>
   const message = definition.validateArgs?.(typedArgs)
   return message ? { ok: false, message } : { ok: true, args: typedArgs }
 }

@@ -56,6 +56,85 @@ describe('ToolRegistry hard output boundary', () => {
     })
   })
 
+  it('repairs scalar types and ignores undeclared provider parameters before approval', () => {
+    const registry = new ToolRegistry()
+    registry.registerTool({
+      id: 'normalize_fixture',
+      description: 'Normalize fixture',
+      inputSchema: Type.Object(
+        {
+          query: Type.String(),
+          limit: Type.Integer({ minimum: 1, maximum: 100 }),
+          literal: Type.Boolean(),
+        },
+        { additionalProperties: false },
+      ),
+      effects: ['filesystem.read'],
+      defaultRisk: 'low',
+      supportsAbort: true,
+      defaultTimeoutMs: 1_000,
+      maxOutputBytes: 1_024,
+      async execute() {
+        return { status: 'ok', content: [] }
+      },
+    })
+    const executor = new ToolExecutor(registry)
+    const raw = {
+      id: 'call-normalize' as CallId,
+      toolId: 'normalize_fixture',
+      args: {
+        query: 42,
+        limit: '10',
+        literal: 'false',
+        hallucinated: 'ignored',
+      },
+      reason: 'Test normalization',
+    }
+
+    const normalized = executor.normalizeCall(raw)
+    expect(normalized.args).toEqual({
+      query: '42',
+      limit: 10,
+      literal: false,
+    })
+    expect(executor.inspectCall(normalized)).toMatchObject({ ok: true })
+  })
+
+  it('returns a field-specific retryable error when normalization cannot repair input', () => {
+    const registry = new ToolRegistry()
+    registry.registerTool({
+      id: 'integer_fixture',
+      description: 'Integer fixture',
+      inputSchema: Type.Object(
+        { count: Type.Integer() },
+        { additionalProperties: false },
+      ),
+      effects: ['filesystem.read'],
+      defaultRisk: 'low',
+      supportsAbort: true,
+      defaultTimeoutMs: 1_000,
+      maxOutputBytes: 1_024,
+      async execute() {
+        return { status: 'ok', content: [] }
+      },
+    })
+
+    const inspected = new ToolExecutor(registry).inspectCall({
+      id: 'call-invalid' as CallId,
+      toolId: 'integer_fixture',
+      args: { count: 'many' },
+      reason: 'Test error',
+    })
+    expect(inspected).toMatchObject({
+      ok: false,
+      result: {
+        code: 'INVALID_TOOL_ARGS',
+        message: expect.stringContaining('/count must be integer'),
+        retryable: true,
+      },
+    })
+  })
+
   it('requires result and evidence for completed plan_update calls', () => {
     const registry = new ToolRegistry()
     registerOrchestrationTools(registry, {

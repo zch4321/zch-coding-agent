@@ -69,23 +69,27 @@ describe('terminal tool permission matrix', () => {
     expect(definitions().get('terminal_resize')).toBeUndefined()
   })
 
-  it('rejects a model-supplied shell on terminal_open', () => {
+  it('ignores a model-supplied shell on terminal_open', () => {
     const registry = definitions()
     const definition = registry.get('terminal_open')!
 
     expect(registry.validateArgs(definition, {}).ok).toBe(true)
-    expect(registry.validateArgs(definition, { shell: '/bin/sh' }).ok).toBe(
-      false,
-    )
+    expect(registry.validateArgs(definition, { shell: '/bin/sh' })).toEqual({
+      ok: true,
+      args: {},
+    })
   })
 
-  it('accepts only positive integer terminal identifiers', () => {
+  it('coerces a numeric terminal id and rejects invalid identifiers', () => {
     const registry = definitions()
     const definition = registry.get('terminal_send')!
     const args = { terminalId: 1, data: 'npm test' }
 
     expect(registry.validateArgs(definition, args).ok).toBe(true)
-    for (const invalid of ['1', 'terminal:1', 0, -2, 1.5]) {
+    expect(
+      registry.validateArgs(definition, { ...args, terminalId: '1' }),
+    ).toMatchObject({ ok: true, args: { terminalId: 1 } })
+    for (const invalid of ['terminal:1', 0, -2, 1.5]) {
       expect(
         registry.validateArgs(definition, { ...args, terminalId: invalid }).ok,
       ).toBe(false)

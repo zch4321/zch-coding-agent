@@ -34,10 +34,24 @@ export function formatSchemaErrors(
     return 'Schema validation failed'
   }
 
-  return errors
-    .map(
-      (error) =>
-        `${error.instancePath || '/'} ${error.message ?? 'is invalid'}`,
-    )
-    .join('; ')
+  return errors.map(formatSchemaError).join('; ')
+}
+
+function formatSchemaError(error: ErrorObject): string {
+  if (error.keyword === 'additionalProperties') {
+    return `${propertyPath(error.instancePath, error.params.additionalProperty)} is not a recognized parameter`
+  }
+  if (error.keyword === 'required') {
+    return `${propertyPath(error.instancePath, error.params.missingProperty)} is required`
+  }
+  if (error.keyword === 'type') {
+    return `${error.instancePath || '/'} must be ${String(error.params.type)}`
+  }
+  return `${error.instancePath || '/'} ${error.message ?? 'is invalid'}`
+}
+
+function propertyPath(instancePath: string, property: unknown): string {
+  if (typeof property !== 'string' || !property) return instancePath || '/'
+  const escaped = property.replaceAll('~', '~0').replaceAll('/', '~1')
+  return `${instancePath}/${escaped}`
 }

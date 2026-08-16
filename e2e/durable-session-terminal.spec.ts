@@ -373,12 +373,13 @@ test.describe.serial('Durable Session and terminal workflows', () => {
 
     fakeProvider.queue([
       toolCallDelta({
-        id: 'call:e2e-terminal-lf',
+        id: 'call:e2e-terminal-normalization',
         name: 'terminal_send',
         args: {
-          terminalId: target.terminalId,
+          terminalId: String(target.terminalId),
           data: 'Write-Output E2E_TERMINAL_SEND_AUTO_ENTER_OK',
           delayMs: 100,
+          hallucinatedParameter: 'ignored before approval',
         },
       }),
     ])
@@ -389,6 +390,7 @@ test.describe.serial('Durable Session and terminal workflows', () => {
     await page.getByRole('button', { name: '发送消息' }).click()
     const approval = page.locator('.approval-card')
     await expect(approval).toBeVisible()
+    await expect(approval).not.toContainText('hallucinatedParameter')
     await approval.getByRole('button', { name: '批准', exact: true }).click()
 
     await expect

@@ -17,6 +17,7 @@ import type {
 } from './types'
 import type { ToolRegistry } from './tool-registry'
 import type { SessionId } from '../../shared/ids'
+import { normalizeToolInput } from './tool-input-normalizer'
 
 export const MCP_CALL_TOOL_ID = 'call_mcp_tool'
 
@@ -72,19 +73,20 @@ export class McpToolGateway {
   /** Recognizes an MCP call tool and validates its arguments and visible server. */
   resolveCall(session: SessionState, call: ToolCall): McpCallResolution {
     if (call.toolId !== MCP_CALL_TOOL_ID) return { matched: false }
-    if (!this.#validateCall(call.args)) {
+    const normalizedCallArgs = normalizeToolInput(CallMcpToolSchema, call.args)
+    if (!this.#validateCall(normalizedCallArgs)) {
       return {
         matched: true,
         ok: false,
         result: {
           status: 'error',
           code: 'INVALID_TOOL_ARGS',
-          message: formatSchemaErrors(this.#validateCall.errors),
-          retryable: false,
+          message: `Invalid arguments for ${MCP_CALL_TOOL_ID}: ${formatSchemaErrors(this.#validateCall.errors)}. Correct the listed fields and call the tool again.`,
+          retryable: true,
         },
       }
     }
-    const args = call.args as CallMcpToolArgs
+    const args = normalizedCallArgs as CallMcpToolArgs
     const disclosure = session.mcpDisclosures.get(args.serverId)
     if (!disclosure?.toolNames.has(args.toolName)) {
       return {
@@ -107,15 +109,19 @@ export class McpToolGateway {
         args.toolName,
         disclosure.revision,
       )
-      if (!resolved.validate(args.arguments)) {
+      const normalizedArguments = normalizeToolInput(
+        resolved.descriptor.inputSchema,
+        args.arguments,
+      )
+      if (!resolved.validate(normalizedArguments)) {
         return {
           matched: true,
           ok: false,
           result: {
             status: 'error',
             code: 'MCP_INVALID_ARGS',
-            message: formatSchemaErrors(resolved.validate.errors),
-            retryable: false,
+            message: `Invalid arguments for MCP tool ${args.serverId}/${args.toolName}: ${formatSchemaErrors(resolved.validate.errors)}. Correct the listed fields and call the tool again.`,
+            retryable: true,
           },
         }
       }
@@ -123,7 +129,7 @@ export class McpToolGateway {
       const effectiveCall: ToolCall = {
         ...call,
         toolId: canonicalId,
-        args: structuredClone(args.arguments) as JsonValue,
+        args: normalizedArguments,
       }
       const permissiveSchema = Type.Unsafe<Record<string, JsonValue>>({})
       const definition: ToolDefinition = {

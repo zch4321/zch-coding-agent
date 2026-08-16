@@ -148,14 +148,15 @@ describe('MCP gateway tools', () => {
       args: {
         serverId: 'fixture',
         toolName: 'alpha',
-        arguments: { value: 'hello' },
+        arguments: { value: 42, hallucinated: 'ignored' },
+        hallucinatedWrapperField: true,
       },
       reason: 'test',
     })
     expect(alphaCall).toMatchObject({
       matched: true,
       ok: true,
-      call: { toolId: 'mcp:fixture:alpha', args: { value: 'hello' } },
+      call: { toolId: 'mcp:fixture:alpha', args: { value: '42' } },
     })
     if (!alphaCall.matched || !alphaCall.ok) return
 

@@ -54,8 +54,7 @@ const SendSchema = Type.Object(
     data: Type.String({
       minLength: 1,
       maxLength: 262_144,
-      description:
-        'Input text or control sequence to submit to the terminal.',
+      description: 'Input text or control sequence to submit to the terminal.',
     }),
     delayMs: Type.Optional(
       Type.Integer({
