@@ -148,7 +148,67 @@ function interjection(seq: number): MessageRecord {
   }
 }
 
+function orchestration(input: {
+  id: string
+  seq: number
+  source: string
+  text: string
+}): MessageRecord {
+  return {
+    schemaVersion: 1,
+    id: input.id as MessageId,
+    sessionId,
+    seq: input.seq,
+    visibility: 'visible',
+    turnId: rootId,
+    inHistory: true,
+    createdAt: timestamp,
+    kind: 'orchestrator',
+    parts: [{ type: 'text', text: input.text }],
+    metadata: {
+      schemaVersion: 1,
+      layer: {
+        source: input.source,
+        trusted: false,
+        editable: false,
+        hash: 'a'.repeat(64),
+      },
+    },
+  }
+}
+
 describe('projectConversationTurns', () => {
+  it('hides legacy visible Swarm prompts without hiding other orchestration', () => {
+    const turns = projectConversationTurns({
+      records: [
+        userMessage(),
+        orchestration({
+          id: 'message:swarm-orchestration',
+          seq: 2,
+          source: 'slash:/swarm',
+          text: 'Internal Swarm prompt',
+        }),
+        orchestration({
+          id: 'message:goal-orchestration',
+          seq: 3,
+          source: 'slash:/goal',
+          text: 'Visible goal orchestration',
+        }),
+        assistantMessage({
+          id: 'message:assistant-after-orchestration',
+          seq: 4,
+          text: 'Done',
+        }),
+      ],
+    })
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]?.messages.map((message) => message.text)).toEqual([
+      'Visible goal orchestration',
+      'Done',
+    ])
+  })
+
   it('groups every ReAct step under one user turn by display category', () => {
     const readCallId = 'call:read' as CallId
     const turns = projectConversationTurns({

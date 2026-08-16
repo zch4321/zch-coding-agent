@@ -225,7 +225,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 
 消息流要求：
 
-- 只有 `visibility = visible` 且 `kind = 'user_input'` 的 Message 显示为用户气泡；orchestrator、runtime context、harness、compact summary 或 hidden `conversation_transcript` 不能伪装成用户亲自输入。
+- 只有 `visibility = visible` 且 `kind = 'user_input'` 的 Message 显示为用户气泡；orchestrator、runtime context、harness、compact summary 或 hidden `conversation_transcript` 不能伪装成用户亲自输入。`/swarm` 原始用户消息正常展示，其内部 `slash:/swarm` orchestrator Prompt 不进入时间线；Renderer 也必须抑制旧版本已经持久化为 visible 的同源 Prompt。
 - Renderer 按 part 的原始顺序渲染：`text` 进入 Markdown，assistant `tool_call` 与对应 `tool_result` 组成稳定工具卡；受支持的 JSON result 只进入有界、可展开的结构化视图。它不能把 parts 重新编译成 Provider DTO。
 - `kind = 'assistant_turn'` / `'tool_result'` 的完整 records 用于重建稳定消息和工具卡；Active Run 的 delta/runtime events 只负责未完成状态，不能由 renderer 自行提交为 Message。
 - Renderer 只能展示 `normalizedReasoningText`，必须把 `providerContinuation` 当作 opaque canonical data，不解析、不修改，也不展示其中的原始 CoT、signature、encrypted/redacted block、response id 或 output item。

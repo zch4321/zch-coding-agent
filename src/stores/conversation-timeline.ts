@@ -53,6 +53,15 @@ function recordRoleMessage(record: MessageRecord): ChatMessage {
   }
 }
 
+function isInternalSwarmOrchestration(record: MessageRecord): boolean {
+  return (
+    record.kind === 'orchestrator' &&
+    record.metadata !== undefined &&
+    'layer' in record.metadata &&
+    record.metadata.layer.source === 'slash:/swarm'
+  )
+}
+
 function userChatMessage(
   record: Extract<MessageRecord, { kind: 'user_input' }>,
 ): ChatMessage {
@@ -164,6 +173,8 @@ export function projectConversationTurns({
   for (const record of [...records].sort(
     (left, right) => left.seq - right.seq,
   )) {
+    if (isInternalSwarmOrchestration(record)) continue
+
     if (record.kind === 'user_input' && record.visibility !== 'visible') {
       if ('replayedFromMessageId' in record.metadata) {
         aliases.set(

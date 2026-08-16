@@ -1,27 +1,19 @@
 # 待讨论的运行时设计问题
 
-状态：开放，尚未形成设计决定。
+状态：部分开放；第 1 项已形成设计决定，其余问题仍待讨论。
 
 本文只记录当前可观察行为、影响范围和后续需要回答的问题，不包含候选方案、推荐结论或实施计划。形成决定后，应把结论写入相应的 requirements、architecture、frontend spec 或 decision log，并更新本文状态。
 
-## 1. Swarm 编排消息的可见性
+## 1. Swarm 编排消息的可见性（已解决）
 
-### 当前行为
+### 决定
 
-- `/swarm <goal>` 会同时保留用户提交的斜杠命令，并生成供 Provider 使用的 `orchestrator` Prompt Layer。
-- Provider Prompt Layer 的正文包含 `<orchestration_request kind="swarm">`，其 canonical Message `kind` 是 `orchestrator`。
-- canonical history 当前把 `orchestrator` 和 `interjection` 默认标记为 `visibility = visible`；Renderer 会把 visible `orchestrator` Message 投影到普通对话时间线。
-- 因此用户可能同时看到自己提交的 `/swarm` 消息、内部 Swarm 编排正文、后续 `swarm_run` 工具或审批状态，以及 Agents 面板中的执行状态。
-- `orchestrator.message` runtime/trace event 与 canonical Prompt Layer 是不同对象；普通时间线中的持久内容来自 canonical Message 的 visibility。
-
-### 待讨论问题
-
-- 模型可见的 Swarm 编排正文是否应该进入普通用户时间线？
-- 用户输入、内部编排指令、编排状态提示、工具审批和 Agents 执行状态各自应采用什么可见性？
-- 可见性规则只适用于 Swarm，还是也适用于 `/prompt`、`/goal`、`/plan` 及后续 orchestration continuation？
-- `kind`、`visibility`、`inHistory` 和 UI presentation 之间的职责边界是什么？
-- 已经持久化为 visible 的历史 Swarm 编排 Message 应如何表现？
-- 普通搜索、会话导出、完整 Trace 和受限 transcript 是否应以相同方式处理这些记录？
+- 用户提交的 `/swarm <goal>` 继续作为普通可见 `user_input` 展示。
+- 供 Provider 使用、正文包含 `<orchestration_request kind="swarm">` 的 canonical `orchestrator` Prompt Layer 以 `visibility = hidden` 持久化，同时保持 `inHistory = true`；它继续进入模型上下文，但不进入普通对话时间线。
+- 已经持久化为 visible 的旧 Swarm Prompt 不改写 SQLite；Renderer 根据稳定来源 `slash:/swarm` 抑制其时间线投影。
+- `orchestrator.message` runtime/trace event、`swarm_run` 工具与审批状态、Agents artifact 各自沿用独立展示链路，不把内部 Prompt 正文重新投影为聊天消息。
+- 本次规则只适用于 `/swarm`；`/prompt`、`/goal`、`/plan` 和 `interjection` 的现有可见性不变。
+- 普通消息搜索与时间线不展示内部 Swarm Prompt；完整 canonical history、Provider-transfer transcript、Conversation 导出和完整 Trace 仍可保留它，用于模型连续性和显式诊断/导出。
 
 ### 关联实现
 

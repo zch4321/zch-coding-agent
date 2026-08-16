@@ -1,5 +1,6 @@
 import type { RunContext } from '../../shared/context'
 import type { ContextAttachmentChip } from '../../shared/context'
+import type { MessageVisibility } from '../../shared/message'
 import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
 import type { SkillsManager } from '../skills/manager'
@@ -25,6 +26,7 @@ export interface PreparedUserTurn {
     kind: 'selected_context' | 'orchestrator' | 'interjection'
     content: string
     source: string
+    visibility?: Exclude<MessageVisibility, 'superseded'>
   }>
 }
 

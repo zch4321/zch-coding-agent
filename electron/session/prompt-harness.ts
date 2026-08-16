@@ -6,7 +6,11 @@ import os from 'node:os'
 import type { PublicConfig } from '../../shared/config'
 import type { PromptBuildSummary } from '../../shared/trace'
 import type { MessageId } from '../../shared/ids'
-import type { CanonicalPromptKind, MessageRecord } from '../../shared/message'
+import type {
+  CanonicalPromptKind,
+  MessageRecord,
+  MessageVisibility,
+} from '../../shared/message'
 import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 import type { ProviderToolDefinition } from '../providers/provider'
@@ -157,6 +161,7 @@ export function appendPromptLayer(
     hash?: string
     turnId?: MessageId
     interjectionId?: string
+    visibility?: Exclude<MessageVisibility, 'superseded'>
   },
 ): MessageRecord {
   return appendPromptMessage(state, input)

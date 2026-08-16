@@ -80,9 +80,23 @@ describe('resolveSlashCommand', () => {
     )
     expect(content).toContain('Child Agents receive no parent conversation')
     expect(content).not.toContain('${objective}')
+    expect(result.providerContextMessages?.[0]?.visibility).toBe('hidden')
     expect(result.swarmGoal).toBe('Review the repository')
     expect(result.orchestratorMessage?.resource?.id).toBe(
       DEFAULT_SWARM_PROMPT_REFS['en-US'].id,
     )
+  })
+
+  it('keeps non-Swarm orchestration visibility unchanged', async () => {
+    const registry = await PromptRegistry.load(
+      path.resolve('resources', 'prompts'),
+    )
+    const result = resolveSlashCommand({
+      message: '/plan Check something',
+      config: publicConfig(),
+      promptRegistry: registry,
+    })
+
+    expect(result.providerContextMessages?.[0]?.visibility).toBeUndefined()
   })
 })

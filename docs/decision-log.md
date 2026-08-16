@@ -214,3 +214,11 @@
 - 验证边界：Child 工具 profile 不含命令、终端、构建或测试能力。父 Agent 可行时先运行相关验证，在下一轮把命令、退出码和精简关键输出写入 `sharedContext`；无法执行时明确说明，不能在同一 Tool batch 中假定尚未返回的测试结果。
 - 副本策略：适合交叉验证时鼓励使用接近本次 Job 上限的 Agent 数，并允许同一 task 多副本。allocator 只保证优先轮换满足能力要求的不同 `Provider + model`，合格模型不足时允许复用，提示词不得承诺绝对异构。
 - 历史边界：每个 hidden Child Session 分别持久化 XML-text 转义后的 `<swarm_shared_context>` prompt layer 与 `<swarm_task>` user input。基础 harness 明确 tag 语义；Renderer 解包 task，公共上下文不进入普通用户消息投影。
+
+## 2026-08-14 — Swarm 编排 Prompt 不进入普通对话时间线
+
+- 状态：已采纳并实现；本条只改变 `/swarm` 内部 Prompt 的展示，不改变其他 orchestration 的现有可见性。
+- 记录边界：用户提交的 `/swarm <goal>` 继续保存并展示为 visible `user_input`。解析器生成的 `<orchestration_request kind="swarm">` 继续保存为 canonical `orchestrator`，但显式使用 `visibility = hidden` 与 `inHistory = true`，因此 Provider 可见、普通聊天不可见。
+- 兼容边界：append-only canonical history 和旧 SQLite rows 不做迁移或改写。Renderer 以稳定 provenance `slash:/swarm` 抑制旧版本已经保存为 visible 的 Swarm Prompt；`/prompt`、`/goal`、`/plan` 与 interjection 不受影响。
+- 投影边界：`orchestrator.message` runtime/trace event、工具审批和 Agents artifact 继续使用各自通道。普通消息搜索与时间线排除内部 Prompt；Provider-transfer transcript、显式 Conversation 导出和完整 Trace 可以保留它。
+- 理由：内部编排正文是模型控制上下文，不是用户或 Assistant 的对话内容。保留 canonical 记录维持 Provider 连续性与审计能力，隐藏普通时间线则避免重复展示 `/swarm` 请求和造成角色混淆。

@@ -13,6 +13,7 @@ import {
   type CanonicalPromptKind,
   type MessagePart,
   type MessageRecord,
+  type MessageVisibility,
   type ProviderCompactEnvelope,
   type ToolCallPart,
   type ToolResultContent,
@@ -128,6 +129,7 @@ export function appendPromptMessage(
     hash?: string
     turnId?: MessageId
     interjectionId?: string
+    visibility?: Exclude<MessageVisibility, 'superseded'>
   },
 ): MessageRecord {
   const content = input.content.trim()
@@ -138,9 +140,10 @@ export function appendPromptMessage(
   const record = {
     ...nextIdentity(state),
     visibility:
-      input.kind === 'orchestrator' || input.kind === 'interjection'
+      input.visibility ??
+      (input.kind === 'orchestrator' || input.kind === 'interjection'
         ? ('visible' as const)
-        : ('hidden' as const),
+        : ('hidden' as const)),
     ...(input.turnId ? { turnId: input.turnId } : {}),
     kind: input.kind,
     parts: [{ type: 'text' as const, text: content }],
