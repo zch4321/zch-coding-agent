@@ -345,4 +345,62 @@ describe('TerminalPool', () => {
     }
     expect(pool.list(sessionA)).toHaveLength(MAX_TERMINALS_PER_SESSION)
   })
+
+  it('rejects an open that finishes after its Session was closed', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const { root, ptys, pool } = await harness(1_024, {
+      resolveShellProfile: async (selection) => {
+        await gate
+        return fakeProfile(selection)
+      },
+    })
+
+    const pending = pool.open({ sessionId: sessionA, workspace: root })
+    pool.closeSession(sessionA)
+    release()
+
+    await expect(pending).rejects.toThrow(
+      'Session closed while the terminal was starting',
+    )
+    expect(ptys).toHaveLength(0)
+    expect(pool.list(sessionA)).toEqual([])
+
+    // A later open for the same Session id (Session reopened) still works.
+    await expect(
+      pool.open({ sessionId: sessionA, workspace: root }),
+    ).resolves.toMatchObject({ status: 'running' })
+  })
+
+  it('rejects an open that finishes after the pool was disposed', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const { root, ptys, pool } = await harness(1_024, {
+      resolveShellProfile: async (selection) => {
+        await gate
+        return fakeProfile(selection)
+      },
+    })
+
+    const pending = pool.open({ sessionId: sessionA, workspace: root })
+    const disposed = pool.dispose()
+    release()
+
+    await expect(pending).rejects.toThrow('Terminal pool is disposed')
+    await disposed
+    expect(ptys).toHaveLength(0)
+  })
+
+  it('rejects new opens after disposal', async () => {
+    const { root, pool } = await harness()
+    await pool.dispose()
+
+    await expect(
+      pool.open({ sessionId: sessionA, workspace: root }),
+    ).rejects.toThrow('Terminal pool is disposed')
+  })
 })

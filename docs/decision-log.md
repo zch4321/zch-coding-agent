@@ -228,7 +228,7 @@
 - 状态：已采纳并实现；本条统一 `run_command.shell` 与交互 Terminal 的解释器来源，并收敛 Terminal 标识符、数量上限与 resize 边界。
 - 共享配置：`terminal_open` 删除模型可见的 `shell` 参数。TerminalPool 在每次打开 Terminal 时读取 `executionEnvironment.commandShell` 并经 CommandShellService 解析实际 profile；配置失效时沿用自动回退，不改写保存值。解析为 PowerShell kind 时 PTY 固定传入 `-ExecutionPolicy Bypass`。设置变更只影响之后打开的 Terminal，已运行的 Terminal 不重启。`run_command.process`、内部 Git、Subagent 与其他直接进程仍不读取该配置。
 - 标识符：`terminalId` 从 `terminal:<UUID>` 字符串改为进程内全局递增的正整数；应用重启后从 1 重新开始，ID 一经分配在当前进程内不复用，启动失败允许留下编号空洞。共享 Schema、IPC、事件、Tool 入参与 Renderer 同步改为整数。不迁移数据库或旧日志；不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。
-- 数量上限：每个 Session 最多保留 16 个 Terminal（含 opening、running 与已退出但未显式关闭的条目），显式关闭立即释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限；`terminal_list` 按数字 ID 升序返回。
+- 数量上限：每个 Session 最多保留 16 个 Terminal（含 opening、running 与已退出但未显式关闭的条目），显式关闭立即释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限；`terminal_list` 按数字 ID 升序返回。Session 关闭按世代作废仍在启动中的打开尝试，Pool 释放后拒绝新的打开，避免孤儿 PTY。
 - Resize 边界：删除模型可见的 `terminal_resize` Tool 及其输入 Schema 与结果投影；保留 `TerminalPool.resize`、`terminal:resize` IPC、preload API 与 Renderer 面板自动 fit/resize，前端尺寸变化继续同步给 PTY。
 - 模型上下文：`<environment_context>` 保留 `command_shell` 字段；基础提示词明确它同时适用于 `run_command` shell 模式与 Terminal，Terminal 自动使用该 Shell，模型只能按对应语法编写命令。设置页文案改为“命令与终端 Shell”并更新提示与回退警告。
 - 理由：解释器选择是用户环境决策，不应由模型在 Tool 参数中指定或绕开；短数字 ID 缩小模型引用与伪造的错误面，数量上限约束 PTY 资源占用；终端尺寸由前端布局驱动，模型无需手动控制。本条关闭 open design questions 第 2、6 项。

@@ -100,6 +100,8 @@ export class TerminalPool {
   readonly #closedOwners = new Map<TerminalId, SessionId>()
   readonly #pendingExits = new Set<Promise<void>>()
   readonly #reservations = new Map<SessionId, number>()
+  readonly #sessionGenerations = new Map<SessionId, number>()
+  #disposed = false
 
   constructor(options: TerminalPoolOptions) {
     this.#options = options
@@ -113,6 +115,9 @@ export class TerminalPool {
     cols?: number
     rows?: number
   }): Promise<TerminalInfo> {
+    if (this.#disposed) {
+      throw new Error('Terminal pool is disposed')
+    }
     this.#reserveSlot(input.sessionId)
     try {
       return await this.#openReserved(input)
@@ -129,6 +134,7 @@ export class TerminalPool {
     cols?: number
     rows?: number
   }): Promise<TerminalInfo> {
+    const generation = this.#sessionGenerations.get(input.sessionId) ?? 0
     const guard = PathGuard.fromCanonical(input.workspace)
     const guarded = await guard.resolveExisting(input.cwd ?? '.')
     const cwdStat = await stat(guarded.realPath)
@@ -143,6 +149,9 @@ export class TerminalPool {
     const id = allocateTerminalId()
     const selection = this.#options.getCommandShellSelection?.() ?? 'auto'
     const profile = await this.#resolveShellProfile(selection)
+    // Spawn through registration below is synchronous, so this single check
+    // covers every await point where closeSession/dispose could interleave.
+    this.#assertOpenStillValid(input.sessionId, generation)
     const shell = profile.executable
     const shellArgs =
       profile.kind === 'powershell'
@@ -323,8 +332,12 @@ export class TerminalPool {
     return true
   }
 
-  /** Closes every terminal owned by a Session. */
+  /** Closes every terminal owned by a Session and invalidates its in-flight opens. */
   closeSession(sessionId: SessionId): void {
+    this.#sessionGenerations.set(
+      sessionId,
+      (this.#sessionGenerations.get(sessionId) ?? 0) + 1,
+    )
     for (const resource of [...this.#resources.values()]) {
       if (resource.sessionId === sessionId) {
         void this.#disposeResource(resource)
@@ -332,8 +345,9 @@ export class TerminalPool {
     }
   }
 
-  /** Closes all terminals and waits for pending PTY cleanup. */
+  /** Closes all terminals, rejects future opens, and waits for pending PTY cleanup. */
   async dispose(): Promise<void> {
+    this.#disposed = true
     for (const resource of [...this.#resources.values()]) {
       void this.#disposeResource(resource)
     }
@@ -359,6 +373,16 @@ export class TerminalPool {
     }
 
     return resource
+  }
+
+  /** Raises when the Session closed or the pool was disposed while the open was awaiting. */
+  #assertOpenStillValid(sessionId: SessionId, generation: number): void {
+    if (this.#disposed) {
+      throw new Error('Terminal pool is disposed')
+    }
+    if ((this.#sessionGenerations.get(sessionId) ?? 0) !== generation) {
+      throw new Error('Session closed while the terminal was starting')
+    }
   }
 
   /** Resolves the configured shell selection to a concrete profile with automatic fallback. */
