@@ -464,7 +464,7 @@ async function handleProviderSelect(value: string | number) {
     return
   }
 
-  await agent.setActiveProvider(providerId)
+  agent.setComposerProvider(providerId)
 }
 
 function handleReasoningSelect(value: string | number) {

@@ -128,7 +128,9 @@ export async function prepareHeadlessConfig(input: {
     new HeadlessSecretStorageAdapter(),
   )
   const configStore = new ConfigStore(configPath, secretStore, {
-    environmentApiKeys: { [appConfig.activeProviderId]: credential },
+    environmentApiKeys: {
+      [appConfig.models.defaultModelProvider]: credential,
+    },
   })
   await configStore.initialize()
 
@@ -212,25 +214,24 @@ function buildAppConfig(config: HeadlessConfig): AppConfig {
   const providerId = config.provider.id
   return {
     ...defaults,
-    activeProviderId: providerId,
-    providers: [
-      {
-        id: providerId,
-        label: config.provider.label ?? providerId,
-        providerType: config.provider.providerType,
-        revision: 1,
-        baseURL: config.provider.baseURL,
-        model: config.provider.model,
-        reasoning: config.provider.reasoning ?? 'high',
-        modelCatalog: [],
-        modelOverrides: {},
-        enabledModelIds: [config.provider.model],
-      },
-    ],
-    approval: {
-      approverProviderId: providerId,
-      approverModel: config.provider.model,
-      reasoning: config.provider.reasoning ?? defaults.approval.reasoning,
+    models: {
+      ...defaults.models,
+      defaultModelProvider: providerId,
+      defaultModel: config.provider.model,
+      providers: [
+        {
+          id: providerId,
+          label: config.provider.label ?? providerId,
+          providerType: config.provider.providerType,
+          revision: 1,
+          baseURL: config.provider.baseURL,
+          model: config.provider.model,
+          reasoning: config.provider.reasoning ?? 'high',
+          modelCatalog: [],
+          modelOverrides: {},
+          enabledModelIds: [config.provider.model],
+        },
+      ],
     },
     permission: {
       ...defaults.permission,

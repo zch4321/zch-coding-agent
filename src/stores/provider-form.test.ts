@@ -137,85 +137,69 @@ describe('providerDraftConflicts', () => {
     mainModelId: 'main-model',
     enabledModelIds: ['main-model', 'approver-model'],
     profiles,
-    approval: {
+    auxiliary: {
       providerId: 'provider-a',
       model: 'approver-model',
-      reasoning: 'low' as ReasoningEffort,
     },
   }
 
   it('reports no conflicts when both routes are compatible', () => {
     expect(providerDraftConflicts(base)).toEqual({
       main: false,
-      approval: false,
-      approvalReason: null,
+      auxiliary: false,
+      auxiliaryReason: null,
     })
   })
 
-  it('flags main when the main model annotation excludes the default effort', () => {
+  it('flags main and auxiliary together when the effort excludes both annotations', () => {
     expect(providerDraftConflicts({ ...base, reasoning: 'medium' })).toEqual({
       main: true,
-      approval: false,
-      approvalReason: null,
+      auxiliary: true,
+      auxiliaryReason: 'reasoning-unsupported',
     })
   })
 
-  it('flags approval when its own configured effort is unsupported', () => {
-    expect(
-      providerDraftConflicts({
-        ...base,
-        reasoning: 'high',
-        approval: { ...base.approval, reasoning: 'high' },
-      }),
-    ).toEqual({
-      main: false,
-      approval: true,
-      approvalReason: 'reasoning-unsupported',
-    })
-  })
-
-  it('does not inherit a changed Provider default effort', () => {
+  it('flags auxiliary when the provider default effort is unsupported by its annotation', () => {
+    // The auxiliary route always follows the Provider default effort.
     expect(providerDraftConflicts({ ...base, reasoning: 'high' })).toEqual({
       main: false,
-      approval: false,
-      approvalReason: null,
+      auxiliary: true,
+      auxiliaryReason: 'reasoning-unsupported',
     })
   })
 
-  it('uses approval off exactly without promoting it to high', () => {
-    expect(
-      providerDraftConflicts({
-        ...base,
-        profiles: [
-          ...profiles.slice(0, 1),
-          profile('approver-model', 'provider', {
-            reasoningEfforts: ['off'],
-          }),
-        ],
-        approval: { ...base.approval, reasoning: 'off' },
-      }),
-    ).toEqual({
-      main: false,
-      approval: false,
-      approvalReason: null,
-    })
-  })
-
-  it('keeps main and approval conflicts independent', () => {
+  it('accepts the provider default off effort for both routes', () => {
     expect(
       providerDraftConflicts({
         ...base,
         reasoning: 'off',
-        approval: { ...base.approval, reasoning: 'high' },
+        profiles: [
+          profile('main-model', 'provider', { reasoningEfforts: ['off'] }),
+          profile('approver-model', 'provider', { reasoningEfforts: ['off'] }),
+        ],
       }),
     ).toEqual({
-      main: true,
-      approval: true,
-      approvalReason: 'reasoning-unsupported',
+      main: false,
+      auxiliary: false,
+      auxiliaryReason: null,
     })
   })
 
-  it('flags approval when the saved approval model is disabled in the draft', () => {
+  it('keeps main and auxiliary conflicts independent', () => {
+    expect(
+      providerDraftConflicts({
+        ...base,
+        reasoning: 'off',
+        enabledModelIds: ['main-model', 'approver-model'],
+      }),
+    ).toEqual({
+      main: true,
+      auxiliary: true,
+      auxiliaryReason: 'reasoning-unsupported',
+    })
+  })
+
+  it('flags auxiliary when the saved auxiliary model is disabled in the draft', () => {
     expect(
       providerDraftConflicts({
         ...base,
@@ -223,36 +207,22 @@ describe('providerDraftConflicts', () => {
       }),
     ).toEqual({
       main: false,
-      approval: true,
-      approvalReason: 'model-disabled',
+      auxiliary: true,
+      auxiliaryReason: 'model-disabled',
     })
   })
 
-  it('ignores the approval route when another provider is the approver', () => {
+  it('ignores the auxiliary role when another provider hosts it', () => {
     expect(
       providerDraftConflicts({
         ...base,
-        approval: {
-          providerId: 'provider-b',
-          model: 'approver-model',
-          reasoning: 'low',
-        },
+        reasoning: 'high',
+        auxiliary: { providerId: 'provider-b', model: 'approver-model' },
       }),
-    ).toEqual({ main: false, approval: false, approvalReason: null })
-  })
-
-  it('treats unannotated models as supporting every effort', () => {
-    expect(
-      providerDraftConflicts({
-        ...base,
-        reasoning: 'max',
-        profiles: [profile('main-model', 'provider')],
-        approval: {
-          providerId: 'provider-a',
-          model: 'main-model',
-          reasoning: 'max',
-        },
-      }),
-    ).toEqual({ main: false, approval: false, approvalReason: null })
+    ).toEqual({
+      main: false,
+      auxiliary: false,
+      auxiliaryReason: null,
+    })
   })
 })

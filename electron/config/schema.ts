@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox'
 import {
   APP_CONFIG_SCHEMA_VERSION,
+  ModelRolesConfigSchema,
   PermissionModeSchema,
   ProviderTypeSchema,
   PublicConfigSchema,
@@ -30,15 +31,17 @@ export const AppProviderConfigSchema = Type.Object(
     model: Type.String({ maxLength: 256 }),
     reasoning: ReasoningEffortSchema,
     modelCatalog: Type.Array(
-      PublicConfigSchema.properties.providers.items.properties.modelCatalog
-        .items,
+      PublicConfigSchema.properties.models.properties.providers.items.properties
+        .modelCatalog.items,
       { maxItems: 1_000 },
     ),
     modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
     modelOverrides:
-      PublicConfigSchema.properties.providers.items.properties.modelOverrides,
+      PublicConfigSchema.properties.models.properties.providers.items.properties
+        .modelOverrides,
     enabledModelIds:
-      PublicConfigSchema.properties.providers.items.properties.enabledModelIds,
+      PublicConfigSchema.properties.models.properties.providers.items.properties
+        .enabledModelIds,
     apiKeyRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   },
   { additionalProperties: false },
@@ -57,17 +60,23 @@ export const AppWebSearchConfigSchema = Type.Object(
 
 export type AppWebSearchConfig = Static<typeof AppWebSearchConfigSchema>
 
-export const AppConfigSchema = Type.Object(
+const AppModelsConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(APP_CONFIG_SCHEMA_VERSION),
-    activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
+    ...ModelRolesConfigSchema.properties,
     providers: Type.Array(AppProviderConfigSchema, {
       minItems: 1,
       maxItems: 32,
     }),
-    approval: PublicConfigSchema.properties.approval,
+    modelPool: PublicConfigSchema.properties.models.properties.modelPool,
+  },
+  { additionalProperties: false },
+)
+
+export const AppConfigSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(APP_CONFIG_SCHEMA_VERSION),
+    models: AppModelsConfigSchema,
     subagents: PublicConfigSchema.properties.subagents,
-    modelPool: PublicConfigSchema.properties.modelPool,
     executionEnvironment: PublicConfigSchema.properties.executionEnvironment,
     permission: Type.Object(
       {
@@ -99,33 +108,33 @@ export const DEFAULT_PROVIDER_ID = 'deepseek'
 
 export const DEFAULT_APP_CONFIG = {
   schemaVersion: APP_CONFIG_SCHEMA_VERSION,
-  activeProviderId: DEFAULT_PROVIDER_ID,
-  providers: [
-    {
-      id: DEFAULT_PROVIDER_ID,
-      label: 'DeepSeek',
-      providerType: 'deepseek.chat-completions',
-      revision: 1,
-      baseURL: 'https://api.deepseek.com',
-      model: '',
-      modelCatalog: [],
-      modelOverrides: {},
-      enabledModelIds: [],
-      reasoning: 'high',
+  models: {
+    defaultModelProvider: DEFAULT_PROVIDER_ID,
+    defaultModel: '',
+    auxiliaryModelProvider: '',
+    auxiliaryModel: '',
+    providers: [
+      {
+        id: DEFAULT_PROVIDER_ID,
+        label: 'DeepSeek',
+        providerType: 'deepseek.chat-completions',
+        revision: 1,
+        baseURL: 'https://api.deepseek.com',
+        model: '',
+        modelCatalog: [],
+        modelOverrides: {},
+        enabledModelIds: [],
+        reasoning: 'high',
+      },
+    ],
+    modelPool: {
+      entries: [],
     },
-  ],
-  approval: {
-    approverProviderId: DEFAULT_PROVIDER_ID,
-    approverModel: '',
-    reasoning: 'high',
   },
   subagents: {
     enabled: false,
     workerTimeoutMs: 30 * 60_000,
     maxAgentsPerSwarm: 10,
-  },
-  modelPool: {
-    entries: [],
   },
   executionEnvironment: {
     commandShell: 'auto',
@@ -202,15 +211,17 @@ export function getAppProvider(
   config: AppConfig,
   providerId: string,
 ): AppProviderConfig | undefined {
-  return config.providers.find((provider) => provider.id === providerId)
+  return config.models.providers.find((provider) => provider.id === providerId)
 }
 
-/** Selects the active application provider, falling back to the first configured provider. */
-export function getActiveAppProvider(config: AppConfig): AppProviderConfig {
+/** Selects the default-model provider, falling back to the first configured provider. */
+export function getDefaultModelAppProvider(
+  config: AppConfig,
+): AppProviderConfig {
   return (
-    getAppProvider(config, config.activeProviderId) ??
-    config.providers[0] ??
-    DEFAULT_APP_CONFIG.providers[0]
+    getAppProvider(config, config.models.defaultModelProvider) ??
+    config.models.providers[0] ??
+    DEFAULT_APP_CONFIG.models.providers[0]
   )
 }
 
@@ -261,24 +272,28 @@ export function toPublicConfig(
 
   return {
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
-    activeProviderId: config.activeProviderId,
-    providers: config.providers.map((provider) => ({
-      id: provider.id,
-      label: provider.label,
-      providerType: provider.providerType,
-      revision: provider.revision,
-      baseURL: provider.baseURL,
-      model: provider.model,
-      reasoning: provider.reasoning,
-      modelCatalog: structuredClone(provider.modelCatalog),
-      modelCatalogFetchedAt: provider.modelCatalogFetchedAt,
-      modelOverrides: structuredClone(provider.modelOverrides),
-      enabledModelIds: structuredClone(provider.enabledModelIds),
-      ...credentialForProvider(provider),
-    })),
-    approval: structuredClone(config.approval),
+    models: {
+      defaultModelProvider: config.models.defaultModelProvider,
+      defaultModel: config.models.defaultModel,
+      auxiliaryModelProvider: config.models.auxiliaryModelProvider,
+      auxiliaryModel: config.models.auxiliaryModel,
+      providers: config.models.providers.map((provider) => ({
+        id: provider.id,
+        label: provider.label,
+        providerType: provider.providerType,
+        revision: provider.revision,
+        baseURL: provider.baseURL,
+        model: provider.model,
+        reasoning: provider.reasoning,
+        modelCatalog: structuredClone(provider.modelCatalog),
+        modelCatalogFetchedAt: provider.modelCatalogFetchedAt,
+        modelOverrides: structuredClone(provider.modelOverrides),
+        enabledModelIds: structuredClone(provider.enabledModelIds),
+        ...credentialForProvider(provider),
+      })),
+      modelPool: structuredClone(config.models.modelPool),
+    },
     subagents: structuredClone(config.subagents),
-    modelPool: structuredClone(config.modelPool),
     executionEnvironment: structuredClone(config.executionEnvironment),
     permission: structuredClone(config.permission),
     limits: structuredClone(config.limits),

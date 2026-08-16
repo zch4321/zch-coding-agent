@@ -241,3 +241,12 @@
 - 模型起名：第一个 Run 完成时，若 Session 标题仍是派生值，由 Main process 使用模型池第一个 enabled 且 `capability = light` 的 route，以首条用户消息与首个 assistant 回复的有界摘要生成短标题。无 light route、Provider 失败或输出清洗为空时静默保留派生标题，生成调用不进 canonical history、不计入对话 usage 投影。
 - 标题来源：SQLite v9（0009_title_source）为 sessions 增加 `title_source`（`auto|user|model`）。新会话从 `auto` 开始；用户重命名与 Fork 置 `user`；模型写回置 `model`；升级前存量会话一律默认 `user`，永不参与自动起名。每个 Session 在进程内最多尝试一次；应用重启后标题仍为 `auto` 时，允许在下一个 Run 结束时补试（宽松语义，避免持久化尝试计数）。
 - 理由：头部五行压缩为三行后信息密度更高，工作区名属于冗余；对话标题的可读性直接影响侧栏与后台通知可用性，而首条消息截断往往过长或不达意。标题生成限定 light route 与一次尝试，把额外 Provider 调用与费用约束在用户已显式配置的小模型上。
+
+## 2026-08-16 — 模型角色统合：主/辅助模型与 Auto 审批回退
+
+- 状态：已采纳并实现；本条统一模型相关配置到单个 `models` 段，并把 Auto 审批与对话起名的模型来源收敛为“辅助模型 ?? 当前模型”。
+- 配置结构：AppConfig v21 新增 `models` 段（`defaultModelProvider/defaultModel`、`auxiliaryModelProvider/auxiliaryModel`、`providers`、`modelPool`）；删除顶层 `activeProviderId` 与 `approval` 段。迁移把旧 `approval.{approverProviderId, approverModel}` 映射为辅助模型并丢弃独立审批档位；加载修复会把不可用的辅助模型改写为当前默认模型。Provider id 保持不可变的机器键（新建改为 `provider-<uuid>`），不再展示于 UI。
+- 审批语义：Auto 模式的审批 route = 辅助模型 ?? 该 Run 的主模型 route；辅助模型未配置或不可用时不再回退纯人工，而是由当前模型审批。审批与起名的 reasoning 沿用所选 Provider 的默认档位，不提供独立档位。
+- 起名语义：`ConversationTitlingService` 的 route 来源从“模型池精确 light route”改为辅助模型 ?? 该 Run 的主模型；模型池与能力标注回归为只服务 Swarm。Desktop 提供 `ZCH_DISABLE_CONVERSATION_TITLING` 环境开关（e2e 默认禁用），Headless 恒不启用。
+- 设置页：`模型服务` 页更名 `模型`，第一节“默认模型”提供主/辅助两个下拉并自动保存；原内容下移为“供应商配置”。权限页删除审批卡片，模式选择下固定一行审批来源说明，整页改为自动保存。
+- 理由：两个后台能力（审批、起名）与 Swarm 的池化调度是不同语义——前者要一个可预测的单一模型，后者要能力轮换。显式的主/辅助角色比“activeProvider + 独立审批路由 + 池内 light 标注”更可解释；破坏性升级由 v21 迁移一次性收敛，不留双轨。

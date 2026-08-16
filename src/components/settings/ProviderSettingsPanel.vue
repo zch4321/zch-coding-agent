@@ -49,7 +49,6 @@ type ProviderAction =
   | { kind: 'create' }
   | { kind: 'copy'; providerId: string }
   | { kind: 'delete'; providerId: string }
-  | { kind: 'set-active'; providerId: string }
 
 interface ManualModelDraft extends ModelTokenSettings {
   modelId: string
@@ -123,7 +122,7 @@ const reasoningEffortOptions = computed(() =>
 )
 /**
  * Draft conflicts that pause autosave: the main model annotation excluding
- * the draft default effort, or the saved approval route being incompatible
+ * the draft default effort, or the saved auxiliary role being incompatible
  * with the draft. Neither is auto-adjusted; the user resolves them manually.
  */
 const draftConflicts = computed(() =>
@@ -133,11 +132,14 @@ const draftConflicts = computed(() =>
     mainModelId: agent.providerForm.model,
     enabledModelIds: agent.providerForm.enabledModelIds,
     profiles: agent.modelProfiles,
-    approval: agent.approvalSavedForm,
+    auxiliary: {
+      providerId: agent.auxiliaryModelProvider,
+      model: agent.auxiliaryModel,
+    },
   }),
 )
 const autosaveConflict = computed(
-  () => draftConflicts.value.main || draftConflicts.value.approval,
+  () => draftConflicts.value.main || draftConflicts.value.auxiliary,
 )
 const capabilityOptions = computed(() => [
   { label: t('settings.capabilityLight'), value: 'light' },
@@ -150,11 +152,6 @@ const tokenEstimationOptions = computed(() => [
 ])
 const deleteProvider = computed(() =>
   agent.providers.find((provider) => provider.id === deleteProviderId.value),
-)
-const selectedProviderReady = computed(
-  () =>
-    Boolean(agent.providerForm.model) &&
-    agent.providerForm.enabledModelIds.includes(agent.providerForm.model),
 )
 const modelTransferOptions = computed(() => agent.modelTransferOptions)
 const selectedModelIds = computed(() => agent.providerForm.enabledModelIds)
@@ -302,10 +299,10 @@ function modelDeleteDisabledReason(modelId: string): string {
     return t('settings.deleteMainModelBlocked')
   }
   if (
-    agent.approvalSavedForm.providerId === agent.selectedProviderId &&
-    agent.approvalSavedForm.model === modelId
+    agent.auxiliaryModelProvider === agent.selectedProviderId &&
+    agent.auxiliaryModel === modelId
   ) {
-    return t('settings.deleteApprovalModelBlocked')
+    return t('settings.deleteAuxiliaryModelBlocked')
   }
   return ''
 }
@@ -339,6 +336,53 @@ function handleCapabilityChange(
   })
 }
 
+/** Encodes one provider+model pair as a role-select value. */
+function roleSelectValue(providerId: string, model: string): string {
+  return JSON.stringify([providerId, model])
+}
+
+const defaultModelRoleOptions = computed(() =>
+  agent.providers.flatMap((provider) =>
+    provider.enabledModelIds.map((model) => ({
+      label: `${provider.label} / ${model}`,
+      value: roleSelectValue(provider.id, model),
+    })),
+  ),
+)
+const auxiliaryModelRoleOptions = computed(() => [
+  { label: t('settings.auxiliaryFollowDefault'), value: '' },
+  ...defaultModelRoleOptions.value,
+])
+const defaultModelRoleValue = computed(() => {
+  const provider =
+    agent.providers.find(
+      (candidate) => candidate.id === agent.defaultModelProvider,
+    ) ?? agent.providers[0]
+  return roleSelectValue(
+    provider?.id ?? '',
+    agent.defaultModel || provider?.model || '',
+  )
+})
+const auxiliaryModelRoleValue = computed(() =>
+  agent.auxiliaryModel
+    ? roleSelectValue(agent.auxiliaryModelProvider, agent.auxiliaryModel)
+    : '',
+)
+
+function selectDefaultModelRole(value: string): void {
+  const [providerId, model] = JSON.parse(value) as [string, string]
+  void agent.setDefaultModelRole(providerId, model)
+}
+
+function selectAuxiliaryModelRole(value: string): void {
+  if (!value) {
+    void agent.setAuxiliaryModelRole('', '')
+    return
+  }
+  const [providerId, model] = JSON.parse(value) as [string, string]
+  void agent.setAuxiliaryModelRole(providerId, model)
+}
+
 onMounted(() => {
   void agent.enterProviderSettings()
 })
@@ -347,7 +391,6 @@ watch(
   () =>
     JSON.stringify({
       form: agent.providerForm,
-      approval: agent.approvalSavedForm,
       models: agent.modelProfiles.map((model) => ({
         id: model.id,
         contextWindowTokens: model.contextWindowTokens,
@@ -379,20 +422,8 @@ onBeforeUnmount(() => {
   }
 })
 
-function providerActions(providerId: string): DropdownOption[] {
-  const isActive = providerId === agent.activeProviderId
-  const provider = agent.providers.find(
-    (candidate) => candidate.id === providerId,
-  )
+function providerActions(): DropdownOption[] {
   return [
-    {
-      label: t('settings.setDefaultProvider'),
-      key: 'set-active',
-      disabled:
-        isActive ||
-        !provider?.model ||
-        !provider.enabledModelIds.includes(provider.model),
-    },
     { label: t('settings.copyProvider'), key: 'copy' },
     {
       label: t('settings.deleteProvider'),
@@ -425,9 +456,6 @@ async function runProviderAction(action: ProviderAction) {
     case 'delete':
       deleteProviderId.value = action.providerId
       break
-    case 'set-active':
-      await agent.setActiveProvider(action.providerId)
-      break
   }
 }
 
@@ -447,9 +475,7 @@ function handleCardKeydown(event: KeyboardEvent, providerId: string) {
 }
 
 function handleDropdownSelect(key: string | number, providerId: string) {
-  if (key === 'set-active') {
-    void requestProviderAction({ kind: 'set-active', providerId })
-  } else if (key === 'copy') {
+  if (key === 'copy') {
     void requestProviderAction({ kind: 'copy', providerId })
   } else if (key === 'delete') {
     void requestProviderAction({ kind: 'delete', providerId })
@@ -459,435 +485,466 @@ function handleDropdownSelect(key: string | number, providerId: string) {
 
 <template>
   <section class="settings-section provider-settings-section">
-    <div class="settings-heading provider-settings-heading">
+    <div class="settings-heading">
       <div>
-        <h2>{{ t('settings.providerTitle') }}</h2>
-        <p>{{ t('settings.providerHint') }}</p>
+        <h2>{{ t('settings.modelsTitle') }}</h2>
+        <p>{{ t('settings.modelsHint') }}</p>
       </div>
-      <NButton
-        type="primary"
-        @click="requestProviderAction({ kind: 'create' })"
-      >
-        {{ t('settings.addProvider') }}
-      </NButton>
     </div>
 
-    <NGrid
-      class="provider-card-grid"
-      cols="1 s:2 l:3"
-      :x-gap="12"
-      :y-gap="12"
-      responsive="screen"
-    >
-      <NGi v-for="provider in agent.providerCardSummaries" :key="provider.id">
-        <NCard
-          size="small"
-          hoverable
-          class="provider-card"
-          :class="{ active: provider.isActive, selected: provider.isSelected }"
-          role="button"
-          tabindex="0"
-          @click="
-            requestProviderAction({
-              kind: 'select',
-              providerId: provider.id,
-            })
-          "
-          @keydown="handleCardKeydown($event, provider.id)"
+    <div class="settings-subsection">
+      <div class="settings-subsection-heading">
+        <h3>{{ t('settings.defaultModelsTitle') }}</h3>
+        <p>{{ t('settings.defaultModelsHint') }}</p>
+      </div>
+      <div class="settings-inline settings-inline-equal">
+        <label class="settings-field">
+          <span>{{ t('settings.defaultModelRole') }}</span>
+          <NSelect
+            :value="defaultModelRoleValue"
+            :options="defaultModelRoleOptions"
+            :disabled="agent.rolesSaving"
+            filterable
+            @update:value="selectDefaultModelRole"
+          />
+          <small>{{ t('settings.defaultModelRoleHint') }}</small>
+        </label>
+        <label class="settings-field">
+          <span>{{ t('settings.auxiliaryModelRole') }}</span>
+          <NSelect
+            :value="auxiliaryModelRoleValue"
+            :options="auxiliaryModelRoleOptions"
+            :disabled="agent.rolesSaving"
+            filterable
+            @update:value="selectAuxiliaryModelRole"
+          />
+          <small>{{ t('settings.auxiliaryModelRoleHint') }}</small>
+        </label>
+      </div>
+      <small class="settings-save-status" aria-live="polite">
+        {{
+          agent.rolesSaving
+            ? t('settings.saving')
+            : agent.rolesSaveStatus === 'saved'
+              ? t('settings.saved')
+              : agent.rolesSaveStatus
+        }}
+      </small>
+    </div>
+
+    <div class="settings-subsection">
+      <div class="settings-heading provider-settings-heading">
+        <div>
+          <h3>{{ t('settings.providerConfigTitle') }}</h3>
+          <p>{{ t('settings.providerHint') }}</p>
+        </div>
+        <NButton
+          type="primary"
+          @click="requestProviderAction({ kind: 'create' })"
         >
-          <template #header>
-            <div class="provider-card-title">
-              <strong>{{ provider.label }}</strong>
-              <NTag v-if="provider.isActive" size="small" type="success">
-                {{ t('settings.defaultProvider') }}
-              </NTag>
-            </div>
-          </template>
-          <template #header-extra>
-            <NDropdown
-              trigger="click"
-              :options="providerActions(provider.id)"
-              @select="handleDropdownSelect($event, provider.id)"
-            >
-              <NButton size="tiny" secondary @click.stop>
-                {{ t('settings.providerActions') }}
-              </NButton>
-            </NDropdown>
-          </template>
-          <div class="provider-card-body">
-            <div class="provider-card-tags">
-              <NTag
-                v-for="model in provider.models"
-                :key="model"
-                size="small"
-                :bordered="false"
+          {{ t('settings.addProvider') }}
+        </NButton>
+      </div>
+
+      <NGrid
+        class="provider-card-grid"
+        cols="1 s:2 l:3"
+        :x-gap="12"
+        :y-gap="12"
+        responsive="screen"
+      >
+        <NGi v-for="provider in agent.providerCardSummaries" :key="provider.id">
+          <NCard
+            size="small"
+            hoverable
+            class="provider-card"
+            :class="{ selected: provider.isSelected }"
+            role="button"
+            tabindex="0"
+            @click="
+              requestProviderAction({
+                kind: 'select',
+                providerId: provider.id,
+              })
+            "
+            @keydown="handleCardKeydown($event, provider.id)"
+          >
+            <template #header>
+              <div class="provider-card-title">
+                <strong>{{ provider.label }}</strong>
+              </div>
+            </template>
+            <template #header-extra>
+              <NDropdown
+                trigger="click"
+                :options="providerActions()"
+                @select="handleDropdownSelect($event, provider.id)"
               >
-                {{ model }}
-              </NTag>
+                <NButton size="tiny" secondary @click.stop>
+                  {{ t('settings.providerActions') }}
+                </NButton>
+              </NDropdown>
+            </template>
+            <div class="provider-card-body">
+              <div class="provider-card-tags">
+                <NTag
+                  v-for="model in provider.models"
+                  :key="model"
+                  size="small"
+                  :bordered="false"
+                >
+                  {{ model }}
+                </NTag>
+              </div>
+              <small>
+                {{
+                  provider.credentialConfigured
+                    ? provider.credentialSource === 'environment'
+                      ? t('settings.credentialEnvShort')
+                      : t('settings.credentialStoredShort')
+                    : t('settings.credentialNoneShort')
+                }}
+              </small>
             </div>
-            <small>
+          </NCard>
+        </NGi>
+      </NGrid>
+
+      <div class="provider-detail-panel">
+        <div class="provider-detail-heading">
+          <div>
+            <h3>{{ agent.providerForm.label }}</h3>
+          </div>
+          <div class="provider-detail-toolbar">
+            <small class="settings-save-status" aria-live="polite">
               {{
-                provider.credentialConfigured
-                  ? provider.credentialSource === 'environment'
-                    ? t('settings.credentialEnvShort')
-                    : t('settings.credentialStoredShort')
-                  : t('settings.credentialNoneShort')
+                agent.providerSaving
+                  ? t('settings.saving')
+                  : agent.providerSaveStatus &&
+                      agent.providerSaveStatus !== 'Saved'
+                    ? agent.providerSaveStatus
+                    : agent.providerDirty
+                      ? t('settings.autosavePending')
+                      : agent.providerSaveStatus
+                        ? t('settings.saved')
+                        : ''
               }}
             </small>
           </div>
-        </NCard>
-      </NGi>
-    </NGrid>
-
-    <div class="provider-detail-panel">
-      <div class="provider-detail-heading">
-        <div>
-          <h3>{{ agent.providerForm.label }}</h3>
-          <p>{{ agent.providerForm.providerId }}</p>
         </div>
-        <div class="provider-detail-toolbar">
-          <div class="provider-detail-actions">
+
+        <div class="settings-inline settings-inline-equal">
+          <label class="settings-field">
+            <span>{{ t('settings.providerLabel') }}</span>
+            <NInput v-model:value="agent.providerForm.label" />
+          </label>
+          <label class="settings-field">
+            <span>{{ t('settings.providerType') }}</span>
+            <NSelect
+              v-model:value="agent.providerForm.providerType"
+              :options="providerTypeOptions"
+            />
+          </label>
+        </div>
+        <p class="settings-footnote">
+          {{ t('settings.providerTypeHint') }}
+        </p>
+        <label class="settings-field">
+          <span>{{ t('settings.baseUrl') }}</span>
+          <NInput v-model:value="agent.providerForm.baseURL" />
+        </label>
+        <label class="settings-field">
+          <span>{{ t('settings.apiKey') }}</span>
+          <div class="settings-inline">
+            <NInput
+              v-model:value="agent.providerForm.apiKey"
+              type="password"
+              show-password-on="click"
+              :placeholder="t('settings.apiKeyPlaceholder')"
+            />
             <NButton
+              v-if="agent.selectedCredentialSource === 'safe-storage'"
               secondary
-              :disabled="
-                agent.selectedProviderId === agent.activeProviderId ||
-                !selectedProviderReady
-              "
-              @click="
-                requestProviderAction({
-                  kind: 'set-active',
-                  providerId: agent.selectedProviderId,
-                })
-              "
+              @click="agent.clearCredential"
             >
-              {{ t('settings.setDefaultProvider') }}
+              {{ t('settings.clearCredential') }}
             </NButton>
           </div>
-          <small class="settings-save-status" aria-live="polite">
+          <small>
             {{
-              agent.providerSaving
-                ? t('settings.saving')
-                : agent.providerSaveStatus &&
-                    agent.providerSaveStatus !== 'Saved'
-                  ? agent.providerSaveStatus
-                  : agent.providerDirty
-                    ? t('settings.autosavePending')
-                    : agent.providerSaveStatus
-                      ? t('settings.saved')
-                      : ''
+              agent.selectedCredentialConfigured
+                ? agent.selectedCredentialSource === 'environment'
+                  ? t('settings.credentialEnv')
+                  : t('settings.credentialStored')
+                : t('settings.credentialNone')
             }}
           </small>
-        </div>
-      </div>
-
-      <div class="settings-inline settings-inline-equal">
-        <label class="settings-field">
-          <span>{{ t('settings.providerLabel') }}</span>
-          <NInput v-model:value="agent.providerForm.label" />
         </label>
         <label class="settings-field">
-          <span>{{ t('settings.providerType') }}</span>
-          <NSelect
-            v-model:value="agent.providerForm.providerType"
-            :options="providerTypeOptions"
-          />
-        </label>
-      </div>
-      <p class="settings-footnote">
-        {{ t('settings.providerTypeHint') }}
-      </p>
-      <label class="settings-field">
-        <span>{{ t('settings.baseUrl') }}</span>
-        <NInput v-model:value="agent.providerForm.baseURL" />
-      </label>
-      <label class="settings-field">
-        <span>{{ t('settings.apiKey') }}</span>
-        <div class="settings-inline">
-          <NInput
-            v-model:value="agent.providerForm.apiKey"
-            type="password"
-            show-password-on="click"
-            :placeholder="t('settings.apiKeyPlaceholder')"
-          />
-          <NButton
-            v-if="agent.selectedCredentialSource === 'safe-storage'"
-            secondary
-            @click="agent.clearCredential"
-          >
-            {{ t('settings.clearCredential') }}
-          </NButton>
-        </div>
-        <small>
-          {{
-            agent.selectedCredentialConfigured
-              ? agent.selectedCredentialSource === 'environment'
-                ? t('settings.credentialEnv')
-                : t('settings.credentialStored')
-              : t('settings.credentialNone')
-          }}
-        </small>
-      </label>
-      <label class="settings-field">
-        <span>{{ t('settings.mainModel') }}</span>
-        <div class="settings-inline">
-          <NSelect
-            :value="agent.providerForm.model"
-            :options="agent.allModelOptions"
-            :loading="agent.modelCatalogLoading"
-            :disabled="agent.allModelOptions.length === 0"
-            :placeholder="t('settings.selectMainModel')"
-            filterable
-            @update:value="agent.setProviderDraftModel"
-          />
-          <NButton
-            secondary
-            :loading="agent.modelCatalogLoading"
-            :disabled="
-              agent.providerSaving ||
-              (!agent.providerRefreshAvailable &&
-                !agent.providerForm.apiKey.trim())
-            "
-            @click="agent.refreshSelectedProviderModels"
-          >
-            {{ t('common.refresh') }}
-          </NButton>
-        </div>
-        <small>
-          {{
-            agent.activeModelProfile
-              ? t('settings.modelProfile', {
-                  availability: agent.activeModelProfile.availability,
-                  source: agent.activeModelProfile.capabilitySource,
-                  tokens:
-                    agent.activeModelProfile.contextWindowTokens.toLocaleString(),
-                })
-              : t('settings.selectMainModelHint')
-          }}
-        </small>
-        <small v-if="!agent.providerRefreshAvailable">
-          {{ t('settings.modelRefreshCredentialHint') }}
-        </small>
-      </label>
-      <div class="settings-inline settings-inline-equal">
-        <label class="settings-field">
-          <span>{{ t('settings.tokenEstimation') }}</span>
-          <NSelect
-            v-model:value="agent.providerForm.tokenEstimationMode"
-            :options="tokenEstimationOptions"
-          />
-        </label>
-        <label class="settings-field">
-          <span>{{ t('settings.bytesPerToken') }}</span>
-          <NInputNumber
-            v-model:value="agent.providerForm.bytesPerToken"
-            :disabled="
-              agent.providerForm.tokenEstimationMode !== 'custom-bytes'
-            "
-            :min="0.25"
-            :max="32"
-            :step="0.25"
-          />
-        </label>
-      </div>
-      <p class="settings-footnote">
-        {{ t('settings.tokenHint') }}
-      </p>
-      <label class="settings-field">
-        <span>{{ t('settings.reasoning') }}</span>
-        <NSelect
-          v-model:value="agent.providerForm.reasoning"
-          :options="reasoningOptions"
-          :status="draftConflicts.main ? 'error' : undefined"
-        />
-        <small v-if="draftConflicts.main" class="settings-field-error">
-          {{ t('settings.mainReasoningConflictHint') }}
-        </small>
-        <small v-else>
-          {{ reasoningHint }}
-        </small>
-      </label>
-
-      <div class="provider-model-settings">
-        <div class="provider-model-settings-title">
-          <div>
-            <h4>{{ t('settings.modelSettings') }}</h4>
-            <p>{{ t('settings.modelSettingsHint') }}</p>
+          <span>{{ t('settings.mainModel') }}</span>
+          <div class="settings-inline">
+            <NSelect
+              :value="agent.providerForm.model"
+              :options="agent.allModelOptions"
+              :loading="agent.modelCatalogLoading"
+              :disabled="agent.allModelOptions.length === 0"
+              :placeholder="t('settings.selectMainModel')"
+              filterable
+              @update:value="agent.setProviderDraftModel"
+            />
+            <NButton
+              secondary
+              :loading="agent.modelCatalogLoading"
+              :disabled="
+                agent.providerSaving ||
+                (!agent.providerRefreshAvailable &&
+                  !agent.providerForm.apiKey.trim())
+              "
+              @click="agent.refreshSelectedProviderModels"
+            >
+              {{ t('common.refresh') }}
+            </NButton>
           </div>
-          <NButton secondary @click="openAddModel">
-            {{ t('settings.addModel') }}
-          </NButton>
+          <small>
+            {{
+              agent.activeModelProfile
+                ? t('settings.modelProfile', {
+                    availability: agent.activeModelProfile.availability,
+                    source: agent.activeModelProfile.capabilitySource,
+                    tokens:
+                      agent.activeModelProfile.contextWindowTokens.toLocaleString(),
+                  })
+                : t('settings.selectMainModelHint')
+            }}
+          </small>
+          <small v-if="!agent.providerRefreshAvailable">
+            {{ t('settings.modelRefreshCredentialHint') }}
+          </small>
+        </label>
+        <div class="settings-inline settings-inline-equal">
+          <label class="settings-field">
+            <span>{{ t('settings.tokenEstimation') }}</span>
+            <NSelect
+              v-model:value="agent.providerForm.tokenEstimationMode"
+              :options="tokenEstimationOptions"
+            />
+          </label>
+          <label class="settings-field">
+            <span>{{ t('settings.bytesPerToken') }}</span>
+            <NInputNumber
+              v-model:value="agent.providerForm.bytesPerToken"
+              :disabled="
+                agent.providerForm.tokenEstimationMode !== 'custom-bytes'
+              "
+              :min="0.25"
+              :max="32"
+              :step="0.25"
+            />
+          </label>
         </div>
-        <small
-          v-if="draftConflicts.approvalReason === 'model-disabled'"
-          class="settings-field-error"
-        >
-          {{
-            t('settings.approvalDraftModelDisabledHint', {
-              model: agent.approvalSavedForm.model,
-            })
-          }}
-        </small>
-        <small v-else-if="draftConflicts.approval" class="settings-field-error">
-          {{
-            t('settings.approvalDraftConflictHint', {
-              model: agent.approvalSavedForm.model,
-            })
-          }}
-        </small>
-        <NTransfer
-          :value="selectedModelIds"
-          :options="modelTransferOptions"
-          :source-title="t('settings.availableModels')"
-          :target-title="t('settings.selectedModels')"
-          :source-filter-placeholder="t('settings.filterModels')"
-          :target-filter-placeholder="t('settings.filterModels')"
-          :select-all-text="t('settings.selectAllModels')"
-          :clear-text="t('settings.clearSelectedModels')"
-          :show-selected="false"
-          source-filterable
-          target-filterable
-          virtual-scroll
-          class="provider-model-transfer"
-          data-testid="provider-model-transfer"
-          @update:value="handleSelectedModels"
-        />
-        <NInput
-          v-if="allModelProfiles.length"
-          v-model:value="modelConfigurationFilter"
-          clearable
-          :placeholder="t('settings.filterModelConfiguration')"
-        />
-        <div
-          v-if="visibleModelProfiles.length"
-          class="provider-model-settings-header"
-          aria-hidden="true"
-        >
-          <span>{{ t('settings.modelName') }}</span>
-          <span>{{ t('settings.maximumContext') }}</span>
-          <span>{{ t('settings.compressionThreshold') }}</span>
-          <span>{{ t('settings.maximumOutputLength') }}</span>
-          <span>{{ t('settings.modelReasoningEfforts') }}</span>
-          <span>{{ t('settings.modelCapability') }}</span>
-          <span>{{ t('settings.modelActions') }}</span>
-        </div>
-        <NScrollbar
-          v-if="visibleModelProfiles.length"
-          class="provider-model-settings-scroll"
-        >
-          <NList
-            bordered
-            class="provider-model-settings-list"
-            data-testid="provider-model-settings-list"
+        <p class="settings-footnote">
+          {{ t('settings.tokenHint') }}
+        </p>
+        <label class="settings-field">
+          <span>{{ t('settings.reasoning') }}</span>
+          <NSelect
+            v-model:value="agent.providerForm.reasoning"
+            :options="reasoningOptions"
+            :status="draftConflicts.main ? 'error' : undefined"
+          />
+          <small v-if="draftConflicts.main" class="settings-field-error">
+            {{ t('settings.mainReasoningConflictHint') }}
+          </small>
+          <small v-else>
+            {{ reasoningHint }}
+          </small>
+        </label>
+
+        <div class="provider-model-settings">
+          <div class="provider-model-settings-title">
+            <div>
+              <h4>{{ t('settings.modelSettings') }}</h4>
+              <p>{{ t('settings.modelSettingsHint') }}</p>
+            </div>
+            <NButton secondary @click="openAddModel">
+              {{ t('settings.addModel') }}
+            </NButton>
+          </div>
+          <small
+            v-if="draftConflicts.auxiliaryReason === 'model-disabled'"
+            class="settings-field-error"
           >
-            <NListItem v-for="model in visibleModelProfiles" :key="model.id">
-              <div class="provider-model-settings-row">
-                <div class="provider-model-name">
-                  <strong>{{ model.id }}</strong>
-                  <NTag
-                    v-if="model.id === agent.providerForm.model"
-                    size="small"
-                    type="info"
-                    :bordered="false"
+            {{
+              t('settings.auxiliaryDraftModelDisabledHint', {
+                model: agent.auxiliaryModel,
+              })
+            }}
+          </small>
+          <small
+            v-else-if="draftConflicts.auxiliary"
+            class="settings-field-error"
+          >
+            {{
+              t('settings.auxiliaryDraftConflictHint', {
+                model: agent.auxiliaryModel,
+              })
+            }}
+          </small>
+          <NTransfer
+            :value="selectedModelIds"
+            :options="modelTransferOptions"
+            :source-title="t('settings.availableModels')"
+            :target-title="t('settings.selectedModels')"
+            :source-filter-placeholder="t('settings.filterModels')"
+            :target-filter-placeholder="t('settings.filterModels')"
+            :select-all-text="t('settings.selectAllModels')"
+            :clear-text="t('settings.clearSelectedModels')"
+            :show-selected="false"
+            source-filterable
+            target-filterable
+            virtual-scroll
+            class="provider-model-transfer"
+            data-testid="provider-model-transfer"
+            @update:value="handleSelectedModels"
+          />
+          <NInput
+            v-if="allModelProfiles.length"
+            v-model:value="modelConfigurationFilter"
+            clearable
+            :placeholder="t('settings.filterModelConfiguration')"
+          />
+          <div
+            v-if="visibleModelProfiles.length"
+            class="provider-model-settings-header"
+            aria-hidden="true"
+          >
+            <span>{{ t('settings.modelName') }}</span>
+            <span>{{ t('settings.maximumContext') }}</span>
+            <span>{{ t('settings.compressionThreshold') }}</span>
+            <span>{{ t('settings.maximumOutputLength') }}</span>
+            <span>{{ t('settings.modelReasoningEfforts') }}</span>
+            <span>{{ t('settings.modelCapability') }}</span>
+            <span>{{ t('settings.modelActions') }}</span>
+          </div>
+          <NScrollbar
+            v-if="visibleModelProfiles.length"
+            class="provider-model-settings-scroll"
+          >
+            <NList
+              bordered
+              class="provider-model-settings-list"
+              data-testid="provider-model-settings-list"
+            >
+              <NListItem v-for="model in visibleModelProfiles" :key="model.id">
+                <div class="provider-model-settings-row">
+                  <div class="provider-model-name">
+                    <strong>{{ model.id }}</strong>
+                    <NTag
+                      v-if="model.id === agent.providerForm.model"
+                      size="small"
+                      type="info"
+                      :bordered="false"
+                    >
+                      {{ t('settings.mainModelTag') }}
+                    </NTag>
+                  </div>
+                  <label class="provider-model-value">
+                    <span>{{ t('settings.maximumContext') }}</span>
+                    <NInputNumber
+                      :value="model.contextWindowTokens"
+                      :min="2048"
+                      :max="10000000"
+                      :show-button="false"
+                      @update:value="
+                        agent.updateModelConfiguration(
+                          model.id,
+                          'contextWindowTokens',
+                          $event,
+                        )
+                      "
+                    />
+                  </label>
+                  <label class="provider-model-value">
+                    <span>{{ t('settings.compressionThreshold') }}</span>
+                    <NInputNumber
+                      :value="model.compactThresholdTokens"
+                      :min="1024"
+                      :max="model.contextWindowTokens - model.maxOutputTokens"
+                      :show-button="false"
+                      @update:value="
+                        agent.updateModelConfiguration(
+                          model.id,
+                          'compactThresholdTokens',
+                          $event,
+                        )
+                      "
+                    />
+                  </label>
+                  <label class="provider-model-value">
+                    <span>{{ t('settings.maximumOutputLength') }}</span>
+                    <NInputNumber
+                      :value="model.maxOutputTokens"
+                      :min="1"
+                      :max="model.contextWindowTokens - 1024"
+                      :show-button="false"
+                      @update:value="
+                        agent.updateModelConfiguration(
+                          model.id,
+                          'maxOutputTokens',
+                          $event,
+                        )
+                      "
+                    />
+                  </label>
+                  <label
+                    class="provider-model-value"
+                    :aria-label="`${model.id} · ${t('settings.modelReasoningEfforts')}`"
                   >
-                    {{ t('settings.mainModelTag') }}
-                  </NTag>
+                    <span>{{ t('settings.modelReasoningEfforts') }}</span>
+                    <NSelect
+                      :value="model.reasoningEfforts ?? []"
+                      :options="reasoningEffortOptions"
+                      :placeholder="
+                        t('settings.modelReasoningEffortsPlaceholder')
+                      "
+                      multiple
+                      clearable
+                      @update:value="
+                        handleReasoningEffortsChange(model.id, $event)
+                      "
+                    />
+                  </label>
+                  <label
+                    class="provider-model-value"
+                    :aria-label="`${model.id} · ${t('settings.modelCapability')}`"
+                  >
+                    <span>{{ t('settings.modelCapability') }}</span>
+                    <NSelect
+                      :value="model.capability ?? null"
+                      :options="capabilityOptions"
+                      :placeholder="t('settings.modelCapabilityPlaceholder')"
+                      clearable
+                      @update:value="handleCapabilityChange(model.id, $event)"
+                    />
+                  </label>
+                  <ProviderModelDeleteAction
+                    :model-id="model.id"
+                    :disabled-reason="modelDeleteDisabledReason(model.id)"
+                    :delete-model="confirmDeleteModel"
+                  />
                 </div>
-                <label class="provider-model-value">
-                  <span>{{ t('settings.maximumContext') }}</span>
-                  <NInputNumber
-                    :value="model.contextWindowTokens"
-                    :min="2048"
-                    :max="10000000"
-                    :show-button="false"
-                    @update:value="
-                      agent.updateModelConfiguration(
-                        model.id,
-                        'contextWindowTokens',
-                        $event,
-                      )
-                    "
-                  />
-                </label>
-                <label class="provider-model-value">
-                  <span>{{ t('settings.compressionThreshold') }}</span>
-                  <NInputNumber
-                    :value="model.compactThresholdTokens"
-                    :min="1024"
-                    :max="model.contextWindowTokens - model.maxOutputTokens"
-                    :show-button="false"
-                    @update:value="
-                      agent.updateModelConfiguration(
-                        model.id,
-                        'compactThresholdTokens',
-                        $event,
-                      )
-                    "
-                  />
-                </label>
-                <label class="provider-model-value">
-                  <span>{{ t('settings.maximumOutputLength') }}</span>
-                  <NInputNumber
-                    :value="model.maxOutputTokens"
-                    :min="1"
-                    :max="model.contextWindowTokens - 1024"
-                    :show-button="false"
-                    @update:value="
-                      agent.updateModelConfiguration(
-                        model.id,
-                        'maxOutputTokens',
-                        $event,
-                      )
-                    "
-                  />
-                </label>
-                <label
-                  class="provider-model-value"
-                  :aria-label="`${model.id} · ${t('settings.modelReasoningEfforts')}`"
-                >
-                  <span>{{ t('settings.modelReasoningEfforts') }}</span>
-                  <NSelect
-                    :value="model.reasoningEfforts ?? []"
-                    :options="reasoningEffortOptions"
-                    :placeholder="
-                      t('settings.modelReasoningEffortsPlaceholder')
-                    "
-                    multiple
-                    clearable
-                    @update:value="
-                      handleReasoningEffortsChange(model.id, $event)
-                    "
-                  />
-                </label>
-                <label
-                  class="provider-model-value"
-                  :aria-label="`${model.id} · ${t('settings.modelCapability')}`"
-                >
-                  <span>{{ t('settings.modelCapability') }}</span>
-                  <NSelect
-                    :value="model.capability ?? null"
-                    :options="capabilityOptions"
-                    :placeholder="t('settings.modelCapabilityPlaceholder')"
-                    clearable
-                    @update:value="handleCapabilityChange(model.id, $event)"
-                  />
-                </label>
-                <ProviderModelDeleteAction
-                  :model-id="model.id"
-                  :disabled-reason="modelDeleteDisabledReason(model.id)"
-                  :delete-model="confirmDeleteModel"
-                />
-              </div>
-            </NListItem>
-          </NList>
-        </NScrollbar>
-        <NEmpty
-          v-else
-          :description="
-            allModelProfiles.length
-              ? t('settings.noMatchingModels')
-              : t('settings.noModelsHint')
-          "
-        />
+              </NListItem>
+            </NList>
+          </NScrollbar>
+          <NEmpty
+            v-else
+            :description="
+              allModelProfiles.length
+                ? t('settings.noMatchingModels')
+                : t('settings.noModelsHint')
+            "
+          />
+        </div>
       </div>
     </div>
 

@@ -167,6 +167,8 @@ async function installIpc(): Promise<void> {
         fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =>
           httpTransport.fetch(input, init),
         onDiagnostic: notifications.reportDiagnostic,
+        conversationTitlingDisabled:
+          process.env.ZCH_DISABLE_CONVERSATION_TITLING === '1',
       }),
   })
   appDisposer.add(() => backend.dispose())

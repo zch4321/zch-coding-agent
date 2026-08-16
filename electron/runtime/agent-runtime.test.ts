@@ -57,7 +57,7 @@ describe('AgentRuntime Node boundary', () => {
     const sessionId = await runtime.createSession({
       workspace,
       mode: 'yolo',
-      provider: configStore.getPublicConfig().activeProviderId,
+      provider: configStore.getPublicConfig().models.defaultModelProvider,
     })
     const handle = runtime.run({
       sessionId,
@@ -139,7 +139,7 @@ describe('AgentRuntime Node boundary', () => {
     const sessionId = await runtime.createSession({
       workspace,
       mode: 'yolo',
-      provider: configStore.getPublicConfig().activeProviderId,
+      provider: configStore.getPublicConfig().models.defaultModelProvider,
     })
     const controller = new AbortController()
     const handle = runtime.run({

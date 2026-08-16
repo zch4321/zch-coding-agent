@@ -17,8 +17,8 @@ import { migrateConfig, UnsupportedConfigSchemaError } from './migrations'
 import {
   DEFAULT_APP_CONFIG,
   DEFAULT_PROVIDER_ID,
-  getActiveAppProvider,
   getAppProvider,
+  getDefaultModelAppProvider,
   toPublicConfig,
   type AppConfig,
   type AppProviderConfig,
@@ -151,66 +151,72 @@ function assertMainRouteConfigValid(provider: AppProviderConfig): void {
   throw new Error(`Invalid main model route: ${compatibility.reason}`)
 }
 
-/** Returns the first enabled model compatible with one explicit effort. */
-function firstApprovalCompatibleModel(
-  provider: AppProviderConfig,
-  reasoning: AppConfig['approval']['reasoning'],
-): string | undefined {
-  return provider.enabledModelIds.find(
-    (model) =>
-      evaluateModelRouteCompatibility(provider, { model, reasoning }).ok,
-  )
-}
-
-/** True when the approval route currently resolves to a usable route. */
-function isApprovalRouteUsable(
-  config: AppConfig,
-  approval: AppConfig['approval'],
-): boolean {
-  const provider = config.providers.find(
-    (candidate) => candidate.id === approval.approverProviderId,
-  )
+/** True when the configured auxiliary model resolves to a usable route. */
+function isAuxiliaryRouteUsable(config: AppConfig): boolean {
+  const roles = config.models
+  if (!roles.auxiliaryModel) return false
+  const provider = getAppProvider(config, roles.auxiliaryModelProvider)
+  if (!provider) return false
   return evaluateModelRouteCompatibility(provider, {
-    model: approval.approverModel,
-    reasoning: approval.reasoning,
+    model: roles.auxiliaryModel,
+    reasoning: provider.reasoning,
   }).ok
 }
 
 /**
- * Validates that an approval route can actually be resolved: the provider
- * exists, the model is non-empty and still enabled, and its explicitly saved
- * approval effort is supported by the model annotation. Used when saving
- * approval settings, and to stop provider updates from breaking a previously
- * working approval route.
+ * Validates the default and auxiliary model roles: the default provider must
+ * exist and its model must stay enabled, and a configured auxiliary model must
+ * resolve against its provider's default reasoning. Used when saving model
+ * roles, and to stop provider updates from breaking a working auxiliary route.
  */
-function assertApprovalRouteConfigValid(
-  config: AppConfig,
-  approval: AppConfig['approval'],
-): void {
-  const provider = config.providers.find(
-    (candidate) => candidate.id === approval.approverProviderId,
-  )
-  const compatibility = evaluateModelRouteCompatibility(provider, {
-    model: approval.approverModel,
-    reasoning: approval.reasoning,
-  })
-  if (compatibility.ok) return
-  if (compatibility.reason === 'provider-missing') {
+function assertModelRolesConfigValid(config: AppConfig): void {
+  const roles = config.models
+  const defaultProvider = getAppProvider(config, roles.defaultModelProvider)
+  if (!defaultProvider) {
     throw new Error(
-      `Approval provider is not configured: ${approval.approverProviderId}`,
+      `Default model provider is not configured: ${roles.defaultModelProvider}`,
     )
   }
   if (
-    compatibility.reason === 'model-empty' ||
-    compatibility.reason === 'model-disabled'
+    roles.defaultModel &&
+    !defaultProvider.enabledModelIds.includes(roles.defaultModel)
   ) {
     throw new Error(
-      `Approval model ${approval.approverModel || '(empty)'} is not enabled for provider ${approval.approverProviderId}`,
+      `Default model ${roles.defaultModel} is not enabled for provider ${roles.defaultModelProvider}`,
+    )
+  }
+  if (!roles.auxiliaryModel) return
+  const auxiliaryProvider = getAppProvider(config, roles.auxiliaryModelProvider)
+  if (!auxiliaryProvider) {
+    throw new Error(
+      `Auxiliary model provider is not configured: ${roles.auxiliaryModelProvider}`,
+    )
+  }
+  const compatibility = evaluateModelRouteCompatibility(auxiliaryProvider, {
+    model: roles.auxiliaryModel,
+    reasoning: auxiliaryProvider.reasoning,
+  })
+  if (compatibility.ok) return
+  if (compatibility.reason === 'reasoning-unsupported') {
+    throw new Error(
+      `Auxiliary model ${roles.auxiliaryModel} does not support the provider default reasoning effort: ${auxiliaryProvider.reasoning}`,
     )
   }
   throw new Error(
-    `Approval model ${approval.approverModel} does not support approval reasoning effort: ${approval.reasoning}`,
+    `Auxiliary model ${roles.auxiliaryModel} is not enabled for provider ${roles.auxiliaryModelProvider}`,
   )
+}
+
+/** Rewrites an unusable auxiliary model role to the current default model. */
+function repairAuxiliaryModelRole(config: AppConfig): void {
+  const roles = config.models
+  if (!roles.auxiliaryModel) {
+    roles.auxiliaryModelProvider = ''
+    return
+  }
+  if (isAuxiliaryRouteUsable(config)) return
+  roles.auxiliaryModelProvider = roles.defaultModelProvider
+  roles.auxiliaryModel = roles.defaultModel
 }
 
 function applyProviderUpdate(
@@ -218,13 +224,13 @@ function applyProviderUpdate(
   request: ProviderUpdate,
   options: { activate: boolean },
 ): void {
-  const providerId = request.providerId ?? next.activeProviderId
+  const providerId = request.providerId ?? next.models.defaultModelProvider
   let provider = getAppProvider(next, providerId)
   const isNewProvider = !provider
-  // Snapshot approval usability before mutating: updates may not break a
-  // working approval route, but an already unconfigured or broken approval
-  // must not block unrelated provider edits.
-  const approvalWasUsable = isApprovalRouteUsable(next, next.approval)
+  // Snapshot auxiliary usability before mutating: updates may not break a
+  // working auxiliary route, but an already unconfigured or broken auxiliary
+  // model must not block unrelated provider edits.
+  const auxiliaryWasUsable = isAuxiliaryRouteUsable(next)
 
   if (!provider) {
     provider = {
@@ -241,7 +247,7 @@ function applyProviderUpdate(
         request.enabledModelIds ?? (request.model ? [request.model] : []),
       ),
     }
-    next.providers.push(provider)
+    next.models.providers.push(provider)
   }
 
   const previousRouteShape = providerRouteShape(provider)
@@ -309,15 +315,19 @@ function applyProviderUpdate(
     delete provider.modelCatalogFetchedAt
   }
   assertMainRouteConfigValid(provider)
-  if (approvalWasUsable && next.approval.approverProviderId === provider.id) {
-    assertApprovalRouteConfigValid(next, next.approval)
+  if (
+    auxiliaryWasUsable &&
+    next.models.auxiliaryModelProvider === provider.id
+  ) {
+    assertModelRolesConfigValid(next)
   }
   if (!isNewProvider && providerRouteShape(provider) !== previousRouteShape) {
     provider.revision += 1
   }
 
   if (options.activate) {
-    next.activeProviderId = provider.id
+    next.models.defaultModelProvider = provider.id
+    next.models.defaultModel = provider.model
   }
 }
 
@@ -340,8 +350,8 @@ function providerFallback(
     (preferredProviderId
       ? getAppProvider(next, preferredProviderId)
       : undefined) ??
-    getAppProvider(next, next.activeProviderId) ??
-    next.providers[0]
+    getAppProvider(next, next.models.defaultModelProvider) ??
+    next.models.providers[0]
   )
 }
 
@@ -350,11 +360,13 @@ function disableModelPoolEntries(
   shouldDisable: (entry: ModelPoolConfig['entries'][number]) => boolean,
 ): boolean {
   let changed = false
-  config.modelPool.entries = config.modelPool.entries.map((entry) => {
-    if (!entry.enabled || !shouldDisable(entry)) return entry
-    changed = true
-    return { ...entry, enabled: false }
-  })
+  config.models.modelPool.entries = config.models.modelPool.entries.map(
+    (entry) => {
+      if (!entry.enabled || !shouldDisable(entry)) return entry
+      changed = true
+      return { ...entry, enabled: false }
+    },
+  )
   return changed
 }
 
@@ -402,7 +414,7 @@ function assertModelPoolRevisionCoverage(
         `Missing expected Provider revision for model pool: ${providerId}`,
       )
     }
-    const provider = config.providers.find(
+    const provider = config.models.providers.find(
       (candidate) => candidate.id === providerId,
     )
     if (!provider) {
@@ -423,7 +435,7 @@ function assertEnabledModelPoolEntriesValid(
   for (const entry of pool.entries) {
     if (!entry.enabled) continue
 
-    const provider = config.providers.find(
+    const provider = config.models.providers.find(
       (candidate) => candidate.id === entry.providerId,
     )
     if (!provider) {
@@ -630,11 +642,6 @@ export class ConfigStore {
     }
   }
 
-  /** Returns a cloned configuration for the active provider. */
-  getActiveProvider(): AppProviderConfig {
-    return structuredClone(getActiveAppProvider(this.#config))
-  }
-
   /** Returns cloned MCP server configurations for privileged callers. */
   getMcpServers(): McpServerConfig[] {
     return structuredClone(this.#config.mcpServers)
@@ -758,8 +765,10 @@ export class ConfigStore {
         }
 
         const provider =
-          getAppProvider(next, request.providerId ?? next.activeProviderId) ??
-          getActiveAppProvider(next)
+          getAppProvider(
+            next,
+            request.providerId ?? next.models.defaultModelProvider,
+          ) ?? getDefaultModelAppProvider(next)
         const previousReference = provider.apiKeyRef
         const newReference = await this.#secretStore.set(request.apiKey)
         provider.apiKeyRef = newReference
@@ -796,10 +805,10 @@ export class ConfigStore {
         }
         const normalizedModelId = request.modelId.trim()
         if (
-          next.approval.approverProviderId === provider.id &&
-          next.approval.approverModel === normalizedModelId
+          next.models.auxiliaryModelProvider === provider.id &&
+          next.models.auxiliaryModel === normalizedModelId
         ) {
-          throw new Error('Cannot delete the current approval model')
+          throw new Error('Cannot delete the current auxiliary model')
         }
         const previousRouteShape = providerRouteShape(provider)
         deleteProviderModel(provider, normalizedModelId)
@@ -812,16 +821,6 @@ export class ConfigStore {
         if (providerRouteShape(provider) !== previousRouteShape) {
           provider.revision += 1
         }
-        break
-      }
-      case 'provider-select': {
-        const provider = getAppProvider(next, request.providerId)
-
-        if (!provider) {
-          throw new Error(`Provider not found: ${request.providerId}`)
-        }
-
-        next.activeProviderId = provider.id
         break
       }
       case 'provider-copy': {
@@ -837,7 +836,7 @@ export class ConfigStore {
 
         const copy = structuredClone(source)
         delete copy.apiKeyRef
-        next.providers.push({
+        next.models.providers.push({
           ...copy,
           id: request.providerId,
           label: request.label,
@@ -846,7 +845,7 @@ export class ConfigStore {
         break
       }
       case 'provider-delete': {
-        if (next.providers.length <= 1) {
+        if (next.models.providers.length <= 1) {
           throw new Error('Cannot delete the last provider')
         }
 
@@ -857,7 +856,7 @@ export class ConfigStore {
         }
 
         const previousReference = provider.apiKeyRef
-        next.providers = next.providers.filter(
+        next.models.providers = next.models.providers.filter(
           (candidate) => candidate.id !== request.providerId,
         )
         const fallback = providerFallback(next, request.fallbackProviderId)
@@ -866,23 +865,20 @@ export class ConfigStore {
           throw new Error('No provider is available after deletion')
         }
 
-        if (next.activeProviderId === request.providerId) {
-          next.activeProviderId = fallback.id
+        if (next.models.defaultModelProvider === request.providerId) {
+          next.models.defaultModelProvider = fallback.id
+          next.models.defaultModel = fallback.model
         }
 
-        if (next.approval.approverProviderId === request.providerId) {
-          const fallbackApprovalModel = next.approval.approverModel
-            ? firstApprovalCompatibleModel(fallback, next.approval.reasoning)
-            : undefined
-          if (next.approval.approverModel && !fallbackApprovalModel) {
-            throw new Error(
-              `No approval-compatible model is enabled for fallback provider ${fallback.id}`,
-            )
-          }
-          next.approval = {
-            approverProviderId: fallback.id,
-            approverModel: fallbackApprovalModel ?? '',
-            reasoning: next.approval.reasoning,
+        if (next.models.auxiliaryModelProvider === request.providerId) {
+          // A configured auxiliary role follows the new default model; an
+          // unset role simply drops the stale provider reference.
+          if (next.models.auxiliaryModel && fallback.model) {
+            next.models.auxiliaryModelProvider = fallback.id
+            next.models.auxiliaryModel = fallback.model
+          } else {
+            next.models.auxiliaryModelProvider = ''
+            next.models.auxiliaryModel = ''
           }
         }
 
@@ -898,8 +894,10 @@ export class ConfigStore {
       }
       case 'credential': {
         const provider =
-          getAppProvider(next, request.providerId ?? next.activeProviderId) ??
-          getActiveAppProvider(next)
+          getAppProvider(
+            next,
+            request.providerId ?? next.models.defaultModelProvider,
+          ) ?? getDefaultModelAppProvider(next)
         const previousReference = provider.apiKeyRef
 
         if (request.action === 'clear') {
@@ -930,18 +928,22 @@ export class ConfigStore {
         await this.#secretStore.delete(previousReference)
         return this.getPublicConfig()
       }
-      case 'approval':
-        assertApprovalRouteConfigValid(next, {
-          approverProviderId: request.approverProviderId,
-          approverModel: request.approverModel,
-          reasoning: request.reasoning,
-        })
-        next.approval = {
-          approverProviderId: request.approverProviderId,
-          approverModel: request.approverModel,
-          reasoning: request.reasoning,
+      case 'models': {
+        const roles = request.value
+        if (roles.auxiliaryModel && !roles.auxiliaryModelProvider) {
+          throw new Error(
+            'Auxiliary model requires its provider to be selected',
+          )
         }
+        next.models.defaultModelProvider = roles.defaultModelProvider
+        next.models.defaultModel = roles.defaultModel
+        next.models.auxiliaryModelProvider = roles.auxiliaryModel
+          ? roles.auxiliaryModelProvider
+          : ''
+        next.models.auxiliaryModel = roles.auxiliaryModel
+        assertModelRolesConfigValid(next)
         break
+      }
       case 'subagents':
         next.subagents = structuredClone(request.value)
         break
@@ -961,7 +963,7 @@ export class ConfigStore {
           value: normalized,
         })
         assertEnabledModelPoolEntriesValid(publicConfig, normalized)
-        next.modelPool = normalized
+        next.models.modelPool = normalized
         break
       }
       case 'permission':
@@ -1059,6 +1061,7 @@ export class ConfigStore {
       const parsed = JSON.parse(content) as unknown
       const migrated = migrateConfig(parsed)
       disableIncompatibleModelPoolEntries(migrated)
+      repairAuxiliaryModelRole(migrated)
       if (JSON.stringify(parsed) !== JSON.stringify(migrated)) {
         await writeJsonAtomic(this.#filePath, migrated)
       }

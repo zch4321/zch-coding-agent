@@ -357,16 +357,19 @@ export class SessionManager {
     const publicConfig = internal
       ? {
           ...configured,
-          providers: getProviderConfig(configured, input.provider)
-            ? configured.providers.map((candidate) =>
-                candidate.id === input.provider
-                  ? structuredClone(internal.providerSnapshot)
-                  : candidate,
-              )
-            : [
-                ...configured.providers,
-                structuredClone(internal.providerSnapshot),
-              ],
+          models: {
+            ...configured.models,
+            providers: getProviderConfig(configured, input.provider)
+              ? configured.models.providers.map((candidate) =>
+                  candidate.id === input.provider
+                    ? structuredClone(internal.providerSnapshot)
+                    : candidate,
+                )
+              : [
+                  ...configured.models.providers,
+                  structuredClone(internal.providerSnapshot),
+                ],
+          },
         }
       : configured
 

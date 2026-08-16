@@ -174,7 +174,7 @@ const enUS = {
       failed: 'Failed',
       completed: 'Completed',
     },
-    providerSettings: 'Provider settings',
+    providerSettings: 'Model settings',
     stop: 'Stop run',
     send: 'Send message',
     interjection: 'Live interjection',
@@ -292,7 +292,7 @@ const enUS = {
     general: 'General',
     project: 'Project',
     archived: 'Archived conversations',
-    provider: 'Provider',
+    provider: 'Models',
     limits: 'Limits',
     agents: 'Agents',
     permissions: 'Permissions',
@@ -349,29 +349,24 @@ const enUS = {
     deleteArchivedConfirm:
       'Permanently delete the local Session, messages, and FileChange audit for “{title}”? This cannot be undone. Workspace files are not modified, and trace logs remain managed separately under Logging.',
     loadMoreArchived: 'Load more archived conversations',
-    providerTitle: 'Provider',
+    modelsTitle: 'Models',
+    modelsHint:
+      'Choose the default model for new conversations and the auxiliary model for background tasks, and manage model providers.',
+    defaultModelsTitle: 'Default models',
+    defaultModelsHint:
+      'The main model runs new conversations by default; the auxiliary model powers background tasks like conversation titling and automatic approval.',
+    defaultModelRole: 'Main model',
+    defaultModelRoleHint:
+      'Used by default for new conversations; you can still switch models per conversation.',
+    auxiliaryModelRole: 'Auxiliary model',
+    auxiliaryModelRoleHint:
+      'Used for conversation titling and automatic approval; when unset, the current model is used. A cheap, fast model is recommended.',
+    auxiliaryFollowDefault: 'Follow the current model (default)',
+    providerConfigTitle: 'Provider configuration',
     providerHint:
       'Configure reusable model services, enabled models, and credentials. Changes save automatically.',
-    approvalTitle: 'Auto approval',
-    approvalHint:
-      'This global route is independent of Provider-card edits. The selected Provider supplies only the protocol, endpoint, and credential.',
-    approvalCredentialReady: 'The selected Provider has a credential.',
-    approvalCredentialMissing:
-      'The selected Provider has no credential; runtime falls back to human approval.',
-    approvalModelHint:
-      'Only models enabled for the selected Provider are shown here.',
-    approvalReasoning: 'Auto approver reasoning effort',
-    approvalReasoningHint:
-      'This exact effort is used for automatic approval; it is independent of the Provider default and is never adjusted implicitly.',
-    approvalReasoningConflictHint:
-      'This model does not support the selected approval reasoning effort; choose a supported effort or another model.',
-    approvalModelMissingHint:
-      'The approval model is missing or not enabled; choose an enabled model to restore automatic approval.',
-    saveApproval: 'Save Auto approval',
     addProvider: 'Add provider',
     providerActions: 'Actions',
-    defaultProvider: 'Default',
-    setDefaultProvider: 'Set default',
     copyProvider: 'Copy provider',
     deleteProvider: 'Delete provider',
     deleteProviderTitle: 'Delete provider?',
@@ -391,7 +386,7 @@ const enUS = {
     providerTypeHint:
       'Provider type selects an independent implementation; the three Generic types are fallbacks for Chat Completions, Responses, and Anthropic APIs.',
     baseUrl: 'Base URL',
-    mainModel: 'Main model',
+    mainModel: 'Provider default model',
     modelSettings: 'Model configuration',
     modelSettingsHint:
       'The transfer controls models offered in conversations and future Swarms. Configure every known Provider model in the list below; changes save automatically.',
@@ -412,8 +407,8 @@ const enUS = {
       'Delete the local catalog entry, enabled state, and configuration for {model}? If the Provider still returns it, the next refresh will add it again.',
     deleteMainModelBlocked:
       'The main model cannot be deleted. Select another main model first.',
-    deleteApprovalModelBlocked:
-      'Automatic approval uses this model. Select another approval model first.',
+    deleteAuxiliaryModelBlocked:
+      'The auxiliary model uses this model. Select another auxiliary model first.',
     availableModels: 'Provider models',
     selectedModels: 'Enabled models',
     filterModels: 'Filter models',
@@ -447,10 +442,10 @@ const enUS = {
     reasoningMax: 'Maximum',
     mainReasoningConflictHint:
       'The main model annotation no longer includes this effort; autosave is paused until you pick a supported one.',
-    approvalDraftConflictHint:
-      'The saved approval model {model} does not support its configured approval effort; autosave is paused until you adjust the annotation or approval route.',
-    approvalDraftModelDisabledHint:
-      'The saved approval model {model} is no longer enabled in this Provider draft; autosave is paused until you re-enable it or choose another approval model.',
+    auxiliaryDraftConflictHint:
+      'The saved auxiliary model {model} is incompatible with this Provider draft; autosave is paused until you adjust the annotation or auxiliary model.',
+    auxiliaryDraftModelDisabledHint:
+      'The saved auxiliary model {model} is no longer enabled in this Provider draft; autosave is paused until you re-enable it or choose another auxiliary model.',
     reasoningHint:
       'The selected effort is sent to the model as-is; annotate a model row to narrow the choices. Off disables thinking.',
     reasoningHintGeneric:
@@ -459,8 +454,6 @@ const enUS = {
       'Responses sends reasoning effort and replays encrypted reasoning items locally without server state.',
     reasoningHintAnthropic:
       'Any effort above Off uses adaptive thinking; select Off for older models or compatible proxies.',
-    approverProvider: 'Auto approver provider',
-    approverModel: 'Auto approver model',
     apiKey: 'API key',
     apiKeyPlaceholder: 'Enter a new key',
     modelRefreshCredentialHint:
@@ -641,8 +634,10 @@ const enUS = {
   },
   permissions: {
     title: 'Permissions',
-    hint: 'Set the default mode, Auto approval model, and rules remembered from approvals.',
+    hint: 'Set the default mode, sensitive-data rules, and rules remembered from approvals. Changes save automatically.',
     defaultMode: 'Default mode',
+    autoApprovalNote:
+      'Auto mode uses the auxiliary model (or the current model when unconfigured) to review approvals.',
     sensitiveData: 'Sensitive data',
     off: 'Off',
     warn: 'Warn',

@@ -171,7 +171,7 @@ const zhCN = {
       failed: '失败',
       completed: '已完成',
     },
-    providerSettings: '模型服务设置',
+    providerSettings: '模型设置',
     stop: '停止运行',
     send: '发送消息',
     interjection: '运行中插话',
@@ -287,7 +287,7 @@ const zhCN = {
     general: '通用',
     project: '项目',
     archived: '已归档对话',
-    provider: '模型服务',
+    provider: '模型',
     limits: '运行限制',
     agents: 'Agents',
     permissions: '权限',
@@ -341,27 +341,22 @@ const zhCN = {
     deleteArchivedConfirm:
       '永久删除“{title}”的本地会话、消息和文件变更审计？此操作不可撤销。工作区文件不会被改动；Trace 日志仍在“日志”设置中单独管理。',
     loadMoreArchived: '加载更多归档对话',
-    providerTitle: '模型服务',
+    modelsTitle: '模型',
+    modelsHint:
+      '选择新对话默认使用的主模型与承担后台任务的辅助模型，并管理模型供应商。',
+    defaultModelsTitle: '默认模型',
+    defaultModelsHint:
+      '主模型是新对话的默认执行模型；辅助模型用于对话自动起名和自动权限审批等后台任务。',
+    defaultModelRole: '主模型',
+    defaultModelRoleHint: '新对话默认使用该模型；对话内仍可临时切换。',
+    auxiliaryModelRole: '辅助模型',
+    auxiliaryModelRoleHint:
+      '用于对话自动起名和自动权限审批；未配置时使用当前模型。建议选择便宜快速的模型。',
+    auxiliaryFollowDefault: '跟随当前模型（默认）',
+    providerConfigTitle: '供应商配置',
     providerHint: '配置可复用的模型服务、启用模型和凭据；修改会自动保存。',
-    approvalTitle: '自动审批',
-    approvalHint:
-      '这是独立于 Provider 卡片的全局路由。所选 Provider 只负责提供协议、服务地址和凭据。',
-    approvalCredentialReady: '所选 Provider 已配置凭据。',
-    approvalCredentialMissing:
-      '所选 Provider 尚未配置凭据；运行时会回退到人工审批。',
-    approvalModelHint: '这里只显示在所选 Provider 中启用的模型。',
-    approvalReasoning: '自动审批思考深度',
-    approvalReasoningHint:
-      '自动审批会原样使用该档位；它独立于 Provider 默认档位，系统不会隐式调整。',
-    approvalReasoningConflictHint:
-      '该模型不支持所选审批思考档位；请选择受支持的档位或其他模型。',
-    approvalModelMissingHint:
-      '审批模型不存在或已停用；请选择已启用的模型以恢复自动审批。',
-    saveApproval: '保存自动审批',
     addProvider: '新增 Provider',
     providerActions: '操作',
-    defaultProvider: '默认',
-    setDefaultProvider: '设为默认',
     copyProvider: '复制 Provider',
     deleteProvider: '删除 Provider',
     deleteProviderTitle: '删除 Provider？',
@@ -380,7 +375,7 @@ const zhCN = {
     providerTypeHint:
       'Provider Type 对应独立代码实现；三种通用类型分别作为 Chat Completions、Responses 和 Anthropic API 兜底。',
     baseUrl: '基础 URL',
-    mainModel: '主模型',
+    mainModel: 'Provider 默认模型',
     modelSettings: '模型配置',
     modelSettingsHint:
       '穿梭框只控制对话与未来 Swarm 中可选的模型；下方可以配置该 Provider 的全部已知模型，修改会自动保存。',
@@ -399,8 +394,7 @@ const zhCN = {
     deleteModelText:
       '删除模型 {model} 的本地目录记录、启用状态和配置？如果 Provider 仍返回它，下次刷新会重新加入。',
     deleteMainModelBlocked: '主模型不能删除，请先更换主模型。',
-    deleteApprovalModelBlocked:
-      '自动审批正在使用该模型，请先更换自动审批模型。',
+    deleteAuxiliaryModelBlocked: '辅助模型正在使用该模型，请先更换辅助模型。',
     availableModels: 'Provider 模型',
     selectedModels: '已启用模型',
     filterModels: '筛选模型',
@@ -433,10 +427,10 @@ const zhCN = {
     reasoningMax: '最高',
     mainReasoningConflictHint:
       '主模型的思考档位标注已不包含当前默认档位；自动保存已暂停，请手动改选受支持的档位。',
-    approvalDraftConflictHint:
-      '已保存的自动审批模型 {model} 不支持其已配置的审批档位；自动保存已暂停，请先调整标注或审批路由。',
-    approvalDraftModelDisabledHint:
-      '已保存的自动审批模型 {model} 已不在当前 Provider 草稿的启用模型中；自动保存已暂停，请重新启用或改选审批模型。',
+    auxiliaryDraftConflictHint:
+      '已保存的辅助模型 {model} 与当前 Provider 草稿不兼容；自动保存已暂停，请先调整标注或辅助模型。',
+    auxiliaryDraftModelDisabledHint:
+      '已保存的辅助模型 {model} 已不在当前 Provider 草稿的启用模型中；自动保存已暂停，请重新启用或改选辅助模型。',
     reasoningHint:
       '所选档位会原样发送给模型；在模型行中标注思考档位可收窄可选范围，关闭会禁用 thinking。',
     reasoningHintGeneric: '通用 Chat Completions 不发送厂商专有推理参数。',
@@ -444,8 +438,6 @@ const zhCN = {
       'Responses 会发送 reasoning effort，并在本地无状态回放加密 reasoning items。',
     reasoningHintAnthropic:
       '所有非关闭档位都会使用 adaptive thinking；旧模型或兼容代理请设为关闭。',
-    approverProvider: '自动审批 Provider',
-    approverModel: '自动审批模型',
     apiKey: 'API Key',
     apiKeyPlaceholder: '输入新的 Key',
     modelRefreshCredentialHint: '填写 API Key 后会自动保存并刷新模型目录。',
@@ -619,8 +611,9 @@ const zhCN = {
   },
   permissions: {
     title: '权限',
-    hint: '设置默认模式、自动审批模型和审批时记住的规则。',
+    hint: '设置默认模式、敏感数据规则和审批时记住的规则；修改会自动保存。',
     defaultMode: '默认模式',
+    autoApprovalNote: '自动模式使用辅助模型（未配置时使用当前模型）进行审批。',
     sensitiveData: '敏感数据',
     off: '关闭',
     warn: '警告',

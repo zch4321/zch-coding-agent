@@ -1,7 +1,10 @@
 import { Type, type Static } from '@sinclair/typebox'
 import {
   APP_CONFIG_SCHEMA_VERSION,
+  ModelPoolConfigSchema,
   PermissionModeSchema,
+  ProviderPublicConfigSchema,
+  ProviderTypeSchema,
   PublicConfigSchema,
   ReasoningEffortSchema,
   RememberedRuleSchema,
@@ -10,7 +13,12 @@ import {
 } from '../../shared/config'
 import { McpServerConfigSchema } from '../../shared/mcp'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
-import { AppConfigSchema, DEFAULT_APP_CONFIG, type AppConfig } from './schema'
+import {
+  AppConfigSchema,
+  DEFAULT_APP_CONFIG,
+  DEFAULT_PROVIDER_ID,
+  type AppConfig,
+} from './schema'
 
 const validateAppConfig = compileSchema(AppConfigSchema)
 
@@ -58,7 +66,6 @@ const LegacyApprovalConfigSchema = Type.Object(
   },
   { additionalProperties: false },
 )
-type LegacyApprovalConfig = Static<typeof LegacyApprovalConfigSchema>
 
 // Frozen v9-era per-model override shape: token limits only, no annotations.
 const LegacyModelCapabilityOverrideV9Schema = Type.Object(
@@ -189,8 +196,7 @@ const LegacyAppProviderConfigV15Schema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
     label: Type.String({ minLength: 1, maxLength: 128 }),
-    providerType:
-      PublicConfigSchema.properties.providers.items.properties.providerType,
+    providerType: ProviderTypeSchema,
     revision: Type.Integer({
       minimum: 1,
       maximum: Number.MAX_SAFE_INTEGER,
@@ -198,13 +204,10 @@ const LegacyAppProviderConfigV15Schema = Type.Object(
     baseURL: Type.String({ minLength: 1, maxLength: 2_048 }),
     model: Type.String({ maxLength: 256 }),
     reasoning: ReasoningEffortSchema,
-    modelCatalog:
-      PublicConfigSchema.properties.providers.items.properties.modelCatalog,
+    modelCatalog: ProviderPublicConfigSchema.properties.modelCatalog,
     modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
-    modelOverrides:
-      PublicConfigSchema.properties.providers.items.properties.modelOverrides,
-    enabledModelIds:
-      PublicConfigSchema.properties.providers.items.properties.enabledModelIds,
+    modelOverrides: ProviderPublicConfigSchema.properties.modelOverrides,
+    enabledModelIds: ProviderPublicConfigSchema.properties.enabledModelIds,
     apiKeyRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   },
   { additionalProperties: false },
@@ -388,9 +391,9 @@ const LegacyAppConfigV19Schema = Type.Object(
       minItems: 1,
       maxItems: 32,
     }),
-    approval: PublicConfigSchema.properties.approval,
+    approval: LegacyApprovalConfigV17Schema,
     subagents: PublicConfigSchema.properties.subagents,
-    modelPool: PublicConfigSchema.properties.modelPool,
+    modelPool: ModelPoolConfigSchema,
     permission: PublicConfigSchema.properties.permission,
     limits: PublicConfigSchema.properties.limits,
     logging: PublicConfigSchema.properties.logging,
@@ -407,6 +410,19 @@ const LegacyAppConfigV19Schema = Type.Object(
 )
 type LegacyAppConfigV19 = Static<typeof LegacyAppConfigV19Schema>
 const validateLegacyAppConfigV19 = compileSchema(LegacyAppConfigV19Schema)
+
+// AppConfig v20 added the command execution environment; it is the last version
+// with a top-level approval route, activeProviderId, and modelPool.
+const LegacyAppConfigV20Schema = Type.Object(
+  {
+    ...LegacyAppConfigV19Schema.properties,
+    schemaVersion: Type.Literal(20),
+    executionEnvironment: PublicConfigSchema.properties.executionEnvironment,
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV20 = Static<typeof LegacyAppConfigV20Schema>
+const validateLegacyAppConfigV20 = compileSchema(LegacyAppConfigV20Schema)
 
 const LegacyAppProviderConfigV14Schema = Type.Object(
   {
@@ -496,24 +512,6 @@ const LegacyAppConfigV10Schema = Type.Object(
 type LegacyAppConfigV10 = Static<typeof LegacyAppConfigV10Schema>
 const validateLegacyAppConfigV10 = compileSchema(LegacyAppConfigV10Schema)
 
-/** Makes the legacy effective approval effort explicit during migration. */
-function migrateLegacyApproval(
-  approval: LegacyApprovalConfig,
-  providers: ReadonlyArray<{
-    id: string
-    reasoning: AppConfig['approval']['reasoning']
-  }>,
-): AppConfig['approval'] {
-  const provider = providers.find(
-    (candidate) => candidate.id === approval.approverProviderId,
-  )
-  return {
-    ...approval,
-    reasoning:
-      !provider || provider.reasoning === 'off' ? 'high' : provider.reasoning,
-  }
-}
-
 function withoutRunToolBudget(
   limits: LegacyLimitsWithRunToolBudget,
 ): AppConfig['limits'] {
@@ -538,21 +536,69 @@ function migrateLimitDefaults(limits: LegacyAppConfigV10['limits']) {
   return next
 }
 
+interface LegacyModelRolesSource {
+  activeProviderId: string
+  approval: {
+    approverProviderId: string
+    approverModel: string
+  }
+}
+
+/** Removes the retired top-level model-role fields from a legacy config. */
+function withoutLegacyModelRoleFields<Value extends Record<string, unknown>>(
+  config: Value,
+): Omit<Value, 'activeProviderId' | 'approval' | 'modelPool' | 'providers'> {
+  const clone = { ...config } as Record<string, unknown>
+  Reflect.deleteProperty(clone, 'activeProviderId')
+  Reflect.deleteProperty(clone, 'approval')
+  Reflect.deleteProperty(clone, 'modelPool')
+  Reflect.deleteProperty(clone, 'providers')
+  return clone as Omit<
+    Value,
+    'activeProviderId' | 'approval' | 'modelPool' | 'providers'
+  >
+}
+
+/** Assembles the unified v21 models section from legacy role fields. */
+function migrateModelsSection(
+  legacy: LegacyModelRolesSource,
+  providers: AppConfig['models']['providers'],
+  modelPool: AppConfig['models']['modelPool'],
+): AppConfig['models'] {
+  const defaultProvider =
+    providers.find((provider) => provider.id === legacy.activeProviderId) ??
+    providers[0] ??
+    DEFAULT_APP_CONFIG.models.providers[0]
+  return {
+    defaultModelProvider: defaultProvider?.id ?? DEFAULT_PROVIDER_ID,
+    defaultModel: defaultProvider?.model ?? '',
+    auxiliaryModelProvider: legacy.approval.approverModel
+      ? legacy.approval.approverProviderId
+      : '',
+    auxiliaryModel: legacy.approval.approverModel,
+    providers: structuredClone(providers),
+    modelPool,
+  }
+}
+
 function migrateV10(config: LegacyAppConfigV10): AppConfig {
+  const providers = config.providers.map((provider) => ({
+    ...provider,
+    enabledModelIds: [provider.model],
+  }))
   const migrated = {
-    ...config,
+    ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: migrateModelsSection(
+      config,
+      providers,
+      structuredClone(DEFAULT_APP_CONFIG.models.modelPool),
+    ),
     executionEnvironment: structuredClone(
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
-    approval: migrateLegacyApproval(config.approval, config.providers),
     subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
-    modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     limits: migrateLimitDefaults(config.limits),
-    providers: config.providers.map((provider) => ({
-      ...provider,
-      enabledModelIds: [provider.model],
-    })),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -564,20 +610,23 @@ function migrateV10(config: LegacyAppConfigV10): AppConfig {
 }
 
 function migrateV11(config: LegacyAppConfigV11): AppConfig {
+  const providers = config.providers.map((provider) => ({
+    ...provider,
+    enabledModelIds: [provider.model],
+  }))
   const migrated = {
-    ...config,
+    ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: migrateModelsSection(
+      config,
+      providers,
+      structuredClone(DEFAULT_APP_CONFIG.models.modelPool),
+    ),
     executionEnvironment: structuredClone(
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
-    approval: migrateLegacyApproval(config.approval, config.providers),
     subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
-    modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     limits: withoutRunToolBudget(config.limits),
-    providers: config.providers.map((provider) => ({
-      ...provider,
-      enabledModelIds: [provider.model],
-    })),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -589,20 +638,23 @@ function migrateV11(config: LegacyAppConfigV11): AppConfig {
 }
 
 function migrateV12(config: LegacyAppConfigV12): AppConfig {
+  const providers = config.providers.map((provider) => ({
+    ...withoutKey(provider, 'modelConfigurationIds'),
+    enabledModelIds: [...provider.modelConfigurationIds],
+  }))
   const migrated = {
-    ...config,
+    ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: migrateModelsSection(
+      config,
+      providers,
+      structuredClone(DEFAULT_APP_CONFIG.models.modelPool),
+    ),
     executionEnvironment: structuredClone(
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
-    approval: migrateLegacyApproval(config.approval, config.providers),
     subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
-    modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
     limits: withoutRunToolBudget(config.limits),
-    providers: config.providers.map((provider) => ({
-      ...withoutKey(provider, 'modelConfigurationIds'),
-      enabledModelIds: [...provider.modelConfigurationIds],
-    })),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -623,20 +675,23 @@ function migrateLegacySubagents(
 }
 
 function migrateV13(config: LegacyAppConfigV13): AppConfig {
+  const providers = config.providers.map((provider) => ({
+    ...withoutKey(provider, 'modelConfigurationIds'),
+    enabledModelIds: [...provider.modelConfigurationIds],
+  }))
   const migrated = {
-    ...config,
+    ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: migrateModelsSection(
+      config,
+      providers,
+      structuredClone(DEFAULT_APP_CONFIG.models.modelPool),
+    ),
     executionEnvironment: structuredClone(
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
     subagents: migrateLegacySubagents(config.subagents),
-    modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
-    approval: migrateLegacyApproval(config.approval, config.providers),
     limits: withoutRunToolBudget(config.limits),
-    providers: config.providers.map((provider) => ({
-      ...withoutKey(provider, 'modelConfigurationIds'),
-      enabledModelIds: [...provider.modelConfigurationIds],
-    })),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -648,19 +703,22 @@ function migrateV13(config: LegacyAppConfigV13): AppConfig {
 }
 
 function migrateV14(config: LegacyAppConfigV14): AppConfig {
+  const providers = config.providers.map((provider) => ({
+    ...withoutKey(provider, 'modelConfigurationIds'),
+    enabledModelIds: [...provider.modelConfigurationIds],
+  }))
   const migrated = {
-    ...config,
+    ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: migrateModelsSection(
+      config,
+      providers,
+      structuredClone(DEFAULT_APP_CONFIG.models.modelPool),
+    ),
     executionEnvironment: structuredClone(
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
     subagents: migrateLegacySubagents(config.subagents),
-    modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
-    approval: migrateLegacyApproval(config.approval, config.providers),
-    providers: config.providers.map((provider) => ({
-      ...withoutKey(provider, 'modelConfigurationIds'),
-      enabledModelIds: [...provider.modelConfigurationIds],
-    })),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -673,14 +731,17 @@ function migrateV14(config: LegacyAppConfigV14): AppConfig {
 
 function migrateV15(config: LegacyAppConfigV15): AppConfig {
   const migrated = {
-    ...config,
+    ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: migrateModelsSection(
+      config,
+      config.providers,
+      structuredClone(DEFAULT_APP_CONFIG.models.modelPool),
+    ),
     executionEnvironment: structuredClone(
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
     subagents: migrateLegacySubagents(config.subagents),
-    approval: migrateLegacyApproval(config.approval, config.providers),
-    modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -705,7 +766,7 @@ type LegacyModelPoolWithParallel = {
 function migrateLegacyModelPool(
   modelPool: LegacyModelPoolWithParallel,
   schemaVersion: 16 | 17 | 18,
-): AppConfig['modelPool'] {
+): AppConfig['models']['modelPool'] {
   try {
     return normalizeModelPoolConfig({
       entries: modelPool.entries.map((entry) => ({
@@ -726,14 +787,17 @@ function migrateLegacyModelPool(
 
 function migrateV16(config: LegacyAppConfigV16): AppConfig {
   const migrated = {
-    ...config,
+    ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: migrateModelsSection(
+      config,
+      config.providers,
+      migrateLegacyModelPool(config.modelPool, 16),
+    ),
     executionEnvironment: structuredClone(
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
     subagents: migrateLegacySubagents(config.subagents),
-    approval: migrateLegacyApproval(config.approval, config.providers),
-    modelPool: migrateLegacyModelPool(config.modelPool, 16),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -746,13 +810,17 @@ function migrateV16(config: LegacyAppConfigV16): AppConfig {
 
 function migrateV17(config: LegacyAppConfigV17): AppConfig {
   const migrated = {
-    ...config,
+    ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: migrateModelsSection(
+      config,
+      config.providers,
+      migrateLegacyModelPool(config.modelPool, 17),
+    ),
     executionEnvironment: structuredClone(
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
     subagents: migrateLegacySubagents(config.subagents),
-    modelPool: migrateLegacyModelPool(config.modelPool, 17),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -765,13 +833,17 @@ function migrateV17(config: LegacyAppConfigV17): AppConfig {
 
 function migrateV18(config: LegacyAppConfigV18): AppConfig {
   const migrated = {
-    ...config,
+    ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: migrateModelsSection(
+      config,
+      config.providers,
+      migrateLegacyModelPool(config.modelPool, 18),
+    ),
     executionEnvironment: structuredClone(
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
     subagents: migrateLegacySubagents(config.subagents),
-    modelPool: migrateLegacyModelPool(config.modelPool, 18),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -784,8 +856,13 @@ function migrateV18(config: LegacyAppConfigV18): AppConfig {
 
 function migrateV19(config: LegacyAppConfigV19): AppConfig {
   const migrated = {
-    ...config,
+    ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: migrateModelsSection(
+      config,
+      config.providers,
+      structuredClone(config.modelPool),
+    ),
     executionEnvironment: structuredClone(
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
@@ -793,6 +870,25 @@ function migrateV19(config: LegacyAppConfigV19): AppConfig {
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
       19,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
+function migrateV20(config: LegacyAppConfigV20): AppConfig {
+  const migrated = {
+    ...withoutLegacyModelRoleFields(config),
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: migrateModelsSection(
+      config,
+      config.providers,
+      structuredClone(config.modelPool),
+    ),
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      20,
       formatSchemaErrors(validateAppConfig.errors),
     )
   }
@@ -836,31 +932,34 @@ export function migrateConfig(candidate: unknown): AppConfig {
       )
     }
     const legacy = candidate as LegacyAppConfigV9
+    const providers = legacy.providers.map((provider) => {
+      const adapterId = provider.adapterId
+      const rest = withoutKey(
+        withoutKey(withoutKey(provider, 'adapterId'), 'profile'),
+        'protocol',
+      )
+      return {
+        ...rest,
+        providerType:
+          adapterId === 'deepseek.chat-completions'
+            ? ('deepseek.chat-completions' as const)
+            : ('generic.chat-completions' as const),
+        enabledModelIds: [provider.model],
+      }
+    })
     const migrated = {
-      ...legacy,
+      ...withoutLegacyModelRoleFields(legacy),
       schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+      models: migrateModelsSection(
+        legacy,
+        providers,
+        structuredClone(DEFAULT_APP_CONFIG.models.modelPool),
+      ),
       executionEnvironment: structuredClone(
         DEFAULT_APP_CONFIG.executionEnvironment,
       ),
-      approval: migrateLegacyApproval(legacy.approval, legacy.providers),
       subagents: structuredClone(DEFAULT_APP_CONFIG.subagents),
-      modelPool: structuredClone(DEFAULT_APP_CONFIG.modelPool),
       limits: migrateLimitDefaults(legacy.limits),
-      providers: legacy.providers.map((provider) => {
-        const adapterId = provider.adapterId
-        const rest = withoutKey(
-          withoutKey(withoutKey(provider, 'adapterId'), 'profile'),
-          'protocol',
-        )
-        return {
-          ...rest,
-          providerType:
-            adapterId === 'deepseek.chat-completions'
-              ? ('deepseek.chat-completions' as const)
-              : ('generic.chat-completions' as const),
-          enabledModelIds: [provider.model],
-        }
-      }),
     }
     if (!validateAppConfig(migrated)) {
       throw new UnsupportedConfigSchemaError(
@@ -971,6 +1070,16 @@ export function migrateConfig(candidate: unknown): AppConfig {
     return migrateV19(candidate as LegacyAppConfigV19)
   }
 
+  if (Reflect.get(candidate, 'schemaVersion') === 20) {
+    if (!validateLegacyAppConfigV20(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        20,
+        formatSchemaErrors(validateLegacyAppConfigV20.errors),
+      )
+    }
+    return migrateV20(candidate as LegacyAppConfigV20)
+  }
+
   if (Reflect.get(candidate, 'schemaVersion') !== APP_CONFIG_SCHEMA_VERSION) {
     throw new UnsupportedConfigSchemaError(
       Reflect.get(candidate, 'schemaVersion'),
@@ -985,9 +1094,13 @@ export function migrateConfig(candidate: unknown): AppConfig {
   }
 
   try {
+    const current = structuredClone(candidate as AppConfig)
     return {
-      ...structuredClone(candidate as AppConfig),
-      modelPool: normalizeModelPoolConfig((candidate as AppConfig).modelPool),
+      ...current,
+      models: {
+        ...current.models,
+        modelPool: normalizeModelPoolConfig(current.models.modelPool),
+      },
     }
   } catch (error) {
     throw new UnsupportedConfigSchemaError(

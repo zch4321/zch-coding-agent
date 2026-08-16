@@ -55,14 +55,12 @@ function publicConfig(
   providers: AppProviderConfig[] = [provider('provider-a', ['model-a'])],
 ) {
   const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
-  config.providers = providers
-  config.activeProviderId = providers[0]!.id
-  config.approval = {
-    approverProviderId: providers[0]!.id,
-    approverModel: providers[0]!.model,
-    reasoning: 'high',
-  }
-  config.modelPool = { entries }
+  config.models.providers = providers
+  config.models.defaultModelProvider = providers[0]!.id
+  config.models.defaultModel = providers[0]!.model
+  config.models.auxiliaryModelProvider = providers[0]!.id
+  config.models.auxiliaryModel = providers[0]!.model
+  config.models.modelPool = { entries }
   return toPublicConfig(config, () => ({
     credentialConfigured: true,
     credentialSource: 'safe-storage' as const,
@@ -280,9 +278,9 @@ describe('freezeModelPoolPlan', () => {
     const harness = storeHarness(config)
     const prepared = await freezeModelPoolPlan(harness.store, ['standard'])
 
-    config.providers[0]!.baseURL = 'https://changed.example/v9'
-    config.providers[0]!.revision = 99
-    config.modelPool.entries[0]!.model = 'changed-model'
+    config.models.providers[0]!.baseURL = 'https://changed.example/v9'
+    config.models.providers[0]!.revision = 99
+    config.models.modelPool.entries[0]!.model = 'changed-model'
 
     expect(prepared.assignments[0]!.routes.main.snapshot).toMatchObject({
       endpoint: 'https://provider-a.example/v1/chat/completions',

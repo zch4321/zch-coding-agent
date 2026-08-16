@@ -129,6 +129,7 @@ export async function runHeadlessAgent(
     databasePath: headlessDatabasePath(databaseDirectory),
     runtimeDataDirectory: prepared.userDataDirectory,
     swarmHostEnabled: false,
+    conversationTitlingDisabled: true,
     promptDirectory: await resolvePromptDirectory(options.promptDirectory),
     fetchImpl: options.fetchImpl,
     providerFactory: options.providerFactory,

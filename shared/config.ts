@@ -25,7 +25,7 @@ export {
   type ReasoningEffort,
 } from './reasoning'
 
-export const APP_CONFIG_SCHEMA_VERSION = 20 as const
+export const APP_CONFIG_SCHEMA_VERSION = 21 as const
 
 export const AssistantLanguageSchema = Type.Union([
   Type.Literal('zh-CN'),
@@ -179,22 +179,34 @@ export const ProviderPublicConfigSchema = Type.Object(
 )
 export type ProviderPublicConfig = Static<typeof ProviderPublicConfigSchema>
 
-export const PublicConfigSchema = Type.Object(
+export const ModelRolesConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(APP_CONFIG_SCHEMA_VERSION),
-    activeProviderId: Type.String({ minLength: 1, maxLength: 128 }),
+    defaultModelProvider: Type.String({ minLength: 1, maxLength: 128 }),
+    defaultModel: Type.String({ maxLength: 256 }),
+    auxiliaryModelProvider: Type.String({ maxLength: 128 }),
+    auxiliaryModel: Type.String({ maxLength: 256 }),
+  },
+  { additionalProperties: false },
+)
+export type ModelRolesConfig = Static<typeof ModelRolesConfigSchema>
+
+export const ModelsConfigSchema = Type.Object(
+  {
+    ...ModelRolesConfigSchema.properties,
     providers: Type.Array(ProviderPublicConfigSchema, {
       minItems: 1,
       maxItems: 32,
     }),
-    approval: Type.Object(
-      {
-        approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
-        approverModel: Type.String({ maxLength: 256 }),
-        reasoning: ReasoningEffortSchema,
-      },
-      { additionalProperties: false },
-    ),
+    modelPool: ModelPoolConfigSchema,
+  },
+  { additionalProperties: false },
+)
+export type ModelsConfig = Static<typeof ModelsConfigSchema>
+
+export const PublicConfigSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(APP_CONFIG_SCHEMA_VERSION),
+    models: ModelsConfigSchema,
     subagents: Type.Object(
       {
         enabled: Type.Boolean(),
@@ -206,7 +218,6 @@ export const PublicConfigSchema = Type.Object(
       },
       { additionalProperties: false },
     ),
-    modelPool: ModelPoolConfigSchema,
     executionEnvironment: Type.Object(
       {
         commandShell: CommandShellSelectionSchema,
@@ -471,22 +482,58 @@ export function getProviderConfig(
   config: PublicConfig,
   providerId: string,
 ): ProviderPublicConfig | undefined {
-  return config.providers.find((provider) => provider.id === providerId)
+  return config.models.providers.find((provider) => provider.id === providerId)
 }
 
-/** Selects the active provider, falling back to the first configured provider when necessary. */
-export function getActiveProviderConfig(
+/** Selects the default-model provider, falling back to the first configured provider. */
+export function getDefaultModelProviderConfig(
   config: PublicConfig,
 ): ProviderPublicConfig {
   return (
-    getProviderConfig(config, config.activeProviderId) ?? config.providers[0]
+    getProviderConfig(config, config.models.defaultModelProvider) ??
+    config.models.providers[0]
   )
+}
+
+/** Builds the default model selection used for new conversations and auxiliary fallbacks. */
+export function getDefaultModelSelection(config: PublicConfig): {
+  providerId: string
+  model: string
+  reasoning: ReasoningEffort
+} {
+  const provider = getDefaultModelProviderConfig(config)
+  return {
+    providerId: provider.id,
+    model: config.models.defaultModel || provider.model,
+    reasoning: provider.reasoning,
+  }
+}
+
+/** Builds the configured auxiliary model selection, undefined when unconfigured. */
+export function getAuxiliaryModelSelection(config: PublicConfig):
+  | {
+      providerId: string
+      model: string
+      reasoning: ReasoningEffort
+    }
+  | undefined {
+  const provider = getProviderConfig(
+    config,
+    config.models.auxiliaryModelProvider,
+  )
+  const model = config.models.auxiliaryModel
+  if (!provider || !model) return undefined
+  return {
+    providerId: provider.id,
+    model,
+    reasoning: provider.reasoning,
+  }
 }
 
 export const ConfigSectionSchema = Type.Union([
   Type.Literal('all'),
   Type.Literal('providers'),
-  Type.Literal('approval'),
+  Type.Literal('models'),
   Type.Literal('subagents'),
   Type.Literal('modelPool'),
   Type.Literal('executionEnvironment'),
@@ -622,14 +669,6 @@ export const ConfigSetRequestSchema = Type.Union([
   Type.Object(
     {
       version: Type.Literal(1),
-      kind: Type.Literal('provider-select'),
-      providerId: Type.String({ minLength: 1, maxLength: 128 }),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      version: Type.Literal(1),
       kind: Type.Literal('provider-copy'),
       sourceProviderId: Type.String({ minLength: 1, maxLength: 128 }),
       providerId: Type.String({ minLength: 1, maxLength: 128 }),
@@ -670,10 +709,8 @@ export const ConfigSetRequestSchema = Type.Union([
   Type.Object(
     {
       version: Type.Literal(1),
-      kind: Type.Literal('approval'),
-      approverProviderId: Type.String({ minLength: 1, maxLength: 128 }),
-      approverModel: Type.String({ maxLength: 256 }),
-      reasoning: ReasoningEffortSchema,
+      kind: Type.Literal('models'),
+      value: ModelRolesConfigSchema,
     },
     { additionalProperties: false },
   ),

@@ -107,7 +107,7 @@ export async function createConfig(
     ),
   )
   await store.initialize()
-  const provider = store.getPublicConfig().providers[0]!
+  const provider = store.getPublicConfig().models.providers[0]!
   await store.update({
     version: 1,
     kind: 'provider-settings',
@@ -122,10 +122,13 @@ export async function createConfig(
   })
   await store.update({
     version: 1,
-    kind: 'approval',
-    approverProviderId: provider.id,
-    approverModel: 'deepseek-v4-pro',
-    reasoning: 'high',
+    kind: 'models',
+    value: {
+      defaultModelProvider: provider.id,
+      defaultModel: 'deepseek-v4-pro',
+      auxiliaryModelProvider: provider.id,
+      auxiliaryModel: 'deepseek-v4-pro',
+    },
   })
   await store.update({
     version: 1,

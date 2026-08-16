@@ -250,7 +250,7 @@ test.describe.serial('Electron settings workflows', () => {
     await subagentsSwitch.click()
     await expect(subagentSaveStatus).toHaveText('已保存')
 
-    await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
+    await settingsNavigation.getByRole('menuitem', { name: '模型' }).click()
     const provider = page.locator('.settings-section')
 
     // Widen the window so the desktop six-column model grid (with header)
@@ -262,7 +262,9 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(provider.locator('.provider-card')).toHaveCount(1)
     await expect(provider.locator('.provider-card')).toContainText('DeepSeek')
     await expect(
-      provider.locator('.settings-field > span', { hasText: /^主模型$/ }),
+      provider.locator('.settings-field > span', {
+        hasText: /^Provider 默认模型$/,
+      }),
     ).toBeVisible()
     await expect(
       provider.getByText('Token 估算方式', { exact: true }),
@@ -517,27 +519,29 @@ test.describe.serial('Electron settings workflows', () => {
       settingsNavigation.getByRole('menuitem', { name: '自动审批' }),
     ).toHaveCount(0)
     await settingsNavigation.getByRole('menuitem', { name: '权限' }).click()
-    const approval = page.locator('.settings-section')
+    const permissions = page.locator('.settings-section')
     await expect(
-      approval.getByRole('heading', { name: '自动审批' }),
+      permissions.getByText(
+        '自动模式使用辅助模型（未配置时使用当前模型）进行审批',
+      ),
     ).toBeVisible()
-    const approvalModel = approval
-      .locator('.settings-field', { hasText: '自动审批模型' })
-      .locator('.n-select')
-    await approvalModel.click()
-    await page.getByText(providerModel, { exact: true }).click()
-    const approvalReasoning = approval
-      .locator('.settings-field', { hasText: '自动审批思考深度' })
-      .locator('.n-select')
-    await approvalReasoning.click()
-    await page
-      .locator('.n-select-menu:visible .n-base-select-option')
-      .getByText('最高', { exact: true })
-      .click()
-    await approval.getByRole('button', { name: '保存自动审批' }).click()
-    await expect(approval.locator('.settings-save-status')).toHaveText('已保存')
 
-    await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
+    await settingsNavigation.getByRole('menuitem', { name: '模型' }).click()
+    const modelsSection = page.locator('.settings-section')
+    const auxiliaryField = modelsSection
+      .locator('.settings-field', { hasText: '辅助模型' })
+      .locator('.n-select')
+    await auxiliaryField.click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option', {
+        hasText: providerModel,
+      })
+      .click()
+    await expect(
+      modelsSection.locator('.settings-save-status').first(),
+    ).toHaveText('已保存')
+
+    await settingsNavigation.getByRole('menuitem', { name: '模型' }).click()
     await expect.poll(() => fakeProvider.modelCatalogRequests).toBe(2)
     await expect(
       page.locator('.provider-model-settings-row', { hasText: providerModel }),
@@ -576,7 +580,7 @@ test.describe.serial('Electron settings workflows', () => {
     const navigation = page.getByRole('navigation', {
       name: '设置分类',
     })
-    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    await navigation.getByRole('menuitem', { name: '模型' }).click()
     const provider = page.locator('.settings-section')
 
     await expect(provider.locator('.provider-card')).toHaveCount(2)
@@ -598,10 +602,18 @@ test.describe.serial('Electron settings workflows', () => {
       provider.locator('.provider-card', { hasText: 'E2E Alt Edited' }),
     ).toBeVisible()
 
-    await provider.getByRole('button', { name: '设为默认' }).click()
-    await expect(
-      provider.locator('.provider-card.active', { hasText: 'E2E Alt Edited' }),
-    ).toContainText('默认')
+    const mainModelField = provider
+      .locator('.settings-field', { hasText: '主模型' })
+      .locator('.n-select')
+    await mainModelField.click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option', {
+        hasText: 'e2e-alt-chat',
+      })
+      .click()
+    await expect(provider.locator('.settings-save-status').first()).toHaveText(
+      '已保存',
+    )
 
     const editedCard = provider.locator('.provider-card', {
       hasText: 'E2E Alt Edited',
@@ -626,10 +638,9 @@ test.describe.serial('Electron settings workflows', () => {
         getConfig(payload: unknown): Promise<{
           value?: {
             config: {
-              approval: {
-                approverProviderId: string
-                approverModel: string
-                reasoning: string
+              models: {
+                auxiliaryModelProvider: string
+                auxiliaryModel: string
               }
             }
           }
@@ -638,14 +649,13 @@ test.describe.serial('Electron settings workflows', () => {
       const result = await api.getConfig({ version: 1, section: 'all' })
       return {
         text: JSON.stringify(result),
-        approval: result.value?.config.approval,
+        roles: result.value?.config.models,
       }
     })
     expect(configSnapshot.text).not.toContain('apiKeyRef')
-    expect(configSnapshot.approval).toEqual({
-      approverProviderId: 'deepseek',
-      approverModel: providerModel,
-      reasoning: 'max',
+    expect(configSnapshot.roles).toMatchObject({
+      auxiliaryModelProvider: 'deepseek',
+      auxiliaryModel: providerModel,
     })
   })
 
@@ -683,7 +693,7 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.locator('.sidebar-settings-button').click()
     const navigation = page.getByRole('navigation', { name: '设置分类' })
-    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    await navigation.getByRole('menuitem', { name: '模型' }).click()
     const provider = page.locator('.settings-section')
     await provider
       .locator('.provider-card', { hasText: 'E2E Annotated' })
@@ -749,7 +759,7 @@ test.describe.serial('Electron settings workflows', () => {
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.locator('.sidebar-settings-button').click()
-    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    await navigation.getByRole('menuitem', { name: '模型' }).click()
     await provider
       .locator('.provider-card', { hasText: 'E2E Annotated' })
       .click()
@@ -757,9 +767,17 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(effortsField).toContainText('中')
     await expect(capabilityField).toContainText('强力')
 
-    // Make the annotated provider active and exercise the composer reasoning
+    // Make the annotated model the default and exercise the composer reasoning
     // validity states through the real facade.
-    await provider.getByRole('button', { name: '设为默认' }).click()
+    await provider
+      .locator('.settings-field', { hasText: '主模型' })
+      .locator('.n-select')
+      .click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option', {
+        hasText: 'annotated-model',
+      })
+      .click()
     await page.locator('.settings-back-button').click()
     // Composer reasoning options are labeled "思考深度 · X", so match loosely.
     const clickComposerOption = (text: string) =>
@@ -891,18 +909,35 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(pool.locator('.n-empty')).toBeVisible()
   })
 
-  test('pauses provider autosave when the draft breaks the saved approval route', async () => {
-    // The saved approval route uses the annotated provider's second model.
+  test('pauses provider autosave when the draft breaks the saved auxiliary route', async () => {
+    // The saved auxiliary role uses the annotated provider's second model.
     const seeded = await page.evaluate(async () => {
       const api = Reflect.get(window, 'agentApi') as {
+        getConfig(payload: unknown): Promise<{
+          ok: boolean
+          value?: {
+            config: {
+              models: {
+                defaultModelProvider: string
+                defaultModel: string
+              }
+            }
+          }
+        }>
         setConfig(payload: unknown): Promise<{ ok: boolean }>
       }
+      const current = await api.getConfig({ version: 1, section: 'all' })
+      if (!current.ok || !current.value) return false
       const result = await api.setConfig({
         version: 1,
-        kind: 'approval',
-        approverProviderId: 'e2e-annotated',
-        approverModel: 'second-model',
-        reasoning: 'low',
+        kind: 'models',
+        value: {
+          defaultModelProvider:
+            current.value.config.models.defaultModelProvider,
+          defaultModel: current.value.config.models.defaultModel,
+          auxiliaryModelProvider: 'e2e-annotated',
+          auxiliaryModel: 'second-model',
+        },
       })
       return result.ok
     })
@@ -912,28 +947,15 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.locator('.sidebar-settings-button').click()
     const navigation = page.getByRole('navigation', { name: '设置分类' })
-    // Leave a different approval model in the form without saving. Provider
-    // conflict checks must still use the persisted second-model route.
-    await navigation.getByRole('menuitem', { name: '权限' }).click()
-    const approval = page.locator('.settings-section')
-    await approval
-      .locator('.settings-field', { hasText: '自动审批模型' })
-      .locator('.n-select')
-      .click()
-    await page
-      .locator('.n-select-menu:visible .n-base-select-option', {
-        hasText: 'annotated-model',
-      })
-      .click()
-    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    await navigation.getByRole('menuitem', { name: '模型' }).click()
     const provider = page.locator('.settings-section')
     await provider
       .locator('.provider-card', { hasText: 'E2E Annotated' })
       .click()
 
-    // Annotating the approval model so it excludes the saved approval effort
-    // would break that route: autosave pauses with a hint instead of failing
-    // against the backend.
+    // Annotating the auxiliary model so it excludes the provider default
+    // effort would break that route: autosave pauses with a hint instead of
+    // failing against the backend.
     const secondEffortsField = provider.locator(
       '.provider-model-value[aria-label*="second-model"][aria-label*="思考档位"]',
     )
@@ -944,22 +966,22 @@ test.describe.serial('Electron settings workflows', () => {
       .click()
     await provider.locator('.settings-heading').first().click()
     await expect(
-      provider.getByText('不支持其已配置的审批档位', { exact: false }),
+      provider.getByText('与当前 Provider 草稿不兼容', { exact: false }),
     ).toBeVisible()
     await expect(provider.locator('.settings-save-status')).not.toHaveText(
       '已保存',
     )
 
-    // Widening the annotation to include the saved effort resumes autosave.
+    // Widening the annotation to include the provider default effort resumes autosave.
     await secondEffortsField.locator('.n-select').click()
     await page
       .locator('.n-select-menu:visible .n-base-select-option')
-      .getByText('低', { exact: true })
+      .getByText('高', { exact: true })
       .click()
     await provider.locator('.settings-heading').first().click()
     await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
 
-    // Disabling the persisted approval model must also pause autosave before
+    // Disabling the persisted auxiliary model must also pause autosave before
     // the backend rejects the Provider update.
     const modelTransfer = provider.getByTestId('provider-model-transfer')
     await expect(

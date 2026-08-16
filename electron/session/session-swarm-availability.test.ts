@@ -4,21 +4,23 @@ import { resolveSwarmAvailability } from './session-swarm-availability'
 
 function readyConfig(): {
   limits: Pick<PublicConfig['limits'], 'maxConcurrentRuns'>
-  modelPool: PublicConfig['modelPool']
+  models: Pick<PublicConfig['models'], 'modelPool'>
   subagents: Pick<PublicConfig['subagents'], 'maxAgentsPerSwarm'>
 } {
   return {
     limits: { maxConcurrentRuns: 8 },
-    modelPool: {
-      entries: [
-        {
-          id: 'reviewer',
-          enabled: true,
-          providerId: 'provider',
-          model: 'review-model',
-          reasoning: 'high',
-        },
-      ],
+    models: {
+      modelPool: {
+        entries: [
+          {
+            id: 'reviewer',
+            enabled: true,
+            providerId: 'provider',
+            model: 'review-model',
+            reasoning: 'high',
+          },
+        ],
+      },
     },
     subagents: { maxAgentsPerSwarm: 12 },
   }
@@ -85,7 +87,7 @@ describe('Swarm Tool availability', () => {
     ).toContain('maxConcurrentRuns')
 
     const emptyPool = readyConfig()
-    emptyPool.modelPool.entries[0]!.enabled = false
+    emptyPool.models.modelPool.entries[0]!.enabled = false
     expect(
       resolveSwarmAvailability({
         hostEnabled: true,

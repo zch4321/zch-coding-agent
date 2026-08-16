@@ -15,7 +15,7 @@
 ### 1.2 核心价值
 
 - **有手有眼**：不只是聊天，而是能真正操作文件系统与终端的 Agent。
-- **可控可审**：四档权限模型 + 双模型自动审批，在自动化与安全之间可调。
+- **可控可审**：四档权限模型 + 辅助模型自动审批，在自动化与安全之间可调。
 - **可观测**：显式开启调试日志后，完整记录每一次 LLM 调用、流式响应、审批和工具执行，可离线回放并分析上下文与 KV cache 命中效果。
 - **可扩展**：插件化生命周期钩子，为未来 MCP / 自定义工具 / RAG 留口子。
 
@@ -150,7 +150,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 生产路径实现互不继承的 `DeepSeekProvider`、`GenericChatCompletionsProvider`、`GenericResponsesProvider` 与 `GenericAnthropicProvider`。三种通用兜底分别对应 Chat Completions、Responses 和 Anthropic API style；Google 和其他具体厂商按实际使用需求分别实现，只共享 HTTP/SSE、bounds、tool-call 拼接等纯函数。
 
-模型目录查询保持独立服务。OpenAI-compatible API 使用 Bearer `GET /models`，Anthropic 使用 `x-api-key`、版本 header 和有界分页 `GET /models`。目录解析只能采用协议明确返回的字段：Anthropic 的 `max_input_tokens/max_tokens` 归一化为模型容量；OpenAI 与 DeepSeek 的标准列表当前只保证模型身份信息，不能臆测容量。刷新按大小写敏感的模型 ID 只追加当前持久化清单中不存在的模型，不得覆盖旧条目或删除本次响应缺失的条目；404/405 等不提供目录接口的 Provider 必须保留现有清单并允许用户手工新增模型。新增模型对话框必须同时收集最大上下文、压缩阈值、最大输出长度、可选思考档位和能力等级，确认时原子写入目录、启用池与模型覆盖，不能先产生半配置模型。模型配置行必须允许删除非主模型、非当前自动审批模型；删除原子清理本地目录、启用池和模型覆盖，并禁用引用它的模型池条目。Provider 后续仍返回该模型时，目录刷新可以重新发现它。设置页合并 Provider 返回、应用内置模型资料和已保存覆盖；不得抓取 Provider 文档 HTML 推断运行时能力。Provider 编辑页在底部以模型列表展示全部已知模型的“最大上下文、压缩阈值、最大输出长度”，目录没有返回的数值必须自动填入应用默认值而不是显示空配置。
+模型目录查询保持独立服务。OpenAI-compatible API 使用 Bearer `GET /models`，Anthropic 使用 `x-api-key`、版本 header 和有界分页 `GET /models`。目录解析只能采用协议明确返回的字段：Anthropic 的 `max_input_tokens/max_tokens` 归一化为模型容量；OpenAI 与 DeepSeek 的标准列表当前只保证模型身份信息，不能臆测容量。刷新按大小写敏感的模型 ID 只追加当前持久化清单中不存在的模型，不得覆盖旧条目或删除本次响应缺失的条目；404/405 等不提供目录接口的 Provider 必须保留现有清单并允许用户手工新增模型。新增模型对话框必须同时收集最大上下文、压缩阈值、最大输出长度、可选思考档位和能力等级，确认时原子写入目录、启用池与模型覆盖，不能先产生半配置模型。模型配置行必须允许删除非 Provider 默认模型、非当前辅助模型；删除原子清理本地目录、启用池和模型覆盖，并禁用引用它的模型池条目。Provider 后续仍返回该模型时，目录刷新可以重新发现它。设置页合并 Provider 返回、应用内置模型资料和已保存覆盖；不得抓取 Provider 文档 HTML 推断运行时能力。Provider 编辑页在底部以模型列表展示全部已知模型的“最大上下文、压缩阈值、最大输出长度”，目录没有返回的数值必须自动填入应用默认值而不是显示空配置。
 
 模型能力采用 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值`。未知模型默认按 256K 上下文和 65,536 Token 最大输出管理；上下文不足时收窄输出上限并至少保留 1,024 Token prompt budget。压缩阈值默认为可用 prompt budget 的 80%，并明确标记“能力未知”。Provider 模型配置区必须使用可筛选的穿梭框维护按 Provider 持久化的 `enabledModelIds`；只有启用模型能进入 Composer、自动审批和 Swarm 模型池的可选项。主模型可以从完整模型清单中选择，选中后必须原子加入启用池，并在作为主模型期间禁止从穿梭框移除；更换主模型不得自动停用旧主模型。穿梭框只管理运行时候选，不得筛掉下方任何已知模型的 Token 与能力配置行。启用池不进入模型能力覆盖或 Provider revision，但运行 route 必须在开始时确认所选模型仍已启用。新安装不写入虚构模型 ID；未配置 Provider 可以暂时没有主模型和启用模型，此时禁止启动 Run。用户首次填写或替换 API Key 后，Provider 表单自动保存并立即刷新模型目录；其余 Provider 合法修改也在短暂防抖后自动保存，不要求手动点击保存。AppConfig v14 的 `modelConfigurationIds` 原样迁移为启用池。自动补齐的模型值不固化为用户覆盖，因此修改全局默认值会同步到仍使用默认能力的模型；手工修改过的三项配置按模型保存并随 route revision 冻结。模型目录请求失败时保留上次成功缓存和当前手工配置。对话 Composer 的 Provider/model route 必须来自当前 Session 或新对话草稿，不能复用 Provider 设置页当前正在编辑的卡片；已停用的历史 Session 模型可以显示为当前值，但必须先改选启用模型才能再次发送。
 
@@ -361,7 +361,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 5. **Auto 审批模型**：只处理 `review` 动作；超时、无效输出或模型异常一律降级到人工审批。
 6. **执行前复核**：紧邻执行再次检查路径和资源状态，降低 TOCTOU 风险。
 
-主模型（如 DeepSeek V4 Pro）提议动作后，可由**独立的审批模型**（如轻量/小模型）辅助判定。Auto 模式下，工作区内 `create_file` / `apply_patch` 若已通过资源计划、workspace 边界、diff 上限、precondition 和 policy signal 检查，可由确定性策略直接执行，不消耗审批模型 token；`delete_file`、VCS 元数据路径、敏感路径、danger signal、Confirm 模式和用户记住的 review 规则仍转人工审批。其他需 review 的副作用工具才进入审批模型。判定输入刻意精简：
+主模型（如 DeepSeek V4 Pro）提议动作后，可由**辅助模型**（如轻量/小模型，未配置时为当前主模型）辅助判定。Auto 模式下，工作区内 `create_file` / `apply_patch` 若已通过资源计划、workspace 边界、diff 上限、precondition 和 policy signal 检查，可由确定性策略直接执行，不消耗审批模型 token；`delete_file`、VCS 元数据路径、敏感路径、danger signal、Confirm 模式和用户记住的 review 规则仍转人工审批。其他需 review 的副作用工具才进入审批模型。判定输入刻意精简：
 
 ```
 审批模型输入 = {
@@ -382,7 +382,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 审批模型只判断动作本身的风险，不判断它是否符合完整用户意图。它不是安全边界：`reason` 来自主模型，可能错误或具有误导性；最终仍受执行不变量和确定性策略限制。
 自动审批模型请求默认超时为 `autoApprovalTimeoutMs = 60000`；超时、无效输出或模型异常一律作为危险信号降级到人工审批，不自动放行。
 
-自动审批路由是独立的全局配置，不属于 Provider 卡片或 Provider 保存事务。它引用一个已配置 Provider 来复用协议、endpoint 和凭据，并独立选择模型；保存任意 Provider 不得隐式覆盖审批路由。若所引用 Provider 不存在或凭据不可用，运行时只记录诊断并回退人工审批。
+自动审批使用辅助模型（`models.auxiliaryModel*`），未配置或解析失败时回退到该 Run 的主模型 route；不存在独立的审批路由配置。辅助模型的思考档位沿用其 Provider 的默认档位，不提供独立档位。保存任意 Provider 不得隐式改写模型角色；删除被辅助模型引用的 Provider 时，辅助模型跟随 fallback Provider 的默认模型，fallback 无默认模型则清空辅助角色。审批 route 解析最终失败时只记录诊断并回退人工审批。
 
 自动审批请求只有规则提示是稳定前缀，工具、参数、路径和 policy signals 都是动态尾部。Provider 的最小可缓存前缀、路由策略和显式 cache-control 各不相同，因此不能承诺审批调用命中缓存，也不得为追求命中率填充无意义 prompt；统计必须如实记录 Provider usage。
 
@@ -441,7 +441,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - UI 中一个项目对应一个 workspace，不重复展示两个概念。
 - 左侧项目侧栏提供新对话、对话搜索，以及项目下的二级对话列表；不引入 Task 概念。
 - “对话”直接对应 backend-owned Session；标题、完整消息历史、所属项目、创建/更新时间和模型/权限模式由后端持久化并推送给 renderer。Draft 仅属于 renderer 输入组件。
-- 对话标题在首次发送时先取首条用户消息的本地截断。第一个 Run 完成时，若标题仍为派生值（`titleSource = auto`），Main process 使用模型池中第一个 enabled 且 `capability = light` 的 route，以首条用户消息与首个 assistant 回复的有界摘要生成短标题并写回（`titleSource = model`）。生成调用不进入 canonical history，也不计入对话 usage 投影；无 light route、Provider 失败或输出无法清洗为合法标题时静默保留派生标题。每个 Session 在进程内最多尝试一次；应用重启后标题仍为 auto 时可在下一个 Run 结束时补试。用户重命名（`user`）、Fork 会话和升级前的存量会话永不参与自动起名。首条消息与回复摘要会发送给 light route 对应的 Provider，与该 Provider 的既有数据边界一致。
+- 对话标题在首次发送时先取首条用户消息的本地截断。第一个 Run 完成时，若标题仍为派生值（`titleSource = auto`），Main process 使用辅助模型（`models.auxiliaryModel*`，未配置或解析失败时为该 Run 的主模型 route），以首条用户消息与首个 assistant 回复的有界摘要生成短标题并写回（`titleSource = model`）。生成调用不进入 canonical history，也不计入对话 usage 投影；Provider 失败或输出无法清洗为合法标题时静默保留派生标题。每个 Session 在进程内最多尝试一次；应用重启后标题仍为 auto 时可在下一个 Run 结束时补试。用户重命名（`user`）、Fork 会话和升级前的存量会话永不参与自动起名。首条消息与回复摘要会发送给辅助/主模型对应的 Provider，与该 Provider 的既有数据边界一致。
 - Durable command 在数据库 commit 后同时返回提交结果并发布同内容事件；renderer 对回包和事件按 cursor/revision 幂等合并。后端自主提交依赖事件通知，不定时轮询；bootstrap、分页/搜索、按需加载和缺口重同步才使用 query。
 - 搜索通过本地后端查询 Session 标题，以及 `kind = 'user_input'/'assistant_turn'` records 中 `type = 'text'` 的 parts；不把 orchestrator/harness/runtime context 当成用户消息，也不检索 tool call 参数、tool result/JSON parts、工作区文件、reasoning、continuation 或 trace，更不访问 Provider。
 - 新建对话时只建立 renderer draft，不创建空 Session；首次发送以 `run:start new_session` 原子创建 Session、首轮 context/user records 并启动 Active Run。Session 创建前终端不可用。Session/Run ID 不作为常驻产品信息展示。

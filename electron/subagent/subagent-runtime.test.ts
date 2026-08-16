@@ -223,12 +223,12 @@ describe('read-only Subagent runtime', () => {
         maxAgentsPerSwarm: 10,
       },
     })
-    const originalModel = store.getPublicConfig().providers[0]!.model
+    const originalModel = store.getPublicConfig().models.providers[0]!.model
     let swapped = false
     const provider = new SubagentChainProvider(workspace, async () => {
       if (swapped) return
       swapped = true
-      const configured = store.getPublicConfig().providers[0]!
+      const configured = store.getPublicConfig().models.providers[0]!
       await store.update({
         version: 1,
         kind: 'provider',
@@ -264,7 +264,7 @@ describe('read-only Subagent runtime', () => {
         projectId: project.id,
         permissionMode: 'readonly',
         modelSelection: {
-          providerId: store.getPublicConfig().activeProviderId,
+          providerId: store.getPublicConfig().models.defaultModelProvider,
           model: originalModel,
           reasoning: 'off',
         },
@@ -525,8 +525,8 @@ describe('read-only Subagent runtime', () => {
         projectId: project.id,
         permissionMode: 'readonly',
         modelSelection: {
-          providerId: store.getPublicConfig().activeProviderId,
-          model: store.getPublicConfig().providers[0]!.model,
+          providerId: store.getPublicConfig().models.defaultModelProvider,
+          model: store.getPublicConfig().models.providers[0]!.model,
           reasoning: 'medium',
         },
         message: 'Delegate with a new reasoning level.',

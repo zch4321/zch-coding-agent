@@ -93,14 +93,14 @@ export const useModelPoolSettingsStore = defineStore('model-pool-settings', {
     /** Hydrates the model-pool draft from an explicit configuration snapshot. */
     applyConfig(config: PublicConfig, sections: ConfigSection[] = ['all']) {
       if (!sections.includes('all') && !sections.includes('modelPool')) return
-      this.entries = structuredClone(config.modelPool.entries)
-      this.savedSignature = modelPoolSignature(config.modelPool)
+      this.entries = structuredClone(config.models.modelPool.entries)
+      this.savedSignature = modelPoolSignature(config.models.modelPool)
       this.selectionLimitExceeded = false
       this.saveStatus = ''
     },
     /** Reconciles Provider-triggered pool repairs without discarding a dirty draft. */
     applyExternalConfig(config: PublicConfig) {
-      const externalSignature = modelPoolSignature(config.modelPool)
+      const externalSignature = modelPoolSignature(config.models.modelPool)
       if (externalSignature === this.savedSignature) return
       const wasDirty = this.dirty
       this.savedSignature = externalSignature
@@ -108,7 +108,7 @@ export const useModelPoolSettingsStore = defineStore('model-pool-settings', {
         this.saveStatus = 'external-change'
         return
       }
-      this.entries = structuredClone(config.modelPool.entries)
+      this.entries = structuredClone(config.models.modelPool.entries)
       this.selectionLimitExceeded = false
       this.saveStatus = ''
     },

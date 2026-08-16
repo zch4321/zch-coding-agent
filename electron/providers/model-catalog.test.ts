@@ -186,7 +186,7 @@ describe('DeepSeek model catalog', () => {
 
   it('uses override, provider, builtin and conservative capabilities in order', () => {
     const internal: AppConfig = structuredClone(DEFAULT_APP_CONFIG)
-    const provider = internal.providers[0]
+    const provider = internal.models.providers[0]
     provider.model = 'custom-model'
     provider.modelCatalog = [
       { id: 'deepseek-v4-pro', ownedBy: 'deepseek' },
@@ -247,7 +247,7 @@ describe('DeepSeek model catalog', () => {
 
   it('passes annotations through without polluting the capability source', () => {
     const internal: AppConfig = structuredClone(DEFAULT_APP_CONFIG)
-    const provider = internal.providers[0]
+    const provider = internal.models.providers[0]
     provider.model = 'annotated-custom'
     provider.modelCatalog = [
       { id: 'deepseek-v4-pro', ownedBy: 'deepseek' },

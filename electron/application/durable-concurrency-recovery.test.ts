@@ -109,7 +109,7 @@ async function setupTarget(): Promise<{
   await writeFile(path.join(workspace, 'README.md'), 'recovery fixture')
   const provider = new RecoveryProvider()
   const store = await createConfig(root)
-  const configuredProvider = store.getPublicConfig().providers[0]!
+  const configuredProvider = store.getPublicConfig().models.providers[0]!
   const selection: ModelSelection = {
     providerId: configuredProvider.id,
     model: configuredProvider.model,

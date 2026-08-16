@@ -1,5 +1,8 @@
 import type { ProviderPublicConfig, PublicConfig } from '../../shared/config'
-import { getProviderConfig } from '../../shared/config'
+import {
+  getAuxiliaryModelSelection,
+  getProviderConfig,
+} from '../../shared/config'
 import type {
   ModelRouteSnapshot,
   ModelSelection,
@@ -141,8 +144,9 @@ export async function resolveModelRoutePairFromConfig(
 }
 
 /**
- * Freezes the main and compression routes for a run while treating the
- * automatic-approval route as an optional enhancement.
+ * Freezes the main and compression routes for a run. The automatic-approval
+ * route uses the configured auxiliary model and falls back to the run's own
+ * main model when the auxiliary role is unset or unavailable.
  */
 export async function resolveRunRoutes(
   configStore: ConfigStore,
@@ -156,42 +160,34 @@ export async function resolveRunRoutes(
   approval?: ResolvedModelRoute
 }> {
   const config = configStore.getPublicConfig()
-  const approvalProvider = getProviderConfig(
-    config,
-    config.approval.approverProviderId,
-  )
   const { main, compression } = await resolveModelRoutePairFromConfig(
     configStore,
     config,
     selection,
   )
-  if (!approvalProvider) {
-    options.onDiagnostic?.(
-      `Approval Provider is not configured: ${config.approval.approverProviderId}`,
-    )
-    return { main, compression }
-  }
-  const approvalSelection: ModelSelection = {
-    providerId: approvalProvider.id,
-    model: config.approval.approverModel,
-    reasoning: config.approval.reasoning,
+  const auxiliary = getAuxiliaryModelSelection(config)
+  if (!auxiliary) {
+    return {
+      main,
+      compression,
+      approval: await resolveRoute(configStore, config, selection, 'approval'),
+    }
   }
   try {
     return {
       main,
       compression,
-      approval: await resolveRoute(
-        configStore,
-        config,
-        approvalSelection,
-        'approval',
-      ),
+      approval: await resolveRoute(configStore, config, auxiliary, 'approval'),
     }
   } catch (error) {
     options.onDiagnostic?.(
-      'Automatic approval route is unavailable; human approval remains enabled',
+      'Auxiliary model route is unavailable; approval uses the current model',
       error,
     )
-    return { main, compression }
+    return {
+      main,
+      compression,
+      approval: await resolveRoute(configStore, config, selection, 'approval'),
+    }
   }
 }

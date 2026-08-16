@@ -234,7 +234,7 @@ describe('SessionManager Provider completion validation', () => {
     await writeFile(path.join(workspace, 'README.md'), 'legacy fixture\n')
     const configStore = await createConfig(directory)
     const config = configStore.getPublicConfig()
-    const configuredProvider = config.providers[0]!
+    const configuredProvider = config.models.providers[0]!
     await configStore.update({
       version: 1,
       kind: 'provider-settings',

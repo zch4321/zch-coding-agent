@@ -24,6 +24,9 @@ export function cleanEnvironment(): Record<string, string> {
     ),
   )
   delete env.VITE_DEV_SERVER_URL
+  // Conversation titling fires real provider calls after the first run, which
+  // would consume scripted fake-provider responses; e2e never tests titling.
+  env.ZCH_DISABLE_CONVERSATION_TITLING = '1'
   return env
 }
 

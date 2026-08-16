@@ -12,9 +12,11 @@ import {
 
 function configuredAppConfig(): AppConfig {
   const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
-  config.providers[0]!.model = 'deepseek-v4-pro'
-  config.providers[0]!.enabledModelIds = ['deepseek-v4-pro']
-  config.approval.approverModel = 'deepseek-v4-pro'
+  config.models.providers[0]!.model = 'deepseek-v4-pro'
+  config.models.providers[0]!.enabledModelIds = ['deepseek-v4-pro']
+  config.models.defaultModel = 'deepseek-v4-pro'
+  config.models.auxiliaryModelProvider = 'deepseek'
+  config.models.auxiliaryModel = 'deepseek-v4-pro'
   return config
 }
 
@@ -67,7 +69,7 @@ describe('resolveRunRoutes', () => {
 
   it('rejects a reasoning effort outside the model annotation before reading credentials', async () => {
     const config = configuredAppConfig()
-    config.providers[0]!.modelOverrides['deepseek-v4-pro'] = {
+    config.models.providers[0]!.modelOverrides['deepseek-v4-pro'] = {
       reasoningEfforts: ['off', 'high'],
     }
     const getProviderApiKeyForRevision = vi.fn(async () => 'secret')
@@ -90,7 +92,7 @@ describe('resolveRunRoutes', () => {
 
   it('resolves annotated models when the reasoning effort is supported', async () => {
     const config = configuredAppConfig()
-    config.providers[0]!.modelOverrides['deepseek-v4-pro'] = {
+    config.models.providers[0]!.modelOverrides['deepseek-v4-pro'] = {
       reasoningEfforts: ['low', 'high'],
       capability: 'strong',
     }
@@ -115,7 +117,8 @@ describe('resolveRunRoutes', () => {
 
   it('rejects an unsafe endpoint before reading credentials', async () => {
     const config = configuredAppConfig()
-    config.providers[0]!.baseURL = 'https://user:secret@provider.example/v1'
+    config.models.providers[0]!.baseURL =
+      'https://user:secret@provider.example/v1'
     const getProviderApiKeyForRevision = vi.fn(async () => 'secret')
     const store = {
       getPublicConfig: () => toPublicConfig(config, true),
@@ -132,11 +135,10 @@ describe('resolveRunRoutes', () => {
     expect(getProviderApiKeyForRevision).not.toHaveBeenCalled()
   })
 
-  it('freezes the exact endpoint and preserves explicit approval reasoning', async () => {
+  it('freezes the exact endpoint and uses the provider default reasoning for approval', async () => {
     const config = configuredAppConfig()
-    config.providers[0]!.baseURL = 'https://provider.example/v1/'
-    config.providers[0]!.reasoning = 'high'
-    config.approval.reasoning = 'off'
+    config.models.providers[0]!.baseURL = 'https://provider.example/v1/'
+    config.models.providers[0]!.reasoning = 'high'
     const store = {
       getPublicConfig: () => toPublicConfig(config, true),
       getProviderApiKeyForRevision: vi.fn(async () => 'secret'),
@@ -149,19 +151,44 @@ describe('resolveRunRoutes', () => {
     })
 
     expect(routes.approval?.snapshot).toMatchObject({
-      reasoning: 'off',
+      reasoning: 'high',
       endpoint: 'https://provider.example/v1/chat/completions',
     })
   })
 
-  it('keeps main and compression routes when approval credentials are absent', async () => {
+  it('resolves the approval route from the auxiliary model when configured', async () => {
     const config = configuredAppConfig()
-    config.providers.push({
-      ...structuredClone(config.providers[0]!),
+    config.models.providers[0]!.enabledModelIds = [
+      'deepseek-v4-pro',
+      'aux-model',
+    ]
+    config.models.auxiliaryModel = 'aux-model'
+    const store = {
+      getPublicConfig: () => toPublicConfig(config, true),
+      getProviderApiKeyForRevision: vi.fn(async () => 'secret'),
+    } as unknown as ConfigStore
+
+    const routes = await resolveRunRoutes(store, {
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+      reasoning: 'off',
+    })
+
+    expect(routes.main.snapshot.model).toBe('deepseek-v4-pro')
+    expect(routes.approval?.snapshot).toMatchObject({
+      purpose: 'approval',
+      model: 'aux-model',
+    })
+  })
+
+  it('falls back to the main model for approval when auxiliary credentials are absent', async () => {
+    const config = configuredAppConfig()
+    config.models.providers.push({
+      ...structuredClone(config.models.providers[0]!),
       id: 'approval-only',
       label: 'Approval only',
     })
-    config.approval.approverProviderId = 'approval-only'
+    config.models.auxiliaryModelProvider = 'approval-only'
     const onDiagnostic = vi.fn()
     const store = {
       getPublicConfig: () =>
@@ -187,13 +214,17 @@ describe('resolveRunRoutes', () => {
 
     expect(routes.main.snapshot.purpose).toBe('main')
     expect(routes.compression.snapshot.purpose).toBe('compression')
-    expect(routes.approval).toBeUndefined()
+    expect(routes.approval?.snapshot).toMatchObject({
+      purpose: 'approval',
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+    })
     expect(onDiagnostic).toHaveBeenCalledOnce()
   })
 
-  it('keeps main and compression routes when approval provider is missing', async () => {
+  it('uses the main model for approval when the auxiliary provider is missing', async () => {
     const config = configuredAppConfig()
-    config.approval.approverProviderId = 'missing-provider'
+    config.models.auxiliaryModelProvider = 'missing-provider'
     const onDiagnostic = vi.fn()
     const store = {
       getPublicConfig: () => toPublicConfig(config, true),
@@ -210,9 +241,11 @@ describe('resolveRunRoutes', () => {
       { onDiagnostic },
     )
 
-    expect(routes.approval).toBeUndefined()
-    expect(onDiagnostic).toHaveBeenCalledWith(
-      expect.stringContaining('missing-provider'),
-    )
+    expect(routes.approval?.snapshot).toMatchObject({
+      purpose: 'approval',
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+    })
+    expect(onDiagnostic).not.toHaveBeenCalled()
   })
 })

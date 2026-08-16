@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, watch, type WatchStopHandle } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentChangesStore } from '../../stores/agent-changes'
-import { useApprovalSettingsStore } from '../../stores/approval-settings'
+import { useModelRolesStore } from '../../stores/model-roles'
 import { useAgentReplicaStore } from '../../stores/agent-replica'
 import { useAgentSettingsStore } from '../../stores/agent-settings'
 import { useAgentShellStore } from '../../stores/agent-shell'
@@ -24,7 +24,7 @@ const { t } = useI18n()
 const notifications = useNotificationStore()
 const shell = useAgentShellStore()
 const settings = useAgentSettingsStore()
-const approval = useApprovalSettingsStore()
+const modelRoles = useModelRolesStore()
 const replica = useAgentReplicaStore()
 const changes = useAgentChangesStore()
 const mcp = useMcpStore()
@@ -114,9 +114,9 @@ forwardStoreError(
 )
 forwardStoreError(
   'APPROVAL_SETTINGS_OPERATION_FAILED',
-  () => approval.error,
+  () => modelRoles.error,
   () => {
-    approval.error = ''
+    modelRoles.error = ''
   },
 )
 forwardStoreError(

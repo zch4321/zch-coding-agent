@@ -67,9 +67,9 @@ export function providerModelOverrides(
 /**
  * Computes provider-draft conflicts that must pause autosave. `main` fires
  * when the main model annotation excludes the draft default effort;
- * `approval` fires when this provider is the saved approval provider and the
- * approval model is disabled or its annotation excludes the explicitly saved
- * approval effort. Neither is auto-adjusted; the user resolves them manually.
+ * `auxiliary` fires when this provider is the saved auxiliary provider and the
+ * auxiliary model is disabled or incompatible with the draft default effort.
+ * Neither is auto-adjusted; the user resolves them manually.
  */
 export function providerDraftConflicts(input: {
   providerId: string
@@ -77,15 +77,14 @@ export function providerDraftConflicts(input: {
   mainModelId: string
   enabledModelIds: readonly string[]
   profiles: ReadonlyArray<Pick<UiModelProfile, 'id' | 'reasoningEfforts'>>
-  approval: {
+  auxiliary: {
     providerId: string
     model: string
-    reasoning: ReasoningEffort
   }
 }): {
   main: boolean
-  approval: boolean
-  approvalReason: 'model-disabled' | 'reasoning-unsupported' | null
+  auxiliary: boolean
+  auxiliaryReason: 'model-disabled' | 'reasoning-unsupported' | null
 } {
   const provider = {
     enabledModelIds: input.enabledModelIds,
@@ -104,31 +103,35 @@ export function providerDraftConflicts(input: {
     !mainCompatibility.ok &&
     mainCompatibility.reason === 'reasoning-unsupported'
 
-  if (input.approval.providerId !== input.providerId || !input.approval.model) {
-    return { main, approval: false, approvalReason: null }
+  if (
+    input.auxiliary.providerId !== input.providerId ||
+    !input.auxiliary.model
+  ) {
+    return { main, auxiliary: false, auxiliaryReason: null }
   }
-  const approvalCompatibility = evaluateModelRouteCompatibility(provider, {
-    model: input.approval.model,
-    reasoning: input.approval.reasoning,
+  // The auxiliary route always uses the provider's default reasoning effort.
+  const auxiliaryCompatibility = evaluateModelRouteCompatibility(provider, {
+    model: input.auxiliary.model,
+    reasoning: input.reasoning,
   })
   if (
-    !approvalCompatibility.ok &&
-    (approvalCompatibility.reason === 'model-empty' ||
-      approvalCompatibility.reason === 'model-disabled')
+    !auxiliaryCompatibility.ok &&
+    (auxiliaryCompatibility.reason === 'model-empty' ||
+      auxiliaryCompatibility.reason === 'model-disabled')
   ) {
     return {
       main,
-      approval: true,
-      approvalReason: 'model-disabled',
+      auxiliary: true,
+      auxiliaryReason: 'model-disabled',
     }
   }
-  const approval =
-    !approvalCompatibility.ok &&
-    approvalCompatibility.reason === 'reasoning-unsupported'
+  const auxiliary =
+    !auxiliaryCompatibility.ok &&
+    auxiliaryCompatibility.reason === 'reasoning-unsupported'
   return {
     main,
-    approval,
-    approvalReason: approval ? 'reasoning-unsupported' : null,
+    auxiliary,
+    auxiliaryReason: auxiliary ? 'reasoning-unsupported' : null,
   }
 }
 

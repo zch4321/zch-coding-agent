@@ -428,7 +428,7 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
 }> {
   const locale = input.config.assistant.language
   const prompt = resourceContent(input.promptRegistry, 'runtimeContext', locale)
-  const provider = input.config.providers.find(
+  const provider = input.config.models.providers.find(
     (candidate) => candidate.id === input.providerId,
   )
   const [git, projectTree, modules, commandShell] = await Promise.all([

@@ -21,6 +21,7 @@ import type { SessionRecord } from '../../shared/session'
 import { useAgentReplicaStore } from './agent-replica'
 import { useAgentRuntimeStore } from './agent-runtime'
 import { useAgentSettingsStore } from './agent-settings'
+import { useModelRolesStore } from './model-roles'
 import { useNotificationStore } from './notifications'
 
 const projectId = 'project:runtime-test' as ProjectId
@@ -206,7 +207,7 @@ describe('agent runtime store', () => {
       reasoning: 'off',
     }
     const settings = useAgentSettingsStore()
-    settings.activeProviderId = 'provider-a'
+    useModelRolesStore().defaultModelProvider = 'provider-a'
     settings.selectedProviderId = 'provider-a'
     settings.providers = [
       provider('provider-a', 'provider-a-default', ['provider-a-catalog']),
@@ -259,7 +260,7 @@ describe('agent runtime store', () => {
   it('blocks sending when the kept reasoning effort is unsupported by the model', () => {
     const replica = seedReplica()
     const settings = useAgentSettingsStore()
-    settings.activeProviderId = 'deepseek'
+    useModelRolesStore().defaultModelProvider = 'deepseek'
     settings.providers = [
       {
         ...provider('deepseek', 'deepseek-chat', [
@@ -306,7 +307,7 @@ describe('agent runtime store', () => {
     replica.projects = [project]
     replica.selectedProjectId = projectId
     const settings = useAgentSettingsStore()
-    settings.activeProviderId = 'provider-a'
+    useModelRolesStore().defaultModelProvider = 'provider-a'
     settings.providers = [
       provider('provider-a', 'provider-a-default', ['provider-a-catalog']),
     ]
@@ -327,7 +328,7 @@ describe('agent runtime store', () => {
     replica.projects = [project]
     replica.selectedProjectId = projectId
     const settings = useAgentSettingsStore()
-    settings.activeProviderId = 'provider-a'
+    useModelRolesStore().defaultModelProvider = 'provider-a'
     settings.providers = [
       provider('provider-a', 'provider-a-default', ['provider-a-default']),
     ]

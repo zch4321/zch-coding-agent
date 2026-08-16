@@ -346,7 +346,7 @@ describe('Headless host', () => {
     await expect(loadHeadlessConfig(configPath)).resolves.toEqual(source)
   })
 
-  it('keeps external v4 singular Provider config while building an empty v20 model pool', async () => {
+  it('keeps external v4 singular Provider config while building an empty v21 model pool', async () => {
     const { artifacts } = await fixture()
     const prepared = await prepareHeadlessConfig({
       config: config(),
@@ -362,9 +362,11 @@ describe('Headless host', () => {
       provider: { id: 'fake' },
     })
     expect(prepared.configStore.getInternalConfig()).toMatchObject({
-      schemaVersion: 20,
-      activeProviderId: 'fake',
-      modelPool: { entries: [] },
+      schemaVersion: 21,
+      models: {
+        defaultModelProvider: 'fake',
+        modelPool: { entries: [] },
+      },
     })
   })
 

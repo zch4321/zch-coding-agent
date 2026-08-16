@@ -1,83 +1,80 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { onBeforeUnmount, watch } from 'vue'
 import { NButton, NInput, NSelect, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import {
-  REASONING_EFFORTS,
-  type PermissionMode,
-  type ReasoningEffort,
-} from '../../../shared/config'
-import { evaluateModelRouteCompatibility } from '../../../shared/model-route'
-import { resolveSupportedReasoningEfforts } from '../../../shared/model-settings'
+import type { PermissionMode } from '../../../shared/config'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 
 const emit = defineEmits<{ mode: [value: PermissionMode] }>()
 const agent = useAgentStore()
 const { t } = useI18n()
-const modeOptions = computed(() => [
+const modeOptions = [
   { label: t('chat.readonly'), value: 'readonly' },
   { label: t('chat.auto'), value: 'auto' },
   { label: t('chat.confirm'), value: 'confirm' },
   { label: t('chat.yolo'), value: 'yolo' },
-])
-const sensitiveModeOptions = computed(() => [
+]
+const sensitiveModeOptions = [
   { label: t('permissions.off'), value: 'off' },
   { label: t('permissions.warn'), value: 'warn' },
   { label: t('permissions.confirm'), value: 'confirm' },
-])
-const REASONING_LABEL_KEYS: Record<ReasoningEffort, string> = {
-  off: 'settings.reasoningOff',
-  low: 'settings.reasoningLow',
-  medium: 'settings.reasoningMedium',
-  high: 'settings.reasoningHigh',
-  xhigh: 'settings.reasoningXhigh',
-  max: 'settings.reasoningMax',
+]
+
+let autosaveTimer: ReturnType<typeof setTimeout> | undefined
+
+function savePermissionsNow() {
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = undefined
+  void agent.savePermissions()
 }
-const approvalProvider = computed(() =>
-  agent.providers.find(
-    (provider) => provider.id === agent.approvalForm.providerId,
-  ),
+
+watch(
+  () => JSON.stringify(agent.permissionForm),
+  () => {
+    if (autosaveTimer) clearTimeout(autosaveTimer)
+    if (!agent.permissionsDirty) return
+
+    agent.permissionsSaveStatus = ''
+    autosaveTimer = setTimeout(() => {
+      autosaveTimer = undefined
+      void agent.savePermissions()
+    }, 600)
+  },
 )
-const approvalCompatibility = computed(() =>
-  evaluateModelRouteCompatibility(approvalProvider.value, {
-    model: agent.approvalForm.model,
-    reasoning: agent.approvalForm.reasoning,
-  }),
-)
-const approvalReasoningOptions = computed(() => {
-  const supported = resolveSupportedReasoningEfforts(
-    approvalProvider.value?.modelOverrides[agent.approvalForm.model],
-  )
-  return REASONING_EFFORTS.map((effort) => ({
-    label: t(REASONING_LABEL_KEYS[effort]),
-    value: effort,
-    disabled: !supported.includes(effort),
-  }))
-})
-/**
- * True when the selected approval model is empty or no longer enabled for the
- * approval provider (distinct from a reasoning-effort conflict).
- */
-const approvalModelMissing = computed(() => {
-  const compatibility = approvalCompatibility.value
-  return !compatibility.ok && compatibility.reason !== 'reasoning-unsupported'
-})
-/**
- * True when the selected approval model annotation excludes the explicitly
- * configured approval reasoning effort.
- */
-const approvalModelConflict = computed(() => {
-  const compatibility = approvalCompatibility.value
-  return !compatibility.ok && compatibility.reason === 'reasoning-unsupported'
+
+onBeforeUnmount(() => {
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  if (agent.permissionsDirty) void agent.savePermissions()
 })
 </script>
 
 <template>
   <section class="settings-section">
-    <div class="settings-heading">
-      <h2>{{ t('permissions.title') }}</h2>
-      <p>{{ t('permissions.hint') }}</p>
+    <div class="settings-heading settings-heading-with-actions">
+      <div>
+        <h2>{{ t('permissions.title') }}</h2>
+        <p>{{ t('permissions.hint') }}</p>
+      </div>
+      <div class="settings-heading-actions">
+        <NButton
+          type="primary"
+          :loading="agent.permissionsSaving"
+          :disabled="!agent.permissionsDirty"
+          @click="savePermissionsNow"
+        >
+          {{ t('permissions.save') }}
+        </NButton>
+        <small class="settings-save-status" aria-live="polite">
+          {{
+            agent.permissionsDirty
+              ? t('settings.unsaved')
+              : agent.permissionsSaveStatus
+                ? t('settings.saved')
+                : ''
+          }}
+        </small>
+      </div>
     </div>
     <label class="settings-field">
       <span>{{ t('permissions.defaultMode') }}</span>
@@ -99,78 +96,8 @@ const approvalModelConflict = computed(() => {
         </template>
         {{ agent.modeLockTooltip }}
       </NTooltip>
+      <small>{{ t('permissions.autoApprovalNote') }}</small>
     </label>
-    <div class="settings-subsection">
-      <div class="settings-subsection-heading">
-        <h3>{{ t('settings.approvalTitle') }}</h3>
-        <p>{{ t('settings.approvalHint') }}</p>
-      </div>
-      <label class="settings-field">
-        <span>{{ t('settings.approverProvider') }}</span>
-        <NSelect
-          :value="agent.approvalForm.providerId"
-          :options="agent.providerOptions"
-          filterable
-          @update:value="agent.setApprovalProvider"
-        />
-        <small>
-          {{
-            approvalProvider?.credentialConfigured
-              ? t('settings.approvalCredentialReady')
-              : t('settings.approvalCredentialMissing')
-          }}
-        </small>
-      </label>
-      <label class="settings-field">
-        <span>{{ t('settings.approverModel') }}</span>
-        <NSelect
-          v-model:value="agent.approvalForm.model"
-          :options="agent.approvalModelOptions"
-          :disabled="agent.approvalModelOptions.length === 0"
-          :status="approvalModelMissing ? 'error' : undefined"
-          filterable
-        />
-        <small v-if="approvalModelMissing" class="settings-field-error">
-          {{ t('settings.approvalModelMissingHint') }}
-        </small>
-        <small v-else>{{ t('settings.approvalModelHint') }}</small>
-      </label>
-      <label class="settings-field">
-        <span>{{ t('settings.approvalReasoning') }}</span>
-        <NSelect
-          v-model:value="agent.approvalForm.reasoning"
-          :options="approvalReasoningOptions"
-          :status="approvalModelConflict ? 'error' : undefined"
-        />
-        <small v-if="approvalModelConflict" class="settings-field-error">
-          {{ t('settings.approvalReasoningConflictHint') }}
-        </small>
-        <small v-else>{{ t('settings.approvalReasoningHint') }}</small>
-      </label>
-      <div class="settings-actions">
-        <NButton
-          type="primary"
-          :loading="agent.approvalSaving"
-          :disabled="
-            !agent.approvalDirty ||
-            approvalModelMissing ||
-            approvalModelConflict
-          "
-          @click="agent.saveApproval"
-        >
-          {{ t('settings.saveApproval') }}
-        </NButton>
-        <small class="settings-save-status" aria-live="polite">
-          {{
-            agent.approvalDirty
-              ? t('settings.unsaved')
-              : agent.approvalSaveStatus
-                ? t('settings.saved')
-                : ''
-          }}
-        </small>
-      </div>
-    </div>
     <label class="settings-field">
       <span>{{ t('permissions.sensitiveData') }}</span>
       <NSelect
@@ -196,9 +123,6 @@ const approvalModelConflict = computed(() => {
         :placeholder="t('permissions.onePattern')"
       />
     </label>
-    <NButton type="primary" @click="agent.savePermissions">
-      {{ t('permissions.save') }}
-    </NButton>
     <div class="remembered-rules">
       <h3>{{ t('permissions.remembered') }}</h3>
       <p v-if="!agent.rememberedRules.length">{{ t('permissions.none') }}</p>

@@ -43,7 +43,7 @@ function enabledProvider(
   config: PublicConfig,
   providerId: string,
 ): ProviderPublicConfig {
-  const provider = config.providers.find(
+  const provider = config.models.providers.find(
     (candidate) => candidate.id === providerId,
   )
   if (!provider) {
@@ -53,7 +53,7 @@ function enabledProvider(
 }
 
 function enabledPoolCandidates(config: PublicConfig): ModelPoolCandidate[] {
-  return config.modelPool.entries
+  return config.models.modelPool.entries
     .filter((entry) => entry.enabled)
     .map((entry) => {
       const provider = enabledProvider(config, entry.providerId)

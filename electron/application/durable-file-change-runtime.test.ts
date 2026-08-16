@@ -434,7 +434,7 @@ async function startFileRun(
   sessionId: SessionId,
   permissionMode: 'auto' | 'yolo' = 'auto',
 ) {
-  const provider = setup.store.getPublicConfig().providers[0]!
+  const provider = setup.store.getPublicConfig().models.providers[0]!
   const started = await setup.target.runs.start({
     version: 1,
     kind: 'new_session',

@@ -54,7 +54,16 @@ function config(
   entries: ModelPoolEntry[],
   providers: ProviderPublicConfig[] = [provider('provider-a')],
 ): PublicConfig {
-  return { modelPool: { entries }, providers } as unknown as PublicConfig
+  return {
+    models: {
+      defaultModelProvider: providers[0]?.id ?? '',
+      defaultModel: providers[0]?.model ?? '',
+      auxiliaryModelProvider: '',
+      auxiliaryModel: '',
+      providers,
+      modelPool: { entries },
+    },
+  } as unknown as PublicConfig
 }
 
 describe('model pool settings', () => {
@@ -65,7 +74,7 @@ describe('model pool settings', () => {
     pool.applyConfig(source)
     pool.entries[0]!.id = 'edited'
 
-    expect(source.modelPool.entries[0]!.id).toBe('worker-1')
+    expect(source.models.modelPool.entries[0]!.id).toBe('worker-1')
     expect(pool.dirty).toBe(true)
   })
 

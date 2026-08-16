@@ -40,15 +40,16 @@ type ChildOutcome = {
 
 function configuredPublicConfig() {
   const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
-  config.providers[0]!.model = 'deepseek-v4-pro'
-  config.providers[0]!.enabledModelIds = ['deepseek-v4-pro']
-  config.approval.approverModel = 'deepseek-v4-pro'
+  config.models.providers[0]!.model = 'deepseek-v4-pro'
+  config.models.providers[0]!.enabledModelIds = ['deepseek-v4-pro']
+  config.models.auxiliaryModelProvider = 'deepseek'
+  config.models.auxiliaryModel = 'deepseek-v4-pro'
   return toPublicConfig(config, true)
 }
 
 function routes(): FrozenSubagentRoutes {
   const config = configuredPublicConfig()
-  const provider = config.providers[0]!
+  const provider = config.models.providers[0]!
   const route = (purpose: 'main' | 'compression') => ({
     snapshot: {
       schemaVersion: 2 as const,

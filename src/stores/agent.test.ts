@@ -3,7 +3,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useAgentStore } from './agent'
-import { useApprovalSettingsStore } from './approval-settings'
+import { useModelRolesStore } from './model-roles'
 import { useAgentRuntimeStore } from './agent-runtime'
 import { useAgentSettingsStore } from './agent-settings'
 
@@ -14,8 +14,9 @@ const INTERNAL_MEMBERS = new Set([
   'error',
   'limitsSavedSignature',
   'subagentsSavedSignature',
+  'permissionSavedSignature',
   'applyConfig',
-  'selectProvider',
+  'persistRoles',
   // Settings actions only invoked internally or via direct store injection.
   'loadSelectedProviderModelsOnEntry',
   'saveWebSearchSettings',
@@ -75,8 +76,8 @@ describe('agent facade contract', () => {
     expect(missingFacadeRoutes(useAgentRuntimeStore())).toEqual([])
   })
 
-  it('routes every facade-consumed approval member through the facade', () => {
-    expect(missingFacadeRoutes(useApprovalSettingsStore())).toEqual([])
+  it('routes every facade-consumed model-roles member through the facade', () => {
+    expect(missingFacadeRoutes(useModelRolesStore())).toEqual([])
   })
 
   it('routes every facade-consumed settings member through the facade', () => {

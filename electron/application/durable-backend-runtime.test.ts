@@ -206,7 +206,7 @@ async function createConfig(root: string): Promise<ConfigStore> {
     { environmentApiKey: 'test-key' },
   )
   await store.initialize()
-  const provider = store.getPublicConfig().providers[0]!
+  const provider = store.getPublicConfig().models.providers[0]!
   await store.update({
     version: 1,
     kind: 'provider-settings',
@@ -360,9 +360,9 @@ describe('durable backend runtime', () => {
       projectId: project.id,
       permissionMode: 'readonly' as const,
       modelSelection: {
-        providerId: store.getPublicConfig().activeProviderId,
-        model: store.getPublicConfig().providers[0]!.model,
-        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+        providerId: store.getPublicConfig().models.defaultModelProvider,
+        model: store.getPublicConfig().models.providers[0]!.model,
+        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
       },
       message: 'first durable question',
       clientRequestId: 'request:lazy-first',
@@ -471,9 +471,9 @@ describe('durable backend runtime', () => {
       title: 'Retry branch',
       permissionMode: 'readonly',
       modelSelection: {
-        providerId: store.getPublicConfig().activeProviderId,
-        model: store.getPublicConfig().providers[0]!.model,
-        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+        providerId: store.getPublicConfig().models.defaultModelProvider,
+        model: store.getPublicConfig().models.providers[0]!.model,
+        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
       },
       goal: {
         id: 'goal:retry',
@@ -594,9 +594,9 @@ describe('durable backend runtime', () => {
       .change.projects[0]!
     const sessionId = 'session:failed-draft' as SessionId
     const modelSelection = {
-      providerId: store.getPublicConfig().activeProviderId,
-      model: store.getPublicConfig().providers[0]!.model,
-      reasoning: store.getPublicConfig().providers[0]!.reasoning,
+      providerId: store.getPublicConfig().models.defaultModelProvider,
+      model: store.getPublicConfig().models.providers[0]!.model,
+      reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
     }
 
     await expect(
@@ -665,9 +665,9 @@ describe('durable backend runtime', () => {
       projectId: project.id,
       permissionMode: 'readonly',
       modelSelection: {
-        providerId: store.getPublicConfig().activeProviderId,
-        model: store.getPublicConfig().providers[0]!.model,
-        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+        providerId: store.getPublicConfig().models.defaultModelProvider,
+        model: store.getPublicConfig().models.providers[0]!.model,
+        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
       },
       message: 'show runtime state',
       clientRequestId: 'request:runtime',
@@ -744,9 +744,9 @@ describe('durable backend runtime', () => {
       projectId: project.id,
       permissionMode: 'readonly',
       modelSelection: {
-        providerId: store.getPublicConfig().activeProviderId,
-        model: store.getPublicConfig().providers[0]!.model,
-        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+        providerId: store.getPublicConfig().models.defaultModelProvider,
+        model: store.getPublicConfig().models.providers[0]!.model,
+        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
       },
       message: 'history that must be replaced',
       clientRequestId: 'request:before-compact',
@@ -868,9 +868,9 @@ describe('durable backend runtime', () => {
       projectId: project.id,
       permissionMode: 'readonly',
       modelSelection: {
-        providerId: store.getPublicConfig().activeProviderId,
-        model: store.getPublicConfig().providers[0]!.model,
-        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+        providerId: store.getPublicConfig().models.defaultModelProvider,
+        model: store.getPublicConfig().models.providers[0]!.model,
+        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
       },
       message: 'history survives compact failure',
       clientRequestId: 'request:failed-compact-history',
@@ -976,9 +976,9 @@ describe('durable backend runtime', () => {
       projectId: project.id,
       permissionMode: 'readonly',
       modelSelection: {
-        providerId: store.getPublicConfig().activeProviderId,
-        model: store.getPublicConfig().providers[0]!.model,
-        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+        providerId: store.getPublicConfig().models.defaultModelProvider,
+        model: store.getPublicConfig().models.providers[0]!.model,
+        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
       },
       message: 'history before pure compact',
       clientRequestId: 'request:pure-compact-seed',
@@ -1054,9 +1054,9 @@ describe('durable backend runtime', () => {
       projectId: project.id,
       permissionMode: 'readonly',
       modelSelection: {
-        providerId: store.getPublicConfig().activeProviderId,
-        model: store.getPublicConfig().providers[0]!.model,
-        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+        providerId: store.getPublicConfig().models.defaultModelProvider,
+        model: store.getPublicConfig().models.providers[0]!.model,
+        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
       },
       message: 'history survives durable compact abort',
       clientRequestId: 'request:abort-compact-seed',
@@ -1121,9 +1121,9 @@ describe('durable backend runtime', () => {
       projectId: project.id,
       permissionMode: 'readonly',
       modelSelection: {
-        providerId: store.getPublicConfig().activeProviderId,
-        model: store.getPublicConfig().providers[0]!.model,
-        reasoning: store.getPublicConfig().providers[0]!.reasoning,
+        providerId: store.getPublicConfig().models.defaultModelProvider,
+        model: store.getPublicConfig().models.providers[0]!.model,
+        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
       },
       message: 'seed before rejected commands',
       clientRequestId: 'request:rejected-seed',

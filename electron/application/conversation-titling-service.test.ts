@@ -9,7 +9,6 @@ import { RuntimeEventBus } from '../runtime/runtime-event-bus'
 import {
   ConversationTitlingService,
   sanitizeModelTitle,
-  selectLightRouteSelection,
 } from './conversation-titling-service'
 import type { SessionService } from './session-service'
 
@@ -233,91 +232,5 @@ describe('ConversationTitlingService', () => {
     garbage.bus.publishAgent(completedEvent(1))
     await garbage.service.settle()
     expect(garbage.applied).toEqual([])
-  })
-})
-
-describe('selectLightRouteSelection', () => {
-  function poolConfig(
-    entries: Array<{
-      id: string
-      enabled: boolean
-      providerId: string
-      model: string
-      reasoning: string
-    }>,
-    overrides: Record<string, Record<string, { capability: string }>>,
-  ) {
-    return {
-      providers: Object.entries(overrides).map(([id, modelOverrides]) => ({
-        id,
-        modelOverrides,
-      })),
-      modelPool: { entries },
-    } as never
-  }
-
-  it('picks the first enabled entry annotated exactly light', () => {
-    const config = poolConfig(
-      [
-        {
-          id: 'standard',
-          enabled: true,
-          providerId: 'a',
-          model: 'm-standard',
-          reasoning: 'off',
-        },
-        {
-          id: 'disabled-light',
-          enabled: false,
-          providerId: 'a',
-          model: 'm-light',
-          reasoning: 'off',
-        },
-        {
-          id: 'light',
-          enabled: true,
-          providerId: 'b',
-          model: 'm-other',
-          reasoning: 'low',
-        },
-      ],
-      {
-        a: {
-          'm-standard': { capability: 'standard' },
-          'm-light': { capability: 'light' },
-        },
-        b: { 'm-other': { capability: 'light' } },
-      },
-    )
-
-    expect(selectLightRouteSelection(config)).toEqual({
-      providerId: 'b',
-      model: 'm-other',
-      reasoning: 'low',
-    })
-  })
-
-  it('returns undefined when no enabled entry is exactly light', () => {
-    const config = poolConfig(
-      [
-        {
-          id: 'standard',
-          enabled: true,
-          providerId: 'a',
-          model: 'm-standard',
-          reasoning: 'off',
-        },
-        {
-          id: 'unannotated',
-          enabled: true,
-          providerId: 'a',
-          model: 'm-plain',
-          reasoning: 'off',
-        },
-      ],
-      { a: { 'm-standard': { capability: 'standard' } } },
-    )
-
-    expect(selectLightRouteSelection(config)).toBeUndefined()
   })
 })

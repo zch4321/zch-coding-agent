@@ -27,7 +27,7 @@ import type {
   CommandShellSelection,
 } from '../../shared/command-shell'
 import type { UiModelProfile, UiRememberedRule } from './agent-types'
-import { useApprovalSettingsStore } from './approval-settings'
+import { useModelRolesStore } from './model-roles'
 import { useModelPoolSettingsStore } from './model-pool-settings'
 import {
   DEFAULT_PROVIDER_FORM,
@@ -93,23 +93,9 @@ function providerPreviewModels(provider: ProviderPublicConfig): string[] {
   return provider.enabledModelIds.slice(0, 3)
 }
 
-function providerIdFromLabel(label: string, existingIds: Set<string>): string {
-  const base =
-    label
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 80) || 'provider'
-  let candidate = base
-  let index = 2
-
-  while (existingIds.has(candidate)) {
-    candidate = `${base}-${index}`
-    index += 1
-  }
-
-  return candidate
+/** Generates an opaque, immutable provider id; users never see or edit it. */
+function newProviderId(): string {
+  return `provider-${crypto.randomUUID()}`
 }
 
 function cloneJson<T>(value: T): T {
@@ -132,7 +118,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     providerNoticeVersion: '',
     traceNoticeVersion: '',
     yoloNoticeVersion: '',
-    activeProviderId: 'deepseek',
     selectedProviderId: 'deepseek',
     providers: [] as ProviderPublicConfig[],
     builtinPolicies: true,
@@ -167,6 +152,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       pathGlobs: '',
       contentPatterns: '',
     },
+    permissionSavedSignature: '',
+    permissionsSaving: false,
+    permissionsSaveStatus: '',
     loggingForm: {
       enabled: false,
       retentionDays: 14,
@@ -198,7 +186,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       state.yoloNoticeVersion === YOLO_NOTICE_VERSION,
     activeProvider: (state) =>
       state.providers.find(
-        (provider) => provider.id === state.activeProviderId,
+        (provider) => provider.id === useModelRolesStore().defaultModelProvider,
       ),
     selectedProvider: (state) =>
       state.providers.find(
@@ -207,12 +195,14 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     credentialConfigured: (state) =>
       Boolean(
         state.providers.find(
-          (provider) => provider.id === state.activeProviderId,
+          (provider) =>
+            provider.id === useModelRolesStore().defaultModelProvider,
         )?.credentialConfigured,
       ),
     credentialSource: (state) =>
-      state.providers.find((provider) => provider.id === state.activeProviderId)
-        ?.credentialSource ?? 'none',
+      state.providers.find(
+        (provider) => provider.id === useModelRolesStore().defaultModelProvider,
+      )?.credentialSource ?? 'none',
     selectedCredentialConfigured: (state) =>
       Boolean(
         state.providers.find(
@@ -271,21 +261,12 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         disabled:
           !provider.model || !provider.enabledModelIds.includes(provider.model),
       })),
-    approvalModelOptions: (state) => {
-      const approval = useApprovalSettingsStore()
-      const provider = state.providers.find(
-        (candidate) => candidate.id === approval.approvalForm.providerId,
-      )
-      if (!provider) return []
-      return provider.enabledModelIds.map((id) => ({ label: id, value: id }))
-    },
     providerCardSummaries: (state) =>
       state.providers.map((provider) => ({
         id: provider.id,
         label: provider.label,
         providerType: provider.providerType,
         models: providerPreviewModels(provider),
-        isActive: provider.id === state.activeProviderId,
         isSelected: provider.id === state.selectedProviderId,
         credentialConfigured: provider.credentialConfigured,
         credentialSource: provider.credentialSource,
@@ -306,6 +287,8 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           (provider) => provider.id === state.selectedProviderId,
         )?.credentialConfigured,
       ),
+    permissionsDirty: (state) =>
+      JSON.stringify(state.permissionForm) !== state.permissionSavedSignature,
     limitsDirty: (state) =>
       limitsSignature(state.limitsConfig) !== state.limitsSavedSignature,
     subagentsDirty: (state) =>
@@ -320,11 +303,13 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
   },
   actions: {
     hydrateSelectedProviderForm(config?: PublicConfig) {
-      const providers = config?.providers ?? this.providers
-      const activeProviderId = config?.activeProviderId ?? this.activeProviderId
+      const providers = config?.models.providers ?? this.providers
+      const defaultProviderId =
+        config?.models.defaultModelProvider ??
+        useModelRolesStore().defaultModelProvider
       const provider =
         providers.find((item) => item.id === this.selectedProviderId) ??
-        providers.find((item) => item.id === activeProviderId) ??
+        providers.find((item) => item.id === defaultProviderId) ??
         providers[0]
 
       if (!provider) return
@@ -369,14 +354,13 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       }
 
       if (includes('providers')) {
-        this.activeProviderId = config.activeProviderId
-        this.providers = structuredClone(config.providers)
+        this.providers = structuredClone(config.models.providers)
 
         if (
           !this.selectedProviderId ||
           !getProviderConfig(config, this.selectedProviderId)
         ) {
-          this.selectedProviderId = config.activeProviderId
+          this.selectedProviderId = config.models.defaultModelProvider
         }
       }
 
@@ -417,6 +401,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           config.permission.sensitiveData.pathGlobs.join('\n')
         this.permissionForm.contentPatterns =
           config.permission.sensitiveData.contentPatterns.join('\n')
+        this.permissionSavedSignature = JSON.stringify(this.permissionForm)
       }
 
       if (includes('logging')) {
@@ -730,9 +715,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
             section: 'providers',
           })
           if (configResult.ok) {
-            const refreshedProvider = configResult.value.config.providers.find(
-              (provider) => provider.id === providerId,
-            )
+            const refreshedProvider =
+              configResult.value.config.models.providers.find(
+                (provider) => provider.id === providerId,
+              )
             const providerIndex = this.providers.findIndex(
               (provider) => provider.id === providerId,
             )
@@ -791,24 +777,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.error = ''
       return this.loadProviderModels(true)
     },
-    async setActiveProvider(providerId: string) {
-      const bridge = window.agentApi
-      if (!bridge) return false
-
-      const result = await bridge.setConfig({
-        version: IPC_VERSION,
-        kind: 'provider-select',
-        providerId,
-      })
-
-      if (!result.ok) {
-        this.error = result.error.message
-        return false
-      }
-
-      this.applyConfig(result.value.config, ['providers'])
-      return true
-    },
     async createProvider() {
       const bridge = window.agentApi
       if (!bridge) return false
@@ -819,11 +787,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         return false
       }
 
-      const existingIds = new Set(this.providers.map((provider) => provider.id))
       const labelBase = 'New Provider'
       const nextIndex = this.providers.length + 1
       const label = `${labelBase} ${nextIndex}`
-      const providerId = providerIdFromLabel(label, existingIds)
+      const providerId = newProviderId()
       const result = await bridge.setConfig({
         version: IPC_VERSION,
         kind: 'provider-settings',
@@ -852,10 +819,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       const source = this.providers.find((provider) => provider.id === sourceId)
       if (!bridge || !source) return false
 
-      const providerId = providerIdFromLabel(
-        `${source.label} copy`,
-        new Set(this.providers.map((provider) => provider.id)),
-      )
+      const providerId = newProviderId()
       const result = await bridge.setConfig({
         version: IPC_VERSION,
         kind: 'provider-copy',
@@ -895,10 +859,11 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       }
 
       if (this.selectedProviderId === providerId) {
-        this.selectedProviderId = result.value.config.activeProviderId
+        this.selectedProviderId =
+          result.value.config.models.defaultModelProvider
       }
       this.applyConfig(result.value.config, ['providers'])
-      useApprovalSettingsStore().applyConfig(result.value.config, ['approval'])
+      useModelRolesStore().applyConfig(result.value.config, ['models'])
       useModelPoolSettingsStore().applyExternalConfig(result.value.config)
       return true
     },
@@ -971,8 +936,10 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
               this.modelProfiles,
             )
             const apiKeyUnchanged = this.providerForm.apiKey === draft.apiKey
-            this.activeProviderId = saved.value.config.activeProviderId
-            this.providers = structuredClone(saved.value.config.providers)
+            this.providers = structuredClone(
+              saved.value.config.models.providers,
+            )
+            useModelRolesStore().applyConfig(saved.value.config, ['models'])
             useModelPoolSettingsStore().applyExternalConfig(saved.value.config)
             if (limitsSignature(this.limitsConfig) === limitsDraftSignature) {
               this.limitsConfig = structuredClone(saved.value.config.limits)
@@ -1148,29 +1115,41 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
     },
     async savePermissions(mode: PermissionMode) {
       const bridge = window.agentApi
-      if (!bridge) return
+      if (!bridge || this.permissionsSaving) return
       const lines = (value: string) =>
         value
           .split(/\r?\n/)
           .map((line) => line.trim())
           .filter(Boolean)
-      const result = await bridge.setConfig({
-        version: IPC_VERSION,
-        kind: 'permission',
-        defaultMode: mode,
-        builtinPolicies: this.builtinPolicies,
-        rememberedRules: this.rememberedRules.map((rule) => ({
-          ...rule,
-          argConstraints: JSON.parse(rule.argConstraints),
-        })),
-        sensitiveData: {
-          mode: this.permissionForm.sensitiveMode,
-          pathGlobs: lines(this.permissionForm.pathGlobs),
-          contentPatterns: lines(this.permissionForm.contentPatterns),
-        },
-      })
-      if (result.ok) this.applyConfig(result.value.config, ['permission'])
-      else this.error = result.error.message
+      this.permissionsSaving = true
+      this.permissionsSaveStatus = ''
+      this.error = ''
+      try {
+        const result = await bridge.setConfig({
+          version: IPC_VERSION,
+          kind: 'permission',
+          defaultMode: mode,
+          builtinPolicies: this.builtinPolicies,
+          rememberedRules: this.rememberedRules.map((rule) => ({
+            ...rule,
+            argConstraints: JSON.parse(rule.argConstraints),
+          })),
+          sensitiveData: {
+            mode: this.permissionForm.sensitiveMode,
+            pathGlobs: lines(this.permissionForm.pathGlobs),
+            contentPatterns: lines(this.permissionForm.contentPatterns),
+          },
+        })
+        if (result.ok) {
+          this.applyConfig(result.value.config, ['permission'])
+          this.permissionsSaveStatus = 'saved'
+        } else {
+          this.error = result.error.message
+          this.permissionsSaveStatus = result.error.message
+        }
+      } finally {
+        this.permissionsSaving = false
+      }
     },
     async removeRememberedRule(ruleId: string, mode: PermissionMode) {
       this.rememberedRules = this.rememberedRules.filter(

@@ -140,7 +140,7 @@ describe('SessionManager prompt and trace', () => {
     await mkdir(workspace)
     const store = await createConfig(directory)
     const config = store.getPublicConfig()
-    const providerConfig = config.providers[0]!
+    const providerConfig = config.models.providers[0]!
     const modelSelection = {
       providerId: providerConfig.id,
       model: providerConfig.model,
@@ -409,7 +409,7 @@ describe('SessionManager prompt and trace', () => {
     await mkdir(workspace)
     await writeFile(path.join(workspace, 'README.md'), '# route\n')
     const store = await createConfig(directory)
-    const initial = store.getPublicConfig().providers[0]!
+    const initial = store.getPublicConfig().models.providers[0]!
     const provider = new ScriptedProvider()
     const pluginBus = new PluginEventBus()
     let updated = false

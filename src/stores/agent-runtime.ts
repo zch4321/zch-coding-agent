@@ -47,7 +47,7 @@ import {
 import { registerRuntimeSubscriptions } from './agent-runtime-subscriptions'
 import { projectConversationTurns } from './conversation-timeline'
 import { useAgentSettingsStore } from './agent-settings'
-import { useApprovalSettingsStore } from './approval-settings'
+import { useModelRolesStore } from './model-roles'
 import { useModelPoolSettingsStore } from './model-pool-settings'
 import { useAgentShellStore } from './agent-shell'
 import { useNotificationStore } from './notifications'
@@ -185,13 +185,14 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         return state.draftModelSelection
       }
 
+      const roles = useModelRolesStore()
       const provider =
         settings.providers.find(
-          (candidate) => candidate.id === settings.activeProviderId,
+          (candidate) => candidate.id === roles.defaultModelProvider,
         ) ?? settings.providers[0]
       return {
-        providerId: provider?.id ?? settings.activeProviderId,
-        model: provider?.model ?? settings.providerForm.model,
+        providerId: provider?.id ?? roles.defaultModelProvider,
+        model: roles.defaultModel || provider?.model || '',
         reasoning: provider?.reasoning ?? settings.providerForm.reasoning,
       }
     },
@@ -300,7 +301,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     applyConfig(config: PublicConfig, sections: ConfigSection[] = ['all']) {
       useAgentSettingsStore().applyConfig(config, sections)
-      useApprovalSettingsStore().applyConfig(config, sections)
+      useModelRolesStore().applyConfig(config, sections)
       useModelPoolSettingsStore().applyConfig(config, sections)
     },
     clearDiagnostics() {
@@ -611,24 +612,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       this.mode = mode
       return true
     },
-    async setActiveProvider(providerId: string) {
-      const settings = useAgentSettingsStore()
-      if (!(await settings.setActiveProvider(providerId))) return false
-      const provider = settings.providers.find((item) => item.id === providerId)
-      if (provider?.model) {
-        const selection = {
-          providerId,
-          model: provider.model,
-          reasoning: provider.reasoning,
-        }
-        if (useAgentReplicaStore().selectedSession) {
-          await this.updateModelSelection(selection)
-        } else {
-          this.draftModelSelection = selection
-        }
-      }
-      return true
-    },
     /** Updates the current Session or draft model while preserving its reasoning effort. */
     setProviderModel(model: string) {
       const replica = useAgentReplicaStore()
@@ -636,6 +619,25 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const selection = {
         ...current,
         model,
+      }
+      if (replica.selectedSession) {
+        void this.updateModelSelection(selection)
+      } else {
+        this.draftModelSelection = selection
+      }
+    },
+    /** Switches the current Session or draft route to another provider's default model. */
+    setComposerProvider(providerId: string) {
+      const settings = useAgentSettingsStore()
+      const provider = settings.providers.find(
+        (candidate) => candidate.id === providerId,
+      )
+      if (!provider) return
+      const replica = useAgentReplicaStore()
+      const selection = {
+        providerId: provider.id,
+        model: provider.model,
+        reasoning: provider.reasoning,
       }
       if (replica.selectedSession) {
         void this.updateModelSelection(selection)
@@ -659,7 +661,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     async updateModelSelection(modelSelection: {
       providerId: string
       model: string
-      reasoning: PublicConfig['providers'][number]['reasoning']
+      reasoning: PublicConfig['models']['providers'][number]['reasoning']
     }) {
       const replica = useAgentReplicaStore()
       const session = replica.selectedSession

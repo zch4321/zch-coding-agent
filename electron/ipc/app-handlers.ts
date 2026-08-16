@@ -142,9 +142,10 @@ export function createAppIpcHandlers(
     },
     'provider:list-models': async (payload) => {
       const config = configStore.getPublicConfig()
-      const provider = config.providers.find(
+      const provider = config.models.providers.find(
         (candidate) =>
-          candidate.id === (payload.providerId ?? config.activeProviderId),
+          candidate.id ===
+          (payload.providerId ?? config.models.defaultModelProvider),
       )
 
       if (!provider) {
@@ -201,11 +202,11 @@ export function createAppIpcHandlers(
 
       const latestConfig = configStore.getPublicConfig()
       const latestProvider =
-        latestConfig.providers.find(
+        latestConfig.models.providers.find(
           (candidate) =>
             candidate.id ===
-            (payload.providerId ?? latestConfig.activeProviderId),
-        ) ?? latestConfig.providers[0]
+            (payload.providerId ?? latestConfig.models.defaultModelProvider),
+        ) ?? latestConfig.models.providers[0]
       const fetchedAt = latestProvider.modelCatalogFetchedAt
       const stale =
         !fetchedAt ||

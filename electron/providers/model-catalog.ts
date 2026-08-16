@@ -1,5 +1,5 @@
 import {
-  getActiveProviderConfig,
+  getDefaultModelProviderConfig,
   getProviderConfig,
   type ModelCapabilityLevel,
   type ProviderType,
@@ -331,11 +331,12 @@ export function fetchProviderModelCatalog(options: {
 /** Builds capability profiles for discovered, enabled, overridden, and explicitly requested models. */
 export function resolveModelProfiles(
   config: PublicConfig,
-  providerId = config.activeProviderId,
+  providerId = config.models.defaultModelProvider,
   includeModelId?: string,
 ): ModelProfile[] {
   const provider =
-    getProviderConfig(config, providerId) ?? getActiveProviderConfig(config)
+    getProviderConfig(config, providerId) ??
+    getDefaultModelProviderConfig(config)
   const models = new Map(
     provider.modelCatalog.map((model) => [model.id, model]),
   )

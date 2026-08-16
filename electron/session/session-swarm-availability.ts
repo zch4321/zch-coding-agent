@@ -12,7 +12,7 @@ export function resolveSwarmAvailability(input: {
   runSubagentsEnabled: boolean
   config: {
     limits: Pick<PublicConfig['limits'], 'maxConcurrentRuns'>
-    modelPool: PublicConfig['modelPool']
+    models: Pick<PublicConfig['models'], 'modelPool'>
     subagents: Pick<PublicConfig['subagents'], 'maxAgentsPerSwarm'>
   }
   requestedGoal?: string
@@ -30,7 +30,7 @@ export function resolveSwarmAvailability(input: {
       unavailableReason: 'Swarm requires maxConcurrentRuns to be at least 2.',
     }
   }
-  if (!input.config.modelPool.entries.some((entry) => entry.enabled)) {
+  if (!input.config.models.modelPool.entries.some((entry) => entry.enabled)) {
     return {
       unavailableReason:
         'Swarm requires at least one enabled model-pool route.',

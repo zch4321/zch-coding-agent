@@ -1,7 +1,7 @@
 import type { Pinia } from 'pinia'
 import type { ProjectId } from '../../shared/ids'
 import { useAgentChangesStore } from './agent-changes'
-import { useApprovalSettingsStore } from './approval-settings'
+import { useModelRolesStore } from './model-roles'
 import { useAgentReplicaStore } from './agent-replica'
 import { useAgentRuntimeStore } from './agent-runtime'
 import { useAgentSettingsStore } from './agent-settings'
@@ -20,20 +20,21 @@ export type {
 } from './agent-types'
 
 type ShellStore = ReturnType<typeof useAgentShellStore>
-type ApprovalStore = ReturnType<typeof useApprovalSettingsStore>
+type ModelRolesStore = ReturnType<typeof useModelRolesStore>
 type SettingsStore = ReturnType<typeof useAgentSettingsStore>
 type ReplicaStore = ReturnType<typeof useAgentReplicaStore>
 type RuntimeStore = ReturnType<typeof useAgentRuntimeStore>
 type ChangesStore = ReturnType<typeof useAgentChangesStore>
 
 export type AgentFacade = Omit<ShellStore, '$id'> &
-  Omit<ApprovalStore, 'error' | '$id' | 'applyConfig' | 'selectProvider'> &
+  Omit<ModelRolesStore, 'error' | '$id' | 'applyConfig' | 'persistRoles'> &
   Omit<
     SettingsStore,
     | 'error'
     | '$id'
     | 'limitsSavedSignature'
     | 'subagentsSavedSignature'
+    | 'permissionSavedSignature'
     | 'savePermissions'
     | 'removeRememberedRule'
   > &
@@ -51,7 +52,6 @@ export type AgentFacade = Omit<ShellStore, '$id'> &
     removeRememberedRule(ruleId: string): Promise<void>
     revertChange(changeId: string): Promise<boolean>
     searchSessions(text: string, projectId?: ProjectId): Promise<void>
-    setApprovalProvider(providerId: string): void
     setProviderDraftModel(model: string): void
   }
 
@@ -91,6 +91,9 @@ const settingsProperties = new Set<PropertyKey>([
   'providerSaving',
   'providerSaveStatus',
   'permissionForm',
+  'permissionsSaving',
+  'permissionsSaveStatus',
+  'permissionsDirty',
   'loggingForm',
   'loggingWarnings',
   'assistantForm',
@@ -109,7 +112,6 @@ const settingsProperties = new Set<PropertyKey>([
   'allModelOptions',
   'modelTransferOptions',
   'providerOptions',
-  'approvalModelOptions',
   'providerCardSummaries',
   'activeModelProfile',
   'providerDirty',
@@ -117,13 +119,13 @@ const settingsProperties = new Set<PropertyKey>([
   'limitsDirty',
   'subagentsDirty',
 ])
-const approvalProperties = new Set<PropertyKey>([
-  'approvalForm',
-  'approvalSavedForm',
-  'approvalSavedSignature',
-  'approvalSaving',
-  'approvalSaveStatus',
-  'approvalDirty',
+const modelRolesProperties = new Set<PropertyKey>([
+  'defaultModelProvider',
+  'defaultModel',
+  'auxiliaryModelProvider',
+  'auxiliaryModel',
+  'rolesSaving',
+  'rolesSaveStatus',
 ])
 const replicaProperties = new Set<PropertyKey>([
   'selectedProjectId',
@@ -217,7 +219,7 @@ function sessionViews(replica: ReplicaStore): SessionView[] {
 export function useAgentStore(pinia?: Pinia): AgentFacade {
   const shell = useAgentShellStore(pinia)
   const settings = useAgentSettingsStore(pinia)
-  const approval = useApprovalSettingsStore(pinia)
+  const modelRoles = useModelRolesStore(pinia)
   const replica = useAgentReplicaStore(pinia)
   const runtime = useAgentRuntimeStore(pinia)
   const changes = useAgentChangesStore(pinia)
@@ -243,6 +245,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     selectProviderForEditing: settings.selectProviderForEditing,
     resetSelectedProviderDraft: settings.resetSelectedProviderDraft,
     setProviderModel: runtime.setProviderModel,
+    setComposerProvider: runtime.setComposerProvider,
     setProviderReasoning: runtime.setProviderReasoning,
     setProviderDraftModel: settings.setProviderModel,
     addProviderModel: settings.addProviderModel,
@@ -252,18 +255,13 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     loadProviderModels: settings.loadProviderModels,
     enterProviderSettings: settings.enterProviderSettings,
     refreshSelectedProviderModels: settings.refreshSelectedProviderModels,
-    setActiveProvider: runtime.setActiveProvider,
+
     createProvider: settings.createProvider,
     copyProvider: settings.copyProvider,
     deleteProvider: settings.deleteProvider,
     saveProvider: settings.saveProvider,
-    setApprovalProvider: (providerId: string) => {
-      const provider = settings.providers.find(
-        (candidate) => candidate.id === providerId,
-      )
-      if (provider) approval.selectProvider(provider)
-    },
-    saveApproval: approval.saveApproval,
+    setDefaultModelRole: modelRoles.setDefaultModelRole,
+    setAuxiliaryModelRole: modelRoles.setAuxiliaryModelRole,
     clearCredential: settings.clearCredential,
     saveLimits: settings.saveLimits,
     saveSubagents: settings.saveSubagents,
@@ -309,7 +307,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
 
   const targetStore = (property: PropertyKey): object | undefined => {
     if (shellProperties.has(property)) return shell
-    if (approvalProperties.has(property)) return approval
+    if (modelRolesProperties.has(property)) return modelRoles
     if (settingsProperties.has(property)) return settings
     if (replicaProperties.has(property)) return replica
     if (runtimeProperties.has(property)) return runtime

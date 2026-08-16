@@ -1,8 +1,9 @@
 import type { MessageId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { PublicConfig } from '../../shared/config'
-import type { ModelSelection } from '../../shared/model-route'
+import { getAuxiliaryModelSelection } from '../../shared/config'
 import { normalizeTitle } from '../../shared/conversation-titles'
+import type { SessionRecord } from '../../shared/session'
 import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'
 import type {
@@ -33,38 +34,22 @@ export interface ConversationTitlingOptions {
   onDiagnostic?: DiagnosticSink
   resolveRoute?: (
     config: PublicConfig,
+    record: SessionRecord,
   ) => Promise<ResolvedModelRoute | undefined>
   createProvider?: (route: ResolvedModelRoute) => ModelProvider
   timeoutMs?: number
 }
 
-/** Picks the first enabled pool entry whose model is annotated exactly light. */
-export function selectLightRouteSelection(
-  config: PublicConfig,
-): ModelSelection | undefined {
-  for (const entry of config.modelPool.entries) {
-    if (!entry.enabled) continue
-    const provider = config.providers.find(
-      (candidate) => candidate.id === entry.providerId,
-    )
-    if (!provider) continue
-    if (provider.modelOverrides[entry.model]?.capability !== 'light') continue
-    return {
-      providerId: entry.providerId,
-      model: entry.model,
-      reasoning: entry.reasoning,
-    }
-  }
-  return undefined
-}
-
-/** Resolves the exact-light pool route used for titling, undefined when absent. */
+/**
+ * Resolves the titling route: the configured auxiliary model when usable,
+ * otherwise the Session's own main selection. Undefined when neither resolves.
+ */
 async function defaultResolveTitlingRoute(
   configStore: ConfigStore,
+  config: PublicConfig,
+  record: SessionRecord,
 ): Promise<ResolvedModelRoute | undefined> {
-  const config = configStore.getPublicConfig()
-  const selection = selectLightRouteSelection(config)
-  if (!selection) return undefined
+  const selection = getAuxiliaryModelSelection(config) ?? record.modelSelection
   const pair = await resolveModelRoutePairFromConfig(
     configStore,
     config,
@@ -118,6 +103,7 @@ export class ConversationTitlingService {
   readonly #onDiagnostic: DiagnosticSink | undefined
   readonly #resolveRoute: (
     config: PublicConfig,
+    record: SessionRecord,
   ) => Promise<ResolvedModelRoute | undefined>
   readonly #createProvider: (route: ResolvedModelRoute) => ModelProvider
   readonly #timeoutMs: number
@@ -133,7 +119,8 @@ export class ConversationTitlingService {
     this.#onDiagnostic = options.onDiagnostic
     this.#resolveRoute =
       options.resolveRoute ??
-      (() => defaultResolveTitlingRoute(this.#configStore))
+      ((config, record) =>
+        defaultResolveTitlingRoute(this.#configStore, config, record))
     this.#timeoutMs = options.timeoutMs ?? TITLING_TIMEOUT_MS
     this.#createProvider =
       options.createProvider ??
@@ -199,6 +186,7 @@ export class ConversationTitlingService {
 
     const route = await this.#resolveRoute(
       this.#configStore.getPublicConfig(),
+      record,
     ).catch(() => undefined)
     if (!route || this.#disposed) return
 

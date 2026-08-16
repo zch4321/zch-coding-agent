@@ -28,9 +28,9 @@ export function createRuntimeIdentity(input: {
   swarmsEnabled?: boolean
 }): RuntimeIdentity {
   const provider =
-    input.config.providers.find(
-      (candidate) => candidate.id === input.config.activeProviderId,
-    ) ?? input.config.providers[0]!
+    input.config.models.providers.find(
+      (candidate) => candidate.id === input.config.models.defaultModelProvider,
+    ) ?? input.config.models.providers[0]!
   const swarmsEnabled = input.swarmsEnabled ?? false
   const toolDefinitions = input.runtime.services.sessions
     .providerToolDefinitions()

@@ -122,10 +122,13 @@ describe('SessionManager approvals', () => {
     })
     await store.update({
       version: 1,
-      kind: 'approval',
-      approverProviderId: 'deepseek',
-      approverModel: 'approval-model',
-      reasoning: 'off',
+      kind: 'models',
+      value: {
+        defaultModelProvider: 'deepseek',
+        defaultModel: 'main-model',
+        auxiliaryModelProvider: 'deepseek',
+        auxiliaryModel: 'approval-model',
+      },
     })
     const provider = new ScriptedCommandProvider()
     const approvalBodies: JsonValue[] = []

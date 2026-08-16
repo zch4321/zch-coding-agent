@@ -89,7 +89,7 @@ async function configurePoolProvider(
   configStore: ConfigStore,
   options: { credential?: boolean } = { credential: true },
 ): Promise<ProviderPublicConfig> {
-  const initial = configStore.getPublicConfig().providers[0]!
+  const initial = configStore.getPublicConfig().models.providers[0]!
   await configStore.update({
     version: 1,
     kind: 'provider',
@@ -113,7 +113,7 @@ async function configurePoolProvider(
       apiKey: 'model-pool-secret',
     })
   }
-  return configStore.getPublicConfig().providers[0]!
+  return configStore.getPublicConfig().models.providers[0]!
 }
 
 function modelPoolUpdate(
@@ -148,10 +148,10 @@ describe('ConfigStore', () => {
     const store = new ConfigStore(configPath, secretStore)
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 20 },
+      config: { schemaVersion: 21 },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 20,
+      schemaVersion: 21,
       limits: { maxStepsPerRun: 0 },
     })
   })
@@ -161,7 +161,7 @@ describe('ConfigStore', () => {
     const configPath = path.join(directory, 'config.json')
     // A "future" config this build cannot validate, e.g. after a downgrade.
     const original = JSON.stringify({
-      schemaVersion: 20,
+      schemaVersion: 21,
       providers: 'not-an-array',
     })
     await writeFile(configPath, original, 'utf8')
@@ -172,7 +172,7 @@ describe('ConfigStore', () => {
     const store = new ConfigStore(configPath, secretStore)
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 20 },
+      config: { schemaVersion: 21 },
     })
 
     const backups = (await readdir(directory)).filter((name) =>
@@ -183,7 +183,7 @@ describe('ConfigStore', () => {
       original,
     )
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 20,
+      schemaVersion: 21,
     })
   })
 
@@ -222,34 +222,36 @@ describe('ConfigStore', () => {
     await store.initialize()
 
     expect(store.getInternalConfig()).toMatchObject({
-      schemaVersion: 20,
-      modelPool: { entries: [] },
-      providers: [
-        {
-          providerType: 'deepseek.chat-completions',
-          revision: 7,
-          apiKeyRef: 'provider-key:legacy',
-          modelCatalog: [{ id: 'deepseek-v4-pro', ownedBy: 'deepseek' }],
-          modelOverrides: {
-            'deepseek-v4-pro': { contextWindowTokens: 128_000 },
+      schemaVersion: 21,
+      models: {
+        modelPool: { entries: [] },
+        providers: [
+          {
+            providerType: 'deepseek.chat-completions',
+            revision: 7,
+            apiKeyRef: 'provider-key:legacy',
+            modelCatalog: [{ id: 'deepseek-v4-pro', ownedBy: 'deepseek' }],
+            modelOverrides: {
+              'deepseek-v4-pro': { contextWindowTokens: 128_000 },
+            },
+            enabledModelIds: ['deepseek-v4-pro'],
           },
-          enabledModelIds: ['deepseek-v4-pro'],
-        },
-        {
-          providerType: 'generic.chat-completions',
-          apiKeyRef: 'provider-key:generic',
-          modelCatalog: [{ id: 'generic-model' }],
-          enabledModelIds: ['generic-model'],
-        },
-      ],
+          {
+            providerType: 'generic.chat-completions',
+            apiKeyRef: 'provider-key:generic',
+            modelCatalog: [{ id: 'generic-model' }],
+            enabledModelIds: ['generic-model'],
+          },
+        ],
+      },
     })
     const persisted = await readFile(configPath, 'utf8')
-    expect(persisted).toContain('"schemaVersion": 20')
+    expect(persisted).toContain('"schemaVersion": 21')
     expect(persisted).not.toContain('adapterId')
     expect(persisted).not.toContain('"profile"')
   })
 
-  it('resets a malformed v9 file to clean v20 defaults', async () => {
+  it('resets a malformed v9 file to clean v21 defaults', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     const malformed = structuredClone(legacyAppConfigV9) as Record<
@@ -267,7 +269,7 @@ describe('ConfigStore', () => {
     )
 
     await expect(store.initialize()).resolves.toMatchObject({
-      config: { schemaVersion: 20 },
+      config: { schemaVersion: 21 },
     })
     expect(store.getInternalConfig()).toEqual(DEFAULT_APP_CONFIG)
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual(
@@ -286,7 +288,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 20,
+      schemaVersion: 21,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).not.toHaveProperty(
       'legacyField',
@@ -299,10 +301,10 @@ describe('ConfigStore', () => {
     await writeFile(configPath, '{"schemaVersion":20', 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 20,
+      schemaVersion: 21,
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 20,
+      schemaVersion: 21,
       limits: { maxStepsPerRun: 0 },
     })
   })
@@ -320,7 +322,7 @@ describe('ConfigStore', () => {
     await writeFile(configPath, JSON.stringify(config), 'utf8')
 
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 20,
+      schemaVersion: 21,
       limits: { [field]: value },
     })
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
@@ -456,7 +458,7 @@ describe('ConfigStore', () => {
     await expect(configStore.update(invalid)).rejects.toThrow(
       'Invalid model pool',
     )
-    expect(configStore.getPublicConfig().modelPool.entries).toEqual([])
+    expect(configStore.getPublicConfig().models.modelPool.entries).toEqual([])
   })
 
   it('normalizes and atomically persists a complete model pool', async () => {
@@ -474,7 +476,7 @@ describe('ConfigStore', () => {
       ]),
     )
 
-    expect(publicConfig.modelPool.entries).toEqual([
+    expect(publicConfig.models.modelPool.entries).toEqual([
       modelPoolEntry({ id: 'é' }),
       modelPoolEntry({
         id: 'disabled-reference',
@@ -485,10 +487,14 @@ describe('ConfigStore', () => {
     ])
     const persisted = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
-    ) as { modelPool: { entries: ModelPoolEntry[] } }
-    expect(persisted.modelPool.entries).toEqual(publicConfig.modelPool.entries)
-    expect(JSON.stringify(publicConfig.modelPool)).not.toContain('apiKeyRef')
-    expect(JSON.stringify(publicConfig.modelPool)).not.toContain(
+    ) as { models: { modelPool: { entries: ModelPoolEntry[] } } }
+    expect(persisted.models.modelPool.entries).toEqual(
+      publicConfig.models.modelPool.entries,
+    )
+    expect(JSON.stringify(publicConfig.models.modelPool)).not.toContain(
+      'apiKeyRef',
+    )
+    expect(JSON.stringify(publicConfig.models.modelPool)).not.toContain(
       'model-pool-secret',
     )
   })
@@ -519,7 +525,7 @@ describe('ConfigStore', () => {
       }),
     ).rejects.toThrow('Provider is not configured: missing-provider')
 
-    expect(configStore.getPublicConfig().modelPool.entries).toEqual([])
+    expect(configStore.getPublicConfig().models.modelPool.entries).toEqual([])
     expect(await readFile(configPath, 'utf8')).toBe(before)
   })
 
@@ -568,7 +574,7 @@ describe('ConfigStore', () => {
         ],
       }),
     ).rejects.toThrow('Provider configuration changed')
-    expect(configStore.getPublicConfig().modelPool.entries).toEqual([])
+    expect(configStore.getPublicConfig().models.modelPool.entries).toEqual([])
   })
 
   it('validates enabled model, endpoint, and credential bindings before saving', async () => {
@@ -597,7 +603,8 @@ describe('ConfigStore', () => {
 
     const unsafeEndpoint = await createStores()
     await configurePoolProvider(unsafeEndpoint.configStore)
-    const current = unsafeEndpoint.configStore.getPublicConfig().providers[0]!
+    const current =
+      unsafeEndpoint.configStore.getPublicConfig().models.providers[0]!
     await unsafeEndpoint.configStore.update({
       version: 1,
       kind: 'provider',
@@ -608,7 +615,7 @@ describe('ConfigStore', () => {
       reasoning: current.reasoning,
     })
     const unsafeProvider =
-      unsafeEndpoint.configStore.getPublicConfig().providers[0]!
+      unsafeEndpoint.configStore.getPublicConfig().models.providers[0]!
     await expect(
       unsafeEndpoint.configStore.update(
         modelPoolUpdate(unsafeProvider, [modelPoolEntry()]),
@@ -618,7 +625,7 @@ describe('ConfigStore', () => {
 
   it('requires enabled pool models to have a Provider capability annotation', async () => {
     const { configStore } = await createStores()
-    const initial = configStore.getPublicConfig().providers[0]!
+    const initial = configStore.getPublicConfig().models.providers[0]!
     await configStore.update({
       version: 1,
       kind: 'provider',
@@ -637,7 +644,7 @@ describe('ConfigStore', () => {
       action: 'set',
       apiKey: 'model-pool-secret',
     })
-    const provider = configStore.getPublicConfig().providers[0]!
+    const provider = configStore.getPublicConfig().models.providers[0]!
 
     await expect(
       configStore.update(modelPoolUpdate(provider, [modelPoolEntry()])),
@@ -649,7 +656,9 @@ describe('ConfigStore', () => {
         modelPoolUpdate(provider, [modelPoolEntry({ enabled: false })]),
       ),
     ).resolves.toMatchObject({
-      modelPool: { entries: [{ enabled: false, model: 'worker-model' }] },
+      models: {
+        modelPool: { entries: [{ enabled: false, model: 'worker-model' }] },
+      },
     })
   })
 
@@ -678,10 +687,10 @@ describe('ConfigStore', () => {
       reasoning: provider.reasoning,
     })
 
-    expect(configStore.getPublicConfig().modelPool.entries[0]?.enabled).toBe(
-      false,
-    )
-    provider = configStore.getPublicConfig().providers[0]!
+    expect(
+      configStore.getPublicConfig().models.modelPool.entries[0]?.enabled,
+    ).toBe(false)
+    provider = configStore.getPublicConfig().models.providers[0]!
     await expect(
       configStore.update(
         modelPoolUpdate(provider, [modelPoolEntry({ reasoning: 'xhigh' })]),
@@ -709,23 +718,39 @@ describe('ConfigStore', () => {
       reasoning: provider.reasoning,
     })
 
-    expect(configStore.getPublicConfig().modelPool.entries[0]).toMatchObject({
+    expect(
+      configStore.getPublicConfig().models.modelPool.entries[0],
+    ).toMatchObject({
       enabled: false,
       model: 'worker-model',
     })
   })
 
-  it('requires an explicit reasoning effort in approval config requests', () => {
+  it('requires the complete role quartet in models config requests', () => {
     const validate = compileSchema(ConfigSetRequestSchema)
-    const approval = {
-      version: 1,
-      kind: 'approval',
-      approverProviderId: 'deepseek',
-      approverModel: 'approval-model',
+    const roles = {
+      version: 1 as const,
+      kind: 'models' as const,
+      value: {
+        defaultModelProvider: 'deepseek',
+        defaultModel: 'main-model',
+        auxiliaryModelProvider: 'deepseek',
+        auxiliaryModel: 'approval-model',
+      },
     }
 
-    expect(validate(approval)).toBe(false)
-    expect(validate({ ...approval, reasoning: 'off' })).toBe(true)
+    expect(validate(roles)).toBe(true)
+    expect(
+      validate({
+        version: 1,
+        kind: 'models',
+        value: {
+          defaultModelProvider: 'deepseek',
+          defaultModel: 'main-model',
+          auxiliaryModelProvider: 'deepseek',
+        },
+      }),
+    ).toBe(false)
   })
 
   it('supports provider-scoped environment credentials for headless hosts', async () => {
@@ -757,20 +782,21 @@ describe('ConfigStore', () => {
     expect(
       store
         .getPublicConfig()
-        .providers.find((provider) => provider.id === 'generic')
+        .models.providers.find((provider) => provider.id === 'generic')
         ?.credentialSource,
     ).toBe('environment')
     expect(
       store
         .getPublicConfig()
-        .providers.find((provider) => provider.id === 'generic')?.revision,
+        .models.providers.find((provider) => provider.id === 'generic')
+        ?.revision,
     ).toBe(1)
     await expect(store.getProviderApiKey('generic')).resolves.toBe(
       'generic-secret',
     )
     const provider = store
       .getPublicConfig()
-      .providers.find((candidate) => candidate.id === 'generic')!
+      .models.providers.find((candidate) => candidate.id === 'generic')!
     await expect(
       store.update(
         modelPoolUpdate(provider, [
@@ -781,7 +807,9 @@ describe('ConfigStore', () => {
         ]),
       ),
     ).resolves.toMatchObject({
-      modelPool: { entries: [{ enabled: true, providerId: 'generic' }] },
+      models: {
+        modelPool: { entries: [{ enabled: true, providerId: 'generic' }] },
+      },
     })
   })
 
@@ -804,7 +832,7 @@ describe('ConfigStore', () => {
     )
     const rendererText = JSON.stringify(publicConfig)
 
-    expect(publicConfig.providers[0].credentialConfigured).toBe(true)
+    expect(publicConfig.models.providers[0].credentialConfigured).toBe(true)
     expect(configText).not.toContain(apiKey)
     expect(secretText).not.toContain(apiKey)
     expect(rendererText).not.toContain(apiKey)
@@ -826,7 +854,9 @@ describe('ConfigStore', () => {
     )
     await store.initialize()
 
-    expect(store.getPublicConfig().providers[0].credentialConfigured).toBe(true)
+    expect(
+      store.getPublicConfig().models.providers[0].credentialConfigured,
+    ).toBe(true)
     await expect(store.getDeepSeekApiKey()).resolves.toBe('environment-secret')
     expect(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
@@ -841,7 +871,7 @@ describe('ConfigStore', () => {
     await expect(store.getDeepSeekApiKey()).resolves.toBe('stored-secret')
   })
 
-  it('writes v20 defaults atomically', async () => {
+  it('writes v21 defaults atomically', async () => {
     const { directory, configStore } = await createStores()
 
     await configStore.update({
@@ -855,7 +885,7 @@ describe('ConfigStore', () => {
     const parsed = JSON.parse(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ) as Record<string, unknown>
-    expect(parsed.schemaVersion).toBe(20)
+    expect(parsed.schemaVersion).toBe(21)
     expect(configStore.getPublicConfig().limits.maxStepsPerRun).toBe(0)
     expect(configStore.getPublicConfig().limits.maxContextTokens).toBe(256_000)
     expect(configStore.getPublicConfig().limits.autoCompactTriggerPercent).toBe(
@@ -869,7 +899,7 @@ describe('ConfigStore', () => {
 
   it('persists Subagent settings without changing Provider revisions', async () => {
     const { directory, configStore } = await createStores()
-    const revision = configStore.getPublicConfig().providers[0]!.revision
+    const revision = configStore.getPublicConfig().models.providers[0]!.revision
 
     const updated = await configStore.update({
       version: 1,
@@ -886,11 +916,11 @@ describe('ConfigStore', () => {
       workerTimeoutMs: 2_700_000,
       maxAgentsPerSwarm: 12,
     })
-    expect(updated.providers[0]!.revision).toBe(revision)
+    expect(updated.models.providers[0]!.revision).toBe(revision)
     expect(
       JSON.parse(await readFile(path.join(directory, 'config.json'), 'utf8')),
     ).toMatchObject({
-      schemaVersion: 20,
+      schemaVersion: 21,
       subagents: {
         enabled: true,
         workerTimeoutMs: 2_700_000,
@@ -901,7 +931,7 @@ describe('ConfigStore', () => {
 
   it('persists the command Shell without changing Provider revisions', async () => {
     const { directory, configStore } = await createStores()
-    const revision = configStore.getPublicConfig().providers[0]!.revision
+    const revision = configStore.getPublicConfig().models.providers[0]!.revision
 
     const updated = await configStore.update({
       version: 1,
@@ -912,24 +942,24 @@ describe('ConfigStore', () => {
     expect(updated.executionEnvironment).toEqual({
       commandShell: 'git-bash',
     })
-    expect(updated.providers[0]!.revision).toBe(revision)
+    expect(updated.models.providers[0]!.revision).toBe(revision)
     expect(
       JSON.parse(await readFile(path.join(directory, 'config.json'), 'utf8')),
     ).toMatchObject({
-      schemaVersion: 20,
+      schemaVersion: 21,
       executionEnvironment: { commandShell: 'git-bash' },
     })
   })
 
   it('increments provider revision only for route or credential changes', async () => {
     const { configStore } = await createStores()
-    const initial = configStore.getPublicConfig().providers[0]!
+    const initial = configStore.getPublicConfig().models.providers[0]!
 
     await configStore.setDeepSeekModelCatalog(
       [{ id: 'catalog-only', ownedBy: 'provider' }],
       '2026-07-23T00:00:00.000Z',
     )
-    expect(configStore.getPublicConfig().providers[0]?.revision).toBe(
+    expect(configStore.getPublicConfig().models.providers[0]?.revision).toBe(
       initial.revision,
     )
 
@@ -945,7 +975,7 @@ describe('ConfigStore', () => {
       reasoning: initial.reasoning,
       limits: configStore.getPublicConfig().limits,
     })
-    expect(selection.providers[0]).toMatchObject({
+    expect(selection.models.providers[0]).toMatchObject({
       enabledModelIds: ['catalog-only'],
       revision: initial.revision + 1,
     })
@@ -961,7 +991,7 @@ describe('ConfigStore', () => {
       reasoning: initial.reasoning,
       limits: configStore.getPublicConfig().limits,
     })
-    expect(expandedPool.providers[0]).toMatchObject({
+    expect(expandedPool.models.providers[0]).toMatchObject({
       enabledModelIds: ['catalog-only', 'secondary-model'],
       revision: initial.revision + 1,
     })
@@ -969,7 +999,7 @@ describe('ConfigStore', () => {
       [{ id: 'different-catalog-model' }],
       '2026-07-24T00:00:00.000Z',
     )
-    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+    expect(configStore.getPublicConfig().models.providers[0]).toMatchObject({
       enabledModelIds: ['catalog-only', 'secondary-model'],
       revision: initial.revision + 1,
     })
@@ -981,7 +1011,7 @@ describe('ConfigStore', () => {
       model: 'revision-model',
       reasoning: initial.reasoning,
     })
-    expect(configStore.getPublicConfig().providers[0]?.revision).toBe(
+    expect(configStore.getPublicConfig().models.providers[0]?.revision).toBe(
       initial.revision + 2,
     )
 
@@ -991,14 +1021,14 @@ describe('ConfigStore', () => {
       action: 'set',
       apiKey: 'revision-secret',
     })
-    expect(configStore.getPublicConfig().providers[0]?.revision).toBe(
+    expect(configStore.getPublicConfig().models.providers[0]?.revision).toBe(
       initial.revision + 3,
     )
   })
 
   it('detects Provider revision changes for route-freeze postflight checks', async () => {
     const { configStore } = await createStores()
-    const initial = configStore.getPublicConfig().providers[0]!
+    const initial = configStore.getPublicConfig().models.providers[0]!
     expect(() =>
       configStore.assertProviderRevisions([
         { providerId: initial.id, revision: initial.revision },
@@ -1038,13 +1068,15 @@ describe('ConfigStore', () => {
       reasoning: provider.reasoning,
       limits: configStore.getPublicConfig().limits,
     })
-    expect(configStore.getPublicConfig().modelPool.entries[0]).toMatchObject({
+    expect(
+      configStore.getPublicConfig().models.modelPool.entries[0],
+    ).toMatchObject({
       enabled: false,
       providerId: 'deepseek',
       model: 'worker-model',
     })
 
-    provider = configStore.getPublicConfig().providers[0]!
+    provider = configStore.getPublicConfig().models.providers[0]!
     await configStore.update({
       version: 1,
       kind: 'provider-settings',
@@ -1057,9 +1089,9 @@ describe('ConfigStore', () => {
       reasoning: provider.reasoning,
       limits: configStore.getPublicConfig().limits,
     })
-    expect(configStore.getPublicConfig().modelPool.entries[0]?.enabled).toBe(
-      false,
-    )
+    expect(
+      configStore.getPublicConfig().models.modelPool.entries[0]?.enabled,
+    ).toBe(false)
   })
 
   it('auto-disables entries on explicit credential clear without restoring them', async () => {
@@ -1073,9 +1105,9 @@ describe('ConfigStore', () => {
       providerId: provider.id,
       action: 'clear',
     })
-    expect(configStore.getPublicConfig().modelPool.entries[0]?.enabled).toBe(
-      false,
-    )
+    expect(
+      configStore.getPublicConfig().models.modelPool.entries[0]?.enabled,
+    ).toBe(false)
 
     await configStore.update({
       version: 1,
@@ -1084,9 +1116,9 @@ describe('ConfigStore', () => {
       action: 'set',
       apiKey: 'restored-secret',
     })
-    expect(configStore.getPublicConfig().modelPool.entries[0]?.enabled).toBe(
-      false,
-    )
+    expect(
+      configStore.getPublicConfig().models.modelPool.entries[0]?.enabled,
+    ).toBe(false)
   })
 
   it('keeps entries enabled across valid route edits and key replacement', async () => {
@@ -1118,11 +1150,11 @@ describe('ConfigStore', () => {
       apiKey: 'replacement-secret',
     })
 
-    provider = configStore.getPublicConfig().providers[0]!
+    provider = configStore.getPublicConfig().models.providers[0]!
     expect(provider.revision).toBeGreaterThan(1)
-    expect(configStore.getPublicConfig().modelPool.entries[0]?.enabled).toBe(
-      true,
-    )
+    expect(
+      configStore.getPublicConfig().models.modelPool.entries[0]?.enabled,
+    ).toBe(true)
   })
 
   it('auto-disables entries when their Provider is deleted and preserves them on recreation', async () => {
@@ -1150,7 +1182,7 @@ describe('ConfigStore', () => {
     })
     const provider = configStore
       .getPublicConfig()
-      .providers.find((candidate) => candidate.id === 'worker-provider')!
+      .models.providers.find((candidate) => candidate.id === 'worker-provider')!
     const entry = modelPoolEntry({
       providerId: provider.id,
       model: provider.model,
@@ -1163,7 +1195,7 @@ describe('ConfigStore', () => {
       providerId: provider.id,
       fallbackProviderId: 'deepseek',
     })
-    expect(configStore.getPublicConfig().modelPool.entries).toEqual([
+    expect(configStore.getPublicConfig().models.modelPool.entries).toEqual([
       { ...entry, enabled: false },
     ])
 
@@ -1178,21 +1210,21 @@ describe('ConfigStore', () => {
       enabledModelIds: ['worker-model'],
       reasoning: 'high',
     })
-    expect(configStore.getPublicConfig().modelPool.entries[0]?.enabled).toBe(
-      false,
-    )
+    expect(
+      configStore.getPublicConfig().models.modelPool.entries[0]?.enabled,
+    ).toBe(false)
   })
 
   it('repairs handwritten dangling references but preserves temporary credential loss', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-config-'))
     const configPath = path.join(directory, 'config.json')
     const config = structuredClone(DEFAULT_APP_CONFIG) as AppConfig
-    config.providers[0]!.model = 'main-model'
-    config.providers[0]!.enabledModelIds = ['main-model']
-    config.providers[0]!.modelOverrides = {
+    config.models.providers[0]!.model = 'main-model'
+    config.models.providers[0]!.enabledModelIds = ['main-model']
+    config.models.providers[0]!.modelOverrides = {
       'main-model': { capability: 'standard' },
     }
-    config.modelPool.entries = [
+    config.models.modelPool.entries = [
       modelPoolEntry({
         id: 'missing-provider',
         providerId: 'removed-provider',
@@ -1216,21 +1248,21 @@ describe('ConfigStore', () => {
     await store.initialize()
 
     expect(
-      store.getPublicConfig().modelPool.entries.map((entry) => entry.enabled),
+      store
+        .getPublicConfig()
+        .models.modelPool.entries.map((entry) => entry.enabled),
     ).toEqual([false, false, true])
     const persisted = JSON.parse(await readFile(configPath, 'utf8')) as {
-      modelPool: { entries: ModelPoolEntry[] }
+      models: { modelPool: { entries: ModelPoolEntry[] } }
     }
-    expect(persisted.modelPool.entries.map((entry) => entry.enabled)).toEqual([
-      false,
-      false,
-      true,
-    ])
+    expect(
+      persisted.models.modelPool.entries.map((entry) => entry.enabled),
+    ).toEqual([false, false, true])
   })
 
   it('rejects a main model outside the enabled Provider pool', async () => {
     const { configStore } = await createStores()
-    const provider = configStore.getPublicConfig().providers[0]!
+    const provider = configStore.getPublicConfig().models.providers[0]!
 
     await expect(
       configStore.update({
@@ -1250,7 +1282,7 @@ describe('ConfigStore', () => {
 
   it('preserves Provider Type when a later update omits it', async () => {
     const { configStore } = await createStores()
-    const initial = configStore.getPublicConfig().providers[0]!
+    const initial = configStore.getPublicConfig().models.providers[0]!
     await configStore.update({
       version: 1,
       kind: 'provider',
@@ -1259,7 +1291,7 @@ describe('ConfigStore', () => {
       model: initial.model,
       reasoning: initial.reasoning,
     })
-    const provider = configStore.getPublicConfig().providers[0]!
+    const provider = configStore.getPublicConfig().models.providers[0]!
 
     await configStore.update({
       version: 1,
@@ -1269,7 +1301,7 @@ describe('ConfigStore', () => {
       reasoning: provider.reasoning,
     })
 
-    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+    expect(configStore.getPublicConfig().models.providers[0]).toMatchObject({
       providerType: 'generic.chat-completions',
       revision: provider.revision + 1,
     })
@@ -1308,11 +1340,11 @@ describe('ConfigStore', () => {
     config.schemaVersion = 99
     await writeFile(configPath, JSON.stringify(config), 'utf8')
     await expect(configStore.reloadFromDisk()).resolves.toMatchObject({
-      schemaVersion: 20,
+      schemaVersion: 21,
     })
     expect(configStore.getMcpServers()).toHaveLength(0)
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toMatchObject({
-      schemaVersion: 20,
+      schemaVersion: 21,
       mcpServers: [],
     })
   })
@@ -1334,7 +1366,7 @@ describe('ConfigStore', () => {
       maxOutputTokens: 10_000,
     })
 
-    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+    expect(configStore.getPublicConfig().models.providers[0]).toMatchObject({
       modelCatalog: [{ id: 'model-a', ownedBy: 'provider' }],
       modelCatalogFetchedAt: '2026-06-19T00:00:00.000Z',
       modelOverrides: {
@@ -1356,9 +1388,9 @@ describe('ConfigStore', () => {
       compactThresholdTokens: null,
       maxOutputTokens: null,
     })
-    expect(configStore.getPublicConfig().providers[0].modelOverrides).toEqual(
-      {},
-    )
+    expect(
+      configStore.getPublicConfig().models.providers[0].modelOverrides,
+    ).toEqual({})
   })
 
   it('merges refreshed model catalogs without changing or deleting known models', async () => {
@@ -1386,7 +1418,7 @@ describe('ConfigStore', () => {
       '2026-08-02T00:00:00.000Z',
     )
 
-    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+    expect(configStore.getPublicConfig().models.providers[0]).toMatchObject({
       modelCatalog: [
         { id: 'model-a', ownedBy: 'original-owner' },
         { id: 'configured-only', ownedBy: 'provider' },
@@ -1399,7 +1431,7 @@ describe('ConfigStore', () => {
 
   it('persists a manual model, enables it, and uses it as an empty main route', async () => {
     const { configStore } = await createStores()
-    const providerId = configStore.getPublicConfig().providers[0]!.id
+    const providerId = configStore.getPublicConfig().models.providers[0]!.id
 
     await configStore.update({
       version: 1,
@@ -1421,7 +1453,7 @@ describe('ConfigStore', () => {
       modelId: 'manually-added-model',
     })
 
-    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+    expect(configStore.getPublicConfig().models.providers[0]).toMatchObject({
       revision: 2,
       model: 'manually-added-model',
       modelCatalog: [{ id: 'manually-added-model' }],
@@ -1440,7 +1472,7 @@ describe('ConfigStore', () => {
 
   it('rejects an inconsistent manual model override atomically', async () => {
     const { configStore } = await createStores()
-    const providerId = configStore.getPublicConfig().providers[0]!.id
+    const providerId = configStore.getPublicConfig().models.providers[0]!.id
 
     await expect(
       configStore.update({
@@ -1456,7 +1488,7 @@ describe('ConfigStore', () => {
       }),
     ).rejects.toThrow('Compression threshold exceeds the usable context')
 
-    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+    expect(configStore.getPublicConfig().models.providers[0]).toMatchObject({
       revision: 1,
       model: '',
       modelCatalog: [],
@@ -1482,30 +1514,35 @@ describe('ConfigStore', () => {
     })
 
     expect(configStore.getPublicConfig()).toMatchObject({
-      providers: [
-        {
-          revision: provider.revision + 1,
-          model: 'main-model',
-          modelCatalog: [{ id: 'main-model' }],
-          enabledModelIds: ['main-model'],
-          modelOverrides: {},
+      models: {
+        providers: [
+          {
+            revision: provider.revision + 1,
+            model: 'main-model',
+            modelCatalog: [{ id: 'main-model' }],
+            enabledModelIds: ['main-model'],
+            modelOverrides: {},
+          },
+        ],
+        modelPool: {
+          entries: [{ model: 'worker-model', enabled: false }],
         },
-      ],
-      modelPool: {
-        entries: [{ model: 'worker-model', enabled: false }],
       },
     })
   })
 
-  it('protects the current main and approval models from deletion', async () => {
+  it('protects the current main and auxiliary models from deletion', async () => {
     const { configStore } = await createStores()
     const provider = await configurePoolProvider(configStore)
     await configStore.update({
       version: 1,
-      kind: 'approval',
-      approverProviderId: provider.id,
-      approverModel: 'worker-model',
-      reasoning: 'high',
+      kind: 'models',
+      value: {
+        defaultModelProvider: provider.id,
+        defaultModel: 'main-model',
+        auxiliaryModelProvider: provider.id,
+        auxiliaryModel: 'worker-model',
+      },
     })
 
     await expect(
@@ -1523,9 +1560,9 @@ describe('ConfigStore', () => {
         providerId: provider.id,
         modelId: 'worker-model',
       }),
-    ).rejects.toThrow('Cannot delete the current approval model')
+    ).rejects.toThrow('Cannot delete the current auxiliary model')
 
-    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+    expect(configStore.getPublicConfig().models.providers[0]).toMatchObject({
       model: 'main-model',
       enabledModelIds: ['main-model', 'worker-model'],
       modelOverrides: {
@@ -1552,7 +1589,7 @@ describe('ConfigStore', () => {
       limits,
     })
 
-    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+    expect(configStore.getPublicConfig().models.providers[0]).toMatchObject({
       modelOverrides: {
         'model-a': { reasoningEfforts: ['low', 'medium'], capability: 'light' },
         'model-b': { capability: 'strong' },
@@ -1568,7 +1605,7 @@ describe('ConfigStore', () => {
       ),
     )
     const result = await reloaded.initialize()
-    expect(result.config.providers[0]).toMatchObject({
+    expect(result.config.models.providers[0]).toMatchObject({
       modelOverrides: {
         'model-a': { reasoningEfforts: ['low', 'medium'], capability: 'light' },
         'model-b': { capability: 'strong' },
@@ -1593,7 +1630,7 @@ describe('ConfigStore', () => {
       ...base,
       modelOverrides: { 'model-a': { reasoningEfforts: ['low', 'medium'] } },
     })
-    const revision = created.providers[0]!.revision
+    const revision = created.models.providers[0]!.revision
 
     const annotated = await configStore.update({
       ...base,
@@ -1601,7 +1638,7 @@ describe('ConfigStore', () => {
         'model-a': { reasoningEfforts: ['low', 'medium'], capability: 'light' },
       },
     })
-    expect(annotated.providers[0]!.revision).toBe(revision + 1)
+    expect(annotated.models.providers[0]!.revision).toBe(revision + 1)
 
     const unchanged = await configStore.update({
       ...base,
@@ -1609,7 +1646,7 @@ describe('ConfigStore', () => {
         'model-a': { reasoningEfforts: ['low', 'medium'], capability: 'light' },
       },
     })
-    expect(unchanged.providers[0]!.revision).toBe(revision + 1)
+    expect(unchanged.models.providers[0]!.revision).toBe(revision + 1)
   })
 
   it('rejects the whole update when the main model annotation excludes the provider reasoning', async () => {
@@ -1647,23 +1684,23 @@ describe('ConfigStore', () => {
     expect(await readFile(path.join(directory, 'config.json'), 'utf8')).toBe(
       persistedBefore,
     )
-    expect(configStore.getPublicConfig().providers[0]).toMatchObject({
+    expect(configStore.getPublicConfig().models.providers[0]).toMatchObject({
       reasoning: 'low',
       modelOverrides: {},
     })
   })
 
-  it('validates and persists the exact approval reasoning effort', async () => {
+  it('validates the auxiliary model against the provider default reasoning', async () => {
     const { configStore } = await createStores()
     const limits = configStore.getPublicConfig().limits
-    const providerId = configStore.getPublicConfig().activeProviderId
+    const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
       kind: 'provider-settings',
       baseURL: 'https://example.test/v1',
       model: 'model-a',
       enabledModelIds: ['model-a', 'model-b'],
-      reasoning: 'off',
+      reasoning: 'high',
       modelOverrides: {
         'model-b': { reasoningEfforts: ['off', 'low'] },
       },
@@ -1673,31 +1710,38 @@ describe('ConfigStore', () => {
     await expect(
       configStore.update({
         version: 1,
-        kind: 'approval',
-        approverProviderId: providerId,
-        approverModel: 'model-b',
-        reasoning: 'high',
+        kind: 'models',
+        value: {
+          defaultModelProvider: providerId,
+          defaultModel: 'model-a',
+          auxiliaryModelProvider: providerId,
+          auxiliaryModel: 'model-b',
+        },
       }),
-    ).rejects.toThrow('does not support approval reasoning effort')
+    ).rejects.toThrow(
+      'Auxiliary model model-b does not support the provider default reasoning effort',
+    )
 
     await configStore.update({
       version: 1,
-      kind: 'approval',
-      approverProviderId: providerId,
-      approverModel: 'model-a',
-      reasoning: 'off',
+      kind: 'models',
+      value: {
+        defaultModelProvider: providerId,
+        defaultModel: 'model-a',
+        auxiliaryModelProvider: providerId,
+        auxiliaryModel: 'model-a',
+      },
     })
-    expect(configStore.getPublicConfig().approval).toEqual({
-      approverProviderId: providerId,
-      approverModel: 'model-a',
-      reasoning: 'off',
+    expect(configStore.getPublicConfig().models).toMatchObject({
+      auxiliaryModelProvider: providerId,
+      auxiliaryModel: 'model-a',
     })
   })
 
-  it('rejects a provider update that would break the saved approval model', async () => {
+  it('rejects a provider update that would break the saved auxiliary model', async () => {
     const { configStore } = await createStores()
     const limits = configStore.getPublicConfig().limits
-    const providerId = configStore.getPublicConfig().activeProviderId
+    const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
       kind: 'provider-settings',
@@ -1709,10 +1753,13 @@ describe('ConfigStore', () => {
     })
     await configStore.update({
       version: 1,
-      kind: 'approval',
-      approverProviderId: providerId,
-      approverModel: 'model-b',
-      reasoning: 'high',
+      kind: 'models',
+      value: {
+        defaultModelProvider: providerId,
+        defaultModel: 'model-a',
+        auxiliaryModelProvider: providerId,
+        auxiliaryModel: 'model-b',
+      },
     })
 
     await expect(
@@ -1728,36 +1775,41 @@ describe('ConfigStore', () => {
         },
         limits,
       }),
-    ).rejects.toThrow('does not support approval reasoning effort')
-    expect(configStore.getPublicConfig().approval.approverModel).toBe('model-b')
-    expect(configStore.getPublicConfig().providers[0]!.modelOverrides).toEqual(
-      {},
+    ).rejects.toThrow(
+      'Auxiliary model model-b does not support the provider default reasoning effort',
     )
+    expect(configStore.getPublicConfig().models.auxiliaryModel).toBe('model-b')
+    expect(
+      configStore.getPublicConfig().models.providers[0]!.modelOverrides,
+    ).toEqual({})
   })
 
-  it('does not inherit Provider default reasoning into the saved approval route', async () => {
+  it('keeps no separate reasoning on the auxiliary role as the provider default changes', async () => {
     const { configStore } = await createStores()
     const limits = configStore.getPublicConfig().limits
-    const providerId = configStore.getPublicConfig().activeProviderId
+    const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
       kind: 'provider-settings',
       baseURL: 'https://example.test/v1',
       model: 'main-model',
-      enabledModelIds: ['main-model', 'approval-model'],
+      enabledModelIds: ['main-model', 'auxiliary-model'],
       reasoning: 'low',
       modelOverrides: {
         'main-model': { reasoningEfforts: ['low', 'high'] },
-        'approval-model': { reasoningEfforts: ['off'] },
+        'auxiliary-model': { reasoningEfforts: ['low', 'high'] },
       },
       limits,
     })
     await configStore.update({
       version: 1,
-      kind: 'approval',
-      approverProviderId: providerId,
-      approverModel: 'approval-model',
-      reasoning: 'off',
+      kind: 'models',
+      value: {
+        defaultModelProvider: providerId,
+        defaultModel: 'main-model',
+        auxiliaryModelProvider: providerId,
+        auxiliaryModel: 'auxiliary-model',
+      },
     })
 
     await configStore.update({
@@ -1765,23 +1817,23 @@ describe('ConfigStore', () => {
       kind: 'provider-settings',
       baseURL: 'https://example.test/v1',
       model: 'main-model',
-      enabledModelIds: ['main-model', 'approval-model'],
+      enabledModelIds: ['main-model', 'auxiliary-model'],
       reasoning: 'high',
       modelOverrides: {
         'main-model': { reasoningEfforts: ['low', 'high'] },
-        'approval-model': { reasoningEfforts: ['off'] },
+        'auxiliary-model': { reasoningEfforts: ['low', 'high'] },
       },
       limits,
     })
 
-    expect(configStore.getPublicConfig()).toMatchObject({
-      providers: [{ reasoning: 'high' }],
-      approval: {
-        approverProviderId: providerId,
-        approverModel: 'approval-model',
-        reasoning: 'off',
-      },
+    const models = configStore.getPublicConfig().models
+    expect(models).toMatchObject({
+      defaultModelProvider: providerId,
+      defaultModel: 'main-model',
+      auxiliaryModelProvider: providerId,
+      auxiliaryModel: 'auxiliary-model',
     })
+    expect(models.providers[0]?.reasoning).toBe('high')
   })
 
   it('normalizes reasoning effort set order so equivalent annotations keep the revision', async () => {
@@ -1799,7 +1851,7 @@ describe('ConfigStore', () => {
       },
       limits,
     })
-    const provider = configStore.getPublicConfig().providers[0]!
+    const provider = configStore.getPublicConfig().models.providers[0]!
     expect(provider.modelOverrides['model-a']!.reasoningEfforts).toEqual([
       'low',
       'high',
@@ -1819,13 +1871,15 @@ describe('ConfigStore', () => {
       },
       limits,
     })
-    expect(configStore.getPublicConfig().providers[0]!.revision).toBe(revision)
+    expect(configStore.getPublicConfig().models.providers[0]!.revision).toBe(
+      revision,
+    )
   })
 
-  it('rejects approval saves with a missing provider, disabled model, or empty model', async () => {
+  it('rejects model role saves with an unknown provider or disabled model', async () => {
     const { configStore } = await createStores()
     const limits = configStore.getPublicConfig().limits
-    const providerId = configStore.getPublicConfig().activeProviderId
+    const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
       kind: 'provider-settings',
@@ -1835,40 +1889,51 @@ describe('ConfigStore', () => {
       reasoning: 'high',
       limits,
     })
+    const roles = {
+      defaultModelProvider: providerId,
+      defaultModel: 'model-a',
+      auxiliaryModelProvider: '',
+      auxiliaryModel: '',
+    }
 
     await expect(
       configStore.update({
         version: 1,
-        kind: 'approval',
-        approverProviderId: 'provider-missing',
-        approverModel: 'model-a',
-        reasoning: 'high',
+        kind: 'models',
+        value: {
+          ...roles,
+          auxiliaryModelProvider: 'provider-missing',
+          auxiliaryModel: 'model-a',
+        },
       }),
-    ).rejects.toThrow('Approval provider is not configured')
+    ).rejects.toThrow('Auxiliary model provider is not configured')
     await expect(
       configStore.update({
         version: 1,
-        kind: 'approval',
-        approverProviderId: providerId,
-        approverModel: 'model-disabled',
-        reasoning: 'high',
+        kind: 'models',
+        value: {
+          ...roles,
+          auxiliaryModelProvider: providerId,
+          auxiliaryModel: 'model-disabled',
+        },
       }),
     ).rejects.toThrow('is not enabled for provider')
     await expect(
       configStore.update({
         version: 1,
-        kind: 'approval',
-        approverProviderId: providerId,
-        approverModel: '',
-        reasoning: 'high',
+        kind: 'models',
+        value: {
+          ...roles,
+          defaultModelProvider: 'provider-missing',
+        },
       }),
-    ).rejects.toThrow('is not enabled for provider')
+    ).rejects.toThrow('Default model provider is not configured')
   })
 
-  it('rejects a provider update that disables the saved approval model', async () => {
+  it('rejects a provider update that disables the saved auxiliary model', async () => {
     const { configStore } = await createStores()
     const limits = configStore.getPublicConfig().limits
-    const providerId = configStore.getPublicConfig().activeProviderId
+    const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
       kind: 'provider-settings',
@@ -1880,10 +1945,13 @@ describe('ConfigStore', () => {
     })
     await configStore.update({
       version: 1,
-      kind: 'approval',
-      approverProviderId: providerId,
-      approverModel: 'model-b',
-      reasoning: 'high',
+      kind: 'models',
+      value: {
+        defaultModelProvider: providerId,
+        defaultModel: 'model-a',
+        auxiliaryModelProvider: providerId,
+        auxiliaryModel: 'model-b',
+      },
     })
 
     await expect(
@@ -1897,13 +1965,13 @@ describe('ConfigStore', () => {
         limits,
       }),
     ).rejects.toThrow('is not enabled for provider')
-    expect(configStore.getPublicConfig().approval.approverModel).toBe('model-b')
+    expect(configStore.getPublicConfig().models.auxiliaryModel).toBe('model-b')
   })
 
-  it('picks a compatible fallback approval model after deleting the approver provider', async () => {
+  it('moves both model roles to the fallback provider default model after deletion', async () => {
     const { configStore } = await createStores()
     const limits = configStore.getPublicConfig().limits
-    const providerId = configStore.getPublicConfig().activeProviderId
+    const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
       kind: 'provider-settings',
@@ -1931,10 +1999,13 @@ describe('ConfigStore', () => {
     })
     await configStore.update({
       version: 1,
-      kind: 'approval',
-      approverProviderId: providerId,
-      approverModel: 'model-a',
-      reasoning: 'high',
+      kind: 'models',
+      value: {
+        defaultModelProvider: providerId,
+        defaultModel: 'model-a',
+        auxiliaryModelProvider: providerId,
+        auxiliaryModel: 'model-a',
+      },
     })
 
     await configStore.update({
@@ -1944,19 +2015,19 @@ describe('ConfigStore', () => {
       fallbackProviderId: 'fallback',
     })
 
-    // Fallback selection uses the saved approval effort, not the fallback
-    // Provider's own default effort, so it skips the low-only main model.
-    expect(configStore.getPublicConfig().approval).toEqual({
-      approverProviderId: 'fallback',
-      approverModel: 'fallback-high',
-      reasoning: 'high',
+    // Both roles follow the fallback Provider's own default model.
+    expect(configStore.getPublicConfig().models).toMatchObject({
+      defaultModelProvider: 'fallback',
+      defaultModel: 'fallback-low',
+      auxiliaryModelProvider: 'fallback',
+      auxiliaryModel: 'fallback-low',
     })
   })
 
-  it('rejects deleting the approver provider when the fallback has no compatible model', async () => {
+  it('clears the auxiliary model when the deleted provider was the only auxiliary source', async () => {
     const { configStore } = await createStores()
     const limits = configStore.getPublicConfig().limits
-    const providerId = configStore.getPublicConfig().activeProviderId
+    const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
       kind: 'provider-settings',
@@ -1973,40 +2044,34 @@ describe('ConfigStore', () => {
       label: 'Fallback',
       providerType: 'generic.chat-completions',
       baseURL: 'https://fallback.example/v1',
-      model: 'fallback-off',
-      enabledModelIds: ['fallback-off'],
+      model: '',
+      enabledModelIds: [],
       reasoning: 'off',
-      modelOverrides: {
-        'fallback-off': { reasoningEfforts: ['off'] },
-      },
       limits,
     })
     await configStore.update({
       version: 1,
-      kind: 'approval',
-      approverProviderId: providerId,
-      approverModel: 'model-a',
-      reasoning: 'high',
+      kind: 'models',
+      value: {
+        defaultModelProvider: 'fallback',
+        defaultModel: '',
+        auxiliaryModelProvider: providerId,
+        auxiliaryModel: 'model-a',
+      },
     })
 
-    await expect(
-      configStore.update({
-        version: 1,
-        kind: 'provider-delete',
-        providerId,
-        fallbackProviderId: 'fallback',
-      }),
-    ).rejects.toThrow(
-      'No approval-compatible model is enabled for fallback provider fallback',
-    )
+    await configStore.update({
+      version: 1,
+      kind: 'provider-delete',
+      providerId,
+      fallbackProviderId: 'fallback',
+    })
 
-    expect(configStore.getPublicConfig().providers.map(({ id }) => id)).toEqual(
-      [providerId, 'fallback'],
-    )
-    expect(configStore.getPublicConfig().approval).toEqual({
-      approverProviderId: providerId,
-      approverModel: 'model-a',
-      reasoning: 'high',
+    expect(configStore.getPublicConfig().models).toMatchObject({
+      defaultModelProvider: 'fallback',
+      defaultModel: '',
+      auxiliaryModelProvider: '',
+      auxiliaryModel: '',
     })
   })
 
@@ -2033,7 +2098,7 @@ describe('ConfigStore', () => {
     })
   })
 
-  it('commits provider settings without rewriting global approval', async () => {
+  it('commits provider settings without rewriting the model roles', async () => {
     const { configStore } = await createStores()
     const limits = configStore.getPublicConfig().limits
     await configStore.update({
@@ -2047,10 +2112,13 @@ describe('ConfigStore', () => {
     })
     await configStore.update({
       version: 1,
-      kind: 'approval',
-      approverProviderId: 'deepseek',
-      approverModel: 'model-approver',
-      reasoning: 'off',
+      kind: 'models',
+      value: {
+        defaultModelProvider: 'deepseek',
+        defaultModel: 'model-a',
+        auxiliaryModelProvider: 'deepseek',
+        auxiliaryModel: 'model-approver',
+      },
     })
 
     const result = await configStore.update({
@@ -2078,7 +2146,7 @@ describe('ConfigStore', () => {
       apiKey: 'atomic-secret',
     })
 
-    expect(result.providers[0]).toMatchObject({
+    expect(result.models.providers[0]).toMatchObject({
       baseURL: 'https://example.test/v1',
       model: 'model-b',
       reasoning: 'off',
@@ -2096,9 +2164,9 @@ describe('ConfigStore', () => {
         },
       },
     })
-    expect(result.approval.approverProviderId).toBe('deepseek')
-    expect(result.approval.approverModel).toBe('model-approver')
-    expect(result.approval.reasoning).toBe('off')
+    expect(result.models.auxiliaryModelProvider).toBe('deepseek')
+    expect(result.models.auxiliaryModel).toBe('model-approver')
+    expect(result.models.defaultModel).toBe('model-a')
     expect(result.limits.tokenEstimation).toEqual({
       mode: 'custom-bytes',
       bytesPerToken: 2.5,
@@ -2153,10 +2221,16 @@ describe('ConfigStore', () => {
 
     const selected = await configStore.update({
       version: 1,
-      kind: 'provider-select',
-      providerId: 'generic',
+      kind: 'models',
+      value: {
+        defaultModelProvider: 'generic',
+        defaultModel: 'generic-chat',
+        auxiliaryModelProvider: '',
+        auxiliaryModel: '',
+      },
     })
-    expect(selected.activeProviderId).toBe('generic')
+    expect(selected.models.defaultModelProvider).toBe('generic')
+    expect(selected.models.defaultModel).toBe('generic-chat')
 
     const copied = await configStore.update({
       version: 1,
@@ -2165,7 +2239,7 @@ describe('ConfigStore', () => {
       providerId: 'generic-copy',
       label: 'Generic Copy',
     })
-    const copiedProvider = copied.providers.find(
+    const copiedProvider = copied.models.providers.find(
       (provider) => provider.id === 'generic-copy',
     )
     expect(copiedProvider).toMatchObject({
@@ -2185,12 +2259,12 @@ describe('ConfigStore', () => {
       providerId: 'generic',
       fallbackProviderId: 'generic-copy',
     })
-    expect(deleted.providers.map((provider) => provider.id)).toEqual([
+    expect(deleted.models.providers.map((provider) => provider.id)).toEqual([
       'deepseek',
       'generic-copy',
     ])
-    expect(deleted.activeProviderId).toBe('generic-copy')
-    expect(deleted.approval.approverProviderId).toBe('deepseek')
+    expect(deleted.models.defaultModelProvider).toBe('generic-copy')
+    expect(deleted.models.auxiliaryModelProvider).toBe('')
     await expect(
       configStore.getProviderApiKey('generic'),
     ).resolves.toBeUndefined()

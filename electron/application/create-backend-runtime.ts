@@ -52,6 +52,7 @@ export interface CreateBackendRuntimeOptions {
   eventListeners?: CreateAgentRuntimeOptions['eventListeners']
   onDiagnostic?: DiagnosticSink
   swarmHostEnabled?: boolean
+  conversationTitlingDisabled?: boolean
 }
 
 export interface BackendRuntime {
@@ -273,14 +274,16 @@ export async function createBackendRuntime(
     })
     swarmBridge.bind(swarmCoordinator)
     targetState.runs = runs
-    const conversationTitling = new ConversationTitlingService({
-      configStore: options.configStore,
-      sessions,
-      prompts: runtime.services.prompts,
-      events: runtime.events,
-      fetchImpl: options.fetchImpl,
-      onDiagnostic: options.onDiagnostic,
-    })
+    const conversationTitling = options.conversationTitlingDisabled
+      ? undefined
+      : new ConversationTitlingService({
+          configStore: options.configStore,
+          sessions,
+          prompts: runtime.services.prompts,
+          events: runtime.events,
+          fetchImpl: options.fetchImpl,
+          onDiagnostic: options.onDiagnostic,
+        })
     let disposePromise: Promise<void> | undefined
     return {
       databasePath,

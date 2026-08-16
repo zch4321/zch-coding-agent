@@ -8,7 +8,7 @@ import type {
   ProviderPublicConfig,
   PublicConfig,
 } from '../../shared/config'
-import { useApprovalSettingsStore } from './approval-settings'
+import { useModelRolesStore } from './model-roles'
 import { useAgentSettingsStore } from './agent-settings'
 import { useModelPoolSettingsStore } from './model-pool-settings'
 import { providerFormSignature } from './provider-form'
@@ -39,16 +39,15 @@ describe('agent settings model pool', () => {
 
   it('uses enabled models for selectors while retaining the full transfer catalog', () => {
     const settings = useAgentSettingsStore()
-    const approval = useApprovalSettingsStore()
     const configuredProvider = provider()
     settings.providers = [configuredProvider]
-    settings.activeProviderId = configuredProvider.id
+    useModelRolesStore().defaultModelProvider = configuredProvider.id
     settings.selectedProviderId = configuredProvider.id
     settings.providerForm.model = configuredProvider.model
     settings.providerForm.enabledModelIds = [
       ...configuredProvider.enabledModelIds,
     ]
-    approval.approvalForm.providerId = configuredProvider.id
+    useModelRolesStore().auxiliaryModelProvider = configuredProvider.id
     settings.modelProfiles = [
       {
         id: 'enabled-model',
@@ -83,9 +82,6 @@ describe('agent settings model pool', () => {
         (option) => option.value === 'enabled-model',
       ),
     ).toMatchObject({ disabled: true })
-    expect(settings.approvalModelOptions.map((option) => option.value)).toEqual(
-      ['enabled-model'],
-    )
     expect(settings.providerCardSummaries[0]?.models).toEqual(['enabled-model'])
   })
 
@@ -191,7 +187,7 @@ describe('agent settings model pool', () => {
       capability: 'strong',
     }
     settings.providers = [configuredProvider]
-    settings.activeProviderId = configuredProvider.id
+    useModelRolesStore().defaultModelProvider = configuredProvider.id
     settings.selectedProviderId = configuredProvider.id
     settings.hydrateSelectedProviderForm()
     settings.providerSavedSignature = providerFormSignature(
@@ -216,9 +212,15 @@ describe('agent settings model pool', () => {
       ok: true as const,
       value: {
         config: {
-          activeProviderId: configuredProvider.id,
-          providers: [updatedProvider],
-        } as PublicConfig,
+          models: {
+            defaultModelProvider: configuredProvider.id,
+            defaultModel: updatedProvider.model,
+            auxiliaryModelProvider: '',
+            auxiliaryModel: '',
+            providers: [updatedProvider],
+            modelPool: { entries: [] },
+          },
+        } as unknown as PublicConfig,
       },
     }))
     Object.defineProperty(window, 'agentApi', {
@@ -256,7 +258,7 @@ describe('agent settings model pool', () => {
     const pool = useModelPoolSettingsStore()
     const configuredProvider = provider()
     settings.providers = [configuredProvider]
-    settings.activeProviderId = configuredProvider.id
+    useModelRolesStore().defaultModelProvider = configuredProvider.id
     settings.selectedProviderId = configuredProvider.id
     settings.hydrateSelectedProviderForm()
     settings.providerSavedSignature = providerFormSignature(
@@ -274,20 +276,25 @@ describe('agent settings model pool', () => {
       ok: true as const,
       value: {
         config: {
-          activeProviderId: configuredProvider.id,
-          providers: [updatedProvider],
-          modelPool: {
-            entries: [
-              {
-                id: 'worker-1',
-                enabled: false,
-                providerId: configuredProvider.id,
-                model: 'catalog-only-model',
-                reasoning: 'off',
-              },
-            ],
+          models: {
+            defaultModelProvider: configuredProvider.id,
+            defaultModel: updatedProvider.model,
+            auxiliaryModelProvider: '',
+            auxiliaryModel: '',
+            providers: [updatedProvider],
+            modelPool: {
+              entries: [
+                {
+                  id: 'worker-1',
+                  enabled: false,
+                  providerId: configuredProvider.id,
+                  model: 'catalog-only-model',
+                  reasoning: 'off',
+                },
+              ],
+            },
           },
-        } as PublicConfig,
+        } as unknown as PublicConfig,
       },
     }))
     Object.defineProperty(window, 'agentApi', {
@@ -316,36 +323,11 @@ describe('agent settings model pool', () => {
     ])
   })
 
-  it('keeps every enabled approval model visible regardless of annotation', () => {
-    const settings = useAgentSettingsStore()
-    const approval = useApprovalSettingsStore()
-    const configuredProvider = {
-      ...provider(),
-      reasoning: 'off' as const,
-      enabledModelIds: ['enabled-model', 'low-only-model', 'off-only-model'],
-      modelOverrides: {
-        'low-only-model': {
-          reasoningEfforts: ['low' as const],
-        },
-        'off-only-model': {
-          reasoningEfforts: ['off' as const],
-        },
-      },
-    }
-    settings.providers = [configuredProvider]
-    approval.approvalForm.providerId = configuredProvider.id
-    approval.approvalForm.reasoning = 'high'
-
-    expect(settings.approvalModelOptions.map((option) => option.value)).toEqual(
-      ['enabled-model', 'low-only-model', 'off-only-model'],
-    )
-  })
-
   it('keeps an unsaved Provider draft dirty after loading its model catalog', async () => {
     const settings = useAgentSettingsStore()
     const configuredProvider = provider()
     settings.providers = [configuredProvider]
-    settings.activeProviderId = configuredProvider.id
+    useModelRolesStore().defaultModelProvider = configuredProvider.id
     settings.selectedProviderId = configuredProvider.id
     settings.hydrateSelectedProviderForm()
     settings.providerSavedSignature = providerFormSignature(
@@ -398,7 +380,7 @@ describe('agent settings model pool', () => {
       },
     }
     settings.providers = [configuredProvider]
-    settings.activeProviderId = configuredProvider.id
+    useModelRolesStore().defaultModelProvider = configuredProvider.id
     settings.selectedProviderId = configuredProvider.id
 
     settings.hydrateSelectedProviderForm()
