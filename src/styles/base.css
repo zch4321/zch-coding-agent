@@ -31,14 +31,6 @@ button {
   cursor: pointer;
 }
 
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
-  outline: none;
-  box-shadow: var(--focus);
-}
-
 #app {
   width: 100vw;
   height: 100vh;
