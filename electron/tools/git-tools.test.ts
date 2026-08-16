@@ -9,6 +9,7 @@ import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { PermissionPipeline } from '../permission/permission-pipeline'
+import { GIT_READ_ONLY_TOOL_IDS } from './git-tool-ids'
 import { registerGitReadOnlyTools, registerGitWriteTools } from './git-tools'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
 
@@ -94,12 +95,13 @@ async function execute(
 }
 
 describe('git read-only tools', () => {
-  it('registers git_status, git_diff, git_log and git_show as vcs.read low risk', () => {
+  it('registers every read-only Git tool as parallel vcs.read low risk', () => {
     const { registry } = harness(os.tmpdir())
-    for (const id of ['git_status', 'git_diff', 'git_log', 'git_show']) {
+    for (const id of GIT_READ_ONLY_TOOL_IDS) {
       const definition = registry.get(id)
       expect(definition?.effects).toEqual(['vcs.read'])
       expect(definition?.defaultRisk).toBe('low')
+      expect(definition?.executionMode).toBe('parallel')
     }
   })
 
@@ -177,6 +179,30 @@ describe('git read-only tools', () => {
     }
   })
 
+  it('runs git_diff across a revision range with bounded hunk context', async () => {
+    const root = await repo()
+    await git(root, ['add', 'README.md'])
+    await git(root, ['commit', '--quiet', '-m', 'second'])
+
+    const result = await execute(root, {
+      toolId: 'git_diff',
+      args: {
+        revision: 'HEAD~1..HEAD',
+        contextLines: 0,
+        paths: ['README.md'],
+      },
+    })
+
+    expect(result).toMatchObject({ status: 'ok' })
+
+    if (result.status === 'ok') {
+      const content = result.content as { stdout: string }
+      expect(content.stdout).toContain('-hello')
+      expect(content.stdout).toContain('+hello world')
+      expect(content.stdout).not.toContain('src.txt')
+    }
+  })
+
   it('reports a git failure for an unknown ref', async () => {
     const root = await repo()
     const result = await execute(root, {
@@ -207,6 +233,28 @@ describe('git read-only tools', () => {
     }
   })
 
+  it('filters git_log history by pathspec', async () => {
+    const root = await repo()
+    await git(root, ['commit', '--quiet', '-m', 'add src', '--', 'src.txt'])
+
+    const result = await execute(root, {
+      toolId: 'git_log',
+      args: {
+        flags: ['--oneline'],
+        limit: 10,
+        paths: ['README.md'],
+      },
+    })
+
+    expect(result).toMatchObject({ status: 'ok' })
+
+    if (result.status === 'ok') {
+      const content = result.content as { stdout: string }
+      expect(content.stdout).toContain('initial')
+      expect(content.stdout).not.toContain('add src')
+    }
+  })
+
   it('runs git_show for a given ref', async () => {
     const root = await repo()
     const result = await execute(root, {
@@ -219,6 +267,48 @@ describe('git read-only tools', () => {
     if (result.status === 'ok') {
       const content = result.content as { stdout: string }
       expect(content.stdout).toContain('initial')
+    }
+  })
+
+  it('filters git_show output by pathspec', async () => {
+    const root = await repo()
+    await git(root, ['add', 'README.md'])
+    await git(root, ['commit', '--quiet', '-m', 'combined change'])
+
+    const result = await execute(root, {
+      toolId: 'git_show',
+      args: { ref: 'HEAD', paths: ['README.md'] },
+    })
+
+    expect(result).toMatchObject({ status: 'ok' })
+
+    if (result.status === 'ok') {
+      const content = result.content as { stdout: string }
+      expect(content.stdout).toContain('README.md')
+      expect(content.stdout).not.toContain('src.txt')
+    }
+  })
+
+  it('lists branches and tags with git_refs', async () => {
+    const root = await repo()
+    await git(root, ['branch', 'feature'])
+    await git(root, ['tag', 'v1.0.0'])
+    const currentBranch = (
+      await git(root, ['symbolic-ref', '--short', 'HEAD'])
+    ).trim()
+
+    const result = await execute(root, {
+      toolId: 'git_refs',
+      args: { scope: 'all', limit: 20 },
+    })
+
+    expect(result).toMatchObject({ status: 'ok' })
+
+    if (result.status === 'ok') {
+      const content = result.content as { stdout: string }
+      expect(content.stdout).toContain(`*\trefs/heads/${currentBranch}\t`)
+      expect(content.stdout).toContain('refs/heads/feature')
+      expect(content.stdout).toContain('refs/tags/v1.0.0')
     }
   })
 
@@ -301,6 +391,21 @@ describe('git read-only tools', () => {
     const result = await execute(root, {
       toolId: 'git_log',
       args: { revision: `--output=${target}`, limit: 1 },
+    })
+
+    expect(result).toMatchObject({
+      status: 'error',
+      code: 'INVALID_ARGS',
+    })
+    expect(existsSync(target)).toBe(false)
+  })
+
+  it('rejects git_diff revision option injection and writes no file', async () => {
+    const root = await repo()
+    const target = path.join(root, 'injected.txt')
+    const result = await execute(root, {
+      toolId: 'git_diff',
+      args: { revision: `--output=${target}` },
     })
 
     expect(result).toMatchObject({

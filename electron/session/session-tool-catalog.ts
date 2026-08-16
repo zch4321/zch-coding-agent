@@ -1,5 +1,6 @@
 import type { ProviderToolDefinition } from '../providers/provider'
 import type { ToolRegistry } from '../tools/tool-registry'
+import { isGitReadOnlyToolId } from '../tools/git-tool-ids'
 
 const DISABLED_PROJECT_TOOL_IDS = new Set([
   'project_get_modules',
@@ -12,13 +13,6 @@ const DISABLED_PROJECT_TOOL_IDS = new Set([
   'code_workspace_symbols',
   'code_diagnostics',
 ])
-const GIT_READ_ONLY_TOOL_IDS = new Set([
-  'git_status',
-  'git_diff',
-  'git_log',
-  'git_show',
-])
-
 export interface SessionToolCatalog {
   definitions: ProviderToolDefinition[]
   names: string[]
@@ -65,7 +59,7 @@ export function resolveSessionToolCatalog(input: {
           definition.name !== 'swarm_run') &&
         (input.subagentsEnabled || definition.name !== 'swarm_run') &&
         (input.gitToolsEnabled !== false ||
-          !GIT_READ_ONLY_TOOL_IDS.has(definition.name)),
+          !isGitReadOnlyToolId(definition.name)),
     )
     .map((definition) =>
       input.swarmMaxAgents === undefined

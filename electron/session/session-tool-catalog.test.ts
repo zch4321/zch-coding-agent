@@ -55,12 +55,14 @@ describe('session tool catalog', () => {
       registry: registry([
         'read_file',
         'git_status',
+        'git_refs',
         'subagent_run',
         'code_find_definition',
       ]),
       allowedToolIds: new Set([
         'read_file',
         'git_status',
+        'git_refs',
         'subagent_run',
         'code_find_definition',
       ]),

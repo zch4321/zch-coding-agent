@@ -4,6 +4,7 @@ import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'
 import { boundToolResultProjectionForContext } from '../tools/context-budget'
+import { isGitReadOnlyToolId } from '../tools/git-tool-ids'
 import { PermissionPipeline } from '../permission/permission-pipeline'
 import { hasSideEffects } from '../permission/policy-engine'
 import type { PluginEventBus } from '../plugins/event-bus'
@@ -757,13 +758,7 @@ export class SessionToolRunner {
     if (run.allowedToolIds && !run.allowedToolIds.has(toolId)) return false
     if (toolId === 'subagent_run' && !run.subagentsEnabled) return false
     if (toolId === 'swarm_run' && !run.swarmToolConfig) return false
-    if (
-      !session.gitToolsEnabled &&
-      (toolId === 'git_status' ||
-        toolId === 'git_diff' ||
-        toolId === 'git_log' ||
-        toolId === 'git_show')
-    ) {
+    if (!session.gitToolsEnabled && isGitReadOnlyToolId(toolId)) {
       return false
     }
     return true

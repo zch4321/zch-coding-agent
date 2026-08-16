@@ -225,8 +225,9 @@ describe('SubagentExecutionService', () => {
       }),
     )
     const childInput = target.manager.createInternalSession.mock.calls[0]?.[0]
-    expect(childInput?.allowedToolIds.size).toBe(10)
+    expect(childInput?.allowedToolIds.size).toBe(11)
     expect(childInput?.allowedToolIds.has('git_status')).toBe(true)
+    expect(childInput?.allowedToolIds.has('git_refs')).toBe(true)
     expect(childInput?.allowedToolIds.has('create_file')).toBe(false)
     expect(result).toEqual({
       results: { worker: 'child response' },

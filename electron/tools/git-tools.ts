@@ -170,6 +170,21 @@ type GitStatusArgs = Static<typeof GitStatusSchema>
 const GitDiffSchema = Type.Object(
   {
     flags: FLAGS_FIELD,
+    revision: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 256,
+        description:
+          'Optional revision or revision range, for example HEAD, main..HEAD, or main...HEAD. Must not start with "-".',
+      }),
+    ),
+    contextLines: Type.Optional(
+      Type.Integer({
+        minimum: 0,
+        maximum: 100,
+        description: 'Number of unchanged context lines around each diff hunk.',
+      }),
+    ),
     paths: PATHS_FIELD,
   },
   { additionalProperties: false },
@@ -194,6 +209,7 @@ const GitLogSchema = Type.Object(
         description: 'Maximum number of commits to show.',
       }),
     ),
+    paths: PATHS_FIELD,
   },
   { additionalProperties: false },
 )
@@ -208,10 +224,39 @@ const GitShowSchema = Type.Object(
       description:
         'Required git commit, tag, branch, or object ref. Must not start with "-".',
     }),
+    paths: PATHS_FIELD,
   },
   { additionalProperties: false },
 )
 type GitShowArgs = Static<typeof GitShowSchema>
+
+const GitRefsSchema = Type.Object(
+  {
+    scope: Type.Optional(
+      Type.Union(
+        [
+          Type.Literal('all'),
+          Type.Literal('local'),
+          Type.Literal('remote'),
+          Type.Literal('tags'),
+        ],
+        {
+          description:
+            'Reference group to list. Defaults to local and remote branches plus tags.',
+        },
+      ),
+    ),
+    limit: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 500,
+        description: 'Maximum number of refs to show. Defaults to 100.',
+      }),
+    ),
+  },
+  { additionalProperties: false },
+)
+type GitRefsArgs = Static<typeof GitRefsSchema>
 
 const GIT_STATUS_FLAGS = [
   '--short',
@@ -243,7 +288,7 @@ function timeoutAndOutput(getConfig: () => PublicConfig): {
   }
 }
 
-/** Registers read-only Git status, diff, log, and related workspace tools. */
+/** Registers read-only Git status, diff, history, object, and ref tools. */
 export function registerGitReadOnlyTools(
   registry: ToolRegistrationPort,
   getConfig: () => PublicConfig,
@@ -293,7 +338,7 @@ export function registerGitReadOnlyTools(
     id: 'git_diff',
     executionMode: 'parallel',
     description:
-      'Show changes between commits, the working tree and the index (read-only). Accepts --stat/--name-only/--cached and optional pathspecs.',
+      'Show changes between revisions, the working tree and the index (read-only). revision accepts HEAD, base..head, or base...head; optional pathspecs and --stat/--name-only/--cached are supported.',
     inputSchema: GitDiffSchema,
     effects: ['vcs.read'],
     defaultRisk: 'low',
@@ -314,11 +359,28 @@ export function registerGitReadOnlyTools(
       }
 
       const paths = args.paths ?? []
+      let revision: string[] = []
+      if (args.revision) {
+        const refError = assertRef(args.revision, 'revision', 'git_diff')
+        if (refError) {
+          return {
+            status: 'error',
+            code: 'INVALID_ARGS',
+            message: refError,
+            retryable: false,
+          }
+        }
+        revision = ['--end-of-options', args.revision]
+      }
+      const contextLines =
+        args.contextLines === undefined
+          ? []
+          : [`--unified=${args.contextLines}`]
       const { timeoutMs, maxOutputBytes } = timeoutAndOutput(getConfig)
       return runGit({
         workspace: context.workspace.canonicalPath,
         subcommand: 'diff',
-        args: [...flags, '--', ...paths],
+        args: [...flags, ...contextLines, ...revision, '--', ...paths],
         fixedArgs: ['--no-ext-diff', '--no-textconv'],
         signal: context.signal,
         timeoutMs,
@@ -331,7 +393,7 @@ export function registerGitReadOnlyTools(
     id: 'git_log',
     executionMode: 'parallel',
     description:
-      'Show commit history (read-only). Accepts --oneline/--stat/--no-merges, an optional revision range and -n <count>.',
+      'Show bounded commit history (read-only). Accepts --oneline/--stat/--no-merges, an optional revision range, limit, and pathspecs.',
     inputSchema: GitLogSchema,
     effects: ['vcs.read'],
     defaultRisk: 'low',
@@ -352,6 +414,7 @@ export function registerGitReadOnlyTools(
       }
 
       const limit = args.limit ? ['-n', String(args.limit)] : []
+      const paths = args.paths ?? []
       let revision: string[] = []
 
       if (args.revision) {
@@ -372,7 +435,7 @@ export function registerGitReadOnlyTools(
       return runGit({
         workspace: context.workspace.canonicalPath,
         subcommand: 'log',
-        args: [...flags, ...limit, ...revision],
+        args: [...flags, ...limit, ...revision, '--', ...paths],
         signal: context.signal,
         timeoutMs,
         maxOutputBytes,
@@ -384,7 +447,7 @@ export function registerGitReadOnlyTools(
     id: 'git_show',
     executionMode: 'parallel',
     description:
-      'Show the contents of a commit, tag or object (read-only). Accepts --stat/--name-only/--no-patch and a required ref.',
+      'Show a commit, tag or object (read-only). Accepts --stat/--name-only/--no-patch, a required ref, and optional pathspecs.',
     inputSchema: GitShowSchema,
     effects: ['vcs.read'],
     defaultRisk: 'low',
@@ -416,11 +479,60 @@ export function registerGitReadOnlyTools(
       }
 
       const { timeoutMs, maxOutputBytes } = timeoutAndOutput(getConfig)
+      const paths = args.paths ?? []
       return runGit({
         workspace: context.workspace.canonicalPath,
         subcommand: 'show',
-        args: [...flags, '--end-of-options', args.ref],
+        args: [...flags, '--end-of-options', args.ref, '--', ...paths],
         fixedArgs: ['--no-ext-diff', '--no-textconv'],
+        signal: context.signal,
+        timeoutMs,
+        maxOutputBytes,
+      })
+    },
+  }
+
+  const gitRefs: ToolDefinition<typeof GitRefsSchema> = {
+    id: 'git_refs',
+    executionMode: 'parallel',
+    description:
+      'List local branches, remote branches and tags (read-only). Tab-separated columns are current marker, full ref, short ref, object, upstream and ahead/behind state.',
+    inputSchema: GitRefsSchema,
+    effects: ['vcs.read'],
+    defaultRisk: 'low',
+    supportsAbort: true,
+    defaultTimeoutMs: 20_000,
+    maxOutputBytes: 128 * 1_024,
+    projectResultForModel: (result) => projectGitResult(result, '[no refs]'),
+    async execute(args: GitRefsArgs, context): Promise<ToolResult> {
+      const scope = args.scope ?? 'all'
+      const prefixes =
+        scope === 'local'
+          ? ['refs/heads']
+          : scope === 'remote'
+            ? ['refs/remotes']
+            : scope === 'tags'
+              ? ['refs/tags']
+              : ['refs/heads', 'refs/remotes', 'refs/tags']
+      const format = [
+        '%(HEAD)',
+        '%(refname)',
+        '%(refname:short)',
+        '%(objectname:short)',
+        '%(upstream:short)',
+        '%(upstream:track)',
+      ].join('%09')
+      const { timeoutMs, maxOutputBytes } = timeoutAndOutput(getConfig)
+      return runGit({
+        workspace: context.workspace.canonicalPath,
+        subcommand: 'for-each-ref',
+        args: [
+          '--sort=-committerdate',
+          '--sort=-HEAD',
+          `--count=${args.limit ?? 100}`,
+          `--format=${format}`,
+          ...prefixes,
+        ],
         signal: context.signal,
         timeoutMs,
         maxOutputBytes,
@@ -432,6 +544,7 @@ export function registerGitReadOnlyTools(
   registry.registerTool(gitDiff)
   registry.registerTool(gitLog)
   registry.registerTool(gitShow)
+  registry.registerTool(gitRefs)
 }
 
 const GitAddSchema = Type.Object(

@@ -1636,9 +1636,9 @@ child Provider catalog 只包含：
 
 - `read_file`、`list_dir`、`glob`、`grep`
 - `read_skill` 与有界 `delay`
-- `git_status`、`git_diff`、`git_log`、`git_show`
+- `git_status`、`git_diff`、`git_log`、`git_show`、`git_refs`
 
-写文件、git write、process、terminal、network、MCP、Goal/Plan、ProjectModel、code intelligence、`subagent_run` 和 `swarm_run` 都不进入模型可见 catalog。实际 executor 再独立校验相同 allowlist 与 `gitToolsEnabled`，所以伪造 tool call 不能绕过 catalog。Git 命令使用 `--no-optional-locks`。
+写文件、git write、process、terminal、network、MCP、Goal/Plan、ProjectModel、code intelligence、`subagent_run` 和 `swarm_run` 都不进入模型可见 catalog。实际 executor 再独立校验相同 allowlist 与 `gitToolsEnabled`，所以伪造 tool call 不能绕过 catalog。Git 命令使用 `--no-optional-locks`。`git_diff` 支持单 revision、双点范围与基于 merge-base 的三点范围，并可限制上下文行和 pathspec；`git_log`、`git_show` 支持 pathspec；`git_refs` 以有界结果列出本地/远端分支、tag、upstream 和 ahead/behind 状态。
 
 ### 18.3 Live Workspace/Git view
 

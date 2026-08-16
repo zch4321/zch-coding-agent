@@ -12,6 +12,7 @@ import type { LlmUsageRecord } from '../../shared/usage'
 import { MAX_SWARM_SHARED_CONTEXT_LENGTH } from '../../shared/swarm'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
+import { GIT_READ_ONLY_TOOL_IDS } from '../tools/git-tool-ids'
 import { projectAgentExecutionSummary } from './public-projection'
 import {
   swarmSharedContextContent,
@@ -36,7 +37,6 @@ const CHILD_TOOL_IDS = new Set([
   'read_skill',
   'delay',
 ])
-const CHILD_GIT_TOOL_IDS = ['git_status', 'git_diff', 'git_log', 'git_show']
 const MAX_ERROR_LENGTH = 65_536
 const OUTPUT_FINISH_REASONS = new Set([
   'length',
@@ -452,7 +452,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
           reasoning: input.routes.main.snapshot.reasoning,
         },
         providerSnapshot: input.routes.main.provider,
-        allowedToolIds: new Set([...CHILD_TOOL_IDS, ...CHILD_GIT_TOOL_IDS]),
+        allowedToolIds: new Set([...CHILD_TOOL_IDS, ...GIT_READ_ONLY_TOOL_IDS]),
         gitToolsEnabled: true,
         execution: {
           executionId: input.record.id,
