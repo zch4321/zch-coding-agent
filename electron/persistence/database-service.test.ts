@@ -16,9 +16,9 @@ import {
 } from './persistence-error'
 import { createTestDatabase } from './test-database'
 import { ProjectRepository } from './project-repository'
-import { SessionRepository } from './session-repository'
 import {
   fileChangeFixture,
+  insertLegacySession,
   projectFixture,
   sessionFixture,
 } from './repository-fixtures'
@@ -196,7 +196,7 @@ describe('DatabaseService', () => {
       const count = reopened.read((reader) =>
         reader.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
       )
-      expect(count).toEqual({ count: 8 })
+      expect(count).toEqual({ count: 9 })
     } finally {
       await reopened.close()
       await testDatabase.dispose()
@@ -230,8 +230,8 @@ describe('DatabaseService', () => {
           .all(),
       }))
       expect(state.migrations.at(-1)).toEqual({
-        version: 8,
-        name: '0008_swarm_executions',
+        version: 9,
+        name: '0009_title_source',
       })
       expect(state.tables).toEqual([
         { name: 'subagent_executions' },
@@ -257,7 +257,7 @@ describe('DatabaseService', () => {
     const row = encodeStoredFileChangeRow(record)
     await legacy.database.withTransaction((transaction) => {
       new ProjectRepository().insert(transaction, project)
-      new SessionRepository().insert(transaction, session)
+      insertLegacySession(transaction, session)
       transaction
         .prepare(
           `INSERT INTO file_changes (
@@ -365,7 +365,7 @@ describe('DatabaseService', () => {
     ]
     await legacy.database.withTransaction((transaction) => {
       new ProjectRepository().insert(transaction, project)
-      new SessionRepository().insert(transaction, session)
+      insertLegacySession(transaction, session)
       const insert = transaction.prepare(
         `INSERT INTO messages (
              schema_version, id, session_id, seq, kind, parts_json,
@@ -515,8 +515,8 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 9,
-        name: '0009_future',
+        version: 10,
+        name: '0010_future',
         sql: 'CREATE TABLE future_state (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -536,13 +536,13 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 9,
-        name: '0009_second',
+        version: 10,
+        name: '0010_second',
         sql: 'CREATE TABLE second_step (id TEXT PRIMARY KEY) STRICT;',
       },
       {
-        version: 10,
-        name: '0010_third',
+        version: 11,
+        name: '0011_third',
         sql: 'CREATE TABLE third_step (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -551,7 +551,7 @@ describe('DatabaseService', () => {
     await testDatabase.database.withTransaction((transaction) => {
       transaction
         .prepare('DELETE FROM schema_migrations WHERE version = ?')
-        .run(9)
+        .run(10)
     })
     await testDatabase.database.close()
 
@@ -572,8 +572,8 @@ describe('DatabaseService', () => {
     const brokenMigrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 9,
-        name: '0009_broken',
+        version: 10,
+        name: '0010_broken',
         sql: `
           CREATE TABLE should_rollback (id TEXT PRIMARY KEY) STRICT;
           INSERT INTO table_that_does_not_exist VALUES (1);
@@ -601,7 +601,7 @@ describe('DatabaseService', () => {
       ).toBeUndefined()
       expect(
         raw.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
-      ).toEqual({ count: 8 })
+      ).toEqual({ count: 9 })
     } finally {
       raw.close()
       await first.dispose()
@@ -613,8 +613,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 9,
-          name: '0009_transaction_probe',
+          version: 10,
+          name: '0010_transaction_probe',
           sql: `
             CREATE TABLE transaction_probe (
               id INTEGER PRIMARY KEY
@@ -707,8 +707,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 9,
-          name: '0009_transaction_control_probe',
+          version: 10,
+          name: '0010_transaction_control_probe',
           sql: 'CREATE TABLE transaction_control_probe (id INTEGER PRIMARY KEY) STRICT;',
         },
       ],

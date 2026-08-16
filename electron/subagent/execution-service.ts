@@ -469,6 +469,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         id: childSessionId,
         projectId: parentRecord.projectId,
         title: `Subagent: ${input.spec.name}`.slice(0, 256),
+        titleSource: 'user',
         lifecycle: 'active',
         permissionMode: 'readonly',
         modelSelection: {

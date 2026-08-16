@@ -47,6 +47,7 @@ function session(
     id,
     projectId,
     title: `Session ${id}`,
+    titleSource: 'user',
     lifecycle: 'active',
     permissionMode: 'readonly',
     modelSelection: {

@@ -44,6 +44,7 @@ function session(
     id,
     projectId,
     title,
+    titleSource: 'user',
     lifecycle: 'active',
     permissionMode: 'readonly',
     modelSelection: {

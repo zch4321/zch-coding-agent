@@ -3,7 +3,11 @@ import type { ProjectId, SessionId } from '../../shared/ids'
 import { REASONING_EFFORTS } from '../../shared/config'
 import { ProjectRepository } from './project-repository'
 import { SessionRepository } from './session-repository'
-import { projectFixture, sessionFixture } from './repository-fixtures'
+import {
+  insertLegacySession,
+  projectFixture,
+  sessionFixture,
+} from './repository-fixtures'
 import { createTestDatabase } from './test-database'
 import { DATABASE_MIGRATIONS } from './migrations'
 
@@ -121,8 +125,8 @@ describe('0006_reasoning_levels migration', () => {
     })
     await v5.database.withTransaction((transaction) => {
       projects.insert(transaction, project)
-      sessions.insert(transaction, parent)
-      sessions.insert(transaction, child)
+      insertLegacySession(transaction, parent)
+      insertLegacySession(transaction, child)
     })
     const databasePath = v5.databasePath
     const directory = v5.directory
@@ -139,8 +143,8 @@ describe('0006_reasoning_levels migration', () => {
           .all(),
       )
       expect(migrationRows.at(-1)).toEqual({
-        version: 8,
-        name: '0008_swarm_executions',
+        version: 9,
+        name: '0009_title_source',
       })
 
       const storedParent = upgraded.read((reader) =>

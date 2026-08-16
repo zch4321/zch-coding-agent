@@ -290,6 +290,7 @@ export class DurableRunApplicationService {
       id: input.sessionId,
       projectId: input.projectId,
       title: input.title?.trim() || defaultTitle(input.message),
+      titleSource: 'auto',
       lifecycle: 'active',
       permissionMode: input.permissionMode,
       modelSelection: structuredClone(input.modelSelection),

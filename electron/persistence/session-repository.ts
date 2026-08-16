@@ -16,9 +16,10 @@ import { decodeSessionRow, encodeSessionRow } from './session-codec'
 import { dateTimeColumn } from './codec-helpers'
 
 const SESSION_COLUMNS = `
-  schema_version, id, project_id, title, lifecycle, permission_mode,
-  provider_id, model, reasoning, goal_json, plan_json, parent_session_id,
-  forked_from_seq, revision, last_seq, created_at, updated_at, archived_at
+  schema_version, id, project_id, title, title_source, lifecycle,
+  permission_mode, provider_id, model, reasoning, goal_json, plan_json,
+  parent_session_id, forked_from_seq, revision, last_seq, created_at,
+  updated_at, archived_at
 `
 
 export interface SessionListQuery {
@@ -40,17 +41,18 @@ export class SessionRepository {
     transaction
       .prepare(
         `INSERT INTO sessions (
-           schema_version, id, project_id, title, lifecycle, permission_mode,
-           provider_id, model, reasoning, goal_json, plan_json,
+           schema_version, id, project_id, title, title_source, lifecycle,
+           permission_mode, provider_id, model, reasoning, goal_json, plan_json,
            parent_session_id, forked_from_seq, revision, last_seq, created_at,
            updated_at, archived_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.schema_version,
         row.id,
         row.project_id,
         row.title,
+        row.title_source,
         row.lifecycle,
         row.permission_mode,
         row.provider_id,
@@ -79,9 +81,9 @@ export class SessionRepository {
     const result = transaction
       .prepare(
         `UPDATE sessions
-         SET project_id = ?, title = ?, lifecycle = ?, permission_mode = ?,
-             provider_id = ?, model = ?, reasoning = ?, goal_json = ?,
-             plan_json = ?, parent_session_id = ?, forked_from_seq = ?,
+         SET project_id = ?, title = ?, title_source = ?, lifecycle = ?,
+             permission_mode = ?, provider_id = ?, model = ?, reasoning = ?,
+             goal_json = ?, plan_json = ?, parent_session_id = ?, forked_from_seq = ?,
              revision = ?, last_seq = ?, updated_at = ?, archived_at = ?
          WHERE id = ? AND revision = ?
            AND ? >= COALESCE(
@@ -92,6 +94,7 @@ export class SessionRepository {
       .run(
         row.project_id,
         row.title,
+        row.title_source,
         row.lifecycle,
         row.permission_mode,
         row.provider_id,

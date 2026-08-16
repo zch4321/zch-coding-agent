@@ -1,5 +1,9 @@
 import type { ProjectId, SessionId } from '../../shared/ids'
-import { SessionRecordSchema, type SessionRecord } from '../../shared/session'
+import {
+  SessionRecordSchema,
+  type SessionRecord,
+  type SessionTitleSource,
+} from '../../shared/session'
 import { compileSchema } from '../schema-validator'
 import {
   assertSchemaValue,
@@ -20,6 +24,7 @@ export interface SessionRow {
   id: string
   project_id: string
   title: string
+  title_source: string
   lifecycle: string
   permission_mode: string
   provider_id: string
@@ -48,6 +53,7 @@ export function encodeSessionRow(record: SessionRecord): SessionRow {
     id: record.id,
     project_id: record.projectId,
     title: record.title,
+    title_source: record.titleSource,
     lifecycle: record.lifecycle,
     permission_mode: record.permissionMode,
     provider_id: record.modelSelection.providerId,
@@ -97,6 +103,10 @@ export function decodeSessionRow(row: Record<string, unknown>): SessionRecord {
     id: stringColumn(row.id, 'sessions.id') as SessionId,
     projectId: stringColumn(row.project_id, 'sessions.project_id') as ProjectId,
     title: stringColumn(row.title, 'sessions.title'),
+    titleSource: stringColumn(
+      row.title_source,
+      'sessions.title_source',
+    ) as SessionTitleSource,
     lifecycle,
     permissionMode: stringColumn(
       row.permission_mode,

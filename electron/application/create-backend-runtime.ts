@@ -36,6 +36,7 @@ import { SubagentExecutionBridge } from '../subagent/execution-bridge'
 import { SubagentExecutionService } from '../subagent/execution-service'
 import { SwarmExecutionBridge } from '../swarm/execution-bridge'
 import { SwarmCoordinator } from '../swarm/coordinator'
+import { ConversationTitlingService } from './conversation-titling-service'
 
 type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
@@ -272,6 +273,14 @@ export async function createBackendRuntime(
     })
     swarmBridge.bind(swarmCoordinator)
     targetState.runs = runs
+    const conversationTitling = new ConversationTitlingService({
+      configStore: options.configStore,
+      sessions,
+      prompts: runtime.services.prompts,
+      events: runtime.events,
+      fetchImpl: options.fetchImpl,
+      onDiagnostic: options.onDiagnostic,
+    })
     let disposePromise: Promise<void> | undefined
     return {
       databasePath,
@@ -307,6 +316,7 @@ export async function createBackendRuntime(
           liveSessions,
           subagentExecution,
           swarmCoordinator,
+          conversationTitling,
           runtime,
           coordinator,
           listeners,
@@ -339,6 +349,7 @@ async function disposeBackendRuntime(input: {
   liveSessions?: LiveSessionContextRegistry
   subagentExecution?: SubagentExecutionService
   swarmCoordinator?: SwarmCoordinator
+  conversationTitling?: ConversationTitlingService
   runtime?: AgentRuntime
   coordinator: ApplicationStateCoordinator
   listeners: Set<(commit: DurableCommitEnvelope) => void>
@@ -347,6 +358,7 @@ async function disposeBackendRuntime(input: {
   await settleCleanup([
     () => input.liveSessions?.dispose(),
     () => input.subagentExecution?.dispose(),
+    () => input.conversationTitling?.dispose(),
     // Swarm disposal waits for child promises, so abort the child service first.
     () => input.swarmCoordinator?.dispose(),
     () => input.runtime?.dispose(),

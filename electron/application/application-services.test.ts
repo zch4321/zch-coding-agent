@@ -76,6 +76,7 @@ function activeSession(
     id,
     projectId,
     title: 'Durable session',
+    titleSource: 'user',
     lifecycle: 'active',
     permissionMode: 'confirm',
     modelSelection: {

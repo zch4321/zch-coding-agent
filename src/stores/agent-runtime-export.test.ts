@@ -15,6 +15,7 @@ function session(): SessionRecord {
     id: sessionId,
     projectId: 'project:markdown-export' as ProjectId,
     title: 'Markdown export',
+    titleSource: 'user',
     lifecycle: 'active',
     permissionMode: 'readonly',
     modelSelection: {

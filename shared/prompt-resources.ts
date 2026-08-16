@@ -4,6 +4,7 @@ export const PROMPT_RESOURCE_VERSION = '2026-08-12.1'
 export const BASE_INSTRUCTIONS_PROMPT_RESOURCE_VERSION = '2026-08-16.1'
 export const HEADLESS_PROMPT_RESOURCE_VERSION = '2026-07-11.1'
 export const SWARM_PROMPT_RESOURCE_VERSION = '2026-08-12.1'
+export const TITLING_PROMPT_RESOURCE_VERSION = '2026-08-16.1'
 
 export interface PromptResourceRef {
   id: string
@@ -141,5 +142,21 @@ export const DEFAULT_SWARM_PROMPT_REFS: Record<
   'en-US': {
     id: 'orchestration.swarm-started.en-US',
     version: SWARM_PROMPT_RESOURCE_VERSION,
+  },
+}
+
+export const DEFAULT_TITLING_PROMPT_REFS: Record<
+  'conversationTitle',
+  Record<AssistantLanguage, PromptResourceRef>
+> = {
+  conversationTitle: {
+    'zh-CN': {
+      id: 'titling.conversation-title.zh-CN',
+      version: TITLING_PROMPT_RESOURCE_VERSION,
+    },
+    'en-US': {
+      id: 'titling.conversation-title.en-US',
+      version: TITLING_PROMPT_RESOURCE_VERSION,
+    },
   },
 }

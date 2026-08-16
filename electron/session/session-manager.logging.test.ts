@@ -94,6 +94,7 @@ describe('SessionManager trace capture switching', () => {
       id: sessionId,
       projectId: 'project:trace-switching' as ProjectId,
       title: 'Restored Session',
+      titleSource: 'user',
       lifecycle: 'active',
       permissionMode: 'readonly',
       modelSelection: {

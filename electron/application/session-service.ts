@@ -20,6 +20,7 @@ import type {
   SessionPage,
   SessionRecord,
   SessionSnapshot,
+  SessionTitleSource,
 } from '../../shared/session'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { TraceCaptureStatus } from '../../shared/trace'
@@ -69,6 +70,7 @@ export interface SessionServiceOptions {
 
 export interface SessionMetadataPatch {
   title?: string
+  titleSource?: SessionTitleSource
   permissionMode?: PermissionMode
   modelSelection?: ModelSelection
   goal?: GoalState | null
@@ -506,6 +508,31 @@ export class SessionService {
     return result
   }
 
+  /** Applies a model-generated title to an auto-titled Session; returns false when skipped. */
+  async applyModelTitle(input: {
+    sessionId: SessionId
+    title: string
+  }): Promise<boolean> {
+    const current = await this.getRecord(input.sessionId)
+    if (current.titleSource !== 'auto') return false
+    try {
+      await this.commitMutation({
+        sessionId: input.sessionId,
+        expectedRevision: current.revision,
+        expectedLastSeq: current.lastSeq,
+        metadata: { title: input.title, titleSource: 'model' },
+        messageChange: 'none',
+      })
+      return true
+    } catch (error) {
+      this.#onDiagnostic(
+        `Model-generated title for Session ${input.sessionId} was not applied`,
+        error,
+      )
+      return false
+    }
+  }
+
   /** Archives a Session after reserving and completing its lifecycle eviction. */
   async archive(input: {
     sessionId: SessionId
@@ -862,6 +889,7 @@ export class SessionService {
         id: input.sessionId,
         projectId: source.projectId,
         title: input.title?.trim() || `Fork: ${source.title}`,
+        titleSource: 'user',
         lifecycle: 'active',
         permissionMode: source.permissionMode,
         modelSelection: structuredClone(source.modelSelection),
@@ -895,6 +923,7 @@ function activeSessionRecord(
     id: record.id,
     projectId: record.projectId,
     title: record.title,
+    titleSource: record.titleSource,
     permissionMode: record.permissionMode,
     modelSelection: record.modelSelection,
     goal: record.goal,
@@ -997,7 +1026,12 @@ function applyMetadata(
   if (!patch) return session
   return {
     ...session,
-    ...(patch.title === undefined ? {} : { title: patch.title.trim() }),
+    ...(patch.title === undefined
+      ? {}
+      : {
+          title: patch.title.trim(),
+          titleSource: patch.titleSource ?? 'user',
+        }),
     ...(patch.permissionMode === undefined
       ? {}
       : { permissionMode: patch.permissionMode }),

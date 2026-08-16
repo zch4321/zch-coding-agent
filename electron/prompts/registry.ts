@@ -8,6 +8,7 @@ import {
   DEFAULT_HARNESS_PROMPT_REFS,
   DEFAULT_ORCHESTRATION_PROMPT_REFS,
   DEFAULT_SWARM_PROMPT_REFS,
+  DEFAULT_TITLING_PROMPT_REFS,
 } from '../../shared/prompt-resources'
 
 export interface PromptResource {
@@ -94,6 +95,19 @@ export class PromptRegistry {
           ),
         ),
       ),
+      ...Object.values(DEFAULT_TITLING_PROMPT_REFS).flatMap((localized) =>
+        (['zh-CN', 'en-US'] as const).map((locale) =>
+          loadResource(
+            localized[locale].id,
+            localized[locale].version,
+            path.join(
+              rootDirectory,
+              'titling',
+              `${localized[locale].id.replace('titling.', '')}.md`,
+            ),
+          ),
+        ),
+      ),
     ])
     return new PromptRegistry(resources)
   }
@@ -173,6 +187,18 @@ export class PromptRegistry {
   /** Resolves the localized, versioned Swarm start prompt. */
   swarmPrompt(locale: AssistantLanguage): ResolvedPrompt {
     const resource = this.get(DEFAULT_SWARM_PROMPT_REFS[locale].id)
+    return {
+      content: resource.content,
+      resource: withoutContent(resource),
+      customized: false,
+    }
+  }
+
+  /** Resolves the localized conversation-titling prompt. */
+  titlingPrompt(locale: AssistantLanguage): ResolvedPrompt {
+    const resource = this.get(
+      DEFAULT_TITLING_PROMPT_REFS.conversationTitle[locale].id,
+    )
     return {
       content: resource.content,
       resource: withoutContent(resource),

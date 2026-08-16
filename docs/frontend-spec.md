@@ -172,8 +172,8 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 ### 5.3 对话标题
 
 - 未发送 draft 可在主区显示 `New conversation`，但不占用 Sidebar；首次发送 commit 后才出现 durable 标题。
-- 第一条用户消息发送成功后，使用本地截断标题或 Provider 标题生成结果更新。
-- Provider 标题生成失败不影响对话执行。
+- 第一条用户消息发送成功后，先以本地截断标题提交；第一个 Run 完成时，若标题仍是派生值（用户未改名、非 Fork、非存量会话），由后端使用模型池第一个 enabled 的 light route 生成短标题并写回，侧栏与头部经普通 commit 事件自动刷新。
+- Provider 标题生成失败或无可用 light route 不影响对话执行，保留派生标题；每个会话在进程内最多尝试一次。
 - 支持重命名、删除和导出 Markdown。导出前使用 Naive UI 确认框警告源代码、路径、工具参数/结果、内部编排和明文 reasoning 可能进入文件；保存对话框取消时不写文件。
 - 删除对话必须二次确认；不删除项目文件。
 
@@ -208,6 +208,8 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 ### 6.1 Header
 
 - 显示当前对话标题。
+- Header 不重复显示工作区名（顶部栏与项目侧栏已展示）。
+- 有 usage 数据时，标题下方依次是两行紧凑用量区：第一行为上下文进度条（样式不变）加同行紧凑数字（如 `128k/256k · 50%`），精确 Token 数与容量来源只出现在 tooltip/aria；第二行为缓存明细 `命中/未命中/输出`，Provider 报告过可缓存输入时追加整数百分比命中率（命中 ÷ (命中+未命中)，与明细同一累计范围）。该命中率只是 UI 展示口径，不改变 trace 或自动压缩的 token 语义。
 - 空闲时不显示 `NO SESSION`、`IDLE` 等内部状态 badge。
 - 仅在以下情况显示短状态：`Running`、`Writer`、`Read-only locked`、`Waiting for approval`、`Cancelling`、`Failed`。
 - 状态不得挤压对话标题；窄宽度下优先保留标题和 Stop 操作。

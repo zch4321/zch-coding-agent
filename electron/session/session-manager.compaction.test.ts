@@ -640,6 +640,7 @@ describe('SessionManager compaction', () => {
       id: sessionId,
       projectId: 'project:model-transition' as ProjectId,
       title: 'Model transition fixture',
+      titleSource: 'user',
       lifecycle: 'active',
       permissionMode: 'readonly',
       modelSelection: {
@@ -759,6 +760,7 @@ describe('SessionManager compaction', () => {
       id: sessionId,
       projectId: 'project:model-transition-rollback' as ProjectId,
       title: 'Model transition rollback fixture',
+      titleSource: 'user',
       lifecycle: 'active',
       permissionMode: 'readonly',
       modelSelection: {

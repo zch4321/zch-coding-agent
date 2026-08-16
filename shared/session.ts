@@ -24,6 +24,13 @@ export const SessionLifecycleSchema = Type.Union([
 ])
 export type SessionLifecycle = Static<typeof SessionLifecycleSchema>
 
+export const SessionTitleSourceSchema = Type.Union([
+  Type.Literal('auto'),
+  Type.Literal('user'),
+  Type.Literal('model'),
+])
+export type SessionTitleSource = Static<typeof SessionTitleSourceSchema>
+
 const SessionParentSchema = Type.Object(
   {
     sessionId: SessionIdSchema,
@@ -37,6 +44,7 @@ const sessionRecordProperties = {
   id: SessionIdSchema,
   projectId: ProjectIdSchema,
   title: Type.String({ minLength: 1, maxLength: 256 }),
+  titleSource: SessionTitleSourceSchema,
   permissionMode: PermissionModeSchema,
   modelSelection: ModelSelectionSchema,
   goal: Type.Union([GoalStateSchema, Type.Null()]),

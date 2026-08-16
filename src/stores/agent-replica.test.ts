@@ -41,6 +41,7 @@ function session(revision = 1): SessionRecord {
     id: sessionId,
     projectId,
     title: 'Replica session',
+    titleSource: 'user',
     lifecycle: 'active',
     permissionMode: 'readonly',
     modelSelection: {

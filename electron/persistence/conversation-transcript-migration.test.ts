@@ -12,8 +12,11 @@ import { DatabaseService } from './database-service'
 import { MessageRepository } from './message-repository'
 import { DATABASE_MIGRATIONS } from './migrations'
 import { ProjectRepository } from './project-repository'
-import { projectFixture, sessionFixture } from './repository-fixtures'
-import { SessionRepository } from './session-repository'
+import {
+  insertLegacySession,
+  projectFixture,
+  sessionFixture,
+} from './repository-fixtures'
 import { createTestDatabase } from './test-database'
 
 const route: ModelRouteSnapshot = {
@@ -50,11 +53,10 @@ describe('0007_conversation_transcript migration', () => {
     })
 
     const projects = new ProjectRepository()
-    const sessions = new SessionRepository()
     const messages = new MessageRepository()
     await legacy.database.withTransaction((transaction) => {
       projects.insert(transaction, project)
-      sessions.insert(transaction, session)
+      insertLegacySession(transaction, session)
       messages.insertMany(transaction, history.history)
     })
     const databasePath = legacy.databasePath
@@ -75,8 +77,8 @@ describe('0007_conversation_transcript migration', () => {
             .get(),
         ),
       ).toEqual({
-        version: 8,
-        name: '0008_swarm_executions',
+        version: 9,
+        name: '0009_title_source',
       })
       expect(
         upgraded

@@ -441,6 +441,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - UI 中一个项目对应一个 workspace，不重复展示两个概念。
 - 左侧项目侧栏提供新对话、对话搜索，以及项目下的二级对话列表；不引入 Task 概念。
 - “对话”直接对应 backend-owned Session；标题、完整消息历史、所属项目、创建/更新时间和模型/权限模式由后端持久化并推送给 renderer。Draft 仅属于 renderer 输入组件。
+- 对话标题在首次发送时先取首条用户消息的本地截断。第一个 Run 完成时，若标题仍为派生值（`titleSource = auto`），Main process 使用模型池中第一个 enabled 且 `capability = light` 的 route，以首条用户消息与首个 assistant 回复的有界摘要生成短标题并写回（`titleSource = model`）。生成调用不进入 canonical history，也不计入对话 usage 投影；无 light route、Provider 失败或输出无法清洗为合法标题时静默保留派生标题。每个 Session 在进程内最多尝试一次；应用重启后标题仍为 auto 时可在下一个 Run 结束时补试。用户重命名（`user`）、Fork 会话和升级前的存量会话永不参与自动起名。首条消息与回复摘要会发送给 light route 对应的 Provider，与该 Provider 的既有数据边界一致。
 - Durable command 在数据库 commit 后同时返回提交结果并发布同内容事件；renderer 对回包和事件按 cursor/revision 幂等合并。后端自主提交依赖事件通知，不定时轮询；bootstrap、分页/搜索、按需加载和缺口重同步才使用 query。
 - 搜索通过本地后端查询 Session 标题，以及 `kind = 'user_input'/'assistant_turn'` records 中 `type = 'text'` 的 parts；不把 orchestrator/harness/runtime context 当成用户消息，也不检索 tool call 参数、tool result/JSON parts、工作区文件、reasoning、continuation 或 trace，更不访问 Provider。
 - 新建对话时只建立 renderer draft，不创建空 Session；首次发送以 `run:start new_session` 原子创建 Session、首轮 context/user records 并启动 Active Run。Session 创建前终端不可用。Session/Run ID 不作为常驻产品信息展示。

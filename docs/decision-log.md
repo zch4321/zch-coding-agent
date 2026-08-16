@@ -232,3 +232,12 @@
 - Resize 边界：删除模型可见的 `terminal_resize` Tool 及其输入 Schema 与结果投影；保留 `TerminalPool.resize`、`terminal:resize` IPC、preload API 与 Renderer 面板自动 fit/resize，前端尺寸变化继续同步给 PTY。
 - 模型上下文：`<environment_context>` 保留 `command_shell` 字段；基础提示词明确它同时适用于 `run_command` shell 模式与 Terminal，Terminal 自动使用该 Shell，模型只能按对应语法编写命令。设置页文案改为“命令与终端 Shell”并更新提示与回退警告。
 - 理由：解释器选择是用户环境决策，不应由模型在 Tool 参数中指定或绕开；短数字 ID 缩小模型引用与伪造的错误面，数量上限约束 PTY 资源占用；终端尺寸由前端布局驱动，模型无需手动控制。本条关闭 open design questions 第 2、6 项。
+
+## 2026-08-16 — 对话头部用量区瘦身与首个 Run 后的模型起名
+
+- 状态：已采纳并实现；本条包含对话头部布局调整与会话标题自动生成两个关联改动。
+- 头部布局：删除重复的工作区名行（顶部栏与项目侧栏已展示）。上下文进度条样式不变，紧凑数字（k/M 格式，如 `128k/256k · 50%`）移到进度条同行；精确 Token 数与容量来源仅在 tooltip/aria 展示。缓存命中/未命中/输出合并为一行，并在 Provider 报告过可缓存输入时追加缓存命中率。
+- 命中率口径：UI 命中率 = 缓存命中输入 ÷ (命中 + 未命中) 的整数百分比，与缓存明细同一累计范围（当前活动 Run overlay 总和）。它只是展示语义；trace、自动压缩与 open design question 3 的其余 token 口径不在本条决策范围内。
+- 模型起名：第一个 Run 完成时，若 Session 标题仍是派生值，由 Main process 使用模型池第一个 enabled 且 `capability = light` 的 route，以首条用户消息与首个 assistant 回复的有界摘要生成短标题。无 light route、Provider 失败或输出清洗为空时静默保留派生标题，生成调用不进 canonical history、不计入对话 usage 投影。
+- 标题来源：SQLite v9（0009_title_source）为 sessions 增加 `title_source`（`auto|user|model`）。新会话从 `auto` 开始；用户重命名与 Fork 置 `user`；模型写回置 `model`；升级前存量会话一律默认 `user`，永不参与自动起名。每个 Session 在进程内最多尝试一次；应用重启后标题仍为 `auto` 时，允许在下一个 Run 结束时补试（宽松语义，避免持久化尝试计数）。
+- 理由：头部五行压缩为三行后信息密度更高，工作区名属于冗余；对话标题的可读性直接影响侧栏与后台通知可用性，而首条消息截断往往过长或不达意。标题生成限定 light route 与一次尝试，把额外 Provider 调用与费用约束在用户已显式配置的小模型上。

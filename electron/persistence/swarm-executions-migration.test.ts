@@ -7,10 +7,10 @@ import { ProjectRepository } from './project-repository'
 import {
   FIXTURE_HASH,
   FIXTURE_TIMESTAMP,
+  insertLegacySession,
   projectFixture,
   sessionFixture,
 } from './repository-fixtures'
-import { SessionRepository } from './session-repository'
 import { SubagentRepository } from './subagent-repository'
 import { createTestDatabase } from './test-database'
 
@@ -20,7 +20,6 @@ describe('0008_swarm_executions migration', () => {
       migrations: DATABASE_MIGRATIONS.slice(0, 7),
     })
     const projects = new ProjectRepository()
-    const sessions = new SessionRepository()
     const parent = sessionFixture({ lastSeq: 0 })
     const child = sessionFixture({
       id: 'session:migrated-child' as SessionId,
@@ -31,8 +30,8 @@ describe('0008_swarm_executions migration', () => {
     const executionId = 'subagent:migrated' as AgentExecutionId
     await legacy.database.withTransaction((transaction) => {
       projects.insert(transaction, projectFixture())
-      sessions.insert(transaction, parent)
-      sessions.insert(transaction, child)
+      insertLegacySession(transaction, parent)
+      insertLegacySession(transaction, child)
       transaction
         .prepare(
           `INSERT INTO subagent_executions (

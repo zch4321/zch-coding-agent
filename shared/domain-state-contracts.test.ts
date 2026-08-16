@@ -128,6 +128,7 @@ const session: SessionRecord = {
   id: sessionId,
   projectId,
   title: 'Canonical contracts',
+  titleSource: 'user',
   lifecycle: 'active',
   permissionMode: 'confirm',
   modelSelection: {

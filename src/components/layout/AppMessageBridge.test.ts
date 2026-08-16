@@ -93,6 +93,7 @@ describe('AppMessageBridge', () => {
         id: sessionId,
         projectId: 'project:notification' as ProjectId,
         title: 'Background task',
+        titleSource: 'user',
         lifecycle: 'active',
         permissionMode: 'readonly',
         modelSelection: {

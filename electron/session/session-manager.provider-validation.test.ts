@@ -339,6 +339,7 @@ describe('SessionManager Provider completion validation', () => {
       id: sessionId,
       projectId: 'project:legacy-transition' as ProjectId,
       title: 'Legacy transition fixture',
+      titleSource: 'user',
       lifecycle: 'active',
       permissionMode: 'readonly',
       modelSelection: {
