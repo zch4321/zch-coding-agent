@@ -10,10 +10,7 @@ import type {
   SessionId,
 } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
-import {
-  DEFAULT_HARNESS_PROMPT_REFS,
-  PROMPT_RESOURCE_VERSION,
-} from '../../shared/prompt-resources'
+import { DEFAULT_HARNESS_PROMPT_REFS } from '../../shared/prompt-resources'
 import { PromptRegistry } from '../prompts/registry'
 import { PluginEventBus } from '../plugins/event-bus'
 import { resolveModelRoutePairFromConfig } from '../providers/model-route-resolver'
@@ -370,6 +367,12 @@ describe('SessionManager prompt and trace', () => {
       llmRequest?.promptBuild?.layers?.map((layer) => layer.kind) ?? []
     const resources = llmRequest?.promptResources ?? []
     const resourceIds = resources.map((resource) => resource.id)
+    const expectedVersionById = new Map(
+      [
+        ...Object.values(DEFAULT_HARNESS_PROMPT_REFS.baseInstructions),
+        ...Object.values(DEFAULT_HARNESS_PROMPT_REFS.runtimeContext),
+      ].map((ref) => [ref.id, ref.version]),
+    )
 
     expect(layerKinds).toEqual(
       expect.arrayContaining([
@@ -388,7 +391,7 @@ describe('SessionManager prompt and trace', () => {
     expect(
       resources.every(
         (resource) =>
-          resource.version === PROMPT_RESOURCE_VERSION &&
+          resource.version === expectedVersionById.get(resource.id ?? '') &&
           typeof resource.path === 'string' &&
           resource.path.length > 0 &&
           /^[a-f0-9]{64}$/u.test(resource.sha256 ?? ''),

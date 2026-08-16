@@ -484,9 +484,9 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 ### 10.5 Limits
 
 - 运行限制保持单列分组和自动保存；页首提供立即保存/失败重试与状态，不让旧保存响应覆盖更新中的草稿。
-- Commands 分组提供 `run_command.shell` 的解释器选择与重新扫描。`Auto` 项显示当前实际解析的解释器；显式选择项只来自 Main process 已发现的 profile，并显示实际 executable path。
+- Commands 分组提供“命令与终端 Shell”的解释器选择与重新扫描。`Auto` 项显示当前实际解析的解释器；显式选择项只来自 Main process 已发现的 profile，并显示实际 executable path。
 - 已保存 profile 不可用时保留原选择、显示 fallback 警告并临时使用自动解释器；Renderer 不自行探测 PATH，也不允许输入任意 executable 或启动参数。
-- 该选择不影响 `run_command.process`、内部 Git 或当前交互 Terminal。模型只接收实际解析后的 `command_shell`，设置页不提供“让模型选择 Shell”的选项。
+- 该选择同时影响 `run_command.shell` 与新打开的交互 Terminal，不影响 `run_command.process`、内部 Git 或已在运行的 Terminal。模型只接收实际解析后的 `command_shell`，设置页不提供“让模型选择 Shell”的选项。
 
 ### 10.6 Agents
 

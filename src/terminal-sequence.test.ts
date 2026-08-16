@@ -4,7 +4,7 @@ import type { SessionId, TerminalId } from '../shared/ids'
 import { TerminalSequenceTracker } from './terminal-sequence'
 
 const sessionId = 'session:sequence' as SessionId
-const terminalId = 'terminal:sequence' as TerminalId
+const terminalId = 7 as TerminalId
 
 function output(seq: number): TerminalEvent {
   return {

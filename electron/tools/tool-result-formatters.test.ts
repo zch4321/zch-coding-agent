@@ -15,7 +15,6 @@ import {
   projectTerminalCloseResult,
   projectTerminalOpenResult,
   projectTerminalReadResult,
-  projectTerminalResizeResult,
   projectTerminalSendResult,
   projectWebSearchResult,
 } from './tool-result-formatters'
@@ -95,17 +94,15 @@ describe('text Tool Result formatters', () => {
   it('formats terminal output without repeating terminal IDs', () => {
     expect(
       rendered(
-        projectTerminalOpenResult(
-          result({ terminalId: 'terminal:opaque', cwd: '/tmp' }),
-        ),
+        projectTerminalOpenResult(result({ terminalId: 7, cwd: '/tmp' })),
       ),
-    ).toBe('Opened terminal terminal:opaque')
+    ).toBe('Opened terminal 7')
     expect(
       rendered(
         projectTerminalReadResult(
           result(
             {
-              terminalId: 'terminal:opaque',
+              terminalId: 7,
               content: 'test output',
               cursor: 42,
               truncated: true,
@@ -124,9 +121,6 @@ describe('text Tool Result formatters', () => {
     expect(rendered(projectTerminalCloseResult(result({ closed: true })))).toBe(
       'Terminal closed',
     )
-    expect(
-      rendered(projectTerminalResizeResult(result({ resized: true }))),
-    ).toBe('Terminal resized')
   })
 
   it('formats process and Git streams with only necessary status metadata', () => {

@@ -128,7 +128,7 @@ test.describe.serial('Electron settings workflows', () => {
       '%',
     )
     const commandShell = limits.locator('.settings-field', {
-      hasText: '一次性命令 Shell',
+      hasText: '命令与终端 Shell',
     })
     await expect(commandShell.getByText('实际使用：')).toBeVisible()
     const explicitShell = await page.evaluate(async () => {

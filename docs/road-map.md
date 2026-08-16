@@ -193,20 +193,20 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 ## 5. M5 · Configurable Terminal And Command Environment
 
-目标：在不改变直接进程执行和内部 Git 命令语义的前提下，自动发现 Windows 上可用的 Shell，并允许用户分别选择交互终端与命令字符串解释器。
+目标：在不改变直接进程执行和内部 Git 命令语义的前提下，自动发现 Windows 上可用的 Shell，并让 `run_command.shell` 与交互 Terminal 统一使用用户配置的命令解释器。
 
-状态：第一阶段已完成 `run_command.shell` 的内置 profile 发现、选择、失效回退、Prompt 注入、显式解释器启动与 UTF-8/fallback 解码；PowerShell 一次性命令和持久 PTY 已使用进程级 `Bypass`，Windows 默认 Terminal 也已复用 PowerShell 7 → Windows PowerShell → CMD 的自动发现顺序。`run_command` 仍是一次性 Tool，不在前端 Terminal 展示；以下独立交互 Terminal profile、自定义 profile、版本探测、WSL 与完整打包 E2E 仍待实现。
+状态：第一阶段的 `run_command.shell` 内置 profile 发现、选择、失效回退、Prompt 注入、显式解释器启动与 UTF-8/fallback 解码已完成；第二阶段已完成统一：`terminal_open` 不再接受模型提交的 shell，TerminalPool 在每次打开时读取 `executionEnvironment.commandShell` 并经 CommandShellService 解析（含自动回退），PowerShell PTY 继续使用进程级 `Bypass`，设置变更只影响之后打开的 Terminal。模型可见的 `terminalId` 已改为进程内全局递增正整数，单 Session 上限 16 个 Terminal，模型侧 `terminal_resize` 已移除，Renderer 自动 fit 仍经 `terminal:resize` IPC 同步 PTY。`run_command` 仍是一次性 Tool，不在前端 Terminal 展示；自定义 profile、版本探测、WSL 与完整打包 E2E 仍待实现。
 
 - Main process 已有界扫描 `pwsh.exe`、`powershell.exe`、`cmd.exe`、Git Bash 和 Nushell；后续增加 WSL adapter、版本展示以及经过校验的自定义可执行文件和启动参数。
-- 分别持久化交互式 terminal profile 与 `run_command.shell` profile。已配置程序消失时显示可诊断警告并回退到安全默认值，不静默改写用户配置。
-- `run_command.process` 已继续以 `shell: false` 直接执行，`run_command.shell` 已显式启动所选解释器及其固定参数，不再依赖 Node 在 Windows 上隐式选择 `%COMSPEC%`；后续让 `terminal_open` 从当前自动发现迁移到独立的用户所选 profile。
+- 交互 Terminal 与 `run_command.shell` 共用同一份持久化选择，不再规划独立 Terminal profile。已配置程序消失时显示可诊断警告并回退到安全默认值，不静默改写用户配置。
+- `run_command.process` 已继续以 `shell: false` 直接执行，`run_command.shell` 已显式启动所选解释器及其固定参数，不再依赖 Node 在 Windows 上隐式选择 `%COMSPEC%`；`terminal_open` 已迁移到同一用户所选 profile。
 - WSL 使用独立 adapter 处理发行版、工作目录映射和参数边界，不把它伪装成普通 Windows 可执行 Shell。
-- Prompt Harness 已报告实际 command shell；后续再独立报告 terminal shell。Subagent、Git/File 工具和其他内部能力继续使用各自既定执行路径，不受用户 Shell 选择影响。
+- Prompt Harness 报告的 command_shell 同时适用于 `run_command.shell` 与新打开的 Terminal。Subagent、Git/File 工具和其他内部能力继续使用各自既定执行路径，不受用户 Shell 选择影响。
 
 验收：
 
 - 未安装 PowerShell 7、仅有 Windows PowerShell/CMD、安装 Git Bash/Nushell 及配置失效等环境都有确定性发现与回退测试。
-- 同一工作区可以用 PowerShell 交互终端和 Git Bash 命令解释器；切换 profile 不影响 `run_command.process` 或内部 Git 命令。
+- 同一工作区的 `run_command.shell` 与新打开的交互终端使用同一所选 profile；切换 profile 不影响 `run_command.process`、内部 Git 命令或已在运行的终端。
 - quoting、空格路径、Unicode、取消、超时和进程树终止在各受支持 profile 下有集成覆盖；打包后的 Windows 应用至少覆盖一次发现、保存、重启恢复和实际执行 E2E。
 
 ## 6. Later

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { CallId, RunId, SessionId, TerminalId } from '../../shared/ids'
+import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { TerminalPool } from '../terminal/pool'
 import { evaluatePolicy } from '../permission/policy-engine'
 import { normalizeTerminalInput, registerTerminalTools } from './terminal-tools'
@@ -53,7 +53,7 @@ describe('terminal tool permission matrix', () => {
     },
   )
 
-  it.each(['terminal_read', 'terminal_list', 'terminal_resize'])(
+  it.each(['terminal_read', 'terminal_list'])(
     'fast-paths %s as an owned read-only operation',
     (toolId) => {
       expect(outcome(toolId, 'readonly')).toBe('allow')
@@ -63,11 +63,38 @@ describe('terminal tool permission matrix', () => {
     },
   )
 
+  it('no longer exposes terminal_resize to the model', () => {
+    expect(definitions().get('terminal_resize')).toBeUndefined()
+  })
+
+  it('rejects a model-supplied shell on terminal_open', () => {
+    const registry = definitions()
+    const definition = registry.get('terminal_open')!
+
+    expect(registry.validateArgs(definition, {}).ok).toBe(true)
+    expect(registry.validateArgs(definition, { shell: '/bin/sh' }).ok).toBe(
+      false,
+    )
+  })
+
+  it('accepts only positive integer terminal identifiers', () => {
+    const registry = definitions()
+    const definition = registry.get('terminal_send')!
+    const args = { terminalId: 1, data: 'npm test\n' }
+
+    expect(registry.validateArgs(definition, args).ok).toBe(true)
+    for (const invalid of ['1', 'terminal:1', 0, -2, 1.5]) {
+      expect(
+        registry.validateArgs(definition, { ...args, terminalId: invalid }).ok,
+      ).toBe(false)
+    }
+  })
+
   it('accepts a bounded optional post-write delay', () => {
     const registry = definitions()
     const definition = registry.get('terminal_send')!
     const args = {
-      terminalId: 'terminal:delay' as TerminalId,
+      terminalId: 7,
       data: 'npm test\n',
     }
 
@@ -102,7 +129,7 @@ describe('terminal tool permission matrix', () => {
       const result = definition
         .execute(
           {
-            terminalId: 'terminal:delay' as TerminalId,
+            terminalId: 7,
             data: 'echo delayed\n',
             delayMs: 250,
           },
@@ -120,7 +147,7 @@ describe('terminal tool permission matrix', () => {
 
       expect(write).toHaveBeenCalledWith(
         'session:delay',
-        'terminal:delay',
+        7,
         normalizeTerminalInput('echo delayed\n'),
       )
       await vi.advanceTimersByTimeAsync(249)
@@ -149,7 +176,7 @@ describe('terminal tool permission matrix', () => {
       await expect(
         definition.execute(
           {
-            terminalId: 'terminal:closed' as TerminalId,
+            terminalId: 8,
             data: 'ignored\n',
             delayMs: 60_000,
           },
@@ -182,7 +209,7 @@ describe('terminal tool permission matrix', () => {
     const controller = new AbortController()
     const result = definition.execute(
       {
-        terminalId: 'terminal:abort' as TerminalId,
+        terminalId: 9,
         data: 'start\n',
         delayMs: 60_000,
       },

@@ -1,6 +1,7 @@
 import type { AssistantLanguage } from './system-prompts'
 
 export const PROMPT_RESOURCE_VERSION = '2026-08-12.1'
+export const BASE_INSTRUCTIONS_PROMPT_RESOURCE_VERSION = '2026-08-16.1'
 export const HEADLESS_PROMPT_RESOURCE_VERSION = '2026-07-11.1'
 export const SWARM_PROMPT_RESOURCE_VERSION = '2026-08-12.1'
 
@@ -16,11 +17,11 @@ export const DEFAULT_HARNESS_PROMPT_REFS: Record<
   baseInstructions: {
     'zh-CN': {
       id: 'harness.base-instructions.zh-CN',
-      version: PROMPT_RESOURCE_VERSION,
+      version: BASE_INSTRUCTIONS_PROMPT_RESOURCE_VERSION,
     },
     'en-US': {
       id: 'harness.base-instructions.en-US',
-      version: PROMPT_RESOURCE_VERSION,
+      version: BASE_INSTRUCTIONS_PROMPT_RESOURCE_VERSION,
     },
   },
   runtimeContext: {

@@ -49,7 +49,7 @@ Prompt harness 可能用类似 XML 的标签包裹自动注入的上下文。这
 
 修改已有 UTF-8 文件时使用 apply_patch。create_file 只用于新文件。delete_file 只在确实需要删除时使用。patch 要聚焦，包含足够的精确上下文；如果文件已变化，用更小或上下文更准确的 patch 重试。
 
-短小、有界的命令使用 run_command。优先使用 process 模式传 executable 和 args。只有需要 shell 行为时才使用 shell 模式，并严格使用 <environment_context> 中的 command_shell 语法，不要假设或选择其他 Shell。长时间测试、开发服务器、watch 任务、REPL 或需要反复观察的命令使用 terminal 工具：打开终端，发送输入，用 delay 等待，然后增量读取输出。
+短小、有界的命令使用 run_command。优先使用 process 模式传 executable 和 args。只有需要 shell 行为时才使用 shell 模式，并严格使用 <environment_context> 中的 command_shell 语法，不要假设或选择其他 Shell。<environment_context> 中的 command_shell 同样适用于 terminal 工具：每个终端打开时都会自动使用该配置 Shell，因此所有终端输入都必须使用同一语法，不能尝试为终端选择或更换 Shell。长时间测试、开发服务器、watch 任务、REPL 或需要反复观察的命令使用 terminal 工具：打开终端，发送输入，用 delay 等待，然后增量读取输出。
 
 使用 git_status、git_diff、git_log 和 git_show 等只读 git 工具理解仓库状态。只有当用户要求对应流程且操作合适时，才使用 git_add、git_commit 和 git_restore 等 git 写入工具。不要随意重写历史或丢弃改动。
 
