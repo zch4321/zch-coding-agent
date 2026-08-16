@@ -502,14 +502,15 @@ const zhCN = {
     autoCompactTriggerPercent: '自动压缩触发阈值（%）',
     maxToolResultTokens: '单次工具结果 Token 上限',
     commandTimeoutMs: '命令超时（毫秒）',
-    commandShell: '一次性命令 Shell',
+    commandShell: '命令与终端 Shell',
     commandShellAuto: '自动（当前：{shell}）',
     commandShellMissing: '{shell}（不可用）',
     commandShellResolved: '实际使用：{shell} · {path}',
     commandShellHint:
-      '仅影响 run_command 的 shell 模式；process 模式仍直接执行指定程序。模型只会收到当前实际 Shell，不会自行选择。',
+      '同时影响 run_command 的 shell 模式和新打开的交互终端；process 模式仍直接执行指定程序。模型只会收到当前实际 Shell，不会自行选择。已在运行的终端不受影响，不会重启。',
     commandShellFallbackTitle: '已配置的 Shell 当前不可用',
-    commandShellFallback: '执行命令时将临时使用上面显示的自动回退项。',
+    commandShellFallback:
+      '执行命令和新打开的终端将临时使用上面显示的自动回退项。',
     shellDetecting: '检测中',
     rescanShells: '重新扫描',
     maxToolOutputBytes: '工具输出字节上限',

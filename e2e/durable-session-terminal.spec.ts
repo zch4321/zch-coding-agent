@@ -327,14 +327,14 @@ test.describe.serial('Durable Session and terminal workflows', () => {
         openTerminal(
           payload: unknown,
         ): Promise<
-          IpcResult<{ terminal: { terminalId: string; status: string } }>
+          IpcResult<{ terminal: { terminalId: number; status: string } }>
         >
         closeTerminal(
           payload: unknown,
         ): Promise<IpcResult<{ accepted: boolean }>>
         listTerminals(payload: unknown): Promise<
           IpcResult<{
-            terminals: Array<{ terminalId: string; status: string }>
+            terminals: Array<{ terminalId: number; status: string }>
           }>
         >
       }

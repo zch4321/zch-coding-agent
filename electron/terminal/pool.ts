@@ -1,9 +1,11 @@
-import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import * as nodePty from 'node-pty'
 import type { SessionId, TerminalId } from '../../shared/ids'
-import type { CommandShellProfile } from '../../shared/command-shell'
+import type {
+  CommandShellProfile,
+  CommandShellSelection,
+} from '../../shared/command-shell'
 import type {
   TerminalInfo,
   TerminalSnapshot,
@@ -44,17 +46,20 @@ export interface TerminalEventDraft {
 
 export interface TerminalPoolOptions {
   getScrollbackBytes: () => number
+  getCommandShellSelection?: () => CommandShellSelection
   emit: (event: TerminalEventDraft) => void
-  platform?: NodeJS.Platform
-  resolveDefaultWindowsShell?: () => Promise<
-    Pick<CommandShellProfile, 'executable' | 'kind'>
-  >
+  resolveShellProfile?: (
+    selection: CommandShellSelection,
+  ) => Promise<CommandShellProfile>
   spawnPty?: (
     shell: string,
     args: string[],
     options: nodePty.IPtyForkOptions,
   ) => PtyLike
 }
+
+/** Maximum terminals retained per Session, including opening, running, and self-exited entries. */
+export const MAX_TERMINALS_PER_SESSION = 16
 
 interface TerminalResource {
   info: TerminalInfo
@@ -68,22 +73,16 @@ interface TerminalResource {
   explicitClose: boolean
 }
 
-function terminalId(): TerminalId {
-  return `terminal:${randomUUID()}` as TerminalId
-}
+let nextTerminalIdValue = 1
 
-function terminalShellArgs(
-  executable: string,
-  platform: NodeJS.Platform,
-): string[] {
-  if (platform !== 'win32') return []
-  const name = path.win32.basename(executable).toLowerCase()
-  return name === 'pwsh.exe' ||
-    name === 'pwsh' ||
-    name === 'powershell.exe' ||
-    name === 'powershell'
-    ? [...POWERSHELL_PROCESS_EXECUTION_POLICY_ARGS]
-    : []
+/** Allocates process-global incrementing terminal IDs that are never reused within the process. */
+function allocateTerminalId(): TerminalId {
+  if (nextTerminalIdValue > Number.MAX_SAFE_INTEGER) {
+    throw new Error('Terminal id space exhausted')
+  }
+  const value = nextTerminalIdValue
+  nextTerminalIdValue += 1
+  return value as TerminalId
 }
 
 function cloneInfo(info: TerminalInfo): TerminalInfo {
@@ -100,6 +99,7 @@ export class TerminalPool {
   readonly #resources = new Map<TerminalId, TerminalResource>()
   readonly #closedOwners = new Map<TerminalId, SessionId>()
   readonly #pendingExits = new Set<Promise<void>>()
+  readonly #reservations = new Map<SessionId, number>()
 
   constructor(options: TerminalPoolOptions) {
     this.#options = options
@@ -110,7 +110,22 @@ export class TerminalPool {
     sessionId: SessionId
     workspace: string
     cwd?: string
-    shell?: string
+    cols?: number
+    rows?: number
+  }): Promise<TerminalInfo> {
+    this.#reserveSlot(input.sessionId)
+    try {
+      return await this.#openReserved(input)
+    } finally {
+      this.#releaseSlot(input.sessionId)
+    }
+  }
+
+  /** Resolves the configured shell and spawns the PTY for an already reserved slot. */
+  async #openReserved(input: {
+    sessionId: SessionId
+    workspace: string
+    cwd?: string
     cols?: number
     rows?: number
   }): Promise<TerminalInfo> {
@@ -125,19 +140,14 @@ export class TerminalPool {
       )
     }
 
-    const id = terminalId()
-    const platform = this.#options.platform ?? process.platform
-    const shell = input.shell
-      ? input.shell
-      : platform === 'win32'
-        ? (
-            await (
-              this.#options.resolveDefaultWindowsShell ??
-              (() => commandShellService.automaticProfile())
-            )()
-          ).executable
-        : (process.env.SHELL ?? '/bin/sh')
-    const shellArgs = terminalShellArgs(shell, platform)
+    const id = allocateTerminalId()
+    const selection = this.#options.getCommandShellSelection?.() ?? 'auto'
+    const profile = await this.#resolveShellProfile(selection)
+    const shell = profile.executable
+    const shellArgs =
+      profile.kind === 'powershell'
+        ? [...POWERSHELL_PROCESS_EXECUTION_POLICY_ARGS]
+        : []
     const cols = input.cols ?? 100
     const rows = input.rows ?? 30
     const environment = createCommandEnvironment()
@@ -200,11 +210,12 @@ export class TerminalPool {
     return cloneInfo(resource.info)
   }
 
-  /** Returns cloned terminal info for terminals owned by a Session. */
+  /** Returns cloned terminal info for terminals owned by a Session, sorted by ascending numeric ID. */
   list(sessionId: SessionId): TerminalInfo[] {
     return [...this.#resources.values()]
       .filter((resource) => resource.sessionId === sessionId)
       .map((resource) => cloneInfo(resource.info))
+      .sort((left, right) => left.terminalId - right.terminalId)
   }
 
   /** Writes input to a running Session-owned PTY. */
@@ -348,6 +359,49 @@ export class TerminalPool {
     }
 
     return resource
+  }
+
+  /** Resolves the configured shell selection to a concrete profile with automatic fallback. */
+  async #resolveShellProfile(
+    selection: CommandShellSelection,
+  ): Promise<CommandShellProfile> {
+    const resolve =
+      this.#options.resolveShellProfile ??
+      (async (requested: CommandShellSelection) =>
+        (await commandShellService.resolve(requested)).profile)
+    return resolve(selection)
+  }
+
+  /** Reserves a per-Session terminal slot synchronously so concurrent opens cannot exceed the limit. */
+  #reserveSlot(sessionId: SessionId): void {
+    if (this.#sessionTerminalCount(sessionId) >= MAX_TERMINALS_PER_SESSION) {
+      throw new Error(
+        `Session terminal limit reached (${MAX_TERMINALS_PER_SESSION}); close a terminal before opening a new one`,
+      )
+    }
+    this.#reservations.set(
+      sessionId,
+      (this.#reservations.get(sessionId) ?? 0) + 1,
+    )
+  }
+
+  /** Releases a slot reservation once the open attempt settled. */
+  #releaseSlot(sessionId: SessionId): void {
+    const count = this.#reservations.get(sessionId) ?? 0
+    if (count <= 1) {
+      this.#reservations.delete(sessionId)
+    } else {
+      this.#reservations.set(sessionId, count - 1)
+    }
+  }
+
+  /** Counts retained terminals and pending reservations owned by a Session. */
+  #sessionTerminalCount(sessionId: SessionId): number {
+    let count = this.#reservations.get(sessionId) ?? 0
+    for (const resource of this.#resources.values()) {
+      if (resource.sessionId === sessionId) count += 1
+    }
+    return count
   }
 
   #emitStatus(

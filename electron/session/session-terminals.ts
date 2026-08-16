@@ -1,4 +1,5 @@
 import type { SessionId, TerminalId } from '../../shared/ids'
+import type { CommandShellSelection } from '../../shared/command-shell'
 import type { TerminalInfo, TerminalSnapshot } from '../../shared/terminal'
 import { TerminalPool, type TerminalEventDraft } from '../terminal/pool'
 import type { SessionState } from './session-types'
@@ -10,12 +11,14 @@ export class SessionTerminalController {
 
   constructor(options: {
     getScrollbackBytes: () => number
+    getCommandShellSelection: () => CommandShellSelection
     emit: (event: TerminalEventDraft) => void
     requireSession: (sessionId: SessionId) => SessionState
   }) {
     this.#requireSession = options.requireSession
     this.pool = new TerminalPool({
       getScrollbackBytes: options.getScrollbackBytes,
+      getCommandShellSelection: options.getCommandShellSelection,
       emit: options.emit,
     })
   }

@@ -130,7 +130,6 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 | `terminal_read(id, {cursor?, lines?})` | 读最近 N 行或指定 cursor 后的输出 | 无     | **是**   |
 | `terminal_list()`                      | 列出所有打开的终端句柄            | 无     | **是**   |
 | `terminal_close(id)`                   | 关闭终端                          | 有     | **是**   |
-| `terminal_resize(id, cols, rows)`      | 调整终端尺寸                      | 无     | **是**   |
 
 约定：
 
@@ -138,7 +137,9 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 - `terminal_read` 不重复返回 `terminalId`，但始终追加下一次增量读取需要的 `cursor`；只有截断时追加 `truncated/totalBytes`。`terminal_open` 仍返回后续调用必需的 ID。
 - **UI** 上人类看到的终端流是**原始带色流**。两者订阅同一 PTY，渲染层不同。
 - 与 `run_command` 并存：一次性命令用前者；长跑服务/交互式 REPL/实时观察用 terminal。`terminal_send.delayMs` 在输入成功后等待最多 60 秒，便于紧随其后的 `terminal_read` 读取增量输出；等待期间取消不会撤回已经写入 PTY 的输入。独立 `delay` 继续用于纯等待。
-- Windows 未显式提供 `shell` 时按 PowerShell 7、Windows PowerShell、CMD 的顺序选择 Terminal executable；启动 PowerShell Terminal 时固定传入 `-ExecutionPolicy Bypass`。显式提供 PowerShell executable 时使用相同参数；失败直接保留在 PTY 输出中。
+- `terminal_open` 不接受模型提交的 Shell。Main process 在每次打开时读取 `executionEnvironment.commandShell` 并经 CommandShellService 解析实际 profile（与 `run_command.shell` 同一配置）；保存的解释器不可用时回退到自动选择且不改写配置。解析为 PowerShell 时 PTY 固定传入 `-ExecutionPolicy Bypass`；其他 Shell 不附加启动参数。设置变更只影响之后打开的终端，已在运行的终端不重启。
+- `terminalId` 是进程内全局递增的正整数：应用重启后从 1 重新开始；ID 分配后不复用，启动失败可留下编号空洞。每个 Session 最多保留 16 个终端（包括 opening、running 和已退出但未显式关闭的终端），显式关闭后释放名额；并发打开先预留名额，不能越过上限。`terminal_list` 按数字 ID 升序返回；不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。不迁移数据库或旧日志中的旧字符串 ID。
+- 模型不可见 `terminal_resize` 工具：Renderer 面板自动 fit 后仍通过 `terminal:resize` IPC 同步 PTY 尺寸，模型无法手动调整虚拟终端尺寸。
 - 终端归属于会话而不是单次 run：中断 run 不自动关闭终端；会话关闭或应用退出时必须清理。
 
 ### 2.3 LLM Provider 适配

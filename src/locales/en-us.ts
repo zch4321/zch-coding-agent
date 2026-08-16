@@ -519,15 +519,15 @@ const enUS = {
     autoCompactTriggerPercent: 'Auto compact trigger threshold (%)',
     maxToolResultTokens: 'Tool result token limit',
     commandTimeoutMs: 'Command timeout (ms)',
-    commandShell: 'One-shot command shell',
+    commandShell: 'Command and terminal shell',
     commandShellAuto: 'Auto (current: {shell})',
     commandShellMissing: '{shell} (unavailable)',
     commandShellResolved: 'Resolved: {shell} · {path}',
     commandShellHint:
-      'Only affects run_command shell mode; process mode still executes the requested program directly. The model receives the resolved shell and does not select one.',
+      'Applies to run_command shell mode and newly opened interactive terminals; process mode still executes the requested program directly. The model receives the resolved shell and does not select one. Already running terminals keep their shell and are not restarted.',
     commandShellFallbackTitle: 'The configured shell is unavailable',
     commandShellFallback:
-      'Commands temporarily use the automatic fallback shown above.',
+      'Commands and newly opened terminals temporarily use the automatic fallback shown above.',
     shellDetecting: 'detecting',
     rescanShells: 'Rescan',
     maxToolOutputBytes: 'Tool output byte limit',

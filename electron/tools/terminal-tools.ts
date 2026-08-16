@@ -6,17 +6,15 @@ import {
   projectTerminalCloseResult,
   projectTerminalOpenResult,
   projectTerminalReadResult,
-  projectTerminalResizeResult,
   projectTerminalSendResult,
 } from './tool-result-formatters'
 
 const MAX_TERMINAL_SEND_DELAY_MS = 60_000
 
 const TerminalIdField = Type.Unsafe<TerminalId>(
-  Type.String({
-    minLength: 1,
-    maxLength: 128,
-    pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$',
+  Type.Integer({
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
     title: 'TerminalId',
     description:
       'Terminal id returned by terminal_open or terminal_list for this session.',
@@ -31,14 +29,6 @@ const OpenSchema = Type.Object(
         maxLength: 4_096,
         description:
           'Workspace-relative directory for the terminal. Omit for workspace root.',
-      }),
-    ),
-    shell: Type.Optional(
-      Type.String({
-        minLength: 1,
-        maxLength: 4_096,
-        description:
-          'Optional shell executable. Omit to use the configured/default shell.',
       }),
     ),
     cols: Type.Optional(
@@ -105,24 +95,8 @@ const CloseSchema = Type.Object(
   },
   { additionalProperties: false },
 )
-const ResizeSchema = Type.Object(
-  {
-    terminalId: TerminalIdField,
-    cols: Type.Integer({
-      minimum: 2,
-      maximum: 1_000,
-      description: 'New terminal width in columns.',
-    }),
-    rows: Type.Integer({
-      minimum: 1,
-      maximum: 1_000,
-      description: 'New terminal height in rows.',
-    }),
-  },
-  { additionalProperties: false },
-)
 
-/** Registers Session terminal open, list, input, resize, and close tools. */
+/** Registers Session terminal open, list, input, and close tools. */
 export function registerTerminalTools(
   registry: ToolRegistrationPort,
   terminalPool: TerminalPool,
@@ -253,32 +227,6 @@ export function registerTerminalTools(
       }
     },
   } satisfies ToolDefinition<typeof CloseSchema>)
-
-  registry.registerTool({
-    id: 'terminal_resize',
-    executionMode: 'serial',
-    description: 'Resize a persistent terminal owned by this session.',
-    inputSchema: ResizeSchema,
-    effects: ['terminal.read'],
-    defaultRisk: 'low',
-    supportsAbort: true,
-    defaultTimeoutMs: 10_000,
-    maxOutputBytes: 16_384,
-    projectResultForModel: projectTerminalResizeResult,
-    async execute(args, context) {
-      return {
-        status: 'ok',
-        content: {
-          resized: terminalPool.resize(
-            context.sessionId,
-            args.terminalId,
-            args.cols,
-            args.rows,
-          ),
-        },
-      }
-    },
-  } satisfies ToolDefinition<typeof ResizeSchema>)
 }
 
 /** Waits after a successful terminal write while honoring run cancellation. */

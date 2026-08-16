@@ -17,7 +17,7 @@ import {
 const sessionId = 'session-1' as SessionId
 const runId = 'run-1' as RunId
 const callId = 'call-1' as CallId
-const terminalId = 'terminal-1' as TerminalId
+const terminalId = 1 as TerminalId
 
 function compileSchema(schema: object) {
   const ajv = new Ajv({ strict: true })

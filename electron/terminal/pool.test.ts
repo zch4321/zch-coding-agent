@@ -3,9 +3,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '../../shared/ids'
-import type { CommandShellProfile } from '../../shared/command-shell'
-import type { PtyLike, TerminalEventDraft } from './pool'
-import { TerminalPool } from './pool'
+import type {
+  CommandShellProfile,
+  CommandShellProfileId,
+  CommandShellSelection,
+} from '../../shared/command-shell'
+import type { PtyLike, TerminalEventDraft, TerminalPoolOptions } from './pool'
+import { MAX_TERMINALS_PER_SESSION, TerminalPool } from './pool'
 
 class FakePty implements PtyLike {
   readonly pid = 123
@@ -45,39 +49,75 @@ class FakePty implements PtyLike {
       listener(data)
     }
   }
+
+  emitExit(exitCode = 0): void {
+    for (const listener of this.#exit) {
+      listener({ exitCode })
+    }
+  }
 }
 
 const sessionA = 'session:a' as SessionId
 const sessionB = 'session:b' as SessionId
 
+const PROFILE_KINDS: Record<
+  CommandShellProfileId,
+  CommandShellProfile['kind']
+> = {
+  'powershell-7': 'powershell',
+  'windows-powershell': 'powershell',
+  cmd: 'cmd',
+  'git-bash': 'bash',
+  nushell: 'nushell',
+  'system-shell': 'posix',
+}
+
+/** Builds a deterministic resolved profile for a selection, mirroring the real discovery kinds. */
+function fakeProfile(selection: CommandShellSelection): CommandShellProfile {
+  const id: CommandShellProfileId =
+    selection === 'auto' ? 'system-shell' : selection
+  return {
+    id,
+    kind: PROFILE_KINDS[id],
+    label: id,
+    executable: `/fake/${id}`,
+    source: 'system',
+  }
+}
+
 async function harness(
   scrollbackBytes = 1_024,
   options: {
-    platform?: NodeJS.Platform
-    defaultWindowsShell?: Pick<CommandShellProfile, 'executable' | 'kind'>
+    selectShell?: () => CommandShellSelection
+    resolveShellProfile?: TerminalPoolOptions['resolveShellProfile']
+    spawnPty?: (shell: string, args: string[]) => PtyLike
   } = {},
 ) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agent-terminal-'))
   const events: TerminalEventDraft[] = []
   const ptys: FakePty[] = []
   const launches: Array<{ shell: string; args: string[] }> = []
+  const selections: CommandShellSelection[] = []
   const pool = new TerminalPool({
     getScrollbackBytes: () => scrollbackBytes,
     emit: (event) => events.push(event),
-    ...(options.platform ? { platform: options.platform } : {}),
-    ...(options.defaultWindowsShell
-      ? {
-          resolveDefaultWindowsShell: async () => options.defaultWindowsShell!,
-        }
+    ...(options.selectShell
+      ? { getCommandShellSelection: options.selectShell }
       : {}),
+    resolveShellProfile: async (selection) => {
+      selections.push(selection)
+      return options.resolveShellProfile
+        ? options.resolveShellProfile(selection)
+        : fakeProfile(selection)
+    },
     spawnPty: (shell, args) => {
       launches.push({ shell, args: [...args] })
-      const pty = new FakePty()
-      ptys.push(pty)
+      const pty = options.spawnPty?.(shell, args) ?? new FakePty()
+      if (pty instanceof FakePty) ptys.push(pty)
       return pty
     },
   })
-  return { root, events, launches, ptys, pool }
+  return { root, events, launches, ptys, selections, pool }
 }
 
 describe('TerminalPool', () => {
@@ -146,39 +186,163 @@ describe('TerminalPool', () => {
     expect(open).toHaveBeenCalledOnce()
   })
 
-  it('starts the preferred Windows PowerShell with process-level script execution', async () => {
+  it('resolves the configured shell profile for each new terminal', async () => {
+    const { root, launches, selections, pool } = await harness(1_024, {
+      selectShell: () => 'git-bash',
+    })
+
+    await pool.open({ sessionId: sessionA, workspace: root })
+
+    expect(selections).toEqual(['git-bash'])
+    expect(launches).toEqual([{ shell: '/fake/git-bash', args: [] }])
+  })
+
+  it('passes PowerShell execution policy args for resolved PowerShell profiles', async () => {
     const { root, launches, pool } = await harness(1_024, {
-      platform: 'win32',
-      defaultWindowsShell: {
-        executable: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
-        kind: 'powershell',
-      },
+      selectShell: () => 'powershell-7',
     })
 
     await pool.open({ sessionId: sessionA, workspace: root })
 
     expect(launches).toEqual([
-      {
-        shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
-        args: ['-ExecutionPolicy', 'Bypass'],
-      },
+      { shell: '/fake/powershell-7', args: ['-ExecutionPolicy', 'Bypass'] },
     ])
   })
 
-  it('applies the same PowerShell arguments to an explicit Windows shell', async () => {
-    const { root, launches, pool } = await harness(1_024, {
-      platform: 'win32',
+  it('reads the current selection on every open so settings changes apply to later terminals', async () => {
+    let current: CommandShellSelection = 'cmd'
+    const { root, launches, selections, pool } = await harness(1_024, {
+      selectShell: () => current,
     })
 
-    await pool.open({
-      sessionId: sessionA,
-      workspace: root,
-      shell: 'powershell.exe',
+    await pool.open({ sessionId: sessionA, workspace: root })
+    current = 'nushell'
+    await pool.open({ sessionId: sessionA, workspace: root })
+
+    expect(selections).toEqual(['cmd', 'nushell'])
+    expect(launches.map((launch) => launch.shell)).toEqual([
+      '/fake/cmd',
+      '/fake/nushell',
+    ])
+  })
+
+  it('defaults to the automatic selection when no getter is configured', async () => {
+    const { root, selections, pool } = await harness()
+
+    await pool.open({ sessionId: sessionA, workspace: root })
+
+    expect(selections).toEqual(['auto'])
+  })
+
+  it('allocates monotonically increasing ids across sessions without reuse', async () => {
+    const { root, pool } = await harness()
+    const first = await pool.open({ sessionId: sessionA, workspace: root })
+    const second = await pool.open({ sessionId: sessionB, workspace: root })
+
+    expect(second.terminalId).toBeGreaterThan(first.terminalId)
+
+    expect(pool.close(sessionA, first.terminalId)).toBe(true)
+    const reopened = await pool.open({ sessionId: sessionA, workspace: root })
+    expect(reopened.terminalId).toBeGreaterThan(second.terminalId)
+  })
+
+  it('lists terminals sorted by ascending numeric id', async () => {
+    const { root, pool } = await harness()
+    const opened = []
+    for (let index = 0; index < 3; index += 1) {
+      opened.push(await pool.open({ sessionId: sessionA, workspace: root }))
+    }
+
+    const listed = pool.list(sessionA).map((terminal) => terminal.terminalId)
+    expect(listed).toEqual(opened.map((terminal) => terminal.terminalId))
+    expect([...listed].sort((left, right) => left - right)).toEqual(listed)
+  })
+
+  it('rejects the terminal beyond the per-session limit until one is closed', async () => {
+    const { root, pool } = await harness()
+    for (let index = 0; index < MAX_TERMINALS_PER_SESSION; index += 1) {
+      await pool.open({ sessionId: sessionA, workspace: root })
+    }
+
+    await expect(
+      pool.open({ sessionId: sessionA, workspace: root }),
+    ).rejects.toThrow('Session terminal limit reached')
+
+    // Other Sessions still have their own quota.
+    await expect(
+      pool.open({ sessionId: sessionB, workspace: root }),
+    ).resolves.toMatchObject({ status: 'running' })
+
+    const [oldest] = pool.list(sessionA)
+    expect(pool.close(sessionA, oldest!.terminalId)).toBe(true)
+    await expect(
+      pool.open({ sessionId: sessionA, workspace: root }),
+    ).resolves.toMatchObject({ status: 'running' })
+    expect(pool.list(sessionA)).toHaveLength(MAX_TERMINALS_PER_SESSION)
+  })
+
+  it('counts self-exited terminals until they are explicitly closed', async () => {
+    const { root, ptys, pool } = await harness()
+    for (let index = 0; index < MAX_TERMINALS_PER_SESSION; index += 1) {
+      await pool.open({ sessionId: sessionA, workspace: root })
+    }
+    ptys[0]!.emitExit(0)
+
+    expect(pool.list(sessionA)[0]?.status).toBe('closed')
+    await expect(
+      pool.open({ sessionId: sessionA, workspace: root }),
+    ).rejects.toThrow('Session terminal limit reached')
+
+    expect(pool.close(sessionA, pool.list(sessionA)[0]!.terminalId)).toBe(true)
+    await expect(
+      pool.open({ sessionId: sessionA, workspace: root }),
+    ).resolves.toMatchObject({ status: 'running' })
+  })
+
+  it('releases the reservation when startup fails', async () => {
+    let failures = 1
+    const { root, pool } = await harness(1_024, {
+      spawnPty: () => {
+        if (failures > 0) {
+          failures -= 1
+          throw new Error('spawn failed')
+        }
+        return new FakePty()
+      },
     })
 
-    expect(launches[0]).toEqual({
-      shell: 'powershell.exe',
-      args: ['-ExecutionPolicy', 'Bypass'],
-    })
+    await expect(
+      pool.open({ sessionId: sessionA, workspace: root }),
+    ).rejects.toThrow('spawn failed')
+
+    for (let index = 0; index < MAX_TERMINALS_PER_SESSION; index += 1) {
+      await pool.open({ sessionId: sessionA, workspace: root })
+    }
+    await expect(
+      pool.open({ sessionId: sessionA, workspace: root }),
+    ).rejects.toThrow('Session terminal limit reached')
+  })
+
+  it('does not allow concurrent opens to bypass the limit', async () => {
+    const { root, pool } = await harness()
+    const attempts = Array.from({ length: MAX_TERMINALS_PER_SESSION + 4 }, () =>
+      pool.open({ sessionId: sessionA, workspace: root }).then(
+        (info) => info,
+        (error: unknown) => error,
+      ),
+    )
+
+    const results = await Promise.all(attempts)
+    const opened = results.filter((result) => !(result instanceof Error))
+    const rejected = results.filter((result) => result instanceof Error)
+
+    expect(opened).toHaveLength(MAX_TERMINALS_PER_SESSION)
+    expect(rejected).toHaveLength(4)
+    for (const error of rejected) {
+      expect((error as Error).message).toContain(
+        'Session terminal limit reached',
+      )
+    }
+    expect(pool.list(sessionA)).toHaveLength(MAX_TERMINALS_PER_SESSION)
   })
 })

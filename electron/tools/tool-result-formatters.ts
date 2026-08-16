@@ -140,9 +140,11 @@ export function projectGrepResult(
 export function projectTerminalOpenResult(
   result: SuccessfulToolResult,
 ): ToolModelContentPart[] {
-  const terminalId = stringValue(objectContent(result).terminalId)
+  const terminalId = numberValue(objectContent(result).terminalId)
   return textPart(
-    terminalId ? `Opened terminal ${terminalId}` : 'Terminal opened',
+    terminalId !== undefined
+      ? `Opened terminal ${terminalId}`
+      : 'Terminal opened',
   )
 }
 
@@ -188,17 +190,6 @@ export function projectTerminalCloseResult(
     objectContent(result).closed === true
       ? 'Terminal closed'
       : 'Terminal was already closed',
-  )
-}
-
-/** Projects terminal_resize to a compact acknowledgement. */
-export function projectTerminalResizeResult(
-  result: SuccessfulToolResult,
-): ToolModelContentPart[] {
-  return textPart(
-    objectContent(result).resized === true
-      ? 'Terminal resized'
-      : 'Terminal was not resized',
   )
 }
 

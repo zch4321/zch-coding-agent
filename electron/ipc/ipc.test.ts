@@ -21,7 +21,7 @@ import { handleIpcInvocation, registerIpcHandlers } from './index'
 const sessionId = 'session-1' as SessionId
 const runId = 'run-1' as RunId
 const callId = 'call-1' as CallId
-const terminalId = 'terminal-1' as TerminalId
+const terminalId = 1 as TerminalId
 const projectId = 'project-1' as ProjectId
 const messageId = 'message-1' as MessageId
 const fileChangeId = 'change-1' as FileChangeId

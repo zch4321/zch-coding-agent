@@ -1,6 +1,6 @@
 # 待讨论的运行时设计问题
 
-状态：部分开放；第 1 项已形成设计决定，其余问题仍待讨论。
+状态：部分开放；第 1、2、6 项已形成设计决定，其余问题仍待讨论。
 
 本文只记录当前可观察行为、影响范围和后续需要回答的问题，不包含候选方案、推荐结论或实施计划。形成决定后，应把结论写入相应的 requirements、architecture、frontend spec 或 decision log，并更新本文状态。
 
@@ -23,25 +23,15 @@
 - `electron/session/canonical-history.ts`
 - `src/stores/conversation-timeline.ts`
 
-## 2. `run_command` 与交互式 Terminal 的执行环境边界
+## 2. `run_command` 与交互式 Terminal 的执行环境边界（已解决）
 
-### 当前行为
+### 决定
 
-- `run_command` 是一次性子进程工具，不创建 PTY，也不把实时输出投影到前端 Terminal。
-- `run_command.mode = process` 直接执行模型提交的 `executable + args`，不读取命令 Shell 配置。
-- `run_command.mode = shell` 读取 `executionEnvironment.commandShell`，由 Main process 解析实际解释器和固定启动参数，最终仍以 `shell: false` 启动。
-- Renderer 在 `Settings → Limits → Commands` 中提供“一次性命令 Shell”选择、重新扫描、实际路径和失效回退提示。
-- `terminal_open` 使用另一条持久 PTY 链路。它当前允许 Tool 参数提供可选 `shell`；未提供时，Windows 按 PowerShell 7、Windows PowerShell、CMD 自动选择，其他平台默认 `$SHELL` 或 `/bin/sh`。PowerShell PTY 使用 `-ExecutionPolicy Bypass`。
-- `terminal_open` 不读取 `executionEnvironment.commandShell`，当前也没有独立的用户侧 Terminal profile 配置。
-
-### 待讨论问题
-
-- 产品中的“命令解释器”“终端”“Shell profile”分别指什么，设置和文案是否足够明确？
-- `run_command.shell` 与 `terminal_open` 应共享配置还是维护不同配置？
-- 交互式 Terminal 使用哪个 Shell 应由用户配置、Tool 参数决定，还是同时支持两者？
-- Main Agent 应获知哪些实际执行环境信息，哪些候选解释器信息不应进入模型上下文？
-- 不同平台上的发现顺序、失效回退、重新扫描和配置持久化语义是否一致？
-- `run_command.process`、内部 Git、Subagent、Swarm child 和 Terminal 是否需要明确展示各自不受哪些设置影响？
+- `run_command.shell` 与交互 Terminal 统一使用 `executionEnvironment.commandShell`；不引入独立的用户侧 Terminal profile 配置。
+- `terminal_open` 删除模型可见的 `shell` 参数；TerminalPool 在每次打开 Terminal 时读取当前配置并经 CommandShellService 解析实际 profile，配置失效时沿用自动回退且不改写保存值。解析为 PowerShell kind 的 PTY 固定使用 `-ExecutionPolicy Bypass`。
+- 设置变更只影响之后打开的 Terminal；已在运行的 Terminal 不重启。
+- `<environment_context>` 继续只注入实际解析后的 `command_shell: label (id)`；它同时约束 `run_command` shell 模式与 Terminal 输入语法，模型不能选择、假设或更换 Shell。
+- `run_command.process`、内部 Git、Subagent、Swarm child 和其他直接进程不读取该配置；设置页文案统一为“命令与终端 Shell”。
 
 ### 关联实现
 
@@ -51,6 +41,7 @@
 - `electron/tools/process-tools.ts`
 - `electron/terminal/pool.ts`
 - `electron/tools/terminal-tools.ts`
+- `electron/session/session-terminals.ts`
 - `src/components/settings/LimitsSettingsPanel.vue`
 
 ## 3. 上下文占用进度条的数据语义
@@ -174,34 +165,25 @@
 - `electron/main.ts`
 - `src/components/settings/LoggingSettingsPanel.vue`
 
-## 6. Terminal 标识符与生命周期
+## 6. Terminal 标识符与生命周期（已解决）
 
-### 当前行为
+### 决定
 
-- `terminal_open` 当前生成 `terminal:<UUID>` 形式的 `terminalId`，并把它返回给模型；`terminal_send`、`terminal_read`、`terminal_resize` 和 `terminal_close` 都要求模型原样传回该标识符。
-- `terminal_list` 可以重新列出当前 Session 拥有的 Terminal；Main process 在每次 Terminal 操作时同时校验 `sessionId` 和 `terminalId` 的归属关系。
-- Terminal 资源归属于 Session，而不是创建它的 Run。单次 Run 正常完成或失败不会关闭 Terminal，后续 Run 可以继续使用同一 Terminal。
-- Terminal 会在显式调用 `terminal_close`、Session 关闭或应用运行时释放时清理。PTY 自行退出时会变为 `closed`，当前资源和 scrollback 仍可被列出、读取，直至后续清理。
-- Terminal 资源表当前以 `terminalId` 作为进程内主键；已显式关闭的最近 256 个标识符还会保留其 Session owner，用于重复关闭的幂等判断。
-
-### 待讨论问题
-
-- 模型可见的 Terminal 标识符应采用应用级、Session 级还是 Run 级作用域？
-- 如果标识符改为自增序号，序号何时重置，跨 Session 的同号 Terminal 如何区分？
-- 模型使用的短标识符与 Main process 内部资源主键是否需要保持相同？
-- Run 级编号如何表达 Terminal 跨 Run 持续存在的当前语义？Session 级编号又如何处理 Session 恢复、进程重启和历史 Tool result？
-- 关闭后的编号是否允许复用，旧 Tool call、延迟事件和重复 close 如何避免指向新资源？
-- 模型输错、引用已关闭 Terminal 或引用其他 Session 的同号 Terminal 时，需要返回什么稳定错误信息？
-- Terminal 数量上限、`terminal_list` 的排序和模型选择目标 Terminal 的上下文是否需要一并定义？
+- 模型可见的 `terminalId` 采用进程级作用域：进程内全局递增的正整数，跨 Session 不重复；应用重启后从 1 重新开始。模型使用的短标识符与 Main process 内部资源主键保持相同。
+- ID 一经分配在当前进程内不复用；打开失败允许留下编号空洞。不迁移数据库或旧日志中的旧字符串 ID。
+- 每个 Session 最多保留 16 个 Terminal（含 opening、running 与已退出但未显式关闭的条目）；显式关闭立即释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限。
+- `terminal_list` 按数字 ID 升序返回；模型输错、引用已关闭 Terminal 或引用其他 Session 的同号 Terminal 时，统一返回 `Terminal not found for this session`；对同一 ID 的重复显式关闭仍幂等返回“已关闭”。
+- 模型侧 `terminal_resize` Tool 已移除；Terminal 尺寸由 Renderer 面板自动 fit 后经 `terminal:resize` IPC 同步给 PTY。
 
 ### 关联实现
 
 - `shared/ids.ts`
 - `shared/terminal.ts`
+- `shared/ipc-contract.ts`
 - `electron/terminal/pool.ts`
 - `electron/tools/terminal-tools.ts`
+- `electron/session/session-terminals.ts`
 - `electron/session/session-manager.ts`
-- `src/stores/agent-runtime.ts`
 
 ## 7. 对话运行阶段、布局稳定性与 Tool call 生成可见性
 

@@ -183,6 +183,8 @@ export class SessionManager {
     this.#terminals = new SessionTerminalController({
       getScrollbackBytes: () =>
         this.#configStore.getPublicConfig().limits.terminalScrollbackBytes,
+      getCommandShellSelection: () =>
+        this.#configStore.getPublicConfig().executionEnvironment.commandShell,
       emit: (event) => this.#events.emitTerminal(event),
       requireSession: (sessionId) => this.#requireSession(sessionId),
     })
