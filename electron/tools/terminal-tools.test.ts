@@ -35,11 +35,13 @@ function outcome(
 }
 
 describe('terminal tool permission matrix', () => {
-  it('normalizes only bare Windows line feeds to Enter', () => {
+  it('presses Enter automatically without duplicating an existing terminator', () => {
+    expect(normalizeTerminalInput('echo one', 'win32')).toBe('echo one\r')
     expect(normalizeTerminalInput('echo one\n', 'win32')).toBe('echo one\r')
     expect(normalizeTerminalInput('one\r\ntwo\nthree\r', 'win32')).toBe(
       'one\r\ntwo\rthree\r',
     )
+    expect(normalizeTerminalInput('echo one', 'linux')).toBe('echo one\n')
     expect(normalizeTerminalInput('echo one\n', 'linux')).toBe('echo one\n')
   })
 
@@ -80,7 +82,7 @@ describe('terminal tool permission matrix', () => {
   it('accepts only positive integer terminal identifiers', () => {
     const registry = definitions()
     const definition = registry.get('terminal_send')!
-    const args = { terminalId: 1, data: 'npm test\n' }
+    const args = { terminalId: 1, data: 'npm test' }
 
     expect(registry.validateArgs(definition, args).ok).toBe(true)
     for (const invalid of ['1', 'terminal:1', 0, -2, 1.5]) {
@@ -95,7 +97,7 @@ describe('terminal tool permission matrix', () => {
     const definition = registry.get('terminal_send')!
     const args = {
       terminalId: 7,
-      data: 'npm test\n',
+      data: 'npm test',
     }
 
     expect(registry.validateArgs(definition, args).ok).toBe(true)
@@ -130,7 +132,7 @@ describe('terminal tool permission matrix', () => {
         .execute(
           {
             terminalId: 7,
-            data: 'echo delayed\n',
+            data: 'echo delayed',
             delayMs: 250,
           },
           {
@@ -148,7 +150,7 @@ describe('terminal tool permission matrix', () => {
       expect(write).toHaveBeenCalledWith(
         'session:delay',
         7,
-        normalizeTerminalInput('echo delayed\n'),
+        normalizeTerminalInput('echo delayed'),
       )
       await vi.advanceTimersByTimeAsync(249)
       expect(settled).toBe(false)
@@ -177,7 +179,7 @@ describe('terminal tool permission matrix', () => {
         definition.execute(
           {
             terminalId: 8,
-            data: 'ignored\n',
+            data: 'ignored',
             delayMs: 60_000,
           },
           {
@@ -210,7 +212,7 @@ describe('terminal tool permission matrix', () => {
     const result = definition.execute(
       {
         terminalId: 9,
-        data: 'start\n',
+        data: 'start',
         delayMs: 60_000,
       },
       {
