@@ -39,10 +39,9 @@
 
 .conversation-header {
   min-width: 0;
-  min-height: 66px;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 24px 12px;
+  padding: 12px 24px 10px;
   overflow: hidden;
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -84,11 +83,10 @@
 .usage-progress-row {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
-  gap: 6px 12px;
+  align-items: center;
+  gap: 10px;
 }
 
-.usage-progress-row span,
 .usage-summary p {
   min-width: 0;
   margin: 0;
@@ -98,7 +96,13 @@
 }
 
 .usage-progress {
-  width: 100%;
+  min-width: 60px;
+  flex: 1;
+}
+
+.usage-progress-text {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .run-status {

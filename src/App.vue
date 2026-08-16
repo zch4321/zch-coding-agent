@@ -494,10 +494,7 @@ onUnmounted(() => {
                     'terminal-maximized': terminalOpen && terminalMaximized,
                   }"
                 >
-                  <ConversationHeader
-                    :active-title="activeTitle"
-                    :project-name="projectName"
-                  />
+                  <ConversationHeader :active-title="activeTitle" />
 
                   <ConversationTimeline
                     :project-name="projectName"

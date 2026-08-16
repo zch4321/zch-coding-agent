@@ -12,8 +12,9 @@ const zhCN = {
     usageSummary:
       '上次 {latest} tokens · 对话累计 {total} · 上下文 {context}（{source}）',
     usageContext: '上下文 {used}/{context} Token · {percent}%（{source}）',
-    usageTotal: '累计 {total} Token',
+    usageContextCompact: '上下文 {used}/{context} · {percent}%',
     usageCache: '缓存命中输入 {hit} · 未命中输入 {miss} · 输出 {output}',
+    usageCacheRate: '缓存命中率 {rate}%',
   },
   common: {
     cancel: '取消',

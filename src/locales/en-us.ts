@@ -12,8 +12,9 @@ const enUS = {
     usageSummary:
       'Last {latest} tokens · conversation {total} · context {context} ({source})',
     usageContext: 'Context {used}/{context} tokens · {percent}% ({source})',
-    usageTotal: 'Total {total} tokens',
+    usageContextCompact: 'Context {used}/{context} · {percent}%',
     usageCache: 'Cache-hit input {hit} · miss input {miss} · output {output}',
+    usageCacheRate: 'Cache hit rate {rate}%',
   },
   common: {
     cancel: 'Cancel',

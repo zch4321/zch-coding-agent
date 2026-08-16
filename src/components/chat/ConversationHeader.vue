@@ -3,22 +3,14 @@ import { NProgress, NTag, type TagProps } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
+import { cacheHitRatePercent, formatTokenCount } from './usage-format'
 
 defineProps<{
   activeTitle: string
-  projectName: string
 }>()
 
 const agent = useAgentStore()
 const { t } = useI18n()
-
-function usageTokens(value: typeof agent.latestUsage): number {
-  if (!value) return 0
-  return (
-    value.totalTokens ??
-    (value.promptTokens ?? 0) + (value.completionTokens ?? 0)
-  )
-}
 
 const statusLabel = computed(() => {
   if (agent.pendingApproval) {
@@ -82,13 +74,12 @@ const usageMetrics = computed(() => {
       : 0
   const totals = agent.usage.reduce(
     (accumulator, item) => {
-      accumulator.total += usageTokens(item.usage)
       accumulator.cacheHit += item.usage.cacheHitTokens ?? 0
       accumulator.cacheMiss += item.usage.cacheMissTokens ?? 0
       accumulator.output += item.usage.completionTokens ?? 0
       return accumulator
     },
-    { total: 0, cacheHit: 0, cacheMiss: 0, output: 0 },
+    { cacheHit: 0, cacheMiss: 0, output: 0 },
   )
 
   return {
@@ -99,58 +90,64 @@ const usageMetrics = computed(() => {
     totals,
   }
 })
+
+const contextTooltip = computed(() => {
+  const metrics = usageMetrics.value
+  if (!metrics) return ''
+  return t('app.usageContext', {
+    used: metrics.usedContextTokens.toLocaleString(),
+    context: metrics.contextWindowTokens.toLocaleString(),
+    percent: metrics.contextPercent,
+    source: metrics.contextWindowSource,
+  })
+})
+
+const contextCompactLabel = computed(() => {
+  const metrics = usageMetrics.value
+  if (!metrics) return ''
+  return t('app.usageContextCompact', {
+    used: formatTokenCount(metrics.usedContextTokens),
+    context: formatTokenCount(metrics.contextWindowTokens),
+    percent: metrics.contextPercent,
+  })
+})
+
+const cacheLabel = computed(() => {
+  const metrics = usageMetrics.value
+  if (!metrics) return ''
+  const base = t('app.usageCache', {
+    hit: formatTokenCount(metrics.totals.cacheHit),
+    miss: formatTokenCount(metrics.totals.cacheMiss),
+    output: formatTokenCount(metrics.totals.output),
+  })
+  const rate = cacheHitRatePercent(
+    metrics.totals.cacheHit,
+    metrics.totals.cacheMiss,
+  )
+  return rate === undefined
+    ? base
+    : `${base} · ${t('app.usageCacheRate', { rate })}`
+})
 </script>
 
 <template>
   <header class="conversation-header">
     <div>
       <h1>{{ activeTitle }}</h1>
-      <p v-if="agent.workspacePath">{{ projectName }}</p>
       <div v-if="usageMetrics" class="usage-summary">
-        <div class="usage-progress-row">
-          <span>
-            {{
-              t('app.usageContext', {
-                used: usageMetrics.usedContextTokens.toLocaleString(),
-                context: usageMetrics.contextWindowTokens.toLocaleString(),
-                percent: usageMetrics.contextPercent,
-                source: usageMetrics.contextWindowSource,
-              })
-            }}
-          </span>
-          <span>
-            {{
-              t('app.usageTotal', {
-                total: usageMetrics.totals.total.toLocaleString(),
-              })
-            }}
-          </span>
+        <div class="usage-progress-row" :title="contextTooltip">
+          <NProgress
+            class="usage-progress"
+            type="line"
+            :percentage="usageMetrics.contextPercent"
+            :show-indicator="false"
+            :height="5"
+            :border-radius="999"
+            :aria-label="contextTooltip"
+          />
+          <span class="usage-progress-text">{{ contextCompactLabel }}</span>
         </div>
-        <NProgress
-          class="usage-progress"
-          type="line"
-          :percentage="usageMetrics.contextPercent"
-          :show-indicator="false"
-          :height="5"
-          :border-radius="999"
-          :aria-label="
-            t('app.usageContext', {
-              used: usageMetrics.usedContextTokens.toLocaleString(),
-              context: usageMetrics.contextWindowTokens.toLocaleString(),
-              percent: usageMetrics.contextPercent,
-              source: usageMetrics.contextWindowSource,
-            })
-          "
-        />
-        <p>
-          {{
-            t('app.usageCache', {
-              hit: usageMetrics.totals.cacheHit.toLocaleString(),
-              miss: usageMetrics.totals.cacheMiss.toLocaleString(),
-              output: usageMetrics.totals.output.toLocaleString(),
-            })
-          }}
-        </p>
+        <p>{{ cacheLabel }}</p>
       </div>
     </div>
     <div class="conversation-statuses">
