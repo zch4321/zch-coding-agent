@@ -128,6 +128,8 @@ const enUS = {
     chooseHint: 'Choose a workspace to begin',
     apiKeyHint: 'Configure a Provider API key in Settings',
     modelHint: 'Enable and select a main model in Provider settings',
+    providerPlaceholder: 'Select a Provider',
+    modelPlaceholder: 'Select a model',
     noticeHint: 'Review the Provider data notice',
     reasoningUnsupportedHint:
       'The selected reasoning effort is not supported by this model; pick a supported one to send',

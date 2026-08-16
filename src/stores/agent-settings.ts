@@ -112,6 +112,19 @@ function subagentsSignature(
   return subagents ? JSON.stringify(subagents) : ''
 }
 
+interface PermissionDraft {
+  defaultMode: PermissionMode
+  builtinPolicies: boolean
+  rememberedRules: UiRememberedRule[]
+  sensitiveMode: 'off' | 'warn' | 'confirm'
+  pathGlobs: string
+  contentPatterns: string
+}
+
+function permissionSignature(draft: PermissionDraft): string {
+  return JSON.stringify(draft)
+}
+
 export const useAgentSettingsStore = defineStore('agent-settings', {
   state: () => ({
     error: '',
@@ -288,7 +301,12 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         )?.credentialConfigured,
       ),
     permissionsDirty: (state) =>
-      JSON.stringify(state.permissionForm) !== state.permissionSavedSignature,
+      permissionSignature({
+        defaultMode: state.defaultMode,
+        builtinPolicies: state.builtinPolicies,
+        rememberedRules: state.rememberedRules,
+        ...state.permissionForm,
+      }) !== state.permissionSavedSignature,
     limitsDirty: (state) =>
       limitsSignature(state.limitsConfig) !== state.limitsSavedSignature,
     subagentsDirty: (state) =>
@@ -401,7 +419,12 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           config.permission.sensitiveData.pathGlobs.join('\n')
         this.permissionForm.contentPatterns =
           config.permission.sensitiveData.contentPatterns.join('\n')
-        this.permissionSavedSignature = JSON.stringify(this.permissionForm)
+        this.permissionSavedSignature = permissionSignature({
+          defaultMode: this.defaultMode,
+          builtinPolicies: this.builtinPolicies,
+          rememberedRules: this.rememberedRules,
+          ...this.permissionForm,
+        })
       }
 
       if (includes('logging')) {
@@ -1113,9 +1136,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         this.subagentsSaving = false
       }
     },
-    async savePermissions(mode: PermissionMode) {
+    async savePermissions() {
       const bridge = window.agentApi
-      if (!bridge || this.permissionsSaving) return
+      if (!bridge || this.permissionsSaving) return false
       const lines = (value: string) =>
         value
           .split(/\r?\n/)
@@ -1125,37 +1148,57 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.permissionsSaveStatus = ''
       this.error = ''
       try {
-        const result = await bridge.setConfig({
-          version: IPC_VERSION,
-          kind: 'permission',
-          defaultMode: mode,
-          builtinPolicies: this.builtinPolicies,
-          rememberedRules: this.rememberedRules.map((rule) => ({
-            ...rule,
-            argConstraints: JSON.parse(rule.argConstraints),
-          })),
-          sensitiveData: {
-            mode: this.permissionForm.sensitiveMode,
-            pathGlobs: lines(this.permissionForm.pathGlobs),
-            contentPatterns: lines(this.permissionForm.contentPatterns),
-          },
-        })
-        if (result.ok) {
+        while (true) {
+          const draft = cloneJson<PermissionDraft>({
+            defaultMode: this.defaultMode,
+            builtinPolicies: this.builtinPolicies,
+            rememberedRules: this.rememberedRules,
+            ...this.permissionForm,
+          })
+          const draftSignature = permissionSignature(draft)
+          const result = await bridge.setConfig({
+            version: IPC_VERSION,
+            kind: 'permission',
+            defaultMode: draft.defaultMode,
+            builtinPolicies: draft.builtinPolicies,
+            rememberedRules: draft.rememberedRules.map((rule) => ({
+              ...rule,
+              argConstraints: JSON.parse(rule.argConstraints),
+            })),
+            sensitiveData: {
+              mode: draft.sensitiveMode,
+              pathGlobs: lines(draft.pathGlobs),
+              contentPatterns: lines(draft.contentPatterns),
+            },
+          })
+          if (!result.ok) {
+            this.error = result.error.message
+            this.permissionsSaveStatus = result.error.message
+            return false
+          }
+
+          this.permissionSavedSignature = draftSignature
+          const currentSignature = permissionSignature({
+            defaultMode: this.defaultMode,
+            builtinPolicies: this.builtinPolicies,
+            rememberedRules: this.rememberedRules,
+            ...this.permissionForm,
+          })
+          if (currentSignature !== draftSignature) continue
+
           this.applyConfig(result.value.config, ['permission'])
           this.permissionsSaveStatus = 'saved'
-        } else {
-          this.error = result.error.message
-          this.permissionsSaveStatus = result.error.message
+          return true
         }
       } finally {
         this.permissionsSaving = false
       }
     },
-    async removeRememberedRule(ruleId: string, mode: PermissionMode) {
+    async removeRememberedRule(ruleId: string) {
       this.rememberedRules = this.rememberedRules.filter(
         (rule) => rule.id !== ruleId,
       )
-      await this.savePermissions(mode)
+      return this.savePermissions()
     },
     async saveLogging() {
       const bridge = window.agentApi

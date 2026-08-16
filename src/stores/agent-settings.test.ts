@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentApi } from '../../shared/agent-api'
 import type {
+  ConfigSetRequest,
   ModelCapabilityOverride,
   ProviderPublicConfig,
   PublicConfig,
@@ -423,5 +424,82 @@ describe('agent settings model pool', () => {
     expect(settings.modelProfiles[0]?.reasoningEfforts).toBeUndefined()
     expect(settings.modelProfiles[0]?.capability).toBeUndefined()
     expect(settings.modelProfiles[0]?.capabilitySource).toBe('provider')
+  })
+
+  it('persists the global default mode and follows edits made during a save', async () => {
+    const settings = useAgentSettingsStore()
+    settings.applyConfig(
+      {
+        permission: {
+          defaultMode: 'readonly',
+          builtinPolicies: true,
+          rememberedRules: [],
+          sensitiveData: {
+            mode: 'confirm',
+            pathGlobs: [],
+            contentPatterns: [],
+          },
+        },
+      } as unknown as PublicConfig,
+      ['permission'],
+    )
+
+    type SetConfigResult = Awaited<ReturnType<AgentApi['setConfig']>>
+    let resolveFirst!: (result: SetConfigResult) => void
+    const responseFor = (
+      request: Extract<ConfigSetRequest, { kind: 'permission' }>,
+    ): SetConfigResult => ({
+      version: 1,
+      ok: true,
+      value: {
+        config: {
+          permission: {
+            defaultMode: request.defaultMode,
+            builtinPolicies: request.builtinPolicies,
+            rememberedRules: request.rememberedRules,
+            sensitiveData: request.sensitiveData,
+          },
+        } as PublicConfig,
+      },
+    })
+    const setConfig = vi.fn((request: ConfigSetRequest) => {
+      if (request.kind !== 'permission') {
+        throw new Error('Expected a permission config request')
+      }
+      const response = responseFor(request)
+      if (setConfig.mock.calls.length === 1) {
+        return new Promise<SetConfigResult>((resolve) => {
+          resolveFirst = resolve
+        })
+      }
+      return Promise.resolve(response)
+    })
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: { setConfig } as Partial<AgentApi> as AgentApi,
+    })
+
+    settings.defaultMode = 'auto'
+    const saving = settings.savePermissions()
+    await vi.waitFor(() => expect(setConfig).toHaveBeenCalledTimes(1))
+    const firstRequest = setConfig.mock.calls[0]![0]
+    if (firstRequest.kind !== 'permission') {
+      throw new Error('Expected a permission config request')
+    }
+
+    settings.defaultMode = 'confirm'
+    settings.permissionForm.pathGlobs = 'src/**'
+    resolveFirst(responseFor(firstRequest))
+
+    await expect(saving).resolves.toBe(true)
+    expect(setConfig).toHaveBeenCalledTimes(2)
+    expect(setConfig.mock.calls[1]?.[0]).toMatchObject({
+      kind: 'permission',
+      defaultMode: 'confirm',
+      sensitiveData: { pathGlobs: ['src/**'] },
+    })
+    expect(settings.defaultMode).toBe('confirm')
+    expect(settings.permissionForm.pathGlobs).toBe('src/**')
+    expect(settings.permissionsDirty).toBe(false)
   })
 })

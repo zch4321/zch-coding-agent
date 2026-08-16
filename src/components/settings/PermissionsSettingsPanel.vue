@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, watch } from 'vue'
-import { NButton, NInput, NSelect, NTooltip } from 'naive-ui'
+import { NButton, NInput, NSelect } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { PermissionMode } from '../../../shared/config'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 
-const emit = defineEmits<{ mode: [value: PermissionMode] }>()
+const emit = defineEmits<{ defaultMode: [value: PermissionMode] }>()
 const agent = useAgentStore()
 const { t } = useI18n()
 const modeOptions = [
@@ -30,7 +30,11 @@ function savePermissionsNow() {
 }
 
 watch(
-  () => JSON.stringify(agent.permissionForm),
+  () =>
+    JSON.stringify({
+      defaultMode: agent.defaultMode,
+      permissionForm: agent.permissionForm,
+    }),
   () => {
     if (autosaveTimer) clearTimeout(autosaveTimer)
     if (!agent.permissionsDirty) return
@@ -78,24 +82,11 @@ onBeforeUnmount(() => {
     </div>
     <label class="settings-field">
       <span>{{ t('permissions.defaultMode') }}</span>
-      <NTooltip :disabled="!agent.modeLockedByWriter">
-        <template #trigger>
-          <NSelect
-            :value="agent.modeLockedByWriter ? 'readonly' : agent.mode"
-            :options="modeOptions"
-            :disabled="
-              Boolean(
-                agent.startPending ||
-                agent.activeRunId ||
-                agent.pendingApproval ||
-                agent.modeLockedByWriter,
-              )
-            "
-            @update:value="emit('mode', $event as PermissionMode)"
-          />
-        </template>
-        {{ agent.modeLockTooltip }}
-      </NTooltip>
+      <NSelect
+        :value="agent.defaultMode"
+        :options="modeOptions"
+        @update:value="emit('defaultMode', $event as PermissionMode)"
+      />
       <small>{{ t('permissions.autoApprovalNote') }}</small>
     </label>
     <label class="settings-field">

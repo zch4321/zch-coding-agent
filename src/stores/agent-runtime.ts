@@ -181,26 +181,42 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
             (provider) => provider.id === state.draftModelSelection?.providerId,
           )
         : undefined
-      if (state.draftModelSelection && draftProvider) {
-        return state.draftModelSelection
+      if (state.draftModelSelection) {
+        return draftProvider
+          ? state.draftModelSelection
+          : {
+              providerId: '',
+              model: '',
+              reasoning: state.draftModelSelection.reasoning,
+            }
       }
 
       const roles = useModelRolesStore()
-      const provider =
-        settings.providers.find(
-          (candidate) => candidate.id === roles.defaultModelProvider,
-        ) ?? settings.providers[0]
-      return {
-        providerId: provider?.id ?? roles.defaultModelProvider,
+      const provider = settings.providers.find(
+        (candidate) => candidate.id === roles.defaultModelProvider,
+      )
+      const selection = {
+        providerId: provider?.id ?? '',
         model: roles.defaultModel || provider?.model || '',
-        reasoning: provider?.reasoning ?? settings.providerForm.reasoning,
+        reasoning: provider?.reasoning ?? ('off' as const),
       }
+      return evaluateModelRouteCompatibility(provider, selection).ok
+        ? selection
+        : { ...selection, providerId: '', model: '' }
     },
     composerProviderId(): string {
       return this.composerModelSelection.providerId
     },
     composerModel(): string {
       return this.composerModelSelection.model
+    },
+    composerCredentialConfigured(): boolean {
+      const settings = useAgentSettingsStore()
+      return Boolean(
+        settings.providers.find(
+          (provider) => provider.id === this.composerProviderId,
+        )?.credentialConfigured,
+      )
     },
     composerReasoning(): ModelSelection['reasoning'] {
       return this.composerModelSelection.reasoning
@@ -636,7 +652,9 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const replica = useAgentReplicaStore()
       const selection = {
         providerId: provider.id,
-        model: provider.model,
+        model: provider.enabledModelIds.includes(provider.model)
+          ? provider.model
+          : '',
         reasoning: provider.reasoning,
       }
       if (replica.selectedSession) {
@@ -682,6 +700,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const session = replica.selectedSession
       const text = (options.text ?? this.input).trim()
       if (
+        !this.canSend ||
         !window.agentApi ||
         !project ||
         !text ||

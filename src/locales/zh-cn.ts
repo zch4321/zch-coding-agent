@@ -125,6 +125,8 @@ const zhCN = {
     chooseHint: '请先选择工作区',
     apiKeyHint: '请在设置中配置模型服务 API Key',
     modelHint: '请先在模型服务设置中启用并选择主模型',
+    providerPlaceholder: '选择 Provider',
+    modelPlaceholder: '选择模型',
     noticeHint: '请先确认模型服务数据提示',
     reasoningUnsupportedHint:
       '当前模型不支持所选思考档位，请手动选择受支持档位后再发送',

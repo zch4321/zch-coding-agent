@@ -744,6 +744,55 @@ describe('SessionService durable transactions', () => {
       await setup.testDatabase.dispose()
     }
   })
+
+  it('applies an automatic title without advancing the execution revision', async () => {
+    const setup = await setupServices()
+    try {
+      const sessionId = 'session:model-title' as SessionId
+      await setup.sessions.commitFirstTurn({
+        session: activeSession(sessionId, setup.project.id, {
+          title: 'Automatic title',
+          titleSource: 'auto',
+        }),
+        messages: firstTurn(sessionId),
+        requestHash: canonicalHash('hello durable state'),
+      })
+
+      await expect(
+        setup.sessions.applyModelTitle({
+          sessionId,
+          title: 'Generated title',
+        }),
+      ).resolves.toBe(true)
+      await expect(setup.sessions.getRecord(sessionId)).resolves.toMatchObject({
+        title: 'Generated title',
+        titleSource: 'model',
+        revision: 1,
+        lastSeq: 2,
+      })
+
+      const next = await setup.sessions.commitMutation({
+        sessionId,
+        expectedRevision: 1,
+        expectedLastSeq: 2,
+        metadata: { permissionMode: 'readonly' },
+        messageChange: 'none',
+      })
+      expect(next.commit.change.session).toMatchObject({
+        title: 'Generated title',
+        titleSource: 'model',
+        revision: 2,
+      })
+      await expect(
+        setup.sessions.applyModelTitle({
+          sessionId,
+          title: 'Replacement title',
+        }),
+      ).resolves.toBe(false)
+    } finally {
+      await setup.testDatabase.dispose()
+    }
+  })
 })
 
 describe('ordinary Session fork', () => {

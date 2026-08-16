@@ -516,14 +516,23 @@ export class SessionService {
     const current = await this.getRecord(input.sessionId)
     if (current.titleSource !== 'auto') return false
     try {
-      await this.commitMutation({
-        sessionId: input.sessionId,
-        expectedRevision: current.revision,
-        expectedLastSeq: current.lastSeq,
-        metadata: { title: input.title, titleSource: 'model' },
-        messageChange: 'none',
+      let applied = false
+      await this.#coordinator.command('session.changed', (transaction) => {
+        applied = this.#sessions.updateAutoTitle(transaction, {
+          sessionId: input.sessionId,
+          title: input.title,
+          updatedAt: this.#now(),
+        })
+        const session = this.#sessions.get(transaction, input.sessionId)
+        if (!session) {
+          throw new ApplicationError('NOT_FOUND', 'Session was not found')
+        }
+        return {
+          session,
+          messageChange: { mode: 'none' as const },
+        }
       })
-      return true
+      return applied
     } catch (error) {
       this.#onDiagnostic(
         `Model-generated title for Session ${input.sessionId} was not applied`,

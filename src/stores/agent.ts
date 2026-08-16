@@ -48,8 +48,8 @@ export type AgentFacade = Omit<ShellStore, '$id'> &
     activeConversation?: SessionView
     goal: SessionView['goal']
     plan: SessionView['plan']
-    savePermissions(): Promise<void>
-    removeRememberedRule(ruleId: string): Promise<void>
+    savePermissions(): Promise<boolean>
+    removeRememberedRule(ruleId: string): Promise<boolean>
     revertChange(changeId: string): Promise<boolean>
     searchSessions(text: string, projectId?: ProjectId): Promise<void>
     setProviderDraftModel(model: string): void
@@ -172,6 +172,7 @@ const runtimeProperties = new Set<PropertyKey>([
   'composerModelSelection',
   'composerProviderId',
   'composerModel',
+  'composerCredentialConfigured',
   'composerReasoning',
   'composerReasoningValid',
   'composerModelOptions',
@@ -267,9 +268,8 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     saveSubagents: settings.saveSubagents,
     loadCommandShells: settings.loadCommandShells,
     setCommandShell: settings.setCommandShell,
-    savePermissions: () => settings.savePermissions(runtime.mode),
-    removeRememberedRule: (ruleId: string) =>
-      settings.removeRememberedRule(ruleId, runtime.mode),
+    savePermissions: settings.savePermissions,
+    removeRememberedRule: settings.removeRememberedRule,
     saveLogging: settings.saveLogging,
     acceptProviderNotice: settings.acceptProviderNotice,
     acceptYoloNotice: settings.acceptYoloNotice,

@@ -323,6 +323,36 @@ describe('agent runtime store', () => {
     expect(runtime.composerReasoning).toBe('max')
   })
 
+  it('leaves a new conversation route empty when the default model is invalid', async () => {
+    const replica = useAgentReplicaStore()
+    replica.projects = [project]
+    replica.selectedProjectId = projectId
+    const settings = useAgentSettingsStore()
+    const configuredProvider = provider('provider-a', 'provider-a-default', [
+      'provider-a-default',
+    ])
+    settings.providers = [configuredProvider]
+    const roles = useModelRolesStore()
+    roles.defaultModelProvider = configuredProvider.id
+    roles.defaultModel = 'removed-model'
+    const startRun = vi.fn()
+    installApi({ startRun: startRun as AgentApi['startRun'] })
+    const runtime = useAgentRuntimeStore()
+
+    expect(runtime.composerProviderId).toBe('')
+    expect(runtime.composerModel).toBe('')
+    expect(runtime.canSend).toBe(false)
+    await expect(
+      runtime.sendMessage({ text: 'Do not start an invalid run' }),
+    ).resolves.toBe(false)
+    expect(startRun).not.toHaveBeenCalled()
+
+    runtime.setComposerProvider(configuredProvider.id)
+    expect(runtime.composerProviderId).toBe(configuredProvider.id)
+    expect(runtime.composerModel).toBe(configuredProvider.model)
+    expect(runtime.canSend).toBe(true)
+  })
+
   it('projects a reactive draft route into a clone-safe run payload', async () => {
     const replica = useAgentReplicaStore()
     replica.projects = [project]
@@ -367,6 +397,11 @@ describe('agent runtime store', () => {
     const replica = useAgentReplicaStore()
     replica.projects = [project]
     replica.selectedProjectId = projectId
+    const settings = useAgentSettingsStore()
+    useModelRolesStore().defaultModelProvider = 'provider-a'
+    settings.providers = [
+      provider('provider-a', 'provider-a-default', ['provider-a-default']),
+    ]
     const startRun = vi.fn(async () => {
       throw new Error('Run bridge unavailable')
     })
@@ -399,6 +434,11 @@ describe('agent runtime store', () => {
     const replica = useAgentReplicaStore()
     replica.projects = [project]
     replica.selectedProjectId = projectId
+    const settings = useAgentSettingsStore()
+    useModelRolesStore().defaultModelProvider = 'provider-a'
+    settings.providers = [
+      provider('provider-a', 'provider-a-default', ['provider-a-default']),
+    ]
     const pending = deferred<ReturnType<typeof success>>()
     const startRun = vi.fn(async (payload: DurableRunStartPayload) => {
       void payload

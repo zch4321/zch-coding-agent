@@ -354,14 +354,14 @@ const auxiliaryModelRoleOptions = computed(() => [
   ...defaultModelRoleOptions.value,
 ])
 const defaultModelRoleValue = computed(() => {
-  const provider =
-    agent.providers.find(
-      (candidate) => candidate.id === agent.defaultModelProvider,
-    ) ?? agent.providers[0]
-  return roleSelectValue(
-    provider?.id ?? '',
-    agent.defaultModel || provider?.model || '',
+  const provider = agent.providers.find(
+    (candidate) => candidate.id === agent.defaultModelProvider,
   )
+  const model = agent.defaultModel || provider?.model || ''
+  if (!provider || !model || !provider.enabledModelIds.includes(model)) {
+    return null
+  }
+  return roleSelectValue(provider.id, model)
 })
 const auxiliaryModelRoleValue = computed(() =>
   agent.auxiliaryModel
@@ -503,6 +503,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <NSelect
             :value="defaultModelRoleValue"
             :options="defaultModelRoleOptions"
+            :placeholder="t('settings.selectMainModel')"
             :disabled="agent.rolesSaving"
             filterable
             @update:value="selectDefaultModelRole"

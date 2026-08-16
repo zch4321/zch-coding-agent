@@ -38,6 +38,7 @@ type Sidebar = 'project' | 'artifact'
 type ArtifactTab = 'files' | 'diff' | 'plan' | 'agents'
 type AppView = 'chat' | 'settings'
 type MessageAction = 'edit' | 'fork' | 'retry'
+type YoloModeTarget = 'session' | 'default'
 
 const LEFT_SIDEBAR_WIDTH = 320
 const ARTIFACT_SIDEBAR_WIDTH = 440
@@ -52,6 +53,7 @@ const { locale, t } = useI18n()
 const activeView = ref<AppView>('chat')
 const settingsTab = ref<SettingsTab>('general')
 const yoloWarningOpen = ref(false)
+const yoloModeTarget = ref<YoloModeTarget>('session')
 const projectSidebarOpen = ref(true)
 const artifactSidebarOpen = ref(false)
 const artifactTab = ref<ArtifactTab>('files')
@@ -138,6 +140,7 @@ async function selectMode(value: string | number) {
   }
 
   if (value === 'yolo' && !agent.yoloNoticeAccepted) {
+    yoloModeTarget.value = 'session'
     yoloWarningOpen.value = true
     return
   }
@@ -145,12 +148,37 @@ async function selectMode(value: string | number) {
   await agent.setMode(value as PermissionMode)
 }
 
+function selectDefaultMode(value: string | number) {
+  if (
+    value !== 'readonly' &&
+    value !== 'auto' &&
+    value !== 'confirm' &&
+    value !== 'yolo'
+  ) {
+    return
+  }
+
+  if (value === 'yolo' && !agent.yoloNoticeAccepted) {
+    yoloModeTarget.value = 'default'
+    yoloWarningOpen.value = true
+    return
+  }
+
+  agent.defaultMode = value as PermissionMode
+}
+
 async function confirmYoloMode() {
   if (yoloPending.value) return
   yoloPending.value = true
   try {
     if (await agent.acceptYoloNotice()) {
-      if (await agent.setMode('yolo')) {
+      let applied = true
+      if (yoloModeTarget.value === 'default') {
+        agent.defaultMode = 'yolo'
+      } else {
+        applied = await agent.setMode('yolo')
+      }
+      if (applied) {
         yoloWarningOpen.value = false
       }
     }
@@ -483,7 +511,7 @@ onUnmounted(() => {
                   v-if="activeView === 'settings'"
                   :active-tab="settingsTab"
                   @close="closeSettings"
-                  @mode="selectMode"
+                  @default-mode="selectDefaultMode"
                 />
                 <section
                   v-else

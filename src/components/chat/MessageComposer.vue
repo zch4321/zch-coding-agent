@@ -113,14 +113,15 @@ const routeSelectionDisabled = computed(() =>
 )
 const sendHint = computed(() => {
   if (!agent.workspacePath) return t('chat.chooseHint')
-  if (!agent.credentialConfigured) return t('chat.apiKeyHint')
   if (
+    !agent.composerProviderId ||
     !agent.composerModelOptions.some(
       (option) => option.value === agent.composerModel,
     )
   ) {
     return t('chat.modelHint')
   }
+  if (!agent.composerCredentialConfigured) return t('chat.apiKeyHint')
   if (!agent.providerNoticeAccepted) return t('chat.noticeHint')
   if (!agent.composerReasoningValid) {
     return t('chat.reasoningUnsupportedHint')
@@ -585,19 +586,21 @@ watch(inputDisabled, (disabled) => {
           </NButton>
         </NDropdown>
         <NSelect
-          :value="agent.composerProviderId"
+          :value="agent.composerProviderId || null"
           style="width: min(180px, 24vw); min-width: 120px; flex: 0 1 180px"
           size="small"
           :options="agent.providerOptions"
+          :placeholder="t('chat.providerPlaceholder')"
           :disabled="routeSelectionDisabled"
           filterable
           @update:value="handleProviderSelect"
         />
         <NSelect
-          :value="agent.composerModel"
+          :value="agent.composerModel || null"
           style="width: min(220px, 28vw); min-width: 0; flex: 1 1 auto"
           size="small"
           :options="agent.composerModelOptions"
+          :placeholder="t('chat.modelPlaceholder')"
           :disabled="
             routeSelectionDisabled || agent.composerModelOptions.length === 0
           "

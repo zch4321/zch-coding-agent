@@ -19,7 +19,7 @@ defineProps<{
 }>()
 const emit = defineEmits<{
   close: []
-  mode: [value: PermissionMode]
+  defaultMode: [value: PermissionMode]
 }>()
 </script>
 
@@ -35,7 +35,7 @@ const emit = defineEmits<{
         <AgentsSettingsPanel v-else-if="activeTab === 'agents'" />
         <PermissionsSettingsPanel
           v-else-if="activeTab === 'permissions'"
-          @mode="emit('mode', $event)"
+          @default-mode="emit('defaultMode', $event)"
         />
         <SkillsSettingsPanel v-else-if="activeTab === 'skills'" />
         <McpSettingsPanel v-else-if="activeTab === 'mcp'" />

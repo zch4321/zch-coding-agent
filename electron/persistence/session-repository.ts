@@ -116,6 +116,25 @@ export class SessionRepository {
     return Number(result.changes) > 0
   }
 
+  /** Applies an automatic title without advancing the execution revision. */
+  updateAutoTitle(
+    transaction: PersistenceTransaction,
+    input: {
+      sessionId: SessionId
+      title: string
+      updatedAt: string
+    },
+  ): boolean {
+    const result = transaction
+      .prepare(
+        `UPDATE sessions
+         SET title = ?, title_source = 'model', updated_at = ?
+         WHERE id = ? AND lifecycle = 'active' AND title_source = 'auto'`,
+      )
+      .run(input.title, input.updatedAt, input.sessionId)
+    return Number(result.changes) > 0
+  }
+
   /** Deletes a Session only when no fork child still references it. */
   deleteLeaf(transaction: PersistenceTransaction, id: SessionId): boolean {
     const result = transaction
