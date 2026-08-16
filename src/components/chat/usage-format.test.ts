@@ -15,13 +15,16 @@ describe('formatTokenCount', () => {
   })
 
   it('uses integer k below one million', () => {
+    expect(formatTokenCount(9_950)).toBe('10k')
     expect(formatTokenCount(10_000)).toBe('10k')
     expect(formatTokenCount(96_500)).toBe('97k')
     expect(formatTokenCount(128_000)).toBe('128k')
     expect(formatTokenCount(256_000)).toBe('256k')
+    expect(formatTokenCount(999_499)).toBe('999k')
   })
 
   it('uses one decimal M at one million and above', () => {
+    expect(formatTokenCount(999_500)).toBe('1.0M')
     expect(formatTokenCount(1_000_000)).toBe('1.0M')
     expect(formatTokenCount(1_249_000)).toBe('1.2M')
   })

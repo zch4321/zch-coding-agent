@@ -1,6 +1,47 @@
 # Code Review：模型角色、自动标题与对话头部
 
-## 结论
+## 修复复审结论（2026-08-16）
+
+原始审查中的功能性与测试问题已经完成修复，当前没有已知的合并阻塞项：
+
+- Findings 1–2、4–13 已修复，并补充了对应的 backend、store、迁移或 Playwright 回归覆盖。
+- Finding 3 按产品决策调整为宽松偏好语义：全局默认模型允许因目录或标注变化而失效；新对话不会隐式迁移到其他模型，而是把 Provider/模型选择置空、禁用发送且不创建 Run，等待用户显式重新选择。已有 Session 的冻结 route 不受影响。
+- Finding 14 不做本次拆分。`ProviderSettingsPanel` 保持现有组件边界；该项属于维护性建议，不影响本次功能正确性。迁移文件同样保持按 schema 演进集中组织，后续仅在确有独立边界时再拆分。
+
+本轮修复还统一迁移了 v21 E2E helper 与断言、恢复了权限默认模式持久化和串行追写、让 Composer 凭据校验跟随当前 route，并使自动标题使用完成 Run 的冻结主 route 回退且可在退出时立即取消。
+
+## 修复状态
+
+| Finding | 状态 | 修复或处理 |
+| --- | --- | --- |
+| 1 | 已修复 | 标题 metadata 写回改为不推进会话历史 revision，避免与 Run durable binding 竞争。 |
+| 2 | 已修复 | E2E 全面迁移到 AppConfig v21 `models` 结构与 `kind: 'models'`，保存状态使用唯一 test id。 |
+| 3 | 按决策处理 | 无效默认偏好在新对话中投影为空 route，并禁用发送；不自动修复或影响已有会话。 |
+| 4–5 | 已修复 | 默认权限模式进入配置 autosave；保存中继续编辑会串行追写最新快照，不再被旧响应覆盖。 |
+| 6 | 已修复 | 标题优先尝试 auxiliary，失败后回退完成 Run 的冻结主 route，并保留内部诊断。 |
+| 7 | 已修复 | fake-provider backend 测试默认关闭自动标题，避免意外访问真实 Provider。 |
+| 8 | 已修复 | 标题服务跟踪并取消活动请求；即使 Provider 忽略 signal，dispose 也不会等待到超时。 |
+| 9 | 已修复 | Composer 提示与 `canSend` 都按当前 Composer Provider 的凭据状态判断。 |
+| 10 | 已修复 | auxiliary 角色变化纳入 Provider autosave watcher，单独解除冲突即可恢复保存。 |
+| 11 | 已修复 | 增加冻结的真实 v20 fixture，覆盖模型角色、凭据引用、模型池、Shell 与损坏输入。 |
+| 12 | 已修复 | Token 单位提升边界改为 9,950 与 999,500，并补齐边界测试。 |
+| 13 | 已修复 | 当前 schema、模型池路径和 auxiliary/Auto Approval 术语统一为 v21 语义。 |
+| 14 | 接受现状 | 按产品决策不拆分 `ProviderSettingsPanel`；不作为合并阻塞项。 |
+
+## 修复后验证
+
+| 命令 | 结果 | 说明 |
+| --- | --- | --- |
+| `npm run format` | 通过 | 任务文件均符合当前 Prettier 规则。 |
+| `npm run check` | 通过 | Format、Lint、Typecheck 与全部确定性 Vitest 并行通过。 |
+| `npm run build:app` | 通过 | Renderer、Main 与 Preload 构建通过；仅保留既有的大 chunk warning。 |
+| `npx playwright test e2e/settings.spec.ts` | 通过 | 完整设置工作流通过，包括角色、Provider autosave 与冲突恢复。 |
+| `npx playwright test e2e/security-baseline.spec.ts --grep "serves config"` | 通过 | AppConfig v21 公共投影断言通过。 |
+| `npx playwright test e2e/features.plan.spec.ts --grep "starts a reviewed"` | 通过 | 公共配置 helper 与审批 Run setup 通过。 |
+
+本轮没有运行 `npm run verify`；该命令保留给合并/发布门禁。本报告涉及的确定性检查、应用构建和针对性 Playwright 回归均已通过。
+
+## 原始结论（修复前）
 
 当前 `feat/model-roles-config` **不建议合并**。本次审查确认 **14 项问题：P0 0 项、P1 5 项、P2 6 项、P3 3 项**。
 
@@ -278,7 +319,7 @@ Provider 面板现在同时承担默认/辅助角色、Provider CRUD、凭据、
 
 **建议**：至少拆出 `ModelRolesSettings` 与 Provider model catalog/config 子组件，并把 frozen migration schema 按版本段分模块。测试大文件可以另行整理，但生产组件越线已经开始直接增加状态遗漏风险。
 
-## 验证结果
+## 原始验证结果（修复前）
 
 | 命令 | 结果 | 说明 |
 | --- | --- | --- |
@@ -298,7 +339,7 @@ Provider 面板现在同时承担默认/辅助角色、Provider CRUD、凭据、
 - 模型角色保存失败并非完全静默：`AppMessageBridge.vue:115-120` 直接监听 `useModelRolesStore().error` 并转成 Naive UI message，因此没有把“角色错误未弹出”列为 finding；面板内联状态仍可改进，但不是独立正确性缺陷。
 - 紧凑用量展示继续使用最新 main usage 计算上下文占用，并保留 Provider/fallback source 的精确 tooltip；除单位边界外未发现口径回归。
 
-## 建议修复顺序
+## 原始建议修复顺序（修复前）
 
 1. 修复标题写回的 lifecycle/revision 串行化，并添加跨 Run 集成测试。
 2. 修复 default model role backend 不变量，以及权限 default mode/autosave 数据丢失。

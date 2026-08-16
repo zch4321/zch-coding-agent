@@ -152,7 +152,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 模型目录查询保持独立服务。OpenAI-compatible API 使用 Bearer `GET /models`，Anthropic 使用 `x-api-key`、版本 header 和有界分页 `GET /models`。目录解析只能采用协议明确返回的字段：Anthropic 的 `max_input_tokens/max_tokens` 归一化为模型容量；OpenAI 与 DeepSeek 的标准列表当前只保证模型身份信息，不能臆测容量。刷新按大小写敏感的模型 ID 只追加当前持久化清单中不存在的模型，不得覆盖旧条目或删除本次响应缺失的条目；404/405 等不提供目录接口的 Provider 必须保留现有清单并允许用户手工新增模型。新增模型对话框必须同时收集最大上下文、压缩阈值、最大输出长度、可选思考档位和能力等级，确认时原子写入目录、启用池与模型覆盖，不能先产生半配置模型。模型配置行必须允许删除非 Provider 默认模型、非当前辅助模型；删除原子清理本地目录、启用池和模型覆盖，并禁用引用它的模型池条目。Provider 后续仍返回该模型时，目录刷新可以重新发现它。设置页合并 Provider 返回、应用内置模型资料和已保存覆盖；不得抓取 Provider 文档 HTML 推断运行时能力。Provider 编辑页在底部以模型列表展示全部已知模型的“最大上下文、压缩阈值、最大输出长度”，目录没有返回的数值必须自动填入应用默认值而不是显示空配置。
 
-模型能力采用 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值`。未知模型默认按 256K 上下文和 65,536 Token 最大输出管理；上下文不足时收窄输出上限并至少保留 1,024 Token prompt budget。压缩阈值默认为可用 prompt budget 的 80%，并明确标记“能力未知”。Provider 模型配置区必须使用可筛选的穿梭框维护按 Provider 持久化的 `enabledModelIds`；只有启用模型能进入 Composer、自动审批和 Swarm 模型池的可选项。主模型可以从完整模型清单中选择，选中后必须原子加入启用池，并在作为主模型期间禁止从穿梭框移除；更换主模型不得自动停用旧主模型。穿梭框只管理运行时候选，不得筛掉下方任何已知模型的 Token 与能力配置行。启用池不进入模型能力覆盖或 Provider revision，但运行 route 必须在开始时确认所选模型仍已启用。新安装不写入虚构模型 ID；未配置 Provider 可以暂时没有主模型和启用模型，此时禁止启动 Run。用户首次填写或替换 API Key 后，Provider 表单自动保存并立即刷新模型目录；其余 Provider 合法修改也在短暂防抖后自动保存，不要求手动点击保存。AppConfig v14 的 `modelConfigurationIds` 原样迁移为启用池。自动补齐的模型值不固化为用户覆盖，因此修改全局默认值会同步到仍使用默认能力的模型；手工修改过的三项配置按模型保存并随 route revision 冻结。模型目录请求失败时保留上次成功缓存和当前手工配置。对话 Composer 的 Provider/model route 必须来自当前 Session 或新对话草稿，不能复用 Provider 设置页当前正在编辑的卡片；已停用的历史 Session 模型可以显示为当前值，但必须先改选启用模型才能再次发送。
+模型能力采用 `用户覆盖 > Provider 明确返回 > 内置资料 > 保守默认值`。未知模型默认按 256K 上下文和 65,536 Token 最大输出管理；上下文不足时收窄输出上限并至少保留 1,024 Token prompt budget。压缩阈值默认为可用 prompt budget 的 80%，并明确标记“能力未知”。Provider 模型配置区必须使用可筛选的穿梭框维护按 Provider 持久化的 `enabledModelIds`；只有启用模型能进入 Composer、自动审批和 Swarm 模型池的可选项。主模型可以从完整模型清单中选择，选中后必须原子加入启用池，并在作为主模型期间禁止从穿梭框移除；更换主模型不得自动停用旧主模型。穿梭框只管理运行时候选，不得筛掉下方任何已知模型的 Token 与能力配置行。启用池不进入模型能力覆盖或 Provider revision，但运行 route 必须在开始时确认所选模型仍已启用。新安装不写入虚构模型 ID；未配置 Provider 可以暂时没有主模型和启用模型，此时禁止启动 Run。全局默认角色因删除、停用或 reasoning 标注变化而失效时，不自动改写已有 Session；新对话的 Provider/模型选择置空并禁用发送，直到用户显式选择有效 route。用户首次填写或替换 API Key 后，Provider 表单自动保存并立即刷新模型目录；其余 Provider 合法修改也在短暂防抖后自动保存，不要求手动点击保存。AppConfig v14 的 `modelConfigurationIds` 原样迁移为启用池。自动补齐的模型值不固化为用户覆盖，因此修改全局默认值会同步到仍使用默认能力的模型；手工修改过的三项配置按模型保存并随 route revision 冻结。模型目录请求失败时保留上次成功缓存和当前手工配置。对话 Composer 的 Provider/model route 必须来自当前 Session 或新对话草稿，不能复用 Provider 设置页当前正在编辑的卡片；已停用的历史 Session 模型可以显示为当前值，但必须先改选启用模型才能再次发送。
 
 运行限制页采用带分节线的单列布局，百分比配置必须同时显示数值和 `%` 单位。合法修改在短暂防抖后自动保存，页面顶部保留立即保存/失败重试按钮；自动保存不能覆盖保存请求期间产生的更新。
 
@@ -312,7 +312,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 
 ### 2.8 Model Pool 配置与执行
 
-- AppConfig v16 首次在根配置加入 `modelPool`，v17 将 entry reasoning 扩展为统一六档，v18 删除重复 capability，v19 保存最多 1,000 个命名 entry 并删除从未执行的 per-route `maxParallel`；当前 v20 不改变模型池结构，只新增命令解释器选择。该上限仅作为 IPC/config 异常负载边界，不承担并发或 Agent 数量控制；entry 只引用现有 Provider/model/reasoning。调度能力固定为 `light | standard | strong`，唯一来源是对应 Provider 的 `modelOverrides[model].capability`。API key、credential reference 与并发配额不进入 entry。
+- AppConfig v16 首次在根配置加入 `modelPool`，v17 将 entry reasoning 扩展为统一六档，v18 删除重复 capability，v19 保存最多 1,000 个命名 entry 并删除从未执行的 per-route `maxParallel`，v20 只新增命令解释器选择；当前 v21 将模型池收拢到 `models.modelPool`。该上限仅作为 IPC/config 异常负载边界，不承担并发或 Agent 数量控制；entry 只引用现有 Provider/model/reasoning。调度能力固定为 `light | standard | strong`，唯一来源是对应 Provider 的 `modelOverrides[model].capability`。API key、credential reference 与并发配额不进入 entry。
 - 完整模型池使用单个 `config:set(model-pool)` 原子保存。所有 enabled entry 引用的 Provider 必须由唯一且精确的 expected revision 列表覆盖，并在写盘前通过 Provider 存在、模型启用、能力标注、安全 endpoint、模型 profile 和当前凭据绑定校验；任一失败时不得部分写入。disabled entry 只要求结构与规范化 ID 唯一，可保留失效引用供未来 UI 修复。
 - Agents 设置页提供模型池独立小节，以 Naive UI Transfer/Tree 按 `Provider → model → reasoning` 展示候选；每个 reasoning 叶节点是一条互不替代的精确 route，同一模型的 `high`、`max` 可以同时入池，且不做自动升降档。顶部“最低思考等级”只过滤左侧候选，低于门槛但已经入池的 route 仍在右侧显示并提示，不改写配置。能力等级只读展示对应 Provider 模型标注；模型池不配置并发，内部 entry ID、顺序和 enabled 状态不作为常规表单暴露。Renderer 使用独立 Pinia store 持有草稿、已保存快照和保存状态；整组修改显式原子保存，不复用 Provider 表单草稿。Provider 编辑触发后端自动禁用时，干净模型池草稿同步回填；未保存草稿则保留并提示重新检查。
 - 删除 Provider、移除 entry 引用的启用模型、移除 capability annotation、reasoning annotation 变为不兼容或显式清除凭据时，在同一配置写入中把受影响 entry 置为 disabled，保留顺序和引用；恢复配置不会自动启用。启动/reload 会修复手写的 enabled 静态不兼容或无能力标注引用，但环境凭据暂时缺失不会改写持久配置。
@@ -631,7 +631,7 @@ session.end     { reason, ts }
 - **Provider Continuation Envelope**：附着在完成 assistant message 上的版本化外壳；`providerType/format` 标识解释者，`data` 保存继续多轮工具链路所需的有序不透明 Provider 状态。统一的是外壳，不是 CoT 数据结构。
 - **执行不变量**：工具 schema、资源归属和 workspace 契约等调用有效性条件，不属于可审批的风险策略。
 - **风险黑名单**：Auto/Confirm 下提升审批等级的危险动作规则；Yolo 明确跳过。
-- **Auto Approval**：由独立小模型对动作做 safe/dangerous 二分类自动放行的能力。
+- **Auto Approval**：由辅助模型（未配置或不可用时回退当前 Run 的冻结主模型）对动作做 safe/dangerous 二分类自动放行的能力。
 - **Skill**：高度浓缩的专家指令（SKILL.md），摘要注入上下文，正文按需 read_skill 加载。
 - **渐进式上下文**：先给目录（摘要便宜常驻），需要时再读全文（按需省 token）的加载策略。
 - **MCP**：Model Context Protocol，连接外部工具 server 的标准协议；本项目只实现客户端。

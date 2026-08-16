@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 20,
+  "subagents": {
+    "enabled": false,
+    "workerTimeoutMs": 1800000,
+    "maxAgentsPerSwarm": 10
+  },
+  "executionEnvironment": {
+    "commandShell": "windows-powershell"
+  },
+  "permission": {
+    "defaultMode": "readonly",
+    "builtinPolicies": true,
+    "rememberedRules": [],
+    "sensitiveData": {
+      "mode": "off",
+      "pathGlobs": [],
+      "contentPatterns": []
+    }
+  },
+  "limits": {
+    "maxConcurrentRuns": 16,
+    "maxStepsPerRun": 0,
+    "maxToolOutputBytes": 131072,
+    "maxContextTokens": 256000,
+    "maxAttachmentContextTokens": 64000,
+    "autoCompactTriggerPercent": 80,
+    "maxToolResultTokens": 64000,
+    "tokenEstimation": {
+      "mode": "conservative",
+      "bytesPerToken": 3
+    },
+    "commandTimeoutMs": 120000,
+    "readFileSourceBytes": 10000000,
+    "readFileOutputBytes": 131072,
+    "editableFileBytes": 10000000,
+    "writeFileBytes": 262144,
+    "patchBytes": 65536,
+    "diffChars": 120000,
+    "fileChangeHistoryBytes": 100000000,
+    "approvalTimeoutMs": 600000,
+    "autoApprovalTimeoutMs": 60000,
+    "modelCatalogTimeoutMs": 15000,
+    "terminalScrollbackBytes": 2000000,
+    "fetchResponseBytes": 262144,
+    "fetchTimeoutMs": 20000,
+    "fetchMaxRedirects": 5
+  },
+  "logging": {
+    "enabled": false,
+    "retentionDays": 14,
+    "maxTotalBytes": 500000000
+  },
+  "privacy": {},
+  "workspace": {},
+  "skills": {
+    "enabled": true,
+    "maxSummaryChars": 2000
+  },
+  "assistant": {
+    "language": "zh-CN",
+    "preferences": {
+      "zh-CN": "",
+      "en-US": ""
+    }
+  },
+  "prompts": {
+    "approval": {
+      "classifyRisk": {
+        "id": "approval.classify-risk",
+        "version": "2026-08-12.1"
+      }
+    },
+    "orchestration": {
+      "goalStarted": {
+        "zh-CN": {
+          "id": "orchestration.goal-started.zh-CN",
+          "version": "2026-08-12.1"
+        },
+        "en-US": {
+          "id": "orchestration.goal-started.en-US",
+          "version": "2026-08-12.1"
+        }
+      },
+      "goalContinue": {
+        "zh-CN": {
+          "id": "orchestration.goal-continue.zh-CN",
+          "version": "2026-08-12.1"
+        },
+        "en-US": {
+          "id": "orchestration.goal-continue.en-US",
+          "version": "2026-08-12.1"
+        }
+      },
+      "planStarted": {
+        "zh-CN": {
+          "id": "orchestration.plan-started.zh-CN",
+          "version": "2026-08-12.1"
+        },
+        "en-US": {
+          "id": "orchestration.plan-started.en-US",
+          "version": "2026-08-12.1"
+        }
+      },
+      "planContinue": {
+        "zh-CN": {
+          "id": "orchestration.plan-continue.zh-CN",
+          "version": "2026-08-12.1"
+        },
+        "en-US": {
+          "id": "orchestration.plan-continue.en-US",
+          "version": "2026-08-12.1"
+        }
+      },
+      "planWarning": {
+        "zh-CN": {
+          "id": "orchestration.plan-warning.zh-CN",
+          "version": "2026-08-12.1"
+        },
+        "en-US": {
+          "id": "orchestration.plan-warning.en-US",
+          "version": "2026-08-12.1"
+        }
+      },
+      "compact": {
+        "zh-CN": {
+          "id": "orchestration.compact.zh-CN",
+          "version": "2026-08-12.1"
+        },
+        "en-US": {
+          "id": "orchestration.compact.en-US",
+          "version": "2026-08-12.1"
+        }
+      }
+    }
+  },
+  "network": {
+    "httpProxy": {
+      "mode": "off"
+    }
+  },
+  "webSearch": {
+    "provider": "brave",
+    "count": 5
+  },
+  "mcpServers": [],
+  "activeProviderId": "deepseek",
+  "providers": [
+    {
+      "id": "deepseek",
+      "label": "DeepSeek",
+      "providerType": "deepseek.chat-completions",
+      "revision": 1,
+      "baseURL": "https://api.deepseek.com",
+      "model": "fixture-main",
+      "modelCatalog": [
+        { "id": "fixture-main" },
+        { "id": "fixture-aux" },
+        { "id": "fixture-worker" }
+      ],
+      "modelOverrides": {
+        "fixture-worker": { "capability": "standard" }
+      },
+      "enabledModelIds": ["fixture-main", "fixture-aux", "fixture-worker"],
+      "reasoning": "high",
+      "apiKeyRef": "provider-key:fixture"
+    }
+  ],
+  "approval": {
+    "approverProviderId": "deepseek",
+    "approverModel": "fixture-aux",
+    "reasoning": "xhigh"
+  },
+  "modelPool": {
+    "entries": [
+      {
+        "id": "fixture-worker",
+        "enabled": true,
+        "providerId": "deepseek",
+        "model": "fixture-worker",
+        "reasoning": "low"
+      }
+    ]
+  }
+}

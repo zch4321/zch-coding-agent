@@ -350,9 +350,11 @@ test.describe.serial('Electron settings workflows', () => {
             getConfig(payload: unknown): Promise<{
               value?: {
                 config: {
-                  providers: Array<{
-                    modelOverrides: Record<string, unknown>
-                  }>
+                  models: {
+                    providers: Array<{
+                      modelOverrides: Record<string, unknown>
+                    }>
+                  }
                 }
               }
             }>
@@ -361,7 +363,9 @@ test.describe.serial('Electron settings workflows', () => {
             version: 1,
             section: 'providers',
           })
-          return result.value?.config.providers[0]?.modelOverrides[modelId]
+          return result.value?.config.models.providers[0]?.modelOverrides[
+            modelId
+          ]
         }, manualModel),
       )
       .toEqual({
@@ -384,7 +388,9 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       provider.getByText('填写 API Key 后会自动保存并刷新模型目录。'),
     ).toBeVisible()
-    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+    await expect(provider.getByTestId('provider-save-status')).toHaveText(
+      '已保存',
+    )
     await expect.poll(() => fakeProvider.modelCatalogRequests).toBe(1)
     await expect(refreshModels).toBeEnabled()
     await expect(provider.getByText('思考深度', { exact: true })).toBeVisible()
@@ -439,9 +445,11 @@ test.describe.serial('Electron settings workflows', () => {
             getConfig(payload: unknown): Promise<{
               value?: {
                 config: {
-                  providers: Array<{
-                    enabledModelIds: string[]
-                  }>
+                  models: {
+                    providers: Array<{
+                      enabledModelIds: string[]
+                    }>
+                  }
                 }
               }
             }>
@@ -450,7 +458,7 @@ test.describe.serial('Electron settings workflows', () => {
             version: 1,
             section: 'providers',
           })
-          return result.value?.config.providers[0]?.enabledModelIds.includes(
+          return result.value?.config.models.providers[0]?.enabledModelIds.includes(
             modelId,
           )
         }, providerModel),
@@ -458,7 +466,7 @@ test.describe.serial('Electron settings workflows', () => {
       .toBe(true)
 
     const modelSelect = provider
-      .locator('.settings-field', { hasText: '主模型' })
+      .locator('.settings-field', { hasText: 'Provider 默认模型' })
       .locator('.n-select')
     await modelSelect.click()
     await expect(
@@ -487,11 +495,13 @@ test.describe.serial('Electron settings workflows', () => {
             getConfig(payload: unknown): Promise<{
               value?: {
                 config: {
-                  providers: Array<{
-                    modelCatalog: Array<{ id: string }>
-                    enabledModelIds: string[]
-                    modelOverrides: Record<string, unknown>
-                  }>
+                  models: {
+                    providers: Array<{
+                      modelCatalog: Array<{ id: string }>
+                      enabledModelIds: string[]
+                      modelOverrides: Record<string, unknown>
+                    }>
+                  }
                 }
               }
             }>
@@ -500,7 +510,7 @@ test.describe.serial('Electron settings workflows', () => {
             version: 1,
             section: 'providers',
           })
-          const configured = result.value?.config.providers[0]
+          const configured = result.value?.config.models.providers[0]
           return {
             catalog: configured?.modelCatalog.some(
               (model) => model.id === modelId,
@@ -538,7 +548,7 @@ test.describe.serial('Electron settings workflows', () => {
       })
       .click()
     await expect(
-      modelsSection.locator('.settings-save-status').first(),
+      modelsSection.getByTestId('model-roles-save-status'),
     ).toHaveText('已保存')
 
     await settingsNavigation.getByRole('menuitem', { name: '模型' }).click()
@@ -597,13 +607,15 @@ test.describe.serial('Electron settings workflows', () => {
       .locator('.settings-field', { hasText: 'Provider 名称' })
       .locator('input')
       .fill('E2E Alt Edited')
-    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+    await expect(provider.getByTestId('provider-save-status')).toHaveText(
+      '已保存',
+    )
     await expect(
       provider.locator('.provider-card', { hasText: 'E2E Alt Edited' }),
     ).toBeVisible()
 
     const mainModelField = provider
-      .locator('.settings-field', { hasText: '主模型' })
+      .locator('.settings-field', { hasText: 'Provider 默认模型' })
       .locator('.n-select')
     await mainModelField.click()
     await page
@@ -611,7 +623,7 @@ test.describe.serial('Electron settings workflows', () => {
         hasText: 'e2e-alt-chat',
       })
       .click()
-    await expect(provider.locator('.settings-save-status').first()).toHaveText(
+    await expect(provider.getByTestId('provider-save-status')).toHaveText(
       '已保存',
     )
 
@@ -727,7 +739,7 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       provider.getByText('自动保存已暂停', { exact: false }),
     ).toBeVisible()
-    await expect(provider.locator('.settings-save-status')).not.toHaveText(
+    await expect(provider.getByTestId('provider-save-status')).not.toHaveText(
       '已保存',
     )
 
@@ -737,14 +749,18 @@ test.describe.serial('Electron settings workflows', () => {
       .locator('.n-select')
       .click()
     await clickSelectOption('低')
-    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+    await expect(provider.getByTestId('provider-save-status')).toHaveText(
+      '已保存',
+    )
 
     const capabilityField = provider.locator(
       '.provider-model-value[aria-label*="annotated-model"][aria-label*="能力等级"]',
     )
     await capabilityField.locator('.n-select').click()
     await clickSelectOption('强力')
-    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+    await expect(provider.getByTestId('provider-save-status')).toHaveText(
+      '已保存',
+    )
 
     // The minimum window width must not overflow either.
     await harness.electronApp.evaluate(({ BrowserWindow }) => {
@@ -770,7 +786,7 @@ test.describe.serial('Electron settings workflows', () => {
     // Make the annotated model the default and exercise the composer reasoning
     // validity states through the real facade.
     await provider
-      .locator('.settings-field', { hasText: '主模型' })
+      .locator('.settings-field', { hasText: 'Provider 默认模型' })
       .locator('.n-select')
       .click()
     await page
@@ -778,6 +794,15 @@ test.describe.serial('Electron settings workflows', () => {
         hasText: 'annotated-model',
       })
       .click()
+    await provider.getByTestId('default-model-role-select').click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option', {
+        hasText: 'E2E Annotated / annotated-model',
+      })
+      .click()
+    await expect(provider.getByTestId('model-roles-save-status')).toHaveText(
+      '已保存',
+    )
     await page.locator('.settings-back-button').click()
     // Composer reasoning options are labeled "思考深度 · X", so match loosely.
     const clickComposerOption = (text: string) =>
@@ -866,8 +891,10 @@ test.describe.serial('Electron settings workflows', () => {
         getConfig(payload: unknown): Promise<{
           value?: {
             config: {
-              modelPool: {
-                entries: Array<Record<string, unknown>>
+              models: {
+                modelPool: {
+                  entries: Array<Record<string, unknown>>
+                }
               }
             }
           }
@@ -877,7 +904,7 @@ test.describe.serial('Electron settings workflows', () => {
         version: 1,
         section: 'modelPool',
       })
-      return result.value?.config.modelPool
+      return result.value?.config.models.modelPool
     })
     expect(savedPool).toEqual({
       entries: [
@@ -968,18 +995,46 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       provider.getByText('与当前 Provider 草稿不兼容', { exact: false }),
     ).toBeVisible()
-    await expect(provider.locator('.settings-save-status')).not.toHaveText(
+    await expect(provider.getByTestId('provider-save-status')).not.toHaveText(
       '已保存',
     )
 
-    // Widening the annotation to include the provider default effort resumes autosave.
+    // Changing only the auxiliary role clears the conflict and must restart
+    // the paused Provider autosave watcher.
+    const auxiliaryField = provider
+      .locator('.settings-field', { hasText: '辅助模型' })
+      .locator('.n-select')
+    await auxiliaryField.click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('跟随当前模型（默认）', { exact: true })
+      .click()
+    await expect(provider.getByTestId('model-roles-save-status')).toHaveText(
+      '已保存',
+    )
+    await expect(provider.getByTestId('provider-save-status')).toHaveText(
+      '已保存',
+    )
+
+    // Widen the saved annotation so the model can become auxiliary again.
     await secondEffortsField.locator('.n-select').click()
     await page
       .locator('.n-select-menu:visible .n-base-select-option')
-      .getByText('高', { exact: true })
+      .getByText('低', { exact: true })
       .click()
     await provider.locator('.settings-heading').first().click()
-    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+    await expect(provider.getByTestId('provider-save-status')).toHaveText(
+      '已保存',
+    )
+    await auxiliaryField.click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option', {
+        hasText: 'second-model',
+      })
+      .click()
+    await expect(provider.getByTestId('model-roles-save-status')).toHaveText(
+      '已保存',
+    )
 
     // Disabling the persisted auxiliary model must also pause autosave before
     // the backend rejects the Provider update.
@@ -1002,15 +1057,20 @@ test.describe.serial('Electron settings workflows', () => {
         exact: false,
       }),
     ).toBeVisible()
-    await expect(provider.locator('.settings-save-status')).not.toHaveText(
+    await expect(provider.getByTestId('provider-save-status')).not.toHaveText(
       '已保存',
     )
 
-    // Re-enabling the model clears the conflict and resumes autosave.
+    // Re-enabling restores the already-saved Provider snapshot, so the
+    // conflict clears without issuing a redundant write.
     await modelTransfer
       .locator('.n-transfer-list-item--source', { hasText: 'second-model' })
       .click()
-    await expect(provider.locator('.settings-save-status')).toHaveText('已保存')
+    await expect(
+      provider.getByText('已不在当前 Provider 草稿的启用模型中', {
+        exact: false,
+      }),
+    ).toHaveCount(0)
   })
 
   test('exposes skill management and bounded trace diagnostics in settings', async () => {

@@ -9,10 +9,10 @@ export function formatTokenCount(value: number): string {
   if (value < 1_000) {
     return Math.max(0, Math.trunc(value)).toLocaleString()
   }
-  if (value < 10_000) {
+  if (value < 9_950) {
     return `${(Math.round(value / 100) / 10).toFixed(1)}k`
   }
-  if (value < 1_000_000) {
+  if (value < 999_500) {
     return `${Math.round(value / 1_000)}k`
   }
   return `${(Math.round(value / 100_000) / 10).toFixed(1)}M`

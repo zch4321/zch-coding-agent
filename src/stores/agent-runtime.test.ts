@@ -353,6 +353,35 @@ describe('agent runtime store', () => {
     expect(runtime.canSend).toBe(true)
   })
 
+  it('derives credential readiness from the current composer Provider', () => {
+    const replica = useAgentReplicaStore()
+    replica.projects = [project]
+    replica.selectedProjectId = projectId
+    const providerA = provider('provider-a', 'model-a', ['model-a'])
+    const providerB = provider('provider-b', 'model-b', ['model-b'])
+    providerB.credentialConfigured = false
+    providerB.credentialSource = 'none'
+    const settings = useAgentSettingsStore()
+    settings.providers = [providerA, providerB]
+    const roles = useModelRolesStore()
+    roles.defaultModelProvider = providerA.id
+    roles.defaultModel = providerA.model
+    const runtime = useAgentRuntimeStore()
+
+    expect(runtime.composerCredentialConfigured).toBe(true)
+    expect(runtime.canSend).toBe(true)
+    runtime.setComposerProvider(providerB.id)
+    expect(runtime.composerCredentialConfigured).toBe(false)
+    expect(runtime.canSend).toBe(false)
+
+    settings.providers[0]!.credentialConfigured = false
+    settings.providers[0]!.credentialSource = 'none'
+    settings.providers[1]!.credentialConfigured = true
+    settings.providers[1]!.credentialSource = 'safe-storage'
+    expect(runtime.composerCredentialConfigured).toBe(true)
+    expect(runtime.canSend).toBe(true)
+  })
+
   it('projects a reactive draft route into a clone-safe run payload', async () => {
     const replica = useAgentReplicaStore()
     replica.projects = [project]

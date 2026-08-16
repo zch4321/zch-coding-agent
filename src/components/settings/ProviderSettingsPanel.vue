@@ -30,6 +30,7 @@ import {
   resolveSupportedReasoningEfforts,
   type ModelTokenSettings,
 } from '../../../shared/model-settings'
+import { evaluateModelRouteCompatibility } from '../../../shared/model-route'
 import { useAgentStore } from '../../stores/agent'
 import { providerDraftConflicts } from '../../stores/provider-form'
 import ProviderModelDeleteAction from './ProviderModelDeleteAction.vue'
@@ -343,10 +344,17 @@ function roleSelectValue(providerId: string, model: string): string {
 
 const defaultModelRoleOptions = computed(() =>
   agent.providers.flatMap((provider) =>
-    provider.enabledModelIds.map((model) => ({
-      label: `${provider.label} / ${model}`,
-      value: roleSelectValue(provider.id, model),
-    })),
+    provider.enabledModelIds.map((model) => {
+      const compatibility = evaluateModelRouteCompatibility(provider, {
+        model,
+        reasoning: provider.reasoning,
+      })
+      return {
+        label: `${provider.label} / ${model}`,
+        value: roleSelectValue(provider.id, model),
+        disabled: !compatibility.ok,
+      }
+    }),
   ),
 )
 const auxiliaryModelRoleOptions = computed(() => [
@@ -357,8 +365,14 @@ const defaultModelRoleValue = computed(() => {
   const provider = agent.providers.find(
     (candidate) => candidate.id === agent.defaultModelProvider,
   )
-  const model = agent.defaultModel || provider?.model || ''
-  if (!provider || !model || !provider.enabledModelIds.includes(model)) {
+  if (!provider) return null
+  const model = agent.defaultModel || provider.model || ''
+  if (
+    !evaluateModelRouteCompatibility(provider, {
+      model,
+      reasoning: provider.reasoning,
+    }).ok
+  ) {
     return null
   }
   return roleSelectValue(provider.id, model)
@@ -399,13 +413,17 @@ watch(
         reasoningEfforts: model.reasoningEfforts,
         capability: model.capability,
       })),
+      auxiliary: {
+        providerId: agent.auxiliaryModelProvider,
+        model: agent.auxiliaryModel,
+      },
     }),
   () => {
     if (autosaveTimer) clearTimeout(autosaveTimer)
     if (!agent.providerDirty) return
+    agent.providerSaveStatus = ''
     if (autosaveConflict.value) return
 
-    agent.providerSaveStatus = ''
     autosaveTimer = setTimeout(() => {
       autosaveTimer = undefined
       void agent.saveProvider()
@@ -501,6 +519,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
         <label class="settings-field">
           <span>{{ t('settings.defaultModelRole') }}</span>
           <NSelect
+            data-testid="default-model-role-select"
             :value="defaultModelRoleValue"
             :options="defaultModelRoleOptions"
             :placeholder="t('settings.selectMainModel')"
@@ -522,7 +541,11 @@ function handleDropdownSelect(key: string | number, providerId: string) {
           <small>{{ t('settings.auxiliaryModelRoleHint') }}</small>
         </label>
       </div>
-      <small class="settings-save-status" aria-live="polite">
+      <small
+        class="settings-save-status"
+        data-testid="model-roles-save-status"
+        aria-live="polite"
+      >
         {{
           agent.rolesSaving
             ? t('settings.saving')
@@ -617,7 +640,11 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             <h3>{{ agent.providerForm.label }}</h3>
           </div>
           <div class="provider-detail-toolbar">
-            <small class="settings-save-status" aria-live="polite">
+            <small
+              class="settings-save-status"
+              data-testid="provider-save-status"
+              aria-live="polite"
+            >
               {{
                 agent.providerSaving
                   ? t('settings.saving')

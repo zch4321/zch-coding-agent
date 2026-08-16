@@ -245,6 +245,7 @@ describe('read-only Subagent runtime', () => {
       promptDirectory: path.resolve('resources', 'prompts'),
       databasePath: path.join(targetDirectory, 'agent.db'),
       runtimeDataDirectory: targetDirectory,
+      conversationTitlingDisabled: true,
       providerFactory: () => provider,
       eventListeners: [
         {
@@ -512,6 +513,7 @@ describe('read-only Subagent runtime', () => {
       promptDirectory: path.resolve('resources', 'prompts'),
       databasePath: path.join(targetDirectory, 'agent.db'),
       runtimeDataDirectory: targetDirectory,
+      conversationTitlingDisabled: true,
       providerFactory: () => provider,
     })
     try {

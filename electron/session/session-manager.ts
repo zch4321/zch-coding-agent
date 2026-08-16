@@ -15,6 +15,7 @@ import type {
 import type { ProviderToolDefinition } from '../providers/provider'
 import type { MessageRecord } from '../../shared/message'
 import type { ModelSelection } from '../../shared/model-route'
+import type { ResolvedModelRoute } from '../providers/model-route-resolver'
 import type { RunContext } from '../../shared/context'
 import type { TerminalInfo, TerminalSnapshot } from '../../shared/terminal'
 import type {
@@ -1084,6 +1085,27 @@ export class SessionManager {
   activeRunSnapshot(sessionId: SessionId): ActiveRunPublicSnapshot | undefined {
     const snapshot = this.#sessions.get(sessionId)?.activeRun?.publicSnapshot
     return snapshot ? structuredClone(snapshot) : undefined
+  }
+
+  /** Returns the frozen main route while the identified Run is completing. */
+  completedRunMainRoute(
+    sessionId: SessionId,
+    runId: RunId,
+  ): ResolvedModelRoute | undefined {
+    const session = this.#sessions.get(sessionId)
+    const run = session?.activeRun
+    if (
+      !session ||
+      session.closed ||
+      session.visibility !== 'public' ||
+      !run ||
+      run.runId !== runId ||
+      run.status !== 'completed' ||
+      !run.routes
+    ) {
+      return undefined
+    }
+    return structuredClone(run.routes.main)
   }
 
   /** Applies committed Session metadata and history to live state and its durable binding. */

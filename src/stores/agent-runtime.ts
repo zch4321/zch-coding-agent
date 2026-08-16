@@ -159,6 +159,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           (option) => option.value === this.composerModel,
         ) &&
         this.composerReasoningValid &&
+        this.composerCredentialConfigured &&
         !this.startPending &&
         !this.activeRunId &&
         !this.pendingApproval &&

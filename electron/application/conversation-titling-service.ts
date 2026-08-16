@@ -1,4 +1,4 @@
-import type { MessageId, SessionId } from '../../shared/ids'
+import type { MessageId, RunId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { PublicConfig } from '../../shared/config'
 import { getAuxiliaryModelSelection } from '../../shared/config'
@@ -35,27 +35,50 @@ export interface ConversationTitlingOptions {
   resolveRoute?: (
     config: PublicConfig,
     record: SessionRecord,
+    completedRunRoute?: ResolvedModelRoute,
   ) => Promise<ResolvedModelRoute | undefined>
+  getCompletedRunRoute?: (
+    sessionId: SessionId,
+    runId: RunId,
+  ) => ResolvedModelRoute | undefined
   createProvider?: (route: ResolvedModelRoute) => ModelProvider
   timeoutMs?: number
 }
 
 /**
- * Resolves the titling route: the configured auxiliary model when usable,
- * otherwise the Session's own main selection. Undefined when neither resolves.
+ * Resolves the titling route from the auxiliary role, the completed Run's
+ * frozen main route, or finally the Session selection, in that order.
  */
-async function defaultResolveTitlingRoute(
+export async function defaultResolveTitlingRoute(
   configStore: ConfigStore,
   config: PublicConfig,
   record: SessionRecord,
+  completedRunRoute?: ResolvedModelRoute,
+  onDiagnostic?: DiagnosticSink,
 ): Promise<ResolvedModelRoute | undefined> {
-  const selection = getAuxiliaryModelSelection(config) ?? record.modelSelection
-  const pair = await resolveModelRoutePairFromConfig(
-    configStore,
-    config,
-    selection,
-  )
-  return pair.main
+  const resolveSelection = async (selection: SessionRecord['modelSelection']) =>
+    (await resolveModelRoutePairFromConfig(configStore, config, selection)).main
+  const auxiliary = getAuxiliaryModelSelection(config)
+  if (auxiliary) {
+    try {
+      return await resolveSelection(auxiliary)
+    } catch (error) {
+      onDiagnostic?.(
+        'Auxiliary title route is unavailable; using the completed Run route',
+        error,
+        { audience: 'internal' },
+      )
+    }
+  }
+  if (completedRunRoute) return structuredClone(completedRunRoute)
+  try {
+    return await resolveSelection(record.modelSelection)
+  } catch (error) {
+    onDiagnostic?.('Conversation title fallback route is unavailable', error, {
+      audience: 'internal',
+    })
+    return undefined
+  }
 }
 
 /** Trims a raw model response into a safe conversation title candidate. */
@@ -104,11 +127,16 @@ export class ConversationTitlingService {
   readonly #resolveRoute: (
     config: PublicConfig,
     record: SessionRecord,
+    completedRunRoute?: ResolvedModelRoute,
   ) => Promise<ResolvedModelRoute | undefined>
+  readonly #getCompletedRunRoute:
+    | ((sessionId: SessionId, runId: RunId) => ResolvedModelRoute | undefined)
+    | undefined
   readonly #createProvider: (route: ResolvedModelRoute) => ModelProvider
   readonly #timeoutMs: number
   readonly #attempted = new Set<SessionId>()
   readonly #inFlight = new Set<Promise<void>>()
+  readonly #controllers = new Set<AbortController>()
   readonly #unsubscribe: RuntimeEventUnsubscribe
   #disposed = false
 
@@ -119,8 +147,15 @@ export class ConversationTitlingService {
     this.#onDiagnostic = options.onDiagnostic
     this.#resolveRoute =
       options.resolveRoute ??
-      ((config, record) =>
-        defaultResolveTitlingRoute(this.#configStore, config, record))
+      ((config, record, completedRunRoute) =>
+        defaultResolveTitlingRoute(
+          this.#configStore,
+          config,
+          record,
+          completedRunRoute,
+          this.#onDiagnostic,
+        ))
+    this.#getCompletedRunRoute = options.getCompletedRunRoute
     this.#timeoutMs = options.timeoutMs ?? TITLING_TIMEOUT_MS
     this.#createProvider =
       options.createProvider ??
@@ -138,7 +173,10 @@ export class ConversationTitlingService {
     this.#unsubscribe = options.events.subscribe({
       onAgentEvent: (event) => {
         if (event.type === 'run.status' && event.status === 'completed') {
-          this.#schedule(event.sessionId)
+          this.#schedule(
+            event.sessionId,
+            this.#getCompletedRunRoute?.(event.sessionId, event.runId),
+          )
         }
       },
     })
@@ -153,13 +191,19 @@ export class ConversationTitlingService {
   async dispose(): Promise<void> {
     this.#disposed = true
     this.#unsubscribe()
+    for (const controller of this.#controllers) {
+      controller.abort(new Error('Conversation titling service disposed'))
+    }
     await this.settle()
   }
 
-  #schedule(sessionId: SessionId): void {
+  #schedule(
+    sessionId: SessionId,
+    completedRunRoute?: ResolvedModelRoute,
+  ): void {
     if (this.#disposed || this.#attempted.has(sessionId)) return
     this.#attempted.add(sessionId)
-    const pending = this.#generate(sessionId)
+    const pending = this.#generate(sessionId, completedRunRoute)
       .catch((error) => {
         this.#onDiagnostic?.(
           `Conversation titling failed for Session ${sessionId}`,
@@ -173,7 +217,10 @@ export class ConversationTitlingService {
     this.#inFlight.add(pending)
   }
 
-  async #generate(sessionId: SessionId): Promise<void> {
+  async #generate(
+    sessionId: SessionId,
+    completedRunRoute?: ResolvedModelRoute,
+  ): Promise<void> {
     const record = await this.#sessions
       .getRecord(sessionId)
       .catch(() => undefined)
@@ -187,6 +234,7 @@ export class ConversationTitlingService {
     const route = await this.#resolveRoute(
       this.#configStore.getPublicConfig(),
       record,
+      completedRunRoute,
     ).catch(() => undefined)
     if (!route || this.#disposed) return
 
@@ -217,6 +265,7 @@ export class ConversationTitlingService {
     assistantText: string,
   ): Promise<string | undefined> {
     const controller = new AbortController()
+    this.#controllers.add(controller)
     const timer = setTimeout(() => {
       controller.abort(new Error('Conversation titling timed out'))
     }, this.#timeoutMs)
@@ -259,19 +308,33 @@ export class ConversationTitlingService {
       const context: ProviderStreamContext = { signal: controller.signal }
       let text = ''
       let completed = false
-      for await (const event of provider.stream(compiled, context)) {
-        if (event.type === 'text.delta') {
-          text += event.delta
-        } else if (event.type === 'completed') {
-          if (completed) {
-            throw new Error('Titling provider produced multiple completions')
+      let removeAbortListener: () => void = () => undefined
+      const aborted = new Promise<never>((_resolve, reject) => {
+        const abort = () =>
+          reject(
+            controller.signal.reason ??
+              new Error('Conversation title request aborted'),
+          )
+        removeAbortListener = () =>
+          controller.signal.removeEventListener('abort', abort)
+        controller.signal.addEventListener('abort', abort, { once: true })
+      })
+      const consume = async () => {
+        for await (const event of provider.stream(compiled, context)) {
+          if (event.type === 'text.delta') {
+            text += event.delta
+          } else if (event.type === 'completed') {
+            if (completed) {
+              throw new Error('Titling provider produced multiple completions')
+            }
+            completed = true
+            text = event.turn.parts
+              .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+              .join('\n')
           }
-          completed = true
-          text = event.turn.parts
-            .flatMap((part) => (part.type === 'text' ? [part.text] : []))
-            .join('\n')
         }
       }
+      await Promise.race([consume(), aborted]).finally(removeAbortListener)
       if (!completed) {
         throw new Error('Titling provider stream ended without completion')
       }
@@ -283,6 +346,7 @@ export class ConversationTitlingService {
       return undefined
     } finally {
       clearTimeout(timer)
+      this.#controllers.delete(controller)
     }
   }
 }

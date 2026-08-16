@@ -34,6 +34,7 @@ function createBackendForTest(
   const { targetDirectory, ...runtimeOptions } = options
   return createBackendRuntime({
     ...runtimeOptions,
+    conversationTitlingDisabled: true,
     databasePath: path.join(targetDirectory, 'agent.db'),
     runtimeDataDirectory: targetDirectory,
   })

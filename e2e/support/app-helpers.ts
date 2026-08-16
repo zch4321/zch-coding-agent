@@ -66,7 +66,9 @@ export async function configureApp(input: {
           assistant: { language: string }
           logging: { enabled: boolean }
           limits: Record<string, unknown>
-          providers: Array<{ id: string; revision: number }>
+          models: {
+            providers: Array<{ id: string; revision: number }>
+          }
         }
       }
       type AgentApiForSetup = {
@@ -111,18 +113,21 @@ export async function configureApp(input: {
         }
       }
 
-      const approval = await api.setConfig({
+      const models = await api.setConfig({
         version: 1,
-        kind: 'approval',
-        approverProviderId: 'deepseek',
-        approverModel: 'e2e-functional-model',
-        reasoning: 'off',
+        kind: 'models',
+        value: {
+          defaultModelProvider: 'deepseek',
+          defaultModel: 'e2e-functional-model',
+          auxiliaryModelProvider: '',
+          auxiliaryModel: '',
+        },
       })
-      if (!approval.ok) {
+      if (!models.ok) {
         return {
           ok: false,
-          step: 'approval',
-          message: approval.error.message,
+          step: 'models',
+          message: models.error.message,
         }
       }
 
@@ -203,7 +208,7 @@ export async function configureApp(input: {
       }
 
       if (swarm) {
-        const configuredProvider = provider.value.config.providers.find(
+        const configuredProvider = provider.value.config.models.providers.find(
           (candidate) => candidate.id === 'deepseek',
         )
         if (!configuredProvider) {

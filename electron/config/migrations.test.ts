@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { REASONING_EFFORTS } from '../../shared/config'
+import legacyAppConfigV20 from './fixtures/app-config-v20.json'
 import legacyAppConfigV9 from './fixtures/app-config-v9.json'
 import { DEFAULT_APP_CONFIG, type AppConfig } from './schema'
 import { migrateConfig } from './migrations'
 
 function legacyV9Config(): Record<string, unknown> {
   return structuredClone(legacyAppConfigV9) as Record<string, unknown>
+}
+
+/** Returns a mutable clone of the frozen production v20 boundary fixture. */
+function legacyV20Config(): Record<string, unknown> {
+  return structuredClone(legacyAppConfigV20) as Record<string, unknown>
 }
 
 /** Explodes the current DEFAULT models section into pre-v21 top-level fields. */
@@ -564,12 +570,45 @@ describe('config v21 migration boundary', () => {
     expect(source).not.toHaveProperty('executionEnvironment')
   })
 
-  it('accepts and clones a valid v20 config', () => {
-    const source = structuredClone(DEFAULT_APP_CONFIG)
+  it('migrates the frozen v20 model roles, pool, credential, and Shell', () => {
+    const source = legacyV20Config()
     const migrated = migrateConfig(source)
 
-    expect(migrated).toEqual(source)
-    expect(migrated).not.toBe(source)
+    expect(migrated).toMatchObject({
+      schemaVersion: 21,
+      executionEnvironment: { commandShell: 'windows-powershell' },
+      models: {
+        defaultModelProvider: 'deepseek',
+        defaultModel: 'fixture-main',
+        auxiliaryModelProvider: 'deepseek',
+        auxiliaryModel: 'fixture-aux',
+        providers: [
+          {
+            id: 'deepseek',
+            reasoning: 'high',
+            apiKeyRef: 'provider-key:fixture',
+          },
+        ],
+        modelPool: {
+          entries: [
+            {
+              id: 'fixture-worker',
+              providerId: 'deepseek',
+              model: 'fixture-worker',
+              reasoning: 'low',
+            },
+          ],
+        },
+      },
+    })
+    expect(migrated).not.toHaveProperty('activeProviderId')
+    expect(migrated).not.toHaveProperty('approval')
+    expect(migrated).not.toHaveProperty('providers')
+    expect(migrated).not.toHaveProperty('modelPool')
+    expect(source).toMatchObject({
+      schemaVersion: 20,
+      approval: { reasoning: 'xhigh' },
+    })
   })
 
   it('accepts the new Provider Types without a schema-version migration', () => {
@@ -587,13 +626,10 @@ describe('config v21 migration boundary', () => {
   })
 
   it('rejects malformed v20 data instead of filling missing fields', () => {
-    const malformed = structuredClone(DEFAULT_APP_CONFIG) as Record<
-      string,
-      unknown
-    >
-    delete malformed.models
+    const malformed = legacyV20Config()
+    delete malformed.executionEnvironment
     expect(() => migrateConfig(malformed)).toThrow(
-      "must have required property 'models'",
+      "must have required property 'executionEnvironment'",
     )
   })
 

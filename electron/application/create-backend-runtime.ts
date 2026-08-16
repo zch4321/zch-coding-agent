@@ -281,6 +281,8 @@ export async function createBackendRuntime(
           sessions,
           prompts: runtime.services.prompts,
           events: runtime.events,
+          getCompletedRunRoute: (sessionId, runId) =>
+            runtime!.services.sessions.completedRunMainRoute(sessionId, runId),
           fetchImpl: options.fetchImpl,
           onDiagnostic: options.onDiagnostic,
         })
