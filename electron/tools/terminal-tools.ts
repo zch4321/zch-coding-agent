@@ -55,7 +55,7 @@ const SendSchema = Type.Object(
       minLength: 1,
       maxLength: 262_144,
       description:
-        'Input bytes to send to the terminal. Include a trailing newline to press Enter; Windows normalizes bare LF to the terminal Enter key.',
+        'Input text or control sequence to submit to the terminal. Enter is pressed automatically when the input is not already line-terminated.',
     }),
     delayMs: Type.Optional(
       Type.Integer({
@@ -128,7 +128,7 @@ export function registerTerminalTools(
     id: 'terminal_send',
     executionMode: 'serial',
     description:
-      'Send input to a persistent terminal owned by this session. Include a newline to press Enter; on Windows a bare LF is normalized to CR. Optional delayMs waits after accepted input before returning so a sequential terminal_read can observe command output.',
+      'Submit input to a persistent terminal owned by this session. The tool presses Enter automatically when needed. Optional delayMs waits after accepted input before returning so a sequential terminal_read can observe command output.',
     inputSchema: SendSchema,
     effects: ['terminal.write'],
     defaultRisk: 'review',
@@ -254,10 +254,13 @@ function waitForTerminalDelay(
   })
 }
 
-/** Converts renderer newlines to the control sequence expected by the platform PTY. */
+/** Terminates one submitted input and normalizes Enter for the platform PTY. */
 export function normalizeTerminalInput(
   data: string,
   platform: NodeJS.Platform = process.platform,
 ): string {
-  return platform === 'win32' ? data.replace(/(?<!\r)\n/gu, '\r') : data
+  const terminated = /[\r\n]$/u.test(data) ? data : `${data}\n`
+  return platform === 'win32'
+    ? terminated.replace(/(?<!\r)\n/gu, '\r')
+    : terminated
 }

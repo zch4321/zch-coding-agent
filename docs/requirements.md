@@ -123,20 +123,20 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 长生命周期的双向伪终端，**Agent 与人类共享同一个终端流**——人可以观察、也可以在同一个 PTY 上输入。
 
-| 工具                                   | 作用                              | 副作用 | `reason` |
-| -------------------------------------- | --------------------------------- | ------ | -------- |
-| `terminal_open(cwd, opts)`             | 打开新终端，返回 `terminalId`     | 有     | **是**   |
-| `terminal_send(id, text, delayMs?)`    | 向终端写入，可在成功后有界等待    | 有     | **是**   |
-| `terminal_read(id, {cursor?, lines?})` | 读最近 N 行或指定 cursor 后的输出 | 无     | **是**   |
-| `terminal_list()`                      | 列出所有打开的终端句柄            | 无     | **是**   |
-| `terminal_close(id)`                   | 关闭终端                          | 有     | **是**   |
+| 工具                                   | 作用                               | 副作用 | `reason` |
+| -------------------------------------- | ---------------------------------- | ------ | -------- |
+| `terminal_open(cwd, opts)`             | 打开新终端，返回 `terminalId`      | 有     | **是**   |
+| `terminal_send(id, text, delayMs?)`    | 提交终端输入并自动回车，可有界等待 | 有     | **是**   |
+| `terminal_read(id, {cursor?, lines?})` | 读最近 N 行或指定 cursor 后的输出  | 无     | **是**   |
+| `terminal_list()`                      | 列出所有打开的终端句柄             | 无     | **是**   |
+| `terminal_close(id)`                   | 关闭终端                           | 有     | **是**   |
 
 约定：
 
 - `terminal_read` 返回给 **LLM** 的内容是**去 ANSI 的纯文本**（便于模型理解）。
 - `terminal_read` 不重复返回 `terminalId`，但始终追加下一次增量读取需要的 `cursor`；只有截断时追加 `truncated/totalBytes`。`terminal_open` 仍返回后续调用必需的 ID。
 - **UI** 上人类看到的终端流是**原始带色流**。两者订阅同一 PTY，渲染层不同。
-- 与 `run_command` 并存：一次性命令用前者；长跑服务/交互式 REPL/实时观察用 terminal。`terminal_send.delayMs` 在输入成功后等待最多 60 秒，便于紧随其后的 `terminal_read` 读取增量输出；等待期间取消不会撤回已经写入 PTY 的输入。独立 `delay` 继续用于纯等待。
+- 与 `run_command` 并存：一次性命令用前者；长跑服务/交互式 REPL/实时观察用 terminal。每次 `terminal_send` 代表提交一段完整输入，未以换行结束时自动补一次 Enter，已有换行时不重复；`delayMs` 在输入成功后等待最多 60 秒，便于紧随其后的 `terminal_read` 读取增量输出。等待期间取消不会撤回已经写入 PTY 的输入。独立 `delay` 继续用于纯等待。
 - `terminal_open` 不接受模型提交的 Shell。Main process 在每次打开时读取 `executionEnvironment.commandShell` 并经 CommandShellService 解析实际 profile（与 `run_command.shell` 同一配置）；保存的解释器不可用时回退到自动选择且不改写配置。解析为 PowerShell 时 PTY 固定传入 `-ExecutionPolicy Bypass`；其他 Shell 不附加启动参数。设置变更只影响之后打开的终端，已在运行的终端不重启。
 - `terminalId` 是进程内全局递增的正整数：应用重启后从 1 重新开始；ID 分配后不复用，启动失败可留下编号空洞。每个 Session 最多保留 16 个终端（包括 opening、running 和已退出但未显式关闭的终端），显式关闭后释放名额；并发打开先预留名额，不能越过上限。`terminal_list` 按数字 ID 升序返回；不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。不迁移数据库或旧日志中的旧字符串 ID。
 - 模型不可见 `terminal_resize` 工具：Renderer 面板自动 fit 后仍通过 `terminal:resize` IPC 同步 PTY 尺寸，模型无法手动调整虚拟终端尺寸。
