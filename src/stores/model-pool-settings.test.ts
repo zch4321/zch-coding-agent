@@ -27,7 +27,6 @@ function provider(
     revision: 3,
     baseURL: `https://${id}.example/v1`,
     model: 'model-a',
-    reasoning: 'high',
     modelCatalog: [],
     modelOverrides: {
       'model-a': { capability: 'standard' },
@@ -58,8 +57,10 @@ function config(
     models: {
       defaultModelProvider: providers[0]?.id ?? '',
       defaultModel: providers[0]?.model ?? '',
+      defaultModelReasoning: 'high',
       auxiliaryModelProvider: '',
       auxiliaryModel: '',
+      auxiliaryModelReasoning: 'high',
       providers,
       modelPool: { entries },
     },

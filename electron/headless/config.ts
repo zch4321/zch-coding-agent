@@ -218,6 +218,8 @@ function buildAppConfig(config: HeadlessConfig): AppConfig {
       ...defaults.models,
       defaultModelProvider: providerId,
       defaultModel: config.provider.model,
+      defaultModelReasoning: config.provider.reasoning ?? 'high',
+      auxiliaryModelReasoning: config.provider.reasoning ?? 'high',
       providers: [
         {
           id: providerId,
@@ -226,7 +228,6 @@ function buildAppConfig(config: HeadlessConfig): AppConfig {
           revision: 1,
           baseURL: config.provider.baseURL,
           model: config.provider.model,
-          reasoning: config.provider.reasoning ?? 'high',
           modelCatalog: [],
           modelOverrides: {},
           enabledModelIds: [config.provider.model],

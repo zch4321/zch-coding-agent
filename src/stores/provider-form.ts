@@ -14,7 +14,6 @@ export const DEFAULT_PROVIDER_FORM = {
   baseURL: 'https://api.deepseek.com',
   model: '',
   enabledModelIds: [] as string[],
-  reasoning: 'high' as ReasoningEffort,
   apiKey: '',
   tokenEstimationMode: 'conservative' as 'conservative' | 'custom-bytes',
   bytesPerToken: 3,
@@ -65,26 +64,22 @@ export function providerModelOverrides(
 }
 
 /**
- * Computes provider-draft conflicts that must pause autosave. `main` fires
- * when the main model annotation excludes the draft default effort;
- * `auxiliary` fires when this provider is the saved auxiliary provider and the
- * auxiliary model is disabled or incompatible with the draft default effort.
- * Neither is auto-adjusted; the user resolves them manually.
+ * Computes whether this Provider draft would break the saved auxiliary route.
+ * The role's explicit reasoning is never auto-adjusted; the user resolves an
+ * incompatible model annotation or enabled-model selection manually.
  */
-export function providerDraftConflicts(input: {
+export function providerDraftAuxiliaryConflict(input: {
   providerId: string
-  reasoning: ReasoningEffort
-  mainModelId: string
   enabledModelIds: readonly string[]
   profiles: ReadonlyArray<Pick<UiModelProfile, 'id' | 'reasoningEfforts'>>
   auxiliary: {
     providerId: string
     model: string
+    reasoning: ReasoningEffort
   }
 }): {
-  main: boolean
-  auxiliary: boolean
-  auxiliaryReason: 'model-disabled' | 'reasoning-unsupported' | null
+  conflict: boolean
+  reason: 'model-disabled' | 'reasoning-unsupported' | null
 } {
   const provider = {
     enabledModelIds: input.enabledModelIds,
@@ -95,24 +90,15 @@ export function providerDraftConflicts(input: {
       ]),
     ),
   }
-  const mainCompatibility = evaluateModelRouteCompatibility(provider, {
-    model: input.mainModelId,
-    reasoning: input.reasoning,
-  })
-  const main =
-    !mainCompatibility.ok &&
-    mainCompatibility.reason === 'reasoning-unsupported'
-
   if (
     input.auxiliary.providerId !== input.providerId ||
     !input.auxiliary.model
   ) {
-    return { main, auxiliary: false, auxiliaryReason: null }
+    return { conflict: false, reason: null }
   }
-  // The auxiliary route always uses the provider's default reasoning effort.
   const auxiliaryCompatibility = evaluateModelRouteCompatibility(provider, {
     model: input.auxiliary.model,
-    reasoning: input.reasoning,
+    reasoning: input.auxiliary.reasoning,
   })
   if (
     !auxiliaryCompatibility.ok &&
@@ -120,18 +106,16 @@ export function providerDraftConflicts(input: {
       auxiliaryCompatibility.reason === 'model-disabled')
   ) {
     return {
-      main,
-      auxiliary: true,
-      auxiliaryReason: 'model-disabled',
+      conflict: true,
+      reason: 'model-disabled',
     }
   }
-  const auxiliary =
+  const conflict =
     !auxiliaryCompatibility.ok &&
     auxiliaryCompatibility.reason === 'reasoning-unsupported'
   return {
-    main,
-    auxiliary,
-    auxiliaryReason: auxiliary ? 'reasoning-unsupported' : null,
+    conflict,
+    reason: conflict ? 'reasoning-unsupported' : null,
   }
 }
 
@@ -157,7 +141,6 @@ export function providerFormSignature(
     enabledModelIds: [...form.enabledModelIds].sort((left, right) =>
       left.localeCompare(right),
     ),
-    reasoning: form.reasoning,
     models: models
       .map((model) => ({
         id: model.id,

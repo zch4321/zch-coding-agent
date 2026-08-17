@@ -117,7 +117,6 @@ describe('SessionManager approvals', () => {
       baseURL: 'https://api.example/v1',
       model: 'main-model',
       enabledModelIds: ['main-model', 'approval-model', 'deepseek-v4-pro'],
-      reasoning: 'off',
       limits: current.limits,
     })
     await store.update({
@@ -126,8 +125,10 @@ describe('SessionManager approvals', () => {
       value: {
         defaultModelProvider: 'deepseek',
         defaultModel: 'main-model',
+        defaultModelReasoning: 'off',
         auxiliaryModelProvider: 'deepseek',
         auxiliaryModel: 'approval-model',
+        auxiliaryModelReasoning: 'off',
       },
     })
     const provider = new ScriptedCommandProvider()

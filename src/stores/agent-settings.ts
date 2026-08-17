@@ -339,7 +339,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.providerForm.baseURL = provider.baseURL
       this.providerForm.model = provider.model
       this.providerForm.enabledModelIds = [...provider.enabledModelIds]
-      this.providerForm.reasoning = provider.reasoning
       this.providerForm.apiKey = ''
       const limits = config?.limits ?? this.limitsConfig
       this.modelProfiles = providerModelProfiles(
@@ -823,7 +822,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         baseURL: 'https://api.example.com/v1',
         model: '',
         enabledModelIds: [],
-        reasoning: 'off',
         limits: cloneJson(limits),
       })
 
@@ -935,7 +933,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
               model: draft.model,
               enabledModelIds: draft.enabledModelIds,
               modelOverrides: providerModelOverrides(draftProfiles),
-              reasoning: draft.reasoning,
               providerId: draft.providerId,
               label: draft.label,
               providerType: draft.providerType,

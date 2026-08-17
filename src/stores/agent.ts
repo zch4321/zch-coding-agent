@@ -122,8 +122,10 @@ const settingsProperties = new Set<PropertyKey>([
 const modelRolesProperties = new Set<PropertyKey>([
   'defaultModelProvider',
   'defaultModel',
+  'defaultModelReasoning',
   'auxiliaryModelProvider',
   'auxiliaryModel',
+  'auxiliaryModelReasoning',
   'rolesSaving',
   'rolesSaveStatus',
 ])

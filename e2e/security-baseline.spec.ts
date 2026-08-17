@@ -57,9 +57,11 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 21,
+          schemaVersion: 22,
           models: {
             defaultModelProvider: 'deepseek',
+            defaultModelReasoning: 'high',
+            auxiliaryModelReasoning: 'high',
             modelPool: { entries: [] },
             providers: [
               {
@@ -77,6 +79,12 @@ test.describe.serial('Electron security and IPC baseline', () => {
         },
       },
     })
+    const publicConfig = results.config as {
+      value: { config: { models: { providers: object[] } } }
+    }
+    expect(publicConfig.value.config.models.providers[0]).not.toHaveProperty(
+      'reasoning',
+    )
     expect(JSON.stringify(results.config)).not.toContain('apiKeyRef')
     expect(results.skills).toMatchObject({
       version: 1,
@@ -132,12 +140,14 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          providers: [
-            {
-              id: 'deepseek',
-              credentialConfigured: true,
-            },
-          ],
+          models: {
+            providers: [
+              {
+                id: 'deepseek',
+                credentialConfigured: true,
+              },
+            ],
+          },
         },
       },
     })

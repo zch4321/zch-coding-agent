@@ -359,10 +359,12 @@ const enUS = {
       'The main model runs new conversations by default; the auxiliary model powers background tasks like conversation titling and automatic approval.',
     defaultModelRole: 'Main model',
     defaultModelRoleHint:
-      'Used by default for new conversations; you can still switch models per conversation.',
+      'New conversations use this model and reasoning effort by default; either can still be changed per conversation.',
     auxiliaryModelRole: 'Auxiliary model',
     auxiliaryModelRoleHint:
-      'Used for conversation titling and automatic approval; when unset, the current model is used. A cheap, fast model is recommended.',
+      'Used for conversation titling and automatic approval; when unset, the current model and its reasoning effort are used. A cheap, fast model is recommended.',
+    modelRoleReasoningConflictHint:
+      'This model does not support the selected reasoning effort. Pick one of its supported efforts to save.',
     auxiliaryFollowDefault: 'Follow the current model (default)',
     providerConfigTitle: 'Provider configuration',
     providerHint:
@@ -402,8 +404,6 @@ const enUS = {
     modelAlreadyExists: 'This model is already in the list.',
     modelConfigurationInvalid:
       'Check the context, compaction threshold, and maximum output values.',
-    newMainModelReasoningConflict:
-      "This model will become the main model, so its reasoning efforts must include the Provider's current default.",
     modelActions: 'Actions',
     deleteModelText:
       'Delete the local catalog entry, enabled state, and configuration for {model}? If the Provider still returns it, the next refresh will add it again.',
@@ -442,20 +442,10 @@ const enUS = {
     reasoningHigh: 'High',
     reasoningXhigh: 'Extra high',
     reasoningMax: 'Maximum',
-    mainReasoningConflictHint:
-      'The main model annotation no longer includes this effort; autosave is paused until you pick a supported one.',
     auxiliaryDraftConflictHint:
       'The saved auxiliary model {model} is incompatible with this Provider draft; autosave is paused until you adjust the annotation or auxiliary model.',
     auxiliaryDraftModelDisabledHint:
       'The saved auxiliary model {model} is no longer enabled in this Provider draft; autosave is paused until you re-enable it or choose another auxiliary model.',
-    reasoningHint:
-      'The selected effort is sent to the model as-is; annotate a model row to narrow the choices. Off disables thinking.',
-    reasoningHintGeneric:
-      'Generic Chat Completions does not send vendor-specific reasoning fields.',
-    reasoningHintResponses:
-      'Responses sends reasoning effort and replays encrypted reasoning items locally without server state.',
-    reasoningHintAnthropic:
-      'Any effort above Off uses adaptive thinking; select Off for older models or compatible proxies.',
     apiKey: 'API key',
     apiKeyPlaceholder: 'Enter a new key',
     modelRefreshCredentialHint:

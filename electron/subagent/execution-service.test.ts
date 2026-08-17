@@ -57,7 +57,7 @@ function routes(): FrozenSubagentRoutes {
       providerType: provider.providerType,
       providerId: provider.id,
       model: provider.model,
-      reasoning: provider.reasoning,
+      reasoning: config.models.defaultModelReasoning,
       endpoint: 'https://api.deepseek.com/chat/completions',
       providerConfigRevision: provider.revision,
     },

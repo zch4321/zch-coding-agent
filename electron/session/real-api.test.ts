@@ -181,7 +181,6 @@ async function liveHarness() {
     kind: 'provider',
     baseURL,
     model,
-    reasoning: 'high',
   })
   await store.update({
     version: 1,

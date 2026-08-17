@@ -183,7 +183,6 @@ function provider(
     revision: 1,
     baseURL: 'https://provider.example/v1',
     model,
-    reasoning: 'off',
     modelCatalog: catalogModels.map((catalogModel) => ({ id: catalogModel })),
     modelOverrides: {},
     enabledModelIds: [model],
@@ -307,12 +306,15 @@ describe('agent runtime store', () => {
     replica.projects = [project]
     replica.selectedProjectId = projectId
     const settings = useAgentSettingsStore()
-    useModelRolesStore().defaultModelProvider = 'provider-a'
+    const roles = useModelRolesStore()
+    roles.defaultModelProvider = 'provider-a'
+    roles.defaultModelReasoning = 'low'
     settings.providers = [
       provider('provider-a', 'provider-a-default', ['provider-a-catalog']),
     ]
     const runtime = useAgentRuntimeStore()
 
+    expect(runtime.composerReasoning).toBe('low')
     runtime.setProviderReasoning('max')
 
     expect(runtime.draftModelSelection).toEqual({

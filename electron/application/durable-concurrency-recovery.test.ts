@@ -114,12 +114,7 @@ async function setupTarget(): Promise<{
   const selection: ModelSelection = {
     providerId: configuredProvider.id,
     model: configuredProvider.model,
-    reasoning:
-      configuredProvider.reasoning === 'off'
-        ? 'off'
-        : configuredProvider.reasoning === 'max'
-          ? 'max'
-          : 'high',
+    reasoning: store.getPublicConfig().models.defaultModelReasoning,
   }
   const target = await createBackendForTest({
     configStore: store,

@@ -1,4 +1,8 @@
-import { getProviderConfig, type PublicConfig } from '../../shared/config'
+import {
+  getDefaultModelSelection,
+  getProviderConfig,
+  type PublicConfig,
+} from '../../shared/config'
 import type { RunContext } from '../../shared/context'
 import type { RunStatus } from '../../shared/agent-events'
 import type { MessageId, RunId } from '../../shared/ids'
@@ -382,10 +386,14 @@ export class SessionRunController {
         if (!runProvider) {
           throw new Error(`Provider is not configured: ${session.provider}`)
         }
+        const defaultSelection = getDefaultModelSelection(runConfig)
         session.modelSelection = {
           providerId: runProvider.id,
-          model: runProvider.model,
-          reasoning: runProvider.reasoning,
+          model:
+            runProvider.id === defaultSelection.providerId
+              ? defaultSelection.model
+              : runProvider.model,
+          reasoning: defaultSelection.reasoning,
         }
       }
       run.routes ??= await resolveRunRoutes(

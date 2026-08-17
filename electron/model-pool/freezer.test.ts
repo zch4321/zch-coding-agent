@@ -26,7 +26,6 @@ function provider(
     revision: 1,
     baseURL: `https://${id}.example/v1`,
     model: models[0]!,
-    reasoning: 'high',
     modelCatalog: [],
     modelOverrides: Object.fromEntries(
       models.map((model) => [model, { capability: 'standard' as const }]),
@@ -58,8 +57,10 @@ function publicConfig(
   config.models.providers = providers
   config.models.defaultModelProvider = providers[0]!.id
   config.models.defaultModel = providers[0]!.model
+  config.models.defaultModelReasoning = 'high'
   config.models.auxiliaryModelProvider = providers[0]!.id
   config.models.auxiliaryModel = providers[0]!.model
+  config.models.auxiliaryModelReasoning = 'high'
   config.models.modelPool = { entries }
   return toPublicConfig(config, () => ({
     credentialConfigured: true,

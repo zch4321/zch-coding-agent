@@ -393,7 +393,12 @@ test.describe.serial('Electron settings workflows', () => {
     )
     await expect.poll(() => fakeProvider.modelCatalogRequests).toBe(1)
     await expect(refreshModels).toBeEnabled()
-    await expect(provider.getByText('思考深度', { exact: true })).toBeVisible()
+    await expect(
+      provider.getByTestId('default-model-reasoning-select'),
+    ).toContainText('高')
+    await expect(
+      provider.getByTestId('auxiliary-model-reasoning-select'),
+    ).toContainText('高')
     const modelTransfer = provider.getByTestId('provider-model-transfer')
     await expect(
       modelTransfer.getByText('Provider 模型', { exact: true }),
@@ -538,9 +543,9 @@ test.describe.serial('Electron settings workflows', () => {
 
     await settingsNavigation.getByRole('menuitem', { name: '模型' }).click()
     const modelsSection = page.locator('.settings-section')
-    const auxiliaryField = modelsSection
-      .locator('.settings-field', { hasText: '辅助模型' })
-      .locator('.n-select')
+    const auxiliaryField = modelsSection.getByTestId(
+      'auxiliary-model-role-select',
+    )
     await auxiliaryField.click()
     await page
       .locator('.n-select-menu:visible .n-base-select-option', {
@@ -577,7 +582,6 @@ test.describe.serial('Electron settings workflows', () => {
         providerType: 'generic.chat-completions',
         baseURL: 'https://provider.example/v1',
         model: 'e2e-alt-chat',
-        reasoning: 'off',
         limits: current.value.config.limits,
       })
       return result.ok
@@ -691,7 +695,6 @@ test.describe.serial('Electron settings workflows', () => {
         baseURL: 'https://provider.example/v1',
         model: 'annotated-model',
         enabledModelIds: ['annotated-model', 'second-model'],
-        reasoning: 'high',
         limits: current.value.config.limits,
       })
       return result.ok
@@ -721,8 +724,8 @@ test.describe.serial('Electron settings workflows', () => {
     }
     await expectNoHorizontalOverflow()
 
-    // Annotate efforts excluding the provider default 'high': autosave must
-    // pause with a field-level hint instead of failing in a loop.
+    // Provider annotations save independently now that reasoning belongs to
+    // exact model roles rather than the Provider.
     const clickSelectOption = (text: string) =>
       page
         .locator('.n-select-menu:visible .n-base-select-option')
@@ -736,19 +739,6 @@ test.describe.serial('Electron settings workflows', () => {
     await clickSelectOption('中')
     await provider.locator('.settings-heading').first().click()
     await expect(page.locator('.n-select-menu:visible')).toHaveCount(0)
-    await expect(
-      provider.getByText('自动保存已暂停', { exact: false }),
-    ).toBeVisible()
-    await expect(provider.getByTestId('provider-save-status')).not.toHaveText(
-      '已保存',
-    )
-
-    // Manually picking a supported default resumes autosave.
-    await provider
-      .locator('.settings-field', { hasText: '思考深度' })
-      .locator('.n-select')
-      .click()
-    await clickSelectOption('低')
     await expect(provider.getByTestId('provider-save-status')).toHaveText(
       '已保存',
     )
@@ -800,6 +790,11 @@ test.describe.serial('Electron settings workflows', () => {
         hasText: 'E2E Annotated / annotated-model',
       })
       .click()
+    await expect(
+      provider.getByText('当前模型不支持这个思考深度', { exact: false }),
+    ).toBeVisible()
+    await provider.getByTestId('default-model-reasoning-select').click()
+    await clickSelectOption('中')
     await expect(provider.getByTestId('model-roles-save-status')).toHaveText(
       '已保存',
     )
@@ -947,6 +942,7 @@ test.describe.serial('Electron settings workflows', () => {
               models: {
                 defaultModelProvider: string
                 defaultModel: string
+                defaultModelReasoning: string
               }
             }
           }
@@ -962,8 +958,11 @@ test.describe.serial('Electron settings workflows', () => {
           defaultModelProvider:
             current.value.config.models.defaultModelProvider,
           defaultModel: current.value.config.models.defaultModel,
+          defaultModelReasoning:
+            current.value.config.models.defaultModelReasoning,
           auxiliaryModelProvider: 'e2e-annotated',
           auxiliaryModel: 'second-model',
+          auxiliaryModelReasoning: 'high',
         },
       })
       return result.ok
@@ -980,7 +979,7 @@ test.describe.serial('Electron settings workflows', () => {
       .locator('.provider-card', { hasText: 'E2E Annotated' })
       .click()
 
-    // Annotating the auxiliary model so it excludes the provider default
+    // Annotating the auxiliary model so it excludes the role's explicit high
     // effort would break that route: autosave pauses with a hint instead of
     // failing against the backend.
     const secondEffortsField = provider.locator(
@@ -1001,9 +1000,7 @@ test.describe.serial('Electron settings workflows', () => {
 
     // Changing only the auxiliary role clears the conflict and must restart
     // the paused Provider autosave watcher.
-    const auxiliaryField = provider
-      .locator('.settings-field', { hasText: '辅助模型' })
-      .locator('.n-select')
+    const auxiliaryField = provider.getByTestId('auxiliary-model-role-select')
     await auxiliaryField.click()
     await page
       .locator('.n-select-menu:visible .n-base-select-option')

@@ -193,7 +193,7 @@ export async function runHeadlessAgent(
         modelSelection: {
           providerId: provider.id,
           model: provider.model,
-          reasoning: resolvedProvider.reasoning,
+          reasoning: provider.reasoning ?? 'high',
         },
         permissionMode: 'yolo',
         message: options.task,

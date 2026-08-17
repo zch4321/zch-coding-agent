@@ -132,23 +132,11 @@ function deleteProviderModel(
   delete provider.modelOverrides[normalizedModelId]
 }
 
-/** Validates the configured main route while allowing an unconfigured model. */
-function assertMainRouteConfigValid(provider: AppProviderConfig): void {
+/** Validates the Provider default model while allowing an unconfigured model. */
+function assertProviderDefaultModelValid(provider: AppProviderConfig): void {
   if (!provider.model) return
-  const compatibility = evaluateModelRouteCompatibility(provider, {
-    model: provider.model,
-    reasoning: provider.reasoning,
-  })
-  if (compatibility.ok) return
-  if (compatibility.reason === 'model-disabled') {
-    throw new Error('Main model must be enabled for the Provider')
-  }
-  if (compatibility.reason === 'reasoning-unsupported') {
-    throw new Error(
-      `Provider reasoning must be supported by the main model: ${provider.model}`,
-    )
-  }
-  throw new Error(`Invalid main model route: ${compatibility.reason}`)
+  if (provider.enabledModelIds.includes(provider.model)) return
+  throw new Error('Default model must be enabled for the Provider')
 }
 
 /** True when the configured auxiliary model resolves to a usable route. */
@@ -159,32 +147,13 @@ function isAuxiliaryRouteUsable(config: AppConfig): boolean {
   if (!provider) return false
   return evaluateModelRouteCompatibility(provider, {
     model: roles.auxiliaryModel,
-    reasoning: provider.reasoning,
+    reasoning: roles.auxiliaryModelReasoning,
   }).ok
 }
 
-/**
- * Validates the default and auxiliary model roles: the default provider must
- * exist and its model must stay enabled, and a configured auxiliary model must
- * resolve against its provider's default reasoning. Used when saving model
- * roles, and to stop provider updates from breaking a working auxiliary route.
- */
-function assertModelRolesConfigValid(config: AppConfig): void {
+/** Validates the configured auxiliary role and its explicit reasoning. */
+function assertAuxiliaryModelRoleConfigValid(config: AppConfig): void {
   const roles = config.models
-  const defaultProvider = getAppProvider(config, roles.defaultModelProvider)
-  if (!defaultProvider) {
-    throw new Error(
-      `Default model provider is not configured: ${roles.defaultModelProvider}`,
-    )
-  }
-  if (
-    roles.defaultModel &&
-    !defaultProvider.enabledModelIds.includes(roles.defaultModel)
-  ) {
-    throw new Error(
-      `Default model ${roles.defaultModel} is not enabled for provider ${roles.defaultModelProvider}`,
-    )
-  }
   if (!roles.auxiliaryModel) return
   const auxiliaryProvider = getAppProvider(config, roles.auxiliaryModelProvider)
   if (!auxiliaryProvider) {
@@ -194,12 +163,12 @@ function assertModelRolesConfigValid(config: AppConfig): void {
   }
   const compatibility = evaluateModelRouteCompatibility(auxiliaryProvider, {
     model: roles.auxiliaryModel,
-    reasoning: auxiliaryProvider.reasoning,
+    reasoning: roles.auxiliaryModelReasoning,
   })
   if (compatibility.ok) return
   if (compatibility.reason === 'reasoning-unsupported') {
     throw new Error(
-      `Auxiliary model ${roles.auxiliaryModel} does not support the provider default reasoning effort: ${auxiliaryProvider.reasoning}`,
+      `Auxiliary model ${roles.auxiliaryModel} does not support reasoning effort: ${roles.auxiliaryModelReasoning}`,
     )
   }
   throw new Error(
@@ -207,16 +176,48 @@ function assertModelRolesConfigValid(config: AppConfig): void {
   )
 }
 
+/** Validates both exact model roles when their configuration is saved. */
+function assertModelRolesConfigValid(config: AppConfig): void {
+  const roles = config.models
+  const defaultProvider = getAppProvider(config, roles.defaultModelProvider)
+  if (!defaultProvider) {
+    throw new Error(
+      `Default model provider is not configured: ${roles.defaultModelProvider}`,
+    )
+  }
+  if (roles.defaultModel) {
+    const compatibility = evaluateModelRouteCompatibility(defaultProvider, {
+      model: roles.defaultModel,
+      reasoning: roles.defaultModelReasoning,
+    })
+    if (!compatibility.ok) {
+      if (compatibility.reason === 'reasoning-unsupported') {
+        throw new Error(
+          `Default model ${roles.defaultModel} does not support reasoning effort: ${roles.defaultModelReasoning}`,
+        )
+      }
+      throw new Error(
+        `Default model ${roles.defaultModel} is not enabled for provider ${roles.defaultModelProvider}`,
+      )
+    }
+  }
+  assertAuxiliaryModelRoleConfigValid(config)
+}
+
 /** Rewrites an unusable auxiliary model role to the current default model. */
 function repairAuxiliaryModelRole(config: AppConfig): void {
   const roles = config.models
   if (!roles.auxiliaryModel) {
     roles.auxiliaryModelProvider = ''
+    roles.auxiliaryModelReasoning = roles.defaultModelReasoning
     return
   }
   if (isAuxiliaryRouteUsable(config)) return
-  roles.auxiliaryModelProvider = roles.defaultModelProvider
+  roles.auxiliaryModelProvider = roles.defaultModel
+    ? roles.defaultModelProvider
+    : ''
   roles.auxiliaryModel = roles.defaultModel
+  roles.auxiliaryModelReasoning = roles.defaultModelReasoning
 }
 
 function applyProviderUpdate(
@@ -240,7 +241,6 @@ function applyProviderUpdate(
       revision: 1,
       baseURL: request.baseURL,
       model: request.model,
-      reasoning: request.reasoning,
       modelCatalog: [],
       modelOverrides: {},
       enabledModelIds: normalizedEnabledModelIds(
@@ -256,7 +256,6 @@ function applyProviderUpdate(
   provider.providerType = request.providerType ?? provider.providerType
   provider.baseURL = request.baseURL
   provider.model = request.model
-  provider.reasoning = request.reasoning
   if (request.enabledModelIds !== undefined) {
     provider.enabledModelIds = normalizedEnabledModelIds(
       request.enabledModelIds,
@@ -314,12 +313,12 @@ function applyProviderUpdate(
     provider.modelCatalog = []
     delete provider.modelCatalogFetchedAt
   }
-  assertMainRouteConfigValid(provider)
+  assertProviderDefaultModelValid(provider)
   if (
     auxiliaryWasUsable &&
     next.models.auxiliaryModelProvider === provider.id
   ) {
-    assertModelRolesConfigValid(next)
+    assertAuxiliaryModelRoleConfigValid(next)
   }
   if (!isNewProvider && providerRouteShape(provider) !== previousRouteShape) {
     provider.revision += 1
@@ -336,7 +335,6 @@ function providerRouteShape(provider: AppProviderConfig): string {
     providerType: provider.providerType,
     baseURL: provider.baseURL,
     model: provider.model,
-    reasoning: provider.reasoning,
     modelOverrides: provider.modelOverrides,
     apiKeyRef: provider.apiKeyRef,
   })
@@ -792,7 +790,7 @@ export class ConfigStore {
         }
         const previousRouteShape = providerRouteShape(provider)
         addProviderModel(provider, request.modelId, request.modelOverride)
-        assertMainRouteConfigValid(provider)
+        assertProviderDefaultModelValid(provider)
         if (providerRouteShape(provider) !== previousRouteShape) {
           provider.revision += 1
         }
@@ -873,12 +871,17 @@ export class ConfigStore {
         if (next.models.auxiliaryModelProvider === request.providerId) {
           // A configured auxiliary role follows the new default model; an
           // unset role simply drops the stale provider reference.
-          if (next.models.auxiliaryModel && fallback.model) {
-            next.models.auxiliaryModelProvider = fallback.id
-            next.models.auxiliaryModel = fallback.model
+          if (next.models.auxiliaryModel && next.models.defaultModel) {
+            next.models.auxiliaryModelProvider =
+              next.models.defaultModelProvider
+            next.models.auxiliaryModel = next.models.defaultModel
+            next.models.auxiliaryModelReasoning =
+              next.models.defaultModelReasoning
           } else {
             next.models.auxiliaryModelProvider = ''
             next.models.auxiliaryModel = ''
+            next.models.auxiliaryModelReasoning =
+              next.models.defaultModelReasoning
           }
         }
 
@@ -937,10 +940,14 @@ export class ConfigStore {
         }
         next.models.defaultModelProvider = roles.defaultModelProvider
         next.models.defaultModel = roles.defaultModel
+        next.models.defaultModelReasoning = roles.defaultModelReasoning
         next.models.auxiliaryModelProvider = roles.auxiliaryModel
           ? roles.auxiliaryModelProvider
           : ''
         next.models.auxiliaryModel = roles.auxiliaryModel
+        next.models.auxiliaryModelReasoning = roles.auxiliaryModel
+          ? roles.auxiliaryModelReasoning
+          : roles.defaultModelReasoning
         assertModelRolesConfigValid(next)
         break
       }

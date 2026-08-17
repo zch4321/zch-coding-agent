@@ -250,3 +250,12 @@
 - 起名语义：`ConversationTitlingService` 的 route 来源从“模型池精确 light route”改为辅助模型 ?? 该 Run 的主模型；模型池与能力标注回归为只服务 Swarm。Desktop 提供 `ZCH_DISABLE_CONVERSATION_TITLING` 环境开关（e2e 默认禁用），Headless 恒不启用。
 - 设置页：`模型服务` 页更名 `模型`，第一节“默认模型”提供主/辅助两个下拉并自动保存；原内容下移为“供应商配置”。权限页删除审批卡片，模式选择下固定一行审批来源说明，整页改为自动保存。
 - 理由：两个后台能力（审批、起名）与 Swarm 的池化调度是不同语义——前者要一个可预测的单一模型，后者要能力轮换。显式的主/辅助角色比“activeProvider + 独立审批路由 + 池内 light 标注”更可解释；破坏性升级由 v21 迁移一次性收敛，不留双轨。
+
+## 2026-08-17 — Reasoning 归精确模型角色所有
+
+- 状态：已采纳并实现；本条覆盖 2026-08-03 决策中“Provider 默认档位”的配置边界，以及 2026-08-16 决策中“主/辅助模型继承 Provider 默认 reasoning”的部分；其他模型标注、模型角色、审批和起名回退语义不变。
+- 配置边界：AppConfig v22 为主模型增加 `defaultModelReasoning`，为辅助模型增加 `auxiliaryModelReasoning`，并从 App/Public Provider 配置与 Provider 更新 IPC 删除 `reasoning`。Provider 只保存连接、凭据引用、目录、默认模型和 per-model 能力标注；不再存在会被不同消费者隐式继承的默认思考档位。
+- 路由边界：主模型和辅助模型都是精确 `Provider + model + reasoning` route，可以使用同一模型的不同档位。新对话读取主角色完整 route；自动审批和对话起名读取辅助角色完整 route，未配置或解析失败时回退完成 Run 的完整主 route。Session、模型池和冻结 route 继续各自显式保存 reasoning，不做自动升降档。
+- 设置边界：模型页的主/辅助模型各显示模型与思考深度。思考选项取对应模型的 `reasoningEfforts` 标注；切换模型造成暂时不兼容时只保留本地组合并提示用户选择，不写入半条 route。Provider 页删除默认思考深度字段；修改模型标注若破坏已保存辅助 route，仍暂停 Provider 自动保存。
+- 迁移：v21→v22 分别读取主/辅助角色所引用 Provider 的旧 reasoning，写入两个角色后删除所有 Provider reasoning，从而保持升级前实际调用等级。v9–v20 直接迁移得到相同结果；已经在 v21 丢弃的旧 approval 独立 reasoning 不尝试恢复。Headless 外部 v4 的可选 reasoning 保持不变，只在构造内部 v22 配置时映射到主角色。
+- 理由：reasoning 是一次模型 route 的属性，不是 Provider 连接属性。把它放在 Provider 上会让主对话、审批和起名共享隐含默认值，任一 Provider 编辑都会跨职责改变调用成本与行为；精确角色使 UI、持久化和冻结路由使用同一份显式事实。

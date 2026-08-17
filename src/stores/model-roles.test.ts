@@ -9,8 +9,10 @@ import { useModelRolesStore } from './model-roles'
 function configWithRoles(roles: {
   defaultModelProvider: string
   defaultModel: string
+  defaultModelReasoning: PublicConfig['models']['defaultModelReasoning']
   auxiliaryModelProvider: string
   auxiliaryModel: string
+  auxiliaryModelReasoning: PublicConfig['models']['auxiliaryModelReasoning']
 }): PublicConfig {
   return {
     models: {
@@ -24,9 +26,11 @@ function configWithRoles(roles: {
 const savedRoles = {
   defaultModelProvider: 'deepseek',
   defaultModel: 'deepseek-v4-pro',
+  defaultModelReasoning: 'high',
   auxiliaryModelProvider: '',
   auxiliaryModel: '',
-}
+  auxiliaryModelReasoning: 'high',
+} as const
 
 describe('model roles store', () => {
   beforeEach(() => setActivePinia(createPinia()))
@@ -38,12 +42,15 @@ describe('model roles store', () => {
         ...savedRoles,
         auxiliaryModelProvider: 'deepseek',
         auxiliaryModel: 'deepseek-v4-lite',
+        auxiliaryModelReasoning: 'low',
       }),
     )
 
     expect(roles.defaultModelProvider).toBe('deepseek')
     expect(roles.defaultModel).toBe('deepseek-v4-pro')
+    expect(roles.defaultModelReasoning).toBe('high')
     expect(roles.auxiliaryModel).toBe('deepseek-v4-lite')
+    expect(roles.auxiliaryModelReasoning).toBe('low')
   })
 
   it('auto-saves the full quartet when the default model changes', async () => {
@@ -59,7 +66,7 @@ describe('model roles store', () => {
     roles.applyConfig(configWithRoles(savedRoles))
 
     await expect(
-      roles.setDefaultModelRole('other-provider', 'other-model'),
+      roles.setDefaultModelRole('other-provider', 'other-model', 'max'),
     ).resolves.toBe(true)
     expect(setConfig).toHaveBeenCalledWith({
       version: 1,
@@ -67,8 +74,10 @@ describe('model roles store', () => {
       value: {
         defaultModelProvider: 'other-provider',
         defaultModel: 'other-model',
+        defaultModelReasoning: 'max',
         auxiliaryModelProvider: '',
         auxiliaryModel: '',
+        auxiliaryModelReasoning: 'max',
       },
     })
   })
@@ -88,18 +97,21 @@ describe('model roles store', () => {
         ...savedRoles,
         auxiliaryModelProvider: 'deepseek',
         auxiliaryModel: 'deepseek-v4-lite',
+        auxiliaryModelReasoning: 'low',
       }),
     )
 
-    await roles.setAuxiliaryModelRole('', '')
+    await roles.setAuxiliaryModelRole('', '', 'low')
     expect(setConfig).toHaveBeenCalledWith({
       version: 1,
       kind: 'models',
       value: {
         defaultModelProvider: 'deepseek',
         defaultModel: 'deepseek-v4-pro',
+        defaultModelReasoning: 'high',
         auxiliaryModelProvider: '',
         auxiliaryModel: '',
+        auxiliaryModelReasoning: 'high',
       },
     })
   })
@@ -117,10 +129,11 @@ describe('model roles store', () => {
     roles.applyConfig(configWithRoles(savedRoles))
 
     await expect(
-      roles.setAuxiliaryModelRole('deepseek', 'deepseek-v4-lite'),
+      roles.setAuxiliaryModelRole('deepseek', 'deepseek-v4-lite', 'low'),
     ).resolves.toBe(false)
     expect(roles.auxiliaryModelProvider).toBe('')
     expect(roles.auxiliaryModel).toBe('')
+    expect(roles.auxiliaryModelReasoning).toBe('high')
     expect(roles.error).toBe('write failed')
   })
 })

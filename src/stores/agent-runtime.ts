@@ -199,7 +199,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       const selection = {
         providerId: provider?.id ?? '',
         model: roles.defaultModel || provider?.model || '',
-        reasoning: provider?.reasoning ?? ('off' as const),
+        reasoning: roles.defaultModelReasoning,
       }
       return evaluateModelRouteCompatibility(provider, selection).ok
         ? selection
@@ -656,7 +656,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         model: provider.enabledModelIds.includes(provider.model)
           ? provider.model
           : '',
-        reasoning: provider.reasoning,
+        reasoning: this.composerModelSelection.reasoning,
       }
       if (replica.selectedSession) {
         void this.updateModelSelection(selection)
@@ -677,11 +677,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         this.draftModelSelection = selection
       }
     },
-    async updateModelSelection(modelSelection: {
-      providerId: string
-      model: string
-      reasoning: PublicConfig['models']['providers'][number]['reasoning']
-    }) {
+    async updateModelSelection(modelSelection: ModelSelection) {
       const replica = useAgentReplicaStore()
       const session = replica.selectedSession
       if (!session || !window.agentApi || this.activeRunId) return

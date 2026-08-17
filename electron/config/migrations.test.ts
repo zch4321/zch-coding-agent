@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { REASONING_EFFORTS } from '../../shared/config'
 import legacyAppConfigV20 from './fixtures/app-config-v20.json'
+import legacyAppConfigV21 from './fixtures/app-config-v21.json'
 import legacyAppConfigV9 from './fixtures/app-config-v9.json'
 import { DEFAULT_APP_CONFIG, type AppConfig } from './schema'
 import { migrateConfig } from './migrations'
@@ -14,11 +15,20 @@ function legacyV20Config(): Record<string, unknown> {
   return structuredClone(legacyAppConfigV20) as Record<string, unknown>
 }
 
+/** Returns a mutable clone of the frozen production v21 boundary fixture. */
+function legacyV21Config(): Record<string, unknown> {
+  return structuredClone(legacyAppConfigV21) as Record<string, unknown>
+}
+
 /** Explodes the current DEFAULT models section into pre-v21 top-level fields. */
 function legacyModelFields(source: Record<string, unknown>): void {
   const models = source.models as Record<string, unknown>
+  const providers = models.providers as Array<Record<string, unknown>>
+  for (const provider of providers) {
+    provider.reasoning = models.defaultModelReasoning ?? 'high'
+  }
   source.activeProviderId = models.defaultModelProvider
-  source.providers = models.providers
+  source.providers = providers
   source.approval = {
     approverProviderId:
       models.auxiliaryModelProvider || models.defaultModelProvider,
@@ -183,8 +193,8 @@ function legacyV19Config(): Record<string, unknown> {
   return source
 }
 
-describe('config v21 migration boundary', () => {
-  it('creates the v21 defaults when no config exists', () => {
+describe('config v22 migration boundary', () => {
+  it('creates the v22 defaults when no config exists', () => {
     expect(migrateConfig(undefined)).toEqual(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined)).not.toBe(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined).limits.maxConcurrentRuns).toBe(16)
@@ -198,7 +208,7 @@ describe('config v21 migration boundary', () => {
           ...structuredClone(DEFAULT_APP_CONFIG),
           schemaVersion,
         }),
-      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v21`)
+      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v22`)
     }
   })
 
@@ -220,7 +230,7 @@ describe('config v21 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       models: {
         auxiliaryModelProvider: '',
         auxiliaryModel: '',
@@ -256,7 +266,7 @@ describe('config v21 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       models: {
         modelPool: {
           entries: [
@@ -330,7 +340,7 @@ describe('config v21 migration boundary', () => {
     const source = legacyV9Config()
     const migrated = migrateConfig(source)
     expect(migrated).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       models: {
         modelPool: { entries: [] },
         providers: [
@@ -387,7 +397,7 @@ describe('config v21 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       models: { modelPool: { entries: [] } },
       limits: {
         maxToolOutputBytes: 128 * 1_024,
@@ -411,7 +421,7 @@ describe('config v21 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       models: { modelPool: { entries: [] } },
       limits: {
         maxToolOutputBytes: 72_000,
@@ -429,7 +439,7 @@ describe('config v21 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       models: {
         modelPool: { entries: [] },
         providers: [
@@ -448,7 +458,7 @@ describe('config v21 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       models: { modelPool: { entries: [] } },
       limits: { maxConcurrentRuns: 7 },
       subagents: {
@@ -463,7 +473,7 @@ describe('config v21 migration boundary', () => {
     const source = legacyV13Config()
     const migrated = migrateConfig(source)
 
-    expect(migrated.schemaVersion).toBe(21)
+    expect(migrated.schemaVersion).toBe(22)
     expect(migrated.models.modelPool).toEqual({ entries: [] })
     expect(migrated.limits).not.toHaveProperty('maxToolTokensPerRun')
     expect((source.limits as Record<string, unknown>).maxToolTokensPerRun).toBe(
@@ -475,7 +485,7 @@ describe('config v21 migration boundary', () => {
     const migrated = migrateConfig(legacyV14Config())
 
     expect(migrated).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       models: {
         modelPool: { entries: [] },
         providers: [
@@ -514,7 +524,7 @@ describe('config v21 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       models: { modelPool: { entries: [] } },
       limits: { maxConcurrentRuns: 7 },
     })
@@ -544,7 +554,7 @@ describe('config v21 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       subagents: { maxAgentsPerSwarm: 10 },
       models: {
         modelPool: {
@@ -562,7 +572,7 @@ describe('config v21 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       executionEnvironment: { commandShell: 'auto' },
     })
     expect(source).not.toHaveProperty('executionEnvironment')
@@ -573,17 +583,18 @@ describe('config v21 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 21,
+      schemaVersion: 22,
       executionEnvironment: { commandShell: 'windows-powershell' },
       models: {
         defaultModelProvider: 'deepseek',
         defaultModel: 'fixture-main',
+        defaultModelReasoning: 'high',
         auxiliaryModelProvider: 'deepseek',
         auxiliaryModel: 'fixture-aux',
+        auxiliaryModelReasoning: 'high',
         providers: [
           {
             id: 'deepseek',
-            reasoning: 'high',
             apiKeyRef: 'provider-key:fixture',
           },
         ],
@@ -609,6 +620,50 @@ describe('config v21 migration boundary', () => {
     })
   })
 
+  it('moves each v21 Provider reasoning effort onto its exact model role', () => {
+    const source = legacyV21Config()
+    const migrated = migrateConfig(source)
+
+    expect(migrated).toMatchObject({
+      schemaVersion: 22,
+      models: {
+        defaultModelProvider: 'deepseek',
+        defaultModel: 'fixture-main',
+        defaultModelReasoning: 'max',
+        auxiliaryModelProvider: 'auxiliary',
+        auxiliaryModel: 'fixture-aux',
+        auxiliaryModelReasoning: 'low',
+        providers: [
+          { id: 'deepseek', apiKeyRef: 'provider-key:main' },
+          { id: 'auxiliary', apiKeyRef: 'provider-key:auxiliary' },
+        ],
+        modelPool: {
+          entries: [{ id: 'fixture-worker', reasoning: 'high' }],
+        },
+      },
+    })
+    for (const provider of migrated.models.providers) {
+      expect(provider).not.toHaveProperty('reasoning')
+    }
+    expect(source).toMatchObject({
+      schemaVersion: 21,
+      models: {
+        providers: [{ reasoning: 'max' }, { reasoning: 'low' }],
+      },
+    })
+  })
+
+  it('rejects malformed v21 data instead of inventing role reasoning', () => {
+    const malformed = legacyV21Config()
+    const models = malformed.models as Record<string, unknown>
+    const providers = models.providers as Array<Record<string, unknown>>
+    delete providers[0]?.reasoning
+
+    expect(() => migrateConfig(malformed)).toThrow(
+      '/models/providers/0/reasoning is required',
+    )
+  })
+
   it('accepts the new Provider Types without a schema-version migration', () => {
     for (const providerType of [
       'generic.responses',
@@ -618,7 +673,7 @@ describe('config v21 migration boundary', () => {
       source.models.providers[0].providerType = providerType
       const migrated = migrateConfig(source)
 
-      expect(migrated.schemaVersion).toBe(21)
+      expect(migrated.schemaVersion).toBe(22)
       expect(migrated.models.providers[0].providerType).toBe(providerType)
     }
   })

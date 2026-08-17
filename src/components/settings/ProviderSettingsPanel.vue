@@ -27,12 +27,11 @@ import {
 import {
   DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
   resolveModelTokenSettings,
-  resolveSupportedReasoningEfforts,
   type ModelTokenSettings,
 } from '../../../shared/model-settings'
-import { evaluateModelRouteCompatibility } from '../../../shared/model-route'
 import { useAgentStore } from '../../stores/agent'
-import { providerDraftConflicts } from '../../stores/provider-form'
+import { providerDraftAuxiliaryConflict } from '../../stores/provider-form'
+import ModelRolesSettingsSection from './ModelRolesSettingsSection.vue'
 import ProviderModelDeleteAction from './ProviderModelDeleteAction.vue'
 
 /** Maps each reasoning effort to its locale label key. */
@@ -90,31 +89,6 @@ const providerTypeOptions = computed(() => [
     value: 'generic.anthropic',
   },
 ])
-const reasoningHint = computed(() => {
-  switch (agent.providerForm.providerType) {
-    case 'deepseek.chat-completions':
-      return t('settings.reasoningHint')
-    case 'generic.responses':
-      return t('settings.reasoningHintResponses')
-    case 'generic.anthropic':
-      return t('settings.reasoningHintAnthropic')
-    case 'generic.chat-completions':
-      return t('settings.reasoningHintGeneric')
-    default:
-      return t('settings.reasoningHintGeneric')
-  }
-})
-const reasoningOptions = computed(() => {
-  const mainModel = agent.modelProfiles.find(
-    (model) => model.id === agent.providerForm.model,
-  )
-  return resolveSupportedReasoningEfforts({
-    reasoningEfforts: mainModel?.reasoningEfforts,
-  }).map((effort) => ({
-    label: t(REASONING_LABEL_KEYS[effort]),
-    value: effort,
-  }))
-})
 const reasoningEffortOptions = computed(() =>
   REASONING_EFFORTS.map((effort) => ({
     label: t(REASONING_LABEL_KEYS[effort]),
@@ -122,26 +96,22 @@ const reasoningEffortOptions = computed(() =>
   })),
 )
 /**
- * Draft conflicts that pause autosave: the main model annotation excluding
- * the draft default effort, or the saved auxiliary role being incompatible
- * with the draft. Neither is auto-adjusted; the user resolves them manually.
+ * A saved auxiliary route remains atomic while its Provider draft changes.
+ * Its explicit reasoning is not rewritten when annotations change.
  */
-const draftConflicts = computed(() =>
-  providerDraftConflicts({
+const draftConflict = computed(() =>
+  providerDraftAuxiliaryConflict({
     providerId: agent.providerForm.providerId,
-    reasoning: agent.providerForm.reasoning,
-    mainModelId: agent.providerForm.model,
     enabledModelIds: agent.providerForm.enabledModelIds,
     profiles: agent.modelProfiles,
     auxiliary: {
       providerId: agent.auxiliaryModelProvider,
       model: agent.auxiliaryModel,
+      reasoning: agent.auxiliaryModelReasoning,
     },
   }),
 )
-const autosaveConflict = computed(
-  () => draftConflicts.value.main || draftConflicts.value.auxiliary,
-)
+const autosaveConflict = computed(() => draftConflict.value.conflict)
 const capabilityOptions = computed(() => [
   { label: t('settings.capabilityLight'), value: 'light' },
   { label: t('settings.capabilityStandard'), value: 'standard' },
@@ -199,13 +169,6 @@ const manualModelValidation = computed(() => {
       manualModelDraft.contextWindowTokens - manualModelDraft.maxOutputTokens
   ) {
     return t('settings.modelConfigurationInvalid')
-  }
-  if (
-    !agent.providerForm.model &&
-    manualModelDraft.reasoningEfforts.length > 0 &&
-    !manualModelDraft.reasoningEfforts.includes(agent.providerForm.reasoning)
-  ) {
-    return t('settings.newMainModelReasoningConflict')
   }
   return ''
 })
@@ -337,66 +300,6 @@ function handleCapabilityChange(
   })
 }
 
-/** Encodes one provider+model pair as a role-select value. */
-function roleSelectValue(providerId: string, model: string): string {
-  return JSON.stringify([providerId, model])
-}
-
-const defaultModelRoleOptions = computed(() =>
-  agent.providers.flatMap((provider) =>
-    provider.enabledModelIds.map((model) => {
-      const compatibility = evaluateModelRouteCompatibility(provider, {
-        model,
-        reasoning: provider.reasoning,
-      })
-      return {
-        label: `${provider.label} / ${model}`,
-        value: roleSelectValue(provider.id, model),
-        disabled: !compatibility.ok,
-      }
-    }),
-  ),
-)
-const auxiliaryModelRoleOptions = computed(() => [
-  { label: t('settings.auxiliaryFollowDefault'), value: '' },
-  ...defaultModelRoleOptions.value,
-])
-const defaultModelRoleValue = computed(() => {
-  const provider = agent.providers.find(
-    (candidate) => candidate.id === agent.defaultModelProvider,
-  )
-  if (!provider) return null
-  const model = agent.defaultModel || provider.model || ''
-  if (
-    !evaluateModelRouteCompatibility(provider, {
-      model,
-      reasoning: provider.reasoning,
-    }).ok
-  ) {
-    return null
-  }
-  return roleSelectValue(provider.id, model)
-})
-const auxiliaryModelRoleValue = computed(() =>
-  agent.auxiliaryModel
-    ? roleSelectValue(agent.auxiliaryModelProvider, agent.auxiliaryModel)
-    : '',
-)
-
-function selectDefaultModelRole(value: string): void {
-  const [providerId, model] = JSON.parse(value) as [string, string]
-  void agent.setDefaultModelRole(providerId, model)
-}
-
-function selectAuxiliaryModelRole(value: string): void {
-  if (!value) {
-    void agent.setAuxiliaryModelRole('', '')
-    return
-  }
-  const [providerId, model] = JSON.parse(value) as [string, string]
-  void agent.setAuxiliaryModelRole(providerId, model)
-}
-
 onMounted(() => {
   void agent.enterProviderSettings()
 })
@@ -416,6 +319,7 @@ watch(
       auxiliary: {
         providerId: agent.auxiliaryModelProvider,
         model: agent.auxiliaryModel,
+        reasoning: agent.auxiliaryModelReasoning,
       },
     }),
   () => {
@@ -510,51 +414,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
       </div>
     </div>
 
-    <div class="settings-subsection">
-      <div class="settings-subsection-heading">
-        <h3>{{ t('settings.defaultModelsTitle') }}</h3>
-        <p>{{ t('settings.defaultModelsHint') }}</p>
-      </div>
-      <div class="settings-inline settings-inline-equal">
-        <label class="settings-field">
-          <span>{{ t('settings.defaultModelRole') }}</span>
-          <NSelect
-            data-testid="default-model-role-select"
-            :value="defaultModelRoleValue"
-            :options="defaultModelRoleOptions"
-            :placeholder="t('settings.selectMainModel')"
-            :disabled="agent.rolesSaving"
-            filterable
-            @update:value="selectDefaultModelRole"
-          />
-          <small>{{ t('settings.defaultModelRoleHint') }}</small>
-        </label>
-        <label class="settings-field">
-          <span>{{ t('settings.auxiliaryModelRole') }}</span>
-          <NSelect
-            :value="auxiliaryModelRoleValue"
-            :options="auxiliaryModelRoleOptions"
-            :disabled="agent.rolesSaving"
-            filterable
-            @update:value="selectAuxiliaryModelRole"
-          />
-          <small>{{ t('settings.auxiliaryModelRoleHint') }}</small>
-        </label>
-      </div>
-      <small
-        class="settings-save-status"
-        data-testid="model-roles-save-status"
-        aria-live="polite"
-      >
-        {{
-          agent.rolesSaving
-            ? t('settings.saving')
-            : agent.rolesSaveStatus === 'saved'
-              ? t('settings.saved')
-              : agent.rolesSaveStatus
-        }}
-      </small>
-    </div>
+    <ModelRolesSettingsSection />
 
     <div class="settings-subsection">
       <div class="settings-heading provider-settings-heading">
@@ -773,21 +633,6 @@ function handleDropdownSelect(key: string | number, providerId: string) {
         <p class="settings-footnote">
           {{ t('settings.tokenHint') }}
         </p>
-        <label class="settings-field">
-          <span>{{ t('settings.reasoning') }}</span>
-          <NSelect
-            v-model:value="agent.providerForm.reasoning"
-            :options="reasoningOptions"
-            :status="draftConflicts.main ? 'error' : undefined"
-          />
-          <small v-if="draftConflicts.main" class="settings-field-error">
-            {{ t('settings.mainReasoningConflictHint') }}
-          </small>
-          <small v-else>
-            {{ reasoningHint }}
-          </small>
-        </label>
-
         <div class="provider-model-settings">
           <div class="provider-model-settings-title">
             <div>
@@ -799,7 +644,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             </NButton>
           </div>
           <small
-            v-if="draftConflicts.auxiliaryReason === 'model-disabled'"
+            v-if="draftConflict.reason === 'model-disabled'"
             class="settings-field-error"
           >
             {{
@@ -809,7 +654,7 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             }}
           </small>
           <small
-            v-else-if="draftConflicts.auxiliary"
+            v-else-if="draftConflict.conflict"
             class="settings-field-error"
           >
             {{

@@ -3,7 +3,7 @@ import type { ModelCapabilityLevel, ReasoningEffort } from '../../shared/config'
 import type { UiModelProfile } from './agent-types'
 import {
   DEFAULT_PROVIDER_FORM,
-  providerDraftConflicts,
+  providerDraftAuxiliaryConflict,
   providerFormSignature,
   providerModelOverrides,
 } from './provider-form'
@@ -126,103 +126,82 @@ describe('provider form signature', () => {
   })
 })
 
-describe('providerDraftConflicts', () => {
+describe('providerDraftAuxiliaryConflict', () => {
   const profiles = [
     profile('main-model', 'provider', { reasoningEfforts: ['low', 'high'] }),
     profile('approver-model', 'provider', { reasoningEfforts: ['low'] }),
   ]
   const base = {
     providerId: 'provider-a',
-    reasoning: 'low' as ReasoningEffort,
-    mainModelId: 'main-model',
     enabledModelIds: ['main-model', 'approver-model'],
     profiles,
     auxiliary: {
       providerId: 'provider-a',
       model: 'approver-model',
+      reasoning: 'low' as ReasoningEffort,
     },
   }
 
   it('reports no conflicts when both routes are compatible', () => {
-    expect(providerDraftConflicts(base)).toEqual({
-      main: false,
-      auxiliary: false,
-      auxiliaryReason: null,
+    expect(providerDraftAuxiliaryConflict(base)).toEqual({
+      conflict: false,
+      reason: null,
     })
   })
 
-  it('flags main and auxiliary together when the effort excludes both annotations', () => {
-    expect(providerDraftConflicts({ ...base, reasoning: 'medium' })).toEqual({
-      main: true,
-      auxiliary: true,
-      auxiliaryReason: 'reasoning-unsupported',
-    })
-  })
-
-  it('flags auxiliary when the provider default effort is unsupported by its annotation', () => {
-    // The auxiliary route always follows the Provider default effort.
-    expect(providerDraftConflicts({ ...base, reasoning: 'high' })).toEqual({
-      main: false,
-      auxiliary: true,
-      auxiliaryReason: 'reasoning-unsupported',
-    })
-  })
-
-  it('accepts the provider default off effort for both routes', () => {
+  it('flags auxiliary when its explicit effort is unsupported', () => {
     expect(
-      providerDraftConflicts({
+      providerDraftAuxiliaryConflict({
         ...base,
-        reasoning: 'off',
+        auxiliary: { ...base.auxiliary, reasoning: 'high' },
+      }),
+    ).toEqual({
+      conflict: true,
+      reason: 'reasoning-unsupported',
+    })
+  })
+
+  it('accepts an explicit off effort when the auxiliary model supports it', () => {
+    expect(
+      providerDraftAuxiliaryConflict({
+        ...base,
         profiles: [
           profile('main-model', 'provider', { reasoningEfforts: ['off'] }),
           profile('approver-model', 'provider', { reasoningEfforts: ['off'] }),
         ],
+        auxiliary: { ...base.auxiliary, reasoning: 'off' },
       }),
     ).toEqual({
-      main: false,
-      auxiliary: false,
-      auxiliaryReason: null,
-    })
-  })
-
-  it('keeps main and auxiliary conflicts independent', () => {
-    expect(
-      providerDraftConflicts({
-        ...base,
-        reasoning: 'off',
-        enabledModelIds: ['main-model', 'approver-model'],
-      }),
-    ).toEqual({
-      main: true,
-      auxiliary: true,
-      auxiliaryReason: 'reasoning-unsupported',
+      conflict: false,
+      reason: null,
     })
   })
 
   it('flags auxiliary when the saved auxiliary model is disabled in the draft', () => {
     expect(
-      providerDraftConflicts({
+      providerDraftAuxiliaryConflict({
         ...base,
         enabledModelIds: ['main-model'],
       }),
     ).toEqual({
-      main: false,
-      auxiliary: true,
-      auxiliaryReason: 'model-disabled',
+      conflict: true,
+      reason: 'model-disabled',
     })
   })
 
   it('ignores the auxiliary role when another provider hosts it', () => {
     expect(
-      providerDraftConflicts({
+      providerDraftAuxiliaryConflict({
         ...base,
-        reasoning: 'high',
-        auxiliary: { providerId: 'provider-b', model: 'approver-model' },
+        auxiliary: {
+          providerId: 'provider-b',
+          model: 'approver-model',
+          reasoning: 'high',
+        },
       }),
     ).toEqual({
-      main: false,
-      auxiliary: false,
-      auxiliaryReason: null,
+      conflict: false,
+      reason: null,
     })
   })
 })

@@ -244,7 +244,6 @@ describe('SessionManager Provider completion validation', () => {
       baseURL: configuredProvider.baseURL,
       model: configuredProvider.model,
       enabledModelIds: [configuredProvider.model, 'legacy-transition-model'],
-      reasoning: configuredProvider.reasoning,
       limits: config.limits,
     })
     const provider = new ToolThenFinalProvider()
@@ -345,7 +344,7 @@ describe('SessionManager Provider completion validation', () => {
       modelSelection: {
         providerId: configuredProvider.id,
         model: 'legacy-transition-model',
-        reasoning: configuredProvider.reasoning,
+        reasoning: config.models.defaultModelReasoning,
       },
       goal: null,
       plan: null,

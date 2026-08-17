@@ -25,7 +25,7 @@ export {
   type ReasoningEffort,
 } from './reasoning'
 
-export const APP_CONFIG_SCHEMA_VERSION = 21 as const
+export const APP_CONFIG_SCHEMA_VERSION = 22 as const
 
 export const AssistantLanguageSchema = Type.Union([
   Type.Literal('zh-CN'),
@@ -156,7 +156,6 @@ export const ProviderPublicConfigSchema = Type.Object(
     }),
     baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
     model: Type.String({ maxLength: 256 }),
-    reasoning: ReasoningEffortSchema,
     modelCatalog: Type.Array(ProviderModelSchema, { maxItems: 1_000 }),
     modelCatalogFetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
     modelOverrides: Type.Record(
@@ -183,8 +182,10 @@ export const ModelRolesConfigSchema = Type.Object(
   {
     defaultModelProvider: Type.String({ minLength: 1, maxLength: 128 }),
     defaultModel: Type.String({ maxLength: 256 }),
+    defaultModelReasoning: ReasoningEffortSchema,
     auxiliaryModelProvider: Type.String({ maxLength: 128 }),
     auxiliaryModel: Type.String({ maxLength: 256 }),
+    auxiliaryModelReasoning: ReasoningEffortSchema,
   },
   { additionalProperties: false },
 )
@@ -505,7 +506,7 @@ export function getDefaultModelSelection(config: PublicConfig): {
   return {
     providerId: provider.id,
     model: config.models.defaultModel || provider.model,
-    reasoning: provider.reasoning,
+    reasoning: config.models.defaultModelReasoning,
   }
 }
 
@@ -526,7 +527,7 @@ export function getAuxiliaryModelSelection(config: PublicConfig):
   return {
     providerId: provider.id,
     model,
-    reasoning: provider.reasoning,
+    reasoning: config.models.auxiliaryModelReasoning,
   }
 }
 
@@ -600,7 +601,6 @@ export const ConfigSetRequestSchema = Type.Union([
           { maxProperties: 1_000 },
         ),
       ),
-      reasoning: ReasoningEffortSchema,
     },
     { additionalProperties: false },
   ),
@@ -641,7 +641,6 @@ export const ConfigSetRequestSchema = Type.Union([
           { maxProperties: 1_000 },
         ),
       ),
-      reasoning: ReasoningEffortSchema,
       limits: PublicConfigSchema.properties.limits,
       apiKey: Type.Optional(Type.String({ minLength: 1, maxLength: 16_384 })),
     },

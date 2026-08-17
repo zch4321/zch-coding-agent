@@ -217,7 +217,6 @@ async function createConfig(root: string): Promise<ConfigStore> {
     baseURL: provider.baseURL,
     model: 'deepseek-v4-pro',
     enabledModelIds: ['deepseek-v4-pro'],
-    reasoning: provider.reasoning,
     limits: store.getPublicConfig().limits,
   })
   await store.update({
@@ -363,7 +362,7 @@ describe('durable backend runtime', () => {
       modelSelection: {
         providerId: store.getPublicConfig().models.defaultModelProvider,
         model: store.getPublicConfig().models.providers[0]!.model,
-        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
+        reasoning: store.getPublicConfig().models.defaultModelReasoning,
       },
       message: 'first durable question',
       clientRequestId: 'request:lazy-first',
@@ -474,7 +473,7 @@ describe('durable backend runtime', () => {
       modelSelection: {
         providerId: store.getPublicConfig().models.defaultModelProvider,
         model: store.getPublicConfig().models.providers[0]!.model,
-        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
+        reasoning: store.getPublicConfig().models.defaultModelReasoning,
       },
       goal: {
         id: 'goal:retry',
@@ -597,7 +596,7 @@ describe('durable backend runtime', () => {
     const modelSelection = {
       providerId: store.getPublicConfig().models.defaultModelProvider,
       model: store.getPublicConfig().models.providers[0]!.model,
-      reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
+      reasoning: store.getPublicConfig().models.defaultModelReasoning,
     }
 
     await expect(
@@ -668,7 +667,7 @@ describe('durable backend runtime', () => {
       modelSelection: {
         providerId: store.getPublicConfig().models.defaultModelProvider,
         model: store.getPublicConfig().models.providers[0]!.model,
-        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
+        reasoning: store.getPublicConfig().models.defaultModelReasoning,
       },
       message: 'show runtime state',
       clientRequestId: 'request:runtime',
@@ -747,7 +746,7 @@ describe('durable backend runtime', () => {
       modelSelection: {
         providerId: store.getPublicConfig().models.defaultModelProvider,
         model: store.getPublicConfig().models.providers[0]!.model,
-        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
+        reasoning: store.getPublicConfig().models.defaultModelReasoning,
       },
       message: 'history that must be replaced',
       clientRequestId: 'request:before-compact',
@@ -871,7 +870,7 @@ describe('durable backend runtime', () => {
       modelSelection: {
         providerId: store.getPublicConfig().models.defaultModelProvider,
         model: store.getPublicConfig().models.providers[0]!.model,
-        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
+        reasoning: store.getPublicConfig().models.defaultModelReasoning,
       },
       message: 'history survives compact failure',
       clientRequestId: 'request:failed-compact-history',
@@ -979,7 +978,7 @@ describe('durable backend runtime', () => {
       modelSelection: {
         providerId: store.getPublicConfig().models.defaultModelProvider,
         model: store.getPublicConfig().models.providers[0]!.model,
-        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
+        reasoning: store.getPublicConfig().models.defaultModelReasoning,
       },
       message: 'history before pure compact',
       clientRequestId: 'request:pure-compact-seed',
@@ -1057,7 +1056,7 @@ describe('durable backend runtime', () => {
       modelSelection: {
         providerId: store.getPublicConfig().models.defaultModelProvider,
         model: store.getPublicConfig().models.providers[0]!.model,
-        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
+        reasoning: store.getPublicConfig().models.defaultModelReasoning,
       },
       message: 'history survives durable compact abort',
       clientRequestId: 'request:abort-compact-seed',
@@ -1124,7 +1123,7 @@ describe('durable backend runtime', () => {
       modelSelection: {
         providerId: store.getPublicConfig().models.defaultModelProvider,
         model: store.getPublicConfig().models.providers[0]!.model,
-        reasoning: store.getPublicConfig().models.providers[0]!.reasoning,
+        reasoning: store.getPublicConfig().models.defaultModelReasoning,
       },
       message: 'seed before rejected commands',
       clientRequestId: 'request:rejected-seed',

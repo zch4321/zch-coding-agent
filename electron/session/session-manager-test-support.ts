@@ -117,7 +117,6 @@ export async function createConfig(
     baseURL: provider.baseURL,
     model: 'deepseek-v4-pro',
     enabledModelIds: ['deepseek-v4-pro'],
-    reasoning: provider.reasoning,
     limits: store.getPublicConfig().limits,
   })
   await store.update({
@@ -126,8 +125,10 @@ export async function createConfig(
     value: {
       defaultModelProvider: provider.id,
       defaultModel: 'deepseek-v4-pro',
+      defaultModelReasoning: 'high',
       auxiliaryModelProvider: provider.id,
       auxiliaryModel: 'deepseek-v4-pro',
+      auxiliaryModelReasoning: 'high',
     },
   })
   await store.update({

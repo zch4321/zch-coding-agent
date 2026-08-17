@@ -29,7 +29,6 @@ describe('SessionManager context-limit boundary', () => {
         kind: 'provider-settings',
         baseURL: 'https://api.deepseek.com',
         model: 'deepseek-v4-pro',
-        reasoning: 'off',
         contextWindowTokens: 2_048,
         compactThresholdTokens: 1_024,
         maxOutputTokens: 1_024,

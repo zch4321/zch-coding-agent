@@ -22,7 +22,6 @@ function provider(): ProviderPublicConfig {
     revision: 1,
     baseURL: 'https://provider.example/v1',
     model: 'enabled-model',
-    reasoning: 'off',
     modelCatalog: [{ id: 'enabled-model' }, { id: 'catalog-only-model' }],
     modelOverrides: {},
     enabledModelIds: ['enabled-model'],

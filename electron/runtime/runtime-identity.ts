@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
-import type { PublicConfig } from '../../shared/config'
+import {
+  getDefaultModelSelection,
+  type PublicConfig,
+} from '../../shared/config'
 import type { RuntimeIdentity } from '../../shared/runtime-identity'
 import type { AgentRuntime } from './agent-runtime'
 
@@ -27,9 +30,10 @@ export function createRuntimeIdentity(input: {
   nodeVersion?: string
   swarmsEnabled?: boolean
 }): RuntimeIdentity {
+  const selection = getDefaultModelSelection(input.config)
   const provider =
     input.config.models.providers.find(
-      (candidate) => candidate.id === input.config.models.defaultModelProvider,
+      (candidate) => candidate.id === selection.providerId,
     ) ?? input.config.models.providers[0]!
   const swarmsEnabled = input.swarmsEnabled ?? false
   const toolDefinitions = input.runtime.services.sessions
@@ -56,8 +60,8 @@ export function createRuntimeIdentity(input: {
     provider: {
       id: provider.id,
       providerType: provider.providerType,
-      model: provider.model,
-      reasoning: provider.reasoning,
+      model: selection.model,
+      reasoning: selection.reasoning,
     },
     budgets: {
       maxStepsPerRun: input.config.limits.maxStepsPerRun,

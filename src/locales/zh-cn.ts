@@ -350,10 +350,13 @@ const zhCN = {
     defaultModelsHint:
       '主模型是新对话的默认执行模型；辅助模型用于对话自动起名和自动权限审批等后台任务。',
     defaultModelRole: '主模型',
-    defaultModelRoleHint: '新对话默认使用该模型；对话内仍可临时切换。',
+    defaultModelRoleHint:
+      '新对话默认使用该模型与思考深度；对话内仍可临时切换。',
     auxiliaryModelRole: '辅助模型',
     auxiliaryModelRoleHint:
-      '用于对话自动起名和自动权限审批；未配置时使用当前模型。建议选择便宜快速的模型。',
+      '用于对话自动起名和自动权限审批；未配置时使用当前模型及其思考深度。建议选择便宜快速的模型。',
+    modelRoleReasoningConflictHint:
+      '当前模型不支持这个思考深度，请选择该模型支持的档位后保存。',
     auxiliaryFollowDefault: '跟随当前模型（默认）',
     providerConfigTitle: '供应商配置',
     providerHint: '配置可复用的模型服务、启用模型和凭据；修改会自动保存。',
@@ -390,8 +393,6 @@ const zhCN = {
     modelNameTooLong: '模型名称不能超过 256 个字符。',
     modelAlreadyExists: '该模型已在列表中。',
     modelConfigurationInvalid: '请检查上下文、压缩阈值和最大输出长度。',
-    newMainModelReasoningConflict:
-      '该模型将成为主模型，其思考档位必须包含当前 Provider 默认档位。',
     modelActions: '操作',
     deleteModelText:
       '删除模型 {model} 的本地目录记录、启用状态和配置？如果 Provider 仍返回它，下次刷新会重新加入。',
@@ -427,19 +428,10 @@ const zhCN = {
     reasoningHigh: '高',
     reasoningXhigh: '超高',
     reasoningMax: '最高',
-    mainReasoningConflictHint:
-      '主模型的思考档位标注已不包含当前默认档位；自动保存已暂停，请手动改选受支持的档位。',
     auxiliaryDraftConflictHint:
       '已保存的辅助模型 {model} 与当前 Provider 草稿不兼容；自动保存已暂停，请先调整标注或辅助模型。',
     auxiliaryDraftModelDisabledHint:
       '已保存的辅助模型 {model} 已不在当前 Provider 草稿的启用模型中；自动保存已暂停，请重新启用或改选辅助模型。',
-    reasoningHint:
-      '所选档位会原样发送给模型；在模型行中标注思考档位可收窄可选范围，关闭会禁用 thinking。',
-    reasoningHintGeneric: '通用 Chat Completions 不发送厂商专有推理参数。',
-    reasoningHintResponses:
-      'Responses 会发送 reasoning effort，并在本地无状态回放加密 reasoning items。',
-    reasoningHintAnthropic:
-      '所有非关闭档位都会使用 adaptive thinking；旧模型或兼容代理请设为关闭。',
     apiKey: 'API Key',
     apiKeyPlaceholder: '输入新的 Key',
     modelRefreshCredentialHint: '填写 API Key 后会自动保存并刷新模型目录。',

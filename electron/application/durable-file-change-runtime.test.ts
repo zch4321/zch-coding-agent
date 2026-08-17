@@ -445,7 +445,7 @@ async function startFileRun(
     modelSelection: {
       providerId: provider.id,
       model: provider.model,
-      reasoning: provider.reasoning,
+      reasoning: setup.store.getPublicConfig().models.defaultModelReasoning,
     },
     message: 'Apply the requested file mutation',
     clientRequestId: `request:${sessionId}`,

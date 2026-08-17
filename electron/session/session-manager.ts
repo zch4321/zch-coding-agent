@@ -1,5 +1,6 @@
 import path from 'node:path'
 import {
+  getDefaultModelSelection,
   getProviderConfig,
   type PermissionMode,
   type ProviderPublicConfig,
@@ -403,11 +404,15 @@ export class SessionManager {
     if (this.#sessions.has(sessionId)) {
       ipcFault('CONFLICT', 'Session already exists in the live registry')
     }
+    const defaultSelection = getDefaultModelSelection(publicConfig)
     const initialModelSelection = structuredClone(
       input.modelSelection ?? {
         providerId: provider.id,
-        model: provider.model,
-        reasoning: provider.reasoning,
+        model:
+          provider.id === defaultSelection.providerId
+            ? defaultSelection.model
+            : provider.model,
+        reasoning: defaultSelection.reasoning,
       },
     )
     const sessionRef: { current?: SessionState } = {}

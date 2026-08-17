@@ -235,7 +235,6 @@ describe('read-only Subagent runtime', () => {
         providerId: configured.id,
         baseURL: configured.baseURL,
         model: 'hot-swapped-model',
-        reasoning: configured.reasoning,
       })
     })
     const events: AgentEvent[] = []

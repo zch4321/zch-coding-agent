@@ -5,7 +5,6 @@ import {
   PermissionModeSchema,
   ProviderTypeSchema,
   PublicConfigSchema,
-  ReasoningEffortSchema,
   RememberedRuleSchema,
   type ProviderPublicConfig,
   type PublicConfig,
@@ -29,7 +28,6 @@ export const AppProviderConfigSchema = Type.Object(
     }),
     baseURL: Type.String({ minLength: 1, maxLength: 2048 }),
     model: Type.String({ maxLength: 256 }),
-    reasoning: ReasoningEffortSchema,
     modelCatalog: Type.Array(
       PublicConfigSchema.properties.models.properties.providers.items.properties
         .modelCatalog.items,
@@ -111,8 +109,10 @@ export const DEFAULT_APP_CONFIG = {
   models: {
     defaultModelProvider: DEFAULT_PROVIDER_ID,
     defaultModel: '',
+    defaultModelReasoning: 'high',
     auxiliaryModelProvider: '',
     auxiliaryModel: '',
+    auxiliaryModelReasoning: 'high',
     providers: [
       {
         id: DEFAULT_PROVIDER_ID,
@@ -124,7 +124,6 @@ export const DEFAULT_APP_CONFIG = {
         modelCatalog: [],
         modelOverrides: {},
         enabledModelIds: [],
-        reasoning: 'high',
       },
     ],
     modelPool: {
@@ -275,8 +274,10 @@ export function toPublicConfig(
     models: {
       defaultModelProvider: config.models.defaultModelProvider,
       defaultModel: config.models.defaultModel,
+      defaultModelReasoning: config.models.defaultModelReasoning,
       auxiliaryModelProvider: config.models.auxiliaryModelProvider,
       auxiliaryModel: config.models.auxiliaryModel,
+      auxiliaryModelReasoning: config.models.auxiliaryModelReasoning,
       providers: config.models.providers.map((provider) => ({
         id: provider.id,
         label: provider.label,
@@ -284,7 +285,6 @@ export function toPublicConfig(
         revision: provider.revision,
         baseURL: provider.baseURL,
         model: provider.model,
-        reasoning: provider.reasoning,
         modelCatalog: structuredClone(provider.modelCatalog),
         modelCatalogFetchedAt: provider.modelCatalogFetchedAt,
         modelOverrides: structuredClone(provider.modelOverrides),

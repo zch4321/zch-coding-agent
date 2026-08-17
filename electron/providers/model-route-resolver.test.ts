@@ -135,10 +135,10 @@ describe('resolveRunRoutes', () => {
     expect(getProviderApiKeyForRevision).not.toHaveBeenCalled()
   })
 
-  it('freezes the exact endpoint and uses the provider default reasoning for approval', async () => {
+  it('freezes the endpoint and uses the auxiliary role reasoning for approval', async () => {
     const config = configuredAppConfig()
     config.models.providers[0]!.baseURL = 'https://provider.example/v1/'
-    config.models.providers[0]!.reasoning = 'high'
+    config.models.auxiliaryModelReasoning = 'high'
     const store = {
       getPublicConfig: () => toPublicConfig(config, true),
       getProviderApiKeyForRevision: vi.fn(async () => 'secret'),

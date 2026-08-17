@@ -101,7 +101,6 @@ export async function configureApp(input: {
         },
         contextWindowTokens: null,
         maxOutputTokens: null,
-        reasoning: 'off',
         limits: current.value.config.limits,
         apiKey: 'e2e-provider-key',
       })
@@ -119,8 +118,10 @@ export async function configureApp(input: {
         value: {
           defaultModelProvider: 'deepseek',
           defaultModel: 'e2e-functional-model',
+          defaultModelReasoning: 'off',
           auxiliaryModelProvider: '',
           auxiliaryModel: '',
+          auxiliaryModelReasoning: 'off',
         },
       })
       if (!models.ok) {

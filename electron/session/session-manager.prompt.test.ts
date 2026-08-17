@@ -144,7 +144,7 @@ describe('SessionManager prompt and trace', () => {
     const modelSelection = {
       providerId: providerConfig.id,
       model: providerConfig.model,
-      reasoning: providerConfig.reasoning,
+      reasoning: config.models.defaultModelReasoning,
     }
     const routes = await resolveModelRoutePairFromConfig(
       store,
@@ -421,7 +421,6 @@ describe('SessionManager prompt and trace', () => {
         kind: 'provider',
         baseURL: initial.baseURL,
         model: 'next-run-model',
-        reasoning: initial.reasoning,
       })
     })
     const sent: AgentEventEnvelope[] = []
@@ -496,7 +495,6 @@ describe('SessionManager prompt and trace', () => {
       providerType: 'generic.chat-completions',
       baseURL: 'https://generic.invalid/v1',
       model: 'generic-model',
-      reasoning: 'off',
     })
     await store.update({
       version: 1,

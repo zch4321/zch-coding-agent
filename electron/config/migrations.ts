@@ -424,6 +424,46 @@ const LegacyAppConfigV20Schema = Type.Object(
 type LegacyAppConfigV20 = Static<typeof LegacyAppConfigV20Schema>
 const validateLegacyAppConfigV20 = compileSchema(LegacyAppConfigV20Schema)
 
+// AppConfig v21 unified model roles, Providers, and the model pool under one
+// models section. Provider-level reasoning was still inherited by both roles.
+const LegacyModelsConfigV21Schema = Type.Object(
+  {
+    defaultModelProvider: Type.String({ minLength: 1, maxLength: 128 }),
+    defaultModel: Type.String({ maxLength: 256 }),
+    auxiliaryModelProvider: Type.String({ maxLength: 128 }),
+    auxiliaryModel: Type.String({ maxLength: 256 }),
+    providers: Type.Array(LegacyAppProviderConfigV15Schema, {
+      minItems: 1,
+      maxItems: 32,
+    }),
+    modelPool: ModelPoolConfigSchema,
+  },
+  { additionalProperties: false },
+)
+
+const LegacyAppConfigV21Schema = Type.Object(
+  {
+    schemaVersion: Type.Literal(21),
+    models: LegacyModelsConfigV21Schema,
+    subagents: PublicConfigSchema.properties.subagents,
+    executionEnvironment: PublicConfigSchema.properties.executionEnvironment,
+    permission: PublicConfigSchema.properties.permission,
+    limits: PublicConfigSchema.properties.limits,
+    logging: PublicConfigSchema.properties.logging,
+    privacy: PublicConfigSchema.properties.privacy,
+    workspace: PublicConfigSchema.properties.workspace,
+    skills: PublicConfigSchema.properties.skills,
+    assistant: PublicConfigSchema.properties.assistant,
+    prompts: PublicConfigSchema.properties.prompts,
+    network: PublicConfigSchema.properties.network,
+    webSearch: LegacyAppWebSearchConfigV15Schema,
+    mcpServers: Type.Array(McpServerConfigSchema, { maxItems: 32 }),
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV21 = Static<typeof LegacyAppConfigV21Schema>
+const validateLegacyAppConfigV21 = compileSchema(LegacyAppConfigV21Schema)
+
 const LegacyAppProviderConfigV14Schema = Type.Object(
   {
     ...withoutKey(
@@ -544,6 +584,16 @@ interface LegacyModelRolesSource {
   }
 }
 
+type LegacyReasoningProvider = AppConfig['models']['providers'][number] & {
+  reasoning: ReasoningEffort
+}
+
+function migrateProvider(
+  provider: LegacyReasoningProvider,
+): AppConfig['models']['providers'][number] {
+  return structuredClone(withoutKey(provider, 'reasoning'))
+}
+
 /** Removes the retired top-level model-role fields from a legacy config. */
 function withoutLegacyModelRoleFields<Value extends Record<string, unknown>>(
   config: Value,
@@ -559,24 +609,31 @@ function withoutLegacyModelRoleFields<Value extends Record<string, unknown>>(
   >
 }
 
-/** Assembles the unified v21 models section from legacy role fields. */
+/** Assembles current model roles and strips retired Provider reasoning. */
 function migrateModelsSection(
   legacy: LegacyModelRolesSource,
-  providers: AppConfig['models']['providers'],
+  providers: LegacyReasoningProvider[],
   modelPool: AppConfig['models']['modelPool'],
 ): AppConfig['models'] {
   const defaultProvider =
     providers.find((provider) => provider.id === legacy.activeProviderId) ??
     providers[0] ??
-    DEFAULT_APP_CONFIG.models.providers[0]
+    undefined
+  const auxiliaryProvider = providers.find(
+    (provider) => provider.id === legacy.approval.approverProviderId,
+  )
+  const defaultModelReasoning = defaultProvider?.reasoning ?? 'high'
   return {
     defaultModelProvider: defaultProvider?.id ?? DEFAULT_PROVIDER_ID,
     defaultModel: defaultProvider?.model ?? '',
+    defaultModelReasoning,
     auxiliaryModelProvider: legacy.approval.approverModel
       ? legacy.approval.approverProviderId
       : '',
     auxiliaryModel: legacy.approval.approverModel,
-    providers: structuredClone(providers),
+    auxiliaryModelReasoning:
+      auxiliaryProvider?.reasoning ?? defaultModelReasoning,
+    providers: providers.map(migrateProvider),
     modelPool,
   }
 }
@@ -895,6 +952,39 @@ function migrateV20(config: LegacyAppConfigV20): AppConfig {
   return structuredClone(migrated as AppConfig)
 }
 
+function migrateV21(config: LegacyAppConfigV21): AppConfig {
+  const defaultProvider =
+    config.models.providers.find(
+      (provider) => provider.id === config.models.defaultModelProvider,
+    ) ?? config.models.providers[0]
+  const auxiliaryProvider = config.models.providers.find(
+    (provider) => provider.id === config.models.auxiliaryModelProvider,
+  )
+  const defaultModelReasoning = defaultProvider?.reasoning ?? 'high'
+  const migrated = {
+    ...config,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    models: {
+      defaultModelProvider: config.models.defaultModelProvider,
+      defaultModel: config.models.defaultModel,
+      defaultModelReasoning,
+      auxiliaryModelProvider: config.models.auxiliaryModelProvider,
+      auxiliaryModel: config.models.auxiliaryModel,
+      auxiliaryModelReasoning:
+        auxiliaryProvider?.reasoning ?? defaultModelReasoning,
+      providers: config.models.providers.map(migrateProvider),
+      modelPool: structuredClone(config.models.modelPool),
+    },
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      21,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
 /** Reports that a persisted configuration uses an unsupported schema version. */
 export class UnsupportedConfigSchemaError extends Error {
   constructor(
@@ -1078,6 +1168,16 @@ export function migrateConfig(candidate: unknown): AppConfig {
       )
     }
     return migrateV20(candidate as LegacyAppConfigV20)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') === 21) {
+    if (!validateLegacyAppConfigV21(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        21,
+        formatSchemaErrors(validateLegacyAppConfigV21.errors),
+      )
+    }
+    return migrateV21(candidate as LegacyAppConfigV21)
   }
 
   if (Reflect.get(candidate, 'schemaVersion') !== APP_CONFIG_SCHEMA_VERSION) {

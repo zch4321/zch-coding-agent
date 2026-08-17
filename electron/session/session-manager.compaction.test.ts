@@ -21,6 +21,26 @@ import {
   waitFor,
 } from './session-manager-test-support'
 
+/** Selects the exact main route used by compaction threshold fixtures. */
+async function selectCompactionModel(
+  store: Awaited<ReturnType<typeof createConfig>>,
+  model: string,
+): Promise<void> {
+  const roles = store.getPublicConfig().models
+  await store.update({
+    version: 1,
+    kind: 'models',
+    value: {
+      defaultModelProvider: roles.defaultModelProvider,
+      defaultModel: model,
+      defaultModelReasoning: 'off',
+      auxiliaryModelProvider: roles.auxiliaryModelProvider,
+      auxiliaryModel: roles.auxiliaryModel,
+      auxiliaryModelReasoning: roles.auxiliaryModelReasoning,
+    },
+  })
+}
+
 describe('SessionManager compaction', () => {
   it('orders manual /compact follow-up after the compact summary', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-compact-'))
@@ -347,7 +367,6 @@ describe('SessionManager compaction', () => {
       kind: 'provider-settings',
       baseURL: 'https://api.deepseek.com',
       model: 'auto-compact-test-model',
-      reasoning: 'off',
       contextWindowTokens: 160_000,
       compactThresholdTokens: 1_024,
       maxOutputTokens: 8_000,
@@ -357,6 +376,7 @@ describe('SessionManager compaction', () => {
         tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
       },
     })
+    await selectCompactionModel(store, 'auto-compact-test-model')
     const provider = new AutoCompactProvider()
     const sent: AgentEventEnvelope[] = []
     const manager = new SessionManager({
@@ -532,12 +552,12 @@ describe('SessionManager compaction', () => {
       kind: 'provider-settings',
       baseURL: 'https://api.deepseek.com',
       model: 'tool-result-compact-model',
-      reasoning: 'off',
       contextWindowTokens: 160_000,
       compactThresholdTokens: 1_024,
       maxOutputTokens: 8_000,
       limits: current.limits,
     })
+    await selectCompactionModel(store, 'tool-result-compact-model')
     const provider = new ToolBatchAutoCompactProvider()
     const sent: AgentEventEnvelope[] = []
     const manager = new SessionManager({
@@ -599,7 +619,6 @@ describe('SessionManager compaction', () => {
         'transition-model-a',
         'transition-model-b',
       ],
-      reasoning: 'off',
       limits: current.limits,
     })
     const provider = new CompactProvider()
@@ -715,7 +734,6 @@ describe('SessionManager compaction', () => {
         'rollback-model-a',
         'rollback-model-b',
       ],
-      reasoning: 'off',
       limits: current.limits,
     })
     const provider = new CompactProvider()
@@ -829,7 +847,6 @@ describe('SessionManager compaction', () => {
       kind: 'provider-settings',
       baseURL: 'https://api.deepseek.com',
       model: 'deepseek-v4-pro',
-      reasoning: 'off',
       contextWindowTokens: 160_000,
       compactThresholdTokens: 100_000,
       maxOutputTokens: 8_000,
@@ -917,7 +934,6 @@ describe('SessionManager compaction', () => {
       kind: 'provider-settings',
       baseURL: 'https://api.deepseek.com',
       model: 'interjection-compact-test-model',
-      reasoning: 'off',
       contextWindowTokens: 160_000,
       compactThresholdTokens: 1_024,
       maxOutputTokens: 8_000,
@@ -926,6 +942,7 @@ describe('SessionManager compaction', () => {
         tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
       },
     })
+    await selectCompactionModel(store, 'interjection-compact-test-model')
     const provider = new InterjectedAutoCompactProvider()
     const sent: AgentEventEnvelope[] = []
     const manager = new SessionManager({

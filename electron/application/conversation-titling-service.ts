@@ -161,11 +161,7 @@ export class ConversationTitlingService {
       options.createProvider ??
       ((route) =>
         createConfiguredProvider(
-          {
-            ...route.provider,
-            model: route.snapshot.model,
-            reasoning: route.snapshot.reasoning,
-          },
+          route.provider,
           route.apiKey,
           options.fetchImpl,
           route.snapshot.endpoint,
