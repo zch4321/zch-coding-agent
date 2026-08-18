@@ -259,3 +259,11 @@
 - 设置边界：模型页的主/辅助模型各显示模型与思考深度。思考选项取对应模型的 `reasoningEfforts` 标注；切换模型造成暂时不兼容时只保留本地组合并提示用户选择，不写入半条 route。Provider 页删除默认思考深度字段；修改模型标注若破坏已保存辅助 route，仍暂停 Provider 自动保存。
 - 迁移：v21→v22 分别读取主/辅助角色所引用 Provider 的旧 reasoning，写入两个角色后删除所有 Provider reasoning，从而保持升级前实际调用等级。v9–v20 直接迁移得到相同结果；已经在 v21 丢弃的旧 approval 独立 reasoning 不尝试恢复。Headless 外部 v4 的可选 reasoning 保持不变，只在构造内部 v22 配置时映射到主角色。
 - 理由：reasoning 是一次模型 route 的属性，不是 Provider 连接属性。把它放在 Provider 上会让主对话、审批和起名共享隐含默认值，任一 Provider 编辑都会跨职责改变调用成本与行为；精确角色使 UI、持久化和冻结路由使用同一份显式事实。
+
+## 2026-08-18 — Shared Config 按八个领域拆分
+
+- 状态：已采纳并实现；这是代码所有权重构，不改变产品配置语义。
+- 领域边界：配置叶模块固定为 application、assistant、integrations、models、network、providers、runtime、security。`models` 可以组合 Provider 与既有 model-pool 原语；其他领域只依赖 process-neutral 的共享原语。领域叶模块不得导入兼容出口、根组合器或 transport 组合器。
+- 组合边界：`shared/config/public-config.ts` 是 AppConfig 版本、`PublicConfigSchema` 与整配置查询 helper 的唯一根组合点。`shared/config/config-requests.ts` 暂时保留 `ConfigSection` 和 `ConfigSetRequest`，明确属于待 IPC 领域化时迁出的 transport 组合，不作为第九个配置领域。
+- 兼容边界：`shared/config.ts` 继续导出拆分前的全部公开符号，避免要求现有调用方在同一提交中机械迁移；新增领域代码直接导入 `shared/config/<domain>`。兼容出口不被领域模块反向依赖，待调用方自然收敛后再单独评估删除。
+- 契约边界：AppConfig 保持 v22，不增加迁移；`PublicConfigSchema` 与 `ConfigSetRequestSchema` 的序列化指纹保持不变。测试同时锁定 wire 指纹、兼容导出对象身份和八领域到根 schema 的组合关系。

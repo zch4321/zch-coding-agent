@@ -11,10 +11,10 @@ import {
 import {
   ConfigSectionSchema,
   ConfigSetRequestSchema,
-  ModelCapabilityLevelSchema,
-  PublicConfigSchema,
-  ReasoningEffortSchema,
-} from './config'
+} from './config/config-requests'
+import { ModelCapabilityLevelSchema } from './config/providers'
+import { PublicConfigSchema } from './config/public-config'
+import { ReasoningEffortSchema } from './reasoning'
 import {
   AgentExecutionIdSchema,
   CallIdSchema,

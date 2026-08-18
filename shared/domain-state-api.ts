@@ -1,6 +1,6 @@
 import { Type, type Static, type TSchema } from '@sinclair/typebox'
 import { IPC_VERSION } from './channels'
-import { PermissionModeSchema } from './config'
+import { PermissionModeSchema } from './config/security'
 import {
   BackendEventSequenceSchema,
   ClientRequestIdSchema,

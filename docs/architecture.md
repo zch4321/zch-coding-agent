@@ -112,11 +112,24 @@ shared/
   file-change.ts          # FileChangeSummary IPC schema
   runtime-events.ts       # ephemeral Run/stream events
   ipc-contract.ts
-  config.ts
+  config.ts               # 旧导入路径的兼容出口
+  config/
+    application.ts        # logging / workspace
+    assistant.ts          # language / preferences / prompts
+    integrations.ts       # skills / web search / MCP
+    models.ts             # 主辅模型角色与模型池组合
+    network.ts            # proxy / network
+    providers.ts          # Provider、目录与模型能力标注
+    runtime.ts            # subagents / shell / limits / token estimation
+    security.ts           # permission / privacy
+    public-config.ts      # AppConfig 版本与八领域根组合
+    config-requests.ts    # IPC 拆分前的 config:set 过渡组合
   ids.ts
 ```
 
 `shared/` 不导入 Electron、Node.js、Vue、Pinia、SQLite driver 或 provider implementation。
+
+配置契约固定分为 application、assistant、integrations、models、network、providers、runtime、security 八个领域。领域叶模块可以依赖已有共享原语，models 可以组合 providers，但不得反向导入 `shared/config.ts`、根 `public-config.ts` 或 transport 组合。`public-config.ts` 是唯一 AppConfig 版本与根结构组合点；`config-requests.ts` 暂时承载尚未随 IPC 拆分迁出的写入 union，不计作配置领域。`shared/config.ts` 只保留既有导出兼容面，新代码应直接依赖所属领域。领域拆分本身不得改变 schemaVersion、持久化形状或 IPC wire schema。
 
 ### 3.2 `electron/`
 

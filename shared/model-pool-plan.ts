@@ -1,5 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox'
-import { ModelCapabilityLevelSchema } from './config'
+import { ModelCapabilityLevelSchema } from './config/providers'
 import { ModelRouteSnapshotSchema } from './model-route'
 import { ReasoningEffortSchema } from './reasoning'
 

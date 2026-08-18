@@ -22,6 +22,16 @@ const WIRE_FREE_ROOTS = [
   'src',
   'shared',
 ]
+const CONFIG_DOMAIN_FILES = [
+  'application.ts',
+  'assistant.ts',
+  'integrations.ts',
+  'models.ts',
+  'network.ts',
+  'providers.ts',
+  'runtime.ts',
+  'security.ts',
+]
 const PROVIDER_IMPORT = /(?:^|\/)providers?(?:\/|$)|provider(?:\.ts)?$/u
 const CHAT_WIRE_IDENTIFIER =
   /\b(?:ProviderMessage|ProviderAssistantTurn|reasoning_content|tool_call_id|tool_calls)\b/u
@@ -90,6 +100,59 @@ describe('architecture import boundaries', () => {
     ).flatMap(({ filePath, imports: specifiers }) =>
       specifiers
         .filter(isForbiddenSharedImport)
+        .map((specifier) => `${relative(filePath)} -> ${specifier}`),
+    )
+
+    expect(violations).toEqual([])
+  })
+
+  it('keeps config domains independent from root and compatibility composers', async () => {
+    const violations = (
+      await Promise.all(
+        CONFIG_DOMAIN_FILES.map(async (fileName) => {
+          const filePath = path.resolve('shared/config', fileName)
+          return {
+            filePath,
+            imports: await imports(filePath),
+          }
+        }),
+      )
+    ).flatMap(({ filePath, imports: specifiers }) =>
+      specifiers
+        .filter(
+          (specifier) =>
+            specifier === '../config' ||
+            specifier === './public-config' ||
+            specifier === './config-requests',
+        )
+        .map((specifier) => `${relative(filePath)} -> ${specifier}`),
+    )
+
+    expect(violations).toEqual([])
+  })
+
+  it('keeps shared production contracts off the config compatibility facade', async () => {
+    const facadePath = path.resolve('shared/config')
+    const facadeFilePath = path.resolve('shared/config.ts')
+    const violations = (
+      await Promise.all(
+        (await sourceFiles(path.resolve('shared')))
+          .filter(
+            (filePath) =>
+              isProductionFile(filePath) && filePath !== facadeFilePath,
+          )
+          .map(async (filePath) => ({
+            filePath,
+            imports: await imports(filePath),
+          })),
+      )
+    ).flatMap(({ filePath, imports: specifiers }) =>
+      specifiers
+        .filter(
+          (specifier) =>
+            specifier.startsWith('.') &&
+            path.resolve(path.dirname(filePath), specifier) === facadePath,
+        )
         .map((specifier) => `${relative(filePath)} -> ${specifier}`),
     )
 

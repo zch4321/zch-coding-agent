@@ -1,5 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox'
-import { PermissionModeSchema } from './config'
+import { PermissionModeSchema } from './config/security'
 import {
   DateTimeSchema,
   DurableSchemaVersionSchema,
