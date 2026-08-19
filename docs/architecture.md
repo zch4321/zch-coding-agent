@@ -111,6 +111,7 @@ shared/
   model-route.ts          # ModelSelection / ModelRouteSnapshot
   file-change.ts          # FileChangeSummary IPC schema
   runtime-events.ts       # ephemeral Run/stream events
+  agent-api.ts            # Renderer capability manifest、派生类型与装配工厂
   ipc-contract.ts         # 旧导入路径的兼容出口
   ipc/
     application.ts        # bootstrap / window
@@ -144,6 +145,8 @@ shared/
 配置契约固定分为 application、assistant、integrations、models、network、providers、runtime、security 八个领域。领域叶模块可以依赖已有共享原语，models 可以组合 providers，但不得反向导入 `shared/config.ts`、根 `public-config.ts` 或 IPC transport。`public-config.ts` 是唯一 AppConfig 版本与根结构组合点；`ConfigSection` 与 `ConfigSetRequest` 归 configuration IPC 领域所有，`shared/config.ts` 只为旧调用方兼容转出。新配置代码应直接依赖所属领域。领域拆分本身不得改变 schemaVersion 或持久化形状。
 
 IPC 契约固定分为 application、configuration、projects、sessions、runs、agents、terminals、integrations、diagnostics 九个领域。一个领域可以为原注册顺序中的不同位置导出多个子注册表；`registry.ts` 按既有顺序把它们组合为唯一 `IPC_CONTRACTS`，并派生 `IpcChannel/IpcPayload/IpcResult`。`common.ts` 和 `events.ts` 是跨领域传输原语与 push envelope，不算额外领域。领域叶模块不得导入根 registry、events composer 或 `shared/ipc-contract.ts`；shared 内部生产代码直接依赖领域、registry 或 events，兼容出口只服务尚未迁移的跨层调用方。IPC 拆分不得改变 channel 集合、channel 顺序、IPC version 或任何 payload/result/event wire schema。
+
+Renderer bridge 使用独立、显式的 capability manifest，而不是把整个 IPC registry 自动公开。`AGENT_API_INVOKE_ROUTES` 是公开方法名到固定 request/response channel 的唯一映射，`AgentApi` RPC 类型、`AGENT_API_KEYS` 和 preload 普通 invoke 方法都从它派生；manifest 中的 channel 必须属于 `IpcChannel`。订阅方法名同样由 `AGENT_API_SUBSCRIPTION_ROUTES` 派生，但 preload 保留 Agent/Terminal 事件转发、Backend notification 缓冲和 Domain State overflow/replay 的显式 adapter。最终 plain object 经 `Object.freeze` 后通过 `contextBridge` 暴露；Renderer 永远拿不到通用 `invoke/on`。Main business handler、sender 校验、payload/result validation 继续独立且显式，不能由公开方法名反射调用。
 
 ### 3.2 `electron/`
 

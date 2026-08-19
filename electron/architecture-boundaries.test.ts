@@ -49,6 +49,7 @@ const CHAT_WIRE_IDENTIFIER =
 const EXPORTED_CHAT_WIRE_TYPE =
   /\bexport\s+(?:interface|type|class)\s+(?:ProviderMessage|ProviderAssistantTurn|ProviderChatRequest)\b/u
 const NATIVE_RENDERER_DIALOG = /\b(?:window\.)?(?:alert|confirm|prompt)\s*\(/u
+const LITERAL_PRELOAD_INVOKE = /\binvoke\(\s*(['"])([^'"]+)\1/gu
 
 async function sourceFiles(root: string): Promise<string[]> {
   const entries: Dirent<string>[] = await readdir(root, {
@@ -283,5 +284,14 @@ describe('architecture import boundaries', () => {
     )
 
     expect(violations.filter(Boolean)).toEqual([])
+  })
+
+  it('keeps preload request methods assembled from the Agent API manifest', async () => {
+    const source = await readFile(path.resolve('electron/preload.ts'), 'utf8')
+    const literalChannels = [...source.matchAll(LITERAL_PRELOAD_INVOKE)].map(
+      (match) => match[2],
+    )
+
+    expect(literalChannels).toEqual([])
   })
 })

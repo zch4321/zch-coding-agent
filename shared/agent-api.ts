@@ -12,291 +12,175 @@ export type IpcInvoke = <Channel extends IpcChannel>(
   payload: IpcPayload<Channel>,
 ) => Promise<IpcResult<Channel>>
 
-type Unsubscribe = () => void
+/**
+ * Explicit Renderer capability allowlist for request/response IPC methods.
+ * Method names stay ergonomic while every target must be a registered channel.
+ */
+export const AGENT_API_INVOKE_ROUTES = Object.freeze({
+  getConfig: 'config:get',
+  setConfig: 'config:set',
+  listCommandShells: 'command-shell:list',
+  listMcpServers: 'mcp:list',
+  reloadMcpConfig: 'mcp:reload',
+  trustAndEnableMcpServer: 'mcp:trust-enable',
+  disableMcpServer: 'mcp:disable',
+  restartMcpServer: 'mcp:restart',
+  listProviderModels: 'provider:list-models',
+  getBootstrap: 'app:get-bootstrap',
+  listProjects: 'project:list',
+  addProject: 'project:add',
+  updateProjectRecord: 'project:update',
+  removeProject: 'project:remove',
+  listSessions: 'session:list',
+  getSession: 'session:get',
+  updateSession: 'session:update',
+  archiveSession: 'session:archive',
+  restoreSession: 'session:restore',
+  deleteSession: 'session:delete',
+  forkSession: 'session:fork',
+  rewindSession: 'session:rewind',
+  searchSessions: 'session:search',
+  exportConversationMarkdown: 'session:export-markdown',
+  listMessages: 'message:list',
+  searchMessages: 'message:search',
+  listFileChanges: 'file-change:list',
+  revertFileChange: 'file-change:revert',
+  listAgentExecutions: 'agent-execution:list',
+  getAgentExecution: 'agent-execution:get',
+  chooseWorkspace: 'workspace:choose',
+  listWorkspaceDirectory: 'workspace:list-directory',
+  readWorkspaceFile: 'workspace:read-file',
+  openWorkspaceFile: 'workspace:open-file',
+  chooseWorkspaceContext: 'workspace:choose-context',
+  getProject: 'project:get',
+  saveProject: 'project:save',
+  detectProjectModules: 'project:detect-modules',
+  getProjectBackendStatus: 'project:backend-status',
+  restartProjectBackend: 'project:restart-backend',
+  updatePlanStatus: 'plan:update-status',
+  startRun: 'run:start',
+  retryRun: 'run:retry',
+  interruptRun: 'run:interrupt',
+  interjectRun: 'run:interject',
+  decideApproval: 'approval:decide',
+  sendTerminalInput: 'terminal:input',
+  openTerminal: 'terminal:open',
+  listTerminals: 'terminal:list',
+  resizeTerminal: 'terminal:resize',
+  closeTerminal: 'terminal:close',
+  getTerminalSnapshot: 'terminal:snapshot',
+  minimizeWindow: 'window:minimize',
+  toggleMaximizeWindow: 'window:toggle-maximize',
+  closeWindow: 'window:close',
+  listSkills: 'skills:list',
+  installSkillFromUrl: 'skills:installFromUrl',
+  chooseAndInstallSkill: 'skills:chooseAndInstallFile',
+  refreshSkills: 'skills:refresh',
+  setSkillEnabled: 'skills:setEnabled',
+  listTraces: 'trace:list',
+  replayTrace: 'trace:replay',
+  getSessionTranscriptPage: 'trace:transcript-page',
+  getSessionTranscriptRequestMessages: 'trace:request-messages',
+  exportSessionTranscript: 'trace:export-transcript',
+  getTraceStats: 'trace:stats',
+  openLogDirectory: 'logs:open-directory',
+  clearClosedTraces: 'logs:clear-closed',
+} as const satisfies Record<string, IpcChannel>)
 
-export interface AgentApi {
-  getConfig(payload: IpcPayload<'config:get'>): Promise<IpcResult<'config:get'>>
-  setConfig(payload: IpcPayload<'config:set'>): Promise<IpcResult<'config:set'>>
-  listCommandShells(
-    payload: IpcPayload<'command-shell:list'>,
-  ): Promise<IpcResult<'command-shell:list'>>
-  listMcpServers(
-    payload: IpcPayload<'mcp:list'>,
-  ): Promise<IpcResult<'mcp:list'>>
-  reloadMcpConfig(
-    payload: IpcPayload<'mcp:reload'>,
-  ): Promise<IpcResult<'mcp:reload'>>
-  trustAndEnableMcpServer(
-    payload: IpcPayload<'mcp:trust-enable'>,
-  ): Promise<IpcResult<'mcp:trust-enable'>>
-  disableMcpServer(
-    payload: IpcPayload<'mcp:disable'>,
-  ): Promise<IpcResult<'mcp:disable'>>
-  restartMcpServer(
-    payload: IpcPayload<'mcp:restart'>,
-  ): Promise<IpcResult<'mcp:restart'>>
-  listProviderModels(
-    payload: IpcPayload<'provider:list-models'>,
-  ): Promise<IpcResult<'provider:list-models'>>
-  getBootstrap(
-    payload: IpcPayload<'app:get-bootstrap'>,
-  ): Promise<IpcResult<'app:get-bootstrap'>>
-  listProjects(
-    payload: IpcPayload<'project:list'>,
-  ): Promise<IpcResult<'project:list'>>
-  addProject(
-    payload: IpcPayload<'project:add'>,
-  ): Promise<IpcResult<'project:add'>>
-  updateProjectRecord(
-    payload: IpcPayload<'project:update'>,
-  ): Promise<IpcResult<'project:update'>>
-  removeProject(
-    payload: IpcPayload<'project:remove'>,
-  ): Promise<IpcResult<'project:remove'>>
-  listSessions(
-    payload: IpcPayload<'session:list'>,
-  ): Promise<IpcResult<'session:list'>>
-  getSession(
-    payload: IpcPayload<'session:get'>,
-  ): Promise<IpcResult<'session:get'>>
-  updateSession(
-    payload: IpcPayload<'session:update'>,
-  ): Promise<IpcResult<'session:update'>>
-  archiveSession(
-    payload: IpcPayload<'session:archive'>,
-  ): Promise<IpcResult<'session:archive'>>
-  restoreSession(
-    payload: IpcPayload<'session:restore'>,
-  ): Promise<IpcResult<'session:restore'>>
-  deleteSession(
-    payload: IpcPayload<'session:delete'>,
-  ): Promise<IpcResult<'session:delete'>>
-  forkSession(
-    payload: IpcPayload<'session:fork'>,
-  ): Promise<IpcResult<'session:fork'>>
-  rewindSession(
-    payload: IpcPayload<'session:rewind'>,
-  ): Promise<IpcResult<'session:rewind'>>
-  searchSessions(
-    payload: IpcPayload<'session:search'>,
-  ): Promise<IpcResult<'session:search'>>
-  exportConversationMarkdown(
-    payload: IpcPayload<'session:export-markdown'>,
-  ): Promise<IpcResult<'session:export-markdown'>>
-  listMessages(
-    payload: IpcPayload<'message:list'>,
-  ): Promise<IpcResult<'message:list'>>
-  searchMessages(
-    payload: IpcPayload<'message:search'>,
-  ): Promise<IpcResult<'message:search'>>
-  listFileChanges(
-    payload: IpcPayload<'file-change:list'>,
-  ): Promise<IpcResult<'file-change:list'>>
-  revertFileChange(
-    payload: IpcPayload<'file-change:revert'>,
-  ): Promise<IpcResult<'file-change:revert'>>
-  listAgentExecutions(
-    payload: IpcPayload<'agent-execution:list'>,
-  ): Promise<IpcResult<'agent-execution:list'>>
-  getAgentExecution(
-    payload: IpcPayload<'agent-execution:get'>,
-  ): Promise<IpcResult<'agent-execution:get'>>
-  chooseWorkspace(
-    payload: IpcPayload<'workspace:choose'>,
-  ): Promise<IpcResult<'workspace:choose'>>
-  listWorkspaceDirectory(
-    payload: IpcPayload<'workspace:list-directory'>,
-  ): Promise<IpcResult<'workspace:list-directory'>>
-  readWorkspaceFile(
-    payload: IpcPayload<'workspace:read-file'>,
-  ): Promise<IpcResult<'workspace:read-file'>>
-  /** Opens one guarded workspace file with the operating system's default application. */
-  openWorkspaceFile(
-    payload: IpcPayload<'workspace:open-file'>,
-  ): Promise<IpcResult<'workspace:open-file'>>
-  chooseWorkspaceContext(
-    payload: IpcPayload<'workspace:choose-context'>,
-  ): Promise<IpcResult<'workspace:choose-context'>>
-  getProject(
-    payload: IpcPayload<'project:get'>,
-  ): Promise<IpcResult<'project:get'>>
-  saveProject(
-    payload: IpcPayload<'project:save'>,
-  ): Promise<IpcResult<'project:save'>>
-  detectProjectModules(
-    payload: IpcPayload<'project:detect-modules'>,
-  ): Promise<IpcResult<'project:detect-modules'>>
-  getProjectBackendStatus(
-    payload: IpcPayload<'project:backend-status'>,
-  ): Promise<IpcResult<'project:backend-status'>>
-  restartProjectBackend(
-    payload: IpcPayload<'project:restart-backend'>,
-  ): Promise<IpcResult<'project:restart-backend'>>
-  updatePlanStatus(
-    payload: IpcPayload<'plan:update-status'>,
-  ): Promise<IpcResult<'plan:update-status'>>
-  startRun(payload: IpcPayload<'run:start'>): Promise<IpcResult<'run:start'>>
-  retryRun(payload: IpcPayload<'run:retry'>): Promise<IpcResult<'run:retry'>>
-  interruptRun(
-    payload: IpcPayload<'run:interrupt'>,
-  ): Promise<IpcResult<'run:interrupt'>>
-  interjectRun(
-    payload: IpcPayload<'run:interject'>,
-  ): Promise<IpcResult<'run:interject'>>
-  decideApproval(
-    payload: IpcPayload<'approval:decide'>,
-  ): Promise<IpcResult<'approval:decide'>>
-  sendTerminalInput(
-    payload: IpcPayload<'terminal:input'>,
-  ): Promise<IpcResult<'terminal:input'>>
-  openTerminal(
-    payload: IpcPayload<'terminal:open'>,
-  ): Promise<IpcResult<'terminal:open'>>
-  listTerminals(
-    payload: IpcPayload<'terminal:list'>,
-  ): Promise<IpcResult<'terminal:list'>>
-  resizeTerminal(
-    payload: IpcPayload<'terminal:resize'>,
-  ): Promise<IpcResult<'terminal:resize'>>
-  closeTerminal(
-    payload: IpcPayload<'terminal:close'>,
-  ): Promise<IpcResult<'terminal:close'>>
-  getTerminalSnapshot(
-    payload: IpcPayload<'terminal:snapshot'>,
-  ): Promise<IpcResult<'terminal:snapshot'>>
-  minimizeWindow(
-    payload: IpcPayload<'window:minimize'>,
-  ): Promise<IpcResult<'window:minimize'>>
-  toggleMaximizeWindow(
-    payload: IpcPayload<'window:toggle-maximize'>,
-  ): Promise<IpcResult<'window:toggle-maximize'>>
-  closeWindow(
-    payload: IpcPayload<'window:close'>,
-  ): Promise<IpcResult<'window:close'>>
-  listSkills(
-    payload: IpcPayload<'skills:list'>,
-  ): Promise<IpcResult<'skills:list'>>
-  installSkillFromUrl(
-    payload: IpcPayload<'skills:installFromUrl'>,
-  ): Promise<IpcResult<'skills:installFromUrl'>>
-  chooseAndInstallSkill(
-    payload: IpcPayload<'skills:chooseAndInstallFile'>,
-  ): Promise<IpcResult<'skills:chooseAndInstallFile'>>
-  refreshSkills(
-    payload: IpcPayload<'skills:refresh'>,
-  ): Promise<IpcResult<'skills:refresh'>>
-  setSkillEnabled(
-    payload: IpcPayload<'skills:setEnabled'>,
-  ): Promise<IpcResult<'skills:setEnabled'>>
-  listTraces(
-    payload: IpcPayload<'trace:list'>,
-  ): Promise<IpcResult<'trace:list'>>
-  replayTrace(
-    payload: IpcPayload<'trace:replay'>,
-  ): Promise<IpcResult<'trace:replay'>>
-  getSessionTranscriptPage(
-    payload: IpcPayload<'trace:transcript-page'>,
-  ): Promise<IpcResult<'trace:transcript-page'>>
-  getSessionTranscriptRequestMessages(
-    payload: IpcPayload<'trace:request-messages'>,
-  ): Promise<IpcResult<'trace:request-messages'>>
-  exportSessionTranscript(
-    payload: IpcPayload<'trace:export-transcript'>,
-  ): Promise<IpcResult<'trace:export-transcript'>>
-  getTraceStats(
-    payload: IpcPayload<'trace:stats'>,
-  ): Promise<IpcResult<'trace:stats'>>
-  openLogDirectory(
-    payload: IpcPayload<'logs:open-directory'>,
-  ): Promise<IpcResult<'logs:open-directory'>>
-  clearClosedTraces(
-    payload: IpcPayload<'logs:clear-closed'>,
-  ): Promise<IpcResult<'logs:clear-closed'>>
-  onAgentEvent(listener: (event: AgentEventEnvelope) => void): Unsubscribe
-  onAgentExecutionEvent(
-    listener: (event: AgentExecutionEventEnvelope) => void,
-  ): Unsubscribe
-  onBackendNotification(
-    listener: (event: BackendNotificationEnvelope) => void,
-  ): Unsubscribe
-  onTerminalEvent(listener: (event: TerminalEventEnvelope) => void): Unsubscribe
-  onDomainStateEvent(
-    listener: (event: DomainStateDelivery) => void,
-  ): Unsubscribe
+type AgentApiInvokeRoutes = typeof AGENT_API_INVOKE_ROUTES
+type AgentInvokeMethod<Channel extends IpcChannel> = (
+  payload: IpcPayload<Channel>,
+) => Promise<IpcResult<Channel>>
+
+export type AgentInvokeApi = {
+  [Method in keyof AgentApiInvokeRoutes]: AgentInvokeMethod<
+    AgentApiInvokeRoutes[Method]
+  >
 }
 
-export const AGENT_API_KEYS = [
-  'getConfig',
-  'setConfig',
-  'listCommandShells',
-  'listMcpServers',
-  'reloadMcpConfig',
-  'trustAndEnableMcpServer',
-  'disableMcpServer',
-  'restartMcpServer',
-  'listProviderModels',
-  'getBootstrap',
-  'listProjects',
-  'addProject',
-  'updateProjectRecord',
-  'removeProject',
-  'listSessions',
-  'getSession',
-  'updateSession',
-  'archiveSession',
-  'restoreSession',
-  'deleteSession',
-  'forkSession',
-  'rewindSession',
-  'searchSessions',
-  'exportConversationMarkdown',
-  'listMessages',
-  'searchMessages',
-  'listFileChanges',
-  'revertFileChange',
-  'listAgentExecutions',
-  'getAgentExecution',
-  'chooseWorkspace',
-  'listWorkspaceDirectory',
-  'readWorkspaceFile',
-  'openWorkspaceFile',
-  'chooseWorkspaceContext',
-  'getProject',
-  'saveProject',
-  'detectProjectModules',
-  'getProjectBackendStatus',
-  'restartProjectBackend',
-  'updatePlanStatus',
-  'startRun',
-  'retryRun',
-  'interruptRun',
-  'interjectRun',
-  'decideApproval',
-  'sendTerminalInput',
-  'openTerminal',
-  'listTerminals',
-  'resizeTerminal',
-  'closeTerminal',
-  'getTerminalSnapshot',
-  'minimizeWindow',
-  'toggleMaximizeWindow',
-  'closeWindow',
-  'listSkills',
-  'installSkillFromUrl',
-  'chooseAndInstallSkill',
-  'refreshSkills',
-  'setSkillEnabled',
-  'listTraces',
-  'replayTrace',
-  'getSessionTranscriptPage',
-  'getSessionTranscriptRequestMessages',
-  'exportSessionTranscript',
-  'getTraceStats',
-  'openLogDirectory',
-  'clearClosedTraces',
-  'onAgentEvent',
-  'onAgentExecutionEvent',
-  'onBackendNotification',
-  'onTerminalEvent',
-  'onDomainStateEvent',
-] as const satisfies readonly (keyof AgentApi)[]
+type Unsubscribe = () => void
+
+export interface AgentApiSubscriptionEventMap {
+  agentEvent: AgentEventEnvelope
+  agentExecutionEvent: AgentExecutionEventEnvelope
+  backendNotification: BackendNotificationEnvelope
+  terminalEvent: TerminalEventEnvelope
+  domainState: DomainStateDelivery
+}
+
+/** Maps public subscription methods to preload-owned subscription adapters. */
+export const AGENT_API_SUBSCRIPTION_ROUTES = Object.freeze({
+  onAgentEvent: 'agentEvent',
+  onAgentExecutionEvent: 'agentExecutionEvent',
+  onBackendNotification: 'backendNotification',
+  onTerminalEvent: 'terminalEvent',
+  onDomainStateEvent: 'domainState',
+} as const satisfies Record<string, keyof AgentApiSubscriptionEventMap>)
+
+type AgentApiSubscriptionRoutes = typeof AGENT_API_SUBSCRIPTION_ROUTES
+
+export type AgentSubscriptionApi = {
+  [Method in keyof AgentApiSubscriptionRoutes]: (
+    listener: (
+      event: AgentApiSubscriptionEventMap[AgentApiSubscriptionRoutes[Method]],
+    ) => void,
+  ) => Unsubscribe
+}
+
+export type AgentApiSubscriptionAdapters = {
+  [Adapter in keyof AgentApiSubscriptionEventMap]: (
+    listener: (event: AgentApiSubscriptionEventMap[Adapter]) => void,
+  ) => Unsubscribe
+}
+
+export type AgentApi = AgentInvokeApi & AgentSubscriptionApi
+
+type ObjectEntry<Value extends object> = {
+  [Key in keyof Value]-?: [Key, Value[Key]]
+}[keyof Value]
+
+function objectEntries<Value extends object>(
+  value: Value,
+): ObjectEntry<Value>[] {
+  return Object.entries(value) as ObjectEntry<Value>[]
+}
+
+function objectKeys<Value extends object>(value: Value): (keyof Value)[] {
+  return Object.keys(value) as (keyof Value)[]
+}
+
+function bindInvoke<Channel extends IpcChannel>(
+  invoke: IpcInvoke,
+  channel: Channel,
+): AgentInvokeMethod<Channel> {
+  return (payload) => invoke(channel, payload)
+}
+
+/**
+ * Builds the fixed Renderer API from the capability manifest and explicit
+ * subscription adapters.
+ */
+export function createAgentApi(
+  invoke: IpcInvoke,
+  subscriptionAdapters: AgentApiSubscriptionAdapters,
+): AgentApi {
+  const invokeMethods = Object.fromEntries(
+    objectEntries(AGENT_API_INVOKE_ROUTES).map(([method, channel]) => [
+      method,
+      bindInvoke(invoke, channel),
+    ]),
+  ) as AgentInvokeApi
+  const subscriptionMethods = Object.fromEntries(
+    objectEntries(AGENT_API_SUBSCRIPTION_ROUTES).map(([method, adapter]) => [
+      method,
+      subscriptionAdapters[adapter],
+    ]),
+  ) as AgentSubscriptionApi
+
+  return Object.assign(invokeMethods, subscriptionMethods)
+}
+
+export const AGENT_API_KEYS = Object.freeze([
+  ...objectKeys(AGENT_API_INVOKE_ROUTES),
+  ...objectKeys(AGENT_API_SUBSCRIPTION_ROUTES),
+]) satisfies readonly (keyof AgentApi)[]

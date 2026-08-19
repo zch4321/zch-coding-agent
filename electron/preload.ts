@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AgentApi, IpcInvoke } from '../shared/agent-api'
+import {
+  createAgentApi,
+  type AgentApiSubscriptionAdapters,
+  type IpcInvoke,
+} from '../shared/agent-api'
 import {
   APP_NOTIFICATION_CHANNEL,
   AGENT_EVENT_CHANNEL,
@@ -88,96 +92,20 @@ function subscribeDomainState(
   return () => domainListeners.delete(listener)
 }
 
-const api: AgentApi = {
-  getConfig: (payload) => invoke('config:get', payload),
-  setConfig: (payload) => invoke('config:set', payload),
-  listCommandShells: (payload) => invoke('command-shell:list', payload),
-  listMcpServers: (payload) => invoke('mcp:list', payload),
-  reloadMcpConfig: (payload) => invoke('mcp:reload', payload),
-  trustAndEnableMcpServer: (payload) => invoke('mcp:trust-enable', payload),
-  disableMcpServer: (payload) => invoke('mcp:disable', payload),
-  restartMcpServer: (payload) => invoke('mcp:restart', payload),
-  listProviderModels: (payload) => invoke('provider:list-models', payload),
-  getBootstrap: (payload) => invoke('app:get-bootstrap', payload),
-  listProjects: (payload) => invoke('project:list', payload),
-  addProject: (payload) => invoke('project:add', payload),
-  updateProjectRecord: (payload) => invoke('project:update', payload),
-  removeProject: (payload) => invoke('project:remove', payload),
-  listSessions: (payload) => invoke('session:list', payload),
-  getSession: (payload) => invoke('session:get', payload),
-  updateSession: (payload) => invoke('session:update', payload),
-  archiveSession: (payload) => invoke('session:archive', payload),
-  restoreSession: (payload) => invoke('session:restore', payload),
-  deleteSession: (payload) => invoke('session:delete', payload),
-  forkSession: (payload) => invoke('session:fork', payload),
-  rewindSession: (payload) => invoke('session:rewind', payload),
-  searchSessions: (payload) => invoke('session:search', payload),
-  exportConversationMarkdown: (payload) =>
-    invoke('session:export-markdown', payload),
-  listMessages: (payload) => invoke('message:list', payload),
-  searchMessages: (payload) => invoke('message:search', payload),
-  listFileChanges: (payload) => invoke('file-change:list', payload),
-  revertFileChange: (payload) => invoke('file-change:revert', payload),
-  listAgentExecutions: (payload) => invoke('agent-execution:list', payload),
-  getAgentExecution: (payload) => invoke('agent-execution:get', payload),
-  chooseWorkspace: (payload) => invoke('workspace:choose', payload),
-  listWorkspaceDirectory: (payload) =>
-    invoke('workspace:list-directory', payload),
-  readWorkspaceFile: (payload) => invoke('workspace:read-file', payload),
-  openWorkspaceFile: (payload) => invoke('workspace:open-file', payload),
-  chooseWorkspaceContext: (payload) =>
-    invoke('workspace:choose-context', payload),
-  getProject: (payload) => invoke('project:get', payload),
-  saveProject: (payload) => invoke('project:save', payload),
-  detectProjectModules: (payload) => invoke('project:detect-modules', payload),
-  getProjectBackendStatus: (payload) =>
-    invoke('project:backend-status', payload),
-  restartProjectBackend: (payload) =>
-    invoke('project:restart-backend', payload),
-  updatePlanStatus: (payload) => invoke('plan:update-status', payload),
-  startRun: (payload) => invoke('run:start', payload),
-  retryRun: (payload) => invoke('run:retry', payload),
-  interruptRun: (payload) => invoke('run:interrupt', payload),
-  interjectRun: (payload) => invoke('run:interject', payload),
-  decideApproval: (payload) => invoke('approval:decide', payload),
-  sendTerminalInput: (payload) => invoke('terminal:input', payload),
-  openTerminal: (payload) => invoke('terminal:open', payload),
-  listTerminals: (payload) => invoke('terminal:list', payload),
-  resizeTerminal: (payload) => invoke('terminal:resize', payload),
-  closeTerminal: (payload) => invoke('terminal:close', payload),
-  getTerminalSnapshot: (payload) => invoke('terminal:snapshot', payload),
-  minimizeWindow: (payload) => invoke('window:minimize', payload),
-  toggleMaximizeWindow: (payload) => invoke('window:toggle-maximize', payload),
-  closeWindow: (payload) => invoke('window:close', payload),
-  listSkills: (payload) => invoke('skills:list', payload),
-  installSkillFromUrl: (payload) => invoke('skills:installFromUrl', payload),
-  chooseAndInstallSkill: (payload) =>
-    invoke('skills:chooseAndInstallFile', payload),
-  refreshSkills: (payload) => invoke('skills:refresh', payload),
-  setSkillEnabled: (payload) => invoke('skills:setEnabled', payload),
-  listTraces: (payload) => invoke('trace:list', payload),
-  replayTrace: (payload) => invoke('trace:replay', payload),
-  getSessionTranscriptPage: (payload) =>
-    invoke('trace:transcript-page', payload),
-  getSessionTranscriptRequestMessages: (payload) =>
-    invoke('trace:request-messages', payload),
-  exportSessionTranscript: (payload) =>
-    invoke('trace:export-transcript', payload),
-  getTraceStats: (payload) => invoke('trace:stats', payload),
-  openLogDirectory: (payload) => invoke('logs:open-directory', payload),
-  clearClosedTraces: (payload) => invoke('logs:clear-closed', payload),
-  onAgentEvent: (listener) =>
+const subscriptionAdapters: AgentApiSubscriptionAdapters = {
+  agentEvent: (listener) =>
     subscribe<AgentEventEnvelope>(AGENT_EVENT_CHANNEL, listener),
-  onAgentExecutionEvent: (listener) =>
+  agentExecutionEvent: (listener) =>
     subscribe<AgentExecutionEventEnvelope>(
       AGENT_EXECUTION_EVENT_CHANNEL,
       listener,
     ),
-  onBackendNotification: (listener) => backendNotifications.subscribe(listener),
-  onTerminalEvent: (listener) =>
+  backendNotification: (listener) => backendNotifications.subscribe(listener),
+  terminalEvent: (listener) =>
     subscribe<TerminalEventEnvelope>(TERMINAL_EVENT_CHANNEL, listener),
-  onDomainStateEvent: subscribeDomainState,
+  domainState: subscribeDomainState,
 }
-const agentApi = Object.freeze(api)
+
+const agentApi = Object.freeze(createAgentApi(invoke, subscriptionAdapters))
 
 contextBridge.exposeInMainWorld('agentApi', agentApi)

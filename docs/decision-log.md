@@ -275,3 +275,11 @@
 - 组合边界：每个领域按需要导出一个或多个 channel 子注册表，`ipc/registry.ts` 按拆分前的声明顺序组合唯一 `IPC_CONTRACTS`，并从它派生 channel、payload 与 result 类型。领域叶模块不得反向导入 registry、events composer 或兼容出口；shared 内部生产代码也不再依赖 `shared/ipc-contract.ts`。
 - Config 归属：原临时 `shared/config/config-requests.ts` 删除，`ConfigSection` 与 `ConfigSetRequest` 迁入 configuration IPC 领域。`shared/config.ts` 继续兼容转出这些旧符号，因此现有 ConfigStore 调用方无需随本次拆分机械迁移。
 - 兼容与契约：`shared/ipc-contract.ts` 保留拆分前全部公开导出，现有 Electron、Preload、Renderer 与测试调用方可以渐进迁移。IPC 保持 v1、68 个 channel 及原顺序；完整 channel payload/result 和 event envelope 的序列化指纹保持不变。测试锁定指纹、无重复/遗漏组合、对象身份与 import 边界。
+
+## 2026-08-19 — Agent API 由显式 Capability Manifest 自动装配
+
+- 状态：已采纳并实现；本条只收敛 Renderer bridge 的重复声明，不改变 IPC wire、Main handler 或订阅语义。
+- Invoke 事实源：`AGENT_API_INVOKE_ROUTES` 显式声明公开方法名到 `IpcChannel` 的映射。RPC 部分的 `AgentApi` mapped type、`AGENT_API_KEYS` 和 preload plain function object 从同一 manifest 派生；新增普通 bridge 方法不再手写 interface、key 列表和 preload wrapper。
+- 安全边界：manifest 是显式 capability allowlist，不从 `IPC_CONTRACTS` 默认暴露新 channel，也不向 Renderer 提供通用 `invoke/send/on`。Main process 业务 handler 继续显式实现，并保留 sender、payload、result 与容量校验；自动装配不跨越该安全边界。
+- 订阅边界：`AGENT_API_SUBSCRIPTION_ROUTES` 派生五个公开订阅方法的名称和事件类型。preload 仍显式提供对应 adapter：普通 Agent/Terminal event 去除 Electron event 参数，Backend notification 保留 64 条启动前缓存，Domain State 保留 256 条缓存、overflow 和 replay 语义。
+- 回归边界：manifest、公开 key 列表和最终 `contextBridge` 对象均冻结；单测验证当前 68 个 invoke channel 一一映射、路由调用目标、五个订阅 adapter 和无重复公开 key。既有 Electron E2E 继续断言实际 `window.agentApi` 只包含派生 key、对象被冻结且不暴露 `ipcRenderer`。
