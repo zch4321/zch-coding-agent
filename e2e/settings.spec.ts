@@ -589,6 +589,15 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       modelsSection.getByTestId('auxiliary-model-reasoning-select'),
     ).toContainText('高')
+    const [defaultModelTop, auxiliaryModelTop] = await Promise.all(
+      [
+        modelsSection.getByTestId('default-model-role-select'),
+        modelsSection.getByTestId('auxiliary-model-role-select'),
+      ].map((select) =>
+        select.evaluate((element) => element.getBoundingClientRect().top),
+      ),
+    )
+    expect(Math.abs(defaultModelTop - auxiliaryModelTop)).toBeLessThanOrEqual(1)
     const auxiliaryField = modelsSection.getByTestId(
       'auxiliary-model-role-select',
     )
