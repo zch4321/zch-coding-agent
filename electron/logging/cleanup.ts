@@ -18,6 +18,15 @@ interface TraceFileInfo {
   closed: boolean
 }
 
+function isMissingFileError(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    error.code === 'ENOENT',
+  )
+}
+
 /** Applies age and size retention without deleting active or corrupt traces. */
 export async function cleanupTraces(
   directory: string,
@@ -32,12 +41,7 @@ export async function cleanupTraces(
   try {
     entries = await readdir(directory)
   } catch (error) {
-    if (
-      error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      error.code === 'ENOENT'
-    ) {
+    if (isMissingFileError(error)) {
       return { deleted: [], retainedBytes: 0 }
     }
 
@@ -57,6 +61,10 @@ export async function cleanupTraces(
     try {
       fileStat = await stat(filePath)
     } catch (error) {
+      if (isMissingFileError(error)) {
+        continue
+      }
+
       onDiagnostic(`Failed to stat trace ${entry}`, error)
       continue
     }
@@ -70,6 +78,10 @@ export async function cleanupTraces(
         closed: events.at(-1)?.type === 'session.end',
       })
     } catch (error) {
+      if (isMissingFileError(error)) {
+        continue
+      }
+
       onDiagnostic(`Failed to inspect trace ${entry}`, error)
       files.push({
         path: filePath,
@@ -85,17 +97,30 @@ export async function cleanupTraces(
 
   files.sort((left, right) => left.mtimeMs - right.mtimeMs)
   const deleted: string[] = []
+  const removed = new Set<string>()
   let retainedBytes = files.reduce((sum, file) => sum + file.size, 0)
+
+  const markRemoved = (file: TraceFileInfo) => {
+    if (removed.has(file.path)) {
+      return
+    }
+
+    removed.add(file.path)
+    retainedBytes -= file.size
+  }
 
   const remove = async (file: TraceFileInfo) => {
     try {
       await unlink(file.path)
       deleted.push(file.path)
-      retainedBytes -= file.size
-      return true
+      markRemoved(file)
     } catch (error) {
+      if (isMissingFileError(error)) {
+        markRemoved(file)
+        return
+      }
+
       onDiagnostic(`Failed to delete trace ${path.basename(file.path)}`, error)
-      return false
     }
   }
 
@@ -116,7 +141,7 @@ export async function cleanupTraces(
 
     if (
       file.closed &&
-      !deleted.includes(file.path) &&
+      !removed.has(file.path) &&
       !activeFiles.has(path.resolve(file.path))
     ) {
       await remove(file)

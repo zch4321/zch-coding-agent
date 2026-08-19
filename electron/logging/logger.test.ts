@@ -289,4 +289,40 @@ describe('trace cleanup', () => {
     expect(result.retainedBytes).toBeGreaterThan(0)
     await expect(readTraceFile(active)).resolves.toHaveLength(1)
   })
+
+  it('treats concurrent cleanup of the same trace as idempotent', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
+    const closed = path.join(directory, 'concurrent-closed.jsonl')
+    await writeFile(
+      closed,
+      `${JSON.stringify({
+        schemaVersion: 2,
+        seq: 1,
+        eventId: 'event-concurrent-closed',
+        type: 'session.end',
+        sessionId: 'session-concurrent-closed',
+        ts: '2025-01-01T00:00:00.000Z',
+      })}\n`,
+    )
+    await utimes(closed, new Date('2025-01-01'), new Date('2025-01-01'))
+
+    const diagnostics: string[] = []
+    const results = await Promise.all(
+      Array.from({ length: 16 }, () =>
+        cleanupTraces(directory, {
+          retentionDays: 1,
+          maxTotalBytes: 0,
+          now: new Date('2026-06-15'),
+          onDiagnostic: (message) => diagnostics.push(message),
+        }),
+      ),
+    )
+
+    expect(diagnostics).toEqual([])
+    const deleted = results.flatMap((result) => result.deleted)
+    expect(deleted.length).toBeGreaterThan(0)
+    expect(new Set(deleted)).toEqual(new Set([closed]))
+    expect(results.every((result) => result.retainedBytes === 0)).toBe(true)
+    await expect(access(closed)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
 })
