@@ -32,6 +32,17 @@ const CONFIG_DOMAIN_FILES = [
   'runtime.ts',
   'security.ts',
 ]
+const IPC_DOMAIN_FILES = [
+  'agents.ts',
+  'application.ts',
+  'configuration.ts',
+  'diagnostics.ts',
+  'integrations.ts',
+  'projects.ts',
+  'runs.ts',
+  'sessions.ts',
+  'terminals.ts',
+]
 const PROVIDER_IMPORT = /(?:^|\/)providers?(?:\/|$)|provider(?:\.ts)?$/u
 const CHAT_WIRE_IDENTIFIER =
   /\b(?:ProviderMessage|ProviderAssistantTurn|reasoning_content|tool_call_id|tool_calls)\b/u
@@ -123,7 +134,60 @@ describe('architecture import boundaries', () => {
           (specifier) =>
             specifier === '../config' ||
             specifier === './public-config' ||
-            specifier === './config-requests',
+            specifier.startsWith('../ipc/'),
+        )
+        .map((specifier) => `${relative(filePath)} -> ${specifier}`),
+    )
+
+    expect(violations).toEqual([])
+  })
+
+  it('keeps IPC domains independent from registry and compatibility composers', async () => {
+    const violations = (
+      await Promise.all(
+        IPC_DOMAIN_FILES.map(async (fileName) => {
+          const filePath = path.resolve('shared/ipc', fileName)
+          return {
+            filePath,
+            imports: await imports(filePath),
+          }
+        }),
+      )
+    ).flatMap(({ filePath, imports: specifiers }) =>
+      specifiers
+        .filter(
+          (specifier) =>
+            specifier === '../ipc-contract' ||
+            specifier === './registry' ||
+            specifier === './events',
+        )
+        .map((specifier) => `${relative(filePath)} -> ${specifier}`),
+    )
+
+    expect(violations).toEqual([])
+  })
+
+  it('keeps shared production contracts off the IPC compatibility facade', async () => {
+    const facadePath = path.resolve('shared/ipc-contract')
+    const facadeFilePath = path.resolve('shared/ipc-contract.ts')
+    const violations = (
+      await Promise.all(
+        (await sourceFiles(path.resolve('shared')))
+          .filter(
+            (filePath) =>
+              isProductionFile(filePath) && filePath !== facadeFilePath,
+          )
+          .map(async (filePath) => ({
+            filePath,
+            imports: await imports(filePath),
+          })),
+      )
+    ).flatMap(({ filePath, imports: specifiers }) =>
+      specifiers
+        .filter(
+          (specifier) =>
+            specifier.startsWith('.') &&
+            path.resolve(path.dirname(filePath), specifier) === facadePath,
         )
         .map((specifier) => `${relative(filePath)} -> ${specifier}`),
     )

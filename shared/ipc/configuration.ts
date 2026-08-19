@@ -1,16 +1,21 @@
 import { Type, type Static } from '@sinclair/typebox'
+import { IPC_VERSION } from '../channels'
+import { CommandShellCatalogSchema } from '../command-shell'
+import { ModelRolesConfigSchema } from '../config/models'
+import {
+  ModelCapabilityLevelSchema,
+  ModelCapabilityOverrideSchema,
+  ProviderPublicConfigSchema,
+  ProviderTypeSchema,
+} from '../config/providers'
+import { PublicConfigSchema } from '../config/public-config'
+import { PermissionModeSchema, RememberedRuleSchema } from '../config/security'
 import {
   ModelPoolConfigSchema,
   ModelPoolProviderRevisionSchema,
 } from '../model-pool'
-import { ModelRolesConfigSchema } from './models'
-import {
-  ModelCapabilityOverrideSchema,
-  ProviderPublicConfigSchema,
-  ProviderTypeSchema,
-} from './providers'
-import { PublicConfigSchema } from './public-config'
-import { PermissionModeSchema, RememberedRuleSchema } from './security'
+import { ReasoningEffortSchema } from '../reasoning'
+import { ipcResultSchema } from './common'
 
 export const ConfigSectionSchema = Type.Union([
   Type.Literal('all'),
@@ -33,7 +38,7 @@ export const ConfigSectionSchema = Type.Union([
 ])
 export type ConfigSection = Static<typeof ConfigSectionSchema>
 
-// This transport-level write union remains here until the IPC contract split.
+// Configuration writes use one discriminated IPC payload union.
 export const ConfigSetRequestSchema = Type.Union([
   Type.Object(
     {
@@ -329,3 +334,106 @@ export const ConfigSetRequestSchema = Type.Union([
   ),
 ])
 export type ConfigSetRequest = Static<typeof ConfigSetRequestSchema>
+
+const ModelProfileSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 256 }),
+    ownedBy: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    availability: Type.Union([
+      Type.Literal('provider'),
+      Type.Literal('custom'),
+    ]),
+    capabilitySource: Type.Union([
+      Type.Literal('override'),
+      Type.Literal('provider'),
+      Type.Literal('builtin'),
+      Type.Literal('default'),
+    ]),
+    contextWindowTokens: Type.Integer({
+      minimum: 1_024,
+      maximum: 10_000_000,
+    }),
+    compactThresholdTokens: Type.Integer({
+      minimum: 1_024,
+      maximum: 10_000_000,
+    }),
+    maxOutputTokens: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+    reasoningEfforts: Type.Optional(
+      Type.Array(ReasoningEffortSchema, { minItems: 1, uniqueItems: true }),
+    ),
+    capability: Type.Optional(ModelCapabilityLevelSchema),
+  },
+  { additionalProperties: false },
+)
+
+export const CONFIGURATION_IPC_CONTRACTS = {
+  'config:get': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        section: ConfigSectionSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          section: ConfigSectionSchema,
+          config: PublicConfigSchema,
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'config:set': {
+    payload: ConfigSetRequestSchema,
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          config: PublicConfigSchema,
+          warnings: Type.Optional(
+            Type.Array(Type.String({ minLength: 1, maxLength: 1_024 }), {
+              maxItems: 512,
+            }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'command-shell:list': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        refresh: Type.Optional(Type.Boolean()),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(CommandShellCatalogSchema),
+  },
+} as const
+
+export const PROVIDER_IPC_CONTRACTS = {
+  'provider:list-models': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        refresh: Type.Boolean(),
+        providerId: Type.Optional(
+          Type.String({ minLength: 1, maxLength: 128 }),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          models: Type.Array(ModelProfileSchema, { maxItems: 1_000 }),
+          fetchedAt: Type.Optional(Type.String({ format: 'date-time' })),
+          stale: Type.Boolean(),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+} as const

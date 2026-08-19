@@ -111,7 +111,20 @@ shared/
   model-route.ts          # ModelSelection / ModelRouteSnapshot
   file-change.ts          # FileChangeSummary IPC schema
   runtime-events.ts       # ephemeral Run/stream events
-  ipc-contract.ts
+  ipc-contract.ts         # 旧导入路径的兼容出口
+  ipc/
+    application.ts        # bootstrap / window
+    configuration.ts      # config / shell / Provider catalog
+    projects.ts           # Project registry / workspace / ProjectModel
+    sessions.ts           # Session / message / file change
+    runs.ts               # Run / approval
+    agents.ts             # Agent execution / plan
+    terminals.ts          # Terminal commands
+    integrations.ts       # MCP / skills
+    diagnostics.ts        # trace / logs
+    common.ts             # success/error envelope 与共享 payload
+    events.ts             # push event envelopes
+    registry.ts           # 全量 channel 注册表组合
   config.ts               # 旧导入路径的兼容出口
   config/
     application.ts        # logging / workspace
@@ -123,13 +136,14 @@ shared/
     runtime.ts            # subagents / shell / limits / token estimation
     security.ts           # permission / privacy
     public-config.ts      # AppConfig 版本与八领域根组合
-    config-requests.ts    # IPC 拆分前的 config:set 过渡组合
   ids.ts
 ```
 
 `shared/` 不导入 Electron、Node.js、Vue、Pinia、SQLite driver 或 provider implementation。
 
-配置契约固定分为 application、assistant、integrations、models、network、providers、runtime、security 八个领域。领域叶模块可以依赖已有共享原语，models 可以组合 providers，但不得反向导入 `shared/config.ts`、根 `public-config.ts` 或 transport 组合。`public-config.ts` 是唯一 AppConfig 版本与根结构组合点；`config-requests.ts` 暂时承载尚未随 IPC 拆分迁出的写入 union，不计作配置领域。`shared/config.ts` 只保留既有导出兼容面，新代码应直接依赖所属领域。领域拆分本身不得改变 schemaVersion、持久化形状或 IPC wire schema。
+配置契约固定分为 application、assistant、integrations、models、network、providers、runtime、security 八个领域。领域叶模块可以依赖已有共享原语，models 可以组合 providers，但不得反向导入 `shared/config.ts`、根 `public-config.ts` 或 IPC transport。`public-config.ts` 是唯一 AppConfig 版本与根结构组合点；`ConfigSection` 与 `ConfigSetRequest` 归 configuration IPC 领域所有，`shared/config.ts` 只为旧调用方兼容转出。新配置代码应直接依赖所属领域。领域拆分本身不得改变 schemaVersion 或持久化形状。
+
+IPC 契约固定分为 application、configuration、projects、sessions、runs、agents、terminals、integrations、diagnostics 九个领域。一个领域可以为原注册顺序中的不同位置导出多个子注册表；`registry.ts` 按既有顺序把它们组合为唯一 `IPC_CONTRACTS`，并派生 `IpcChannel/IpcPayload/IpcResult`。`common.ts` 和 `events.ts` 是跨领域传输原语与 push envelope，不算额外领域。领域叶模块不得导入根 registry、events composer 或 `shared/ipc-contract.ts`；shared 内部生产代码直接依赖领域、registry 或 events，兼容出口只服务尚未迁移的跨层调用方。IPC 拆分不得改变 channel 集合、channel 顺序、IPC version 或任何 payload/result/event wire schema。
 
 ### 3.2 `electron/`
 

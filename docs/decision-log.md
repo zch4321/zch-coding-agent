@@ -264,6 +264,14 @@
 
 - 状态：已采纳并实现；这是代码所有权重构，不改变产品配置语义。
 - 领域边界：配置叶模块固定为 application、assistant、integrations、models、network、providers、runtime、security。`models` 可以组合 Provider 与既有 model-pool 原语；其他领域只依赖 process-neutral 的共享原语。领域叶模块不得导入兼容出口、根组合器或 transport 组合器。
-- 组合边界：`shared/config/public-config.ts` 是 AppConfig 版本、`PublicConfigSchema` 与整配置查询 helper 的唯一根组合点。`shared/config/config-requests.ts` 暂时保留 `ConfigSection` 和 `ConfigSetRequest`，明确属于待 IPC 领域化时迁出的 transport 组合，不作为第九个配置领域。
+- 组合边界：`shared/config/public-config.ts` 是 AppConfig 版本、`PublicConfigSchema` 与整配置查询 helper 的唯一根组合点。Config 拆分当时由 `shared/config/config-requests.ts` 暂时保留 `ConfigSection` 和 `ConfigSetRequest`，明确属于待 IPC 领域化时迁出的 transport 组合，不作为第九个配置领域。
 - 兼容边界：`shared/config.ts` 继续导出拆分前的全部公开符号，避免要求现有调用方在同一提交中机械迁移；新增领域代码直接导入 `shared/config/<domain>`。兼容出口不被领域模块反向依赖，待调用方自然收敛后再单独评估删除。
 - 契约边界：AppConfig 保持 v22，不增加迁移；`PublicConfigSchema` 与 `ConfigSetRequestSchema` 的序列化指纹保持不变。测试同时锁定 wire 指纹、兼容导出对象身份和八领域到根 schema 的组合关系。
+
+## 2026-08-19 — Shared IPC Contract 按九个领域拆分
+
+- 状态：已采纳并实现；这是 IPC schema 所有权与依赖方向重构，不改变 transport 行为。
+- 领域边界：channel contract 固定归入 application、configuration、projects、sessions、runs、agents、terminals、integrations、diagnostics 九个领域。跨领域共用的 success/error envelope 与空 payload 放在 `ipc/common.ts`，push event envelope 放在 `ipc/events.ts`；二者是 transport 原语，不增加领域数量。
+- 组合边界：每个领域按需要导出一个或多个 channel 子注册表，`ipc/registry.ts` 按拆分前的声明顺序组合唯一 `IPC_CONTRACTS`，并从它派生 channel、payload 与 result 类型。领域叶模块不得反向导入 registry、events composer 或兼容出口；shared 内部生产代码也不再依赖 `shared/ipc-contract.ts`。
+- Config 归属：原临时 `shared/config/config-requests.ts` 删除，`ConfigSection` 与 `ConfigSetRequest` 迁入 configuration IPC 领域。`shared/config.ts` 继续兼容转出这些旧符号，因此现有 ConfigStore 调用方无需随本次拆分机械迁移。
+- 兼容与契约：`shared/ipc-contract.ts` 保留拆分前全部公开导出，现有 Electron、Preload、Renderer 与测试调用方可以渐进迁移。IPC 保持 v1、68 个 channel 及原顺序；完整 channel payload/result 和 event envelope 的序列化指纹保持不变。测试锁定指纹、无重复/遗漏组合、对象身份与 import 边界。

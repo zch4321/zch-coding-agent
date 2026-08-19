@@ -1,8 +1,8 @@
 /**
  * Backwards-compatible config facade.
  *
- * New domain code should import from `shared/config/<domain>`; existing callers
- * can keep this entry while the wider IPC contract is split independently.
+ * New config code should import from `shared/config/<domain>`; existing callers
+ * can keep this entry, including legacy transport symbols forwarded from IPC.
  */
 export {
   AssistantLanguageSchema,
@@ -14,7 +14,7 @@ export {
   ConfigSetRequestSchema,
   type ConfigSection,
   type ConfigSetRequest,
-} from './config/config-requests'
+} from './ipc/configuration'
 export {
   ModelRolesConfigSchema,
   ModelsConfigSchema,

@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   APP_CONFIG_SCHEMA_VERSION,
-  ConfigSetRequestSchema,
   ModelCapabilityOverrideSchema as FacadeModelCapabilityOverrideSchema,
   PublicConfigSchema as FacadePublicConfigSchema,
 } from './config'
@@ -35,13 +34,10 @@ function schemaHash(schema: object): string {
 }
 
 describe('shared config contracts', () => {
-  it('preserves the v22 wire schema fingerprints across the domain split', () => {
+  it('preserves the v22 schema fingerprint across the domain split', () => {
     expect(APP_CONFIG_SCHEMA_VERSION).toBe(22)
     expect(schemaHash(PublicConfigSchema)).toBe(
       '084559018332e66420860fa4f14d83fe9417c1212d039c8ada2bbb9dd30420b4',
-    )
-    expect(schemaHash(ConfigSetRequestSchema)).toBe(
-      'da59070bd110ed83dcfb7016061a6b67c9ce80c3c101b84bfa829fb60db951e0',
     )
   })
 

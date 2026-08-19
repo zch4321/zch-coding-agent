@@ -1,13 +1,11 @@
 import type {
   AgentEventEnvelope,
   AgentExecutionEventEnvelope,
-  BackendNotificationEnvelope,
   DomainStateDelivery,
-  IpcChannel,
-  IpcPayload,
-  IpcResult,
   TerminalEventEnvelope,
-} from './ipc-contract'
+} from './ipc/events'
+import type { IpcChannel, IpcPayload, IpcResult } from './ipc/registry'
+import type { BackendNotificationEnvelope } from './notifications'
 
 export type IpcInvoke = <Channel extends IpcChannel>(
   channel: Channel,
