@@ -10,9 +10,12 @@ import type {
   PublicConfig,
 } from '../../shared/config'
 import { useModelRolesStore } from './model-roles'
-import { useAgentSettingsStore } from './agent-settings'
+import { useProviderSettingsStore } from './agent-settings'
 import { useModelPoolSettingsStore } from './model-pool-settings'
+import { useNetworkSettingsStore } from './network-settings'
 import { providerFormSignature } from './provider-form'
+import { useRuntimeSettingsStore } from './runtime-settings'
+import { useSecuritySettingsStore } from './security-settings'
 
 function provider(): ProviderPublicConfig {
   return {
@@ -30,7 +33,7 @@ function provider(): ProviderPublicConfig {
   }
 }
 
-describe('agent settings model pool', () => {
+describe('provider and domain settings stores', () => {
   beforeEach(() => setActivePinia(createPinia()))
   afterEach(() => {
     Reflect.deleteProperty(window, 'agentApi')
@@ -38,7 +41,7 @@ describe('agent settings model pool', () => {
   })
 
   it('uses enabled models for selectors while retaining the full transfer catalog', () => {
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     const configuredProvider = provider()
     settings.providers = [configuredProvider]
     useModelRolesStore().defaultModelProvider = configuredProvider.id
@@ -86,7 +89,7 @@ describe('agent settings model pool', () => {
   })
 
   it('loads discovered command Shells and persists the user selection', async () => {
-    const settings = useAgentSettingsStore()
+    const settings = useRuntimeSettingsStore()
     const profile = {
       id: 'powershell-7' as const,
       kind: 'powershell' as const,
@@ -139,8 +142,54 @@ describe('agent settings model pool', () => {
     )
   })
 
+  it('persists the network domain without involving Provider settings', async () => {
+    const settings = useNetworkSettingsStore()
+    settings.applyConfig(
+      { network: { httpProxy: { mode: 'off' } } } as PublicConfig,
+      ['network'],
+    )
+    const setConfig = vi.fn(async () => ({
+      version: 1 as const,
+      ok: true as const,
+      value: {
+        config: {
+          network: {
+            httpProxy: {
+              mode: 'manual' as const,
+              url: 'http://127.0.0.1:7890',
+            },
+          },
+        } as PublicConfig,
+      },
+    }))
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: { setConfig } as Partial<AgentApi> as AgentApi,
+    })
+
+    settings.networkConfig.httpProxy = {
+      mode: 'manual',
+      url: '  http://127.0.0.1:7890  ',
+    }
+    expect(settings.networkDirty).toBe(true)
+
+    await expect(settings.saveNetwork()).resolves.toBe(true)
+    expect(setConfig).toHaveBeenCalledWith({
+      version: 1,
+      kind: 'network',
+      value: {
+        httpProxy: { mode: 'manual', url: 'http://127.0.0.1:7890' },
+      },
+    })
+    expect(settings.networkConfig.httpProxy).toEqual({
+      mode: 'manual',
+      url: 'http://127.0.0.1:7890',
+    })
+    expect(settings.networkDirty).toBe(false)
+  })
+
   it('allows any known model to become main and enables it atomically', () => {
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     settings.providerForm.model = 'enabled-model'
     settings.providerForm.enabledModelIds = ['enabled-model']
     settings.modelProfiles = [
@@ -177,7 +226,7 @@ describe('agent settings model pool', () => {
   })
 
   it('persists a manually entered model through the dedicated config action', async () => {
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     const configuredProvider = provider()
     const modelOverride: ModelCapabilityOverride = {
       contextWindowTokens: 400_000,
@@ -254,7 +303,7 @@ describe('agent settings model pool', () => {
   })
 
   it('deletes a model through the dedicated config action', async () => {
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     const pool = useModelPoolSettingsStore()
     const configuredProvider = provider()
     settings.providers = [configuredProvider]
@@ -324,7 +373,7 @@ describe('agent settings model pool', () => {
   })
 
   it('keeps an unsaved Provider draft dirty after loading its model catalog', async () => {
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     const configuredProvider = provider()
     settings.providers = [configuredProvider]
     useModelRolesStore().defaultModelProvider = configuredProvider.id
@@ -370,8 +419,40 @@ describe('agent settings model pool', () => {
     expect(settings.modelCatalogFetchedAt).toBe('2026-08-03T00:00:00.000Z')
   })
 
+  it('rebases derived token defaults without discarding a Provider draft', () => {
+    const settings = useProviderSettingsStore()
+    const configuredProvider = provider()
+    settings.providers = [configuredProvider]
+    useModelRolesStore().defaultModelProvider = configuredProvider.id
+    settings.selectedProviderId = configuredProvider.id
+    settings.hydrateSelectedProviderForm()
+    settings.providerSavedSignature = providerFormSignature(
+      settings.providerForm,
+      settings.modelProfiles,
+    )
+    settings.providerForm.label = 'Unsaved Provider label'
+
+    settings.applyConfig(
+      {
+        models: { providers: [configuredProvider] },
+        limits: {
+          maxContextTokens: 512_000,
+          autoCompactTriggerPercent: 75,
+        },
+      } as PublicConfig,
+      ['limits'],
+    )
+
+    expect(settings.providerForm.label).toBe('Unsaved Provider label')
+    expect(settings.providerDirty).toBe(true)
+    expect(settings.modelProfiles[0]).toMatchObject({
+      contextWindowTokens: 512_000,
+      capabilitySource: 'default',
+    })
+  })
+
   it('maps saved annotations into profiles without changing token source semantics', () => {
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     const configuredProvider = provider()
     configuredProvider.modelOverrides = {
       'enabled-model': {
@@ -394,7 +475,7 @@ describe('agent settings model pool', () => {
   })
 
   it('updates and clears per-model annotations without touching capabilitySource', () => {
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     settings.modelProfiles = [
       {
         id: 'model-a',
@@ -426,7 +507,7 @@ describe('agent settings model pool', () => {
   })
 
   it('persists the global default mode and follows edits made during a save', async () => {
-    const settings = useAgentSettingsStore()
+    const settings = useSecuritySettingsStore()
     settings.applyConfig(
       {
         permission: {

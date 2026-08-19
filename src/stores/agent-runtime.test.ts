@@ -20,7 +20,7 @@ import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { SessionRecord } from '../../shared/session'
 import { useAgentReplicaStore } from './agent-replica'
 import { useAgentRuntimeStore } from './agent-runtime'
-import { useAgentSettingsStore } from './agent-settings'
+import { useProviderSettingsStore } from './agent-settings'
 import { useModelRolesStore } from './model-roles'
 import { useNotificationStore } from './notifications'
 
@@ -205,7 +205,7 @@ describe('agent runtime store', () => {
       model: 'provider-b-selected',
       reasoning: 'off',
     }
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     useModelRolesStore().defaultModelProvider = 'provider-a'
     settings.selectedProviderId = 'provider-a'
     settings.providers = [
@@ -258,7 +258,7 @@ describe('agent runtime store', () => {
 
   it('blocks sending when the kept reasoning effort is unsupported by the model', () => {
     const replica = seedReplica()
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     useModelRolesStore().defaultModelProvider = 'deepseek'
     settings.providers = [
       {
@@ -305,7 +305,7 @@ describe('agent runtime store', () => {
     const replica = useAgentReplicaStore()
     replica.projects = [project]
     replica.selectedProjectId = projectId
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     const roles = useModelRolesStore()
     roles.defaultModelProvider = 'provider-a'
     roles.defaultModelReasoning = 'low'
@@ -329,7 +329,7 @@ describe('agent runtime store', () => {
     const replica = useAgentReplicaStore()
     replica.projects = [project]
     replica.selectedProjectId = projectId
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     const configuredProvider = provider('provider-a', 'provider-a-default', [
       'provider-a-default',
     ])
@@ -363,7 +363,7 @@ describe('agent runtime store', () => {
     const providerB = provider('provider-b', 'model-b', ['model-b'])
     providerB.credentialConfigured = false
     providerB.credentialSource = 'none'
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     settings.providers = [providerA, providerB]
     const roles = useModelRolesStore()
     roles.defaultModelProvider = providerA.id
@@ -388,7 +388,7 @@ describe('agent runtime store', () => {
     const replica = useAgentReplicaStore()
     replica.projects = [project]
     replica.selectedProjectId = projectId
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     useModelRolesStore().defaultModelProvider = 'provider-a'
     settings.providers = [
       provider('provider-a', 'provider-a-default', ['provider-a-default']),
@@ -428,7 +428,7 @@ describe('agent runtime store', () => {
     const replica = useAgentReplicaStore()
     replica.projects = [project]
     replica.selectedProjectId = projectId
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     useModelRolesStore().defaultModelProvider = 'provider-a'
     settings.providers = [
       provider('provider-a', 'provider-a-default', ['provider-a-default']),
@@ -465,7 +465,7 @@ describe('agent runtime store', () => {
     const replica = useAgentReplicaStore()
     replica.projects = [project]
     replica.selectedProjectId = projectId
-    const settings = useAgentSettingsStore()
+    const settings = useProviderSettingsStore()
     useModelRolesStore().defaultModelProvider = 'provider-a'
     settings.providers = [
       provider('provider-a', 'provider-a-default', ['provider-a-default']),

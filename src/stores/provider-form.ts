@@ -15,8 +15,6 @@ export const DEFAULT_PROVIDER_FORM = {
   model: '',
   enabledModelIds: [] as string[],
   apiKey: '',
-  tokenEstimationMode: 'conservative' as 'conservative' | 'custom-bytes',
-  bytesPerToken: 3,
 }
 
 export type ProviderForm = typeof DEFAULT_PROVIDER_FORM
@@ -153,7 +151,5 @@ export function providerFormSignature(
         capability: model.capability ?? null,
       }))
       .sort((left, right) => left.id.localeCompare(right.id)),
-    tokenEstimationMode: form.tokenEstimationMode,
-    bytesPerToken: form.bytesPerToken,
   })
 }

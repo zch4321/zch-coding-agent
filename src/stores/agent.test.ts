@@ -3,9 +3,14 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useAgentStore } from './agent'
+import { useApplicationSettingsStore } from './application-settings'
+import { useAssistantSettingsStore } from './assistant-settings'
 import { useModelRolesStore } from './model-roles'
 import { useAgentRuntimeStore } from './agent-runtime'
-import { useAgentSettingsStore } from './agent-settings'
+import { useProviderSettingsStore } from './agent-settings'
+import { useNetworkSettingsStore } from './network-settings'
+import { useRuntimeSettingsStore } from './runtime-settings'
+import { useSecuritySettingsStore } from './security-settings'
 
 /** Members the facade deliberately does not route, grouped by reason. */
 const INTERNAL_MEMBERS = new Set([
@@ -14,21 +19,15 @@ const INTERNAL_MEMBERS = new Set([
   'error',
   'limitsSavedSignature',
   'subagentsSavedSignature',
+  'networkSavedSignature',
   'permissionSavedSignature',
+  'providerSavedSignature',
   'applyConfig',
   'persistRoles',
   // Settings actions only invoked internally or via direct store injection.
+  'acceptNotice',
+  'acceptTraceNotice',
   'loadSelectedProviderModelsOnEntry',
-  'saveWebSearchSettings',
-  'clearWebSearchCredential',
-  // Web search settings are consumed through direct settings-store injection
-  // (WebSearchSettingsPanel), never through the facade.
-  'webSearchCredentialConfigured',
-  'webSearchDirty',
-  'webSearchForm',
-  'webSearchSaveStatus',
-  'webSearchSavedSignature',
-  'webSearchSaving',
   // Runtime internal bookkeeping and action-only plumbing.
   'startPendingSessionId',
   'carryoversBySessionId',
@@ -58,18 +57,27 @@ describe('agent facade contract', () => {
 
   it('exposes every facade-consumed settings action through the facade', () => {
     const facade = useAgentStore()
-    const settings = useAgentSettingsStore()
     const missing: string[] = []
-    for (const key of Object.keys(settings)) {
-      if (key.startsWith('$') || key.startsWith('_')) continue
-      if (INTERNAL_MEMBERS.has(key)) continue
-      const value = Reflect.get(settings, key) as unknown
-      if (typeof value !== 'function') continue
-      if (typeof Reflect.get(facade, key) !== 'function') {
-        missing.push(key)
+    const settingsStores = [
+      useApplicationSettingsStore(),
+      useAssistantSettingsStore(),
+      useNetworkSettingsStore(),
+      useProviderSettingsStore(),
+      useRuntimeSettingsStore(),
+      useSecuritySettingsStore(),
+    ]
+    for (const settings of settingsStores) {
+      for (const key of Object.keys(settings)) {
+        if (key.startsWith('$') || key.startsWith('_')) continue
+        if (INTERNAL_MEMBERS.has(key)) continue
+        const value = Reflect.get(settings, key) as unknown
+        if (typeof value !== 'function') continue
+        if (typeof Reflect.get(facade, key) !== 'function') {
+          missing.push(key)
+        }
       }
     }
-    expect(missing).toEqual([])
+    expect(missing.sort()).toEqual([])
   })
 
   it('routes every facade-consumed runtime member through the facade', () => {
@@ -81,7 +89,12 @@ describe('agent facade contract', () => {
   })
 
   it('routes every facade-consumed settings member through the facade', () => {
-    expect(missingFacadeRoutes(useAgentSettingsStore())).toEqual([])
+    expect(missingFacadeRoutes(useApplicationSettingsStore())).toEqual([])
+    expect(missingFacadeRoutes(useAssistantSettingsStore())).toEqual([])
+    expect(missingFacadeRoutes(useNetworkSettingsStore())).toEqual([])
+    expect(missingFacadeRoutes(useProviderSettingsStore())).toEqual([])
+    expect(missingFacadeRoutes(useRuntimeSettingsStore())).toEqual([])
+    expect(missingFacadeRoutes(useSecuritySettingsStore())).toEqual([])
   })
 
   it('exposes the per-model annotation mutation used by provider settings', () => {

@@ -46,8 +46,10 @@ test.describe('Electron MCP gateway workflows', () => {
 
     await page.locator('.sidebar-settings-button').click()
     const navigation = page.getByRole('navigation', { name: '设置分类' })
-    await navigation.getByRole('menuitem', { name: 'MCP 连接' }).click()
-    const settings = page.locator('.settings-section')
+    await navigation.getByRole('menuitem', { name: '集成' }).click()
+    const settings = page
+      .locator('[data-settings-domain="integrations"] .settings-section')
+      .filter({ has: page.getByRole('heading', { name: 'MCP 连接' }) })
     await settings.getByRole('button', { name: '重新加载配置' }).click()
 
     const card = settings.locator('.skill-list article', {
@@ -157,11 +159,12 @@ test.describe('Electron MCP gateway workflows', () => {
     await page.locator('.sidebar-settings-button').click()
     await page
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('menuitem', { name: 'MCP 连接' })
+      .getByRole('menuitem', { name: '集成' })
       .click()
-    const activeCard = page.locator('.settings-section .skill-list article', {
-      hasText: 'E2E MCP fixture',
-    })
+    const activeCard = page.locator(
+      '[data-settings-domain="integrations"] .settings-section .skill-list article',
+      { hasText: 'E2E MCP fixture' },
+    )
     const firstStatus = await mcpStatus(page)
     await expect(
       activeCard.getByRole('button', { name: '重启连接' }),

@@ -2,9 +2,9 @@
 import { computed } from 'vue'
 import { NButton, NInput, NInputNumber, NSelect } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { useAgentSettingsStore } from '../../stores/agent-settings'
+import { useIntegrationSettingsStore } from '../../stores/integration-settings'
 
-const settings = useAgentSettingsStore()
+const settings = useIntegrationSettingsStore()
 const { t } = useI18n()
 
 const providerOptions = computed(() => [

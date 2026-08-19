@@ -1,11 +1,16 @@
 import type { Pinia } from 'pinia'
 import type { ProjectId } from '../../shared/ids'
 import { useAgentChangesStore } from './agent-changes'
+import { useApplicationSettingsStore } from './application-settings'
+import { useAssistantSettingsStore } from './assistant-settings'
 import { useModelRolesStore } from './model-roles'
 import { useAgentReplicaStore } from './agent-replica'
 import { useAgentRuntimeStore } from './agent-runtime'
-import { useAgentSettingsStore } from './agent-settings'
+import { useProviderSettingsStore } from './agent-settings'
 import { useAgentShellStore } from './agent-shell'
+import { useNetworkSettingsStore } from './network-settings'
+import { useRuntimeSettingsStore } from './runtime-settings'
+import { useSecuritySettingsStore } from './security-settings'
 import type { ProjectView, SessionView } from './agent-types'
 
 export type {
@@ -21,23 +26,49 @@ export type {
 
 type ShellStore = ReturnType<typeof useAgentShellStore>
 type ModelRolesStore = ReturnType<typeof useModelRolesStore>
-type SettingsStore = ReturnType<typeof useAgentSettingsStore>
+type ApplicationSettingsStore = ReturnType<typeof useApplicationSettingsStore>
+type AssistantSettingsStore = ReturnType<typeof useAssistantSettingsStore>
+type NetworkSettingsStore = ReturnType<typeof useNetworkSettingsStore>
+type ProviderSettingsStore = ReturnType<typeof useProviderSettingsStore>
+type RuntimeSettingsStore = ReturnType<typeof useRuntimeSettingsStore>
+type SecuritySettingsStore = ReturnType<typeof useSecuritySettingsStore>
 type ReplicaStore = ReturnType<typeof useAgentReplicaStore>
 type RuntimeStore = ReturnType<typeof useAgentRuntimeStore>
 type ChangesStore = ReturnType<typeof useAgentChangesStore>
 
+type HiddenSettingsMembers =
+  | '$id'
+  | '$state'
+  | '$patch'
+  | '$reset'
+  | '$subscribe'
+  | '$onAction'
+  | '$dispose'
+  | 'error'
+  | 'applyConfig'
+
 export type AgentFacade = Omit<ShellStore, '$id'> &
   Omit<ModelRolesStore, 'error' | '$id' | 'applyConfig' | 'persistRoles'> &
   Omit<
-    SettingsStore,
-    | 'error'
-    | '$id'
-    | 'limitsSavedSignature'
-    | 'subagentsSavedSignature'
-    | 'permissionSavedSignature'
-    | 'savePermissions'
-    | 'removeRememberedRule'
+    ProviderSettingsStore,
+    | HiddenSettingsMembers
+    | 'providerSavedSignature'
+    | 'loadSelectedProviderModelsOnEntry'
   > &
+  Omit<
+    RuntimeSettingsStore,
+    HiddenSettingsMembers | 'limitsSavedSignature' | 'subagentsSavedSignature'
+  > &
+  Omit<
+    SecuritySettingsStore,
+    | HiddenSettingsMembers
+    | 'permissionSavedSignature'
+    | 'acceptNotice'
+    | 'acceptTraceNotice'
+  > &
+  Omit<NetworkSettingsStore, HiddenSettingsMembers | 'networkSavedSignature'> &
+  Omit<ApplicationSettingsStore, HiddenSettingsMembers> &
+  Omit<AssistantSettingsStore, HiddenSettingsMembers> &
   Omit<ReplicaStore, 'error' | '$id' | 'projects'> &
   Omit<RuntimeStore, '$id' | 'draftModelSelection'> &
   Omit<ChangesStore, 'error' | '$id' | 'revertChange'> & {
@@ -60,48 +91,17 @@ const shellProperties = new Set<PropertyKey>([
   'bridgeAvailable',
   'unsubscribers',
 ])
-const settingsProperties = new Set<PropertyKey>([
-  'providerNoticeVersion',
-  'traceNoticeVersion',
-  'yoloNoticeVersion',
-  'activeProviderId',
+const providerSettingsProperties = new Set<PropertyKey>([
   'selectedProviderId',
   'providers',
-  'builtinPolicies',
-  'rememberedRules',
-  'defaultMode',
   'modelProfiles',
   'modelCatalogFetchedAt',
   'modelCatalogStale',
   'modelCatalogLoading',
   'pendingModelCatalogRefreshProviderId',
-  'limitsConfig',
-  'limitsSaving',
-  'limitsSaveStatus',
-  'subagentsConfig',
-  'subagentsSaving',
-  'subagentsSaveStatus',
-  'executionEnvironmentConfig',
-  'commandShellCatalog',
-  'commandShellLoading',
-  'commandShellSaving',
-  'commandShellSaveStatus',
   'providerForm',
-  'providerSavedSignature',
   'providerSaving',
   'providerSaveStatus',
-  'permissionForm',
-  'permissionsSaving',
-  'permissionsSaveStatus',
-  'permissionsDirty',
-  'loggingForm',
-  'loggingWarnings',
-  'assistantForm',
-  'assistantSaving',
-  'assistantSaveStatus',
-  'providerNoticeAccepted',
-  'traceNoticeAccepted',
-  'yoloNoticeAccepted',
   'credentialConfigured',
   'credentialSource',
   'selectedCredentialConfigured',
@@ -116,8 +116,51 @@ const settingsProperties = new Set<PropertyKey>([
   'activeModelProfile',
   'providerDirty',
   'providerRefreshAvailable',
+])
+const runtimeSettingsProperties = new Set<PropertyKey>([
+  'limitsConfig',
+  'limitsSaving',
+  'limitsSaveStatus',
   'limitsDirty',
+  'subagentsConfig',
+  'subagentsSaving',
+  'subagentsSaveStatus',
   'subagentsDirty',
+  'executionEnvironmentConfig',
+  'commandShellCatalog',
+  'commandShellLoading',
+  'commandShellSaving',
+  'commandShellSaveStatus',
+])
+const securitySettingsProperties = new Set<PropertyKey>([
+  'providerNoticeVersion',
+  'traceNoticeVersion',
+  'yoloNoticeVersion',
+  'builtinPolicies',
+  'rememberedRules',
+  'defaultMode',
+  'permissionForm',
+  'permissionsSaving',
+  'permissionsSaveStatus',
+  'permissionsDirty',
+  'providerNoticeAccepted',
+  'traceNoticeAccepted',
+  'yoloNoticeAccepted',
+])
+const networkSettingsProperties = new Set<PropertyKey>([
+  'networkConfig',
+  'networkSaving',
+  'networkSaveStatus',
+  'networkDirty',
+])
+const applicationSettingsProperties = new Set<PropertyKey>([
+  'loggingForm',
+  'loggingWarnings',
+])
+const assistantSettingsProperties = new Set<PropertyKey>([
+  'assistantForm',
+  'assistantSaving',
+  'assistantSaveStatus',
 ])
 const modelRolesProperties = new Set<PropertyKey>([
   'defaultModelProvider',
@@ -221,7 +264,12 @@ function sessionViews(replica: ReplicaStore): SessionView[] {
 /** Creates the facade that combines shell, settings, replica, and runtime Pinia stores. */
 export function useAgentStore(pinia?: Pinia): AgentFacade {
   const shell = useAgentShellStore(pinia)
-  const settings = useAgentSettingsStore(pinia)
+  const applicationSettings = useApplicationSettingsStore(pinia)
+  const assistantSettings = useAssistantSettingsStore(pinia)
+  const networkSettings = useNetworkSettingsStore(pinia)
+  const providerSettings = useProviderSettingsStore(pinia)
+  const runtimeSettings = useRuntimeSettingsStore(pinia)
+  const securitySettings = useSecuritySettingsStore(pinia)
   const modelRoles = useModelRolesStore(pinia)
   const replica = useAgentReplicaStore(pinia)
   const runtime = useAgentRuntimeStore(pinia)
@@ -244,38 +292,40 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     removeProject: runtime.removeProject,
     chooseWorkspace: runtime.chooseWorkspace,
     setMode: runtime.setMode,
-    hydrateSelectedProviderForm: settings.hydrateSelectedProviderForm,
-    selectProviderForEditing: settings.selectProviderForEditing,
-    resetSelectedProviderDraft: settings.resetSelectedProviderDraft,
+    hydrateSelectedProviderForm: providerSettings.hydrateSelectedProviderForm,
+    selectProviderForEditing: providerSettings.selectProviderForEditing,
+    resetSelectedProviderDraft: providerSettings.resetSelectedProviderDraft,
     setProviderModel: runtime.setProviderModel,
     setComposerProvider: runtime.setComposerProvider,
     setProviderReasoning: runtime.setProviderReasoning,
-    setProviderDraftModel: settings.setProviderModel,
-    addProviderModel: settings.addProviderModel,
-    deleteProviderModel: settings.deleteProviderModel,
-    updateModelConfiguration: settings.updateModelConfiguration,
-    updateModelAnnotation: settings.updateModelAnnotation,
-    loadProviderModels: settings.loadProviderModels,
-    enterProviderSettings: settings.enterProviderSettings,
-    refreshSelectedProviderModels: settings.refreshSelectedProviderModels,
+    setProviderDraftModel: providerSettings.setProviderModel,
+    addProviderModel: providerSettings.addProviderModel,
+    deleteProviderModel: providerSettings.deleteProviderModel,
+    updateModelConfiguration: providerSettings.updateModelConfiguration,
+    updateModelAnnotation: providerSettings.updateModelAnnotation,
+    loadProviderModels: providerSettings.loadProviderModels,
+    enterProviderSettings: providerSettings.enterProviderSettings,
+    refreshSelectedProviderModels:
+      providerSettings.refreshSelectedProviderModels,
 
-    createProvider: settings.createProvider,
-    copyProvider: settings.copyProvider,
-    deleteProvider: settings.deleteProvider,
-    saveProvider: settings.saveProvider,
+    createProvider: providerSettings.createProvider,
+    copyProvider: providerSettings.copyProvider,
+    deleteProvider: providerSettings.deleteProvider,
+    saveProvider: providerSettings.saveProvider,
     setDefaultModelRole: modelRoles.setDefaultModelRole,
     setAuxiliaryModelRole: modelRoles.setAuxiliaryModelRole,
-    clearCredential: settings.clearCredential,
-    saveLimits: settings.saveLimits,
-    saveSubagents: settings.saveSubagents,
-    loadCommandShells: settings.loadCommandShells,
-    setCommandShell: settings.setCommandShell,
-    savePermissions: settings.savePermissions,
-    removeRememberedRule: settings.removeRememberedRule,
-    saveLogging: settings.saveLogging,
-    acceptProviderNotice: settings.acceptProviderNotice,
-    acceptYoloNotice: settings.acceptYoloNotice,
-    saveAssistantSettings: runtime.saveAssistantSettings,
+    clearCredential: providerSettings.clearCredential,
+    saveLimits: runtimeSettings.saveLimits,
+    saveSubagents: runtimeSettings.saveSubagents,
+    loadCommandShells: runtimeSettings.loadCommandShells,
+    setCommandShell: runtimeSettings.setCommandShell,
+    saveNetwork: networkSettings.saveNetwork,
+    savePermissions: securitySettings.savePermissions,
+    removeRememberedRule: securitySettings.removeRememberedRule,
+    saveLogging: applicationSettings.saveLogging,
+    acceptProviderNotice: securitySettings.acceptProviderNotice,
+    acceptYoloNotice: securitySettings.acceptYoloNotice,
+    saveAssistantSettings: assistantSettings.saveAssistantSettings,
     updatePlanStatus: runtime.updatePlanStatus,
     approvePlan: runtime.approvePlan,
     rejectPlan: runtime.rejectPlan,
@@ -310,7 +360,12 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
   const targetStore = (property: PropertyKey): object | undefined => {
     if (shellProperties.has(property)) return shell
     if (modelRolesProperties.has(property)) return modelRoles
-    if (settingsProperties.has(property)) return settings
+    if (providerSettingsProperties.has(property)) return providerSettings
+    if (runtimeSettingsProperties.has(property)) return runtimeSettings
+    if (securitySettingsProperties.has(property)) return securitySettings
+    if (networkSettingsProperties.has(property)) return networkSettings
+    if (applicationSettingsProperties.has(property)) return applicationSettings
+    if (assistantSettingsProperties.has(property)) return assistantSettings
     if (replicaProperties.has(property)) return replica
     if (runtimeProperties.has(property)) return runtime
     if (changesProperties.has(property)) return changes

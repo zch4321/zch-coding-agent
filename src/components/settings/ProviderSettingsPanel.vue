@@ -31,7 +31,6 @@ import {
 } from '../../../shared/model-settings'
 import { useAgentStore } from '../../stores/agent'
 import { providerDraftAuxiliaryConflict } from '../../stores/provider-form'
-import ModelRolesSettingsSection from './ModelRolesSettingsSection.vue'
 import ProviderModelDeleteAction from './ProviderModelDeleteAction.vue'
 
 /** Maps each reasoning effort to its locale label key. */
@@ -116,10 +115,6 @@ const capabilityOptions = computed(() => [
   { label: t('settings.capabilityLight'), value: 'light' },
   { label: t('settings.capabilityStandard'), value: 'standard' },
   { label: t('settings.capabilityStrong'), value: 'strong' },
-])
-const tokenEstimationOptions = computed(() => [
-  { label: t('settings.tokenConservative'), value: 'conservative' },
-  { label: t('settings.tokenCustom'), value: 'custom-bytes' },
 ])
 const deleteProvider = computed(() =>
   agent.providers.find((provider) => provider.id === deleteProviderId.value),
@@ -409,12 +404,10 @@ function handleDropdownSelect(key: string | number, providerId: string) {
   <section class="settings-section provider-settings-section">
     <div class="settings-heading">
       <div>
-        <h2>{{ t('settings.modelsTitle') }}</h2>
-        <p>{{ t('settings.modelsHint') }}</p>
+        <h2>{{ t('settings.providerDomainTitle') }}</h2>
+        <p>{{ t('settings.providerDomainHint') }}</p>
       </div>
     </div>
-
-    <ModelRolesSettingsSection />
 
     <div class="settings-subsection">
       <div class="settings-heading provider-settings-heading">
@@ -609,30 +602,6 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             {{ t('settings.modelRefreshCredentialHint') }}
           </small>
         </label>
-        <div class="settings-inline settings-inline-equal">
-          <label class="settings-field">
-            <span>{{ t('settings.tokenEstimation') }}</span>
-            <NSelect
-              v-model:value="agent.providerForm.tokenEstimationMode"
-              :options="tokenEstimationOptions"
-            />
-          </label>
-          <label class="settings-field">
-            <span>{{ t('settings.bytesPerToken') }}</span>
-            <NInputNumber
-              v-model:value="agent.providerForm.bytesPerToken"
-              :disabled="
-                agent.providerForm.tokenEstimationMode !== 'custom-bytes'
-              "
-              :min="0.25"
-              :max="32"
-              :step="0.25"
-            />
-          </label>
-        </div>
-        <p class="settings-footnote">
-          {{ t('settings.tokenHint') }}
-        </p>
         <div class="provider-model-settings">
           <div class="provider-model-settings-title">
             <div>

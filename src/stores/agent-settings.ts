@@ -1,32 +1,21 @@
 import { defineStore } from 'pinia'
 import { IPC_VERSION } from '../../shared/channels'
 import type {
-  AssistantLanguage,
-  ConfigSection,
   ModelCapabilityOverride,
   ModelCapabilityLevel,
-  PermissionMode,
   ProviderPublicConfig,
-  PublicConfig,
-  ReasoningEffort,
-} from '../../shared/config'
-import { getProviderConfig } from '../../shared/config'
+} from '../../shared/config/providers'
 import {
-  PROVIDER_NOTICE_VERSION,
-  TRACE_NOTICE_VERSION,
-  YOLO_NOTICE_VERSION,
-} from '../../shared/notices'
-import { DEFAULT_ASSISTANT_PREFERENCES } from '../../shared/system-prompts'
+  getProviderConfig,
+  type PublicConfig,
+} from '../../shared/config/public-config'
+import type { ConfigSection } from '../../shared/ipc/configuration'
+import type { ReasoningEffort } from '../../shared/reasoning'
 import {
   DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
   resolveModelTokenSettings,
 } from '../../shared/model-settings'
-import { nowNotice, toUiRememberedRules } from './config-mapping'
-import type {
-  CommandShellCatalog,
-  CommandShellSelection,
-} from '../../shared/command-shell'
-import type { UiModelProfile, UiRememberedRule } from './agent-types'
+import type { UiModelProfile } from './agent-types'
 import { useModelRolesStore } from './model-roles'
 import { useModelPoolSettingsStore } from './model-pool-settings'
 import {
@@ -34,6 +23,7 @@ import {
   providerFormSignature,
   providerModelOverrides,
 } from './provider-form'
+import { useRuntimeSettingsStore } from './runtime-settings'
 
 const providerSaveOperations = new WeakMap<object, Promise<boolean>>()
 
@@ -106,97 +96,47 @@ function limitsSignature(limits: PublicConfig['limits'] | undefined): string {
   return limits ? JSON.stringify(limits) : ''
 }
 
-function subagentsSignature(
-  subagents: PublicConfig['subagents'] | undefined,
-): string {
-  return subagents ? JSON.stringify(subagents) : ''
+function rebaseDerivedModelTokenSettings(
+  models: UiModelProfile[],
+  provider: ProviderPublicConfig | undefined,
+  limits: PublicConfig['limits'],
+): void {
+  for (const model of models) {
+    if (model.capabilitySource === 'override') continue
+    const catalogModel = provider?.modelCatalog.find(
+      (candidate) => candidate.id === model.id,
+    )
+    Object.assign(
+      model,
+      resolveModelTokenSettings({
+        contextWindowTokens:
+          catalogModel?.contextWindowTokens ?? limits.maxContextTokens,
+        maxOutputTokens: catalogModel?.maxOutputTokens,
+        compactTriggerPercent: limits.autoCompactTriggerPercent,
+      }),
+    )
+    model.capabilitySource = catalogModel?.contextWindowTokens
+      ? 'provider'
+      : 'default'
+  }
 }
 
-interface PermissionDraft {
-  defaultMode: PermissionMode
-  builtinPolicies: boolean
-  rememberedRules: UiRememberedRule[]
-  sensitiveMode: 'off' | 'warn' | 'confirm'
-  pathGlobs: string
-  contentPatterns: string
-}
-
-function permissionSignature(draft: PermissionDraft): string {
-  return JSON.stringify(draft)
-}
-
-export const useAgentSettingsStore = defineStore('agent-settings', {
+export const useProviderSettingsStore = defineStore('provider-settings', {
   state: () => ({
     error: '',
-    providerNoticeVersion: '',
-    traceNoticeVersion: '',
-    yoloNoticeVersion: '',
     selectedProviderId: 'deepseek',
     providers: [] as ProviderPublicConfig[],
-    builtinPolicies: true,
-    rememberedRules: [] as UiRememberedRule[],
-    defaultMode: 'readonly' as PermissionMode,
     modelProfiles: [] as UiModelProfile[],
     modelCatalogFetchedAt: undefined as string | undefined,
     modelCatalogStale: true,
     modelCatalogLoading: false,
     pendingModelCatalogRefreshProviderId: undefined as string | undefined,
-    limitsConfig: undefined as PublicConfig['limits'] | undefined,
-    limitsSavedSignature: '',
-    limitsSaving: false,
-    limitsSaveStatus: '',
-    subagentsConfig: undefined as PublicConfig['subagents'] | undefined,
-    subagentsSavedSignature: '',
-    subagentsSaving: false,
-    subagentsSaveStatus: '',
-    executionEnvironmentConfig: {
-      commandShell: 'auto',
-    } as PublicConfig['executionEnvironment'],
-    commandShellCatalog: undefined as CommandShellCatalog | undefined,
-    commandShellLoading: false,
-    commandShellSaving: false,
-    commandShellSaveStatus: '',
     providerForm: structuredClone(DEFAULT_PROVIDER_FORM),
     providerSavedSignature: providerFormSignature(DEFAULT_PROVIDER_FORM),
     providerSaving: false,
     providerSaveStatus: '',
-    permissionForm: {
-      sensitiveMode: 'confirm' as 'off' | 'warn' | 'confirm',
-      pathGlobs: '',
-      contentPatterns: '',
-    },
-    permissionSavedSignature: '',
-    permissionsSaving: false,
-    permissionsSaveStatus: '',
-    loggingForm: {
-      enabled: false,
-      retentionDays: 14,
-      maxTotalMegabytes: 100,
-    },
-    loggingWarnings: [] as string[],
-    assistantForm: {
-      language: 'zh-CN' as AssistantLanguage,
-      preferences: structuredClone(DEFAULT_ASSISTANT_PREFERENCES),
-    },
-    assistantSaving: false,
-    assistantSaveStatus: '',
-    webSearchForm: {
-      provider: 'brave' as PublicConfig['webSearch']['provider'],
-      count: 5,
-      apiKey: '',
-    },
-    webSearchCredentialConfigured: false,
-    webSearchSaving: false,
-    webSearchSaveStatus: '',
-    webSearchSavedSignature: 'brave|5',
   }),
   getters: {
-    providerNoticeAccepted: (state) =>
-      state.providerNoticeVersion === PROVIDER_NOTICE_VERSION,
-    traceNoticeAccepted: (state) =>
-      state.traceNoticeVersion === TRACE_NOTICE_VERSION,
-    yoloNoticeAccepted: (state) =>
-      state.yoloNoticeVersion === YOLO_NOTICE_VERSION,
     activeProvider: (state) =>
       state.providers.find(
         (provider) => provider.id === useModelRolesStore().defaultModelProvider,
@@ -300,26 +240,9 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           (provider) => provider.id === state.selectedProviderId,
         )?.credentialConfigured,
       ),
-    permissionsDirty: (state) =>
-      permissionSignature({
-        defaultMode: state.defaultMode,
-        builtinPolicies: state.builtinPolicies,
-        rememberedRules: state.rememberedRules,
-        ...state.permissionForm,
-      }) !== state.permissionSavedSignature,
-    limitsDirty: (state) =>
-      limitsSignature(state.limitsConfig) !== state.limitsSavedSignature,
-    subagentsDirty: (state) =>
-      subagentsSignature(state.subagentsConfig) !==
-      state.subagentsSavedSignature,
-    webSearchDirty: (state) =>
-      Boolean(
-        state.webSearchForm.apiKey.trim() ||
-        `${state.webSearchForm.provider}|${state.webSearchForm.count}` !==
-          state.webSearchSavedSignature,
-      ),
   },
   actions: {
+    /** Hydrates the selected Provider draft and its complete model profiles. */
     hydrateSelectedProviderForm(config?: PublicConfig) {
       const providers = config?.models.providers ?? this.providers
       const defaultProviderId =
@@ -340,7 +263,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.providerForm.model = provider.model
       this.providerForm.enabledModelIds = [...provider.enabledModelIds]
       this.providerForm.apiKey = ''
-      const limits = config?.limits ?? this.limitsConfig
+      const limits = config?.limits ?? useRuntimeSettingsStore().limitsConfig
       this.modelProfiles = providerModelProfiles(
         provider,
         limits?.maxContextTokens ?? DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
@@ -351,24 +274,12 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         !provider.modelCatalogFetchedAt ||
         Date.now() - new Date(provider.modelCatalogFetchedAt).getTime() >
           24 * 60 * 60_000
-
-      if (limits) {
-        this.providerForm.tokenEstimationMode = limits.tokenEstimation.mode
-        this.providerForm.bytesPerToken = limits.tokenEstimation.bytesPerToken
-      }
     },
+    /** Hydrates Provider-owned state when relevant config sections change. */
     applyConfig(config: PublicConfig, sections: ConfigSection[] = ['all']) {
       const includes = (section: ConfigSection) =>
         sections.includes('all') || sections.includes(section)
-
-      if (includes('privacy')) {
-        this.providerNoticeVersion =
-          config.privacy.providerNoticeAccepted?.version ?? ''
-        this.traceNoticeVersion =
-          config.privacy.traceNoticeAccepted?.version ?? ''
-        this.yoloNoticeVersion =
-          config.privacy.yoloNoticeAccepted?.version ?? ''
-      }
+      const providerDraftWasDirty = this.providerDirty
 
       if (includes('providers')) {
         this.providers = structuredClone(config.models.providers)
@@ -381,158 +292,29 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         }
       }
 
-      if (includes('limits')) {
-        this.limitsConfig = structuredClone(config.limits)
-        this.limitsSavedSignature = limitsSignature(config.limits)
-        this.providerForm.tokenEstimationMode =
-          config.limits.tokenEstimation.mode
-        this.providerForm.bytesPerToken =
-          config.limits.tokenEstimation.bytesPerToken
-      }
-
-      if (includes('subagents')) {
-        this.subagentsConfig = structuredClone(config.subagents)
-        this.subagentsSavedSignature = subagentsSignature(config.subagents)
-      }
-
-      if (includes('executionEnvironment')) {
-        this.executionEnvironmentConfig = structuredClone(
-          config.executionEnvironment,
-        )
-      }
-
-      if (includes('providers') || includes('limits')) {
+      if (includes('providers')) {
         this.hydrateSelectedProviderForm(config)
         this.providerSavedSignature = providerFormSignature(
           this.providerForm,
           this.modelProfiles,
         )
-      }
-
-      if (includes('permission')) {
-        this.defaultMode = config.permission.defaultMode
-        this.builtinPolicies = config.permission.builtinPolicies
-        this.rememberedRules = toUiRememberedRules(config)
-        this.permissionForm.sensitiveMode = config.permission.sensitiveData.mode
-        this.permissionForm.pathGlobs =
-          config.permission.sensitiveData.pathGlobs.join('\n')
-        this.permissionForm.contentPatterns =
-          config.permission.sensitiveData.contentPatterns.join('\n')
-        this.permissionSavedSignature = permissionSignature({
-          defaultMode: this.defaultMode,
-          builtinPolicies: this.builtinPolicies,
-          rememberedRules: this.rememberedRules,
-          ...this.permissionForm,
-        })
-      }
-
-      if (includes('logging')) {
-        this.loggingForm.enabled = config.logging.enabled
-        this.loggingForm.retentionDays = config.logging.retentionDays
-        this.loggingForm.maxTotalMegabytes = Math.max(
-          1,
-          Math.round(config.logging.maxTotalBytes / 1_000_000),
+      } else if (includes('limits')) {
+        rebaseDerivedModelTokenSettings(
+          this.modelProfiles,
+          config.models.providers.find(
+            (provider) => provider.id === this.selectedProviderId,
+          ),
+          config.limits,
         )
-      }
-
-      if (includes('assistant')) {
-        this.assistantForm = structuredClone(config.assistant)
-      }
-
-      if (includes('all') || includes('webSearch')) {
-        this.webSearchForm.provider = config.webSearch.provider
-        this.webSearchForm.count = config.webSearch.count
-        this.webSearchForm.apiKey = ''
-        this.webSearchCredentialConfigured =
-          config.webSearch.credentialConfigured
-        this.webSearchSavedSignature = `${config.webSearch.provider}|${config.webSearch.count}`
-      }
-    },
-    async saveAssistantSettings(language?: AssistantLanguage) {
-      const bridge = window.agentApi
-      const targetLanguage = language ?? this.assistantForm.language
-
-      if (!bridge) {
-        this.assistantForm.language = targetLanguage
-        return true
-      }
-
-      this.assistantSaving = true
-      this.assistantSaveStatus = ''
-      const result = await bridge.setConfig({
-        version: IPC_VERSION,
-        kind: 'assistant',
-        value: {
-          language: targetLanguage,
-          preferences: {
-            'zh-CN': this.assistantForm.preferences['zh-CN'].trim(),
-            'en-US': this.assistantForm.preferences['en-US'].trim(),
-          },
-        },
-      })
-      this.assistantSaving = false
-
-      if (!result.ok) {
-        this.error = result.error.message
-        this.assistantSaveStatus = result.error.message
-        return false
-      }
-
-      this.applyConfig(result.value.config, ['assistant'])
-      this.assistantSaveStatus = 'saved'
-      return true
-    },
-    async loadCommandShells(refresh = false): Promise<boolean> {
-      const bridge = window.agentApi
-      if (!bridge || this.commandShellLoading) return false
-      this.commandShellLoading = true
-      this.commandShellSaveStatus = ''
-      try {
-        const result = await bridge.listCommandShells({
-          version: IPC_VERSION,
-          ...(refresh ? { refresh: true } : {}),
-        })
-        if (!result.ok) {
-          this.error = result.error.message
-          this.commandShellSaveStatus = result.error.message
-          return false
+        if (!providerDraftWasDirty) {
+          this.providerSavedSignature = providerFormSignature(
+            this.providerForm,
+            this.modelProfiles,
+          )
         }
-        this.commandShellCatalog = structuredClone(result.value)
-        return true
-      } finally {
-        this.commandShellLoading = false
       }
     },
-    async setCommandShell(
-      commandShell: CommandShellSelection,
-    ): Promise<boolean> {
-      const bridge = window.agentApi
-      if (!bridge || this.commandShellSaving) return false
-      const previous = this.executionEnvironmentConfig.commandShell
-      this.executionEnvironmentConfig.commandShell = commandShell
-      this.commandShellSaving = true
-      this.commandShellSaveStatus = ''
-      try {
-        const result = await bridge.setConfig({
-          version: IPC_VERSION,
-          kind: 'execution-environment',
-          value: { commandShell },
-        })
-        if (!result.ok) {
-          this.executionEnvironmentConfig.commandShell = previous
-          this.error = result.error.message
-          this.commandShellSaveStatus = result.error.message
-          return false
-        }
-        this.applyConfig(result.value.config, ['executionEnvironment'])
-        if (await this.loadCommandShells()) {
-          this.commandShellSaveStatus = 'Saved'
-        }
-        return true
-      } finally {
-        this.commandShellSaving = false
-      }
-    },
+    /** Selects one Provider card for editing and optionally loads its catalog. */
     async selectProviderForEditing(providerId: string, refreshModels = true) {
       if (!this.providers.some((provider) => provider.id === providerId)) {
         return false
@@ -547,6 +329,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       if (refreshModels) await this.loadProviderModels(false)
       return true
     },
+    /** Restores the selected Provider draft to its last persisted values. */
     resetSelectedProviderDraft() {
       this.hydrateSelectedProviderForm()
       this.providerSavedSignature = providerFormSignature(
@@ -554,6 +337,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         this.modelProfiles,
       )
     },
+    /** Selects a Provider default model and ensures it remains enabled. */
     setProviderModel(model: string) {
       this.providerForm.model = model
       if (!model) return
@@ -563,17 +347,16 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       }
 
       if (!this.modelProfiles.some((candidate) => candidate.id === model)) {
+        const limits = useRuntimeSettingsStore().limitsConfig
         const fallbackContext =
-          this.limitsConfig?.maxContextTokens ??
-          DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS
+          limits?.maxContextTokens ?? DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS
         this.modelProfiles.push({
           id: model,
           availability: 'custom',
           capabilitySource: 'default',
           ...resolveModelTokenSettings({
             contextWindowTokens: fallbackContext,
-            compactTriggerPercent:
-              this.limitsConfig?.autoCompactTriggerPercent ?? 80,
+            compactTriggerPercent: limits?.autoCompactTriggerPercent ?? 80,
           }),
         })
         this.modelProfiles.sort((left, right) =>
@@ -661,7 +444,8 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
           compactThresholdTokens: model.compactThresholdTokens,
           maxOutputTokens: model.maxOutputTokens,
           compactTriggerPercent:
-            this.limitsConfig?.autoCompactTriggerPercent ?? 80,
+            useRuntimeSettingsStore().limitsConfig?.autoCompactTriggerPercent ??
+            80,
         }),
       )
       model.capabilitySource = 'override'
@@ -799,11 +583,12 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.error = ''
       return this.loadProviderModels(true)
     },
+    /** Creates an empty generic Provider using the current runtime limits. */
     async createProvider() {
       const bridge = window.agentApi
       if (!bridge) return false
 
-      const limits = this.limitsConfig
+      const limits = useRuntimeSettingsStore().limitsConfig
       if (!limits) {
         this.error = 'Provider settings are not initialized.'
         return false
@@ -834,6 +619,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.applyConfig(result.value.config, ['providers', 'limits'])
       return true
     },
+    /** Copies a Provider into a new independently editable configuration. */
     async copyProvider(sourceProviderId?: string) {
       const bridge = window.agentApi
       const sourceId = sourceProviderId ?? this.selectedProviderId
@@ -858,6 +644,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       this.applyConfig(result.value.config, ['providers'])
       return true
     },
+    /** Deletes one Provider and reconciles dependent model routes. */
     async deleteProvider(providerId: string) {
       const bridge = window.agentApi
       if (!bridge || this.providers.length <= 1) return false
@@ -888,6 +675,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       useModelPoolSettingsStore().applyExternalConfig(result.value.config)
       return true
     },
+    /** Persists Provider drafts serially while preserving edits made in flight. */
     async saveProvider(): Promise<boolean> {
       const bridge = window.agentApi
       if (!bridge) return false
@@ -906,7 +694,8 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
 
         try {
           while (this.providerDirty) {
-            const limits = this.limitsConfig
+            const runtimeSettings = useRuntimeSettingsStore()
+            const limits = runtimeSettings.limitsConfig
             if (!limits) {
               this.error = 'Provider settings are not initialized.'
               return false
@@ -936,13 +725,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
               providerId: draft.providerId,
               label: draft.label,
               providerType: draft.providerType,
-              limits: {
-                ...limitsDraft,
-                tokenEstimation: {
-                  mode: draft.tokenEstimationMode,
-                  bytesPerToken: draft.bytesPerToken,
-                },
-              },
+              limits: limitsDraft,
               ...(apiKey ? { apiKey } : {}),
             })
             if (!saved.ok) {
@@ -961,11 +744,11 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
             )
             useModelRolesStore().applyConfig(saved.value.config, ['models'])
             useModelPoolSettingsStore().applyExternalConfig(saved.value.config)
-            if (limitsSignature(this.limitsConfig) === limitsDraftSignature) {
-              this.limitsConfig = structuredClone(saved.value.config.limits)
-              this.limitsSavedSignature = limitsSignature(
-                saved.value.config.limits,
-              )
+            if (
+              limitsSignature(runtimeSettings.limitsConfig) ===
+              limitsDraftSignature
+            ) {
+              runtimeSettings.applyConfig(saved.value.config, ['limits'])
             }
 
             if (this.selectedProviderId === draft.providerId) {
@@ -1001,6 +784,7 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
       providerSaveOperations.set(this, trackedOperation)
       return trackedOperation
     },
+    /** Clears the selected Provider credential and reconciles dependent routes. */
     async clearCredential() {
       const bridge = window.agentApi
       if (!bridge) return
@@ -1014,248 +798,6 @@ export const useAgentSettingsStore = defineStore('agent-settings', {
         this.applyConfig(result.value.config, ['providers'])
         useModelPoolSettingsStore().applyExternalConfig(result.value.config)
       } else this.error = result.error.message
-    },
-    async saveWebSearchSettings() {
-      const bridge = window.agentApi
-      if (!bridge) return
-      this.webSearchSaving = true
-      try {
-        const apiKey = this.webSearchForm.apiKey.trim()
-        if (apiKey) {
-          const keyResult = await bridge.setConfig({
-            version: IPC_VERSION,
-            kind: 'web-search-credential',
-            action: 'set',
-            apiKey,
-          })
-          if (!keyResult.ok) {
-            this.error = keyResult.error.message
-            return false
-          }
-          this.applyConfig(keyResult.value.config, ['webSearch'])
-        }
-
-        const result = await bridge.setConfig({
-          version: IPC_VERSION,
-          kind: 'web-search',
-          provider: this.webSearchForm.provider,
-          count: this.webSearchForm.count,
-        })
-        if (result.ok) {
-          this.applyConfig(result.value.config, ['webSearch'])
-          this.webSearchSaveStatus = 'saved'
-          return true
-        }
-        this.error = result.error.message
-        return false
-      } finally {
-        this.webSearchSaving = false
-      }
-    },
-    async clearWebSearchCredential() {
-      const bridge = window.agentApi
-      if (!bridge) return
-      const result = await bridge.setConfig({
-        version: IPC_VERSION,
-        kind: 'web-search-credential',
-        action: 'clear',
-      })
-      if (result.ok) this.applyConfig(result.value.config, ['webSearch'])
-      else this.error = result.error.message
-    },
-    async saveLimits() {
-      const bridge = window.agentApi
-      if (!bridge || !this.limitsConfig || this.limitsSaving) return false
-
-      this.limitsSaving = true
-      this.limitsSaveStatus = ''
-      try {
-        while (this.limitsConfig) {
-          const draft = cloneJson(this.limitsConfig)
-          const draftSignature = limitsSignature(draft)
-          const result = await bridge.setConfig({
-            version: IPC_VERSION,
-            kind: 'limits',
-            value: draft,
-          })
-
-          if (!result.ok) {
-            this.error = result.error.message
-            this.limitsSaveStatus = result.error.message
-            return false
-          }
-
-          this.limitsSavedSignature = draftSignature
-          if (limitsSignature(this.limitsConfig) !== draftSignature) continue
-
-          this.applyConfig(result.value.config, ['limits'])
-          this.limitsSaveStatus = 'Saved'
-          return true
-        }
-        return false
-      } finally {
-        this.limitsSaving = false
-      }
-    },
-    async saveSubagents() {
-      const bridge = window.agentApi
-      if (!bridge || !this.subagentsConfig || this.subagentsSaving) return false
-
-      this.subagentsSaving = true
-      this.subagentsSaveStatus = ''
-      try {
-        while (this.subagentsConfig) {
-          const draft = cloneJson(this.subagentsConfig)
-          const draftSignature = subagentsSignature(draft)
-          const result = await bridge.setConfig({
-            version: IPC_VERSION,
-            kind: 'subagents',
-            value: draft,
-          })
-
-          if (!result.ok) {
-            this.error = result.error.message
-            this.subagentsSaveStatus = result.error.message
-            return false
-          }
-
-          this.subagentsSavedSignature = draftSignature
-          if (subagentsSignature(this.subagentsConfig) !== draftSignature) {
-            continue
-          }
-
-          this.applyConfig(result.value.config, ['subagents'])
-          this.subagentsSaveStatus = 'Saved'
-          return true
-        }
-        return false
-      } finally {
-        this.subagentsSaving = false
-      }
-    },
-    async savePermissions() {
-      const bridge = window.agentApi
-      if (!bridge || this.permissionsSaving) return false
-      const lines = (value: string) =>
-        value
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)
-      this.permissionsSaving = true
-      this.permissionsSaveStatus = ''
-      this.error = ''
-      try {
-        while (true) {
-          const draft = cloneJson<PermissionDraft>({
-            defaultMode: this.defaultMode,
-            builtinPolicies: this.builtinPolicies,
-            rememberedRules: this.rememberedRules,
-            ...this.permissionForm,
-          })
-          const draftSignature = permissionSignature(draft)
-          const result = await bridge.setConfig({
-            version: IPC_VERSION,
-            kind: 'permission',
-            defaultMode: draft.defaultMode,
-            builtinPolicies: draft.builtinPolicies,
-            rememberedRules: draft.rememberedRules.map((rule) => ({
-              ...rule,
-              argConstraints: JSON.parse(rule.argConstraints),
-            })),
-            sensitiveData: {
-              mode: draft.sensitiveMode,
-              pathGlobs: lines(draft.pathGlobs),
-              contentPatterns: lines(draft.contentPatterns),
-            },
-          })
-          if (!result.ok) {
-            this.error = result.error.message
-            this.permissionsSaveStatus = result.error.message
-            return false
-          }
-
-          this.permissionSavedSignature = draftSignature
-          const currentSignature = permissionSignature({
-            defaultMode: this.defaultMode,
-            builtinPolicies: this.builtinPolicies,
-            rememberedRules: this.rememberedRules,
-            ...this.permissionForm,
-          })
-          if (currentSignature !== draftSignature) continue
-
-          this.applyConfig(result.value.config, ['permission'])
-          this.permissionsSaveStatus = 'saved'
-          return true
-        }
-      } finally {
-        this.permissionsSaving = false
-      }
-    },
-    async removeRememberedRule(ruleId: string) {
-      this.rememberedRules = this.rememberedRules.filter(
-        (rule) => rule.id !== ruleId,
-      )
-      return this.savePermissions()
-    },
-    async saveLogging() {
-      const bridge = window.agentApi
-      if (!bridge) return
-
-      if (this.loggingForm.enabled && !this.traceNoticeAccepted) {
-        const notice = await bridge.setConfig({
-          version: IPC_VERSION,
-          kind: 'privacy',
-          traceNoticeAccepted: nowNotice(TRACE_NOTICE_VERSION),
-        })
-        if (!notice.ok) {
-          this.error = notice.error.message
-          return
-        }
-        this.applyConfig(notice.value.config, ['privacy'])
-      }
-
-      const result = await bridge.setConfig({
-        version: IPC_VERSION,
-        kind: 'logging',
-        value: {
-          enabled: this.loggingForm.enabled,
-          retentionDays: Math.max(1, this.loggingForm.retentionDays),
-          maxTotalBytes: Math.max(
-            1_024,
-            Math.round(this.loggingForm.maxTotalMegabytes * 1_000_000),
-          ),
-        },
-      })
-      if (result.ok) {
-        this.applyConfig(result.value.config, ['logging'])
-        this.loggingWarnings = [...(result.value.warnings ?? [])]
-      } else this.error = result.error.message
-    },
-    async acceptProviderNotice() {
-      const bridge = window.agentApi
-      if (!bridge) return
-      const result = await bridge.setConfig({
-        version: IPC_VERSION,
-        kind: 'privacy',
-        providerNoticeAccepted: nowNotice(PROVIDER_NOTICE_VERSION),
-      })
-      if (result.ok) this.applyConfig(result.value.config, ['privacy'])
-      else this.error = result.error.message
-    },
-    async acceptYoloNotice() {
-      const bridge = window.agentApi
-      if (!bridge) return false
-      const result = await bridge.setConfig({
-        version: IPC_VERSION,
-        kind: 'privacy',
-        yoloNoticeAccepted: nowNotice(YOLO_NOTICE_VERSION),
-      })
-      if (result.ok) {
-        this.applyConfig(result.value.config, ['privacy'])
-        return true
-      }
-      this.error = result.error.message
-      return false
     },
   },
 })

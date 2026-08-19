@@ -291,6 +291,16 @@ const enUS = {
     },
   },
   settings: {
+    configurationGroup: 'Configuration',
+    managementGroup: 'Management',
+    assistantDomain: 'Assistant',
+    modelsDomain: 'Models',
+    providersDomain: 'Model services',
+    runtimeDomain: 'Runtime',
+    securityDomain: 'Security',
+    integrationsDomain: 'Integrations',
+    networkDomain: 'Network',
+    applicationDomain: 'Application & diagnostics',
     general: 'General',
     project: 'Project',
     archived: 'Archived conversations',
@@ -307,7 +317,7 @@ const enUS = {
     languageHint: 'The language is stored locally and applies immediately.',
     chinese: '简体中文',
     english: 'English',
-    appearanceTitle: 'General',
+    appearanceTitle: 'Assistant',
     systemPromptZh: 'Chinese system prompt',
     systemPromptEn: 'English system prompt',
     systemPromptHint:
@@ -353,7 +363,10 @@ const enUS = {
     loadMoreArchived: 'Load more archived conversations',
     modelsTitle: 'Models',
     modelsHint:
-      'Choose the default model for new conversations and the auxiliary model for background tasks, and manage model providers.',
+      'Choose the default model for new conversations, the auxiliary model for background tasks, and the model pool used by Swarm scheduling.',
+    providerDomainTitle: 'Model services',
+    providerDomainHint:
+      'Manage Provider connections, credentials, model catalogs, and per-model capability and reasoning annotations.',
     defaultModelsTitle: 'Default models',
     defaultModelsHint:
       'The main model runs new conversations by default; the auxiliary model powers background tasks like conversation titling and automatic approval.',
@@ -433,8 +446,6 @@ const enUS = {
     capabilityStandard: 'Standard',
     capabilityStrong: 'Strong',
     mainModelTag: 'Main model',
-    tokenEstimation: 'Token estimation',
-    bytesPerToken: 'UTF-8 bytes per token',
     reasoning: 'Reasoning effort',
     reasoningOff: 'Off',
     reasoningLow: 'Low',
@@ -459,13 +470,9 @@ const enUS = {
     autosavePending: 'Waiting to autosave…',
     selectMainModel: 'Select a main model',
     selectMainModelHint: 'Refresh the model catalog or add a model first.',
-    tokenConservative: 'Conservative default',
-    tokenCustom: 'Custom UTF-8 bytes/token',
     modelProfile:
       '{availability} model · {source} capabilities · {tokens} maximum context tokens',
     customModel: 'Custom model with conservative capability defaults.',
-    tokenHint:
-      'Token estimation plans context usage. Byte, line and result limits remain enforced independently.',
     credentialEnv: 'Using DEEPSEEK_API_KEY from the main-process environment.',
     credentialStored: 'A credential is stored securely.',
     credentialNone: 'No credential is configured.',
@@ -485,6 +492,20 @@ const enUS = {
     webSearchClearCredential: 'Clear key',
     webSearchCredentialStored: 'A search API key is stored securely.',
     webSearchCredentialNone: 'No search API key is configured.',
+    networkTitle: 'Network',
+    networkHint:
+      'Configure the proxy used by model requests, web search, and other HTTP integrations.',
+    networkProxyMode: 'HTTP proxy',
+    networkProxyModeHint:
+      'Off connects directly, system proxy follows the host environment, and manual mode uses the URL below.',
+    networkProxyOff: 'Off',
+    networkProxySystem: 'Use system proxy',
+    networkProxyManual: 'Manual',
+    networkProxyUrl: 'Proxy URL',
+    networkProxyUrlPlaceholder: 'http://127.0.0.1:7890',
+    networkProxyUrlHint: 'HTTP and HTTPS proxy URLs are supported.',
+    networkProxyUrlRequired: 'Enter a proxy URL for manual mode.',
+    saveNetwork: 'Save network settings',
   },
   limits: {
     title: 'Limits',

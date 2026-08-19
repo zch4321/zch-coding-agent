@@ -1,17 +1,14 @@
 import { defineStore } from 'pinia'
 import type { AgentEvent, RunStatus } from '../../shared/agent-events'
 import { IPC_VERSION } from '../../shared/channels'
-import type {
-  AssistantLanguage,
-  ConfigSection,
-  PermissionMode,
-  PublicConfig,
-} from '../../shared/config'
+import type { PublicConfig } from '../../shared/config/public-config'
+import type { PermissionMode } from '../../shared/config/security'
 import type {
   ContextAttachmentChip,
   ContextAttachmentKind,
 } from '../../shared/context'
 import type { MessageId, ProjectId, RunId, SessionId } from '../../shared/ids'
+import type { ConfigSection } from '../../shared/ipc/configuration'
 import {
   evaluateModelRouteCompatibility,
   type ModelSelection,
@@ -46,9 +43,15 @@ import {
 } from './agent-runtime-helpers'
 import { registerRuntimeSubscriptions } from './agent-runtime-subscriptions'
 import { projectConversationTurns } from './conversation-timeline'
-import { useAgentSettingsStore } from './agent-settings'
+import { useApplicationSettingsStore } from './application-settings'
+import { useAssistantSettingsStore } from './assistant-settings'
+import { useIntegrationSettingsStore } from './integration-settings'
 import { useModelRolesStore } from './model-roles'
 import { useModelPoolSettingsStore } from './model-pool-settings'
+import { useNetworkSettingsStore } from './network-settings'
+import { useProviderSettingsStore } from './agent-settings'
+import { useRuntimeSettingsStore } from './runtime-settings'
+import { useSecuritySettingsStore } from './security-settings'
 import { useAgentShellStore } from './agent-shell'
 import { useNotificationStore } from './notifications'
 import { useAgentExecutionStore } from './agent-executions'
@@ -173,7 +176,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     composerModelSelection(state): ModelSelection {
       const replica = useAgentReplicaStore()
-      const settings = useAgentSettingsStore()
+      const settings = useProviderSettingsStore()
       const sessionSelection = replica.selectedSession?.modelSelection
       if (sessionSelection) return sessionSelection
 
@@ -212,7 +215,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       return this.composerModelSelection.model
     },
     composerCredentialConfigured(): boolean {
-      const settings = useAgentSettingsStore()
+      const settings = useProviderSettingsStore()
       return Boolean(
         settings.providers.find(
           (provider) => provider.id === this.composerProviderId,
@@ -228,7 +231,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
      * blocks sending until the user picks a supported one.
      */
     composerReasoningValid(): boolean {
-      const settings = useAgentSettingsStore()
+      const settings = useProviderSettingsStore()
       const selection = this.composerModelSelection
       const provider = settings.providers.find(
         (candidate) => candidate.id === selection.providerId,
@@ -239,7 +242,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       )
     },
     composerModelOptions(): Array<{ label: string; value: string }> {
-      const settings = useAgentSettingsStore()
+      const settings = useProviderSettingsStore()
       const selection = this.composerModelSelection
       const provider = settings.providers.find(
         (candidate) => candidate.id === selection.providerId,
@@ -279,7 +282,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     async initialize() {
       const shell = useAgentShellStore()
-      const settings = useAgentSettingsStore()
+      const security = useSecuritySettingsStore()
       const replica = useAgentReplicaStore()
       const executions = useAgentExecutionStore()
       const api = window.agentApi
@@ -306,7 +309,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         config.ok ? config.value.config.workspace.lastOpened : undefined,
       )
       this.mode =
-        replica.selectedSession?.permissionMode ?? settings.defaultMode
+        replica.selectedSession?.permissionMode ?? security.defaultMode
       this.hydrateRuntime(replica.selectedRuntime)
       if (replica.selectedSessionId) {
         await executions.loadSession(replica.selectedSessionId)
@@ -317,7 +320,13 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       useAgentShellStore().disposeSubscriptions()
     },
     applyConfig(config: PublicConfig, sections: ConfigSection[] = ['all']) {
-      useAgentSettingsStore().applyConfig(config, sections)
+      useApplicationSettingsStore().applyConfig(config, sections)
+      useAssistantSettingsStore().applyConfig(config, sections)
+      useIntegrationSettingsStore().applyConfig(config, sections)
+      useNetworkSettingsStore().applyConfig(config, sections)
+      useProviderSettingsStore().applyConfig(config, sections)
+      useRuntimeSettingsStore().applyConfig(config, sections)
+      useSecuritySettingsStore().applyConfig(config, sections)
       useModelRolesStore().applyConfig(config, sections)
       useModelPoolSettingsStore().applyConfig(config, sections)
     },
@@ -374,7 +383,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       }
       replica.beginDraft(project.id)
       this.draftModelSelection = undefined
-      this.mode = useAgentSettingsStore().defaultMode
+      this.mode = useSecuritySettingsStore().defaultMode
       this.input = ''
       this.contextAttachments = []
     },
@@ -594,7 +603,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       if (removingSelectedProject) {
         this.mode =
           replica.selectedSession?.permissionMode ??
-          useAgentSettingsStore().defaultMode
+          useSecuritySettingsStore().defaultMode
         this.hydrateRuntime(replica.selectedRuntime)
         this.draftModelSelection = undefined
         this.input = ''
@@ -645,7 +654,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     /** Switches the current Session or draft route to another provider's default model. */
     setComposerProvider(providerId: string) {
-      const settings = useAgentSettingsStore()
+      const settings = useProviderSettingsStore()
       const provider = settings.providers.find(
         (candidate) => candidate.id === providerId,
       )
@@ -999,7 +1008,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     async approvePlan() {
       if (!(await this.updatePlanStatus('active'))) return false
-      const language = useAgentSettingsStore().assistantForm.language
+      const language = useAssistantSettingsStore().assistantForm.language
       return this.sendMessage({
         text:
           language === 'zh-CN'
@@ -1058,9 +1067,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       if (overlay.approval) return 'awaitingApproval'
       if (overlay.runId) return overlay.status
       return undefined
-    },
-    saveAssistantSettings(language?: AssistantLanguage) {
-      return useAgentSettingsStore().saveAssistantSettings(language)
     },
     handleAgentEvent(event: AgentEvent) {
       handleRuntimeAgentEvent(this, event)
