@@ -4,6 +4,15 @@ import type { ContextAttachmentChip } from '../../shared/context'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ToolApprovalSummary } from '../../shared/agent-events'
 
+export type RunActivity =
+  | 'requesting_model'
+  | 'reasoning'
+  | 'output'
+  | 'calling_tool'
+  | 'executing_tool'
+  | 'awaiting_approval'
+  | 'cancelling'
+
 export interface UiLlmUsageRecord {
   scope: 'main' | 'approval' | 'title' | 'compression' | 'subagent'
   providerId: string
@@ -69,6 +78,7 @@ export interface ConversationTurn {
   tools: ToolActivity[]
   reasoningSegments: ReasoningSegment[]
   messages: ChatMessage[]
+  runActivity?: RunActivity
   finalAssistantMessageId?: string
 }
 

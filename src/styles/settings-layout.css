@@ -71,6 +71,12 @@
   padding: 24px 28px 32px;
 }
 
+.settings-domain-page {
+  display: grid;
+  min-width: 0;
+  gap: 28px;
+}
+
 .settings-section {
   display: grid;
   gap: 17px;

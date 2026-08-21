@@ -167,6 +167,18 @@ code {
   white-space: nowrap;
 }
 
+.reasoning-disclosure-header {
+  width: 100%;
+  min-height: 22px;
+  justify-content: space-between;
+}
+
+.run-activity {
+  color: var(--text-secondary);
+  line-height: 16px;
+  white-space: nowrap;
+}
+
 .timeline-disclosure-list {
   width: 100%;
   min-width: 0;

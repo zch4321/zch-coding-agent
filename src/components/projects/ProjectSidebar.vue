@@ -50,13 +50,10 @@ function displayConversationTitle(title: string) {
   return title === 'New conversation' ? t('app.newConversation') : title
 }
 function conversationBadges(conversation: {
-  id: string
   parentId?: string
   importedFrom?: string
 }): string[] {
   const badges: string[] = []
-  const status = agent.conversationStatus(conversation.id)
-  if (status) badges.push(t(`chat.status.${status}`))
   if (conversation.parentId) badges.push(t('chat.forkedBadge'))
   if (conversation.importedFrom) badges.push(t('chat.importedBadge'))
   return badges

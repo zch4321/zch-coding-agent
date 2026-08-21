@@ -63,8 +63,8 @@ test.describe.serial('Electron settings workflows', () => {
     const settingsNavigation = page.getByRole('navigation', {
       name: '设置分类',
     })
-    await settingsNavigation.getByRole('menuitem', { name: '通用' }).click()
-    const general = page.locator('.settings-section')
+    await settingsNavigation.getByRole('menuitem', { name: '助手' }).click()
+    const general = page.locator('[data-settings-domain="assistant"]')
     await expect(general.getByText('中文助手偏好')).toBeVisible()
     await expect(general.getByText('英文助手偏好')).toBeVisible()
     const zhPrompt = general
@@ -100,7 +100,49 @@ test.describe.serial('Electron settings workflows', () => {
     await general.getByRole('button', { name: '保存助手偏好' }).click()
     await expect(saveStatus).toHaveText('已保存')
 
-    await settingsNavigation.getByRole('menuitem', { name: '运行限制' }).click()
+    await settingsNavigation.getByRole('menuitem', { name: '网络' }).click()
+    const network = page.locator('[data-settings-domain="network"]')
+    await network.locator('.n-select').click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('手动配置', { exact: true })
+      .click()
+    await network
+      .getByPlaceholder('http://127.0.0.1:7890')
+      .fill('http://127.0.0.1:7890')
+    await network.getByRole('button', { name: '保存网络设置' }).click()
+    await expect(network.locator('.settings-save-status')).toHaveText('已保存')
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          const api = Reflect.get(window, 'agentApi') as {
+            getConfig(payload: unknown): Promise<{
+              value?: {
+                config: {
+                  network: {
+                    httpProxy: { mode: string; url?: string }
+                  }
+                }
+              }
+            }>
+          }
+          const result = await api.getConfig({
+            version: 1,
+            section: 'network',
+          })
+          return result.value?.config.network.httpProxy
+        }),
+      )
+      .toEqual({ mode: 'manual', url: 'http://127.0.0.1:7890' })
+    await network.locator('.n-select').click()
+    await page
+      .locator('.n-select-menu:visible .n-base-select-option')
+      .getByText('关闭', { exact: true })
+      .click()
+    await network.getByRole('button', { name: '保存网络设置' }).click()
+    await expect(network.locator('.settings-save-status')).toHaveText('已保存')
+
+    await settingsNavigation.getByRole('menuitem', { name: '运行' }).click()
     const limits = page.locator('.limits-settings-section')
     const saveLimits = limits
       .locator('.settings-heading')
@@ -195,8 +237,10 @@ test.describe.serial('Electron settings workflows', () => {
       )
       .toBe(300_000)
 
-    await settingsNavigation.getByRole('menuitem', { name: 'Agents' }).click()
-    const agents = page.locator('.settings-section')
+    const agents = page
+      .locator('[data-settings-domain="runtime"]')
+      .locator('.settings-section')
+      .filter({ has: page.getByRole('heading', { name: 'Agents' }) })
     await expect(agents.getByRole('heading', { name: 'Agents' })).toBeVisible()
     await expect(
       agents.getByText('子 Agent 会发起额外的模型请求', { exact: false }),
@@ -250,8 +294,8 @@ test.describe.serial('Electron settings workflows', () => {
     await subagentsSwitch.click()
     await expect(subagentSaveStatus).toHaveText('已保存')
 
-    await settingsNavigation.getByRole('menuitem', { name: '模型' }).click()
-    const provider = page.locator('.settings-section')
+    await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
+    const provider = page.locator('[data-settings-domain="providers"]')
 
     // Widen the window so the desktop six-column model grid (with header)
     // applies; narrow widths intentionally switch to the stacked layout.
@@ -268,7 +312,7 @@ test.describe.serial('Electron settings workflows', () => {
     ).toBeVisible()
     await expect(
       provider.getByText('Token 估算方式', { exact: true }),
-    ).toBeVisible()
+    ).toHaveCount(0)
     await expect(
       provider.getByText('Provider Type', { exact: true }),
     ).toBeVisible()
@@ -393,12 +437,6 @@ test.describe.serial('Electron settings workflows', () => {
     )
     await expect.poll(() => fakeProvider.modelCatalogRequests).toBe(1)
     await expect(refreshModels).toBeEnabled()
-    await expect(
-      provider.getByTestId('default-model-reasoning-select'),
-    ).toContainText('高')
-    await expect(
-      provider.getByTestId('auxiliary-model-reasoning-select'),
-    ).toContainText('高')
     const modelTransfer = provider.getByTestId('provider-model-transfer')
     await expect(
       modelTransfer.getByText('Provider 模型', { exact: true }),
@@ -533,16 +571,33 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       settingsNavigation.getByRole('menuitem', { name: '自动审批' }),
     ).toHaveCount(0)
-    await settingsNavigation.getByRole('menuitem', { name: '权限' }).click()
-    const permissions = page.locator('.settings-section')
+    await settingsNavigation.getByRole('menuitem', { name: '安全' }).click()
+    const permissions = page.locator('[data-settings-domain="security"]')
     await expect(
       permissions.getByText(
         '自动模式使用辅助模型（未配置时使用当前模型）进行审批',
       ),
     ).toBeVisible()
 
-    await settingsNavigation.getByRole('menuitem', { name: '模型' }).click()
-    const modelsSection = page.locator('.settings-section')
+    await settingsNavigation
+      .getByRole('menuitem', { name: '模型', exact: true })
+      .click()
+    const modelsSection = page.locator('[data-settings-domain="models"]')
+    await expect(
+      modelsSection.getByTestId('default-model-reasoning-select'),
+    ).toContainText('高')
+    await expect(
+      modelsSection.getByTestId('auxiliary-model-reasoning-select'),
+    ).toContainText('高')
+    const [defaultModelTop, auxiliaryModelTop] = await Promise.all(
+      [
+        modelsSection.getByTestId('default-model-role-select'),
+        modelsSection.getByTestId('auxiliary-model-role-select'),
+      ].map((select) =>
+        select.evaluate((element) => element.getBoundingClientRect().top),
+      ),
+    )
+    expect(Math.abs(defaultModelTop - auxiliaryModelTop)).toBeLessThanOrEqual(1)
     const auxiliaryField = modelsSection.getByTestId(
       'auxiliary-model-role-select',
     )
@@ -556,7 +611,7 @@ test.describe.serial('Electron settings workflows', () => {
       modelsSection.getByTestId('model-roles-save-status'),
     ).toHaveText('已保存')
 
-    await settingsNavigation.getByRole('menuitem', { name: '模型' }).click()
+    await settingsNavigation.getByRole('menuitem', { name: '模型服务' }).click()
     await expect.poll(() => fakeProvider.modelCatalogRequests).toBe(2)
     await expect(
       page.locator('.provider-model-settings-row', { hasText: providerModel }),
@@ -594,8 +649,8 @@ test.describe.serial('Electron settings workflows', () => {
     const navigation = page.getByRole('navigation', {
       name: '设置分类',
     })
-    await navigation.getByRole('menuitem', { name: '模型' }).click()
-    const provider = page.locator('.settings-section')
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    const provider = page.locator('[data-settings-domain="providers"]')
 
     await expect(provider.locator('.provider-card')).toHaveCount(2)
     const altCard = provider.locator('.provider-card', { hasText: 'E2E Alt' })
@@ -708,8 +763,8 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.locator('.sidebar-settings-button').click()
     const navigation = page.getByRole('navigation', { name: '设置分类' })
-    await navigation.getByRole('menuitem', { name: '模型' }).click()
-    const provider = page.locator('.settings-section')
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    const provider = page.locator('[data-settings-domain="providers"]')
     await provider
       .locator('.provider-card', { hasText: 'E2E Annotated' })
       .click()
@@ -765,7 +820,7 @@ test.describe.serial('Electron settings workflows', () => {
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.locator('.sidebar-settings-button').click()
-    await navigation.getByRole('menuitem', { name: '模型' }).click()
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
     await provider
       .locator('.provider-card', { hasText: 'E2E Annotated' })
       .click()
@@ -784,18 +839,22 @@ test.describe.serial('Electron settings workflows', () => {
         hasText: 'annotated-model',
       })
       .click()
-    await provider.getByTestId('default-model-role-select').click()
+    await navigation
+      .getByRole('menuitem', { name: '模型', exact: true })
+      .click()
+    const models = page.locator('[data-settings-domain="models"]')
+    await models.getByTestId('default-model-role-select').click()
     await page
       .locator('.n-select-menu:visible .n-base-select-option', {
         hasText: 'E2E Annotated / annotated-model',
       })
       .click()
     await expect(
-      provider.getByText('当前模型不支持这个思考深度', { exact: false }),
+      models.getByText('当前模型不支持这个思考深度', { exact: false }),
     ).toBeVisible()
-    await provider.getByTestId('default-model-reasoning-select').click()
+    await models.getByTestId('default-model-reasoning-select').click()
     await clickSelectOption('中')
-    await expect(provider.getByTestId('model-roles-save-status')).toHaveText(
+    await expect(models.getByTestId('model-roles-save-status')).toHaveText(
       '已保存',
     )
     await page.locator('.settings-back-button').click()
@@ -829,7 +888,7 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(reasoningSelectBox).not.toHaveClass(/error-status/u)
   })
 
-  test('configures and persists the model pool from Agents settings', async () => {
+  test('configures and persists the model pool from Models settings', async () => {
     const credentialReady = await page.evaluate(async () => {
       const api = Reflect.get(window, 'agentApi') as {
         setConfig(payload: unknown): Promise<{ ok: boolean }>
@@ -849,7 +908,9 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.locator('.sidebar-settings-button').click()
     const navigation = page.getByRole('navigation', { name: '设置分类' })
-    await navigation.getByRole('menuitem', { name: 'Agents' }).click()
+    await navigation
+      .getByRole('menuitem', { name: '模型', exact: true })
+      .click()
     const pool = page.locator('.model-pool-section')
 
     await expect(pool.getByRole('heading', { name: '模型池' })).toBeVisible()
@@ -917,7 +978,9 @@ test.describe.serial('Electron settings workflows', () => {
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.locator('.sidebar-settings-button').click()
-    await navigation.getByRole('menuitem', { name: 'Agents' }).click()
+    await navigation
+      .getByRole('menuitem', { name: '模型', exact: true })
+      .click()
     await expect(
       target.getByText('E2E Annotated', { exact: true }),
     ).toBeVisible()
@@ -973,8 +1036,8 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await page.locator('.sidebar-settings-button').click()
     const navigation = page.getByRole('navigation', { name: '设置分类' })
-    await navigation.getByRole('menuitem', { name: '模型' }).click()
-    const provider = page.locator('.settings-section')
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
+    const provider = page.locator('[data-settings-domain="providers"]')
     await provider
       .locator('.provider-card', { hasText: 'E2E Annotated' })
       .click()
@@ -1000,15 +1063,20 @@ test.describe.serial('Electron settings workflows', () => {
 
     // Changing only the auxiliary role clears the conflict and must restart
     // the paused Provider autosave watcher.
-    const auxiliaryField = provider.getByTestId('auxiliary-model-role-select')
+    await navigation
+      .getByRole('menuitem', { name: '模型', exact: true })
+      .click()
+    const models = page.locator('[data-settings-domain="models"]')
+    const auxiliaryField = models.getByTestId('auxiliary-model-role-select')
     await auxiliaryField.click()
     await page
       .locator('.n-select-menu:visible .n-base-select-option')
       .getByText('跟随当前模型（默认）', { exact: true })
       .click()
-    await expect(provider.getByTestId('model-roles-save-status')).toHaveText(
+    await expect(models.getByTestId('model-roles-save-status')).toHaveText(
       '已保存',
     )
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
     await expect(provider.getByTestId('provider-save-status')).toHaveText(
       '已保存',
     )
@@ -1023,15 +1091,19 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(provider.getByTestId('provider-save-status')).toHaveText(
       '已保存',
     )
+    await navigation
+      .getByRole('menuitem', { name: '模型', exact: true })
+      .click()
     await auxiliaryField.click()
     await page
       .locator('.n-select-menu:visible .n-base-select-option', {
         hasText: 'second-model',
       })
       .click()
-    await expect(provider.getByTestId('model-roles-save-status')).toHaveText(
+    await expect(models.getByTestId('model-roles-save-status')).toHaveText(
       '已保存',
     )
+    await navigation.getByRole('menuitem', { name: '模型服务' }).click()
 
     // Disabling the persisted auxiliary model must also pause autosave before
     // the backend rejects the Provider update.
@@ -1077,8 +1149,11 @@ test.describe.serial('Electron settings workflows', () => {
     const navigation = page.getByRole('navigation', {
       name: '设置分类',
     })
-    await navigation.getByRole('menuitem', { name: '技能' }).click()
-    const skills = page.locator('.settings-section')
+    await navigation.getByRole('menuitem', { name: '集成' }).click()
+    const integrations = page.locator('[data-settings-domain="integrations"]')
+    const skills = integrations
+      .locator('.settings-section')
+      .filter({ has: page.getByRole('heading', { name: '技能' }) })
     await expect(skills.getByText('未找到有效技能。')).toBeVisible()
     await expect(
       skills.getByPlaceholder('https://example.com/skill.md'),
@@ -1095,8 +1170,9 @@ test.describe.serial('Electron settings workflows', () => {
       skills.getByText('E2E skill without optional trigger'),
     ).toBeVisible()
 
-    await navigation.getByRole('menuitem', { name: 'MCP 连接' }).click()
-    const mcp = page.locator('.settings-section')
+    const mcp = integrations
+      .locator('.settings-section')
+      .filter({ has: page.getByRole('heading', { name: 'MCP 连接' }) })
     await expect(mcp.getByRole('heading', { name: 'MCP 连接' })).toBeVisible()
     await expect(mcp.getByText('配置中没有 MCP server。')).toBeVisible()
     await expect(
@@ -1278,8 +1354,8 @@ test.describe.serial('Electron settings workflows', () => {
       'utf8',
     )
 
-    await navigation.getByRole('menuitem', { name: '日志' }).click()
-    const logging = page.locator('.settings-section')
+    await navigation.getByRole('menuitem', { name: '应用与诊断' }).click()
+    const logging = page.locator('[data-settings-domain="application"]')
     await expect(
       logging.getByRole('button', { name: '打开日志目录' }),
     ).toBeVisible()

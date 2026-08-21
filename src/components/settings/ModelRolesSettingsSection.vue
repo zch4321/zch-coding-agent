@@ -204,7 +204,7 @@ watch(
       <h3>{{ t('settings.defaultModelsTitle') }}</h3>
       <p>{{ t('settings.defaultModelsHint') }}</p>
     </div>
-    <div class="settings-inline settings-inline-equal">
+    <div class="settings-inline settings-inline-equal model-role-fields">
       <label class="settings-field">
         <span>{{ t('settings.defaultModelRole') }}</span>
         <div class="settings-inline settings-inline-equal">

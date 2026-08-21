@@ -7,6 +7,7 @@ import {
   providerMessageText,
   providerModel,
   providerToolNames,
+  reasoningDelta,
   textDelta,
   toolCallDelta,
   toolCallsDelta,
@@ -61,7 +62,6 @@ test.describe('Electron chat and tool workflows', () => {
     })
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
-
     const composer = page.locator('.message-input-area textarea')
     await expect(composer).toBeEnabled()
     await composer.fill('Summarize @notes.md')
@@ -215,6 +215,170 @@ test.describe('Electron chat and tool workflows', () => {
       .innerText()
     expect(durableResultText).toBe(liveResultText)
     expect(durableResultText).not.toContain('call:e2e-write')
+  })
+
+  test('shows one stable status while reasoning, writing, and running a tool', async () => {
+    fakeProvider.queue(
+      [
+        reasoningDelta('Inspect the request.'),
+        textDelta('Preparing the command.'),
+        toolCallDelta({
+          id: 'call:e2e-status',
+          name: 'run_command',
+          args: {
+            mode: 'process',
+            executable: 'node',
+            args: [
+              '-e',
+              "setTimeout(() => process.stdout.write('done'), 1500)",
+            ],
+          },
+        }),
+      ],
+      { chunkDelayMs: 1_500 },
+    )
+    fakeProvider.queue([textDelta('Status sequence completed.')], {
+      chunkDelayMs: 1_500,
+    })
+    fakeProvider.armResponseGate([1])
+
+    await configureApp({
+      page,
+      providerBaseURL: fakeProvider.origin,
+      workspace,
+      defaultMode: 'confirm',
+      reasoningEffort: 'high',
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page.evaluate(() => {
+      const events: string[] = []
+      const rendered: string[] = []
+      Reflect.set(window, '__e2eRunActivityEvents', events)
+      Reflect.set(window, '__e2eRenderedRunActivities', rendered)
+      const captureRenderedActivity = () => {
+        const elements = document.querySelectorAll('[data-run-activity]')
+        const activity = elements
+          .item(elements.length - 1)
+          ?.getAttribute('data-run-activity')
+        if (activity && rendered.at(-1) !== activity) rendered.push(activity)
+      }
+      new MutationObserver(captureRenderedActivity).observe(document.body, {
+        attributes: true,
+        childList: true,
+        subtree: true,
+        attributeFilter: ['data-run-activity'],
+      })
+      const api = Reflect.get(window, 'agentApi') as {
+        onAgentEvent(
+          listener: (envelope: {
+            event: { type: string; activity?: string }
+          }) => void,
+        ): () => void
+      }
+      api.onAgentEvent(({ event }) => {
+        if (event.type === 'assistant.activity' && event.activity) {
+          events.push(event.activity)
+        }
+      })
+    })
+
+    const composer = page.locator('.message-input-area textarea')
+    await composer.fill('Exercise every visible run status')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    await expect.poll(() => fakeProvider.requests.length).toBe(1)
+
+    const activity = page.locator('.run-activity').last()
+    await expect(activity).toHaveAttribute(
+      'data-run-activity',
+      'requesting_model',
+    )
+    await expect(activity).toContainText('请求模型')
+    await expect(activity.locator('.run-activity-spinner')).toBeVisible()
+    const spinnerAlignment = await activity.evaluate((element) => {
+      const spinner = element.querySelector('.run-activity-spinner')
+      const label = Array.from(element.children).find(
+        (child) => child !== spinner,
+      )
+      if (!spinner || !label) throw new Error('Run activity layout is missing')
+      const spinnerRect = spinner.getBoundingClientRect()
+      const labelRect = label.getBoundingClientRect()
+      return {
+        width: spinnerRect.width,
+        height: spinnerRect.height,
+        centerOffset:
+          spinnerRect.top +
+          spinnerRect.height / 2 -
+          (labelRect.top + labelRect.height / 2),
+      }
+    })
+    expect(spinnerAlignment.width).toBe(12)
+    expect(spinnerAlignment.height).toBe(12)
+    expect(Math.abs(spinnerAlignment.centerOffset)).toBeLessThanOrEqual(1)
+    await expect(page.locator('.conversation-header .run-status')).toHaveCount(
+      0,
+    )
+    await expect(
+      page.locator('.project-sidebar .n-tag', { hasText: '运行中' }),
+    ).toHaveCount(0)
+
+    fakeProvider.releaseResponseGate()
+    const approval = page.locator('.approval-card')
+    await expect(approval).toBeVisible()
+    await expect(activity).toHaveAttribute(
+      'data-run-activity',
+      'awaiting_approval',
+    )
+    await expect(activity).toContainText('等待审批')
+    expect(
+      await page.evaluate(
+        () => Reflect.get(window, '__e2eRunActivityEvents') as string[],
+      ),
+    ).toEqual(['reasoning', 'output', 'tool_call'])
+    expect(
+      await page.evaluate(
+        () => Reflect.get(window, '__e2eRenderedRunActivities') as string[],
+      ),
+    ).toEqual([
+      'requesting_model',
+      'reasoning',
+      'output',
+      'calling_tool',
+      'executing_tool',
+      'awaiting_approval',
+    ])
+
+    const turnChildren = await page
+      .locator('.conversation-turn')
+      .last()
+      .locator(':scope > article')
+      .evaluateAll((elements) => elements.map((element) => element.className))
+    expect(
+      turnChildren.findIndex((value) => value.includes('reasoning-group')),
+    ).toBeLessThan(
+      turnChildren.findIndex((value) => value.includes('tool-call-group')),
+    )
+
+    fakeProvider.armResponseGate([2])
+    await approval.getByRole('button', { name: '批准', exact: true }).click()
+    await expect(activity).toHaveAttribute(
+      'data-run-activity',
+      'executing_tool',
+    )
+    await expect(activity).toContainText('执行工具')
+
+    await expect.poll(() => fakeProvider.requests.length).toBe(2)
+    await expect(activity).toHaveAttribute(
+      'data-run-activity',
+      'requesting_model',
+    )
+    fakeProvider.releaseResponseGate()
+    await expect(activity).toHaveAttribute('data-run-activity', 'output')
+    await expect(activity).toContainText('输出中')
+    await expect(page.locator('.run-activity')).toHaveCount(0)
+    await expect(
+      page.locator('.message-status', { hasText: '生成中' }),
+    ).toHaveCount(0)
   })
 
   test('contains a 20,000-character tool result inside the tool card', async () => {

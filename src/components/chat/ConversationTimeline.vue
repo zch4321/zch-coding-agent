@@ -61,7 +61,7 @@ const timelineRenderSignature = computed(() =>
       const messages = turn.messages
         .map((message) => `${message.id}:${message.text.length}`)
         .join(',')
-      return `${turn.id}|${tools}|${reasoning}|${messages}`
+      return `${turn.id}|${turn.runActivity ?? ''}|${tools}|${reasoning}|${messages}`
     })
     .join(';'),
 )
@@ -186,7 +186,6 @@ onBeforeUnmount(() => {
             v-for="turn in timelineTurns"
             :key="turn.id"
             :turn="turn"
-            :active-run-id="agent.activeRunId"
             :actions-disabled="
               Boolean(
                 agent.startPending ||

@@ -51,7 +51,7 @@ const TerminalPanel = defineAsyncComponent(
 const agent = useAgentStore()
 const { locale, t } = useI18n()
 const activeView = ref<AppView>('chat')
-const settingsTab = ref<SettingsTab>('general')
+const settingsTab = ref<SettingsTab>('assistant')
 const yoloWarningOpen = ref(false)
 const yoloModeTarget = ref<YoloModeTarget>('session')
 const projectSidebarOpen = ref(true)
@@ -117,7 +117,7 @@ const artifactSidebarDisabled = computed(
     activeView.value === 'settings' ||
     (!artifactSidebarOpen.value && !canOpenArtifactSidebar.value),
 )
-function openSettings(tab: SettingsTab = 'general') {
+function openSettings(tab: SettingsTab = 'assistant') {
   settingsTab.value = tab
   activeView.value = 'settings'
   projectSidebarOpen.value = true
@@ -534,7 +534,7 @@ onUnmounted(() => {
 
                   <MessageComposer
                     @mode="selectMode"
-                    @provider="openSettings('provider')"
+                    @provider="openSettings('providers')"
                   />
 
                   <TerminalPanel

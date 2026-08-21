@@ -30,6 +30,13 @@ export const RunStatusSchema = Type.Union([
 ])
 export type RunStatus = Static<typeof RunStatusSchema>
 
+export const AssistantActivitySchema = Type.Union([
+  Type.Literal('reasoning'),
+  Type.Literal('output'),
+  Type.Literal('tool_call'),
+])
+export type AssistantActivity = Static<typeof AssistantActivitySchema>
+
 export const ToolResultEnvelopeSchema = Type.Union([
   Type.Object(
     {
@@ -112,6 +119,15 @@ export const AgentEventSchema = Type.Union([
           { additionalProperties: false },
         ),
       ),
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
+      type: Type.Literal('assistant.activity'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      activity: AssistantActivitySchema,
     }),
   ]),
   Type.Composite([

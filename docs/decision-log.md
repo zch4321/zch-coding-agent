@@ -283,3 +283,12 @@
 - 安全边界：manifest 是显式 capability allowlist，不从 `IPC_CONTRACTS` 默认暴露新 channel，也不向 Renderer 提供通用 `invoke/send/on`。Main process 业务 handler 继续显式实现，并保留 sender、payload、result 与容量校验；自动装配不跨越该安全边界。
 - 订阅边界：`AGENT_API_SUBSCRIPTION_ROUTES` 派生五个公开订阅方法的名称和事件类型。preload 仍显式提供对应 adapter：普通 Agent/Terminal event 去除 Electron event 参数，Backend notification 保留 64 条启动前缓存，Domain State 保留 256 条缓存、overflow 和 replay 语义。
 - 回归边界：manifest、公开 key 列表和最终 `contextBridge` 对象均冻结；单测验证当前 68 个 invoke channel 一一映射、路由调用目标、五个订阅 adapter 和无重复公开 key。既有 Electron E2E 继续断言实际 `window.agentApi` 只包含派生 key、对象被冻结且不暴露 `ipcRenderer`。
+
+## 2026-08-19 — Renderer 设置导航按 Config Domain 组合
+
+- 状态：已采纳并实现；本条取代此前把模型角色、Provider 与模型池放在同一“模型”页，以及把模型池放在 Agents 页的设置布局，不改变 AppConfig v22 或 IPC wire。
+- 一级导航：application、assistant、integrations、models、network、providers、runtime、security 八个配置领域各对应一个一级菜单。Renderer 用唯一 registry 同时声明稳定 id、分组、翻译 key、组件和所属 `ConfigSection[]`，导航和页面分发不再分别手抄；测试锁定八领域与全部细粒度 section 无遗漏、无重复。
+- 页面归属：Models 拥有主/辅助模型角色与模型池；Providers 只拥有连接、凭据、模型目录和模型标注，删除全局 Token 估算编辑；Runtime 组合 Agents、Limits 和命令/终端 Shell；Integrations 组合 Skills、MCP 与 Web Search；Network 首次暴露既有 HTTP proxy 配置；Application 当前展示日志与 Trace 诊断。项目和归档对话归“管理”，不伪装成 Config domain。
+- 状态归属：原通用 `agent-settings` store 收缩为 Provider 状态；application、assistant、integrations、network、runtime、security 分别拥有自己的表单、dirty signature、保存状态和错误。初始化配置由 runtime coordinator 按 section fan-out，旧 UI facade 只做显式路由，不复制或合并领域状态；models 继续使用既有 roles/pool stores。
+- 保存边界：一个领域菜单可以组合多个各自保存的区块，不建立整页大事务。Provider 保存为兼容既有 IPC 仍携带未修改的 Limits snapshot，但 Renderer 不再把 Token 估算纳入 Provider draft/signature；真正的编辑只在 Runtime/Limits 区块发生。跨领域读取候选与展示说明允许，修改由所属 store/action 完成。
+- 隐藏边界：Prompt resource、privacy notice acceptance 和 workspace last-opened 等内部配置继续属于各自领域，但 registry 不按 schema 自动生成控件。领域对齐是所有权和导航约束，不是把每个持久化字段暴露给用户。

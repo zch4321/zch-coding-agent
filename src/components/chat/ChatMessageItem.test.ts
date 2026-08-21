@@ -44,24 +44,24 @@ function mountMessage() {
   return mount(ChatMessageItem, {
     props: {
       message: activeAssistant(),
-      activeRunId: runId,
       actionsDisabled: true,
     },
     global: { plugins: [i18n] },
   })
 }
 
-describe('ChatMessageItem streaming status', () => {
+describe('ChatMessageItem metadata', () => {
   afterEach(() => {
     document.body.innerHTML = ''
   })
 
-  it('places the active status above the streamed assistant text', async () => {
+  it('renders streamed assistant text without a duplicate status row', async () => {
     const wrapper = mountMessage()
 
     await flushPromises()
 
-    expect(wrapper.get('.message-meta .n-tag').text()).toBe('生成中')
+    expect(wrapper.find('.message-meta').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('生成中')
     expect(wrapper.text()).toContain('Streaming answer')
     wrapper.unmount()
   })

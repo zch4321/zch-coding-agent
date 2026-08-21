@@ -24,7 +24,7 @@ import {
 } from '../../../shared/config'
 import { evaluateModelRouteCompatibility } from '../../../shared/model-route'
 import { resolveSupportedReasoningEfforts } from '../../../shared/model-settings'
-import { useAgentSettingsStore } from '../../stores/agent-settings'
+import { useProviderSettingsStore } from '../../stores/agent-settings'
 import {
   modelPoolRouteKey,
   useModelPoolSettingsStore,
@@ -68,7 +68,7 @@ const CAPABILITY_LABEL_KEYS: Record<ModelCapabilityLevel, string> = {
   strong: 'settings.capabilityStrong',
 }
 
-const settings = useAgentSettingsStore()
+const settings = useProviderSettingsStore()
 const pool = useModelPoolSettingsStore()
 const { t } = useI18n()
 const reasoningFloor = ref<ReasoningFloor>('all')

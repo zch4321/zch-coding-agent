@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { CallId, MessageId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { MessageRecord } from '../../shared/message'
-import { blankOverlay } from './agent-runtime-helpers'
+import { blankOverlay, resolveRunActivity } from './agent-runtime-helpers'
 import { projectConversationTurns } from './conversation-timeline'
 
 const sessionId = 'session:timeline' as SessionId
@@ -178,6 +178,46 @@ function orchestration(input: {
 }
 
 describe('projectConversationTurns', () => {
+  it.each([
+    ['idle', undefined, 'requesting_model'],
+    ['idle', 'reasoning', 'reasoning'],
+    ['calling_llm', undefined, 'requesting_model'],
+    ['calling_llm', 'reasoning', 'reasoning'],
+    ['calling_llm', 'output', 'output'],
+    ['calling_llm', 'tool_call', 'calling_tool'],
+    ['evaluating_tools', undefined, 'calling_tool'],
+    ['running_tools', undefined, 'executing_tool'],
+    ['awaiting_approval', undefined, 'awaiting_approval'],
+    ['cancelling', undefined, 'cancelling'],
+    ['completed', undefined, undefined],
+  ] as const)(
+    'maps %s with %s stream activity to %s',
+    (status, streamActivity, expected) => {
+      const overlay = blankOverlay()
+      overlay.runId = 'run:activity' as RunId
+      overlay.status = status
+      overlay.streamActivity = streamActivity
+
+      expect(resolveRunActivity(overlay)).toBe(expected)
+    },
+  )
+
+  it('projects an empty active run as a status-only conversation turn', () => {
+    const overlay = blankOverlay()
+    overlay.runId = 'run:empty-live' as RunId
+    overlay.status = 'calling_llm'
+
+    expect(projectConversationTurns({ records: [], overlay })).toEqual([
+      expect.objectContaining({
+        id: 'turn:live:run:empty-live',
+        runActivity: 'requesting_model',
+        tools: [],
+        reasoningSegments: [],
+        messages: [],
+      }),
+    ])
+  })
+
   it('hides legacy visible Swarm prompts without hiding other orchestration', () => {
     const turns = projectConversationTurns({
       records: [

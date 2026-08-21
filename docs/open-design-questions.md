@@ -185,34 +185,19 @@
 - `electron/session/session-terminals.ts`
 - `electron/session/session-manager.ts`
 
-## 7. 对话运行阶段、布局稳定性与 Tool call 生成可见性
+## 7. 对话运行阶段、布局稳定性与 Tool call 生成可见性（已解决）
 
-### 当前行为
+### 决定
 
-- 单个对话 Turn 当前按 Tool call、思考过程、assistant 消息的固定顺序渲染；思考过程不位于 Tool call 上方。
-- 流式 reasoning 会在“思考过程”折叠栏标题中显示“生成中” `NTag`；流式 assistant 消息还会在正文上方新增一行 metadata 和“生成中” `NTag`。这些元素会在运行阶段切换时进入或离开布局。
-- 对话头部另有 Run 级状态 `NTag`，显示运行中、取消中、等待审批或失败；运行状态分散在头部、思考折叠栏和消息 metadata 三处。
-- Tool call 折叠栏标题当前显示“工具调用 · 最近一个 Tool 名称”；每个对话 Turn 独立生成一个折叠栏，标题不显示当前组或更大范围内的累计调用次数。
-- Provider 协议已经产生 `text.delta`、`reasoning.delta` 和 `tool.delta`。主 Session Provider runner 当前只把 text/reasoning delta 投影为 Agent event，没有把 `tool.delta` 投影给 Renderer。
-- Renderer 通常要等 Provider 完成整个 assistant turn、Session Core 发出 `tool.proposed` 后，才会首次看到 Tool card。因此模型只在生成 Tool name/arguments 且没有 text/reasoning delta 时，界面可能长时间没有新增内容。
-- `run.status` 已包含 `calling_llm`、`evaluating_tools`、`waiting_approval`、`executing_tools` 等阶段，但普通对话目前主要把它们概括为“运行中”，没有在思考过程标题位置持续展示具体阶段。
-
-### 待讨论问题
-
-- 对话 Turn 中思考过程、Tool call 和 assistant 消息应采用什么固定顺序？
-- 是否需要一个不改变占位高度的统一运行状态区域；它与对话头部状态、思考过程标题和消息 metadata 各自承担什么职责？
-- “正在思考”“正在生成 Tool call”“正在调用工具”“等待审批”“正在输出”“正在取消”等状态的完整集合、优先级和切换边界是什么？
-- 状态应由 Main process 发送明确事件，还是由 Renderer 根据 `run.status`、delta 和 Tool event 推导？
-- Provider `tool.delta` 中哪些信息可以实时展示：Tool 名称、参数生成进度、部分参数正文或仅阶段状态？
-- Tool call 流式生成被取消、Provider 失败、arguments 不完整或最终 completion 与 delta 不一致时，临时状态如何收敛？
-- Naive UI loading spinner 应在哪些状态显示，如何处理 reduced motion、无障碍标签和多个并行 Tool call？
-- 如何避免状态文字长度变化、Tag 出现/消失、折叠栏创建以及首个 assistant token 到达造成消息正文纵向跳变？
-- Main Agent 与 Agents/Swarm 面板是否应共享同一套阶段词汇和状态映射？
-- Tool call 折叠栏后的“累计调用次数”应累计当前折叠组、当前 Run、当前 Session，还是其他范围？
-- 累计次数在 Tool call 开始生成、`tool.proposed`、获批、开始执行或执行结束的哪个时点增加？
-- 被拒绝、取消、失败、重试以及相同 `callId` 的状态更新应如何计入累计次数？
-- Swarm root、child Agent、审批模型和压缩流程中的 Tool call 是否进入普通对话栏显示的累计值？
-- Run 完成、Renderer reload 或重新打开历史 Session 后，累计次数是否继续显示，权威数据来源是什么？
+- 单个对话 Turn 固定按用户消息、思考过程、Tool call、assistant 消息的顺序渲染。
+- “思考过程”标题右侧是唯一的普通对话 Run 状态区域。所有非终态都显示 Naive UI 圆形 Spinner，并使用“请求模型”“思考中”“输出中”“调用工具”“执行工具”“等待审批”“取消中”之一。
+- 对话头部 Run Tag、流式 assistant 消息的“生成中”和 Session 侧栏运行文字全部移除；Trace 状态、fork/import 身份标记和每个 Tool card 自身状态继续保留。
+- Main process 发出轻量 `assistant.activity` 事件，值为 `reasoning`、`output` 或 `tool_call`。Provider stream 类型发生变化时才发送，不转发 Tool 名称、arguments delta 或其他参数内容。
+- Renderer 对活跃 Run 的启动期 `idle` 与 `calling_llm` 使用同一套瞬时活动映射：没有活动时显示“请求模型”，收到活动后显示对应细分状态；每次进入 `calling_llm` 时清空上一轮活动。text/reasoning delta 同时作为兼容兜底更新活动。`evaluating_tools` 统一显示“调用工具”，不暴露短暂的内部评估阶段。
+- 活动不写入持久化历史或公开 Run Snapshot。Renderer reload 后先根据粗粒度 `run.status` 恢复状态，收到新的活动事件后再细化。
+- 活跃 Run 即使尚无 reasoning、text 或 Tool，也投影出状态专用 Turn；状态槽保持固定高度。终态隐藏状态，不额外保留“已完成”标签。
+- `orchestrator.message` 仍是模型可见但用户不可见的编排上下文；Renderer 注册表为它和 `tool.attempt` 提供显式空处理器。
+- Tool call 累计次数不在本项中定义或修改；Swarm 运行统计的一致性继续由下一节跟踪。
 
 ### 关联实现
 

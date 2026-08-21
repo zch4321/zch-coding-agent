@@ -3,10 +3,16 @@ import { onBeforeUnmount, onMounted, watch, type WatchStopHandle } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAgentChangesStore } from '../../stores/agent-changes'
+import { useApplicationSettingsStore } from '../../stores/application-settings'
+import { useAssistantSettingsStore } from '../../stores/assistant-settings'
+import { useIntegrationSettingsStore } from '../../stores/integration-settings'
 import { useModelRolesStore } from '../../stores/model-roles'
 import { useAgentReplicaStore } from '../../stores/agent-replica'
-import { useAgentSettingsStore } from '../../stores/agent-settings'
+import { useProviderSettingsStore } from '../../stores/agent-settings'
 import { useAgentShellStore } from '../../stores/agent-shell'
+import { useNetworkSettingsStore } from '../../stores/network-settings'
+import { useRuntimeSettingsStore } from '../../stores/runtime-settings'
+import { useSecuritySettingsStore } from '../../stores/security-settings'
 import { useMcpStore } from '../../stores/mcp'
 import { useModelPoolSettingsStore } from '../../stores/model-pool-settings'
 import {
@@ -23,7 +29,6 @@ const message = useMessage()
 const { t } = useI18n()
 const notifications = useNotificationStore()
 const shell = useAgentShellStore()
-const settings = useAgentSettingsStore()
 const modelRoles = useModelRolesStore()
 const replica = useAgentReplicaStore()
 const changes = useAgentChangesStore()
@@ -31,6 +36,15 @@ const mcp = useMcpStore()
 const modelPool = useModelPoolSettingsStore()
 const skills = useSkillsStore()
 const traces = useTraceStore()
+const settingsStores = [
+  ['APPLICATION_SETTINGS_OPERATION_FAILED', useApplicationSettingsStore()],
+  ['ASSISTANT_SETTINGS_OPERATION_FAILED', useAssistantSettingsStore()],
+  ['INTEGRATION_SETTINGS_OPERATION_FAILED', useIntegrationSettingsStore()],
+  ['NETWORK_SETTINGS_OPERATION_FAILED', useNetworkSettingsStore()],
+  ['PROVIDER_SETTINGS_OPERATION_FAILED', useProviderSettingsStore()],
+  ['RUNTIME_SETTINGS_OPERATION_FAILED', useRuntimeSettingsStore()],
+  ['SECURITY_SETTINGS_OPERATION_FAILED', useSecuritySettingsStore()],
+] as const
 const errorWatchers: WatchStopHandle[] = []
 let activeCount = 0
 
@@ -105,13 +119,15 @@ watch(
   { flush: 'post' },
 )
 
-forwardStoreError(
-  'SETTINGS_OPERATION_FAILED',
-  () => settings.error,
-  () => {
-    settings.error = ''
-  },
-)
+for (const [code, store] of settingsStores) {
+  forwardStoreError(
+    code,
+    () => store.error,
+    () => {
+      store.error = ''
+    },
+  )
+}
 forwardStoreError(
   'APPROVAL_SETTINGS_OPERATION_FAILED',
   () => modelRoles.error,

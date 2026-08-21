@@ -239,6 +239,10 @@
   color: var(--danger);
 }
 
+.model-role-fields {
+  align-items: flex-start;
+}
+
 .model-pool-transfer {
   height: min(440px, 54vh);
   min-height: 320px;

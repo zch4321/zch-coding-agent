@@ -20,40 +20,18 @@ interface RuntimeEventTarget {
   flushCarryovers(sessionId: SessionId): Promise<boolean>
 }
 
-/** Reconciles one ordered live-run event into its per-Session overlay. */
-export function handleRuntimeAgentEvent(
-  target: RuntimeEventTarget,
-  event: AgentEvent,
-): void {
-  if (event.type === 'session.closed') {
-    delete useAgentReplicaStore().traceCaptureBySessionId[event.sessionId]
-    delete target.overlays[event.sessionId]
-    delete target.carryoversBySessionId[event.sessionId]
-    delete target.carryoverStartingBySessionId[event.sessionId]
-    return
-  }
-  const overlay = target.ensureOverlay(event.sessionId)
-  if (event.seq <= overlay.lastEventSeq) return
-  if (overlay.lastEventSeq && event.seq !== overlay.lastEventSeq + 1) {
-    const warning = `Runtime event gap: expected ${overlay.lastEventSeq + 1}, received ${event.seq}. Resynchronizing.`
-    overlay.diagnostics.push(warning)
-    useNotificationStore().warning({
-      code: 'RUNTIME_EVENT_GAP',
-      message: warning,
-      sessionId: event.sessionId,
-    })
-    void useAgentReplicaStore()
-      .loadSession(event.sessionId)
-      .then(() =>
-        target.hydrateRuntime(
-          useAgentReplicaStore().runtimeBySessionId[event.sessionId],
-        ),
-      )
-  }
-  overlay.lastEventSeq = event.seq
-  overlay.order += 1
+type RoutedAgentEvent = Exclude<AgentEvent, { type: 'session.closed' }>
+type RoutedAgentEventType = RoutedAgentEvent['type']
+type RuntimeEventHandlerMap = {
+  [Type in RoutedAgentEventType]: (
+    target: RuntimeEventTarget,
+    overlay: SessionOverlay,
+    event: Extract<RoutedAgentEvent, { type: Type }>,
+  ) => void
+}
 
-  if (event.type === 'workspace.writer.changed') {
+const runtimeEventHandlers = {
+  'workspace.writer.changed': (target, _overlay, event) => {
     if (event.status === 'acquired') {
       target.workspaceWriters[event.workspace] = event.writerSessionId
     } else if (
@@ -61,10 +39,8 @@ export function handleRuntimeAgentEvent(
     ) {
       delete target.workspaceWriters[event.workspace]
     }
-    return
-  }
-
-  if (event.type === 'trace.capture.changed') {
+  },
+  'trace.capture.changed': (_target, _overlay, event) => {
     const replica = useAgentReplicaStore()
     const previous = replica.traceCaptureBySessionId[event.sessionId]
     replica.traceCaptureBySessionId[event.sessionId] = structuredClone(
@@ -81,10 +57,8 @@ export function handleRuntimeAgentEvent(
         sessionId: event.sessionId,
       })
     }
-    return
-  }
-
-  if (event.type === 'run.status') {
+  },
+  'run.status': (target, overlay, event) => {
     if (
       !TERMINAL_RUN_STATUSES.has(event.status) &&
       overlay.terminalReloadRunId &&
@@ -92,6 +66,7 @@ export function handleRuntimeAgentEvent(
     ) {
       overlay.text = ''
       overlay.reasoning = ''
+      overlay.streamActivity = undefined
       overlay.approval = undefined
       overlay.tools = []
       overlay.usage = []
@@ -101,6 +76,9 @@ export function handleRuntimeAgentEvent(
     overlay.runId = TERMINAL_RUN_STATUSES.has(event.status)
       ? undefined
       : event.runId
+    if (event.status === 'calling_llm') {
+      overlay.streamActivity = undefined
+    }
     if (!TERMINAL_RUN_STATUSES.has(event.status)) {
       overlay.terminalReloadRunId = undefined
     }
@@ -111,34 +89,41 @@ export function handleRuntimeAgentEvent(
         sessionId: event.sessionId,
       })
     }
-    if (TERMINAL_RUN_STATUSES.has(event.status)) {
-      const completedRunId = event.runId
-      overlay.terminalReloadRunId = completedRunId
-      target.workspaceFileRevision += 1
-      void useAgentReplicaStore()
-        .loadSession(event.sessionId)
-        .then(() => {
-          if (overlay.runId || overlay.terminalReloadRunId !== completedRunId) {
-            return
-          }
-          overlay.text = ''
-          overlay.reasoning = ''
-          overlay.approval = undefined
-        })
-      void target.flushCarryovers(event.sessionId)
-    }
-    return
-  }
+    if (!TERMINAL_RUN_STATUSES.has(event.status)) return
 
-  overlay.runId = event.runId
-  if (event.type === 'assistant.text.delta') {
+    const completedRunId = event.runId
+    overlay.streamActivity = undefined
+    overlay.terminalReloadRunId = completedRunId
+    target.workspaceFileRevision += 1
+    void useAgentReplicaStore()
+      .loadSession(event.sessionId)
+      .then(() => {
+        if (overlay.runId || overlay.terminalReloadRunId !== completedRunId) {
+          return
+        }
+        overlay.text = ''
+        overlay.reasoning = ''
+        overlay.approval = undefined
+      })
+    void target.flushCarryovers(event.sessionId)
+  },
+  'assistant.activity': (_target, overlay, event) => {
+    overlay.streamActivity = event.activity
+  },
+  'assistant.text.delta': (_target, overlay, event) => {
+    overlay.streamActivity = 'output'
     overlay.text += event.delta
-  } else if (event.type === 'assistant.reasoning.delta') {
+  },
+  'assistant.reasoning.delta': (_target, overlay, event) => {
+    overlay.streamActivity = 'reasoning'
     overlay.reasoning += event.delta
-  } else if (event.type === 'assistant.message.completed') {
+  },
+  'assistant.message.completed': (_target, overlay, event) => {
     overlay.text = event.text
     overlay.reasoning = event.reasoning ?? overlay.reasoning
-  } else if (event.type === 'tool.proposed') {
+  },
+  'tool.attempt': () => undefined,
+  'tool.proposed': (_target, overlay, event) => {
     overlay.tools = overlay.tools.filter((tool) => tool.callId !== event.callId)
     overlay.tools.unshift({
       callId: event.callId,
@@ -149,20 +134,8 @@ export function handleRuntimeAgentEvent(
       status: 'proposed',
       order: overlay.order,
     })
-  } else if (event.type === 'tool.completed') {
-    const tool = overlay.tools.find(
-      (candidate) => candidate.callId === event.callId,
-    )
-    if (tool) {
-      tool.status = 'completed'
-      tool.result = event.result
-      tool.approval = event.approval
-    }
-    if (overlay.approval?.callId === event.callId) {
-      overlay.approval = undefined
-    }
-    void useAgentReplicaStore().loadFileChanges(event.sessionId)
-  } else if (event.type === 'approval.requested') {
+  },
+  'approval.requested': (_target, overlay, event) => {
     overlay.approval = {
       runId: event.runId,
       callId: event.callId,
@@ -179,18 +152,31 @@ export function handleRuntimeAgentEvent(
       status: 'requested',
       order: overlay.order,
     }
-  } else if (event.type === 'llm.usage') {
+  },
+  'tool.completed': (_target, overlay, event) => {
+    const tool = overlay.tools.find(
+      (candidate) => candidate.callId === event.callId,
+    )
+    if (tool) {
+      tool.status = 'completed'
+      tool.result = event.result
+      tool.approval = event.approval
+    }
+    if (overlay.approval?.callId === event.callId) {
+      overlay.approval = undefined
+    }
+    void useAgentReplicaStore().loadFileChanges(event.sessionId)
+  },
+  'llm.usage': (_target, overlay, event) => {
     overlay.usage.push({
       runId: event.runId,
       callId: event.callId,
       usage: event.usage,
       order: overlay.order,
     })
-  } else if (event.type === 'goal.updated') {
-    overlay.goal = event.goal ? structuredClone(event.goal) : undefined
-  } else if (event.type === 'plan.updated') {
-    overlay.plan = event.plan ? structuredClone(event.plan) : undefined
-  } else if (event.type === 'interjection.updated') {
+  },
+  'orchestrator.message': () => undefined,
+  'interjection.updated': (_target, overlay, event) => {
     overlay.interjections = overlay.interjections.filter(
       (interjection) => interjection.id !== event.interjectionId,
     )
@@ -200,7 +186,8 @@ export function handleRuntimeAgentEvent(
       content: event.content,
       createdAt: event.createdAt,
     })
-  } else if (event.type === 'interjection.carryover') {
+  },
+  'interjection.carryover': (target, overlay, event) => {
     overlay.interjections = overlay.interjections.filter(
       (interjection) => interjection.id !== event.interjectionId,
     )
@@ -227,5 +214,63 @@ export function handleRuntimeAgentEvent(
       )
     }
     void target.flushCarryovers(event.sessionId)
+  },
+  'goal.updated': (_target, overlay, event) => {
+    overlay.goal = event.goal ? structuredClone(event.goal) : undefined
+  },
+  'plan.updated': (_target, overlay, event) => {
+    overlay.plan = event.plan ? structuredClone(event.plan) : undefined
+  },
+} satisfies RuntimeEventHandlerMap
+
+function dispatchRuntimeEvent(
+  target: RuntimeEventTarget,
+  overlay: SessionOverlay,
+  event: RoutedAgentEvent,
+): void {
+  if ('runId' in event && event.type !== 'run.status') {
+    overlay.runId = event.runId
   }
+  const handler = runtimeEventHandlers[event.type] as (
+    target: RuntimeEventTarget,
+    overlay: SessionOverlay,
+    event: RoutedAgentEvent,
+  ) => void
+  handler(target, overlay, event)
+}
+
+/** Reconciles one ordered live-run event into its per-Session overlay. */
+export function handleRuntimeAgentEvent(
+  target: RuntimeEventTarget,
+  event: AgentEvent,
+): void {
+  if (event.type === 'session.closed') {
+    delete useAgentReplicaStore().traceCaptureBySessionId[event.sessionId]
+    delete target.overlays[event.sessionId]
+    delete target.carryoversBySessionId[event.sessionId]
+    delete target.carryoverStartingBySessionId[event.sessionId]
+    return
+  }
+
+  const overlay = target.ensureOverlay(event.sessionId)
+  if (event.seq <= overlay.lastEventSeq) return
+  if (overlay.lastEventSeq && event.seq !== overlay.lastEventSeq + 1) {
+    const warning = `Runtime event gap: expected ${overlay.lastEventSeq + 1}, received ${event.seq}. Resynchronizing.`
+    overlay.diagnostics.push(warning)
+    useNotificationStore().warning({
+      code: 'RUNTIME_EVENT_GAP',
+      message: warning,
+      sessionId: event.sessionId,
+    })
+    void useAgentReplicaStore()
+      .loadSession(event.sessionId)
+      .then(() =>
+        target.hydrateRuntime(
+          useAgentReplicaStore().runtimeBySessionId[event.sessionId],
+        ),
+      )
+  }
+  overlay.lastEventSeq = event.seq
+  overlay.order += 1
+  dispatchRuntimeEvent(target, overlay, event)
 }

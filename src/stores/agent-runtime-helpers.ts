@@ -1,4 +1,4 @@
-import type { RunStatus } from '../../shared/agent-events'
+import type { AssistantActivity, RunStatus } from '../../shared/agent-events'
 import type {
   ContextAttachmentChip,
   ContextAttachmentKind,
@@ -11,6 +11,7 @@ import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type {
   PendingApproval,
   ReviewedApproval,
+  RunActivity,
   ToolActivity,
   UsageActivity,
 } from './agent-types'
@@ -32,6 +33,7 @@ export interface UiInterjection {
 export interface SessionOverlay {
   runId?: RunId
   status: RunStatus
+  streamActivity?: AssistantActivity
   text: string
   reasoning: string
   tools: ToolActivity[]
@@ -159,6 +161,38 @@ export function blankOverlay(): SessionOverlay {
     lastEventSeq: 0,
     diagnostics: [],
     order: 0,
+  }
+}
+
+/** Resolves transient Provider activity and coarse Run status into one UI phase. */
+export function resolveRunActivity(
+  overlay: Pick<
+    SessionOverlay,
+    'approval' | 'runId' | 'status' | 'streamActivity'
+  >,
+): RunActivity | undefined {
+  if (!overlay.runId) return undefined
+  if (overlay.approval) return 'awaiting_approval'
+
+  switch (overlay.status) {
+    case 'idle':
+    case 'calling_llm':
+      if (overlay.streamActivity === 'reasoning') return 'reasoning'
+      if (overlay.streamActivity === 'output') return 'output'
+      if (overlay.streamActivity === 'tool_call') return 'calling_tool'
+      return 'requesting_model'
+    case 'evaluating_tools':
+      return 'calling_tool'
+    case 'running_tools':
+      return 'executing_tool'
+    case 'awaiting_approval':
+      return 'awaiting_approval'
+    case 'cancelling':
+      return 'cancelling'
+    case 'completed':
+    case 'cancelled':
+    case 'failed':
+      return undefined
   }
 }
 

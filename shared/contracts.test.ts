@@ -93,6 +93,17 @@ describe('shared runtime contracts', () => {
     expect(
       validateAgentEvent({
         schemaVersion: 1,
+        type: 'assistant.activity',
+        sessionId,
+        runId,
+        activity: 'tool_call',
+        seq: 3,
+        ts: '2026-06-15T00:00:00.750Z',
+      } satisfies AgentEvent),
+    ).toBe(true)
+    expect(
+      validateAgentEvent({
+        schemaVersion: 1,
         type: 'tool.completed',
         sessionId,
         runId,
@@ -104,7 +115,7 @@ describe('shared runtime contracts', () => {
           reason: 'Read-only bounded action',
           valid: true,
         },
-        seq: 3,
+        seq: 4,
         ts: '2026-06-15T00:00:01.000Z',
       } satisfies AgentEvent),
     ).toBe(true)
