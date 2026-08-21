@@ -318,20 +318,33 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     await expect(
       page.locator('.chat-message.assistant > .message-meta > strong'),
     ).toHaveCount(0)
-    const messageCenters = await page.evaluate(() => {
+    const messageBounds = await page.evaluate(() => {
       const user = document.querySelector('.chat-message.user')
       const assistant = document.querySelector('.chat-message.assistant')
-      if (!user || !assistant) throw new Error('Expected chat messages')
+      const turn = user?.closest('.conversation-turn')
+      if (!user || !assistant || !turn) {
+        throw new Error('Expected timeline chat messages')
+      }
       const userBounds = user.getBoundingClientRect()
       const assistantBounds = assistant.getBoundingClientRect()
+      const turnBounds = turn.getBoundingClientRect()
       return {
-        user: userBounds.left + userBounds.width / 2,
-        assistant: assistantBounds.left + assistantBounds.width / 2,
+        userLeft: userBounds.left,
+        userRight: userBounds.right,
+        assistantLeft: assistantBounds.left,
+        assistantRight: assistantBounds.right,
+        turnLeft: turnBounds.left,
+        turnRight: turnBounds.right,
       }
     })
+    expect(messageBounds.userLeft).toBeGreaterThan(messageBounds.assistantLeft)
     expect(
-      Math.abs(messageCenters.user - messageCenters.assistant),
+      Math.abs(messageBounds.userRight - messageBounds.assistantRight),
     ).toBeLessThan(1)
+    expect(messageBounds.userLeft).toBeGreaterThanOrEqual(
+      messageBounds.turnLeft,
+    )
+    expect(messageBounds.userRight).toBeLessThanOrEqual(messageBounds.turnRight)
     await page.setViewportSize({ width: 1000, height: 720 })
 
     const artifactToggle = page.getByRole('button', {

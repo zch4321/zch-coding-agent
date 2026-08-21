@@ -156,7 +156,7 @@
 .conversation-turn > .chat-message.user,
 .conversation-turn > .chat-message.interjection {
   width: fit-content;
-  margin: 0 auto;
+  margin: 0 0 0 auto;
 }
 
 .load-earlier {
