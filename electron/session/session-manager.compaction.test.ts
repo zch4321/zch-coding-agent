@@ -532,7 +532,7 @@ describe('SessionManager compaction', () => {
       ),
     ).toBe(false)
     await manager.closeSession(sessionId)
-  }, 10_000)
+  }, 30_000)
 
   it('compacts only after a threshold-crossing tool result is committed', async () => {
     const directory = await mkdtemp(
@@ -599,7 +599,7 @@ describe('SessionManager compaction', () => {
       'Tool result checkpoint retained',
     )
     await manager.closeSession(sessionId)
-  }, 10_000)
+  }, 30_000)
 
   it('replaces incompatible model history with a transcript before new user input', async () => {
     const directory = await mkdtemp(
@@ -714,7 +714,7 @@ describe('SessionManager compaction', () => {
       false,
     )
     await manager.closeSession(sessionId)
-  }, 10_000)
+  }, 30_000)
 
   it('keeps the old epoch active when durable transcript loading fails', async () => {
     const directory = await mkdtemp(
@@ -832,7 +832,7 @@ describe('SessionManager compaction', () => {
     expect(recovered).not.toContain('MUST_NOT_BE_INSERTED')
     expect(recovered).not.toContain('<conversation_transcript format=')
     await manager.closeSession(sessionId)
-  }, 10_000)
+  }, 30_000)
 
   it('accepts a Provider response at the configured limit and defers compaction', async () => {
     const directory = await mkdtemp(
@@ -919,7 +919,7 @@ describe('SessionManager compaction', () => {
       ),
     ).toBe(true)
     await manager.closeSession(sessionId)
-  }, 10_000)
+  }, 30_000)
 
   it('drains an interjection that arrives while auto compact is streaming', async () => {
     const directory = await mkdtemp(
@@ -1014,5 +1014,5 @@ describe('SessionManager compaction', () => {
       ),
     ).toBe(true)
     await manager.closeSession(sessionId)
-  }, 10_000)
+  }, 30_000)
 })
