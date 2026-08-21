@@ -188,7 +188,8 @@ export class ToolBatchAutoCompactProvider extends ScriptedProviderHarness {
         rawResponse: { id: 'tool-batch-compact' },
         turn: {
           role: 'assistant',
-          content: 'Tool result checkpoint retained',
+          content:
+            'Tool result checkpoint retained. Todo remains: Finish after compact.',
         },
         toolCalls: [],
         usage: { total_tokens: 20 },
@@ -217,7 +218,7 @@ export class ToolBatchAutoCompactProvider extends ScriptedProviderHarness {
                     { step: 'Read the fixture', status: 'in_progress' },
                     { step: 'Finish after compact', status: 'pending' },
                   ],
-                  _agent_intent: 'Keep the current Run checklist visible',
+                  _agent_intent: 'Keep the current task checklist visible',
                 }),
               },
             },
@@ -245,7 +246,7 @@ export class ToolBatchAutoCompactProvider extends ScriptedProviderHarness {
                 { step: 'Finish after compact', status: 'pending' },
               ],
             },
-            reason: 'Keep the current Run checklist visible',
+            reason: 'Keep the current task checklist visible',
           },
           {
             id: 'call:compact-read' as CallId,

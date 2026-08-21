@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox'
+import { Value } from '@sinclair/typebox/value'
 
 export const MAX_TODO_ITEMS = 128
 export const MAX_TODO_STEP_LENGTH = 1_024
@@ -43,3 +44,25 @@ export const TodoStateSchema = Type.Object(
   { additionalProperties: false },
 )
 export type TodoState = Static<typeof TodoStateSchema>
+
+/** Parses and normalizes one complete Todo snapshot from untrusted history data. */
+export function parseTodoState(value: unknown): TodoState | undefined {
+  if (!Value.Check(TodoStateSchema, value)) return undefined
+  const todo = value as TodoState
+  const explanation = todo.explanation?.trim()
+  if (todo.explanation !== undefined && !explanation) return undefined
+
+  let inProgress = 0
+  const items: TodoItem[] = []
+  for (const item of todo.items) {
+    const step = item.step.trim()
+    if (!step) return undefined
+    if (item.status === 'in_progress') inProgress += 1
+    if (inProgress > 1) return undefined
+    items.push({ step, status: item.status })
+  }
+  return {
+    ...(explanation ? { explanation } : {}),
+    items,
+  }
+}

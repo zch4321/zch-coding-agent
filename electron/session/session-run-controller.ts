@@ -38,7 +38,6 @@ import type {
 } from './session-types'
 import type { RunAccessLease } from './workspace-access-coordinator'
 import type { ResolvedModelRoute } from '../providers/model-route-resolver'
-import { todoStateContext } from './todo-context'
 
 export interface RunStartOptions {
   routes?: {
@@ -409,18 +408,6 @@ export class SessionRunController {
       }
       const maxStepsPerRun = runConfig.limits.maxStepsPerRun
       let runInputCommitted = false
-      const todoContextRecord = compactCommand
-        ? undefined
-        : appendPromptLayer(session, {
-            kind: 'runtime_context',
-            content: todoStateContext(run.runId, undefined),
-            source: 'runtime:active-run-todo',
-            trusted: true,
-            editable: false,
-            config: runConfig,
-            ...(run.rootUserMessageId ? { turnId: run.rootUserMessageId } : {}),
-          })
-      if (todoContextRecord) run.harnessMessageIds.push(todoContextRecord.id)
       if (harnessMessage) {
         const content = orchestrationRequestContent(
           harnessMessage.kind,
@@ -549,9 +536,6 @@ export class SessionRunController {
             text: prepared.visibleMessage,
           })
         }
-      }
-      if (todoContextRecord && run.rootUserMessageId) {
-        todoContextRecord.turnId = run.rootUserMessageId
       }
       if (!runInputCommitted) {
         await this.#executionState?.commit(session, { reason: 'run_input' })

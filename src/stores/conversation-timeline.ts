@@ -1,5 +1,6 @@
 import type { MessageId, RunId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
+import { TODO_TOOL_ID, parseTodoState, type TodoState } from '../../shared/todo'
 import type {
   ChatMessage,
   ConversationTurn,
@@ -7,7 +8,6 @@ import type {
   ToolActivity,
 } from './agent-types'
 import type { SessionOverlay } from './agent-runtime-helpers'
-import { TODO_TOOL_ID } from '../../shared/todo'
 import {
   messageText,
   originalUserRecord,
@@ -108,13 +108,25 @@ function sortTurnContent(turn: MutableConversationTurn): void {
   turn.messages.sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
 }
 
-function copyTodo(todo: NonNullable<SessionOverlay['todo']>) {
+function copyTodo(todo: TodoState): TodoState {
   return {
     ...(todo.explanation === undefined
       ? {}
       : { explanation: todo.explanation }),
     items: todo.items.map((item) => ({ ...item })),
   }
+}
+
+function todosEqual(left: TodoState, right: TodoState): boolean {
+  return (
+    left.explanation === right.explanation &&
+    left.items.length === right.items.length &&
+    left.items.every(
+      (item, index) =>
+        item.step === right.items[index]?.step &&
+        item.status === right.items[index]?.status,
+    )
+  )
 }
 
 function markFinalAssistantMessages(turns: MutableConversationTurn[]): void {
@@ -153,6 +165,10 @@ export function projectConversationTurns({
   const aliases = new Map<string, string>()
   const toolsByCallId = new Map<string, ToolActivity>()
   const hiddenToolCallIds = new Set<string>()
+  const pendingTodosByCallId = new Map<
+    string,
+    { turn: MutableConversationTurn; todo: TodoState }
+  >()
   const durableInterjectionIds = new Set<string>()
   let currentTurn: MutableConversationTurn | undefined
 
@@ -264,6 +280,8 @@ export function projectConversationTurns({
         if (part.type !== 'tool_call') continue
         if (part.name === TODO_TOOL_ID) {
           hiddenToolCallIds.add(part.callId)
+          const todo = parseTodoState(part.arguments)
+          if (todo) pendingTodosByCallId.set(part.callId, { turn, todo })
           continue
         }
         const tool: ToolActivity = {
@@ -286,6 +304,16 @@ export function projectConversationTurns({
         hiddenToolCallIds.has(part.callId) ||
         record.metadata?.tool.name === TODO_TOOL_ID
       ) {
+        const pending = pendingTodosByCallId.get(part.callId)
+        const status = record.metadata?.tool.status
+        if (
+          pending &&
+          !part.isError &&
+          (status === undefined || status === 'completed')
+        ) {
+          pending.turn.todo = copyTodo(pending.todo)
+        }
+        pendingTodosByCallId.delete(part.callId)
         continue
       }
       let tool = toolsByCallId.get(part.callId)
@@ -375,8 +403,24 @@ export function projectConversationTurns({
         live: true,
       })
     }
-    liveTurn.todo = overlay.todo ? copyTodo(overlay.todo) : undefined
+    if (overlay.todo) liveTurn.todo = copyTodo(overlay.todo)
     liveTurn.runActivity = resolveRunActivity(overlay)
+  } else if (overlay?.terminalReloadRunId && overlay.todo) {
+    const terminalTodo = overlay.todo
+    const durableTodoLoaded = turns.some(
+      (turn) => turn.todo && todosEqual(turn.todo, terminalTodo),
+    )
+    if (!durableTodoLoaded) {
+      let terminalTurn = currentTurn
+      if (!terminalTurn) {
+        terminalTurn = createTurn({
+          id: `turn:terminal:${overlay.terminalReloadRunId}`,
+          order: Number.MAX_SAFE_INTEGER,
+        })
+        turns.push(terminalTurn)
+      }
+      terminalTurn.todo = copyTodo(terminalTodo)
+    }
   }
 
   for (const turn of turns) sortTurnContent(turn)

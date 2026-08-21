@@ -17,7 +17,7 @@ Zch Coding Agent 是 Electron + Vue 3 桌面 coding agent。Backend 负责 Proje
 ```text
 Renderer (Vue + Pinia)
   ├─ UI-only state：draft、draft attachments、layout、selection
-  └─ backend replicas：Project、Session、complete Messages、Goal、Plan、FileChangeSummary；ActiveRun Todo 只进入 runtime overlay
+  └─ backend replicas：Project、Session、complete Messages、Goal、Plan、FileChangeSummary；Todo 从 complete Messages 派生，ActiveRun 另有临时 overlay
           │ commands / queries
           ▼
 Preload typed bridge
@@ -1488,15 +1488,15 @@ Goal/Plan 会跨越多个 provider turn，并影响下一次 prompt 和 continua
 
 需要进入模型上下文时，backend 生成完整 harness/orchestrator Message。Goal/Plan 的当前状态不依赖 runtime memory。
 
-### 11.2 Run-scoped Todo List
+### 11.2 History-derived Todo List
 
-Todo List 是模型自行维护的当前 Run 执行清单，不是 Durable Plan 的别名。`shared/todo.ts` 一次定义 `TodoState`：一个不超过 65,536 字符的可选 explanation 和至多 128 个有序 item；item 只包含不超过 1,024 字符的 step 与 `pending | in_progress | completed` 状态。完整快照至多允许一个 `in_progress`，不使用稳定 item ID、增量 patch、取消态或完成证据。
+Todo List 是模型自行维护的当前任务执行清单，不是 Durable Plan 的别名。`shared/todo.ts` 一次定义 `TodoState`：一个不超过 65,536 字符的可选 explanation 和至多 128 个有序 item；item 只包含不超过 1,024 字符的 step 与 `pending | in_progress | completed` 状态。完整快照至多允许一个 `in_progress`，不使用稳定 item ID、增量 patch、取消态或完成证据。
 
-Provider 只看到一个 `todo_update` 工具。每次调用必须提交完整有序快照，因此替换、重排和多项状态推进都是一次原子更新；空 items 用于显式清空。工具按 serial 执行，校验 `sessionId/runId` 与当前 `ActiveRunExecution` 一致，使用低风险、无 workspace 副作用的既有执行路径，不进入人工审批，也不创建、修改或完成 Goal/Plan。普通 Main、Headless 和只读 child 使用同一 schema；child allowlist 显式包含 Todo，但 internal Session 的 `todo.updated` 不投影到父 Session。
+Provider 只看到一个 `todo_update` 工具。每次调用必须提交完整有序快照，因此替换、重排和多项状态推进都是一次原子更新。工具按 serial 执行，校验 `sessionId/runId` 与当前 `ActiveRunExecution` 一致，使用低风险、无 workspace 副作用的既有执行路径，不进入人工审批，也不创建、修改或完成 Goal/Plan。普通 Main、Headless 和只读 child 使用同一 schema；child allowlist 显式包含 Todo，但 internal Session 的 `todo.updated` 不投影到父 Session。
 
-Backend `ActiveRunExecution.todo` 是唯一真相源。更新通过 `todo.updated` 事件和 `ActiveRunPublicSnapshot.todo` 投影给 Renderer，窗口 reload、Session 切换与事件 gap resync 都从同一 snapshot 恢复。Renderer timeline 只在 Run 活跃时用 Naive UI 的只读 checklist 展示最新快照，并从普通 Tool Call 折叠栏隐藏 `todo_update` 的协议卡片；终态后 overlay 不再展示，下一 Run 创建新的空 runtime state。
+成功的 `todo_update` assistant tool call 与对应 `tool_result` 是 canonical history 中的事实记录。Renderer 按顺序归约已完成且非错误的调用，从参数重建规范化快照，并在原调用所属 Turn 用 Naive UI 的只读 checklist 展示最后一次成功更新；协议工具卡片仍从普通 Tool Call 折叠栏隐藏。失败、拒绝、取消、超时或缺少结果的调用不改变 Todo。应用重启、Session 切换和 Run 终态 reload 都从 complete Messages 重建，不另存需要同步或删除的 Session Todo 字段。
 
-Todo tool call/result 仍作为 canonical tool history 审计。为了防止下一 Run 把旧调用误认为当前清单，每个 Run 在真实用户或编排请求之前追加一个带当前 `run_id`、JSON 值为 `null` 的隐藏 `<todo_state>` runtime context；同一 Run 中，后续成功的 `todo_update` 取代较早 checkpoint。发生 Provider compact 或不兼容 route 转换时，在重建的新 epoch 中紧邻 summary/transcript anchor 写入当前完整快照，使它再取代已退出 active history 的工具调用。应用重启不恢复中断 Run 或 Todo UI；下一次 Run 仍先写入新的空边界。
+`ActiveRunExecution.todo`、`todo.updated` 与 `ActiveRunPublicSnapshot.todo` 只负责成功调用后的低延迟显示、窗口 resync 和终态 durable reload 完成前的过渡。Run 结束或下一 Run 开始不向历史追加清空标记，也不注入 `<todo_state>`；后续模型像处理其他工具一样，从 conversation history 中最近的成功 `todo_update` 理解当前清单。Provider compact 依靠 handoff summary 保留当前进度，route 转换依靠 complete-history transcript，不维护 Todo 专用 checkpoint。
 
 ### 11.3 Interjection
 

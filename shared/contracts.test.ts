@@ -18,6 +18,7 @@ import {
   MAX_TODO_ITEMS,
   MAX_TODO_STEP_LENGTH,
   TodoStateSchema,
+  parseTodoState,
 } from './todo'
 
 const sessionId = 'session-1' as SessionId
@@ -187,6 +188,29 @@ describe('shared runtime contracts', () => {
         items: [],
       }),
     ).toBe(false)
+  })
+
+  it('normalizes valid Todo history snapshots and ignores invalid updates', () => {
+    expect(
+      parseTodoState({
+        explanation: '  Continue the task  ',
+        items: [{ step: '  Verify history  ', status: 'in_progress' }],
+      }),
+    ).toEqual({
+      explanation: 'Continue the task',
+      items: [{ step: 'Verify history', status: 'in_progress' }],
+    })
+    expect(
+      parseTodoState({
+        items: [
+          { step: 'First', status: 'in_progress' },
+          { step: 'Second', status: 'in_progress' },
+        ],
+      }),
+    ).toBeUndefined()
+    expect(
+      parseTodoState({ items: [{ step: ' ', status: 'pending' }] }),
+    ).toBeUndefined()
   })
 
   it('keeps type-level IPC payloads aligned with runtime schemas', () => {

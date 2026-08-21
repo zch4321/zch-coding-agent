@@ -174,7 +174,7 @@ describe('timeline disclosure groups', () => {
     wrapper.unmount()
   })
 
-  it('renders the Run Todo as a compact read-only checklist', () => {
+  it('renders the Todo as a compact read-only checklist', () => {
     const wrapper = mount(TodoGroup, {
       props: {
         todo: {

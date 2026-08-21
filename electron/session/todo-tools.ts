@@ -3,7 +3,7 @@ import type { JsonValue } from '../../shared/json'
 import {
   TODO_TOOL_ID,
   TodoStateSchema,
-  type TodoState,
+  parseTodoState,
 } from '../../shared/todo'
 import type { ToolRegistrationPort, ToolResult } from '../tools/types'
 import type { AgentEventDraft, SessionState } from './session-types'
@@ -32,19 +32,7 @@ function validateTodo(
   return undefined
 }
 
-function normalizeTodo(args: Static<typeof TodoStateSchema>): TodoState {
-  return {
-    ...(args.explanation === undefined
-      ? {}
-      : { explanation: args.explanation.trim() }),
-    items: args.items.map((item) => ({
-      step: item.step.trim(),
-      status: item.status,
-    })),
-  }
-}
-
-/** Registers the Run-scoped checklist tool against active Session state. */
+/** Registers the model-managed checklist tool against active Session execution. */
 export function registerTodoTools(
   registry: ToolRegistrationPort,
   options: {
@@ -57,7 +45,7 @@ export function registerTodoTools(
   registry.registerTool({
     id: TODO_TOOL_ID,
     description:
-      "Updates the current Run's Todo checklist. Provide an optional explanation and the complete ordered item list on every call. Use it for non-trivial multi-step work, keep steps short, and skip it for simple tasks. Keep at most one item in_progress and mark every item completed before finishing. This does not create or modify the durable Plan.",
+      'Updates the current task Todo checklist. Provide an optional explanation and the complete ordered item list on every call. The latest successful update remains current in conversation history until another update replaces it. Use it for non-trivial multi-step work, keep steps short, and skip it for simple tasks. Keep at most one item in_progress and mark every item completed before finishing. This does not create or modify the durable Plan.',
     inputSchema: TodoStateSchema,
     executionMode: 'serial',
     effects: ['instruction.read'],
@@ -79,7 +67,10 @@ export function registerTodoTools(
         )
       }
 
-      const todo = normalizeTodo(args)
+      const todo = parseTodoState(args)
+      if (!todo) {
+        return todoError('TODO_INVALID', 'Todo checklist is invalid')
+      }
       run.todo = todo
       options.emit(session, {
         type: 'todo.updated',

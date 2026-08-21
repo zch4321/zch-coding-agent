@@ -4,7 +4,7 @@
 
 Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`backend-refactor-plan.md`](./backend-refactor-plan.md)。
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、Run-scoped Todo List、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run`、Model Pool、逐次人工审批的普通 Desktop Swarm Tool、两级 Agents 状态视图与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一步完成 Swarm hardening，随后迁移 ProjectModel 到 SQLite 并恢复代码智能。
+当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、history-derived Todo List、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run`、Model Pool、逐次人工审批的普通 Desktop Swarm Tool、两级 Agents 状态视图与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一步完成 Swarm hardening，随后迁移 ProjectModel 到 SQLite 并恢复代码智能。
 
 原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
 

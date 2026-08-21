@@ -599,7 +599,7 @@ describe('SessionManager compaction', () => {
       'Tool result checkpoint retained',
     )
     const continued = JSON.stringify(provider.requests[2]?.messages)
-    expect(continued).toContain('<todo_state')
+    expect(continued).not.toContain('<todo_state')
     expect(continued).toContain('Finish after compact')
     expect(
       sent.some(
@@ -623,10 +623,9 @@ describe('SessionManager compaction', () => {
       5_000,
     )
 
-    const nextRunTodoStates = (provider.requests[3]?.messages ?? []).filter(
-      (message) => String(message.content ?? '').includes('<todo_state'),
-    )
-    expect(String(nextRunTodoStates.at(-1)?.content)).toContain('\nnull\n')
+    const nextRunContext = JSON.stringify(provider.requests[3]?.messages)
+    expect(nextRunContext).not.toContain('<todo_state')
+    expect(nextRunContext).toContain('Finish after compact')
     await manager.closeSession(sessionId)
   }, 30_000)
 
