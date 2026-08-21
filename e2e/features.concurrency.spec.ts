@@ -68,7 +68,9 @@ test.describe('Electron concurrency and interjection workflows', () => {
       1,
     )
     await expect(page.locator('.approval-card')).toHaveCount(0)
-    await expect(page.locator('.project-sidebar')).toContainText('待审批')
+    await expect(
+      page.locator('.project-sidebar .n-tag', { hasText: '待审批' }),
+    ).toHaveCount(0)
 
     await composer.fill('Analyze while A writes')
     await page.getByRole('button', { name: '发送消息' }).click()
@@ -90,6 +92,10 @@ test.describe('Electron concurrency and interjection workflows', () => {
       .click()
     const approval = page.locator('.approval-card')
     await expect(approval).toBeVisible()
+    await expect(page.locator('.run-activity').last()).toHaveAttribute(
+      'data-run-activity',
+      'awaiting_approval',
+    )
     await approval.getByRole('button', { name: '拒绝', exact: true }).click()
     await expect.poll(() => fakeProvider.requests.length).toBe(3)
     await expect(page.locator('.chat-message.assistant')).toContainText(
