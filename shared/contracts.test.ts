@@ -13,7 +13,12 @@ import {
   BackendNotificationEnvelopeSchema,
   type BackendNotificationEnvelope,
 } from './notifications'
-import { TodoStateSchema } from './todo'
+import {
+  MAX_TODO_EXPLANATION_LENGTH,
+  MAX_TODO_ITEMS,
+  MAX_TODO_STEP_LENGTH,
+  TodoStateSchema,
+} from './todo'
 
 const sessionId = 'session-1' as SessionId
 const runId = 'run-1' as RunId
@@ -144,6 +149,11 @@ describe('shared runtime contracts', () => {
   it('bounds Todo snapshots and rejects unknown checklist fields', () => {
     const validate = compileSchema(TodoStateSchema)
 
+    expect([
+      MAX_TODO_ITEMS,
+      MAX_TODO_STEP_LENGTH,
+      MAX_TODO_EXPLANATION_LENGTH,
+    ]).toEqual([128, 1_024, 65_536])
     expect(
       validate({
         explanation: 'Current work',
@@ -158,7 +168,7 @@ describe('shared runtime contracts', () => {
     expect(validate({ items: [], runId })).toBe(false)
     expect(
       validate({
-        items: Array.from({ length: 33 }, (_, index) => ({
+        items: Array.from({ length: MAX_TODO_ITEMS + 1 }, (_, index) => ({
           step: `Step ${index}`,
           status: 'pending',
         })),
@@ -166,7 +176,15 @@ describe('shared runtime contracts', () => {
     ).toBe(false)
     expect(
       validate({
-        items: [{ step: 'x'.repeat(257), status: 'pending' }],
+        items: [
+          { step: 'x'.repeat(MAX_TODO_STEP_LENGTH + 1), status: 'pending' },
+        ],
+      }),
+    ).toBe(false)
+    expect(
+      validate({
+        explanation: 'x'.repeat(MAX_TODO_EXPLANATION_LENGTH + 1),
+        items: [],
       }),
     ).toBe(false)
   })

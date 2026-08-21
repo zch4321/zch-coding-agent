@@ -1,8 +1,8 @@
 import { Type, type Static } from '@sinclair/typebox'
 
-export const MAX_TODO_ITEMS = 32
-export const MAX_TODO_STEP_LENGTH = 256
-export const MAX_TODO_EXPLANATION_LENGTH = 2_048
+export const MAX_TODO_ITEMS = 128
+export const MAX_TODO_STEP_LENGTH = 1_024
+export const MAX_TODO_EXPLANATION_LENGTH = 65_536
 export const TODO_TOOL_ID = 'todo_update'
 
 export const TodoItemStatusSchema = Type.Union([

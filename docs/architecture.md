@@ -1490,7 +1490,7 @@ Goal/Plan 会跨越多个 provider turn，并影响下一次 prompt 和 continua
 
 ### 11.2 Run-scoped Todo List
 
-Todo List 是模型自行维护的当前 Run 执行清单，不是 Durable Plan 的别名。`shared/todo.ts` 一次定义 `TodoState`：一个可选 explanation 和至多 32 个有序 item；item 只包含不超过 256 字符的 step 与 `pending | in_progress | completed` 状态。完整快照至多允许一个 `in_progress`，不使用稳定 item ID、增量 patch、取消态或完成证据。
+Todo List 是模型自行维护的当前 Run 执行清单，不是 Durable Plan 的别名。`shared/todo.ts` 一次定义 `TodoState`：一个不超过 65,536 字符的可选 explanation 和至多 128 个有序 item；item 只包含不超过 1,024 字符的 step 与 `pending | in_progress | completed` 状态。完整快照至多允许一个 `in_progress`，不使用稳定 item ID、增量 patch、取消态或完成证据。
 
 Provider 只看到一个 `todo_update` 工具。每次调用必须提交完整有序快照，因此替换、重排和多项状态推进都是一次原子更新；空 items 用于显式清空。工具按 serial 执行，校验 `sessionId/runId` 与当前 `ActiveRunExecution` 一致，使用低风险、无 workspace 副作用的既有执行路径，不进入人工审批，也不创建、修改或完成 Goal/Plan。普通 Main、Headless 和只读 child 使用同一 schema；child allowlist 显式包含 Todo，但 internal Session 的 `todo.updated` 不投影到父 Session。
 
