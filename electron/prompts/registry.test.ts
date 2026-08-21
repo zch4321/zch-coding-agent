@@ -73,6 +73,9 @@ describe('PromptRegistry', () => {
       DEFAULT_APPROVAL_PROMPT_REFS.classifyRisk.id,
     )
     expect(approval.content).toContain('Return only strict JSON')
+    expect(approval.content).toContain(
+      '<approval_tool_definition source="host">',
+    )
   })
 
   it('loads the versioned autonomous headless continuation prompt', async () => {

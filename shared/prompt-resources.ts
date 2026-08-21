@@ -2,6 +2,7 @@ import type { AssistantLanguage } from './system-prompts'
 
 export const PROMPT_RESOURCE_VERSION = '2026-08-12.1'
 export const BASE_INSTRUCTIONS_PROMPT_RESOURCE_VERSION = '2026-08-16.1'
+export const APPROVAL_PROMPT_RESOURCE_VERSION = '2026-08-21.1'
 export const HEADLESS_PROMPT_RESOURCE_VERSION = '2026-07-11.1'
 export const SWARM_PROMPT_RESOURCE_VERSION = '2026-08-12.1'
 export const TITLING_PROMPT_RESOURCE_VERSION = '2026-08-16.1'
@@ -40,7 +41,7 @@ export const DEFAULT_HARNESS_PROMPT_REFS: Record<
 export const DEFAULT_APPROVAL_PROMPT_REFS = {
   classifyRisk: {
     id: 'approval.classify-risk',
-    version: PROMPT_RESOURCE_VERSION,
+    version: APPROVAL_PROMPT_RESOURCE_VERSION,
   },
 }
 
