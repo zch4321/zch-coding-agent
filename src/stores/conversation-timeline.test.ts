@@ -92,6 +92,8 @@ function toolResult(input: {
   seq: number
   callId: CallId
   name: string
+  status?: 'completed' | 'denied' | 'failed' | 'cancelled' | 'timed_out'
+  isError?: boolean
 }): Extract<MessageRecord, { kind: 'tool_result' }> {
   return {
     schemaVersion: 1,
@@ -108,7 +110,7 @@ function toolResult(input: {
         type: 'tool_result',
         callId: input.callId,
         content: [{ type: 'json', value: { status: 'ok' } }],
-        isError: false,
+        isError: input.isError ?? false,
       },
     ],
     metadata: {
@@ -116,7 +118,7 @@ function toolResult(input: {
       tool: {
         name: input.name,
         reason: 'Inspect the requested resource',
-        status: 'completed',
+        status: input.status ?? 'completed',
         truncated: false,
       },
     },
@@ -216,6 +218,130 @@ describe('projectConversationTurns', () => {
         messages: [],
       }),
     ])
+  })
+
+  it('projects the active Todo while hiding its plumbing tool card', () => {
+    const overlay = blankOverlay()
+    overlay.runId = 'run:todo-timeline' as RunId
+    overlay.status = 'running_tools'
+    overlay.todo = {
+      explanation: 'Current work',
+      items: [
+        { step: 'Inspect', status: 'completed' },
+        { step: 'Implement', status: 'in_progress' },
+      ],
+    }
+    overlay.tools = [
+      {
+        callId: 'call:todo-live' as CallId,
+        runId: overlay.runId,
+        tool: 'todo_update',
+        args: { items: overlay.todo.items },
+        reason: 'Track work',
+        status: 'completed',
+      },
+    ]
+
+    const turns = projectConversationTurns({ records: [], overlay })
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]?.todo).toEqual(overlay.todo)
+    expect(turns[0]?.tools).toEqual([])
+  })
+
+  it('reconstructs a completed historical Todo without a generic tool card', () => {
+    const callId = 'call:todo-durable' as CallId
+    const turns = projectConversationTurns({
+      records: [
+        userMessage(),
+        assistantMessage({
+          id: 'message:todo-call',
+          seq: 2,
+          tool: {
+            callId,
+            name: 'todo_update',
+            args: {
+              items: [{ step: 'Inspect', status: 'in_progress' }],
+            },
+          },
+        }),
+        toolResult({
+          id: 'message:todo-result',
+          seq: 3,
+          callId,
+          name: 'todo_update',
+        }),
+      ],
+    })
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]?.todo).toEqual({
+      items: [{ step: 'Inspect', status: 'in_progress' }],
+    })
+    expect(turns[0]?.tools).toEqual([])
+  })
+
+  it('keeps the latest successful Todo when a later update fails', () => {
+    const completedCallId = 'call:todo-completed' as CallId
+    const failedCallId = 'call:todo-failed' as CallId
+    const turns = projectConversationTurns({
+      records: [
+        userMessage(),
+        assistantMessage({
+          id: 'message:todo-completed-call',
+          seq: 2,
+          tool: {
+            callId: completedCallId,
+            name: 'todo_update',
+            args: { items: [{ step: 'Keep me', status: 'in_progress' }] },
+          },
+        }),
+        toolResult({
+          id: 'message:todo-completed-result',
+          seq: 3,
+          callId: completedCallId,
+          name: 'todo_update',
+        }),
+        assistantMessage({
+          id: 'message:todo-failed-call',
+          seq: 4,
+          tool: {
+            callId: failedCallId,
+            name: 'todo_update',
+            args: { items: [{ step: 'Ignore me', status: 'completed' }] },
+          },
+        }),
+        toolResult({
+          id: 'message:todo-failed-result',
+          seq: 5,
+          callId: failedCallId,
+          name: 'todo_update',
+          status: 'failed',
+          isError: true,
+        }),
+      ],
+    })
+
+    expect(turns[0]?.todo).toEqual({
+      items: [{ step: 'Keep me', status: 'in_progress' }],
+    })
+    expect(turns[0]?.tools).toEqual([])
+  })
+
+  it('keeps the terminal overlay Todo visible while durable history reloads', () => {
+    const overlay = blankOverlay()
+    overlay.terminalReloadRunId = 'run:todo-terminal' as RunId
+    overlay.todo = {
+      items: [{ step: 'Persist after completion', status: 'completed' }],
+    }
+
+    const turns = projectConversationTurns({
+      records: [userMessage()],
+      overlay,
+    })
+
+    expect(turns[0]?.todo).toEqual(overlay.todo)
+    expect(turns[0]?.runActivity).toBeUndefined()
   })
 
   it('hides legacy visible Swarm prompts without hiding other orchestration', () => {

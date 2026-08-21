@@ -4,6 +4,7 @@ import {
   type TestProviderStreamRequest as ProviderStreamRequest,
 } from '../providers/provider-test-harness'
 import type { CallId } from '../../shared/ids'
+import { TODO_TOOL_ID } from '../../shared/todo'
 
 function deferred(): { resolve: () => void; promise: Promise<void> } {
   let resolve: () => void = () => undefined
@@ -187,7 +188,8 @@ export class ToolBatchAutoCompactProvider extends ScriptedProviderHarness {
         rawResponse: { id: 'tool-batch-compact' },
         turn: {
           role: 'assistant',
-          content: 'Tool result checkpoint retained',
+          content:
+            'Tool result checkpoint retained. Todo remains: Finish after compact.',
         },
         toolCalls: [],
         usage: { total_tokens: 20 },
@@ -206,6 +208,21 @@ export class ToolBatchAutoCompactProvider extends ScriptedProviderHarness {
           content: null,
           tool_calls: [
             {
+              id: 'call:compact-todo',
+              type: 'function',
+              function: {
+                name: TODO_TOOL_ID,
+                arguments: JSON.stringify({
+                  explanation: 'Track compacted work',
+                  items: [
+                    { step: 'Read the fixture', status: 'in_progress' },
+                    { step: 'Finish after compact', status: 'pending' },
+                  ],
+                  _agent_intent: 'Keep the current task checklist visible',
+                }),
+              },
+            },
+            {
               id: 'call:compact-read',
               type: 'function',
               function: {
@@ -219,6 +236,18 @@ export class ToolBatchAutoCompactProvider extends ScriptedProviderHarness {
           ],
         },
         toolCalls: [
+          {
+            id: 'call:compact-todo' as CallId,
+            toolId: TODO_TOOL_ID,
+            args: {
+              explanation: 'Track compacted work',
+              items: [
+                { step: 'Read the fixture', status: 'in_progress' },
+                { step: 'Finish after compact', status: 'pending' },
+              ],
+            },
+            reason: 'Keep the current task checklist visible',
+          },
           {
             id: 'call:compact-read' as CallId,
             toolId: 'read_file',

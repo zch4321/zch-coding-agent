@@ -10,6 +10,7 @@ import { TerminalStatusSchema } from './terminal'
 import { LlmUsageRecordSchema } from './usage'
 import { GoalStateSchema, PlanStateSchema } from './orchestration'
 import { TraceCaptureStatusSchema } from './trace'
+import { TodoStateSchema } from './todo'
 
 const EventBaseSchema = Type.Object({
   schemaVersion: Type.Literal(1),
@@ -281,6 +282,15 @@ export const AgentEventSchema = Type.Union([
       interjectionId: Type.String({ minLength: 1, maxLength: 128 }),
       content: Type.String({ maxLength: 1_000_000 }),
       createdAt: Type.String({ format: 'date-time' }),
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
+      type: Type.Literal('todo.updated'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      todo: TodoStateSchema,
     }),
   ]),
   Type.Composite([

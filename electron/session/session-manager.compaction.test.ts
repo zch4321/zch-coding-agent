@@ -598,6 +598,34 @@ describe('SessionManager compaction', () => {
     expect(JSON.stringify(provider.requests[2]?.messages)).toContain(
       'Tool result checkpoint retained',
     )
+    const continued = JSON.stringify(provider.requests[2]?.messages)
+    expect(continued).not.toContain('<todo_state')
+    expect(continued).toContain('Finish after compact')
+    expect(
+      sent.some(
+        ({ event }) =>
+          event.type === 'todo.updated' &&
+          event.todo.items[0]?.step === 'Read the fixture',
+      ),
+    ).toBe(true)
+
+    manager.startRun({
+      sessionId,
+      message: 'Start a separate task.',
+      clientRequestId: 'request:after-todo-run',
+    })
+    await waitFor(
+      () =>
+        sent.filter(
+          ({ event }) =>
+            event.type === 'run.status' && event.status === 'completed',
+        ).length >= 2,
+      5_000,
+    )
+
+    const nextRunContext = JSON.stringify(provider.requests[3]?.messages)
+    expect(nextRunContext).not.toContain('<todo_state')
+    expect(nextRunContext).toContain('Finish after compact')
     await manager.closeSession(sessionId)
   }, 30_000)
 

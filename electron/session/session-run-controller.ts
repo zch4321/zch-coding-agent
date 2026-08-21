@@ -190,14 +190,7 @@ export class SessionRunController {
       },
     }
 
-    run.done = this.#run(
-      session,
-      run,
-      userMessage,
-      context,
-      harnessMessage,
-      retryUserMessageId,
-    )
+    run.done = this.#run(session, run, userMessage, context, harnessMessage)
       .catch((error: unknown) =>
         this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error, {
           audience: 'internal',
@@ -365,7 +358,6 @@ export class SessionRunController {
     userMessage?: string,
     context?: RunContext,
     harnessMessage?: HarnessRunMessage,
-    retryUserMessageId?: MessageId,
   ): Promise<void> {
     const signal = run.controller.signal
     let runInputCheckpoint = {
@@ -401,11 +393,12 @@ export class SessionRunController {
         session.modelSelection,
         { onDiagnostic: this.#onDiagnostic },
       )
+      const compactCommand =
+        userMessage !== undefined &&
+        !run.directUserInput &&
+        isCompactSlashCommand(userMessage)
       await this.#compact.prepareBeforeRunInput(session, run, {
-        compactCommand:
-          userMessage !== undefined &&
-          !run.directUserInput &&
-          isCompactSlashCommand(userMessage),
+        compactCommand,
       })
       runInputCheckpoint = {
         history: structuredClone(session.history),
@@ -414,7 +407,7 @@ export class SessionRunController {
         plan: session.plan ? structuredClone(session.plan) : undefined,
       }
       const maxStepsPerRun = runConfig.limits.maxStepsPerRun
-      let runInputCommitted = retryUserMessageId !== undefined
+      let runInputCommitted = false
       if (harnessMessage) {
         const content = orchestrationRequestContent(
           harnessMessage.kind,

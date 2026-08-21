@@ -622,6 +622,9 @@ describe('bounded domain-state API contracts', () => {
       reasoning: 'partial reasoning',
       tools: [],
       interjections: [],
+      todo: {
+        items: [{ step: 'Keep working', status: 'in_progress' as const }],
+      },
     }
     roundTrip(ActiveRunPublicSnapshotSchema, runtime)
     roundTrip(DurableRunStartPayloadSchema, {

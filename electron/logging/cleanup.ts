@@ -18,6 +18,8 @@ interface TraceFileInfo {
   closed: boolean
 }
 
+const cleanupTails = new Map<string, Promise<void>>()
+
 function isMissingFileError(error: unknown): boolean {
   return Boolean(
     error &&
@@ -27,8 +29,7 @@ function isMissingFileError(error: unknown): boolean {
   )
 }
 
-/** Applies age and size retention without deleting active or corrupt traces. */
-export async function cleanupTraces(
+async function cleanupTracesUnlocked(
   directory: string,
   options: TraceCleanupOptions,
 ): Promise<{ deleted: string[]; retainedBytes: number }> {
@@ -149,4 +150,25 @@ export async function cleanupTraces(
   }
 
   return { deleted, retainedBytes }
+}
+
+/** Applies age and size retention while serializing cleanup of each trace directory. */
+export function cleanupTraces(
+  directory: string,
+  options: TraceCleanupOptions,
+): Promise<{ deleted: string[]; retainedBytes: number }> {
+  const key = path.resolve(directory)
+  const previous = cleanupTails.get(key) ?? Promise.resolve()
+  const run = previous
+    .catch(() => undefined)
+    .then(() => cleanupTracesUnlocked(directory, options))
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  cleanupTails.set(key, tail)
+
+  return run.finally(() => {
+    if (cleanupTails.get(key) === tail) cleanupTails.delete(key)
+  })
 }

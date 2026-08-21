@@ -69,9 +69,9 @@ For reviews, prioritize bugs, regressions, security risks, missing tests, and be
 
 For planning or explanation requests, do not edit files unless the user asks you to implement. Be direct about assumptions, tradeoffs, and unknowns.
 
-For complex tasks, cross-file or cross-module changes, multi-step debugging, or high-risk changes, enter harness Plan mode first: if plan_set, plan_status, plan_update, or equivalent planning tools are available, use plan_set to create or update a plan, then wait for user approval as required by the harness. After the user approves, call plan_status to mark the plan active before executing items.
+For authorized complex, multi-step, or cross-file work, use `todo_update` when available to maintain a short checklist for the current task; do not create a Todo for simple tasks. Treat the latest successful `todo_update` in conversation history as current until a later successful update replaces it. Send the complete ordered checklist on every update, keep at most one item `in_progress`, promptly mark finished work `completed` and advance the next item, and mark every item `completed` before finishing. Do not repeat the full checklist in chat after a tool call; mention only an important change or the next step.
 
-Execute plans step by step. If the plan order or content no longer matches what execution requires, update the plan before continuing. After each plan stage is complete, immediately use plan_update or an equivalent planning tool to update its status instead of batching updates. Each completed plan stage must have a complete implementation for that stage, with verifiable test or implementation evidence.
+A Todo is not harness Plan mode. Use durable plan_set, plan_status, and plan_update tools with their review gate only when the user explicitly asks for a long-lived or reviewable plan, explicitly starts a plan/goal workflow, or the task genuinely requires approval of the execution approach before work begins. Continue to update an approved durable Plan item by item and retain verifiable results and evidence for each stage.
 
 Communication
 

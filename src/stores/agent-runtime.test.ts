@@ -88,6 +88,70 @@ function userMessage(
   }
 }
 
+function completedTodoHistory(
+  todo: NonNullable<ActiveRunPublicSnapshot['todo']>,
+): MessageRecord[] {
+  const callId = 'call:todo-durable' as CallId
+  return [
+    {
+      schemaVersion: 1,
+      id: 'message:todo-call' as MessageId,
+      sessionId: selectedSessionId,
+      seq: 2,
+      visibility: 'visible',
+      turnId: 'message:user' as MessageId,
+      inHistory: true,
+      createdAt: timestamp,
+      kind: 'assistant_turn',
+      parts: [
+        {
+          type: 'tool_call',
+          callId,
+          name: 'todo_update',
+          arguments: todo,
+        },
+      ],
+      modelRoute: {
+        schemaVersion: 2,
+        purpose: 'main',
+        providerType: 'generic.chat-completions',
+        providerId: 'deepseek',
+        model: 'deepseek-chat',
+        reasoning: 'off',
+        endpoint: 'https://provider.invalid/v1/chat/completions',
+        providerConfigRevision: 1,
+      },
+    },
+    {
+      schemaVersion: 1,
+      id: 'message:todo-result' as MessageId,
+      sessionId: selectedSessionId,
+      seq: 3,
+      visibility: 'visible',
+      turnId: 'message:user' as MessageId,
+      inHistory: true,
+      createdAt: timestamp,
+      kind: 'tool_result',
+      parts: [
+        {
+          type: 'tool_result',
+          callId,
+          content: [{ type: 'json', value: { status: 'ok' } }],
+          isError: false,
+        },
+      ],
+      metadata: {
+        schemaVersion: 1,
+        tool: {
+          name: 'todo_update',
+          status: 'completed',
+          truncated: false,
+        },
+      },
+    },
+  ]
+}
+
 function runtimeSnapshot(id: SessionId, runId: RunId): ActiveRunPublicSnapshot {
   return {
     schemaVersion: 1,
@@ -650,6 +714,62 @@ describe('agent runtime store', () => {
       undefined,
     )
     expect(runtime.timelineTurns.at(-1)?.runActivity).toBe('requesting_model')
+  })
+
+  it('tracks live Todo snapshots and retains completed history across Runs', () => {
+    const replica = seedReplica()
+    const runtime = useAgentRuntimeStore()
+    const firstRunId = 'run:todo-first' as RunId
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'todo.updated',
+        seq: 1,
+        sessionId: selectedSessionId,
+        runId: firstRunId,
+        todo: {
+          explanation: 'Track the task',
+          items: [{ step: 'Implement Todo', status: 'in_progress' }],
+        },
+      }),
+    )
+    expect(runtime.timelineTurns.at(-1)?.todo).toEqual({
+      explanation: 'Track the task',
+      items: [{ step: 'Implement Todo', status: 'in_progress' }],
+    })
+
+    const snapshot = runtimeSnapshot(selectedSessionId, firstRunId)
+    snapshot.todo = {
+      items: [{ step: 'Verify reload', status: 'completed' }],
+    }
+    runtime.hydrateRuntime(snapshot)
+    expect(runtime.ensureOverlay(selectedSessionId).todo).toEqual(snapshot.todo)
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 2,
+        sessionId: selectedSessionId,
+        runId: firstRunId,
+        status: 'completed',
+      }),
+    )
+    replica.messagesBySessionId[selectedSessionId] = [
+      userMessage(),
+      ...completedTodoHistory(snapshot.todo),
+    ]
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 3,
+        sessionId: selectedSessionId,
+        runId: 'run:todo-second' as RunId,
+        status: 'calling_llm',
+      }),
+    )
+
+    expect(runtime.ensureOverlay(selectedSessionId).todo).toBeUndefined()
+    expect(runtime.timelineTurns[0]?.todo).toEqual(snapshot.todo)
   })
 
   it('routes audit-only events through explicit no-op handlers', () => {

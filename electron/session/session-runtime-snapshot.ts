@@ -90,6 +90,8 @@ export function updatePublicRunSnapshot(
       createdAt: event.createdAt,
     })
     snapshot.interjections = next.slice(-MAX_RUNTIME_INTERJECTIONS)
+  } else if (event.type === 'todo.updated') {
+    snapshot.todo = structuredClone(event.todo)
   }
   snapshot.tools = [...run.publicTools.values()].map((tool) =>
     structuredClone(tool),

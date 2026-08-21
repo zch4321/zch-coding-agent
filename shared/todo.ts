@@ -1,0 +1,68 @@
+import { Type, type Static } from '@sinclair/typebox'
+import { Value } from '@sinclair/typebox/value'
+
+export const MAX_TODO_ITEMS = 128
+export const MAX_TODO_STEP_LENGTH = 1_024
+export const MAX_TODO_EXPLANATION_LENGTH = 65_536
+export const TODO_TOOL_ID = 'todo_update'
+
+export const TodoItemStatusSchema = Type.Union([
+  Type.Literal('pending'),
+  Type.Literal('in_progress'),
+  Type.Literal('completed'),
+])
+export type TodoItemStatus = Static<typeof TodoItemStatusSchema>
+
+export const TodoItemSchema = Type.Object(
+  {
+    step: Type.String({
+      minLength: 1,
+      maxLength: MAX_TODO_STEP_LENGTH,
+      description: 'One short, concrete task step.',
+    }),
+    status: TodoItemStatusSchema,
+  },
+  { additionalProperties: false },
+)
+export type TodoItem = Static<typeof TodoItemSchema>
+
+export const TodoStateSchema = Type.Object(
+  {
+    explanation: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: MAX_TODO_EXPLANATION_LENGTH,
+        description: 'Optional explanation for this checklist update.',
+      }),
+    ),
+    items: Type.Array(TodoItemSchema, {
+      maxItems: MAX_TODO_ITEMS,
+      description:
+        'Complete ordered checklist snapshot. At most one item may be in_progress.',
+    }),
+  },
+  { additionalProperties: false },
+)
+export type TodoState = Static<typeof TodoStateSchema>
+
+/** Parses and normalizes one complete Todo snapshot from untrusted history data. */
+export function parseTodoState(value: unknown): TodoState | undefined {
+  if (!Value.Check(TodoStateSchema, value)) return undefined
+  const todo = value as TodoState
+  const explanation = todo.explanation?.trim()
+  if (todo.explanation !== undefined && !explanation) return undefined
+
+  let inProgress = 0
+  const items: TodoItem[] = []
+  for (const item of todo.items) {
+    const step = item.step.trim()
+    if (!step) return undefined
+    if (item.status === 'in_progress') inProgress += 1
+    if (inProgress > 1) return undefined
+    items.push({ step, status: item.status })
+  }
+  return {
+    ...(explanation ? { explanation } : {}),
+    items,
+  }
+}

@@ -22,6 +22,7 @@ import type { SubagentExecutionPort } from '../subagent/contracts'
 import { registerSubagentTools } from '../tools/subagent-tools'
 import type { SwarmExecutionPort } from '../swarm/contracts'
 import { registerSwarmTools } from '../tools/swarm-tools'
+import { registerTodoTools } from './todo-tools'
 
 export interface SessionTooling {
   toolRegistry: ToolRegistry
@@ -70,6 +71,10 @@ export function createSessionTooling(options: {
     registerSkillTools(toolRegistry, options.skillsManager)
   }
   registerOrchestrationTools(toolRegistry, {
+    getSession: options.getSession,
+    emit: options.emit,
+  })
+  registerTodoTools(toolRegistry, {
     getSession: options.getSession,
     emit: options.emit,
   })

@@ -74,6 +74,14 @@ const zhCN = {
     orchestrator: '编排',
     goal: '目标',
     plan: '计划',
+    todo: '待办',
+    todoProgress: '{completed}/{total}',
+    todoEmpty: '暂无待办项',
+    todoStatus: {
+      pending: '待处理',
+      in_progress: '进行中',
+      completed: '已完成',
+    },
     streaming: '生成中',
     reasoning: '思考过程',
     runActivity: {

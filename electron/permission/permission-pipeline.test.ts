@@ -293,6 +293,16 @@ describe('P3 permission pipeline ordering', () => {
       approvedCall: { approvedBy: 'model' },
     })
     expect(autoApprover.evaluate).toHaveBeenCalledOnce()
+    expect(autoApprover.evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool: expect.objectContaining({
+          id: 'run_command',
+          description: expect.any(String),
+          inputSchema: expect.objectContaining({ type: 'object' }),
+        }),
+      }),
+      expect.anything(),
+    )
     expect(requestHumanApproval).not.toHaveBeenCalled()
   })
 

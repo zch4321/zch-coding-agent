@@ -80,6 +80,13 @@ describe('terminal tool permission matrix', () => {
     })
   })
 
+  it('reports that terminal_open starts the configured shell process', () => {
+    const definition = definitions().get('terminal_open')!
+
+    expect(definition.effects).toEqual(['process.spawn', 'terminal.write'])
+    expect(definition.description).toContain('does not submit a command')
+  })
+
   it('coerces a numeric terminal id and rejects invalid identifiers', () => {
     const registry = definitions()
     const definition = registry.get('terminal_send')!

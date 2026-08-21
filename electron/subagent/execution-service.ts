@@ -13,6 +13,7 @@ import { MAX_SWARM_SHARED_CONTEXT_LENGTH } from '../../shared/swarm'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
 import { GIT_READ_ONLY_TOOL_IDS } from '../tools/git-tool-ids'
+import { TODO_TOOL_ID } from '../../shared/todo'
 import { projectAgentExecutionSummary } from './public-projection'
 import {
   swarmSharedContextContent,
@@ -36,6 +37,7 @@ const CHILD_TOOL_IDS = new Set([
   'grep',
   'read_skill',
   'delay',
+  TODO_TOOL_ID,
 ])
 const MAX_ERROR_LENGTH = 65_536
 const OUTPUT_FINISH_REASONS = new Set([

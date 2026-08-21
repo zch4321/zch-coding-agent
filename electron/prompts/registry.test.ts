@@ -51,6 +51,8 @@ describe('PromptRegistry', () => {
     )
     expect(base.content).toContain('指令优先级与上下文边界')
     expect(base.content).toContain('Harness 标签')
+    expect(base.content).not.toContain('<todo_state>')
+    expect(base.content).toContain('todo_update')
     expect(base.content).toContain('ProjectModel')
     expect(base.content).not.toContain('<runtime_policy>')
     expect(runtime.resource.id).toBe(
@@ -73,6 +75,9 @@ describe('PromptRegistry', () => {
       DEFAULT_APPROVAL_PROMPT_REFS.classifyRisk.id,
     )
     expect(approval.content).toContain('Return only strict JSON')
+    expect(approval.content).toContain(
+      '<approval_tool_definition source="host">',
+    )
   })
 
   it('loads the versioned autonomous headless continuation prompt', async () => {

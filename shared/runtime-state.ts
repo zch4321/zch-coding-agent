@@ -12,6 +12,7 @@ import {
 } from './durable'
 import { CallIdSchema, RunIdSchema, SessionIdSchema } from './ids'
 import { JsonValueSchema } from './json'
+import { TodoStateSchema } from './todo'
 
 export const ActiveRunToolSnapshotSchema = Type.Object(
   {
@@ -79,6 +80,7 @@ export const ActiveRunPublicSnapshotSchema = Type.Object(
     interjections: Type.Array(ActiveRunInterjectionSnapshotSchema, {
       maxItems: MAX_RUNTIME_INTERJECTIONS,
     }),
+    todo: Type.Optional(TodoStateSchema),
   },
   { additionalProperties: false },
 )

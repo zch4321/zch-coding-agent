@@ -105,9 +105,9 @@ export function registerTerminalTools(
     id: 'terminal_open',
     executionMode: 'serial',
     description:
-      'Open a persistent terminal owned by the current session. Use for long-running tests, watch tasks, dev servers, REPLs, and commands that need repeated observation.',
+      'Open a persistent terminal owned by the current session using the configured shell. This starts the shell process but does not submit a command. Use for long-running tests, watch tasks, dev servers, REPLs, and commands that need repeated observation.',
     inputSchema: OpenSchema,
-    effects: ['terminal.write'],
+    effects: ['process.spawn', 'terminal.write'],
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 10_000,

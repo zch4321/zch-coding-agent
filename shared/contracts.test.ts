@@ -13,6 +13,13 @@ import {
   BackendNotificationEnvelopeSchema,
   type BackendNotificationEnvelope,
 } from './notifications'
+import {
+  MAX_TODO_EXPLANATION_LENGTH,
+  MAX_TODO_ITEMS,
+  MAX_TODO_STEP_LENGTH,
+  TodoStateSchema,
+  parseTodoState,
+} from './todo'
 
 const sessionId = 'session-1' as SessionId
 const runId = 'run-1' as RunId
@@ -93,6 +100,23 @@ describe('shared runtime contracts', () => {
     expect(
       validateAgentEvent({
         schemaVersion: 1,
+        type: 'todo.updated',
+        sessionId,
+        runId,
+        todo: {
+          explanation: 'Track the work',
+          items: [
+            { step: 'Inspect', status: 'completed' },
+            { step: 'Implement', status: 'in_progress' },
+          ],
+        },
+        seq: 4,
+        ts: '2026-06-15T00:00:00.900Z',
+      } satisfies AgentEvent),
+    ).toBe(true)
+    expect(
+      validateAgentEvent({
+        schemaVersion: 1,
         type: 'assistant.activity',
         sessionId,
         runId,
@@ -121,6 +145,72 @@ describe('shared runtime contracts', () => {
     ).toBe(true)
     expect(validateTerminalEvent(terminalEvent)).toBe(true)
     expect(validateAgentEvent({ ...agentEvent, reason: undefined })).toBe(false)
+  })
+
+  it('bounds Todo snapshots and rejects unknown checklist fields', () => {
+    const validate = compileSchema(TodoStateSchema)
+
+    expect([
+      MAX_TODO_ITEMS,
+      MAX_TODO_STEP_LENGTH,
+      MAX_TODO_EXPLANATION_LENGTH,
+    ]).toEqual([128, 1_024, 65_536])
+    expect(
+      validate({
+        explanation: 'Current work',
+        items: [{ step: 'Implement it', status: 'in_progress' }],
+      }),
+    ).toBe(true)
+    expect(
+      validate({
+        items: [{ step: 'Implement it', status: 'blocked' }],
+      }),
+    ).toBe(false)
+    expect(validate({ items: [], runId })).toBe(false)
+    expect(
+      validate({
+        items: Array.from({ length: MAX_TODO_ITEMS + 1 }, (_, index) => ({
+          step: `Step ${index}`,
+          status: 'pending',
+        })),
+      }),
+    ).toBe(false)
+    expect(
+      validate({
+        items: [
+          { step: 'x'.repeat(MAX_TODO_STEP_LENGTH + 1), status: 'pending' },
+        ],
+      }),
+    ).toBe(false)
+    expect(
+      validate({
+        explanation: 'x'.repeat(MAX_TODO_EXPLANATION_LENGTH + 1),
+        items: [],
+      }),
+    ).toBe(false)
+  })
+
+  it('normalizes valid Todo history snapshots and ignores invalid updates', () => {
+    expect(
+      parseTodoState({
+        explanation: '  Continue the task  ',
+        items: [{ step: '  Verify history  ', status: 'in_progress' }],
+      }),
+    ).toEqual({
+      explanation: 'Continue the task',
+      items: [{ step: 'Verify history', status: 'in_progress' }],
+    })
+    expect(
+      parseTodoState({
+        items: [
+          { step: 'First', status: 'in_progress' },
+          { step: 'Second', status: 'in_progress' },
+        ],
+      }),
+    ).toBeUndefined()
+    expect(
+      parseTodoState({ items: [{ step: ' ', status: 'pending' }] }),
+    ).toBeUndefined()
   })
 
   it('keeps type-level IPC payloads aligned with runtime schemas', () => {
