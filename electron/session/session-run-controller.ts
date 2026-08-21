@@ -38,6 +38,7 @@ import type {
 } from './session-types'
 import type { RunAccessLease } from './workspace-access-coordinator'
 import type { ResolvedModelRoute } from '../providers/model-route-resolver'
+import { todoStateContext } from './todo-context'
 
 export interface RunStartOptions {
   routes?: {
@@ -190,14 +191,7 @@ export class SessionRunController {
       },
     }
 
-    run.done = this.#run(
-      session,
-      run,
-      userMessage,
-      context,
-      harnessMessage,
-      retryUserMessageId,
-    )
+    run.done = this.#run(session, run, userMessage, context, harnessMessage)
       .catch((error: unknown) =>
         this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error, {
           audience: 'internal',
@@ -365,7 +359,6 @@ export class SessionRunController {
     userMessage?: string,
     context?: RunContext,
     harnessMessage?: HarnessRunMessage,
-    retryUserMessageId?: MessageId,
   ): Promise<void> {
     const signal = run.controller.signal
     let runInputCheckpoint = {
@@ -401,11 +394,12 @@ export class SessionRunController {
         session.modelSelection,
         { onDiagnostic: this.#onDiagnostic },
       )
+      const compactCommand =
+        userMessage !== undefined &&
+        !run.directUserInput &&
+        isCompactSlashCommand(userMessage)
       await this.#compact.prepareBeforeRunInput(session, run, {
-        compactCommand:
-          userMessage !== undefined &&
-          !run.directUserInput &&
-          isCompactSlashCommand(userMessage),
+        compactCommand,
       })
       runInputCheckpoint = {
         history: structuredClone(session.history),
@@ -414,7 +408,19 @@ export class SessionRunController {
         plan: session.plan ? structuredClone(session.plan) : undefined,
       }
       const maxStepsPerRun = runConfig.limits.maxStepsPerRun
-      let runInputCommitted = retryUserMessageId !== undefined
+      let runInputCommitted = false
+      const todoContextRecord = compactCommand
+        ? undefined
+        : appendPromptLayer(session, {
+            kind: 'runtime_context',
+            content: todoStateContext(run.runId, undefined),
+            source: 'runtime:active-run-todo',
+            trusted: true,
+            editable: false,
+            config: runConfig,
+            ...(run.rootUserMessageId ? { turnId: run.rootUserMessageId } : {}),
+          })
+      if (todoContextRecord) run.harnessMessageIds.push(todoContextRecord.id)
       if (harnessMessage) {
         const content = orchestrationRequestContent(
           harnessMessage.kind,
@@ -543,6 +549,9 @@ export class SessionRunController {
             text: prepared.visibleMessage,
           })
         }
+      }
+      if (todoContextRecord && run.rootUserMessageId) {
+        todoContextRecord.turnId = run.rootUserMessageId
       }
       if (!runInputCommitted) {
         await this.#executionState?.commit(session, { reason: 'run_input' })

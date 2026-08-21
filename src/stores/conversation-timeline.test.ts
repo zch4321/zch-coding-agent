@@ -218,6 +218,64 @@ describe('projectConversationTurns', () => {
     ])
   })
 
+  it('projects the active Todo while hiding its plumbing tool card', () => {
+    const overlay = blankOverlay()
+    overlay.runId = 'run:todo-timeline' as RunId
+    overlay.status = 'running_tools'
+    overlay.todo = {
+      explanation: 'Current work',
+      items: [
+        { step: 'Inspect', status: 'completed' },
+        { step: 'Implement', status: 'in_progress' },
+      ],
+    }
+    overlay.tools = [
+      {
+        callId: 'call:todo-live' as CallId,
+        runId: overlay.runId,
+        tool: 'todo_update',
+        args: { items: overlay.todo.items },
+        reason: 'Track work',
+        status: 'completed',
+      },
+    ]
+
+    const turns = projectConversationTurns({ records: [], overlay })
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]?.todo).toEqual(overlay.todo)
+    expect(turns[0]?.tools).toEqual([])
+  })
+
+  it('does not reconstruct historical Todo calls as generic tools', () => {
+    const callId = 'call:todo-durable' as CallId
+    const turns = projectConversationTurns({
+      records: [
+        userMessage(),
+        assistantMessage({
+          id: 'message:todo-call',
+          seq: 2,
+          tool: {
+            callId,
+            name: 'todo_update',
+            args: {
+              items: [{ step: 'Inspect', status: 'in_progress' }],
+            },
+          },
+        }),
+        toolResult({
+          id: 'message:todo-result',
+          seq: 3,
+          callId,
+          name: 'todo_update',
+        }),
+      ],
+    })
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]?.tools).toEqual([])
+  })
+
   it('hides legacy visible Swarm prompts without hiding other orchestration', () => {
     const turns = projectConversationTurns({
       records: [

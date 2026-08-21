@@ -75,6 +75,14 @@ const enUS = {
     orchestrator: 'Orchestrator',
     goal: 'Goal',
     plan: 'Plan',
+    todo: 'Todo',
+    todoProgress: '{completed}/{total}',
+    todoEmpty: 'No todo items',
+    todoStatus: {
+      pending: 'Pending',
+      in_progress: 'In progress',
+      completed: 'Completed',
+    },
     streaming: 'Streaming',
     reasoning: 'Reasoning',
     runActivity: {

@@ -652,6 +652,58 @@ describe('agent runtime store', () => {
     expect(runtime.timelineTurns.at(-1)?.runActivity).toBe('requesting_model')
   })
 
+  it('tracks Todo snapshots, hydrates them, and clears them for the next Run', () => {
+    seedReplica()
+    const runtime = useAgentRuntimeStore()
+    const firstRunId = 'run:todo-first' as RunId
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'todo.updated',
+        seq: 1,
+        sessionId: selectedSessionId,
+        runId: firstRunId,
+        todo: {
+          explanation: 'Track the task',
+          items: [{ step: 'Implement Todo', status: 'in_progress' }],
+        },
+      }),
+    )
+    expect(runtime.timelineTurns.at(-1)?.todo).toEqual({
+      explanation: 'Track the task',
+      items: [{ step: 'Implement Todo', status: 'in_progress' }],
+    })
+
+    const snapshot = runtimeSnapshot(selectedSessionId, firstRunId)
+    snapshot.todo = {
+      items: [{ step: 'Verify reload', status: 'completed' }],
+    }
+    runtime.hydrateRuntime(snapshot)
+    expect(runtime.ensureOverlay(selectedSessionId).todo).toEqual(snapshot.todo)
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 2,
+        sessionId: selectedSessionId,
+        runId: firstRunId,
+        status: 'completed',
+      }),
+    )
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 3,
+        sessionId: selectedSessionId,
+        runId: 'run:todo-second' as RunId,
+        status: 'calling_llm',
+      }),
+    )
+
+    expect(runtime.ensureOverlay(selectedSessionId).todo).toBeUndefined()
+    expect(runtime.timelineTurns.at(-1)?.todo).toBeUndefined()
+  })
+
   it('routes audit-only events through explicit no-op handlers', () => {
     seedReplica()
     const runtime = useAgentRuntimeStore()

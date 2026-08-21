@@ -7,6 +7,7 @@ import type {
   ToolActivity,
 } from './agent-types'
 import type { SessionOverlay } from './agent-runtime-helpers'
+import { TODO_TOOL_ID } from '../../shared/todo'
 import {
   messageText,
   originalUserRecord,
@@ -107,6 +108,15 @@ function sortTurnContent(turn: MutableConversationTurn): void {
   turn.messages.sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
 }
 
+function copyTodo(todo: NonNullable<SessionOverlay['todo']>) {
+  return {
+    ...(todo.explanation === undefined
+      ? {}
+      : { explanation: todo.explanation }),
+    items: todo.items.map((item) => ({ ...item })),
+  }
+}
+
 function markFinalAssistantMessages(turns: MutableConversationTurn[]): void {
   const finalBySourceTurn = new Map<
     string,
@@ -142,6 +152,7 @@ export function projectConversationTurns({
   const phaseBySourceTurnId = new Map<string, MutableConversationTurn>()
   const aliases = new Map<string, string>()
   const toolsByCallId = new Map<string, ToolActivity>()
+  const hiddenToolCallIds = new Set<string>()
   const durableInterjectionIds = new Set<string>()
   let currentTurn: MutableConversationTurn | undefined
 
@@ -251,6 +262,10 @@ export function projectConversationTurns({
       }
       for (const part of record.parts) {
         if (part.type !== 'tool_call') continue
+        if (part.name === TODO_TOOL_ID) {
+          hiddenToolCallIds.add(part.callId)
+          continue
+        }
         const tool: ToolActivity = {
           callId: part.callId,
           runId: (record.turnId ?? record.id) as unknown as RunId,
@@ -267,6 +282,12 @@ export function projectConversationTurns({
     }
     if (record.kind === 'tool_result') {
       const part = record.parts[0]
+      if (
+        hiddenToolCallIds.has(part.callId) ||
+        record.metadata?.tool.name === TODO_TOOL_ID
+      ) {
+        continue
+      }
       let tool = toolsByCallId.get(part.callId)
       if (!tool) {
         tool = {
@@ -320,9 +341,9 @@ export function projectConversationTurns({
       }
     }
 
-    const liveTools = [...overlay.tools].sort(
-      (left, right) => (left.order ?? 0) - (right.order ?? 0),
-    )
+    const liveTools = overlay.tools
+      .filter((tool) => tool.tool !== TODO_TOOL_ID)
+      .sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
     for (const [index, tool] of liveTools.entries()) {
       if (toolsByCallId.has(tool.callId)) continue
       const liveTool = {
@@ -354,6 +375,7 @@ export function projectConversationTurns({
         live: true,
       })
     }
+    liveTurn.todo = overlay.todo ? copyTodo(overlay.todo) : undefined
     liveTurn.runActivity = resolveRunActivity(overlay)
   }
 
@@ -364,6 +386,7 @@ export function projectConversationTurns({
       turn.tools.length > 0 ||
       turn.reasoningSegments.length > 0 ||
       turn.messages.length > 0 ||
+      turn.todo ||
       turn.runActivity,
   )
   markFinalAssistantMessages(visibleTurns)

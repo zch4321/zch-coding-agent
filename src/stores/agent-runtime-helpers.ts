@@ -8,6 +8,7 @@ import type { RunId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
+import type { TodoState } from '../../shared/todo'
 import type {
   PendingApproval,
   ReviewedApproval,
@@ -42,6 +43,7 @@ export interface SessionOverlay {
   reviewedApproval?: ReviewedApproval
   goal?: GoalState
   plan?: PlanState
+  todo?: TodoState
   interjections: UiInterjection[]
   terminalReloadRunId?: RunId
   lastEventSeq: number

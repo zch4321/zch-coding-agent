@@ -64,6 +64,7 @@ import {
   waitForCompactRetry,
 } from './session-compact-retry'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
+import { todoStateContext } from './todo-context'
 
 function compactOrchestrationState(input: {
   goal?: GoalState
@@ -87,6 +88,20 @@ function appendOrchestrationStateCheckpoint(
       compactOrchestrationState(session),
     ),
     source: 'runtime:compaction-orchestration-state',
+    trusted: true,
+    editable: false,
+    turnId: run.rootUserMessageId,
+  })
+}
+
+function appendTodoStateCheckpoint(
+  session: SessionState,
+  run: ActiveRun,
+): void {
+  appendPromptMessage(session, {
+    kind: 'runtime_context',
+    content: todoStateContext(run.runId, run.todo),
+    source: 'runtime:compaction-todo-state',
     trusted: true,
     editable: false,
     turnId: run.rootUserMessageId,
@@ -664,6 +679,7 @@ export class SessionCompactCoordinator {
       deactivateActiveHistory(session)
       await this.#appendFreshHarness(session, run)
       appendOrchestrationStateCheckpoint(session, run)
+      appendTodoStateCheckpoint(session, run)
       appendProviderCompactSummary(session, {
         payload: input.compact.payload,
         route: run.routes!.compression.snapshot,
@@ -737,6 +753,7 @@ export class SessionCompactCoordinator {
       deactivateActiveHistory(session)
       await this.#appendFreshHarness(session, run)
       appendOrchestrationStateCheckpoint(session, run)
+      appendTodoStateCheckpoint(session, run)
       appendConversationTranscript(session, {
         content: conversationTranscriptContent(document),
         route: target,

@@ -53,4 +53,23 @@ describe('public run snapshot', () => {
     expect(run.publicSnapshot.text).toBe('current output')
     expect(run.publicSnapshot.tools).toHaveLength(1)
   })
+
+  it('captures the latest Run Todo for renderer resynchronization', () => {
+    const run = activeRun()
+
+    updatePublicRunSnapshot(run, {
+      type: 'todo.updated',
+      sessionId: run.publicSnapshot.sessionId,
+      runId: run.publicSnapshot.runId,
+      todo: {
+        explanation: 'Current checklist',
+        items: [{ step: 'Verify snapshot', status: 'in_progress' }],
+      },
+    })
+
+    expect(run.publicSnapshot.todo).toEqual({
+      explanation: 'Current checklist',
+      items: [{ step: 'Verify snapshot', status: 'in_progress' }],
+    })
+  })
 })

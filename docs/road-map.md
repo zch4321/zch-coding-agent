@@ -4,7 +4,7 @@
 
 Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`backend-refactor-plan.md`](./backend-refactor-plan.md)。
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run`、Model Pool、逐次人工审批的普通 Desktop Swarm Tool、两级 Agents 状态视图与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一步先增加 Run-scoped Todo List，再完成 Swarm hardening，随后迁移 ProjectModel 到 SQLite 并恢复代码智能。
+当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、Run-scoped Todo List、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run`、Model Pool、逐次人工审批的普通 Desktop Swarm Tool、两级 Agents 状态视图与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一步完成 Swarm hardening，随后迁移 ProjectModel 到 SQLite 并恢复代码智能。
 
 原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
 
@@ -12,44 +12,11 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 | 优先级 | 领域                           | 目标                                                  | 主要风险                              |
 | ------ | ------------------------------ | ----------------------------------------------------- | ------------------------------------- |
-| P2     | Run Planning                   | 模型自行维护的单 Run Todo List                        | 与 Durable Plan 混淆、状态跨 Run 泄漏 |
 | P2     | Swarm Hardening                | 取消体验、压力测试、诊断与成本汇总                    | 费用失控、取消竞态与上下文膨胀        |
 | P2     | Provider Routing               | Session selection、Active Run route 与用途路由        | 全局 active provider 静默影响已有会话 |
 | P3     | Project / Code Intelligence UX | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断 | 项目元数据误改、后端不可诊断          |
 | P3     | Terminal / Command Environment | Windows Shell 自动发现及终端、命令解释器独立配置      | Shell 参数差异、路径漂移与回退语义    |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                  | 基础并发与扩展边界未稳时过早扩张      |
-
-## 1. M1 · Run-scoped Todo List（下一步）
-
-目标：提供一个通用、由模型自行维护的当前 Run 执行清单。Todo List 用于把本次回答或实现过程拆成短步骤、标记当前进展和避免遗漏；它不是需要用户批准的长期承诺。
-
-### 1.1 与 Goal / Plan 的边界
-
-- Goal 与 Plan 继续属于 Session durable metadata，可以跨多个 Run；Plan 具有 `awaiting_review | active | rejected | completed` 顶层状态、用户审阅门、continuation 和完成证据语义。
-- Todo List 属于 `ActiveRun` runtime state，只覆盖创建它的 Run。Run 完成、失败或取消后结束生命周期，下一 Run 默认从空清单开始。
-- Todo List 由模型自行创建、替换、重排和更新，不触发用户审阅，不暂停 Run，不启动自动 continuation，也不自动创建、修改或完成 Goal/Plan。
-- Goal、Plan 和 Todo List 可以同时存在。Todo List 可以细化当前 Plan item 的执行动作，但二者不做双向隐式同步。
-- Todo Tool 不修改 workspace 或外部系统，不经过普通副作用审批；catalog 与 executor 仍必须按 Run/Session ownership 校验调用。
-
-### 1.2 Runtime、Tool 与上下文
-
-- 设计一组有界的结构化 Todo Tool，至少支持读取当前清单、原子设置有序条目和更新单项状态；公开命名、完整替换还是增量更新在实现设计中确定，不能复用现有 `plan_*` 的审阅语义。
-- 第一版状态保持精简，覆盖 `pending | in_progress | completed`；是否允许多个 `in_progress`、取消项、备注和稳定 item ID 必须在 shared schema 中一次定义。
-- Todo 状态由 backend Active Run 持有，并通过明确的 Run-scoped event/snapshot 投影给 Renderer；Renderer 不得成为状态真相源。
-- 同一 Run 内发生 Provider compaction、Renderer reload 或 Session 切换时，当前 Todo 仍可恢复并重新进入后续 Provider context；应用进程重启不恢复已中断 Run 的 Todo。
-- Todo Tool call/result 可以审计，但后续 Run 的 Provider context 不应把旧清单误认为当前任务状态；存储历史、context selection 和 transcript 展示需要分别定义。
-- Todo 作为通用无副作用 Agent Tool，面向普通 Main Run、只读 Subagent、Swarm child 和支持 Provider Tool call 的 Headless Run；Runtime Identity、catalog 与 executor 必须使用一致契约。Todo 本身不得成为递归 Agent capability。
-- 条目数量、单项文本、总 payload、更新频率和事件大小必须有界；未知 ID、重复 ID、非法状态转换和跨 Run 调用返回稳定错误。
-
-### 1.3 UI 与验收
-
-- 对话运行中以紧凑、稳定布局展示 Todo 状态和当前项；更新状态不能持续挤压流式消息或把模型内部清单伪装成用户消息。
-- 用户可以查看但第一版不直接编辑模型 Todo；Todo 与 Plan 审阅卡、Goal/Plan artifact 使用不同名称和视觉层级。
-- 模型可以在一次 Run 中创建、重排和逐项完成清单；并发 Session 的 Todo event 不串线。
-- Provider compaction 与 Renderer reload 后，模型和 UI 看到相同的当前清单；Run 终态后下一 Run 不继承旧 active Todo。
-- Todo 更新不会改变 Session revision 中的 Goal/Plan，不会触发 Plan review、自动 continuation、workspace writer 或工具审批。
-- Main、Subagent、Swarm child 与 Headless 使用相同 Todo schema 和生命周期；hidden child 的 Todo 不泄漏到父 Session 或普通会话列表。
-- deterministic fake-provider trajectory 覆盖创建、增量更新、非法更新、取消、失败、compaction、reload 和终态清理。
 
 ## 2. M2 · Swarm Hardening
 

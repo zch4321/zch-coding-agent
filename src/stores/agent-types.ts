@@ -3,6 +3,7 @@ import type { ModelCapabilityLevel, ReasoningEffort } from '../../shared/config'
 import type { ContextAttachmentChip } from '../../shared/context'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type { ToolApprovalSummary } from '../../shared/agent-events'
+import type { TodoState } from '../../shared/todo'
 
 export type RunActivity =
   | 'requesting_model'
@@ -75,6 +76,7 @@ export interface ConversationTurn {
   sourceTurnId?: MessageId
   order: number
   userMessage?: ChatMessage
+  todo?: TodoState
   tools: ToolActivity[]
   reasoningSegments: ReasoningSegment[]
   messages: ChatMessage[]

@@ -71,6 +71,7 @@ const runtimeEventHandlers = {
       overlay.tools = []
       overlay.usage = []
       overlay.interjections = []
+      overlay.todo = undefined
     }
     overlay.status = event.status
     overlay.runId = TERMINAL_RUN_STATUSES.has(event.status)
@@ -214,6 +215,9 @@ const runtimeEventHandlers = {
       )
     }
     void target.flushCarryovers(event.sessionId)
+  },
+  'todo.updated': (_target, overlay, event) => {
+    overlay.todo = structuredClone(event.todo)
   },
   'goal.updated': (_target, overlay, event) => {
     overlay.goal = event.goal ? structuredClone(event.goal) : undefined

@@ -15,6 +15,7 @@ import type {
 import ConversationTurn from './ConversationTurn.vue'
 import ReasoningGroup from './ReasoningGroup.vue'
 import ToolCallGroup from './ToolCallGroup.vue'
+import TodoGroup from './TodoGroup.vue'
 
 const runId = 'run:timeline-groups' as RunId
 
@@ -173,6 +174,34 @@ describe('timeline disclosure groups', () => {
     wrapper.unmount()
   })
 
+  it('renders the Run Todo as a compact read-only checklist', () => {
+    const wrapper = mount(TodoGroup, {
+      props: {
+        todo: {
+          explanation: 'Keep the implementation visible',
+          items: [
+            { step: 'Inspect runtime', status: 'completed' },
+            { step: 'Implement event', status: 'in_progress' },
+            { step: 'Run checks', status: 'pending' },
+          ],
+        },
+      },
+      global: { plugins: [i18n] },
+    })
+
+    expect(wrapper.get('.todo-group').text()).toContain('待办')
+    expect(wrapper.get('.todo-group').text()).toContain('1/3')
+    expect(wrapper.findAll('.n-checkbox')).toHaveLength(3)
+    expect(wrapper.findAll('.n-checkbox')[0]?.classes()).toContain(
+      'n-checkbox--checked',
+    )
+    expect(wrapper.findAll('.n-checkbox')[1]?.classes()).toContain(
+      'n-checkbox--indeterminate',
+    )
+    expect(wrapper.text()).toContain('Keep the implementation visible')
+    wrapper.unmount()
+  })
+
   it('renders each turn in user, reasoning, tools, and message order', () => {
     const turn: ConversationTurnView = {
       id: 'turn:test',
@@ -182,6 +211,9 @@ describe('timeline disclosure groups', () => {
         role: 'user',
         durableKind: 'user_input',
         text: 'Please inspect it',
+      },
+      todo: {
+        items: [{ step: 'Inspect it', status: 'in_progress' }],
       },
       tools: tools(),
       reasoningSegments: reasoningSegments(),
@@ -214,6 +246,7 @@ describe('timeline disclosure groups', () => {
     ).map((element) => element.className)
     expect(childClasses).toEqual([
       expect.stringContaining('chat-message user'),
+      expect.stringContaining('todo-group'),
       expect.stringContaining('reasoning-group'),
       expect.stringContaining('tool-call-group'),
       expect.stringContaining('chat-message assistant'),

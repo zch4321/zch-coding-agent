@@ -31,6 +31,7 @@ import type { SessionTraceController } from './session-trace-controller'
 import type { SubagentExecutionPort } from '../subagent/contracts'
 import type { SwarmExecutionPort } from '../swarm/contracts'
 import type { LlmUsageRecord } from '../../shared/usage'
+import type { TodoState } from '../../shared/todo'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -154,6 +155,7 @@ export interface ActiveRun {
   rootUserMessageId?: MessageId
   harnessMessageIds: MessageId[]
   requestCommitted: boolean
+  todo?: TodoState
   publicSnapshot: ActiveRunPublicSnapshot
   publicTools: Map<CallId, ActiveRunToolSnapshot>
   routes?: {

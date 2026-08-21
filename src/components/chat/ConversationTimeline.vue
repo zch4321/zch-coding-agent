@@ -61,7 +61,12 @@ const timelineRenderSignature = computed(() =>
       const messages = turn.messages
         .map((message) => `${message.id}:${message.text.length}`)
         .join(',')
-      return `${turn.id}|${turn.runActivity ?? ''}|${tools}|${reasoning}|${messages}`
+      const todo = turn.todo
+        ? `${turn.todo.explanation ?? ''}:${turn.todo.items
+            .map((item) => `${item.status}:${item.step}`)
+            .join(',')}`
+        : ''
+      return `${turn.id}|${turn.runActivity ?? ''}|${todo}|${tools}|${reasoning}|${messages}`
     })
     .join(';'),
 )
