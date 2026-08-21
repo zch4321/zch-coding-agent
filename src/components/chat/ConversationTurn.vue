@@ -1,14 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { RunId } from '../../../shared/ids'
 import type { ConversationTurn } from '../../stores/agent-types'
 import ChatMessageItem from './ChatMessageItem.vue'
 import ReasoningGroup from './ReasoningGroup.vue'
 import ToolCallGroup from './ToolCallGroup.vue'
 
-const props = defineProps<{
+defineProps<{
   turn: ConversationTurn
-  activeRunId?: RunId
   actionsDisabled: boolean
 }>()
 const emit = defineEmits<{
@@ -18,14 +15,6 @@ const emit = defineEmits<{
   edit: [messageId: string, text: string]
   'content-resized': []
 }>()
-
-const reasoningStreaming = computed(
-  () =>
-    props.turn.reasoningSegments.some((segment) => segment.live) &&
-    !props.turn.messages.some(
-      (message) => message.role === 'assistant' && message.live,
-    ),
-)
 </script>
 
 <template>
@@ -33,12 +22,18 @@ const reasoningStreaming = computed(
     <ChatMessageItem
       v-if="turn.userMessage"
       :message="turn.userMessage"
-      :active-run-id="activeRunId"
       :actions-disabled="actionsDisabled"
       @revert="emit('revert', $event, turn.userMessage!.text)"
       @fork="emit('fork', $event)"
       @retry="emit('retry', $event, turn.userMessage!.text)"
       @edit="emit('edit', $event, turn.userMessage!.text)"
+    />
+
+    <ReasoningGroup
+      v-if="turn.reasoningSegments.length || turn.runActivity"
+      :segments="turn.reasoningSegments"
+      :activity="turn.runActivity"
+      @content-resized="emit('content-resized')"
     />
 
     <ToolCallGroup
@@ -47,18 +42,10 @@ const reasoningStreaming = computed(
       @content-resized="emit('content-resized')"
     />
 
-    <ReasoningGroup
-      v-if="turn.reasoningSegments.length"
-      :segments="turn.reasoningSegments"
-      :streaming="reasoningStreaming"
-      @content-resized="emit('content-resized')"
-    />
-
     <ChatMessageItem
       v-for="message in turn.messages"
       :key="message.id"
       :message="message"
-      :active-run-id="activeRunId"
       :actions-disabled="actionsDisabled"
       :show-actions="
         message.role !== 'assistant' ||

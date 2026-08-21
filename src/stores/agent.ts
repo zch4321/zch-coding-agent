@@ -350,7 +350,6 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     handleAgentEvent: runtime.handleAgentEvent,
     clearDiagnostics: runtime.clearDiagnostics,
     conversationIsBusy: runtime.conversationIsBusy,
-    conversationStatus: runtime.conversationStatus,
     searchSessions: replica.search,
     loadOlderSessions: replica.loadOlderSessions,
     loadOlderMessages: replica.loadOlderMessages,

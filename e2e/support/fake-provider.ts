@@ -27,7 +27,7 @@ export interface FakeProvider {
   origin: string
   requests: CapturedProviderRequest[]
   readonly modelCatalogRequests: number
-  queue(chunks: JsonObject[]): void
+  queue(chunks: JsonObject[], options?: { chunkDelayMs?: number }): void
   armSecondResponseGate(): void
   armResponseGate(requestNumbers: number[]): void
   releaseSecondResponse(): void
@@ -49,7 +49,10 @@ async function parseJsonBody(request: IncomingMessage): Promise<JsonObject> {
 }
 
 export async function startFakeProvider(): Promise<FakeProvider> {
-  const queuedResponses: JsonObject[][] = []
+  const queuedResponses: Array<{
+    chunks: JsonObject[]
+    chunkDelayMs: number
+  }> = []
   const requests: CapturedProviderRequest[] = []
   let modelCatalogRequests = 0
   // Optional gate that holds selected provider requests open until a test
@@ -81,8 +84,8 @@ export async function startFakeProvider(): Promise<FakeProvider> {
         url: request.url,
       })
 
-      const chunks = queuedResponses.shift()
-      if (!chunks) {
+      const queued = queuedResponses.shift()
+      if (!queued) {
         response.writeHead(500, { 'content-type': 'application/json' })
         response.end(JSON.stringify({ error: 'unexpected provider call' }))
         return
@@ -97,8 +100,15 @@ export async function startFakeProvider(): Promise<FakeProvider> {
         connection: 'keep-alive',
         'content-type': 'text/event-stream; charset=utf-8',
       })
-      for (const chunk of chunks) {
+      response.socket?.setNoDelay(true)
+      response.flushHeaders()
+      for (const chunk of queued.chunks) {
         response.write(`data: ${JSON.stringify(chunk)}\n\n`)
+        if (queued.chunkDelayMs > 0) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, queued.chunkDelayMs),
+          )
+        }
       }
       response.write('data: [DONE]\n\n')
       response.end()
@@ -131,8 +141,11 @@ export async function startFakeProvider(): Promise<FakeProvider> {
     get modelCatalogRequests() {
       return modelCatalogRequests
     },
-    queue(chunks) {
-      queuedResponses.push(chunks)
+    queue(chunks, options) {
+      queuedResponses.push({
+        chunks,
+        chunkDelayMs: options?.chunkDelayMs ?? 0,
+      })
     },
     armSecondResponseGate() {
       gatedRequestNumbers.clear()

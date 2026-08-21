@@ -62,7 +62,7 @@ describe('shared IPC contracts', () => {
         TerminalEventEnvelopeSchema,
         DomainStateDeliverySchema,
       }),
-    ).toBe('08c462ac1b38186963c12b27f57d75a18fa39f6790a2ee5052484a866340d5a1')
+    ).toBe('7d9e1d9b3a2ad6151a7777efc5580cc2172d6195d43a4a3d17b65c869c2c9616')
   })
 
   it('composes every channel once from the nine IPC domains', () => {

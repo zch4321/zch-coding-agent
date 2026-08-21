@@ -263,6 +263,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       overlay.runId = runtime.runId
       overlay.terminalReloadRunId = undefined
       overlay.status = runtime.status
+      overlay.streamActivity = undefined
       overlay.text = runtime.text
       overlay.reasoning = runtime.reasoning
       overlay.interjections = structuredClone(runtime.interjections)
@@ -1060,13 +1061,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         this.carryoverStartingBySessionId[sessionId] ||
         Boolean(this.carryoversBySessionId[sessionId]?.length),
       )
-    },
-    conversationStatus(sessionId: string): string | undefined {
-      const overlay = this.overlays[sessionId]
-      if (!overlay) return undefined
-      if (overlay.approval) return 'awaitingApproval'
-      if (overlay.runId) return overlay.status
-      return undefined
     },
     handleAgentEvent(event: AgentEvent) {
       handleRuntimeAgentEvent(this, event)

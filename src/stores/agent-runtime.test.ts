@@ -581,6 +581,120 @@ describe('agent runtime store', () => {
     })
   })
 
+  it('tracks stream activity with delta fallbacks and resets it for each model call', () => {
+    seedReplica()
+    const runtime = useAgentRuntimeStore()
+    const runId = 'run:activity' as RunId
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 1,
+        sessionId: selectedSessionId,
+        runId,
+        status: 'calling_llm',
+      }),
+    )
+    expect(runtime.timelineTurns.at(-1)?.runActivity).toBe('requesting_model')
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'assistant.activity',
+        seq: 2,
+        sessionId: selectedSessionId,
+        runId,
+        activity: 'tool_call',
+      }),
+    )
+    expect(runtime.ensureOverlay(selectedSessionId).streamActivity).toBe(
+      'tool_call',
+    )
+    expect(runtime.timelineTurns.at(-1)?.runActivity).toBe('calling_tool')
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'assistant.text.delta',
+        seq: 3,
+        sessionId: selectedSessionId,
+        runId,
+        delta: 'live output',
+      }),
+    )
+    expect(runtime.ensureOverlay(selectedSessionId).streamActivity).toBe(
+      'output',
+    )
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'assistant.reasoning.delta',
+        seq: 4,
+        sessionId: selectedSessionId,
+        runId,
+        delta: 'live reasoning',
+      }),
+    )
+    expect(runtime.ensureOverlay(selectedSessionId).streamActivity).toBe(
+      'reasoning',
+    )
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 5,
+        sessionId: selectedSessionId,
+        runId,
+        status: 'calling_llm',
+      }),
+    )
+    expect(runtime.ensureOverlay(selectedSessionId).streamActivity).toBe(
+      undefined,
+    )
+    expect(runtime.timelineTurns.at(-1)?.runActivity).toBe('requesting_model')
+  })
+
+  it('routes audit-only events through explicit no-op handlers', () => {
+    seedReplica()
+    const runtime = useAgentRuntimeStore()
+    const runId = 'run:audit-events' as RunId
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'tool.attempt',
+        seq: 1,
+        sessionId: selectedSessionId,
+        runId,
+        callId: 'call:audit' as CallId,
+        tool: 'read_file',
+        stage: 'execution',
+        outcome: 'succeeded',
+        effects: ['filesystem.read'],
+        durationMs: 1,
+        inputBytes: 2,
+        outputBytes: 3,
+        truncated: false,
+      }),
+    )
+    runtime.handleAgentEvent(
+      event({
+        type: 'orchestrator.message',
+        seq: 2,
+        sessionId: selectedSessionId,
+        runId,
+        kind: 'swarm',
+        text: 'internal orchestration',
+      }),
+    )
+
+    expect(runtime.ensureOverlay(selectedSessionId)).toMatchObject({
+      runId,
+      lastEventSeq: 2,
+      order: 2,
+      text: '',
+      reasoning: '',
+      tools: [],
+    })
+  })
+
   it('continues live tool arrival order after hydrating a running snapshot', () => {
     seedReplica()
     const runtime = useAgentRuntimeStore()

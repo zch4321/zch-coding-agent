@@ -2,7 +2,6 @@
 import { computed } from 'vue'
 import { NButton, NTag, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { RunId } from '../../../shared/ids'
 import type { ChatMessage } from '../../stores/agent-types'
 import MarkdownBlock from '../MarkdownBlock.vue'
 import UiIcon from '../UiIcon.vue'
@@ -10,11 +9,10 @@ import UiIcon from '../UiIcon.vue'
 const props = withDefaults(
   defineProps<{
     message: ChatMessage
-    activeRunId?: RunId
     actionsDisabled: boolean
     showActions?: boolean
   }>(),
-  { activeRunId: undefined, showActions: true },
+  { showActions: true },
 )
 const emit = defineEmits<{
   revert: [messageId: string, text: string]
@@ -41,16 +39,7 @@ const visibleRoleLabel = computed(() => {
   return roleLabel()
 })
 
-const isActiveAssistant = computed(
-  () =>
-    props.message.role === 'assistant' &&
-    Boolean(props.activeRunId) &&
-    props.message.runId === props.activeRunId,
-)
-
-const showMetadata = computed(
-  () => Boolean(visibleRoleLabel.value) || isActiveAssistant.value,
-)
+const showMetadata = computed(() => Boolean(visibleRoleLabel.value))
 </script>
 
 <template>
@@ -58,16 +47,7 @@ const showMetadata = computed(
     <div v-if="showMetadata" class="message-meta">
       <strong v-if="visibleRoleLabel">{{ visibleRoleLabel }}</strong>
       <NTag
-        v-if="isActiveAssistant"
-        class="message-status"
-        round
-        size="small"
-        type="info"
-      >
-        {{ t('chat.streaming') }}
-      </NTag>
-      <NTag
-        v-else-if="
+        v-if="
           message.role === 'interjection' &&
           message.interjectionStatus === 'queued'
         "

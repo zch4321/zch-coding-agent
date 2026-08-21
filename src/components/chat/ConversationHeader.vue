@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NProgress, NTag, type TagProps } from 'naive-ui'
+import { NProgress, NTag } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
@@ -11,32 +11,6 @@ defineProps<{
 
 const agent = useAgentStore()
 const { t } = useI18n()
-
-const statusLabel = computed(() => {
-  if (agent.pendingApproval) {
-    return t('app.waitingApproval')
-  }
-
-  if (agent.runStatus === 'failed') {
-    return t('app.failed')
-  }
-
-  if (agent.runStatus === 'cancelling') {
-    return t('app.cancelling')
-  }
-
-  if (agent.activeRunId) {
-    return t('app.running')
-  }
-
-  return ''
-})
-
-const statusType = computed<TagProps['type']>(() => {
-  if (agent.pendingApproval) return 'warning'
-  if (agent.runStatus === 'failed') return 'error'
-  return 'info'
-})
 
 const captureStatus = computed(() => {
   const capture = agent.selectedTraceCapture
@@ -150,24 +124,14 @@ const cacheLabel = computed(() => {
         <p>{{ cacheLabel }}</p>
       </div>
     </div>
-    <div class="conversation-statuses">
+    <div v-if="captureStatus" class="conversation-statuses">
       <NTag
-        v-if="captureStatus"
         round
         size="small"
         :type="captureStatus.type"
         :title="captureStatus.title"
       >
         {{ captureStatus.label }}
-      </NTag>
-      <NTag
-        v-if="statusLabel"
-        class="run-status"
-        round
-        size="small"
-        :type="statusType"
-      >
-        {{ statusLabel }}
       </NTag>
     </div>
   </header>

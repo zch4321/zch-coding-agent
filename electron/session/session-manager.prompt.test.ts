@@ -292,6 +292,25 @@ describe('SessionManager prompt and trace', () => {
           envelope.event.result.status === 'ok',
       ),
     ).toBe(true)
+    const activities = sent.flatMap(({ event }) =>
+      event.type === 'assistant.activity' ? [event] : [],
+    )
+    expect(activities.map((event) => event.activity)).toEqual([
+      'reasoning',
+      'tool_call',
+      'output',
+    ])
+    expect(activities).toEqual(
+      activities.map((event) => ({
+        schemaVersion: 1,
+        type: 'assistant.activity',
+        sessionId,
+        runId: event.runId,
+        activity: event.activity,
+        seq: event.seq,
+        ts: event.ts,
+      })),
+    )
     expect(
       sent.some(
         (envelope) =>

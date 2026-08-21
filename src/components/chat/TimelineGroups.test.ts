@@ -8,6 +8,7 @@ import { i18n, setAppLocale } from '../../i18n'
 import type {
   ConversationTurn as ConversationTurnView,
   ReasoningSegment,
+  RunActivity,
   ToolActivity,
 } from '../../stores/agent-types'
 import ConversationTurn from './ConversationTurn.vue'
@@ -78,6 +79,8 @@ describe('timeline disclosure groups', () => {
       'n-collapse-item--active',
     )
     expect(wrapper.findAll('.tool-call-card')).toHaveLength(2)
+    expect(wrapper.text()).toContain('已完成')
+    expect(wrapper.text()).toContain('待执行')
     expect(wrapper.emitted('content-resized')).toHaveLength(1)
 
     const updatedTools = tools()
@@ -93,9 +96,9 @@ describe('timeline disclosure groups', () => {
     wrapper.unmount()
   })
 
-  it('keeps plaintext reasoning segments in one collapsed streaming group', async () => {
+  it('keeps plaintext reasoning segments in one collapsed activity group', async () => {
     const wrapper = mount(ReasoningGroup, {
-      props: { segments: reasoningSegments(), streaming: true },
+      props: { segments: reasoningSegments(), activity: 'reasoning' },
       global: { plugins: [i18n] },
     })
 
@@ -103,8 +106,9 @@ describe('timeline disclosure groups', () => {
       '思考过程',
     )
     expect(wrapper.get('.timeline-disclosure-header').text()).toContain(
-      '生成中',
+      '思考中',
     )
+    expect(wrapper.find('.run-activity-spinner').exists()).toBe(true)
     expect(wrapper.get('.n-collapse-item').attributes('class')).not.toContain(
       'n-collapse-item--active',
     )
@@ -135,7 +139,38 @@ describe('timeline disclosure groups', () => {
     wrapper.unmount()
   })
 
-  it('renders each turn in user, tools, reasoning, and message order', () => {
+  it('shows every active phase in one stable status slot', async () => {
+    const labels: Array<[RunActivity, string]> = [
+      ['requesting_model', '请求模型'],
+      ['reasoning', '思考中'],
+      ['output', '输出中'],
+      ['calling_tool', '调用工具'],
+      ['executing_tool', '执行工具'],
+      ['awaiting_approval', '等待审批'],
+      ['cancelling', '取消中'],
+    ]
+    const wrapper = mount(ReasoningGroup, {
+      props: { segments: [], activity: labels[0]![0] },
+      global: { plugins: [i18n] },
+    })
+
+    expect(wrapper.get('.reasoning-group').text()).toContain('思考过程')
+    expect(wrapper.get('.n-collapse-item').attributes('class')).toContain(
+      'n-collapse-item--disabled',
+    )
+    expect(wrapper.find('.reasoning-content').exists()).toBe(false)
+
+    for (const [activity, label] of labels) {
+      await wrapper.setProps({ activity })
+      const status = wrapper.get('.run-activity')
+      expect(status.attributes('data-run-activity')).toBe(activity)
+      expect(status.text()).toBe(label)
+      expect(wrapper.findAll('.run-activity-spinner')).toHaveLength(1)
+    }
+    wrapper.unmount()
+  })
+
+  it('renders each turn in user, reasoning, tools, and message order', () => {
     const turn: ConversationTurnView = {
       id: 'turn:test',
       order: 1,
@@ -176,8 +211,8 @@ describe('timeline disclosure groups', () => {
     ).map((element) => element.className)
     expect(childClasses).toEqual([
       expect.stringContaining('chat-message user'),
-      expect.stringContaining('tool-call-group'),
       expect.stringContaining('reasoning-group'),
+      expect.stringContaining('tool-call-group'),
       expect.stringContaining('chat-message assistant'),
       expect.stringContaining('chat-message assistant'),
     ])

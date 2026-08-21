@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test'
 import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
-import type { PermissionMode } from '../../shared/config'
+import type { PermissionMode, ReasoningEffort } from '../../shared/config'
 import {
   PROVIDER_NOTICE_VERSION,
   TRACE_NOTICE_VERSION,
@@ -41,6 +41,7 @@ export async function configureApp(input: {
   workspace: string
   defaultMode: PermissionMode
   assistantLanguage?: 'zh-CN' | 'en-US'
+  reasoningEffort?: ReasoningEffort
   traceLogging?: boolean
   subagents?: boolean
   swarm?: boolean
@@ -52,6 +53,7 @@ export async function configureApp(input: {
       workspace,
       defaultMode,
       assistantLanguage,
+      reasoningEffort,
       providerNoticeVersion,
       traceNoticeVersion,
       traceLogging,
@@ -97,7 +99,12 @@ export async function configureApp(input: {
         model: 'e2e-functional-model',
         enabledModelIds: ['e2e-functional-model'],
         modelOverrides: {
-          'e2e-functional-model': { capability: 'standard' },
+          'e2e-functional-model': {
+            capability: 'standard',
+            ...(reasoningEffort === 'off'
+              ? {}
+              : { reasoningEfforts: [reasoningEffort] }),
+          },
         },
         contextWindowTokens: null,
         maxOutputTokens: null,
@@ -118,7 +125,7 @@ export async function configureApp(input: {
         value: {
           defaultModelProvider: 'deepseek',
           defaultModel: 'e2e-functional-model',
-          defaultModelReasoning: 'off',
+          defaultModelReasoning: reasoningEffort,
           auxiliaryModelProvider: '',
           auxiliaryModel: '',
           auxiliaryModelReasoning: 'off',
@@ -338,6 +345,7 @@ export async function configureApp(input: {
       workspace,
       defaultMode: input.defaultMode,
       assistantLanguage: input.assistantLanguage,
+      reasoningEffort: input.reasoningEffort ?? 'off',
       providerNoticeVersion: PROVIDER_NOTICE_VERSION,
       traceNoticeVersion: TRACE_NOTICE_VERSION,
       traceLogging: input.traceLogging ?? false,

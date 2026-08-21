@@ -1,4 +1,5 @@
 import type { CallId } from '../../shared/ids'
+import type { AssistantActivity } from '../../shared/agent-events'
 import type { JsonValue } from '../../shared/json'
 import type {
   MessagePart,
@@ -196,7 +197,18 @@ export class SessionProviderTurnRunner {
 
     const llmCallId = id<CallId>('llm')
     let reasoning = ''
+    let streamActivity: AssistantActivity | undefined
     let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
+    const emitActivity = (activity: AssistantActivity): void => {
+      if (streamActivity === activity) return
+      streamActivity = activity
+      this.#emit(session, {
+        type: 'assistant.activity',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        activity,
+      })
+    }
     const diagnostics = providerRequestDiagnostics(compiled)
     await session.logger.write({
       type: 'llm.request',
@@ -221,6 +233,7 @@ export class SessionProviderTurnRunner {
         signal: run.controller.signal,
       })) {
         if (event.type === 'text.delta') {
+          emitActivity('output')
           this.#emit(session, {
             type: 'assistant.text.delta',
             sessionId: session.sessionId,
@@ -229,6 +242,7 @@ export class SessionProviderTurnRunner {
           })
         } else if (event.type === 'reasoning.delta') {
           if (binding.snapshot.reasoning !== 'off') {
+            emitActivity('reasoning')
             reasoning += event.delta
             this.#emit(session, {
               type: 'assistant.reasoning.delta',
@@ -237,6 +251,8 @@ export class SessionProviderTurnRunner {
               delta: event.delta,
             })
           }
+        } else if (event.type === 'tool.delta') {
+          emitActivity('tool_call')
         } else if (event.type === 'completed') {
           if (completed) {
             throw new Error('Provider stream produced multiple completions')

@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { nextTick } from 'vue'
-import { NCollapse, NCollapseItem, NScrollbar, NTag } from 'naive-ui'
+import { computed, nextTick } from 'vue'
+import { NCollapse, NCollapseItem, NScrollbar, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { ReasoningSegment } from '../../stores/agent-types'
+import type { ReasoningSegment, RunActivity } from '../../stores/agent-types'
 
-defineProps<{
+const props = defineProps<{
   segments: ReasoningSegment[]
-  streaming: boolean
+  activity?: RunActivity
 }>()
 const emit = defineEmits<{ 'content-resized': [] }>()
 const { t } = useI18n()
+const activityLabel = computed(() =>
+  props.activity ? t(`chat.runActivity.${props.activity}`) : '',
+)
 
 function notifyContentResized(): void {
   void nextTick(() => emit('content-resized'))
@@ -22,16 +25,30 @@ function notifyContentResized(): void {
       arrow-placement="right"
       @update:expanded-names="notifyContentResized"
     >
-      <NCollapseItem name="reasoning">
+      <NCollapseItem name="reasoning" :disabled="segments.length === 0">
         <template #header>
-          <div class="timeline-disclosure-header">
+          <div class="timeline-disclosure-header reasoning-disclosure-header">
             <span>{{ t('chat.reasoning') }}</span>
-            <NTag v-if="streaming" round size="small" type="info">
-              {{ t('chat.streaming') }}
-            </NTag>
+            <span
+              v-if="activity"
+              class="run-activity"
+              role="status"
+              aria-live="polite"
+              :data-run-activity="activity"
+              :aria-label="activityLabel"
+            >
+              <NSpin
+                class="run-activity-spinner"
+                size="small"
+                :show="true"
+                aria-hidden="true"
+              />
+              <span>{{ activityLabel }}</span>
+            </span>
           </div>
         </template>
         <NScrollbar
+          v-if="segments.length"
           class="timeline-disclosure-list reasoning-segment-scroll"
           content-class="reasoning-segment-list"
         >

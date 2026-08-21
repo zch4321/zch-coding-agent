@@ -7,7 +7,11 @@ import type {
   ToolActivity,
 } from './agent-types'
 import type { SessionOverlay } from './agent-runtime-helpers'
-import { messageText, originalUserRecord } from './agent-runtime-helpers'
+import {
+  messageText,
+  originalUserRecord,
+  resolveRunActivity,
+} from './agent-runtime-helpers'
 
 interface TimelineProjectionInput {
   records: readonly MessageRecord[]
@@ -350,6 +354,7 @@ export function projectConversationTurns({
         live: true,
       })
     }
+    liveTurn.runActivity = resolveRunActivity(overlay)
   }
 
   for (const turn of turns) sortTurnContent(turn)
@@ -358,7 +363,8 @@ export function projectConversationTurns({
       turn.userMessage ||
       turn.tools.length > 0 ||
       turn.reasoningSegments.length > 0 ||
-      turn.messages.length > 0,
+      turn.messages.length > 0 ||
+      turn.runActivity,
   )
   markFinalAssistantMessages(visibleTurns)
   return visibleTurns

@@ -167,6 +167,29 @@ code {
   white-space: nowrap;
 }
 
+.reasoning-disclosure-header {
+  width: 100%;
+  min-height: 22px;
+  justify-content: space-between;
+}
+
+.run-activity {
+  display: flex;
+  min-width: 0;
+  min-height: 22px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.run-activity-spinner {
+  width: 16px;
+  height: 16px;
+}
+
 .timeline-disclosure-list {
   width: 100%;
   min-width: 0;

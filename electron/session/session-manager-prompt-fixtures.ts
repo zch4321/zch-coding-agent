@@ -21,6 +21,19 @@ export class ScriptedProvider extends ScriptedProviderHarness {
         raw: { type: 'reasoning.delta' },
       }
       yield {
+        type: 'tool.delta',
+        index: 0,
+        id: 'call-readme',
+        name: 'read_file',
+        raw: { type: 'tool.delta', part: 'name' },
+      }
+      yield {
+        type: 'tool.delta',
+        index: 0,
+        argumentsDelta: '{"path":"README.md"}',
+        raw: { type: 'tool.delta', part: 'arguments' },
+      }
+      yield {
         type: 'completed',
         rawResponse: { id: 'first', echo: 'secret-sentinel' },
         turn: {
