@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick } from 'vue'
-import { NCollapse, NCollapseItem, NScrollbar, NSpin } from 'naive-ui'
+import { NCollapse, NCollapseItem, NFlex, NScrollbar, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { ReasoningSegment, RunActivity } from '../../stores/agent-types'
 
@@ -29,9 +29,13 @@ function notifyContentResized(): void {
         <template #header>
           <div class="timeline-disclosure-header reasoning-disclosure-header">
             <span>{{ t('chat.reasoning') }}</span>
-            <span
+            <NFlex
               v-if="activity"
               class="run-activity"
+              inline
+              align="center"
+              :size="4"
+              :wrap="false"
               role="status"
               aria-live="polite"
               :data-run-activity="activity"
@@ -39,12 +43,13 @@ function notifyContentResized(): void {
             >
               <NSpin
                 class="run-activity-spinner"
-                size="small"
+                :size="12"
+                :stroke-width="16"
                 :show="true"
                 aria-hidden="true"
               />
               <span>{{ activityLabel }}</span>
-            </span>
+            </NFlex>
           </div>
         </template>
         <NScrollbar

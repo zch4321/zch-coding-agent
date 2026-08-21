@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { createPinia, setActivePinia } from 'pinia'
+import { NSpin } from 'naive-ui'
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CallId, RunId } from '../../../shared/ids'
@@ -109,6 +110,8 @@ describe('timeline disclosure groups', () => {
       '思考中',
     )
     expect(wrapper.find('.run-activity-spinner').exists()).toBe(true)
+    expect(wrapper.getComponent(NSpin).props('size')).toBe(12)
+    expect(wrapper.getComponent(NSpin).props('strokeWidth')).toBe(16)
     expect(wrapper.get('.n-collapse-item').attributes('class')).not.toContain(
       'n-collapse-item--active',
     )

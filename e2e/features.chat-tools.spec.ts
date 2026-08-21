@@ -295,6 +295,26 @@ test.describe('Electron chat and tool workflows', () => {
     )
     await expect(activity).toContainText('请求模型')
     await expect(activity.locator('.run-activity-spinner')).toBeVisible()
+    const spinnerAlignment = await activity.evaluate((element) => {
+      const spinner = element.querySelector('.run-activity-spinner')
+      const label = Array.from(element.children).find(
+        (child) => child !== spinner,
+      )
+      if (!spinner || !label) throw new Error('Run activity layout is missing')
+      const spinnerRect = spinner.getBoundingClientRect()
+      const labelRect = label.getBoundingClientRect()
+      return {
+        width: spinnerRect.width,
+        height: spinnerRect.height,
+        centerOffset:
+          spinnerRect.top +
+          spinnerRect.height / 2 -
+          (labelRect.top + labelRect.height / 2),
+      }
+    })
+    expect(spinnerAlignment.width).toBe(12)
+    expect(spinnerAlignment.height).toBe(12)
+    expect(Math.abs(spinnerAlignment.centerOffset)).toBeLessThanOrEqual(1)
     await expect(page.locator('.conversation-header .run-status')).toHaveCount(
       0,
     )

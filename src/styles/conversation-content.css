@@ -174,20 +174,9 @@ code {
 }
 
 .run-activity {
-  display: flex;
-  min-width: 0;
-  min-height: 22px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
   color: var(--text-secondary);
+  line-height: 16px;
   white-space: nowrap;
-}
-
-.run-activity-spinner {
-  width: 16px;
-  height: 16px;
 }
 
 .timeline-disclosure-list {
