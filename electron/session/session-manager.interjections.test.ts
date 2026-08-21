@@ -259,6 +259,7 @@ describe('SessionManager live interjections', () => {
           envelope.event.status === 'completed',
       ),
     )
+    await waitFor(() => !manager.hasActiveRun(sessionId))
 
     // The run ended after the first final answer instead of forcing an extra
     // continuation that would overwrite it.
