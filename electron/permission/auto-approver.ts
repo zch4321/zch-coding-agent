@@ -5,6 +5,7 @@ import type { JsonObject, JsonValue } from '../../shared/json'
 import type { MessageId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { ModelRouteSnapshot } from '../../shared/model-route'
+import { renderTaggedJson } from '../../shared/tagged-message'
 import { compileSchema } from '../schema-validator'
 import type { ToolCall, ToolDefinition } from '../tools/types'
 import type { ModelProvider, ProviderUsage } from '../providers/provider'
@@ -52,17 +53,17 @@ function jsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
 }
 
-function taggedJson(
+/** Renders one escaped approval harness block within the canonical message bound. */
+function approvalContextBlock(
   tag: 'approval_tool_definition' | 'approval_request',
   value: unknown,
   source?: 'host',
 ): string {
-  const serialized = JSON.stringify(jsonValue(value))
-    .replace(/&/gu, '\\u0026')
-    .replace(/</gu, '\\u003c')
-    .replace(/>/gu, '\\u003e')
-  const opening = `<${tag}${source ? ` source="${source}"` : ''}>`
-  const rendered = `${opening}\n${serialized}\n</${tag}>`
+  const rendered = renderTaggedJson(
+    tag,
+    jsonValue(value),
+    source ? { source } : {},
+  )
   if (rendered.length > MAX_MESSAGE_TEXT_LENGTH) {
     throw new ApprovalContextError(
       `Approval ${tag} exceeds the canonical message limit`,
@@ -175,12 +176,12 @@ export class ProviderAutoApprover implements AutoApprover {
 
     try {
       const sessionId = 'approval:session' as SessionId
-      const toolDefinition = taggedJson(
+      const toolDefinition = approvalContextBlock(
         'approval_tool_definition',
         input.tool,
         'host',
       )
-      const approvalRequest = taggedJson('approval_request', {
+      const approvalRequest = approvalContextBlock('approval_request', {
         args: input.args,
         reason: input.reason,
         workspacePath: input.workspacePath,
