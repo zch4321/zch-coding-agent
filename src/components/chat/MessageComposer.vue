@@ -39,6 +39,7 @@ import {
   type ComposerSuggestionTrigger,
 } from './composer-suggestions'
 import ComposerSuggestionPanel from './ComposerSuggestionPanel.vue'
+import ComposerTodo from './ComposerTodo.vue'
 import UiIcon from '../UiIcon.vue'
 
 const emit = defineEmits<{
@@ -490,214 +491,220 @@ watch(inputDisabled, (disabled) => {
 </script>
 
 <template>
-  <footer class="message-input-area">
-    <NAlert
-      v-if="agent.bridgeAvailable && !agent.providerNoticeAccepted"
-      type="info"
-      :title="t('chat.providerNotice')"
-      class="composer-notice"
-    >
-      {{ t('chat.providerNoticeText') }}
-      <div class="notice-action">
-        <NButton
-          size="small"
-          type="primary"
-          @click="agent.acceptProviderNotice"
-        >
-          {{ t('chat.understand') }}
-        </NButton>
-      </div>
-    </NAlert>
-    <div v-if="agent.contextAttachments.length" class="composer-context-chips">
-      <NTooltip
-        v-for="attachment in agent.contextAttachments"
-        :key="attachment.kind + ':' + attachment.path"
+  <div class="message-composer-stack">
+    <ComposerTodo v-if="agent.currentTodo" :todo="agent.currentTodo" />
+    <footer class="message-input-area">
+      <NAlert
+        v-if="agent.bridgeAvailable && !agent.providerNoticeAccepted"
+        type="info"
+        :title="t('chat.providerNotice')"
+        class="composer-notice"
       >
-        <template #trigger>
-          <NTag
-            class="context-chip"
-            round
-            size="small"
-            closable
-            @close="
-              agent.removeContextAttachment(attachment.path, attachment.kind)
-            "
-          >
-            <template #icon>
-              <UiIcon
-                :name="attachment.kind === 'directory' ? 'folder' : 'file'"
-              />
-            </template>
-            <span>{{ attachment.path }}</span>
-          </NTag>
-        </template>
-        {{ attachment.path }}
-      </NTooltip>
-    </div>
-    <NPopover
-      trigger="manual"
-      placement="top-start"
-      raw
-      :show="suggestionPanelVisible"
-      :show-arrow="false"
-      :to="false"
-    >
-      <template #trigger>
-        <NInput
-          ref="composerInput"
-          v-model:value="agent.input"
-          type="textarea"
-          :autosize="{ minRows: 2, maxRows: 7 }"
-          :placeholder="sendHint"
-          :disabled="textareaDisabled"
-          :theme-overrides="composerInputThemeOverrides"
-          @keydown="handleKeydown"
-          @click="scheduleSuggestionRefresh"
-          @keyup="handleKeyup"
-          @focus="scheduleSuggestionRefresh"
-        />
-      </template>
-      <ComposerSuggestionPanel
-        :items="suggestionItems"
-        :active-index="activeSuggestionIndex"
-        :title="suggestionTitle"
-        :loading="suggestionLoading"
-        :empty-text="suggestionEmptyText"
-        @hover="activeSuggestionIndex = $event"
-        @select="selectSuggestion"
-      />
-    </NPopover>
-    <div class="message-input-toolbar">
-      <div class="input-selectors">
-        <NDropdown
-          trigger="click"
-          :options="contextOptions"
-          :disabled="inputDisabled"
-          @select="handleContextSelect"
-        >
+        {{ t('chat.providerNoticeText') }}
+        <div class="notice-action">
           <NButton
             size="small"
-            secondary
-            circle
-            :aria-label="t('chat.addFileContext')"
-            :disabled="inputDisabled"
+            type="primary"
+            @click="agent.acceptProviderNotice"
           >
-            <template #icon><UiIcon name="plus" /></template>
+            {{ t('chat.understand') }}
           </NButton>
-        </NDropdown>
-        <NSelect
-          :value="agent.composerProviderId || null"
-          style="width: min(180px, 24vw); min-width: 120px; flex: 0 1 180px"
-          size="small"
-          :options="agent.providerOptions"
-          :placeholder="t('chat.providerPlaceholder')"
-          :disabled="routeSelectionDisabled"
-          filterable
-          @update:value="handleProviderSelect"
-        />
-        <NSelect
-          :value="agent.composerModel || null"
-          style="width: min(220px, 28vw); min-width: 0; flex: 1 1 auto"
-          size="small"
-          :options="agent.composerModelOptions"
-          :placeholder="t('chat.modelPlaceholder')"
-          :disabled="
-            routeSelectionDisabled || agent.composerModelOptions.length === 0
-          "
-          filterable
-          data-testid="composer-model-select"
-          @update:value="agent.setProviderModel"
-        />
-        <NSelect
-          :value="agent.composerReasoning"
-          style="width: min(168px, 22vw); min-width: 118px; flex: 0 1 168px"
-          size="small"
-          :options="reasoningOptions"
-          :disabled="routeSelectionDisabled"
-          :status="agent.composerReasoningValid ? undefined : 'error'"
-          :aria-label="t('settings.reasoning')"
-          data-testid="composer-reasoning-select"
-          @update:value="handleReasoningSelect"
-        />
-        <NTooltip>
+        </div>
+      </NAlert>
+      <div
+        v-if="agent.contextAttachments.length"
+        class="composer-context-chips"
+      >
+        <NTooltip
+          v-for="attachment in agent.contextAttachments"
+          :key="attachment.kind + ':' + attachment.path"
+        >
           <template #trigger>
-            <NButton
-              class="provider-settings-button"
-              quaternary
-              circle
+            <NTag
+              class="context-chip"
+              round
               size="small"
-              :aria-label="t('chat.providerSettings')"
-              @click="emit('provider')"
-            >
-              <template #icon><UiIcon name="settings" /></template>
-            </NButton>
-          </template>
-          {{ t('chat.providerSettings') }}
-        </NTooltip>
-        <NTooltip :disabled="!agent.modeLockedByWriter">
-          <template #trigger>
-            <NSelect
-              :value="agent.modeLockedByWriter ? 'readonly' : agent.mode"
-              class="mode-select"
-              style="width: 112px"
-              size="small"
-              :options="modeOptions"
-              :disabled="
-                Boolean(
-                  agent.startPending ||
-                  agent.activeRunId ||
-                  agent.pendingApproval ||
-                  agent.modeLockedByWriter,
-                )
+              closable
+              @close="
+                agent.removeContextAttachment(attachment.path, attachment.kind)
               "
-              @update:value="emit('mode', $event as PermissionMode)"
-            />
+            >
+              <template #icon>
+                <UiIcon
+                  :name="attachment.kind === 'directory' ? 'folder' : 'file'"
+                />
+              </template>
+              <span>{{ attachment.path }}</span>
+            </NTag>
           </template>
-          {{ agent.modeLockTooltip }}
+          {{ attachment.path }}
         </NTooltip>
       </div>
-      <NTooltip v-if="agent.activeRunId">
+      <NPopover
+        trigger="manual"
+        placement="top-start"
+        raw
+        :show="suggestionPanelVisible"
+        :show-arrow="false"
+        :to="false"
+      >
         <template #trigger>
-          <div class="run-actions">
+          <NInput
+            ref="composerInput"
+            v-model:value="agent.input"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 7 }"
+            :placeholder="sendHint"
+            :disabled="textareaDisabled"
+            :theme-overrides="composerInputThemeOverrides"
+            @keydown="handleKeydown"
+            @click="scheduleSuggestionRefresh"
+            @keyup="handleKeyup"
+            @focus="scheduleSuggestionRefresh"
+          />
+        </template>
+        <ComposerSuggestionPanel
+          :items="suggestionItems"
+          :active-index="activeSuggestionIndex"
+          :title="suggestionTitle"
+          :loading="suggestionLoading"
+          :empty-text="suggestionEmptyText"
+          @hover="activeSuggestionIndex = $event"
+          @select="selectSuggestion"
+        />
+      </NPopover>
+      <div class="message-input-toolbar">
+        <div class="input-selectors">
+          <NDropdown
+            trigger="click"
+            :options="contextOptions"
+            :disabled="inputDisabled"
+            @select="handleContextSelect"
+          >
             <NButton
-              class="send-button interject"
+              size="small"
+              secondary
+              circle
+              :aria-label="t('chat.addFileContext')"
+              :disabled="inputDisabled"
+            >
+              <template #icon><UiIcon name="plus" /></template>
+            </NButton>
+          </NDropdown>
+          <NSelect
+            :value="agent.composerProviderId || null"
+            style="width: min(180px, 24vw); min-width: 120px; flex: 0 1 180px"
+            size="small"
+            :options="agent.providerOptions"
+            :placeholder="t('chat.providerPlaceholder')"
+            :disabled="routeSelectionDisabled"
+            filterable
+            @update:value="handleProviderSelect"
+          />
+          <NSelect
+            :value="agent.composerModel || null"
+            style="width: min(220px, 28vw); min-width: 0; flex: 1 1 auto"
+            size="small"
+            :options="agent.composerModelOptions"
+            :placeholder="t('chat.modelPlaceholder')"
+            :disabled="
+              routeSelectionDisabled || agent.composerModelOptions.length === 0
+            "
+            filterable
+            data-testid="composer-model-select"
+            @update:value="agent.setProviderModel"
+          />
+          <NSelect
+            :value="agent.composerReasoning"
+            style="width: min(168px, 22vw); min-width: 118px; flex: 0 1 168px"
+            size="small"
+            :options="reasoningOptions"
+            :disabled="routeSelectionDisabled"
+            :status="agent.composerReasoningValid ? undefined : 'error'"
+            :aria-label="t('settings.reasoning')"
+            data-testid="composer-reasoning-select"
+            @update:value="handleReasoningSelect"
+          />
+          <NTooltip>
+            <template #trigger>
+              <NButton
+                class="provider-settings-button"
+                quaternary
+                circle
+                size="small"
+                :aria-label="t('chat.providerSettings')"
+                @click="emit('provider')"
+              >
+                <template #icon><UiIcon name="settings" /></template>
+              </NButton>
+            </template>
+            {{ t('chat.providerSettings') }}
+          </NTooltip>
+          <NTooltip :disabled="!agent.modeLockedByWriter">
+            <template #trigger>
+              <NSelect
+                :value="agent.modeLockedByWriter ? 'readonly' : agent.mode"
+                class="mode-select"
+                style="width: 112px"
+                size="small"
+                :options="modeOptions"
+                :disabled="
+                  Boolean(
+                    agent.startPending ||
+                    agent.activeRunId ||
+                    agent.pendingApproval ||
+                    agent.modeLockedByWriter,
+                  )
+                "
+                @update:value="emit('mode', $event as PermissionMode)"
+              />
+            </template>
+            {{ agent.modeLockTooltip }}
+          </NTooltip>
+        </div>
+        <NTooltip v-if="agent.activeRunId">
+          <template #trigger>
+            <div class="run-actions">
+              <NButton
+                class="send-button interject"
+                circle
+                type="primary"
+                :aria-label="t('chat.interjectionSend')"
+                :disabled="!agent.canInterject"
+                @click="agent.sendInterjection"
+              >
+                <template #icon><UiIcon name="send" /></template>
+              </NButton>
+              <NButton
+                class="send-button stop"
+                circle
+                type="error"
+                :aria-label="t('chat.stop')"
+                :disabled="agent.runStatus === 'cancelling'"
+                @click="() => agent.interruptRun()"
+              >
+                <template #icon><UiIcon name="stop" /></template>
+              </NButton>
+            </div>
+          </template>
+          {{ t('chat.interjectionSend') }} / {{ t('chat.stop') }}
+        </NTooltip>
+        <NTooltip v-else>
+          <template #trigger>
+            <NButton
+              class="send-button"
               circle
               type="primary"
-              :aria-label="t('chat.interjectionSend')"
-              :disabled="!agent.canInterject"
-              @click="agent.sendInterjection"
+              :aria-label="t('chat.send')"
+              :disabled="!agent.canSend"
+              @click="agent.sendMessage"
             >
               <template #icon><UiIcon name="send" /></template>
             </NButton>
-            <NButton
-              class="send-button stop"
-              circle
-              type="error"
-              :aria-label="t('chat.stop')"
-              :disabled="agent.runStatus === 'cancelling'"
-              @click="() => agent.interruptRun()"
-            >
-              <template #icon><UiIcon name="stop" /></template>
-            </NButton>
-          </div>
-        </template>
-        {{ t('chat.interjectionSend') }} / {{ t('chat.stop') }}
-      </NTooltip>
-      <NTooltip v-else>
-        <template #trigger>
-          <NButton
-            class="send-button"
-            circle
-            type="primary"
-            :aria-label="t('chat.send')"
-            :disabled="!agent.canSend"
-            @click="agent.sendMessage"
-          >
-            <template #icon><UiIcon name="send" /></template>
-          </NButton>
-        </template>
-        {{ t('chat.send') }}
-      </NTooltip>
-    </div>
-  </footer>
+          </template>
+          {{ t('chat.send') }}
+        </NTooltip>
+      </div>
+    </footer>
+  </div>
 </template>

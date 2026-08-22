@@ -206,6 +206,7 @@ const runtimeProperties = new Set<PropertyKey>([
   'runStatus',
   'pendingApproval',
   'timelineTurns',
+  'currentTodo',
   'usage',
   'latestUsage',
   'latestReviewedApproval',

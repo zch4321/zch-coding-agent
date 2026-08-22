@@ -15,6 +15,7 @@ import {
 } from '../../shared/model-route'
 import type { PlanStatus } from '../../shared/orchestration'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
+import type { TodoState } from '../../shared/todo'
 import type {
   DurableRunStartPayload,
   DurableRunStartResult,
@@ -126,6 +127,13 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         records: replica.selectedMessages,
         overlay: sessionId ? this.overlays[sessionId] : undefined,
       })
+    },
+    currentTodo(): TodoState | undefined {
+      for (let index = this.timelineTurns.length - 1; index >= 0; index -= 1) {
+        const todo = this.timelineTurns[index]?.todo
+        if (todo) return todo
+      }
+      return undefined
     },
     usage(): UsageActivity[] {
       return this.activeOverlay?.usage ?? []

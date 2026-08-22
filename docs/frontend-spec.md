@@ -301,6 +301,8 @@ Context Ingress 审批必须显示：
 - 当前权限模式选择。
 - Send；Run 活动时替换为 Stop。
 
+当前已加载历史能尽力派生 Todo 时，输入框上方可额外显示一个比输入框窄的单行悬浮预览：优先预览 `in_progress` item，否则预览第一个 `pending` item。预览与输入框在同一纵向布局中参与正常文档流，不使用绝对定位覆盖输入框。悬停后使用 Naive UI Popover 展开完整只读清单，长内容使用 `NScrollbar` 在浮层内滚动。Todo 全部完成或当前无可操作 item 时隐藏。
+
 不包含：
 
 - Terminal 快捷入口。
@@ -693,6 +695,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] active Run 和 pending approval 时禁止重复发送。
 - [ ] Enter、Shift+Enter 和 IME 行为符合规范。
 - [ ] 模型和权限模式只使用紧凑控件，不放入侧栏大卡片。
+- [ ] Todo 不生成时间线大卡片；输入框上方只显示单行当前项，悬停后在有界滚动浮层中展开完整清单。
 - [ ] 同 workspace writer 活跃时，其他 Session 显示 Read-only locked；renderer 不修改其持久化 mode，writer 结束后解除约束。
 - [ ] Limits 提供运行/工具硬限制与已发现的 command shell；UI 明确 writer=1 是不可配置安全规则，Shell fallback 有可见警告。
 - [ ] 对话输入区没有 Terminal 入口。

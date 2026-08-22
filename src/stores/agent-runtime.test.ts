@@ -733,7 +733,7 @@ describe('agent runtime store', () => {
         },
       }),
     )
-    expect(runtime.timelineTurns.at(-1)?.todo).toEqual({
+    expect(runtime.currentTodo).toEqual({
       explanation: 'Track the task',
       items: [{ step: 'Implement Todo', status: 'in_progress' }],
     })
@@ -769,7 +769,7 @@ describe('agent runtime store', () => {
     )
 
     expect(runtime.ensureOverlay(selectedSessionId).todo).toBeUndefined()
-    expect(runtime.timelineTurns[0]?.todo).toEqual(snapshot.todo)
+    expect(runtime.currentTodo).toEqual(snapshot.todo)
   })
 
   it('routes audit-only events through explicit no-op handlers', () => {

@@ -30,7 +30,7 @@
 }
 
 .conversation-pane.terminal-maximized .conversation-scroll,
-.conversation-pane.terminal-maximized .message-input-area {
+.conversation-pane.terminal-maximized .message-composer-stack {
   overflow: hidden;
   visibility: hidden;
   margin-block: 0;
@@ -147,16 +147,10 @@
 }
 
 .conversation-turn > .chat-message,
-.conversation-turn > .todo-group,
 .conversation-turn > .timeline-disclosure {
   width: 100%;
   max-width: 100%;
   margin: 0;
-}
-
-.todo-step {
-  min-width: 0;
-  overflow-wrap: anywhere;
 }
 
 .conversation-turn > .chat-message.user,
