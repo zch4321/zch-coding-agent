@@ -30,7 +30,7 @@
 }
 
 .conversation-pane.terminal-maximized .conversation-scroll,
-.conversation-pane.terminal-maximized .message-input-area {
+.conversation-pane.terminal-maximized .message-composer-stack {
   overflow: hidden;
   visibility: hidden;
   margin-block: 0;

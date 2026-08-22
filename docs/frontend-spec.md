@@ -301,7 +301,7 @@ Context Ingress 审批必须显示：
 - 当前权限模式选择。
 - Send；Run 活动时替换为 Stop。
 
-当前已加载历史能尽力派生 Todo 时，输入框上方可额外显示一个比输入框窄的单行悬浮预览：优先预览 `in_progress` item，否则预览第一个 `pending` item。悬停后使用 Naive UI Popover 展开完整只读清单，长内容使用 `NScrollbar` 在浮层内滚动。预览不占用 Timeline 高度，Todo 全部完成或当前无可操作 item 时隐藏。
+当前已加载历史能尽力派生 Todo 时，输入框上方可额外显示一个比输入框窄的单行悬浮预览：优先预览 `in_progress` item，否则预览第一个 `pending` item。预览与输入框在同一纵向布局中参与正常文档流，不使用绝对定位覆盖输入框。悬停后使用 Naive UI Popover 展开完整只读清单，长内容使用 `NScrollbar` 在浮层内滚动。Todo 全部完成或当前无可操作 item 时隐藏。
 
 不包含：
 

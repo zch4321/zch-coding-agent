@@ -34,6 +34,9 @@ const timelineTurns = computed(() =>
       turn.runActivity,
   ),
 )
+const hasVisibleTodo = computed(() =>
+  Boolean(agent.currentTodo?.items.some((item) => item.status !== 'completed')),
+)
 let resizeObserver: ResizeObserver | undefined
 
 function requestRevert(messageId: string, text: string) {
@@ -140,7 +143,11 @@ async function loadOlderMessages() {
 }
 
 watch(
-  () => [timelineRenderSignature.value, agent.pendingApproval?.callId],
+  () => [
+    timelineRenderSignature.value,
+    agent.pendingApproval?.callId,
+    hasVisibleTodo.value,
+  ],
   () => void scrollToBottom(),
 )
 

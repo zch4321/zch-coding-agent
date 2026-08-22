@@ -1,9 +1,17 @@
-.message-input-area {
-  position: relative;
+.message-composer-stack {
   width: min(760px, calc(100% - 36px));
   min-width: 0;
   max-width: calc(100% - 36px);
+  display: grid;
+  gap: 8px;
   margin: 0 auto 16px;
+}
+
+.message-input-area {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 15px;
@@ -12,13 +20,9 @@
 }
 
 .composer-todo-anchor {
-  position: absolute;
-  z-index: 4;
-  bottom: calc(100% - 8px);
-  left: 50%;
   width: min(520px, calc(100% - 28px));
   min-width: 0;
-  transform: translateX(-50%);
+  justify-self: center;
 }
 
 .composer-todo-preview {
