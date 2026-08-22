@@ -2,12 +2,12 @@ import { Type } from '@sinclair/typebox'
 import type { JsonValue } from '../../shared/json'
 import type { PublicConfig } from '../../shared/config'
 import type { ToolDefinition, ToolResult } from './types'
-import { matchesGlob } from './glob'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
 import type { ToolRegistry } from './tool-registry'
 import { estimateTextTokens, truncateTextHeadTail } from './context-budget'
 import { DEFAULT_MAX_ENTRIES, walkFiles } from './workspace-walk'
 import { type Searcher, resolveWorkspaceSearcher } from './searcher'
+import { iterateWorkspaceGlobFiles } from './workspace-glob'
 import {
   projectGlobResult,
   projectGrepResult,
@@ -95,7 +95,8 @@ const GlobArgsSchema = Type.Object(
     pattern: Type.String({
       minLength: 1,
       maxLength: 1_024,
-      description: 'Glob pattern relative to path, for example **/*.ts.',
+      description:
+        'Bash-style glob relative to path, for example **/*.{ts,tsx}. Use forward slashes.',
     }),
     path: Type.Optional(
       Type.String({
@@ -136,7 +137,7 @@ const GrepArgsSchema = Type.Object(
         minLength: 1,
         maxLength: 1_024,
         description:
-          'Glob filter for searched files, for example **/*.ts. Defaults to **/*.',
+          'Bash-style glob relative to path for files to search, for example **/*.{ts,tsx}. Defaults to **/*.',
       }),
     ),
     caseSensitive: Type.Optional(
@@ -382,7 +383,7 @@ export function createReadOnlyToolDefinitions(
     id: 'glob',
     executionMode: 'parallel',
     description:
-      'Find workspace files matching a glob pattern such as **/*.ts. Symlinks are not followed.',
+      'Find workspace files with a Bash-style glob relative to path. Supports globstar, braces, character classes, and extglobs. Symlinks are not followed.',
     inputSchema: GlobArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
@@ -393,24 +394,31 @@ export function createReadOnlyToolDefinitions(
     async execute(args, context) {
       try {
         const guard = workspaceGuard(context.workspace.canonicalPath)
-        const walked = await walkFiles(
+        const maxResults = args.maxResults ?? DEFAULT_MAX_ENTRIES
+        const matches: string[] = []
+        let truncated = false
+        for await (const match of iterateWorkspaceGlobFiles({
           guard,
-          args.path ?? '.',
-          args.maxResults ?? DEFAULT_MAX_ENTRIES,
-          context.signal,
-        )
-        const matches = walked.files
-          .filter((file) => matchesGlob(args.pattern, file.path))
-          .map((file) => file.path)
+          rootInput: args.path ?? '.',
+          pattern: args.pattern,
+          signal: context.signal,
+        })) {
+          if (matches.length >= maxResults) {
+            truncated = true
+            break
+          }
+          matches.push(match)
+        }
+        matches.sort((left, right) => left.localeCompare(right))
 
         return {
           status: 'ok',
           content: {
             pattern: args.pattern,
             matches,
-            truncated: walked.truncated,
+            truncated,
           },
-          truncated: walked.truncated,
+          truncated,
         }
       } catch (error) {
         return errorResult(error)

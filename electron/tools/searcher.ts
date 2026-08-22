@@ -1,4 +1,4 @@
-import { matchesGlob } from './glob'
+import { stat } from 'node:fs/promises'
 import { BoundedRegexSearcher } from './regex-search'
 import { RipgrepSearcher } from './ripgrep-searcher'
 import {
@@ -7,21 +7,46 @@ import {
   type SearchOutcome,
   type Searcher,
 } from './searcher-types'
-import { walkFiles } from './workspace-walk'
+import { iterateWorkspaceGlobFiles } from './workspace-glob'
+import { PathGuardError } from '../safety/path-guard'
 
 const DEFAULT_GREP_FILE_BYTES = 256_000
 
 export type { SearchInput, SearchMatch, SearchOutcome, Searcher }
 
+async function* iterateSearchFiles(
+  input: Pick<SearchInput, 'guard' | 'rootInput' | 'include' | 'signal'>,
+): AsyncGenerator<string> {
+  const root = await input.guard.resolveExisting(input.rootInput)
+  const rootStats = await stat(root.realPath)
+  if (rootStats.isFile()) {
+    yield root.relativePath
+    return
+  }
+  if (!rootStats.isDirectory()) {
+    throw new PathGuardError(
+      'NOT_A_DIRECTORY',
+      'Grep path must be a file or directory',
+    )
+  }
+
+  yield* iterateWorkspaceGlobFiles({
+    guard: input.guard,
+    rootInput: root.relativePath,
+    pattern: input.include,
+    signal: input.signal,
+    baseNameMatch: true,
+  })
+}
+
 /**
- * In-process fallback that mirrors the original grep behaviour: walk the
- * workspace, filter by include glob, and run a bounded worker-thread regex
- * over each file's content.
+ * In-process fallback that enumerates the include glob and runs a bounded
+ * worker-thread regex over each matching file's content.
  */
 export class JavaScriptSearcher implements Searcher {
   readonly backend = 'javascript' as const
 
-  /** Searches guarded workspace files with include, exclude, and result limits. */
+  /** Searches guarded workspace files with include and result limits. */
   async search(input: SearchInput): Promise<SearchOutcome> {
     const {
       guard,
@@ -32,38 +57,41 @@ export class JavaScriptSearcher implements Searcher {
       pattern,
       caseSensitive,
     } = input
-    const walked = await walkFiles(guard, rootInput, maxResults * 10, signal)
     const matches: SearchMatch[] = []
     const searcher = new BoundedRegexSearcher()
+    let truncated = false
 
     try {
-      for (const file of walked.files) {
-        if (matches.length >= maxResults) {
-          break
-        }
-
-        if (!matchesGlob(include, file.path)) {
-          continue
-        }
-
+      for await (const file of iterateSearchFiles({
+        guard,
+        rootInput,
+        include,
+        signal,
+      })) {
         const source = await guard
-          .readFileBounded(file.path, DEFAULT_GREP_FILE_BYTES, signal)
+          .readFileBounded(file, DEFAULT_GREP_FILE_BYTES, signal)
           .catch(() => undefined)
 
         if (!source) {
           continue
         }
+        truncated ||= source.truncated
 
         const fileMatches = await searcher.search({
           pattern,
           caseSensitive,
           content: source.content,
-          maxResults: maxResults - matches.length,
+          maxResults: maxResults + 1 - matches.length,
           signal,
         })
 
         for (const match of fileMatches) {
-          matches.push({ path: file.path, line: match.line, text: match.text })
+          matches.push({ path: file, line: match.line, text: match.text })
+        }
+
+        if (matches.length > maxResults) {
+          truncated = true
+          break
         }
       }
     } finally {
@@ -71,8 +99,8 @@ export class JavaScriptSearcher implements Searcher {
     }
 
     return {
-      matches,
-      truncated: walked.truncated || matches.length >= maxResults,
+      matches: matches.slice(0, maxResults),
+      truncated,
     }
   }
 }

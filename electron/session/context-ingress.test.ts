@@ -59,4 +59,46 @@ describe('P3 context ingress modes', () => {
       )
     }
   })
+
+  it('supports brace globs and portable path separators', () => {
+    const decision = new ContextIngressFilter().evaluatePath(
+      {
+        mode: 'confirm',
+        pathGlobs: ['**/*.{pem,key}'],
+        contentPatterns: [],
+      },
+      {
+        ...call,
+        args: { path: 'credentials\\client.pem' },
+      },
+    )
+
+    expect(decision).toMatchObject({
+      action: 'confirm',
+      signals: [
+        expect.objectContaining({
+          code: 'sensitive_path',
+          detail: expect.stringContaining('credentials\\client.pem'),
+        }),
+      ],
+    })
+  })
+
+  it('fails closed when a configured sensitive-path glob is invalid', () => {
+    const decision = new ContextIngressFilter().evaluatePath(
+      {
+        mode: 'confirm',
+        pathGlobs: ['['],
+        contentPatterns: [],
+      },
+      call,
+    )
+
+    expect(decision).toMatchObject({
+      action: 'confirm',
+      signals: [
+        expect.objectContaining({ code: 'invalid_sensitive_path_glob' }),
+      ],
+    })
+  })
 })

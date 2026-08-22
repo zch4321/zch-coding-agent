@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { normalizePortablePath } from './glob'
+import { normalizePortablePath } from './portable-path'
 import { RegexSearchError } from './regex-search'
 import type {
   SearchInput,
@@ -142,7 +142,7 @@ export class RipgrepSearcher implements Searcher {
     args.push('--', pattern, searchPath)
 
     const matches: SearchMatch[] = []
-    let walkedTruncated = false
+    let truncated = false
 
     await new Promise<void>((resolve, reject) => {
       const child = spawn(rgPath, args, { cwd, windowsHide: true })
@@ -189,9 +189,9 @@ export class RipgrepSearcher implements Searcher {
             text: stripTrailingNewline(record.data.lines.text).slice(0, 1_000),
           })
 
-          if (matches.length >= maxResults) {
+          if (matches.length > maxResults) {
             capped = true
-            walkedTruncated = true
+            truncated = true
             finish()
             return
           }
@@ -240,8 +240,8 @@ export class RipgrepSearcher implements Searcher {
     })
 
     return {
-      matches,
-      truncated: walkedTruncated || matches.length >= maxResults,
+      matches: matches.slice(0, maxResults),
+      truncated,
     }
   }
 }

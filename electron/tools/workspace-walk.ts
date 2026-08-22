@@ -1,6 +1,6 @@
 import { readdir } from 'node:fs/promises'
 import path from 'node:path'
-import { normalizePortablePath } from './glob'
+import { normalizePortablePath } from './portable-path'
 import { PathGuard } from '../safety/path-guard'
 
 export const DEFAULT_MAX_ENTRIES = 200
@@ -11,8 +11,8 @@ export interface WalkedFile {
 
 /**
  * Depth-first workspace file walk. Skips symlinks and the large generated
- * folders (node_modules, .git, dist) so read-only tools stay bounded and do
- * not honour .gitignore (matching the original grep/glob behaviour).
+ * folders (node_modules, .git, dist) so recursive directory listings stay
+ * bounded without following ignore-file semantics.
  */
 export async function walkFiles(
   guard: PathGuard,
