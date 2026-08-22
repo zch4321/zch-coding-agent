@@ -1,4 +1,5 @@
 .message-input-area {
+  position: relative;
   width: min(760px, calc(100% - 36px));
   min-width: 0;
   max-width: calc(100% - 36px);
@@ -8,6 +9,81 @@
   border-radius: 15px;
   background: var(--background);
   box-shadow: 0 8px 24px rgba(31, 35, 40, 0.07);
+}
+
+.composer-todo-anchor {
+  position: absolute;
+  z-index: 4;
+  bottom: calc(100% - 8px);
+  left: 50%;
+  width: min(520px, calc(100% - 28px));
+  min-width: 0;
+  transform: translateX(-50%);
+}
+
+.composer-todo-preview {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.composer-todo-preview .n-button__content {
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 7px;
+}
+
+.composer-todo-status,
+.composer-todo-count {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.composer-todo-step {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-todo-popover {
+  display: grid;
+  width: min(430px, calc(100vw - 48px));
+  min-width: 0;
+  gap: 8px;
+}
+
+.composer-todo-popover header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.composer-todo-scroll {
+  max-height: min(280px, 42dvh);
+}
+
+.composer-todo-explanation {
+  display: block;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.composer-todo-popover .n-list-item {
+  padding-block: 5px;
+}
+
+.composer-todo-list-step {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .composer-context-chips {

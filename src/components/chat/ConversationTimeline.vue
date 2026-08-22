@@ -24,7 +24,16 @@ const timelineContent = ref<HTMLElement>()
 const bottomSentinel = ref<HTMLElement>()
 const followingOutput = ref(true)
 const loadingOlderMessages = ref(false)
-const timelineTurns = computed(() => agent.timelineTurns)
+const timelineTurns = computed(() =>
+  agent.timelineTurns.filter(
+    (turn) =>
+      turn.userMessage ||
+      turn.tools.length > 0 ||
+      turn.reasoningSegments.length > 0 ||
+      turn.messages.length > 0 ||
+      turn.runActivity,
+  ),
+)
 let resizeObserver: ResizeObserver | undefined
 
 function requestRevert(messageId: string, text: string) {
@@ -61,12 +70,7 @@ const timelineRenderSignature = computed(() =>
       const messages = turn.messages
         .map((message) => `${message.id}:${message.text.length}`)
         .join(',')
-      const todo = turn.todo
-        ? `${turn.todo.explanation ?? ''}:${turn.todo.items
-            .map((item) => `${item.status}:${item.step}`)
-            .join(',')}`
-        : ''
-      return `${turn.id}|${turn.runActivity ?? ''}|${todo}|${tools}|${reasoning}|${messages}`
+      return `${turn.id}|${turn.runActivity ?? ''}|${tools}|${reasoning}|${messages}`
     })
     .join(';'),
 )

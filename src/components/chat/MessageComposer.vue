@@ -39,6 +39,7 @@ import {
   type ComposerSuggestionTrigger,
 } from './composer-suggestions'
 import ComposerSuggestionPanel from './ComposerSuggestionPanel.vue'
+import ComposerTodo from './ComposerTodo.vue'
 import UiIcon from '../UiIcon.vue'
 
 const emit = defineEmits<{
@@ -491,6 +492,10 @@ watch(inputDisabled, (disabled) => {
 
 <template>
   <footer class="message-input-area">
+    <ComposerTodo
+      v-if="agent.currentTodo && !suggestionPanelVisible"
+      :todo="agent.currentTodo"
+    />
     <NAlert
       v-if="agent.bridgeAvailable && !agent.providerNoticeAccepted"
       type="info"

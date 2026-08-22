@@ -3,6 +3,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { NSpin } from 'naive-ui'
 import { mount } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CallId, RunId } from '../../../shared/ids'
 import { i18n, setAppLocale } from '../../i18n'
@@ -13,11 +14,22 @@ import type {
   ToolActivity,
 } from '../../stores/agent-types'
 import ConversationTurn from './ConversationTurn.vue'
+import ComposerTodo from './ComposerTodo.vue'
 import ReasoningGroup from './ReasoningGroup.vue'
 import ToolCallGroup from './ToolCallGroup.vue'
-import TodoGroup from './TodoGroup.vue'
 
 const runId = 'run:timeline-groups' as RunId
+const PopoverStub = defineComponent({
+  name: 'NPopover',
+  props: { trigger: String },
+  setup(props, { slots }) {
+    return () =>
+      h('div', { 'data-trigger': props.trigger }, [
+        slots.trigger?.(),
+        h('div', { class: 'popover-content' }, slots.default?.()),
+      ])
+  },
+})
 
 function tools(): ToolActivity[] {
   return [
@@ -174,8 +186,8 @@ describe('timeline disclosure groups', () => {
     wrapper.unmount()
   })
 
-  it('renders the Todo as a compact read-only checklist', () => {
-    const wrapper = mount(TodoGroup, {
+  it('renders the current Todo as one hover preview with a full checklist', () => {
+    const wrapper = mount(ComposerTodo, {
       props: {
         todo: {
           explanation: 'Keep the implementation visible',
@@ -186,11 +198,21 @@ describe('timeline disclosure groups', () => {
           ],
         },
       },
-      global: { plugins: [i18n] },
+      global: {
+        plugins: [i18n],
+        stubs: { Popover: PopoverStub },
+      },
     })
 
-    expect(wrapper.get('.todo-group').text()).toContain('待办')
-    expect(wrapper.get('.todo-group').text()).toContain('1/3')
+    expect(
+      wrapper.get('[data-trigger="hover"]').attributes('data-trigger'),
+    ).toBe('hover')
+    expect(wrapper.get('.composer-todo-preview').text()).toContain('进行中')
+    expect(wrapper.get('.composer-todo-preview').text()).toContain(
+      'Implement event',
+    )
+    expect(wrapper.get('.composer-todo-preview').text()).toContain('1/3')
+    expect(wrapper.get('.composer-todo-popover').text()).toContain('待办')
     expect(wrapper.findAll('.n-checkbox')).toHaveLength(3)
     expect(wrapper.findAll('.n-checkbox')[0]?.classes()).toContain(
       'n-checkbox--checked',
@@ -199,6 +221,20 @@ describe('timeline disclosure groups', () => {
       'n-checkbox--indeterminate',
     )
     expect(wrapper.text()).toContain('Keep the implementation visible')
+    wrapper.unmount()
+  })
+
+  it('hides the composer Todo after every item completes', () => {
+    const wrapper = mount(ComposerTodo, {
+      props: {
+        todo: {
+          items: [{ step: 'Finished', status: 'completed' }],
+        },
+      },
+      global: { plugins: [i18n] },
+    })
+
+    expect(wrapper.find('.composer-todo-anchor').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -211,9 +247,6 @@ describe('timeline disclosure groups', () => {
         role: 'user',
         durableKind: 'user_input',
         text: 'Please inspect it',
-      },
-      todo: {
-        items: [{ step: 'Inspect it', status: 'in_progress' }],
       },
       tools: tools(),
       reasoningSegments: reasoningSegments(),
@@ -246,7 +279,6 @@ describe('timeline disclosure groups', () => {
     ).map((element) => element.className)
     expect(childClasses).toEqual([
       expect.stringContaining('chat-message user'),
-      expect.stringContaining('todo-group'),
       expect.stringContaining('reasoning-group'),
       expect.stringContaining('tool-call-group'),
       expect.stringContaining('chat-message assistant'),

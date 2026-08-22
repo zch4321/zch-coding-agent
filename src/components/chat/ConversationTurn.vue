@@ -3,7 +3,6 @@ import type { ConversationTurn } from '../../stores/agent-types'
 import ChatMessageItem from './ChatMessageItem.vue'
 import ReasoningGroup from './ReasoningGroup.vue'
 import ToolCallGroup from './ToolCallGroup.vue'
-import TodoGroup from './TodoGroup.vue'
 
 defineProps<{
   turn: ConversationTurn
@@ -29,8 +28,6 @@ const emit = defineEmits<{
       @retry="emit('retry', $event, turn.userMessage!.text)"
       @edit="emit('edit', $event, turn.userMessage!.text)"
     />
-
-    <TodoGroup v-if="turn.todo" :todo="turn.todo" />
 
     <ReasoningGroup
       v-if="turn.reasoningSegments.length || turn.runActivity"

@@ -1494,7 +1494,7 @@ Todo List 是模型自行维护的当前任务执行清单，不是 Durable Plan
 
 Provider 只看到一个 `todo_update` 工具。每次调用必须提交完整有序快照，因此替换、重排和多项状态推进都是一次原子更新。工具按 serial 执行，校验 `sessionId/runId` 与当前 `ActiveRunExecution` 一致，使用低风险、无 workspace 副作用的既有执行路径，不进入人工审批，也不创建、修改或完成 Goal/Plan。普通 Main、Headless 和只读 child 使用同一 schema；child allowlist 显式包含 Todo，但 internal Session 的 `todo.updated` 不投影到父 Session。
 
-成功的 `todo_update` assistant tool call 与对应 `tool_result` 是 canonical history 中的事实记录。Renderer 按顺序归约当前已加载消息中已完成且非错误的调用，从参数重建快照，并在原调用所属 Turn 用 Naive UI 的只读 checklist 展示最后一次成功更新；协议工具卡片仍从普通 Tool Call 折叠栏隐藏。失败、拒绝、取消、超时或缺少结果的调用不改变 Todo。应用重启、Session 切换和 Run 终态 reload 都从有界消息页尽力重建，不另存需要同步或删除的 Session Todo 字段；更新落在未加载的更早页、被压缩或无法从原始参数解析时，Todo 可以暂时不显示。
+成功的 `todo_update` assistant tool call 与对应 `tool_result` 是 canonical history 中的事实记录。Renderer 按顺序归约当前已加载消息中已完成且非错误的调用，从参数重建快照，并将最新快照暴露为 `currentTodo`；协议工具卡片仍从普通 Tool Call 折叠栏隐藏。输入框上方用 Naive UI 的紧凑单行预览展示当前 `in_progress` item，没有时回退到第一个 `pending` item；鼠标悬停后在有界 Popover 中展开完整只读 checklist，全部完成时隐藏预览。Todo 不生成时间线项，也不改变时间线高度。失败、拒绝、取消、超时或缺少结果的调用不改变 Todo。应用重启、Session 切换和 Run 终态 reload 都从有界消息页尽力重建，不另存需要同步或删除的 Session Todo 字段；更新落在未加载的更早页、被压缩或无法从原始参数解析时，Todo 可以暂时不显示。
 
 `ActiveRunExecution.todo`、`todo.updated` 与 `ActiveRunPublicSnapshot.todo` 只负责成功调用后的低延迟显示、窗口 resync 和终态 durable reload 完成前的过渡。Run 结束或下一 Run 开始不向历史追加清空标记，也不注入 `<todo_state>`；后续模型像处理其他工具一样，从 conversation history 中最近的成功 `todo_update` 理解当前清单。Provider compact 依靠 handoff summary 保留当前进度，route 转换依靠 complete-history transcript，不维护 Todo 专用 checkpoint。
 
