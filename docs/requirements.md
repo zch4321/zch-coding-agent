@@ -96,7 +96,7 @@ Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelle
 | `glob`     | 文件名模式匹配（`fast-glob`） | **是**   |
 | `grep`     | 内容搜索（底层 `ripgrep`）    | **是**   |
 
-`glob.pattern` 使用 Bash-style glob 并固定相对于可选 `path`，支持 globstar、brace、character class 和 extglob；模型应使用 `/` 分隔符，Backend 会把 Windows `\` 输入规范化为 `/`。Backend 以 `fast-glob` 流式枚举普通文件，禁止绝对/负模式和任何可展开成父目录的 pattern，不跟随 symlink，并在每个结果上重新执行 workspace containment 校验。`maxResults` 只限制匹配结果：读取第 `maxResults + 1` 项后停止并标记截断，不能在匹配前限制扫描文件数。JavaScript `grep` fallback 使用同一枚举器解释 `include`，显式 file `path` 与 ripgrep 一样优先于 include；ripgrep 仍是正常首选 backend。
+`glob.pattern` 使用 Bash-style glob 并固定相对于可选 `path`，支持 globstar、brace、character class 和 extglob；模型应使用 `/` 分隔符，Backend 会把 Windows `\` 输入规范化为 `/`。Backend 以 `fast-glob` 流式枚举普通文件，禁止绝对/负模式和任何可展开成父目录的 pattern，不跟随 symlink，并在每个结果上重新执行 workspace containment 校验。`maxResults` 只限制匹配结果：读取第 `maxResults + 1` 项后停止并标记截断，不能在匹配前限制扫描文件数。JavaScript `grep` fallback 使用同一枚举器解释 `include`，显式 file `path` 与 ripgrep 一样优先于 include；正常路径使用 `@vscode/ripgrep` 分发的原生 ripgrep，项目代码只负责安全参数、进程生命周期、JSON 解析和有界结果。敏感路径策略独立使用 `picomatch` 匹配配置中的 glob，不复用文件枚举实现。
 
 模型可见的 `grep` 结果使用 `path:line:text`，`glob/list_dir` 每行一个路径且目录追加 `/`；空结果使用 `[no matches]` 或 `[empty directory]`，只有截断时追加短尾注。不得重复回显 pattern/include/path 等调用参数。
 

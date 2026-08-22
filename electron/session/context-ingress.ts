@@ -2,7 +2,7 @@ import type { PublicConfig } from '../../shared/config'
 import type { PolicySignal } from '../../shared/agent-events'
 import type { JsonValue } from '../../shared/json'
 import type { ToolCall, ToolResult } from '../tools/types'
-import { matchesGlob } from '../tools/glob'
+import { createSensitivePathMatcher } from './sensitive-path-matcher'
 
 export type IngressDecision =
   | { action: 'allow'; signals: PolicySignal[] }
@@ -115,9 +115,19 @@ export class ContextIngressFilter {
     const signals: PolicySignal[] = []
 
     for (const pattern of config.pathGlobs) {
-      const matches = paths.filter((candidate) =>
-        matchesGlob(pattern, candidate),
-      )
+      let isMatch: (candidate: string) => boolean
+      try {
+        isMatch = createSensitivePathMatcher(pattern)
+      } catch {
+        signals.push({
+          code: 'invalid_sensitive_path_glob',
+          severity: config.mode === 'confirm' ? 'danger' : 'warning',
+          detail: `Invalid sensitive path glob: ${pattern}`,
+        })
+        continue
+      }
+
+      const matches = paths.filter(isMatch)
 
       if (matches.length > 0) {
         signals.push({

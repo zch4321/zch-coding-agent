@@ -1,6 +1,6 @@
 import { readdir } from 'node:fs/promises'
 import path from 'node:path'
-import { normalizePortablePath } from './glob'
+import { normalizePortablePath } from './portable-path'
 import { PathGuard } from '../safety/path-guard'
 
 export const DEFAULT_MAX_ENTRIES = 200

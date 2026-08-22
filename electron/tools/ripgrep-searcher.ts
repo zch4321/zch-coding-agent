@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { normalizePortablePath } from './glob'
+import { normalizePortablePath } from './portable-path'
 import { RegexSearchError } from './regex-search'
 import type {
   SearchInput,

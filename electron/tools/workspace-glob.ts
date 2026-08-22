@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
 import fastGlob from 'fast-glob'
-import { normalizePortablePath } from './glob'
+import { normalizePortablePath } from './portable-path'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
 
 const IGNORED_DIRECTORY_GLOBS = [
