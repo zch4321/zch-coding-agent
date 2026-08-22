@@ -37,6 +37,7 @@ import { SubagentExecutionService } from '../subagent/execution-service'
 import { SwarmExecutionBridge } from '../swarm/execution-bridge'
 import { SwarmCoordinator } from '../swarm/coordinator'
 import { ConversationTitlingService } from './conversation-titling-service'
+import type { OperationalLogService } from '../operational-logging/service'
 
 type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
@@ -51,6 +52,7 @@ export interface CreateBackendRuntimeOptions {
   autoApproverFactory?: CreateAgentRuntimeOptions['autoApproverFactory']
   eventListeners?: CreateAgentRuntimeOptions['eventListeners']
   onDiagnostic?: DiagnosticSink
+  operationalLog?: Pick<OperationalLogService, 'log'>
   swarmHostEnabled?: boolean
   conversationTitlingDisabled?: boolean
 }
@@ -81,16 +83,33 @@ export async function createBackendRuntime(
   await rm(path.join(runtimeDataDirectory, 'subagent-snapshots'), {
     recursive: true,
     force: true,
-  }).catch((error) =>
-    options.onDiagnostic?.('Failed to clean legacy Subagent snapshots', error, {
-      audience: 'internal',
-    }),
-  )
+  }).catch((error) => {
+    options.operationalLog?.log({
+      level: 'warn',
+      event: 'log.cleanup.failed',
+      code: 'LEGACY_SNAPSHOT_CLEANUP_FAILED',
+      error,
+    })
+    return options.onDiagnostic?.(
+      'Failed to clean legacy Subagent snapshots',
+      error,
+      {
+        audience: 'internal',
+      },
+    )
+  })
   const database = DatabaseService.open({
     databasePath,
     appVersion: options.appVersion ?? 'development',
     onMigrationProgress: (progress) => {
       const duration = Math.round(progress.elapsedMs)
+      options.operationalLog?.log({
+        level: 'info',
+        event: 'database.migration',
+        databaseVersion: progress.version,
+        phase: progress.stage,
+        durationMs: duration,
+      })
       options.onDiagnostic?.(
         `SQLite migration ${progress.version}:${progress.name} ${progress.stage} (${duration}ms)`,
         undefined,
@@ -215,6 +234,7 @@ export async function createBackendRuntime(
       swarmExecution: swarmBridge,
       swarmHostEnabled: options.swarmHostEnabled ?? true,
       onDiagnostic: options.onDiagnostic,
+      operationalLog: options.operationalLog,
     })
     const agentExecutions = new AgentExecutionQueryService({
       coordinator,
@@ -285,6 +305,7 @@ export async function createBackendRuntime(
             runtime!.services.sessions.completedRunMainRoute(sessionId, runId),
           fetchImpl: options.fetchImpl,
           onDiagnostic: options.onDiagnostic,
+          operationalLog: options.operationalLog,
         })
     let disposePromise: Promise<void> | undefined
     return {

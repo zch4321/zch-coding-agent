@@ -14,6 +14,8 @@ import {
   type WebContents,
   type WebContentsWillFrameNavigateEventParams,
   type WebContentsWillNavigateEventParams,
+  type RenderProcessGoneDetails,
+  type Details as ChildProcessGoneDetails,
 } from 'electron'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -44,6 +46,9 @@ import {
 } from './security'
 import { acquireDesktopSingleInstance } from './single-instance'
 import { backendStartupRecoveryPrompt } from './backend-startup-recovery'
+import { OperationalLogService } from './operational-logging/service'
+import { desktopOperationalLoggerFactory } from './operational-logging/electron-logger'
+import { diagnosticIdForError } from './operational-logging/diagnostic-id'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(currentDirectory, '..')
@@ -57,6 +62,7 @@ const appDisposer = new Disposer({
 let mainWindow: BrowserWindow | undefined
 let cleanupComplete = false
 let cleanupStarted = false
+let runtimeLog: OperationalLogService | undefined
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -136,8 +142,29 @@ async function installIpc(): Promise<void> {
     },
   )
   const initialized = await configStore.initialize()
+  runtimeLog = new OperationalLogService({
+    directory: path.join(userData, 'logs', 'runtime'),
+    config: initialized.config.logging.operational,
+    loggerFactory: desktopOperationalLoggerFactory,
+    sanitizer: { userData, installation: appRoot },
+  })
+  appDisposer.add(runtimeLog.startProcessErrorCapture())
   const notifications = new BackendNotificationReporter({
     getWebContents: () => mainWindow?.webContents,
+    log: (message, error, delivery) =>
+      runtimeLog?.log({
+        level: delivery?.severity === 'error' ? 'error' : 'warn',
+        event: message.startsWith('IPC ')
+          ? 'ipc.failed'
+          : message.toLowerCase().includes('cleanup')
+            ? 'log.cleanup.failed'
+            : 'backend.diagnostic',
+        message,
+        error,
+        diagnosticId: delivery?.diagnosticId ?? diagnosticIdForError(error),
+        ...(delivery?.code ? { code: delivery.code } : {}),
+        ...(delivery?.sessionId ? { sessionId: delivery.sessionId } : {}),
+      }).diagnosticId,
   })
   let httpTransport = createHttpTransport(initialized.config.network.httpProxy)
   const refreshHttpTransport = (
@@ -167,9 +194,14 @@ async function installIpc(): Promise<void> {
         fetchImpl: (input: RequestInfo | URL, init?: RequestInit) =>
           httpTransport.fetch(input, init),
         onDiagnostic: notifications.reportDiagnostic,
+        operationalLog: runtimeLog,
         conversationTitlingDisabled:
           process.env.ZCH_DISABLE_CONVERSATION_TITLING === '1',
       }),
+  })
+  runtimeLog.log({ level: 'info', event: 'backend.started' })
+  appDisposer.add(() => {
+    runtimeLog?.log({ level: 'info', event: 'backend.stopped' })
   })
   appDisposer.add(() => backend.dispose())
   const unsubscribeDomainState = backend.subscribe((commit) => {
@@ -195,6 +227,7 @@ async function installIpc(): Promise<void> {
       backend,
       skillsManager,
       traceService,
+      operationalLog: runtimeLog,
       mcpManager,
       getHttpTransport: () => httpTransport,
       refreshHttpTransport,
@@ -218,6 +251,12 @@ async function openBackendWithRecovery<T>(input: {
       return await input.create()
     } catch (error) {
       console.error('Durable backend startup failed', error)
+      runtimeLog?.log({
+        level: 'error',
+        event: 'backend.failed',
+        code: 'BACKEND_STARTUP_FAILED',
+        error,
+      })
       const prompt = backendStartupRecoveryPrompt(error)
       const buttons = prompt.retryable
         ? ['Retry', 'Open data directory', 'Exit']
@@ -263,10 +302,25 @@ function guardNavigation(
   const preventWebView = (event: Event): void => {
     event.preventDefault()
   }
+  const reportRendererGone = (
+    _event: Event,
+    details: RenderProcessGoneDetails,
+  ): void => {
+    if (details.reason === 'clean-exit') return
+    runtimeLog?.log({
+      level: 'error',
+      event: 'process.failed',
+      code: 'ELECTRON_RENDERER_PROCESS_GONE',
+      phase: 'renderer',
+      outcome: details.reason,
+      message: `Renderer exited with code ${details.exitCode}`,
+    })
+  }
 
   webContents.on('will-navigate', preventMainFrameNavigation)
   webContents.on('will-frame-navigate', preventFrameNavigation)
   webContents.on('will-attach-webview', preventWebView)
+  webContents.on('render-process-gone', reportRendererGone)
   webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
   windowDisposer.add(() => {
@@ -277,6 +331,9 @@ function guardNavigation(
   })
   windowDisposer.add(() => {
     webContents.removeListener('will-attach-webview', preventWebView)
+  })
+  windowDisposer.add(() => {
+    webContents.removeListener('render-process-gone', reportRendererGone)
   })
   windowDisposer.add(() => {
     webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -377,6 +434,24 @@ const ownsDesktopInstance = acquireDesktopSingleInstance({
 })
 
 if (ownsDesktopInstance) {
+  const reportChildProcessGone = (
+    _event: Event,
+    details: ChildProcessGoneDetails,
+  ): void => {
+    if (details.reason === 'clean-exit') return
+    runtimeLog?.log({
+      level: 'error',
+      event: 'process.failed',
+      code: 'ELECTRON_CHILD_PROCESS_GONE',
+      phase: details.type,
+      outcome: details.reason,
+      message: `Electron child process exited with code ${details.exitCode}`,
+    })
+  }
+  app.on('child-process-gone', reportChildProcessGone)
+  appDisposer.add(() => {
+    app.removeListener('child-process-gone', reportChildProcessGone)
+  })
   app.on('before-quit', (event) => {
     if (cleanupComplete) {
       return
@@ -389,6 +464,7 @@ if (ownsDesktopInstance) {
     }
 
     cleanupStarted = true
+    runtimeLog?.log({ level: 'info', event: 'app.stopped' })
     void appDisposer.dispose().finally(() => {
       cleanupComplete = true
       app.quit()
@@ -417,9 +493,16 @@ if (ownsDesktopInstance) {
       installSessionSecurity()
       await installIpc()
       await createWindow()
+      runtimeLog?.log({ level: 'info', event: 'app.started' })
     })
     .catch((error) => {
       console.error('Application startup failed', error)
+      runtimeLog?.log({
+        level: 'error',
+        event: 'app.failed',
+        code: 'APP_STARTUP_FAILED',
+        error,
+      })
       app.exit(1)
     })
 }

@@ -42,6 +42,12 @@ import {
   type WorkspaceConcurrencyContext,
 } from './prompt-harness'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
+import type { OperationalLogService } from '../operational-logging/service'
+import { ProviderAttemptRecorder } from '../operational-logging/provider-attempt-recorder'
+import {
+  recordProviderAttemptFailure,
+  writeProviderFailureTrace,
+} from './provider-failure-diagnostics'
 
 export interface ProviderTurnResult {
   parts: MessagePart[]
@@ -66,6 +72,7 @@ export class SessionProviderTurnRunner {
   readonly #getWorkspaceConcurrency: (
     session: SessionState,
   ) => WorkspaceConcurrencyContext
+  readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
 
   constructor(options: {
     configStore: ConfigStore
@@ -75,6 +82,7 @@ export class SessionProviderTurnRunner {
     fetchImpl?: typeof fetch
     providerFactory: SessionManagerOptions['providerFactory']
     onDiagnostic: DiagnosticSink
+    operationalLog?: Pick<OperationalLogService, 'log'>
     emit: (session: SessionState, event: AgentEventDraft) => void
     getWorkspaceConcurrency?: (
       session: SessionState,
@@ -87,28 +95,34 @@ export class SessionProviderTurnRunner {
     this.#fetchImpl = options.fetchImpl
     this.#providerFactory = options.providerFactory
     this.#onDiagnostic = options.onDiagnostic
+    this.#operationalLog = options.operationalLog
     this.#emit = options.emit
     this.#getWorkspaceConcurrency =
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
   }
 
-  async #writeFailedResponse(
+  async #writeFailure(
     session: SessionState,
     run: ActiveRun,
     callId: CallId,
     apiKey: string,
-    diagnostics: ProviderResponseDiagnostics,
+    error: unknown,
+    diagnostics?: ProviderResponseDiagnostics,
+    classification?: { stage: string; code: string },
   ): Promise<void> {
-    await session.logger.write({
-      type: 'llm.response',
+    await writeProviderFailureTrace({
+      logger: session.logger,
       sessionId: session.sessionId,
       runId: run.runId,
       callId,
-      rawResponse: redactJsonSecrets(diagnostics.rawResponse, [apiKey]),
-      normalizedTurn: null,
-      providerState: redactJsonSecrets(diagnostics.providerState, [apiKey]),
-      usage: diagnostics.usage,
-      timing: toJsonValue(diagnostics.timing),
+      ...(session.internalExecution
+        ? { agentExecutionId: session.internalExecution.executionId }
+        : {}),
+      apiKey,
+      operation: 'main',
+      error,
+      ...(diagnostics ? { diagnostics } : {}),
+      ...(classification ? { classification } : {}),
     })
   }
 
@@ -210,6 +224,24 @@ export class SessionProviderTurnRunner {
       })
     }
     const diagnostics = providerRequestDiagnostics(compiled)
+    const attempt = new ProviderAttemptRecorder(this.#operationalLog, {
+      operation: 'main',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      providerCallId: llmCallId,
+      ...(session.internalExecution
+        ? { agentExecutionId: session.internalExecution.executionId }
+        : {}),
+      ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
+      providerId: binding.snapshot.providerId,
+      providerType: provider.providerType,
+      model: binding.snapshot.model,
+      reasoning: binding.snapshot.reasoning,
+      endpoint: binding.snapshot.endpoint,
+      messageCount: compiled.normalizedMessages.length,
+      toolCount: compiled.tools.length,
+      requestBytes: diagnostics.requestBytes,
+    })
     await session.logger.write({
       type: 'llm.request',
       sessionId: session.sessionId,
@@ -261,6 +293,10 @@ export class SessionProviderTurnRunner {
         }
       }
     } catch (error) {
+      if (run.controller.signal.aborted) {
+        attempt.completed({ outcome: 'cancelled' })
+        throw error
+      }
       const failure =
         error instanceof ProviderCompletionError
           ? error.diagnostics
@@ -268,21 +304,32 @@ export class SessionProviderTurnRunner {
             ? providerCompletionDiagnostics(completed)
             : undefined
       if (failure) {
-        await this.#writeFailedResponse(
+        recordProviderAttemptFailure(attempt, error, failure)
+        await this.#writeFailure(
           session,
           run,
           llmCallId,
           binding.apiKey,
+          error,
           failure,
         )
         this.#onDiagnostic('Provider completion failed', error, {
           audience: 'internal',
         })
       }
+      if (!failure) {
+        recordProviderAttemptFailure(attempt, error)
+        await this.#writeFailure(session, run, llmCallId, binding.apiKey, error)
+      }
       throw error
     }
 
-    if (!completed) throw new Error('Provider stream ended without completion')
+    if (!completed) {
+      const error = new Error('Provider stream ended without completion')
+      recordProviderAttemptFailure(attempt, error)
+      await this.#writeFailure(session, run, llmCallId, binding.apiKey, error)
+      throw error
+    }
     const canonical = completed.turn
     try {
       assertCompletedAssistantTurn(canonical)
@@ -294,12 +341,20 @@ export class SessionProviderTurnRunner {
         continuation: canonical.providerContinuation,
       })
     } catch (error) {
-      await this.#writeFailedResponse(
+      recordProviderAttemptFailure(
+        attempt,
+        error,
+        providerCompletionDiagnostics(completed),
+        'PROVIDER_COMPLETION_INVALID',
+      )
+      await this.#writeFailure(
         session,
         run,
         llmCallId,
         binding.apiKey,
+        error,
         providerCompletionDiagnostics(completed),
+        { stage: 'validation', code: 'PROVIDER_COMPLETION_INVALID' },
       )
       this.#onDiagnostic('Provider completion validation failed', error, {
         audience: 'internal',
@@ -324,6 +379,12 @@ export class SessionProviderTurnRunner {
       ]),
       usage: canonical.usage.raw,
       timing: toJsonValue(completed.timing),
+    })
+    attempt.completed({
+      durationMs: completed.timing.totalMs,
+      ttftMs: completed.timing.ttftMs,
+      responseBytes: completed.timing.responseBytes,
+      usage: canonical.usage,
     })
     const usage = normalizeLlmUsage({
       scope: 'main',

@@ -4,7 +4,13 @@ import type {
   RunStatus,
   TerminalEvent,
 } from '../../shared/agent-events'
-import type { CallId, MessageId, RunId, SessionId } from '../../shared/ids'
+import type {
+  CallId,
+  DiagnosticId,
+  MessageId,
+  RunId,
+  SessionId,
+} from '../../shared/ids'
 import type { AgentExecutionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { ModelSelection } from '../../shared/model-route'
@@ -32,6 +38,7 @@ import type { SubagentExecutionPort } from '../subagent/contracts'
 import type { SwarmExecutionPort } from '../swarm/contracts'
 import type { LlmUsageRecord } from '../../shared/usage'
 import type { TodoState } from '../../shared/todo'
+import type { OperationalLogService } from '../operational-logging/service'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -80,6 +87,7 @@ export interface SessionManagerOptions {
   executionState?: SessionExecutionStatePort
   historySource?: SessionHistorySourcePort
   onDiagnostic?: DiagnosticSink
+  operationalLog?: Pick<OperationalLogService, 'log'>
 }
 
 export interface SessionExecutionCommit {
@@ -141,7 +149,7 @@ export interface ActiveRun {
   pendingSideEffects: Set<Promise<void>>
   writerReleasePending: boolean
   status: RunStatus
-  failure?: { code: string; message: string }
+  failure?: { code: string; message: string; diagnosticId?: DiagnosticId }
   usageRecords: LlmUsageRecord[]
   fileChangeHistoryBytes: number
   pendingApproval?: PendingApproval

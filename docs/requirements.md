@@ -16,7 +16,7 @@
 
 - **有手有眼**：不只是聊天，而是能真正操作文件系统与终端的 Agent。
 - **可控可审**：四档权限模型 + 辅助模型自动审批，在自动化与安全之间可调。
-- **可观测**：显式开启调试日志后，完整记录每一次 LLM 调用、流式响应、审批和工具执行，可离线回放并分析上下文与 KV cache 命中效果。
+- **可观测**：默认运行日志记录脱敏的 Provider、Run 与工具元数据；显式开启完整 Trace 后保存聚合请求/响应、失败证据、审批和工具执行，用于离线检查与上下文分析。
 - **可扩展**：插件化生命周期钩子，为未来 MCP / 自定义工具 / RAG 留口子。
 
 ### 1.3 非目标（明确不做）
@@ -50,7 +50,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 - **协议完整**：LLM 一次返回多个工具调用时，每个调用都必须回填一个结果；拒绝、取消、超时也以结构化工具结果回填，不能静默丢失。
 - **有序并发**：`ToolDefinition.executionMode` 明确区分 `parallel | serial`，未声明时按 `serial` 处理。连续 parallel 调用只并发执行 Tool body，准备/审批和结果提交保持原 call 顺序；serial 调用是前后并行段的完成屏障。
 - **有界资源、默认不限 React 步数**：单次和单个 run 的工具输出预算、累计上下文预算继续受限；全应用 `maxConcurrentRuns` 范围为 `1..32`、新安装默认 16，达到上限的新 run 直接拒绝，升级已有配置时保留用户当前值。每个 run 同时最多一个 provider call，不设置独立 provider 并发上限，也不对主聊天流设置默认总墙钟超时。`maxStepsPerRun = 0` 表示 React loop 不限步数并作为默认值；有界自动化部署仍可配置正整数上限。自动压缩只由刚完成响应的 Provider usage 达到当前模型绝对 `compactThresholdTokens` 触发；Provider 已接受的响应即使 usage 达到或超过本地配置的 `contextWindowTokens` 也必须正常追加完整 assistant turn，并把该 usage 视为压缩信号，不能因本地 profile 回滚响应或跳过 Tool batch；usage 缺失时不主动压缩。工具响应在完整结果 batch 提交后压缩，final answer 延迟到下一次用户 Run 且在插入新提问前压缩。未显式配置的模型仍按可用 prompt budget 的 `autoCompactTriggerPercent`（默认 80%）生成绝对阈值；本地 token 估算只用于 trace、诊断和有界输出截断，不得拒绝 Provider 请求，也不决定主动压缩，真实上下文是否可接受由 Provider 响应决定。字节、行数/结果数与估算 token 任一输出上限先到即截断，并向用户和模型返回续读信息。
-- **可回放**：调试日志开启时，循环的请求、响应、流式事件和工具结果必须完整保存，可确定性离线回放原会话；重新请求模型属于单独的“重放请求”，不保证复现随机输出（§5）。
+- **可检查**：完整 Trace 开启时保存循环的聚合请求、成功响应、失败证据和工具结果；不持久化 token/SSE 增量，也不承诺从失败前 partial 输出确定性恢复 UI（§5）。
 - **Prompt Harness**：稳定 base instructions、runtime context、AGENTS、selected context、orchestration request 和 compact history 作为可审计 prompt layers 进入模型请求；runtime context 必须包含 workspace writer 的 `available | writer | readonly_locked` 快照，其他 writer 存在时明确当前 session 只读、禁止副作用并要求 writer 结束后重读文件。状态变化通过 hash 追加新 layer，不修改历史。用户可编辑内容是 assistant preferences，不替换 base harness instructions。
 - **计划审阅门**：模型可用 `plan_set` 创建或替换 Plan，默认进入 `awaiting_review` 并停止执行；UI 批准/拒绝会直接记录顶层 Plan 状态并写入 trace，自然语言批准/拒绝也可由模型通过 `plan_status({status:"active" | "rejected"})` 转成可审计状态。Plan review 不是权限模式，不绕过也不替代工具审批。
 
@@ -506,28 +506,34 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 
 ### 5.1 形态
 
+- Backend Operational Log 与 Full Session Trace 是两条独立边界。Operational Log 存于 Desktop `userData/logs/runtime/`，Headless 存于 artifact 的 `runtime/logs/runtime/`；默认 `info`，支持 `off | error | warn | info | debug`，单文件固定 5 MB、唯一时间戳归档，默认保留 14 天且总量 50 MB。
+- Operational Log 只记录经过白名单约束和脱敏的生命周期、关联 ID、耗时、大小、usage、HTTP 状态与稳定错误码；不得包含 API Key/header、Prompt、reasoning、消息正文、Provider body、工具参数/结果、命令、Terminal/文件内容或绝对 workspace 路径。关闭只停止文件写入，错误仍可获得供 UI 展示的 `diagnosticId`。
 - 每次日志启用或 Durable Session 恢复创建一个独立 **JSONL capture 文件**，存于 Electron `userData/traces/`；同一 Session 可以关联多个 capture，不能把 `traceId` 等同于 `sessionId`。
 - 每个 capture 使用唯一 `traceId`、以独占新文件创建且 `seq` 从 1 开始；旧 capture 不追加、不改名、不回填。
-- 日志是**调试功能**，配置项 `logging.enabled` 默认 `false`；只有用户显式开启后才创建 trace。
+- Full Trace 是**敏感调试功能**，配置项 `logging.trace.enabled` 默认 `false`；只有用户接受隐私提示并显式开启后才创建 trace。Operational 与 Trace 分别配置保留天数和总大小。
 - 保存日志开关后必须通知所有已加载 Session：idle Session 立即启停；active Run 在该 Run 完整结束后应用最终保存值。运行中开启不记录当前 Run，运行中关闭仍记录当前 Run 的终态；未加载 Session 在下次 restore 时按当前配置创建 capture。
 - `TraceCaptureStatus` 必须公开 `configuredEnabled` 与 `disabled | pending | active | degraded` 状态，并可携带当前 `traceId` 或有界 warning；状态变化通过有序 Session event 同步 renderer。
 - capture 创建或写入失败必须降级为 Null logger，不得让模型、工具或 Terminal 操作失败；不完整文件留作诊断，下一 Run 开始前重试创建新 capture。
-- 开启后采用完整记录模式，不做上下文脱敏或摘要化：完整保存规范化消息、实际 Provider 请求体、原始流事件、聚合响应、reasoning/continuation state、工具参数与结果、审批事件和配置快照。
+- 开启后采用内容记录模式：保存规范化消息、实际 Provider 请求体、聚合成功响应、reasoning/continuation state、工具参数与结果、审批事件和配置快照。正常 Provider stream 不写 `llm.stream`；失败只写一条聚合 `llm.failure`，不保存失败前累计的 partial text/reasoning。
+- `llm.failure` 可保存真正导致失败的 HTTP body、无效 SSE/JSON 或非法 completion 证据；内容最多 256 KiB，并记录观察/捕获字节数、截断状态和完整 SHA-256。API Key 仍必须在写入前移除。
 - “完整”以 Agent 实际可见数据为边界：工具因输出上限而未进入 Agent 的丢弃字节记录 `totalBytes/truncated/discardedHash`，不要求无限落盘；进入模型上下文的内容必须逐字保存。
 - 不记录请求传输层凭据，例如 API Key、Authorization header 和 safeStorage 密文；这些信息不属于模型上下文，也不是回放所需数据。
 - 开启时必须明确提示日志可能包含源代码、用户输入、模型推理、工具输出以及工作区中被读取的凭据，并支持保留天数/总大小上限。
 - 完整 trace 必须可规范化为只读 `zch-session-transcript`：按 run 展示用户/Assistant/明文 reasoning、内部编排、工具与审批、Provider上下文、Plan、interjection、usage、terminal和生命周期。该格式不可导入或重放；每次 Electron 导出前必须警告，导出内容不做敏感信息扫描或脱敏，用户负责本地保存和后续分享。
-- Transcript 不输出 provider wire request/raw response/provider continuation、流式重复分片、工具schema、加密/opaque reasoning或多模态原始载荷；中断且没有final message的明文delta标为partial，多模态只保留类型/MIME/已知大小占位。
+- Transcript 不输出 provider wire request/raw response/provider continuation、失败证据正文、工具 schema、加密/opaque reasoning或多模态原始载荷。v3 新 Trace 不从失败请求恢复 partial 输出；读取旧 v2 `llm.stream` 时仍可将遗留明文 delta 标为 partial。多模态只保留类型/MIME/已知大小占位。
 - 产品 Session 状态使用 SQLite 持久化；Trace 继续按 capture 分段保存，并通过 `sessionId` 归属同一 Session，不能因数据库存在而降低 trace 保真度。清理活动日志时必须使用真实 active `traceId`，不能把 `sessionId` 当作文件标识。
 
 ### 5.2 必须记录的事件（每条一行 JSON）
 
 ```
+operational     { schemaVersion, seq, eventId, level, event, diagnosticId?, correlationIds?, boundedMetadata, ts }
 session.start   { schemaVersion, seq, eventId, sessionId, workspace, model, mode, ts }
 run.start/end   { runId, status, ts }
 run.rejected    { runId, reason, limit?, active?, writerSessionId?, writerRunId?, ts }
 workspace.writer { sessionId, runId, workspace, acquired|released|rejected, owner?, ts }
-llm.call        { callId, runId, model, params, messages, providerRequest, rawEvents, response, providerContinuation?, usage, timing, ts }
+llm.request     { callId, runId, scope, messages, providerRequest, modelRoute, requestBytes, ts }
+llm.response    { callId, runId, aggregateResponse, providerState?, usage, timing, ts }
+llm.failure     { callId, runId, operation, stage, code, diagnosticId?, httpMetadata?, evidence?, timing?, ts }
 approval        { callId, policySignals, mode, approver, decision, reason, ts }
 tool.call       { callId, runId, tool, args, result, approvedBy, duration, ts }
 terminal.event  { terminalId, direction, data/status, seq, ts }
@@ -538,8 +544,8 @@ session.end     { reason, ts }
 
 ### 5.3 保真度要求
 
-- 每条事件包含 `schemaVersion + seq + eventId`，异步流事件可用 `parentId/callId/runId` 建立因果关系。
-- **离线回放**：不访问模型、不执行工具，按原始流事件和已记录结果确定性重现 UI、消息历史和 Agent 状态机。
+- 每条事件包含 `schemaVersion + seq + eventId`，Provider/Tool/Run 使用 `sessionId/runId/providerCallId/toolBatchId/callId/agentExecutionId/traceId` 建立因果关系。
+- **离线检查**：不访问模型、不执行工具，按聚合响应、canonical 消息和已记录工具结果恢复稳定时间线；不承诺重现 token 级流式节奏或失败前 partial UI。
 - **请求检查**：保留最终 Provider 请求体用于离线检查、导出和 cache 行为分析；不使用当前凭据在线重放，也不从 trace 创建 Session 分叉。
 - **工具重放**默认只注入已记录结果；真实重新执行副作用工具必须是独立显式操作。
 - 保存 Provider 返回的完整 usage，包括可用时的 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`、输入/输出 token；同时记录 TTFT、总延迟、请求字节数和稳定前缀 hash，供 KV cache 分析。标准化 `cacheMissTokens` 表示未由缓存提供的输入：协议只返回总输入和 cached tokens 时按差值计算，未返回 cached 指标时把输入视为 miss；Anthropic 按 uncached input 加 cache-creation input 计算。原始 usage 必须保留以便审计。
@@ -549,7 +555,7 @@ session.end     { reason, ts }
 
 - 内部 Headless host 必须复用桌面端唯一 Agent Runtime 组装入口，固定 Yolo 且不增加、删除或替换模型可见工具。
 - Headless config v4 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs`，并迁移 v1–v3 输入；Runtime Identity v5 记录开关、timeout 和 `swarmsEnabled = false`，并从 tool 名称/hash 排除 `swarm_run`。普通 child execution 仍使用相同 live workspace、隐藏 Session、Tool profile 和 usage 归属。
-- stdout 只允许版本化 JSONL；host 诊断写 stderr；最终 `result.json` 原子写入 workspace 外的 artifacts 目录。
+- stdout 只允许版本化 JSONL；Operational Log 独立写入 artifact 目录且不得混入 stdout；host 诊断写 stderr；最终 `result.json` 原子写入 workspace 外的 artifacts 目录并返回运行日志目录。
 - Provider 凭据只能由受信任配置声明的环境变量名称解析，凭据值不得进入配置回包、JSONL、trace、patch 或子进程环境。
 - result 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计、trace 和 patch 路径。`completed` 只表示 Agent run 正常结束，不替代外部业务验收。
 - Plan 自动批准必须在前一 run 完全 settle 后，通过有版本的 harness 消息追加到历史和 trace；不得伪装成用户消息。Goal blocked 或自动批准达到上限返回 `needs_human_input`。

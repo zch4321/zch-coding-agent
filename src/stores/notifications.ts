@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { SessionId } from '../../shared/ids'
+import type { DiagnosticId, SessionId } from '../../shared/ids'
 
 export type UiNotificationSeverity = 'warning' | 'error'
 
@@ -9,6 +9,7 @@ export interface UiNotificationInput {
   code: string
   message: string
   sessionId?: SessionId
+  diagnosticId?: DiagnosticId
 }
 
 export interface UiNotification extends UiNotificationInput {
@@ -32,6 +33,7 @@ function notificationKey(input: UiNotificationInput): string {
     normalizedCode(input.code),
     input.sessionId ?? '',
     normalizedMessage(input.message),
+    input.diagnosticId ?? '',
   ].join('\u0000')
 }
 
@@ -57,6 +59,7 @@ export const useNotificationStore = defineStore('notifications', {
         code: normalizedCode(input.code),
         message: normalizedMessage(input.message),
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        ...(input.diagnosticId ? { diagnosticId: input.diagnosticId } : {}),
         dedupeKey,
       }
       if (this.pending.length >= MAX_PENDING_NOTIFICATIONS) {

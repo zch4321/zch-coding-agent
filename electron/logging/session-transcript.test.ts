@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { CallId, EventId, RunId, SessionId } from '../../shared/ids'
 import type { TraceId } from '../../shared/trace'
-import { createTraceEvent, type TraceEventInput } from './events'
+import {
+  createTraceEvent,
+  type TraceEvent,
+  type TraceEventInput,
+} from './events'
 import {
   normalizeSessionTranscript,
   omitMultimodalContent,
@@ -24,15 +28,29 @@ const modelRoute = {
   providerConfigRevision: 1,
 }
 
-function trace(inputs: TraceEventInput[]) {
-  return inputs.map((input, index) =>
-    createTraceEvent(
-      input,
-      index + 1,
-      `event-${index + 1}` as EventId,
-      new Date(Date.UTC(2026, 6, 12, 0, 0, index)).toISOString(),
-    ),
-  )
+type LegacyStreamInput = {
+  type: 'llm.stream'
+  sessionId: SessionId
+  runId: RunId
+  callId: CallId
+  providerEvent: import('../../shared/json').JsonValue
+  elapsedMs: number
+}
+
+function trace(inputs: Array<TraceEventInput | LegacyStreamInput>) {
+  return inputs.map((input, index) => {
+    const eventId = `event-${index + 1}` as EventId
+    const ts = new Date(Date.UTC(2026, 6, 12, 0, 0, index)).toISOString()
+    return input.type === 'llm.stream'
+      ? ({
+          schemaVersion: 3,
+          seq: index + 1,
+          eventId,
+          ts,
+          ...input,
+        } as TraceEvent)
+      : createTraceEvent(input, index + 1, eventId, ts)
+  })
 }
 
 describe('session transcript', () => {
@@ -185,7 +203,7 @@ describe('session transcript', () => {
     expect(markdown).not.toContain('secretSchema')
   })
 
-  it('emits interrupted plaintext deltas as partial entries', () => {
+  it('can still read interrupted deltas from legacy trace files', () => {
     const events = trace([
       {
         type: 'session.start',

@@ -1,5 +1,12 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Writable } from 'node:stream'
@@ -346,7 +353,7 @@ describe('Headless host', () => {
     await expect(loadHeadlessConfig(configPath)).resolves.toEqual(source)
   })
 
-  it('keeps external v4 singular Provider config while building an empty v22 model pool', async () => {
+  it('keeps external v4 singular Provider config while building an empty v23 model pool', async () => {
     const { artifacts } = await fixture()
     const prepared = await prepareHeadlessConfig({
       config: config(),
@@ -362,7 +369,7 @@ describe('Headless host', () => {
       provider: { id: 'fake' },
     })
     expect(prepared.configStore.getInternalConfig()).toMatchObject({
-      schemaVersion: 22,
+      schemaVersion: 23,
       models: {
         defaultModelProvider: 'fake',
         modelPool: { entries: [] },
@@ -556,6 +563,25 @@ describe('Headless host', () => {
     expect(
       await readFile(path.join(artifacts, 'runtime', 'config.json'), 'utf8'),
     ).not.toContain(secret)
+    const runtimeLogFiles = await readdir(
+      result.artifacts.operationalLogDirectory,
+    )
+    const runtimeLog = (
+      await Promise.all(
+        runtimeLogFiles.map((name) =>
+          readFile(
+            path.join(result.artifacts.operationalLogDirectory, name),
+            'utf8',
+          ),
+        ),
+      )
+    ).join('\n')
+    expect(runtimeLog).toContain('"event":"backend.started"')
+    expect(runtimeLog).toContain('"event":"run.started"')
+    expect(runtimeLog).toContain('"event":"backend.stopped"')
+    expect(runtimeLog).not.toContain('Create headless-created.txt')
+    expect(runtimeLog).not.toContain(secret)
+    expect(output.value).not.toContain('"event":"run.started"')
     expect(provider.receivedApiKey).toBe(secret)
   }, 20_000)
 

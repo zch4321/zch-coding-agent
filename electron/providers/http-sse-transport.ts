@@ -13,12 +13,19 @@ export type ProviderTransportErrorCode =
 export interface ProviderTransportErrorOptions extends ErrorOptions {
   retryAfterMs?: number
   providerErrorCode?: string
+  requestId?: string
+  evidence?: {
+    kind: 'http_body' | 'invalid_sse' | 'invalid_json'
+    content: string
+  }
 }
 
 /** Reports bounded HTTP or SSE transport failures and retry metadata. */
 export class ProviderTransportError extends Error {
   readonly retryAfterMs: number | undefined
   readonly providerErrorCode: string | undefined
+  readonly requestId: string | undefined
+  readonly evidence: ProviderTransportErrorOptions['evidence']
 
   constructor(
     readonly code: ProviderTransportErrorCode,
@@ -30,6 +37,8 @@ export class ProviderTransportError extends Error {
     this.name = 'ProviderTransportError'
     this.retryAfterMs = options?.retryAfterMs
     this.providerErrorCode = options?.providerErrorCode
+    this.requestId = options?.requestId
+    this.evidence = options?.evidence
   }
 }
 
@@ -69,13 +78,18 @@ function parsePayload(payload: string): JsonObject {
       'INVALID_SSE',
       'Provider returned invalid SSE JSON',
       undefined,
-      { cause: error },
+      {
+        cause: error,
+        evidence: { kind: 'invalid_sse', content: payload },
+      },
     )
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ProviderTransportError(
       'INVALID_SSE',
       'Provider SSE payload must be a JSON object',
+      undefined,
+      { evidence: { kind: 'invalid_sse', content: payload } },
     )
   }
   return value as JsonObject
@@ -247,13 +261,18 @@ export class HttpSseTransport {
           'INVALID_JSON',
           'Provider returned invalid JSON',
           undefined,
-          { cause: error },
+          {
+            cause: error,
+            evidence: { kind: 'invalid_json', content: text },
+          },
         )
       }
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new ProviderTransportError(
           'INVALID_JSON',
           'Provider JSON response must be an object',
+          undefined,
+          { evidence: { kind: 'invalid_json', content: text } },
         )
       }
       return value as JsonObject
@@ -368,15 +387,35 @@ async function httpErrorMetadata(
     response.headers.get('retry-after'),
   )
   let parsed: unknown
+  let responseText = ''
   try {
-    const text = await readBoundedJsonBody(response)
-    if (text.trim()) parsed = JSON.parse(text)
+    responseText = await readBoundedJsonBody(response)
+    if (responseText.trim()) parsed = JSON.parse(responseText)
   } catch {
     await response.body?.cancel().catch(() => undefined)
   }
   const code = providerErrorCode(parsed)
+  const requestId = responseRequestId(response.headers)
   return {
     ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
     ...(code ? { providerErrorCode: code } : {}),
+    ...(requestId ? { requestId } : {}),
+    ...(responseText
+      ? { evidence: { kind: 'http_body' as const, content: responseText } }
+      : {}),
   }
+}
+
+function responseRequestId(headers: Headers): string | undefined {
+  for (const name of [
+    'x-request-id',
+    'request-id',
+    'openai-request-id',
+    'anthropic-request-id',
+    'cf-ray',
+  ]) {
+    const value = headers.get(name)?.trim()
+    if (value) return value.slice(0, 512)
+  }
+  return undefined
 }

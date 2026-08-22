@@ -125,4 +125,19 @@ describe('AppMessageBridge', () => {
     expect(replica.selectedSessionId).toBe(selected)
     wrapper.unmount()
   })
+
+  it('shows the stable code and diagnostic ID for Run failures', async () => {
+    const wrapper = host()
+    useNotificationStore().error({
+      code: 'PROVIDER_HTTP_ERROR',
+      message: 'Provider request failed.',
+      diagnosticId:
+        'diagnostic:test-1' as import('../../../shared/ids').DiagnosticId,
+    })
+    await renderMessages()
+
+    expect(document.body.textContent).toContain('[PROVIDER_HTTP_ERROR]')
+    expect(document.body.textContent).toContain('diagnostic:test-1')
+    wrapper.unmount()
+  })
 })

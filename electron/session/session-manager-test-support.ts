@@ -154,7 +154,7 @@ export async function createConfig(
     kind: 'logging',
     value: {
       ...store.getPublicConfig().logging,
-      enabled: true,
+      trace: { ...store.getPublicConfig().logging.trace, enabled: true },
     },
   })
   return store

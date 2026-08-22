@@ -8,6 +8,7 @@ import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'
 import type {
   ModelProvider,
+  ProviderEvent,
   ProviderStreamContext,
 } from '../providers/provider'
 import { createConfiguredProvider } from '../providers/provider-factory'
@@ -20,6 +21,9 @@ import type { RuntimeEventBus } from '../runtime/runtime-event-bus'
 import type { RuntimeEventUnsubscribe } from '../runtime/runtime-events'
 import { canonicalHash } from '../session/canonical-history'
 import type { SessionService } from './session-service'
+import type { OperationalLogService } from '../operational-logging/service'
+import { ProviderAttemptRecorder } from '../operational-logging/provider-attempt-recorder'
+import { ProviderTransportError } from '../providers/http-sse-transport'
 
 const TITLING_TIMEOUT_MS = 15_000
 const TITLING_MAX_OUTPUT_TOKENS = 128
@@ -43,6 +47,7 @@ export interface ConversationTitlingOptions {
   ) => ResolvedModelRoute | undefined
   createProvider?: (route: ResolvedModelRoute) => ModelProvider
   timeoutMs?: number
+  operationalLog?: Pick<OperationalLogService, 'log'>
 }
 
 /**
@@ -134,6 +139,7 @@ export class ConversationTitlingService {
     | undefined
   readonly #createProvider: (route: ResolvedModelRoute) => ModelProvider
   readonly #timeoutMs: number
+  readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
   readonly #attempted = new Set<SessionId>()
   readonly #inFlight = new Set<Promise<void>>()
   readonly #controllers = new Set<AbortController>()
@@ -157,6 +163,7 @@ export class ConversationTitlingService {
         ))
     this.#getCompletedRunRoute = options.getCompletedRunRoute
     this.#timeoutMs = options.timeoutMs ?? TITLING_TIMEOUT_MS
+    this.#operationalLog = options.operationalLog
     this.#createProvider =
       options.createProvider ??
       ((route) =>
@@ -171,6 +178,7 @@ export class ConversationTitlingService {
         if (event.type === 'run.status' && event.status === 'completed') {
           this.#schedule(
             event.sessionId,
+            event.runId,
             this.#getCompletedRunRoute?.(event.sessionId, event.runId),
           )
         }
@@ -195,11 +203,12 @@ export class ConversationTitlingService {
 
   #schedule(
     sessionId: SessionId,
+    runId: RunId,
     completedRunRoute?: ResolvedModelRoute,
   ): void {
     if (this.#disposed || this.#attempted.has(sessionId)) return
     this.#attempted.add(sessionId)
-    const pending = this.#generate(sessionId, completedRunRoute)
+    const pending = this.#generate(sessionId, runId, completedRunRoute)
       .catch((error) => {
         this.#onDiagnostic?.(
           `Conversation titling failed for Session ${sessionId}`,
@@ -215,6 +224,7 @@ export class ConversationTitlingService {
 
   async #generate(
     sessionId: SessionId,
+    runId: RunId,
     completedRunRoute?: ResolvedModelRoute,
   ): Promise<void> {
     const record = await this.#sessions
@@ -244,6 +254,8 @@ export class ConversationTitlingService {
       prompt.content,
       userText,
       assistantText,
+      sessionId,
+      runId,
     )
     if (this.#disposed || raw === undefined) return
 
@@ -259,12 +271,31 @@ export class ConversationTitlingService {
     rules: string,
     userText: string,
     assistantText: string,
+    parentSessionId: SessionId,
+    parentRunId: RunId,
   ): Promise<string | undefined> {
     const controller = new AbortController()
+    let timedOut = false
     this.#controllers.add(controller)
     const timer = setTimeout(() => {
+      timedOut = true
       controller.abort(new Error('Conversation titling timed out'))
     }, this.#timeoutMs)
+    const attempt = this.#operationalLog
+      ? new ProviderAttemptRecorder(this.#operationalLog, {
+          operation: 'title',
+          sessionId: parentSessionId,
+          runId: parentRunId,
+          providerCallId: `title:${parentRunId}`,
+          providerId: route.snapshot.providerId,
+          providerType: provider.providerType,
+          model: route.snapshot.model,
+          reasoning: route.snapshot.reasoning,
+          endpoint: route.snapshot.endpoint,
+          messageCount: 1,
+          toolCount: 0,
+        })
+      : undefined
     try {
       const sessionId = 'titling:session' as SessionId
       const messages: MessageRecord[] = [
@@ -304,6 +335,9 @@ export class ConversationTitlingService {
       const context: ProviderStreamContext = { signal: controller.signal }
       let text = ''
       let completed = false
+      let completedEvent:
+        | Extract<ProviderEvent, { type: 'completed' }>
+        | undefined
       let removeAbortListener: () => void = () => undefined
       const aborted = new Promise<never>((_resolve, reject) => {
         const abort = () =>
@@ -324,6 +358,7 @@ export class ConversationTitlingService {
               throw new Error('Titling provider produced multiple completions')
             }
             completed = true
+            completedEvent = event
             text = event.turn.parts
               .flatMap((part) => (part.type === 'text' ? [part.text] : []))
               .join('\n')
@@ -334,8 +369,39 @@ export class ConversationTitlingService {
       if (!completed) {
         throw new Error('Titling provider stream ended without completion')
       }
+      attempt?.completed(
+        completedEvent
+          ? {
+              durationMs: completedEvent.timing.totalMs,
+              ttftMs: completedEvent.timing.ttftMs,
+              responseBytes: completedEvent.timing.responseBytes,
+              usage: completedEvent.turn.usage,
+            }
+          : {},
+      )
       return text
     } catch (error) {
+      if (controller.signal.aborted && !timedOut && this.#disposed) {
+        attempt?.completed({ outcome: 'cancelled' })
+        return undefined
+      }
+      const transport = titleTransportError(error)
+      attempt?.failed(error, {
+        code: timedOut ? 'PROVIDER_TIMEOUT' : 'PROVIDER_TITLE_FAILED',
+        ...(transport?.status === undefined
+          ? {}
+          : { httpStatus: transport.status }),
+        ...(transport?.providerErrorCode
+          ? { providerErrorCode: transport.providerErrorCode }
+          : {}),
+        ...(transport?.retryAfterMs === undefined
+          ? {}
+          : { retryAfterMs: transport.retryAfterMs }),
+        ...(transport?.requestId ? { requestId: transport.requestId } : {}),
+        ...(transport?.evidence
+          ? { responseBytes: Buffer.byteLength(transport.evidence.content) }
+          : {}),
+      })
       this.#onDiagnostic?.('Conversation title request failed', error, {
         audience: 'internal',
       })
@@ -345,6 +411,15 @@ export class ConversationTitlingService {
       this.#controllers.delete(controller)
     }
   }
+}
+
+function titleTransportError(
+  error: unknown,
+  depth = 0,
+): ProviderTransportError | undefined {
+  if (error instanceof ProviderTransportError) return error
+  if (!error || typeof error !== 'object' || depth >= 3) return undefined
+  return titleTransportError(Reflect.get(error, 'cause'), depth + 1)
 }
 
 function recordText(record: MessageRecord): string {

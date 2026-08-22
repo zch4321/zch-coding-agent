@@ -3,7 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
-import type { CallId, ProjectId } from '../../shared/ids'
+import type { CallId, DiagnosticId, EventId, ProjectId } from '../../shared/ids'
+import type { OperationalEventInput } from '../operational-logging/events'
 import type { SessionRecord } from '../../shared/session'
 import {
   ScriptedProviderHarness,
@@ -557,13 +558,38 @@ describe('SessionManager Provider completion validation', () => {
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
     const events: AgentEventEnvelope[] = []
+    const operationalEvents: Array<
+      OperationalEventInput & { diagnosticId?: DiagnosticId }
+    > = []
+    let diagnosticSequence = 0
+    const operationalLog = {
+      log(input: OperationalEventInput) {
+        const diagnosticId =
+          input.diagnosticId ??
+          (input.level === 'warn' || input.level === 'error'
+            ? (`diagnostic:test-${++diagnosticSequence}` as DiagnosticId)
+            : undefined)
+        operationalEvents.push({
+          ...structuredClone(input),
+          ...(diagnosticId ? { diagnosticId } : {}),
+        })
+        return {
+          eventId: `event:test-${operationalEvents.length}` as EventId,
+          diagnosticId,
+          written: true,
+        }
+      },
+    }
     const configStore = await createConfig(directory)
     await configStore.update({
       version: 1,
       kind: 'logging',
       value: {
         ...configStore.getPublicConfig().logging,
-        enabled: true,
+        trace: {
+          ...configStore.getPublicConfig().logging.trace,
+          enabled: true,
+        },
       },
     })
     const manager = new SessionManager({
@@ -571,6 +597,7 @@ describe('SessionManager Provider completion validation', () => {
       traceDirectory: path.join(directory, 'traces'),
       eventSink: createIpcTestEventSink((event) => events.push(event)),
       providerFactory: () => new ReasoningOnlyProvider(),
+      operationalLog,
     })
     const sessionId = await manager.createSession({
       workspace,
@@ -601,22 +628,49 @@ describe('SessionManager Provider completion validation', () => {
       )?.event,
     ).toMatchObject({
       error: {
-        code: 'RUN_FAILED',
+        code: 'PROVIDER_COMPLETION_INVALID',
         message:
           'Provider returned reasoning without an assistant answer; retry the request',
       },
     })
     await manager.closeSession(sessionId)
-    const response = parseTrace(
-      await readSessionTrace(directory, sessionId),
-    ).find((event) => event.type === 'llm.response')
+    const traceText = await readSessionTrace(directory, sessionId)
+    const traceEvents = parseTrace(traceText)
+    const failures = traceEvents.filter((event) => event.type === 'llm.failure')
+    const response = failures[0]
+    expect(failures).toHaveLength(1)
+    expect(traceEvents.some((event) => event.type === 'llm.stream')).toBe(false)
+    expect(traceText).not.toContain('Unfinished reasoning')
     expect(response).toMatchObject({
-      rawResponse: { id: 'reasoning-only' },
-      normalizedTurn: null,
-      providerState: {},
-      usage: {},
+      operation: 'main',
+      stage: 'completion',
+      code: 'PROVIDER_COMPLETION_INVALID',
       timing: { ttftMs: null, totalMs: 0, responseBytes: 0 },
+      evidence: {
+        kind: 'invalid_completion',
+        content: '{"id":"reasoning-only"}',
+        truncated: false,
+      },
     })
+    const providerFailure = operationalEvents.find(
+      (event) => event.event === 'provider.failed',
+    )
+    const runFailure = operationalEvents.find(
+      (event) => event.event === 'run.failed',
+    )
+    const runStatus = events.find(
+      ({ event }) =>
+        event.type === 'run.status' &&
+        event.runId === runId &&
+        event.status === 'failed',
+    )?.event
+    expect(providerFailure?.diagnosticId).toBeTruthy()
+    expect(runFailure?.diagnosticId).toBe(providerFailure?.diagnosticId)
+    expect(
+      runStatus?.type === 'run.status'
+        ? runStatus.error?.diagnosticId
+        : undefined,
+    ).toBe(providerFailure?.diagnosticId)
   })
 
   it('retains the original validation error and trace for a malformed turn', async () => {
@@ -632,7 +686,10 @@ describe('SessionManager Provider completion validation', () => {
       kind: 'logging',
       value: {
         ...configStore.getPublicConfig().logging,
-        enabled: true,
+        trace: {
+          ...configStore.getPublicConfig().logging.trace,
+          enabled: true,
+        },
       },
     })
     const manager = new SessionManager({
@@ -675,13 +732,17 @@ describe('SessionManager Provider completion validation', () => {
     await manager.closeSession(sessionId)
     expect(
       parseTrace(await readSessionTrace(directory, sessionId)).find(
-        (event) => event.type === 'llm.response',
+        (event) => event.type === 'llm.failure',
       ),
     ).toMatchObject({
-      rawResponse: { id: 'missing-usage' },
-      normalizedTurn: null,
-      providerState: { stage: 'malformed' },
-      usage: null,
+      operation: 'main',
+      stage: 'validation',
+      code: 'PROVIDER_COMPLETION_INVALID',
+      evidence: {
+        kind: 'invalid_completion',
+        content: '{"id":"missing-usage"}',
+        truncated: false,
+      },
     })
   })
 })

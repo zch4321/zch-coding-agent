@@ -26,6 +26,9 @@ import {
 import { HeadlessEventWriter, HeadlessRunMetrics } from './event-stream'
 import { collectWorkspacePatch } from './patch'
 import { headlessDatabasePath } from '../persistence/database-service'
+import { OperationalLogService } from '../operational-logging/service'
+import { nodeOperationalLoggerFactory } from '../operational-logging/node-logger'
+import { diagnosticIdForError } from '../operational-logging/diagnostic-id'
 
 const validateResult = compileSchema(HeadlessResultSchema)
 const validateRuntimeIdentity = compileSchema(RuntimeIdentitySchema)
@@ -124,6 +127,31 @@ export async function runHeadlessAgent(
   const databaseDirectory = await mkdtemp(
     path.join(os.tmpdir(), 'zch-headless-db-'),
   )
+  const operationalLogDirectory = path.join(
+    prepared.userDataDirectory,
+    'logs',
+    'runtime',
+  )
+  const operationalLog = new OperationalLogService({
+    directory: operationalLogDirectory,
+    config: prepared.configStore.getPublicConfig().logging.operational,
+    loggerFactory: nodeOperationalLoggerFactory,
+    sanitizer: {
+      workspace,
+      userData: prepared.userDataDirectory,
+    },
+  })
+  const stopProcessErrorCapture = operationalLog.startProcessErrorCapture()
+  const headlessDiagnostic = (message: string, error?: unknown): void => {
+    operationalLog.log({
+      level: 'warn',
+      event: 'backend.diagnostic',
+      message,
+      error,
+      diagnosticId: diagnosticIdForError(error),
+    })
+    options.onDiagnostic?.(message, error)
+  }
   const backend = await createBackendRuntime({
     configStore: prepared.configStore,
     databasePath: headlessDatabasePath(databaseDirectory),
@@ -135,11 +163,20 @@ export async function runHeadlessAgent(
     providerFactory: options.providerFactory,
     autoApproverFactory: options.autoApproverFactory,
     eventListeners: [metricsListener, ...(options.eventListeners ?? [])],
-    onDiagnostic: options.onDiagnostic,
+    onDiagnostic: headlessDiagnostic,
+    operationalLog,
   }).catch(async (error: unknown) => {
+    operationalLog.log({
+      level: 'error',
+      event: 'backend.failed',
+      code: 'BACKEND_STARTUP_FAILED',
+      error,
+    })
+    stopProcessErrorCapture()
     await rm(databaseDirectory, { recursive: true, force: true })
     throw error
   })
+  operationalLog.log({ level: 'info', event: 'backend.started' })
   const runtime = backend.runtime
   const controller = new AbortController()
   let timedOut = false
@@ -329,6 +366,7 @@ export async function runHeadlessAgent(
             'capture-unavailable'
           }.jsonl`,
         ),
+        operationalLogDirectory,
         ...(patch.path ? { patchPath: patch.path } : {}),
         patchStatus: patch.status,
       },
@@ -352,15 +390,17 @@ export async function runHeadlessAgent(
     try {
       await backend.dispose()
     } catch (error) {
-      options.onDiagnostic?.(
+      headlessDiagnostic(
         'Headless backend cleanup did not fully complete',
         error,
       )
     }
+    operationalLog.log({ level: 'info', event: 'backend.stopped' })
+    stopProcessErrorCapture()
     try {
       await rm(databaseDirectory, { recursive: true, force: true })
     } catch (error) {
-      options.onDiagnostic?.(
+      headlessDiagnostic(
         'Headless temporary database cleanup did not fully complete',
         error,
       )

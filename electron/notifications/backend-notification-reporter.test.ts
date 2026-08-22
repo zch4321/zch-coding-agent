@@ -32,7 +32,10 @@ describe('BackendNotificationReporter', () => {
       code: 'MCP_BACKGROUND_FAILURE',
     })
 
-    expect(log).toHaveBeenCalledWith('MCP server transport error', error)
+    expect(log).toHaveBeenCalledWith('MCP server transport error', error, {
+      audience: 'notification',
+      code: 'MCP_BACKGROUND_FAILURE',
+    })
     expect(target.send).toHaveBeenCalledWith(
       APP_NOTIFICATION_CHANNEL,
       expect.objectContaining({
@@ -99,9 +102,33 @@ describe('BackendNotificationReporter', () => {
     ).not.toThrow()
   })
 
+  it('forwards the operational diagnostic ID to renderer notifications', () => {
+    const target = webContents()
+    const log = vi.fn(
+      () => 'diagnostic:shared' as import('../../shared/ids').DiagnosticId,
+    )
+    const reporter = new BackendNotificationReporter({
+      getWebContents: () => target,
+      log,
+    })
+
+    reporter.reportDiagnostic('Provider failed', new Error('network'), {
+      audience: 'notification',
+      severity: 'error',
+      code: 'PROVIDER_NETWORK_ERROR',
+      message: 'Provider request failed.',
+    })
+
+    expect(target.send).toHaveBeenCalledWith(
+      APP_NOTIFICATION_CHANNEL,
+      expect.objectContaining({ diagnosticId: 'diagnostic:shared' }),
+    )
+    expect(log).toHaveBeenCalledOnce()
+  })
+
   it('removes URLs, paths, newlines and excessive content', () => {
     const safe = sanitizeDiagnosticMessage(
-      `Failed at https://example.test/path?token=secret in /home/alice/workspace/file ${'x'.repeat(2_000)}\nstack`,
+      `Failed at https://example.test/path?token=secret in /srv/alice/workspace/file ${'x'.repeat(2_000)}\nstack`,
     )
     expect(safe).toContain('<url>')
     expect(safe).toContain('<path>')

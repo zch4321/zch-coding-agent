@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox'
 import {
   CallIdSchema,
   RunIdSchema,
+  DiagnosticIdSchema,
   SessionIdSchema,
   TerminalIdSchema,
 } from './ids'
@@ -116,6 +117,7 @@ export const AgentEventSchema = Type.Union([
           {
             code: Type.String({ minLength: 1, maxLength: 128 }),
             message: Type.String({ maxLength: 65_536 }),
+            diagnosticId: Type.Optional(DiagnosticIdSchema),
           },
           { additionalProperties: false },
         ),

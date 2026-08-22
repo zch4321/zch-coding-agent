@@ -241,7 +241,10 @@ function buildAppConfig(config: HeadlessConfig): AppConfig {
     },
     limits: { ...defaults.limits, ...config.limits },
     subagents: { ...defaults.subagents, ...config.subagents },
-    logging: { ...defaults.logging, enabled: true },
+    logging: {
+      operational: { ...defaults.logging.operational },
+      trace: { ...defaults.logging.trace, enabled: true },
+    },
     privacy: {
       ...defaults.privacy,
       providerNoticeAccepted: {

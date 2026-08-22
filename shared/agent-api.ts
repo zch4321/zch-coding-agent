@@ -85,6 +85,9 @@ export const AGENT_API_INVOKE_ROUTES = Object.freeze({
   getTraceStats: 'trace:stats',
   openLogDirectory: 'logs:open-directory',
   clearClosedTraces: 'logs:clear-closed',
+  getRuntimeLogStatus: 'runtime-log:status',
+  openRuntimeLogDirectory: 'runtime-log:open-directory',
+  clearRuntimeLogs: 'runtime-log:clear',
 } as const satisfies Record<string, IpcChannel>)
 
 type AgentApiInvokeRoutes = typeof AGENT_API_INVOKE_ROUTES

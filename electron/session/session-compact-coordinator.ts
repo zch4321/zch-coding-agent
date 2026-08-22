@@ -64,6 +64,16 @@ import {
   waitForCompactRetry,
 } from './session-compact-retry'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
+import type { OperationalLogService } from '../operational-logging/service'
+import { ProviderAttemptRecorder } from '../operational-logging/provider-attempt-recorder'
+import {
+  associateDiagnosticId,
+  diagnosticIdForError,
+} from '../operational-logging/diagnostic-id'
+import {
+  recordProviderAttemptFailure,
+  writeProviderFailureTrace,
+} from './provider-failure-diagnostics'
 
 function compactOrchestrationState(input: {
   goal?: GoalState
@@ -166,6 +176,7 @@ export class SessionCompactCoordinator {
   readonly #executionState?: SessionExecutionStatePort
   readonly #historySource?: SessionHistorySourcePort
   readonly #unsupportedNativeCompaction = new Set<string>()
+  readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
 
   constructor(options: {
     configStore: ConfigStore
@@ -187,6 +198,7 @@ export class SessionCompactCoordinator {
     ) => WorkspaceConcurrencyContext
     executionState?: SessionExecutionStatePort
     historySource?: SessionHistorySourcePort
+    operationalLog?: Pick<OperationalLogService, 'log'>
   }) {
     this.#configStore = options.configStore
     this.#toolRegistry = options.toolRegistry
@@ -201,6 +213,7 @@ export class SessionCompactCoordinator {
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
     this.#executionState = options.executionState
     this.#historySource = options.historySource
+    this.#operationalLog = options.operationalLog
   }
 
   /** Migrates incompatible Provider history and handles deferred final-turn compaction. */
@@ -262,6 +275,7 @@ export class SessionCompactCoordinator {
     try {
       return await this.#runCompactCommand(session, run, userMessage)
     } catch (error) {
+      this.#recordCompactionFailure(session, run, error)
       rethrowCompactionFailure(error, run.controller.signal)
     }
   }
@@ -383,6 +397,7 @@ export class SessionCompactCoordinator {
     try {
       await this.#compactActiveHistoryOperation(session, run, input)
     } catch (error) {
+      this.#recordCompactionFailure(session, run, error)
       rethrowCompactionFailure(error, run.controller.signal)
     }
   }
@@ -515,6 +530,29 @@ export class SessionCompactCoordinator {
       const textDeltas: string[] = []
       this.#setRunStatus(session, run, 'calling_llm')
       const diagnostics = providerRequestDiagnostics(compiled)
+      const attemptRecorder = new ProviderAttemptRecorder(
+        this.#operationalLog,
+        {
+          operation: 'compact',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          providerCallId: callId,
+          ...(session.internalExecution
+            ? { agentExecutionId: session.internalExecution.executionId }
+            : {}),
+          ...(session.logger.traceId
+            ? { traceId: session.logger.traceId }
+            : {}),
+          providerId: binding.snapshot.providerId,
+          providerType: provider.providerType,
+          model: binding.snapshot.model,
+          reasoning: binding.snapshot.reasoning,
+          endpoint: binding.snapshot.endpoint,
+          messageCount: compiled.normalizedMessages.length,
+          toolCount: 0,
+          requestBytes: diagnostics.requestBytes,
+        },
+      )
       await session.logger.write({
         type: 'llm.request',
         sessionId: session.sessionId,
@@ -551,25 +589,37 @@ export class SessionCompactCoordinator {
           )
         }
       } catch (error) {
+        if (run.controller.signal.aborted) {
+          attemptRecorder.completed({ outcome: 'cancelled' })
+          throw error
+        }
         const responseDiagnostics =
           error instanceof ProviderCompletionError ||
           error instanceof ProviderCompactUnsupportedError
             ? error.diagnostics
             : undefined
-        if (responseDiagnostics) {
-          await this.#writeFailedResponse(
-            session,
-            run,
-            callId,
-            binding.apiKey,
-            responseDiagnostics,
-          )
-        }
-        if (
+        const nativeFallback =
           mode === 'native' &&
           availableModes.includes('synthetic') &&
           shouldFallbackNativeCompact(error)
-        ) {
+        if (nativeFallback) {
+          attemptRecorder.fallback('NATIVE_COMPACT_UNAVAILABLE', error)
+        } else {
+          recordProviderAttemptFailure(
+            attemptRecorder,
+            error,
+            responseDiagnostics,
+          )
+        }
+        await this.#writeFailure(
+          session,
+          run,
+          callId,
+          binding.apiKey,
+          error,
+          responseDiagnostics,
+        )
+        if (nativeFallback) {
           this.#unsupportedNativeCompaction.add(capabilityKey)
           mode = 'synthetic'
           instructions = input.promptText
@@ -605,6 +655,12 @@ export class SessionCompactCoordinator {
         ]),
         usage: completed.compact.usage.raw,
         timing: toJsonValue(completed.timing),
+      })
+      attemptRecorder.completed({
+        durationMs: completed.timing.totalMs,
+        ttftMs: completed.timing.ttftMs,
+        responseBytes: completed.timing.responseBytes,
+        usage: completed.compact.usage,
       })
       const usage = normalizeLlmUsage({
         scope: 'compression',
@@ -883,23 +939,49 @@ export class SessionCompactCoordinator {
     }
   }
 
-  async #writeFailedResponse(
+  async #writeFailure(
     session: SessionState,
     run: ActiveRun,
     callId: CallId,
     apiKey: string,
-    diagnostics: ProviderResponseDiagnostics,
+    error: unknown,
+    diagnostics?: ProviderResponseDiagnostics,
   ): Promise<void> {
-    await session.logger.write({
-      type: 'llm.response',
+    await writeProviderFailureTrace({
+      logger: session.logger,
       sessionId: session.sessionId,
       runId: run.runId,
       callId,
-      rawResponse: redactJsonSecrets(diagnostics.rawResponse, [apiKey]),
-      normalizedTurn: null,
-      providerState: redactJsonSecrets(diagnostics.providerState, [apiKey]),
-      usage: diagnostics.usage,
-      timing: toJsonValue(diagnostics.timing),
+      ...(session.internalExecution
+        ? { agentExecutionId: session.internalExecution.executionId }
+        : {}),
+      apiKey,
+      operation: 'compact',
+      error,
+      ...(diagnostics ? { diagnostics } : {}),
     })
+  }
+
+  #recordCompactionFailure(
+    session: SessionState,
+    run: ActiveRun,
+    error: unknown,
+  ): void {
+    if (run.controller.signal.aborted) return
+    const existingDiagnosticId = diagnosticIdForError(error)
+    const result = this.#operationalLog?.log({
+      level: 'error',
+      event: 'compaction.failed',
+      sessionId: session.sessionId,
+      runId: run.runId,
+      ...(session.internalExecution
+        ? { agentExecutionId: session.internalExecution.executionId }
+        : {}),
+      ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
+      diagnosticId: existingDiagnosticId,
+      code: 'COMPACTION_FAILED',
+      error,
+    })
+    associateDiagnosticId(error, existingDiagnosticId ?? result?.diagnosticId)
   }
 }

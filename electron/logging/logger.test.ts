@@ -9,7 +9,13 @@ import {
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { SessionId } from '../../shared/ids'
+import type {
+  AgentExecutionId,
+  CallId,
+  DiagnosticId,
+  RunId,
+  SessionId,
+} from '../../shared/ids'
 import { cleanupTraces } from './cleanup'
 import { JsonlTraceLogger, NullTraceLogger } from './logger'
 import {
@@ -103,6 +109,7 @@ describe('JsonlTraceLogger', () => {
     const events = await readTraceFile(filePath)
 
     expect(events[0]).toMatchObject({
+      schemaVersion: 3,
       type: 'llm.request',
       modelRoute: {
         schemaVersion: 2,
@@ -111,6 +118,69 @@ describe('JsonlTraceLogger', () => {
       },
     })
     await expect(readFile(filePath, 'utf8')).resolves.toBe(original)
+  })
+
+  it('projects legacy v2 stream records for read-only compatibility', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
+    const filePath = path.join(directory, 'legacy-stream.jsonl')
+    const legacyEvent = {
+      schemaVersion: 2,
+      seq: 1,
+      eventId: 'event:legacy-stream',
+      ts: '2026-07-27T00:00:00.000Z',
+      type: 'llm.stream',
+      sessionId,
+      runId: 'run:legacy-stream',
+      callId: 'call:legacy-stream',
+      providerEvent: { type: 'text.delta', delta: 'legacy' },
+      elapsedMs: 1,
+    }
+    await writeFile(filePath, `${JSON.stringify(legacyEvent)}\n`)
+
+    await expect(readTraceFile(filePath)).resolves.toMatchObject([
+      {
+        schemaVersion: 3,
+        type: 'llm.stream',
+        providerEvent: { delta: 'legacy' },
+      },
+    ])
+  })
+
+  it('writes and validates one aggregate v3 Provider failure', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
+    const logger = await JsonlTraceLogger.create(directory, sessionId)
+    await logger.write({
+      type: 'llm.failure',
+      sessionId,
+      runId: 'run:failure' as RunId,
+      callId: 'call:failure' as CallId,
+      agentExecutionId: 'execution:failure' as AgentExecutionId,
+      operation: 'main',
+      stage: 'transport',
+      code: 'PROVIDER_JSON_INVALID',
+      diagnosticId: 'diagnostic:failure' as DiagnosticId,
+      message: 'Provider returned invalid JSON',
+      evidence: {
+        kind: 'invalid_json',
+        content: 'not-json',
+        observedBytes: 8,
+        capturedBytes: 8,
+        truncated: false,
+        sha256: '0'.repeat(64),
+      },
+    })
+    await logger.dispose()
+
+    await expect(
+      readTraceFile(path.join(directory, `${logger.traceId}.jsonl`)),
+    ).resolves.toMatchObject([
+      {
+        schemaVersion: 3,
+        type: 'llm.failure',
+        diagnosticId: 'diagnostic:failure',
+        agentExecutionId: 'execution:failure',
+      },
+    ])
   })
 
   it('creates unique safe captures for Session ids with reserved characters', async () => {

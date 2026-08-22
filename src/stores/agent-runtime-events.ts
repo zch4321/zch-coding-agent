@@ -88,6 +88,9 @@ const runtimeEventHandlers = {
         code: event.error.code,
         message: event.error.message,
         sessionId: event.sessionId,
+        ...(event.error.diagnosticId
+          ? { diagnosticId: event.error.diagnosticId }
+          : {}),
       })
     }
     if (!TERMINAL_RUN_STATUSES.has(event.status)) return

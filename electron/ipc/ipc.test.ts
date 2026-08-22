@@ -259,6 +259,9 @@ const validPayloads: {
   'trace:stats': { version: 1 },
   'logs:open-directory': { version: 1 },
   'logs:clear-closed': { version: 1 },
+  'runtime-log:status': { version: 1 },
+  'runtime-log:open-directory': { version: 1 },
+  'runtime-log:clear': { version: 1 },
 }
 
 describe('IPC security registrar', () => {

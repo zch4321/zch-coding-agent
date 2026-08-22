@@ -1557,6 +1557,7 @@ Renderer 不可以：
 | 非敏感应用/provider 配置                             | backend config repository                | backend           |
 | API keys                                             | Electron safeStorage-backed secret store | backend           |
 | Trace                                                | `userData/traces/*.jsonl`                | backend           |
+| Operational runtime logs                             | `userData/logs/runtime/*.jsonl`          | backend           |
 | Skills                                               | `userData/skills/`                       | backend manager   |
 | ProjectModel                                         | 暂停持久化；目标为 `userData/agent.db`   | backend（迁移后） |
 | Prompt resources                                     | versioned application resources          | backend registry  |
@@ -1584,20 +1585,24 @@ Preload 只暴露冻结 typed API，不暴露 `ipcRenderer`。Command/query/resu
 
 ---
 
-## 15. Trace 与产品状态
+## 15. Operational Log、Trace 与产品状态
 
-SQLite 是产品持久状态的真相源；JSONL trace 是可选审计记录，不用于 Project/Session/FileChange 恢复。
+SQLite 是产品持久状态的真相源；Operational Log 与 JSONL Trace 都是 failure-isolated side channel，不用于 Project/Session/FileChange 恢复。
+
+Operational Log 由类型化 `OperationalLogService` 独占写入，Desktop 使用隔离的 `electron-log/main` instance，Headless 使用 `electron-log/node`；两者都关闭 console、IPC 和 remote transport，不调用 Renderer `initialize`/preload。默认 `info`，正常 Provider/Tool attempt 只在 `debug` 出现，错误在默认级别仍可诊断。JSONL 信封包含进程实例、单调 `seq/eventId`、稳定错误码、`diagnosticId` 与显式 correlation IDs；业务只能提交白名单字段，不能把任意 object、Provider body、工具内容或 Error 原样交给 transport。单文件 5 MB 后同步改名为唯一时间戳归档；清理只处理已关闭文件，并把活动文件计入总容量。
+
+Operational Error 在进入 schema 前移除凭据、URL secrets 和绝对路径，只保留有界首行、最多两层 cause 与 16 个规范化 frame。写入、轮转和清理异常只令服务进入 degraded，不向 Provider、Tool、IPC 或退出流程抛出。Renderer 只能读取状态、打开目录和清理历史，不能读取日志内容。
 
 Trace 文件采用 segmented capture，而不是“一 Session 一固定文件”。每次在 idle 状态启用日志或恢复一个已存在的 Durable Session，`SessionTraceController` 都以唯一 `traceId` 独占创建新文件，写入 `session.start`，并令该片段的 `seq` 从 1 开始。关闭日志、关闭 Session 或切换 capture 时写入带原因的 `session.end`；旧文件保持只读，不追加、不改名、不补录历史。`TraceInfo.sessionId` 负责把多个 capture 归属到同一 Session，Session transcript 入口选择最新片段，日志设置页仍列出全部片段。
 
-日志开关在 `config:set(logging)` 保存后广播到所有 live Sessions。idle Session 立即切换；active Run 仅记录 pending 值，并在该 Run 的 `run.end` 完整写入后应用最后一次保存的设置。因此运行中开启不会产生半截当前 Run，运行中关闭也不会丢失当前 Run 终态。未加载 Session 在 restore 时读取当前配置。主进程通过 `TraceCaptureStatus` 和 `trace.capture.changed` 暴露 `disabled | pending | active | degraded`，renderer 只显示状态，不拥有日志生命周期。
+`logging.operational` 的 level/retention/size 保存后立即热更新；`logging.trace` 开关广播到所有 live Sessions。idle Session 立即切换 Trace；active Run 仅记录 pending 值，并在该 Run 的 `run.end` 完整写入后应用最后一次保存的设置。因此运行中开启不会产生半截当前 Run，运行中关闭也不会丢失当前 Run 终态。未加载 Session 在 restore 时读取当前配置。主进程通过 `TraceCaptureStatus` 和 `trace.capture.changed` 暴露 `disabled | pending | active | degraded`，renderer 只显示状态，不拥有日志生命周期。
 
 日志是 failure-isolated side channel。创建或写入失败时 controller 保留不完整文件用于诊断、切换为 Null logger 并发布有界 warning，业务请求继续；配置仍开启时，下一 Run 开始前尝试新建独立 capture。Retention 保护集合使用当前 controller 的真实 `traceId`。
 
-Trace v2 可以记录比 messages 更细的内容：
+Trace v3 可以记录比 messages 更细的内容：
 
 - Run lifecycle 和失败/取消原因。
-- stream delta 和 partial output。
+- 聚合成功响应，以及一条带稳定 code/diagnostic ID 的 `llm.failure`；失败证据最多 256 KiB 并带观察字节数、截断位与 SHA-256。
 - canonical source 摘要、冻结 route、prompt build 和 request-specific selection。
 - 最终 wire request、canonical completion、必要 raw response、timing 和 usage。
 - pending approval、tool attempt、writer、terminal 和 runtime diagnostics。
@@ -1606,7 +1611,7 @@ Logging 关闭时这些细节可以不存在，但 Projects、完整 Messages、
 
 Restricted transcript 可以组合 SQLite messages 与 trace；缺少 trace 时明确省略 runtime 细节。
 
-Trace 不记录 credentials。P3 的 trace reader 明确拒绝 v1，不提供转换；trace fork/start-fork API 和 UI 已移除，普通 Session fork 不受影响。
+Trace 不记录 credentials。生产 `TraceEventInput` 不允许 `llm.stream`，正常 token/SSE 增量只存在于 backend memory 和 Renderer overlay；失败前 partial text/reasoning 不落盘。reader 会把 v2 records 投影为 v3，并保留旧 `llm.stream` 的只读查看能力，文件本身不改写；v1 仍明确拒绝。trace fork/start-fork API 和 UI 已移除，普通 Session fork 不受影响。
 
 ---
 
@@ -1624,7 +1629,7 @@ Trace 不记录 credentials。P3 的 trace reader 明确拒绝 v1，不提供转
 
 ### 16.1 `run_command` 与 Terminal 的解释器边界
 
-`run_command.process` 始终把 `executable + args[]` 交给 `spawn(..., { shell: false })`。`run_command.shell` 也不使用 Node 的隐式 Shell：Main process 根据当前 AppConfig v22 的 `executionEnvironment.commandShell` 解析受支持 profile，再由 profile adapter 生成明确的 executable、固定启动参数和命令字符串参数，最终仍以 `shell: false` 启动。权限预览和 canonical ToolCall 保留模型提交的原始命令，不暴露 adapter wrapper。
+`run_command.process` 始终把 `executable + args[]` 交给 `spawn(..., { shell: false })`。`run_command.shell` 也不使用 Node 的隐式 Shell：Main process 根据当前 AppConfig v23 的 `executionEnvironment.commandShell` 解析受支持 profile，再由 profile adapter 生成明确的 executable、固定启动参数和命令字符串参数，最终仍以 `shell: false` 启动。权限预览和 canonical ToolCall 保留模型提交的原始命令，不暴露 adapter wrapper。
 
 Windows 发现只扫描 PATH 与有限的系统/安装目录，内置 profile 为 PowerShell 7、Windows PowerShell、CMD、Git Bash 和 Nushell；`auto` 固定选择 PowerShell 7 → Windows PowerShell → CMD。Git Bash 与 Nushell 只在用户显式选择时使用；System32 的旧 `bash.exe` 不会被误识别为 Git Bash。已保存 profile 消失时，解析结果临时回退到 `auto`，通过只读 `command-shell:list` IPC 把实际路径和 fallback 状态提供给设置页，但不改写保存值。WSL 与任意自定义 executable/args 仍属于 M5 后续范围。
 
@@ -1644,7 +1649,7 @@ Headless 继续复用唯一 Agent runtime：
 
 - 每次执行使用独立临时 SQLite database。
 - Desktop 和 Headless fake-provider trajectory 比较 active messages、provider requests、tool results、prompt hashes 和 patch。
-- Headless 产物从 canonical messages 和 trace 生成，不依赖 renderer store。
+- Headless 产物从 canonical messages、trace 和独立 Operational Log 生成，不依赖 renderer store；stdout JSONL 永不混入文件日志。
 - Run/stream 细节来自 trace，而不是 `runs` table。
 - Runtime identity 固定 source commit/tree、task/config digest、Provider/model、核心预算、prompt/tool hash 和宿主 capability。
 
@@ -1832,6 +1837,8 @@ SQLite transaction callback 通过 authorizer 拒绝事务控制 SQL；commit li
 
 AppConfig v14 会把合法 v9 Provider 配置迁移为 `providerType`，把合法 v9/v10 配置中仍等于旧默认值的单次工具 token 与工具/read 字节限制提升到 64K/128KiB，为合法 v9/v10/v11 Provider 补充默认包含主模型的 `modelConfigurationIds`，为合法 v12 增加默认关闭、30 分钟 timeout 的 Subagent 配置，并从所有合法 v9–v13 配置删除退役的 `maxToolTokensPerRun`。AppConfig v15 再把合法 v14 `modelConfigurationIds` 原样迁移为 `enabledModelIds`，并让新安装的默认 Provider 从空模型池开始；已有主模型、API-key reference、模型目录、模型覆盖、revision、其余自定义限制和 `maxConcurrentRuns` 保持不变。
 
-AppConfig v16 是 model-pool foundation 的冻结边界：Provider reasoning 与 pool entry reasoning 仅允许当时的 `off|high|max`，per-model annotation 尚不存在。AppConfig v17 集成六档 reasoning、annotation 和 approval route 的必填 `reasoning`，仍在每个 pool entry 保存 capability。AppConfig v18 删除重复 capability，调度时只读取 Provider `modelOverrides[model].capability`；AppConfig v19 再删除从未执行的 pool entry `maxParallel`，并在 `subagents` 增加默认 10、范围 1–32 的 `maxAgentsPerSwarm`。AppConfig v20 新增默认 `auto` 的 `executionEnvironment.commandShell`；合法 v9–v19 配置都保留各自可迁移字段并补入该默认值。AppConfig v21 把模型角色统合进 `models` 段：`activeProviderId` 与其 Provider 默认模型成为 `defaultModelProvider/defaultModel`，旧 `approval` 段成为 `auxiliaryModelProvider/auxiliaryModel`，`providers` 与 `modelPool` 平移入 `models`。当前 AppConfig v22 再增加 `defaultModelReasoning/auxiliaryModelReasoning`，并从每个 Provider 删除 `reasoning`：v21→v22 分别把主/辅助角色所引用 Provider 的旧默认档位写入对应角色，从而保持实际请求等级；v9–v20 直接迁移采用相同结果。v9–v20 的旧独立 approval reasoning 已在 v21 决策中丢弃，直接升级到 v22 仍按当时所选 Provider 档位保持 v21 行为。不可用辅助 route 在 reload 修复阶段改写为当前主 route；Provider 不再持有可被角色隐式继承的 reasoning。Headless 构造的临时内部 AppConfig 相应使用 v22 结构，外部配置仍为 v4 单 Provider，并把其可选 reasoning 映射到主角色。合法 v9–v15 仍迁移到默认空 pool；合法 v16/v17 保留并规范化 pool route、剥离旧 capability 与 `maxParallel` 后迁移；合法 v18 剥离 `maxParallel` 后迁移，合法 v19/v20/v21 原样保留现有 pool 与 Swarm 上限。旧配置中仍 enabled 但对应 Provider 模型没有 capability annotation 的 entry 会在 ConfigStore reload 修复阶段被禁用；disabled entry 原样保留供后续修复。v16–v18 pool entry ID 在 trim/NFC 后必须唯一且拒绝控制/格式字符；不符合各自冻结 schema、损坏或更早版本仍执行 reset-only。Runtime Identity v5 记录 `swarmsEnabled = false`，并从 Headless tool 名称/hash 排除 `swarm_run`。SQLite v5 增加 hidden Subagent execution/session ownership，并保留 v4 对历史 route/continuation identity 的原位迁移。SQLite v6 通过表重建把 `sessions.reasoning` 的 CHECK 扩展为六档（`off|low|medium|high|xhigh|max`）；SQLite v7 再重建 `messages`，加入 `conversation_transcript` 与带 `model_route_json` 的 Provider-native `compact_summary`。SQLite v8 重建 `subagent_executions` 为 schema v2，增加 `kind/name/parent_execution_id/child_ordinal`、queued/partial 状态及 root/child 唯一索引，并把旧记录迁为根级 `subagent`。表重建由 runner 暂停外键约束、换表并重建索引，提交前以 `PRAGMA foreign_key_check` 兜底完整性；旧版本应用打开更新数据库会以 `DATABASE_VERSION_TOO_NEW` 明确拒绝。旧 JSONL trace 只在读取时投影而不改写文件。
+AppConfig v16 是 model-pool foundation 的冻结边界：Provider reasoning 与 pool entry reasoning 仅允许当时的 `off|high|max`，per-model annotation 尚不存在。AppConfig v17 集成六档 reasoning、annotation 和 approval route 的必填 `reasoning`，仍在每个 pool entry 保存 capability。AppConfig v18 删除重复 capability，调度时只读取 Provider `modelOverrides[model].capability`；AppConfig v19 再删除从未执行的 pool entry `maxParallel`，并在 `subagents` 增加默认 10、范围 1–32 的 `maxAgentsPerSwarm`。AppConfig v20 新增默认 `auto` 的 `executionEnvironment.commandShell`；合法 v9–v19 配置都保留各自可迁移字段并补入该默认值。AppConfig v21 把模型角色统合进 `models` 段：`activeProviderId` 与其 Provider 默认模型成为 `defaultModelProvider/defaultModel`，旧 `approval` 段成为 `auxiliaryModelProvider/auxiliaryModel`，`providers` 与 `modelPool` 平移入 `models`。AppConfig v22 再增加 `defaultModelReasoning/auxiliaryModelReasoning`，并从每个 Provider 删除 `reasoning`：v21→v22 分别把主/辅助角色所引用 Provider 的旧默认档位写入对应角色，从而保持实际请求等级；v9–v20 直接迁移采用相同结果。v9–v20 的旧独立 approval reasoning 已在 v21 决策中丢弃，直接升级到 v22 仍按当时所选 Provider 档位保持 v21 行为。不可用辅助 route 在 reload 修复阶段改写为当前主 route；Provider 不再持有可被角色隐式继承的 reasoning。当时的 Headless 临时内部 AppConfig 使用 v22 结构，外部配置仍为 v4 单 Provider，并把其可选 reasoning 映射到主角色。合法 v9–v15 仍迁移到默认空 pool；合法 v16/v17 保留并规范化 pool route、剥离旧 capability 与 `maxParallel` 后迁移；合法 v18 剥离 `maxParallel` 后迁移，合法 v19/v20/v21 原样保留现有 pool 与 Swarm 上限。旧配置中仍 enabled 但对应 Provider 模型没有 capability annotation 的 entry 会在 ConfigStore reload 修复阶段被禁用；disabled entry 原样保留供后续修复。v16–v18 pool entry ID 在 trim/NFC 后必须唯一且拒绝控制/格式字符；不符合各自冻结 schema、损坏或更早版本仍执行 reset-only。Runtime Identity v5 记录 `swarmsEnabled = false`，并从 Headless tool 名称/hash 排除 `swarm_run`。SQLite v5 增加 hidden Subagent execution/session ownership，并保留 v4 对历史 route/continuation identity 的原位迁移。SQLite v6 通过表重建把 `sessions.reasoning` 的 CHECK 扩展为六档（`off|low|medium|high|xhigh|max`）；SQLite v7 再重建 `messages`，加入 `conversation_transcript` 与带 `model_route_json` 的 Provider-native `compact_summary`。SQLite v8 重建 `subagent_executions` 为 schema v2，增加 `kind/name/parent_execution_id/child_ordinal`、queued/partial 状态及 root/child 唯一索引，并把旧记录迁为根级 `subagent`。表重建由 runner 暂停外键约束、换表并重建索引，提交前以 `PRAGMA foreign_key_check` 兜底完整性；旧版本应用打开更新数据库会以 `DATABASE_VERSION_TOO_NEW` 明确拒绝。旧 JSONL trace 只在读取时投影而不改写文件。
+
+AppConfig v23 把 v22 的三字段 `logging` 冻结为 legacy boundary，并迁移为 `logging.operational + logging.trace`。旧 `enabled/retentionDays/maxTotalBytes` 完整进入 Trace；Operational 使用 `info/14 天/50 MB` 新默认。v9–v21 迁移同样先按冻结旧日志 schema 校验，再生成 v23，避免当前 schema 演进反向破坏旧配置。Headless 外部 config 版本不变，构造的内部 AppConfig 使用 v23。
 
 P3 review 建议、N-3/N-4 和 201+ 数据量的额外 Electron E2E 明确延后，不属于 P10 发布门禁；现有单元/集成测试继续覆盖 201+ Session、Message 和 FileChange 分页。产品路径不再保留双轨、兼容开关或 legacy fallback。

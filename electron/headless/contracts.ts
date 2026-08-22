@@ -8,7 +8,11 @@ import {
   PublicConfigSchema,
   ReasoningEffortSchema,
 } from '../../shared/config'
-import { RunIdSchema, SessionIdSchema } from '../../shared/ids'
+import {
+  DiagnosticIdSchema,
+  RunIdSchema,
+  SessionIdSchema,
+} from '../../shared/ids'
 import { McpServerConfigSchema } from '../../shared/mcp'
 
 const HeadlessProviderConfigSchema = Type.Object(
@@ -199,6 +203,10 @@ export const HeadlessResultSchema = Type.Object(
         resultPath: Type.String({ minLength: 1, maxLength: 4_096 }),
         identityPath: Type.String({ minLength: 1, maxLength: 4_096 }),
         tracePath: Type.String({ minLength: 1, maxLength: 4_096 }),
+        operationalLogDirectory: Type.String({
+          minLength: 1,
+          maxLength: 4_096,
+        }),
         patchPath: Type.Optional(
           Type.String({ minLength: 1, maxLength: 4_096 }),
         ),
@@ -215,6 +223,7 @@ export const HeadlessResultSchema = Type.Object(
         {
           code: Type.String({ minLength: 1, maxLength: 128 }),
           message: Type.String({ maxLength: 65_536 }),
+          diagnosticId: Type.Optional(DiagnosticIdSchema),
         },
         { additionalProperties: false },
       ),

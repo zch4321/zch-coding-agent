@@ -30,7 +30,10 @@ describe('SessionManager trace capture switching', () => {
       kind: 'logging',
       value: {
         ...configStore.getPublicConfig().logging,
-        enabled: false,
+        trace: {
+          ...configStore.getPublicConfig().logging.trace,
+          enabled: false,
+        },
       },
     })
     const manager = new SessionManager({
@@ -54,7 +57,10 @@ describe('SessionManager trace capture switching', () => {
       kind: 'logging',
       value: {
         ...configStore.getPublicConfig().logging,
-        enabled: true,
+        trace: {
+          ...configStore.getPublicConfig().logging.trace,
+          enabled: true,
+        },
       },
     })
     await expect(manager.reconfigureTraceLogging(true)).resolves.toEqual([])

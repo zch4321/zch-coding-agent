@@ -2,11 +2,15 @@ import { Type, type Static } from '@sinclair/typebox'
 import { Sha256Schema } from '../../shared/durable'
 import {
   CallIdSchema,
+  AgentExecutionIdSchema,
+  DiagnosticIdSchema,
   EventIdSchema,
   RunIdSchema,
   SessionIdSchema,
   TerminalIdSchema,
+  type AgentExecutionId,
   type CallId,
+  type DiagnosticId,
   type EventId,
   type RunId,
   type SessionId,
@@ -28,7 +32,7 @@ import {
   type PromptBuildSummary,
 } from '../../shared/trace'
 
-export const TRACE_SCHEMA_VERSION = 2 as const
+export const TRACE_SCHEMA_VERSION = 3 as const
 
 const TraceBaseSchema = Type.Object({
   schemaVersion: Type.Literal(TRACE_SCHEMA_VERSION),
@@ -46,6 +50,24 @@ const PromptResourceSummarySchema = Type.Object(
   },
   { additionalProperties: false },
 )
+
+export const TraceFailureEvidenceSchema = Type.Object(
+  {
+    kind: Type.Union([
+      Type.Literal('http_body'),
+      Type.Literal('invalid_sse'),
+      Type.Literal('invalid_json'),
+      Type.Literal('invalid_completion'),
+    ]),
+    content: Type.String({ maxLength: 262_144 }),
+    observedBytes: Type.Integer({ minimum: 0 }),
+    capturedBytes: Type.Integer({ minimum: 0, maximum: 262_144 }),
+    truncated: Type.Boolean(),
+    sha256: Sha256Schema,
+  },
+  { additionalProperties: false },
+)
+export type TraceFailureEvidence = Static<typeof TraceFailureEvidenceSchema>
 
 export const TraceEventSchema = Type.Union([
   Type.Composite([
@@ -181,6 +203,30 @@ export const TraceEventSchema = Type.Union([
       usage: JsonValueSchema,
       timing: JsonValueSchema,
     }),
+  ]),
+  Type.Composite([
+    TraceBaseSchema,
+    Type.Object(
+      {
+        type: Type.Literal('llm.failure'),
+        sessionId: SessionIdSchema,
+        runId: RunIdSchema,
+        callId: CallIdSchema,
+        agentExecutionId: Type.Optional(AgentExecutionIdSchema),
+        operation: Type.String({ minLength: 1, maxLength: 64 }),
+        stage: Type.String({ minLength: 1, maxLength: 64 }),
+        code: Type.String({ minLength: 1, maxLength: 128 }),
+        diagnosticId: Type.Optional(DiagnosticIdSchema),
+        message: Type.String({ maxLength: 2_048 }),
+        httpStatus: Type.Optional(Type.Integer({ minimum: 100, maximum: 599 })),
+        providerErrorCode: Type.Optional(Type.String({ maxLength: 256 })),
+        retryAfterMs: Type.Optional(Type.Number({ minimum: 0 })),
+        requestId: Type.Optional(Type.String({ maxLength: 512 })),
+        timing: Type.Optional(JsonValueSchema),
+        evidence: Type.Optional(TraceFailureEvidenceSchema),
+      },
+      { additionalProperties: false },
+    ),
   ]),
   Type.Composite([
     TraceBaseSchema,
@@ -398,13 +444,6 @@ export type TraceEventInput =
       modelRoute: ModelRouteSnapshot
     })
   | (TraceInputBase & {
-      type: 'llm.stream'
-      runId: RunId
-      callId: CallId
-      providerEvent: JsonValue
-      elapsedMs: number
-    })
-  | (TraceInputBase & {
       type: 'llm.response'
       runId: RunId
       callId: CallId
@@ -413,6 +452,23 @@ export type TraceEventInput =
       providerState?: JsonValue
       usage: JsonValue
       timing: JsonValue
+    })
+  | (TraceInputBase & {
+      type: 'llm.failure'
+      runId: RunId
+      callId: CallId
+      agentExecutionId?: AgentExecutionId
+      operation: string
+      stage: string
+      code: string
+      diagnosticId?: DiagnosticId
+      message: string
+      httpStatus?: number
+      providerErrorCode?: string
+      retryAfterMs?: number
+      requestId?: string
+      timing?: JsonValue
+      evidence?: TraceFailureEvidence
     })
   | (TraceInputBase & {
       type: 'llm.usage'

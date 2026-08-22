@@ -351,6 +351,38 @@ export function normalizeSessionTranscript(
           }),
         )
         break
+      case 'llm.failure':
+        entries.push(
+          entry(event, 'provider-failure', {
+            kind: 'provider_response',
+            categories: ['provider'],
+            title: `Provider failure · ${event.code}`,
+            runId: event.runId,
+            callId: event.callId,
+            data: jsonClone({
+              operation: event.operation,
+              stage: event.stage,
+              code: event.code,
+              diagnosticId: event.diagnosticId ?? null,
+              message: event.message,
+              httpStatus: event.httpStatus ?? null,
+              providerErrorCode: event.providerErrorCode ?? null,
+              retryAfterMs: event.retryAfterMs ?? null,
+              requestId: event.requestId ?? null,
+              timing: event.timing ?? null,
+              evidence: event.evidence
+                ? {
+                    kind: event.evidence.kind,
+                    observedBytes: event.evidence.observedBytes,
+                    capturedBytes: event.evidence.capturedBytes,
+                    truncated: event.evidence.truncated,
+                    sha256: event.evidence.sha256,
+                  }
+                : null,
+            }),
+          }),
+        )
+        break
       case 'user.message':
         entries.push(
           entry(event, 'user', {

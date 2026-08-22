@@ -31,6 +31,7 @@ function createHandlers(input?: {
   sessions?: Record<string, unknown>
   configStore?: Record<string, unknown>
   commandShells?: Record<string, unknown>
+  operationalLog?: Record<string, unknown>
 }) {
   const sessions = {
     activeTraceIds: vi.fn(() => new Set<string>()),
@@ -66,6 +67,23 @@ function createHandlers(input?: {
       backend: backend as never,
       skillsManager: {} as never,
       traceService: traceService as never,
+      operationalLog: {
+        reconfigure: vi.fn(),
+        status: vi.fn(() => ({
+          enabled: true,
+          level: 'info',
+          directory: 'C:\\runtime-logs',
+          activeFile: 'C:\\runtime-logs\\runtime.current.jsonl',
+          degraded: false,
+        })),
+        cleanup: vi.fn(),
+        clearHistory: vi.fn(async () => ({
+          deletedFiles: 0,
+          deletedBytes: 0,
+          remainingBytes: 0,
+        })),
+        ...input?.operationalLog,
+      } as never,
       commandShells: input?.commandShells as never,
       getMainWindow: () => undefined,
     }),
@@ -376,23 +394,36 @@ describe('app IPC handlers', () => {
           acceptedAt: '2026-07-25T00:00:00Z',
         },
       },
-      logging: { enabled: true },
+      logging: {
+        operational: {
+          level: 'info',
+          retentionDays: 14,
+          maxTotalBytes: 50_000_000,
+        },
+        trace: {
+          enabled: true,
+          retentionDays: 14,
+          maxTotalBytes: 500_000_000,
+        },
+      },
     }
     const update = vi.fn(async () => config)
     const reconfigureTraceLogging = vi.fn(async () => [
       'session-test: trace directory unavailable',
     ])
+    const reconfigureOperational = vi.fn()
     const { handlers } = createHandlers({
       configStore: {
         getPublicConfig: vi.fn(() => config),
         update,
       },
       sessions: { reconfigureTraceLogging },
+      operationalLog: { reconfigure: reconfigureOperational },
     })
     const payload = {
       version: 1,
       kind: 'logging',
-      value: { enabled: true },
+      value: config.logging,
     } as const
 
     await expect(
@@ -403,5 +434,101 @@ describe('app IPC handlers', () => {
     })
     expect(update).toHaveBeenCalledWith(payload)
     expect(reconfigureTraceLogging).toHaveBeenCalledWith(true)
+    expect(reconfigureOperational).toHaveBeenCalledWith(
+      config.logging.operational,
+    )
+  })
+
+  it('requires the privacy notice only when Full Trace is enabled', async () => {
+    const config = {
+      privacy: {},
+      logging: {
+        operational: {
+          level: 'debug' as const,
+          retentionDays: 7,
+          maxTotalBytes: 25_000_000,
+        },
+        trace: {
+          enabled: false,
+          retentionDays: 14,
+          maxTotalBytes: 500_000_000,
+        },
+      },
+    }
+    const update = vi.fn(async () => config)
+    const { handlers } = createHandlers({
+      configStore: {
+        getPublicConfig: vi.fn(() => config),
+        update,
+      },
+    })
+    const operationalOnly = {
+      version: 1,
+      kind: 'logging',
+      value: config.logging,
+    } as const
+
+    await expect(
+      handlers['config:set']!(operationalOnly as never, stubEvent),
+    ).resolves.toMatchObject({ config })
+    await expect(
+      handlers['config:set']!(
+        {
+          ...operationalOnly,
+          value: {
+            ...config.logging,
+            trace: { ...config.logging.trace, enabled: true },
+          },
+        } as never,
+        stubEvent,
+      ),
+    ).rejects.toMatchObject({
+      error: { code: 'PRECONDITION_FAILED' },
+    })
+    expect(update).toHaveBeenCalledOnce()
+  })
+
+  it('reports, opens, and clears operational logs without touching the active file', async () => {
+    openPath.mockResolvedValue('')
+    const cleanup = vi.fn(async () => ({
+      deletedFiles: 0,
+      deletedBytes: 0,
+      remainingBytes: 1,
+    }))
+    const clearHistory = vi.fn(async () => ({
+      deletedFiles: 2,
+      deletedBytes: 42,
+      remainingBytes: 1,
+    }))
+    const { handlers } = createHandlers({
+      operationalLog: {
+        status: vi.fn(() => ({
+          enabled: true,
+          level: 'info',
+          directory: 'C:\\runtime-logs',
+          activeFile: 'C:\\runtime-logs\\runtime.current.jsonl',
+          degraded: true,
+          warning: 'previous write failed',
+        })),
+        cleanup,
+        clearHistory,
+      },
+    })
+
+    expect(handlers['runtime-log:status']!({ version: 1 }, stubEvent)).toEqual({
+      enabled: true,
+      level: 'info',
+      degraded: true,
+      warning: 'previous write failed',
+    })
+    await expect(
+      handlers['runtime-log:open-directory']!({ version: 1 }, stubEvent),
+    ).resolves.toEqual({ accepted: true })
+    expect(openPath).toHaveBeenCalledWith('C:\\runtime-logs')
+    await expect(
+      handlers['runtime-log:clear']!({ version: 1 }, stubEvent),
+    ).resolves.toEqual({ deleted: 2, deletedBytes: 42 })
+    expect(cleanup).toHaveBeenCalledOnce()
+    expect(clearHistory).toHaveBeenCalledOnce()
   })
 })

@@ -12,6 +12,7 @@ import {
   TraceInfoSchema,
 } from '../trace'
 import { AcceptedSchema, EmptyPayloadSchema, ipcResultSchema } from './common'
+import { OperationalLogLevelSchema } from '../config/application'
 
 export const DIAGNOSTICS_IPC_CONTRACTS = {
   'trace:list': {
@@ -88,6 +89,36 @@ export const DIAGNOSTICS_IPC_CONTRACTS = {
     result: ipcResultSchema(
       Type.Object(
         { deleted: Type.Integer({ minimum: 0 }) },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'runtime-log:status': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          enabled: Type.Boolean(),
+          level: OperationalLogLevelSchema,
+          degraded: Type.Boolean(),
+          warning: Type.Optional(Type.String({ maxLength: 1_024 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  'runtime-log:open-directory': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(AcceptedSchema),
+  },
+  'runtime-log:clear': {
+    payload: EmptyPayloadSchema,
+    result: ipcResultSchema(
+      Type.Object(
+        {
+          deleted: Type.Integer({ minimum: 0 }),
+          deletedBytes: Type.Integer({ minimum: 0 }),
+        },
         { additionalProperties: false },
       ),
     ),
