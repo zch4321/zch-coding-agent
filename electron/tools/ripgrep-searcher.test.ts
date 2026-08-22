@@ -4,7 +4,11 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PathGuard } from '../safety/path-guard'
 import { RipgrepSearcher } from './ripgrep-searcher'
-import { __resetCachedSearcher } from './searcher'
+import {
+  JavaScriptSearcher,
+  __resetCachedSearcher,
+  type Searcher,
+} from './searcher'
 
 async function makeWorkspace() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'rg-search-'))
@@ -23,7 +27,7 @@ async function makeWorkspace() {
 }
 
 function search(
-  searcher: RipgrepSearcher,
+  searcher: Searcher,
   root: string,
   input: {
     pattern: string
@@ -86,6 +90,27 @@ describe('RipgrepSearcher', () => {
     expect(paths).toEqual(['src/app.ts'])
   })
 
+  it('keeps ripgrep and JavaScript fallback include results aligned', async () => {
+    const root = await makeWorkspace()
+    const input = {
+      pattern: 'marker',
+      include: '**/*.{ts,md}',
+      maxResults: 100,
+    }
+    const [ripgrep, fallback] = await Promise.all([
+      search(new RipgrepSearcher(), root, input),
+      search(new JavaScriptSearcher(), root, input),
+    ])
+    const comparable = (outcome: Awaited<ReturnType<typeof search>>) =>
+      outcome.matches
+        .map((match) => `${match.path}:${match.line}:${match.text}`)
+        .sort()
+
+    expect(comparable(fallback)).toEqual(comparable(ripgrep))
+    expect(fallback.truncated).toBe(false)
+    expect(ripgrep.truncated).toBe(false)
+  })
+
   it('honours case sensitivity', async () => {
     const root = await makeWorkspace()
     const lower = await search(new RipgrepSearcher(), root, {
@@ -110,6 +135,18 @@ describe('RipgrepSearcher', () => {
 
     expect(outcome.matches).toHaveLength(1)
     expect(outcome.truncated).toBe(true)
+  })
+
+  it('does not mark an exact maxResults match count as truncated', async () => {
+    const root = await makeWorkspace()
+    const outcome = await search(new RipgrepSearcher(), root, {
+      pattern: 'marker',
+      rootInput: 'README.md',
+      maxResults: 1,
+    })
+
+    expect(outcome.matches).toHaveLength(1)
+    expect(outcome.truncated).toBe(false)
   })
 
   it('scopes the search to rootInput', async () => {

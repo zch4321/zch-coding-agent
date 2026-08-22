@@ -11,8 +11,8 @@ export interface WalkedFile {
 
 /**
  * Depth-first workspace file walk. Skips symlinks and the large generated
- * folders (node_modules, .git, dist) so read-only tools stay bounded and do
- * not honour .gitignore (matching the original grep/glob behaviour).
+ * folders (node_modules, .git, dist) so recursive directory listings stay
+ * bounded without following ignore-file semantics.
  */
 export async function walkFiles(
   guard: PathGuard,

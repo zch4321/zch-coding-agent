@@ -1677,6 +1677,8 @@ parent ToolCall
 
 内置 parallel Tool 包含文件/代码/Git/Project/Skill 读取、`fetch`、`web_search`、`delay`、MCP discovery、`run_command` 和 `subagent_run`；文件/Git/Project 写入、实际 MCP、全部 `terminal_*` 以及未知 Tool 为 serial。`run_command` 是明确例外：同一 parallel 段中的其他读取不得假设其文件副作用已经完成，有依赖的工作必须放到后续 Provider turn。
 
+Workspace 文件发现由一个 backend-only `fast-glob` 枚举器统一：`glob` 直接流式消费匹配文件，JavaScript `grep` fallback 用它筛选 include。枚举器先用 `PathGuard` 固定 directory-relative `cwd`，拒绝绝对、负模式与父目录 traversal，关闭 symlink 跟随，并对每个输出重新验证 real path containment；固定跳过 `node_modules/.git/dist`。调用者读取第 `maxResults + 1` 个匹配判断截断，因此结果上限不再错误地变成扫描上限。Bundled ripgrep 仍是 `grep` 首选 backend，fallback 只在进程级 availability probe 失败时启用；二者的结果条数都用额外一个 match 区分“恰好达到上限”和“确实还有更多”。
+
 child Provider catalog 只包含：
 
 - `read_file`、`list_dir`、`glob`、`grep`

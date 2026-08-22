@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, mkdir } from 'node:fs/promises'
+import { mkdtemp, writeFile, mkdir, symlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -133,6 +133,211 @@ describe('read-only tools', () => {
         )
         expect(result.status).toBe('ok')
       }
+    }
+  })
+
+  it('counts glob matches after traversal and treats patterns as path-relative', async () => {
+    const root = await workspace()
+    await Promise.all(
+      Array.from({ length: 30 }, (_, index) =>
+        writeFile(
+          path.join(root, `${String(index).padStart(2, '0')}-unrelated.txt`),
+          'not a component\n',
+        ),
+      ),
+    )
+    await mkdir(path.join(root, 'src', 'components'))
+    await writeFile(
+      path.join(root, 'src', 'components', 'First.vue'),
+      '<template />\n',
+    )
+    await writeFile(
+      path.join(root, 'src', 'components', 'Second.vue'),
+      '<template />\n',
+    )
+    await mkdir(path.join(root, 'node_modules'))
+    await writeFile(
+      path.join(root, 'node_modules', 'ignored.ts'),
+      'export const ignored = true\n',
+    )
+
+    const limited = await executeReadonly(root, {
+      id: 'call-glob-path-relative' as CallId,
+      toolId: 'glob',
+      args: {
+        pattern: '*.vue',
+        path: 'src/components',
+        maxResults: 1,
+      },
+      reason: '',
+    })
+    expect(limited).toMatchObject({
+      status: 'ok',
+      truncated: true,
+      content: { truncated: true },
+    })
+    if (limited.status === 'ok') {
+      const matches = (limited.content as { matches: string[] }).matches
+      expect(matches).toHaveLength(1)
+      expect([
+        'src/components/First.vue',
+        'src/components/Second.vue',
+      ]).toContain(matches[0])
+    }
+
+    const recursive = await executeReadonly(root, {
+      id: 'call-glob-recursive' as CallId,
+      toolId: 'glob',
+      args: { pattern: '**/*.{ts,vue}', maxResults: 10 },
+      reason: '',
+    })
+    expect(recursive).toMatchObject({ status: 'ok', truncated: false })
+    if (recursive.status === 'ok') {
+      expect((recursive.content as { matches: string[] }).matches).toEqual([
+        'src/app.ts',
+        'src/components/First.vue',
+        'src/components/Second.vue',
+      ])
+    }
+
+    const exactLimit = await executeReadonly(root, {
+      id: 'call-glob-exact-limit' as CallId,
+      toolId: 'glob',
+      args: { pattern: '**/*.ts', maxResults: 1 },
+      reason: '',
+    })
+    expect(exactLimit).toMatchObject({ status: 'ok', truncated: false })
+    if (exactLimit.status === 'ok') {
+      expect((exactLimit.content as { matches: string[] }).matches).toEqual([
+        'src/app.ts',
+      ])
+    }
+  })
+
+  it('rejects glob traversal and does not follow directory symlinks', async () => {
+    const root = await workspace()
+    const outside = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-tools-outside-'),
+    )
+    await writeFile(
+      path.join(outside, 'secret.ts'),
+      'export const secret = true\n',
+    )
+    await symlink(
+      outside,
+      path.join(root, 'linked-outside'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+
+    const safe = await executeReadonly(root, {
+      id: 'call-glob-symlink' as CallId,
+      toolId: 'glob',
+      args: { pattern: '**/*.ts', maxResults: 10 },
+      reason: '',
+    })
+    expect(safe).toMatchObject({ status: 'ok', truncated: false })
+    if (safe.status === 'ok') {
+      expect((safe.content as { matches: string[] }).matches).toEqual([
+        'src/app.ts',
+      ])
+    }
+
+    const escaped = await executeReadonly(root, {
+      id: 'call-glob-escape' as CallId,
+      toolId: 'glob',
+      args: { pattern: '{..,src}/**/*.ts', maxResults: 10 },
+      reason: '',
+    })
+    expect(escaped).toMatchObject({
+      status: 'error',
+      code: 'INVALID_GLOB',
+    })
+  })
+
+  it('keeps JavaScript grep fallback glob semantics complete and path-relative', async () => {
+    const root = await workspace()
+    await Promise.all(
+      Array.from({ length: 120 }, (_, index) =>
+        writeFile(
+          path.join(root, `${String(index).padStart(3, '0')}-unrelated.txt`),
+          'not relevant\n',
+        ),
+      ),
+    )
+    await writeFile(
+      path.join(root, 'src', 'view.vue'),
+      '<script>const marker = true</script>\n',
+    )
+
+    const recursive = await executeReadonly(
+      root,
+      {
+        id: 'call-grep-fallback-braces' as CallId,
+        toolId: 'grep',
+        args: {
+          pattern: 'marker',
+          include: '**/*.{ts,vue}',
+          maxResults: 10,
+        },
+        reason: '',
+      },
+      new JavaScriptSearcher(),
+    )
+    expect(recursive).toMatchObject({ status: 'ok', truncated: false })
+    if (recursive.status === 'ok') {
+      expect(
+        (recursive.content as { matches: Array<{ path: string }> }).matches.map(
+          (match) => match.path,
+        ),
+      ).toEqual(['src/app.ts', 'src/view.vue'])
+    }
+
+    const pathRelative = await executeReadonly(
+      root,
+      {
+        id: 'call-grep-fallback-path' as CallId,
+        toolId: 'grep',
+        args: {
+          pattern: 'marker',
+          path: 'src',
+          include: '*.ts',
+          maxResults: 10,
+        },
+        reason: '',
+      },
+      new JavaScriptSearcher(),
+    )
+    expect(pathRelative).toMatchObject({ status: 'ok', truncated: false })
+    if (pathRelative.status === 'ok') {
+      expect(
+        (
+          pathRelative.content as { matches: Array<{ path: string }> }
+        ).matches.map((match) => match.path),
+      ).toEqual(['src/app.ts'])
+    }
+
+    const explicitFile = await executeReadonly(
+      root,
+      {
+        id: 'call-grep-fallback-file' as CallId,
+        toolId: 'grep',
+        args: {
+          pattern: 'marker',
+          path: 'src/app.ts',
+          include: '*.vue',
+          maxResults: 1,
+        },
+        reason: '',
+      },
+      new JavaScriptSearcher(),
+    )
+    expect(explicitFile).toMatchObject({ status: 'ok', truncated: false })
+    if (explicitFile.status === 'ok') {
+      expect(
+        (
+          explicitFile.content as { matches: Array<{ path: string }> }
+        ).matches.map((match) => match.path),
+      ).toEqual(['src/app.ts'])
     }
   })
 
