@@ -155,6 +155,13 @@ export const TraceEventSchema = Type.Union([
       scope: Type.Optional(LlmUsageScopeSchema),
       normalizedMessages: Type.Array(JsonValueSchema),
       providerRequest: JsonValueSchema,
+      requestFields: Type.Optional(
+        Type.Array(Type.String({ minLength: 1, maxLength: 128 }), {
+          maxItems: 256,
+          uniqueItems: true,
+        }),
+      ),
+      wireParameters: Type.Optional(JsonValueSchema),
       requestBytes: Type.Integer({ minimum: 0 }),
       prefixHash: Type.String({ maxLength: 256 }),
       promptResources: Type.Optional(
@@ -431,6 +438,8 @@ export type TraceEventInput =
       scope?: LlmUsageRecord['scope']
       normalizedMessages: JsonValue[]
       providerRequest: JsonValue
+      requestFields: string[]
+      wireParameters: JsonValue
       requestBytes: number
       prefixHash: string
       promptResources?: Static<typeof PromptResourceSummarySchema>[]

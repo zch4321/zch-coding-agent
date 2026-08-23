@@ -75,6 +75,11 @@ describe('OperationalLogService', () => {
       endpoint: 'https://user:password@example.test/v1?token=secret#fragment',
       attempt: 2,
       maxAttempts: 3,
+      requestFields: ['max_tokens', 'messages', 'reasoning_effort'],
+      outputTokenField: 'max_tokens',
+      maxOutputTokens: 128_000,
+      wireReasoningEffort: 'max',
+      thinkingMode: 'enabled',
     })
 
     const output = await records(directory)
@@ -89,6 +94,11 @@ describe('OperationalLogService', () => {
       endpoint: 'https://example.test/v1',
       attempt: 2,
       maxAttempts: 3,
+      requestFields: ['max_tokens', 'messages', 'reasoning_effort'],
+      outputTokenField: 'max_tokens',
+      maxOutputTokens: 128_000,
+      wireReasoningEffort: 'max',
+      thinkingMode: 'enabled',
     })
     const serialized = JSON.stringify(output)
     expect(serialized).not.toContain('top-secret')

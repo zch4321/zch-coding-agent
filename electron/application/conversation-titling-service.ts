@@ -6,10 +6,11 @@ import { normalizeTitle } from '../../shared/conversation-titles'
 import type { SessionRecord } from '../../shared/session'
 import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'
-import type {
-  ModelProvider,
-  ProviderEvent,
-  ProviderStreamContext,
+import {
+  providerRequestDiagnostics,
+  type ModelProvider,
+  type ProviderEvent,
+  type ProviderStreamContext,
 } from '../providers/provider'
 import { createConfiguredProvider } from '../providers/provider-factory'
 import {
@@ -332,6 +333,7 @@ export class ConversationTitlingService {
         tools: [],
         maxOutputTokens: TITLING_MAX_OUTPUT_TOKENS,
       })
+      attempt?.attachRequestDiagnostics(providerRequestDiagnostics(compiled))
       const context: ProviderStreamContext = { signal: controller.signal }
       let text = ''
       let completed = false

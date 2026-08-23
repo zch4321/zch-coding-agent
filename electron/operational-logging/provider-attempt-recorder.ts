@@ -1,6 +1,9 @@
 import type { ProviderType } from '../../shared/config/providers'
 import type { ReasoningEffort } from '../../shared/reasoning'
-import type { ProviderUsage } from '../providers/provider'
+import type {
+  ProviderRequestDiagnostics,
+  ProviderUsage,
+} from '../providers/provider'
 import type { OperationalLogService } from './service'
 import {
   associateDiagnosticId,
@@ -19,6 +22,11 @@ export interface ProviderAttemptInput extends OperationalCorrelation {
   messageCount?: number
   toolCount?: number
   requestBytes?: number
+  requestFields?: string[]
+  outputTokenField?: string
+  maxOutputTokens?: number
+  wireReasoningEffort?: string
+  thinkingMode?: string
   attempt?: number
   maxAttempts?: number
 }
@@ -56,6 +64,11 @@ export class ProviderAttemptRecorder {
       event: 'provider.started',
       ...this.#input,
     })
+  }
+
+  /** Attaches controls extracted after a Provider request has been compiled. */
+  attachRequestDiagnostics(diagnostics: ProviderRequestDiagnostics): void {
+    Object.assign(this.#input, requestDiagnosticFields(diagnostics))
   }
 
   /** Records a successful aggregate response. */
@@ -119,6 +132,36 @@ export class ProviderAttemptRecorder {
       ...usageFields(failure.usage),
     })
     associateDiagnosticId(error, result?.diagnosticId)
+  }
+}
+
+/** Selects the bounded request metadata allowed in Operational Logs. */
+export function requestDiagnosticFields(
+  diagnostics: ProviderRequestDiagnostics,
+): Pick<
+  ProviderAttemptInput,
+  | 'requestBytes'
+  | 'requestFields'
+  | 'outputTokenField'
+  | 'maxOutputTokens'
+  | 'wireReasoningEffort'
+  | 'thinkingMode'
+> {
+  return {
+    requestBytes: diagnostics.requestBytes,
+    requestFields: diagnostics.requestFields.slice(0, 16),
+    ...(diagnostics.outputTokenField
+      ? { outputTokenField: diagnostics.outputTokenField }
+      : {}),
+    ...(diagnostics.maxOutputTokens === undefined
+      ? {}
+      : { maxOutputTokens: diagnostics.maxOutputTokens }),
+    ...(diagnostics.wireReasoningEffort
+      ? { wireReasoningEffort: diagnostics.wireReasoningEffort }
+      : {}),
+    ...(diagnostics.thinkingMode
+      ? { thinkingMode: diagnostics.thinkingMode }
+      : {}),
   }
 }
 

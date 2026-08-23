@@ -393,6 +393,26 @@ describe('SessionManager prompt and trace', () => {
       ].map((ref) => [ref.id, ref.version]),
     )
 
+    expect(llmRequest).toMatchObject({
+      requestFields: expect.arrayContaining([
+        'messages',
+        'model',
+        'reasoning_effort',
+        'thinking',
+        'tools',
+      ]),
+      wireParameters: {
+        model: 'deepseek-v4-pro',
+        stream: true,
+        stream_options: { include_usage: true },
+        thinking: { type: 'enabled' },
+        reasoning_effort: 'high',
+      },
+    })
+    expect(JSON.stringify(llmRequest?.wireParameters)).not.toContain(
+      'Audit prompt metadata',
+    )
+
     expect(layerKinds).toEqual(
       expect.arrayContaining([
         'system_instruction',

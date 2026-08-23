@@ -24,6 +24,8 @@ import { TraceService } from '../logging/service'
 export interface TraceObject {
   type?: string
   normalizedMessages?: Array<{ role?: string; content?: unknown }>
+  requestFields?: string[]
+  wireParameters?: JsonValue
   promptResources?: Array<{
     id?: string
     version?: string

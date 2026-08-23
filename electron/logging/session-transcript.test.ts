@@ -84,7 +84,25 @@ describe('session transcript', () => {
             content: 'data:image/png;base64,aGVsbG8=',
           },
         ],
-        providerRequest: { tools: [{ secretSchema: true }] },
+        providerRequest: {
+          model: 'fixture',
+          messages: [{ role: 'user', content: 'private prompt' }],
+          tools: [{ secretSchema: true }],
+          max_tokens: 8_192,
+          reasoning_effort: 'high',
+        },
+        requestFields: [
+          'max_tokens',
+          'messages',
+          'model',
+          'reasoning_effort',
+          'tools',
+        ],
+        wireParameters: {
+          model: 'fixture',
+          max_tokens: 8_192,
+          reasoning_effort: 'high',
+        },
         requestBytes: 123,
         prefixHash: 'prefix',
         canonicalSource: [],
@@ -192,6 +210,17 @@ describe('session transcript', () => {
     expect(JSON.stringify(requestMessages)).toContain(
       'multimodal content omitted',
     )
+    const providerRequest = document.entries.find(
+      (entry) => entry.kind === 'provider_request',
+    )
+    expect(providerRequest?.data).toMatchObject({
+      requestFields: expect.arrayContaining(['max_tokens', 'reasoning_effort']),
+      wireParameters: {
+        model: 'fixture',
+        max_tokens: 8_192,
+        reasoning_effort: 'high',
+      },
+    })
 
     const markdown = sessionTranscriptToMarkdown(document)
     expect(markdown).toContain('format: "zch-session-transcript"')
@@ -201,6 +230,7 @@ describe('session transcript', () => {
     expect(markdown).not.toContain('ciphertext-must-not-export')
     expect(markdown).not.toContain('opaque-state-must-not-export')
     expect(markdown).not.toContain('secretSchema')
+    expect(markdown).not.toContain('private prompt')
   })
 
   it('can still read interrupted deltas from legacy trace files', () => {

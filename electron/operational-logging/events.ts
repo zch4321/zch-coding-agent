@@ -109,6 +109,18 @@ export const OperationalLogRecordSchema = Type.Object(
     messageCount: Type.Optional(Type.Integer({ minimum: 0 })),
     toolCount: Type.Optional(Type.Integer({ minimum: 0 })),
     requestBytes: Type.Optional(Type.Integer({ minimum: 0 })),
+    requestFields: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: 128 }), {
+        maxItems: 16,
+        uniqueItems: true,
+      }),
+    ),
+    outputTokenField: Type.Optional(Type.String({ maxLength: 64 })),
+    maxOutputTokens: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+    ),
+    wireReasoningEffort: Type.Optional(Type.String({ maxLength: 32 })),
+    thinkingMode: Type.Optional(Type.String({ maxLength: 32 })),
     responseBytes: Type.Optional(Type.Integer({ minimum: 0 })),
     httpStatus: Type.Optional(Type.Integer({ minimum: 100, maximum: 599 })),
     providerErrorCode: Type.Optional(Type.String({ maxLength: 256 })),
@@ -168,6 +180,11 @@ export interface OperationalEventInput extends OperationalCorrelation {
   messageCount?: number
   toolCount?: number
   requestBytes?: number
+  requestFields?: string[]
+  outputTokenField?: string
+  maxOutputTokens?: number
+  wireReasoningEffort?: string
+  thinkingMode?: string
   responseBytes?: number
   httpStatus?: number
   providerErrorCode?: string

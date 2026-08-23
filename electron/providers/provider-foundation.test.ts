@@ -28,6 +28,7 @@ import { GenericResponsesProvider } from './generic-responses-provider'
 import {
   assertCompletedAssistantTurn,
   ProviderCompletionError,
+  providerRequestDiagnostics,
 } from './provider'
 import type {
   ModelProvider,
@@ -137,6 +138,47 @@ function completed(events: ProviderEvent[]) {
 }
 
 describe('P11 Provider foundation', () => {
+  it('projects queryable wire controls without duplicating request content', () => {
+    const diagnostics = providerRequestDiagnostics({
+      request: {
+        model: 'diagnostic-model',
+        messages: [{ role: 'user', content: 'private prompt' }],
+        tools: [{ name: 'private-tool' }],
+        stream: true,
+        max_tokens: 128_000,
+        reasoning_effort: 'max',
+        thinking: { type: 'enabled' },
+        vendor_payload: { private: 'content' },
+      },
+      normalizedMessages: [{ role: 'user', content: 'private prompt' }],
+    })
+
+    expect(diagnostics).toMatchObject({
+      requestFields: [
+        'max_tokens',
+        'messages',
+        'model',
+        'reasoning_effort',
+        'stream',
+        'thinking',
+        'tools',
+        'vendor_payload',
+      ],
+      wireParameters: {
+        model: 'diagnostic-model',
+        stream: true,
+        max_tokens: 128_000,
+        reasoning_effort: 'max',
+        thinking: { type: 'enabled' },
+      },
+      outputTokenField: 'max_tokens',
+      maxOutputTokens: 128_000,
+      wireReasoningEffort: 'max',
+      thinkingMode: 'enabled',
+    })
+    expect(JSON.stringify(diagnostics.wireParameters)).not.toContain('private')
+  })
+
   it('derives generic Chat cache misses from prompt token details', () => {
     expect(
       normalizeChatUsage({

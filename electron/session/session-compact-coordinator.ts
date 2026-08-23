@@ -65,7 +65,10 @@ import {
 } from './session-compact-retry'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 import type { OperationalLogService } from '../operational-logging/service'
-import { ProviderAttemptRecorder } from '../operational-logging/provider-attempt-recorder'
+import {
+  ProviderAttemptRecorder,
+  requestDiagnosticFields,
+} from '../operational-logging/provider-attempt-recorder'
 import {
   associateDiagnosticId,
   diagnosticIdForError,
@@ -550,7 +553,7 @@ export class SessionCompactCoordinator {
           endpoint: binding.snapshot.endpoint,
           messageCount: compiled.normalizedMessages.length,
           toolCount: 0,
-          requestBytes: diagnostics.requestBytes,
+          ...requestDiagnosticFields(diagnostics),
         },
       )
       await session.logger.write({
@@ -563,6 +566,10 @@ export class SessionCompactCoordinator {
           binding.apiKey,
         ]) as JsonValue[],
         providerRequest: redactJsonSecrets(compiled.request, [binding.apiKey]),
+        requestFields: diagnostics.requestFields,
+        wireParameters: redactJsonSecrets(diagnostics.wireParameters, [
+          binding.apiKey,
+        ]),
         requestBytes: diagnostics.requestBytes,
         prefixHash: diagnostics.prefixHash,
         promptResources: promptResources(session),

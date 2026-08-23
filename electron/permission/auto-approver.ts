@@ -14,7 +14,11 @@ import type { ModelRouteSnapshot } from '../../shared/model-route'
 import { renderTaggedJson } from '../../shared/tagged-message'
 import { compileSchema } from '../schema-validator'
 import type { ToolCall, ToolDefinition } from '../tools/types'
-import type { ModelProvider, ProviderUsage } from '../providers/provider'
+import {
+  providerRequestDiagnostics,
+  type ModelProvider,
+  type ProviderUsage,
+} from '../providers/provider'
 import { canonicalHash } from '../session/canonical-history'
 import type { OperationalLogService } from '../operational-logging/service'
 import { ProviderAttemptRecorder } from '../operational-logging/provider-attempt-recorder'
@@ -297,6 +301,7 @@ export class ProviderAutoApprover implements AutoApprover {
           schema: jsonValue(AutoApproverOutputSchema) as JsonObject,
         },
       })
+      attempt.attachRequestDiagnostics(providerRequestDiagnostics(compiled))
       let completed = false
       for await (const event of this.#provider.stream(compiled, {
         signal: controller.signal,
