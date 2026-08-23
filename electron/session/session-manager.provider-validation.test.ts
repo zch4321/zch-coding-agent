@@ -647,6 +647,10 @@ describe('SessionManager Provider completion validation', () => {
       ({ event }) =>
         event.type === 'assistant.stream.reset' && event.runId === runId,
     )
+    const retrying = events.findIndex(
+      ({ event }) =>
+        event.type === 'provider.retrying' && event.runId === runId,
+    )
     const discardedDelta = events.findIndex(
       ({ event }) =>
         event.type === 'assistant.text.delta' &&
@@ -661,7 +665,12 @@ describe('SessionManager Provider completion validation', () => {
     )
     expect(discardedDelta).toBeGreaterThan(-1)
     expect(retryReset).toBeGreaterThan(discardedDelta)
-    expect(recovered).toBeGreaterThan(retryReset)
+    expect(retrying).toBeGreaterThan(retryReset)
+    expect(recovered).toBeGreaterThan(retrying)
+    expect(events[retrying]?.event).toMatchObject({
+      type: 'provider.retrying',
+      retry: { attempt: 2, maxAttempts: 3, delayMs: 0 },
+    })
     expect(
       committedHistories
         .flat()

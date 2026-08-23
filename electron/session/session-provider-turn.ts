@@ -375,6 +375,16 @@ export class SessionProviderTurnRunner {
           sessionId: session.sessionId,
           runId: run.runId,
         })
+        this.#emit(session, {
+          type: 'provider.retrying',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          retry: {
+            attempt: attemptNumber + 1,
+            maxAttempts: MAX_PROVIDER_TURN_ATTEMPTS,
+            delayMs: retry.delayMs,
+          },
+        })
         await waitForProviderTurnRetry(retry.delayMs, run.controller.signal)
         continue
       }

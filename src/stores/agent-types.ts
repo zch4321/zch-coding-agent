@@ -2,11 +2,15 @@ import type { CallId, MessageId, ProjectId, RunId } from '../../shared/ids'
 import type { ModelCapabilityLevel, ReasoningEffort } from '../../shared/config'
 import type { ContextAttachmentChip } from '../../shared/context'
 import type { GoalState, PlanState } from '../../shared/orchestration'
-import type { ToolApprovalSummary } from '../../shared/agent-events'
+import type {
+  ProviderRetryState,
+  ToolApprovalSummary,
+} from '../../shared/agent-events'
 import type { TodoState } from '../../shared/todo'
 
 export type RunActivity =
   | 'requesting_model'
+  | 'retrying_model'
   | 'reasoning'
   | 'output'
   | 'calling_tool'
@@ -81,6 +85,7 @@ export interface ConversationTurn {
   reasoningSegments: ReasoningSegment[]
   messages: ChatMessage[]
   runActivity?: RunActivity
+  providerRetry?: ProviderRetryState
   finalAssistantMessageId?: string
 }
 

@@ -405,6 +405,13 @@ export function projectConversationTurns({
     }
     if (overlay.todo) liveTurn.todo = copyTodo(overlay.todo)
     liveTurn.runActivity = resolveRunActivity(overlay)
+    liveTurn.providerRetry = overlay.providerRetry
+      ? {
+          attempt: overlay.providerRetry.attempt,
+          maxAttempts: overlay.providerRetry.maxAttempts,
+          delayMs: overlay.providerRetry.delayMs,
+        }
+      : undefined
   } else if (overlay?.terminalReloadRunId && overlay.todo) {
     const terminalTodo = overlay.todo
     const durableTodoLoaded = turns.some(

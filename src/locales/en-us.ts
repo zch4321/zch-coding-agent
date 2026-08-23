@@ -88,6 +88,7 @@ const enUS = {
     reasoning: 'Reasoning',
     runActivity: {
       requesting_model: 'Requesting model',
+      retrying_model: 'Retrying {attempt}/{maxAttempts}',
       reasoning: 'Reasoning',
       output: 'Writing',
       calling_tool: 'Calling tool',
@@ -278,6 +279,7 @@ const enUS = {
     noAgentsHint:
       'Subagent activity will appear here when the Agent delegates work.',
     agentThinking: 'Thinking',
+    agentRetrying: 'Retrying {attempt}/{maxAttempts}',
     agentOutputting: 'Writing response',
     agentRunning: 'Running',
     agentCallingTool: 'Calling {tool}',

@@ -274,6 +274,9 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       overlay.streamActivity = undefined
       overlay.text = runtime.text
       overlay.reasoning = runtime.reasoning
+      overlay.providerRetry = runtime.providerRetry
+        ? structuredClone(runtime.providerRetry)
+        : undefined
       overlay.interjections = structuredClone(runtime.interjections)
       overlay.todo = runtime.todo ? structuredClone(runtime.todo) : undefined
       overlay.tools = runtime.tools.map((tool, index) => ({

@@ -1061,7 +1061,7 @@ Tool/approval 的实时卡片来自 runtime event；完成后 renderer 从 assis
 
 每个物理 attempt 分配独立 `llm:*` call ID，写一组 `llm.request` 与 `provider.started`，失败时写单条 `llm.failure` 与 `provider.failed`，成功时才写 `llm.response`、usage 并调用 after-LLM plugin hook。Operational Provider 记录携带 `attempt/maxAttempts`；最终 Run 失败复用最后一次 attempt 的 diagnostic ID。before-LLM plugin hook 在逻辑请求编译后只调用一次，避免观察插件因网络补试重复产生副作用。
 
-Provider delta 仍实时发送。若 attempt 失败且允许重试，Session Core 先发 `assistant.stream.reset`，Public Run snapshot、Renderer overlay 和 internal Agent execution overlay 同时清除该 attempt 的临时 text/reasoning/activity，再等待并开始下一 attempt。失败 attempt 从不形成 canonical assistant record、工具 proposal 或审批；因此重试可能增加 Provider 费用，但不会重复执行本地工具副作用。
+Provider delta 仍实时发送。若 attempt 失败且允许重试，Session Core 先发 `assistant.stream.reset` 清除该 attempt 的临时 text/reasoning/activity，再发带 `attempt/maxAttempts/delayMs` 的 `provider.retrying`。Public Run snapshot、Renderer overlay 和 internal Agent execution overlay 同步投影该状态；主时间线与 Agents 状态槽显示“正在重试 A/B”，不弹 NMessage。新的 assistant activity 或后续 Run status 会清除 retry 状态。失败 attempt 从不形成 canonical assistant record、工具 proposal 或审批；因此重试可能增加 Provider 费用，但不会重复执行本地工具副作用。
 
 这个简化模型不承诺“宿主文件副作用”和 Message transaction 在进程崩溃下原子一致：如果工具已经修改文件、但应用在完整 tool batch commit 前崩溃，workspace 变化可能存在而对应 tool messages 不存在。`file_changes` 和下一次 runtime context 可以重新发现当前 workspace 状态，但不能伪造丢失的执行历史。若未来要求 crash-atomic tool journal，必须重新引入 durable tool/run journal；它不是 v2.1 目标。
 

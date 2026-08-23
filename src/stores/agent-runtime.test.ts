@@ -717,8 +717,24 @@ describe('agent runtime store', () => {
 
     runtime.handleAgentEvent(
       event({
-        type: 'run.status',
+        type: 'provider.retrying',
         seq: 6,
+        sessionId: selectedSessionId,
+        runId,
+        retry: { attempt: 2, maxAttempts: 3, delayMs: 250 },
+      }),
+    )
+    expect(runtime.ensureOverlay(selectedSessionId).providerRetry).toEqual({
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 250,
+    })
+    expect(runtime.timelineTurns.at(-1)?.runActivity).toBe('retrying_model')
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 7,
         sessionId: selectedSessionId,
         runId,
         status: 'calling_llm',

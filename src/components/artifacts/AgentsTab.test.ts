@@ -134,6 +134,22 @@ describe('Agents artifact tab', () => {
       'n-scrollbar',
     )
 
+    useAgentExecutionStore().handleEvent({
+      schemaVersion: 1,
+      seq: 1,
+      ts: timestamp,
+      executionId: execution.id,
+      parentSessionId,
+      parentRunId: execution.parentRunId,
+      parentCallId: execution.parentCallId,
+      type: 'provider.retrying',
+      retry: { attempt: 2, maxAttempts: 3, delayMs: 250 },
+    })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.agent-execution-heading').text()).toContain(
+      '正在重试 2/3',
+    )
+
     useAgentExecutionStore().upsertSummary({
       ...execution,
       updatedAt: '2026-08-01T00:00:01.000Z',

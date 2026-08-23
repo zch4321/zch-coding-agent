@@ -204,6 +204,21 @@ describe('projectConversationTurns', () => {
     },
   )
 
+  it('projects an active Provider retry with its attempt counters', () => {
+    const overlay = blankOverlay()
+    overlay.runId = 'run:retrying' as RunId
+    overlay.status = 'calling_llm'
+    overlay.providerRetry = { attempt: 2, maxAttempts: 3, delayMs: 500 }
+
+    expect(resolveRunActivity(overlay)).toBe('retrying_model')
+    expect(projectConversationTurns({ records: [], overlay })).toEqual([
+      expect.objectContaining({
+        runActivity: 'retrying_model',
+        providerRetry: { attempt: 2, maxAttempts: 3, delayMs: 500 },
+      }),
+    ])
+  })
+
   it('projects an empty active run as a status-only conversation turn', () => {
     const overlay = blankOverlay()
     overlay.runId = 'run:empty-live' as RunId

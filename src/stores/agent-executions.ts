@@ -8,6 +8,7 @@ import type {
   AgentExecutionLiveOverlay,
   AgentExecutionSummary,
 } from '../../shared/agent-execution'
+import type { ProviderRetryState } from '../../shared/agent-events'
 import { IPC_VERSION } from '../../shared/channels'
 import type { AgentExecutionId, SessionId } from '../../shared/ids'
 import type { LlmUsageRecord } from '../../shared/usage'
@@ -35,6 +36,7 @@ interface LiveExecutionView {
   generation: number
   text: string
   reasoning: string
+  providerRetry?: ProviderRetryState
   activities: AgentExecutionActivity[]
   usage: LlmUsageRecord[]
 }
@@ -444,6 +446,9 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       const durable =
         this.details[executionId]?.detail?.activityPage.records ?? []
       live.phase = overlay.status
+      live.providerRetry = overlay.providerRetry
+        ? cloneReactiveSafe(overlay.providerRetry)
+        : undefined
       live.text = durable.some(
         (activity) =>
           activity.type === 'message' && activity.text === overlay.text,
@@ -493,6 +498,7 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
           if (detail) void this.refreshBoundary(event.executionId)
           live.text = ''
           live.reasoning = ''
+          live.providerRetry = undefined
         }
         return
       }
@@ -500,6 +506,7 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
         const enteredProvider =
           event.status === 'calling_llm' && live.phase !== 'calling_llm'
         live.phase = event.status
+        live.providerRetry = undefined
         if (enteredProvider) {
           live.generation += 1
           live.text = ''
@@ -510,14 +517,21 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
         }
         return
       }
-      if (event.type === 'assistant.stream.reset') {
+      if (event.type === 'assistant.activity') {
+        live.providerRetry = undefined
+      } else if (event.type === 'assistant.stream.reset') {
         live.text = ''
         live.reasoning = ''
+      } else if (event.type === 'provider.retrying') {
+        live.providerRetry = cloneReactiveSafe(event.retry)
       } else if (event.type === 'assistant.text.delta') {
+        live.providerRetry = undefined
         live.text += event.delta
       } else if (event.type === 'assistant.reasoning.delta') {
+        live.providerRetry = undefined
         live.reasoning += event.delta
       } else if (event.type === 'assistant.message.completed') {
+        live.providerRetry = undefined
         const activities: AgentExecutionActivity[] = []
         const order = event.seq * 3
         const reasoning = event.reasoning ?? live.reasoning

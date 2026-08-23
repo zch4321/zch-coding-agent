@@ -49,7 +49,7 @@ describe('shared IPC contracts', () => {
   it('preserves the complete wire schema fingerprints across the domain split', () => {
     expect(Object.keys(IPC_CONTRACTS)).toHaveLength(71)
     expect(schemaHash(IPC_CONTRACTS)).toBe(
-      'e8cc5dece0372e88e08b5a1d5c2b8925d7eccdeec73929a231f03856312aa7af',
+      '48c873d5bdb0f7924b03540c58c820738b72f48a5e1807d4aa158d95b09aa4cb',
     )
     expect(schemaHash(ConfigSetRequestSchema)).toBe(
       '3ae0dce98aac5eace5fa11790125122294382a876777462f3d09c137921dbaa3',
@@ -62,7 +62,7 @@ describe('shared IPC contracts', () => {
         TerminalEventEnvelopeSchema,
         DomainStateDeliverySchema,
       }),
-    ).toBe('9d37a04404d6c3428e6604b1d1f10b272c41268c967e58b307cf36489f34179d')
+    ).toBe('b4a5fddfccbb2e3fd1b5e4c6f38020c2008e82df703182bcdb6f8daac70d7385')
   })
 
   it('composes every channel once from the nine IPC domains', () => {

@@ -536,6 +536,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 | Provider 未配置  | 配置提示         | Send disabled            | 可浏览本地文件              |
 | Idle             | 不显示内部 badge | 可输入                   | 保留当前 tab                |
 | Calling LLM      | 流式占位/文本    | Stop                     | 保留当前 tab                |
+| Retrying LLM     | 正在重试 A/B     | Stop                     | Agents 同步显示 A/B         |
 | Running tool     | 工具卡状态更新   | Stop                     | 文件工具可打开相关 Artifact |
 | Waiting approval | 审批卡           | 禁止发送，可 Stop        | 自动显示 Diff 或相关文件    |
 | Workspace writer | Writer badge     | 当前 Run 的普通控制      | 保留内容                    |
@@ -547,6 +548,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 要求：
 
 - 错误消息对用户可见但不泄露 API Key、Authorization header 或主进程堆栈。
+- `provider.retrying` 复用思考过程标题中的稳定运行状态槽，显示下一次 attempt 与总上限；它不弹 NMessage。新的 reasoning/text/tool activity 到达后恢复对应阶段，只有重试耗尽后的 Run failure 才显示错误消息。
 - ConversationTimeline 只投影 durable messages、live overlay、工具和审批，不渲染全局 warning/error。NMessage 位于 46px frameless 顶栏下方：warning 10 秒自动消失且可提前关闭，error 不自动消失；最多显示 5 条，其余排队，不挤掉未关闭 error。
 - 相同 code、Session 和 message 在活动/排队期间去重。后台 Session 的通知显示对话标题但不切换当前对话；日志 capture 持续状态显示在 Header/设置，Provider 隐私 notice 保留在 composer 附近。
 - 创建、重命名、归档、切换模型/模式和发送消息期间只设置 pending/error UI，不先改 durable replica；commit 失败时继续显示后端原值。

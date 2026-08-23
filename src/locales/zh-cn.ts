@@ -87,6 +87,7 @@ const zhCN = {
     reasoning: '思考过程',
     runActivity: {
       requesting_model: '请求模型',
+      retrying_model: '正在重试 {attempt}/{maxAttempts}',
       reasoning: '思考中',
       output: '输出中',
       calling_tool: '调用工具',
@@ -273,6 +274,7 @@ const zhCN = {
     noAgents: '暂无 Agent 任务',
     noAgentsHint: 'Agent 启动 Subagent 后，其运行情况会显示在这里。',
     agentThinking: '思考中',
+    agentRetrying: '正在重试 {attempt}/{maxAttempts}',
     agentOutputting: '正在输出',
     agentRunning: '运行中',
     agentCallingTool: '正在调用 {tool}',

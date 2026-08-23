@@ -158,6 +158,7 @@ describe('timeline disclosure groups', () => {
   it('shows every active phase in one stable status slot', async () => {
     const labels: Array<[RunActivity, string]> = [
       ['requesting_model', '请求模型'],
+      ['retrying_model', '正在重试 2/3'],
       ['reasoning', '思考中'],
       ['output', '输出中'],
       ['calling_tool', '调用工具'],
@@ -177,7 +178,13 @@ describe('timeline disclosure groups', () => {
     expect(wrapper.find('.reasoning-content').exists()).toBe(false)
 
     for (const [activity, label] of labels) {
-      await wrapper.setProps({ activity })
+      await wrapper.setProps({
+        activity,
+        providerRetry:
+          activity === 'retrying_model'
+            ? { attempt: 2, maxAttempts: 3, delayMs: 250 }
+            : undefined,
+      })
       const status = wrapper.get('.run-activity')
       expect(status.attributes('data-run-activity')).toBe(activity)
       expect(status.text()).toBe(label)

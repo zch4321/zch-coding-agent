@@ -2,17 +2,22 @@
 import { computed, nextTick } from 'vue'
 import { NCollapse, NCollapseItem, NFlex, NScrollbar, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import type { ProviderRetryState } from '../../../shared/agent-events'
 import type { ReasoningSegment, RunActivity } from '../../stores/agent-types'
 
 const props = defineProps<{
   segments: ReasoningSegment[]
   activity?: RunActivity
+  providerRetry?: ProviderRetryState
 }>()
 const emit = defineEmits<{ 'content-resized': [] }>()
 const { t } = useI18n()
-const activityLabel = computed(() =>
-  props.activity ? t(`chat.runActivity.${props.activity}`) : '',
-)
+const activityLabel = computed(() => {
+  if (props.providerRetry) {
+    return t('chat.runActivity.retrying_model', props.providerRetry)
+  }
+  return props.activity ? t(`chat.runActivity.${props.activity}`) : ''
+})
 
 function notifyContentResized(): void {
   void nextTick(() => emit('content-resized'))

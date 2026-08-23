@@ -1,4 +1,8 @@
-import type { AssistantActivity, RunStatus } from '../../shared/agent-events'
+import type {
+  AssistantActivity,
+  ProviderRetryState,
+  RunStatus,
+} from '../../shared/agent-events'
 import type {
   ContextAttachmentChip,
   ContextAttachmentKind,
@@ -35,6 +39,7 @@ export interface SessionOverlay {
   runId?: RunId
   status: RunStatus
   streamActivity?: AssistantActivity
+  providerRetry?: ProviderRetryState
   text: string
   reasoning: string
   tools: ToolActivity[]
@@ -170,11 +175,12 @@ export function blankOverlay(): SessionOverlay {
 export function resolveRunActivity(
   overlay: Pick<
     SessionOverlay,
-    'approval' | 'runId' | 'status' | 'streamActivity'
+    'approval' | 'providerRetry' | 'runId' | 'status' | 'streamActivity'
   >,
 ): RunActivity | undefined {
   if (!overlay.runId) return undefined
   if (overlay.approval) return 'awaiting_approval'
+  if (overlay.providerRetry) return 'retrying_model'
 
   switch (overlay.status) {
     case 'idle':

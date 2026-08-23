@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox'
 import {
   PolicySignalSchema,
+  ProviderRetryStateSchema,
   RunStatusSchema,
   ToolResultEnvelopeSchema,
 } from './agent-events'
@@ -73,6 +74,7 @@ export const ActiveRunPublicSnapshotSchema = Type.Object(
     status: RunStatusSchema,
     text: Type.String({ maxLength: MAX_RUNTIME_TEXT_LENGTH }),
     reasoning: Type.String({ maxLength: MAX_RUNTIME_TEXT_LENGTH }),
+    providerRetry: Type.Optional(ProviderRetryStateSchema),
     tools: Type.Array(ActiveRunToolSnapshotSchema, {
       maxItems: MAX_RUNTIME_TOOL_RECORDS,
     }),

@@ -24,14 +24,22 @@ export function updatePublicRunSnapshot(
       snapshot.reasoning = ''
     }
     snapshot.status = event.status
+    delete snapshot.providerRetry
+  } else if (event.type === 'assistant.activity') {
+    delete snapshot.providerRetry
   } else if (event.type === 'assistant.text.delta') {
+    delete snapshot.providerRetry
     snapshot.text = boundedRuntimeText(snapshot.text, event.delta)
   } else if (event.type === 'assistant.reasoning.delta') {
+    delete snapshot.providerRetry
     snapshot.reasoning = boundedRuntimeText(snapshot.reasoning, event.delta)
   } else if (event.type === 'assistant.stream.reset') {
     snapshot.text = ''
     snapshot.reasoning = ''
+  } else if (event.type === 'provider.retrying') {
+    snapshot.providerRetry = structuredClone(event.retry)
   } else if (event.type === 'assistant.message.completed') {
+    delete snapshot.providerRetry
     snapshot.text = event.text.slice(-MAX_RUNTIME_TEXT_LENGTH)
     snapshot.reasoning = (event.reasoning ?? '').slice(-MAX_RUNTIME_TEXT_LENGTH)
   } else if (event.type === 'tool.proposed') {

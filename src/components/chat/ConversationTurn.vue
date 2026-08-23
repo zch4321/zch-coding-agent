@@ -33,6 +33,7 @@ const emit = defineEmits<{
       v-if="turn.reasoningSegments.length || turn.runActivity"
       :segments="turn.reasoningSegments"
       :activity="turn.runActivity"
+      :provider-retry="turn.providerRetry"
       @content-resized="emit('content-resized')"
     />
 

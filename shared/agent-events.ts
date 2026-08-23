@@ -39,6 +39,16 @@ export const AssistantActivitySchema = Type.Union([
 ])
 export type AssistantActivity = Static<typeof AssistantActivitySchema>
 
+export const ProviderRetryStateSchema = Type.Object(
+  {
+    attempt: Type.Integer({ minimum: 2, maximum: 100 }),
+    maxAttempts: Type.Integer({ minimum: 2, maximum: 100 }),
+    delayMs: Type.Number({ minimum: 0, maximum: 60_000 }),
+  },
+  { additionalProperties: false },
+)
+export type ProviderRetryState = Static<typeof ProviderRetryStateSchema>
+
 export const ToolResultEnvelopeSchema = Type.Union([
   Type.Object(
     {
@@ -139,6 +149,15 @@ export const AgentEventSchema = Type.Union([
       type: Type.Literal('assistant.stream.reset'),
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
+      type: Type.Literal('provider.retrying'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      retry: ProviderRetryStateSchema,
     }),
   ]),
   Type.Composite([
