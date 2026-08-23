@@ -293,6 +293,8 @@ export function reduceTraceEvent(
     }
     case 'llm.request':
     case 'llm.response':
+    case 'llm.failure':
+    case 'llm.usage':
     case 'tool.attempt':
     case 'plan.status':
       break

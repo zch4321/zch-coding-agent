@@ -72,4 +72,40 @@ describe('public run snapshot', () => {
       items: [{ step: 'Verify snapshot', status: 'in_progress' }],
     })
   })
+
+  it('discards partial streaming content before a Provider retry', () => {
+    const run = activeRun()
+    run.publicSnapshot.status = 'calling_llm'
+    run.publicSnapshot.text = 'partial answer'
+    run.publicSnapshot.reasoning = 'partial reasoning'
+
+    updatePublicRunSnapshot(run, {
+      type: 'assistant.stream.reset',
+      sessionId: run.publicSnapshot.sessionId,
+      runId: run.publicSnapshot.runId,
+    })
+
+    expect(run.publicSnapshot.text).toBe('')
+    expect(run.publicSnapshot.reasoning).toBe('')
+
+    updatePublicRunSnapshot(run, {
+      type: 'provider.retrying',
+      sessionId: run.publicSnapshot.sessionId,
+      runId: run.publicSnapshot.runId,
+      retry: { attempt: 2, maxAttempts: 3, delayMs: 250 },
+    })
+    expect(run.publicSnapshot.providerRetry).toEqual({
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 250,
+    })
+
+    updatePublicRunSnapshot(run, {
+      type: 'assistant.text.delta',
+      sessionId: run.publicSnapshot.sessionId,
+      runId: run.publicSnapshot.runId,
+      delta: 'recovered',
+    })
+    expect(run.publicSnapshot.providerRetry).toBeUndefined()
+  })
 })

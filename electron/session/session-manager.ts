@@ -218,6 +218,7 @@ export class SessionManager {
         this.#workspaceConcurrencyContext(session),
       executionState: this.#executionState,
       historySource: options.historySource,
+      operationalLog: options.operationalLog,
     })
     this.#interjections = new SessionInterjectionCoordinator({
       configStore: this.#configStore,
@@ -246,6 +247,7 @@ export class SessionManager {
       fetchImpl: this.#fetchImpl,
       providerFactory: this.#providerFactory,
       onDiagnostic: this.#onDiagnostic,
+      operationalLog: options.operationalLog,
       emit: (session, event) => this.#emit(session, event),
       getWorkspaceConcurrency: (session) =>
         this.#workspaceConcurrencyContext(session),
@@ -263,6 +265,7 @@ export class SessionManager {
       contextGate: this.#contextGate,
       mcpGateway: this.#mcpGateway,
       onDiagnostic: this.#onDiagnostic,
+      operationalLog: options.operationalLog,
       emit: (session, event) => this.#emit(session, event),
       setRunStatus: (session, run, status, error) =>
         this.#runs.setRunStatus(session, run, status, error),
@@ -282,6 +285,7 @@ export class SessionManager {
       executionState: this.#executionState,
       beforeRun: (session) => session.trace.beforeRun(),
       afterRun: (session) => session.trace.afterRun(),
+      operationalLog: options.operationalLog,
     })
     this.#pluginBus?.setToolRegistrationPort(this.#toolRegistry)
   }
@@ -377,7 +381,7 @@ export class SessionManager {
 
     if (
       !internal &&
-      publicConfig.logging.enabled &&
+      publicConfig.logging.trace.enabled &&
       publicConfig.privacy.traceNoticeAccepted?.version !== TRACE_NOTICE_VERSION
     ) {
       ipcFault(
@@ -422,7 +426,7 @@ export class SessionManager {
       model: () =>
         sessionRef.current?.modelSelection.model ?? initialModelSelection.model,
       mode: () => sessionRef.current?.mode ?? input.mode,
-      configuredEnabled: internal ? false : publicConfig.logging.enabled,
+      configuredEnabled: internal ? false : publicConfig.logging.trace.enabled,
       factory: this.#traceLoggerFactory,
       onStatus: (capture) => {
         if (sessionRef.current) {
@@ -534,7 +538,7 @@ export class SessionManager {
         sessionRef.current?.modelSelection.model ??
         input.record.modelSelection.model,
       mode: () => sessionRef.current?.mode ?? input.record.permissionMode,
-      configuredEnabled: publicConfig.logging.enabled,
+      configuredEnabled: publicConfig.logging.trace.enabled,
       factory: this.#traceLoggerFactory,
       onStatus: (capture) => {
         if (sessionRef.current) {
@@ -1476,8 +1480,8 @@ export class SessionManager {
     )
 
     await cleanupTraces(this.#traceDirectory, {
-      retentionDays: config.logging.retentionDays,
-      maxTotalBytes: config.logging.maxTotalBytes,
+      retentionDays: config.logging.trace.retentionDays,
+      maxTotalBytes: config.logging.trace.maxTotalBytes,
       activeFiles,
       onDiagnostic: this.#onDiagnostic,
     })

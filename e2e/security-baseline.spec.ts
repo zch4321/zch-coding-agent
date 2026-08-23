@@ -57,7 +57,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 22,
+          schemaVersion: 23,
           models: {
             defaultModelProvider: 'deepseek',
             defaultModelReasoning: 'high',

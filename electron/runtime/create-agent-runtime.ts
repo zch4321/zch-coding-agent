@@ -19,6 +19,7 @@ import type {
 import type { FileChangeExecutionPort } from '../session/file-change-execution'
 import type { SubagentExecutionPort } from '../subagent/contracts'
 import type { SwarmExecutionPort } from '../swarm/contracts'
+import type { OperationalLogService } from '../operational-logging/service'
 
 export interface CreateAgentRuntimeOptions {
   configStore: ConfigStore
@@ -41,6 +42,7 @@ export interface CreateAgentRuntimeOptions {
   swarmExecution?: SwarmExecutionPort
   swarmHostEnabled?: boolean
   onDiagnostic?: (message: string, error?: unknown) => void
+  operationalLog?: Pick<OperationalLogService, 'log'>
 }
 
 /** Builds the privileged services, event plumbing, and AgentRuntime composition. */
@@ -99,6 +101,7 @@ export async function createAgentRuntime(
       executionState: options.executionState,
       historySource: options.historySource,
       onDiagnostic,
+      operationalLog: options.operationalLog,
     })
     disposer.add(() => sessions.dispose())
 

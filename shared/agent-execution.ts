@@ -1,5 +1,10 @@
 import { Type, type Static } from '@sinclair/typebox'
-import { RunStatusSchema, ToolResultEnvelopeSchema } from './agent-events'
+import {
+  AssistantActivitySchema,
+  ProviderRetryStateSchema,
+  RunStatusSchema,
+  ToolResultEnvelopeSchema,
+} from './agent-events'
 import {
   DateTimeSchema,
   MAX_MESSAGE_PAGE_RECORDS,
@@ -214,6 +219,7 @@ export const AgentExecutionLiveOverlaySchema = Type.Object(
     status: RunStatusSchema,
     text: Type.String({ maxLength: MAX_RUNTIME_TEXT_LENGTH }),
     reasoning: Type.String({ maxLength: MAX_RUNTIME_TEXT_LENGTH }),
+    providerRetry: Type.Optional(ProviderRetryStateSchema),
     tools: Type.Array(
       Type.Object(
         {
@@ -292,6 +298,35 @@ export const AgentExecutionEventSchema = Type.Union([
             { additionalProperties: false },
           ),
         ),
+      }),
+    ],
+    { additionalProperties: false },
+  ),
+  Type.Composite(
+    [
+      AgentExecutionEventBaseSchema,
+      Type.Object({
+        type: Type.Literal('assistant.activity'),
+        activity: AssistantActivitySchema,
+      }),
+    ],
+    { additionalProperties: false },
+  ),
+  Type.Composite(
+    [
+      AgentExecutionEventBaseSchema,
+      Type.Object({
+        type: Type.Literal('assistant.stream.reset'),
+      }),
+    ],
+    { additionalProperties: false },
+  ),
+  Type.Composite(
+    [
+      AgentExecutionEventBaseSchema,
+      Type.Object({
+        type: Type.Literal('provider.retrying'),
+        retry: ProviderRetryStateSchema,
       }),
     ],
     { additionalProperties: false },

@@ -165,7 +165,11 @@ describe('HttpSseTransport', () => {
           JSON.stringify({ error: { code: 'rate_limit_exceeded' } }),
           {
             status: 429,
-            headers: { 'retry-after': '1.5' },
+            headers: {
+              'retry-after': '1.5',
+              'x-request-id': 'request-safe',
+              'set-cookie': 'must-not-be-captured',
+            },
           },
         ),
     ) as unknown as typeof fetch
@@ -174,6 +178,11 @@ describe('HttpSseTransport', () => {
       status: 429,
       retryAfterMs: 1_500,
       providerErrorCode: 'rate_limit_exceeded',
+      requestId: 'request-safe',
+      evidence: {
+        kind: 'http_body',
+        content: '{"error":{"code":"rate_limit_exceeded"}}',
+      },
     })
 
     const invalidFetch = vi.fn(async () =>
@@ -181,6 +190,7 @@ describe('HttpSseTransport', () => {
     ) as unknown as typeof fetch
     await expect(collect(transport(invalidFetch))).rejects.toMatchObject({
       code: 'INVALID_SSE',
+      evidence: { kind: 'invalid_sse', content: 'not-json' },
     })
 
     const oversizedFetch = vi.fn(async () =>
@@ -215,7 +225,10 @@ describe('HttpSseTransport', () => {
     )
     await expect(
       invalid.postJsonObject({}, new AbortController().signal),
-    ).rejects.toMatchObject({ code: 'INVALID_JSON' })
+    ).rejects.toMatchObject({
+      code: 'INVALID_JSON',
+      evidence: { kind: 'invalid_json', content: 'not-json' },
+    })
 
     const array = transport(
       vi.fn(async () => Response.json([])) as unknown as typeof fetch,

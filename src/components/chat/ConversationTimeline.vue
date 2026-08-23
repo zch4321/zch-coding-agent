@@ -73,7 +73,10 @@ const timelineRenderSignature = computed(() =>
       const messages = turn.messages
         .map((message) => `${message.id}:${message.text.length}`)
         .join(',')
-      return `${turn.id}|${turn.runActivity ?? ''}|${tools}|${reasoning}|${messages}`
+      const retry = turn.providerRetry
+        ? `${turn.providerRetry.attempt}/${turn.providerRetry.maxAttempts}`
+        : ''
+      return `${turn.id}|${turn.runActivity ?? ''}:${retry}|${tools}|${reasoning}|${messages}`
     })
     .join(';'),
 )

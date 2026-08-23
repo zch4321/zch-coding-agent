@@ -20,8 +20,20 @@ const agent = useAgentStore()
 const traces = useTraceStore()
 const { t } = useI18n()
 const clearDialogOpen = ref(false)
+const runtimeClearDialogOpen = ref(false)
 const clearPending = ref(false)
-onMounted(() => void traces.load())
+const runtimeClearPending = ref(false)
+onMounted(() => {
+  void traces.load()
+  void agent.loadRuntimeLogStatus()
+})
+const operationalLevelOptions = computed(() => [
+  { label: t('logging.levelOff'), value: 'off' },
+  { label: t('logging.levelError'), value: 'error' },
+  { label: t('logging.levelWarn'), value: 'warn' },
+  { label: t('logging.levelInfo'), value: 'info' },
+  { label: t('logging.levelDebug'), value: 'debug' },
+])
 const promptRequest = computed(() => traces.selectedPromptRequest)
 const promptLayers = computed(
   () => promptRequest.value?.promptBuild?.layers ?? [],
@@ -53,6 +65,17 @@ async function clearClosedTraces() {
   }
 }
 
+async function clearRuntimeLogs() {
+  if (runtimeClearPending.value) return
+  runtimeClearPending.value = true
+  try {
+    await agent.clearRuntimeLogs()
+    runtimeClearDialogOpen.value = false
+  } finally {
+    runtimeClearPending.value = false
+  }
+}
+
 function jsonText(value: unknown) {
   return JSON.stringify(value, null, 2)
 }
@@ -80,17 +103,22 @@ function interjectionTitle(interjection: {
       <h2>{{ t('logging.title') }}</h2>
       <p>{{ t('logging.hint') }}</p>
     </div>
-    <div class="settings-switch-row">
-      <div>
-        <strong>{{ t('logging.full') }}</strong>
-        <p>{{ t('logging.fullHint') }}</p>
-      </div>
-      <NSwitch v-model:value="agent.loggingForm.enabled" />
+
+    <div class="settings-heading">
+      <h3>{{ t('logging.operational') }}</h3>
+      <p>{{ t('logging.operationalHint') }}</p>
     </div>
+    <label class="settings-field">
+      <span>{{ t('logging.level') }}</span>
+      <NSelect
+        v-model:value="agent.loggingForm.operational.level"
+        :options="operationalLevelOptions"
+      />
+    </label>
     <label class="settings-field">
       <span>{{ t('logging.retention') }}</span>
       <NInputNumber
-        v-model:value="agent.loggingForm.retentionDays"
+        v-model:value="agent.loggingForm.operational.retentionDays"
         :min="1"
         :max="3650"
       />
@@ -98,7 +126,72 @@ function interjectionTitle(interjection: {
     <label class="settings-field">
       <span>{{ t('logging.maxSize') }}</span>
       <NInputNumber
-        v-model:value="agent.loggingForm.maxTotalMegabytes"
+        v-model:value="agent.loggingForm.operational.maxTotalMegabytes"
+        :min="1"
+        :max="10000"
+      />
+    </label>
+    <NAlert v-if="agent.runtimeLogStatus?.degraded" type="warning">
+      {{
+        t('logging.operationalDegraded', {
+          warning: agent.runtimeLogStatus.warning ?? '',
+        })
+      }}
+    </NAlert>
+    <div class="settings-actions">
+      <NButton secondary @click="agent.openRuntimeLogDirectory">
+        {{ t('logging.openOperationalDirectory') }}
+      </NButton>
+      <NButton secondary @click="agent.loadRuntimeLogStatus">
+        {{ t('logging.refreshStatus') }}
+      </NButton>
+      <NButton secondary type="error" @click="runtimeClearDialogOpen = true">
+        {{ t('logging.clearOperational') }}
+      </NButton>
+    </div>
+    <NAlert v-if="agent.runtimeLogActionMessage" type="info">
+      {{
+        t('logging.operationalCleared', {
+          count: agent.runtimeLogActionMessage,
+        })
+      }}
+    </NAlert>
+    <ConfirmDialog
+      v-model:show="runtimeClearDialogOpen"
+      :title="t('logging.clearOperationalTitle')"
+      :positive-text="t('logging.clearOperational')"
+      :negative-text="t('common.cancel')"
+      :loading="runtimeClearPending"
+      type="warning"
+      positive-type="error"
+      @positive="clearRuntimeLogs"
+    >
+      {{ t('logging.clearOperationalConfirm') }}
+    </ConfirmDialog>
+
+    <div class="settings-heading">
+      <h3>{{ t('logging.traceSection') }}</h3>
+      <p>{{ t('logging.fullHint') }}</p>
+    </div>
+    <div class="settings-switch-row">
+      <div>
+        <strong>{{ t('logging.full') }}</strong>
+        <p>{{ t('logging.fullHint') }}</p>
+      </div>
+      <NSwitch v-model:value="agent.loggingForm.trace.enabled" />
+    </div>
+    <label class="settings-field">
+      <span>{{ t('logging.retention') }}</span>
+      <NInputNumber
+        v-model:value="agent.loggingForm.trace.retentionDays"
+        :min="1"
+        :max="3650"
+      />
+    </label>
+    <label class="settings-field">
+      <span>{{ t('logging.maxSize') }}</span>
+      <NInputNumber
+        v-model:value="agent.loggingForm.trace.maxTotalMegabytes"
         :min="1"
         :max="10000"
       />
@@ -121,7 +214,7 @@ function interjectionTitle(interjection: {
     </NAlert>
     <div class="settings-actions">
       <NButton secondary @click="traces.openDirectory">
-        {{ t('logging.openDirectory') }}
+        {{ t('logging.openTraceDirectory') }}
       </NButton>
       <NButton secondary :loading="traces.loading" @click="traces.load">
         {{ t('logging.refresh') }}

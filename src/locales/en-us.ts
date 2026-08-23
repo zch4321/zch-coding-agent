@@ -32,6 +32,7 @@ const enUS = {
     loading: 'Loading…',
   },
   notifications: {
+    diagnosticId: 'Diagnostic ID: {id}',
     sessionMessage: '[{title}] {message}',
   },
   sidebar: {
@@ -87,6 +88,7 @@ const enUS = {
     reasoning: 'Reasoning',
     runActivity: {
       requesting_model: 'Requesting model',
+      retrying_model: 'Retrying {attempt}/{maxAttempts}',
       reasoning: 'Reasoning',
       output: 'Writing',
       calling_tool: 'Calling tool',
@@ -277,6 +279,7 @@ const enUS = {
     noAgentsHint:
       'Subagent activity will appear here when the Agent delegates work.',
     agentThinking: 'Thinking',
+    agentRetrying: 'Retrying {attempt}/{maxAttempts}',
     agentOutputting: 'Writing response',
     agentRunning: 'Running',
     agentCallingTool: 'Calling {tool}',
@@ -684,13 +687,32 @@ const enUS = {
   },
   logging: {
     title: 'Logging',
-    hint: 'Future actions in existing and new conversations are captured; existing history is not backfilled. Streaming chunks are not written.',
+    hint: 'Operational logs contain redacted metadata; full traces optionally contain content. Streaming chunks are never written.',
+    operational: 'Operational logs',
+    operationalHint:
+      'Records redacted Provider, tool, and backend metadata without prompts, commands, or tool content.',
+    level: 'Log level',
+    levelOff: 'Off',
+    levelError: 'Error',
+    levelWarn: 'Warning',
+    levelInfo: 'Info',
+    levelDebug: 'Debug',
+    operationalDegraded: 'Operational logging is degraded: {warning}',
+    openOperationalDirectory: 'Open operational log directory',
+    refreshStatus: 'Refresh status',
+    clearOperational: 'Clear historical operational logs',
+    clearOperationalTitle: 'Clear historical operational logs?',
+    clearOperationalConfirm:
+      'Delete every rotated operational log? The active file will be preserved.',
+    operationalCleared: 'Cleared {count} historical operational log files.',
+    traceSection: 'Full trace',
     full: 'Full trace logging',
     fullHint: 'May contain prompts, code, tool arguments and outputs.',
     retention: 'Retention days',
     maxSize: 'Maximum total size (MB)',
     save: 'Save logging settings',
     openDirectory: 'Open log directory',
+    openTraceDirectory: 'Open trace directory',
     refresh: 'Refresh traces',
     clear: 'Clear closed traces',
     clearTitle: 'Clear closed traces?',

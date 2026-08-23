@@ -45,6 +45,11 @@ import {
   toolResultProjectionText,
   toolResultProjectionValue,
 } from '../tools/tool-result-projection'
+import type { OperationalLogService } from '../operational-logging/service'
+import {
+  associateDiagnosticCode,
+  associateDiagnosticId,
+} from '../operational-logging/diagnostic-id'
 
 type ToolAttemptStage = 'validation' | 'permission' | 'execution'
 
@@ -123,6 +128,18 @@ function projectedEventResult(
   return { status: source.status, message }
 }
 
+function operationalToolCorrelation(session: SessionState, run: ActiveRun) {
+  return {
+    sessionId: session.sessionId,
+    runId: run.runId,
+    ...(run.lastToolBatchId ? { toolBatchId: run.lastToolBatchId } : {}),
+    ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
+    ...(session.internalExecution
+      ? { agentExecutionId: session.internalExecution.executionId }
+      : {}),
+  }
+}
+
 /** Executes tool calls, approvals, file changes, and provider-facing result annotations. */
 export class SessionToolRunner {
   readonly #configStore: ConfigStore
@@ -144,6 +161,7 @@ export class SessionToolRunner {
     status: RunStatus,
     error?: unknown,
   ) => void
+  readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
 
   constructor(options: {
     configStore: ConfigStore
@@ -158,6 +176,7 @@ export class SessionToolRunner {
     contextGate: SessionContextGate
     mcpGateway?: McpToolGateway
     onDiagnostic: DiagnosticSink
+    operationalLog?: Pick<OperationalLogService, 'log'>
     emit: (session: SessionState, event: AgentEventDraft) => void
     setRunStatus: (
       session: SessionState,
@@ -178,6 +197,7 @@ export class SessionToolRunner {
     this.#contextGate = options.contextGate
     this.#mcpGateway = options.mcpGateway
     this.#onDiagnostic = options.onDiagnostic
+    this.#operationalLog = options.operationalLog
     this.#emit = options.emit
     this.#setRunStatus = options.setRunStatus
   }
@@ -191,6 +211,12 @@ export class SessionToolRunner {
   ): Promise<void> {
     this.#setRunStatus(session, run, 'running_tools')
     const terminalCallIds = new Set<CallId>()
+    this.#operationalLog?.log({
+      level: 'debug',
+      event: 'tool.batch.started',
+      ...operationalToolCorrelation(session, run),
+      itemCount: toolCalls.length,
+    })
 
     try {
       for (const segment of this.#toolCallSegments(toolCalls)) {
@@ -238,6 +264,26 @@ export class SessionToolRunner {
       }
     } catch (error) {
       const cancelled = run.controller.signal.aborted
+      if (cancelled) {
+        this.#operationalLog?.log({
+          level: 'debug',
+          event: 'tool.batch.completed',
+          ...operationalToolCorrelation(session, run),
+          outcome: 'cancelled',
+          itemCount: toolCalls.length,
+        })
+      } else {
+        const diagnostic = this.#operationalLog?.log({
+          level: 'error',
+          event: 'tool.batch.failed',
+          ...operationalToolCorrelation(session, run),
+          code: 'TOOL_BATCH_FAILED',
+          error,
+          itemCount: toolCalls.length,
+        })
+        associateDiagnosticCode(error, 'TOOL_BATCH_FAILED')
+        associateDiagnosticId(error, diagnostic?.diagnosticId)
+      }
       for (const call of toolCalls) {
         if (terminalCallIds.has(call.id)) continue
         const result: ToolResult = cancelled
@@ -267,6 +313,14 @@ export class SessionToolRunner {
       }
       throw error
     }
+
+    this.#operationalLog?.log({
+      level: 'debug',
+      event: 'tool.batch.completed',
+      ...operationalToolCorrelation(session, run),
+      outcome: run.controller.signal.aborted ? 'cancelled' : 'completed',
+      itemCount: toolCalls.length,
+    })
 
     if (run.controller.signal.aborted) {
       throw run.controller.signal.reason ?? new Error('Run cancelled')
@@ -331,6 +385,14 @@ export class SessionToolRunner {
     } as const
     await session.logger.write(proposed)
     this.#emit(session, proposed)
+    this.#operationalLog?.log({
+      level: 'debug',
+      event: 'tool.proposed',
+      ...operationalToolCorrelation(session, run),
+      callId: call.id,
+      toolName: call.toolId,
+      inputBytes: serializedBytes(call.args),
+    })
 
     const execution: ToolCallExecution = {
       providerCall,
@@ -387,6 +449,21 @@ export class SessionToolRunner {
                   config.limits.autoApprovalTimeoutMs,
                   this.#promptRegistry?.approvalPrompt().content,
                   modelOutputTokenLimit(approvalBinding.modelProfile),
+                  {
+                    operationalLog: this.#operationalLog,
+                    sessionId: session.sessionId,
+                    runId: run.runId,
+                    callId: call.id,
+                    ...(session.internalExecution
+                      ? {
+                          agentExecutionId:
+                            session.internalExecution.executionId,
+                        }
+                      : {}),
+                    ...(session.logger.traceId
+                      ? { traceId: session.logger.traceId }
+                      : {}),
+                  },
                 ))
               : undefined
           const authorization = await this.#permissionPipeline.authorize({
@@ -541,6 +618,16 @@ export class SessionToolRunner {
   ): Promise<void> {
     if (execution.result) return
     const startedAt = performance.now()
+    this.#operationalLog?.log({
+      level: 'debug',
+      event: 'tool.execution.started',
+      ...operationalToolCorrelation(session, run),
+      callId: execution.call.id,
+      toolName: execution.call.toolId,
+      executionMode: execution.definition?.executionMode,
+      effects: execution.attemptEffects,
+      phase: execution.attemptStage,
+    })
     try {
       if (run.controller.signal.aborted) {
         execution.result = {
@@ -665,6 +752,31 @@ export class SessionToolRunner {
     }
     await session.logger.write(attempt)
     this.#emit(session, attempt)
+    const outputBytes =
+      'totalBytes' in result && result.totalBytes !== undefined
+        ? result.totalBytes
+        : serializedBytes(result)
+    const operationalFailure =
+      result.status !== 'ok' && result.status !== 'cancelled'
+    this.#operationalLog?.log({
+      level: operationalFailure ? 'warn' : 'debug',
+      event: operationalFailure
+        ? 'tool.execution.failed'
+        : 'tool.execution.completed',
+      ...operationalToolCorrelation(session, run),
+      callId: execution.call.id,
+      toolName: execution.call.toolId,
+      executionMode: execution.definition?.executionMode,
+      effects: execution.attemptEffects,
+      phase: execution.attemptStage,
+      approval: execution.approvedBy,
+      durationMs,
+      inputBytes: serializedBytes(execution.call.args),
+      outputBytes,
+      truncated: 'truncated' in result && result.truncated === true,
+      outcome: attempt.outcome,
+      ...(result.status === 'error' ? { code: result.code } : {}),
+    })
 
     await session.logger.write({
       type: 'tool.call',

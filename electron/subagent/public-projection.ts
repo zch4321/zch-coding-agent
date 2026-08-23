@@ -148,6 +148,9 @@ export function projectAgentExecutionLiveOverlay(
     status: snapshot.status,
     text: snapshot.text,
     reasoning: snapshot.reasoning,
+    ...(snapshot.providerRetry
+      ? { providerRetry: structuredClone(snapshot.providerRetry) }
+      : {}),
     tools: snapshot.tools.map((tool) => ({
       callId: tool.callId,
       tool: tool.tool,

@@ -42,6 +42,22 @@ import {
   type WorkspaceConcurrencyContext,
 } from './prompt-harness'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
+import type { OperationalLogService } from '../operational-logging/service'
+import {
+  ProviderAttemptRecorder,
+  requestDiagnosticFields,
+} from '../operational-logging/provider-attempt-recorder'
+import {
+  recordProviderAttemptFailure,
+  writeProviderFailureTrace,
+} from './provider-failure-diagnostics'
+import {
+  createProviderTurnRetryBudget,
+  MAX_PROVIDER_TURN_ATTEMPTS,
+  ProviderStreamIncompleteError,
+  providerTurnRetryDecision,
+  waitForProviderTurnRetry,
+} from './session-provider-retry'
 
 export interface ProviderTurnResult {
   parts: MessagePart[]
@@ -66,6 +82,7 @@ export class SessionProviderTurnRunner {
   readonly #getWorkspaceConcurrency: (
     session: SessionState,
   ) => WorkspaceConcurrencyContext
+  readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
 
   constructor(options: {
     configStore: ConfigStore
@@ -75,6 +92,7 @@ export class SessionProviderTurnRunner {
     fetchImpl?: typeof fetch
     providerFactory: SessionManagerOptions['providerFactory']
     onDiagnostic: DiagnosticSink
+    operationalLog?: Pick<OperationalLogService, 'log'>
     emit: (session: SessionState, event: AgentEventDraft) => void
     getWorkspaceConcurrency?: (
       session: SessionState,
@@ -87,28 +105,34 @@ export class SessionProviderTurnRunner {
     this.#fetchImpl = options.fetchImpl
     this.#providerFactory = options.providerFactory
     this.#onDiagnostic = options.onDiagnostic
+    this.#operationalLog = options.operationalLog
     this.#emit = options.emit
     this.#getWorkspaceConcurrency =
       options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
   }
 
-  async #writeFailedResponse(
+  async #writeFailure(
     session: SessionState,
     run: ActiveRun,
     callId: CallId,
     apiKey: string,
-    diagnostics: ProviderResponseDiagnostics,
+    error: unknown,
+    diagnostics?: ProviderResponseDiagnostics,
+    classification?: { stage: string; code: string },
   ): Promise<void> {
-    await session.logger.write({
-      type: 'llm.response',
+    await writeProviderFailureTrace({
+      logger: session.logger,
       sessionId: session.sessionId,
       runId: run.runId,
       callId,
-      rawResponse: redactJsonSecrets(diagnostics.rawResponse, [apiKey]),
-      normalizedTurn: null,
-      providerState: redactJsonSecrets(diagnostics.providerState, [apiKey]),
-      usage: diagnostics.usage,
-      timing: toJsonValue(diagnostics.timing),
+      ...(session.internalExecution
+        ? { agentExecutionId: session.internalExecution.executionId }
+        : {}),
+      apiKey,
+      operation: 'main',
+      error,
+      ...(diagnostics ? { diagnostics } : {}),
+      ...(classification ? { classification } : {}),
     })
   }
 
@@ -195,183 +219,261 @@ export class SessionProviderTurnRunner {
         )
     }
 
-    const llmCallId = id<CallId>('llm')
-    let reasoning = ''
-    let streamActivity: AssistantActivity | undefined
-    let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
-    const emitActivity = (activity: AssistantActivity): void => {
-      if (streamActivity === activity) return
-      streamActivity = activity
-      this.#emit(session, {
-        type: 'assistant.activity',
+    const diagnostics = providerRequestDiagnostics(compiled)
+    const retryBudget = createProviderTurnRetryBudget()
+    for (
+      let attemptNumber = 1;
+      attemptNumber <= MAX_PROVIDER_TURN_ATTEMPTS;
+      attemptNumber += 1
+    ) {
+      const llmCallId = id<CallId>('llm')
+      let reasoning = ''
+      let streamActivity: AssistantActivity | undefined
+      let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
+      let accepted: Extract<ProviderEvent, { type: 'completed' }> | undefined
+      let failureClassification: { stage: string; code: string } | undefined
+      const emitActivity = (activity: AssistantActivity): void => {
+        if (streamActivity === activity) return
+        streamActivity = activity
+        this.#emit(session, {
+          type: 'assistant.activity',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          activity,
+        })
+      }
+      const attempt = new ProviderAttemptRecorder(this.#operationalLog, {
+        operation: 'main',
         sessionId: session.sessionId,
         runId: run.runId,
-        activity,
+        providerCallId: llmCallId,
+        ...(session.internalExecution
+          ? { agentExecutionId: session.internalExecution.executionId }
+          : {}),
+        ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
+        providerId: binding.snapshot.providerId,
+        providerType: provider.providerType,
+        model: binding.snapshot.model,
+        reasoning: binding.snapshot.reasoning,
+        endpoint: binding.snapshot.endpoint,
+        messageCount: compiled.normalizedMessages.length,
+        toolCount: compiled.tools.length,
+        ...requestDiagnosticFields(diagnostics),
+        attempt: attemptNumber,
+        maxAttempts: MAX_PROVIDER_TURN_ATTEMPTS,
       })
-    }
-    const diagnostics = providerRequestDiagnostics(compiled)
-    await session.logger.write({
-      type: 'llm.request',
-      sessionId: session.sessionId,
-      runId: run.runId,
-      callId: llmCallId,
-      scope: 'main',
-      normalizedMessages: redactJsonSecrets(compiled.normalizedMessages, [
-        binding.apiKey,
-      ]) as JsonValue[],
-      providerRequest: redactJsonSecrets(compiled.request, [binding.apiKey]),
-      requestBytes: diagnostics.requestBytes,
-      prefixHash: diagnostics.prefixHash,
-      promptResources: promptResources(session),
-      promptBuild: selection.promptBuild,
-      canonicalSource: canonicalTraceSource(selection.messages),
-      modelRoute: binding.snapshot,
-    })
+      await session.logger.write({
+        type: 'llm.request',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: llmCallId,
+        scope: 'main',
+        normalizedMessages: redactJsonSecrets(compiled.normalizedMessages, [
+          binding.apiKey,
+        ]) as JsonValue[],
+        providerRequest: redactJsonSecrets(compiled.request, [binding.apiKey]),
+        requestFields: diagnostics.requestFields,
+        wireParameters: redactJsonSecrets(diagnostics.wireParameters, [
+          binding.apiKey,
+        ]),
+        requestBytes: diagnostics.requestBytes,
+        prefixHash: diagnostics.prefixHash,
+        promptResources: promptResources(session),
+        promptBuild: selection.promptBuild,
+        canonicalSource: canonicalTraceSource(selection.messages),
+        modelRoute: binding.snapshot,
+      })
 
-    try {
-      for await (const event of provider.stream(compiled, {
-        signal: run.controller.signal,
-      })) {
-        if (event.type === 'text.delta') {
-          emitActivity('output')
-          this.#emit(session, {
-            type: 'assistant.text.delta',
-            sessionId: session.sessionId,
-            runId: run.runId,
-            delta: event.delta,
-          })
-        } else if (event.type === 'reasoning.delta') {
-          if (binding.snapshot.reasoning !== 'off') {
-            emitActivity('reasoning')
-            reasoning += event.delta
+      try {
+        for await (const event of provider.stream(compiled, {
+          signal: run.controller.signal,
+        })) {
+          if (event.type === 'text.delta') {
+            emitActivity('output')
             this.#emit(session, {
-              type: 'assistant.reasoning.delta',
+              type: 'assistant.text.delta',
               sessionId: session.sessionId,
               runId: run.runId,
               delta: event.delta,
             })
+          } else if (event.type === 'reasoning.delta') {
+            if (binding.snapshot.reasoning !== 'off') {
+              emitActivity('reasoning')
+              reasoning += event.delta
+              this.#emit(session, {
+                type: 'assistant.reasoning.delta',
+                sessionId: session.sessionId,
+                runId: run.runId,
+                delta: event.delta,
+              })
+            }
+          } else if (event.type === 'tool.delta') {
+            emitActivity('tool_call')
+          } else if (event.type === 'completed') {
+            if (completed) {
+              throw new TypeError(
+                'Provider stream produced multiple completions',
+              )
+            }
+            completed = event
           }
-        } else if (event.type === 'tool.delta') {
-          emitActivity('tool_call')
-        } else if (event.type === 'completed') {
-          if (completed) {
-            throw new Error('Provider stream produced multiple completions')
-          }
-          completed = event
         }
-      }
-    } catch (error) {
-      const failure =
-        error instanceof ProviderCompletionError
-          ? error.diagnostics
-          : completed
-            ? providerCompletionDiagnostics(completed)
-            : undefined
-      if (failure) {
-        await this.#writeFailedResponse(
+        if (!completed) throw new ProviderStreamIncompleteError()
+        const canonical = completed.turn
+        try {
+          assertCompletedAssistantTurn(canonical)
+          assertAssistantTurnCandidate(session, {
+            parts: canonical.parts,
+            reasoning: canonical.normalizedReasoningText,
+            finishReason: canonical.finishReason,
+            route: binding.snapshot,
+            continuation: canonical.providerContinuation,
+          })
+        } catch (error) {
+          failureClassification = {
+            stage: 'validation',
+            code: 'PROVIDER_COMPLETION_INVALID',
+          }
+          throw error
+        }
+        accepted = completed
+      } catch (error) {
+        if (run.controller.signal.aborted) {
+          attempt.completed({ outcome: 'cancelled' })
+          throw error
+        }
+        const failure =
+          error instanceof ProviderCompletionError
+            ? error.diagnostics
+            : completed
+              ? providerCompletionDiagnostics(completed)
+              : undefined
+        recordProviderAttemptFailure(
+          attempt,
+          error,
+          failure,
+          failureClassification?.code,
+        )
+        await this.#writeFailure(
           session,
           run,
           llmCallId,
           binding.apiKey,
+          error,
           failure,
+          failureClassification,
         )
-        this.#onDiagnostic('Provider completion failed', error, {
-          audience: 'internal',
-        })
-      }
-      throw error
-    }
-
-    if (!completed) throw new Error('Provider stream ended without completion')
-    const canonical = completed.turn
-    try {
-      assertCompletedAssistantTurn(canonical)
-      assertAssistantTurnCandidate(session, {
-        parts: canonical.parts,
-        reasoning: canonical.normalizedReasoningText,
-        finishReason: canonical.finishReason,
-        route: binding.snapshot,
-        continuation: canonical.providerContinuation,
-      })
-    } catch (error) {
-      await this.#writeFailedResponse(
-        session,
-        run,
-        llmCallId,
-        binding.apiKey,
-        providerCompletionDiagnostics(completed),
-      )
-      this.#onDiagnostic('Provider completion validation failed', error, {
-        audience: 'internal',
-      })
-      throw error
-    }
-    const canonicalText = canonical.parts
-      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
-      .join('\n')
-
-    await session.logger.write({
-      type: 'llm.response',
-      sessionId: session.sessionId,
-      runId: run.runId,
-      callId: llmCallId,
-      rawResponse: redactJsonSecrets(completed.rawResponse, [binding.apiKey]),
-      normalizedTurn: redactJsonSecrets(toJsonValue(canonical), [
-        binding.apiKey,
-      ]),
-      providerState: redactJsonSecrets(completed.providerState, [
-        binding.apiKey,
-      ]),
-      usage: canonical.usage.raw,
-      timing: toJsonValue(completed.timing),
-    })
-    const usage = normalizeLlmUsage({
-      scope: 'main',
-      config,
-      provider: binding.provider,
-      model: binding.snapshot.model,
-      modelProfile: binding.modelProfile,
-      usage: canonical.usage,
-    })
-    if (usage) {
-      run.usageRecords.push(structuredClone(usage))
-      await session.logger.write({
-        type: 'llm.usage',
-        sessionId: session.sessionId,
-        runId: run.runId,
-        callId: llmCallId,
-        usage,
-      })
-      this.#emit(session, {
-        type: 'llm.usage',
-        sessionId: session.sessionId,
-        runId: run.runId,
-        callId: llmCallId,
-        usage,
-      })
-    }
-    if (session.visibility === 'public') {
-      await this.#pluginBus
-        ?.emit('afterLLMCall', {
-          version: 1,
+        if (failureClassification) {
+          this.#onDiagnostic('Provider completion validation failed', error, {
+            audience: 'internal',
+          })
+        } else if (failure) {
+          this.#onDiagnostic('Provider completion failed', error, {
+            audience: 'internal',
+          })
+        }
+        const retry =
+          attemptNumber < MAX_PROVIDER_TURN_ATTEMPTS
+            ? providerTurnRetryDecision(error, retryBudget)
+            : undefined
+        if (!retry) throw error
+        this.#emit(session, {
+          type: 'assistant.stream.reset',
           sessionId: session.sessionId,
           runId: run.runId,
-          response: completed.rawResponse,
-          usage: canonical.usage.raw,
         })
-        .catch((error: unknown) =>
-          this.#onDiagnostic('Plugin afterLLMCall failed', error),
-        )
-    }
+        this.#emit(session, {
+          type: 'provider.retrying',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          retry: {
+            attempt: attemptNumber + 1,
+            maxAttempts: MAX_PROVIDER_TURN_ATTEMPTS,
+            delayMs: retry.delayMs,
+          },
+        })
+        await waitForProviderTurnRetry(retry.delayMs, run.controller.signal)
+        continue
+      }
 
-    return {
-      parts: structuredClone(canonical.parts),
-      toolCalls: canonical.toolCalls,
-      text: canonicalText,
-      reasoning: canonical.normalizedReasoningText ?? reasoning,
-      finishReason: canonical.finishReason,
-      continuation: canonical.providerContinuation,
-      usage: structuredClone(canonical.usage),
+      if (!accepted) {
+        throw new Error('Provider retry loop accepted no completion')
+      }
+      const canonical = accepted.turn
+      const canonicalText = canonical.parts
+        .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+        .join('\n')
+
+      await session.logger.write({
+        type: 'llm.response',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: llmCallId,
+        rawResponse: redactJsonSecrets(accepted.rawResponse, [binding.apiKey]),
+        normalizedTurn: redactJsonSecrets(toJsonValue(canonical), [
+          binding.apiKey,
+        ]),
+        providerState: redactJsonSecrets(accepted.providerState, [
+          binding.apiKey,
+        ]),
+        usage: canonical.usage.raw,
+        timing: toJsonValue(accepted.timing),
+      })
+      attempt.completed({
+        durationMs: accepted.timing.totalMs,
+        ttftMs: accepted.timing.ttftMs,
+        responseBytes: accepted.timing.responseBytes,
+        usage: canonical.usage,
+      })
+      const usage = normalizeLlmUsage({
+        scope: 'main',
+        config,
+        provider: binding.provider,
+        model: binding.snapshot.model,
+        modelProfile: binding.modelProfile,
+        usage: canonical.usage,
+      })
+      if (usage) {
+        run.usageRecords.push(structuredClone(usage))
+        await session.logger.write({
+          type: 'llm.usage',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          callId: llmCallId,
+          usage,
+        })
+        this.#emit(session, {
+          type: 'llm.usage',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          callId: llmCallId,
+          usage,
+        })
+      }
+      if (session.visibility === 'public') {
+        await this.#pluginBus
+          ?.emit('afterLLMCall', {
+            version: 1,
+            sessionId: session.sessionId,
+            runId: run.runId,
+            response: accepted.rawResponse,
+            usage: canonical.usage.raw,
+          })
+          .catch((error: unknown) =>
+            this.#onDiagnostic('Plugin afterLLMCall failed', error),
+          )
+      }
+
+      return {
+        parts: structuredClone(canonical.parts),
+        toolCalls: canonical.toolCalls,
+        text: canonicalText,
+        reasoning: canonical.normalizedReasoningText ?? reasoning,
+        finishReason: canonical.finishReason,
+        continuation: canonical.providerContinuation,
+        usage: structuredClone(canonical.usage),
+      }
     }
+    throw new Error('Provider retry loop ended unexpectedly')
   }
 }

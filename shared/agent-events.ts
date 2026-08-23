@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox'
 import {
   CallIdSchema,
   RunIdSchema,
+  DiagnosticIdSchema,
   SessionIdSchema,
   TerminalIdSchema,
 } from './ids'
@@ -37,6 +38,16 @@ export const AssistantActivitySchema = Type.Union([
   Type.Literal('tool_call'),
 ])
 export type AssistantActivity = Static<typeof AssistantActivitySchema>
+
+export const ProviderRetryStateSchema = Type.Object(
+  {
+    attempt: Type.Integer({ minimum: 2, maximum: 100 }),
+    maxAttempts: Type.Integer({ minimum: 2, maximum: 100 }),
+    delayMs: Type.Number({ minimum: 0, maximum: 60_000 }),
+  },
+  { additionalProperties: false },
+)
+export type ProviderRetryState = Static<typeof ProviderRetryStateSchema>
 
 export const ToolResultEnvelopeSchema = Type.Union([
   Type.Object(
@@ -116,6 +127,7 @@ export const AgentEventSchema = Type.Union([
           {
             code: Type.String({ minLength: 1, maxLength: 128 }),
             message: Type.String({ maxLength: 65_536 }),
+            diagnosticId: Type.Optional(DiagnosticIdSchema),
           },
           { additionalProperties: false },
         ),
@@ -129,6 +141,23 @@ export const AgentEventSchema = Type.Union([
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
       activity: AssistantActivitySchema,
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
+      type: Type.Literal('assistant.stream.reset'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
+      type: Type.Literal('provider.retrying'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+      retry: ProviderRetryStateSchema,
     }),
   ]),
   Type.Composite([

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { WebContents } from 'electron'
 import { IPC_VERSION } from '../../shared/channels'
-import type { SessionId } from '../../shared/ids'
+import type { DiagnosticId, SessionId } from '../../shared/ids'
 import type { BackendNotificationEnvelope } from '../../shared/notifications'
 import { sendBackendNotification } from '../ipc/event-sink'
 import type { DiagnosticSink } from '../diagnostics'
@@ -10,7 +10,11 @@ const MAX_NOTIFICATION_MESSAGE_LENGTH = 1_024
 
 export interface BackendNotificationReporterOptions {
   getWebContents: () => WebContents | undefined
-  log?: (message: string, error?: unknown) => void
+  log?: (
+    message: string,
+    error?: unknown,
+    delivery?: Parameters<DiagnosticSink>[2],
+  ) => DiagnosticId | void
   now?: () => string
   createId?: () => string
 }
@@ -18,7 +22,7 @@ export interface BackendNotificationReporterOptions {
 /** Converts backend diagnostics into bounded, renderer-safe notifications. */
 export class BackendNotificationReporter {
   readonly #getWebContents: () => WebContents | undefined
-  readonly #log: (message: string, error?: unknown) => void
+  readonly #log: NonNullable<BackendNotificationReporterOptions['log']>
   readonly #now: () => string
   readonly #createId: () => string
 
@@ -32,19 +36,23 @@ export class BackendNotificationReporter {
 
   /** Logs a diagnostic and publishes it unless the producer marks it internal. */
   readonly reportDiagnostic: DiagnosticSink = (message, error, delivery) => {
-    this.#log(message, error)
-    if (delivery?.audience === 'internal') return
+    const loggedDiagnosticId = this.#log(message, error, delivery)
+    const diagnosticId =
+      delivery?.diagnosticId ?? loggedDiagnosticId ?? undefined
+    if (delivery?.audience === 'internal') return diagnosticId
     this.notify({
       severity: delivery?.severity ?? 'warning',
       code: delivery?.code ?? 'BACKEND_DIAGNOSTIC',
       message: delivery?.message ?? diagnosticMessage(message, error),
       ...(delivery?.sessionId ? { sessionId: delivery.sessionId } : {}),
+      ...(diagnosticId ? { diagnosticId } : {}),
     })
+    return diagnosticId
   }
 
   /** Logs diagnostics that already have a request-response delivery path. */
   readonly reportInternal = (message: string, error?: unknown): void => {
-    this.#log(message, error)
+    this.#log(message, error, { audience: 'internal' })
   }
 
   /** Publishes an explicitly classified safe notification when a window exists. */
@@ -53,6 +61,7 @@ export class BackendNotificationReporter {
     code: string
     message: string
     sessionId?: SessionId
+    diagnosticId?: DiagnosticId
   }): void {
     const webContents = this.#getWebContents()
     if (!webContents || webContents.isDestroyed()) return
@@ -64,6 +73,7 @@ export class BackendNotificationReporter {
       message: sanitizeDiagnosticMessage(input.message),
       occurredAt: this.#now(),
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.diagnosticId ? { diagnosticId: input.diagnosticId } : {}),
     }
     try {
       sendBackendNotification(webContents, envelope)
@@ -89,10 +99,7 @@ export function sanitizeDiagnosticMessage(message: string): string {
     )
     .replace(/https?:\/\/[^\s"'<>]+/giu, '<url>')
     .replace(/(?:[A-Za-z]:\\|\\\\)[^\s"'<>]+/gu, '<path>')
-    .replace(
-      /\/(?:Users|home|tmp|var|etc|opt|private|mnt|workspace)(?:\/[^\s"'<>:]+)+/gu,
-      '<path>',
-    )
+    .replace(/(^|[\s("'=])\/(?:[^/\s"'<>:]+\/)*[^/\s"'<>:]+/gu, '$1<path>')
     .replace(/\s+/gu, ' ')
     .trim()
   const bounded = redacted || 'A backend operation reported an error.'

@@ -4,8 +4,12 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { WebContents } from 'electron'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
-import type { CallId } from '../../shared/ids'
+import type { CallId, EventId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
+import type {
+  OperationalEventInput,
+  OperationalLogWriteResult,
+} from '../operational-logging/events'
 import {
   ScriptedProviderHarness,
   type ScriptedProviderEvent as ProviderEvent,
@@ -114,6 +118,74 @@ describe('SessionManager cancellation and forks', () => {
       }
     }
   }
+
+  class BlockingCancellationProvider extends ScriptedProviderHarness {
+    started = false
+
+    async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+      this.started = true
+      await new Promise<void>((_resolve, reject) => {
+        const abort = () =>
+          reject(request.signal.reason ?? new Error('Provider call cancelled'))
+        if (request.signal.aborted) abort()
+        else request.signal.addEventListener('abort', abort, { once: true })
+      })
+      yield* []
+    }
+  }
+
+  it('records an interrupted Provider call as a cancelled Run only', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-session-provider-cancel-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(directory)
+    const provider = new BlockingCancellationProvider()
+    const operationalEvents: OperationalEventInput[] = []
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink(() => undefined),
+      providerFactory: () => provider,
+      operationalLog: {
+        log(input: OperationalEventInput): OperationalLogWriteResult {
+          operationalEvents.push(input)
+          return {
+            eventId: `event:test-${operationalEvents.length}` as EventId,
+            written: true,
+          }
+        },
+      },
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    const runId = manager.startRun({
+      sessionId,
+      message: 'Wait until cancelled',
+      clientRequestId: 'request-provider-cancel',
+    })
+
+    await waitFor(() => provider.started)
+    expect(manager.interruptRun(sessionId, runId)).toBe(true)
+    await waitFor(() =>
+      operationalEvents.some((event) => event.event === 'run.cancelled'),
+    )
+
+    expect(
+      operationalEvents.some((event) => event.event === 'provider.failed'),
+    ).toBe(false)
+    expect(
+      operationalEvents.some((event) => event.event === 'run.failed'),
+    ).toBe(false)
+    expect(
+      operationalEvents.find((event) => event.event === 'provider.completed'),
+    ).toMatchObject({ level: 'debug', outcome: 'cancelled' })
+    await manager.closeSession(sessionId)
+  })
 
   it('fills every tool result when a multi-tool turn is interrupted', async () => {
     const directory = await mkdtemp(
@@ -242,6 +314,17 @@ describe('SessionManager cancellation and forks', () => {
           event.status === 'failed',
       ),
     )
+    const failedRun = sent.find(
+      ({ event }) =>
+        event.type === 'run.status' &&
+        event.runId === firstRunId &&
+        event.status === 'failed',
+    )
+    expect(
+      failedRun?.event.type === 'run.status'
+        ? failedRun.event.error?.code
+        : undefined,
+    ).toBe('TOOL_BATCH_FAILED')
     manager.startRun({
       sessionId,
       message: 'Continue after the infrastructure failure',

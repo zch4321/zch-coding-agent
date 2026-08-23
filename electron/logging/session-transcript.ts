@@ -331,6 +331,8 @@ export function normalizeSessionTranscript(
             requestEventId: event.eventId,
             data: jsonClone({
               requestBytes: event.requestBytes,
+              requestFields: event.requestFields ?? [],
+              wireParameters: event.wireParameters ?? null,
               prefixHash: event.prefixHash,
               promptResources: event.promptResources ?? [],
               promptBuild: event.promptBuild ?? null,
@@ -348,6 +350,38 @@ export function normalizeSessionTranscript(
             runId: event.runId,
             callId: event.callId,
             data: jsonClone(event.usage),
+          }),
+        )
+        break
+      case 'llm.failure':
+        entries.push(
+          entry(event, 'provider-failure', {
+            kind: 'provider_response',
+            categories: ['provider'],
+            title: `Provider failure · ${event.code}`,
+            runId: event.runId,
+            callId: event.callId,
+            data: jsonClone({
+              operation: event.operation,
+              stage: event.stage,
+              code: event.code,
+              diagnosticId: event.diagnosticId ?? null,
+              message: event.message,
+              httpStatus: event.httpStatus ?? null,
+              providerErrorCode: event.providerErrorCode ?? null,
+              retryAfterMs: event.retryAfterMs ?? null,
+              requestId: event.requestId ?? null,
+              timing: event.timing ?? null,
+              evidence: event.evidence
+                ? {
+                    kind: event.evidence.kind,
+                    observedBytes: event.evidence.observedBytes,
+                    capturedBytes: event.evidence.capturedBytes,
+                    truncated: event.evidence.truncated,
+                    sha256: event.evidence.sha256,
+                  }
+                : null,
+            }),
           }),
         )
         break

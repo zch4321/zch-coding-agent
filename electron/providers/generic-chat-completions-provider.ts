@@ -57,11 +57,16 @@ export class GenericChatCompletionsProvider implements ModelProvider {
     this.#createCallId = options.createCallId ?? createChatCallId
   }
 
-  /** Compiles canonical input without vendor-specific request fields. */
+  /** Compiles canonical input into the common Chat Completions request shape. */
   compile(input: ProviderCompileInput): CompiledProviderCall {
     if (input.route.providerType !== this.providerType) {
       throw new TypeError(
         `Route Provider ${input.route.providerType} does not match ${this.providerType}`,
+      )
+    }
+    if (!Number.isInteger(input.maxOutputTokens) || input.maxOutputTokens < 1) {
+      throw new RangeError(
+        'Provider max output tokens must be a positive integer',
       )
     }
     const normalizedMessages = compileChatMessages(
@@ -77,6 +82,9 @@ export class GenericChatCompletionsProvider implements ModelProvider {
       ...(wireTools.length > 0 ? { tools: wireTools } : {}),
       stream: true,
       stream_options: { include_usage: true },
+      max_tokens: input.maxOutputTokens,
+      reasoning_effort:
+        input.route.reasoning === 'off' ? 'none' : input.route.reasoning,
       ...(input.structuredOutput
         ? { response_format: { type: 'json_object' } }
         : {}),

@@ -57,12 +57,19 @@ function sessionTitle(notification: UiNotification): string | undefined {
 
 function content(notification: UiNotification): string {
   const title = sessionTitle(notification)
+  const detail = `[${notification.code}] ${notification.message}${
+    notification.diagnosticId
+      ? ` · ${t('notifications.diagnosticId', {
+          id: notification.diagnosticId,
+        })}`
+      : ''
+  }`
   return title
     ? t('notifications.sessionMessage', {
         title,
-        message: notification.message,
+        message: detail,
       })
-    : notification.message
+    : detail
 }
 
 function drain(): void {

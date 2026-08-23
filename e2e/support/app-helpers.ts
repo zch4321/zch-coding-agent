@@ -66,7 +66,18 @@ export async function configureApp(input: {
       type ConfigValue = {
         config: {
           assistant: { language: string }
-          logging: { enabled: boolean }
+          logging: {
+            operational: {
+              level: 'off' | 'error' | 'warn' | 'info' | 'debug'
+              retentionDays: number
+              maxTotalBytes: number
+            }
+            trace: {
+              enabled: boolean
+              retentionDays: number
+              maxTotalBytes: number
+            }
+          }
           limits: Record<string, unknown>
           models: {
             providers: Array<{ id: string; revision: number }>
@@ -261,9 +272,11 @@ export async function configureApp(input: {
           version: 1,
           kind: 'logging',
           value: {
-            enabled: true,
-            retentionDays: 14,
-            maxTotalBytes: 500_000_000,
+            ...current.value.config.logging,
+            trace: {
+              ...current.value.config.logging.trace,
+              enabled: true,
+            },
           },
         })
         if (!logging.ok) {
@@ -330,7 +343,10 @@ export async function configureApp(input: {
           message: `Expected assistant language ${assistantLanguage}, got ${finalConfig.value.config.assistant.language}`,
         }
       }
-      if (traceLogging && finalConfig.value.config.logging.enabled !== true) {
+      if (
+        traceLogging &&
+        finalConfig.value.config.logging.trace.enabled !== true
+      ) {
         return {
           ok: false,
           step: 'logging-final',

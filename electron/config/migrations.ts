@@ -22,6 +22,21 @@ import {
 
 const validateAppConfig = compileSchema(AppConfigSchema)
 
+// AppConfig v9-v22 shared this exact trace-only logging shape. Keep it frozen
+// so future logging changes cannot invalidate an otherwise migratable config.
+const LegacyLoggingConfigV22Schema = Type.Object(
+  {
+    enabled: Type.Boolean(),
+    retentionDays: Type.Integer({ minimum: 1, maximum: 3_650 }),
+    maxTotalBytes: Type.Integer({
+      minimum: 1_024,
+      maximum: 10_000_000_000,
+    }),
+  },
+  { additionalProperties: false },
+)
+type LegacyLoggingConfigV22 = Static<typeof LegacyLoggingConfigV22Schema>
+
 function withoutKey<
   Value extends Record<string, unknown>,
   Key extends keyof Value,
@@ -149,7 +164,7 @@ const LegacyAppConfigV9Schema = Type.Object(
       { additionalProperties: false },
     ),
     limits: LegacyLimitsWithRunToolBudgetSchema,
-    logging: PublicConfigSchema.properties.logging,
+    logging: LegacyLoggingConfigV22Schema,
     privacy: PublicConfigSchema.properties.privacy,
     workspace: PublicConfigSchema.properties.workspace,
     skills: PublicConfigSchema.properties.skills,
@@ -234,7 +249,7 @@ const LegacyAppConfigV15Schema = Type.Object(
     subagents: LegacySubagentsConfigSchema,
     permission: PublicConfigSchema.properties.permission,
     limits: PublicConfigSchema.properties.limits,
-    logging: PublicConfigSchema.properties.logging,
+    logging: LegacyLoggingConfigV22Schema,
     privacy: PublicConfigSchema.properties.privacy,
     workspace: PublicConfigSchema.properties.workspace,
     skills: PublicConfigSchema.properties.skills,
@@ -396,7 +411,7 @@ const LegacyAppConfigV19Schema = Type.Object(
     modelPool: ModelPoolConfigSchema,
     permission: PublicConfigSchema.properties.permission,
     limits: PublicConfigSchema.properties.limits,
-    logging: PublicConfigSchema.properties.logging,
+    logging: LegacyLoggingConfigV22Schema,
     privacy: PublicConfigSchema.properties.privacy,
     workspace: PublicConfigSchema.properties.workspace,
     skills: PublicConfigSchema.properties.skills,
@@ -449,7 +464,7 @@ const LegacyAppConfigV21Schema = Type.Object(
     executionEnvironment: PublicConfigSchema.properties.executionEnvironment,
     permission: PublicConfigSchema.properties.permission,
     limits: PublicConfigSchema.properties.limits,
-    logging: PublicConfigSchema.properties.logging,
+    logging: LegacyLoggingConfigV22Schema,
     privacy: PublicConfigSchema.properties.privacy,
     workspace: PublicConfigSchema.properties.workspace,
     skills: PublicConfigSchema.properties.skills,
@@ -463,6 +478,19 @@ const LegacyAppConfigV21Schema = Type.Object(
 )
 type LegacyAppConfigV21 = Static<typeof LegacyAppConfigV21Schema>
 const validateLegacyAppConfigV21 = compileSchema(LegacyAppConfigV21Schema)
+
+// AppConfig v22 has the current model-role layout and only differs from v23
+// in its trace-only logging section.
+const LegacyAppConfigV22Schema = Type.Object(
+  {
+    ...AppConfigSchema.properties,
+    schemaVersion: Type.Literal(22),
+    logging: LegacyLoggingConfigV22Schema,
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV22 = Static<typeof LegacyAppConfigV22Schema>
+const validateLegacyAppConfigV22 = compileSchema(LegacyAppConfigV22Schema)
 
 const LegacyAppProviderConfigV14Schema = Type.Object(
   {
@@ -560,6 +588,16 @@ function withoutRunToolBudget(
   ) as AppConfig['limits']
 }
 
+/** Preserves legacy trace settings while adding default operational logging. */
+function migrateLegacyLogging(
+  logging: LegacyLoggingConfigV22,
+): AppConfig['logging'] {
+  return {
+    operational: structuredClone(DEFAULT_APP_CONFIG.logging.operational),
+    trace: structuredClone(logging),
+  }
+}
+
 function migrateLimitDefaults(limits: LegacyAppConfigV10['limits']) {
   const next = withoutRunToolBudget(limits)
 
@@ -646,6 +684,7 @@ function migrateV10(config: LegacyAppConfigV10): AppConfig {
   const migrated = {
     ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: migrateModelsSection(
       config,
       providers,
@@ -674,6 +713,7 @@ function migrateV11(config: LegacyAppConfigV11): AppConfig {
   const migrated = {
     ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: migrateModelsSection(
       config,
       providers,
@@ -702,6 +742,7 @@ function migrateV12(config: LegacyAppConfigV12): AppConfig {
   const migrated = {
     ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: migrateModelsSection(
       config,
       providers,
@@ -739,6 +780,7 @@ function migrateV13(config: LegacyAppConfigV13): AppConfig {
   const migrated = {
     ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: migrateModelsSection(
       config,
       providers,
@@ -767,6 +809,7 @@ function migrateV14(config: LegacyAppConfigV14): AppConfig {
   const migrated = {
     ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: migrateModelsSection(
       config,
       providers,
@@ -790,6 +833,7 @@ function migrateV15(config: LegacyAppConfigV15): AppConfig {
   const migrated = {
     ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: migrateModelsSection(
       config,
       config.providers,
@@ -846,6 +890,7 @@ function migrateV16(config: LegacyAppConfigV16): AppConfig {
   const migrated = {
     ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: migrateModelsSection(
       config,
       config.providers,
@@ -869,6 +914,7 @@ function migrateV17(config: LegacyAppConfigV17): AppConfig {
   const migrated = {
     ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: migrateModelsSection(
       config,
       config.providers,
@@ -892,6 +938,7 @@ function migrateV18(config: LegacyAppConfigV18): AppConfig {
   const migrated = {
     ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: migrateModelsSection(
       config,
       config.providers,
@@ -915,6 +962,7 @@ function migrateV19(config: LegacyAppConfigV19): AppConfig {
   const migrated = {
     ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: migrateModelsSection(
       config,
       config.providers,
@@ -937,6 +985,7 @@ function migrateV20(config: LegacyAppConfigV20): AppConfig {
   const migrated = {
     ...withoutLegacyModelRoleFields(config),
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: migrateModelsSection(
       config,
       config.providers,
@@ -964,6 +1013,7 @@ function migrateV21(config: LegacyAppConfigV21): AppConfig {
   const migrated = {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
     models: {
       defaultModelProvider: config.models.defaultModelProvider,
       defaultModel: config.models.defaultModel,
@@ -979,6 +1029,22 @@ function migrateV21(config: LegacyAppConfigV21): AppConfig {
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
       21,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
+/** Migrates the v22 trace-only logging settings into the split v23 layout. */
+function migrateV22(config: LegacyAppConfigV22): AppConfig {
+  const migrated = {
+    ...config,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    logging: migrateLegacyLogging(config.logging),
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      22,
       formatSchemaErrors(validateAppConfig.errors),
     )
   }
@@ -1040,6 +1106,7 @@ export function migrateConfig(candidate: unknown): AppConfig {
     const migrated = {
       ...withoutLegacyModelRoleFields(legacy),
       schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+      logging: migrateLegacyLogging(legacy.logging),
       models: migrateModelsSection(
         legacy,
         providers,
@@ -1178,6 +1245,16 @@ export function migrateConfig(candidate: unknown): AppConfig {
       )
     }
     return migrateV21(candidate as LegacyAppConfigV21)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') === 22) {
+    if (!validateLegacyAppConfigV22(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        22,
+        formatSchemaErrors(validateLegacyAppConfigV22.errors),
+      )
+    }
+    return migrateV22(candidate as LegacyAppConfigV22)
   }
 
   if (Reflect.get(candidate, 'schemaVersion') !== APP_CONFIG_SCHEMA_VERSION) {

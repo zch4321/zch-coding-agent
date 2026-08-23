@@ -39,6 +39,14 @@ function projectLegacyRouteIdentity(candidate: unknown): unknown {
   }
 }
 
+function projectLegacyTraceVersion(candidate: unknown): unknown {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return candidate
+  }
+  if (Reflect.get(candidate, 'schemaVersion') !== 2) return candidate
+  return { ...(candidate as Record<string, unknown>), schemaVersion: 3 }
+}
+
 /** Reports a complete trace record written with an unsupported schema. */
 export class UnsupportedTraceSchemaError extends Error {
   constructor(
@@ -85,6 +93,7 @@ export async function readTraceFile(filePath: string): Promise<TraceEvent[]> {
       throw new CorruptTraceError(`Invalid JSON in trace line ${index + 1}`)
     }
 
+    candidate = projectLegacyTraceVersion(candidate)
     candidate = projectLegacyRouteIdentity(candidate)
     if (!validateTraceEvent(candidate)) {
       const version =

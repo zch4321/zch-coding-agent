@@ -197,7 +197,10 @@ async function liveHarness() {
   await store.update({
     version: 1,
     kind: 'logging',
-    value: { ...store.getPublicConfig().logging, enabled: true },
+    value: {
+      ...store.getPublicConfig().logging,
+      trace: { ...store.getPublicConfig().logging.trace, enabled: true },
+    },
   })
   const skills = new SkillsManager(skillsDirectory)
   await skills.initialize()

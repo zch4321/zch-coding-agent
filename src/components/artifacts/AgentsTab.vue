@@ -56,6 +56,9 @@ function currentPhase(summary: AgentExecutionSummary): string {
     return t('artifact.swarmProgress', { completed, total, active })
   }
   const live = executions.live[summary.id]
+  if (live?.providerRetry) {
+    return t('artifact.agentRetrying', live.providerRetry)
+  }
   const activities = executions.activitiesFor(summary.id)
   const lastTool = [...activities]
     .reverse()

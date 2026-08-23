@@ -156,6 +156,8 @@ const networkSettingsProperties = new Set<PropertyKey>([
 const applicationSettingsProperties = new Set<PropertyKey>([
   'loggingForm',
   'loggingWarnings',
+  'runtimeLogStatus',
+  'runtimeLogActionMessage',
 ])
 const assistantSettingsProperties = new Set<PropertyKey>([
   'assistantForm',
@@ -324,6 +326,9 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     savePermissions: securitySettings.savePermissions,
     removeRememberedRule: securitySettings.removeRememberedRule,
     saveLogging: applicationSettings.saveLogging,
+    loadRuntimeLogStatus: applicationSettings.loadRuntimeLogStatus,
+    openRuntimeLogDirectory: applicationSettings.openRuntimeLogDirectory,
+    clearRuntimeLogs: applicationSettings.clearRuntimeLogs,
     acceptProviderNotice: securitySettings.acceptProviderNotice,
     acceptYoloNotice: securitySettings.acceptYoloNotice,
     saveAssistantSettings: assistantSettings.saveAssistantSettings,

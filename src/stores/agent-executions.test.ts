@@ -210,8 +210,34 @@ describe('agent execution store', () => {
     store.handleEvent({
       ...eventBase(second, 2),
       type: 'assistant.text.delta',
+      delta: 'Discarded output',
+    })
+    store.handleEvent({
+      ...eventBase(second, 3),
+      type: 'assistant.stream.reset',
+    })
+    store.handleEvent({
+      ...eventBase(second, 4),
+      type: 'provider.retrying',
+      retry: { attempt: 2, maxAttempts: 3, delayMs: 250 },
+    })
+    expect(store.live[second.id]?.providerRetry).toEqual({
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 250,
+    })
+    store.handleEvent({
+      ...eventBase(second, 5),
+      type: 'assistant.activity',
+      activity: 'output',
+    })
+    expect(store.live[second.id]?.providerRetry).toBeUndefined()
+    store.handleEvent({
+      ...eventBase(second, 6),
+      type: 'assistant.text.delta',
       delta: 'Second output',
     })
+    expect(store.live[second.id]?.providerRetry).toBeUndefined()
     store.handleEvent({
       ...eventBase(first, 3),
       type: 'assistant.message.completed',

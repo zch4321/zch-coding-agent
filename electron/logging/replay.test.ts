@@ -1,24 +1,42 @@
 import { describe, expect, it } from 'vitest'
 import type { CallId, EventId, RunId, SessionId } from '../../shared/ids'
-import { createTraceEvent, type TraceEventInput } from './events'
+import {
+  createTraceEvent,
+  type TraceEvent,
+  type TraceEventInput,
+} from './events'
 import { createReplayTimeline, replayTrace, reduceTraceEvent } from './replay'
 
 const sessionId = 'session-replay' as SessionId
 const runId = 'run-replay' as RunId
 const callId = 'call-replay' as CallId
 
+type LegacyStreamInput = {
+  type: 'llm.stream'
+  sessionId: SessionId
+  runId: RunId
+  callId: CallId
+  providerEvent: import('../../shared/json').JsonValue
+  elapsedMs: number
+}
+
 function trace(
-  inputs: TraceEventInput[],
+  inputs: Array<TraceEventInput | LegacyStreamInput>,
   start = Date.parse('2026-06-15T00:00:00.000Z'),
 ) {
-  return inputs.map((input, index) =>
-    createTraceEvent(
-      input,
-      index + 1,
-      `event-${index + 1}` as EventId,
-      new Date(start + index * 100).toISOString(),
-    ),
-  )
+  return inputs.map((input, index) => {
+    const eventId = `event-${index + 1}` as EventId
+    const ts = new Date(start + index * 100).toISOString()
+    return input.type === 'llm.stream'
+      ? ({
+          schemaVersion: 3,
+          seq: index + 1,
+          eventId,
+          ts,
+          ...input,
+        } as TraceEvent)
+      : createTraceEvent(input, index + 1, eventId, ts)
+  })
 }
 
 describe('trace replay', () => {

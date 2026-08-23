@@ -7,7 +7,7 @@ import type {
   AgentExecutionEvent,
   AgentExecutionEventDraft,
 } from '../../shared/agent-execution'
-import type { RunId, SessionId } from '../../shared/ids'
+import type { DiagnosticId, RunId, SessionId } from '../../shared/ids'
 
 export interface RuntimeEventSink {
   publishAgent(event: AgentEvent): void
@@ -29,6 +29,7 @@ export interface RunCompletion {
   error?: {
     code: string
     message: string
+    diagnosticId?: DiagnosticId
   }
 }
 

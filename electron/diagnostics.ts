@@ -1,4 +1,4 @@
-import type { SessionId } from '../shared/ids'
+import type { DiagnosticId, SessionId } from '../shared/ids'
 
 export interface DiagnosticDelivery {
   audience: 'internal' | 'notification'
@@ -6,6 +6,7 @@ export interface DiagnosticDelivery {
   code?: string
   message?: string
   sessionId?: SessionId
+  diagnosticId?: DiagnosticId
 }
 
 /** Receives an internal diagnostic with optional explicit renderer delivery metadata. */
@@ -13,4 +14,4 @@ export type DiagnosticSink = (
   message: string,
   error?: unknown,
   delivery?: DiagnosticDelivery,
-) => void
+) => DiagnosticId | void

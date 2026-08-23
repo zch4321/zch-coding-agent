@@ -74,6 +74,7 @@ const runtimeEventHandlers = {
       overlay.todo = undefined
     }
     overlay.status = event.status
+    overlay.providerRetry = undefined
     overlay.runId = TERMINAL_RUN_STATUSES.has(event.status)
       ? undefined
       : event.runId
@@ -88,6 +89,9 @@ const runtimeEventHandlers = {
         code: event.error.code,
         message: event.error.message,
         sessionId: event.sessionId,
+        ...(event.error.diagnosticId
+          ? { diagnosticId: event.error.diagnosticId }
+          : {}),
       })
     }
     if (!TERMINAL_RUN_STATUSES.has(event.status)) return
@@ -109,17 +113,30 @@ const runtimeEventHandlers = {
     void target.flushCarryovers(event.sessionId)
   },
   'assistant.activity': (_target, overlay, event) => {
+    overlay.providerRetry = undefined
     overlay.streamActivity = event.activity
   },
+  'assistant.stream.reset': (_target, overlay) => {
+    overlay.text = ''
+    overlay.reasoning = ''
+    overlay.streamActivity = undefined
+  },
+  'provider.retrying': (_target, overlay, event) => {
+    overlay.providerRetry = structuredClone(event.retry)
+    overlay.streamActivity = undefined
+  },
   'assistant.text.delta': (_target, overlay, event) => {
+    overlay.providerRetry = undefined
     overlay.streamActivity = 'output'
     overlay.text += event.delta
   },
   'assistant.reasoning.delta': (_target, overlay, event) => {
+    overlay.providerRetry = undefined
     overlay.streamActivity = 'reasoning'
     overlay.reasoning += event.delta
   },
   'assistant.message.completed': (_target, overlay, event) => {
+    overlay.providerRetry = undefined
     overlay.text = event.text
     overlay.reasoning = event.reasoning ?? overlay.reasoning
   },

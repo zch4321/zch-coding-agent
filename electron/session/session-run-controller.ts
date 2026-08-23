@@ -5,7 +5,8 @@ import {
 } from '../../shared/config'
 import type { RunContext } from '../../shared/context'
 import type { RunStatus } from '../../shared/agent-events'
-import type { MessageId, RunId } from '../../shared/ids'
+import type { DiagnosticId, MessageId, RunId } from '../../shared/ids'
+import { randomUUID } from 'node:crypto'
 import { PROVIDER_NOTICE_VERSION } from '../../shared/notices'
 import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'
@@ -19,10 +20,8 @@ import {
   appendCompletedAssistantTurn,
   appendUserInput,
   canonicalHash,
-  LegacyToolResultError,
 } from './canonical-history'
 import type { SessionCompactCoordinator } from './session-compact-coordinator'
-import { CompactionFailedError } from './session-compact-retry'
 import type { SessionInterjectionCoordinator } from './session-interjection-coordinator'
 import type { SessionOrchestrationPlanner } from './session-orchestration-planner'
 import type { SessionProviderTurnRunner } from './session-provider-turn'
@@ -38,6 +37,13 @@ import type {
 } from './session-types'
 import type { RunAccessLease } from './workspace-access-coordinator'
 import type { ResolvedModelRoute } from '../providers/model-route-resolver'
+import type { OperationalLogService } from '../operational-logging/service'
+import {
+  associateDiagnosticId,
+  diagnosticIdForError,
+} from '../operational-logging/diagnostic-id'
+import { classifyRunError } from './run-error-classifier'
+import { sanitizeDiagnosticMessage } from '../notifications/backend-notification-reporter'
 
 export interface RunStartOptions {
   routes?: {
@@ -81,6 +87,7 @@ export class SessionRunController {
   readonly #executionState?: SessionExecutionStatePort
   readonly #beforeRun?: (session: SessionState) => Promise<void>
   readonly #afterRun?: (session: SessionState) => Promise<void>
+  readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
 
   /** Creates a controller with the collaborators needed to execute session runs. */
   constructor(options: {
@@ -97,6 +104,7 @@ export class SessionRunController {
     executionState?: SessionExecutionStatePort
     beforeRun?: (session: SessionState) => Promise<void>
     afterRun?: (session: SessionState) => Promise<void>
+    operationalLog?: Pick<OperationalLogService, 'log'>
   }) {
     this.#configStore = options.configStore
     this.#providerTurns = options.providerTurns
@@ -111,6 +119,7 @@ export class SessionRunController {
     this.#executionState = options.executionState
     this.#beforeRun = options.beforeRun
     this.#afterRun = options.afterRun
+    this.#operationalLog = options.operationalLog
   }
 
   /** Starts a new run, or returns the existing run for a repeated client request. */
@@ -130,11 +139,28 @@ export class SessionRunController {
     }
 
     const config = this.#configStore.getPublicConfig()
-    this.#assertRunPreconditions(
-      config,
-      session,
-      options.skipProviderPreconditions ?? false,
-    )
+    try {
+      this.#assertRunPreconditions(
+        config,
+        session,
+        options.skipProviderPreconditions ?? false,
+      )
+    } catch (error) {
+      const classified = classifyRunError(error)
+      const result = this.#operationalLog?.log({
+        level: 'warn',
+        event: 'run.rejected',
+        sessionId: session.sessionId,
+        ...(session.internalExecution
+          ? { agentExecutionId: session.internalExecution.executionId }
+          : {}),
+        ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
+        code: classified.code,
+        error,
+      })
+      associateDiagnosticId(error, result?.diagnosticId)
+      throw error
+    }
 
     if (session.activeRun && isTerminalRunStatus(session.activeRun.status)) {
       session.activeRun = undefined
@@ -190,12 +216,23 @@ export class SessionRunController {
       },
     }
 
+    this.#operationalLog?.log({
+      level: 'info',
+      event: 'run.started',
+      sessionId: session.sessionId,
+      runId,
+      ...(session.internalExecution
+        ? { agentExecutionId: session.internalExecution.executionId }
+        : {}),
+      ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
+    })
+
     run.done = this.#run(session, run, userMessage, context, harnessMessage)
-      .catch((error: unknown) =>
+      .catch((error: unknown) => {
         this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error, {
           audience: 'internal',
-        }),
-      )
+        })
+      })
       .finally(() => {
         const finalize = () => {
           this.releaseAccess(run)
@@ -263,17 +300,16 @@ export class SessionRunController {
       this.releaseAccess(run)
     }
     run.status = status
-    const failureCode =
-      error instanceof LegacyToolResultError
-        ? error.code
-        : error instanceof CompactionFailedError
-          ? 'COMPACTION_FAILED'
-          : 'RUN_FAILED'
+    const classified = classifyRunError(error)
+    const failure = {
+      ...classified,
+      message: sanitizeDiagnosticMessage(classified.message),
+    }
+    const diagnosticId = diagnosticIdForError(error)
     if (error && status === 'failed') {
       run.failure = {
-        code: failureCode,
-        message:
-          error instanceof Error ? error.message : 'Run failed unexpectedly',
+        ...failure,
+        ...(diagnosticId ? { diagnosticId } : {}),
       }
     }
     this.#emit(session, {
@@ -284,11 +320,8 @@ export class SessionRunController {
       ...(error && status === 'failed'
         ? {
             error: {
-              code: failureCode,
-              message:
-                error instanceof Error
-                  ? error.message
-                  : 'Run failed unexpectedly',
+              ...failure,
+              ...(diagnosticId ? { diagnosticId } : {}),
             },
           }
         : {}),
@@ -714,6 +747,39 @@ export class SessionRunController {
     status: RunStatus,
     error?: unknown,
   ): Promise<void> {
+    if (status === 'failed') {
+      const classified = classifyRunError(error)
+      const existingDiagnosticId = diagnosticIdForError(error)
+      const result = this.#operationalLog?.log({
+        level: 'error',
+        event: 'run.failed',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        ...(session.internalExecution
+          ? { agentExecutionId: session.internalExecution.executionId }
+          : {}),
+        ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
+        diagnosticId: existingDiagnosticId,
+        code: classified.code,
+        error,
+      })
+      const diagnosticId =
+        existingDiagnosticId ??
+        result?.diagnosticId ??
+        (`diagnostic:${randomUUID()}` as DiagnosticId)
+      associateDiagnosticId(error, diagnosticId)
+    } else {
+      this.#operationalLog?.log({
+        level: 'info',
+        event: status === 'cancelled' ? 'run.cancelled' : 'run.completed',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        ...(session.internalExecution
+          ? { agentExecutionId: session.internalExecution.executionId }
+          : {}),
+        ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
+      })
+    }
     this.setRunStatus(session, run, status, error)
     await session.logger.write({
       type: 'run.end',

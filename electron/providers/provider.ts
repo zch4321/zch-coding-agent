@@ -67,6 +67,18 @@ export interface CompiledProviderCompactCall {
   normalizedMessages: JsonObject[]
 }
 
+/** Bounded request controls safe to duplicate into diagnostic indexes. */
+export interface ProviderRequestDiagnostics {
+  requestBytes: number
+  prefixHash: string
+  requestFields: string[]
+  wireParameters: JsonObject
+  outputTokenField?: string
+  maxOutputTokens?: number
+  wireReasoningEffort?: string
+  thinkingMode?: string
+}
+
 /** Runtime-only controls used while sending one compiled provider request. */
 export interface ProviderStreamContext {
   signal: AbortSignal
@@ -481,17 +493,77 @@ export function providerCompletionDiagnostics(
   }
 }
 
+const DIAGNOSTIC_WIRE_PARAMETER_FIELDS = new Set([
+  'frequency_penalty',
+  'include',
+  'max_completion_tokens',
+  'max_output_tokens',
+  'max_tokens',
+  'model',
+  'output_config',
+  'parallel_tool_calls',
+  'presence_penalty',
+  'reasoning',
+  'reasoning_effort',
+  'response_format',
+  'seed',
+  'service_tier',
+  'stop',
+  'store',
+  'stream',
+  'stream_options',
+  'temperature',
+  'text',
+  'thinking',
+  'tool_choice',
+  'top_p',
+  'truncation',
+])
+
+function objectStringField(value: JsonValue | undefined, field: string) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? typeof value[field] === 'string'
+      ? value[field]
+      : undefined
+    : undefined
+}
+
 /** Computes stable, credential-free diagnostics for a compiled provider call. */
 export function providerRequestDiagnostics(
   call: Pick<CompiledProviderCall, 'request' | 'normalizedMessages'>,
-): {
-  requestBytes: number
-  prefixHash: string
-} {
+): ProviderRequestDiagnostics {
+  const requestFields = Object.keys(call.request).sort()
+  const wireParameters = Object.fromEntries(
+    Object.entries(call.request)
+      .filter(([field]) => DIAGNOSTIC_WIRE_PARAMETER_FIELDS.has(field))
+      .map(([field, value]) => [field, structuredClone(value)]),
+  ) as JsonObject
+  const outputTokenField = [
+    'max_output_tokens',
+    'max_completion_tokens',
+    'max_tokens',
+  ].find((field) => typeof call.request[field] === 'number')
+  const maxOutputTokens = outputTokenField
+    ? call.request[outputTokenField]
+    : undefined
+  const wireReasoningEffort =
+    (typeof call.request.reasoning_effort === 'string'
+      ? call.request.reasoning_effort
+      : undefined) ??
+    objectStringField(call.request.reasoning, 'effort') ??
+    objectStringField(call.request.output_config, 'effort') ??
+    objectStringField(call.request.thinking, 'effort')
+  const thinkingMode = objectStringField(call.request.thinking, 'type')
   return {
     requestBytes: Buffer.byteLength(JSON.stringify(call.request), 'utf8'),
     prefixHash: createHash('sha256')
       .update(JSON.stringify(call.normalizedMessages))
       .digest('hex'),
+    requestFields,
+    wireParameters,
+    ...(outputTokenField ? { outputTokenField } : {}),
+    ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
+    ...(wireReasoningEffort ? { wireReasoningEffort } : {}),
+    ...(thinkingMode ? { thinkingMode } : {}),
   }
 }

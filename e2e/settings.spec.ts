@@ -1357,7 +1357,10 @@ test.describe.serial('Electron settings workflows', () => {
     await navigation.getByRole('menuitem', { name: '应用与诊断' }).click()
     const logging = page.locator('[data-settings-domain="application"]')
     await expect(
-      logging.getByRole('button', { name: '打开日志目录' }),
+      logging.getByRole('button', { name: '打开运行日志目录' }),
+    ).toBeVisible()
+    await expect(
+      logging.getByRole('button', { name: '打开 Trace 目录' }),
     ).toBeVisible()
     await expect(
       logging.getByRole('button', { name: '清理已关闭 Trace' }),

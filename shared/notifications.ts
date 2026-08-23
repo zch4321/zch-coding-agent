@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox'
 import { IPC_VERSION } from './channels'
-import { SessionIdSchema } from './ids'
+import { DiagnosticIdSchema, SessionIdSchema } from './ids'
 
 export const BackendNotificationEnvelopeSchema = Type.Object(
   {
@@ -19,6 +19,7 @@ export const BackendNotificationEnvelopeSchema = Type.Object(
     message: Type.String({ minLength: 1, maxLength: 1_024 }),
     occurredAt: Type.String({ format: 'date-time' }),
     sessionId: Type.Optional(SessionIdSchema),
+    diagnosticId: Type.Optional(DiagnosticIdSchema),
   },
   { additionalProperties: false },
 )

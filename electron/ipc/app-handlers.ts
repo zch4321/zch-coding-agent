@@ -10,6 +10,7 @@ import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import {
   fetchProviderModelCatalog,
   ModelCatalogError,
+  modelCatalogEndpoint,
   resolveModelProfiles,
 } from '../providers/model-catalog'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
@@ -26,12 +27,15 @@ import {
   commandShellService,
   type CommandShellService,
 } from '../process/command-shell'
+import type { OperationalLogService } from '../operational-logging/service'
+import { ProviderAttemptRecorder } from '../operational-logging/provider-attempt-recorder'
 
 export interface AppIpcHandlerDependencies {
   configStore: ConfigStore
   backend: BackendRuntime
   skillsManager: SkillsManager
   traceService: TraceService
+  operationalLog: OperationalLogService
   commandShells?: Pick<CommandShellService, 'catalog'>
   mcpManager?: McpManager
   getHttpTransport?: () => HttpTransport
@@ -67,6 +71,7 @@ export function createAppIpcHandlers(
     backend,
     skillsManager,
     traceService,
+    operationalLog,
     commandShells = commandShellService,
     mcpManager,
     getHttpTransport,
@@ -87,7 +92,7 @@ export function createAppIpcHandlers(
     'config:set': async (payload) => {
       if (
         payload.kind === 'logging' &&
-        payload.value.enabled &&
+        payload.value.trace.enabled &&
         configStore.getPublicConfig().privacy.traceNoticeAccepted?.version !==
           TRACE_NOTICE_VERSION
       ) {
@@ -100,10 +105,13 @@ export function createAppIpcHandlers(
       }
 
       const config = await configStore.update(payload)
-      const warnings =
-        payload.kind === 'logging'
-          ? await sessionManager.reconfigureTraceLogging(config.logging.enabled)
-          : []
+      let warnings: string[] = []
+      if (payload.kind === 'logging') {
+        operationalLog.reconfigure(config.logging.operational)
+        warnings = await sessionManager.reconfigureTraceLogging(
+          config.logging.trace.enabled,
+        )
+      }
 
       if (payload.kind === 'network') {
         refreshHttpTransport?.(config.network.httpProxy)
@@ -165,6 +173,16 @@ export function createAppIpcHandlers(
           })
         }
 
+        const catalogAttempt = new ProviderAttemptRecorder(operationalLog, {
+          operation: 'model_catalog',
+          providerCallId: `catalog:${provider.id}:${Date.now()}`,
+          providerId: provider.id,
+          providerType: provider.providerType,
+          model: provider.model,
+          endpoint: modelCatalogEndpoint(provider.baseURL),
+          messageCount: 0,
+          toolCount: 0,
+        })
         try {
           const models = await fetchProviderModelCatalog({
             providerType: provider.providerType,
@@ -180,7 +198,14 @@ export function createAppIpcHandlers(
             models,
             new Date().toISOString(),
           )
+          catalogAttempt.completed()
         } catch (error) {
+          catalogAttempt.failed(error, {
+            code: 'PROVIDER_MODEL_CATALOG_FAILED',
+            ...(error instanceof ModelCatalogError && error.status !== undefined
+              ? { httpStatus: error.status }
+              : {}),
+          })
           if (error instanceof ModelCatalogError) {
             throw new IpcFault({
               code:
@@ -803,5 +828,28 @@ export function createAppIpcHandlers(
     'logs:clear-closed': async () => ({
       deleted: await traceService.clearClosed(sessionManager.activeTraceIds()),
     }),
+    'runtime-log:status': () => {
+      const status = operationalLog.status()
+      return {
+        enabled: status.enabled,
+        level: status.level,
+        degraded: status.degraded,
+        ...(status.warning ? { warning: status.warning } : {}),
+      }
+    },
+    'runtime-log:open-directory': async () => {
+      await operationalLog.cleanup()
+      const error = await shell.openPath(operationalLog.status().directory)
+      if (error) throw notAvailable(error)
+      return { accepted: true }
+    },
+    'runtime-log:clear': async () => {
+      const cleared = await operationalLog.clearHistory()
+      if (!cleared) throw notAvailable('Operational log cleanup failed')
+      return {
+        deleted: cleared.deletedFiles,
+        deletedBytes: cleared.deletedBytes,
+      }
+    },
   }
 }

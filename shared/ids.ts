@@ -19,6 +19,7 @@ export type CallId = BrandedId<'CallId'>
 export type TerminalId = BrandedIntId<'TerminalId'>
 export type EventId = BrandedId<'EventId'>
 export type AgentExecutionId = BrandedId<'AgentExecutionId'>
+export type DiagnosticId = BrandedId<'DiagnosticId'>
 
 function idSchema<Name extends string>(name: Name) {
   return Type.Unsafe<BrandedId<Name>>(
@@ -46,5 +47,6 @@ export const TerminalIdSchema = Type.Unsafe<TerminalId>(
 )
 export const EventIdSchema = idSchema('EventId')
 export const AgentExecutionIdSchema = idSchema('AgentExecutionId')
+export const DiagnosticIdSchema = idSchema('DiagnosticId')
 
 export type IdSchemaValue<Schema extends TSchema> = Static<Schema>

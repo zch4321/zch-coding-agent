@@ -177,9 +177,16 @@ export const DEFAULT_APP_CONFIG = {
     fetchMaxRedirects: 5,
   },
   logging: {
-    enabled: false,
-    retentionDays: 14,
-    maxTotalBytes: 500_000_000,
+    operational: {
+      level: 'info',
+      retentionDays: 14,
+      maxTotalBytes: 50_000_000,
+    },
+    trace: {
+      enabled: false,
+      retentionDays: 14,
+      maxTotalBytes: 500_000_000,
+    },
   },
   privacy: {},
   workspace: {},
