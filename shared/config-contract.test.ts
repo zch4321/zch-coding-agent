@@ -37,7 +37,7 @@ describe('shared config contracts', () => {
   it('preserves the v23 schema fingerprint across the domain split', () => {
     expect(APP_CONFIG_SCHEMA_VERSION).toBe(23)
     expect(schemaHash(PublicConfigSchema)).toBe(
-      '1934d1cbd7e541f1b5b1684171d2a4f1bf5854235141c9999473e4856beeee37',
+      '26a4dfa5f386966587140e56b84bb82bdf90400463a421eb1645094b2ad5982f',
     )
   })
 

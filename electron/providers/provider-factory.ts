@@ -8,6 +8,7 @@ import { DeepSeekProvider } from './deepseek-provider'
 import { GenericAnthropicProvider } from './generic-anthropic-provider'
 import { GenericChatCompletionsProvider } from './generic-chat-completions-provider'
 import { GenericResponsesProvider } from './generic-responses-provider'
+import { MiMoProvider } from './mimo-provider'
 import type { ModelProvider } from './provider'
 
 /** Resolves the endpoint owned by one concrete provider implementation. */
@@ -17,6 +18,7 @@ export function resolveProviderEndpoint(
 ): string {
   switch (providerType) {
     case 'deepseek.chat-completions':
+    case 'mimo.chat-completions':
     case 'generic.chat-completions':
       return resolveChatCompletionsEndpoint(baseURL)
     case 'generic.responses':
@@ -36,6 +38,14 @@ export function createConfiguredProvider(
   switch (provider.providerType) {
     case 'deepseek.chat-completions':
       return new DeepSeekProvider({
+        providerId: provider.id,
+        baseURL: provider.baseURL,
+        apiKey,
+        fetchImpl,
+        endpoint,
+      })
+    case 'mimo.chat-completions':
+      return new MiMoProvider({
         providerId: provider.id,
         baseURL: provider.baseURL,
         apiKey,

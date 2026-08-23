@@ -700,6 +700,7 @@ describe('config v23 migration boundary', () => {
 
   it('accepts the new Provider Types without a schema-version migration', () => {
     for (const providerType of [
+      'mimo.chat-completions',
       'generic.responses',
       'generic.anthropic',
     ] as const) {

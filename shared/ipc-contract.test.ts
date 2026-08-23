@@ -49,10 +49,10 @@ describe('shared IPC contracts', () => {
   it('preserves the complete wire schema fingerprints across the domain split', () => {
     expect(Object.keys(IPC_CONTRACTS)).toHaveLength(71)
     expect(schemaHash(IPC_CONTRACTS)).toBe(
-      '48c873d5bdb0f7924b03540c58c820738b72f48a5e1807d4aa158d95b09aa4cb',
+      '5560cbda26d105f008b9a4a6ae3232c52ea8e7d57af18a01292d551f1b84b95c',
     )
     expect(schemaHash(ConfigSetRequestSchema)).toBe(
-      '3ae0dce98aac5eace5fa11790125122294382a876777462f3d09c137921dbaa3',
+      'db94e2516bb0673dfec4b98a6b34b5915a941114ffa4dd0d6d03eb9272da02a9',
     )
     expect(
       schemaHash({

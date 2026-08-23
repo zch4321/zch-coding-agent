@@ -29,6 +29,14 @@ const BUILTIN_MODEL_CAPABILITIES: Readonly<
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
   },
+  'mimo-v2.5-pro': {
+    contextWindowTokens: 1_000_000,
+    maxOutputTokens: 131_072,
+  },
+  'mimo-v2.5': {
+    contextWindowTokens: 1_000_000,
+    maxOutputTokens: 131_072,
+  },
 }
 
 export interface ModelProfile {
@@ -320,6 +328,7 @@ export function fetchProviderModelCatalog(options: {
 }): Promise<ProviderModel[]> {
   switch (options.providerType) {
     case 'deepseek.chat-completions':
+    case 'mimo.chat-completions':
     case 'generic.chat-completions':
     case 'generic.responses':
       return fetchOpenAICompatibleModelCatalog(options)

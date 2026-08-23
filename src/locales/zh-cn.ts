@@ -407,11 +407,14 @@ const zhCN = {
     providerLabel: 'Provider 名称',
     providerType: 'Provider Type',
     providerTypeDeepSeek: 'DeepSeek Chat Completions',
+    providerTypeMimo: '小米 MiMo Chat Completions',
     providerTypeGeneric: '通用 Chat Completions',
     providerTypeResponses: '通用 Responses',
     providerTypeAnthropic: '通用 Anthropic Messages',
     providerTypeHint:
       'Provider Type 对应独立代码实现；三种通用类型分别作为 Chat Completions、Responses 和 Anthropic API 兜底。',
+    providerTypeMimoHint:
+      'MiMo 专用类型使用官方 Chat 协议；按量 API 的基础 URL 为 https://api.xiaomimimo.com/v1。非关闭思考等级都会启用 MiMo 思考。',
     baseUrl: '基础 URL',
     mainModel: 'Provider 默认模型',
     modelSettings: '模型配置',

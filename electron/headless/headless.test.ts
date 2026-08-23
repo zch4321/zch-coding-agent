@@ -377,12 +377,13 @@ describe('Headless host', () => {
     })
   })
 
-  it('accepts Responses and Anthropic Provider Types in v4 config', async () => {
+  it('accepts MiMo, Responses and Anthropic Provider Types in v4 config', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-p12-'))
     temporaryDirectories.push(directory)
     const configPath = path.join(directory, 'headless.json')
 
     for (const providerType of [
+      'mimo.chat-completions',
       'generic.responses',
       'generic.anthropic',
     ] as const) {

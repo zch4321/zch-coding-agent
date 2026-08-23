@@ -50,6 +50,7 @@ export type ModelCapabilityOverride = Static<
 
 export const ProviderTypeSchema = Type.Union([
   Type.Literal('deepseek.chat-completions'),
+  Type.Literal('mimo.chat-completions'),
   Type.Literal('generic.chat-completions'),
   Type.Literal('generic.responses'),
   Type.Literal('generic.anthropic'),
