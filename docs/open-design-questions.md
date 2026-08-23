@@ -1,50 +1,10 @@
 # 待讨论的运行时设计问题
 
-状态：部分开放；第 1、2、6 项已形成设计决定，其余问题仍待讨论。
+状态：开放；本文只保留尚未形成最终设计决定的问题。
 
 本文只记录当前可观察行为、影响范围和后续需要回答的问题，不包含候选方案、推荐结论或实施计划。形成决定后，应把结论写入相应的 requirements、architecture、frontend spec 或 decision log，并更新本文状态。
 
-## 1. Swarm 编排消息的可见性（已解决）
-
-### 决定
-
-- 用户提交的 `/swarm <goal>` 继续作为普通可见 `user_input` 展示。
-- 供 Provider 使用、正文包含 `<orchestration_request kind="swarm">` 的 canonical `orchestrator` Prompt Layer 以 `visibility = hidden` 持久化，同时保持 `inHistory = true`；它继续进入模型上下文，但不进入普通对话时间线。
-- 已经持久化为 visible 的旧 Swarm Prompt 不改写 SQLite；Renderer 根据稳定来源 `slash:/swarm` 抑制其时间线投影。
-- `orchestrator.message` runtime/trace event、`swarm_run` 工具与审批状态、Agents artifact 各自沿用独立展示链路，不把内部 Prompt 正文重新投影为聊天消息。
-- 本次规则只适用于 `/swarm`；`/prompt`、`/goal`、`/plan` 和 `interjection` 的现有可见性不变。
-- 普通消息搜索与时间线不展示内部 Swarm Prompt；完整 canonical history、Provider-transfer transcript、Conversation 导出和完整 Trace 仍可保留它，用于模型连续性和显式诊断/导出。
-
-### 关联实现
-
-- `electron/session/slash-commands.ts`
-- `electron/session/session-user-turn-preparer.ts`
-- `electron/session/session-run-controller.ts`
-- `electron/session/canonical-history.ts`
-- `src/stores/conversation-timeline.ts`
-
-## 2. `run_command` 与交互式 Terminal 的执行环境边界（已解决）
-
-### 决定
-
-- `run_command.shell` 与交互 Terminal 统一使用 `executionEnvironment.commandShell`；不引入独立的用户侧 Terminal profile 配置。
-- `terminal_open` 删除模型可见的 `shell` 参数；TerminalPool 在每次打开 Terminal 时读取当前配置并经 CommandShellService 解析实际 profile，配置失效时沿用自动回退且不改写保存值。解析为 PowerShell kind 的 PTY 固定使用 `-ExecutionPolicy Bypass`。
-- 设置变更只影响之后打开的 Terminal；已在运行的 Terminal 不重启。
-- `<environment_context>` 继续只注入实际解析后的 `command_shell: label (id)`；它同时约束 `run_command` shell 模式与 Terminal 输入语法，模型不能选择、假设或更换 Shell。
-- `run_command.process`、内部 Git、Subagent、Swarm child 和其他直接进程不读取该配置；设置页文案统一为“命令与终端 Shell”。
-
-### 关联实现
-
-- `shared/command-shell.ts`
-- `electron/process/command-shell.ts`
-- `electron/process/run.ts`
-- `electron/tools/process-tools.ts`
-- `electron/terminal/pool.ts`
-- `electron/tools/terminal-tools.ts`
-- `electron/session/session-terminals.ts`
-- `src/components/settings/LimitsSettingsPanel.vue`
-
-## 3. 上下文占用进度条的数据语义
+## 1. 上下文占用进度条的数据语义
 
 ### 当前行为
 
@@ -84,96 +44,7 @@
 - `src/components/chat/ConversationHeader.vue`
 - `src/stores/agent-runtime.ts`
 
-## 4. Reasoning-only Provider completion 的重试语义（已解决）
-
-- 主模型每个 ReAct step 拥有独立的三次 attempt 上限；empty/reasoning-only completion 与无 terminal completion 最多补试一次，transient transport 最多补试两次。
-- 重试保持同一冻结 Provider、模型、reasoning、prompt、tools 和 output limit；每次物理 attempt 使用独立 call ID和失败诊断，只有成功 usage 计入 Run。
-- 失败 attempt 不进入 canonical history，也不执行工具。已经流到前端的临时 text/reasoning 通过 `assistant.stream.reset` 同步清除；重试等待可被取消。
-- 具体错误分类、退避和日志边界已记录在 `requirements.md` §2.3.3 与 `architecture.md` §7.2.1。
-
-### 关联实现
-
-- `electron/providers/provider.ts`
-- `electron/providers/chat-completions-shared.ts`
-- `electron/providers/generic-responses-provider.ts`
-- `electron/session/session-provider-turn.ts`
-- `electron/session/session-run-controller.ts`
-- `electron/session/session-provider-retry.ts`
-- `src/stores/agent-runtime-events.ts`
-
-## 5. 后端运行日志与 Session Trace 的职责
-
-### 决定
-
-- 增加独立 Operational Log：支持 `off/error/warn/info/debug`，默认 `info`，14 天/50 MB，固定 5 MB 单文件轮转。它只记录白名单化、脱敏、有界的运行元数据；Provider/Tool 正常 attempt 为 `debug`，失败为 `warn/error`。
-- Full Session Trace 继续默认关闭并要求隐私确认，独立使用 14 天/500 MB 配额。它保存内容级聚合 request/response、工具、审批和 canonical 诊断信息。
-- 正常 Provider stream 不写 token/SSE 增量。Trace v3 仅为失败写一条 `llm.failure`，可附带最多 256 KiB 的 HTTP body 或非法 SSE/JSON/completion 证据；失败前 partial text/reasoning 不落盘。读取链保留 v2 `llm.stream` 兼容投影，但生产写入类型不再允许该事件。
-- HTTP/network/timeout/SSE/JSON/completion/configuration/tool batch/compaction 使用稳定 Run 错误码。`warn/error` 分配 `diagnosticId`，同一 ID 贯穿 Provider、Run status、Operational Log 和 Renderer 的 Naive UI message。
-- Operational Log 永不包含 Prompt、消息正文、reasoning、Provider body、工具参数/结果、命令、Terminal/文件内容、凭据、任意 headers 或绝对 workspace 路径。Error 仅保存有界首行、稳定 code、两层 cause 和 16 个规范化 stack frame；endpoint 移除 userinfo/query/fragment。
-- 日志服务使用独立 `electron-log` 实例和同步文件 transport；日志自身失败只把状态标为 degraded，不能改变业务结果。设置页只提供两类日志的配置、状态、打开目录和清理历史，不提供 tail/分页查看或远程上传。
-- Desktop 写入 `userData/logs/runtime/`；Headless 写入 artifact 下的 `runtime/logs/runtime/` 并在 result 中返回目录，stdout JSONL 不混入日志。
-
-### 关联实现
-
-- `electron/diagnostics.ts`
-- `electron/notifications/backend-notification-reporter.ts`
-- `electron/logging/events.ts`
-- `electron/logging/logger.ts`
-- `electron/logging/service.ts`
-- `electron/session/session-trace-controller.ts`
-- `electron/session/session-provider-turn.ts`
-- `electron/session/session-run-controller.ts`
-- `electron/main.ts`
-- `src/components/settings/LoggingSettingsPanel.vue`
-
-## 6. Terminal 标识符与生命周期（已解决）
-
-### 决定
-
-- 模型可见的 `terminalId` 采用进程级作用域：进程内全局递增的正整数，跨 Session 不重复；应用重启后从 1 重新开始。模型使用的短标识符与 Main process 内部资源主键保持相同。
-- ID 一经分配在当前进程内不复用；打开失败允许留下编号空洞。不迁移数据库或旧日志中的旧字符串 ID。
-- 每个 Session 最多保留 16 个 Terminal（含 opening、running 与已退出但未显式关闭的条目）；显式关闭立即释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限。
-- `terminal_list` 按数字 ID 升序返回；模型输错、引用已关闭 Terminal 或引用其他 Session 的同号 Terminal 时，统一返回 `Terminal not found for this session`；对同一 ID 的重复显式关闭仍幂等返回“已关闭”。
-- 模型侧 `terminal_resize` Tool 已移除；Terminal 尺寸由 Renderer 面板自动 fit 后经 `terminal:resize` IPC 同步给 PTY。
-
-### 关联实现
-
-- `shared/ids.ts`
-- `shared/terminal.ts`
-- `shared/ipc-contract.ts`
-- `electron/terminal/pool.ts`
-- `electron/tools/terminal-tools.ts`
-- `electron/session/session-terminals.ts`
-- `electron/session/session-manager.ts`
-
-## 7. 对话运行阶段、布局稳定性与 Tool call 生成可见性（已解决）
-
-### 决定
-
-- 单个对话 Turn 固定按用户消息、思考过程、Tool call、assistant 消息的顺序渲染。
-- “思考过程”标题右侧是唯一的普通对话 Run 状态区域。所有非终态都显示 Naive UI 圆形 Spinner，并使用“请求模型”“思考中”“输出中”“调用工具”“执行工具”“等待审批”“取消中”之一。
-- 对话头部 Run Tag、流式 assistant 消息的“生成中”和 Session 侧栏运行文字全部移除；Trace 状态、fork/import 身份标记和每个 Tool card 自身状态继续保留。
-- Main process 发出轻量 `assistant.activity` 事件，值为 `reasoning`、`output` 或 `tool_call`。Provider stream 类型发生变化时才发送，不转发 Tool 名称、arguments delta 或其他参数内容。
-- Renderer 对活跃 Run 的启动期 `idle` 与 `calling_llm` 使用同一套瞬时活动映射：没有活动时显示“请求模型”，收到活动后显示对应细分状态；每次进入 `calling_llm` 时清空上一轮活动。text/reasoning delta 同时作为兼容兜底更新活动。`evaluating_tools` 统一显示“调用工具”，不暴露短暂的内部评估阶段。
-- 活动不写入持久化历史或公开 Run Snapshot。Renderer reload 后先根据粗粒度 `run.status` 恢复状态，收到新的活动事件后再细化。
-- 活跃 Run 即使尚无 reasoning、text 或 Tool，也投影出状态专用 Turn；状态槽保持固定高度。终态隐藏状态，不额外保留“已完成”标签。
-- `orchestrator.message` 仍是模型可见但用户不可见的编排上下文；Renderer 注册表为它和 `tool.attempt` 提供显式空处理器。
-- Tool call 累计次数不在本项中定义或修改；Swarm 运行统计的一致性继续由下一节跟踪。
-
-### 关联实现
-
-- `electron/providers/provider.ts`
-- `electron/session/session-provider-turn.ts`
-- `shared/agent-events.ts`
-- `src/stores/agent-runtime-events.ts`
-- `src/stores/conversation-timeline.ts`
-- `src/components/chat/ConversationHeader.vue`
-- `src/components/chat/ConversationTurn.vue`
-- `src/components/chat/ReasoningGroup.vue`
-- `src/components/chat/ChatMessageItem.vue`
-- `src/components/chat/ToolCallGroup.vue`
-
-## 8. Swarm 运行中 Tool call 统计的一致性
+## 2. Swarm 运行中 Tool call 统计的一致性
 
 ### 当前行为
 
@@ -203,7 +74,7 @@
 - `src/stores/agent-executions.ts`
 - `src/components/artifacts/AgentExecutionBody.vue`
 
-## 9. 用户消息的视觉容器与对齐方式
+## 3. 用户消息的视觉容器与对齐方式
 
 ### 当前行为
 
@@ -227,3 +98,34 @@
 - `src/components/chat/ChatMessageItem.vue`
 - `src/components/MarkdownBlock.vue`
 - `src/styles/conversation-layout.css`
+
+## 4. `terminal_read` 的模型可见输出语义
+
+### 当前行为
+
+- `node-pty` 输出先以原始字节进入 `ByteRingBuffer`，并作为 `terminal.output` 原样交给 Renderer 的 xterm.js；用户看到的是终端模拟器解释控制序列后的屏幕，而不是普通文本流。
+- `terminal_read` 从同一个 raw scrollback 按绝对字节 cursor 截取数据，随后使用 `electron/terminal/pool.ts` 中的手写 `ANSI_PATTERN` 做无状态清洗，再按 `\r?\n` 保留末尾若干行并从末尾限制 UTF-8 字节数。工具结果 formatter 只追加 cursor/truncated footer。
+- 当前 `ANSI_PATTERN` 无法完整匹配包含空格或反斜杠的 OSC 窗口标题。它会把 OSC 前缀误当作 CSI，并额外吃掉标题正文的第一个字符：`ESC ] 0 ; npm run lint BEL` 被投影为 `pm run lint BEL`，`ESC ] 0 ; C:\... BEL` 被投影为 `:\... BEL`。这会让泄漏的窗口标题看起来像真实命令输出被吞掉首字符；该行为已由现有正则直接复现。
+- 清洗发生在 cursor 截取之后且没有跨调用解析状态。若一次读取的 cursor 位于 UTF-8 字符、CSI/OSC 或其他控制序列中间，下一次增量读取可能从半个序列开始；即使修正完整序列的正则，也不能单靠当前调用恢复它的起始状态。
+- 当前实现不解释裸 `\r`、退格、擦除、光标移动、alternate screen 或重复覆盖的进度行。因此模型得到的既不是终端当前屏幕，也不是严格的纯文本 transcript；行合并、重复文本和控制字符残留都可能出现。
+- Renderer 的 xterm.js 路径通常正常，因为它消费完整 raw stream。现有 TerminalPool 测试只覆盖 SGR 颜色序列，没有覆盖 OSC/BEL、Windows 标题路径、跨 chunk/cursor 序列、裸 `\r`、UTF-8 截断或屏幕重绘。
+
+### 待讨论问题
+
+- `terminal_read` 的正式契约应是原始追加日志、ANSI-free transcript、当前可见 screen/viewport，还是同时提供其中两种视图？
+- cursor 应基于 raw PTY 字节、规范化文本字节还是解析后的逻辑事件？清洗或屏幕重绘改变长度后，如何保证分页稳定且不重复、不漏读？
+- ANSI/CSI/OSC 解析状态是否必须按 Terminal 持续保存，并跨 PTY chunk 与多次 `terminal_read` 延续？应用重启、scrollback 淘汰和 cursor 落后时如何表达状态丢失？
+- OSC title、hyperlink、clipboard、notification 与其他非正文控制通道应全部丢弃，还是保留部分结构化元数据？如何避免把控制载荷或终端注入内容交给模型？
+- 裸 `\r`、退格、擦除、光标定位、alternate screen 和交互式 TUI 分别应该形成覆盖后的屏幕内容、追加式历史，还是明确标记为不支持？
+- `lines` 与 `maxBytes` 应在解析前还是解析后生效？从末尾截断时如何避免切断 UTF-8 code point、控制序列或逻辑行，并让 `truncated/totalBytes` 的单位保持可解释？
+- 模型读取和 Renderer 恢复是否应共享同一终端状态投影，还是明确维持 raw UI stream 与独立 model transcript 两条边界？两者出现差异时哪一侧是诊断真相？
+- 回归测试至少需要覆盖哪些 Windows PowerShell/npm/cmd 标题序列、Unix shell 控制序列、分块边界、增量 cursor 与长输出截断组合？
+
+### 关联实现
+
+- `electron/terminal/pool.ts`
+- `electron/terminal/byte-ring-buffer.ts`
+- `electron/tools/terminal-tools.ts`
+- `electron/tools/tool-result-formatters.ts`
+- `electron/terminal/pool.test.ts`
+- `src/components/TerminalPanel.vue`
