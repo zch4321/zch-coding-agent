@@ -114,6 +114,8 @@ export const OperationalLogRecordSchema = Type.Object(
     providerErrorCode: Type.Optional(Type.String({ maxLength: 256 })),
     retryAfterMs: Type.Optional(Type.Number({ minimum: 0 })),
     requestId: Type.Optional(Type.String({ maxLength: 512 })),
+    attempt: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+    maxAttempts: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
     ttftMs: Type.Optional(Type.Number({ minimum: 0 })),
     durationMs: Type.Optional(Type.Number({ minimum: 0 })),
     promptTokens: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -171,6 +173,8 @@ export interface OperationalEventInput extends OperationalCorrelation {
   providerErrorCode?: string
   retryAfterMs?: number
   requestId?: string
+  attempt?: number
+  maxAttempts?: number
   ttftMs?: number
   durationMs?: number
   promptTokens?: number

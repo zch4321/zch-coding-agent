@@ -72,4 +72,20 @@ describe('public run snapshot', () => {
       items: [{ step: 'Verify snapshot', status: 'in_progress' }],
     })
   })
+
+  it('discards partial streaming content before a Provider retry', () => {
+    const run = activeRun()
+    run.publicSnapshot.status = 'calling_llm'
+    run.publicSnapshot.text = 'partial answer'
+    run.publicSnapshot.reasoning = 'partial reasoning'
+
+    updatePublicRunSnapshot(run, {
+      type: 'assistant.stream.reset',
+      sessionId: run.publicSnapshot.sessionId,
+      runId: run.publicSnapshot.runId,
+    })
+
+    expect(run.publicSnapshot.text).toBe('')
+    expect(run.publicSnapshot.reasoning).toBe('')
+  })
 })

@@ -114,6 +114,11 @@ const runtimeEventHandlers = {
   'assistant.activity': (_target, overlay, event) => {
     overlay.streamActivity = event.activity
   },
+  'assistant.stream.reset': (_target, overlay) => {
+    overlay.text = ''
+    overlay.reasoning = ''
+    overlay.streamActivity = undefined
+  },
   'assistant.text.delta': (_target, overlay, event) => {
     overlay.streamActivity = 'output'
     overlay.text += event.delta

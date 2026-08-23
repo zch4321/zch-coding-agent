@@ -19,6 +19,8 @@ export interface ProviderAttemptInput extends OperationalCorrelation {
   messageCount?: number
   toolCount?: number
   requestBytes?: number
+  attempt?: number
+  maxAttempts?: number
 }
 
 export interface ProviderAttemptCompletion {

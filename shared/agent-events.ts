@@ -136,6 +136,14 @@ export const AgentEventSchema = Type.Union([
   Type.Composite([
     EventBaseSchema,
     Type.Object({
+      type: Type.Literal('assistant.stream.reset'),
+      sessionId: SessionIdSchema,
+      runId: RunIdSchema,
+    }),
+  ]),
+  Type.Composite([
+    EventBaseSchema,
+    Type.Object({
       type: Type.Literal('assistant.text.delta'),
       sessionId: SessionIdSchema,
       runId: RunIdSchema,

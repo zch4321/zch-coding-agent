@@ -324,6 +324,8 @@ export class OperationalLogService {
           'responseBytes',
           'httpStatus',
           'retryAfterMs',
+          'attempt',
+          'maxAttempts',
           'ttftMs',
           'durationMs',
           'promptTokens',

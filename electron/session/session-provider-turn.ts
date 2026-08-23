@@ -48,6 +48,13 @@ import {
   recordProviderAttemptFailure,
   writeProviderFailureTrace,
 } from './provider-failure-diagnostics'
+import {
+  createProviderTurnRetryBudget,
+  MAX_PROVIDER_TURN_ATTEMPTS,
+  ProviderStreamIncompleteError,
+  providerTurnRetryDecision,
+  waitForProviderTurnRetry,
+} from './session-provider-retry'
 
 export interface ProviderTurnResult {
   parts: MessagePart[]
@@ -209,102 +216,137 @@ export class SessionProviderTurnRunner {
         )
     }
 
-    const llmCallId = id<CallId>('llm')
-    let reasoning = ''
-    let streamActivity: AssistantActivity | undefined
-    let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
-    const emitActivity = (activity: AssistantActivity): void => {
-      if (streamActivity === activity) return
-      streamActivity = activity
-      this.#emit(session, {
-        type: 'assistant.activity',
+    const diagnostics = providerRequestDiagnostics(compiled)
+    const retryBudget = createProviderTurnRetryBudget()
+    for (
+      let attemptNumber = 1;
+      attemptNumber <= MAX_PROVIDER_TURN_ATTEMPTS;
+      attemptNumber += 1
+    ) {
+      const llmCallId = id<CallId>('llm')
+      let reasoning = ''
+      let streamActivity: AssistantActivity | undefined
+      let completed: Extract<ProviderEvent, { type: 'completed' }> | undefined
+      let accepted: Extract<ProviderEvent, { type: 'completed' }> | undefined
+      let failureClassification: { stage: string; code: string } | undefined
+      const emitActivity = (activity: AssistantActivity): void => {
+        if (streamActivity === activity) return
+        streamActivity = activity
+        this.#emit(session, {
+          type: 'assistant.activity',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          activity,
+        })
+      }
+      const attempt = new ProviderAttemptRecorder(this.#operationalLog, {
+        operation: 'main',
         sessionId: session.sessionId,
         runId: run.runId,
-        activity,
+        providerCallId: llmCallId,
+        ...(session.internalExecution
+          ? { agentExecutionId: session.internalExecution.executionId }
+          : {}),
+        ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
+        providerId: binding.snapshot.providerId,
+        providerType: provider.providerType,
+        model: binding.snapshot.model,
+        reasoning: binding.snapshot.reasoning,
+        endpoint: binding.snapshot.endpoint,
+        messageCount: compiled.normalizedMessages.length,
+        toolCount: compiled.tools.length,
+        requestBytes: diagnostics.requestBytes,
+        attempt: attemptNumber,
+        maxAttempts: MAX_PROVIDER_TURN_ATTEMPTS,
       })
-    }
-    const diagnostics = providerRequestDiagnostics(compiled)
-    const attempt = new ProviderAttemptRecorder(this.#operationalLog, {
-      operation: 'main',
-      sessionId: session.sessionId,
-      runId: run.runId,
-      providerCallId: llmCallId,
-      ...(session.internalExecution
-        ? { agentExecutionId: session.internalExecution.executionId }
-        : {}),
-      ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
-      providerId: binding.snapshot.providerId,
-      providerType: provider.providerType,
-      model: binding.snapshot.model,
-      reasoning: binding.snapshot.reasoning,
-      endpoint: binding.snapshot.endpoint,
-      messageCount: compiled.normalizedMessages.length,
-      toolCount: compiled.tools.length,
-      requestBytes: diagnostics.requestBytes,
-    })
-    await session.logger.write({
-      type: 'llm.request',
-      sessionId: session.sessionId,
-      runId: run.runId,
-      callId: llmCallId,
-      scope: 'main',
-      normalizedMessages: redactJsonSecrets(compiled.normalizedMessages, [
-        binding.apiKey,
-      ]) as JsonValue[],
-      providerRequest: redactJsonSecrets(compiled.request, [binding.apiKey]),
-      requestBytes: diagnostics.requestBytes,
-      prefixHash: diagnostics.prefixHash,
-      promptResources: promptResources(session),
-      promptBuild: selection.promptBuild,
-      canonicalSource: canonicalTraceSource(selection.messages),
-      modelRoute: binding.snapshot,
-    })
+      await session.logger.write({
+        type: 'llm.request',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: llmCallId,
+        scope: 'main',
+        normalizedMessages: redactJsonSecrets(compiled.normalizedMessages, [
+          binding.apiKey,
+        ]) as JsonValue[],
+        providerRequest: redactJsonSecrets(compiled.request, [binding.apiKey]),
+        requestBytes: diagnostics.requestBytes,
+        prefixHash: diagnostics.prefixHash,
+        promptResources: promptResources(session),
+        promptBuild: selection.promptBuild,
+        canonicalSource: canonicalTraceSource(selection.messages),
+        modelRoute: binding.snapshot,
+      })
 
-    try {
-      for await (const event of provider.stream(compiled, {
-        signal: run.controller.signal,
-      })) {
-        if (event.type === 'text.delta') {
-          emitActivity('output')
-          this.#emit(session, {
-            type: 'assistant.text.delta',
-            sessionId: session.sessionId,
-            runId: run.runId,
-            delta: event.delta,
-          })
-        } else if (event.type === 'reasoning.delta') {
-          if (binding.snapshot.reasoning !== 'off') {
-            emitActivity('reasoning')
-            reasoning += event.delta
+      try {
+        for await (const event of provider.stream(compiled, {
+          signal: run.controller.signal,
+        })) {
+          if (event.type === 'text.delta') {
+            emitActivity('output')
             this.#emit(session, {
-              type: 'assistant.reasoning.delta',
+              type: 'assistant.text.delta',
               sessionId: session.sessionId,
               runId: run.runId,
               delta: event.delta,
             })
+          } else if (event.type === 'reasoning.delta') {
+            if (binding.snapshot.reasoning !== 'off') {
+              emitActivity('reasoning')
+              reasoning += event.delta
+              this.#emit(session, {
+                type: 'assistant.reasoning.delta',
+                sessionId: session.sessionId,
+                runId: run.runId,
+                delta: event.delta,
+              })
+            }
+          } else if (event.type === 'tool.delta') {
+            emitActivity('tool_call')
+          } else if (event.type === 'completed') {
+            if (completed) {
+              throw new TypeError(
+                'Provider stream produced multiple completions',
+              )
+            }
+            completed = event
           }
-        } else if (event.type === 'tool.delta') {
-          emitActivity('tool_call')
-        } else if (event.type === 'completed') {
-          if (completed) {
-            throw new Error('Provider stream produced multiple completions')
-          }
-          completed = event
         }
-      }
-    } catch (error) {
-      if (run.controller.signal.aborted) {
-        attempt.completed({ outcome: 'cancelled' })
-        throw error
-      }
-      const failure =
-        error instanceof ProviderCompletionError
-          ? error.diagnostics
-          : completed
-            ? providerCompletionDiagnostics(completed)
-            : undefined
-      if (failure) {
-        recordProviderAttemptFailure(attempt, error, failure)
+        if (!completed) throw new ProviderStreamIncompleteError()
+        const canonical = completed.turn
+        try {
+          assertCompletedAssistantTurn(canonical)
+          assertAssistantTurnCandidate(session, {
+            parts: canonical.parts,
+            reasoning: canonical.normalizedReasoningText,
+            finishReason: canonical.finishReason,
+            route: binding.snapshot,
+            continuation: canonical.providerContinuation,
+          })
+        } catch (error) {
+          failureClassification = {
+            stage: 'validation',
+            code: 'PROVIDER_COMPLETION_INVALID',
+          }
+          throw error
+        }
+        accepted = completed
+      } catch (error) {
+        if (run.controller.signal.aborted) {
+          attempt.completed({ outcome: 'cancelled' })
+          throw error
+        }
+        const failure =
+          error instanceof ProviderCompletionError
+            ? error.diagnostics
+            : completed
+              ? providerCompletionDiagnostics(completed)
+              : undefined
+        recordProviderAttemptFailure(
+          attempt,
+          error,
+          failure,
+          failureClassification?.code,
+        )
         await this.#writeFailure(
           session,
           run,
@@ -312,127 +354,109 @@ export class SessionProviderTurnRunner {
           binding.apiKey,
           error,
           failure,
+          failureClassification,
         )
-        this.#onDiagnostic('Provider completion failed', error, {
-          audience: 'internal',
-        })
-      }
-      if (!failure) {
-        recordProviderAttemptFailure(attempt, error)
-        await this.#writeFailure(session, run, llmCallId, binding.apiKey, error)
-      }
-      throw error
-    }
-
-    if (!completed) {
-      const error = new Error('Provider stream ended without completion')
-      recordProviderAttemptFailure(attempt, error)
-      await this.#writeFailure(session, run, llmCallId, binding.apiKey, error)
-      throw error
-    }
-    const canonical = completed.turn
-    try {
-      assertCompletedAssistantTurn(canonical)
-      assertAssistantTurnCandidate(session, {
-        parts: canonical.parts,
-        reasoning: canonical.normalizedReasoningText,
-        finishReason: canonical.finishReason,
-        route: binding.snapshot,
-        continuation: canonical.providerContinuation,
-      })
-    } catch (error) {
-      recordProviderAttemptFailure(
-        attempt,
-        error,
-        providerCompletionDiagnostics(completed),
-        'PROVIDER_COMPLETION_INVALID',
-      )
-      await this.#writeFailure(
-        session,
-        run,
-        llmCallId,
-        binding.apiKey,
-        error,
-        providerCompletionDiagnostics(completed),
-        { stage: 'validation', code: 'PROVIDER_COMPLETION_INVALID' },
-      )
-      this.#onDiagnostic('Provider completion validation failed', error, {
-        audience: 'internal',
-      })
-      throw error
-    }
-    const canonicalText = canonical.parts
-      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
-      .join('\n')
-
-    await session.logger.write({
-      type: 'llm.response',
-      sessionId: session.sessionId,
-      runId: run.runId,
-      callId: llmCallId,
-      rawResponse: redactJsonSecrets(completed.rawResponse, [binding.apiKey]),
-      normalizedTurn: redactJsonSecrets(toJsonValue(canonical), [
-        binding.apiKey,
-      ]),
-      providerState: redactJsonSecrets(completed.providerState, [
-        binding.apiKey,
-      ]),
-      usage: canonical.usage.raw,
-      timing: toJsonValue(completed.timing),
-    })
-    attempt.completed({
-      durationMs: completed.timing.totalMs,
-      ttftMs: completed.timing.ttftMs,
-      responseBytes: completed.timing.responseBytes,
-      usage: canonical.usage,
-    })
-    const usage = normalizeLlmUsage({
-      scope: 'main',
-      config,
-      provider: binding.provider,
-      model: binding.snapshot.model,
-      modelProfile: binding.modelProfile,
-      usage: canonical.usage,
-    })
-    if (usage) {
-      run.usageRecords.push(structuredClone(usage))
-      await session.logger.write({
-        type: 'llm.usage',
-        sessionId: session.sessionId,
-        runId: run.runId,
-        callId: llmCallId,
-        usage,
-      })
-      this.#emit(session, {
-        type: 'llm.usage',
-        sessionId: session.sessionId,
-        runId: run.runId,
-        callId: llmCallId,
-        usage,
-      })
-    }
-    if (session.visibility === 'public') {
-      await this.#pluginBus
-        ?.emit('afterLLMCall', {
-          version: 1,
+        if (failureClassification) {
+          this.#onDiagnostic('Provider completion validation failed', error, {
+            audience: 'internal',
+          })
+        } else if (failure) {
+          this.#onDiagnostic('Provider completion failed', error, {
+            audience: 'internal',
+          })
+        }
+        const retry =
+          attemptNumber < MAX_PROVIDER_TURN_ATTEMPTS
+            ? providerTurnRetryDecision(error, retryBudget)
+            : undefined
+        if (!retry) throw error
+        this.#emit(session, {
+          type: 'assistant.stream.reset',
           sessionId: session.sessionId,
           runId: run.runId,
-          response: completed.rawResponse,
-          usage: canonical.usage.raw,
         })
-        .catch((error: unknown) =>
-          this.#onDiagnostic('Plugin afterLLMCall failed', error),
-        )
-    }
+        await waitForProviderTurnRetry(retry.delayMs, run.controller.signal)
+        continue
+      }
 
-    return {
-      parts: structuredClone(canonical.parts),
-      toolCalls: canonical.toolCalls,
-      text: canonicalText,
-      reasoning: canonical.normalizedReasoningText ?? reasoning,
-      finishReason: canonical.finishReason,
-      continuation: canonical.providerContinuation,
-      usage: structuredClone(canonical.usage),
+      if (!accepted) {
+        throw new Error('Provider retry loop accepted no completion')
+      }
+      const canonical = accepted.turn
+      const canonicalText = canonical.parts
+        .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+        .join('\n')
+
+      await session.logger.write({
+        type: 'llm.response',
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: llmCallId,
+        rawResponse: redactJsonSecrets(accepted.rawResponse, [binding.apiKey]),
+        normalizedTurn: redactJsonSecrets(toJsonValue(canonical), [
+          binding.apiKey,
+        ]),
+        providerState: redactJsonSecrets(accepted.providerState, [
+          binding.apiKey,
+        ]),
+        usage: canonical.usage.raw,
+        timing: toJsonValue(accepted.timing),
+      })
+      attempt.completed({
+        durationMs: accepted.timing.totalMs,
+        ttftMs: accepted.timing.ttftMs,
+        responseBytes: accepted.timing.responseBytes,
+        usage: canonical.usage,
+      })
+      const usage = normalizeLlmUsage({
+        scope: 'main',
+        config,
+        provider: binding.provider,
+        model: binding.snapshot.model,
+        modelProfile: binding.modelProfile,
+        usage: canonical.usage,
+      })
+      if (usage) {
+        run.usageRecords.push(structuredClone(usage))
+        await session.logger.write({
+          type: 'llm.usage',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          callId: llmCallId,
+          usage,
+        })
+        this.#emit(session, {
+          type: 'llm.usage',
+          sessionId: session.sessionId,
+          runId: run.runId,
+          callId: llmCallId,
+          usage,
+        })
+      }
+      if (session.visibility === 'public') {
+        await this.#pluginBus
+          ?.emit('afterLLMCall', {
+            version: 1,
+            sessionId: session.sessionId,
+            runId: run.runId,
+            response: accepted.rawResponse,
+            usage: canonical.usage.raw,
+          })
+          .catch((error: unknown) =>
+            this.#onDiagnostic('Plugin afterLLMCall failed', error),
+          )
+      }
+
+      return {
+        parts: structuredClone(canonical.parts),
+        toolCalls: canonical.toolCalls,
+        text: canonicalText,
+        reasoning: canonical.normalizedReasoningText ?? reasoning,
+        finishReason: canonical.finishReason,
+        continuation: canonical.providerContinuation,
+        usage: structuredClone(canonical.usage),
+      }
     }
+    throw new Error('Provider retry loop ended unexpectedly')
   }
 }

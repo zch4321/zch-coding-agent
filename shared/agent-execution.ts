@@ -300,6 +300,15 @@ export const AgentExecutionEventSchema = Type.Union([
     [
       AgentExecutionEventBaseSchema,
       Type.Object({
+        type: Type.Literal('assistant.stream.reset'),
+      }),
+    ],
+    { additionalProperties: false },
+  ),
+  Type.Composite(
+    [
+      AgentExecutionEventBaseSchema,
+      Type.Object({
         type: Type.Literal('assistant.text.delta'),
         delta: Type.String({ maxLength: 65_536 }),
       }),

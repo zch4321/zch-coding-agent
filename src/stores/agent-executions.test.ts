@@ -210,6 +210,15 @@ describe('agent execution store', () => {
     store.handleEvent({
       ...eventBase(second, 2),
       type: 'assistant.text.delta',
+      delta: 'Discarded output',
+    })
+    store.handleEvent({
+      ...eventBase(second, 3),
+      type: 'assistant.stream.reset',
+    })
+    store.handleEvent({
+      ...eventBase(second, 4),
+      type: 'assistant.text.delta',
       delta: 'Second output',
     })
     store.handleEvent({

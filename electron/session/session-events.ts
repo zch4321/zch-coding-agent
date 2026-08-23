@@ -102,6 +102,8 @@ function projectInternalAgentEvent(
     case 'assistant.text.delta':
     case 'assistant.reasoning.delta':
       return { ...identity, type: event.type, delta: event.delta }
+    case 'assistant.stream.reset':
+      return { ...identity, type: event.type }
     case 'assistant.message.completed':
       return {
         ...identity,

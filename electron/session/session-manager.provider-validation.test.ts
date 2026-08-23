@@ -10,6 +10,7 @@ import {
   ScriptedProviderHarness,
   type ScriptedProviderEvent as ProviderEvent,
 } from '../providers/provider-test-harness'
+import { ProviderTransportError } from '../providers/http-sse-transport'
 import type { SessionExecutionStatePort, SessionState } from './session-types'
 import {
   createConfig,
@@ -136,7 +137,10 @@ class CrossTurnDuplicateProvider extends ScriptedProviderHarness {
 }
 
 class ReasoningOnlyProvider extends ScriptedProviderHarness {
+  calls = 0
+
   async *run(): AsyncIterable<ProviderEvent> {
+    this.calls += 1
     yield {
       type: 'completed',
       rawResponse: { id: 'reasoning-only' },
@@ -150,6 +154,41 @@ class ReasoningOnlyProvider extends ScriptedProviderHarness {
       providerState: {},
       timing: {},
       finishReason: 'length',
+    }
+  }
+}
+
+class PartialFailureThenValidProvider extends ScriptedProviderHarness {
+  calls = 0
+
+  async *run(): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    if (this.calls === 1) {
+      yield {
+        type: 'reasoning.delta',
+        delta: 'Discarded reasoning',
+        raw: { attempt: 1 },
+      }
+      yield {
+        type: 'text.delta',
+        delta: 'Discarded partial answer',
+        raw: { attempt: 1 },
+      }
+      throw new ProviderTransportError(
+        'NETWORK_ERROR',
+        'Temporary Provider disconnect',
+        undefined,
+        { retryAfterMs: 0 },
+      )
+    }
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'retry-recovered' },
+      turn: { role: 'assistant', content: 'Recovered answer' },
+      toolCalls: [],
+      usage: { total_tokens: 7 },
+      providerState: {},
+      timing: {},
     }
   }
 }
@@ -551,6 +590,103 @@ describe('SessionManager Provider completion validation', () => {
     await manager.closeSession(sessionId)
   })
 
+  it('retries a transient partial stream without retaining its live output', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-provider-retry-stream-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    const events: AgentEventEnvelope[] = []
+    const committedHistories: SessionState['history'][] = []
+    const provider = new PartialFailureThenValidProvider()
+    const configStore = await createConfig(directory)
+    await configStore.update({
+      version: 1,
+      kind: 'logging',
+      value: {
+        ...configStore.getPublicConfig().logging,
+        trace: {
+          ...configStore.getPublicConfig().logging.trace,
+          enabled: true,
+        },
+      },
+    })
+    const manager = new SessionManager({
+      configStore,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((event) => events.push(event)),
+      providerFactory: () => provider,
+      executionState: {
+        commit: async (session) => {
+          committedHistories.push(structuredClone(session.history))
+          return undefined
+        },
+      },
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    const runId = manager.startRun({
+      sessionId,
+      message: 'Recover this request',
+      clientRequestId: 'request:provider-auto-retry',
+    })
+    await waitFor(() =>
+      events.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === runId &&
+          event.status === 'completed',
+      ),
+    )
+
+    expect(provider.calls).toBe(2)
+    const retryReset = events.findIndex(
+      ({ event }) =>
+        event.type === 'assistant.stream.reset' && event.runId === runId,
+    )
+    const discardedDelta = events.findIndex(
+      ({ event }) =>
+        event.type === 'assistant.text.delta' &&
+        event.runId === runId &&
+        event.delta === 'Discarded partial answer',
+    )
+    const recovered = events.findIndex(
+      ({ event }) =>
+        event.type === 'assistant.message.completed' &&
+        event.runId === runId &&
+        event.text === 'Recovered answer',
+    )
+    expect(discardedDelta).toBeGreaterThan(-1)
+    expect(retryReset).toBeGreaterThan(discardedDelta)
+    expect(recovered).toBeGreaterThan(retryReset)
+    expect(
+      committedHistories
+        .flat()
+        .filter((record) => record.kind === 'assistant_turn')
+        .flatMap((record) =>
+          record.kind === 'assistant_turn'
+            ? record.parts.flatMap((part) =>
+                part.type === 'text' ? [part.text] : [],
+              )
+            : [],
+        ),
+    ).toEqual(['Recovered answer'])
+    await manager.closeSession(sessionId)
+    const traceEvents = parseTrace(await readSessionTrace(directory, sessionId))
+    expect(
+      traceEvents.filter((event) => event.type === 'llm.request'),
+    ).toHaveLength(2)
+    expect(
+      traceEvents.filter((event) => event.type === 'llm.failure'),
+    ).toHaveLength(1)
+    expect(
+      traceEvents.filter((event) => event.type === 'llm.response'),
+    ).toHaveLength(1)
+  })
+
   it('reports a reasoning-only completion as a retryable run failure', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'agent-provider-reasoning-only-'),
@@ -592,11 +728,12 @@ describe('SessionManager Provider completion validation', () => {
         },
       },
     })
+    const provider = new ReasoningOnlyProvider()
     const manager = new SessionManager({
       configStore,
       traceDirectory: path.join(directory, 'traces'),
       eventSink: createIpcTestEventSink((event) => events.push(event)),
-      providerFactory: () => new ReasoningOnlyProvider(),
+      providerFactory: () => provider,
       operationalLog,
     })
     const sessionId = await manager.createSession({
@@ -638,7 +775,8 @@ describe('SessionManager Provider completion validation', () => {
     const traceEvents = parseTrace(traceText)
     const failures = traceEvents.filter((event) => event.type === 'llm.failure')
     const response = failures[0]
-    expect(failures).toHaveLength(1)
+    expect(provider.calls).toBe(2)
+    expect(failures).toHaveLength(2)
     expect(traceEvents.some((event) => event.type === 'llm.stream')).toBe(false)
     expect(traceText).not.toContain('Unfinished reasoning')
     expect(response).toMatchObject({
@@ -652,9 +790,10 @@ describe('SessionManager Provider completion validation', () => {
         truncated: false,
       },
     })
-    const providerFailure = operationalEvents.find(
+    const providerFailures = operationalEvents.filter(
       (event) => event.event === 'provider.failed',
     )
+    const providerFailure = providerFailures.at(-1)
     const runFailure = operationalEvents.find(
       (event) => event.event === 'run.failed',
     )
@@ -664,6 +803,7 @@ describe('SessionManager Provider completion validation', () => {
         event.runId === runId &&
         event.status === 'failed',
     )?.event
+    expect(providerFailures.map((event) => event.attempt)).toEqual([1, 2])
     expect(providerFailure?.diagnosticId).toBeTruthy()
     expect(runFailure?.diagnosticId).toBe(providerFailure?.diagnosticId)
     expect(

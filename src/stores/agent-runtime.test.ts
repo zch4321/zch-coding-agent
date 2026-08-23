@@ -703,8 +703,22 @@ describe('agent runtime store', () => {
 
     runtime.handleAgentEvent(
       event({
-        type: 'run.status',
+        type: 'assistant.stream.reset',
         seq: 5,
+        sessionId: selectedSessionId,
+        runId,
+      }),
+    )
+    expect(runtime.ensureOverlay(selectedSessionId)).toMatchObject({
+      text: '',
+      reasoning: '',
+      streamActivity: undefined,
+    })
+
+    runtime.handleAgentEvent(
+      event({
+        type: 'run.status',
+        seq: 6,
         sessionId: selectedSessionId,
         runId,
         status: 'calling_llm',

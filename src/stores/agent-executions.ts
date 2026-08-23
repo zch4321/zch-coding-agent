@@ -510,7 +510,10 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
         }
         return
       }
-      if (event.type === 'assistant.text.delta') {
+      if (event.type === 'assistant.stream.reset') {
+        live.text = ''
+        live.reasoning = ''
+      } else if (event.type === 'assistant.text.delta') {
         live.text += event.delta
       } else if (event.type === 'assistant.reasoning.delta') {
         live.reasoning += event.delta

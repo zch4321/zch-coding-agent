@@ -1055,6 +1055,14 @@ Text/reasoning delta 只进入 `ActiveRunExecution` memory buffer，并通过 `r
 
 Tool/approval 的实时卡片来自 runtime event；完成后 renderer 从 assistant/tool messages 的 `tool_call/tool_result` parts 和 typed metadata 重建稳定展示。
 
+### 7.2.1 主模型 Provider attempt 重试
+
+每个 ReAct step 只编译一次不可变 Provider request，并以该 request 进行有界 attempt：network、timeout、HTTP 408/409/425/429/5xx 最多重试两次，invalid SSE/JSON、`ProviderCompletionError`（包括 empty/reasoning-only）和无 terminal completion 最多重试一次，总 attempt 不超过三次。服务端 `Retry-After` 优先于指数退避并限制在 60 秒内；abort 会立即终止等待。鉴权、计费/配额、上下文上限、配置与 canonical invariant 错误直接失败。
+
+每个物理 attempt 分配独立 `llm:*` call ID，写一组 `llm.request` 与 `provider.started`，失败时写单条 `llm.failure` 与 `provider.failed`，成功时才写 `llm.response`、usage 并调用 after-LLM plugin hook。Operational Provider 记录携带 `attempt/maxAttempts`；最终 Run 失败复用最后一次 attempt 的 diagnostic ID。before-LLM plugin hook 在逻辑请求编译后只调用一次，避免观察插件因网络补试重复产生副作用。
+
+Provider delta 仍实时发送。若 attempt 失败且允许重试，Session Core 先发 `assistant.stream.reset`，Public Run snapshot、Renderer overlay 和 internal Agent execution overlay 同时清除该 attempt 的临时 text/reasoning/activity，再等待并开始下一 attempt。失败 attempt 从不形成 canonical assistant record、工具 proposal 或审批；因此重试可能增加 Provider 费用，但不会重复执行本地工具副作用。
+
 这个简化模型不承诺“宿主文件副作用”和 Message transaction 在进程崩溃下原子一致：如果工具已经修改文件、但应用在完整 tool batch commit 前崩溃，workspace 变化可能存在而对应 tool messages 不存在。`file_changes` 和下一次 runtime context 可以重新发现当前 workspace 状态，但不能伪造丢失的执行历史。若未来要求 crash-atomic tool journal，必须重新引入 durable tool/run journal；它不是 v2.1 目标。
 
 ### 7.3 Compact 与 `inHistory`

@@ -28,6 +28,9 @@ export function updatePublicRunSnapshot(
     snapshot.text = boundedRuntimeText(snapshot.text, event.delta)
   } else if (event.type === 'assistant.reasoning.delta') {
     snapshot.reasoning = boundedRuntimeText(snapshot.reasoning, event.delta)
+  } else if (event.type === 'assistant.stream.reset') {
+    snapshot.text = ''
+    snapshot.reasoning = ''
   } else if (event.type === 'assistant.message.completed') {
     snapshot.text = event.text.slice(-MAX_RUNTIME_TEXT_LENGTH)
     snapshot.reasoning = (event.reasoning ?? '').slice(-MAX_RUNTIME_TEXT_LENGTH)

@@ -73,6 +73,8 @@ describe('OperationalLogService', () => {
         'api_key=secret-value C:\\Users\\alice\\AppData\\agent\\config.json',
       ),
       endpoint: 'https://user:password@example.test/v1?token=secret#fragment',
+      attempt: 2,
+      maxAttempts: 3,
     })
 
     const output = await records(directory)
@@ -85,6 +87,8 @@ describe('OperationalLogService', () => {
       processInstanceId: 'process:test',
       diagnosticId: failed.diagnosticId,
       endpoint: 'https://example.test/v1',
+      attempt: 2,
+      maxAttempts: 3,
     })
     const serialized = JSON.stringify(output)
     expect(serialized).not.toContain('top-secret')

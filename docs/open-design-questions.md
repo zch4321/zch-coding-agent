@@ -84,31 +84,12 @@
 - `src/components/chat/ConversationHeader.vue`
 - `src/stores/agent-runtime.ts`
 
-## 4. Reasoning-only Provider completion 的重试语义
+## 4. Reasoning-only Provider completion 的重试语义（已解决）
 
-### 当前行为
-
-- Chat Completions 或 Responses Provider 在收到 reasoning、但没有 assistant 文本和工具调用时，会抛出 `ProviderCompletionError`。
-- Desktop 主 Run 当前不会自动重试该错误；Run 进入 failed，用户看到 `Provider returned reasoning without an assistant answer; retry the request` 或对应 Provider 文案。
-- 此错误发生在 canonical assistant Message 写入、工具执行和审批之前；失败尝试不会形成可继续的 assistant turn。
-- Provider reasoning delta 可能已经作为活动 Run 事件发送给 Renderer，因此失败前的临时 reasoning 可能已经显示。
-- `ProviderCompletionError` 当前携带 response diagnostics，但没有稳定的 reasoning-only failure code、结束原因或 retry disposition。
-- Chat Completions accumulator 已观察 Provider finish reason，但 reasoning-only 异常没有把它作为结构化分类公开给 Session Core。
-- 完整 Trace 开启时，失败 completion 可以写入带 `normalizedTurn = null` 的 `llm.response`；失败尝试的 usage 不进入普通成功 usage 汇总。
-- 主对话 Provider 调用没有通用 retry loop；Provider compaction 有独立的、有界 retry policy。
-
-### 待讨论问题
-
-- Reasoning-only completion 是否应自动重试？如果需要，重试预算属于一次 Provider attempt、一次 ReAct step 还是整个 Run？
-- Empty turn 是否与 reasoning-only 使用相同语义？
-- 如何区分偶发空响应、正常 stop、输出 token 耗尽、content filter、refusal 和 Provider 协议损坏？
-- Retry policy 应依据结构化错误字段、HTTP/Provider code、finish reason 还是其他信号？
-- 自动重试是否保持相同 Provider、模型、reasoning、Prompt 和 output limit？
-- 第一次失败尝试已经流式展示的 text/reasoning 应如何处理？
-- 每次重试是否拥有独立 call ID、Plugin hook、Trace 事件、usage 和费用统计？
-- 用户取消、应用退出或 Session 关闭发生在重试等待期间时，终止边界是什么？
-- 第二次仍然失败时，用户应看到哪一层错误以及哪些 attempt 信息？
-- 主对话的 reasoning-only 重试与未来可能加入的网络、timeout、HTTP 408/429/5xx 重试之间是什么关系？
+- 主模型每个 ReAct step 拥有独立的三次 attempt 上限；empty/reasoning-only completion 与无 terminal completion 最多补试一次，transient transport 最多补试两次。
+- 重试保持同一冻结 Provider、模型、reasoning、prompt、tools 和 output limit；每次物理 attempt 使用独立 call ID和失败诊断，只有成功 usage 计入 Run。
+- 失败 attempt 不进入 canonical history，也不执行工具。已经流到前端的临时 text/reasoning 通过 `assistant.stream.reset` 同步清除；重试等待可被取消。
+- 具体错误分类、退避和日志边界已记录在 `requirements.md` §2.3.3 与 `architecture.md` §7.2.1。
 
 ### 关联实现
 
@@ -117,7 +98,7 @@
 - `electron/providers/generic-responses-provider.ts`
 - `electron/session/session-provider-turn.ts`
 - `electron/session/session-run-controller.ts`
-- `electron/session/session-compact-retry.ts`
+- `electron/session/session-provider-retry.ts`
 - `src/stores/agent-runtime-events.ts`
 
 ## 5. 后端运行日志与 Session Trace 的职责
