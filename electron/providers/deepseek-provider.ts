@@ -64,6 +64,11 @@ export class DeepSeekProvider implements ModelProvider {
         `Route Provider ${input.route.providerType} does not match ${this.providerType}`,
       )
     }
+    if (!Number.isInteger(input.maxOutputTokens) || input.maxOutputTokens < 1) {
+      throw new RangeError(
+        'Provider max output tokens must be a positive integer',
+      )
+    }
     const normalizedMessages = compileChatMessages(
       input.history,
       this.providerType,
@@ -77,6 +82,7 @@ export class DeepSeekProvider implements ModelProvider {
       ...(wireTools.length > 0 ? { tools: wireTools } : {}),
       stream: true,
       stream_options: { include_usage: true },
+      max_tokens: input.maxOutputTokens,
       ...(input.structuredOutput
         ? { response_format: { type: 'json_object' } }
         : {}),

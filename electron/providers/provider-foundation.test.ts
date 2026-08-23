@@ -225,7 +225,9 @@ describe('P11 Provider foundation', () => {
           fetchImpl,
         })
       },
-      expectedVendorFields: {},
+      expectedVendorFields: {
+        reasoning_effort: 'high',
+      },
     },
   ])(
     '$name golden compiles and streams a canonical text turn',
@@ -255,6 +257,7 @@ describe('P11 Provider foundation', () => {
         messages: [{ role: 'user', content: 'Hello' }],
         stream: true,
         stream_options: { include_usage: true },
+        max_tokens: 8_192,
         ...fixture.expectedVendorFields,
       })
       expect(JSON.parse(wireBody)).toEqual(request)
@@ -304,7 +307,54 @@ describe('P11 Provider foundation', () => {
     })
     expect(call.request.messages).toEqual(call.normalizedMessages)
     expect(call.request).not.toHaveProperty('tools')
+    expect(call.request).toMatchObject({
+      max_tokens: 1_024,
+      reasoning_effort: 'high',
+    })
   })
+
+  it('maps disabled generic Chat reasoning to the wire none effort', () => {
+    const provider = new GenericChatCompletionsProvider({
+      providerId: 'generic',
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+    })
+
+    const call = provider.compile(
+      compileInput({
+        providerType: 'generic.chat-completions',
+        reasoning: 'off',
+      }),
+    )
+
+    expect(call.request).toMatchObject({
+      max_tokens: 8_192,
+      reasoning_effort: 'none',
+    })
+  })
+
+  it.each(['generic.chat-completions', 'deepseek.chat-completions'] as const)(
+    'rejects an invalid %s output token limit',
+    (providerType) => {
+      const provider =
+        providerType === 'generic.chat-completions'
+          ? new GenericChatCompletionsProvider({
+              providerId: 'generic',
+              baseURL: 'https://api.example/v1',
+              apiKey: 'secret',
+            })
+          : new DeepSeekProvider({
+              baseURL: 'https://api.example/v1',
+              apiKey: 'secret',
+            })
+      const input = compileInput({ providerType })
+      input.maxOutputTokens = 0
+
+      expect(() => provider.compile(input)).toThrow(
+        /max output tokens must be a positive integer/u,
+      )
+    },
+  )
 
   it('normalizes DeepSeek reasoning, split tool arguments and raw usage', async () => {
     let wireBody = ''
