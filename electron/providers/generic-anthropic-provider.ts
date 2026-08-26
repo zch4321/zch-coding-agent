@@ -21,6 +21,7 @@ import {
   normalizedAnthropicCompactUsage,
   normalizedAnthropicUsage,
 } from './anthropic-usage'
+import { projectAnthropicToolInputSchema } from './anthropic-tool-schema'
 import { HttpSseTransport } from './http-sse-transport'
 import {
   ProviderCompletionError,
@@ -91,7 +92,7 @@ function anthropicTools(tools: readonly ProviderToolDefinition[]): JsonValue[] {
   return tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    input_schema: structuredClone(tool.inputSchema),
+    input_schema: projectAnthropicToolInputSchema(tool),
   }))
 }
 
