@@ -4,7 +4,6 @@ import {
   ModelPoolConfigSchema,
   PermissionModeSchema,
   ProviderPublicConfigSchema,
-  ProviderTypeSchema,
   PublicConfigSchema,
   ReasoningEffortSchema,
   RememberedRuleSchema,
@@ -70,6 +69,15 @@ const LegacyReasoningEffortV9Schema = Type.Union([
   Type.Literal('off'),
   Type.Literal('high'),
   Type.Literal('max'),
+])
+
+// AppConfig v15-v22 knew only these four Provider implementations. Keep this
+// union frozen so adding current Provider Types cannot broaden old boundaries.
+const LegacyProviderTypeV22Schema = Type.Union([
+  Type.Literal('deepseek.chat-completions'),
+  Type.Literal('generic.chat-completions'),
+  Type.Literal('generic.responses'),
+  Type.Literal('generic.anthropic'),
 ])
 
 // Frozen approval route before reasoning became explicit. Approval reasoning
@@ -211,7 +219,7 @@ const LegacyAppProviderConfigV15Schema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 128 }),
     label: Type.String({ minLength: 1, maxLength: 128 }),
-    providerType: ProviderTypeSchema,
+    providerType: LegacyProviderTypeV22Schema,
     revision: Type.Integer({
       minimum: 1,
       maximum: Number.MAX_SAFE_INTEGER,

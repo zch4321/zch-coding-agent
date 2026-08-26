@@ -25,6 +25,7 @@ import { DeepSeekProvider } from './deepseek-provider'
 import { GenericAnthropicProvider } from './generic-anthropic-provider'
 import { GenericChatCompletionsProvider } from './generic-chat-completions-provider'
 import { GenericResponsesProvider } from './generic-responses-provider'
+import { MiMoProvider } from './mimo-provider'
 import {
   assertCompletedAssistantTurn,
   ProviderCompletionError,
@@ -1027,6 +1028,12 @@ describe('P11 Provider foundation', () => {
     ).toBeInstanceOf(DeepSeekProvider)
     expect(
       createConfiguredProvider(
+        { ...base, providerType: 'mimo.chat-completions' },
+        'secret',
+      ),
+    ).toBeInstanceOf(MiMoProvider)
+    expect(
+      createConfiguredProvider(
         { ...base, providerType: 'generic.chat-completions' },
         'secret',
       ),
@@ -1046,6 +1053,7 @@ describe('P11 Provider foundation', () => {
     expect(Object.getPrototypeOf(DeepSeekProvider.prototype)).toBe(
       Object.prototype,
     )
+    expect(Object.getPrototypeOf(MiMoProvider.prototype)).toBe(Object.prototype)
     expect(
       Object.getPrototypeOf(GenericChatCompletionsProvider.prototype),
     ).toBe(Object.prototype)
@@ -1060,6 +1068,9 @@ describe('P11 Provider foundation', () => {
   it('resolves the endpoint owned by each generic Provider Type', () => {
     const baseURL = 'https://api.example/v1'
     expect(resolveProviderEndpoint('generic.chat-completions', baseURL)).toBe(
+      'https://api.example/v1/chat/completions',
+    )
+    expect(resolveProviderEndpoint('mimo.chat-completions', baseURL)).toBe(
       'https://api.example/v1/chat/completions',
     )
     expect(resolveProviderEndpoint('generic.responses', baseURL)).toBe(

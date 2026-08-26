@@ -10,6 +10,7 @@ import {
 } from './chat-completions-shared'
 import { DeepSeekProvider } from './deepseek-provider'
 import { GenericChatCompletionsProvider } from './generic-chat-completions-provider'
+import { MiMoProvider } from './mimo-provider'
 import {
   ProviderCompletionError,
   compiledSyntheticCompactCall,
@@ -48,6 +49,7 @@ export type ScriptedProviderEvent =
 function supportedProviderType(value: string): ProviderType {
   if (
     value !== 'deepseek.chat-completions' &&
+    value !== 'mimo.chat-completions' &&
     value !== 'generic.chat-completions'
   ) {
     throw new TypeError(`Unsupported scripted Provider Type: ${value}`)
@@ -65,16 +67,27 @@ function compileTestCall(
       `Route Provider ${routeProviderType} does not match scripted ${providerType}`,
     )
   }
-  return providerType === 'deepseek.chat-completions'
-    ? new DeepSeekProvider({
+  switch (providerType) {
+    case 'deepseek.chat-completions':
+      return new DeepSeekProvider({
         baseURL: 'https://provider.invalid/v1',
         apiKey: 'test-only',
       }).compile(input)
-    : new GenericChatCompletionsProvider({
+    case 'mimo.chat-completions':
+      return new MiMoProvider({
         providerId: 'test-only',
         baseURL: 'https://provider.invalid/v1',
         apiKey: 'test-only',
       }).compile(input)
+    case 'generic.chat-completions':
+      return new GenericChatCompletionsProvider({
+        providerId: 'test-only',
+        baseURL: 'https://provider.invalid/v1',
+        apiKey: 'test-only',
+      }).compile(input)
+    default:
+      throw new TypeError(`Unsupported scripted Provider Type: ${providerType}`)
+  }
 }
 
 function timing(value: JsonValue | undefined): {

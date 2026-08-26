@@ -43,6 +43,8 @@ const REASONING_LABEL_KEYS: Record<ReasoningEffort, string> = {
   max: 'settings.reasoningMax',
 }
 
+const MIMO_DEFAULT_BASE_URL = 'https://api.xiaomimimo.com/v1'
+
 type ProviderAction =
   | { kind: 'select'; providerId: string }
   | { kind: 'create' }
@@ -76,6 +78,10 @@ const providerTypeOptions = computed(() => [
     value: 'deepseek.chat-completions',
   },
   {
+    label: t('settings.providerTypeMimo'),
+    value: 'mimo.chat-completions',
+  },
+  {
     label: t('settings.providerTypeGeneric'),
     value: 'generic.chat-completions',
   },
@@ -88,6 +94,11 @@ const providerTypeOptions = computed(() => [
     value: 'generic.anthropic',
   },
 ])
+const providerTypeHint = computed(() =>
+  agent.providerForm.providerType === 'mimo.chat-completions'
+    ? t('settings.providerTypeMimoHint')
+    : t('settings.providerTypeHint'),
+)
 const reasoningEffortOptions = computed(() =>
   REASONING_EFFORTS.map((effort) => ({
     label: t(REASONING_LABEL_KEYS[effort]),
@@ -180,6 +191,28 @@ function handleSelectedModels(value: Array<string | number>): void {
   agent.providerForm.enabledModelIds = nextModelIds
   if (!mainModel && nextModelIds[0]) {
     agent.setProviderDraftModel(nextModelIds[0])
+  }
+}
+
+/** Applies safe defaults when an empty Provider draft selects MiMo. */
+function handleProviderTypeChange(value: string | number | null): void {
+  if (value !== 'mimo.chat-completions') return
+  const baseURL = agent.providerForm.baseURL.trim()
+  if (!baseURL || baseURL === 'https://api.example.com/v1') {
+    agent.providerForm.baseURL = MIMO_DEFAULT_BASE_URL
+    return
+  }
+  try {
+    const parsed = new URL(baseURL)
+    const path = parsed.pathname.replace(/\/+$/u, '') || '/'
+    if (
+      parsed.origin === 'https://api.xiaomimimo.com' &&
+      (path === '/' || path === '/anthropic' || path === '/anthropic/v1')
+    ) {
+      agent.providerForm.baseURL = MIMO_DEFAULT_BASE_URL
+    }
+  } catch {
+    // Leave an invalid draft visible so the existing save validation reports it.
   }
 }
 
@@ -524,11 +557,12 @@ function handleDropdownSelect(key: string | number, providerId: string) {
             <NSelect
               v-model:value="agent.providerForm.providerType"
               :options="providerTypeOptions"
+              @update:value="handleProviderTypeChange"
             />
           </label>
         </div>
         <p class="settings-footnote">
-          {{ t('settings.providerTypeHint') }}
+          {{ providerTypeHint }}
         </p>
         <label class="settings-field">
           <span>{{ t('settings.baseUrl') }}</span>

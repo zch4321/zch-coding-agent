@@ -7,6 +7,7 @@ import {
 import {
   fetchAnthropicModelCatalog,
   fetchDeepSeekModelCatalog,
+  fetchProviderModelCatalog,
   modelCatalogEndpoint,
   resolveModelProfiles,
 } from './model-catalog'
@@ -51,6 +52,40 @@ describe('DeepSeek model catalog', () => {
     ).resolves.toEqual([
       { id: 'model-a', ownedBy: 'deepseek' },
       { id: 'model-b', ownedBy: 'deepseek' },
+    ])
+  })
+
+  it('uses the OpenAI-compatible model catalog for the MiMo Provider', async () => {
+    const fetchImpl = vi.fn(
+      async (url: string | URL | Request, init?: RequestInit) => {
+        expect(String(url)).toBe('https://api.xiaomimimo.com/v1/models')
+        expect(init?.headers).toMatchObject({
+          Authorization: 'Bearer secret',
+        })
+        return Response.json({
+          object: 'list',
+          data: [
+            { id: 'mimo-v2.5-pro', owned_by: 'xiaomi' },
+            { id: 'mimo-v2.5', owned_by: 'xiaomi' },
+            { id: 'mimo-v2.5-asr', owned_by: 'xiaomi' },
+            { id: 'mimo-v2.5-tts', owned_by: 'xiaomi' },
+            { id: 'mimo-v2.5-tts-voiceclone', owned_by: 'xiaomi' },
+            { id: 'mimo-v2.5-tts-voicedesign', owned_by: 'xiaomi' },
+          ],
+        })
+      },
+    ) as typeof fetch
+
+    await expect(
+      fetchProviderModelCatalog({
+        providerType: 'mimo.chat-completions',
+        baseURL: 'https://api.xiaomimimo.com/v1',
+        apiKey: 'secret',
+        fetchImpl,
+      }),
+    ).resolves.toEqual([
+      { id: 'mimo-v2.5', ownedBy: 'xiaomi' },
+      { id: 'mimo-v2.5-pro', ownedBy: 'xiaomi' },
     ])
   })
 
@@ -190,6 +225,7 @@ describe('DeepSeek model catalog', () => {
     provider.model = 'custom-model'
     provider.modelCatalog = [
       { id: 'deepseek-v4-pro', ownedBy: 'deepseek' },
+      { id: 'mimo-v2.5-pro', ownedBy: 'xiaomi' },
       { id: 'custom-model' },
       { id: 'identity-only' },
       {
@@ -214,6 +250,12 @@ describe('DeepSeek model catalog', () => {
           contextWindowTokens: 1_000_000,
           compactThresholdTokens: 492_800,
           maxOutputTokens: 384_000,
+        }),
+        expect.objectContaining({
+          id: 'mimo-v2.5-pro',
+          capabilitySource: 'builtin',
+          contextWindowTokens: 1_000_000,
+          maxOutputTokens: 131_072,
         }),
         expect.objectContaining({
           id: 'custom-model',

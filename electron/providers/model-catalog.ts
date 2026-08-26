@@ -29,7 +29,17 @@ const BUILTIN_MODEL_CAPABILITIES: Readonly<
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
   },
+  'mimo-v2.5-pro': {
+    contextWindowTokens: 1_000_000,
+    maxOutputTokens: 131_072,
+  },
+  'mimo-v2.5': {
+    contextWindowTokens: 1_000_000,
+    maxOutputTokens: 131_072,
+  },
 }
+
+const MIMO_CHAT_MODEL_IDS = new Set(['mimo-v2.5-pro', 'mimo-v2.5'])
 
 export interface ModelProfile {
   id: string
@@ -323,6 +333,10 @@ export function fetchProviderModelCatalog(options: {
     case 'generic.chat-completions':
     case 'generic.responses':
       return fetchOpenAICompatibleModelCatalog(options)
+    case 'mimo.chat-completions':
+      return fetchOpenAICompatibleModelCatalog(options).then((models) =>
+        models.filter((model) => MIMO_CHAT_MODEL_IDS.has(model.id)),
+      )
     case 'generic.anthropic':
       return fetchAnthropicModelCatalog(options)
   }

@@ -55,7 +55,10 @@ interface AccumulatedToolCall {
 
 export interface ChatCompletionOptions {
   providerId: string
-  providerType: 'deepseek.chat-completions' | 'generic.chat-completions'
+  providerType:
+    | 'deepseek.chat-completions'
+    | 'mimo.chat-completions'
+    | 'generic.chat-completions'
   now: () => number
   createCallId: () => CallId
 }

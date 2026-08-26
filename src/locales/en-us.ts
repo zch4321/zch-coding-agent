@@ -417,11 +417,14 @@ const enUS = {
     providerLabel: 'Provider label',
     providerType: 'Provider type',
     providerTypeDeepSeek: 'DeepSeek Chat Completions',
+    providerTypeMimo: 'Xiaomi MiMo Chat Completions',
     providerTypeGeneric: 'Generic Chat Completions',
     providerTypeResponses: 'Generic Responses',
     providerTypeAnthropic: 'Generic Anthropic Messages',
     providerTypeHint:
       'Provider type selects an independent implementation; the three Generic types are fallbacks for Chat Completions, Responses, and Anthropic APIs.',
+    providerTypeMimoHint:
+      'The dedicated MiMo type uses its documented Chat protocol. The pay-as-you-go Base URL is https://api.xiaomimimo.com/v1; every non-off effort enables MiMo reasoning.',
     baseUrl: 'Base URL',
     mainModel: 'Provider default model',
     modelSettings: 'Model configuration',
