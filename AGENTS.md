@@ -18,6 +18,7 @@ Define cross-process payloads once in `shared/` and validate them at IPC boundar
 - After making changes on a non-`master` branch, commit the scoped changes and push the branch to its configured remote.
 - Keep each code file below 1,000 lines where practical, including test files, stylesheets, Vue components, and pages. Exceed this only when the functionality is genuinely cohesive or splitting it would add more complexity than it removes.
 - Use TypeScript and Vue SFCs. Prettier enforces two spaces, single quotes, no semicolons, and trailing commas; ESLint handles semantic rules. Use `kebab-case.ts` modules, `PascalCase.vue` components, `camelCase` values, and `PascalCase` types.
+- Prefer Naive UI components for renderer UI. Before implementing or changing frontend behavior, consult the [Naive UI documentation](https://www.naiveui.com/zh-CN/os-theme/docs/introduction) for an existing component or supported composition, and reuse it where practical instead of building custom controls or writing custom CSS.
 - Document every class and public method or function with a concise comment explaining its responsibility.
 - Keep commits cohesive and use imperative Conventional Commit-style subjects.
 - Do not delegate implementation work to coder subagents unless the user explicitly asks. Read-only exploration and review tasks may use explore/swarm subagents.
