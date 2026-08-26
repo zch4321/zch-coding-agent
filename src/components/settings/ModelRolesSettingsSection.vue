@@ -205,11 +205,12 @@ watch(
       <p>{{ t('settings.defaultModelsHint') }}</p>
     </div>
     <div class="settings-inline settings-inline-equal model-role-fields">
-      <label class="settings-field">
+      <div class="settings-field">
         <span>{{ t('settings.defaultModelRole') }}</span>
         <div class="settings-inline settings-inline-equal">
           <NSelect
             data-testid="default-model-role-select"
+            :aria-label="t('settings.defaultModelRole')"
             :value="defaultModelRoleDraft"
             :options="defaultModelRoleOptions"
             :placeholder="t('settings.selectMainModel')"
@@ -219,6 +220,7 @@ watch(
           />
           <NSelect
             data-testid="default-model-reasoning-select"
+            :aria-label="`${t('settings.defaultModelRole')} · ${t('settings.reasoning')}`"
             :value="defaultModelReasoningDraft"
             :options="defaultModelReasoningOptions"
             :placeholder="t('settings.reasoning')"
@@ -231,12 +233,13 @@ watch(
           {{ t('settings.modelRoleReasoningConflictHint') }}
         </small>
         <small v-else>{{ t('settings.defaultModelRoleHint') }}</small>
-      </label>
-      <label class="settings-field">
+      </div>
+      <div class="settings-field">
         <span>{{ t('settings.auxiliaryModelRole') }}</span>
         <div class="settings-inline settings-inline-equal">
           <NSelect
             data-testid="auxiliary-model-role-select"
+            :aria-label="t('settings.auxiliaryModelRole')"
             :value="auxiliaryModelRoleDraft"
             :options="auxiliaryModelRoleOptions"
             :disabled="agent.rolesSaving"
@@ -245,6 +248,7 @@ watch(
           />
           <NSelect
             data-testid="auxiliary-model-reasoning-select"
+            :aria-label="`${t('settings.auxiliaryModelRole')} · ${t('settings.reasoning')}`"
             :value="auxiliaryModelReasoningDraft"
             :options="auxiliaryModelReasoningOptions"
             :placeholder="t('settings.reasoning')"
@@ -257,7 +261,7 @@ watch(
           {{ t('settings.modelRoleReasoningConflictHint') }}
         </small>
         <small v-else>{{ t('settings.auxiliaryModelRoleHint') }}</small>
-      </label>
+      </div>
     </div>
     <small
       class="settings-save-status"
