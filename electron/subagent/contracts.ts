@@ -7,10 +7,13 @@ import type {
 } from '../../shared/ids'
 import type { ResolvedModelRoute } from '../providers/model-route-resolver'
 import type { RunStatus } from '../../shared/agent-events'
+import type { AgentToolAccess } from '../../shared/agent-execution'
+import type { PermissionMode } from '../../shared/config'
 
 export interface SubagentSpec {
   name: string
   task: string
+  toolAccess: AgentToolAccess
   sharedContext?: string
 }
 
@@ -31,6 +34,12 @@ export interface InternalSessionOwnership {
 export interface FrozenSubagentRoutes {
   main: ResolvedModelRoute
   compression: ResolvedModelRoute
+}
+
+export interface FrozenSubagentToolContext {
+  permissionMode: PermissionMode
+  allowedToolIds: ReadonlySet<string>
+  gitToolsEnabled: boolean
 }
 
 export interface InternalSubagentRunOutcome {

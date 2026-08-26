@@ -59,6 +59,9 @@ function currentPhase(summary: AgentExecutionSummary): string {
   if (live?.providerRetry) {
     return t('artifact.agentRetrying', live.providerRetry)
   }
+  if (live?.phase === 'awaiting_approval') {
+    return t('chat.runActivity.awaiting_approval')
+  }
   const activities = executions.activitiesFor(summary.id)
   const lastTool = [...activities]
     .reverse()

@@ -35,7 +35,6 @@ import type {
   SessionState,
   SessionExecutionStatePort,
 } from './session-types'
-import type { RunAccessLease } from './workspace-access-coordinator'
 import type { ResolvedModelRoute } from '../providers/model-route-resolver'
 import type { OperationalLogService } from '../operational-logging/service'
 import {
@@ -56,7 +55,6 @@ export interface RunStartOptions {
   directContext?: { content: string; source: string }
   subagentsEnabled?: boolean
   skipProviderPreconditions?: boolean
-  reservedAccess?: { runId: RunId; lease: RunAccessLease }
 }
 
 /** Returns whether a run status cannot transition any further. */
@@ -69,7 +67,7 @@ function isCompactSlashCommand(message: string): boolean {
   return /^\/compact(?:\s|$)/iu.test(message.trimStart())
 }
 
-/** Coordinates the lifecycle, persistence, and access control of a session run. */
+/** Coordinates the lifecycle and persistence of a session run. */
 export class SessionRunController {
   readonly #configStore: ConfigStore
   readonly #providerTurns: SessionProviderTurnRunner
@@ -80,10 +78,6 @@ export class SessionRunController {
   readonly #userTurns: SessionUserTurnPreparer
   readonly #onDiagnostic: DiagnosticSink
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
-  readonly #acquireRunAccess: (
-    session: SessionState,
-    runId: RunId,
-  ) => RunAccessLease
   readonly #executionState?: SessionExecutionStatePort
   readonly #beforeRun?: (session: SessionState) => Promise<void>
   readonly #afterRun?: (session: SessionState) => Promise<void>
@@ -100,7 +94,6 @@ export class SessionRunController {
     userTurns: SessionUserTurnPreparer
     onDiagnostic: DiagnosticSink
     emit: (session: SessionState, event: AgentEventDraft) => void
-    acquireRunAccess: (session: SessionState, runId: RunId) => RunAccessLease
     executionState?: SessionExecutionStatePort
     beforeRun?: (session: SessionState) => Promise<void>
     afterRun?: (session: SessionState) => Promise<void>
@@ -115,7 +108,6 @@ export class SessionRunController {
     this.#userTurns = options.userTurns
     this.#onDiagnostic = options.onDiagnostic
     this.#emit = options.emit
-    this.#acquireRunAccess = options.acquireRunAccess
     this.#executionState = options.executionState
     this.#beforeRun = options.beforeRun
     this.#afterRun = options.afterRun
@@ -170,9 +162,7 @@ export class SessionRunController {
       ipcFault('CONFLICT', 'This session already has an active run')
     }
 
-    const runId = options.reservedAccess?.runId ?? id<RunId>('run')
-    const access =
-      options.reservedAccess?.lease ?? this.#acquireRunAccess(session, runId)
+    const runId = id<RunId>('run')
     const controller = new AbortController()
     const run: ActiveRun = {
       runId,
@@ -182,10 +172,7 @@ export class SessionRunController {
       usageRecords: [],
       fileChangeHistoryBytes: config.limits.fileChangeHistoryBytes,
       done: Promise.resolve(),
-      releaseRunSlot: access.releaseRunSlot,
-      releaseWriter: access.releaseWriter,
       pendingSideEffects: new Set(),
-      writerReleasePending: false,
       pendingInterjections: [],
       acceptingInterjections: true,
       processedInterjectionIds: new Set(),
@@ -235,7 +222,6 @@ export class SessionRunController {
       })
       .finally(() => {
         const finalize = () => {
-          this.releaseAccess(run)
           if (session.activeRun === run) {
             session.activeRun = undefined
           }
@@ -296,9 +282,6 @@ export class SessionRunController {
     status: RunStatus,
     error?: unknown,
   ): void {
-    if (isTerminalRunStatus(status)) {
-      this.releaseAccess(run)
-    }
     run.status = status
     const classified = classifyRunError(error)
     const failure = {
@@ -325,32 +308,6 @@ export class SessionRunController {
             },
           }
         : {}),
-    })
-  }
-
-  /** Releases the run slot immediately and the workspace writer after side effects settle. */
-  releaseAccess(run: ActiveRun): void {
-    run.releaseRunSlot()
-    this.#releaseWriterWhenSettled(run)
-  }
-
-  /** Defers writer release until all side effects associated with the run finish. */
-  #releaseWriterWhenSettled(run: ActiveRun): void {
-    if (run.writerReleasePending) return
-
-    const pending = [...run.pendingSideEffects]
-    if (pending.length === 0) {
-      run.releaseWriter()
-      return
-    }
-
-    run.writerReleasePending = true
-    void Promise.allSettled(pending).then(() => {
-      for (const settlement of pending) {
-        run.pendingSideEffects.delete(settlement)
-      }
-      run.writerReleasePending = false
-      this.#releaseWriterWhenSettled(run)
     })
   }
 

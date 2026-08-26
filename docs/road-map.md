@@ -4,7 +4,7 @@
 
 Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`backend-refactor-plan.md`](./backend-refactor-plan.md)。
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、history-derived Todo List、live interjection v1、一写多读并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、只读 `subagent_run`、Model Pool、逐次人工审批的普通 Desktop Swarm Tool、两级 Agents 状态视图与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一步完成 Swarm hardening，随后迁移 ProjectModel 到 SQLite 并恢复代码智能。
+当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、history-derived Todo List、live interjection v1、不限制跨 Session/workspace 写入的并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、带 `readonly | inherit` 显式工具权限的 `subagent_run`、Model Pool、低风险 parallel Desktop Swarm Tool、child 副作用审批、两级 Agents 状态视图与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一步完成 Swarm hardening，随后迁移 ProjectModel 到 SQLite 并恢复代码智能。
 
 原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
 
@@ -20,26 +20,25 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 ## 2. M2 · Swarm Hardening
 
-目标：在不改变已经落地的只读 child、模型池分配、逐次人工审批和全局 FIFO Run slot 契约的前提下，补齐 Desktop Swarm 的运行反馈、取消、统计、诊断与高并发回归覆盖。
+目标：在不改变已经落地的显式 child 工具权限、模型池分配、原工具审批管线和无产品级并发准入契约的前提下，补齐 Desktop Swarm 的运行反馈、取消、统计、诊断与高并发回归覆盖。
 
 ### 2.1 运行反馈与取消体验
 
 - 评估在主时间线 Swarm ToolCallCard 中展示 queued/running/completed/failed 汇总、模型 assignment、部分失败和结果截断；与 Agents artifact 的 Job → child 两级视图保持同一状态定义。
 - 提供明确的 Job 取消入口和取消中状态。父 Run 取消、单 Job 取消、queued child 与 active child 的终态必须可区分，并保持 call/result 与 durable execution 收敛。
-- 完善 live workspace 变化提示；child 读取 live canonical workspace 的既有语义不变，不把提示包装成快照保证。
-- 评估更完整的只读诊断视图，但 child Session 仍不可继续聊天，也不进入普通 Session 列表、搜索、导出或主对话事件。
+- 评估更完整的 child 诊断视图，但 child Session 仍不可继续聊天，也不进入普通 Session 列表、搜索、导出或主对话事件。
 
 ### 2.2 统计、诊断与成本
 
 - 建立 parent Session/Run/call → Swarm Job → child execution → Provider call 的可审计关联，并汇总 route assignment、usage、费用相关指标、耗时和错误分类。
 - 让运行中的 Tool call 数、child 状态和 usage 聚合与终态 durable 统计确定性收敛；Renderer live overlay、详情查询、Trace 和最终结果采用明确且一致的统计口径。
-- 完善部分失败、排队等待、取消、Provider failure、输出截断和 Trace degradation 的诊断信息，同时保持凭据、reasoning、workspace 绝对路径和 hidden Session ID 不进入公共结果。
+- 完善部分失败、取消、Provider failure、输出截断和 Trace degradation 的诊断信息，同时保持凭据、reasoning、workspace 绝对路径和 hidden Session ID 不进入公共结果。
 - 主时间线、Agents artifact 和日志/Trace 对同一 Job 的名称、数量和终态不应互相矛盾。
 
 ### 2.3 压力测试与持续不变量
 
-- 覆盖慢 Provider、全局 slot 长时间占用、FIFO 排队取消、父 Run 取消、应用退出/崩溃、Renderer reload、事件缺口、长结果和最大 Agent 数的压力测试。
-- 持续验证 write/process/terminal/network/MCP/code intelligence/递归 Agent Tool 对 child 不可见，伪造调用也由 executor 拒绝。
+- 覆盖慢 Provider、同父 Run 多 Job、多个 sibling child、同 workspace 多可写 Session、父 Run 取消、应用退出/崩溃、Renderer reload、事件缺口、长结果和协议最大 Agent 数的压力测试。
+- 持续验证 `readonly` child 不可见副作用工具，`inherit` child 不高于父 Run 且副作用继续经过原权限管线；Goal/Plan/递归 Agent Tool 对所有 child 不可见，伪造调用也由 executor 拒绝。
 - 持续验证 parallel/serial Tool 调度的串行屏障、单审批和原 call 顺序结果；未知 Tool 默认 serial。
 - 持续验证 route、canonical workspace、assignment、usage 和终态可审计，而凭据、reasoning 与 workspace 绝对路径不落盘、不回传。
 - 持续验证 hidden Session 不进入 bootstrap、分页、搜索、导出、普通事件或侧栏；父/Project 删除级联清理，父归档保留。
@@ -147,7 +146,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 ### 4.3 Trace / Replay 增强
 
-- trace 记录并发 Run 的 sessionId、runId、provider purpose、providerType、workspace writer ownership、prompt resource、prompt build 和不可变 route snapshot。
+- trace 记录并发 Run 的 sessionId、runId、provider purpose、providerType、prompt resource、prompt build 和不可变 route snapshot。
 - 保留离线 replay、Prompt Inspector、导出和统计；不提供 trace fork 或在线重放 provider request。
 - 增加 prompt cache 指标、usage 趋势、tool timing、compact 前后 token 变化。
 - 后端、MCP、Serena、provider retry、approval model 的关键事件进入统一 trace。
@@ -178,8 +177,8 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 ## 6. Later
 
-- Subagent / Swarm 后续演进：`subagent_continue` 与多轮追问；child 间通信、递归委派、投票、辩论或自动应用修改；自定义 child 工具列表。
-- Child sandbox profile：在明确隔离后评估运行测试、终端、命令、网络或只读 MCP；当前 readonly child 边界不变。
+- Subagent / Swarm 后续演进：`subagent_continue` 与多轮追问；child 间通信、递归委派、投票或辩论；超出 `readonly | inherit` 的自定义 child 工具列表。
+- Child sandbox profile：在明确隔离后评估比父 Run 权限继承更细的进程、网络、终端和 MCP 沙箱策略。
 - Swarm 共享结果索引、跨 Job 调查缓存和自动能力评估。
 - 多机器 Worker、claim lease、heartbeat、远程 artifact/trace 上传和断线恢复。
 - Durable Session Markdown import：定义从 `zch-conversation-markdown` 新建 Session 时的 attachment/reference 恢复、冲突策略与可信边界；当前导出文件只用于阅读和模型 route 迁移，不能导入或重放。Trace transcript export 继续保持独立。

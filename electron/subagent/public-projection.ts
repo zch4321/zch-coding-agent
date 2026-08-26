@@ -138,7 +138,7 @@ export function projectAgentExecutionTask(
   return (task && unwrapSwarmTaskContent(task)) || task || undefined
 }
 
-/** Removes child run identity and approval state from one active internal snapshot. */
+/** Removes child run identity while retaining its actionable approval state. */
 export function projectAgentExecutionLiveOverlay(
   snapshot: ActiveRunPublicSnapshot | undefined,
 ): AgentExecutionLiveOverlay | undefined {
@@ -150,6 +150,9 @@ export function projectAgentExecutionLiveOverlay(
     reasoning: snapshot.reasoning,
     ...(snapshot.providerRetry
       ? { providerRetry: structuredClone(snapshot.providerRetry) }
+      : {}),
+    ...(snapshot.approval
+      ? { approval: structuredClone(snapshot.approval) }
       : {}),
     tools: snapshot.tools.map((tool) => ({
       callId: tool.callId,

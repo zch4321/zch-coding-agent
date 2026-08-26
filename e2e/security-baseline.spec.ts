@@ -57,7 +57,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 23,
+          schemaVersion: 24,
           models: {
             defaultModelProvider: 'deepseek',
             defaultModelReasoning: 'high',
@@ -73,7 +73,6 @@ test.describe.serial('Electron security and IPC baseline', () => {
           subagents: {
             enabled: false,
             workerTimeoutMs: 1_800_000,
-            maxAgentsPerSwarm: 10,
           },
           mcpServers: [],
         },

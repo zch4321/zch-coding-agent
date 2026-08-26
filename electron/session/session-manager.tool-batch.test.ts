@@ -150,7 +150,6 @@ async function fixture(batch: BatchCall[], options: BatchFixtureOptions = {}) {
     value: {
       enabled: true,
       workerTimeoutMs: 60_000,
-      maxAgentsPerSwarm: 10,
     },
   })
   const events: AgentEventEnvelope[] = []
@@ -196,7 +195,11 @@ describe('Session Tool batch scheduling', () => {
       {
         id: 'call:subagent',
         toolId: 'subagent_run',
-        args: { name: 'worker', task: 'Inspect README directly.' },
+        args: {
+          name: 'worker',
+          task: 'Inspect README directly.',
+          toolAccess: 'readonly',
+        },
       },
       { id: 'call:read', toolId: 'read_file', args: { path: 'README.md' } },
     ])
@@ -241,12 +244,20 @@ describe('Session Tool batch scheduling', () => {
         {
           id: 'call:subagent-1',
           toolId: 'subagent_run',
-          args: { name: 'first', task: 'Inspect first.' },
+          args: {
+            name: 'first',
+            task: 'Inspect first.',
+            toolAccess: 'readonly',
+          },
         },
         {
           id: 'call:subagent-2',
           toolId: 'subagent_run',
-          args: { name: 'second', task: 'Inspect second.' },
+          args: {
+            name: 'second',
+            task: 'Inspect second.',
+            toolAccess: 'readonly',
+          },
         },
       ],
       { runOne },

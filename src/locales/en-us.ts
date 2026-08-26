@@ -127,6 +127,8 @@ const enUS = {
     swarmTotalAgents: 'Total Agents',
     swarmSharedContext: 'Shared context',
     swarmAgents: '{count} Agents',
+    swarmToolReadonly: 'Read-only tools',
+    swarmToolInherit: 'Inherited tools',
     swarmInvalidArguments: 'Swarm arguments cannot be displayed safely',
     openWorkspace: 'Open a workspace',
     openWorkspaceHint: 'Choose a project folder to start a local conversation.',
@@ -188,8 +190,6 @@ const enUS = {
     importedBadge: 'Imported',
     status: {
       awaitingApproval: 'Awaiting approval',
-      writer: 'Writer',
-      readonlyLocked: 'Read-only locked',
       cancelling: 'Cancelling',
       running: 'Running',
       failed: 'Failed',
@@ -533,10 +533,6 @@ const enUS = {
   limits: {
     title: 'Limits',
     hint: 'Tune hard limits for the Agent loop, context, tool output, approvals and network requests. Changes save automatically.',
-    concurrency: 'Concurrent tasks',
-    maxConcurrentRuns: 'Maximum concurrent tasks',
-    concurrencyHint:
-      'Each workspace always permits one writer; read-only tasks may run in parallel and the writer limit is fixed.',
     runLoop: 'Loop and context',
     commands: 'Commands and terminal',
     files: 'File tools',
@@ -582,21 +578,16 @@ const enUS = {
   },
   subagents: {
     title: 'Agents',
-    hint: 'Control whether the main Agent may start read-only subagents and how long each task may run. Changes save automatically.',
-    enabled: 'Enable read-only subagents',
+    hint: 'Control whether the main Agent may start subagents and how long each task may run. Changes save automatically.',
+    enabled: 'Enable subagents',
     enabledHint:
       'Changes apply to the next main Agent run; an active run keeps the setting frozen at its start.',
     workerTimeout: 'Subagent task timeout',
     workerTimeoutHint:
       'The subtask is cancelled at this limit. Cancelling the parent task also cancels active subagents immediately.',
-    maxAgentsPerSwarm: 'Maximum Agents per Swarm',
-    maxAgentsPerSwarmHint:
-      'Limits the total child Agents created by one Swarm. Simultaneous execution remains bounded by the global task concurrency limit. Changes apply to the next /swarm Run.',
     minutes: 'minutes',
     costNotice:
       'Subagents make additional model requests and therefore consume tokens and may incur Provider charges.',
-    concurrencyNotice:
-      'Subtasks share the global task concurrency limit (currently {count}). Nested work is rejected when that limit is 1.',
     save: 'Save Agent settings',
   },
   modelPool: {

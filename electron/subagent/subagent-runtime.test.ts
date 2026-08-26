@@ -1,6 +1,13 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -13,7 +20,7 @@ import {
   type ScriptedProviderEvent,
   type TestProviderStreamRequest,
 } from '../providers/provider-test-harness'
-import { createConfig } from '../session/session-manager-test-support'
+import { createConfig, waitFor } from '../session/session-manager-test-support'
 import { createBackendRuntime } from '../application/create-backend-runtime'
 
 const execFileAsync = promisify(execFile)
@@ -91,6 +98,7 @@ class SubagentChainProvider extends ScriptedProviderHarness {
               args: {
                 name: 'live-workspace-audit',
                 task: 'Inspect README.md and the current Git diff, then report both directly.',
+                toolAccess: 'inherit',
               },
             },
           ],
@@ -167,12 +175,86 @@ class SubagentChainProvider extends ScriptedProviderHarness {
   }
 }
 
+class WritableSubagentProvider extends ScriptedProviderHarness {
+  readonly parentRequests: TestProviderStreamRequest[] = []
+  readonly childRequests: TestProviderStreamRequest[] = []
+
+  async *run(
+    request: TestProviderStreamRequest,
+  ): AsyncIterable<ScriptedProviderEvent> {
+    const parent = request.toolDefinitions.some(
+      (definition) => definition.name === 'subagent_run',
+    )
+    if (parent) {
+      this.parentRequests.push(structuredClone(request))
+      if (this.parentRequests.length === 1) {
+        yield toolTurn({
+          id: 'parent:delegate-writer',
+          calls: [
+            {
+              id: 'call:subagent-writer',
+              toolId: 'subagent_run',
+              args: {
+                name: 'workspace-writer',
+                task: 'Create inherited-write.txt with the requested fixture content.',
+                toolAccess: 'inherit',
+              },
+            },
+          ],
+        })
+        return
+      }
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'parent:writer-complete' },
+        turn: {
+          role: 'assistant',
+          content: 'Parent received the completed writable child result.',
+        },
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    this.childRequests.push(structuredClone(request))
+    if (this.childRequests.length === 1) {
+      yield toolTurn({
+        id: 'child:create-file',
+        calls: [
+          {
+            id: 'call:child-create-file',
+            toolId: 'create_file',
+            args: {
+              path: 'inherited-write.txt',
+              content: 'written by inherited child\n',
+            },
+          },
+        ],
+      })
+      return
+    }
+    yield {
+      type: 'completed',
+      rawResponse: { id: 'child:writer-complete' },
+      turn: {
+        role: 'assistant',
+        content: 'Created inherited-write.txt after approval.',
+      },
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
 async function git(workspace: string, args: string[]): Promise<void> {
   await execFileAsync('git', args, { cwd: workspace })
 }
 
 describe('read-only Subagent runtime', () => {
-  it('reads the live file/Git view and returns a hidden durable result', async () => {
+  it('does not elevate inherited access from a read-only parent', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'zch-subagent-runtime-'))
     cleanup.push(root)
     const workspace = path.join(root, 'workspace')
@@ -220,7 +302,6 @@ describe('read-only Subagent runtime', () => {
       value: {
         enabled: true,
         workerTimeoutMs: 60_000,
-        maxAgentsPerSwarm: 10,
       },
     })
     const originalModel = store.getPublicConfig().models.providers[0]!.model
@@ -503,7 +584,6 @@ describe('read-only Subagent runtime', () => {
       value: {
         enabled: true,
         workerTimeoutMs: 60_000,
-        maxAgentsPerSwarm: 10,
       },
     })
     const provider = new SubagentChainProvider(workspace, async () => undefined)
@@ -558,6 +638,114 @@ describe('read-only Subagent runtime', () => {
         )
       ).value as { reasoning: string }
       expect(durable.reasoning).toBe('medium')
+    } finally {
+      await target.dispose()
+    }
+  }, 30_000)
+})
+
+describe('write-capable Subagent runtime', () => {
+  it('inherits confirm mode and resumes after a projected child approval', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'zch-subagent-write-'))
+    cleanup.push(root)
+    const workspace = path.join(root, 'workspace')
+    const runtimeDirectory = path.join(root, 'runtime')
+    await mkdir(workspace)
+
+    const store = await createConfig(root)
+    await store.update({
+      version: 1,
+      kind: 'subagents',
+      value: {
+        enabled: true,
+        workerTimeoutMs: 60_000,
+      },
+    })
+    const provider = new WritableSubagentProvider()
+    const executionEvents: AgentExecutionEvent[] = []
+    const target = await createBackendRuntime({
+      configStore: store,
+      promptDirectory: path.resolve('resources', 'prompts'),
+      databasePath: path.join(runtimeDirectory, 'agent.db'),
+      runtimeDataDirectory: runtimeDirectory,
+      conversationTitlingDisabled: true,
+      providerFactory: () => provider,
+      eventListeners: [
+        {
+          onAgentEvent: () => undefined,
+          onAgentExecutionEvent: (event) => executionEvents.push(event),
+        },
+      ],
+    })
+    try {
+      const project = (await target.projects.add({ path: workspace })).commit
+        .change.projects[0]!
+      const sessionId = 'session:writable-subagent-parent' as SessionId
+      const configured = store.getPublicConfig()
+      const started = await target.runs.start({
+        version: 1,
+        kind: 'new_session',
+        sessionId,
+        projectId: project.id,
+        permissionMode: 'confirm',
+        modelSelection: {
+          providerId: configured.models.defaultModelProvider,
+          model: configured.models.defaultModel,
+          reasoning: 'off',
+        },
+        message: 'Delegate the requested file creation.',
+        clientRequestId: 'request:writable-subagent',
+      })
+      if (started.outcome !== 'started') {
+        throw new Error('Writable parent Run did not start')
+      }
+
+      await waitFor(() =>
+        executionEvents.some((event) => event.type === 'approval.requested'),
+      )
+      const approval = executionEvents.find(
+        (
+          event,
+        ): event is Extract<
+          AgentExecutionEvent,
+          { type: 'approval.requested' }
+        > => event.type === 'approval.requested',
+      )!
+      expect(approval.approval).toMatchObject({
+        callId: 'call:child-create-file',
+        tool: 'create_file',
+        arguments: { path: 'inherited-write.txt' },
+      })
+      expect(
+        target.runtime.services.sessions.decideAgentExecutionApproval({
+          parentSessionId: sessionId,
+          executionId: approval.executionId,
+          callId: approval.approval.callId,
+          decision: 'allow',
+        }),
+      ).toBe(true)
+
+      await target.runtime.services.sessions.waitForRunSettled(
+        sessionId,
+        started.runId,
+      )
+      expect(
+        await readFile(path.join(workspace, 'inherited-write.txt'), 'utf8'),
+      ).toBe('written by inherited child\n')
+      expect(provider.childRequests).toHaveLength(2)
+      const childTools = provider.childRequests[0]!.toolDefinitions.map(
+        (definition) => definition.name,
+      )
+      expect(childTools).toContain('create_file')
+      expect(childTools).not.toContain('subagent_run')
+      expect(childTools).not.toContain('swarm_run')
+      expect(
+        executionEvents.some(
+          (event) =>
+            event.type === 'execution.changed' &&
+            event.summary.status === 'completed',
+        ),
+      ).toBe(true)
     } finally {
       await target.dispose()
     }

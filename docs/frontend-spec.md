@@ -50,8 +50,8 @@
 
 - Session 是持久化对话，但 UI 仍显示“对话”而不显示内部 ID；Run 不作为左侧导航层级。
 - 同一 Session 同一时间最多一个 active Run。
-- 全应用 `maxConcurrentRuns` 范围为 `1..32`，新安装默认最多 16 个 active Run，升级保留已有用户值；达到上限后新 Run 直接拒绝，不另设 provider call 上限。
-- 同一 canonical workspace 最多一个非只读 writer Run；ReadOnly Run 可与 writer 和其他 ReadOnly Run 并行，不同 workspace 的 writer 可并行。
+- 不设置全应用 active Run 上限；不同 Session 可以并发运行。
+- 不按 canonical workspace 限制写入并发，也不强制只读、禁用权限选择或显示 workspace 并发警告。用户自行决定是否让多个可写对话操作同一项目。
 - Run 活动时同一 Session 再次发送普通消息默认拒绝；排队不在当前范围。
 
 ### 2.4 Artifact
@@ -194,8 +194,8 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 
 ### 5.6 并发状态与破坏性操作
 
-- 对话项和搜索结果显示一个最高优先级运行状态：`Awaiting approval` → `Writer` → `Read-only locked` → `Cancelling` → `Running` → `Failed` → `Completed`。
-- 后台 approval 只在其所属对话显示 badge；点击后 ApprovalCard 使用显式 `sessionId/runId/callId` 提交，不得复用先前 active Session 的标识。
+- 对话项和搜索结果不叠加运行状态文字或 workspace 并发 badge；切换到对应对话后，从统一 Run 活动区和审批卡查看当前状态。
+- 后台 approval 仍只属于其 Session/Agent execution；点击后使用显式 owner identity 提交，不得复用先前 active Session 的标识。
 - running、start pending 或 awaiting approval 的 conversation 禁用 delete、fork 和 revert，并通过 tooltip 说明原因；项目内任一 conversation busy 时禁止 remove project。
 - 对话切换不得让 timeline、error、pending approval 或 runtime event 串到错误 Session。产品不验收未发送 draft/context attachments 的跨 Session 恢复。
 
@@ -211,8 +211,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 - Header 不重复显示工作区名（顶部栏与项目侧栏已展示）。
 - 有 usage 数据时，标题下方依次是两行紧凑用量区：第一行为上下文进度条（样式不变）加同行紧凑数字（如 `128k/256k · 50%`），精确 Token 数与容量来源只出现在 tooltip/aria；第二行为缓存明细 `命中/未命中/输出`，Provider 报告过可缓存输入时追加整数百分比命中率（命中 ÷ (命中+未命中)，与明细同一累计范围）。该命中率只是 UI 展示口径，不改变 trace 或自动压缩的 token 语义。
 - 空闲时不显示 `NO SESSION`、`IDLE` 等内部状态 badge。
-- 仅在以下情况显示短状态：`Running`、`Writer`、`Read-only locked`、`Waiting for approval`、`Cancelling`、`Failed`。
-- 状态不得挤压对话标题；窄宽度下优先保留标题和 Stop 操作。
+- Header 不重复显示 Run 状态；运行反馈固定显示在时间线“思考过程”标题右侧，窄宽度下不挤压对话标题。
 
 ### 6.2 消息流
 
@@ -327,9 +326,7 @@ Context Ingress 审批必须显示：
 - 首次启用 Yolo 必须显示 host-level side effects 风险并记录告知版本。
 - 模型和模式控件使用紧凑下拉，不使用侧栏大卡片。
 - 模型和模式修改必须发送 Session command；控件只在收到后端确认的 entity/state revision 后进入 committed 状态，失败时回到后端值并显示错误。
-- 同 workspace 其他 writer 活跃时，后端发布 `Read-only locked` 运行约束；当前 Session 保存的权限模式不因用户切换对话而被 renderer 偷改为 ReadOnly。
-- `Read-only locked` 期间仍可按 Session 当前模式展示选择值，但非只读 Run 的发送入口禁用并指明 writer Session；用户可以明确将 Session 模式改为 ReadOnly 后启动只读分析。
-- writer 结束后解除运行约束，不自动改变 Session 已保存的模式。
+- 其他 Session 是否在同一 workspace 运行或写入，不改变当前 Session 保存的权限模式，不禁用模式控件或发送入口，也不显示额外警告。
 
 ### 7.4 布局验收
 
@@ -492,11 +489,12 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 ### 10.6 Agents
 
-- 提供默认关闭的只读 Subagent 开关，以及 1–1,440 分钟的 worker timeout；默认 30 分钟。
+- 提供默认关闭的 Subagent 开关，以及 1–1,440 分钟的 worker timeout；默认 30 分钟。
 - 使用与运行限制一致的自动保存交互，并保留页首立即保存按钮和保存状态。
-- 明确提示额外 Provider 请求/费用，并显示当前全局并发值；并发为 1 时说明嵌套 Agent 会被拒绝。
-- 提供 `maxAgentsPerSwarm`（1–32）与模型池配置。模型池使用 `Provider → model → reasoning` 穿梭树选择精确 route，只读展示 Provider 模型能力，不在模型池重复配置并发或 Agent 数量。
+- 明确提示额外 Provider 请求/费用；不显示全局并发值或单次 Swarm Agent 上限。
+- 提供模型池配置。模型池使用 `Provider → model → reasoning` 穿梭树选择精确 route，只读展示 Provider 模型能力，不配置并发或 Agent 数量。
 - 设置变更从下一次主 Run 生效；不提供隐藏 child Session 入口、完整 transcript、取消操作或自定义 child 工具列表。运行状态和历史回看位于 Artifact 的 Agents Tab，不与设置表单混合。
+- `inherit` child 的人工审批在对应 Agent 展开详情中显示，展示工具、参数、原因和 diff，并提供批准/拒绝；隐藏 Session ID 不进入 Renderer。
 
 ### 10.7 Skills
 
@@ -520,7 +518,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - Settings 不展示 `Start session` / `Close session` 作为主流程按钮。
 - Settings 提供“已归档对话”菜单项：分页列出 archived Session，支持恢复；永久删除使用 Naive UI 确认框，并在存在 fork 子 Session 时由 backend 拒绝。
 - 新建对话只产生 renderer draft；首次发送用一个 backend command 创建 durable Session/initial Messages 并启动 Active Run。
-- 切换对话不关闭后台 `LiveSessionContext` 或 `ActiveRunExecution`；归档/删除 Session、移除项目和退出应用才清理对应 runtime 资源。退出时统一取消 active runs、释放 workspace writer 并关闭 PTY。
+- 切换对话不关闭后台 `LiveSessionContext` 或 `ActiveRunExecution`；归档/删除 Session、移除项目和退出应用才清理对应 runtime 资源。退出时统一取消 active runs 并关闭 PTY。
 - 未发送 draft 与 context attachments 不进入 backend，不保证 A → B → A、renderer reload 或应用重启后恢复。
 - 应用重启后从 backend Session snapshot 恢复完整 messages、Goal/Plan、模型和模式；partial assistant output、pending approval 和 Active Run 可以丢失，不显示伪造的 interrupted message。
 
@@ -539,8 +537,6 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 | Retrying LLM     | 正在重试 A/B     | Stop                     | Agents 同步显示 A/B         |
 | Running tool     | 工具卡状态更新   | Stop                     | 文件工具可打开相关 Artifact |
 | Waiting approval | 审批卡           | 禁止发送，可 Stop        | 自动显示 Diff 或相关文件    |
-| Workspace writer | Writer badge     | 当前 Run 的普通控制      | 保留内容                    |
-| Read-only locked | Read-only locked | 允许启动只读分析         | 保留内容并提示状态可能过期  |
 | Cancelling       | 短状态           | Stop disabled            | 保留内容                    |
 | Failed           | NMessage error   | 恢复输入，可重试用户消息 | 保留审查上下文              |
 | Session archived | 历史只读         | Unarchive 后可发送       | 恢复持久化 Artifact 元数据  |
@@ -698,8 +694,8 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] Enter、Shift+Enter 和 IME 行为符合规范。
 - [ ] 模型和权限模式只使用紧凑控件，不放入侧栏大卡片。
 - [ ] Todo 不生成时间线大卡片；输入框上方只显示单行当前项，悬停后在有界滚动浮层中展开完整清单。
-- [ ] 同 workspace writer 活跃时，其他 Session 显示 Read-only locked；renderer 不修改其持久化 mode，writer 结束后解除约束。
-- [ ] Limits 提供运行/工具硬限制与已发现的 command shell；UI 明确 writer=1 是不可配置安全规则，Shell fallback 有可见警告。
+- [ ] 不同 Session 可在同一 workspace 并发运行和写入；renderer 不强制只读、不禁用权限选择，也不显示 workspace 并发警告。
+- [ ] Limits 提供运行/工具硬限制与已发现的 command shell；Shell fallback 有可见警告，不提供全局 Run 或 workspace writer 配置。
 - [ ] 对话输入区没有 Terminal 入口。
 - [ ] Send/Stop 按钮与底部、右侧距离一致。
 

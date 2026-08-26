@@ -178,6 +178,7 @@ describe('agent execution store', () => {
       reasoning: '',
       activities: [],
       usage: [],
+      approvalSubmitting: false,
     }
     store.removeSession(parentSessionId)
     expect(store.sessions[parentSessionId]).toBeUndefined()
@@ -277,6 +278,50 @@ describe('agent execution store', () => {
     expect(JSON.stringify(store.activitiesFor(second.id))).not.toContain(
       'First reasoning',
     )
+  })
+
+  it('projects and decides an approval owned by a child execution', async () => {
+    const running = summary('subagent:approval', 'running')
+    const decideAgentExecutionApproval = vi.fn(async () =>
+      success({ accepted: true }),
+    )
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        decideAgentExecutionApproval,
+      } as Partial<AgentApi> as AgentApi,
+    })
+    const store = useAgentExecutionStore()
+    store.upsertSummary(running)
+    store.handleEvent({
+      ...eventBase(running, 1),
+      type: 'approval.requested',
+      approval: {
+        callId: 'call:child-write' as CallId,
+        kind: 'tool',
+        tool: 'create_file',
+        arguments: { path: 'child.txt' },
+        reason: 'Create the delegated output',
+        policySignals: [],
+        rememberable: false,
+        expiresAt: '2026-08-01T00:05:00.000Z',
+      },
+    })
+
+    expect(store.live[running.id]?.approval).toMatchObject({
+      callId: 'call:child-write',
+      tool: 'create_file',
+    })
+    await expect(store.decideApproval(running.id, 'allow')).resolves.toBe(true)
+    expect(decideAgentExecutionApproval).toHaveBeenCalledWith({
+      version: 1,
+      parentSessionId,
+      executionId: running.id,
+      callId: 'call:child-write',
+      decision: 'allow',
+    })
+    expect(store.live[running.id]?.approval).toBeUndefined()
+    expect(store.live[running.id]?.approvalSubmitting).toBe(false)
   })
 
   it('groups Swarm children under their Job and counts active leaf Agents', () => {

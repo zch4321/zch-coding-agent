@@ -214,7 +214,6 @@ export async function configureApp(input: {
           value: {
             enabled: true,
             workerTimeoutMs: 60_000,
-            maxAgentsPerSwarm: 10,
           },
         })
         if (!delegated.ok) {

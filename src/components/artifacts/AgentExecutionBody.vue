@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NButton, NSpin } from 'naive-ui'
+import { NAlert, NButton, NSpace, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type {
   AgentExecutionActivity,
@@ -18,6 +18,8 @@ const executions = useAgentExecutionStore()
 const { t } = useI18n()
 const detailView = computed(() => executions.details[props.summary.id])
 const children = computed(() => executions.childrenFor(props.summary.id))
+const live = computed(() => executions.live[props.summary.id])
+const approval = computed(() => live.value?.approval)
 
 function elapsed(): string {
   const end = props.summary.completedAt
@@ -73,6 +75,32 @@ function messages(): Array<
     </div>
     <NSpin v-if="detailView?.loading && !detailView.loaded" size="small" />
     <template v-else>
+      <NAlert
+        v-if="approval"
+        type="warning"
+        :title="`${t('chat.approvalRequired')} · ${approval.tool}`"
+      >
+        <p>{{ approval.reason }}</p>
+        <pre>{{ JSON.stringify(approval.arguments, null, 2) }}</pre>
+        <pre v-if="approval.diff">{{ approval.diff }}</pre>
+        <NSpace>
+          <NButton
+            size="small"
+            type="primary"
+            :loading="live?.approvalSubmitting"
+            @click.stop="executions.decideApproval(summary.id, 'allow')"
+          >
+            {{ t('common.approve') }}
+          </NButton>
+          <NButton
+            size="small"
+            :disabled="live?.approvalSubmitting"
+            @click.stop="executions.decideApproval(summary.id, 'deny')"
+          >
+            {{ t('common.deny') }}
+          </NButton>
+        </NSpace>
+      </NAlert>
       <dl class="agent-execution-stats">
         <div class="agent-execution-stat">
           <dt>{{ t('artifact.agentRunTime') }}</dt>

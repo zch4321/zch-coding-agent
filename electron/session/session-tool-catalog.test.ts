@@ -73,7 +73,7 @@ describe('session tool catalog', () => {
     expect(catalog.names).toEqual(['read_file'])
   })
 
-  it('exposes swarm only for a capable Run and freezes its per-Job maximum', async () => {
+  it('exposes the fixed-schema Swarm only for an eligible Run', async () => {
     const tools = registry(['read_file'])
     tools.registerTool({
       id: 'swarm_run',
@@ -101,7 +101,7 @@ describe('session tool catalog', () => {
     const catalog = await resolveSessionToolCatalog({
       registry: tools,
       subagentsEnabled: true,
-      swarmMaxAgents: 3,
+      swarmEnabled: true,
     })
     const swarm = catalog.definitions.find(
       (definition) => definition.name === 'swarm_run',
@@ -115,8 +115,8 @@ describe('session tool catalog', () => {
       }
     }
     expect(catalog.names).toEqual(['read_file', 'swarm_run'])
-    expect(schema.properties.tasks.maxItems).toBe(3)
-    expect(schema.properties.tasks.items.properties.agentCount.maximum).toBe(3)
+    expect(schema.properties.tasks.maxItems).toBe(32)
+    expect(schema.properties.tasks.items.properties.agentCount.maximum).toBe(32)
     expect(SwarmRunArgsSchema.properties.tasks.maxItems).toBe(32)
     expect(
       SwarmRunArgsSchema.properties.tasks.items.properties.agentCount.maximum,

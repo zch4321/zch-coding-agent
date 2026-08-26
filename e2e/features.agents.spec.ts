@@ -121,6 +121,7 @@ test.describe('Electron Agents activity panel', () => {
           args: {
             name: 'first-reviewer',
             task: 'Review the long fixture and report the important result.',
+            toolAccess: 'readonly',
           },
         },
         {
@@ -129,6 +130,7 @@ test.describe('Electron Agents activity panel', () => {
           args: {
             name: 'second-reviewer',
             task: 'Independently review the long fixture and report it.',
+            toolAccess: 'readonly',
           },
         },
       ]),
@@ -272,6 +274,7 @@ test.describe('Electron Agents activity panel', () => {
               task: 'Review the repository independently.',
               requiredCapability: 'standard',
               agentCount: 2,
+              toolAccess: 'readonly',
             },
           ],
         },
@@ -295,18 +298,8 @@ test.describe('Electron Agents activity panel', () => {
       .locator('.message-input-area textarea')
       .fill('Use a Swarm to review the repository independently')
     await page.getByRole('button', { name: '发送消息' }).click()
-    const approval = page.locator('.approval-card')
-    await expect(approval).toContainText('启动 Swarm')
-    await expect(approval).toContainText('Agent 总数')
-    await expect(approval).toContainText('npm run check exited 0')
-    await expect(approval).toContainText('review')
-    await expect(
-      approval.locator('.swarm-approval-tasks .n-list-item'),
-    ).toHaveCount(1)
-    await expect.poll(() => fakeProvider.requests.length).toBe(1)
-    await approval.getByRole('button', { name: '批准', exact: true }).click()
-    await expect(approval).toHaveCount(0)
     await expect.poll(() => fakeProvider.requests.length).toBe(3)
+    await expect(page.locator('.approval-card')).toHaveCount(0)
     for (const request of fakeProvider.requests.slice(1, 3)) {
       const childPrompt = providerMessageText(request.body)
       expect(childPrompt).toContain('<swarm_shared_context>')

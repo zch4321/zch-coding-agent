@@ -12,8 +12,6 @@ import type { LlmUsageRecord } from '../../shared/usage'
 import { MAX_SWARM_SHARED_CONTEXT_LENGTH } from '../../shared/swarm'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
-import { GIT_READ_ONLY_TOOL_IDS } from '../tools/git-tool-ids'
-import { TODO_TOOL_ID } from '../../shared/todo'
 import { projectAgentExecutionSummary } from './public-projection'
 import {
   swarmSharedContextContent,
@@ -22,6 +20,7 @@ import {
 import {
   SubagentRuntimeError,
   summarizeSubagentUsage,
+  type FrozenSubagentToolContext,
   type FrozenSubagentRoutes,
   type PreparedSubagentExecution,
   type PreparedSubagentExecutionPort,
@@ -30,15 +29,6 @@ import {
   type SubagentSpec,
 } from './contracts'
 
-const CHILD_TOOL_IDS = new Set([
-  'read_file',
-  'list_dir',
-  'glob',
-  'grep',
-  'read_skill',
-  'delay',
-  TODO_TOOL_ID,
-])
 const MAX_ERROR_LENGTH = 65_536
 const OUTPUT_FINISH_REASONS = new Set([
   'length',
@@ -82,6 +72,12 @@ function normalizeSpec(spec: SubagentSpec): SubagentSpec {
       'Subagent task must contain 1-32768 characters',
     )
   }
+  if (spec.toolAccess !== 'readonly' && spec.toolAccess !== 'inherit') {
+    throw new SubagentRuntimeError(
+      'INVALID_SUBAGENT_TOOL_ACCESS',
+      'Subagent toolAccess must be readonly or inherit',
+    )
+  }
   if (
     spec.sharedContext !== undefined &&
     (!sharedContext ||
@@ -92,7 +88,12 @@ function normalizeSpec(spec: SubagentSpec): SubagentSpec {
       `Subagent shared context must contain 1-${MAX_SWARM_SHARED_CONTEXT_LENGTH} characters`,
     )
   }
-  return { name, task, ...(sharedContext ? { sharedContext } : {}) }
+  return {
+    name,
+    task,
+    toolAccess: spec.toolAccess,
+    ...(sharedContext ? { sharedContext } : {}),
+  }
 }
 
 function completedResult(
@@ -251,15 +252,14 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     }
     const spec = normalizeSpec(candidate)
     const config = this.#configStore.getPublicConfig()
-    if (config.limits.maxConcurrentRuns === 1) {
-      throw new SubagentRuntimeError(
-        'SUBAGENT_CONCURRENCY_DISABLED',
-        'Subagent execution requires maxConcurrentRuns to be at least 2',
-      )
-    }
     const routes = this.#manager.frozenSubagentRoutes(
       parent.sessionId,
       parent.runId,
+    )
+    const toolContext = this.#manager.frozenSubagentToolContext(
+      parent.sessionId,
+      parent.runId,
+      spec.toolAccess,
     )
     const timestamp = new Date().toISOString()
     const executionId = `subagent-${randomUUID()}` as AgentExecutionId
@@ -310,9 +310,9 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       spec,
       parent,
       routes,
+      toolContext,
       record,
       workerTimeoutMs: config.subagents.workerTimeoutMs,
-      queued: false,
     })
   }
 
@@ -331,6 +331,11 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     const spec = normalizeSpec(candidate)
     const config = this.#configStore.getPublicConfig()
     this.#manager.frozenSubagentRoutes(parent.sessionId, parent.runId)
+    const toolContext = this.#manager.frozenSubagentToolContext(
+      parent.sessionId,
+      parent.runId,
+      spec.toolAccess,
+    )
     const record = await this.#state.getExecution(
       parent.sessionId,
       prepared.executionId,
@@ -369,9 +374,9 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       spec,
       parent,
       routes: prepared.routes,
+      toolContext,
       record,
       workerTimeoutMs: config.subagents.workerTimeoutMs,
-      queued: true,
     })
   }
 
@@ -379,9 +384,9 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     spec: SubagentSpec
     parent: SubagentParentContext
     routes: FrozenSubagentRoutes
+    toolContext: FrozenSubagentToolContext
     record: SubagentExecutionRecord
     workerTimeoutMs: number
-    queued: boolean
   }): Promise<SubagentRunResult> {
     const controller = new AbortController()
     const timeoutReason = new SubagentRuntimeError(
@@ -410,18 +415,15 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     spec: SubagentSpec
     parent: SubagentParentContext
     routes: ReturnType<SessionManager['frozenSubagentRoutes']>
+    toolContext: FrozenSubagentToolContext
     record: SubagentExecutionRecord
     controller: AbortController
     timeoutReason: SubagentRuntimeError
     workerTimeoutMs: number
-    queued: boolean
   }): Promise<SubagentRunResult> {
     const startedAt = performance.now()
     let childSessionId: SessionId | undefined
     let sessionCreated = false
-    let reservation:
-      | Awaited<ReturnType<SessionManager['reserveQueuedInternalRun']>>
-      | undefined
     let timeout: ReturnType<typeof setTimeout> | undefined
     let usage: LlmUsageRecord[] = []
     try {
@@ -429,13 +431,6 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         input.parent.sessionId,
       )
       childSessionId = `subagent-session-${randomUUID()}` as SessionId
-      if (input.queued) {
-        reservation = await this.#manager.reserveQueuedInternalRun({
-          sessionId: childSessionId,
-          workspace: input.parent.workspace,
-          signal: input.controller.signal,
-        })
-      }
       if (input.controller.signal.aborted) {
         throw input.controller.signal.reason
       }
@@ -447,6 +442,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       await this.#manager.createInternalSession({
         sessionId: childSessionId,
         workspace: input.parent.workspace,
+        mode: input.toolContext.permissionMode,
         provider: input.routes.main.snapshot.providerId,
         modelSelection: {
           providerId: input.routes.main.snapshot.providerId,
@@ -454,8 +450,8 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
           reasoning: input.routes.main.snapshot.reasoning,
         },
         providerSnapshot: input.routes.main.provider,
-        allowedToolIds: new Set([...CHILD_TOOL_IDS, ...GIT_READ_ONLY_TOOL_IDS]),
-        gitToolsEnabled: true,
+        allowedToolIds: input.toolContext.allowedToolIds,
+        gitToolsEnabled: input.toolContext.gitToolsEnabled,
         execution: {
           executionId: input.record.id,
           parentSessionId: input.parent.sessionId,
@@ -473,7 +469,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         title: `Subagent: ${input.spec.name}`.slice(0, 256),
         titleSource: 'user',
         lifecycle: 'active',
-        permissionMode: 'readonly',
+        permissionMode: input.toolContext.permissionMode,
         modelSelection: {
           providerId: input.routes.main.snapshot.providerId,
           model: input.routes.main.snapshot.model,
@@ -496,31 +492,22 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       await this.#state.updateExecution(input.record)
       this.#publishExecutionChanged(input.record, input.spec.name)
 
-      let childRun
-      try {
-        const swarmAssignment = input.spec.sharedContext
-          ? {
-              context: {
-                content: swarmSharedContextContent(input.spec.sharedContext),
-                source: 'swarm:shared-context',
-              },
-              task: swarmTaskContent(input.spec.task),
-            }
-          : undefined
-        childRun = this.#manager.startInternalRun({
-          sessionId: childSessionId,
-          task: swarmAssignment?.task ?? input.spec.task,
-          ...(swarmAssignment ? { context: swarmAssignment.context } : {}),
-          clientRequestId: `subagent-${randomUUID()}`,
-          routes: input.routes,
-          ...(reservation ? { reservation } : {}),
-        })
-        reservation = undefined
-      } catch (error) {
-        reservation?.lease.release()
-        reservation = undefined
-        throw error
-      }
+      const swarmAssignment = input.spec.sharedContext
+        ? {
+            context: {
+              content: swarmSharedContextContent(input.spec.sharedContext),
+              source: 'swarm:shared-context',
+            },
+            task: swarmTaskContent(input.spec.task),
+          }
+        : undefined
+      const childRun = this.#manager.startInternalRun({
+        sessionId: childSessionId,
+        task: swarmAssignment?.task ?? input.spec.task,
+        ...(swarmAssignment ? { context: swarmAssignment.context } : {}),
+        clientRequestId: `subagent-${randomUUID()}`,
+        routes: input.routes,
+      })
       const interrupt = () =>
         this.#manager.interruptRun(childSessionId!, childRun.runId)
       if (input.controller.signal.aborted) interrupt()
@@ -628,7 +615,6 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       throw safeFailure
     } finally {
       if (timeout) clearTimeout(timeout)
-      reservation?.lease.release()
       if (childSessionId && sessionCreated) {
         await this.#manager.closeSession(childSessionId).catch((error) =>
           this.#onDiagnostic(

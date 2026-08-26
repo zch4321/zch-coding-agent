@@ -149,8 +149,8 @@ test.describe.serial('Electron settings workflows', () => {
       .getByRole('button', { name: '保存运行限制' })
     await expect(saveLimits).toBeVisible()
     await expect(saveLimits).toBeDisabled()
-    await expect(limits.locator('.limits-group')).toHaveCount(6)
-    await expect(limits.locator('.n-divider')).toHaveCount(5)
+    await expect(limits.locator('.limits-group')).toHaveCount(5)
+    await expect(limits.locator('.n-divider')).toHaveCount(4)
     const limitColumnCount = await limits
       .locator('.limits-grid')
       .evaluate(
@@ -245,23 +245,17 @@ test.describe.serial('Electron settings workflows', () => {
     await expect(
       agents.getByText('子 Agent 会发起额外的模型请求', { exact: false }),
     ).toBeVisible()
-    await expect(agents.getByText('当前为 16', { exact: false })).toBeVisible()
     const subagentsSwitch = agents.locator('.n-switch')
     const timeoutMinutes = agents
       .locator('.settings-field', { hasText: '单个子任务超时' })
-      .locator('input')
-    const maxAgentsPerSwarm = agents
-      .locator('.settings-field', { hasText: '单次 Swarm 最大 Agent 数' })
       .locator('input')
     const subagentSaveStatus = agents.locator(
       '.settings-heading-actions .settings-save-status',
     )
     await expect(subagentsSwitch).not.toHaveClass(/n-switch--active/u)
     await expect(timeoutMinutes).toHaveValue('30')
-    await expect(maxAgentsPerSwarm).toHaveValue('10')
     await subagentsSwitch.click()
     await timeoutMinutes.fill('45')
-    await maxAgentsPerSwarm.fill('12')
     await expect(subagentSaveStatus).toHaveText('已保存')
     await expect
       .poll(async () =>
@@ -273,7 +267,6 @@ test.describe.serial('Electron settings workflows', () => {
                   subagents: {
                     enabled: boolean
                     workerTimeoutMs: number
-                    maxAgentsPerSwarm: number
                   }
                 }
               }
@@ -289,7 +282,6 @@ test.describe.serial('Electron settings workflows', () => {
       .toEqual({
         enabled: true,
         workerTimeoutMs: 2_700_000,
-        maxAgentsPerSwarm: 12,
       })
     await subagentsSwitch.click()
     await expect(subagentSaveStatus).toHaveText('已保存')

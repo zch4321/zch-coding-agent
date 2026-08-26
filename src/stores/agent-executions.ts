@@ -12,6 +12,7 @@ import type { ProviderRetryState } from '../../shared/agent-events'
 import { IPC_VERSION } from '../../shared/channels'
 import type { AgentExecutionId, SessionId } from '../../shared/ids'
 import type { LlmUsageRecord } from '../../shared/usage'
+import type { ActiveRunApprovalSnapshot } from '../../shared/runtime-state'
 import { useAgentReplicaStore } from './agent-replica'
 
 interface ExecutionSessionView {
@@ -37,6 +38,8 @@ interface LiveExecutionView {
   text: string
   reasoning: string
   providerRetry?: ProviderRetryState
+  approval?: ActiveRunApprovalSnapshot
+  approvalSubmitting: boolean
   activities: AgentExecutionActivity[]
   usage: LlmUsageRecord[]
 }
@@ -66,6 +69,7 @@ function blankLiveView(): LiveExecutionView {
     reasoning: '',
     activities: [],
     usage: [],
+    approvalSubmitting: false,
   }
 }
 
@@ -449,6 +453,9 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       live.providerRetry = overlay.providerRetry
         ? cloneReactiveSafe(overlay.providerRetry)
         : undefined
+      live.approval = overlay.approval
+        ? cloneReactiveSafe(overlay.approval)
+        : undefined
       live.text = durable.some(
         (activity) =>
           activity.type === 'message' && activity.text === overlay.text,
@@ -499,6 +506,7 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
           live.text = ''
           live.reasoning = ''
           live.providerRetry = undefined
+          live.approval = undefined
         }
         return
       }
@@ -507,6 +515,7 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
           event.status === 'calling_llm' && live.phase !== 'calling_llm'
         live.phase = event.status
         live.providerRetry = undefined
+        if (event.status !== 'awaiting_approval') live.approval = undefined
         if (enteredProvider) {
           live.generation += 1
           live.text = ''
@@ -570,7 +579,12 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
             status: 'proposed',
           },
         ])
+      } else if (event.type === 'approval.requested') {
+        live.approval = cloneReactiveSafe(event.approval)
       } else if (event.type === 'tool.completed') {
+        if (live.approval?.callId === event.callId) {
+          live.approval = undefined
+        }
         const existing = live.activities.find(
           (activity) =>
             activity.type === 'tool' && activity.callId === event.callId,
@@ -597,6 +611,33 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
           event.executionId,
         )
         if (summary) summary.usage = summarizedUsage(live.usage)
+      }
+    },
+    async decideApproval(
+      executionId: AgentExecutionId,
+      decision: 'allow' | 'deny',
+    ): Promise<boolean> {
+      const api = window.agentApi
+      const live = this.ensureLive(executionId)
+      const approval = live.approval
+      const summary = findSummary(this.sessions, this.children, executionId)
+      if (!api || !approval || !summary || live.approvalSubmitting) {
+        return false
+      }
+      live.approvalSubmitting = true
+      try {
+        const result = await api.decideAgentExecutionApproval({
+          version: IPC_VERSION,
+          parentSessionId: summary.parentSessionId,
+          executionId,
+          callId: approval.callId,
+          decision,
+        })
+        if (!result.ok || !result.value.accepted) return false
+        live.approval = undefined
+        return true
+      } finally {
+        live.approvalSubmitting = false
       }
     },
   },

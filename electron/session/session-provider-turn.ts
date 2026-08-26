@@ -39,7 +39,6 @@ import type { PromptRegistry } from '../prompts/registry'
 import {
   appendAgentsContextIfChanged,
   appendRuntimeContextIfChanged,
-  type WorkspaceConcurrencyContext,
 } from './prompt-harness'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 import type { OperationalLogService } from '../operational-logging/service'
@@ -79,9 +78,6 @@ export class SessionProviderTurnRunner {
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #onDiagnostic: DiagnosticSink
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
-  readonly #getWorkspaceConcurrency: (
-    session: SessionState,
-  ) => WorkspaceConcurrencyContext
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
 
   constructor(options: {
@@ -94,9 +90,6 @@ export class SessionProviderTurnRunner {
     onDiagnostic: DiagnosticSink
     operationalLog?: Pick<OperationalLogService, 'log'>
     emit: (session: SessionState, event: AgentEventDraft) => void
-    getWorkspaceConcurrency?: (
-      session: SessionState,
-    ) => WorkspaceConcurrencyContext
   }) {
     this.#configStore = options.configStore
     this.#toolRegistry = options.toolRegistry
@@ -107,8 +100,6 @@ export class SessionProviderTurnRunner {
     this.#onDiagnostic = options.onDiagnostic
     this.#operationalLog = options.operationalLog
     this.#emit = options.emit
-    this.#getWorkspaceConcurrency =
-      options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
   }
 
   async #writeFailure(
@@ -150,7 +141,7 @@ export class SessionProviderTurnRunner {
       registry: this.#toolRegistry,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
-      swarmMaxAgents: run.swarmToolConfig?.maxAgentsPerJob,
+      swarmEnabled: Boolean(run.swarmToolConfig),
       gitToolsEnabled: session.gitToolsEnabled,
     })
     const tools = toolCatalog.definitions
@@ -162,7 +153,6 @@ export class SessionProviderTurnRunner {
       providerId: binding.snapshot.providerId,
       promptRegistry: this.#promptRegistry,
       reason: 'provider_call',
-      workspaceConcurrency: this.#getWorkspaceConcurrency(session),
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
     })

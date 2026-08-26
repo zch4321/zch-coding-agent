@@ -20,8 +20,19 @@ function legacyV21Config(): Record<string, unknown> {
   return structuredClone(legacyAppConfigV21) as Record<string, unknown>
 }
 
+function addLegacyConcurrency(
+  source: Record<string, unknown>,
+  includeSwarmLimit = true,
+): void {
+  ;(source.limits as Record<string, unknown>).maxConcurrentRuns = 16
+  if (includeSwarmLimit) {
+    ;(source.subagents as Record<string, unknown>).maxAgentsPerSwarm = 10
+  }
+}
+
 /** Explodes the current DEFAULT models section into pre-v21 top-level fields. */
 function legacyModelFields(source: Record<string, unknown>): void {
+  addLegacyConcurrency(source)
   source.logging = {
     enabled: false,
     retentionDays: 14,
@@ -198,11 +209,13 @@ function legacyV19Config(): Record<string, unknown> {
   return source
 }
 
-describe('config v23 migration boundary', () => {
-  it('creates the v23 defaults when no config exists', () => {
+describe('config v24 migration boundary', () => {
+  it('creates the v24 defaults when no config exists', () => {
     expect(migrateConfig(undefined)).toEqual(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined)).not.toBe(DEFAULT_APP_CONFIG)
-    expect(migrateConfig(undefined).limits.maxConcurrentRuns).toBe(16)
+    expect(migrateConfig(undefined).limits).not.toHaveProperty(
+      'maxConcurrentRuns',
+    )
     expect(migrateConfig(undefined).models.modelPool).toEqual({ entries: [] })
   })
 
@@ -211,6 +224,7 @@ describe('config v23 migration boundary', () => {
       string,
       unknown
     >
+    addLegacyConcurrency(source)
     source.schemaVersion = 22
     source.logging = {
       enabled: true,
@@ -219,7 +233,7 @@ describe('config v23 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       logging: {
         operational: {
           level: 'info',
@@ -235,6 +249,21 @@ describe('config v23 migration boundary', () => {
     })
   })
 
+  it('removes the v23 runtime concurrency controls', () => {
+    const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
+      string,
+      unknown
+    >
+    addLegacyConcurrency(source)
+    source.schemaVersion = 23
+
+    const migrated = migrateConfig(source)
+
+    expect(migrated.schemaVersion).toBe(24)
+    expect(migrated.limits).not.toHaveProperty('maxConcurrentRuns')
+    expect(migrated.subagents).not.toHaveProperty('maxAgentsPerSwarm')
+  })
+
   it('rejects every legacy schema with reset guidance', () => {
     for (const schemaVersion of [0, 1, 7, 8]) {
       expect(() =>
@@ -242,7 +271,7 @@ describe('config v23 migration boundary', () => {
           ...structuredClone(DEFAULT_APP_CONFIG),
           schemaVersion,
         }),
-      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v23`)
+      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v24`)
     }
   })
 
@@ -264,7 +293,7 @@ describe('config v23 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       models: {
         auxiliaryModelProvider: '',
         auxiliaryModel: '',
@@ -300,7 +329,7 @@ describe('config v23 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       models: {
         modelPool: {
           entries: [
@@ -374,7 +403,7 @@ describe('config v23 migration boundary', () => {
     const source = legacyV9Config()
     const migrated = migrateConfig(source)
     expect(migrated).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       models: {
         modelPool: { entries: [] },
         providers: [
@@ -431,7 +460,7 @@ describe('config v23 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       models: { modelPool: { entries: [] } },
       limits: {
         maxToolOutputBytes: 128 * 1_024,
@@ -455,7 +484,7 @@ describe('config v23 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       models: { modelPool: { entries: [] } },
       limits: {
         maxToolOutputBytes: 72_000,
@@ -473,7 +502,7 @@ describe('config v23 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       models: {
         modelPool: { entries: [] },
         providers: [
@@ -486,28 +515,27 @@ describe('config v23 migration boundary', () => {
     })
   })
 
-  it('migrates v12 with subagent defaults and preserves concurrency', () => {
+  it('migrates v12 with subagent defaults and removes concurrency admission', () => {
     const source = legacyV12Config()
     ;(source.limits as Record<string, unknown>).maxConcurrentRuns = 7
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       models: { modelPool: { entries: [] } },
-      limits: { maxConcurrentRuns: 7 },
       subagents: {
         enabled: false,
         workerTimeoutMs: 1_800_000,
-        maxAgentsPerSwarm: 10,
       },
     })
+    expect(migrated.limits).not.toHaveProperty('maxConcurrentRuns')
   })
 
   it('migrates v13 and drops the retired run-wide Tool Result budget', () => {
     const source = legacyV13Config()
     const migrated = migrateConfig(source)
 
-    expect(migrated.schemaVersion).toBe(23)
+    expect(migrated.schemaVersion).toBe(24)
     expect(migrated.models.modelPool).toEqual({ entries: [] })
     expect(migrated.limits).not.toHaveProperty('maxToolTokensPerRun')
     expect((source.limits as Record<string, unknown>).maxToolTokensPerRun).toBe(
@@ -519,7 +547,7 @@ describe('config v23 migration boundary', () => {
     const migrated = migrateConfig(legacyV14Config())
 
     expect(migrated).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       models: {
         modelPool: { entries: [] },
         providers: [
@@ -558,10 +586,10 @@ describe('config v23 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       models: { modelPool: { entries: [] } },
-      limits: { maxConcurrentRuns: 7 },
     })
+    expect(migrated.limits).not.toHaveProperty('maxConcurrentRuns')
     expect(migrated).not.toBe(source)
     expect(migrated.models.providers[0]).toMatchObject({
       providerType: 'deepseek.chat-completions',
@@ -570,7 +598,7 @@ describe('config v23 migration boundary', () => {
     })
   })
 
-  it('migrates v18 by removing route concurrency and adding the Swarm bound', () => {
+  it('migrates v18 by removing route and runtime concurrency controls', () => {
     const source = legacyV18Config()
     source.modelPool = {
       entries: [
@@ -588,8 +616,7 @@ describe('config v23 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 23,
-      subagents: { maxAgentsPerSwarm: 10 },
+      schemaVersion: 24,
       models: {
         modelPool: {
           entries: [{ id: 'worker', reasoning: 'max' }],
@@ -599,6 +626,7 @@ describe('config v23 migration boundary', () => {
     expect(migrated.models.modelPool.entries[0]).not.toHaveProperty(
       'maxParallel',
     )
+    expect(migrated.subagents).not.toHaveProperty('maxAgentsPerSwarm')
   })
 
   it('migrates v19 by adding the automatic command Shell selection', () => {
@@ -606,7 +634,7 @@ describe('config v23 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       executionEnvironment: { commandShell: 'auto' },
     })
     expect(source).not.toHaveProperty('executionEnvironment')
@@ -617,7 +645,7 @@ describe('config v23 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       executionEnvironment: { commandShell: 'windows-powershell' },
       models: {
         defaultModelProvider: 'deepseek',
@@ -659,7 +687,7 @@ describe('config v23 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 23,
+      schemaVersion: 24,
       models: {
         defaultModelProvider: 'deepseek',
         defaultModel: 'fixture-main',
@@ -708,7 +736,7 @@ describe('config v23 migration boundary', () => {
       source.models.providers[0].providerType = providerType
       const migrated = migrateConfig(source)
 
-      expect(migrated.schemaVersion).toBe(23)
+      expect(migrated.schemaVersion).toBe(24)
       expect(migrated.models.providers[0].providerType).toBe(providerType)
     }
   })

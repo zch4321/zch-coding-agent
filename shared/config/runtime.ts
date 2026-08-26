@@ -20,7 +20,6 @@ export const SubagentsConfigSchema = Type.Object(
       minimum: 60_000,
       maximum: 86_400_000,
     }),
-    maxAgentsPerSwarm: Type.Integer({ minimum: 1, maximum: 32 }),
   },
   { additionalProperties: false },
 )
@@ -38,7 +37,6 @@ export type ExecutionEnvironmentConfig = Static<
 
 export const LimitsConfigSchema = Type.Object(
   {
-    maxConcurrentRuns: Type.Integer({ minimum: 1, maximum: 32 }),
     // Zero disables the React-loop step limit. Positive values remain
     // available for bounded autonomous deployment profiles.
     maxStepsPerRun: Type.Integer({ minimum: 0, maximum: 1_000 }),

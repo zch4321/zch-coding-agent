@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox'
 import { ModelCapabilityLevelSchema } from './config/providers'
 import { AgentExecutionUsageSummarySchema } from './agent-execution'
 import { ReasoningEffortSchema } from './reasoning'
+import { AgentToolAccessSchema } from './agent-execution'
 
 export const MAX_SWARM_AGENTS = 32
 export const MAX_SWARM_SHARED_CONTEXT_LENGTH = 32_768
@@ -32,6 +33,11 @@ export const SwarmTaskSchema = Type.Object(
       description:
         'Number of independent replicas for this task. Use multiple replicas for cross-model verification.',
     }),
+    toolAccess: Type.Unsafe<Static<typeof AgentToolAccessSchema>>({
+      ...AgentToolAccessSchema,
+      description:
+        "Tool access for every replica of this task. Use 'readonly' for investigation and 'inherit' only when the task needs the parent Run's non-readonly tools and permission mode.",
+    }),
   },
   { additionalProperties: false },
 )
@@ -49,7 +55,7 @@ export const SwarmRunArgsSchema = Type.Object(
       minItems: 1,
       maxItems: MAX_SWARM_AGENTS,
       description:
-        'Independent read-only assignments. The total of all agentCount values must stay within the per-Job Agent limit.',
+        'Independent assignments. The total of all agentCount values must stay within the protocol Agent limit.',
     }),
   },
   { additionalProperties: false },

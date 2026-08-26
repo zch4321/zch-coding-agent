@@ -292,3 +292,13 @@
 - 状态归属：原通用 `agent-settings` store 收缩为 Provider 状态；application、assistant、integrations、network、runtime、security 分别拥有自己的表单、dirty signature、保存状态和错误。初始化配置由 runtime coordinator 按 section fan-out，旧 UI facade 只做显式路由，不复制或合并领域状态；models 继续使用既有 roles/pool stores。
 - 保存边界：一个领域菜单可以组合多个各自保存的区块，不建立整页大事务。Provider 保存为兼容既有 IPC 仍携带未修改的 Limits snapshot，但 Renderer 不再把 Token 估算纳入 Provider draft/signature；真正的编辑只在 Runtime/Limits 区块发生。跨领域读取候选与展示说明允许，修改由所属 store/action 完成。
 - 隐藏边界：Prompt resource、privacy notice acceptance 和 workspace last-opened 等内部配置继续属于各自领域，但 registry 不按 schema 自动生成控件。领域对齐是所有权和导航约束，不是把每个持久化字段暴露给用户。
+
+## 2026-08-26 — 移除产品级并发准入并让主 Agent 显式委派工具权限
+
+- 状态：已采纳并实现；覆盖 2026-08-06 “Swarm 数量归 Job 所有”中用户级并发上限、逐次 Swarm 审批和只读 child 的部分，保留模型池分配与固定协议容量边界。
+- 工作区并发：删除全应用 Active Run slot、canonical workspace writer lease、强制只读降级、启动拒绝、Renderer 禁用态和 `<workspace_concurrency>` 提示。不同 Session 可以在同一 workspace 并发执行和写入，不额外警告；同一 Session 仍只允许一个 Active Run，以保持 canonical history 线性。
+- 配置迁移：AppConfig v24 删除 `limits.maxConcurrentRuns` 与 `subagents.maxAgentsPerSwarm`。v9–v23 使用各自冻结 schema 校验并保留其余字段后迁移；Agents/Runtime 设置页只保留 Subagent 开关、worker timeout、模型池与费用提示。`MAX_SWARM_AGENTS = 32` 仅作为 Tool schema、持久化计数和结果大小的异常负载边界，不是产品并发策略。
+- 委派契约：`subagent_run` 增加必填 `toolAccess: readonly | inherit`；`swarm_run.tasks[]` 对每项任务增加相同字段。`readonly` 只取父 Run catalog 的无副作用子集；`inherit` 使用父 Session 权限模式和父 Run 冻结 catalog，不能提升只读父 Run。Goal、Plan、Subagent 与 Swarm 编排工具始终从 child 排除。
+- 审批边界：Subagent/Swarm 编排调用本身为 parallel、无副作用、低风险，不强制人工审批。`inherit` child 的文件、命令、网络、终端或 MCP 调用继续逐次经过父权限模式对应的原权限管线；人工审批通过安全 `AgentExecutionEvent` 投影和独立 IPC 决策，不暴露 hidden Session identity。
+- Swarm 执行：删除同父 Run Job 串行 tail 和 prepared child 的全局 FIFO slot；sibling Job、child 及不同父 Run 可以并发。Coordinator 仍在任何 child Provider 请求前原子创建 durable root/children、冻结全部 route、校验总 Agent 数，并按声明顺序汇总结果。
+- 保留保护：PathGuard、工具 schema、权限校验、审批、文件 precondition、原子写入、FileChange OCC、输出/timeout 上限和取消传播保持不变。移除 workspace 互斥不代表移除具体资源冲突检测，也不允许 child 超出父 Run 权限。

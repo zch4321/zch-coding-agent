@@ -3,6 +3,7 @@ import type { ModelCapabilityLevel } from '../../shared/config'
 import type { AgentExecutionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import {
+  MAX_SWARM_AGENTS,
   MAX_SWARM_SHARED_CONTEXT_LENGTH,
   MAX_SWARM_TASK_LENGTH,
   MAX_SWARM_TASK_NAME_LENGTH,
@@ -153,6 +154,7 @@ function expandTasks(
       spec: {
         name: displayChildName(task, index + 1),
         task: task.task,
+        toolAccess: task.toolAccess,
         sharedContext,
       },
     })),
@@ -299,7 +301,6 @@ export class SwarmCoordinator implements SwarmExecutionPort {
   readonly #subagents: PreparedSubagentExecutionPort
   readonly #events: RuntimeEventSink
   readonly #active = new Map<AgentExecutionId, ActiveJob>()
-  readonly #parentTails = new Map<string, Promise<void>>()
   #disposing = false
 
   constructor(options: {
@@ -316,12 +317,12 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     this.#events = options.events
   }
 
-  /** Queues one Job behind any earlier Swarm owned by the same parent Run. */
+  /** Starts one Swarm Job without serializing it against sibling Jobs. */
   run(args: SwarmRunArgs, parent: SwarmParentContext): Promise<SwarmRunResult> {
-    return this.#withParentLock(parent, () => this.#runExclusive(args, parent))
+    return this.#run(args, parent)
   }
 
-  async #runExclusive(
+  async #run(
     candidate: SwarmRunArgs,
     parent: SwarmParentContext,
   ): Promise<SwarmRunResult> {
@@ -335,14 +336,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
       parent.sessionId,
       parent.runId,
     )
-    const config = this.#configStore.getPublicConfig()
-    if (config.limits.maxConcurrentRuns < 2) {
-      throw new SwarmRuntimeError(
-        'SWARM_CONCURRENCY_DISABLED',
-        'Swarm requires maxConcurrentRuns to be at least 2',
-      )
-    }
-    const args = normalizeArgs(candidate, context.maxAgentsPerJob)
+    const args = normalizeArgs(candidate, MAX_SWARM_AGENTS)
     const argsHash = hash(args)
     const existing = await this.#state.getRootExecution({
       parentSessionId: parent.sessionId,
@@ -616,47 +610,6 @@ export class SwarmCoordinator implements SwarmExecutionPort {
       parentCallId: record.parentCallId,
       summary: projectAgentExecutionSummary(record),
     })
-  }
-
-  async #withParentLock<Result>(
-    parent: SwarmParentContext,
-    work: () => Promise<Result>,
-  ): Promise<Result> {
-    const key = `${parent.sessionId}\u0000${parent.runId}`
-    const previous = this.#parentTails.get(key) ?? Promise.resolve()
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    const tail = previous.catch(() => undefined).then(() => gate)
-    this.#parentTails.set(key, tail)
-    const cleanupTail = (): void => {
-      void tail.finally(() => {
-        if (this.#parentTails.get(key) === tail) this.#parentTails.delete(key)
-      })
-    }
-    const abortWait = new Promise<never>((_, reject) => {
-      const onAbort = (): void => reject(parent.signal.reason)
-      if (parent.signal.aborted) {
-        onAbort()
-        return
-      }
-      parent.signal.addEventListener('abort', onAbort, { once: true })
-      tail.finally(() => parent.signal.removeEventListener('abort', onAbort))
-    })
-    try {
-      await Promise.race([previous.catch(() => undefined), abortWait])
-    } catch (error) {
-      release()
-      cleanupTail()
-      throw error
-    }
-    try {
-      return await work()
-    } finally {
-      release()
-      cleanupTail()
-    }
   }
 
   /** Waits for active Jobs while Subagent disposal propagates their aborts. */

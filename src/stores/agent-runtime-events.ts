@@ -13,7 +13,6 @@ interface RuntimeEventTarget {
   overlays: Record<string, SessionOverlay>
   carryoversBySessionId: Record<string, CarryoverInterjection[]>
   carryoverStartingBySessionId: Record<string, boolean>
-  workspaceWriters: Record<string, SessionId>
   workspaceFileRevision: number
   ensureOverlay(sessionId: SessionId): SessionOverlay
   hydrateRuntime(runtime: ActiveRunPublicSnapshot | undefined): void
@@ -31,15 +30,6 @@ type RuntimeEventHandlerMap = {
 }
 
 const runtimeEventHandlers = {
-  'workspace.writer.changed': (target, _overlay, event) => {
-    if (event.status === 'acquired') {
-      target.workspaceWriters[event.workspace] = event.writerSessionId
-    } else if (
-      target.workspaceWriters[event.workspace] === event.writerSessionId
-    ) {
-      delete target.workspaceWriters[event.workspace]
-    }
-  },
   'trace.capture.changed': (_target, _overlay, event) => {
     const replica = useAgentReplicaStore()
     const previous = replica.traceCaptureBySessionId[event.sessionId]

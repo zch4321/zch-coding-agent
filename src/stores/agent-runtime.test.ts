@@ -1216,33 +1216,6 @@ describe('agent runtime store', () => {
     ).toMatchObject({ live: true })
   })
 
-  it('accounts writer events in the Session event sequence', () => {
-    seedReplica()
-    const runtime = useAgentRuntimeStore()
-    runtime.handleAgentEvent(
-      event({
-        type: 'workspace.writer.changed',
-        seq: 1,
-        sessionId: selectedSessionId,
-        workspace: project.path,
-        status: 'acquired',
-        writerSessionId: selectedSessionId,
-        writerRunId: 'run:writer' as RunId,
-      }),
-    )
-    runtime.handleAgentEvent(
-      event({
-        type: 'run.status',
-        seq: 2,
-        sessionId: selectedSessionId,
-        runId: 'run:writer' as RunId,
-        status: 'running_tools',
-      }),
-    )
-
-    expect(runtime.ensureOverlay(selectedSessionId).lastEventSeq).toBe(2)
-  })
-
   it('reconciles trace capture status in the Session event sequence', () => {
     const replica = seedReplica()
     const runtime = useAgentRuntimeStore()

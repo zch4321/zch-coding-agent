@@ -28,7 +28,7 @@ function fixture() {
 }
 
 describe('subagent_run Tool', () => {
-  it('publishes the two-field schema and delegation guidance', () => {
+  it('publishes the tool-access schema and delegation guidance', () => {
     const { registry } = fixture()
     const definition = registry.get('subagent_run')!
     const provider = registry
@@ -45,6 +45,7 @@ describe('subagent_run Tool', () => {
     expect(Object.keys(inputSchema.properties)).toEqual([
       'name',
       'task',
+      'toolAccess',
       '_agent_intent',
     ])
   })
@@ -55,7 +56,7 @@ describe('subagent_run Tool', () => {
       executor.inspectCall({
         id: 'call:test' as CallId,
         toolId: 'subagent_run',
-        args: { name, task },
+        args: { name, task, toolAccess: 'readonly' },
         reason: '',
       })
 
@@ -80,7 +81,7 @@ describe('subagent_run Tool', () => {
     const definition = registry.get('subagent_run')!
     const controller = new AbortController()
     const result = await definition.execute(
-      { name: ' 调查 ', task: ' 直接检查 README ' },
+      { name: ' 调查 ', task: ' 直接检查 README ', toolAccess: 'inherit' },
       {
         sessionId: 'session:parent' as SessionId,
         runId: 'run:parent' as RunId,
@@ -91,7 +92,11 @@ describe('subagent_run Tool', () => {
           runId: 'run:parent' as RunId,
           callId: 'call:subagent' as CallId,
           toolId: 'subagent_run',
-          args: { name: ' 调查 ', task: ' 直接检查 README ' },
+          args: {
+            name: ' 调查 ',
+            task: ' 直接检查 README ',
+            toolAccess: 'inherit',
+          },
           approvedBy: 'policy',
           approvedAt: new Date(0).toISOString(),
         } as never,
@@ -99,7 +104,7 @@ describe('subagent_run Tool', () => {
     )
 
     expect(runOne).toHaveBeenCalledWith(
-      { name: '调查', task: '直接检查 README' },
+      { name: '调查', task: '直接检查 README', toolAccess: 'inherit' },
       expect.objectContaining({
         sessionId: 'session:parent',
         runId: 'run:parent',

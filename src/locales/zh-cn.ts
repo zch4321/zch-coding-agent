@@ -126,6 +126,8 @@ const zhCN = {
     swarmTotalAgents: 'Agent 总数',
     swarmSharedContext: '公共上下文',
     swarmAgents: '{count} 个 Agent',
+    swarmToolReadonly: '只读工具',
+    swarmToolInherit: '继承工具权限',
     swarmInvalidArguments: 'Swarm 参数无法安全展示',
     openWorkspace: '打开工作区',
     openWorkspaceHint: '选择一个项目文件夹以开始本地对话。',
@@ -185,8 +187,6 @@ const zhCN = {
     importedBadge: '导入',
     status: {
       awaitingApproval: '待审批',
-      writer: '写入中',
-      readonlyLocked: '只读锁定',
       cancelling: '取消中',
       running: '运行中',
       failed: '失败',
@@ -517,10 +517,6 @@ const zhCN = {
   limits: {
     title: '运行限制',
     hint: '调整 Agent 循环、上下文、工具输出、审批和网络请求的硬限制。修改后会自动保存。',
-    concurrency: '并发任务',
-    maxConcurrentRuns: '最大并发任务数',
-    concurrencyHint:
-      '同一工作区始终只允许一个写入任务；只读任务可并行，writer 上限不可调整。',
     runLoop: '循环与上下文',
     commands: '命令与终端',
     files: '文件工具',
@@ -566,21 +562,16 @@ const zhCN = {
   },
   subagents: {
     title: 'Agents',
-    hint: '配置主 Agent 是否可以启动只读子 Agent，以及单个子任务的最长运行时间。修改后会自动保存。',
-    enabled: '启用只读子 Agent',
+    hint: '配置主 Agent 是否可以启动子 Agent，以及单个子任务的最长运行时间。修改后会自动保存。',
+    enabled: '启用子 Agent',
     enabledHint:
       '设置变更从下一次主 Agent 运行开始生效；当前运行使用启动时冻结的配置。',
     workerTimeout: '单个子任务超时',
     workerTimeoutHint:
       '达到此时限后会取消子任务。关闭父任务也会立即取消正在运行的子任务。',
-    maxAgentsPerSwarm: '单次 Swarm 最大 Agent 数',
-    maxAgentsPerSwarmHint:
-      '限制一次 Swarm 创建的子 Agent 总数；实际同时运行数仍受全局最大并发任务数限制。修改从下一次 /swarm Run 生效。',
     minutes: '分钟',
     costNotice:
       '子 Agent 会发起额外的模型请求，并产生相应的 Token 消耗和 Provider 费用。',
-    concurrencyNotice:
-      '子任务与普通任务共用全局并发限制（当前为 {count}）。当全局限制为 1 时，嵌套子任务会被拒绝。',
     save: '保存 Agent 设置',
   },
   modelPool: {

@@ -120,6 +120,7 @@ function args(agentCount = 2): SwarmRunArgs {
         task: 'Review the implementation.',
         requiredCapability: 'standard',
         agentCount,
+        toolAccess: 'readonly',
       },
     ],
   }
@@ -135,10 +136,7 @@ function parent(callId: string): SwarmParentContext {
   }
 }
 
-function fixture(
-  runPrepared: PreparedSubagentExecutionPort['runPrepared'],
-  maxAgentsPerJob = 8,
-) {
+function fixture(runPrepared: PreparedSubagentExecutionPort['runPrepared']) {
   const records = new Map<AgentExecutionId, SubagentExecutionRecord>()
   const roots = new Map<string, SubagentExecutionRecord>()
   const state = {
@@ -187,14 +185,11 @@ function fixture(
   const publishAgentExecution = vi.fn()
   const coordinator = new SwarmCoordinator({
     configStore: {
-      getPublicConfig: () => ({
-        limits: { maxConcurrentRuns: 4 },
-      }),
+      getPublicConfig: () => ({}),
     } as ConfigStore,
     manager: {
       frozenSwarmContext: () => ({
         goal: 'Review the project',
-        maxAgentsPerJob,
       }),
     } as unknown as SessionManager,
     state: state as unknown as SubagentStateService,
@@ -252,6 +247,7 @@ describe('SwarmCoordinator', () => {
             task: 'Review the tests.',
             requiredCapability: 'standard',
             agentCount: 1,
+            toolAccess: 'readonly',
           },
         ],
       },
@@ -344,7 +340,7 @@ describe('SwarmCoordinator', () => {
         throw new Error(longFailure)
       },
     )
-    const fixtureValue = fixture(runPrepared, 32)
+    const fixtureValue = fixture(runPrepared)
     durableRecords.current = fixtureValue.records
 
     const result = await fixtureValue.coordinator.run(
@@ -360,7 +356,7 @@ describe('SwarmCoordinator', () => {
     expect(result.results[1]?.error?.message).not.toBe(longFailure)
   })
 
-  it('serializes multiple Jobs owned by the same parent Run', async () => {
+  it('runs multiple Jobs owned by the same parent Run concurrently', async () => {
     freezeModelPoolPlanMock.mockImplementation(async (_store, requirements) =>
       plan((requirements as unknown[]).length),
     )
@@ -379,17 +375,17 @@ describe('SwarmCoordinator', () => {
     const first = coordinator.run(args(1), parent('call:first-job'))
     await vi.waitFor(() => expect(runPrepared).toHaveBeenCalledTimes(1))
     const second = coordinator.run(args(1), parent('call:second-job'))
-    await Promise.resolve()
-    expect(freezeModelPoolPlanMock).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(runPrepared).toHaveBeenCalledTimes(2))
+    expect(freezeModelPoolPlanMock).toHaveBeenCalledTimes(2)
+
+    await expect(second).resolves.toMatchObject({
+      meta: { status: 'completed' },
+    })
 
     releaseFirst()
     await expect(first).resolves.toMatchObject({
       meta: { status: 'completed' },
     })
-    await expect(second).resolves.toMatchObject({
-      meta: { status: 'completed' },
-    })
-    expect(freezeModelPoolPlanMock).toHaveBeenCalledTimes(2)
   })
 
   it('fails the Job when every child Agent fails', async () => {

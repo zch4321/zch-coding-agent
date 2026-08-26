@@ -640,27 +640,21 @@ watch(inputDisabled, (disabled) => {
             </template>
             {{ t('chat.providerSettings') }}
           </NTooltip>
-          <NTooltip :disabled="!agent.modeLockedByWriter">
-            <template #trigger>
-              <NSelect
-                :value="agent.modeLockedByWriter ? 'readonly' : agent.mode"
-                class="mode-select"
-                style="width: 112px"
-                size="small"
-                :options="modeOptions"
-                :disabled="
-                  Boolean(
-                    agent.startPending ||
-                    agent.activeRunId ||
-                    agent.pendingApproval ||
-                    agent.modeLockedByWriter,
-                  )
-                "
-                @update:value="emit('mode', $event as PermissionMode)"
-              />
-            </template>
-            {{ agent.modeLockTooltip }}
-          </NTooltip>
+          <NSelect
+            :value="agent.mode"
+            class="mode-select"
+            style="width: 112px"
+            size="small"
+            :options="modeOptions"
+            :disabled="
+              Boolean(
+                agent.startPending ||
+                agent.activeRunId ||
+                agent.pendingApproval,
+              )
+            "
+            @update:value="emit('mode', $event as PermissionMode)"
+          />
         </div>
         <NTooltip v-if="agent.activeRunId">
           <template #trigger>

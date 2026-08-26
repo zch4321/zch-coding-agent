@@ -10,7 +10,6 @@ import {
   appendAgentsContextIfChanged,
   appendRuntimeContextIfChanged,
   selectedContextContent,
-  type WorkspaceConcurrencyContext,
 } from './prompt-harness'
 import type { SessionOrchestratorMessages } from './session-orchestrator-messages'
 import { resolveSlashCommand } from './slash-commands'
@@ -38,9 +37,6 @@ export class SessionUserTurnPreparer {
   readonly #promptRegistry: PromptRegistry | undefined
   readonly #orchestratorMessages: SessionOrchestratorMessages
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
-  readonly #getWorkspaceConcurrency: (
-    session: SessionState,
-  ) => WorkspaceConcurrencyContext
   readonly #swarmHostEnabled: boolean
 
   constructor(options: {
@@ -50,9 +46,6 @@ export class SessionUserTurnPreparer {
     promptRegistry?: PromptRegistry
     orchestratorMessages: SessionOrchestratorMessages
     emit: (session: SessionState, event: AgentEventDraft) => void
-    getWorkspaceConcurrency?: (
-      session: SessionState,
-    ) => WorkspaceConcurrencyContext
     swarmHostEnabled?: boolean
   }) {
     this.#configStore = options.configStore
@@ -61,8 +54,6 @@ export class SessionUserTurnPreparer {
     this.#promptRegistry = options.promptRegistry
     this.#orchestratorMessages = options.orchestratorMessages
     this.#emit = options.emit
-    this.#getWorkspaceConcurrency =
-      options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
     this.#swarmHostEnabled = options.swarmHostEnabled ?? false
   }
 
@@ -94,7 +85,7 @@ export class SessionUserTurnPreparer {
       registry: this.#toolRegistry,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
-      swarmMaxAgents: run.swarmToolConfig?.maxAgentsPerJob,
+      swarmEnabled: Boolean(run.swarmToolConfig),
       gitToolsEnabled: session.gitToolsEnabled,
     })
     await appendRuntimeContextIfChanged(session, {
@@ -104,7 +95,6 @@ export class SessionUserTurnPreparer {
       providerId: session.provider,
       promptRegistry: this.#promptRegistry,
       reason: 'run_started',
-      workspaceConcurrency: this.#getWorkspaceConcurrency(session),
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
     })

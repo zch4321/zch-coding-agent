@@ -3,12 +3,9 @@ import type { PublicConfig } from '../../shared/config'
 import { resolveSwarmAvailability } from './session-swarm-availability'
 
 function readyConfig(): {
-  limits: Pick<PublicConfig['limits'], 'maxConcurrentRuns'>
   models: Pick<PublicConfig['models'], 'modelPool'>
-  subagents: Pick<PublicConfig['subagents'], 'maxAgentsPerSwarm'>
 } {
   return {
-    limits: { maxConcurrentRuns: 8 },
     models: {
       modelPool: {
         entries: [
@@ -22,7 +19,6 @@ function readyConfig(): {
         ],
       },
     },
-    subagents: { maxAgentsPerSwarm: 12 },
   }
 }
 
@@ -34,7 +30,7 @@ describe('Swarm Tool availability', () => {
         runSubagentsEnabled: true,
         config: readyConfig(),
       }),
-    ).toEqual({ toolConfig: { maxAgentsPerJob: 12 } })
+    ).toEqual({ toolConfig: {} })
   })
 
   it('retains an explicit slash-command goal only as display context', () => {
@@ -48,7 +44,6 @@ describe('Swarm Tool availability', () => {
     ).toEqual({
       toolConfig: {
         goal: 'Review the repository',
-        maxAgentsPerJob: 12,
       },
     })
   })
@@ -75,17 +70,7 @@ describe('Swarm Tool availability', () => {
     expect(result.unavailableReason).toContain(message)
   })
 
-  it('withholds Swarm without concurrency or an enabled model-pool route', () => {
-    const insufficientConcurrency = readyConfig()
-    insufficientConcurrency.limits.maxConcurrentRuns = 1
-    expect(
-      resolveSwarmAvailability({
-        hostEnabled: true,
-        runSubagentsEnabled: true,
-        config: insufficientConcurrency,
-      }).unavailableReason,
-    ).toContain('maxConcurrentRuns')
-
+  it('withholds Swarm without an enabled model-pool route', () => {
     const emptyPool = readyConfig()
     emptyPool.models.modelPool.entries[0]!.enabled = false
     expect(

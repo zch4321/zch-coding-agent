@@ -8,9 +8,9 @@ import {
 import { IPC_VERSION } from '../channels'
 import { DOMAIN_STATE_API_CONTRACTS } from '../domain-state-api'
 import { MAX_MESSAGE_PAGE_RECORDS } from '../durable'
-import { AgentExecutionIdSchema, SessionIdSchema } from '../ids'
+import { AgentExecutionIdSchema, CallIdSchema, SessionIdSchema } from '../ids'
 import { PlanStatusSchema } from '../orchestration'
-import { ipcResultSchema } from './common'
+import { AcceptedSchema, ipcResultSchema } from './common'
 
 export const AGENT_EXECUTION_IPC_CONTRACTS = {
   'agent-execution:list': {
@@ -54,6 +54,31 @@ export const AGENT_EXECUTION_IPC_CONTRACTS = {
         { additionalProperties: false },
       ),
     ),
+  },
+  'agent-execution:approval-decide': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        parentSessionId: SessionIdSchema,
+        executionId: AgentExecutionIdSchema,
+        callId: CallIdSchema,
+        decision: Type.Union([Type.Literal('allow'), Type.Literal('deny')]),
+        remember: Type.Optional(
+          Type.Object(
+            {
+              workspaceScope: Type.Union([
+                Type.Literal('workspace'),
+                Type.Literal('global'),
+              ]),
+              expiresAt: Type.Optional(Type.String({ format: 'date-time' })),
+            },
+            { additionalProperties: false },
+          ),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(AcceptedSchema),
   },
 } as const
 

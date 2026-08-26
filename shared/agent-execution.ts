@@ -23,8 +23,15 @@ import {
 import { JsonValueSchema } from './json'
 import { ToolResultPartSchema } from './message'
 import { LlmUsageRecordSchema } from './usage'
+import { ActiveRunApprovalSnapshotSchema } from './runtime-state'
 
 export const MAX_AGENT_EXECUTION_PAGE_RECORDS = 100
+
+export const AgentToolAccessSchema = Type.Union([
+  Type.Literal('readonly'),
+  Type.Literal('inherit'),
+])
+export type AgentToolAccess = Static<typeof AgentToolAccessSchema>
 
 export const AgentExecutionKindSchema = Type.Union([
   Type.Literal('subagent'),
@@ -220,6 +227,7 @@ export const AgentExecutionLiveOverlaySchema = Type.Object(
     text: Type.String({ maxLength: MAX_RUNTIME_TEXT_LENGTH }),
     reasoning: Type.String({ maxLength: MAX_RUNTIME_TEXT_LENGTH }),
     providerRetry: Type.Optional(ProviderRetryStateSchema),
+    approval: Type.Optional(ActiveRunApprovalSnapshotSchema),
     tools: Type.Array(
       Type.Object(
         {
@@ -373,6 +381,16 @@ export const AgentExecutionEventSchema = Type.Union([
         tool: Type.String({ minLength: 1, maxLength: 512 }),
         args: JsonValueSchema,
         reason: Type.String({ maxLength: 65_536 }),
+      }),
+    ],
+    { additionalProperties: false },
+  ),
+  Type.Composite(
+    [
+      AgentExecutionEventBaseSchema,
+      Type.Object({
+        type: Type.Literal('approval.requested'),
+        approval: ActiveRunApprovalSnapshotSchema,
       }),
     ],
     { additionalProperties: false },

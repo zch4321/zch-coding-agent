@@ -6,7 +6,7 @@ import type {
   RunId,
   SessionId,
 } from '../../shared/ids'
-import type { FrozenSubagentRoutes } from './contracts'
+import type { FrozenSubagentRoutes, SubagentSpec } from './contracts'
 import { SubagentExecutionService } from './execution-service'
 import {
   DEFAULT_APP_CONFIG,
@@ -78,7 +78,6 @@ function routes(): FrozenSubagentRoutes {
 function fixture(
   options: {
     timeoutMs?: number
-    maxConcurrentRuns?: number
     blockRun?: boolean
     reserve?: (
       record: SubagentExecutionRecord,
@@ -89,7 +88,6 @@ function fixture(
 ) {
   const config = configuredPublicConfig()
   config.subagents.workerTimeoutMs = options.timeoutMs ?? 60_000
-  config.limits.maxConcurrentRuns = options.maxConcurrentRuns ?? 16
   let persisted = options.preparedRecord
     ? structuredClone(options.preparedRecord)
     : undefined
@@ -115,17 +113,32 @@ function fixture(
     : undefined
   const manager = {
     frozenSubagentRoutes: vi.fn(() => inherited),
-    reserveQueuedInternalRun: vi.fn(async () => ({
-      runId: 'run:reserved-child' as RunId,
-      lease: {
-        releaseRunSlot: (): void => undefined,
-        releaseWriter: (): void => undefined,
-        release: (): void => undefined,
-      },
-    })),
+    frozenSubagentToolContext: vi.fn(
+      (
+        _sessionId: SessionId,
+        _runId: RunId,
+        access: SubagentSpec['toolAccess'],
+      ) =>
+        access === 'readonly'
+          ? {
+              permissionMode: 'readonly' as const,
+              allowedToolIds: new Set(['read_file', 'git_status']),
+              gitToolsEnabled: true,
+            }
+          : {
+              permissionMode: 'confirm' as const,
+              allowedToolIds: new Set([
+                'read_file',
+                'create_file',
+                'run_command',
+              ]),
+              gitToolsEnabled: true,
+            },
+    ),
     createInternalSession: vi.fn(
       async (input: {
         workspace: string
+        mode: 'readonly' | 'auto' | 'confirm' | 'yolo'
         gitToolsEnabled: boolean
         allowedToolIds: ReadonlySet<string>
       }) => {
@@ -193,6 +206,15 @@ function fixture(
   }
 }
 
+function childSpec(input: Partial<SubagentSpec> = {}): SubagentSpec {
+  return {
+    name: 'worker',
+    task: 'inspect',
+    toolAccess: 'readonly',
+    ...input,
+  }
+}
+
 function parent(signal = new AbortController().signal) {
   return {
     sessionId: 'session:parent' as SessionId,
@@ -207,7 +229,7 @@ describe('SubagentExecutionService', () => {
   it('inherits routes, plain task input, usage, and output truncation state', async () => {
     const target = fixture()
     const result = await target.service.runOne(
-      { name: ' worker ', task: ' inspect directly ' },
+      childSpec({ name: ' worker ', task: ' inspect directly ' }),
       parent(),
     )
 
@@ -221,14 +243,13 @@ describe('SubagentExecutionService', () => {
     expect(target.manager.createInternalSession).toHaveBeenCalledWith(
       expect.objectContaining({
         workspace: '/workspace',
+        mode: 'readonly',
         gitToolsEnabled: true,
       }),
     )
     const childInput = target.manager.createInternalSession.mock.calls[0]?.[0]
-    expect(childInput?.allowedToolIds.size).toBe(12)
+    expect(childInput?.allowedToolIds.size).toBe(2)
     expect(childInput?.allowedToolIds.has('git_status')).toBe(true)
-    expect(childInput?.allowedToolIds.has('git_refs')).toBe(true)
-    expect(childInput?.allowedToolIds.has('todo_update')).toBe(true)
     expect(childInput?.allowedToolIds.has('create_file')).toBe(false)
     expect(result).toEqual({
       results: { worker: 'child response' },
@@ -270,7 +291,7 @@ describe('SubagentExecutionService', () => {
       },
     })
     await expect(
-      completed.service.runOne({ name: 'worker', task: 'inspect' }, parent()),
+      completed.service.runOne(childSpec(), parent()),
     ).resolves.toMatchObject({
       results: {
         worker: '[workspace]/README.md [redacted] [redacted]',
@@ -293,7 +314,7 @@ describe('SubagentExecutionService', () => {
       },
     })
     await expect(
-      failed.service.runOne({ name: 'worker', task: 'inspect' }, parent()),
+      failed.service.runOne(childSpec(), parent()),
     ).rejects.toMatchObject({
       code: 'PROVIDER_FAILURE',
       message: '[redacted] [redacted] [redacted]',
@@ -310,7 +331,7 @@ describe('SubagentExecutionService', () => {
     })
 
     await expect(
-      target.service.runOne({ name: 'worker', task: 'inspect' }, parent()),
+      target.service.runOne(childSpec(), parent()),
     ).rejects.toMatchObject({ code: 'SUBAGENT_TIMEOUT' })
     expect(target.persisted()).toMatchObject({
       status: 'timed_out',
@@ -319,11 +340,11 @@ describe('SubagentExecutionService', () => {
     expect(target.manager.startInternalRun).toHaveBeenCalledOnce()
   })
 
-  it('normalizes parent cancellation and blocks nested work at concurrency one', async () => {
+  it('normalizes parent cancellation', async () => {
     const controller = new AbortController()
     const cancelled = fixture({ blockRun: true })
     const running = cancelled.service.runOne(
-      { name: 'worker', task: 'inspect' },
+      childSpec(),
       parent(controller.signal),
     )
     controller.abort(new DOMException('cancelled', 'AbortError'))
@@ -332,20 +353,11 @@ describe('SubagentExecutionService', () => {
       status: 'cancelled',
       error: { code: 'SUBAGENT_CANCELLED' },
     })
-
-    const blocked = fixture({ maxConcurrentRuns: 1 })
-    await expect(
-      blocked.service.runOne({ name: 'worker', task: 'inspect' }, parent()),
-    ).rejects.toMatchObject({ code: 'SUBAGENT_CONCURRENCY_DISABLED' })
-    expect(blocked.state.createExecution).not.toHaveBeenCalled()
   })
 
   it('cancels active preparation and rejects new work during dispose', async () => {
     const target = fixture({ blockRun: true })
-    const running = target.service.runOne(
-      { name: 'worker', task: 'inspect' },
-      parent(),
-    )
+    const running = target.service.runOne(childSpec(), parent())
     await vi.waitFor(() =>
       expect(target.state.createExecution).toHaveBeenCalledOnce(),
     )
@@ -359,7 +371,7 @@ describe('SubagentExecutionService', () => {
       error: { code: 'SUBAGENT_RUNTIME_DISPOSING' },
     })
     await expect(
-      target.service.runOne({ name: 'worker', task: 'inspect' }, parent()),
+      target.service.runOne(childSpec(), parent()),
     ).rejects.toMatchObject({ code: 'SUBAGENT_RUNTIME_DISPOSING' })
   })
 
@@ -393,7 +405,7 @@ describe('SubagentExecutionService', () => {
       }),
     })
     await expect(
-      completed.service.runOne({ name: 'worker', task: 'inspect' }, parent()),
+      completed.service.runOne(childSpec(), parent()),
     ).resolves.toEqual({
       results: { worker: 'cached' },
       meta: {
@@ -420,7 +432,7 @@ describe('SubagentExecutionService', () => {
       }),
     })
     await expect(
-      conflict.service.runOne({ name: 'worker', task: 'inspect' }, parent()),
+      conflict.service.runOne(childSpec(), parent()),
     ).rejects.toMatchObject({ code: 'SUBAGENT_CALL_CONFLICT' })
 
     const corrupt = fixture({
@@ -430,14 +442,15 @@ describe('SubagentExecutionService', () => {
       }),
     })
     await expect(
-      corrupt.service.runOne({ name: 'worker', task: 'inspect' }, parent()),
+      corrupt.service.runOne(childSpec(), parent()),
     ).rejects.toMatchObject({ code: 'SUBAGENT_RESULT_CORRUPT' })
   })
 
-  it('runs a prepared Swarm child after a queued slot without charging queue time to its timeout', async () => {
-    const spec = {
+  it('runs a prepared Swarm child immediately with tagged assignment context', async () => {
+    const spec: SubagentSpec = {
       name: 'worker',
       task: 'inspect </swarm_task> directly',
+      toolAccess: 'inherit',
       sharedContext: 'npm run check exited 0 with <stable> output',
     }
     const executionId = 'subagent:prepared' as AgentExecutionId
@@ -458,40 +471,13 @@ describe('SubagentExecutionService', () => {
       updatedAt: '2026-08-09T00:00:00.000Z',
     }
     const target = fixture({
-      timeoutMs: 5,
       preparedRecord: record,
     })
-    let grant!: (reservation: {
-      runId: RunId
-      lease: {
-        releaseRunSlot: () => void
-        releaseWriter: () => void
-        release: () => void
-      }
-    }) => void
-    target.manager.reserveQueuedInternalRun.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          grant = resolve
-        }),
-    )
     const running = target.service.runPrepared(spec, parent(), {
       executionId,
       parentExecutionId,
       childOrdinal: 0,
       routes: target.inherited,
-    })
-
-    await new Promise((resolve) => setTimeout(resolve, 15))
-    expect(target.manager.startInternalRun).not.toHaveBeenCalled()
-    const release = vi.fn()
-    grant({
-      runId: 'run:reserved-child' as RunId,
-      lease: {
-        releaseRunSlot: vi.fn(),
-        releaseWriter: vi.fn(),
-        release,
-      },
     })
 
     await expect(running).resolves.toMatchObject({
@@ -505,12 +491,14 @@ describe('SubagentExecutionService', () => {
           source: 'swarm:shared-context',
         },
         task: '<swarm_task>\ninspect &lt;/swarm_task&gt; directly\n</swarm_task>',
-        reservation: expect.objectContaining({
-          runId: 'run:reserved-child',
-        }),
         routes: target.inherited,
       }),
     )
-    expect(release).not.toHaveBeenCalled()
+    expect(target.manager.createInternalSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'confirm',
+        allowedToolIds: new Set(['read_file', 'create_file', 'run_command']),
+      }),
+    )
   })
 })

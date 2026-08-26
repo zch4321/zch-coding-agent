@@ -6,27 +6,24 @@ import { ToolRegistry } from './tool-registry'
 import { registerSwarmTools } from './swarm-tools'
 
 describe('swarm_run Tool', () => {
-  it('registers a serial, review-risk Job without a fixed Tool timeout', () => {
+  it('registers a parallel, low-risk orchestration Tool without a fixed timeout', () => {
     const registry = new ToolRegistry()
     registerSwarmTools(registry, { run: vi.fn() })
     const definition = registry.get('swarm_run')!
 
-    expect(definition.executionMode).toBe('serial')
-    expect(definition.defaultRisk).toBe('review')
+    expect(definition.executionMode).toBe('parallel')
+    expect(definition.defaultRisk).toBe('low')
     expect(definition.defaultTimeoutMs).toBeNull()
     expect(definition.description).toContain('user explicitly requests')
-    expect(definition.description).toContain(
-      'Every call requires user approval',
-    )
     expect(definition.description).toContain('self-contained')
-    expect(definition.description).toContain('strictly serially')
-    expect(definition.description).toContain('cannot execute commands')
-    expect(definition.description).toContain('close to the per-Job Agent limit')
+    expect(definition.description).toContain("toolAccess='readonly'")
+    expect(definition.description).toContain("toolAccess='inherit'")
+    expect(definition.description).toContain('disjoint ownership')
     expect(definition.description).not.toContain('agentCount 1 by default')
   })
 
   it.each<PermissionMode>(['readonly', 'auto', 'confirm', 'yolo'])(
-    'requires human review in %s mode',
+    'allows low-risk orchestration in %s mode',
     (mode) => {
       const registry = new ToolRegistry()
       registerSwarmTools(registry, { run: vi.fn() })
@@ -44,7 +41,7 @@ describe('swarm_run Tool', () => {
           args: { sharedContext: 'Verification was not run.', tasks: [] },
           callId: 'call:swarm-review' as CallId,
         }).kind,
-      ).toBe('review')
+      ).toBe('allow')
     },
   )
 
@@ -80,6 +77,7 @@ describe('swarm_run Tool', () => {
           task: 'Review the project.',
           requiredCapability: 'standard' as const,
           agentCount: 1,
+          toolAccess: 'inherit' as const,
         },
       ],
     }

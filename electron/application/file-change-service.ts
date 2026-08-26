@@ -35,7 +35,6 @@ import {
   restoreFileContent,
   sha256,
 } from './file-change-filesystem'
-import type { FileChangeRevertAccessResult } from '../session/workspace-access-coordinator'
 
 const FILE_CHANGE_TOOL_OPERATIONS = {
   create_file: 'write',
@@ -61,11 +60,6 @@ export interface FileChangeRuntimeGuard {
     projectId: ProjectId,
   ): void
   releaseSessionMutation(sessionId: SessionId, operationToken: string): void
-  acquireFileChangeRevertWriter(input: {
-    workspace: string
-    sessionId: SessionId
-    operationId: string
-  }): FileChangeRevertAccessResult
 }
 
 /** Coordinates durable file-change listing, preparation, commit, and safe revert operations. */
@@ -318,8 +312,6 @@ export class FileChangeService implements FileChangeExecutionPort {
       )
     }
     const operationToken = runtimeGuard.reserveSessionMutation(sessionId)
-    const operationId = `file-change-revert:${randomUUID()}`
-    let releaseWriter: (() => void) | undefined
     try {
       const initial = (
         await this.#coordinator.query((reader) =>
@@ -336,24 +328,6 @@ export class FileChangeService implements FileChangeExecutionPort {
         operationToken,
         initial.projectId,
       )
-      const writer = runtimeGuard.acquireFileChangeRevertWriter({
-        workspace: initial.workspace,
-        sessionId,
-        operationId,
-      })
-      if (!writer.acquired) {
-        throw new ApplicationError(
-          'CONFLICT',
-          'Another operation is modifying this workspace',
-          {
-            details: {
-              writerKind: writer.rejection.writer.kind,
-            },
-          },
-        )
-      }
-      releaseWriter = writer.release
-
       const target = (
         await this.#coordinator.query((reader) =>
           this.#readRevertTarget(
@@ -448,7 +422,6 @@ export class FileChangeService implements FileChangeExecutionPort {
         )
       }
     } finally {
-      releaseWriter?.()
       runtimeGuard.releaseSessionMutation(sessionId, operationToken)
     }
   }

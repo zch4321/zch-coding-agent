@@ -17,7 +17,8 @@ import {
   waitFor,
 } from './session-manager-test-support'
 
-describe('SessionManager M1 workspace concurrency', () => {
+describe('SessionManager workspace concurrency', () => {
+  /** Holds every Provider request until the test releases its matching task. */
   class ConcurrentGateProvider extends ScriptedProviderHarness {
     readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
     readonly #releases: Array<() => void> = []
@@ -39,85 +40,28 @@ describe('SessionManager M1 workspace concurrency', () => {
       }
     }
 
-    release(index: number): void {
-      this.#releases[index]?.()
-    }
-
-    requestContaining(
-      text: string,
-    ): ProviderStreamRequest['normalizedMessages'] | undefined {
-      return this.requests.find((messages) =>
-        messages.some(
-          (message) =>
-            typeof message.content === 'string' &&
-            String(message.content ?? '').includes(text),
-        ),
-      )
-    }
-
+    /** Releases the Provider request containing the specified user text. */
     releaseRequestContaining(text: string): void {
       const index = this.requests.findIndex((messages) =>
         messages.some(
           (message) =>
             typeof message.content === 'string' &&
-            String(message.content ?? '').includes(text),
+            message.content.includes(text),
         ),
       )
       if (index < 0) throw new Error(`Provider request not found: ${text}`)
-      this.release(index)
+      this.#releases[index]?.()
     }
   }
 
-  function lastWorkspaceConcurrency(
-    messages: ProviderStreamRequest['normalizedMessages'],
-  ): string {
-    return String(
-      messages
-        .filter(
-          (message) =>
-            typeof message.content === 'string' &&
-            String(message.content ?? '').includes('<workspace_concurrency'),
-        )
-        .at(-1)?.content ?? '',
-    )
-  }
-
-  async function waitForModeUpdate(
-    manager: SessionManager,
-    sessionId: Parameters<SessionManager['updateSessionMode']>[0],
-    mode: Parameters<SessionManager['updateSessionMode']>[1],
-  ): Promise<void> {
-    const deadline = Date.now() + 2_000
-    while (Date.now() < deadline) {
-      const result = await manager.updateSessionMode(sessionId, mode)
-      if (result.accepted) return
-      if (result.reason !== 'active_run') {
-        throw new Error(`Unexpected mode update rejection: ${result.reason}`)
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-    throw new Error('Timed out waiting for the session run to settle')
-  }
-
-  it('enforces the configured active-run limit and one writer per canonical workspace', async () => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-m1-'))
-    const workspaceA = path.join(directory, 'workspace-a')
-    const workspaceB = path.join(directory, 'workspace-b')
-    const workspaceC = path.join(directory, 'workspace-c')
-    await Promise.all([mkdir(workspaceA), mkdir(workspaceB), mkdir(workspaceC)])
-    const store = await createConfig(directory)
-    await store.update({
-      version: 1,
-      kind: 'limits',
-      value: {
-        ...store.getPublicConfig().limits,
-        maxConcurrentRuns: 4,
-      },
-    })
+  it('allows every conversation to run concurrently in one workspace', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-concurrent-'))
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
     const provider = new ConcurrentGateProvider()
     const sent: AgentEventEnvelope[] = []
     const manager = new SessionManager({
-      configStore: store,
+      configStore: await createConfig(directory),
       traceDirectory: path.join(directory, 'traces'),
       eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
       providerFactory: () => provider,
@@ -125,115 +69,38 @@ describe('SessionManager M1 workspace concurrency', () => {
         path.resolve('resources', 'prompts'),
       ),
     })
-    const writerSession = await manager.createSession({
-      workspace: workspaceA,
-      mode: 'auto',
-      provider: 'deepseek',
-    })
-    const readerSession = await manager.createSession({
-      workspace: workspaceA,
-      mode: 'confirm',
-      provider: 'deepseek',
-    })
-    const otherWriterSession = await manager.createSession({
-      workspace: workspaceB,
-      mode: 'yolo',
-      provider: 'deepseek',
-    })
-    const otherReaderSession = await manager.createSession({
-      workspace: workspaceB,
-      mode: 'readonly',
-      provider: 'deepseek',
-    })
-    const fifthSession = await manager.createSession({
-      workspace: workspaceC,
-      mode: 'readonly',
-      provider: 'deepseek',
-    })
+    const modes = ['auto', 'confirm', 'yolo', 'readonly', 'confirm'] as const
+    const sessions = await Promise.all(
+      modes.map((mode) =>
+        manager.createSession({ workspace, mode, provider: 'deepseek' }),
+      ),
+    )
+    const messages = modes.map((_, index) => `Concurrent task ${index + 1}`)
+    const runs = sessions.map((sessionId, index) =>
+      manager.startRun({
+        sessionId,
+        message: messages[index]!,
+        clientRequestId: `concurrent-${index + 1}`,
+      }),
+    )
 
-    const writerRun = manager.startRun({
-      sessionId: writerSession,
-      message: 'Hold writer A',
-      clientRequestId: 'm1-writer-a',
-    })
-    await waitFor(() => provider.requests.length === 1)
+    await waitFor(() => provider.requests.length === sessions.length)
     expect(
-      lastWorkspaceConcurrency(provider.requestContaining('Hold writer A')!),
-    ).toContain('status="writer"')
-    expect(
-      sent.some(
-        ({ event }) =>
-          event.type === 'workspace.writer.changed' &&
-          event.status === 'acquired' &&
-          event.writerRunId === writerRun,
+      provider.requests.every((request) =>
+        request.every(
+          (message) =>
+            typeof message.content !== 'string' ||
+            !message.content.includes('<workspace_concurrency'),
+        ),
       ),
     ).toBe(true)
-
     await expect(
-      manager.updateSessionMode(readerSession, 'confirm'),
-    ).resolves.toMatchObject({
-      accepted: false,
-      reason: 'workspace_writer_active',
-      writerSessionId: writerSession,
-      writerRunId: writerRun,
-    })
-    expect(() =>
-      manager.startRun({
-        sessionId: readerSession,
-        message: 'Must not write concurrently',
-        clientRequestId: 'm1-rejected-writer',
-      }),
-    ).toThrow('Another run is modifying this workspace')
+      manager.updateSessionMode(sessions[3]!, 'confirm'),
+    ).resolves.toMatchObject({ reason: 'active_run' })
 
-    await expect(
-      manager.updateSessionMode(readerSession, 'readonly'),
-    ).resolves.toEqual({ accepted: true })
-    const readerRun = manager.startRun({
-      sessionId: readerSession,
-      message: 'Read while writer A is active',
-      clientRequestId: 'm1-reader-a',
-    })
-    const otherWriterRun = manager.startRun({
-      sessionId: otherWriterSession,
-      message: 'Hold writer B',
-      clientRequestId: 'm1-writer-b',
-    })
-    const otherReaderRun = manager.startRun({
-      sessionId: otherReaderSession,
-      message: 'Read workspace B',
-      clientRequestId: 'm1-reader-b',
-    })
-    await waitFor(() => provider.requests.length === 4)
-    const readerARequest = provider.requestContaining(
-      'Read while writer A is active',
-    )!
-    expect(lastWorkspaceConcurrency(readerARequest)).toContain(
-      'status="readonly_locked"',
-    )
-    expect(lastWorkspaceConcurrency(readerARequest)).toContain(writerSession)
-    expect(
-      lastWorkspaceConcurrency(provider.requestContaining('Hold writer B')!),
-    ).toContain('status="writer"')
-
-    expect(() =>
-      manager.startRun({
-        sessionId: fifthSession,
-        message: 'Fifth run',
-        clientRequestId: 'm1-fifth',
-      }),
-    ).toThrow('maximum number of concurrent runs')
-
-    for (const message of [
-      'Hold writer A',
-      'Read while writer A is active',
-      'Hold writer B',
-      'Read workspace B',
-    ]) {
-      provider.releaseRequestContaining(message)
-    }
-    const initialRuns = [writerRun, readerRun, otherWriterRun, otherReaderRun]
+    for (const message of messages) provider.releaseRequestContaining(message)
     await waitFor(() =>
-      initialRuns.every((runId) =>
+      runs.every((runId) =>
         sent.some(
           ({ event }) =>
             event.type === 'run.status' &&
@@ -242,54 +109,16 @@ describe('SessionManager M1 workspace concurrency', () => {
         ),
       ),
     )
-
-    const availableRun = manager.startRun({
-      sessionId: readerSession,
-      message: 'Read after writers released',
-      clientRequestId: 'm1-reader-available',
-    })
-    await waitFor(() => provider.requests.length === 5)
-    expect(
-      lastWorkspaceConcurrency(
-        provider.requestContaining('Read after writers released')!,
-      ),
-    ).toContain('status="available"')
-    provider.releaseRequestContaining('Read after writers released')
     await waitFor(() =>
-      sent.some(
-        ({ event }) =>
-          event.type === 'run.status' &&
-          event.runId === availableRun &&
-          event.status === 'completed',
-      ),
-    )
-    await waitForModeUpdate(manager, readerSession, 'confirm')
-    const nextWriterRun = manager.startRun({
-      sessionId: readerSession,
-      message: 'Writer after release',
-      clientRequestId: 'm1-next-writer',
-    })
-    await waitFor(() => provider.requests.length === 6)
-    expect(
-      lastWorkspaceConcurrency(
-        provider.requestContaining('Writer after release')!,
-      ),
-    ).toContain('status="writer"')
-    provider.releaseRequestContaining('Writer after release')
-    await waitFor(() =>
-      sent.some(
-        ({ event }) =>
-          event.type === 'run.status' &&
-          event.runId === nextWriterRun &&
-          event.status === 'completed',
-      ),
+      sessions.every((sessionId) => !manager.hasActiveRun(sessionId)),
     )
 
+    await expect(
+      manager.updateSessionMode(sessions[3]!, 'confirm'),
+    ).resolves.toEqual({ accepted: true })
     await manager.dispose()
-    const trace = await readSessionTrace(directory, readerSession)
-    expect(trace).toContain('"type":"run.rejected"')
-    expect(trace).toContain('"status":"rejected"')
-    expect(trace).toContain('"status":"acquired"')
-    expect(trace).toContain('"status":"released"')
+    const trace = await readSessionTrace(directory, sessions[0]!)
+    expect(trace).not.toContain('workspace.writer')
+    expect(trace).not.toContain('max_concurrent_runs')
   })
 })

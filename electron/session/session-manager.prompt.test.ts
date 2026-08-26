@@ -175,6 +175,7 @@ describe('SessionManager prompt and trace', () => {
     await manager.createInternalSession({
       sessionId,
       workspace,
+      mode: 'readonly',
       provider: providerConfig.id,
       modelSelection,
       allowedToolIds: new Set(),

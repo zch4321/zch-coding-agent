@@ -47,6 +47,7 @@ export const AGENT_API_INVOKE_ROUTES = Object.freeze({
   revertFileChange: 'file-change:revert',
   listAgentExecutions: 'agent-execution:list',
   getAgentExecution: 'agent-execution:get',
+  decideAgentExecutionApproval: 'agent-execution:approval-decide',
   chooseWorkspace: 'workspace:choose',
   listWorkspaceDirectory: 'workspace:list-directory',
   readWorkspaceFile: 'workspace:read-file',

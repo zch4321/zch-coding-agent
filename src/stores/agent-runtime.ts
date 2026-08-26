@@ -90,7 +90,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     carryoversBySessionId: {} as Record<string, CarryoverInterjection[]>,
     carryoverStartingBySessionId: {} as Record<string, boolean>,
     overlays: {} as Record<string, SessionOverlay>,
-    workspaceWriters: {} as Record<string, SessionId>,
     approvalSubmitting: false,
     workspaceFileRevision: 0,
     draftModelSelection: undefined as ModelSelection | undefined,
@@ -143,20 +142,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     latestReviewedApproval(): ReviewedApproval | undefined {
       return this.activeOverlay?.reviewedApproval
-    },
-    modeLockedByWriter(): boolean {
-      const replica = useAgentReplicaStore()
-      const project = replica.selectedProject
-      const writer = project ? this.workspaceWriters[project.path] : undefined
-      return Boolean(writer && writer !== replica.selectedSessionId)
-    },
-    modeLockTooltip(): string {
-      const replica = useAgentReplicaStore()
-      const project = replica.selectedProject
-      const writer = project ? this.workspaceWriters[project.path] : undefined
-      return writer && writer !== replica.selectedSessionId
-        ? `Session ${writer} is modifying this workspace.`
-        : ''
     },
     modeSyncError(): string {
       return ''
@@ -630,7 +615,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     async setMode(mode: PermissionMode) {
       const replica = useAgentReplicaStore()
       const session = replica.selectedSession
-      if (this.modeLockedByWriter || this.activeRunId || this.pendingApproval) {
+      if (this.activeRunId || this.pendingApproval) {
         return false
       }
       if (!session || !window.agentApi) {
@@ -768,7 +753,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
               model: selection.model,
               reasoning: selection.reasoning,
             },
-            permissionMode: this.modeLockedByWriter ? 'readonly' : this.mode,
+            permissionMode: this.mode,
             message: text,
             context: { attachments: attachmentRefs(attachments) },
             clientRequestId: requestId('request'),

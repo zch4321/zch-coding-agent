@@ -29,11 +29,7 @@ export class SessionEventEmitter {
       if (projected) this.#eventSink.publishAgentExecution(projected)
       return
     }
-    if (
-      session.closed &&
-      event.type !== 'session.closed' &&
-      event.type !== 'workspace.writer.changed'
-    ) {
+    if (session.closed && event.type !== 'session.closed') {
       return
     }
 
@@ -127,6 +123,30 @@ function projectInternalAgentEvent(
         tool: event.tool,
         args: event.args,
         reason: event.reason,
+      }
+    case 'approval.requested':
+      return {
+        ...identity,
+        type: event.type,
+        approval: {
+          callId: event.callId,
+          kind: event.kind,
+          tool: event.tool,
+          arguments: structuredClone(event.args),
+          reason: event.reason,
+          policySignals: structuredClone(event.policySignals),
+          ...(event.diff ? { diff: event.diff } : {}),
+          ...(event.diffHash ? { diffHash: event.diffHash } : {}),
+          rememberable: event.rememberable,
+          ...(event.rememberArgConstraints
+            ? {
+                rememberArgConstraints: structuredClone(
+                  event.rememberArgConstraints,
+                ),
+              }
+            : {}),
+          expiresAt: event.expiresAt,
+        },
       }
     case 'tool.completed':
       return {

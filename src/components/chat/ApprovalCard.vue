@@ -13,6 +13,7 @@ import {
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ModelCapabilityLevel } from '../../../shared/config'
+import type { AgentToolAccess } from '../../../shared/agent-execution'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 
@@ -28,6 +29,7 @@ interface SwarmApprovalTask {
   task: string
   requiredCapability: ModelCapabilityLevel
   agentCount: number
+  toolAccess: AgentToolAccess
 }
 
 interface SwarmApprovalArgs {
@@ -40,6 +42,7 @@ const capabilities = new Set<ModelCapabilityLevel>([
   'standard',
   'strong',
 ])
+const toolAccessValues = new Set<AgentToolAccess>(['readonly', 'inherit'])
 const capabilityLabels: Record<ModelCapabilityLevel, string> = {
   light: 'settings.capabilityLight',
   standard: 'settings.capabilityStandard',
@@ -73,12 +76,14 @@ function swarmArgsFromValue(value: unknown): SwarmApprovalArgs | undefined {
     const task = Reflect.get(candidate, 'task')
     const requiredCapability = Reflect.get(candidate, 'requiredCapability')
     const agentCount = Reflect.get(candidate, 'agentCount')
+    const toolAccess = Reflect.get(candidate, 'toolAccess')
     if (
       typeof name !== 'string' ||
       typeof task !== 'string' ||
       !capabilities.has(requiredCapability as ModelCapabilityLevel) ||
       !Number.isSafeInteger(agentCount) ||
-      agentCount < 1
+      agentCount < 1 ||
+      !toolAccessValues.has(toolAccess as AgentToolAccess)
     ) {
       return undefined
     }
@@ -87,6 +92,7 @@ function swarmArgsFromValue(value: unknown): SwarmApprovalArgs | undefined {
       task,
       requiredCapability: requiredCapability as ModelCapabilityLevel,
       agentCount,
+      toolAccess: toolAccess as AgentToolAccess,
     })
   }
   return { sharedContext, tasks: parsed }
@@ -108,6 +114,14 @@ const swarmAgentCount = computed(
 
 function swarmCapabilityLabel(capability: ModelCapabilityLevel): string {
   return t(capabilityLabels[capability])
+}
+
+function swarmToolAccessLabel(toolAccess: AgentToolAccess): string {
+  return t(
+    toolAccess === 'readonly'
+      ? 'chat.swarmToolReadonly'
+      : 'chat.swarmToolInherit',
+  )
 }
 </script>
 
@@ -188,6 +202,9 @@ function swarmCapabilityLabel(capability: ModelCapabilityLevel): string {
                   </NTag>
                   <NTag size="small" :bordered="false">
                     {{ t('chat.swarmAgents', { count: task.agentCount }) }}
+                  </NTag>
+                  <NTag size="small" :bordered="false">
+                    {{ swarmToolAccessLabel(task.toolAccess) }}
                   </NTag>
                 </div>
               </template>

@@ -278,26 +278,6 @@ describe('shared runtime contracts', () => {
     expect(validateAgentEvent({ ...queued, status: 'unknown' })).toBe(false)
   })
 
-  it('requires workspace writer events to identify their event Session', () => {
-    const validateAgentEvent = compileSchema(AgentEventSchema)
-    const writer: AgentEvent = {
-      schemaVersion: 1,
-      type: 'workspace.writer.changed',
-      sessionId,
-      workspace: 'F:/workspace/project',
-      status: 'acquired',
-      writerSessionId: sessionId,
-      writerRunId: runId,
-      seq: 2,
-      ts: '2026-06-26T00:00:00.000Z',
-    }
-
-    expect(validateAgentEvent(writer)).toBe(true)
-    const missingSession = { ...writer } as Record<string, unknown>
-    delete missingSession.sessionId
-    expect(validateAgentEvent(missingSession)).toBe(false)
-  })
-
   it('validates bounded trace capture status events', () => {
     const validateAgentEvent = compileSchema(AgentEventSchema)
     const capture: AgentEvent = {

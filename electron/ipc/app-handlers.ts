@@ -389,6 +389,15 @@ export function createAppIpcHandlers(
         ...(payload.limit === undefined ? {} : { limit: payload.limit }),
       }),
     }),
+    'agent-execution:approval-decide': (payload) => ({
+      accepted: sessionManager.decideAgentExecutionApproval({
+        parentSessionId: payload.parentSessionId,
+        executionId: payload.executionId,
+        callId: payload.callId,
+        decision: payload.decision,
+        remember: payload.remember,
+      }),
+    }),
     'workspace:choose': async () => {
       const options: OpenDialogOptions = {
         properties: ['openDirectory'],

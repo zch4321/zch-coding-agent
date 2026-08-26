@@ -36,6 +36,31 @@ const LegacyLoggingConfigV22Schema = Type.Object(
 )
 type LegacyLoggingConfigV22 = Static<typeof LegacyLoggingConfigV22Schema>
 
+// AppConfig v9-v23 retained the global Run admission limit. Keep this
+// subsection frozen so v24 can remove the policy without resetting installs.
+const LegacyLimitsConfigV23Schema = Type.Object(
+  {
+    maxConcurrentRuns: Type.Integer({ minimum: 1, maximum: 32 }),
+    ...PublicConfigSchema.properties.limits.properties,
+  },
+  { additionalProperties: false },
+)
+type LegacyLimitsConfigV23 = Static<typeof LegacyLimitsConfigV23Schema>
+
+// AppConfig v19-v23 exposed a configurable per-Swarm Agent limit.
+const LegacySubagentsConfigV23Schema = Type.Object(
+  {
+    enabled: Type.Boolean(),
+    workerTimeoutMs: Type.Integer({
+      minimum: 60_000,
+      maximum: 86_400_000,
+    }),
+    maxAgentsPerSwarm: Type.Integer({ minimum: 1, maximum: 32 }),
+  },
+  { additionalProperties: false },
+)
+type LegacySubagentsConfigV23 = Static<typeof LegacySubagentsConfigV23Schema>
+
 function withoutKey<
   Value extends Record<string, unknown>,
   Key extends keyof Value,
@@ -47,7 +72,7 @@ function withoutKey<
 
 const LegacyLimitsWithRunToolBudgetSchema = Type.Object(
   {
-    ...PublicConfigSchema.properties.limits.properties,
+    ...LegacyLimitsConfigV23Schema.properties,
     maxToolTokensPerRun: Type.Integer({
       minimum: 256,
       maximum: 10_000_000,
@@ -256,7 +281,7 @@ const LegacyAppConfigV15Schema = Type.Object(
     approval: LegacyApprovalConfigSchema,
     subagents: LegacySubagentsConfigSchema,
     permission: PublicConfigSchema.properties.permission,
-    limits: PublicConfigSchema.properties.limits,
+    limits: LegacyLimitsConfigV23Schema,
     logging: LegacyLoggingConfigV22Schema,
     privacy: PublicConfigSchema.properties.privacy,
     workspace: PublicConfigSchema.properties.workspace,
@@ -415,10 +440,10 @@ const LegacyAppConfigV19Schema = Type.Object(
       maxItems: 32,
     }),
     approval: LegacyApprovalConfigV17Schema,
-    subagents: PublicConfigSchema.properties.subagents,
+    subagents: LegacySubagentsConfigV23Schema,
     modelPool: ModelPoolConfigSchema,
     permission: PublicConfigSchema.properties.permission,
-    limits: PublicConfigSchema.properties.limits,
+    limits: LegacyLimitsConfigV23Schema,
     logging: LegacyLoggingConfigV22Schema,
     privacy: PublicConfigSchema.properties.privacy,
     workspace: PublicConfigSchema.properties.workspace,
@@ -468,10 +493,10 @@ const LegacyAppConfigV21Schema = Type.Object(
   {
     schemaVersion: Type.Literal(21),
     models: LegacyModelsConfigV21Schema,
-    subagents: PublicConfigSchema.properties.subagents,
+    subagents: LegacySubagentsConfigV23Schema,
     executionEnvironment: PublicConfigSchema.properties.executionEnvironment,
     permission: PublicConfigSchema.properties.permission,
-    limits: PublicConfigSchema.properties.limits,
+    limits: LegacyLimitsConfigV23Schema,
     logging: LegacyLoggingConfigV22Schema,
     privacy: PublicConfigSchema.properties.privacy,
     workspace: PublicConfigSchema.properties.workspace,
@@ -493,12 +518,28 @@ const LegacyAppConfigV22Schema = Type.Object(
   {
     ...AppConfigSchema.properties,
     schemaVersion: Type.Literal(22),
+    subagents: LegacySubagentsConfigV23Schema,
+    limits: LegacyLimitsConfigV23Schema,
     logging: LegacyLoggingConfigV22Schema,
   },
   { additionalProperties: false },
 )
 type LegacyAppConfigV22 = Static<typeof LegacyAppConfigV22Schema>
 const validateLegacyAppConfigV22 = compileSchema(LegacyAppConfigV22Schema)
+
+// AppConfig v23 introduced operational logging and otherwise retained the
+// v22 runtime concurrency controls removed by v24.
+const LegacyAppConfigV23Schema = Type.Object(
+  {
+    ...AppConfigSchema.properties,
+    schemaVersion: Type.Literal(23),
+    subagents: LegacySubagentsConfigV23Schema,
+    limits: LegacyLimitsConfigV23Schema,
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV23 = Static<typeof LegacyAppConfigV23Schema>
+const validateLegacyAppConfigV23 = compileSchema(LegacyAppConfigV23Schema)
 
 const LegacyAppProviderConfigV14Schema = Type.Object(
   {
@@ -591,9 +632,16 @@ const validateLegacyAppConfigV10 = compileSchema(LegacyAppConfigV10Schema)
 function withoutRunToolBudget(
   limits: LegacyLimitsWithRunToolBudget,
 ): AppConfig['limits'] {
+  const withoutBudget = withoutKey(limits, 'maxToolTokensPerRun')
   return structuredClone(
-    withoutKey(limits, 'maxToolTokensPerRun'),
+    withoutKey(withoutBudget, 'maxConcurrentRuns'),
   ) as AppConfig['limits']
+}
+
+function migrateLegacyLimits(
+  limits: LegacyLimitsConfigV23,
+): AppConfig['limits'] {
+  return structuredClone(withoutKey(limits, 'maxConcurrentRuns'))
 }
 
 /** Preserves legacy trace settings while adding default operational logging. */
@@ -774,10 +822,13 @@ function migrateV12(config: LegacyAppConfigV12): AppConfig {
 function migrateLegacySubagents(
   subagents: LegacySubagentsConfig,
 ): AppConfig['subagents'] {
-  return {
-    ...structuredClone(subagents),
-    maxAgentsPerSwarm: DEFAULT_APP_CONFIG.subagents.maxAgentsPerSwarm,
-  }
+  return structuredClone(subagents)
+}
+
+function migrateConfiguredSubagents(
+  subagents: LegacySubagentsConfigV23,
+): AppConfig['subagents'] {
+  return structuredClone(withoutKey(subagents, 'maxAgentsPerSwarm'))
 }
 
 function migrateV13(config: LegacyAppConfigV13): AppConfig {
@@ -827,6 +878,7 @@ function migrateV14(config: LegacyAppConfigV14): AppConfig {
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
     subagents: migrateLegacySubagents(config.subagents),
+    limits: migrateLegacyLimits(config.limits),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -851,6 +903,7 @@ function migrateV15(config: LegacyAppConfigV15): AppConfig {
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
     subagents: migrateLegacySubagents(config.subagents),
+    limits: migrateLegacyLimits(config.limits),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -908,6 +961,7 @@ function migrateV16(config: LegacyAppConfigV16): AppConfig {
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
     subagents: migrateLegacySubagents(config.subagents),
+    limits: migrateLegacyLimits(config.limits),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -932,6 +986,7 @@ function migrateV17(config: LegacyAppConfigV17): AppConfig {
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
     subagents: migrateLegacySubagents(config.subagents),
+    limits: migrateLegacyLimits(config.limits),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -956,6 +1011,7 @@ function migrateV18(config: LegacyAppConfigV18): AppConfig {
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
     subagents: migrateLegacySubagents(config.subagents),
+    limits: migrateLegacyLimits(config.limits),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -976,6 +1032,8 @@ function migrateV19(config: LegacyAppConfigV19): AppConfig {
       config.providers,
       structuredClone(config.modelPool),
     ),
+    subagents: migrateConfiguredSubagents(config.subagents),
+    limits: migrateLegacyLimits(config.limits),
     executionEnvironment: structuredClone(
       DEFAULT_APP_CONFIG.executionEnvironment,
     ),
@@ -999,6 +1057,8 @@ function migrateV20(config: LegacyAppConfigV20): AppConfig {
       config.providers,
       structuredClone(config.modelPool),
     ),
+    subagents: migrateConfiguredSubagents(config.subagents),
+    limits: migrateLegacyLimits(config.limits),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
@@ -1022,6 +1082,8 @@ function migrateV21(config: LegacyAppConfigV21): AppConfig {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
     logging: migrateLegacyLogging(config.logging),
+    subagents: migrateConfiguredSubagents(config.subagents),
+    limits: migrateLegacyLimits(config.limits),
     models: {
       defaultModelProvider: config.models.defaultModelProvider,
       defaultModel: config.models.defaultModel,
@@ -1049,10 +1111,29 @@ function migrateV22(config: LegacyAppConfigV22): AppConfig {
     ...config,
     schemaVersion: APP_CONFIG_SCHEMA_VERSION,
     logging: migrateLegacyLogging(config.logging),
+    subagents: migrateConfiguredSubagents(config.subagents),
+    limits: migrateLegacyLimits(config.limits),
   }
   if (!validateAppConfig(migrated)) {
     throw new UnsupportedConfigSchemaError(
       22,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
+/** Removes the retired runtime concurrency controls from AppConfig v23. */
+function migrateV23(config: LegacyAppConfigV23): AppConfig {
+  const migrated = {
+    ...config,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    subagents: migrateConfiguredSubagents(config.subagents),
+    limits: migrateLegacyLimits(config.limits),
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      23,
       formatSchemaErrors(validateAppConfig.errors),
     )
   }
@@ -1263,6 +1344,16 @@ export function migrateConfig(candidate: unknown): AppConfig {
       )
     }
     return migrateV22(candidate as LegacyAppConfigV22)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') === 23) {
+    if (!validateLegacyAppConfigV23(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        23,
+        formatSchemaErrors(validateLegacyAppConfigV23.errors),
+      )
+    }
+    return migrateV23(candidate as LegacyAppConfigV23)
   }
 
   if (Reflect.get(candidate, 'schemaVersion') !== APP_CONFIG_SCHEMA_VERSION) {

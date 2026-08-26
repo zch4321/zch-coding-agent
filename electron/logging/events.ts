@@ -99,38 +99,6 @@ export const TraceEventSchema = Type.Union([
   Type.Composite([
     TraceBaseSchema,
     Type.Object({
-      type: Type.Literal('run.rejected'),
-      sessionId: SessionIdSchema,
-      runId: RunIdSchema,
-      reason: Type.Union([
-        Type.Literal('max_concurrent_runs'),
-        Type.Literal('workspace_writer_active'),
-      ]),
-      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 32 })),
-      active: Type.Optional(Type.Integer({ minimum: 0, maximum: 32 })),
-      writerSessionId: Type.Optional(SessionIdSchema),
-      writerRunId: Type.Optional(RunIdSchema),
-    }),
-  ]),
-  Type.Composite([
-    TraceBaseSchema,
-    Type.Object({
-      type: Type.Literal('workspace.writer'),
-      sessionId: SessionIdSchema,
-      runId: RunIdSchema,
-      workspace: Type.String({ minLength: 1, maxLength: 4_096 }),
-      status: Type.Union([
-        Type.Literal('acquired'),
-        Type.Literal('released'),
-        Type.Literal('rejected'),
-      ]),
-      writerSessionId: Type.Optional(SessionIdSchema),
-      writerRunId: Type.Optional(RunIdSchema),
-    }),
-  ]),
-  Type.Composite([
-    TraceBaseSchema,
-    Type.Object({
       type: Type.Literal('run.start'),
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
@@ -408,23 +376,6 @@ export type TraceEventInput =
     })
   | (TraceInputBase & { type: 'session.end'; reason?: string })
   | (TraceInputBase & { type: 'session.mode'; mode: string })
-  | (TraceInputBase & {
-      type: 'run.rejected'
-      runId: RunId
-      reason: 'max_concurrent_runs' | 'workspace_writer_active'
-      limit?: number
-      active?: number
-      writerSessionId?: SessionId
-      writerRunId?: RunId
-    })
-  | (TraceInputBase & {
-      type: 'workspace.writer'
-      runId: RunId
-      workspace: string
-      status: 'acquired' | 'released' | 'rejected'
-      writerSessionId?: SessionId
-      writerRunId?: RunId
-    })
   | (TraceInputBase & { type: 'run.start'; runId: RunId })
   | (TraceInputBase & {
       type: 'run.end'

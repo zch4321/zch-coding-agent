@@ -133,7 +133,6 @@ export const DEFAULT_APP_CONFIG = {
   subagents: {
     enabled: false,
     workerTimeoutMs: 30 * 60_000,
-    maxAgentsPerSwarm: 10,
   },
   executionEnvironment: {
     commandShell: 'auto',
@@ -149,7 +148,6 @@ export const DEFAULT_APP_CONFIG = {
     },
   },
   limits: {
-    maxConcurrentRuns: 16,
     maxStepsPerRun: 0,
     maxToolOutputBytes: 128 * 1_024,
     maxContextTokens: DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,

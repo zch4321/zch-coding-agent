@@ -18,6 +18,7 @@ import { i18n, setAppLocale } from '../../i18n'
 import { useAgentExecutionStore } from '../../stores/agent-executions'
 import { useAgentReplicaStore } from '../../stores/agent-replica'
 import ArtifactPanel from './ArtifactPanel.vue'
+import AgentExecutionBody from './AgentExecutionBody.vue'
 import AgentsTab from './AgentsTab.vue'
 
 const timestamp = '2026-08-01T00:00:00.000Z'
@@ -199,6 +200,57 @@ describe('Agents artifact tab', () => {
       .find((label) => label.text().includes('Agents'))
     expect(agentsLabel?.text()).toContain('1')
     expect(wrapper.props('activeTab')).toBe('files')
+    wrapper.unmount()
+  })
+
+  it('shows and resolves an approval requested by a writable child', async () => {
+    const decideAgentExecutionApproval = vi.fn(async () =>
+      success({ accepted: true }),
+    )
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        decideAgentExecutionApproval,
+      } as Partial<AgentApi> as AgentApi,
+    })
+    const store = useAgentExecutionStore()
+    store.upsertSummary(execution)
+    store.details[execution.id] = {
+      detail,
+      loaded: true,
+      loading: false,
+    }
+    store.ensureLive(execution.id).approval = {
+      callId: 'call:child-create' as CallId,
+      kind: 'tool',
+      tool: 'create_file',
+      arguments: { path: 'delegated.txt' },
+      reason: 'Create the delegated file',
+      policySignals: [],
+      rememberable: false,
+      expiresAt: '2026-08-01T00:05:00.000Z',
+    }
+    const wrapper = mount(AgentExecutionBody, {
+      props: {
+        summary: execution,
+        now: new Date(timestamp).getTime(),
+      },
+      global: { plugins: [i18n] },
+    })
+
+    expect(wrapper.text()).toContain('需要审批 · create_file')
+    expect(wrapper.text()).toContain('delegated.txt')
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(decideAgentExecutionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentSessionId,
+        executionId: execution.id,
+        callId: 'call:child-create',
+        decision: 'allow',
+      }),
+    )
+    expect(wrapper.text()).not.toContain('需要审批 · create_file')
     wrapper.unmount()
   })
 

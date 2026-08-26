@@ -262,8 +262,6 @@ export async function createBackendRuntime(
         liveSessions!.bindSessionMutationProject(sessionId, token, projectId),
       releaseSessionMutation: (sessionId, token) =>
         liveSessions!.releaseSessionMutation(sessionId, token),
-      acquireFileChangeRevertWriter: (input) =>
-        runtime!.services.sessions.acquireFileChangeRevertWriter(input),
     })
     executionState.setInvalidationHandler((sessionId, runId) =>
       liveSessions?.invalidate(sessionId, runId),

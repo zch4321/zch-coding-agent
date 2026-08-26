@@ -68,29 +68,30 @@ import { updatePublicRunSnapshot } from './session-runtime-snapshot'
 import {
   appendInitialPromptHarness,
   appendRuntimeContextIfChanged,
-  type WorkspaceConcurrencyContext,
 } from './prompt-harness'
-import {
-  WorkspaceAccessCoordinator,
-  type FileChangeRevertAccessResult,
-  type RunAccessLease,
-  type RunAccessRejection,
-  type WorkspaceWriterOwner,
-} from './workspace-access-coordinator'
 import { SessionTraceController } from './session-trace-controller'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 import type {
+  FrozenSubagentToolContext,
   FrozenSubagentRoutes,
   InternalSubagentRunOutcome,
 } from '../subagent/contracts'
 import { SubagentRuntimeError } from '../subagent/contracts'
+import type { AgentToolAccess } from '../../shared/agent-execution'
+import { hasSideEffects } from '../permission/policy-engine'
 
 const RUN_CANCEL_GRACE_MS = 2_000
-
-export interface InternalRunReservation {
-  runId: RunId
-  lease: RunAccessLease
-}
+const CHILD_ORCHESTRATION_TOOL_IDS = new Set([
+  'subagent_run',
+  'swarm_run',
+  'goal_get',
+  'goal_complete',
+  'goal_block',
+  'plan_get',
+  'plan_set',
+  'plan_status',
+  'plan_update',
+])
 
 /**
  * Main-process facade for agent sessions.
@@ -116,7 +117,6 @@ export class SessionManager {
   >
   readonly #onDiagnostic: DiagnosticSink
   readonly #sessions = new Map<SessionId, SessionState>()
-  readonly #writerEventSessions = new Map<RunId, SessionState>()
   readonly #toolRegistry: ToolRegistry
   readonly #toolExecutor: ToolExecutor
   readonly #mcpGateway: SessionTooling['mcpGateway']
@@ -130,7 +130,6 @@ export class SessionManager {
   readonly #orchestration: SessionOrchestrationPlanner
   readonly #userTurns: SessionUserTurnPreparer
   readonly #runs: SessionRunController
-  readonly #workspaceAccess: WorkspaceAccessCoordinator
   readonly #permissionPipeline = new PermissionPipeline()
   readonly #executionState: SessionManagerOptions['executionState']
 
@@ -160,10 +159,6 @@ export class SessionManager {
     this.#events = new SessionEventEmitter({
       eventSink: options.eventSink,
       getSession: (sessionId) => this.#sessions.get(sessionId),
-    })
-    this.#workspaceAccess = new WorkspaceAccessCoordinator({
-      onWriterChanged: (status, owner) =>
-        this.#handleWorkspaceWriterChanged(status, owner),
     })
     this.#approvals = new SessionApprovalCoordinator({
       configStore: this.#configStore,
@@ -214,8 +209,6 @@ export class SessionManager {
       emit: (session, event) => this.#emit(session, event),
       setRunStatus: (session, run, status, error) =>
         this.#runs.setRunStatus(session, run, status, error),
-      getWorkspaceConcurrency: (session) =>
-        this.#workspaceConcurrencyContext(session),
       executionState: this.#executionState,
       historySource: options.historySource,
       operationalLog: options.operationalLog,
@@ -235,8 +228,6 @@ export class SessionManager {
       promptRegistry: this.#promptRegistry,
       orchestratorMessages: this.#orchestratorMessages,
       emit: (session, event) => this.#emit(session, event),
-      getWorkspaceConcurrency: (session) =>
-        this.#workspaceConcurrencyContext(session),
       swarmHostEnabled: options.swarmHostEnabled ?? false,
     })
     const providerTurns = new SessionProviderTurnRunner({
@@ -249,8 +240,6 @@ export class SessionManager {
       onDiagnostic: this.#onDiagnostic,
       operationalLog: options.operationalLog,
       emit: (session, event) => this.#emit(session, event),
-      getWorkspaceConcurrency: (session) =>
-        this.#workspaceConcurrencyContext(session),
     })
     const toolRunner = new SessionToolRunner({
       configStore: this.#configStore,
@@ -280,8 +269,6 @@ export class SessionManager {
       userTurns: this.#userTurns,
       onDiagnostic: this.#onDiagnostic,
       emit: (session, event) => this.#emit(session, event),
-      acquireRunAccess: (session, runId) =>
-        this.#acquireRunAccess(session, runId),
       executionState: this.#executionState,
       beforeRun: (session) => session.trace.beforeRun(),
       afterRun: (session) => session.trace.afterRun(),
@@ -307,9 +294,10 @@ export class SessionManager {
     return this.#createSession(input)
   }
 
-  /** Creates an event-hidden read-only Session for one Subagent execution. */
+  /** Creates an event-hidden Session for one Subagent execution. */
   async createInternalSession(input: {
     workspace: string
+    mode: PermissionMode
     provider: string
     modelSelection: ModelSelection
     allowedToolIds: ReadonlySet<string>
@@ -328,7 +316,7 @@ export class SessionManager {
     return this.#createSession(
       {
         workspace: input.workspace,
-        mode: 'readonly',
+        mode: input.mode,
         provider: input.provider,
         modelSelection: input.modelSelection,
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -452,7 +440,7 @@ export class SessionManager {
       ...(internal
         ? { internalExecution: structuredClone(internal.execution) }
         : {}),
-      readOnlyWorkspace: Boolean(internal),
+      readOnlyWorkspace: Boolean(internal && input.mode === 'readonly'),
       gitToolsEnabled: internal?.gitToolsEnabled ?? true,
       ...(internal ? { allowedToolIds: new Set(internal.allowedToolIds) } : {}),
       clientRequests: new Map(),
@@ -478,7 +466,6 @@ export class SessionManager {
         promptRegistry: this.#promptRegistry,
         skillSummary: this.#skillsManager?.summaryPrompt(),
         toolNames: toolCatalog.names,
-        workspaceConcurrency: this.#workspaceConcurrencyContext(session),
       })
       this.#emitTraceCaptureStatus(session, trace.status())
       if (!internal) {
@@ -585,9 +572,7 @@ export class SessionManager {
     mode: PermissionMode,
   ): Promise<{
     accepted: boolean
-    reason?: 'active_run' | 'workspace_writer_active'
-    writerSessionId?: SessionId
-    writerRunId?: RunId
+    reason?: 'active_run'
   }> {
     const session = this.#sessions.get(sessionId)
 
@@ -597,20 +582,6 @@ export class SessionManager {
 
     if (session.activeRun || session.mutationInProgress) {
       return { accepted: false, reason: 'active_run' }
-    }
-
-    const writer = this.#workspaceAccess.writerFor(session.workspace)
-    if (mode !== 'readonly' && writer) {
-      return {
-        accepted: false,
-        reason: 'workspace_writer_active',
-        ...(writer.kind === 'provider_run'
-          ? {
-              writerSessionId: writer.sessionId,
-              writerRunId: writer.runId,
-            }
-          : {}),
-      }
     }
 
     const previousMode = session.mode
@@ -636,7 +607,6 @@ export class SessionManager {
         providerId: session.provider,
         promptRegistry: this.#promptRegistry,
         reason: 'permission_mode_changed',
-        workspaceConcurrency: this.#workspaceConcurrencyContext(session),
         toolNames: toolCatalog.names,
       })
       await this.#executionState?.commit(session, { reason: 'metadata' })
@@ -744,7 +714,6 @@ export class SessionManager {
       )
 
       if (!completed) {
-        this.#runs.releaseAccess(session.activeRun)
         session.logger = new NullTraceLogger()
         this.#onDiagnostic(
           `Run ${session.activeRun.runId} did not stop within the cancellation grace period`,
@@ -830,11 +799,41 @@ export class SessionManager {
     })
   }
 
-  /** Returns the frozen Swarm limits and optional slash-command goal for a live parent Run. */
-  frozenSwarmContext(
+  /** Resolves delegated Tool access without allowing a Child to exceed its parent Run. */
+  frozenSubagentToolContext(
     sessionId: SessionId,
     runId: RunId,
-  ): { goal?: string; maxAgentsPerJob: number } {
+    toolAccess: AgentToolAccess,
+  ): FrozenSubagentToolContext {
+    this.frozenSubagentRoutes(sessionId, runId)
+    const session = this.#sessions.get(sessionId)!
+    const run = session.activeRun!
+    const permissionMode = toolAccess === 'readonly' ? 'readonly' : session.mode
+    const parentCatalog = resolveSessionToolCatalog({
+      registry: this.#toolRegistry,
+      allowedToolIds: run.allowedToolIds,
+      subagentsEnabled: run.subagentsEnabled,
+      gitToolsEnabled: session.gitToolsEnabled,
+    })
+    const allowedToolIds = new Set(
+      parentCatalog.names.filter((toolId) => {
+        if (CHILD_ORCHESTRATION_TOOL_IDS.has(toolId)) return false
+        const definition = this.#toolRegistry.get(toolId)
+        return Boolean(
+          definition &&
+          (permissionMode !== 'readonly' || !hasSideEffects(definition)),
+        )
+      }),
+    )
+    return {
+      permissionMode,
+      allowedToolIds,
+      gitToolsEnabled: session.gitToolsEnabled,
+    }
+  }
+
+  /** Returns the optional slash-command goal for a live parent Swarm Run. */
+  frozenSwarmContext(sessionId: SessionId, runId: RunId): { goal?: string } {
     const session = this.#sessions.get(sessionId)
     const run = session?.activeRun
     if (
@@ -860,7 +859,6 @@ export class SessionManager {
     context?: { content: string; source: string }
     clientRequestId: string
     routes: FrozenSubagentRoutes
-    reservation?: InternalRunReservation
   }): {
     runId: RunId
     completion: Promise<InternalSubagentRunOutcome>
@@ -886,7 +884,6 @@ export class SessionManager {
         subagentsEnabled: false,
         allowedToolIds: session.allowedToolIds,
         skipProviderPreconditions: true,
-        ...(input.reservation ? { reservedAccess: input.reservation } : {}),
       },
     )
     const run = session.activeRun
@@ -926,33 +923,6 @@ export class SessionManager {
         }
       }),
     }
-  }
-
-  /** Waits for and reserves one readonly global Run slot for a Swarm child. */
-  async reserveQueuedInternalRun(input: {
-    sessionId: SessionId
-    workspace: string
-    signal: AbortSignal
-  }): Promise<InternalRunReservation> {
-    const limit = this.#configStore.getPublicConfig().limits.maxConcurrentRuns
-    if (limit < 2) {
-      throw new SubagentRuntimeError(
-        'SUBAGENT_CONCURRENCY_DISABLED',
-        'Queued Subagent execution requires maxConcurrentRuns to be at least 2',
-      )
-    }
-    const runId = id<RunId>('run')
-    const lease = await this.#workspaceAccess.acquireQueued(
-      {
-        limit,
-        workspace: input.workspace,
-        mode: 'readonly',
-        sessionId: input.sessionId,
-        runId,
-      },
-      input.signal,
-    )
-    return { runId, lease }
   }
 
   /** Attributes child usage to its active parent Run without exposing child events. */
@@ -1161,15 +1131,6 @@ export class SessionManager {
     if (run?.runId === runId) await run.done
   }
 
-  /** Acquires exclusive workspace access for a file-change revert operation. */
-  acquireFileChangeRevertWriter(input: {
-    workspace: string
-    sessionId: SessionId
-    operationId: string
-  }): FileChangeRevertAccessResult {
-    return this.#workspaceAccess.acquireFileChangeRevert(input)
-  }
-
   /**
    * Queues a live user interjection for an active run.
    *
@@ -1216,6 +1177,37 @@ export class SessionManager {
   }): boolean {
     const session = this.#requireSession(input.sessionId)
     return this.#approvals.decide(session, input)
+  }
+
+  /** Resolves an approval owned by an active internal Child execution. */
+  decideAgentExecutionApproval(input: {
+    parentSessionId: SessionId
+    executionId: AgentExecutionId
+    callId: CallId
+    decision: 'allow' | 'deny'
+    remember?: RememberApprovalInput
+  }): boolean {
+    for (const session of this.#sessions.values()) {
+      const execution = session.internalExecution
+      const run = session.activeRun
+      if (
+        session.closed ||
+        !execution ||
+        execution.parentSessionId !== input.parentSessionId ||
+        execution.executionId !== input.executionId ||
+        !run
+      ) {
+        continue
+      }
+      return this.#approvals.decide(session, {
+        sessionId: session.sessionId,
+        runId: run.runId,
+        callId: input.callId,
+        decision: input.decision,
+        remember: input.remember,
+      })
+    }
+    return false
   }
 
   /** Opens a terminal owned by the specified Session. */
@@ -1265,171 +1257,12 @@ export class SessionManager {
     return this.#terminals.snapshot(sessionId, terminalId)
   }
 
-  /** Closes every Session and releases workspace access and terminal resources. */
+  /** Closes every Session and its terminal resources. */
   async dispose(): Promise<void> {
     await Promise.all(
       [...this.#sessions.keys()].map((idValue) => this.closeSession(idValue)),
     )
-    this.#workspaceAccess.releaseAll()
     await this.#terminals.dispose()
-  }
-
-  #acquireRunAccess(session: SessionState, runId: RunId): RunAccessLease {
-    const result = this.#workspaceAccess.acquire({
-      limit: this.#configStore.getPublicConfig().limits.maxConcurrentRuns,
-      workspace: session.workspace,
-      mode: session.mode,
-      sessionId: session.sessionId,
-      runId,
-    })
-
-    if (result.acquired) {
-      if (session.mode !== 'readonly') {
-        this.#writerEventSessions.set(runId, session)
-      }
-      return result.lease
-    }
-
-    this.#traceRunAccessRejection(session, runId, result.rejection)
-    if (result.rejection.reason === 'max_concurrent_runs') {
-      ipcFault('CONFLICT', 'The maximum number of concurrent runs is active', {
-        reason: result.rejection.reason,
-        limit: result.rejection.limit,
-        active: result.rejection.active,
-      })
-    }
-
-    ipcFault('CONFLICT', 'Another run is modifying this workspace', {
-      reason: result.rejection.reason,
-      writerKind: result.rejection.writer.kind,
-      ...(result.rejection.writer.kind === 'provider_run'
-        ? {
-            writerSessionId: result.rejection.writer.sessionId,
-            writerRunId: result.rejection.writer.runId,
-          }
-        : { writerOperationId: result.rejection.writer.operationId }),
-    })
-  }
-
-  #traceRunAccessRejection(
-    session: SessionState,
-    runId: RunId,
-    rejection: RunAccessRejection,
-  ): void {
-    const common = {
-      type: 'run.rejected' as const,
-      sessionId: session.sessionId,
-      runId,
-    }
-    const event =
-      rejection.reason === 'max_concurrent_runs'
-        ? {
-            ...common,
-            reason: rejection.reason,
-            limit: rejection.limit,
-            active: rejection.active,
-          }
-        : {
-            ...common,
-            reason: rejection.reason,
-            ...(rejection.writer.kind === 'provider_run'
-              ? {
-                  writerSessionId: rejection.writer.sessionId,
-                  writerRunId: rejection.writer.runId,
-                }
-              : {}),
-          }
-    void session.logger.write(event).catch((error: unknown) =>
-      this.#onDiagnostic('Failed to trace rejected run', error, {
-        audience: 'internal',
-      }),
-    )
-
-    if (rejection.reason === 'workspace_writer_active') {
-      if (rejection.writer.kind !== 'provider_run') return
-      void session.logger
-        .write({
-          type: 'workspace.writer',
-          sessionId: session.sessionId,
-          runId,
-          workspace: session.workspace,
-          status: 'rejected',
-          writerSessionId: rejection.writer.sessionId,
-          writerRunId: rejection.writer.runId,
-        })
-        .catch((error: unknown) =>
-          this.#onDiagnostic(
-            'Failed to trace rejected workspace writer',
-            error,
-            { audience: 'internal' },
-          ),
-        )
-    }
-  }
-
-  #handleWorkspaceWriterChanged(
-    status: 'acquired' | 'released',
-    owner: WorkspaceWriterOwner,
-  ): void {
-    if (owner.kind !== 'provider_run') return
-    const session =
-      this.#sessions.get(owner.sessionId) ??
-      this.#writerEventSessions.get(owner.runId)
-    if (!session) return
-
-    void session.logger
-      .write({
-        type: 'workspace.writer',
-        sessionId: owner.sessionId,
-        runId: owner.runId,
-        workspace: owner.workspace,
-        status,
-      })
-      .catch((error: unknown) =>
-        this.#onDiagnostic('Failed to trace workspace writer change', error, {
-          audience: 'internal',
-        }),
-      )
-    this.#emit(session, {
-      type: 'workspace.writer.changed',
-      sessionId: owner.sessionId,
-      workspace: owner.workspace,
-      status,
-      writerSessionId: owner.sessionId,
-      writerRunId: owner.runId,
-    })
-    if (status === 'released') {
-      this.#writerEventSessions.delete(owner.runId)
-    }
-  }
-
-  #workspaceConcurrencyContext(
-    session: SessionState,
-  ): WorkspaceConcurrencyContext {
-    const writer = this.#workspaceAccess.writerFor(session.workspace)
-    if (!writer) return { status: 'available' }
-
-    if (writer.kind === 'file_change_revert') {
-      return {
-        status: 'readonly_locked',
-        writerSessionId: writer.sessionId,
-        writerRunId: writer.operationId,
-      }
-    }
-
-    if (writer.sessionId === session.sessionId) {
-      return {
-        status: 'writer',
-        writerSessionId: writer.sessionId,
-        writerRunId: writer.runId,
-      }
-    }
-
-    return {
-      status: 'readonly_locked',
-      writerSessionId: writer.sessionId,
-      writerRunId: writer.runId,
-    }
   }
 
   /**

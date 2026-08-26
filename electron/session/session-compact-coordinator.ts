@@ -37,7 +37,6 @@ import {
   appendInitialPromptHarness,
   orchestrationRequestContent,
   promptResources,
-  type WorkspaceConcurrencyContext,
 } from './prompt-harness'
 import {
   appendControlCommand,
@@ -173,9 +172,6 @@ export class SessionCompactCoordinator {
     status: RunStatus,
     error?: unknown,
   ) => void
-  readonly #getWorkspaceConcurrency: (
-    session: SessionState,
-  ) => WorkspaceConcurrencyContext
   readonly #executionState?: SessionExecutionStatePort
   readonly #historySource?: SessionHistorySourcePort
   readonly #unsupportedNativeCompaction = new Set<string>()
@@ -196,9 +192,6 @@ export class SessionCompactCoordinator {
       status: RunStatus,
       error?: unknown,
     ) => void
-    getWorkspaceConcurrency?: (
-      session: SessionState,
-    ) => WorkspaceConcurrencyContext
     executionState?: SessionExecutionStatePort
     historySource?: SessionHistorySourcePort
     operationalLog?: Pick<OperationalLogService, 'log'>
@@ -212,8 +205,6 @@ export class SessionCompactCoordinator {
     this.#orchestratorMessages = options.orchestratorMessages
     this.#emit = options.emit
     this.#setRunStatus = options.setRunStatus
-    this.#getWorkspaceConcurrency =
-      options.getWorkspaceConcurrency ?? (() => ({ status: 'available' }))
     this.#executionState = options.executionState
     this.#historySource = options.historySource
     this.#operationalLog = options.operationalLog
@@ -865,7 +856,7 @@ export class SessionCompactCoordinator {
       registry: this.#toolRegistry,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
-      swarmMaxAgents: run.swarmToolConfig?.maxAgentsPerJob,
+      swarmEnabled: Boolean(run.swarmToolConfig),
       gitToolsEnabled: session.gitToolsEnabled,
     })
     await appendInitialPromptHarness(session, {
@@ -875,7 +866,6 @@ export class SessionCompactCoordinator {
       providerId: session.modelSelection.providerId,
       promptRegistry: this.#promptRegistry,
       skillSummary: this.#skillsManager?.summaryPrompt(),
-      workspaceConcurrency: this.#getWorkspaceConcurrency(session),
       toolNames: toolCatalog.names,
       signal: run.controller.signal,
     })
@@ -892,7 +882,7 @@ export class SessionCompactCoordinator {
       registry: this.#toolRegistry,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
-      swarmMaxAgents: run.swarmToolConfig?.maxAgentsPerJob,
+      swarmEnabled: Boolean(run.swarmToolConfig),
       gitToolsEnabled: session.gitToolsEnabled,
     })
     const provider =

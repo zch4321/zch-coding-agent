@@ -15,7 +15,6 @@ import type {
   FileChangeId,
   MessageId,
   ProjectId,
-  RunId,
   SessionId,
 } from '../../shared/ids'
 import type { PersistenceTransaction } from '../persistence/database-service'
@@ -29,7 +28,6 @@ import {
 } from '../persistence/repository-fixtures'
 import { SessionRepository } from '../persistence/session-repository'
 import { createTestDatabase } from '../persistence/test-database'
-import type { FileChangeRevertAccessResult } from '../session/workspace-access-coordinator'
 import { hash } from '../tools/file-tool-preconditions'
 import { MAX_MUTATION_FILE_BYTES } from '../tools/file-tool-limits'
 import { ApplicationError } from './application-error'
@@ -41,7 +39,6 @@ import {
 
 class TestRuntimeGuard implements FileChangeRuntimeGuard {
   mutationReserved = false
-  writerReserved = false
   boundProjectId: ProjectId | undefined
 
   reserveSessionMutation(): string {
@@ -65,30 +62,6 @@ class TestRuntimeGuard implements FileChangeRuntimeGuard {
 
   releaseSessionMutation(): void {
     this.mutationReserved = false
-  }
-
-  acquireFileChangeRevertWriter(): FileChangeRevertAccessResult {
-    if (this.writerReserved) {
-      return {
-        acquired: false,
-        rejection: {
-          reason: 'workspace_writer_active',
-          writer: {
-            kind: 'provider_run',
-            workspace: '/workspace',
-            sessionId: 'session:writer' as SessionId,
-            runId: 'run:writer' as RunId,
-          },
-        },
-      }
-    }
-    this.writerReserved = true
-    return {
-      acquired: true,
-      release: () => {
-        this.writerReserved = false
-      },
-    }
   }
 }
 
@@ -163,7 +136,6 @@ describe('FileChangeService revert', () => {
         })
         expect(restored).toBe(beforeContent)
         expect(setup.guard.mutationReserved).toBe(false)
-        expect(setup.guard.writerReserved).toBe(false)
         await expect(
           setup.service.revert(setup.sessionId, record.id, 1),
         ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
@@ -281,7 +253,7 @@ describe('FileChangeService revert', () => {
     }
   })
 
-  it('honors lifecycle and workspace writer conflicts before file I/O', async () => {
+  it('honors lifecycle conflicts before file I/O', async () => {
     const setup = await setupRevert()
     try {
       const record = await seedChange(setup, {
@@ -289,14 +261,6 @@ describe('FileChangeService revert', () => {
         beforeContent: 'before patch',
         afterContent: 'after patch',
       })
-      setup.guard.writerReserved = true
-      await expect(
-        setup.service.revert(setup.sessionId, record.id, 1),
-      ).rejects.toMatchObject({ code: 'CONFLICT' })
-      expect(
-        await readFile(path.join(setup.workspace, record.path), 'utf8'),
-      ).toBe('after patch')
-      setup.guard.writerReserved = false
       setup.guard.mutationReserved = true
       await expect(
         setup.service.revert(setup.sessionId, record.id, 1),

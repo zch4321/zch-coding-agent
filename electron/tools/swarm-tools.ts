@@ -11,11 +11,11 @@ export function registerSwarmTools(
   registry.registerTool({
     id: 'swarm_run',
     description:
-      'Run one read-only model-pool Swarm Job. Call this only when the user explicitly requests a Swarm, multiple Agents, parallel investigation, or independent cross-checking; do not invoke it merely because a task is complex. Every call requires user approval. Child Agents receive no parent history and cannot execute commands, builds, or tests. Before calling, run relevant verification with parent command tools when feasible, then put each command, exit code, and concise key output in sharedContext; explicitly state there when verification could not be run. Put common background, evidence, constraints, and output requirements in sharedContext, and keep each task focused on its Child-specific assignment; together they must be self-contained. When independent cross-checking adds value, use close to the per-Job Agent limit and assign multiple Agents to the same task; the allocator rotates eligible provider/model identities before reuse, but a limited model pool may still reuse a model. Prefer one swarm_run call per assistant turn because multiple Swarm Jobs owned by the same parent Run execute strictly serially and can take a long time. Request the lowest capability that can complete each task.',
+      "Run one model-pool Swarm Job. Call this only when the user explicitly requests a Swarm, multiple Agents, parallel work, or independent cross-checking; do not invoke it merely because a task is complex. Child Agents receive no parent history. Put common background, evidence, constraints, and output requirements in sharedContext, and keep every task focused and self-contained. Set each task's toolAccess='readonly' for investigation or toolAccess='inherit' when its Agents must use the parent Run's non-readonly tools and permission mode. Give write-capable tasks disjoint ownership whenever practical. The allocator rotates eligible provider/model identities before reuse, but a limited model pool may still reuse a model. Request the lowest capability that can complete each task.",
     inputSchema: SwarmRunArgsSchema,
-    executionMode: 'serial',
+    executionMode: 'parallel',
     effects: [],
-    defaultRisk: 'review',
+    defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: null,
     maxOutputBytes: 2_000_000,

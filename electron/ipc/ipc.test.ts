@@ -143,6 +143,13 @@ const validPayloads: {
     parentSessionId: sessionId,
     executionId: agentExecutionId,
   },
+  'agent-execution:approval-decide': {
+    version: 1,
+    parentSessionId: sessionId,
+    executionId: agentExecutionId,
+    callId,
+    decision: 'allow',
+  },
   'workspace:choose': { version: 1 },
   'workspace:list-directory': {
     version: 1,

@@ -302,18 +302,6 @@ export function normalizeSessionTranscript(
       case 'run.end':
         entries.push(runtimeEntry(event, `Run ended · ${event.status}`))
         break
-      case 'run.rejected':
-        entries.push(runtimeEntry(event, `Run rejected · ${event.reason}`))
-        break
-      case 'workspace.writer':
-        entries.push(
-          runtimeEntry(event, `Workspace writer · ${event.status}`, {
-            workspace: event.workspace,
-            writerSessionId: event.writerSessionId ?? null,
-            writerRunId: event.writerRunId ?? null,
-          }),
-        )
-        break
       case 'llm.request':
         requestMessages.set(
           event.eventId,

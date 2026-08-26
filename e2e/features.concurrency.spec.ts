@@ -1,9 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
-import { readdir, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { configureApp, findDurableMessageText } from './support/app-helpers'
 import {
-  providerMessageText,
   textDelta,
   toolCallDelta,
   type FakeProvider,
@@ -18,134 +17,93 @@ test.describe('Electron concurrency and interjection workflows', () => {
   let harness: FeatureHarness
   let fakeProvider: FakeProvider
   let page: Page
-  let userDataPath: string
   let workspace: string
 
   test.beforeEach(async () => {
     harness = await launchFeatureHarness()
-    ;({ fakeProvider, page, userDataPath, workspace } = harness)
+    ;({ fakeProvider, page, workspace } = harness)
     await expect(page.getByTestId('app-ready')).toBeVisible()
   })
 
   test.afterEach(async () => disposeFeatureHarness(harness))
 
-  test('keeps one writer and a concurrent readonly conversation in the same workspace', async () => {
+  test('allows concurrent write-capable conversations in the same workspace', async () => {
     fakeProvider.queue([
       toolCallDelta({
-        id: 'call:e2e-writer-lock',
+        id: 'call:e2e-concurrent-a',
         name: 'create_file',
         args: {
-          path: 'writer-lock.txt',
-          content: 'writer lock fixture\n',
-          _agent_intent: 'Hold the workspace writer at approval',
+          path: 'concurrent-a.txt',
+          content: 'written by conversation A\n',
+          _agent_intent: 'Write the output owned by conversation A',
         },
       }),
     ])
-    fakeProvider.queue([textDelta('Readonly B completed beside writer A.')])
-    fakeProvider.queue([textDelta('Writer A stopped without changing files.')])
-    fakeProvider.queue([textDelta('B became the next writer.')])
+    fakeProvider.queue([
+      toolCallDelta({
+        id: 'call:e2e-concurrent-b',
+        name: 'create_file',
+        args: {
+          path: 'concurrent-b.txt',
+          content: 'written by conversation B\n',
+          _agent_intent: 'Write the output owned by conversation B',
+        },
+      }),
+    ])
+    fakeProvider.queue([textDelta('Concurrent write completed.')])
+    fakeProvider.queue([textDelta('Concurrent write completed.')])
+    fakeProvider.armResponseGate([1, 2])
 
     await configureApp({
       page,
       providerBaseURL: fakeProvider.origin,
       workspace,
-      defaultMode: 'confirm',
-      traceLogging: true,
+      defaultMode: 'yolo',
     })
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
 
     const composer = page.locator('.message-input-area textarea')
-    await composer.fill('Create writer lock fixture')
+    await composer.fill('Write the output owned by conversation A')
     await page.getByRole('button', { name: '发送消息' }).click()
     await expect.poll(() => fakeProvider.requests.length).toBe(1)
-    await expect(page.locator('.approval-card')).toBeVisible()
 
     await page.locator('.new-conversation-button').click()
     const modeSelect = page.locator('.mode-select')
-    await expect(modeSelect).toContainText('只读')
-    await expect(modeSelect.locator('.n-base-selection--disabled')).toHaveCount(
-      1,
-    )
-    await expect(page.locator('.approval-card')).toHaveCount(0)
-    await expect(
-      page.locator('.project-sidebar .n-tag', { hasText: '待审批' }),
-    ).toHaveCount(0)
-
-    await composer.fill('Analyze while A writes')
-    await page.getByRole('button', { name: '发送消息' }).click()
-    await expect.poll(() => fakeProvider.requests.length).toBe(2)
-    await expect(page.locator('.chat-message.assistant')).toContainText(
-      'Readonly B completed beside writer A.',
-    )
-    expect(providerMessageText(fakeProvider.requests[1].body)).toContain(
-      '<workspace_concurrency status="readonly_locked">',
-    )
-    expect(providerMessageText(fakeProvider.requests[1].body)).toContain(
-      '另一个 agent run 正在修改同一 workspace',
-    )
-
-    await page
-      .locator('button.conversation-item', {
-        hasText: 'Create writer lock fixture',
-      })
-      .click()
-    const approval = page.locator('.approval-card')
-    await expect(approval).toBeVisible()
-    await expect(page.locator('.run-activity').last()).toHaveAttribute(
-      'data-run-activity',
-      'awaiting_approval',
-    )
-    await approval.getByRole('button', { name: '拒绝', exact: true }).click()
-    await expect.poll(() => fakeProvider.requests.length).toBe(3)
-    await expect(page.locator('.chat-message.assistant')).toContainText(
-      'Writer A stopped without changing files.',
-    )
-    expect(
-      await readFile(path.join(workspace, 'writer-lock.txt'), 'utf8').catch(
-        () => 'missing',
-      ),
-    ).toBe('missing')
-
-    await page
-      .locator('button.conversation-item', {
-        hasText: 'Analyze while A writes',
-      })
-      .click()
-    await expect(modeSelect).toContainText('只读')
+    await expect(modeSelect).toContainText('全自动')
     await expect(modeSelect.locator('.n-base-selection--disabled')).toHaveCount(
       0,
     )
-    await modeSelect.click()
-    await page.getByText('确认', { exact: true }).last().click()
-    await expect(modeSelect).toContainText('确认')
 
-    await composer.fill('Take the writer after A')
+    await composer.fill('Write the output owned by conversation B')
     await page.getByRole('button', { name: '发送消息' }).click()
-    await expect.poll(() => fakeProvider.requests.length).toBe(4)
-    await expect(
-      page.locator('.chat-message.assistant', {
-        hasText: 'B became the next writer.',
-      }),
-    ).toBeVisible()
-    expect(providerMessageText(fakeProvider.requests[3].body)).toContain(
-      '<workspace_concurrency status="writer">',
+    await expect.poll(() => fakeProvider.requests.length).toBe(2)
+    expect(JSON.stringify(fakeProvider.requests[0].body)).not.toContain(
+      'workspace_concurrency',
+    )
+    expect(JSON.stringify(fakeProvider.requests[1].body)).not.toContain(
+      'workspace_concurrency',
     )
 
+    fakeProvider.releaseResponseGate()
+    await expect.poll(() => fakeProvider.requests.length).toBe(4)
     await expect
-      .poll(async () => {
-        const traceDirectory = path.join(userDataPath, 'traces')
-        const files = (await readdir(traceDirectory)).filter((file) =>
-          file.endsWith('.jsonl'),
-        )
-        const traces = await Promise.all(
-          files.map((file) =>
-            readFile(path.join(traceDirectory, file), 'utf8'),
-          ),
-        )
-        return traces.join('\n')
-      })
-      .toContain('"type":"workspace.writer"')
+      .poll(() =>
+        readFile(path.join(workspace, 'concurrent-a.txt'), 'utf8').catch(
+          () => '',
+        ),
+      )
+      .toBe('written by conversation A\n')
+    await expect
+      .poll(() =>
+        readFile(path.join(workspace, 'concurrent-b.txt'), 'utf8').catch(
+          () => '',
+        ),
+      )
+      .toBe('written by conversation B\n')
+    await expect(page.locator('.chat-message.assistant')).toContainText(
+      'Concurrent write completed.',
+    )
   })
 
   test('injects a live user interjection after a tool batch mid-run', async () => {
