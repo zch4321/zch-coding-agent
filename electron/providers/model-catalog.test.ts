@@ -64,7 +64,14 @@ describe('DeepSeek model catalog', () => {
         })
         return Response.json({
           object: 'list',
-          data: [{ id: 'mimo-v2.5-pro', owned_by: 'xiaomi' }],
+          data: [
+            { id: 'mimo-v2.5-pro', owned_by: 'xiaomi' },
+            { id: 'mimo-v2.5', owned_by: 'xiaomi' },
+            { id: 'mimo-v2.5-asr', owned_by: 'xiaomi' },
+            { id: 'mimo-v2.5-tts', owned_by: 'xiaomi' },
+            { id: 'mimo-v2.5-tts-voiceclone', owned_by: 'xiaomi' },
+            { id: 'mimo-v2.5-tts-voicedesign', owned_by: 'xiaomi' },
+          ],
         })
       },
     ) as typeof fetch
@@ -76,7 +83,10 @@ describe('DeepSeek model catalog', () => {
         apiKey: 'secret',
         fetchImpl,
       }),
-    ).resolves.toEqual([{ id: 'mimo-v2.5-pro', ownedBy: 'xiaomi' }])
+    ).resolves.toEqual([
+      { id: 'mimo-v2.5', ownedBy: 'xiaomi' },
+      { id: 'mimo-v2.5-pro', ownedBy: 'xiaomi' },
+    ])
   })
 
   it('reports authentication failures without exposing response bodies', async () => {

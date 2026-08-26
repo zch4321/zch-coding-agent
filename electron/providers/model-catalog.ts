@@ -39,6 +39,8 @@ const BUILTIN_MODEL_CAPABILITIES: Readonly<
   },
 }
 
+const MIMO_CHAT_MODEL_IDS = new Set(['mimo-v2.5-pro', 'mimo-v2.5'])
+
 export interface ModelProfile {
   id: string
   ownedBy?: string
@@ -328,10 +330,13 @@ export function fetchProviderModelCatalog(options: {
 }): Promise<ProviderModel[]> {
   switch (options.providerType) {
     case 'deepseek.chat-completions':
-    case 'mimo.chat-completions':
     case 'generic.chat-completions':
     case 'generic.responses':
       return fetchOpenAICompatibleModelCatalog(options)
+    case 'mimo.chat-completions':
+      return fetchOpenAICompatibleModelCatalog(options).then((models) =>
+        models.filter((model) => MIMO_CHAT_MODEL_IDS.has(model.id)),
+      )
     case 'generic.anthropic':
       return fetchAnthropicModelCatalog(options)
   }
