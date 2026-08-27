@@ -182,6 +182,8 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 
 Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items；Anthropic 所有非 off 思考档位必须使用 adaptive thinking 与对应 effort，off 不发送 thinking 参数。Structured output 契约必须携带实际 JSON Schema；Responses 与 Anthropic 使用原生 schema 字段，Chat 兜底实现允许降级为 JSON object mode，但 Application 的本地 schema 校验不能省略。
 
+Anthropic 普通 Messages、自动审批/起名以及 native/synthetic compact 请求必须在顶层发送 `cache_control: { type: 'ephemeral' }`，让 Provider 自动把断点推进到最后一个可缓存 block。默认使用 5 分钟 TTL，不发送成本更高的 `ttl: '1h'`；首次 cache creation 计入 miss，只有 Provider 返回的 `cache_read_input_tokens` 计入 hit。缓存长度门槛、精确前缀匹配、TTL、路由稳定性与网关兼容性由 Provider 决定，Application 不伪造命中。
+
 完整原始 Provider request/response 和 stream events 只属于显式开启的 trace。Message 只保存 canonical message parts、可读 reasoning 投影，以及继续协议所需的最小 opaque state。
 
 #### 2.3.3 Canonical History 与 ModelProvider

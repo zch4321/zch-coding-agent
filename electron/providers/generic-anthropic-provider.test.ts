@@ -234,6 +234,7 @@ describe('GenericAnthropicProvider', () => {
           input_schema: readTool().inputSchema,
         },
       ],
+      cache_control: { type: 'ephemeral' },
       max_tokens: 8_192,
       stream: true,
       thinking: { type: 'adaptive' },
@@ -294,6 +295,7 @@ describe('GenericAnthropicProvider', () => {
       },
     ])
     expect(call.request.messages).toEqual(call.normalizedMessages)
+    expect(call.request.cache_control).toEqual({ type: 'ephemeral' })
     expect(call.request).not.toHaveProperty('tools')
   })
 
@@ -374,6 +376,7 @@ describe('GenericAnthropicProvider', () => {
     ).toEqual(['synthetic'])
     expect(call.request).toMatchObject({
       model: 'claude-test',
+      cache_control: { type: 'ephemeral' },
       max_tokens: 4_096,
       context_management: {
         edits: [
