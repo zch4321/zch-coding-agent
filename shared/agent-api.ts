@@ -61,6 +61,7 @@ export const AGENT_API_INVOKE_ROUTES = Object.freeze({
   updatePlanStatus: 'plan:update-status',
   startRun: 'run:start',
   retryRun: 'run:retry',
+  continueRun: 'run:continue',
   interruptRun: 'run:interrupt',
   interjectRun: 'run:interject',
   decideApproval: 'approval:decide',

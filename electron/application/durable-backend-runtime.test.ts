@@ -165,6 +165,46 @@ class BlockingProvider extends ScriptedProviderHarness {
   }
 }
 
+class InterruptThenCompleteProvider extends ScriptedProviderHarness {
+  calls = 0
+  readonly started: Promise<void>
+  #markStarted!: () => void
+
+  constructor() {
+    super()
+    this.started = new Promise((resolve) => {
+      this.#markStarted = resolve
+    })
+  }
+
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    if (this.calls === 1) {
+      yield { type: 'text.delta', delta: 'discarded partial', raw: {} }
+      this.#markStarted()
+      await new Promise<void>((resolve) => {
+        if (request.signal.aborted) {
+          resolve()
+          return
+        }
+        request.signal.addEventListener('abort', () => resolve(), {
+          once: true,
+        })
+      })
+      return
+    }
+    yield {
+      type: 'completed',
+      rawResponse: {},
+      turn: { role: 'assistant', content: 'continued answer' },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
+
 class EmptyCompactProvider extends ScriptedProviderHarness {
   calls = 0
 
@@ -718,6 +758,93 @@ describe('durable backend runtime', () => {
       'NOT_FOUND',
     )
     expect((await stat(workspace)).isDirectory()).toBe(true)
+    await target.dispose()
+  })
+
+  it('continues an interrupted durable turn without appending user input', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'zch-p4-continue-'))
+    cleanup.push(() => rm(root, { recursive: true, force: true }))
+    const workspace = path.join(root, 'workspace')
+    await mkdir(workspace)
+    const store = await createConfig(root)
+    const provider = new InterruptThenCompleteProvider()
+    const target = await createBackendForTest({
+      configStore: store,
+      promptDirectory: path.resolve('resources', 'prompts'),
+      targetDirectory: path.join(root, 'target'),
+      providerFactory: () => provider,
+    })
+    const project = (await target.projects.add({ path: workspace })).commit
+      .change.projects[0]!
+    const sessionId = 'session:manual-continuation' as SessionId
+    const started = await target.runs.start({
+      version: 1,
+      kind: 'new_session',
+      sessionId,
+      projectId: project.id,
+      permissionMode: 'readonly',
+      modelSelection: {
+        providerId: store.getPublicConfig().models.defaultModelProvider,
+        model: store.getPublicConfig().models.providers[0]!.model,
+        reasoning: store.getPublicConfig().models.defaultModelReasoning,
+      },
+      message: 'continue this interrupted turn',
+      clientRequestId: 'request:interrupted',
+    })
+    if (started.outcome !== 'started') throw new Error('Run did not start')
+    await provider.started
+    expect(
+      target.runtime.services.sessions.interruptRun(sessionId, started.runId),
+    ).toBe(true)
+    await target.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      started.runId,
+    )
+
+    const interrupted = await target.sessions.get(sessionId)
+    const user = interrupted.messagePage.records.find(
+      (candidate) => candidate.kind === 'user_input',
+    )
+    if (!user) throw new Error('Expected the durable user input')
+    const payload = {
+      version: 1,
+      sessionId,
+      expectedRevision: interrupted.session.revision,
+      clientRequestId: 'request:continue',
+    } as const
+    await expect(
+      target.runs.continue({
+        ...payload,
+        expectedRevision: interrupted.session.revision - 1,
+        clientRequestId: 'request:stale-continuation',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
+    const continued = await target.runs.continue(payload)
+    await expect(target.runs.continue(payload)).resolves.toEqual(continued)
+    await target.runtime.services.sessions.waitForRunSettled(
+      sessionId,
+      continued.runId,
+    )
+    expect(provider.calls).toBe(2)
+
+    const completed = await target.sessions.get(sessionId)
+    expect(
+      completed.messagePage.records.filter(
+        (candidate) => candidate.kind === 'user_input',
+      ),
+    ).toHaveLength(1)
+    expect(
+      completed.messagePage.records.find(
+        (candidate) => candidate.kind === 'assistant_turn',
+      ),
+    ).toMatchObject({ turnId: user.id })
+    await expect(
+      target.runs.continue({
+        ...payload,
+        expectedRevision: completed.session.revision,
+        clientRequestId: 'request:continue-completed',
+      }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     await target.dispose()
   })
 

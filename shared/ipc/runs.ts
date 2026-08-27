@@ -7,6 +7,7 @@ import { AcceptedSchema, domainIpcContract, ipcResultSchema } from './common'
 export const RUN_IPC_CONTRACTS = {
   'run:start': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['run:start']),
   'run:retry': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['run:retry']),
+  'run:continue': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['run:continue']),
   'run:interrupt': {
     payload: Type.Object(
       {

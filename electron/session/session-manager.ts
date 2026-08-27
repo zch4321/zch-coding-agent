@@ -15,6 +15,7 @@ import type {
 } from '../../shared/ids'
 import type { ProviderToolDefinition } from '../providers/provider'
 import type { MessageRecord } from '../../shared/message'
+import { resolveManualContinuationTarget } from '../../shared/conversation-continuation'
 import type { ModelSelection } from '../../shared/model-route'
 import type { ResolvedModelRoute } from '../providers/model-route-resolver'
 import type { RunContext } from '../../shared/context'
@@ -972,6 +973,26 @@ export class SessionManager {
       undefined,
       undefined,
       input.userMessageId,
+    )
+  }
+
+  /** Continues an interrupted turn without appending another user message. */
+  continueRun(input: { sessionId: SessionId; clientRequestId: string }): RunId {
+    const session = this.#requireSession(input.sessionId)
+    const target = resolveManualContinuationTarget(session.history)
+    if (!target) {
+      ipcFault(
+        'PRECONDITION_FAILED',
+        'The Session history does not end at a continuable turn',
+      )
+    }
+    return this.#runs.start(
+      session,
+      input.clientRequestId,
+      undefined,
+      undefined,
+      undefined,
+      target.rootUserMessageId,
     )
   }
 

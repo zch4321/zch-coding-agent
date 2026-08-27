@@ -221,6 +221,10 @@ function requestMessageAction(action: MessageAction, messageId: string) {
   messageActionId.value = messageId
 }
 
+function continueConversation() {
+  void agent.continueConversation()
+}
+
 function updateMessageAction(value?: MessageAction) {
   messageAction.value = value
   if (!value) messageActionId.value = undefined
@@ -530,6 +534,7 @@ onUnmounted(() => {
                     @fork="requestMessageAction('fork', $event)"
                     @retry="requestMessageAction('retry', $event)"
                     @edit="requestMessageAction('edit', $event)"
+                    @continue="continueConversation"
                   />
 
                   <MessageComposer

@@ -252,13 +252,18 @@ describe('SessionManager cancellation and forks', () => {
     ).toBe(false)
     expect(manager.interruptRun(sessionId, firstRunId)).toBe(false)
 
-    manager.startRun({
+    manager.continueRun({
       sessionId,
-      message: 'Continue safely',
       clientRequestId: 'request-after-cancel',
     })
     await waitFor(() => provider.calls === 2)
 
+    expect(
+      provider.requests[1]?.filter((message) => message.role === 'user'),
+    ).toHaveLength(
+      provider.requests[0]?.filter((message) => message.role === 'user')
+        .length ?? 0,
+    )
     expect(
       provider.requests[1]?.filter((message) => message.role === 'tool'),
     ).toHaveLength(2)

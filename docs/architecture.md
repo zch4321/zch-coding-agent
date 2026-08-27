@@ -63,11 +63,11 @@ SQLite
 
 ### 2.2 状态分为三类
 
-| 类别                      | 所有者           | 是否落盘 | 示例                                                                                           |
-| ------------------------- | ---------------- | -------- | ---------------------------------------------------------------------------------------------- |
-| Durable application state | backend + SQLite | 是       | Projects、Session metadata、完整 messages、Goal/Plan、有界 FileChanges/revert payloads         |
-| Ephemeral execution state | backend memory   | 否       | active Run、stream buffer、AbortController、pending approval、PTY/MCP connection |
-| UI-only state             | renderer         | 否       | draft、draft attachments、IME composition、scroll、panel、selection                            |
+| 类别                      | 所有者           | 是否落盘 | 示例                                                                                   |
+| ------------------------- | ---------------- | -------- | -------------------------------------------------------------------------------------- |
+| Durable application state | backend + SQLite | 是       | Projects、Session metadata、完整 messages、Goal/Plan、有界 FileChanges/revert payloads |
+| Ephemeral execution state | backend memory   | 否       | active Run、stream buffer、AbortController、pending approval、PTY/MCP connection       |
+| UI-only state             | renderer         | 否       | draft、draft attachments、IME composition、scroll、panel、selection                    |
 
 “Backend authoritative”不等于“所有 backend 状态必须落盘”。只有应用重启后仍应存在、并参与后续模型历史或产品展示的完整记录才进入 SQLite。
 
@@ -1199,7 +1199,7 @@ project:list / project:add / project:update / project:remove
 session:list / session:get / session:update / session:archive / session:restore / session:delete / session:fork
 message:list / message:search
 file-change:list / file-change:revert
-run:start / run:interrupt / run:interject
+run:start / run:retry / run:continue / run:interrupt / run:interject
 approval:decide
 ```
 
@@ -1376,11 +1376,13 @@ Draft 和 draft attachments 只属于当前 renderer 输入组件：
 
 Backend 校验附件、构造完整 user/harness messages 并落盘。附件正文受 AppConfig v9 的 `limits.maxAttachmentContextTokens` 约束，默认 `64_000`；聚合估算超过预算时，本次附件统一降级为仅注入类型和路径，renderer attachment chips 标记为 truncated。Draft 丢失不会造成 backend state 与 canonical history 不一致。
 
-### 9.3 Rewind、用户消息重试与编辑
+### 9.3 Rewind、用户消息重试、继续与编辑
 
 - `session:rewind` 只接受当前分支中可见的原始用户或 Assistant 消息。用户边界会移除该用户整轮及之后记录；Assistant 边界保留对应用户消息，从 Assistant 开始移除。
 - “移除”不删除 row：相关 records 改为 `visibility = superseded` 且 `inHistory = false`。每次 rewind 递增 Session revision、清除 Goal/Plan，并从保留前缀重建 `inHistory`；`compact_summary.replacesThroughSeq` 与 `conversation_transcript.sourceThroughSeq` 作为同等 epoch boundary，因此可以跨 compact 或 Provider transition 回退。
 - `run:retry(userMessageId)` 只接受可见原始用户消息。它保留该用户消息及其本轮前置 context，supersede 之后分支，再复用该 user record 运行；不会插入第二条 user message。Assistant、replay、derived、control command 或其他消息类型都返回验证错误。
+- `run:continue` 只在 idle Session 的 active history 停在可续跑边界时启动：忽略尾部 passive prompt layer 后，最后一个驱动记录必须是非 control-command 的 `user_input`、`tool_result`、`interjection`、`orchestrator`，或带 `turnId` 的自动 `compact_summary`。完整 `assistant_turn`、手动 compact summary 和 conversation transcript 都是终止边界。Application 与 Session Core 必须分别校验当前 revision 和 live canonical history。
+- 继续复用该记录的 `turnId`（缺省时复用记录 ID）作为原始轮次，不追加空 user message，也不产生初始 durable commit；新的 Assistant/tool commit 仍通过正常 `session.changed` 发布。Renderer 只在最后一个匹配轮次的消息操作栏显示“继续”，点击后直接调用，不经过 composer。
 - 编辑先按该用户整轮 rewind，将原文和附件引用恢复到 composer，不自动发送；下一次发送创建新的用户轮次。
 - Fork 只复制当前非 superseded 分支，连续重编号并重映射 message/turn/reference IDs，以及 compact/transcript epoch boundary。
 - 所有操作只修改 Session/Message 状态。文件、终端与 MCP/外部工具副作用不回滚，FileChange 审计继续保留；UI 在操作前明确提示。
@@ -1403,6 +1405,8 @@ Active Run 开始时解析 immutable `ModelRouteSnapshot` 并保存在 memory；
 6. Stream delta 只存 memory 并推送 renderer。
 7. 每个完整 assistant turn 或完整 tool batch 按 §7.2 写入 SQLite。
 8. 完成、取消或失败后释放 runtime resources。
+
+用户中断或可恢复的 Provider failure 后，若 durable history 符合 §9.3 的续跑边界，`run:continue` 可以从同一 canonical turn 重新进入第 5 步；streaming 中尚未完成的 Assistant text/reasoning 不会被恢复或伪造。
 
 Durable execution port 对每个 Session 串行 commit。commit 失败时从 SQLite 单次恢复 SessionRecord、active history、next seq、mode/model/Goal/Plan，并清除未提交 request 映射；恢复也失败时 binding 标记为 invalid，当前 Run settle 后强制驱逐。tool-batch commit 失败即使恢复成功也会隔离当前 live binding，避免带着已发生但未落库的副作用继续 React。
 

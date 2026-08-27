@@ -222,6 +222,7 @@ Tool Result 的 canonical renderer 固定为：单 TextPart 原样、单 JsonPar
 - 文件工具必须约束在工作区边界内（规范化路径、真实路径与符号链接逃逸检测）。
 - Session canonical history 必须以完整 Message 持久化。应用重启后按 `inHistory = true` 和 `seq` 重建 `CompiledCanonicalHistory`，再由当前 route 的 ModelProvider 生成请求；compact 通过版本化 checkpoint message 和显式 `inHistory` 变更替代旧前缀。若 `providerType + providerId + model + endpoint + providerConfigRevision` 与 active assistant/compact/transcript anchor 不兼容，下一次 Run 必须在插入用户消息前把 SQLite 完整非 superseded 分支投影成 `zch-conversation-markdown`，以 fresh harness + hidden `conversation_transcript` 建立新 epoch；迁移预检或 commit 失败时旧 epoch 原样保留。Fork/rewind 重建 active branch 时必须把 `compact_summary.replacesThroughSeq` 与 `conversation_transcript.sourceThroughSeq` 作为同等 epoch boundary，并在 fork 连续重编号时重映射该边界。
 - 只有当前分支中可见的原始用户消息支持重试和编辑。重试保留该用户消息及本轮 context、supersede 后续分支并复用原记录运行，不能插入重复 user message；Assistant 和其他 message kind 必须被 `run:retry` 拒绝。编辑 supersede 该用户整轮及后续，将原文和附件引用恢复到 composer，不自动发送。
+- Idle Session 的 active history 若停在未完成的用户输入、terminal tool result、插话、编排输入或带 `turnId` 的自动 compact summary，最后一个对应轮次必须显示“继续”操作。继续必须校验 Session revision 与 canonical history，复用原 `turnId` 启动 Run，不发送或持久化新 user message；完整 Assistant、control command、手动 compact 与 imported transcript 不得视为可继续。
 - 仅回退可以作用于用户或 Assistant：用户边界移除该用户整轮及之后记录，Assistant 边界保留对应用户消息并从 Assistant 开始移除。每次回退清除当前 Goal/Plan，并在跨 compact 或 conversation transcript epoch 时重建保留前缀的有效 history。文件、终端和 MCP/外部工具副作用不回滚，FileChange 审计继续保留，UI 操作前必须提示。
 - Assistant stream delta 只保存在 backend memory；Provider turn 完成后才插入 Message。包含 tool calls 的 assistant turn 必须等每个 call 都有 terminal result 后，与对应 tool messages 在同一 transaction 写入，数据库不得保存协议半截。
 - 应用崩溃可以丢失尚未完成的 assistant text/reasoning、tool batch 和 Active Run，不保存 partial message，也不生成持久化 interrupted Run。最后一条已提交 user message 可以暂时没有 assistant reply。
@@ -593,16 +594,16 @@ session.end     { reason, ts }
 
 ## 7. 非功能需求
 
-| 维度         | 要求                                                                                                                           |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| **可中断**   | 任意 LLM 流与当前工具执行可被用户中止，不残留无主子进程；会话所属 PTY 按既定生命周期保留或关闭                                 |
-| **安全**     | 文件路径硬边界 + 分层权限策略 + IPC 隔离 + safeStorage，见 §3                                                                  |
-| **可扩展**   | 新增工具 = 注册一个 schema + handler；新增 Provider = 实现 `compile/stream` + factory/config type                              |
-| **桌面分发** | electron-builder 打包 Windows（首要），macOS/Linux 后续                                                                        |
-| **配置化**   | 模型、Provider、权限模式、调试日志开关、Skills 开关和用户策略均可配置                                                          |
+| 维度         | 要求                                                                                                                                     |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **可中断**   | 任意 LLM 流与当前工具执行可被用户中止，不残留无主子进程；会话所属 PTY 按既定生命周期保留或关闭                                           |
+| **安全**     | 文件路径硬边界 + 分层权限策略 + IPC 隔离 + safeStorage，见 §3                                                                            |
+| **可扩展**   | 新增工具 = 注册一个 schema + handler；新增 Provider = 实现 `compile/stream` + factory/config type                                        |
+| **桌面分发** | electron-builder 打包 Windows（首要），macOS/Linux 后续                                                                                  |
+| **配置化**   | 模型、Provider、权限模式、调试日志开关、Skills 开关和用户策略均可配置                                                                    |
 | **资源有界** | 工具输出、日志大小、可选循环轮数、PTY scrollback、单个 Swarm 参数和结果均有防御性上限；不以产品级 Run/workspace 并发上限替代具体资源保护 |
-| **失败隔离** | Provider、工具、日志失败转成结构化事件，不得因未捕获异常直接打崩主窗口                                                         |
-| **契约演进** | IPC、日志、配置和 Provider Continuation Envelope 均带版本，可做向后兼容迁移                                                    |
+| **失败隔离** | Provider、工具、日志失败转成结构化事件，不得因未捕获异常直接打崩主窗口                                                                   |
+| **契约演进** | IPC、日志、配置和 Provider Continuation Envelope 均带版本，可做向后兼容迁移                                                              |
 
 ---
 

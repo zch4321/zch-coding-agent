@@ -121,7 +121,7 @@ export class SessionRunController {
     userMessage?: string,
     context?: RunContext,
     harnessMessage?: HarnessRunMessage,
-    retryUserMessageId?: MessageId,
+    rootUserMessageId?: MessageId,
     options: RunStartOptions = {},
   ): RunId {
     const existing = session.clientRequests.get(clientRequestId)
@@ -176,7 +176,7 @@ export class SessionRunController {
       pendingInterjections: [],
       acceptingInterjections: true,
       processedInterjectionIds: new Set(),
-      ...(retryUserMessageId ? { rootUserMessageId: retryUserMessageId } : {}),
+      ...(rootUserMessageId ? { rootUserMessageId } : {}),
       harnessMessageIds: [],
       requestCommitted: false,
       subagentsEnabled: options.subagentsEnabled ?? config.subagents.enabled,

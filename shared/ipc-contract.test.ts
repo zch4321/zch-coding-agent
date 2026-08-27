@@ -47,9 +47,9 @@ function schemaHash(schema: object): string {
 
 describe('shared IPC contracts', () => {
   it('preserves the complete wire schema fingerprints across the domain split', () => {
-    expect(Object.keys(IPC_CONTRACTS)).toHaveLength(72)
+    expect(Object.keys(IPC_CONTRACTS)).toHaveLength(73)
     expect(schemaHash(IPC_CONTRACTS)).toBe(
-      'bd1d793e6cbac0f88a12e5fe78ea1ff542a603c14b436de8207483de768a6cfe',
+      '4936d0e9d7c25bc7f6ec7ac0ea04cf2f61a8f1af70984acbe7f5a02e620a2446',
     )
     expect(schemaHash(ConfigSetRequestSchema)).toBe(
       '68d82d2fbaad7b4303c70482f67794d38e664daf5b3b7c1caf3ddac661e0e8d1',

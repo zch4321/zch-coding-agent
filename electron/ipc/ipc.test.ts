@@ -203,6 +203,12 @@ const validPayloads: {
     userMessageId: messageId,
     clientRequestId: 'request-retry',
   },
+  'run:continue': {
+    version: 1,
+    sessionId,
+    expectedRevision: 1,
+    clientRequestId: 'request-continue',
+  },
   'run:interrupt': {
     version: 1,
     sessionId,

@@ -585,6 +585,31 @@ export const DurableRunRetryResultSchema = Type.Object(
 export type DurableRunRetryPayload = Static<typeof DurableRunRetryPayloadSchema>
 export type DurableRunRetryResult = Static<typeof DurableRunRetryResultSchema>
 
+export const DurableRunContinuePayloadSchema = Type.Object(
+  {
+    ...versionProperty,
+    sessionId: SessionIdSchema,
+    expectedRevision: RevisionSchema,
+    clientRequestId: ClientRequestIdSchema,
+  },
+  { additionalProperties: false },
+)
+
+export const DurableRunContinueResultSchema = Type.Object(
+  {
+    ...versionProperty,
+    runId: RunIdSchema,
+    runtime: ActiveRunPublicSnapshotSchema,
+  },
+  { additionalProperties: false },
+)
+export type DurableRunContinuePayload = Static<
+  typeof DurableRunContinuePayloadSchema
+>
+export type DurableRunContinueResult = Static<
+  typeof DurableRunContinueResultSchema
+>
+
 export const FileChangeListPayloadSchema = Type.Object(
   {
     ...versionProperty,
@@ -687,6 +712,10 @@ export const DOMAIN_STATE_API_CONTRACTS = {
   'run:retry': {
     payload: DurableRunRetryPayloadSchema,
     result: DurableRunRetryResultSchema,
+  },
+  'run:continue': {
+    payload: DurableRunContinuePayloadSchema,
+    result: DurableRunContinueResultSchema,
   },
   'file-change:list': {
     payload: FileChangeListPayloadSchema,

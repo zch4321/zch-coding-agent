@@ -183,6 +183,8 @@ const zhCN = {
     editMessageTitle: '回退本轮并把内容恢复到输入框',
     forkFromHere: '分支',
     forkFromHereTitle: '从此回复创建分支',
+    continueConversation: '继续',
+    continueConversationTitle: '不发送新消息，从中断位置继续',
     forkedBadge: '分支',
     importedBadge: '导入',
     status: {

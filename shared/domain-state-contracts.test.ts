@@ -5,6 +5,8 @@ import {
   AppBootstrapResultSchema,
   DOMAIN_STATE_API_CONTRACTS,
   DomainStateEventSchema,
+  DurableRunContinuePayloadSchema,
+  DurableRunContinueResultSchema,
   DurableRunStartPayloadSchema,
   DurableRunStartResultSchema,
   FileChangeCommittedChangeSchema,
@@ -592,7 +594,7 @@ describe('bounded domain-state API contracts', () => {
     expect(
       validatePayload({ ...payload, limit: MAX_MESSAGE_PAGE_RECORDS + 1 }),
     ).toBe(false)
-    expect(contractEntries).toHaveLength(20)
+    expect(contractEntries).toHaveLength(21)
     expect(DOMAIN_STATE_API_CONTRACTS).not.toHaveProperty('session:create')
     expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('run:start')
     expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('message:search')
@@ -657,6 +659,17 @@ describe('bounded domain-state API contracts', () => {
           messageChange: { mode: 'upsert', records: [messages[0]] },
         },
       },
+      runId: runtime.runId,
+      runtime,
+    })
+    roundTrip(DurableRunContinuePayloadSchema, {
+      version: 1,
+      sessionId,
+      expectedRevision: 2,
+      clientRequestId: 'request:manual-continuation',
+    })
+    roundTrip(DurableRunContinueResultSchema, {
+      version: 1,
       runId: runtime.runId,
       runtime,
     })
