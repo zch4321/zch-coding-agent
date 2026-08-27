@@ -1,7 +1,7 @@
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '../../shared/ids'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { PromptRegistry } from '../prompts/registry'
@@ -10,6 +10,7 @@ import {
   appendAgentsContextIfChanged,
   appendInitialPromptHarness,
   appendPromptLayer,
+  appendRuntimeContextIfChanged,
   orchestrationRequestContent,
   promptResources,
   renderPromptTemplate,
@@ -147,6 +148,104 @@ describe('canonical prompt harness', () => {
     expect(state.history.at(-1)?.parts[0]).toMatchObject({
       type: 'text',
       text: expect.stringContaining('updated guidance'),
+    })
+  })
+
+  it('excludes Git and project tree snapshots from the runtime fingerprint', async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), 'prompt-runtime-'))
+    const state = history()
+    const config = publicConfig()
+    const readGitSummary = vi
+      .fn()
+      .mockResolvedValueOnce('git snapshot: initial')
+      .mockResolvedValue('git snapshot: refreshed')
+    const readProjectTree = vi
+      .fn()
+      .mockResolvedValueOnce('file initial.txt')
+      .mockResolvedValue('file refreshed.txt')
+    const input = {
+      workspace,
+      mode: 'readonly',
+      config,
+      providerId: 'deepseek',
+      promptRegistry,
+      reason: 'test',
+      toolNames: ['read_file'],
+      workspaceSnapshotReaders: {
+        gitSummary: readGitSummary,
+        projectTreeSummary: readProjectTree,
+      },
+    }
+
+    await expect(appendRuntimeContextIfChanged(state, input)).resolves.toBe(
+      true,
+    )
+    expect(readGitSummary).toHaveBeenCalledTimes(1)
+    expect(readProjectTree).toHaveBeenCalledTimes(1)
+    expect(state.history.at(-1)?.parts[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining('git snapshot: initial'),
+    })
+
+    await writeFile(path.join(workspace, 'ordinary-file.txt'), 'changed\n')
+    await expect(appendRuntimeContextIfChanged(state, input)).resolves.toBe(
+      false,
+    )
+    expect(readGitSummary).toHaveBeenCalledTimes(1)
+    expect(readProjectTree).toHaveBeenCalledTimes(1)
+    expect(
+      state.history.filter((record) => record.kind === 'runtime_context'),
+    ).toHaveLength(1)
+
+    await expect(
+      appendRuntimeContextIfChanged(state, { ...input, mode: 'confirm' }),
+    ).resolves.toBe(true)
+    expect(readGitSummary).toHaveBeenCalledTimes(2)
+    expect(readProjectTree).toHaveBeenCalledTimes(2)
+    expect(state.history.at(-1)?.parts[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringMatching(
+        /git snapshot: refreshed[\s\S]*file refreshed\.txt/u,
+      ),
+    })
+  })
+
+  it('keeps stable tool and module fields in the runtime fingerprint', async () => {
+    const workspace = await mkdtemp(
+      path.join(os.tmpdir(), 'prompt-runtime-stable-'),
+    )
+    const state = history()
+    const config = publicConfig()
+    const input = {
+      workspace,
+      mode: 'readonly',
+      config,
+      providerId: 'deepseek',
+      promptRegistry,
+      reason: 'test',
+      toolNames: ['read_file'],
+    }
+
+    await expect(appendRuntimeContextIfChanged(state, input)).resolves.toBe(
+      true,
+    )
+    await expect(
+      appendRuntimeContextIfChanged(state, {
+        ...input,
+        toolNames: ['read_file', 'list_directory'],
+      }),
+    ).resolves.toBe(true)
+
+    await writeFile(path.join(workspace, 'package.json'), '{}\n')
+    await expect(
+      appendRuntimeContextIfChanged(state, {
+        ...input,
+        toolNames: ['read_file', 'list_directory'],
+      }),
+    ).resolves.toBe(true)
+    expect(state.history.at(-1)?.parts[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining('.: package.json'),
     })
   })
 

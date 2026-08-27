@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -304,6 +304,10 @@ describe('SessionManager cancellation and forks', () => {
     ).toBe(false)
     expect(manager.interruptRun(sessionId, firstRunId)).toBe(false)
 
+    await writeFile(
+      path.join(workspace, 'AGENTS.md'),
+      'Continuation Run guidance\n',
+    )
     manager.continueRun({
       sessionId,
       clientRequestId: 'request-after-cancel',
@@ -313,10 +317,12 @@ describe('SessionManager cancellation and forks', () => {
     expect(provider.toolNames[0]).toContain('swarm_run')
     expect(provider.toolNames[1]).toEqual(provider.toolNames[0])
     expect(
-      provider.requests[1]?.filter((message) => message.role === 'user'),
-    ).toHaveLength(
-      provider.requests[0]?.filter((message) => message.role === 'user')
-        .length ?? 0,
+      provider.requests[1]?.filter(
+        (message) => message.content === 'Create both files',
+      ),
+    ).toHaveLength(1)
+    expect(JSON.stringify(provider.requests[1])).toContain(
+      'Continuation Run guidance',
     )
     expect(
       provider.requests[1]?.filter((message) => message.role === 'tool'),

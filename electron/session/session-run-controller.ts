@@ -24,6 +24,7 @@ import {
 import type { SessionCompactCoordinator } from './session-compact-coordinator'
 import type { SessionInterjectionCoordinator } from './session-interjection-coordinator'
 import type { SessionOrchestrationPlanner } from './session-orchestration-planner'
+import type { SessionPromptContextCoordinator } from './session-prompt-context-coordinator'
 import type { SessionProviderTurnRunner } from './session-provider-turn'
 import { delay, finalStatusFromError } from './session-run-utils'
 import type { SessionToolRunner } from './session-tool-runner'
@@ -76,6 +77,7 @@ export class SessionRunController {
   readonly #compact: SessionCompactCoordinator
   readonly #interjections: SessionInterjectionCoordinator
   readonly #orchestration: SessionOrchestrationPlanner
+  readonly #promptContext: SessionPromptContextCoordinator
   readonly #userTurns: SessionUserTurnPreparer
   readonly #onDiagnostic: DiagnosticSink
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
@@ -93,6 +95,7 @@ export class SessionRunController {
     compact: SessionCompactCoordinator
     interjections: SessionInterjectionCoordinator
     orchestration: SessionOrchestrationPlanner
+    promptContext: SessionPromptContextCoordinator
     userTurns: SessionUserTurnPreparer
     onDiagnostic: DiagnosticSink
     emit: (session: SessionState, event: AgentEventDraft) => void
@@ -108,6 +111,7 @@ export class SessionRunController {
     this.#compact = options.compact
     this.#interjections = options.interjections
     this.#orchestration = options.orchestration
+    this.#promptContext = options.promptContext
     this.#userTurns = options.userTurns
     this.#onDiagnostic = options.onDiagnostic
     this.#emit = options.emit
@@ -408,6 +412,7 @@ export class SessionRunController {
         goal: session.goal ? structuredClone(session.goal) : undefined,
         plan: session.plan ? structuredClone(session.plan) : undefined,
       }
+      await this.#promptContext.refresh(session, run)
       const maxStepsPerRun = runConfig.limits.maxStepsPerRun
       let runInputCommitted = false
       if (harnessMessage) {

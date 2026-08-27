@@ -63,6 +63,7 @@ import type { McpManager } from '../mcp/mcp-manager'
 import { SessionCompactCoordinator } from './session-compact-coordinator'
 import { SessionInterjectionCoordinator } from './session-interjection-coordinator'
 import { SessionOrchestrationPlanner } from './session-orchestration-planner'
+import { SessionPromptContextCoordinator } from './session-prompt-context-coordinator'
 import { SessionUserTurnPreparer } from './session-user-turn-preparer'
 import { SessionRunController } from './session-run-controller'
 import { updatePublicRunSnapshot } from './session-runtime-snapshot'
@@ -224,18 +225,21 @@ export class SessionManager {
     })
     this.#userTurns = new SessionUserTurnPreparer({
       configStore: this.#configStore,
-      toolRegistry: this.#toolRegistry,
       skillsManager: this.#skillsManager,
       promptRegistry: this.#promptRegistry,
       orchestratorMessages: this.#orchestratorMessages,
       emit: (session, event) => this.#emit(session, event),
       swarmHostEnabled: options.swarmHostEnabled ?? false,
     })
+    const promptContext = new SessionPromptContextCoordinator({
+      configStore: this.#configStore,
+      toolRegistry: this.#toolRegistry,
+      promptRegistry: this.#promptRegistry,
+    })
     const providerTurns = new SessionProviderTurnRunner({
       configStore: this.#configStore,
       toolRegistry: this.#toolRegistry,
       pluginBus: this.#pluginBus,
-      promptRegistry: options.promptRegistry,
       fetchImpl: this.#fetchImpl,
       providerFactory: this.#providerFactory,
       onDiagnostic: this.#onDiagnostic,
@@ -267,6 +271,7 @@ export class SessionManager {
       compact: this.#compact,
       interjections: this.#interjections,
       orchestration: this.#orchestration,
+      promptContext,
       userTurns: this.#userTurns,
       onDiagnostic: this.#onDiagnostic,
       emit: (session, event) => this.#emit(session, event),
