@@ -71,15 +71,17 @@ export class SessionUserTurnPreparer {
       skillsManager: this.#skillsManager,
       promptRegistry: this.#promptRegistry,
     })
-    const swarm = resolveSwarmAvailability({
-      hostEnabled: this.#swarmHostEnabled,
-      runSubagentsEnabled: run.subagentsEnabled,
-      config,
-      requestedGoal: command.swarmGoal,
-    })
-    run.swarmToolConfig = swarm.toolConfig
-    if (command.swarmGoal && swarm.unavailableReason) {
-      throw new Error(swarm.unavailableReason)
+    if (command.swarmGoal) {
+      const swarm = resolveSwarmAvailability({
+        hostEnabled: this.#swarmHostEnabled,
+        runSubagentsEnabled: run.subagentsEnabled,
+        config,
+        requestedGoal: command.swarmGoal,
+      })
+      run.swarmToolConfig = swarm.toolConfig
+      if (swarm.unavailableReason) {
+        throw new Error(swarm.unavailableReason)
+      }
     }
     const toolCatalog = await resolveSessionToolCatalog({
       registry: this.#toolRegistry,

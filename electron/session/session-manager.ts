@@ -274,6 +274,7 @@ export class SessionManager {
       beforeRun: (session) => session.trace.beforeRun(),
       afterRun: (session) => session.trace.afterRun(),
       operationalLog: options.operationalLog,
+      swarmHostEnabled: options.swarmHostEnabled ?? false,
     })
     this.#pluginBus?.setToolRegistrationPort(this.#toolRegistry)
   }

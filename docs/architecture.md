@@ -1731,6 +1731,8 @@ child stream/tool/domain event 通过去除隐藏 Session identity 的 `AgentExe
 
 Tool description 明确要求只有用户已经提出 Swarm、多 Agent、并行调查或独立交叉检查时才能调用，不能仅因任务复杂而自行启动。父 Agent 可行时先运行可共享验证，再把命令、退出码和精简关键输出写入 `sharedContext`；无法验证时明确说明。每项 task 必须显式选择 `readonly | inherit`，可写任务尽量使用互不重叠的文件或子系统所有权。allocator 会优先轮换合格 `Provider + model`，池不足时仍可能复用，Tool 不作绝对异构承诺。
 
+每个新 Public Run 都根据宿主能力、本轮冻结的 Subagents 开关和当前模型池重新计算一次 Swarm capability；普通发送、`run:retry` 与 `run:continue` 使用同一初始化边界。`/swarm` 只在该基础 capability 上补充本轮 goal 和编排上下文。设置不变时，续跑前后的 Provider Tool catalog 必须保持一致；内部 child Run 因冻结 `subagentsEnabled = false`，不得获得 `swarm_run`。
+
 `swarm_run({ sharedContext, tasks })` 是 `executionMode = parallel`、`effects = []`、`defaultRisk = low` 的编排 Tool；顶层 `sharedContext` 保存全部 Child 共用的背景、证据、约束、验证结果和输出要求，每项 task 提供唯一安全名称、Child-specific 任务、`light|standard|strong` 最低能力、replica 数量和 `toolAccess`。两部分合起来自包含。编排调用本身不强制人工审批；每个 `inherit` child 实际提出的副作用工具仍按父 Run 的冻结权限模式分别审批。
 
 Coordinator trim 并校验公共上下文和 task 后，把同一 `sharedContext` 与 task 的 `toolAccess` 复制到每个 prepared child spec，再从一次 PublicConfig 快照确定性分配并冻结全部 route。Subagent execution 将 XML-text 转义后的公共部分作为独立 `selected_context` canonical record 注入，将转义后的 `<swarm_task>` 作为该 Child 的 `user_input`；基础 system harness 把前者定义为背景、后者定义为当前委派任务与冻结权限。公共上下文和 task 不拼成不可分割字符串，Agents 详情从 user record 安全解包原始 task。随后 Backend 在一个 SQLite transaction 中创建 Swarm root 和所有 queued child。assignment 失败、配置 revision 竞态或总量超限都发生在任何 child Provider 请求之前；冻结后配置热变更不重分配，失败 child 也不自动切换 Provider 重试。

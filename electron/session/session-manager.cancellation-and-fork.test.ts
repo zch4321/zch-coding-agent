@@ -26,10 +26,14 @@ describe('SessionManager cancellation and forks', () => {
   class MultiToolCancellationProvider extends ScriptedProviderHarness {
     calls = 0
     requests: ProviderStreamRequest['normalizedMessages'][] = []
+    toolNames: string[][] = []
 
     async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
       this.calls += 1
       this.requests.push(structuredClone(request.normalizedMessages))
+      this.toolNames.push(
+        request.toolDefinitions.map((definition) => definition.name),
+      )
 
       if (this.calls === 1) {
         const toolCalls = ['first.txt', 'second.txt'].map(
@@ -194,6 +198,48 @@ describe('SessionManager cancellation and forks', () => {
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
     const store = await createConfig(directory)
+    await store.update({
+      version: 1,
+      kind: 'subagents',
+      value: {
+        ...store.getPublicConfig().subagents,
+        enabled: true,
+      },
+    })
+    const initialProvider = store.getPublicConfig().models.providers[0]!
+    await store.update({
+      version: 1,
+      kind: 'provider',
+      providerId: initialProvider.id,
+      label: initialProvider.label,
+      providerType: initialProvider.providerType,
+      baseURL: initialProvider.baseURL,
+      model: initialProvider.model,
+      enabledModelIds: initialProvider.enabledModelIds,
+      modelOverrides: {
+        ...initialProvider.modelOverrides,
+        [initialProvider.model]: { capability: 'standard' },
+      },
+    })
+    const poolProvider = store.getPublicConfig().models.providers[0]!
+    await store.update({
+      version: 1,
+      kind: 'model-pool',
+      value: {
+        entries: [
+          {
+            id: 'continuation-worker',
+            enabled: true,
+            providerId: poolProvider.id,
+            model: poolProvider.model,
+            reasoning: 'high',
+          },
+        ],
+      },
+      expectedProviderRevisions: [
+        { providerId: poolProvider.id, revision: poolProvider.revision },
+      ],
+    })
     const provider = new MultiToolCancellationProvider()
     const sent: AgentEventEnvelope[] = []
     const webContents = {
@@ -209,6 +255,12 @@ describe('SessionManager cancellation and forks', () => {
         webContents.send('', envelope),
       ),
       providerFactory: () => provider,
+      swarmHostEnabled: true,
+      swarmExecution: {
+        run: async () => {
+          throw new Error('Swarm execution is not expected in this test')
+        },
+      },
     })
     const sessionId = await manager.createSession({
       workspace,
@@ -258,6 +310,8 @@ describe('SessionManager cancellation and forks', () => {
     })
     await waitFor(() => provider.calls === 2)
 
+    expect(provider.toolNames[0]).toContain('swarm_run')
+    expect(provider.toolNames[1]).toEqual(provider.toolNames[0])
     expect(
       provider.requests[1]?.filter((message) => message.role === 'user'),
     ).toHaveLength(
