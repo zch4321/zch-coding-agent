@@ -24,7 +24,12 @@ function addLegacyConcurrency(
   source: Record<string, unknown>,
   includeSwarmLimit = true,
 ): void {
-  ;(source.limits as Record<string, unknown>).maxConcurrentRuns = 16
+  const limits = source.limits as Record<string, unknown>
+  limits.maxConcurrentRuns = 16
+  limits.maxToolResultTokens = 64_000
+  limits.readFileOutputBytes = 128 * 1_024
+  delete limits.maxToolOutputLines
+  delete (source.subagents as Record<string, unknown>).maxSubagents
   if (includeSwarmLimit) {
     ;(source.subagents as Record<string, unknown>).maxAgentsPerSwarm = 10
   }
@@ -209,8 +214,8 @@ function legacyV19Config(): Record<string, unknown> {
   return source
 }
 
-describe('config v24 migration boundary', () => {
-  it('creates the v24 defaults when no config exists', () => {
+describe('config v25 migration boundary', () => {
+  it('creates the v25 defaults when no config exists', () => {
     expect(migrateConfig(undefined)).toEqual(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined)).not.toBe(DEFAULT_APP_CONFIG)
     expect(migrateConfig(undefined).limits).not.toHaveProperty(
@@ -233,7 +238,7 @@ describe('config v24 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       logging: {
         operational: {
           level: 'info',
@@ -259,9 +264,37 @@ describe('config v24 migration boundary', () => {
 
     const migrated = migrateConfig(source)
 
-    expect(migrated.schemaVersion).toBe(24)
+    expect(migrated.schemaVersion).toBe(25)
     expect(migrated.limits).not.toHaveProperty('maxConcurrentRuns')
     expect(migrated.subagents).not.toHaveProperty('maxAgentsPerSwarm')
+  })
+
+  it('migrates v24 duplicate Tool budgets and adds Session capacity', () => {
+    const source = structuredClone(DEFAULT_APP_CONFIG) as unknown as Record<
+      string,
+      unknown
+    >
+    source.schemaVersion = 24
+    const subagents = source.subagents as Record<string, unknown>
+    delete subagents.maxSubagents
+    const limits = source.limits as Record<string, unknown>
+    limits.maxToolOutputBytes = 128 * 1_024
+    limits.maxToolResultTokens = 64_000
+    limits.readFileOutputBytes = 128 * 1_024
+    delete limits.maxToolOutputLines
+
+    const migrated = migrateConfig(source)
+
+    expect(migrated).toMatchObject({
+      schemaVersion: 25,
+      subagents: { maxSubagents: 32 },
+      limits: {
+        maxToolOutputBytes: 256 * 1_024,
+        maxToolOutputLines: 500,
+      },
+    })
+    expect(migrated.limits).not.toHaveProperty('maxToolResultTokens')
+    expect(migrated.limits).not.toHaveProperty('readFileOutputBytes')
   })
 
   it('rejects every legacy schema with reset guidance', () => {
@@ -271,7 +304,7 @@ describe('config v24 migration boundary', () => {
           ...structuredClone(DEFAULT_APP_CONFIG),
           schemaVersion,
         }),
-      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v24`)
+      ).toThrow(`schema ${schemaVersion}; this build requires AppConfig v25`)
     }
   })
 
@@ -293,7 +326,7 @@ describe('config v24 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       models: {
         auxiliaryModelProvider: '',
         auxiliaryModel: '',
@@ -329,7 +362,7 @@ describe('config v24 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       models: {
         modelPool: {
           entries: [
@@ -403,7 +436,7 @@ describe('config v24 migration boundary', () => {
     const source = legacyV9Config()
     const migrated = migrateConfig(source)
     expect(migrated).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       models: {
         modelPool: { entries: [] },
         providers: [
@@ -460,16 +493,21 @@ describe('config v24 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       models: { modelPool: { entries: [] } },
       limits: {
-        maxToolOutputBytes: 128 * 1_024,
-        maxToolResultTokens: 64_000,
-        readFileOutputBytes: 128 * 1_024,
+        maxToolOutputBytes: 256 * 1_024,
+        maxToolOutputLines: 500,
       },
     })
     expect(migrateConfig(source).limits).not.toHaveProperty(
       'maxToolTokensPerRun',
+    )
+    expect(migrateConfig(source).limits).not.toHaveProperty(
+      'maxToolResultTokens',
+    )
+    expect(migrateConfig(source).limits).not.toHaveProperty(
+      'readFileOutputBytes',
     )
   })
 
@@ -484,12 +522,11 @@ describe('config v24 migration boundary', () => {
     }
 
     expect(migrateConfig(source)).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       models: { modelPool: { entries: [] } },
       limits: {
         maxToolOutputBytes: 72_000,
-        maxToolResultTokens: 12_000,
-        readFileOutputBytes: 80_000,
+        maxToolOutputLines: 500,
       },
     })
     expect(migrateConfig(source).limits).not.toHaveProperty(
@@ -497,12 +534,22 @@ describe('config v24 migration boundary', () => {
     )
   })
 
+  it('does not confuse a custom v10 128 KiB limit with a later default', () => {
+    const source = legacyCurrentShapeConfig(10)
+    source.limits = {
+      ...(source.limits as Record<string, unknown>),
+      maxToolOutputBytes: 128 * 1_024,
+    }
+
+    expect(migrateConfig(source).limits.maxToolOutputBytes).toBe(128 * 1_024)
+  })
+
   it('migrates v11 model configuration selections to the main model', () => {
     const source = legacyCurrentShapeConfig(11)
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       models: {
         modelPool: { entries: [] },
         providers: [
@@ -521,7 +568,7 @@ describe('config v24 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       models: { modelPool: { entries: [] } },
       subagents: {
         enabled: false,
@@ -535,7 +582,7 @@ describe('config v24 migration boundary', () => {
     const source = legacyV13Config()
     const migrated = migrateConfig(source)
 
-    expect(migrated.schemaVersion).toBe(24)
+    expect(migrated.schemaVersion).toBe(25)
     expect(migrated.models.modelPool).toEqual({ entries: [] })
     expect(migrated.limits).not.toHaveProperty('maxToolTokensPerRun')
     expect((source.limits as Record<string, unknown>).maxToolTokensPerRun).toBe(
@@ -547,7 +594,7 @@ describe('config v24 migration boundary', () => {
     const migrated = migrateConfig(legacyV14Config())
 
     expect(migrated).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       models: {
         modelPool: { entries: [] },
         providers: [
@@ -586,7 +633,7 @@ describe('config v24 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       models: { modelPool: { entries: [] } },
     })
     expect(migrated.limits).not.toHaveProperty('maxConcurrentRuns')
@@ -616,7 +663,7 @@ describe('config v24 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       models: {
         modelPool: {
           entries: [{ id: 'worker', reasoning: 'max' }],
@@ -634,8 +681,9 @@ describe('config v24 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       executionEnvironment: { commandShell: 'auto' },
+      subagents: { maxSubagents: 10 },
     })
     expect(source).not.toHaveProperty('executionEnvironment')
   })
@@ -645,7 +693,7 @@ describe('config v24 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       executionEnvironment: { commandShell: 'windows-powershell' },
       models: {
         defaultModelProvider: 'deepseek',
@@ -687,7 +735,7 @@ describe('config v24 migration boundary', () => {
     const migrated = migrateConfig(source)
 
     expect(migrated).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 25,
       models: {
         defaultModelProvider: 'deepseek',
         defaultModel: 'fixture-main',
@@ -736,7 +784,7 @@ describe('config v24 migration boundary', () => {
       source.models.providers[0].providerType = providerType
       const migrated = migrateConfig(source)
 
-      expect(migrated.schemaVersion).toBe(24)
+      expect(migrated.schemaVersion).toBe(25)
       expect(migrated.models.providers[0].providerType).toBe(providerType)
     }
   })

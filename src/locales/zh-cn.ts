@@ -529,7 +529,6 @@ const zhCN = {
     maxContextTokens: '默认最大上下文 Token',
     maxAttachmentContextTokens: '附件内容 Token 上限',
     autoCompactTriggerPercent: '自动压缩触发阈值（%）',
-    maxToolResultTokens: '单次工具结果 Token 上限',
     commandTimeoutMs: '命令超时（毫秒）',
     commandShell: '命令与终端 Shell',
     commandShellAuto: '自动（当前：{shell}）',
@@ -543,9 +542,9 @@ const zhCN = {
     shellDetecting: '检测中',
     rescanShells: '重新扫描',
     maxToolOutputBytes: '工具输出字节上限',
+    maxToolOutputLines: '工具输出行数上限',
     terminalScrollbackBytes: '终端回滚字节上限',
     readFileSourceBytes: '可读取源文件字节上限',
-    readFileOutputBytes: '读取文件输出字节上限',
     editableFileBytes: '可编辑文件字节上限',
     writeFileBytes: '新建文件字节上限',
     patchBytes: '补丁字节上限',
@@ -570,7 +569,10 @@ const zhCN = {
       '设置变更从下一次主 Agent 运行开始生效；当前运行使用启动时冻结的配置。',
     workerTimeout: '单个子任务超时',
     workerTimeoutHint:
-      '达到此时限后会取消子任务。关闭父任务也会立即取消正在运行的子任务。',
+      '达到此时限后会取消子任务。后台任务不随父任务结束而取消。',
+    maxSubagents: '每个会话最大后台 Agent 数',
+    maxSubagentsHint:
+      '普通 Subagent 与 Swarm child 共用该上限；设置从下一次主 Agent 运行生效。',
     minutes: '分钟',
     costNotice:
       '子 Agent 会发起额外的模型请求，并产生相应的 Token 消耗和 Provider 费用。',

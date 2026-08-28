@@ -133,6 +133,7 @@ export const DEFAULT_APP_CONFIG = {
   subagents: {
     enabled: false,
     workerTimeoutMs: 30 * 60_000,
+    maxSubagents: 32,
   },
   executionEnvironment: {
     commandShell: 'auto',
@@ -149,18 +150,17 @@ export const DEFAULT_APP_CONFIG = {
   },
   limits: {
     maxStepsPerRun: 0,
-    maxToolOutputBytes: 128 * 1_024,
+    maxToolOutputBytes: 256 * 1_024,
+    maxToolOutputLines: 500,
     maxContextTokens: DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
     maxAttachmentContextTokens: 64_000,
     autoCompactTriggerPercent: 80,
-    maxToolResultTokens: 64_000,
     tokenEstimation: {
       mode: 'conservative',
       bytesPerToken: 3,
     },
     commandTimeoutMs: 120_000,
     readFileSourceBytes: 10_000_000,
-    readFileOutputBytes: 128 * 1_024,
     editableFileBytes: 10_000_000,
     writeFileBytes: 256 * 1_024,
     patchBytes: 64 * 1_024,

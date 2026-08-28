@@ -82,14 +82,21 @@ const LegacyHeadlessLimitsWithRunToolBudgetSchema = Type.Partial(
         minimum: 256,
         maximum: 10_000_000,
       }),
+      maxToolResultTokens: Type.Integer({
+        minimum: 256,
+        maximum: 10_000_000,
+      }),
+      readFileOutputBytes: Type.Integer({
+        minimum: 1_024,
+        maximum: 100_000_000,
+      }),
     },
     { additionalProperties: false },
   ),
   { additionalProperties: false },
 )
 
-// Headless v4 predates Swarm and keeps its original Subagent shape. Internal
-// AppConfig fills the v19 Swarm cardinality default during preparation.
+// Headless v4 predates the Session-wide background leaf limit.
 const HeadlessSubagentsConfigV4Schema = Type.Object(
   {
     enabled: Type.Boolean(),
@@ -101,9 +108,11 @@ const HeadlessSubagentsConfigV4Schema = Type.Object(
   { additionalProperties: false },
 )
 
+const HeadlessSubagentsConfigV5Schema = PublicConfigSchema.properties.subagents
+
 export const HeadlessConfigSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(4),
+    schemaVersion: Type.Literal(5),
     provider: HeadlessProviderConfigSchema,
     limits: Type.Optional(
       Type.Partial(PublicConfigSchema.properties.limits, {
@@ -120,7 +129,7 @@ export const HeadlessConfigSchema = Type.Object(
         additionalProperties: false,
       }),
     ),
-    subagents: Type.Optional(HeadlessSubagentsConfigV4Schema),
+    subagents: Type.Optional(HeadlessSubagentsConfigV5Schema),
     network: Type.Optional(PublicConfigSchema.properties.network),
     mcpServers: Type.Optional(
       Type.Array(McpServerConfigSchema, { maxItems: 32 }),
@@ -133,11 +142,23 @@ export const HeadlessConfigSchema = Type.Object(
 )
 export type HeadlessConfig = Static<typeof HeadlessConfigSchema>
 
+export const LegacyHeadlessConfigV4Schema = Type.Object(
+  {
+    ...HeadlessConfigSchema.properties,
+    schemaVersion: Type.Literal(4),
+    limits: Type.Optional(LegacyHeadlessLimitsWithRunToolBudgetSchema),
+    subagents: Type.Optional(HeadlessSubagentsConfigV4Schema),
+  },
+  { additionalProperties: false },
+)
+export type LegacyHeadlessConfigV4 = Static<typeof LegacyHeadlessConfigV4Schema>
+
 export const LegacyHeadlessConfigV3Schema = Type.Object(
   {
     ...HeadlessConfigSchema.properties,
     schemaVersion: Type.Literal(3),
     limits: Type.Optional(LegacyHeadlessLimitsWithRunToolBudgetSchema),
+    subagents: Type.Optional(HeadlessSubagentsConfigV4Schema),
   },
   { additionalProperties: false },
 )

@@ -43,7 +43,7 @@ export function createRuntimeIdentity(input: {
     .toolNames()
     .filter((toolName) => swarmsEnabled || toolName !== 'swarm_run')
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     sourceCommit: input.sourceCommit?.trim() || embeddedSourceCommit(),
     sourceTree: input.sourceTree ?? embeddedSourceTree(),
     runtimeImageDigest:
@@ -66,10 +66,11 @@ export function createRuntimeIdentity(input: {
     budgets: {
       maxStepsPerRun: input.config.limits.maxStepsPerRun,
       maxContextTokens: input.config.limits.maxContextTokens,
-      maxToolResultTokens: input.config.limits.maxToolResultTokens,
       maxToolOutputBytes: input.config.limits.maxToolOutputBytes,
+      maxToolOutputLines: input.config.limits.maxToolOutputLines,
       commandTimeoutMs: input.config.limits.commandTimeoutMs,
       subagentWorkerTimeoutMs: input.config.subagents.workerTimeoutMs,
+      maxSubagents: input.config.subagents.maxSubagents,
     },
     capabilities: {
       platform: input.platform ?? process.platform,

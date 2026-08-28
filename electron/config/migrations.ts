@@ -21,6 +21,15 @@ import {
 
 const validateAppConfig = compileSchema(AppConfigSchema)
 
+function withoutKey<
+  Value extends Record<string, unknown>,
+  Key extends keyof Value,
+>(value: Value, key: Key): Omit<Value, Key> {
+  const clone = { ...value }
+  Reflect.deleteProperty(clone, key)
+  return clone
+}
+
 // AppConfig v9-v22 shared this exact trace-only logging shape. Keep it frozen
 // so future logging changes cannot invalidate an otherwise migratable config.
 const LegacyLoggingConfigV22Schema = Type.Object(
@@ -36,12 +45,33 @@ const LegacyLoggingConfigV22Schema = Type.Object(
 )
 type LegacyLoggingConfigV22 = Static<typeof LegacyLoggingConfigV22Schema>
 
+// AppConfig v24 retained the pre-v25 Tool output budgets. Keep this shape
+// frozen so removing duplicate result budgets cannot invalidate installs.
+const LegacyLimitsConfigV24Schema = Type.Object(
+  {
+    ...withoutKey(
+      PublicConfigSchema.properties.limits.properties,
+      'maxToolOutputLines',
+    ),
+    maxToolResultTokens: Type.Integer({
+      minimum: 256,
+      maximum: 1_000_000,
+    }),
+    readFileOutputBytes: Type.Integer({
+      minimum: 1_024,
+      maximum: 10_000_000,
+    }),
+  },
+  { additionalProperties: false },
+)
+type LegacyLimitsConfigV24 = Static<typeof LegacyLimitsConfigV24Schema>
+
 // AppConfig v9-v23 retained the global Run admission limit. Keep this
-// subsection frozen so v24 can remove the policy without resetting installs.
+// subsection frozen so later versions can still migrate those installs.
 const LegacyLimitsConfigV23Schema = Type.Object(
   {
     maxConcurrentRuns: Type.Integer({ minimum: 1, maximum: 32 }),
-    ...PublicConfigSchema.properties.limits.properties,
+    ...LegacyLimitsConfigV24Schema.properties,
   },
   { additionalProperties: false },
 )
@@ -61,15 +91,16 @@ const LegacySubagentsConfigV23Schema = Type.Object(
 )
 type LegacySubagentsConfigV23 = Static<typeof LegacySubagentsConfigV23Schema>
 
-function withoutKey<
-  Value extends Record<string, unknown>,
-  Key extends keyof Value,
->(value: Value, key: Key): Omit<Value, Key> {
-  const clone = { ...value }
-  Reflect.deleteProperty(clone, key)
-  return clone
-}
-
+const LegacySubagentsConfigV24Schema = Type.Object(
+  {
+    enabled: Type.Boolean(),
+    workerTimeoutMs: Type.Integer({
+      minimum: 60_000,
+      maximum: 86_400_000,
+    }),
+  },
+  { additionalProperties: false },
+)
 const LegacyLimitsWithRunToolBudgetSchema = Type.Object(
   {
     ...LegacyLimitsConfigV23Schema.properties,
@@ -541,6 +572,20 @@ const LegacyAppConfigV23Schema = Type.Object(
 type LegacyAppConfigV23 = Static<typeof LegacyAppConfigV23Schema>
 const validateLegacyAppConfigV23 = compileSchema(LegacyAppConfigV23Schema)
 
+// AppConfig v24 removed concurrency settings but predates the unified v25
+// model-visible Tool output limit and maxSubagents setting.
+const LegacyAppConfigV24Schema = Type.Object(
+  {
+    ...AppConfigSchema.properties,
+    schemaVersion: Type.Literal(24),
+    subagents: LegacySubagentsConfigV24Schema,
+    limits: LegacyLimitsConfigV24Schema,
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV24 = Static<typeof LegacyAppConfigV24Schema>
+const validateLegacyAppConfigV24 = compileSchema(LegacyAppConfigV24Schema)
+
 const LegacyAppProviderConfigV14Schema = Type.Object(
   {
     ...withoutKey(
@@ -631,17 +676,36 @@ const validateLegacyAppConfigV10 = compileSchema(LegacyAppConfigV10Schema)
 
 function withoutRunToolBudget(
   limits: LegacyLimitsWithRunToolBudget,
+  upgrade128KibDefault = true,
 ): AppConfig['limits'] {
   const withoutBudget = withoutKey(limits, 'maxToolTokensPerRun')
-  return structuredClone(
+  return migrateV25Limits(
     withoutKey(withoutBudget, 'maxConcurrentRuns'),
-  ) as AppConfig['limits']
+    upgrade128KibDefault,
+  )
 }
 
 function migrateLegacyLimits(
   limits: LegacyLimitsConfigV23,
 ): AppConfig['limits'] {
-  return structuredClone(withoutKey(limits, 'maxConcurrentRuns'))
+  return migrateV25Limits(withoutKey(limits, 'maxConcurrentRuns'))
+}
+
+/** Replaces the duplicate v24 Tool-result limits with the v25 global bounds. */
+function migrateV25Limits(
+  limits: LegacyLimitsConfigV24,
+  upgrade128KibDefault = true,
+): AppConfig['limits'] {
+  const withoutTokens = withoutKey(limits, 'maxToolResultTokens')
+  const withoutReadOutput = withoutKey(withoutTokens, 'readFileOutputBytes')
+  return {
+    ...structuredClone(withoutReadOutput),
+    maxToolOutputBytes:
+      upgrade128KibDefault && limits.maxToolOutputBytes === 128 * 1_024
+        ? 256 * 1_024
+        : limits.maxToolOutputBytes,
+    maxToolOutputLines: 500,
+  }
 }
 
 /** Preserves legacy trace settings while adding default operational logging. */
@@ -655,19 +719,12 @@ function migrateLegacyLogging(
 }
 
 function migrateLimitDefaults(limits: LegacyAppConfigV10['limits']) {
-  const next = withoutRunToolBudget(limits)
-
-  if (next.maxToolOutputBytes === 64 * 1_024) {
-    next.maxToolOutputBytes = 128 * 1_024
+  const normalized = structuredClone(limits)
+  const usedOldDefault = normalized.maxToolOutputBytes === 64 * 1_024
+  if (usedOldDefault) {
+    normalized.maxToolOutputBytes = 128 * 1_024
   }
-  if (next.maxToolResultTokens === 8_000) {
-    next.maxToolResultTokens = 64_000
-  }
-  if (next.readFileOutputBytes === 64 * 1_024) {
-    next.readFileOutputBytes = 128 * 1_024
-  }
-
-  return next
+  return withoutRunToolBudget(normalized, usedOldDefault)
 }
 
 interface LegacyModelRolesSource {
@@ -822,13 +879,16 @@ function migrateV12(config: LegacyAppConfigV12): AppConfig {
 function migrateLegacySubagents(
   subagents: LegacySubagentsConfig,
 ): AppConfig['subagents'] {
-  return structuredClone(subagents)
+  return { ...structuredClone(subagents), maxSubagents: 32 }
 }
 
 function migrateConfiguredSubagents(
   subagents: LegacySubagentsConfigV23,
 ): AppConfig['subagents'] {
-  return structuredClone(withoutKey(subagents, 'maxAgentsPerSwarm'))
+  return {
+    ...structuredClone(withoutKey(subagents, 'maxAgentsPerSwarm')),
+    maxSubagents: subagents.maxAgentsPerSwarm,
+  }
 }
 
 function migrateV13(config: LegacyAppConfigV13): AppConfig {
@@ -1140,6 +1200,26 @@ function migrateV23(config: LegacyAppConfigV23): AppConfig {
   return structuredClone(migrated as AppConfig)
 }
 
+/** Adds the v25 Subagent capacity and unified model-visible output limits. */
+function migrateV24(config: LegacyAppConfigV24): AppConfig {
+  const migrated = {
+    ...config,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    subagents: {
+      ...structuredClone(config.subagents),
+      maxSubagents: 32,
+    },
+    limits: migrateV25Limits(config.limits),
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      24,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
 /** Reports that a persisted configuration uses an unsupported schema version. */
 export class UnsupportedConfigSchemaError extends Error {
   constructor(
@@ -1354,6 +1434,16 @@ export function migrateConfig(candidate: unknown): AppConfig {
       )
     }
     return migrateV23(candidate as LegacyAppConfigV23)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') === 24) {
+    if (!validateLegacyAppConfigV24(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        24,
+        formatSchemaErrors(validateLegacyAppConfigV24.errors),
+      )
+    }
+    return migrateV24(candidate as LegacyAppConfigV24)
   }
 
   if (Reflect.get(candidate, 'schemaVersion') !== APP_CONFIG_SCHEMA_VERSION) {

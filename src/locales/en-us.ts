@@ -546,7 +546,6 @@ const enUS = {
     maxContextTokens: 'Default maximum context tokens',
     maxAttachmentContextTokens: 'Attachment content token limit',
     autoCompactTriggerPercent: 'Auto compact trigger threshold (%)',
-    maxToolResultTokens: 'Tool result token limit',
     commandTimeoutMs: 'Command timeout (ms)',
     commandShell: 'Command and terminal shell',
     commandShellAuto: 'Auto (current: {shell})',
@@ -560,9 +559,9 @@ const enUS = {
     shellDetecting: 'detecting',
     rescanShells: 'Rescan',
     maxToolOutputBytes: 'Tool output byte limit',
+    maxToolOutputLines: 'Tool output line limit',
     terminalScrollbackBytes: 'Terminal scrollback byte limit',
     readFileSourceBytes: 'Readable source file byte limit',
-    readFileOutputBytes: 'Read file output byte limit',
     editableFileBytes: 'Editable file byte limit',
     writeFileBytes: 'Create file byte limit',
     patchBytes: 'Patch byte limit',
@@ -587,7 +586,10 @@ const enUS = {
       'Changes apply to the next main Agent run; an active run keeps the setting frozen at its start.',
     workerTimeout: 'Subagent task timeout',
     workerTimeoutHint:
-      'The subtask is cancelled at this limit. Cancelling the parent task also cancels active subagents immediately.',
+      'The subtask is cancelled at this limit. Background tasks continue after the parent task ends.',
+    maxSubagents: 'Maximum background Agents per conversation',
+    maxSubagentsHint:
+      'Standalone Subagents and Swarm children share this limit. Changes apply to the next main Agent run.',
     minutes: 'minutes',
     costNotice:
       'Subagents make additional model requests and therefore consume tokens and may incur Provider charges.',

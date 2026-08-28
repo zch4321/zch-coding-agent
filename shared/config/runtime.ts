@@ -20,6 +20,7 @@ export const SubagentsConfigSchema = Type.Object(
       minimum: 60_000,
       maximum: 86_400_000,
     }),
+    maxSubagents: Type.Integer({ minimum: 1, maximum: 32 }),
   },
   { additionalProperties: false },
 )
@@ -44,25 +45,18 @@ export const LimitsConfigSchema = Type.Object(
       minimum: 1_024,
       maximum: 100_000_000,
     }),
+    maxToolOutputLines: Type.Integer({ minimum: 1, maximum: 100_000 }),
     maxContextTokens: Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
     maxAttachmentContextTokens: Type.Integer({
       minimum: 1_024,
       maximum: 1_000_000,
     }),
     autoCompactTriggerPercent: Type.Integer({ minimum: 50, maximum: 95 }),
-    maxToolResultTokens: Type.Integer({
-      minimum: 256,
-      maximum: 1_000_000,
-    }),
     tokenEstimation: TokenEstimationSchema,
     commandTimeoutMs: Type.Integer({ minimum: 100, maximum: 86_400_000 }),
     readFileSourceBytes: Type.Integer({
       minimum: 1_024,
       maximum: 100_000_000,
-    }),
-    readFileOutputBytes: Type.Integer({
-      minimum: 1_024,
-      maximum: 10_000_000,
     }),
     editableFileBytes: Type.Integer({
       minimum: 1_024,

@@ -148,14 +148,6 @@ onBeforeUnmount(() => {
               <template #suffix>%</template>
             </NInputNumber>
           </label>
-          <label class="settings-field">
-            <span>{{ t('limits.maxToolResultTokens') }}</span>
-            <NInputNumber
-              v-model:value="agent.limitsConfig.maxToolResultTokens"
-              :min="256"
-              :max="1000000"
-            />
-          </label>
         </section>
 
         <NDivider />
@@ -214,6 +206,14 @@ onBeforeUnmount(() => {
             />
           </label>
           <label class="settings-field">
+            <span>{{ t('limits.maxToolOutputLines') }}</span>
+            <NInputNumber
+              v-model:value="agent.limitsConfig.maxToolOutputLines"
+              :min="1"
+              :max="100000"
+            />
+          </label>
+          <label class="settings-field">
             <span>{{ t('limits.terminalScrollbackBytes') }}</span>
             <NInputNumber
               v-model:value="agent.limitsConfig.terminalScrollbackBytes"
@@ -232,14 +232,6 @@ onBeforeUnmount(() => {
               v-model:value="agent.limitsConfig.readFileSourceBytes"
               :min="1024"
               :max="100000000"
-            />
-          </label>
-          <label class="settings-field">
-            <span>{{ t('limits.readFileOutputBytes') }}</span>
-            <NInputNumber
-              v-model:value="agent.limitsConfig.readFileOutputBytes"
-              :min="1024"
-              :max="10000000"
             />
           </label>
           <label class="settings-field">

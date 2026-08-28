@@ -17,7 +17,7 @@ import {
 } from './runtime'
 import { PermissionConfigSchema, PrivacyConfigSchema } from './security'
 
-export const APP_CONFIG_SCHEMA_VERSION = 24 as const
+export const APP_CONFIG_SCHEMA_VERSION = 25 as const
 
 export const PublicConfigSchema = Type.Object(
   {
