@@ -135,14 +135,17 @@ test.describe('Electron Agents activity panel', () => {
         },
       ]),
     ])
-    fakeProvider.queue([
-      reasoningDelta('Inspect the delegated fixture first.'),
-      toolCallDelta({
-        id: 'call:e2e-child-read-first',
-        name: 'read_file',
-        args: { path: 'long-agent-result.txt' },
-      }),
-    ])
+    fakeProvider.queue(
+      [
+        reasoningDelta('Inspect the delegated fixture first.'),
+        toolCallDelta({
+          id: 'call:e2e-child-read-first',
+          name: 'read_file',
+          args: { path: 'long-agent-result.txt' },
+        }),
+      ],
+      { waitForRequestCount: 3 },
+    )
     fakeProvider.queue([
       reasoningDelta('Verify the delegated fixture independently.'),
       toolCallDelta({

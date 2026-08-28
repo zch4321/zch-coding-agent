@@ -27,7 +27,10 @@ export interface FakeProvider {
   origin: string
   requests: CapturedProviderRequest[]
   readonly modelCatalogRequests: number
-  queue(chunks: JsonObject[], options?: { chunkDelayMs?: number }): void
+  queue(
+    chunks: JsonObject[],
+    options?: { chunkDelayMs?: number; waitForRequestCount?: number },
+  ): void
   armSecondResponseGate(): void
   armResponseGate(requestNumbers: number[]): void
   releaseSecondResponse(): void
@@ -52,8 +55,13 @@ export async function startFakeProvider(): Promise<FakeProvider> {
   const queuedResponses: Array<{
     chunks: JsonObject[]
     chunkDelayMs: number
+    waitForRequestCount?: number
   }> = []
   const requests: CapturedProviderRequest[] = []
+  const requestCountWaiters: Array<{
+    count: number
+    resolve: () => void
+  }> = []
   let modelCatalogRequests = 0
   // Optional gate that holds selected provider requests open until a test
   // releases them, allowing deterministic inspection of concurrent runs.
@@ -83,12 +91,30 @@ export async function startFakeProvider(): Promise<FakeProvider> {
         body: await parseJsonBody(request),
         url: request.url,
       })
+      for (let index = requestCountWaiters.length - 1; index >= 0; index -= 1) {
+        const waiter = requestCountWaiters[index]!
+        if (requests.length < waiter.count) continue
+        requestCountWaiters.splice(index, 1)
+        waiter.resolve()
+      }
 
       const queued = queuedResponses.shift()
       if (!queued) {
         response.writeHead(500, { 'content-type': 'application/json' })
         response.end(JSON.stringify({ error: 'unexpected provider call' }))
         return
+      }
+
+      if (
+        queued.waitForRequestCount !== undefined &&
+        requests.length < queued.waitForRequestCount
+      ) {
+        await new Promise<void>((resolve) => {
+          requestCountWaiters.push({
+            count: queued.waitForRequestCount!,
+            resolve,
+          })
+        })
       }
 
       if (gatedRequestNumbers.has(requests.length) && responseGatePromise) {
@@ -145,6 +171,9 @@ export async function startFakeProvider(): Promise<FakeProvider> {
       queuedResponses.push({
         chunks,
         chunkDelayMs: options?.chunkDelayMs ?? 0,
+        ...(options?.waitForRequestCount === undefined
+          ? {}
+          : { waitForRequestCount: options.waitForRequestCount }),
       })
     },
     armSecondResponseGate() {
