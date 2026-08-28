@@ -52,7 +52,6 @@ export function registerTodoTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 1_000,
-    maxOutputBytes: 1_024,
     validateArgs: validateTodo,
     async execute(args: Static<typeof TodoStateSchema>, context) {
       const session = options.getSession(context.sessionId)

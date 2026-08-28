@@ -145,7 +145,6 @@ export function registerProjectTools(
     defaultRisk: 'low',
     supportsAbort: false,
     defaultTimeoutMs: 10_000,
-    maxOutputBytes: 64 * 1_024,
     async execute(_args, context): Promise<ToolResult> {
       try {
         return {
@@ -170,7 +169,6 @@ export function registerProjectTools(
     defaultRisk: 'low',
     supportsAbort: false,
     defaultTimeoutMs: 15_000,
-    maxOutputBytes: 64 * 1_024,
     async execute(_args, context): Promise<ToolResult> {
       try {
         return {
@@ -197,7 +195,6 @@ export function registerProjectTools(
     defaultRisk: 'low',
     supportsAbort: false,
     defaultTimeoutMs: 10_000,
-    maxOutputBytes: 64 * 1_024,
     async execute(args: SetModulesArgs, context): Promise<ToolResult> {
       try {
         const snapshot = await projectMetadata.get(
@@ -232,7 +229,6 @@ export function registerProjectTools(
     defaultRisk: 'low',
     supportsAbort: false,
     defaultTimeoutMs: 10_000,
-    maxOutputBytes: 64 * 1_024,
     async execute(args: UpdateModuleArgs, context): Promise<ToolResult> {
       try {
         const snapshot = await projectMetadata.get(

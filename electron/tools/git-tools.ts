@@ -284,7 +284,7 @@ function timeoutAndOutput(getConfig: () => PublicConfig): {
   const limits = getConfig().limits
   return {
     timeoutMs: Math.min(limits.commandTimeoutMs, 30_000),
-    maxOutputBytes: Math.min(limits.maxToolOutputBytes, 64 * 1_024),
+    maxOutputBytes: limits.maxToolOutputBytes,
   }
 }
 
@@ -303,7 +303,6 @@ export function registerGitReadOnlyTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 128 * 1_024,
     projectResultForModel: (result) =>
       projectGitResult(result, '[working tree clean]'),
     async execute(args: GitStatusArgs, context): Promise<ToolResult> {
@@ -344,7 +343,6 @@ export function registerGitReadOnlyTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 128 * 1_024,
     projectResultForModel: (result) => projectGitResult(result, '[no changes]'),
     async execute(args: GitDiffArgs, context): Promise<ToolResult> {
       const flags = args.flags ?? []
@@ -399,7 +397,6 @@ export function registerGitReadOnlyTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 128 * 1_024,
     projectResultForModel: (result) => projectGitResult(result, '[no commits]'),
     async execute(args: GitLogArgs, context): Promise<ToolResult> {
       const flags = args.flags ?? []
@@ -453,7 +450,6 @@ export function registerGitReadOnlyTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 128 * 1_024,
     projectResultForModel: (result) =>
       projectGitResult(result, '[git show completed with no output]'),
     async execute(args: GitShowArgs, context): Promise<ToolResult> {
@@ -502,7 +498,6 @@ export function registerGitReadOnlyTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 128 * 1_024,
     projectResultForModel: (result) => projectGitResult(result, '[no refs]'),
     async execute(args: GitRefsArgs, context): Promise<ToolResult> {
       const scope = args.scope ?? 'all'
@@ -613,7 +608,6 @@ export function registerGitWriteTools(
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 64 * 1_024,
     projectResultForModel: (result) =>
       projectGitResult(result, '[git add completed]'),
     async execute(args: GitAddArgs, context): Promise<ToolResult> {
@@ -663,7 +657,6 @@ export function registerGitWriteTools(
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 30_000,
-    maxOutputBytes: 64 * 1_024,
     projectResultForModel: (result) =>
       projectGitResult(result, '[git commit completed]'),
     async execute(args: GitCommitArgs, context): Promise<ToolResult> {
@@ -691,7 +684,6 @@ export function registerGitWriteTools(
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 64 * 1_024,
     projectResultForModel: (result) =>
       projectGitResult(result, '[git restore completed]'),
     async execute(args: GitRestoreArgs, context): Promise<ToolResult> {

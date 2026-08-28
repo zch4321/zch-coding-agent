@@ -3,6 +3,7 @@ import type { PublicConfig } from '../../shared/config'
 import type { JsonValue } from '../../shared/json'
 import type { ToolRegistrationPort, ToolResult } from './types'
 import { runCommand } from '../process/run'
+import { sessionArtifactKey } from '../session-temp/service'
 import {
   commandShellService,
   type CommandShellService,
@@ -45,7 +46,7 @@ const RunCommandSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative working directory. Omit to run from the workspace root.',
+          'Workspace-relative directory or absolute Session-temp directory. Omit to run from the workspace root.',
       }),
     ),
     timeoutMs: Type.Optional(
@@ -71,7 +72,7 @@ const DelaySchema = Type.Object(
       minimum: 1,
       maximum: MAX_DELAY_MS,
       description:
-        'Milliseconds to wait before the next step. Use after terminal_send before terminal_read when observing long-running tests, dev servers, watch tasks, or REPL output.',
+        'Milliseconds to wait before the next step. Prefer background_wait for Terminal or Agent tasks.',
     }),
   },
   { additionalProperties: false },
@@ -137,13 +138,12 @@ export function registerProcessTools(
     id: 'run_command',
     executionMode: 'parallel',
     description:
-      'Run a bounded short-lived child process from the workspace. Prefer process mode with an executable and argument array. Shell mode uses the configured command_shell reported in environment_context and is higher risk; do not assume another shell syntax. For long-running tests, watch tasks, dev servers, REPLs, or commands that need periodic observation, open a terminal, send the command, use delay, then read terminal output.',
+      'Run a bounded short-lived child process from the workspace or Session temp. Prefer process mode with an executable and argument array. Shell mode uses the configured command_shell reported in environment_context and is higher risk; do not assume another shell syntax. For long-running tests, watch tasks, dev servers, REPLs, or commands that need periodic observation, use a Terminal, background_wait, and its artifact log.',
     inputSchema: RunCommandSchema,
     effects: ['process.spawn'],
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 86_400_000,
-    maxOutputBytes: 128 * 1_024,
     validateArgs: validateRunCommandArgs,
     projectResultForModel: projectRunCommandResult,
     async execute(args: RunCommandArgs, context): Promise<ToolResult> {
@@ -180,18 +180,29 @@ export function registerProcessTools(
           args.timeoutMs ?? limits.commandTimeoutMs,
           limits.commandTimeoutMs,
         ),
-        maxOutputBytes: Math.min(limits.maxToolOutputBytes, 64 * 1_024),
+        maxOutputBytes:
+          context.toolOutputLimits?.maxToolOutputBytes ??
+          limits.maxToolOutputBytes,
+        sessionTemp: context.sessionTemp,
+        artifactKey: sessionArtifactKey(
+          `${context.runId}:${context.approvedCall.callId}`,
+        ),
         signal: context.signal,
       })
 
       if (result.cancelled || context.signal.aborted) {
-        return { status: 'cancelled', message: 'The command was cancelled' }
+        return {
+          status: 'cancelled',
+          message: `The command was cancelled${artifactResultSuffix(result)}`,
+        }
       }
 
       if (result.timedOut) {
         return {
           status: 'timeout',
-          message: `Command timed out after ${Math.round(result.durationMs)} ms`,
+          message: `Command timed out after ${Math.round(
+            result.durationMs,
+          )} ms${artifactResultSuffix(result)}`,
         }
       }
 
@@ -221,13 +232,12 @@ export function registerProcessTools(
     id: 'delay',
     executionMode: 'parallel',
     description:
-      'Wait for a short bounded interval before continuing. Use with terminal_read polling after terminal_send for long-running tests, watch tasks, dev servers, or REPLs.',
+      'Wait for a short bounded interval. Prefer background_wait when waiting for Terminal or Agent task completion.',
     inputSchema: DelaySchema,
     effects: [],
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: MAX_DELAY_MS + 5_000,
-    maxOutputBytes: 4_096,
     projectResultForModel: projectDelayResult,
     async execute(args: DelayArgs, context): Promise<ToolResult> {
       const startedAt = performance.now()
@@ -240,4 +250,15 @@ export function registerProcessTools(
       }
     },
   })
+}
+
+function artifactResultSuffix(result: {
+  artifactAvailable: boolean
+  artifactPath?: string
+  captureError?: string
+}): string {
+  if (result.artifactPath) return `; artifactPath=${result.artifactPath}`
+  return `; artifactAvailable=false${
+    result.captureError ? `; captureError=${result.captureError}` : ''
+  }`
 }

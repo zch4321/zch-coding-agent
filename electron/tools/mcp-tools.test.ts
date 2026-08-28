@@ -1,4 +1,7 @@
 import { Type } from '@sinclair/typebox'
+import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { McpServerStatus } from '../../shared/mcp'
@@ -254,6 +257,100 @@ describe('MCP gateway tools', () => {
       false,
     )
   })
+
+  it('stores normalized MCP results that exceed the line threshold', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'mcp-artifact-'))
+    const sessionTemp = {
+      root,
+      artifacts: path.join(root, 'artifacts'),
+      scratch: path.join(root, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+    const revision = 'c'.repeat(64)
+    const longText = Array.from(
+      { length: 501 },
+      (_, index) => `line-${index}`,
+    ).join('\n')
+    const manager = {
+      listVisible: () => [visibleStatus()],
+      catalog: async (): Promise<McpCatalogSnapshot> => ({
+        server: visibleStatus(),
+        serverId: 'fixture',
+        revision,
+        tools: [alpha],
+        diagnostics: [],
+      }),
+      resolveTool: () => ({
+        descriptor: alpha,
+        validate: compileSchema(
+          Type.Object(
+            { value: Type.String() },
+            { additionalProperties: false },
+          ),
+        ),
+      }),
+      callTool: async () => ({
+        content: [{ type: 'text', text: longText }],
+        structuredContent: { complete: true },
+      }),
+    } as unknown as McpManager
+    const config = toPublicConfig(DEFAULT_APP_CONFIG, false)
+    const session = {
+      sessionId: 'session:mcp-artifact' as SessionId,
+      workspace: process.cwd(),
+      mcpDisclosures: new Map(),
+    } as SessionState
+    const registry = new ToolRegistry()
+    const gateway = registerMcpTools(registry, {
+      manager,
+      configStore: {
+        getPublicConfig: () => config,
+      } as unknown as ConfigStore,
+      getSession: () => session,
+    })
+    await registry
+      .get('read_mcp_server')!
+      .execute(
+        { serverId: 'fixture', limit: 1 },
+        executionContext(session, sessionTemp),
+      )
+    const resolved = gateway.resolveCall(session, {
+      id: 'call:mcp-artifact' as CallId,
+      toolId: 'call_mcp_tool',
+      args: {
+        serverId: 'fixture',
+        toolName: 'alpha',
+        arguments: { value: 'test' },
+      },
+      reason: 'capture complete output',
+    })
+    if (!resolved.matched || !resolved.ok) {
+      throw new Error('Expected a disclosed MCP tool')
+    }
+
+    const result = await resolved.definition.execute(
+      { value: 'test' },
+      executionContext(session, sessionTemp, 'call:mcp-artifact'),
+    )
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      content: {
+        artifactAvailable: true,
+        artifactPath: expect.any(String),
+      },
+    })
+    if (result.status !== 'ok') return
+    const artifactPath = (result.content as { artifactPath: string })
+      .artifactPath
+    const artifact = JSON.parse(await readFile(artifactPath, 'utf8')) as {
+      content: Array<{ text?: string }>
+    }
+    expect(artifact.content[0]?.text).toBe(longText)
+  })
 })
 
 function policy(
@@ -273,13 +370,20 @@ function policy(
   }).kind
 }
 
-function executionContext(session: SessionState): ToolExecutionContext {
+function executionContext(
+  session: SessionState,
+  sessionTemp?: { root: string; artifacts: string; scratch: string },
+  callId = 'call:mcp',
+): ToolExecutionContext {
   return {
     sessionId: session.sessionId,
     runId: 'run:mcp' as RunId,
     workspace: { canonicalPath: session.workspace },
+    ...(sessionTemp ? { sessionTemp } : {}),
     signal: new AbortController().signal,
-    approvedCall: {} as ToolExecutionContext['approvedCall'],
+    approvedCall: {
+      callId: callId as CallId,
+    } as ToolExecutionContext['approvedCall'],
   }
 }
 

@@ -51,7 +51,6 @@ describe('Tool Result projection', () => {
       defaultRisk: 'low',
       supportsAbort: true,
       defaultTimeoutMs: 1_000,
-      maxOutputBytes: 1_000,
       projectResultForModel: () => [
         { type: 'text', text: 'alpha' },
         { type: 'json', value: { beta: true } },
@@ -88,6 +87,7 @@ describe('Tool Result projection', () => {
       content: [{ type: 'text', text: expected }],
       isError: true,
       truncated: false,
+      outputPolicy: 'bounded',
     })
   })
 
@@ -123,7 +123,6 @@ describe('Tool Result projection', () => {
       defaultRisk: 'low',
       supportsAbort: true,
       defaultTimeoutMs: 1_000,
-      maxOutputBytes: 1_000,
       projectResultForModel(result, args) {
         ;(result.content as { value: number }).value = 9
         args.path = 'changed'
@@ -145,6 +144,7 @@ describe('Tool Result projection', () => {
       content: [{ type: 'json', value: { value: 1 } }],
       isError: false,
       truncated: false,
+      outputPolicy: 'bounded',
     })
     expect(originalResult.content).toEqual({ value: 1 })
     expect(originalCall.args).toEqual({ path: 'README.md' })
@@ -174,6 +174,7 @@ describe('Tool Result projection', () => {
       ],
       isError: false,
       truncated: true,
+      outputPolicy: 'bounded',
     })
   })
 })

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -70,12 +70,100 @@ describe('runCommand', () => {
       maxOutputBytes: 16_384,
       signal: new AbortController().signal,
     })
-
     expect(result).toMatchObject({
       stdout: 'explicit shell',
       stderr: '',
       exitCode: 0,
     })
+  })
+
+  it('allows Session scratch cwd, injects paths, and captures complete output', async () => {
+    const root = await workspace()
+    const sessionRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-command-session-'),
+    )
+    const sessionTemp = {
+      root: sessionRoot,
+      artifacts: path.join(sessionRoot, 'artifacts'),
+      scratch: path.join(sessionRoot, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+    const result = await runCommand({
+      workspace: root,
+      sessionTemp,
+      artifactKey: 'call-env',
+      command: {
+        mode: 'process',
+        executable: process.execPath,
+        args: [
+          '-e',
+          "process.stdout.write(`${process.cwd()}\\n${process.env.ZCH_SESSION_SCRATCH_DIR}`); process.stderr.write('captured stderr')",
+        ],
+        cwd: sessionTemp.scratch,
+      },
+      timeoutMs: 5_000,
+      maxOutputBytes: 16,
+      signal: new AbortController().signal,
+    })
+    const canonicalScratch = await realpath(sessionTemp.scratch)
+
+    expect(result).toMatchObject({
+      artifactAvailable: true,
+      artifactPath: expect.any(String),
+      cwd: canonicalScratch,
+    })
+    expect(
+      await readFile(path.join(result.artifactPath!, 'stdout.log'), 'utf8'),
+    ).toBe(`${canonicalScratch}\n${sessionTemp.scratch}`)
+    expect(
+      await readFile(path.join(result.artifactPath!, 'stderr.log'), 'utf8'),
+    ).toBe('captured stderr')
+  })
+
+  it('settles command artifacts when process spawning fails', async () => {
+    const root = await workspace()
+    const sessionRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-command-spawn-failure-'),
+    )
+    const sessionTemp = {
+      root: sessionRoot,
+      artifacts: path.join(sessionRoot, 'artifacts'),
+      scratch: path.join(sessionRoot, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+    const artifactPath = path.join(
+      sessionTemp.artifacts,
+      'commands',
+      'call-spawn-failure',
+    )
+
+    await expect(
+      runCommand({
+        workspace: root,
+        sessionTemp,
+        artifactKey: 'call-spawn-failure',
+        command: {
+          mode: 'process',
+          executable: path.join(root, 'definitely-missing-executable'),
+        },
+        timeoutMs: 5_000,
+        maxOutputBytes: 16_384,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(`artifactPath=${artifactPath}`)
+    await expect(
+      readFile(path.join(artifactPath, 'stdout.log'), 'utf8'),
+    ).resolves.toBe('')
+    const recorded = JSON.parse(
+      await readFile(path.join(artifactPath, 'result.json'), 'utf8'),
+    ) as { error: { code: string } }
+    expect(recorded.error.code).toBe('ENOENT')
   })
 
   it('executes the automatic shell with UTF-8 output and the native exit code', async () => {

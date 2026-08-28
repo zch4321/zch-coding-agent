@@ -107,7 +107,6 @@ export function registerCodeIntelligenceTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 60_000,
-    maxOutputBytes: 64 * 1_024,
     async execute(args: SymbolOverviewArgs, context): Promise<ToolResult> {
       try {
         return {
@@ -135,7 +134,6 @@ export function registerCodeIntelligenceTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 60_000,
-    maxOutputBytes: 64 * 1_024,
     async execute(args: SymbolAtPathArgs, context): Promise<ToolResult> {
       try {
         return {
@@ -164,7 +162,6 @@ export function registerCodeIntelligenceTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 60_000,
-    maxOutputBytes: 64 * 1_024,
     async execute(args: SymbolAtPathArgs, context): Promise<ToolResult> {
       try {
         return {
@@ -193,7 +190,6 @@ export function registerCodeIntelligenceTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 60_000,
-    maxOutputBytes: 64 * 1_024,
     async execute(args: WorkspaceSymbolsArgs, context): Promise<ToolResult> {
       try {
         return {
@@ -221,7 +217,6 @@ export function registerCodeIntelligenceTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 60_000,
-    maxOutputBytes: 64 * 1_024,
     async execute(args: DiagnosticsArgs, context): Promise<ToolResult> {
       try {
         return {

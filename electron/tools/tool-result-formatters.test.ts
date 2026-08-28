@@ -49,13 +49,30 @@ describe('text Tool Result formatters', () => {
         ),
       ),
     ).toBe(
-      '7\talpha\n8\tbeta\n\n[truncated=true; nextStartLine=9; totalLines=10; lineTruncated=false]',
+      '7\talpha\n8\tbeta\n\n[hasMore=true; nextStartLine=9; totalLines=10; lineTruncated=false]',
     )
     expect(
       rendered(
         projectReadFileResult(result({ content: '', truncated: false })),
       ),
     ).toBe('[empty file]')
+    expect(
+      rendered(
+        projectReadFileResult(
+          result({
+            content: '1\tcomplete',
+            hasMore: false,
+            startCursor: 'cursor-start',
+            endCursor: 'cursor-end',
+            lineTruncated: false,
+            dataLost: false,
+            tailClipped: false,
+          }),
+        ),
+      ),
+    ).toBe(
+      '1\tcomplete\n\n[hasMore=false; endCursor=cursor-end; lineTruncated=false]',
+    )
     expect(
       rendered(
         projectGrepResult(
@@ -96,7 +113,7 @@ describe('text Tool Result formatters', () => {
       rendered(
         projectTerminalOpenResult(result({ terminalId: 7, cwd: '/tmp' })),
       ),
-    ).toBe('Opened terminal 7')
+    ).toBe('Opened terminal 7\n\n[target={"type":"terminal","id":"7"}]')
     expect(
       rendered(
         projectTerminalReadResult(
@@ -117,7 +134,9 @@ describe('text Tool Result formatters', () => {
       rendered(
         projectTerminalSendResult(result({ accepted: true, waitedMs: 250 })),
       ),
-    ).toBe('Terminal input accepted after 250 ms')
+    ).toBe(
+      '[no new output]\n\n[accepted=true; waitedMs=250; cursor=0; delta=false]',
+    )
     expect(rendered(projectTerminalCloseResult(result({ closed: true })))).toBe(
       'Terminal closed',
     )

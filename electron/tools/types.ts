@@ -3,6 +3,7 @@ import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { ToolResultContent } from '../../shared/message'
 import type { ApprovedToolCall } from './approved-tool-call'
+import type { SessionTempPaths } from '../session-temp/service'
 
 export type Effect =
   | 'filesystem.read'
@@ -20,6 +21,7 @@ export type Effect =
   | 'external.unknown'
 
 export type ToolExecutionMode = 'parallel' | 'serial'
+export type ToolModelOutputPolicy = 'bounded' | 'paged' | 'passthrough'
 
 export type SuccessfulToolResult = Extract<ToolResult, { status: 'ok' }>
 export type ToolModelContentPart = ToolResultContent[number]
@@ -28,6 +30,7 @@ export interface ToolResultProjection {
   content: ToolModelContentPart[]
   isError: boolean
   truncated: boolean
+  outputPolicy: ToolModelOutputPolicy
 }
 
 export interface ToolDefinition<Schema extends TSchema = TSchema> {
@@ -41,7 +44,8 @@ export interface ToolDefinition<Schema extends TSchema = TSchema> {
   supportsAbort: boolean
   /** Null delegates lifetime bounds to the abortable orchestration body. */
   defaultTimeoutMs: number | null
-  maxOutputBytes: number
+  /** Selects the shared model-visible output limiter; defaults to bounded. */
+  modelOutputPolicy?: ToolModelOutputPolicy
   validateArgs?(args: Static<Schema>): string | undefined
   /** Projects a successful internal result into deterministic model-visible parts. */
   projectResultForModel?(
@@ -63,9 +67,16 @@ export interface ToolCall {
 
 export interface ToolExecutionContext {
   sessionId: SessionId
+  ownerSessionId?: SessionId
   runId: RunId
   workspace: {
     canonicalPath: string
+  }
+  sessionTemp?: SessionTempPaths
+  maxSubagents?: number
+  toolOutputLimits?: {
+    maxToolOutputBytes: number
+    maxToolOutputLines: number
   }
   readOnlyWorkspace?: boolean
   signal: AbortSignal

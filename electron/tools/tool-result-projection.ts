@@ -113,6 +113,7 @@ export function projectToolResultForModel(input: {
       content: textContent(error.text),
       isError: true,
       truncated: error.truncated,
+      outputPolicy: input.definition?.modelOutputPolicy ?? 'bounded',
     }
   }
 
@@ -122,6 +123,7 @@ export function projectToolResultForModel(input: {
       content: fallback,
       isError: false,
       truncated: true,
+      outputPolicy: input.definition?.modelOutputPolicy ?? 'bounded',
     }
   }
   const projector = input.definition?.projectResultForModel
@@ -130,6 +132,7 @@ export function projectToolResultForModel(input: {
       content: fallback,
       isError: false,
       truncated: input.result.truncated === true,
+      outputPolicy: input.definition?.modelOutputPolicy ?? 'bounded',
     }
   }
 
@@ -149,6 +152,7 @@ export function projectToolResultForModel(input: {
       content: canonicalContent(projected),
       isError: false,
       truncated: input.result.truncated === true,
+      outputPolicy: input.definition?.modelOutputPolicy ?? 'bounded',
     }
   } catch (error) {
     input.onDiagnostic?.(
@@ -159,6 +163,7 @@ export function projectToolResultForModel(input: {
       content: fallback,
       isError: false,
       truncated: input.result.truncated === true,
+      outputPolicy: input.definition?.modelOutputPolicy ?? 'bounded',
     }
   }
 }

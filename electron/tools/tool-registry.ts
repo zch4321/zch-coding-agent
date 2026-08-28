@@ -216,60 +216,6 @@ function cancelledResult(): ToolResult {
   }
 }
 
-function boundResult(result: ToolResult, maxBytes: number): ToolResult {
-  if (result.status !== 'ok') {
-    return result
-  }
-
-  const serialized = JSON.stringify(result.content)
-  const totalBytes = Buffer.byteLength(serialized, 'utf8')
-
-  if (totalBytes <= maxBytes) {
-    return {
-      ...result,
-      totalBytes: result.totalBytes ?? totalBytes,
-    }
-  }
-
-  const bytes = Buffer.from(serialized, 'utf8')
-  let lower = 0
-  let upper = bytes.length
-  let bounded: ToolResult = {
-    status: 'ok',
-    content: {
-      truncated: true,
-      preview: '',
-      message: 'Tool output exceeded the configured limit',
-    },
-    truncated: true,
-    totalBytes,
-  }
-
-  while (lower <= upper) {
-    const retained = Math.floor((lower + upper) / 2)
-    const preview = new TextDecoder().decode(bytes.subarray(0, retained))
-    const candidate: ToolResult = {
-      status: 'ok',
-      content: {
-        truncated: true,
-        preview,
-        message: 'Tool output exceeded the configured limit',
-      },
-      truncated: true,
-      totalBytes,
-    }
-
-    if (Buffer.byteLength(JSON.stringify(candidate), 'utf8') <= maxBytes) {
-      bounded = candidate
-      lower = retained + 1
-    } else {
-      upper = retained - 1
-    }
-  }
-
-  return bounded
-}
-
 /** Validates approved calls and executes definitions with abort and settlement tracking. */
 export class ToolExecutor {
   readonly #registry: ToolRegistry
@@ -377,6 +323,7 @@ export class ToolExecutor {
         sessionId: context.sessionId,
         runId: context.runId,
         workspace: context.workspace.canonicalPath,
+        sessionTempRoot: context.sessionTemp?.root,
       })
     } catch (error) {
       return {
@@ -426,7 +373,7 @@ export class ToolExecutor {
             : timeoutResult(definition.id)
         }
 
-        return boundResult(result, definition.maxOutputBytes)
+        return result
       }
 
       const settlement = executed.then(
@@ -447,7 +394,7 @@ export class ToolExecutor {
         )
       })
       const result = await Promise.race([executed, aborted])
-      return boundResult(result, definition.maxOutputBytes)
+      return result
     } catch (error) {
       if (signal.aborted) {
         return cancelledResult()

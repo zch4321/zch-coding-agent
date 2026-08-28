@@ -69,30 +69,74 @@ export function truncateTextHeadTail(
   return `${decodeUtf8Slice(source.subarray(0, headBytes))}${TRUNCATION_MARKER}${decodeUtf8Slice(source.subarray(Math.max(headBytes, source.length - tailBytes)))}`
 }
 
-/** Fits one projected Tool Result to the configured per-result token limit. */
+/** Fits one projected Tool Result to the frozen global byte and line limits. */
 export function boundToolResultProjectionForContext(
   projection: ToolResultProjection,
-  limits: PublicConfig['limits'],
+  limits: Pick<
+    PublicConfig['limits'],
+    'maxToolOutputBytes' | 'maxToolOutputLines'
+  >,
 ): ToolResultProjection {
-  const rendered = renderToolResultContent(projection.content)
-  const tokens = estimateTextTokens(rendered, limits.tokenEstimation)
+  if (projection.outputPolicy !== 'bounded') return projection
 
-  if (tokens <= limits.maxToolResultTokens) {
-    return projection
-  }
+  const rendered = renderToolResultContent(projection.content)
+  const totalBytes = Buffer.byteLength(rendered, 'utf8')
+  const lines = rendered.split('\n')
+  const totalLines = lines.length
+  const byteLimitExceeded = totalBytes > limits.maxToolOutputBytes
+  const lineLimitExceeded = totalLines > limits.maxToolOutputLines
+
+  if (!byteLimitExceeded && !lineLimitExceeded) return projection
+
+  const continuation = [
+    'artifactPath',
+    'resultPath',
+    'manifestPath',
+    'activityPath',
+  ]
+    .map((field) => {
+      const value =
+        new RegExp(`(?:^|[;\\n\\s])${field}=([^;\\]\\n]+)`, 'u')
+          .exec(rendered)?.[1]
+          ?.trim() ??
+        new RegExp(`"${field}"\\s*:\\s*"([^"]+)"`, 'u')
+          .exec(rendered)?.[1]
+          ?.trim()
+      return value ? `${field}=${value}` : undefined
+    })
+    .find((value) => value !== undefined)
+  const marker = `[truncated=true; byteLimitExceeded=${String(
+    byteLimitExceeded,
+  )}; lineLimitExceeded=${String(
+    lineLimitExceeded,
+  )}; totalBytes=${totalBytes}; totalLines=${totalLines}${
+    continuation ? `; ${continuation}` : ''
+  }]`
+  const sourceLineLimit = Math.max(0, limits.maxToolOutputLines - 1)
+  const sourceHead = lines.slice(0, sourceLineLimit).join('\n')
+  const separator = sourceHead
+    ? limits.maxToolOutputLines > 1
+      ? '\n'
+      : ' '
+    : ''
+  const availableBytes = Math.max(
+    0,
+    limits.maxToolOutputBytes -
+      Buffer.byteLength(`${separator}${marker}`, 'utf8'),
+  )
+  const boundedHead = decodeUtf8Slice(
+    Buffer.from(sourceHead, 'utf8').subarray(0, availableBytes),
+  )
 
   return {
     content: [
       {
         type: 'text',
-        text: truncateTextHeadTail(
-          rendered,
-          limits.maxToolResultTokens,
-          limits.tokenEstimation,
-        ),
+        text: `${boundedHead}${boundedHead ? separator : ''}${marker}`,
       },
     ],
     isError: projection.isError,
     truncated: true,
+    outputPolicy: projection.outputPolicy,
   }
 }

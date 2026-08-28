@@ -9,6 +9,10 @@ import {
   type WebSearchProvider,
 } from './web-search-provider'
 import { projectWebSearchResult } from './tool-result-formatters'
+import {
+  sessionArtifactKey,
+  writeSessionArtifactJson,
+} from '../session-temp/service'
 
 const WebSearchSchema = Type.Object(
   {
@@ -52,6 +56,10 @@ function errorResult(error: unknown): ToolResult {
 export function registerWebSearchTools(
   registry: ToolRegistrationPort,
   configStore: Pick<ConfigStore, 'getPublicConfig' | 'getWebSearchApiKey'>,
+  providerFactory: (
+    providerId: PublicConfig['webSearch']['provider'],
+    apiKey: string,
+  ) => WebSearchProvider = createProvider,
 ): void {
   registry.registerTool({
     id: 'web_search',
@@ -63,7 +71,6 @@ export function registerWebSearchTools(
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 128 * 1_024,
     projectResultForModel: projectWebSearchResult,
     async execute(args: WebSearchArgs, context): Promise<ToolResult> {
       try {
@@ -81,7 +88,7 @@ export function registerWebSearchTools(
         }
 
         const count = args.count ?? config.webSearch.count
-        const provider = createProvider(config.webSearch.provider, apiKey)
+        const provider = providerFactory(config.webSearch.provider, apiKey)
         const results = await provider.search({
           query: args.query,
           count,
@@ -98,10 +105,36 @@ export function registerWebSearchTools(
             snippet: result.snippet,
           })),
         }
+        let artifact:
+          | { artifactAvailable: true; artifactPath: string }
+          | { artifactAvailable: false; captureError: string }
+        try {
+          if (!context.sessionTemp)
+            throw new Error('Session temp is unavailable')
+          artifact = {
+            artifactAvailable: true,
+            artifactPath: await writeSessionArtifactJson(
+              context.sessionTemp,
+              [
+                'web-search',
+                `${sessionArtifactKey(
+                  `${context.runId}:${context.approvedCall.callId}`,
+                )}.json`,
+              ],
+              content,
+            ),
+          }
+        } catch (error) {
+          artifact = {
+            artifactAvailable: false,
+            captureError:
+              error instanceof Error ? error.message : String(error),
+          }
+        }
 
         return {
           status: 'ok',
-          content,
+          content: { ...content, ...artifact },
         }
       } catch (error) {
         return errorResult(error)

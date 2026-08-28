@@ -18,6 +18,13 @@ export const TerminalInfoSchema = Type.Object(
     cols: Type.Integer({ minimum: 2, maximum: 1_000 }),
     rows: Type.Integer({ minimum: 1, maximum: 1_000 }),
     seq: Type.Integer({ minimum: 0 }),
+    artifactAvailable: Type.Optional(Type.Boolean()),
+    artifactPath: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 8_192 }),
+    ),
+    captureError: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 65_536 }),
+    ),
   },
   { additionalProperties: false },
 )

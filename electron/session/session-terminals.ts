@@ -33,7 +33,9 @@ export class SessionTerminalController {
     const session = this.#requireSession(input.sessionId)
     return this.pool.open({
       sessionId: session.sessionId,
+      ownerSessionId: session.ownerSessionId,
       workspace: session.workspace,
+      sessionTemp: session.sessionTemp,
       cwd: input.cwd,
       cols: input.cols,
       rows: input.rows,

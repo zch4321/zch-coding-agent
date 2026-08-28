@@ -3,9 +3,7 @@ import type { TerminalId } from '../../shared/ids'
 import type { TerminalPool } from '../terminal/pool'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
 import {
-  projectTerminalCloseResult,
   projectTerminalOpenResult,
-  projectTerminalReadResult,
   projectTerminalSendResult,
 } from './tool-result-formatters'
 
@@ -16,8 +14,7 @@ const TerminalIdField = Type.Unsafe<TerminalId>(
     minimum: 1,
     maximum: Number.MAX_SAFE_INTEGER,
     title: 'TerminalId',
-    description:
-      'Terminal id returned by terminal_open or terminal_list for this session.',
+    description: 'Numeric Terminal id returned by terminal_open.',
   }),
 )
 
@@ -28,7 +25,7 @@ const OpenSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative directory for the terminal. Omit for workspace root.',
+          'Workspace-relative directory or absolute Session-temp directory for the Terminal. Omit for workspace root.',
       }),
     ),
     cols: Type.Optional(
@@ -40,7 +37,7 @@ const OpenSchema = Type.Object(
     ),
     rows: Type.Optional(
       Type.Integer({
-        minimum: 1,
+        minimum: 0,
         maximum: 1_000,
         description: 'Initial terminal height in rows.',
       }),
@@ -58,48 +55,19 @@ const SendSchema = Type.Object(
     }),
     delayMs: Type.Optional(
       Type.Integer({
-        minimum: 1,
+        minimum: 0,
         maximum: MAX_TERMINAL_SEND_DELAY_MS,
         description:
-          'Optional milliseconds to wait after the input is accepted. Use before a sequential terminal_read when the command needs time to produce output.',
+          'Milliseconds to wait before returning new output. Defaults to 1000; set 0 for an immediate snapshot.',
       }),
     ),
   },
   { additionalProperties: false },
 )
-const ReadSchema = Type.Object(
-  {
-    terminalId: TerminalIdField,
-    cursor: Type.Optional(
-      Type.Integer({
-        minimum: 0,
-        description:
-          'Optional scrollback cursor from a previous terminal_read result.',
-      }),
-    ),
-    lines: Type.Optional(
-      Type.Integer({
-        minimum: 1,
-        maximum: 5_000,
-        description: 'Maximum number of terminal lines to return.',
-      }),
-    ),
-  },
-  { additionalProperties: false },
-)
-const ListSchema = Type.Object({}, { additionalProperties: false })
-const CloseSchema = Type.Object(
-  {
-    terminalId: TerminalIdField,
-  },
-  { additionalProperties: false },
-)
-
-/** Registers Session terminal open, list, input, and close tools. */
+/** Registers Provider-visible Terminal launch and input tools. */
 export function registerTerminalTools(
   registry: ToolRegistrationPort,
   terminalPool: TerminalPool,
-  getMaxOutputBytes: () => number,
 ): void {
   registry.registerTool({
     id: 'terminal_open',
@@ -111,15 +79,22 @@ export function registerTerminalTools(
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 10_000,
-    maxOutputBytes: 65_536,
     projectResultForModel: projectTerminalOpenResult,
     async execute(args, context) {
       const terminal = await terminalPool.open({
         sessionId: context.sessionId,
+        ownerSessionId: context.ownerSessionId ?? context.sessionId,
         workspace: context.workspace.canonicalPath,
+        sessionTemp: context.sessionTemp,
         ...args,
       })
-      return { status: 'ok', content: { ...terminal } }
+      return {
+        status: 'ok',
+        content: {
+          ...terminal,
+          target: { type: 'terminal', id: String(terminal.terminalId) },
+        },
+      }
     },
   } satisfies ToolDefinition<typeof OpenSchema>)
 
@@ -127,105 +102,77 @@ export function registerTerminalTools(
     id: 'terminal_send',
     executionMode: 'serial',
     description:
-      'Submit input to a persistent terminal owned by this session. The tool presses Enter automatically when needed. Optional delayMs waits after accepted input before returning so a sequential terminal_read can observe command output.',
+      'Submit input to a persistent Terminal. Input is newline-normalized, then the tool waits 1 second by default and returns new ANSI-free output; when no new output arrives it returns a short tail. Full output remains in the returned artifactPath.',
     inputSchema: SendSchema,
     effects: ['terminal.write'],
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: MAX_TERMINAL_SEND_DELAY_MS + 5_000,
-    maxOutputBytes: 16_384,
     projectResultForModel: projectTerminalSendResult,
     async execute(args, context): Promise<ToolResult> {
+      const before = terminalPool.modelCursor(
+        context.sessionId,
+        args.terminalId,
+      )
       const accepted = terminalPool.write(
         context.sessionId,
         args.terminalId,
         normalizeTerminalInput(args.data),
       )
-      if (!accepted || args.delayMs === undefined) {
+      if (!accepted) {
+        const background = terminalPool.backgroundSnapshot(
+          context.ownerSessionId ?? context.sessionId,
+          args.terminalId,
+        )
         return {
           status: 'ok',
-          content: { accepted },
+          content: {
+            accepted,
+            content: '',
+            cursor: background.cursor,
+            delta: false,
+            artifactAvailable: background.artifactAvailable,
+            ...(background.artifactPath
+              ? { artifactPath: background.artifactPath }
+              : {}),
+            ...(background.captureError
+              ? { captureError: background.captureError }
+              : {}),
+          },
         }
       }
       const startedAt = performance.now()
-      await waitForTerminalDelay(args.delayMs, context.signal)
+      await waitForTerminalDelay(args.delayMs ?? 1_000, context.signal)
+      const output = terminalPool.readDeltaOrTail(
+        context.sessionId,
+        args.terminalId,
+        before,
+        { lines: 20, maxBytes: 8 * 1_024 },
+      )
+      const background = terminalPool.backgroundSnapshot(
+        context.ownerSessionId ?? context.sessionId,
+        args.terminalId,
+      )
       return {
         status: 'ok',
         content: {
           accepted,
           waitedMs: Math.round(performance.now() - startedAt),
+          content: output.content,
+          cursor: output.cursor,
+          delta: output.delta,
+          truncated: output.truncated,
+          artifactAvailable: background.artifactAvailable,
+          ...(background.artifactPath
+            ? { artifactPath: background.artifactPath }
+            : {}),
+          ...(background.captureError
+            ? { captureError: background.captureError }
+            : {}),
         },
       }
     },
   } satisfies ToolDefinition<typeof SendSchema>)
-
-  registry.registerTool({
-    id: 'terminal_read',
-    executionMode: 'serial',
-    description:
-      'Read bounded, ANSI-free output from a persistent terminal owned by this session. Use cursor for incremental polling after delay while a long-running test, server, watcher, or REPL continues.',
-    inputSchema: ReadSchema,
-    effects: ['terminal.read'],
-    defaultRisk: 'low',
-    supportsAbort: true,
-    defaultTimeoutMs: 10_000,
-    maxOutputBytes: 64 * 1_024,
-    projectResultForModel: projectTerminalReadResult,
-    async execute(args, context) {
-      const result = terminalPool.read(context.sessionId, args.terminalId, {
-        cursor: args.cursor,
-        lines: args.lines,
-        maxBytes: Math.min(getMaxOutputBytes(), 32 * 1_024),
-      })
-      return {
-        status: 'ok',
-        content: result,
-        truncated: result.truncated,
-        totalBytes: result.totalBytes,
-      }
-    },
-  } satisfies ToolDefinition<typeof ReadSchema>)
-
-  registry.registerTool({
-    id: 'terminal_list',
-    executionMode: 'serial',
-    description: 'List persistent terminals owned by this session.',
-    inputSchema: ListSchema,
-    effects: ['terminal.read'],
-    defaultRisk: 'low',
-    supportsAbort: true,
-    defaultTimeoutMs: 10_000,
-    maxOutputBytes: 65_536,
-    async execute(_args, context) {
-      return {
-        status: 'ok',
-        content: terminalPool.list(context.sessionId).map((terminal) => ({
-          ...terminal,
-        })),
-      }
-    },
-  } satisfies ToolDefinition<typeof ListSchema>)
-
-  registry.registerTool({
-    id: 'terminal_close',
-    executionMode: 'serial',
-    description: 'Close a persistent terminal owned by this session.',
-    inputSchema: CloseSchema,
-    effects: ['terminal.write'],
-    defaultRisk: 'review',
-    supportsAbort: true,
-    defaultTimeoutMs: 10_000,
-    maxOutputBytes: 16_384,
-    projectResultForModel: projectTerminalCloseResult,
-    async execute(args, context) {
-      return {
-        status: 'ok',
-        content: {
-          closed: terminalPool.close(context.sessionId, args.terminalId),
-        },
-      }
-    },
-  } satisfies ToolDefinition<typeof CloseSchema>)
 }
 
 /** Waits after a successful terminal write while honoring run cancellation. */

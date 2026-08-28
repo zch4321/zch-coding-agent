@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import {
   boundToolResultProjectionForContext,
   estimateTextTokens,
 } from './context-budget'
-
-const limits = toPublicConfig(DEFAULT_APP_CONFIG, false).limits
 
 describe('context budget', () => {
   it('supports conservative and user-defined UTF-8 byte ratios', () => {
@@ -23,7 +20,7 @@ describe('context budget', () => {
     ).toBe(3)
   })
 
-  it('bounds each result independently with a head and tail preview', () => {
+  it('bounds each result independently with a head preview', () => {
     const large = {
       content: [
         {
@@ -33,10 +30,11 @@ describe('context budget', () => {
       ],
       isError: false,
       truncated: false,
+      outputPolicy: 'bounded' as const,
     }
     const bounded = boundToolResultProjectionForContext(large, {
-      ...limits,
-      maxToolResultTokens: 256,
+      maxToolOutputBytes: 1_024,
+      maxToolOutputLines: 500,
     })
 
     expect(bounded).toMatchObject({ truncated: true })
@@ -44,17 +42,18 @@ describe('context budget', () => {
       type: 'text',
       text: expect.stringContaining('HEAD-'),
     })
-    expect(JSON.stringify(bounded.content)).toContain('-TAIL')
+    expect(JSON.stringify(bounded.content)).not.toContain('-TAIL')
 
     const small = {
       content: [{ type: 'text' as const, text: 'small later result' }],
       isError: false,
       truncated: false,
+      outputPolicy: 'bounded' as const,
     }
     expect(
       boundToolResultProjectionForContext(small, {
-        ...limits,
-        maxToolResultTokens: 256,
+        maxToolOutputBytes: 1_024,
+        maxToolOutputLines: 500,
       }),
     ).toEqual(small)
   })
@@ -70,14 +69,39 @@ describe('context budget', () => {
         ],
         isError: false,
         truncated: false,
+        outputPolicy: 'bounded',
       },
-      { ...limits, maxToolResultTokens: 128 },
+      { maxToolOutputBytes: 1_024, maxToolOutputLines: 500 },
     )
     const content = bounded.content[0]
     expect(content?.type).toBe('text')
     if (content?.type !== 'text') return
     expect(content.text).not.toContain('\uFFFD')
     expect(content.text).toContain('开头')
-    expect(content.text).toContain('结尾')
+    expect(content.text).not.toContain('结尾')
+  })
+
+  it('retains a continuation artifact path in the truncation marker', () => {
+    const bounded = boundToolResultProjectionForContext(
+      {
+        content: [
+          {
+            type: 'json',
+            value: {
+              response: 'x'.repeat(10_000),
+              resultPath: '/tmp/session/artifacts/subagents/result.md',
+            },
+          },
+        ],
+        isError: false,
+        truncated: false,
+        outputPolicy: 'bounded',
+      },
+      { maxToolOutputBytes: 1_024, maxToolOutputLines: 500 },
+    )
+
+    expect(JSON.stringify(bounded.content)).toContain(
+      'resultPath=/tmp/session/artifacts/subagents/result.md',
+    )
   })
 })

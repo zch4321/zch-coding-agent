@@ -81,7 +81,7 @@ export async function prepareRunContext(input: {
     if (attachment.kind === 'file') {
       const file = await guard.readFileBounded(
         attachment.path,
-        input.config.limits.readFileOutputBytes,
+        input.config.limits.maxToolOutputBytes,
         input.signal,
       )
       chips.push({

@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { PermissionPipeline } from '../permission/permission-pipeline'
@@ -22,9 +25,21 @@ function fakeStore(options: { hasKey: boolean }) {
 async function executeWebSearch(
   args: Record<string, unknown>,
   hasKey: boolean,
+  options: {
+    providerFactory?: Parameters<typeof registerWebSearchTools>[2]
+    sessionTemp?: { root: string; artifacts: string; scratch: string }
+  } = {},
 ) {
   const registry = new ToolRegistry()
-  registerWebSearchTools(registry, fakeStore({ hasKey }))
+  if (options.providerFactory) {
+    registerWebSearchTools(
+      registry,
+      fakeStore({ hasKey }),
+      options.providerFactory,
+    )
+  } else {
+    registerWebSearchTools(registry, fakeStore({ hasKey }))
+  }
   const executor = new ToolExecutor(registry)
   const signal = new AbortController().signal
   const call = {
@@ -42,6 +57,7 @@ async function executeWebSearch(
     sessionId: 's' as SessionId,
     runId: 'r' as RunId,
     workspace: { canonicalPath: 'F:/workspace' },
+    ...(options.sessionTemp ? { sessionTemp: options.sessionTemp } : {}),
   }
   const prepared = await new PermissionPipeline().authorize({
     ...context,
@@ -73,6 +89,46 @@ describe('web_search tool', () => {
     expect(result).toMatchObject({
       status: 'error',
       code: 'NO_API_KEY',
+    })
+  })
+
+  it('always stores normalized search results in the Session artifacts', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'search-artifact-'))
+    const sessionTemp = {
+      root,
+      artifacts: path.join(root, 'artifacts'),
+      scratch: path.join(root, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+    const search = vi.fn(async () => [
+      {
+        title: 'Result',
+        url: 'https://example.com/result',
+        snippet: 'complete normalized snippet',
+      },
+    ])
+
+    const result = await executeWebSearch({ query: 'artifact' }, true, {
+      sessionTemp,
+      providerFactory: () => ({ id: 'fixture', search }),
+    })
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      content: {
+        artifactAvailable: true,
+        artifactPath: expect.any(String),
+      },
+    })
+    if (result.status !== 'ok') return
+    const artifactPath = (result.content as { artifactPath: string })
+      .artifactPath
+    expect(JSON.parse(await readFile(artifactPath, 'utf8'))).toMatchObject({
+      provider: 'fixture',
+      results: [{ snippet: 'complete normalized snippet' }],
     })
   })
 })

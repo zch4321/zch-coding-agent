@@ -21,7 +21,7 @@ import type {
 import { writeJsonAtomic } from '../config/atomic-file'
 import { isPublicNetworkAddress } from '../net/network-address'
 
-export const MAX_SKILL_BYTES = 64 * 1_024
+export const MAX_SKILL_BYTES = 256 * 1_024
 const MAX_SKILLS = 128
 const MAX_REDIRECTS = 5
 const DOWNLOAD_TIMEOUT_MS = 15_000
