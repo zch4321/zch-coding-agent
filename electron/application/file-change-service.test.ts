@@ -216,6 +216,8 @@ function approvedPatchCall(
       {
         kind: 'file' as const,
         operation: 'patch' as const,
+        rootKind: 'workspace' as const,
+        rootPath: workspace,
         path: 'created.txt',
         absolutePath: path.join(workspace, 'created.txt'),
         parentRealPath: workspace,
@@ -256,6 +258,8 @@ function approvedCreateCall(
       {
         kind: 'file' as const,
         operation: 'write' as const,
+        rootKind: 'workspace' as const,
+        rootPath: workspace,
         path: 'created.txt',
         absolutePath: path.join(workspace, 'created.txt'),
         parentRealPath: workspace,

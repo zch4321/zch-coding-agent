@@ -1,10 +1,10 @@
 import { Type } from '@sinclair/typebox'
+import path from 'node:path'
 import type { JsonValue } from '../../shared/json'
 import type { PublicConfig } from '../../shared/config'
 import type { ToolDefinition, ToolResult } from './types'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
 import type { ToolRegistry } from './tool-registry'
-import { estimateTextTokens, truncateTextHeadTail } from './context-budget'
 import { DEFAULT_MAX_ENTRIES, walkFiles } from './workspace-walk'
 import { type Searcher, resolveWorkspaceSearcher } from './searcher'
 import { iterateWorkspaceGlobFiles } from './workspace-glob'
@@ -14,22 +14,17 @@ import {
   projectListDirResult,
   projectReadFileResult,
 } from './tool-result-formatters'
+import { readStreamingFile } from './streaming-file-reader'
 
-const MAX_READ_SOURCE_BYTES = 10_000_000
-const MAX_READ_OUTPUT_BYTES = 128 * 1_024
 const MAX_READ_LINES = 10_000
-const DEFAULT_READ_LINES = MAX_READ_LINES
+const READ_FILE_CURSOR_RESERVE_BYTES = 768
 const DEFAULT_LIMITS: Pick<
   PublicConfig['limits'],
-  | 'maxToolResultTokens'
-  | 'tokenEstimation'
-  | 'readFileSourceBytes'
-  | 'readFileOutputBytes'
+  'maxToolOutputBytes' | 'maxToolOutputLines' | 'readFileSourceBytes'
 > = {
-  maxToolResultTokens: 64_000,
-  tokenEstimation: { mode: 'conservative', bytesPerToken: 3 },
-  readFileSourceBytes: MAX_READ_SOURCE_BYTES,
-  readFileOutputBytes: MAX_READ_OUTPUT_BYTES,
+  maxToolOutputBytes: 256 * 1_024,
+  maxToolOutputLines: 500,
+  readFileSourceBytes: 10_000_000,
 }
 
 const ReadFileArgsSchema = Type.Object(
@@ -37,7 +32,8 @@ const ReadFileArgsSchema = Type.Object(
     path: Type.String({
       minLength: 1,
       maxLength: 4_096,
-      description: 'Workspace-relative path of the UTF-8 file to read.',
+      description:
+        'Workspace-relative path or absolute path inside the current Session temp directory.',
     }),
     startLine: Type.Optional(
       Type.Integer({
@@ -59,6 +55,20 @@ const ReadFileArgsSchema = Type.Object(
           'Whether to prefix returned lines with line numbers. Defaults to true.',
       }),
     ),
+    cursor: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 4_096,
+        description:
+          'Opaque continuation cursor returned by a previous read_file call for this exact file.',
+      }),
+    ),
+    tail: Type.Optional(
+      Type.Boolean({
+        description:
+          'Read the final lineCount lines. Cannot be combined with startLine or cursor.',
+      }),
+    ),
   },
   { additionalProperties: false },
 )
@@ -70,7 +80,7 @@ const ListDirArgsSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative directory path. Omit to list the workspace root.',
+          'Workspace-relative directory or absolute Session-temp directory. Omit to list the workspace root.',
       }),
     ),
     recursive: Type.Optional(
@@ -103,7 +113,7 @@ const GlobArgsSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative directory to search. Omit to search the workspace root.',
+          'Workspace-relative directory or absolute Session-temp directory to search. Omit to search the workspace root.',
       }),
     ),
     maxResults: Type.Optional(
@@ -129,7 +139,7 @@ const GrepArgsSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative file or directory to search. Omit for workspace root.',
+          'Workspace-relative file/directory or absolute Session-temp path to search. Omit for workspace root.',
       }),
     ),
     include: Type.Optional(
@@ -156,8 +166,11 @@ const GrepArgsSchema = Type.Object(
   { additionalProperties: false },
 )
 
-function workspaceGuard(canonicalPath: string): PathGuard {
-  return PathGuard.fromCanonical(canonicalPath)
+function workspaceGuard(
+  canonicalPath: string,
+  sessionTempPath?: string,
+): PathGuard {
+  return PathGuard.fromCanonical(canonicalPath, sessionTempPath)
 }
 
 function errorResult(error: unknown): ToolResult {
@@ -178,10 +191,7 @@ function errorResult(error: unknown): ToolResult {
 export function createReadOnlyToolDefinitions(
   getLimits: () => Pick<
     PublicConfig['limits'],
-    | 'maxToolResultTokens'
-    | 'tokenEstimation'
-    | 'readFileSourceBytes'
-    | 'readFileOutputBytes'
+    'maxToolOutputBytes' | 'maxToolOutputLines' | 'readFileSourceBytes'
   > = () => DEFAULT_LIMITS,
   getSearcher: () => Promise<Searcher> = resolveWorkspaceSearcher,
 ): ToolDefinition[] {
@@ -189,126 +199,81 @@ export function createReadOnlyToolDefinitions(
     id: 'read_file',
     executionMode: 'parallel',
     description:
-      'Read a bounded line range from a UTF-8 workspace file. Each line is prefixed with its line number. Continue with nextStartLine when truncated.',
+      'Stream a bounded UTF-8 page from a workspace or Session-temp file. Continue an appended log with nextCursor; use tail for a bounded final snapshot.',
     inputSchema: ReadFileArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 15_000,
-    maxOutputBytes: 160 * 1_024,
+    modelOutputPolicy: 'paged',
     projectResultForModel: projectReadFileResult,
+    validateArgs(args) {
+      const locations =
+        Number(args.startLine !== undefined) +
+        Number(args.cursor !== undefined) +
+        Number(args.tail === true)
+      return locations > 1
+        ? 'read_file startLine, cursor, and tail are mutually exclusive'
+        : undefined
+    },
     async execute(args, context) {
       try {
-        const guard = workspaceGuard(context.workspace.canonicalPath)
-        const limits = getLimits()
-        const maxSourceBytes = Math.min(
-          limits.readFileSourceBytes,
-          MAX_READ_SOURCE_BYTES,
+        const guard = workspaceGuard(
+          context.workspace.canonicalPath,
+          context.sessionTemp?.root,
         )
-        const maxOutputBytes = Math.min(
-          limits.readFileOutputBytes,
-          MAX_READ_OUTPUT_BYTES,
-        )
-        const source = await guard.readFileBounded(
-          args.path,
-          maxSourceBytes,
-          context.signal,
-        )
-
-        if (source.truncated) {
+        const configuredLimits = getLimits()
+        const outputLimits = context.toolOutputLimits ?? configuredLimits
+        const bodyLineLimit =
+          outputLimits.maxToolOutputLines <= 2
+            ? 1
+            : outputLimits.maxToolOutputLines - 2
+        const result = await readStreamingFile({
+          guard,
+          inputPath: args.path,
+          startLine: args.startLine,
+          cursor: args.cursor,
+          tail: args.tail,
+          lineCount: Math.min(args.lineCount ?? bodyLineLimit, bodyLineLimit),
+          lineNumbers: args.lineNumbers ?? true,
+          maxOutputBytes: Math.max(
+            1,
+            outputLimits.maxToolOutputBytes - READ_FILE_CURSOR_RESERVE_BYTES,
+          ),
+          projectionLineLimit: outputLimits.maxToolOutputLines,
+          maxWorkspaceSourceBytes: configuredLimits.readFileSourceBytes,
+          signal: context.signal,
+        })
+        return {
+          status: 'ok',
+          ...result,
+        }
+      } catch (error) {
+        if (
+          error instanceof PathGuardError &&
+          error.code === 'PATH_NOT_FOUND' &&
+          context.sessionTemp &&
+          path.isAbsolute(args.path) &&
+          (() => {
+            try {
+              return (
+                workspaceGuard(
+                  context.workspace.canonicalPath,
+                  context.sessionTemp.root,
+                ).rootForCandidate(args.path).kind === 'session-temp'
+              )
+            } catch {
+              return false
+            }
+          })()
+        ) {
           return {
             status: 'error',
-            code: 'FILE_TOO_LARGE',
-            message: `read_file supports files up to ${maxSourceBytes} bytes`,
+            code: 'ARTIFACT_EXPIRED',
+            message: 'The Session artifact no longer exists',
             retryable: false,
           }
         }
-
-        const lines =
-          source.content.length === 0 ? [] : source.content.split(/\r?\n/u)
-
-        if (/\r?\n$/u.test(source.content)) {
-          lines.pop()
-        }
-        const requestedStartLine = args.startLine ?? 1
-        const startIndex = Math.min(requestedStartLine - 1, lines.length)
-        const requestedLines = args.lineCount ?? DEFAULT_READ_LINES
-        const maxTokens = Math.min(64_000, limits.maxToolResultTokens)
-        const selected: string[] = []
-        let selectedBytes = 0
-        let selectedTokens = 0
-        let lineTruncated = false
-
-        const includeLineNumbers = args.lineNumbers ?? true
-        for (
-          let index = startIndex;
-          index < lines.length && selected.length < requestedLines;
-          index += 1
-        ) {
-          const lineNumber = requestedStartLine + (index - startIndex)
-          const renderedLine = includeLineNumbers
-            ? `${lineNumber}\t${lines[index]}`
-            : lines[index]
-          const separator = selected.length === 0 ? '' : '\n'
-          const candidate = `${separator}${renderedLine}`
-          const candidateBytes = Buffer.byteLength(candidate, 'utf8')
-          const candidateTokens = estimateTextTokens(
-            candidate,
-            limits.tokenEstimation,
-          )
-
-          if (
-            selectedBytes + candidateBytes > maxOutputBytes ||
-            selectedTokens + candidateTokens > maxTokens
-          ) {
-            if (selected.length === 0) {
-              const byteBounded = Buffer.from(renderedLine).subarray(
-                0,
-                maxOutputBytes,
-              )
-              selected.push(
-                truncateTextHeadTail(
-                  new TextDecoder().decode(byteBounded),
-                  maxTokens,
-                  limits.tokenEstimation,
-                ),
-              )
-              lineTruncated = true
-            }
-            break
-          }
-
-          selected.push(renderedLine)
-          selectedBytes += candidateBytes
-          selectedTokens += candidateTokens
-        }
-
-        const endLine =
-          selected.length === 0
-            ? undefined
-            : requestedStartLine + selected.length - 1
-        const hasMore =
-          lineTruncated || startIndex + selected.length < lines.length
-        const result: JsonValue = {
-          path: source.path,
-          content: selected.join('\n'),
-          startLine: requestedStartLine,
-          endLine: endLine ?? null,
-          totalLines: lines.length,
-          truncated: hasMore,
-          lineTruncated,
-          ...(hasMore && endLine !== undefined
-            ? { nextStartLine: endLine + 1 }
-            : {}),
-        }
-
-        return {
-          status: 'ok',
-          content: result,
-          truncated: hasMore,
-          totalBytes: source.totalBytes,
-        }
-      } catch (error) {
         return errorResult(error)
       }
     },
@@ -318,17 +283,19 @@ export function createReadOnlyToolDefinitions(
     id: 'list_dir',
     executionMode: 'parallel',
     description:
-      'List files and directories inside the workspace. Recursive listing skips symlinks and large generated folders.',
+      'List files and directories inside the workspace or current Session temp. Recursive listing skips symlinks and large generated folders.',
     inputSchema: ListDirArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 15_000,
-    maxOutputBytes: 128 * 1_024,
     projectResultForModel: projectListDirResult,
     async execute(args, context) {
       try {
-        const guard = workspaceGuard(context.workspace.canonicalPath)
+        const guard = workspaceGuard(
+          context.workspace.canonicalPath,
+          context.sessionTemp?.root,
+        )
         const maxEntries = args.maxEntries ?? DEFAULT_MAX_ENTRIES
 
         if (!args.recursive) {
@@ -383,17 +350,19 @@ export function createReadOnlyToolDefinitions(
     id: 'glob',
     executionMode: 'parallel',
     description:
-      'Find workspace files with a Bash-style glob relative to path. Supports globstar, braces, character classes, and extglobs. Symlinks are not followed.',
+      'Find files under a workspace-relative or absolute Session-temp directory with a Bash-style glob. Supports globstar, braces, character classes, and extglobs. Symlinks are not followed.',
     inputSchema: GlobArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 15_000,
-    maxOutputBytes: 128 * 1_024,
     projectResultForModel: projectGlobResult,
     async execute(args, context) {
       try {
-        const guard = workspaceGuard(context.workspace.canonicalPath)
+        const guard = workspaceGuard(
+          context.workspace.canonicalPath,
+          context.sessionTemp?.root,
+        )
         const maxResults = args.maxResults ?? DEFAULT_MAX_ENTRIES
         const matches: string[] = []
         let truncated = false
@@ -430,17 +399,19 @@ export function createReadOnlyToolDefinitions(
     id: 'grep',
     executionMode: 'parallel',
     description:
-      'Search text files in the workspace using a regular expression. Prefers ripgrep and falls back to an in-process engine when unavailable.',
+      'Search text files in the workspace or current Session temp using a regular expression. Prefers ripgrep and falls back to an in-process engine when unavailable.',
     inputSchema: GrepArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 128 * 1_024,
     projectResultForModel: projectGrepResult,
     async execute(args, context) {
       try {
-        const guard = workspaceGuard(context.workspace.canonicalPath)
+        const guard = workspaceGuard(
+          context.workspace.canonicalPath,
+          context.sessionTemp?.root,
+        )
         const maxResults = args.maxResults ?? DEFAULT_MAX_ENTRIES
         const include = args.include ?? '**/*'
         const searcher = await getSearcher()
@@ -484,10 +455,7 @@ export function registerReadOnlyTools(
   registry: ToolRegistry,
   getLimits?: () => Pick<
     PublicConfig['limits'],
-    | 'maxToolResultTokens'
-    | 'tokenEstimation'
-    | 'readFileSourceBytes'
-    | 'readFileOutputBytes'
+    'maxToolOutputBytes' | 'maxToolOutputLines' | 'readFileSourceBytes'
   >,
   getSearcher?: () => Promise<Searcher>,
 ): void {

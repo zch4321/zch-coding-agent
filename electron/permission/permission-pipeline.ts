@@ -26,6 +26,7 @@ import {
 } from '../tools/file-tools'
 import { PathGuardError } from '../safety/path-guard'
 import { evaluatePolicy } from './policy-engine'
+import type { SessionTempPaths } from '../session-temp/service'
 
 export interface ApprovalRequest {
   call: ToolCall
@@ -68,6 +69,7 @@ export interface PermissionPipelineInput {
   sessionId: SessionId
   runId: RunId
   workspace: string
+  sessionTemp?: SessionTempPaths
   mode: PermissionMode
   call: ToolCall
   definition: ToolDefinition
@@ -257,6 +259,7 @@ export async function revalidateApprovedToolCall(
     sessionId: SessionId
     runId: RunId
     workspace: string
+    sessionTempRoot?: string
   },
 ): Promise<void> {
   if (approvedCall[approvedCallBrand] !== true) {
@@ -286,6 +289,7 @@ export async function revalidateApprovedToolCall(
   await revalidateResourcePreconditions(
     context.workspace,
     approvedCall.resourcePreconditions,
+    context.sessionTempRoot,
   )
 }
 
@@ -300,6 +304,7 @@ export class PermissionPipeline {
     try {
       plan = await prepareToolResourcePlan({
         workspace: input.workspace,
+        sessionTemp: input.sessionTemp,
         call: input.call,
         definition: input.definition,
         limits: input.config.limits,
@@ -353,6 +358,7 @@ export class PermissionPipeline {
       workspace: input.workspace,
       args: input.call.args,
       callId: input.call.id,
+      scratchMutation: plan.scratchMutation === true,
     })
 
     if (outcome.kind === 'deny') {

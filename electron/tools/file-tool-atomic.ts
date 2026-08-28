@@ -7,6 +7,7 @@ import { PathGuard, PathGuardError } from '../safety/path-guard'
 
 async function ensureParentDirectory(
   workspace: string,
+  sessionTempRoot: string | undefined,
   precondition: FilePrecondition,
   signal: AbortSignal,
 ): Promise<string> {
@@ -20,7 +21,10 @@ async function ensureParentDirectory(
     await realpath(precondition.parentRealPath),
   )
   const parentStat = await stat(parentRealPath)
-  PathGuard.fromCanonical(workspace).assertInside(parentRealPath)
+  PathGuard.fromCanonical(workspace, sessionTempRoot).assertInsideRoot(
+    parentRealPath,
+    precondition.rootKind,
+  )
 
   if (!parentStat.isDirectory()) {
     throw new PathGuardError(
@@ -39,9 +43,11 @@ export async function atomicReplace(
   precondition: FilePrecondition,
   content: string,
   signal: AbortSignal,
+  sessionTempRoot?: string,
 ): Promise<void> {
   const parentRealPath = await ensureParentDirectory(
     workspace,
+    sessionTempRoot,
     precondition,
     signal,
   )
@@ -64,7 +70,7 @@ export async function atomicReplace(
 
   try {
     signal.throwIfAborted()
-    await assertFilePrecondition(workspace, precondition)
+    await assertFilePrecondition(workspace, precondition, sessionTempRoot)
     signal.throwIfAborted()
     await rename(temporaryPath, precondition.absolutePath)
   } catch (error) {
@@ -78,6 +84,7 @@ export async function atomicDelete(
   workspace: string,
   precondition: FilePrecondition,
   signal: AbortSignal,
+  sessionTempRoot?: string,
 ): Promise<void> {
   const temporaryPath = path.join(
     precondition.parentRealPath,
@@ -85,7 +92,7 @@ export async function atomicDelete(
   )
 
   signal.throwIfAborted()
-  await assertFilePrecondition(workspace, precondition)
+  await assertFilePrecondition(workspace, precondition, sessionTempRoot)
   signal.throwIfAborted()
   await rename(precondition.absolutePath, temporaryPath)
 

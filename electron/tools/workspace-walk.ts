@@ -40,9 +40,11 @@ export async function walkFiles(
 
     for (const entry of entries) {
       const absolutePath = path.join(current, entry.name)
-      const relativePath = normalizePortablePath(
-        path.relative(guard.workspacePath, absolutePath),
+      const rootRelativePath = normalizePortablePath(
+        path.relative(root.rootPath, absolutePath),
       )
+      const relativePath =
+        root.rootKind === 'workspace' ? rootRelativePath : absolutePath
 
       if (entry.isSymbolicLink()) {
         continue

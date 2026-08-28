@@ -22,6 +22,7 @@ export interface PolicyInput {
   workspace: string
   args: JsonValue
   callId: CallId
+  scratchMutation?: boolean
   now?: Date
 }
 
@@ -118,6 +119,10 @@ export function evaluatePolicy(input: PolicyInput): PolicyOutcome {
       code: 'READONLY_MODE',
       reason: 'ReadOnly mode denies tools with side effects',
     }
+  }
+
+  if (input.scratchMutation) {
+    return { kind: 'allow', approvedBy: 'policy' }
   }
 
   if (input.mode === 'yolo') {

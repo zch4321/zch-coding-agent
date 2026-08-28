@@ -1,10 +1,13 @@
 import type { PolicySignal } from '../../shared/agent-events'
+import type { PathGuardRootKind } from '../safety/path-guard'
 
 export type FileOperation = 'write' | 'patch' | 'delete'
 
 export interface FilePrecondition {
   readonly kind: 'file'
   readonly operation: FileOperation
+  readonly rootKind: PathGuardRootKind
+  readonly rootPath: string
   readonly path: string
   readonly absolutePath: string
   readonly parentRealPath: string
@@ -26,6 +29,7 @@ export interface FilePrecondition {
 export interface ToolResourcePlan {
   readonly preconditions: readonly FilePrecondition[]
   readonly policySignals: readonly PolicySignal[]
+  readonly scratchMutation?: boolean
   readonly diff?: string
   readonly diffHash?: string
 }

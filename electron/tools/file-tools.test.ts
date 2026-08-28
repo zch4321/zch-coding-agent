@@ -103,6 +103,86 @@ async function execute(root: string, call: ToolCall) {
 }
 
 describe('P3 file tools', () => {
+  it('allows approval-free scratch mutations but blocks application-owned artifacts', async () => {
+    const root = await workspace()
+    const sessionRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-file-session-'),
+    )
+    const sessionTemp = {
+      root: sessionRoot,
+      artifacts: path.join(sessionRoot, 'artifacts'),
+      scratch: path.join(sessionRoot, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+    const { registry, executor, pipeline } = harness()
+    const scratchPath = path.join(sessionTemp.scratch, 'notes.md')
+    const call: ToolCall = {
+      id: 'call:scratch-write' as CallId,
+      toolId: 'create_file',
+      args: { path: scratchPath, content: 'temporary notes\n' },
+      reason: 'Record temporary notes',
+    }
+    const definition = registry.get(call.toolId)!
+    const requestHumanApproval = async () => {
+      throw new Error('Scratch writes must not request approval')
+    }
+    const approval = await pipeline.authorize({
+      sessionId,
+      runId,
+      workspace: root,
+      sessionTemp,
+      mode: 'confirm',
+      call,
+      definition,
+      config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+      signal: new AbortController().signal,
+      requestHumanApproval,
+    })
+    expect(approval).toMatchObject({ ok: true })
+    if (approval.ok) {
+      await executor.execute(
+        approval.approvedCall,
+        {
+          sessionId,
+          runId,
+          workspace: { canonicalPath: root },
+          sessionTemp,
+        },
+        new AbortController().signal,
+      )
+    }
+    expect(await readFile(scratchPath, 'utf8')).toBe('temporary notes\n')
+
+    const artifactCall = {
+      ...call,
+      id: 'call:artifact-write' as CallId,
+      args: {
+        path: path.join(sessionTemp.artifacts, 'forbidden.txt'),
+        content: 'no',
+      },
+    }
+    await expect(
+      pipeline.authorize({
+        sessionId,
+        runId,
+        workspace: root,
+        sessionTemp,
+        mode: 'yolo',
+        call: artifactCall,
+        definition,
+        config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+        signal: new AbortController().signal,
+        requestHumanApproval: async () => ({ decision: 'deny' }),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      result: { status: 'error', code: 'PATH_OUTSIDE_WORKSPACE' },
+    })
+  })
+
   it('atomically writes, patches, and deletes workspace files', async () => {
     const root = await workspace()
 

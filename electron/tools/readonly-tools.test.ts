@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, mkdir, symlink } from 'node:fs/promises'
+import { mkdtemp, writeFile, mkdir, rename, symlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -27,6 +27,7 @@ async function executeReadonly(
   root: string,
   call: ToolCall,
   searcher?: Searcher,
+  sessionTemp?: { root: string; artifacts: string; scratch: string },
 ) {
   const registry = new ToolRegistry()
   registerReadOnlyTools(
@@ -39,6 +40,7 @@ async function executeReadonly(
     sessionId: 'session-test' as SessionId,
     runId: 'run-test' as RunId,
     workspace: { canonicalPath: root },
+    ...(sessionTemp ? { sessionTemp } : {}),
   }
   const signal = new AbortController().signal
   const inspected = executor.inspectCall(call)
@@ -50,6 +52,7 @@ async function executeReadonly(
   const prepared = await new PermissionPipeline().authorize({
     ...context,
     workspace: root,
+    ...(sessionTemp ? { sessionTemp } : {}),
     mode: 'readonly',
     call,
     definition: inspected.definition,
@@ -415,7 +418,7 @@ describe('read-only tools', () => {
 
     expect(result).toMatchObject({
       status: 'ok',
-      content: { startLine: 1, endLine: 3, truncated: false },
+      content: { startLine: 1, endLine: 3, hasMore: false },
     })
 
     if (result.status === 'ok') {
@@ -443,7 +446,7 @@ describe('read-only tools', () => {
     }
   })
 
-  it('uses byte and token budgets instead of the former 400-line default', async () => {
+  it('uses the global line budget instead of the former 400-line default', async () => {
     const root = await workspace()
     await writeFile(
       path.join(root, 'many-lines.txt'),
@@ -459,7 +462,7 @@ describe('read-only tools', () => {
 
     expect(result).toMatchObject({
       status: 'ok',
-      content: { endLine: 600, truncated: false },
+      content: { endLine: 498, hasMore: true },
     })
   })
 
@@ -517,30 +520,39 @@ describe('read-only tools', () => {
       status: 'ok',
       content: {
         startLine: 1,
-        endLine: 1_000,
-        nextStartLine: 1_001,
-        truncated: true,
+        endLine: 498,
+        hasMore: true,
+        nextCursor: expect.any(String),
       },
     })
+
+    const nextCursor =
+      first.status === 'ok' &&
+      first.content &&
+      typeof first.content === 'object' &&
+      !Array.isArray(first.content) &&
+      typeof first.content.nextCursor === 'string'
+        ? first.content.nextCursor
+        : ''
 
     const second = await executeReadonly(root, {
       id: 'call-page-2' as CallId,
       toolId: 'read_file',
-      args: { path: 'large.txt', startLine: 1_001, lineCount: 1_000 },
+      args: { path: 'large.txt', cursor: nextCursor, lineCount: 1_000 },
       reason: '',
     })
     expect(second).toMatchObject({
       status: 'ok',
       content: {
-        startLine: 1_001,
-        truncated: false,
+        startLine: 499,
+        hasMore: true,
       },
     })
   })
 
   it('bounds one extremely long line', async () => {
     const root = await workspace()
-    await writeFile(path.join(root, 'one-line.txt'), 'x'.repeat(200_000))
+    await writeFile(path.join(root, 'one-line.txt'), 'x'.repeat(400_000))
     const result = await executeReadonly(root, {
       id: 'call-long-line' as CallId,
       toolId: 'read_file',
@@ -550,14 +562,137 @@ describe('read-only tools', () => {
 
     expect(result).toMatchObject({
       status: 'ok',
-      content: { lineTruncated: true, truncated: true },
+      content: { lineTruncated: true, hasMore: true },
     })
 
     if (result.status === 'ok') {
       const content = result.content as { content: string }
       expect(Buffer.byteLength(content.content, 'utf8')).toBeLessThanOrEqual(
-        128 * 1_024,
+        256 * 1_024,
       )
     }
+  })
+
+  it('continues an appended UTF-8 Session artifact from an opaque cursor', async () => {
+    const root = await workspace()
+    const sessionRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-read-session-'),
+    )
+    const sessionTemp = {
+      root: sessionRoot,
+      artifacts: path.join(sessionRoot, 'artifacts'),
+      scratch: path.join(sessionRoot, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+    const logPath = path.join(sessionTemp.artifacts, 'activity.log')
+    await writeFile(logPath, '第一行\n')
+    const first = await executeReadonly(
+      root,
+      {
+        id: 'call-artifact-first' as CallId,
+        toolId: 'read_file',
+        args: { path: logPath },
+        reason: '',
+      },
+      undefined,
+      sessionTemp,
+    )
+    expect(first).toMatchObject({
+      status: 'ok',
+      content: { hasMore: false, endCursor: expect.any(String) },
+    })
+    const cursor =
+      first.status === 'ok' &&
+      first.content &&
+      typeof first.content === 'object' &&
+      !Array.isArray(first.content) &&
+      typeof first.content.endCursor === 'string'
+        ? first.content.endCursor
+        : ''
+    await writeFile(logPath, '第一行\n第二行🙂\n')
+
+    const appended = await executeReadonly(
+      root,
+      {
+        id: 'call-artifact-appended' as CallId,
+        toolId: 'read_file',
+        args: { path: logPath, cursor },
+        reason: '',
+      },
+      undefined,
+      sessionTemp,
+    )
+    expect(appended).toMatchObject({ status: 'ok' })
+    if (appended.status === 'ok') {
+      expect((appended.content as { content: string }).content).toBe(
+        '2\t第二行🙂',
+      )
+    }
+  })
+
+  it('supports tail reads and rejects a cursor after atomic replacement', async () => {
+    const root = await workspace()
+    const sessionRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-read-session-'),
+    )
+    const sessionTemp = {
+      root: sessionRoot,
+      artifacts: path.join(sessionRoot, 'artifacts'),
+      scratch: path.join(sessionRoot, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+    const logPath = path.join(sessionTemp.artifacts, 'terminal.log')
+    await writeFile(logPath, 'one\ntwo\nthree\n')
+    const tail = await executeReadonly(
+      root,
+      {
+        id: 'call-artifact-tail' as CallId,
+        toolId: 'read_file',
+        args: { path: logPath, tail: true, lineCount: 2 },
+        reason: '',
+      },
+      undefined,
+      sessionTemp,
+    )
+    expect(tail).toMatchObject({ status: 'ok' })
+    if (tail.status === 'ok') {
+      expect((tail.content as { content: string }).content).toBe(
+        '2\ttwo\n3\tthree',
+      )
+    }
+    const cursor =
+      tail.status === 'ok' &&
+      tail.content &&
+      typeof tail.content === 'object' &&
+      !Array.isArray(tail.content) &&
+      typeof tail.content.endCursor === 'string'
+        ? tail.content.endCursor
+        : ''
+    const replacement = path.join(sessionTemp.artifacts, 'replacement.log')
+    await writeFile(replacement, 'replacement\n')
+    await rename(replacement, logPath)
+
+    await expect(
+      executeReadonly(
+        root,
+        {
+          id: 'call-artifact-replaced' as CallId,
+          toolId: 'read_file',
+          args: { path: logPath, cursor },
+          reason: '',
+        },
+        undefined,
+        sessionTemp,
+      ),
+    ).resolves.toMatchObject({
+      status: 'error',
+      code: 'RESOURCE_CHANGED',
+    })
   })
 })

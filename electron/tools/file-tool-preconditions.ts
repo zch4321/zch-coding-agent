@@ -3,10 +3,20 @@ import { lstat, readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { MAX_MUTATION_FILE_BYTES } from './file-tool-limits'
 import type { FileOperation, FilePrecondition } from './file-tool-types'
-import { PathGuard, PathGuardError } from '../safety/path-guard'
+import {
+  PathGuard,
+  PathGuardError,
+  type PathGuardRootKind,
+} from '../safety/path-guard'
 
-function portableRelative(workspace: string, absolutePath: string): string {
-  return path.relative(workspace, absolutePath).split(path.sep).join('/') || '.'
+function displayPath(
+  rootKind: 'workspace' | 'session-temp',
+  rootPath: string,
+  absolutePath: string,
+): string {
+  return rootKind === 'workspace'
+    ? path.relative(rootPath, absolutePath).split(path.sep).join('/') || '.'
+    : path.resolve(absolutePath)
 }
 
 function normalizeForCompare(value: string): string {
@@ -77,6 +87,7 @@ async function nearestExistingParent(target: string): Promise<string> {
 
 async function captureParentPrecondition(
   guard: PathGuard,
+  rootKind: PathGuardRootKind,
   parentPath: string,
   allowMissing: boolean,
 ): Promise<{
@@ -90,7 +101,7 @@ async function captureParentPrecondition(
     const parentRealPath = path.resolve(await realpath(parentPath))
     const parentStat = await stat(parentRealPath)
 
-    guard.assertInside(parentRealPath)
+    guard.assertInsideRoot(parentRealPath, rootKind)
 
     if (!parentStat.isDirectory()) {
       throw new PathGuardError(
@@ -119,7 +130,7 @@ async function captureParentPrecondition(
   )
   const existingParentStat = await stat(existingParentRealPath)
 
-  guard.assertInside(existingParentRealPath)
+  guard.assertInsideRoot(existingParentRealPath, rootKind)
 
   if (!existingParentStat.isDirectory()) {
     throw new PathGuardError(
@@ -133,7 +144,7 @@ async function captureParentPrecondition(
     existingParentRealPath,
     missingParentRelative,
   )
-  guard.assertInside(parentRealPath)
+  guard.assertInsideRoot(parentRealPath, rootKind)
   const existingParentId = directoryId(existingParentStat)
 
   return {
@@ -153,9 +164,11 @@ export async function captureFilePrecondition(
   maxMutationFileBytes = MAX_MUTATION_FILE_BYTES,
 ): Promise<FilePrecondition> {
   const absolutePath = guard.resolveCandidate(inputPath)
+  const root = guard.rootForCandidate(inputPath)
   const parentPath = path.dirname(absolutePath)
   const parent = await captureParentPrecondition(
     guard,
+    root.kind,
     parentPath,
     operation === 'write',
   )
@@ -176,7 +189,9 @@ export async function captureFilePrecondition(
     return Object.freeze({
       kind: 'file',
       operation,
-      path: portableRelative(guard.workspacePath, canonicalAbsolutePath),
+      rootKind: root.kind,
+      rootPath: root.path,
+      path: displayPath(root.kind, root.path, canonicalAbsolutePath),
       absolutePath: canonicalAbsolutePath,
       parentRealPath: parent.parentRealPath,
       expectedParentId: parent.expectedParentId,
@@ -206,13 +221,15 @@ export async function captureFilePrecondition(
   }
 
   const targetRealPath = path.resolve(await realpath(canonicalAbsolutePath))
-  guard.assertInside(targetRealPath)
+  guard.assertInsideRoot(targetRealPath, root.kind)
   const content = await readFile(targetRealPath)
 
   return Object.freeze({
     kind: 'file',
     operation,
-    path: portableRelative(guard.workspacePath, targetRealPath),
+    rootKind: root.kind,
+    rootPath: root.path,
+    path: displayPath(root.kind, root.path, targetRealPath),
     absolutePath: canonicalAbsolutePath,
     parentRealPath: parent.parentRealPath,
     expectedParentId: parent.expectedParentId,
@@ -263,8 +280,20 @@ async function assertExistingParentPrecondition(
 export async function assertFilePrecondition(
   workspace: string,
   expected: FilePrecondition,
+  sessionTempRoot?: string,
 ): Promise<void> {
-  const guard = PathGuard.fromCanonical(workspace)
+  const guard = PathGuard.fromCanonical(workspace, sessionTempRoot)
+  if (
+    expected.rootKind === 'session-temp' &&
+    (!guard.sessionTempPath ||
+      normalizeForCompare(guard.sessionTempPath) !==
+        normalizeForCompare(expected.rootPath))
+  ) {
+    throw new PathGuardError(
+      'RESOURCE_CHANGED',
+      'The approved Session temp root no longer matches the execution context',
+    )
+  }
   await assertExistingParentPrecondition(guard, expected)
   const current = await captureFilePrecondition(
     guard,
@@ -279,6 +308,9 @@ export async function assertFilePrecondition(
         current.expectedParentId !== expected.expectedParentId
   const changed =
     current.path !== expected.path ||
+    current.rootKind !== expected.rootKind ||
+    normalizeForCompare(current.rootPath) !==
+      normalizeForCompare(expected.rootPath) ||
     normalizeForCompare(current.absolutePath) !==
       normalizeForCompare(expected.absolutePath) ||
     parentChanged ||
@@ -302,8 +334,9 @@ export async function assertFilePrecondition(
 export async function revalidateResourcePreconditions(
   workspace: string,
   preconditions: readonly FilePrecondition[],
+  sessionTempRoot?: string,
 ): Promise<void> {
   for (const precondition of preconditions) {
-    await assertFilePrecondition(workspace, precondition)
+    await assertFilePrecondition(workspace, precondition, sessionTempRoot)
   }
 }

@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { Type } from '@sinclair/typebox'
 import type { PublicConfig } from '../../shared/config'
 import type { ToolCall, ToolDefinition, ToolResult } from './types'
@@ -34,6 +35,7 @@ export type {
 import { PathGuard, PathGuardError } from '../safety/path-guard'
 import type { ApprovedToolCall } from './approved-tool-call'
 import type { ToolRegistry } from './tool-registry'
+import type { SessionTempPaths } from '../session-temp/service'
 import { applyTextPatch, TextPatchError } from './text-patch'
 
 const CreateFileArgsSchema = Type.Object(
@@ -42,7 +44,7 @@ const CreateFileArgsSchema = Type.Object(
       minLength: 1,
       maxLength: 4_096,
       description:
-        'Workspace-relative path for the new file. Missing parent directories are created automatically. The file must not already exist.',
+        'Workspace-relative path or absolute path inside Session scratch for the new file. Missing parent directories are created automatically. The file must not already exist.',
     }),
     content: Type.String({
       maxLength: MAX_WRITE_BYTES,
@@ -59,7 +61,7 @@ const ApplyPatchArgsSchema = Type.Object(
       minLength: 1,
       maxLength: 4_096,
       description:
-        'Workspace-relative path of one existing UTF-8 text file to modify.',
+        'Workspace-relative path or absolute Session-scratch path of one existing UTF-8 text file to modify.',
     }),
     patch: Type.String({
       minLength: 1,
@@ -77,7 +79,7 @@ const DeleteFileArgsSchema = Type.Object(
       minLength: 1,
       maxLength: 4_096,
       description:
-        'Workspace-relative path of one existing regular file to delete.',
+        'Workspace-relative path or absolute Session-scratch path of one existing regular file to delete.',
     }),
   },
   { additionalProperties: false },
@@ -116,11 +118,15 @@ function fileLimits(limits?: Partial<FileToolLimits>): FileToolLimits {
 /** Builds file resource preconditions and policy signals for one tool call. */
 export async function prepareToolResourcePlan(input: {
   workspace: string
+  sessionTemp?: SessionTempPaths
   call: ToolCall
   definition: ToolDefinition
   limits?: Partial<FileToolLimits>
 }): Promise<ToolResourcePlan> {
-  const guard = PathGuard.fromCanonical(input.workspace)
+  const guard = PathGuard.fromCanonical(
+    input.workspace,
+    input.sessionTemp?.root,
+  )
   const operation = operationFor(input.call.toolId)
   const limits = fileLimits(input.limits)
 
@@ -148,6 +154,31 @@ export async function prepareToolResourcePlan(input: {
     operation,
     limits.editableFileBytes,
   )
+  const scratchRoot = input.sessionTemp
+    ? (await guard.resolveExisting(input.sessionTemp.scratch)).realPath
+    : undefined
+  const scratchMutation =
+    precondition.rootKind === 'session-temp' &&
+    scratchRoot !== undefined &&
+    (() => {
+      const relative = path.relative(
+        scratchRoot,
+        path.resolve(precondition.absolutePath),
+      )
+      return (
+        relative === '' ||
+        (!relative.startsWith(`..${path.sep}`) &&
+          relative !== '..' &&
+          !path.isAbsolute(relative))
+      )
+    })()
+
+  if (precondition.rootKind === 'session-temp' && !scratchMutation) {
+    throw new PathGuardError(
+      'PATH_OUTSIDE_WORKSPACE',
+      'Built-in file mutations may only write to the Session scratch directory; artifacts are application-owned',
+    )
+  }
   const before = precondition.expectedExists
     ? await readFile(precondition.expectedRealPath!, 'utf8')
     : ''
@@ -205,6 +236,7 @@ export async function prepareToolResourcePlan(input: {
 
   return {
     preconditions: [plannedPrecondition],
+    scratchMutation,
     policySignals: filePolicySignals(
       operation,
       precondition.path,
@@ -253,13 +285,12 @@ export function createFileToolDefinitions(
     id: 'create_file',
     executionMode: 'serial',
     description:
-      'Create a new UTF-8 file inside the workspace, creating missing parent directories automatically. Use apply_patch when the file already exists.',
+      'Create a new UTF-8 file inside the workspace or Session scratch, creating missing parent directories automatically. Use apply_patch when the file already exists.',
     inputSchema: CreateFileArgsSchema,
     effects: ['filesystem.write'],
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 200_000,
     projectResultForModel: (result) =>
       projectFileMutationResult(result, 'created'),
     validateArgs(args) {
@@ -276,6 +307,7 @@ export function createFileToolDefinitions(
           precondition,
           args.content,
           context.signal,
+          context.sessionTemp?.root,
         )
 
         return {
@@ -302,7 +334,6 @@ export function createFileToolDefinitions(
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 200_000,
     projectResultForModel: (result) =>
       projectFileMutationResult(result, 'patched'),
     validateArgs(args) {
@@ -332,6 +363,7 @@ export function createFileToolDefinitions(
           precondition,
           applied.content,
           context.signal,
+          context.sessionTemp?.root,
         )
 
         return {
@@ -355,13 +387,12 @@ export function createFileToolDefinitions(
     id: 'delete_file',
     executionMode: 'serial',
     description:
-      'Delete one regular file inside the workspace. Requires permission approval.',
+      'Delete one regular file inside the workspace or Session scratch. Scratch mutations are approval-free outside readonly mode.',
     inputSchema: DeleteFileArgsSchema,
     effects: ['filesystem.delete'],
     defaultRisk: 'high',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 100_000,
     projectResultForModel: (result) =>
       projectFileMutationResult(result, 'deleted'),
     async execute(_args, context) {
@@ -374,6 +405,7 @@ export function createFileToolDefinitions(
           context.workspace.canonicalPath,
           precondition,
           context.signal,
+          context.sessionTemp?.root,
         )
 
         return {

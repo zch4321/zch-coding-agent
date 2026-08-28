@@ -26,7 +26,6 @@ function definition(
     defaultRisk: risk,
     supportsAbort: true,
     defaultTimeoutMs: 1_000,
-    maxOutputBytes: 1_000,
     async execute() {
       return { status: 'ok', content: null }
     },
@@ -90,7 +89,6 @@ function runCommandPolicy(args: JsonValue, danger = false) {
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 1_000,
-    maxOutputBytes: 1_000,
     async execute() {
       return { status: 'ok', content: null }
     },
@@ -129,7 +127,6 @@ function fileMutationPolicy(input: {
     defaultRisk: risk,
     supportsAbort: true,
     defaultTimeoutMs: 1_000,
-    maxOutputBytes: 1_000,
     async execute() {
       return { status: 'ok', content: null }
     },
@@ -180,7 +177,6 @@ describe('P3 policy engine', () => {
       defaultRisk: 'low',
       supportsAbort: true,
       defaultTimeoutMs: 1_000,
-      maxOutputBytes: 1_000,
       async execute() {
         return { status: 'ok', content: null }
       },
@@ -212,7 +208,6 @@ describe('P3 policy engine', () => {
         defaultRisk: 'low',
         supportsAbort: true,
         defaultTimeoutMs: 1_000,
-        maxOutputBytes: 1_000,
         async execute() {
           return { status: 'ok', content: null }
         },

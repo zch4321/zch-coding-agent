@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import path from 'node:path'
 import { normalizePortablePath } from './portable-path'
 import { RegexSearchError } from './regex-search'
 import type {
@@ -116,11 +117,9 @@ export class RipgrepSearcher implements Searcher {
       pattern,
       caseSensitive,
     } = input
-    const cwd = guard.workspacePath
-    // Re-anchor to the workspace root so rg emits relative paths. resolveExisting
-    // already returns a portable relative path ('.' for the workspace root).
     const resolvedRoot = await guard.resolveExisting(rootInput)
-    const searchPath = resolvedRoot.relativePath || '.'
+    const cwd = resolvedRoot.rootPath
+    const searchPath = resolvedRoot.rootRelativePath || '.'
 
     const args = [
       '--json',
@@ -183,8 +182,12 @@ export class RipgrepSearcher implements Searcher {
             continue
           }
 
+          const matchedPath = normalizeRgPath(record.data.path.text)
           matches.push({
-            path: normalizeRgPath(record.data.path.text),
+            path:
+              resolvedRoot.rootKind === 'workspace'
+                ? matchedPath
+                : path.resolve(resolvedRoot.rootPath, matchedPath),
             line: record.data.line_number,
             text: stripTrailingNewline(record.data.lines.text).slice(0, 1_000),
           })
