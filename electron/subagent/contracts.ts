@@ -9,6 +9,30 @@ import type { ResolvedModelRoute } from '../providers/model-route-resolver'
 import type { RunStatus } from '../../shared/agent-events'
 import type { AgentToolAccess } from '../../shared/agent-execution'
 import type { PermissionMode } from '../../shared/config'
+import type { SessionTempPaths } from '../session-temp/service'
+
+export interface BackgroundTaskHandle {
+  target: { type: 'subagent' | 'swarm'; id: string }
+  status:
+    | 'queued'
+    | 'preparing'
+    | 'running'
+    | 'completed'
+    | 'partial'
+    | 'failed'
+    | 'cancelled'
+    | 'timed_out'
+    | 'interrupted'
+  artifactAvailable: boolean
+  artifactPath?: string
+  captureError?: string
+}
+
+export interface BackgroundArtifactStatus {
+  artifactAvailable: boolean
+  artifactPath?: string
+  captureError?: string
+}
 
 export interface SubagentSpec {
   name: string
@@ -23,6 +47,9 @@ export interface SubagentParentContext {
   callId: CallId
   workspace: string
   signal: AbortSignal
+  ownerSessionId?: SessionId
+  sessionTemp?: SessionTempPaths
+  maxSubagents?: number
 }
 
 export interface InternalSessionOwnership {
@@ -87,10 +114,16 @@ export interface PreparedSubagentExecution {
   parentExecutionId: AgentExecutionId
   childOrdinal: number
   routes: FrozenSubagentRoutes
+  toolContext?: FrozenSubagentToolContext
+  cancellationSignal?: AbortSignal
 }
 
 /** Runs one backend-private Subagent against a frozen parent Run context. */
 export interface SubagentExecutionPort {
+  startOne?(
+    spec: SubagentSpec,
+    parent: SubagentParentContext,
+  ): Promise<BackgroundTaskHandle>
   runOne(
     spec: SubagentSpec,
     parent: SubagentParentContext,
@@ -99,6 +132,13 @@ export interface SubagentExecutionPort {
 
 /** Runs both standalone and pre-persisted model-pool Subagent executions. */
 export interface PreparedSubagentExecutionPort extends SubagentExecutionPort {
+  cancel?(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): boolean | Promise<boolean>
+  artifactStatus?(
+    executionId: AgentExecutionId,
+  ): BackgroundArtifactStatus | undefined
   runPrepared(
     spec: SubagentSpec,
     parent: SubagentParentContext,

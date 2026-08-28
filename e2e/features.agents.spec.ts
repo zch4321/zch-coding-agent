@@ -5,6 +5,7 @@ import { configureApp } from './support/app-helpers'
 import {
   providerMessageText,
   providerMessages,
+  providerToolNames,
   reasoningDelta,
   textDelta,
   toolCallDelta,
@@ -112,29 +113,34 @@ test.describe('Electron Agents activity panel', () => {
       `${'delegated-result-line '.repeat(1_500)}\n`,
       'utf8',
     )
-    fakeProvider.armResponseGate([4, 5])
-    fakeProvider.queue([
-      toolCallsDelta([
-        {
-          id: 'call:e2e-subagent-first',
-          name: 'subagent_run',
-          args: {
-            name: 'first-reviewer',
-            task: 'Review the long fixture and report the important result.',
-            toolAccess: 'readonly',
+    const isParentRequest = (request: { body: Record<string, unknown> }) =>
+      providerToolNames(request.body).includes('subagent_run')
+    fakeProvider.armResponseGate([])
+    fakeProvider.queue(
+      [
+        toolCallsDelta([
+          {
+            id: 'call:e2e-subagent-first',
+            name: 'subagent_run',
+            args: {
+              name: 'first-reviewer',
+              task: 'Review the long fixture and report the important result.',
+              toolAccess: 'readonly',
+            },
           },
-        },
-        {
-          id: 'call:e2e-subagent-second',
-          name: 'subagent_run',
-          args: {
-            name: 'second-reviewer',
-            task: 'Independently review the long fixture and report it.',
-            toolAccess: 'readonly',
+          {
+            id: 'call:e2e-subagent-second',
+            name: 'subagent_run',
+            args: {
+              name: 'second-reviewer',
+              task: 'Independently review the long fixture and report it.',
+              toolAccess: 'readonly',
+            },
           },
-        },
-      ]),
-    ])
+        ]),
+      ],
+      { match: isParentRequest },
+    )
     fakeProvider.queue(
       [
         reasoningDelta('Inspect the delegated fixture first.'),
@@ -144,25 +150,39 @@ test.describe('Electron Agents activity panel', () => {
           args: { path: 'long-agent-result.txt' },
         }),
       ],
-      { waitForRequestCount: 3 },
+      {
+        waitForRequestCount: 4,
+        match: (request) => !isParentRequest(request),
+      },
     )
-    fakeProvider.queue([
-      reasoningDelta('Verify the delegated fixture independently.'),
-      toolCallDelta({
-        id: 'call:e2e-child-read-second',
-        name: 'read_file',
-        args: { path: 'long-agent-result.txt' },
-      }),
-    ])
-    fakeProvider.queue([
-      reasoningDelta('Summarize the first completed review.'),
-      textDelta('Delegated review completed.'),
-    ])
-    fakeProvider.queue([
-      reasoningDelta('Summarize the second completed review.'),
-      textDelta('Delegated review completed.'),
-    ])
-    fakeProvider.queue([textDelta('Parent collected both reviews.')])
+    fakeProvider.queue(
+      [
+        reasoningDelta('Verify the delegated fixture independently.'),
+        toolCallDelta({
+          id: 'call:e2e-child-read-second',
+          name: 'read_file',
+          args: { path: 'long-agent-result.txt' },
+        }),
+      ],
+      { match: (request) => !isParentRequest(request) },
+    )
+    fakeProvider.queue(
+      [
+        reasoningDelta('Summarize the first completed review.'),
+        textDelta('Delegated review completed.'),
+      ],
+      { match: (request) => !isParentRequest(request), gate: true },
+    )
+    fakeProvider.queue(
+      [
+        reasoningDelta('Summarize the second completed review.'),
+        textDelta('Delegated review completed.'),
+      ],
+      { match: (request) => !isParentRequest(request), gate: true },
+    )
+    fakeProvider.queue([textDelta('Parent launched both reviews.')], {
+      match: isParentRequest,
+    })
 
     await configureApp({
       page,
@@ -177,15 +197,15 @@ test.describe('Electron Agents activity panel', () => {
     const composer = page.locator('.message-input-area textarea')
     await composer.fill('Run two independent Subagent reviews now.')
     await page.getByRole('button', { name: '发送消息' }).click()
-    await expect.poll(() => fakeProvider.requests.length).toBe(5)
+    await expect.poll(() => fakeProvider.requests.length).toBe(6)
 
     const liveDetails = await readAgentExecutionDetails(page)
     expect(liveDetails).toHaveLength(2)
     for (const executionDetail of liveDetails) {
       expect(executionDetail.detail.live).toMatchObject({
         status: 'calling_llm',
-        tools: [expect.objectContaining({ tool: 'read_file' })],
       })
+      expect(executionDetail.detail.live?.tools).toEqual(expect.any(Array))
       expect(executionDetail.detail.live).not.toHaveProperty('sessionId')
       expect(executionDetail.detail.live).not.toHaveProperty('runId')
     }
@@ -218,20 +238,22 @@ test.describe('Electron Agents activity panel', () => {
       await expect(item).not.toContainText('Verify the delegated fixture')
     }
 
-    fakeProvider.releaseResponseGate()
-    await expect.poll(() => fakeProvider.requests.length).toBe(6)
     await expect(page.locator('.chat-message.assistant')).toContainText(
-      'Parent collected both reviews.',
+      'Parent launched both reviews.',
     )
+
+    fakeProvider.releaseResponseGate()
     await expect(
       page.locator('.agent-execution-status-dot.status-completed'),
     ).toHaveCount(2)
-    const parentFollowup = providerMessageText(fakeProvider.requests[5]!.body)
-    expect(parentFollowup.match(/Delegated review completed\./g)).toHaveLength(
-      2,
-    )
+    const parentFollowupRequest = fakeProvider.requests
+      .slice(1)
+      .find((request) => isParentRequest(request))!
+    const parentFollowup = providerMessageText(parentFollowupRequest.body)
+    expect(parentFollowup).toContain('"type":"subagent"')
+    expect(parentFollowup).not.toContain('Delegated review completed.')
     expect(
-      providerMessages(fakeProvider.requests[5]!.body)
+      providerMessages(parentFollowupRequest.body)
         .filter((message) => message.role === 'tool')
         .map((message) => message.toolCallId),
     ).toEqual(['call:e2e-subagent-first', 'call:e2e-subagent-second'])
@@ -239,15 +261,14 @@ test.describe('Electron Agents activity panel', () => {
 
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
-    const restoredDetail = (await readAgentExecutionDetails(page)).find(
-      (record) => record.name === 'first-reviewer',
-    )?.detail
-    expect(restoredDetail).toBeDefined()
-    if (!restoredDetail) throw new Error('Expected restored detail')
-    expect(restoredDetail.task).toContain('Review the long fixture')
-    expect(JSON.stringify(restoredDetail.activityPage.records)).toContain(
-      'read_file',
-    )
+    const restoredDetails = await readAgentExecutionDetails(page)
+    expect(restoredDetails).toHaveLength(2)
+    for (const restoredDetail of restoredDetails) {
+      expect(restoredDetail.detail.task).toContain('fixture')
+      expect(
+        JSON.stringify(restoredDetail.detail.activityPage.records),
+      ).toContain('read_file')
+    }
     await openAgentsTab(page)
     await expect(page.locator('.agent-execution-item')).toHaveCount(2)
     await expect(
@@ -263,29 +284,44 @@ test.describe('Electron Agents activity panel', () => {
   })
 
   test('runs a Swarm as one Job with manually expanded child Agents', async () => {
-    fakeProvider.armResponseGate([2, 3])
-    fakeProvider.queue([
-      toolCallDelta({
-        id: 'call:e2e-swarm',
-        name: 'swarm_run',
-        args: {
-          sharedContext:
-            'npm run check exited 0. The <verification> result was stable.',
-          tasks: [
-            {
-              name: 'review',
-              task: 'Review the repository independently.',
-              requiredCapability: 'standard',
-              agentCount: 2,
-              toolAccess: 'readonly',
-            },
-          ],
-        },
-      }),
-    ])
-    fakeProvider.queue([textDelta('Replica review completed.')])
-    fakeProvider.queue([textDelta('Replica review completed.')])
-    fakeProvider.queue([textDelta('Parent synthesized both Swarm reviews.')])
+    const isParentRequest = (request: { body: Record<string, unknown> }) =>
+      providerToolNames(request.body).includes('swarm_run')
+    fakeProvider.armResponseGate([])
+    fakeProvider.queue(
+      [
+        toolCallDelta({
+          id: 'call:e2e-swarm',
+          name: 'swarm_run',
+          args: {
+            sharedContext:
+              'npm run check exited 0. The <verification> result was stable.',
+            tasks: [
+              {
+                name: 'review',
+                task: 'Review the repository independently.',
+                requiredCapability: 'standard',
+                agentCount: 2,
+                toolAccess: 'readonly',
+              },
+            ],
+          },
+        }),
+      ],
+      { match: isParentRequest },
+    )
+    fakeProvider.queue([textDelta('Replica review completed.')], {
+      waitForRequestCount: 4,
+      match: (request) => !isParentRequest(request),
+      gate: true,
+    })
+    fakeProvider.queue([textDelta('Replica review completed.')], {
+      waitForRequestCount: 4,
+      match: (request) => !isParentRequest(request),
+      gate: true,
+    })
+    fakeProvider.queue([textDelta('Parent launched the Swarm.')], {
+      match: isParentRequest,
+    })
 
     await configureApp({
       page,
@@ -301,9 +337,13 @@ test.describe('Electron Agents activity panel', () => {
       .locator('.message-input-area textarea')
       .fill('Use a Swarm to review the repository independently')
     await page.getByRole('button', { name: '发送消息' }).click()
-    await expect.poll(() => fakeProvider.requests.length).toBe(3)
+    await expect.poll(() => fakeProvider.requests.length).toBe(4)
     await expect(page.locator('.approval-card')).toHaveCount(0)
-    for (const request of fakeProvider.requests.slice(1, 3)) {
+    const childRequests = fakeProvider.requests.filter(
+      (request) => !isParentRequest(request),
+    )
+    expect(childRequests).toHaveLength(2)
+    for (const request of childRequests) {
       const childPrompt = providerMessageText(request.body)
       expect(childPrompt).toContain('<swarm_shared_context>')
       expect(childPrompt).toContain(
@@ -326,12 +366,11 @@ test.describe('Electron Agents activity panel', () => {
     ).toHaveCount(0)
     await expect(children.nth(0)).toContainText('review · 1/2')
     await expect(children.nth(1)).toContainText('review · 2/2')
+    await expect(page.locator('.chat-message.assistant')).toContainText(
+      'Parent launched the Swarm.',
+    )
 
     fakeProvider.releaseResponseGate()
-    await expect.poll(() => fakeProvider.requests.length).toBe(4)
-    await expect(page.locator('.chat-message.assistant')).toContainText(
-      'Parent synthesized both Swarm reviews.',
-    )
     await expect(
       root.locator('.agent-execution-status-dot.status-completed'),
     ).toHaveCount(3)
@@ -343,11 +382,13 @@ test.describe('Electron Agents activity panel', () => {
       .click()
     await expect(children.nth(0)).toHaveClass(/n-collapse-item--active/u)
     await expect(children.nth(0)).toContainText('Replica review completed.')
-    const parentFollowup = providerMessageText(fakeProvider.requests[3]!.body)
-    expect(parentFollowup.match(/Replica review completed\./gu)).toHaveLength(2)
-    expect(parentFollowup.indexOf('review · 1/2')).toBeLessThan(
-      parentFollowup.indexOf('review · 2/2'),
-    )
+    const parentFollowupRequest = fakeProvider.requests
+      .slice(1)
+      .find((request) => isParentRequest(request))!
+    const parentFollowup = providerMessageText(parentFollowupRequest.body)
+    expect(parentFollowup).toContain('"type":"swarm"')
+    expect(parentFollowup).toContain('manifest.json')
+    expect(parentFollowup).not.toContain('Replica review completed.')
     await expect(page.locator('button.conversation-item')).toHaveCount(1)
 
     await page.reload()

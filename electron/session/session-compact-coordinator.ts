@@ -781,9 +781,7 @@ export class SessionCompactCoordinator {
       mode: 'provider_transfer',
       sessionId: session.sessionId,
       title: 'Conversation',
-      maxToolResultChars:
-        config.limits.maxToolResultTokens *
-        config.limits.tokenEstimation.bytesPerToken,
+      maxToolResultChars: config.limits.maxToolOutputBytes,
     })
     const previousHistory = structuredClone(session.history)
     const previousNextSeq = session.nextMessageSeq
@@ -857,6 +855,7 @@ export class SessionCompactCoordinator {
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
       swarmEnabled: Boolean(run.swarmToolConfig),
+      maxSubagents: run.maxSubagents,
       gitToolsEnabled: session.gitToolsEnabled,
     })
     await appendInitialPromptHarness(session, {
@@ -883,6 +882,7 @@ export class SessionCompactCoordinator {
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
       swarmEnabled: Boolean(run.swarmToolConfig),
+      maxSubagents: run.maxSubagents,
       gitToolsEnabled: session.gitToolsEnabled,
     })
     const provider =

@@ -260,6 +260,26 @@ export class SessionRepository {
     return page
   }
 
+  /** Lists every public Session id owned by one Project for lifecycle cleanup. */
+  listIdsByProject(
+    reader: PersistenceReader,
+    projectId: ProjectId,
+  ): SessionId[] {
+    const rows = reader
+      .prepare(
+        `SELECT id
+         FROM sessions
+         WHERE project_id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM subagent_sessions hidden
+             WHERE hidden.session_id = sessions.id
+           )
+         ORDER BY id ASC`,
+      )
+      .all(projectId) as unknown as Array<{ id: string }>
+    return rows.map((row) => row.id as SessionId)
+  }
+
   /** Searches normalized Session text and returns matching Session IDs. */
   searchCandidateIds(
     reader: PersistenceReader,

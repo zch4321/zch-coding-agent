@@ -6,14 +6,14 @@ import { ToolRegistry } from './tool-registry'
 import { registerSwarmTools } from './swarm-tools'
 
 describe('swarm_run Tool', () => {
-  it('registers a parallel, low-risk orchestration Tool without a fixed timeout', () => {
+  it('bounds only asynchronous Swarm preparation with a fixed timeout', () => {
     const registry = new ToolRegistry()
     registerSwarmTools(registry, { run: vi.fn() })
     const definition = registry.get('swarm_run')!
 
     expect(definition.executionMode).toBe('parallel')
     expect(definition.defaultRisk).toBe('low')
-    expect(definition.defaultTimeoutMs).toBeNull()
+    expect(definition.defaultTimeoutMs).toBe(30_000)
     expect(definition.description).toContain('user explicitly requests')
     expect(definition.description).toContain('self-contained')
     expect(definition.description).toContain("toolAccess='readonly'")

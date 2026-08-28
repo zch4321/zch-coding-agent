@@ -5,7 +5,7 @@ import type {
   ProjectCommandResult,
   ProjectUpdatePayloadSchema,
 } from '../../shared/domain-state-api'
-import type { ProjectId } from '../../shared/ids'
+import type { ProjectId, SessionId } from '../../shared/ids'
 import type { ProjectRecord } from '../../shared/project'
 import { MAX_PROJECT_RECORDS } from '../../shared/durable'
 import type { Static } from '@sinclair/typebox'
@@ -23,6 +23,10 @@ export interface ProjectRuntimeGuard {
   evictIdleProject?(
     projectId: ProjectId,
     operationToken?: string,
+  ): void | Promise<void>
+  quiesceProject?(projectId: ProjectId): Promise<SessionId[]>
+  cleanupDeletedSessions?(
+    sessionIds: readonly SessionId[],
   ): void | Promise<void>
 }
 
@@ -188,8 +192,11 @@ export class ProjectService {
     const operationToken = this.#runtimeGuard?.reserveProjectEviction?.(
       input.projectId,
     )
+    let deletedSessionIds: SessionId[]
     let result: ProjectCommandResult
     try {
+      deletedSessionIds =
+        (await this.#runtimeGuard?.quiesceProject?.(input.projectId)) ?? []
       result = await this.#coordinator.command(
         'project.changed',
         (transaction) => {
@@ -217,6 +224,14 @@ export class ProjectService {
         )
       }
       throw error
+    }
+    try {
+      await this.#runtimeGuard?.cleanupDeletedSessions?.(deletedSessionIds)
+    } catch (error) {
+      this.#onDiagnostic(
+        `Removed Project ${input.projectId} could not clean Session temp directories`,
+        error,
+      )
     }
     try {
       await this.#runtimeGuard?.evictIdleProject?.(

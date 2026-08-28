@@ -38,6 +38,12 @@ import { SwarmExecutionBridge } from '../swarm/execution-bridge'
 import { SwarmCoordinator } from '../swarm/coordinator'
 import { ConversationTitlingService } from './conversation-titling-service'
 import type { OperationalLogService } from '../operational-logging/service'
+import {
+  desktopSessionTempRoot,
+  SessionTempService,
+} from '../session-temp/service'
+import { BackgroundTaskBridge } from '../background/bridge'
+import { BackgroundTaskService } from '../background/service'
 
 type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
@@ -55,6 +61,7 @@ export interface CreateBackendRuntimeOptions {
   operationalLog?: Pick<OperationalLogService, 'log'>
   swarmHostEnabled?: boolean
   conversationTitlingDisabled?: boolean
+  sessionTempRootDirectory?: string
 }
 
 export interface BackendRuntime {
@@ -67,6 +74,7 @@ export interface BackendRuntime {
   agentExecutions: AgentExecutionQueryService
   runs: DurableRunApplicationService
   liveSessions: LiveSessionContextRegistry
+  sessionTemps: SessionTempService
   bootstrap(): Promise<AppBootstrapResult>
   subscribe(listener: (commit: DurableCommitEnvelope) => void): () => void
   dispose(): Promise<void>
@@ -80,6 +88,14 @@ export async function createBackendRuntime(
   const runtimeDataDirectory = path.resolve(options.runtimeDataDirectory)
   await mkdir(path.dirname(databasePath), { recursive: true })
   await mkdir(runtimeDataDirectory, { recursive: true })
+  const sessionTemps = new SessionTempService({
+    rootDirectory:
+      options.sessionTempRootDirectory ??
+      desktopSessionTempRoot(runtimeDataDirectory),
+    onDiagnostic: (message, error) =>
+      options.onDiagnostic?.(message, error, { audience: 'internal' }),
+  })
+  await sessionTemps.initialize()
   await rm(path.join(runtimeDataDirectory, 'subagent-snapshots'), {
     recursive: true,
     force: true,
@@ -158,6 +174,25 @@ export async function createBackendRuntime(
     cancelProjectEviction(projectId, token) {
       liveSessions?.cancelProjectEviction(projectId, token)
     },
+    async quiesceProject(projectId) {
+      if (!liveSessions) {
+        throw new Error('Live Session registry is not initialized')
+      }
+      const sessionIds = (
+        await coordinator.query((reader) =>
+          sessionRepository.listIdsByProject(reader, projectId),
+        )
+      ).value
+      for (const sessionId of sessionIds) {
+        await liveSessions.quiesceSession(sessionId)
+      }
+      return sessionIds
+    },
+    async cleanupDeletedSessions(sessionIds) {
+      for (const sessionId of sessionIds) {
+        await sessionTemps.removeSession(sessionId)
+      }
+    },
   }
   const sessionGuard: SessionRuntimeGuard = {
     assertSessionIdle(sessionId) {
@@ -178,6 +213,12 @@ export async function createBackendRuntime(
     cancelSessionEviction(sessionId, token) {
       liveSessions?.cancelSessionEviction(sessionId, token)
     },
+    async quiesceSession(sessionId) {
+      if (!liveSessions) {
+        throw new Error('Live Session registry is not initialized')
+      }
+      await liveSessions.quiesceSession(sessionId)
+    },
     releaseSession(sessionId, operationToken) {
       return liveSessions?.releaseSession(sessionId, operationToken)
     },
@@ -197,6 +238,7 @@ export async function createBackendRuntime(
     messages: messageRepository,
     runtimeGuard: sessionGuard,
     onDiagnostic: options.onDiagnostic,
+    onSessionDeleted: (sessionId) => sessionTemps.removeSession(sessionId),
   })
   const fileChanges = new FileChangeService({
     coordinator,
@@ -214,6 +256,7 @@ export async function createBackendRuntime(
   const executionState = new DurableExecutionStatePort(sessions, subagentState)
   const subagentBridge = new SubagentExecutionBridge()
   const swarmBridge = new SwarmExecutionBridge()
+  const backgroundBridge = new BackgroundTaskBridge()
   let runtime: AgentRuntime | undefined
   let subagentExecution: SubagentExecutionService | undefined
   let swarmCoordinator: SwarmCoordinator | undefined
@@ -232,9 +275,11 @@ export async function createBackendRuntime(
       fileChangeExecution: fileChanges,
       subagentExecution: subagentBridge,
       swarmExecution: swarmBridge,
+      backgroundTasks: backgroundBridge,
       swarmHostEnabled: options.swarmHostEnabled ?? true,
       onDiagnostic: options.onDiagnostic,
       operationalLog: options.operationalLog,
+      sessionTemps,
     })
     const agentExecutions = new AgentExecutionQueryService({
       coordinator,
@@ -291,6 +336,14 @@ export async function createBackendRuntime(
       events: runtime.events,
     })
     swarmBridge.bind(swarmCoordinator)
+    backgroundBridge.bind(
+      new BackgroundTaskService({
+        state: subagentState,
+        subagents: subagentExecution,
+        swarms: swarmCoordinator,
+        terminals: runtime.services.sessions.backgroundTerminalPool(),
+      }),
+    )
     targetState.runs = runs
     const conversationTitling = options.conversationTitlingDisabled
       ? undefined
@@ -316,6 +369,7 @@ export async function createBackendRuntime(
       agentExecutions,
       runs,
       liveSessions,
+      sessionTemps,
       async bootstrap() {
         const snapshot = await coordinator.query((reader) => ({
           projects: projectRepository.list(reader),

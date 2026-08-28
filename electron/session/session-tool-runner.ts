@@ -298,7 +298,7 @@ export class SessionToolRunner {
                 'The tool batch failed before this result could be finalized',
               retryable: false,
             }
-        const projected = this.#projectForContext(call, result)
+        const projected = this.#projectForContext(run, call, result)
         appendToolResult(session, {
           callId: call.id,
           content: projected.projection.content,
@@ -470,6 +470,7 @@ export class SessionToolRunner {
             sessionId: session.sessionId,
             runId: run.runId,
             workspace: session.workspace,
+            sessionTemp: session.sessionTemp,
             mode: session.mode,
             call,
             definition: inspected.definition,
@@ -582,7 +583,10 @@ export class SessionToolRunner {
               execution.attemptStage = 'execution'
               try {
                 execution.preparedFileChange =
-                  session.visibility === 'public'
+                  session.visibility === 'public' &&
+                  !authorization.approvedCall.resourcePreconditions.some(
+                    (precondition) => precondition.rootKind === 'session-temp',
+                  )
                     ? await this.#fileChangeExecution?.prepareMutation({
                         sessionId: session.sessionId,
                         assistantMessageId,
@@ -646,10 +650,14 @@ export class SessionToolRunner {
           execution.approvedCall,
           {
             sessionId: session.sessionId,
+            ownerSessionId: session.ownerSessionId,
             runId: run.runId,
             workspace: {
               canonicalPath: session.workspace,
             },
+            sessionTemp: session.sessionTemp,
+            maxSubagents: run.maxSubagents,
+            toolOutputLimits: run.toolOutputLimits,
             readOnlyWorkspace: session.readOnlyWorkspace,
           },
           run.controller.signal,
@@ -726,6 +734,7 @@ export class SessionToolRunner {
       providerResult = toolFailure(error, run.controller.signal)
     }
     const projected = this.#projectForContext(
+      run,
       execution.call,
       providerResult,
       execution.definitionOverride,
@@ -835,6 +844,7 @@ export class SessionToolRunner {
   }
 
   #projectForContext(
+    run: ActiveRun,
     call: ToolCall,
     result: ToolResult,
     definitionOverride?: ToolDefinition,
@@ -854,7 +864,7 @@ export class SessionToolRunner {
     )
     const bounded = boundToolResultProjectionForContext(
       projection,
-      this.#configStore.getPublicConfig().limits,
+      run.toolOutputLimits,
     )
     return {
       projection: bounded,

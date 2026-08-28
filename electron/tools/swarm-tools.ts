@@ -1,7 +1,7 @@
-import type { JsonValue } from '../../shared/json'
 import { SwarmRunArgsSchema, type SwarmRunArgs } from '../../shared/swarm'
 import type { SwarmExecutionPort } from '../swarm/contracts'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
+import type { JsonValue } from '../../shared/json'
 
 /** Registers the model-pool Swarm orchestration Tool for eligible public Runs. */
 export function registerSwarmTools(
@@ -11,21 +11,27 @@ export function registerSwarmTools(
   registry.registerTool({
     id: 'swarm_run',
     description:
-      "Run one model-pool Swarm Job. Call this only when the user explicitly requests a Swarm, multiple Agents, parallel work, or independent cross-checking; do not invoke it merely because a task is complex. Child Agents receive no parent history. Put common background, evidence, constraints, and output requirements in sharedContext, and keep every task focused and self-contained. Set each task's toolAccess='readonly' for investigation or toolAccess='inherit' when its Agents must use the parent Run's non-readonly tools and permission mode. Give write-capable tasks disjoint ownership whenever practical. The allocator rotates eligible provider/model identities before reuse, but a limited model pool may still reuse a model. Request the lowest capability that can complete each task.",
+      "Start one background model-pool Swarm and immediately return a durable target handle. Call this only when the user explicitly requests a Swarm, multiple Agents, parallel work, or independent cross-checking. Child Agents receive no parent history, so every task must be self-contained. Put common background and constraints in sharedContext, and give write-capable tasks disjoint ownership. Set toolAccess='readonly' for investigation or toolAccess='inherit' for frozen parent permissions. Use background_wait/list and the manifest artifact to observe completion; read child artifacts for complete results.",
     inputSchema: SwarmRunArgsSchema,
     executionMode: 'parallel',
     effects: [],
     defaultRisk: 'low',
     supportsAbort: true,
-    defaultTimeoutMs: null,
-    maxOutputBytes: 2_000_000,
+    defaultTimeoutMs: 30_000,
     async execute(args: SwarmRunArgs, context): Promise<ToolResult> {
-      const result = await execution.run(args, {
+      const run =
+        execution.start?.bind(execution) ?? execution.run.bind(execution)
+      const result = await run(args, {
         sessionId: context.sessionId,
         runId: context.runId,
         callId: context.approvedCall.callId,
         workspace: context.workspace.canonicalPath,
         signal: context.signal,
+        ...(context.ownerSessionId
+          ? { ownerSessionId: context.ownerSessionId }
+          : {}),
+        ...(context.sessionTemp ? { sessionTemp: context.sessionTemp } : {}),
+        ...(context.maxSubagents ? { maxSubagents: context.maxSubagents } : {}),
       })
       return {
         status: 'ok',

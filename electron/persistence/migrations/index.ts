@@ -7,6 +7,7 @@ import reasoningLevelsSql from './0006_reasoning_levels.sql?raw'
 import conversationTranscriptSql from './0007_conversation_transcript.sql?raw'
 import swarmExecutionsSql from './0008_swarm_executions.sql?raw'
 import titleSourceSql from './0009_title_source.sql?raw'
+import activeSubagentCapacitySql from './0010_active_subagent_capacity.sql?raw'
 
 export interface DatabaseMigration {
   version: number
@@ -67,5 +68,10 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
     version: 9,
     name: '0009_title_source',
     sql: titleSourceSql,
+  },
+  {
+    version: 10,
+    name: '0010_active_subagent_capacity',
+    sql: activeSubagentCapacitySql,
   },
 ]

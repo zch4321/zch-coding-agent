@@ -23,6 +23,8 @@ import { registerSubagentTools } from '../tools/subagent-tools'
 import type { SwarmExecutionPort } from '../swarm/contracts'
 import { registerSwarmTools } from '../tools/swarm-tools'
 import { registerTodoTools } from './todo-tools'
+import type { BackgroundTaskPort } from '../background/contracts'
+import { registerBackgroundTools } from '../tools/background-tools'
 
 export interface SessionTooling {
   toolRegistry: ToolRegistry
@@ -38,6 +40,7 @@ export function createSessionTooling(options: {
   mcpManager?: McpManager
   subagentExecution?: SubagentExecutionPort
   swarmExecution?: SwarmExecutionPort
+  backgroundTasks?: BackgroundTaskPort
   getSession: (sessionId: SessionId) => SessionState | undefined
   emit: (session: SessionState, event: AgentEventDraft) => void
 }): SessionTooling {
@@ -62,11 +65,7 @@ export function createSessionTooling(options: {
   )
   registerFetchTools(toolRegistry, () => options.configStore.getPublicConfig())
   registerWebSearchTools(toolRegistry, options.configStore)
-  registerTerminalTools(
-    toolRegistry,
-    options.terminals.pool,
-    () => options.configStore.getPublicConfig().limits.maxToolOutputBytes,
-  )
+  registerTerminalTools(toolRegistry, options.terminals.pool)
   if (options.skillsManager) {
     registerSkillTools(toolRegistry, options.skillsManager)
   }
@@ -83,6 +82,9 @@ export function createSessionTooling(options: {
   }
   if (options.swarmExecution) {
     registerSwarmTools(toolRegistry, options.swarmExecution)
+  }
+  if (options.backgroundTasks) {
+    registerBackgroundTools(toolRegistry, options.backgroundTasks)
   }
 
   const mcpGateway = options.mcpManager

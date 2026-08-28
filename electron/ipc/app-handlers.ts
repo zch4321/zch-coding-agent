@@ -463,7 +463,7 @@ export function createAppIpcHandlers(
       try {
         const guard = await PathGuard.create(workspace)
         const maxBytes = Math.min(
-          configStore.getPublicConfig().limits.readFileOutputBytes,
+          configStore.getPublicConfig().limits.maxToolOutputBytes,
           499_999,
         )
         return {

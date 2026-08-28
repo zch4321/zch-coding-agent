@@ -196,7 +196,7 @@ describe('DatabaseService', () => {
       const count = reopened.read((reader) =>
         reader.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
       )
-      expect(count).toEqual({ count: 9 })
+      expect(count).toEqual({ count: 10 })
     } finally {
       await reopened.close()
       await testDatabase.dispose()
@@ -230,8 +230,8 @@ describe('DatabaseService', () => {
           .all(),
       }))
       expect(state.migrations.at(-1)).toEqual({
-        version: 9,
-        name: '0009_title_source',
+        version: 10,
+        name: '0010_active_subagent_capacity',
       })
       expect(state.tables).toEqual([
         { name: 'subagent_executions' },
@@ -515,8 +515,8 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 10,
-        name: '0010_future',
+        version: 11,
+        name: '0011_future',
         sql: 'CREATE TABLE future_state (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -536,13 +536,13 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 10,
-        name: '0010_second',
+        version: 11,
+        name: '0011_second',
         sql: 'CREATE TABLE second_step (id TEXT PRIMARY KEY) STRICT;',
       },
       {
-        version: 11,
-        name: '0011_third',
+        version: 12,
+        name: '0012_third',
         sql: 'CREATE TABLE third_step (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -551,7 +551,7 @@ describe('DatabaseService', () => {
     await testDatabase.database.withTransaction((transaction) => {
       transaction
         .prepare('DELETE FROM schema_migrations WHERE version = ?')
-        .run(10)
+        .run(11)
     })
     await testDatabase.database.close()
 
@@ -572,8 +572,8 @@ describe('DatabaseService', () => {
     const brokenMigrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 10,
-        name: '0010_broken',
+        version: 11,
+        name: '0011_broken',
         sql: `
           CREATE TABLE should_rollback (id TEXT PRIMARY KEY) STRICT;
           INSERT INTO table_that_does_not_exist VALUES (1);
@@ -601,7 +601,7 @@ describe('DatabaseService', () => {
       ).toBeUndefined()
       expect(
         raw.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
-      ).toEqual({ count: 9 })
+      ).toEqual({ count: 10 })
     } finally {
       raw.close()
       await first.dispose()
@@ -613,8 +613,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 10,
-          name: '0010_transaction_probe',
+          version: 11,
+          name: '0011_transaction_probe',
           sql: `
             CREATE TABLE transaction_probe (
               id INTEGER PRIMARY KEY
@@ -707,8 +707,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 10,
-          name: '0010_transaction_control_probe',
+          version: 11,
+          name: '0011_transaction_control_probe',
           sql: 'CREATE TABLE transaction_control_probe (id INTEGER PRIMARY KEY) STRICT;',
         },
       ],

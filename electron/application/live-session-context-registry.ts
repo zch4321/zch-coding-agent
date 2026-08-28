@@ -155,6 +155,13 @@ export class LiveSessionContextRegistry
 
   /** Rejects project operations while related Sessions or the project are being evicted. */
   assertProjectIdle(projectId: ProjectId): void {
+    this.#assertProjectSessionsIdle(projectId, true)
+  }
+
+  #assertProjectSessionsIdle(
+    projectId: ProjectId,
+    includeTerminals: boolean,
+  ): void {
     if (this.#projectEvictions.has(projectId)) {
       throw new ApplicationError('CONFLICT', 'Project lifecycle is evicting')
     }
@@ -175,7 +182,8 @@ export class LiveSessionContextRegistry
           `Session lifecycle is ${entry.phase}`,
         )
       }
-      this.#assertManagerSessionIdle(sessionId)
+      if (includeTerminals) this.#assertManagerSessionIdle(sessionId)
+      else this.#assertManagerSessionMutationIdle(sessionId)
     }
   }
 
@@ -249,7 +257,7 @@ export class LiveSessionContextRegistry
         `Session lifecycle is ${entry.phase}`,
       )
     }
-    this.#assertManagerSessionIdle(sessionId)
+    this.#assertManagerSessionMutationIdle(sessionId)
     const operationToken = randomUUID()
     if (entry) {
       entry.phase = 'evicting'
@@ -303,9 +311,14 @@ export class LiveSessionContextRegistry
     await this.#scheduleTeardown(sessionId, entry)
   }
 
+  /** Cancels and settles background tasks before archive/delete lifecycle commits. */
+  quiesceSession(sessionId: SessionId): Promise<void> {
+    return this.#manager.quiesceBackgroundTasks(sessionId)
+  }
+
   /** Marks a Project and its live Sessions for coordinated eviction. */
   reserveProjectEviction(projectId: ProjectId): string {
-    this.assertProjectIdle(projectId)
+    this.#assertProjectSessionsIdle(projectId, false)
     const operationToken = randomUUID()
     this.#projectEvictions.set(projectId, operationToken)
     for (const entry of this.#entries.values()) {

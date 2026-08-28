@@ -186,6 +186,10 @@ export class SessionRunController {
       status: 'idle',
       usageRecords: [],
       fileChangeHistoryBytes: config.limits.fileChangeHistoryBytes,
+      toolOutputLimits: {
+        maxToolOutputBytes: config.limits.maxToolOutputBytes,
+        maxToolOutputLines: config.limits.maxToolOutputLines,
+      },
       done: Promise.resolve(),
       pendingSideEffects: new Set(),
       pendingInterjections: [],
@@ -195,6 +199,7 @@ export class SessionRunController {
       harnessMessageIds: [],
       requestCommitted: false,
       subagentsEnabled,
+      maxSubagents: config.subagents.maxSubagents,
       ...(swarm.toolConfig ? { swarmToolConfig: swarm.toolConfig } : {}),
       directUserInput: options.directUserInput ?? false,
       ...(options.directContext

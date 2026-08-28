@@ -50,7 +50,6 @@ function fixtureTool(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 5_000,
-    maxOutputBytes: 4_096,
     execute,
   }
 }
@@ -150,6 +149,7 @@ async function fixture(batch: BatchCall[], options: BatchFixtureOptions = {}) {
     value: {
       enabled: true,
       workerTimeoutMs: 60_000,
+      maxSubagents: 32,
     },
   })
   const events: AgentEventEnvelope[] = []

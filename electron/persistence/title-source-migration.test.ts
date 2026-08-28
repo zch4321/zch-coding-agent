@@ -42,7 +42,10 @@ describe('0009_title_source migration', () => {
             )
             .get(),
         ),
-      ).toEqual({ version: 9, name: '0009_title_source' })
+      ).toEqual({
+        version: 10,
+        name: '0010_active_subagent_capacity',
+      })
 
       // Rows that existed before the migration keep their titles unmanaged.
       expect(

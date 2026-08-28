@@ -39,6 +39,11 @@ import type { SwarmExecutionPort } from '../swarm/contracts'
 import type { LlmUsageRecord } from '../../shared/usage'
 import type { TodoState } from '../../shared/todo'
 import type { OperationalLogService } from '../operational-logging/service'
+import type {
+  SessionTempPaths,
+  SessionTempService,
+} from '../session-temp/service'
+import type { BackgroundTaskPort } from '../background/contracts'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -70,6 +75,7 @@ export interface SessionManagerOptions {
   mcpManager?: McpManager
   subagentExecution?: SubagentExecutionPort
   swarmExecution?: SwarmExecutionPort
+  backgroundTasks?: BackgroundTaskPort
   swarmHostEnabled?: boolean
   promptRegistry?: PromptRegistry
   fetchImpl?: typeof fetch
@@ -88,6 +94,7 @@ export interface SessionManagerOptions {
   historySource?: SessionHistorySourcePort
   onDiagnostic?: DiagnosticSink
   operationalLog?: Pick<OperationalLogService, 'log'>
+  sessionTemps?: SessionTempService
 }
 
 export interface SessionExecutionCommit {
@@ -148,6 +155,10 @@ export interface ActiveRun {
   failure?: { code: string; message: string; diagnosticId?: DiagnosticId }
   usageRecords: LlmUsageRecord[]
   fileChangeHistoryBytes: number
+  toolOutputLimits: {
+    maxToolOutputBytes: number
+    maxToolOutputLines: number
+  }
   pendingApproval?: PendingApproval
   pendingInterjections: RunInterjection[]
   acceptingInterjections: boolean
@@ -168,6 +179,7 @@ export interface ActiveRun {
     approval?: ResolvedModelRoute
   }
   subagentsEnabled: boolean
+  maxSubagents: number
   swarmToolConfig?: SwarmToolConfiguration
   allowedToolIds?: Set<string>
   directUserInput: boolean
@@ -180,6 +192,8 @@ export type ActiveRunExecution = ActiveRun
 
 export interface SessionState {
   sessionId: SessionId
+  ownerSessionId: SessionId
+  sessionTemp: SessionTempPaths
   workspace: string
   mode: PermissionMode
   provider: string

@@ -214,6 +214,7 @@ export async function configureApp(input: {
           value: {
             enabled: true,
             workerTimeoutMs: 60_000,
+            maxSubagents: 32,
           },
         })
         if (!delegated.ok) {

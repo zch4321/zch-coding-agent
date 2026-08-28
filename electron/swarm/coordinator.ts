@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { access } from 'node:fs/promises'
+import path from 'node:path'
 import type { ModelCapabilityLevel } from '../../shared/config'
 import type { AgentExecutionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import {
-  MAX_SWARM_AGENTS,
   MAX_SWARM_SHARED_CONTEXT_LENGTH,
   MAX_SWARM_TASK_LENGTH,
   MAX_SWARM_TASK_NAME_LENGTH,
@@ -26,19 +27,27 @@ import type { RuntimeEventSink } from '../runtime/runtime-events'
 import type { SessionManager } from '../session/session-manager'
 import type {
   PreparedSubagentExecutionPort,
+  BackgroundTaskHandle,
   SubagentRunResult,
   SubagentSpec,
   SubagentUsageSummary,
 } from '../subagent/contracts'
 import { projectAgentExecutionSummary } from '../subagent/public-projection'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
-import type { SubagentStateService } from '../application/subagent-state-service'
+import {
+  SubagentCapacityError,
+  type SubagentStateService,
+} from '../application/subagent-state-service'
 import { compileSchema } from '../schema-validator'
 import {
   SwarmRuntimeError,
   type SwarmExecutionPort,
   type SwarmParentContext,
 } from './contracts'
+import {
+  writeSessionArtifactJson,
+  type SessionTempPaths,
+} from '../session-temp/service'
 
 const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype'])
 const MAX_SWARM_RESULT_BYTES = 2_000_000
@@ -52,11 +61,30 @@ interface ExpandedChild {
 
 interface PreparedChild extends ExpandedChild {
   assignment: PreparedModelPoolAssignment
+  toolContext: ReturnType<SessionManager['frozenSubagentToolContext']>
   record: SubagentExecutionRecord
 }
 
 interface ActiveJob {
   promise: Promise<SwarmRunResult>
+  controller: AbortController
+  childIds: AgentExecutionId[]
+}
+
+interface SwarmArtifacts {
+  path: string
+  available: boolean
+  captureError?: string
+  manifestSeed?: {
+    sharedContext: string
+    tasks: SwarmRunArgs['tasks']
+    children: Array<{
+      executionId: AgentExecutionId
+      taskIndex: number
+      agentIndex: number
+      assignment: ReturnType<typeof assignmentResult>
+    }>
+  }
 }
 
 function json(value: unknown): JsonValue {
@@ -301,6 +329,9 @@ export class SwarmCoordinator implements SwarmExecutionPort {
   readonly #subagents: PreparedSubagentExecutionPort
   readonly #events: RuntimeEventSink
   readonly #active = new Map<AgentExecutionId, ActiveJob>()
+  readonly #starting = new Set<Promise<void>>()
+  readonly #artifacts = new Map<AgentExecutionId, SwarmArtifacts>()
+  readonly #cancelled = new Set<AgentExecutionId>()
   #disposing = false
 
   constructor(options: {
@@ -319,12 +350,52 @@ export class SwarmCoordinator implements SwarmExecutionPort {
 
   /** Starts one Swarm Job without serializing it against sibling Jobs. */
   run(args: SwarmRunArgs, parent: SwarmParentContext): Promise<SwarmRunResult> {
-    return this.#run(args, parent)
+    return this.#beginRun(args, parent)
+  }
+
+  /** Starts a detached Swarm and resolves after durable reservation and manifest creation. */
+  start(
+    args: SwarmRunArgs,
+    parent: SwarmParentContext,
+  ): Promise<BackgroundTaskHandle> {
+    return new Promise((resolve, reject) => {
+      let handleReturned = false
+      const execution = this.#beginRun(args, parent, (handle) => {
+        handleReturned = true
+        resolve(handle)
+      })
+      void execution.catch((error) => {
+        if (!handleReturned) reject(error)
+      })
+    })
+  }
+
+  #beginRun(
+    args: SwarmRunArgs,
+    parent: SwarmParentContext,
+    onStarted?: (handle: BackgroundTaskHandle) => void,
+  ): Promise<SwarmRunResult> {
+    let settlePreparation!: () => void
+    const preparation = new Promise<void>((resolve) => {
+      settlePreparation = resolve
+    })
+    const settle = () => {
+      this.#starting.delete(preparation)
+      settlePreparation()
+    }
+    this.#starting.add(preparation)
+    const execution = this.#run(args, parent, (handle) => {
+      onStarted?.(handle)
+      settle()
+    })
+    void execution.then(settle, settle)
+    return execution
   }
 
   async #run(
     candidate: SwarmRunArgs,
     parent: SwarmParentContext,
+    onStarted?: (handle: BackgroundTaskHandle) => void,
   ): Promise<SwarmRunResult> {
     if (this.#disposing) {
       throw new SwarmRuntimeError(
@@ -336,14 +407,28 @@ export class SwarmCoordinator implements SwarmExecutionPort {
       parent.sessionId,
       parent.runId,
     )
-    const args = normalizeArgs(candidate, MAX_SWARM_AGENTS)
+    const maximum =
+      parent.maxSubagents ??
+      this.#configStore.getPublicConfig().subagents?.maxSubagents ??
+      32
+    const args = normalizeArgs(candidate, maximum)
     const argsHash = hash(args)
     const existing = await this.#state.getRootExecution({
       parentSessionId: parent.sessionId,
       parentRunId: parent.runId,
       parentCallId: parent.callId,
     })
-    if (existing) return this.#reuseExisting(existing, argsHash)
+    if (existing) {
+      if (existing.kind !== 'swarm' || existing.specHash !== argsHash) {
+        throw new SwarmRuntimeError(
+          'SWARM_CALL_CONFLICT',
+          'The parent Tool call was already used with different arguments',
+        )
+      }
+      const handle = await this.#handleFor(existing, parent.sessionTemp)
+      onStarted?.(handle)
+      return this.#reuseExisting(existing, argsHash)
+    }
     const expanded = expandTasks(args.sharedContext, args.tasks)
     const requirements = expanded.map(
       (child) =>
@@ -377,6 +462,11 @@ export class SwarmCoordinator implements SwarmExecutionPort {
       return {
         ...child,
         assignment,
+        toolContext: this.#manager.frozenSubagentToolContext(
+          parent.sessionId,
+          parent.runId,
+          child.spec.toolAccess,
+        ),
         record: {
           id: `subagent-${randomUUID()}` as AgentExecutionId,
           kind: 'subagent',
@@ -398,10 +488,24 @@ export class SwarmCoordinator implements SwarmExecutionPort {
         },
       }
     })
-    const reserved = await this.#state.createSwarmJob(
-      root,
-      children.map((child) => child.record),
-    )
+    let reserved
+    try {
+      reserved = await this.#state.createSwarmJob(
+        root,
+        children.map((child) => child.record),
+        maximum,
+      )
+    } catch (error) {
+      if (error instanceof SubagentCapacityError) {
+        throw new SwarmRuntimeError(error.capacityCode, error.message)
+      }
+      throw new SwarmRuntimeError(
+        'SWARM_START_FAILED',
+        error instanceof Error
+          ? error.message
+          : 'Swarm durable reservation failed',
+      )
+    }
     if (!reserved.created) {
       if (reserved.root.specHash !== root.specHash) {
         throw new SwarmRuntimeError(
@@ -410,6 +514,8 @@ export class SwarmCoordinator implements SwarmExecutionPort {
         )
       }
       const active = this.#active.get(reserved.root.id)
+      const handle = await this.#handleFor(reserved.root, parent.sessionTemp)
+      onStarted?.(handle)
       if (active) return active.promise
       if (
         reserved.root.status === 'completed' ||
@@ -428,12 +534,30 @@ export class SwarmCoordinator implements SwarmExecutionPort {
           `Swarm execution is ${reserved.root.status}`,
       )
     }
+    const artifacts = await this.#initializeManifest(
+      root,
+      children,
+      args,
+      parent.sessionTemp,
+    )
     await this.#publishRoot(root)
     for (const child of children) this.#publishChild(child.record)
-    const promise = this.#executeJob(root, children, parent).finally(() =>
-      this.#active.delete(root.id),
-    )
-    this.#active.set(root.id, { promise })
+    const controller = new AbortController()
+    const promise = this.#executeJob(
+      root,
+      children,
+      parent,
+      controller.signal,
+    ).finally(() => {
+      this.#active.delete(root.id)
+      this.#cancelled.delete(root.id)
+    })
+    this.#active.set(root.id, {
+      promise,
+      controller,
+      childIds: children.map((child) => child.record.id),
+    })
+    onStarted?.(this.#artifactHandle(root, artifacts))
     return promise
   }
 
@@ -474,12 +598,14 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     root: SubagentExecutionRecord,
     children: readonly PreparedChild[],
     parent: SwarmParentContext,
+    cancellationSignal: AbortSignal,
   ): Promise<SwarmRunResult> {
     const startedAt = performance.now()
     root.status = 'running'
     root.updatedAt = new Date().toISOString()
     await this.#state.updateExecution(root)
     await this.#publishRoot(root)
+    await this.#updateManifest(root, parent.sessionTemp)
 
     const results = await Promise.all(
       children.map(async (child): Promise<SwarmAgentResult> => {
@@ -492,6 +618,8 @@ export class SwarmCoordinator implements SwarmExecutionPort {
             parentExecutionId: root.id,
             childOrdinal: child.record.childOrdinal!,
             routes: child.assignment.routes,
+            toolContext: child.toolContext,
+            cancellationSignal,
           })
         } catch (error) {
           failure = error
@@ -501,6 +629,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
           child.record.id,
         )
         await this.#publishRoot(root)
+        await this.#updateManifest(root, parent.sessionTemp)
         if (completed) {
           return {
             taskIndex: child.taskIndex,
@@ -545,14 +674,15 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     root.updatedAt = completedAt
     root.completedAt = completedAt
 
-    if (parent.signal.aborted) {
+    if (this.#cancelled.has(root.id) || cancellationSignal.aborted) {
       root.status = 'cancelled'
       root.error = {
         code: 'SWARM_CANCELLED',
-        message: 'Swarm execution was cancelled with its parent Run',
+        message: 'Swarm execution was cancelled',
       }
       await this.#state.updateExecution(root)
       await this.#publishRoot(root)
+      await this.#updateManifest(root, parent.sessionTemp)
       throw new SwarmRuntimeError(root.error.code, root.error.message)
     }
 
@@ -568,6 +698,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
       }
       await this.#state.updateExecution(root)
       await this.#publishRoot(root)
+      await this.#updateManifest(root, parent.sessionTemp)
       throw new SwarmRuntimeError(root.error.code, root.error.message)
     }
 
@@ -586,7 +717,215 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     root.result = json(result)
     await this.#state.updateExecution(root)
     await this.#publishRoot(root)
+    await this.#updateManifest(root, parent.sessionTemp)
     return result
+  }
+
+  async #initializeManifest(
+    root: SubagentExecutionRecord,
+    children: readonly PreparedChild[],
+    args: SwarmRunArgs,
+    sessionTemp: SessionTempPaths | undefined,
+  ): Promise<SwarmArtifacts> {
+    const existing = this.#artifacts.get(root.id)
+    if (existing) return existing
+    if (!sessionTemp) {
+      const unavailable = {
+        path: '',
+        available: false,
+        captureError: 'Session temp is unavailable',
+      }
+      this.#artifacts.set(root.id, unavailable)
+      return unavailable
+    }
+    const manifestSeed: NonNullable<SwarmArtifacts['manifestSeed']> = {
+      sharedContext: args.sharedContext,
+      tasks: structuredClone(args.tasks),
+      children: children.map((child) => ({
+        executionId: child.record.id,
+        taskIndex: child.taskIndex,
+        agentIndex: child.agentIndex,
+        assignment: assignmentResult(child.assignment),
+      })),
+    }
+    const artifact: SwarmArtifacts = {
+      path: path.join(
+        sessionTemp.artifacts,
+        'swarms',
+        root.id,
+        'manifest.json',
+      ),
+      available: true,
+      manifestSeed,
+    }
+    this.#artifacts.set(root.id, artifact)
+    try {
+      await writeSessionArtifactJson(
+        sessionTemp,
+        ['swarms', root.id, 'manifest.json'],
+        {
+          schemaVersion: 1,
+          target: { type: 'swarm', id: root.id },
+          status: root.status,
+          createdAt: root.createdAt,
+          sharedContext: manifestSeed.sharedContext,
+          tasks: manifestSeed.tasks,
+          children: children.map((child) => ({
+            executionId: child.record.id,
+            taskIndex: child.taskIndex,
+            agentIndex: child.agentIndex,
+            name: child.record.name,
+            status: child.record.status,
+            artifactPath: path.join(
+              sessionTemp.artifacts,
+              'subagents',
+              child.record.id,
+            ),
+            assignment: assignmentResult(child.assignment),
+          })),
+        },
+      )
+    } catch (error) {
+      artifact.available = false
+      artifact.captureError =
+        error instanceof Error ? error.message : String(error)
+    }
+    return artifact
+  }
+
+  async #updateManifest(
+    root: SubagentExecutionRecord,
+    sessionTemp: SessionTempPaths | undefined,
+  ): Promise<void> {
+    const artifact = this.#artifacts.get(root.id)
+    if (!artifact?.available || !sessionTemp) return
+    try {
+      const children = await this.#state.listChildren(
+        root.parentSessionId,
+        root.id,
+      )
+      const childSeeds = new Map(
+        artifact.manifestSeed?.children.map((child) => [
+          child.executionId,
+          child,
+        ]),
+      )
+      await writeSessionArtifactJson(
+        sessionTemp,
+        ['swarms', root.id, 'manifest.json'],
+        {
+          schemaVersion: 1,
+          target: { type: 'swarm', id: root.id },
+          status: root.status,
+          createdAt: root.createdAt,
+          updatedAt: root.updatedAt,
+          completedAt: root.completedAt,
+          counts: await this.#state.executionCounts(root.id),
+          sharedContext: artifact.manifestSeed?.sharedContext,
+          tasks: artifact.manifestSeed?.tasks,
+          children: children.map((child) => ({
+            executionId: child.id,
+            childOrdinal: child.childOrdinal,
+            taskIndex: childSeeds.get(child.id)?.taskIndex,
+            agentIndex: childSeeds.get(child.id)?.agentIndex,
+            name: child.name,
+            status: child.status,
+            artifactPath: path.join(
+              sessionTemp.artifacts,
+              'subagents',
+              child.id,
+            ),
+            assignment: childSeeds.get(child.id)?.assignment,
+            error: child.error,
+          })),
+        },
+      )
+    } catch (error) {
+      artifact.available = false
+      artifact.captureError =
+        error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  #artifactHandle(
+    record: SubagentExecutionRecord,
+    artifact: SwarmArtifacts,
+  ): BackgroundTaskHandle {
+    return {
+      target: { type: 'swarm', id: record.id },
+      status: record.status,
+      artifactAvailable: artifact.available,
+      ...(artifact.available ? { artifactPath: artifact.path } : {}),
+      ...(artifact.captureError ? { captureError: artifact.captureError } : {}),
+    }
+  }
+
+  async #handleFor(
+    record: SubagentExecutionRecord,
+    sessionTemp: SessionTempPaths | undefined,
+  ): Promise<BackgroundTaskHandle> {
+    const active = this.#artifacts.get(record.id)
+    if (active) return this.#artifactHandle(record, active)
+    if (!sessionTemp) {
+      return {
+        target: { type: 'swarm', id: record.id },
+        status: record.status,
+        artifactAvailable: false,
+      }
+    }
+    const manifestPath = path.join(
+      sessionTemp.artifacts,
+      'swarms',
+      record.id,
+      'manifest.json',
+    )
+    try {
+      await access(manifestPath)
+      return {
+        target: { type: 'swarm', id: record.id },
+        status: record.status,
+        artifactAvailable: true,
+        artifactPath: manifestPath,
+      }
+    } catch {
+      return {
+        target: { type: 'swarm', id: record.id },
+        status: record.status,
+        artifactAvailable: false,
+      }
+    }
+  }
+
+  /** Cancels one owned Swarm root and cascades to every unfinished child. */
+  async cancel(
+    parentSessionId: import('../../shared/ids').SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<boolean> {
+    const record = await this.#state.getExecution(parentSessionId, executionId)
+    if (!record || record.kind !== 'swarm') return false
+    const active = this.#active.get(executionId)
+    if (!active) return false
+    this.#cancelled.add(executionId)
+    active.controller.abort(
+      new SwarmRuntimeError('SWARM_CANCELLED', 'Swarm was cancelled'),
+    )
+    for (const childId of active.childIds) {
+      await this.#subagents.cancel?.(parentSessionId, childId)
+    }
+    return true
+  }
+
+  /** Returns current manifest capture truth without trusting mutable files. */
+  artifactStatus(
+    executionId: AgentExecutionId,
+  ): import('../subagent/contracts').BackgroundArtifactStatus | undefined {
+    const artifact = this.#artifacts.get(executionId)
+    if (!artifact) return undefined
+    return {
+      artifactAvailable: artifact.available,
+      ...(artifact.available ? { artifactPath: artifact.path } : {}),
+      ...(artifact.captureError ? { captureError: artifact.captureError } : {}),
+    }
   }
 
   async #publishRoot(record: SubagentExecutionRecord): Promise<void> {
@@ -615,6 +954,16 @@ export class SwarmCoordinator implements SwarmExecutionPort {
   /** Waits for active Jobs while Subagent disposal propagates their aborts. */
   async dispose(): Promise<void> {
     this.#disposing = true
+    await Promise.allSettled([...this.#starting])
+    for (const [executionId, active] of this.#active) {
+      this.#cancelled.add(executionId)
+      active.controller.abort(
+        new SwarmRuntimeError(
+          'SWARM_RUNTIME_DISPOSING',
+          'Swarm runtime is shutting down',
+        ),
+      )
+    }
     await Promise.allSettled(
       [...this.#active.values()].map((active) => active.promise),
     )

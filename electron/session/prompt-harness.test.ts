@@ -165,6 +165,11 @@ describe('canonical prompt harness', () => {
       .mockResolvedValue('file refreshed.txt')
     const input = {
       workspace,
+      sessionTemp: {
+        root: path.join(workspace, '.session-temp-a'),
+        artifacts: path.join(workspace, '.session-temp-a', 'artifacts'),
+        scratch: path.join(workspace, '.session-temp-a', 'scratch'),
+      },
       mode: 'readonly',
       config,
       providerId: 'deepseek',
@@ -186,6 +191,19 @@ describe('canonical prompt harness', () => {
       type: 'text',
       text: expect.stringContaining('git snapshot: initial'),
     })
+
+    await expect(
+      appendRuntimeContextIfChanged(state, {
+        ...input,
+        sessionTemp: {
+          root: path.join(workspace, '.session-temp-b'),
+          artifacts: path.join(workspace, '.session-temp-b', 'artifacts'),
+          scratch: path.join(workspace, '.session-temp-b', 'scratch'),
+        },
+      }),
+    ).resolves.toBe(false)
+    expect(readGitSummary).toHaveBeenCalledTimes(1)
+    expect(readProjectTree).toHaveBeenCalledTimes(1)
 
     await writeFile(path.join(workspace, 'ordinary-file.txt'), 'changed\n')
     await expect(appendRuntimeContextIfChanged(state, input)).resolves.toBe(

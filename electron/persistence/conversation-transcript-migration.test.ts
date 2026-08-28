@@ -77,8 +77,8 @@ describe('0007_conversation_transcript migration', () => {
             .get(),
         ),
       ).toEqual({
-        version: 9,
-        name: '0009_title_source',
+        version: 10,
+        name: '0010_active_subagent_capacity',
       })
       expect(
         upgraded

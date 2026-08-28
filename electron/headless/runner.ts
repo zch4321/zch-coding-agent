@@ -165,6 +165,7 @@ export async function runHeadlessAgent(
     eventListeners: [metricsListener, ...(options.eventListeners ?? [])],
     onDiagnostic: headlessDiagnostic,
     operationalLog,
+    sessionTempRootDirectory: path.join(artifactsDirectory, 'sessions'),
   }).catch(async (error: unknown) => {
     operationalLog.log({
       level: 'error',
@@ -324,6 +325,9 @@ export async function runHeadlessAgent(
       options.signal?.removeEventListener('abort', relayAbort)
     }
 
+    if (sessionId) {
+      await runtime.services.sessions.quiesceBackgroundTasks(sessionId)
+    }
     const status = classifyStatus({ completion, timedOut, incompleteReason })
     const patch = await collectWorkspacePatch({ workspace, artifactsDirectory })
     const completedAt = new Date().toISOString()

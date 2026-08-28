@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import type {
   AgentExecutionId,
   CallId,
@@ -16,7 +19,10 @@ import type {
   SubagentRunResult,
   SubagentSpec,
 } from '../subagent/contracts'
-import type { SubagentStateService } from '../application/subagent-state-service'
+import {
+  SubagentCapacityError,
+  type SubagentStateService,
+} from '../application/subagent-state-service'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { SwarmParentContext } from './contracts'
 
@@ -136,7 +142,19 @@ function parent(callId: string): SwarmParentContext {
   }
 }
 
-function fixture(runPrepared: PreparedSubagentExecutionPort['runPrepared']) {
+function fixture(
+  runPrepared: PreparedSubagentExecutionPort['runPrepared'],
+  options: {
+    createSwarmJob?: (
+      root: SubagentExecutionRecord,
+      children: SubagentExecutionRecord[],
+    ) => Promise<{
+      created: boolean
+      root: SubagentExecutionRecord
+      children?: SubagentExecutionRecord[]
+    }>
+  } = {},
+) {
   const records = new Map<AgentExecutionId, SubagentExecutionRecord>()
   const roots = new Map<string, SubagentExecutionRecord>()
   const state = {
@@ -147,6 +165,9 @@ function fixture(runPrepared: PreparedSubagentExecutionPort['runPrepared']) {
       root: SubagentExecutionRecord,
       children: SubagentExecutionRecord[],
     ) {
+      if (options.createSwarmJob) {
+        return options.createSwarmJob(root, children)
+      }
       const existing = roots.get(root.parentCallId)
       if (existing) return { created: false as const, root: existing }
       roots.set(root.parentCallId, root)
@@ -181,6 +202,16 @@ function fixture(runPrepared: PreparedSubagentExecutionPort['runPrepared']) {
         ).length,
       }
     },
+    async listChildren(
+      _parentSessionId: SessionId,
+      rootExecutionId: AgentExecutionId,
+    ) {
+      return [...records.values()]
+        .filter((record) => record.parentExecutionId === rootExecutionId)
+        .sort(
+          (left, right) => (left.childOrdinal ?? 0) - (right.childOrdinal ?? 0),
+        )
+    },
   }
   const publishAgentExecution = vi.fn()
   const coordinator = new SwarmCoordinator({
@@ -190,6 +221,11 @@ function fixture(runPrepared: PreparedSubagentExecutionPort['runPrepared']) {
     manager: {
       frozenSwarmContext: () => ({
         goal: 'Review the project',
+      }),
+      frozenSubagentToolContext: () => ({
+        permissionMode: 'readonly',
+        allowedToolIds: new Set<string>(),
+        gitToolsEnabled: true,
       }),
     } as unknown as SessionManager,
     state: state as unknown as SubagentStateService,
@@ -412,5 +448,92 @@ describe('SwarmCoordinator', () => {
       fixtureValue.coordinator.run(args(2), parent('call:all-fail')),
     ).rejects.toMatchObject({ code: 'SWARM_ALL_AGENTS_FAILED' })
     expect(fixtureValue.roots.get('call:all-fail')?.status).toBe('failed')
+    await expect(
+      fixtureValue.coordinator.start(args(2), parent('call:all-fail')),
+    ).resolves.toMatchObject({
+      target: { type: 'swarm', id: expect.any(String) },
+      status: 'failed',
+    })
+  })
+
+  it('distinguishes atomic capacity rejection from durable storage failure', async () => {
+    freezeModelPoolPlanMock.mockResolvedValue(plan(1))
+    const capacity = fixture(vi.fn(), {
+      createSwarmJob: async () => {
+        throw new SubagentCapacityError(1)
+      },
+    })
+    await expect(
+      capacity.coordinator.start(args(1), parent('call:capacity')),
+    ).rejects.toMatchObject({ code: 'SUBAGENT_CAPACITY_EXCEEDED' })
+
+    const storage = fixture(vi.fn(), {
+      createSwarmJob: async () => {
+        throw new Error('database unavailable')
+      },
+    })
+    await expect(
+      storage.coordinator.start(args(1), parent('call:storage')),
+    ).rejects.toMatchObject({ code: 'SWARM_START_FAILED' })
+  })
+
+  it('preserves task and assignment metadata after manifest status updates', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'swarm-manifest-'))
+    const sessionTemp = {
+      root,
+      artifacts: path.join(root, 'artifacts'),
+      scratch: path.join(root, 'scratch'),
+    }
+    freezeModelPoolPlanMock.mockResolvedValue(plan(1))
+    const durableRecords: {
+      current?: Map<AgentExecutionId, SubagentExecutionRecord>
+    } = {}
+    const fixtureValue = fixture(async (spec, _parent, prepared) => {
+      const record = durableRecords.current!.get(prepared.executionId)!
+      record.status = 'completed'
+      record.updatedAt = new Date().toISOString()
+      record.completedAt = record.updatedAt
+      return completed(spec)
+    })
+    durableRecords.current = fixtureValue.records
+
+    try {
+      await fixtureValue.coordinator.run(args(1), {
+        ...parent('call:manifest'),
+        sessionTemp,
+      })
+      const execution = fixtureValue.roots.get('call:manifest')!
+      const manifest = JSON.parse(
+        await readFile(
+          path.join(
+            sessionTemp.artifacts,
+            'swarms',
+            execution!.id,
+            'manifest.json',
+          ),
+          'utf8',
+        ),
+      ) as Record<string, unknown>
+
+      expect(manifest).toMatchObject({
+        status: 'completed',
+        sharedContext: args(1).sharedContext,
+        tasks: args(1).tasks,
+        children: [
+          {
+            taskIndex: 0,
+            agentIndex: 1,
+            status: 'completed',
+            assignment: {
+              providerId: 'provider-a',
+              model: 'model-a',
+            },
+          },
+        ],
+      })
+    } finally {
+      await fixtureValue.coordinator.dispose()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })

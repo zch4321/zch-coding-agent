@@ -87,6 +87,22 @@ const ALIASED_EXECUTION_COLUMNS = `
 
 /** Persists hidden Subagent execution identity, lifecycle, results, and Session ownership. */
 export class SubagentRepository {
+  /** Counts active leaf executions for one public parent Session. */
+  countActiveLeaves(
+    reader: PersistenceReader,
+    parentSessionId: SessionId,
+  ): number {
+    const row = reader
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM subagent_executions
+         WHERE parent_session_id = ? AND kind = 'subagent'
+           AND status IN ('queued', 'preparing', 'running')`,
+      )
+      .get(parentSessionId) as { count: number }
+    return Number(row.count)
+  }
+
   /** Inserts a preparing execution before snapshot or Provider work begins. */
   insert(
     transaction: PersistenceTransaction,

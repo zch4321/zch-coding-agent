@@ -32,7 +32,7 @@ export function registerSkillTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 2_000,
-    maxOutputBytes: 80 * 1_024,
+    modelOutputPolicy: 'passthrough',
     projectResultForModel: projectReadSkillResult,
     async execute(args) {
       const skill = skills.read(args.name)

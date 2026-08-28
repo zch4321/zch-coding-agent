@@ -2,7 +2,6 @@ import { Type, type Static } from '@sinclair/typebox'
 import type { SubagentExecutionPort } from '../subagent/contracts'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
 import type { JsonValue } from '../../shared/json'
-import { projectSubagentResult } from './tool-result-formatters'
 import {
   AgentToolAccessSchema,
   type AgentToolAccess,
@@ -64,19 +63,18 @@ export function registerSubagentTools(
   registry.registerTool({
     id: 'subagent_run',
     description:
-      "Run one Subagent with explicit tool access. The child receives no parent conversation history, so provide a self-contained task. Set toolAccess='readonly' for investigation or toolAccess='inherit' when the child must use the parent Run's non-readonly tools and permission mode. The child cannot spawn more Agents. Return findings in the final assistant response unless the task explicitly requires workspace changes.",
+      "Start one background Subagent and immediately return a durable target handle. The child receives no parent conversation history, so provide a self-contained task and ask it to put findings in its final assistant response. Use background_wait or background_list to observe it and read its artifact files for complete output. Set toolAccess='readonly' for investigation or 'inherit' for frozen parent permissions. The child cannot spawn more Agents.",
     inputSchema: SubagentRunArgsSchema,
     executionMode: 'parallel',
     effects: [],
     defaultRisk: 'low',
     supportsAbort: true,
-    defaultTimeoutMs: 86_405_000,
-    maxOutputBytes: 2_000_000,
+    defaultTimeoutMs: 30_000,
     validateArgs: validateSubagentArgs,
-    projectResultForModel: (result, args) =>
-      projectSubagentResult(result, args.name.trim()),
     async execute(args, context): Promise<ToolResult> {
-      const result = await execution.runOne(
+      const run =
+        execution.startOne?.bind(execution) ?? execution.runOne.bind(execution)
+      const result = await run(
         {
           name: args.name.trim(),
           task: args.task.trim(),
@@ -88,6 +86,13 @@ export function registerSubagentTools(
           callId: context.approvedCall.callId,
           workspace: context.workspace.canonicalPath,
           signal: context.signal,
+          ...(context.ownerSessionId
+            ? { ownerSessionId: context.ownerSessionId }
+            : {}),
+          ...(context.sessionTemp ? { sessionTemp: context.sessionTemp } : {}),
+          ...(context.maxSubagents
+            ? { maxSubagents: context.maxSubagents }
+            : {}),
         },
       )
       return {
