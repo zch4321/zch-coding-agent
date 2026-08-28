@@ -101,4 +101,22 @@ describe('ChatMessageItem metadata', () => {
     expect(wrapper.find('[aria-label="编辑"]').exists()).toBe(true)
     wrapper.unmount()
   })
+
+  it('adds a direct continuation action for an interrupted turn', async () => {
+    setAppLocale('zh-CN')
+    const wrapper = mount(ChatMessageItem, {
+      props: {
+        message: actionableUser(),
+        actionsDisabled: false,
+        continuable: true,
+      },
+      global: { plugins: [i18n] },
+    })
+
+    await wrapper.get('[aria-label="继续"]').trigger('click')
+
+    expect(wrapper.findAll('.message-action')).toHaveLength(5)
+    expect(wrapper.emitted('continue')).toHaveLength(1)
+    wrapper.unmount()
+  })
 })

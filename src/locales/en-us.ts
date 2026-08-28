@@ -186,6 +186,9 @@ const enUS = {
     editMessageTitle: 'Rewind this turn and restore it to the composer',
     forkFromHere: 'Fork',
     forkFromHereTitle: 'Create a branch from this reply',
+    continueConversation: 'Continue',
+    continueConversationTitle:
+      'Continue from the interruption without sending a new message',
     forkedBadge: 'Fork',
     importedBadge: 'Imported',
     status: {

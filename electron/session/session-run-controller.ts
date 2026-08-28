@@ -24,6 +24,7 @@ import {
 import type { SessionCompactCoordinator } from './session-compact-coordinator'
 import type { SessionInterjectionCoordinator } from './session-interjection-coordinator'
 import type { SessionOrchestrationPlanner } from './session-orchestration-planner'
+import type { SessionPromptContextCoordinator } from './session-prompt-context-coordinator'
 import type { SessionProviderTurnRunner } from './session-provider-turn'
 import { delay, finalStatusFromError } from './session-run-utils'
 import type { SessionToolRunner } from './session-tool-runner'
@@ -43,6 +44,7 @@ import {
 } from '../operational-logging/diagnostic-id'
 import { classifyRunError } from './run-error-classifier'
 import { sanitizeDiagnosticMessage } from '../notifications/backend-notification-reporter'
+import { resolveSwarmAvailability } from './session-swarm-availability'
 
 export interface RunStartOptions {
   routes?: {
@@ -75,6 +77,7 @@ export class SessionRunController {
   readonly #compact: SessionCompactCoordinator
   readonly #interjections: SessionInterjectionCoordinator
   readonly #orchestration: SessionOrchestrationPlanner
+  readonly #promptContext: SessionPromptContextCoordinator
   readonly #userTurns: SessionUserTurnPreparer
   readonly #onDiagnostic: DiagnosticSink
   readonly #emit: (session: SessionState, event: AgentEventDraft) => void
@@ -82,6 +85,7 @@ export class SessionRunController {
   readonly #beforeRun?: (session: SessionState) => Promise<void>
   readonly #afterRun?: (session: SessionState) => Promise<void>
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
+  readonly #swarmHostEnabled: boolean
 
   /** Creates a controller with the collaborators needed to execute session runs. */
   constructor(options: {
@@ -91,6 +95,7 @@ export class SessionRunController {
     compact: SessionCompactCoordinator
     interjections: SessionInterjectionCoordinator
     orchestration: SessionOrchestrationPlanner
+    promptContext: SessionPromptContextCoordinator
     userTurns: SessionUserTurnPreparer
     onDiagnostic: DiagnosticSink
     emit: (session: SessionState, event: AgentEventDraft) => void
@@ -98,6 +103,7 @@ export class SessionRunController {
     beforeRun?: (session: SessionState) => Promise<void>
     afterRun?: (session: SessionState) => Promise<void>
     operationalLog?: Pick<OperationalLogService, 'log'>
+    swarmHostEnabled?: boolean
   }) {
     this.#configStore = options.configStore
     this.#providerTurns = options.providerTurns
@@ -105,6 +111,7 @@ export class SessionRunController {
     this.#compact = options.compact
     this.#interjections = options.interjections
     this.#orchestration = options.orchestration
+    this.#promptContext = options.promptContext
     this.#userTurns = options.userTurns
     this.#onDiagnostic = options.onDiagnostic
     this.#emit = options.emit
@@ -112,6 +119,7 @@ export class SessionRunController {
     this.#beforeRun = options.beforeRun
     this.#afterRun = options.afterRun
     this.#operationalLog = options.operationalLog
+    this.#swarmHostEnabled = options.swarmHostEnabled ?? false
   }
 
   /** Starts a new run, or returns the existing run for a repeated client request. */
@@ -121,7 +129,7 @@ export class SessionRunController {
     userMessage?: string,
     context?: RunContext,
     harnessMessage?: HarnessRunMessage,
-    retryUserMessageId?: MessageId,
+    rootUserMessageId?: MessageId,
     options: RunStartOptions = {},
   ): RunId {
     const existing = session.clientRequests.get(clientRequestId)
@@ -164,6 +172,13 @@ export class SessionRunController {
 
     const runId = id<RunId>('run')
     const controller = new AbortController()
+    const subagentsEnabled =
+      options.subagentsEnabled ?? config.subagents.enabled
+    const swarm = resolveSwarmAvailability({
+      hostEnabled: this.#swarmHostEnabled,
+      runSubagentsEnabled: subagentsEnabled,
+      config,
+    })
     const run: ActiveRun = {
       runId,
       clientRequestId,
@@ -176,10 +191,11 @@ export class SessionRunController {
       pendingInterjections: [],
       acceptingInterjections: true,
       processedInterjectionIds: new Set(),
-      ...(retryUserMessageId ? { rootUserMessageId: retryUserMessageId } : {}),
+      ...(rootUserMessageId ? { rootUserMessageId } : {}),
       harnessMessageIds: [],
       requestCommitted: false,
-      subagentsEnabled: options.subagentsEnabled ?? config.subagents.enabled,
+      subagentsEnabled,
+      ...(swarm.toolConfig ? { swarmToolConfig: swarm.toolConfig } : {}),
       directUserInput: options.directUserInput ?? false,
       ...(options.directContext
         ? { directContext: structuredClone(options.directContext) }
@@ -396,6 +412,7 @@ export class SessionRunController {
         goal: session.goal ? structuredClone(session.goal) : undefined,
         plan: session.plan ? structuredClone(session.plan) : undefined,
       }
+      await this.#promptContext.refresh(session, run)
       const maxStepsPerRun = runConfig.limits.maxStepsPerRun
       let runInputCommitted = false
       if (harnessMessage) {

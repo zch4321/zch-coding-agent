@@ -1,4 +1,6 @@
 import type {
+  DurableRunContinuePayload,
+  DurableRunContinueResult,
   DurableRunRetryPayload,
   DurableRunRetryResult,
   DurableRunStartPayload,
@@ -6,6 +8,7 @@ import type {
   SessionCommitEnvelopeSchema,
 } from '../../shared/domain-state-api'
 import type { RunId, SessionId } from '../../shared/ids'
+import { resolveManualContinuationTarget } from '../../shared/conversation-continuation'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { SessionRecord } from '../../shared/session'
 import type { Static } from '@sinclair/typebox'
@@ -41,6 +44,13 @@ export class DurableRunApplicationService {
       requestHash: string
       promise: Promise<DurableRunRetryResult>
       settled: boolean
+    }
+  >()
+  readonly #continueRequests = new Map<
+    string,
+    {
+      requestHash: string
+      promise: Promise<DurableRunContinueResult>
     }
   >()
 
@@ -87,7 +97,7 @@ export class DurableRunApplicationService {
     return request
   }
 
-  /** Removes cached start and retry results for a session after it is evicted. */
+  /** Removes cached run command results for a session after it is evicted. */
   evictRequestCacheForSession(sessionId: SessionId): void {
     const prefix = `${sessionId}\u0000`
     for (const key of this.#requests.keys()) {
@@ -97,6 +107,9 @@ export class DurableRunApplicationService {
       if (key.startsWith(prefix) && entry.settled) {
         this.#retryRequests.delete(key)
       }
+    }
+    for (const key of this.#continueRequests.keys()) {
+      if (key.startsWith(prefix)) this.#continueRequests.delete(key)
     }
   }
 
@@ -141,6 +154,91 @@ export class DurableRunApplicationService {
       this.#retryRequests.delete(oldest)
     }
     return request
+  }
+
+  /** Continues an interrupted durable turn idempotently without adding input. */
+  continue(
+    input: DurableRunContinuePayload,
+  ): Promise<DurableRunContinueResult> {
+    const key = `${input.sessionId}\u0000${input.clientRequestId}`
+    const requestHash = canonicalHash(String(input.expectedRevision))
+    const existing = this.#continueRequests.get(key)
+    if (existing) {
+      if (existing.requestHash !== requestHash) {
+        return Promise.reject(
+          new ApplicationError(
+            'CONFLICT',
+            'clientRequestId was already used for a different continuation',
+          ),
+        )
+      }
+      return existing.promise
+    }
+    const request = this.#continue(input).catch((error) => {
+      this.#continueRequests.delete(key)
+      throw error
+    })
+    this.#continueRequests.set(key, { requestHash, promise: request })
+    while (this.#continueRequests.size > MAX_CACHED_RUN_STARTS) {
+      const oldest = this.#continueRequests.keys().next().value
+      if (oldest === undefined) break
+      this.#continueRequests.delete(oldest)
+    }
+    return request
+  }
+
+  async #continue(
+    input: DurableRunContinuePayload,
+  ): Promise<DurableRunContinueResult> {
+    const durable = await this.#sessions.loadRuntimeState(input.sessionId)
+    const current = durable.record
+    if (current.lifecycle !== 'active') {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Archived Session cannot continue a Run',
+      )
+    }
+    if (current.revision !== input.expectedRevision) {
+      throw new ApplicationError('CONFLICT', 'Session revision has changed', {
+        details: {
+          currentRevision: current.revision,
+          currentLastSeq: current.lastSeq,
+        },
+      })
+    }
+    if (!resolveManualContinuationTarget(durable.activeHistory)) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'The Session history does not end at a continuable turn',
+      )
+    }
+    await this.#registry.ensureLoaded(input.sessionId)
+    const loaded = this.#executionState.record(input.sessionId)
+    if (!loaded) {
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Durable Session binding was not loaded',
+      )
+    }
+    if (loaded.revision !== input.expectedRevision) {
+      throw new ApplicationError('CONFLICT', 'Session revision has changed', {
+        details: {
+          currentRevision: loaded.revision,
+          currentLastSeq: loaded.lastSeq,
+        },
+      })
+    }
+    const runId = this.#manager.continueRun({
+      sessionId: input.sessionId,
+      clientRequestId: input.clientRequestId,
+    })
+    return {
+      version: 1,
+      runId,
+      runtime:
+        this.#manager.activeRunSnapshot(input.sessionId) ??
+        emptyRuntimeSnapshot(input.sessionId, runId),
+    }
   }
 
   async #retry(input: DurableRunRetryPayload): Promise<DurableRunRetryResult> {

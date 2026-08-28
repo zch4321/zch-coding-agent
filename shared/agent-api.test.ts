@@ -27,7 +27,7 @@ describe('Agent API manifest', () => {
     expect(Object.values(AGENT_API_INVOKE_ROUTES)).toEqual(
       Object.keys(IPC_CONTRACTS),
     )
-    expect(invokeMethods).toHaveLength(72)
+    expect(invokeMethods).toHaveLength(73)
     expect(subscriptionMethods).toHaveLength(5)
     expect(AGENT_API_KEYS).toEqual([...invokeMethods, ...subscriptionMethods])
     expect(new Set(AGENT_API_KEYS).size).toBe(AGENT_API_KEYS.length)

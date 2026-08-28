@@ -6,6 +6,7 @@ import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type {
   AgentExecutionId,
   CallId,
+  MessageId,
   RunId,
   SessionId,
 } from '../../shared/ids'
@@ -14,6 +15,11 @@ import { DEFAULT_HARNESS_PROMPT_REFS } from '../../shared/prompt-resources'
 import { PromptRegistry } from '../prompts/registry'
 import { PluginEventBus } from '../plugins/event-bus'
 import { resolveModelRoutePairFromConfig } from '../providers/model-route-resolver'
+import {
+  ScriptedProviderHarness,
+  type ScriptedProviderEvent as ProviderEvent,
+  type TestProviderStreamRequest as ProviderStreamRequest,
+} from '../providers/provider-test-harness'
 import {
   swarmSharedContextContent,
   swarmTaskContent,
@@ -32,6 +38,69 @@ import {
   waitFor,
 } from './session-manager-test-support'
 import type { SessionExecutionStatePort } from './session-types'
+
+/** Simulates workspace changes between Provider calls and across Run boundaries. */
+class PromptContextBoundaryProvider extends ScriptedProviderHarness {
+  calls = 0
+  readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
+
+  /** Creates a Provider fixture bound to the test workspace. */
+  constructor(private readonly workspace: string) {
+    super()
+  }
+
+  /** Records each request and forces one two-step Provider loop. */
+  async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
+    this.calls += 1
+    this.requests.push(structuredClone(request.normalizedMessages))
+
+    if (this.calls === 1) {
+      await writeFile(
+        path.join(this.workspace, 'AGENTS.md'),
+        'Updated during the active Run\n',
+      )
+      await writeFile(
+        path.join(this.workspace, 'generated-file.txt'),
+        'generated\n',
+      )
+      const toolCall = {
+        id: 'call-boundary-read',
+        type: 'function',
+        function: {
+          name: 'read_file',
+          arguments: JSON.stringify({ path: 'README.md' }),
+        },
+      }
+      yield {
+        type: 'completed',
+        rawResponse: { id: 'boundary-tool' },
+        turn: { role: 'assistant', content: null, tool_calls: [toolCall] },
+        toolCalls: [
+          {
+            id: toolCall.id as CallId,
+            toolId: 'read_file',
+            args: { path: 'README.md' },
+            reason: 'Force another Provider call in the same Run',
+          },
+        ],
+        usage: {},
+        providerState: {},
+        timing: {},
+      }
+      return
+    }
+
+    yield {
+      type: 'completed',
+      rawResponse: { id: `boundary-final-${this.calls}` },
+      turn: { role: 'assistant', content: `Boundary call ${this.calls}` },
+      toolCalls: [],
+      usage: {},
+      providerState: {},
+      timing: {},
+    }
+  }
+}
 
 describe('SessionManager prompt and trace', () => {
   it('rejects an unknown provider instead of falling back to the active one', async () => {
@@ -129,6 +198,119 @@ describe('SessionManager prompt and trace', () => {
           ),
       ),
     ).toBe(true)
+    await manager.closeSession(sessionId)
+  })
+
+  it('refreshes runtime and AGENTS context once per external Run', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-prompt-run-boundary-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    await mkdir(workspace)
+    await writeFile(path.join(workspace, 'README.md'), '# Boundary\n')
+    await writeFile(path.join(workspace, 'AGENTS.md'), 'Initial Run guidance\n')
+    const store = await createConfig(directory)
+    const provider = new PromptContextBoundaryProvider(workspace)
+    const sent: AgentEventEnvelope[] = []
+    let originalUserMessageId: MessageId | undefined
+    const executionState: SessionExecutionStatePort = {
+      async commit(session, input) {
+        if (input.reason === 'run_input' && !originalUserMessageId) {
+          originalUserMessageId = session.history.find(
+            (record) => record.kind === 'user_input',
+          )?.id
+        }
+      },
+    }
+    const manager = new SessionManager({
+      configStore: store,
+      traceDirectory: path.join(directory, 'traces'),
+      eventSink: createIpcTestEventSink((envelope) => sent.push(envelope)),
+      providerFactory: () => provider,
+      promptRegistry: await PromptRegistry.load(
+        path.resolve('resources', 'prompts'),
+      ),
+      executionState,
+    })
+    const sessionId = await manager.createSession({
+      workspace,
+      mode: 'readonly',
+      provider: 'deepseek',
+    })
+    const firstRunId = manager.startRun({
+      sessionId,
+      message: 'Exercise the Provider loop',
+      clientRequestId: 'request-context-boundary-first',
+    })
+
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === firstRunId &&
+          event.status === 'completed',
+      ),
+    )
+    expect(originalUserMessageId).toBeDefined()
+    expect(provider.requests).toHaveLength(2)
+    const secondCall = provider.requests[1] ?? []
+    expect(
+      secondCall.filter(
+        (message) =>
+          message.role === 'user' &&
+          String(message.content ?? '').startsWith('<environment_context'),
+      ),
+    ).toHaveLength(1)
+    expect(JSON.stringify(secondCall)).toContain('Initial Run guidance')
+    expect(JSON.stringify(secondCall)).not.toContain(
+      'Updated during the active Run',
+    )
+    expect(JSON.stringify(secondCall)).not.toContain('generated-file.txt')
+
+    const retryRunId = manager.retryRun({
+      sessionId,
+      userMessageId: originalUserMessageId!,
+      clientRequestId: 'request-context-boundary-retry',
+    })
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === retryRunId &&
+          event.status === 'completed',
+      ),
+    )
+    expect(JSON.stringify(provider.requests[2])).toContain(
+      'Updated during the active Run',
+    )
+    expect(
+      (provider.requests[2] ?? []).filter(
+        (message) =>
+          message.role === 'user' &&
+          String(message.content ?? '').startsWith('<environment_context'),
+      ),
+    ).toHaveLength(1)
+
+    await writeFile(
+      path.join(workspace, 'AGENTS.md'),
+      'Updated before a new user Run\n',
+    )
+    const userRunId = manager.startRun({
+      sessionId,
+      message: 'Start another user Run',
+      clientRequestId: 'request-context-boundary-user',
+    })
+    await waitFor(() =>
+      sent.some(
+        ({ event }) =>
+          event.type === 'run.status' &&
+          event.runId === userRunId &&
+          event.status === 'completed',
+      ),
+    )
+    expect(JSON.stringify(provider.requests[3])).toContain(
+      'Updated before a new user Run',
+    )
     await manager.closeSession(sessionId)
   })
 

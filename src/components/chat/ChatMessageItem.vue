@@ -11,14 +11,16 @@ const props = withDefaults(
     message: ChatMessage
     actionsDisabled: boolean
     showActions?: boolean
+    continuable?: boolean
   }>(),
-  { showActions: true },
+  { showActions: true, continuable: false },
 )
 const emit = defineEmits<{
   revert: [messageId: string, text: string]
   fork: [messageId: string]
   retry: [messageId: string, text: string]
   edit: [messageId: string, text: string]
+  continue: []
 }>()
 const { t } = useI18n()
 
@@ -182,6 +184,21 @@ const showMetadata = computed(() => Boolean(visibleRoleLabel.value))
           </NButton>
         </template>
         {{ t('chat.forkFromHereTitle') }}
+      </NTooltip>
+      <NTooltip v-if="continuable">
+        <template #trigger>
+          <NButton
+            class="message-action"
+            quaternary
+            circle
+            size="small"
+            :aria-label="t('chat.continueConversation')"
+            @click="emit('continue')"
+          >
+            <template #icon><UiIcon name="chevron-right" /></template>
+          </NButton>
+        </template>
+        {{ t('chat.continueConversationTitle') }}
       </NTooltip>
     </div>
   </article>

@@ -17,6 +17,7 @@ const emit = defineEmits<{
   fork: [messageId: string]
   retry: [messageId: string, preview: string]
   edit: [messageId: string, preview: string]
+  continue: []
 }>()
 const scrollbar = ref<ScrollbarInst>()
 const scrollElement = ref<HTMLElement>()
@@ -27,6 +28,7 @@ const loadingOlderMessages = ref(false)
 const timelineTurns = computed(() =>
   agent.timelineTurns.filter(
     (turn) =>
+      turn.sourceTurnId === agent.manualContinuationTarget?.rootUserMessageId ||
       turn.userMessage ||
       turn.tools.length > 0 ||
       turn.reasoningSegments.length > 0 ||
@@ -34,6 +36,15 @@ const timelineTurns = computed(() =>
       turn.runActivity,
   ),
 )
+const continuationTurnId = computed(() => {
+  const rootUserMessageId = agent.manualContinuationTarget?.rootUserMessageId
+  if (!rootUserMessageId) return undefined
+  for (let index = timelineTurns.value.length - 1; index >= 0; index -= 1) {
+    const turn = timelineTurns.value[index]
+    if (turn?.sourceTurnId === rootUserMessageId) return turn.id
+  }
+  return undefined
+})
 const hasVisibleTodo = computed(() =>
   Boolean(agent.currentTodo?.items.some((item) => item.status !== 'completed')),
 )
@@ -205,6 +216,7 @@ onBeforeUnmount(() => {
             v-for="turn in timelineTurns"
             :key="turn.id"
             :turn="turn"
+            :continuable="turn.id === continuationTurnId"
             :actions-disabled="
               Boolean(
                 agent.startPending ||
@@ -216,6 +228,7 @@ onBeforeUnmount(() => {
             @fork="requestFork"
             @retry="requestRetry"
             @edit="requestEdit"
+            @continue="emit('continue')"
             @content-resized="onContentResized"
           />
         </div>

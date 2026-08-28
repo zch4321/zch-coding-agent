@@ -35,11 +35,6 @@ import type {
   SessionManagerOptions,
   SessionState,
 } from './session-types'
-import type { PromptRegistry } from '../prompts/registry'
-import {
-  appendAgentsContextIfChanged,
-  appendRuntimeContextIfChanged,
-} from './prompt-harness'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 import type { OperationalLogService } from '../operational-logging/service'
 import {
@@ -73,7 +68,6 @@ export class SessionProviderTurnRunner {
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
   readonly #pluginBus: PluginEventBus | undefined
-  readonly #promptRegistry: PromptRegistry | undefined
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #providerFactory: SessionManagerOptions['providerFactory']
   readonly #onDiagnostic: DiagnosticSink
@@ -84,7 +78,6 @@ export class SessionProviderTurnRunner {
     configStore: ConfigStore
     toolRegistry: ToolRegistry
     pluginBus?: PluginEventBus
-    promptRegistry?: PromptRegistry
     fetchImpl?: typeof fetch
     providerFactory: SessionManagerOptions['providerFactory']
     onDiagnostic: DiagnosticSink
@@ -94,7 +87,6 @@ export class SessionProviderTurnRunner {
     this.#configStore = options.configStore
     this.#toolRegistry = options.toolRegistry
     this.#pluginBus = options.pluginBus
-    this.#promptRegistry = options.promptRegistry
     this.#fetchImpl = options.fetchImpl
     this.#providerFactory = options.providerFactory
     this.#onDiagnostic = options.onDiagnostic
@@ -145,26 +137,6 @@ export class SessionProviderTurnRunner {
       gitToolsEnabled: session.gitToolsEnabled,
     })
     const tools = toolCatalog.definitions
-
-    await appendRuntimeContextIfChanged(session, {
-      workspace: session.workspace,
-      mode: session.mode,
-      config,
-      providerId: binding.snapshot.providerId,
-      promptRegistry: this.#promptRegistry,
-      reason: 'provider_call',
-      toolNames: toolCatalog.names,
-      signal: run.controller.signal,
-    })
-    await appendAgentsContextIfChanged(session, {
-      workspace: session.workspace,
-      mode: session.mode,
-      config,
-      providerId: binding.snapshot.providerId,
-      promptRegistry: this.#promptRegistry,
-      toolNames: toolCatalog.names,
-      signal: run.controller.signal,
-    })
 
     const selection = selectPromptMessages({
       state: session,

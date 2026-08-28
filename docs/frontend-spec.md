@@ -521,6 +521,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - 切换对话不关闭后台 `LiveSessionContext` 或 `ActiveRunExecution`；归档/删除 Session、移除项目和退出应用才清理对应 runtime 资源。退出时统一取消 active runs 并关闭 PTY。
 - 未发送 draft 与 context attachments 不进入 backend，不保证 A → B → A、renderer reload 或应用重启后恢复。
 - 应用重启后从 backend Session snapshot 恢复完整 messages、Goal/Plan、模型和模式；partial assistant output、pending approval 和 Active Run 可以丢失，不显示伪造的 interrupted message。
+- 若恢复后的 canonical history 停在 backend 定义的可续跑边界，最后一个对应 turn 的回退/分支操作栏追加 Naive UI 图标按钮“继续”。点击直接调用 `run:continue`，不向 composer 写入文本、不发送空消息；Run active、等待审批或 continuation pending 时隐藏该入口。
 
 ---
 

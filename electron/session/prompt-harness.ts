@@ -52,6 +52,12 @@ interface RuntimeContextInput {
   reason: string
   toolNames?: readonly string[]
   signal?: AbortSignal
+  workspaceSnapshotReaders?: RuntimeWorkspaceSnapshotReaders
+}
+
+interface RuntimeWorkspaceSnapshotReaders {
+  gitSummary: (workspace: string, signal?: AbortSignal) => Promise<string>
+  projectTreeSummary: (workspace: string) => Promise<string>
 }
 
 interface HarnessPromptInput {
@@ -402,9 +408,11 @@ async function projectContextSummary(input: RuntimeContextInput): Promise<{
   }
 }
 
-async function runtimeContext(input: RuntimeContextInput): Promise<{
-  content: string
+async function prepareRuntimeContext(input: RuntimeContextInput): Promise<{
   hash: string
+  currentTime: string
+  promptContent: string
+  stableVariables: Record<string, string>
   resource?: PromptResourceSummary
 }> {
   const locale = input.config.assistant.language
@@ -412,16 +420,13 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
   const provider = input.config.models.providers.find(
     (candidate) => candidate.id === input.providerId,
   )
-  const [git, projectTree, modules, commandShell] = await Promise.all([
-    gitSummary(input.workspace, input.signal).catch(() => 'git: unavailable'),
-    projectTreeSummary(input.workspace).catch(() => 'unavailable'),
+  const [modules, commandShell] = await Promise.all([
     projectContextSummary(input),
     commandShellService.resolve(input.config.executionEnvironment.commandShell),
   ])
   const currentTime = new Date().toISOString()
-  const content = renderPromptTemplate(prompt.content, {
-    currentDate: new Date().toISOString().slice(0, 10),
-    currentTime,
+  const stableVariables = {
+    currentDate: currentTime.slice(0, 10),
     timezone: currentTimeZone(),
     workspace: input.workspace,
     cwd: input.workspace,
@@ -438,19 +443,45 @@ async function runtimeContext(input: RuntimeContextInput): Promise<{
     rememberedRules: String(input.config.permission.rememberedRules.length),
     sensitiveDataMode: input.config.permission.sensitiveData.mode,
     availableTools: input.toolNames?.join(', ') || 'not listed',
-    gitSummary: git,
     projectTreeDepth: String(MAX_TREE_DEPTH),
-    projectTree,
     moduleStatus: escapeXmlAttribute(modules.status),
     moduleContent: modules.content,
-  })
-  const stableContent = content.replace(currentTime, '<current_time_snapshot>')
+  }
 
   return {
-    content,
-    hash: sha256(stableContent),
+    hash: hashJson({
+      schemaVersion: 2,
+      promptTemplate: prompt.content,
+      variables: stableVariables,
+    }),
+    currentTime,
+    promptContent: prompt.content,
+    stableVariables,
     ...(prompt.resource ? { resource: prompt.resource } : {}),
   }
+}
+
+async function renderRuntimeContext(
+  input: RuntimeContextInput,
+  prepared: Awaited<ReturnType<typeof prepareRuntimeContext>>,
+): Promise<string> {
+  const readers = input.workspaceSnapshotReaders ?? {
+    gitSummary,
+    projectTreeSummary,
+  }
+  const [git, projectTree] = await Promise.all([
+    readers
+      .gitSummary(input.workspace, input.signal)
+      .catch(() => 'git: unavailable'),
+    readers.projectTreeSummary(input.workspace).catch(() => 'unavailable'),
+  ])
+
+  return renderPromptTemplate(prepared.promptContent, {
+    ...prepared.stableVariables,
+    currentTime: prepared.currentTime,
+    gitSummary: git,
+    projectTree,
+  })
 }
 
 async function agentsContext(input: HarnessPromptInput): Promise<{
@@ -535,20 +566,22 @@ export async function appendInitialPromptHarness(
   }
 }
 
-/** Appends runtime context only when its canonical content differs from the previous version. */
+/** Appends runtime context only when its stable semantic fingerprint changes. */
 export async function appendRuntimeContextIfChanged(
   state: PromptHistoryState,
   input: RuntimeContextInput,
 ): Promise<boolean> {
-  const runtime = await runtimeContext(input)
+  const runtime = await prepareRuntimeContext(input)
 
   if (latestPromptHash(state, 'runtime_context') === runtime.hash) {
     return false
   }
 
+  const content = await renderRuntimeContext(input, runtime)
+
   appendPromptLayer(state, {
     kind: 'runtime_context',
-    content: runtime.content,
+    content,
     source: runtime.resource?.path ?? 'fallback:harness.runtime-context',
     trusted: true,
     editable: false,

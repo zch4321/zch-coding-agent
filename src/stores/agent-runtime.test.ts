@@ -586,6 +586,36 @@ describe('agent runtime store', () => {
     expect(runtime.startPending).toBe(false)
   })
 
+  it('continues an interrupted turn without changing durable messages', async () => {
+    const replica = seedReplica()
+    const runId = 'run:continued' as RunId
+    const continueRun = vi.fn(async () =>
+      success({
+        version: 1 as const,
+        runId,
+        runtime: runtimeSnapshot(selectedSessionId, runId),
+      }),
+    )
+    installApi({ continueRun })
+    const runtime = useAgentRuntimeStore()
+
+    expect(runtime.manualContinuationTarget).toEqual({
+      rootUserMessageId: 'message:user',
+      anchorMessageId: 'message:user',
+    })
+    await expect(runtime.continueConversation()).resolves.toBe(true)
+
+    expect(continueRun).toHaveBeenCalledWith({
+      version: 1,
+      sessionId: selectedSessionId,
+      expectedRevision: 1,
+      clientRequestId: expect.stringMatching(/^continuation:/),
+    })
+    expect(replica.selectedMessages).toEqual([userMessage()])
+    expect(runtime.activeRunId).toBe(runId)
+    expect(runtime.manualContinuationTarget).toBeUndefined()
+  })
+
   it('restores an approval after a rejected decision IPC', async () => {
     seedReplica()
     const decideApproval = vi.fn(async () => failure('approval unavailable'))

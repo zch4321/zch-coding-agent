@@ -63,11 +63,11 @@ SQLite
 
 ### 2.2 状态分为三类
 
-| 类别                      | 所有者           | 是否落盘 | 示例                                                                                           |
-| ------------------------- | ---------------- | -------- | ---------------------------------------------------------------------------------------------- |
-| Durable application state | backend + SQLite | 是       | Projects、Session metadata、完整 messages、Goal/Plan、有界 FileChanges/revert payloads         |
-| Ephemeral execution state | backend memory   | 否       | active Run、stream buffer、AbortController、pending approval、PTY/MCP connection |
-| UI-only state             | renderer         | 否       | draft、draft attachments、IME composition、scroll、panel、selection                            |
+| 类别                      | 所有者           | 是否落盘 | 示例                                                                                   |
+| ------------------------- | ---------------- | -------- | -------------------------------------------------------------------------------------- |
+| Durable application state | backend + SQLite | 是       | Projects、Session metadata、完整 messages、Goal/Plan、有界 FileChanges/revert payloads |
+| Ephemeral execution state | backend memory   | 否       | active Run、stream buffer、AbortController、pending approval、PTY/MCP connection       |
+| UI-only state             | renderer         | 否       | draft、draft attachments、IME composition、scroll、panel、selection                    |
 
 “Backend authoritative”不等于“所有 backend 状态必须落盘”。只有应用重启后仍应存在、并参与后续模型历史或产品展示的完整记录才进入 SQLite。
 
@@ -1063,7 +1063,7 @@ Tool/approval 的实时卡片来自 runtime event；完成后 renderer 从 assis
 
 Provider delta 仍实时发送。若 attempt 失败且允许重试，Session Core 先发 `assistant.stream.reset` 清除该 attempt 的临时 text/reasoning/activity，再发带 `attempt/maxAttempts/delayMs` 的 `provider.retrying`。Public Run snapshot、Renderer overlay 和 internal Agent execution overlay 同步投影该状态；主时间线与 Agents 状态槽显示“正在重试 A/B”，不弹 NMessage。新的 assistant activity 或后续 Run status 会清除 retry 状态。失败 attempt 从不形成 canonical assistant record、工具 proposal 或审批；因此重试可能增加 Provider 费用，但不会重复执行本地工具副作用。
 
-这个简化模型不承诺“宿主文件副作用”和 Message transaction 在进程崩溃下原子一致：如果工具已经修改文件、但应用在完整 tool batch commit 前崩溃，workspace 变化可能存在而对应 tool messages 不存在。`file_changes` 和下一次 runtime context 可以重新发现当前 workspace 状态，但不能伪造丢失的执行历史。若未来要求 crash-atomic tool journal，必须重新引入 durable tool/run journal；它不是 v2.1 目标。
+这个简化模型不承诺“宿主文件副作用”和 Message transaction 在进程崩溃下原子一致：如果工具已经修改文件、但应用在完整 tool batch commit 前崩溃，workspace 变化可能存在而对应 tool messages 不存在。`file_changes` 与显式文件/Git 工具可以重新发现当前 workspace 状态；runtime context 中的 Git 摘要和项目树只是提示性快照，不是 crash journal，也不能伪造丢失的执行历史。若未来要求 crash-atomic tool journal，必须重新引入 durable tool/run journal；它不是 v2.1 目标。
 
 ### 7.3 Compact 与 `inHistory`
 
@@ -1199,7 +1199,7 @@ project:list / project:add / project:update / project:remove
 session:list / session:get / session:update / session:archive / session:restore / session:delete / session:fork
 message:list / message:search
 file-change:list / file-change:revert
-run:start / run:interrupt / run:interject
+run:start / run:retry / run:continue / run:interrupt / run:interject
 approval:decide
 ```
 
@@ -1376,11 +1376,13 @@ Draft 和 draft attachments 只属于当前 renderer 输入组件：
 
 Backend 校验附件、构造完整 user/harness messages 并落盘。附件正文受 AppConfig v9 的 `limits.maxAttachmentContextTokens` 约束，默认 `64_000`；聚合估算超过预算时，本次附件统一降级为仅注入类型和路径，renderer attachment chips 标记为 truncated。Draft 丢失不会造成 backend state 与 canonical history 不一致。
 
-### 9.3 Rewind、用户消息重试与编辑
+### 9.3 Rewind、用户消息重试、继续与编辑
 
 - `session:rewind` 只接受当前分支中可见的原始用户或 Assistant 消息。用户边界会移除该用户整轮及之后记录；Assistant 边界保留对应用户消息，从 Assistant 开始移除。
 - “移除”不删除 row：相关 records 改为 `visibility = superseded` 且 `inHistory = false`。每次 rewind 递增 Session revision、清除 Goal/Plan，并从保留前缀重建 `inHistory`；`compact_summary.replacesThroughSeq` 与 `conversation_transcript.sourceThroughSeq` 作为同等 epoch boundary，因此可以跨 compact 或 Provider transition 回退。
 - `run:retry(userMessageId)` 只接受可见原始用户消息。它保留该用户消息及其本轮前置 context，supersede 之后分支，再复用该 user record 运行；不会插入第二条 user message。Assistant、replay、derived、control command 或其他消息类型都返回验证错误。
+- `run:continue` 只在 idle Session 的 active history 停在可续跑边界时启动：忽略尾部 passive prompt layer 后，最后一个驱动记录必须是非 control-command 的 `user_input`、`tool_result`、`interjection`、`orchestrator`，或带 `turnId` 的自动 `compact_summary`。完整 `assistant_turn`、手动 compact summary 和 conversation transcript 都是终止边界。Application 与 Session Core 必须分别校验当前 revision 和 live canonical history。
+- 继续复用该记录的 `turnId`（缺省时复用记录 ID）作为原始轮次，不追加空 user message，也不产生初始 durable commit；新的 Assistant/tool commit 仍通过正常 `session.changed` 发布。Renderer 只在最后一个匹配轮次的消息操作栏显示“继续”，点击后直接调用，不经过 composer。
 - 编辑先按该用户整轮 rewind，将原文和附件引用恢复到 composer，不自动发送；下一次发送创建新的用户轮次。
 - Fork 只复制当前非 superseded 分支，连续重编号并重映射 message/turn/reference IDs，以及 compact/transcript epoch boundary。
 - 所有操作只修改 Session/Message 状态。文件、终端与 MCP/外部工具副作用不回滚，FileChange 审计继续保留；UI 在操作前明确提示。
@@ -1403,6 +1405,8 @@ Active Run 开始时解析 immutable `ModelRouteSnapshot` 并保存在 memory；
 6. Stream delta 只存 memory 并推送 renderer。
 7. 每个完整 assistant turn 或完整 tool batch 按 §7.2 写入 SQLite。
 8. 完成、取消或失败后释放 runtime resources。
+
+用户中断或可恢复的 Provider failure 后，若 durable history 符合 §9.3 的续跑边界，`run:continue` 可以从同一 canonical turn 重新进入第 5 步；streaming 中尚未完成的 Assistant text/reasoning 不会被恢复或伪造。
 
 Durable execution port 对每个 Session 串行 commit。commit 失败时从 SQLite 单次恢复 SessionRecord、active history、next seq、mode/model/Goal/Plan，并清除未提交 request 映射；恢复也失败时 binding 标记为 invalid，当前 Run settle 后强制驱逐。tool-batch commit 失败即使恢复成功也会隔离当前 live binding，避免带着已发生但未落库的副作用继续 React。
 
@@ -1639,7 +1643,7 @@ Trace 不记录 credentials。生产 `TraceEventInput` 不允许 `llm.stream`，
 
 Windows 发现只扫描 PATH 与有限的系统/安装目录，内置 profile 为 PowerShell 7、Windows PowerShell、CMD、Git Bash 和 Nushell；`auto` 固定选择 PowerShell 7 → Windows PowerShell → CMD。Git Bash 与 Nushell 只在用户显式选择时使用；System32 的旧 `bash.exe` 不会被误识别为 Git Bash。已保存 profile 消失时，解析结果临时回退到 `auto`，通过只读 `command-shell:list` IPC 把实际路径和 fallback 状态提供给设置页，但不改写保存值。WSL 与任意自定义 executable/args 仍属于 M5 后续范围。
 
-Prompt Harness 在每次 Provider 调用前读取同一配置并只注入实际解析后的 `command_shell: label (id)`；`run_command` schema 不接受 shell ID，因此模型不能自行选择未安装解释器。工具执行前会再次解析，以应对调用期间安装状态变化。内部 Git、Subagent 和其他直接进程不读取该选项。
+Prompt Harness 在每个外部 Run 开始时读取同一配置并只注入实际解析后的 `command_shell: label (id)`；同一 Run 的后续 Provider 调用不重复刷新。runtime 语义指纹包含 Shell、权限、Provider、工具集合和 module markers 等稳定字段，但排除精确时间、Git 摘要与项目树；只有稳定指纹变化时才采集并追加包含最新 Git/项目树的完整快照。AGENTS 也只在外部 Run 边界检查，因此 Run 中途的规则变更从下一 Run 生效；会话创建、权限更新与 compact 新 epoch 仍按各自边界重建 Harness。`run_command` schema 不接受 shell ID，因此模型不能自行选择未安装解释器。工具执行前会再次解析 Shell，以应对调用期间安装状态变化。内部 Git、Subagent 和其他直接进程不读取该选项。
 
 PowerShell adapter 固定传入 `-ExecutionPolicy Bypass`，并设置 Console 与 pipeline 输出编码；CMD adapter 先切到 code page 65001，Bash/Nushell adapter 设置 UTF-8 locale。应用不预检 Execution Policy，也不把相关失败改写为专用错误；原始 stderr 和 exit code 沿普通 Tool Result 返回。`BoundedProcessOutput` 对 stdout/stderr 独立流式校验 UTF-8；若实际字节无效，则使用启动时探测到的 Windows 当前代码页解码保留区。字节上限、head/tail 截断、discard hash、超时、取消、进程树终止和子进程环境 allowlist 均保持原有边界。`run_command` 是一次性 Tool，不把实时输出投影进 Renderer Terminal。
 
@@ -1726,6 +1730,8 @@ child stream/tool/domain event 通过去除隐藏 Session identity 的 `AgentExe
 `/swarm` 的原始斜杠命令作为 visible `user_input` 留在普通对话中；解析器额外生成的 `slash:/swarm` canonical `orchestrator` Prompt 以 `visibility = hidden`、`inHistory = true` 追加。MessageHistoryCompiler 继续把该 Prompt 交给 Provider，Renderer 时间线不投影它。兼容旧数据时不修改 append-only canonical history，而由 Renderer 同样抑制已写为 visible 的 `slash:/swarm` 记录；其他 orchestration 与 interjection 的默认可见性不受影响。Provider-transfer transcript、显式 Conversation 导出与完整 Trace 可以保留内部编排内容。
 
 Tool description 明确要求只有用户已经提出 Swarm、多 Agent、并行调查或独立交叉检查时才能调用，不能仅因任务复杂而自行启动。父 Agent 可行时先运行可共享验证，再把命令、退出码和精简关键输出写入 `sharedContext`；无法验证时明确说明。每项 task 必须显式选择 `readonly | inherit`，可写任务尽量使用互不重叠的文件或子系统所有权。allocator 会优先轮换合格 `Provider + model`，池不足时仍可能复用，Tool 不作绝对异构承诺。
+
+每个新 Public Run 都根据宿主能力、本轮冻结的 Subagents 开关和当前模型池重新计算一次 Swarm capability；普通发送、`run:retry` 与 `run:continue` 使用同一初始化边界。`/swarm` 只在该基础 capability 上补充本轮 goal 和编排上下文。设置不变时，续跑前后的 Provider Tool catalog 必须保持一致；内部 child Run 因冻结 `subagentsEnabled = false`，不得获得 `swarm_run`。
 
 `swarm_run({ sharedContext, tasks })` 是 `executionMode = parallel`、`effects = []`、`defaultRisk = low` 的编排 Tool；顶层 `sharedContext` 保存全部 Child 共用的背景、证据、约束、验证结果和输出要求，每项 task 提供唯一安全名称、Child-specific 任务、`light|standard|strong` 最低能力、replica 数量和 `toolAccess`。两部分合起来自包含。编排调用本身不强制人工审批；每个 `inherit` child 实际提出的副作用工具仍按父 Run 的冻结权限模式分别审批。
 

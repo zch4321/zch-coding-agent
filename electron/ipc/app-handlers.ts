@@ -615,6 +615,7 @@ export function createAppIpcHandlers(
     },
     'run:start': (payload) => backend.runs.start(payload),
     'run:retry': (payload) => backend.runs.retry(payload),
+    'run:continue': (payload) => backend.runs.continue(payload),
     'run:interrupt': (payload) => ({
       accepted: sessionManager.interruptRun(payload.sessionId, payload.runId),
     }),

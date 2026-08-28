@@ -16,6 +16,7 @@ import {
 import type { PlanStatus } from '../../shared/orchestration'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { TodoState } from '../../shared/todo'
+import { resolveManualContinuationTarget } from '../../shared/conversation-continuation'
 import type {
   DurableRunStartPayload,
   DurableRunStartResult,
@@ -166,6 +167,21 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     canInterject(): boolean {
       return Boolean(this.activeRunId)
+    },
+    manualContinuationTarget() {
+      const replica = useAgentReplicaStore()
+      const sessionId = replica.selectedSessionId
+      if (
+        !sessionId ||
+        this.startPending ||
+        this.activeRunId ||
+        this.pendingApproval ||
+        this.carryoverStartingBySessionId[sessionId] ||
+        this.carryoversBySessionId[sessionId]?.length
+      ) {
+        return undefined
+      }
+      return resolveManualContinuationTarget(replica.selectedMessages)
     },
     composerModelSelection(state): ModelSelection {
       const replica = useAgentReplicaStore()
@@ -539,6 +555,46 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         return false
       }
       await replica.reconcile(result.value.commit)
+      this.hydrateRuntime(result.value.runtime)
+      return true
+    },
+    /** Continues the interrupted turn without appending a user message. */
+    async continueConversation() {
+      const replica = useAgentReplicaStore()
+      const session = replica.selectedSession
+      if (!session || !this.manualContinuationTarget || !window.agentApi) {
+        return false
+      }
+      this.startPendingSessionId = session.id
+      let result: Awaited<ReturnType<typeof window.agentApi.continueRun>>
+      try {
+        result = await window.agentApi.continueRun({
+          version: IPC_VERSION,
+          sessionId: session.id,
+          expectedRevision: session.revision,
+          clientRequestId: requestId('continuation'),
+        })
+      } catch (error) {
+        showOperationError(
+          {
+            code: 'RUN_CONTINUE_FAILED',
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Failed to continue the conversation.',
+          },
+          session.id,
+        )
+        return false
+      } finally {
+        if (this.startPendingSessionId === session.id) {
+          this.startPendingSessionId = undefined
+        }
+      }
+      if (!result.ok) {
+        showOperationError(result.error, session.id)
+        return false
+      }
       this.hydrateRuntime(result.value.runtime)
       return true
     },

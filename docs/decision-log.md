@@ -2,6 +2,13 @@
 
 本文件记录有意接受、暂缓或取舍的技术决策。Code review 记录发现本身；本日志记录项目对发现采取的处理方式，避免后续将已知限制误认为遗漏。
 
+## 2026-08-27 — 中断续跑由 canonical history 推导
+
+- 状态：采用。
+- 决定：不持久化独立的 interrupted Run 标记；renderer 与 backend 共享同一 history 判定器，只有 active history 停在明确的驱动记录时才开放 `run:continue`。Application 校验 revision，Session Core 再校验 live history。
+- 理由：Run status 和 partial stream 本来就是瞬时状态，应用重启后不可依赖；完整 Assistant 结束边界、terminal tool batch 和 compact `turnId` 已经足够区分“已完成”与“可以从 canonical context 继续”。共享判定避免 UI 猜测与 backend 行为分叉。
+- 当前语义：继续不追加 user message、不生成空 commit，并沿用原 turn identity。尾部 passive prompt layer 不影响判定；control command、手动 compact、conversation transcript 和完整 Assistant 均阻断继续。
+
 ## 2026-07-25 — FC-1：FileChange revert 的 workspace TOCTOU
 
 - 状态：P8 切流时已重新评估；接受风险，不修复。

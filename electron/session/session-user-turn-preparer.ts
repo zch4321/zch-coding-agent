@@ -4,18 +4,12 @@ import type { MessageVisibility } from '../../shared/message'
 import type { ConfigStore } from '../config/store'
 import type { PromptRegistry } from '../prompts/registry'
 import type { SkillsManager } from '../skills/manager'
-import type { ToolRegistry } from '../tools/tool-registry'
 import { prepareRunContext } from './context-attachments'
-import {
-  appendAgentsContextIfChanged,
-  appendRuntimeContextIfChanged,
-  selectedContextContent,
-} from './prompt-harness'
+import { selectedContextContent } from './prompt-harness'
 import type { SessionOrchestratorMessages } from './session-orchestrator-messages'
 import { resolveSlashCommand } from './slash-commands'
 import type { ActiveRun, AgentEventDraft, SessionState } from './session-types'
 import { resolveSwarmAvailability } from './session-swarm-availability'
-import { resolveSessionToolCatalog } from './session-tool-catalog'
 
 export interface PreparedUserTurn {
   visibleMessage: string
@@ -32,7 +26,6 @@ export interface PreparedUserTurn {
 /** Prepares user messages, slash commands, prompt layers, and run context for a provider turn. */
 export class SessionUserTurnPreparer {
   readonly #configStore: ConfigStore
-  readonly #toolRegistry: ToolRegistry
   readonly #skillsManager: SkillsManager | undefined
   readonly #promptRegistry: PromptRegistry | undefined
   readonly #orchestratorMessages: SessionOrchestratorMessages
@@ -41,7 +34,6 @@ export class SessionUserTurnPreparer {
 
   constructor(options: {
     configStore: ConfigStore
-    toolRegistry: ToolRegistry
     skillsManager?: SkillsManager
     promptRegistry?: PromptRegistry
     orchestratorMessages: SessionOrchestratorMessages
@@ -49,7 +41,6 @@ export class SessionUserTurnPreparer {
     swarmHostEnabled?: boolean
   }) {
     this.#configStore = options.configStore
-    this.#toolRegistry = options.toolRegistry
     this.#skillsManager = options.skillsManager
     this.#promptRegistry = options.promptRegistry
     this.#orchestratorMessages = options.orchestratorMessages
@@ -71,43 +62,18 @@ export class SessionUserTurnPreparer {
       skillsManager: this.#skillsManager,
       promptRegistry: this.#promptRegistry,
     })
-    const swarm = resolveSwarmAvailability({
-      hostEnabled: this.#swarmHostEnabled,
-      runSubagentsEnabled: run.subagentsEnabled,
-      config,
-      requestedGoal: command.swarmGoal,
-    })
-    run.swarmToolConfig = swarm.toolConfig
-    if (command.swarmGoal && swarm.unavailableReason) {
-      throw new Error(swarm.unavailableReason)
+    if (command.swarmGoal) {
+      const swarm = resolveSwarmAvailability({
+        hostEnabled: this.#swarmHostEnabled,
+        runSubagentsEnabled: run.subagentsEnabled,
+        config,
+        requestedGoal: command.swarmGoal,
+      })
+      run.swarmToolConfig = swarm.toolConfig
+      if (swarm.unavailableReason) {
+        throw new Error(swarm.unavailableReason)
+      }
     }
-    const toolCatalog = await resolveSessionToolCatalog({
-      registry: this.#toolRegistry,
-      allowedToolIds: run.allowedToolIds,
-      subagentsEnabled: run.subagentsEnabled,
-      swarmEnabled: Boolean(run.swarmToolConfig),
-      gitToolsEnabled: session.gitToolsEnabled,
-    })
-    await appendRuntimeContextIfChanged(session, {
-      workspace: session.workspace,
-      mode: session.mode,
-      config,
-      providerId: session.provider,
-      promptRegistry: this.#promptRegistry,
-      reason: 'run_started',
-      toolNames: toolCatalog.names,
-      signal: run.controller.signal,
-    })
-    await appendAgentsContextIfChanged(session, {
-      workspace: session.workspace,
-      mode: session.mode,
-      config,
-      providerId: session.provider,
-      promptRegistry: this.#promptRegistry,
-      skillSummary: this.#skillsManager?.summaryPrompt(),
-      toolNames: toolCatalog.names,
-      signal: run.controller.signal,
-    })
     if (command.goal) {
       session.goal = command.goal
       this.#emit(session, {
