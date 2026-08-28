@@ -56,7 +56,7 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 ### 2.2 工具集
 
-工具分为四大类。所有规范化 `ToolCall` 都必须包含独立的 `reason` 意图字段，用于：
+工具分为五大类。所有规范化 `ToolCall` 都必须包含独立的 `reason` 意图字段，用于：
 
 1. 人类审批界面的意图展示；
 2. 喂给审批模型做判定。
@@ -67,13 +67,17 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 - `effects`：如 `filesystem.read`、`filesystem.write`、`process.spawn`、`terminal.write`、`network.request`。
 - `risk`：`low | review | high` 的默认风险级别。
-- `supportsAbort`、`defaultTimeoutMs`、`maxOutputBytes`。
+- `supportsAbort`、`defaultTimeoutMs`、`modelOutputPolicy`。其中 `bounded` 使用统一模型可见输出限制，`paged` 由工具维护准确分页，`passthrough` 只用于自身已有严格源文件上限的结果。
 
 Provider 生成的参数在记录 `tool.proposed` 和进入权限审批前先规范化：递归删除 schema 明确禁止的多余字段，并转换无歧义的 JSON 标量类型（数字字符串转 number/integer、`true|false` 字符串转 boolean、number/boolean 转 string）。不得把字符串猜测为 JSON object/array、把单值包装成数组、把 null 转成可执行值，也不得把未知工具名自动映射到另一个工具。规范化后的参数仍须通过完整 JSON Schema、工具语义校验、路径边界和权限策略；审批卡、日志与实际执行读取同一份规范化参数。无法修复时，模型可见错误必须包含工具名、具体 JSON Pointer 字段和预期约束，并明确允许修正后重试。
 
 Provider-neutral Tool Schema 是本地参数校验的权威来源，协议适配不得改写它。Anthropic wire schema 不发送顶层 `oneOf`、`allOf` 或 `anyOf`：当根 schema 明确为 object，且组合分支涉及的同级字段都已在根 `properties` 声明时，Provider 只从发送副本删除这些顶层关键字，继续保留嵌套组合约束；若组合分支依赖根目录未声明字段、非 object 分支或无法解析的 `$ref`，必须在网络调用和计费前报告包含工具名的本地错误，不得静默丢字段或放宽本地执行校验。其他 Provider 保持各自协议编译行为。
 
-Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelled/timeout/truncated`，供安全检查、trace 和插件使用；模型历史不接收该信封。敏感数据过滤后，Tool Registry 将成功正文投影为 canonical `TextPart | JsonPart`，错误投影为统一短文本，再按投影后的实际内容执行单次与 Run 累计 token bound。自定义 projector 必须同步、确定性、无 I/O，异常时回退默认安全投影。
+Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelled/timeout/truncated`，供安全检查、trace 和插件使用；模型历史不接收该信封。敏感数据过滤后，Tool Registry 将成功正文投影为 canonical `TextPart | JsonPart`，错误投影为统一短文本，再使用 Run 开始时冻结的 `maxToolOutputBytes` 与 `maxToolOutputLines` 限制模型可见结果；默认分别为 256 KiB 与 500 行，不再维护 token 单结果预算或跨调用累计 Tool Result 预算。`bounded` 结果超限时只保留 UTF-8 安全的头部，并在限制内附上触发原因、原始字节/行数和可用的 artifact/continuation 路径；`read_file`、`background_list` 等 `paged` 结果必须自行保证 cursor 完整，不能再被通用 limiter 二次破坏。自定义 projector 必须同步、确定性、无 I/O，异常时回退默认安全投影。
+
+Terminal、Command、Subagent 与 Swarm 始终尝试留档。Fetch 与 Web Search 始终保存完整的已获取/规范化结果；MCP 模型投影超过 256 KiB 或 500 行时保存完整规范化 JSON；这些工具的内联结果仍受统一限制。MCP catalog 继续保留 4 MiB、100 页、1,000 tools 的独立发现边界。`read_skill` 源文件上限为 256 KiB，正文完整返回并豁免 500 行限制；其他不可分页结果超限时只有头部和截断元数据。
+
+AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-tool `ToolDefinition.maxOutputBytes`，新增 `maxToolOutputLines` 与 `subagents.maxSubagents`。旧 `maxToolOutputBytes` 恰为 v24 默认 128 KiB 时迁移到 256 KiB，自定义值保留；从含 `maxAgentsPerSwarm` 的旧版直接升级时保留该值为 `maxSubagents`，v24 升级使用 32。
 
 #### 2.2.1 文件类
 
@@ -86,7 +90,7 @@ Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelle
 
 > 设计意图：把常规删除做成独立工具，便于精确展示路径、数量和审批风险。它不能阻止 `run_command` 间接删除文件，因此命令工具仍必须独立经过权限策略，不能把工具拆分误当成 sandbox。
 
-`read_file` 使用 `startLine + lineCount` 分页。模型可见结果直接是带行号正文；空文件为 `[empty file]`，只有截断时才追加 `nextStartLine/totalLines/lineTruncated` 尾注，不重复 path 或参数。默认尽量读取到 10,000 行，单次最多 10,000 行，并同时受 128 KiB 与 64K 估算 token 限制；超长单行不能绕过字节/token 上限。每个工具结果独立受默认 64K token 上限保护，不设置跨调用或跨步骤累计的 Run 总预算；Token 估算继续按 UTF-8 字节比例保守计算，不能把字节数直接当成真实 token 数。完整 Provider 请求仍受冻结模型 profile 的 prompt budget 和自动压缩约束。
+`read_file` 从文件句柄流式读取，不为分页把整个文件载入内存。它支持 `startLine`、opaque `cursor` 或 `tail` 三种互斥定位方式，以及 `lineCount/lineNumbers`；schema 保持普通 object，并在执行期校验互斥关系，避免 Provider 不兼容的顶层组合关键字。结果返回 `startCursor/endCursor/nextCursor/hasMore/dataLost/tailClipped`；即使读到当前 EOF 也返回可保存的 `endCursor`，日志后续 append 后可从该 cursor 继续。cursor 绑定绝对路径与文件身份，文件被替换或缩短时返回 `RESOURCE_CHANGED`；UTF-8 边界和超长单行可无损续读。workspace 文件仍受 `readFileSourceBytes` 总源文件上限，Session temp 文件不受该总量限制，但每页模型正文始终受冻结的 256 KiB/500 行限制。临时 artifact 已清理时返回 `ARTIFACT_EXPIRED`。
 
 `apply_patch` 第一版一次只修改一个已存在的 UTF-8 文本文件，可包含多个 hunk。补丁路径必须是 workspace 相对路径；禁止二进制、rename、mode change、绝对路径和越界路径。为适配模型常见的计数错误，hunk header 的行数和 new-file 行号只作为提示；上下文/删除行仍必须精确匹配，old line number 失效时只有在精确上下文唯一命中时才可应用。审批绑定原文件 hash、规范化补丁 hash 与结果 hash，执行前重新验证。`create_file` 只创建不存在的文件，并会自动创建缺失父目录；覆盖已有文件应使用 `apply_patch`。
 
@@ -111,7 +115,7 @@ Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelle
 | `run_command` | 一次性执行进程或 shell 命令，等待结束，返回 stdout/stderr/exit code | 有     | **是**   |
 | `delay`       | 等待一个有界毫秒数，供 terminal 轮询输出时使用                      | 无     | **是**   |
 
-> `run_command` 用于短测试、构建、一次性脚本。长时间测试、watch、开发服务器、REPL 或需要反复观察输出的命令应使用 `terminal_open` / `terminal_send`，再配合 `terminal_send.delayMs` 或独立 `delay` 和 `terminal_read` 轮询。
+> `run_command` 用于短测试、构建、一次性脚本。长时间测试、watch、开发服务器、REPL 或需要反复观察输出的命令应使用 `terminal_open` / `terminal_send`；用 `background_wait` 等待 PTY 退出，并通过 `read_file` 分页读取 Terminal artifact。
 >
 > 参数必须区分 `mode: "process"`（`executable + args[]`，默认优先）和 `mode: "shell"`（命令字符串，支持管道/重定向但风险更高）。不能把两者混成一个无法可靠审查的字符串。
 >
@@ -129,24 +133,34 @@ Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelle
 
 长生命周期的双向伪终端，**Agent 与人类共享同一个终端流**——人可以观察、也可以在同一个 PTY 上输入。
 
-| 工具                                   | 作用                               | 副作用 | `reason` |
-| -------------------------------------- | ---------------------------------- | ------ | -------- |
-| `terminal_open(cwd, opts)`             | 打开新终端，返回 `terminalId`      | 有     | **是**   |
-| `terminal_send(id, text, delayMs?)`    | 提交终端输入并自动回车，可有界等待 | 有     | **是**   |
-| `terminal_read(id, {cursor?, lines?})` | 读最近 N 行或指定 cursor 后的输出  | 无     | **是**   |
-| `terminal_list()`                      | 列出所有打开的终端句柄             | 无     | **是**   |
-| `terminal_close(id)`                   | 关闭终端                           | 有     | **是**   |
+| 工具                                | 作用                                               | 副作用 | `reason` |
+| ----------------------------------- | -------------------------------------------------- | ------ | -------- |
+| `terminal_open(cwd, opts)`          | 打开新终端，返回 `terminalId`、后台 target 与日志路径 | 有     | **是**   |
+| `terminal_send(id, text, delayMs?)` | 提交终端输入并自动回车，默认等待 1 秒并返回增量/tail | 有     | **是**   |
 
 约定：
 
-- `terminal_read` 返回给 **LLM** 的内容是**去 ANSI 的纯文本**（便于模型理解）。
-- `terminal_read` 不重复返回 `terminalId`，但始终追加下一次增量读取需要的 `cursor`；只有截断时追加 `truncated/totalBytes`。`terminal_open` 仍返回后续调用必需的 ID。
-- **UI** 上人类看到的终端流是**原始带色流**。两者订阅同一 PTY，渲染层不同。
-- 与 `run_command` 并存：一次性命令用前者；长跑服务/交互式 REPL/实时观察用 terminal。每次 `terminal_send` 代表提交一段完整输入，未以换行结束时自动补一次 Enter，已有换行时不重复；`delayMs` 在输入成功后等待最多 60 秒，便于紧随其后的 `terminal_read` 读取增量输出。等待期间取消不会撤回已经写入 PTY 的输入。独立 `delay` 继续用于纯等待。
+- `terminal_open` 在启动 PTY 前创建 `artifacts/terminals/terminal-<id>.log`，并返回 `{ type: "terminal", id: String(terminalId) }` target。应用用跨 chunk 保留状态的 ANSI sanitizer 持续写入无 ANSI、追加式完整日志；Renderer 仍接收同一 PTY 的原始带色流。
+- 与 `run_command` 并存：一次性命令用前者；长跑服务、交互式 REPL 或实时观察用 Terminal。每次 `terminal_send` 代表提交一段完整输入，未以换行结束时自动补一次 Enter，已有换行时不重复；`delayMs` 默认 1,000 ms、允许显式为 0、最大 60 秒。返回优先包含发送前 cursor 之后的无 ANSI 增量；没有增量时返回最多 20 行/8 KiB 的短 tail，并始终携带当前 cursor 与 artifact 状态。等待期间取消不会撤回已经写入 PTY 的输入。
 - `terminal_open` 不接受模型提交的 Shell。Main process 在每次打开时读取 `executionEnvironment.commandShell` 并经 CommandShellService 解析实际 profile（与 `run_command.shell` 同一配置）；保存的解释器不可用时回退到自动选择且不改写配置。解析为 PowerShell 时 PTY 固定传入 `-ExecutionPolicy Bypass`；其他 Shell 不附加启动参数。设置变更只影响之后打开的终端，已在运行的终端不重启。
-- `terminalId` 是进程内全局递增的正整数：应用重启后从 1 重新开始；ID 分配后不复用，启动失败可留下编号空洞。每个 Session 最多保留 16 个终端（包括 opening、running 和已退出但未显式关闭的终端），显式关闭后释放名额；并发打开先预留名额，不能越过上限。`terminal_list` 按数字 ID 升序返回；不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。不迁移数据库或旧日志中的旧字符串 ID。
+- `terminalId` 是进程内全局递增的正整数：应用重启后从 1 重新开始；ID 分配后不复用，启动失败可留下编号空洞。每个 Session 最多保留 16 个终端（包括 opening、running 和已退出但未显式关闭的终端），显式关闭后释放名额；并发打开先预留名额，不能越过上限。Provider catalog 不再暴露 `terminal_read/list/close`；模型通过 `background_wait/list/cancel` 管理状态，人类 Terminal UI 继续通过 Renderer IPC 列举、读取和关闭。不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。
 - 模型不可见 `terminal_resize` 工具：Renderer 面板自动 fit 后仍通过 `terminal:resize` IPC 同步 PTY 尺寸，模型无法手动调整虚拟终端尺寸。
-- 终端归属于会话而不是单次 run：中断 run 不自动关闭终端；会话关闭或应用退出时必须清理。
+- Terminal 归属于公开 Session 而不是单次 Run：页面切换、live context 卸载、父 Run 完成/中断、retry/edit/rewind 都不自动关闭；归档、永久删除、Project 删除和应用退出必须先取消并等待收敛。
+
+#### 2.2.5 后台任务
+
+`subagent_run` 与 `swarm_run` 是异步启动工具；统一后台工具管理 Agent 与 Terminal：
+
+| 工具                | 作用                                                                 |
+| ------------------- | -------------------------------------------------------------------- |
+| `background_wait`   | 按 `any|all` 等待混合 target 的终态，超时返回全部目标当前快照         |
+| `background_list`   | 分页列出当前 Session 最新的 Subagent root、Swarm root 与 Terminal    |
+| `background_cancel` | 幂等取消当前 Session 拥有的 root、Swarm child 或 Terminal，可等待收敛 |
+
+- target 统一为 `{ type: "subagent" | "swarm" | "terminal", id: string }`。`background_wait` 默认 `any`；纯 Agent 默认/最大 5 分钟，包含 Terminal 时整次最多 60 秒，`timeoutMs = 0` 为即时快照。只有 Agent 进入终态或 PTY 退出会唤醒，普通输出/activity 不唤醒；超时不是错误。
+- Subagent 终态快照可内联受全局限制的最终回答，并返回 `resultPath/activityPath`；运行中只返回状态和 activity path。Swarm 只返回状态、child 计数和 `manifestPath`，不内联聚合结果。Terminal 返回状态、exit code、日志路径和当前 cursor。
+- `background_list` 默认混合返回最新 20 个 root/Terminal，支持类型、`active|finished|all`、limit 和绑定查询条件的 opaque cursor；Swarm child 只在 manifest 中展开。`background_cancel.waitMs` 默认 0、最大 60 秒；取消 Swarm root 级联未完成 child，取消单 child 后重新汇总 root。
+- child catalog 始终移除 `subagent_run`、`swarm_run` 和全部 `background_*`，防止递归编排。
 
 ### 2.3 LLM Provider 适配
 
@@ -218,18 +232,20 @@ Tool Result 的 canonical renderer 固定为：单 TextPart 原样、单 JsonPar
 - Message metadata 是按 `kind` 校验的 application-owned typed annotations，可包含 attachment provenance、prompt id/version/hash、标准化 usage、tool/approval/compact boundary、conversation transcript hash 和 reasoning projection 状态。Metadata 可以来源于 Provider，但删除它不能破坏下一次 Provider 请求；assistant continuation 必须放入 `providerContinuation`，compact 的协议关键状态必须放入 `provider_compact.payload`。
 - SQLite 不保存 OpenAI、DeepSeek、Anthropic 或其他 Provider SDK 的请求 DTO。发起请求时，backend 从 `inHistory = true` 的完整 `MessageRecord` 生成 `CompiledCanonicalHistory`，再由当前 `ModelProvider.compile()` 整段编译 wire DTO；Persistence layer 不依赖 Provider。
 - Draft 和 draft attachments 是 renderer UI 状态，不进入 backend 或 SQLite，也不要求在切换 Session、renderer reload 或应用重启后保留。
+- 每个公开 Session 在 OS temp 下拥有按应用 profile hash 与 Session hash 确定的私有目录，目录/文件权限分别为 `0700/0600`（支持该权限模型的平台）。目录固定分为 application-owned `artifacts/{terminals,commands,subagents,swarms,fetch,web-search,mcp}` 与 model-writable `scratch`；主 Agent 和所有 hidden child 共享同一根。Harness 提供真实绝对路径以及 `ZCH_SESSION_TEMP_DIR/ZCH_SESSION_ARTIFACTS_DIR/ZCH_SESSION_SCRATCH_DIR`，变量也注入 `run_command` 与 Terminal，但不覆盖系统 `TMP/TEMP`。路径和动态目录内容不进入 runtime context 指纹或项目树。
+- Session temp artifact 是完整输出的便利副本，不是生命周期真相源；Shell 具有宿主权限并可能改写它，Agent/Terminal 状态始终以 Backend memory 与 SQLite execution 为准。正常退出和归档保留目录；Desktop 启动时清理最后使用超过 24 小时的 Session 目录，永久删除 Session/Project 后立即清理，无磁盘配额。捕获失败或磁盘写满时必须返回 `artifactAvailable = false` 和有界 `captureError`，不能声称结果已完整留档。
 - 每次用户提交形成 backend memory 中的 Active Run；它在开始时冻结包含 `providerType/providerId/model/reasoning/config revision` 的实际 `ModelRouteSnapshot` 和权限模式，但不单独落盘。完成的 assistant message 记录实际 route；Session 的模型/模式修改只影响后续 Run。
-- Active Run、stream delta、pending approval、未完成 tool batch 和 PTY/process 都是 backend runtime state，不进入 SQLite。
+- Active Run、stream delta、pending approval、未完成 tool batch 和 PTY/process 都是 backend runtime state，不进入 SQLite；Subagent/Swarm execution identity、状态与结果仍按 §2.7/§2.9 持久化，artifact 文件不替代这些记录。
 - Final-answer 边界到达的 live interjection 可转为 renderer carryover，并以稳定 request id 按 FIFO 启动后续 Run。某项启动失败时必须移除队列和 overlay、显示可自动消失的 warning、继续下一项且解除输入锁；不提供 carryover 重试或持久队列。
 - 不同 Session 的 Run 不参与全局 slot 或 workspace writer 准入；同一 canonical workspace 可以同时存在多个 `auto`、`confirm` 或 `yolo` Run，Renderer 和 Prompt Harness 不显示额外警告。
-- completed、failed、cancelled、异常、session close 和 app dispose 都必须走幂等 runtime 资源清理路径。不可中止的副作用 Promise 即使晚于 Run 终态 settle，也必须保留诊断并完成自身清理，但不阻塞其他 Session 启动。
-- 文件工具必须约束在工作区边界内（规范化路径、真实路径与符号链接逃逸检测）。
+- completed、failed、cancelled 和父 Run 异常只清理该 Run 自身资源，不取消已经 durable 启动的后台任务。归档/删除先阻止新任务、取消该 Session 全部 Agent/Terminal 并等待最多 60 秒收敛，再提交生命周期变更；应用退出执行同样的取消与收敛。不可中止的副作用 Promise 即使晚于 Run 终态 settle，也必须保留诊断并完成自身清理，但不阻塞其他 Session 启动。
+- 文件读取/检索工具允许 workspace 相对路径，以及 workspace 或当前 Session temp 内的绝对路径；内置文件写工具只允许 workspace 或 `scratch`，不得修改 `artifacts`。两根都执行规范化路径、真实路径与符号链接/junction 逃逸检测。
 - Session canonical history 必须以完整 Message 持久化。应用重启后按 `inHistory = true` 和 `seq` 重建 `CompiledCanonicalHistory`，再由当前 route 的 ModelProvider 生成请求；compact 通过版本化 checkpoint message 和显式 `inHistory` 变更替代旧前缀。若 `providerType + providerId + model + endpoint + providerConfigRevision` 与 active assistant/compact/transcript anchor 不兼容，下一次 Run 必须在插入用户消息前把 SQLite 完整非 superseded 分支投影成 `zch-conversation-markdown`，以 fresh harness + hidden `conversation_transcript` 建立新 epoch；迁移预检或 commit 失败时旧 epoch 原样保留。Fork/rewind 重建 active branch 时必须把 `compact_summary.replacesThroughSeq` 与 `conversation_transcript.sourceThroughSeq` 作为同等 epoch boundary，并在 fork 连续重编号时重映射该边界。
 - 只有当前分支中可见的原始用户消息支持重试和编辑。重试保留该用户消息及本轮 context、supersede 后续分支并复用原记录运行，不能插入重复 user message；Assistant 和其他 message kind 必须被 `run:retry` 拒绝。编辑 supersede 该用户整轮及后续，将原文和附件引用恢复到 composer，不自动发送。
 - Idle Session 的 active history 若停在未完成的用户输入、terminal tool result、插话、编排输入或带 `turnId` 的自动 compact summary，最后一个对应轮次必须显示“继续”操作。继续必须校验 Session revision 与 canonical history，复用原 `turnId` 启动 Run，不发送或持久化新 user message；完整 Assistant、control command、手动 compact 与 imported transcript 不得视为可继续。
 - 仅回退可以作用于用户或 Assistant：用户边界移除该用户整轮及之后记录，Assistant 边界保留对应用户消息并从 Assistant 开始移除。每次回退清除当前 Goal/Plan，并在跨 compact 或 conversation transcript epoch 时重建保留前缀的有效 history。文件、终端和 MCP/外部工具副作用不回滚，FileChange 审计继续保留，UI 操作前必须提示。
 - Assistant stream delta 只保存在 backend memory；Provider turn 完成后才插入 Message。包含 tool calls 的 assistant turn 必须等每个 call 都有 terminal result 后，与对应 tool messages 在同一 transaction 写入，数据库不得保存协议半截。
-- 应用崩溃可以丢失尚未完成的 assistant text/reasoning、tool batch 和 Active Run，不保存 partial message，也不生成持久化 interrupted Run。最后一条已提交 user message 可以暂时没有 assistant reply。
+- 应用崩溃可以丢失尚未完成的 assistant text/reasoning、tool batch 和 Active Run，不保存 partial message，也不生成持久化 interrupted Run。最后一条已提交 user message 可以暂时没有 assistant reply；重启时遗留 active Subagent/Swarm execution 标记为 `interrupted` 且不自动恢复，真实 PTY 已消失。
 - 如果副作用工具已经修改 workspace、但应用在完整 tool batch transaction 前崩溃，文件变化可以保留而 tool messages 丢失；系统以下一次读取到的实际 workspace 为准。V2.1 不承诺文件系统与消息数据库之间的 crash-atomic journal。
 - 文件写入工具的模型可见结果是一行成功摘要。如果副作用已成功但 `file_changes` 持久化失败，摘要尾注必须如实保留 `mutationSucceeded = true`、`CHANGE_HISTORY_PERSIST_FAILED` 和 `revertAvailable = false`；不得把已发生的文件操作报成未发生或自动重试。
 - JSONL trace 是可选审计记录，不是事务恢复日志，也不能作为 Session 状态的唯一来源。
@@ -309,27 +325,27 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - `task` 必须自包含，并作为 child Session 的普通 canonical `user_input`；child 不复制父 Session history，也不接受特殊任务包装。
 - `readonly` 只暴露父 Run 当前可见工具中的无副作用子集；`inherit` 继承父 Session 的权限模式及父 Run 已冻结的可见工具。继承不能提升权限：只读父 Run 的 `inherit` 仍只暴露无副作用工具。
 - Goal、Plan、`subagent_run` 和 `swarm_run` 等编排工具始终从 child catalog 排除；主 Agent 保留任务拆解和 child 数量控制。Tool description 要求调查任务优先选择 `readonly`，只有任务确需命令、网络或写入时才选择 `inherit`，并为并发可写任务分配互不重叠的所有权。
-- 同一 parallel 段先按 call 顺序逐个完成权限检查和审批，始终最多暴露一个 `pendingApproval`；准备完成后并发执行，结果仍按原 call 顺序进入事件和 canonical history。
+- 同一 parallel 段先按 call 顺序逐个完成权限检查和审批，始终最多暴露一个 `pendingApproval`。`subagent_run` 在 durable execution、容量预留和初始 artifact 创建完成后立即返回 `{ target, status, artifactPath }`，后台执行不再占用父 Tool body 或等待原 call 顺序中的最终回答。
 - child 精确继承父 Run 已冻结的 main/compression route，配置热变更不改变正在运行的 Provider、模型、reasoning 或 credential binding。
 - child 直接读取父 Run 的 canonical workspace；每次 Tool 读取看到当时的实时文件与 Git 状态，不创建文件副本、临时 repository、Git bundle 或 refs。
 - child 复用唯一 Session/Run/Provider loop，其 Session 使用计算后的权限模式并对普通 bootstrap、分页、搜索、导出和主对话事件隐藏。父 Session/Project 删除级联清理；父归档继续保留。
 - `inherit` child 的副作用工具仍逐次经过现有权限管线：Auto 可使用审批模型并升级人工审批，Confirm 等待人工审批，Yolo 直接执行。人工审批通过独立 Agent execution event/IPC 显示和决策，不暴露隐藏 Session ID。
 - child 沿用全局 `maxStepsPerRun`（`0` 表示不限）、模型最大输出和通用 Tool context/output 限制，不增加专属 step/token/result budget。
-- 内部成功结果保存 `results[name]` 最终文本，以及耗时、实际 Provider/model、标准化 usage 和输出上限截断标记；进入父模型历史时只投影 `results[name]` 文本，Provider/model/usage 留在内部 meta。不得返回 reasoning、endpoint、凭据、child Session ID、trace 路径或临时绝对路径。
-- `workerTimeoutMs` 默认 30 分钟、可配置 1 分钟至 24 小时。父 Run 取消、timeout、Provider failure 和应用退出都必须中断 child；不存在全局 Run slot 准入或 workspace writer 锁。
-- 相同 parent Session/Run/call 与参数 hash 可复用已完成结果；参数不同返回冲突。应用重启将遗留 active execution 标记为 `interrupted`，不得自动重试或恢复 stream。
+- 内部成功结果保存 `results[name]` 最终文本，以及耗时、实际 Provider/model、标准化 usage 和输出上限截断标记；`result.md` 保存完整最终文本，`activity.jsonl` 保存追加式可见活动。`background_wait` 终态快照只内联受全局限制的最终回答并返回两条路径，不得返回 reasoning、endpoint、凭据、child Session ID 或 trace 路径。
+- `workerTimeoutMs` 默认 30 分钟、可配置 1 分钟至 24 小时。父 Run 完成、中断、timeout 或 Provider failure 均不取消已启动 child；应用退出、Session 归档/删除、Project 删除、显式 `background_cancel` 和 worker timeout 才取消并收敛。不存在全局 Run slot 准入或 workspace writer 锁。
+- 相同 parent Session/Run/call 与参数 hash 幂等复用同一 execution handle，包括并发重试和终态重试；参数不同返回冲突。应用重启将遗留 active execution 标记为 `interrupted`，不得自动重试或恢复 stream；调用方丢失 target 时通过 `background_list` 找回。
 
 模型池与 Desktop Swarm 不改变上述 `subagent_run` route 继承路径。Swarm 使用独立 prepared execution；普通 Subagent、Swarm Job 和 sibling child 均可并发启动。递归委派、Serena/code intelligence、自定义工具 ID 列表或可继续聊天的 child Session UI 仍未实现。后续 hardening 边界见 [`road-map.md`](./road-map.md#2-m2--swarm-hardening)。
 
 ### 2.8 Model Pool 配置与执行
 
-- AppConfig v16 首次在根配置加入 `modelPool`，v17 将 entry reasoning 扩展为统一六档，v18 删除重复 capability，v19 保存最多 1,000 个命名 entry 并删除从未执行的 per-route `maxParallel`，v20 只新增命令解释器选择，v21 将模型池收拢到 `models.modelPool`，v22 把 Provider reasoning 迁移到主/辅助模型角色；当前 v24 删除全局 Run 与单 Job Agent 数量配置，不改变模型池结构。模型池上限仅作为 IPC/config 异常负载边界，不承担并发或 Agent 数量控制；entry 只引用现有 Provider/model/reasoning。调度能力固定为 `light | standard | strong`，唯一来源是对应 Provider 的 `modelOverrides[model].capability`。API key、credential reference 与并发配额不进入 entry。
+- AppConfig v16 首次在根配置加入 `modelPool`，v17 将 entry reasoning 扩展为统一六档，v18 删除重复 capability，v19 保存最多 1,000 个命名 entry 并删除从未执行的 per-route `maxParallel`，v20 只新增命令解释器选择，v21 将模型池收拢到 `models.modelPool`，v22 把 Provider reasoning 迁移到主/辅助模型角色，v24 删除全局 Run 与单 Job Agent 数量配置；当前 v25 增加 Session 级 `subagents.maxSubagents` 并统一模型可见输出限制，不改变模型池结构。entry 只引用现有 Provider/model/reasoning，调度能力固定为 `light | standard | strong`，唯一来源是对应 Provider 的 `modelOverrides[model].capability`。API key、credential reference 与并发配额不进入 entry。
 - 完整模型池使用单个 `config:set(model-pool)` 原子保存。所有 enabled entry 引用的 Provider 必须由唯一且精确的 expected revision 列表覆盖，并在写盘前通过 Provider 存在、模型启用、能力标注、安全 endpoint、模型 profile 和当前凭据绑定校验；任一失败时不得部分写入。disabled entry 只要求结构与规范化 ID 唯一，可保留失效引用供未来 UI 修复。
 - Agents 设置页提供模型池独立小节，以 Naive UI Transfer/Tree 按 `Provider → model → reasoning` 展示候选；每个 reasoning 叶节点是一条互不替代的精确 route，同一模型的 `high`、`max` 可以同时入池，且不做自动升降档。顶部“最低思考等级”只过滤左侧候选，低于门槛但已经入池的 route 仍在右侧显示并提示，不改写配置。能力等级只读展示对应 Provider 模型标注；模型池不配置并发，内部 entry ID、顺序和 enabled 状态不作为常规表单暴露。Renderer 使用独立 Pinia store 持有草稿、已保存快照和保存状态；整组修改显式原子保存，不复用 Provider 表单草稿。Provider 编辑触发后端自动禁用时，干净模型池草稿同步回填；未保存草稿则保留并提示重新检查。
 - 删除 Provider、移除 entry 引用的启用模型、移除 capability annotation、reasoning annotation 变为不兼容或显式清除凭据时，在同一配置写入中把受影响 entry 置为 disabled，保留顺序和引用；恢复配置不会自动启用。启动/reload 会修复手写的 enabled 静态不兼容或无能力标注引用，但环境凭据暂时缺失不会改写持久配置。
 - 纯 allocator 让所有 `actualCapability >= requiredCapability` 的模型参与分配，并按声明顺序先 round-robin `Provider + model`、再轮询该模型的精确 reasoning route；选择更多 reasoning 叶节点不会提高模型权重，每次调用从头开始。符合要求的模型少于 Agent 数时自然重复使用；缺少能力时在 route/credential 解析前整体失败。route freezer 读取单个 PublicConfig 快照，生成包含全部 enabled entry 及 Provider revision 的顺序敏感 SHA-256 digest，并对实际选择的唯一 entry 各解析一次 main/compression route。
 - prepared plan 是 backend-private 内存结果，包含 `ResolvedModelRoute` 与 API key；safe snapshot v2 只包含 digest、需求/entry/能力、Provider/model/reasoning/revision 与安全 route snapshot。revision 竞态或已选 entry 不可用会使整个 freeze 失败，不会跳过、切换 Provider 或重新分配。
-- `subagent_run` 通过 `runOne` 继承父 route；Swarm 通过 backend-private `runPrepared` 消费冻结 assignment，配置热变更不得影响 preparing/running child。Agent 数量的 `1..32` 只保留在 Tool schema、持久化计数和结果协议中作为固定异常负载边界，不提供用户配置，也不形成运行时并发队列。
+- `subagent_run` 通过 `runOne` 继承父 route；Swarm 通过 backend-private `runPrepared` 消费冻结 assignment，配置热变更不得影响 preparing/running child。`subagents.maxSubagents` 默认 32、范围 1–32，按公开 Session 统计 `queued/preparing/running` leaf：standalone Subagent 计 1，Swarm 每个 child 计 1、root 不计。Backend 在 SQLite transaction 中原子预留容量；Swarm 容量不足整次失败且不创建部分 Job。设置调低不取消存量，新启动必须等 active leaf 低于新值；Run 冻结值同时约束 Provider schema 中的 `tasks/agentCount`，Backend 仍复核跨 Job 总量。
 
 ### 2.9 Desktop Swarm
 
@@ -337,14 +353,14 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - `/swarm` 原始用户输入保持可见；它生成的 `<orchestration_request kind="swarm">` canonical `orchestrator` Prompt 必须以 `visibility = hidden`、`inHistory = true` 持久化，只进入 Provider 上下文而不进入普通对话时间线。不得改写旧 SQLite 记录；Renderer 必须按 `slash:/swarm` 来源抑制已经持久化为 visible 的旧 Prompt。该规则不改变其他 slash orchestration、interjection、工具审批、Agents artifact、完整导出或 Trace 的现有投影。
 - Tool description 必须要求用户未明确提出 Swarm、多 Agent、并行调查或独立交叉检查时不得调用。父 Agent 在可行时先执行可共享验证，把命令、退出码和精简关键输出放入 `sharedContext`；每项 task 显式选择 `toolAccess`，可写任务尽量使用互不重叠的文件或子系统所有权。描述只能承诺优先轮换合格模型，不能保证池不足时仍使用不同模型。
 - `swarm_run` 本身只是低风险编排调用，`effects = []`、`defaultRisk = low`，不强制逐次人工审批。真正的命令、网络、终端和文件副作用由各 child 的继承权限模式与原有工具审批管线决定。
-- `sharedContext` 必须是非空有界文本，承载所有 Child 共用的背景、证据、约束、验证结果和输出要求；每个 task 必须包含唯一安全 `name`、仅针对该 Child 的 `task`、`requiredCapability: light|standard|strong`、`agentCount` 和 `toolAccess: readonly|inherit`。`sharedContext + task` 合起来必须自包含。单项和总 Agent 数都受固定协议上限 32 约束，Provider schema 与 Backend 执行校验必须同时执行。
+- `sharedContext` 必须是非空有界文本，承载所有 Child 共用的背景、证据、约束、验证结果和输出要求；每个 task 必须包含唯一安全 `name`、仅针对该 Child 的 `task`、`requiredCapability: light|standard|strong`、`agentCount` 和 `toolAccess: readonly|inherit`。`sharedContext + task` 合起来必须自包含。单项和本次总 Agent 数受本 Run 冻结的 `maxSubagents` 约束，Provider schema 与 Backend 执行校验必须同时执行；当前 Session 的跨 Job 剩余容量由 Backend transaction 原子判定。
 - 每个 Child hidden Session 必须把 XML-text 转义后的 `<swarm_shared_context>` 与 `<swarm_task>` 分别持久化为公共 prompt layer 和本轮 user input。基础 harness 必须说明两种 tag 的信任与任务语义；详情投影返回解包后的原始 task，不能把 tag 或公共上下文伪装成用户输入。
 - 主 Agent 负责拆解任务；Backend 在任何 child Provider 请求前确定性分配模型池 route、复核 Provider revision，并冻结 main/compression route 与凭据绑定。能力不足、配置竞态或输入超限必须整体失败，不得静默降级、跳过任务或自动换 Provider。
 - Job root 与所有 queued child 必须在一个 SQLite transaction 创建。root/child 只保存安全 assignment、状态、usage、结果与有界错误，不保存 API key、endpoint、reasoning、workspace 绝对路径或 child prompt harness；hidden Session 继续从普通 Session API 隐藏。
-- Swarm child 在 Job durable identity 创建后直接并发启动 hidden Session 和 worker timeout；不经过全局 FIFO slot。同一父 Run 的 sibling Job、不同父 Run 的 Job 及其 child 都可以并发执行。
-- 父 Run 取消或应用退出必须取消 queued child 并中断 active child。单 child 失败不取消兄弟且不自动重试；结果按 task 声明顺序和 replica 序号稳定返回。至少一个成功时保留 `completed|partial` 结果，全部失败返回明确 Tool error。
-- 每个结果项独立包含成功文本或失败、冻结 assignment、耗时、usage 与截断标记；`meta` 汇总状态、数量、总耗时和 usage。结果不得包含 reasoning、child Session ID、trace 或完整工具轨迹，2 MB 上限不得通过删除 Agent 条目来满足。
-- 同一父 Run 可以多次并发调用 `swarm_run`。相同 call ID 与相同参数可幂等复用 active/durable 结果，相同 call ID 参数不一致必须冲突。
+- Swarm child 在 Job durable identity 创建后直接并发启动 hidden Session 和 worker timeout；不经过全局 FIFO slot。同一父 Run 的 sibling Job、不同父 Run 的 Job 及其 child 都可以并发执行。`swarm_run` 在 root/children transaction、全部 route freeze、容量预留和初始 manifest 完成后立即返回后台 handle，不等待 child。
+- 父 Run 完成或取消不影响 queued/running child。应用退出、Session/Project 生命周期收敛或 `background_cancel` 必须取消 queued child 并中断 active child；取消 root 级联，取消单 child 后重新汇总 root。单 child 失败不取消兄弟且不自动重试；结果按 task 声明顺序和 replica 序号稳定保存，至少一个成功时为 `completed|partial`，全部失败为明确错误。
+- `artifacts/swarms/<execution-id>/manifest.json` 保存 shared context、tasks、安全 assignment、child 路径、状态与计数，并随执行原子更新；Swarm background 快照只返回 manifest 路径，不把可能超过上下文限制的聚合结果内联给主模型。Backend durable execution/result 仍是权威，manifest 可能被 Shell 改写或因清理而缺失。
+- 同一父 Run 可以多次并发调用 `swarm_run`。相同 call ID 与相同参数幂等复用同一 active/durable handle，相同 call ID 参数不一致必须冲突。
 
 ---
 
@@ -399,18 +415,19 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 
 ### 3.3 执行不变量与风险黑名单
 
-- **执行不变量**不是权限规则：例如 `create_file` 的路径必须属于 workspace、terminal 必须属于当前 session、参数必须满足 schema。违反时调用本身无效，因此所有模式都拒绝；若用户需要访问 workspace 外文件，应切换 workspace 或使用命令工具，而不是让 Yolo 改写文件工具契约。
+- **执行不变量**不是权限规则：例如内置文件写入必须属于 workspace 或当前 Session `scratch`、Terminal/background target 必须属于当前 Session、参数必须满足 schema。违反时调用本身无效，因此所有模式都拒绝；Yolo 不会改写文件工具契约。
 - **风险黑名单**是权限策略：例如破坏性命令、批量删除、发布/部署、修改凭据等。在 Auto/Confirm 下用于强制或提升人工审批；在 Yolo 下明确跳过。
 - **工作区文件写入**：`create_file` 与 `apply_patch` 在资源计划确认路径位于 workspace、diff 有界且没有 danger 信号时，Auto 可由确定性策略直接放行；`delete_file`、敏感路径、VCS 元数据路径和用户记住的 review 规则仍需人工审批。
+- **Session scratch 写入**：`create_file/apply_patch/delete_file` 对当前 Session `scratch` 的操作在 Auto、Confirm 与 Yolo 中免审批；Readonly 仍不暴露写工具。scratch 变更不产生 Git/项目 Diff、durable FileChange 或分支回滚记录，`artifacts` 永远拒绝内置写工具。
 - **常规开发命令**不是确定性放行规则：例如 `go mod tidy`、`npm install`、`pip install -r requirements.txt` 有副作用但通常可由 Auto 审批模型判为 safe；是否放行取决于当次参数、cwd、路径、网络/脚本行为和风险信号。
 
 命令匹配只能作为风险信号，不能宣称能完整解析 PowerShell/cmd/bash 的所有转义、别名、脚本和子进程行为。
 
 ### 3.4 路径安全
 
-文件工具在执行前和打开文件后都需验证规范化路径/真实路径，阻止 `../`、绝对路径越界、符号链接和 junction 绕过。新建文件需验证最近已存在父目录的真实路径，并使用避免跟随符号链接的打开策略。
+root-aware `PathGuard` 把相对路径固定解析到 workspace；绝对路径只允许位于 workspace 或当前 Session temp。`read_file/list_dir/glob/grep` 可读两根，内置写工具只允许 workspace 或 `scratch`。执行前和打开后都需验证规范化/真实路径，阻止 `../`、绝对路径越界、符号链接、junction 与 TOCTOU 绕过；新建文件需验证最近已存在父目录并使用避免跟随符号链接的打开策略。
 
-命令类和终端类只能约束初始 `cwd`；没有 OS sandbox 时不能承诺进程无法访问工作区外路径。
+`run_command.cwd` 与 `terminal_open.cwd` 可位于 workspace 或 Session temp。命令类和终端类只能约束初始 `cwd`；Shell 本身仍是宿主权限进程，没有 OS sandbox 时不能承诺其无法访问或修改其他路径，包括 application-owned artifacts。
 
 ### 3.5 凭据存储
 
@@ -463,7 +480,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 ### 4.2 终端面板
 
 - 内嵌终端组件，订阅 PTY 原始流，**人类可观察、可输入**。
-- 支持多终端（`terminal_list` 对应多个 tab/面板）。
+- 支持多终端；Renderer 通过保留的 Terminal IPC 列举并映射为多个 tab/面板。
 - ANSI 着色渲染。
 - 对话输入区位于对话区内部，只占中间对话工作列宽度，不跨项目侧栏或右侧 Artifact 侧栏。
 - Terminal 位于完整对话区之后、对话输入区下方的可调整底部面板，只占对话工作列宽度，不出现在对话输入区或右侧 Artifact 侧栏。
@@ -498,13 +515,13 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 
 ### 4.7 Agents 设置
 
-- Agents 设置页提供 Subagent 功能开关和 worker timeout，沿用设置页 600 ms 自动保存及显式立即保存入口。
-- 开关默认关闭；timeout 默认 30 分钟，输入以分钟展示并限制为 1–1,440，从下一次主 Run 生效。页面不提供全局 Run、workspace writer 或单个 Swarm 的并发上限。
+- Agents 设置页提供 Subagent 功能开关、worker timeout 和 `maxSubagents`，沿用设置页 600 ms 自动保存及显式立即保存入口；按 Naive UI 文档复用 `NInputNumber` 与既有表单组合，不新增手写控件。
+- 开关默认关闭；timeout 默认 30 分钟，输入以分钟展示并限制为 1–1,440；`maxSubagents` 默认 32、范围 1–32。两者从下一次主 Run 生效，降低容量不会取消存量。页面不提供全局 Run、workspace writer 或单个 Swarm 独立并发上限。
 - 页面必须提示启用后会产生额外 Provider 请求和费用。
 - 同页模型池小节显式原子保存完整 entry 数组；以 `Provider → model → reasoning` 穿梭树选择精确 route，并只读展示 Provider 模型的能力标注。模型池本身不配置并发或 Agent 数量。
 - Artifact 侧栏提供只读 Agents Tab。根列表展示普通 Subagent 与 Swarm Job；Swarm 展开后按声明顺序嵌套 child Agent。根与 child 都只能由用户手动展开，不因新任务、状态变化或首次打开自动展开。
 - 活跃数量徽标统计实际 active leaf Agent，不把 Swarm root 重复计数。详情只展示运行时间、工具调用次数、状态、模型、usage、Swarm Agent 计数和可见 Assistant 消息；不展示 reasoning、完整工具轨迹、隐藏 Session ID、prompt harness、route 或 Provider continuation。
-- 当前不提供自定义 child 工具 ID 列表、取消按钮、可继续聊天的子任务页或隐藏 Session 入口；主 Agent 通过 `toolAccess` 在只读与继承父权限之间选择。
+- 当前不提供 Agents 面板取消按钮、自定义 child 工具 ID 列表、可继续聊天的子任务页或隐藏 Session 入口；主 Agent 可用 `background_cancel`，并通过 `toolAccess` 在只读与继承父权限之间选择。
 
 ---
 
@@ -559,7 +576,8 @@ session.end     { reason, ts }
 ### 5.4 Headless 运行输出
 
 - 内部 Headless host 必须复用桌面端唯一 Agent Runtime 组装入口，固定 Yolo 且不增加、删除或替换模型可见工具。
-- Headless config v4 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs`，并迁移 v1–v3 输入；Runtime Identity v5 记录开关、timeout 和 `swarmsEnabled = false`，并从 tool 名称/hash 排除 `swarm_run`。普通 child execution 仍使用相同 live workspace、隐藏 Session、Tool profile 和 usage 归属。
+- Headless config v5 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs/maxSubagents`，并迁移 v1–v4 输入；Runtime Identity v6 记录字节/行数 Tool 输出预算、worker timeout、`maxSubagents` 和 `swarmsEnabled = false`，移除 token 单结果预算，并从 tool 名称/hash 排除 `swarm_run`。Headless 暴露异步 `subagent_run` 与全部 `background_*`；普通 child execution 仍使用相同 live workspace、隐藏 Session、Tool profile 和 usage 归属。
+- 每次 Headless 任务把 Session temp 放在调用者显式 artifacts 目录下；主流程结束时取消未等待的后台任务，已经生成的文件由调用者管理，不执行 Desktop 24 小时清理。
 - stdout 只允许版本化 JSONL；Operational Log 独立写入 artifact 目录且不得混入 stdout；host 诊断写 stderr；最终 `result.json` 原子写入 workspace 外的 artifacts 目录并返回运行日志目录。
 - Provider 凭据只能由受信任配置声明的环境变量名称解析，凭据值不得进入配置回包、JSONL、trace、patch 或子进程环境。
 - result 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计、trace 和 patch 路径。`completed` 只表示 Agent run 正常结束，不替代外部业务验收。
@@ -600,12 +618,12 @@ session.end     { reason, ts }
 
 | 维度         | 要求                                                                                                                                     |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **可中断**   | 任意 LLM 流与当前工具执行可被用户中止，不残留无主子进程；会话所属 PTY 按既定生命周期保留或关闭                                           |
+| **可中断**   | 任意前台 LLM 流与当前工具执行可被用户中止；已 durable 启动的后台任务按 Session 生命周期保留，并可显式取消/等待，退出时统一收敛            |
 | **安全**     | 文件路径硬边界 + 分层权限策略 + IPC 隔离 + safeStorage，见 §3                                                                            |
 | **可扩展**   | 新增工具 = 注册一个 schema + handler；新增 Provider = 实现 `compile/stream` + factory/config type                                        |
 | **桌面分发** | electron-builder 打包 Windows（首要），macOS/Linux 后续                                                                                  |
 | **配置化**   | 模型、Provider、权限模式、调试日志开关、Skills 开关和用户策略均可配置                                                                    |
-| **资源有界** | 工具输出、日志大小、可选循环轮数、PTY scrollback、单个 Swarm 参数和结果均有防御性上限；不以产品级 Run/workspace 并发上限替代具体资源保护 |
+| **资源有界** | 模型可见工具输出、可选循环轮数、PTY scrollback、Session active leaf、单个 Swarm 参数均有防御性上限；完整 Session artifacts 不设磁盘配额，由 24 小时清理和失败显式化管理 |
 | **失败隔离** | Provider、工具、日志失败转成结构化事件，不得因未捕获异常直接打崩主窗口                                                                   |
 | **契约演进** | IPC、日志、配置和 Provider Continuation Envelope 均带版本，可做向后兼容迁移                                                              |
 
@@ -616,7 +634,7 @@ session.end     { reason, ts }
 **纳入 MVP：**
 
 - DeepSeek Provider（含 reasoning 明文回传）
-- 工具集：文件（read/create/apply_patch）、检索（list/glob/grep）、命令（run_command/delay）、终端（open/send/read/list/close）、**skills（read_skill + 摘要注入 + 三种安装入口）**
+- 工具集：文件（streaming read/create/apply_patch/delete）、检索（list/glob/grep）、命令（run_command/delay）、终端（open/send）、后台任务（wait/list/cancel）、**skills（read_skill + 摘要注入 + 三种安装入口）**
 - 四档权限模式 + 双模型审批（审批模型可先用 DeepSeek 小模型）
 - 执行不变量 + 可扩展风险黑名单 + 确定性策略
 - Chat UI（Naive UI，流式 + Markdown + 工具可视化）
@@ -626,7 +644,7 @@ session.end     { reason, ts }
 - JSONL 完整调试 trace（默认关闭）+ 离线回放引擎 + cache usage/时延统计
 - IPC 白名单 API、sender/payload 校验、CSP 与安全导航策略
 - 上下文/输出预算与取消、超时、进程树清理
-- 默认关闭的只读 `subagent_run`、实时 workspace/Git 读取、隐藏 durable child Session 与取消/usage 归属
+- 默认关闭的异步 `subagent_run`、实时 workspace/Git 读取、共享 Session temp、隐藏 durable child Session 与取消/usage 归属
 - 插件钩子点（埋点，无加载器）
 
 **MVP 之后：**

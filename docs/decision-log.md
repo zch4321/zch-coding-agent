@@ -323,3 +323,13 @@
 - TTL 与成本：使用默认 5 分钟 TTL，不发送 `ttl: '1h'`。一小时缓存写入价格高于默认缓存写入，不能在没有用户成本选择的情况下自动升级；命中会刷新默认缓存有效期。
 - 断点语义：采用 Anthropic 自动缓存，让断点随对话推进到最后一个可缓存 block，不在 canonical history 或 Tool Schema 中写入 Provider-only marker。Provider-neutral history、route identity 和其他 Provider request 均不改变。
 - 观测语义：首次写入的 `cache_creation_input_tokens` 继续计入 miss，只有 `cache_read_input_tokens` 计入 hit；短于模型门槛、前缀变化、TTL 过期、实际模型/网关路由变化或网关不支持时允许保持零命中，不由 Application 补值。
+
+## 2026-08-28 — Agent 与 Terminal 统一为可留档的 Session 后台任务
+
+- 状态：已采纳并实现；取代 2026-08-09/08-26 中 Subagent/Swarm Tool 等待最终聚合结果、父 Run 取消传播和固定 Swarm 32 上限的现行部分，也关闭 `open-design-questions.md` 中 `terminal_read` 投影问题。历史条目继续记录当时边界。
+- 异步契约：`subagent_run/swarm_run` 在 durable identity、原子容量预留和初始 artifact 成功尝试后立即返回 `{ target, status, artifactPath }`；相同 parent Session/Run/call + 参数 hash 幂等复用 handle，参数冲突失败。后台 execution 不再绑定父 Run AbortSignal；`background_wait/list/cancel` 统一管理 Subagent、Swarm 和 Terminal，child catalog 排除全部递归/后台编排工具。
+- 容量契约：AppConfig v25 新增 `subagents.maxSubagents`（默认 32、范围 1–32），按公开 Session 的 `queued/preparing/running` leaf 计数，Swarm root 不计。SQLite transaction 原子预留整个 start；容量不足不创建部分 Job，终态释放，降低设置不取消存量。Swarm Provider schema 使用 Run 冻结值，Backend 复核跨 Job 剩余容量。
+- 临时工作区：每个公开 Session 在 OS temp/profile hash/Session hash 下拥有权限 `0700/0600` 的真实目录，主 Agent 与 hidden child 共享。`artifacts` 由应用写完整输出副本，`scratch` 可由内置文件工具免审批写入且不产生 Git/FileChange/rewind；相对路径仍属于 workspace，绝对路径由双根 PathGuard 校验。Shell 环境增加三个 `ZCH_SESSION_*` 变量但仍是宿主权限进程，不是 OS sandbox；Backend/SQLite 状态永远比可修改 artifact 权威。
+- 生命周期：普通退出和归档保留 temp，Desktop 启动清理最后使用超过 24 小时的精确 Session 目录，永久删除立即清理。页面切换、context unload、父 Run 结束/中断、retry/edit/rewind 不取消后台任务；archive/delete/project delete/app quit 先阻止新任务、级联取消并等待收敛。重启把遗留 active Agent execution 标为 interrupted，不恢复 PTY。
+- Terminal 契约：Provider catalog 删除 `terminal_read/list/close`，Renderer IPC 保留。`terminal_open` 在 spawn 前创建跨 chunk ANSI sanitizer 驱动的无 ANSI 追加日志并返回 background target；`terminal_send` 默认等待 1 秒，优先返回发送前 cursor 后增量，否则返回 20 行/8 KiB tail。模型用 background 工具检查/取消状态，并用流式 `read_file` 分页读取完整日志。
+- 输出契约：Run 冻结的模型可见 Tool Result 统一限制为默认 256 KiB/500 行，作用于 projector 后正文；paged/passthrough 工具自行保证 continuation。AppConfig v25 删除 token/read 重复预算，Headless v5 与 Runtime Identity v6 记录 bytes/lines/worker timeout/`maxSubagents`，SQLite v10 只增加 active leaf 查询索引。Command/Terminal/Subagent/Swarm 永久尝试留档，Fetch/Search 保存已获取结果，MCP 超过统一阈值才落完整 JSON；捕获失败显式返回 unavailable/error。

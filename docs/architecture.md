@@ -65,11 +65,12 @@ SQLite
 
 | 类别                      | 所有者           | 是否落盘 | 示例                                                                                   |
 | ------------------------- | ---------------- | -------- | -------------------------------------------------------------------------------------- |
-| Durable application state | backend + SQLite | 是       | Projects、Session metadata、完整 messages、Goal/Plan、有界 FileChanges/revert payloads |
-| Ephemeral execution state | backend memory   | 否       | active Run、stream buffer、AbortController、pending approval、PTY/MCP connection       |
-| UI-only state             | renderer         | 否       | draft、draft attachments、IME composition、scroll、panel、selection                    |
+| Durable application state | backend + SQLite | 是       | Projects、Session metadata/messages、Goal/Plan、FileChanges、Subagent/Swarm execution |
+| Ephemeral execution state | backend memory   | 否       | active Run、stream buffer、AbortController、pending approval、真实 PTY/MCP connection |
+| Session artifact state    | backend + OS temp | 独立文件 | Terminal/Command/Agent/Network 输出副本与 model-writable scratch                     |
+| UI-only state             | renderer         | 否       | draft、draft attachments、IME composition、scroll、panel、selection                  |
 
-“Backend authoritative”不等于“所有 backend 状态必须落盘”。只有应用重启后仍应存在、并参与后续模型历史或产品展示的完整记录才进入 SQLite。
+“Backend authoritative”不等于“所有 backend 状态必须落盘”。只有应用重启后仍应存在、并参与后续模型历史或产品展示的完整记录才进入 SQLite。Session artifact 是便于模型分页读取的输出副本，可能过期或被宿主 Shell 改写，不能覆盖 SQLite execution 或 PTY ownership 的权威状态。
 
 ### 2.3 明确允许丢失的状态
 
@@ -240,6 +241,8 @@ Session 保存：
 - 当前 Goal/Plan。
 - fork metadata。
 - `revision` 和 `lastSeq`。
+
+每个公开 Session 还在 OS temp 下映射一个按应用 profile hash 与 Session hash 确定的私有目录；它不属于 `SessionRecord`，hidden child 通过 owner Session 共享该目录。
 
 ### 4.3 Message
 
@@ -637,13 +640,15 @@ Provider 实现保持扁平：`DeepSeekProvider`、`GenericChatCompletionsProvid
 
 S3 backend foundation 在 AppConfig v16 增加默认空的根 `modelPool`；v17 将 pool entry 的 reasoning 与全局六档枚举统一；v18 删除 entry 中重复的 capability；v19 再删除从未执行的 per-route `maxParallel`；v20 不改变模型池结构，v21 将其收拢为 `models.modelPool`，v22 只迁移模型角色 reasoning 而不改变 pool。模型池 entry 只保存稳定 ID、enabled 和 Provider/model/reasoning，不保存能力等级、并发配额、Provider revision、API key 或 credential reference；能力由对应 Provider 的 `modelOverrides[model].capability` 唯一决定，revision 只作为 `config:set(model-pool)` 的 optimistic concurrency 输入。保存路径先规范化完整数组，再通过共享静态路由规则与能力标注校验 enabled entry 并原子写盘；Provider 删除、模型移除、能力标注移除、reasoning annotation 变为不兼容和显式清凭据会在同一配置写入中禁用引用项，恢复不自动启用。启动/reload 修复 enabled 的静态不兼容或无能力标注引用，环境凭据暂时缺失仍留给 route freeze 显式失败。Renderer 的 `model-pool-settings` Pinia store 独立拥有 entry 草稿、已保存签名和保存状态；Models 设置页引用 Provider store 的公开目录，用 Naive UI Transfer/Tree 把候选投影为 `Provider → model → reasoning` 穿梭树，不复制 Provider 表单状态。叶节点使用 Provider/model/reasoning 三元组编码，因此同一模型的不同 reasoning 是可同时选择的精确 route；UI 不执行 fallback。最低 reasoning 门槛只隐藏左侧未选择候选，已选 route 始终保留在右侧，不进入 AppConfig 或调度策略。用户显式保存时发送一次完整 `config:set(model-pool)`；Provider 写入返回的自动修复配置仅在模型池草稿干净时回填，dirty 草稿保留并提示冲突检查。
 
-Model Pool allocator 是不含 Agent task/name 的纯函数：freezer 先从同一 PublicConfig 快照把 enabled entry 与 Provider 模型能力标注组合为不持久化的 runtime candidate，allocator 再消费 candidate 与能力需求序列，让所有 `actualCapability >= requiredCapability` 的模型参与分配。它按声明顺序先 round-robin `Provider + model`，再轮询选中模型的精确 reasoning route，因此同一模型选择更多 reasoning 叶节点不会获得更高权重；符合要求的模型少于需求数时自然复用，cursor 不跨调用保存。freezer 计算覆盖全部 enabled candidate、派生能力与相应 Provider revision 的顺序敏感 SHA-256 digest，按 allocator 结果对每个唯一 entry 只解析一次 main/compression pair，并在返回前复核所有 digest Provider revision。backend-private prepared plan 保留 `ResolvedModelRoute`/API key；可序列化 safe snapshot v2 只保留 assignment 元数据和安全 route，不含 per-route 并发字段。缺少能力或能力标注在解析凭据前整体失败；已选 entry 不可用或 revision 竞态不会触发 fallback/reassignment。当前没有生产调用者，`subagent_run` 仍继承父 route。
+Model Pool allocator 是不含 Agent task/name 的纯函数：freezer 先从同一 PublicConfig 快照把 enabled entry 与 Provider 模型能力标注组合为不持久化的 runtime candidate，allocator 再消费 candidate 与能力需求序列，让所有 `actualCapability >= requiredCapability` 的模型参与分配。它按声明顺序先 round-robin `Provider + model`，再轮询选中模型的精确 reasoning route，因此同一模型选择更多 reasoning 叶节点不会获得更高权重；符合要求的模型少于需求数时自然复用，cursor 不跨调用保存。freezer 计算覆盖全部 enabled candidate、派生能力与相应 Provider revision 的顺序敏感 SHA-256 digest，按 allocator 结果对每个唯一 entry 只解析一次 main/compression pair，并在返回前复核所有 digest Provider revision。backend-private prepared plan 保留 `ResolvedModelRoute`/API key；可序列化 safe snapshot v2 只保留 assignment 元数据和安全 route，不含 per-route 并发字段。缺少能力或能力标注在解析凭据前整体失败；已选 entry 不可用或 revision 竞态不会触发 fallback/reassignment。Desktop Swarm 使用该 prepared plan；standalone `subagent_run` 仍继承父 route。
 
 模型路由的静态兼容性由 `shared/model-route.ts` 中的 process-neutral helper 统一解释：Provider 必须存在、模型 ID 非空且位于 `enabledModelIds`，显式选择的 reasoning 必须属于模型标注的 `reasoningEfforts`；未标注模型仍视为支持全部六档。Renderer 的角色草稿预检查、辅助角色持久化校验、Provider 删除 fallback 和运行时 route resolver 都消费同一结果及结构化失败原因。全局主模型角色是新对话偏好而非强制修复不变量：它因模型删除、停用或标注变化而失效时，新对话的 Provider/模型选择保持为空并禁用发送，等待用户显式重新选择；已有 Session 不受影响。该 helper 不检查凭据、Endpoint 安全性或 Provider 实时可用性，这些仍属于运行时边界。
 
 Renderer 的运行限制表单以单列分节展示，`autoCompactTriggerPercent` 明确显示 `%` 单位。表单变更在 600ms 静默期后调用 versioned `config:set(limits)`；store 对发送中的快照签名，并在请求期间又有编辑时继续保存最新快照，避免用旧响应覆盖新输入。顶部按钮复用同一 action，用于立即提交和错误重试。
 
-每个工具结果的模型投影独立受默认 64K token 上限保护，不再维护跨 Tool batch、Provider step 或整个 Run 累计的工具结果预算；通用工具输出与 `read_file` 内容边界为 128 KiB。`read_file` 默认/最多扫描 10,000 行，最终仍由字节与保守 token 估算先到者截断。执行器先保留独立 byte bound，模型 token 预算随后只计算 canonical projection，不再计算内部结果信封。完整 Provider 请求继续受冻结模型 profile 的 prompt budget 与自动压缩约束。AppConfig v14 从合法 v9–v13 配置删除退役的 `maxToolTokensPerRun`，其余限制保持既有迁移语义。
+Run 开始时冻结 `maxToolOutputBytes/maxToolOutputLines`，默认 256 KiB/500 行。Tool executor 先产生完整内部结果并运行 canonical projector；`modelOutputPolicy = bounded` 的投影随后按 UTF-8 字节和逻辑行保留头部，在限制内加入 `byteLimitExceeded/lineLimitExceeded/totalBytes/totalLines` 与发现到的 artifact/continuation 路径。`paged` 工具（当前 `read_file/background_list`）自行生成准确 cursor，通用 limiter 不再修改；`passthrough` 当前只用于已有 256 KiB 源文件上限的 `read_skill`，正文不受 500 行限制。不再维护 `maxToolResultTokens`、`readFileOutputBytes` 或跨 Tool batch/Run 的累计结果预算；token estimator 继续用于 prompt 诊断和其他明确的 token 边界。完整 Provider 请求仍受冻结模型 profile 的 prompt budget 与自动压缩约束。
+
+`read_file` 使用文件句柄与固定大小 chunk 真正流式分页。`startLine`、opaque `cursor` 与 `tail` 在普通 object schema 中可选，并由 executor 校验互斥；cursor 绑定规范化路径、`dev/ino/birthtime` 身份、字节 offset、逻辑行号和签发时大小。文件替换或缩短返回 `RESOURCE_CHANGED`；EOF `endCursor` 可在同一文件 append 后继续。读取器在 UTF-8 code point 与超长单行中间安全停下，下一页从精确字节位置续读；workspace 文件仍受 `readFileSourceBytes`，Session temp 只受每页模型输出限制。
 
 ProjectModel 与 code intelligence 暂停期间，Session tooling 不注册 `project_*` 或 `code_*`，provider tool catalog 还会无条件过滤这些保留 ID，旧 IPC 调用统一返回 `NOT_AVAILABLE`；因此 Desktop、Headless、main Agent 和 child Agent 都不能启动 Serena 或触发 `.zch` I/O。Provider parser 删除 intent metadata 后，ToolRegistry/executor 在权限与 schema 校验前再次按注册时记录的实际 intent field 清理，防止 `_agent_intent` 序列化泄漏导致偶发 `additionalProperties` 错误。
 
@@ -987,14 +992,16 @@ Application service 通过 `DatabaseService.withTransaction()`：
 
 ### 6.9 Hidden Agent execution
 
-SQLite v5 增加 `subagent_executions` 与 `subagent_sessions`；SQLite v8 把 execution 升级为支持 Swarm root/child 的 schema v2。它们是 backend-private durable execution state，不加入 shared `SessionRecord` 或普通 Session replica：
+SQLite v5 增加 `subagent_executions` 与 `subagent_sessions`；SQLite v8 把 execution 升级为支持 Swarm root/child 的 schema v2，SQLite v10 增加按 `parent_session_id + active leaf status` 的容量查询索引。它们是 backend-private durable execution state，不加入 shared `SessionRecord` 或普通 Session replica：
 
-- root execution 以 `(parent_session_id, parent_run_id, parent_call_id)` 唯一标识一次普通 Subagent 或 Swarm Job，保存 `kind/name`、参数 hash、`queued/preparing/running/terminal` 状态、安全 route snapshot、标准化 usage、有界结果/错误和时间戳。Swarm child 通过 `(parent_execution_id, child_ordinal)` 唯一归属 root；Job root 与全部 queued child 在同一 transaction 创建，避免半个 Job。
+- root execution 以 `(parent_session_id, parent_run_id, parent_call_id)` 唯一标识一次普通 Subagent 或 Swarm Job，保存 `kind/name`、参数 hash、`queued/preparing/running/terminal` 状态、安全 route snapshot、标准化 usage、有界结果/错误和时间戳。Swarm child 通过 `(parent_execution_id, child_ordinal)` 唯一归属 root；Job root 与全部 queued child 在同一 transaction 创建并原子预留 active leaf 容量，避免半个 Job或超额并发。
 - execution 不重复保存 task 明文，也不保存 API key、endpoint、reasoning、trace 路径或 workspace 绝对路径；旧版 nullable `source_identity_json` 列只为数据库兼容保留，新执行不再写入。普通公开查询只分页返回 root，详情查询在校验父 Session 归属后附带有序 child 摘要。
 - `subagent_sessions` 在 child 首条 canonical message commit 时原子记录 hidden Session 与 execution/parent 的归属。公开 Session get/bootstrap/list/search/export 必须排除这些 Session；backend 内部恢复使用显式 private query，不能靠调用方记得过滤。
-- 相同 parent Session/Run/call 与参数 hash 可以直接复用已完成结果；相同调用标识但参数 hash 不同返回冲突，避免无意重复产生 Provider 费用。
+- 相同 parent Session/Run/call 与参数 hash 始终复用同一 execution handle，包括并发 start 与终态 retry；相同调用标识但参数 hash 不同返回冲突，避免无意重复产生 Provider 费用。
 - 应用启动时把遗留 `queued/preparing/running` execution 标记为 `interrupted`；Swarm root 使用有界的 Job interrupted 错误，不恢复 Provider stream，也不自动重试。
 - 删除父 Session 或 Project 时由 foreign key/trigger 级联删除 child Session、execution 和 canonical messages；归档父 Session 时继续保留。
+
+App 启动 Subagent/Swarm 前先提交 execution identity，再创建 artifact 并返回 handle。artifact 捕获失败只设置 `artifactAvailable = false/captureError`，不得回滚已经成功的 durable reservation，也不得把可修改文件当作 lifecycle 状态。旧完成 execution 没有 artifact 时按 unavailable 投影，不做数据库重写。
 
 子 Session 自身仍使用普通 `sessions/messages` schema，从而复用唯一 Message history compiler、Session/Run loop 和 Provider runtime；hidden ownership 是正交关系，不挪用普通 fork 字段。
 
@@ -1406,6 +1413,8 @@ Active Run 开始时解析 immutable `ModelRouteSnapshot` 并保存在 memory；
 7. 每个完整 assistant turn 或完整 tool batch 按 §7.2 写入 SQLite。
 8. 完成、取消或失败后释放 runtime resources。
 
+`subagent_run/swarm_run` 的 Tool body 只等待 durable reservation、容量预留和初始 artifact；返回 background handle 后 execution 不再绑定父 Run AbortSignal。因此第 8 步只释放前台 Run，自身完成/中断不会取消后台 Agent 或 Terminal。页面切换、live context 卸载、retry/edit/rewind 同样不取消；Session/Project archive/delete 与 app dispose 通过独立 quiesce boundary 先阻止新任务、级联取消并最多等待 60 秒，再提交生命周期变更。
+
 用户中断或可恢复的 Provider failure 后，若 durable history 符合 §9.3 的续跑边界，`run:continue` 可以从同一 canonical turn 重新进入第 5 步；streaming 中尚未完成的 Assistant text/reasoning 不会被恢复或伪造。
 
 Durable execution port 对每个 Session 串行 commit。commit 失败时从 SQLite 单次恢复 SessionRecord、active history、next seq、mode/model/Goal/Plan，并清除未提交 request 映射；恢复也失败时 binding 标记为 invalid，当前 Run settle 后强制驱逐。tool-batch commit 失败即使恢复成功也会隔离当前 live binding，避免带着已发生但未落库的副作用继续 React。
@@ -1421,9 +1430,11 @@ Application boundary 保留显式 `ApplicationError`；SQLite/codec 故障归一
 - Session metadata 和完整 messages 从 SQLite 恢复。
 - `inHistory = 1` 的 rows 重建 `CompiledCanonicalHistory`，再由当前 `ModelProvider` 编译 request。
 - 所有上次的 active Run、pending approval、partial text/reasoning 和未完成 tool batch 丢失。
+- SQLite 中遗留的 `queued/preparing/running` Subagent/Swarm execution 标记为 `interrupted`，不自动恢复；真实 PTY 不恢复。
 - 最后一条已提交 user message 可能没有 assistant reply；UI 可以展示为未回答并允许用户重试。
 - 崩溃前已经发生但尚未形成完整 tool batch message 的 workspace side effect 可能保留；系统以下一次实际文件状态为准。
 - 不生成持久化 `interrupted` Run，也不伪造 partial assistant message。
+- Session temp 根启动时清理最后使用时间超过 24 小时的安全目录；较新的 artifact/scratch 保留。路径已过期时 `read_file` 返回 `ARTIFACT_EXPIRED`。
 
 如果只是 renderer reload 而 main process 仍存活，`session:get` 可以附带 backend memory 中的 `ActiveRunPublicSnapshot`，继续展示当前 Run。
 
@@ -1568,6 +1579,7 @@ Renderer 不可以：
 | API keys                                             | Electron safeStorage-backed secret store | backend           |
 | Trace                                                | `userData/traces/*.jsonl`                | backend           |
 | Operational runtime logs                             | `userData/logs/runtime/*.jsonl`          | backend           |
+| Session artifacts/scratch                            | OS temp/profile hash/Session hash        | backend + tools   |
 | Skills                                               | `userData/skills/`                       | backend manager   |
 | ProjectModel                                         | 暂停持久化；目标为 `userData/agent.db`   | backend（迁移后） |
 | Prompt resources                                     | versioned application resources          | backend registry  |
@@ -1588,6 +1600,7 @@ Preload 只暴露冻结 typed API，不暴露 `ipcRenderer`。Command/query/resu
 - sender/frame/origin 与 payload/result schema 校验。
 - secrets 不进入 renderer。
 - workspace path 和 resource ownership 校验。
+- workspace + 当前 Session temp 的 root-aware path guard；application-owned artifacts 与 writable scratch 分离。
 - 子进程环境 allowlist。
 - tool approval、abort 和 bounded output。
 
@@ -1639,7 +1652,7 @@ Trace 不记录 credentials。生产 `TraceEventInput` 不允许 `llm.stream`，
 
 ### 16.1 `run_command` 与 Terminal 的解释器边界
 
-`run_command.process` 始终把 `executable + args[]` 交给 `spawn(..., { shell: false })`。`run_command.shell` 也不使用 Node 的隐式 Shell：Main process 根据当前 AppConfig v24 的 `executionEnvironment.commandShell` 解析受支持 profile，再由 profile adapter 生成明确的 executable、固定启动参数和命令字符串参数，最终仍以 `shell: false` 启动。权限预览和 canonical ToolCall 保留模型提交的原始命令，不暴露 adapter wrapper。
+`run_command.process` 始终把 `executable + args[]` 交给 `spawn(..., { shell: false })`。`run_command.shell` 也不使用 Node 的隐式 Shell：Main process 根据当前 AppConfig v25 的 `executionEnvironment.commandShell` 解析受支持 profile，再由 profile adapter 生成明确的 executable、固定启动参数和命令字符串参数，最终仍以 `shell: false` 启动。权限预览和 canonical ToolCall 保留模型提交的原始命令，不暴露 adapter wrapper。
 
 Windows 发现只扫描 PATH 与有限的系统/安装目录，内置 profile 为 PowerShell 7、Windows PowerShell、CMD、Git Bash 和 Nushell；`auto` 固定选择 PowerShell 7 → Windows PowerShell → CMD。Git Bash 与 Nushell 只在用户显式选择时使用；System32 的旧 `bash.exe` 不会被误识别为 Git Bash。已保存 profile 消失时，解析结果临时回退到 `auto`，通过只读 `command-shell:list` IPC 把实际路径和 fallback 状态提供给设置页，但不改写保存值。WSL 与任意自定义 executable/args 仍属于 M5 后续范围。
 
@@ -1649,7 +1662,32 @@ PowerShell adapter 固定传入 `-ExecutionPolicy Bypass`，并设置 Console �
 
 交互 Terminal 与 `run_command.shell` 共享同一个 `executionEnvironment.commandShell` 配置。`terminal_open` 没有模型可见的 `shell` 参数；TerminalPool 在每次打开时读取当前配置并经 `CommandShellService.resolve()` 解析实际 profile，配置项失效时沿用自动回退且不改写保存值。解析出的 profile `kind = powershell` 时 PTY 固定传入 `-ExecutionPolicy Bypass`，其他 kind 不附加启动参数。设置变更只影响之后打开的 Terminal，已在运行的 Terminal 不重启。
 
-模型可见的 `terminalId` 是进程内全局递增的正整数：应用重启后从 `1` 重新开始，ID 一经分配在当前进程内不复用，启动失败允许留下编号空洞。每个 Session 最多保留 16 个 Terminal（含 opening、running 和已退出但未显式关闭的条目），显式关闭立即释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限。Session 关闭按世代（generation）作废仍在启动中的打开尝试，Pool 释放后拒绝新的打开，两者都不会留下孤儿 PTY。`terminal_list` 按数字 ID 升序返回；不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。旧日志与旧 Tool result 中的字符串 ID 不做迁移。模型侧不再有 `terminal_resize` Tool；Renderer 面板自动 fit 后仍通过 `terminal:resize` IPC 同步 PTY 尺寸，模型无法手动控制虚拟终端尺寸。
+模型可见的 `terminalId` 是进程内全局递增的正整数：应用重启后从 `1` 重新开始，ID 一经分配在当前进程内不复用，启动失败允许留下编号空洞。每个 Session 最多保留 16 个 Terminal（含 opening、running 和已退出但未显式关闭的条目），显式关闭立即释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限。不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。Provider catalog 只保留 `terminal_open/send`，移除 `terminal_read/list/close`；Renderer 的 list/read/close/resize IPC 和多 tab UI 不变。模型把 `terminal_open` 返回的数字 ID 用于 `terminal_send`，把额外 `{ type: 'terminal', id: String(terminalId) }` target 用于 `background_wait/list/cancel`。
+
+TerminalPool 在 spawn PTY 前打开权限为 `0600` 的 `artifacts/terminals/terminal-<id>.log`。raw chunk 一路进入 Renderer/xterm 和原始 scrollback；另一条路经过持久、跨 chunk 的 ANSI sanitizer 进入 model scrollback 与追加式日志，因此 OSC/CSI 分段不会按无状态正则误投影。capture 初始化/追加/close 任一步失败都会更新 backend-owned `artifactAvailable/captureError`。`terminal_send.delayMs` 缺省为 1,000 ms，可显式为 0，最大 60 秒；结果优先返回发送前 cursor 后的增量，否则返回 20 行/8 KiB tail，并始终携带 cursor 和 artifact 状态。
+
+### 16.2 Session 临时工作区与 artifact
+
+Desktop temp 根为 `<os.tmp>/zch-coding-agent/<profile-hash>/<session-hash>/`。`SessionTempService` 只接受单个安全 path segment，创建目录 `0700`、文件 `0600`，以同目录临时文件 + rename 原子写 JSON/text；启动时只清理 `mtime` 超过 24 小时的真实目录，不跟随 symlink。正常退出和归档保留，永久删除 Session 或 Project 后立即删除精确 Session 根；没有磁盘配额。Headless 把对应根放在调用者显式 artifacts 目录下并不运行 Desktop retention。
+
+```text
+<session-temp>/
+├── artifacts/
+│   ├── terminals/terminal-<id>.log
+│   ├── commands/<run+call-key>/{stdout.log,stderr.log,result.json}
+│   ├── subagents/<execution-id>/{result.md,activity.jsonl}
+│   ├── swarms/<execution-id>/manifest.json
+│   ├── fetch/<run+call-key>/result.json
+│   ├── web-search/<run+call-key>.json
+│   └── mcp/<run+call-key>.json
+└── scratch/
+```
+
+Harness 注入真实 root/artifacts/scratch 绝对路径，并给 `run_command` 与 Terminal 环境增加 `ZCH_SESSION_TEMP_DIR/ZCH_SESSION_ARTIFACTS_DIR/ZCH_SESSION_SCRATCH_DIR`，但不覆盖宿主 `TMP/TEMP`。这些动态值不进入 runtime semantic hash，也不生成实时 temp tree。主 Agent 与所有 hidden child 使用公开 owner Session 的同一目录。
+
+`PathGuard` 支持 workspace/session-temp 两个 canonical root：相对路径始终从 workspace 解析，绝对路径必须落入其中之一；打开前后同时检查 lexical/real containment、symlink/junction 与文件身份。read/list/glob/grep 可访问两根；create/apply/delete 只允许 workspace 或 `scratch`，明确拒绝 `artifacts`。scratch mutation 在 Auto/Confirm/Yolo 免审批、Readonly 无写 catalog，且不创建 Git/project diff、FileChange 或 rewind 记录。Command/Terminal `cwd` 可位于两根，但 spawn 的 Shell 是宿主权限进程而非 OS sandbox，可能访问或改写其他路径。
+
+Command/Terminal/Subagent/Swarm 始终尝试完整留档；Fetch/Web Search 保存已获取/规范化结果，MCP 只在模型投影超过 256 KiB 或 500 行时保存规范化 JSON。Backend state 始终权威，文件只作可分页副本；捕获失败返回 `artifactAvailable = false/captureError`，旧路径不存在时 `read_file` 返回 `ARTIFACT_EXPIRED`。
 
 ---
 
@@ -1658,10 +1696,12 @@ PowerShell adapter 固定传入 `-ExecutionPolicy Bypass`，并设置 Console �
 Headless 继续复用唯一 Agent runtime：
 
 - 每次执行使用独立临时 SQLite database。
+- Headless config v5 迁移 v1–v4，支持 `subagents.enabled/workerTimeoutMs/maxSubagents` 与统一输出限制；异步 `subagent_run` 和 `background_wait/list/cancel` 与 Desktop 共用实现，`swarm_run` 仍按宿主能力排除。
+- Session temp 位于显式 Headless artifacts 目录下；主流程结束时取消并收敛未等待的后台任务，已有文件由调用者管理。
 - Desktop 和 Headless fake-provider trajectory 比较 active messages、provider requests、tool results、prompt hashes 和 patch。
 - Headless 产物从 canonical messages、trace 和独立 Operational Log 生成，不依赖 renderer store；stdout JSONL 永不混入文件日志。
 - Run/stream 细节来自 trace，而不是 `runs` table。
-- Runtime identity 固定 source commit/tree、task/config digest、Provider/model、核心预算、prompt/tool hash 和宿主 capability。
+- Runtime Identity v6 固定 source commit/tree、task/config digest、Provider/model、字节/行数 Tool 输出预算、worker timeout、`maxSubagents`、prompt/tool hash 和宿主 capability；不再记录 token 单结果预算。
 
 ---
 
@@ -1674,31 +1714,31 @@ Headless 继续复用唯一 Agent runtime：
 ```text
 parent ToolCall
   → ordered Tool preparation/approval
-  → SubagentExecutionPort.runOne
-  → parent canonical workspace
-  → hidden Session with frozen delegated Tool context + ordinary user_input(task)
-  → existing Session/Run/Provider loop
-  → final assistant text
-  → standard ToolResult { results, meta }
+  → durable execution + atomic Session leaf capacity reservation
+  → initialize artifacts/subagents/<execution-id>/
+  → return BackgroundTaskHandle { target, status, artifactPath }
+  ⇢ detached hidden Session with frozen delegated Tool context
+  ⇢ existing Session/Run/Provider loop on parent workspace + shared Session temp
+  ⇢ append activity.jsonl and atomically write result.md
 ```
 
 主 Run 开始时冻结 `subagents.enabled`；设置热变更从下一个 Run 生效。child 精确复用父 Run 已冻结的 main/compression `ResolvedModelRoute`，包含模型 profile、Provider revision 和仅存在于内存的 credential binding；运行中配置变化不能换模型、reasoning 或 API key。child 不复制父 canonical history，只加载普通基础 harness、用户偏好、当前 workspace 的 AGENTS 和 skill 摘要，随后把 `task` 作为普通 `user_input` 追加。
 
-`SubagentExecutionPort` 是 Tool Registry 与 application/runtime 之间的 backend-private 注入边界；延迟 bridge 解除 runtime 构造环。Desktop 与 Headless 都从 `createBackendRuntime` 注入同一个实现，不创建第二套 Provider loop。
+`SubagentExecutionPort` 是 Tool Registry 与 application/runtime 之间的 backend-private 注入边界；延迟 bridge 解除 runtime 构造环。Desktop 与 Headless 都从 `createBackendRuntime` 注入同一个实现，不创建第二套 Provider loop。Provider retry 使用相同 Session/Run/call 与参数 hash 时复用同一 handle；参数冲突在任何新费用前失败。
 
 ### 18.2 Tool batch 与 child profile
 
 `ToolDefinition.executionMode` 支持 `parallel | serial`，未声明时 fail-closed 为 `serial`。SessionToolRunner 按 Provider call 顺序切分最大连续 parallel 段，每个 serial Tool 独占一段并成为前后完成屏障。每段先按顺序完成 normalize、MCP resolution、权限/审批、上下文 preflight 和 mutation preparation；parallel 段只并发 Tool body；文件变更提交、输出过滤、事件、插件 after hook 和 canonical Tool Result 再按原 call 顺序完成。单项拒绝、失败或 timeout 不取消兄弟调用，父 Run 取消则中断所有 active body 并为每个 call 补齐终态结果。
 
-内置 parallel Tool 包含文件/代码/Git/Project/Skill 读取、`fetch`、`web_search`、`delay`、MCP discovery、`run_command` 和 `subagent_run`；文件/Git/Project 写入、实际 MCP、全部 `terminal_*` 以及未知 Tool 为 serial。`run_command` 是明确例外：同一 parallel 段中的其他读取不得假设其文件副作用已经完成，有依赖的工作必须放到后续 Provider turn。
+内置 parallel Tool 包含文件/代码/Git/Project/Skill 读取、`fetch`、`web_search`、`delay`、MCP discovery、`run_command`、`subagent_run`、`swarm_run`、`background_wait/list`；文件/Git/Project 写入、实际 MCP、`terminal_open/send`、`background_cancel` 以及未知 Tool 为 serial。异步 Agent start 的 Tool body 只覆盖 durable preparation，后台 worker 不占用 Tool batch；`run_command` 仍是明确例外，同一 parallel 段中的其他读取不得假设其文件副作用已经完成。
 
 Workspace 文件发现由一个 backend-only `fast-glob` 枚举器统一：`glob` 直接流式消费匹配文件，JavaScript `grep` fallback 用它筛选 include。枚举器先用 `PathGuard` 固定 directory-relative `cwd`，拒绝绝对、负模式与父目录 traversal，关闭 symlink 跟随，并对每个输出重新验证 real path containment；固定跳过 `node_modules/.git/dist`。调用者读取第 `maxResults + 1` 个匹配判断截断，因此结果上限不再错误地变成扫描上限。`grep` 的正常 backend 是 `@vscode/ripgrep` 分发的原生 ripgrep；项目内 `RipgrepSearcher` 只定位二进制、固定 workspace cwd、构造安全参数、管理取消/子进程并解析有界 `--json` 输出。只有进程级 availability probe 失败时才启用项目内 worker-thread regex fallback；二者的结果条数都用额外一个 match 区分“恰好达到上限”和“确实还有更多”。敏感路径 ingress 不参与文件枚举，独立用 `picomatch` 编译配置 glob；路径分隔符规范化由无匹配语义的公共 helper 提供，旧的手写 glob-to-regexp 实现不再保留。
 
-child Provider catalog 由父 Run 已冻结的可见 catalog 派生。`readonly` 以及只读父 Run 的 `inherit` 只保留无副作用工具；其他 `inherit` 保留父 Run 允许的读取、命令、网络、MCP、文件/Git 写入等工具，并沿用父 Session 的 `auto | confirm | yolo` 权限模式。Goal、Plan、`subagent_run` 和 `swarm_run` 始终排除，防止 child 扩张编排树。实际 executor 继续独立执行注册、schema、权限和路径校验，所以伪造 tool call 不能绕过 catalog。Git 命令使用 `--no-optional-locks`。
+child Provider catalog 由父 Run 已冻结的可见 catalog 派生。`readonly` 以及只读父 Run 的 `inherit` 只保留无副作用工具；其他 `inherit` 保留父 Run 允许的读取、命令、网络、MCP、文件/Git 写入等工具，并沿用父 Session 的 `auto | confirm | yolo` 权限模式。Goal、Plan、`subagent_run`、`swarm_run` 和全部 `background_*` 始终排除，防止 child 扩张或管理编排树。实际 executor 继续独立执行注册、schema、权限和路径校验，所以伪造 tool call 不能绕过 catalog。Git 命令使用 `--no-optional-locks`。
 
 ### 18.3 Live Workspace/Git view
 
-child Session 直接绑定父 Run 已规范化的 workspace path。其 `permissionMode` 为 `readonly` 或父 Session 的冻结模式；只有计算结果为只读时才设置 `readOnlyWorkspace = true`。递归 Agent 与 Goal/Plan 等被排除的调用仍返回 `TOOL_NOT_AVAILABLE`。
+child Session 直接绑定父 Run 已规范化的 workspace path，并通过 `ownerSessionId` 共享父公开 Session 的 temp root。其 `permissionMode` 为 `readonly` 或父 Session 的冻结模式；只有计算结果为只读时才设置 `readOnlyWorkspace = true`。递归 Agent、background 与 Goal/Plan 等被排除的调用仍返回 `TOOL_NOT_AVAILABLE`。
 
 文件与 Git Tool 在真正读取时观察 live workspace；不会复制目录、创建临时 Git repository、bundle、checkpoint 或 refs。serial 写 Tool 与所在前后的 parallel 段不会重叠，但显式 parallel 的 `run_command` 可能修改 workspace，因此与同段 child/read Tool 之间不提供冻结一致性。
 
@@ -1706,26 +1746,27 @@ child Session 直接绑定父 Run 已规范化的 workspace path。其 `permissi
 
 ### 18.4 Child Run、结果与生命周期
 
-child Session 固定 `visibility = 'internal'`，使用委派计算后的权限模式并沿用全局 `limits.maxStepsPerRun`；`0` 仍表示不限步数。Provider 输出沿用冻结模型 profile 的 `maxOutputTokens`，返回父模型时继续经过现有单次 `maxToolResultTokens` 与 Tool byte/token 保护，不增加 Subagent 专属 step/token/result budget。
+child Session 固定 `visibility = 'internal'`，使用委派计算后的权限模式并沿用全局 `limits.maxStepsPerRun`；`0` 仍表示不限步数。Provider 输出沿用冻结模型 profile 的 `maxOutputTokens`，`background_wait` 内联回答经过冻结的 256 KiB/500 行通用限制，不增加 Subagent 专属 step/token/result budget；完整回答另存 `result.md`。
 
-AppConfig/PublicConfig v13 首次引入 Subagent 配置；当前 AppConfig/PublicConfig v24 中该部分的完整结构为：
+AppConfig/PublicConfig v13 首次引入 Subagent 配置；当前 AppConfig/PublicConfig v25 中该部分的完整结构为：
 
 ```ts
 subagents: {
   enabled: boolean // default false
   workerTimeoutMs: number // default 1_800_000, range 1 minute..24 hours
+  maxSubagents: number // default 32, range 1..32
 }
 ```
 
-AppConfig v24 从所有合法 v9–v23 配置迁移并删除 `limits.maxConcurrentRuns` 与 `subagents.maxAgentsPerSwarm`；设置页只保留开关和 timeout。Headless config v3 引入开关与 timeout；v4 迁移 v1–v3 并删除退役的 Run 工具结果预算，外部格式无需迁移并发字段。Runtime Identity v5 的 `swarmsEnabled` 宿主能力位保持不变；当前只生成该 artifact 的 Headless 固定为 `false`，Desktop runtime 支持普通 Swarm Tool。
+AppConfig v25 从 v24 增加 `maxSubagents = 32`；直接从 v19–v23 升级时把旧 `maxAgentsPerSwarm` 保留为 Session 总 leaf 上限。它同时删除 `maxToolResultTokens/readFileOutputBytes`，增加 `maxToolOutputLines = 500`，并只把恰为旧默认的 128 KiB byte limit 升到 256 KiB。Headless config v5 迁移 v1–v4 并增加同样容量/输出字段。Runtime Identity v6 记录字节、行数、worker timeout 与 `maxSubagents`，保留 `swarmsEnabled` 宿主能力位。
 
-内部成功结果为 `{ results: { [name]: finalAssistantText }, meta }`；`meta` 只包含耗时、实际 `providerId/model`、标准化 usage 汇总和模型是否因输出上限截断。reasoning、endpoint、凭据、child Session ID、trace 路径和临时绝对路径不能回传。进入父模型历史时 `subagent_run` projector 只保留 `results[name]` 最终文本，输出上限截断时追加短尾注；Provider/model/usage 留在内部 meta 和统计。只有 reasoning 或缺少最终 assistant text 时明确失败；长度上限结束则保留已有文本并标记 `truncated`。
+内部成功结果仍为 `{ results: { [name]: finalAssistantText }, meta }`；`meta` 只包含耗时、实际 `providerId/model`、标准化 usage 汇总和模型是否因输出上限截断。reasoning、endpoint、凭据、child Session ID 与 trace 路径不能回传。start Tool 只投影 target/status/artifact；终态 `background_wait` 从 durable result 取最终文本并附 `resultPath/activityPath`，Provider/model/usage 留在 execution 统计。只有 reasoning 或缺少最终 assistant text 时明确失败；长度上限结束则保留已有文本并标记 `truncated`。
 
-child stream/tool/domain event 通过去除隐藏 Session identity 的 `AgentExecutionEvent` 投影到 Renderer；其中包括运行状态、流式活动、工具活动、usage 和人工审批。审批决策使用 `parentSessionId + executionId + callId` 定位 active child，再进入同一 ApprovalCoordinator。child 不创建独立 trace capture；标准化 usage 以 `scope = 'subagent'` 和父 Session/Run/call 归属进入现有统计。父 Run 取消、worker timeout、Provider failure、应用 dispose 都通过 AbortSignal/Session interrupt 级联中断，并等待 child Provider/Tool 和 hidden Session handle 完整收敛。
+child stream/tool/domain event 通过去除隐藏 Session identity 的 `AgentExecutionEvent` 投影到 Renderer；其中包括运行状态、流式活动、工具活动、usage 和人工审批。审批决策使用 `parentSessionId + executionId + callId` 定位 active child，再进入同一 ApprovalCoordinator。child 不创建独立 trace capture；标准化 usage 只进入 execution/Agent 统计，不回写可能已结束的父 Run。父 Run completion/cancel/Provider failure 不再级联；worker timeout、显式 background cancel、Session/Project archive/delete 与 app dispose 才通过 execution-owned AbortController 中断并等待 hidden Session 完整收敛。
 
 ### 18.5 Desktop Swarm Job 与模型池调度
 
-`swarm_run` 是满足运行条件的 Desktop 主 Run 的普通 Tool：Subagent 必须已启用，并且模型池至少有一条 enabled route。普通用户消息也能获得该工具；`/swarm <goal>` 仅作为显式请求与目标编排快捷命令，不再授予特殊 capability。child Run、历史重放和 Headless 仍不获得该工具，catalog 与 executor 对伪造调用执行相同检查。Provider 可见 schema 要求有界非空 `sharedContext`，每项 task 包含 `name/task/requiredCapability/agentCount/toolAccess`；`tasks.maxItems`、`agentCount.maximum` 与总数校验使用固定协议上限 32，而不是用户配置。
+`swarm_run` 是满足运行条件的 Desktop 主 Run 的普通 Tool：Subagent 必须已启用，并且模型池至少有一条 enabled route。普通用户消息也能获得该工具；`/swarm <goal>` 仅作为显式请求与目标编排快捷命令，不再授予特殊 capability。child Run、历史重放和 Headless 仍不获得该工具，catalog 与 executor 对伪造调用执行相同检查。Provider 可见 schema 要求有界非空 `sharedContext`，每项 task 包含 `name/task/requiredCapability/agentCount/toolAccess`；`tasks.maxItems`、`agentCount.maximum` 使用本 Run 冻结的 `maxSubagents`，总量与跨 Job 剩余容量由 Backend 再校验。
 
 `/swarm` 的原始斜杠命令作为 visible `user_input` 留在普通对话中；解析器额外生成的 `slash:/swarm` canonical `orchestrator` Prompt 以 `visibility = hidden`、`inHistory = true` 追加。MessageHistoryCompiler 继续把该 Prompt 交给 Provider，Renderer 时间线不投影它。兼容旧数据时不修改 append-only canonical history，而由 Renderer 同样抑制已写为 visible 的 `slash:/swarm` 记录；其他 orchestration 与 interjection 的默认可见性不受影响。Provider-transfer transcript、显式 Conversation 导出与完整 Trace 可以保留内部编排内容。
 
@@ -1735,13 +1776,17 @@ Tool description 明确要求只有用户已经提出 Swarm、多 Agent、并行
 
 `swarm_run({ sharedContext, tasks })` 是 `executionMode = parallel`、`effects = []`、`defaultRisk = low` 的编排 Tool；顶层 `sharedContext` 保存全部 Child 共用的背景、证据、约束、验证结果和输出要求，每项 task 提供唯一安全名称、Child-specific 任务、`light|standard|strong` 最低能力、replica 数量和 `toolAccess`。两部分合起来自包含。编排调用本身不强制人工审批；每个 `inherit` child 实际提出的副作用工具仍按父 Run 的冻结权限模式分别审批。
 
-Coordinator trim 并校验公共上下文和 task 后，把同一 `sharedContext` 与 task 的 `toolAccess` 复制到每个 prepared child spec，再从一次 PublicConfig 快照确定性分配并冻结全部 route。Subagent execution 将 XML-text 转义后的公共部分作为独立 `selected_context` canonical record 注入，将转义后的 `<swarm_task>` 作为该 Child 的 `user_input`；基础 system harness 把前者定义为背景、后者定义为当前委派任务与冻结权限。公共上下文和 task 不拼成不可分割字符串，Agents 详情从 user record 安全解包原始 task。随后 Backend 在一个 SQLite transaction 中创建 Swarm root 和所有 queued child。assignment 失败、配置 revision 竞态或总量超限都发生在任何 child Provider 请求之前；冻结后配置热变更不重分配，失败 child 也不自动切换 Provider 重试。
+Coordinator trim 并校验公共上下文和 task 后，把同一 `sharedContext` 与 task 的 `toolAccess` 复制到每个 prepared child spec，再从一次 PublicConfig 快照确定性分配并冻结全部 route。Subagent execution 将 XML-text 转义后的公共部分作为独立 `selected_context` canonical record 注入，将转义后的 `<swarm_task>` 作为该 Child 的 `user_input`；基础 system harness 把前者定义为背景、后者定义为当前委派任务与冻结权限。公共上下文和 task 不拼成不可分割字符串，Agents 详情从 user record 安全解包原始 task。随后 Backend 在一个 SQLite transaction 中创建 Swarm root 和所有 queued child，并按 parent Session 的 active leaf 原子预留全部容量；assignment、配置 revision 竞态或容量不足都在任何 child Provider 请求前整体失败。成功后先写初始 manifest，再立即返回 handle；冻结后配置热变更不重分配，失败 child 也不自动切换 Provider 重试。
 
-Swarm child 使用 backend-private prepared execution 路径。每个 child 根据 `toolAccess` 从父 Run 冻结工具与权限上下文，随后直接并发创建 hidden Session 并启动 worker timeout，不进入全局 FIFO Run slot。同一父 Run 的多个 Swarm Job、不同父 Run 的 Job 和 sibling child 都可以并发；父取消或应用退出会中断所有 active child。
+Swarm child 使用 backend-private prepared execution 路径。每个 child 根据 `toolAccess` 从父 Run 冻结工具与权限上下文，随后直接并发创建 hidden Session 并启动 worker timeout，不进入全局 FIFO Run slot。同一父 Run 的多个 Swarm Job、不同父 Run 的 Job 和 sibling child 都可以并发；父 Run 结束或取消不影响它们。终态释放 leaf 名额；设置调低不取消存量，新 start 只在当前 active leaf 低于新上限后成功。
 
-父 Tool Result 使用声明顺序稳定的扁平 `results[]`：每个 replica 独立携带 task/agent 序号、终态、成功文本或有界错误、安全 assignment、耗时、usage 与截断标记；`meta` 聚合 Job 状态、数量、耗时和 usage。部分失败保留全部成功与失败项，全部失败返回 Tool error；不会自动重试或启动第二个聚合 Run。结果总 JSON 有 2 MB 上限，超限时公平收窄成功文本与错误正文但不删除条目。相同 root call 与参数 hash 可幂等读取 active/durable 结果，不同参数明确冲突。
+内部 durable result 使用声明顺序稳定的扁平 `results[]`：每个 replica 独立携带 task/agent 序号、终态、成功文本或有界错误、安全 assignment、耗时、usage 与截断标记；`meta` 聚合 Job 状态、数量、耗时和 usage。部分失败保留全部成功与失败项，全部失败记录明确错误；不会自动重试或启动第二个聚合 Run。结果总 JSON 有 2 MB 防御上限，超限时公平收窄成功文本与错误正文但不删除条目。相同 root call 与参数 hash 幂等返回同一 handle，不同参数明确冲突。
+
+模型侧不内联上述聚合 result。`artifacts/swarms/<root-id>/manifest.json` 从 preparation 起保存 `sharedContext/tasks`、每个 child 的 task/agent index、安全 assignment 和 artifact path，状态更新保留这些静态字段并原子追加 counts/status/error。`background_wait` 对 Swarm 只返回 root 状态、child counts 与 `manifestPath`；主 Agent按需用 `read_file` 分页读取 manifest 和 child `result.md/activity.jsonl`。
 
 独立 `agent-execution:event` 只投影安全生命周期和可见活动，不把 hidden Session 伪装成普通 Session。Agents artifact 根列表仅显示普通 Subagent 与 Swarm root；展开 Swarm root 后按 `childOrdinal` 显示 child。两级均使用手动 `NCollapse`，不自动展开；详情只显示运行时间、工具调用数、状态、模型/usage/Agent 计数和可见 Assistant 文本，不展示 reasoning、完整工具轨迹、child Session ID、prompt harness、route 凭据或 Provider continuation。
+
+统一 `BackgroundTaskService` 以 SQLite execution 与 TerminalPool ownership 为权威。`background_wait` 接受混合 target、`any|all` 和 timeout，只在 Agent 终态/PTY exit 或正常超时返回；纯 Agent 最大 300 秒，含 Terminal 最大 60 秒。`background_list` 将 standalone root、Swarm root 与 Terminal 按创建时间合并，使用绑定 filters 的 opaque cursor，并按冻结 Tool 输出 budget 生成不会被通用 limiter 破坏的精确页。`background_cancel` 校验公开 Session ownership、幂等取消 root/child/Terminal，可选等待最多 60 秒；Swarm root 级联 child，单 child 取消触发 root 重汇总。
 
 ---
 
@@ -1775,8 +1820,8 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 - MessageHistoryCompiler 只执行 active-history policy 并生成 `CompiledCanonicalHistory`，不生成 wire `role` 或 Provider DTO。
 - 相同 active MessageRecords、route 和 Provider config 生成确定性的 Provider DTO；不同 Provider 的 golden tests 覆盖 Chat Completions messages、Responses items 和 Anthropic content blocks。
 - Chat Completions 将 assistant tool-call parts 编译为 `tool_calls[]`、将每个 tool-result record 编译为 `role = 'tool'`；Responses 编译为 `function_call/function_call_output` items；Anthropic 把相邻 results 合并为 `user` message 中排在前面的 `tool_result` blocks。
-- Tool Result 默认/自定义投影、projector fallback、JSON-safe normalization、UTF-8 head/tail token bound 和错误文本均有 exact tests；Provider golden 断言 wire 不含内部 envelope 或 part 标签。
-- `read_file/grep/glob/list_dir`、terminal/process/Git、fetch/search/skill、FileChange、MCP 与 Subagent 的模型可见格式使用 exact golden；实时 `tool.completed` 与 reload 后 durable ToolCallCard 显示相同 canonical content。
+- Tool Result 默认/自定义投影、projector fallback、JSON-safe normalization、UTF-8 head byte/line bound、paged/passthrough 豁免和错误文本均有 exact tests；Provider golden 断言 wire 不含内部 envelope 或 part 标签。
+- `read_file` 覆盖大文件、append/EOF cursor、tail、UTF-8、超长单行、替换/缩短和 artifact expiry；`grep/glob/list_dir`、terminal/process/Git、fetch/search/skill、FileChange、MCP 与 Subagent 的模型可见格式使用 exact golden。
 - 新结果持久化 projection marker；active legacy result 在 Provider factory/stream 和 usage 前失败，inactive old epoch 不阻断新 history。
 - Provider 可以将一条 canonical record 展开为多个 wire items，或把多条相邻 canonical records 合并为一条 wire message；不依赖一对一映射。
 - `normalizedReasoningText` 只包含允许展示的非加密文本；缺失投影时 UI 不显示 reasoning，且不能从它重建 continuation。
@@ -1794,11 +1839,14 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 - Tool batch transaction 失败时不留下协议半截。
 - parallel Tool body 确实重叠，serial Tool 形成前后屏障；审批和 Tool Result 始终按原 call 顺序，失败/拒绝/取消仍为每个 call 生成终态结果。
 - `subagent_run` 的 Unicode/保留键/控制字符/长度 schema，普通 `user_input` history、无父历史、冻结 route 继承、配置热变更和最终 assistant text 提取。
-- child Provider catalog 与 executor 双重拒绝 write/process/terminal/network/MCP/code intelligence/递归 Agent Tool；四个 Git read Tool 在非 Git workspace 返回普通错误。
+- child Provider catalog 与 executor 双重拒绝越权 write/process/terminal/network/MCP/code intelligence、递归 Agent Tool 和全部 background Tool；四个 Git read Tool 在非 Git workspace 返回普通错误。
 - live workspace 覆盖 dirty/staged/untracked Git、child 启动后的文件变化、旧 snapshot 目录清理以及不创建新 Git refs。
-- hidden Session 不进入公开 get/bootstrap/list/search/export 或 Renderer events；父/Project 删除级联、归档保留、启动 interrupted、幂等 completed result 与参数冲突均有持久化回归。
-- 父取消、30 分钟默认/自定义 timeout、应用 dispose、Provider failure、全局并发 1 和 slot 耗尽都不遗留 active child handle。
-- fake-provider E2E 验证 child 从实时文件和 Git diff 调查、伪造写调用被拒、结果作为标准 tool role 返回、父 Agent 继续总结，并把 usage 归属到父 Run 的 `subagent` scope。
+- hidden Session 不进入公开 get/bootstrap/list/search/export 或 Renderer events；父/Project 删除级联、归档保留、启动 interrupted、并发/终态幂等 handle 与参数冲突均有持久化回归。
+- 并发 start 的 Session leaf 容量预留必须原子；Swarm 容量不足不创建部分 root/child，设置调低不取消存量，终态释放名额。
+- 父 Run 完成/取消/Provider failure 后后台 Agent 继续；30 分钟默认/自定义 timeout、显式 cancel、archive/delete/quit 会取消并收敛，usage 不回写已结束父 Run。
+- `background_wait` 覆盖 any/all、混合 target、0/60 秒/5 分钟和正常超时；list 覆盖 filter-bound cursor 与小 byte budget；cancel 覆盖 waitMs、Swarm root/child 和 Terminal。
+- Session temp/PathGuard 覆盖双根绝对路径、symlink/junction、scratch 免审批、Readonly、无 FileChange、环境变量/cwd、24 小时清理、Session/Project 删除和 capture failure。
+- Terminal 覆盖默认 1 秒增量/tail、完整日志、跨 chunk ANSI、spawn/artifact failure，并断言 Provider catalog 不含 `terminal_read/list/close`。
 - Compact 只在完整 turn boundary 修改 `inHistory`，active history 可直接按 seq 重建。
 - Rewind/edit 跨 compact 或 Provider-transition transcript epoch 重建保留前缀；重复 rewind 被拒绝；rewind 后 fork 只复制非 superseded 当前分支并重映射引用与 epoch boundary。
 - Renderer revision gap 触发 Session snapshot。
@@ -1828,9 +1876,9 @@ P0–P13 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路�
 
 P11 Provider Runtime Foundation 与 P12 Generic Responses/Anthropic 已完成。Main 与 auto approver 使用扁平 `ModelProvider.compile/stream`，compact 使用同一实现上的 `compileCompact/compact`；生产实现为互不继承的 `deepseek.chat-completions`、`mimo.chat-completions`、`generic.chat-completions`、`generic.responses` 与 `generic.anthropic`。MiMo 专用实现发送官方 `max_completion_tokens + thinking.enabled/disabled` 字段，并通过 MiMo continuation 完整回传带工具调用轮次的 `reasoning_content`；其所有非关闭 reasoning 档位按供应商能力统一为启用思考。配置、route、continuation 和 compact envelope 统一使用 `providerType`；Google 和其他具体厂商实现继续按实际使用需求独立增加。
 
-P13 Subagent Runtime 的 S1–S4 已完成。默认关闭的 `subagent_run({ name, task, toolAccess })` 复用唯一 Session/Run/Provider loop，以隐藏 Session 直接读取父 Run 的 live workspace；task 是不含父历史的普通 user input。`readonly` 使用无副作用 catalog，`inherit` 使用不高于父 Run 的冻结工具和权限模式；通用 Tool scheduler 允许同批多个 Subagent 与其他 parallel Tool 并发执行，并按原 call 顺序提交结果。S3 Model Pool 已完成配置、Agents 设置、allocator/freezer 与 prepared execution 接入。S4 Desktop Swarm 通过低风险 parallel `swarm_run`、SQLite root/child execution、并发 child 和两级 Agents artifact 完成有界批量委派；`/swarm` 只保留为显式编排快捷命令，Headless Runtime Identity 明确声明不支持 Swarm。不同 Session 和同 workspace 写入不再受产品级并发准入、警告或 writer lock；同一 Session 仍只允许一个 Active Run。递归委派、自定义 child 工具 ID 列表、取消 UI 和完整 child transcript 仍未实现。ProjectModel/Serena/code intelligence 已从生产装配、工具、IPC 可用路径和 Renderer 入口关闭；其 SQLite 迁移及重新启用排在总路线图的 Swarm hardening 之后。
+P13 Subagent Runtime 的 S1–S4 已完成，并扩展为异步 background execution。默认关闭的 `subagent_run({ name, task, toolAccess })` 和 Desktop `swarm_run` 在 durable reservation/artifact 初始化后立即返回 handle；隐藏 Session 继续复用唯一 Run/Provider loop并读取 live workspace 与共享 Session temp。`background_wait/list/cancel` 统一管理 standalone Subagent、Swarm root/child 和 Terminal；父 Run 结束不再取消后台任务，Session/Project 生命周期与 app dispose 负责收敛。Session 级 `maxSubagents` 原子限制 active leaf。`/swarm` 只保留为显式编排快捷命令，Headless Runtime Identity 明确声明不支持 Swarm，但支持异步 Subagent/background tools。递归委派、自定义 child 工具 ID 列表、取消 UI 和可继续聊天的 child 页仍未实现。
 
-Tool Result projection 已统一进入生产主链：完整内部 `ToolResult` 只供安全、trace 和插件使用，模型历史与 `tool.completed` 使用 `model-content.v1` canonical parts。文本密集型内置工具输出紧凑正文，结构化工具保留 JSON value；Chat Completions、Responses 与 Anthropic 共用无 part 外壳的 renderer。旧 active Tool Result 不迁移并明确拒绝续聊。
+Tool Result projection 已统一进入生产主链：完整内部 `ToolResult` 只供安全、trace 和插件使用，模型历史与 `tool.completed` 使用 `model-content.v1` canonical parts。冻结的 256 KiB/500 行 limiter 作用于 projection 后正文；`read_file/background_list` 精确分页，`read_skill` 在 256 KiB 源文件边界内 passthrough。Terminal/Command/Agent/Fetch/Search/MCP 的完整输出按策略写入 Session artifact。旧 active Tool Result 不迁移并明确拒绝续聊。
 
 Renderer 只维护 Project/Session replicas、分页 Message/FileChange cache、每 Session runtime overlay 和 UI-only draft/selection。首次发送前不创建空 Session；所有 durable command response 与 `domain-state:event` 经同一 reconciler 处理 cursor/revision、重复 delivery、缺口和 backend instance 变化。
 
@@ -1844,6 +1892,6 @@ AppConfig v14 会把合法 v9 Provider 配置迁移为 `providerType`，把合�
 
 AppConfig v16 是 model-pool foundation 的冻结边界：Provider reasoning 与 pool entry reasoning 仅允许当时的 `off|high|max`，per-model annotation 尚不存在。AppConfig v17 集成六档 reasoning、annotation 和 approval route 的必填 `reasoning`，仍在每个 pool entry 保存 capability。AppConfig v18 删除重复 capability，调度时只读取 Provider `modelOverrides[model].capability`；AppConfig v19 再删除从未执行的 pool entry `maxParallel`，并在 `subagents` 增加默认 10、范围 1–32 的 `maxAgentsPerSwarm`。AppConfig v20 新增默认 `auto` 的 `executionEnvironment.commandShell`；合法 v9–v19 配置都保留各自可迁移字段并补入该默认值。AppConfig v21 把模型角色统合进 `models` 段：`activeProviderId` 与其 Provider 默认模型成为 `defaultModelProvider/defaultModel`，旧 `approval` 段成为 `auxiliaryModelProvider/auxiliaryModel`，`providers` 与 `modelPool` 平移入 `models`。AppConfig v22 再增加 `defaultModelReasoning/auxiliaryModelReasoning`，并从每个 Provider 删除 `reasoning`：v21→v22 分别把主/辅助角色所引用 Provider 的旧默认档位写入对应角色，从而保持实际请求等级；v9–v20 直接迁移采用相同结果。v9–v20 的旧独立 approval reasoning 已在 v21 决策中丢弃，直接升级到 v22 仍按当时所选 Provider 档位保持 v21 行为。不可用辅助 route 在 reload 修复阶段改写为当前主 route；Provider 不再持有可被角色隐式继承的 reasoning。当时的 Headless 临时内部 AppConfig 使用 v22 结构，外部配置仍为 v4 单 Provider，并把其可选 reasoning 映射到主角色。合法 v9–v15 仍迁移到默认空 pool；合法 v16/v17 保留并规范化 pool route、剥离旧 capability 与 `maxParallel` 后迁移；合法 v18 剥离 `maxParallel` 后迁移，合法 v19/v20/v21 原样保留现有 pool 与 Swarm 上限。旧配置中仍 enabled 但对应 Provider 模型没有 capability annotation 的 entry 会在 ConfigStore reload 修复阶段被禁用；disabled entry 原样保留供后续修复。v16–v18 pool entry ID 在 trim/NFC 后必须唯一且拒绝控制/格式字符；不符合各自冻结 schema、损坏或更早版本仍执行 reset-only。Runtime Identity v5 记录 `swarmsEnabled = false`，并从 Headless tool 名称/hash 排除 `swarm_run`。SQLite v5 增加 hidden Subagent execution/session ownership，并保留 v4 对历史 route/continuation identity 的原位迁移。SQLite v6 通过表重建把 `sessions.reasoning` 的 CHECK 扩展为六档（`off|low|medium|high|xhigh|max`）；SQLite v7 再重建 `messages`，加入 `conversation_transcript` 与带 `model_route_json` 的 Provider-native `compact_summary`。SQLite v8 重建 `subagent_executions` 为 schema v2，增加 `kind/name/parent_execution_id/child_ordinal`、queued/partial 状态及 root/child 唯一索引，并把旧记录迁为根级 `subagent`。表重建由 runner 暂停外键约束、换表并重建索引，提交前以 `PRAGMA foreign_key_check` 兜底完整性；旧版本应用打开更新数据库会以 `DATABASE_VERSION_TOO_NEW` 明确拒绝。旧 JSONL trace 只在读取时投影而不改写文件。
 
-AppConfig v23 把 v22 的三字段 `logging` 冻结为 legacy boundary，并迁移为 `logging.operational + logging.trace`。旧 `enabled/retentionDays/maxTotalBytes` 完整进入 Trace；Operational 使用 `info/14 天/50 MB` 新默认。AppConfig v24 删除 `limits.maxConcurrentRuns` 和 `subagents.maxAgentsPerSwarm`；v9–v23 各自使用冻结 legacy schema 校验并保留其他配置后迁移。Headless 外部 config 版本不变，构造的内部 AppConfig 使用 v24。
+AppConfig v23 把 v22 的三字段 `logging` 冻结为 legacy boundary，并迁移为 `logging.operational + logging.trace`。旧 `enabled/retentionDays/maxTotalBytes` 完整进入 Trace；Operational 使用 `info/14 天/50 MB` 新默认。AppConfig v24 删除 `limits.maxConcurrentRuns` 和 `subagents.maxAgentsPerSwarm`。AppConfig v25 删除 `maxToolResultTokens/readFileOutputBytes`，增加 `maxToolOutputLines = 500` 和 `maxSubagents`；旧 byte limit 恰为 128 KiB 默认时升至 256 KiB，自定义值保留，v19–v23 的 `maxAgentsPerSwarm` 直接迁为新 Session 容量，v24 使用 32。Headless 外部 config v5 迁移 v1–v4，内部 AppConfig 使用 v25；Runtime Identity v6 移除 token result budget 并增加 bytes/lines/worker timeout/`maxSubagents`。SQLite v10 只增加 active leaf capacity 查询索引，现有 execution/result JSON 不重写。
 
 P3 review 建议、N-3/N-4 和 201+ 数据量的额外 Electron E2E 明确延后，不属于 P10 发布门禁；现有单元/集成测试继续覆盖 201+ Session、Message 和 FileChange 分页。产品路径不再保留双轨、兼容开关或 legacy fallback。
