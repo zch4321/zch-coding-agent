@@ -39,6 +39,7 @@ import {
   writeSessionArtifactText,
   type SessionTempPaths,
 } from '../session-temp/service'
+import type { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
 
 const MAX_ERROR_LENGTH = 65_536
 const OUTPUT_FINISH_REASONS = new Set([
@@ -249,6 +250,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
   readonly #executionState: DurableExecutionStatePort
   readonly #state: SubagentStateService
   readonly #events: RuntimeEventSink
+  readonly #handles: BackgroundAgentHandleRegistry
   readonly #onDiagnostic: DiagnosticSink
   readonly #active = new Map<string, ActiveExecution>()
   readonly #artifacts = new Map<AgentExecutionId, SubagentArtifacts>()
@@ -264,6 +266,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     executionState: DurableExecutionStatePort
     state: SubagentStateService
     events: RuntimeEventSink
+    handles: BackgroundAgentHandleRegistry
     onDiagnostic?: DiagnosticSink
   }) {
     this.#configStore = options.configStore
@@ -272,6 +275,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     this.#executionState = options.executionState
     this.#state = options.state
     this.#events = options.events
+    this.#handles = options.handles
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
@@ -909,7 +913,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     artifacts: SubagentArtifacts,
   ): BackgroundTaskHandle {
     return {
-      target: { type: 'subagent', id: record.id },
+      target: this.#targetFor(record),
       status: record.status,
       artifactAvailable: artifacts.available,
       ...(artifacts.available ? { artifactPath: artifacts.directory } : {}),
@@ -927,7 +931,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     if (activeArtifacts) return this.#artifactHandle(record, activeArtifacts)
     if (!sessionTemp) {
       return {
-        target: { type: 'subagent', id: record.id },
+        target: this.#targetFor(record),
         status: record.status,
         artifactAvailable: false,
         captureError: 'Session temp is unavailable',
@@ -937,17 +941,28 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     try {
       await access(path.join(directory, 'activity.jsonl'))
       return {
-        target: { type: 'subagent', id: record.id },
+        target: this.#targetFor(record),
         status: record.status,
         artifactAvailable: true,
         artifactPath: directory,
       }
     } catch {
       return {
-        target: { type: 'subagent', id: record.id },
+        target: this.#targetFor(record),
         status: record.status,
         artifactAvailable: false,
       }
+    }
+  }
+
+  #targetFor(record: SubagentExecutionRecord): BackgroundTaskHandle['target'] {
+    return {
+      type: 'subagent',
+      id: this.#handles.expose({
+        executionId: record.id,
+        parentSessionId: record.parentSessionId,
+        type: 'subagent',
+      }),
     }
   }
 

@@ -49,7 +49,7 @@ describe('text Tool Result formatters', () => {
         ),
       ),
     ).toBe(
-      '7\talpha\n8\tbeta\n\n[hasMore=true; nextStartLine=9; totalLines=10; lineTruncated=false]',
+      '7\talpha\n8\tbeta\n\n[hasMore=true; nextStartLine=9; totalLines=10]',
     )
     expect(
       rendered(
@@ -62,17 +62,13 @@ describe('text Tool Result formatters', () => {
           result({
             content: '1\tcomplete',
             hasMore: false,
-            startCursor: 'cursor-start',
-            endCursor: 'cursor-end',
+            nextStartLine: 2,
             lineTruncated: false,
-            dataLost: false,
             tailClipped: false,
           }),
         ),
       ),
-    ).toBe(
-      '1\tcomplete\n\n[hasMore=false; endCursor=cursor-end; lineTruncated=false]',
-    )
+    ).toBe('1\tcomplete\n\n[hasMore=false; nextStartLine=2]')
     expect(
       rendered(
         projectGrepResult(
@@ -113,7 +109,7 @@ describe('text Tool Result formatters', () => {
       rendered(
         projectTerminalOpenResult(result({ terminalId: 7, cwd: '/tmp' })),
       ),
-    ).toBe('Opened terminal 7\n\n[target={"type":"terminal","id":"7"}]')
+    ).toBe('Opened terminal 7\n\n[target={"type":"terminal","id":7}]')
     expect(
       rendered(
         projectTerminalReadResult(

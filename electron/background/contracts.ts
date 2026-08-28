@@ -1,4 +1,4 @@
-import type { AgentExecutionId, SessionId } from '../../shared/ids'
+import type { SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { SessionTempPaths } from '../session-temp/service'
 
@@ -6,7 +6,7 @@ export type BackgroundTargetType = 'subagent' | 'swarm' | 'terminal'
 
 export interface BackgroundTarget {
   type: BackgroundTargetType
-  id: string
+  id: number
 }
 
 export interface BackgroundRequestContext {
@@ -54,9 +54,4 @@ export class BackgroundTaskError extends Error {
     super(message)
     this.name = 'BackgroundTaskError'
   }
-}
-
-/** Narrows a validated opaque background target string to an execution ID. */
-export function agentExecutionId(value: string): AgentExecutionId {
-  return value as AgentExecutionId
 }

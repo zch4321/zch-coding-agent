@@ -4,6 +4,7 @@ import path from 'node:path'
 
 export type PathGuardErrorCode =
   | 'INVALID_PATH'
+  | 'INVALID_POSITION'
   | 'PATH_OUTSIDE_WORKSPACE'
   | 'PATH_NOT_FOUND'
   | 'PATH_ALREADY_EXISTS'

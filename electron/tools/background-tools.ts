@@ -15,11 +15,11 @@ const BackgroundTypeSchema = Type.Union([
 const BackgroundTargetSchema = Type.Object(
   {
     type: BackgroundTypeSchema,
-    id: Type.String({
-      minLength: 1,
-      maxLength: 256,
+    id: Type.Integer({
+      minimum: 1,
+      maximum: Number.MAX_SAFE_INTEGER,
       description:
-        'Opaque Agent execution id or decimal Terminal id returned by a start tool.',
+        'Process-local numeric id returned by an Agent or Terminal start tool or by background_list.',
     }),
   },
   { additionalProperties: false },
@@ -180,7 +180,7 @@ export function registerBackgroundTools(
     id: 'background_list',
     executionMode: 'parallel',
     description:
-      'List newest background standalone Subagents, Swarm roots, and Terminals for the current Session. Swarm children are available through the manifest instead of being flattened into this list.',
+      'List newest background standalone Subagents, Swarm roots, and Terminals for the current Session. Swarm root snapshots include numeric targets for their children.',
     inputSchema: ListSchema,
     effects: ['terminal.read'],
     defaultRisk: 'low',

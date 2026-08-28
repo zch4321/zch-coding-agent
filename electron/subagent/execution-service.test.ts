@@ -16,6 +16,7 @@ import {
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import { sessionFixture } from '../persistence/repository-fixtures'
 import { SubagentCapacityError } from '../application/subagent-state-service'
+import { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
 
 type ChildOutcome = {
   status: 'completed' | 'failed' | 'cancelled'
@@ -196,6 +197,7 @@ function fixture(
     executionState: executionState as never,
     state: state as never,
     events: { publishAgentExecution: vi.fn() } as never,
+    handles: new BackgroundAgentHandleRegistry(),
   })
   return {
     service,
@@ -349,7 +351,7 @@ describe('SubagentExecutionService', () => {
       parent(controller.signal),
     )
     expect(handle).toMatchObject({
-      target: { type: 'subagent', id: expect.any(String) },
+      target: { type: 'subagent', id: expect.any(Number) },
     })
     controller.abort(new DOMException('cancelled', 'AbortError'))
     await vi.waitFor(() =>
@@ -358,7 +360,7 @@ describe('SubagentExecutionService', () => {
     await expect(
       cancelled.service.cancel(
         'session:parent' as SessionId,
-        handle.target.id as AgentExecutionId,
+        cancelled.persisted()!.id,
       ),
     ).resolves.toBe(true)
     await vi.waitFor(() =>
@@ -473,7 +475,7 @@ describe('SubagentExecutionService', () => {
     await expect(
       finalized.service.startOne(childSpec(), parent()),
     ).resolves.toMatchObject({
-      target: { type: 'subagent', id: expect.any(String) },
+      target: { type: 'subagent', id: expect.any(Number) },
       status: 'failed',
     })
   })

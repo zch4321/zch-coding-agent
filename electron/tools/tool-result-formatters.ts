@@ -63,25 +63,19 @@ export function projectReadFileResult(
     booleanValue(content.truncated) ||
     result.truncated === true
   const nextStartLine = numberValue(content.nextStartLine)
+  const nextStartCharacter = numberValue(content.nextStartCharacter)
   const totalLines = numberValue(content.totalLines)
-  const endCursor = stringValue(content.endCursor)
-  const nextCursor = stringValue(content.nextCursor)
-  const cursorFields = nextCursor
-    ? [`nextCursor=${nextCursor}`]
-    : endCursor
-      ? [`endCursor=${endCursor}`]
-      : []
-  if (!hasMore && cursorFields.length === 0) {
+  if (!hasMore && nextStartLine === undefined) {
     return textPart(body)
   }
   const fields = [
     `hasMore=${String(hasMore)}`,
-    ...cursorFields,
     ...(nextStartLine === undefined ? [] : [`nextStartLine=${nextStartLine}`]),
+    ...(nextStartCharacter === undefined
+      ? []
+      : [`nextStartCharacter=${nextStartCharacter}`]),
     ...(totalLines === undefined ? [] : [`totalLines=${totalLines}`]),
-    `lineTruncated=${String(booleanValue(content.lineTruncated))}`,
-    ...(booleanValue(content.lineContinued) ? ['lineContinued=true'] : []),
-    ...(booleanValue(content.dataLost) ? ['dataLost=true'] : []),
+    ...(booleanValue(content.lineTruncated) ? ['lineTruncated=true'] : []),
     ...(booleanValue(content.tailClipped) ? ['tailClipped=true'] : []),
   ]
   const footer = `[${fields.join('; ')}]`
@@ -156,7 +150,7 @@ export function projectGrepResult(
   )
 }
 
-/** Projects terminal_open to the only opaque identifier needed by later calls. */
+/** Projects terminal_open to the process-local numeric target used by later calls. */
 export function projectTerminalOpenResult(
   result: SuccessfulToolResult,
 ): ToolModelContentPart[] {
@@ -171,7 +165,7 @@ export function projectTerminalOpenResult(
       [
         ...(terminalId === undefined
           ? []
-          : [`target={"type":"terminal","id":"${terminalId}"}`]),
+          : [`target={"type":"terminal","id":${terminalId}}`]),
         ...(artifactPath ? [`artifactPath=${artifactPath}`] : []),
         ...(content.artifactAvailable === false
           ? [

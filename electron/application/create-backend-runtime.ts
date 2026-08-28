@@ -44,6 +44,7 @@ import {
 } from '../session-temp/service'
 import { BackgroundTaskBridge } from '../background/bridge'
 import { BackgroundTaskService } from '../background/service'
+import { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
 
 type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
@@ -257,6 +258,7 @@ export async function createBackendRuntime(
   const subagentBridge = new SubagentExecutionBridge()
   const swarmBridge = new SwarmExecutionBridge()
   const backgroundBridge = new BackgroundTaskBridge()
+  const backgroundAgentHandles = new BackgroundAgentHandleRegistry()
   let runtime: AgentRuntime | undefined
   let subagentExecution: SubagentExecutionService | undefined
   let swarmCoordinator: SwarmCoordinator | undefined
@@ -325,6 +327,7 @@ export async function createBackendRuntime(
       executionState,
       state: subagentState,
       events: runtime.events,
+      handles: backgroundAgentHandles,
       onDiagnostic: options.onDiagnostic,
     })
     subagentBridge.bind(subagentExecution)
@@ -334,6 +337,7 @@ export async function createBackendRuntime(
       state: subagentState,
       subagents: subagentExecution,
       events: runtime.events,
+      handles: backgroundAgentHandles,
     })
     swarmBridge.bind(swarmCoordinator)
     backgroundBridge.bind(
@@ -342,6 +346,7 @@ export async function createBackendRuntime(
         subagents: subagentExecution,
         swarms: swarmCoordinator,
         terminals: runtime.services.sessions.backgroundTerminalPool(),
+        handles: backgroundAgentHandles,
       }),
     )
     targetState.runs = runs

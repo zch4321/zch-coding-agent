@@ -73,7 +73,7 @@ Provider 生成的参数在记录 `tool.proposed` 和进入权限审批前先规
 
 Provider-neutral Tool Schema 是本地参数校验的权威来源，协议适配不得改写它。Anthropic wire schema 不发送顶层 `oneOf`、`allOf` 或 `anyOf`：当根 schema 明确为 object，且组合分支涉及的同级字段都已在根 `properties` 声明时，Provider 只从发送副本删除这些顶层关键字，继续保留嵌套组合约束；若组合分支依赖根目录未声明字段、非 object 分支或无法解析的 `$ref`，必须在网络调用和计费前报告包含工具名的本地错误，不得静默丢字段或放宽本地执行校验。其他 Provider 保持各自协议编译行为。
 
-Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelled/timeout/truncated`，供安全检查、trace 和插件使用；模型历史不接收该信封。敏感数据过滤后，Tool Registry 将成功正文投影为 canonical `TextPart | JsonPart`，错误投影为统一短文本，再使用 Run 开始时冻结的 `maxToolOutputBytes` 与 `maxToolOutputLines` 限制模型可见结果；默认分别为 256 KiB 与 500 行，不再维护 token 单结果预算或跨调用累计 Tool Result 预算。`bounded` 结果超限时只保留 UTF-8 安全的头部，并在限制内附上触发原因、原始字节/行数和可用的 artifact/continuation 路径；`read_file`、`background_list` 等 `paged` 结果必须自行保证 cursor 完整，不能再被通用 limiter 二次破坏。自定义 projector 必须同步、确定性、无 I/O，异常时回退默认安全投影。
+Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelled/timeout/truncated`，供安全检查、trace 和插件使用；模型历史不接收该信封。敏感数据过滤后，Tool Registry 将成功正文投影为 canonical `TextPart | JsonPart`，错误投影为统一短文本，再使用 Run 开始时冻结的 `maxToolOutputBytes` 与 `maxToolOutputLines` 限制模型可见结果；默认分别为 256 KiB 与 500 行，不再维护 token 单结果预算或跨调用累计 Tool Result 预算。`bounded` 结果超限时只保留 UTF-8 安全的头部，并在限制内附上触发原因、原始字节/行数和可用的 artifact/continuation 路径；`read_file`、`background_list` 等 `paged` 结果必须自行保证 continuation 元数据完整，不能再被通用 limiter 二次破坏。自定义 projector 必须同步、确定性、无 I/O，异常时回退默认安全投影。
 
 Terminal、Command、Subagent 与 Swarm 始终尝试留档。Fetch 与 Web Search 始终保存完整的已获取/规范化结果；MCP 模型投影超过 256 KiB 或 500 行时保存完整规范化 JSON；这些工具的内联结果仍受统一限制。MCP catalog 继续保留 4 MiB、100 页、1,000 tools 的独立发现边界。`read_skill` 源文件上限为 256 KiB，正文完整返回并豁免 500 行限制；其他不可分页结果超限时只有头部和截断元数据。
 
@@ -90,7 +90,7 @@ AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-to
 
 > 设计意图：把常规删除做成独立工具，便于精确展示路径、数量和审批风险。它不能阻止 `run_command` 间接删除文件，因此命令工具仍必须独立经过权限策略，不能把工具拆分误当成 sandbox。
 
-`read_file` 从文件句柄流式读取，不为分页把整个文件载入内存。它支持 `startLine`、opaque `cursor` 或 `tail` 三种互斥定位方式，以及 `lineCount/lineNumbers`；schema 保持普通 object，并在执行期校验互斥关系，避免 Provider 不兼容的顶层组合关键字。结果返回 `startCursor/endCursor/nextCursor/hasMore/dataLost/tailClipped`；即使读到当前 EOF 也返回可保存的 `endCursor`，日志后续 append 后可从该 cursor 继续。cursor 绑定绝对路径与文件身份，文件被替换或缩短时返回 `RESOURCE_CHANGED`；UTF-8 边界和超长单行可无损续读。workspace 文件仍受 `readFileSourceBytes` 总源文件上限，Session temp 文件不受该总量限制，但每页模型正文始终受冻结的 256 KiB/500 行限制。临时 artifact 已清理时返回 `ARTIFACT_EXPIRED`。
+`read_file` 从文件句柄流式读取，不为分页把整个文件载入内存。它支持 1-based `startLine`、可选的 0-based Unicode code-point `startCharacter`、`tail` 以及 `lineCount/lineNumbers`；`tail` 与显式起点互斥。结果始终返回下一次可用的 `nextStartLine`，只有停在超长单行中间时才返回非零 `nextStartCharacter`，因此普通分页只需复制下一行号；EOF 后同一行继续 append 时也能从字符偏移续读。读取器在 UTF-8 code point 边界安全停下，并继续检测一次调用期间的文件替换；跨调用不再维护文件身份 cursor。workspace 文件仍受 `readFileSourceBytes` 总源文件上限，Session temp 文件不受该总量限制，但每页模型正文始终受冻结的 256 KiB/500 行限制。临时 artifact 已清理时返回 `ARTIFACT_EXPIRED`。
 
 `apply_patch` 第一版一次只修改一个已存在的 UTF-8 文本文件，可包含多个 hunk。补丁路径必须是 workspace 相对路径；禁止二进制、rename、mode change、绝对路径和越界路径。为适配模型常见的计数错误，hunk header 的行数和 new-file 行号只作为提示；上下文/删除行仍必须精确匹配，old line number 失效时只有在精确上下文唯一命中时才可应用。审批绑定原文件 hash、规范化补丁 hash 与结果 hash，执行前重新验证。`create_file` 只创建不存在的文件，并会自动创建缺失父目录；覆盖已有文件应使用 `apply_patch`。
 
@@ -133,14 +133,14 @@ AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-to
 
 长生命周期的双向伪终端，**Agent 与人类共享同一个终端流**——人可以观察、也可以在同一个 PTY 上输入。
 
-| 工具                                | 作用                                               | 副作用 | `reason` |
-| ----------------------------------- | -------------------------------------------------- | ------ | -------- |
+| 工具                                | 作用                                                  | 副作用 | `reason` |
+| ----------------------------------- | ----------------------------------------------------- | ------ | -------- |
 | `terminal_open(cwd, opts)`          | 打开新终端，返回 `terminalId`、后台 target 与日志路径 | 有     | **是**   |
-| `terminal_send(id, text, delayMs?)` | 提交终端输入并自动回车，默认等待 1 秒并返回增量/tail | 有     | **是**   |
+| `terminal_send(id, text, delayMs?)` | 提交终端输入并自动回车，默认等待 1 秒并返回增量/tail  | 有     | **是**   |
 
 约定：
 
-- `terminal_open` 在启动 PTY 前创建 `artifacts/terminals/terminal-<id>.log`，并返回 `{ type: "terminal", id: String(terminalId) }` target。应用用跨 chunk 保留状态的 ANSI sanitizer 持续写入无 ANSI、追加式完整日志；Renderer 仍接收同一 PTY 的原始带色流。
+- `terminal_open` 在启动 PTY 前创建 `artifacts/terminals/terminal-<id>.log`，并返回 `{ type: "terminal", id: terminalId }` 数字 target。应用用跨 chunk 保留状态的 ANSI sanitizer 持续写入无 ANSI、追加式完整日志；Renderer 仍接收同一 PTY 的原始带色流。
 - 与 `run_command` 并存：一次性命令用前者；长跑服务、交互式 REPL 或实时观察用 Terminal。每次 `terminal_send` 代表提交一段完整输入，未以换行结束时自动补一次 Enter，已有换行时不重复；`delayMs` 默认 1,000 ms、允许显式为 0、最大 60 秒。返回优先包含发送前 cursor 之后的无 ANSI 增量；没有增量时返回最多 20 行/8 KiB 的短 tail，并始终携带当前 cursor 与 artifact 状态。等待期间取消不会撤回已经写入 PTY 的输入。
 - `terminal_open` 不接受模型提交的 Shell。Main process 在每次打开时读取 `executionEnvironment.commandShell` 并经 CommandShellService 解析实际 profile（与 `run_command.shell` 同一配置）；保存的解释器不可用时回退到自动选择且不改写配置。解析为 PowerShell 时 PTY 固定传入 `-ExecutionPolicy Bypass`；其他 Shell 不附加启动参数。设置变更只影响之后打开的终端，已在运行的终端不重启。
 - `terminalId` 是进程内全局递增的正整数：应用重启后从 1 重新开始；ID 分配后不复用，启动失败可留下编号空洞。每个 Session 最多保留 16 个终端（包括 opening、running 和已退出但未显式关闭的终端），显式关闭后释放名额；并发打开先预留名额，不能越过上限。Provider catalog 不再暴露 `terminal_read/list/close`；模型通过 `background_wait/list/cancel` 管理状态，人类 Terminal UI 继续通过 Renderer IPC 列举、读取和关闭。不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。
@@ -151,15 +151,15 @@ AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-to
 
 `subagent_run` 与 `swarm_run` 是异步启动工具；统一后台工具管理 Agent 与 Terminal：
 
-| 工具                | 作用                                                                 |
-| ------------------- | -------------------------------------------------------------------- |
-| `background_wait`   | 按 `any|all` 等待混合 target 的终态，超时返回全部目标当前快照         |
-| `background_list`   | 分页列出当前 Session 最新的 Subagent root、Swarm root 与 Terminal    |
+| 工具                | 作用                                                                  |
+| ------------------- | --------------------------------------------------------------------- | ----------------------------------------------------- |
+| `background_wait`   | 按 `any                                                               | all` 等待混合 target 的终态，超时返回全部目标当前快照 |
+| `background_list`   | 分页列出当前 Session 最新的 Subagent root、Swarm root 与 Terminal     |
 | `background_cancel` | 幂等取消当前 Session 拥有的 root、Swarm child 或 Terminal，可等待收敛 |
 
-- target 统一为 `{ type: "subagent" | "swarm" | "terminal", id: string }`。`background_wait` 默认 `any`；纯 Agent 默认/最大 5 分钟，包含 Terminal 时整次最多 60 秒，`timeoutMs = 0` 为即时快照。只有 Agent 进入终态或 PTY 退出会唤醒，普通输出/activity 不唤醒；超时不是错误。
-- Subagent 终态快照可内联受全局限制的最终回答，并返回 `resultPath/activityPath`；运行中只返回状态和 activity path。Swarm 只返回状态、child 计数和 `manifestPath`，不内联聚合结果。Terminal 返回状态、exit code、日志路径和当前 cursor。
-- `background_list` 默认混合返回最新 20 个 root/Terminal，支持类型、`active|finished|all`、limit 和绑定查询条件的 opaque cursor；Swarm child 只在 manifest 中展开。`background_cancel.waitMs` 默认 0、最大 60 秒；取消 Swarm root 级联未完成 child，取消单 child 后重新汇总 root。
+- target 统一为 `{ type: "subagent" | "swarm" | "terminal", id: number }`。Subagent/Swarm 共享一个当前应用进程内递增且不复用的 Agent 编号空间；Terminal 遵循相同生命周期但使用独立编号空间，`type` 负责消除同号歧义。两类 ID 都在重启后失效并重新分配；SQLite、Renderer Agents API 与 artifact 目录仍可使用 durable execution UUID，但模型工具不接受它作为操作 target。`background_wait` 默认 `any`；纯 Agent 默认/最大 5 分钟，包含 Terminal 时整次最多 60 秒，`timeoutMs = 0` 为即时快照。只有 Agent 进入终态或 PTY 退出会唤醒，普通输出/activity 不唤醒；超时不是错误。
+- Subagent 终态快照可内联受全局限制的最终回答，并返回 `resultPath/activityPath`；运行中只返回状态和 activity path。Swarm 返回状态、child 计数、每个 child 的数字 target 和 `manifestPath`，不内联聚合结果。Terminal 返回状态、exit code、日志路径和当前 cursor。
+- `background_list` 默认混合返回最新 20 个 root/Terminal，支持类型、`active|finished|all`、limit 和绑定查询条件的 opaque cursor；Swarm child 不作为 root 展平，而随 Swarm 快照返回操作 target，manifest 只保存任务、assignment、路径与 durable 状态，不保存模型操作 ID。`background_cancel.waitMs` 默认 0、最大 60 秒；取消 Swarm root 级联未完成 child，取消单 child 后重新汇总 root。
 - child catalog 始终移除 `subagent_run`、`swarm_run` 和全部 `background_*`，防止递归编排。
 
 ### 2.3 LLM Provider 适配
@@ -333,7 +333,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - child 沿用全局 `maxStepsPerRun`（`0` 表示不限）、模型最大输出和通用 Tool context/output 限制，不增加专属 step/token/result budget。
 - 内部成功结果保存 `results[name]` 最终文本，以及耗时、实际 Provider/model、标准化 usage 和输出上限截断标记；`result.md` 保存完整最终文本，`activity.jsonl` 保存追加式可见活动。`background_wait` 终态快照只内联受全局限制的最终回答并返回两条路径，不得返回 reasoning、endpoint、凭据、child Session ID 或 trace 路径。
 - `workerTimeoutMs` 默认 30 分钟、可配置 1 分钟至 24 小时。父 Run 完成、中断、timeout 或 Provider failure 均不取消已启动 child；应用退出、Session 归档/删除、Project 删除、显式 `background_cancel` 和 worker timeout 才取消并收敛。不存在全局 Run slot 准入或 workspace writer 锁。
-- 相同 parent Session/Run/call 与参数 hash 幂等复用同一 execution handle，包括并发重试和终态重试；参数不同返回冲突。应用重启将遗留 active execution 标记为 `interrupted`，不得自动重试或恢复 stream；调用方丢失 target 时通过 `background_list` 找回。
+- 相同 parent Session/Run/call 与参数 hash 幂等复用同一 durable execution，并在当前进程复用同一数字 target，包括并发重试和终态重试；参数不同返回冲突。应用重启将遗留 active execution 标记为 `interrupted`，不得自动重试或恢复 stream；旧数字 target 随进程失效，调用方通过 `background_list` 为历史 root 获取当前进程的新 target。
 
 模型池与 Desktop Swarm 不改变上述 `subagent_run` route 继承路径。Swarm 使用独立 prepared execution；普通 Subagent、Swarm Job 和 sibling child 均可并发启动。递归委派、Serena/code intelligence、自定义工具 ID 列表或可继续聊天的 child Session UI 仍未实现。后续 hardening 边界见 [`road-map.md`](./road-map.md#2-m2--swarm-hardening)。
 
@@ -360,7 +360,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - Swarm child 在 Job durable identity 创建后直接并发启动 hidden Session 和 worker timeout；不经过全局 FIFO slot。同一父 Run 的 sibling Job、不同父 Run 的 Job 及其 child 都可以并发执行。`swarm_run` 在 root/children transaction、全部 route freeze、容量预留和初始 manifest 完成后立即返回后台 handle，不等待 child。
 - 父 Run 完成或取消不影响 queued/running child。应用退出、Session/Project 生命周期收敛或 `background_cancel` 必须取消 queued child 并中断 active child；取消 root 级联，取消单 child 后重新汇总 root。单 child 失败不取消兄弟且不自动重试；结果按 task 声明顺序和 replica 序号稳定保存，至少一个成功时为 `completed|partial`，全部失败为明确错误。
 - `artifacts/swarms/<execution-id>/manifest.json` 保存 shared context、tasks、安全 assignment、child 路径、状态与计数，并随执行原子更新；Swarm background 快照只返回 manifest 路径，不把可能超过上下文限制的聚合结果内联给主模型。Backend durable execution/result 仍是权威，manifest 可能被 Shell 改写或因清理而缺失。
-- 同一父 Run 可以多次并发调用 `swarm_run`。相同 call ID 与相同参数幂等复用同一 active/durable handle，相同 call ID 参数不一致必须冲突。
+- 同一父 Run 可以多次并发调用 `swarm_run`。相同 call ID 与相同参数幂等复用同一 durable execution 和当前进程 target，相同 call ID 参数不一致必须冲突。
 
 ---
 
@@ -616,16 +616,16 @@ session.end     { reason, ts }
 
 ## 7. 非功能需求
 
-| 维度         | 要求                                                                                                                                     |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **可中断**   | 任意前台 LLM 流与当前工具执行可被用户中止；已 durable 启动的后台任务按 Session 生命周期保留，并可显式取消/等待，退出时统一收敛            |
-| **安全**     | 文件路径硬边界 + 分层权限策略 + IPC 隔离 + safeStorage，见 §3                                                                            |
-| **可扩展**   | 新增工具 = 注册一个 schema + handler；新增 Provider = 实现 `compile/stream` + factory/config type                                        |
-| **桌面分发** | electron-builder 打包 Windows（首要），macOS/Linux 后续                                                                                  |
-| **配置化**   | 模型、Provider、权限模式、调试日志开关、Skills 开关和用户策略均可配置                                                                    |
+| 维度         | 要求                                                                                                                                                                    |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **可中断**   | 任意前台 LLM 流与当前工具执行可被用户中止；已 durable 启动的后台任务按 Session 生命周期保留，并可显式取消/等待，退出时统一收敛                                          |
+| **安全**     | 文件路径硬边界 + 分层权限策略 + IPC 隔离 + safeStorage，见 §3                                                                                                           |
+| **可扩展**   | 新增工具 = 注册一个 schema + handler；新增 Provider = 实现 `compile/stream` + factory/config type                                                                       |
+| **桌面分发** | electron-builder 打包 Windows（首要），macOS/Linux 后续                                                                                                                 |
+| **配置化**   | 模型、Provider、权限模式、调试日志开关、Skills 开关和用户策略均可配置                                                                                                   |
 | **资源有界** | 模型可见工具输出、可选循环轮数、PTY scrollback、Session active leaf、单个 Swarm 参数均有防御性上限；完整 Session artifacts 不设磁盘配额，由 24 小时清理和失败显式化管理 |
-| **失败隔离** | Provider、工具、日志失败转成结构化事件，不得因未捕获异常直接打崩主窗口                                                                   |
-| **契约演进** | IPC、日志、配置和 Provider Continuation Envelope 均带版本，可做向后兼容迁移                                                              |
+| **失败隔离** | Provider、工具、日志失败转成结构化事件，不得因未捕获异常直接打崩主窗口                                                                                                  |
+| **契约演进** | IPC、日志、配置和 Provider Continuation Envelope 均带版本，可做向后兼容迁移                                                                                             |
 
 ---
 

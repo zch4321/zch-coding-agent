@@ -4,6 +4,7 @@ import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentExecutionId, SessionId } from '../../shared/ids'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
+import { BackgroundAgentHandleRegistry } from './agent-handle-registry'
 import { BackgroundTaskService } from './service'
 
 const parentSessionId = 'session:background' as SessionId
@@ -47,8 +48,16 @@ async function fixture() {
     status: 'completed',
     result: { complete: true },
   })
+  const swarmChild = record({
+    id: 'subagent-swarm-child' as AgentExecutionId,
+    kind: 'subagent',
+    name: 'Swarm child',
+    status: 'completed',
+    parentExecutionId: swarm.id,
+    childOrdinal: 0,
+  })
   const records = new Map(
-    [standalone, swarm].map((entry) => [entry.id, entry] as const),
+    [standalone, swarm, swarmChild].map((entry) => [entry.id, entry] as const),
   )
   const activityPath = path.join(
     sessionTemp.artifacts,
@@ -80,6 +89,7 @@ async function fixture() {
       completed: 1,
       failed: 0,
     })),
+    listChildren: vi.fn(async () => [swarmChild]),
     listRoots: vi.fn(async () => ({
       records: [standalone, swarm],
       hasMore: false,
@@ -103,17 +113,31 @@ async function fixture() {
     listBackground: vi.fn(() => [terminal]),
     cancelBackground: cancelTerminal,
   }
+  const handles = new BackgroundAgentHandleRegistry()
+  const standaloneTargetId = handles.expose({
+    executionId: standalone.id,
+    parentSessionId,
+    type: 'subagent',
+  })
+  const swarmTargetId = handles.expose({
+    executionId: swarm.id,
+    parentSessionId,
+    type: 'swarm',
+  })
   const service = new BackgroundTaskService({
     state: state as never,
     subagents: { cancel: cancelSubagent } as never,
     swarms: { cancel: cancelSwarm } as never,
     terminals: terminals as never,
+    handles,
   })
   return {
     service,
     sessionTemp,
     standalone,
+    standaloneTargetId,
     swarm,
+    swarmTargetId,
     cancelSubagent,
     cancelSwarm,
     cancelTerminal,
@@ -128,8 +152,8 @@ describe('BackgroundTaskService', () => {
       sessionTemp: target.sessionTemp,
       signal: new AbortController().signal,
       targets: [
-        { type: 'subagent' as const, id: target.standalone.id },
-        { type: 'swarm' as const, id: target.swarm.id },
+        { type: 'subagent' as const, id: target.standaloneTargetId },
+        { type: 'swarm' as const, id: target.swarmTargetId },
       ],
       timeoutMs: 0,
     }
@@ -154,10 +178,16 @@ describe('BackgroundTaskService', () => {
 
     expect(result).toMatchObject({
       tasks: expect.arrayContaining([
-        expect.objectContaining({ type: 'terminal', id: '7' }),
+        expect.objectContaining({ type: 'terminal', id: 7 }),
         expect.objectContaining({
           type: 'swarm',
+          id: expect.any(Number),
           manifestPath: expect.any(String),
+          children: [
+            expect.objectContaining({
+              target: { type: 'subagent', id: expect.any(Number) },
+            }),
+          ],
         }),
       ]),
       hasMore: true,
@@ -208,14 +238,14 @@ describe('BackgroundTaskService', () => {
       parentSessionId,
       sessionTemp: target.sessionTemp,
       signal: new AbortController().signal,
-      outputLimits: { maxToolOutputBytes: 1_024, maxToolOutputLines: 1 },
+      outputLimits: { maxToolOutputBytes: 512, maxToolOutputLines: 1 },
       status: 'all',
       limit: 20,
     })
 
     expect(
       Buffer.byteLength(JSON.stringify(result), 'utf8'),
-    ).toBeLessThanOrEqual(1_024)
+    ).toBeLessThanOrEqual(512)
     expect(result).toMatchObject({
       hasMore: true,
       nextCursor: expect.any(String),
@@ -229,7 +259,7 @@ describe('BackgroundTaskService', () => {
         parentSessionId,
         sessionTemp: target.sessionTemp,
         signal: new AbortController().signal,
-        target: { type: 'subagent', id: target.standalone.id },
+        target: { type: 'subagent', id: target.standaloneTargetId },
         waitMs: 0,
       }),
     ).resolves.toMatchObject({ cancellationRequested: true })

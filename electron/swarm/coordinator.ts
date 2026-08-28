@@ -48,6 +48,7 @@ import {
   writeSessionArtifactJson,
   type SessionTempPaths,
 } from '../session-temp/service'
+import type { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
 
 const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype'])
 const MAX_SWARM_RESULT_BYTES = 2_000_000
@@ -328,6 +329,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
   readonly #state: SubagentStateService
   readonly #subagents: PreparedSubagentExecutionPort
   readonly #events: RuntimeEventSink
+  readonly #handles: BackgroundAgentHandleRegistry
   readonly #active = new Map<AgentExecutionId, ActiveJob>()
   readonly #starting = new Set<Promise<void>>()
   readonly #artifacts = new Map<AgentExecutionId, SwarmArtifacts>()
@@ -340,12 +342,14 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     state: SubagentStateService
     subagents: PreparedSubagentExecutionPort
     events: RuntimeEventSink
+    handles: BackgroundAgentHandleRegistry
   }) {
     this.#configStore = options.configStore
     this.#manager = options.manager
     this.#state = options.state
     this.#subagents = options.subagents
     this.#events = options.events
+    this.#handles = options.handles
   }
 
   /** Starts one Swarm Job without serializing it against sibling Jobs. */
@@ -764,14 +768,14 @@ export class SwarmCoordinator implements SwarmExecutionPort {
         sessionTemp,
         ['swarms', root.id, 'manifest.json'],
         {
-          schemaVersion: 1,
-          target: { type: 'swarm', id: root.id },
+          schemaVersion: 2,
+          kind: 'swarm',
           status: root.status,
           createdAt: root.createdAt,
           sharedContext: manifestSeed.sharedContext,
           tasks: manifestSeed.tasks,
           children: children.map((child) => ({
-            executionId: child.record.id,
+            childOrdinal: child.record.childOrdinal,
             taskIndex: child.taskIndex,
             agentIndex: child.agentIndex,
             name: child.record.name,
@@ -814,8 +818,8 @@ export class SwarmCoordinator implements SwarmExecutionPort {
         sessionTemp,
         ['swarms', root.id, 'manifest.json'],
         {
-          schemaVersion: 1,
-          target: { type: 'swarm', id: root.id },
+          schemaVersion: 2,
+          kind: 'swarm',
           status: root.status,
           createdAt: root.createdAt,
           updatedAt: root.updatedAt,
@@ -824,7 +828,6 @@ export class SwarmCoordinator implements SwarmExecutionPort {
           sharedContext: artifact.manifestSeed?.sharedContext,
           tasks: artifact.manifestSeed?.tasks,
           children: children.map((child) => ({
-            executionId: child.id,
             childOrdinal: child.childOrdinal,
             taskIndex: childSeeds.get(child.id)?.taskIndex,
             agentIndex: childSeeds.get(child.id)?.agentIndex,
@@ -852,7 +855,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     artifact: SwarmArtifacts,
   ): BackgroundTaskHandle {
     return {
-      target: { type: 'swarm', id: record.id },
+      target: this.#targetFor(record),
       status: record.status,
       artifactAvailable: artifact.available,
       ...(artifact.available ? { artifactPath: artifact.path } : {}),
@@ -868,7 +871,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     if (active) return this.#artifactHandle(record, active)
     if (!sessionTemp) {
       return {
-        target: { type: 'swarm', id: record.id },
+        target: this.#targetFor(record),
         status: record.status,
         artifactAvailable: false,
       }
@@ -882,17 +885,28 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     try {
       await access(manifestPath)
       return {
-        target: { type: 'swarm', id: record.id },
+        target: this.#targetFor(record),
         status: record.status,
         artifactAvailable: true,
         artifactPath: manifestPath,
       }
     } catch {
       return {
-        target: { type: 'swarm', id: record.id },
+        target: this.#targetFor(record),
         status: record.status,
         artifactAvailable: false,
       }
+    }
+  }
+
+  #targetFor(record: SubagentExecutionRecord): BackgroundTaskHandle['target'] {
+    return {
+      type: 'swarm',
+      id: this.#handles.expose({
+        executionId: record.id,
+        parentSessionId: record.parentSessionId,
+        type: 'swarm',
+      }),
     }
   }
 

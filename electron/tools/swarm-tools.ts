@@ -11,7 +11,7 @@ export function registerSwarmTools(
   registry.registerTool({
     id: 'swarm_run',
     description:
-      "Start one background model-pool Swarm and immediately return a durable target handle. Call this only when the user explicitly requests a Swarm, multiple Agents, parallel work, or independent cross-checking. Child Agents receive no parent history, so every task must be self-contained. Put common background and constraints in sharedContext, and give write-capable tasks disjoint ownership. Set toolAccess='readonly' for investigation or toolAccess='inherit' for frozen parent permissions. Use background_wait/list and the manifest artifact to observe completion; read child artifacts for complete results.",
+      "Start one background model-pool Swarm and immediately return a process-local numeric target. Call this only when the user explicitly requests a Swarm, multiple Agents, parallel work, or independent cross-checking. Child Agents receive no parent history, so every task must be self-contained. Put common background and constraints in sharedContext, and give write-capable tasks disjoint ownership. Set toolAccess='readonly' for investigation or toolAccess='inherit' for frozen parent permissions. Use background_wait/list to observe completion and obtain child targets; read the manifest and child artifacts for complete results.",
     inputSchema: SwarmRunArgsSchema,
     executionMode: 'parallel',
     effects: [],

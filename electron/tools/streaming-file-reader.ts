@@ -1,33 +1,21 @@
-import { createHash } from 'node:crypto'
 import { open, stat } from 'node:fs/promises'
-import path from 'node:path'
 import type { JsonValue } from '../../shared/json'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
 
 const READ_CHUNK_BYTES = 64 * 1_024
-const CURSOR_VERSION = 1
-
-interface FileCursorPayload {
-  v: number
-  pathHash: string
-  identity: string
-  offset: number
-  line: number
-  continued: boolean
-  issuedSize: number
-}
 
 interface LineRead {
   content: Buffer
   sourceBytes: number
   complete: boolean
+  terminated: boolean
 }
 
 export interface StreamingFileReadInput {
   guard: PathGuard
   inputPath: string
   startLine?: number
-  cursor?: string
+  startCharacter?: number
   tail?: boolean
   lineCount: number
   lineNumbers: boolean
@@ -43,48 +31,8 @@ export interface StreamingFileReadResult {
   truncated: boolean
 }
 
-function normalizedPathHash(value: string): string {
-  const normalized =
-    process.platform === 'win32'
-      ? path.resolve(value).toLowerCase()
-      : path.resolve(value)
-  return createHash('sha256').update(normalized).digest('hex')
-}
-
 function fileIdentity(value: Awaited<ReturnType<typeof stat>>): string {
   return `${value.dev}:${value.ino}:${value.birthtimeMs}`
-}
-
-function encodeCursor(payload: FileCursorPayload): string {
-  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
-}
-
-function decodeCursor(value: string): FileCursorPayload {
-  let candidate: unknown
-  try {
-    candidate = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'))
-  } catch {
-    throw new PathGuardError('INVALID_PATH', 'read_file cursor is invalid')
-  }
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    throw new PathGuardError('INVALID_PATH', 'read_file cursor is invalid')
-  }
-  const payload = candidate as Partial<FileCursorPayload>
-  if (
-    payload.v !== CURSOR_VERSION ||
-    typeof payload.pathHash !== 'string' ||
-    typeof payload.identity !== 'string' ||
-    !Number.isSafeInteger(payload.offset) ||
-    Number(payload.offset) < 0 ||
-    !Number.isSafeInteger(payload.line) ||
-    Number(payload.line) < 1 ||
-    typeof payload.continued !== 'boolean' ||
-    !Number.isSafeInteger(payload.issuedSize) ||
-    Number(payload.issuedSize) < 0
-  ) {
-    throw new PathGuardError('INVALID_PATH', 'read_file cursor is invalid')
-  }
-  return payload as FileCursorPayload
 }
 
 function safeUtf8PrefixLength(value: Buffer, maximumBytes: number): number {
@@ -140,6 +88,7 @@ async function readLine(
         content: withoutCarriageReturn,
         sourceBytes: position - offset + newline + 1,
         complete: captured <= maximumBytes,
+        terminated: true,
       }
     }
     position += bytesRead
@@ -148,6 +97,7 @@ async function readLine(
         content: Buffer.concat(chunks),
         sourceBytes: maximumBytes + 1,
         complete: false,
+        terminated: false,
       }
     }
   }
@@ -155,7 +105,81 @@ async function readLine(
     content: Buffer.concat(chunks),
     sourceBytes: fileSize - offset,
     complete: true,
+    terminated: false,
   }
+}
+
+function completeUtf8PrefixLength(
+  value: Buffer,
+  moreBytesFollow: boolean,
+): number {
+  if (!moreBytesFollow || value.byteLength === 0) return value.byteLength
+  let lead = value.byteLength - 1
+  while (lead >= 0 && (value[lead] & 0xc0) === 0x80) lead -= 1
+  if (lead < 0) return 0
+  const leadByte = value[lead]
+  const expected =
+    leadByte < 0x80
+      ? 1
+      : leadByte >= 0xc2 && leadByte <= 0xdf
+        ? 2
+        : leadByte >= 0xe0 && leadByte <= 0xef
+          ? 3
+          : leadByte >= 0xf0 && leadByte <= 0xf4
+            ? 4
+            : 1
+  return value.byteLength - lead < expected ? lead : value.byteLength
+}
+
+async function offsetForCharacter(
+  handle: Awaited<ReturnType<typeof open>>,
+  lineOffset: number,
+  requestedCharacter: number,
+  fileSize: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  if (requestedCharacter === 0) return lineOffset
+  let remaining = requestedCharacter
+  let position = lineOffset
+  while (position < fileSize) {
+    signal?.throwIfAborted()
+    const requested = Math.min(READ_CHUNK_BYTES, fileSize - position)
+    const buffer = Buffer.allocUnsafe(requested)
+    const { bytesRead } = await handle.read(buffer, 0, requested, position)
+    if (bytesRead === 0) break
+    const chunk = buffer.subarray(0, bytesRead)
+    const newline = chunk.indexOf(0x0a)
+    let visibleEnd = newline >= 0 ? newline : chunk.byteLength
+    if (newline >= 0 && visibleEnd > 0 && chunk[visibleEnd - 1] === 0x0d) {
+      visibleEnd -= 1
+    }
+    const visible = chunk.subarray(0, visibleEnd)
+    const safeLength = completeUtf8PrefixLength(
+      visible,
+      newline < 0 && position + bytesRead < fileSize,
+    )
+    const safe = visible.subarray(0, safeLength)
+    const characters = [...safe.toString('utf8')]
+    if (remaining <= characters.length) {
+      return (
+        position +
+        Buffer.byteLength(characters.slice(0, remaining).join(''), 'utf8')
+      )
+    }
+    remaining -= characters.length
+    if (newline >= 0) break
+    if (safeLength === 0) {
+      throw new PathGuardError(
+        'INVALID_POSITION',
+        'read_file could not resolve startCharacter in invalid UTF-8 data',
+      )
+    }
+    position += safeLength
+  }
+  throw new PathGuardError(
+    'INVALID_POSITION',
+    'read_file startCharacter exceeds the selected line length',
+  )
 }
 
 async function offsetForLine(
@@ -224,17 +248,6 @@ async function tailLocation(
   }
 }
 
-function cursorFor(input: {
-  pathHash: string
-  identity: string
-  offset: number
-  line: number
-  continued: boolean
-  issuedSize: number
-}): string {
-  return encodeCursor({ v: CURSOR_VERSION, ...input })
-}
-
 /** Streams one bounded UTF-8 page without loading the complete source file. */
 export async function readStreamingFile(
   input: StreamingFileReadInput,
@@ -256,28 +269,10 @@ export async function readStreamingFile(
       )
     }
     const identity = fileIdentity(metadata)
-    const pathHash = normalizedPathHash(guarded.realPath)
     let offset = 0
     let line = input.startLine ?? 1
-    let continued = false
-    if (input.cursor) {
-      const cursor = decodeCursor(input.cursor)
-      if (cursor.pathHash !== pathHash || cursor.identity !== identity) {
-        throw new PathGuardError(
-          'RESOURCE_CHANGED',
-          'read_file cursor belongs to a different or replaced file',
-        )
-      }
-      if (metadata.size < cursor.issuedSize || metadata.size < cursor.offset) {
-        throw new PathGuardError(
-          'RESOURCE_CHANGED',
-          'The file was shortened after the read_file cursor was issued',
-        )
-      }
-      offset = cursor.offset
-      line = cursor.line
-      continued = cursor.continued
-    } else if (input.tail) {
+    let character = input.startCharacter ?? 0
+    if (input.tail) {
       const location = await tailLocation(
         handle,
         input.lineCount,
@@ -286,16 +281,24 @@ export async function readStreamingFile(
       )
       offset = location.offset
       line = location.line
+      character = 0
     } else {
       offset = await offsetForLine(handle, line, metadata.size, input.signal)
+      offset = await offsetForCharacter(
+        handle,
+        offset,
+        character,
+        metadata.size,
+        input.signal,
+      )
     }
 
-    const startOffset = offset
     const startLine = line
-    const startContinued = continued
+    const startCharacter = character
     const rendered: string[] = []
     let renderedBytes = 0
     let lineTruncated = false
+    let endLine: number | null = null
     while (offset < metadata.size && rendered.length < input.lineCount) {
       input.signal?.throwIfAborted()
       const prefix = input.lineNumbers ? `${line}\t` : ''
@@ -316,15 +319,21 @@ export async function readStreamingFile(
       const visible = sourceLine.content.subarray(0, visibleBytes)
       rendered.push(`${prefix}${visible.toString('utf8')}`)
       renderedBytes += fixedBytes + visible.byteLength
+      endLine = line
+      const visibleCharacters = [...visible.toString('utf8')].length
       const wholeLine =
         sourceLine.complete && visibleBytes === sourceLine.content.byteLength
       if (wholeLine) {
         offset += sourceLine.sourceBytes
-        line += 1
-        continued = false
+        if (sourceLine.terminated) {
+          line += 1
+          character = 0
+        } else {
+          character += visibleCharacters
+        }
       } else {
         offset += visibleBytes
-        continued = true
+        character += visibleCharacters
         lineTruncated = true
         break
       }
@@ -337,36 +346,18 @@ export async function readStreamingFile(
       )
     }
     const hasMore = offset < metadata.size
-    const startCursor = cursorFor({
-      pathHash,
-      identity,
-      offset: startOffset,
-      line: startLine,
-      continued: startContinued,
-      issuedSize: metadata.size,
-    })
-    const endCursor = cursorFor({
-      pathHash,
-      identity,
-      offset,
-      line,
-      continued,
-      issuedSize: metadata.size,
-    })
     return {
       content: {
         path: guarded.relativePath,
         content: rendered.join('\n'),
         startLine,
-        endLine: rendered.length > 0 ? line - (continued ? 0 : 1) : null,
-        startCursor,
-        endCursor,
-        ...(hasMore ? { nextCursor: endCursor } : {}),
+        startCharacter,
+        endLine,
+        nextStartLine: line,
+        ...(character > 0 ? { nextStartCharacter: character } : {}),
         hasMore,
-        dataLost: false,
         tailClipped: input.tail === true && hasMore,
         lineTruncated,
-        lineContinued: startContinued,
         totalBytes: metadata.size,
         projectionLineLimit: input.projectionLineLimit,
       },

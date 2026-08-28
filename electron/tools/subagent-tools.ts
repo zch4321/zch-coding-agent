@@ -63,7 +63,7 @@ export function registerSubagentTools(
   registry.registerTool({
     id: 'subagent_run',
     description:
-      "Start one background Subagent and immediately return a durable target handle. The child receives no parent conversation history, so provide a self-contained task and ask it to put findings in its final assistant response. Use background_wait or background_list to observe it and read its artifact files for complete output. Set toolAccess='readonly' for investigation or 'inherit' for frozen parent permissions. The child cannot spawn more Agents.",
+      "Start one background Subagent and immediately return a process-local numeric target. The child receives no parent conversation history, so provide a self-contained task and ask it to put findings in its final assistant response. Use background_wait or background_list to observe it and read its artifact files for complete output. Set toolAccess='readonly' for investigation or 'inherit' for frozen parent permissions. The child cannot spawn more Agents.",
     inputSchema: SubagentRunArgsSchema,
     executionMode: 'parallel',
     effects: [],

@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, mkdir, rename, symlink } from 'node:fs/promises'
+import { mkdtemp, writeFile, mkdir, symlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -522,23 +522,23 @@ describe('read-only tools', () => {
         startLine: 1,
         endLine: 498,
         hasMore: true,
-        nextCursor: expect.any(String),
+        nextStartLine: 499,
       },
     })
 
-    const nextCursor =
+    const nextStartLine =
       first.status === 'ok' &&
       first.content &&
       typeof first.content === 'object' &&
       !Array.isArray(first.content) &&
-      typeof first.content.nextCursor === 'string'
-        ? first.content.nextCursor
-        : ''
+      typeof first.content.nextStartLine === 'number'
+        ? first.content.nextStartLine
+        : 1
 
     const second = await executeReadonly(root, {
       id: 'call-page-2' as CallId,
       toolId: 'read_file',
-      args: { path: 'large.txt', cursor: nextCursor, lineCount: 1_000 },
+      args: { path: 'large.txt', startLine: nextStartLine, lineCount: 1_000 },
       reason: '',
     })
     expect(second).toMatchObject({
@@ -550,30 +550,59 @@ describe('read-only tools', () => {
     })
   })
 
-  it('bounds one extremely long line', async () => {
+  it('continues one extremely long Unicode line by character offset', async () => {
     const root = await workspace()
-    await writeFile(path.join(root, 'one-line.txt'), 'x'.repeat(400_000))
-    const result = await executeReadonly(root, {
+    const source = '🙂漢字'.repeat(40_000)
+    await writeFile(path.join(root, 'one-line.txt'), source)
+    const first = await executeReadonly(root, {
       id: 'call-long-line' as CallId,
       toolId: 'read_file',
-      args: { path: 'one-line.txt' },
+      args: { path: 'one-line.txt', lineNumbers: false },
       reason: '',
     })
 
-    expect(result).toMatchObject({
+    expect(first).toMatchObject({
       status: 'ok',
-      content: { lineTruncated: true, hasMore: true },
+      content: {
+        lineTruncated: true,
+        hasMore: true,
+        nextStartLine: 1,
+        nextStartCharacter: expect.any(Number),
+      },
     })
 
-    if (result.status === 'ok') {
-      const content = result.content as { content: string }
+    if (first.status === 'ok') {
+      const content = first.content as {
+        content: string
+        nextStartCharacter: number
+      }
       expect(Buffer.byteLength(content.content, 'utf8')).toBeLessThanOrEqual(
         256 * 1_024,
       )
+      const second = await executeReadonly(root, {
+        id: 'call-long-line-continued' as CallId,
+        toolId: 'read_file',
+        args: {
+          path: 'one-line.txt',
+          startLine: 1,
+          startCharacter: content.nextStartCharacter,
+          lineNumbers: false,
+        },
+        reason: '',
+      })
+      expect(second).toMatchObject({
+        status: 'ok',
+        content: { hasMore: false },
+      })
+      if (second.status === 'ok') {
+        expect(
+          content.content + (second.content as { content: string }).content,
+        ).toBe(source)
+      }
     }
   })
 
-  it('continues an appended UTF-8 Session artifact from an opaque cursor', async () => {
+  it('continues an appended UTF-8 Session artifact from its next line', async () => {
     const root = await workspace()
     const sessionRoot = await mkdtemp(
       path.join(os.tmpdir(), 'agent-read-session-'),
@@ -602,16 +631,16 @@ describe('read-only tools', () => {
     )
     expect(first).toMatchObject({
       status: 'ok',
-      content: { hasMore: false, endCursor: expect.any(String) },
+      content: { hasMore: false, nextStartLine: 2 },
     })
-    const cursor =
+    const nextStartLine =
       first.status === 'ok' &&
       first.content &&
       typeof first.content === 'object' &&
       !Array.isArray(first.content) &&
-      typeof first.content.endCursor === 'string'
-        ? first.content.endCursor
-        : ''
+      typeof first.content.nextStartLine === 'number'
+        ? first.content.nextStartLine
+        : 1
     await writeFile(logPath, '第一行\n第二行🙂\n')
 
     const appended = await executeReadonly(
@@ -619,7 +648,7 @@ describe('read-only tools', () => {
       {
         id: 'call-artifact-appended' as CallId,
         toolId: 'read_file',
-        args: { path: logPath, cursor },
+        args: { path: logPath, startLine: nextStartLine },
         reason: '',
       },
       undefined,
@@ -633,7 +662,55 @@ describe('read-only tools', () => {
     }
   })
 
-  it('supports tail reads and rejects a cursor after atomic replacement', async () => {
+  it('continues an appended unterminated line by character offset', async () => {
+    const root = await workspace()
+    const logPath = path.join(root, 'growing.log')
+    await writeFile(logPath, '前缀🙂')
+    const first = await executeReadonly(root, {
+      id: 'call-growing-first' as CallId,
+      toolId: 'read_file',
+      args: { path: 'growing.log' },
+      reason: '',
+    })
+    expect(first).toMatchObject({
+      status: 'ok',
+      content: {
+        nextStartLine: 1,
+        nextStartCharacter: 3,
+        hasMore: false,
+      },
+    })
+    await writeFile(logPath, '前缀🙂追加\n')
+    const appended = await executeReadonly(root, {
+      id: 'call-growing-appended' as CallId,
+      toolId: 'read_file',
+      args: { path: 'growing.log', startLine: 1, startCharacter: 3 },
+      reason: '',
+    })
+    expect(appended).toMatchObject({ status: 'ok' })
+    if (appended.status === 'ok') {
+      expect((appended.content as { content: string }).content).toBe('1\t追加')
+    }
+  })
+
+  it('reports an explicit error when startCharacter exceeds the line', async () => {
+    const root = await workspace()
+    await writeFile(path.join(root, 'short.txt'), 'short\n')
+
+    await expect(
+      executeReadonly(root, {
+        id: 'call-invalid-character-offset' as CallId,
+        toolId: 'read_file',
+        args: { path: 'short.txt', startLine: 1, startCharacter: 100 },
+        reason: '',
+      }),
+    ).resolves.toMatchObject({
+      status: 'error',
+      code: 'INVALID_POSITION',
+    })
+  })
+
+  it('supports bounded tail reads', async () => {
     const root = await workspace()
     const sessionRoot = await mkdtemp(
       path.join(os.tmpdir(), 'agent-read-session-'),
@@ -666,33 +743,5 @@ describe('read-only tools', () => {
         '2\ttwo\n3\tthree',
       )
     }
-    const cursor =
-      tail.status === 'ok' &&
-      tail.content &&
-      typeof tail.content === 'object' &&
-      !Array.isArray(tail.content) &&
-      typeof tail.content.endCursor === 'string'
-        ? tail.content.endCursor
-        : ''
-    const replacement = path.join(sessionTemp.artifacts, 'replacement.log')
-    await writeFile(replacement, 'replacement\n')
-    await rename(replacement, logPath)
-
-    await expect(
-      executeReadonly(
-        root,
-        {
-          id: 'call-artifact-replaced' as CallId,
-          toolId: 'read_file',
-          args: { path: logPath, cursor },
-          reason: '',
-        },
-        undefined,
-        sessionTemp,
-      ),
-    ).resolves.toMatchObject({
-      status: 'error',
-      code: 'RESOURCE_CHANGED',
-    })
   })
 })

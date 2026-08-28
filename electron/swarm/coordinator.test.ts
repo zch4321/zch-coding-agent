@@ -25,6 +25,7 @@ import {
 } from '../application/subagent-state-service'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { SwarmParentContext } from './contracts'
+import { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
 
 const { freezeModelPoolPlanMock } = vi.hoisted(() => ({
   freezeModelPoolPlanMock: vi.fn(),
@@ -234,6 +235,7 @@ function fixture(
       runPrepared,
     },
     events: { publishAgentExecution } as unknown as RuntimeEventSink,
+    handles: new BackgroundAgentHandleRegistry(),
   })
   return { coordinator, records, roots, publishAgentExecution }
 }
@@ -451,7 +453,7 @@ describe('SwarmCoordinator', () => {
     await expect(
       fixtureValue.coordinator.start(args(2), parent('call:all-fail')),
     ).resolves.toMatchObject({
-      target: { type: 'swarm', id: expect.any(String) },
+      target: { type: 'swarm', id: expect.any(Number) },
       status: 'failed',
     })
   })
@@ -516,6 +518,8 @@ describe('SwarmCoordinator', () => {
       ) as Record<string, unknown>
 
       expect(manifest).toMatchObject({
+        schemaVersion: 2,
+        kind: 'swarm',
         status: 'completed',
         sharedContext: args(1).sharedContext,
         tasks: args(1).tasks,
@@ -531,6 +535,10 @@ describe('SwarmCoordinator', () => {
           },
         ],
       })
+      expect(manifest).not.toHaveProperty('target')
+      expect(
+        (manifest.children as Array<Record<string, unknown>>)[0],
+      ).not.toHaveProperty('executionId')
     } finally {
       await fixtureValue.coordinator.dispose()
       await rm(root, { recursive: true, force: true })

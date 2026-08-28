@@ -92,7 +92,7 @@ export function registerTerminalTools(
         status: 'ok',
         content: {
           ...terminal,
-          target: { type: 'terminal', id: String(terminal.terminalId) },
+          target: { type: 'terminal', id: terminal.terminalId },
         },
       }
     },

@@ -17,7 +17,7 @@ import {
 import { readStreamingFile } from './streaming-file-reader'
 
 const MAX_READ_LINES = 10_000
-const READ_FILE_CURSOR_RESERVE_BYTES = 768
+const READ_FILE_METADATA_RESERVE_BYTES = 256
 const DEFAULT_LIMITS: Pick<
   PublicConfig['limits'],
   'maxToolOutputBytes' | 'maxToolOutputLines' | 'readFileSourceBytes'
@@ -42,6 +42,14 @@ const ReadFileArgsSchema = Type.Object(
         description: '1-based first line to read. Omit to start at line 1.',
       }),
     ),
+    startCharacter: Type.Optional(
+      Type.Integer({
+        minimum: 0,
+        maximum: 1_000_000_000,
+        description:
+          '0-based Unicode character offset within startLine. Use nextStartCharacter only when a previous page stopped inside one very long line.',
+      }),
+    ),
     lineCount: Type.Optional(
       Type.Integer({
         minimum: 1,
@@ -55,18 +63,10 @@ const ReadFileArgsSchema = Type.Object(
           'Whether to prefix returned lines with line numbers. Defaults to true.',
       }),
     ),
-    cursor: Type.Optional(
-      Type.String({
-        minLength: 1,
-        maxLength: 4_096,
-        description:
-          'Opaque continuation cursor returned by a previous read_file call for this exact file.',
-      }),
-    ),
     tail: Type.Optional(
       Type.Boolean({
         description:
-          'Read the final lineCount lines. Cannot be combined with startLine or cursor.',
+          'Read the final lineCount lines. Cannot be combined with startLine or startCharacter.',
       }),
     ),
   },
@@ -199,7 +199,7 @@ export function createReadOnlyToolDefinitions(
     id: 'read_file',
     executionMode: 'parallel',
     description:
-      'Stream a bounded UTF-8 page from a workspace or Session-temp file. Continue an appended log with nextCursor; use tail for a bounded final snapshot.',
+      'Stream a bounded UTF-8 page from a workspace or Session-temp file. Continue with nextStartLine and, only for a split long line, nextStartCharacter. Use tail for a bounded final snapshot.',
     inputSchema: ReadFileArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
@@ -208,12 +208,9 @@ export function createReadOnlyToolDefinitions(
     modelOutputPolicy: 'paged',
     projectResultForModel: projectReadFileResult,
     validateArgs(args) {
-      const locations =
-        Number(args.startLine !== undefined) +
-        Number(args.cursor !== undefined) +
-        Number(args.tail === true)
-      return locations > 1
-        ? 'read_file startLine, cursor, and tail are mutually exclusive'
+      return args.tail === true &&
+        (args.startLine !== undefined || args.startCharacter !== undefined)
+        ? 'read_file tail cannot be combined with startLine or startCharacter'
         : undefined
     },
     async execute(args, context) {
@@ -232,13 +229,13 @@ export function createReadOnlyToolDefinitions(
           guard,
           inputPath: args.path,
           startLine: args.startLine,
-          cursor: args.cursor,
+          startCharacter: args.startCharacter,
           tail: args.tail,
           lineCount: Math.min(args.lineCount ?? bodyLineLimit, bodyLineLimit),
           lineNumbers: args.lineNumbers ?? true,
           maxOutputBytes: Math.max(
             1,
-            outputLimits.maxToolOutputBytes - READ_FILE_CURSOR_RESERVE_BYTES,
+            outputLimits.maxToolOutputBytes - READ_FILE_METADATA_RESERVE_BYTES,
           ),
           projectionLineLimit: outputLimits.maxToolOutputLines,
           maxWorkspaceSourceBytes: configuredLimits.readFileSourceBytes,

@@ -12,7 +12,7 @@ import type { PermissionMode } from '../../shared/config'
 import type { SessionTempPaths } from '../session-temp/service'
 
 export interface BackgroundTaskHandle {
-  target: { type: 'subagent' | 'swarm'; id: string }
+  target: { type: 'subagent' | 'swarm'; id: number }
   status:
     | 'queued'
     | 'preparing'

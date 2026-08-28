@@ -63,12 +63,12 @@ SQLite
 
 ### 2.2 状态分为三类
 
-| 类别                      | 所有者           | 是否落盘 | 示例                                                                                   |
-| ------------------------- | ---------------- | -------- | -------------------------------------------------------------------------------------- |
-| Durable application state | backend + SQLite | 是       | Projects、Session metadata/messages、Goal/Plan、FileChanges、Subagent/Swarm execution |
-| Ephemeral execution state | backend memory   | 否       | active Run、stream buffer、AbortController、pending approval、真实 PTY/MCP connection |
-| Session artifact state    | backend + OS temp | 独立文件 | Terminal/Command/Agent/Network 输出副本与 model-writable scratch                     |
-| UI-only state             | renderer         | 否       | draft、draft attachments、IME composition、scroll、panel、selection                  |
+| 类别                      | 所有者            | 是否落盘 | 示例                                                                                  |
+| ------------------------- | ----------------- | -------- | ------------------------------------------------------------------------------------- |
+| Durable application state | backend + SQLite  | 是       | Projects、Session metadata/messages、Goal/Plan、FileChanges、Subagent/Swarm execution |
+| Ephemeral execution state | backend memory    | 否       | active Run、stream buffer、AbortController、pending approval、真实 PTY/MCP connection |
+| Session artifact state    | backend + OS temp | 独立文件 | Terminal/Command/Agent/Network 输出副本与 model-writable scratch                      |
+| UI-only state             | renderer          | 否       | draft、draft attachments、IME composition、scroll、panel、selection                   |
 
 “Backend authoritative”不等于“所有 backend 状态必须落盘”。只有应用重启后仍应存在、并参与后续模型历史或产品展示的完整记录才进入 SQLite。Session artifact 是便于模型分页读取的输出副本，可能过期或被宿主 Shell 改写，不能覆盖 SQLite execution 或 PTY ownership 的权威状态。
 
@@ -646,9 +646,9 @@ Model Pool allocator 是不含 Agent task/name 的纯函数：freezer 先从同�
 
 Renderer 的运行限制表单以单列分节展示，`autoCompactTriggerPercent` 明确显示 `%` 单位。表单变更在 600ms 静默期后调用 versioned `config:set(limits)`；store 对发送中的快照签名，并在请求期间又有编辑时继续保存最新快照，避免用旧响应覆盖新输入。顶部按钮复用同一 action，用于立即提交和错误重试。
 
-Run 开始时冻结 `maxToolOutputBytes/maxToolOutputLines`，默认 256 KiB/500 行。Tool executor 先产生完整内部结果并运行 canonical projector；`modelOutputPolicy = bounded` 的投影随后按 UTF-8 字节和逻辑行保留头部，在限制内加入 `byteLimitExceeded/lineLimitExceeded/totalBytes/totalLines` 与发现到的 artifact/continuation 路径。`paged` 工具（当前 `read_file/background_list`）自行生成准确 cursor，通用 limiter 不再修改；`passthrough` 当前只用于已有 256 KiB 源文件上限的 `read_skill`，正文不受 500 行限制。不再维护 `maxToolResultTokens`、`readFileOutputBytes` 或跨 Tool batch/Run 的累计结果预算；token estimator 继续用于 prompt 诊断和其他明确的 token 边界。完整 Provider 请求仍受冻结模型 profile 的 prompt budget 与自动压缩约束。
+Run 开始时冻结 `maxToolOutputBytes/maxToolOutputLines`，默认 256 KiB/500 行。Tool executor 先产生完整内部结果并运行 canonical projector；`modelOutputPolicy = bounded` 的投影随后按 UTF-8 字节和逻辑行保留头部，在限制内加入 `byteLimitExceeded/lineLimitExceeded/totalBytes/totalLines` 与发现到的 artifact/continuation 路径。`paged` 工具（当前 `read_file/background_list`）自行生成准确 continuation 元数据，通用 limiter 不再修改；`passthrough` 当前只用于已有 256 KiB 源文件上限的 `read_skill`，正文不受 500 行限制。不再维护 `maxToolResultTokens`、`readFileOutputBytes` 或跨 Tool batch/Run 的累计结果预算；token estimator 继续用于 prompt 诊断和其他明确的 token 边界。完整 Provider 请求仍受冻结模型 profile 的 prompt budget 与自动压缩约束。
 
-`read_file` 使用文件句柄与固定大小 chunk 真正流式分页。`startLine`、opaque `cursor` 与 `tail` 在普通 object schema 中可选，并由 executor 校验互斥；cursor 绑定规范化路径、`dev/ino/birthtime` 身份、字节 offset、逻辑行号和签发时大小。文件替换或缩短返回 `RESOURCE_CHANGED`；EOF `endCursor` 可在同一文件 append 后继续。读取器在 UTF-8 code point 与超长单行中间安全停下，下一页从精确字节位置续读；workspace 文件仍受 `readFileSourceBytes`，Session temp 只受每页模型输出限制。
+`read_file` 使用文件句柄与固定大小 chunk 真正流式分页。模型以 1-based `startLine` 定位普通页；只有一行超过单页上限时才附加 0-based Unicode code-point `startCharacter`。输出用 `nextStartLine/nextStartCharacter` 明确给出下一位置，不再暴露编码文件身份与字节 offset 的 opaque cursor。读取器把字符位置流式换算为内部字节位置，在 UTF-8 code point 中间安全停下，并检测一次调用期间的文件替换；读到无换行 EOF 时保留同一行字符位置，使后续 append 不丢前缀。workspace 文件仍受 `readFileSourceBytes`，Session temp 只受每页模型输出限制。
 
 ProjectModel 与 code intelligence 暂停期间，Session tooling 不注册 `project_*` 或 `code_*`，provider tool catalog 还会无条件过滤这些保留 ID，旧 IPC 调用统一返回 `NOT_AVAILABLE`；因此 Desktop、Headless、main Agent 和 child Agent 都不能启动 Serena 或触发 `.zch` I/O。Provider parser 删除 intent metadata 后，ToolRegistry/executor 在权限与 schema 校验前再次按注册时记录的实际 intent field 清理，防止 `_agent_intent` 序列化泄漏导致偶发 `additionalProperties` 错误。
 
@@ -1662,7 +1662,7 @@ PowerShell adapter 固定传入 `-ExecutionPolicy Bypass`，并设置 Console �
 
 交互 Terminal 与 `run_command.shell` 共享同一个 `executionEnvironment.commandShell` 配置。`terminal_open` 没有模型可见的 `shell` 参数；TerminalPool 在每次打开时读取当前配置并经 `CommandShellService.resolve()` 解析实际 profile，配置项失效时沿用自动回退且不改写保存值。解析出的 profile `kind = powershell` 时 PTY 固定传入 `-ExecutionPolicy Bypass`，其他 kind 不附加启动参数。设置变更只影响之后打开的 Terminal，已在运行的 Terminal 不重启。
 
-模型可见的 `terminalId` 是进程内全局递增的正整数：应用重启后从 `1` 重新开始，ID 一经分配在当前进程内不复用，启动失败允许留下编号空洞。每个 Session 最多保留 16 个 Terminal（含 opening、running 和已退出但未显式关闭的条目），显式关闭立即释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限。不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。Provider catalog 只保留 `terminal_open/send`，移除 `terminal_read/list/close`；Renderer 的 list/read/close/resize IPC 和多 tab UI 不变。模型把 `terminal_open` 返回的数字 ID 用于 `terminal_send`，把额外 `{ type: 'terminal', id: String(terminalId) }` target 用于 `background_wait/list/cancel`。
+模型可见的 `terminalId` 是进程内全局递增的正整数：应用重启后从 `1` 重新开始，ID 一经分配在当前进程内不复用，启动失败允许留下编号空洞。每个 Session 最多保留 16 个 Terminal（含 opening、running 和已退出但未显式关闭的条目），显式关闭立即释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限。不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。Provider catalog 只保留 `terminal_open/send`，移除 `terminal_read/list/close`；Renderer 的 list/read/close/resize IPC 和多 tab UI 不变。模型把 `terminal_open` 返回的数字 ID 用于 `terminal_send`，并把同一数字 `{ type: 'terminal', id: terminalId }` target 用于 `background_wait/list/cancel`。
 
 TerminalPool 在 spawn PTY 前打开权限为 `0600` 的 `artifacts/terminals/terminal-<id>.log`。raw chunk 一路进入 Renderer/xterm 和原始 scrollback；另一条路经过持久、跨 chunk 的 ANSI sanitizer 进入 model scrollback 与追加式日志，因此 OSC/CSI 分段不会按无状态正则误投影。capture 初始化/追加/close 任一步失败都会更新 backend-owned `artifactAvailable/captureError`。`terminal_send.delayMs` 缺省为 1,000 ms，可显式为 0，最大 60 秒；结果优先返回发送前 cursor 后的增量，否则返回 20 行/8 KiB tail，并始终携带 cursor 和 artifact 状态。
 
@@ -1782,11 +1782,11 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 
 内部 durable result 使用声明顺序稳定的扁平 `results[]`：每个 replica 独立携带 task/agent 序号、终态、成功文本或有界错误、安全 assignment、耗时、usage 与截断标记；`meta` 聚合 Job 状态、数量、耗时和 usage。部分失败保留全部成功与失败项，全部失败记录明确错误；不会自动重试或启动第二个聚合 Run。结果总 JSON 有 2 MB 防御上限，超限时公平收窄成功文本与错误正文但不删除条目。相同 root call 与参数 hash 幂等返回同一 handle，不同参数明确冲突。
 
-模型侧不内联上述聚合 result。`artifacts/swarms/<root-id>/manifest.json` 从 preparation 起保存 `sharedContext/tasks`、每个 child 的 task/agent index、安全 assignment 和 artifact path，状态更新保留这些静态字段并原子追加 counts/status/error。`background_wait` 对 Swarm 只返回 root 状态、child counts 与 `manifestPath`；主 Agent按需用 `read_file` 分页读取 manifest 和 child `result.md/activity.jsonl`。
+模型侧不内联上述聚合 result。`artifacts/swarms/<root-id>/manifest.json` 从 preparation 起保存 `sharedContext/tasks`、每个 child 的 ordinal、task/agent index、安全 assignment 和 artifact path，状态更新保留这些静态字段并原子追加 counts/status/error；manifest 不保存进程内模型操作 ID。`background_wait/list` 对 Swarm 返回 root 状态、child counts、当前进程可用的 child 数字 target 与 `manifestPath`；主 Agent按需用 `read_file` 分页读取 manifest 和 child `result.md/activity.jsonl`。
 
 独立 `agent-execution:event` 只投影安全生命周期和可见活动，不把 hidden Session 伪装成普通 Session。Agents artifact 根列表仅显示普通 Subagent 与 Swarm root；展开 Swarm root 后按 `childOrdinal` 显示 child。两级均使用手动 `NCollapse`，不自动展开；详情只显示运行时间、工具调用数、状态、模型/usage/Agent 计数和可见 Assistant 文本，不展示 reasoning、完整工具轨迹、child Session ID、prompt harness、route 凭据或 Provider continuation。
 
-统一 `BackgroundTaskService` 以 SQLite execution 与 TerminalPool ownership 为权威。`background_wait` 接受混合 target、`any|all` 和 timeout，只在 Agent 终态/PTY exit 或正常超时返回；纯 Agent 最大 300 秒，含 Terminal 最大 60 秒。`background_list` 将 standalone root、Swarm root 与 Terminal 按创建时间合并，使用绑定 filters 的 opaque cursor，并按冻结 Tool 输出 budget 生成不会被通用 limiter 破坏的精确页。`background_cancel` 校验公开 Session ownership、幂等取消 root/child/Terminal，可选等待最多 60 秒；Swarm root 级联 child，单 child 取消触发 root 重汇总。
+统一 `BackgroundTaskService` 以 SQLite execution 与 TerminalPool ownership 为权威，同时用一个进程内 registry 把 durable Agent execution UUID 映射为全局递增数字；模型输入永不直接解析或接受 UUID，重启后通过 `background_list` 为历史 root 分配新数字。`background_wait` 接受混合 target、`any|all` 和 timeout，只在 Agent 终态/PTY exit 或正常超时返回；纯 Agent 最大 300 秒，含 Terminal 最大 60 秒。`background_list` 将 standalone root、Swarm root 与 Terminal 按创建时间合并，使用绑定 filters 的 opaque 分页 cursor，并按冻结 Tool 输出 budget 生成不会被通用 limiter 破坏的精确页。`background_cancel` 校验数字 target 的当前进程映射和公开 Session ownership，幂等取消 root/child/Terminal，可选等待最多 60 秒；Swarm root 级联 child，单 child 取消触发 root 重汇总。
 
 ---
 
@@ -1821,7 +1821,7 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 - 相同 active MessageRecords、route 和 Provider config 生成确定性的 Provider DTO；不同 Provider 的 golden tests 覆盖 Chat Completions messages、Responses items 和 Anthropic content blocks。
 - Chat Completions 将 assistant tool-call parts 编译为 `tool_calls[]`、将每个 tool-result record 编译为 `role = 'tool'`；Responses 编译为 `function_call/function_call_output` items；Anthropic 把相邻 results 合并为 `user` message 中排在前面的 `tool_result` blocks。
 - Tool Result 默认/自定义投影、projector fallback、JSON-safe normalization、UTF-8 head byte/line bound、paged/passthrough 豁免和错误文本均有 exact tests；Provider golden 断言 wire 不含内部 envelope 或 part 标签。
-- `read_file` 覆盖大文件、append/EOF cursor、tail、UTF-8、超长单行、替换/缩短和 artifact expiry；`grep/glob/list_dir`、terminal/process/Git、fetch/search/skill、FileChange、MCP 与 Subagent 的模型可见格式使用 exact golden。
+- `read_file` 覆盖大文件、行号分页、append/EOF 字符位置、tail、UTF-8、超长单行、调用中替换和 artifact expiry；`grep/glob/list_dir`、terminal/process/Git、fetch/search/skill、FileChange、MCP 与 Subagent 的模型可见格式使用 exact golden。
 - 新结果持久化 projection marker；active legacy result 在 Provider factory/stream 和 usage 前失败，inactive old epoch 不阻断新 history。
 - Provider 可以将一条 canonical record 展开为多个 wire items，或把多条相邻 canonical records 合并为一条 wire message；不依赖一对一映射。
 - `normalizedReasoningText` 只包含允许展示的非加密文本；缺失投影时 UI 不显示 reasoning，且不能从它重建 continuation。

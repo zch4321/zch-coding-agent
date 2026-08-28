@@ -34,6 +34,17 @@ describe('background tools', () => {
       expect(schema).not.toHaveProperty('anyOf')
       expect(schema).not.toHaveProperty('allOf')
     }
+    const waitSchema = tools
+      .providerDefinitions()
+      .find((definition) => definition.name === 'background_wait')
+      ?.inputSchema as {
+      properties?: {
+        targets?: { items?: { properties?: { id?: { type?: string } } } }
+      }
+    }
+    expect(waitSchema.properties?.targets?.items?.properties?.id?.type).toBe(
+      'integer',
+    )
   })
 
   it('caps mixed Terminal waits and keeps cancellation approval-free', () => {
@@ -41,7 +52,7 @@ describe('background tools', () => {
     const wait = tools.get('background_wait')!
     expect(
       wait.validateArgs?.({
-        targets: [{ type: 'terminal', id: '1' }],
+        targets: [{ type: 'terminal', id: 1 }],
         timeoutMs: 60_001,
       } as never),
     ).toContain('60000')
