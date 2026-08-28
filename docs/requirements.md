@@ -71,6 +71,8 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 Provider 生成的参数在记录 `tool.proposed` 和进入权限审批前先规范化：递归删除 schema 明确禁止的多余字段，并转换无歧义的 JSON 标量类型（数字字符串转 number/integer、`true|false` 字符串转 boolean、number/boolean 转 string）。不得把字符串猜测为 JSON object/array、把单值包装成数组、把 null 转成可执行值，也不得把未知工具名自动映射到另一个工具。规范化后的参数仍须通过完整 JSON Schema、工具语义校验、路径边界和权限策略；审批卡、日志与实际执行读取同一份规范化参数。无法修复时，模型可见错误必须包含工具名、具体 JSON Pointer 字段和预期约束，并明确允许修正后重试。
 
+Provider-neutral Tool Schema 是本地参数校验的权威来源，协议适配不得改写它。Anthropic wire schema 不发送顶层 `oneOf`、`allOf` 或 `anyOf`：当根 schema 明确为 object，且组合分支涉及的同级字段都已在根 `properties` 声明时，Provider 只从发送副本删除这些顶层关键字，继续保留嵌套组合约束；若组合分支依赖根目录未声明字段、非 object 分支或无法解析的 `$ref`，必须在网络调用和计费前报告包含工具名的本地错误，不得静默丢字段或放宽本地执行校验。其他 Provider 保持各自协议编译行为。
+
 Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelled/timeout/truncated`，供安全检查、trace 和插件使用；模型历史不接收该信封。敏感数据过滤后，Tool Registry 将成功正文投影为 canonical `TextPart | JsonPart`，错误投影为统一短文本，再按投影后的实际内容执行单次与 Run 累计 token bound。自定义 projector 必须同步、确定性、无 I/O，异常时回退默认安全投影。
 
 #### 2.2.1 文件类
@@ -179,6 +181,8 @@ token 预算通过可替换估算器计算。支持 Provider tokenizer、保守�
 - `providerContinuation`：包含 `schemaVersion/providerType/format/data` 的版本化 envelope。`data` 原样保留该 Provider 继续请求所需的有序 provider-native items、签名、密文、cursor 或 response id；Agent Core 和 Renderer 只搬运，不解释、不修改。
 
 Responses 请求必须固定 `store = false` 并回传 encrypted reasoning items；Anthropic 所有非 off 思考档位必须使用 adaptive thinking 与对应 effort，off 不发送 thinking 参数。Structured output 契约必须携带实际 JSON Schema；Responses 与 Anthropic 使用原生 schema 字段，Chat 兜底实现允许降级为 JSON object mode，但 Application 的本地 schema 校验不能省略。
+
+Anthropic 普通 Messages、自动审批/起名以及 native/synthetic compact 请求必须在顶层发送 `cache_control: { type: 'ephemeral' }`，让 Provider 自动把断点推进到最后一个可缓存 block。默认使用 5 分钟 TTL，不发送成本更高的 `ttl: '1h'`；首次 cache creation 计入 miss，只有 Provider 返回的 `cache_read_input_tokens` 计入 hit。缓存长度门槛、精确前缀匹配、TTL、路由稳定性与网关兼容性由 Provider 决定，Application 不伪造命中。
 
 完整原始 Provider request/response 和 stream events 只属于显式开启的 trace。Message 只保存 canonical message parts、可读 reasoning 投影，以及继续协议所需的最小 opaque state。
 

@@ -21,6 +21,7 @@ import {
   normalizedAnthropicCompactUsage,
   normalizedAnthropicUsage,
 } from './anthropic-usage'
+import { projectAnthropicToolInputSchema } from './anthropic-tool-schema'
 import { HttpSseTransport } from './http-sse-transport'
 import {
   ProviderCompletionError,
@@ -91,7 +92,7 @@ function anthropicTools(tools: readonly ProviderToolDefinition[]): JsonValue[] {
   return tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    input_schema: structuredClone(tool.inputSchema),
+    input_schema: projectAnthropicToolInputSchema(tool),
   }))
 }
 
@@ -384,6 +385,7 @@ export class GenericAnthropicProvider implements ModelProvider {
       ...(compiled.system ? { system: compiled.system } : {}),
       messages: compiled.messages,
       ...(wireTools.length > 0 ? { tools: wireTools } : {}),
+      cache_control: { type: 'ephemeral' },
       max_tokens: input.maxOutputTokens,
       stream: true,
       ...(input.route.reasoning === 'off'
@@ -446,6 +448,7 @@ export class GenericAnthropicProvider implements ModelProvider {
         model: input.route.model,
         ...(compiled.system ? { system: compiled.system } : {}),
         messages: structuredClone(compiled.messages),
+        cache_control: { type: 'ephemeral' },
         max_tokens: input.maxOutputTokens,
         context_management: {
           edits: [

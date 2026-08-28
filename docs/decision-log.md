@@ -302,3 +302,17 @@
 - 审批边界：Subagent/Swarm 编排调用本身为 parallel、无副作用、低风险，不强制人工审批。`inherit` child 的文件、命令、网络、终端或 MCP 调用继续逐次经过父权限模式对应的原权限管线；人工审批通过安全 `AgentExecutionEvent` 投影和独立 IPC 决策，不暴露 hidden Session identity。
 - Swarm 执行：删除同父 Run Job 串行 tail 和 prepared child 的全局 FIFO slot；sibling Job、child 及不同父 Run 可以并发。Coordinator 仍在任何 child Provider 请求前原子创建 durable root/children、冻结全部 route、校验总 Agent 数，并按声明顺序汇总结果。
 - 保留保护：PathGuard、工具 schema、权限校验、审批、文件 precondition、原子写入、FileChange OCC、输出/timeout 上限和取消传播保持不变。移除 workspace 互斥不代表移除具体资源冲突检测，也不允许 child 超出父 Run 权限。
+
+## 2026-08-26 — Anthropic Tool Schema 顶层组合关键字兼容投影
+
+- 状态：已采纳并实现；修复 Anthropic Messages 对 Tool `input_schema` 顶层 `oneOf/allOf/anyOf` 的拒绝，同时不削弱本地工具参数校验。
+- 投影边界：`GenericAnthropicProvider` 只修改 Provider wire request 的深拷贝。根 schema 必须声明 `type: object`，且组合分支引用的同级字段必须已出现在根 `properties`；满足条件时删除顶层组合关键字，字段定义、required、additionalProperties 与嵌套组合约束原样保留。
+- 失败边界：分支引入根目录未声明字段、使用无法安全展开的 `$ref` 或包含非 object 分支时，在网络请求前抛出包含工具名的确定性本地错误，不静默合并、不删除工具，也不发送已知会被上游拒绝的请求。
+- 校验边界：ToolRegistry 继续保存并执行完整 Provider-neutral Schema，因此 wire 投影放宽的条件约束仍会在审批和执行前按原契约校验；Chat Completions 与 Responses 的 schema 编译不受影响。
+
+## 2026-08-27 — Anthropic Messages 启用默认五分钟自动 Prompt Cache
+
+- 状态：已采纳并实现；普通对话、后台模型调用和 native/synthetic compact 的 Anthropic Messages request 统一发送顶层 `cache_control: { type: 'ephemeral' }`。
+- TTL 与成本：使用默认 5 分钟 TTL，不发送 `ttl: '1h'`。一小时缓存写入价格高于默认缓存写入，不能在没有用户成本选择的情况下自动升级；命中会刷新默认缓存有效期。
+- 断点语义：采用 Anthropic 自动缓存，让断点随对话推进到最后一个可缓存 block，不在 canonical history 或 Tool Schema 中写入 Provider-only marker。Provider-neutral history、route identity 和其他 Provider request 均不改变。
+- 观测语义：首次写入的 `cache_creation_input_tokens` 继续计入 miss，只有 `cache_read_input_tokens` 计入 hit；短于模型门槛、前缀变化、TTL 过期、实际模型/网关路由变化或网关不支持时允许保持零命中，不由 Application 补值。
