@@ -97,6 +97,14 @@ export interface TerminalBackgroundSnapshot {
   createdAt: string
 }
 
+export interface TerminalOutputRead {
+  terminalId: TerminalId
+  content: string
+  cursor: number
+  truncated: boolean
+  totalBytes: number
+}
+
 let nextTerminalIdValue = 1
 
 /** Allocates process-global incrementing terminal IDs that are never reused within the process. */
@@ -111,6 +119,15 @@ function allocateTerminalId(): TerminalId {
 
 function cloneInfo(info: TerminalInfo): TerminalInfo {
   return { ...info }
+}
+
+function utf8SafeTail(value: Buffer, maximumBytes: number): Buffer {
+  if (value.byteLength <= maximumBytes) return value
+  let start = Math.max(0, value.byteLength - Math.max(0, maximumBytes))
+  while (start < value.byteLength && (value[start] & 0xc0) === 0x80) {
+    start += 1
+  }
+  return value.subarray(start)
 }
 
 /** Owns PTY terminal processes per Session, bounded scrollback, and cleanup state. */
@@ -386,14 +403,27 @@ export class TerminalPool {
     sessionId: SessionId,
     id: TerminalId,
     options: { cursor?: number; lines?: number; maxBytes: number },
-  ): {
-    terminalId: TerminalId
-    content: string
-    cursor: number
-    truncated: boolean
-    totalBytes: number
-  } {
-    const resource = this.#requireOwned(sessionId, id)
+  ): TerminalOutputRead {
+    return this.#readResource(this.#requireOwned(sessionId, id), options)
+  }
+
+  /** Reads bounded model output from a Terminal owned by one public Session. */
+  readBackground(
+    ownerSessionId: SessionId,
+    id: TerminalId,
+    options: { cursor?: number; lines?: number; maxBytes: number },
+  ): TerminalOutputRead {
+    const resource = this.#resources.get(id)
+    if (!resource || resource.ownerSessionId !== ownerSessionId) {
+      throw new Error('Terminal not found for this session')
+    }
+    return this.#readResource(resource, options)
+  }
+
+  #readResource(
+    resource: TerminalResource,
+    options: { cursor?: number; lines?: number; maxBytes: number },
+  ): TerminalOutputRead {
     const snapshot = resource.modelScrollback.snapshot(options.cursor)
     let content = snapshot.data
     const lines = Math.max(1, options.lines ?? 200)
@@ -404,13 +434,10 @@ export class TerminalPool {
     }
 
     const encoded = Buffer.from(content)
-    const bounded =
-      encoded.byteLength > options.maxBytes
-        ? encoded.subarray(encoded.byteLength - options.maxBytes)
-        : encoded
+    const bounded = utf8SafeTail(encoded, options.maxBytes)
 
     return {
-      terminalId: id,
+      terminalId: resource.info.terminalId,
       content: bounded.toString('utf8'),
       cursor: snapshot.cursor,
       truncated:

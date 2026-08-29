@@ -41,6 +41,11 @@ interface ListedSnapshot {
   value: Record<string, JsonValue>
 }
 
+interface TerminalWaitStart {
+  cursor: number
+  terminal: boolean
+}
+
 function json(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
 }
@@ -232,6 +237,7 @@ export class BackgroundTaskService implements BackgroundTaskPort {
   async wait(input: BackgroundWaitInput): Promise<JsonValue> {
     const startedAt = performance.now()
     let snapshots = await this.#snapshots(input, true)
+    const terminalStarts = this.#terminalWaitStarts(snapshots)
     const satisfied = () =>
       input.mode === 'all'
         ? snapshots.every(snapshotTerminal)
@@ -241,6 +247,7 @@ export class BackgroundTaskService implements BackgroundTaskPort {
       await waitDelay(Math.min(POLL_INTERVAL_MS, remaining), input.signal)
       snapshots = await this.#snapshots(input, true)
     }
+    snapshots = this.#attachTerminalWaitOutput(input, snapshots, terminalStarts)
     return json({
       mode: input.mode,
       timedOut: !satisfied(),
@@ -460,6 +467,67 @@ export class BackgroundTaskService implements BackgroundTaskPort {
         this.#snapshot(input, target, includeResult),
       ),
     )
+  }
+
+  #terminalWaitStarts(
+    snapshots: readonly Record<string, JsonValue>[],
+  ): Map<number, TerminalWaitStart> {
+    const starts = new Map<number, TerminalWaitStart>()
+    for (const snapshot of snapshots) {
+      if (
+        snapshot.type !== 'terminal' ||
+        typeof snapshot.id !== 'number' ||
+        typeof snapshot.cursor !== 'number'
+      ) {
+        continue
+      }
+      starts.set(snapshot.id, {
+        cursor: snapshot.cursor,
+        terminal: snapshotTerminal(snapshot),
+      })
+    }
+    return starts
+  }
+
+  #attachTerminalWaitOutput(
+    input: BackgroundWaitInput,
+    snapshots: readonly Record<string, JsonValue>[],
+    starts: ReadonlyMap<number, TerminalWaitStart>,
+  ): Array<Record<string, JsonValue>> {
+    const lines = input.outputLimits?.maxToolOutputLines ?? 500
+    const maxBytes = input.outputLimits?.maxToolOutputBytes ?? 256 * 1_024
+    return snapshots.map((snapshot) => {
+      if (snapshot.type !== 'terminal' || typeof snapshot.id !== 'number') {
+        return snapshot
+      }
+      const id = terminalId(snapshot.id)
+      const start = starts.get(snapshot.id)
+      try {
+        const output = this.#terminals.readBackground(
+          input.parentSessionId,
+          id,
+          {
+            ...(start?.terminal ? {} : { cursor: start?.cursor }),
+            lines,
+            maxBytes,
+          },
+        )
+        return {
+          ...snapshot,
+          content: output.content,
+          cursor: output.cursor,
+          delta: start?.terminal !== true,
+          truncated: output.truncated,
+          totalBytes: output.totalBytes,
+        }
+      } catch {
+        return {
+          ...snapshot,
+          content: '',
+          outputUnavailable: true,
+        }
+      }
+    })
   }
 
   async #snapshot(

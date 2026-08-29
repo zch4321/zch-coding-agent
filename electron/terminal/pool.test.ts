@@ -155,6 +155,39 @@ describe('TerminalPool', () => {
     })
   })
 
+  it('reads background output through the public owner Session', async () => {
+    const { root, ptys, pool } = await harness()
+    const terminal = await pool.open({
+      sessionId: sessionA,
+      ownerSessionId: sessionB,
+      workspace: root,
+    })
+    ptys[0]!.emitData('child terminal output\n')
+
+    expect(
+      pool.readBackground(sessionB, terminal.terminalId, {
+        cursor: 0,
+        lines: 500,
+        maxBytes: 256 * 1_024,
+      }),
+    ).toMatchObject({ content: 'child terminal output\n' })
+    expect(() =>
+      pool.readBackground(sessionA, terminal.terminalId, {
+        cursor: 0,
+        lines: 500,
+        maxBytes: 256 * 1_024,
+      }),
+    ).toThrow('Terminal not found for this session')
+
+    ptys[0]!.emitData('前🙂后')
+    expect(
+      pool.readBackground(sessionB, terminal.terminalId, {
+        lines: 500,
+        maxBytes: 6,
+      }).content,
+    ).toBe('后')
+  })
+
   it('writes a complete ANSI-free artifact across chunk boundaries', async () => {
     const { root, ptys, pool } = await harness()
     const sessionTemp = {

@@ -115,7 +115,7 @@ AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-to
 | `run_command` | 一次性执行进程或 shell 命令，等待结束，返回 stdout/stderr/exit code | 有     | **是**   |
 | `delay`       | 等待一个有界毫秒数，供 terminal 轮询输出时使用                      | 无     | **是**   |
 
-> `run_command` 用于短测试、构建、一次性脚本。长时间测试、watch、开发服务器、REPL 或需要反复观察输出的命令应使用 `terminal_open` / `terminal_send`；用 `background_wait` 等待 PTY 退出，并通过 `read_file` 分页读取 Terminal artifact。
+> `run_command` 用于短测试、构建、一次性脚本。长时间测试、watch、开发服务器、REPL 或需要反复观察输出的命令应使用 `terminal_open` / `terminal_send`；用 `background_wait` 等待 PTY 退出或一个采样超时，并读取本次等待窗口的增量输出；完整输出通过 `read_file` 分页读取 Terminal artifact。
 >
 > 参数必须区分 `mode: "process"`（`executable + args[]`，默认优先）和 `mode: "shell"`（命令字符串，支持管道/重定向但风险更高）。不能把两者混成一个无法可靠审查的字符串。
 >
@@ -157,8 +157,8 @@ AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-to
 | `background_list`   | 分页列出当前 Session 最新的 Subagent root、Swarm root 与 Terminal     |
 | `background_cancel` | 幂等取消当前 Session 拥有的 root、Swarm child 或 Terminal，可等待收敛 |
 
-- target 统一为 `{ type: "subagent" | "swarm" | "terminal", id: number }`。Subagent/Swarm 共享一个当前应用进程内递增且不复用的 Agent 编号空间；Terminal 遵循相同生命周期但使用独立编号空间，`type` 负责消除同号歧义。两类 ID 都在重启后失效并重新分配；SQLite、Renderer Agents API 与 artifact 目录仍可使用 durable execution UUID，但模型工具不接受它作为操作 target。`background_wait` 默认 `any`；纯 Agent 默认/最大 5 分钟，包含 Terminal 时整次最多 60 秒，`timeoutMs = 0` 为即时快照。只有 Agent 进入终态或 PTY 退出会唤醒，普通输出/activity 不唤醒；超时不是错误。
-- Subagent 终态快照可内联受全局限制的最终回答，并返回 `resultPath/activityPath`；运行中只返回状态和 activity path。Swarm 返回状态、child 计数、每个 child 的数字 target 和 `manifestPath`，不内联聚合结果。Terminal 返回状态、exit code、日志路径和当前 cursor。
+- target 统一为 `{ type: "subagent" | "swarm" | "terminal", id: number }`。Subagent/Swarm 共享一个当前应用进程内递增且不复用的 Agent 编号空间；Terminal 遵循相同生命周期但使用独立编号空间，`type` 负责消除同号歧义。两类 ID 都在重启后失效并重新分配；SQLite、Renderer Agents API 与 artifact 目录仍可使用 durable execution UUID，但模型工具不接受它作为操作 target。`background_wait` 默认 `any`；纯 Agent 默认/最大 5 分钟，包含 Terminal 时整次最多 60 秒，`timeoutMs = 0` 为即时快照。Agent 进入终态或 PTY 退出/失败会唤醒，普通 activity 和 Terminal 输出不唤醒；超时不是错误。
+- Subagent 终态快照可内联受全局限制的最终回答，并返回 `resultPath/activityPath`；运行中只返回状态和 activity path。Swarm 返回状态、child 计数、每个 child 的数字 target 和 `manifestPath`，不内联聚合结果。Terminal 在退出或 timeout 返回时附加从本次 wait 起始 cursor 到返回时的无 ANSI 增量、当前 cursor、截断状态和日志路径；如果 wait 开始时 Terminal 已是终态，则返回当前保留输出。读取直接使用 Run 冻结的全局 `maxToolOutputLines/maxToolOutputBytes`，不再定义 Terminal wait 专属行数或字节上限。
 - `background_list` 默认混合返回最新 20 个 root/Terminal，支持类型、`active|finished|all`、limit 和绑定查询条件的 opaque cursor；Swarm child 不作为 root 展平，而随 Swarm 快照返回操作 target，manifest 只保存任务、assignment、路径与 durable 状态，不保存模型操作 ID。`background_cancel.waitMs` 默认 0、最大 60 秒；取消 Swarm root 级联未完成 child，取消单 child 后重新汇总 root。
 - child catalog 始终移除 `subagent_run`、`swarm_run` 和全部 `background_*`，防止递归编排。
 

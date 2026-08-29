@@ -1786,7 +1786,7 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 
 独立 `agent-execution:event` 只投影安全生命周期和可见活动，不把 hidden Session 伪装成普通 Session。Agents artifact 根列表仅显示普通 Subagent 与 Swarm root；展开 Swarm root 后按 `childOrdinal` 显示 child。两级均使用手动 `NCollapse`，不自动展开；详情只显示运行时间、工具调用数、状态、模型/usage/Agent 计数和可见 Assistant 文本，不展示 reasoning、完整工具轨迹、child Session ID、prompt harness、route 凭据或 Provider continuation。
 
-统一 `BackgroundTaskService` 以 SQLite execution 与 TerminalPool ownership 为权威，同时用一个进程内 registry 把 durable Agent execution UUID 映射为全局递增数字；模型输入永不直接解析或接受 UUID，重启后通过 `background_list` 为历史 root 分配新数字。`background_wait` 接受混合 target、`any|all` 和 timeout，只在 Agent 终态/PTY exit 或正常超时返回；纯 Agent 最大 300 秒，含 Terminal 最大 60 秒。`background_list` 将 standalone root、Swarm root 与 Terminal 按创建时间合并，使用绑定 filters 的 opaque 分页 cursor，并按冻结 Tool 输出 budget 生成不会被通用 limiter 破坏的精确页。`background_cancel` 校验数字 target 的当前进程映射和公开 Session ownership，幂等取消 root/child/Terminal，可选等待最多 60 秒；Swarm root 级联 child，单 child 取消触发 root 重汇总。
+统一 `BackgroundTaskService` 以 SQLite execution 与 TerminalPool ownership 为权威，同时用一个进程内 registry 把 durable Agent execution UUID 映射为全局递增数字；模型输入永不直接解析或接受 UUID，重启后通过 `background_list` 为历史 root 分配新数字。`background_wait` 接受混合 target、`any|all` 和 timeout，只在 Agent 终态、PTY exit/failure 或正常超时返回；普通 Terminal 输出不参与唤醒。wait 首次快照冻结每个运行中 Terminal 的 ANSI-free model cursor，返回前按 public owner 读取该 cursor 之后的增量；起始时已终态则读取当前保留输出。读取行数与字节数直接使用 Run 冻结的全局 Tool 输出限制，最终 canonical projection 仍接受同一全局 limiter；纯 Agent 最大等待 300 秒，含 Terminal 最大 60 秒。`background_list` 将 standalone root、Swarm root 与 Terminal 按创建时间合并，使用绑定 filters 的 opaque 分页 cursor，并按冻结 Tool 输出 budget 生成不会被通用 limiter 破坏的精确页。`background_cancel` 校验数字 target 的当前进程映射和公开 Session ownership，幂等取消 root/child/Terminal，可选等待最多 60 秒；Swarm root 级联 child，单 child 取消触发 root 重汇总。
 
 ---
 
@@ -1844,7 +1844,7 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 - hidden Session 不进入公开 get/bootstrap/list/search/export 或 Renderer events；父/Project 删除级联、归档保留、启动 interrupted、并发/终态幂等 handle 与参数冲突均有持久化回归。
 - 并发 start 的 Session leaf 容量预留必须原子；Swarm 容量不足不创建部分 root/child，设置调低不取消存量，终态释放名额。
 - 父 Run 完成/取消/Provider failure 后后台 Agent 继续；30 分钟默认/自定义 timeout、显式 cancel、archive/delete/quit 会取消并收敛，usage 不回写已结束父 Run。
-- `background_wait` 覆盖 any/all、混合 target、0/60 秒/5 分钟和正常超时；list 覆盖 filter-bound cursor 与小 byte budget；cancel 覆盖 waitMs、Swarm root/child 和 Terminal。
+- `background_wait` 覆盖 any/all、混合 target、0/60 秒/5 分钟、Terminal 输出不唤醒、PTY exit 提前唤醒、等待窗口增量及统一输出限制；list 覆盖 filter-bound cursor 与小 byte budget；cancel 覆盖 waitMs、Swarm root/child 和 Terminal。
 - Session temp/PathGuard 覆盖双根绝对路径、symlink/junction、scratch 免审批、Readonly、无 FileChange、环境变量/cwd、24 小时清理、Session/Project 删除和 capture failure。
 - Terminal 覆盖默认 1 秒增量/tail、完整日志、跨 chunk ANSI、spawn/artifact failure，并断言 Provider catalog 不含 `terminal_read/list/close`。
 - Compact 只在完整 turn boundary 修改 `inHistory`，active history 可直接按 seq 重建。

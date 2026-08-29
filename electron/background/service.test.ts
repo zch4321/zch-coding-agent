@@ -95,7 +95,15 @@ async function fixture() {
       hasMore: false,
     })),
   }
-  const terminal = {
+  const terminal: {
+    terminalId: number
+    status: 'running' | 'closed'
+    exitCode: number | null
+    cursor: number
+    artifactAvailable: boolean
+    artifactPath: string
+    createdAt: string
+  } = {
     terminalId: 7,
     status: 'running' as const,
     exitCode: null,
@@ -108,9 +116,18 @@ async function fixture() {
     ),
     createdAt: '2026-08-28T01:00:00.000Z',
   }
+  const backgroundSnapshot = vi.fn(() => ({ ...terminal }))
+  const readBackground = vi.fn(() => ({
+    terminalId: terminal.terminalId,
+    content: '',
+    cursor: terminal.cursor,
+    truncated: false,
+    totalBytes: terminal.cursor,
+  }))
   const terminals = {
-    backgroundSnapshot: vi.fn(() => terminal),
-    listBackground: vi.fn(() => [terminal]),
+    backgroundSnapshot,
+    readBackground,
+    listBackground: vi.fn(() => [{ ...terminal }]),
     cancelBackground: cancelTerminal,
   }
   const handles = new BackgroundAgentHandleRegistry()
@@ -138,6 +155,9 @@ async function fixture() {
     standaloneTargetId,
     swarm,
     swarmTargetId,
+    terminal,
+    backgroundSnapshot,
+    readBackground,
     cancelSubagent,
     cancelSwarm,
     cancelTerminal,
@@ -164,6 +184,92 @@ describe('BackgroundTaskService', () => {
     await expect(
       target.service.wait({ ...context, mode: 'all' }),
     ).resolves.toMatchObject({ timedOut: true })
+  })
+
+  it('waits through Terminal output until timeout and returns the bounded delta', async () => {
+    const target = await fixture()
+    target.backgroundSnapshot
+      .mockReturnValueOnce({ ...target.terminal })
+      .mockReturnValue({ ...target.terminal, cursor: 84 })
+    target.readBackground.mockReturnValue({
+      terminalId: 7,
+      content: 'progress one\nprogress two',
+      cursor: 84,
+      truncated: false,
+      totalBytes: 84,
+    })
+
+    const result = await target.service.wait({
+      parentSessionId,
+      sessionTemp: target.sessionTemp,
+      signal: new AbortController().signal,
+      outputLimits: { maxToolOutputBytes: 4_096, maxToolOutputLines: 17 },
+      targets: [{ type: 'terminal', id: 7 }],
+      mode: 'all',
+      timeoutMs: 25,
+    })
+
+    expect(result).toMatchObject({
+      timedOut: true,
+      targets: [
+        {
+          type: 'terminal',
+          status: 'running',
+          content: 'progress one\nprogress two',
+          cursor: 84,
+          delta: true,
+          truncated: false,
+          totalBytes: 84,
+        },
+      ],
+    })
+    expect(target.readBackground).toHaveBeenCalledWith(parentSessionId, 7, {
+      cursor: 42,
+      lines: 17,
+      maxBytes: 4_096,
+    })
+  })
+
+  it('wakes when a Terminal exits and includes output produced before exit', async () => {
+    const target = await fixture()
+    target.backgroundSnapshot
+      .mockReturnValueOnce({ ...target.terminal })
+      .mockReturnValue({
+        ...target.terminal,
+        status: 'closed',
+        exitCode: 0,
+        cursor: 96,
+      })
+    target.readBackground.mockReturnValue({
+      terminalId: 7,
+      content: 'completed output',
+      cursor: 96,
+      truncated: false,
+      totalBytes: 96,
+    })
+
+    const result = await target.service.wait({
+      parentSessionId,
+      sessionTemp: target.sessionTemp,
+      signal: new AbortController().signal,
+      targets: [{ type: 'terminal', id: 7 }],
+      mode: 'all',
+      timeoutMs: 1_000,
+    })
+
+    expect(result).toMatchObject({
+      timedOut: false,
+      targets: [
+        {
+          status: 'closed',
+          exitCode: 0,
+          content: 'completed output',
+          delta: true,
+        },
+      ],
+    })
+    expect(result).toMatchObject({ elapsedMs: expect.any(Number) })
+    expect((result as { elapsedMs: number }).elapsedMs).toBeLessThan(1_000)
   })
 
   it('lists roots with artifact paths and a filter-bound cursor', async () => {
