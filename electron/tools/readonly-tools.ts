@@ -54,7 +54,7 @@ const ReadFileArgsSchema = Type.Object(
       Type.Integer({
         minimum: 1,
         maximum: MAX_READ_LINES,
-        description: `Maximum number of lines to return, up to ${MAX_READ_LINES}.`,
+        description: `Requested maximum source lines. The actual page is capped by the frozen per-Tool line limit and the hard maximum of ${MAX_READ_LINES}; continuation metadata does not consume this line budget.`,
       }),
     ),
     lineNumbers: Type.Optional(
@@ -199,7 +199,7 @@ export function createReadOnlyToolDefinitions(
     id: 'read_file',
     executionMode: 'parallel',
     description:
-      'Stream a bounded UTF-8 page from a workspace or Session-temp file. Continue with nextStartLine and, only for a split long line, nextStartCharacter. Use tail for a bounded final snapshot.',
+      'Stream a bounded UTF-8 page from a workspace or Session-temp file. The configured Tool line limit counts source lines only; continuation metadata is appended outside that line budget. Continue with nextStartLine and, only for a split long line, nextStartCharacter. Use tail for a bounded final snapshot.',
     inputSchema: ReadFileArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
@@ -221,10 +221,10 @@ export function createReadOnlyToolDefinitions(
         )
         const configuredLimits = getLimits()
         const outputLimits = context.toolOutputLimits ?? configuredLimits
-        const bodyLineLimit =
-          outputLimits.maxToolOutputLines <= 2
-            ? 1
-            : outputLimits.maxToolOutputLines - 2
+        const bodyLineLimit = Math.min(
+          MAX_READ_LINES,
+          outputLimits.maxToolOutputLines,
+        )
         const result = await readStreamingFile({
           guard,
           inputPath: args.path,
@@ -237,7 +237,6 @@ export function createReadOnlyToolDefinitions(
             1,
             outputLimits.maxToolOutputBytes - READ_FILE_METADATA_RESERVE_BYTES,
           ),
-          projectionLineLimit: outputLimits.maxToolOutputLines,
           maxWorkspaceSourceBytes: configuredLimits.readFileSourceBytes,
           signal: context.signal,
         })

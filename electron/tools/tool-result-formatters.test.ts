@@ -104,6 +104,29 @@ describe('text Tool Result formatters', () => {
     ).toBe('src/\nREADME.md')
   })
 
+  it('appends read_file metadata outside the source line budget', () => {
+    const sourceLines = Array.from(
+      { length: 500 },
+      (_, index) => `${index + 1}\tline ${index + 1}`,
+    )
+    const output = rendered(
+      projectReadFileResult(
+        result(
+          {
+            content: sourceLines.join('\n'),
+            hasMore: true,
+            nextStartLine: 501,
+          },
+          { truncated: true },
+        ),
+      ),
+    )
+
+    expect(output.split('\n').slice(0, 500)).toEqual(sourceLines)
+    expect(output.split('\n')).toHaveLength(502)
+    expect(output).toMatch(/\n\n\[hasMore=true; nextStartLine=501\]$/u)
+  })
+
   it('formats terminal output without repeating terminal IDs', () => {
     expect(
       rendered(

@@ -69,13 +69,10 @@ export function truncateTextHeadTail(
   return `${decodeUtf8Slice(source.subarray(0, headBytes))}${TRUNCATION_MARKER}${decodeUtf8Slice(source.subarray(Math.max(headBytes, source.length - tailBytes)))}`
 }
 
-/** Fits one projected Tool Result to the frozen global byte and line limits. */
+/** Fits one projected Tool Result to the frozen global byte safety limit. */
 export function boundToolResultProjectionForContext(
   projection: ToolResultProjection,
-  limits: Pick<
-    PublicConfig['limits'],
-    'maxToolOutputBytes' | 'maxToolOutputLines'
-  >,
+  limits: Pick<PublicConfig['limits'], 'maxToolOutputBytes'>,
 ): ToolResultProjection {
   if (projection.outputPolicy !== 'bounded') return projection
 
@@ -84,9 +81,8 @@ export function boundToolResultProjectionForContext(
   const lines = rendered.split('\n')
   const totalLines = lines.length
   const byteLimitExceeded = totalBytes > limits.maxToolOutputBytes
-  const lineLimitExceeded = totalLines > limits.maxToolOutputLines
 
-  if (!byteLimitExceeded && !lineLimitExceeded) return projection
+  if (!byteLimitExceeded) return projection
 
   const continuation = [
     'artifactPath',
@@ -105,27 +101,17 @@ export function boundToolResultProjectionForContext(
       return value ? `${field}=${value}` : undefined
     })
     .find((value) => value !== undefined)
-  const marker = `[truncated=true; byteLimitExceeded=${String(
-    byteLimitExceeded,
-  )}; lineLimitExceeded=${String(
-    lineLimitExceeded,
-  )}; totalBytes=${totalBytes}; totalLines=${totalLines}${
+  const marker = `[truncated=true; byteLimitExceeded=true; totalBytes=${totalBytes}; totalLines=${totalLines}${
     continuation ? `; ${continuation}` : ''
   }]`
-  const sourceLineLimit = Math.max(0, limits.maxToolOutputLines - 1)
-  const sourceHead = lines.slice(0, sourceLineLimit).join('\n')
-  const separator = sourceHead
-    ? limits.maxToolOutputLines > 1
-      ? '\n'
-      : ' '
-    : ''
+  const separator = '\n'
   const availableBytes = Math.max(
     0,
     limits.maxToolOutputBytes -
       Buffer.byteLength(`${separator}${marker}`, 'utf8'),
   )
   const boundedHead = decodeUtf8Slice(
-    Buffer.from(sourceHead, 'utf8').subarray(0, availableBytes),
+    Buffer.from(rendered, 'utf8').subarray(0, availableBytes),
   )
 
   return {

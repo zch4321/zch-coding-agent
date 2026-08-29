@@ -78,15 +78,7 @@ export function projectReadFileResult(
     ...(booleanValue(content.lineTruncated) ? ['lineTruncated=true'] : []),
     ...(booleanValue(content.tailClipped) ? ['tailClipped=true'] : []),
   ]
-  const footer = `[${fields.join('; ')}]`
-  const lineLimit = numberValue(content.projectionLineLimit)
-  return textPart(
-    lineLimit === 1
-      ? `${body.replace(/\n/gu, ' ')} ${footer}`
-      : lineLimit === 2
-        ? `${body}\n${footer}`
-        : appendFooter(body, fields),
-  )
+  return textPart(appendFooter(body, fields))
 }
 
 /** Projects list_dir to one workspace-relative path per line. */

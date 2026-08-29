@@ -234,7 +234,7 @@ describe('ToolRegistry hard output boundary', () => {
     )
     const bounded = boundToolResultProjectionForContext(
       projectToolResultForModel({ call, definition, result }),
-      { maxToolOutputBytes: 1_024, maxToolOutputLines: 500 },
+      { maxToolOutputBytes: 1_024 },
     )
     expect(
       Buffer.byteLength((bounded.content[0] as { text: string }).text, 'utf8'),

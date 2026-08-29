@@ -446,7 +446,7 @@ describe('read-only tools', () => {
     }
   })
 
-  it('uses the global line budget instead of the former 400-line default', async () => {
+  it('uses the configured line budget only for source file lines', async () => {
     const root = await workspace()
     await writeFile(
       path.join(root, 'many-lines.txt'),
@@ -462,8 +462,13 @@ describe('read-only tools', () => {
 
     expect(result).toMatchObject({
       status: 'ok',
-      content: { endLine: 498, hasMore: true },
+      content: { endLine: 500, hasMore: true },
     })
+    if (result.status === 'ok') {
+      expect(
+        (result.content as { content: string }).content.split('\n'),
+      ).toHaveLength(500)
+    }
   })
 
   it('returns a structured error for path escapes', async () => {
@@ -520,9 +525,9 @@ describe('read-only tools', () => {
       status: 'ok',
       content: {
         startLine: 1,
-        endLine: 498,
+        endLine: 500,
         hasMore: true,
-        nextStartLine: 499,
+        nextStartLine: 501,
       },
     })
 
@@ -544,7 +549,7 @@ describe('read-only tools', () => {
     expect(second).toMatchObject({
       status: 'ok',
       content: {
-        startLine: 499,
+        startLine: 501,
         hasMore: true,
       },
     })

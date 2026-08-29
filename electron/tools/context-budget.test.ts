@@ -34,7 +34,6 @@ describe('context budget', () => {
     }
     const bounded = boundToolResultProjectionForContext(large, {
       maxToolOutputBytes: 1_024,
-      maxToolOutputLines: 500,
     })
 
     expect(bounded).toMatchObject({ truncated: true })
@@ -53,7 +52,6 @@ describe('context budget', () => {
     expect(
       boundToolResultProjectionForContext(small, {
         maxToolOutputBytes: 1_024,
-        maxToolOutputLines: 500,
       }),
     ).toEqual(small)
   })
@@ -71,7 +69,7 @@ describe('context budget', () => {
         truncated: false,
         outputPolicy: 'bounded',
       },
-      { maxToolOutputBytes: 1_024, maxToolOutputLines: 500 },
+      { maxToolOutputBytes: 1_024 },
     )
     const content = bounded.content[0]
     expect(content?.type).toBe('text')
@@ -97,11 +95,31 @@ describe('context budget', () => {
         truncated: false,
         outputPolicy: 'bounded',
       },
-      { maxToolOutputBytes: 1_024, maxToolOutputLines: 500 },
+      { maxToolOutputBytes: 1_024 },
     )
 
     expect(JSON.stringify(bounded.content)).toContain(
       'resultPath=/tmp/session/artifacts/subagents/result.md',
     )
+  })
+
+  it('does not apply the per-Tool source line setting in the byte guard', () => {
+    const projection = {
+      content: [
+        {
+          type: 'text' as const,
+          text: Array.from({ length: 1_000 }, () => 'x').join('\n'),
+        },
+      ],
+      isError: false,
+      truncated: false,
+      outputPolicy: 'bounded' as const,
+    }
+
+    expect(
+      boundToolResultProjectionForContext(projection, {
+        maxToolOutputBytes: 16 * 1_024,
+      }),
+    ).toEqual(projection)
   })
 })

@@ -67,15 +67,15 @@ Agent 基于原生 **Tool Use（Function Calling）** 运行一个循环：
 
 - `effects`：如 `filesystem.read`、`filesystem.write`、`process.spawn`、`terminal.write`、`network.request`。
 - `risk`：`low | review | high` 的默认风险级别。
-- `supportsAbort`、`defaultTimeoutMs`、`modelOutputPolicy`。其中 `bounded` 使用统一模型可见输出限制，`paged` 由工具维护准确分页，`passthrough` 只用于自身已有严格源文件上限的结果。
+- `supportsAbort`、`defaultTimeoutMs`、`modelOutputPolicy`。其中 `bounded` 使用统一模型可见字节安全限制，`paged` 由工具维护准确分页和自身行数语义，`passthrough` 只用于自身已有严格源文件上限的结果。
 
 Provider 生成的参数在记录 `tool.proposed` 和进入权限审批前先规范化：递归删除 schema 明确禁止的多余字段，并转换无歧义的 JSON 标量类型（数字字符串转 number/integer、`true|false` 字符串转 boolean、number/boolean 转 string）。不得把字符串猜测为 JSON object/array、把单值包装成数组、把 null 转成可执行值，也不得把未知工具名自动映射到另一个工具。规范化后的参数仍须通过完整 JSON Schema、工具语义校验、路径边界和权限策略；审批卡、日志与实际执行读取同一份规范化参数。无法修复时，模型可见错误必须包含工具名、具体 JSON Pointer 字段和预期约束，并明确允许修正后重试。
 
 Provider-neutral Tool Schema 是本地参数校验的权威来源，协议适配不得改写它。Anthropic wire schema 不发送顶层 `oneOf`、`allOf` 或 `anyOf`：当根 schema 明确为 object，且组合分支涉及的同级字段都已在根 `properties` 声明时，Provider 只从发送副本删除这些顶层关键字，继续保留嵌套组合约束；若组合分支依赖根目录未声明字段、非 object 分支或无法解析的 `$ref`，必须在网络调用和计费前报告包含工具名的本地错误，不得静默丢字段或放宽本地执行校验。其他 Provider 保持各自协议编译行为。
 
-Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelled/timeout/truncated`，供安全检查、trace 和插件使用；模型历史不接收该信封。敏感数据过滤后，Tool Registry 将成功正文投影为 canonical `TextPart | JsonPart`，错误投影为统一短文本，再使用 Run 开始时冻结的 `maxToolOutputBytes` 与 `maxToolOutputLines` 限制模型可见结果；默认分别为 256 KiB 与 500 行，不再维护 token 单结果预算或跨调用累计 Tool Result 预算。`bounded` 结果超限时只保留 UTF-8 安全的头部，并在限制内附上触发原因、原始字节/行数和可用的 artifact/continuation 路径；`read_file`、`background_list` 等 `paged` 结果必须自行保证 continuation 元数据完整，不能再被通用 limiter 二次破坏。自定义 projector 必须同步、确定性、无 I/O，异常时回退默认安全投影。
+Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelled/timeout/truncated`，供安全检查、trace 和插件使用；模型历史不接收该信封。敏感数据过滤后，Tool Registry 将成功正文投影为 canonical `TextPart | JsonPart`，错误投影为统一短文本。Run 开始时冻结 `maxToolOutputBytes/maxToolOutputLines`，默认 256 KiB/500 行：字节数由统一出口作为最终安全保险，行数配置交给各工具按自身语义消费，不再由统一出口截断所有 Tool Result。`bounded` 结果超过字节上限时只保留 UTF-8 安全的头部，并在限制内附上原始字节/行数和可用的 artifact/continuation 路径；`read_file`、`background_list` 等 `paged` 结果自行保证正文预算与 continuation 元数据完整。自定义 projector 必须同步、确定性、无 I/O，异常时回退默认安全投影。
 
-Terminal、Command、Subagent 与 Swarm 始终尝试留档。Fetch 与 Web Search 始终保存完整的已获取/规范化结果；MCP 模型投影超过 256 KiB 或 500 行时保存完整规范化 JSON；这些工具的内联结果仍受统一限制。MCP catalog 继续保留 4 MiB、100 页、1,000 tools 的独立发现边界。`read_skill` 源文件上限为 256 KiB，正文完整返回并豁免 500 行限制；其他不可分页结果超限时只有头部和截断元数据。
+Terminal、Command、Subagent 与 Swarm 始终尝试留档。Fetch 与 Web Search 始终保存完整的已获取/规范化结果；MCP 模型投影超过 256 KiB 或 500 行时保存完整规范化 JSON；这些工具的内联结果仍受统一字节保险。MCP catalog 继续保留 4 MiB、100 页、1,000 tools 的独立发现边界。`read_skill` 源文件上限为 256 KiB并完整返回；其他不可分页结果超过统一字节上限时只有头部和截断元数据。
 
 AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-tool `ToolDefinition.maxOutputBytes`，新增 `maxToolOutputLines` 与 `subagents.maxSubagents`。旧 `maxToolOutputBytes` 恰为 v24 默认 128 KiB 时迁移到 256 KiB，自定义值保留；从含 `maxAgentsPerSwarm` 的旧版直接升级时保留该值为 `maxSubagents`，v24 升级使用 32。
 
@@ -90,7 +90,7 @@ AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-to
 
 > 设计意图：把常规删除做成独立工具，便于精确展示路径、数量和审批风险。它不能阻止 `run_command` 间接删除文件，因此命令工具仍必须独立经过权限策略，不能把工具拆分误当成 sandbox。
 
-`read_file` 从文件句柄流式读取，不为分页把整个文件载入内存。它支持 1-based `startLine`、可选的 0-based Unicode code-point `startCharacter`、`tail` 以及 `lineCount/lineNumbers`；`tail` 与显式起点互斥。结果始终返回下一次可用的 `nextStartLine`，只有停在超长单行中间时才返回非零 `nextStartCharacter`，因此普通分页只需复制下一行号；EOF 后同一行继续 append 时也能从字符偏移续读。读取器在 UTF-8 code point 边界安全停下，并继续检测一次调用期间的文件替换；跨调用不再维护文件身份 cursor。workspace 文件仍受 `readFileSourceBytes` 总源文件上限，Session temp 文件不受该总量限制，但每页模型正文始终受冻结的 256 KiB/500 行限制。临时 artifact 已清理时返回 `ARTIFACT_EXPIRED`。
+`read_file` 从文件句柄流式读取，不为分页把整个文件载入内存。它支持 1-based `startLine`、可选的 0-based Unicode code-point `startCharacter`、`tail` 以及 `lineCount/lineNumbers`；`tail` 与显式起点互斥。结果始终返回下一次可用的 `nextStartLine`，只有停在超长单行中间时才返回非零 `nextStartCharacter`，因此普通分页只需复制下一行号；EOF 后同一行继续 append 时也能从字符偏移续读。读取器在 UTF-8 code point 边界安全停下，并继续检测一次调用期间的文件替换；跨调用不再维护文件身份 cursor。workspace 文件仍受 `readFileSourceBytes` 总源文件上限，Session temp 文件不受该总量限制。每页文件正文直接使用冻结的行数配置（默认完整 500 个源文件行）以及为 continuation 元数据预留空间后的字节配置；空行与 footer 不占用源文件行预算。临时 artifact 已清理时返回 `ARTIFACT_EXPIRED`。
 
 `apply_patch` 第一版一次只修改一个已存在的 UTF-8 文本文件，可包含多个 hunk。补丁路径必须是 workspace 相对路径；禁止二进制、rename、mode change、绝对路径和越界路径。为适配模型常见的计数错误，hunk header 的行数和 new-file 行号只作为提示；上下文/删除行仍必须精确匹配，old line number 失效时只有在精确上下文唯一命中时才可应用。审批绑定原文件 hash、规范化补丁 hash 与结果 hash，执行前重新验证。`create_file` 只创建不存在的文件，并会自动创建缺失父目录；覆盖已有文件应使用 `apply_patch`。
 

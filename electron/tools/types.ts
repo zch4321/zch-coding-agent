@@ -44,7 +44,7 @@ export interface ToolDefinition<Schema extends TSchema = TSchema> {
   supportsAbort: boolean
   /** Null delegates lifetime bounds to the abortable orchestration body. */
   defaultTimeoutMs: number | null
-  /** Selects the shared model-visible output limiter; defaults to bounded. */
+  /** Selects byte-safety or tool-owned output handling; defaults to bounded. */
   modelOutputPolicy?: ToolModelOutputPolicy
   validateArgs?(args: Static<Schema>): string | undefined
   /** Projects a successful internal result into deterministic model-visible parts. */

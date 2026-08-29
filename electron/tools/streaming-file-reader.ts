@@ -20,7 +20,6 @@ export interface StreamingFileReadInput {
   lineCount: number
   lineNumbers: boolean
   maxOutputBytes: number
-  projectionLineLimit: number
   maxWorkspaceSourceBytes: number
   signal?: AbortSignal
 }
@@ -359,7 +358,6 @@ export async function readStreamingFile(
         tailClipped: input.tail === true && hasMore,
         lineTruncated,
         totalBytes: metadata.size,
-        projectionLineLimit: input.projectionLineLimit,
       },
       totalBytes: metadata.size,
       truncated: hasMore,
