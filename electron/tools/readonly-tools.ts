@@ -15,6 +15,7 @@ import {
   projectReadFileResult,
 } from './tool-result-formatters'
 import { readStreamingFile } from './streaming-file-reader'
+import { resolveSessionTempToolPath } from '../session-temp/path-alias'
 
 const MAX_READ_LINES = 10_000
 const READ_FILE_METADATA_RESERVE_BYTES = 256
@@ -33,7 +34,7 @@ const ReadFileArgsSchema = Type.Object(
       minLength: 1,
       maxLength: 4_096,
       description:
-        'Workspace-relative path or absolute path inside the current Session temp directory.',
+        'Workspace-relative path, absolute path inside the current Session temp directory, or a returned ZCH_SESSION_*_DIR:/ tool path alias.',
     }),
     startLine: Type.Optional(
       Type.Integer({
@@ -80,7 +81,7 @@ const ListDirArgsSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative directory or absolute Session-temp directory. Omit to list the workspace root.',
+          'Workspace-relative directory, absolute Session-temp directory, or a returned ZCH_SESSION_*_DIR:/ tool path alias. Omit to list the workspace root.',
       }),
     ),
     recursive: Type.Optional(
@@ -113,7 +114,7 @@ const GlobArgsSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative directory or absolute Session-temp directory to search. Omit to search the workspace root.',
+          'Workspace-relative directory, absolute Session-temp directory, or a returned ZCH_SESSION_*_DIR:/ tool path alias to search. Omit to search the workspace root.',
       }),
     ),
     maxResults: Type.Optional(
@@ -139,7 +140,7 @@ const GrepArgsSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative file/directory or absolute Session-temp path to search. Omit for workspace root.',
+          'Workspace-relative file/directory, absolute Session-temp path, or a returned ZCH_SESSION_*_DIR:/ tool path alias to search. Omit for workspace root.',
       }),
     ),
     include: Type.Optional(
@@ -199,7 +200,7 @@ export function createReadOnlyToolDefinitions(
     id: 'read_file',
     executionMode: 'parallel',
     description:
-      'Stream a bounded UTF-8 page from a workspace or Session-temp file. The configured Tool line limit counts source lines only; continuation metadata is appended outside that line budget. Continue with nextStartLine and, only for a split long line, nextStartCharacter. Use tail for a bounded final snapshot.',
+      'Stream a bounded UTF-8 page from a workspace or Session-temp file, including returned ZCH_SESSION_*_DIR:/ artifact aliases. The configured Tool line limit counts source lines only; continuation metadata is appended outside that line budget. Continue with nextStartLine and, only for a split long line, nextStartCharacter. Use tail for a bounded final snapshot.',
     inputSchema: ReadFileArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
@@ -221,13 +222,17 @@ export function createReadOnlyToolDefinitions(
         )
         const configuredLimits = getLimits()
         const outputLimits = context.toolOutputLimits ?? configuredLimits
+        const inputPath = resolveSessionTempToolPath(
+          args.path,
+          context.sessionTemp,
+        )
         const bodyLineLimit = Math.min(
           MAX_READ_LINES,
           outputLimits.maxToolOutputLines,
         )
         const result = await readStreamingFile({
           guard,
-          inputPath: args.path,
+          inputPath,
           startLine: args.startLine,
           startCharacter: args.startCharacter,
           tail: args.tail,
@@ -249,14 +254,18 @@ export function createReadOnlyToolDefinitions(
           error instanceof PathGuardError &&
           error.code === 'PATH_NOT_FOUND' &&
           context.sessionTemp &&
-          path.isAbsolute(args.path) &&
+          path.isAbsolute(
+            resolveSessionTempToolPath(args.path, context.sessionTemp),
+          ) &&
           (() => {
             try {
               return (
                 workspaceGuard(
                   context.workspace.canonicalPath,
                   context.sessionTemp.root,
-                ).rootForCandidate(args.path).kind === 'session-temp'
+                ).rootForCandidate(
+                  resolveSessionTempToolPath(args.path, context.sessionTemp),
+                ).kind === 'session-temp'
               )
             } catch {
               return false
@@ -279,7 +288,7 @@ export function createReadOnlyToolDefinitions(
     id: 'list_dir',
     executionMode: 'parallel',
     description:
-      'List files and directories inside the workspace or current Session temp. Recursive listing skips symlinks and large generated folders.',
+      'List files and directories inside the workspace or current Session temp. Returned ZCH_SESSION_*_DIR:/ path aliases are accepted. Recursive listing skips symlinks and large generated folders.',
     inputSchema: ListDirArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
@@ -293,9 +302,13 @@ export function createReadOnlyToolDefinitions(
           context.sessionTemp?.root,
         )
         const maxEntries = args.maxEntries ?? DEFAULT_MAX_ENTRIES
+        const inputPath = resolveSessionTempToolPath(
+          args.path ?? '.',
+          context.sessionTemp,
+        )
 
         if (!args.recursive) {
-          const entries = (await guard.listDirectory(args.path ?? '.')).slice(
+          const entries = (await guard.listDirectory(inputPath)).slice(
             0,
             maxEntries,
           )
@@ -317,7 +330,7 @@ export function createReadOnlyToolDefinitions(
 
         const walked = await walkFiles(
           guard,
-          args.path ?? '.',
+          inputPath,
           maxEntries,
           context.signal,
         )
@@ -346,7 +359,7 @@ export function createReadOnlyToolDefinitions(
     id: 'glob',
     executionMode: 'parallel',
     description:
-      'Find files under a workspace-relative or absolute Session-temp directory with a Bash-style glob. Supports globstar, braces, character classes, and extglobs. Symlinks are not followed.',
+      'Find files under a workspace-relative, absolute Session-temp, or returned ZCH_SESSION_*_DIR:/ directory with a Bash-style glob. Supports globstar, braces, character classes, and extglobs. Symlinks are not followed.',
     inputSchema: GlobArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
@@ -360,11 +373,15 @@ export function createReadOnlyToolDefinitions(
           context.sessionTemp?.root,
         )
         const maxResults = args.maxResults ?? DEFAULT_MAX_ENTRIES
+        const inputPath = resolveSessionTempToolPath(
+          args.path ?? '.',
+          context.sessionTemp,
+        )
         const matches: string[] = []
         let truncated = false
         for await (const match of iterateWorkspaceGlobFiles({
           guard,
-          rootInput: args.path ?? '.',
+          rootInput: inputPath,
           pattern: args.pattern,
           signal: context.signal,
         })) {
@@ -395,7 +412,7 @@ export function createReadOnlyToolDefinitions(
     id: 'grep',
     executionMode: 'parallel',
     description:
-      'Search text files in the workspace or current Session temp using a regular expression. Prefers ripgrep and falls back to an in-process engine when unavailable.',
+      'Search text files in the workspace or current Session temp using a regular expression. Returned ZCH_SESSION_*_DIR:/ path aliases are accepted. Prefers ripgrep and falls back to an in-process engine when unavailable.',
     inputSchema: GrepArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
@@ -410,12 +427,16 @@ export function createReadOnlyToolDefinitions(
         )
         const maxResults = args.maxResults ?? DEFAULT_MAX_ENTRIES
         const include = args.include ?? '**/*'
+        const inputPath = resolveSessionTempToolPath(
+          args.path ?? '.',
+          context.sessionTemp,
+        )
         const searcher = await getSearcher()
         const outcome = await searcher.search({
           pattern: args.pattern,
           caseSensitive: Boolean(args.caseSensitive),
           guard,
-          rootInput: args.path ?? '.',
+          rootInput: inputPath,
           include,
           maxResults,
           signal: context.signal,

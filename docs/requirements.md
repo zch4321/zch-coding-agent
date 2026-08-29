@@ -115,7 +115,7 @@ AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-to
 | `run_command` | 一次性执行进程或 shell 命令，等待结束，返回 stdout/stderr/exit code | 有     | **是**   |
 | `delay`       | 等待一个有界毫秒数，供 terminal 轮询输出时使用                      | 无     | **是**   |
 
-> `run_command` 用于短测试、构建、一次性脚本。长时间测试、watch、开发服务器、REPL 或需要反复观察输出的命令应使用 `terminal_open` / `terminal_send`；用 `background_wait` 等待 PTY 退出或一个采样超时，并读取本次等待窗口的增量输出；完整输出通过 `read_file` 分页读取 Terminal artifact。
+> `run_command` 用于短测试、构建、一次性脚本。长时间测试、watch、开发服务器、REPL 或需要反复观察输出的命令应使用 `terminal_open` / `terminal_send`；用 `background_wait` 等待 PTY 退出或一个采样超时，并读取 Terminal 当前最后 50 行；更早的完整输出通过 `read_file` 分页读取 Terminal artifact。
 >
 > 参数必须区分 `mode: "process"`（`executable + args[]`，默认优先）和 `mode: "shell"`（命令字符串，支持管道/重定向但风险更高）。不能把两者混成一个无法可靠审查的字符串。
 >
@@ -158,7 +158,7 @@ AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-to
 | `background_cancel` | 幂等取消当前 Session 拥有的 root、Swarm child 或 Terminal，可等待收敛 |
 
 - target 统一为 `{ type: "subagent" | "swarm" | "terminal", id: number }`。Subagent/Swarm 共享一个当前应用进程内递增且不复用的 Agent 编号空间；Terminal 遵循相同生命周期但使用独立编号空间，`type` 负责消除同号歧义。两类 ID 都在重启后失效并重新分配；SQLite、Renderer Agents API 与 artifact 目录仍可使用 durable execution UUID，但模型工具不接受它作为操作 target。`background_wait` 默认 `any`；纯 Agent 默认/最大 5 分钟，包含 Terminal 时整次最多 60 秒，`timeoutMs = 0` 为即时快照。Agent 进入终态或 PTY 退出/失败会唤醒，普通 activity 和 Terminal 输出不唤醒；超时不是错误。
-- Subagent 终态快照可内联受全局限制的最终回答，并返回 `resultPath/activityPath`；运行中只返回状态和 activity path。Swarm 返回状态、child 计数、每个 child 的数字 target 和 `manifestPath`，不内联聚合结果。Terminal 在退出或 timeout 返回时附加从本次 wait 起始 cursor 到返回时的无 ANSI 增量、当前 cursor、截断状态和日志路径；如果 wait 开始时 Terminal 已是终态，则返回当前保留输出。读取直接使用 Run 冻结的全局 `maxToolOutputLines/maxToolOutputBytes`，不再定义 Terminal wait 专属行数或字节上限。
+- Subagent 终态快照可内联受全局限制的最终回答，并返回 `resultPath/activityPath`；运行中只返回状态和 activity path。Swarm 返回状态、child 计数、每个 child 的数字 target 和 `manifestPath`，不内联聚合结果。Terminal 在退出或 timeout 返回时始终附加当前最后 50 行无 ANSI tail、当前 cursor、截断状态和日志路径；普通输出不会提前唤醒。tail 使用固定 50 行语义并继续受 Run 冻结的 `maxToolOutputBytes` 字节保险；更早内容由模型读取完整日志。
 - `background_list` 默认混合返回最新 20 个 root/Terminal，支持类型、`active|finished|all`、limit 和绑定查询条件的 opaque cursor；Swarm child 不作为 root 展平，而随 Swarm 快照返回操作 target，manifest 只保存任务、assignment、路径与 durable 状态，不保存模型操作 ID。`background_cancel.waitMs` 默认 0、最大 60 秒；取消 Swarm root 级联未完成 child，取消单 child 后重新汇总 root。
 - child catalog 始终移除 `subagent_run`、`swarm_run` 和全部 `background_*`，防止递归编排。
 
@@ -232,14 +232,14 @@ Tool Result 的 canonical renderer 固定为：单 TextPart 原样、单 JsonPar
 - Message metadata 是按 `kind` 校验的 application-owned typed annotations，可包含 attachment provenance、prompt id/version/hash、标准化 usage、tool/approval/compact boundary、conversation transcript hash 和 reasoning projection 状态。Metadata 可以来源于 Provider，但删除它不能破坏下一次 Provider 请求；assistant continuation 必须放入 `providerContinuation`，compact 的协议关键状态必须放入 `provider_compact.payload`。
 - SQLite 不保存 OpenAI、DeepSeek、Anthropic 或其他 Provider SDK 的请求 DTO。发起请求时，backend 从 `inHistory = true` 的完整 `MessageRecord` 生成 `CompiledCanonicalHistory`，再由当前 `ModelProvider.compile()` 整段编译 wire DTO；Persistence layer 不依赖 Provider。
 - Draft 和 draft attachments 是 renderer UI 状态，不进入 backend 或 SQLite，也不要求在切换 Session、renderer reload 或应用重启后保留。
-- 每个公开 Session 在 OS temp 下拥有按应用 profile hash 与 Session hash 确定的私有目录，目录/文件权限分别为 `0700/0600`（支持该权限模型的平台）。目录固定分为 application-owned `artifacts/{terminals,commands,subagents,swarms,fetch,web-search,mcp}` 与 model-writable `scratch`；主 Agent 和所有 hidden child 共享同一根。Harness 提供真实绝对路径以及 `ZCH_SESSION_TEMP_DIR/ZCH_SESSION_ARTIFACTS_DIR/ZCH_SESSION_SCRATCH_DIR`，变量也注入 `run_command` 与 Terminal，但不覆盖系统 `TMP/TEMP`。路径和动态目录内容不进入 runtime context 指纹或项目树。
+- 每个公开 Session 在 OS temp 下拥有按应用 profile hash 与 Session hash 确定的私有目录，目录/文件权限分别为 `0700/0600`（支持该权限模型的平台）。目录固定分为 application-owned `artifacts/{terminals,commands,subagents,swarms,fetch,web-search,mcp}` 与 model-writable `scratch`；主 Agent 和所有 hidden child 共享同一根。Harness 提供真实绝对路径以及 `ZCH_SESSION_TEMP_DIR/ZCH_SESSION_ARTIFACTS_DIR/ZCH_SESSION_SCRATCH_DIR`，变量也注入 `run_command` 与 Terminal，但不覆盖系统 `TMP/TEMP`。模型可见 Tool Result 中已知 artifact 字段投影为跨 Shell 的 `ZCH_SESSION_ARTIFACTS_DIR:/...` 短路径；这是一种文件工具 alias，不是 Shell 展开语法。路径和动态目录内容不进入 runtime context 指纹或项目树。
 - Session temp artifact 是完整输出的便利副本，不是生命周期真相源；Shell 具有宿主权限并可能改写它，Agent/Terminal 状态始终以 Backend memory 与 SQLite execution 为准。正常退出和归档保留目录；Desktop 启动时清理最后使用超过 24 小时的 Session 目录，永久删除 Session/Project 后立即清理，无磁盘配额。捕获失败或磁盘写满时必须返回 `artifactAvailable = false` 和有界 `captureError`，不能声称结果已完整留档。
 - 每次用户提交形成 backend memory 中的 Active Run；它在开始时冻结包含 `providerType/providerId/model/reasoning/config revision` 的实际 `ModelRouteSnapshot` 和权限模式，但不单独落盘。完成的 assistant message 记录实际 route；Session 的模型/模式修改只影响后续 Run。
 - Active Run、stream delta、pending approval、未完成 tool batch 和 PTY/process 都是 backend runtime state，不进入 SQLite；Subagent/Swarm execution identity、状态与结果仍按 §2.7/§2.9 持久化，artifact 文件不替代这些记录。
 - Final-answer 边界到达的 live interjection 可转为 renderer carryover，并以稳定 request id 按 FIFO 启动后续 Run。某项启动失败时必须移除队列和 overlay、显示可自动消失的 warning、继续下一项且解除输入锁；不提供 carryover 重试或持久队列。
 - 不同 Session 的 Run 不参与全局 slot 或 workspace writer 准入；同一 canonical workspace 可以同时存在多个 `auto`、`confirm` 或 `yolo` Run，Renderer 和 Prompt Harness 不显示额外警告。
 - completed、failed、cancelled 和父 Run 异常只清理该 Run 自身资源，不取消已经 durable 启动的后台任务。归档/删除先阻止新任务、取消该 Session 全部 Agent/Terminal 并等待最多 60 秒收敛，再提交生命周期变更；应用退出执行同样的取消与收敛。不可中止的副作用 Promise 即使晚于 Run 终态 settle，也必须保留诊断并完成自身清理，但不阻塞其他 Session 启动。
-- 文件读取/检索工具允许 workspace 相对路径，以及 workspace 或当前 Session temp 内的绝对路径；内置文件写工具只允许 workspace 或 `scratch`，不得修改 `artifacts`。两根都执行规范化路径、真实路径与符号链接/junction 逃逸检测。
+- 文件读取/检索工具允许 workspace 相对路径、workspace 或当前 Session temp 内的绝对路径，以及 `ZCH_SESSION_{TEMP,ARTIFACTS,SCRATCH}_DIR:/...` 短路径；alias 在进入同一个 `PathGuard` 前解析，不能绕过根目录约束。内置文件写工具只允许 workspace 或 `scratch`，不得修改 `artifacts`。两根都执行规范化路径、真实路径与符号链接/junction 逃逸检测。
 - Session canonical history 必须以完整 Message 持久化。应用重启后按 `inHistory = true` 和 `seq` 重建 `CompiledCanonicalHistory`，再由当前 route 的 ModelProvider 生成请求；compact 通过版本化 checkpoint message 和显式 `inHistory` 变更替代旧前缀。若 `providerType + providerId + model + endpoint + providerConfigRevision` 与 active assistant/compact/transcript anchor 不兼容，下一次 Run 必须在插入用户消息前把 SQLite 完整非 superseded 分支投影成 `zch-conversation-markdown`，以 fresh harness + hidden `conversation_transcript` 建立新 epoch；迁移预检或 commit 失败时旧 epoch 原样保留。Fork/rewind 重建 active branch 时必须把 `compact_summary.replacesThroughSeq` 与 `conversation_transcript.sourceThroughSeq` 作为同等 epoch boundary，并在 fork 连续重编号时重映射该边界。
 - 只有当前分支中可见的原始用户消息支持重试和编辑。重试保留该用户消息及本轮 context、supersede 后续分支并复用原记录运行，不能插入重复 user message；Assistant 和其他 message kind 必须被 `run:retry` 拒绝。编辑 supersede 该用户整轮及后续，将原文和附件引用恢复到 composer，不自动发送。
 - Idle Session 的 active history 若停在未完成的用户输入、terminal tool result、插话、编排输入或带 `turnId` 的自动 compact summary，最后一个对应轮次必须显示“继续”操作。继续必须校验 Session revision 与 canonical history，复用原 `turnId` 启动 Run，不发送或持久化新 user message；完整 Assistant、control command、手动 compact 与 imported transcript 不得视为可继续。
@@ -425,7 +425,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 
 ### 3.4 路径安全
 
-root-aware `PathGuard` 把相对路径固定解析到 workspace；绝对路径只允许位于 workspace 或当前 Session temp。`read_file/list_dir/glob/grep` 可读两根，内置写工具只允许 workspace 或 `scratch`。执行前和打开后都需验证规范化/真实路径，阻止 `../`、绝对路径越界、符号链接、junction 与 TOCTOU 绕过；新建文件需验证最近已存在父目录并使用避免跟随符号链接的打开策略。
+root-aware `PathGuard` 把相对路径固定解析到 workspace；绝对路径只允许位于 workspace 或当前 Session temp。`read_file/list_dir/glob/grep` 还可接收精确的 `ZCH_SESSION_*_DIR:/...` alias，并在安全检查前解析到当前 Session 根；内置写工具只允许 workspace 或 `scratch`。执行前和打开后都需验证规范化/真实路径，阻止 `../`、绝对路径越界、符号链接、junction 与 TOCTOU 绕过；新建文件需验证最近已存在父目录并使用避免跟随符号链接的打开策略。
 
 `run_command.cwd` 与 `terminal_open.cwd` 可位于 workspace 或 Session temp。命令类和终端类只能约束初始 `cwd`；Shell 本身仍是宿主权限进程，没有 OS sandbox 时不能承诺其无法访问或修改其他路径，包括 application-owned artifacts。
 

@@ -36,6 +36,7 @@ import { PathGuard, PathGuardError } from '../safety/path-guard'
 import type { ApprovedToolCall } from './approved-tool-call'
 import type { ToolRegistry } from './tool-registry'
 import type { SessionTempPaths } from '../session-temp/service'
+import { resolveSessionTempToolPath } from '../session-temp/path-alias'
 import { applyTextPatch, TextPatchError } from './text-patch'
 
 const CreateFileArgsSchema = Type.Object(
@@ -134,7 +135,9 @@ export async function prepareToolResourcePlan(input: {
     if (input.definition.effects.includes('filesystem.read')) {
       const args = argsObject(input.call)
       const candidate = typeof args.path === 'string' ? args.path : '.'
-      await guard.resolveExisting(candidate)
+      await guard.resolveExisting(
+        resolveSessionTempToolPath(candidate, input.sessionTemp),
+      )
     }
 
     return {

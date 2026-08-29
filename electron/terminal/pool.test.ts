@@ -188,6 +188,29 @@ describe('TerminalPool', () => {
     ).toBe('后')
   })
 
+  it('retains a bounded background tail after an explicit close', async () => {
+    const { root, ptys, pool } = await harness(512 * 1_024)
+    const terminal = await pool.open({
+      sessionId: sessionA,
+      ownerSessionId: sessionB,
+      workspace: root,
+    })
+    ptys[0]!.emitData(
+      `${Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join('\n')}\n`,
+    )
+
+    pool.closeSession(sessionA)
+
+    const output = pool.readBackground(sessionB, terminal.terminalId, {
+      lines: 50,
+      maxBytes: 256 * 1_024,
+    })
+    expect(output.content.trimEnd().split('\n')).toHaveLength(50)
+    expect(output.content).toContain('line 60')
+    expect(output.content).not.toContain('line 10\n')
+    expect(output.truncated).toBe(true)
+  })
+
   it('writes a complete ANSI-free artifact across chunk boundaries', async () => {
     const { root, ptys, pool } = await harness()
     const sessionTemp = {

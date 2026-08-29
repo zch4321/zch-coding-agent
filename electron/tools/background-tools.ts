@@ -142,7 +142,7 @@ export function registerBackgroundTools(
     id: 'background_wait',
     executionMode: 'parallel',
     description:
-      'Wait for any or all background Subagent, Swarm, and Terminal targets to finish. Terminal exit wakes the wait, but ordinary output does not; on exit or timeout each Terminal snapshot includes ANSI-free output produced during this wait, bounded by the frozen global Tool output limits. Use artifact paths with read_file for complete output.',
+      'Wait for any or all background Subagent, Swarm, and Terminal targets to finish. Terminal exit wakes the wait, but ordinary output does not. On exit or timeout every Terminal snapshot includes its current ANSI-free final 50 lines; use the returned artifact path with read_file for earlier output.',
     inputSchema: WaitSchema,
     effects: ['terminal.read'],
     defaultRisk: 'low',

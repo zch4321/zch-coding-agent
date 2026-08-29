@@ -97,6 +97,13 @@ describe('canonical prompt harness', () => {
     expect(state.history.map((record) => record.seq)).toEqual([
       1, 2, 3, 4, 5, 6,
     ])
+    const systemInstruction = state.history.find(
+      (record) => record.kind === 'system_instruction',
+    )
+    expect(systemInstruction?.parts[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining('ZCH_SESSION_ARTIFACTS_DIR:/...'),
+    })
     const runtimeContext = state.history.find(
       (record) => record.kind === 'runtime_context',
     )

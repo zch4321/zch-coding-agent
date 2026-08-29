@@ -736,7 +736,11 @@ describe('read-only tools', () => {
       {
         id: 'call-artifact-tail' as CallId,
         toolId: 'read_file',
-        args: { path: logPath, tail: true, lineCount: 2 },
+        args: {
+          path: 'ZCH_SESSION_ARTIFACTS_DIR:/terminal.log',
+          tail: true,
+          lineCount: 2,
+        },
         reason: '',
       },
       undefined,
@@ -748,5 +752,38 @@ describe('read-only tools', () => {
         '2\ttwo\n3\tthree',
       )
     }
+  })
+
+  it('does not let a Session path alias escape its guarded root', async () => {
+    const root = await workspace()
+    const sessionRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-read-session-'),
+    )
+    const sessionTemp = {
+      root: sessionRoot,
+      artifacts: path.join(sessionRoot, 'artifacts'),
+      scratch: path.join(sessionRoot, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+
+    await expect(
+      executeReadonly(
+        root,
+        {
+          id: 'call-artifact-alias-escape' as CallId,
+          toolId: 'read_file',
+          args: { path: 'ZCH_SESSION_ARTIFACTS_DIR:/../../outside.txt' },
+          reason: '',
+        },
+        undefined,
+        sessionTemp,
+      ),
+    ).resolves.toMatchObject({
+      status: 'error',
+      code: 'PATH_OUTSIDE_WORKSPACE',
+    })
   })
 })

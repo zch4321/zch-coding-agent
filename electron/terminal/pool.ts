@@ -61,6 +61,9 @@ export interface TerminalPoolOptions {
 
 /** Maximum terminals retained per Session, including opening, running, and self-exited entries. */
 export const MAX_TERMINALS_PER_SESSION = 16
+/** Fixed Terminal tail returned by background_wait snapshots. */
+export const TERMINAL_BACKGROUND_TAIL_LINES = 50
+const TERMINAL_BACKGROUND_TAIL_BYTES = 256 * 1_024
 
 interface TerminalResource {
   info: TerminalInfo
@@ -137,7 +140,11 @@ export class TerminalPool {
   readonly #closedOwners = new Map<TerminalId, SessionId>()
   readonly #closedBackground = new Map<
     TerminalId,
-    { ownerSessionId: SessionId; snapshot: TerminalBackgroundSnapshot }
+    {
+      ownerSessionId: SessionId
+      snapshot: TerminalBackgroundSnapshot
+      output: TerminalOutputRead
+    }
   >()
   readonly #pendingExits = new Set<Promise<void>>()
   readonly #reservations = new Map<SessionId, number>()
@@ -414,7 +421,14 @@ export class TerminalPool {
     options: { cursor?: number; lines?: number; maxBytes: number },
   ): TerminalOutputRead {
     const resource = this.#resources.get(id)
-    if (!resource || resource.ownerSessionId !== ownerSessionId) {
+    if (!resource) {
+      const closed = this.#closedBackground.get(id)
+      if (closed?.ownerSessionId === ownerSessionId) {
+        return this.#boundOutputRead(closed.output, options)
+      }
+      throw new Error('Terminal not found for this session')
+    }
+    if (resource.ownerSessionId !== ownerSessionId) {
       throw new Error('Terminal not found for this session')
     }
     return this.#readResource(resource, options)
@@ -425,26 +439,44 @@ export class TerminalPool {
     options: { cursor?: number; lines?: number; maxBytes: number },
   ): TerminalOutputRead {
     const snapshot = resource.modelScrollback.snapshot(options.cursor)
-    let content = snapshot.data
+    return this.#boundOutputRead(
+      {
+        terminalId: resource.info.terminalId,
+        content: snapshot.data,
+        cursor: snapshot.cursor,
+        truncated: snapshot.truncated,
+        totalBytes: snapshot.totalBytes,
+      },
+      options,
+    )
+  }
+
+  #boundOutputRead(
+    output: TerminalOutputRead,
+    options: { lines?: number; maxBytes: number },
+  ): TerminalOutputRead {
+    let content = output.content
     const lines = Math.max(1, options.lines ?? 200)
+    const endsWithNewline = /\r?\n$/u.test(content)
     const split = content.split(/\r?\n/u)
+    if (endsWithNewline) split.pop()
 
     if (split.length > lines) {
-      content = split.slice(-lines).join('\n')
+      content = `${split.slice(-lines).join('\n')}${endsWithNewline ? '\n' : ''}`
     }
 
     const encoded = Buffer.from(content)
     const bounded = utf8SafeTail(encoded, options.maxBytes)
 
     return {
-      terminalId: resource.info.terminalId,
+      terminalId: output.terminalId,
       content: bounded.toString('utf8'),
-      cursor: snapshot.cursor,
+      cursor: output.cursor,
       truncated:
-        snapshot.truncated ||
+        output.truncated ||
         split.length > lines ||
         encoded.byteLength > options.maxBytes,
-      totalBytes: snapshot.totalBytes,
+      totalBytes: output.totalBytes,
     }
   }
 
@@ -733,6 +765,10 @@ export class TerminalPool {
 
     this.#emitStatus(resource, 'closed', null)
     const closedSnapshot = this.#backgroundSnapshot(resource)
+    const closedOutput = this.#readResource(resource, {
+      lines: TERMINAL_BACKGROUND_TAIL_LINES,
+      maxBytes: TERMINAL_BACKGROUND_TAIL_BYTES,
+    })
     resource.scrollback.clear()
     resource.modelScrollback.clear()
     this.#resources.delete(resource.info.terminalId)
@@ -740,6 +776,7 @@ export class TerminalPool {
     this.#closedBackground.set(resource.info.terminalId, {
       ownerSessionId: resource.ownerSessionId,
       snapshot: closedSnapshot,
+      output: closedOutput,
     })
 
     if (this.#closedOwners.size > 256) {

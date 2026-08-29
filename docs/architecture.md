@@ -1683,9 +1683,9 @@ Desktop temp 根为 `<os.tmp>/zch-coding-agent/<profile-hash>/<session-hash>/`�
 └── scratch/
 ```
 
-Harness 注入真实 root/artifacts/scratch 绝对路径，并给 `run_command` 与 Terminal 环境增加 `ZCH_SESSION_TEMP_DIR/ZCH_SESSION_ARTIFACTS_DIR/ZCH_SESSION_SCRATCH_DIR`，但不覆盖宿主 `TMP/TEMP`。这些动态值不进入 runtime semantic hash，也不生成实时 temp tree。主 Agent 与所有 hidden child 使用公开 owner Session 的同一目录。
+Harness 注入真实 root/artifacts/scratch 绝对路径，并给 `run_command` 与 Terminal 环境增加 `ZCH_SESSION_TEMP_DIR/ZCH_SESSION_ARTIFACTS_DIR/ZCH_SESSION_SCRATCH_DIR`，但不覆盖宿主 `TMP/TEMP`。模型投影在已知 `artifactPath/manifestPath/activityPath/resultPath` 字段中使用 `ZCH_SESSION_*_DIR:/...` 跨 Shell 短路径；read/list/glob/grep 在进入 PathGuard 前把该 alias 还原到当前 Session 根，Shell 仍使用自身的环境变量语法。这些动态值不进入 runtime semantic hash，也不生成实时 temp tree。主 Agent 与所有 hidden child 使用公开 owner Session 的同一目录。
 
-`PathGuard` 支持 workspace/session-temp 两个 canonical root：相对路径始终从 workspace 解析，绝对路径必须落入其中之一；打开前后同时检查 lexical/real containment、symlink/junction 与文件身份。read/list/glob/grep 可访问两根；create/apply/delete 只允许 workspace 或 `scratch`，明确拒绝 `artifacts`。scratch mutation 在 Auto/Confirm/Yolo 免审批、Readonly 无写 catalog，且不创建 Git/project diff、FileChange 或 rewind 记录。Command/Terminal `cwd` 可位于两根，但 spawn 的 Shell 是宿主权限进程而非 OS sandbox，可能访问或改写其他路径。
+`PathGuard` 支持 workspace/session-temp 两个 canonical root：相对路径始终从 workspace 解析，绝对路径必须落入其中之一；只读文件工具还可把精确的 `ZCH_SESSION_*_DIR:/...` alias 展开为当前 Session 绝对路径。打开前后仍检查 lexical/real containment、symlink/junction 与文件身份，alias 中的 `..` 不能越界。read/list/glob/grep 可访问两根；create/apply/delete 只允许 workspace 或 `scratch`，明确拒绝 `artifacts`。scratch mutation 在 Auto/Confirm/Yolo 免审批、Readonly 无写 catalog，且不创建 Git/project diff、FileChange 或 rewind 记录。Command/Terminal `cwd` 可位于两根，但 spawn 的 Shell 是宿主权限进程而非 OS sandbox，可能访问或改写其他路径。
 
 Command/Terminal/Subagent/Swarm 始终尝试完整留档；Fetch/Web Search 保存已获取/规范化结果，MCP 只在模型投影超过 256 KiB 或 500 行时保存规范化 JSON。Backend state 始终权威，文件只作可分页副本；捕获失败返回 `artifactAvailable = false/captureError`，旧路径不存在时 `read_file` 返回 `ARTIFACT_EXPIRED`。
 
@@ -1746,7 +1746,7 @@ child Session 直接绑定父 Run 已规范化的 workspace path，并通过 `ow
 
 ### 18.4 Child Run、结果与生命周期
 
-child Session 固定 `visibility = 'internal'`，使用委派计算后的权限模式并沿用全局 `limits.maxStepsPerRun`；`0` 仍表示不限步数。Provider 输出沿用冻结模型 profile 的 `maxOutputTokens`，`background_wait` 内联回答经过冻结的 256 KiB/500 行通用限制，不增加 Subagent 专属 step/token/result budget；完整回答另存 `result.md`。
+child Session 固定 `visibility = 'internal'`，使用委派计算后的权限模式并沿用全局 `limits.maxStepsPerRun`；`0` 仍表示不限步数。Provider 输出沿用冻结模型 profile 的 `maxOutputTokens`，`background_wait` 内联 Agent 回答经过冻结的 256 KiB 通用字节保险，不增加 Subagent 专属 step/token/result budget；完整回答另存 `result.md`。
 
 AppConfig/PublicConfig v13 首次引入 Subagent 配置；当前 AppConfig/PublicConfig v25 中该部分的完整结构为：
 
@@ -1786,7 +1786,7 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 
 独立 `agent-execution:event` 只投影安全生命周期和可见活动，不把 hidden Session 伪装成普通 Session。Agents artifact 根列表仅显示普通 Subagent 与 Swarm root；展开 Swarm root 后按 `childOrdinal` 显示 child。两级均使用手动 `NCollapse`，不自动展开；详情只显示运行时间、工具调用数、状态、模型/usage/Agent 计数和可见 Assistant 文本，不展示 reasoning、完整工具轨迹、child Session ID、prompt harness、route 凭据或 Provider continuation。
 
-统一 `BackgroundTaskService` 以 SQLite execution 与 TerminalPool ownership 为权威，同时用一个进程内 registry 把 durable Agent execution UUID 映射为全局递增数字；模型输入永不直接解析或接受 UUID，重启后通过 `background_list` 为历史 root 分配新数字。`background_wait` 接受混合 target、`any|all` 和 timeout，只在 Agent 终态、PTY exit/failure 或正常超时返回；普通 Terminal 输出不参与唤醒。wait 首次快照冻结每个运行中 Terminal 的 ANSI-free model cursor，返回前按 public owner 读取该 cursor 之后的增量；起始时已终态则读取当前保留输出。读取行数与字节数直接使用 Run 冻结的全局 Tool 输出限制，最终 canonical projection 仍接受同一全局 limiter；纯 Agent 最大等待 300 秒，含 Terminal 最大 60 秒。`background_list` 将 standalone root、Swarm root 与 Terminal 按创建时间合并，使用绑定 filters 的 opaque 分页 cursor，并按冻结 Tool 输出 budget 生成不会被通用 limiter 破坏的精确页。`background_cancel` 校验数字 target 的当前进程映射和公开 Session ownership，幂等取消 root/child/Terminal，可选等待最多 60 秒；Swarm root 级联 child，单 child 取消触发 root 重汇总。
+统一 `BackgroundTaskService` 以 SQLite execution 与 TerminalPool ownership 为权威，同时用一个进程内 registry 把 durable Agent execution UUID 映射为全局递增数字；模型输入永不直接解析或接受 UUID，重启后通过 `background_list` 为历史 root 分配新数字。`background_wait` 接受混合 target、`any|all` 和 timeout，只在 Agent 终态、PTY exit/failure 或正常超时返回；普通 Terminal 输出不参与唤醒。返回前按 public owner 读取 Terminal 当前最后 50 行 ANSI-free tail，不再维护 wait 起始 cursor 或 delta 语义；显式关闭的 Terminal 在进程内额外保留同样有界的 tail，完整历史仍以日志 artifact 为准。tail 继续受 Run 冻结的全局字节限制；纯 Agent 最大等待 300 秒，含 Terminal 最大 60 秒。`background_list` 将 standalone root、Swarm root 与 Terminal 按创建时间合并，使用绑定 filters 的 opaque 分页 cursor，并按冻结 Tool 输出 budget 生成不会被通用 limiter 破坏的精确页。`background_cancel` 校验数字 target 的当前进程映射和公开 Session ownership，幂等取消 root/child/Terminal，可选等待最多 60 秒；Swarm root 级联 child，单 child 取消触发 root 重汇总。
 
 ---
 
@@ -1844,8 +1844,8 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 - hidden Session 不进入公开 get/bootstrap/list/search/export 或 Renderer events；父/Project 删除级联、归档保留、启动 interrupted、并发/终态幂等 handle 与参数冲突均有持久化回归。
 - 并发 start 的 Session leaf 容量预留必须原子；Swarm 容量不足不创建部分 root/child，设置调低不取消存量，终态释放名额。
 - 父 Run 完成/取消/Provider failure 后后台 Agent 继续；30 分钟默认/自定义 timeout、显式 cancel、archive/delete/quit 会取消并收敛，usage 不回写已结束父 Run。
-- `background_wait` 覆盖 any/all、混合 target、0/60 秒/5 分钟、Terminal 输出不唤醒、PTY exit 提前唤醒、等待窗口增量及统一输出限制；list 覆盖 filter-bound cursor 与小 byte budget；cancel 覆盖 waitMs、Swarm root/child 和 Terminal。
-- Session temp/PathGuard 覆盖双根绝对路径、symlink/junction、scratch 免审批、Readonly、无 FileChange、环境变量/cwd、24 小时清理、Session/Project 删除和 capture failure。
+- `background_wait` 覆盖 any/all、混合 target、0/60 秒/5 分钟、Terminal 输出不唤醒、PTY exit 提前唤醒、固定 50 行 tail、关闭后 tail 和统一字节限制；list 覆盖 filter-bound cursor 与小 byte budget；cancel 覆盖 waitMs、Swarm root/child 和 Terminal。
+- Session temp/PathGuard 覆盖双根绝对路径、`ZCH_SESSION_*_DIR:/...` alias、symlink/junction、scratch 免审批、Readonly、无 FileChange、环境变量/cwd、24 小时清理、Session/Project 删除和 capture failure。
 - Terminal 覆盖默认 1 秒增量/tail、完整日志、跨 chunk ANSI、spawn/artifact failure，并断言 Provider catalog 不含 `terminal_read/list/close`。
 - Compact 只在完整 turn boundary 修改 `inHistory`，active history 可直接按 seq 重建。
 - Rewind/edit 跨 compact 或 Provider-transition transcript epoch 重建保留前缀；重复 rewind 被拒绝；rewind 后 fork 只复制非 superseded 当前分支并重映射引用与 epoch boundary。

@@ -8,7 +8,11 @@ import type { SubagentStateService } from '../application/subagent-state-service
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { PreparedSubagentExecutionPort } from '../subagent/contracts'
 import type { SwarmExecutionPort } from '../swarm/contracts'
-import type { TerminalBackgroundSnapshot, TerminalPool } from '../terminal/pool'
+import {
+  TERMINAL_BACKGROUND_TAIL_LINES,
+  type TerminalBackgroundSnapshot,
+  type TerminalPool,
+} from '../terminal/pool'
 import type { BackgroundAgentHandleRegistry } from './agent-handle-registry'
 import {
   BackgroundTaskError,
@@ -39,11 +43,6 @@ interface ListedSnapshot {
   id: string
   type: BackgroundTarget['type']
   value: Record<string, JsonValue>
-}
-
-interface TerminalWaitStart {
-  cursor: number
-  terminal: boolean
 }
 
 function json(value: unknown): JsonValue {
@@ -237,7 +236,6 @@ export class BackgroundTaskService implements BackgroundTaskPort {
   async wait(input: BackgroundWaitInput): Promise<JsonValue> {
     const startedAt = performance.now()
     let snapshots = await this.#snapshots(input, true)
-    const terminalStarts = this.#terminalWaitStarts(snapshots)
     const satisfied = () =>
       input.mode === 'all'
         ? snapshots.every(snapshotTerminal)
@@ -247,7 +245,7 @@ export class BackgroundTaskService implements BackgroundTaskPort {
       await waitDelay(Math.min(POLL_INTERVAL_MS, remaining), input.signal)
       snapshots = await this.#snapshots(input, true)
     }
-    snapshots = this.#attachTerminalWaitOutput(input, snapshots, terminalStarts)
+    snapshots = this.#attachTerminalWaitOutput(input, snapshots)
     return json({
       mode: input.mode,
       timedOut: !satisfied(),
@@ -469,46 +467,22 @@ export class BackgroundTaskService implements BackgroundTaskPort {
     )
   }
 
-  #terminalWaitStarts(
-    snapshots: readonly Record<string, JsonValue>[],
-  ): Map<number, TerminalWaitStart> {
-    const starts = new Map<number, TerminalWaitStart>()
-    for (const snapshot of snapshots) {
-      if (
-        snapshot.type !== 'terminal' ||
-        typeof snapshot.id !== 'number' ||
-        typeof snapshot.cursor !== 'number'
-      ) {
-        continue
-      }
-      starts.set(snapshot.id, {
-        cursor: snapshot.cursor,
-        terminal: snapshotTerminal(snapshot),
-      })
-    }
-    return starts
-  }
-
   #attachTerminalWaitOutput(
     input: BackgroundWaitInput,
     snapshots: readonly Record<string, JsonValue>[],
-    starts: ReadonlyMap<number, TerminalWaitStart>,
   ): Array<Record<string, JsonValue>> {
-    const lines = input.outputLimits?.maxToolOutputLines ?? 500
     const maxBytes = input.outputLimits?.maxToolOutputBytes ?? 256 * 1_024
     return snapshots.map((snapshot) => {
       if (snapshot.type !== 'terminal' || typeof snapshot.id !== 'number') {
         return snapshot
       }
       const id = terminalId(snapshot.id)
-      const start = starts.get(snapshot.id)
       try {
         const output = this.#terminals.readBackground(
           input.parentSessionId,
           id,
           {
-            ...(start?.terminal ? {} : { cursor: start?.cursor }),
-            lines,
+            lines: TERMINAL_BACKGROUND_TAIL_LINES,
             maxBytes,
           },
         )
@@ -516,7 +490,8 @@ export class BackgroundTaskService implements BackgroundTaskPort {
           ...snapshot,
           content: output.content,
           cursor: output.cursor,
-          delta: start?.terminal !== true,
+          tail: true,
+          tailLines: TERMINAL_BACKGROUND_TAIL_LINES,
           truncated: output.truncated,
           totalBytes: output.totalBytes,
         }

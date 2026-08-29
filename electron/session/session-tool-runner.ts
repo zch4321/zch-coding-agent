@@ -50,6 +50,7 @@ import {
   associateDiagnosticCode,
   associateDiagnosticId,
 } from '../operational-logging/diagnostic-id'
+import { aliasSessionTempPathFields } from '../session-temp/path-alias'
 
 type ToolAttemptStage = 'validation' | 'permission' | 'execution'
 
@@ -126,6 +127,21 @@ function projectedEventResult(
     return { ...source, message }
   }
   return { status: source.status, message }
+}
+
+function modelVisibleToolResult(
+  result: ToolResult,
+  session: SessionState,
+): ToolResult {
+  return result.status === 'ok'
+    ? {
+        ...result,
+        content: aliasSessionTempPathFields(
+          result.content,
+          session.sessionTemp,
+        ),
+      }
+    : result
 }
 
 function operationalToolCorrelation(session: SessionState, run: ActiveRun) {
@@ -298,7 +314,7 @@ export class SessionToolRunner {
                 'The tool batch failed before this result could be finalized',
               retryable: false,
             }
-        const projected = this.#projectForContext(run, call, result)
+        const projected = this.#projectForContext(session, run, call, result)
         appendToolResult(session, {
           callId: call.id,
           content: projected.projection.content,
@@ -734,6 +750,7 @@ export class SessionToolRunner {
       providerResult = toolFailure(error, run.controller.signal)
     }
     const projected = this.#projectForContext(
+      session,
       run,
       execution.call,
       providerResult,
@@ -844,6 +861,7 @@ export class SessionToolRunner {
   }
 
   #projectForContext(
+    session: SessionState,
     run: ActiveRun,
     call: ToolCall,
     result: ToolResult,
@@ -854,7 +872,7 @@ export class SessionToolRunner {
   } {
     const projection = this.#toolExecutor.projectResultForModel(
       call,
-      result,
+      modelVisibleToolResult(result, session),
       definitionOverride,
       (message, error) => this.#onDiagnostic(message, error),
     )

@@ -186,7 +186,7 @@ describe('BackgroundTaskService', () => {
     ).resolves.toMatchObject({ timedOut: true })
   })
 
-  it('waits through Terminal output until timeout and returns the bounded delta', async () => {
+  it('waits through Terminal output until timeout and returns the final 50 lines', async () => {
     const target = await fixture()
     target.backgroundSnapshot
       .mockReturnValueOnce({ ...target.terminal })
@@ -217,15 +217,15 @@ describe('BackgroundTaskService', () => {
           status: 'running',
           content: 'progress one\nprogress two',
           cursor: 84,
-          delta: true,
+          tail: true,
+          tailLines: 50,
           truncated: false,
           totalBytes: 84,
         },
       ],
     })
     expect(target.readBackground).toHaveBeenCalledWith(parentSessionId, 7, {
-      cursor: 42,
-      lines: 17,
+      lines: 50,
       maxBytes: 4_096,
     })
   })
@@ -264,7 +264,8 @@ describe('BackgroundTaskService', () => {
           status: 'closed',
           exitCode: 0,
           content: 'completed output',
-          delta: true,
+          tail: true,
+          tailLines: 50,
         },
       ],
     })
