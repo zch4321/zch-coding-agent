@@ -3,6 +3,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentApi } from '../../shared/agent-api'
+import { delay } from '../../shared/async/delay'
 import type {
   DurableCommitEnvelope,
   SessionCommitEnvelopeSchema,
@@ -388,34 +389,28 @@ describe('agent durable replica', () => {
   })
 
   it('coalesces bootstrap replay and loads the 201st active Session', async () => {
-    const pending = new Promise<ReturnType<typeof success>>((resolve) => {
-      window.setTimeout(
-        () =>
-          resolve(
-            success({
-              version: 1 as const,
-              cursor: {
-                schemaVersion: 1 as const,
-                backendInstanceId: 'backend:replica',
-                sequence: 1,
-              },
-              projects: [project],
-              sessionPage: {
-                schemaVersion: 1 as const,
-                records: Array.from({ length: 200 }, (_, index) =>
-                  otherSession(index + 1),
-                ),
-                hasMore: true as const,
-                nextBefore: {
-                  updatedAt: otherSession(200).updatedAt,
-                  sessionId: otherSession(200).id,
-                },
-              },
-            }),
+    const pending = delay(10).then(() =>
+      success({
+        version: 1 as const,
+        cursor: {
+          schemaVersion: 1 as const,
+          backendInstanceId: 'backend:replica',
+          sequence: 1,
+        },
+        projects: [project],
+        sessionPage: {
+          schemaVersion: 1 as const,
+          records: Array.from({ length: 200 }, (_, index) =>
+            otherSession(index + 1),
           ),
-        10,
-      )
-    })
+          hasMore: true as const,
+          nextBefore: {
+            updatedAt: otherSession(200).updatedAt,
+            sessionId: otherSession(200).id,
+          },
+        },
+      }),
+    )
     const getBootstrap = vi.fn(async () => pending)
     const listSessions = vi.fn(async () =>
       success({

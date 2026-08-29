@@ -2,11 +2,6 @@ import type { RunStatus, ToolResultEnvelope } from '../../shared/agent-events'
 import type { ToolResult } from '../tools/types'
 import type { ModelProfile } from '../providers/model-catalog'
 
-/** Resolves after the requested number of milliseconds. */
-export function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 /** Converts an internal ToolResult into the provider result envelope. */
 export function normalizeToolResult(result: ToolResult): ToolResultEnvelope {
   return result as ToolResultEnvelope

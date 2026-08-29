@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { delay } from '../../shared/async/delay'
 import { createCommandEnvironment, runCommand } from './run'
 import { commandShellService } from './command-shell'
 
@@ -30,7 +31,7 @@ async function waitForProcessesToExit(pids: number[]): Promise<boolean> {
       return true
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await delay(50)
   }
 
   return pids.every((pid) => !processExists(pid))

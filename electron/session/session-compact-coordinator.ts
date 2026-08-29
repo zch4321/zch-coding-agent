@@ -1,4 +1,5 @@
 import type { RunStatus } from '../../shared/agent-events'
+import { delay } from '../../shared/async/delay'
 import type { CallId, MessageId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { ProviderUsage } from '../providers/provider'
@@ -60,7 +61,6 @@ import {
   MAX_COMPACT_ATTEMPTS,
   rethrowCompactionFailure,
   shouldFallbackNativeCompact,
-  waitForCompactRetry,
 } from './session-compact-retry'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 import type { OperationalLogService } from '../operational-logging/service'
@@ -631,7 +631,9 @@ export class SessionCompactCoordinator {
             ? compactRetryDecision(error, retryBudget)
             : undefined
         if (!retry) throw error
-        await waitForCompactRetry(retry.delayMs, run.controller.signal)
+        if (retry.delayMs > 0) {
+          await delay(retry.delayMs, run.controller.signal)
+        }
         if (retry.corrective) {
           instructions = correctiveCompactPrompt(input.promptText)
         }

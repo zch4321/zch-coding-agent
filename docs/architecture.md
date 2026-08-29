@@ -104,6 +104,8 @@ decode(encode(record)) deep-equals record
 
 ```text
 shared/
+  async/
+    delay.ts              # process-neutral timer delay 与 AbortSignal 取消
   durable.ts              # schema version、revision/seq 与容量上限
   domain-state-api.ts     # 业务状态 commands / queries / results / events
   project.ts              # ProjectRecord
@@ -142,6 +144,8 @@ shared/
 ```
 
 `shared/` 不导入 Electron、Node.js、Vue、Pinia、SQLite driver 或 provider implementation。
+
+`shared/async/` 只承载各进程行为一致、仅依赖标准 JavaScript/Web API 的异步原语。`delay` 统一 timer 与 `AbortSignal` 的监听、清理和拒绝语义；Provider retry、Tool timeout、进程终止等业务策略仍由所属领域决定，不进入共享层。
 
 配置契约固定分为 application、assistant、integrations、models、network、providers、runtime、security 八个领域。领域叶模块可以依赖已有共享原语，models 可以组合 providers，但不得反向导入 `shared/config.ts`、根 `public-config.ts` 或 IPC transport。`public-config.ts` 是唯一 AppConfig 版本与根结构组合点；`ConfigSection` 与 `ConfigSetRequest` 归 configuration IPC 领域所有，`shared/config.ts` 只为旧调用方兼容转出。新配置代码应直接依赖所属领域。领域拆分本身不得改变 schemaVersion 或持久化形状。
 

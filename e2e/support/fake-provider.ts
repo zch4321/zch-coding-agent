@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { delay } from '../../shared/async/delay'
 
 export type JsonObject = Record<string, unknown>
 
@@ -146,9 +147,7 @@ export async function startFakeProvider(): Promise<FakeProvider> {
       for (const chunk of queued.chunks) {
         response.write(`data: ${JSON.stringify(chunk)}\n\n`)
         if (queued.chunkDelayMs > 0) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, queued.chunkDelayMs),
-          )
+          await delay(queued.chunkDelayMs)
         }
       }
       response.write('data: [DONE]\n\n')

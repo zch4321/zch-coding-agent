@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { access } from 'node:fs/promises'
 import path from 'node:path'
 import type { AgentExecutionStatus } from '../../shared/agent-execution'
+import { delay } from '../../shared/async/delay'
 import type { AgentExecutionId, SessionId, TerminalId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { SubagentStateService } from '../application/subagent-state-service'
@@ -193,23 +194,6 @@ function listResultBytes(
   )
 }
 
-function waitDelay(durationMs: number, signal: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const finish = () => {
-      signal.removeEventListener('abort', abort)
-      resolve()
-    }
-    const timer = setTimeout(finish, durationMs)
-    const abort = () => {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', abort)
-      reject(signal.reason ?? new Error('background wait was cancelled'))
-    }
-    if (signal.aborted) abort()
-    else signal.addEventListener('abort', abort, { once: true })
-  })
-}
-
 /** Uses SQLite and PTY ownership as authority for all background task operations. */
 export class BackgroundTaskService implements BackgroundTaskPort {
   readonly #state: SubagentStateService
@@ -242,7 +226,7 @@ export class BackgroundTaskService implements BackgroundTaskPort {
         : snapshots.some(snapshotTerminal)
     while (!satisfied() && performance.now() - startedAt < input.timeoutMs) {
       const remaining = input.timeoutMs - (performance.now() - startedAt)
-      await waitDelay(Math.min(POLL_INTERVAL_MS, remaining), input.signal)
+      await delay(Math.min(POLL_INTERVAL_MS, remaining), input.signal)
       snapshots = await this.#snapshots(input, true)
     }
     snapshots = this.#attachTerminalWaitOutput(input, snapshots)
@@ -446,9 +430,7 @@ export class BackgroundTaskService implements BackgroundTaskPort {
         .listBackground(parentSessionId)
         .every((terminal) => terminalTerminal(terminal.status))
       if (agentsDone && terminalsDone) return
-      await new Promise<void>((resolve) =>
-        setTimeout(resolve, POLL_INTERVAL_MS),
-      )
+      await delay(POLL_INTERVAL_MS)
     }
     throw new BackgroundTaskError(
       'BACKGROUND_QUIESCE_TIMEOUT',

@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { delay } from '../../shared/async/delay'
 import type { AgentEventEnvelope } from '../../shared/ipc-contract'
 import type { ProjectId } from '../../shared/ids'
 import type { SessionRecord } from '../../shared/session'
@@ -77,7 +78,7 @@ describe('SessionManager compaction', () => {
             envelope.event.status === 'completed',
         ).length >= 1,
     )
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await delay(20)
 
     manager.startRun({
       sessionId,
@@ -93,7 +94,7 @@ describe('SessionManager compaction', () => {
             envelope.event.status === 'completed',
         ).length >= 2,
     )
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await delay(20)
 
     expect(
       sent.find((envelope) => envelope.event.type === 'orchestrator.message')
@@ -419,7 +420,7 @@ describe('SessionManager compaction', () => {
       firstTerminal?.type === 'run.status' ? firstTerminal.status : undefined,
       JSON.stringify(firstTerminal),
     ).toBe('completed')
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await delay(20)
 
     manager.startRun({
       sessionId,

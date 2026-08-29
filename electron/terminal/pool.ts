@@ -1,6 +1,7 @@
 import { chmod, mkdir, open, stat, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import * as nodePty from 'node-pty'
+import { delay } from '../../shared/async/delay'
 import type { SessionId, TerminalId } from '../../shared/ids'
 import type {
   CommandShellProfile,
@@ -550,14 +551,15 @@ export class TerminalPool {
     const pending = [...this.#pendingExits]
     if (pending.length === 0) return
 
-    let timeout: ReturnType<typeof setTimeout> | undefined
-    await Promise.race([
-      Promise.allSettled(pending),
-      new Promise<void>((resolve) => {
-        timeout = setTimeout(resolve, 1_000)
-      }),
-    ])
-    if (timeout) clearTimeout(timeout)
+    const waitController = new AbortController()
+    try {
+      await Promise.race([
+        Promise.allSettled(pending),
+        delay(1_000, waitController.signal),
+      ])
+    } finally {
+      waitController.abort()
+    }
   }
 
   #requireOwned(sessionId: SessionId, id: TerminalId): TerminalResource {

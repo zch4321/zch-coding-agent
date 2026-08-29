@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { WebContents } from 'electron'
 import type { AgentEvent } from '../../shared/agent-events'
+import { delay } from '../../shared/async/delay'
 import type { RunId, SessionId } from '../../shared/ids'
 import {
   PROVIDER_NOTICE_VERSION,
@@ -58,7 +59,7 @@ async function waitFor(
       return
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await delay(50)
   }
 
   throw new Error('Timed out waiting for the real API run')
@@ -136,7 +137,7 @@ async function waitForConfirmedWrite(input: {
       return
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await delay(50)
   }
 
   throw new Error(

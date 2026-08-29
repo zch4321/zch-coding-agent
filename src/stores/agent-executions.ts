@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { toRaw } from 'vue'
+import { delay } from '../../shared/async/delay'
 import type {
   AgentExecutionActivity,
   AgentExecutionDetail,
@@ -688,15 +689,6 @@ function findSummary(
   return undefined
 }
 
-function waitForDetailLoad(view: ExecutionDetailView): Promise<void> {
-  return new Promise((resolve) => {
-    const check = (): void => {
-      if (!view.loading) {
-        resolve()
-        return
-      }
-      window.setTimeout(check, 0)
-    }
-    check()
-  })
+async function waitForDetailLoad(view: ExecutionDetailView): Promise<void> {
+  while (view.loading) await delay(0)
 }

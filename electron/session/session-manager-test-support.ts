@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
+import { delay } from '../../shared/async/delay'
 import type { JsonValue } from '../../shared/json'
 import type { SessionId } from '../../shared/ids'
 import { IPC_VERSION } from '../../shared/channels'
@@ -189,7 +190,7 @@ export async function waitFor(
 
   while (Date.now() < deadline) {
     if (predicate()) return
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await delay(10)
   }
 
   throw new Error('Timed out waiting for condition')

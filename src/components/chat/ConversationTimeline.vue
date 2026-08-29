@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NEmpty, NScrollbar, type ScrollbarInst } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import { delay } from '../../../shared/async/delay'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 import ApprovalCard from './ApprovalCard.vue'
@@ -111,13 +112,8 @@ function onContentResized() {
 }
 
 function animationFrame(): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(() => resolve())
-    } else {
-      window.setTimeout(resolve, 0)
-    }
-  })
+  if (typeof window.requestAnimationFrame !== 'function') return delay(0)
+  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()))
 }
 
 async function scrollToBottom(force = false) {

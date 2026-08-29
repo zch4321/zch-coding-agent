@@ -8,6 +8,7 @@ import type {
   ObservationEmitResult,
   PluginApi,
 } from './types'
+import { delay } from '../../shared/async/delay'
 import type { ToolDefinition, ToolRegistrationPort } from '../tools/types'
 
 export interface PluginEventBusOptions {
@@ -155,16 +156,14 @@ export class PluginEventBus implements PluginApi {
     context: Readonly<HookContextMap[HookName]>,
     diagnostics: HookDiagnostic[],
   ): Promise<HookHandlerResultMap[HookName] | undefined> {
-    let timer: ReturnType<typeof setTimeout> | undefined
+    const waitController = new AbortController()
 
     try {
-      const timeout = new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`Hook timed out after ${this.#timeoutMs}ms`)),
-          this.#timeoutMs,
-        )
+      const timeout = delay(this.#timeoutMs, waitController.signal).then(() => {
+        throw new Error(`Hook timed out after ${this.#timeoutMs}ms`)
       })
-      return await Promise.race([Promise.resolve(handler(context)), timeout])
+      const execution = Promise.resolve().then(() => handler(context))
+      return await Promise.race([execution, timeout])
     } catch (error) {
       const diagnostic = {
         hook,
@@ -175,9 +174,7 @@ export class PluginEventBus implements PluginApi {
       this.#onDiagnostic?.(diagnostic, error)
       return undefined
     } finally {
-      if (timer) {
-        clearTimeout(timer)
-      }
+      waitController.abort()
     }
   }
 }

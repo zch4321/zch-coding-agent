@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox'
+import { delay } from '../../shared/async/delay'
 import type { PublicConfig } from '../../shared/config'
 import type { JsonValue } from '../../shared/json'
 import type { ToolRegistrationPort, ToolResult } from './types'
@@ -101,28 +102,6 @@ function validateRunCommandArgs(args: RunCommandArgs): string | undefined {
   }
 
   return undefined
-}
-
-function wait(durationMs: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const finish = () => {
-      signal.removeEventListener('abort', abort)
-      resolve()
-    }
-    const timer = setTimeout(finish, durationMs)
-    const abort = () => {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', abort)
-      reject(signal.reason ?? new Error('delay aborted'))
-    }
-
-    if (signal.aborted) {
-      abort()
-      return
-    }
-
-    signal.addEventListener('abort', abort, { once: true })
-  })
 }
 
 /** Registers the bounded process-execution tool and its argument policy. */
@@ -241,7 +220,7 @@ export function registerProcessTools(
     projectResultForModel: projectDelayResult,
     async execute(args: DelayArgs, context): Promise<ToolResult> {
       const startedAt = performance.now()
-      await wait(args.durationMs, context.signal)
+      await delay(args.durationMs, context.signal)
       return {
         status: 'ok',
         content: {

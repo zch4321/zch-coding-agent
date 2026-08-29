@@ -1,4 +1,5 @@
 import { Type } from '@sinclair/typebox'
+import { delay } from '../../shared/async/delay'
 import type { TerminalId } from '../../shared/ids'
 import type { TerminalPool } from '../terminal/pool'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
@@ -142,7 +143,7 @@ export function registerTerminalTools(
         }
       }
       const startedAt = performance.now()
-      await waitForTerminalDelay(args.delayMs ?? 1_000, context.signal)
+      await delay(args.delayMs ?? 1_000, context.signal)
       const output = terminalPool.readDeltaOrTail(
         context.sessionId,
         args.terminalId,
@@ -173,31 +174,6 @@ export function registerTerminalTools(
       }
     },
   } satisfies ToolDefinition<typeof SendSchema>)
-}
-
-/** Waits after a successful terminal write while honoring run cancellation. */
-function waitForTerminalDelay(
-  durationMs: number,
-  signal: AbortSignal,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const finish = () => {
-      signal.removeEventListener('abort', abort)
-      resolve()
-    }
-    const timer = setTimeout(finish, durationMs)
-    const abort = () => {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', abort)
-      reject(signal.reason ?? new Error('terminal send delay aborted'))
-    }
-
-    if (signal.aborted) {
-      abort()
-      return
-    }
-    signal.addEventListener('abort', abort, { once: true })
-  })
 }
 
 /** Terminates one submitted input and normalizes Enter for the platform PTY. */

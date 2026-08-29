@@ -8,7 +8,6 @@ import {
   compactRetryDecision,
   createCompactRetryBudget,
   shouldFallbackNativeCompact,
-  waitForCompactRetry,
 } from './session-compact-retry'
 
 const diagnostics = {
@@ -95,12 +94,5 @@ describe('compact retry policy', () => {
         new ProviderTransportError('HTTP_ERROR', 'busy', 503),
       ),
     ).toBe(false)
-  })
-
-  it('interrupts a pending retry delay', async () => {
-    const controller = new AbortController()
-    const pending = waitForCompactRetry(60_000, controller.signal)
-    controller.abort(new Error('stop'))
-    await expect(pending).rejects.toThrow('stop')
   })
 })
