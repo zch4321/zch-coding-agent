@@ -543,7 +543,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - 不记录请求传输层凭据，例如 API Key、Authorization header 和 safeStorage 密文；这些信息不属于模型上下文，也不是回放所需数据。
 - 开启时必须明确提示日志可能包含源代码、用户输入、模型推理、工具输出以及工作区中被读取的凭据，并支持保留天数/总大小上限。
 - 完整 trace 必须可规范化为只读 `zch-session-transcript`：按 run 展示用户/Assistant/明文 reasoning、内部编排、工具与审批、Provider上下文、Plan、interjection、usage、terminal和生命周期。该格式不可导入或重放；每次 Electron 导出前必须警告，导出内容不做敏感信息扫描或脱敏，用户负责本地保存和后续分享。
-- Transcript 不输出 provider wire request/raw response/provider continuation、失败证据正文、工具 schema、加密/opaque reasoning或多模态原始载荷。v3 新 Trace 不从失败请求恢复 partial 输出；读取旧 v2 `llm.stream` 时仍可将遗留明文 delta 标为 partial。多模态只保留类型/MIME/已知大小占位。
+- Transcript 不输出 provider wire request/raw response/provider continuation、失败证据正文、工具 schema、加密/opaque reasoning或多模态原始载荷。v3 新 Trace 不从失败请求恢复 partial 输出；读取旧 v2 `llm.stream` 时仍可将遗留明文 delta 标为 partial，已经删除且没有 v3 等价物的 `run.rejected/workspace.writer` 记录只在读取投影中跳过，不改写原文件。多模态只保留类型/MIME/已知大小占位。
 - 产品 Session 状态使用 SQLite 持久化；Trace 继续按 capture 分段保存，并通过 `sessionId` 归属同一 Session，不能因数据库存在而降低 trace 保真度。清理活动日志时必须使用真实 active `traceId`，不能把 `sessionId` 当作文件标识。
 
 ### 5.2 必须记录的事件（每条一行 JSON）
@@ -552,7 +552,6 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 operational     { schemaVersion, seq, eventId, level, event, diagnosticId?, correlationIds?, boundedMetadata, ts }
 session.start   { schemaVersion, seq, eventId, sessionId, workspace, model, mode, ts }
 run.start/end   { runId, status, ts }
-run.rejected    { runId, reason, ts }
 llm.request     { callId, runId, scope, messages, providerRequest, modelRoute, requestBytes, ts }
 llm.response    { callId, runId, aggregateResponse, providerState?, usage, timing, ts }
 llm.failure     { callId, runId, operation, stage, code, diagnosticId?, httpMetadata?, evidence?, timing?, ts }

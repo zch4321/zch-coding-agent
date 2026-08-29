@@ -775,7 +775,7 @@ export class SessionManager {
     await trace.dispose()
     this.#emit(session, { type: 'session.closed', sessionId })
     this.#sessions.delete(sessionId)
-    await this.#cleanupTraces()
+    if (session.visibility === 'public') await this.#cleanupTraces()
     return true
   }
 

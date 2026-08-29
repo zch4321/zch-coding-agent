@@ -146,6 +146,85 @@ describe('JsonlTraceLogger', () => {
     ])
   })
 
+  it('skips retired v2 concurrency records during reads and retention cleanup', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
+    const filePath = path.join(directory, 'legacy-concurrency.jsonl')
+    const base = {
+      schemaVersion: 2,
+      sessionId,
+      runId: 'run:legacy-concurrency',
+      ts: '2026-07-27T00:00:00.000Z',
+    }
+    const events = [
+      {
+        ...base,
+        seq: 1,
+        eventId: 'event:legacy-session-start',
+        type: 'session.start',
+        workspace: 'F:/workspace',
+        model: 'legacy-model',
+        mode: 'readonly',
+      },
+      {
+        ...base,
+        seq: 2,
+        eventId: 'event:legacy-writer',
+        type: 'workspace.writer',
+        workspace: 'F:/workspace',
+        status: 'acquired',
+      },
+      {
+        ...base,
+        seq: 3,
+        eventId: 'event:legacy-rejected',
+        type: 'run.rejected',
+        reason: 'workspace_writer_active',
+      },
+      {
+        ...base,
+        seq: 4,
+        eventId: 'event:legacy-run-start',
+        type: 'run.start',
+      },
+      {
+        ...base,
+        seq: 5,
+        eventId: 'event:legacy-run-end',
+        type: 'run.end',
+        status: 'completed',
+      },
+      {
+        ...base,
+        seq: 6,
+        eventId: 'event:legacy-session-end',
+        type: 'session.end',
+      },
+    ]
+    await writeFile(
+      filePath,
+      `${events.map((event) => JSON.stringify(event)).join('\n')}\n`,
+    )
+
+    await expect(readTraceFile(filePath)).resolves.toMatchObject([
+      { schemaVersion: 3, seq: 1, type: 'session.start' },
+      { schemaVersion: 3, seq: 4, type: 'run.start' },
+      { schemaVersion: 3, seq: 5, type: 'run.end' },
+      { schemaVersion: 3, seq: 6, type: 'session.end' },
+    ])
+
+    await utimes(filePath, new Date('2025-01-01'), new Date('2025-01-01'))
+    const diagnostics: string[] = []
+    await expect(
+      cleanupTraces(directory, {
+        retentionDays: 1,
+        maxTotalBytes: 1_000_000,
+        now: new Date('2026-06-15'),
+        onDiagnostic: (message) => diagnostics.push(message),
+      }),
+    ).resolves.toMatchObject({ deleted: [filePath], retainedBytes: 0 })
+    expect(diagnostics).toEqual([])
+  })
+
   it('writes and validates one aggregate v3 Provider failure', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-trace-'))
     const logger = await JsonlTraceLogger.create(directory, sessionId)

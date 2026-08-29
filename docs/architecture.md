@@ -1628,13 +1628,13 @@ Trace v3 可以记录比 messages 更细的内容：
 - 聚合成功响应，以及一条带稳定 code/diagnostic ID 的 `llm.failure`；失败证据最多 256 KiB 并带观察字节数、截断位与 SHA-256。
 - canonical source 摘要、冻结 route、prompt build 和 request-specific selection。
 - 最终 wire request、canonical completion、必要 raw response、timing 和 usage。
-- pending approval、tool attempt、writer、terminal 和 runtime diagnostics。
+- pending approval、tool attempt、terminal 和 runtime diagnostics。
 
 Logging 关闭时这些细节可以不存在，但 Projects、完整 Messages、Session metadata 和未被 retention 清理的 FileChanges 仍必须落盘。
 
 Restricted transcript 可以组合 SQLite messages 与 trace；缺少 trace 时明确省略 runtime 细节。
 
-Trace 不记录 credentials。生产 `TraceEventInput` 不允许 `llm.stream`，正常 token/SSE 增量只存在于 backend memory 和 Renderer overlay；失败前 partial text/reasoning 不落盘。reader 会把 v2 records 投影为 v3，并保留旧 `llm.stream` 的只读查看能力，文件本身不改写；v1 仍明确拒绝。trace fork/start-fork API 和 UI 已移除，普通 Session fork 不受影响。
+Trace 不记录 credentials。生产 `TraceEventInput` 不允许 `llm.stream`，正常 token/SSE 增量只存在于 backend memory 和 Renderer overlay；失败前 partial text/reasoning 不落盘。reader 会把 v2 records 投影为 v3，并保留旧 `llm.stream` 的只读查看能力；没有 v3 等价物的旧 `run.rejected/workspace.writer` 在投影中跳过，允许 seq 存在空洞，文件本身不改写。v1 仍明确拒绝。trace fork/start-fork API 和 UI 已移除，普通 Session fork 不受影响。Internal Subagent/Swarm child Session 固定关闭 Full Trace，其关闭不触发全目录 retention 扫描；公开 Session 关闭和日志生命周期继续负责清理，避免一个 Swarm 的每个 child 重复扫描同一批历史文件。
 
 ---
 
