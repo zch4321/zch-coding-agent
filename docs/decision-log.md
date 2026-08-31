@@ -2,6 +2,29 @@
 
 本文件记录有意接受、暂缓或取舍的技术决策。Code review 记录发现本身；本日志记录项目对发现采取的处理方式，避免后续将已知限制误认为遗漏。
 
+## 2026-09-01 — Main process 文件能力统一归 `electron/common/filesystem`
+
+- 状态：已采纳，待实施；实施顺序见 [文件系统与文件工具重构计划](./file-tools-filesystem-refactor-plan.md)。
+- 决定：通用文件读取、检查、目录创建、原子 text/buffer/JSON 替换、权限继承、幂等删除和临时文件清理统一由 `electron/common/filesystem` 的单一出口提供。目标状态下，除该 package 和测试 fixture 外，`electron/**` production code 不直接导入 `node:fs`/`node:fs/promises`，并由架构测试固定。
+- 实现边界：原子替换由 common facade 封装 `write-file-atomic`，第三方 API 不泄漏给业务模块；覆盖现有文件继承 permission mode，新文件服从进程 umask。owner/ACL/xattr 不作为跨平台产品承诺。filesystem common 不拥有 PathGuard、审批、Tool schema、FileChange、Git 或 SQLite 事务。
+- 理由：当前 config、tool、FileChange、headless、session-temp 和 skills 分别实现临时文件与 rename，权限保持、清理、Windows 行为和耐久性修复无法一次覆盖。`shared/` 必须保持 Node-free，`tooling` 只拥有 Tool framework，因此 Main-only 的 `electron/common/filesystem` 是合适边界；统一入口也比继续在每个业务 package 维护局部 helper 更易测试和替换。
+
+## 2026-09-01 — 文件工具采用 best-effort 与 last-writer-wins
+
+- 状态：已采纳，待实施；本条取代 2026-08-26 并发决策中继续保留文件 precondition/FileChange OCC 的部分，以及审批后文件变化必须使调用失效的旧要求。
+- 工具集合：`create_file` 替换为 `write_file`。不存在则创建，存在的普通文件则整体覆盖；覆盖保留当前权限，新文件使用正常 workspace 默认权限。旧 canonical history 中的 `create_file` 仍按历史事实显示，但生产 catalog 不保留 alias，旧 remembered rule 也不自动扩大为 `write_file` 授权。
+- 审批语义：批准继续绑定 tool/call、完整 args hash、规范化 path、operation 和 workspace scope；Diff 是时间点预览。目标内容、hash、inode、mtime、父目录 identity 或预期结果在批准后变化，不再作为执行拒绝条件。执行时仍重新经过 PathGuard，symlink/junction、目录、越界和非法根继续失败。
+- 执行语义：`apply_patch` 重新读取最新内容，只在精确上下文唯一匹配时应用；缺失或歧义零写入并要求 Agent 重读，不做 fuzzy replacement。`delete_file` 重新解析普通文件后删除，不检查旧 hash；不存在时幂等成功并返回 `deleted: false`。读取后的并发写入允许由最后完成的写入覆盖，产品不提供 workspace writer lock 或自动 merge。
+- 理由：多人/多 Agent 并发本来无法由审批时快照彻底解决；当前条件写把用户授权和 OCC 混成一个机制，增加复杂度并制造大量无价值的 `RESOURCE_CHANGED`。保留参数与路径授权、原子发布和明确冲突错误，已经足以表达本地 coding agent 的实际承诺。
+
+## 2026-09-01 — FileChange 回退改用 Git reverse patch
+
+- 状态：已采纳，待实施；本条取代 FC-3、M-1 的 snapshot/prewrite 语义和“回退不依赖 Git”的旧产品承诺。
+- 决定：FileChange 继续持久化 Session/tool-call 归属与实际 Diff，但 backend 不再保存 `beforeContent`、before/after hash 或自研恢复 payload。新记录保存完整 Git-compatible forward patch；回退只对 working tree 执行等价于 `git apply --reverse` 的 Git 操作，不触碰 index，不创建 commit/stash/ref，不使用 `git restore`、`git checkout` 或面向 commit 的 `git revert`。
+- 冲突语义：Git 无法反向应用时返回 `CONFLICT` 并保持 workspace 原状；不使用 `--3way`、`--reject`、fuzzy merge 或整文件覆盖 fallback。非 Git workspace 仍可查看 Diff 历史，但 Revert 明确不可用。旧 v1 FileChange 迁移为 `legacy_unavailable` 只读历史，并删除私有恢复快照。
+- 一致性取舍：FileChange 变为文件 mutation 成功后的 best-effort annotation。patch/SQLite retention 或持久化失败不会阻止、撤销或自动重试已经授权的文件操作；结果必须如实报告 `mutationSucceeded: true`、warning 和 `revertAvailable: false`。Git 只替代内容恢复/冲突算法，Session 归属、patch retention、revert command 和状态持久化仍由应用负责。
+- 理由：Git 的反向 patch 可以在上下文仍匹配时保留无关修改，并在重叠修改时确定性拒绝；它比持久化整份 before snapshot 和维护第二套恢复算法更符合项目的简化方向。接受的代价是非 Git 项目没有回退、乱序回退可能冲突，以及 Git 可执行文件成为该能力的前提。
+
 ## 2026-08-27 — 中断续跑由 canonical history 推导
 
 - 状态：采用。
@@ -11,7 +34,7 @@
 
 ## 2026-07-25 — FC-1：FileChange revert 的 workspace TOCTOU
 
-- 状态：P8 切流时已重新评估；接受风险，不修复。
+- 状态：自研 FileChange revert 部分已由 2026-09-01 Git reverse patch 决策取代；对普通文件工具路径检查与最终系统调用之间的同机竞争风险仍接受。
 - 决定：本轮不引入基于目录句柄的 no-follow 原子文件操作。
 - 背景：`FileChange` 回滚会在完成路径与内容校验后，以字符串路径调用最终的 `rename` 或 `unlink`。外部本地进程若在极窄窗口内替换文件或中间目录，可能覆盖竞争方的新内容；若以符号链接或等效机制替换中间目录，理论上还可能越过 workspace 边界。详见 [FC-1 code review](backend-refactor-p0-p5-code-review.md#fc-1-revert-的最终-renameunlink-在最后一次校验之后使用词法路径toctou-可越过-workspace-边界p1-1)。
 - 理由：完整修复需要跨平台目录句柄绑定和 no-follow 原子操作，实施复杂度高；当前产品假定本地 workspace 和同机进程可信，接受极窄外部竞争窗口。Durable Backend 切流不改变这一取舍。
@@ -35,7 +58,7 @@
 
 ## 2026-07-25 — FC-3：FileChange beforeHash 不交叉校验
 
-- 状态：接受，不修复。
+- 状态：已由 2026-09-01 Git reverse patch 决策取代；FileChange v2 不再保存 `beforeContent/beforeHash`。
 - 决定：Revert 继续信任同一 SQLite record 中的 `beforeContent`，不在读取时重新计算并强制匹配 `beforeHash`。
 - 理由：记录由单一 backend transaction 写入，正常路径不存在两者分叉；触发需要数据库损坏或外部篡改。异常仍进入现有 codec/SQLite/revert 诊断日志，暂不增加 hash 交叉校验与恢复拒绝分支。
 - 重新评估条件：支持外部导入 FileChange、数据库修复工具、跨设备同步，或出现真实损坏案例。
@@ -80,7 +103,7 @@
 
 ## 2026-07-25 — M-1：FileChange 预写失败时禁止文件副作用
 
-- 状态：已采纳 fail-closed 行为。
+- 状态：已由 2026-09-01 FileChange best-effort annotation 决策取代；以下保留为历史背景。
 - 决定：文件变更工具必须先完成 `prepareMutation`；包括 SQLite 错误在内的任何准备失败都会跳过文件写入并让当前 Run 失败，前端向用户显示错误并允许重试请求。
 - 理由：如果审计记录尚未可靠准备就继续修改文件，会产生无法证明、无法安全回退的副作用。相较于把数据库短暂故障降级为 warning，请求失败更符合 Durable Backend 对变更可追溯性的承诺。
 - 边界：文件写入已经成功后，`commitMutation` 失败仍保留现有 warning 语义，因为此时再把 Run 标为失败并不能撤销已发生的文件副作用；工具结果必须明确 `mutationSucceeded: true` 和回退不可用。
@@ -302,7 +325,7 @@
 
 ## 2026-08-26 — 移除产品级并发准入并让主 Agent 显式委派工具权限
 
-- 状态：已采纳并实现；覆盖 2026-08-06 “Swarm 数量归 Job 所有”中用户级并发上限、逐次 Swarm 审批和只读 child 的部分，保留模型池分配与固定协议容量边界。
+- 状态：已采纳并实现；覆盖 2026-08-06 “Swarm 数量归 Job 所有”中用户级并发上限、逐次 Swarm 审批和只读 child 的部分，保留模型池分配与固定协议容量边界。下述文件 precondition/FileChange OCC 保留项已由 2026-09-01 best-effort/last-writer-wins 决策取代。
 - 工作区并发：删除全应用 Active Run slot、canonical workspace writer lease、强制只读降级、启动拒绝、Renderer 禁用态和 `<workspace_concurrency>` 提示。不同 Session 可以在同一 workspace 并发执行和写入，不额外警告；同一 Session 仍只允许一个 Active Run，以保持 canonical history 线性。
 - 配置迁移：AppConfig v24 删除 `limits.maxConcurrentRuns` 与 `subagents.maxAgentsPerSwarm`。v9–v23 使用各自冻结 schema 校验并保留其余字段后迁移；Agents/Runtime 设置页只保留 Subagent 开关、worker timeout、模型池与费用提示。`MAX_SWARM_AGENTS = 32` 仅作为 Tool schema、持久化计数和结果大小的异常负载边界，不是产品并发策略。
 - 委派契约：`subagent_run` 增加必填 `toolAccess: readonly | inherit`；`swarm_run.tasks[]` 对每项任务增加相同字段。`readonly` 只取父 Run catalog 的无副作用子集；`inherit` 使用父 Session 权限模式和父 Run 冻结 catalog，不能提升只读父 Run。Goal、Plan、Subagent 与 Swarm 编排工具始终从 child 排除。

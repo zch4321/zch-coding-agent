@@ -1,10 +1,10 @@
 # 架构设计文档 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 已完成 P0–P11 · 2026-07-27
+> 状态：Backend Architecture v2.1 已完成；2026-09-01 文件系统/文件工具目标架构已采纳，实施待完成
 >
 > 配套文档：[`requirements.md`](./requirements.md) 定义产品能力，[`frontend-spec.md`](./frontend-spec.md) 定义前端信息架构与交互验收。
 >
-> 本文同时是当前实现的规范。P6–P9 已一次完成 Durable IPC、renderer replica、production composition 切流和旧路径删除；P10 已完成事务、生命周期、通知、恢复与发布门禁收口。
+> 本文是已采纳架构的规范；尚未切流的目标设计会明确标注，并在 §21 记录当前实现状态。文件系统/文件工具的实施顺序见 [`file-tools-filesystem-refactor-plan.md`](./file-tools-filesystem-refactor-plan.md)。
 
 ---
 
@@ -33,7 +33,7 @@ Backend application services
 SQLite
   ├─ Project registry / Session metadata
   ├─ complete, ordered Messages
-  └─ bounded FileChanges / revert payloads
+  └─ bounded FileChanges / Git-compatible patches
 ```
 
 本次重构解决：
@@ -88,7 +88,7 @@ SQLite
 
 `ProjectRecord`、`SessionRecord` 和 `MessageRecord` 在 `shared/` 用 TypeBox 定义。Renderer、backend、IPC 和 database codec 使用同一 schema，不再在 `src/` 与 `electron/` 分别维护语义不同的 Project/Conversation/Message 类型。
 
-`file_changes.before_content` 是唯一一个明确的宿主私有恢复 payload：它有 backend 内部 codec，但不属于 renderer 状态。`shared/` 只定义不含该字段的 `FileChangeSummary` IPC schema。
+FileChange v2 的完整 forward patch 是 backend-private payload：它有 repository/codec，但不属于 renderer 状态。`shared/` 只定义有界 Diff 投影、patch hash/bytes 和 revert capability；不包含 patch 正文或文件内容快照。旧 `file_changes.before_content` 在迁移后删除，不保留非 Git restore fallback。
 
 SQLite 可以使用关系型列名，但必须满足：
 
@@ -161,6 +161,12 @@ Renderer bridge 使用独立、显式的 capability manifest，而不是把整�
 
 ```text
 electron/
+  common/
+    filesystem/                    # Main/Node 文件基础设施的唯一公开入口
+  git/
+    client.ts                      # bounded/abortable argv-only Git client
+    patch-service.ts               # Git-compatible patch 与 working-tree revert
+  tooling/                         # Tool framework，不含内置业务 Tool
   session/
     canonical-history.ts          # P3 MessageHistoryCompiler
     session-provider-turn.ts
@@ -187,7 +193,7 @@ electron/
     chat-completions-shared.ts
     model-route-resolver.ts
   prompts/
-  tools/
+  tools/                           # 内置 Tool schema/definition/adapter
   permission/
   terminal/
   project/
@@ -198,6 +204,12 @@ electron/
 ```
 
 `electron/application/` 包含 production 使用的 coordinator、Project/Session/FileChange services、run application service 和 live-session registry；Desktop 与 Headless 通过唯一 `createBackendRuntime` 组装它们。
+
+`electron/common/filesystem` 是 Main process 文件基础设施，不是业务 `util` 集合。通用 read/inspect/mkdir/atomic text-buffer-JSON replace/idempotent remove/temp cleanup 按职责拆成小模块，并只从 `index.ts` 公开。覆盖写由该 facade 封装 `write-file-atomic`：已有文件继承 permission mode，新文件服从进程 umask；owner/ACL/xattr 不作为跨平台产品承诺。同进程同路径写入串行，不同路径仍可并行，第三方 API 不泄漏给调用方。
+
+目标状态下，除 `electron/common/filesystem/**` 和测试 fixture 外，`electron/**` production module 不直接导入 `node:fs` 或 `node:fs/promises`，由 architecture boundary test 固定。`PathGuard`、permission、Tool schema、FileChange、Git 和 SQLite 不进入 common；依赖方向是业务/安全层调用 common，而 common 不反向导入业务 package。Git 是独立 integration，FileChange revert 通过 `electron/git/patch-service` 调用它，不能把 Git process policy 塞入 filesystem。
+
+文件 mutation 的批准与执行分离：approval 固定 tool/call、完整 args hash、规范化 path、operation 和 scope，批准时 Diff 只是有界预览；执行时重新经过 PathGuard 并读取最新状态，不再比较审批时的 existence/hash/inode/mtime/parent identity 或 expected result。`write_file` 对不存在目标创建、对普通文件整体覆盖；`apply_patch` 只在最新内容中精确上下文唯一匹配时应用，缺失或歧义零写入且不做 fuzzy replacement；`delete_file` 对普通文件删除、对不存在目标幂等返回 `deleted: false`，后者不创建空 FileChange。读取后发生的并发修改采用 last-writer-wins，原子替换只防止半文件可见，不提供 conditional mutation。持久化 Diff 描述本调用实际读取的 before 与其发布/删除的结果，不冒充外部竞争完成后的 workspace 总状态。
 
 Persistence 是独立代码层，但不是独立进程、IPC service 或通用 ORM：
 
@@ -668,44 +680,51 @@ Structured output 是携带 JSON Schema 的 provider-neutral 请求。Responses 
 
 ### 5.4 FileChangeSummary 与 StoredFileChangeRecord
 
-Renderer 只需要展示 Diff 历史并发起“回退” command，因此 `shared/` 中的公开结构不包含文件恢复内容：
+> 目标设计，已采纳但尚未切流。v1 snapshot schema 的迁移见 §6.7 与 §21。
+
+Renderer 只需要展示实际 Diff 历史、回退能力并发起 command，因此 `shared/` 中的公开结构不包含完整 patch：
 
 ```ts
-interface FileChangeSummary {
-  schemaVersion: 1
+interface FileChangeSummaryV2 {
+  schemaVersion: 2
   id: FileChangeId
   sessionId: SessionId
   callId: string
   path: string
   operation: 'write' | 'patch' | 'delete'
+  beforeExists: boolean
+  afterExists: boolean
   diff: string
   diffHash: string
+  patchHash?: string
+  patchBytes?: number
   diffTruncated: boolean
-  beforeExists: boolean
-  beforeHash: string
-  afterExists: boolean
-  afterHash: string
+  revertCapability:
+    | 'available'
+    | 'not_git_repository'
+    | 'legacy_unavailable'
   revision: number
   createdAt: string
   updatedAt: string
   revertedAt?: string
 }
 
-interface StoredFileChangeRecord extends FileChangeSummary {
-  beforeContent: string | null
-  payloadBytes: number
+interface StoredFileChangeRecordV2 extends FileChangeSummaryV2 {
+  patch: string | null
+  gitPath: string | null
 }
 ```
 
-`StoredFileChangeRecord` 只属于 Backend repository 和 SQLite。`path` 是相对于 Project workspace 的路径。`beforeContent` 是回退 payload：
+`StoredFileChangeRecordV2` 只属于 Backend repository 和 SQLite。`path` 是相对于 Project workspace 的展示路径；`gitPath` 是经过验证、相对于当前 repository top-level 的 apply path。`patch` 是本次工具实际执行时 before→after 的完整 Git-compatible forward patch：
 
-- 修改或删除已有文件时，保存完整、受限的 UTF-8 修改前内容。
-- 创建新文件时，`beforeExists = false` 且 `beforeContent = null`；回退动作删除该文件。
-- 不保存 `afterContent`；回退只需要 `beforeContent`，冲突检查使用当前文件的 existence 与 `afterHash`。
+- `write_file`、`apply_patch` 和 `delete_file` 只在当前执行内存中保留 before/after，持久层不保存整份内容快照。
+- create/delete patch 使用 `/dev/null` 语义；修改 patch 只描述该次文件工具的实际变化，不等同于整个 working tree 相对 HEAD 的 Diff。
+- `diff` 是 renderer 的有界投影，`diffHash` 对该投影计算；只有具备完整 backend patch 的记录才有 `patchHash/patchBytes`。截断 display diff 不能用于回退。
+- 非 Git workspace 可以保存 Diff，但 `patch/gitPath` 可以为空并标为 `not_git_repository`；v1 历史迁移为 `legacy_unavailable`。
 
-Hash 都是对 UTF-8 内容计算的 SHA-256。文件不存在时使用 `exists = false` 区分状态，hash 列保存空字节串的 SHA-256，不把空文件和不存在混为一种状态。
+FileChange v2 不保存 before/after hash，也不以当前文件是否等于某个 after state 决定回退。Revert 的内容匹配与冲突由 Git reverse apply 负责。
 
-Renderer 只能通过 IPC 获得 `FileChangeSummary`。这不违反“Session 数据在前端、后端、数据库一致”的约束：FileChange 是独立的宿主恢复记录，不是 Session 字段或 Message。Renderer 不执行回退，也不持有恢复快照。
+Renderer 只能通过 IPC 获得 `FileChangeSummaryV2`。这不违反“Session 数据在前端、后端、数据库一致”的约束：FileChange 是独立的宿主变更记录，不是 Session 字段或 Message。Renderer 不执行 Git、不持有完整 patch，也不从 Message/tool card 推导历史。
 
 ### 5.5 SessionSnapshot
 
@@ -914,6 +933,8 @@ CREATE INDEX messages_history_idx
 
 ### 6.7 `file_changes`
 
+> 下列是已采纳的 v2 目标 schema；当前 v1 表在文件工具重构切流时以前向 migration 重建。
+
 ```sql
 CREATE TABLE file_changes (
   schema_version  INTEGER NOT NULL,
@@ -922,23 +943,41 @@ CREATE TABLE file_changes (
   call_id         TEXT NOT NULL,
   path            TEXT NOT NULL,
   operation       TEXT NOT NULL CHECK (operation IN ('write', 'patch', 'delete')),
+  before_exists   INTEGER NOT NULL CHECK (before_exists IN (0, 1)),
+  after_exists    INTEGER NOT NULL CHECK (after_exists IN (0, 1)),
   diff            TEXT NOT NULL,
   diff_hash       TEXT NOT NULL CHECK (length(diff_hash) = 64),
+  patch_hash      TEXT CHECK (patch_hash IS NULL OR length(patch_hash) = 64),
+  patch_bytes     INTEGER CHECK (patch_bytes IS NULL OR patch_bytes >= 0),
   diff_truncated  INTEGER NOT NULL CHECK (diff_truncated IN (0, 1)),
-  before_exists   INTEGER NOT NULL CHECK (before_exists IN (0, 1)),
-  before_hash     TEXT NOT NULL CHECK (length(before_hash) = 64),
-  before_content  TEXT,
-  after_exists    INTEGER NOT NULL CHECK (after_exists IN (0, 1)),
-  after_hash      TEXT NOT NULL CHECK (length(after_hash) = 64),
-  payload_bytes   INTEGER NOT NULL CHECK (payload_bytes >= 0),
+  revert_capability TEXT NOT NULL CHECK (
+    revert_capability IN (
+      'available',
+      'not_git_repository',
+      'legacy_unavailable'
+    )
+  ),
+  patch           TEXT,
+  git_path        TEXT,
   revision        INTEGER NOT NULL,
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL,
   reverted_at     TEXT,
   UNIQUE (session_id, call_id, path),
   CHECK (
-    (before_exists = 0 AND before_content IS NULL)
-    OR (before_exists = 1 AND before_content IS NOT NULL)
+    (
+      revert_capability = 'available'
+      AND patch IS NOT NULL
+      AND patch_hash IS NOT NULL
+      AND patch_bytes IS NOT NULL
+      AND git_path IS NOT NULL
+    ) OR (
+      revert_capability != 'available'
+      AND patch IS NULL
+      AND patch_hash IS NULL
+      AND patch_bytes IS NULL
+      AND git_path IS NULL
+    )
   )
 );
 
@@ -952,35 +991,35 @@ CREATE INDEX file_changes_retention_idx
 `file_changes` 只服务两个产品能力：
 
 1. Diff 面板在应用重启后仍能按 Session 查看 Agent 的文件修改历史。
-2. 用户可以不依赖 Git，安全回退某一项 `create_file/apply_patch/delete_file` 变更。
+2. Git workspace 中，用户可以对某一项 `write_file/apply_patch/delete_file` 变更尝试 working-tree reverse patch。
 
 它不是 provider message、Run journal、trace 或通用 filesystem audit log，不进入 `messages`、`inHistory` 或下一次模型请求。`call_id` 只用于与对应 tool call/result 关联，不表示 Run 已持久化。
 
-`operation = 'write'` 同时覆盖 `create_file` 和其他整体写入；`before_exists` 能区分“创建新文件”与“替换已有文件”，不需要再增加一个与恢复语义重复的 `create` 枚举。
+`operation = 'write'` 对应 `write_file` 的整体写入；`before_exists` 区分创建与覆盖，不增加重复的 `create` operation。历史 tool message 中的 `create_file` 不改写，迁移后的旧 FileChange 仍可按 `operation = 'write'` 展示。
 
 记录流程：
 
-1. 副作用前已有 resource precondition 中的 before content 和 diff，先计算 `payloadBytes = utf8(beforeContent) + utf8(diff)`。单条记录已超过总容量上限时，在修改文件前返回 `CHANGE_HISTORY_LIMIT_EXCEEDED`。
-2. 文件工具完成原子写入/删除，并重新读取或校验实际 after existence/hash。
-3. 在工具结果成为 terminal result 前，同一 FileChange transaction 先按 `(createdAt, id)` 删除最旧记录以满足全应用字节容量，再插入完整 `StoredFileChangeRecord`。删除使用有界 SQL batch，不把无界历史加载进内存。
-4. Commit 后，工具结果才可以声明该变更支持 revert；随后按 §7.2 与其余 tool batch messages 一起写入对话历史。
+1. 文件工具在执行时重新经过 PathGuard，并只在当前调用内存中保留它实际读取的 latest before 与本次要发布的 bytes/删除结果；审批时 preview 不作为 mutation precondition。
+2. `write_file/apply_patch` 通过 `electron/common/filesystem` 原子发布，`delete_file` 对普通文件执行幂等删除。完成读取后的外部写入参与 last-writer-wins，不比较 inode/hash/mtime。
+3. mutation 成功后，由 before/after 尽力生成完整 Git-compatible patch 与有界 Diff。非 Git、patch 生成失败或单条 patch 超过 history budget 不回滚文件副作用，只让本条 `revertAvailable = false` 并返回 warning。
+4. 可记录时，FileChange transaction 先按 `(createdAt, id)` 有界删除最旧记录以满足全应用 patch bytes 容量，再插入 v2 record。Commit 后发布 FileChange replica；随后按 §7.2 与其余 tool batch messages 一起写入对话历史。
 
 如果 filesystem mutation 已成功但 FileChange transaction 失败，terminal result 必须同时如实返回 `mutationSucceeded = true`、`warningCode = 'CHANGE_HISTORY_PERSIST_FAILED'` 和 `revertAvailable = false`，不能宣称整个文件操作未发生，也不能自动重试副作用。Filesystem 与 SQLite 仍不是同一原子事务；崩溃可能留下文件变化但没有 FileChange/Message，这与 §7.2 的 crash tradeoff 一致。
 
-如果副作用完成后重新读取的 after existence/hash 已不匹配审批结果，不保存 FileChange；tool result 仍保持成功并返回 `CHANGE_HISTORY_AFTER_STATE_MISMATCH`、`mutationSucceeded = true` 和 `revertAvailable = false`，React loop 可以继续。
-
-FileChange 与 Message 故意不在同一个 transaction 落盘：前者紧跟每次已完成的文件副作用，后者要等当前 assistant tool-call batch 的所有 terminal results 齐全后才能原子提交。Message history 是 append-only 且参与 provider context；FileChange 会更新 `revertedAt`、按独立容量规则清理，并携带大容量恢复 snapshot。将两者混在 Message 中会破坏这些边界。
+FileChange 与 Message 故意不在同一个 transaction 落盘：前者是每次已完成文件副作用的 best-effort annotation，后者要等当前 assistant tool-call batch 的所有 terminal results 齐全后才能原子提交。Message history 是 append-only 且参与 provider context；FileChange 会更新 `revertedAt` 并按独立 patch 容量清理。将两者混在 Message 中会破坏这些边界。
 
 回退流程：
 
 1. 在第一次 await 前取得 Session `mutating` lifecycle token，阻止同 Session Run/archive、Project path update/remove 和并发 revert。不同 Session 或 workspace 操作不参与产品级 writer 准入。
-2. 当前文件 existence/hash 必须严格等于记录的 `afterExists/afterHash`；否则返回 `RESOURCE_CHANGED`，不能覆盖用户或后续工具的新修改。
-3. `beforeExists = true` 时用 `beforeContent` 原子恢复，并把临时文件恢复为快照记录的 POSIX permission mode 后再替换目标；否则删除 Agent 创建的文件。ACL、owner、xattr 和特殊位不属于 v1 恢复承诺。
-4. 成功后以 expected revision OCC 更新 `reverted_at`、`updated_at` 和 `revision`，最后释放 lifecycle token。
+2. 根据当前 Project workspace 重新发现 Git top-level，验证 record 未回退、`revertCapability = available`，并确认 patch 只涉及 workspace 内的记录路径。非 Git 和 legacy record 明确不可回退。
+3. 通过 bounded、abortable、`shell: false` 的 Git client 把完整 patch 送入 stdin，对 working tree 执行等价于 `git apply --reverse` 的操作。不得使用 `--cached/--index/--3way/--reject`，不得创建 commit/stash/ref，也不得 fallback 到 `git restore` 或整文件覆盖。
+4. Git 精确应用失败时返回 `CONFLICT`，workspace 保持 Git 的 all-or-nothing 结果；成功后以 expected revision 更新 `reverted_at/updated_at/revision`，最后释放 lifecycle token。
 
-文件已经恢复但 `markReverted` 持久化失败时，不自动重做或补偿文件副作用；返回 `PERSISTENCE_FAILURE`，details 明确包含 `mutationSucceeded = true` 和 `FILE_CHANGE_REVERT_STATE_PERSIST_FAILED`。后续重试会因当前文件不再等于 after hash 而安全返回 `RESOURCE_CHANGED`。
+Git 已经反向应用但 `markReverted` 持久化失败时，不自动重做或补偿文件副作用；返回 `PERSISTENCE_FAILURE`，details 明确包含 `mutationSucceeded = true` 和 `FILE_CHANGE_REVERT_STATE_PERSIST_FAILED`。重试前必须重新查询 record/workspace，不能假设重复 reverse 一定幂等。
 
-AppConfig v9 的 `limits.fileChangeHistoryBytes` 是全应用总预算，默认 `100_000_000` bytes，允许 `1_000_000`～`10_000_000_000`。记录条数不设上限，200 仅是单页上限。降低配置不启动后台清理；下一次 insert 在同一 transaction 内收敛到新预算。Retention 只会让最旧单项失去 Diff/revert 能力，不修改 Messages 或 workspace。恢复 snapshot 永远不经 IPC；renderer 只接收 `FileChangeSummary`。
+`limits.fileChangeHistoryBytes` 继续作为全应用总预算，默认 `100_000_000` bytes，允许 `1_000_000`～`10_000_000_000`，但 v2 只统计完整 patch payload。记录条数不设上限，200 仅是单页上限。降低配置不启动后台清理；下一次 insert 在同一 transaction 内收敛到新预算。Retention 只删除最旧 FileChange，不修改 Messages 或 workspace。完整 patch 永远不经 IPC；renderer 只接收 `FileChangeSummaryV2`。
+
+SQLite migration 把 v1 记录保留为 `legacy_unavailable` 只读 Diff 历史，并删除 `before_content/before_hash/after_hash`；可能截断的旧 Diff 不转换成可执行 patch，也不保留 snapshot restore 双轨。
 
 ### 6.8 Message seq 与 transaction
 
@@ -1536,7 +1575,7 @@ Queued interjection 属于 ActiveRun memory。只有真正注入 canonical activ
 - 每个 Session 同时最多一个 Active Run。
 - 不设置全应用 Active Run 准入上限；不同 Session 可以同时运行。
 - 不按 canonical workspace 建立 writer lease、只读降级、启动拒绝或并发警告；同一 workspace 的多个可写 Session 可以并发。
-- 文件工具继续使用路径守卫、调用级 precondition、原子替换和 FileChange revision；这些保护检测具体资源冲突，不充当 workspace 并发锁。
+- 文件工具继续使用路径守卫、args-bound approval、普通文件限制与原子发布，但不使用内容 hash/file identity precondition；读取后的竞争采用 last-writer-wins。`apply_patch` 的精确唯一匹配和 Git revert conflict 只报告具体操作是否可应用，不充当 workspace 并发锁。
 - 同一 Session 的 active Run、metadata mutation、revert、归档和关闭仍按线性历史与 lifecycle token 互斥。
 - 不可中止副作用仍在执行时继续由其 Tool 生命周期跟踪到 Promise settle，但不占用 workspace 准入资源。
 
@@ -1689,7 +1728,7 @@ Desktop temp 根为 `<os.tmp>/zch-coding-agent/<profile-hash>/<session-hash>/`�
 
 Harness 注入真实 root/artifacts/scratch 绝对路径，并给 `run_command` 与 Terminal 环境增加 `ZCH_SESSION_TEMP_DIR/ZCH_SESSION_ARTIFACTS_DIR/ZCH_SESSION_SCRATCH_DIR`，但不覆盖宿主 `TMP/TEMP`。模型投影在已知 `artifactPath/manifestPath/activityPath/resultPath` 字段中使用 `ZCH_SESSION_*_DIR:/...` 跨 Shell 短路径；read/list/glob/grep 在进入 PathGuard 前把该 alias 还原到当前 Session 根，Shell 仍使用自身的环境变量语法。这些动态值不进入 runtime semantic hash，也不生成实时 temp tree。主 Agent 与所有 hidden child 使用公开 owner Session 的同一目录。
 
-`PathGuard` 支持 workspace/session-temp 两个 canonical root：相对路径始终从 workspace 解析，绝对路径必须落入其中之一；只读文件工具还可把精确的 `ZCH_SESSION_*_DIR:/...` alias 展开为当前 Session 绝对路径。打开前后仍检查 lexical/real containment、symlink/junction 与文件身份，alias 中的 `..` 不能越界。read/list/glob/grep 可访问两根；create/apply/delete 只允许 workspace 或 `scratch`，明确拒绝 `artifacts`。scratch mutation 在 Auto/Confirm/Yolo 免审批、Readonly 无写 catalog，且不创建 Git/project diff、FileChange 或 rewind 记录。Command/Terminal `cwd` 可位于两根，但 spawn 的 Shell 是宿主权限进程而非 OS sandbox，可能访问或改写其他路径。
+`PathGuard` 支持 workspace/session-temp 两个 canonical root：相对路径始终从 workspace 解析，绝对路径必须落入其中之一；只读文件工具还可把精确的 `ZCH_SESSION_*_DIR:/...` alias 展开为当前 Session 绝对路径。打开前后仍检查 lexical/real containment、symlink/junction 与文件身份，alias 中的 `..` 不能越界。read/list/glob/grep 可访问两根；write/apply/delete 只允许 workspace 或 `scratch`，明确拒绝 `artifacts`。scratch mutation 在 Auto/Confirm/Yolo 免审批、Readonly 无写 catalog，且不创建 Git/project diff、FileChange 或 rewind 记录。Command/Terminal `cwd` 可位于两根，但 spawn 的 Shell 是宿主权限进程而非 OS sandbox，可能访问或改写其他路径。
 
 Command/Terminal/Subagent/Swarm 始终尝试完整留档；Fetch/Web Search 保存已获取/规范化结果，MCP 只在模型投影超过 256 KiB 或 500 行时保存规范化 JSON。Backend state 始终权威，文件只作可分页副本；捕获失败返回 `artifactAvailable = false/captureError`，旧路径不存在时 `read_file` 返回 `ARTIFACT_EXPIRED`。
 
@@ -1857,9 +1896,9 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 - Draft、partial output 和 active Run 不进入 SQLite。
 - Renderer reload 且 main 存活时可读取 ActiveRunPublicSnapshot。
 - App crash/restart 后 partial output 丢失，但完整 messages 可以继续请求模型。
-- FileChange create/patch/delete 都能在重启后列出和回退；当前文件不匹配 after existence/hash 时必须返回 `RESOURCE_CHANGED`。
-- FileChange 持久化失败时不宣称 `revertAvailable`；单条 payload 超限在文件副作用前拒绝；retention 只删除最旧变更记录，不改写 Messages 或 workspace。
-- `FileChangeSummary` IPC 不包含 `beforeContent`，renderer store、DOM、trace 默认记录中不得出现恢复 snapshot。
+- FileChange write/patch/delete 都能在重启后列出；Git workspace 的 v2 record 可 reverse apply，非 Git 和 legacy record 明确不可回退，重叠或乱序变化返回 `CONFLICT`。
+- FileChange patch 生成、容量或持久化失败时不宣称 `revertAvailable`，但不得阻止、撤销或自动重试已经成功的文件 mutation；retention 只删除最旧变更记录，不改写 Messages 或 workspace。
+- `FileChangeSummaryV2` IPC 不包含完整 patch 或 before/after content，renderer store、DOM、trace 默认记录中不得出现 backend-private patch payload。
 
 核心重启回归：
 
@@ -1877,6 +1916,8 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 ## 21. 当前迁移状态
 
 P0–P13 已完成。Desktop、Headless、IPC、preload 和 renderer 默认路径均使用唯一 `createBackendRuntime` 与 SQLite Durable Backend。Desktop 数据库为 `userData/agent.db`；数据库打开或 migration 失败时显示阻塞恢复对话框，不回退 Workbench。Headless 使用任务独立临时数据库并在退出时关闭、删除。
+
+2026-09-01 已采纳 `electron/common/filesystem`、`write_file` best-effort/last-writer-wins 和 Git-backed FileChange v2 的目标设计，但代码迁移尚未开始。当前 production 仍注册 `create_file`，仍使用审批时 resource precondition、多个局部原子写 helper、`beforeContent` snapshot 与非 Git restore；这些仅是待迁移现状，不再是目标架构。切流、schema migration、兼容边界和删除门禁以 [`file-tools-filesystem-refactor-plan.md`](./file-tools-filesystem-refactor-plan.md) 为准。
 
 P11 Provider Runtime Foundation 与 P12 Generic Responses/Anthropic 已完成。Main 与 auto approver 使用扁平 `ModelProvider.compile/stream`，compact 使用同一实现上的 `compileCompact/compact`；生产实现为互不继承的 `deepseek.chat-completions`、`mimo.chat-completions`、`generic.chat-completions`、`generic.responses` 与 `generic.anthropic`。MiMo 专用实现发送官方 `max_completion_tokens + thinking.enabled/disabled` 字段，并通过 MiMo continuation 完整回传带工具调用轮次的 `reasoning_content`；其所有非关闭 reasoning 档位按供应商能力统一为启用思考。配置、route、continuation 和 compact envelope 统一使用 `providerType`；Google 和其他具体厂商实现继续按实际使用需求独立增加。
 

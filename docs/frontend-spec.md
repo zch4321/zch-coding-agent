@@ -1,9 +1,9 @@
 # 前端产品与验收规范 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 P0–P13 配套规范 · 最后更新 2026-08-02
+> 状态：Backend Architecture v2.1 P0–P13 配套规范；文件工具交互目标已采纳、待实施 · 最后更新 2026-09-01
 > 配套：[`requirements.md`](./requirements.md)（产品能力）、[`architecture.md`](./architecture.md)（技术边界）、[`road-map.md`](./road-map.md)（实施方向）。
 > 本文档是前端信息架构、交互行为、阶段展示和验收标准的权威依据；发生冲突时以本文档为准。
-> v2.1 状态所有权和恢复行为已经实现；明确延后项见架构文档 §21。
+> v2.1 状态所有权已经实现；文件工具审批预览、实际 Diff 与 Git revert 的新交互尚未切流，见 [`file-tools-filesystem-refactor-plan.md`](./file-tools-filesystem-refactor-plan.md) 和架构文档 §21。
 
 ---
 
@@ -265,7 +265,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 - 完整业务 args。
 - reason。
 - policySignals。
-- bounded diff。
+- bounded preview diff，并明确它是审批时预览而非执行快照。
 - workspace scope。
 - 规则 expiry。
 - `Approve`、`Deny`、`Approve & remember`。
@@ -283,7 +283,7 @@ Context Ingress 审批必须显示：
 - 同一 call 只接受第一次有效决定。
 - 决定提交后所有重复按钮立即 disabled。
 - 审批过期、Run 中断或对话关闭后显示失效状态。
-- 文件状态在审批后变化时显示 `RESOURCE_CHANGED`，不得继续使用旧 Diff 执行。
+- 文件状态在审批后变化不会自动使批准失效。执行期仍重新校验 path/scope/普通文件边界；`apply_patch` 无法在最新内容中精确唯一匹配时显示缺失或歧义错误并提示 Agent 重读。
 
 ---
 
@@ -377,13 +377,15 @@ Files 内部使用二级 tab：
 ### 8.3 Diff
 
 - pending 文件审批出现时，Artifact 侧栏自动切到 Diff，但不得抢走输入焦点。
-- 显示目标路径、操作类型、diff hash、截断状态和统一 diff。
+- Pending 状态显示目标路径、操作类型、preview diff hash、截断状态和统一 Diff，并标注“执行前预览，文件现状可能变化”。批准固定 tool args 与路径 scope，不宣称冻结目标内容。
+- `write_file` 审批文案始终使用“创建或覆盖”；即使 preview 时目标不存在，也不能把权限描述成只创建。完成态再按执行时结果显示 created/overwritten。
 - Diff 活动时不同时展示 Explorer。
 - 审批按钮可同时出现在对话卡和 Diff footer，但共享同一 store 状态。
 - 审批完成后从后端加载当前 Session 的持久化文件变更历史；切换对话或项目时必须按 `sessionId` 重新查询，不能复用上一对话的列表。
-- Renderer 只缓存后端返回的 `FileChangeSummary`；它不包含 `beforeContent` 恢复快照。变更历史不得从 Message/tool card 反向解析或在 Pinia 中自行合成。
-- 变更列表显示路径、操作、时间、diff hash 和回退状态；选择记录后显示对应统一 diff。
-- “回退此变更”必须先显示明确确认，运行期间禁用。主进程返回 `CONFLICT` 时在当前视口显示错误，不能假装回退成功。
+- Renderer 只缓存后端返回的 `FileChangeSummaryV2`；它不包含完整 forward patch 或 before/after content。变更历史不得从 Message/tool card 反向解析或在 Pinia 中自行合成。
+- 变更列表显示路径、操作、时间、变更 hash、实际 Diff 和回退状态；具备完整 backend patch 时可显示 patch hash，否则显示有界 Diff hash。执行结果 Diff 与 pending preview 不同时以实际 Diff 为准，不静默替换二者含义。
+- “回退此变更”只对 `revertCapability = available` 显示可用，必须先明确确认且运行期间禁用。非 Git workspace 显示“需要 Git 仓库”，legacy record 显示“旧记录不可回退”。
+- 主进程通过 Git working-tree reverse patch 返回 `CONFLICT` 时在当前视口显示错误，不能假装成功，也不提供整文件覆盖或 fuzzy fallback。回退不触碰 staged/index 状态。
 - 大 Diff 必须有明确截断提示，不能让 UI 假装展示了完整变化。
 
 ### 8.4 Agents
@@ -708,18 +710,19 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] pending 文件审批自动打开 Diff。
 - [ ] Diff 与对话审批卡共享同一个决定状态。
 - [ ] 大文件和大 Diff 显示截断提示。
-- [ ] 应用重启后仍可按 Session 查看未被 retention 清理的文件变更，并可在 after hash 仍匹配时回退。
-- [ ] Renderer 只接收 `FileChangeSummary`，恢复用 `beforeContent` 不进入 renderer state 或 DOM。
+- [ ] 应用重启后仍可按 Session 查看未被 retention 清理的文件变更；Git v2 record 可尝试 reverse patch，非 Git 和 legacy 状态诚实不可用。
+- [ ] Renderer 只接收 `FileChangeSummaryV2`，完整 patch 和 before/after content 不进入 renderer state 或 DOM。
 
 ### 16.5 权限审批
 
 - [ ] ReadOnly 写操作显示明确拒绝。
 - [ ] Confirm 展示 tool、args、reason、signals、diff、scope 和 expiry。
 - [ ] Deny 后文件逐字节不变。
-- [ ] Approve 后落盘内容与 Diff 一致。
+- [ ] Approve 后只执行已批准 args；完成态展示执行时 actual Diff，不能要求它与可能过时的 preview Diff 相同。
 - [ ] Approve & remember 后显示持久化规则。
 - [ ] 重复、过期、跨 Session 的决定不可再次生效。
-- [ ] 文件在审批后变化时返回 `RESOURCE_CHANGED`。
+- [ ] 文件在审批后变化不自动使批准失效；参数/path/scope 变化仍失效，目标变成 symlink/junction/目录/越界路径仍拒绝。
+- [ ] `apply_patch` 对最新内容只做精确唯一匹配，缺失或歧义时零写入并显示可行动错误。
 - [ ] Yolo 首次启用显示 host-level side effects 告知。
 - [ ] HTML、脚本和 prompt injection 只显示为文本。
 

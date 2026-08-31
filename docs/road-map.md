@@ -4,19 +4,41 @@
 
 Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`backend-refactor-plan.md`](./backend-refactor-plan.md)。
 
+文件基础设施、best-effort 文件工具和 Git-backed revert 的已采纳设计与实施顺序见 [`file-tools-filesystem-refactor-plan.md`](./file-tools-filesystem-refactor-plan.md)。
+
 当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、history-derived Todo List、live interjection v1、不限制跨 Session/workspace 写入的并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、带 `readonly | inherit` 显式工具权限的 `subagent_run`、Model Pool、低风险 parallel Desktop Swarm Tool、child 副作用审批、两级 Agents 状态视图与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一步完成 Swarm hardening，随后迁移 ProjectModel 到 SQLite 并恢复代码智能。
 
 原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
 
 ## 0. 未完成概览
 
-| 优先级 | 领域                           | 目标                                                  | 主要风险                              |
-| ------ | ------------------------------ | ----------------------------------------------------- | ------------------------------------- |
-| P2     | Swarm Hardening                | 取消体验、压力测试、诊断与成本汇总                    | 费用失控、取消竞态与上下文膨胀        |
-| P2     | Provider Routing               | Session selection、Active Run route 与用途路由        | 全局 active provider 静默影响已有会话 |
-| P3     | Project / Code Intelligence UX | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断 | 项目元数据误改、后端不可诊断          |
-| P3     | Terminal / Command Environment | Windows Shell 自动发现及终端、命令解释器独立配置      | Shell 参数差异、路径漂移与回退语义    |
-| P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                  | 基础并发与扩展边界未稳时过早扩张      |
+| 优先级 | 领域                             | 目标                                                       | 主要风险                                  |
+| ------ | -------------------------------- | ---------------------------------------------------------- | ----------------------------------------- |
+| P1     | Filesystem / File Tools          | common filesystem、write/patch/delete 新语义与 Git 回退     | 并发更新丢失、schema 迁移、非 Git 能力变化 |
+| P2     | Swarm Hardening                  | 取消体验、压力测试、诊断与成本汇总                         | 费用失控、取消竞态与上下文膨胀            |
+| P2     | Provider Routing                 | Session selection、Active Run route 与用途路由             | 全局 active provider 静默影响已有会话     |
+| P3     | Project / Code Intelligence UX   | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断      | 项目元数据误改、后端不可诊断              |
+| P3     | Terminal / Command Environment   | Windows Shell 自动发现及终端、命令解释器独立配置           | Shell 参数差异、路径漂移与回退语义        |
+| P3     | Later Expansion                  | 插件加载器、浏览器、多模态、高级统计                       | 基础并发与扩展边界未稳时过早扩张          |
+
+## 1. M1 · Filesystem And File Tool Semantics
+
+目标：把 Main process 文件基础设施收敛到 `electron/common/filesystem`，用 `write_file` 取代 `create_file`，让 write/patch/delete 采用已批准参数与路径不变、文件现状 best-effort/last-writer-wins 的并发语义，并把 FileChange 内容恢复交给 Git reverse patch。
+
+实施边界：
+
+- 先引入 common filesystem 和架构 import 门禁，再迁移 config、headless、session-temp、skills、logging、process/terminal artifact、PathGuard 与文件工具；中间兼容 facade 只能短期存在。
+- approval 继续绑定 tool/call、完整 args hash、path、operation 和 scope，但不再绑定 before/after hash、inode、parent identity 或 expected result。路径、symlink/junction、普通文件、大小、权限和审批模式边界不放宽。
+- `write_file` 创建或整体覆盖并保持已有权限；`apply_patch` 对最新内容只做精确唯一匹配；`delete_file` 对不存在目标幂等成功。读取后的竞争接受最后完成写入者获胜，不引入 workspace writer lock 或 fuzzy merge。
+- FileChange v2 保存实际 Diff 与完整 Git-compatible forward patch，不保存 `beforeContent`。Revert 只修改 Git working tree，不碰 index、不创建 commit/stash/ref；非 Git 和 legacy record 只读不可回退。
+- v1 FileChange、旧 remembered `create_file` rule、Provider tool catalog、Headless Runtime Identity、Subagent/Swarm catalog、IPC/SQLite schema 和 Renderer Diff 状态必须有显式迁移或失效策略，不保留双轨恢复。
+
+验收：
+
+- production `electron/**` 的 Node filesystem import 只存在于 common package，原子写覆盖权限、umask、并发顺序、清理和 Windows 行为有回归测试。
+- 三个 mutation Tool 覆盖审批后外部编辑、精确 patch 缺失/歧义、删除幂等、symlink/path 拒绝和确定性 last-writer-wins barrier 测试。
+- 修改、创建、删除的 Git reverse patch 跨重启可用，保留无关 working-tree 修改，冲突 all-or-nothing，staged/index 保持不变；非 Git 状态在 UI 中明确不可用。
+- 完成全部 schema/compat 删除门禁后运行 `npm run verify`；详细完成定义以重构计划为准。
 
 ## 2. M2 · Swarm Hardening
 

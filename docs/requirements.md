@@ -1,8 +1,8 @@
 # 需求文档 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 P0–P13 已完成 · 最后更新 2026-07-29
+> 状态：Backend Architecture v2.1 P0–P13 已完成；文件工具目标语义已采纳、待实施 · 最后更新 2026-09-01
 > 本文档定义「做什么」。技术怎么做见 [`architecture.md`](./architecture.md)，前端信息架构与验收标准见 [`frontend-spec.md`](./frontend-spec.md)。
-> P0–P13 已实现；后续产品项与已延后的 P3 review 建议进入 roadmap 或独立设计。
+> P0–P13 已实现；`electron/common/filesystem`、`write_file` best-effort/last-writer-wins 和 Git-backed FileChange v2 的切流计划见 [`file-tools-filesystem-refactor-plan.md`](./file-tools-filesystem-refactor-plan.md)。
 
 ---
 
@@ -81,18 +81,20 @@ AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-to
 
 #### 2.2.1 文件类
 
-| 工具          | 作用                                          | 副作用 | `reason` |
-| ------------- | --------------------------------------------- | ------ | -------- |
-| `read_file`   | 按行范围分页读取文件内容                      | 无     | **是**   |
-| `create_file` | 新建不存在的 UTF-8 文件，可自动创建缺失父目录 | 有     | **是**   |
-| `apply_patch` | 对一个已有文件应用多 hunk 文本补丁            | 有     | **是**   |
-| `delete_file` | 删除文件（受控路径，替代裸 `rm`）             | 有     | **是**   |
+| 工具          | 作用                                              | 副作用 | `reason` |
+| ------------- | ------------------------------------------------- | ------ | -------- |
+| `read_file`   | 按行范围分页读取文件内容                          | 无     | **是**   |
+| `write_file`  | 创建或整体覆盖 UTF-8 文件，可自动创建缺失父目录   | 有     | **是**   |
+| `apply_patch` | 对一个已有文件的最新内容应用多 hunk 精确文本补丁  | 有     | **是**   |
+| `delete_file` | 幂等删除文件（受控路径，替代裸 `rm`）             | 有     | **是**   |
 
 > 设计意图：把常规删除做成独立工具，便于精确展示路径、数量和审批风险。它不能阻止 `run_command` 间接删除文件，因此命令工具仍必须独立经过权限策略，不能把工具拆分误当成 sandbox。
 
 `read_file` 从文件句柄流式读取，不为分页把整个文件载入内存。它支持 1-based `startLine`、可选的 0-based Unicode code-point `startCharacter`、`tail` 以及 `lineCount/lineNumbers`；`tail` 与显式起点互斥。结果始终返回下一次可用的 `nextStartLine`，只有停在超长单行中间时才返回非零 `nextStartCharacter`，因此普通分页只需复制下一行号；EOF 后同一行继续 append 时也能从字符偏移续读。读取器在 UTF-8 code point 边界安全停下，并继续检测一次调用期间的文件替换；跨调用不再维护文件身份 cursor。workspace 文件仍受 `readFileSourceBytes` 总源文件上限，Session temp 文件不受该总量限制。每页文件正文直接使用冻结的行数配置（默认完整 500 个源文件行）以及为 continuation 元数据预留空间后的字节配置；空行与 footer 不占用源文件行预算。临时 artifact 已清理时返回 `ARTIFACT_EXPIRED`。
 
-`apply_patch` 第一版一次只修改一个已存在的 UTF-8 文本文件，可包含多个 hunk。补丁路径必须是 workspace 相对路径；禁止二进制、rename、mode change、绝对路径和越界路径。为适配模型常见的计数错误，hunk header 的行数和 new-file 行号只作为提示；上下文/删除行仍必须精确匹配，old line number 失效时只有在精确上下文唯一命中时才可应用。审批绑定原文件 hash、规范化补丁 hash 与结果 hash，执行前重新验证。`create_file` 只创建不存在的文件，并会自动创建缺失父目录；覆盖已有文件应使用 `apply_patch`。
+三个 mutation 工具采用 best-effort、last-writer-wins 语义。审批固定 tool/call、完整 args hash、规范化路径、operation 与 scope，批准时 Diff 只是时间点预览；执行前后文件 existence/hash/inode/mtime 或父目录 identity 变化不使批准失效。执行时仍重新经过 PathGuard，symlink/junction、目录、越界路径和受保护根继续拒绝。
+
+`write_file` 在目标不存在时创建文件并自动创建缺失父目录，在目标是允许范围内的普通文件时整体覆盖；覆盖保留执行时文件权限，新文件使用进程 umask 下的 workspace 默认权限。`apply_patch` 一次只修改一个已存在的 UTF-8 文本文件，可包含多个 hunk。补丁路径必须是 workspace 相对路径；禁止二进制、rename、mode change、绝对路径和越界路径。hunk header 的行数和 new-file 行号只作定位提示；上下文/删除行必须逐字匹配，原位置失效时只有在最新内容中精确上下文唯一命中才可应用。无匹配或多个匹配均零写入并提示 Agent 重读，不做 fuzzy replacement。读取后再发生并发修改时允许最后完成的原子替换获胜。`delete_file` 执行时重新解析目标：普通文件直接删除，不检查旧 hash；已不存在时幂等成功并返回 `deleted: false`，且不创建空 FileChange。
 
 #### 2.2.2 检索类
 
@@ -386,9 +388,9 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 3. **权限模式**：Yolo 直接放行；其他模式继续进入确定性风险策略。
 4. **确定性策略**：能力元数据、可选敏感数据规则、命令黑名单、用户记忆规则和权限模式共同决定 `allow / deny / review`。确定性策略不能为有副作用的常规命令维护静态放行白名单；这类命令在 Auto 下应交给审批模型按具体参数和风险信号判定。
 5. **Auto 审批模型**：只处理 `review` 动作；超时、无效输出或模型异常一律降级到人工审批。
-6. **执行前复核**：紧邻执行再次检查路径和资源状态，降低 TOCTOU 风险。
+6. **执行前复核**：紧邻执行再次检查批准的 args/path/scope，以及目标当前是否仍位于允许根并满足普通文件/非 symlink 等路径约束；不把内容 hash 或文件 identity 变化重新解释为审批失效。
 
-主模型（如 DeepSeek V4 Pro）提议动作后，可由**辅助模型**（如轻量/小模型，未配置时为当前主模型）辅助判定。Auto 模式下，工作区内 `create_file` / `apply_patch` 若已通过资源计划、workspace 边界、diff 上限、precondition 和 policy signal 检查，可由确定性策略直接执行，不消耗审批模型 token；`delete_file`、VCS 元数据路径、敏感路径、danger signal、Confirm 模式和用户记住的 review 规则仍转人工审批。其他需 review 的副作用工具才进入审批模型。判定输入刻意精简：
+主模型（如 DeepSeek V4 Pro）提议动作后，可由**辅助模型**（如轻量/小模型，未配置时为当前主模型）辅助判定。Auto 模式下，工作区内 `write_file` / `apply_patch` 若已通过资源计划、workspace 边界、diff 上限和 policy signal 检查，可由确定性策略直接执行，不消耗审批模型 token；资源计划固定批准的参数、路径与 scope，但不冻结文件内容。`delete_file`、VCS 元数据路径、敏感路径、danger signal、Confirm 模式和用户记住的 review 规则仍转人工审批。其他需 review 的副作用工具才进入审批模型。判定输入刻意精简：
 
 ```
 审批模型输入 = {
@@ -417,8 +419,8 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 
 - **执行不变量**不是权限规则：例如内置文件写入必须属于 workspace 或当前 Session `scratch`、Terminal/background target 必须属于当前 Session、参数必须满足 schema。违反时调用本身无效，因此所有模式都拒绝；Yolo 不会改写文件工具契约。
 - **风险黑名单**是权限策略：例如破坏性命令、批量删除、发布/部署、修改凭据等。在 Auto/Confirm 下用于强制或提升人工审批；在 Yolo 下明确跳过。
-- **工作区文件写入**：`create_file` 与 `apply_patch` 在资源计划确认路径位于 workspace、diff 有界且没有 danger 信号时，Auto 可由确定性策略直接放行；`delete_file`、敏感路径、VCS 元数据路径和用户记住的 review 规则仍需人工审批。
-- **Session scratch 写入**：`create_file/apply_patch/delete_file` 对当前 Session `scratch` 的操作在 Auto、Confirm 与 Yolo 中免审批；Readonly 仍不暴露写工具。scratch 变更不产生 Git/项目 Diff、durable FileChange 或分支回滚记录，`artifacts` 永远拒绝内置写工具。
+- **工作区文件写入**：`write_file` 与 `apply_patch` 在资源计划确认路径位于 workspace、预览 diff 有界且没有 danger 信号时，Auto 可由确定性策略直接放行；`delete_file`、敏感路径、VCS 元数据路径和用户记住的 review 规则仍需人工审批。批准固定参数和路径授权，但不冻结目标文件内容。
+- **Session scratch 写入**：`write_file/apply_patch/delete_file` 对当前 Session `scratch` 的操作在 Auto、Confirm 与 Yolo 中免审批；Readonly 仍不暴露写工具。scratch 变更不产生 Git/项目 Diff、durable FileChange 或分支回滚记录，`artifacts` 永远拒绝内置写工具。
 - **常规开发命令**不是确定性放行规则：例如 `go mod tidy`、`npm install`、`pip install -r requirements.txt` 有副作用但通常可由 Auto 审批模型判为 safe；是否放行取决于当次参数、cwd、路径、网络/脚本行为和风险信号。
 
 命令匹配只能作为风险信号，不能宣称能完整解析 PowerShell/cmd/bash 的所有转义、别名、脚本和子进程行为。
@@ -488,13 +490,14 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 
 ### 4.3 Diff 预览
 
-- `apply_patch` / `create_file` 的变更在执行前/后以 diff 形式预览。
-- 审批绑定变更前文件 hash 与拟写入内容 hash；若文件在审批后发生变化，原批准失效并重新计算 diff。
+- `apply_patch` / `write_file` 的变更在执行前显示有界风险预览，执行后以本次调用实际读取的 latest before 与其发布的 bytes 形成 Diff。两者可能因并发编辑而不同，UI 必须明确标注，不能把旧预览冒充实际变更；该 Diff 描述本次调用，不承诺等于外部 last writer 完成后的 workspace 总 Diff。
+- 审批绑定 tool/call、完整 args hash、规范化路径、operation 和 scope，不绑定变更前文件 hash 或预期结果 hash。文件在审批后发生变化时原批准继续有效；目标变成 symlink/junction、目录、越界路径或非法根时仍由执行期 PathGuard 拒绝。
 - 使用有界只读 Diff viewer，支持语法高亮、截断提示和审批状态；P3 不引入 Monaco/CodeMirror 等完整编辑器。
-- 每次成功的 `create_file` / `apply_patch` / `delete_file` 按 Session 保存变更记录、before/after hash 和有界恢复快照；Diff 面板可查看上次及更早的 Session 变更。
-- 用户可显式回退单项变更。回退前必须再次确认，并校验当前文件仍等于该记录的 after 状态；检测到用户或后续工具修改时拒绝覆盖。回退不依赖 Git，也不影响其他文件。
-- 变更历史保存在主进程 `userData/agent.db` 的 `file_changes` 表。它不是 Message、Run journal、trace 或模型历史；恢复用 `beforeContent` 只对 backend 可见，renderer 只获得不含快照的 `FileChangeSummary`。
-- `file_changes` 不限制记录条数，只受全应用可配置的 `beforeContent + diff` UTF-8 总字节预算约束（默认 100 MB）；200 仅是单页查询上限。单条恢复 payload 已超过当前 Run 冻结预算时，文件工具必须在副作用前拒绝；Retention 只会让最旧单项丧失 Diff/revert 能力，不能删除 Message 或改动 workspace。
+- 每次成功的 `write_file` / `apply_patch` / `delete_file` 尽力按 Session 保存实际变更记录和有界 Diff；Git workspace 的 v2 record 另外保存完整 Git-compatible forward patch。FileChange 持久化失败不得撤销、重试或把已成功 mutation 报成失败。
+- 用户可在 Git workspace 中显式回退单项 v2 变更。主进程只对 working tree 执行 Git reverse patch，不触碰 index、不创建 commit/stash/ref，也不使用 `git restore`/`git checkout` 整文件覆盖。Git 不能精确应用时返回 `CONFLICT`，不做 fuzzy/3-way/custom snapshot fallback。
+- 非 Git workspace 仍可查看 Diff 历史，但 Revert 明确不可用。旧 v1 FileChange 迁移为 `legacy_unavailable` 只读历史，不保留 `beforeContent` 恢复路径。
+- 变更历史保存在主进程 `userData/agent.db` 的 `file_changes` 表。它不是 Message、Run journal、trace 或模型历史；完整 patch 只对 backend 可见，renderer 只获得有界 `FileChangeSummaryV2`。
+- `file_changes` 不限制记录条数，只受全应用可配置的完整 patch UTF-8 总字节预算约束（默认 100 MB）；200 仅是单页查询上限。单条 patch、Git 探测或记录失败时文件 mutation 仍可成功，但该次结果必须报告 warning 与 `revertAvailable: false`。Retention 只能删除最旧 FileChange，不能删除 Message 或改动 workspace。
 
 ### 4.4 UI 组件库
 
@@ -633,7 +636,7 @@ session.end     { reason, ts }
 **纳入 MVP：**
 
 - DeepSeek Provider（含 reasoning 明文回传）
-- 工具集：文件（streaming read/create/apply_patch/delete）、检索（list/glob/grep）、命令（run_command/delay）、终端（open/send）、后台任务（wait/list/cancel）、**skills（read_skill + 摘要注入 + 三种安装入口）**
+- 工具集：文件（streaming read/write/apply_patch/idempotent delete）、检索（list/glob/grep）、命令（run_command/delay）、终端（open/send）、后台任务（wait/list/cancel）、**skills（read_skill + 摘要注入 + 三种安装入口）**
 - 四档权限模式 + 双模型审批（审批模型可先用 DeepSeek 小模型）
 - 执行不变量 + 可扩展风险黑名单 + 确定性策略
 - Chat UI（Naive UI，流式 + Markdown + 工具可视化）
