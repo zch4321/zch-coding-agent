@@ -246,9 +246,6 @@ function swarmToolAccessLabel(toolAccess: AgentToolAccess): string {
           <UiIcon name="warning" />{{ signal.detail }}
         </li>
       </ul>
-      <pre v-if="agent.pendingApproval.diff" class="approval-diff">{{
-        agent.pendingApproval.diff
-      }}</pre>
       <div
         v-if="agent.pendingApproval.rememberArgConstraints"
         class="approval-remember-preview"

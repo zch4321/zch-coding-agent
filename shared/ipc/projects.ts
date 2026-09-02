@@ -7,6 +7,11 @@ import {
 import { DOMAIN_STATE_API_CONTRACTS } from '../domain-state-api'
 import { ProjectIdSchema } from '../ids'
 import {
+  GitReviewDiffSchema,
+  GitReviewModeSchema,
+  GitReviewStatusSchema,
+} from '../git-review'
+import {
   CodeBackendStatusSchema,
   DetectedProjectModulesSchema,
   ProjectMetadataSnapshotSchema,
@@ -30,6 +35,30 @@ export const PROJECT_STATE_IPC_CONTRACTS = {
 } as const
 
 export const WORKSPACE_IPC_CONTRACTS = {
+  'git-review:get-status': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        projectId: ProjectIdSchema,
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(GitReviewStatusSchema),
+  },
+  'git-review:get-diff': {
+    payload: Type.Object(
+      {
+        version: Type.Literal(IPC_VERSION),
+        projectId: ProjectIdSchema,
+        mode: GitReviewModeSchema,
+        path: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
+        baseRef: Type.Optional(Type.String({ minLength: 1, maxLength: 1_024 })),
+        contextLines: Type.Optional(Type.Integer({ minimum: 0, maximum: 100 })),
+      },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(GitReviewDiffSchema),
+  },
   'workspace:choose': {
     payload: EmptyPayloadSchema,
     result: ipcResultSchema(

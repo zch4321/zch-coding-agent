@@ -243,22 +243,18 @@ describe('text Tool Result formatters', () => {
     ).toBe('Final finding\n\n[truncated=true]')
   })
 
-  it('preserves durable file-change warnings in one-line mutation summaries', () => {
+  it('reports an idempotent delete without claiming a mutation', () => {
     expect(
       rendered(
         projectFileMutationResult(
           result({
             path: 'src/app.ts',
-            operation: 'patch',
-            mutationSucceeded: true,
-            warningCode: 'CHANGE_HISTORY_PERSIST_FAILED',
-            revertAvailable: false,
+            operation: 'delete',
+            deleted: false,
           }),
-          'patched',
+          'deleted',
         ),
       ),
-    ).toBe(
-      'Patched file src/app.ts\n\n[mutationSucceeded=true; warningCode=CHANGE_HISTORY_PERSIST_FAILED; revertAvailable=false]',
-    )
+    ).toBe('File was already absent src/app.ts')
   })
 })

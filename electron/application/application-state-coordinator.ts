@@ -4,7 +4,6 @@ import type {
   DurableCommitEnvelope,
   DurableCommitFor,
   DurableCommitTopic,
-  FileChangeCommittedChange,
   ProjectCommittedChange,
   SessionCommittedChange,
   SessionRemovedChange,
@@ -26,7 +25,7 @@ type DurableChangeFor<Topic extends DurableCommitTopic> =
       ? SessionCommittedChange
       : Topic extends 'session.removed'
         ? SessionRemovedChange
-        : FileChangeCommittedChange
+        : never
 
 export interface ApplicationStateCoordinatorOptions {
   database: DatabaseService

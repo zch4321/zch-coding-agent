@@ -707,18 +707,9 @@ describe('SessionService durable transactions', () => {
                 .get(sessionId) as { count: number }
             ).count,
           ),
-          fileChanges: Number(
-            (
-              reader
-                .prepare(
-                  'SELECT COUNT(*) AS count FROM file_changes WHERE session_id = ?',
-                )
-                .get(sessionId) as { count: number }
-            ).count,
-          ),
         }))
       ).value
-      expect(durableCounts).toEqual({ messages: 0, fileChanges: 0 })
+      expect(durableCounts).toEqual({ messages: 0 })
     } finally {
       await setup.testDatabase.dispose()
     }

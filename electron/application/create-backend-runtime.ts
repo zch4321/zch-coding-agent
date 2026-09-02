@@ -1,4 +1,4 @@
-import { mkdir, rm } from 'node:fs/promises'
+import { makeDirectory as mkdir, removePath as rm } from '../common/filesystem'
 import path from 'node:path'
 import type {
   AppBootstrapResultSchema,
@@ -12,7 +12,6 @@ import {
   type DatabaseServiceOptions,
 } from '../persistence/database-service'
 import { MessageRepository } from '../persistence/message-repository'
-import { FileChangeRepository } from '../persistence/file-change-repository'
 import { ProjectRepository } from '../persistence/project-repository'
 import { SessionRepository } from '../persistence/session-repository'
 import { SubagentRepository } from '../persistence/subagent-repository'
@@ -24,7 +23,6 @@ import {
 } from '../runtime/create-agent-runtime'
 import type { AgentRuntime } from '../runtime/agent-runtime'
 import { ApplicationStateCoordinator } from './application-state-coordinator'
-import { FileChangeService } from './file-change-service'
 import { DurableExecutionStatePort } from './durable-execution-state-port'
 import { DurableRunApplicationService } from './durable-run-application-service'
 import { LiveSessionContextRegistry } from './live-session-context-registry'
@@ -37,6 +35,7 @@ import { SubagentExecutionService } from '../subagent/execution-service'
 import { SwarmExecutionBridge } from '../swarm/execution-bridge'
 import { SwarmCoordinator } from '../swarm/coordinator'
 import { ConversationTitlingService } from './conversation-titling-service'
+import { GitReviewService } from './git-review-service'
 import type { OperationalLogService } from '../operational-logging/service'
 import {
   desktopSessionTempRoot,
@@ -71,7 +70,7 @@ export interface BackendRuntime {
   coordinator: ApplicationStateCoordinator
   projects: ProjectService
   sessions: SessionService
-  fileChanges: FileChangeService
+  gitReview: GitReviewService
   agentExecutions: AgentExecutionQueryService
   runs: DurableRunApplicationService
   liveSessions: LiveSessionContextRegistry
@@ -155,7 +154,6 @@ export async function createBackendRuntime(
   const projectRepository = new ProjectRepository()
   const sessionRepository = new SessionRepository()
   const messageRepository = new MessageRepository()
-  const fileChangeRepository = new FileChangeRepository()
   const subagentRepository = new SubagentRepository()
 
   let liveSessions: LiveSessionContextRegistry | undefined
@@ -241,13 +239,7 @@ export async function createBackendRuntime(
     onDiagnostic: options.onDiagnostic,
     onSessionDeleted: (sessionId) => sessionTemps.removeSession(sessionId),
   })
-  const fileChanges = new FileChangeService({
-    coordinator,
-    fileChanges: fileChangeRepository,
-    sessions: sessionRepository,
-    projects: projectRepository,
-    onDiagnostic: options.onDiagnostic,
-  })
+  const gitReview = new GitReviewService()
   const subagentState = new SubagentStateService({
     coordinator,
     sessions: sessionRepository,
@@ -274,7 +266,6 @@ export async function createBackendRuntime(
       eventListeners: options.eventListeners,
       executionState,
       historySource: sessions,
-      fileChangeExecution: fileChanges,
       subagentExecution: subagentBridge,
       swarmExecution: swarmBridge,
       backgroundTasks: backgroundBridge,
@@ -301,14 +292,6 @@ export async function createBackendRuntime(
       onSessionEvicted: (sessionId) =>
         targetState.runs?.evictRequestCacheForSession(sessionId),
       onDiagnostic: options.onDiagnostic,
-    })
-    fileChanges.setRuntimeGuard({
-      reserveSessionMutation: (sessionId) =>
-        liveSessions!.reserveSessionMutation(sessionId),
-      bindSessionMutationProject: (sessionId, token, projectId) =>
-        liveSessions!.bindSessionMutationProject(sessionId, token, projectId),
-      releaseSessionMutation: (sessionId, token) =>
-        liveSessions!.releaseSessionMutation(sessionId, token),
     })
     executionState.setInvalidationHandler((sessionId, runId) =>
       liveSessions?.invalidate(sessionId, runId),
@@ -370,7 +353,7 @@ export async function createBackendRuntime(
       coordinator,
       projects,
       sessions,
-      fileChanges,
+      gitReview,
       agentExecutions,
       runs,
       liveSessions,

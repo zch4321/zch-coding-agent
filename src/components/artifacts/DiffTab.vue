@@ -1,321 +1,301 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, h, ref, watch } from 'vue'
 import {
+  NAlert,
   NButton,
   NEmpty,
-  NList,
-  NListItem,
-  NScrollbar,
   NSelect,
   NSpin,
+  NTabPane,
+  NTabs,
   NTag,
+  NTree,
   type SelectOption,
+  type TreeOption,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { FileChangeSummary } from '../../../shared/file-change'
+import { IPC_VERSION } from '../../../shared/channels'
+import type {
+  GitReviewDiff,
+  GitReviewMode,
+  GitReviewStatus,
+  GitReviewStatusEntry,
+} from '../../../shared/git-review'
 import { useAgentStore } from '../../stores/agent'
-import ConfirmDialog from '../dialogs/ConfirmDialog.vue'
 import UiIcon from '../UiIcon.vue'
-
-type ChangeStatusFilter = 'all' | 'active' | 'reverted'
 
 const agent = useAgentStore()
 const { t } = useI18n()
 
-const selectedChangeId = ref<string>()
-const filterCallId = ref<string | undefined>(undefined)
-const filterPath = ref<string | undefined>(undefined)
-const filterStatus = ref<ChangeStatusFilter>('all')
-const revertCandidate = ref<FileChangeSummary>()
+const status = ref<GitReviewStatus>()
+const diff = ref<GitReviewDiff>()
+const selectedPath = ref<string>()
+const mode = ref<GitReviewMode>('head')
+const baseRef = ref<string>()
+const statusLoading = ref(false)
+const diffLoading = ref(false)
+const error = ref('')
+let statusGeneration = 0
+let diffGeneration = 0
 
-const selectedChange = computed(
-  () =>
-    agent.changes.find((change) => change.id === selectedChangeId.value) ??
-    filteredChanges.value[0],
+const baseRefOptions = computed<SelectOption[]>(() =>
+  (status.value?.baseRefs ?? []).map((refName) => ({
+    label: refName,
+    value: refName,
+  })),
 )
-const callOptions = computed<SelectOption[]>(() => {
-  const calls = new Map<string, number>()
-  for (const change of agent.changes) {
-    calls.set(change.callId, (calls.get(change.callId) ?? 0) + 1)
-  }
-  return [
-    { label: t('artifact.filterAll'), value: undefined },
-    ...[...calls.entries()].map(([callId, count]) => ({
-      label: `${callId} (${count})`,
-      value: callId,
-    })),
-  ]
+const selectedEntry = computed(() =>
+  status.value?.entries.find((entry) => entry.path === selectedPath.value),
+)
+const treeData = computed<TreeOption[]>(() =>
+  (status.value?.entries ?? []).map((entry) => ({
+    key: entry.path,
+    label: entry.path,
+    entry,
+  })),
+)
+const baselineLabel = computed(() => {
+  if (mode.value !== 'merge_base') return t(`artifact.gitMode.${mode.value}`)
+  return diff.value?.baseOid
+    ? `${baseRef.value} · ${diff.value.baseOid.slice(0, 8)}`
+    : (baseRef.value ?? t('artifact.selectBaseRef'))
 })
-const pathOptions = computed<SelectOption[]>(() => {
-  const paths = new Map<string, number>()
-  for (const change of agent.changes) {
-    paths.set(change.path, (paths.get(change.path) ?? 0) + 1)
-  }
-  return [
-    { label: t('artifact.filterAll'), value: undefined },
-    ...[...paths.entries()].map(([path, count]) => ({
-      label: `${path} (${count})`,
-      value: path,
-    })),
-  ]
-})
-const statusOptions = computed<SelectOption[]>(
-  () =>
-    [
-      { label: t('artifact.filterAll'), value: 'all' },
-      { label: t('artifact.filterActive'), value: 'active' },
-      { label: t('artifact.filterReverted'), value: 'reverted' },
-    ] as SelectOption[],
-)
-const filteredChanges = computed(() =>
-  agent.changes.filter((change) => {
-    if (filterCallId.value && change.callId !== filterCallId.value) return false
-    if (filterPath.value && change.path !== filterPath.value) return false
-    if (filterStatus.value === 'active' && change.revertedAt) return false
-    if (filterStatus.value === 'reverted' && !change.revertedAt) return false
-    return true
-  }),
-)
 
-function requestRevertChange(change: FileChangeSummary) {
-  revertCandidate.value = change
+function statusType(entry: GitReviewStatusEntry) {
+  if (entry.kind === 'deleted' || entry.kind === 'unmerged') return 'error'
+  if (entry.kind === 'untracked' || entry.kind === 'added') return 'success'
+  if (entry.kind === 'renamed' || entry.kind === 'copied') return 'info'
+  return 'warning'
 }
 
-async function confirmRevertChange() {
-  const changeId = revertCandidate.value?.id
-  if (!changeId) return
-  await agent.revertChange(changeId)
-  revertCandidate.value = undefined
+function renderStatusLabel({ option }: { option: TreeOption }) {
+  const entry = option.entry as GitReviewStatusEntry
+  return h('span', { class: 'git-change-label' }, [
+    h(
+      NTag,
+      { size: 'tiny', bordered: false, type: statusType(entry) },
+      { default: () => `${entry.indexStatus}${entry.worktreeStatus}` },
+    ),
+    h('span', { title: entry.path }, entry.path),
+  ])
+}
+
+function preferredBaseRef(next: GitReviewStatus): string | undefined {
+  if (next.upstreamRef && next.baseRefs.includes(next.upstreamRef)) {
+    return next.upstreamRef
+  }
+  return (
+    ['origin/main', 'origin/master', 'main', 'master'].find((candidate) =>
+      next.baseRefs.includes(candidate),
+    ) ?? next.baseRefs.find((candidate) => candidate !== next.headRef)
+  )
+}
+
+async function refreshStatus() {
+  const generation = ++statusGeneration
+  diffGeneration += 1
+  const api = window.agentApi
+  const projectId = agent.selectedProjectId
+  if (!api || !projectId) {
+    status.value = undefined
+    diff.value = undefined
+    statusLoading.value = false
+    diffLoading.value = false
+    error.value = ''
+    return
+  }
+  statusLoading.value = true
+  diffLoading.value = false
+  diff.value = undefined
+  error.value = ''
+  const result = await api.getGitReviewStatus({
+    version: IPC_VERSION,
+    projectId,
+  })
+  if (generation !== statusGeneration) return
+  statusLoading.value = false
+  if (!result.ok) {
+    error.value = result.error.message
+    status.value = undefined
+    diff.value = undefined
+    return
+  }
+  status.value = result.value
+  if (
+    !result.value.entries.some((entry) => entry.path === selectedPath.value)
+  ) {
+    selectedPath.value = result.value.entries[0]?.path
+  }
+  if (!baseRef.value || !result.value.baseRefs.includes(baseRef.value)) {
+    baseRef.value = preferredBaseRef(result.value)
+  }
+  await refreshDiff()
+}
+
+async function refreshDiff() {
+  const generation = ++diffGeneration
+  const api = window.agentApi
+  const projectId = agent.selectedProjectId
+  if (!api || !projectId || !status.value?.repository) {
+    diff.value = undefined
+    diffLoading.value = false
+    return
+  }
+  if (mode.value === 'merge_base' && !baseRef.value) {
+    diff.value = undefined
+    diffLoading.value = false
+    return
+  }
+  diffLoading.value = true
+  error.value = ''
+  const result = await api.getGitReviewDiff({
+    version: IPC_VERSION,
+    projectId,
+    mode: mode.value,
+    ...(selectedPath.value ? { path: selectedPath.value } : {}),
+    ...(mode.value === 'merge_base' && baseRef.value
+      ? { baseRef: baseRef.value }
+      : {}),
+  })
+  if (generation !== diffGeneration) return
+  diffLoading.value = false
+  if (!result.ok) {
+    error.value = result.error.message
+    diff.value = undefined
+    return
+  }
+  diff.value = result.value
+}
+
+function selectPaths(keys: Array<string | number>) {
+  selectedPath.value = typeof keys[0] === 'string' ? keys[0] : undefined
+  void refreshDiff()
 }
 
 watch(
-  () => [agent.activeConversationId, agent.workspacePath] as const,
+  () => [agent.selectedProjectId, agent.workspacePath] as const,
   () => {
-    filterCallId.value = undefined
-    filterPath.value = undefined
-    filterStatus.value = 'all'
-    void agent.loadConversationChanges()
+    status.value = undefined
+    diff.value = undefined
+    selectedPath.value = undefined
+    baseRef.value = undefined
+    void refreshStatus()
   },
   { immediate: true },
 )
-
 watch(
-  () => agent.changes,
-  (changes) => {
-    if (!changes.some((change) => change.id === selectedChangeId.value)) {
-      selectedChangeId.value = changes[0]?.id
-    }
-  },
-  { deep: true },
+  () => agent.workspaceFileRevision,
+  () => void refreshStatus(),
 )
+watch(mode, () => void refreshDiff())
+watch(baseRef, () => {
+  if (mode.value === 'merge_base') void refreshDiff()
+})
 </script>
 
 <template>
-  <section class="artifact-content diff-view">
-    <template v-if="agent.pendingApproval?.diff">
-      <div class="diff-summary">
-        <span class="diff-summary-label">{{
-          t('artifact.pendingChange')
-        }}</span>
-        <strong>{{ agent.pendingApproval.tool }}</strong>
-        <p>{{ agent.pendingApproval.reason }}</p>
-        <code v-if="agent.pendingApproval.diffHash">
-          {{ agent.pendingApproval.diffHash }}
-        </code>
+  <section class="artifact-content diff-view git-review-view">
+    <header class="git-review-header">
+      <div>
+        <strong>{{ t('artifact.gitChanges') }}</strong>
+        <small v-if="status?.repository">
+          {{
+            status.headRef ??
+            status.headOid?.slice(0, 8) ??
+            t('artifact.unbornHead')
+          }}
+        </small>
       </div>
-      <pre class="diff-content">{{ agent.pendingApproval.diff }}</pre>
-      <div class="diff-actions">
-        <NButton
-          type="primary"
-          :loading="agent.approvalSubmitting"
-          :disabled="agent.approvalSubmitting"
-          @click="
-            agent.decideApproval({
-              decision: 'allow',
-            })
-          "
-        >
-          {{ t('common.approve') }}
-        </NButton>
-        <NButton
-          secondary
-          :disabled="agent.approvalSubmitting"
-          @click="
-            agent.decideApproval({
-              decision: 'deny',
-            })
-          "
-        >
-          {{ t('common.deny') }}
-        </NButton>
-      </div>
-    </template>
-    <template v-else-if="agent.changes.length && selectedChange">
-      <div class="change-history-header">
-        <div>
-          <strong>{{ t('artifact.changeHistory') }}</strong>
-          <span>{{
-            t('artifact.changeCount', { count: agent.changes.length })
-          }}</span>
-          <NTag
-            v-if="agent.selectedFileChangeHasMore"
-            round
-            size="small"
-            type="warning"
-          >
-            {{ t('artifact.historyTruncated') }}
-          </NTag>
-        </div>
-        <NSpin v-if="agent.changesLoading" size="small" />
-      </div>
-      <div class="change-filters">
-        <NSelect
-          v-model:value="filterCallId"
-          :options="callOptions"
-          :placeholder="t('artifact.filterByToolCall')"
-          size="small"
-          filterable
-          class="change-filter-select"
-        />
-        <NSelect
-          v-model:value="filterPath"
-          :options="pathOptions"
-          :placeholder="t('artifact.filterByFile')"
-          size="small"
-          filterable
-          class="change-filter-select"
-        />
-        <NSelect
-          v-model:value="filterStatus"
-          :options="statusOptions"
-          :placeholder="t('artifact.filterByStatus')"
-          size="small"
-          class="change-filter-select"
-        />
-      </div>
-      <NScrollbar v-if="filteredChanges.length" class="change-history-scroll">
-        <NList class="change-history-list" role="listbox" hoverable clickable>
-          <NListItem
-            v-for="change in filteredChanges"
-            :key="change.id"
-            class="change-history-item"
-            :class="{ active: change.id === selectedChange.id }"
-            role="option"
-            tabindex="0"
-            :aria-selected="change.id === selectedChange.id"
-            @click="selectedChangeId = change.id"
-            @keydown.enter="selectedChangeId = change.id"
-            @keydown.space.prevent="selectedChangeId = change.id"
-          >
-            <div class="change-history-item-content">
-              <span>{{ change.path }}</span>
-              <small>
-                {{ t(`artifact.operation.${change.operation}`) }} ·
-                {{ new Date(change.createdAt).toLocaleString() }}
-              </small>
-            </div>
-            <template #suffix>
-              <NTag v-if="change.revertedAt" round size="small" type="success">
-                {{ t('artifact.reverted') }}
-              </NTag>
-            </template>
-          </NListItem>
-        </NList>
-      </NScrollbar>
-      <NEmpty
-        v-else
-        class="artifact-message"
+      <NButton
+        quaternary
+        circle
         size="small"
-        :description="t('artifact.noFilteredChanges')"
-      />
-      <div v-if="agent.selectedFileChangeHasMore" class="change-load-more">
-        <NButton
-          size="small"
-          secondary
-          :loading="agent.changesLoading"
-          @click="agent.loadOlderConversationChanges()"
-        >
-          {{ t('artifact.loadMoreChanges') }}
-        </NButton>
-      </div>
-      <div class="diff-summary">
-        <span class="diff-summary-label">
-          {{ t(`artifact.operation.${selectedChange.operation}`) }}
-        </span>
-        <NTag
-          v-if="selectedChange.diffTruncated"
-          round
-          size="small"
-          type="warning"
-        >
-          {{ t('artifact.truncated') }}
-        </NTag>
-        <strong>{{ selectedChange.path }}</strong>
-        <code v-if="selectedChange.diffHash">{{
-          selectedChange.diffHash
-        }}</code>
-      </div>
-      <pre class="diff-content">{{ selectedChange.diff }}</pre>
-      <div class="diff-actions">
-        <NButton
-          type="warning"
-          :loading="agent.revertingChangeId === selectedChange.id"
-          :disabled="
-            Boolean(selectedChange.revertedAt) ||
-            Boolean(agent.revertingChangeId) ||
-            Boolean(agent.activeRunId) ||
-            Boolean(agent.pendingApproval)
-          "
-          @click="requestRevertChange(selectedChange)"
-        >
-          {{
-            selectedChange.revertedAt
-              ? t('artifact.reverted')
-              : t('artifact.revert')
-          }}
-        </NButton>
-        <small>{{ t('artifact.revertSafetyHint') }}</small>
-      </div>
-    </template>
-    <template v-else-if="agent.latestReviewedApproval?.diff">
-      <div class="diff-summary">
-        <span class="diff-summary-label">
-          {{
-            t('artifact.reviewed', {
-              decision: agent.latestReviewedApproval.decision,
-            })
-          }}
-        </span>
-        <strong>{{ agent.latestReviewedApproval.tool }}</strong>
-        <p>{{ agent.latestReviewedApproval.reason }}</p>
-      </div>
-      <pre class="diff-content">{{ agent.latestReviewedApproval.diff }}</pre>
-    </template>
-    <NEmpty v-else class="artifact-empty" :description="t('artifact.noDiff')">
-      <template #icon><UiIcon name="diff" /></template>
+        :loading="statusLoading"
+        :aria-label="t('artifact.refreshGit')"
+        @click="refreshStatus"
+      >
+        <UiIcon name="refresh" />
+      </NButton>
+    </header>
+
+    <NAlert v-if="error" type="error" :show-icon="false">{{ error }}</NAlert>
+    <NSpin v-if="statusLoading && !status" class="git-review-loading" />
+    <NEmpty
+      v-else-if="status && !status.repository"
+      class="artifact-empty"
+      :description="t('artifact.notGitRepository')"
+    >
+      <template #icon><UiIcon name="git-branch" /></template>
       <template #extra>
-        <span class="artifact-empty-hint">{{ t('artifact.noDiffHint') }}</span>
+        <span class="artifact-empty-hint">{{
+          t('artifact.gitRequiredHint')
+        }}</span>
       </template>
     </NEmpty>
-    <ConfirmDialog
-      :show="Boolean(revertCandidate)"
-      :title="t('artifact.revertDialogTitle')"
-      :positive-text="t('artifact.revert')"
-      :negative-text="t('common.cancel')"
-      :loading="
-        Boolean(
-          revertCandidate && agent.revertingChangeId === revertCandidate.id,
-        )
-      "
-      type="warning"
-      @update:show="!$event && (revertCandidate = undefined)"
-      @positive="confirmRevertChange"
-    >
-      {{
-        t('artifact.revertConfirm', {
-          path: revertCandidate?.path ?? '',
-        })
-      }}
-    </ConfirmDialog>
+    <template v-else-if="status?.repository">
+      <div class="git-review-status">
+        <NTree
+          v-if="treeData.length"
+          block-line
+          :data="treeData"
+          :selected-keys="selectedPath ? [selectedPath] : []"
+          :render-label="renderStatusLabel"
+          @update:selected-keys="selectPaths"
+        />
+        <NEmpty
+          v-else
+          size="small"
+          :description="t('artifact.cleanWorkingTree')"
+        />
+        <NTag v-if="status.truncated" size="small" type="warning">
+          {{ t('artifact.statusTruncated') }}
+        </NTag>
+      </div>
+
+      <div class="git-review-controls">
+        <NTabs v-model:value="mode" type="segment" size="small" animated>
+          <NTabPane name="head" :tab="t('artifact.gitMode.head')" />
+          <NTabPane name="unstaged" :tab="t('artifact.gitMode.unstaged')" />
+          <NTabPane name="staged" :tab="t('artifact.gitMode.staged')" />
+          <NTabPane name="merge_base" :tab="t('artifact.gitMode.merge_base')" />
+        </NTabs>
+        <NSelect
+          v-if="mode === 'merge_base'"
+          v-model:value="baseRef"
+          size="small"
+          filterable
+          :options="baseRefOptions"
+          :placeholder="t('artifact.selectBaseRef')"
+        />
+      </div>
+
+      <div class="diff-summary git-diff-summary">
+        <span class="diff-summary-label">{{ baselineLabel }}</span>
+        <strong>{{ selectedPath ?? t('artifact.allProjectChanges') }}</strong>
+        <small v-if="selectedEntry?.originalPath">
+          {{ selectedEntry.originalPath }} → {{ selectedEntry.path }}
+        </small>
+        <NTag v-if="diff?.binary" size="small" type="info">
+          {{ t('artifact.binaryDiff') }}
+        </NTag>
+        <NTag v-if="diff?.truncated" size="small" type="warning">
+          {{ t('artifact.truncated') }}
+        </NTag>
+      </div>
+      <NSpin v-if="diffLoading" class="git-review-loading" />
+      <pre v-else-if="diff?.content" class="diff-content">{{
+        diff.content
+      }}</pre>
+      <NEmpty
+        v-else
+        class="git-diff-empty"
+        size="small"
+        :description="
+          selectedEntry?.kind === 'untracked'
+            ? t('artifact.untrackedNoDiff')
+            : t('artifact.noGitDiff')
+        "
+      />
+    </template>
   </section>
 </template>

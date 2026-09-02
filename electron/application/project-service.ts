@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { realpath, stat } from 'node:fs/promises'
+import {
+  canonicalPath as realpath,
+  fileStatus as stat,
+} from '../common/filesystem'
 import path from 'node:path'
 import type {
   ProjectCommandResult,

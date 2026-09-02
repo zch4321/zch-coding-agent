@@ -1,12 +1,12 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import {
-  chmod,
-  mkdir,
-  open,
-  stat,
-  writeFile,
+  changeFileMode as chmod,
+  fileStatus as stat,
+  makeDirectory as mkdir,
+  openFileHandle as open,
+  writeFileContents as writeFile,
   type FileHandle,
-} from 'node:fs/promises'
+} from '../common/filesystem'
 import path from 'node:path'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
 import {

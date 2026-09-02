@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { access } from 'node:fs/promises'
+import { accessPath as access } from '../common/filesystem'
 import path from 'node:path'
 import type { ModelCapabilityLevel } from '../../shared/config'
 import type { AgentExecutionId } from '../../shared/ids'

@@ -1,16 +1,8 @@
-import { Buffer } from 'node:buffer'
-import type {
-  CallId,
-  FileChangeId,
-  MessageId,
-  ProjectId,
-  SessionId,
-} from '../../shared/ids'
+import type { CallId, MessageId, ProjectId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { ProjectRecord } from '../../shared/project'
 import type { SessionRecord } from '../../shared/session'
 import type { PersistenceTransaction } from './database-service'
-import type { StoredFileChangeRecord } from './file-change-codec'
 import { encodeSessionRow } from './session-codec'
 
 export const FIXTURE_HASH = 'a'.repeat(64)
@@ -193,38 +185,4 @@ export function messageFixtures(
       },
     },
   ]
-}
-
-export function fileChangeFixture(
-  overrides: Partial<StoredFileChangeRecord> = {},
-): StoredFileChangeRecord {
-  const beforeContent =
-    overrides.beforeContent === undefined ? 'before' : overrides.beforeContent
-  const diff = overrides.diff ?? 'diff'
-  return {
-    schemaVersion: 1,
-    id: 'file-change:fixture' as FileChangeId,
-    sessionId: 'session:fixture' as SessionId,
-    assistantMessageId: 'message:assistant-fixture' as MessageId,
-    callId: 'call:file-change' as CallId,
-    workspacePath: 'C:/workspace',
-    path: 'README.md',
-    operation: 'patch',
-    diff,
-    diffHash: FIXTURE_HASH,
-    diffTruncated: false,
-    beforeExists: true,
-    beforeMode: 0o644,
-    beforeHash: FIXTURE_HASH,
-    beforeContent,
-    afterExists: true,
-    afterHash: FIXTURE_HASH,
-    payloadBytes:
-      Buffer.byteLength(beforeContent ?? '', 'utf8') +
-      Buffer.byteLength(diff, 'utf8'),
-    revision: 1,
-    createdAt: FIXTURE_TIMESTAMP,
-    updatedAt: FIXTURE_TIMESTAMP,
-    ...overrides,
-  }
 }

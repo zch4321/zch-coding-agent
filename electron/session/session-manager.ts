@@ -113,7 +113,6 @@ export class SessionManager {
   readonly #traceDirectory: string
   readonly #pluginBus: PluginEventBus | undefined
   readonly #skillsManager: SkillsManager | undefined
-  readonly #fileChangeExecution: SessionManagerOptions['fileChangeExecution']
   readonly #mcpManager: McpManager | undefined
   readonly #promptRegistry: PromptRegistry | undefined
   readonly #providerFactory: SessionManagerOptions['providerFactory']
@@ -154,7 +153,6 @@ export class SessionManager {
     this.#traceDirectory = options.traceDirectory
     this.#pluginBus = options.pluginBus
     this.#skillsManager = options.skillsManager
-    this.#fileChangeExecution = options.fileChangeExecution
     this.#mcpManager = options.mcpManager
     this.#promptRegistry = options.promptRegistry
     this.#providerFactory = options.providerFactory
@@ -265,7 +263,6 @@ export class SessionManager {
     const toolRunner = new SessionToolRunner({
       configStore: this.#configStore,
       pluginBus: this.#pluginBus,
-      fileChangeExecution: this.#fileChangeExecution,
       promptRegistry: options.promptRegistry,
       fetchImpl: this.#fetchImpl,
       autoApproverFactory: this.#autoApproverFactory,

@@ -32,7 +32,6 @@ import type {
   ActiveRunToolSnapshot,
 } from '../../shared/runtime-state'
 import type { SessionCommandResult } from '../../shared/domain-state-api'
-import type { FileChangeExecutionPort } from './file-change-execution'
 import type { SessionTraceController } from './session-trace-controller'
 import type { SubagentExecutionPort } from '../subagent/contracts'
 import type { SwarmExecutionPort } from '../swarm/contracts'
@@ -71,7 +70,6 @@ export interface SessionManagerOptions {
   eventSink: RuntimeEventSink
   pluginBus?: PluginEventBus
   skillsManager?: SkillsManager
-  fileChangeExecution?: FileChangeExecutionPort
   mcpManager?: McpManager
   subagentExecution?: SubagentExecutionPort
   swarmExecution?: SwarmExecutionPort
@@ -154,7 +152,6 @@ export interface ActiveRun {
   status: RunStatus
   failure?: { code: string; message: string; diagnosticId?: DiagnosticId }
   usageRecords: LlmUsageRecord[]
-  fileChangeHistoryBytes: number
   toolOutputLimits: {
     maxToolOutputBytes: number
     maxToolOutputLines: number

@@ -135,8 +135,6 @@ function projectInternalAgentEvent(
           arguments: structuredClone(event.args),
           reason: event.reason,
           policySignals: structuredClone(event.policySignals),
-          ...(event.diff ? { diff: event.diff } : {}),
-          ...(event.diffHash ? { diffHash: event.diffHash } : {}),
           rememberable: event.rememberable,
           ...(event.rememberArgConstraints
             ? {

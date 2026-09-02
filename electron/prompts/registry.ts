@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFileContents as readFile } from '../common/filesystem'
 import path from 'node:path'
 import type { AssistantLanguage } from '../../shared/system-prompts'
 import {

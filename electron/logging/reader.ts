@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFileContents as readFile } from '../common/filesystem'
 import type { TraceEvent } from './events'
 import { TRACE_SCHEMA_VERSION, TraceEventSchema } from './events'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'

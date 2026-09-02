@@ -199,11 +199,6 @@ function notifyContentResized(): void {
                 <UiIcon name="warning" />{{ signal.detail }}
               </li>
             </ul>
-            <pre
-              v-if="pendingApprovalForTool(tool)?.diff"
-              class="tool-approval-json"
-              >{{ pendingApprovalForTool(tool)?.diff }}</pre
-            >
             <NDescriptions
               v-if="reviewedApprovalForTool(tool)"
               class="tool-approval-meta"
@@ -214,12 +209,6 @@ function notifyContentResized(): void {
               <NDescriptionsItem :label="t('chat.approvalDecision')">
                 {{ reviewedApprovalForTool(tool)?.decision }}
               </NDescriptionsItem>
-              <NDescriptionsItem
-                v-if="reviewedApprovalForTool(tool)?.diffHash"
-                :label="t('chat.diffHash')"
-              >
-                {{ reviewedApprovalForTool(tool)?.diffHash }}
-              </NDescriptionsItem>
             </NDescriptions>
             <p
               v-if="reviewedApprovalForTool(tool)?.reason"
@@ -227,11 +216,6 @@ function notifyContentResized(): void {
             >
               {{ reviewedApprovalForTool(tool)?.reason }}
             </p>
-            <pre
-              v-if="reviewedApprovalForTool(tool)?.diff"
-              class="tool-approval-json"
-              >{{ reviewedApprovalForTool(tool)?.diff }}</pre
-            >
             <div v-if="approvalUsageForTool(tool)" class="tool-approval-usage">
               <span>{{ t('chat.approvalUsage') }}</span>
               <p>{{ approvalUsageSummaryForTool(tool) }}</p>

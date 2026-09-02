@@ -186,7 +186,6 @@ export class SessionRunController {
       controller,
       status: 'idle',
       usageRecords: [],
-      fileChangeHistoryBytes: config.limits.fileChangeHistoryBytes,
       toolOutputLimits: {
         maxToolOutputBytes: config.limits.maxToolOutputBytes,
         maxToolOutputLines: config.limits.maxToolOutputLines,
@@ -626,7 +625,7 @@ export class SessionRunController {
             ? {}
             : { cacheMissTokens: completed.usage.cacheMissTokens }),
         }
-        const assistantRecord = appendCompletedAssistantTurn(session, {
+        appendCompletedAssistantTurn(session, {
           parts: completed.parts,
           reasoning: completed.reasoning,
           finishReason: completed.finishReason,
@@ -675,7 +674,6 @@ export class SessionRunController {
             session,
             run,
             completed.toolCalls,
-            assistantRecord.id,
           )
         } catch (error) {
           toolBatchFailed = true

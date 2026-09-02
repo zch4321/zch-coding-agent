@@ -99,6 +99,29 @@ function isProductionFile(filePath: string): boolean {
 }
 
 describe('architecture import boundaries', () => {
+  it('routes production filesystem access through common/filesystem', async () => {
+    const violations = (
+      await Promise.all(
+        (await sourceFiles(path.resolve('electron')))
+          .filter(
+            (filePath) =>
+              isProductionFile(filePath) &&
+              !relative(filePath).startsWith('electron/common/filesystem/'),
+          )
+          .map(async (filePath) => ({
+            filePath,
+            imports: await imports(filePath),
+          })),
+      )
+    ).flatMap(({ filePath, imports: specifiers }) =>
+      specifiers
+        .filter((specifier) => /^(?:node:)?fs(?:\/promises)?$/u.test(specifier))
+        .map((specifier) => `${relative(filePath)} -> ${specifier}`),
+    )
+
+    expect(violations).toEqual([])
+  })
+
   it('keeps Tooling independent from built-in Tools and Agent execution domains', async () => {
     const forbiddenRoots = [
       'electron/tools/',

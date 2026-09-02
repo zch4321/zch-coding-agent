@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { readFile } from 'node:fs/promises'
+import { readFileContents as readFile } from '../common/filesystem'
 import { delay } from '../../shared/async/delay'
 import type { JsonValue } from '../../shared/json'
 import type { SessionId } from '../../shared/ids'

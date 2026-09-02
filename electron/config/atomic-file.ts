@@ -1,66 +1,23 @@
-import { open, rename, unlink } from 'node:fs/promises'
-import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { writeUtf8Atomic } from '../common/filesystem'
 
-/** Replaces a JSON file through a temporary sibling file and atomic rename. */
+/** Writes a JSON document atomically with owner-only permissions for new files. */
 export async function writeJsonAtomic(
   filePath: string,
   value: unknown,
 ): Promise<void> {
-  const directory = path.dirname(filePath)
-  const temporaryPath = path.join(
-    directory,
-    `.${path.basename(filePath)}.${randomUUID()}.tmp`,
-  )
-  const data = `${JSON.stringify(value, null, 2)}\n`
-  const file = await open(temporaryPath, 'wx', 0o600)
-
-  try {
-    await file.writeFile(data, 'utf8')
-    await file.sync()
-  } catch (error) {
-    await file.close().catch(() => undefined)
-    await unlink(temporaryPath).catch(() => undefined)
-    throw error
-  }
-
-  await file.close()
-
-  try {
-    await rename(temporaryPath, filePath)
-  } catch (error) {
-    await unlink(temporaryPath).catch(() => undefined)
-    throw error
-  }
+  await writeUtf8Atomic(filePath, `${JSON.stringify(value, null, 2)}\n`, {
+    mode: 0o600,
+    preserveExistingMode: false,
+  })
 }
 
-/** Replaces a text file through a temporary sibling file and atomic rename. */
+/** Writes a text document atomically with owner-only permissions for new files. */
 export async function writeTextAtomic(
   filePath: string,
   data: string,
 ): Promise<void> {
-  const directory = path.dirname(filePath)
-  const temporaryPath = path.join(
-    directory,
-    `.${path.basename(filePath)}.${randomUUID()}.tmp`,
-  )
-  const file = await open(temporaryPath, 'wx', 0o600)
-
-  try {
-    await file.writeFile(data, 'utf8')
-    await file.sync()
-  } catch (error) {
-    await file.close().catch(() => undefined)
-    await unlink(temporaryPath).catch(() => undefined)
-    throw error
-  }
-
-  await file.close()
-
-  try {
-    await rename(temporaryPath, filePath)
-  } catch (error) {
-    await unlink(temporaryPath).catch(() => undefined)
-    throw error
-  }
+  await writeUtf8Atomic(filePath, data, {
+    mode: 0o600,
+    preserveExistingMode: false,
+  })
 }

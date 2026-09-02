@@ -200,7 +200,7 @@ export type HeadlessRunStatus = Static<typeof HeadlessRunStatusSchema>
 
 export const HeadlessResultSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(1),
+    schemaVersion: Type.Literal(2),
     status: HeadlessRunStatusSchema,
     sessionId: SessionIdSchema,
     runIds: Type.Array(RunIdSchema, { minItems: 1, maxItems: 16 }),
@@ -228,14 +228,6 @@ export const HeadlessResultSchema = Type.Object(
           minLength: 1,
           maxLength: 4_096,
         }),
-        patchPath: Type.Optional(
-          Type.String({ minLength: 1, maxLength: 4_096 }),
-        ),
-        patchStatus: Type.Union([
-          Type.Literal('written'),
-          Type.Literal('not_git'),
-          Type.Literal('failed'),
-        ]),
       },
       { additionalProperties: false },
     ),

@@ -1,4 +1,4 @@
-import { stat } from 'node:fs/promises'
+import { fileStatus as stat } from '../common/filesystem'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
 import fastGlob from 'fast-glob'

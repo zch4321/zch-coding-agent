@@ -1,6 +1,5 @@
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
-import type { FilePrecondition } from '../safety/file-precondition'
 
 /**
  * Branded type for a tool call that has passed the permission pipeline. The
@@ -26,8 +25,8 @@ export interface ApprovedToolCall {
   readonly toolId: string
   readonly args: JsonValue
   readonly argsHash: string
-  readonly resourcePreconditions: readonly FilePrecondition[]
-  readonly diffHash?: string
+  readonly workspace: string
+  readonly sessionTempRoot?: string
   readonly approvedBy: ApprovedBy
   readonly approvedAt: string
 }

@@ -1,4 +1,9 @@
-import { lstat, mkdir, readdir, unlink } from 'node:fs/promises'
+import {
+  linkStatus as lstat,
+  makeDirectory as mkdir,
+  readDirectory as readdir,
+  unlinkFile as unlink,
+} from '../common/filesystem'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import type { EventId } from '../../shared/ids'

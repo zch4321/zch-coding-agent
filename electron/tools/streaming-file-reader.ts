@@ -1,4 +1,7 @@
-import { open, stat } from 'node:fs/promises'
+import {
+  fileStatus as stat,
+  openFileHandle as open,
+} from '../common/filesystem'
 import type { JsonValue } from '../../shared/json'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
 

@@ -1,4 +1,7 @@
-import { readFile, stat } from 'node:fs/promises'
+import {
+  fileStatus as stat,
+  readFileContents as readFile,
+} from '../common/filesystem'
 import path from 'node:path'
 
 const MAX_TASK_BYTES = 1_048_576

@@ -1,9 +1,9 @@
 # 前端产品与验收规范 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 P0–P13 配套规范；文件工具交互目标已采纳、待实施 · 最后更新 2026-09-01
+> 状态：Backend Architecture v2.1 P0–P13 与文件系统、文件工具、Git Review 交互均已实现 · 最后更新 2026-09-02
 > 配套：[`requirements.md`](./requirements.md)（产品能力）、[`architecture.md`](./architecture.md)（技术边界）、[`road-map.md`](./road-map.md)（实施方向）。
 > 本文档是前端信息架构、交互行为、阶段展示和验收标准的权威依据；发生冲突时以本文档为准。
-> v2.1 状态所有权已经实现；文件工具审批预览、实际 Diff 与 Git revert 的新交互尚未切流，见 [`file-tools-filesystem-refactor-plan.md`](./file-tools-filesystem-refactor-plan.md) 和架构文档 §21。
+> 文件能力的最终交互、迁移边界和已知限制见 [`file-tools-filesystem-refactor-plan.md`](./file-tools-filesystem-refactor-plan.md) 和架构文档 §21。
 
 ---
 
@@ -56,7 +56,7 @@
 
 ### 2.4 Artifact
 
-- Artifact 是当前项目中由 Agent 产生、查看或依赖的上下文对象，包括文件内容、Diff、计划和项目级代码智能配置。
+- Artifact 是当前项目中由 Agent 产生、查看或依赖的上下文对象，包括文件内容、Project 级 Git Review、计划和项目级代码智能配置。
 - Artifact 侧栏承载当前 workspace 的项目状态视图；全局应用设置仍放在 Settings 页面。
 - Terminal 不是 Artifact；Browser 在 Post-MVP 重新设计。
 
@@ -196,7 +196,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 
 - 对话项和搜索结果不叠加运行状态文字或 workspace 并发 badge；切换到对应对话后，从统一 Run 活动区和审批卡查看当前状态。
 - 后台 approval 仍只属于其 Session/Agent execution；点击后使用显式 owner identity 提交，不得复用先前 active Session 的标识。
-- running、start pending 或 awaiting approval 的 conversation 禁用 delete、fork 和 revert，并通过 tooltip 说明原因；项目内任一 conversation busy 时禁止 remove project。
+- running、start pending 或 awaiting approval 的 conversation 禁用 delete 和 fork，并通过 tooltip 说明原因；项目内任一 conversation busy 时禁止 remove project。
 - 对话切换不得让 timeline、error、pending approval 或 runtime event 串到错误 Session。产品不验收未发送 draft/context attachments 的跨 Session 恢复。
 
 ---
@@ -254,8 +254,7 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 约束：
 
 - 工具活动只在对话流展示一次。
-- Files/Diff 可展示工具产生的 Artifact，但不重复绘制完整 Tool Activity 列表。
-- 文件写工具进入审批时，工具卡与 Diff 侧栏共享同一个 `(sessionId, runId, callId)` 状态。
+- Files 可展示工具涉及的文件，但不重复绘制完整 Tool Activity 列表。Diff 只展示当前 Project 的 Git 状态，不绑定工具调用。
 
 ### 6.4 文件与 Context 审批卡
 
@@ -265,8 +264,6 @@ P3 不显示 Share、全局 Search 或其他无实现按钮。对话搜索入口
 - 完整业务 args。
 - reason。
 - policySignals。
-- bounded preview diff，并明确它是审批时预览而非执行快照。
-- workspace scope。
 - 规则 expiry。
 - `Approve`、`Deny`、`Approve & remember`。
 
@@ -283,7 +280,7 @@ Context Ingress 审批必须显示：
 - 同一 call 只接受第一次有效决定。
 - 决定提交后所有重复按钮立即 disabled。
 - 审批过期、Run 中断或对话关闭后显示失效状态。
-- 文件状态在审批后变化不会自动使批准失效。执行期仍重新校验 path/scope/普通文件边界；`apply_patch` 无法在最新内容中精确唯一匹配时显示缺失或歧义错误并提示 Agent 重读。
+- 文件状态在审批后变化不会自动使批准失效。完整 args（含 path/content/patch）在批准后不可替换；执行期仍重新校验 path/scope/普通文件边界。`apply_patch` 无法在最新内容中精确唯一匹配时显示缺失或歧义错误并提示 Agent 重读。
 
 ---
 
@@ -376,17 +373,14 @@ Files 内部使用二级 tab：
 
 ### 8.3 Diff
 
-- pending 文件审批出现时，Artifact 侧栏自动切到 Diff，但不得抢走输入焦点。
-- Pending 状态显示目标路径、操作类型、preview diff hash、截断状态和统一 Diff，并标注“执行前预览，文件现状可能变化”。批准固定 tool args 与路径 scope，不宣称冻结目标内容。
-- `write_file` 审批文案始终使用“创建或覆盖”；即使 preview 时目标不存在，也不能把权限描述成只创建。完成态再按执行时结果显示 created/overwritten。
-- Diff 活动时不同时展示 Explorer。
-- 审批按钮可同时出现在对话卡和 Diff footer，但共享同一 store 状态。
-- 审批完成后从后端加载当前 Session 的持久化文件变更历史；切换对话或项目时必须按 `sessionId` 重新查询，不能复用上一对话的列表。
-- Renderer 只缓存后端返回的 `FileChangeSummaryV2`；它不包含完整 forward patch 或 before/after content。变更历史不得从 Message/tool card 反向解析或在 Pinia 中自行合成。
-- 变更列表显示路径、操作、时间、变更 hash、实际 Diff 和回退状态；具备完整 backend patch 时可显示 patch hash，否则显示有界 Diff hash。执行结果 Diff 与 pending preview 不同时以实际 Diff 为准，不静默替换二者含义。
-- “回退此变更”只对 `revertCapability = available` 显示可用，必须先明确确认且运行期间禁用。非 Git workspace 显示“需要 Git 仓库”，legacy record 显示“旧记录不可回退”。
-- 主进程通过 Git working-tree reverse patch 返回 `CONFLICT` 时在当前视口显示错误，不能假装成功，也不提供整文件覆盖或 fuzzy fallback。回退不触碰 staged/index 状态。
-- 大 Diff 必须有明确截断提示，不能让 UI 假装展示了完整变化。
+- Diff 是 Project 级实时 Git Review，不随当前 Session 变化，也不按 Session、Run、Agent 或工具调用归因。文件审批不会自动打开该 tab；审批和 Diff 没有共享决定状态或 footer。
+- Header 显示当前 branch；detached HEAD 显示短 OID，unborn repository 显示明确提示。右上角刷新按钮必须有 aria-label 和 loading 状态。
+- 左侧状态区使用 `NTree` 列出 Git porcelain entries，并同时显示 index/worktree 两列短状态。rename/copy 可在摘要中显示原路径；没有变化时显示 clean working tree。
+- 比较模式使用 `NTabs`：`HEAD`、unstaged、staged 和 merge base。merge-base 模式使用可筛选 `NSelect` 选择本地/远端 ref，优先 upstream，其次 `origin/main`、`origin/master`、`main`、`master`；摘要显示实际解析的短 merge-base OID。
+- 切换项目、内置工具完成或用户点击刷新时重新查询 status；选择路径、比较模式或 base ref 时懒加载 Diff。旧异步请求的结果不得覆盖新选择。
+- 未跟踪文件显示“加入 Git 后才能查看 Diff”；binary 只显示标记，不展示 binary patch；当前比较下无正文时显示明确空状态。
+- status、refs 或 Diff 达到 Main process 上限时显示截断提示；错误在当前视口显示，不伪造空结果。
+- 非 Git Project 显示空状态和“Git 管理恢复与变更查看”的提示。应用不展示 FileChange history、变更 hash、revert capability 或恢复按钮。
 
 ### 8.4 Agents
 
@@ -448,7 +442,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 
 - 使用项目列表展示所有 backend `ProjectRecord`，每项显示名称、完整路径、当前项目标记和已加载的活跃对话数量。
 - 列表提供 Choose workspace / Add project，并允许从任意空闲项目行发起移除。
-- 移除操作必须二次确认，并明确清理应用内 Session、Message、FileChange、Subagent 和运行资源但不删除 workspace 目录或文件；Trace 日志仍由 Logging 设置单独管理。
+- 移除操作必须二次确认，并明确清理应用内 Session、Message、Subagent 和运行资源但不删除 workspace 目录或文件；Trace 日志仍由 Logging 设置单独管理。
 - 项目中存在 running、start pending 或 awaiting approval 的对话时禁用移除并解释原因；移除当前项目后选择下一个可用项目及其最近的活跃对话，没有剩余项目时进入空状态。
 - 不展示内部 session ID。
 
@@ -496,7 +490,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - 明确提示额外 Provider 请求/费用；不显示全局并发值或单次 Swarm Agent 上限。
 - 提供模型池配置。模型池使用 `Provider → model → reasoning` 穿梭树选择精确 route，只读展示 Provider 模型能力，不配置并发或 Agent 数量。
 - 设置变更从下一次主 Run 生效；不提供隐藏 child Session 入口、完整 transcript、取消操作或自定义 child 工具列表。运行状态和历史回看位于 Artifact 的 Agents Tab，不与设置表单混合。
-- `inherit` child 的人工审批在对应 Agent 展开详情中显示，展示工具、参数、原因和 diff，并提供批准/拒绝；隐藏 Session ID 不进入 Renderer。
+- `inherit` child 的人工审批在对应 Agent 展开详情中显示，展示工具、参数、原因和 policy signals，并提供批准/拒绝；隐藏 Session ID 不进入 Renderer。
 
 ### 10.7 Skills
 
@@ -539,10 +533,10 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 | Calling LLM      | 流式占位/文本    | Stop                     | 保留当前 tab                |
 | Retrying LLM     | 正在重试 A/B     | Stop                     | Agents 同步显示 A/B         |
 | Running tool     | 工具卡状态更新   | Stop                     | 文件工具可打开相关 Artifact |
-| Waiting approval | 审批卡           | 禁止发送，可 Stop        | 自动显示 Diff 或相关文件    |
+| Waiting approval | 审批卡           | 禁止发送，可 Stop        | 保留当前 Artifact           |
 | Cancelling       | 短状态           | Stop disabled            | 保留内容                    |
 | Failed           | NMessage error   | 恢复输入，可重试用户消息 | 保留审查上下文              |
-| Session archived | 历史只读         | Unarchive 后可发送       | 恢复持久化 Artifact 元数据  |
+| Session archived | 历史只读         | Unarchive 后可发送       | Files/Git 仍按 Project 查询 |
 
 要求：
 
@@ -551,12 +545,12 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - ConversationTimeline 只投影 durable messages、live overlay、工具和审批，不渲染全局 warning/error。NMessage 位于 46px frameless 顶栏下方：warning 10 秒自动消失且可提前关闭，error 不自动消失；最多显示 5 条，其余排队，不挤掉未关闭 error。
 - 相同 code、Session 和 message 在活动/排队期间去重。后台 Session 的通知显示对话标题但不切换当前对话；日志 capture 持续状态显示在 Header/设置，Provider 隐私 notice 保留在 composer 附近。
 - 创建、重命名、归档、切换模型/模式和发送消息期间只设置 pending/error UI，不先改 durable replica；commit 失败时继续显示后端原值。
-- 恢复使用 `session.changed` commit；永久删除使用 `session.removed` commit。删除只清理本地 Session/Message/FileChange durable 数据，不修改 workspace 文件，也不代替日志设置中的 Trace 管理。
+- 恢复使用 `session.changed` commit；永久删除使用 `session.removed` commit。删除只清理本地 Session/Message/Subagent durable 数据，不修改 workspace 文件，也不代替日志设置中的 Trace 管理。
 - Command 回包和 durable push event 使用同一个 reconciler；相同 event cursor 只应用一次，不依赖两者的到达顺序。
 - Event 已先应用时，重复的成功回包仍结束当前控件的 pending，只是不重复改写副本。
 - Preload 在 bootstrap query 前开始 buffer durable events；安装带 cursor 的 bootstrap snapshot 后重放更新事件，再进入 live apply，不能采用“先 query、后 subscribe”。
 - Event cursor 缺口或 backend instance 变化时重新 bootstrap；Session `revision` 重复时不重复应用，revision 缺口请求 Session snapshot 并重建 message cache。
-- Project、Session、Message、Goal/Plan 和 FileChange 不定时轮询；query 只用于 bootstrap、切换/分页/搜索/按需加载和缺口恢复。
+- Project、Session、Message 和 Goal/Plan 不定时轮询；durable query 只用于 bootstrap、切换/分页/搜索和缺口恢复。Git Review 作为可过期 Project read model 只在打开、变更提示或用户刷新时查询。
 - `run:stream` sequence 缺口只影响瞬时展示，可单次读取 ActiveRun snapshot，但不能轮询补 token；backend 没有可恢复 buffer 时允许丢失 partial output。
 - 切换对话、卸载组件和关闭窗口时注销 renderer listener。
 
@@ -638,7 +632,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - 状态不能只通过红/绿颜色表达，必须同时有文本或图标。
 - modal 打开时焦点被约束；关闭后返回触发按钮。
 - 危险操作默认焦点不得落在确认按钮。
-- Approval args/reason/diff 使用文本绑定，不通过 raw `v-html`。
+- Approval args/reason/policy signals 与 Git Diff 使用文本绑定，不通过 raw `v-html`。
 - Markdown renderer 禁止 raw HTML 和 `javascript:` 等危险协议。
 - renderer 不 import Electron/Node，不直接读取 workspace 或密钥。
 
@@ -652,7 +646,7 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 | 对话列表与搜索        | 基础 | 完整本地版 |       保持 | 保持 |      可扩展同步 |
 | Chat/Markdown/流式    | 必须 |       必须 |       必须 | 必须 |            必须 |
 | Files Explorer/Viewer | 基础 |       必须 |       必须 | 必须 |            必须 |
-| 文件审批与 Diff       |    - |       必须 |       必须 | 必须 |            必须 |
+| 文件审批与 Git Review |    - |       必须 |       必须 | 必须 |            必须 |
 | Terminal 底部面板     |    - |     不显示 |       必须 | 必须 |            必须 |
 | Skills 管理           |    - |          - |          - | 必须 |            必须 |
 | Trace/Replay 基础入口 |    - | Trace 设置 | Trace 设置 | 必须 | 完整 GUI 可后移 |
@@ -683,8 +677,8 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] 搜索只在本地检索标题和消息，并能打开结果。
 - [ ] 新建对话不调用 backend、不进入 Sidebar；首次发送原子创建 backend-owned Session/initial Messages 并启动内存 Active Run。
 - [ ] A 运行时切到 B 不打断 A，A/B timeline、approval 和 error 不串线；draft 跨切换恢复不属于验收要求。
-- [ ] Sidebar 与搜索结果按规定优先级显示 writer/running/readonly locked/approval/failed/completed 状态。
-- [ ] running/start pending/approval conversation 的 delete、fork、revert 和 remove project 被禁用并说明原因。
+- [ ] Sidebar 与搜索结果不显示 workspace writer 状态；Run/approval/failed/completed 反馈只在对应对话的统一状态区展示。
+- [ ] running/start pending/approval conversation 的 delete、fork 和 remove project 被禁用并说明原因。
 
 ### 16.3 对话与输入
 
@@ -707,18 +701,18 @@ Settings 使用一个 modal，内部按 tab 分组，不使用占满主界面的
 - [ ] Explorer 独立加载真实 workspace，不依赖 Agent 工具历史。
 - [ ] 文件树和文件内容通过二级 tab 切换，不同时拥挤展示。
 - [ ] 文件 viewer 只读、有界、有行号和语法高亮。
-- [ ] pending 文件审批自动打开 Diff。
-- [ ] Diff 与对话审批卡共享同一个决定状态。
-- [ ] 大文件和大 Diff 显示截断提示。
-- [ ] 应用重启后仍可按 Session 查看未被 retention 清理的文件变更；Git v2 record 可尝试 reverse patch，非 Git 和 legacy 状态诚实不可用。
-- [ ] Renderer 只接收 `FileChangeSummaryV2`，完整 patch 和 before/after content 不进入 renderer state 或 DOM。
+- [ ] Diff 只展示当前 Project 实时 Git 状态，不因 pending 文件审批自动打开，也不按 Session/Run/Agent 归因。
+- [ ] HEAD、unstaged、staged 和 merge-base 四种模式可切换；merge-base 显示实际 OID。
+- [ ] tracked/untracked、rename/copy、binary、clean、detached/unborn 和非 Git 状态诚实展示。
+- [ ] status/Diff 截断和查询错误有明确提示；二进制不展示 binary patch payload。
+- [ ] Renderer/SQLite 不保存 `FileChangeSummary`、before/after、Diff history 或恢复 payload，界面没有文件 revert 按钮。
 
 ### 16.5 权限审批
 
 - [ ] ReadOnly 写操作显示明确拒绝。
-- [ ] Confirm 展示 tool、args、reason、signals、diff、scope 和 expiry。
+- [ ] Confirm 展示 tool、args、reason、signals 和 expiry，不生成审批 Diff。
 - [ ] Deny 后文件逐字节不变。
-- [ ] Approve 后只执行已批准 args；完成态展示执行时 actual Diff，不能要求它与可能过时的 preview Diff 相同。
+- [ ] Approve 后只执行已批准 args；完成态显示操作摘要，不合成调用级 actual Diff。
 - [ ] Approve & remember 后显示持久化规则。
 - [ ] 重复、过期、跨 Session 的决定不可再次生效。
 - [ ] 文件在审批后变化不自动使批准失效；参数/path/scope 变化仍失效，目标变成 symlink/junction/目录/越界路径仍拒绝。

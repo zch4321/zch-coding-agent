@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { access, appendFile } from 'node:fs/promises'
+import {
+  accessPath as access,
+  appendFileContents as appendFile,
+} from '../common/filesystem'
 import path from 'node:path'
 import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'

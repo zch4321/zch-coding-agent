@@ -398,29 +398,23 @@ export function projectSubagentResult(
   )
 }
 
-/** Projects a successful file mutation to a summary and durable-warning fields. */
+/** Projects a successful file mutation to one compact operation summary. */
 export function projectFileMutationResult(
   result: SuccessfulToolResult,
-  action: 'created' | 'patched' | 'deleted',
+  action: 'written' | 'patched' | 'deleted',
 ): ToolModelContentPart[] {
   const content = objectContent(result)
   const path = stringValue(content.path) || '[unknown path]'
   const verb =
-    action === 'created'
-      ? 'Created file'
+    action === 'written'
+      ? 'Wrote file'
       : action === 'patched'
         ? 'Patched file'
         : 'Deleted file'
-  const warningCode = stringValue(content.warningCode)
+  const deleted = action === 'deleted' ? content.deleted === true : undefined
   return textPart(
-    appendFooter(`${verb} ${path}`, [
-      ...(warningCode
-        ? [
-            `mutationSucceeded=${String(content.mutationSucceeded === true)}`,
-            `warningCode=${warningCode}`,
-            `revertAvailable=${String(content.revertAvailable === true)}`,
-          ]
-        : []),
-    ]),
+    action === 'deleted' && !deleted
+      ? `File was already absent ${path}`
+      : `${verb} ${path}`,
   )
 }

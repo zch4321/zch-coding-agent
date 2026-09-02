@@ -258,14 +258,6 @@ onBeforeUnmount(() => {
               :max="10000000"
             />
           </label>
-          <label class="settings-field">
-            <span>{{ t('limits.diffChars') }}</span>
-            <NInputNumber
-              v-model:value="agent.limitsConfig.diffChars"
-              :min="1024"
-              :max="10000000"
-            />
-          </label>
         </section>
 
         <NDivider />

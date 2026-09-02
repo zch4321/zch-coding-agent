@@ -101,8 +101,6 @@ export interface ReviewedApproval {
   callId: CallId
   tool: string
   reason: string
-  diff: string
-  diffHash?: string
   decision: 'allowed' | 'denied' | 'stale'
 }
 
@@ -152,8 +150,6 @@ export interface PendingApproval {
   args: unknown
   reason: string
   signals: Array<{ code: string; severity: string; detail: string }>
-  diff?: string
-  diffHash?: string
   rememberable: boolean
   rememberArgConstraints?: unknown
   expiresAt: string

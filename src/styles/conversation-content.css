@@ -421,15 +421,9 @@ code {
   gap: 5px;
 }
 
-.approval-args,
-.approval-diff {
+.approval-args {
   max-height: 260px;
   white-space: pre;
-}
-
-.approval-diff {
-  border-color: #b6d7a8;
-  background: #f2fbef;
 }
 
 .policy-signals {

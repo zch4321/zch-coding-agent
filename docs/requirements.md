@@ -1,8 +1,8 @@
 # 需求文档 · Zch Coding Agent
 
-> 状态：Backend Architecture v2.1 P0–P13 已完成；文件工具目标语义已采纳、待实施 · 最后更新 2026-09-01
+> 状态：Backend Architecture v2.1 P0–P13 与文件系统、文件工具、Git Review 重构已完成 · 最后更新 2026-09-02
 > 本文档定义「做什么」。技术怎么做见 [`architecture.md`](./architecture.md)，前端信息架构与验收标准见 [`frontend-spec.md`](./frontend-spec.md)。
-> P0–P13 已实现；`electron/common/filesystem`、`write_file` best-effort/last-writer-wins 和 Git-backed FileChange v2 的切流计划见 [`file-tools-filesystem-refactor-plan.md`](./file-tools-filesystem-refactor-plan.md)。
+> 本次文件能力的最终决策、迁移和限制见 [`file-tools-filesystem-refactor-plan.md`](./file-tools-filesystem-refactor-plan.md)。
 
 ---
 
@@ -92,9 +92,11 @@ AppConfig v25 删除 `limits.maxToolResultTokens/readFileOutputBytes` 和 per-to
 
 `read_file` 从文件句柄流式读取，不为分页把整个文件载入内存。它支持 1-based `startLine`、可选的 0-based Unicode code-point `startCharacter`、`tail` 以及 `lineCount/lineNumbers`；`tail` 与显式起点互斥。结果始终返回下一次可用的 `nextStartLine`，只有停在超长单行中间时才返回非零 `nextStartCharacter`，因此普通分页只需复制下一行号；EOF 后同一行继续 append 时也能从字符偏移续读。读取器在 UTF-8 code point 边界安全停下，并继续检测一次调用期间的文件替换；跨调用不再维护文件身份 cursor。workspace 文件仍受 `readFileSourceBytes` 总源文件上限，Session temp 文件不受该总量限制。每页文件正文直接使用冻结的行数配置（默认完整 500 个源文件行）以及为 continuation 元数据预留空间后的字节配置；空行与 footer 不占用源文件行预算。临时 artifact 已清理时返回 `ARTIFACT_EXPIRED`。
 
-三个 mutation 工具采用 best-effort、last-writer-wins 语义。审批固定 tool/call、完整 args hash、规范化路径、operation 与 scope，批准时 Diff 只是时间点预览；执行前后文件 existence/hash/inode/mtime 或父目录 identity 变化不使批准失效。执行时仍重新经过 PathGuard，symlink/junction、目录、越界路径和受保护根继续拒绝。
+三个 mutation 工具采用 best-effort、last-writer-wins 语义。审批固定 tool/call 和完整 args hash（包括 path/content/patch），并在批准前校验当时的路径与 scope；不生成审批 Diff，也不冻结文件 existence/hash/inode/mtime、父目录 identity 或预期结果。执行时再次经过 PathGuard，symlink/junction、目录、越界路径和受保护根继续拒绝。
 
-`write_file` 在目标不存在时创建文件并自动创建缺失父目录，在目标是允许范围内的普通文件时整体覆盖；覆盖保留执行时文件权限，新文件使用进程 umask 下的 workspace 默认权限。`apply_patch` 一次只修改一个已存在的 UTF-8 文本文件，可包含多个 hunk。补丁路径必须是 workspace 相对路径；禁止二进制、rename、mode change、绝对路径和越界路径。hunk header 的行数和 new-file 行号只作定位提示；上下文/删除行必须逐字匹配，原位置失效时只有在最新内容中精确上下文唯一命中才可应用。无匹配或多个匹配均零写入并提示 Agent 重读，不做 fuzzy replacement。读取后再发生并发修改时允许最后完成的原子替换获胜。`delete_file` 执行时重新解析目标：普通文件直接删除，不检查旧 hash；已不存在时幂等成功并返回 `deleted: false`，且不创建空 FileChange。
+`write_file` 在目标不存在时创建文件并自动创建缺失父目录，在目标是允许范围内的普通文件时整体覆盖；覆盖保留执行时文件权限，新文件使用进程 umask 下的 workspace 默认权限。`apply_patch` 一次只修改一个已存在的 UTF-8 文本文件，可包含多个 hunk；禁止 create/delete、二进制、rename、mode change 和越界路径。hunk header 的行号只用于错误定位；每个上下文/删除序列必须在执行时最新内容中逐字命中一次。无匹配或多个匹配均零写入并提示 Agent 重读，不做 fuzzy replacement。读取后再发生并发修改时允许最后完成的原子替换获胜。`delete_file` 执行时重新解析目标：普通文件直接删除且不读取内容、不检查旧 hash、不受文本编辑大小上限约束；已不存在或在删除竞态中消失时幂等成功并返回 `deleted: false`。
+
+应用不记录 Run 开始状态或每次 mutation 的 before/after、Diff、patch、mode 与文件恢复元数据。两个写入若都基于同一旧内容并发发布，最后完成者可能覆盖先完成者，即使逻辑编辑互不冲突；需要隔离或恢复时由用户使用 Git 分支/worktree/commit/stash 等原生能力。
 
 #### 2.2.2 检索类
 
@@ -225,9 +227,9 @@ Tool Result 的 canonical renderer 固定为：单 TextPart 原样、单 JsonPar
 ### 2.4 会话与工作区
 
 - 一个工作区（workspace）= 一个本地目录。
-- Project 是 backend-owned 的持久化 workspace 注册记录，使用稳定 `projectId` 和规范化绝对路径。移动目录后通过重新关联更新 Project path，不改写 Session identity。设置页以列表管理全部 Project；任意空闲 Project 都可在二次确认后从应用移除。移除会删除应用中归属它的 Sessions/Messages/FileChanges/Subagent 记录并释放运行资源，绝不删除 workspace 目录或项目文件；Trace 日志仍由日志设置独立管理。若移除当前 Project，renderer 必须稳定回退到下一个可用 Project 及其最近的活跃 Session。
+- Project 是 backend-owned 的持久化 workspace 注册记录，使用稳定 `projectId` 和规范化绝对路径；path 是可重新关联的属性，不是跨表 identity。设置页以列表管理全部 Project；任意空闲 Project 都可在二次确认后从应用移除。移除会删除应用中归属它的 Sessions/Messages/Subagent 记录并释放运行资源，绝不删除 workspace 目录或项目文件；Trace 日志仍由日志设置独立管理。若移除当前 Project，renderer 必须稳定回退到下一个可用 Project 及其最近的活跃 Session。
 - Session 是持久化对话实体，绑定一个 `projectId`、当前模型选择与权限模式；UI 中的“对话”是 Session 的展示名称，不存在独立 Conversation 领域记录或 `conversationId -> sessionId` 映射。
-- SQLite 持久化 schema migrations、Projects、Session 元数据、完整 Message history 和有界 FileChanges。Goal/Plan 属于 Session 元数据；完整 assistant/tool/harness 内容统一表示为 Message。Renderer 只保存 backend public records 的副本，不得单独创建已提交消息。
+- SQLite 持久化 schema migrations、Projects、Session 元数据、完整 Message history 和 Subagent/Swarm executions，不持久化 FileChange、Diff、文件快照或恢复 patch。Goal/Plan 属于 Session 元数据；完整 assistant/tool/harness 内容统一表示为 Message。Renderer 只保存 backend public records 的副本，不得单独创建已提交消息。
 - Database migrations 必须按版本前向执行，在单个 transaction 内提交 schema/data change 和 migration record；已应用文件 checksum 改变或数据库版本高于当前应用时明确拒绝打开，不静默猜测兼容。
 - 每个 `MessageRecord` 保存内部 `kind` 与有序 `parts`。`kind` 用于区分真实用户输入、编排消息、runtime context、harness、assistant、tool result、compact summary 和 conversation transcript；它不是 Provider wire role。V1 shared schema 必须按 `kind` 校验 part 组合：用户输入是非空 text；assistant turn 只含 text/tool-call 且记录实际 route；tool result record 只含一个 terminal tool-result，并引用历史中未完成的 call；compact summary 是 legacy text 或单个 provider-compact；conversation transcript 是隐藏 text parts 并绑定目标 route。新 tool result 必须带 `resultProjection = model-content.v1`；active history 中缺少 marker 的旧结果必须在 Provider 网络调用和计费前报 `LEGACY_TOOL_RESULT_UNSUPPORTED`，provider-transfer transcript 对它实际纳入的任何 legacy result 同样 fail closed，但旧会话仍可查看、导出、删除，也不改写 SQLite 历史。
 - 每个 `MessageRecord` 必须保存 `visibility = visible | hidden | superseded`，并可用 `turnId` 关联同一轮 context、user、assistant、tool 和 interjection。`visibility` 控制当前分支展示；`inHistory` 只控制模型上下文。Compact 只修改 `inHistory`，不得隐藏历史消息；rewind 将退出当前分支的记录标为 `superseded` 且 `inHistory = false`，不得物理删除。
@@ -245,11 +247,11 @@ Tool Result 的 canonical renderer 固定为：单 TextPart 原样、单 JsonPar
 - Session canonical history 必须以完整 Message 持久化。应用重启后按 `inHistory = true` 和 `seq` 重建 `CompiledCanonicalHistory`，再由当前 route 的 ModelProvider 生成请求；compact 通过版本化 checkpoint message 和显式 `inHistory` 变更替代旧前缀。若 `providerType + providerId + model + endpoint + providerConfigRevision` 与 active assistant/compact/transcript anchor 不兼容，下一次 Run 必须在插入用户消息前把 SQLite 完整非 superseded 分支投影成 `zch-conversation-markdown`，以 fresh harness + hidden `conversation_transcript` 建立新 epoch；迁移预检或 commit 失败时旧 epoch 原样保留。Fork/rewind 重建 active branch 时必须把 `compact_summary.replacesThroughSeq` 与 `conversation_transcript.sourceThroughSeq` 作为同等 epoch boundary，并在 fork 连续重编号时重映射该边界。
 - 只有当前分支中可见的原始用户消息支持重试和编辑。重试保留该用户消息及本轮 context、supersede 后续分支并复用原记录运行，不能插入重复 user message；Assistant 和其他 message kind 必须被 `run:retry` 拒绝。编辑 supersede 该用户整轮及后续，将原文和附件引用恢复到 composer，不自动发送。
 - Idle Session 的 active history 若停在未完成的用户输入、terminal tool result、插话、编排输入或带 `turnId` 的自动 compact summary，最后一个对应轮次必须显示“继续”操作。继续必须校验 Session revision 与 canonical history，复用原 `turnId` 启动 Run，不发送或持久化新 user message；完整 Assistant、control command、手动 compact 与 imported transcript 不得视为可继续。
-- 仅回退可以作用于用户或 Assistant：用户边界移除该用户整轮及之后记录，Assistant 边界保留对应用户消息并从 Assistant 开始移除。每次回退清除当前 Goal/Plan，并在跨 compact 或 conversation transcript epoch 时重建保留前缀的有效 history。文件、终端和 MCP/外部工具副作用不回滚，FileChange 审计继续保留，UI 操作前必须提示。
+- 仅对话回退可以作用于用户或 Assistant：用户边界移除该用户整轮及之后记录，Assistant 边界保留对应用户消息并从 Assistant 开始移除。每次回退清除当前 Goal/Plan，并在跨 compact 或 conversation transcript epoch 时重建保留前缀的有效 history。文件、终端和 MCP/外部工具副作用不回滚，应用没有文件恢复 journal；UI 操作前必须提示用户自行使用 Git 管理工作树。
 - Assistant stream delta 只保存在 backend memory；Provider turn 完成后才插入 Message。包含 tool calls 的 assistant turn 必须等每个 call 都有 terminal result 后，与对应 tool messages 在同一 transaction 写入，数据库不得保存协议半截。
 - 应用崩溃可以丢失尚未完成的 assistant text/reasoning、tool batch 和 Active Run，不保存 partial message，也不生成持久化 interrupted Run。最后一条已提交 user message 可以暂时没有 assistant reply；重启时遗留 active Subagent/Swarm execution 标记为 `interrupted` 且不自动恢复，真实 PTY 已消失。
 - 如果副作用工具已经修改 workspace、但应用在完整 tool batch transaction 前崩溃，文件变化可以保留而 tool messages 丢失；系统以下一次读取到的实际 workspace 为准。V2.1 不承诺文件系统与消息数据库之间的 crash-atomic journal。
-- 文件写入工具的模型可见结果是一行成功摘要。如果副作用已成功但 `file_changes` 持久化失败，摘要尾注必须如实保留 `mutationSucceeded = true`、`CHANGE_HISTORY_PERSIST_FAILED` 和 `revertAvailable = false`；不得把已发生的文件操作报成未发生或自动重试。
+- 文件写入工具的模型可见结果是一行成功摘要，包含路径和必要的操作统计；不会附带自有 Diff、恢复状态或 FileChange 持久化结果。已经发生的副作用不得因后续 Message transaction 失败而自动重试。
 - JSONL trace 是可选审计记录，不是事务恢复日志，也不能作为 Session 状态的唯一来源。
 
 ### 2.5 Skills（渐进式专家指令）
@@ -390,7 +392,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 5. **Auto 审批模型**：只处理 `review` 动作；超时、无效输出或模型异常一律降级到人工审批。
 6. **执行前复核**：紧邻执行再次检查批准的 args/path/scope，以及目标当前是否仍位于允许根并满足普通文件/非 symlink 等路径约束；不把内容 hash 或文件 identity 变化重新解释为审批失效。
 
-主模型（如 DeepSeek V4 Pro）提议动作后，可由**辅助模型**（如轻量/小模型，未配置时为当前主模型）辅助判定。Auto 模式下，工作区内 `write_file` / `apply_patch` 若已通过资源计划、workspace 边界、diff 上限和 policy signal 检查，可由确定性策略直接执行，不消耗审批模型 token；资源计划固定批准的参数、路径与 scope，但不冻结文件内容。`delete_file`、VCS 元数据路径、敏感路径、danger signal、Confirm 模式和用户记住的 review 规则仍转人工审批。其他需 review 的副作用工具才进入审批模型。判定输入刻意精简：
+主模型（如 DeepSeek V4 Pro）提议动作后，可由**辅助模型**（如轻量/小模型，未配置时为当前主模型）辅助判定。Auto 模式下，工作区内 `write_file` / `apply_patch` 若已通过路径、大小元数据和 policy signal 检查，可由确定性策略直接执行，不消耗审批模型 token；批准固定完整参数，并在执行时重新校验路径与 scope，但不冻结文件内容。`delete_file`、VCS 元数据路径、敏感路径、danger signal、Confirm 模式和用户记住的 review 规则仍转人工审批。其他需 review 的副作用工具才进入审批模型。判定输入刻意精简：
 
 ```
 审批模型输入 = {
@@ -419,8 +421,8 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 
 - **执行不变量**不是权限规则：例如内置文件写入必须属于 workspace 或当前 Session `scratch`、Terminal/background target 必须属于当前 Session、参数必须满足 schema。违反时调用本身无效，因此所有模式都拒绝；Yolo 不会改写文件工具契约。
 - **风险黑名单**是权限策略：例如破坏性命令、批量删除、发布/部署、修改凭据等。在 Auto/Confirm 下用于强制或提升人工审批；在 Yolo 下明确跳过。
-- **工作区文件写入**：`write_file` 与 `apply_patch` 在资源计划确认路径位于 workspace、预览 diff 有界且没有 danger 信号时，Auto 可由确定性策略直接放行；`delete_file`、敏感路径、VCS 元数据路径和用户记住的 review 规则仍需人工审批。批准固定参数和路径授权，但不冻结目标文件内容。
-- **Session scratch 写入**：`write_file/apply_patch/delete_file` 对当前 Session `scratch` 的操作在 Auto、Confirm 与 Yolo 中免审批；Readonly 仍不暴露写工具。scratch 变更不产生 Git/项目 Diff、durable FileChange 或分支回滚记录，`artifacts` 永远拒绝内置写工具。
+- **工作区文件写入**：`write_file` 与 `apply_patch` 在资源计划确认路径位于 workspace、大小元数据有界且没有 danger 信号时，Auto 可由确定性策略直接放行；`delete_file`、敏感路径、VCS 元数据路径和用户记住的 review 规则仍需人工审批。批准固定完整参数，但不冻结目标文件内容，也不生成 Diff 预览。
+- **Session scratch 写入**：`write_file/apply_patch/delete_file` 对当前 Session `scratch` 的操作在 Auto、Confirm 与 Yolo 中免审批；Readonly 仍不暴露写工具，`artifacts` 永远拒绝内置写工具。应用对 workspace 和 scratch mutation 都不创建自有 Diff、FileChange 或分支回滚记录。
 - **常规开发命令**不是确定性放行规则：例如 `go mod tidy`、`npm install`、`pip install -r requirements.txt` 有副作用但通常可由 Auto 审批模型判为 safe；是否放行取决于当次参数、cwd、路径、网络/脚本行为和风险信号。
 
 命令匹配只能作为风险信号，不能宣称能完整解析 PowerShell/cmd/bash 的所有转义、别名、脚本和子进程行为。
@@ -474,7 +476,7 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - Durable command 在数据库 commit 后同时返回提交结果并发布同内容事件；renderer 对回包和事件按 cursor/revision 幂等合并。后端自主提交依赖事件通知，不定时轮询；bootstrap、分页/搜索、按需加载和缺口重同步才使用 query。
 - 搜索通过本地后端查询 Session 标题，以及 `kind = 'user_input'/'assistant_turn'` records 中 `type = 'text'` 的 parts；不把 orchestrator/harness/runtime context 当成用户消息，也不检索 tool call 参数、tool result/JSON parts、工作区文件、reasoning、continuation 或 trace，更不访问 Provider。
 - 新建对话时只建立 renderer draft，不创建空 Session；首次发送以 `run:start new_session` 原子创建 Session、首轮 context/user records 并启动 Active Run。Session 创建前终端不可用。Session/Run ID 不作为常驻产品信息展示。
-- 侧栏的删除操作归档 Session；设置页提供分页的已归档对话列表和恢复入口。永久删除只允许 archived、idle 且没有 fork 子 Session 的记录，删除 Session/Message/FileChange durable 数据但不得改动 workspace 文件；Trace capture 继续由日志设置独立管理。
+- 侧栏的删除操作归档 Session；设置页提供分页的已归档对话列表和恢复入口。永久删除只允许 archived、idle 且没有 fork 子 Session 的记录，删除 Session/Message/Subagent durable 数据但不得改动 workspace 文件；Trace capture 继续由日志设置独立管理。
 - 普通 Session 提供单向 Markdown Conversation 导出：用户确认风险后，由 backend 从完整 canonical log 生成 `zch-conversation-markdown` 并原子保存。它恢复用户/Assistant/明文 reasoning、编排、tool call/result 与附件元数据，但排除 system/runtime/AGENTS/selected context、控制命令/replay、compact、generated transcript、Provider continuation 和加密 reasoning。Markdown 导入仍明确不可用；Trace transcript 查看/导出保持独立。
 - 正式 UI 不得使用硬编码项目、对话或工具活动作为占位数据。
 - 后台异步故障使用版本化、脱敏、有界的 `app:notification`；preload 在 renderer 挂载前缓存最多 64 条。Renderer 的操作 warning/error 使用 `NMessage` 顶部通知，不写入 Timeline 或 durable replica：warning 10 秒自动消失，error 需手动关闭，最多同时 5 条并排队，按 code/Session/message 去重。后台 Session 通知显示对话标题但不得切换当前选择；风险确认、隐私告知、字段校验和持续状态留在所属界面。
@@ -488,16 +490,15 @@ LLM API Key 等敏感配置优先使用 Electron `safeStorage` 异步 API 存储
 - Terminal 位于完整对话区之后、对话输入区下方的可调整底部面板，只占对话工作列宽度，不出现在对话输入区或右侧 Artifact 侧栏。
 - 顶栏提供底部面板开关，并支持 `Ctrl+J` / `Ctrl+\`` 切换。
 
-### 4.3 Diff 预览
+### 4.3 Git Review
 
-- `apply_patch` / `write_file` 的变更在执行前显示有界风险预览，执行后以本次调用实际读取的 latest before 与其发布的 bytes 形成 Diff。两者可能因并发编辑而不同，UI 必须明确标注，不能把旧预览冒充实际变更；该 Diff 描述本次调用，不承诺等于外部 last writer 完成后的 workspace 总 Diff。
-- 审批绑定 tool/call、完整 args hash、规范化路径、operation 和 scope，不绑定变更前文件 hash 或预期结果 hash。文件在审批后发生变化时原批准继续有效；目标变成 symlink/junction、目录、越界路径或非法根时仍由执行期 PathGuard 拒绝。
-- 使用有界只读 Diff viewer，支持语法高亮、截断提示和审批状态；P3 不引入 Monaco/CodeMirror 等完整编辑器。
-- 每次成功的 `write_file` / `apply_patch` / `delete_file` 尽力按 Session 保存实际变更记录和有界 Diff；Git workspace 的 v2 record 另外保存完整 Git-compatible forward patch。FileChange 持久化失败不得撤销、重试或把已成功 mutation 报成失败。
-- 用户可在 Git workspace 中显式回退单项 v2 变更。主进程只对 working tree 执行 Git reverse patch，不触碰 index、不创建 commit/stash/ref，也不使用 `git restore`/`git checkout` 整文件覆盖。Git 不能精确应用时返回 `CONFLICT`，不做 fuzzy/3-way/custom snapshot fallback。
-- 非 Git workspace 仍可查看 Diff 历史，但 Revert 明确不可用。旧 v1 FileChange 迁移为 `legacy_unavailable` 只读历史，不保留 `beforeContent` 恢复路径。
-- 变更历史保存在主进程 `userData/agent.db` 的 `file_changes` 表。它不是 Message、Run journal、trace 或模型历史；完整 patch 只对 backend 可见，renderer 只获得有界 `FileChangeSummaryV2`。
-- `file_changes` 不限制记录条数，只受全应用可配置的完整 patch UTF-8 总字节预算约束（默认 100 MB）；200 仅是单页查询上限。单条 patch、Git 探测或记录失败时文件 mutation 仍可成功，但该次结果必须报告 warning 与 `revertAvailable: false`。Retention 只能删除最旧 FileChange，不能删除 Message 或改动 workspace。
+- 右侧“Diff”入口展示当前 Project 的实时 Git working-tree 状态，不展示 Session、Run、Agent 或工具调用历史，也不承诺变更归因。
+- 状态列表显示 tracked、staged、unstaged、untracked、rename/copy、delete、type change 和 conflict 等 Git porcelain 状态；未跟踪文件在加入 index 前只有 status，没有伪造 Diff。
+- 用户可以查看 working tree 相对当前 `HEAD`、unstaged 相对 index、staged 相对 `HEAD`，或当前 working tree 相对所选 ref 与 `HEAD` 的 merge-base 的 Diff。merge-base 必须先解析为 OID并在界面显示实际基准。
+- 查询必须由 Main process 以 argv-only Git 子进程执行，关闭 pager、颜色、external diff 和 textconv，并限制 timeout、status 条目、refs 与输出 bytes。二进制变化只展示 Git 的 binary marker，不生成 `GIT binary patch` payload。
+- Project 可以是 Git repository 的子目录；查询只能覆盖该 Project scope。Project path 重新关联后，下次查询使用新路径。非 Git Project 显示“需要 Git 仓库”，不生成 fallback Diff。
+- Git Review 是临时只读结果，不进入 SQLite、Message、Trace 恢复协议或 durable event；用户可手动刷新，内置工具完成后也触发刷新。Terminal、外部程序或用户直接改动文件后，界面在刷新前允许暂时过期。
+- 应用不提供文件恢复按钮、单项/整 Run undo、reverse patch 或自有 checkpoint。Session rewind/retry/edit/fork 只改对话；恢复工作树完全由用户通过 Git 原生命令或其他外部工具完成。
 
 ### 4.4 UI 组件库
 
@@ -581,12 +582,12 @@ session.end     { reason, ts }
 - Headless config v5 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs/maxSubagents`，并迁移 v1–v4 输入；Runtime Identity v6 记录字节/行数 Tool 输出预算、worker timeout、`maxSubagents` 和 `swarmsEnabled = false`，移除 token 单结果预算，并从 tool 名称/hash 排除 `swarm_run`。Headless 暴露异步 `subagent_run` 与全部 `background_*`；普通 child execution 仍使用相同 live workspace、隐藏 Session、Tool profile 和 usage 归属。
 - 每次 Headless 任务把 Session temp 放在调用者显式 artifacts 目录下；主流程结束时取消未等待的后台任务，已经生成的文件由调用者管理，不执行 Desktop 24 小时清理。
 - stdout 只允许版本化 JSONL；Operational Log 独立写入 artifact 目录且不得混入 stdout；host 诊断写 stderr；最终 `result.json` 原子写入 workspace 外的 artifacts 目录并返回运行日志目录。
-- Provider 凭据只能由受信任配置声明的环境变量名称解析，凭据值不得进入配置回包、JSONL、trace、patch 或子进程环境。
-- result 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计、trace 和 patch 路径。`completed` 只表示 Agent run 正常结束，不替代外部业务验收。
+- Provider 凭据只能由受信任配置声明的环境变量名称解析，凭据值不得进入配置回包、JSONL、trace、工具参数或子进程环境。
+- result schema v2 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计和 trace 路径；不返回 `patchPath/patchStatus`，也不生成 `workspace.patch`。`completed` 只表示 Agent run 正常结束，不替代外部业务验收。
 - Plan 自动批准必须在前一 run 完全 settle 后，通过有版本的 harness 消息追加到历史和 trace；不得伪装成用户消息。Goal blocked 或自动批准达到上限返回 `needs_human_input`。
-- timeout、SIGINT 和 SIGTERM 必须进入共享 interrupt/disposer；补丁采集不得修改 workspace 的真实 Git index。
+- timeout、SIGINT 和 SIGTERM 必须进入共享 interrupt/disposer；Headless 不为结果采集读取或修改 workspace 的 Git index。
 - 每个 Headless artifact 必须包含 runtime identity；source commit、task/config digest、provider/model、核心预算、prompt/tool hash 或 capability 不同的结果不得直接比较。
-- Electron/Headless parity 必须通过共享 trajectory 比较 Provider messages、稳定 prompt layer、工具定义与调用、compact/Plan/MCP 行为和 patch；只允许逐字段声明的 host 差异，禁止宽泛 snapshot 忽略。
+- Electron/Headless parity 必须通过共享 trajectory 比较 Provider messages、稳定 prompt layer、工具定义与调用以及 compact/Plan/MCP 行为；只允许逐字段声明的 host 差异，禁止宽泛 snapshot 忽略。
 
 ---
 
@@ -642,7 +643,7 @@ session.end     { reason, ts }
 - Chat UI（Naive UI，流式 + Markdown + 工具可视化）
 - 本地项目/对话导航、对话历史和消息搜索
 - 终端面板（人类可交互）
-- Diff 预览
+- Project 级实时 Git Review
 - JSONL 完整调试 trace（默认关闭）+ 离线回放引擎 + cache usage/时延统计
 - IPC 白名单 API、sender/payload 校验、CSP 与安全导航策略
 - 上下文/输出预算与取消、超时、进程树清理

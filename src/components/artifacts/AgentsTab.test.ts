@@ -223,7 +223,7 @@ describe('Agents artifact tab', () => {
     store.ensureLive(execution.id).approval = {
       callId: 'call:child-create' as CallId,
       kind: 'tool',
-      tool: 'create_file',
+      tool: 'write_file',
       arguments: { path: 'delegated.txt' },
       reason: 'Create the delegated file',
       policySignals: [],
@@ -238,7 +238,7 @@ describe('Agents artifact tab', () => {
       global: { plugins: [i18n] },
     })
 
-    expect(wrapper.text()).toContain('需要审批 · create_file')
+    expect(wrapper.text()).toContain('需要审批 · write_file')
     expect(wrapper.text()).toContain('delegated.txt')
     await wrapper.get('button').trigger('click')
     await flushPromises()
@@ -250,7 +250,7 @@ describe('Agents artifact tab', () => {
         decision: 'allow',
       }),
     )
-    expect(wrapper.text()).not.toContain('需要审批 · create_file')
+    expect(wrapper.text()).not.toContain('需要审批 · write_file')
     wrapper.unmount()
   })
 

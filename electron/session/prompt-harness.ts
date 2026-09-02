@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { readdir, readFile } from 'node:fs/promises'
+import {
+  readDirectory as readdir,
+  readFileContents as readFile,
+} from '../common/filesystem'
 import path from 'node:path'
 import os from 'node:os'
 import type { PublicConfig } from '../../shared/config'

@@ -143,8 +143,8 @@ describe('0006_reasoning_levels migration', () => {
           .all(),
       )
       expect(migrationRows.at(-1)).toEqual({
-        version: 10,
-        name: '0010_active_subagent_capacity',
+        version: 11,
+        name: '0011_remove_file_changes',
       })
 
       const storedParent = upgraded.read((reader) =>

@@ -14,7 +14,7 @@ import {
 
 const input: AutoApproverInput = {
   tool: {
-    id: 'create_file',
+    id: 'write_file',
     description: 'Create a workspace file with the supplied content.',
     inputSchema: {
       type: 'object',

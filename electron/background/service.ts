@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { access } from 'node:fs/promises'
+import { accessPath as access } from '../common/filesystem'
 import path from 'node:path'
 import type { AgentExecutionStatus } from '../../shared/agent-execution'
 import { delay } from '../../shared/async/delay'

@@ -17,13 +17,10 @@ import {
 import { createTestDatabase } from './test-database'
 import { ProjectRepository } from './project-repository'
 import {
-  fileChangeFixture,
   insertLegacySession,
   projectFixture,
   sessionFixture,
 } from './repository-fixtures'
-import { encodeStoredFileChangeRow } from './file-change-codec'
-import { FileChangeRepository } from './file-change-repository'
 import { MessageRepository } from './message-repository'
 
 describe('DatabaseService', () => {
@@ -196,7 +193,7 @@ describe('DatabaseService', () => {
       const count = reopened.read((reader) =>
         reader.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
       )
-      expect(count).toEqual({ count: 10 })
+      expect(count).toEqual({ count: 11 })
     } finally {
       await reopened.close()
       await testDatabase.dispose()
@@ -230,8 +227,8 @@ describe('DatabaseService', () => {
           .all(),
       }))
       expect(state.migrations.at(-1)).toEqual({
-        version: 10,
-        name: '0010_active_subagent_capacity',
+        version: 11,
+        name: '0011_remove_file_changes',
       })
       expect(state.tables).toEqual([
         { name: 'subagent_executions' },
@@ -243,54 +240,11 @@ describe('DatabaseService', () => {
     }
   })
 
-  it('backfills the FileChange workspace when migrating a v1 database', async () => {
+  it('removes legacy FileChange storage when upgrading', async () => {
     const legacy = await createTestDatabase({
-      migrations: [DATABASE_MIGRATIONS[0]!],
+      migrations: DATABASE_MIGRATIONS.slice(0, 10),
     })
     const databasePath = legacy.databasePath
-    const project = projectFixture({ path: 'C:/legacy-workspace' })
-    const session = sessionFixture({ lastSeq: 0 })
-    const record = fileChangeFixture({
-      workspacePath: project.path,
-      sessionId: session.id,
-    })
-    const row = encodeStoredFileChangeRow(record)
-    await legacy.database.withTransaction((transaction) => {
-      new ProjectRepository().insert(transaction, project)
-      insertLegacySession(transaction, session)
-      transaction
-        .prepare(
-          `INSERT INTO file_changes (
-             schema_version, id, session_id, assistant_message_id, call_id,
-             path, operation, diff, diff_hash, diff_truncated, before_exists,
-             before_hash, before_content, before_mode, after_exists, after_hash,
-             payload_bytes, revision, created_at, updated_at, reverted_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          row.schema_version,
-          row.id,
-          row.session_id,
-          row.assistant_message_id,
-          row.call_id,
-          row.path,
-          row.operation,
-          row.diff,
-          row.diff_hash,
-          row.diff_truncated,
-          row.before_exists,
-          row.before_hash,
-          row.before_content,
-          row.before_mode,
-          row.after_exists,
-          row.after_hash,
-          row.payload_bytes,
-          row.revision,
-          row.created_at,
-          row.updated_at,
-          row.reverted_at,
-        )
-    })
     await legacy.database.close()
 
     const migrated = DatabaseService.open({
@@ -300,20 +254,14 @@ describe('DatabaseService', () => {
     try {
       expect(
         migrated.read((reader) =>
-          new FileChangeRepository().getStored(reader, session.id, record.id),
-        ),
-      ).toMatchObject({ workspacePath: project.path })
-      expect(
-        migrated.read((reader) =>
           reader
             .prepare(
-              `SELECT total_payload_bytes
-               FROM file_change_retention_state
-               WHERE singleton = 1`,
+              `SELECT name FROM sqlite_master
+               WHERE name IN ('file_changes', 'file_change_retention_state')`,
             )
-            .get(),
+            .all(),
         ),
-      ).toEqual({ total_payload_bytes: record.payloadBytes })
+      ).toEqual([])
     } finally {
       await migrated.close()
       await legacy.dispose()
@@ -515,8 +463,8 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 11,
-        name: '0011_future',
+        version: 12,
+        name: '0012_future',
         sql: 'CREATE TABLE future_state (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -536,13 +484,13 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 11,
-        name: '0011_second',
+        version: 12,
+        name: '0012_second',
         sql: 'CREATE TABLE second_step (id TEXT PRIMARY KEY) STRICT;',
       },
       {
-        version: 12,
-        name: '0012_third',
+        version: 13,
+        name: '0013_third',
         sql: 'CREATE TABLE third_step (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -551,7 +499,7 @@ describe('DatabaseService', () => {
     await testDatabase.database.withTransaction((transaction) => {
       transaction
         .prepare('DELETE FROM schema_migrations WHERE version = ?')
-        .run(11)
+        .run(12)
     })
     await testDatabase.database.close()
 
@@ -572,8 +520,8 @@ describe('DatabaseService', () => {
     const brokenMigrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 11,
-        name: '0011_broken',
+        version: 12,
+        name: '0012_broken',
         sql: `
           CREATE TABLE should_rollback (id TEXT PRIMARY KEY) STRICT;
           INSERT INTO table_that_does_not_exist VALUES (1);
@@ -601,7 +549,7 @@ describe('DatabaseService', () => {
       ).toBeUndefined()
       expect(
         raw.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
-      ).toEqual({ count: 10 })
+      ).toEqual({ count: 11 })
     } finally {
       raw.close()
       await first.dispose()
@@ -613,8 +561,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 11,
-          name: '0011_transaction_probe',
+          version: 12,
+          name: '0012_transaction_probe',
           sql: `
             CREATE TABLE transaction_probe (
               id INTEGER PRIMARY KEY
@@ -707,8 +655,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 11,
-          name: '0011_transaction_control_probe',
+          version: 12,
+          name: '0012_transaction_control_probe',
           sql: 'CREATE TABLE transaction_control_probe (id INTEGER PRIMARY KEY) STRICT;',
         },
       ],

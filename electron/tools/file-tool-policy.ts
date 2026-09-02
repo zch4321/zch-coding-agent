@@ -14,7 +14,7 @@ export function argsObject(call: ToolCall): Record<string, JsonValue> {
 
 /** Maps a file tool ID to its read, write, delete, or rename operation. */
 export function operationFor(toolId: string): FileOperation | undefined {
-  if (toolId === 'create_file') {
+  if (toolId === 'write_file') {
     return 'write'
   }
 
@@ -106,11 +106,10 @@ export function processPolicySignals(call: ToolCall): PolicySignal[] {
 export function filePolicySignals(
   operation: FileOperation,
   targetPath: string,
-  before: string,
-  after: string,
+  sizes: { beforeBytes: number; afterBytes: number },
 ): PolicySignal[] {
   const signals: PolicySignal[] = []
-  const changedBytes = Buffer.byteLength(before) + Buffer.byteLength(after)
+  const changedBytes = sizes.beforeBytes + sizes.afterBytes
 
   signals.push({
     code: `filesystem_${operation}`,
@@ -120,9 +119,9 @@ export function filePolicySignals(
 
   if (changedBytes > 200_000) {
     signals.push({
-      code: 'large_file_diff',
+      code: 'large_file_mutation',
       severity: 'danger',
-      detail: `The planned file diff covers ${changedBytes} bytes`,
+      detail: `The file operation covers approximately ${changedBytes} bytes`,
     })
   }
 

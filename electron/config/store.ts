@@ -1,4 +1,9 @@
-import { copyFile, mkdir, readFile, rm } from 'node:fs/promises'
+import {
+  copyFileContents as copyFile,
+  makeDirectory as mkdir,
+  readFileContents as readFile,
+  removePath as rm,
+} from '../common/filesystem'
 import path from 'node:path'
 import {
   ModelPoolConfigSchema,

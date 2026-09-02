@@ -1,18 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  rename,
-  rm,
-  stat,
-  unlink,
-  utimes,
-  writeFile,
+  changeFileMode as chmod,
+  fileStatus as stat,
+  linkStatus as lstat,
+  makeDirectory as mkdir,
+  openFileHandle as open,
+  readDirectory as readdir,
+  removePath as rm,
+  renamePath as rename,
+  unlinkFile as unlink,
+  updateFileTimes as utimes,
+  writeFileContents as writeFile,
   type FileHandle,
-} from 'node:fs/promises'
+} from '../common/filesystem'
 import os from 'node:os'
 import path from 'node:path'
 import type { SessionId } from '../../shared/ids'

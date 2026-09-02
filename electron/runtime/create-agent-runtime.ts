@@ -16,7 +16,6 @@ import type {
   SessionExecutionStatePort,
   SessionHistorySourcePort,
 } from '../session/session-types'
-import type { FileChangeExecutionPort } from '../session/file-change-execution'
 import type { SubagentExecutionPort } from '../subagent/contracts'
 import type { SwarmExecutionPort } from '../swarm/contracts'
 import type { OperationalLogService } from '../operational-logging/service'
@@ -42,7 +41,6 @@ export interface CreateAgentRuntimeOptions {
   eventListeners?: RuntimeEventListener[]
   executionState?: SessionExecutionStatePort
   historySource?: SessionHistorySourcePort
-  fileChangeExecution: FileChangeExecutionPort
   subagentExecution?: SubagentExecutionPort
   swarmExecution?: SwarmExecutionPort
   backgroundTasks?: BackgroundTaskPort
@@ -103,7 +101,6 @@ export async function createAgentRuntime(
       eventSink: events,
       pluginBus,
       skillsManager: skills,
-      fileChangeExecution: options.fileChangeExecution,
       mcpManager: mcp,
       subagentExecution: options.subagentExecution,
       swarmExecution: options.swarmExecution,

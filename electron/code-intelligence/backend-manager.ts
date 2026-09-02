@@ -1,4 +1,4 @@
-import { stat } from 'node:fs/promises'
+import { fileStatus as stat } from '../common/filesystem'
 import type {
   CodeBackendStatus,
   CodeIntelligenceCapability,

@@ -96,7 +96,7 @@ describe('SessionManager approvals', () => {
         expect.objectContaining({ code: 'filesystem_patch' }),
       ]),
     )
-    expect(toolCall?.diffHash).toEqual(expect.any(String))
+    expect(toolCall).not.toHaveProperty('diffHash')
   })
 
   it('uses JSON mode without changing explicit approval reasoning', async () => {

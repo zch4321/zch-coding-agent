@@ -252,7 +252,7 @@ class WritableSubagentProvider extends ScriptedProviderHarness {
         calls: [
           {
             id: 'call:child-create-file',
-            toolId: 'create_file',
+            toolId: 'write_file',
             args: {
               path: 'inherited-write.txt',
               content: 'written by inherited child\n',
@@ -755,7 +755,7 @@ describe('write-capable Subagent runtime', () => {
       )!
       expect(approval.approval).toMatchObject({
         callId: 'call:child-create-file',
-        tool: 'create_file',
+        tool: 'write_file',
         arguments: { path: 'inherited-write.txt' },
       })
       expect(
@@ -785,7 +785,7 @@ describe('write-capable Subagent runtime', () => {
       const childTools = provider.childRequests[0]!.toolDefinitions.map(
         (definition) => definition.name,
       )
-      expect(childTools).toContain('create_file')
+      expect(childTools).toContain('write_file')
       expect(childTools).not.toContain('subagent_run')
       expect(childTools).not.toContain('swarm_run')
       expect(childTools).not.toContain('background_wait')

@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile } from 'node:fs/promises'
+import {
+  makeDirectory as mkdir,
+  readFileContents as readFile,
+} from '../common/filesystem'
 import path from 'node:path'
 import {
   PROVIDER_NOTICE_VERSION,

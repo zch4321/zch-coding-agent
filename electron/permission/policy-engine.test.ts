@@ -110,7 +110,7 @@ function runCommandPolicy(args: JsonValue, danger = false) {
 }
 
 function fileMutationPolicy(input: {
-  toolId: 'create_file' | 'apply_patch' | 'delete_file'
+  toolId: 'write_file' | 'apply_patch' | 'delete_file'
   mode?: PermissionMode
   danger?: boolean
   builtinPolicies?: boolean
@@ -276,7 +276,7 @@ describe('P3 policy engine', () => {
   })
 
   it('auto-allows bounded workspace write and patch file mutations by policy', () => {
-    expect(fileMutationPolicy({ toolId: 'create_file' })).toMatchObject({
+    expect(fileMutationPolicy({ toolId: 'write_file' })).toMatchObject({
       kind: 'allow',
       approvedBy: 'policy',
     })
@@ -285,7 +285,7 @@ describe('P3 policy engine', () => {
       approvedBy: 'policy',
     })
     expect(
-      fileMutationPolicy({ toolId: 'create_file', mode: 'confirm' }).kind,
+      fileMutationPolicy({ toolId: 'write_file', mode: 'confirm' }).kind,
     ).toBe('review')
     expect(
       fileMutationPolicy({ toolId: 'apply_patch', danger: true }).kind,
@@ -293,18 +293,18 @@ describe('P3 policy engine', () => {
     expect(fileMutationPolicy({ toolId: 'delete_file' }).kind).toBe('review')
     expect(
       fileMutationPolicy({
-        toolId: 'create_file',
+        toolId: 'write_file',
         builtinPolicies: false,
       }).kind,
     ).toBe('model')
     expect(
       fileMutationPolicy({
-        toolId: 'create_file',
+        toolId: 'write_file',
         rules: [
           {
             id: 'rule:file-review',
             effect: 'review',
-            toolId: 'create_file',
+            toolId: 'write_file',
             workspaceScope: 'F:/workspace',
             argConstraints: {},
             expiresAt: '2099-01-01T00:00:00.000Z',

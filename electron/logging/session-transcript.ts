@@ -161,7 +161,6 @@ function toolEntry(aggregate: ToolAggregate): SessionTranscriptEntry {
         result: aggregate.call?.result ?? null,
         approvedBy: aggregate.call?.approvedBy ?? 'none',
         policySignals: aggregate.call?.policySignals ?? [],
-        diffHash: aggregate.call?.diffHash ?? null,
         stage: aggregate.attempt?.stage ?? null,
         outcome: aggregate.attempt?.outcome ?? null,
         effects: aggregate.attempt?.effects ?? [],

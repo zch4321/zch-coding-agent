@@ -88,7 +88,7 @@ test.describe('Electron chat and tool workflows', () => {
       stream: true,
     })
     expect(providerToolNames(request.body)).toEqual(
-      expect.arrayContaining(['read_file', 'create_file']),
+      expect.arrayContaining(['read_file', 'write_file']),
     )
     const requestMessages = providerMessageText(request.body)
     expect(requestMessages).toContain('<context_file path="notes.md"')
@@ -104,12 +104,12 @@ test.describe('Electron chat and tool workflows', () => {
       .toBe('E2E provider saw the workspace context.')
   })
 
-  test('approves a create_file tool call and continues the provider turn', async () => {
+  test('approves a write_file tool call and continues the provider turn', async () => {
     fakeProvider.queue([
       textDelta('Preparing e2e-output.txt'),
       toolCallDelta({
         id: 'call:e2e-write',
-        name: 'create_file',
+        name: 'write_file',
         args: {
           path: 'e2e-output.txt',
           content: 'approved by e2e\n',
@@ -137,7 +137,7 @@ test.describe('Electron chat and tool workflows', () => {
     await expect.poll(() => fakeProvider.requests.length).toBe(1)
     const approval = page.locator('.approval-card')
     await expect(approval).toBeVisible()
-    await expect(approval).toContainText('create_file')
+    await expect(approval).toContainText('write_file')
     await expect(approval).toContainText('e2e-output.txt')
     await approval.getByRole('button', { name: '批准', exact: true }).click()
 
@@ -151,14 +151,14 @@ test.describe('Electron chat and tool workflows', () => {
     await expect.poll(() => fakeProvider.requests.length).toBe(2)
     const liveToolGroup = await expandLatestToolGroup(page)
     const toolCard = liveToolGroup.locator('.tool-call-card', {
-      hasText: 'create_file',
+      hasText: 'write_file',
     })
     await expect(toolCard).toContainText('已完成')
     await toolCard.locator('.tool-call-row').click()
     const liveResultText = await toolCard
       .locator('.tool-result-json')
       .innerText()
-    expect(liveResultText).toBe('Created file e2e-output.txt')
+    expect(liveResultText).toBe('Wrote file e2e-output.txt')
     const progressMessage = page.locator('.chat-message.assistant', {
       hasText: 'Preparing e2e-output.txt',
     })
@@ -185,12 +185,12 @@ test.describe('Electron chat and tool workflows', () => {
 
     const firstRequest = fakeProvider.requests[0]
     const secondRequest = fakeProvider.requests[1]
-    expect(providerToolNames(firstRequest.body)).toContain('create_file')
+    expect(providerToolNames(firstRequest.body)).toContain('write_file')
     const secondRequestBody = JSON.stringify(secondRequest.body)
     expect(secondRequestBody).toContain('"role":"tool"')
     expect(secondRequestBody).toContain('"tool_call_id":"call:e2e-write"')
     expect(providerMessageText(secondRequest.body)).toContain(
-      'Created file e2e-output.txt',
+      'Wrote file e2e-output.txt',
     )
 
     await page.reload()
@@ -207,7 +207,7 @@ test.describe('Electron chat and tool workflows', () => {
     ).toHaveCount(0)
     const durableToolGroup = await expandLatestToolGroup(page)
     const durableToolCard = durableToolGroup.locator('.tool-call-card', {
-      hasText: 'create_file',
+      hasText: 'write_file',
     })
     await durableToolCard.locator('.tool-call-row').click()
     const durableResultText = await durableToolCard
@@ -455,7 +455,7 @@ test.describe('Electron chat and tool workflows', () => {
       toolCallsDelta([
         {
           id: 'call:e2e-serial-first',
-          name: 'create_file',
+          name: 'write_file',
           args: {
             path: 'serial-first.txt',
             content: 'first approval\n',
@@ -464,7 +464,7 @@ test.describe('Electron chat and tool workflows', () => {
         },
         {
           id: 'call:e2e-serial-second',
-          name: 'create_file',
+          name: 'write_file',
           args: {
             path: 'serial-second.txt',
             content: longContent,

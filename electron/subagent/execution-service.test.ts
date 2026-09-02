@@ -131,7 +131,7 @@ function fixture(
               permissionMode: 'confirm' as const,
               allowedToolIds: new Set([
                 'read_file',
-                'create_file',
+                'write_file',
                 'run_command',
               ]),
               gitToolsEnabled: true,
@@ -253,7 +253,7 @@ describe('SubagentExecutionService', () => {
     const childInput = target.manager.createInternalSession.mock.calls[0]?.[0]
     expect(childInput?.allowedToolIds.size).toBe(2)
     expect(childInput?.allowedToolIds.has('git_status')).toBe(true)
-    expect(childInput?.allowedToolIds.has('create_file')).toBe(false)
+    expect(childInput?.allowedToolIds.has('write_file')).toBe(false)
     expect(result).toEqual({
       results: { worker: 'child response' },
       meta: {
@@ -617,7 +617,7 @@ describe('SubagentExecutionService', () => {
     expect(target.manager.createInternalSession).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: 'confirm',
-        allowedToolIds: new Set(['read_file', 'create_file', 'run_command']),
+        allowedToolIds: new Set(['read_file', 'write_file', 'run_command']),
       }),
     )
   })

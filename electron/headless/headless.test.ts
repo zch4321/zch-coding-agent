@@ -59,7 +59,7 @@ class EditProvider extends ScriptedProviderHarness {
     const args = { path: 'headless-created.txt', content: 'from headless\n' }
     const toolCall = {
       id: 'call-create' as CallId,
-      toolId: 'create_file',
+      toolId: 'write_file',
       args,
       reason: 'Create the requested file',
     }
@@ -378,7 +378,7 @@ describe('Headless host', () => {
       provider: { id: 'fake' },
     })
     expect(prepared.configStore.getInternalConfig()).toMatchObject({
-      schemaVersion: 25,
+      schemaVersion: 26,
       models: {
         defaultModelProvider: 'fake',
         modelPool: { entries: [] },
@@ -491,7 +491,7 @@ describe('Headless host', () => {
     ).resolves.toContain('"status": "completed"')
   }, 20_000)
 
-  it('runs editing tools in fixed Yolo and writes JSONL, result, trace, and patch', async () => {
+  it('runs editing tools in fixed Yolo and writes JSONL, result, and trace', async () => {
     const { workspace, artifacts } = await fixture(true)
     const output = new StringSink()
     const provider = new EditProvider()
@@ -524,7 +524,6 @@ describe('Headless host', () => {
       completionTokens: 10,
       totalTokens: 34,
     })
-    expect(result.artifacts.patchStatus).toBe('written')
     await expect(
       readFile(path.join(workspace, 'headless-created.txt'), 'utf8'),
     ).resolves.toBe('from headless\n')
@@ -565,9 +564,6 @@ describe('Headless host', () => {
     await expect(
       readFile(result.artifacts.tracePath, 'utf8'),
     ).resolves.toContain('"type":"tool.call"')
-    await expect(
-      readFile(result.artifacts.patchPath!, 'utf8'),
-    ).resolves.toContain('headless-created.txt')
     expect(events[0]).toMatchObject({
       type: 'runtime.started',
       permissionMode: 'yolo',

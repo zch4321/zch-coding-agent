@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises'
+import { readDirectory as readdir } from '../common/filesystem'
 import path from 'node:path'
 import { normalizePortablePath } from './portable-path'
 import { PathGuard } from '../safety/path-guard'

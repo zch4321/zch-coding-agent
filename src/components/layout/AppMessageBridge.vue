@@ -2,7 +2,6 @@
 import { onBeforeUnmount, onMounted, watch, type WatchStopHandle } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { useAgentChangesStore } from '../../stores/agent-changes'
 import { useApplicationSettingsStore } from '../../stores/application-settings'
 import { useAssistantSettingsStore } from '../../stores/assistant-settings'
 import { useIntegrationSettingsStore } from '../../stores/integration-settings'
@@ -31,7 +30,6 @@ const notifications = useNotificationStore()
 const shell = useAgentShellStore()
 const modelRoles = useModelRolesStore()
 const replica = useAgentReplicaStore()
-const changes = useAgentChangesStore()
 const mcp = useMcpStore()
 const modelPool = useModelPoolSettingsStore()
 const skills = useSkillsStore()
@@ -154,13 +152,6 @@ forwardStoreError(
   () => replica.error,
   () => {
     replica.error = ''
-  },
-)
-forwardStoreError(
-  'FILE_CHANGE_OPERATION_FAILED',
-  () => changes.error,
-  () => {
-    changes.error = ''
   },
 )
 forwardStoreError(

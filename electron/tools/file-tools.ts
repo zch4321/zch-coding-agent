@@ -1,13 +1,21 @@
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { Type } from '@sinclair/typebox'
 import type { PublicConfig } from '../../shared/config'
-import type { ToolCall, ToolDefinition, ToolResult } from './types'
-import { projectFileMutationResult } from './tool-result-formatters'
-import { atomicDelete, atomicReplace } from './file-tool-atomic'
-import { createFileDiff } from './file-tool-diff'
 import {
-  MAX_DIFF_CHARS,
+  ensureDirectory,
+  readUtf8File,
+  removeFileIfPresent,
+  writeUtf8Atomic,
+} from '../common/filesystem'
+import { PathGuard, PathGuardError } from '../safety/path-guard'
+import { resolveSessionTempToolPath } from '../session-temp/path-alias'
+import type { SessionTempPaths } from '../session-temp/service'
+import {
+  isSessionScratchTarget,
+  resolveFileMutationTarget,
+  type FileMutationTarget,
+} from './file-tool-target'
+import {
   MAX_MUTATION_FILE_BYTES,
   MAX_PATCH_BYTES,
   MAX_WRITE_BYTES,
@@ -19,38 +27,23 @@ import {
   operationFor,
   processPolicySignals,
 } from './file-tool-policy'
-import { captureFilePrecondition, hash } from './file-tool-preconditions'
-export { createFileDiff } from './file-tool-diff'
-export { revalidateResourcePreconditions } from './file-tool-preconditions'
-import type {
-  FileOperation,
-  FilePrecondition,
-  ToolResourcePlan,
-} from './file-tool-types'
-export type {
-  FileOperation,
-  FilePrecondition,
-  ToolResourcePlan,
-} from './file-tool-types'
-import { PathGuard, PathGuardError } from '../safety/path-guard'
-import type { ApprovedToolCall } from './approved-tool-call'
+import type { FileOperation, ToolResourcePlan } from './file-tool-types'
+import { projectFileMutationResult } from './tool-result-formatters'
+import type { ToolCall, ToolDefinition, ToolResult } from './types'
 import type { ToolRegistry } from './tool-registry'
-import type { SessionTempPaths } from '../session-temp/service'
-import { resolveSessionTempToolPath } from '../session-temp/path-alias'
 import { applyTextPatch, TextPatchError } from './text-patch'
 
-const CreateFileArgsSchema = Type.Object(
+const WriteFileArgsSchema = Type.Object(
   {
     path: Type.String({
       minLength: 1,
       maxLength: 4_096,
       description:
-        'Workspace-relative path or absolute path inside Session scratch for the new file. Missing parent directories are created automatically. The file must not already exist.',
+        'Workspace-relative path or absolute path inside Session scratch. Missing parent directories are created and an existing regular file is replaced.',
     }),
     content: Type.String({
       maxLength: MAX_WRITE_BYTES,
-      description:
-        'Complete UTF-8 content for the new file. Use apply_patch for existing files.',
+      description: 'Complete UTF-8 content to write to the file.',
     }),
   },
   { additionalProperties: false },
@@ -68,7 +61,7 @@ const ApplyPatchArgsSchema = Type.Object(
       minLength: 1,
       maxLength: MAX_PATCH_BYTES,
       description:
-        'Single-file unified diff. Context/deleted lines must match exactly; header line counts are advisory.',
+        'Single-file unified diff. Every context/deleted sequence must have one exact match in the latest file content.',
     }),
   },
   { additionalProperties: false },
@@ -80,7 +73,7 @@ const DeleteFileArgsSchema = Type.Object(
       minLength: 1,
       maxLength: 4_096,
       description:
-        'Workspace-relative path or absolute Session-scratch path of one existing regular file to delete.',
+        'Workspace-relative path or absolute Session-scratch path of one regular file to delete. A missing target is a successful no-op.',
     }),
   },
   { additionalProperties: false },
@@ -88,14 +81,13 @@ const DeleteFileArgsSchema = Type.Object(
 
 type FileToolLimits = Pick<
   PublicConfig['limits'],
-  'editableFileBytes' | 'writeFileBytes' | 'patchBytes' | 'diffChars'
+  'editableFileBytes' | 'writeFileBytes' | 'patchBytes'
 >
 
 const DEFAULT_FILE_TOOL_LIMITS: FileToolLimits = {
   editableFileBytes: MAX_MUTATION_FILE_BYTES,
   writeFileBytes: MAX_WRITE_BYTES,
   patchBytes: MAX_PATCH_BYTES,
-  diffChars: MAX_DIFF_CHARS,
 }
 
 function fileLimits(limits?: Partial<FileToolLimits>): FileToolLimits {
@@ -112,11 +104,10 @@ function fileLimits(limits?: Partial<FileToolLimits>): FileToolLimits {
       limits?.patchBytes ?? MAX_PATCH_BYTES,
       MAX_PATCH_BYTES,
     ),
-    diffChars: Math.min(limits?.diffChars ?? MAX_DIFF_CHARS, MAX_DIFF_CHARS),
   }
 }
 
-/** Builds file resource preconditions and policy signals for one tool call. */
+/** Builds current path validation and policy metadata for one tool call. */
 export async function prepareToolResourcePlan(input: {
   workspace: string
   sessionTemp?: SessionTempPaths
@@ -124,24 +115,20 @@ export async function prepareToolResourcePlan(input: {
   definition: ToolDefinition
   limits?: Partial<FileToolLimits>
 }): Promise<ToolResourcePlan> {
-  const guard = PathGuard.fromCanonical(
-    input.workspace,
-    input.sessionTemp?.root,
-  )
   const operation = operationFor(input.call.toolId)
-  const limits = fileLimits(input.limits)
-
   if (!operation) {
     if (input.definition.effects.includes('filesystem.read')) {
       const args = argsObject(input.call)
       const candidate = typeof args.path === 'string' ? args.path : '.'
+      const guard = PathGuard.fromCanonical(
+        input.workspace,
+        input.sessionTemp?.root,
+      )
       await guard.resolveExisting(
         resolveSessionTempToolPath(candidate, input.sessionTemp),
       )
     }
-
     return {
-      preconditions: [],
       policySignals: [
         ...processPolicySignals(input.call),
         ...gitPolicySignals(input.call),
@@ -150,120 +137,51 @@ export async function prepareToolResourcePlan(input: {
   }
 
   const args = argsObject(input.call)
-  const targetPath = String(args.path)
-  const precondition = await captureFilePrecondition(
-    guard,
-    targetPath,
+  const target = await currentTarget(
+    input.workspace,
+    input.sessionTemp,
+    String(args.path),
     operation,
-    limits.editableFileBytes,
   )
-  const scratchRoot = input.sessionTemp
-    ? (await guard.resolveExisting(input.sessionTemp.scratch)).realPath
-    : undefined
-  const scratchMutation =
-    precondition.rootKind === 'session-temp' &&
-    scratchRoot !== undefined &&
-    (() => {
-      const relative = path.relative(
-        scratchRoot,
-        path.resolve(precondition.absolutePath),
-      )
-      return (
-        relative === '' ||
-        (!relative.startsWith(`..${path.sep}`) &&
-          relative !== '..' &&
-          !path.isAbsolute(relative))
-      )
-    })()
-
-  if (precondition.rootKind === 'session-temp' && !scratchMutation) {
+  const scratchMutation = await isSessionScratchTarget(
+    target,
+    input.workspace,
+    input.sessionTemp,
+  )
+  if (target.rootKind === 'session-temp' && !scratchMutation) {
     throw new PathGuardError(
       'PATH_OUTSIDE_WORKSPACE',
       'Built-in file mutations may only write to the Session scratch directory; artifacts are application-owned',
     )
   }
-  const before = precondition.expectedExists
-    ? await readFile(precondition.expectedRealPath!, 'utf8')
-    : ''
-  let after: string
 
+  const limits = fileLimits(input.limits)
+  let afterBytes = 0
   if (operation === 'write') {
-    if (precondition.expectedExists) {
+    afterBytes = Buffer.byteLength(String(args.content), 'utf8')
+  } else if (operation === 'patch') {
+    const before = await readPatchTarget(target, limits.editableFileBytes)
+    const applied = applyTextPatch(before, String(args.patch), target.path)
+    afterBytes = Buffer.byteLength(applied.content, 'utf8')
+    if (afterBytes > limits.editableFileBytes) {
       throw new PathGuardError(
-        'PATH_ALREADY_EXISTS',
-        'create_file only creates new files; use apply_patch for an existing file',
+        'FILE_TOO_LARGE',
+        `The resulting file exceeds ${limits.editableFileBytes} bytes`,
       )
     }
-
-    after = String(args.content)
-  } else if (operation === 'patch') {
-    if (!precondition.expectedExists) {
-      throw new PathGuardError('PATH_NOT_FOUND', 'Patch target does not exist')
-    }
-
-    after = applyTextPatch(
-      before,
-      String(args.patch),
-      precondition.path,
-    ).content
-  } else {
-    if (!precondition.expectedExists) {
-      throw new PathGuardError('PATH_NOT_FOUND', 'Delete target does not exist')
-    }
-
-    after = ''
   }
-
-  if (Buffer.byteLength(after, 'utf8') > limits.editableFileBytes) {
-    throw new PathGuardError(
-      'FILE_TOO_LARGE',
-      `The resulting file exceeds ${limits.editableFileBytes} bytes`,
-    )
-  }
-
-  const diff = createFileDiff(precondition.path, before, after)
-
-  if (diff.length > limits.diffChars) {
-    throw new PathGuardError(
-      'FILE_TOO_LARGE',
-      `The preview diff exceeds ${limits.diffChars} characters`,
-    )
-  }
-
-  const plannedPrecondition = Object.freeze({
-    ...precondition,
-    ...(operation === 'patch' ? { patchHash: hash(String(args.patch)) } : {}),
-    expectedResultHash: hash(after),
-    expectedResultContent: after,
-  })
 
   return {
-    preconditions: [plannedPrecondition],
     scratchMutation,
-    policySignals: filePolicySignals(
-      operation,
-      precondition.path,
-      before,
-      after,
-    ),
-    diff,
-    diffHash: hash(diff),
+    policySignals: filePolicySignals(operation, target.path, {
+      beforeBytes: target.size,
+      afterBytes,
+    }),
   }
 }
 
-function mutationPrecondition(
-  approved: ApprovedToolCall,
-  operation: FileOperation,
-): FilePrecondition {
-  const precondition = approved.resourcePreconditions.find(
-    (candidate) => candidate.operation === operation,
-  )
-
-  if (!precondition) {
-    throw new Error('Approved file precondition is missing')
-  }
-
-  return precondition
+function contentHash(content: string): string {
+  return createHash('sha256').update(content).digest('hex')
 }
 
 function errorResult(error: unknown): ToolResult {
@@ -280,45 +198,98 @@ function errorResult(error: unknown): ToolResult {
   }
 }
 
-/** Creates schemas and handlers for the create, edit, delete, and rename file tools. */
+async function currentTarget(
+  workspace: string,
+  sessionTemp: SessionTempPaths | undefined,
+  targetPath: string,
+  operation: FileOperation,
+): Promise<FileMutationTarget> {
+  return resolveFileMutationTarget({
+    workspace,
+    sessionTemp,
+    path: targetPath,
+    operation,
+  })
+}
+
+async function readPatchTarget(
+  target: FileMutationTarget,
+  maximumBytes: number,
+): Promise<string> {
+  if (!target.exists || !target.realPath) {
+    throw new PathGuardError('PATH_NOT_FOUND', 'Patch target does not exist')
+  }
+  if (target.size > maximumBytes) {
+    throw new PathGuardError(
+      'FILE_TOO_LARGE',
+      `File mutations support files up to ${maximumBytes} bytes`,
+    )
+  }
+  try {
+    return await readUtf8File(target.realPath, maximumBytes)
+  } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'EFBIG'
+    ) {
+      throw new PathGuardError(
+        'FILE_TOO_LARGE',
+        error instanceof Error ? error.message : 'File is too large',
+      )
+    }
+    throw error
+  }
+}
+
+/** Creates schemas and handlers for write, patch, and idempotent delete tools. */
 export function createFileToolDefinitions(
   getLimits: () => Partial<FileToolLimits> = () => DEFAULT_FILE_TOOL_LIMITS,
 ): ToolDefinition[] {
-  const createFile: ToolDefinition<typeof CreateFileArgsSchema> = {
-    id: 'create_file',
+  const writeFile: ToolDefinition<typeof WriteFileArgsSchema> = {
+    id: 'write_file',
     executionMode: 'serial',
     description:
-      'Create a new UTF-8 file inside the workspace or Session scratch, creating missing parent directories automatically. Use apply_patch when the file already exists.',
-    inputSchema: CreateFileArgsSchema,
+      'Write complete UTF-8 content to a workspace or Session-scratch file. Creates missing parents and replaces an existing regular file while preserving its permission mode.',
+    inputSchema: WriteFileArgsSchema,
     effects: ['filesystem.write'],
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
     projectResultForModel: (result) =>
-      projectFileMutationResult(result, 'created'),
+      projectFileMutationResult(result, 'written'),
     validateArgs(args) {
       const limit = fileLimits(getLimits()).writeFileBytes
       return Buffer.byteLength(args.content, 'utf8') > limit
-        ? `create_file content must not exceed ${limit} UTF-8 bytes`
+        ? `write_file content must not exceed ${limit} UTF-8 bytes`
         : undefined
     },
     async execute(args, context) {
       try {
-        const precondition = mutationPrecondition(context.approvedCall, 'write')
-        await atomicReplace(
+        let target = await currentTarget(
           context.workspace.canonicalPath,
-          precondition,
-          args.content,
-          context.signal,
-          context.sessionTemp?.root,
+          context.sessionTemp,
+          args.path,
+          'write',
         )
-
+        await ensureDirectory(target.parentRealPath)
+        target = await currentTarget(
+          context.workspace.canonicalPath,
+          context.sessionTemp,
+          args.path,
+          'write',
+        )
+        await writeUtf8Atomic(target.absolutePath, args.content, {
+          signal: context.signal,
+        })
         return {
           status: 'ok',
           content: {
-            path: precondition.path,
+            path: target.path,
             operation: 'write',
-            contentHash: hash(args.content),
+            created: !target.exists,
+            contentHash: contentHash(args.content),
           },
         }
       } catch (error) {
@@ -331,7 +302,7 @@ export function createFileToolDefinitions(
     id: 'apply_patch',
     executionMode: 'serial',
     description:
-      'Apply a single-file unified diff with one or more hunks. Context/deleted lines must match exactly; hunk line counts and new-file line numbers are advisory. If the old line number is stale, the patch is applied only when the exact context has one unique match.',
+      'Apply a single-file unified diff to the latest file content. Every context/deleted sequence must match exactly once; missing or ambiguous context causes no write.',
     inputSchema: ApplyPatchArgsSchema,
     effects: ['filesystem.write'],
     defaultRisk: 'review',
@@ -347,37 +318,35 @@ export function createFileToolDefinitions(
     },
     async execute(args, context) {
       try {
-        const precondition = mutationPrecondition(context.approvedCall, 'patch')
-        const current = await readFile(precondition.absolutePath, 'utf8')
-        const applied = applyTextPatch(current, args.patch, precondition.path)
-
+        const limits = fileLimits(getLimits())
+        const target = await currentTarget(
+          context.workspace.canonicalPath,
+          context.sessionTemp,
+          args.path,
+          'patch',
+        )
+        const current = await readPatchTarget(target, limits.editableFileBytes)
+        const applied = applyTextPatch(current, args.patch, target.path)
         if (
-          precondition.patchHash !== hash(args.patch) ||
-          precondition.expectedResultHash !== hash(applied.content)
+          Buffer.byteLength(applied.content, 'utf8') > limits.editableFileBytes
         ) {
           throw new PathGuardError(
-            'RESOURCE_CHANGED',
-            'The approved patch no longer matches its planned result',
+            'FILE_TOO_LARGE',
+            `The resulting file exceeds ${limits.editableFileBytes} bytes`,
           )
         }
-
-        await atomicReplace(
-          context.workspace.canonicalPath,
-          precondition,
-          applied.content,
-          context.signal,
-          context.sessionTemp?.root,
-        )
-
+        await writeUtf8Atomic(target.absolutePath, applied.content, {
+          signal: context.signal,
+        })
         return {
           status: 'ok',
           content: {
-            path: precondition.path,
+            path: target.path,
             operation: 'patch',
             hunks: applied.hunks,
             addedLines: applied.addedLines,
             removedLines: applied.removedLines,
-            contentHash: hash(applied.content),
+            contentHash: contentHash(applied.content),
           },
         }
       } catch (error) {
@@ -390,7 +359,7 @@ export function createFileToolDefinitions(
     id: 'delete_file',
     executionMode: 'serial',
     description:
-      'Delete one regular file inside the workspace or Session scratch. Scratch mutations are approval-free outside readonly mode.',
+      'Delete one regular file inside the workspace or Session scratch. A missing target is an idempotent success.',
     inputSchema: DeleteFileArgsSchema,
     effects: ['filesystem.delete'],
     defaultRisk: 'high',
@@ -398,24 +367,23 @@ export function createFileToolDefinitions(
     defaultTimeoutMs: 20_000,
     projectResultForModel: (result) =>
       projectFileMutationResult(result, 'deleted'),
-    async execute(_args, context) {
+    async execute(args, context) {
       try {
-        const precondition = mutationPrecondition(
-          context.approvedCall,
+        const target = await currentTarget(
+          context.workspace.canonicalPath,
+          context.sessionTemp,
+          args.path,
           'delete',
         )
-        await atomicDelete(
-          context.workspace.canonicalPath,
-          precondition,
-          context.signal,
-          context.sessionTemp?.root,
-        )
-
+        const deleted = target.exists
+          ? await removeFileIfPresent(target.absolutePath, context.signal)
+          : false
         return {
           status: 'ok',
           content: {
-            path: precondition.path,
+            path: target.path,
             operation: 'delete',
+            deleted,
           },
         }
       } catch (error) {
@@ -424,7 +392,7 @@ export function createFileToolDefinitions(
     },
   }
 
-  return [createFile, applyPatch, deleteFile]
+  return [writeFile, applyPatch, deleteFile]
 }
 
 /** Registers all file mutation definitions with the tool registry. */

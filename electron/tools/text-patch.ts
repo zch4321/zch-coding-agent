@@ -224,35 +224,22 @@ export function applyTextPatch(
     sourceLines.pop()
   }
 
-  let offset = 0
   let addedLines = 0
   let removedLines = 0
 
   for (const hunk of hunks) {
-    let position = hunk.oldStart - 1 + offset
-
-    if (position < 0) {
-      throw new TextPatchError('Patch hunk line numbers are inconsistent')
+    const match = findUniqueSequence(sourceLines, hunk.oldLines)
+    if (match.kind === 'multiple') {
+      throw new TextPatchError(
+        [
+          'Patch context matches multiple locations; provide more unchanged context lines.',
+          'Expected context:',
+          formatPatchPreview(hunk.oldLines, hunk.oldStart),
+        ].join('\n'),
+      )
     }
-
-    if (!matchingSequenceAt(sourceLines, position, hunk.oldLines)) {
-      const match = findUniqueSequence(sourceLines, hunk.oldLines)
-
-      if (match.kind === 'unique') {
-        position = match.position
-      } else if (match.kind === 'multiple') {
-        throw new TextPatchError(
-          [
-            'Patch context matches multiple locations; provide more unchanged context lines.',
-            'Expected context:',
-            formatPatchPreview(hunk.oldLines, hunk.oldStart),
-          ].join('\n'),
-        )
-      }
-    }
-
-    if (!matchingSequenceAt(sourceLines, position, hunk.oldLines)) {
-      const actualStart = Math.max(0, position)
+    if (match.kind === 'none') {
+      const actualStart = Math.max(0, hunk.oldStart - 1)
       const actual = sourceLines.slice(
         actualStart,
         actualStart + Math.max(hunk.oldLines.length, 1),
@@ -269,8 +256,8 @@ export function applyTextPatch(
       )
     }
 
+    const position = match.position
     sourceLines.splice(position, hunk.oldLines.length, ...hunk.newLines)
-    offset += hunk.newLines.length - hunk.oldLines.length
     addedLines += hunk.addedLines
     removedLines += hunk.removedLines
   }

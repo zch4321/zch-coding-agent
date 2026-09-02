@@ -2,15 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { MessageId, ProjectId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import { decodeMessageRow, encodeMessageRow } from './message-codec'
-import {
-  decodeStoredFileChangeRow,
-  encodeStoredFileChangeRow,
-} from './file-change-codec'
-import { FileChangeRepository } from './file-change-repository'
 import { MessageRepository } from './message-repository'
 import { ProjectRepository } from './project-repository'
 import {
-  fileChangeFixture,
   messageFixtures,
   projectFixture,
   sessionFixture,
@@ -23,7 +17,6 @@ import { createTestDatabase } from './test-database'
 const projects = new ProjectRepository()
 const sessions = new SessionRepository()
 const messages = new MessageRepository()
-const fileChanges = new FileChangeRepository()
 
 describe('persistence repositories', () => {
   it('round-trips canonical records through a file-backed reopen', async () => {
@@ -56,13 +49,10 @@ describe('persistence repositories', () => {
       },
     })
     const messageRecords = messageFixtures()
-    const fileChange = fileChangeFixture()
-
     await testDatabase.database.withTransaction((transaction) => {
       projects.insert(transaction, project)
       sessions.insert(transaction, session)
       messages.insertMany(transaction, messageRecords)
-      fileChanges.insertWithRetention(transaction, fileChange)
     })
     const databasePath = testDatabase.databasePath
     await testDatabase.database.close()
@@ -81,11 +71,6 @@ describe('persistence repositories', () => {
           messages.listActiveHistory(reader, session.id),
         ),
       ).toEqual(messageRecords)
-      expect(
-        reopened.read((reader) =>
-          fileChanges.getStored(reader, session.id, fileChange.id),
-        ),
-      ).toEqual(fileChange)
     } finally {
       await reopened.close()
       await testDatabase.dispose()
@@ -145,13 +130,11 @@ describe('persistence repositories', () => {
     const project = projectFixture()
     const session = sessionFixture()
     const user = messageFixtures()[0]!
-    const fileChange = fileChangeFixture()
     try {
       await testDatabase.database.withTransaction((transaction) => {
         projects.insert(transaction, project)
         sessions.insert(transaction, session)
         messages.insert(transaction, user)
-        fileChanges.insertWithRetention(transaction, fileChange)
       })
 
       await testDatabase.database.withTransaction((transaction) => {
@@ -166,19 +149,6 @@ describe('persistence repositories', () => {
           sessions.update(
             transaction,
             { ...session, title: 'updated', revision: 2, lastSeq: 1 },
-            1,
-          ),
-        ).toBe(true)
-        expect(
-          fileChanges.markReverted(
-            transaction,
-            {
-              sessionId: fileChange.sessionId,
-              id: fileChange.id,
-              revision: 2,
-              updatedAt: '2026-07-22T00:00:01.000Z',
-              revertedAt: '2026-07-22T00:00:01.000Z',
-            },
             1,
           ),
         ).toBe(true)
@@ -197,19 +167,6 @@ describe('persistence repositories', () => {
             transaction,
             { ...session, revision: 3, lastSeq: 0 },
             2,
-          ),
-        ).toBe(false)
-        expect(
-          fileChanges.markReverted(
-            transaction,
-            {
-              sessionId: fileChange.sessionId,
-              id: fileChange.id,
-              revision: 2,
-              updatedAt: '2026-07-22T00:00:01.000Z',
-              revertedAt: '2026-07-22T00:00:01.000Z',
-            },
-            1,
           ),
         ).toBe(false)
       })
@@ -334,7 +291,6 @@ describe('persistence repositories', () => {
         projects.insert(transaction, project)
         sessions.insert(transaction, session)
         messages.insertMany(transaction, messageFixtures())
-        fileChanges.insertWithRetention(transaction, fileChangeFixture())
       })
       await testDatabase.database.withTransaction((transaction) => {
         expect(projects.delete(transaction, project.id)).toBe(true)
@@ -349,15 +305,11 @@ describe('persistence repositories', () => {
         messages: reader
           .prepare('SELECT count(*) AS count FROM messages')
           .get(),
-        fileChanges: reader
-          .prepare('SELECT count(*) AS count FROM file_changes')
-          .get(),
       }))
       expect(counts).toEqual({
         projects: { count: 0 },
         sessions: { count: 0 },
         messages: { count: 0 },
-        fileChanges: { count: 0 },
       })
     } finally {
       await testDatabase.dispose()
@@ -583,7 +535,7 @@ describe('persistence repositories', () => {
     })
   })
 
-  it('normalizes Project, Message and FileChange timestamps to UTC', () => {
+  it('normalizes Project and Message timestamps to UTC', () => {
     const projectRow = encodeProjectRow(
       projectFixture({
         createdAt: '2026-07-22T02:00:00.000+02:00',
@@ -594,25 +546,12 @@ describe('persistence repositories', () => {
       ...messageFixtures()[0]!,
       createdAt: '2026-07-22T04:00:00.000+02:00',
     })
-    const fileChangeRow = encodeStoredFileChangeRow(
-      fileChangeFixture({
-        createdAt: '2026-07-22T05:00:00.000+02:00',
-        updatedAt: '2026-07-22T06:00:00.000+02:00',
-        revertedAt: '2026-07-22T07:00:00.000+02:00',
-      }),
-    )
-
     expect(decodeProjectRow({ ...projectRow })).toMatchObject({
       createdAt: '2026-07-22T00:00:00.000Z',
       updatedAt: '2026-07-22T01:00:00.000Z',
     })
     expect(decodeMessageRow({ ...messageRow })).toMatchObject({
       createdAt: '2026-07-22T02:00:00.000Z',
-    })
-    expect(decodeStoredFileChangeRow({ ...fileChangeRow })).toMatchObject({
-      createdAt: '2026-07-22T03:00:00.000Z',
-      updatedAt: '2026-07-22T04:00:00.000Z',
-      revertedAt: '2026-07-22T05:00:00.000Z',
     })
   })
 })

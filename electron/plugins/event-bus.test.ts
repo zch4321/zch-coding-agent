@@ -54,7 +54,7 @@ describe('PluginEventBus', () => {
       runId,
       call: {
         id: callId,
-        toolId: 'create_file',
+        toolId: 'write_file',
         args: { path: 'a.txt' },
         reason: 'write output',
       },

@@ -31,7 +31,7 @@ test.describe('Electron concurrency and interjection workflows', () => {
     fakeProvider.queue([
       toolCallDelta({
         id: 'call:e2e-concurrent-a',
-        name: 'create_file',
+        name: 'write_file',
         args: {
           path: 'concurrent-a.txt',
           content: 'written by conversation A\n',
@@ -42,7 +42,7 @@ test.describe('Electron concurrency and interjection workflows', () => {
     fakeProvider.queue([
       toolCallDelta({
         id: 'call:e2e-concurrent-b',
-        name: 'create_file',
+        name: 'write_file',
         args: {
           path: 'concurrent-b.txt',
           content: 'written by conversation B\n',
@@ -107,14 +107,14 @@ test.describe('Electron concurrency and interjection workflows', () => {
   })
 
   test('injects a live user interjection after a tool batch mid-run', async () => {
-    // First provider turn: a create_file tool call that requires approval in
+    // First provider turn: a write_file tool call that requires approval in
     // confirm mode. Second provider turn: a final answer that acknowledges the
     // queued interjection. The approval pause gives the test a deterministic
     // window to queue the interjection before the second provider turn.
     fakeProvider.queue([
       toolCallDelta({
         id: 'call:e2e-interject-write',
-        name: 'create_file',
+        name: 'write_file',
         args: {
           path: 'interject-output.txt',
           content: 'interjection run\n',
@@ -138,12 +138,12 @@ test.describe('Electron concurrency and interjection workflows', () => {
     await composer.fill('Create interject-output.txt')
     await page.getByRole('button', { name: '发送消息' }).click()
 
-    // The create_file tool call requires approval, so the run pauses. This is
+    // The write_file tool call requires approval, so the run pauses. This is
     // the deterministic window to queue a live interjection.
     await expect.poll(() => fakeProvider.requests.length).toBe(1)
     const approval = page.locator('.approval-card')
     await expect(approval).toBeVisible()
-    await expect(approval).toContainText('create_file')
+    await expect(approval).toContainText('write_file')
 
     await expect(composer).toBeEnabled()
     await composer.fill('Remember to mention the interjection')

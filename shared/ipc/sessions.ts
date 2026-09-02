@@ -49,10 +49,4 @@ export const SESSION_IPC_CONTRACTS = {
   'message:search': domainIpcContract(
     DOMAIN_STATE_API_CONTRACTS['message:search'],
   ),
-  'file-change:list': domainIpcContract(
-    DOMAIN_STATE_API_CONTRACTS['file-change:list'],
-  ),
-  'file-change:revert': domainIpcContract(
-    DOMAIN_STATE_API_CONTRACTS['file-change:revert'],
-  ),
 } as const

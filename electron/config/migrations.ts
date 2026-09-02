@@ -61,6 +61,11 @@ const LegacyLimitsConfigV24Schema = Type.Object(
       minimum: 1_024,
       maximum: 10_000_000,
     }),
+    diffChars: Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+    fileChangeHistoryBytes: Type.Integer({
+      minimum: 1_000_000,
+      maximum: 10_000_000_000,
+    }),
   },
   { additionalProperties: false },
 )
@@ -586,6 +591,30 @@ const LegacyAppConfigV24Schema = Type.Object(
 type LegacyAppConfigV24 = Static<typeof LegacyAppConfigV24Schema>
 const validateLegacyAppConfigV24 = compileSchema(LegacyAppConfigV24Schema)
 
+// AppConfig v25 still exposed limits for the removed application-owned Diff
+// and FileChange retention systems.
+const LegacyLimitsConfigV25Schema = Type.Object(
+  {
+    ...PublicConfigSchema.properties.limits.properties,
+    diffChars: Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
+    fileChangeHistoryBytes: Type.Integer({
+      minimum: 1_000_000,
+      maximum: 10_000_000_000,
+    }),
+  },
+  { additionalProperties: false },
+)
+const LegacyAppConfigV25Schema = Type.Object(
+  {
+    ...AppConfigSchema.properties,
+    schemaVersion: Type.Literal(25),
+    limits: LegacyLimitsConfigV25Schema,
+  },
+  { additionalProperties: false },
+)
+type LegacyAppConfigV25 = Static<typeof LegacyAppConfigV25Schema>
+const validateLegacyAppConfigV25 = compileSchema(LegacyAppConfigV25Schema)
+
 const LegacyAppProviderConfigV14Schema = Type.Object(
   {
     ...withoutKey(
@@ -698,8 +727,13 @@ function migrateV25Limits(
 ): AppConfig['limits'] {
   const withoutTokens = withoutKey(limits, 'maxToolResultTokens')
   const withoutReadOutput = withoutKey(withoutTokens, 'readFileOutputBytes')
+  const withoutDiffChars = withoutKey(withoutReadOutput, 'diffChars')
+  const withoutFileChangeHistory = withoutKey(
+    withoutDiffChars,
+    'fileChangeHistoryBytes',
+  )
   return {
-    ...structuredClone(withoutReadOutput),
+    ...structuredClone(withoutFileChangeHistory),
     maxToolOutputBytes:
       upgrade128KibDefault && limits.maxToolOutputBytes === 128 * 1_024
         ? 256 * 1_024
@@ -758,6 +792,33 @@ function withoutLegacyModelRoleFields<Value extends Record<string, unknown>>(
     Value,
     'activeProviderId' | 'approval' | 'modelPool' | 'providers'
   >
+}
+
+/** Removes remembered approval rules for tools that no longer exist. */
+function withoutRetiredToolRules(candidate: object): object {
+  const permission = Reflect.get(candidate, 'permission')
+  if (
+    !permission ||
+    typeof permission !== 'object' ||
+    Array.isArray(permission)
+  ) {
+    return candidate
+  }
+  const rememberedRules = Reflect.get(permission, 'rememberedRules')
+  if (!Array.isArray(rememberedRules)) return candidate
+  return {
+    ...candidate,
+    permission: {
+      ...permission,
+      rememberedRules: rememberedRules.filter(
+        (rule) =>
+          !rule ||
+          typeof rule !== 'object' ||
+          Array.isArray(rule) ||
+          Reflect.get(rule, 'toolId') !== 'create_file',
+      ),
+    },
+  }
 }
 
 /** Assembles current model roles and strips retired Provider reasoning. */
@@ -1220,6 +1281,30 @@ function migrateV24(config: LegacyAppConfigV24): AppConfig {
   return structuredClone(migrated as AppConfig)
 }
 
+/** Removes application-owned Diff limits and invalidates retired create_file rules. */
+function migrateV25(config: LegacyAppConfigV25): AppConfig {
+  const withoutDiffChars = withoutKey(config.limits, 'diffChars')
+  const limits = withoutKey(withoutDiffChars, 'fileChangeHistoryBytes')
+  const migrated = {
+    ...config,
+    schemaVersion: APP_CONFIG_SCHEMA_VERSION,
+    limits: structuredClone(limits),
+    permission: {
+      ...config.permission,
+      rememberedRules: config.permission.rememberedRules.filter(
+        (rule) => rule.toolId !== 'create_file',
+      ),
+    },
+  }
+  if (!validateAppConfig(migrated)) {
+    throw new UnsupportedConfigSchemaError(
+      25,
+      formatSchemaErrors(validateAppConfig.errors),
+    )
+  }
+  return structuredClone(migrated as AppConfig)
+}
+
 /** Reports that a persisted configuration uses an unsupported schema version. */
 export class UnsupportedConfigSchemaError extends Error {
   constructor(
@@ -1247,6 +1332,11 @@ export function migrateConfig(candidate: unknown): AppConfig {
         ? Reflect.get(candidate, 'schemaVersion')
         : undefined,
     )
+  }
+
+  candidate = withoutRetiredToolRules(candidate)
+  if (typeof candidate !== 'object' || candidate === null) {
+    throw new UnsupportedConfigSchemaError(undefined)
   }
 
   if (Reflect.get(candidate, 'schemaVersion') === 9) {
@@ -1444,6 +1534,16 @@ export function migrateConfig(candidate: unknown): AppConfig {
       )
     }
     return migrateV24(candidate as LegacyAppConfigV24)
+  }
+
+  if (Reflect.get(candidate, 'schemaVersion') === 25) {
+    if (!validateLegacyAppConfigV25(candidate)) {
+      throw new UnsupportedConfigSchemaError(
+        25,
+        formatSchemaErrors(validateLegacyAppConfigV25.errors),
+      )
+    }
+    return migrateV25(candidate as LegacyAppConfigV25)
   }
 
   if (Reflect.get(candidate, 'schemaVersion') !== APP_CONFIG_SCHEMA_VERSION) {

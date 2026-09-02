@@ -1,5 +1,10 @@
-import { open, readdir, realpath, stat } from 'node:fs/promises'
-import { realpathSync } from 'node:fs'
+import {
+  canonicalPath as realpath,
+  canonicalPathSync as realpathSync,
+  fileStatus as stat,
+  openFileHandle as open,
+  readDirectory as readdir,
+} from '../common/filesystem'
 import path from 'node:path'
 
 export type PathGuardErrorCode =

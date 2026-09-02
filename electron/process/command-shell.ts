@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { access } from 'node:fs/promises'
+import { accessPath as access } from '../common/filesystem'
 import path from 'node:path'
 import type {
   CommandShellCatalog,

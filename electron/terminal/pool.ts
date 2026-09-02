@@ -1,4 +1,10 @@
-import { chmod, mkdir, open, stat, type FileHandle } from 'node:fs/promises'
+import {
+  changeFileMode as chmod,
+  fileStatus as stat,
+  makeDirectory as mkdir,
+  openFileHandle as open,
+  type FileHandle,
+} from '../common/filesystem'
 import path from 'node:path'
 import * as nodePty from 'node-pty'
 import { delay } from '../../shared/async/delay'
