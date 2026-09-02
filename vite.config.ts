@@ -18,7 +18,12 @@ export default defineConfig({
         vite: {
           build: {
             rolldownOptions: {
-              external: ['node-pty', '@vscode/ripgrep'],
+              external: [
+                'node-pty',
+                '@vscode/ripgrep',
+                // CommonJS package reads __filename, which is absent if inlined into ESM.
+                'write-file-atomic',
+              ],
             },
           },
         },

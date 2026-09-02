@@ -9,7 +9,12 @@ export default defineConfig({
     emptyOutDir: true,
     ssr: 'electron/headless/main.ts',
     rolldownOptions: {
-      external: ['node-pty', '@vscode/ripgrep'],
+      external: [
+        'node-pty',
+        '@vscode/ripgrep',
+        // CommonJS package reads __filename, which is absent if inlined into ESM.
+        'write-file-atomic',
+      ],
       output: {
         entryFileNames: 'zch-agent-headless.mjs',
         format: 'esm',
