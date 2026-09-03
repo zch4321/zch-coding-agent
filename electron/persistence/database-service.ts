@@ -236,17 +236,20 @@ export class DatabaseService {
         )
       }
       const migration = supportedByVersion.get(row.version)
-      if (!migration || migration.name !== row.name) {
+      const appliedSql = migration
+        ? appliedMigrationSql(migration, row.name)
+        : undefined
+      if (!migration || appliedSql === undefined) {
         throw new PersistenceError(
           'MIGRATION_INVALID',
           `Applied migration ${row.version}:${row.name} is not supported`,
         )
       }
-      const checksum = migrationChecksum(migration.sql)
+      const checksum = migrationChecksum(appliedSql)
       if (row.checksum_sha256 !== checksum) {
         throw new PersistenceError(
           'MIGRATION_CHECKSUM_MISMATCH',
-          `Migration ${migration.name} checksum does not match the applied database`,
+          `Migration ${row.name} checksum does not match the applied database`,
         )
       }
     }
@@ -408,7 +411,31 @@ function validateMigrations(migrations: readonly DatabaseMigration[]): void {
       )
     }
     names.add(migration.name)
+    for (const variant of migration.acceptedAppliedVariants ?? []) {
+      if (
+        !/^\d{4}_[a-z0-9_]+$/u.test(variant.name) ||
+        !variant.name.startsWith(expectedNamePrefix) ||
+        variant.sql.trim().length === 0 ||
+        names.has(variant.name)
+      ) {
+        throw new PersistenceError(
+          'MIGRATION_INVALID',
+          `Applied migration variant ${variant.name || '<unnamed>'} is not valid for version ${expectedVersion}`,
+        )
+      }
+      names.add(variant.name)
+    }
   }
+}
+
+function appliedMigrationSql(
+  migration: DatabaseMigration,
+  appliedName: string,
+): string | undefined {
+  if (migration.name === appliedName) return migration.sql
+  return migration.acceptedAppliedVariants?.find(
+    (variant) => variant.name === appliedName,
+  )?.sql
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {

@@ -896,7 +896,7 @@ CREATE INDEX messages_history_idx
 
 ### 6.7 FileChange 删除迁移
 
-SQLite v11 删除遗留的 `file_changes`、`file_change_retention_state` 及其 retention triggers。旧 migration 文件保持不可变以便校验和与顺序升级；无论从旧数据库升级还是新建数据库执行全部 migration，最终 schema 都不包含 FileChange、Diff、patch、before/after snapshot 或恢复状态。
+标准 SQLite v11 删除遗留的 `file_changes`、`file_change_retention_state` 及其 retention triggers；SQLite v12 对已执行历史 v11 分叉的数据库重复同一幂等清理，并解除该分叉遗留的 Subagent public-id insert trigger。旧 migration 文件保持不可变；runner 只按精确名称与 checksum 接受已知 alternative，未知 migration 继续 fail closed。无论从旧数据库升级还是新建数据库执行全部 migration，最终 schema 都不包含 FileChange、Diff、patch、before/after snapshot 或恢复状态。
 
 文件工具只提交正常的 assistant tool-call/tool-result Message。`apply_patch` 参数因此可能作为对话历史的一部分出现在 `messages.parts_json`，但数据库没有另一份用于恢复或 Diff 展示的 patch 副本。当前 Git status/Diff 由只读 Git Review 即时查询，不进入 SQLite。
 
@@ -1160,10 +1160,7 @@ interface BackendEventCursor {
 interface DurableCommitEnvelope<TChange> {
   schemaVersion: 1
   cursor: BackendEventCursor
-  topic:
-    | 'project.changed'
-    | 'session.changed'
-    | 'session.removed'
+  topic: 'project.changed' | 'session.changed' | 'session.removed'
   change: TChange
 }
 
@@ -1487,17 +1484,17 @@ Renderer 不可以：
 
 ## 13. 配置、Secrets 与其他存储
 
-| 数据                                                 | 存储                                     | 所有者            |
-| ---------------------------------------------------- | ---------------------------------------- | ----------------- |
-| Projects、Sessions、Messages、Goal/Plan             | `userData/agent.db`                      | backend           |
-| 非敏感应用/provider 配置                             | backend config repository                | backend           |
-| API keys                                             | Electron safeStorage-backed secret store | backend           |
-| Trace                                                | `userData/traces/*.jsonl`                | backend           |
-| Operational runtime logs                             | `userData/logs/runtime/*.jsonl`          | backend           |
-| Session artifacts/scratch                            | OS temp/profile hash/Session hash        | backend + tools   |
-| Skills                                               | `userData/skills/`                       | backend manager   |
-| ProjectModel                                         | 暂停持久化；目标为 `userData/agent.db`   | backend（迁移后） |
-| Prompt resources                                     | versioned application resources          | backend registry  |
+| 数据                                    | 存储                                     | 所有者            |
+| --------------------------------------- | ---------------------------------------- | ----------------- |
+| Projects、Sessions、Messages、Goal/Plan | `userData/agent.db`                      | backend           |
+| 非敏感应用/provider 配置                | backend config repository                | backend           |
+| API keys                                | Electron safeStorage-backed secret store | backend           |
+| Trace                                   | `userData/traces/*.jsonl`                | backend           |
+| Operational runtime logs                | `userData/logs/runtime/*.jsonl`          | backend           |
+| Session artifacts/scratch               | OS temp/profile hash/Session hash        | backend + tools   |
+| Skills                                  | `userData/skills/`                       | backend manager   |
+| ProjectModel                            | 暂停持久化；目标为 `userData/agent.db`   | backend（迁移后） |
+| Prompt resources                        | versioned application resources          | backend registry  |
 
 Renderer 只能读取 public config snapshot。API key、Authorization 和 safeStorage 密文不进入 renderer、Session/Message records 或 trace。
 
@@ -1712,7 +1709,7 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 
 切流版本首次启用 v2 persistence 时，创建 `agent.db` 并执行 SQLite schema migrations。旧 `workbench.json`、renderer localStorage 和 `change-history.json` 不参与新数据库初始化或状态恢复；新架构从 SQLite 中已有的 records 开始，没有 records 时显示空 Project/Session 状态。
 
-切流不读取、改写、重命名或删除这些旧文件。`schema_migrations` 只负责 `agent.db` 自身的 schema version，不承担旧 Conversation/Message 数据转换。SQLite v11 仅删除数据库内已经失去产品消费者的 FileChange 表。
+切流不读取、改写、重命名或删除这些旧文件。`schema_migrations` 只负责 `agent.db` 自身的 schema version，不承担旧 Conversation/Message 数据转换。标准 SQLite v11 删除数据库内已经失去产品消费者的 FileChange 表，v12 为历史 v11 分叉执行兼容收敛。
 
 ### 19.2 切换顺序
 
@@ -1720,7 +1717,7 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 2. Runtime 改为从 messages 查询 active history，Renderer 改为 Project/Session/Message replica。
 3. 删除 `workbench:save`、frontend conversation persistence、legacy change-history JSON 和 memory-only canonical history。
 4. 文件基础设施统一迁入 `electron/common/filesystem`，`create_file` 切换为 `write_file` 并采用 latest-content/last-writer-wins 语义。
-5. 删除 FileChange service/repository/codec/IPC/renderer state、审批 Diff、恢复流程和 Headless patch artifact；SQLite v11 删除遗留表。
+5. 删除 FileChange service/repository/codec/IPC/renderer state、审批 Diff、恢复流程和 Headless patch artifact；SQLite v12 保证所有受支持的 v11 路径都删除遗留表。
 6. 新增 Project 级 `git-review:get-status/get-diff`，只实时读取 Git，不写入应用状态。
 
 迁移不长期双写。
@@ -1770,7 +1767,7 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 - Renderer reload 且 main 存活时可读取 ActiveRunPublicSnapshot。
 - App crash/restart 后 partial output 丢失，但完整 messages 可以继续请求模型。
 - `write_file` 覆盖/创建与 mode 保留、`apply_patch` latest-content 精确唯一匹配、`delete_file` 100 MB binary 与幂等删除，以及审批后文件变化的 last-writer-wins 语义。
-- SQLite v11 删除 FileChange 表和 retention trigger；AppConfig v26 删除 Diff/history limits 与旧 `create_file` remembered rule；Headless result v2 不含 patch path/status。
+- 标准 SQLite v11 删除 FileChange 表和 retention trigger，v12 兼容历史 v11 分叉并完成收敛；AppConfig v26 删除 Diff/history limits 与旧 `create_file` remembered rule；Headless result v2 不含 patch path/status。
 - Git Review 覆盖非 Git、tracked/untracked、staged/unstaged、binary、rename、unborn/detached HEAD、Project 子目录 scope 与 merge-base，并验证输出有界且无 binary patch payload。
 
 核心重启回归：
@@ -1804,12 +1801,12 @@ Renderer 只维护 Project/Session replicas、分页 Message cache、每 Session
 
 `MessageRecord` 使用 `visibility + inHistory + turnId` 分离展示、模型历史和轮次归属。Compact 只更新 `inHistory`；rewind 将移除分支标为 `superseded`，清除 Goal/Plan 并重建 active history。只有可见原始用户消息能 retry/edit；Assistant 不能作为 `run:retry` 目标。
 
-SQLite transaction callback 通过 authorizer 拒绝事务控制 SQL；commit listener 逐项隔离；backend dispose 使用共享 promise 排空 live runtime/coordinator 后关闭数据库。SQLite v11 已删除 FileChange 表、retention state 和 triggers。Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 FileChange IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。普通 Session 已支持受警告保护的 `zch-conversation-markdown` 单向导出；Markdown 导入仍未实现，Trace transcript 查看/导出保持独立。
+SQLite transaction callback 通过 authorizer 拒绝事务控制 SQL；commit listener 逐项隔离；backend dispose 使用共享 promise 排空 live runtime/coordinator 后关闭数据库。SQLite v12 已保证删除 FileChange 表、retention state 和 triggers，并精确兼容已知的历史 v11 migration alternative。Legacy Workbench、Conversation durable records、renderer snapshot persistence、JSON ChangeHistory、旧 FileChange IPC 和 identity bridge 已删除。旧 `workbench.json`、`change-history.json` 与 localStorage 数据不迁移、不读取、不删除、不改写。普通 Session 已支持受警告保护的 `zch-conversation-markdown` 单向导出；Markdown 导入仍未实现，Trace transcript 查看/导出保持独立。
 
 AppConfig v14 会把合法 v9 Provider 配置迁移为 `providerType`，把合法 v9/v10 配置中仍等于旧默认值的单次工具 token 与工具/read 字节限制提升到 64K/128KiB，为合法 v9/v10/v11 Provider 补充默认包含主模型的 `modelConfigurationIds`，为合法 v12 增加默认关闭、30 分钟 timeout 的 Subagent 配置，并从所有合法 v9–v13 配置删除退役的 `maxToolTokensPerRun`。AppConfig v15 再把合法 v14 `modelConfigurationIds` 原样迁移为 `enabledModelIds`，并让新安装的默认 Provider 从空模型池开始；已有主模型、API-key reference、模型目录、模型覆盖、revision、其余自定义限制和 `maxConcurrentRuns` 保持不变。
 
 AppConfig v16 是 model-pool foundation 的冻结边界：Provider reasoning 与 pool entry reasoning 仅允许当时的 `off|high|max`，per-model annotation 尚不存在。AppConfig v17 集成六档 reasoning、annotation 和 approval route 的必填 `reasoning`，仍在每个 pool entry 保存 capability。AppConfig v18 删除重复 capability，调度时只读取 Provider `modelOverrides[model].capability`；AppConfig v19 再删除从未执行的 pool entry `maxParallel`，并在 `subagents` 增加默认 10、范围 1–32 的 `maxAgentsPerSwarm`。AppConfig v20 新增默认 `auto` 的 `executionEnvironment.commandShell`；合法 v9–v19 配置都保留各自可迁移字段并补入该默认值。AppConfig v21 把模型角色统合进 `models` 段：`activeProviderId` 与其 Provider 默认模型成为 `defaultModelProvider/defaultModel`，旧 `approval` 段成为 `auxiliaryModelProvider/auxiliaryModel`，`providers` 与 `modelPool` 平移入 `models`。AppConfig v22 再增加 `defaultModelReasoning/auxiliaryModelReasoning`，并从每个 Provider 删除 `reasoning`：v21→v22 分别把主/辅助角色所引用 Provider 的旧默认档位写入对应角色，从而保持实际请求等级；v9–v20 直接迁移采用相同结果。v9–v20 的旧独立 approval reasoning 已在 v21 决策中丢弃，直接升级到 v22 仍按当时所选 Provider 档位保持 v21 行为。不可用辅助 route 在 reload 修复阶段改写为当前主 route；Provider 不再持有可被角色隐式继承的 reasoning。当时的 Headless 临时内部 AppConfig 使用 v22 结构，外部配置仍为 v4 单 Provider，并把其可选 reasoning 映射到主角色。合法 v9–v15 仍迁移到默认空 pool；合法 v16/v17 保留并规范化 pool route、剥离旧 capability 与 `maxParallel` 后迁移；合法 v18 剥离 `maxParallel` 后迁移，合法 v19/v20/v21 原样保留现有 pool 与 Swarm 上限。旧配置中仍 enabled 但对应 Provider 模型没有 capability annotation 的 entry 会在 ConfigStore reload 修复阶段被禁用；disabled entry 原样保留供后续修复。v16–v18 pool entry ID 在 trim/NFC 后必须唯一且拒绝控制/格式字符；不符合各自冻结 schema、损坏或更早版本仍执行 reset-only。Runtime Identity v5 记录 `swarmsEnabled = false`，并从 Headless tool 名称/hash 排除 `swarm_run`。SQLite v5 增加 hidden Subagent execution/session ownership，并保留 v4 对历史 route/continuation identity 的原位迁移。SQLite v6 通过表重建把 `sessions.reasoning` 的 CHECK 扩展为六档（`off|low|medium|high|xhigh|max`）；SQLite v7 再重建 `messages`，加入 `conversation_transcript` 与带 `model_route_json` 的 Provider-native `compact_summary`。SQLite v8 重建 `subagent_executions` 为 schema v2，增加 `kind/name/parent_execution_id/child_ordinal`、queued/partial 状态及 root/child 唯一索引，并把旧记录迁为根级 `subagent`。表重建由 runner 暂停外键约束、换表并重建索引，提交前以 `PRAGMA foreign_key_check` 兜底完整性；旧版本应用打开更新数据库会以 `DATABASE_VERSION_TOO_NEW` 明确拒绝。旧 JSONL trace 只在读取时投影而不改写文件。
 
-AppConfig v23 把 v22 的三字段 `logging` 冻结为 legacy boundary，并迁移为 `logging.operational + logging.trace`。旧 `enabled/retentionDays/maxTotalBytes` 完整进入 Trace；Operational 使用 `info/14 天/50 MB` 新默认。AppConfig v24 删除 `limits.maxConcurrentRuns` 和 `subagents.maxAgentsPerSwarm`。AppConfig v25 删除 `maxToolResultTokens/readFileOutputBytes`，增加 `maxToolOutputLines = 500` 和 `maxSubagents`；旧 byte limit 恰为 128 KiB 默认时升至 256 KiB，自定义值保留，v19–v23 的 `maxAgentsPerSwarm` 直接迁为新 Session 容量，v24 使用 32。AppConfig v26 删除 `limits.diffChars/fileChangeHistoryBytes`，并移除旧 `create_file` remembered rules；其他权限、Provider 和运行限制保持不变。Headless 外部 config v5 迁移 v1–v4，内部 AppConfig 使用 v26；Runtime Identity v6 移除 token result budget 并增加 bytes/lines/worker timeout/`maxSubagents`。SQLite v10 只增加 active leaf capacity 查询索引，v11 删除 FileChange storage，现有 conversation/execution records 不重写。
+AppConfig v23 把 v22 的三字段 `logging` 冻结为 legacy boundary，并迁移为 `logging.operational + logging.trace`。旧 `enabled/retentionDays/maxTotalBytes` 完整进入 Trace；Operational 使用 `info/14 天/50 MB` 新默认。AppConfig v24 删除 `limits.maxConcurrentRuns` 和 `subagents.maxAgentsPerSwarm`。AppConfig v25 删除 `maxToolResultTokens/readFileOutputBytes`，增加 `maxToolOutputLines = 500` 和 `maxSubagents`；旧 byte limit 恰为 128 KiB 默认时升至 256 KiB，自定义值保留，v19–v23 的 `maxAgentsPerSwarm` 直接迁为新 Session 容量，v24 使用 32。AppConfig v26 删除 `limits.diffChars/fileChangeHistoryBytes`，并移除旧 `create_file` remembered rules；其他权限、Provider 和运行限制保持不变。Headless 外部 config v5 迁移 v1–v4，内部 AppConfig 使用 v26；Runtime Identity v6 移除 token result budget 并增加 bytes/lines/worker timeout/`maxSubagents`。SQLite v10 只增加 active leaf capacity 查询索引，标准 v11 删除 FileChange storage，v12 精确兼容历史 v11 alternative 并完成收敛；现有 conversation/execution records 不重写。
 
 P3 review 建议、N-3/N-4 和 201+ 数据量的额外 Electron E2E 明确延后，不属于 P10 发布门禁；现有单元/集成测试继续覆盖 201+ Session 和 Message 分页。产品路径不再保留双轨、兼容开关或 legacy fallback。

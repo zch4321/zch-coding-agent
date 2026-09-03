@@ -77,8 +77,8 @@ describe('0007_conversation_transcript migration', () => {
             .get(),
         ),
       ).toEqual({
-        version: 11,
-        name: '0011_remove_file_changes',
+        version: 12,
+        name: '0012_reconcile_file_change_removal',
       })
       expect(
         upgraded

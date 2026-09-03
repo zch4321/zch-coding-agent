@@ -43,8 +43,8 @@ describe('0009_title_source migration', () => {
             .get(),
         ),
       ).toEqual({
-        version: 11,
-        name: '0011_remove_file_changes',
+        version: 12,
+        name: '0012_reconcile_file_change_removal',
       })
 
       // Rows that existed before the migration keep their titles unmanaged.

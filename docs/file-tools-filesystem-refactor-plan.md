@@ -110,8 +110,8 @@ Renderer 通过独立只读 IPC 查询 Project，不调用模型 Tool Registry�
 
 ## 6. 迁移与兼容
 
-- SQLite migration `0011_remove_file_changes.sql` 删除 FileChange retention triggers、`file_change_retention_state` 和 `file_changes`。
-- 旧 migration 文件不可改写；新安装最终 schema 同样不含这些表。
+- 标准 SQLite migration `0011_remove_file_changes.sql` 删除 FileChange retention triggers、`file_change_retention_state` 和 `file_changes`；v12 再次幂等收敛，保证执行过历史 `0011_background_task_public_ids` 分叉的数据库也得到相同结果。
+- 旧 migration 文件不可改写。runner 仅按精确名称与 checksum 接受已知 v11 alternative；未知分叉继续 fail closed。v12 同时解除旧 public-id insert trigger，但不破坏性重建历史业务表。
 - shared domain、IPC、preload API、Backend service/repository、runtime execution port、renderer replica/store 和恢复 UI 全部删除。
 - AppConfig 升为 v26，删除 `limits.diffChars` 与 `limits.fileChangeHistoryBytes`，并过滤旧 `create_file` remembered rules。
 - Headless result 升为 schema v2，删除 `patchPath`/`patchStatus`。

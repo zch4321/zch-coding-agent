@@ -193,7 +193,7 @@ describe('DatabaseService', () => {
       const count = reopened.read((reader) =>
         reader.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
       )
-      expect(count).toEqual({ count: 11 })
+      expect(count).toEqual({ count: 12 })
     } finally {
       await reopened.close()
       await testDatabase.dispose()
@@ -227,8 +227,8 @@ describe('DatabaseService', () => {
           .all(),
       }))
       expect(state.migrations.at(-1)).toEqual({
-        version: 11,
-        name: '0011_remove_file_changes',
+        version: 12,
+        name: '0012_reconcile_file_change_removal',
       })
       expect(state.tables).toEqual([
         { name: 'subagent_executions' },
@@ -459,12 +459,95 @@ describe('DatabaseService', () => {
     await testDatabase.dispose()
   })
 
+  it('accepts the exact legacy v11 migration and reconciles its schema', async () => {
+    const legacyVariant = DATABASE_MIGRATIONS[10]!.acceptedAppliedVariants?.[0]
+    expect(legacyVariant).toBeDefined()
+    if (!legacyVariant) return
+    expect(migrationChecksum(legacyVariant.sql)).toBe(
+      '771c64e51438283edf46622aed90e27e6101b7e8ff40f426f432cc2f58f2d9cb',
+    )
+    const legacy = await createTestDatabase({
+      migrations: [
+        ...DATABASE_MIGRATIONS.slice(0, 10),
+        {
+          version: 11,
+          name: legacyVariant.name,
+          sql: legacyVariant.sql,
+        },
+      ],
+    })
+    const databasePath = legacy.databasePath
+    await legacy.database.close()
+
+    const migrated = DatabaseService.open({
+      databasePath,
+      appVersion: 'legacy-v11-compatibility-test',
+    })
+    try {
+      expect(
+        migrated.read((reader) => ({
+          migrations: reader
+            .prepare(
+              `SELECT version, name FROM schema_migrations
+               WHERE version >= 11 ORDER BY version`,
+            )
+            .all(),
+          retiredObjects: reader
+            .prepare(
+              `SELECT name FROM sqlite_master
+               WHERE name IN (
+                 'file_changes',
+                 'file_change_retention_state',
+                 'subagent_executions_require_public_id'
+               )
+               ORDER BY name`,
+            )
+            .all(),
+        })),
+      ).toEqual({
+        migrations: [
+          { version: 11, name: '0011_background_task_public_ids' },
+          { version: 12, name: '0012_reconcile_file_change_removal' },
+        ],
+        retiredObjects: [],
+      })
+    } finally {
+      await migrated.close()
+      await legacy.dispose()
+    }
+  })
+
+  it('rejects a modified checksum for an accepted migration variant', async () => {
+    const legacyVariant = DATABASE_MIGRATIONS[10]!.acceptedAppliedVariants?.[0]
+    expect(legacyVariant).toBeDefined()
+    if (!legacyVariant) return
+    const legacy = await createTestDatabase({
+      migrations: [
+        ...DATABASE_MIGRATIONS.slice(0, 10),
+        {
+          version: 11,
+          name: legacyVariant.name,
+          sql: `${legacyVariant.sql}\n-- changed`,
+        },
+      ],
+    })
+    const databasePath = legacy.databasePath
+    await legacy.database.close()
+
+    expect(() =>
+      DatabaseService.open({ databasePath, appVersion: 'test' }),
+    ).toThrowError(
+      expect.objectContaining({ code: 'MIGRATION_CHECKSUM_MISMATCH' }),
+    )
+    await legacy.dispose()
+  })
+
   it('rejects a database created by a newer migration set', async () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 12,
-        name: '0012_future',
+        version: 13,
+        name: '0013_future',
         sql: 'CREATE TABLE future_state (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -484,13 +567,13 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 12,
-        name: '0012_second',
+        version: 13,
+        name: '0013_second',
         sql: 'CREATE TABLE second_step (id TEXT PRIMARY KEY) STRICT;',
       },
       {
-        version: 13,
-        name: '0013_third',
+        version: 14,
+        name: '0014_third',
         sql: 'CREATE TABLE third_step (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -499,7 +582,7 @@ describe('DatabaseService', () => {
     await testDatabase.database.withTransaction((transaction) => {
       transaction
         .prepare('DELETE FROM schema_migrations WHERE version = ?')
-        .run(12)
+        .run(13)
     })
     await testDatabase.database.close()
 
@@ -520,8 +603,8 @@ describe('DatabaseService', () => {
     const brokenMigrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 12,
-        name: '0012_broken',
+        version: 13,
+        name: '0013_broken',
         sql: `
           CREATE TABLE should_rollback (id TEXT PRIMARY KEY) STRICT;
           INSERT INTO table_that_does_not_exist VALUES (1);
@@ -549,7 +632,7 @@ describe('DatabaseService', () => {
       ).toBeUndefined()
       expect(
         raw.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
-      ).toEqual({ count: 11 })
+      ).toEqual({ count: 12 })
     } finally {
       raw.close()
       await first.dispose()
@@ -561,8 +644,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 12,
-          name: '0012_transaction_probe',
+          version: 13,
+          name: '0013_transaction_probe',
           sql: `
             CREATE TABLE transaction_probe (
               id INTEGER PRIMARY KEY
@@ -655,8 +738,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 12,
-          name: '0012_transaction_control_probe',
+          version: 13,
+          name: '0013_transaction_control_probe',
           sql: 'CREATE TABLE transaction_control_probe (id INTEGER PRIMARY KEY) STRICT;',
         },
       ],

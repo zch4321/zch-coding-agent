@@ -2,11 +2,18 @@
 
 本文件记录有意接受、暂缓或取舍的技术决策。Code review 记录发现本身；本日志记录项目对发现采取的处理方式，避免后续将已知限制误认为遗漏。
 
+## 2026-09-03 — 精确兼容已经执行的 SQLite v11 分叉迁移
+
+- 状态：已采纳并实现。开发数据库中已经存在 `11:0011_background_task_public_ids`，而当前标准 v11 是 `0011_remove_file_changes`；两者占用了同一不可重写的 migration version。
+- 决定：标准新数据库继续执行 `0011_remove_file_changes`。migration runner 只接受名称为 `0011_background_task_public_ids` 且 SQL checksum 精确等于历史值 `771c64e…d9cb` 的 v11 alternative；任何其他名称或 checksum 仍 fail closed。
+- 收敛：SQLite v12 `0012_reconcile_file_change_removal` 幂等删除 FileChange 表与 retention trigger，并移除历史 v11 创建的 `subagent_executions_require_public_id` trigger，使当前不写 `public_id` 的 Subagent repository 能继续工作。历史 auxiliary table/column 保留为无消费者数据，不在启动修复中破坏性重建业务表。
+- 理由：修改用户数据库 ledger、放宽任意 checksum 或删除数据库都会破坏 durable backend 的可信边界。显式列出一个可审计的历史 alternative，并通过下一号迁移收敛当前必须满足的 schema，既保留严格校验，也兼容已经落盘的开发数据。
+
 ## 2026-09-02 — 删除应用自有 Diff 与文件恢复，改用实时 Git Review
 
 - 状态：已采纳并实现；本条完整取代 2026-09-01“FileChange 回退改用 Git reverse patch”，并取代所有仍要求 FileChange、审批 Diff、Run checkpoint、patch retention 或应用级文件恢复的旧决策。
 - 文件恢复：应用不记录 Run 开始状态，也不记录每次文件工具的 before/after、Diff、patch、hash、mode 或恢复元数据；不提供单项或整 Run undo。Session rewind/retry/edit/fork 只修改对话。无论 Project 是否为 Git repository，恢复工作树都由用户直接使用 Git 或其他外部工具完成。
-- 数据与兼容：SQLite v11 删除 `file_changes`、retention state 和 triggers；AppConfig v26 删除 `diffChars/fileChangeHistoryBytes` 并移除旧 `create_file` remembered rules；Headless result v2 删除 `patchPath/patchStatus`，不再生成 `workspace.patch`。`apply_patch` 的参数仍可作为 canonical tool-call Message 保存，但它不是恢复副本或 Diff history。
+- 数据与兼容：标准 SQLite v11 删除 `file_changes`、retention state 和 triggers，v12 对历史 v11 分叉执行同一幂等收敛；AppConfig v26 删除 `diffChars/fileChangeHistoryBytes` 并移除旧 `create_file` remembered rules；Headless result v2 删除 `patchPath/patchStatus`，不再生成 `workspace.patch`。`apply_patch` 的参数仍可作为 canonical tool-call Message 保存，但它不是恢复副本或 Diff history。
 - 前端语义：原 Diff tab 改为 Project 级实时 Git Review，按需查询 status，以及相对 `HEAD`、index、staged `HEAD` 或所选 ref merge-base 的有界 Diff。未跟踪文件只有 status，二进制只有 marker；结果不归因于 Session、Run、Agent 或工具调用，不进入 SQLite 或 durable event。
 - 理由：Git 已经是代码项目的版本控制真相源。继续维护第二套 FileChange/patch/revert 状态既无法覆盖 Terminal、用户和外部进程，又会给大二进制删除、并发归因、retention 和迁移增加成本。只读 Git Review 保留日常审查能力，同时彻底移除恢复一致性问题。
 - 接受的代价：非 Git Project 没有 Diff 面板内容或应用级恢复；Git Review 会混合当前 Project scope 内的所有来源变更；untracked 文件在加入 Git 前没有标准 Diff；last-writer-wins 仍可能覆盖基于同一旧内容的并发写入。
@@ -74,7 +81,7 @@
 
 ## 2026-07-26 — FileChange Assistant Message ID 保持软关联
 
-- 状态：已由 2026-09-02 删除 FileChange 的决策取代；SQLite v11 删除对应表和关联字段，以下只保留历史背景。
+- 状态：已由 2026-09-02 删除 FileChange 的决策取代；SQLite v12 已保证删除对应表和关联字段，以下只保留历史背景。
 - 决定：`file_changes.assistant_message_id` 继续作为工具批次的关联标识，不要求对应 `messages` 行已经或最终成功提交。
 - 理由：文件副作用完成后，FileChange 审计会先于整个 Assistant/tool batch 的 Session commit 独立写入。若后续 Session commit 失败，审计仍必须保留；外键会使审计写入失败或迫使运行时错误地提前提交 Assistant 消息。现有 `UNIQUE (session_id, assistant_message_id, call_id, path)` 已提供以 Session 和 Assistant Message ID 为前缀的复合索引。
 - 重新评估条件：FileChange 与 Session message 改为同一事务提交，或产品要求按 Assistant Message ID 跨 Session 独立查询。

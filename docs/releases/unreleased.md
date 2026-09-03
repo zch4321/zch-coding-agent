@@ -4,7 +4,7 @@
 
 ## 升级说明
 
-- SQLite 会迁移到 v11，并永久删除旧 `file_changes`、恢复快照和 retention 状态。升级前如需保留旧的应用内变更记录，请先自行查看；升级后文件恢复完全依赖用户自己的 Git 历史、stash 或其他备份。
+- SQLite 会迁移到 v12，并永久删除旧 `file_changes`、恢复快照和 retention 状态。已经执行过历史 `11:0011_background_task_public_ids` 的开发数据库会按精确 checksum 兼容并由 v12 收敛，不需要删除或重建数据库。升级前如需保留旧的应用内变更记录，请先自行查看；升级后文件恢复完全依赖用户自己的 Git 历史、stash 或其他备份。
 - AppConfig 会迁移到 v26，删除 `limits.diffChars`、`limits.fileChangeHistoryBytes`，并移除旧 `create_file` remembered approval rule。其他 Provider、权限和运行配置保持不变。
 - 模型文件工具由 `create_file` 改为 `write_file`。旧对话中的 `create_file` 调用仍可阅读，但不再是可执行工具，也不会把旧授权自动扩大到覆盖写。
 - Headless result 升为 schema v2，不再返回 `patchPath/patchStatus`，也不生成 `workspace.patch`。依赖这些字段的调用方需要改为直接检查工作树或 Git。
