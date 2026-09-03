@@ -168,6 +168,7 @@ describe('file mutation tools', () => {
     const root = await workspace()
     const target = path.join(root, 'note.txt')
     await chmod(target, 0o744)
+    const existingMode = (await stat(target)).mode & 0o777
 
     await expect(
       execute(root, {
@@ -180,7 +181,7 @@ describe('file mutation tools', () => {
       status: 'ok',
       content: { created: false },
     })
-    expect((await stat(target)).mode & 0o777).toBe(0o744)
+    expect((await stat(target)).mode & 0o777).toBe(existingMode)
 
     await expect(
       execute(root, {
