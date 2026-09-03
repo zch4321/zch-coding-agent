@@ -21,14 +21,11 @@ import type { PromptRegistry } from '../prompts/registry'
 import type { RuntimeEventBus } from '../runtime/runtime-event-bus'
 import type { RuntimeEventUnsubscribe } from '../runtime/runtime-events'
 import { canonicalHash } from '../session/canonical-history'
+import { modelOutputTokenLimit } from '../session/session-run-utils'
 import type { SessionService } from './session-service'
 import type { OperationalLogService } from '../operational-logging/service'
 import { ProviderAttemptRecorder } from '../operational-logging/provider-attempt-recorder'
 import { ProviderTransportError } from '../providers/http-sse-transport'
-
-const TITLING_TIMEOUT_MS = 15_000
-const TITLING_MAX_OUTPUT_TOKENS = 128
-const TITLING_INPUT_MAX_CHARS = 2_000
 
 export interface ConversationTitlingOptions {
   configStore: ConfigStore
@@ -47,7 +44,6 @@ export interface ConversationTitlingOptions {
     runId: RunId,
   ) => ResolvedModelRoute | undefined
   createProvider?: (route: ResolvedModelRoute) => ModelProvider
-  timeoutMs?: number
   operationalLog?: Pick<OperationalLogService, 'log'>
 }
 
@@ -139,7 +135,6 @@ export class ConversationTitlingService {
     | ((sessionId: SessionId, runId: RunId) => ResolvedModelRoute | undefined)
     | undefined
   readonly #createProvider: (route: ResolvedModelRoute) => ModelProvider
-  readonly #timeoutMs: number
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
   readonly #attempted = new Set<SessionId>()
   readonly #inFlight = new Set<Promise<void>>()
@@ -163,7 +158,6 @@ export class ConversationTitlingService {
           this.#onDiagnostic,
         ))
     this.#getCompletedRunRoute = options.getCompletedRunRoute
-    this.#timeoutMs = options.timeoutMs ?? TITLING_TIMEOUT_MS
     this.#operationalLog = options.operationalLog
     this.#createProvider =
       options.createProvider ??
@@ -265,7 +259,7 @@ export class ConversationTitlingService {
     await this.#sessions.applyModelTitle({ sessionId, title })
   }
 
-  /** Runs the bounded single-shot titling request; undefined on any failure. */
+  /** Runs the single-shot titling request; undefined on any failure. */
   async #requestTitle(
     provider: ModelProvider,
     route: ResolvedModelRoute,
@@ -276,12 +270,7 @@ export class ConversationTitlingService {
     parentRunId: RunId,
   ): Promise<string | undefined> {
     const controller = new AbortController()
-    let timedOut = false
     this.#controllers.add(controller)
-    const timer = setTimeout(() => {
-      timedOut = true
-      controller.abort(new Error('Conversation titling timed out'))
-    }, this.#timeoutMs)
     const attempt = this.#operationalLog
       ? new ProviderAttemptRecorder(this.#operationalLog, {
           operation: 'title',
@@ -331,7 +320,7 @@ export class ConversationTitlingService {
         },
         route: route.snapshot,
         tools: [],
-        maxOutputTokens: TITLING_MAX_OUTPUT_TOKENS,
+        maxOutputTokens: modelOutputTokenLimit(route.modelProfile),
       })
       attempt?.attachRequestDiagnostics(providerRequestDiagnostics(compiled))
       const context: ProviderStreamContext = { signal: controller.signal }
@@ -383,13 +372,13 @@ export class ConversationTitlingService {
       )
       return text
     } catch (error) {
-      if (controller.signal.aborted && !timedOut && this.#disposed) {
+      if (controller.signal.aborted && this.#disposed) {
         attempt?.completed({ outcome: 'cancelled' })
         return undefined
       }
       const transport = titleTransportError(error)
       attempt?.failed(error, {
-        code: timedOut ? 'PROVIDER_TIMEOUT' : 'PROVIDER_TITLE_FAILED',
+        code: 'PROVIDER_TITLE_FAILED',
         ...(transport?.status === undefined
           ? {}
           : { httpStatus: transport.status }),
@@ -409,7 +398,6 @@ export class ConversationTitlingService {
       })
       return undefined
     } finally {
-      clearTimeout(timer)
       this.#controllers.delete(controller)
     }
   }
@@ -428,10 +416,9 @@ function recordText(record: MessageRecord): string {
   return record.parts
     .flatMap((part) => (part.type === 'text' ? [part.text] : []))
     .join('\n')
-    .slice(0, TITLING_INPUT_MAX_CHARS)
 }
 
-/** Returns the first original visible user message text, bounded for prompt use. */
+/** Returns the first original visible user message text for prompt use. */
 function firstUserText(messages: readonly MessageRecord[]): string {
   const record = messages.find(
     (message) =>
@@ -442,7 +429,7 @@ function firstUserText(messages: readonly MessageRecord[]): string {
   return record ? recordText(record) : ''
 }
 
-/** Returns the first visible assistant reply text, bounded for prompt use. */
+/** Returns the first visible assistant reply text for prompt use. */
 function firstAssistantText(messages: readonly MessageRecord[]): string {
   const record = messages.find(
     (message) =>

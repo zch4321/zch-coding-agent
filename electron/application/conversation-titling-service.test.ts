@@ -8,6 +8,7 @@ import type { ConfigStore } from '../config/store'
 import type {
   CompiledProviderCall,
   ModelProvider,
+  ProviderCompileInput,
   ProviderEvent,
   ProviderStreamContext,
 } from '../providers/provider'
@@ -35,12 +36,14 @@ const titlingResource = {
 class FakeProvider {
   readonly providerType = 'generic.chat-completions'
   readonly requests: string[] = []
+  readonly outputTokenBudgets: number[] = []
 
   constructor(private readonly responder: () => string) {}
 
-  compile(input: { history: { messages: MessageRecord[] } }) {
+  compile(input: ProviderCompileInput) {
     const part = input.history.messages[0]?.parts[0]
     this.requests.push(part?.type === 'text' ? part.text : '')
+    this.outputTokenBudgets.push(input.maxOutputTokens)
     return { request: {}, normalizedMessages: [] } as never
   }
 
@@ -103,6 +106,36 @@ function assistantMessage(text: string): MessageRecord {
   } as MessageRecord
 }
 
+function resolvedRoute(
+  model = 'titling-model',
+  tokenSettings: { contextWindowTokens: number; maxOutputTokens: number } = {
+    contextWindowTokens: 8_192,
+    maxOutputTokens: 4_096,
+  },
+): ResolvedModelRoute {
+  return {
+    snapshot: {
+      schemaVersion: 2,
+      purpose: 'main',
+      providerType: 'generic.chat-completions',
+      providerId: 'titling-provider',
+      model,
+      reasoning: 'off',
+      endpoint: 'https://example.com/v1/chat/completions',
+      providerConfigRevision: 1,
+    },
+    modelProfile: {
+      id: model,
+      availability: 'custom',
+      capabilitySource: 'override',
+      compactThresholdTokens: 4_096,
+      ...tokenSettings,
+    },
+    provider: {} as ResolvedModelRoute['provider'],
+    apiKey: 'test-key',
+  }
+}
+
 function harness(input: {
   titleSource?: 'auto' | 'user' | 'model'
   recordMissing?: boolean
@@ -114,6 +147,7 @@ function harness(input: {
 }) {
   const bus = new RuntimeEventBus()
   const provider = new FakeProvider(input.responder ?? (() => '修复终端竞态'))
+  const defaultRoute = resolvedRoute()
   const createProvider = vi.fn(() => provider as unknown as ModelProvider)
   const applied: string[] = []
   const diagnostics: string[] = []
@@ -141,7 +175,7 @@ function harness(input: {
     events: bus,
     resolveRoute: async (_config, _record, completedRunRoute) => {
       input.onResolvedRoute?.(completedRunRoute)
-      return input.noRoute ? undefined : (completedRunRoute ?? ({} as never))
+      return input.noRoute ? undefined : (completedRunRoute ?? defaultRoute)
     },
     getCompletedRunRoute: () => input.completedRunRoute,
     createProvider,
@@ -176,15 +210,13 @@ describe('sanitizeModelTitle', () => {
   it('rejects empty output and caps length', () => {
     expect(sanitizeModelTitle('')).toBeUndefined()
     expect(sanitizeModelTitle('  \n "" \n')).toBeUndefined()
-    expect(sanitizeModelTitle('x'.repeat(200))).toHaveLength(120)
+    expect(sanitizeModelTitle('x'.repeat(200))).toHaveLength(128)
   })
 })
 
 describe('ConversationTitlingService', () => {
   it('passes the completed Run frozen route into route resolution', async () => {
-    const completedRunRoute = {
-      snapshot: { model: 'frozen-main' },
-    } as ResolvedModelRoute
+    const completedRunRoute = resolvedRoute('frozen-main')
     const observed: Array<ResolvedModelRoute | undefined> = []
     const { bus, service } = harness({
       completedRunRoute,
@@ -209,6 +241,26 @@ describe('ConversationTitlingService', () => {
       '修复 Windows 终端尺寸调整的竞态问题',
     )
     expect(provider.requests[0]).toContain('已在 pool.ts 中修复')
+  })
+
+  it('uses the route output budget and keeps complete source messages', async () => {
+    const userText = `${'u'.repeat(2_100)}user-tail`
+    const assistantText = `${'a'.repeat(2_100)}assistant-tail`
+    const completedRunRoute = resolvedRoute('large-output-model', {
+      contextWindowTokens: 16_384,
+      maxOutputTokens: 8_192,
+    })
+    const { bus, provider, service } = harness({
+      completedRunRoute,
+      messages: [userMessage(userText), assistantMessage(assistantText)],
+    })
+
+    bus.publishAgent(completedEvent(1))
+    await service.settle()
+
+    expect(provider.outputTokenBudgets).toEqual([8_192])
+    expect(provider.requests[0]).toContain(userText)
+    expect(provider.requests[0]).toContain(assistantText)
   })
 
   it('never attempts a Session twice in one process', async () => {
@@ -301,7 +353,7 @@ describe('ConversationTitlingService', () => {
       } as unknown as SessionService,
       prompts: PromptRegistry.fromResources([titlingResource]),
       events: bus,
-      resolveRoute: async () => ({}) as ResolvedModelRoute,
+      resolveRoute: async () => resolvedRoute(),
       createProvider: () => provider as unknown as ModelProvider,
     })
 

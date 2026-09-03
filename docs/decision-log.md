@@ -374,3 +374,9 @@
 - 输出契约：Run 冻结默认 256 KiB/500 行的单次工具输出配置。统一出口只把 256 KiB 字节值作为 `bounded` projection 的最终安全保险；500 行值通过执行上下文交给工具自行解释，不再统一截断所有结果。`read_file` 的行预算只计算源文件正文，默认返回完整 500 行后再附 continuation footer；paged/passthrough 工具自行保证 continuation。AppConfig v25 删除 token/read 重复预算，Headless v5 与 Runtime Identity v6 记录 bytes/lines/worker timeout/`maxSubagents`，SQLite v10 只增加 active leaf 查询索引。Command/Terminal/Subagent/Swarm 永久尝试留档，Fetch/Search 保存已获取结果，MCP 超过自身阈值才落完整 JSON；捕获失败显式返回 unavailable/error。
 - 文件续读：`read_file` 不再向模型暴露绑定路径、文件身份和字节 offset 的 base64 cursor。普通分页只返回/接收 1-based `nextStartLine/startLine`；超长单行或无换行 EOF 的 append 额外使用 0-based Unicode code-point `nextStartCharacter/startCharacter`，内部仍流式换算字节位置并在 UTF-8 边界停下。
 - 后台句柄：Subagent 与 Swarm 的模型操作 target 共享当前进程递增且不复用的 Agent 正整数空间；Terminal 使用相同形状但保留独立数字空间，由 target `type` 区分。两者重启后都失效。Agent durable UUID 继续用于 SQLite、Renderer Agents API、事件、日志与内部父子关系，但模型工具 schema 不接受 UUID；`background_list` 为历史 root 懒分配当前进程 target，Swarm 快照提供 child target，持久 manifest 不保存操作句柄。
+
+## 2026-09-03 — 对话起名只约束标题长度，不另设生成预算
+
+- 状态：已采纳并实现；修正 2026-08-16 对话起名方案中的独立生成边界，route 选择、标题来源和一次尝试语义不变。
+- 请求边界：删除起名服务私有的 15 秒 timeout、128 output-token 上限和首条消息/回复各 2,000 字符截断。Provider 编译沿用所选模型 route 的正常输出预算，生命周期取消继续由应用退出时的 AbortSignal 负责。
+- 标题边界：模型完成后仍只取首个非空文本行并清理引号、标签和句末标点，最终与手工标题共用 128 字符上限。限制落在持久化标题而不是模型生成 token 上，避免 reasoning 模型在形成最终文本前耗尽标题专用预算。
