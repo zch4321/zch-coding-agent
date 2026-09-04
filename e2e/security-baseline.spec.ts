@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { AGENT_API_KEYS } from '../shared/agent-api'
 import { delay } from '../shared/async/delay'
+import { APP_CONFIG_SCHEMA_VERSION } from '../shared/config'
 import {
   disposeElectronHarness,
   launchElectronHarness,
@@ -58,7 +59,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 25,
+          schemaVersion: APP_CONFIG_SCHEMA_VERSION,
           models: {
             defaultModelProvider: 'deepseek',
             defaultModelReasoning: 'high',
