@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { delay } from '../../shared/async/delay'
 
 export type JsonObject = Record<string, unknown>
 
@@ -29,7 +30,12 @@ export interface FakeProvider {
   readonly modelCatalogRequests: number
   queue(
     chunks: JsonObject[],
-    options?: { chunkDelayMs?: number; waitForRequestCount?: number },
+    options?: {
+      chunkDelayMs?: number
+      waitForRequestCount?: number
+      match?: (request: CapturedProviderRequest) => boolean
+      gate?: boolean
+    },
   ): void
   armSecondResponseGate(): void
   armResponseGate(requestNumbers: number[]): void
@@ -56,6 +62,8 @@ export async function startFakeProvider(): Promise<FakeProvider> {
     chunks: JsonObject[]
     chunkDelayMs: number
     waitForRequestCount?: number
+    match?: (request: CapturedProviderRequest) => boolean
+    gate: boolean
   }> = []
   const requests: CapturedProviderRequest[] = []
   const requestCountWaiters: Array<{
@@ -86,11 +94,12 @@ export async function startFakeProvider(): Promise<FakeProvider> {
         return
       }
 
-      requests.push({
+      const captured = {
         authorization: request.headers.authorization ?? '',
         body: await parseJsonBody(request),
         url: request.url,
-      })
+      }
+      requests.push(captured)
       for (let index = requestCountWaiters.length - 1; index >= 0; index -= 1) {
         const waiter = requestCountWaiters[index]!
         if (requests.length < waiter.count) continue
@@ -98,7 +107,11 @@ export async function startFakeProvider(): Promise<FakeProvider> {
         waiter.resolve()
       }
 
-      const queued = queuedResponses.shift()
+      const queuedIndex = queuedResponses.findIndex(
+        (candidate) => candidate.match?.(captured) ?? true,
+      )
+      const queued =
+        queuedIndex < 0 ? undefined : queuedResponses.splice(queuedIndex, 1)[0]
       if (!queued) {
         response.writeHead(500, { 'content-type': 'application/json' })
         response.end(JSON.stringify({ error: 'unexpected provider call' }))
@@ -117,7 +130,10 @@ export async function startFakeProvider(): Promise<FakeProvider> {
         })
       }
 
-      if (gatedRequestNumbers.has(requests.length) && responseGatePromise) {
+      if (
+        (queued.gate || gatedRequestNumbers.has(requests.length)) &&
+        responseGatePromise
+      ) {
         await responseGatePromise
       }
 
@@ -131,9 +147,7 @@ export async function startFakeProvider(): Promise<FakeProvider> {
       for (const chunk of queued.chunks) {
         response.write(`data: ${JSON.stringify(chunk)}\n\n`)
         if (queued.chunkDelayMs > 0) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, queued.chunkDelayMs),
-          )
+          await delay(queued.chunkDelayMs)
         }
       }
       response.write('data: [DONE]\n\n')
@@ -174,6 +188,8 @@ export async function startFakeProvider(): Promise<FakeProvider> {
         ...(options?.waitForRequestCount === undefined
           ? {}
           : { waitForRequestCount: options.waitForRequestCount }),
+        ...(options?.match ? { match: options.match } : {}),
+        gate: options?.gate ?? false,
       })
     },
     armSecondResponseGate() {

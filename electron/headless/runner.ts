@@ -1,4 +1,10 @@
-import { access, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import {
+  accessPath as access,
+  canonicalPath as realpath,
+  makeDirectory as mkdir,
+  makeTemporaryDirectory as mkdtemp,
+  removePath as rm,
+} from '../common/filesystem'
 import { randomUUID } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
@@ -24,7 +30,6 @@ import {
   type HeadlessRunStatus,
 } from './contracts'
 import { HeadlessEventWriter, HeadlessRunMetrics } from './event-stream'
-import { collectWorkspacePatch } from './patch'
 import { headlessDatabasePath } from '../persistence/database-service'
 import { OperationalLogService } from '../operational-logging/service'
 import { nodeOperationalLoggerFactory } from '../operational-logging/node-logger'
@@ -165,6 +170,7 @@ export async function runHeadlessAgent(
     eventListeners: [metricsListener, ...(options.eventListeners ?? [])],
     onDiagnostic: headlessDiagnostic,
     operationalLog,
+    sessionTempRootDirectory: path.join(artifactsDirectory, 'sessions'),
   }).catch(async (error: unknown) => {
     operationalLog.log({
       level: 'error',
@@ -324,8 +330,10 @@ export async function runHeadlessAgent(
       options.signal?.removeEventListener('abort', relayAbort)
     }
 
+    if (sessionId) {
+      await runtime.services.sessions.quiesceBackgroundTasks(sessionId)
+    }
     const status = classifyStatus({ completion, timedOut, incompleteReason })
-    const patch = await collectWorkspacePatch({ workspace, artifactsDirectory })
     const completedAt = new Date().toISOString()
     const resultPath = path.join(artifactsDirectory, 'result.json')
     const identityPath = path.join(artifactsDirectory, 'identity.json')
@@ -340,7 +348,7 @@ export async function runHeadlessAgent(
       swarmsEnabled: false,
     })
     const result: HeadlessResult = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       status,
       sessionId: sessionId!,
       runIds,
@@ -367,8 +375,6 @@ export async function runHeadlessAgent(
           }.jsonl`,
         ),
         operationalLogDirectory,
-        ...(patch.path ? { patchPath: patch.path } : {}),
-        patchStatus: patch.status,
       },
       ...(completion?.error ? { error: { ...completion.error } } : {}),
     }

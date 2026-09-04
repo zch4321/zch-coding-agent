@@ -1,3 +1,5 @@
+import { delay } from '../shared/async/delay'
+
 export type DisposeTask = () => Promise<void> | void
 
 export interface Disposable {
@@ -109,37 +111,32 @@ export class Disposer {
     return report
   }
 
-  #runTask(
+  async #runTask(
     task: DisposeTask,
     timeoutMs: number,
   ): Promise<'completed' | 'failed' | 'timeout'> {
-    return new Promise((resolve) => {
-      let settled = false
-      const finish = (result: 'completed' | 'failed' | 'timeout') => {
-        if (settled) {
-          return
-        }
+    const waitController = new AbortController()
+    const taskResult = Promise.resolve()
+      .then(task)
+      .then(
+        () => 'completed' as const,
+        (error: unknown) => {
+          try {
+            this.#onError(error)
+          } catch {
+            // Cleanup failures must not create a second failure path.
+          }
+          return 'failed' as const
+        },
+      )
 
-        settled = true
-        clearTimeout(timer)
-        resolve(result)
-      }
-      const timer = setTimeout(() => finish('timeout'), timeoutMs)
-
-      Promise.resolve()
-        .then(task)
-        .then(
-          () => finish('completed'),
-          (error: unknown) => {
-            try {
-              this.#onError(error)
-            } catch {
-              // Cleanup failures must not create a second failure path.
-            }
-
-            finish('failed')
-          },
-        )
-    })
+    try {
+      return await Promise.race([
+        taskResult,
+        delay(timeoutMs, waitController.signal).then(() => 'timeout' as const),
+      ])
+    } finally {
+      waitController.abort()
+    }
   }
 }

@@ -18,7 +18,6 @@ function registry(
       defaultRisk: 'low',
       supportsAbort: true,
       defaultTimeoutMs: 1_000,
-      maxOutputBytes: 1_024,
       async execute() {
         return { status: 'ok', content: null }
       },
@@ -83,7 +82,6 @@ describe('session tool catalog', () => {
       defaultRisk: 'low',
       supportsAbort: true,
       defaultTimeoutMs: null,
-      maxOutputBytes: 1_024,
       async execute() {
         return { status: 'ok', content: null }
       },

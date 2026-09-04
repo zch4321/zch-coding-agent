@@ -2,6 +2,7 @@
 import { NAlert, NButton, NInput, NModal, NSpace } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { CONVERSATION_TITLE_MAX } from '../../../shared/conversation-titles'
 import ConfirmDialog from './ConfirmDialog.vue'
 
 type MessageAction = 'edit' | 'fork' | 'retry'
@@ -117,7 +118,7 @@ const messageActionPositiveText = computed(() => {
   >
     <NInput
       :value="renameValue"
-      maxlength="120"
+      :maxlength="CONVERSATION_TITLE_MAX"
       @update:value="emit('update:renameValue', $event)"
     />
     <NSpace justify="end" class="modal-actions">

@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { renameSync } from 'node:fs'
-import { mkdir, stat } from 'node:fs/promises'
+import {
+  fileStatus as stat,
+  makeDirectory as mkdir,
+  renamePathSync as renameSync,
+} from '../common/filesystem'
 import path from 'node:path'
 import type {
   LoggingConfig,

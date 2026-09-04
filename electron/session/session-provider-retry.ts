@@ -79,26 +79,6 @@ export function providerTurnRetryDecision(
   }
 }
 
-/** Waits for an abortable bounded Provider retry delay. */
-export function waitForProviderTurnRetry(
-  ms: number,
-  signal: AbortSignal,
-): Promise<void> {
-  if (ms <= 0) return Promise.resolve()
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(finish, ms)
-    const abort = () => finish(signal.reason ?? new Error('Run interrupted'))
-    function finish(error?: unknown): void {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', abort)
-      if (error === undefined) resolve()
-      else reject(error)
-    }
-    if (signal.aborted) abort()
-    else signal.addEventListener('abort', abort, { once: true })
-  })
-}
-
 function retryableHttpFailure(error: ProviderTransportError): boolean {
   const providerCode = error.providerErrorCode?.toLowerCase()
   if (

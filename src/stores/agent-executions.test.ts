@@ -299,7 +299,7 @@ describe('agent execution store', () => {
       approval: {
         callId: 'call:child-write' as CallId,
         kind: 'tool',
-        tool: 'create_file',
+        tool: 'write_file',
         arguments: { path: 'child.txt' },
         reason: 'Create the delegated output',
         policySignals: [],
@@ -310,7 +310,7 @@ describe('agent execution store', () => {
 
     expect(store.live[running.id]?.approval).toMatchObject({
       callId: 'call:child-write',
-      tool: 'create_file',
+      tool: 'write_file',
     })
     await expect(store.decideApproval(running.id, 'allow')).resolves.toBe(true)
     expect(decideAgentExecutionApproval).toHaveBeenCalledWith({

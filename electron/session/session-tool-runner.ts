@@ -1,5 +1,5 @@
 import type { RunStatus, ToolApprovalSummary } from '../../shared/agent-events'
-import type { CallId, MessageId } from '../../shared/ids'
+import type { CallId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'
@@ -37,10 +37,6 @@ import type {
 import { normalizeLlmUsage } from '../providers/usage'
 import type { McpToolGateway } from '../tools/mcp-tools'
 import { appendToolResult } from './canonical-history'
-import type {
-  FileChangeExecutionPort,
-  PreparedFileChange,
-} from './file-change-execution'
 import {
   toolResultProjectionText,
   toolResultProjectionValue,
@@ -50,6 +46,7 @@ import {
   associateDiagnosticCode,
   associateDiagnosticId,
 } from '../operational-logging/diagnostic-id'
+import { aliasSessionTempPathFields } from '../session-temp/path-alias'
 
 type ToolAttemptStage = 'validation' | 'permission' | 'execution'
 
@@ -69,18 +66,8 @@ interface ToolCallExecution {
   result?: ToolResult
   approvedBy: string
   policySignals: JsonValue[]
-  diffHash?: string
-  preparedFileChange?: PreparedFileChange
   approvalSummary?: ToolApprovalSummary
   durationMs: number
-}
-
-/** Wraps a durable file-change preparation failure while preserving its original cause. */
-class FileChangePreparationFailure extends Error {
-  constructor(readonly cause: unknown) {
-    super('Durable file change preparation failed')
-    this.name = 'FileChangePreparationFailure'
-  }
 }
 
 function attemptOutcome(
@@ -128,6 +115,21 @@ function projectedEventResult(
   return { status: source.status, message }
 }
 
+function modelVisibleToolResult(
+  result: ToolResult,
+  session: SessionState,
+): ToolResult {
+  return result.status === 'ok'
+    ? {
+        ...result,
+        content: aliasSessionTempPathFields(
+          result.content,
+          session.sessionTemp,
+        ),
+      }
+    : result
+}
+
 function operationalToolCorrelation(session: SessionState, run: ActiveRun) {
   return {
     sessionId: session.sessionId,
@@ -140,11 +142,10 @@ function operationalToolCorrelation(session: SessionState, run: ActiveRun) {
   }
 }
 
-/** Executes tool calls, approvals, file changes, and provider-facing result annotations. */
+/** Executes tool calls, approvals, and provider-facing result projections. */
 export class SessionToolRunner {
   readonly #configStore: ConfigStore
   readonly #pluginBus: PluginEventBus | undefined
-  readonly #fileChangeExecution: FileChangeExecutionPort | undefined
   readonly #promptRegistry: PromptRegistry | undefined
   readonly #fetchImpl: SessionManagerOptions['fetchImpl']
   readonly #autoApproverFactory: SessionManagerOptions['autoApproverFactory']
@@ -166,7 +167,6 @@ export class SessionToolRunner {
   constructor(options: {
     configStore: ConfigStore
     pluginBus?: PluginEventBus
-    fileChangeExecution?: FileChangeExecutionPort
     promptRegistry?: PromptRegistry
     fetchImpl?: typeof fetch
     autoApproverFactory: SessionManagerOptions['autoApproverFactory']
@@ -187,7 +187,6 @@ export class SessionToolRunner {
   }) {
     this.#configStore = options.configStore
     this.#pluginBus = options.pluginBus
-    this.#fileChangeExecution = options.fileChangeExecution
     this.#promptRegistry = options.promptRegistry
     this.#fetchImpl = options.fetchImpl
     this.#autoApproverFactory = options.autoApproverFactory
@@ -207,7 +206,6 @@ export class SessionToolRunner {
     session: SessionState,
     run: ActiveRun,
     toolCalls: ToolCall[],
-    assistantMessageId: MessageId,
   ): Promise<void> {
     this.#setRunStatus(session, run, 'running_tools')
     const terminalCallIds = new Set<CallId>()
@@ -222,14 +220,7 @@ export class SessionToolRunner {
       for (const segment of this.#toolCallSegments(toolCalls)) {
         const prepared: ToolCallExecution[] = []
         for (const providerCall of segment.calls) {
-          prepared.push(
-            await this.#prepareToolCall(
-              session,
-              run,
-              providerCall,
-              assistantMessageId,
-            ),
-          )
+          prepared.push(await this.#prepareToolCall(session, run, providerCall))
         }
 
         if (segment.mode === 'parallel') {
@@ -298,7 +289,7 @@ export class SessionToolRunner {
                 'The tool batch failed before this result could be finalized',
               retryable: false,
             }
-        const projected = this.#projectForContext(call, result)
+        const projected = this.#projectForContext(session, run, call, result)
         appendToolResult(session, {
           callId: call.id,
           content: projected.projection.content,
@@ -349,7 +340,6 @@ export class SessionToolRunner {
     session: SessionState,
     run: ActiveRun,
     providerCall: ToolCall,
-    assistantMessageId: MessageId,
   ): Promise<ToolCallExecution> {
     let call = this.#toolExecutor.normalizeCall(providerCall)
     let definitionOverride: ToolDefinition | undefined
@@ -470,6 +460,7 @@ export class SessionToolRunner {
             sessionId: session.sessionId,
             runId: run.runId,
             workspace: session.workspace,
+            sessionTemp: session.sessionTemp,
             mode: session.mode,
             call,
             definition: inspected.definition,
@@ -564,7 +555,6 @@ export class SessionToolRunner {
             }
 
             execution.approvedBy = authorization.approvedCall.approvedBy
-            execution.diffHash = authorization.approvedCall.diffHash
             execution.approvedCall = authorization.approvedCall
             execution.definition = inspected.definition
             const preflight = await this.#contextGate.preflightToolContext(
@@ -580,29 +570,11 @@ export class SessionToolRunner {
               execution.result = preflight.result
             } else {
               execution.attemptStage = 'execution'
-              try {
-                execution.preparedFileChange =
-                  session.visibility === 'public'
-                    ? await this.#fileChangeExecution?.prepareMutation({
-                        sessionId: session.sessionId,
-                        assistantMessageId,
-                        workspace: session.workspace,
-                        approvedCall: authorization.approvedCall,
-                        diff: authorization.diff ?? '',
-                        maximumPayloadBytes: run.fileChangeHistoryBytes,
-                      })
-                    : undefined
-              } catch (error) {
-                throw new FileChangePreparationFailure(error)
-              }
             }
           }
         }
       }
     } catch (error) {
-      if (error instanceof FileChangePreparationFailure) {
-        throw error.cause
-      }
       execution.result = toolFailure(error, run.controller.signal)
     } finally {
       execution.durationMs += performance.now() - startedAt
@@ -646,10 +618,14 @@ export class SessionToolRunner {
           execution.approvedCall,
           {
             sessionId: session.sessionId,
+            ownerSessionId: session.ownerSessionId,
             runId: run.runId,
             workspace: {
               canonicalPath: session.workspace,
             },
+            sessionTemp: session.sessionTemp,
+            maxSubagents: run.maxSubagents,
+            toolOutputLimits: run.toolOutputLimits,
             readOnlyWorkspace: session.readOnlyWorkspace,
           },
           run.controller.signal,
@@ -680,33 +656,11 @@ export class SessionToolRunner {
     terminalCallIds: Set<CallId>,
   ): Promise<void> {
     const startedAt = performance.now()
-    let result: ToolResult = execution.result ?? {
+    const result: ToolResult = execution.result ?? {
       status: 'error',
       code: 'TOOL_EXECUTION_MISSING_RESULT',
       message: 'The tool call completed without a result',
       retryable: false,
-    }
-
-    if (
-      result.status === 'ok' &&
-      execution.preparedFileChange &&
-      this.#fileChangeExecution
-    ) {
-      const mutation = await this.#fileChangeExecution
-        .commitMutation({
-          workspace: session.workspace,
-          prepared: execution.preparedFileChange,
-        })
-        .catch((error: unknown) => {
-          this.#onDiagnostic('Failed to finalize durable file change', error, {
-            audience: 'internal',
-          })
-          return {
-            status: 'warning' as const,
-            warningCode: 'CHANGE_HISTORY_PERSIST_FAILED' as const,
-          }
-        })
-      result = annotateFileMutationResult(result, mutation)
     }
 
     let providerResult = result
@@ -726,6 +680,8 @@ export class SessionToolRunner {
       providerResult = toolFailure(error, run.controller.signal)
     }
     const projected = this.#projectForContext(
+      session,
+      run,
       execution.call,
       providerResult,
       execution.definitionOverride,
@@ -789,7 +745,6 @@ export class SessionToolRunner {
       result: toJsonValue(result),
       approvedBy: execution.approvedBy,
       policySignals: execution.policySignals,
-      diffHash: execution.diffHash,
       durationMs,
       totalBytes: 'totalBytes' in result ? result.totalBytes : undefined,
       truncated: 'truncated' in result ? result.truncated : undefined,
@@ -835,6 +790,8 @@ export class SessionToolRunner {
   }
 
   #projectForContext(
+    session: SessionState,
+    run: ActiveRun,
     call: ToolCall,
     result: ToolResult,
     definitionOverride?: ToolDefinition,
@@ -844,7 +801,7 @@ export class SessionToolRunner {
   } {
     const projection = this.#toolExecutor.projectResultForModel(
       call,
-      result,
+      modelVisibleToolResult(result, session),
       definitionOverride,
       (message, error) => this.#onDiagnostic(message, error),
     )
@@ -854,7 +811,7 @@ export class SessionToolRunner {
     )
     const bounded = boundToolResultProjectionForContext(
       projection,
-      this.#configStore.getPublicConfig().limits,
+      run.toolOutputLimits,
     )
     return {
       projection: bounded,
@@ -874,34 +831,5 @@ export class SessionToolRunner {
       return false
     }
     return true
-  }
-}
-
-function annotateFileMutationResult(
-  result: Extract<ToolResult, { status: 'ok' }>,
-  mutation: Awaited<ReturnType<FileChangeExecutionPort['commitMutation']>>,
-): ToolResult {
-  const content =
-    result.content &&
-    typeof result.content === 'object' &&
-    !Array.isArray(result.content)
-      ? result.content
-      : { result: result.content }
-  return {
-    ...result,
-    content:
-      mutation.status === 'recorded'
-        ? {
-            ...content,
-            mutationSucceeded: true,
-            revertAvailable: true,
-            fileChangeId: mutation.fileChange.id,
-          }
-        : {
-            ...content,
-            mutationSucceeded: true,
-            warningCode: mutation.warningCode,
-            revertAvailable: false,
-          },
   }
 }

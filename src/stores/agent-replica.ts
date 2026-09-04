@@ -6,10 +6,6 @@ import type {
   DurableCommitEnvelope,
   SessionSearchHit,
 } from '../../shared/domain-state-api'
-import type {
-  FileChangeListCursor,
-  FileChangeSummary,
-} from '../../shared/file-change'
 import type { ProjectId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { ProjectRecord } from '../../shared/project'
@@ -47,19 +43,6 @@ function mergeSessions(
   )
 }
 
-function mergeFileChanges(
-  current: FileChangeSummary[],
-  records: readonly FileChangeSummary[],
-): FileChangeSummary[] {
-  const byId = new Map(current.map((record) => [record.id, record]))
-  for (const record of records) byId.set(record.id, structuredClone(record))
-  return [...byId.values()].sort(
-    (left, right) =>
-      right.createdAt.localeCompare(left.createdAt) ||
-      right.id.localeCompare(left.id),
-  )
-}
-
 /** Stores the server-authoritative durable Project, Session, and page caches. */
 export const useAgentReplicaStore = defineStore('agent-replica', {
   state: () => ({
@@ -68,7 +51,6 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
     selectedProjectId: undefined as ProjectId | undefined,
     selectedSessionId: undefined as SessionId | undefined,
     messagesBySessionId: {} as Record<string, MessageRecord[]>,
-    fileChangesBySessionId: {} as Record<string, FileChangeSummary[]>,
     runtimeBySessionId: {} as Record<
       string,
       ActiveRunPublicSnapshot | undefined
@@ -81,11 +63,6 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
     sessionNextBefore: undefined as SessionListCursor | undefined,
     messageHasMoreBySessionId: {} as Record<string, boolean>,
     messageNextBeforeSeqBySessionId: {} as Record<string, number | undefined>,
-    fileChangeHasMoreBySessionId: {} as Record<string, boolean>,
-    fileChangeNextBeforeBySessionId: {} as Record<
-      string,
-      FileChangeListCursor | undefined
-    >,
     cursor: undefined as BackendEventCursor | undefined,
     searchHits: [] as SessionSearchHit[],
     searchGeneration: 0,
@@ -108,11 +85,6 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         ? (state.messagesBySessionId[state.selectedSessionId] ?? [])
         : []
     },
-    selectedFileChanges(state): FileChangeSummary[] {
-      return state.selectedSessionId
-        ? (state.fileChangesBySessionId[state.selectedSessionId] ?? [])
-        : []
-    },
     selectedRuntime(state): ActiveRunPublicSnapshot | undefined {
       return state.selectedSessionId
         ? state.runtimeBySessionId[state.selectedSessionId]
@@ -126,11 +98,6 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
     selectedMessageHasMore(state): boolean {
       return state.selectedSessionId
         ? (state.messageHasMoreBySessionId[state.selectedSessionId] ?? false)
-        : false
-    },
-    selectedFileChangeHasMore(state): boolean {
-      return state.selectedSessionId
-        ? (state.fileChangeHasMoreBySessionId[state.selectedSessionId] ?? false)
         : false
     },
   },
@@ -346,69 +313,6 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         : undefined
       return true
     },
-    /** Replaces the cached FileChange page for a Session. */
-    async loadFileChanges(targetSessionId?: SessionId): Promise<boolean> {
-      const sessionId = targetSessionId ?? this.selectedSessionId
-      const api = window.agentApi
-      if (!api || !sessionId) return false
-      const result = await api.listFileChanges({
-        version: IPC_VERSION,
-        sessionId,
-        limit: 200,
-      })
-      if (!result.ok) {
-        this.error = result.error.message
-        return false
-      }
-      this.fileChangesBySessionId[sessionId] = structuredClone(
-        result.value.page.records,
-      )
-      this.fileChangeHasMoreBySessionId[sessionId] = result.value.page.hasMore
-      this.fileChangeNextBeforeBySessionId[sessionId] = result.value.page
-        .hasMore
-        ? structuredClone(result.value.page.nextBefore)
-        : undefined
-      return true
-    },
-    /** Appends one older FileChange page using its stable compound cursor. */
-    async loadOlderFileChanges(targetSessionId?: SessionId): Promise<boolean> {
-      const sessionId = targetSessionId ?? this.selectedSessionId
-      const api = window.agentApi
-      const before = sessionId
-        ? this.fileChangeNextBeforeBySessionId[sessionId]
-        : undefined
-      if (
-        !api ||
-        !sessionId ||
-        !this.fileChangeHasMoreBySessionId[sessionId] ||
-        !before
-      ) {
-        return false
-      }
-      const result = await api.listFileChanges({
-        version: IPC_VERSION,
-        sessionId,
-        before: {
-          createdAt: before.createdAt,
-          fileChangeId: before.fileChangeId,
-        },
-        limit: 200,
-      })
-      if (!result.ok) {
-        this.error = result.error.message
-        return false
-      }
-      this.fileChangesBySessionId[sessionId] = mergeFileChanges(
-        this.fileChangesBySessionId[sessionId] ?? [],
-        result.value.page.records,
-      )
-      this.fileChangeHasMoreBySessionId[sessionId] = result.value.page.hasMore
-      this.fileChangeNextBeforeBySessionId[sessionId] = result.value.page
-        .hasMore
-        ? structuredClone(result.value.page.nextBefore)
-        : undefined
-      return true
-    },
     /** Searches active Sessions and upserts uncached hit summaries. */
     async search(text: string, projectId?: ProjectId): Promise<void> {
       const api = window.agentApi
@@ -568,18 +472,6 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         return 'applied' as const
       }
 
-      const change = commit.change
-      if (change.mode === 'invalidate_all') {
-        this.fileChangesBySessionId = {}
-        this.fileChangeHasMoreBySessionId = {}
-        this.fileChangeNextBeforeBySessionId = {}
-        return 'applied' as const
-      }
-      const sessionId = change.sessionId
-      this.fileChangesBySessionId[sessionId] = mergeFileChanges(
-        this.fileChangesBySessionId[sessionId] ?? [],
-        [change.fileChange],
-      )
       return 'applied' as const
     },
     /** Removes every cache whose Session is no longer represented locally. */
@@ -587,20 +479,16 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
       const sessionIds = new Set(this.sessions.map((session) => session.id))
       const keys = new Set([
         ...Object.keys(this.messagesBySessionId),
-        ...Object.keys(this.fileChangesBySessionId),
         ...Object.keys(this.runtimeBySessionId),
         ...Object.keys(this.traceCaptureBySessionId),
       ])
       for (const key of keys) {
         if (!sessionIds.has(key as SessionId)) {
           delete this.messagesBySessionId[key]
-          delete this.fileChangesBySessionId[key]
           delete this.runtimeBySessionId[key]
           delete this.traceCaptureBySessionId[key]
           delete this.messageHasMoreBySessionId[key]
           delete this.messageNextBeforeSeqBySessionId[key]
-          delete this.fileChangeHasMoreBySessionId[key]
-          delete this.fileChangeNextBeforeBySessionId[key]
         }
       }
     },

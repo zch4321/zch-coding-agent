@@ -283,7 +283,6 @@ export const TraceEventSchema = Type.Union([
       result: JsonValueSchema,
       approvedBy: Type.String({ maxLength: 64 }),
       policySignals: Type.Array(JsonValueSchema, { maxItems: 256 }),
-      diffHash: Type.Optional(Type.String({ maxLength: 128 })),
       durationMs: Type.Number({ minimum: 0 }),
       totalBytes: Type.Optional(Type.Integer({ minimum: 0 })),
       truncated: Type.Optional(Type.Boolean()),
@@ -484,7 +483,6 @@ export type TraceEventInput =
       result: JsonValue
       approvedBy: string
       policySignals: JsonValue[]
-      diffHash?: string
       durationMs: number
       totalBytes?: number
       truncated?: boolean

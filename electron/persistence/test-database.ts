@@ -1,4 +1,7 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import {
+  makeTemporaryDirectory as mkdtemp,
+  removePath as rm,
+} from '../common/filesystem'
 import os from 'node:os'
 import path from 'node:path'
 import {

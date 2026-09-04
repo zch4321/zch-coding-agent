@@ -396,7 +396,7 @@ function assistantTurnCandidate(
   return record
 }
 
-/** Appends a tool result linked to its provider call ID and optional file-change metadata. */
+/** Appends a tool result linked to its provider call ID. */
 export function appendToolResult(
   state: CanonicalHistoryState,
   input: {

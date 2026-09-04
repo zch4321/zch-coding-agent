@@ -1037,8 +1037,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         callId: approval.callId,
         tool: approval.tool,
         reason: approval.reason,
-        diff: approval.diff ?? '',
-        diffHash: approval.diffHash,
         decision: input.decision === 'allow' ? 'allowed' : 'denied',
       }
       overlay.approval = undefined

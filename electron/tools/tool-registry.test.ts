@@ -5,6 +5,8 @@ import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
 import { PermissionPipeline } from '../permission/permission-pipeline'
 import { registerOrchestrationTools } from '../session/orchestration-tools'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
+import { projectToolResultForModel } from './tool-result-projection'
+import { boundToolResultProjectionForContext } from './context-budget'
 
 describe('ToolRegistry hard output boundary', () => {
   it('strips provider-only intent metadata again at the executor boundary', () => {
@@ -24,7 +26,6 @@ describe('ToolRegistry hard output boundary', () => {
       defaultRisk: 'low',
       supportsAbort: true,
       defaultTimeoutMs: 1_000,
-      maxOutputBytes: 1_024,
       async execute() {
         return { status: 'ok', content: [] }
       },
@@ -73,7 +74,6 @@ describe('ToolRegistry hard output boundary', () => {
       defaultRisk: 'low',
       supportsAbort: true,
       defaultTimeoutMs: 1_000,
-      maxOutputBytes: 1_024,
       async execute() {
         return { status: 'ok', content: [] }
       },
@@ -113,7 +113,6 @@ describe('ToolRegistry hard output boundary', () => {
       defaultRisk: 'low',
       supportsAbort: true,
       defaultTimeoutMs: 1_000,
-      maxOutputBytes: 1_024,
       async execute() {
         return { status: 'ok', content: [] }
       },
@@ -191,7 +190,6 @@ describe('ToolRegistry hard output boundary', () => {
       defaultRisk: 'low',
       supportsAbort: true,
       defaultTimeoutMs: 1_000,
-      maxOutputBytes: 1_024,
       async execute() {
         return { status: 'ok', content: '😀'.repeat(10_000) }
       },
@@ -230,9 +228,17 @@ describe('ToolRegistry hard output boundary', () => {
       signal,
     )
 
+    expect(result).toMatchObject({ status: 'ok' })
+    expect(Buffer.byteLength(JSON.stringify(result), 'utf8')).toBeGreaterThan(
+      1_024,
+    )
+    const bounded = boundToolResultProjectionForContext(
+      projectToolResultForModel({ call, definition, result }),
+      { maxToolOutputBytes: 1_024 },
+    )
     expect(
-      Buffer.byteLength(JSON.stringify(result), 'utf8'),
+      Buffer.byteLength((bounded.content[0] as { text: string }).text, 'utf8'),
     ).toBeLessThanOrEqual(1_024)
-    expect(result).toMatchObject({ status: 'ok', truncated: true })
+    expect(bounded.truncated).toBe(true)
   })
 })

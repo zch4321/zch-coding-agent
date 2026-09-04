@@ -15,6 +15,7 @@ describe('conversation titles', () => {
   })
 
   it('trims and caps a user-supplied title', () => {
+    expect(CONVERSATION_TITLE_MAX).toBe(128)
     expect(normalizeTitle('  hello  ')).toBe('hello')
     const long = 'y'.repeat(300)
     expect(normalizeTitle(long)).toHaveLength(CONVERSATION_TITLE_MAX)

@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { AGENT_API_KEYS } from '../shared/agent-api'
+import { delay } from '../shared/async/delay'
+import { APP_CONFIG_SCHEMA_VERSION } from '../shared/config'
 import {
   disposeElectronHarness,
   launchElectronHarness,
@@ -57,7 +59,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
       ok: true,
       value: {
         config: {
-          schemaVersion: 24,
+          schemaVersion: APP_CONFIG_SCHEMA_VERSION,
           models: {
             defaultModelProvider: 'deepseek',
             defaultModelReasoning: 'high',
@@ -73,6 +75,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
           subagents: {
             enabled: false,
             workerTimeoutMs: 1_800_000,
+            maxSubagents: 32,
           },
           mcpServers: [],
         },
@@ -202,7 +205,7 @@ test.describe.serial('Electron security and IPC baseline', () => {
 
     expect(inlineStyleWidth).toBe('17px')
 
-    const executionCount = await page.evaluate(async () => {
+    await page.evaluate(() => {
       const testWindow = window as Window & { __p0ExecutionCount?: number }
       testWindow.__p0ExecutionCount = 0
 
@@ -219,10 +222,12 @@ test.describe.serial('Electron security and IPC baseline', () => {
       link.href = 'javascript:window.__p0ExecutionCount += 1'
       document.body.append(link)
       link.click()
-
-      await new Promise((resolve) => setTimeout(resolve, 50))
-      return testWindow.__p0ExecutionCount
     })
+    await delay(50)
+    const executionCount = await page.evaluate(
+      () =>
+        (window as Window & { __p0ExecutionCount?: number }).__p0ExecutionCount,
+    )
 
     expect(executionCount).toBe(0)
   })

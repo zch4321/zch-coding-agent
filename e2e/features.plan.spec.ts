@@ -170,7 +170,7 @@ test.describe('Electron plan workflows', () => {
         },
         {
           id: 'call:e2e-same-batch-write',
-          name: 'create_file',
+          name: 'write_file',
           args: {
             path: 'same-batch-plan.txt',
             content: 'same batch approval\n',
@@ -199,7 +199,7 @@ test.describe('Electron plan workflows', () => {
     await expect(planView).toContainText('待审查')
     const approval = page.locator('.approval-card')
     await expect(approval).toBeVisible()
-    await expect(approval).toContainText('create_file')
+    await expect(approval).toContainText('write_file')
     await expect(approval).toContainText('same-batch-plan.txt')
     await approval.getByRole('button', { name: '批准', exact: true }).click()
 

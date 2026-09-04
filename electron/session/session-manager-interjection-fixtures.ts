@@ -8,17 +8,27 @@ import {
 export class InterjectionProvider extends ScriptedProviderHarness {
   calls = 0
   requests: ProviderStreamRequest['normalizedMessages'][] = []
+  readonly #holdSecondTurn: boolean
   // Resolves when the first tool-bearing turn has been consumed, allowing the
   // test to enqueue an interjection before the second provider call fires.
   firstTurnConsumed: { resolve: () => void; promise: Promise<void> }
+  secondTurnGate: { resolve: () => void; promise: Promise<void> }
 
-  constructor() {
+  constructor(options: { holdSecondTurn?: boolean } = {}) {
     super()
+    this.#holdSecondTurn = options.holdSecondTurn === true
     let resolve: () => void = () => undefined
     this.firstTurnConsumed = {
       resolve: () => resolve(),
       promise: new Promise<void>((r) => {
         resolve = r
+      }),
+    }
+    let resolveSecondTurn: () => void = () => undefined
+    this.secondTurnGate = {
+      resolve: () => resolveSecondTurn(),
+      promise: new Promise<void>((r) => {
+        resolveSecondTurn = r
       }),
     }
   }
@@ -62,6 +72,7 @@ export class InterjectionProvider extends ScriptedProviderHarness {
       return
     }
 
+    if (this.#holdSecondTurn) await this.secondTurnGate.promise
     yield {
       type: 'text.delta',
       delta: 'Acknowledged the interjection',

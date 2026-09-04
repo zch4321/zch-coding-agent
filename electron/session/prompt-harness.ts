@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { readdir, readFile } from 'node:fs/promises'
+import {
+  readDirectory as readdir,
+  readFileContents as readFile,
+} from '../common/filesystem'
 import path from 'node:path'
 import os from 'node:os'
 import type { PublicConfig } from '../../shared/config'
@@ -15,6 +18,7 @@ import type {
 import { LEGACY_DEFAULT_SYSTEM_PROMPTS } from '../../shared/system-prompts'
 import type { PromptRegistry, PromptResourceSummary } from '../prompts/registry'
 import type { ProviderToolDefinition } from '../providers/provider'
+import type { SessionTempPaths } from '../session-temp/service'
 import { estimateJsonTokens } from '../tools/context-budget'
 import { commandShellService } from '../process/command-shell'
 import {
@@ -45,6 +49,7 @@ export interface PromptSelection {
 
 interface RuntimeContextInput {
   workspace: string
+  sessionTemp?: SessionTempPaths
   mode: string
   config: PublicConfig
   providerId: string
@@ -62,6 +67,7 @@ interface RuntimeWorkspaceSnapshotReaders {
 
 interface HarnessPromptInput {
   workspace: string
+  sessionTemp?: SessionTempPaths
   mode: string
   config: PublicConfig
   providerId: string
@@ -413,6 +419,7 @@ async function prepareRuntimeContext(input: RuntimeContextInput): Promise<{
   currentTime: string
   promptContent: string
   stableVariables: Record<string, string>
+  runtimeVariables: Record<string, string>
   resource?: PromptResourceSummary
 }> {
   const locale = input.config.assistant.language
@@ -447,6 +454,11 @@ async function prepareRuntimeContext(input: RuntimeContextInput): Promise<{
     moduleStatus: escapeXmlAttribute(modules.status),
     moduleContent: modules.content,
   }
+  const runtimeVariables = {
+    sessionTempRoot: input.sessionTemp?.root ?? 'unavailable',
+    sessionArtifactsDirectory: input.sessionTemp?.artifacts ?? 'unavailable',
+    sessionScratchDirectory: input.sessionTemp?.scratch ?? 'unavailable',
+  }
 
   return {
     hash: hashJson({
@@ -457,6 +469,7 @@ async function prepareRuntimeContext(input: RuntimeContextInput): Promise<{
     currentTime,
     promptContent: prompt.content,
     stableVariables,
+    runtimeVariables,
     ...(prompt.resource ? { resource: prompt.resource } : {}),
   }
 }
@@ -478,6 +491,7 @@ async function renderRuntimeContext(
 
   return renderPromptTemplate(prepared.promptContent, {
     ...prepared.stableVariables,
+    ...prepared.runtimeVariables,
     currentTime: prepared.currentTime,
     gitSummary: git,
     projectTree,

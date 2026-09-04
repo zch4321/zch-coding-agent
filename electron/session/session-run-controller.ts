@@ -5,6 +5,7 @@ import {
 } from '../../shared/config'
 import type { RunContext } from '../../shared/context'
 import type { RunStatus } from '../../shared/agent-events'
+import { delay } from '../../shared/async/delay'
 import type { DiagnosticId, MessageId, RunId } from '../../shared/ids'
 import { randomUUID } from 'node:crypto'
 import { PROVIDER_NOTICE_VERSION } from '../../shared/notices'
@@ -26,7 +27,7 @@ import type { SessionInterjectionCoordinator } from './session-interjection-coor
 import type { SessionOrchestrationPlanner } from './session-orchestration-planner'
 import type { SessionPromptContextCoordinator } from './session-prompt-context-coordinator'
 import type { SessionProviderTurnRunner } from './session-provider-turn'
-import { delay, finalStatusFromError } from './session-run-utils'
+import { finalStatusFromError } from './session-run-utils'
 import type { SessionToolRunner } from './session-tool-runner'
 import type { SessionUserTurnPreparer } from './session-user-turn-preparer'
 import type {
@@ -185,7 +186,10 @@ export class SessionRunController {
       controller,
       status: 'idle',
       usageRecords: [],
-      fileChangeHistoryBytes: config.limits.fileChangeHistoryBytes,
+      toolOutputLimits: {
+        maxToolOutputBytes: config.limits.maxToolOutputBytes,
+        maxToolOutputLines: config.limits.maxToolOutputLines,
+      },
       done: Promise.resolve(),
       pendingSideEffects: new Set(),
       pendingInterjections: [],
@@ -195,6 +199,7 @@ export class SessionRunController {
       harnessMessageIds: [],
       requestCommitted: false,
       subagentsEnabled,
+      maxSubagents: config.subagents.maxSubagents,
       ...(swarm.toolConfig ? { swarmToolConfig: swarm.toolConfig } : {}),
       directUserInput: options.directUserInput ?? false,
       ...(options.directContext
@@ -620,7 +625,7 @@ export class SessionRunController {
             ? {}
             : { cacheMissTokens: completed.usage.cacheMissTokens }),
         }
-        const assistantRecord = appendCompletedAssistantTurn(session, {
+        appendCompletedAssistantTurn(session, {
           parts: completed.parts,
           reasoning: completed.reasoning,
           finishReason: completed.finishReason,
@@ -669,7 +674,6 @@ export class SessionRunController {
             session,
             run,
             completed.toolCalls,
-            assistantRecord.id,
           )
         } catch (error) {
           toolBatchFailed = true

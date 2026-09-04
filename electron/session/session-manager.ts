@@ -81,11 +81,16 @@ import type {
 import { SubagentRuntimeError } from '../subagent/contracts'
 import type { AgentToolAccess } from '../../shared/agent-execution'
 import { hasSideEffects } from '../permission/policy-engine'
+import { SessionTempService } from '../session-temp/service'
+import type { TerminalPool } from '../terminal/pool'
 
 const RUN_CANCEL_GRACE_MS = 2_000
 const CHILD_ORCHESTRATION_TOOL_IDS = new Set([
   'subagent_run',
   'swarm_run',
+  'background_wait',
+  'background_list',
+  'background_cancel',
   'goal_get',
   'goal_complete',
   'goal_block',
@@ -108,7 +113,6 @@ export class SessionManager {
   readonly #traceDirectory: string
   readonly #pluginBus: PluginEventBus | undefined
   readonly #skillsManager: SkillsManager | undefined
-  readonly #fileChangeExecution: SessionManagerOptions['fileChangeExecution']
   readonly #mcpManager: McpManager | undefined
   readonly #promptRegistry: PromptRegistry | undefined
   readonly #providerFactory: SessionManagerOptions['providerFactory']
@@ -134,6 +138,8 @@ export class SessionManager {
   readonly #runs: SessionRunController
   readonly #permissionPipeline = new PermissionPipeline()
   readonly #executionState: SessionManagerOptions['executionState']
+  readonly #sessionTemps: SessionTempService
+  readonly #backgroundTasks: SessionManagerOptions['backgroundTasks']
 
   /**
    * Wires session collaborators around shared session state.
@@ -147,7 +153,6 @@ export class SessionManager {
     this.#traceDirectory = options.traceDirectory
     this.#pluginBus = options.pluginBus
     this.#skillsManager = options.skillsManager
-    this.#fileChangeExecution = options.fileChangeExecution
     this.#mcpManager = options.mcpManager
     this.#promptRegistry = options.promptRegistry
     this.#providerFactory = options.providerFactory
@@ -157,6 +162,14 @@ export class SessionManager {
       options.traceLoggerFactory ??
       ((sessionId) => JsonlTraceLogger.create(this.#traceDirectory, sessionId))
     this.#executionState = options.executionState
+    this.#backgroundTasks = options.backgroundTasks
+    this.#sessionTemps =
+      options.sessionTemps ??
+      new SessionTempService({
+        rootDirectory: path.join(this.#traceDirectory, '.session-temp'),
+        onDiagnostic: (message, error) =>
+          (options.onDiagnostic ?? (() => undefined))(message, error),
+      })
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
     this.#events = new SessionEventEmitter({
       eventSink: options.eventSink,
@@ -194,6 +207,7 @@ export class SessionManager {
       mcpManager: options.mcpManager,
       subagentExecution: options.subagentExecution,
       swarmExecution: options.swarmExecution,
+      backgroundTasks: options.backgroundTasks,
       getSession: (sessionId) => this.#sessions.get(sessionId),
       emit: (session, event) => this.#emit(session, event),
     })
@@ -249,7 +263,6 @@ export class SessionManager {
     const toolRunner = new SessionToolRunner({
       configStore: this.#configStore,
       pluginBus: this.#pluginBus,
-      fileChangeExecution: this.#fileChangeExecution,
       promptRegistry: options.promptRegistry,
       fetchImpl: this.#fetchImpl,
       autoApproverFactory: this.#autoApproverFactory,
@@ -282,6 +295,11 @@ export class SessionManager {
       swarmHostEnabled: options.swarmHostEnabled ?? false,
     })
     this.#pluginBus?.setToolRegistrationPort(this.#toolRegistry)
+  }
+
+  /** Exposes the shared PTY owner to the backend background-task composition. */
+  backgroundTerminalPool(): TerminalPool {
+    return this.#terminals.pool
   }
 
   /**
@@ -403,6 +421,8 @@ export class SessionManager {
     if (this.#sessions.has(sessionId)) {
       ipcFault('CONFLICT', 'Session already exists in the live registry')
     }
+    const ownerSessionId = internal?.execution.parentSessionId ?? sessionId
+    const sessionTemp = await this.#sessionTemps.ensureSession(ownerSessionId)
     const defaultSelection = getDefaultModelSelection(publicConfig)
     const initialModelSelection = structuredClone(
       input.modelSelection ?? {
@@ -432,6 +452,8 @@ export class SessionManager {
     })
     const session: SessionState = {
       sessionId,
+      ownerSessionId,
+      sessionTemp,
       workspace: guard.workspacePath,
       mode: input.mode,
       provider: provider.id,
@@ -463,10 +485,12 @@ export class SessionManager {
         registry: this.#toolRegistry,
         allowedToolIds: session.allowedToolIds,
         subagentsEnabled: internal ? false : publicConfig.subagents.enabled,
+        maxSubagents: publicConfig.subagents.maxSubagents,
         gitToolsEnabled: session.gitToolsEnabled,
       })
       await appendInitialPromptHarness(session, {
         workspace: session.workspace,
+        sessionTemp,
         mode: session.mode,
         config: publicConfig,
         providerId: provider.id,
@@ -524,6 +548,7 @@ export class SessionManager {
     }
     const guard = await PathGuard.create(input.workspace)
     await this.#mcpManager?.activateWorkspace(guard.workspacePath)
+    const sessionTemp = await this.#sessionTemps.ensureSession(input.record.id)
     const sessionRef: { current?: SessionState } = {}
     const trace = await SessionTraceController.create({
       sessionId: input.record.id,
@@ -543,6 +568,8 @@ export class SessionManager {
     })
     const session: SessionState = {
       sessionId: input.record.id,
+      ownerSessionId: input.record.id,
+      sessionTemp,
       workspace: guard.workspacePath,
       mode: input.record.permissionMode,
       provider: input.record.modelSelection.providerId,
@@ -605,10 +632,13 @@ export class SessionManager {
       const toolCatalog = await resolveSessionToolCatalog({
         registry: this.#toolRegistry,
         subagentsEnabled: this.#configStore.getPublicConfig().subagents.enabled,
+        maxSubagents:
+          this.#configStore.getPublicConfig().subagents.maxSubagents,
         gitToolsEnabled: session.gitToolsEnabled,
       })
       await appendRuntimeContextIfChanged(session, {
         workspace: session.workspace,
+        sessionTemp: session.sessionTemp,
         mode: session.mode,
         config: this.#configStore.getPublicConfig(),
         providerId: session.provider,
@@ -728,8 +758,6 @@ export class SessionManager {
       }
     }
 
-    this.#terminals.closeSession(sessionId)
-
     if (session.visibility === 'public') {
       await this.#pluginBus
         ?.emit('onSessionEnd', {
@@ -744,8 +772,13 @@ export class SessionManager {
     await trace.dispose()
     this.#emit(session, { type: 'session.closed', sessionId })
     this.#sessions.delete(sessionId)
-    await this.#cleanupTraces()
+    if (session.visibility === 'public') await this.#cleanupTraces()
     return true
+  }
+
+  /** Cancels and settles every background task before a lifecycle mutation. */
+  async quiesceBackgroundTasks(sessionId: SessionId): Promise<void> {
+    await this.#backgroundTasks?.cancelSession(sessionId)
   }
 
   /**
@@ -761,6 +794,7 @@ export class SessionManager {
     context?: RunContext
   }): RunId {
     const session = this.#requireSession(input.sessionId)
+    this.#touchSessionTemp(session)
     return this.#runs.start(
       session,
       input.clientRequestId,
@@ -820,6 +854,7 @@ export class SessionManager {
       registry: this.#toolRegistry,
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
+      maxSubagents: run.maxSubagents,
       gitToolsEnabled: session.gitToolsEnabled,
     })
     const allowedToolIds = new Set(
@@ -877,6 +912,7 @@ export class SessionManager {
         'Internal Run requires a hidden Subagent Session',
       )
     }
+    this.#touchSessionTemp(session)
     const runId = this.#runs.start(
       session,
       input.clientRequestId,
@@ -972,6 +1008,7 @@ export class SessionManager {
     clientRequestId: string
   }): RunId {
     const session = this.#requireSession(input.sessionId)
+    this.#touchSessionTemp(session)
     return this.#runs.start(
       session,
       input.clientRequestId,
@@ -985,6 +1022,7 @@ export class SessionManager {
   /** Continues an interrupted turn without appending another user message. */
   continueRun(input: { sessionId: SessionId; clientRequestId: string }): RunId {
     const session = this.#requireSession(input.sessionId)
+    this.#touchSessionTemp(session)
     const target = resolveManualContinuationTarget(session.history)
     if (!target) {
       ipcFault(
@@ -1009,6 +1047,7 @@ export class SessionManager {
     message: HarnessRunMessage
   }): RunId {
     const session = this.#requireSession(input.sessionId)
+    this.#touchSessionTemp(session)
     return this.#runs.start(
       session,
       input.clientRequestId,
@@ -1027,6 +1066,15 @@ export class SessionManager {
         session.trace.traceId ? [session.trace.traceId] : [],
       ),
     )
+  }
+
+  /** Refreshes retention age without delaying synchronous Run admission. */
+  #touchSessionTemp(session: SessionState): void {
+    void this.#sessionTemps
+      .touch(session.ownerSessionId)
+      .catch((error) =>
+        this.#onDiagnostic('Failed to touch the Session temp directory', error),
+      )
   }
 
   /** Returns the live trace capture status for one loaded Session. */

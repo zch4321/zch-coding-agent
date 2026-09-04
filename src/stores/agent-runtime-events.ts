@@ -29,6 +29,12 @@ type RuntimeEventHandlerMap = {
   ) => void
 }
 
+const WORKSPACE_FILE_TOOLS = new Set([
+  'write_file',
+  'apply_patch',
+  'delete_file',
+])
+
 const runtimeEventHandlers = {
   'trace.capture.changed': (_target, _overlay, event) => {
     const replica = useAgentReplicaStore()
@@ -152,8 +158,6 @@ const runtimeEventHandlers = {
       args: event.args,
       reason: event.reason,
       signals: event.policySignals,
-      diff: event.diff,
-      diffHash: event.diffHash,
       rememberable: event.rememberable,
       rememberArgConstraints: event.rememberArgConstraints,
       expiresAt: event.expiresAt,
@@ -161,7 +165,7 @@ const runtimeEventHandlers = {
       order: overlay.order,
     }
   },
-  'tool.completed': (_target, overlay, event) => {
+  'tool.completed': (target, overlay, event) => {
     const tool = overlay.tools.find(
       (candidate) => candidate.callId === event.callId,
     )
@@ -173,7 +177,13 @@ const runtimeEventHandlers = {
     if (overlay.approval?.callId === event.callId) {
       overlay.approval = undefined
     }
-    void useAgentReplicaStore().loadFileChanges(event.sessionId)
+    if (
+      tool &&
+      event.result.status === 'ok' &&
+      WORKSPACE_FILE_TOOLS.has(tool.tool)
+    ) {
+      target.workspaceFileRevision += 1
+    }
   },
   'llm.usage': (_target, overlay, event) => {
     overlay.usage.push({

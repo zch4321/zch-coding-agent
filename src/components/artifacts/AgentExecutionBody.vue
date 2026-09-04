@@ -82,7 +82,6 @@ function messages(): Array<
       >
         <p>{{ approval.reason }}</p>
         <pre>{{ JSON.stringify(approval.arguments, null, 2) }}</pre>
-        <pre v-if="approval.diff">{{ approval.diff }}</pre>
         <NSpace>
           <NButton
             size="small"

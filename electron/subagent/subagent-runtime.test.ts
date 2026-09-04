@@ -105,6 +105,33 @@ class SubagentChainProvider extends ScriptedProviderHarness {
         })
         return
       }
+      if (this.parentRequests.length === 2) {
+        const handleMessage = [...request.normalizedMessages]
+          .reverse()
+          .find(
+            (message) =>
+              message.role === 'tool' && typeof message.content === 'string',
+          )
+        const handle = JSON.parse(String(handleMessage?.content)) as {
+          target?: { id?: string }
+        }
+        const executionId = handle.target?.id ?? ''
+        yield toolTurn({
+          id: 'parent:wait',
+          calls: [
+            {
+              id: 'call:background-wait',
+              toolId: 'background_wait',
+              args: {
+                targets: [{ type: 'subagent', id: executionId }],
+                mode: 'all',
+                timeoutMs: 300_000,
+              },
+            },
+          ],
+        })
+        return
+      }
       yield {
         type: 'completed',
         rawResponse: { id: 'parent:complete' },
@@ -225,7 +252,7 @@ class WritableSubagentProvider extends ScriptedProviderHarness {
         calls: [
           {
             id: 'call:child-create-file',
-            toolId: 'create_file',
+            toolId: 'write_file',
             args: {
               path: 'inherited-write.txt',
               content: 'written by inherited child\n',
@@ -302,6 +329,7 @@ describe('read-only Subagent runtime', () => {
       value: {
         enabled: true,
         workerTimeoutMs: 60_000,
+        maxSubagents: 32,
       },
     })
     const originalModel = store.getPublicConfig().models.providers[0]!.model
@@ -358,6 +386,13 @@ describe('read-only Subagent runtime', () => {
         sessionId,
         started.runId,
       )
+      await waitFor(() =>
+        executionEvents.some(
+          (event) =>
+            event.type === 'execution.changed' &&
+            event.summary.status === 'completed',
+        ),
+      )
 
       expect(
         events.find(
@@ -407,7 +442,7 @@ describe('read-only Subagent runtime', () => {
         usage: { scope: 'subagent' },
       })
 
-      expect(provider.parentRequests).toHaveLength(2)
+      expect(provider.parentRequests).toHaveLength(3)
       expect(provider.childRequests).toHaveLength(2)
       for (const request of [
         ...provider.parentRequests,
@@ -428,6 +463,10 @@ describe('read-only Subagent runtime', () => {
       )
       for (const forbidden of [
         'subagent_run',
+        'swarm_run',
+        'background_wait',
+        'background_list',
+        'background_cancel',
         'write_file',
         'apply_patch',
         'run_command',
@@ -453,7 +492,7 @@ describe('read-only Subagent runtime', () => {
       expect(secondChildHistory).not.toContain('dirty before child start')
       expect(secondChildHistory).toContain('TOOL_NOT_AVAILABLE')
       expect(
-        JSON.stringify(provider.parentRequests[1]!.normalizedMessages),
+        JSON.stringify(provider.parentRequests[2]!.normalizedMessages),
       ).toContain('The live README and Git diff both show')
 
       const parent = await target.sessions.get(sessionId)
@@ -584,6 +623,7 @@ describe('read-only Subagent runtime', () => {
       value: {
         enabled: true,
         workerTimeoutMs: 60_000,
+        maxSubagents: 32,
       },
     })
     const provider = new SubagentChainProvider(workspace, async () => undefined)
@@ -619,6 +659,7 @@ describe('read-only Subagent runtime', () => {
         sessionId,
         started.runId,
       )
+      await waitFor(() => provider.childRequests.length > 0)
 
       // The child inherits the parent's frozen route, including the new level.
       expect(provider.childRequests[0]!.providerRequest).toMatchObject({
@@ -659,6 +700,7 @@ describe('write-capable Subagent runtime', () => {
       value: {
         enabled: true,
         workerTimeoutMs: 60_000,
+        maxSubagents: 32,
       },
     })
     const provider = new WritableSubagentProvider()
@@ -713,7 +755,7 @@ describe('write-capable Subagent runtime', () => {
       )!
       expect(approval.approval).toMatchObject({
         callId: 'call:child-create-file',
-        tool: 'create_file',
+        tool: 'write_file',
         arguments: { path: 'inherited-write.txt' },
       })
       expect(
@@ -729,6 +771,13 @@ describe('write-capable Subagent runtime', () => {
         sessionId,
         started.runId,
       )
+      await waitFor(() =>
+        executionEvents.some(
+          (event) =>
+            event.type === 'execution.changed' &&
+            event.summary.status === 'completed',
+        ),
+      )
       expect(
         await readFile(path.join(workspace, 'inherited-write.txt'), 'utf8'),
       ).toBe('written by inherited child\n')
@@ -736,9 +785,12 @@ describe('write-capable Subagent runtime', () => {
       const childTools = provider.childRequests[0]!.toolDefinitions.map(
         (definition) => definition.name,
       )
-      expect(childTools).toContain('create_file')
+      expect(childTools).toContain('write_file')
       expect(childTools).not.toContain('subagent_run')
       expect(childTools).not.toContain('swarm_run')
+      expect(childTools).not.toContain('background_wait')
+      expect(childTools).not.toContain('background_list')
+      expect(childTools).not.toContain('background_cancel')
       expect(
         executionEvents.some(
           (event) =>

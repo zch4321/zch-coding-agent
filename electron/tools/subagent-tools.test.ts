@@ -36,6 +36,7 @@ describe('subagent_run Tool', () => {
       .find((candidate) => candidate.name === 'subagent_run')!
 
     expect(definition.executionMode).toBe('parallel')
+    expect(definition.defaultTimeoutMs).toBe(30_000)
     expect(definition.description).toContain('self-contained')
     expect(definition.description).toContain('final assistant response')
     expect(definition.description).not.toContain('last call')

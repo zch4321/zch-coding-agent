@@ -40,8 +40,6 @@ export const ActiveRunApprovalSnapshotSchema = Type.Object(
     arguments: JsonValueSchema,
     reason: Type.String({ maxLength: 65_536 }),
     policySignals: Type.Array(PolicySignalSchema, { maxItems: 256 }),
-    diff: Type.Optional(Type.String({ maxLength: 262_144 })),
-    diffHash: Type.Optional(Type.String({ maxLength: 128 })),
     rememberable: Type.Boolean(),
     rememberArgConstraints: Type.Optional(JsonValueSchema),
     expiresAt: Type.String({ format: 'date-time' }),

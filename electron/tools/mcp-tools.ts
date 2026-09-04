@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox'
 import { JsonValueSchema, type JsonValue } from '../../shared/json'
+import { renderToolResultContent } from '../../shared/message'
 import type { ConfigStore } from '../config/store'
 import type {
   McpCatalogSnapshot,
@@ -18,6 +19,10 @@ import type {
 import type { ToolRegistry } from './tool-registry'
 import type { SessionId } from '../../shared/ids'
 import { normalizeToolInput } from './tool-input-normalizer'
+import {
+  sessionArtifactKey,
+  writeSessionArtifactJson,
+} from '../session-temp/service'
 
 export const MCP_CALL_TOOL_ID = 'call_mcp_tool'
 
@@ -142,14 +147,12 @@ export class McpToolGateway {
         supportsAbort: false,
         defaultTimeoutMs:
           this.#configStore.getPublicConfig().limits.commandTimeoutMs,
-        maxOutputBytes:
-          this.#configStore.getPublicConfig().limits.maxToolOutputBytes,
         validateArgs: (value) =>
           resolved.validate(value)
             ? undefined
             : formatSchemaErrors(resolved.validate.errors),
         projectResultForModel: projectMcpResult,
-        execute: async (value) => {
+        execute: async (value, context) => {
           try {
             const result = await this.#manager.callTool({
               serverId: args.serverId,
@@ -158,7 +161,49 @@ export class McpToolGateway {
               arguments: value as Record<string, unknown>,
               expectedRevision: disclosure.revision,
             })
-            return normalizeMcpResult(result)
+            const normalized = normalizeMcpResult(result)
+            if (normalized.status !== 'ok') return normalized
+            const projected = renderToolResultContent(
+              projectMcpResult(normalized),
+            )
+            const exceedsArtifactThreshold =
+              Buffer.byteLength(projected, 'utf8') > 256 * 1_024 ||
+              projected.split('\n').length > 500
+            if (!exceedsArtifactThreshold) return normalized
+            let artifact:
+              | { artifactAvailable: true; artifactPath: string }
+              | { artifactAvailable: false; captureError: string }
+            try {
+              if (!context.sessionTemp) {
+                throw new Error('Session temp is unavailable')
+              }
+              artifact = {
+                artifactAvailable: true,
+                artifactPath: await writeSessionArtifactJson(
+                  context.sessionTemp,
+                  [
+                    'mcp',
+                    `${sessionArtifactKey(
+                      `${context.runId}:${context.approvedCall.callId}`,
+                    )}.json`,
+                  ],
+                  normalized.content,
+                ),
+              }
+            } catch (error) {
+              artifact = {
+                artifactAvailable: false,
+                captureError:
+                  error instanceof Error ? error.message : String(error),
+              }
+            }
+            return {
+              ...normalized,
+              content: {
+                ...(normalized.content as Record<string, JsonValue>),
+                ...artifact,
+              },
+            }
           } catch (error) {
             return failureResult(error)
           }
@@ -190,7 +235,6 @@ export function registerMcpTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 2_000,
-    maxOutputBytes: 32 * 1_024,
     async execute(_args, context) {
       return {
         status: 'ok',
@@ -220,8 +264,7 @@ export function registerMcpTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 30_000,
-    maxOutputBytes:
-      options.configStore.getPublicConfig().limits.maxToolOutputBytes,
+    modelOutputPolicy: 'paged',
     async execute(args, context) {
       const session = options.getSession(context.sessionId)
       if (!session) {
@@ -255,6 +298,7 @@ export function registerMcpTools(
           throw codedError('MCP_CURSOR_INVALID', 'Cursor offset is invalid')
         }
         const maxBytes =
+          context.toolOutputLimits?.maxToolOutputBytes ??
           options.configStore.getPublicConfig().limits.maxToolOutputBytes
         const page = buildPage(catalog, offset, args.limit ?? 10, maxBytes)
         const current = session.mcpDisclosures.get(args.serverId)
@@ -283,7 +327,6 @@ export function registerMcpTools(
     defaultRisk: 'review',
     supportsAbort: false,
     defaultTimeoutMs: 120_000,
-    maxOutputBytes: 64 * 1_024,
     async execute() {
       return {
         status: 'error',
@@ -491,6 +534,18 @@ function projectMcpResult(
     parts.push({
       type: 'json',
       value: structuredClone(value.structuredContent),
+    })
+  }
+  const artifactPath =
+    typeof value.artifactPath === 'string' ? value.artifactPath : ''
+  if (artifactPath) {
+    parts.push({ type: 'text', text: `artifactPath=${artifactPath}` })
+  } else if (value.artifactAvailable === false) {
+    parts.push({
+      type: 'text',
+      text: `artifactAvailable=false; captureError=${
+        typeof value.captureError === 'string' ? value.captureError : 'unknown'
+      }`,
     })
   }
   return parts.length > 0 ? parts : [{ type: 'text', text: '[no output]' }]

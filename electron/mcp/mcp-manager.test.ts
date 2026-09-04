@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { delay } from '../../shared/async/delay'
 import type { McpServerConfig } from '../../shared/mcp'
 import type { ConfigStore } from '../config/store'
 import { launchFingerprint, McpManager } from './mcp-manager'
@@ -219,6 +220,6 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   while (!predicate()) {
     if (Date.now() > deadline)
       throw new Error('Timed out waiting for MCP state')
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await delay(25)
   }
 }

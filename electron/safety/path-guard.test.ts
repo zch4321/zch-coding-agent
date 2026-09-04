@@ -79,4 +79,55 @@ describe('PathGuard', () => {
       code: 'PATH_OUTSIDE_WORKSPACE',
     } satisfies Partial<PathGuardError>)
   })
+
+  it('allows absolute Session-temp paths while keeping relative paths workspace-based', async () => {
+    const root = await workspace()
+    const sessionTemp = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-session-temp-'),
+    )
+    const artifact = path.join(sessionTemp, 'artifacts', 'task.log')
+    await mkdir(path.dirname(artifact), { recursive: true })
+    await writeFile(artifact, 'background output\n')
+    const guard = await PathGuard.create(root, sessionTemp)
+
+    const workspaceFile = await guard.resolveExisting('README.md')
+    const tempFile = await guard.resolveExisting(artifact)
+
+    expect(workspaceFile).toMatchObject({
+      rootKind: 'workspace',
+      relativePath: 'README.md',
+    })
+    expect(tempFile).toMatchObject({
+      rootKind: 'session-temp',
+      relativePath: await realpath(artifact),
+    })
+  })
+
+  it('rejects symlinks that switch between allowed roots', async () => {
+    const root = await workspace()
+    const sessionTemp = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-session-temp-'),
+    )
+    const artifact = path.join(sessionTemp, 'artifact.txt')
+    await writeFile(artifact, 'output')
+    const link = path.join(root, 'temp-link.txt')
+    try {
+      await symlink(artifact, link)
+    } catch (error) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        (error.code === 'EPERM' || error.code === 'EACCES')
+      ) {
+        return
+      }
+      throw error
+    }
+    const guard = await PathGuard.create(root, sessionTemp)
+
+    await expect(guard.resolveExisting(link)).rejects.toMatchObject({
+      code: 'PATH_OUTSIDE_WORKSPACE',
+    })
+  })
 })

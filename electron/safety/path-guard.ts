@@ -1,9 +1,15 @@
-import { open, readdir, realpath, stat } from 'node:fs/promises'
-import { realpathSync } from 'node:fs'
+import {
+  canonicalPath as realpath,
+  canonicalPathSync as realpathSync,
+  fileStatus as stat,
+  openFileHandle as open,
+  readDirectory as readdir,
+} from '../common/filesystem'
 import path from 'node:path'
 
 export type PathGuardErrorCode =
   | 'INVALID_PATH'
+  | 'INVALID_POSITION'
   | 'PATH_OUTSIDE_WORKSPACE'
   | 'PATH_NOT_FOUND'
   | 'PATH_ALREADY_EXISTS'
@@ -27,7 +33,18 @@ export interface GuardedPath {
   readonly inputPath: string
   readonly absolutePath: string
   readonly realPath: string
+  readonly rootKind: PathGuardRootKind
+  readonly rootPath: string
+  readonly rootRelativePath: string
   readonly relativePath: string
+}
+
+export type PathGuardRootKind = 'workspace' | 'session-temp'
+
+interface PathGuardRoot {
+  readonly kind: PathGuardRootKind
+  readonly canonicalPath: string
+  readonly aliases: readonly string[]
 }
 
 export interface DirectoryEntry {
@@ -91,83 +108,131 @@ async function nearestExistingParent(target: string): Promise<string> {
   }
 }
 
-/** Guards workspace paths against traversal, symlink escapes, and unsafe filesystem access. */
+/** Guards workspace and Session-temp paths against traversal and symlink escapes. */
 export class PathGuard {
   readonly workspacePath: string
-  readonly #workspaceAliases: readonly string[]
+  readonly sessionTempPath?: string
+  readonly #roots: readonly PathGuardRoot[]
 
-  private constructor(workspacePath: string, aliases: readonly string[] = []) {
-    this.workspacePath = workspacePath
-    this.#workspaceAliases = [...new Set([workspacePath, ...aliases])]
+  private constructor(workspace: PathGuardRoot, sessionTemp?: PathGuardRoot) {
+    this.workspacePath = workspace.canonicalPath
+    this.sessionTempPath = sessionTemp?.canonicalPath
+    this.#roots = sessionTemp ? [workspace, sessionTemp] : [workspace]
   }
 
   /** Creates a guard for an already canonical workspace path and its accepted aliases. */
-  static fromCanonical(workspacePath: string): PathGuard {
+  static fromCanonical(
+    workspacePath: string,
+    sessionTempPath?: string,
+  ): PathGuard {
     assertReasonableInput(workspacePath)
-    const resolvedWorkspacePath = path.resolve(workspacePath)
-
-    try {
-      const realWorkspacePath = path.resolve(
-        realpathSync.native(resolvedWorkspacePath),
-      )
-      return new PathGuard(realWorkspacePath, [resolvedWorkspacePath])
-    } catch {
-      return new PathGuard(resolvedWorkspacePath)
-    }
+    const workspace = PathGuard.#canonicalRoot('workspace', workspacePath)
+    const sessionTemp = sessionTempPath
+      ? PathGuard.#canonicalRoot('session-temp', sessionTempPath)
+      : undefined
+    return new PathGuard(workspace, sessionTemp)
   }
 
   /** Realpaths the workspace and creates a guard with its canonical alias roots. */
-  static async create(workspacePath: string): Promise<PathGuard> {
+  static async create(
+    workspacePath: string,
+    sessionTempPath?: string,
+  ): Promise<PathGuard> {
     assertReasonableInput(workspacePath)
-    const resolvedWorkspacePath = path.resolve(workspacePath)
-    const workspaceRealPath = await realpath(workspacePath)
-    const workspaceStat = await stat(workspaceRealPath)
+    const workspace = await PathGuard.#realRoot('workspace', workspacePath)
+    const sessionTemp = sessionTempPath
+      ? await PathGuard.#realRoot('session-temp', sessionTempPath)
+      : undefined
+    return new PathGuard(workspace, sessionTemp)
+  }
 
-    if (!workspaceStat.isDirectory()) {
+  static #canonicalRoot(
+    kind: PathGuardRootKind,
+    inputPath: string,
+  ): PathGuardRoot {
+    assertReasonableInput(inputPath)
+    const resolvedPath = path.resolve(inputPath)
+    try {
+      const canonicalPath = path.resolve(realpathSync.native(resolvedPath))
+      return {
+        kind,
+        canonicalPath,
+        aliases: [...new Set([canonicalPath, resolvedPath])],
+      }
+    } catch {
+      return { kind, canonicalPath: resolvedPath, aliases: [resolvedPath] }
+    }
+  }
+
+  static async #realRoot(
+    kind: PathGuardRootKind,
+    inputPath: string,
+  ): Promise<PathGuardRoot> {
+    assertReasonableInput(inputPath)
+    const resolvedPath = path.resolve(inputPath)
+    const canonicalPath = path.resolve(await realpath(resolvedPath))
+    const rootStat = await stat(canonicalPath)
+    if (!rootStat.isDirectory()) {
       throw new PathGuardError(
         'NOT_A_DIRECTORY',
-        'Workspace must be a directory',
+        `${kind === 'workspace' ? 'Workspace' : 'Session temp'} must be a directory`,
       )
     }
-
-    return new PathGuard(path.resolve(workspaceRealPath), [
-      resolvedWorkspacePath,
-    ])
+    return {
+      kind,
+      canonicalPath,
+      aliases: [...new Set([canonicalPath, resolvedPath])],
+    }
   }
 
-  #isInsideWorkspace(candidate: string): boolean {
-    return this.#workspaceAliases.some((workspacePath) =>
-      isSubpath(workspacePath, candidate),
-    )
+  #rootForCandidate(candidate: string): PathGuardRoot | undefined {
+    return this.#roots
+      .flatMap((root) =>
+        root.aliases.map((alias) => ({ root, alias: path.resolve(alias) })),
+      )
+      .filter(({ alias }) => isSubpath(alias, candidate))
+      .sort((left, right) => right.alias.length - left.alias.length)[0]?.root
   }
 
-  /** Resolves a relative or absolute candidate under the workspace without filesystem access. */
-  resolveCandidate(inputPath: string): string {
+  #rootForRealPath(candidate: string): PathGuardRoot | undefined {
+    return this.#roots
+      .filter((root) => isSubpath(root.canonicalPath, candidate))
+      .sort(
+        (left, right) => right.canonicalPath.length - left.canonicalPath.length,
+      )[0]
+  }
+
+  #candidate(inputPath: string): { absolutePath: string; root: PathGuardRoot } {
     assertReasonableInput(inputPath)
     const absolutePath = path.isAbsolute(inputPath)
       ? path.resolve(inputPath)
       : path.resolve(this.workspacePath, inputPath)
+    const root = this.#rootForCandidate(absolutePath)
 
-    if (!this.#isInsideWorkspace(absolutePath)) {
+    if (!root) {
       throw new PathGuardError(
         'PATH_OUTSIDE_WORKSPACE',
-        'Path escapes the workspace',
+        'Path escapes the workspace and Session temp roots',
       )
     }
+    return { absolutePath, root }
+  }
 
-    return absolutePath
+  /** Resolves a relative or absolute candidate under the workspace without filesystem access. */
+  resolveCandidate(inputPath: string): string {
+    return this.#candidate(inputPath).absolutePath
   }
 
   /** Resolves an existing path and checks real parent containment to block symlink escapes. */
   async resolveExisting(inputPath: string): Promise<GuardedPath> {
-    const absolutePath = this.resolveCandidate(inputPath)
+    const { absolutePath, root } = this.#candidate(inputPath)
     const parent = await nearestExistingParent(absolutePath)
     const parentRealPath = await realpath(parent)
 
-    if (!this.#isInsideWorkspace(parentRealPath)) {
+    if (!isSubpath(root.canonicalPath, parentRealPath)) {
       throw new PathGuardError(
         'PATH_OUTSIDE_WORKSPACE',
-        'Existing parent escapes the workspace',
+        'Existing parent escapes its allowed root',
       )
     }
 
@@ -188,29 +253,57 @@ export class PathGuard {
       throw error
     }
 
-    if (!this.#isInsideWorkspace(realPathValue)) {
+    if (!isSubpath(root.canonicalPath, realPathValue)) {
       throw new PathGuardError(
         'PATH_OUTSIDE_WORKSPACE',
-        'Real path escapes the workspace',
+        'Real path escapes its allowed root',
       )
     }
+
+    const rootRelativePath = toPortableRelative(
+      path.relative(root.canonicalPath, realPathValue) || '.',
+    )
 
     return {
       inputPath,
       absolutePath,
       realPath: path.resolve(realPathValue),
-      relativePath: toPortableRelative(
-        path.relative(this.workspacePath, realPathValue) || '.',
-      ),
+      rootKind: root.kind,
+      rootPath: root.canonicalPath,
+      rootRelativePath,
+      relativePath:
+        root.kind === 'workspace'
+          ? rootRelativePath
+          : path.resolve(realPathValue),
     }
   }
 
-  /** Ensures a real path remains inside the guarded workspace. */
+  /** Ensures a real path remains inside either allowed root. */
   assertInside(realPathValue: string): void {
-    if (!this.#isInsideWorkspace(realPathValue)) {
+    if (!this.#rootForRealPath(realPathValue)) {
       throw new PathGuardError(
         'PATH_OUTSIDE_WORKSPACE',
-        'Real path escapes the workspace',
+        'Real path escapes the workspace and Session temp roots',
+      )
+    }
+  }
+
+  /** Resolves which allowed root owns a lexical path. */
+  rootForCandidate(inputPath: string): {
+    kind: PathGuardRootKind
+    path: string
+  } {
+    const { root } = this.#candidate(inputPath)
+    return { kind: root.kind, path: root.canonicalPath }
+  }
+
+  /** Ensures a real path remains inside one specific allowed root. */
+  assertInsideRoot(realPathValue: string, kind: PathGuardRootKind): void {
+    const root = this.#roots.find((candidate) => candidate.kind === kind)
+    if (!root || !isSubpath(root.canonicalPath, realPathValue)) {
+      throw new PathGuardError(
+        'PATH_OUTSIDE_WORKSPACE',
+        `Real path escapes the ${kind} root`,
       )
     }
   }
@@ -283,12 +376,15 @@ export class PathGuard {
     const entries = await readdir(guarded.realPath, { withFileTypes: true })
 
     return entries.map((entry) => {
-      const entryRelative = toPortableRelative(
-        path.join(
-          guarded.relativePath === '.' ? '' : guarded.relativePath,
-          entry.name,
-        ),
-      )
+      const entryRelative =
+        guarded.rootKind === 'workspace'
+          ? toPortableRelative(
+              path.join(
+                guarded.relativePath === '.' ? '' : guarded.relativePath,
+                entry.name,
+              ),
+            )
+          : path.join(guarded.realPath, entry.name)
       const type = entry.isSymbolicLink()
         ? 'symlink'
         : entry.isDirectory()

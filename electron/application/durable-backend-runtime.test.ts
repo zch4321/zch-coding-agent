@@ -749,6 +749,21 @@ describe('durable backend runtime', () => {
       started.runId,
     )
     expect((await target.sessions.get(sessionId)).runtime).toBeUndefined()
+    const sessionTemp = await target.sessionTemps.ensureSession(sessionId)
+    await writeFile(
+      path.join(sessionTemp.scratch, 'temporary-note.txt'),
+      'note',
+    )
+    const quiesce = vi.spyOn(
+      target.runtime.services.sessions,
+      'quiesceBackgroundTasks',
+    )
+    const idleRecord = await target.sessions.getRecord(sessionId)
+    await target.sessions.archive({
+      sessionId,
+      expectedRevision: idleRecord.revision,
+    })
+    expect(quiesce).toHaveBeenCalledWith(sessionId)
     await target.projects.remove({
       projectId: project.id,
       expectedRevision: project.revision,
@@ -757,6 +772,9 @@ describe('durable backend runtime', () => {
       'code',
       'NOT_FOUND',
     )
+    await expect(stat(sessionTemp.root)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
     expect((await stat(workspace)).isDirectory()).toBe(true)
     await target.dispose()
   })

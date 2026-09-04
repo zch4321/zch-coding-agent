@@ -34,13 +34,6 @@ const projectName = computed(() => {
 })
 
 watch(
-  () => agent.pendingApproval,
-  (approval) => {
-    if (approval?.diff) activeArtifact.value = 'diff'
-  },
-)
-
-watch(
   () => agent.plan?.id,
   (planId, previousPlanId) => {
     if (planId && planId !== previousPlanId) activeArtifact.value = 'plan'
@@ -141,7 +134,6 @@ watch(
         <template #tab>
           <span class="artifact-tab-label">
             <UiIcon name="diff" />{{ t('artifact.diff') }}
-            <NBadge v-if="agent.pendingApproval?.diff" dot type="warning" />
           </span>
         </template>
         <DiffTab />

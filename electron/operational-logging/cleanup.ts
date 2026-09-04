@@ -1,4 +1,8 @@
-import { readdir, stat, unlink } from 'node:fs/promises'
+import {
+  fileStatus as stat,
+  readDirectory as readdir,
+  unlinkFile as unlink,
+} from '../common/filesystem'
 import path from 'node:path'
 
 export interface RuntimeLogCleanupOptions {

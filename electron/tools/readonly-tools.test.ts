@@ -27,6 +27,7 @@ async function executeReadonly(
   root: string,
   call: ToolCall,
   searcher?: Searcher,
+  sessionTemp?: { root: string; artifacts: string; scratch: string },
 ) {
   const registry = new ToolRegistry()
   registerReadOnlyTools(
@@ -39,6 +40,7 @@ async function executeReadonly(
     sessionId: 'session-test' as SessionId,
     runId: 'run-test' as RunId,
     workspace: { canonicalPath: root },
+    ...(sessionTemp ? { sessionTemp } : {}),
   }
   const signal = new AbortController().signal
   const inspected = executor.inspectCall(call)
@@ -50,6 +52,7 @@ async function executeReadonly(
   const prepared = await new PermissionPipeline().authorize({
     ...context,
     workspace: root,
+    ...(sessionTemp ? { sessionTemp } : {}),
     mode: 'readonly',
     call,
     definition: inspected.definition,
@@ -415,7 +418,7 @@ describe('read-only tools', () => {
 
     expect(result).toMatchObject({
       status: 'ok',
-      content: { startLine: 1, endLine: 3, truncated: false },
+      content: { startLine: 1, endLine: 3, hasMore: false },
     })
 
     if (result.status === 'ok') {
@@ -443,7 +446,7 @@ describe('read-only tools', () => {
     }
   })
 
-  it('uses byte and token budgets instead of the former 400-line default', async () => {
+  it('uses the configured line budget only for source file lines', async () => {
     const root = await workspace()
     await writeFile(
       path.join(root, 'many-lines.txt'),
@@ -459,8 +462,13 @@ describe('read-only tools', () => {
 
     expect(result).toMatchObject({
       status: 'ok',
-      content: { endLine: 600, truncated: false },
+      content: { endLine: 500, hasMore: true },
     })
+    if (result.status === 'ok') {
+      expect(
+        (result.content as { content: string }).content.split('\n'),
+      ).toHaveLength(500)
+    }
   })
 
   it('returns a structured error for path escapes', async () => {
@@ -517,47 +525,265 @@ describe('read-only tools', () => {
       status: 'ok',
       content: {
         startLine: 1,
-        endLine: 1_000,
-        nextStartLine: 1_001,
-        truncated: true,
+        endLine: 500,
+        hasMore: true,
+        nextStartLine: 501,
       },
     })
+
+    const nextStartLine =
+      first.status === 'ok' &&
+      first.content &&
+      typeof first.content === 'object' &&
+      !Array.isArray(first.content) &&
+      typeof first.content.nextStartLine === 'number'
+        ? first.content.nextStartLine
+        : 1
 
     const second = await executeReadonly(root, {
       id: 'call-page-2' as CallId,
       toolId: 'read_file',
-      args: { path: 'large.txt', startLine: 1_001, lineCount: 1_000 },
+      args: { path: 'large.txt', startLine: nextStartLine, lineCount: 1_000 },
       reason: '',
     })
     expect(second).toMatchObject({
       status: 'ok',
       content: {
-        startLine: 1_001,
-        truncated: false,
+        startLine: 501,
+        hasMore: true,
       },
     })
   })
 
-  it('bounds one extremely long line', async () => {
+  it('continues one extremely long Unicode line by character offset', async () => {
     const root = await workspace()
-    await writeFile(path.join(root, 'one-line.txt'), 'x'.repeat(200_000))
-    const result = await executeReadonly(root, {
+    const source = '🙂漢字'.repeat(40_000)
+    await writeFile(path.join(root, 'one-line.txt'), source)
+    const first = await executeReadonly(root, {
       id: 'call-long-line' as CallId,
       toolId: 'read_file',
-      args: { path: 'one-line.txt' },
+      args: { path: 'one-line.txt', lineNumbers: false },
       reason: '',
     })
 
-    expect(result).toMatchObject({
+    expect(first).toMatchObject({
       status: 'ok',
-      content: { lineTruncated: true, truncated: true },
+      content: {
+        lineTruncated: true,
+        hasMore: true,
+        nextStartLine: 1,
+        nextStartCharacter: expect.any(Number),
+      },
     })
 
-    if (result.status === 'ok') {
-      const content = result.content as { content: string }
+    if (first.status === 'ok') {
+      const content = first.content as {
+        content: string
+        nextStartCharacter: number
+      }
       expect(Buffer.byteLength(content.content, 'utf8')).toBeLessThanOrEqual(
-        128 * 1_024,
+        256 * 1_024,
+      )
+      const second = await executeReadonly(root, {
+        id: 'call-long-line-continued' as CallId,
+        toolId: 'read_file',
+        args: {
+          path: 'one-line.txt',
+          startLine: 1,
+          startCharacter: content.nextStartCharacter,
+          lineNumbers: false,
+        },
+        reason: '',
+      })
+      expect(second).toMatchObject({
+        status: 'ok',
+        content: { hasMore: false },
+      })
+      if (second.status === 'ok') {
+        expect(
+          content.content + (second.content as { content: string }).content,
+        ).toBe(source)
+      }
+    }
+  })
+
+  it('continues an appended UTF-8 Session artifact from its next line', async () => {
+    const root = await workspace()
+    const sessionRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-read-session-'),
+    )
+    const sessionTemp = {
+      root: sessionRoot,
+      artifacts: path.join(sessionRoot, 'artifacts'),
+      scratch: path.join(sessionRoot, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+    const logPath = path.join(sessionTemp.artifacts, 'activity.log')
+    await writeFile(logPath, '第一行\n')
+    const first = await executeReadonly(
+      root,
+      {
+        id: 'call-artifact-first' as CallId,
+        toolId: 'read_file',
+        args: { path: logPath },
+        reason: '',
+      },
+      undefined,
+      sessionTemp,
+    )
+    expect(first).toMatchObject({
+      status: 'ok',
+      content: { hasMore: false, nextStartLine: 2 },
+    })
+    const nextStartLine =
+      first.status === 'ok' &&
+      first.content &&
+      typeof first.content === 'object' &&
+      !Array.isArray(first.content) &&
+      typeof first.content.nextStartLine === 'number'
+        ? first.content.nextStartLine
+        : 1
+    await writeFile(logPath, '第一行\n第二行🙂\n')
+
+    const appended = await executeReadonly(
+      root,
+      {
+        id: 'call-artifact-appended' as CallId,
+        toolId: 'read_file',
+        args: { path: logPath, startLine: nextStartLine },
+        reason: '',
+      },
+      undefined,
+      sessionTemp,
+    )
+    expect(appended).toMatchObject({ status: 'ok' })
+    if (appended.status === 'ok') {
+      expect((appended.content as { content: string }).content).toBe(
+        '2\t第二行🙂',
       )
     }
+  })
+
+  it('continues an appended unterminated line by character offset', async () => {
+    const root = await workspace()
+    const logPath = path.join(root, 'growing.log')
+    await writeFile(logPath, '前缀🙂')
+    const first = await executeReadonly(root, {
+      id: 'call-growing-first' as CallId,
+      toolId: 'read_file',
+      args: { path: 'growing.log' },
+      reason: '',
+    })
+    expect(first).toMatchObject({
+      status: 'ok',
+      content: {
+        nextStartLine: 1,
+        nextStartCharacter: 3,
+        hasMore: false,
+      },
+    })
+    await writeFile(logPath, '前缀🙂追加\n')
+    const appended = await executeReadonly(root, {
+      id: 'call-growing-appended' as CallId,
+      toolId: 'read_file',
+      args: { path: 'growing.log', startLine: 1, startCharacter: 3 },
+      reason: '',
+    })
+    expect(appended).toMatchObject({ status: 'ok' })
+    if (appended.status === 'ok') {
+      expect((appended.content as { content: string }).content).toBe('1\t追加')
+    }
+  })
+
+  it('reports an explicit error when startCharacter exceeds the line', async () => {
+    const root = await workspace()
+    await writeFile(path.join(root, 'short.txt'), 'short\n')
+
+    await expect(
+      executeReadonly(root, {
+        id: 'call-invalid-character-offset' as CallId,
+        toolId: 'read_file',
+        args: { path: 'short.txt', startLine: 1, startCharacter: 100 },
+        reason: '',
+      }),
+    ).resolves.toMatchObject({
+      status: 'error',
+      code: 'INVALID_POSITION',
+    })
+  })
+
+  it('supports bounded tail reads', async () => {
+    const root = await workspace()
+    const sessionRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-read-session-'),
+    )
+    const sessionTemp = {
+      root: sessionRoot,
+      artifacts: path.join(sessionRoot, 'artifacts'),
+      scratch: path.join(sessionRoot, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+    const logPath = path.join(sessionTemp.artifacts, 'terminal.log')
+    await writeFile(logPath, 'one\ntwo\nthree\n')
+    const tail = await executeReadonly(
+      root,
+      {
+        id: 'call-artifact-tail' as CallId,
+        toolId: 'read_file',
+        args: {
+          path: 'ZCH_SESSION_ARTIFACTS_DIR:/terminal.log',
+          tail: true,
+          lineCount: 2,
+        },
+        reason: '',
+      },
+      undefined,
+      sessionTemp,
+    )
+    expect(tail).toMatchObject({ status: 'ok' })
+    if (tail.status === 'ok') {
+      expect((tail.content as { content: string }).content).toBe(
+        '2\ttwo\n3\tthree',
+      )
+    }
+  })
+
+  it('does not let a Session path alias escape its guarded root', async () => {
+    const root = await workspace()
+    const sessionRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-read-session-'),
+    )
+    const sessionTemp = {
+      root: sessionRoot,
+      artifacts: path.join(sessionRoot, 'artifacts'),
+      scratch: path.join(sessionRoot, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+
+    await expect(
+      executeReadonly(
+        root,
+        {
+          id: 'call-artifact-alias-escape' as CallId,
+          toolId: 'read_file',
+          args: { path: 'ZCH_SESSION_ARTIFACTS_DIR:/../../outside.txt' },
+          reason: '',
+        },
+        undefined,
+        sessionTemp,
+      ),
+    ).resolves.toMatchObject({
+      status: 'error',
+      code: 'PATH_OUTSIDE_WORKSPACE',
+    })
   })
 })

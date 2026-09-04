@@ -1,5 +1,6 @@
 import type { CallId } from '../../shared/ids'
 import type { AssistantActivity } from '../../shared/agent-events'
+import { delay } from '../../shared/async/delay'
 import type { JsonValue } from '../../shared/json'
 import type {
   MessagePart,
@@ -50,7 +51,6 @@ import {
   MAX_PROVIDER_TURN_ATTEMPTS,
   ProviderStreamIncompleteError,
   providerTurnRetryDecision,
-  waitForProviderTurnRetry,
 } from './session-provider-retry'
 
 export interface ProviderTurnResult {
@@ -134,6 +134,7 @@ export class SessionProviderTurnRunner {
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
       swarmEnabled: Boolean(run.swarmToolConfig),
+      maxSubagents: run.maxSubagents,
       gitToolsEnabled: session.gitToolsEnabled,
     })
     const tools = toolCatalog.definitions
@@ -354,7 +355,9 @@ export class SessionProviderTurnRunner {
             delayMs: retry.delayMs,
           },
         })
-        await waitForProviderTurnRetry(retry.delayMs, run.controller.signal)
+        if (retry.delayMs > 0) {
+          await delay(retry.delayMs, run.controller.signal)
+        }
         continue
       }
 

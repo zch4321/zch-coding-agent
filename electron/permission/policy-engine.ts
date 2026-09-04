@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs'
+import { canonicalPathSync as realpathSync } from '../common/filesystem'
 import path from 'node:path'
 import type { PolicySignal } from '../../shared/agent-events'
 import type { PermissionMode, RememberedRule } from '../../shared/config'
@@ -22,6 +22,7 @@ export interface PolicyInput {
   workspace: string
   args: JsonValue
   callId: CallId
+  scratchMutation?: boolean
   now?: Date
 }
 
@@ -91,7 +92,7 @@ function isAutoAllowedWorkspaceFileMutation(input: PolicyInput): boolean {
   return (
     input.mode === 'auto' &&
     input.builtinPolicies &&
-    (input.definition.id === 'create_file' ||
+    (input.definition.id === 'write_file' ||
       input.definition.id === 'apply_patch')
   )
 }
@@ -118,6 +119,10 @@ export function evaluatePolicy(input: PolicyInput): PolicyOutcome {
       code: 'READONLY_MODE',
       reason: 'ReadOnly mode denies tools with side effects',
     }
+  }
+
+  if (input.scratchMutation) {
+    return { kind: 'allow', approvedBy: 'policy' }
   }
 
   if (input.mode === 'yolo') {

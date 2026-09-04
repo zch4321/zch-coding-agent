@@ -51,6 +51,7 @@ export interface SessionRuntimeGuard {
   traceCaptureStatus?(sessionId: SessionId): TraceCaptureStatus | undefined
   reserveSessionEviction?(sessionId: SessionId): string
   cancelSessionEviction?(sessionId: SessionId, token: string): void
+  quiesceSession?(sessionId: SessionId): void | Promise<void>
   releaseSession(
     sessionId: SessionId,
     operationToken?: string,
@@ -66,6 +67,7 @@ export interface SessionServiceOptions {
   now?: () => string
   createMessageId?: () => MessageId
   onDiagnostic?: (message: string, error?: unknown) => void
+  onSessionDeleted?: (sessionId: SessionId) => void | Promise<void>
 }
 
 export interface SessionMetadataPatch {
@@ -112,6 +114,7 @@ export class SessionService {
   readonly #now: () => string
   readonly #createMessageId: () => MessageId
   readonly #onDiagnostic: (message: string, error?: unknown) => void
+  readonly #onSessionDeleted?: (sessionId: SessionId) => void | Promise<void>
 
   constructor(options: SessionServiceOptions) {
     this.#coordinator = options.coordinator
@@ -122,6 +125,7 @@ export class SessionService {
     this.#createMessageId =
       options.createMessageId ?? (() => `message:${randomUUID()}` as MessageId)
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
+    this.#onSessionDeleted = options.onSessionDeleted
   }
 
   /** Lists Sessions with project, lifecycle, search, and cursor filters. */
@@ -552,6 +556,7 @@ export class SessionService {
     )
     let result: SessionCommandResult
     try {
+      await this.#runtimeGuard?.quiesceSession?.(input.sessionId)
       result = await this.#coordinator.command(
         'session.changed',
         (transaction) => {
@@ -639,31 +644,44 @@ export class SessionService {
     expectedRevision: number
   }): Promise<SessionDeleteCommandResult> {
     this.#runtimeGuard?.assertSessionIdle(input.sessionId)
-    return this.#coordinator.command('session.removed', (transaction) => {
-      const current = this.#sessions.get(transaction, input.sessionId)
-      if (!current) {
-        throw new ApplicationError('NOT_FOUND', 'Session was not found')
-      }
-      if (current.revision !== input.expectedRevision) {
-        throw revisionConflict(current)
-      }
-      if (current.lifecycle !== 'archived') {
-        throw new ApplicationError(
-          'PRECONDITION_FAILED',
-          'Only archived Sessions can be permanently deleted',
-        )
-      }
-      if (this.#sessions.hasChildren(transaction, current.id)) {
-        throw new ApplicationError(
-          'PRECONDITION_FAILED',
-          'A Session with fork children cannot be permanently deleted',
-        )
-      }
-      if (!this.#sessions.deleteLeaf(transaction, current.id)) {
-        throw new ApplicationError('CONFLICT', 'Session could not be deleted')
-      }
-      return { sessionId: current.id, projectId: current.projectId }
-    })
+    await this.#runtimeGuard?.quiesceSession?.(input.sessionId)
+    const result = await this.#coordinator.command(
+      'session.removed',
+      (transaction) => {
+        const current = this.#sessions.get(transaction, input.sessionId)
+        if (!current) {
+          throw new ApplicationError('NOT_FOUND', 'Session was not found')
+        }
+        if (current.revision !== input.expectedRevision) {
+          throw revisionConflict(current)
+        }
+        if (current.lifecycle !== 'archived') {
+          throw new ApplicationError(
+            'PRECONDITION_FAILED',
+            'Only archived Sessions can be permanently deleted',
+          )
+        }
+        if (this.#sessions.hasChildren(transaction, current.id)) {
+          throw new ApplicationError(
+            'PRECONDITION_FAILED',
+            'A Session with fork children cannot be permanently deleted',
+          )
+        }
+        if (!this.#sessions.deleteLeaf(transaction, current.id)) {
+          throw new ApplicationError('CONFLICT', 'Session could not be deleted')
+        }
+        return { sessionId: current.id, projectId: current.projectId }
+      },
+    )
+    try {
+      await this.#onSessionDeleted?.(input.sessionId)
+    } catch (error) {
+      this.#onDiagnostic(
+        `Deleted Session ${input.sessionId} could not clean its temp directory`,
+        error,
+      )
+    }
+    return result
   }
 
   /** Rebuilds a Session's active branch through a selected boundary and commits the result. */

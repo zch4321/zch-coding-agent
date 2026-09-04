@@ -7,7 +7,7 @@ import { ToolRegistry } from './tool-registry'
 
 function definitions() {
   const registry = new ToolRegistry()
-  registerTerminalTools(registry, {} as TerminalPool, () => 100_000)
+  registerTerminalTools(registry, {} as TerminalPool)
   return registry
 }
 
@@ -45,7 +45,7 @@ describe('terminal tool permission matrix', () => {
     expect(normalizeTerminalInput('echo one\n', 'linux')).toBe('echo one\n')
   })
 
-  it.each(['terminal_open', 'terminal_send', 'terminal_close'])(
+  it.each(['terminal_open', 'terminal_send'])(
     'routes %s through side-effect policy',
     (toolId) => {
       expect(outcome(toolId, 'readonly')).toBe('deny')
@@ -55,18 +55,15 @@ describe('terminal tool permission matrix', () => {
     },
   )
 
-  it.each(['terminal_read', 'terminal_list'])(
-    'fast-paths %s as an owned read-only operation',
-    (toolId) => {
-      expect(outcome(toolId, 'readonly')).toBe('allow')
-      expect(outcome(toolId, 'auto')).toBe('allow')
-      expect(outcome(toolId, 'confirm')).toBe('allow')
-      expect(outcome(toolId, 'yolo')).toBe('allow')
-    },
-  )
-
-  it('no longer exposes terminal_resize to the model', () => {
-    expect(definitions().get('terminal_resize')).toBeUndefined()
+  it('keeps renderer-only terminal management out of the Provider catalog', () => {
+    for (const toolId of [
+      'terminal_read',
+      'terminal_list',
+      'terminal_close',
+      'terminal_resize',
+    ]) {
+      expect(definitions().get(toolId)).toBeUndefined()
+    }
   })
 
   it('ignores a model-supplied shell on terminal_open', () => {
@@ -119,7 +116,7 @@ describe('terminal tool permission matrix', () => {
       registry.validateArgs(definition, { ...args, delayMs: 60_000 }).ok,
     ).toBe(true)
     expect(registry.validateArgs(definition, { ...args, delayMs: 0 }).ok).toBe(
-      false,
+      true,
     )
     expect(
       registry.validateArgs(definition, { ...args, delayMs: 60_001 }).ok,
@@ -130,12 +127,24 @@ describe('terminal tool permission matrix', () => {
     vi.useFakeTimers()
     try {
       const write = vi.fn(() => true)
+      const modelCursor = vi.fn(() => 10)
+      const readDeltaOrTail = vi.fn(() => ({
+        content: 'done',
+        cursor: 20,
+        delta: true,
+        truncated: false,
+      }))
+      const backgroundSnapshot = vi.fn(() => ({
+        artifactAvailable: true,
+        artifactPath: '/tmp/terminal-7.log',
+      }))
       const registry = new ToolRegistry()
-      registerTerminalTools(
-        registry,
-        { write } as unknown as TerminalPool,
-        () => 100_000,
-      )
+      registerTerminalTools(registry, {
+        write,
+        modelCursor,
+        readDeltaOrTail,
+        backgroundSnapshot,
+      } as unknown as TerminalPool)
       const definition = registry.get('terminal_send')!
       const controller = new AbortController()
       let settled = false
@@ -168,7 +177,12 @@ describe('terminal tool permission matrix', () => {
       await vi.advanceTimersByTimeAsync(1)
       await expect(result).resolves.toMatchObject({
         status: 'ok',
-        content: { accepted: true, waitedMs: 250 },
+        content: {
+          accepted: true,
+          waitedMs: 250,
+          content: 'done',
+          artifactPath: '/tmp/terminal-7.log',
+        },
       })
     } finally {
       vi.useRealTimers()
@@ -179,11 +193,19 @@ describe('terminal tool permission matrix', () => {
     vi.useFakeTimers()
     try {
       const registry = new ToolRegistry()
-      registerTerminalTools(
-        registry,
-        { write: vi.fn(() => false) } as unknown as TerminalPool,
-        () => 100_000,
-      )
+      registerTerminalTools(registry, {
+        modelCursor: vi.fn(() => 0),
+        write: vi.fn(() => false),
+        backgroundSnapshot: vi.fn(() => ({
+          terminalId: 8,
+          status: 'closed',
+          exitCode: 0,
+          cursor: 7,
+          artifactAvailable: true,
+          artifactPath: '/tmp/terminal-8.log',
+          createdAt: '2026-08-28T00:00:00.000Z',
+        })),
+      } as unknown as TerminalPool)
       const definition = registry.get('terminal_send')!
 
       await expect(
@@ -202,7 +224,14 @@ describe('terminal tool permission matrix', () => {
         ),
       ).resolves.toEqual({
         status: 'ok',
-        content: { accepted: false },
+        content: {
+          accepted: false,
+          content: '',
+          cursor: 7,
+          delta: false,
+          artifactAvailable: true,
+          artifactPath: '/tmp/terminal-8.log',
+        },
       })
       expect(vi.getTimerCount()).toBe(0)
     } finally {
@@ -213,11 +242,10 @@ describe('terminal tool permission matrix', () => {
   it('cancels only the post-write wait after input was accepted', async () => {
     const write = vi.fn(() => true)
     const registry = new ToolRegistry()
-    registerTerminalTools(
-      registry,
-      { write } as unknown as TerminalPool,
-      () => 100_000,
-    )
+    registerTerminalTools(registry, {
+      modelCursor: vi.fn(() => 0),
+      write,
+    } as unknown as TerminalPool)
     const definition = registry.get('terminal_send')!
     const controller = new AbortController()
     const result = definition.execute(

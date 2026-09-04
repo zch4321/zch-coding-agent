@@ -49,13 +49,26 @@ describe('text Tool Result formatters', () => {
         ),
       ),
     ).toBe(
-      '7\talpha\n8\tbeta\n\n[truncated=true; nextStartLine=9; totalLines=10; lineTruncated=false]',
+      '7\talpha\n8\tbeta\n\n[hasMore=true; nextStartLine=9; totalLines=10]',
     )
     expect(
       rendered(
         projectReadFileResult(result({ content: '', truncated: false })),
       ),
     ).toBe('[empty file]')
+    expect(
+      rendered(
+        projectReadFileResult(
+          result({
+            content: '1\tcomplete',
+            hasMore: false,
+            nextStartLine: 2,
+            lineTruncated: false,
+            tailClipped: false,
+          }),
+        ),
+      ),
+    ).toBe('1\tcomplete\n\n[hasMore=false; nextStartLine=2]')
     expect(
       rendered(
         projectGrepResult(
@@ -91,12 +104,35 @@ describe('text Tool Result formatters', () => {
     ).toBe('src/\nREADME.md')
   })
 
+  it('appends read_file metadata outside the source line budget', () => {
+    const sourceLines = Array.from(
+      { length: 500 },
+      (_, index) => `${index + 1}\tline ${index + 1}`,
+    )
+    const output = rendered(
+      projectReadFileResult(
+        result(
+          {
+            content: sourceLines.join('\n'),
+            hasMore: true,
+            nextStartLine: 501,
+          },
+          { truncated: true },
+        ),
+      ),
+    )
+
+    expect(output.split('\n').slice(0, 500)).toEqual(sourceLines)
+    expect(output.split('\n')).toHaveLength(502)
+    expect(output).toMatch(/\n\n\[hasMore=true; nextStartLine=501\]$/u)
+  })
+
   it('formats terminal output without repeating terminal IDs', () => {
     expect(
       rendered(
         projectTerminalOpenResult(result({ terminalId: 7, cwd: '/tmp' })),
       ),
-    ).toBe('Opened terminal 7')
+    ).toBe('Opened terminal 7\n\n[target={"type":"terminal","id":7}]')
     expect(
       rendered(
         projectTerminalReadResult(
@@ -117,7 +153,9 @@ describe('text Tool Result formatters', () => {
       rendered(
         projectTerminalSendResult(result({ accepted: true, waitedMs: 250 })),
       ),
-    ).toBe('Terminal input accepted after 250 ms')
+    ).toBe(
+      '[no new output]\n\n[accepted=true; waitedMs=250; cursor=0; delta=false]',
+    )
     expect(rendered(projectTerminalCloseResult(result({ closed: true })))).toBe(
       'Terminal closed',
     )
@@ -205,22 +243,18 @@ describe('text Tool Result formatters', () => {
     ).toBe('Final finding\n\n[truncated=true]')
   })
 
-  it('preserves durable file-change warnings in one-line mutation summaries', () => {
+  it('reports an idempotent delete without claiming a mutation', () => {
     expect(
       rendered(
         projectFileMutationResult(
           result({
             path: 'src/app.ts',
-            operation: 'patch',
-            mutationSucceeded: true,
-            warningCode: 'CHANGE_HISTORY_PERSIST_FAILED',
-            revertAvailable: false,
+            operation: 'delete',
+            deleted: false,
           }),
-          'patched',
+          'deleted',
         ),
       ),
-    ).toBe(
-      'Patched file src/app.ts\n\n[mutationSucceeded=true; warningCode=CHANGE_HISTORY_PERSIST_FAILED; revertAvailable=false]',
-    )
+    ).toBe('File was already absent src/app.ts')
   })
 })

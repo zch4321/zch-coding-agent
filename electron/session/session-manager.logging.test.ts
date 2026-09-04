@@ -1,8 +1,15 @@
-import { mkdir, mkdtemp } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
-import type { MessageId, ProjectId } from '../../shared/ids'
+import { describe, expect, it, vi } from 'vitest'
+import type {
+  AgentExecutionId,
+  CallId,
+  MessageId,
+  ProjectId,
+  RunId,
+  SessionId,
+} from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { SessionRecord } from '../../shared/session'
 import { readTraceFile } from '../logging/reader'
@@ -17,6 +24,69 @@ import {
 const timestamp = '2026-07-25T00:00:00.000Z'
 
 describe('SessionManager trace capture switching', () => {
+  it('does not rescan global traces when a trace-disabled internal Session closes', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-internal-trace-cleanup-'),
+    )
+    const workspace = path.join(directory, 'workspace')
+    const traceDirectory = path.join(directory, 'traces')
+    await Promise.all([mkdir(workspace), mkdir(traceDirectory)])
+    const corruptTrace = path.join(traceDirectory, 'corrupt-current.jsonl')
+    await writeFile(
+      corruptTrace,
+      `${JSON.stringify({
+        schemaVersion: 3,
+        seq: 1,
+        eventId: 'event:corrupt-internal-cleanup',
+        ts: '2026-08-29T00:00:00.000Z',
+        type: 'session.start',
+      })}\n`,
+    )
+    const configStore = await createConfig(directory)
+    const config = configStore.getPublicConfig()
+    const provider = config.models.providers[0]!
+    const onDiagnostic = vi.fn()
+    const manager = new SessionManager({
+      configStore,
+      traceDirectory,
+      eventSink: createIpcTestEventSink(() => undefined),
+      providerFactory: () => new ForkProvider(),
+      onDiagnostic,
+    })
+    const sessionId = 'session:internal-no-cleanup' as SessionId
+    await manager.createInternalSession({
+      sessionId,
+      workspace,
+      mode: 'readonly',
+      provider: provider.id,
+      modelSelection: {
+        providerId: provider.id,
+        model: provider.model,
+        reasoning: config.models.defaultModelReasoning,
+      },
+      allowedToolIds: new Set(),
+      gitToolsEnabled: true,
+      providerSnapshot: provider,
+      execution: {
+        executionId: 'execution:internal-no-cleanup' as AgentExecutionId,
+        parentSessionId: 'session:internal-parent' as SessionId,
+        parentRunId: 'run:internal-parent' as RunId,
+        parentCallId: 'call:internal-parent' as CallId,
+        name: 'internal-no-cleanup',
+        createdAt: '2026-08-29T00:00:00.000Z',
+      },
+    })
+
+    await expect(manager.closeSession(sessionId)).resolves.toBe(true)
+    expect(
+      onDiagnostic.mock.calls.filter(([message]) =>
+        String(message).startsWith('Failed to inspect trace'),
+      ),
+    ).toEqual([])
+    await expect(access(corruptTrace)).resolves.toBeUndefined()
+    await manager.dispose()
+  })
+
   it('enables an idle Session and creates a new capture when restored', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'agent-trace-switching-'),

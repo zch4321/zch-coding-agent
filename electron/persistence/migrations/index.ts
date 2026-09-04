@@ -7,6 +7,15 @@ import reasoningLevelsSql from './0006_reasoning_levels.sql?raw'
 import conversationTranscriptSql from './0007_conversation_transcript.sql?raw'
 import swarmExecutionsSql from './0008_swarm_executions.sql?raw'
 import titleSourceSql from './0009_title_source.sql?raw'
+import activeSubagentCapacitySql from './0010_active_subagent_capacity.sql?raw'
+import removeFileChangesSql from './0011_remove_file_changes.sql?raw'
+import reconcileFileChangeRemovalSql from './0012_reconcile_file_change_removal.sql?raw'
+import legacyBackgroundTaskPublicIdsSql from './legacy/0011_background_task_public_ids.sql?raw'
+
+export interface AppliedMigrationVariant {
+  name: string
+  sql: string
+}
 
 export interface DatabaseMigration {
   version: number
@@ -17,6 +26,8 @@ export interface DatabaseMigration {
    * paused; the runner validates `PRAGMA foreign_key_check` before committing.
    */
   disableForeignKeys?: boolean
+  /** Exact historical alternatives accepted for an already-applied version. */
+  acceptedAppliedVariants?: readonly AppliedMigrationVariant[]
 }
 
 export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
@@ -67,5 +78,26 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
     version: 9,
     name: '0009_title_source',
     sql: titleSourceSql,
+  },
+  {
+    version: 10,
+    name: '0010_active_subagent_capacity',
+    sql: activeSubagentCapacitySql,
+  },
+  {
+    version: 11,
+    name: '0011_remove_file_changes',
+    sql: removeFileChangesSql,
+    acceptedAppliedVariants: [
+      {
+        name: '0011_background_task_public_ids',
+        sql: legacyBackgroundTaskPublicIdsSql,
+      },
+    ],
+  },
+  {
+    version: 12,
+    name: '0012_reconcile_file_change_removal',
+    sql: reconcileFileChangeRemovalSql,
   },
 ]

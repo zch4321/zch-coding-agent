@@ -39,7 +39,7 @@ describe('SessionManager plan tool batches', () => {
             id: 'call-create-file',
             type: 'function',
             function: {
-              name: 'create_file',
+              name: 'write_file',
               arguments: JSON.stringify(writeArgs),
             },
           },
@@ -57,7 +57,7 @@ describe('SessionManager plan tool batches', () => {
             },
             {
               id: 'call-create-file' as CallId,
-              toolId: 'create_file',
+              toolId: 'write_file',
               args: writeArgs,
               reason: 'Create the requested file',
             },

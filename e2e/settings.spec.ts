@@ -249,11 +249,15 @@ test.describe.serial('Electron settings workflows', () => {
     const timeoutMinutes = agents
       .locator('.settings-field', { hasText: '单个子任务超时' })
       .locator('input')
+    const maxSubagents = agents
+      .locator('.settings-field', { hasText: '每个会话最大后台 Agent 数' })
+      .locator('input')
     const subagentSaveStatus = agents.locator(
       '.settings-heading-actions .settings-save-status',
     )
     await expect(subagentsSwitch).not.toHaveClass(/n-switch--active/u)
     await expect(timeoutMinutes).toHaveValue('30')
+    await expect(maxSubagents).toHaveValue('32')
     await subagentsSwitch.click()
     await timeoutMinutes.fill('45')
     await expect(subagentSaveStatus).toHaveText('已保存')
@@ -267,6 +271,7 @@ test.describe.serial('Electron settings workflows', () => {
                   subagents: {
                     enabled: boolean
                     workerTimeoutMs: number
+                    maxSubagents: number
                   }
                 }
               }
@@ -282,6 +287,7 @@ test.describe.serial('Electron settings workflows', () => {
       .toEqual({
         enabled: true,
         workerTimeoutMs: 2_700_000,
+        maxSubagents: 32,
       })
     await subagentsSwitch.click()
     await expect(subagentSaveStatus).toHaveText('已保存')

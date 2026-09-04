@@ -1,7 +1,18 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { stat } from 'node:fs/promises'
+import {
+  changeFileMode as chmod,
+  fileStatus as stat,
+  makeDirectory as mkdir,
+  openFileHandle as open,
+  writeFileContents as writeFile,
+  type FileHandle,
+} from '../common/filesystem'
 import path from 'node:path'
 import { PathGuard, PathGuardError } from '../safety/path-guard'
+import {
+  touchSessionTempPath,
+  type SessionTempPaths,
+} from '../session-temp/service'
 import {
   BoundedProcessOutput,
   type BoundedOutputSnapshot,
@@ -61,6 +72,8 @@ export interface RunCommandOptions {
   maxOutputBytes: number
   signal: AbortSignal
   terminationGraceMs?: number
+  sessionTemp?: SessionTempPaths
+  artifactKey?: string
 }
 
 export interface RunCommandResult extends BoundedOutputSnapshot {
@@ -71,11 +84,15 @@ export interface RunCommandResult extends BoundedOutputSnapshot {
   durationMs: number
   cwd: string
   terminationStrategy: 'none' | 'taskkill' | 'process-group'
+  artifactAvailable: boolean
+  artifactPath?: string
+  captureError?: string
 }
 
 /** Builds a child-process environment with the allowed variables and safe proxy settings. */
 export function createCommandEnvironment(
   source: Record<string, string | undefined> = process.env,
+  sessionTemp?: SessionTempPaths,
 ): NodeJS.ProcessEnv {
   const nodeEnvironment =
     source.NODE_ENV === 'development' ||
@@ -96,14 +113,20 @@ export function createCommandEnvironment(
   }
 
   environment.NO_COLOR = '1'
+  if (sessionTemp) {
+    environment.ZCH_SESSION_TEMP_DIR = sessionTemp.root
+    environment.ZCH_SESSION_ARTIFACTS_DIR = sessionTemp.artifacts
+    environment.ZCH_SESSION_SCRATCH_DIR = sessionTemp.scratch
+  }
   return environment
 }
 
 async function resolveWorkingDirectory(
   workspace: string,
+  sessionTempRoot: string | undefined,
   requested: string | undefined,
 ): Promise<string> {
-  const guard = PathGuard.fromCanonical(workspace)
+  const guard = PathGuard.fromCanonical(workspace, sessionTempRoot)
   const guarded = await guard.resolveExisting(requested ?? '.')
   const directoryStat = await stat(guarded.realPath)
 
@@ -115,6 +138,159 @@ async function resolveWorkingDirectory(
   }
 
   return guarded.realPath
+}
+
+interface CommandArtifactCapture {
+  directory: string
+  sessionTemp: SessionTempPaths
+  stdout?: FileHandle
+  stderr?: FileHandle
+  stdoutTail: Promise<void>
+  stderrTail: Promise<void>
+  captureError?: string
+}
+
+/** Creates the always-on command capture files before spawning the process. */
+async function createArtifactCapture(
+  sessionTemp: SessionTempPaths | undefined,
+  artifactKey: string | undefined,
+): Promise<CommandArtifactCapture | undefined> {
+  if (!sessionTemp || !artifactKey) return undefined
+  const directory = path.join(sessionTemp.artifacts, 'commands', artifactKey)
+  let stdout: FileHandle | undefined
+  let stderr: FileHandle | undefined
+  try {
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    if (process.platform !== 'win32') await chmod(directory, 0o700)
+    stdout = await open(path.join(directory, 'stdout.log'), 'w', 0o600)
+    stderr = await open(path.join(directory, 'stderr.log'), 'w', 0o600)
+    if (process.platform !== 'win32') {
+      await Promise.all([stdout.chmod(0o600), stderr.chmod(0o600)])
+    }
+    return {
+      directory,
+      sessionTemp,
+      stdout,
+      stderr,
+      stdoutTail: Promise.resolve(),
+      stderrTail: Promise.resolve(),
+    }
+  } catch (error) {
+    await Promise.allSettled([stdout?.close(), stderr?.close()])
+    return {
+      directory,
+      sessionTemp,
+      stdoutTail: Promise.resolve(),
+      stderrTail: Promise.resolve(),
+      captureError: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+function appendArtifact(
+  capture: CommandArtifactCapture | undefined,
+  stream: 'stdout' | 'stderr',
+  chunk: Buffer,
+): void {
+  if (!capture || capture.captureError) return
+  const handle = capture[stream]
+  if (!handle) return
+  const tailKey = stream === 'stdout' ? 'stdoutTail' : 'stderrTail'
+  capture[tailKey] = capture[tailKey]
+    .then(async () => {
+      await handle.write(chunk)
+    })
+    .catch((error: unknown) => {
+      capture.captureError =
+        error instanceof Error ? error.message : String(error)
+    })
+}
+
+async function finishArtifactCapture(
+  capture: CommandArtifactCapture | undefined,
+  result: unknown,
+): Promise<
+  Pick<RunCommandResult, 'artifactAvailable' | 'artifactPath' | 'captureError'>
+> {
+  if (!capture) return { artifactAvailable: false }
+  await Promise.allSettled([capture.stdoutTail, capture.stderrTail])
+  const closed = await Promise.allSettled([
+    capture.stdout?.close(),
+    capture.stderr?.close(),
+  ])
+  const closeFailure = closed.find(
+    (settlement): settlement is PromiseRejectedResult =>
+      settlement.status === 'rejected',
+  )
+  if (closeFailure) {
+    capture.captureError ??=
+      closeFailure.reason instanceof Error
+        ? closeFailure.reason.message
+        : String(closeFailure.reason)
+  }
+  if (!capture.captureError) {
+    try {
+      const resultPath = path.join(capture.directory, 'result.json')
+      await writeFile(resultPath, `${JSON.stringify(result, null, 2)}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+      })
+      await touchSessionTempPath(capture.sessionTemp)
+    } catch (error) {
+      capture.captureError =
+        error instanceof Error ? error.message : String(error)
+    }
+  }
+  return capture.captureError
+    ? {
+        artifactAvailable: false,
+        captureError: capture.captureError,
+      }
+    : { artifactAvailable: true, artifactPath: capture.directory }
+}
+
+function commandFailureResult(
+  error: unknown,
+  output: BoundedOutputSnapshot,
+  startedAt: number,
+  cwd: string,
+): Record<string, unknown> {
+  return {
+    ...output,
+    exitCode: null,
+    exitSignal: null,
+    timedOut: false,
+    cancelled: false,
+    durationMs: performance.now() - startedAt,
+    cwd,
+    terminationStrategy: 'none',
+    error: {
+      code:
+        error && typeof error === 'object' && 'code' in error
+          ? String(error.code)
+          : 'COMMAND_SPAWN_FAILED',
+      message: error instanceof Error ? error.message : String(error),
+    },
+  }
+}
+
+function attachArtifactToError(
+  error: unknown,
+  artifact: Pick<
+    RunCommandResult,
+    'artifactAvailable' | 'artifactPath' | 'captureError'
+  >,
+): Error {
+  const source = error instanceof Error ? error : new Error(String(error))
+  const details = artifact.artifactPath
+    ? `artifactPath=${artifact.artifactPath}`
+    : `artifactAvailable=false${
+        artifact.captureError ? `; captureError=${artifact.captureError}` : ''
+      }`
+  const wrapped = new Error(`${source.message}; ${details}`, { cause: source })
+  if ('code' in source)
+    Reflect.set(wrapped, 'code', Reflect.get(source, 'code'))
+  return wrapped
 }
 
 function waitForExit(processToWait: ChildProcess): Promise<{
@@ -199,7 +375,12 @@ export async function runCommand(
 
   const cwd = await resolveWorkingDirectory(
     path.resolve(options.workspace),
+    options.sessionTemp?.root,
     options.command.cwd,
+  )
+  const artifactCapture = await createArtifactCapture(
+    options.sessionTemp,
+    options.artifactKey,
   )
   const output = new BoundedProcessOutput(
     options.maxOutputBytes,
@@ -210,31 +391,45 @@ export async function runCommand(
   const startedAt = performance.now()
   let child: ChildProcess
 
-  if (options.command.mode === 'process') {
-    child = spawn(options.command.executable, options.command.args ?? [], {
-      cwd,
-      env: createCommandEnvironment(),
-      shell: false,
-      windowsHide: true,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-  } else {
-    child = spawn(options.command.executable, options.command.args, {
-      cwd,
-      env: {
-        ...createCommandEnvironment(),
-        ...options.command.environment,
-      },
-      shell: false,
-      windowsHide: true,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+  try {
+    if (options.command.mode === 'process') {
+      child = spawn(options.command.executable, options.command.args ?? [], {
+        cwd,
+        env: createCommandEnvironment(process.env, options.sessionTemp),
+        shell: false,
+        windowsHide: true,
+        detached: process.platform !== 'win32',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } else {
+      child = spawn(options.command.executable, options.command.args, {
+        cwd,
+        env: {
+          ...createCommandEnvironment(process.env, options.sessionTemp),
+          ...options.command.environment,
+        },
+        shell: false,
+        windowsHide: true,
+        detached: process.platform !== 'win32',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    }
+  } catch (error) {
+    const artifact = await finishArtifactCapture(
+      artifactCapture,
+      commandFailureResult(error, output.snapshot(), startedAt, cwd),
+    )
+    throw attachArtifactToError(error, artifact)
   }
 
-  child.stdout?.on('data', (chunk: Buffer) => output.append('stdout', chunk))
-  child.stderr?.on('data', (chunk: Buffer) => output.append('stderr', chunk))
+  child.stdout?.on('data', (chunk: Buffer) => {
+    output.append('stdout', chunk)
+    appendArtifact(artifactCapture, 'stdout', chunk)
+  })
+  child.stderr?.on('data', (chunk: Buffer) => {
+    output.append('stderr', chunk)
+    appendArtifact(artifactCapture, 'stderr', chunk)
+  })
 
   let timedOut = false
   let cancelled = false
@@ -272,8 +467,17 @@ export async function runCommand(
   )
 
   try {
-    const exited = await waitForExit(child)
-    return {
+    let exited: Awaited<ReturnType<typeof waitForExit>>
+    try {
+      exited = await waitForExit(child)
+    } catch (error) {
+      const artifact = await finishArtifactCapture(
+        artifactCapture,
+        commandFailureResult(error, output.snapshot(), startedAt, cwd),
+      )
+      throw attachArtifactToError(error, artifact)
+    }
+    const result = {
       ...output.snapshot(),
       ...exited,
       timedOut,
@@ -281,6 +485,10 @@ export async function runCommand(
       durationMs: performance.now() - startedAt,
       cwd,
       terminationStrategy,
+    }
+    return {
+      ...result,
+      ...(await finishArtifactCapture(artifactCapture, result)),
     }
   } finally {
     clearTimeout(timeout)

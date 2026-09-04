@@ -160,23 +160,3 @@ export function correctiveCompactPrompt(original: string): string {
     'Finish within the available output budget.',
   ].join('\n')
 }
-
-/** Waits for a bounded retry delay while remaining responsive to Run abort. */
-export function waitForCompactRetry(
-  ms: number,
-  signal: AbortSignal,
-): Promise<void> {
-  if (ms <= 0) return Promise.resolve()
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(finish, ms)
-    const abort = () => finish(signal.reason ?? new Error('Run interrupted'))
-    function finish(error?: unknown): void {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', abort)
-      if (error === undefined) resolve()
-      else reject(error)
-    }
-    if (signal.aborted) abort()
-    else signal.addEventListener('abort', abort, { once: true })
-  })
-}

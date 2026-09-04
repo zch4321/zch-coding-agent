@@ -59,7 +59,7 @@ class EditProvider extends ScriptedProviderHarness {
     const args = { path: 'headless-created.txt', content: 'from headless\n' }
     const toolCall = {
       id: 'call-create' as CallId,
-      toolId: 'create_file',
+      toolId: 'write_file',
       args,
       reason: 'Create the requested file',
     }
@@ -214,7 +214,7 @@ function toolCompletion(
 
 function config(overrides: Partial<HeadlessConfig> = {}): HeadlessConfig {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     provider: {
       id: 'fake',
       providerType: 'generic.chat-completions',
@@ -292,7 +292,7 @@ describe('Headless host', () => {
     )
 
     await expect(loadHeadlessConfig(configPath)).resolves.toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       provider: {
         id: 'legacy-deepseek',
         label: 'Legacy DeepSeek',
@@ -319,7 +319,7 @@ describe('Headless host', () => {
 
     await expect(loadHeadlessConfig(configPath)).resolves.toEqual({
       ...legacy,
-      schemaVersion: 4,
+      schemaVersion: 5,
     })
   })
 
@@ -337,20 +337,29 @@ describe('Headless host', () => {
 
     await expect(loadHeadlessConfig(configPath)).resolves.toEqual({
       ...current,
-      limits: { maxToolResultTokens: 12_000 },
+      limits: {},
     })
   })
 
-  it('accepts bounded Subagent settings in v4 config', async () => {
+  it('migrates bounded Subagent settings from v4 to v5', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-v4-'))
     temporaryDirectories.push(directory)
     const configPath = path.join(directory, 'headless.json')
-    const source = config({
-      subagents: { enabled: true, workerTimeoutMs: 2_700_000 },
-    })
+    const source = {
+      ...config(),
+      schemaVersion: 4,
+      subagents: {
+        enabled: true,
+        workerTimeoutMs: 2_700_000,
+      },
+    }
     await writeFile(configPath, JSON.stringify(source), 'utf8')
 
-    await expect(loadHeadlessConfig(configPath)).resolves.toEqual(source)
+    await expect(loadHeadlessConfig(configPath)).resolves.toEqual({
+      ...source,
+      schemaVersion: 5,
+      subagents: { ...source.subagents, maxSubagents: 32 },
+    })
   })
 
   it('keeps external v4 singular Provider config while building an empty v24 model pool', async () => {
@@ -365,11 +374,11 @@ describe('Headless host', () => {
     })
 
     expect(prepared.config).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       provider: { id: 'fake' },
     })
     expect(prepared.configStore.getInternalConfig()).toMatchObject({
-      schemaVersion: 24,
+      schemaVersion: 26,
       models: {
         defaultModelProvider: 'fake',
         modelPool: { entries: [] },
@@ -482,7 +491,7 @@ describe('Headless host', () => {
     ).resolves.toContain('"status": "completed"')
   }, 20_000)
 
-  it('runs editing tools in fixed Yolo and writes JSONL, result, trace, and patch', async () => {
+  it('runs editing tools in fixed Yolo and writes JSONL, result, and trace', async () => {
     const { workspace, artifacts } = await fixture(true)
     const output = new StringSink()
     const provider = new EditProvider()
@@ -515,7 +524,6 @@ describe('Headless host', () => {
       completionTokens: 10,
       totalTokens: 34,
     })
-    expect(result.artifacts.patchStatus).toBe('written')
     await expect(
       readFile(path.join(workspace, 'headless-created.txt'), 'utf8'),
     ).resolves.toBe('from headless\n')
@@ -529,18 +537,26 @@ describe('Headless host', () => {
       configHash: string
       toolsHash: string
       promptResources: unknown[]
-      budgets: { subagentWorkerTimeoutMs: number }
+      budgets: {
+        subagentWorkerTimeoutMs: number
+        maxToolOutputBytes: number
+        maxToolOutputLines: number
+        maxSubagents: number
+      }
       capabilities: {
         toolNames: string[]
         subagentsEnabled: boolean
         swarmsEnabled: boolean
       }
     }
-    expect(identity.schemaVersion).toBe(5)
+    expect(identity.schemaVersion).toBe(6)
     expect(identity.configHash).toBe(result.configHash)
     expect(identity.toolsHash).toMatch(/^[a-f0-9]{64}$/u)
     expect(identity.promptResources.length).toBeGreaterThan(0)
     expect(identity.budgets.subagentWorkerTimeoutMs).toBe(1_800_000)
+    expect(identity.budgets.maxToolOutputBytes).toBe(256 * 1_024)
+    expect(identity.budgets.maxToolOutputLines).toBe(500)
+    expect(identity.budgets.maxSubagents).toBe(32)
     expect(identity.capabilities.subagentsEnabled).toBe(false)
     expect(identity.capabilities.swarmsEnabled).toBe(false)
     expect(identity.capabilities.toolNames).toContain('call_mcp_tool')
@@ -548,9 +564,6 @@ describe('Headless host', () => {
     await expect(
       readFile(result.artifacts.tracePath, 'utf8'),
     ).resolves.toContain('"type":"tool.call"')
-    await expect(
-      readFile(result.artifacts.patchPath!, 'utf8'),
-    ).resolves.toContain('headless-created.txt')
     expect(events[0]).toMatchObject({
       type: 'runtime.started',
       permissionMode: 'yolo',

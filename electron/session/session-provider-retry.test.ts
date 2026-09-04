@@ -1,11 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { ProviderTransportError } from '../providers/http-sse-transport'
 import { ProviderCompletionError } from '../providers/provider'
 import {
   createProviderTurnRetryBudget,
   ProviderStreamIncompleteError,
   providerTurnRetryDecision,
-  waitForProviderTurnRetry,
 } from './session-provider-retry'
 
 const diagnostics = {
@@ -75,14 +74,5 @@ describe('Provider turn retry policy', () => {
         providerTurnRetryDecision(error, createProviderTurnRetryBudget()),
       ).toBeUndefined()
     }
-  })
-
-  it('waits abortably between attempts', async () => {
-    vi.useFakeTimers()
-    const controller = new AbortController()
-    const waiting = waitForProviderTurnRetry(10_000, controller.signal)
-    controller.abort(new Error('cancelled'))
-    await expect(waiting).rejects.toThrow('cancelled')
-    vi.useRealTimers()
   })
 })

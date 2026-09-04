@@ -7,7 +7,6 @@ import {
 } from '../../shared/ipc-contract'
 import type {
   CallId,
-  FileChangeId,
   AgentExecutionId,
   MessageId,
   ProjectId,
@@ -24,7 +23,6 @@ const callId = 'call-1' as CallId
 const terminalId = 1 as TerminalId
 const projectId = 'project-1' as ProjectId
 const messageId = 'message-1' as MessageId
-const fileChangeId = 'change-1' as FileChangeId
 const agentExecutionId = 'subagent-1' as AgentExecutionId
 const projectModel = {
   schemaVersion: 1,
@@ -130,12 +128,11 @@ const validPayloads: {
   'session:search': { version: 1, text: 'query' },
   'message:list': { version: 1, sessionId },
   'message:search': { version: 1, sessionId, text: 'query' },
-  'file-change:list': { version: 1, sessionId },
-  'file-change:revert': {
+  'git-review:get-status': { version: 1, projectId },
+  'git-review:get-diff': {
     version: 1,
-    sessionId,
-    fileChangeId,
-    expectedRevision: 1,
+    projectId,
+    mode: 'head',
   },
   'agent-execution:list': { version: 1, parentSessionId: sessionId },
   'agent-execution:get': {

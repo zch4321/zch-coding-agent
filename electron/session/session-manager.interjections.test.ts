@@ -130,7 +130,7 @@ describe('SessionManager live interjections', () => {
     await mkdir(workspace)
     await writeFile(path.join(workspace, 'notes.md'), 'note body\n')
     const store = await createConfig(directory)
-    const provider = new InterjectionProvider()
+    const provider = new InterjectionProvider({ holdSecondTurn: true })
     const sent: AgentEventEnvelope[] = []
     const manager = new SessionManager({
       configStore: store,
@@ -175,6 +175,7 @@ describe('SessionManager live interjections', () => {
       clientRequestId: 'request-idem-1',
     })
     expect(accepted).toBe(true)
+    provider.secondTurnGate.resolve()
 
     await waitFor(() =>
       sent.some(

@@ -1,6 +1,5 @@
 import type { Pinia } from 'pinia'
 import type { ProjectId } from '../../shared/ids'
-import { useAgentChangesStore } from './agent-changes'
 import { useApplicationSettingsStore } from './application-settings'
 import { useAssistantSettingsStore } from './assistant-settings'
 import { useModelRolesStore } from './model-roles'
@@ -34,7 +33,6 @@ type RuntimeSettingsStore = ReturnType<typeof useRuntimeSettingsStore>
 type SecuritySettingsStore = ReturnType<typeof useSecuritySettingsStore>
 type ReplicaStore = ReturnType<typeof useAgentReplicaStore>
 type RuntimeStore = ReturnType<typeof useAgentRuntimeStore>
-type ChangesStore = ReturnType<typeof useAgentChangesStore>
 
 type HiddenSettingsMembers =
   | '$id'
@@ -70,8 +68,7 @@ export type AgentFacade = Omit<ShellStore, '$id'> &
   Omit<ApplicationSettingsStore, HiddenSettingsMembers> &
   Omit<AssistantSettingsStore, HiddenSettingsMembers> &
   Omit<ReplicaStore, 'error' | '$id' | 'projects'> &
-  Omit<RuntimeStore, '$id' | 'draftModelSelection'> &
-  Omit<ChangesStore, 'error' | '$id' | 'revertChange'> & {
+  Omit<RuntimeStore, '$id' | 'draftModelSelection'> & {
     workspacePath: string
     projects: ProjectView[]
     conversations: SessionView[]
@@ -81,7 +78,6 @@ export type AgentFacade = Omit<ShellStore, '$id'> &
     plan: SessionView['plan']
     savePermissions(): Promise<boolean>
     removeRememberedRule(ruleId: string): Promise<boolean>
-    revertChange(changeId: string): Promise<boolean>
     searchSessions(text: string, projectId?: ProjectId): Promise<void>
     setProviderDraftModel(model: string): void
   }
@@ -178,17 +174,13 @@ const replicaProperties = new Set<PropertyKey>([
   'selectedProjectId',
   'selectedSessionId',
   'messagesBySessionId',
-  'fileChangesBySessionId',
   'runtimeBySessionId',
   'traceCaptureBySessionId',
   'sessionHasMore',
   'sessionNextBefore',
   'messageHasMoreBySessionId',
   'messageNextBeforeSeqBySessionId',
-  'fileChangeHasMoreBySessionId',
-  'fileChangeNextBeforeBySessionId',
   'selectedMessageHasMore',
-  'selectedFileChangeHasMore',
   'selectedTraceCapture',
   'cursor',
   'searchHits',
@@ -223,12 +215,6 @@ const runtimeProperties = new Set<PropertyKey>([
   'composerReasoningValid',
   'composerModelOptions',
 ])
-const changesProperties = new Set<PropertyKey>([
-  'changes',
-  'changesLoading',
-  'revertingChangeId',
-])
-
 function projectViews(replica: ReplicaStore): ProjectView[] {
   return replica.projects.map((project) => ({
     id: project.id,
@@ -274,7 +260,6 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
   const modelRoles = useModelRolesStore(pinia)
   const replica = useAgentReplicaStore(pinia)
   const runtime = useAgentRuntimeStore(pinia)
-  const changes = useAgentChangesStore(pinia)
 
   const actions: Record<PropertyKey, unknown> = {
     initialize: runtime.initialize,
@@ -334,17 +319,6 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     updatePlanStatus: runtime.updatePlanStatus,
     approvePlan: runtime.approvePlan,
     rejectPlan: runtime.rejectPlan,
-    loadConversationChanges: changes.loadConversationChanges,
-    loadOlderConversationChanges: changes.loadOlderConversationChanges,
-    revertChange: (changeId: string) =>
-      changes.revertChange(
-        changeId,
-        Boolean(
-          runtime.startPending ||
-          runtime.activeRunId ||
-          runtime.pendingApproval,
-        ),
-      ),
     sendMessage: runtime.sendMessage,
     sendInterjection: runtime.sendInterjection,
     chooseContextAttachment: runtime.chooseContextAttachment,
@@ -358,7 +332,6 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     searchSessions: replica.search,
     loadOlderSessions: replica.loadOlderSessions,
     loadOlderMessages: replica.loadOlderMessages,
-    loadOlderFileChanges: replica.loadOlderFileChanges,
   }
 
   const targetStore = (property: PropertyKey): object | undefined => {
@@ -372,7 +345,6 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     if (assistantSettingsProperties.has(property)) return assistantSettings
     if (replicaProperties.has(property)) return replica
     if (runtimeProperties.has(property)) return runtime
-    if (changesProperties.has(property)) return changes
     return undefined
   }
 

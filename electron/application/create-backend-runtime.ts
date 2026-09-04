@@ -1,4 +1,4 @@
-import { mkdir, rm } from 'node:fs/promises'
+import { makeDirectory as mkdir, removePath as rm } from '../common/filesystem'
 import path from 'node:path'
 import type {
   AppBootstrapResultSchema,
@@ -12,7 +12,6 @@ import {
   type DatabaseServiceOptions,
 } from '../persistence/database-service'
 import { MessageRepository } from '../persistence/message-repository'
-import { FileChangeRepository } from '../persistence/file-change-repository'
 import { ProjectRepository } from '../persistence/project-repository'
 import { SessionRepository } from '../persistence/session-repository'
 import { SubagentRepository } from '../persistence/subagent-repository'
@@ -24,7 +23,6 @@ import {
 } from '../runtime/create-agent-runtime'
 import type { AgentRuntime } from '../runtime/agent-runtime'
 import { ApplicationStateCoordinator } from './application-state-coordinator'
-import { FileChangeService } from './file-change-service'
 import { DurableExecutionStatePort } from './durable-execution-state-port'
 import { DurableRunApplicationService } from './durable-run-application-service'
 import { LiveSessionContextRegistry } from './live-session-context-registry'
@@ -37,7 +35,15 @@ import { SubagentExecutionService } from '../subagent/execution-service'
 import { SwarmExecutionBridge } from '../swarm/execution-bridge'
 import { SwarmCoordinator } from '../swarm/coordinator'
 import { ConversationTitlingService } from './conversation-titling-service'
+import { GitReviewService } from './git-review-service'
 import type { OperationalLogService } from '../operational-logging/service'
+import {
+  desktopSessionTempRoot,
+  SessionTempService,
+} from '../session-temp/service'
+import { BackgroundTaskBridge } from '../background/bridge'
+import { BackgroundTaskService } from '../background/service'
+import { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
 
 type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
@@ -55,6 +61,7 @@ export interface CreateBackendRuntimeOptions {
   operationalLog?: Pick<OperationalLogService, 'log'>
   swarmHostEnabled?: boolean
   conversationTitlingDisabled?: boolean
+  sessionTempRootDirectory?: string
 }
 
 export interface BackendRuntime {
@@ -63,10 +70,11 @@ export interface BackendRuntime {
   coordinator: ApplicationStateCoordinator
   projects: ProjectService
   sessions: SessionService
-  fileChanges: FileChangeService
+  gitReview: GitReviewService
   agentExecutions: AgentExecutionQueryService
   runs: DurableRunApplicationService
   liveSessions: LiveSessionContextRegistry
+  sessionTemps: SessionTempService
   bootstrap(): Promise<AppBootstrapResult>
   subscribe(listener: (commit: DurableCommitEnvelope) => void): () => void
   dispose(): Promise<void>
@@ -80,6 +88,14 @@ export async function createBackendRuntime(
   const runtimeDataDirectory = path.resolve(options.runtimeDataDirectory)
   await mkdir(path.dirname(databasePath), { recursive: true })
   await mkdir(runtimeDataDirectory, { recursive: true })
+  const sessionTemps = new SessionTempService({
+    rootDirectory:
+      options.sessionTempRootDirectory ??
+      desktopSessionTempRoot(runtimeDataDirectory),
+    onDiagnostic: (message, error) =>
+      options.onDiagnostic?.(message, error, { audience: 'internal' }),
+  })
+  await sessionTemps.initialize()
   await rm(path.join(runtimeDataDirectory, 'subagent-snapshots'), {
     recursive: true,
     force: true,
@@ -138,7 +154,6 @@ export async function createBackendRuntime(
   const projectRepository = new ProjectRepository()
   const sessionRepository = new SessionRepository()
   const messageRepository = new MessageRepository()
-  const fileChangeRepository = new FileChangeRepository()
   const subagentRepository = new SubagentRepository()
 
   let liveSessions: LiveSessionContextRegistry | undefined
@@ -157,6 +172,25 @@ export async function createBackendRuntime(
     },
     cancelProjectEviction(projectId, token) {
       liveSessions?.cancelProjectEviction(projectId, token)
+    },
+    async quiesceProject(projectId) {
+      if (!liveSessions) {
+        throw new Error('Live Session registry is not initialized')
+      }
+      const sessionIds = (
+        await coordinator.query((reader) =>
+          sessionRepository.listIdsByProject(reader, projectId),
+        )
+      ).value
+      for (const sessionId of sessionIds) {
+        await liveSessions.quiesceSession(sessionId)
+      }
+      return sessionIds
+    },
+    async cleanupDeletedSessions(sessionIds) {
+      for (const sessionId of sessionIds) {
+        await sessionTemps.removeSession(sessionId)
+      }
     },
   }
   const sessionGuard: SessionRuntimeGuard = {
@@ -178,6 +212,12 @@ export async function createBackendRuntime(
     cancelSessionEviction(sessionId, token) {
       liveSessions?.cancelSessionEviction(sessionId, token)
     },
+    async quiesceSession(sessionId) {
+      if (!liveSessions) {
+        throw new Error('Live Session registry is not initialized')
+      }
+      await liveSessions.quiesceSession(sessionId)
+    },
     releaseSession(sessionId, operationToken) {
       return liveSessions?.releaseSession(sessionId, operationToken)
     },
@@ -197,14 +237,9 @@ export async function createBackendRuntime(
     messages: messageRepository,
     runtimeGuard: sessionGuard,
     onDiagnostic: options.onDiagnostic,
+    onSessionDeleted: (sessionId) => sessionTemps.removeSession(sessionId),
   })
-  const fileChanges = new FileChangeService({
-    coordinator,
-    fileChanges: fileChangeRepository,
-    sessions: sessionRepository,
-    projects: projectRepository,
-    onDiagnostic: options.onDiagnostic,
-  })
+  const gitReview = new GitReviewService()
   const subagentState = new SubagentStateService({
     coordinator,
     sessions: sessionRepository,
@@ -214,6 +249,8 @@ export async function createBackendRuntime(
   const executionState = new DurableExecutionStatePort(sessions, subagentState)
   const subagentBridge = new SubagentExecutionBridge()
   const swarmBridge = new SwarmExecutionBridge()
+  const backgroundBridge = new BackgroundTaskBridge()
+  const backgroundAgentHandles = new BackgroundAgentHandleRegistry()
   let runtime: AgentRuntime | undefined
   let subagentExecution: SubagentExecutionService | undefined
   let swarmCoordinator: SwarmCoordinator | undefined
@@ -229,12 +266,13 @@ export async function createBackendRuntime(
       eventListeners: options.eventListeners,
       executionState,
       historySource: sessions,
-      fileChangeExecution: fileChanges,
       subagentExecution: subagentBridge,
       swarmExecution: swarmBridge,
+      backgroundTasks: backgroundBridge,
       swarmHostEnabled: options.swarmHostEnabled ?? true,
       onDiagnostic: options.onDiagnostic,
       operationalLog: options.operationalLog,
+      sessionTemps,
     })
     const agentExecutions = new AgentExecutionQueryService({
       coordinator,
@@ -255,14 +293,6 @@ export async function createBackendRuntime(
         targetState.runs?.evictRequestCacheForSession(sessionId),
       onDiagnostic: options.onDiagnostic,
     })
-    fileChanges.setRuntimeGuard({
-      reserveSessionMutation: (sessionId) =>
-        liveSessions!.reserveSessionMutation(sessionId),
-      bindSessionMutationProject: (sessionId, token, projectId) =>
-        liveSessions!.bindSessionMutationProject(sessionId, token, projectId),
-      releaseSessionMutation: (sessionId, token) =>
-        liveSessions!.releaseSessionMutation(sessionId, token),
-    })
     executionState.setInvalidationHandler((sessionId, runId) =>
       liveSessions?.invalidate(sessionId, runId),
     )
@@ -280,6 +310,7 @@ export async function createBackendRuntime(
       executionState,
       state: subagentState,
       events: runtime.events,
+      handles: backgroundAgentHandles,
       onDiagnostic: options.onDiagnostic,
     })
     subagentBridge.bind(subagentExecution)
@@ -289,8 +320,18 @@ export async function createBackendRuntime(
       state: subagentState,
       subagents: subagentExecution,
       events: runtime.events,
+      handles: backgroundAgentHandles,
     })
     swarmBridge.bind(swarmCoordinator)
+    backgroundBridge.bind(
+      new BackgroundTaskService({
+        state: subagentState,
+        subagents: subagentExecution,
+        swarms: swarmCoordinator,
+        terminals: runtime.services.sessions.backgroundTerminalPool(),
+        handles: backgroundAgentHandles,
+      }),
+    )
     targetState.runs = runs
     const conversationTitling = options.conversationTitlingDisabled
       ? undefined
@@ -312,10 +353,11 @@ export async function createBackendRuntime(
       coordinator,
       projects,
       sessions,
-      fileChanges,
+      gitReview,
       agentExecutions,
       runs,
       liveSessions,
+      sessionTemps,
       async bootstrap() {
         const snapshot = await coordinator.query((reader) => ({
           projects: projectRepository.list(reader),

@@ -156,7 +156,7 @@ function updateExpandedProjects(
       <template #prefix><UiIcon name="search" /></template>
     </NInput>
 
-    <NScrollbar class="project-list">
+    <NScrollbar class="project-list" content-style="padding: 1em">
       <template v-if="searchQuery.trim()">
         <p class="sidebar-section-title">{{ t('sidebar.searchResults') }}</p>
         <section

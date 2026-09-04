@@ -245,7 +245,6 @@ export function registerOrchestrationTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 1_000,
-    maxOutputBytes: 16 * 1_024,
     async execute(_args, context) {
       const session = requireSession(options.getSession, context.sessionId)
       if ('status' in session) return session
@@ -262,7 +261,6 @@ export function registerOrchestrationTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 1_000,
-    maxOutputBytes: 16 * 1_024,
     async execute(args: Static<typeof GoalCompleteSchema>, context) {
       const session = requireSession(options.getSession, context.sessionId)
       if ('status' in session) return session
@@ -319,7 +317,6 @@ export function registerOrchestrationTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 1_000,
-    maxOutputBytes: 16 * 1_024,
     async execute(args: Static<typeof GoalBlockSchema>, context) {
       const session = requireSession(options.getSession, context.sessionId)
       if ('status' in session) return session
@@ -347,7 +344,6 @@ export function registerOrchestrationTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 1_000,
-    maxOutputBytes: 32 * 1_024,
     async execute(_args, context) {
       const session = requireSession(options.getSession, context.sessionId)
       if ('status' in session) return session
@@ -364,7 +360,6 @@ export function registerOrchestrationTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 1_000,
-    maxOutputBytes: 32 * 1_024,
     async execute(args: Static<typeof PlanSetSchema>, context) {
       const session = requireSession(options.getSession, context.sessionId)
       if ('status' in session) return session
@@ -398,7 +393,6 @@ export function registerOrchestrationTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 1_000,
-    maxOutputBytes: 32 * 1_024,
     async execute(args: Static<typeof PlanStatusUpdateSchema>, context) {
       const session = requireSession(options.getSession, context.sessionId)
       if ('status' in session) return session
@@ -434,7 +428,6 @@ export function registerOrchestrationTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 1_000,
-    maxOutputBytes: 32 * 1_024,
     async execute(args: Static<typeof PlanUpdateSchema>, context) {
       const session = requireSession(options.getSession, context.sessionId)
       if ('status' in session) return session

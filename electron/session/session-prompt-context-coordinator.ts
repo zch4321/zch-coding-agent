@@ -36,10 +36,12 @@ export class SessionPromptContextCoordinator {
       allowedToolIds: run.allowedToolIds,
       subagentsEnabled: run.subagentsEnabled,
       swarmEnabled: Boolean(run.swarmToolConfig),
+      maxSubagents: run.maxSubagents,
       gitToolsEnabled: session.gitToolsEnabled,
     })
     const input = {
       workspace: session.workspace,
+      sessionTemp: session.sessionTemp,
       mode: session.mode,
       config,
       providerId: binding.snapshot.providerId,

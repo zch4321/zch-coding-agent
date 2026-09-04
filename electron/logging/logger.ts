@@ -1,5 +1,8 @@
-import type { WriteStream } from 'node:fs'
-import { mkdir, open } from 'node:fs/promises'
+import {
+  makeDirectory as mkdir,
+  openFileHandle as open,
+  type WriteStream,
+} from '../common/filesystem'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { EventId, SessionId } from '../../shared/ids'

@@ -218,8 +218,6 @@ export function pendingApprovalFromSnapshot(
     args: approval.arguments,
     reason: approval.reason,
     signals: approval.policySignals,
-    diff: approval.diff,
-    diffHash: approval.diffHash,
     rememberable: approval.rememberable,
     rememberArgConstraints: approval.rememberArgConstraints,
     expiresAt: approval.expiresAt,

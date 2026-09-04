@@ -15,6 +15,8 @@ import {
 } from '../config/schema'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import { sessionFixture } from '../persistence/repository-fixtures'
+import { SubagentCapacityError } from '../application/subagent-state-service'
+import { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
 
 type ChildOutcome = {
   status: 'completed' | 'failed' | 'cancelled'
@@ -129,7 +131,7 @@ function fixture(
               permissionMode: 'confirm' as const,
               allowedToolIds: new Set([
                 'read_file',
-                'create_file',
+                'write_file',
                 'run_command',
               ]),
               gitToolsEnabled: true,
@@ -195,6 +197,7 @@ function fixture(
     executionState: executionState as never,
     state: state as never,
     events: { publishAgentExecution: vi.fn() } as never,
+    handles: new BackgroundAgentHandleRegistry(),
   })
   return {
     service,
@@ -250,7 +253,7 @@ describe('SubagentExecutionService', () => {
     const childInput = target.manager.createInternalSession.mock.calls[0]?.[0]
     expect(childInput?.allowedToolIds.size).toBe(2)
     expect(childInput?.allowedToolIds.has('git_status')).toBe(true)
-    expect(childInput?.allowedToolIds.has('create_file')).toBe(false)
+    expect(childInput?.allowedToolIds.has('write_file')).toBe(false)
     expect(result).toEqual({
       results: { worker: 'child response' },
       meta: {
@@ -340,15 +343,29 @@ describe('SubagentExecutionService', () => {
     expect(target.manager.startInternalRun).toHaveBeenCalledOnce()
   })
 
-  it('normalizes parent cancellation', async () => {
+  it('returns a handle and stays alive after parent cancellation', async () => {
     const controller = new AbortController()
     const cancelled = fixture({ blockRun: true })
-    const running = cancelled.service.runOne(
+    const handle = await cancelled.service.startOne(
       childSpec(),
       parent(controller.signal),
     )
+    expect(handle).toMatchObject({
+      target: { type: 'subagent', id: expect.any(Number) },
+    })
     controller.abort(new DOMException('cancelled', 'AbortError'))
-    await expect(running).rejects.toMatchObject({ code: 'SUBAGENT_CANCELLED' })
+    await vi.waitFor(() =>
+      expect(cancelled.persisted()).toMatchObject({ status: 'running' }),
+    )
+    await expect(
+      cancelled.service.cancel(
+        'session:parent' as SessionId,
+        cancelled.persisted()!.id,
+      ),
+    ).resolves.toBe(true)
+    await vi.waitFor(() =>
+      expect(cancelled.persisted()).toMatchObject({ status: 'cancelled' }),
+    )
     expect(cancelled.persisted()).toMatchObject({
       status: 'cancelled',
       error: { code: 'SUBAGENT_CANCELLED' },
@@ -444,6 +461,109 @@ describe('SubagentExecutionService', () => {
     await expect(
       corrupt.service.runOne(childSpec(), parent()),
     ).rejects.toMatchObject({ code: 'SUBAGENT_RESULT_CORRUPT' })
+
+    const finalized = fixture({
+      reserve: async (record) => ({
+        created: false,
+        record: {
+          ...record,
+          status: 'failed',
+          error: { code: 'PROVIDER_FAILED', message: 'provider failed' },
+        },
+      }),
+    })
+    await expect(
+      finalized.service.startOne(childSpec(), parent()),
+    ).resolves.toMatchObject({
+      target: { type: 'subagent', id: expect.any(Number) },
+      status: 'failed',
+    })
+  })
+
+  it('deduplicates concurrent starts and distinguishes capacity from storage failure', async () => {
+    let release!: (value: {
+      created: boolean
+      record: SubagentExecutionRecord
+    }) => void
+    const reserved = new Promise<{
+      created: boolean
+      record: SubagentExecutionRecord
+    }>((resolve) => {
+      release = resolve
+    })
+    let candidate: SubagentExecutionRecord | undefined
+    const concurrent = fixture({
+      reserve: async (record) => {
+        candidate = structuredClone(record)
+        return reserved
+      },
+    })
+    const first = concurrent.service.startOne(childSpec(), parent())
+    const second = concurrent.service.startOne(childSpec(), parent())
+    await vi.waitFor(() =>
+      expect(concurrent.state.createExecution).toHaveBeenCalledOnce(),
+    )
+    release({ created: true, record: candidate! })
+    const [firstHandle, secondHandle] = await Promise.all([first, second])
+    expect(secondHandle.target).toEqual(firstHandle.target)
+    expect(concurrent.manager.startInternalRun).toHaveBeenCalledOnce()
+
+    const capacity = fixture({
+      reserve: async () => {
+        throw new SubagentCapacityError(1)
+      },
+    })
+    await expect(
+      capacity.service.startOne(childSpec(), parent()),
+    ).rejects.toMatchObject({ code: 'SUBAGENT_CAPACITY_EXCEEDED' })
+
+    const storage = fixture({
+      reserve: async () => {
+        throw new Error('database unavailable')
+      },
+    })
+    await expect(
+      storage.service.startOne(childSpec(), parent()),
+    ).rejects.toMatchObject({ code: 'SUBAGENT_START_FAILED' })
+  })
+
+  it('cancels a durably queued Swarm child before it launches', async () => {
+    const spec = childSpec()
+    const executionId = 'subagent:queued-cancel' as AgentExecutionId
+    const parentExecutionId = 'swarm:queued-cancel' as AgentExecutionId
+    const queued: SubagentExecutionRecord = {
+      id: executionId,
+      kind: 'subagent',
+      parentExecutionId,
+      childOrdinal: 0,
+      name: spec.name,
+      parentSessionId: 'session:parent' as SessionId,
+      parentRunId: 'run:parent' as RunId,
+      parentCallId: 'call:subagent' as CallId,
+      specHash: createHash('sha256').update(JSON.stringify(spec)).digest('hex'),
+      status: 'queued',
+      route: {},
+      createdAt: '2026-08-28T00:00:00.000Z',
+      updatedAt: '2026-08-28T00:00:00.000Z',
+    }
+    const target = fixture({ preparedRecord: queued })
+
+    await expect(
+      target.service.cancel('session:parent' as SessionId, executionId),
+    ).resolves.toBe(true)
+    expect(target.persisted()).toMatchObject({
+      status: 'cancelled',
+      error: { code: 'SUBAGENT_CANCELLED' },
+    })
+    await expect(
+      target.service.runPrepared(spec, parent(), {
+        executionId,
+        parentExecutionId,
+        childOrdinal: 0,
+        routes: target.inherited,
+      }),
+    ).rejects.toMatchObject({ code: 'SUBAGENT_CANCELLED' })
+    expect(target.manager.startInternalRun).not.toHaveBeenCalled()
   })
 
   it('runs a prepared Swarm child immediately with tagged assignment context', async () => {
@@ -497,7 +617,7 @@ describe('SubagentExecutionService', () => {
     expect(target.manager.createInternalSession).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: 'confirm',
-        allowedToolIds: new Set(['read_file', 'create_file', 'run_command']),
+        allowedToolIds: new Set(['read_file', 'write_file', 'run_command']),
       }),
     )
   })

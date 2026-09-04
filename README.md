@@ -4,7 +4,7 @@
 
 使用：启动应用后先选择一个工作区目录，在设置里配置模型服务和 API Key，然后在对话框中提出任务。Agent 会在当前工作区内读取文件、搜索代码、应用补丁、执行命令或打开共享终端；涉及文件写入、命令执行、终端输入等副作用时，会根据当前权限模式进入人工审批、自动审批或全自动执行。日常修改运行 `npm run check`；合并或发布前运行完整的 `npm run verify`。
 
-Headless host 可通过 `npm run build:headless` 构建，然后用 `npm run agent:headless -- run --workspace <dir> --task-file <file> --config <file> --artifacts <dir> --timeout-ms <ms>` 启动。该入口固定为无人审批的 Yolo，stdout 只输出 JSONL，运行结果和 patch 写入 workspace 外的 artifacts 目录。真实 Provider 测试仍是高成本 opt-in 工作负载，不属于 `npm run verify`。
+Headless host 可通过 `npm run build:headless` 构建，然后用 `npm run agent:headless -- run --workspace <dir> --task-file <file> --config <file> --artifacts <dir> --timeout-ms <ms>` 启动。该入口固定为无人审批的 Yolo，stdout 只输出 JSONL，运行结果写入 workspace 外的 artifacts 目录；应用不生成 workspace patch。真实 Provider 测试仍是高成本 opt-in 工作负载，不属于 `npm run verify`。
 
 ## 项目简介
 
@@ -18,7 +18,8 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - 工作区级 Agent 会话：每个会话绑定一个本地目录，文件工具会检测规范化路径、真实路径和 symlink 逃逸。
 - 多轮工具调用：支持模型原生 tool use，能连续读取、搜索、修改、执行命令，直到模型产出最终回复。
 - 权限模式：支持 ReadOnly、Auto、Confirm、Yolo 四档模式，副作用工具会经过确定性策略、自动审批或人工确认。
-- 文件工具：`read_file`、`list_dir`、`glob`、`grep`、`create_file`、`apply_patch`、`delete_file`，带分页、字节上限、diff 预览和执行前 precondition 复核。
+- 文件工具：`read_file`、`list_dir`、`glob`、`grep`、`write_file`、`apply_patch`、`delete_file`，带分页、字节上限、args-bound 审批和执行期路径复核；写入采用 latest-content/last-writer-wins。
+- Git Review：右侧 Diff 面板实时查看当前 Project 相对 `HEAD`、index、staged `HEAD` 或 merge-base 的 Git 状态；应用不维护 FileChange、Diff history 或文件恢复。
 - 命令与终端：`run_command` 用于短命令和一次性进程执行，长跑测试、服务、watch 和 REPL 使用持久 PTY，并通过 `delay` + `terminal_read` 轮询输出。
 - 项目与代码智能：`.zch/project-model.json` 保存项目模块和 Serena 配置；`code_*` 工具可通过 Serena 定位符号、定义、引用和诊断，定义查询会尽量返回函数/类代码上下文。
 - 安全凭据：Provider API Key 存在 Electron `safeStorage`，不会暴露给 renderer、trace 文件或子进程环境。
@@ -26,7 +27,7 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - 可配置提示词：内置中英文 system prompt，设置页可编辑，界面语言会选择对应提示词。
 - Skills：支持安装、扫描和启用本地 Skill 指令文件，通过按需读取减少常驻上下文开销。
 - Generic MCP：支持手写 stdio server 配置、逐 server 启停与启动信任；模型通过三个固定 gateway 工具分页发现和调用外部工具，调用继续经过现有权限与 trace 管线。
-- Headless host：复用桌面端同一 Node Agent Runtime，提供固定 Yolo 的程序化 API/CLI、JSONL 事件、原子 result/identity、usage/tool 指标、Git patch 和自动 Plan continuation；parity fixture 持续校验 Electron/Headless 的 Provider、prompt、tool、compact、Plan、MCP 和 patch 语义。
+- Headless host：复用桌面端同一 Node Agent Runtime，提供固定 Yolo 的程序化 API/CLI、JSONL 事件、原子 result/identity、usage/tool 指标和自动 Plan continuation；parity fixture 持续校验 Electron/Headless 的 Provider、prompt、tool、compact、Plan 和 MCP 语义。
 
 ### MCP 配置示例
 
@@ -60,7 +61,7 @@ Zch Coding Agent 是一个基于 Electron + Vue 3 的本地桌面编程助手。
 - Agent Runtime：自研 session manager、tool registry、permission pipeline、policy engine、context budget 和 Provider adapter。
 - 模型接入：DeepSeek / OpenAI-compatible HTTP provider，支持模型目录刷新、reasoning 配置、自动审批模型和 usage 记录。
 - 工具执行：Node.js `child_process`、`node-pty`、受控文件系统 API、bounded stdout/stderr、worker thread 正则搜索。
-- 安全与契约：TypeBox + AJV runtime schema、sender validation、workspace path guard、TOCTOU precondition、敏感数据过滤。
+- 安全与契约：TypeBox + AJV runtime schema、sender validation、workspace path guard、args-bound approval、执行期路径复核和敏感数据过滤。
 - 测试：Vitest、Vue Test Utils、Playwright Electron E2E、native PTY smoke test。
 - 构建发布：Vite Electron build、electron-builder、Windows NSIS installer、GitHub Actions CI / Release workflow。
 
@@ -127,7 +128,7 @@ npm run test:real
 
 ## 数据库、备份与恢复
 
-Desktop 的 Project、Session、Message 和 FileChange 审计只以 Electron `userData/agent.db` 为持久化真相源；Windows 安装版通常位于 `%APPDATA%\Zch Coding Agent\agent.db`，设置中的“打开数据目录”以运行时实际路径为准。SQLite 使用 WAL 模式，运行时可能同时存在 `agent.db-wal` 和 `agent.db-shm`。
+Desktop 的 Project、Session、Message 和 Subagent/Swarm execution 只以 Electron `userData/agent.db` 为持久化真相源；数据库不保存文件 Diff 或恢复 patch。Windows 安装版通常位于 `%APPDATA%\Zch Coding Agent\agent.db`，设置中的“打开数据目录”以运行时实际路径为准。SQLite 使用 WAL 模式，运行时可能同时存在 `agent.db-wal` 和 `agent.db-shm`。
 
 做一致备份前应完全退出应用，确认没有 Zch Coding Agent 进程，再复制整个 `userData` 目录，至少保留 `agent.db`、`config.json`、`secrets.json` 和 `traces/`。如果必须在应用运行时复制，需要把数据库及同名 `-wal`/`-shm` 文件作为一个不可拆分的快照；单独复制 `agent.db` 可能缺少尚未 checkpoint 的提交。`secrets.json` 由操作系统 `safeStorage` 保护，不保证可跨 Windows 账户或机器恢复。
 

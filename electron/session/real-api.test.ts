@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { WebContents } from 'electron'
 import type { AgentEvent } from '../../shared/agent-events'
+import { delay } from '../../shared/async/delay'
 import type { RunId, SessionId } from '../../shared/ids'
 import {
   PROVIDER_NOTICE_VERSION,
@@ -58,7 +59,7 @@ async function waitFor(
       return
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await delay(50)
   }
 
   throw new Error('Timed out waiting for the real API run')
@@ -109,7 +110,7 @@ async function waitForConfirmedWrite(input: {
           : undefined
       const exactExpectedWrite =
         event.kind === 'tool' &&
-        event.tool === 'create_file' &&
+        event.tool === 'write_file' &&
         args?.path === input.expectedPath &&
         args?.content === input.expectedContent
       input.manager.decideApproval({
@@ -136,7 +137,7 @@ async function waitForConfirmedWrite(input: {
       return
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await delay(50)
   }
 
   throw new Error(
@@ -295,7 +296,7 @@ describe.skipIf(!live)('real DeepSeek endpoint', () => {
     })
     const writeRunId = manager.startRun({
       sessionId: writeSessionId,
-      message: `Use create_file to create live-created.txt with the exact content ${sentinel}.`,
+      message: `Use write_file to create live-created.txt with the exact content ${sentinel}.`,
       clientRequestId: 'real-write-run',
     })
     const writeTraceId = manager.traceCaptureStatus(writeSessionId)?.traceId

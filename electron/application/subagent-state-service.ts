@@ -17,6 +17,20 @@ import {
 } from '../persistence/subagent-repository'
 import type { InternalSessionOwnership } from '../subagent/contracts'
 
+/** Reports an atomic public-Session leaf-capacity reservation failure. */
+export class SubagentCapacityError extends ApplicationError {
+  readonly capacityCode = 'SUBAGENT_CAPACITY_EXCEEDED'
+
+  constructor(maxActiveLeaves: number) {
+    super(
+      'PRECONDITION_FAILED',
+      `Subagent capacity exceeded (${maxActiveLeaves} active leaves maximum)`,
+      { details: { capacityCode: 'SUBAGENT_CAPACITY_EXCEEDED' } },
+    )
+    this.name = 'SubagentCapacityError'
+  }
+}
+
 /** Owns backend-private Subagent lifecycle records and hidden Session commits. */
 export class SubagentStateService {
   readonly #coordinator: ApplicationStateCoordinator
@@ -39,10 +53,18 @@ export class SubagentStateService {
   /** Creates an execution or returns the existing record for the same parent Tool call. */
   async createExecution(
     record: SubagentExecutionRecord,
+    maxActiveLeaves = 32,
   ): Promise<{ created: boolean; record: SubagentExecutionRecord }> {
     return this.#coordinator.internalCommand((transaction) => {
       const existing = this.#subagents.findByParentCall(transaction, record)
       if (existing) return { created: false, record: existing }
+      if (
+        this.#subagents.countActiveLeaves(transaction, record.parentSessionId) +
+          1 >
+        maxActiveLeaves
+      ) {
+        throw new SubagentCapacityError(maxActiveLeaves)
+      }
       this.#subagents.insert(transaction, record)
       return { created: true, record: structuredClone(record) }
     })
@@ -52,6 +74,7 @@ export class SubagentStateService {
   async createSwarmJob(
     root: SubagentExecutionRecord,
     children: readonly SubagentExecutionRecord[],
+    maxActiveLeaves = 32,
   ): Promise<{
     created: boolean
     root: SubagentExecutionRecord
@@ -88,6 +111,13 @@ export class SubagentStateService {
           'PRECONDITION_FAILED',
           'Swarm execution identities are not contiguous and parent-scoped',
         )
+      }
+      if (
+        this.#subagents.countActiveLeaves(transaction, root.parentSessionId) +
+          children.length >
+        maxActiveLeaves
+      ) {
+        throw new SubagentCapacityError(maxActiveLeaves)
       }
       this.#subagents.insert(transaction, root)
       for (const child of children) this.#subagents.insert(transaction, child)
@@ -136,6 +166,42 @@ export class SubagentStateService {
       await this.#coordinator.query((reader) =>
         this.#subagents.childCounts(reader, parentExecutionId),
       )
+    ).value
+  }
+
+  /** Lists every durable child for one owned Swarm root. */
+  async listChildren(
+    parentSessionId: SessionId,
+    parentExecutionId: AgentExecutionId,
+  ): Promise<SubagentExecutionRecord[]> {
+    return (
+      await this.#coordinator.query((reader) =>
+        this.#subagents
+          .listChildren(reader, { parentSessionId, parentExecutionId })
+          .map((entry) => entry.record),
+      )
+    ).value
+  }
+
+  /** Lists a durable page of root executions for background discovery. */
+  async listRoots(input: {
+    parentSessionId: SessionId
+    before?: import('../../shared/agent-execution').AgentExecutionListCursor
+    limit: number
+  }): Promise<{
+    records: SubagentExecutionRecord[]
+    hasMore: boolean
+    nextBefore?: import('../../shared/agent-execution').AgentExecutionListCursor
+  }> {
+    return (
+      await this.#coordinator.query((reader) => {
+        const page = this.#subagents.listByParentSession(reader, input)
+        return {
+          records: page.records.map((entry) => entry.record),
+          hasMore: page.hasMore,
+          ...(page.nextBefore ? { nextBefore: page.nextBefore } : {}),
+        }
+      })
     ).value
   }
 

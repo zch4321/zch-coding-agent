@@ -1,20 +1,22 @@
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
-  rename,
+  stat,
+  truncate,
   writeFile,
 } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
-import type { ToolCall } from './types'
 import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
-import { registerFileTools } from './file-tools'
 import { PermissionPipeline } from '../permission/permission-pipeline'
+import { registerFileTools } from './file-tools'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
+import type { ToolCall } from './types'
 
 const sessionId = 'session:file-tools' as SessionId
 const runId = 'run:file-tools' as RunId
@@ -29,15 +31,6 @@ function betaToGammaPatch(filePath = 'note.txt'): string {
     '+gamma',
   ].join('\n')
 }
-
-const replacementPatch = [
-  '--- a/note.txt',
-  '+++ b/note.txt',
-  '@@ -1,2 +1,1 @@',
-  '-alpha',
-  '-beta',
-  '+replacement',
-].join('\n')
 
 async function workspace() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agent-file-tools-'))
@@ -62,11 +55,7 @@ async function authorize(
 ) {
   const { registry, executor, pipeline } = harness()
   const definition = registry.get(call.toolId)
-
-  if (!definition) {
-    throw new Error('Missing test tool')
-  }
-
+  if (!definition) throw new Error('Missing test tool')
   const approval = await pipeline.authorize({
     sessionId,
     runId,
@@ -78,19 +67,13 @@ async function authorize(
     signal,
     requestHumanApproval: async () => ({ decision: 'deny' }),
   })
-
   return { approval, executor }
 }
 
 async function execute(root: string, call: ToolCall) {
   const { approval, executor } = await authorize(root, call)
-
   expect(approval.ok).toBe(true)
-
-  if (!approval.ok) {
-    return approval.result
-  }
-
+  if (!approval.ok) return approval.result
   return executor.execute(
     approval.approvedCall,
     {
@@ -102,21 +85,103 @@ async function execute(root: string, call: ToolCall) {
   )
 }
 
-describe('P3 file tools', () => {
-  it('atomically writes, patches, and deletes workspace files', async () => {
+describe('file mutation tools', () => {
+  it('allows scratch mutations but blocks application-owned artifacts', async () => {
     const root = await workspace()
+    const sessionRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'agent-file-session-'),
+    )
+    const sessionTemp = {
+      root: sessionRoot,
+      artifacts: path.join(sessionRoot, 'artifacts'),
+      scratch: path.join(sessionRoot, 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+    const { registry, executor, pipeline } = harness()
+    const scratchPath = path.join(sessionTemp.scratch, 'notes.md')
+    const call: ToolCall = {
+      id: 'call:scratch-write' as CallId,
+      toolId: 'write_file',
+      args: { path: scratchPath, content: 'temporary notes\n' },
+      reason: 'Record temporary notes',
+    }
+    const definition = registry.get(call.toolId)!
+    const approval = await pipeline.authorize({
+      sessionId,
+      runId,
+      workspace: root,
+      sessionTemp,
+      mode: 'confirm',
+      call,
+      definition,
+      config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+      signal: new AbortController().signal,
+      requestHumanApproval: async () => {
+        throw new Error('Scratch writes must not request approval')
+      },
+    })
+    expect(approval).toMatchObject({ ok: true })
+    if (approval.ok) {
+      await executor.execute(
+        approval.approvedCall,
+        {
+          sessionId,
+          runId,
+          workspace: { canonicalPath: root },
+          sessionTemp,
+        },
+        new AbortController().signal,
+      )
+    }
+    expect(await readFile(scratchPath, 'utf8')).toBe('temporary notes\n')
+
+    await expect(
+      pipeline.authorize({
+        sessionId,
+        runId,
+        workspace: root,
+        sessionTemp,
+        mode: 'yolo',
+        call: {
+          ...call,
+          id: 'call:artifact-write' as CallId,
+          args: {
+            path: path.join(sessionTemp.artifacts, 'forbidden.txt'),
+            content: 'no',
+          },
+        },
+        definition,
+        config: toPublicConfig(DEFAULT_APP_CONFIG, false),
+        signal: new AbortController().signal,
+        requestHumanApproval: async () => ({ decision: 'deny' }),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      result: { status: 'error', code: 'PATH_OUTSIDE_WORKSPACE' },
+    })
+  })
+
+  it('writes, overwrites, patches, and preserves an existing mode', async () => {
+    const root = await workspace()
+    const target = path.join(root, 'note.txt')
+    await chmod(target, 0o744)
+    const existingMode = (await stat(target)).mode & 0o777
 
     await expect(
       execute(root, {
-        id: 'call:write' as CallId,
-        toolId: 'create_file',
-        args: { path: 'created.txt', content: 'created\n' },
-        reason: 'Create a fixture',
+        id: 'call:overwrite' as CallId,
+        toolId: 'write_file',
+        args: { path: 'note.txt', content: 'alpha\nbeta\n' },
+        reason: 'Replace a fixture',
       }),
-    ).resolves.toMatchObject({ status: 'ok' })
-    expect(await readFile(path.join(root, 'created.txt'), 'utf8')).toBe(
-      'created\n',
-    )
+    ).resolves.toMatchObject({
+      status: 'ok',
+      content: { created: false },
+    })
+    expect((await stat(target)).mode & 0o777).toBe(existingMode)
 
     await expect(
       execute(root, {
@@ -126,270 +191,173 @@ describe('P3 file tools', () => {
         reason: 'Update one line',
       }),
     ).resolves.toMatchObject({ status: 'ok' })
-    expect(await readFile(path.join(root, 'note.txt'), 'utf8')).toBe(
-      'alpha\ngamma\n',
-    )
-
-    await expect(
-      execute(root, {
-        id: 'call:delete' as CallId,
-        toolId: 'delete_file',
-        args: { path: 'created.txt' },
-        reason: 'Remove the fixture',
-      }),
-    ).resolves.toMatchObject({ status: 'ok' })
-    await expect(
-      readFile(path.join(root, 'created.txt')),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(target, 'utf8')).toBe('alpha\ngamma\n')
   })
 
-  it('creates missing parent directories for new files', async () => {
+  it('creates missing parent directories', async () => {
     const root = await workspace()
-
     await expect(
       execute(root, {
-        id: 'call:nested-create' as CallId,
-        toolId: 'create_file',
+        id: 'call:nested-write' as CallId,
+        toolId: 'write_file',
         args: {
           path: 'src/generated/client.ts',
           content: 'export const generated = true\n',
         },
         reason: 'Create a generated source file',
       }),
-    ).resolves.toMatchObject({ status: 'ok' })
-    expect(
-      await readFile(path.join(root, 'src', 'generated', 'client.ts'), 'utf8'),
-    ).toBe('export const generated = true\n')
+    ).resolves.toMatchObject({
+      status: 'ok',
+      content: { created: true },
+    })
   })
 
-  it('rejects patch context that does not match without changing the file', async () => {
-    const root = await workspace()
-    const target = path.join(root, 'note.txt')
-    await writeFile(target, 'same\nsame\n', 'utf8')
-    const { approval } = await authorize(root, {
-      id: 'call:mismatch' as CallId,
-      toolId: 'apply_patch',
-      args: { path: 'note.txt', patch: betaToGammaPatch() },
-      reason: 'Mismatched patch',
-    })
-
-    expect(approval).toMatchObject({
-      ok: false,
-      result: { status: 'error', code: 'INVALID_PATCH' },
-    })
-    expect(await readFile(target, 'utf8')).toBe('same\nsame\n')
-  })
-
-  it('invalidates approval when target content changes before execution', async () => {
+  it('uses latest content after approval and applies one exact match', async () => {
     const root = await workspace()
     const target = path.join(root, 'note.txt')
     const call: ToolCall = {
-      id: 'call:toctou' as CallId,
+      id: 'call:latest-content' as CallId,
       toolId: 'apply_patch',
       args: { path: 'note.txt', patch: betaToGammaPatch() },
       reason: 'Update one line',
     }
     const { approval, executor } = await authorize(root, call)
-
+    await writeFile(target, 'prefix\nalpha\nbeta\nsuffix\n', 'utf8')
     expect(approval.ok).toBe(true)
-    await writeFile(target, 'changed elsewhere\n', 'utf8')
-
-    if (approval.ok) {
-      await expect(
-        executor.execute(
-          approval.approvedCall,
-          {
-            sessionId,
-            runId,
-            workspace: { canonicalPath: root },
-          },
-          new AbortController().signal,
-        ),
-      ).resolves.toMatchObject({
-        status: 'error',
-        code: 'RESOURCE_CHANGED',
-      })
-    }
-
-    expect(await readFile(target, 'utf8')).toBe('changed elsewhere\n')
+    if (!approval.ok) return
+    await expect(
+      executor.execute(
+        approval.approvedCall,
+        { sessionId, runId, workspace: { canonicalPath: root } },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: 'ok' })
+    expect(await readFile(target, 'utf8')).toBe(
+      'prefix\nalpha\ngamma\nsuffix\n',
+    )
   })
 
-  it('invalidates approval when the target is replaced with identical content', async () => {
+  it('rejects context that becomes ambiguous after approval without writing', async () => {
     const root = await workspace()
     const target = path.join(root, 'note.txt')
     const call: ToolCall = {
-      id: 'call:replacement' as CallId,
+      id: 'call:ambiguous' as CallId,
       toolId: 'apply_patch',
-      args: { path: 'note.txt', patch: replacementPatch },
-      reason: 'Replace the file',
+      args: { path: 'note.txt', patch: betaToGammaPatch() },
+      reason: 'Update one line',
     }
     const { approval, executor } = await authorize(root, call)
-    await rename(target, path.join(root, 'old-note.txt'))
-    await writeFile(target, 'alpha\nbeta\n', 'utf8')
-
-    if (approval.ok) {
-      await expect(
-        executor.execute(
-          approval.approvedCall,
-          {
-            sessionId,
-            runId,
-            workspace: { canonicalPath: root },
-          },
-          new AbortController().signal,
-        ),
-      ).resolves.toMatchObject({ status: 'error', code: 'RESOURCE_CHANGED' })
-    }
+    const ambiguous = 'alpha\nbeta\nseparator\nalpha\nbeta\n'
+    await writeFile(target, ambiguous, 'utf8')
+    expect(approval.ok).toBe(true)
+    if (!approval.ok) return
+    await expect(
+      executor.execute(
+        approval.approvedCall,
+        { sessionId, runId, workspace: { canonicalPath: root } },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: 'error', code: 'INVALID_PATCH' })
+    expect(await readFile(target, 'utf8')).toBe(ambiguous)
   })
 
-  it('invalidates approval when an existing target is deleted', async () => {
-    const root = await workspace()
-    const target = path.join(root, 'note.txt')
-    const call: ToolCall = {
-      id: 'call:deleted' as CallId,
-      toolId: 'apply_patch',
-      args: { path: 'note.txt', patch: replacementPatch },
-      reason: 'Replace the file',
-    }
-    const { approval, executor } = await authorize(root, call)
-    await rename(target, path.join(root, 'removed-note.txt'))
-
-    if (approval.ok) {
-      await expect(
-        executor.execute(
-          approval.approvedCall,
-          {
-            sessionId,
-            runId,
-            workspace: { canonicalPath: root },
-          },
-          new AbortController().signal,
-        ),
-      ).resolves.toMatchObject({ status: 'error', code: 'RESOURCE_CHANGED' })
-    }
-  })
-
-  it('invalidates approval when a previously missing target is created', async () => {
+  it('lets an approved write replace a file created by another writer', async () => {
     const root = await workspace()
     const target = path.join(root, 'new-note.txt')
     const call: ToolCall = {
-      id: 'call:created' as CallId,
-      toolId: 'create_file',
+      id: 'call:last-writer' as CallId,
+      toolId: 'write_file',
       args: { path: 'new-note.txt', content: 'agent content\n' },
-      reason: 'Create a file',
+      reason: 'Write a file',
     }
     const { approval, executor } = await authorize(root, call)
     await writeFile(target, 'created elsewhere\n', 'utf8')
-
-    if (approval.ok) {
-      await expect(
-        executor.execute(
-          approval.approvedCall,
-          {
-            sessionId,
-            runId,
-            workspace: { canonicalPath: root },
-          },
-          new AbortController().signal,
-        ),
-      ).resolves.toMatchObject({ status: 'error', code: 'RESOURCE_CHANGED' })
-    }
-    expect(await readFile(target, 'utf8')).toBe('created elsewhere\n')
+    expect(approval.ok).toBe(true)
+    if (!approval.ok) return
+    await expect(
+      executor.execute(
+        approval.approvedCall,
+        { sessionId, runId, workspace: { canonicalPath: root } },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: 'ok', content: { created: false } })
+    expect(await readFile(target, 'utf8')).toBe('agent content\n')
   })
 
-  it('invalidates approval when the target parent directory is replaced', async () => {
+  it('rejects an approved call when its workspace scope changes', async () => {
     const root = await workspace()
-    const directory = path.join(root, 'src')
-    await mkdir(directory)
-    await writeFile(path.join(directory, 'note.txt'), 'alpha\nbeta\n')
+    const otherRoot = await workspace()
     const call: ToolCall = {
-      id: 'call:parent' as CallId,
-      toolId: 'apply_patch',
-      args: {
-        path: 'src/note.txt',
-        patch: betaToGammaPatch('src/note.txt'),
-      },
-      reason: 'Update nested file',
+      id: 'call:scope-change' as CallId,
+      toolId: 'write_file',
+      args: { path: 'scoped.txt', content: 'approved content\n' },
+      reason: 'Write in the approved workspace',
     }
     const { approval, executor } = await authorize(root, call)
-    await rename(directory, path.join(root, 'src-old'))
-    await mkdir(directory)
-    await writeFile(path.join(directory, 'note.txt'), 'alpha\nbeta\n')
+    expect(approval.ok).toBe(true)
+    if (!approval.ok) return
 
-    if (approval.ok) {
-      await expect(
-        executor.execute(
-          approval.approvedCall,
-          {
-            sessionId,
-            runId,
-            workspace: { canonicalPath: root },
-          },
-          new AbortController().signal,
-        ),
-      ).resolves.toMatchObject({ status: 'error', code: 'RESOURCE_CHANGED' })
-    }
+    await expect(
+      executor.execute(
+        approval.approvedCall,
+        { sessionId, runId, workspace: { canonicalPath: otherRoot } },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: 'error', code: 'RESOURCE_CHANGED' })
+    await expect(
+      readFile(path.join(otherRoot, 'scoped.txt'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('invalidates create approval when the nearest existing parent is replaced', async () => {
+  it('deletes large binary files and treats a repeated delete as success', async () => {
     const root = await workspace()
-    const directory = path.join(root, 'src')
-    await mkdir(directory)
-    const call: ToolCall = {
-      id: 'call:create-parent' as CallId,
-      toolId: 'create_file',
-      args: {
-        path: 'src/generated/client.ts',
-        content: 'export const generated = true\n',
-      },
-      reason: 'Create a generated source file',
-    }
-    const { approval, executor } = await authorize(root, call)
-    await rename(directory, path.join(root, 'src-old'))
-    await mkdir(directory)
+    const target = path.join(root, 'large.bin')
+    await writeFile(target, Buffer.from([0, 1, 2, 3]))
+    await truncate(target, 100_000_000)
 
-    if (approval.ok) {
-      await expect(
-        executor.execute(
-          approval.approvedCall,
-          {
-            sessionId,
-            runId,
-            workspace: { canonicalPath: root },
-          },
-          new AbortController().signal,
-        ),
-      ).resolves.toMatchObject({ status: 'error', code: 'RESOURCE_CHANGED' })
-    }
+    const first = await execute(root, {
+      id: 'call:delete-large' as CallId,
+      toolId: 'delete_file',
+      args: { path: 'large.bin' },
+      reason: 'Delete a binary fixture',
+    })
+    expect(first).toMatchObject({
+      status: 'ok',
+      content: { deleted: true },
+    })
+    const second = await execute(root, {
+      id: 'call:delete-again' as CallId,
+      toolId: 'delete_file',
+      args: { path: 'large.bin' },
+      reason: 'Ensure the fixture is absent',
+    })
+    expect(second).toMatchObject({
+      status: 'ok',
+      content: { deleted: false },
+    })
   })
 
-  it('leaves the original file and no temp file when already cancelled', async () => {
+  it('does not write when execution is already cancelled', async () => {
     const root = await workspace()
     const target = path.join(root, 'note.txt')
     const call: ToolCall = {
       id: 'call:cancelled' as CallId,
       toolId: 'apply_patch',
-      args: { path: 'note.txt', patch: replacementPatch },
-      reason: 'Replace the file',
+      args: { path: 'note.txt', patch: betaToGammaPatch() },
+      reason: 'Update the file',
     }
     const { approval, executor } = await authorize(root, call)
     const controller = new AbortController()
     controller.abort(new Error('cancelled'))
-
-    if (approval.ok) {
-      await expect(
-        executor.execute(
-          approval.approvedCall,
-          {
-            sessionId,
-            runId,
-            workspace: { canonicalPath: root },
-          },
-          controller.signal,
-        ),
-      ).resolves.toMatchObject({ status: 'cancelled' })
-    }
-
+    expect(approval.ok).toBe(true)
+    if (!approval.ok) return
+    await expect(
+      executor.execute(
+        approval.approvedCall,
+        { sessionId, runId, workspace: { canonicalPath: root } },
+        controller.signal,
+      ),
+    ).resolves.toMatchObject({ status: 'cancelled' })
     expect(await readFile(target, 'utf8')).toBe('alpha\nbeta\n')
     expect((await readdir(root)).some((name) => name.endsWith('.tmp'))).toBe(
       false,

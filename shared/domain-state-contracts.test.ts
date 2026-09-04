@@ -9,7 +9,6 @@ import {
   DurableRunContinueResultSchema,
   DurableRunStartPayloadSchema,
   DurableRunStartResultSchema,
-  FileChangeCommittedChangeSchema,
   MessageListPayloadSchema,
   ProjectCommittedChangeSchema,
   SessionCommittedChangeSchema,
@@ -19,20 +18,7 @@ import {
   type DomainStateEvent,
 } from './domain-state-api'
 import { MAX_MESSAGE_PAGE_RECORDS } from './durable'
-import {
-  assertFileChangeSummarySemantics,
-  EMPTY_FILE_SHA256,
-  FileChangePageSchema,
-  FileChangeSummarySchema,
-  type FileChangeSummary,
-} from './file-change'
-import type {
-  CallId,
-  FileChangeId,
-  MessageId,
-  ProjectId,
-  SessionId,
-} from './ids'
+import type { CallId, MessageId, ProjectId, SessionId } from './ids'
 import { assertBoundedJsonValue, type JsonValueLimits } from './json'
 import {
   assertMessagePageSemantics,
@@ -275,38 +261,17 @@ const messages: MessageRecord[] = [
   },
 ]
 
-const fileChange: FileChangeSummary = {
-  schemaVersion: 1,
-  id: 'file-change:one' as FileChangeId,
-  sessionId,
-  callId,
-  path: 'README.md',
-  operation: 'patch',
-  diff: '@@ -1 +1 @@',
-  diffHash: hash,
-  diffTruncated: false,
-  beforeExists: true,
-  beforeHash: hash,
-  afterExists: true,
-  afterHash: hash,
-  revision: 1,
-  createdAt: timestamp,
-  updatedAt: timestamp,
-}
-
 describe('domain-state canonical records', () => {
-  it('round-trips Project, Session, every Message kind, route and FileChange', () => {
+  it('round-trips Project, Session, every Message kind, and route', () => {
     roundTrip(ProjectRecordSchema, project)
     roundTrip(SessionRecordSchema, session)
     roundTrip(ModelRouteSnapshotSchema, route)
-    roundTrip(FileChangeSummarySchema, fileChange)
     for (const message of messages) roundTrip(MessageRecordSchema, message)
   })
 
   it('enforces lifecycle, revision and secret-safe public fields', () => {
     const validateSession = compileSchema(SessionRecordSchema)
     const validateProject = compileSchema(ProjectRecordSchema)
-    const validateFileChange = compileSchema(FileChangeSummarySchema)
 
     expect(validateSession({ ...session, lifecycle: 'archived' })).toBe(false)
     expect(
@@ -317,9 +282,6 @@ describe('domain-state canonical records', () => {
       }),
     ).toBe(true)
     expect(validateProject({ ...project, revision: 0 })).toBe(false)
-    expect(
-      validateFileChange({ ...fileChange, beforeContent: 'private snapshot' }),
-    ).toBe(false)
     expect(validateSession({ ...session, updatedAt: 'not-a-date' })).toBe(false)
   })
 })
@@ -556,23 +518,6 @@ describe('message paging and Session snapshots', () => {
   })
 })
 
-describe('FileChange semantics', () => {
-  it('uses the empty-content hash for missing file states', () => {
-    const missingBefore = {
-      ...fileChange,
-      beforeExists: false,
-      beforeHash: EMPTY_FILE_SHA256,
-    }
-    expect(() => assertFileChangeSummarySemantics(missingBefore)).not.toThrow()
-    expect(() =>
-      assertFileChangeSummarySemantics({
-        ...missingBefore,
-        beforeHash: hash,
-      }),
-    ).toThrow(/empty-content/u)
-  })
-})
-
 describe('bounded domain-state API contracts', () => {
   const cursor = {
     schemaVersion: 1 as const,
@@ -594,7 +539,7 @@ describe('bounded domain-state API contracts', () => {
     expect(
       validatePayload({ ...payload, limit: MAX_MESSAGE_PAGE_RECORDS + 1 }),
     ).toBe(false)
-    expect(contractEntries).toHaveLength(21)
+    expect(contractEntries).toHaveLength(19)
     expect(DOMAIN_STATE_API_CONTRACTS).not.toHaveProperty('session:create')
     expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('run:start')
     expect(DOMAIN_STATE_API_CONTRACTS).toHaveProperty('message:search')
@@ -686,23 +631,6 @@ describe('bounded domain-state API contracts', () => {
       messageChange: { mode: 'upsert', records: messages.slice(0, 3) },
     })
     roundTrip(SessionRemovedChangeSchema, { sessionId, projectId })
-    roundTrip(FileChangeCommittedChangeSchema, {
-      mode: 'upsert',
-      sessionId,
-      fileChange,
-    })
-    roundTrip(FileChangeCommittedChangeSchema, { mode: 'invalidate_all' })
-    roundTrip(FileChangePageSchema, {
-      schemaVersion: 1,
-      sessionId,
-      records: [fileChange],
-      hasMore: true,
-      nextBefore: {
-        createdAt: fileChange.createdAt,
-        fileChangeId: fileChange.id,
-      },
-    })
-
     const event: DomainStateEvent = {
       version: 1,
       commit: {

@@ -97,6 +97,13 @@ describe('canonical prompt harness', () => {
     expect(state.history.map((record) => record.seq)).toEqual([
       1, 2, 3, 4, 5, 6,
     ])
+    const systemInstruction = state.history.find(
+      (record) => record.kind === 'system_instruction',
+    )
+    expect(systemInstruction?.parts[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining('ZCH_SESSION_ARTIFACTS_DIR:/...'),
+    })
     const runtimeContext = state.history.find(
       (record) => record.kind === 'runtime_context',
     )
@@ -165,6 +172,11 @@ describe('canonical prompt harness', () => {
       .mockResolvedValue('file refreshed.txt')
     const input = {
       workspace,
+      sessionTemp: {
+        root: path.join(workspace, '.session-temp-a'),
+        artifacts: path.join(workspace, '.session-temp-a', 'artifacts'),
+        scratch: path.join(workspace, '.session-temp-a', 'scratch'),
+      },
       mode: 'readonly',
       config,
       providerId: 'deepseek',
@@ -186,6 +198,19 @@ describe('canonical prompt harness', () => {
       type: 'text',
       text: expect.stringContaining('git snapshot: initial'),
     })
+
+    await expect(
+      appendRuntimeContextIfChanged(state, {
+        ...input,
+        sessionTemp: {
+          root: path.join(workspace, '.session-temp-b'),
+          artifacts: path.join(workspace, '.session-temp-b', 'artifacts'),
+          scratch: path.join(workspace, '.session-temp-b', 'scratch'),
+        },
+      }),
+    ).resolves.toBe(false)
+    expect(readGitSummary).toHaveBeenCalledTimes(1)
+    expect(readProjectTree).toHaveBeenCalledTimes(1)
 
     await writeFile(path.join(workspace, 'ordinary-file.txt'), 'changed\n')
     await expect(appendRuntimeContextIfChanged(state, input)).resolves.toBe(

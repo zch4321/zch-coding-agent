@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
-import { readdir, stat } from 'node:fs/promises'
+import {
+  fileStatus as stat,
+  readDirectory as readdir,
+} from '../common/filesystem'
 import path from 'node:path'
 import type { ProjectModule } from '../../shared/project-model'
 import { PathGuard } from '../safety/path-guard'

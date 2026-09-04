@@ -121,8 +121,6 @@ export class SessionApprovalCoordinator {
       args: request.call.args,
       reason: request.call.reason,
       policySignals: request.policySignals,
-      diff: request.diff,
-      diffHash: request.diffHash,
       rememberable: request.rememberable,
       rememberArgConstraints: request.rememberArgConstraints,
       expiresAt: request.expiresAt,

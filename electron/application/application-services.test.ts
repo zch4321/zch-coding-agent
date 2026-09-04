@@ -10,7 +10,7 @@ import { projectFixture } from '../persistence/repository-fixtures'
 import { createTestDatabase } from '../persistence/test-database'
 import { ApplicationError } from './application-error'
 import { ApplicationStateCoordinator } from './application-state-coordinator'
-import { ProjectService } from './project-service'
+import { ProjectService, type ProjectRuntimeGuard } from './project-service'
 import { SessionService, type SessionRuntimeGuard } from './session-service'
 
 const timestamp = '2026-07-23T00:00:00.000Z'
@@ -215,6 +215,54 @@ describe('application-state coordinator and ProjectService', () => {
           repository.get(reader, 'project:overflow' as ProjectId),
         ),
       ).toBeUndefined()
+    } finally {
+      await setup.testDatabase.dispose()
+    }
+  })
+
+  it('quiesces and cleans every Project Session around permanent removal', async () => {
+    const setup = await setupServices()
+    const calls: string[] = []
+    const sessionIds = [
+      'session:project-first',
+      'session:project-second',
+    ] as SessionId[]
+    const guard: ProjectRuntimeGuard = {
+      assertProjectIdle: vi.fn(),
+      reserveProjectEviction: () => {
+        calls.push('reserve')
+        return 'operation-token'
+      },
+      cancelProjectEviction: vi.fn(),
+      quiesceProject: async () => {
+        calls.push('quiesce')
+        return sessionIds
+      },
+      cleanupDeletedSessions: async (deleted) => {
+        calls.push(`cleanup:${deleted.join(',')}`)
+      },
+      evictIdleProject: async () => {
+        calls.push('evict')
+      },
+    }
+    const projects = new ProjectService({
+      coordinator: setup.coordinator,
+      runtimeGuard: guard,
+    })
+    try {
+      await projects.remove({
+        projectId: setup.project.id,
+        expectedRevision: setup.project.revision,
+      })
+      expect(calls).toEqual([
+        'reserve',
+        'quiesce',
+        `cleanup:${sessionIds.join(',')}`,
+        'evict',
+      ])
+      await expect(projects.get(setup.project.id)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      })
     } finally {
       await setup.testDatabase.dispose()
     }
@@ -659,18 +707,9 @@ describe('SessionService durable transactions', () => {
                 .get(sessionId) as { count: number }
             ).count,
           ),
-          fileChanges: Number(
-            (
-              reader
-                .prepare(
-                  'SELECT COUNT(*) AS count FROM file_changes WHERE session_id = ?',
-                )
-                .get(sessionId) as { count: number }
-            ).count,
-          ),
         }))
       ).value
-      expect(durableCounts).toEqual({ messages: 0, fileChanges: 0 })
+      expect(durableCounts).toEqual({ messages: 0 })
     } finally {
       await setup.testDatabase.dispose()
     }

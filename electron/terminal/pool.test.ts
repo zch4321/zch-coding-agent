@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -153,6 +153,131 @@ describe('TerminalPool', () => {
       content: 'red\nnext',
       truncated: false,
     })
+  })
+
+  it('reads background output through the public owner Session', async () => {
+    const { root, ptys, pool } = await harness()
+    const terminal = await pool.open({
+      sessionId: sessionA,
+      ownerSessionId: sessionB,
+      workspace: root,
+    })
+    ptys[0]!.emitData('child terminal output\n')
+
+    expect(
+      pool.readBackground(sessionB, terminal.terminalId, {
+        cursor: 0,
+        lines: 500,
+        maxBytes: 256 * 1_024,
+      }),
+    ).toMatchObject({ content: 'child terminal output\n' })
+    expect(() =>
+      pool.readBackground(sessionA, terminal.terminalId, {
+        cursor: 0,
+        lines: 500,
+        maxBytes: 256 * 1_024,
+      }),
+    ).toThrow('Terminal not found for this session')
+
+    ptys[0]!.emitData('前🙂后')
+    expect(
+      pool.readBackground(sessionB, terminal.terminalId, {
+        lines: 500,
+        maxBytes: 6,
+      }).content,
+    ).toBe('后')
+  })
+
+  it('retains a bounded background tail after an explicit close', async () => {
+    const { root, ptys, pool } = await harness(512 * 1_024)
+    const terminal = await pool.open({
+      sessionId: sessionA,
+      ownerSessionId: sessionB,
+      workspace: root,
+    })
+    ptys[0]!.emitData(
+      `${Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join('\n')}\n`,
+    )
+
+    pool.closeSession(sessionA)
+
+    const output = pool.readBackground(sessionB, terminal.terminalId, {
+      lines: 50,
+      maxBytes: 256 * 1_024,
+    })
+    expect(output.content.trimEnd().split('\n')).toHaveLength(50)
+    expect(output.content).toContain('line 60')
+    expect(output.content).not.toContain('line 10\n')
+    expect(output.truncated).toBe(true)
+  })
+
+  it('writes a complete ANSI-free artifact across chunk boundaries', async () => {
+    const { root, ptys, pool } = await harness()
+    const sessionTemp = {
+      root: path.join(root, 'session-temp'),
+      artifacts: path.join(root, 'session-temp', 'artifacts'),
+      scratch: path.join(root, 'session-temp', 'scratch'),
+    }
+    await Promise.all([
+      mkdir(sessionTemp.artifacts, { recursive: true }),
+      mkdir(sessionTemp.scratch, { recursive: true }),
+    ])
+    const terminal = await pool.open({
+      sessionId: sessionA,
+      workspace: root,
+      sessionTemp,
+    })
+    ptys[0]!.emitData('\u001b]0;npm run lint')
+    expect(
+      pool.read(sessionA, terminal.terminalId, {
+        lines: 20,
+        maxBytes: 8 * 1_024,
+      }).content,
+    ).toBe('')
+    ptys[0]!.emitData('\u0007visible\n\u001b]0;C:\\workspace\\app\u001b')
+    ptys[0]!.emitData('\\\u001b[31mred\u001b[0m\nplain')
+    expect(
+      pool.read(sessionA, terminal.terminalId, {
+        lines: 20,
+        maxBytes: 8 * 1_024,
+      }).content,
+    ).toBe('visible\nred\nplain')
+    ptys[0]!.emitExit(0)
+    await pool.waitForExit(sessionA, terminal.terminalId)
+
+    expect(terminal).toMatchObject({
+      artifactAvailable: true,
+      artifactPath: expect.any(String),
+    })
+    expect(await readFile(terminal.artifactPath!, 'utf8')).toBe(
+      'visible\nred\nplain',
+    )
+  })
+
+  it('keeps the PTY usable while reporting artifact initialization failure', async () => {
+    const { root, ptys, pool } = await harness()
+    const blockedArtifacts = path.join(root, 'blocked-artifacts')
+    await writeFile(blockedArtifacts, 'not a directory')
+    const terminal = await pool.open({
+      sessionId: sessionA,
+      workspace: root,
+      sessionTemp: {
+        root: path.join(root, 'session-temp'),
+        artifacts: blockedArtifacts,
+        scratch: path.join(root, 'session-temp', 'scratch'),
+      },
+    })
+
+    expect(terminal).toMatchObject({
+      status: 'running',
+      artifactAvailable: false,
+      captureError: expect.any(String),
+    })
+    expect(terminal).not.toHaveProperty('artifactPath')
+    expect(pool.write(sessionA, terminal.terminalId, 'echo usable\n')).toBe(
+      true,
+    )
+    expect(ptys[0]?.writes).toEqual(['echo usable\n'])
   })
 
   it('rejects cross-session access and closes all session terminals', async () => {

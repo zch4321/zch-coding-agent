@@ -58,21 +58,27 @@ export function projectReadFileResult(
 ): ToolModelContentPart[] {
   const content = objectContent(result)
   const body = stringValue(content.content) || '[empty file]'
-  if (!booleanValue(content.truncated) && result.truncated !== true) {
+  const hasMore =
+    booleanValue(content.hasMore) ||
+    booleanValue(content.truncated) ||
+    result.truncated === true
+  const nextStartLine = numberValue(content.nextStartLine)
+  const nextStartCharacter = numberValue(content.nextStartCharacter)
+  const totalLines = numberValue(content.totalLines)
+  if (!hasMore && nextStartLine === undefined) {
     return textPart(body)
   }
-  const nextStartLine = numberValue(content.nextStartLine)
-  const totalLines = numberValue(content.totalLines)
-  return textPart(
-    appendFooter(body, [
-      'truncated=true',
-      ...(nextStartLine === undefined
-        ? []
-        : [`nextStartLine=${nextStartLine}`]),
-      ...(totalLines === undefined ? [] : [`totalLines=${totalLines}`]),
-      `lineTruncated=${String(booleanValue(content.lineTruncated))}`,
-    ]),
-  )
+  const fields = [
+    `hasMore=${String(hasMore)}`,
+    ...(nextStartLine === undefined ? [] : [`nextStartLine=${nextStartLine}`]),
+    ...(nextStartCharacter === undefined
+      ? []
+      : [`nextStartCharacter=${nextStartCharacter}`]),
+    ...(totalLines === undefined ? [] : [`totalLines=${totalLines}`]),
+    ...(booleanValue(content.lineTruncated) ? ['lineTruncated=true'] : []),
+    ...(booleanValue(content.tailClipped) ? ['tailClipped=true'] : []),
+  ]
+  return textPart(appendFooter(body, fields))
 }
 
 /** Projects list_dir to one workspace-relative path per line. */
@@ -136,15 +142,31 @@ export function projectGrepResult(
   )
 }
 
-/** Projects terminal_open to the only opaque identifier needed by later calls. */
+/** Projects terminal_open to the process-local numeric target used by later calls. */
 export function projectTerminalOpenResult(
   result: SuccessfulToolResult,
 ): ToolModelContentPart[] {
-  const terminalId = numberValue(objectContent(result).terminalId)
+  const content = objectContent(result)
+  const terminalId = numberValue(content.terminalId)
+  const artifactPath = stringValue(content.artifactPath)
   return textPart(
-    terminalId !== undefined
-      ? `Opened terminal ${terminalId}`
-      : 'Terminal opened',
+    appendFooter(
+      terminalId !== undefined
+        ? `Opened terminal ${terminalId}`
+        : 'Terminal opened',
+      [
+        ...(terminalId === undefined
+          ? []
+          : [`target={"type":"terminal","id":${terminalId}}`]),
+        ...(artifactPath ? [`artifactPath=${artifactPath}`] : []),
+        ...(content.artifactAvailable === false
+          ? [
+              'artifactAvailable=false',
+              `captureError=${stringValue(content.captureError) || 'unknown'}`,
+            ]
+          : []),
+      ],
+    ),
   )
 }
 
@@ -155,10 +177,25 @@ export function projectTerminalSendResult(
   const content = objectContent(result)
   const accepted = content.accepted === true
   const waitedMs = numberValue(content.waitedMs)
+  const output = stringValue(content.content)
+  const artifactPath = stringValue(content.artifactPath)
   return textPart(
-    `${accepted ? 'Terminal input accepted' : 'Terminal input was not accepted'}${
-      waitedMs === undefined ? '' : ` after ${waitedMs} ms`
-    }`,
+    appendFooter(
+      output || (accepted ? '[no new output]' : '[input rejected]'),
+      [
+        accepted ? 'accepted=true' : 'accepted=false',
+        ...(waitedMs === undefined ? [] : [`waitedMs=${waitedMs}`]),
+        `cursor=${numberValue(content.cursor) ?? 0}`,
+        `delta=${String(booleanValue(content.delta))}`,
+        ...(artifactPath ? [`artifactPath=${artifactPath}`] : []),
+        ...(content.artifactAvailable === false
+          ? [
+              'artifactAvailable=false',
+              `captureError=${stringValue(content.captureError) || 'unknown'}`,
+            ]
+          : []),
+      ],
+    ),
   )
 }
 
@@ -202,6 +239,7 @@ export function projectRunCommandResult(
   const stderr = stringValue(content.stderr)
   const exitCode = numberValue(content.exitCode)
   const exitSignal = stringValue(content.exitSignal)
+  const artifactPath = stringValue(content.artifactPath)
   const truncated = booleanValue(content.truncated) || result.truncated === true
   let body = stdout
   if (stderr) {
@@ -216,6 +254,13 @@ export function projectRunCommandResult(
       ...(truncated ? ['truncated=true'] : []),
       ...(truncated && result.totalBytes !== undefined
         ? [`totalBytes=${result.totalBytes}`]
+        : []),
+      ...(artifactPath ? [`artifactPath=${artifactPath}`] : []),
+      ...(content.artifactAvailable === false
+        ? [
+            'artifactAvailable=false',
+            `captureError=${stringValue(content.captureError) || 'unknown'}`,
+          ]
         : []),
     ]),
   )
@@ -271,6 +316,15 @@ export function projectFetchResult(
       ...(truncated && result.totalBytes !== undefined
         ? [`totalBytes=${result.totalBytes}`]
         : []),
+      ...(stringValue(content.artifactPath)
+        ? [`artifactPath=${stringValue(content.artifactPath)}`]
+        : []),
+      ...(content.artifactAvailable === false
+        ? [
+            'artifactAvailable=false',
+            `captureError=${stringValue(content.captureError) || 'unknown'}`,
+          ]
+        : []),
     ]),
   )
 }
@@ -279,7 +333,8 @@ export function projectFetchResult(
 export function projectWebSearchResult(
   result: SuccessfulToolResult,
 ): ToolModelContentPart[] {
-  const values = objectContent(result).results
+  const content = objectContent(result)
+  const values = content.results
   const results = Array.isArray(values) ? values : []
   const body = results
     .map((value, index) => {
@@ -296,7 +351,19 @@ export function projectWebSearchResult(
     })
     .filter(Boolean)
     .join('\n\n')
-  return textPart(body || '[no results]')
+  return textPart(
+    appendFooter(body || '[no results]', [
+      ...(stringValue(content.artifactPath)
+        ? [`artifactPath=${stringValue(content.artifactPath)}`]
+        : []),
+      ...(content.artifactAvailable === false
+        ? [
+            'artifactAvailable=false',
+            `captureError=${stringValue(content.captureError) || 'unknown'}`,
+          ]
+        : []),
+    ]),
+  )
 }
 
 /** Projects read_skill to the skill instruction body only. */
@@ -331,29 +398,23 @@ export function projectSubagentResult(
   )
 }
 
-/** Projects a successful file mutation to a summary and durable-warning fields. */
+/** Projects a successful file mutation to one compact operation summary. */
 export function projectFileMutationResult(
   result: SuccessfulToolResult,
-  action: 'created' | 'patched' | 'deleted',
+  action: 'written' | 'patched' | 'deleted',
 ): ToolModelContentPart[] {
   const content = objectContent(result)
   const path = stringValue(content.path) || '[unknown path]'
   const verb =
-    action === 'created'
-      ? 'Created file'
+    action === 'written'
+      ? 'Wrote file'
       : action === 'patched'
         ? 'Patched file'
         : 'Deleted file'
-  const warningCode = stringValue(content.warningCode)
+  const deleted = action === 'deleted' ? content.deleted === true : undefined
   return textPart(
-    appendFooter(`${verb} ${path}`, [
-      ...(warningCode
-        ? [
-            `mutationSucceeded=${String(content.mutationSucceeded === true)}`,
-            `warningCode=${warningCode}`,
-            `revertAvailable=${String(content.revertAvailable === true)}`,
-          ]
-        : []),
-    ]),
+    action === 'deleted' && !deleted
+      ? `File was already absent ${path}`
+      : `${verb} ${path}`,
   )
 }

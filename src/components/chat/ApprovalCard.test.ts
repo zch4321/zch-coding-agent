@@ -28,7 +28,6 @@ beforeEach(() => {
     args: { path: 'src/app.ts', patch: 'x'.repeat(4000) },
     reason: 'Update the application',
     signals: [{ code: 'write', severity: 'warning', detail: 'Writes a file' }],
-    diff: '+ updated content',
     rememberable: false,
     expiresAt: '2026-08-01T01:00:00.000Z',
     status: 'requested',

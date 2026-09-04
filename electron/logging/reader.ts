@@ -1,9 +1,10 @@
-import { readFile } from 'node:fs/promises'
+import { readFileContents as readFile } from '../common/filesystem'
 import type { TraceEvent } from './events'
 import { TRACE_SCHEMA_VERSION, TraceEventSchema } from './events'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 
 const validateTraceEvent = compileSchema(TraceEventSchema)
+const RETIRED_V2_EVENT_TYPES = new Set(['run.rejected', 'workspace.writer'])
 
 function projectLegacyRouteIdentity(candidate: unknown): unknown {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
@@ -39,11 +40,14 @@ function projectLegacyRouteIdentity(candidate: unknown): unknown {
   }
 }
 
-function projectLegacyTraceVersion(candidate: unknown): unknown {
+function projectLegacyTraceVersion(candidate: unknown): unknown | undefined {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
     return candidate
   }
   if (Reflect.get(candidate, 'schemaVersion') !== 2) return candidate
+  if (RETIRED_V2_EVENT_TYPES.has(String(Reflect.get(candidate, 'type')))) {
+    return undefined
+  }
   return { ...(candidate as Record<string, unknown>), schemaVersion: 3 }
 }
 
@@ -94,6 +98,7 @@ export async function readTraceFile(filePath: string): Promise<TraceEvent[]> {
     }
 
     candidate = projectLegacyTraceVersion(candidate)
+    if (candidate === undefined) continue
     candidate = projectLegacyRouteIdentity(candidate)
     if (!validateTraceEvent(candidate)) {
       const version =

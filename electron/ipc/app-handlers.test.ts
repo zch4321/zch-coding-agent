@@ -50,7 +50,10 @@ function createHandlers(input?: {
     bootstrap: vi.fn(),
     projects,
     sessions: {},
-    fileChanges: {},
+    gitReview: {
+      getStatus: vi.fn(),
+      getDiff: vi.fn(),
+    },
     runs: {},
     liveSessions: {},
     ...input?.backend,
@@ -384,6 +387,50 @@ describe('app IPC handlers', () => {
       handlers['project:list']!({ version: 1 }, stubEvent),
     ).resolves.toEqual({ version: 1, projects: records })
     expect(list).toHaveBeenCalledOnce()
+  })
+
+  it('queries Git Review against the Project current workspace', async () => {
+    const get = vi.fn(async () => ({ path: 'C:\\projects\\current' }))
+    const status = { repository: true, entries: [] }
+    const diff = { mode: 'merge_base', content: 'diff content' }
+    const getStatus = vi.fn(async () => status)
+    const getDiff = vi.fn(async () => diff)
+    const { handlers } = createHandlers({
+      backend: {
+        projects: { get },
+        gitReview: { getStatus, getDiff },
+      },
+    })
+
+    await expect(
+      handlers['git-review:get-status']!(
+        { version: 1, projectId: 'project-test' } as never,
+        stubEvent,
+      ),
+    ).resolves.toBe(status)
+    await expect(
+      handlers['git-review:get-diff']!(
+        {
+          version: 1,
+          projectId: 'project-test',
+          mode: 'merge_base',
+          path: 'src/main.ts',
+          baseRef: 'origin/main',
+          contextLines: 5,
+        } as never,
+        stubEvent,
+      ),
+    ).resolves.toBe(diff)
+
+    expect(get).toHaveBeenCalledTimes(2)
+    expect(getStatus).toHaveBeenCalledWith('C:\\projects\\current')
+    expect(getDiff).toHaveBeenCalledWith({
+      workspace: 'C:\\projects\\current',
+      mode: 'merge_base',
+      path: 'src/main.ts',
+      baseRef: 'origin/main',
+      contextLines: 5,
+    })
   })
 
   it('reconfigures live Session captures after saving logging settings', async () => {

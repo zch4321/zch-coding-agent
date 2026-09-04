@@ -1,4 +1,8 @@
-import { mkdir, readFile, stat } from 'node:fs/promises'
+import {
+  fileStatus as stat,
+  makeDirectory as mkdir,
+  readFileContents as readFile,
+} from '../common/filesystem'
 import path from 'node:path'
 import {
   ProjectModelFileSchema,

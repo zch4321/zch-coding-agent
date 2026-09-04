@@ -6,7 +6,6 @@ import {
   ClientRequestIdSchema,
   DurableSchemaVersionSchema,
   MAX_COMMIT_MESSAGE_RECORDS,
-  MAX_FILE_CHANGE_PAGE_RECORDS,
   MAX_MESSAGE_PAGE_RECORDS,
   MAX_PATH_LENGTH,
   MAX_PROJECT_RECORDS,
@@ -15,12 +14,6 @@ import {
   RevisionSchema,
 } from './durable'
 import {
-  FileChangeListCursorSchema,
-  FileChangePageSchema,
-  FileChangeSummarySchema,
-} from './file-change'
-import {
-  FileChangeIdSchema,
   MessageIdSchema,
   ProjectIdSchema,
   RunIdSchema,
@@ -100,24 +93,6 @@ export const SessionCommittedChangeSchema = Type.Object(
 )
 export type SessionCommittedChange = Static<typeof SessionCommittedChangeSchema>
 
-export const FileChangeCommittedChangeSchema = Type.Union([
-  Type.Object(
-    {
-      mode: Type.Literal('upsert'),
-      sessionId: SessionIdSchema,
-      fileChange: FileChangeSummarySchema,
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    { mode: Type.Literal('invalidate_all') },
-    { additionalProperties: false },
-  ),
-])
-export type FileChangeCommittedChange = Static<
-  typeof FileChangeCommittedChangeSchema
->
-
 export const ProjectCommitEnvelopeSchema = Type.Object(
   {
     schemaVersion: DurableSchemaVersionSchema,
@@ -157,21 +132,10 @@ export const SessionRemovedCommitEnvelopeSchema = Type.Object(
   { additionalProperties: false },
 )
 
-export const FileChangeCommitEnvelopeSchema = Type.Object(
-  {
-    schemaVersion: DurableSchemaVersionSchema,
-    cursor: BackendEventCursorSchema,
-    topic: Type.Literal('file-change.changed'),
-    change: FileChangeCommittedChangeSchema,
-  },
-  { additionalProperties: false },
-)
-
 export const DurableCommitEnvelopeSchema = Type.Union([
   ProjectCommitEnvelopeSchema,
   SessionCommitEnvelopeSchema,
   SessionRemovedCommitEnvelopeSchema,
-  FileChangeCommitEnvelopeSchema,
 ])
 export type DurableCommitEnvelope = Static<typeof DurableCommitEnvelopeSchema>
 export type DurableCommitTopic = DurableCommitEnvelope['topic']
@@ -210,13 +174,6 @@ export const SessionDeleteCommandResultSchema = commandResultSchema(
 )
 export type SessionDeleteCommandResult = Static<
   typeof SessionDeleteCommandResultSchema
->
-
-export const FileChangeCommandResultSchema = commandResultSchema(
-  FileChangeCommitEnvelopeSchema,
-)
-export type FileChangeCommandResult = Static<
-  typeof FileChangeCommandResultSchema
 >
 
 export const DomainStateEventSchema = Type.Object(
@@ -610,36 +567,6 @@ export type DurableRunContinueResult = Static<
   typeof DurableRunContinueResultSchema
 >
 
-export const FileChangeListPayloadSchema = Type.Object(
-  {
-    ...versionProperty,
-    sessionId: SessionIdSchema,
-    before: Type.Optional(FileChangeListCursorSchema),
-    limit: Type.Optional(
-      Type.Integer({ minimum: 1, maximum: MAX_FILE_CHANGE_PAGE_RECORDS }),
-    ),
-  },
-  { additionalProperties: false },
-)
-export const FileChangeListResultSchema = Type.Object(
-  {
-    ...versionProperty,
-    sessionId: SessionIdSchema,
-    page: FileChangePageSchema,
-  },
-  { additionalProperties: false },
-)
-
-export const FileChangeRevertPayloadSchema = Type.Object(
-  {
-    ...versionProperty,
-    sessionId: SessionIdSchema,
-    fileChangeId: FileChangeIdSchema,
-    expectedRevision: RevisionSchema,
-  },
-  { additionalProperties: false },
-)
-
 export const DOMAIN_STATE_API_CONTRACTS = {
   'app:get-bootstrap': {
     payload: AppBootstrapPayloadSchema,
@@ -716,14 +643,6 @@ export const DOMAIN_STATE_API_CONTRACTS = {
   'run:continue': {
     payload: DurableRunContinuePayloadSchema,
     result: DurableRunContinueResultSchema,
-  },
-  'file-change:list': {
-    payload: FileChangeListPayloadSchema,
-    result: FileChangeListResultSchema,
-  },
-  'file-change:revert': {
-    payload: FileChangeRevertPayloadSchema,
-    result: FileChangeCommandResultSchema,
   },
 } as const
 

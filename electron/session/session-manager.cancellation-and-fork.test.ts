@@ -41,7 +41,7 @@ describe('SessionManager cancellation and forks', () => {
             id: `call-write-${index + 1}`,
             type: 'function',
             function: {
-              name: 'create_file',
+              name: 'write_file',
               arguments: JSON.stringify({ path: fileName, content: fileName }),
             },
           }),
@@ -52,7 +52,7 @@ describe('SessionManager cancellation and forks', () => {
           turn: { role: 'assistant', content: null, tool_calls: toolCalls },
           toolCalls: toolCalls.map((toolCall) => ({
             id: toolCall.id as CallId,
-            toolId: 'create_file',
+            toolId: 'write_file',
             args: JSON.parse(toolCall.function.arguments) as JsonValue,
             reason: 'Create cancellation fixture',
           })),

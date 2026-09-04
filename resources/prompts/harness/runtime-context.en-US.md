@@ -4,6 +4,10 @@ timezone: ${timezone}
 workspace: ${workspace}
 cwd: ${cwd}
 command_shell: ${commandShell}
+session_temp: ${sessionTempRoot}
+session_artifacts: ${sessionArtifactsDirectory}
+session_scratch: ${sessionScratchDirectory}
+session_environment: ZCH_SESSION_TEMP_DIR, ZCH_SESSION_ARTIFACTS_DIR, ZCH_SESSION_SCRATCH_DIR
 os: ${osInfo}
 assistant_language: ${assistantLanguage}
 permission_mode: ${permissionMode}

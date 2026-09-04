@@ -51,7 +51,8 @@
     "shiki": "4.2.0",
     "undici": "^7.27.2",
     "vue": "3.5.38",
-    "vue-i18n": "^11.4.6"
+    "vue-i18n": "^11.4.6",
+    "write-file-atomic": "^7.0.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
@@ -60,6 +61,7 @@
     "@types/markdown-it": "14.1.2",
     "@types/node": "24.13.2",
     "@types/picomatch": "^4.0.3",
+    "@types/write-file-atomic": "^4.0.3",
     "@vitejs/plugin-vue": "6.0.7",
     "@vitest/coverage-v8": "^4.1.9",
     "@vue/test-utils": "2.4.11",

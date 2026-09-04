@@ -1,14 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { lookup as dnsLookup } from 'node:dns/promises'
 import {
-  lstat,
-  link,
-  mkdir,
-  open,
-  readFile,
-  readdir,
-  unlink,
-} from 'node:fs/promises'
+  linkPath as link,
+  linkStatus as lstat,
+  makeDirectory as mkdir,
+  openFileHandle as open,
+  readDirectory as readdir,
+  readFileContents as readFile,
+  unlinkFile as unlink,
+} from '../common/filesystem'
 import { request as httpsRequest } from 'node:https'
 import path from 'node:path'
 import { JSON_SCHEMA, load as loadYaml } from 'js-yaml'
@@ -21,7 +21,7 @@ import type {
 import { writeJsonAtomic } from '../config/atomic-file'
 import { isPublicNetworkAddress } from '../net/network-address'
 
-export const MAX_SKILL_BYTES = 64 * 1_024
+export const MAX_SKILL_BYTES = 256 * 1_024
 const MAX_SKILLS = 128
 const MAX_REDIRECTS = 5
 const DOWNLOAD_TIMEOUT_MS = 15_000

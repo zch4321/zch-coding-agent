@@ -92,6 +92,42 @@ describe('LiveSessionContextRegistry mutation ownership', () => {
     )
   })
 
+  it('reserves lifecycle eviction while Terminals await quiescence', () => {
+    const session = createRegistry()
+    const sessionId = 'session:terminal-eviction' as SessionId
+    const projectId = 'project:terminal-eviction' as ProjectId
+    const owner = session.registry.reserveNew(
+      sessionId,
+      projectId,
+      'request:terminal-eviction',
+    )
+    session.registry.adoptNew(sessionId, projectId, owner)
+    vi.mocked(session.manager.hasOpenTerminals).mockReturnValue(true)
+
+    expect(() => session.registry.assertSessionIdle(sessionId)).toThrowError(
+      expect.objectContaining({ code: 'CONFLICT' }),
+    )
+    expect(() =>
+      session.registry.reserveSessionEviction(sessionId),
+    ).not.toThrow()
+
+    const project = createRegistry()
+    const projectOwner = project.registry.reserveNew(
+      sessionId,
+      projectId,
+      'request:project-terminal-eviction',
+    )
+    project.registry.adoptNew(sessionId, projectId, projectOwner)
+    vi.mocked(project.manager.hasOpenTerminals).mockReturnValue(true)
+
+    expect(() => project.registry.assertProjectIdle(projectId)).toThrowError(
+      expect.objectContaining({ code: 'CONFLICT' }),
+    )
+    expect(() =>
+      project.registry.reserveProjectEviction(projectId),
+    ).not.toThrow()
+  })
+
   it('applies runtime metadata before advancing the durable binding', () => {
     const { calls, manager, registry } = createRegistry()
     const sessionId = 'session:update-order' as SessionId

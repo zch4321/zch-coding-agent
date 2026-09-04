@@ -4,19 +4,21 @@
 
 Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`backend-refactor-plan.md`](./backend-refactor-plan.md)。
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、history-derived Todo List、live interjection v1、不限制跨 Session/workspace 写入的并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、带 `readonly | inherit` 显式工具权限的 `subagent_run`、Model Pool、低风险 parallel Desktop Swarm Tool、child 副作用审批、两级 Agents 状态视图与完整 Trace transcript 查看/导出已经落地。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一步完成 Swarm hardening，随后迁移 ProjectModel 到 SQLite 并恢复代码智能。
+已完成的文件基础设施、best-effort 文件工具和 Git Review 重构记录见 [`file-tools-filesystem-refactor-plan.md`](./file-tools-filesystem-refactor-plan.md)。
+
+当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、history-derived Todo List、live interjection v1、不限制跨 Session/workspace 写入的并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、带 `readonly | inherit` 显式工具权限的 `subagent_run`、Model Pool、低风险 parallel Desktop Swarm Tool、child 副作用审批、两级 Agents 状态视图、完整 Trace transcript、统一 filesystem facade、`write_file`/latest-content patch/idempotent delete，以及 Project 级实时 Git Review 已经落地。应用不维护 FileChange、Diff history、patch artifact 或文件恢复；Session rewind 只影响对话。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一步完成 Swarm hardening，随后迁移 ProjectModel 到 SQLite 并恢复代码智能。
 
 原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
 
 ## 0. 未完成概览
 
-| 优先级 | 领域                           | 目标                                                  | 主要风险                              |
-| ------ | ------------------------------ | ----------------------------------------------------- | ------------------------------------- |
-| P2     | Swarm Hardening                | 取消体验、压力测试、诊断与成本汇总                    | 费用失控、取消竞态与上下文膨胀        |
-| P2     | Provider Routing               | Session selection、Active Run route 与用途路由        | 全局 active provider 静默影响已有会话 |
-| P3     | Project / Code Intelligence UX | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断 | 项目元数据误改、后端不可诊断          |
-| P3     | Terminal / Command Environment | Windows Shell 自动发现及终端、命令解释器独立配置      | Shell 参数差异、路径漂移与回退语义    |
-| P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                  | 基础并发与扩展边界未稳时过早扩张      |
+| 优先级 | 领域                             | 目标                                                       | 主要风险                                  |
+| ------ | -------------------------------- | ---------------------------------------------------------- | ----------------------------------------- |
+| P2     | Swarm Hardening                  | 取消体验、压力测试、诊断与成本汇总                         | 费用失控、取消竞态与上下文膨胀            |
+| P2     | Provider Routing                 | Session selection、Active Run route 与用途路由             | 全局 active provider 静默影响已有会话     |
+| P3     | Project / Code Intelligence UX   | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断      | 项目元数据误改、后端不可诊断              |
+| P3     | Terminal / Command Environment   | Windows Shell 自动发现及终端、命令解释器独立配置           | Shell 参数差异、路径漂移与回退语义        |
+| P3     | Later Expansion                  | 插件加载器、浏览器、多模态、高级统计                       | 基础并发与扩展边界未稳时过早扩张          |
 
 ## 2. M2 · Swarm Hardening
 
@@ -60,7 +62,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - 以稳定 `projectId` 在 `userData/agent.db` 中持久化 versioned ProjectModel，由 Backend transaction 和 revision 控制更新。
 - 旧 `.zch/project-model.json` 只允许用户显式、一次性、有界导入；成功后不删除、不改写、不续写源文件，也不自动修改 `.gitignore`。
 - Project tab 支持完整手动编辑：module root、languages、sourceRoots、testRoots、excludedRoots、default module、来源说明。
-- module metadata 更新写入 trace/change history 摘要，便于审计和回滚。
+- module metadata 更新通过 SQLite revision/transaction 管理，并写入 trace 摘要以便审计；不创建文件级 change history。
 - 评估接入受维护 project detector，避免核心长期膨胀语言规则。
 - ProjectModel query/command 通过 shared schema 和 backend transaction 暴露；Project 删除级联、目录重关联、revision 冲突、备份/恢复和 Renderer reload 都以 SQLite record 为权威。
 - Serena 和其他 code backend 只能引用 SQLite ProjectModel；backend pid、状态和 stderr tail 保持 Main process live state，不写入 ProjectModel。
@@ -93,7 +95,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - diagnostics 支持缓存、过期标记和 UI 展示。
 - Trace 记录 facade 命中率、读文件 token、首次定位正确文件耗时和 fallback/unsupported 原因。
 - 后续 IDE 级编辑能力单独设计：rename、replace body、update definition、refactor preview、diagnostics refresh。
-- 所有写入类 IDE 能力必须进入现有 diff、审批、change history 和 trace 管线。
+- 所有写入类 IDE 能力必须进入现有 PathGuard、args-bound 审批和 trace 管线；结果由 Project 级 Git Review 查看，不另建 Diff/change-history/恢复体系。
 
 验收：
 

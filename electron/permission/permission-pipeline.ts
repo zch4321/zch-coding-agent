@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import path from 'node:path'
 import type { PolicySignal } from '../../shared/agent-events'
 import type {
   PermissionMode,
@@ -19,19 +20,15 @@ import {
   type AutoApprover,
   type AutoApproverResult,
 } from './auto-approver'
-import {
-  prepareToolResourcePlan,
-  revalidateResourcePreconditions,
-  type ToolResourcePlan,
-} from '../tools/file-tools'
+import { prepareToolResourcePlan } from '../tools/file-tools'
+import type { ToolResourcePlan } from '../tools/file-tool-types'
 import { PathGuardError } from '../safety/path-guard'
 import { evaluatePolicy } from './policy-engine'
+import type { SessionTempPaths } from '../session-temp/service'
 
 export interface ApprovalRequest {
   call: ToolCall
   policySignals: PolicySignal[]
-  diff?: string
-  diffHash?: string
   expiresAt: string
   rememberable: boolean
   rememberArgConstraints?: JsonValue
@@ -52,7 +49,6 @@ export type AuthorizationResult =
       ok: true
       approvedCall: ApprovedToolCall
       policySignals: PolicySignal[]
-      diff?: string
       rememberedRule?: RememberedRule
       autoDecision?: AutoApproverResult
     }
@@ -60,7 +56,6 @@ export type AuthorizationResult =
       ok: false
       result: ToolResult
       policySignals: PolicySignal[]
-      diff?: string
       autoDecision?: AutoApproverResult
     }
 
@@ -68,6 +63,7 @@ export interface PermissionPipelineInput {
   sessionId: SessionId
   runId: RunId
   workspace: string
+  sessionTemp?: SessionTempPaths
   mode: PermissionMode
   call: ToolCall
   definition: ToolDefinition
@@ -102,8 +98,9 @@ export function createArgsHash(args: JsonValue): string {
 function issueApprovedCall(input: {
   sessionId: SessionId
   runId: RunId
+  workspace: string
+  sessionTempRoot?: string
   call: ToolCall
-  plan: ToolResourcePlan
   approvedBy: ApprovedBy
 }): ApprovedToolCall {
   const approved = {
@@ -114,8 +111,10 @@ function issueApprovedCall(input: {
     toolId: input.call.toolId,
     args: structuredClone(input.call.args),
     argsHash: createArgsHash(input.call.args),
-    resourcePreconditions: structuredClone(input.plan.preconditions),
-    diffHash: input.plan.diffHash,
+    workspace: path.resolve(input.workspace),
+    ...(input.sessionTempRoot
+      ? { sessionTempRoot: path.resolve(input.sessionTempRoot) }
+      : {}),
     approvedBy: input.approvedBy,
     approvedAt: new Date().toISOString(),
   } as ApprovedToolCall
@@ -189,7 +188,7 @@ function rememberArgConstraints(call: ToolCall): JsonValue | undefined {
   }
 
   if (
-    call.toolId === 'create_file' ||
+    call.toolId === 'write_file' ||
     call.toolId === 'apply_patch' ||
     call.toolId === 'delete_file'
   ) {
@@ -250,15 +249,22 @@ function rememberedRule(input: {
   }
 }
 
-/** Checks that an approved call still matches its session, run, arguments, workspace, and policy. */
-export async function revalidateApprovedToolCall(
+function comparablePath(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const resolved = path.resolve(value)
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+}
+
+/** Checks that an approved call still matches its owner, arguments, and filesystem scope. */
+export function revalidateApprovedToolCall(
   approvedCall: ApprovedToolCall,
   context: {
     sessionId: SessionId
     runId: RunId
     workspace: string
+    sessionTempRoot?: string
   },
-): Promise<void> {
+): void {
   if (approvedCall[approvedCallBrand] !== true) {
     throw new PathGuardError(
       'RESOURCE_CHANGED',
@@ -283,10 +289,17 @@ export async function revalidateApprovedToolCall(
     )
   }
 
-  await revalidateResourcePreconditions(
-    context.workspace,
-    approvedCall.resourcePreconditions,
-  )
+  if (
+    comparablePath(approvedCall.workspace) !==
+      comparablePath(context.workspace) ||
+    comparablePath(approvedCall.sessionTempRoot) !==
+      comparablePath(context.sessionTempRoot)
+  ) {
+    throw new PathGuardError(
+      'RESOURCE_CHANGED',
+      'Approved call filesystem scope changed before execution',
+    )
+  }
 }
 
 /** Applies policy, plugin, auto-approval, and human-approval gates to tool calls. */
@@ -300,6 +313,7 @@ export class PermissionPipeline {
     try {
       plan = await prepareToolResourcePlan({
         workspace: input.workspace,
+        sessionTemp: input.sessionTemp,
         call: input.call,
         definition: input.definition,
         limits: input.config.limits,
@@ -329,7 +343,6 @@ export class PermissionPipeline {
             detail: hook.reason ?? 'A security hook blocked this tool call',
           },
         ],
-        diff: plan.diff,
       }
     }
 
@@ -353,6 +366,7 @@ export class PermissionPipeline {
       workspace: input.workspace,
       args: input.call.args,
       callId: input.call.id,
+      scratchMutation: plan.scratchMutation === true,
     })
 
     if (outcome.kind === 'deny') {
@@ -360,7 +374,6 @@ export class PermissionPipeline {
         ok: false,
         result: { status: 'denied', message: outcome.reason },
         policySignals: signals,
-        diff: plan.diff,
       }
     }
 
@@ -370,12 +383,12 @@ export class PermissionPipeline {
         approvedCall: issueApprovedCall({
           sessionId: input.sessionId,
           runId: input.runId,
+          workspace: input.workspace,
+          sessionTempRoot: input.sessionTemp?.root,
           call: input.call,
-          plan,
           approvedBy: outcome.approvedBy,
         }),
         policySignals: signals,
-        diff: plan.diff,
       }
     }
 
@@ -406,12 +419,12 @@ export class PermissionPipeline {
           approvedCall: issueApprovedCall({
             sessionId: input.sessionId,
             runId: input.runId,
+            workspace: input.workspace,
+            sessionTempRoot: input.sessionTemp?.root,
             call: input.call,
-            plan,
             approvedBy: 'model',
           }),
           policySignals: signals,
-          diff: plan.diff,
           autoDecision,
         }
       }
@@ -424,8 +437,6 @@ export class PermissionPipeline {
     const decision = await input.requestHumanApproval({
       call: input.call,
       policySignals: signals,
-      diff: plan.diff,
-      diffHash: plan.diffHash,
       expiresAt: new Date(
         Date.now() + input.config.limits.approvalTimeoutMs,
       ).toISOString(),
@@ -438,7 +449,6 @@ export class PermissionPipeline {
         ok: false,
         result: { status: 'cancelled', message: 'Approval was cancelled' },
         policySignals: signals,
-        diff: plan.diff,
         autoDecision,
       }
     }
@@ -448,7 +458,6 @@ export class PermissionPipeline {
         ok: false,
         result: { status: 'denied', message: reviewReason },
         policySignals: signals,
-        diff: plan.diff,
         autoDecision,
       }
     }
@@ -468,12 +477,12 @@ export class PermissionPipeline {
       approvedCall: issueApprovedCall({
         sessionId: input.sessionId,
         runId: input.runId,
+        workspace: input.workspace,
+        sessionTempRoot: input.sessionTemp?.root,
         call: input.call,
-        plan,
         approvedBy: 'human',
       }),
       policySignals: signals,
-      diff: plan.diff,
       rememberedRule: rule,
       autoDecision,
     }

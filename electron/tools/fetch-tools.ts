@@ -4,6 +4,10 @@ import type { JsonValue } from '../../shared/json'
 import type { ToolRegistrationPort, ToolResult } from './types'
 import { fetchWithSsrfGuard, SsrfFetchError } from '../net/ssrf'
 import { projectFetchResult } from './tool-result-formatters'
+import {
+  sessionArtifactKey,
+  writeSessionArtifactJson,
+} from '../session-temp/service'
 
 const FetchSchema = Type.Object(
   {
@@ -64,6 +68,7 @@ function ssrfErrorResult(error: unknown): ToolResult {
 export function registerFetchTools(
   registry: ToolRegistrationPort,
   getConfig: () => PublicConfig,
+  fetcher: typeof fetchWithSsrfGuard = fetchWithSsrfGuard,
 ): void {
   registry.registerTool({
     id: 'fetch',
@@ -75,7 +80,6 @@ export function registerFetchTools(
     defaultRisk: 'review',
     supportsAbort: true,
     defaultTimeoutMs: 20_000,
-    maxOutputBytes: 256 * 1_024,
     projectResultForModel: projectFetchResult,
     async execute(args: FetchArgs, context): Promise<ToolResult> {
       try {
@@ -91,7 +95,7 @@ export function registerFetchTools(
           }
         }
 
-        const response = await fetchWithSsrfGuard(args.url, {
+        const response = await fetcher(args.url, {
           maxBytes: Math.min(
             args.maxBytes ?? limits.fetchResponseBytes,
             limits.fetchResponseBytes,
@@ -124,10 +128,37 @@ export function registerFetchTools(
           body: response.body,
           truncated: response.truncated,
         }
+        let artifact:
+          | { artifactAvailable: true; artifactPath: string }
+          | { artifactAvailable: false; captureError: string }
+        try {
+          if (!context.sessionTemp)
+            throw new Error('Session temp is unavailable')
+          artifact = {
+            artifactAvailable: true,
+            artifactPath: await writeSessionArtifactJson(
+              context.sessionTemp,
+              [
+                'fetch',
+                sessionArtifactKey(
+                  `${context.runId}:${context.approvedCall.callId}`,
+                ),
+                'result.json',
+              ],
+              content,
+            ),
+          }
+        } catch (error) {
+          artifact = {
+            artifactAvailable: false,
+            captureError:
+              error instanceof Error ? error.message : String(error),
+          }
+        }
 
         return {
           status: 'ok',
-          content,
+          content: { ...content, ...artifact },
           truncated: response.truncated,
           totalBytes: response.totalBytes,
         }

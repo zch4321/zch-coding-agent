@@ -5,7 +5,7 @@ import {
   type OpenDialogOptions,
   type SaveDialogOptions,
 } from 'electron'
-import { stat } from 'node:fs/promises'
+import { fileStatus as stat } from '../common/filesystem'
 import { TRACE_NOTICE_VERSION } from '../../shared/notices'
 import {
   fetchProviderModelCatalog,
@@ -358,20 +358,16 @@ export function createAppIpcHandlers(
         limit: payload.limit,
       }),
     }),
-    'file-change:list': async (payload) => ({
-      version: 1,
-      sessionId: payload.sessionId,
-      page: await backend.fileChanges.list(payload.sessionId, {
-        before: payload.before,
-        limit: payload.limit,
+    'git-review:get-status': async (payload) =>
+      backend.gitReview.getStatus(await projectWorkspace(payload.projectId)),
+    'git-review:get-diff': async (payload) =>
+      backend.gitReview.getDiff({
+        workspace: await projectWorkspace(payload.projectId),
+        mode: payload.mode,
+        path: payload.path,
+        baseRef: payload.baseRef,
+        contextLines: payload.contextLines,
       }),
-    }),
-    'file-change:revert': (payload) =>
-      backend.fileChanges.revert(
-        payload.sessionId,
-        payload.fileChangeId,
-        payload.expectedRevision,
-      ),
     'agent-execution:list': async (payload) => ({
       page: await backend.agentExecutions.list({
         parentSessionId: payload.parentSessionId,
@@ -463,7 +459,7 @@ export function createAppIpcHandlers(
       try {
         const guard = await PathGuard.create(workspace)
         const maxBytes = Math.min(
-          configStore.getPublicConfig().limits.readFileOutputBytes,
+          configStore.getPublicConfig().limits.maxToolOutputBytes,
           499_999,
         )
         return {

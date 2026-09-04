@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile } from 'node:fs/promises'
+import {
+  makeDirectory as mkdir,
+  readFileContents as readFile,
+} from '../common/filesystem'
 import path from 'node:path'
 import {
   PROVIDER_NOTICE_VERSION,
@@ -13,10 +16,12 @@ import { writeJsonAtomic } from '../config/atomic-file'
 import { SecretStore, type SafeStorageAdapter } from '../config/secret-store'
 import {
   HeadlessConfigSchema,
+  LegacyHeadlessConfigV4Schema,
   LegacyHeadlessConfigV1Schema,
   LegacyHeadlessConfigV2Schema,
   LegacyHeadlessConfigV3Schema,
   type HeadlessConfig,
+  type LegacyHeadlessConfigV4,
   type LegacyHeadlessConfigV1,
   type LegacyHeadlessConfigV2,
   type LegacyHeadlessConfigV3,
@@ -30,6 +35,9 @@ const validateLegacyHeadlessConfigV2 = compileSchema(
 )
 const validateLegacyHeadlessConfigV3 = compileSchema(
   LegacyHeadlessConfigV3Schema,
+)
+const validateLegacyHeadlessConfigV4 = compileSchema(
+  LegacyHeadlessConfigV4Schema,
 )
 
 /** Provides a no-persistence SafeStorageAdapter for headless environment credentials. */
@@ -146,28 +154,30 @@ function normalizeHeadlessConfig(candidate: unknown): HeadlessConfig {
   if (validateHeadlessConfig(candidate)) {
     return structuredClone(candidate) as HeadlessConfig
   }
+  if (validateLegacyHeadlessConfigV4(candidate)) {
+    return migrateLegacyHeadless(
+      structuredClone(candidate) as LegacyHeadlessConfigV4,
+    )
+  }
   if (validateLegacyHeadlessConfigV3(candidate)) {
-    const legacy = structuredClone(candidate) as LegacyHeadlessConfigV3
-    return {
-      ...legacy,
-      schemaVersion: 4,
-      ...(legacy.limits ? { limits: withoutRunToolBudget(legacy.limits) } : {}),
-    }
+    return migrateLegacyHeadless(
+      structuredClone(candidate) as LegacyHeadlessConfigV3,
+    )
   }
   if (validateLegacyHeadlessConfigV2(candidate)) {
     const legacy = structuredClone(candidate) as LegacyHeadlessConfigV2
     return {
       ...legacy,
-      schemaVersion: 4,
-      ...(legacy.limits ? { limits: withoutRunToolBudget(legacy.limits) } : {}),
+      schemaVersion: 5,
+      ...(legacy.limits ? { limits: migrateLegacyLimits(legacy.limits) } : {}),
     }
   }
   if (validateLegacyHeadlessConfig(candidate)) {
     const legacy = structuredClone(candidate) as LegacyHeadlessConfigV1
     return {
       ...legacy,
-      schemaVersion: 4,
-      ...(legacy.limits ? { limits: withoutRunToolBudget(legacy.limits) } : {}),
+      schemaVersion: 5,
+      ...(legacy.limits ? { limits: migrateLegacyLimits(legacy.limits) } : {}),
       provider: {
         id: legacy.provider.id,
         ...(legacy.provider.label ? { label: legacy.provider.label } : {}),
@@ -189,12 +199,33 @@ function normalizeHeadlessConfig(candidate: unknown): HeadlessConfig {
   )
 }
 
-/** Removes the retired lifetime Tool Result budget from a legacy config. */
-function withoutRunToolBudget<Limits extends Record<string, unknown>>(
+function migrateLegacyHeadless(
+  legacy: LegacyHeadlessConfigV3 | LegacyHeadlessConfigV4,
+): HeadlessConfig {
+  return {
+    ...legacy,
+    schemaVersion: 5,
+    ...(legacy.limits ? { limits: migrateLegacyLimits(legacy.limits) } : {}),
+    ...(legacy.subagents
+      ? { subagents: { ...legacy.subagents, maxSubagents: 32 } }
+      : {}),
+  } as HeadlessConfig
+}
+
+/** Removes retired Tool limits and upgrades the old default output byte cap. */
+function migrateLegacyLimits<Limits extends Record<string, unknown>>(
   limits: Limits,
-): Omit<Limits, 'maxToolTokensPerRun'> {
+): Omit<
+  Limits,
+  'maxToolTokensPerRun' | 'maxToolResultTokens' | 'readFileOutputBytes'
+> {
   const migrated = { ...limits }
   Reflect.deleteProperty(migrated, 'maxToolTokensPerRun')
+  Reflect.deleteProperty(migrated, 'maxToolResultTokens')
+  Reflect.deleteProperty(migrated, 'readFileOutputBytes')
+  if (Reflect.get(migrated, 'maxToolOutputBytes') === 128 * 1_024) {
+    Reflect.set(migrated, 'maxToolOutputBytes', 256 * 1_024)
+  }
   return migrated
 }
 

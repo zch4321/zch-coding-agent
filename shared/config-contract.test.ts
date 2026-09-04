@@ -34,10 +34,10 @@ function schemaHash(schema: object): string {
 }
 
 describe('shared config contracts', () => {
-  it('preserves the v24 schema fingerprint across the domain split', () => {
-    expect(APP_CONFIG_SCHEMA_VERSION).toBe(24)
+  it('preserves the v26 schema fingerprint across the domain split', () => {
+    expect(APP_CONFIG_SCHEMA_VERSION).toBe(26)
     expect(schemaHash(PublicConfigSchema)).toBe(
-      '8171681f726443bde18d12a0bc47fe33a70784341f23167465b0f319c27cdbff',
+      '872ad265ce4a10bb9798e7128fde1625a4aabdf1ba508226ad56bbf4edee2bd4',
     )
   })
 

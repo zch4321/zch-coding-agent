@@ -3,22 +3,16 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentApi } from '../../shared/agent-api'
+import { delay } from '../../shared/async/delay'
 import type {
   DurableCommitEnvelope,
   SessionCommitEnvelopeSchema,
 } from '../../shared/domain-state-api'
-import type {
-  CallId,
-  FileChangeId,
-  MessageId,
-  ProjectId,
-  SessionId,
-} from '../../shared/ids'
+import type { MessageId, ProjectId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
 import type { ProjectRecord } from '../../shared/project'
 import type { SessionRecord } from '../../shared/session'
 import type { Static } from '@sinclair/typebox'
-import { useAgentChangesStore } from './agent-changes'
 import { useAgentReplicaStore } from './agent-replica'
 
 const projectId = 'project:replica' as ProjectId
@@ -77,31 +71,6 @@ function numberedMessage(seq: number): MessageRecord {
     clientRequestId: `request:replica-${seq}`,
     parts: [{ type: 'text', text: `message ${seq}` }],
   } as MessageRecord
-}
-
-function fileChange(index: number) {
-  const createdAt = new Date(
-    Date.parse(timestamp) - index * 1_000,
-  ).toISOString()
-  return {
-    schemaVersion: 1 as const,
-    id: `file-change:replica-${index}` as FileChangeId,
-    sessionId,
-    callId: `call:replica-${index}` as CallId,
-    path: `file-${index}.txt`,
-    operation: 'write' as const,
-    diff: `+${index}`,
-    diffHash: 'a'.repeat(64),
-    diffTruncated: false,
-    beforeExists: false,
-    beforeHash:
-      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-    afterExists: true,
-    afterHash: 'b'.repeat(64),
-    revision: 1,
-    createdAt,
-    updatedAt: createdAt,
-  }
 }
 
 const userMessage: MessageRecord = {
@@ -281,7 +250,6 @@ describe('agent durable replica', () => {
     replica.selectedProjectId = projectId
     replica.selectedSessionId = sessionId
     replica.messagesBySessionId[sessionId] = [userMessage]
-    replica.fileChangesBySessionId[sessionId] = [fileChange(1)]
     replica.runtimeBySessionId[sessionId] = undefined
     replica.traceCaptureBySessionId[sessionId] = undefined
     replica.cursor = {
@@ -304,7 +272,6 @@ describe('agent durable replica', () => {
     expect(replica.sessions).toEqual([])
     expect(replica.selectedSessionId).toBeUndefined()
     expect(replica.messagesBySessionId).toEqual({})
-    expect(replica.fileChangesBySessionId).toEqual({})
   })
 
   it('loads the latest active Session when a removed current Project falls back outside the cache', async () => {
@@ -388,34 +355,28 @@ describe('agent durable replica', () => {
   })
 
   it('coalesces bootstrap replay and loads the 201st active Session', async () => {
-    const pending = new Promise<ReturnType<typeof success>>((resolve) => {
-      window.setTimeout(
-        () =>
-          resolve(
-            success({
-              version: 1 as const,
-              cursor: {
-                schemaVersion: 1 as const,
-                backendInstanceId: 'backend:replica',
-                sequence: 1,
-              },
-              projects: [project],
-              sessionPage: {
-                schemaVersion: 1 as const,
-                records: Array.from({ length: 200 }, (_, index) =>
-                  otherSession(index + 1),
-                ),
-                hasMore: true as const,
-                nextBefore: {
-                  updatedAt: otherSession(200).updatedAt,
-                  sessionId: otherSession(200).id,
-                },
-              },
-            }),
+    const pending = delay(10).then(() =>
+      success({
+        version: 1 as const,
+        cursor: {
+          schemaVersion: 1 as const,
+          backendInstanceId: 'backend:replica',
+          sequence: 1,
+        },
+        projects: [project],
+        sessionPage: {
+          schemaVersion: 1 as const,
+          records: Array.from({ length: 200 }, (_, index) =>
+            otherSession(index + 1),
           ),
-        10,
-      )
-    })
+          hasMore: true as const,
+          nextBefore: {
+            updatedAt: otherSession(200).updatedAt,
+            sessionId: otherSession(200).id,
+          },
+        },
+      }),
+    )
     const getBootstrap = vi.fn(async () => pending)
     const listSessions = vi.fn(async () =>
       success({
@@ -593,7 +554,7 @@ describe('agent durable replica', () => {
     expect(replica.selectedSessionId).toBe(uncached.id)
   })
 
-  it('loads the 201st Message and FileChange from stable cursors', async () => {
+  it('loads the 201st Message from a stable cursor', async () => {
     const replica = useAgentReplicaStore()
     replica.projects = [project]
     replica.sessions = [session()]
@@ -605,15 +566,6 @@ describe('agent durable replica', () => {
     )
     replica.messageHasMoreBySessionId[sessionId] = true
     replica.messageNextBeforeSeqBySessionId[sessionId] = 2
-    replica.fileChangesBySessionId[sessionId] = Array.from(
-      { length: 200 },
-      (_, index) => fileChange(index + 1),
-    )
-    replica.fileChangeHasMoreBySessionId[sessionId] = true
-    replica.fileChangeNextBeforeBySessionId[sessionId] = {
-      createdAt: fileChange(200).createdAt,
-      fileChangeId: fileChange(200).id,
-    }
     const listMessages = vi.fn(async () =>
       success({
         version: 1 as const,
@@ -625,50 +577,9 @@ describe('agent durable replica', () => {
         },
       }),
     )
-    const listFileChanges = vi.fn(async () =>
-      success({
-        version: 1 as const,
-        sessionId,
-        page: {
-          schemaVersion: 1 as const,
-          sessionId,
-          records: [fileChange(201)],
-          hasMore: false as const,
-        },
-      }),
-    )
-    const reverted = {
-      ...fileChange(201),
-      revision: 2,
-      revertedAt: '2026-07-25T01:00:00.000Z',
-      updatedAt: '2026-07-25T01:00:00.000Z',
-    }
-    const revertFileChange = vi.fn(async () =>
-      success({
-        version: 1 as const,
-        commit: {
-          schemaVersion: 1 as const,
-          cursor: {
-            schemaVersion: 1 as const,
-            backendInstanceId: 'backend:replica',
-            sequence: 2,
-          },
-          topic: 'file-change.changed' as const,
-          change: {
-            mode: 'upsert' as const,
-            sessionId,
-            fileChange: reverted,
-          },
-        },
-      }),
-    )
     Object.defineProperty(window, 'agentApi', {
       configurable: true,
-      value: {
-        listMessages,
-        listFileChanges,
-        revertFileChange,
-      } as unknown as AgentApi,
+      value: { listMessages } as unknown as AgentApi,
     })
     replica.cursor = {
       schemaVersion: 1,
@@ -677,21 +588,7 @@ describe('agent durable replica', () => {
     }
 
     expect(await replica.loadOlderMessages()).toBe(true)
-    expect(await replica.loadOlderFileChanges()).toBe(true)
     expect(replica.selectedMessages).toHaveLength(201)
     expect(replica.selectedMessages[0]?.seq).toBe(1)
-    expect(replica.selectedFileChanges).toHaveLength(201)
-    expect(replica.selectedFileChanges.at(-1)?.id).toBe(fileChange(201).id)
-    expect(await useAgentChangesStore().revertChange(fileChange(201).id)).toBe(
-      true,
-    )
-    expect(revertFileChange).toHaveBeenCalledWith(
-      expect.objectContaining({ fileChangeId: fileChange(201).id }),
-    )
-    expect(
-      replica.selectedFileChanges.find(
-        (record) => record.id === fileChange(201).id,
-      )?.revertedAt,
-    ).toBe(reverted.revertedAt)
   })
 })
