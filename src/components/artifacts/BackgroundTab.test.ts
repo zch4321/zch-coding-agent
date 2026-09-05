@@ -17,9 +17,10 @@ import type {
 import { i18n, setAppLocale } from '../../i18n'
 import { useAgentExecutionStore } from '../../stores/agent-executions'
 import { useAgentReplicaStore } from '../../stores/agent-replica'
+import { useBackgroundTaskStore } from '../../stores/background-tasks'
 import ArtifactPanel from './ArtifactPanel.vue'
 import AgentExecutionBody from './AgentExecutionBody.vue'
-import AgentsTab from './AgentsTab.vue'
+import AgentsTab from './BackgroundTab.vue'
 
 const timestamp = '2026-08-01T00:00:00.000Z'
 const parentSessionId = 'session:agents-component' as SessionId
@@ -81,6 +82,15 @@ function success<T>(value: T) {
   return { version: 1 as const, ok: true as const, value }
 }
 
+function backgroundPage(records: AgentExecutionSummary[]) {
+  return {
+    cursor: { backendInstanceId: 'backend:component', sequence: 0 },
+    records: records.map((summary) => ({ kind: 'agent' as const, summary })),
+    activeCount: records.filter((record) => record.status === 'running').length,
+    hasMore: false,
+  }
+}
+
 describe('Agents artifact tab', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -93,21 +103,51 @@ describe('Agents artifact tab', () => {
     vi.restoreAllMocks()
   })
 
+  it('stops from the header without expanding the task or opening a terminal', async () => {
+    const cancelBackgroundTask = vi.fn(async () => success({ accepted: true }))
+    const getAgentExecution = vi.fn()
+    const openTerminal = vi.fn()
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        listBackgroundTasks: vi.fn(async () =>
+          success(backgroundPage([execution])),
+        ),
+        cancelBackgroundTask,
+        getAgentExecution,
+        openTerminal,
+      } as unknown as AgentApi,
+    })
+    const wrapper = mount(AgentsTab, { global: { plugins: [i18n] } })
+    await flushPromises()
+    await wrapper.get('button[aria-label="停止"]').trigger('click')
+    await flushPromises()
+    expect(cancelBackgroundTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentSessionId,
+        target: { kind: 'subagent', executionId: execution.id },
+      }),
+    )
+    expect(wrapper.get('.n-collapse-item').classes()).not.toContain(
+      'n-collapse-item--active',
+    )
+    expect(
+      wrapper.get('button[aria-label="停止"]').attributes('disabled'),
+    ).toBeDefined()
+    expect(getAgentExecution).not.toHaveBeenCalled()
+    expect(openTerminal).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('never auto-expands and shows only statistics plus messages after a manual expansion', async () => {
     const listAgentExecutions = vi.fn(async () =>
-      success({
-        page: {
-          schemaVersion: 1 as const,
-          records: [execution],
-          hasMore: false as const,
-        },
-      }),
+      success(backgroundPage([execution])),
     )
     const getAgentExecution = vi.fn(async () => success({ detail }))
     Object.defineProperty(window, 'agentApi', {
       configurable: true,
       value: {
-        listAgentExecutions,
+        listBackgroundTasks: listAgentExecutions,
         getAgentExecution,
       } as Partial<AgentApi> as AgentApi,
     })
@@ -116,13 +156,13 @@ describe('Agents artifact tab', () => {
       global: { plugins: [i18n] },
     })
     await vi.waitFor(() =>
-      expect(useAgentExecutionStore().sessions[parentSessionId]?.loaded).toBe(
+      expect(useBackgroundTaskStore().sessions[parentSessionId]?.loaded).toBe(
         true,
       ),
     )
     await flushPromises()
     await wrapper.vm.$nextTick()
-    expect(useAgentExecutionStore().sessions[parentSessionId]).toMatchObject({
+    expect(useBackgroundTaskStore().sessions[parentSessionId]).toMatchObject({
       loaded: true,
       loading: false,
     })
@@ -182,12 +222,13 @@ describe('Agents artifact tab', () => {
 
   it('shows the active execution count without switching to Agents', () => {
     useAgentExecutionStore().upsertSummary(execution)
+    useBackgroundTaskStore().ensureSession(parentSessionId).activeCount = 1
     const wrapper = mount(ArtifactPanel, {
       props: { activeTab: 'files' },
       global: {
         plugins: [i18n],
         stubs: {
-          AgentsTab: true,
+          BackgroundTab: true,
           DiffTab: true,
           FilesTab: true,
           PlanTab: true,
@@ -197,7 +238,7 @@ describe('Agents artifact tab', () => {
 
     const agentsLabel = wrapper
       .findAll('.artifact-tab-label')
-      .find((label) => label.text().includes('Agents'))
+      .find((label) => label.text().includes('后台'))
     expect(agentsLabel?.text()).toContain('1')
     expect(wrapper.props('activeTab')).toBe('files')
     wrapper.unmount()
@@ -261,13 +302,7 @@ describe('Agents artifact tab', () => {
       completedAt: timestamp,
     }
     const listAgentExecutions = vi.fn(async () =>
-      success({
-        page: {
-          schemaVersion: 1 as const,
-          records: [completed],
-          hasMore: false as const,
-        },
-      }),
+      success(backgroundPage([completed])),
     )
     const getAgentExecution = vi.fn(async () =>
       success({ detail: { ...detail, summary: completed } }),
@@ -275,7 +310,7 @@ describe('Agents artifact tab', () => {
     Object.defineProperty(window, 'agentApi', {
       configurable: true,
       value: {
-        listAgentExecutions,
+        listBackgroundTasks: listAgentExecutions,
         getAgentExecution,
       } as Partial<AgentApi> as AgentApi,
     })
@@ -283,7 +318,7 @@ describe('Agents artifact tab', () => {
       global: { plugins: [i18n] },
     })
     await vi.waitFor(() =>
-      expect(useAgentExecutionStore().sessions[parentSessionId]?.loaded).toBe(
+      expect(useBackgroundTaskStore().sessions[parentSessionId]?.loaded).toBe(
         true,
       ),
     )
@@ -331,13 +366,7 @@ describe('Agents artifact tab', () => {
       summary: child,
     }
     const listAgentExecutions = vi.fn(async () =>
-      success({
-        page: {
-          schemaVersion: 1 as const,
-          records: [swarm],
-          hasMore: false as const,
-        },
-      }),
+      success(backgroundPage([swarm])),
     )
     const getAgentExecution = vi.fn(async (request) =>
       success({
@@ -347,7 +376,7 @@ describe('Agents artifact tab', () => {
     Object.defineProperty(window, 'agentApi', {
       configurable: true,
       value: {
-        listAgentExecutions,
+        listBackgroundTasks: listAgentExecutions,
         getAgentExecution,
       } as Partial<AgentApi> as AgentApi,
     })
@@ -355,7 +384,7 @@ describe('Agents artifact tab', () => {
       global: { plugins: [i18n] },
     })
     await vi.waitFor(() =>
-      expect(useAgentExecutionStore().sessions[parentSessionId]?.loaded).toBe(
+      expect(useBackgroundTaskStore().sessions[parentSessionId]?.loaded).toBe(
         true,
       ),
     )

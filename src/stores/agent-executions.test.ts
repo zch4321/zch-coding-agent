@@ -95,6 +95,239 @@ describe('agent execution store', () => {
     vi.restoreAllMocks()
   })
 
+  it('does not let an older list snapshot overwrite a completed event', async () => {
+    const running = summary('subagent:late-list', 'running')
+    let resolve!: (
+      value: ReturnType<
+        typeof success<{
+          page: {
+            schemaVersion: 1
+            records: AgentExecutionSummary[]
+            hasMore: boolean
+            cursor: { backendInstanceId: string; sequence: number }
+          }
+        }>
+      >,
+    ) => void
+    const pending = new Promise<Parameters<typeof resolve>[0]>((done) => {
+      resolve = done
+    })
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        listAgentExecutions: vi.fn(() => pending),
+      } as unknown as AgentApi,
+    })
+    const store = useAgentExecutionStore()
+    store.upsertSummary(running, {
+      backendInstanceId: 'backend:race',
+      sequence: 0,
+    })
+    const loading = store.loadSession(parentSessionId, { force: true })
+    store.handleEvent({
+      ...eventBase(running, 1),
+      cursor: { backendInstanceId: 'backend:race', sequence: 2 },
+      type: 'execution.changed',
+      summary: { ...running, status: 'completed' },
+    })
+    resolve(
+      success({
+        page: {
+          schemaVersion: 1,
+          records: [running],
+          hasMore: false,
+          cursor: { backendInstanceId: 'backend:race', sequence: 1 },
+        },
+      }),
+    )
+    await loading
+    expect(store.selectedExecutions[0]?.status).toBe('completed')
+  })
+
+  it('repairs a missing delta from a snapshot then replays later deltas exactly once', async () => {
+    const running = summary('subagent:watermark', 'running')
+    const cursor = (sequence: number) => ({
+      backendInstanceId: 'backend:watermark',
+      sequence,
+    })
+    let resolve!: (
+      value: ReturnType<typeof success<{ detail: AgentExecutionDetail }>>,
+    ) => void
+    const pending = new Promise<Parameters<typeof resolve>[0]>((done) => {
+      resolve = done
+    })
+    const getAgentExecution = vi.fn(() => pending)
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        listAgentExecutions: vi.fn(async () =>
+          success({
+            page: {
+              schemaVersion: 1,
+              records: [running],
+              hasMore: false,
+              cursor: cursor(3),
+            },
+          }),
+        ),
+        getAgentExecution,
+      } as unknown as AgentApi,
+    })
+    const store = useAgentExecutionStore()
+    store.upsertSummary(running, cursor(0))
+    store.handleEvent({
+      ...eventBase(running, 1),
+      cursor: cursor(1),
+      type: 'assistant.text.delta',
+      delta: 'A',
+    })
+    store.handleEvent({
+      ...eventBase(running, 3),
+      cursor: cursor(3),
+      type: 'assistant.text.delta',
+      delta: 'C',
+    })
+    await vi.waitFor(() => expect(getAgentExecution).toHaveBeenCalledOnce())
+    store.handleEvent({
+      ...eventBase(running, 4),
+      cursor: cursor(4),
+      type: 'assistant.text.delta',
+      delta: 'D',
+    })
+    resolve(
+      success({
+        detail: {
+          ...detail(running),
+          cursor: cursor(3),
+          eventSeq: 3,
+          live: {
+            schemaVersion: 1,
+            status: 'calling_llm',
+            text: 'ABC',
+            reasoning: '',
+            tools: [],
+          },
+        },
+      }),
+    )
+    await vi.waitFor(() => expect(store.live[running.id]?.text).toBe('ABCD'))
+    store.handleEvent({
+      ...eventBase(running, 5),
+      cursor: cursor(5),
+      type: 'assistant.text.delta',
+      delta: 'E',
+    })
+    expect(store.live[running.id]?.text).toBe('ABCDE')
+    expect(store.recoveryPending[running.id]).toBe(false)
+  })
+
+  it('ignores a retired backend instance after adopting a new one', () => {
+    const running = summary('subagent:restart', 'running')
+    const store = useAgentExecutionStore()
+    store.upsertSummary(running, { backendInstanceId: 'old', sequence: 8 })
+    store.acceptCursor({ backendInstanceId: 'new', sequence: 0 })
+    store.handleEvent({
+      ...eventBase(running, 9),
+      cursor: { backendInstanceId: 'old', sequence: 9 },
+      type: 'execution.changed',
+      summary: running,
+    })
+    expect(store.selectedExecutions).toEqual([])
+    expect(store.backendInstanceId).toBe('new')
+  })
+
+  it('ignores late events older than a complete snapshot even if its per-execution counter was evicted', async () => {
+    const completed = summary('subagent:evicted-sequence', 'completed')
+    const store = useAgentExecutionStore()
+    store.upsertSummary(completed, {
+      backendInstanceId: 'backend:eviction',
+      sequence: 50,
+    })
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: {
+        getAgentExecution: vi.fn(async () =>
+          success({
+            detail: {
+              ...detail(completed),
+              cursor: { backendInstanceId: 'backend:eviction', sequence: 100 },
+              eventSeq: 0,
+            },
+          }),
+        ),
+      } as unknown as AgentApi,
+    })
+    await store.loadDetail(completed.id)
+    store.handleEvent({
+      ...eventBase(completed, 1),
+      cursor: { backendInstanceId: 'backend:eviction', sequence: 90 },
+      type: 'assistant.text.delta',
+      delta: 'obsolete output',
+    })
+    expect(store.live[completed.id]?.text).toBe('')
+    expect(store.live[completed.id]?.lastEventSeq).toBe(0)
+  })
+
+  it('bounds buffered events and obtains a fresh snapshot after overflow', async () => {
+    const running = summary('subagent:overflow', 'running')
+    const cursor = (sequence: number) => ({
+      backendInstanceId: 'backend:overflow',
+      sequence,
+    })
+    const finalText = 'A' + 'x'.repeat(299)
+    const snapshot = (sequence: number, text: string) =>
+      success({
+        detail: {
+          ...detail(running),
+          cursor: cursor(sequence),
+          eventSeq: sequence,
+          live: {
+            schemaVersion: 1 as const,
+            status: 'calling_llm' as const,
+            text,
+            reasoning: '',
+            tools: [],
+          },
+        },
+      })
+    let resolve!: (value: ReturnType<typeof snapshot>) => void
+    const pending = new Promise<ReturnType<typeof snapshot>>((done) => {
+      resolve = done
+    })
+    const getAgentExecution = vi
+      .fn()
+      .mockReturnValueOnce(pending)
+      .mockResolvedValue(snapshot(300, finalText))
+    Object.defineProperty(window, 'agentApi', {
+      configurable: true,
+      value: { getAgentExecution } as unknown as AgentApi,
+    })
+    const store = useAgentExecutionStore()
+    store.upsertSummary(running, cursor(0))
+    store.handleEvent({
+      ...eventBase(running, 1),
+      cursor: cursor(1),
+      type: 'assistant.text.delta',
+      delta: 'A',
+    })
+    const loading = store.loadDetail(running.id)
+    for (let seq = 2; seq <= 300; seq += 1)
+      store.handleEvent({
+        ...eventBase(running, seq),
+        cursor: cursor(seq),
+        type: 'assistant.text.delta',
+        delta: 'x',
+      })
+    expect(store.requestEvents[running.id]!.length).toBeLessThanOrEqual(256)
+    resolve(snapshot(1, 'A'))
+    await loading
+    await vi.waitFor(() =>
+      expect(store.details[running.id]?.detail?.cursor?.sequence).toBe(300),
+    )
+    expect(getAgentExecution).toHaveBeenCalledTimes(2)
+    expect(store.live[running.id]?.text).toBe(finalText)
+  })
+
   it('sorts active executions first, paginates, and isolates Session views', async () => {
     const completed = summary(
       'subagent:completed',
@@ -444,6 +677,7 @@ describe('agent execution store', () => {
     await vi.waitFor(() => {
       expect(listAgentExecutions).toHaveBeenCalledOnce()
       expect(getAgentExecution).toHaveBeenCalledOnce()
+      expect(store.details[running.id]?.loaded).toBe(true)
     })
     expect(store.activitiesFor(running.id)).toEqual([
       expect.objectContaining({
@@ -506,7 +740,7 @@ describe('agent execution store', () => {
       status: 'calling_llm',
     })
 
-    await vi.waitFor(() => expect(getAgentExecution).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(store.details[child.id]?.loaded).toBe(true))
     expect(getAgentExecution).toHaveBeenCalledWith(
       expect.objectContaining({
         parentSessionId,

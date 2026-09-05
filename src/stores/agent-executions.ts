@@ -15,6 +15,7 @@ import type { AgentExecutionId, SessionId } from '../../shared/ids'
 import type { LlmUsageRecord } from '../../shared/usage'
 import type { ActiveRunApprovalSnapshot } from '../../shared/runtime-state'
 import { useAgentReplicaStore } from './agent-replica'
+import type { RuntimeCursor } from '../../shared/runtime-cursor'
 
 interface ExecutionSessionView {
   records: AgentExecutionSummary[]
@@ -174,6 +175,14 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
     children: {} as Record<string, AgentExecutionSummary[]>,
     details: {} as Record<string, ExecutionDetailView>,
     live: {} as Record<string, LiveExecutionView>,
+    backendInstanceId: undefined as string | undefined,
+    retiredInstances: [] as string[],
+    summaryWatermarks: {} as Record<string, number>,
+    liveWatermarks: {} as Record<string, number>,
+    requestEvents: {} as Record<string, AgentExecutionEvent[]>,
+    recoveryPending: {} as Record<string, boolean>,
+    resyncing: {} as Record<string, boolean>,
+    overflowWatermarks: {} as Record<string, number>,
   }),
   getters: {
     selectedExecutions(state): AgentExecutionSummary[] {
@@ -246,6 +255,30 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       },
   },
   actions: {
+    acceptCursor(cursor: RuntimeCursor): boolean {
+      if (this.retiredInstances.includes(cursor.backendInstanceId)) return false
+      if (
+        this.backendInstanceId &&
+        this.backendInstanceId !== cursor.backendInstanceId
+      ) {
+        this.retiredInstances = [
+          ...this.retiredInstances,
+          this.backendInstanceId,
+        ].slice(-16)
+        this.sessions = {}
+        this.children = {}
+        this.details = {}
+        this.live = {}
+        this.summaryWatermarks = {}
+        this.liveWatermarks = {}
+        this.requestEvents = {}
+        this.recoveryPending = {}
+        this.resyncing = {}
+        this.overflowWatermarks = {}
+      }
+      this.backendInstanceId = cursor.backendInstanceId
+      return true
+    },
     ensureSession(sessionId: SessionId): ExecutionSessionView {
       if (!this.sessions[sessionId]) {
         this.sessions[sessionId] = blankSessionView()
@@ -258,7 +291,18 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       }
       return this.live[executionId]!
     },
-    upsertSummary(summary: AgentExecutionSummary): void {
+    upsertSummary(
+      summary: AgentExecutionSummary,
+      cursor?: RuntimeCursor,
+    ): void {
+      if (cursor) {
+        if (
+          !this.acceptCursor(cursor) ||
+          (this.summaryWatermarks[summary.id] ?? 0) > cursor.sequence
+        )
+          return
+        this.summaryWatermarks[summary.id] = cursor.sequence
+      }
       if (summary.parentExecutionId) {
         const records = this.children[summary.parentExecutionId] ?? []
         this.children[summary.parentExecutionId] = mergeSummaries(records, [
@@ -297,6 +341,12 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
         }
       }
       for (const executionId of executionIds) {
+        delete this.requestEvents[executionId]
+        delete this.summaryWatermarks[executionId]
+        delete this.liveWatermarks[executionId]
+        delete this.recoveryPending[executionId]
+        delete this.resyncing[executionId]
+        delete this.overflowWatermarks[executionId]
         delete this.details[executionId]
         delete this.live[executionId]
         delete this.children[executionId]
@@ -309,7 +359,7 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
     ): Promise<boolean> {
       const api = window.agentApi
       if (!api) return false
-      const view = this.ensureSession(sessionId)
+      let view = this.ensureSession(sessionId)
       if (view.loading || (!options.append && view.loaded && !options.force)) {
         return view.loaded
       }
@@ -328,13 +378,22 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
         .finally(() => {
           view.loading = false
         })
+      if (this.sessions[sessionId] !== view) return false
       if (!result.ok) {
         view.error = result.error.message
         return false
       }
-      view.records = options.append
-        ? mergeSummaries(view.records, result.value.page.records)
-        : structuredClone(result.value.page.records)
+      const cursor = result.value.page.cursor
+      if (cursor) {
+        if (!this.acceptCursor(cursor)) return false
+        view = this.ensureSession(sessionId)
+        for (const summary of result.value.page.records)
+          this.upsertSummary(summary, cursor)
+      } else {
+        view.records = options.append
+          ? mergeSummaries(view.records, result.value.page.records)
+          : structuredClone(result.value.page.records)
+      }
       view.hasMore = result.value.page.hasMore
       view.nextBefore = result.value.page.nextBefore
         ? structuredClone(result.value.page.nextBefore)
@@ -374,6 +433,7 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       view.loading = true
       view.error = undefined
       const eventSeqBeforeRequest = this.live[executionId]?.lastEventSeq ?? 0
+      this.requestEvents[executionId] ??= []
       const result = await api
         .getAgentExecution({
           version: IPC_VERSION,
@@ -387,11 +447,14 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
         .finally(() => {
           view.loading = false
         })
+      if (this.details[executionId] !== view) return false
       if (!result.ok) {
         view.error = result.error.message
         return false
       }
       const incoming = result.value.detail
+      if (incoming.cursor && !this.acceptCursor(incoming.cursor)) return false
+      this.details[executionId] ??= view
       if (view.detail && (options.older || options.refresh)) {
         const existingPage = view.detail.activityPage
         incoming.activityPage.records = mergeActivities(
@@ -405,16 +468,46 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       }
       view.detail = structuredClone(incoming)
       view.loaded = true
-      this.upsertSummary(incoming.summary)
+      this.upsertSummary(incoming.summary, incoming.cursor)
+      const currentSummary = findSummary(
+        this.sessions,
+        this.children,
+        executionId,
+      )
+      if (currentSummary)
+        view.detail.summary = cloneReactiveSafe(currentSummary)
       if (incoming.children) {
-        this.children[incoming.summary.id] = mergeSummaries(
-          this.children[incoming.summary.id] ?? [],
-          incoming.children,
-        )
-        for (const child of incoming.children) this.upsertSummary(child)
+        for (const child of incoming.children)
+          this.upsertSummary(child, incoming.cursor)
       }
       this.reconcileLiveActivities(executionId)
       if (
+        incoming.cursor &&
+        incoming.eventSeq !== undefined &&
+        !options.older
+      ) {
+        const pending = this.requestEvents[executionId] ?? []
+        delete this.requestEvents[executionId]
+        if (
+          (this.overflowWatermarks[executionId] ?? 0) > incoming.cursor.sequence
+        ) {
+          this.recoveryPending[executionId] = true
+          void this.loadDetail(executionId, { refresh: true, parentSessionId })
+          return false
+        }
+        delete this.overflowWatermarks[executionId]
+        const live = this.ensureLive(executionId)
+        live.lastEventSeq = incoming.eventSeq
+        this.liveWatermarks[executionId] = incoming.cursor.sequence
+        live.text = ''
+        live.reasoning = ''
+        if (incoming.live) this.applyLiveOverlay(executionId, incoming.live)
+        this.recoveryPending[executionId] = false
+        for (const event of pending) {
+          if (event.cursor && event.cursor.sequence > incoming.cursor.sequence)
+            this.handleEvent(event, true)
+        }
+      } else if (
         incoming.live &&
         (this.live[executionId]?.lastEventSeq ?? 0) === eventSeqBeforeRequest
       ) {
@@ -489,18 +582,55 @@ export const useAgentExecutionStore = defineStore('agent-executions', {
       parentSessionId: SessionId,
       executionId: AgentExecutionId,
     ): Promise<void> {
-      await this.loadSession(parentSessionId, { force: true })
-      await this.loadDetail(executionId, { refresh: true, parentSessionId })
+      if (this.resyncing[executionId]) return
+      this.resyncing[executionId] = true
+      try {
+        await this.loadSession(parentSessionId, { force: true })
+        await this.loadDetail(executionId, { refresh: true, parentSessionId })
+      } finally {
+        this.resyncing[executionId] = false
+      }
     },
-    handleEvent(event: AgentExecutionEvent): void {
+    bufferEvent(event: AgentExecutionEvent): void {
+      const pending = (this.requestEvents[event.executionId] ??= [])
+      pending.push(cloneReactiveSafe(event))
+      if (pending.length > 256 || JSON.stringify(pending).length > 512 * 1024) {
+        this.overflowWatermarks[event.executionId] = event.cursor?.sequence ?? 0
+        this.requestEvents[event.executionId] = []
+      }
+    },
+    handleEvent(event: AgentExecutionEvent, replay = false): void {
+      if (event.cursor && !this.acceptCursor(event.cursor)) return
+      if (
+        event.cursor &&
+        event.cursor.sequence <= (this.liveWatermarks[event.executionId] ?? -1)
+      )
+        return
+      if (
+        event.cursor &&
+        !replay &&
+        (this.details[event.executionId]?.loading ||
+          this.recoveryPending[event.executionId])
+      )
+        this.bufferEvent(event)
+      if (this.recoveryPending[event.executionId] && !replay) return
       const live = this.ensureLive(event.executionId)
       if (event.seq <= live.lastEventSeq) return
       if (event.seq !== live.lastEventSeq + 1) {
+        if (event.cursor) {
+          if (!this.details[event.executionId]?.loading || replay)
+            this.bufferEvent(event)
+          this.recoveryPending[event.executionId] = true
+          void this.resyncExecution(event.parentSessionId, event.executionId)
+          return
+        }
         void this.resyncExecution(event.parentSessionId, event.executionId)
       }
       live.lastEventSeq = event.seq
+      if (event.cursor)
+        this.liveWatermarks[event.executionId] = event.cursor.sequence
       if (event.type === 'execution.changed') {
-        this.upsertSummary(event.summary)
+        this.upsertSummary(event.summary, event.cursor)
         if (!isActiveAgentExecution(event.summary)) {
           const detail = this.details[event.executionId]
           if (detail) void this.refreshBoundary(event.executionId)

@@ -515,7 +515,7 @@ onUnmounted(() => {
                 size="small"
                 type="warning"
               >
-                {{ terminal.status }}
+                {{ t(`terminal.status.${terminal.status}`) }}
               </NTag>
             </span>
           </template>
