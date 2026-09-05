@@ -44,12 +44,15 @@
 
 .project-sidebar-footer {
   flex: 0 0 auto;
-  padding-top: 10px;
   border-top: 1px solid var(--border);
 }
 
-.sidebar-settings-button {
+.sidebar-settings-button.n-button {
+  height: auto;
+  min-height: 3rem;
   justify-content: flex-start;
+  padding: 0.5rem 1rem;
+  border-radius: 0;
 }
 
 .sidebar-section-heading {

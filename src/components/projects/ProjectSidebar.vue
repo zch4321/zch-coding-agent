@@ -428,7 +428,7 @@ function updateExpandedProjects(
         quaternary
         @click="emit('settings')"
       >
-        <UiIcon name="settings" />
+        <template #icon><UiIcon name="settings" /></template>
         <span>{{ t('app.settings') }}</span>
       </NButton>
     </div>
