@@ -9,7 +9,7 @@
 这些服务继续由 backend 拥有：
 
 - Project explorer 继续读取普通 workspace 文件；ProjectModel/Serena/code intelligence query 暂停，等待总路线图中的 Swarm hardening 完成后迁移到 SQLite。
-- PTY process、scrollback 和 ownership 属于 LiveSessionContext；应用重启不恢复真实 PTY。
+- TerminalPool 持有 PTY、scrollback、实际 Session 与公开 owner Session 的映射；context unload 不关闭独立终端，应用重启不恢复真实 PTY。
 - Skills manager 扫描、安装和启用 skill。
 - MCP manager 拥有连接、目录 revision、tool normalization 和调用。
 - Plugin event bus 是 backend hook/event mechanism。 `beforeLLMCall` 只收到不含凭据的编译请求深拷贝；它只能观察，不能 patch、阻断调用或改写 canonical history，handler 失败只产生诊断。
@@ -28,9 +28,15 @@ PowerShell adapter 固定传入 `-ExecutionPolicy Bypass`，并设置 Console �
 
 交互 Terminal 与 `run_command.shell` 共享同一个 `executionEnvironment.commandShell` 配置。`terminal_open` 没有模型可见的 `shell` 参数；TerminalPool 在每次打开时读取当前配置并经 `CommandShellService.resolve()` 解析实际 profile，配置项失效时沿用自动回退且不改写保存值。解析出的 profile `kind = powershell` 时 PTY 固定传入 `-ExecutionPolicy Bypass`，其他 kind 不附加启动参数。设置变更只影响之后打开的 Terminal，已在运行的 Terminal 不重启。
 
-模型可见的 `terminalId` 是进程内全局递增的正整数：应用重启后从 `1` 重新开始，ID 一经分配在当前进程内不复用，启动失败允许留下编号空洞。每个 Session 最多保留 16 个 Terminal（含 opening、running 和已退出但未显式关闭的条目），显式关闭立即释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限。不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。Provider catalog 只保留 `terminal_open/send`，移除 `terminal_read/list/close`；Renderer 的 list/read/close/resize IPC 和多 tab UI 不变。模型把 `terminal_open` 返回的数字 ID 用于 `terminal_send`，并把同一数字 `{ type: 'terminal', id: terminalId }` target 用于 `background_wait/list/cancel`。
+模型可见的 `terminalId` 是进程内全局递增的正整数：应用重启后从 `1` 重新开始，ID 一经分配在当前进程内不复用，启动失败允许留下编号空洞。每个 Session 最多保留 16 个 Terminal（含 opening、running、closing 和已退出但未显式关闭的条目），显式关闭在真实退出及日志收尾后释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限。不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。Provider catalog 只保留 `terminal_open/send`，移除 `terminal_read/list/close`；Renderer 的 list/read/close/resize IPC 和多 tab UI 不变。模型把 `terminal_open` 返回的数字 ID 用于 `terminal_send`，并把同一数字 `{ type: 'terminal', id: terminalId }` target 用于 `background_wait/list/cancel`。
 
 TerminalPool 在 spawn PTY 前打开权限为 `0600` 的 `artifacts/terminals/terminal-<id>.log`。raw chunk 一路进入 Renderer/xterm 和原始 scrollback；另一条路经过持久、跨 chunk 的 ANSI sanitizer 进入 model scrollback 与追加式日志，因此 OSC/CSI 分段不会按无状态正则误投影。capture 初始化/追加/close 任一步失败都会更新 backend-owned `artifactAvailable/captureError`。`terminal_send.delayMs` 缺省为 1,000 ms，可显式为 0，最大 60 秒；结果优先返回发送前 cursor 后的增量，否则返回 20 行/8 KiB tail，并始终携带 cursor 和 artifact 状态。
+
+### Terminal 关闭与日志预览
+
+显式关闭只先进入 `closing`，继续捕获最后的输出；实际 PTY exit 和日志追加、关闭完成后才进入 `closed`，移动到有界关闭缓存并释放显式关闭条目的名额。自退出、尚未被用户关闭的底部终端条目保留既有回看行为。关闭失败保留资源与活动状态并允许重试，wait 和会话清理不能将 kill 请求当成真实退出。
+
+Background 按公开 owner 列出当前进程的全部终端，包括 hidden child 与手动终端；底部交互接口仍按实际 Session 校验。右侧日志读取只接收 parent Session、backend 实例和 Terminal ID，由主进程查登记路径并通过 temp PathGuard 校验普通文件；不接受任意路径。文件尾部按 32 KiB 分块，最多扫描 256 KiB，返回最近 200 行且最多 64 KiB，处理 UTF-8 边界。日志可修改、缺失或捕获失败，不能作为任务状态依据。
 
 ### Session 临时工作区与 artifact
 

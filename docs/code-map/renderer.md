@@ -17,12 +17,14 @@ Vue Renderer 通过冻结 `agentApi` 发命令、查数据、订阅事件。Pini
 | [agent-runtime-events.ts](../../src/stores/agent-runtime-events.ts)、[agent-runtime-subscriptions.ts](../../src/stores/agent-runtime-subscriptions.ts) | 事件转 overlay 与 durable reconciliation             |
 | [conversation-timeline.ts](../../src/stores/conversation-timeline.ts)、[ConversationTimeline.vue](../../src/components/chat/ConversationTimeline.vue)  | Canonical records 和活动的有序展示                   |
 | [MessageComposer.vue](../../src/components/chat/MessageComposer.vue)、[ApprovalCard.vue](../../src/components/chat/ApprovalCard.vue)                   | 输入/IME/模型模式和审批交互                          |
-| [ArtifactPanel.vue](../../src/components/artifacts/ArtifactPanel.vue)、[TerminalPanel.vue](../../src/components/TerminalPanel.vue)                     | 右侧文件/Git/Plan/Agents 与底部 PTY                  |
+| [ArtifactPanel.vue](../../src/components/artifacts/ArtifactPanel.vue)、[TerminalPanel.vue](../../src/components/TerminalPanel.vue)                     | 右侧文件/Git/Plan/Background 与底部 PTY              |
 | [settings-tabs.ts](../../src/components/settings/settings-tabs.ts) / `SETTINGS_PAGES`                                                                  | 配置领域、导航、组件与 ConfigSection 的唯一 registry |
 | [AppMessageBridge.vue](../../src/components/layout/AppMessageBridge.vue)、[notifications.ts](../../src/stores/notifications.ts)                        | 操作通知去重和 NMessage 展示                         |
 | [naive-theme.ts](../../src/theme/naive-theme.ts)、[style.css](../../src/style.css)、[i18n.ts](../../src/i18n.ts)                                       | Naive 主题、领域样式入口和本地化                     |
 
 ## 主要调用链
+
+[background-tasks.ts](../../src/stores/background-tasks.ts) 拥有后台列表、活动总数和停止请求；[BackgroundTab.vue](../../src/components/artifacts/BackgroundTab.vue) 复用 Agent/Swarm 内容并组合终端卡片；[BackgroundTerminalTail.vue](../../src/components/artifacts/BackgroundTerminalTail.vue) 只在可见并跟随时读取日志，与底部 xterm 独立。
 
 ```text
 用户动作 → Component → owning Store → agentApi → Backend
@@ -44,6 +46,8 @@ Settings 的八个一级配置领域与 shared/config 一致；project/archived 
 - 改视觉先查 [Naive UI 文档](https://www.naiveui.com/zh-CN/os-theme/docs/introduction)和现有主题；领域 CSS 位于 [styles](../../src/styles/)，交互验收见[前端专题](../frontend-spec.md#专题规范)。
 
 ## 验证入口
+
+[BackgroundTab tests](../../src/components/artifacts/BackgroundTab.test.ts) 验证手动展开、停止与既有 Agent 展示；[Terminal tail tests](../../src/components/artifacts/BackgroundTerminalTail.test.ts) 验证轮询、暂停、迟到响应和纯文本渲染。
 
 | 测试                                                                                                                                                                               | 验证内容                         |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |

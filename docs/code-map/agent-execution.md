@@ -18,9 +18,11 @@ Agent start Tool 返回后台 handle；execution service 持有独立 worker，�
 | [background/service.ts](../../electron/background/service.ts)、[agent-handle-registry.ts](../../electron/background/agent-handle-registry.ts)                  | wait/list/cancel、进程内数字 target 与 ownership     |
 | [background-tools.ts](../../electron/tools/background-tools.ts)                                                                                                | 模型侧后台操作及分页输出                             |
 | [agent-execution-query-service.ts](../../electron/application/agent-execution-query-service.ts)                                                                | 公开详情、统计和 hidden identity 过滤                |
-| [agent-executions.ts](../../src/stores/agent-executions.ts)、[AgentsTab.vue](../../src/components/artifacts/AgentsTab.vue)                                     | Renderer root/child 副本和 live activity             |
+| [agent-executions.ts](../../src/stores/agent-executions.ts)、[BackgroundTab.vue](../../src/components/artifacts/BackgroundTab.vue)                             | Renderer root/child 副本和 live activity             |
 
 ## 主要调用链
+
+UI 的统一查询、取消与 tail 入口为 [background-task-application-service.ts](../../electron/application/background-task-application-service.ts)，契约为 [background-tasks.ts](../../shared/background-tasks.ts)。[Subagent execution-values](../../electron/subagent/execution-values.ts) 与 [Swarm execution-values](../../electron/swarm/execution-values.ts) 分别维护参数和结果的纯投影，worker 服务保留生命周期所有权。
 
 ```text
 subagent_run / swarm_run → ordered Tool preparation
@@ -48,11 +50,13 @@ Durable execution 与 hidden Session 在 SQLite，公开契约在 [agent-executi
 
 ## 验证入口
 
-| 测试                                                                                                                                         | 验证内容                           |
-| -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| [execution-service.test.ts](../../electron/subagent/execution-service.test.ts)                                                               | child 生命周期、权限、结果与隔离   |
-| [coordinator.test.ts](../../electron/swarm/coordinator.test.ts)                                                                              | 分配、容量、部分失败与取消         |
-| [background/service.test.ts](../../electron/background/service.test.ts)                                                                      | 混合 target、owner、wait 和 cancel |
-| [agent-handle-registry.test.ts](../../electron/background/agent-handle-registry.test.ts)                                                     | 数字 handle 的进程内映射           |
-| [agent-execution-query-service.test.ts](../../electron/application/agent-execution-query-service.test.ts)                                    | 安全投影和统计                     |
-| [agent-executions.test.ts](../../src/stores/agent-executions.test.ts)、[AgentsTab.test.ts](../../src/components/artifacts/AgentsTab.test.ts) | root/child 状态、展开和事件        |
+[Background application tests](../../electron/application/background-task-application-service.test.ts) 覆盖 owner/实例隔离、活动总数、分页与 artifact 来源；[Terminal lifecycle tests](../../electron/terminal/pool-lifecycle.test.ts) 覆盖真实退出与末尾写入收敛。
+
+| 测试                                                                                                                                                 | 验证内容                           |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| [execution-service.test.ts](../../electron/subagent/execution-service.test.ts)                                                                       | child 生命周期、权限、结果与隔离   |
+| [coordinator.test.ts](../../electron/swarm/coordinator.test.ts)                                                                                      | 分配、容量、部分失败与取消         |
+| [background/service.test.ts](../../electron/background/service.test.ts)                                                                              | 混合 target、owner、wait 和 cancel |
+| [agent-handle-registry.test.ts](../../electron/background/agent-handle-registry.test.ts)                                                             | 数字 handle 的进程内映射           |
+| [agent-execution-query-service.test.ts](../../electron/application/agent-execution-query-service.test.ts)                                            | 安全投影和统计                     |
+| [agent-executions.test.ts](../../src/stores/agent-executions.test.ts)、[BackgroundTab.test.ts](../../src/components/artifacts/BackgroundTab.test.ts) | root/child 状态、展开和事件        |

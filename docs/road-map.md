@@ -18,8 +18,8 @@
 
 ### 运行反馈与取消体验
 
-- 评估在主时间线 Swarm ToolCallCard 中展示 queued/running/completed/failed 汇总、模型 assignment、部分失败和结果截断；与 Agents artifact 的 Job → child 两级视图保持同一状态定义。
-- 提供明确的 Job 取消入口和取消中状态。父 Run 结束/取消后后台任务继续、显式 Job 取消、queued child 与 active child 的状态必须可区分，并保持 call/result 与 durable execution 收敛。
+- 评估在主时间线 Swarm ToolCallCard 中展示 queued/running/completed/failed 汇总、模型 assignment、部分失败和结果截断；与 Background 的 Job → child 两级视图保持同一状态定义。
+- Background 已提供 Job/child 取消入口与取消中状态，剩余工作聚焦跨宿主压力与诊断一致性。父 Run 结束/取消后后台任务继续、显式 Job 取消、queued child 与 active child 的状态必须可区分，并保持 call/result 与 durable execution 收敛。
 - 评估更完整的 child 诊断视图，但 child Session 仍不可继续聊天，也不进入普通 Session 列表、搜索、导出或主对话事件。
 
 ### 统计、诊断与成本
@@ -27,7 +27,7 @@
 - 建立 parent Session/Run/call → Swarm Job → child execution → Provider call 的可审计关联，并汇总 route assignment、usage、费用相关指标、耗时和错误分类。
 - 让运行中的 Tool call 数、child 状态和 usage 聚合与终态 durable 统计确定性收敛；Renderer live overlay、详情查询、Trace 和最终结果采用明确且一致的统计口径。
 - 完善部分失败、取消、Provider failure、输出截断和 Trace degradation 的诊断信息，同时保持凭据、reasoning、workspace 绝对路径和 hidden Session ID 不进入公共结果。
-- 主时间线、Agents artifact 和日志/Trace 对同一 Job 的名称、数量和终态不应互相矛盾。
+- 主时间线、Background 和日志/Trace 对同一 Job 的名称、数量和终态不应互相矛盾。
 
 ### 压力测试与持续不变量
 
@@ -40,7 +40,7 @@
 
 验收：
 
-- 用户能在主时间线或 Agents artifact 准确判断 Job 是否排队、运行、部分完成、失败、取消或被截断，并能取消仍在进行的 Job。
+- 用户能在主时间线或 Background 准确判断 Job 是否排队、运行、部分完成、失败、取消或被截断，并能取消仍在进行的 Job。
 - 运行中统计最终与 SQLite durable 查询一致；Renderer reload、事件丢失重同步和长结果不会暴露 hidden Session 或破坏排序。
 - 压力场景不遗留 active child、Run slot、AbortController、pending approval 或无法清理的 execution；费用与 usage 可以追溯到父 call 和具体 child；父 Run 结束或取消不级联已启动后台任务。
 - `npm run check` 覆盖确定性单元/集成回归；涉及窗口生命周期和取消 UI 的路径进入构建后 Playwright，真实付费 Provider 继续显式 opt-in。

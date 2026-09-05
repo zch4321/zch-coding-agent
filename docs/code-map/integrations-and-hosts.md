@@ -25,6 +25,8 @@
 
 ## 主要调用链
 
+Background 日志预览沿 `background:terminal-tail` → application ownership 校验 → TerminalPool 登记路径 → [artifact-tail.ts](../../electron/terminal/artifact-tail.ts) 有界文件尾读取。终端生命周期失效事件不携带 raw output；底部终端保留原始 ANSI 订阅和输入能力。
+
 ```text
 MCP config → startup trust → stdio connection → gateway → Tool pipeline
 Terminal open → resolved user Shell → TerminalPool → events / artifact

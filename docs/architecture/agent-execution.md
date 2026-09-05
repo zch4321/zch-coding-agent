@@ -98,9 +98,19 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 
 模型侧不内联上述聚合 result。`artifacts/swarms/<root-id>/manifest.json` 从 preparation 起保存 `sharedContext/tasks`、每个 child 的 ordinal、task/agent index、安全 assignment 和 artifact path，状态更新保留这些静态字段并原子追加 counts/status/error；manifest 不保存进程内模型操作 ID。`background_wait/list` 对 Swarm 返回 root 状态、child counts、当前进程可用的 child 数字 target 与 `manifestPath`；主 Agent按需用 `read_file` 分页读取 manifest 和 child `result.md/activity.jsonl`。
 
-独立 `agent-execution:event` 只投影安全生命周期和可见活动，不把 hidden Session 伪装成普通 Session。Agents artifact 根列表仅显示普通 Subagent 与 Swarm root；展开 Swarm root 后按 `childOrdinal` 显示 child。两级均使用手动 `NCollapse`，不自动展开；详情只显示运行时间、工具调用数、状态、模型/usage/Agent 计数和可见 Assistant 文本，不展示 reasoning、完整工具轨迹、child Session ID、prompt harness、route 凭据或 Provider continuation。
+独立 `agent-execution:event` 只投影安全生命周期和可见活动，不把 hidden Session 伪装成普通 Session。Background 根列表显示普通 Subagent、Swarm root 与当前进程的 Terminal；展开 Swarm root 后按 `childOrdinal` 显示 child。两级均使用手动 `NCollapse`，不自动展开；详情只显示运行时间、工具调用数、状态、模型/usage/Agent 计数和可见 Assistant 文本，不展示 reasoning、完整工具轨迹、child Session ID、prompt harness、route 凭据或 Provider continuation。
 
 统一 `BackgroundTaskService` 以 SQLite execution 与 TerminalPool ownership 为权威，同时用一个进程内 registry 把 durable Agent execution UUID 映射为全局递增数字；模型输入永不直接解析或接受 UUID，重启后通过 `background_list` 为历史 root 分配新数字。`background_wait` 接受混合 target、`any|all` 和 timeout，只在 Agent 终态、PTY exit/failure 或正常超时返回；普通 Terminal 输出不参与唤醒。返回前按 public owner 读取 Terminal 当前最后 50 行 ANSI-free tail，不再维护 wait 起始 cursor 或 delta 语义；显式关闭的 Terminal 在进程内额外保留同样有界的 tail，完整历史仍以日志 artifact 为准。tail 继续受 Run 冻结的全局字节限制；纯 Agent 最大等待 300 秒，含 Terminal 最大 60 秒。`background_list` 将 standalone root、Swarm root 与 Terminal 按创建时间合并，使用绑定 filters 的 opaque 分页 cursor，并按冻结 Tool 输出 budget 生成不会被通用 limiter 破坏的精确页。`background_cancel` 校验数字 target 的当前进程映射和公开 Session ownership，幂等取消 root/child/Terminal，可选等待最多 60 秒；Swarm root 级联 child，单 child 取消触发 root 重汇总。
+
+### Background UI 与取消收尾
+
+Renderer 的 `background:list/cancel/terminal-tail` 使用 shared 类型和公开 Session ownership，复用 `BackgroundTaskService.cancelOwned`，不暴露通用模型 Tool JSON 或 hidden Session。Agent 使用 durable execution ID，Terminal 使用当前 backend 实例与数字 ID；模型的数字 handle 契约不变。
+
+列表通过协调队列同步采样 SQLite root、TerminalPool 和 runtime cursor，按活动优先、创建时间倒序分页；活动数量独立于页大小。Agent 事件、详情与 Background 失效事件共享实例内单调 observation sequence，详情同时携带 execution sequence。Renderer 按水位合并摘要，缺口恢复采用快照与有界后续事件回放；backend 实例变化清空进程副本。
+
+Swarm 在 durable reservation 后、任何异步 artifact/publication 步骤前登记控制器，并保留更早到达的取消意图。状态发布失败记录诊断，不中止已持有资源的 worker；启动或 durable 更新失败需取消并等待已启动 child，收敛剩余预留记录。正常状态机和结果聚合保持既有定义。
+
+显式停止 child 时，先阻止其实际 Session 新建 Terminal，再中断 Run 并关闭已有 PTY；晚完成的打开操作也失效。等待不可立即中断的已派发操作和终端退出、日志关闭后，才发布 child 终态并释放 leaf 容量。Swarm 取消还等待已完成 child 遗留终端的关闭。正常 Agent 完成继续允许独立终端运行；主 Run 结束或 Stop 不级联后台任务。
 
 ### Headless 运行输出
 
